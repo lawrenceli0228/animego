@@ -101,14 +101,77 @@
 
 ---
 
+---
+
+## 2026-03-08
+
+### · 根本修复缓存翻页与 429 限流（`fix: cache pagination and rate limit with full season pre-fetch`）
+
+**问题：** 翻到第 2 页及以后返回空数组；每次翻页仍打 AniList 存在 429 风险
+
+**修复：**
+
+- 新增 `warmSeasonCache(season, year)` — 服务器启动后后台预热整个季度（每页 50 条全量写入 MongoDB）
+- `getSeasonalAnime` 改为 4 级降级策略：已预热 MongoDB → 未预热时实时拉取 → 内存缓存兜底
+- `server/index.js` 服务器就绪后异步触发 `warmCurrentSeason()`，不阻塞启动
+
+**涉及文件：**
+- `server/services/anilist.service.js`
+- `server/index.js`
+
+---
+
+### · 首页新增每周放送日历（`feat: add weekly airing schedule to homepage`）
+
+- 新增 `/api/anime/schedule` 接口，从 AniList 拉取本周 7 天播出计划，按本地日期分组，30 分钟内存缓存
+- 新增 `WeeklySchedule` 组件：日期标签页（今天高亮）+ 当日番剧竖向列表（封面、集数、播出时间、评分）
+- 前端 `localToday()` 用客户端本地时区计算今日日期，避免 UTC 时差错位
+
+**涉及文件：**
+- `server/queries/weeklySchedule.graphql.js`（新增）
+- `server/controllers/anime.controller.js`
+- `server/routes/anime.routes.js`
+- `client/src/components/anime/WeeklySchedule.jsx`（新增）
+- `client/src/hooks/useAnime.js`
+- `client/src/api/anime.api.js`
+
+---
+
+### · 首页改版：Hero 轮播图 + 每周卡片网格（`feat: replace homepage grid with top-5 hero carousel`）
+
+- 移除首页番剧方格，改为当季评分前 5 轮播图（`HeroCarousel`）：全宽 banner、Ken Burns 缩放、5 秒自动切换、悬停暂停、方向箭头、点状指示器
+- 每周更新从竖向列表改为横向卡片网格（`auto-fill, minmax(140px, 1fr)`），每张卡片含封面（3:4）、标题、集数标签、时间、评分，悬停上浮效果
+
+**涉及文件：**
+- `client/src/components/anime/HeroCarousel.jsx`（新增）
+- `client/src/components/anime/WeeklySchedule.jsx`（重构为卡片网格）
+- `client/src/pages/HomePage.jsx`
+
+---
+
+### · 首页新增「继续追番」板块（`feat: add continue watching section to homepage`）
+
+- 登录用户首页轮播图下方、每周更新上方新增横向滚动卡片条
+- 展示当前状态为 `watching` 的全部追番：封面图 + 观看进度条 + 集数角标（已看/总集数）+ 标题
+- 未登录或无在追番剧时自动隐藏，不占空间
+
+**涉及文件：**
+- `client/src/components/anime/ContinueWatching.jsx`（新增）
+- `client/src/pages/HomePage.jsx`
+
+---
+
 ## Git 提交记录
 
 | Hash | 时间 | 说明 |
 |------|------|------|
-| `feb3ca6` | 18:26 | Initial project setup: AnimeGo anime website |
-| `5e8aa59` | 18:58 | feat: implement full-stack AnimeGo anime website |
-| `800f0ef` | 19:08 | fix: resolve AniList 429 rate limit with cache-first strategy |
-| `083d5ec` | 19:17 | fix: resolve infinite page refresh loop on startup |
-| `f11f453` | 19:22 | fix: guests see content immediately, no forced login |
+| `feb3ca6` | 2026-03-07 18:26 | Initial project setup: AnimeGo anime website |
+| `5e8aa59` | 2026-03-07 18:58 | feat: implement full-stack AnimeGo anime website |
+| `800f0ef` | 2026-03-07 19:08 | fix: resolve AniList 429 rate limit with cache-first strategy |
+| `083d5ec` | 2026-03-07 19:17 | fix: resolve infinite page refresh loop on startup |
+| `f11f453` | 2026-03-07 19:22 | fix: guests see content immediately, no forced login |
+| `c459c6a` | 2026-03-08 | fix: cache pagination and rate limit with full season pre-fetch |
+| `1585800` | 2026-03-08 | feat: add weekly airing schedule to homepage |
+| `8df7df3` | 2026-03-08 | feat: replace homepage grid with top-5 hero carousel |
 
 仓库地址：`https://github.com/lawrenceli0228/animego`
