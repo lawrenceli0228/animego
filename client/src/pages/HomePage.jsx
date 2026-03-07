@@ -1,34 +1,32 @@
-import { useState } from 'react'
-import { getCurrentSeason, SEASON_LABELS } from '../utils/constants'
+import { getCurrentSeason } from '../utils/constants'
 import { useSeasonalAnime } from '../hooks/useAnime'
-import AnimeGrid from '../components/anime/AnimeGrid'
-import Pagination from '../components/common/Pagination'
+import HeroCarousel from '../components/anime/HeroCarousel'
 import WeeklySchedule from '../components/anime/WeeklySchedule'
+import LoadingSpinner from '../components/common/LoadingSpinner'
 
 export default function HomePage() {
   const currentSeason = getCurrentSeason()
   const currentYear   = new Date().getFullYear()
-  const [page, setPage] = useState(1)
 
-  const { data, isLoading, error } = useSeasonalAnime(currentSeason, currentYear, page)
+  const { data, isLoading } = useSeasonalAnime(currentSeason, currentYear, 1)
+
+  // Top 5 by score (already sorted desc in cache)
+  const top5 = data?.data?.slice(0, 5) ?? []
 
   return (
-    <div className="container" style={{ paddingTop: 40, paddingBottom: 60 }}>
-      {/* Current season */}
-      <div style={{ marginBottom: 28, animation: 'fadeUp 0.4s ease' }}>
-        <p style={{ color: '#7c3aed', fontSize: 13, fontWeight: 600, letterSpacing: '2px',
-          textTransform: 'uppercase', marginBottom: 8 }}>当前季度</p>
-        <h1 style={{ fontSize: 'clamp(26px,4vw,40px)', background: 'linear-gradient(135deg,#f1f5f9,#94a3b8)',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          {SEASON_LABELS[currentSeason]} {currentYear}
-        </h1>
+    <div>
+      {/* Full-width hero carousel */}
+      {isLoading
+        ? <div style={{ height: 'clamp(420px,55vh,600px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <LoadingSpinner />
+          </div>
+        : <HeroCarousel animeList={top5} />
+      }
+
+      {/* Weekly schedule */}
+      <div className="container" style={{ paddingTop: 8, paddingBottom: 60 }}>
+        <WeeklySchedule />
       </div>
-
-      <AnimeGrid animeList={data?.data} loading={isLoading} error={error} />
-      <Pagination page={page} totalPages={data?.pagination?.totalPages} onPageChange={setPage} />
-
-      {/* Weekly airing schedule */}
-      <WeeklySchedule />
     </div>
   )
 }
