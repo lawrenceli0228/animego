@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment variables (contains secrets - never commit)
+.env
+.env.local
+.env.production
+
+# Build output
+client/dist/
+client/build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
