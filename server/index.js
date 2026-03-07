@@ -12,9 +12,6 @@ const subscriptionRoutes = require('./routes/subscription.routes');
 
 const app = express();
 
-// Connect to MongoDB
-connectDB();
-
 // Middleware
 app.use(cors({
   origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
@@ -36,4 +33,18 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+// Connect DB → start server → warm current season cache in background
+(async () => {
+  await connectDB();
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+
+    // Pre-populate current season into MongoDB (non-blocking, runs in background)
+    const { warmCurrentSeason } = require('./services/anilist.service');
+    warmCurrentSeason().catch(err =>
+      console.error('❌ Season cache warm failed:', err.message)
+    );
+  });
+})();
