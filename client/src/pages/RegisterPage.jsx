@@ -1,11 +1,14 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, Navigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../context/AuthContext'
 
 export default function RegisterPage() {
-  const { register } = useAuth()
+  const { register, user, initializing } = useAuth()
   const navigate = useNavigate()
+
+  // Already logged in → go home
+  if (!initializing && user) return <Navigate to="/" replace />
   const [form, setForm] = useState({ username:'', email:'', password:'' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)

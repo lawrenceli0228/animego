@@ -6,59 +6,67 @@ import { setAccessToken } from '../api/axiosClient';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser]             = useState(null);
+  const [initializing, setInit]     = useState(true);  // startup session check
+  const [loading, setLoading]       = useState(false);  // login/register/logout ops
 
-  // On mount, try to restore session via refresh cookie
+  // On mount: silently try to restore session via refresh cookie
   useEffect(() => {
     (async () => {
       try {
-        // Use plain axios (NOT the intercepted api) to avoid triggering the 401 interceptor
         const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
         setAccessToken(data.data.accessToken);
         const me = await getMe();
         setUser(me.data.data.user);
       } catch {
-        // No valid session — stay as guest, do NOT redirect
+        // No session — guest mode, never redirect
         setUser(null);
       } finally {
-        setLoading(false);
+        setInit(false);
       }
     })();
   }, []);
 
-  // Listen for token expiry event dispatched by axiosClient interceptor
+  // Listen for token expiry dispatched by axiosClient
   useEffect(() => {
-    const handleExpired = () => {
-      setAccessToken(null);
-      setUser(null);
-    };
+    const handleExpired = () => { setAccessToken(null); setUser(null); };
     window.addEventListener('auth:expired', handleExpired);
     return () => window.removeEventListener('auth:expired', handleExpired);
   }, []);
 
   const login = useCallback(async (email, password) => {
-    const res = await apiLogin({ email, password });
-    setAccessToken(res.data.data.accessToken);
-    setUser(res.data.data.user);
-    return res.data.data.user;
+    setLoading(true);
+    try {
+      const res = await apiLogin({ email, password });
+      setAccessToken(res.data.data.accessToken);
+      setUser(res.data.data.user);
+      return res.data.data.user;
+    } finally { setLoading(false); }
   }, []);
 
   const register = useCallback(async (username, email, password) => {
-    const res = await apiRegister({ username, email, password });
-    setAccessToken(res.data.data.accessToken);
-    setUser(res.data.data.user);
-    return res.data.data.user;
+    setLoading(true);
+    try {
+      const res = await apiRegister({ username, email, password });
+      setAccessToken(res.data.data.accessToken);
+      setUser(res.data.data.user);
+      return res.data.data.user;
+    } finally { setLoading(false); }
   }, []);
 
   const logout = useCallback(async () => {
-    await apiLogout().catch(() => {});
-    setAccessToken(null);
-    setUser(null);
+    setLoading(true);
+    try {
+      await apiLogout().catch(() => {});
+    } finally {
+      setAccessToken(null);
+      setUser(null);
+      setLoading(false);
+    }
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, initializing, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );
