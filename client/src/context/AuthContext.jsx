@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 import { getMe, login as apiLogin, register as apiRegister, logout as apiLogout } from '../api/auth.api';
 import { setAccessToken } from '../api/axiosClient';
 
@@ -12,16 +13,28 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await import('../api/axiosClient').then(m => m.default.post('/auth/refresh'));
+        // Use plain axios (NOT the intercepted api) to avoid triggering the 401 interceptor
+        const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
         setAccessToken(data.data.accessToken);
         const me = await getMe();
         setUser(me.data.data.user);
       } catch {
+        // No valid session — stay as guest, do NOT redirect
         setUser(null);
       } finally {
         setLoading(false);
       }
     })();
+  }, []);
+
+  // Listen for token expiry event dispatched by axiosClient interceptor
+  useEffect(() => {
+    const handleExpired = () => {
+      setAccessToken(null);
+      setUser(null);
+    };
+    window.addEventListener('auth:expired', handleExpired);
+    return () => window.removeEventListener('auth:expired', handleExpired);
   }, []);
 
   const login = useCallback(async (email, password) => {

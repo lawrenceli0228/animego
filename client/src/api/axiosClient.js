@@ -26,34 +26,45 @@ api.interceptors.response.use(
   res => res,
   async (err) => {
     const original = err.config;
-    if (err.response?.status === 401 && !original._retry) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          refreshQueue.push({ resolve, reject });
-        }).then(token => {
-          original.headers.Authorization = `Bearer ${token}`;
-          return api(original);
-        });
-      }
-      original._retry = true;
-      isRefreshing = true;
-      try {
-        const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
-        const newToken = data.data.accessToken;
-        setAccessToken(newToken);
-        processQueue(null, newToken);
-        original.headers.Authorization = `Bearer ${newToken}`;
-        return api(original);
-      } catch (refreshErr) {
-        processQueue(refreshErr, null);
-        setAccessToken(null);
-        window.location.href = '/login';
-        return Promise.reject(refreshErr);
-      } finally {
-        isRefreshing = false;
-      }
+
+    // Skip retry if: not 401, already retried, or the failed request IS the refresh endpoint
+    if (
+      err.response?.status !== 401 ||
+      original._retry ||
+      original.url?.includes('/auth/refresh')
+    ) {
+      return Promise.reject(err);
     }
-    return Promise.reject(err);
+
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        refreshQueue.push({ resolve, reject });
+      }).then(token => {
+        original.headers.Authorization = `Bearer ${token}`;
+        return api(original);
+      });
+    }
+
+    original._retry = true;
+    isRefreshing = true;
+
+    try {
+      // Use plain axios (no interceptor) to avoid recursive loop
+      const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
+      const newToken = data.data.accessToken;
+      setAccessToken(newToken);
+      processQueue(null, newToken);
+      original.headers.Authorization = `Bearer ${newToken}`;
+      return api(original);
+    } catch (refreshErr) {
+      processQueue(refreshErr, null);
+      setAccessToken(null);
+      // Dispatch event instead of hard redirect — let React Router handle navigation
+      window.dispatchEvent(new CustomEvent('auth:expired'));
+      return Promise.reject(refreshErr);
+    } finally {
+      isRefreshing = false;
+    }
   }
 );
 
