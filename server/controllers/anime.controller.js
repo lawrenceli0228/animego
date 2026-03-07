@@ -37,6 +37,14 @@ exports.search = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// GET /api/anime/schedule
+exports.getSchedule = async (req, res, next) => {
+  try {
+    const schedule = await anilistService.getWeeklySchedule();
+    res.json({ data: schedule });
+  } catch (err) { next(err); }
+};
+
 // GET /api/anime/:anilistId
 exports.getDetail = async (req, res, next) => {
   try {

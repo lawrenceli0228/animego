@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { getSeasonalAnime, searchAnime, getAnimeDetail } from '../api/anime.api'
+import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule } from '../api/anime.api'
 
 export function useSeasonalAnime(season, year, page = 1) {
   return useQuery({
@@ -17,6 +17,15 @@ export function useAnimeDetail(id) {
     queryFn: () => getAnimeDetail(id).then(r => r.data.data),
     enabled: !!id,
     staleTime: 10 * 60 * 1000
+  })
+}
+
+export function useWeeklySchedule() {
+  return useQuery({
+    queryKey: ['weeklySchedule'],
+    queryFn: () => getWeeklySchedule().then(r => r.data.data),
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false
   })
 }
 

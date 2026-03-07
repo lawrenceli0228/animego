@@ -8,3 +8,6 @@ export const searchAnime = (q, genre, page = 1, perPage = 20) =>
 
 export const getAnimeDetail = (anilistId) =>
   api.get(`/anime/${anilistId}`);
+
+export const getWeeklySchedule = () =>
+  api.get('/anime/schedule');

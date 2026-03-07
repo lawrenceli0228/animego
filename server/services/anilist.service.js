@@ -1,7 +1,8 @@
 const AnimeCache = require('../models/AnimeCache');
-const { SEASONAL_ANIME_QUERY } = require('../queries/seasonalAnime.graphql');
-const { SEARCH_ANIME_QUERY }   = require('../queries/searchAnime.graphql');
-const { ANIME_DETAIL_QUERY }   = require('../queries/animeDetail.graphql');
+const { SEASONAL_ANIME_QUERY }  = require('../queries/seasonalAnime.graphql');
+const { SEARCH_ANIME_QUERY }    = require('../queries/searchAnime.graphql');
+const { ANIME_DETAIL_QUERY }    = require('../queries/animeDetail.graphql');
+const { WEEKLY_SCHEDULE_QUERY } = require('../queries/weeklySchedule.graphql');
 
 const ANILIST_URL   = 'https://graphql.anilist.co';
 const CACHE_TTL_MS  = (parseInt(process.env.CACHE_TTL_HOURS) || 24) * 60 * 60 * 1000;
@@ -233,8 +234,57 @@ async function getAnimeDetail(anilistId) {
   return anime;
 }
 
+// ─── Weekly schedule ──────────────────────────────────────────────────────────
+const scheduleCache = new Map(); // 'YYYY-MM-DD' → { data, cachedAt }
+const SCHEDULE_TTL  = 30 * 60 * 1000; // 30 min
+
+async function getWeeklySchedule() {
+  const todayKey = new Date().toISOString().split('T')[0];
+  const hit      = scheduleCache.get(todayKey);
+  if (hit && Date.now() - hit.cachedAt < SCHEDULE_TTL) return hit.data;
+
+  // today midnight local → 7 days later (as Unix seconds)
+  const now   = new Date();
+  const start = Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000);
+  const end   = start + 7 * 24 * 60 * 60;
+
+  // Fetch all pages (usually 1-2)
+  const allSchedules = [];
+  let page = 1, hasNext = true;
+  while (hasNext) {
+    const data = await queryAniList(WEEKLY_SCHEDULE_QUERY, { weekStart: start, weekEnd: end, page });
+    allSchedules.push(...data.Page.airingSchedules);
+    hasNext = data.Page.pageInfo.hasNextPage;
+    page++;
+  }
+
+  // Group by local date string 'YYYY-MM-DD'
+  const groups = {};
+  allSchedules.forEach(item => {
+    const d   = new Date(item.airingAt * 1000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push({
+      scheduleId:    item.id,
+      airingAt:      item.airingAt,
+      episode:       item.episode,
+      anilistId:     item.media.id,
+      titleRomaji:   item.media.title.romaji,
+      titleEnglish:  item.media.title.english,
+      coverImageUrl: item.media.coverImage?.extraLarge || item.media.coverImage?.large,
+      format:        item.media.format,
+      averageScore:  item.media.averageScore,
+      genres:        item.media.genres || []
+    });
+  });
+
+  const result = { today: todayKey, groups };
+  scheduleCache.set(todayKey, { data: result, cachedAt: Date.now() });
+  return result;
+}
+
 module.exports = {
-  getSeasonalAnime, searchAnime, getAnimeDetail,
+  getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule,
   warmSeasonCache, warmCurrentSeason,
   upsertCache, normalize
 };
