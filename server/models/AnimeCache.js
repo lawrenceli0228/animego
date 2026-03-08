@@ -15,7 +15,11 @@ const animeCacheSchema = new mongoose.Schema({
   averageScore:   Number,
   genres:         [String],
   format:         String,  // TV, OVA, MOVIE, SPECIAL, ONA, MUSIC
-  cachedAt:       { type: Date, default: Date.now }
+  cachedAt:       { type: Date, default: Date.now },
+  // Bangumi enrichment
+  titleChinese:    { type: String,  default: null },
+  bgmId:           { type: Number,  default: null },
+  bangumiEnriched: { type: Boolean, default: false }
 });
 
 animeCacheSchema.index({ season: 1, seasonYear: 1 });

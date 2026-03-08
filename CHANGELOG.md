@@ -161,6 +161,101 @@
 
 ---
 
+### · 中英文切换 / 集数列表 / 磁力搜索 / 每集评论（`feat: add i18n, episode list, torrent search and episode comments`）
+
+**中英文切换（i18n）**
+
+- 新增 `LanguageContext.jsx` — 轻量级双语 Context，暴露 `t(key)` 和 `lang`，语言偏好持久化到 `localStorage`，默认中文
+- 新增 `client/src/locales/zh.js` / `en.js` — 全站 UI 文案翻译字典（Navbar、首页、详情页、订阅、搜索、季度、登录/注册、集数评论等）
+- Navbar 右上角新增 `中 / EN` 切换按钮，全站文案实时响应无需刷新
+
+**集数列表**
+
+- 新增 `EpisodeList.jsx` — 番剧详情页底部显示全部集数（自适应卡片网格）
+- 已登录用户：已看集数绿色高亮，当前进度集数紫色高亮（数据来自 `useSubscription`）
+- 每集卡片含集数编号 + 已看标记 + 磁链按钮
+- `episodes` 为空时显示「集数信息待更新」友好提示
+
+**磁力链接搜索**
+
+- 新增 `TorrentModal.jsx` — 点击每集磁链按钮弹出全屏遮罩 Modal
+- 后端 `GET /api/anime/torrents?q=` 请求 Nyaa.si RSS，`fast-xml-parser` 解析 XML，返回标题、磁链、大小、做种数
+- 默认搜索词：`{titleEnglish || titleRomaji} + {episode}`；支持用户手动修改后重新搜索
+
+**每集评论**
+
+- 新增 `EpisodeComment` 数据模型（`anilistId + episode + userId + content`，双字段复合索引）
+- 新增 REST 接口：`GET/POST /api/comments/:anilistId/:episode`（公开读 / 登录写）、`DELETE /api/comments/:id`（仅本人）
+- 新增 `EpisodeComments.jsx` — 点击集数卡片手风琴展开评论区，同时只展开一集
+- 已登录：文本框 + 发布按钮；访客：「请登录后参与评论」提示 + 登录跳转链接
+
+**涉及文件：**
+- `server/models/EpisodeComment.js`（新增）
+- `server/controllers/comment.controller.js`（新增）
+- `server/routes/comment.routes.js`（新增）
+- `server/index.js`（注册 `/api/comments` 路由）
+- `client/src/context/LanguageContext.jsx`（新增）
+- `client/src/locales/zh.js` / `en.js`（新增）
+- `client/src/components/anime/EpisodeList.jsx`（新增）
+- `client/src/components/anime/TorrentModal.jsx`（新增）
+- `client/src/components/anime/EpisodeComments.jsx`（新增）
+- 全站各组件/页面接入 `t()` 双语支持
+
+---
+
+### · Bangumi 中文标题集成 + bgmId 外链（`feat: integrate Bangumi API for Chinese titles with bgmId linking`）
+
+**中文标题后台富化**
+
+- 新增 `server/services/bangumi.service.js` — 封装 Bangumi API（速率限制 800ms/请求），全局异步富化队列，不阻塞主请求
+- `AnimeCache` 模型新增 `titleChinese`（String）、`bgmId`（Number）、`bangumiEnriched`（Boolean）三个字段
+- `fetchBangumiData()` 搜索 `bgm.tv` 返回 `{ titleChinese, bgmId }`，优先用日文原名匹配
+- `anilist.service.js` 三处调用 `enqueueEnrichment()`：季度预热、搜索结果、详情页懒加载；放送表额外批查 `titleChinese` 并合并
+
+**前端中文标题显示**
+
+- 新增 `pickTitle(obj, lang)` — 中文模式优先级：`titleChinese → titleNative → titleRomaji → titleEnglish`
+- 5 个组件（AnimeCard / AnimeDetailHero / HeroCarousel / WeeklySchedule / ContinueWatching）全部切换使用 `pickTitle`
+
+**bgm.tv 外链**
+
+- 番剧详情页 `AnimeDetailHero` 徽章栏新增「在 Bangumi 查看 / View on Bangumi」外链按钮（红色主题，`target="_blank"`）
+- 仅在 `bgmId` 非空时渲染，链接至 `https://bgm.tv/subject/{bgmId}`
+
+**涉及文件：**
+- `server/models/AnimeCache.js`（新增 3 字段）
+- `server/services/bangumi.service.js`（新增）
+- `server/services/anilist.service.js`（富化调用 + 放送表 titleChinese 拼接）
+- `client/src/utils/formatters.js`（新增 `pickTitle`）
+- `client/src/components/anime/AnimeDetailHero.jsx`（bgmId 外链）
+- 5 个组件接入 `pickTitle`
+
+---
+
+### · 磁链搜索重构：接入 Anime Garden API + 三栏 UI（`feat: redesign torrent search with Anime Garden API`）
+
+**数据源切换**
+
+- 废弃 Nyaa.si RSS + XML 解析，改用 [Anime Garden API](https://api.animes.garden)（聚合 Nyaa.si + ACG.rip）
+- API 直接返回预解析的 `fansub.name` 字段，覆盖 ANi、LoliHouse、SubsPlease 等中文字幕组
+- 默认搜索词改为 `{titleRomaji} - {零补位集数}`（如 `Sousou no Frieren - 05`），匹配 Nyaa 命名惯例
+- `formatBytes()` 处理 Anime Garden 以 KB 为单位的文件大小，正确转换为 MB/GB
+
+**三栏弹窗重设计**
+
+- 左侧栏：番剧名 + 字幕组过滤列表（自动聚合 + 按数量排序 + 数量 badge + 「全部/All」按钮）
+- 中间列表：每条结果显示完整标题（单行省略）、分辨率 badge（1080P/720P）、编码 badge（HEVC/AVC/WEB-DL）、文件大小、日期
+- 右侧：番剧封面图
+- 复制磁链 ⎘ 按钮（点击变绿 ✓）+ 直接打开磁链 ↗ 按钮（唤起本地 BT 客户端）
+- 切换字幕组时列表立即过滤；新搜索完成后自动重置为「全部」
+
+**涉及文件：**
+- `server/controllers/anime.controller.js`（重写 `getTorrents`，移除 XML 相关代码）
+- `client/src/components/anime/TorrentModal.jsx`（完整重写）
+- `client/src/locales/zh.js` / `en.js`（新增 `groupAll`、`openMagnet`、`date` 键）
+
+---
+
 ## Git 提交记录
 
 | Hash | 时间 | 说明 |
@@ -173,5 +268,9 @@
 | `c459c6a` | 2026-03-08 | fix: cache pagination and rate limit with full season pre-fetch |
 | `1585800` | 2026-03-08 | feat: add weekly airing schedule to homepage |
 | `8df7df3` | 2026-03-08 | feat: replace homepage grid with top-5 hero carousel |
+| `95eaeba` | 2026-03-08 | feat: add continue watching section and weekly grid layout |
+| *(pending)* | 2026-03-08 | feat: add i18n, episode list, torrent search and episode comments |
+| *(pending)* | 2026-03-08 | feat: integrate Bangumi API for Chinese titles with bgmId linking |
+| *(pending)* | 2026-03-08 | feat: redesign torrent search with Anime Garden API |
 
 仓库地址：`https://github.com/lawrenceli0228/animego`

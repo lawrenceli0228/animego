@@ -3,6 +3,7 @@ const { SEASONAL_ANIME_QUERY }  = require('../queries/seasonalAnime.graphql');
 const { SEARCH_ANIME_QUERY }    = require('../queries/searchAnime.graphql');
 const { ANIME_DETAIL_QUERY }    = require('../queries/animeDetail.graphql');
 const { WEEKLY_SCHEDULE_QUERY } = require('../queries/weeklySchedule.graphql');
+const { enqueueEnrichment }     = require('./bangumi.service');
 
 const ANILIST_URL   = 'https://graphql.anilist.co';
 const CACHE_TTL_MS  = (parseInt(process.env.CACHE_TTL_HOURS) || 24) * 60 * 60 * 1000;
@@ -90,7 +91,9 @@ async function warmSeasonCache(season, year) {
       const { pageInfo, media } = data.Page;
       lastPage = pageInfo.lastPage;
       total   += media.length;
-      await upsertCache(media.map(normalize));
+      const normalized = media.map(normalize);
+      await upsertCache(normalized);
+      enqueueEnrichment(normalized); // Bangumi 中文标题后台富化
       console.log(`  ✓ ${season} ${year} — page ${page}/${lastPage} (${media.length} anime)`);
       page++;
     } while (page <= lastPage);
@@ -218,6 +221,7 @@ async function searchAnime(search, genre, page = 1, perPage = 20) {
   });
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
+  enqueueEnrichment(animeList); // Bangumi 中文标题后台富化
   const result = { pageInfo: data.Page.pageInfo, anime: animeList };
   searchCache.set(key, { data: result, time: Date.now() });
   return result;
@@ -226,11 +230,15 @@ async function searchAnime(search, genre, page = 1, perPage = 20) {
 // ─── Single anime detail — cache-first ───────────────────────────────────────
 async function getAnimeDetail(anilistId) {
   const cached = await AnimeCache.findOne({ anilistId: parseInt(anilistId) });
-  if (cached && Date.now() - cached.cachedAt.getTime() < CACHE_TTL_MS) return cached;
+  if (cached && Date.now() - cached.cachedAt.getTime() < CACHE_TTL_MS) {
+    if (!cached.bangumiEnriched) enqueueEnrichment([cached]); // 懒加载富化
+    return cached;
+  }
 
   const data  = await queryAniList(ANIME_DETAIL_QUERY, { id: parseInt(anilistId) });
   const anime = normalize(data.Media);
   await upsertCache([anime]);
+  enqueueEnrichment([anime]); // Bangumi 中文标题后台富化
   return anime;
 }
 
@@ -271,12 +279,39 @@ async function getWeeklySchedule() {
       anilistId:     item.media.id,
       titleRomaji:   item.media.title.romaji,
       titleEnglish:  item.media.title.english,
+      titleNative:   item.media.title.native,
+      titleChinese:  null, // 下方从 AnimeCache 拼入
       coverImageUrl: item.media.coverImage?.extraLarge || item.media.coverImage?.large,
       format:        item.media.format,
       averageScore:  item.media.averageScore,
       genres:        item.media.genres || []
     });
   });
+
+  // 从 AnimeCache 拼入 titleChinese，并触发尚未富化条目的后台富化
+  const allIds = [...new Set(Object.values(groups).flat().map(i => i.anilistId))];
+  if (allIds.length > 0) {
+    const cached = await AnimeCache.find(
+      { anilistId: { $in: allIds } },
+      { anilistId: 1, titleChinese: 1, titleNative: 1, bangumiEnriched: 1 }
+    ).lean();
+    const cacheMap = new Map(cached.map(a => [a.anilistId, a]));
+    const toEnrich = [];
+    Object.values(groups).forEach(items =>
+      items.forEach(item => {
+        const doc = cacheMap.get(item.anilistId);
+        item.titleChinese = doc?.titleChinese ?? null;
+        if (doc && !doc.bangumiEnriched) {
+          toEnrich.push({
+            anilistId:   item.anilistId,
+            titleNative: doc.titleNative || item.titleNative,
+            titleRomaji: item.titleRomaji,
+          });
+        }
+      })
+    );
+    if (toEnrich.length > 0) enqueueEnrichment(toEnrich);
+  }
 
   const result = { today: todayKey, groups };
   scheduleCache.set(todayKey, { data: result, cachedAt: Date.now() });
