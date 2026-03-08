@@ -1,18 +1,15 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useWeeklySchedule } from '../../hooks/useAnime'
+import { useLang } from '../../context/LanguageContext'
+import { pickTitle } from '../../utils/formatters'
 
 const DAY_ZH = { 0: '周日', 1: '周一', 2: '周二', 3: '周三', 4: '周四', 5: '周五', 6: '周六' }
+const DAY_EN = { 0: 'Sun', 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat' }
 
 function localToday() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function formatDayLabel(dateStr, today) {
-  if (dateStr === today) return '今天'
-  const d = new Date(dateStr + 'T00:00:00')
-  return DAY_ZH[d.getDay()]
 }
 
 function formatTime(unixSec) {
@@ -31,20 +28,8 @@ const s = {
     color: active ? '#fff' : isToday ? '#a78bfa' : '#94a3b8',
     outline: isToday && !active ? '1px solid rgba(124,58,237,0.4)' : 'none'
   }),
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-    gap: 14
-  },
-  card: {
-    display: 'flex', flexDirection: 'column',
-    borderRadius: 12,
-    background: 'rgba(255,255,255,0.03)',
-    border: '1px solid rgba(148,163,184,0.08)',
-    overflow: 'hidden',
-    textDecoration: 'none', color: 'inherit',
-    transition: 'transform 0.2s, border-color 0.2s'
-  },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 14 },
+  card: { display: 'flex', flexDirection: 'column', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.08)', overflow: 'hidden', textDecoration: 'none', color: 'inherit', transition: 'transform 0.2s, border-color 0.2s' },
   cover: { width: '100%', aspectRatio: '3/4', objectFit: 'cover', display: 'block', background: '#1a2235' },
   cardBody: { padding: '8px 10px 10px' },
   titleText: { fontSize: 13, fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.4, marginBottom: 6 },
@@ -58,6 +43,7 @@ const s = {
 
 export default function WeeklySchedule() {
   const { data, isLoading } = useWeeklySchedule()
+  const { lang, t } = useLang()
   const today = localToday()
   const [selected, setSelected] = useState(null)
 
@@ -68,65 +54,47 @@ export default function WeeklySchedule() {
   const activeDay = days.includes(active) ? active : days[0]
   const items   = data?.groups[activeDay] ?? []
 
+  const DAY_MAP = lang === 'zh' ? DAY_ZH : DAY_EN
+
+  function formatDayLabel(dateStr) {
+    if (dateStr === today) return t('home.today')
+    const d = new Date(dateStr + 'T00:00:00')
+    return DAY_MAP[d.getDay()]
+  }
+
   return (
     <section style={s.section}>
       <div style={s.header}>
-        <p style={s.label}>放送日历</p>
-        <h2 style={s.title}>本周更新</h2>
+        <p style={s.label}>{t('home.scheduleLabel')}</p>
+        <h2 style={s.title}>{t('home.thisWeek')}</h2>
       </div>
 
-      {/* Day tabs */}
       <div style={s.tabs}>
         {days.map(d => (
-          <button
-            key={d}
-            style={s.tab(d === activeDay, d === today)}
-            onClick={() => setSelected(d)}
-          >
-            {formatDayLabel(d, today)}
-            <span style={{ marginLeft: 4, opacity: 0.7, fontSize: 11 }}>
-              {data.groups[d]?.length ?? 0}
-            </span>
+          <button key={d} style={s.tab(d === activeDay, d === today)} onClick={() => setSelected(d)}>
+            {formatDayLabel(d)}
+            <span style={{ marginLeft: 4, opacity: 0.7, fontSize: 11 }}>{data.groups[d]?.length ?? 0}</span>
           </button>
         ))}
       </div>
 
-      {/* Anime grid */}
       {items.length === 0
-        ? <p style={s.empty}>今日暂无更新</p>
+        ? <p style={s.empty}>{t('home.noUpdates')}</p>
         : (
           <div style={s.grid}>
             {items.map(item => (
-              <Link
-                key={item.scheduleId}
-                to={`/anime/${item.anilistId}`}
-                style={s.card}
-                onMouseEnter={e => {
-                  e.currentTarget.style.transform = 'translateY(-4px)'
-                  e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.transform = 'translateY(0)'
-                  e.currentTarget.style.borderColor = 'rgba(148,163,184,0.08)'
-                }}
+              <Link key={item.scheduleId} to={`/anime/${item.anilistId}`} style={s.card}
+                onMouseEnter={e => { e.currentTarget.style.transform='translateY(-4px)'; e.currentTarget.style.borderColor='rgba(124,58,237,0.4)' }}
+                onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.borderColor='rgba(148,163,184,0.08)' }}
               >
-                <img
-                  src={item.coverImageUrl}
-                  alt={item.titleRomaji}
-                  style={s.cover}
-                  loading="lazy"
-                />
+                <img src={item.coverImageUrl} alt={item.titleRomaji} style={s.cover} loading="lazy" />
                 <div style={s.cardBody}>
-                  <div style={s.titleText}>
-                    {item.titleEnglish || item.titleRomaji}
-                  </div>
+                  <div style={s.titleText}>{pickTitle(item, lang)}</div>
                   <div style={s.meta}>
-                    <span style={s.ep}>第 {item.episode} 集</span>
+                    <span style={s.ep}>{t('detail.ep')} {item.episode} {t('detail.epUnit')}</span>
                     <div style={s.timeScore}>
                       <span style={s.time}>{formatTime(item.airingAt)}</span>
-                      {item.averageScore > 0 && (
-                        <span style={s.score}>★ {(item.averageScore / 10).toFixed(1)}</span>
-                      )}
+                      {item.averageScore > 0 && <span style={s.score}>★ {(item.averageScore / 10).toFixed(1)}</span>}
                     </div>
                   </div>
                 </div>

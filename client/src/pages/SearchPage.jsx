@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAnimeSearch } from '../hooks/useAnime'
+import { useLang } from '../context/LanguageContext'
 import SearchBar from '../components/search/SearchBar'
 import GenreFilter from '../components/search/GenreFilter'
 import AnimeGrid from '../components/anime/AnimeGrid'
@@ -9,6 +10,7 @@ import Pagination from '../components/common/Pagination'
 export default function SearchPage() {
   const [params, setParams] = useSearchParams()
   const [page, setPage] = useState(1)
+  const { t } = useLang()
 
   const q     = params.get('q') || ''
   const genre = params.get('genre') || ''
@@ -23,7 +25,7 @@ export default function SearchPage() {
       <h1 style={{ fontSize:'clamp(22px,3vw,34px)', marginBottom:24,
         background:'linear-gradient(135deg,#f1f5f9,#94a3b8)',
         WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
-        搜索番剧
+        {t('search.title')}
       </h1>
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
         <SearchBar value={q} onChange={setQ} />
@@ -32,7 +34,7 @@ export default function SearchPage() {
       {!q && !genre ? (
         <div style={{ textAlign:'center', padding:'60px 0', color:'#64748b',
           fontFamily:"'Sora',sans-serif", fontSize:15 }}>
-          输入关键词或选择类型开始搜索
+          {t('search.prompt')}
         </div>
       ) : (
         <>

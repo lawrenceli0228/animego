@@ -5,6 +5,7 @@ const ctrl = require('../controllers/anime.controller');
 router.get('/seasonal', ctrl.getSeasonal);
 router.get('/search',   ctrl.search);
 router.get('/schedule', ctrl.getSchedule);  // must be before /:anilistId
+router.get('/torrents', ctrl.getTorrents);  // must be before /:anilistId
 router.get('/:anilistId', ctrl.getDetail);
 
 module.exports = router;

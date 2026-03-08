@@ -1,4 +1,4 @@
-import { SEASON_LABELS } from '../../utils/constants'
+import { useLang } from '../../context/LanguageContext'
 
 const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL']
 const currentYear = new Date().getFullYear()
@@ -23,15 +23,16 @@ const s = {
 }
 
 export default function SeasonSelector({ year, season, onYearChange, onSeasonChange }) {
+  const { t } = useLang()
   return (
     <div style={s.wrap}>
       <select style={s.select} value={year} onChange={e => onYearChange(Number(e.target.value))}>
-        {years.map(y => <option key={y} value={y}>{y} 年</option>)}
+        {years.map(y => <option key={y} value={y}>{y} {t('season.year')}</option>)}
       </select>
       <div style={s.tabs}>
         {SEASONS.map(s_ => (
           <button key={s_} style={s.tab(season === s_)} onClick={() => onSeasonChange(s_)}>
-            {SEASON_LABELS[s_]}
+            {t(`season.${s_}`)}
           </button>
         ))}
       </div>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { getCurrentSeason } from '../utils/constants'
 import { useSeasonalAnime } from '../hooks/useAnime'
+import { useLang } from '../context/LanguageContext'
 import SeasonSelector from '../components/season/SeasonSelector'
 import GenreFilter from '../components/search/GenreFilter'
 import AnimeGrid from '../components/anime/AnimeGrid'
@@ -11,6 +12,7 @@ export default function SeasonPage() {
   const [params, setParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [genre, setGenre] = useState('')
+  const { t } = useLang()
 
   const season = params.get('season') || getCurrentSeason()
   const year   = Number(params.get('year')) || new Date().getFullYear()
@@ -20,7 +22,6 @@ export default function SeasonPage() {
 
   const { data, isLoading, error } = useSeasonalAnime(season, year, page)
 
-  // Optional genre filtering on client side
   const filtered = genre && data?.data
     ? data.data.filter(a => a.genres?.includes(genre))
     : data?.data
@@ -30,7 +31,7 @@ export default function SeasonPage() {
       <h1 style={{ fontSize:'clamp(22px,3vw,34px)', marginBottom:24,
         background:'linear-gradient(135deg,#f1f5f9,#94a3b8)',
         WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
-        季度番剧
+        {t('seasonPage.title')}
       </h1>
       <SeasonSelector year={year} season={season} onYearChange={setYear} onSeasonChange={setSeason} />
       <GenreFilter selected={genre} onSelect={g => { setGenre(g); setPage(1) }} />

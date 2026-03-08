@@ -9,6 +9,7 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 const authRoutes         = require('./routes/auth.routes');
 const animeRoutes        = require('./routes/anime.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
+const commentRoutes      = require('./routes/comment.routes');
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use('/api', apiLimiter);
 app.use('/api/auth',          authRoutes);
 app.use('/api/anime',         animeRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/comments',      commentRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));

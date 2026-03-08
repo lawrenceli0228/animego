@@ -1,5 +1,6 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { useLang } from '../../context/LanguageContext'
 import toast from 'react-hot-toast'
 
 const s = {
@@ -42,16 +43,23 @@ const s = {
     background: 'linear-gradient(135deg,#7c3aed,#6d28d9)',
     color: '#fff', fontSize: 14, fontWeight: 600,
     border: 'none', cursor: 'pointer'
+  },
+  langBtn: {
+    padding: '4px 10px', borderRadius: 6,
+    border: '1px solid rgba(148,163,184,0.2)',
+    color: '#94a3b8', fontSize: 12, fontWeight: 600,
+    cursor: 'pointer', background: 'none', transition: 'all 0.2s'
   }
 }
 
 export default function Navbar() {
   const { user, logout } = useAuth()
+  const { lang, toggle, t } = useLang()
   const navigate = useNavigate()
 
   const handleLogout = async () => {
     await logout()
-    toast.success('已登出')
+    toast.success(t('nav.logout'))
     navigate('/')
   }
 
@@ -60,21 +68,22 @@ export default function Navbar() {
       <div style={s.inner}>
         <Link to="/" style={s.logo}>AnimeGo</Link>
         <div style={s.links}>
-          {[['/', '首页'], ['/season', '季度'], ['/search', '搜索']].map(([to, label]) => (
-            <NavLink key={to} to={to} end={to==='/'} style={({ isActive }) => s.link(isActive)}>{label}</NavLink>
+          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search']].map(([to, key]) => (
+            <NavLink key={to} to={to} end={to==='/'} style={({ isActive }) => s.link(isActive)}>{t(key)}</NavLink>
           ))}
         </div>
         <div style={s.right}>
+          <button style={s.langBtn} onClick={toggle}>{lang === 'zh' ? 'EN' : '中'}</button>
           {user ? (
             <>
-              <span style={s.username}>Hi, {user.username}</span>
-              <Link to="/profile" style={s.btnOutline}>我的追番</Link>
-              <button style={s.btnOutline} onClick={handleLogout}>登出</button>
+              <span style={s.username}>{t('nav.hi')}, {user.username}</span>
+              <Link to="/profile" style={s.btnOutline}>{t('nav.myList')}</Link>
+              <button style={s.btnOutline} onClick={handleLogout}>{t('nav.logout')}</button>
             </>
           ) : (
             <>
-              <Link to="/login" style={s.btnOutline}>登录</Link>
-              <Link to="/register" style={s.btnFill}>注册</Link>
+              <Link to="/login" style={s.btnOutline}>{t('nav.login')}</Link>
+              <Link to="/register" style={s.btnFill}>{t('nav.register')}</Link>
             </>
           )}
         </div>

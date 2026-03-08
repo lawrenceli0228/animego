@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { Link, useNavigate, Navigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../context/AuthContext'
+import { useLang } from '../context/LanguageContext'
 
 export default function LoginPage() {
   const { login, user, initializing } = useAuth()
+  const { t } = useLang()
   const navigate = useNavigate()
 
-  // Already logged in → go home
   if (!initializing && user) return <Navigate to="/" replace />
   const [form, setForm] = useState({ email:'', password:'' })
   const [error, setError] = useState('')
@@ -21,11 +22,17 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await login(form.email, form.password)
-      toast.success('登录成功！')
+      toast.success(t('login.success'))
       navigate('/')
     } catch (err) {
-      setError(err.response?.data?.error?.message || '登录失败')
+      setError(err.response?.data?.error?.message || t('login.fail'))
     } finally { setLoading(false) }
+  }
+
+  const inputStyle = {
+    width:'100%', padding:'11px 14px', borderRadius:10,
+    background:'#0a0e1a', border:'1px solid rgba(148,163,184,0.15)',
+    color:'#f1f5f9', fontSize:14, outline:'none', marginBottom:16
   }
 
   return (
@@ -37,19 +44,16 @@ export default function LoginPage() {
           <h1 style={{ fontFamily:"'Sora',sans-serif", fontSize:28,
             background:'linear-gradient(135deg,#7c3aed,#06b6d4)',
             WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:8 }}>
-            AnimeGo
+            {t('login.title')}
           </h1>
-          <p style={{ color:'#94a3b8', fontSize:14 }}>欢迎回来，继续追番之旅</p>
+          <p style={{ color:'#94a3b8', fontSize:14 }}>{t('login.subtitle')}</p>
         </div>
 
         <form onSubmit={handleSubmit}>
-          {[['email','邮箱','email'],['password','密码','password']].map(([k,l,t]) => (
+          {[['email', t('login.email'), 'email'], ['password', t('login.password'), 'password']].map(([k,l,tp]) => (
             <div key={k}>
               <label style={{ display:'block', fontSize:13, fontWeight:600, color:'#94a3b8', marginBottom:6 }}>{l}</label>
-              <input type={t} value={form[k]} onChange={set(k)} required
-                style={{ width:'100%', padding:'11px 14px', borderRadius:10,
-                  background:'#0a0e1a', border:'1px solid rgba(148,163,184,0.15)',
-                  color:'#f1f5f9', fontSize:14, outline:'none', marginBottom:16 }}
+              <input type={tp} value={form[k]} onChange={set(k)} required style={inputStyle}
                 onFocus={e => e.target.style.borderColor='rgba(124,58,237,0.5)'}
                 onBlur={e => e.target.style.borderColor='rgba(148,163,184,0.15)'}
               />
@@ -63,13 +67,13 @@ export default function LoginPage() {
               border:'none', borderRadius:10, color:'#fff', fontSize:15, fontWeight:700,
               cursor: loading ? 'not-allowed' : 'pointer', fontFamily:"'Sora',sans-serif",
               opacity: loading ? 0.7 : 1 }}>
-            {loading ? '登录中...' : '登录'}
+            {loading ? t('login.submitting') : t('login.submit')}
           </button>
         </form>
 
         <p style={{ textAlign:'center', marginTop:20, fontSize:14, color:'#64748b' }}>
-          还没有账号？{' '}
-          <Link to="/register" style={{ color:'#7c3aed', fontWeight:600 }}>立即注册</Link>
+          {t('login.noAccount')}{' '}
+          <Link to="/register" style={{ color:'#7c3aed', fontWeight:600 }}>{t('login.registerLink')}</Link>
         </p>
       </div>
     </div>

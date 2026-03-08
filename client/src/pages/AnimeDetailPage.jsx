@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom'
 import { useAnimeDetail } from '../hooks/useAnime'
 import AnimeDetailHero from '../components/anime/AnimeDetailHero'
 import SubscriptionButton from '../components/subscription/SubscriptionButton'
+import EpisodeList from '../components/anime/EpisodeList'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
 export default function AnimeDetailPage() {
@@ -21,6 +22,7 @@ export default function AnimeDetailPage() {
       <AnimeDetailHero anime={anime} />
       <div className="container">
         <SubscriptionButton anilistId={anime.anilistId} episodes={anime.episodes} />
+        <EpisodeList anime={anime} />
       </div>
     </div>
   )

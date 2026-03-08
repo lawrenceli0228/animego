@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
+import { useLang } from '../../context/LanguageContext'
 
 export default function SearchBar({ value, onChange }) {
   const [local, setLocal] = useState(value)
+  const { t } = useLang()
 
   useEffect(() => { setLocal(value) }, [value])
 
   useEffect(() => {
-    const t = setTimeout(() => { if (local !== value) onChange(local) }, 400)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => { if (local !== value) onChange(local) }, 400)
+    return () => clearTimeout(timer)
   }, [local])
 
   return (
@@ -18,7 +20,7 @@ export default function SearchBar({ value, onChange }) {
         type="text"
         value={local}
         onChange={e => setLocal(e.target.value)}
-        placeholder="搜索番剧名称..."
+        placeholder={t('search.placeholder')}
         style={{
           width:'100%', padding:'10px 14px 10px 42px',
           borderRadius:10, border:'1px solid rgba(124,58,237,0.3)',

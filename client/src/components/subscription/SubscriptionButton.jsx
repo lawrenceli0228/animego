@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../../context/AuthContext'
+import { useLang } from '../../context/LanguageContext'
 import { useSubscription, useAddSubscription, useUpdateSubscription, useRemoveSubscription } from '../../hooks/useSubscription'
 import { STATUS_OPTIONS } from '../../utils/constants'
-import { formatEpisodes } from '../../utils/formatters'
 
 const s = {
   wrap: { display:'flex', flexWrap:'wrap', alignItems:'center', gap:12, padding:'24px 0' },
@@ -31,13 +31,19 @@ const s = {
 
 export default function SubscriptionButton({ anilistId, episodes }) {
   const { user } = useAuth()
+  const { t } = useLang()
   const { data: sub, isLoading } = useSubscription(anilistId)
   const add    = useAddSubscription()
   const update = useUpdateSubscription()
   const remove = useRemoveSubscription()
   const [epInput, setEpInput] = useState(null)
 
-  if (!user) return <Link to="/login" style={s.loginBtn}>登录后追番</Link>
+  const statusLabels = {
+    watching: t('sub.watching'), completed: t('sub.completed'),
+    plan_to_watch: t('sub.planToWatch'), dropped: t('sub.dropped')
+  }
+
+  if (!user) return <Link to="/login" style={s.loginBtn}>{t('sub.loginToWatch')}</Link>
   if (isLoading) return null
 
   const currentEp = epInput ?? sub?.currentEpisode ?? 0
@@ -47,8 +53,8 @@ export default function SubscriptionButton({ anilistId, episodes }) {
     try {
       if (!sub) await add.mutateAsync({ anilistId, status })
       else await update.mutateAsync({ anilistId, status })
-      toast.success('已更新')
-    } catch { toast.error('操作失败') }
+      toast.success('✓')
+    } catch { toast.error('!') }
   }
 
   const handleEp = async (ep) => {
@@ -57,23 +63,23 @@ export default function SubscriptionButton({ anilistId, episodes }) {
     try {
       if (!sub) await add.mutateAsync({ anilistId, status: 'watching', currentEpisode: val })
       else await update.mutateAsync({ anilistId, currentEpisode: val })
-    } catch { toast.error('更新失败') }
+    } catch { toast.error('!') }
   }
 
   const handleRemove = async () => {
     try {
       await remove.mutateAsync(anilistId)
       setEpInput(null)
-      toast.success('已移除')
-    } catch { toast.error('操作失败') }
+      toast.success('✓')
+    } catch { toast.error('!') }
   }
 
   return (
     <div style={s.wrap}>
       <select style={s.select} value={currentStatus || ''} onChange={e => handleStatus(e.target.value)}>
-        <option value="" disabled>+ 添加到列表</option>
+        <option value="" disabled>{t('sub.addToList')}</option>
         {STATUS_OPTIONS.map(o => (
-          <option key={o.value} value={o.value}>{o.label}</option>
+          <option key={o.value} value={o.value}>{statusLabels[o.value]}</option>
         ))}
       </select>
 
@@ -83,13 +89,13 @@ export default function SubscriptionButton({ anilistId, episodes }) {
           <span style={s.epNum}>{currentEp}</span>
           <button style={s.epBtn} onClick={() => handleEp(currentEp + 1)}>+</button>
           <span style={{ fontSize:12, color:'#64748b', marginLeft:4 }}>
-            {episodes ? `/ ${episodes} 集` : '集'}
+            {episodes ? `/ ${episodes} ${t('sub.epUnit')}` : t('sub.epUnit')}
           </span>
         </div>
       )}
 
       {sub && (
-        <button style={s.removeBtn} onClick={handleRemove}>移除</button>
+        <button style={s.removeBtn} onClick={handleRemove}>{t('sub.remove')}</button>
       )}
     </div>
   )

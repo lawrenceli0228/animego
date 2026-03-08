@@ -11,3 +11,6 @@ export const getAnimeDetail = (anilistId) =>
 
 export const getWeeklySchedule = () =>
   api.get('/anime/schedule');
+
+export const getTorrents = (q) =>
+  api.get('/anime/torrents', { params: { q } });

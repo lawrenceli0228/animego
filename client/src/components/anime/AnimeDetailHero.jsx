@@ -1,21 +1,25 @@
 import { useState } from 'react'
-import { formatScore, formatSeason, stripHtml, truncate } from '../../utils/formatters'
-import { STATUS_OPTIONS } from '../../utils/constants'
+import { formatScore, formatSeason, stripHtml, truncate, pickTitle } from '../../utils/formatters'
+import { useLang } from '../../context/LanguageContext'
 
 const scoreColor = (s) => s >= 75 ? '#22c55e' : s >= 50 ? '#eab308' : '#ef4444'
 
 export default function AnimeDetailHero({ anime }) {
   const [expanded, setExpanded] = useState(false)
+  const { t, lang } = useLang()
   const {
     titleRomaji, titleEnglish, titleNative,
     coverImageUrl, bannerImageUrl, description,
     episodes, status, season, seasonYear,
-    averageScore, genres = [], format
+    averageScore, genres = [], format, bgmId
   } = anime
 
   const desc = stripHtml(description || '')
   const displayDesc = expanded ? desc : truncate(desc, 300)
-  const statusLabel = { RELEASING:'连载中', FINISHED:'已完结', NOT_YET_RELEASED:'未开播', CANCELLED:'已取消' }[status] || status
+  const statusLabel = {
+    RELEASING: t('detail.releasing'), FINISHED: t('detail.finished'),
+    NOT_YET_RELEASED: t('detail.notYetReleased'), CANCELLED: t('detail.cancelled')
+  }[status] || status
 
   return (
     <div>
@@ -46,7 +50,7 @@ export default function AnimeDetailHero({ anime }) {
         {/* Meta */}
         <div style={{ flex:1, paddingTop: bannerImageUrl ? 60 : 0 }}>
           <h1 style={{ fontSize:'clamp(22px,4vw,36px)', color:'#f1f5f9', marginBottom:4 }}>
-            {titleEnglish || titleRomaji}
+            {pickTitle(anime, lang)}
           </h1>
           {titleNative && <p style={{ color:'#94a3b8', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
 
@@ -63,11 +67,29 @@ export default function AnimeDetailHero({ anime }) {
             {status && <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(6,182,212,0.1)',
               color:'#22d3ee', fontSize:13, border:'1px solid rgba(6,182,212,0.3)' }}>{statusLabel}</span>}
             {episodes && <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(148,163,184,0.08)',
-              color:'#94a3b8', fontSize:13 }}>{episodes} 集</span>}
+              color:'#94a3b8', fontSize:13 }}>{episodes} {t('detail.epUnit')}</span>}
             {season && seasonYear && <span style={{ padding:'4px 12px', borderRadius:20,
               background:'rgba(148,163,184,0.08)', color:'#94a3b8', fontSize:13 }}>
               {formatSeason(season, seasonYear)}
             </span>}
+            {bgmId && (
+              <a
+                href={`https://bgm.tv/subject/${bgmId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  padding:'4px 12px', borderRadius:20,
+                  background:'rgba(239,68,68,0.12)', color:'#f87171', fontSize:13,
+                  border:'1px solid rgba(239,68,68,0.3)', textDecoration:'none',
+                  display:'inline-flex', alignItems:'center', gap:4, fontWeight:500
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background='rgba(239,68,68,0.22)'; e.currentTarget.style.borderColor='rgba(239,68,68,0.5)' }}
+                onMouseLeave={e => { e.currentTarget.style.background='rgba(239,68,68,0.12)'; e.currentTarget.style.borderColor='rgba(239,68,68,0.3)' }}
+              >
+                <span style={{ fontSize:10, opacity:0.8 }}>▶</span>
+                {t('detail.viewOnBgm')}
+              </a>
+            )}
           </div>
 
           {/* Genres */}
@@ -87,7 +109,7 @@ export default function AnimeDetailHero({ anime }) {
                 <button onClick={() => setExpanded(!expanded)}
                   style={{ color:'#7c3aed', fontSize:13, fontWeight:600, marginTop:8, cursor:'pointer',
                     background:'none', border:'none', padding:0 }}>
-                  {expanded ? '收起' : '展开更多'}
+                  {expanded ? t('detail.collapse') : t('detail.readMore')}
                 </button>
               )}
             </div>

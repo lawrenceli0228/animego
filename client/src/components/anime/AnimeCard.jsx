@@ -1,10 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { formatScore } from '../../utils/formatters'
+import { formatScore, pickTitle } from '../../utils/formatters'
+import { useLang } from '../../context/LanguageContext'
 
 const scoreColor = (s) => s >= 75 ? '#22c55e' : s >= 50 ? '#eab308' : '#ef4444'
 
 export default function AnimeCard({ anime }) {
   const navigate = useNavigate()
+  const { lang } = useLang()
   const { anilistId, titleRomaji, titleEnglish, coverImageUrl, averageScore, genres = [], format } = anime
 
   return (
@@ -63,7 +65,7 @@ export default function AnimeCard({ anime }) {
         display:'flex', flexDirection:'column', justifyContent:'flex-end', padding:12
       }}>
         <p style={{ fontFamily:"'Sora',sans-serif", fontSize:12, fontWeight:600, color:'#f1f5f9', marginBottom:6, lineHeight:1.3 }}>
-          {titleEnglish || titleRomaji}
+          {pickTitle(anime, lang)}
         </p>
         <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
           {genres.slice(0,2).map(g => (
