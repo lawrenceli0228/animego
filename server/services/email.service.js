@@ -1,14 +1,6 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-const transporter = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST,
-  port:   parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_PORT === '465',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 /**
  * Send password reset email
@@ -19,8 +11,8 @@ exports.sendPasswordResetEmail = async (to, token) => {
   const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
   const resetUrl = `${clientOrigin}/reset-password/${token}`;
 
-  await transporter.sendMail({
-    from: `"AnimeGo" <${process.env.SMTP_USER}>`,
+  await resend.emails.send({
+    from: 'AnimeGo <noreply@animego.app>',
     to,
     subject: '【AnimeGo】重置你的密码',
     html: `
