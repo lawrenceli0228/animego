@@ -5,7 +5,10 @@ let accessToken = null;
 export const setAccessToken = (token) => { accessToken = token; };
 export const getAccessToken = () => accessToken;
 
-const api = axios.create({ baseURL: '/api', withCredentials: true });
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  withCredentials: true,
+});
 
 // Inject access token on every request
 api.interceptors.request.use((config) => {
@@ -50,7 +53,8 @@ api.interceptors.response.use(
 
     try {
       // Use plain axios (no interceptor) to avoid recursive loop
-      const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
+      const refreshBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      const { data } = await axios.post(`${refreshBase}/auth/refresh`, {}, { withCredentials: true });
       const newToken = data.data.accessToken;
       setAccessToken(newToken);
       processQueue(null, newToken);

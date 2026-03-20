@@ -17,9 +17,11 @@ const signTokens = (userId, username) => {
 };
 
 const setRefreshCookie = (res, token) => {
+  const isProd = process.env.NODE_ENV === 'production';
   res.cookie('refreshToken', token, {
     httpOnly: true,
-    sameSite: 'strict',
+    sameSite: isProd ? 'none' : 'strict',
+    secure: isProd,
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   });
 };
