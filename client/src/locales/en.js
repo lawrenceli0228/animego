@@ -51,7 +51,23 @@ const en = {
     email: 'Email', password: 'Password',
     submit: 'Login', submitting: 'Logging in...',
     noAccount: "Don't have an account? ", registerLink: 'Sign Up',
+    forgotPassword: 'Forgot password?',
     success: 'Logged in!', fail: 'Login failed',
+  },
+  forgotPassword: {
+    title: 'Reset Password', subtitle: "Enter your email and we'll send a reset link",
+    email: 'Email', submit: 'Send Reset Link', submitting: 'Sending...',
+    success: 'Reset link sent! Check your inbox (including spam folder)',
+    backToLogin: 'Back to Login',
+  },
+  resetPassword: {
+    title: 'Set New Password', subtitle: 'Enter your new password below',
+    password: 'New Password (min. 6 chars)', confirm: 'Confirm New Password',
+    submit: 'Reset Password', submitting: 'Resetting...',
+    mismatch: 'Passwords do not match',
+    success: 'Password reset! Please log in',
+    invalidToken: 'Link is invalid or expired. Please request a new one.',
+    backToLogin: 'Back to Login',
   },
   // Register
   register: {

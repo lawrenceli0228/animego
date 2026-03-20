@@ -51,7 +51,23 @@ const zh = {
     email: '邮箱', password: '密码',
     submit: '登录', submitting: '登录中...',
     noAccount: '还没有账号？', registerLink: '立即注册',
+    forgotPassword: '忘记密码？',
     success: '登录成功！', fail: '登录失败',
+  },
+  forgotPassword: {
+    title: '重置密码', subtitle: '输入注册邮箱，我们将发送重置链接',
+    email: '邮箱', submit: '发送重置链接', submitting: '发送中...',
+    success: '重置链接已发送，请查收邮件（包括垃圾邮件）',
+    backToLogin: '返回登录',
+  },
+  resetPassword: {
+    title: '设置新密码', subtitle: '请输入你的新密码',
+    password: '新密码（至少 6 位）', confirm: '确认新密码',
+    submit: '确认重置', submitting: '重置中...',
+    mismatch: '两次密码不一致',
+    success: '密码已重置，请登录',
+    invalidToken: '链接无效或已过期，请重新申请',
+    backToLogin: '返回登录',
   },
   // Register
   register: {

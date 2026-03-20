@@ -16,10 +16,12 @@ const loginRules = [
   body('password').notEmpty().withMessage('密码不能为空')
 ];
 
-router.post('/register', authLimiter, registerRules, ctrl.register);
-router.post('/login',    authLimiter, loginRules,    ctrl.login);
-router.post('/refresh',  ctrl.refresh);
-router.post('/logout',   authenticateToken, ctrl.logout);
-router.get('/me',        authenticateToken, ctrl.me);
+router.post('/register',                authLimiter, registerRules, ctrl.register);
+router.post('/login',                   authLimiter, loginRules,    ctrl.login);
+router.post('/refresh',                 ctrl.refresh);
+router.post('/logout',                  authenticateToken, ctrl.logout);
+router.get('/me',                       authenticateToken, ctrl.me);
+router.post('/forgot-password',         authLimiter, ctrl.forgotPassword);
+router.post('/reset-password/:token',   authLimiter, ctrl.resetPassword);
 
 module.exports = router;

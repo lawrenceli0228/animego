@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
+const { sendPasswordResetEmail } = require('../services/email.service');
 
 const signTokens = (userId, username) => {
   const accessToken = jwt.sign(
@@ -112,5 +114,56 @@ exports.me = async (req, res, next) => {
     const user = await User.findById(req.user.userId);
     if (!user) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '用户不存在' } });
     res.json({ data: { user } });
+  } catch (err) { next(err); }
+};
+
+// POST /api/auth/forgot-password
+exports.forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+
+    // Always return success to prevent email enumeration
+    if (!user) {
+      return res.json({ data: { message: '如果该邮箱已注册，你将收到重置链接' } });
+    }
+
+    // Generate secure token
+    const token = crypto.randomBytes(32).toString('hex');
+    user.resetPasswordToken   = token;
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await user.save();
+
+    await sendPasswordResetEmail(user.email, token);
+    res.json({ data: { message: '如果该邮箱已注册，你将收到重置链接' } });
+  } catch (err) { next(err); }
+};
+
+// POST /api/auth/reset-password/:token
+exports.resetPassword = async (req, res, next) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '密码至少 6 位' } });
+    }
+
+    const user = await User.findOne({
+      resetPasswordToken:   token,
+      resetPasswordExpires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: { code: 'INVALID_TOKEN', message: '链接无效或已过期，请重新申请' } });
+    }
+
+    user.password             = password; // pre-save hook will hash it
+    user.resetPasswordToken   = null;
+    user.resetPasswordExpires = null;
+    user.refreshToken         = null;     // invalidate all sessions
+    await user.save();
+
+    res.json({ data: { message: '密码已重置，请重新登录' } });
   } catch (err) { next(err); }
 };
