@@ -1,4 +1,5 @@
 const anilistService = require('../services/anilist.service');
+const { XMLParser } = require('fast-xml-parser');
 
 // GET /api/anime/seasonal?season=WINTER&year=2025&page=1&perPage=20
 exports.getSeasonal = async (req, res, next) => {
@@ -54,22 +55,19 @@ function formatBytes(kb) {
 }
 
 // GET /api/anime/torrents?q=<search query>
-// Data source: Anime Garden API (aggregates Nyaa.si + ACG.rip, pre-parses fansub field)
+// Data source: ACG.RIP RSS feed
 exports.getTorrents = async (req, res, next) => {
   try {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Missing query' } });
 
-    // Use 'search' param for full-text search across title
-    const url = new URL('https://api.animes.garden/resources');
-    url.searchParams.set('page', '1');
-    url.searchParams.set('pageSize', '75');
-    url.searchParams.set('search', q.trim());
+    const url = new URL('https://acg.rip/.xml');
+    url.searchParams.set('term', q.trim());
 
     let resp;
     try {
       resp = await fetch(url.toString(), {
-        headers: { 'User-Agent': 'AnimeGo/1.0 (https://github.com/animego)' },
+        headers: { 'User-Agent': 'AnimeGo/1.0' },
         signal: AbortSignal.timeout(10000),
       });
     } catch {
@@ -77,13 +75,24 @@ exports.getTorrents = async (req, res, next) => {
     }
     if (!resp.ok) return res.json({ data: [] });
 
-    const json = await resp.json();
-    const data = (json.resources ?? []).map(r => ({
-      title:  r.title  ?? '',
-      magnet: r.magnet ?? '',
-      size:   formatBytes(r.size),
-      fansub: r.fansub?.name ?? null,
-      date:   r.createdAt ?? null,
+    const xml = await resp.text();
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+    const parsed = parser.parse(xml);
+    const items = parsed?.rss?.channel?.item ?? [];
+    const list = Array.isArray(items) ? items : [items];
+
+    // Extract fansub name from title brackets e.g. "[SubsPlease]" or "[喵萌奶茶屋]"
+    const parseFansub = (title) => {
+      const match = title.match(/^\[([^\]]+)\]/);
+      return match ? match[1] : null;
+    };
+
+    const data = list.map(item => ({
+      title:  item.title ?? '',
+      magnet: item.enclosure?.['@_url'] ?? item.link ?? '',
+      size:   '',
+      fansub: parseFansub(item.title ?? ''),
+      date:   item.pubDate ?? null,
     }));
 
     res.json({ data });
