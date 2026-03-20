@@ -14,6 +14,9 @@ const commentRoutes      = require('./routes/comment.routes');
 
 const app = express();
 
+// Trust Railway/Vercel reverse proxy
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors({
   origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
