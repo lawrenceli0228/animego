@@ -12,7 +12,7 @@ exports.sendPasswordResetEmail = async (to, token) => {
   const resetUrl = `${clientOrigin}/reset-password/${token}`;
 
   await resend.emails.send({
-    from: 'AnimeGo <noreply@animego.app>',
+    from: 'AnimeGo <onboarding@resend.dev>',
     to,
     subject: '【AnimeGo】重置你的密码',
     html: `
