@@ -1,6 +1,9 @@
 const anilistService = require('../services/anilist.service');
 const { XMLParser } = require('fast-xml-parser');
 
+// In-memory torrent cache (5-min TTL)
+const torrentCache = new Map();
+
 // GET /api/anime/seasonal?season=WINTER&year=2025&page=1&perPage=20
 exports.getSeasonal = async (req, res, next) => {
   try {
@@ -61,6 +64,12 @@ exports.getTorrents = async (req, res, next) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Missing query' } });
 
+    const key = q.trim().toLowerCase();
+    const cached = torrentCache.get(key);
+    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+      return res.json({ data: cached.data });
+    }
+
     const url = new URL('https://acg.rip/.xml');
     url.searchParams.set('term', q.trim());
 
@@ -95,6 +104,7 @@ exports.getTorrents = async (req, res, next) => {
       date:   item.pubDate ?? null,
     }));
 
+    torrentCache.set(key, { data, ts: Date.now() });
     res.json({ data });
   } catch (err) { next(err); }
 };
