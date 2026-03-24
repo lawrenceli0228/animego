@@ -2,6 +2,25 @@
 
 ---
 
+## [0.1.0.0] - 2026-03-25
+
+### Added
+- 弹幕/评论删除：改用内联确认 UI，替换浏览器原生 `window.confirm()` 弹窗
+- 评论发布失败时显示内联错误提示（`postError`）
+- 种子搜索 5 分钟内存缓存（Map + TTL），减少对 acg.rip 的重复请求
+- 测试基础设施：client 使用 Vitest + @testing-library/react（9 个测试），server 使用 Jest + Supertest（6 个测试）
+- `docs/designs/community-platform-v2.md`：社区平台三阶段设计文档（含 CEO / Eng / Design Review 评审结论）
+- 版本追踪：创建 `VERSION` 文件（`0.1.0.0`）
+
+### Changed
+- 种子数据源：从 Anime Garden 切换至 acg.rip RSS（`anime.controller.js`）
+
+### Removed
+- `client/src/utils/constants.js` 中的 `SEASON_LABELS` 对象（无消费者）
+- `client/src/components/subscription/StatusBadge.jsx`（未被使用）
+
+---
+
 ## 2026-03-07
 
 ### 18:26 · 初始化项目
