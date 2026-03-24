@@ -2,7 +2,7 @@
 
 一个全栈动漫浏览与追番网站。访客可浏览所有番剧、查看每周放送表、搜索磁力链接；登录用户可追番、记录观看进度、参与剧集评论。
 
-番剧数据来自 **AniList GraphQL API**（免费，无需 Key），中文标题由 **Bangumi API** 补充，磁力资源聚合自 **Anime Garden**（Nyaa.si + ACG.rip）。
+番剧数据来自 **AniList GraphQL API**（免费，无需 Key），中文标题由 **Bangumi API** 补充，磁力资源聚合自 **ACG.rip RSS**。
 
 ---
 
