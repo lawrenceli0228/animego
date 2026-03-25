@@ -2,6 +2,27 @@
 
 ---
 
+## [0.1.3.0] - 2026-03-25
+
+### Added
+- **社区 Phase 3：实时弹幕** — WebSocket（socket.io）弹幕系统，按番剧+剧集隔离房间
+- `Danmaku` model：`{ anilistId, episode, userId, username, content, liveEndsAt }`，含 `(anilistId, episode, createdAt)` 复合索引
+- `socketAuth` 中间件：JWT Handshake 验证，连接时附加 `socket.user`
+- `danmaku.handler.js`：`danmaku:join/leave/send` 事件处理，1条/5秒用户级内存限流，2小时首播窗口（`liveEndsAt`）
+- `GET /api/danmaku/:anilistId/:episode`：HTTP 历史弹幕接口，返回弹幕列表 + `liveEndsAt`
+- `DanmakuOverlay` 组件：4 条泳道飞行弹幕，CSS `right→left` 动画，自动清理已播完元素
+- `DanmakuInput` 组件：50字上限，字符计数器，WebSocket 连接状态指示灯（绿/灰）
+- `DanmakuSection` 组件：HTTP 历史 + 实时消息合并去重，LIVE 绿色徽章，首播窗口关闭后显示只读提示
+- `useDanmaku` hook：`useDanmakuHistory`（TanStack Query）+ `useDanmakuSocket`（socket.io-client）
+- i18n：新增 `danmaku.*` 键组（中英文）
+- `server/index.js`：改用 `http.createServer` + socket.io 绑定同端口
+- `EpisodeList`：剧集展开面板顶部插入 `DanmakuSection`，评论区保留在下方
+
+### Changed
+- `server/index.js`：`app.listen` → `http.createServer(app)` + `server.listen`
+
+---
+
 ## [0.1.2.0] - 2026-03-25
 
 ### Added
