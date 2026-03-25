@@ -2,6 +2,29 @@
 
 ---
 
+## [0.1.2.0] - 2026-03-25
+
+### Added
+- **社区 Phase 2：关注系统** — `POST/DELETE /api/users/:username/follow`，单向关注模型，`Follow` 集合含 `(followerId, followeeId)` 唯一索引
+- **公开个人主页** — `GET /api/users/:username`，含追番列表（按状态分组）、粉丝/关注数、`isFollowing` 字段（需 JWT，可选）
+- **关注者/关注列表** — `GET /api/users/:username/followers` 与 `/following`
+- **好友动态 Feed** — `GET /api/feed`，返回已关注用户近 40 条追番动态，按更新时间倒序
+- `FollowButton` 组件：关注/取消关注切换，未登录重定向到 `/login`，自身主页隐藏
+- `ActivityFeed` 组件：首页好友动态列表，含时间相对显示（timeAgo）
+- `UserProfilePage` — `/u/:username` 公开主页，含渐变头像、粉丝/关注跳转、分享按钮、追番列表分 Tab 展示
+- 分享按钮：`AnimeDetailPage` 和 `UserProfilePage` 均集成 `navigator.share()` + 剪贴板回退
+- `optionalAuth` 中间件：有效 JWT 附加 `req.user`，无 token 静默跳过
+- i18n：新增 `social.*` 键组（中英文），含 `follow`、`followers`、`feedLabel`、`action_*` 等
+- `client/src/hooks/useSocial.js`：`useUserProfile`、`useFollow`（TanStack Query mutation + cache invalidation）、`useFeed`
+- `client/src/api/social.api.js`：对应 REST 封装
+
+### Changed
+- 首页布局：在 `ContinueWatching` 与 `WeeklySchedule` 之间插入 `ActivityFeed`
+- `App.jsx`：注册 `/u/:username` 路由指向 `UserProfilePage`
+- `server/index.js`：注册 `/api/users` 路由与 `/api/feed` 端点
+
+---
+
 ## [0.1.1.0] - 2026-03-25
 
 ### Added
