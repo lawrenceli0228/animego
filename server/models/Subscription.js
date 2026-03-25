@@ -15,5 +15,6 @@ const subscriptionSchema = new mongoose.Schema({
 // One subscription per user per anime
 subscriptionSchema.index({ userId: 1, anilistId: 1 }, { unique: true });
 subscriptionSchema.index({ userId: 1, status: 1 });
+subscriptionSchema.index({ anilistId: 1 });  // for trending aggregate
 
 module.exports = mongoose.model('Subscription', subscriptionSchema);
