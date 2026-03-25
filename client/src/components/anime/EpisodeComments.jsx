@@ -8,9 +8,10 @@ export default function EpisodeComments({ anilistId, episode }) {
   const { user } = useAuth()
   const { t } = useLang()
   const [text, setText] = useState('')
+  const [confirmId, setConfirmId] = useState(null)
 
   const { data: comments = [], isLoading } = useComments(anilistId, episode)
-  const { mutate: addComment, isPending: isPosting } = useAddComment(anilistId, episode)
+  const { mutate: addComment, isPending: isPosting, isError: postError } = useAddComment(anilistId, episode)
   const { mutate: deleteComment } = useDeleteComment(anilistId, episode)
 
   function handlePost() {
@@ -38,13 +39,16 @@ export default function EpisodeComments({ anilistId, episode }) {
           />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
             <span style={{ fontSize: 11, color: text.length > 480 ? '#ef4444' : '#475569' }}>{text.length}/500</span>
-            <button
-              onClick={handlePost}
-              disabled={isPosting || !text.trim()}
-              style={{ padding: '8px 20px', borderRadius: 8, border: 'none', cursor: isPosting || !text.trim() ? 'default' : 'pointer', background: 'linear-gradient(135deg,#7c3aed,#06b6d4)', color: '#fff', fontWeight: 700, fontSize: 13, opacity: isPosting || !text.trim() ? 0.5 : 1, transition: 'opacity 0.2s' }}
-            >
-              {isPosting ? t('comment.posting') : t('comment.post')}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {postError && <span style={{ fontSize: 11, color: '#ef4444' }}>发布失败，请重试</span>}
+              <button
+                onClick={handlePost}
+                disabled={isPosting || !text.trim()}
+                style={{ padding: '8px 20px', borderRadius: 8, border: 'none', cursor: isPosting || !text.trim() ? 'default' : 'pointer', background: 'linear-gradient(135deg,#7c3aed,#06b6d4)', color: '#fff', fontWeight: 700, fontSize: 13, opacity: isPosting || !text.trim() ? 0.5 : 1, transition: 'opacity 0.2s' }}
+              >
+                {isPosting ? t('comment.posting') : t('comment.post')}
+              </button>
+            </div>
           </div>
         </div>
       ) : (
@@ -71,14 +75,25 @@ export default function EpisodeComments({ anilistId, episode }) {
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#a78bfa' }}>{c.username}</span>
                   <span style={{ fontSize: 11, color: '#475569' }}>{new Date(c.createdAt).toLocaleDateString()}</span>
                   {user && String(user._id) === String(c.userId) && (
-                    <button
-                      onClick={() => { if (window.confirm(t('comment.deleteConfirm'))) deleteComment(c._id) }}
-                      style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 12, padding: '0 4px', transition: 'color 0.15s' }}
-                      onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-                      onMouseLeave={e => e.currentTarget.style.color = '#475569'}
-                    >
-                      {t('comment.delete')}
-                    </button>
+                    confirmId === c._id ? (
+                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button
+                          onClick={() => { deleteComment(c._id); setConfirmId(null) }}
+                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 12, padding: '0 4px', fontWeight: 600 }}
+                        >{t('comment.deleteConfirm')}</button>
+                        <button
+                          onClick={() => setConfirmId(null)}
+                          style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 12, padding: '0 4px' }}
+                        >取消</button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmId(c._id)}
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 12, padding: '0 4px', transition: 'color 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#475569'}
+                      >{t('comment.delete')}</button>
+                    )
                   )}
                 </div>
                 <p style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.65, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{c.content}</p>

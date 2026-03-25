@@ -17,4 +17,15 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
-module.exports = { authenticateToken };
+// Attaches req.user if valid token present, otherwise continues without error
+const optionalAuth = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return next();
+  try {
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (_) { /* ignore invalid token */ }
+  next();
+};
+
+module.exports = { authenticateToken, optionalAuth };

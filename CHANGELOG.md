@@ -2,6 +2,66 @@
 
 ---
 
+## [0.1.2.0] - 2026-03-25
+
+### Added
+- **社区 Phase 2：关注系统** — `POST/DELETE /api/users/:username/follow`，单向关注模型，`Follow` 集合含 `(followerId, followeeId)` 唯一索引
+- **公开个人主页** — `GET /api/users/:username`，含追番列表（按状态分组）、粉丝/关注数、`isFollowing` 字段（需 JWT，可选）
+- **关注者/关注列表** — `GET /api/users/:username/followers` 与 `/following`
+- **好友动态 Feed** — `GET /api/feed`，返回已关注用户近 40 条追番动态，按更新时间倒序
+- `FollowButton` 组件：关注/取消关注切换，未登录重定向到 `/login`，自身主页隐藏
+- `ActivityFeed` 组件：首页好友动态列表，含时间相对显示（timeAgo）
+- `UserProfilePage` — `/u/:username` 公开主页，含渐变头像、粉丝/关注跳转、分享按钮、追番列表分 Tab 展示
+- 分享按钮：`AnimeDetailPage` 和 `UserProfilePage` 均集成 `navigator.share()` + 剪贴板回退
+- `optionalAuth` 中间件：有效 JWT 附加 `req.user`，无 token 静默跳过
+- i18n：新增 `social.*` 键组（中英文），含 `follow`、`followers`、`feedLabel`、`action_*` 等
+- `client/src/hooks/useSocial.js`：`useUserProfile`、`useFollow`（TanStack Query mutation + cache invalidation）、`useFeed`
+- `client/src/api/social.api.js`：对应 REST 封装
+
+### Changed
+- 首页布局：在 `ContinueWatching` 与 `WeeklySchedule` 之间插入 `ActivityFeed`
+- `App.jsx`：注册 `/u/:username` 路由指向 `UserProfilePage`
+- `server/index.js`：注册 `/api/users` 路由与 `/api/feed` 端点
+
+---
+
+## [0.1.1.0] - 2026-03-25
+
+### Added
+- **社区 Phase 1：热门排行榜** — `GET /api/anime/trending`，按订阅数聚合排名，1 小时内存缓存（TTL），最多返回 20 条
+- **社区 Phase 1：在看用户** — `GET /api/anime/:anilistId/watchers`，返回正在观看的用户头像列表及总人数
+- `WatchersAvatarList` 组件：彩色首字母圆形头像 + "+N 人" 溢出文本，展示在番剧详情页订阅按钮下方
+- `TrendingSection` 组件：首页水平滚动热门卡片，含 shimmer 骨架屏加载态
+- `AnimeCard` 支持 `rank` 和 `watcherCount` props：显示 `#N` 排名徽章和 👥 观看人数徽章
+- i18n：新增 `home.trendingLabel`、`home.trendingTitle`、`anime.watchers`、`anime.watchersMore`（中英文）
+- `Subscription` 模型新增 `anilistId` 索引（优化 trending 聚合查询）
+- 服务端测试：新增 `getTrending` 和 `getWatchers` 的 6 个 Jest+Supertest 单元测试（覆盖 happy path、参数校验、边界情况）
+
+### Changed
+- 首页布局：在 `ContinueWatching` 上方插入 `TrendingSection`
+- 番剧详情页：在 `SubscriptionButton` 下方插入 `WatchersAvatarList`
+
+---
+
+## [0.1.0.0] - 2026-03-25
+
+### Added
+- 弹幕/评论删除：改用内联确认 UI，替换浏览器原生 `window.confirm()` 弹窗
+- 评论发布失败时显示内联错误提示（`postError`）
+- 种子搜索 5 分钟内存缓存（Map + TTL），减少对 acg.rip 的重复请求
+- 测试基础设施：client 使用 Vitest + @testing-library/react（9 个测试），server 使用 Jest + Supertest（6 个测试）
+- `docs/designs/community-platform-v2.md`：社区平台三阶段设计文档（含 CEO / Eng / Design Review 评审结论）
+- 版本追踪：创建 `VERSION` 文件（`0.1.0.0`）
+
+### Changed
+- 种子数据源：从 Anime Garden 切换至 acg.rip RSS（`anime.controller.js`）
+
+### Removed
+- `client/src/utils/constants.js` 中的 `SEASON_LABELS` 对象（无消费者）
+- `client/src/components/subscription/StatusBadge.jsx`（未被使用）
+
+---
+
 ## 2026-03-07
 
 ### 18:26 · 初始化项目

@@ -15,6 +15,11 @@ const en = {
     scheduleLabel: 'SCHEDULE', thisWeek: 'This Week',
     continueLabel: 'Continue Watching', watchingTitle: 'Currently Watching',
     today: 'Today', noUpdates: 'No episodes today',
+    trendingLabel: 'TRENDING', trendingTitle: 'Most Watched',
+  },
+  // Anime watchers
+  anime: {
+    watchers: 'watching', watchersMore: '+',
   },
   // Anime detail
   detail: {
@@ -93,6 +98,19 @@ const en = {
     noResults: 'No results found',
     loading: 'Searching...', placeholder: 'Search query (romaji - episode)',
     groupAll: 'All',
+  },
+  // Social
+  social: {
+    follow: 'Follow', unfollow: 'Following',
+    followers: 'Followers', following: 'Following',
+    share: 'Share',
+    feedLabel: 'ACTIVITY', feedTitle: "Friends' Updates",
+    userNotFound: 'User not found',
+    emptyList: 'No anime tracked yet',
+    action_watching: 'is watching',
+    action_completed: 'completed',
+    action_plan_to_watch: 'wants to watch',
+    action_dropped: 'dropped',
   },
   // Comments
   comment: {

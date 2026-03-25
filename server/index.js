@@ -11,6 +11,9 @@ const authRoutes         = require('./routes/auth.routes');
 const animeRoutes        = require('./routes/anime.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const commentRoutes      = require('./routes/comment.routes');
+const userRoutes         = require('./routes/user.routes');
+const { authenticateToken } = require('./middleware/auth.middleware');
+const profileCtrl        = require('./controllers/profile.controller');
 
 const app = express();
 
@@ -31,6 +34,8 @@ app.use('/api/auth',          authRoutes);
 app.use('/api/anime',         animeRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/comments',      commentRoutes);
+app.use('/api/users',         userRoutes);
+app.get('/api/feed',          authenticateToken, profileCtrl.getFeed);
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));

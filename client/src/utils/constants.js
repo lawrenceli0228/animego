@@ -1,12 +1,5 @@
 export const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
 
-export const SEASON_LABELS = {
-  WINTER: '冬季 ❄️',
-  SPRING: '春季 🌸',
-  SUMMER: '夏季 ☀️',
-  FALL:   '秋季 🍂'
-};
-
 export const STATUS_OPTIONS = [
   { value: 'watching',      label: '在看',   color: '#3b82f6' },
   { value: 'completed',     label: '看完',   color: '#22c55e' },

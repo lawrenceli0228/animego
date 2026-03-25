@@ -1,5 +1,73 @@
 const anilistService = require('../services/anilist.service');
 const { XMLParser } = require('fast-xml-parser');
+const Subscription = require('../models/Subscription');
+const AnimeCache   = require('../models/AnimeCache');
+
+// In-memory torrent cache (5-min TTL)
+const torrentCache = new Map();
+
+// In-memory trending cache (1h TTL)
+const trendingCache = { data: null, ts: 0 };
+
+// GET /api/anime/trending?limit=10&refresh=true
+exports.getTrending = async (req, res, next) => {
+  try {
+    const { limit = 10, refresh } = req.query;
+    const limitNum = Math.min(Number(limit) || 10, 20);
+
+    if (!refresh && trendingCache.data && Date.now() - trendingCache.ts < 60 * 60 * 1000) {
+      return res.json({ data: trendingCache.data.slice(0, limitNum) });
+    }
+
+    const agg = await Subscription.aggregate([
+      { $group: { _id: '$anilistId', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 20 }
+    ]);
+
+    const anilistIds = agg.map(r => r._id);
+    const animes = await AnimeCache.find({ anilistId: { $in: anilistIds } });
+    const animeMap = Object.fromEntries(animes.map(a => [a.anilistId, a]));
+
+    const data = agg
+      .filter(r => animeMap[r._id])
+      .map((r, i) => ({
+        rank: i + 1,
+        watcherCount: r.count,
+        ...animeMap[r._id].toObject()
+      }));
+
+    trendingCache.data = data;
+    trendingCache.ts = Date.now();
+
+    res.json({ data: data.slice(0, limitNum) });
+  } catch (err) { next(err); }
+};
+
+// GET /api/anime/:anilistId/watchers?limit=5
+exports.getWatchers = async (req, res, next) => {
+  try {
+    const { anilistId } = req.params;
+    if (isNaN(anilistId)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '无效的番剧 ID' } });
+    }
+    const limitNum = Math.min(Number(req.query.limit) || 5, 20);
+    const id = Number(anilistId);
+
+    const [subs, total] = await Promise.all([
+      Subscription.find({ anilistId: id, status: 'watching' })
+        .populate('userId', 'username')
+        .limit(limitNum),
+      Subscription.countDocuments({ anilistId: id, status: 'watching' })
+    ]);
+
+    const data = subs
+      .filter(s => s.userId != null)
+      .map(s => ({ username: s.userId.username }));
+
+    res.json({ data, total });
+  } catch (err) { next(err); }
+};
 
 // GET /api/anime/seasonal?season=WINTER&year=2025&page=1&perPage=20
 exports.getSeasonal = async (req, res, next) => {
@@ -61,6 +129,12 @@ exports.getTorrents = async (req, res, next) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Missing query' } });
 
+    const key = q.trim().toLowerCase();
+    const cached = torrentCache.get(key);
+    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+      return res.json({ data: cached.data });
+    }
+
     const url = new URL('https://acg.rip/.xml');
     url.searchParams.set('term', q.trim());
 
@@ -95,6 +169,7 @@ exports.getTorrents = async (req, res, next) => {
       date:   item.pubDate ?? null,
     }));
 
+    torrentCache.set(key, { data, ts: Date.now() });
     res.json({ data });
   } catch (err) { next(err); }
 };

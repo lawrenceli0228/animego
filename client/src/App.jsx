@@ -8,6 +8,7 @@ import SearchPage from './pages/SearchPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import ProfilePage from './pages/ProfilePage'
+import UserProfilePage from './pages/UserProfilePage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/forgot-password"         element={<ForgotPasswordPage />} />
           <Route path="/reset-password/:token"   element={<ResetPasswordPage />} />
           <Route path="/profile"                 element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          <Route path="/u/:username"             element={<UserProfilePage />} />
         </Route>
       </Routes>
     </BrowserRouter>

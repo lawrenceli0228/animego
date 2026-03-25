@@ -2,7 +2,7 @@
 
 一个全栈动漫浏览与追番网站。访客可浏览所有番剧、查看每周放送表、搜索磁力链接；登录用户可追番、记录观看进度、参与剧集评论。
 
-番剧数据来自 **AniList GraphQL API**（免费，无需 Key），中文标题由 **Bangumi API** 补充，磁力资源聚合自 **Anime Garden**（Nyaa.si + ACG.rip）。
+番剧数据来自 **AniList GraphQL API**（免费，无需 Key），中文标题由 **Bangumi API** 补充，磁力资源聚合自 **ACG.rip RSS**。
 
 ---
 
@@ -14,7 +14,7 @@
 | 后端 | Node.js + Express |
 | 数据库 | MongoDB + Mongoose |
 | 认证 | JWT（Access Token 15m + Refresh Token 7d）+ bcrypt |
-| 外部 API | AniList GraphQL、Bangumi API、Anime Garden |
+| 外部 API | AniList GraphQL、Bangumi API、ACG.rip RSS |
 | 样式 | 纯 CSS，深色影院风格（深海蓝 `#0a0e1a` + 紫色 `#7c3aed` + 青色 `#06b6d4`）|
 
 > 数据库推荐使用 **MongoDB Atlas** 免费套餐（512MB），无需本地安装。
@@ -29,7 +29,7 @@
 - **季度浏览**：按年份 + 季度筛选番剧，支持分页
 - **番剧详情**：横幅、评分、简介、剧集数、Bangumi 中文标题及链接
 - **剧集列表**：展示全部剧集，支持磁力搜索
-- **磁力资源**：通过 Anime Garden 聚合搜索 Nyaa.si 和 ACG.rip 种子，支持字幕组筛选
+- **磁力资源**：通过 ACG.rip RSS 聚合搜索种子，支持字幕组筛选，5 分钟内存缓存
 - **搜索**：全文搜索 + 类型多选过滤
 - **中英文切换**：UI 全面国际化，偏好本地持久化
 
@@ -38,6 +38,16 @@
 - **观看进度**：记录当前观看至第几集，剧集列表高亮已看内容
 - **继续观看**：首页横向滚动卡片，展示正在追的番剧及进度条
 - **剧集评论**：按剧集发表评论，支持删除自己的评论
+
+### 社区功能（Phase 1）
+- **热门排行**：首页横向滚动热门番剧（按订阅数聚合排名，1h 缓存）
+- **在看用户**：番剧详情页展示当前在看该番的用户头像列表及总人数
+
+### 社区功能（Phase 2）
+- **关注系统**：单向关注模型，可关注 / 取消关注其他用户
+- **公开主页** `/u/:username`：任意用户均可访问他人追番列表（按状态分组），含粉丝 / 关注数
+- **好友动态**：首页展示已关注用户的最新追番更新（含时间相对显示）
+- **分享按钮**：番剧详情页与个人主页均可一键分享链接（Web Share API + 剪贴板回退）
 
 ---
 
@@ -56,29 +66,32 @@ animego/
 │       │   ├── axiosClient.js        # Bearer Token 注入 + 401 自动刷新 + auth:expired 事件
 │       │   ├── auth.api.js
 │       │   ├── anime.api.js
-│       │   └── comment.api.js
+│       │   ├── comment.api.js
+│       │   └── social.api.js         # follow/unfollow/profile/feed
 │       ├── context/
 │       │   ├── AuthContext.jsx       # 用户状态、会话持久化
 │       │   └── LanguageContext.jsx   # i18n：zh/en 切换，localStorage 持久化
 │       ├── hooks/
-│       │   ├── useAnime.js           # useSeasonal, useSearch, useAnimeDetail, useSchedule, useTorrents
+│       │   ├── useAnime.js           # useSeasonal, useSearch, useAnimeDetail, useSchedule, useTorrents, useTrending, useWatchers
 │       │   ├── useSubscription.js
-│       │   └── useComment.js
+│       │   ├── useComment.js
+│       │   └── useSocial.js          # useUserProfile, useFollow, useFeed
 │       ├── locales/
 │       │   ├── zh.js                 # 中文翻译字典
 │       │   └── en.js                 # 英文翻译字典
 │       ├── pages/
-│       │   ├── HomePage.jsx          # 轮播 + 每周放送 + 继续观看
+│       │   ├── HomePage.jsx          # 轮播 + 热门排行 + 继续观看 + 好友动态 + 每周放送
 │       │   ├── SeasonPage.jsx        # 季度浏览 + 分页
-│       │   ├── AnimeDetailPage.jsx   # 详情 + 剧集列表 + 评论
+│       │   ├── AnimeDetailPage.jsx   # 详情 + 剧集列表 + 评论 + 分享按钮
 │       │   ├── SearchPage.jsx
 │       │   ├── LoginPage.jsx
 │       │   ├── RegisterPage.jsx
-│       │   └── ProfilePage.jsx       # 我的追番（分状态标签页）
+│       │   ├── ProfilePage.jsx       # 我的追番（分状态标签页）
+│       │   └── UserProfilePage.jsx   # 公开主页 /u/:username（Phase 2）
 │       ├── components/
 │       │   ├── layout/               # Navbar, Footer, Layout
 │       │   ├── anime/
-│       │   │   ├── AnimeCard.jsx
+│       │   │   ├── AnimeCard.jsx     # rank + watcherCount badge props
 │       │   │   ├── AnimeGrid.jsx
 │       │   │   ├── AnimeDetailHero.jsx
 │       │   │   ├── HeroCarousel.jsx  # 首页英雄轮播
@@ -86,8 +99,12 @@ animego/
 │       │   │   ├── ContinueWatching.jsx
 │       │   │   ├── EpisodeList.jsx
 │       │   │   ├── EpisodeComments.jsx
+│       │   │   ├── WatchersAvatarList.jsx  # 在看用户头像列表（Phase 1）
 │       │   │   └── TorrentModal.jsx  # 磁力搜索弹窗
-│       │   ├── subscription/         # SubscriptionButton, StatusBadge
+│       │   ├── home/
+│       │   │   └── TrendingSection.jsx     # 热门排行横向滚动（Phase 1）
+│       │   ├── social/               # Phase 2：FollowButton, ActivityFeed
+│       │   ├── subscription/         # SubscriptionButton
 │       │   ├── search/               # SearchBar
 │       │   ├── season/               # SeasonSelector
 │       │   └── common/               # ProtectedRoute, LoadingSpinner, Pagination
@@ -106,8 +123,9 @@ animego/
     │   ├── User.js
     │   ├── AnimeCache.js             # AniList + Bangumi 数据缓存，TTL 24h
     │   ├── Subscription.js           # 追番状态 + 观看进度
-    │   └── EpisodeComment.js
-    ├── routes/ & controllers/        # 路由与控制器
+    │   ├── EpisodeComment.js
+    │   └── Follow.js                 # 关注关系（Phase 2）
+    ├── routes/ & controllers/        # 路由与控制器（含 user.routes.js Phase 2）
     ├── services/
     │   ├── anilist.service.js        # AniList 查询 + MongoDB 缓存 + 缓存预热
     │   ├── bangumi.service.js        # 异步补充中文标题（后台队列，不阻塞主请求）
@@ -157,7 +175,7 @@ animego/
   currentEpisode: Number,
   lastWatchedAt: Date,
 }
-// 索引：{ userId, anilistId }（唯一）
+// 索引：{ userId, anilistId }（唯一）、{ userId, status }、{ anilistId }（trending 聚合）
 
 // EpisodeComment.js
 {
@@ -168,6 +186,14 @@ animego/
   content: String,
 }
 // 索引：{ anilistId, episode }
+
+// Follow.js — Phase 2 关注关系
+{
+  followerId: ObjectId,   // ref: User
+  followeeId: ObjectId,   // ref: User
+  createdAt: Date,
+}
+// 索引：{ followerId, followeeId }（唯一）、{ followeeId }
 ```
 
 ---
@@ -201,7 +227,9 @@ animego/
 | GET | `/anime/seasonal` | `year`, `season`, `page`, `perPage` |
 | GET | `/anime/search` | `q`, `genre`, `page`, `perPage` |
 | GET | `/anime/schedule` | — |
+| GET | `/anime/trending` | `limit`（max 20，1h 缓存）|
 | GET | `/anime/:anilistId` | — |
+| GET | `/anime/:anilistId/watchers` | `limit`（max 20）|
 | GET | `/anime/torrents` | `q`, `episode` |
 
 ### 追番 `/api/subscriptions`（需 JWT）
@@ -220,6 +248,17 @@ animego/
 | GET | `/comments/:anilistId/:episode` | 获取该集评论 |
 | POST | `/comments/:anilistId/:episode` | 发表评论（需 JWT）|
 | DELETE | `/comments/:id` | 删除自己的评论（需 JWT）|
+
+### 社交 `/api/users` + `/api/feed`（Phase 2）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/users/:username` | 公开主页（追番列表 + 关注数；JWT 可选，有则返回 `isFollowing`）|
+| POST | `/users/:username/follow` | 关注（需 JWT）|
+| DELETE | `/users/:username/follow` | 取消关注（需 JWT）|
+| GET | `/users/:username/followers` | 粉丝列表 |
+| GET | `/users/:username/following` | 关注列表 |
+| GET | `/feed` | 好友动态（需 JWT，返回关注用户近 40 条追番更新）|
 
 ---
 
@@ -283,13 +322,14 @@ VITE_API_BASE_URL=
 ## 页面路由
 
 ```
-/              → 首页（轮播 + 每周放送 + 继续观看）
+/              → 首页（轮播 + 热门排行 + 继续观看 + 好友动态 + 每周放送）
 /season        → 季度番剧列表
-/anime/:id     → 番剧详情（剧集 + 评论）
+/anime/:id     → 番剧详情（剧集 + 评论 + 分享按钮）
 /search        → 搜索
 /login         → 登录
 /register      → 注册
 /profile       → 我的追番（需登录）
+/u/:username   → 公开主页（Phase 2）
 ```
 
 ---
