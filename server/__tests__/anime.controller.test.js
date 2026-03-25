@@ -8,12 +8,28 @@ jest.mock('../services/anilist.service', () => ({
   getWeeklySchedule: jest.fn(),
 }))
 
+// Mock Subscription model
+jest.mock('../models/Subscription', () => ({
+  aggregate: jest.fn(),
+  find: jest.fn(),
+  countDocuments: jest.fn(),
+}))
+
+// Mock AnimeCache model
+jest.mock('../models/AnimeCache', () => ({
+  find: jest.fn(),
+}))
+
 const anilistService = require('../services/anilist.service')
+const Subscription = require('../models/Subscription')
+const AnimeCache = require('../models/AnimeCache')
 const animeController = require('../controllers/anime.controller')
 
 function buildApp() {
   const app = express()
   app.use(express.json())
+  app.get('/api/anime/trending', animeController.getTrending)
+  app.get('/api/anime/:anilistId/watchers', animeController.getWatchers)
   app.get('/api/anime/seasonal', animeController.getSeasonal)
   app.get('/api/anime/search', animeController.search)
   app.get('/api/anime/torrents', animeController.getTorrents)
@@ -102,6 +118,101 @@ describe('anime.controller', () => {
       expect(res.status).toBe(200)
       expect(res.body.data).toHaveLength(1)
       expect(res.body.pagination).toBeDefined()
+    })
+  })
+
+  describe('GET /api/anime/trending', () => {
+    beforeEach(() => {
+      // Reset module-level cache between tests by clearing mock state
+      Subscription.aggregate.mockReset()
+      AnimeCache.find.mockReset()
+    })
+
+    it('returns ranked trending anime from aggregate', async () => {
+      Subscription.aggregate.mockResolvedValue([
+        { _id: 101, count: 5 },
+        { _id: 202, count: 3 },
+      ])
+      AnimeCache.find.mockResolvedValue([
+        { anilistId: 101, title: { romaji: 'Anime A' }, toObject: () => ({ anilistId: 101, title: { romaji: 'Anime A' } }) },
+        { anilistId: 202, title: { romaji: 'Anime B' }, toObject: () => ({ anilistId: 202, title: { romaji: 'Anime B' } }) },
+      ])
+
+      // Force cache miss by using refresh=true
+      const res = await request(app).get('/api/anime/trending?refresh=true&limit=10')
+      expect(res.status).toBe(200)
+      expect(res.body.data).toHaveLength(2)
+      expect(res.body.data[0].rank).toBe(1)
+      expect(res.body.data[0].watcherCount).toBe(5)
+      expect(res.body.data[1].rank).toBe(2)
+    })
+
+    it('clamps limit to max 20', async () => {
+      Subscription.aggregate.mockResolvedValue([])
+      AnimeCache.find.mockResolvedValue([])
+
+      const res = await request(app).get('/api/anime/trending?refresh=true&limit=999')
+      expect(res.status).toBe(200)
+      // aggregate is called with $limit: 20
+      expect(Subscription.aggregate).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ $limit: 20 })])
+      )
+    })
+
+    it('filters out animes not in AnimeCache', async () => {
+      Subscription.aggregate.mockResolvedValue([
+        { _id: 101, count: 5 },
+        { _id: 999, count: 3 }, // no matching cache entry
+      ])
+      AnimeCache.find.mockResolvedValue([
+        { anilistId: 101, toObject: () => ({ anilistId: 101 }) },
+      ])
+
+      const res = await request(app).get('/api/anime/trending?refresh=true')
+      expect(res.status).toBe(200)
+      expect(res.body.data).toHaveLength(1)
+      expect(res.body.data[0].anilistId).toBe(101)
+    })
+  })
+
+  describe('GET /api/anime/:anilistId/watchers', () => {
+    it('returns watchers list and total', async () => {
+      Subscription.find.mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([
+          { userId: { username: 'alice' } },
+          { userId: { username: 'bob' } },
+        ]),
+      })
+      Subscription.countDocuments.mockResolvedValue(10)
+
+      const res = await request(app).get('/api/anime/101/watchers')
+      expect(res.status).toBe(200)
+      expect(res.body.data).toHaveLength(2)
+      expect(res.body.data[0].username).toBe('alice')
+      expect(res.body.total).toBe(10)
+    })
+
+    it('returns 400 for non-numeric anilistId', async () => {
+      const res = await request(app).get('/api/anime/abc/watchers')
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('filters out watchers with null userId (deleted users)', async () => {
+      Subscription.find.mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([
+          { userId: { username: 'alice' } },
+          { userId: null }, // deleted user
+        ]),
+      })
+      Subscription.countDocuments.mockResolvedValue(2)
+
+      const res = await request(app).get('/api/anime/101/watchers')
+      expect(res.status).toBe(200)
+      expect(res.body.data).toHaveLength(1)
+      expect(res.body.data[0].username).toBe('alice')
     })
   })
 })
