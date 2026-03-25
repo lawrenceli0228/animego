@@ -43,6 +43,12 @@
 - **热门排行**：首页横向滚动热门番剧（按订阅数聚合排名，1h 缓存）
 - **在看用户**：番剧详情页展示当前在看该番的用户头像列表及总人数
 
+### 社区功能（Phase 2）
+- **关注系统**：单向关注模型，可关注 / 取消关注其他用户
+- **公开主页** `/u/:username`：任意用户均可访问他人追番列表（按状态分组），含粉丝 / 关注数
+- **好友动态**：首页展示已关注用户的最新追番更新（含时间相对显示）
+- **分享按钮**：番剧详情页与个人主页均可一键分享链接（Web Share API + 剪贴板回退）
+
 ---
 
 ## 项目结构
@@ -60,25 +66,28 @@ animego/
 │       │   ├── axiosClient.js        # Bearer Token 注入 + 401 自动刷新 + auth:expired 事件
 │       │   ├── auth.api.js
 │       │   ├── anime.api.js
-│       │   └── comment.api.js
+│       │   ├── comment.api.js
+│       │   └── social.api.js         # follow/unfollow/profile/feed
 │       ├── context/
 │       │   ├── AuthContext.jsx       # 用户状态、会话持久化
 │       │   └── LanguageContext.jsx   # i18n：zh/en 切换，localStorage 持久化
 │       ├── hooks/
 │       │   ├── useAnime.js           # useSeasonal, useSearch, useAnimeDetail, useSchedule, useTorrents, useTrending, useWatchers
 │       │   ├── useSubscription.js
-│       │   └── useComment.js
+│       │   ├── useComment.js
+│       │   └── useSocial.js          # useUserProfile, useFollow, useFeed
 │       ├── locales/
 │       │   ├── zh.js                 # 中文翻译字典
 │       │   └── en.js                 # 英文翻译字典
 │       ├── pages/
-│       │   ├── HomePage.jsx          # 轮播 + 每周放送 + 继续观看
+│       │   ├── HomePage.jsx          # 轮播 + 热门排行 + 继续观看 + 好友动态 + 每周放送
 │       │   ├── SeasonPage.jsx        # 季度浏览 + 分页
-│       │   ├── AnimeDetailPage.jsx   # 详情 + 剧集列表 + 评论
+│       │   ├── AnimeDetailPage.jsx   # 详情 + 剧集列表 + 评论 + 分享按钮
 │       │   ├── SearchPage.jsx
 │       │   ├── LoginPage.jsx
 │       │   ├── RegisterPage.jsx
-│       │   └── ProfilePage.jsx       # 我的追番（分状态标签页）
+│       │   ├── ProfilePage.jsx       # 我的追番（分状态标签页）
+│       │   └── UserProfilePage.jsx   # 公开主页 /u/:username（Phase 2）
 │       ├── components/
 │       │   ├── layout/               # Navbar, Footer, Layout
 │       │   ├── anime/
@@ -94,6 +103,7 @@ animego/
 │       │   │   └── TorrentModal.jsx  # 磁力搜索弹窗
 │       │   ├── home/
 │       │   │   └── TrendingSection.jsx     # 热门排行横向滚动（Phase 1）
+│       │   ├── social/               # Phase 2：FollowButton, ActivityFeed
 │       │   ├── subscription/         # SubscriptionButton
 │       │   ├── search/               # SearchBar
 │       │   ├── season/               # SeasonSelector
@@ -113,8 +123,9 @@ animego/
     │   ├── User.js
     │   ├── AnimeCache.js             # AniList + Bangumi 数据缓存，TTL 24h
     │   ├── Subscription.js           # 追番状态 + 观看进度
-    │   └── EpisodeComment.js
-    ├── routes/ & controllers/        # 路由与控制器
+    │   ├── EpisodeComment.js
+    │   └── Follow.js                 # 关注关系（Phase 2）
+    ├── routes/ & controllers/        # 路由与控制器（含 user.routes.js Phase 2）
     ├── services/
     │   ├── anilist.service.js        # AniList 查询 + MongoDB 缓存 + 缓存预热
     │   ├── bangumi.service.js        # 异步补充中文标题（后台队列，不阻塞主请求）
@@ -175,6 +186,14 @@ animego/
   content: String,
 }
 // 索引：{ anilistId, episode }
+
+// Follow.js — Phase 2 关注关系
+{
+  followerId: ObjectId,   // ref: User
+  followeeId: ObjectId,   // ref: User
+  createdAt: Date,
+}
+// 索引：{ followerId, followeeId }（唯一）、{ followeeId }
 ```
 
 ---
@@ -229,6 +248,17 @@ animego/
 | GET | `/comments/:anilistId/:episode` | 获取该集评论 |
 | POST | `/comments/:anilistId/:episode` | 发表评论（需 JWT）|
 | DELETE | `/comments/:id` | 删除自己的评论（需 JWT）|
+
+### 社交 `/api/users` + `/api/feed`（Phase 2）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/users/:username` | 公开主页（追番列表 + 关注数；JWT 可选，有则返回 `isFollowing`）|
+| POST | `/users/:username/follow` | 关注（需 JWT）|
+| DELETE | `/users/:username/follow` | 取消关注（需 JWT）|
+| GET | `/users/:username/followers` | 粉丝列表 |
+| GET | `/users/:username/following` | 关注列表 |
+| GET | `/feed` | 好友动态（需 JWT，返回关注用户近 40 条追番更新）|
 
 ---
 
@@ -292,13 +322,14 @@ VITE_API_BASE_URL=
 ## 页面路由
 
 ```
-/              → 首页（轮播 + 热门排行 + 继续观看 + 每周放送）
+/              → 首页（轮播 + 热门排行 + 继续观看 + 好友动态 + 每周放送）
 /season        → 季度番剧列表
-/anime/:id     → 番剧详情（剧集 + 评论）
+/anime/:id     → 番剧详情（剧集 + 评论 + 分享按钮）
 /search        → 搜索
 /login         → 登录
 /register      → 注册
 /profile       → 我的追番（需登录）
+/u/:username   → 公开主页（Phase 2）
 ```
 
 ---
