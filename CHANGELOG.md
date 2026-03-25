@@ -2,6 +2,24 @@
 
 ---
 
+## [0.1.1.0] - 2026-03-25
+
+### Added
+- **社区 Phase 1：热门排行榜** — `GET /api/anime/trending`，按订阅数聚合排名，1 小时内存缓存（TTL），最多返回 20 条
+- **社区 Phase 1：在看用户** — `GET /api/anime/:anilistId/watchers`，返回正在观看的用户头像列表及总人数
+- `WatchersAvatarList` 组件：彩色首字母圆形头像 + "+N 人" 溢出文本，展示在番剧详情页订阅按钮下方
+- `TrendingSection` 组件：首页水平滚动热门卡片，含 shimmer 骨架屏加载态
+- `AnimeCard` 支持 `rank` 和 `watcherCount` props：显示 `#N` 排名徽章和 👥 观看人数徽章
+- i18n：新增 `home.trendingLabel`、`home.trendingTitle`、`anime.watchers`、`anime.watchersMore`（中英文）
+- `Subscription` 模型新增 `anilistId` 索引（优化 trending 聚合查询）
+- 服务端测试：新增 `getTrending` 和 `getWatchers` 的 6 个 Jest+Supertest 单元测试（覆盖 happy path、参数校验、边界情况）
+
+### Changed
+- 首页布局：在 `ContinueWatching` 上方插入 `TrendingSection`
+- 番剧详情页：在 `SubscriptionButton` 下方插入 `WatchersAvatarList`
+
+---
+
 ## [0.1.0.0] - 2026-03-25
 
 ### Added
