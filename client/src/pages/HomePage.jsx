@@ -3,6 +3,7 @@ import { useSeasonalAnime } from '../hooks/useAnime'
 import HeroCarousel from '../components/anime/HeroCarousel'
 import TrendingSection from '../components/home/TrendingSection'
 import ContinueWatching from '../components/anime/ContinueWatching'
+import ActivityFeed from '../components/social/ActivityFeed'
 import WeeklySchedule from '../components/anime/WeeklySchedule'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
@@ -29,6 +30,7 @@ export default function HomePage() {
       <div className="container" style={{ paddingTop: 8, paddingBottom: 60 }}>
         <TrendingSection />
         <ContinueWatching />
+        <ActivityFeed />
         <WeeklySchedule />
       </div>
     </div>

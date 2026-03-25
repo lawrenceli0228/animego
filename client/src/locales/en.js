@@ -99,6 +99,19 @@ const en = {
     loading: 'Searching...', placeholder: 'Search query (romaji - episode)',
     groupAll: 'All',
   },
+  // Social
+  social: {
+    follow: 'Follow', unfollow: 'Following',
+    followers: 'Followers', following: 'Following',
+    share: 'Share',
+    feedLabel: 'ACTIVITY', feedTitle: "Friends' Updates",
+    userNotFound: 'User not found',
+    emptyList: 'No anime tracked yet',
+    action_watching: 'is watching',
+    action_completed: 'completed',
+    action_plan_to_watch: 'wants to watch',
+    action_dropped: 'dropped',
+  },
   // Comments
   comment: {
     title: 'Comments', noComments: 'No comments yet. Be the first!',

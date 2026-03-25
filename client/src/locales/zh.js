@@ -99,6 +99,19 @@ const zh = {
     loading: '搜索中...', placeholder: '搜索词（罗马音 - 集数）',
     groupAll: '全部',
   },
+  // Social
+  social: {
+    follow: '关注', unfollow: '已关注',
+    followers: '粉丝', following: '关注',
+    share: '分享',
+    feedLabel: '动态流', feedTitle: '关注的人在追',
+    userNotFound: '用户不存在',
+    emptyList: '该用户还没有追番记录',
+    action_watching: '正在看',
+    action_completed: '看完了',
+    action_plan_to_watch: '想看',
+    action_dropped: '弃坑了',
+  },
   // Comments
   comment: {
     title: '集数评论', noComments: '暂无评论，来说点什么吧',
