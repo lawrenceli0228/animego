@@ -1,4 +1,5 @@
 require('dotenv').config();
+const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -12,10 +13,13 @@ const animeRoutes        = require('./routes/anime.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const commentRoutes      = require('./routes/comment.routes');
 const userRoutes         = require('./routes/user.routes');
+const danmakuRoutes      = require('./routes/danmaku.routes');
 const { authenticateToken } = require('./middleware/auth.middleware');
 const profileCtrl        = require('./controllers/profile.controller');
+const setupSocket        = require('./socket');
 
-const app = express();
+const app    = express();
+const server = http.createServer(app);
 
 // Trust Railway/Vercel reverse proxy
 app.set('trust proxy', 1);
@@ -35,6 +39,7 @@ app.use('/api/anime',         animeRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/comments',      commentRoutes);
 app.use('/api/users',         userRoutes);
+app.use('/api/danmaku',       danmakuRoutes);
 app.get('/api/feed',          authenticateToken, profileCtrl.getFeed);
 
 // Health check
@@ -56,7 +61,9 @@ const PORT = process.env.PORT || 5001;
 (async () => {
   await connectDB();
 
-  app.listen(PORT, () => {
+  setupSocket(server);
+
+  server.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 
     // Pre-populate current season into MongoDB (non-blocking, runs in background)

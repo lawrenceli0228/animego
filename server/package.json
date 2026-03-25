@@ -19,7 +19,8 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.0.3",
     "nodemailer": "^8.0.3",
-    "resend": "^6.9.4"
+    "resend": "^6.9.4",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

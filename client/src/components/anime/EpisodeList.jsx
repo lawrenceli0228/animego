@@ -3,6 +3,7 @@ import { useLang } from '../../context/LanguageContext'
 import { useSubscription } from '../../hooks/useSubscription'
 import TorrentModal from './TorrentModal'
 import EpisodeComments from './EpisodeComments'
+import DanmakuSection from './DanmakuSection'
 
 export default function EpisodeList({ anime }) {
   const { t } = useLang()
@@ -72,6 +73,9 @@ export default function EpisodeList({ anime }) {
 
       {openEp !== null && (
         <div style={{ marginTop: 16, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(148,163,184,0.1)', background: 'rgba(255,255,255,0.02)' }}>
+          <div style={{ padding: '12px 16px' }}>
+            <DanmakuSection anilistId={anime.anilistId} episode={openEp} />
+          </div>
           <EpisodeComments anilistId={anime.anilistId} episode={openEp} />
         </div>
       )}
