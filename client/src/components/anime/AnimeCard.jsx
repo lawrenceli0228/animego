@@ -4,7 +4,7 @@ import { useLang } from '../../context/LanguageContext'
 
 const scoreColor = (s) => s >= 75 ? '#22c55e' : s >= 50 ? '#eab308' : '#ef4444'
 
-export default function AnimeCard({ anime }) {
+export default function AnimeCard({ anime, rank, watcherCount }) {
   const navigate = useNavigate()
   const { lang } = useLang()
   const { anilistId, titleRomaji, titleEnglish, coverImageUrl, averageScore, genres = [], format } = anime
@@ -12,6 +12,10 @@ export default function AnimeCard({ anime }) {
   return (
     <div
       onClick={() => navigate(`/anime/${anilistId}`)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => e.key === 'Enter' && navigate(`/anime/${anilistId}`)}
+      aria-label={rank ? `排名第${rank}` : titleRomaji}
       style={{
         position: 'relative', cursor: 'pointer', borderRadius: 12,
         overflow: 'hidden', background: '#111827',
@@ -38,8 +42,15 @@ export default function AnimeCard({ anime }) {
         onError={e => { e.target.style.background = '#1a2235' }}
       />
 
-      {/* Format badge */}
-      {format && (
+      {/* Rank badge (replaces format badge when rank is provided) */}
+      {rank ? (
+        <span style={{
+          position:'absolute', top:6, left:8,
+          color:'#7c3aed', fontSize:22, fontWeight:900,
+          lineHeight:1, textShadow:'0 2px 8px rgba(0,0,0,0.8)',
+          fontFamily:"'Sora',sans-serif"
+        }}>#{rank}</span>
+      ) : format && (
         <span style={{
           position:'absolute', top:8, left:8,
           background:'rgba(10,14,26,0.85)', backdropFilter:'blur(8px)',
@@ -56,6 +67,16 @@ export default function AnimeCard({ anime }) {
           color: scoreColor(averageScore), fontSize:11, fontWeight:700,
           padding:'3px 7px', borderRadius:5
         }}>★ {formatScore(averageScore)}</span>
+      )}
+
+      {/* Watcher count badge */}
+      {watcherCount > 0 && (
+        <span style={{
+          position:'absolute', bottom:8, left:8,
+          background:'rgba(10,14,26,0.85)', backdropFilter:'blur(8px)',
+          color:'#06b6d4', fontSize:10, fontWeight:700,
+          padding:'3px 7px', borderRadius:5
+        }}>👥 {watcherCount}</span>
       )}
 
       {/* Hover overlay */}

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule, getTorrents } from '../api/anime.api'
+import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule, getTorrents, getTrending, getWatchers } from '../api/anime.api'
 
 export function useSeasonalAnime(season, year, page = 1) {
   return useQuery({
@@ -44,6 +44,25 @@ export function useTorrents(q) {
     queryKey: ['torrents', q],
     queryFn: () => getTorrents(q).then(r => r.data.data),
     enabled: !!q,
+    staleTime: 5 * 60 * 1000,
+    retry: false
+  })
+}
+
+export function useTrending(limit = 10) {
+  return useQuery({
+    queryKey: ['trending', limit],
+    queryFn: () => getTrending(limit).then(r => r.data.data),
+    staleTime: 60 * 60 * 1000,
+    retry: false
+  })
+}
+
+export function useWatchers(anilistId, limit = 5) {
+  return useQuery({
+    queryKey: ['watchers', anilistId, limit],
+    queryFn: () => getWatchers(anilistId, limit).then(r => r.data),
+    enabled: !!anilistId,
     staleTime: 5 * 60 * 1000,
     retry: false
   })

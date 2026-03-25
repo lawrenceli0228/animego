@@ -15,6 +15,11 @@ const zh = {
     scheduleLabel: '放送日历', thisWeek: '本周更新',
     continueLabel: '继续追番', watchingTitle: '我的在追',
     today: '今天', noUpdates: '今日暂无更新',
+    trendingLabel: '本季热追', trendingTitle: '大家都在追',
+  },
+  // Anime watchers
+  anime: {
+    watchers: '人在追', watchersMore: '还有',
   },
   // Anime detail
   detail: {

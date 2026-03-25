@@ -15,6 +15,11 @@ const en = {
     scheduleLabel: 'SCHEDULE', thisWeek: 'This Week',
     continueLabel: 'Continue Watching', watchingTitle: 'Currently Watching',
     today: 'Today', noUpdates: 'No episodes today',
+    trendingLabel: 'TRENDING', trendingTitle: 'Most Watched',
+  },
+  // Anime watchers
+  anime: {
+    watchers: 'watching', watchersMore: '+',
   },
   // Anime detail
   detail: {

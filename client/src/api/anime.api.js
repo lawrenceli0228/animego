@@ -14,3 +14,9 @@ export const getWeeklySchedule = () =>
 
 export const getTorrents = (q) =>
   api.get('/anime/torrents', { params: { q } });
+
+export const getTrending = (limit = 10) =>
+  api.get('/anime/trending', { params: { limit } });
+
+export const getWatchers = (anilistId, limit = 5) =>
+  api.get(`/anime/${anilistId}/watchers`, { params: { limit } });
