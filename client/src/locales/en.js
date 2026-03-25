@@ -112,6 +112,14 @@ const en = {
     action_plan_to_watch: 'wants to watch',
     action_dropped: 'dropped',
   },
+  // Danmaku
+  danmaku: {
+    label: 'DANMAKU', live: 'LIVE', send: 'Send',
+    placeholder: 'Send a danmaku (max 50 chars)...',
+    loginSuffix: 'to send danmaku',
+    connected: 'Connected', connecting: 'Connecting...',
+    windowClosed: 'Premiere window closed — showing history only',
+  },
   // Comments
   comment: {
     title: 'Comments', noComments: 'No comments yet. Be the first!',

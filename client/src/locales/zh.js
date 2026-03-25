@@ -112,6 +112,14 @@ const zh = {
     action_plan_to_watch: '想看',
     action_dropped: '弃坑了',
   },
+  // Danmaku
+  danmaku: {
+    label: '弹幕', live: 'LIVE', send: '发送',
+    placeholder: '发条弹幕（最多50字）...',
+    loginSuffix: '后发送弹幕',
+    connected: '已连接', connecting: '连接中...',
+    windowClosed: '首播窗口已关闭，仅可查看历史弹幕',
+  },
   // Comments
   comment: {
     title: '集数评论', noComments: '暂无评论，来说点什么吧',
