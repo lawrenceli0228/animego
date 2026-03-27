@@ -93,13 +93,13 @@ const en = {
   },
   // Torrent modal
   torrent: {
-    title: 'Torrent Search', searchBtn: 'Search', btn: 'Magnet',
+    title: 'Torrent Search', searchBtn: 'Search', btn: 'Magnet', download: 'Torrents',
     copy: 'Copy', copied: 'Copied!',
     openMagnet: 'Open',
     size: 'Size', seeders: 'Seeds', date: 'Date',
     noResults: 'No results found',
-    loading: 'Searching...', placeholder: 'Search query (romaji - episode)',
-    groupAll: 'All',
+    loading: 'Searching...', placeholder: 'Search...',
+    groupAll: 'All', epAll: 'All',
   },
   // Social
   social: {

@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useLang } from '../../context/LanguageContext'
 import { useSubscription } from '../../hooks/useSubscription'
-import TorrentModal from './TorrentModal'
 import EpisodeComments from './EpisodeComments'
 import DanmakuSection from './DanmakuSection'
 
@@ -9,7 +8,6 @@ export default function EpisodeList({ anime }) {
   const { t } = useLang()
   const { data: sub } = useSubscription(anime.anilistId)
   const [openEp, setOpenEp] = useState(null)
-  const [torrentEp, setTorrentEp] = useState(null)
 
   const currentEp = sub?.currentEpisode ?? 0
   const total = anime.episodes
@@ -58,14 +56,6 @@ export default function EpisodeList({ anime }) {
               </div>
               {watched && <div style={{ fontSize: 12, color: '#34d399', marginBottom: 3 }}>✓</div>}
               {isCurrent && <div style={{ fontSize: 10, color: '#60aaff', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>▶</div>}
-              <button
-                onClick={e => { e.stopPropagation(); setTorrentEp(ep) }}
-                style={{ marginTop: 2, width: '100%', padding: '3px 0', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'rgba(10,132,255,0.15)', color: '#60aaff', fontSize: 10, fontWeight: 700, letterSpacing: '0.5px', transition: 'background 0.15s' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(10,132,255,0.35)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'rgba(10,132,255,0.15)'}
-              >
-                {t('torrent.btn')}
-              </button>
             </div>
           )
         })}
@@ -80,9 +70,6 @@ export default function EpisodeList({ anime }) {
         </div>
       )}
 
-      {torrentEp !== null && (
-        <TorrentModal anime={anime} episode={torrentEp} onClose={() => setTorrentEp(null)} />
-      )}
     </section>
   )
 }

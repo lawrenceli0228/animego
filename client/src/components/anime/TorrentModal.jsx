@@ -155,16 +155,16 @@ function TorrentRow({ item, copied, onCopy, onOpen }) {
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
-export default function TorrentModal({ anime, episode, onClose }) {
+export default function TorrentModal({ anime, onClose }) {
   const { t } = useLang()
 
-  const epPad = String(episode).padStart(2, '0')
-  const defaultQ = `${anime.titleRomaji || anime.titleEnglish} - ${epPad}`
+  const defaultQ = anime.titleRomaji || anime.titleEnglish || ''
 
   const [query, setQuery]               = useState(defaultQ)
   const [searchQ, setSearchQ]           = useState(defaultQ)
   const [copied, setCopied]             = useState(null)
   const [selectedGroup, setSelectedGroup] = useState('ALL')
+  const [selectedEp, setSelectedEp]     = useState(null)
 
   const { data: torrents, isLoading } = useTorrents(searchQ)
 
@@ -199,13 +199,14 @@ export default function TorrentModal({ anime, episode, onClose }) {
   }, [])
 
   const applyTitle = (title) => {
-    const newQ = `${title} - ${epPad}`
-    setQuery(newQ)
-    triggerSearch(newQ)
+    setQuery(title)
+    triggerSearch(title)
   }
 
   // Build fansub groups + sorted results
   const { groups, groupNames, filteredTorrents } = useMemo(() => {
+    const epPad = selectedEp ? String(selectedEp).padStart(2, '0') : null
+
     const groups = {}
     for (const item of torrents ?? []) {
       const g = item.fansub ?? 'Unknown'
@@ -218,17 +219,26 @@ export default function TorrentModal({ anime, episode, onClose }) {
       : selectedGroup === 'ALL' ? torrents
       : (groups[selectedGroup] ?? [])
 
-    // Sort: episode-match first → resolution desc → date desc
-    const sorted = [...base].sort((a, b) => {
-      const epDiff = epRelevance(b.title, epPad) - epRelevance(a.title, epPad)
-      if (epDiff !== 0) return epDiff
+    // Client-side episode filter with fallback to all if no match
+    let filtered = base
+    if (epPad) {
+      const epFiltered = base.filter(item => epRelevance(item.title, epPad) > 0)
+      filtered = epFiltered.length > 0 ? epFiltered : base
+    }
+
+    // Sort: episode-match first (when ep selected) → resolution desc → date desc
+    const sorted = [...filtered].sort((a, b) => {
+      if (epPad) {
+        const epDiff = epRelevance(b.title, epPad) - epRelevance(a.title, epPad)
+        if (epDiff !== 0) return epDiff
+      }
       const resDiff = resScore(b.title) - resScore(a.title)
       if (resDiff !== 0) return resDiff
       return new Date(b.date || 0) - new Date(a.date || 0)
     })
 
     return { groups, groupNames, filteredTorrents: sorted }
-  }, [torrents, selectedGroup, epPad])
+  }, [torrents, selectedGroup, selectedEp])
 
   return (
     <div
@@ -295,6 +305,33 @@ export default function TorrentModal({ anime, episode, onClose }) {
                   <span style={{ color: 'rgba(235,235,245,0.35)', marginRight: 4 }}>{opt.label}</span>
                   {opt.value.length > 18 ? opt.value.slice(0, 18) + '…' : opt.value}
                 </button>
+              ))}
+            </div>
+          )}
+
+          {/* Episode selector pills */}
+          {anime.episodes > 0 && (
+            <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', paddingBottom: 1 }}>
+              <button
+                onClick={() => setSelectedEp(null)}
+                style={{
+                  padding: '3px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                  background: selectedEp === null ? '#0a84ff' : 'rgba(255,255,255,0.06)',
+                  color: selectedEp === null ? '#fff' : 'rgba(235,235,245,0.50)',
+                  fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', transition: 'all 0.15s',
+                }}
+              >{t('torrent.epAll')}</button>
+              {Array.from({ length: anime.episodes }, (_, i) => i + 1).map(ep => (
+                <button
+                  key={ep}
+                  onClick={() => setSelectedEp(ep)}
+                  style={{
+                    padding: '3px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                    background: selectedEp === ep ? '#0a84ff' : 'rgba(255,255,255,0.06)',
+                    color: selectedEp === ep ? '#fff' : 'rgba(235,235,245,0.50)',
+                    fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', transition: 'all 0.15s',
+                  }}
+                >{String(ep).padStart(2, '0')}</button>
               ))}
             </div>
           )}

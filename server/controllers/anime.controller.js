@@ -3,7 +3,7 @@ const { XMLParser } = require('fast-xml-parser');
 const Subscription = require('../models/Subscription');
 const AnimeCache   = require('../models/AnimeCache');
 
-// In-memory torrent cache (5-min TTL)
+// In-memory torrent cache (1-hour TTL)
 const torrentCache = new Map();
 
 // In-memory trending cache (1h TTL)
@@ -230,7 +230,7 @@ exports.getTorrents = async (req, res, next) => {
 
     const key = q.trim().toLowerCase();
     const cached = torrentCache.get(key);
-    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+    if (cached && Date.now() - cached.ts < 60 * 60 * 1000) {
       return res.json({ data: cached.data });
     }
 

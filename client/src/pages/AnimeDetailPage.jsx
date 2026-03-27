@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useAnimeDetail } from '../hooks/useAnime'
 import { pickTitle } from '../utils/formatters'
@@ -6,6 +7,7 @@ import AnimeDetailHero from '../components/anime/AnimeDetailHero'
 import SubscriptionButton from '../components/subscription/SubscriptionButton'
 import WatchersAvatarList from '../components/anime/WatchersAvatarList'
 import EpisodeList from '../components/anime/EpisodeList'
+import TorrentModal from '../components/anime/TorrentModal'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
 function ShareButton({ anime }) {
@@ -40,6 +42,7 @@ export default function AnimeDetailPage() {
   const { id } = useParams()
   const { t } = useLang()
   const { data: anime, isLoading, error } = useAnimeDetail(id)
+  const [torrentOpen, setTorrentOpen] = useState(false)
 
   if (isLoading) return <LoadingSpinner />
   if (error) return (
@@ -56,9 +59,23 @@ export default function AnimeDetailPage() {
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4, marginTop: 16 }}>
           <SubscriptionButton anilistId={anime.anilistId} episodes={anime.episodes} />
           <ShareButton anime={anime} />
+          {anime.episodes > 0 && (
+            <button
+              onClick={() => setTorrentOpen(true)}
+              style={{
+                marginLeft: 8, padding: '8px 14px', borderRadius: 8,
+                border: '1px solid rgba(148,163,184,0.3)',
+                background: 'transparent', color: 'rgba(235,235,245,0.60)',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              {t('torrent.download')}
+            </button>
+          )}
         </div>
         <WatchersAvatarList anilistId={anime.anilistId} />
         <EpisodeList anime={anime} />
+        {torrentOpen && <TorrentModal anime={anime} onClose={() => setTorrentOpen(false)} />}
       </div>
     </div>
   )

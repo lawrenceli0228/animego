@@ -93,13 +93,13 @@ const zh = {
   },
   // Torrent modal
   torrent: {
-    title: '磁力搜索', searchBtn: '搜索', btn: '磁链',
+    title: '磁力搜索', searchBtn: '搜索', btn: '磁链', download: '磁力资源',
     copy: '复制', copied: '已复制',
     openMagnet: '打开',
     size: '大小', seeders: '做种', date: '日期',
     noResults: '暂无搜索结果',
-    loading: '搜索中...', placeholder: '搜索词（罗马音 - 集数）',
-    groupAll: '全部',
+    loading: '搜索中...', placeholder: '搜索词...',
+    groupAll: '全部', epAll: '全集',
   },
   // Social
   social: {
