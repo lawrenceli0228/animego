@@ -38,7 +38,7 @@ export default function DanmakuOverlay({ messages }) {
   const removeItem = (id) => setItems(prev => prev.filter(i => i.id !== id))
 
   return (
-    <div style={{
+    <div aria-hidden="true" style={{
       position: 'relative',
       width: '100%',
       height: LANE_COUNT * LANE_HEIGHT,
@@ -77,4 +77,4 @@ export default function DanmakuOverlay({ messages }) {
   )
 }
 
-const COLORS = ['#60aaff', '#5ac8fa', '#34d399', '#fbbf24', '#f472b6', '#818cf8']
+const COLORS = ['#60aaff', '#5ac8fa', '#34d399', '#fbbf24', '#f472b6', '#30d158']
