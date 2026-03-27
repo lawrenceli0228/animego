@@ -23,7 +23,7 @@ const s = {
   title: { fontSize: 'clamp(22px,3vw,32px)', background: 'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
   tabs: { display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 24, scrollbarWidth: 'none' },
   tab: (active, isToday) => ({
-    padding: '6px 18px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', whiteSpace: 'nowrap', transition: 'all 0.2s',
+    padding: '6px 18px', minHeight: 44, borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', whiteSpace: 'nowrap', transition: 'all 0.2s',
     background: active ? 'linear-gradient(135deg,#0a84ff,#5ac8fa)' : isToday ? 'rgba(10,132,255,0.15)' : 'rgba(255,255,255,0.05)',
     color: active ? '#fff' : isToday ? '#60aaff' : 'rgba(235,235,245,0.60)',
     outline: isToday && !active ? '1px solid rgba(10,132,255,0.4)' : 'none'
