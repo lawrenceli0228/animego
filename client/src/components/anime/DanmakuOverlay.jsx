@@ -77,4 +77,4 @@ export default function DanmakuOverlay({ messages }) {
   )
 }
 
-const COLORS = ['#a78bfa', '#22d3ee', '#34d399', '#fbbf24', '#f472b6', '#818cf8']
+const COLORS = ['#60aaff', '#5ac8fa', '#34d399', '#fbbf24', '#f472b6', '#818cf8']

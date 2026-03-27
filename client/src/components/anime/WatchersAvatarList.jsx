@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useLang } from '../../context/LanguageContext'
 import { useWatchers } from '../../hooks/useAnime'
 
-const COLORS = ['#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#6366f1']
+const COLORS = ['#0a84ff', '#5ac8fa', '#30d158', '#ff9f0a', '#ff453a', '#bf5af2']
 
 function avatarColor(username) {
   return COLORS[username.charCodeAt(0) % COLORS.length]
@@ -34,7 +34,7 @@ export default function WatchersAvatarList({ anilistId }) {
             style={{
               width: 28, height: 28, borderRadius: '50%',
               background: avatarColor(w.username),
-              border: '2px solid #0a0e1a',
+              border: '2px solid #000000',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 11, fontWeight: 700, color: '#fff', textTransform: 'uppercase',
               marginRight: i < watchers.length - 1 ? -8 : 0,
@@ -48,10 +48,10 @@ export default function WatchersAvatarList({ anilistId }) {
       </div>
 
       {/* Count text */}
-      <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: watchers.length > 0 ? 10 : 0 }}>
+      <span style={{ fontSize: 12, color: 'rgba(235,235,245,0.60)', marginLeft: watchers.length > 0 ? 10 : 0 }}>
         {`${total} ${t('anime.watchers')}`}
         {more > 0 && (
-          <span style={{ color: '#7c3aed', marginLeft: 4 }}>
+          <span style={{ color: '#0a84ff', marginLeft: 4 }}>
             {lang === 'zh' ? `（${t('anime.watchersMore')} ${more} 人）` : `(${t('anime.watchersMore')}${more} more)`}
           </span>
         )}

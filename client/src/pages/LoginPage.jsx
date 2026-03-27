@@ -31,37 +31,37 @@ export default function LoginPage() {
 
   const inputStyle = {
     width:'100%', padding:'11px 14px', borderRadius:10,
-    background:'#0a0e1a', border:'1px solid rgba(148,163,184,0.15)',
-    color:'#f1f5f9', fontSize:14, outline:'none', marginBottom:16
+    background:'#000000', border:'1px solid rgba(148,163,184,0.15)',
+    color:'#ffffff', fontSize:14, outline:'none', marginBottom:16
   }
 
   return (
     <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'40px 24px' }}>
-      <div style={{ width:'100%', maxWidth:420, background:'#111827',
-        border:'1px solid rgba(124,58,237,0.2)', borderRadius:16, padding:40,
+      <div style={{ width:'100%', maxWidth:420, background:'#1c1c1e',
+        border:'1px solid rgba(10,132,255,0.2)', borderRadius:16, padding:40,
         boxShadow:'0 24px 60px rgba(0,0,0,0.5)' }}>
         <div style={{ textAlign:'center', marginBottom:32 }}>
           <h1 style={{ fontFamily:"'Sora',sans-serif", fontSize:28,
-            background:'linear-gradient(135deg,#7c3aed,#06b6d4)',
+            background:'linear-gradient(135deg,#0a84ff,#5ac8fa)',
             WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:8 }}>
             {t('login.title')}
           </h1>
-          <p style={{ color:'#94a3b8', fontSize:14 }}>{t('login.subtitle')}</p>
+          <p style={{ color:'rgba(235,235,245,0.60)', fontSize:14 }}>{t('login.subtitle')}</p>
         </div>
 
         <form onSubmit={handleSubmit}>
           {[['email', t('login.email'), 'email'], ['password', t('login.password'), 'password']].map(([k,l,tp]) => (
             <div key={k}>
-              <label style={{ display:'block', fontSize:13, fontWeight:600, color:'#94a3b8', marginBottom:6 }}>{l}</label>
+              <label style={{ display:'block', fontSize:13, fontWeight:600, color:'rgba(235,235,245,0.60)', marginBottom:6 }}>{l}</label>
               <input type={tp} value={form[k]} onChange={set(k)} required style={inputStyle}
-                onFocus={e => e.target.style.borderColor='rgba(124,58,237,0.5)'}
+                onFocus={e => e.target.style.borderColor='rgba(10,132,255,0.5)'}
                 onBlur={e => e.target.style.borderColor='rgba(148,163,184,0.15)'}
               />
             </div>
           ))}
 
           <div style={{ textAlign:'right', marginTop:-8, marginBottom:16 }}>
-            <Link to="/forgot-password" style={{ color:'#7c3aed', fontSize:13, fontWeight:500 }}>
+            <Link to="/forgot-password" style={{ color:'#0a84ff', fontSize:13, fontWeight:500 }}>
               {t('login.forgotPassword')}
             </Link>
           </div>
@@ -69,7 +69,7 @@ export default function LoginPage() {
           {error && <p style={{ color:'#f87171', fontSize:13, marginBottom:12, textAlign:'center' }}>{error}</p>}
 
           <button type="submit" disabled={loading}
-            style={{ width:'100%', padding:'12px', background:'linear-gradient(135deg,#7c3aed,#6d28d9)',
+            style={{ width:'100%', padding:'12px', background:'linear-gradient(135deg,#0a84ff,#0a84ff)',
               border:'none', borderRadius:10, color:'#fff', fontSize:15, fontWeight:700,
               cursor: loading ? 'not-allowed' : 'pointer', fontFamily:"'Sora',sans-serif",
               opacity: loading ? 0.7 : 1 }}>
@@ -77,9 +77,9 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p style={{ textAlign:'center', marginTop:20, fontSize:14, color:'#64748b' }}>
+        <p style={{ textAlign:'center', marginTop:20, fontSize:14, color:'rgba(235,235,245,0.30)' }}>
           {t('login.noAccount')}{' '}
-          <Link to="/register" style={{ color:'#7c3aed', fontWeight:600 }}>{t('login.registerLink')}</Link>
+          <Link to="/register" style={{ color:'#0a84ff', fontWeight:600 }}>{t('login.registerLink')}</Link>
         </p>
       </div>
     </div>

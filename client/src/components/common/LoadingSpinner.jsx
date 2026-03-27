@@ -2,8 +2,8 @@ const s = {
   wrap: { display:'flex', justifyContent:'center', alignItems:'center', padding:'60px 0' },
   spinner: {
     width: 44, height: 44,
-    border: '3px solid rgba(124,58,237,0.2)',
-    borderTop: '3px solid #7c3aed',
+    border: '3px solid rgba(10,132,255,0.2)',
+    borderTop: '3px solid #0a84ff',
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite'
   }

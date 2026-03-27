@@ -32,15 +32,15 @@ export default function TrendingSection() {
 
       <section style={{ marginTop: 40 }}>
         <div style={{ marginBottom: 16 }}>
-          <p style={{ color: '#7c3aed', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
+          <p style={{ color: '#0a84ff', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
             {t('home.trendingLabel')}
           </p>
-          <h2 style={{ fontSize: 'clamp(22px,3vw,32px)', background: 'linear-gradient(135deg,#f1f5f9,#94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          <h2 style={{ fontSize: 'clamp(22px,3vw,32px)', background: 'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             {t('home.trendingTitle')}
           </h2>
         </div>
 
-        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin', scrollbarColor: 'rgba(124,58,237,0.3) transparent' }}>
+        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin', scrollbarColor: 'rgba(10,132,255,0.3) transparent' }}>
           {isLoading
             ? Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
             : data.map(item => (

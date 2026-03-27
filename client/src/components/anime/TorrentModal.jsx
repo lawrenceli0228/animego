@@ -29,9 +29,9 @@ function GroupRow({ label, count, active, onClick }) {
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         width: '100%', padding: '7px 8px', borderRadius: 8,
-        background: active ? 'rgba(124,58,237,0.25)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
-        border: active ? '1px solid rgba(124,58,237,0.45)' : '1px solid transparent',
-        color: active ? '#c4b5fd' : '#94a3b8',
+        background: active ? 'rgba(10,132,255,0.25)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
+        border: active ? '1px solid rgba(10,132,255,0.45)' : '1px solid transparent',
+        color: active ? '#90c8ff' : 'rgba(235,235,245,0.60)',
         cursor: 'pointer', fontSize: 13, fontWeight: active ? 600 : 400,
         textAlign: 'left', transition: 'all 0.15s',
       }}
@@ -42,8 +42,8 @@ function GroupRow({ label, count, active, onClick }) {
       <span style={{
         flexShrink: 0, marginLeft: 6, fontSize: 10, fontWeight: 700,
         padding: '1px 6px', borderRadius: 10,
-        background: active ? 'rgba(124,58,237,0.4)' : 'rgba(148,163,184,0.12)',
-        color: active ? '#a78bfa' : '#64748b',
+        background: active ? 'rgba(10,132,255,0.4)' : 'rgba(148,163,184,0.12)',
+        color: active ? '#60aaff' : 'rgba(235,235,245,0.30)',
       }}>{count}</span>
     </button>
   )
@@ -60,7 +60,7 @@ function TorrentRow({ item, idx, copied, onCopy, onOpen }) {
       style={{
         padding: '10px 12px', borderRadius: 10,
         background: hovered ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)',
-        border: `1px solid ${hovered ? 'rgba(124,58,237,0.3)' : 'rgba(148,163,184,0.07)'}`,
+        border: `1px solid ${hovered ? 'rgba(10,132,255,0.3)' : 'rgba(148,163,184,0.07)'}`,
         display: 'flex', alignItems: 'flex-start', gap: 10, transition: 'all 0.15s',
       }}
     >
@@ -77,13 +77,13 @@ function TorrentRow({ item, idx, copied, onCopy, onOpen }) {
           {resolution && (
             <span style={{
               fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 700,
-              background: 'rgba(6,182,212,0.15)', color: '#22d3ee',
+              background: 'rgba(90,200,250,0.15)', color: '#5ac8fa',
             }}>{resolution}</span>
           )}
           {tags.map(tag => (
             <span key={tag} style={{
               fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 500,
-              background: 'rgba(148,163,184,0.1)', color: '#94a3b8',
+              background: 'rgba(148,163,184,0.1)', color: 'rgba(235,235,245,0.60)',
             }}>{tag}</span>
           ))}
           <span style={{ fontSize: 10, color: '#475569', marginLeft: 4 }}>{item.size}</span>
@@ -100,8 +100,8 @@ function TorrentRow({ item, idx, copied, onCopy, onOpen }) {
           title="Copy magnet"
           style={{
             padding: '5px 10px', borderRadius: 7, border: 'none', cursor: 'pointer',
-            background: copied ? 'rgba(16,185,129,0.2)' : 'rgba(124,58,237,0.2)',
-            color: copied ? '#34d399' : '#a78bfa',
+            background: copied ? 'rgba(16,185,129,0.2)' : 'rgba(10,132,255,0.2)',
+            color: copied ? '#34d399' : '#60aaff',
             fontSize: 12, fontWeight: 700, transition: 'all 0.2s', whiteSpace: 'nowrap',
           }}
         >
@@ -112,7 +112,7 @@ function TorrentRow({ item, idx, copied, onCopy, onOpen }) {
           title="Open magnet"
           style={{
             padding: '5px 10px', borderRadius: 7, border: 'none', cursor: 'pointer',
-            background: 'rgba(6,182,212,0.15)', color: '#22d3ee',
+            background: 'rgba(90,200,250,0.15)', color: '#5ac8fa',
             fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap',
           }}
         >↗</button>
@@ -179,7 +179,7 @@ export default function TorrentModal({ anime, episode, onClose }) {
     >
       <div
         style={{
-          background: '#0a0e1a',
+          background: '#000000',
           border: '1px solid rgba(148,163,184,0.12)',
           borderRadius: 16, width: '100%', maxWidth: 1060,
           height: 'min(88vh, 700px)',
@@ -195,14 +195,14 @@ export default function TorrentModal({ anime, episode, onClose }) {
           display: 'flex', flexDirection: 'column', gap: 10,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ color: '#7c3aed', fontSize: 11, fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase' }}>
+            <span style={{ color: '#0a84ff', fontSize: 11, fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase' }}>
               {t('torrent.title')}
             </span>
             <button
               onClick={onClose}
-              style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: 4 }}
-              onMouseEnter={e => e.currentTarget.style.color = '#f1f5f9'}
-              onMouseLeave={e => e.currentTarget.style.color = '#64748b'}
+              style={{ background: 'none', border: 'none', color: 'rgba(235,235,245,0.30)', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: 4 }}
+              onMouseEnter={e => e.currentTarget.style.color = '#ffffff'}
+              onMouseLeave={e => e.currentTarget.style.color = 'rgba(235,235,245,0.30)'}
             >✕</button>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -213,7 +213,7 @@ export default function TorrentModal({ anime, episode, onClose }) {
               style={{
                 flex: 1, padding: '8px 13px', borderRadius: 9,
                 border: '1px solid rgba(148,163,184,0.15)',
-                background: 'rgba(255,255,255,0.04)', color: '#f1f5f9',
+                background: 'rgba(255,255,255,0.04)', color: '#ffffff',
                 fontSize: 13, outline: 'none', fontFamily: 'inherit',
               }}
               placeholder={t('torrent.placeholder')}
@@ -222,7 +222,7 @@ export default function TorrentModal({ anime, episode, onClose }) {
               onClick={() => setSearchQ(query)}
               style={{
                 padding: '8px 18px', borderRadius: 9, flexShrink: 0,
-                background: 'linear-gradient(135deg,#7c3aed,#06b6d4)',
+                background: 'linear-gradient(135deg,#0a84ff,#5ac8fa)',
                 color: '#fff', fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer',
               }}
             >{t('torrent.searchBtn')}</button>
@@ -267,11 +267,11 @@ export default function TorrentModal({ anime, episode, onClose }) {
           {/* CENTER — torrent list */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
             {isLoading ? (
-              <p style={{ color: '#64748b', textAlign: 'center', padding: '60px 0' }}>
+              <p style={{ color: 'rgba(235,235,245,0.30)', textAlign: 'center', padding: '60px 0' }}>
                 {t('torrent.loading')}
               </p>
             ) : !filteredTorrents.length ? (
-              <p style={{ color: '#64748b', textAlign: 'center', padding: '60px 0' }}>
+              <p style={{ color: 'rgba(235,235,245,0.30)', textAlign: 'center', padding: '60px 0' }}>
                 {t('torrent.noResults')}
               </p>
             ) : (
@@ -305,7 +305,7 @@ export default function TorrentModal({ anime, episode, onClose }) {
                 style={{
                   width: 106, height: 152,
                   objectFit: 'cover', borderRadius: 10,
-                  border: '2px solid rgba(124,58,237,0.35)',
+                  border: '2px solid rgba(10,132,255,0.35)',
                   boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
                 }}
               />

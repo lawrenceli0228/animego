@@ -27,10 +27,10 @@ export default function ActivityFeed() {
   return (
     <section style={{ marginTop: 40 }}>
       <div style={{ marginBottom: 16 }}>
-        <p style={{ color: '#7c3aed', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
+        <p style={{ color: '#0a84ff', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
           {t('social.feedLabel')}
         </p>
-        <h2 style={{ fontSize: 'clamp(20px,2.5vw,28px)', background: 'linear-gradient(135deg,#f1f5f9,#94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+        <h2 style={{ fontSize: 'clamp(20px,2.5vw,28px)', background: 'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
           {t('social.feedTitle')}
         </h2>
       </div>
@@ -67,18 +67,18 @@ export default function ActivityFeed() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span
                     onClick={e => { e.stopPropagation(); navigate(`/u/${item.username}`) }}
-                    style={{ color: '#7c3aed', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                    style={{ color: '#0a84ff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
                   >
                     {item.username}
                   </span>
-                  <span style={{ color: '#94a3b8', fontSize: 13 }}>
+                  <span style={{ color: 'rgba(235,235,245,0.60)', fontSize: 13 }}>
                     {' '}{t(`social.action_${item.status}`)}{' '}
                   </span>
-                  <span style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 500 }}>
+                  <span style={{ color: '#ffffff', fontSize: 13, fontWeight: 500 }}>
                     {lang === 'zh' && item.titleChinese ? item.titleChinese : item.title}
                   </span>
                   {item.episode > 0 && (
-                    <span style={{ color: '#94a3b8', fontSize: 12 }}>
+                    <span style={{ color: 'rgba(235,235,245,0.60)', fontSize: 12 }}>
                       {' '}· Ep {item.episode}
                     </span>
                   )}

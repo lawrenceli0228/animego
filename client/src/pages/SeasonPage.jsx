@@ -29,7 +29,7 @@ export default function SeasonPage() {
   return (
     <div className="container" style={{ paddingTop:40, paddingBottom:40 }}>
       <h1 style={{ fontSize:'clamp(22px,3vw,34px)', marginBottom:24,
-        background:'linear-gradient(135deg,#f1f5f9,#94a3b8)',
+        background:'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))',
         WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
         {t('seasonPage.title')}
       </h1>

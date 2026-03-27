@@ -41,18 +41,18 @@ export default function AnimeDetailHero({ anime }) {
         <div style={{ flexShrink:0 }}>
           <img src={coverImageUrl} alt={titleRomaji}
             style={{ width:180, height:260, objectFit:'cover', borderRadius:12,
-              border:'3px solid rgba(124,58,237,0.4)',
+              border:'3px solid rgba(10,132,255,0.4)',
               boxShadow:'0 20px 50px rgba(0,0,0,0.6)' }}
-            onError={e => { e.target.style.background='#1a2235' }}
+            onError={e => { e.target.style.background='#2c2c2e' }}
           />
         </div>
 
         {/* Meta */}
         <div style={{ flex:1, paddingTop: bannerImageUrl ? 60 : 0 }}>
-          <h1 style={{ fontSize:'clamp(22px,4vw,36px)', color:'#f1f5f9', marginBottom:4 }}>
+          <h1 style={{ fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 }}>
             {pickTitle(anime, lang)}
           </h1>
-          {titleNative && <p style={{ color:'#94a3b8', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
+          {titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
 
           {/* Badges row */}
           <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:20 }}>
@@ -62,14 +62,14 @@ export default function AnimeDetailHero({ anime }) {
                 ★ {formatScore(averageScore)}
               </span>
             )}
-            {format && <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(124,58,237,0.15)',
-              color:'#a78bfa', fontSize:13, border:'1px solid rgba(124,58,237,0.3)' }}>{format}</span>}
-            {status && <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(6,182,212,0.1)',
-              color:'#22d3ee', fontSize:13, border:'1px solid rgba(6,182,212,0.3)' }}>{statusLabel}</span>}
+            {format && <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(10,132,255,0.15)',
+              color:'#60aaff', fontSize:13, border:'1px solid rgba(10,132,255,0.3)' }}>{format}</span>}
+            {status && <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(90,200,250,0.1)',
+              color:'#5ac8fa', fontSize:13, border:'1px solid rgba(90,200,250,0.3)' }}>{statusLabel}</span>}
             {episodes && <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(148,163,184,0.08)',
-              color:'#94a3b8', fontSize:13 }}>{episodes} {t('detail.epUnit')}</span>}
+              color:'rgba(235,235,245,0.60)', fontSize:13 }}>{episodes} {t('detail.epUnit')}</span>}
             {season && seasonYear && <span style={{ padding:'4px 12px', borderRadius:20,
-              background:'rgba(148,163,184,0.08)', color:'#94a3b8', fontSize:13 }}>
+              background:'rgba(148,163,184,0.08)', color:'rgba(235,235,245,0.60)', fontSize:13 }}>
               {formatSeason(season, seasonYear)}
             </span>}
             {bgmId && (
@@ -96,18 +96,18 @@ export default function AnimeDetailHero({ anime }) {
           <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:20 }}>
             {genres.map(g => (
               <span key={g} style={{ padding:'4px 12px', borderRadius:6,
-                background:'rgba(124,58,237,0.12)', color:'#c4b5fd', fontSize:12,
-                border:'1px solid rgba(124,58,237,0.2)', fontWeight:500 }}>{g}</span>
+                background:'rgba(10,132,255,0.12)', color:'#90c8ff', fontSize:12,
+                border:'1px solid rgba(10,132,255,0.2)', fontWeight:500 }}>{g}</span>
             ))}
           </div>
 
           {/* Description */}
           {desc && (
             <div>
-              <p style={{ color:'#94a3b8', fontSize:14, lineHeight:1.8 }}>{displayDesc}</p>
+              <p style={{ color:'rgba(235,235,245,0.60)', fontSize:14, lineHeight:1.8 }}>{displayDesc}</p>
               {desc.length > 300 && (
                 <button onClick={() => setExpanded(!expanded)}
-                  style={{ color:'#7c3aed', fontSize:13, fontWeight:600, marginTop:8, cursor:'pointer',
+                  style={{ color:'#0a84ff', fontSize:13, fontWeight:600, marginTop:8, cursor:'pointer',
                     background:'none', border:'none', padding:0 }}>
                   {expanded ? t('detail.collapse') : t('detail.readMore')}
                 </button>

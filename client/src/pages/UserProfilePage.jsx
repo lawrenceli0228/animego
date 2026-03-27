@@ -27,7 +27,7 @@ function ShareButton({ username }) {
       style={{
         padding: '8px 14px', borderRadius: 8,
         border: '1px solid rgba(148,163,184,0.3)',
-        background: 'transparent', color: '#94a3b8',
+        background: 'transparent', color: 'rgba(235,235,245,0.60)',
         fontSize: 13, fontWeight: 600, cursor: 'pointer',
       }}
     >
@@ -51,7 +51,7 @@ export default function UserProfilePage() {
   )
 
   if (isError || !profile) return (
-    <div style={{ textAlign: 'center', paddingTop: 80, color: '#94a3b8' }}>
+    <div style={{ textAlign: 'center', paddingTop: 80, color: 'rgba(235,235,245,0.60)' }}>
       {t('social.userNotFound')}
     </div>
   )
@@ -78,7 +78,7 @@ export default function UserProfilePage() {
         {/* Avatar */}
         <div style={{
           width: 64, height: 64, borderRadius: '50%',
-          background: 'linear-gradient(135deg,#7c3aed,#06b6d4)',
+          background: 'linear-gradient(135deg,#0a84ff,#5ac8fa)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 26, fontWeight: 800, color: '#fff', flexShrink: 0,
           textTransform: 'uppercase',
@@ -87,22 +87,22 @@ export default function UserProfilePage() {
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ fontSize: 'clamp(20px,3vw,30px)', color: '#f1f5f9', fontWeight: 800, marginBottom: 4 }}>
+          <h1 style={{ fontSize: 'clamp(20px,3vw,30px)', color: '#ffffff', fontWeight: 800, marginBottom: 4 }}>
             {username}
           </h1>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <button
               onClick={() => navigate(`/u/${username}/followers`)}
-              style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: 13, cursor: 'pointer', padding: 0 }}
+              style={{ background: 'none', border: 'none', color: 'rgba(235,235,245,0.60)', fontSize: 13, cursor: 'pointer', padding: 0 }}
             >
-              <strong style={{ color: '#f1f5f9' }}>{profile.followerCount}</strong>
+              <strong style={{ color: '#ffffff' }}>{profile.followerCount}</strong>
               {' '}{t('social.followers')}
             </button>
             <button
               onClick={() => navigate(`/u/${username}/following`)}
-              style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: 13, cursor: 'pointer', padding: 0 }}
+              style={{ background: 'none', border: 'none', color: 'rgba(235,235,245,0.60)', fontSize: 13, cursor: 'pointer', padding: 0 }}
             >
-              <strong style={{ color: '#f1f5f9' }}>{profile.followingCount}</strong>
+              <strong style={{ color: '#ffffff' }}>{profile.followingCount}</strong>
               {' '}{t('social.following')}
             </button>
           </div>
@@ -125,11 +125,11 @@ export default function UserProfilePage() {
         return (
           <section key={status} style={{ marginBottom: 40 }}>
             <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9' }}>
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: '#ffffff' }}>
                 {statusLabels[status]}
               </h2>
               <span style={{
-                fontSize: 12, color: '#7c3aed', background: 'rgba(124,58,237,0.15)',
+                fontSize: 12, color: '#0a84ff', background: 'rgba(10,132,255,0.15)',
                 padding: '2px 8px', borderRadius: 99, fontWeight: 600,
               }}>
                 {list.length}

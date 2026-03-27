@@ -15,7 +15,7 @@ export default function DanmakuInput({ onSend, connected }) {
     <div style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '8px 0' }}>
       <button
         onClick={() => navigate('/login')}
-        style={{ color: '#a78bfa', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+        style={{ color: '#60aaff', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
       >
         {t('sub.loginToWatch')}
       </button>
@@ -47,7 +47,7 @@ export default function DanmakuInput({ onSend, connected }) {
         style={{
           flex: 1, padding: '7px 12px', borderRadius: 8,
           border: '1px solid rgba(148,163,184,0.2)',
-          background: 'rgba(255,255,255,0.04)', color: '#f1f5f9',
+          background: 'rgba(255,255,255,0.04)', color: '#ffffff',
           fontSize: 13, outline: 'none',
         }}
       />
@@ -59,8 +59,8 @@ export default function DanmakuInput({ onSend, connected }) {
         disabled={!value.trim() || !connected}
         style={{
           padding: '7px 16px', borderRadius: 8, border: 'none',
-          background: value.trim() && connected ? '#7c3aed' : 'rgba(124,58,237,0.2)',
-          color: value.trim() && connected ? '#fff' : '#64748b',
+          background: value.trim() && connected ? '#0a84ff' : 'rgba(10,132,255,0.2)',
+          color: value.trim() && connected ? '#fff' : 'rgba(235,235,245,0.30)',
           fontSize: 13, fontWeight: 600, cursor: value.trim() && connected ? 'pointer' : 'default',
           transition: 'all 0.2s', flexShrink: 0,
         }}

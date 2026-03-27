@@ -19,35 +19,35 @@ const s = {
   logo: {
     fontFamily: "'Sora',sans-serif", fontWeight: 800,
     fontSize: 22, letterSpacing: '-0.5px',
-    background: 'linear-gradient(135deg, #7c3aed, #06b6d4)',
+    background: 'linear-gradient(135deg, #0a84ff, #5ac8fa)',
     WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
   },
   links: { display: 'flex', gap: 4, flex: 1 },
   link: (active) => ({
     padding: '6px 14px', borderRadius: 8,
     fontSize: 14, fontWeight: 500,
-    color: active ? '#f1f5f9' : '#94a3b8',
-    background: active ? 'rgba(124,58,237,0.2)' : 'transparent',
+    color: active ? '#ffffff' : 'rgba(235,235,245,0.60)',
+    background: active ? 'rgba(10,132,255,0.2)' : 'transparent',
     transition: 'all 0.2s'
   }),
   right: { display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' },
-  username: { color: '#94a3b8', fontSize: 14 },
+  username: { color: 'rgba(235,235,245,0.60)', fontSize: 14 },
   btnOutline: {
     padding: '6px 16px', borderRadius: 8,
-    border: '1px solid rgba(124,58,237,0.4)',
-    color: '#f1f5f9', fontSize: 14, fontWeight: 500,
+    border: '1px solid rgba(10,132,255,0.4)',
+    color: '#ffffff', fontSize: 14, fontWeight: 500,
     transition: 'all 0.2s', cursor: 'pointer', background: 'none'
   },
   btnFill: {
     padding: '6px 16px', borderRadius: 8,
-    background: 'linear-gradient(135deg,#7c3aed,#6d28d9)',
+    background: 'linear-gradient(135deg,#0a84ff,#0a84ff)',
     color: '#fff', fontSize: 14, fontWeight: 600,
     border: 'none', cursor: 'pointer'
   },
   langBtn: {
     padding: '4px 10px', borderRadius: 6,
     border: '1px solid rgba(148,163,184,0.2)',
-    color: '#94a3b8', fontSize: 12, fontWeight: 600,
+    color: 'rgba(235,235,245,0.60)', fontSize: 12, fontWeight: 600,
     cursor: 'pointer', background: 'none', transition: 'all 0.2s'
   }
 }

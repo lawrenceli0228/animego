@@ -30,7 +30,7 @@ export default function DanmakuSection({ anilistId, episode }) {
     }}>
       {/* Label */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <p style={{ color: '#7c3aed', fontSize: 12, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase' }}>
+        <p style={{ color: '#0a84ff', fontSize: 12, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase' }}>
           {t('danmaku.label')}
         </p>
         {allMessages.length > 0 && (

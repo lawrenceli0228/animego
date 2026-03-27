@@ -26,7 +26,7 @@ function ShareButton({ anime }) {
       style={{
         marginLeft: 8, padding: '8px 14px', borderRadius: 8,
         border: '1px solid rgba(148,163,184,0.3)',
-        background: 'transparent', color: '#94a3b8',
+        background: 'transparent', color: 'rgba(235,235,245,0.60)',
         fontSize: 13, fontWeight: 600, cursor: 'pointer',
       }}
     >

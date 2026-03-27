@@ -10,21 +10,21 @@ const s = {
   wrap: { display:'flex', flexWrap:'wrap', alignItems:'center', gap:12, padding:'24px 0' },
   select: {
     padding:'10px 16px', borderRadius:10,
-    background:'#1a2235', border:'1px solid rgba(124,58,237,0.4)',
-    color:'#f1f5f9', fontSize:14, cursor:'pointer',
+    background:'#2c2c2e', border:'1px solid rgba(10,132,255,0.4)',
+    color:'#ffffff', fontSize:14, cursor:'pointer',
     outline:'none', minWidth:150
   },
-  epWrap: { display:'flex', alignItems:'center', gap:6, background:'#1a2235',
+  epWrap: { display:'flex', alignItems:'center', gap:6, background:'#2c2c2e',
     border:'1px solid rgba(148,163,184,0.12)', borderRadius:10, padding:'4px 8px' },
-  epBtn: { width:28, height:28, borderRadius:6, background:'rgba(124,58,237,0.2)',
-    color:'#f1f5f9', fontSize:16, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer',
+  epBtn: { width:28, height:28, borderRadius:6, background:'rgba(10,132,255,0.2)',
+    color:'#ffffff', fontSize:16, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer',
     border:'none', transition:'background 0.2s' },
-  epNum: { minWidth:32, textAlign:'center', fontSize:14, fontWeight:600, color:'#f1f5f9' },
+  epNum: { minWidth:32, textAlign:'center', fontSize:14, fontWeight:600, color:'#ffffff' },
   removeBtn: { padding:'10px 16px', borderRadius:10, border:'1px solid rgba(239,68,68,0.4)',
     color:'#f87171', fontSize:13, cursor:'pointer', background:'rgba(239,68,68,0.05)', transition:'all 0.2s' },
   loginBtn: {
     display:'inline-block', padding:'10px 24px', borderRadius:10,
-    background:'linear-gradient(135deg,#7c3aed,#06b6d4)',
+    background:'linear-gradient(135deg,#0a84ff,#5ac8fa)',
     color:'#fff', fontWeight:600, fontSize:14
   }
 }
@@ -88,7 +88,7 @@ export default function SubscriptionButton({ anilistId, episodes }) {
           <button style={s.epBtn} onClick={() => handleEp(currentEp - 1)}>−</button>
           <span style={s.epNum}>{currentEp}</span>
           <button style={s.epBtn} onClick={() => handleEp(currentEp + 1)}>+</button>
-          <span style={{ fontSize:12, color:'#64748b', marginLeft:4 }}>
+          <span style={{ fontSize:12, color:'rgba(235,235,245,0.30)', marginLeft:4 }}>
             {episodes ? `/ ${episodes} ${t('sub.epUnit')}` : t('sub.epUnit')}
           </span>
         </div>

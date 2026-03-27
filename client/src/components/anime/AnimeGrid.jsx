@@ -9,7 +9,7 @@ export default function AnimeGrid({ animeList, loading, error }) {
     </div>
   )
   if (!animeList?.length) return (
-    <div style={{ textAlign:'center', padding:'60px 0', color:'#64748b', fontFamily:"'Sora',sans-serif" }}>
+    <div style={{ textAlign:'center', padding:'60px 0', color:'rgba(235,235,245,0.30)', fontFamily:"'Sora',sans-serif" }}>
       暂无番剧
     </div>
   )

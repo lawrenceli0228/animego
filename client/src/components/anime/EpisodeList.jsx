@@ -23,7 +23,7 @@ export default function EpisodeList({ anime }) {
   return (
     <section style={{ marginTop: 40, marginBottom: 60 }}>
       <div style={{ marginBottom: 16 }}>
-        <p style={{ color: '#7c3aed', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
+        <p style={{ color: '#0a84ff', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
           {t('detail.episodes')}
         </p>
       </div>
@@ -36,33 +36,33 @@ export default function EpisodeList({ anime }) {
 
           let bg = 'rgba(255,255,255,0.04)'
           let border = 'rgba(148,163,184,0.1)'
-          let numColor = '#94a3b8'
+          let numColor = 'rgba(235,235,245,0.60)'
 
-          if (isCurrent) { bg = 'rgba(124,58,237,0.2)'; border = 'rgba(124,58,237,0.5)'; numColor = '#a78bfa' }
+          if (isCurrent) { bg = 'rgba(10,132,255,0.2)'; border = 'rgba(10,132,255,0.5)'; numColor = '#60aaff' }
           else if (watched) { bg = 'rgba(16,185,129,0.12)'; border = 'rgba(16,185,129,0.3)'; numColor = '#34d399' }
-          if (isOpen) { bg = 'rgba(124,58,237,0.12)'; border = 'rgba(124,58,237,0.55)'; numColor = '#a78bfa' }
+          if (isOpen) { bg = 'rgba(10,132,255,0.12)'; border = 'rgba(10,132,255,0.55)'; numColor = '#60aaff' }
 
           return (
             <div
               key={ep}
               onClick={() => setOpenEp(prev => prev === ep ? null : ep)}
               style={{ borderRadius: 10, background: bg, border: `1px solid ${border}`, padding: '10px 8px 8px', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s' }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(124,58,237,0.45)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = isOpen ? 'rgba(124,58,237,0.55)' : border }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(10,132,255,0.45)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = isOpen ? 'rgba(10,132,255,0.55)' : border }}
             >
-              <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div style={{ fontSize: 10, color: 'rgba(235,235,245,0.30)', marginBottom: 3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {t('detail.ep')}
               </div>
               <div style={{ fontSize: 20, fontWeight: 800, color: numColor, lineHeight: 1, marginBottom: 5, fontFamily: "'Sora', sans-serif" }}>
                 {ep}
               </div>
               {watched && <div style={{ fontSize: 12, color: '#34d399', marginBottom: 3 }}>✓</div>}
-              {isCurrent && <div style={{ fontSize: 10, color: '#a78bfa', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>▶</div>}
+              {isCurrent && <div style={{ fontSize: 10, color: '#60aaff', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>▶</div>}
               <button
                 onClick={e => { e.stopPropagation(); setTorrentEp(ep) }}
-                style={{ marginTop: 2, width: '100%', padding: '3px 0', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontSize: 10, fontWeight: 700, letterSpacing: '0.5px', transition: 'background 0.15s' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(124,58,237,0.35)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'rgba(124,58,237,0.15)'}
+                style={{ marginTop: 2, width: '100%', padding: '3px 0', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'rgba(10,132,255,0.15)', color: '#60aaff', fontSize: 10, fontWeight: 700, letterSpacing: '0.5px', transition: 'background 0.15s' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(10,132,255,0.35)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(10,132,255,0.15)'}
               >
                 {t('torrent.btn')}
               </button>

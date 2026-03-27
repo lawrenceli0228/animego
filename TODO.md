@@ -160,42 +160,6 @@ _记录时间：2026-03-21_
 
 ---
 
-## 待办六：MAL / AniList OAuth 一键导入追番记录
-
-**背景：** 新用户需手动重建追番列表，迁移成本高，是社区冷启动最大阻力之一。
-
-**What：** 用户授权后通过 MAL/AniList OAuth 拉取现有追番列表，批量写入 Subscription collection。
-
-**Why：** 降低新用户冷启动门槛，直接带来有数据的社交图谱，是社区化投放前最强增长手段。
-
-**Pros：** 显著提升新用户留存；导入后立刻有内容，社交功能可用。
-
-**Cons：** OAuth 流程复杂（申请 API key、回调、token 刷新）；MAL API 限流严格。
-
-**Context：** 优先 AniList（GraphQL，文档好，无需 key）。MAL 需申请 client_id。实现思路：新增 `GET /api/auth/anilist/import`，前端授权页跳转 → callback → 后台拉取 → 批量 upsert Subscription。
-
-**Effort：** L（人工 3 天 / CC ~1h）｜**Priority：** P2｜**Depends on：** Phase 2 公开追番页上线
-
----
-
-## 待办七：分享卡片 OG 图生成
-
-**背景：** Phase 2 分享按钮生成的链接在 Twitter/Discord 展示时只有文字，缺乏视觉吸引力。
-
-**What：** 为 `/u/:username` 和番剧详情页生成带封面图、标题、评分的 OpenGraph 图片（使用 Satori 或 Vercel OG）。
-
-**Why：** 带图分享点击率显著高于纯文字链接，是低成本提升用户获取的手段。
-
-**Pros：** 提升分享转化率；实现后对所有分享场景永久生效。
-
-**Cons：** Satori 字体加载有冷启动延迟；需要 Vercel Edge Function 或单独 worker。
-
-**Context：** 封面图来源 AniList 的 `coverImage.large`，已在 AnimeCache model 中缓存。OG endpoint：`GET /api/og?anilistId=xxx` 返回 PNG。
-
-**Effort：** M（人工 1 天 / CC ~20min）｜**Priority：** P2｜**Depends on：** Phase 2 分享按钮上线
-
----
-
 ---
 
 ## 待办八：建立 DESIGN.md 设计系统文档
