@@ -17,6 +17,24 @@ function fmtDate(iso) {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
 }
 
+// Score 1 if title contains this specific episode number (common patterns)
+function epRelevance(title, epPad) {
+  const epNum = String(parseInt(epPad)) // non-padded e.g. "1"
+  return [
+    `- ${epPad}`, `- ${epNum} `, `- ${epNum}]`, `- ${epNum}.`,
+    `[${epPad}]`, `[${epNum}]`,
+    ` ${epPad} `, ` ${epPad}.`,
+  ].some(p => title.includes(p)) ? 1 : 0
+}
+
+function resScore(title) {
+  if (/2160[Pp]|4K/i.test(title)) return 4
+  if (/1080[Pp]/i.test(title)) return 3
+  if (/720[Pp]/i.test(title)) return 2
+  if (/480[Pp]/i.test(title)) return 1
+  return 0
+}
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function GroupRow({ label, count, active, onClick }) {
@@ -49,7 +67,7 @@ function GroupRow({ label, count, active, onClick }) {
   )
 }
 
-function TorrentRow({ item, idx, copied, onCopy, onOpen }) {
+function TorrentRow({ item, copied, onCopy, onOpen }) {
   const { resolution, tags } = parseTags(item.title)
   const [hovered, setHovered] = useState(false)
 
@@ -86,9 +104,23 @@ function TorrentRow({ item, idx, copied, onCopy, onOpen }) {
               background: 'rgba(148,163,184,0.1)', color: 'rgba(235,235,245,0.60)',
             }}>{tag}</span>
           ))}
-          <span style={{ fontSize: 10, color: '#475569', marginLeft: 4 }}>{item.size}</span>
+          {item.size && (
+            <span style={{ fontSize: 10, color: '#475569' }}>{item.size}</span>
+          )}
           {item.date && (
             <span style={{ fontSize: 10, color: '#475569' }}>{fmtDate(item.date)}</span>
+          )}
+          {item.source && (
+            <span style={{
+              fontSize: 9, padding: '1px 5px', borderRadius: 3, fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '0.5px',
+              background: item.source === 'nyaa'  ? 'rgba(90,200,250,0.1)'
+                        : item.source === 'dmhy'  ? 'rgba(52,211,153,0.1)'
+                        : 'rgba(148,163,184,0.08)',
+              color: item.source === 'nyaa'  ? '#5ac8fa'
+                   : item.source === 'dmhy'  ? '#34d399'
+                   : 'rgba(235,235,245,0.30)',
+            }}>{item.source === 'dmhy' ? '花园' : item.source}</span>
           )}
         </div>
       </div>
@@ -136,9 +168,6 @@ export default function TorrentModal({ anime, episode, onClose }) {
 
   const { data: torrents, isLoading } = useTorrents(searchQ)
 
-  // Reset group filter on each new search result
-  useEffect(() => { setSelectedGroup('ALL') }, [torrents])
-
   // Escape key closes modal
   useEffect(() => {
     const handler = e => { if (e.key === 'Escape') onClose() }
@@ -152,7 +181,30 @@ export default function TorrentModal({ anime, episode, onClose }) {
     setTimeout(() => setCopied(c => c === idx ? null : c), 2000)
   }, [])
 
-  // Build fansub groups from API-provided fansub field
+  // Title variant pills for quick search switching
+  const titleOptions = useMemo(() => {
+    const opts = [
+      anime.titleChinese && { label: '中文', value: anime.titleChinese },
+      anime.titleRomaji  && { label: 'Romaji', value: anime.titleRomaji },
+      anime.titleEnglish && anime.titleEnglish !== anime.titleRomaji
+        && { label: 'English', value: anime.titleEnglish },
+      anime.titleNative  && { label: '日本語', value: anime.titleNative },
+    ].filter(Boolean)
+    return opts.filter((opt, i) => opts.findIndex(o => o.value === opt.value) === i)
+  }, [anime])
+
+  const triggerSearch = useCallback((newQ) => {
+    setSearchQ(newQ)
+    setSelectedGroup('ALL')
+  }, [])
+
+  const applyTitle = (title) => {
+    const newQ = `${title} - ${epPad}`
+    setQuery(newQ)
+    triggerSearch(newQ)
+  }
+
+  // Build fansub groups + sorted results
   const { groups, groupNames, filteredTorrents } = useMemo(() => {
     const groups = {}
     for (const item of torrents ?? []) {
@@ -161,11 +213,22 @@ export default function TorrentModal({ anime, episode, onClose }) {
       groups[g].push(item)
     }
     const groupNames = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length)
-    const filteredTorrents = !torrents ? []
+
+    const base = !torrents ? []
       : selectedGroup === 'ALL' ? torrents
       : (groups[selectedGroup] ?? [])
-    return { groups, groupNames, filteredTorrents }
-  }, [torrents, selectedGroup])
+
+    // Sort: episode-match first → resolution desc → date desc
+    const sorted = [...base].sort((a, b) => {
+      const epDiff = epRelevance(b.title, epPad) - epRelevance(a.title, epPad)
+      if (epDiff !== 0) return epDiff
+      const resDiff = resScore(b.title) - resScore(a.title)
+      if (resDiff !== 0) return resDiff
+      return new Date(b.date || 0) - new Date(a.date || 0)
+    })
+
+    return { groups, groupNames, filteredTorrents: sorted }
+  }, [torrents, selectedGroup, epPad])
 
   return (
     <div
@@ -192,7 +255,7 @@ export default function TorrentModal({ anime, episode, onClose }) {
           padding: '14px 18px 12px',
           borderBottom: '1px solid rgba(148,163,184,0.08)',
           flexShrink: 0,
-          display: 'flex', flexDirection: 'column', gap: 10,
+          display: 'flex', flexDirection: 'column', gap: 8,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ color: '#0a84ff', fontSize: 11, fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase' }}>
@@ -205,11 +268,43 @@ export default function TorrentModal({ anime, episode, onClose }) {
               onMouseLeave={e => e.currentTarget.style.color = 'rgba(235,235,245,0.30)'}
             >✕</button>
           </div>
+
+          {/* Title variant pills */}
+          {titleOptions.length > 1 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {titleOptions.map(opt => (
+                <button
+                  key={opt.label}
+                  onClick={() => applyTitle(opt.value)}
+                  style={{
+                    padding: '3px 10px', borderRadius: 20,
+                    border: '1px solid rgba(148,163,184,0.2)',
+                    background: 'transparent', color: 'rgba(235,235,245,0.50)',
+                    fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                    transition: 'all 0.15s', whiteSpace: 'nowrap',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.borderColor = 'rgba(10,132,255,0.6)'
+                    e.currentTarget.style.color = '#60aaff'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = 'rgba(148,163,184,0.2)'
+                    e.currentTarget.style.color = 'rgba(235,235,245,0.50)'
+                  }}
+                >
+                  <span style={{ color: 'rgba(235,235,245,0.35)', marginRight: 4 }}>{opt.label}</span>
+                  {opt.value.length > 18 ? opt.value.slice(0, 18) + '…' : opt.value}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Search bar */}
           <div style={{ display: 'flex', gap: 10 }}>
             <input
               value={query}
               onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') setSearchQ(query) }}
+              onKeyDown={e => { if (e.key === 'Enter') triggerSearch(query) }}
               style={{
                 flex: 1, padding: '8px 13px', borderRadius: 9,
                 border: '1px solid rgba(148,163,184,0.15)',
@@ -219,10 +314,10 @@ export default function TorrentModal({ anime, episode, onClose }) {
               placeholder={t('torrent.placeholder')}
             />
             <button
-              onClick={() => setSearchQ(query)}
+              onClick={() => triggerSearch(query)}
               style={{
                 padding: '8px 18px', borderRadius: 9, flexShrink: 0,
-                background: 'linear-gradient(135deg,#0a84ff,#5ac8fa)',
+                background: '#0a84ff',
                 color: '#fff', fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer',
               }}
             >{t('torrent.searchBtn')}</button>
@@ -280,7 +375,6 @@ export default function TorrentModal({ anime, episode, onClose }) {
                   <TorrentRow
                     key={i}
                     item={item}
-                    idx={i}
                     copied={copied === i}
                     onCopy={() => copyMagnet(item.magnet, i)}
                     onOpen={() => window.open(item.magnet)}
