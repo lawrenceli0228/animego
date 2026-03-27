@@ -45,7 +45,7 @@ const s = {
     border: 'none', cursor: 'pointer'
   },
   langBtn: {
-    padding: '4px 10px', borderRadius: 6,
+    minHeight: 44, minWidth: 44, padding: '0 10px', borderRadius: 6,
     border: '1px solid rgba(148,163,184,0.2)',
     color: 'rgba(235,235,245,0.60)', fontSize: 12, fontWeight: 600,
     cursor: 'pointer', background: 'none', transition: 'all 0.2s'
