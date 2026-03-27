@@ -7,7 +7,7 @@ const scoreColor = (s) => s >= 75 ? '#22c55e' : s >= 50 ? '#eab308' : '#ef4444'
 export default function AnimeCard({ anime, rank, watcherCount }) {
   const navigate = useNavigate()
   const { lang } = useLang()
-  const { anilistId, titleRomaji, titleEnglish, coverImageUrl, averageScore, genres = [], format } = anime
+  const { anilistId, titleRomaji, coverImageUrl, averageScore, genres = [], format } = anime
 
   return (
     <div
@@ -15,7 +15,7 @@ export default function AnimeCard({ anime, rank, watcherCount }) {
       role="button"
       tabIndex={0}
       onKeyDown={e => e.key === 'Enter' && navigate(`/anime/${anilistId}`)}
-      aria-label={rank ? `排名第${rank}` : titleRomaji}
+      aria-label={pickTitle(anime, lang)}
       style={{
         position: 'relative', cursor: 'pointer', borderRadius: 12,
         overflow: 'hidden', background: '#1c1c1e',
@@ -79,16 +79,17 @@ export default function AnimeCard({ anime, rank, watcherCount }) {
         }}>👥 {watcherCount}</span>
       )}
 
-      {/* Hover overlay */}
-      <div className="card-overlay" style={{
-        position:'absolute', inset:0, opacity:0, transition:'opacity 0.25s',
-        background:'linear-gradient(to top, rgba(10,14,26,0.97) 0%, rgba(10,14,26,0.5) 60%, transparent 100%)',
-        display:'flex', flexDirection:'column', justifyContent:'flex-end', padding:12
+      {/* Permanent bottom gradient — title always visible inside the image */}
+      <div style={{
+        position:'absolute', bottom:0, left:0, right:0,
+        background:'linear-gradient(to top, rgba(10,14,26,0.97) 0%, rgba(10,14,26,0.6) 55%, transparent 100%)',
+        padding:'32px 10px 10px'
       }}>
-        <p style={{ fontFamily:"'Sora',sans-serif", fontSize:12, fontWeight:600, color:'#ffffff', marginBottom:6, lineHeight:1.3 }}>
-          {pickTitle(anime, lang)}
-        </p>
-        <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
+        {/* Genres — revealed on hover */}
+        <div className="card-overlay" style={{
+          opacity:0, transition:'opacity 0.25s',
+          display:'flex', flexWrap:'wrap', gap:4, marginBottom:6
+        }}>
           {genres.slice(0,2).map(g => (
             <span key={g} style={{
               fontSize:10, padding:'2px 7px', borderRadius:4,
@@ -96,6 +97,15 @@ export default function AnimeCard({ anime, rank, watcherCount }) {
             }}>{g}</span>
           ))}
         </div>
+        {/* Title — always visible, updates immediately on language switch */}
+        <p style={{
+          fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:600,
+          color:'#ffffff', lineHeight:1.35, margin:0,
+          overflow:'hidden', display:'-webkit-box',
+          WebkitLineClamp:2, WebkitBoxOrient:'vertical'
+        }}>
+          {pickTitle(anime, lang)}
+        </p>
       </div>
     </div>
   )

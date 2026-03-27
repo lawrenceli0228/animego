@@ -143,7 +143,8 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   if (warmed) {
     const skip  = (pageNum - 1) * perPageNum;
     const anime = await AnimeCache.find({
-      season, seasonYear: yearNum, cachedAt: { $gt: freshSince }
+      season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+      genres: { $nin: ['Hentai'] }
     })
       .sort({ averageScore: -1 })
       .skip(skip)
@@ -169,13 +170,15 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
 
   // ③ Serve partial MongoDB data while warming (avoids waiting)
   const totalCached = await AnimeCache.countDocuments({
-    season, seasonYear: yearNum, cachedAt: { $gt: freshSince }
+    season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+    genres: { $nin: ['Hentai'] }
   });
 
   if (totalCached > 0) {
     const skip  = (pageNum - 1) * perPageNum;
     const anime = await AnimeCache.find({
-      season, seasonYear: yearNum, cachedAt: { $gt: freshSince }
+      season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+      genres: { $nin: ['Hentai'] }
     })
       .sort({ averageScore: -1 })
       .skip(skip)
@@ -269,6 +272,7 @@ async function getWeeklySchedule() {
   // Group by local date string 'YYYY-MM-DD'
   const groups = {};
   allSchedules.forEach(item => {
+    if (item.media.isAdult) return; // skip adult content
     const d   = new Date(item.airingAt * 1000);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (!groups[key]) groups[key] = [];

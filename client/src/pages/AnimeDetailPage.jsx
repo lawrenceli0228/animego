@@ -1,5 +1,6 @@
 import { useParams } from 'react-router-dom'
 import { useAnimeDetail } from '../hooks/useAnime'
+import { pickTitle } from '../utils/formatters'
 import { useLang } from '../context/LanguageContext'
 import AnimeDetailHero from '../components/anime/AnimeDetailHero'
 import SubscriptionButton from '../components/subscription/SubscriptionButton'
@@ -11,13 +12,13 @@ function ShareButton({ anime }) {
   const { t, lang } = useLang()
   const handle = async () => {
     const url = `${window.location.origin}/anime/${anime.anilistId}`
-    const title = (lang === 'zh' && anime.titleChinese) ? anime.titleChinese : (anime.titleRomaji || anime.titleEnglish)
+    const title = pickTitle(anime, lang)
     if (navigator.share) {
       try { await navigator.share({ title: `${title} — AnimeGo`, url }) }
       catch (_) {}
     } else {
       await navigator.clipboard.writeText(url)
-      alert(lang === 'zh' ? '链接已复制' : 'Link copied!')
+      alert(t('detail.linkCopied'))
     }
   }
   return (
@@ -37,12 +38,13 @@ function ShareButton({ anime }) {
 
 export default function AnimeDetailPage() {
   const { id } = useParams()
+  const { t } = useLang()
   const { data: anime, isLoading, error } = useAnimeDetail(id)
 
   if (isLoading) return <LoadingSpinner />
   if (error) return (
     <div style={{ textAlign:'center', padding:'80px 0', color:'#ef4444' }}>
-      加载失败：{error.message}
+      {t('anime.loadError')}：{error.message}
     </div>
   )
   if (!anime) return null

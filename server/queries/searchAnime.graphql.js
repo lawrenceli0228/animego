@@ -8,7 +8,7 @@ const SEARCH_ANIME_QUERY = `
         hasNextPage
         perPage
       }
-      media(search: $search, genre: $genre, type: ANIME, sort: SEARCH_MATCH) {
+      media(search: $search, genre: $genre, type: ANIME, isAdult: false, sort: SEARCH_MATCH) {
         id
         title { romaji english native }
         coverImage { extraLarge large }

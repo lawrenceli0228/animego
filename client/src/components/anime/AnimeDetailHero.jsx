@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { formatScore, formatSeason, stripHtml, truncate, pickTitle } from '../../utils/formatters'
+import { formatScore, stripHtml, truncate, pickTitle } from '../../utils/formatters'
 import { useLang } from '../../context/LanguageContext'
 
 const scoreColor = (s) => s >= 75 ? '#22c55e' : s >= 50 ? '#eab308' : '#ef4444'
@@ -52,7 +52,7 @@ export default function AnimeDetailHero({ anime }) {
           <h1 style={{ fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 }}>
             {pickTitle(anime, lang)}
           </h1>
-          {titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
+          {lang === 'zh' && titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
 
           {/* Badges row */}
           <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:20 }}>
@@ -70,7 +70,7 @@ export default function AnimeDetailHero({ anime }) {
               color:'rgba(235,235,245,0.60)', fontSize:13 }}>{episodes} {t('detail.epUnit')}</span>}
             {season && seasonYear && <span style={{ padding:'4px 12px', borderRadius:20,
               background:'rgba(148,163,184,0.08)', color:'rgba(235,235,245,0.60)', fontSize:13 }}>
-              {formatSeason(season, seasonYear)}
+              {t(`season.${season}`)} {seasonYear}
             </span>}
             {bgmId && (
               <a

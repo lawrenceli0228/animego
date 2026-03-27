@@ -18,7 +18,7 @@ function ShareButton({ username }) {
     } else {
       await navigator.clipboard.writeText(url)
       // simple feedback — toast would be ideal but keeps this self-contained
-      alert(lang === 'zh' ? '链接已复制' : 'Link copied!')
+      alert(t('detail.linkCopied'))
     }
   }
   return (

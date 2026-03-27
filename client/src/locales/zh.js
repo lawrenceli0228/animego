@@ -20,6 +20,7 @@ const zh = {
   // Anime watchers
   anime: {
     watchers: '人在追', watchersMore: '还有',
+    loadError: '加载失败', noAnime: '暂无番剧',
   },
   // Anime detail
   detail: {
@@ -30,6 +31,7 @@ const zh = {
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',
+    linkCopied: '链接已复制',
   },
   // Subscription
   sub: {

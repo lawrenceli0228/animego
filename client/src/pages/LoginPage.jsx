@@ -69,7 +69,7 @@ export default function LoginPage() {
           {error && <p style={{ color:'#f87171', fontSize:13, marginBottom:12, textAlign:'center' }}>{error}</p>}
 
           <button type="submit" disabled={loading}
-            style={{ width:'100%', padding:'12px', background:'linear-gradient(135deg,#0a84ff,#0a84ff)',
+            style={{ width:'100%', padding:'12px', background:'#0a84ff',
               border:'none', borderRadius:10, color:'#fff', fontSize:15, fontWeight:700,
               cursor: loading ? 'not-allowed' : 'pointer', fontFamily:"'Sora',sans-serif",
               opacity: loading ? 0.7 : 1 }}>

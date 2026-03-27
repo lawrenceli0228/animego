@@ -67,7 +67,7 @@ export default function ForgotPasswordPage() {
             />
 
             <button type="submit" disabled={loading}
-              style={{ width:'100%', padding:'12px', background:'linear-gradient(135deg,#0a84ff,#0a84ff)',
+              style={{ width:'100%', padding:'12px', background:'#0a84ff',
                 border:'none', borderRadius:10, color:'#fff', fontSize:15, fontWeight:700,
                 cursor: loading ? 'not-allowed' : 'pointer', fontFamily:"'Sora',sans-serif",
                 opacity: loading ? 0.7 : 1, marginBottom:20 }}>

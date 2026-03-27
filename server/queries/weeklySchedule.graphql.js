@@ -12,6 +12,7 @@ const WEEKLY_SCHEDULE_QUERY = `
         episode
         media {
           id
+          isAdult
           title { romaji english native }
           coverImage { extraLarge large }
           format

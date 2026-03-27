@@ -8,7 +8,7 @@ const SEASONAL_ANIME_QUERY = `
         hasNextPage
         perPage
       }
-      media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: POPULARITY_DESC) {
+      media(season: $season, seasonYear: $seasonYear, type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
         id
         title { romaji english native }
         coverImage { extraLarge large }

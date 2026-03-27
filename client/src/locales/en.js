@@ -20,6 +20,7 @@ const en = {
   // Anime watchers
   anime: {
     watchers: 'watching', watchersMore: '+',
+    loadError: 'Failed to load', noAnime: 'No anime found',
   },
   // Anime detail
   detail: {
@@ -30,6 +31,7 @@ const en = {
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
+    linkCopied: 'Link copied!',
   },
   // Subscription
   sub: {
