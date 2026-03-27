@@ -162,22 +162,63 @@ _记录时间：2026-03-21_
 
 ---
 
-## 待办八：建立 DESIGN.md 设计系统文档
+## ✅ 待办八：建立 DESIGN.md 设计系统文档（已完成 2026-03-27）
 
-**背景：** 项目无 DESIGN.md。设计语言（调色 `#0a0e1a/#7c3aed/#06b6d4`、字体 Sora、间距规则、动画时长）全部分散在组件代码里，每次评审需靠反推。
-
-**What：** 运行 `/design-consultation`，生成 DESIGN.md，记录完整设计系统（调色板、字体规格、间距调、动画参数、组件词汇表）。
-
-**Why：** 没有 DESIGN.md，每次设计评审都是在读代码而非对照文档，且新特性容易引入设计不一致。
-
-**Pros：** 设计决策有单一真相源；Phase 2/3 新组件有明确参考，保持视觉一致性。
-
-**Cons：** 当前单人开发，协作收益短期有限；需要半天时间整理。
-
-**Context：** Phase 1 设计评审中已手动推断出设计语言并写入 community-platform-v2.md，这是临时措施。DESIGN.md 应在 Phase 2 前建立，届时会有公开追番页、关注按钮等新组件。命令：`/design-consultation`。
-
-**Effort：** S（人工半天 / CC ~20min）｜**Priority：** P3｜**Depends on：** 无
+DESIGN.md 已在 feat/community-phase3 分支由 /design-consultation 生成，包含完整色系、字体规格、间距体系、动画参数。
 
 ---
 
 _记录时间：2026-03-21（CEO Review 补充）_
+_完成时间：2026-03-27_
+
+---
+
+## 待办九：全局 Toast 通知系统
+
+**What：** 实现一个轻量 Toast 组件（右下角入场，2-3 秒自动消失）+ 全局 `ToastContext`，替代现有的静默失败和 `alert()` 调用。
+
+**Why：** 目前关注操作失败静默，追番更新无反馈，分享链接用 `alert()`——每一个都在悄悄磨损用户信任。
+
+**Pros：** 统一操作反馈；`alert()` 全部清除；为后续所有需要通知的功能提供基础设施。
+
+**Cons：** 需要新建 Context + 组件，约 40 行代码。
+
+**Context：** 已知需要接入的点：`FollowButton` 失败态、`UserProfilePage` 分享按钮（当前 `alert(t('detail.linkCopied'))`）、后续磁力搜索重设计中的复制反馈（当前用 `setCopied` 本地状态）。Toast 组件应支持 success / error / info 三种语义，对应 `--success #30d158` / `--error #ff453a` / `--info #5ac8fa`。
+
+**Effort：** S（人工 4h / CC ~20min）｜**Priority：** P2｜**Depends on：** 无
+
+---
+
+## 待办十：弹幕输入框断线状态视觉处理
+
+**What：** `DanmakuInput.jsx` 在 `connected === false` 时，输入框 opacity 降为 0.4，placeholder 改为 `t('danmaku.connecting')`，阻止用户在断线时打字。
+
+**Why：** 用户现在会在断线状态下打字、点发送，什么都不发生，不知道是 bug 还是自己操作错了。
+
+**Pros：** 消除无效操作；明确传达连接状态。
+
+**Cons：** 极小改动（~5 行）。
+
+**Context：** `DanmakuInput.jsx:41`。当前只有发送按钮会变暗（`value.trim() && connected`），输入框本身无视觉变化。`connected` prop 已传入组件，直接可用。
+
+**Effort：** S（人工 1h / CC ~10min）｜**Priority：** P2｜**Depends on：** 无
+
+---
+
+## 待办十一：用户追番列表分页（"显示更多"）
+
+**What：** `UserProfilePage.jsx` 每个状态分组默认只显示前 12 部，底部加「显示更多」按钮，点击展开全部。
+
+**Why：** 追番数量多的用户（100+ 已完结）会一次性渲染大量 `AnimeCard`，导致页面卡顿。
+
+**Pros：** 防止大用户页面卡顿；首屏加载更快；视觉上更整洁。
+
+**Cons：** 纯前端逻辑，无需改后端接口。
+
+**Context：** `UserProfilePage.jsx:122`，`byStatus[status]` 数组直接 `.map()` 渲染，无截断。改为 `byStatus[status].slice(0, expanded ? Infinity : 12)` + 展开按钮。
+
+**Effort：** S（人工 2h / CC ~15min）｜**Priority：** P3｜**Depends on：** 无
+
+---
+
+_记录时间：2026-03-27（Design Review 补充）_
