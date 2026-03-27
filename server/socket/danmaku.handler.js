@@ -22,6 +22,8 @@ module.exports = function registerDanmakuHandlers(io, socket) {
       // Rate limit
       if (now - (lastSent.get(userId) ?? 0) < RATE_LIMIT_MS) return;
       lastSent.set(userId, now);
+      // Auto-expire entry so the map stays bounded
+      setTimeout(() => { if (lastSent.get(userId) === now) lastSent.delete(userId) }, RATE_LIMIT_MS * 2);
 
       // Validate
       if (!content || typeof content !== 'string') return;

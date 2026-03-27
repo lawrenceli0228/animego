@@ -9,6 +9,7 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import ProfilePage from './pages/ProfilePage'
 import UserProfilePage from './pages/UserProfilePage'
+import FollowListPage from './pages/FollowListPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 
@@ -27,6 +28,8 @@ export default function App() {
           <Route path="/reset-password/:token"   element={<ResetPasswordPage />} />
           <Route path="/profile"                 element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
           <Route path="/u/:username"             element={<UserProfilePage />} />
+          <Route path="/u/:username/followers"  element={<FollowListPage type="followers" />} />
+          <Route path="/u/:username/following"  element={<FollowListPage type="following" />} />
         </Route>
       </Routes>
     </BrowserRouter>

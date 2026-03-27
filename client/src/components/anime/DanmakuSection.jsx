@@ -11,7 +11,10 @@ export default function DanmakuSection({ anilistId, episode }) {
 
   const { data: history } = useDanmakuHistory(anilistId, episode, true)
   const liveEndsAt = history?.liveEndsAt ? new Date(history.liveEndsAt) : null
-  const isLive = !liveEndsAt || Date.now() < liveEndsAt.getTime()
+  // isLive: badge — only when a window has been explicitly started AND not expired
+  // canSend: input — also covers "never started" so the first user can open the window
+  const isLive  = liveEndsAt !== null && Date.now() < liveEndsAt.getTime()
+  const canSend = !liveEndsAt || Date.now() < liveEndsAt.getTime()
 
   const { live, connected, send } = useDanmakuSocket(anilistId, episode, !!user)
 
@@ -57,8 +60,8 @@ export default function DanmakuSection({ anilistId, episode }) {
         <DanmakuOverlay messages={allMessages.slice(-30)} />
       </div>
 
-      {/* Input (only during live window) */}
-      {isLive ? (
+      {/* Input (during live window or before any danmaku sent) */}
+      {canSend ? (
         <DanmakuInput onSend={send} connected={connected} />
       ) : (
         <p style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '4px 0' }}>
