@@ -102,12 +102,17 @@ export default function HeroCarousel({ animeList = [] }) {
 
       <div style={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 8, zIndex: 10 }}>
         {animeList.map((_, i) => (
-          <button key={i} onClick={() => setCurrent(i)} style={{
-            height: 6, borderRadius: 3, border: 'none', cursor: 'pointer',
-            width: i === current ? 28 : 6,
-            background: i === current ? '#0a84ff' : 'rgba(255,255,255,0.35)',
-            transition: 'all 0.35s ease', padding: 0
-          }} />
+          <button key={i} onClick={() => setCurrent(i)} aria-label={`Slide ${i + 1}`} style={{
+            height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: 'none', cursor: 'pointer', background: 'transparent', padding: '0 4px',
+          }}>
+            <span style={{
+              display: 'block', height: 6, borderRadius: 3,
+              width: i === current ? 28 : 6,
+              background: i === current ? '#0a84ff' : 'rgba(255,255,255,0.35)',
+              transition: 'all 0.35s ease',
+            }} />
+          </button>
         ))}
       </div>
     </div>
