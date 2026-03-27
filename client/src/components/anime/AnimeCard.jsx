@@ -76,7 +76,7 @@ export default function AnimeCard({ anime, rank, watcherCount }) {
           background:'rgba(10,14,26,0.85)', backdropFilter:'blur(8px)',
           color:'#5ac8fa', fontSize:10, fontWeight:700,
           padding:'3px 7px', borderRadius:5
-        }}>👥 {watcherCount}</span>
+        }}>{watcherCount} 人</span>
       )}
 
       {/* Permanent bottom gradient — title always visible inside the image */}
