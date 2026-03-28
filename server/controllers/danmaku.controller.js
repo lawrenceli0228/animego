@@ -1,4 +1,5 @@
 const Danmaku = require('../models/Danmaku');
+const EpisodeWindow = require('../models/EpisodeWindow');
 
 exports.getDanmaku = async (req, res, next) => {
   try {
@@ -9,12 +10,15 @@ exports.getDanmaku = async (req, res, next) => {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid params' } });
     }
 
-    const danmakus = await Danmaku.find({ anilistId, episode })
-      .sort({ createdAt: 1 })
-      .select('username content createdAt liveEndsAt')
-      .lean();
+    const [danmakus, win] = await Promise.all([
+      Danmaku.find({ anilistId, episode })
+        .sort({ createdAt: 1 })
+        .select('username content createdAt')
+        .lean(),
+      EpisodeWindow.findOne({ anilistId, episode }).lean(),
+    ]);
 
-    const liveEndsAt = danmakus.length > 0 ? danmakus[0].liveEndsAt : null;
+    const liveEndsAt = win?.liveEndsAt ?? null;
 
     res.json({ data: danmakus, liveEndsAt });
   } catch (err) {
