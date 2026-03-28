@@ -32,6 +32,7 @@ const en = {
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
     linkCopied: 'Link copied!',
+    linkCopyFailed: 'Copy failed — please copy the link manually',
   },
   // Subscription
   sub: {

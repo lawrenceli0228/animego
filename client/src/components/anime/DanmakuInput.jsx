@@ -25,7 +25,7 @@ export default function DanmakuInput({ onSend, connected }) {
 
   const handleSend = () => {
     const trimmed = value.trim()
-    if (!trimmed) return
+    if (!trimmed || !connected) return
     onSend(trimmed)
     setValue('')
   }
@@ -41,14 +41,17 @@ export default function DanmakuInput({ onSend, connected }) {
       <input
         value={value}
         onChange={e => setValue(e.target.value.slice(0, MAX_LEN))}
-        onKeyDown={e => e.key === 'Enter' && handleSend()}
-        placeholder={t('danmaku.placeholder')}
+        onKeyDown={e => e.key === 'Enter' && connected && handleSend()}
+        placeholder={connected ? t('danmaku.placeholder') : t('danmaku.connecting')}
         maxLength={MAX_LEN}
+        disabled={!connected}
         style={{
           flex: 1, padding: '7px 12px', borderRadius: 8,
           border: '1px solid rgba(148,163,184,0.2)',
           background: 'rgba(255,255,255,0.04)', color: '#ffffff',
           fontSize: 13, outline: 'none',
+          opacity: connected ? 1 : 0.4,
+          cursor: connected ? 'text' : 'not-allowed',
         }}
       />
       <span style={{ fontSize: 11, color: '#475569', flexShrink: 0 }}>

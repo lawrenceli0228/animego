@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import { useAuth } from '../context/AuthContext'
 import { useLang } from '../context/LanguageContext'
 import { useUserProfile } from '../hooks/useSocial'
@@ -7,6 +9,7 @@ import AnimeCard from '../components/anime/AnimeCard'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
 const STATUS_TABS = ['watching', 'completed', 'plan_to_watch', 'dropped']
+const PAGE_SIZE = 12
 
 function ShareButton({ username }) {
   const { t, lang } = useLang()
@@ -16,9 +19,12 @@ function ShareButton({ username }) {
       try { await navigator.share({ title: `${username} 的追番列表 — AnimeGo`, url }) }
       catch (_) { /* user cancelled */ }
     } else {
-      await navigator.clipboard.writeText(url)
-      // simple feedback — toast would be ideal but keeps this self-contained
-      alert(t('detail.linkCopied'))
+      try {
+        await navigator.clipboard.writeText(url)
+        toast(t('detail.linkCopied'))
+      } catch (_) {
+        toast.error(t('detail.linkCopyFailed'))
+      }
     }
   }
   return (
@@ -43,6 +49,9 @@ export default function UserProfilePage() {
   const navigate = useNavigate()
 
   const { data: profile, isLoading, isError } = useUserProfile(username)
+  const [expanded, setExpanded] = useState({})
+  // Reset expand state when navigating to a different user's profile
+  useEffect(() => { setExpanded({}) }, [username])
 
   if (isLoading) return (
     <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}>
@@ -122,6 +131,9 @@ export default function UserProfilePage() {
       {STATUS_TABS.map(status => {
         const list = byStatus[status]
         if (list.length === 0) return null
+        const isExpanded = expanded[status]
+        const shown = isExpanded ? list : list.slice(0, PAGE_SIZE)
+        const hasMore = list.length > PAGE_SIZE
         return (
           <section key={status} style={{ marginBottom: 40 }}>
             <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -136,12 +148,28 @@ export default function UserProfilePage() {
               </span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-              {list.map(anime => (
+              {shown.map(anime => (
                 <div key={anime.anilistId} style={{ width: 120 }}>
                   <AnimeCard anime={anime} />
                 </div>
               ))}
             </div>
+            {hasMore && (
+              <button
+                onClick={() => setExpanded(prev => ({ ...prev, [status]: !isExpanded }))}
+                style={{
+                  marginTop: 12, padding: '8px 20px', borderRadius: 8,
+                  border: '1px solid rgba(148,163,184,0.2)',
+                  background: 'transparent', color: 'rgba(235,235,245,0.60)',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                {isExpanded
+                  ? (lang === 'zh' ? '收起' : 'Show Less')
+                  : (lang === 'zh' ? `显示更多 (${list.length - PAGE_SIZE})` : `Show More (${list.length - PAGE_SIZE})`)
+                }
+              </button>
+            )}
           </section>
         )
       })}

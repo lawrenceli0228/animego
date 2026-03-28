@@ -32,6 +32,7 @@ const zh = {
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',
     linkCopied: '链接已复制',
+    linkCopyFailed: '复制失败，请手动复制链接',
   },
   // Subscription
   sub: {
