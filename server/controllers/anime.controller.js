@@ -3,8 +3,9 @@ const { XMLParser } = require('fast-xml-parser');
 const Subscription = require('../models/Subscription');
 const AnimeCache   = require('../models/AnimeCache');
 
-// In-memory torrent cache (1-hour TTL)
+// In-memory torrent cache (1-hour TTL, max 500 entries)
 const torrentCache = new Map();
+const TORRENT_CACHE_MAX = 500;
 
 // In-memory trending cache (1h TTL)
 const trendingCache = { data: null, ts: 0 };
@@ -150,7 +151,7 @@ async function fetchAcgRip(term) {
       date:   item.pubDate ?? null,
       source: 'acg',
     }))
-    .filter(i => i.title && i.magnet);
+    .filter(i => i.title && i.magnet && i.magnet.startsWith('magnet:'));
 }
 
 async function fetchDmhy(term) {
@@ -218,7 +219,7 @@ async function fetchNyaa(term) {
         source: 'nyaa',
       };
     })
-    .filter(i => i.title && i.magnet);
+    .filter(i => i.title && i.magnet && i.magnet.startsWith('magnet:'));
 }
 
 // GET /api/anime/torrents?q=<search query>
@@ -227,6 +228,7 @@ exports.getTorrents = async (req, res, next) => {
   try {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Missing query' } });
+    if (q.length > 200) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Query too long' } });
 
     const key = q.trim().toLowerCase();
     const cached = torrentCache.get(key);
@@ -246,6 +248,10 @@ exports.getTorrents = async (req, res, next) => {
       ...(nyaaResult.status  === 'fulfilled' ? nyaaResult.value  : []),
     ];
 
+    // Evict oldest entry if cache is full
+    if (torrentCache.size >= TORRENT_CACHE_MAX) {
+      torrentCache.delete(torrentCache.keys().next().value);
+    }
     torrentCache.set(key, { data, ts: Date.now() });
     res.json({ data });
   } catch (err) { next(err); }

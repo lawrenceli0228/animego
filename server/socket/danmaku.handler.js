@@ -1,4 +1,5 @@
 const Danmaku = require('../models/Danmaku');
+const EpisodeWindow = require('../models/EpisodeWindow');
 
 const lastSent = new Map(); // userId -> lastSentAt (in-memory rate limit)
 const RATE_LIMIT_MS  = 5000;
@@ -19,29 +20,31 @@ module.exports = function registerDanmakuHandlers(io, socket) {
     try {
       const now = Date.now();
 
-      // Rate limit
+      // Rate limit (skip tracking if map is too large to keep memory bounded)
       if (now - (lastSent.get(userId) ?? 0) < RATE_LIMIT_MS) return;
-      lastSent.set(userId, now);
-      // Auto-expire entry so the map stays bounded
-      setTimeout(() => { if (lastSent.get(userId) === now) lastSent.delete(userId) }, RATE_LIMIT_MS * 2);
+      if (lastSent.size < 10000) {
+        lastSent.set(userId, now);
+        // Auto-expire entry so the map stays bounded
+        setTimeout(() => { if (lastSent.get(userId) === now) lastSent.delete(userId) }, RATE_LIMIT_MS * 2);
+      }
 
       // Validate
       if (!content || typeof content !== 'string') return;
       const trimmed = content.trim().slice(0, 50);
       if (!trimmed) return;
+      if (!socket.user.username || !socket.user.username.trim()) return;
 
       const anilistIdNum = parseInt(anilistId);
       const episodeNum   = parseInt(episode);
       if (isNaN(anilistIdNum) || isNaN(episodeNum)) return;
 
-      // Determine liveEndsAt from first danmaku in this episode, or start new window
-      const earliest = await Danmaku.findOne(
+      // Atomically get-or-create the live window for this episode (race-safe)
+      const win = await EpisodeWindow.findOneAndUpdate(
         { anilistId: anilistIdNum, episode: episodeNum },
-        { liveEndsAt: 1 },
-        { sort: { createdAt: 1 } }
-      ).lean();
-
-      const liveEndsAt = earliest ? earliest.liveEndsAt : new Date(now + LIVE_WINDOW_MS);
+        { $setOnInsert: { liveEndsAt: new Date(now + LIVE_WINDOW_MS) } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      const liveEndsAt = win.liveEndsAt;
 
       // Reject if window closed
       if (now > liveEndsAt.getTime()) return;

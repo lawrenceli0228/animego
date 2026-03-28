@@ -7,7 +7,7 @@ exports.follow = async (req, res, next) => {
     const followee = await User.findOne({ username: req.params.username });
     if (!followee) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '用户不存在' } });
 
-    if (followee._id.toString() === req.user.userId) {
+    if (followee._id.equals(req.user.userId)) {
       return res.status(400).json({ error: { code: 'INVALID_ACTION', message: '不能关注自己' } });
     }
 
