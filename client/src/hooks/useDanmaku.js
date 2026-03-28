@@ -36,10 +36,12 @@ export function useDanmakuSocket(anilistId, episode, enabled) {
     })
     socketRef.current = socket
 
-    socket.on('connect',    () => setConnected(true))
+    socket.on('connect', () => {
+      setConnected(true)
+      socket.emit('danmaku:join', { anilistId, episode })
+    })
     socket.on('disconnect', () => setConnected(false))
-
-    socket.emit('danmaku:join', { anilistId, episode })
+    socket.on('auth:expired', () => window.dispatchEvent(new CustomEvent('auth:expired')))
 
     socket.on('danmaku:new', (msg) => {
       setLive(prev => [...prev, msg])
