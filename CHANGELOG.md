@@ -2,6 +2,25 @@
 
 ---
 
+## [0.1.5.0] - 2026-03-28
+
+### Added
+- **测试覆盖扩充** — 新增 5 个测试套件（48 → 48 个用例）：`EpisodeList` 高亮边界条件（6）、`LanguageContext` 回退行为（4）、`TrendingSection` 状态（4）、`WatchersAvatarList` 显示逻辑（5）、`comment.controller` 权限与内容校验（7）
+- `UserProfilePage` 番剧列表"显示更多"分页（默认 12 部）
+- `test/setup.js` 添加 `localStorage` mock，解决 jsdom 环境下 `LanguageContext` 语言初始化问题
+
+### Fixed
+- `UserProfilePage` `ShareButton`：`navigator.clipboard.writeText` 现在有 try/catch，剪贴板权限被拒时弹出错误 toast 而非静默失败
+- `DanmakuInput` `handleSend()` 添加 `!connected` 防卫，修复通过 form 提交绕过 disabled 按钮的边界情况
+- `comment.controller` 内容长度校验改为 `content.trim().length`，修复含尾随空格的合法内容被误拒（400）问题
+- `UserProfilePage` `expanded` 状态在切换用户时（路由参数变化）正确重置
+- `LanguageContext.test` 每个用例前清空 `localStorage`，防止测试间语言状态泄漏
+- `test/setup.js` localStorage mock 添加 `configurable: true`，避免多线程测试池下重定义报错
+- `UserProfilePage` 补充缺失的 `useState`/`useEffect` React 导入
+- `zh.js`/`en.js` 新增 `detail.linkCopyFailed` 翻译 key
+
+---
+
 ## [0.1.4.0] - 2026-03-28
 
 ### Added
