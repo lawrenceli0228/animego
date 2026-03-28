@@ -2,6 +2,29 @@
 
 ---
 
+## [0.1.4.0] - 2026-03-28
+
+### Added
+- **磁力搜索重设计** — 入口从全局搜索迁移至番剧详情页，支持集数筛选器（全部/01/02…），字幕组识别从标题方括号提取
+- `GET /api/anime/torrents` 新增第三方源：动漫花园（dmhy）+ Nyaa.si，三源并发 `Promise.allSettled`，任一失败不影响其他结果
+- **iOS Blue 设计系统** — 全站 `#0a84ff` 替换紫色系，Apple True Black 三层背景（`#000000 → #1c1c1e → #2c2c2e`）
+- WCAG 触控区域修复：弹幕颜色、语言切换按钮、轮播圆点、日期筛选标签均≥44px
+
+### Fixed
+- `danmaku:join` 事件移入 `socket.on('connect', …)` 回调，修复重连后房间订阅丢失问题
+- `follow.controller.js` 自关注检测改用 `ObjectId.equals()`，修复字符串与 ObjectId 比较误判
+- 弹幕 `lastSent` Map 添加 10k 上限防内存无限增长；新增 `username` 非空校验
+- `torrentCache` 增加 500 条上限 LRU 淘汰；查询长度上限 200 字符防缓存投毒
+- RSS `magnet:` 协议校验（acg.rip + Nyaa），阻断 `javascript:` / `data:` URI 注入
+- followers/following 路由注册补全
+
+### Changed
+- **弹幕 `liveEndsAt` 竞态修复** — 引入 `EpisodeWindow` 集合（唯一索引 `{anilistId, episode}`），用 `findOneAndUpdate + $setOnInsert` 原子化首播窗口创建，消除并发首条弹幕竞态
+- **Socket JWT 过期断连** — `socket.use()` 每事件重验 JWT，过期时 emit `auth:expired` 并断开连接；客户端监听后触发统一登出流程
+- `danmaku.controller.js` `liveEndsAt` 改从 `EpisodeWindow` 读取，历史弹幕不再携带冗余字段
+
+---
+
 ## [0.1.3.0] - 2026-03-25
 
 ### Added
