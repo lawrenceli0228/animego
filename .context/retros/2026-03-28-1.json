@@ -1,0 +1,50 @@
+{
+  "date": "2026-03-28",
+  "window": "7d",
+  "metrics": {
+    "commits": 32,
+    "contributors": 1,
+    "prs_merged": 2,
+    "insertions": 10674,
+    "deletions": 2301,
+    "net_loc": 8373,
+    "test_loc": 285,
+    "test_ratio": 0.027,
+    "active_days": 4,
+    "sessions": 6,
+    "deep_sessions": 1,
+    "avg_session_minutes": 17,
+    "loc_per_session_hour": 4750,
+    "feat_pct": 0.31,
+    "fix_pct": 0.09,
+    "chore_pct": 0.16,
+    "docs_pct": 0.13,
+    "test_pct": 0.06,
+    "style_pct": 0.22,
+    "peak_hour": 0,
+    "ai_assisted_commits": 16
+  },
+  "authors": {
+    "JingchenLi": {
+      "commits": 32,
+      "insertions": 10674,
+      "deletions": 2301,
+      "test_ratio": 0.027,
+      "top_area": "client/src/components/"
+    }
+  },
+  "version_range": ["0.1.0.0", "0.1.3.0"],
+  "streak_days": 2,
+  "tweetable": "Week of Mar 21: 32 commits, 10.7k LOC, shipped 3-phase community platform (trending + profiles + danmaku) + design system | Streak: 2d",
+  "test_health": {
+    "total_test_files": 2,
+    "tests_added_this_period": 2,
+    "regression_test_commits": 1,
+    "test_files_changed": 2
+  },
+  "backlog": {
+    "total_open": 11,
+    "completed_this_period": 1,
+    "added_this_period": 3
+  }
+}
