@@ -9,18 +9,28 @@ module.exports = function registerDanmakuHandlers(io, socket) {
   const userId = String(socket.user.id);
 
   socket.on('danmaku:join', ({ anilistId, episode }) => {
-    socket.join(`danmaku:${anilistId}:${episode}`);
+    const id  = parseInt(anilistId);
+    const ep  = parseInt(episode);
+    if (isNaN(id) || isNaN(ep) || id <= 0 || ep <= 0) return;
+    // Limit per-socket room membership to prevent memory abuse
+    const danmakuRooms = [...socket.rooms].filter(r => r.startsWith('danmaku:'));
+    if (danmakuRooms.length >= 10) return;
+    socket.join(`danmaku:${id}:${ep}`);
   });
 
   socket.on('danmaku:leave', ({ anilistId, episode }) => {
-    socket.leave(`danmaku:${anilistId}:${episode}`);
+    const id = parseInt(anilistId);
+    const ep = parseInt(episode);
+    if (isNaN(id) || isNaN(ep)) return;
+    socket.leave(`danmaku:${id}:${ep}`);
   });
 
   socket.on('danmaku:send', async ({ anilistId, episode, content }) => {
     try {
       const now = Date.now();
 
-      // Rate limit (skip tracking if map is too large to keep memory bounded)
+      // Rate limit: under attack (>10k concurrent senders) we stop tracking to bound memory;
+      // this means rate limiting is intentionally sacrificed during extreme load events.
       if (now - (lastSent.get(userId) ?? 0) < RATE_LIMIT_MS) return;
       if (lastSent.size < 10000) {
         lastSent.set(userId, now);

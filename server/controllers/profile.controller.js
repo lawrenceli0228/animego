@@ -12,7 +12,7 @@ exports.getProfile = async (req, res, next) => {
     const requesterId = req.user?.userId;
 
     const [subs, followerCount, followingCount, isFollowing] = await Promise.all([
-      Subscription.find({ userId: user._id }).sort({ updatedAt: -1 }),
+      Subscription.find({ userId: user._id }).sort({ updatedAt: -1 }).limit(200),
       Follow.countDocuments({ followeeId: user._id }),
       Follow.countDocuments({ followerId: user._id }),
       requesterId
@@ -47,7 +47,7 @@ exports.getProfile = async (req, res, next) => {
 // GET /api/feed  — activity feed of followed users (requires auth)
 exports.getFeed = async (req, res, next) => {
   try {
-    const follows    = await Follow.find({ followerId: req.user.userId }).select('followeeId');
+    const follows    = await Follow.find({ followerId: req.user.userId }).select('followeeId').limit(500);
     const followeeIds = follows.map(f => f.followeeId);
 
     if (followeeIds.length === 0) return res.json({ data: [] });

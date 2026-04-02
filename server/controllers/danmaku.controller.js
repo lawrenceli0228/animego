@@ -12,9 +12,11 @@ exports.getDanmaku = async (req, res, next) => {
 
     const [danmakus, win] = await Promise.all([
       Danmaku.find({ anilistId, episode })
-        .sort({ createdAt: 1 })
+        .sort({ createdAt: -1 })
+        .limit(500)
         .select('username content createdAt')
-        .lean(),
+        .lean()
+        .then(docs => docs.reverse()), // return up to 500 most recent in chronological order
       EpisodeWindow.findOne({ anilistId, episode }).lean(),
     ]);
 

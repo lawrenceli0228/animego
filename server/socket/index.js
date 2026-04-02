@@ -20,8 +20,8 @@ module.exports = function setupSocket(httpServer) {
       try {
         jwt.verify(socket.handshake.auth.token, process.env.JWT_SECRET);
         next();
-      } catch {
-        socket.emit('auth:expired');
+      } catch (err) {
+        if (err.name === 'TokenExpiredError') socket.emit('auth:expired');
         socket.disconnect(true);
       }
     });

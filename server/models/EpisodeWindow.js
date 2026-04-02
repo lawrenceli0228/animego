@@ -10,5 +10,6 @@ const episodeWindowSchema = new mongoose.Schema({
 }, { timestamps: false });
 
 episodeWindowSchema.index({ anilistId: 1, episode: 1 }, { unique: true });
+episodeWindowSchema.index({ liveEndsAt: 1 }, { expireAfterSeconds: 90 * 24 * 3600 }); // auto-delete 90d after window closes
 
 module.exports = mongoose.model('EpisodeWindow', episodeWindowSchema);
