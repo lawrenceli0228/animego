@@ -58,13 +58,13 @@ let queueRunning = false;
 
 /**
  * 将一批 anime 对象加入富化队列（幂等：已在队列中或已完成的会被跳过）
- * @param {Array<{anilistId, titleNative, titleRomaji, bangumiEnriched}>} items
+ * @param {Array<{anilistId, titleNative, titleRomaji, bangumiVersion}>} items
  */
 function enqueueEnrichment(items) {
   let added = 0;
   for (const item of items) {
     if (!item.anilistId) continue;
-    if (item.bangumiEnriched) continue;       // 已完成，跳过
+    if ((item.bangumiVersion ?? 0) >= 1) continue; // 已完成，跳过
     if (enrichMap.has(item.anilistId)) continue; // 已在队列，跳过
     enrichMap.set(item.anilistId, {
       anilistId:   item.anilistId,
@@ -91,9 +91,9 @@ async function processQueue() {
       // 再次确认 DB 中是否已富化（避免多进程/重启重复写入）
       const doc = await AnimeCache.findOne(
         { anilistId },
-        { bangumiEnriched: 1 }
+        { bangumiVersion: 1 }
       ).lean();
-      if (!doc || doc.bangumiEnriched) continue;
+      if (!doc || doc.bangumiVersion >= 1) continue;
 
       const result = await fetchBangumiData(
         item.titleNative,
@@ -105,7 +105,7 @@ async function processQueue() {
 
       await AnimeCache.updateOne(
         { anilistId },
-        { $set: { titleChinese, bgmId, bangumiEnriched: true } }
+        { $set: { titleChinese, bgmId, bangumiVersion: 1 } }
       );
 
       if (titleChinese) {

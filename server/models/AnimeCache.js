@@ -19,7 +19,8 @@ const animeCacheSchema = new mongoose.Schema({
   // Bangumi enrichment
   titleChinese:    { type: String,  default: null },
   bgmId:           { type: Number,  default: null },
-  bangumiEnriched: { type: Boolean, default: false }
+  // 0 = unenriched, 1 = Phase 1-3 basic (title+bgmId), 2 = Phase 4 full (score/chars/staff/episodes)
+  bangumiVersion:  { type: Number,  default: 0 }
 });
 
 animeCacheSchema.index({ season: 1, seasonYear: 1 });

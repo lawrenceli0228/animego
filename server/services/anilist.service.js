@@ -63,7 +63,7 @@ async function upsertCache(animeList) {
   await Promise.all(animeList.map(a =>
     AnimeCache.findOneAndUpdate(
       { anilistId: a.anilistId },
-      a,
+      { $set: a },
       { upsert: true, new: true }
     )
   ));
@@ -186,7 +186,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
       .lean();
 
     if (anime.length > 0) {
-      const unenriched = anime.filter(a => !a.bangumiEnriched);
+      const unenriched = anime.filter(a => !a.bangumiVersion);
       if (unenriched.length) enqueueEnrichment(unenriched);
       return {
         pageInfo: {
@@ -237,7 +237,7 @@ async function searchAnime(search, genre, page = 1, perPage = 20) {
 async function getAnimeDetail(anilistId) {
   const cached = await AnimeCache.findOne({ anilistId: parseInt(anilistId) });
   if (cached && Date.now() - cached.cachedAt.getTime() < CACHE_TTL_MS) {
-    if (!cached.bangumiEnriched) enqueueEnrichment([cached]); // 懒加载富化
+    if (!cached.bangumiVersion) enqueueEnrichment([cached]); // 懒加载富化
     return cached;
   }
 
@@ -300,7 +300,7 @@ async function getWeeklySchedule() {
   if (allIds.length > 0) {
     const cached = await AnimeCache.find(
       { anilistId: { $in: allIds } },
-      { anilistId: 1, titleChinese: 1, titleNative: 1, bangumiEnriched: 1 }
+      { anilistId: 1, titleChinese: 1, titleNative: 1, bangumiVersion: 1 }
     ).lean();
     const cacheMap = new Map(cached.map(a => [a.anilistId, a]));
     const toEnrich = [];
@@ -308,7 +308,7 @@ async function getWeeklySchedule() {
       items.forEach(item => {
         const doc = cacheMap.get(item.anilistId);
         item.titleChinese = doc?.titleChinese ?? null;
-        if (doc && !doc.bangumiEnriched) {
+        if (doc && !doc.bangumiVersion) {
           toEnrich.push({
             anilistId:   item.anilistId,
             titleNative: doc.titleNative || item.titleNative,

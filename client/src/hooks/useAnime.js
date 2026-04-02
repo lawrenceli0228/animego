@@ -10,7 +10,7 @@ export function useSeasonalAnime(season, year, page = 1) {
     enabled: !!season && !!year,
     refetchInterval: (data) => {
       const items = data?.data ?? []
-      return items.length > 0 && items.some(a => !a.bangumiEnriched) ? 20 * 1000 : false
+      return items.length > 0 && items.some(a => !a.bangumiVersion) ? 20 * 1000 : false
     }
   })
 }
