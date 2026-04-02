@@ -20,7 +20,12 @@ export function useAnimeDetail(id) {
     queryKey: ['anime', id],
     queryFn: () => getAnimeDetail(id).then(r => r.data.data),
     enabled: !!id,
-    staleTime: 0
+    staleTime: 0,
+    refetchInterval: (data) => {
+      const anime = data?.data ?? data
+      if (!anime) return false
+      return (anime.bangumiVersion ?? 0) < 2 ? 4000 : false
+    }
   })
 }
 
