@@ -67,11 +67,13 @@ function normalize(m) {
     title:        e.node.title?.romaji || e.node.title?.native,
   }));
   if (m.characters) base.characters = m.characters.edges.map(e => ({
-    nameEn:       e.node.name?.full   ?? null,
-    nameJa:       e.node.name?.native ?? null,
-    imageUrl:     e.node.image?.medium ?? null,
-    voiceActorEn: e.voiceActors?.[0]?.name?.full   ?? null,
-    voiceActorJa: e.voiceActors?.[0]?.name?.native ?? null,
+    nameEn:             e.node.name?.full              ?? null,
+    nameJa:             e.node.name?.native            ?? null,
+    imageUrl:           e.node.image?.medium           ?? null,
+    role:               e.role                         ?? null,
+    voiceActorEn:       e.voiceActors?.[0]?.name?.full   ?? null,
+    voiceActorJa:       e.voiceActors?.[0]?.name?.native ?? null,
+    voiceActorImageUrl: e.voiceActors?.[0]?.image?.medium ?? null,
   }));
   if (m.staff) base.staff = m.staff.edges.map(e => ({
     nameEn:  e.node.name?.full   ?? null,
@@ -272,7 +274,8 @@ async function getAnimeDetail(anilistId) {
   // cached.studios === undefined means document was written before P4-3 — force re-fetch.
   const stale = !cached ||
     Date.now() - cached.cachedAt.getTime() >= CACHE_TTL_MS ||
-    cached.studios === undefined;
+    cached.studios === undefined ||
+    (cached.characters?.length > 0 && cached.characters[0].role === undefined);
   if (!stale) {
     if (!cached.bangumiVersion) enqueueEnrichment([cached]);           // Phase 1-3
     else if (cached.bangumiVersion === 1) enqueuePhase4Enrichment([cached]); // Phase 4

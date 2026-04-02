@@ -30,7 +30,7 @@ const animeCacheSchema = new mongoose.Schema({
   // 0 = unenriched, 1 = Phase 1-3 basic (title+bgmId), 2 = Phase 4 full (score+detail)
   bangumiVersion:  { type: Number,  default: 0 },
   // Phase 4 rich fields
-  characters:    [{ nameEn: String, nameJa: String, nameCn: String, imageUrl: String, voiceActorEn: String, voiceActorJa: String, voiceActorCn: String }],
+  characters:    [{ nameEn: String, nameJa: String, nameCn: String, imageUrl: String, role: String, voiceActorEn: String, voiceActorJa: String, voiceActorCn: String, voiceActorImageUrl: String }],
   staff:         [{ nameEn: String, nameJa: String, imageUrl: String, role: String }],
   recommendations: [{ anilistId: Number, title: String, coverImageUrl: String, averageScore: Number }],
   episodeTitles: [{ episode: Number, nameCn: String, name: String }]
