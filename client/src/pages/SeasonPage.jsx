@@ -20,7 +20,7 @@ export default function SeasonPage() {
   const setSeason = (s) => { setParams({ season: s, year }); setPage(1) }
   const setYear   = (y) => { setParams({ season, year: y }); setPage(1) }
 
-  const { data, isLoading, error } = useSeasonalAnime(season, year, page)
+  const { data, isLoading, error, dataUpdatedAt } = useSeasonalAnime(season, year, page)
 
   const filtered = genre && data?.data
     ? data.data.filter(a => a.genres?.includes(genre))
@@ -35,7 +35,7 @@ export default function SeasonPage() {
       </h1>
       <SeasonSelector year={year} season={season} onYearChange={setYear} onSeasonChange={setSeason} />
       <GenreFilter selected={genre} onSelect={g => { setGenre(g); setPage(1) }} />
-      <AnimeGrid animeList={filtered} loading={isLoading} error={error} />
+      <AnimeGrid key={dataUpdatedAt} animeList={filtered} loading={isLoading} error={error} />
       <Pagination page={page} totalPages={data?.pagination?.totalPages} onPageChange={setPage} />
     </div>
   )

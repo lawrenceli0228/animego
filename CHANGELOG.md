@@ -2,6 +2,18 @@
 
 ---
 
+## [0.2.1.0] - 2026-04-02
+
+### Fixed
+- **历史季度中文标题缺失** — `getSeasonalAnime()` 路径③（部分缓存）和路径④（冷启动）新增 `enqueueEnrichment()` 调用，历史季度番剧现在在首次访问后会触发 Bangumi 富化
+- **第一页中文标题不更新** — `useSeasonalAnime` 新增条件轮询（`refetchInterval: 20s`），当页面中存在 `bangumiEnriched: false/undefined` 的条目时自动轮询，富化完成后无需手动刷新即可看到中文标题，全部富化完成后自动停止轮询
+
+### Changed
+- `useSeasonalAnime` `staleTime` 从 5 分钟缩短为 1 分钟，确保富化完成后下次访问能及时拿到中文数据
+- `SeasonPage` `AnimeGrid` 添加 `key={dataUpdatedAt}`，季度切换时新数据到达触发 `fadeUp` 动画，所有卡片同时出现而非逐个替换
+
+---
+
 ## [0.2.0.0] - 2026-04-02
 
 ### Added

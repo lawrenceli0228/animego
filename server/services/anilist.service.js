@@ -186,6 +186,8 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
       .lean();
 
     if (anime.length > 0) {
+      const unenriched = anime.filter(a => !a.bangumiEnriched);
+      if (unenriched.length) enqueueEnrichment(unenriched);
       return {
         pageInfo: {
           total:       totalCached,
@@ -205,6 +207,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   });
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
+  enqueueEnrichment(animeList);
   return { pageInfo: data.Page.pageInfo, anime: animeList };
 }
 
