@@ -19,7 +19,12 @@ export function useSubscription(anilistId) {
   const { user } = useAuth()
   return useQuery({
     queryKey: ['subscription', anilistId],
-    queryFn: () => getSubscription(anilistId).then(r => r.data.data),
+    queryFn: () => getSubscription(anilistId)
+      .then(r => r.data.data)
+      .catch(err => {
+        if (err.response?.status === 404) return null;
+        throw err;
+      }),
     enabled: !!user && !!anilistId,
     retry: false
   })

@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import { useAuth } from '../../context/AuthContext'
 import { useFollow } from '../../hooks/useSocial'
 import { useLang } from '../../context/LanguageContext'
@@ -13,8 +14,8 @@ export default function FollowButton({ username, isFollowing, isSelf }) {
 
   const handleClick = () => {
     if (!user) return navigate('/login')
-    if (isFollowing) unfollow()
-    else follow()
+    if (isFollowing) unfollow(undefined, { onSuccess: () => toast(t('social.unfollowedToast')) })
+    else follow(undefined, { onSuccess: () => toast(t('social.followedToast')) })
   }
 
   return (
@@ -32,6 +33,7 @@ export default function FollowButton({ username, isFollowing, isSelf }) {
         cursor: isPending ? 'wait' : 'pointer',
         transition: 'all 0.2s',
         flexShrink: 0,
+        minWidth: 88,
       }}
     >
       {isPending ? '...' : isFollowing ? t('social.unfollow') : t('social.follow')}

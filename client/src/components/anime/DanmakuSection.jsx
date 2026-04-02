@@ -33,16 +33,16 @@ export default function DanmakuSection({ anilistId, episode }) {
     }}>
       {/* Label */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <p style={{ color: '#0a84ff', fontSize: 12, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase' }}>
+        <p style={{ color: '#5ac8fa', fontSize: 12, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase' }}>
           {t('danmaku.label')}
         </p>
         {allMessages.length > 0 && (
-          <span style={{ fontSize: 11, color: '#475569' }}>{allMessages.length}</span>
+          <span style={{ fontSize: 11, color: 'rgba(235,235,245,0.30)' }}>{allMessages.length}</span>
         )}
         {isLive && (
           <span style={{
-            fontSize: 10, fontWeight: 700, color: '#34d399',
-            background: 'rgba(52,211,153,0.12)', padding: '1px 6px',
+            fontSize: 10, fontWeight: 700, color: '#30d158',
+            background: 'rgba(48,209,88,0.12)', padding: '1px 6px',
             borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.5px',
           }}>
             {t('danmaku.live')}
@@ -64,7 +64,7 @@ export default function DanmakuSection({ anilistId, episode }) {
       {canSend ? (
         <DanmakuInput onSend={send} connected={connected} />
       ) : (
-        <p style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '4px 0' }}>
+        <p style={{ fontSize: 12, color: 'rgba(235,235,245,0.30)', textAlign: 'center', padding: '4px 0' }}>
           {t('danmaku.windowClosed')}
         </p>
       )}

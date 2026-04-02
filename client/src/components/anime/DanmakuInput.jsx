@@ -12,7 +12,7 @@ export default function DanmakuInput({ onSend, connected }) {
   const [value, setValue] = useState('')
 
   if (!user) return (
-    <div style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '8px 0' }}>
+    <div style={{ fontSize: 12, color: 'rgba(235,235,245,0.30)', textAlign: 'center', padding: '8px 0' }}>
       <button
         onClick={() => navigate('/login')}
         style={{ color: '#60aaff', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
@@ -34,7 +34,7 @@ export default function DanmakuInput({ onSend, connected }) {
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
       <div style={{
         width: 6, height: 6, borderRadius: '50%',
-        background: connected ? '#34d399' : '#475569',
+        background: connected ? '#30d158' : 'rgba(235,235,245,0.30)',
         flexShrink: 0, transition: 'background 0.3s',
       }} title={connected ? t('danmaku.connected') : t('danmaku.connecting')} />
 
@@ -54,7 +54,7 @@ export default function DanmakuInput({ onSend, connected }) {
           cursor: connected ? 'text' : 'not-allowed',
         }}
       />
-      <span style={{ fontSize: 11, color: '#475569', flexShrink: 0 }}>
+      <span style={{ fontSize: 11, color: 'rgba(235,235,245,0.30)', flexShrink: 0 }}>
         {value.length}/{MAX_LEN}
       </span>
       <button

@@ -37,7 +37,7 @@ export default function EpisodeList({ anime }) {
           let numColor = 'rgba(235,235,245,0.60)'
 
           if (isCurrent) { bg = 'rgba(10,132,255,0.2)'; border = 'rgba(10,132,255,0.5)'; numColor = '#60aaff' }
-          else if (watched) { bg = 'rgba(16,185,129,0.12)'; border = 'rgba(16,185,129,0.3)'; numColor = '#34d399' }
+          else if (watched) { bg = 'rgba(48,209,88,0.12)'; border = 'rgba(48,209,88,0.3)'; numColor = '#30d158' }
           if (isOpen) { bg = 'rgba(10,132,255,0.12)'; border = 'rgba(10,132,255,0.55)'; numColor = '#60aaff' }
 
           return (
@@ -54,7 +54,7 @@ export default function EpisodeList({ anime }) {
               <div style={{ fontSize: 20, fontWeight: 800, color: numColor, lineHeight: 1, marginBottom: 5, fontFamily: "'Sora', sans-serif" }}>
                 {ep}
               </div>
-              {watched && <div style={{ fontSize: 12, color: '#34d399', marginBottom: 3 }}>✓</div>}
+              {watched && <div style={{ fontSize: 12, color: '#30d158', marginBottom: 3 }}>✓</div>}
               {isCurrent && <div style={{ fontSize: 10, color: '#60aaff', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>▶</div>}
             </div>
           )

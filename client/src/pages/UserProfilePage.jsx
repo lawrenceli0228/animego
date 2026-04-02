@@ -175,7 +175,7 @@ export default function UserProfilePage() {
       })}
 
       {(profile.watching || []).length === 0 && (
-        <p style={{ color: '#475569', textAlign: 'center', paddingTop: 40 }}>
+        <p style={{ color: 'rgba(235,235,245,0.30)', textAlign: 'center', paddingTop: 40 }}>
           {t('social.emptyList')}
         </p>
       )}

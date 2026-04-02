@@ -11,7 +11,7 @@ const s = {
     background:'#2c2c2e', border:'1px solid rgba(10,132,255,0.3)',
     color:'#ffffff', fontSize:14, cursor:'pointer', outline:'none'
   },
-  tabs: { display:'flex', gap:4, background:'rgba(26,34,53,0.8)',
+  tabs: { display:'flex', gap:4, background:'#1c1c1e',
     borderRadius:10, padding:4, border:'1px solid rgba(148,163,184,0.08)' },
   tab: (active) => ({
     padding:'6px 16px', borderRadius:7, fontSize:14, fontWeight:600,

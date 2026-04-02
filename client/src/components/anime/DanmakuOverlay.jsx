@@ -4,18 +4,19 @@ const LANE_COUNT  = 4
 const LANE_HEIGHT = 32  // px per lane
 const FLY_DURATION = 7  // seconds to cross the container
 
-// Assign each message a lane that's least recently used
-const laneLastUsed = Array(LANE_COUNT).fill(0)
-
-function pickLane() {
-  const oldest = laneLastUsed.indexOf(Math.min(...laneLastUsed))
-  laneLastUsed[oldest] = Date.now()
-  return oldest
-}
-
 export default function DanmakuOverlay({ messages }) {
   const [items, setItems] = useState([])
   const prevLen = useRef(0)
+  // Per-instance lane tracker (fixes shared module-level state bug when
+  // multiple overlays are mounted simultaneously)
+  const laneLastUsed = useRef(Array(LANE_COUNT).fill(0))
+
+  const pickLane = () => {
+    const lanes = laneLastUsed.current
+    const oldest = lanes.indexOf(Math.min(...lanes))
+    lanes[oldest] = Date.now()
+    return oldest
+  }
 
   // When new messages arrive, animate them
   useEffect(() => {
@@ -36,6 +37,8 @@ export default function DanmakuOverlay({ messages }) {
 
   // Clean up finished animations
   const removeItem = (id) => setItems(prev => prev.filter(i => i.id !== id))
+
+  if (items.length === 0) return null
 
   return (
     <div aria-hidden="true" style={{
@@ -77,4 +80,4 @@ export default function DanmakuOverlay({ messages }) {
   )
 }
 
-const COLORS = ['#60aaff', '#5ac8fa', '#34d399', '#fbbf24', '#f472b6', '#30d158']
+const COLORS = ['#60aaff', '#5ac8fa', '#30d158', '#fbbf24', '#ff9f0a', '#0a84ff']

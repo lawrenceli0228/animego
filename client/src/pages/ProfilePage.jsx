@@ -40,7 +40,7 @@ export default function ProfilePage() {
         </h1>
       </div>
 
-      <div style={{ display:'flex', gap:4, marginBottom:28, background:'rgba(26,34,53,0.8)',
+      <div style={{ display:'flex', gap:4, marginBottom:28, background:'#1c1c1e',
         borderRadius:12, padding:5, width:'fit-content',
         border:'1px solid rgba(148,163,184,0.08)' }}>
         {STATUS_OPTIONS.map(opt => (

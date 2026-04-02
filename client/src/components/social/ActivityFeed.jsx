@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useFeed } from '../../hooks/useSocial'
 import { useLang } from '../../context/LanguageContext'
+import { useAuth } from '../../context/AuthContext'
 
 function timeAgo(date, lang) {
   const diff = Math.floor((Date.now() - new Date(date)) / 1000)
@@ -18,11 +19,20 @@ function timeAgo(date, lang) {
 }
 
 export default function ActivityFeed() {
+  const { user } = useAuth()
   const { data, isLoading, isError } = useFeed()
   const navigate = useNavigate()
   const { t, lang } = useLang()
 
-  if (isError || (!isLoading && (!data || data.length === 0))) return null
+  if (!user) return null
+  if (isError) return null
+  if (!isLoading && (!data || data.length === 0)) return (
+    <section style={{ marginTop: 40 }}>
+      <p style={{ color: 'rgba(235,235,245,0.30)', fontSize: 13, textAlign: 'center', padding: '16px 0' }}>
+        {t('social.noActivity')}
+      </p>
+    </section>
+  )
 
   return (
     <section style={{ marginTop: 40 }}>
@@ -83,7 +93,7 @@ export default function ActivityFeed() {
                     </span>
                   )}
                 </div>
-                <span style={{ color: '#475569', fontSize: 11, flexShrink: 0 }}>
+                <span style={{ color: 'rgba(235,235,245,0.30)', fontSize: 11, flexShrink: 0 }}>
                   {timeAgo(item.lastWatchedAt, lang)}
                 </span>
               </div>

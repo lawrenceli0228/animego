@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { getMe, login as apiLogin, register as apiRegister, logout as apiLogout } from '../api/auth.api';
 import { setAccessToken } from '../api/axiosClient';
@@ -10,8 +10,12 @@ export function AuthProvider({ children }) {
   const [initializing, setInit]     = useState(true);  // startup session check
   const [loading, setLoading]       = useState(false);  // login/register/logout ops
 
+  const didInit = useRef(false);
+
   // On mount: silently try to restore session via refresh cookie
   useEffect(() => {
+    if (didInit.current) return;
+    didInit.current = true;
     (async () => {
       try {
         const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });

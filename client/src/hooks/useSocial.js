@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getUserProfile, followUser, unfollowUser, getFeed, getFollowers, getFollowing } from '../api/social.api'
+import { useAuth } from '../context/AuthContext'
 
 export function useUserProfile(username) {
   return useQuery({
@@ -40,9 +41,11 @@ export function useFollowList(username, type) {
 }
 
 export function useFeed() {
+  const { user } = useAuth()
   return useQuery({
     queryKey: ['feed'],
     queryFn: () => getFeed().then(r => r.data.data),
+    enabled: !!user,
     staleTime: 2 * 60 * 1000,
     retry: false,
   })
