@@ -27,7 +27,7 @@ export default function DanmakuOverlay({ messages }) {
     setItems(prev => [
       ...prev,
       ...newMsgs.map((m) => ({
-        id:    m._id || m.createdAt || Math.random(),
+        id:    m._id ? String(m._id) : String(Math.random()),
         text:  m.content,
         lane:  pickLane(),
         color: COLORS[m.username ? m.username.charCodeAt(0) % COLORS.length : 0],

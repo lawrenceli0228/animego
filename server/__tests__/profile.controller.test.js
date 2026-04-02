@@ -46,7 +46,7 @@ describe('profile.controller', () => {
       Subscription.find = jest.fn().mockReturnValue(subsQuery)
       Follow.countDocuments = jest.fn().mockResolvedValue(0)
       Follow.exists = jest.fn()
-      AnimeCache.find = jest.fn().mockResolvedValue([])
+      AnimeCache.find = jest.fn().mockReturnValue({ select: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue([]) })
 
       const res = await request(buildApp(null)).get('/api/users/bob')
       expect(res.status).toBe(200)
@@ -60,7 +60,7 @@ describe('profile.controller', () => {
       Subscription.find = jest.fn().mockReturnValue(subsQuery)
       Follow.countDocuments = jest.fn().mockResolvedValue(0)
       Follow.exists = jest.fn().mockResolvedValue({ _id: 'follow-id' }) // truthy = following
-      AnimeCache.find = jest.fn().mockResolvedValue([])
+      AnimeCache.find = jest.fn().mockReturnValue({ select: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue([]) })
 
       const res = await request(buildApp(USER_A.toString())).get('/api/users/bob')
       expect(res.status).toBe(200)
@@ -75,7 +75,7 @@ describe('profile.controller', () => {
         .mockResolvedValueOnce(5)  // followerCount
         .mockResolvedValueOnce(3)  // followingCount
       Follow.exists = jest.fn().mockResolvedValue(null)
-      AnimeCache.find = jest.fn().mockResolvedValue([])
+      AnimeCache.find = jest.fn().mockReturnValue({ select: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue([]) })
 
       const res = await request(buildApp(USER_A.toString())).get('/api/users/bob')
       expect(res.body.data.followerCount).toBe(5)

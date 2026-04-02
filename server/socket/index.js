@@ -1,5 +1,4 @@
 const { Server } = require('socket.io');
-const jwt = require('jsonwebtoken');
 const socketAuth = require('../middleware/socketAuth');
 const registerDanmakuHandlers = require('./danmaku.handler');
 
@@ -15,15 +14,14 @@ module.exports = function setupSocket(httpServer) {
   io.use(socketAuth);
 
   io.on('connection', (socket) => {
-    // Re-verify JWT on each event so expired tokens don't linger
+    // Lightweight per-event expiry check (avoids full jwt.verify on every packet)
     socket.use((packet, next) => {
-      try {
-        jwt.verify(socket.handshake.auth.token, process.env.JWT_SECRET);
-        next();
-      } catch (err) {
-        if (err.name === 'TokenExpiredError') socket.emit('auth:expired');
+      if (socket.user?.exp && socket.user.exp * 1000 < Date.now()) {
+        socket.emit('auth:expired');
         socket.disconnect(true);
+        return next(new Error('token expired'));
       }
+      next();
     });
 
     registerDanmakuHandlers(io, socket);

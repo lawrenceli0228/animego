@@ -16,7 +16,7 @@ export default function DanmakuSection({ anilistId, episode }) {
   const isLive  = liveEndsAt !== null && Date.now() < liveEndsAt.getTime()
   const canSend = !liveEndsAt || Date.now() < liveEndsAt.getTime()
 
-  const { live, connected, send } = useDanmakuSocket(anilistId, episode, !!user)
+  const { live, connected, send } = useDanmakuSocket(anilistId, episode, !!user && canSend)
 
   // Merge history + live, deduplicated by _id
   const allMessages = useMemo(() => {

@@ -14,7 +14,10 @@ module.exports = function registerDanmakuHandlers(io, socket) {
     if (isNaN(id) || isNaN(ep) || id <= 0 || ep <= 0) return;
     // Limit per-socket room membership to prevent memory abuse
     const danmakuRooms = [...socket.rooms].filter(r => r.startsWith('danmaku:'));
-    if (danmakuRooms.length >= 10) return;
+    if (danmakuRooms.length >= 10) {
+      socket.emit('danmaku:error', { code: 'ROOM_LIMIT', message: 'Too many rooms' });
+      return;
+    }
     socket.join(`danmaku:${id}:${ep}`);
   });
 
@@ -46,7 +49,7 @@ module.exports = function registerDanmakuHandlers(io, socket) {
 
       const anilistIdNum = parseInt(anilistId);
       const episodeNum   = parseInt(episode);
-      if (isNaN(anilistIdNum) || isNaN(episodeNum)) return;
+      if (isNaN(anilistIdNum) || isNaN(episodeNum) || anilistIdNum <= 0 || episodeNum <= 0) return;
 
       // Atomically get-or-create the live window for this episode (race-safe)
       const win = await EpisodeWindow.findOneAndUpdate(

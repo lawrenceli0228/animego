@@ -50,9 +50,9 @@ export default function ActivityFeed() {
           ? Array.from({ length: 4 }).map((_, i) => (
               <div key={i} style={{ height: 64, borderRadius: 10, background: 'rgba(255,255,255,0.05)', animation: 'shimmer 1.4s ease-in-out infinite' }} />
             ))
-          : data.map((item, i) => (
+          : data.map((item) => (
               <div
-                key={i}
+                key={`${item.username}:${item.anilistId}:${item.lastWatchedAt}`}
                 onClick={() => navigate(`/anime/${item.anilistId}`)}
                 role="button"
                 tabIndex={0}

@@ -21,11 +21,13 @@ exports.getProfile = async (req, res, next) => {
     ]);
 
     const anilistIds = subs.map(s => s.anilistId);
-    const animes     = await AnimeCache.find({ anilistId: { $in: anilistIds } });
+    const animes     = await AnimeCache.find({ anilistId: { $in: anilistIds } })
+      .select('-__v -updatedAt -createdAt')
+      .lean();
     const animeMap   = Object.fromEntries(animes.map(a => [a.anilistId, a]));
 
     const watching = subs.map(s => ({
-      ...(animeMap[s.anilistId]?.toObject() || { anilistId: s.anilistId }),
+      ...(animeMap[s.anilistId] || { anilistId: s.anilistId }),
       subscriptionStatus: s.status,
       currentEpisode:     s.currentEpisode,
       lastWatchedAt:      s.lastWatchedAt,
