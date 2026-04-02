@@ -1,17 +1,42 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { formatScore, stripHtml, truncate, pickTitle } from '../../utils/formatters'
 import { useLang } from '../../context/LanguageContext'
 
 const scoreColor = (s) => s >= 75 ? '#22c55e' : s >= 50 ? '#eab308' : '#ef4444'
 
+const SOURCE_LABEL = {
+  ORIGINAL:     { zh: '原创',    en: 'Original' },
+  MANGA:        { zh: '漫改',    en: 'Manga' },
+  LIGHT_NOVEL:  { zh: '轻小说改', en: 'Light Novel' },
+  VISUAL_NOVEL: { zh: '视觉小说改', en: 'Visual Novel' },
+  VIDEO_GAME:   { zh: '游戏改',  en: 'Video Game' },
+  NOVEL:        { zh: '小说改',  en: 'Novel' },
+  WEB_NOVEL:    { zh: '网文改',  en: 'Web Novel' },
+  GAME:         { zh: '游戏改',  en: 'Game' },
+}
+
+const RELATION_LABEL = {
+  PREQUEL:    { zh: '前作', en: 'Prequel' },
+  SEQUEL:     { zh: '续作', en: 'Sequel' },
+  PARENT:     { zh: '原作', en: 'Parent' },
+  SIDE_STORY: { zh: '外传', en: 'Side Story' },
+  SPIN_OFF:   { zh: '衍生', en: 'Spin-off' },
+  ADAPTATION: { zh: '改编', en: 'Adaptation' },
+}
+const SHOWN_RELATIONS = new Set(['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SPIN_OFF'])
+
 export default function AnimeDetailHero({ anime }) {
   const [expanded, setExpanded] = useState(false)
   const { t, lang } = useLang()
+  const navigate = useNavigate()
   const {
     titleRomaji, titleEnglish, titleNative,
     coverImageUrl, bannerImageUrl, description,
     episodes, status, season, seasonYear,
-    averageScore, genres = [], format, bgmId
+    averageScore, genres = [], format, bgmId,
+    studios = [], source, duration, startDate,
+    bangumiScore, bangumiVotes, relations = [],
   } = anime
 
   const desc = stripHtml(description || '')
@@ -20,6 +45,19 @@ export default function AnimeDetailHero({ anime }) {
     RELEASING: t('detail.releasing'), FINISHED: t('detail.finished'),
     NOT_YET_RELEASED: t('detail.notYetReleased'), CANCELLED: t('detail.cancelled')
   }[status] || status
+
+  const sourceLabel = SOURCE_LABEL[source]?.[lang] ?? null
+  const durationLabel = duration ? (lang === 'zh' ? `${duration}分/集` : `${duration} min/ep`) : null
+
+  let startDateLabel = null
+  if (startDate?.year) {
+    startDateLabel = lang === 'zh'
+      ? `${startDate.year}年${startDate.month ? startDate.month + '月' : ''}${startDate.day ? startDate.day + '日' : ''}`
+      : new Date(startDate.year, (startDate.month || 1) - 1, startDate.day || 1)
+          .toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: startDate.day ? 'numeric' : undefined })
+  }
+
+  const visibleRelations = relations.filter(r => SHOWN_RELATIONS.has(r.relationType))
 
   return (
     <div>
@@ -55,11 +93,22 @@ export default function AnimeDetailHero({ anime }) {
           {lang === 'zh' && titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
 
           {/* Badges row */}
-          <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:20 }}>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:16 }}>
+            {/* AniList score */}
             {averageScore && (
               <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(34,197,94,0.15)',
                 color: scoreColor(averageScore), fontWeight:700, fontSize:14, border:`1px solid ${scoreColor(averageScore)}40` }}>
                 ★ {formatScore(averageScore)}
+              </span>
+            )}
+            {/* Bangumi score */}
+            {bangumiScore > 0 && (
+              <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(239,68,68,0.12)',
+                color:'#f87171', fontWeight:700, fontSize:14, border:'1px solid rgba(239,68,68,0.3)',
+                display:'inline-flex', alignItems:'center', gap:5 }}>
+                <span style={{ fontSize:10, opacity:0.7 }}>BGM</span>
+                ★ {bangumiScore.toFixed(1)}
+                {bangumiVotes > 0 && <span style={{ fontSize:11, opacity:0.6, fontWeight:400 }}>({bangumiVotes.toLocaleString()})</span>}
               </span>
             )}
             {format && <span style={{ padding:'4px 12px', borderRadius:20, background:'rgba(10,132,255,0.15)',
@@ -92,6 +141,21 @@ export default function AnimeDetailHero({ anime }) {
             )}
           </div>
 
+          {/* Meta info row: studios · source · duration · date */}
+          {(studios.length > 0 || sourceLabel || durationLabel || startDateLabel) && (
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 12px', marginBottom:16, alignItems:'center' }}>
+              {studios.length > 0 && (
+                <span style={{ color:'rgba(235,235,245,0.75)', fontSize:13 }}>{studios.join(' · ')}</span>
+              )}
+              {(studios.length > 0 && (sourceLabel || durationLabel || startDateLabel)) && (
+                <span style={{ color:'rgba(148,163,184,0.3)', fontSize:13 }}>·</span>
+              )}
+              {sourceLabel && <span style={{ color:'rgba(235,235,245,0.50)', fontSize:12 }}>{sourceLabel}</span>}
+              {durationLabel && <span style={{ color:'rgba(235,235,245,0.50)', fontSize:12 }}>{durationLabel}</span>}
+              {startDateLabel && <span style={{ color:'rgba(235,235,245,0.50)', fontSize:12 }}>{startDateLabel}</span>}
+            </div>
+          )}
+
           {/* Genres */}
           <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:20 }}>
             {genres.map(g => (
@@ -103,7 +167,7 @@ export default function AnimeDetailHero({ anime }) {
 
           {/* Description */}
           {desc && (
-            <div>
+            <div style={{ marginBottom: visibleRelations.length > 0 ? 20 : 0 }}>
               <p style={{ color:'rgba(235,235,245,0.60)', fontSize:14, lineHeight:1.8 }}>{displayDesc}</p>
               {desc.length > 300 && (
                 <button onClick={() => setExpanded(!expanded)}
@@ -112,6 +176,32 @@ export default function AnimeDetailHero({ anime }) {
                   {expanded ? t('detail.collapse') : t('detail.readMore')}
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Relations */}
+          {visibleRelations.length > 0 && (
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+              {visibleRelations.map(r => {
+                const label = RELATION_LABEL[r.relationType]?.[lang] ?? r.relationType
+                return (
+                  <button
+                    key={`${r.relationType}-${r.anilistId}`}
+                    onClick={() => navigate(`/anime/${r.anilistId}`)}
+                    style={{
+                      display:'inline-flex', alignItems:'center', gap:6,
+                      padding:'5px 12px', borderRadius:8, cursor:'pointer',
+                      background:'rgba(148,163,184,0.08)', border:'1px solid rgba(148,163,184,0.15)',
+                      color:'rgba(235,235,245,0.75)', fontSize:12, fontWeight:500,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background='rgba(10,132,255,0.1)'; e.currentTarget.style.borderColor='rgba(10,132,255,0.3)'; e.currentTarget.style.color='#60aaff' }}
+                    onMouseLeave={e => { e.currentTarget.style.background='rgba(148,163,184,0.08)'; e.currentTarget.style.borderColor='rgba(148,163,184,0.15)'; e.currentTarget.style.color='rgba(235,235,245,0.75)' }}
+                  >
+                    <span style={{ color:'rgba(235,235,245,0.35)', fontSize:11 }}>{label}</span>
+                    {r.title}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>

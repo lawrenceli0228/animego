@@ -108,6 +108,9 @@ async function processQueue() {
         { $set: { titleChinese, bgmId, bangumiVersion: 1 } }
       );
 
+      // Immediately enqueue Phase 4 if bgmId was found
+      if (bgmId) enqueuePhase4Enrichment([{ anilistId, bgmId, bangumiVersion: 1 }]);
+
       if (titleChinese) {
         console.log(`[Bangumi] ${item.titleRomaji} → ${titleChinese} (bgmId=${bgmId})`);
       } else if (bgmId) {
@@ -121,4 +124,62 @@ async function processQueue() {
   queueRunning = false;
 }
 
-module.exports = { enqueueEnrichment };
+// ─── Phase 4: Bangumi subject detail (score + vote count) ────────────────────
+async function fetchBangumiSubject(bgmId) {
+  const res = await rateLimitedFetch(
+    `https://api.bgm.tv/v0/subjects/${bgmId}`
+  );
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!data?.rating) return null;
+  return {
+    bangumiScore: data.rating.score   ?? null,
+    bangumiVotes: data.rating.total   ?? null,
+  };
+}
+
+const enrichPhase4Map = new Map();
+let phase4Running = false;
+
+/**
+ * Enqueue items for Phase 4 enrichment (bangumiScore + bangumiVotes).
+ * Only items with bangumiVersion === 1 (have bgmId, not yet phase4) are processed.
+ */
+function enqueuePhase4Enrichment(items) {
+  let added = 0;
+  for (const item of items) {
+    if (!item.anilistId || !item.bgmId) continue;
+    if ((item.bangumiVersion ?? 0) >= 2) continue;
+    if (enrichPhase4Map.has(item.anilistId)) continue;
+    enrichPhase4Map.set(item.anilistId, { anilistId: item.anilistId, bgmId: item.bgmId });
+    added++;
+  }
+  if (added > 0 && !phase4Running) processPhase4Queue();
+}
+
+async function processPhase4Queue() {
+  if (phase4Running) return;
+  phase4Running = true;
+
+  while (enrichPhase4Map.size > 0) {
+    const [anilistId, item] = enrichPhase4Map.entries().next().value;
+    enrichPhase4Map.delete(anilistId);
+
+    try {
+      const doc = await AnimeCache.findOne({ anilistId }, { bangumiVersion: 1 }).lean();
+      if (!doc || doc.bangumiVersion >= 2) continue;
+
+      const result = await fetchBangumiSubject(item.bgmId).catch(() => null);
+      await AnimeCache.updateOne(
+        { anilistId },
+        { $set: { ...(result || {}), bangumiVersion: 2 } }
+      );
+    } catch (err) {
+      console.warn(`[Bangumi P4] 富化失败 anilistId=${anilistId}:`, err.message);
+    }
+  }
+
+  phase4Running = false;
+}
+
+module.exports = { enqueueEnrichment, enqueuePhase4Enrichment };

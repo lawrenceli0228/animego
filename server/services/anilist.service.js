@@ -3,7 +3,7 @@ const { SEASONAL_ANIME_QUERY }  = require('../queries/seasonalAnime.graphql');
 const { SEARCH_ANIME_QUERY }    = require('../queries/searchAnime.graphql');
 const { ANIME_DETAIL_QUERY }    = require('../queries/animeDetail.graphql');
 const { WEEKLY_SCHEDULE_QUERY } = require('../queries/weeklySchedule.graphql');
-const { enqueueEnrichment }     = require('./bangumi.service');
+const { enqueueEnrichment, enqueuePhase4Enrichment } = require('./bangumi.service');
 
 const ANILIST_URL   = 'https://graphql.anilist.co';
 const CACHE_TTL_MS  = (parseInt(process.env.CACHE_TTL_HOURS) || 24) * 60 * 60 * 1000;
@@ -39,7 +39,7 @@ async function queryAniList(query, variables) {
 
 // ─── Normalize AniList media → our schema ────────────────────────────────────
 function normalize(m) {
-  return {
+  const base = {
     anilistId:      m.id,
     titleRomaji:    m.title?.romaji,
     titleEnglish:   m.title?.english,
@@ -56,6 +56,17 @@ function normalize(m) {
     format:         m.format,
     cachedAt:       new Date()
   };
+  // Detail-only fields — only included when present in the AniList response
+  if (m.studios)   base.studios   = m.studios.nodes.map(n => n.name);
+  if (m.startDate?.year) base.startDate = m.startDate;
+  if (m.duration != null) base.duration = m.duration;
+  if (m.source)    base.source    = m.source;
+  if (m.relations) base.relations = m.relations.edges.map(e => ({
+    anilistId:    e.node.id,
+    relationType: e.relationType,
+    title:        e.node.title?.romaji || e.node.title?.native,
+  }));
+  return base;
 }
 
 // ─── Upsert a list of anime into MongoDB ─────────────────────────────────────
@@ -237,14 +248,15 @@ async function searchAnime(search, genre, page = 1, perPage = 20) {
 async function getAnimeDetail(anilistId) {
   const cached = await AnimeCache.findOne({ anilistId: parseInt(anilistId) });
   if (cached && Date.now() - cached.cachedAt.getTime() < CACHE_TTL_MS) {
-    if (!cached.bangumiVersion) enqueueEnrichment([cached]); // 懒加载富化
+    if (!cached.bangumiVersion) enqueueEnrichment([cached]);           // Phase 1-3
+    else if (cached.bangumiVersion === 1) enqueuePhase4Enrichment([cached]); // Phase 4
     return cached;
   }
 
   const data  = await queryAniList(ANIME_DETAIL_QUERY, { id: parseInt(anilistId) });
   const anime = normalize(data.Media);
   await upsertCache([anime]);
-  enqueueEnrichment([anime]); // Bangumi 中文标题后台富化
+  enqueueEnrichment([anime]); // Phase 1-3 first; Phase 4 queued after bgmId is resolved
   return anime;
 }
 

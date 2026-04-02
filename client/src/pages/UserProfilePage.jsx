@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useLang } from '../context/LanguageContext'
 import { useUserProfile } from '../hooks/useSocial'
 import FollowButton from '../components/social/FollowButton'
+import UserStatsPanel from '../components/social/UserStatsPanel'
 import AnimeCard from '../components/anime/AnimeCard'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
@@ -126,6 +127,8 @@ export default function UserProfilePage() {
           />
         </div>
       </div>
+
+      <UserStatsPanel watching={profile.watching || []} />
 
       {/* Tabs by status */}
       {STATUS_TABS.map(status => {

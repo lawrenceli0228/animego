@@ -15,7 +15,10 @@ const ANIME_DETAIL_QUERY = `
       format
       startDate { year month day }
       endDate   { year month day }
+      duration
+      source
       studios(isMain: true) { nodes { name } }
+      relations { edges { relationType node { id title { romaji native } } } }
       trailer { id site }
     }
   }
