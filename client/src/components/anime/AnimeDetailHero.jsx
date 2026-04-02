@@ -25,13 +25,13 @@ export default function AnimeDetailHero({ anime }) {
     <div>
       {/* Banner */}
       <div style={{
-        position:'relative', height: bannerImageUrl ? 320 : 120,
+        position:'relative', height: bannerImageUrl ? 400 : 120,
         background: bannerImageUrl ? `url(${bannerImageUrl}) center/cover` : 'linear-gradient(135deg,#1a1040,#0a1628)',
         overflow:'hidden'
       }}>
         <div style={{
           position:'absolute', inset:0,
-          background:'linear-gradient(to bottom, rgba(10,14,26,0.2) 0%, rgba(10,14,26,0.95) 100%)'
+          background:'linear-gradient(to bottom, rgba(10,14,26,0.15) 0%, rgba(10,14,26,0.75) 100%)'
         }} />
       </div>
 
@@ -40,7 +40,7 @@ export default function AnimeDetailHero({ anime }) {
         {/* Cover */}
         <div style={{ flexShrink:0 }}>
           <img src={coverImageUrl} alt={titleRomaji}
-            style={{ width:180, height:260, objectFit:'cover', borderRadius:12,
+            style={{ width:210, height:300, objectFit:'cover', borderRadius:6,
               border:'3px solid rgba(10,132,255,0.4)',
               boxShadow:'0 20px 50px rgba(0,0,0,0.6)' }}
             onError={e => { e.target.style.background='#2c2c2e' }}
