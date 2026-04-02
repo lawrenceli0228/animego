@@ -267,11 +267,12 @@ async function searchAnime(search, genre, page = 1, perPage = 20) {
 
 // ─── Single anime detail — cache-first ───────────────────────────────────────
 async function getAnimeDetail(anilistId) {
-  const cached = await AnimeCache.findOne({ anilistId: parseInt(anilistId) });
-  // cached.studios == null means document was written before P4-3 — force re-fetch
+  const cached = await AnimeCache.findOne({ anilistId: parseInt(anilistId) }).lean();
+  // Use lean() so unset fields are truly undefined (not Mongoose array defaults).
+  // cached.studios === undefined means document was written before P4-3 — force re-fetch.
   const stale = !cached ||
     Date.now() - cached.cachedAt.getTime() >= CACHE_TTL_MS ||
-    cached.studios == null;
+    cached.studios === undefined;
   if (!stale) {
     if (!cached.bangumiVersion) enqueueEnrichment([cached]);           // Phase 1-3
     else if (cached.bangumiVersion === 1) enqueuePhase4Enrichment([cached]); // Phase 4

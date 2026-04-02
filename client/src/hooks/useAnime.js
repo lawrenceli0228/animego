@@ -20,7 +20,7 @@ export function useAnimeDetail(id) {
     queryKey: ['anime', id],
     queryFn: () => getAnimeDetail(id).then(r => r.data.data),
     enabled: !!id,
-    staleTime: 10 * 60 * 1000
+    staleTime: 0
   })
 }
 
