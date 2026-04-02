@@ -7,62 +7,67 @@ const ROLE_LABEL = {
   en: { MAIN: 'Main', SUPPORTING: 'Supporting', BACKGROUND: 'Background' },
 }
 
-function Portrait({ src, alt, size = 54 }) {
+function Portrait({ src, alt, w = 58, h = 76 }) {
   return (
     <div style={{
-      width: size, height: size + 10, flexShrink: 0,
+      width: w, height: h, flexShrink: 0,
       borderRadius: 4, overflow: 'hidden', background: '#2c2c2e',
       border: '1px solid rgba(148,163,184,0.10)',
     }}>
-      {src
-        ? <img src={src} alt={alt}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            onError={e => { e.target.style.display = 'none' }} />
-        : null}
+      {src && (
+        <img src={src} alt={alt}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          onError={e => { e.target.style.display = 'none' }} />
+      )}
     </div>
   )
 }
 
 function CharPair({ c, lang }) {
-  const charName = (lang === 'zh' && c.nameCn) ? c.nameCn : (c.nameEn || c.nameJa || '—')
-  const vaName   = (lang === 'zh' && c.voiceActorCn) ? c.voiceActorCn
-                 : (c.voiceActorEn || c.voiceActorJa || null)
-  const roleKey  = c.role?.toUpperCase() || 'SUPPORTING'
+  const charName  = (lang === 'zh' && c.nameCn) ? c.nameCn : (c.nameEn || c.nameJa || '—')
+  const vaName    = (lang === 'zh' && c.voiceActorCn) ? c.voiceActorCn
+                  : (c.voiceActorEn || c.voiceActorJa || null)
+  const roleKey   = c.role?.toUpperCase() || 'SUPPORTING'
   const roleLabel = ROLE_LABEL[lang]?.[roleKey] ?? ROLE_LABEL.en[roleKey] ?? roleKey
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
+      display: 'flex', alignItems: 'stretch', gap: 0,
       background: 'rgba(255,255,255,0.03)',
       border: '1px solid rgba(148,163,184,0.08)',
-      borderRadius: 6, padding: 8, minWidth: 260,
+      borderRadius: 6, overflow: 'hidden',
     }}>
-      {/* Character */}
-      <Portrait src={c.imageUrl} alt={charName} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#ffffff',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {charName}
-        </div>
-        <div style={{ fontSize: 11, color: 'rgba(235,235,245,0.35)', marginTop: 2 }}>
-          {roleLabel}
+      {/* Character side */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', flex: 1, minWidth: 0 }}>
+        <Portrait src={c.imageUrl} alt={charName} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#ffffff',
+            lineHeight: 1.35, wordBreak: 'break-word' }}>
+            {charName}
+          </div>
+          <div style={{ fontSize: 11, color: 'rgba(235,235,245,0.40)', marginTop: 3 }}>
+            {roleLabel}
+          </div>
         </div>
       </div>
 
-      {/* Voice Actor */}
+      {/* Divider */}
+      {vaName && <div style={{ width: 1, background: 'rgba(148,163,184,0.08)', flexShrink: 0 }} />}
+
+      {/* VA side */}
       {vaName && (
-        <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', flex: 1, minWidth: 0 }}>
           <Portrait src={c.voiceActorImageUrl} alt={vaName} />
-          <div style={{ minWidth: 0, flex: 1, textAlign: 'right' }}>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#ffffff',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              lineHeight: 1.35, wordBreak: 'break-word' }}>
               {vaName}
             </div>
-            <div style={{ fontSize: 11, color: 'rgba(235,235,245,0.35)', marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: 'rgba(235,235,245,0.40)', marginTop: 3 }}>
               {lang === 'zh' ? '日语' : 'Japanese'}
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   )
@@ -80,7 +85,7 @@ export default function CharacterSection({ characters }) {
       </p>
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
         gap: 8,
       }}>
         {characters.map((c, i) => <CharPair key={i} c={c} lang={lang} />)}
