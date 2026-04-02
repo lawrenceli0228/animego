@@ -7,6 +7,9 @@ import AnimeDetailHero from '../components/anime/AnimeDetailHero'
 import SubscriptionButton from '../components/subscription/SubscriptionButton'
 import WatchersAvatarList from '../components/anime/WatchersAvatarList'
 import EpisodeList from '../components/anime/EpisodeList'
+import CharacterSection from '../components/anime/CharacterSection'
+import StaffSection from '../components/anime/StaffSection'
+import RecommendationSection from '../components/anime/RecommendationSection'
 import TorrentModal from '../components/anime/TorrentModal'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
@@ -74,7 +77,10 @@ export default function AnimeDetailPage() {
           )}
         </div>
         <WatchersAvatarList anilistId={anime.anilistId} />
+        <CharacterSection characters={anime.characters} />
+        <StaffSection staff={anime.staff} />
         <EpisodeList anime={anime} />
+        <RecommendationSection recommendations={anime.recommendations} />
         {torrentOpen && <TorrentModal anime={anime} onClose={() => setTorrentOpen(false)} />}
       </div>
     </div>

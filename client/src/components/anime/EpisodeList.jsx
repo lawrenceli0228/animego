@@ -5,12 +5,17 @@ import EpisodeComments from './EpisodeComments'
 import DanmakuSection from './DanmakuSection'
 
 export default function EpisodeList({ anime }) {
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const { data: sub } = useSubscription(anime.anilistId)
   const [openEp, setOpenEp] = useState(null)
 
   const currentEp = sub?.currentEpisode ?? 0
   const total = anime.episodes
+  // Build episode→title map for O(1) lookup
+  const epTitleMap = {}
+  if (anime.episodeTitles?.length) {
+    anime.episodeTitles.forEach(e => { epTitleMap[e.episode] = e })
+  }
 
   if (!total) return (
     <section style={{ marginTop: 40 }}>
@@ -56,6 +61,10 @@ export default function EpisodeList({ anime }) {
               </div>
               {watched && <div style={{ fontSize: 12, color: '#30d158', marginBottom: 3 }}>✓</div>}
               {isCurrent && <div style={{ fontSize: 10, color: '#60aaff', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>▶</div>}
+              {epTitleMap[ep] && (() => {
+                const title = lang === 'zh' ? (epTitleMap[ep].nameCn || epTitleMap[ep].name) : (epTitleMap[ep].name || epTitleMap[ep].nameCn)
+                return title ? <div style={{ fontSize: 9, color: 'rgba(235,235,245,0.35)', marginTop: 2, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={title}>{title}</div> : null
+              })()}
             </div>
           )
         })}

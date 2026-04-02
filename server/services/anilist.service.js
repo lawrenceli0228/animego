@@ -66,6 +66,27 @@ function normalize(m) {
     relationType: e.relationType,
     title:        e.node.title?.romaji || e.node.title?.native,
   }));
+  if (m.characters) base.characters = m.characters.edges.map(e => ({
+    nameEn:       e.node.name?.full   ?? null,
+    nameJa:       e.node.name?.native ?? null,
+    imageUrl:     e.node.image?.medium ?? null,
+    voiceActorEn: e.voiceActors?.[0]?.name?.full   ?? null,
+    voiceActorJa: e.voiceActors?.[0]?.name?.native ?? null,
+  }));
+  if (m.staff) base.staff = m.staff.edges.map(e => ({
+    nameEn:  e.node.name?.full   ?? null,
+    nameJa:  e.node.name?.native ?? null,
+    imageUrl: e.node.image?.medium ?? null,
+    role:    e.role ?? null,
+  }));
+  if (m.recommendations) base.recommendations = m.recommendations.nodes
+    .filter(n => n.mediaRecommendation)
+    .map(n => ({
+      anilistId:    n.mediaRecommendation.id,
+      title:        n.mediaRecommendation.title?.romaji || n.mediaRecommendation.title?.native,
+      coverImageUrl: n.mediaRecommendation.coverImage?.large ?? null,
+      averageScore: n.mediaRecommendation.averageScore ?? null,
+    }));
   return base;
 }
 

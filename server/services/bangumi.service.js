@@ -126,16 +126,42 @@ async function processQueue() {
 
 // ─── Phase 4: Bangumi subject detail (score + vote count) ────────────────────
 async function fetchBangumiSubject(bgmId) {
-  const res = await rateLimitedFetch(
-    `https://api.bgm.tv/v0/subjects/${bgmId}`
-  );
+  const res = await rateLimitedFetch(`https://api.bgm.tv/v0/subjects/${bgmId}`);
   if (!res.ok) return null;
   const data = await res.json().catch(() => null);
   if (!data?.rating) return null;
-  return {
-    bangumiScore: data.rating.score   ?? null,
-    bangumiVotes: data.rating.total   ?? null,
-  };
+  return { bangumiScore: data.rating.score ?? null, bangumiVotes: data.rating.total ?? null };
+}
+
+// Returns [{ nameCn, voiceActorCn }] sorted by main role first (for index-match with AniList)
+async function fetchBangumiCharacters(bgmId) {
+  const res = await rateLimitedFetch(`https://api.bgm.tv/v0/subjects/${bgmId}/characters`);
+  if (!res.ok) return null;
+  const list = await res.json().catch(() => null);
+  if (!Array.isArray(list)) return null;
+  // relation: 1=主角 2=配角 3=客串 — sort same order as AniList (main first)
+  list.sort((a, b) => (a.relation ?? 9) - (b.relation ?? 9));
+  return list.map(c => ({
+    nameCn:       c.name           ?? null,
+    voiceActorCn: c.actors?.[0]?.name ?? null,
+  }));
+}
+
+// Returns [{ episode, nameCn, name }] for main episodes only
+async function fetchBangumiEpisodes(bgmId) {
+  const res = await rateLimitedFetch(
+    `https://api.bgm.tv/v0/subjects/${bgmId}/episodes?type=0&limit=100`
+  );
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!Array.isArray(data?.data)) return null;
+  return data.data
+    .filter(e => e.ep > 0)
+    .map(e => ({
+      episode: e.ep,
+      nameCn:  e.name_cn || null,
+      name:    e.name    || null,
+    }));
 }
 
 const enrichPhase4Map = new Map();
@@ -166,14 +192,44 @@ async function processPhase4Queue() {
     enrichPhase4Map.delete(anilistId);
 
     try {
-      const doc = await AnimeCache.findOne({ anilistId }, { bangumiVersion: 1 }).lean();
+      const doc = await AnimeCache.findOne(
+        { anilistId },
+        { bangumiVersion: 1, characters: 1 }
+      ).lean();
       if (!doc || doc.bangumiVersion >= 2) continue;
 
-      const result = await fetchBangumiSubject(item.bgmId).catch(() => null);
-      await AnimeCache.updateOne(
-        { anilistId },
-        { $set: { ...(result || {}), bangumiVersion: 2 } }
-      );
+      const [scoreResult, charsResult, epsResult] = await Promise.allSettled([
+        fetchBangumiSubject(item.bgmId),
+        fetchBangumiCharacters(item.bgmId),
+        fetchBangumiEpisodes(item.bgmId),
+      ]);
+
+      const update = { bangumiVersion: 2 };
+
+      if (scoreResult.status === 'fulfilled' && scoreResult.value) {
+        Object.assign(update, scoreResult.value);
+      }
+
+      // Merge Bangumi Chinese names into existing AniList character array (by index)
+      if (charsResult.status === 'fulfilled' && charsResult.value?.length > 0) {
+        const anilistChars = doc.characters || [];
+        const bgmChars     = charsResult.value;
+        if (anilistChars.length > 0) {
+          update.characters = anilistChars.map((c, i) => ({
+            ...c,
+            nameCn:       bgmChars[i]?.nameCn       ?? c.nameCn       ?? null,
+            voiceActorCn: bgmChars[i]?.voiceActorCn ?? c.voiceActorCn ?? null,
+          }));
+        }
+      }
+
+      if (epsResult.status === 'fulfilled' && epsResult.value?.length > 0) {
+        update.episodeTitles = epsResult.value;
+      }
+
+      await AnimeCache.updateOne({ anilistId }, { $set: update });
+
+      console.log(`[Bangumi P4] anilistId=${anilistId} score=${update.bangumiScore ?? '-'} chars=${update.characters?.length ?? 0} eps=${update.episodeTitles?.length ?? 0}`);
     } catch (err) {
       console.warn(`[Bangumi P4] 富化失败 anilistId=${anilistId}:`, err.message);
     }
