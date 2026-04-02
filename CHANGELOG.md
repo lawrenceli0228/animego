@@ -2,6 +2,44 @@
 
 ---
 
+## [0.2.0.0] - 2026-04-02
+
+### Added
+- **社区 Phase 1：趋势发现** — `GET /api/anime/trending` 热追排行榜（订阅数聚合，1h 内存缓存）；`GET /api/anime/:anilistId/watchers` 在看用户头像列表
+- **社区 Phase 2：社交图谱** — 单向关注系统（`POST/DELETE /api/users/:username/follow`）；公开个人主页 `/u/:username`；关注者/关注列表；好友动态 Feed（`GET /api/feed`）
+- **社区 Phase 3：实时弹幕** — WebSocket（socket.io）弹幕系统，按 `anilistId:episode` 隔离房间；`EpisodeWindow` 集合原子化首播窗口（`$setOnInsert` 消除竞态）；1 条/5s 用户级内存限流；JWT Handshake + 每事件重验（`TokenExpiredError` 精准识别）
+- **iOS Blue 设计系统** — `#0a84ff` 替换全站紫色系；Apple True Black 三层背景（`#000000 → #1c1c1e → #2c2c2e`）；DESIGN.md 设计规范文档
+- **WCAG 触控区域修复** — 弹幕颜色、语言切换按钮、轮播圆点、日期筛选标签均 ≥44px
+- **磁力搜索重设计** — 入口迁至番剧详情页，三源并发（动漫花园 + acg.rip + Nyaa），集数筛选器，字幕组识别
+- **测试基础设施** — Vitest（client）+ Jest+Supertest（server）；新增 17 个测试文件，共 81 条用例（ActivityFeed、FollowButton、danmaku.controller、follow.controller、profile.controller 等）
+- `TrendingSection` 组件（首页横向卡片）；`WatchersAvatarList` 组件（番剧详情页）；`FollowButton`；`ActivityFeed`；`DanmakuOverlay`；`DanmakuInput`；`DanmakuSection`；`UserProfilePage`；`FollowListPage`
+- `Danmaku` 模型（含 1 年 TTL 自动清理索引）；`EpisodeWindow` 模型；`Follow` 模型
+- i18n：新增 `social.*`、`danmaku.*` 键组（中英双语）
+- `useDanmaku`、`useSocial` hooks；`social.api.js`、`danmaku.api.js`
+- CLAUDE.md 架构文档；docs/designs/community-platform-v2.md 设计决策记录
+
+### Fixed
+- `danmaku:join` 移入 `socket.on('connect', …)` 回调，修复重连后房间订阅丢失
+- `follow.controller.js` 自关注检测改用 `ObjectId.equals()`，修复字符串与 ObjectId 比较误判
+- `comment.controller` 内容长度校验改为 `content.trim().length`，修复含尾随空格内容被误拒（400）
+- 弹幕 `lastSent` Map 添加 10k 上限防内存无限增长；`danmaku:join` 加参数校验 + 10 房间上限
+- 弹幕历史接口加 500 条上限并倒序取最近（`.sort(-1).limit(500).then(reverse)`）
+- `torrentCache` LRU 500 条上限；查询长度上限 200 字符防缓存投毒；RSS `magnet:` 协议校验
+- `useFeed` 添加 `enabled: !!user` 防止未登录时发起请求
+- `useSubscription` 静默处理 404（未订阅用户不抛错）
+- `AuthContext` 使用 `useRef` 防止 React 18 StrictMode 下双重初始化
+- `FollowButton` 关注/取消关注后显示 toast 反馈；`minWidth: 88px` 防按钮宽度抖动
+- `ActivityFeed` 未登录时隐藏；空动态时显示友好提示文案
+- `profile.controller.getProfile` 订阅列表上限 200 条；`getFeed` 关注列表上限 500 条
+
+### Changed
+- `server/index.js` 改用 `http.createServer` + `server.listen`，Socket.IO 绑定同端口
+- 全站 success 色从 `#34d399` 统一为 Apple `#30d158`；次要文字从 `#475569` 统一为 `rgba(235,235,245,0.30)`
+- `DanmakuSection` 标签色改用 teal `#5ac8fa`（符合 DESIGN.md 弹幕分区规范）
+- `SeasonSelector` / `ProfilePage` tab 背景从 `rgba(26,34,53,0.8)` 统一为 `#1c1c1e`
+
+---
+
 ## [0.1.5.0] - 2026-03-28
 
 ### Added

@@ -225,22 +225,9 @@ _记录时间：2026-03-27（Design Review 补充）_
 
 ---
 
-## 待办十二：补写 follow / profile / danmaku 控制器测试
+## ✅ 待办十二：补写 follow / profile / danmaku 控制器测试（已完成 v0.2.0.0）
 
-**What：** 为以下三个已上线控制器补充 Jest + Supertest 集成测试：
-- `follow.controller`：关注自己 → 400、重复关注幂等（upsert 不报错）、`/followers` 分页
-- `profile.controller`：未登录访问 `isFollowing` → `null`、username 不存在 → 404
-- `danmaku.controller`：非整数 anilistId/episode → 400
-
-**Why：** 这三个控制器有真实的 DB 副作用（写入 Follow、读取 Subscription + AnimeCache），上线后没有回归保护。平台"测试不容商量"。
-
-**Pros：** 保护已上线功能；为 Phase 4 开发提供安全网。
-
-**Cons：** 需要 MongoDB 内存测试环境（现有测试套件已使用 `mongodb-memory-server`，模式已建立）。
-
-**Context：** 参考 `server/__tests__/comment.controller.test.js` 的测试结构，测试文件分别命名为 `follow.controller.test.js`、`profile.controller.test.js`、`danmaku.controller.test.js`。
-
-**Effort：** M（人工 1 天 / CC ~20min）｜**Priority：** P1｜**Depends on：** 无
+新增 `follow.controller.test.js`（10 tests）、`profile.controller.test.js`（9 tests）、`danmaku.controller.test.js`（4 tests），覆盖自关注 400、幂等 upsert、isFollowing 逻辑、分页、非整数参数校验等场景。
 
 ---
 
