@@ -90,3 +90,79 @@ This is a **monorepo** with two workspaces: `client/` (React SPA) and `server/` 
 **`server/.env`** — `MONGODB_URI`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `JWT_EXPIRES_IN=15m`, `JWT_REFRESH_EXPIRES_IN=7d`, `PORT=5001`, `CLIENT_ORIGIN=http://localhost:5173`, `CACHE_TTL_HOURS=24`
 
 **`client/.env`** — `VITE_API_BASE_URL` (leave empty for dev; Vite proxy handles `/api`)
+
+## Bangumi 富化管道设计规范
+
+### 背景
+Bangumi 富化分两个阶段在后台异步执行：
+- **Phase 1-3**（`enqueueEnrichment`）：获取 `titleChinese` + `bgmId`，写入 `bangumiVersion=1`
+- **Phase 4**（`enqueuePhase4Enrichment`）：获取评分、角色中文名、分集标题，写入 `bangumiVersion=2`
+
+### 已知坑：分集标题无法写入（2026-04）
+
+**根因：三层问题叠加，形成"初次失败后永不重试"的死结**
+
+1. **Bangumi v0 API 不可靠**
+   - `/v0/subjects/{bgmId}/episodes` 对部分番剧返回 404（番剧本身存在但该端点无数据）
+   - **正确做法：使用旧 API `/subject/{bgmId}/ep`**，更稳定，覆盖面更广
+
+2. **续集集数偏移问题**
+   - Bangumi 续集（S2）的 `sort` 字段继承 S1 编号（如 S1 有 28 集，S2 的 sort=29-38）
+   - 必须做偏移归一化：`episode = Math.round(e.sort) - (Math.floor(eps[0].sort) - 1)`
+   - 使用 `e.sort` 而非 `e.ep`（`e.ep` 对续集不可靠）
+
+3. **Guard 阻止已有记录重新处理**
+   - `enqueuePhase4Enrichment` 不能对 `bangumiVersion >= 2` 的记录设置提前退出
+   - `processPhase4Queue` 的 skip 条件必须检查 `episodeTitles == null`，而不是只看 version
+   - **正确 skip 条件**：`doc.bangumiVersion >= 2 && episodeTitles != null`（有 version 且有 titles 才跳过）
+
+### 已知坑：bgmId 为 null 时客户端无限轮询（2026-04）
+
+**根因：** Phase 1-3 找不到番剧（如新番未被 Bangumi 收录），`bgmId = null`，写 `bangumiVersion: 1`。
+客户端检测到 `bangumiVersion < 2` 每 4 秒轮询一次。但 Phase 4 入队时检查 `!item.bgmId` 直接 skip，
+`bangumiVersion` 永远停在 1，形成无限轮询死锁。
+
+**正确做法：** Phase 1-3 完成后若 `bgmId = null`，直接写 `bangumiVersion: 2, episodeTitles: []`，
+标记为已完成，阻止客户端继续轮询。`getAnimeDetail` 缓存命中时若发现 `bangumiVersion === 1 && !bgmId`，
+同样直接修复写入 version 2。
+
+### 自愈设计原则
+- `episodeTitles` 用 `null`（未尝试）vs `[]`（尝试过但无数据）作哨兵区分，不能混用
+- Phase 4 结束后**必须**写入 `episodeTitles`（哪怕是 `[]`），否则无法判断是否已尝试
+- `anilist.service.js` 的 `getAnimeDetail` 缓存命中分支必须包含对 `bangumiVersion >= 2 && episodeTitles == null` 的重新入队逻辑
+- 客户端 `useAnimeDetail` 的 `refetchInterval` 需同时检查 `bangumiVersion < 2` 和 `episodeTitles` 是否为空
+
+### Bangumi API 参考
+- 番剧搜索：`GET https://api.bgm.tv/search/subject/{keyword}?type=2&responseGroup=small&max_results=5`
+- 番剧详情（评分）：`GET https://api.bgm.tv/v0/subjects/{bgmId}`
+- 角色列表：`GET https://api.bgm.tv/v0/subjects/{bgmId}/characters`
+- **分集列表（用这个）**：`GET https://api.bgm.tv/subject/{bgmId}/ep`（旧 API，稳定）
+- 速率限制：请求间隔 ≥ 800ms
+
+### 优化：详情页富化延迟（2026-04）
+
+**根因：两层延迟叠加**
+
+1. **React Query 缓存不共享**
+   - 季度/热门页缓存 key = `['seasonal', ...]` / `['trending', ...]`
+   - 详情页 key = `['anime', id]`，完全独立，不复用已有数据
+   - 用户点击卡片后详情页从零发 API 请求，显示 loading spinner
+   - 实际上列表页已经有这个番的数据（包括已富化字段），但详情页看不到
+
+2. **富化队列 FIFO 无优先级**
+   - `warmSeasonCache` 一次入队整季 ~80 个番
+   - 每 800ms 处理一个，全季处理完需 64s+（Phase 4 更长）
+   - 用户点击的番剧排在队尾，等待时间 = 前面所有番剧的处理时间
+
+**解决方案（已实现）：**
+
+1. **客户端 `placeholderData`**（`client/src/hooks/useAnime.js`）
+   - `useAnimeDetail` 添加 `placeholderData`，从 seasonal/trending/search 缓存中找该番数据
+   - 有 placeholder 时 `isLoading = false`，页面立刻渲染，无 loading spinner
+   - 后台 API 调用返回后无缝替换为完整数据
+
+2. **服务端优先队列**（`server/services/bangumi.service.js`）
+   - Phase 1-3 和 Phase 4 各增加 `enrichPriority` / `enrichPhase4Priority` 数组
+   - `enqueueEnrichment(items, priority)` 支持 priority 参数；priority 项插到队首
+   - Phase 1-3 的 priority 项完成后，Phase 4 入队也继承 priority
+   - `getAnimeDetail` 调用时传 `priority = true`；批量入队（warmCache、季度页）用默认 `false`

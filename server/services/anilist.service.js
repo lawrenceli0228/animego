@@ -277,15 +277,22 @@ async function getAnimeDetail(anilistId) {
     cached.studios === undefined ||
     (cached.characters?.length > 0 && cached.characters[0].role === undefined);
   if (!stale) {
-    if (!cached.bangumiVersion) enqueueEnrichment([cached]);           // Phase 1-3
-    else if (cached.bangumiVersion === 1) enqueuePhase4Enrichment([cached]); // Phase 4
+    if (!cached.bangumiVersion) enqueueEnrichment([cached], true);           // Phase 1-3 (priority)
+    else if (cached.bangumiVersion === 1 && cached.bgmId) enqueuePhase4Enrichment([cached], true); // Phase 4 (priority)
+    else if (cached.bangumiVersion === 1 && !cached.bgmId) {
+      // Stuck: Phase 1-3 done but no bgmId — Phase 4 impossible, advance to done
+      AnimeCache.updateOne({ anilistId: cached.anilistId }, { $set: { bangumiVersion: 2, episodeTitles: [] } }).catch(() => {});
+    }
+    else if (cached.bangumiVersion >= 2 && cached.episodes > 0 && cached.episodeTitles == null) {
+      enqueuePhase4Enrichment([cached], true); // Re-run to fill missing episodeTitles (priority)
+    }
     return cached;
   }
 
   const data  = await queryAniList(ANIME_DETAIL_QUERY, { id: parseInt(anilistId) });
   const anime = normalize(data.Media);
   await upsertCache([anime]);
-  enqueueEnrichment([anime]); // Phase 1-3 first; Phase 4 queued after bgmId is resolved
+  enqueueEnrichment([anime], true); // Phase 1-3 first (priority); Phase 4 queued after bgmId is resolved
   return anime;
 }
 

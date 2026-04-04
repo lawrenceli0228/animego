@@ -24,9 +24,8 @@ function Portrait({ src, alt, w = 58, h = 76 }) {
 }
 
 function CharPair({ c, lang }) {
-  const charName  = (lang === 'zh' && c.nameCn) ? c.nameCn : (c.nameJa || c.nameEn || '—')
-  const vaName    = (lang === 'zh' && c.voiceActorCn) ? c.voiceActorCn
-                  : (c.voiceActorJa || c.voiceActorEn || null)
+  const charName  = c.nameJa || c.nameEn || '—'
+  const vaName    = c.voiceActorJa || c.voiceActorEn || null
   const roleKey   = c.role?.toUpperCase() || 'SUPPORTING'
   const roleLabel = ROLE_LABEL[lang]?.[roleKey] ?? ROLE_LABEL.en[roleKey] ?? roleKey
 

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule, getTorrents, getTrending, getWatchers } from '../api/anime.api'
 
 export function useSeasonalAnime(season, year, page = 1) {
@@ -16,15 +16,36 @@ export function useSeasonalAnime(season, year, page = 1) {
 }
 
 export function useAnimeDetail(id) {
+  const queryClient = useQueryClient()
   return useQuery({
     queryKey: ['anime', id],
     queryFn: () => getAnimeDetail(id).then(r => r.data.data),
     enabled: !!id,
     staleTime: 0,
+    placeholderData: () => {
+      const numId = Number(id)
+      for (const [, d] of queryClient.getQueriesData({ queryKey: ['seasonal'] })) {
+        const hit = d?.data?.find(a => a.anilistId === numId)
+        if (hit) return hit
+      }
+      for (const [, d] of queryClient.getQueriesData({ queryKey: ['trending'] })) {
+        if (Array.isArray(d)) {
+          const hit = d.find(a => a.anilistId === numId)
+          if (hit) return hit
+        }
+      }
+      for (const [, d] of queryClient.getQueriesData({ queryKey: ['search'] })) {
+        const hit = d?.data?.find(a => a.anilistId === numId)
+        if (hit) return hit
+      }
+      return undefined
+    },
     refetchInterval: (data) => {
       const anime = data?.data ?? data
       if (!anime) return false
-      return (anime.bangumiVersion ?? 0) < 2 ? 4000 : false
+      if ((anime.bangumiVersion ?? 0) < 2) return 4000
+      if (anime.episodes > 0 && !anime.episodeTitles?.length) return 4000
+      return false
     }
   })
 }

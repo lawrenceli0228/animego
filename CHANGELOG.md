@@ -2,6 +2,24 @@
 
 ---
 
+## [0.2.2.0] - 2026-04-03
+
+ ### Changed
+  - **角色 & 配音演员名固定显示日文** — `CharacterSection` 移除语言适配逻辑，`nameJa`/`voiceActorJa` 始终优先，不再因语言设置切换为中文名
+  - **Bangumi 标题匹配精确化** — `fetchBangumiData` 从 `list[0]` 改为在最多 5 条结果中寻找 `name === titleNative` 的精确匹配；仅精确命中时才写入
+  `titleChinese`，非精确匹配仍保留 `bgmId` 但不写中文标题，避免续集 OVA 等变体污染正片翻译
+
+
+### Fixed
+- **bgmId 为 null 时客户端无限轮询** — Phase 1-3 搜索不到番剧时（新番未被 Bangumi 收录），原来写 `bangumiVersion: 1`，Phase 4 因 `!bgmId` 跳过，`bangumiVersion` 永远停在 1，客户端每 4 秒轮询死锁。现在直接写 `bangumiVersion: 2, episodeTitles: []` 标记完成
+- **历史卡记录自愈** — `getAnimeDetail` 缓存命中时检测 `bangumiVersion === 1 && !bgmId` 的残留记录，自动推进到 version 2，无需重启或手动干预
+
+### Performance
+- **详情页秒开（placeholderData）** — `useAnimeDetail` 新增 `placeholderData`，优先从 seasonal/trending/search 的 React Query 缓存中查找该番数据；有 placeholder 时 `isLoading = false`，从列表点进详情页立刻渲染，无 loading spinner
+- **富化优先队列** — `bangumi.service.js` 为 Phase 1-3 和 Phase 4 各增加 `enrichPriority` 数组；`enqueueEnrichment(items, priority)` 和 `enqueuePhase4Enrichment(items, priority)` 支持 `priority` 参数；`getAnimeDetail` 调用时传 `priority = true`，用户主动点击的番剧从队尾插到队首，等待时间从 60s+ 降至 ≤800ms；Phase 1-3 的 priority 项完成后，Phase 4 继承 priority
+
+---
+
 ## [0.2.1.0] - 2026-04-02
 
 ### Fixed
