@@ -6,7 +6,7 @@ export default function AnimeGrid({ animeList, loading, error }) {
   const { t } = useLang()
   if (loading) return <LoadingSpinner />
   if (error) return (
-    <div style={{ textAlign:'center', padding:'60px 0', color:'#ef4444' }}>
+    <div style={{ textAlign:'center', padding:'60px 0', color:'#ff453a' }}>
       {t('anime.loadError')}：{error.message}
     </div>
   )

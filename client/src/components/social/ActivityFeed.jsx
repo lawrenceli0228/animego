@@ -40,7 +40,7 @@ export default function ActivityFeed() {
         <p style={{ color: '#0a84ff', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
           {t('social.feedLabel')}
         </p>
-        <h2 style={{ fontSize: 'clamp(20px,2.5vw,28px)', background: 'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+        <h2 style={{ fontSize: 'clamp(20px,2.5vw,28px)', color: '#ffffff' }}>
           {t('social.feedTitle')}
         </h2>
       </div>
@@ -61,7 +61,7 @@ export default function ActivityFeed() {
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '10px 14px', borderRadius: 10,
                   background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(148,163,184,0.08)',
+                  border: '1px solid #38383a',
                   cursor: 'pointer', transition: 'background 0.2s',
                 }}
                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'}

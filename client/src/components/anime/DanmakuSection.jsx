@@ -28,7 +28,7 @@ export default function DanmakuSection({ anilistId, episode }) {
 
   return (
     <div style={{
-      borderTop: '1px solid rgba(148,163,184,0.08)',
+      borderTop: '1px solid #38383a',
       paddingTop: 12, marginTop: 4,
     }}>
       {/* Label */}
@@ -54,7 +54,7 @@ export default function DanmakuSection({ anilistId, episode }) {
       <div style={{
         borderRadius: 8, overflow: 'hidden',
         background: 'rgba(255,255,255,0.02)',
-        border: '1px solid rgba(148,163,184,0.08)',
+        border: '1px solid #38383a',
         marginBottom: 8,
       }}>
         <DanmakuOverlay messages={allMessages.slice(-30)} />

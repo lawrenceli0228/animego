@@ -9,34 +9,45 @@
 
   /* Accent — iOS Blue */
   --accent: #0a84ff;
-  --accent-light: #409cff;
+  --accent-hover: #409cff;
   --accent-dim: rgba(10, 132, 255, 0.12);
 
-  /* Secondary — iOS Teal */
-  --cyan: #5ac8fa;
+  /* Secondary — iOS Teal (info/read-only only) */
+  --teal: #5ac8fa;
+  --teal-dim: rgba(90, 200, 250, 0.10);
 
   /* Text — Apple Label System */
   --text: #ffffff;
-  --text-muted: rgba(235, 235, 245, 0.60);
-  --text-dim: rgba(235, 235, 245, 0.30);
+  --text-secondary: rgba(235, 235, 245, 0.60);
+  --text-tertiary: rgba(235, 235, 245, 0.30);
+  --text-quaternary: rgba(235, 235, 245, 0.18);
 
   /* Borders / Separators */
-  --border: rgba(84, 84, 88, 0.65);
-  --border-hover: rgba(10, 132, 255, 0.40);
-  --separator: #38383a;
+  --separator: rgba(84, 84, 88, 0.65);
+  --separator-opaque: #38383a;
 
   /* Semantic — Apple System Colors */
   --success: #30d158;
   --warning: #ff9f0a;
   --error: #ff453a;
 
-  /* Kept for compatibility (no glow in Apple style) */
-  --glow-accent: rgba(10, 132, 255, 0.20);
-  --glow-cyan: rgba(90, 200, 250, 0.15);
-
-  --radius: 12px;
+  /* Border Radius */
   --radius-sm: 8px;
+  --radius: 12px;
   --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Spacing */
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 16px;
+  --sp-lg: 24px;
+  --sp-xl: 32px;
+  --sp-2xl: 48px;
+  --sp-3xl: 64px;
+
+  /* Motion */
   --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 

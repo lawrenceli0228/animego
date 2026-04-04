@@ -43,8 +43,8 @@ export default function HeroCarousel({ animeList = [] }) {
               transform: i === current ? 'scale(1.03)' : 'scale(1)',
               transition: 'transform 6s ease'
             }} />
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, rgba(10,14,26,0.97) 0%, rgba(10,14,26,0.75) 55%, rgba(10,14,26,0.15) 100%)' }} />
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%', background: 'linear-gradient(to top, rgba(10,14,26,1), transparent)' }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.70) 55%, rgba(0,0,0,0.10) 100%)' }} />
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%', background: 'linear-gradient(to top, #000000, transparent)' }} />
 
             <div className="container" style={{ position: 'relative', height: '100%', display: 'flex', alignItems: 'center' }}>
               <div style={{ maxWidth: 560, animation: i === current ? 'fadeUp 0.6s ease' : 'none' }}>
@@ -56,7 +56,7 @@ export default function HeroCarousel({ animeList = [] }) {
                 </h1>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
                   {(anime.genres || []).slice(0, 4).map(g => (
-                    <span key={g} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(10,132,255,0.2)', border: '1px solid rgba(10,132,255,0.35)', color: '#90c8ff' }}>{g}</span>
+                    <span key={g} style={{ fontSize: 11, fontWeight: 500, padding: '3px 10px', borderRadius: 9999, background: 'rgba(120,120,128,0.12)', color: 'rgba(235,235,245,0.60)' }}>{g}</span>
                   ))}
                 </div>
                 {anime.description && (
@@ -67,14 +67,14 @@ export default function HeroCarousel({ animeList = [] }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   {anime.averageScore > 0 && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 20, color: '#fbbf24' }}>★</span>
-                      <span style={{ fontSize: 22, fontWeight: 800, color: '#ffffff' }}>{formatScore(anime.averageScore)}</span>
+                      <span style={{ fontSize: 20, color: '#ff9f0a' }}>★</span>
+                      <span style={{ fontSize: 22, fontWeight: 800, color: '#ffffff', fontFamily: "'JetBrains Mono',monospace" }}>{formatScore(anime.averageScore)}</span>
                     </div>
                   )}
                   <Link to={`/anime/${anime.anilistId}`}
-                    style={{ padding: '10px 28px', borderRadius: 10, background: 'linear-gradient(135deg,#0a84ff,#5ac8fa)', color: '#fff', fontWeight: 700, fontSize: 14, fontFamily: "'Sora',sans-serif", textDecoration: 'none', boxShadow: '0 4px 20px rgba(10,132,255,0.35)', transition: 'opacity 0.2s' }}
-                    onMouseEnter={e => e.currentTarget.style.opacity='0.85'}
-                    onMouseLeave={e => e.currentTarget.style.opacity='1'}
+                    style={{ padding: '10px 28px', borderRadius: 8, background: '#0a84ff', color: '#fff', fontWeight: 500, fontSize: 14, fontFamily: "'DM Sans',sans-serif", textDecoration: 'none', transition: 'background 0.15s' }}
+                    onMouseEnter={e => e.currentTarget.style.background='#409cff'}
+                    onMouseLeave={e => e.currentTarget.style.background='#0a84ff'}
                   >
                     {t('detail.viewDetails')}
                   </Link>

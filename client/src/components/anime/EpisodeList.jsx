@@ -19,7 +19,7 @@ export default function EpisodeList({ anime }) {
 
   if (!total) return (
     <section style={{ marginTop: 40 }}>
-      <p style={{ color: '#475569', fontSize: 14, padding: '24px 0' }}>{t('detail.noEpisodes')}</p>
+      <p style={{ color: 'rgba(235,235,245,0.30)', fontSize: 14, padding: '24px 0' }}>{t('detail.noEpisodes')}</p>
     </section>
   )
 
@@ -38,12 +38,12 @@ export default function EpisodeList({ anime }) {
           const isOpen = openEp === ep
 
           let bg = 'rgba(255,255,255,0.04)'
-          let border = 'rgba(148,163,184,0.1)'
+          let border = '#38383a'
           let numColor = 'rgba(235,235,245,0.60)'
 
-          if (isCurrent) { bg = 'rgba(10,132,255,0.2)'; border = 'rgba(10,132,255,0.5)'; numColor = '#60aaff' }
+          if (isCurrent) { bg = 'rgba(10,132,255,0.2)'; border = 'rgba(10,132,255,0.5)'; numColor = '#0a84ff' }
           else if (watched) { bg = 'rgba(48,209,88,0.12)'; border = 'rgba(48,209,88,0.3)'; numColor = '#30d158' }
-          if (isOpen) { bg = 'rgba(10,132,255,0.12)'; border = 'rgba(10,132,255,0.55)'; numColor = '#60aaff' }
+          if (isOpen) { bg = 'rgba(10,132,255,0.12)'; border = 'rgba(10,132,255,0.55)'; numColor = '#0a84ff' }
 
           return (
             <div
@@ -60,7 +60,7 @@ export default function EpisodeList({ anime }) {
                 {ep}
               </div>
               {watched && <div style={{ fontSize: 12, color: '#30d158', marginBottom: 3 }}>✓</div>}
-              {isCurrent && <div style={{ fontSize: 10, color: '#60aaff', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>▶</div>}
+              {isCurrent && <div style={{ fontSize: 10, color: '#0a84ff', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>▶</div>}
               {epTitleMap[ep] && (() => {
                 const title = lang === 'zh' ? (epTitleMap[ep].nameCn || epTitleMap[ep].name) : (epTitleMap[ep].name || epTitleMap[ep].nameCn)
                 return title ? <div style={{ fontSize: 9, color: 'rgba(235,235,245,0.35)', marginTop: 2, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={title}>{title}</div> : null
@@ -71,7 +71,7 @@ export default function EpisodeList({ anime }) {
       </div>
 
       {openEp !== null && (
-        <div style={{ marginTop: 16, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(148,163,184,0.1)', background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ marginTop: 16, borderRadius: 12, overflow: 'hidden', border: '1px solid #38383a', background: 'rgba(255,255,255,0.02)' }}>
           <div style={{ padding: '12px 16px' }}>
             <DanmakuSection anilistId={anime.anilistId} episode={openEp} />
           </div>

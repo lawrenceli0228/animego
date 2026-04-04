@@ -49,7 +49,7 @@ function GroupRow({ label, count, active, onClick }) {
         width: '100%', padding: '7px 8px', borderRadius: 8,
         background: active ? 'rgba(10,132,255,0.25)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
         border: active ? '1px solid rgba(10,132,255,0.45)' : '1px solid transparent',
-        color: active ? '#90c8ff' : 'rgba(235,235,245,0.60)',
+        color: active ? '#0a84ff' : 'rgba(235,235,245,0.60)',
         cursor: 'pointer', fontSize: 13, fontWeight: active ? 600 : 400,
         textAlign: 'left', transition: 'all 0.15s',
       }}
@@ -60,8 +60,8 @@ function GroupRow({ label, count, active, onClick }) {
       <span style={{
         flexShrink: 0, marginLeft: 6, fontSize: 10, fontWeight: 700,
         padding: '1px 6px', borderRadius: 10,
-        background: active ? 'rgba(10,132,255,0.4)' : 'rgba(148,163,184,0.12)',
-        color: active ? '#60aaff' : 'rgba(235,235,245,0.30)',
+        background: active ? 'rgba(10,132,255,0.4)' : 'rgba(120,120,128,0.12)',
+        color: active ? '#0a84ff' : 'rgba(235,235,245,0.30)',
       }}>{count}</span>
     </button>
   )
@@ -78,14 +78,14 @@ function TorrentRow({ item, copied, onCopy, onOpen }) {
       style={{
         padding: '10px 12px', borderRadius: 10,
         background: hovered ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)',
-        border: `1px solid ${hovered ? 'rgba(10,132,255,0.3)' : 'rgba(148,163,184,0.07)'}`,
+        border: `1px solid ${hovered ? 'rgba(10,132,255,0.3)' : 'rgba(84,84,88,0.30)'}`,
         display: 'flex', alignItems: 'flex-start', gap: 10, transition: 'all 0.15s',
       }}
     >
       {/* Main info */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
-          fontSize: 12, color: '#e2e8f0', lineHeight: 1.5,
+          fontSize: 12, color: '#ffffff', lineHeight: 1.5,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           marginBottom: 5,
         }} title={item.title}>{item.title}</p>
@@ -101,14 +101,14 @@ function TorrentRow({ item, copied, onCopy, onOpen }) {
           {tags.map(tag => (
             <span key={tag} style={{
               fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 500,
-              background: 'rgba(148,163,184,0.1)', color: 'rgba(235,235,245,0.60)',
+              background: 'rgba(120,120,128,0.12)', color: 'rgba(235,235,245,0.60)',
             }}>{tag}</span>
           ))}
           {item.size && (
-            <span style={{ fontSize: 10, color: '#475569' }}>{item.size}</span>
+            <span style={{ fontSize: 10, color: 'rgba(235,235,245,0.30)' }}>{item.size}</span>
           )}
           {item.date && (
-            <span style={{ fontSize: 10, color: '#475569' }}>{fmtDate(item.date)}</span>
+            <span style={{ fontSize: 10, color: 'rgba(235,235,245,0.30)' }}>{fmtDate(item.date)}</span>
           )}
           {item.source && (
             <span style={{
@@ -116,7 +116,7 @@ function TorrentRow({ item, copied, onCopy, onOpen }) {
               textTransform: 'uppercase', letterSpacing: '0.5px',
               background: item.source === 'nyaa'  ? 'rgba(90,200,250,0.1)'
                         : item.source === 'dmhy'  ? 'rgba(52,211,153,0.1)'
-                        : 'rgba(148,163,184,0.08)',
+                        : 'rgba(84,84,88,0.30)',
               color: item.source === 'nyaa'  ? '#5ac8fa'
                    : item.source === 'dmhy'  ? '#34d399'
                    : 'rgba(235,235,245,0.30)',
@@ -133,7 +133,7 @@ function TorrentRow({ item, copied, onCopy, onOpen }) {
           style={{
             padding: '5px 10px', borderRadius: 7, border: 'none', cursor: 'pointer',
             background: copied ? 'rgba(16,185,129,0.2)' : 'rgba(10,132,255,0.2)',
-            color: copied ? '#34d399' : '#60aaff',
+            color: copied ? '#34d399' : '#0a84ff',
             fontSize: 12, fontWeight: 700, transition: 'all 0.2s', whiteSpace: 'nowrap',
           }}
         >
@@ -253,7 +253,7 @@ export default function TorrentModal({ anime, onClose }) {
       <div
         style={{
           background: '#000000',
-          border: '1px solid rgba(148,163,184,0.12)',
+          border: '1px solid rgba(120,120,128,0.12)',
           borderRadius: 16, width: '100%', maxWidth: 1060,
           height: 'min(88vh, 700px)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -263,7 +263,7 @@ export default function TorrentModal({ anime, onClose }) {
         {/* ── HEADER ── */}
         <div style={{
           padding: '14px 18px 12px',
-          borderBottom: '1px solid rgba(148,163,184,0.08)',
+          borderBottom: '1px solid rgba(84,84,88,0.30)',
           flexShrink: 0,
           display: 'flex', flexDirection: 'column', gap: 8,
         }}>
@@ -288,17 +288,17 @@ export default function TorrentModal({ anime, onClose }) {
                   onClick={() => applyTitle(opt.value)}
                   style={{
                     padding: '3px 10px', borderRadius: 20,
-                    border: '1px solid rgba(148,163,184,0.2)',
+                    border: '1px solid rgba(84,84,88,0.65)',
                     background: 'transparent', color: 'rgba(235,235,245,0.50)',
                     fontSize: 11, fontWeight: 500, cursor: 'pointer',
                     transition: 'all 0.15s', whiteSpace: 'nowrap',
                   }}
                   onMouseEnter={e => {
                     e.currentTarget.style.borderColor = 'rgba(10,132,255,0.6)'
-                    e.currentTarget.style.color = '#60aaff'
+                    e.currentTarget.style.color = '#0a84ff'
                   }}
                   onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = 'rgba(148,163,184,0.2)'
+                    e.currentTarget.style.borderColor = 'rgba(84,84,88,0.65)'
                     e.currentTarget.style.color = 'rgba(235,235,245,0.50)'
                   }}
                 >
@@ -344,7 +344,7 @@ export default function TorrentModal({ anime, onClose }) {
               onKeyDown={e => { if (e.key === 'Enter') triggerSearch(query) }}
               style={{
                 flex: 1, padding: '8px 13px', borderRadius: 9,
-                border: '1px solid rgba(148,163,184,0.15)',
+                border: '1px solid #38383a',
                 background: 'rgba(255,255,255,0.04)', color: '#ffffff',
                 fontSize: 13, outline: 'none', fontFamily: 'inherit',
               }}
@@ -367,13 +367,13 @@ export default function TorrentModal({ anime, onClose }) {
           {/* LEFT — fansub group list */}
           <div style={{
             width: 185, flexShrink: 0,
-            borderRight: '1px solid rgba(148,163,184,0.08)',
+            borderRight: '1px solid rgba(84,84,88,0.30)',
             overflowY: 'auto', padding: '10px 8px',
-            background: '#0d1322',
+            background: '#1c1c1e',
             display: 'flex', flexDirection: 'column', gap: 3,
           }}>
             <p style={{
-              fontSize: 10, color: '#475569', fontWeight: 600,
+              fontSize: 10, color: 'rgba(235,235,245,0.30)', fontWeight: 600,
               letterSpacing: '1.5px', textTransform: 'uppercase',
               padding: '2px 6px 8px',
             }}>
@@ -424,8 +424,8 @@ export default function TorrentModal({ anime, onClose }) {
           {/* RIGHT — cover image */}
           <div style={{
             width: 128, flexShrink: 0,
-            borderLeft: '1px solid rgba(148,163,184,0.08)',
-            background: '#0d1322',
+            borderLeft: '1px solid rgba(84,84,88,0.30)',
+            background: '#1c1c1e',
             display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
             padding: '14px 10px',
           }}>

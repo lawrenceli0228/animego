@@ -15,7 +15,7 @@ export default function DanmakuInput({ onSend, connected }) {
     <div style={{ fontSize: 12, color: 'rgba(235,235,245,0.30)', textAlign: 'center', padding: '8px 0' }}>
       <button
         onClick={() => navigate('/login')}
-        style={{ color: '#60aaff', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+        style={{ color: '#0a84ff', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
       >
         {t('sub.loginToWatch')}
       </button>
@@ -47,7 +47,7 @@ export default function DanmakuInput({ onSend, connected }) {
         disabled={!connected}
         style={{
           flex: 1, padding: '7px 12px', borderRadius: 8,
-          border: '1px solid rgba(148,163,184,0.2)',
+          border: '1px solid #38383a',
           background: 'rgba(255,255,255,0.04)', color: '#ffffff',
           fontSize: 13, outline: 'none',
           opacity: connected ? 1 : 0.4,

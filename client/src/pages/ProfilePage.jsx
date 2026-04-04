@@ -33,16 +33,14 @@ export default function ProfilePage() {
       <div style={{ marginBottom:36, animation:'fadeUp 0.4s ease' }}>
         <p style={{ color:'#0a84ff', fontSize:13, fontWeight:600, letterSpacing:'2px',
           textTransform:'uppercase', marginBottom:8 }}>{t('profile.label')}</p>
-        <h1 style={{ fontSize:'clamp(24px,3.5vw,38px)',
-          background:'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))',
-          WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
+        <h1 style={{ fontSize:'clamp(24px,3.5vw,38px)', color:'#ffffff' }}>
           {user?.username}{t('profile.titleSuffix')}
         </h1>
       </div>
 
       <div style={{ display:'flex', gap:4, marginBottom:28, background:'#1c1c1e',
         borderRadius:12, padding:5, width:'fit-content',
-        border:'1px solid rgba(148,163,184,0.08)' }}>
+        border:'1px solid #38383a' }}>
         {STATUS_OPTIONS.map(opt => (
           <button key={opt.value} onClick={() => setActiveStatus(opt.value)}
             style={{

@@ -28,9 +28,7 @@ export default function SeasonPage() {
 
   return (
     <div className="container" style={{ paddingTop:40, paddingBottom:40 }}>
-      <h1 style={{ fontSize:'clamp(22px,3vw,34px)', marginBottom:24,
-        background:'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))',
-        WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
+      <h1 style={{ fontSize:'clamp(22px,3vw,34px)', marginBottom:24, color:'#ffffff' }}>
         {t('seasonPage.title')}
       </h1>
       <SeasonSelector year={year} season={season} onYearChange={setYear} onSeasonChange={setSeason} />

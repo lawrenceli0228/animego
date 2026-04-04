@@ -25,7 +25,7 @@ export default function FollowButton({ username, isFollowing, isSelf }) {
       style={{
         padding: '8px 20px',
         borderRadius: 8,
-        border: isFollowing ? '1px solid rgba(148,163,184,0.3)' : 'none',
+        border: isFollowing ? '1px solid rgba(84,84,88,0.65)' : 'none',
         background: isFollowing ? 'transparent' : '#0a84ff',
         color: isFollowing ? 'rgba(235,235,245,0.60)' : '#fff',
         fontSize: 13,

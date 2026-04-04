@@ -20,7 +20,7 @@ export default function StaffSection({ staff }) {
               <div style={{
                 width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
                 overflow: 'hidden', background: '#2c2c2e',
-                border: '1px solid rgba(148,163,184,0.10)',
+                border: '1px solid #38383a',
               }}>
                 {s.imageUrl
                   ? <img src={s.imageUrl} alt={name}

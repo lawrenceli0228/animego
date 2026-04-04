@@ -12,7 +12,7 @@ function Portrait({ src, alt, w = 58, h = 76 }) {
     <div style={{
       width: w, height: h, flexShrink: 0,
       borderRadius: 4, overflow: 'hidden', background: '#2c2c2e',
-      border: '1px solid rgba(148,163,184,0.10)',
+      border: '1px solid #38383a',
     }}>
       {src && (
         <img src={src} alt={alt}
@@ -33,7 +33,7 @@ function CharPair({ c, lang }) {
     <div style={{
       display: 'flex', alignItems: 'stretch', gap: 0,
       background: 'rgba(255,255,255,0.03)',
-      border: '1px solid rgba(148,163,184,0.08)',
+      border: '1px solid rgba(84,84,88,0.30)',
       borderRadius: 6, overflow: 'hidden',
     }}>
       {/* Character side */}
@@ -51,7 +51,7 @@ function CharPair({ c, lang }) {
       </div>
 
       {/* Divider */}
-      {vaName && <div style={{ width: 1, background: 'rgba(148,163,184,0.08)', flexShrink: 0 }} />}
+      {vaName && <div style={{ width: 1, background: 'rgba(84,84,88,0.30)', flexShrink: 0 }} />}
 
       {/* VA side */}
       {vaName && (

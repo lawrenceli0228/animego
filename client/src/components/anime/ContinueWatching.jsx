@@ -17,17 +17,20 @@ export default function ContinueWatching() {
         <p style={{ color: '#0a84ff', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
           {t('home.continueLabel')}
         </p>
-        <h2 style={{ fontSize: 'clamp(22px,3vw,32px)', background: 'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+        <h2 style={{ fontSize: 'clamp(22px,3vw,32px)', color: '#ffffff' }}>
           {t('home.watchingTitle')}
         </h2>
       </div>
 
-      <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin', scrollbarColor: 'rgba(10,132,255,0.3) transparent' }}>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+        gap: 16, animation: 'fadeUp 0.4s ease both'
+      }}>
         {list.map(item => (
           <Link key={item.anilistId} to={`/anime/${item.anilistId}`}
-            style={{ flexShrink: 0, width: 130, textDecoration: 'none', color: 'inherit', borderRadius: 12, overflow: 'hidden', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.08)', transition: 'transform 0.2s, border-color 0.2s' }}
-            onMouseEnter={e => { e.currentTarget.style.transform='translateY(-4px)'; e.currentTarget.style.borderColor='rgba(10,132,255,0.4)' }}
-            onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.borderColor='rgba(148,163,184,0.08)' }}
+            style={{ textDecoration: 'none', color: 'inherit', borderRadius: 12, overflow: 'hidden', background: '#1c1c1e', border: '1px solid #38383a', transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1), box-shadow 0.25s cubic-bezier(0.4,0,0.2,1)' }}
+            onMouseEnter={e => { e.currentTarget.style.transform='translateY(-4px)'; e.currentTarget.style.boxShadow='0 8px 24px rgba(0,0,0,0.40)' }}
+            onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.boxShadow='none' }}
           >
             <div style={{ position: 'relative' }}>
               <img src={item.coverImageUrl} alt={item.titleRomaji}
@@ -36,17 +39,17 @@ export default function ContinueWatching() {
               />
               {item.episodes > 0 && (
                 <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.5)' }}>
-                  <div style={{ height: '100%', width: `${Math.min(100, (item.currentEpisode / item.episodes) * 100)}%`, background: 'linear-gradient(90deg,#0a84ff,#5ac8fa)' }} />
+                  <div style={{ height: '100%', width: `${Math.min(100, (item.currentEpisode / item.episodes) * 100)}%`, background: '#0a84ff' }} />
                 </div>
               )}
-              <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(10,14,26,0.75)', backdropFilter: 'blur(4px)', borderRadius: 6, padding: '2px 6px', fontSize: 11, fontWeight: 600, color: '#60aaff' }}>
+              <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', borderRadius: 6, padding: '2px 6px', fontSize: 11, fontWeight: 600, color: '#0a84ff' }}>
                 {item.currentEpisode > 0
                   ? `${item.currentEpisode}${item.episodes > 0 ? `/${item.episodes}` : ''} ${t('detail.epUnit')}`
                   : item.episodes > 0 ? `${item.episodes} ${t('detail.epUnit')}` : t('sub.watching')}
               </div>
             </div>
             <div style={{ padding: '8px 10px 10px' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#ffffff', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.4 }}>
+              <div style={{ fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 600, color: '#ffffff', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.35 }}>
                 {pickTitle(item, lang)}
               </div>
             </div>

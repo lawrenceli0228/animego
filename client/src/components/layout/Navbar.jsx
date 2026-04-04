@@ -6,47 +6,47 @@ import toast from 'react-hot-toast'
 const s = {
   nav: {
     position: 'sticky', top: 0, zIndex: 100,
-    background: 'rgba(10,14,26,0.85)',
-    backdropFilter: 'blur(20px)',
-    borderBottom: '1px solid rgba(148,163,184,0.08)',
+    background: 'rgba(0,0,0,0.80)',
+    backdropFilter: 'saturate(180%) blur(20px)',
+    WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+    borderBottom: '1px solid rgba(84,84,88,0.65)',
     padding: '0 24px'
   },
   inner: {
     maxWidth: 1400, margin: '0 auto',
     display: 'flex', alignItems: 'center',
-    height: 64, gap: 40
+    height: 56, gap: 32
   },
   logo: {
-    fontFamily: "'Sora',sans-serif", fontWeight: 800,
-    fontSize: 22, letterSpacing: '-0.5px',
-    background: 'linear-gradient(135deg, #0a84ff, #5ac8fa)',
-    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+    fontFamily: "'Sora',sans-serif", fontWeight: 700,
+    fontSize: 20, letterSpacing: '-0.03em',
+    color: '#ffffff', textDecoration: 'none'
   },
   links: { display: 'flex', gap: 4, flex: 1 },
   link: (active) => ({
     padding: '6px 14px', borderRadius: 8,
-    fontSize: 14, fontWeight: 500,
+    fontSize: 14, fontWeight: active ? 600 : 500,
     color: active ? '#ffffff' : 'rgba(235,235,245,0.60)',
-    background: active ? 'rgba(10,132,255,0.2)' : 'transparent',
+    background: active ? 'rgba(255,255,255,0.10)' : 'transparent',
     transition: 'all 0.2s'
   }),
   right: { display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' },
   username: { color: 'rgba(235,235,245,0.60)', fontSize: 14 },
   btnOutline: {
     padding: '6px 16px', borderRadius: 8,
-    border: '1px solid rgba(10,132,255,0.4)',
-    color: '#ffffff', fontSize: 14, fontWeight: 500,
+    border: '1px solid rgba(84,84,88,0.65)',
+    color: 'rgba(235,235,245,0.60)', fontSize: 14, fontWeight: 500,
     transition: 'all 0.2s', cursor: 'pointer', background: 'none'
   },
   btnFill: {
     padding: '6px 16px', borderRadius: 8,
-    background: 'linear-gradient(135deg,#0a84ff,#0a84ff)',
-    color: '#fff', fontSize: 14, fontWeight: 600,
+    background: '#0a84ff',
+    color: '#fff', fontSize: 14, fontWeight: 500,
     border: 'none', cursor: 'pointer'
   },
   langBtn: {
-    minHeight: 44, minWidth: 44, padding: '0 10px', borderRadius: 6,
-    border: '1px solid rgba(148,163,184,0.2)',
+    minHeight: 44, minWidth: 44, padding: '0 10px', borderRadius: 8,
+    border: '1px solid rgba(84,84,88,0.65)',
     color: 'rgba(235,235,245,0.60)', fontSize: 12, fontWeight: 600,
     cursor: 'pointer', background: 'none', transition: 'all 0.2s'
   }

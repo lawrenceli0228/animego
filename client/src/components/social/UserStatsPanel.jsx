@@ -121,7 +121,7 @@ export default function UserStatsPanel({ watching }) {
       </div>
 
       {/* Divider */}
-      <div style={{ width: 1, height: 56, background: 'rgba(148,163,184,0.12)', flexShrink: 0, alignSelf: 'center' }} />
+      <div style={{ width: 1, height: 56, background: '#38383a', flexShrink: 0, alignSelf: 'center' }} />
 
       {/* Stat items */}
       <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
@@ -137,8 +137,8 @@ export default function UserStatsPanel({ watching }) {
               {topGenres.map(g => (
                 <span key={g} style={{
                   fontSize: 11, padding: '2px 8px', borderRadius: 99,
-                  background: 'rgba(10,132,255,0.15)', color: '#60aaff',
-                  border: '1px solid rgba(10,132,255,0.25)', fontWeight: 600,
+                  background: 'rgba(10,132,255,0.12)', color: '#0a84ff',
+                  fontWeight: 600,
                 }}>{g}</span>
               ))}
             </div>

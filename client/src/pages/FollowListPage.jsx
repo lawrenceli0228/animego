@@ -22,7 +22,7 @@ export default function FollowListPage({ type }) {
         >
           ← {username}
         </button>
-        <span style={{ color: 'rgba(148,163,184,0.3)' }}>/</span>
+        <span style={{ color: 'rgba(84,84,88,0.65)' }}>/</span>
         <h1 style={{ fontSize: 18, fontWeight: 700, color: '#ffffff', margin: 0 }}>
           {title}
           {data?.total > 0 && (
@@ -46,7 +46,7 @@ export default function FollowListPage({ type }) {
       )}
 
       {!isLoading && !isError && users.length === 0 && (
-        <p style={{ color: '#475569', textAlign: 'center', paddingTop: 40 }}>
+        <p style={{ color: 'rgba(235,235,245,0.30)', textAlign: 'center', paddingTop: 40 }}>
           —
         </p>
       )}
@@ -60,15 +60,15 @@ export default function FollowListPage({ type }) {
               display: 'flex', alignItems: 'center', gap: 12,
               padding: '10px 14px', borderRadius: 10,
               background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(148,163,184,0.08)',
+              border: '1px solid #38383a',
               cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
             }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(10,132,255,0.4)'; e.currentTarget.style.background = 'rgba(10,132,255,0.06)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(148,163,184,0.08)'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = '#38383a'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
           >
             <div style={{
               width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-              background: 'linear-gradient(135deg,#0a84ff,#5ac8fa)',
+              background: '#0a84ff',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 15, fontWeight: 800, color: '#fff', textTransform: 'uppercase',
             }}>

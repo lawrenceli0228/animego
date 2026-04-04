@@ -11,10 +11,10 @@ export default function ForgotPasswordPage() {
   const [sent, setSent] = useState(false)
 
   const inputStyle = {
-    width:'100%', padding:'11px 14px', borderRadius:10,
-    background:'#000000', border:'1px solid rgba(148,163,184,0.15)',
+    width:'100%', padding:'12px 16px', borderRadius:8,
+    background:'#2c2c2e', border:'1px solid #38383a',
     color:'#ffffff', fontSize:14, outline:'none', marginBottom:20,
-    boxSizing:'border-box',
+    boxSizing:'border-box', transition:'border-color 0.2s, box-shadow 0.2s',
   }
 
   const handleSubmit = async (e) => {
@@ -32,13 +32,12 @@ export default function ForgotPasswordPage() {
   return (
     <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'40px 24px' }}>
       <div style={{ width:'100%', maxWidth:420, background:'#1c1c1e',
-        border:'1px solid rgba(10,132,255,0.2)', borderRadius:16, padding:40,
-        boxShadow:'0 24px 60px rgba(0,0,0,0.5)' }}>
+        border:'1px solid #38383a', borderRadius:16, padding:40,
+        boxShadow:'0 16px 48px rgba(0,0,0,0.60)' }}>
 
         <div style={{ textAlign:'center', marginBottom:32 }}>
           <h1 style={{ fontFamily:"'Sora',sans-serif", fontSize:28,
-            background:'linear-gradient(135deg,#0a84ff,#5ac8fa)',
-            WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:8 }}>
+            color:'#ffffff', marginBottom:8 }}>
             {t('forgotPassword.title')}
           </h1>
           <p style={{ color:'rgba(235,235,245,0.60)', fontSize:14 }}>{t('forgotPassword.subtitle')}</p>
@@ -62,8 +61,8 @@ export default function ForgotPasswordPage() {
             <input
               type="email" value={email} onChange={e => setEmail(e.target.value)}
               required style={inputStyle}
-              onFocus={e => e.target.style.borderColor='rgba(10,132,255,0.5)'}
-              onBlur={e => e.target.style.borderColor='rgba(148,163,184,0.15)'}
+              onFocus={e => { e.target.style.borderColor='#0a84ff'; e.target.style.boxShadow='0 0 0 3px rgba(10,132,255,0.25)' }}
+              onBlur={e => { e.target.style.borderColor='#38383a'; e.target.style.boxShadow='none' }}
             />
 
             <button type="submit" disabled={loading}

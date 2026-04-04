@@ -25,7 +25,7 @@ export default function RecommendationSection({ recommendations }) {
             <div style={{
               width: 110, height: 155, borderRadius: 8, overflow: 'hidden',
               background: '#2c2c2e', marginBottom: 6,
-              border: '1px solid rgba(148,163,184,0.08)',
+              border: '1px solid #38383a',
             }}>
               {r.coverImageUrl
                 ? <img src={r.coverImageUrl} alt={r.title}

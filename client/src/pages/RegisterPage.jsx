@@ -31,20 +31,20 @@ export default function RegisterPage() {
   }
 
   const inputStyle = {
-    width:'100%', padding:'11px 14px', borderRadius:10,
-    background:'#000000', border:'1px solid rgba(148,163,184,0.15)',
-    color:'#ffffff', fontSize:14, outline:'none', marginBottom:16
+    width:'100%', padding:'12px 16px', borderRadius:8,
+    background:'#2c2c2e', border:'1px solid #38383a',
+    color:'#ffffff', fontSize:14, outline:'none', marginBottom:16,
+    transition:'border-color 0.2s, box-shadow 0.2s'
   }
 
   return (
     <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'40px 24px' }}>
       <div style={{ width:'100%', maxWidth:420, background:'#1c1c1e',
-        border:'1px solid rgba(10,132,255,0.2)', borderRadius:16, padding:40,
-        boxShadow:'0 24px 60px rgba(0,0,0,0.5)' }}>
+        border:'1px solid #38383a', borderRadius:16, padding:40,
+        boxShadow:'0 16px 48px rgba(0,0,0,0.60)' }}>
         <div style={{ textAlign:'center', marginBottom:32 }}>
           <h1 style={{ fontFamily:"'Sora',sans-serif", fontSize:28,
-            background:'linear-gradient(135deg,#0a84ff,#5ac8fa)',
-            WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:8 }}>
+            color:'#ffffff', marginBottom:8 }}>
             {t('register.title')}
           </h1>
           <p style={{ color:'rgba(235,235,245,0.60)', fontSize:14 }}>{t('register.subtitle')}</p>
@@ -55,13 +55,13 @@ export default function RegisterPage() {
             <div key={k}>
               <label style={{ display:'block', fontSize:13, fontWeight:600, color:'rgba(235,235,245,0.60)', marginBottom:6 }}>{l}</label>
               <input type={tp} value={form[k]} onChange={set(k)} required style={inputStyle}
-                onFocus={e => e.target.style.borderColor='rgba(10,132,255,0.5)'}
-                onBlur={e => e.target.style.borderColor='rgba(148,163,184,0.15)'}
+                onFocus={e => { e.target.style.borderColor='#0a84ff'; e.target.style.boxShadow='0 0 0 3px rgba(10,132,255,0.25)' }}
+                onBlur={e => { e.target.style.borderColor='#38383a'; e.target.style.boxShadow='none' }}
               />
             </div>
           ))}
 
-          {error && <p style={{ color:'#f87171', fontSize:13, marginBottom:12, textAlign:'center' }}>{error}</p>}
+          {error && <p style={{ color:'#ff453a', fontSize:13, marginBottom:12, textAlign:'center' }}>{error}</p>}
 
           <button type="submit" disabled={loading}
             style={{ width:'100%', padding:'12px', background:'#0a84ff',

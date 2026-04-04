@@ -33,7 +33,7 @@ function ShareButton({ username }) {
       onClick={handle}
       style={{
         padding: '8px 14px', borderRadius: 8,
-        border: '1px solid rgba(148,163,184,0.3)',
+        border: '1px solid rgba(84,84,88,0.65)',
         background: 'transparent', color: 'rgba(235,235,245,0.60)',
         fontSize: 13, fontWeight: 600, cursor: 'pointer',
       }}
@@ -88,7 +88,7 @@ export default function UserProfilePage() {
         {/* Avatar */}
         <div style={{
           width: 64, height: 64, borderRadius: '50%',
-          background: 'linear-gradient(135deg,#0a84ff,#5ac8fa)',
+          background: '#0a84ff',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 26, fontWeight: 800, color: '#fff', flexShrink: 0,
           textTransform: 'uppercase',
@@ -162,7 +162,7 @@ export default function UserProfilePage() {
                 onClick={() => setExpanded(prev => ({ ...prev, [status]: !isExpanded }))}
                 style={{
                   marginTop: 12, padding: '8px 20px', borderRadius: 8,
-                  border: '1px solid rgba(148,163,184,0.2)',
+                  border: '1px solid rgba(84,84,88,0.65)',
                   background: 'transparent', color: 'rgba(235,235,245,0.60)',
                   fontSize: 13, fontWeight: 600, cursor: 'pointer',
                 }}

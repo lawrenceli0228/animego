@@ -31,7 +31,7 @@ function ShareButton({ anime }) {
       onClick={handle}
       style={{
         marginLeft: 8, padding: '8px 14px', borderRadius: 8,
-        border: '1px solid rgba(148,163,184,0.3)',
+        border: '1px solid rgba(84,84,88,0.65)',
         background: 'transparent', color: 'rgba(235,235,245,0.60)',
         fontSize: 13, fontWeight: 600, cursor: 'pointer',
       }}
@@ -49,7 +49,7 @@ export default function AnimeDetailPage() {
 
   if (isLoading) return <LoadingSpinner />
   if (error) return (
-    <div style={{ textAlign:'center', padding:'80px 0', color:'#ef4444' }}>
+    <div style={{ textAlign:'center', padding:'80px 0', color:'#ff453a' }}>
       {t('anime.loadError')}：{error.message}
     </div>
   )
@@ -67,7 +67,7 @@ export default function AnimeDetailPage() {
               onClick={() => setTorrentOpen(true)}
               style={{
                 marginLeft: 8, padding: '8px 14px', borderRadius: 8,
-                border: '1px solid rgba(148,163,184,0.3)',
+                border: '1px solid rgba(84,84,88,0.65)',
                 background: 'transparent', color: 'rgba(235,235,245,0.60)',
                 fontSize: 13, fontWeight: 600, cursor: 'pointer',
               }}
