@@ -23,23 +23,24 @@ export function useDanmakuSocket(anilistId, episode, enabled) {
   useEffect(() => {
     if (!enabled) return
 
-    const token = getAccessToken()
-    if (!token) return   // must be logged in to receive live danmaku
+    if (!getAccessToken()) return   // must be logged in to receive live danmaku
 
     const base = import.meta.env.VITE_API_BASE_URL
       ? import.meta.env.VITE_API_BASE_URL.replace('/api', '')
       : ''
 
     const socket = io(base, {
-      auth: { token },
+      auth: (cb) => cb({ token: getAccessToken() }),
       transports: ['websocket'],
     })
     socketRef.current = socket
 
-    socket.on('connect',    () => setConnected(true))
+    socket.on('connect', () => {
+      setConnected(true)
+      socket.emit('danmaku:join', { anilistId, episode })
+    })
     socket.on('disconnect', () => setConnected(false))
-
-    socket.emit('danmaku:join', { anilistId, episode })
+    socket.on('auth:expired', () => socket.disconnect())
 
     socket.on('danmaku:new', (msg) => {
       setLive(prev => [...prev, msg])

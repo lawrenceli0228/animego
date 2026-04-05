@@ -31,18 +31,16 @@ export default function ProfilePage() {
   return (
     <div className="container" style={{ paddingTop:40, paddingBottom:60 }}>
       <div style={{ marginBottom:36, animation:'fadeUp 0.4s ease' }}>
-        <p style={{ color:'#7c3aed', fontSize:13, fontWeight:600, letterSpacing:'2px',
+        <p style={{ color:'#0a84ff', fontSize:13, fontWeight:600, letterSpacing:'2px',
           textTransform:'uppercase', marginBottom:8 }}>{t('profile.label')}</p>
-        <h1 style={{ fontSize:'clamp(24px,3.5vw,38px)',
-          background:'linear-gradient(135deg,#f1f5f9,#94a3b8)',
-          WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
+        <h1 style={{ fontSize:'clamp(24px,3.5vw,38px)', color:'#ffffff' }}>
           {user?.username}{t('profile.titleSuffix')}
         </h1>
       </div>
 
-      <div style={{ display:'flex', gap:4, marginBottom:28, background:'rgba(26,34,53,0.8)',
+      <div style={{ display:'flex', gap:4, marginBottom:28, background:'#1c1c1e',
         borderRadius:12, padding:5, width:'fit-content',
-        border:'1px solid rgba(148,163,184,0.08)' }}>
+        border:'1px solid #38383a' }}>
         {STATUS_OPTIONS.map(opt => (
           <button key={opt.value} onClick={() => setActiveStatus(opt.value)}
             style={{
@@ -50,7 +48,7 @@ export default function ProfilePage() {
               cursor:'pointer', border:'none', transition:'all 0.2s',
               fontFamily:"'Sora',sans-serif",
               background: activeStatus === opt.value ? `linear-gradient(135deg,${opt.color}33,${opt.color}22)` : 'transparent',
-              color: activeStatus === opt.value ? opt.color : '#64748b',
+              color: activeStatus === opt.value ? opt.color : 'rgba(235,235,245,0.30)',
               boxShadow: activeStatus === opt.value ? `0 2px 12px ${opt.color}30` : 'none',
               borderBottom: activeStatus === opt.value ? `2px solid ${opt.color}` : '2px solid transparent'
             }}>
@@ -60,7 +58,7 @@ export default function ProfilePage() {
       </div>
 
       {animeList?.length === 0 && !isLoading ? (
-        <div style={{ textAlign:'center', padding:'60px 0', color:'#64748b',
+        <div style={{ textAlign:'center', padding:'60px 0', color:'rgba(235,235,245,0.30)',
           fontFamily:"'Sora',sans-serif", fontSize:15 }}>
           {t('profile.noAnime')} 「{statusLabels[activeStatus]}」 {t('profile.noAnimeSuffix')}
         </div>

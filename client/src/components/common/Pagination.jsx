@@ -2,12 +2,12 @@ const btn = (disabled) => ({
   padding: '8px 20px',
   borderRadius: 8,
   border: '1px solid',
-  borderColor: disabled ? 'rgba(148,163,184,0.15)' : 'rgba(124,58,237,0.5)',
-  color: disabled ? '#64748b' : '#f1f5f9',
-  background: disabled ? 'transparent' : 'rgba(124,58,237,0.15)',
+  borderColor: disabled ? 'rgba(84,84,88,0.30)' : 'rgba(84,84,88,0.65)',
+  color: disabled ? 'rgba(235,235,245,0.18)' : '#ffffff',
+  background: disabled ? 'transparent' : 'rgba(120,120,128,0.12)',
   cursor: disabled ? 'not-allowed' : 'pointer',
-  fontFamily: "'Sora', sans-serif",
-  fontSize: 14, fontWeight: 600,
+  fontFamily: "'DM Sans', sans-serif",
+  fontSize: 14, fontWeight: 500,
   transition: 'all 0.2s'
 })
 
@@ -16,8 +16,8 @@ export default function Pagination({ page, totalPages, onPageChange }) {
   return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:16, padding:'32px 0' }}>
       <button style={btn(page <= 1)} disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← 上一页</button>
-      <span style={{ color:'#94a3b8', fontSize:14, fontFamily:"'Sora',sans-serif" }}>
-        <span style={{ color:'#f1f5f9', fontWeight:700 }}>{page}</span>
+      <span style={{ color:'rgba(235,235,245,0.60)', fontSize:14, fontFamily:"'Sora',sans-serif" }}>
+        <span style={{ color:'#ffffff', fontWeight:700 }}>{page}</span>
         {' / '}{totalPages}
       </span>
       <button style={btn(page >= totalPages)} disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>下一页 →</button>

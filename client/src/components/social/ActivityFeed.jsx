@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useFeed } from '../../hooks/useSocial'
 import { useLang } from '../../context/LanguageContext'
+import { useAuth } from '../../context/AuthContext'
 
 function timeAgo(date, lang) {
   const diff = Math.floor((Date.now() - new Date(date)) / 1000)
@@ -18,19 +19,28 @@ function timeAgo(date, lang) {
 }
 
 export default function ActivityFeed() {
+  const { user } = useAuth()
   const { data, isLoading, isError } = useFeed()
   const navigate = useNavigate()
   const { t, lang } = useLang()
 
-  if (isError || (!isLoading && (!data || data.length === 0))) return null
+  if (!user) return null
+  if (isError) return null
+  if (!isLoading && (!data || data.length === 0)) return (
+    <section style={{ marginTop: 40 }}>
+      <p style={{ color: 'rgba(235,235,245,0.30)', fontSize: 13, textAlign: 'center', padding: '16px 0' }}>
+        {t('social.noActivity')}
+      </p>
+    </section>
+  )
 
   return (
     <section style={{ marginTop: 40 }}>
       <div style={{ marginBottom: 16 }}>
-        <p style={{ color: '#7c3aed', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
+        <p style={{ color: '#0a84ff', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>
           {t('social.feedLabel')}
         </p>
-        <h2 style={{ fontSize: 'clamp(20px,2.5vw,28px)', background: 'linear-gradient(135deg,#f1f5f9,#94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+        <h2 style={{ fontSize: 'clamp(20px,2.5vw,28px)', color: '#ffffff' }}>
           {t('social.feedTitle')}
         </h2>
       </div>
@@ -40,9 +50,9 @@ export default function ActivityFeed() {
           ? Array.from({ length: 4 }).map((_, i) => (
               <div key={i} style={{ height: 64, borderRadius: 10, background: 'rgba(255,255,255,0.05)', animation: 'shimmer 1.4s ease-in-out infinite' }} />
             ))
-          : data.map((item, i) => (
+          : data.map((item) => (
               <div
-                key={i}
+                key={`${item.username}:${item.anilistId}:${item.lastWatchedAt}`}
                 onClick={() => navigate(`/anime/${item.anilistId}`)}
                 role="button"
                 tabIndex={0}
@@ -51,7 +61,7 @@ export default function ActivityFeed() {
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '10px 14px', borderRadius: 10,
                   background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(148,163,184,0.08)',
+                  border: '1px solid #38383a',
                   cursor: 'pointer', transition: 'background 0.2s',
                 }}
                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'}
@@ -67,23 +77,23 @@ export default function ActivityFeed() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span
                     onClick={e => { e.stopPropagation(); navigate(`/u/${item.username}`) }}
-                    style={{ color: '#7c3aed', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                    style={{ color: '#0a84ff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
                   >
                     {item.username}
                   </span>
-                  <span style={{ color: '#94a3b8', fontSize: 13 }}>
+                  <span style={{ color: 'rgba(235,235,245,0.60)', fontSize: 13 }}>
                     {' '}{t(`social.action_${item.status}`)}{' '}
                   </span>
-                  <span style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 500 }}>
+                  <span style={{ color: '#ffffff', fontSize: 13, fontWeight: 500 }}>
                     {lang === 'zh' && item.titleChinese ? item.titleChinese : item.title}
                   </span>
                   {item.episode > 0 && (
-                    <span style={{ color: '#94a3b8', fontSize: 12 }}>
+                    <span style={{ color: 'rgba(235,235,245,0.60)', fontSize: 12 }}>
                       {' '}· Ep {item.episode}
                     </span>
                   )}
                 </div>
-                <span style={{ color: '#475569', fontSize: 11, flexShrink: 0 }}>
+                <span style={{ color: 'rgba(235,235,245,0.30)', fontSize: 11, flexShrink: 0 }}>
                   {timeAgo(item.lastWatchedAt, lang)}
                 </span>
               </div>

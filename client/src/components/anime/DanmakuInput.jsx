@@ -12,10 +12,10 @@ export default function DanmakuInput({ onSend, connected }) {
   const [value, setValue] = useState('')
 
   if (!user) return (
-    <div style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '8px 0' }}>
+    <div style={{ fontSize: 12, color: 'rgba(235,235,245,0.30)', textAlign: 'center', padding: '8px 0' }}>
       <button
         onClick={() => navigate('/login')}
-        style={{ color: '#a78bfa', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+        style={{ color: '#0a84ff', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
       >
         {t('sub.loginToWatch')}
       </button>
@@ -25,7 +25,7 @@ export default function DanmakuInput({ onSend, connected }) {
 
   const handleSend = () => {
     const trimmed = value.trim()
-    if (!trimmed) return
+    if (!trimmed || !connected) return
     onSend(trimmed)
     setValue('')
   }
@@ -34,24 +34,27 @@ export default function DanmakuInput({ onSend, connected }) {
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
       <div style={{
         width: 6, height: 6, borderRadius: '50%',
-        background: connected ? '#34d399' : '#475569',
+        background: connected ? '#30d158' : 'rgba(235,235,245,0.30)',
         flexShrink: 0, transition: 'background 0.3s',
       }} title={connected ? t('danmaku.connected') : t('danmaku.connecting')} />
 
       <input
         value={value}
         onChange={e => setValue(e.target.value.slice(0, MAX_LEN))}
-        onKeyDown={e => e.key === 'Enter' && handleSend()}
-        placeholder={t('danmaku.placeholder')}
+        onKeyDown={e => e.key === 'Enter' && connected && handleSend()}
+        placeholder={connected ? t('danmaku.placeholder') : t('danmaku.connecting')}
         maxLength={MAX_LEN}
+        disabled={!connected}
         style={{
           flex: 1, padding: '7px 12px', borderRadius: 8,
-          border: '1px solid rgba(148,163,184,0.2)',
-          background: 'rgba(255,255,255,0.04)', color: '#f1f5f9',
+          border: '1px solid #38383a',
+          background: 'rgba(255,255,255,0.04)', color: '#ffffff',
           fontSize: 13, outline: 'none',
+          opacity: connected ? 1 : 0.4,
+          cursor: connected ? 'text' : 'not-allowed',
         }}
       />
-      <span style={{ fontSize: 11, color: '#475569', flexShrink: 0 }}>
+      <span style={{ fontSize: 11, color: 'rgba(235,235,245,0.30)', flexShrink: 0 }}>
         {value.length}/{MAX_LEN}
       </span>
       <button
@@ -59,8 +62,8 @@ export default function DanmakuInput({ onSend, connected }) {
         disabled={!value.trim() || !connected}
         style={{
           padding: '7px 16px', borderRadius: 8, border: 'none',
-          background: value.trim() && connected ? '#7c3aed' : 'rgba(124,58,237,0.2)',
-          color: value.trim() && connected ? '#fff' : '#64748b',
+          background: value.trim() && connected ? '#0a84ff' : 'rgba(10,132,255,0.2)',
+          color: value.trim() && connected ? '#fff' : 'rgba(235,235,245,0.30)',
           fontSize: 13, fontWeight: 600, cursor: value.trim() && connected ? 'pointer' : 'default',
           transition: 'all 0.2s', flexShrink: 0,
         }}

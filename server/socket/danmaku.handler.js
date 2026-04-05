@@ -1,4 +1,5 @@
 const Danmaku = require('../models/Danmaku');
+const EpisodeWindow = require('../models/EpisodeWindow');
 
 const lastSent = new Map(); // userId -> lastSentAt (in-memory rate limit)
 const RATE_LIMIT_MS  = 5000;
@@ -8,38 +9,55 @@ module.exports = function registerDanmakuHandlers(io, socket) {
   const userId = String(socket.user.id);
 
   socket.on('danmaku:join', ({ anilistId, episode }) => {
-    socket.join(`danmaku:${anilistId}:${episode}`);
+    const id  = parseInt(anilistId);
+    const ep  = parseInt(episode);
+    if (isNaN(id) || isNaN(ep) || id <= 0 || ep <= 0) return;
+    // Limit per-socket room membership to prevent memory abuse
+    const danmakuRooms = [...socket.rooms].filter(r => r.startsWith('danmaku:'));
+    if (danmakuRooms.length >= 10) {
+      socket.emit('danmaku:error', { code: 'ROOM_LIMIT', message: 'Too many rooms' });
+      return;
+    }
+    socket.join(`danmaku:${id}:${ep}`);
   });
 
   socket.on('danmaku:leave', ({ anilistId, episode }) => {
-    socket.leave(`danmaku:${anilistId}:${episode}`);
+    const id = parseInt(anilistId);
+    const ep = parseInt(episode);
+    if (isNaN(id) || isNaN(ep)) return;
+    socket.leave(`danmaku:${id}:${ep}`);
   });
 
   socket.on('danmaku:send', async ({ anilistId, episode, content }) => {
     try {
       const now = Date.now();
 
-      // Rate limit
+      // Rate limit: under attack (>10k concurrent senders) we stop tracking to bound memory;
+      // this means rate limiting is intentionally sacrificed during extreme load events.
       if (now - (lastSent.get(userId) ?? 0) < RATE_LIMIT_MS) return;
-      lastSent.set(userId, now);
+      if (lastSent.size < 10000) {
+        lastSent.set(userId, now);
+        // Auto-expire entry so the map stays bounded
+        setTimeout(() => { if (lastSent.get(userId) === now) lastSent.delete(userId) }, RATE_LIMIT_MS * 2);
+      }
 
       // Validate
       if (!content || typeof content !== 'string') return;
       const trimmed = content.trim().slice(0, 50);
       if (!trimmed) return;
+      if (!socket.user.username || !socket.user.username.trim()) return;
 
       const anilistIdNum = parseInt(anilistId);
       const episodeNum   = parseInt(episode);
-      if (isNaN(anilistIdNum) || isNaN(episodeNum)) return;
+      if (isNaN(anilistIdNum) || isNaN(episodeNum) || anilistIdNum <= 0 || episodeNum <= 0) return;
 
-      // Determine liveEndsAt from first danmaku in this episode, or start new window
-      const earliest = await Danmaku.findOne(
+      // Atomically get-or-create the live window for this episode (race-safe)
+      const win = await EpisodeWindow.findOneAndUpdate(
         { anilistId: anilistIdNum, episode: episodeNum },
-        { liveEndsAt: 1 },
-        { sort: { createdAt: 1 } }
-      ).lean();
-
-      const liveEndsAt = earliest ? earliest.liveEndsAt : new Date(now + LIVE_WINDOW_MS);
+        { $setOnInsert: { liveEndsAt: new Date(now + LIVE_WINDOW_MS) } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      const liveEndsAt = win.liveEndsAt;
 
       // Reject if window closed
       if (now > liveEndsAt.getTime()) return;

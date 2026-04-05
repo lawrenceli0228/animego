@@ -3,7 +3,7 @@ const { SEASONAL_ANIME_QUERY }  = require('../queries/seasonalAnime.graphql');
 const { SEARCH_ANIME_QUERY }    = require('../queries/searchAnime.graphql');
 const { ANIME_DETAIL_QUERY }    = require('../queries/animeDetail.graphql');
 const { WEEKLY_SCHEDULE_QUERY } = require('../queries/weeklySchedule.graphql');
-const { enqueueEnrichment }     = require('./bangumi.service');
+const { enqueueEnrichment, enqueuePhase4Enrichment } = require('./bangumi.service');
 
 const ANILIST_URL   = 'https://graphql.anilist.co';
 const CACHE_TTL_MS  = (parseInt(process.env.CACHE_TTL_HOURS) || 24) * 60 * 60 * 1000;
@@ -39,7 +39,7 @@ async function queryAniList(query, variables) {
 
 // ─── Normalize AniList media → our schema ────────────────────────────────────
 function normalize(m) {
-  return {
+  const base = {
     anilistId:      m.id,
     titleRomaji:    m.title?.romaji,
     titleEnglish:   m.title?.english,
@@ -56,6 +56,40 @@ function normalize(m) {
     format:         m.format,
     cachedAt:       new Date()
   };
+  // Detail-only fields — only included when present in the AniList response
+  if (m.studios)   base.studios   = m.studios.nodes.map(n => n.name);
+  if (m.startDate?.year) base.startDate = m.startDate;
+  if (m.duration != null) base.duration = m.duration;
+  if (m.source)    base.source    = m.source;
+  if (m.relations) base.relations = m.relations.edges.map(e => ({
+    anilistId:    e.node.id,
+    relationType: e.relationType,
+    title:        e.node.title?.romaji || e.node.title?.native,
+  }));
+  if (m.characters) base.characters = m.characters.edges.map(e => ({
+    nameEn:             e.node.name?.full              ?? null,
+    nameJa:             e.node.name?.native            ?? null,
+    imageUrl:           e.node.image?.medium           ?? null,
+    role:               e.role                         ?? null,
+    voiceActorEn:       e.voiceActors?.[0]?.name?.full   ?? null,
+    voiceActorJa:       e.voiceActors?.[0]?.name?.native ?? null,
+    voiceActorImageUrl: e.voiceActors?.[0]?.image?.medium ?? null,
+  }));
+  if (m.staff) base.staff = m.staff.edges.map(e => ({
+    nameEn:  e.node.name?.full   ?? null,
+    nameJa:  e.node.name?.native ?? null,
+    imageUrl: e.node.image?.medium ?? null,
+    role:    e.role ?? null,
+  }));
+  if (m.recommendations) base.recommendations = m.recommendations.nodes
+    .filter(n => n.mediaRecommendation)
+    .map(n => ({
+      anilistId:    n.mediaRecommendation.id,
+      title:        n.mediaRecommendation.title?.romaji || n.mediaRecommendation.title?.native,
+      coverImageUrl: n.mediaRecommendation.coverImage?.large ?? null,
+      averageScore: n.mediaRecommendation.averageScore ?? null,
+    }));
+  return base;
 }
 
 // ─── Upsert a list of anime into MongoDB ─────────────────────────────────────
@@ -63,7 +97,7 @@ async function upsertCache(animeList) {
   await Promise.all(animeList.map(a =>
     AnimeCache.findOneAndUpdate(
       { anilistId: a.anilistId },
-      a,
+      { $set: a },
       { upsert: true, new: true }
     )
   ));
@@ -143,7 +177,8 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   if (warmed) {
     const skip  = (pageNum - 1) * perPageNum;
     const anime = await AnimeCache.find({
-      season, seasonYear: yearNum, cachedAt: { $gt: freshSince }
+      season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+      genres: { $nin: ['Hentai'] }
     })
       .sort({ averageScore: -1 })
       .skip(skip)
@@ -169,13 +204,15 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
 
   // ③ Serve partial MongoDB data while warming (avoids waiting)
   const totalCached = await AnimeCache.countDocuments({
-    season, seasonYear: yearNum, cachedAt: { $gt: freshSince }
+    season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+    genres: { $nin: ['Hentai'] }
   });
 
   if (totalCached > 0) {
     const skip  = (pageNum - 1) * perPageNum;
     const anime = await AnimeCache.find({
-      season, seasonYear: yearNum, cachedAt: { $gt: freshSince }
+      season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+      genres: { $nin: ['Hentai'] }
     })
       .sort({ averageScore: -1 })
       .skip(skip)
@@ -183,6 +220,8 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
       .lean();
 
     if (anime.length > 0) {
+      const unenriched = anime.filter(a => !a.bangumiVersion);
+      if (unenriched.length) enqueueEnrichment(unenriched);
       return {
         pageInfo: {
           total:       totalCached,
@@ -202,6 +241,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   });
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
+  enqueueEnrichment(animeList);
   return { pageInfo: data.Page.pageInfo, anime: animeList };
 }
 
@@ -229,16 +269,30 @@ async function searchAnime(search, genre, page = 1, perPage = 20) {
 
 // ─── Single anime detail — cache-first ───────────────────────────────────────
 async function getAnimeDetail(anilistId) {
-  const cached = await AnimeCache.findOne({ anilistId: parseInt(anilistId) });
-  if (cached && Date.now() - cached.cachedAt.getTime() < CACHE_TTL_MS) {
-    if (!cached.bangumiEnriched) enqueueEnrichment([cached]); // 懒加载富化
+  const cached = await AnimeCache.findOne({ anilistId: parseInt(anilistId) }).lean();
+  // Use lean() so unset fields are truly undefined (not Mongoose array defaults).
+  // cached.studios === undefined means document was written before P4-3 — force re-fetch.
+  const stale = !cached ||
+    Date.now() - cached.cachedAt.getTime() >= CACHE_TTL_MS ||
+    cached.studios === undefined ||
+    (cached.characters?.length > 0 && cached.characters[0].role === undefined);
+  if (!stale) {
+    if (!cached.bangumiVersion) enqueueEnrichment([cached], true);           // Phase 1-3 (priority)
+    else if (cached.bangumiVersion === 1 && cached.bgmId) enqueuePhase4Enrichment([cached], true); // Phase 4 (priority)
+    else if (cached.bangumiVersion === 1 && !cached.bgmId) {
+      // Stuck: Phase 1-3 done but no bgmId — Phase 4 impossible, advance to done
+      AnimeCache.updateOne({ anilistId: cached.anilistId }, { $set: { bangumiVersion: 2, episodeTitles: [] } }).catch(() => {});
+    }
+    else if (cached.bangumiVersion >= 2 && cached.episodes > 0 && cached.episodeTitles == null) {
+      enqueuePhase4Enrichment([cached], true); // Re-run to fill missing episodeTitles (priority)
+    }
     return cached;
   }
 
   const data  = await queryAniList(ANIME_DETAIL_QUERY, { id: parseInt(anilistId) });
   const anime = normalize(data.Media);
   await upsertCache([anime]);
-  enqueueEnrichment([anime]); // Bangumi 中文标题后台富化
+  enqueueEnrichment([anime], true); // Phase 1-3 first (priority); Phase 4 queued after bgmId is resolved
   return anime;
 }
 
@@ -269,6 +323,7 @@ async function getWeeklySchedule() {
   // Group by local date string 'YYYY-MM-DD'
   const groups = {};
   allSchedules.forEach(item => {
+    if (item.media.isAdult) return; // skip adult content
     const d   = new Date(item.airingAt * 1000);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (!groups[key]) groups[key] = [];
@@ -293,7 +348,7 @@ async function getWeeklySchedule() {
   if (allIds.length > 0) {
     const cached = await AnimeCache.find(
       { anilistId: { $in: allIds } },
-      { anilistId: 1, titleChinese: 1, titleNative: 1, bangumiEnriched: 1 }
+      { anilistId: 1, titleChinese: 1, titleNative: 1, bangumiVersion: 1 }
     ).lean();
     const cacheMap = new Map(cached.map(a => [a.anilistId, a]));
     const toEnrich = [];
@@ -301,7 +356,7 @@ async function getWeeklySchedule() {
       items.forEach(item => {
         const doc = cacheMap.get(item.anilistId);
         item.titleChinese = doc?.titleChinese ?? null;
-        if (doc && !doc.bangumiEnriched) {
+        if (doc && !doc.bangumiVersion) {
           toEnrich.push({
             anilistId:   item.anilistId,
             titleNative: doc.titleNative || item.titleNative,

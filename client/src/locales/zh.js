@@ -20,6 +20,7 @@ const zh = {
   // Anime watchers
   anime: {
     watchers: '人在追', watchersMore: '还有',
+    loadError: '加载失败', noAnime: '暂无番剧',
   },
   // Anime detail
   detail: {
@@ -30,6 +31,8 @@ const zh = {
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',
+    linkCopied: '链接已复制',
+    linkCopyFailed: '复制失败，请手动复制链接',
   },
   // Subscription
   sub: {
@@ -91,13 +94,13 @@ const zh = {
   },
   // Torrent modal
   torrent: {
-    title: '磁力搜索', searchBtn: '搜索', btn: '磁链',
+    title: '磁力搜索', searchBtn: '搜索', btn: '磁链', download: '磁力资源',
     copy: '复制', copied: '已复制',
     openMagnet: '打开',
     size: '大小', seeders: '做种', date: '日期',
     noResults: '暂无搜索结果',
-    loading: '搜索中...', placeholder: '搜索词（罗马音 - 集数）',
-    groupAll: '全部',
+    loading: '搜索中...', placeholder: '搜索词...',
+    groupAll: '全部', epAll: '全集',
   },
   // Social
   social: {
@@ -107,6 +110,12 @@ const zh = {
     feedLabel: '动态流', feedTitle: '关注的人在追',
     userNotFound: '用户不存在',
     emptyList: '该用户还没有追番记录',
+    noActivity: '暂无动态，关注其他用户可见',
+    followedToast: '已关注',
+    unfollowedToast: '已取消关注',
+    statsEpisodes: '集已观看',
+    statsGenres: '常追类型',
+    statsSeason: '最活跃赛季',
     action_watching: '正在看',
     action_completed: '看完了',
     action_plan_to_watch: '想看',

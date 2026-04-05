@@ -16,10 +16,24 @@ const animeCacheSchema = new mongoose.Schema({
   genres:         [String],
   format:         String,  // TV, OVA, MOVIE, SPECIAL, ONA, MUSIC
   cachedAt:       { type: Date, default: Date.now },
+  // Phase 4 AniList fields
+  studios:         [String],
+  relations:       [{ anilistId: Number, relationType: String, title: String }],
+  startDate:       { year: Number, month: Number, day: Number },
+  duration:        Number,
+  source:          String,
   // Bangumi enrichment
   titleChinese:    { type: String,  default: null },
   bgmId:           { type: Number,  default: null },
-  bangumiEnriched: { type: Boolean, default: false }
+  bangumiScore:    Number,
+  bangumiVotes:    Number,
+  // 0 = unenriched, 1 = Phase 1-3 basic (title+bgmId), 2 = Phase 4 full (score+detail)
+  bangumiVersion:  { type: Number,  default: 0 },
+  // Phase 4 rich fields
+  characters:    [{ nameEn: String, nameJa: String, nameCn: String, imageUrl: String, role: String, voiceActorEn: String, voiceActorJa: String, voiceActorCn: String, voiceActorImageUrl: String }],
+  staff:         [{ nameEn: String, nameJa: String, imageUrl: String, role: String }],
+  recommendations: [{ anilistId: Number, title: String, coverImageUrl: String, averageScore: Number }],
+  episodeTitles: [{ episode: Number, nameCn: String, name: String }]
 });
 
 animeCacheSchema.index({ season: 1, seasonYear: 1 });

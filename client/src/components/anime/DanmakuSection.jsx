@@ -11,9 +11,12 @@ export default function DanmakuSection({ anilistId, episode }) {
 
   const { data: history } = useDanmakuHistory(anilistId, episode, true)
   const liveEndsAt = history?.liveEndsAt ? new Date(history.liveEndsAt) : null
-  const isLive = !liveEndsAt || Date.now() < liveEndsAt.getTime()
+  // isLive: badge — only when a window has been explicitly started AND not expired
+  // canSend: input — also covers "never started" so the first user can open the window
+  const isLive  = liveEndsAt !== null && Date.now() < liveEndsAt.getTime()
+  const canSend = !liveEndsAt || Date.now() < liveEndsAt.getTime()
 
-  const { live, connected, send } = useDanmakuSocket(anilistId, episode, !!user)
+  const { live, connected, send } = useDanmakuSocket(anilistId, episode, !!user && canSend)
 
   // Merge history + live, deduplicated by _id
   const allMessages = useMemo(() => {
@@ -25,21 +28,21 @@ export default function DanmakuSection({ anilistId, episode }) {
 
   return (
     <div style={{
-      borderTop: '1px solid rgba(148,163,184,0.08)',
+      borderTop: '1px solid #38383a',
       paddingTop: 12, marginTop: 4,
     }}>
       {/* Label */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <p style={{ color: '#7c3aed', fontSize: 12, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase' }}>
+        <p style={{ color: '#5ac8fa', fontSize: 12, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase' }}>
           {t('danmaku.label')}
         </p>
         {allMessages.length > 0 && (
-          <span style={{ fontSize: 11, color: '#475569' }}>{allMessages.length}</span>
+          <span style={{ fontSize: 11, color: 'rgba(235,235,245,0.30)' }}>{allMessages.length}</span>
         )}
         {isLive && (
           <span style={{
-            fontSize: 10, fontWeight: 700, color: '#34d399',
-            background: 'rgba(52,211,153,0.12)', padding: '1px 6px',
+            fontSize: 10, fontWeight: 700, color: '#30d158',
+            background: 'rgba(48,209,88,0.12)', padding: '1px 6px',
             borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.5px',
           }}>
             {t('danmaku.live')}
@@ -51,17 +54,17 @@ export default function DanmakuSection({ anilistId, episode }) {
       <div style={{
         borderRadius: 8, overflow: 'hidden',
         background: 'rgba(255,255,255,0.02)',
-        border: '1px solid rgba(148,163,184,0.08)',
+        border: '1px solid #38383a',
         marginBottom: 8,
       }}>
         <DanmakuOverlay messages={allMessages.slice(-30)} />
       </div>
 
-      {/* Input (only during live window) */}
-      {isLive ? (
+      {/* Input (during live window or before any danmaku sent) */}
+      {canSend ? (
         <DanmakuInput onSend={send} connected={connected} />
       ) : (
-        <p style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '4px 0' }}>
+        <p style={{ fontSize: 12, color: 'rgba(235,235,245,0.30)', textAlign: 'center', padding: '4px 0' }}>
           {t('danmaku.windowClosed')}
         </p>
       )}

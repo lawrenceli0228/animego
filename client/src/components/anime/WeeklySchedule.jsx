@@ -19,26 +19,26 @@ function formatTime(unixSec) {
 const s = {
   section: { marginTop: 56 },
   header: { marginBottom: 20 },
-  label: { color: '#7c3aed', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 },
-  title: { fontSize: 'clamp(22px,3vw,32px)', background: 'linear-gradient(135deg,#f1f5f9,#94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  label: { color: '#0a84ff', fontSize: 13, fontWeight: 600, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 },
+  title: { fontSize: 'clamp(22px,3vw,32px)', color: '#ffffff' },
   tabs: { display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 24, scrollbarWidth: 'none' },
   tab: (active, isToday) => ({
-    padding: '6px 18px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', whiteSpace: 'nowrap', transition: 'all 0.2s',
-    background: active ? 'linear-gradient(135deg,#7c3aed,#06b6d4)' : isToday ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.05)',
-    color: active ? '#fff' : isToday ? '#a78bfa' : '#94a3b8',
-    outline: isToday && !active ? '1px solid rgba(124,58,237,0.4)' : 'none'
+    padding: '6px 18px', minHeight: 44, borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', whiteSpace: 'nowrap', transition: 'all 0.2s',
+    background: active ? '#0a84ff' : isToday ? 'rgba(10,132,255,0.12)' : 'rgba(120,120,128,0.12)',
+    color: active ? '#fff' : isToday ? '#0a84ff' : 'rgba(235,235,245,0.60)',
+    outline: 'none'
   }),
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 14 },
-  card: { display: 'flex', flexDirection: 'column', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.08)', overflow: 'hidden', textDecoration: 'none', color: 'inherit', transition: 'transform 0.2s, border-color 0.2s' },
-  cover: { width: '100%', aspectRatio: '3/4', objectFit: 'cover', display: 'block', background: '#1a2235' },
+  card: { display: 'flex', flexDirection: 'column', borderRadius: 12, background: '#1c1c1e', border: '1px solid #38383a', overflow: 'hidden', textDecoration: 'none', color: 'inherit', transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1), box-shadow 0.25s cubic-bezier(0.4,0,0.2,1)' },
+  cover: { width: '100%', aspectRatio: '3/4', objectFit: 'cover', display: 'block', background: '#2c2c2e' },
   cardBody: { padding: '8px 10px 10px' },
-  titleText: { fontSize: 13, fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.4, marginBottom: 6 },
+  titleText: { fontSize: 13, fontWeight: 600, color: '#ffffff', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.4, marginBottom: 6 },
   meta: { display: 'flex', flexDirection: 'column', gap: 4 },
-  ep: { fontSize: 11, color: '#7c3aed', fontWeight: 600, background: 'rgba(124,58,237,0.15)', padding: '2px 7px', borderRadius: 4, alignSelf: 'flex-start' },
+  ep: { fontSize: 11, color: '#0a84ff', fontWeight: 600, background: 'rgba(10,132,255,0.15)', padding: '2px 7px', borderRadius: 4, alignSelf: 'flex-start' },
   timeScore: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  time: { fontSize: 11, color: '#64748b' },
-  score: { fontSize: 11, color: '#fbbf24', fontWeight: 600 },
-  empty: { color: '#475569', fontSize: 14, padding: '32px 0', textAlign: 'center' }
+  time: { fontSize: 11, color: 'rgba(235,235,245,0.30)' },
+  score: { fontSize: 11, color: '#ff9f0a', fontWeight: 600, fontFamily: "'JetBrains Mono',monospace" },
+  empty: { color: 'rgba(235,235,245,0.30)', fontSize: 14, padding: '32px 0', textAlign: 'center' }
 }
 
 export default function WeeklySchedule() {
@@ -84,8 +84,8 @@ export default function WeeklySchedule() {
           <div style={s.grid}>
             {items.map(item => (
               <Link key={item.scheduleId} to={`/anime/${item.anilistId}`} style={s.card}
-                onMouseEnter={e => { e.currentTarget.style.transform='translateY(-4px)'; e.currentTarget.style.borderColor='rgba(124,58,237,0.4)' }}
-                onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.borderColor='rgba(148,163,184,0.08)' }}
+                onMouseEnter={e => { e.currentTarget.style.transform='translateY(-4px)'; e.currentTarget.style.boxShadow='0 8px 24px rgba(0,0,0,0.40)' }}
+                onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.boxShadow='none' }}
               >
                 <img src={item.coverImageUrl} alt={item.titleRomaji} style={s.cover} loading="lazy" />
                 <div style={s.cardBody}>

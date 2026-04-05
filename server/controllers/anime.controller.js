@@ -3,8 +3,9 @@ const { XMLParser } = require('fast-xml-parser');
 const Subscription = require('../models/Subscription');
 const AnimeCache   = require('../models/AnimeCache');
 
-// In-memory torrent cache (5-min TTL)
+// In-memory torrent cache (1-hour TTL, max 500 entries)
 const torrentCache = new Map();
+const TORRENT_CACHE_MAX = 500;
 
 // In-memory trending cache (1h TTL)
 const trendingCache = { data: null, ts: 0 };
@@ -114,74 +115,145 @@ exports.getSchedule = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// Helper: format size — Anime Garden returns size in kilobytes
-function formatBytes(kb) {
-  if (!kb) return '';
-  if (kb >= 1024 * 1024) return `${(kb / (1024 * 1024)).toFixed(1)} GB`;
-  if (kb >= 1024) return `${(kb / 1024).toFixed(1)} MB`;
-  return `${kb.toFixed(0)} KB`;
+// Helper: format bytes from RSS enclosure length
+function formatBytes(bytes) {
+  const n = parseInt(bytes);
+  if (!n || n <= 0) return '';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(0)} MB`;
+  return `${Math.round(n / 1e3)} KB`;
+}
+
+// Extract fansub name from title brackets e.g. "[SubsPlease]", "[喵萌奶茶屋]", "【云光字幕组】"
+function parseFansub(title) {
+  const match = title.match(/^[\[【]([^\]】]+)[\]】]/);
+  return match ? match[1] : null;
+}
+
+async function fetchAcgRip(term) {
+  const url = new URL('https://acg.rip/.xml');
+  url.searchParams.set('term', term);
+  const resp = await fetch(url.toString(), {
+    headers: { 'User-Agent': 'AnimeGo/1.0' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!resp.ok) return [];
+  const xml = await resp.text();
+  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+  const raw = parser.parse(xml)?.rss?.channel?.item ?? [];
+  const items = Array.isArray(raw) ? raw : [raw];
+  return items
+    .map(item => ({
+      title:  item.title ?? '',
+      magnet: item.enclosure?.['@_url'] ?? item.link ?? '',
+      size:   formatBytes(item.enclosure?.['@_length']),
+      fansub: parseFansub(item.title ?? ''),
+      date:   item.pubDate ?? null,
+      source: 'acg',
+    }))
+    .filter(i => i.title && i.magnet && i.magnet.startsWith('magnet:'));
+}
+
+async function fetchDmhy(term) {
+  // dmhy doesn't recognise "Title - 01" pattern; strip separator so "Title 01" matches
+  const dmhyTerm = term.replace(/\s*-\s*(\d+)$/, ' $1').trim();
+  const url = new URL('https://share.dmhy.org/topics/rss/rss.xml');
+  url.searchParams.set('keyword', dmhyTerm);
+  url.searchParams.set('sort_id', '2'); // anime category
+  url.searchParams.set('order', 'date-desc');
+  const resp = await fetch(url.toString(), {
+    headers: { 'User-Agent': 'AnimeGo/1.0' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!resp.ok) return [];
+  const xml = await resp.text();
+  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+  const raw = parser.parse(xml)?.rss?.channel?.item ?? [];
+  const items = Array.isArray(raw) ? raw : [raw];
+  return items
+    .map(item => {
+      const title  = item.title ?? '';
+      // dmhy enclosure url has HTML entities — decode &amp; → &
+      const rawUrl = item.enclosure?.['@_url'] ?? '';
+      const magnet = rawUrl.replace(/&amp;/g, '&');
+      return {
+        title,
+        magnet,
+        size:   '',  // dmhy enclosure length is always "1"
+        fansub: parseFansub(title),
+        date:   item.pubDate ?? null,
+        source: 'dmhy',
+      };
+    })
+    .filter(i => i.title && i.magnet && i.magnet.startsWith('magnet:'));
+}
+
+async function fetchNyaa(term) {
+  const url = new URL('https://nyaa.si/');
+  url.searchParams.set('page', 'rss');
+  url.searchParams.set('q', term);
+  url.searchParams.set('c', '1_0'); // all anime
+  url.searchParams.set('f', '0');   // no filter
+  const resp = await fetch(url.toString(), {
+    headers: { 'User-Agent': 'AnimeGo/1.0' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!resp.ok) return [];
+  const xml = await resp.text();
+  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+  const raw = parser.parse(xml)?.rss?.channel?.item ?? [];
+  const items = Array.isArray(raw) ? raw : [raw];
+  return items
+    .map(item => {
+      const hash  = String(item['nyaa:infoHash'] ?? '').trim();
+      const title = item.title ?? '';
+      const magnet = hash
+        ? `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(title)}&tr=http%3A%2F%2Fnyaa.tracker.wf%3A7777%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce`
+        : (item.link ?? '');
+      return {
+        title,
+        magnet,
+        size:   String(item['nyaa:size'] ?? ''),
+        fansub: parseFansub(title),
+        date:   item.pubDate ?? null,
+        source: 'nyaa',
+      };
+    })
+    .filter(i => i.title && i.magnet && i.magnet.startsWith('magnet:'));
 }
 
 // GET /api/anime/torrents?q=<search query>
-// Data source: ACG.RIP RSS feed
+// Data sources: 动漫花园 + ACG.RIP + Nyaa.si (parallel, graceful on failure)
 exports.getTorrents = async (req, res, next) => {
   try {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Missing query' } });
+    if (q.length > 200) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Query too long' } });
 
     const key = q.trim().toLowerCase();
     const cached = torrentCache.get(key);
-    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+    if (cached && Date.now() - cached.ts < 60 * 60 * 1000) {
       return res.json({ data: cached.data });
     }
 
-    const url = new URL('https://acg.rip/.xml');
-    url.searchParams.set('term', q.trim());
+    const [dmhyResult, acgResult, nyaaResult] = await Promise.allSettled([
+      fetchDmhy(q.trim()),
+      fetchAcgRip(q.trim()),
+      fetchNyaa(q.trim()),
+    ]);
 
-    let resp;
-    try {
-      resp = await fetch(url.toString(), {
-        headers: { 'User-Agent': 'AnimeGo/1.0' },
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch {
-      return res.json({ data: [] });
+    const data = [
+      ...(dmhyResult.status  === 'fulfilled' ? dmhyResult.value  : []),
+      ...(acgResult.status   === 'fulfilled' ? acgResult.value   : []),
+      ...(nyaaResult.status  === 'fulfilled' ? nyaaResult.value  : []),
+    ];
+
+    // Evict oldest entry if cache is full
+    if (torrentCache.size >= TORRENT_CACHE_MAX) {
+      torrentCache.delete(torrentCache.keys().next().value);
     }
-    if (!resp.ok) return res.json({ data: [] });
-
-    const xml = await resp.text();
-    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
-    const parsed = parser.parse(xml);
-    const items = parsed?.rss?.channel?.item ?? [];
-    const list = Array.isArray(items) ? items : [items];
-
-    // Extract fansub name from title brackets e.g. "[SubsPlease]" or "[喵萌奶茶屋]"
-    const parseFansub = (title) => {
-      const match = title.match(/^\[([^\]]+)\]/);
-      return match ? match[1] : null;
-    };
-
-    const data = list.map(item => ({
-      title:  item.title ?? '',
-      magnet: item.enclosure?.['@_url'] ?? item.link ?? '',
-      size:   '',
-      fansub: parseFansub(item.title ?? ''),
-      date:   item.pubDate ?? null,
-    }));
-
     torrentCache.set(key, { data, ts: Date.now() });
     res.json({ data });
   } catch (err) { next(err); }
 };
 
-// GET /api/anime/:anilistId
-exports.getDetail = async (req, res, next) => {
-  try {
-    const { anilistId } = req.params;
-    if (isNaN(anilistId)) {
-      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '无效的番剧 ID' } });
-    }
-    const anime = await anilistService.getAnimeDetail(anilistId);
-    res.json({ data: anime });
-  } catch (err) { next(err); }
-};

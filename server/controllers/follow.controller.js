@@ -1,13 +1,17 @@
+const mongoose = require('mongoose');
 const Follow = require('../models/Follow');
 const User   = require('../models/User');
 
 // POST /api/users/:username/follow  — requires auth
 exports.follow = async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.user.userId)) {
+      return res.status(400).json({ error: { code: 'INVALID_TOKEN', message: '无效的用户 ID' } });
+    }
     const followee = await User.findOne({ username: req.params.username });
     if (!followee) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '用户不存在' } });
 
-    if (followee._id.toString() === req.user.userId) {
+    if (followee._id.equals(req.user.userId)) {
       return res.status(400).json({ error: { code: 'INVALID_ACTION', message: '不能关注自己' } });
     }
 
@@ -23,6 +27,9 @@ exports.follow = async (req, res, next) => {
 // DELETE /api/users/:username/follow  — requires auth
 exports.unfollow = async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.user.userId)) {
+      return res.status(400).json({ error: { code: 'INVALID_TOKEN', message: '无效的用户 ID' } });
+    }
     const followee = await User.findOne({ username: req.params.username });
     if (!followee) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '用户不存在' } });
 

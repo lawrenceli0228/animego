@@ -20,6 +20,7 @@ const en = {
   // Anime watchers
   anime: {
     watchers: 'watching', watchersMore: '+',
+    loadError: 'Failed to load', noAnime: 'No anime found',
   },
   // Anime detail
   detail: {
@@ -30,6 +31,8 @@ const en = {
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
+    linkCopied: 'Link copied!',
+    linkCopyFailed: 'Copy failed — please copy the link manually',
   },
   // Subscription
   sub: {
@@ -91,13 +94,13 @@ const en = {
   },
   // Torrent modal
   torrent: {
-    title: 'Torrent Search', searchBtn: 'Search', btn: 'Magnet',
+    title: 'Torrent Search', searchBtn: 'Search', btn: 'Magnet', download: 'Torrents',
     copy: 'Copy', copied: 'Copied!',
     openMagnet: 'Open',
     size: 'Size', seeders: 'Seeds', date: 'Date',
     noResults: 'No results found',
-    loading: 'Searching...', placeholder: 'Search query (romaji - episode)',
-    groupAll: 'All',
+    loading: 'Searching...', placeholder: 'Search...',
+    groupAll: 'All', epAll: 'All',
   },
   // Social
   social: {
@@ -107,6 +110,12 @@ const en = {
     feedLabel: 'ACTIVITY', feedTitle: "Friends' Updates",
     userNotFound: 'User not found',
     emptyList: 'No anime tracked yet',
+    noActivity: 'No activity yet — follow someone to see their updates',
+    followedToast: 'Followed',
+    unfollowedToast: 'Unfollowed',
+    statsEpisodes: 'eps watched',
+    statsGenres: 'Top Genres',
+    statsSeason: 'Most Active',
     action_watching: 'is watching',
     action_completed: 'completed',
     action_plan_to_watch: 'wants to watch',

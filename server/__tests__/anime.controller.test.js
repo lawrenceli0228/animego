@@ -99,10 +99,11 @@ describe('anime.controller', () => {
       global.fetch = mockFetch
 
       await request(app).get('/api/anime/torrents?q=test+anime')
+      const callsAfterFirst = mockFetch.mock.calls.length
       await request(app).get('/api/anime/torrents?q=test+anime')
 
-      // fetch should only be called once — second request served from cache
-      expect(mockFetch).toHaveBeenCalledTimes(1)
+      // second request served from cache — no additional fetch calls
+      expect(mockFetch).toHaveBeenCalledTimes(callsAfterFirst)
 
       delete global.fetch
     })

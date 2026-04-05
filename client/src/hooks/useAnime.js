@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule, getTorrents, getTrending, getWatchers } from '../api/anime.api'
 
 export function useSeasonalAnime(season, year, page = 1) {
@@ -6,17 +6,47 @@ export function useSeasonalAnime(season, year, page = 1) {
     queryKey: ['seasonal', season, year, page],
     queryFn: () => getSeasonalAnime(season, year, page).then(r => r.data),
     keepPreviousData: true,
-    staleTime: 5 * 60 * 1000,
-    enabled: !!season && !!year
+    staleTime: 1 * 60 * 1000,
+    enabled: !!season && !!year,
+    refetchInterval: (data) => {
+      const items = data?.data ?? []
+      return items.length > 0 && items.some(a => !a.bangumiVersion) ? 20 * 1000 : false
+    }
   })
 }
 
 export function useAnimeDetail(id) {
+  const queryClient = useQueryClient()
   return useQuery({
     queryKey: ['anime', id],
     queryFn: () => getAnimeDetail(id).then(r => r.data.data),
     enabled: !!id,
-    staleTime: 10 * 60 * 1000
+    staleTime: 0,
+    placeholderData: () => {
+      const numId = Number(id)
+      for (const [, d] of queryClient.getQueriesData({ queryKey: ['seasonal'] })) {
+        const hit = d?.data?.find(a => a.anilistId === numId)
+        if (hit) return hit
+      }
+      for (const [, d] of queryClient.getQueriesData({ queryKey: ['trending'] })) {
+        if (Array.isArray(d)) {
+          const hit = d.find(a => a.anilistId === numId)
+          if (hit) return hit
+        }
+      }
+      for (const [, d] of queryClient.getQueriesData({ queryKey: ['search'] })) {
+        const hit = d?.data?.find(a => a.anilistId === numId)
+        if (hit) return hit
+      }
+      return undefined
+    },
+    refetchInterval: (data) => {
+      const anime = data?.data ?? data
+      if (!anime) return false
+      if ((anime.bangumiVersion ?? 0) < 2) return 4000
+      if (anime.episodes > 0 && !anime.episodeTitles?.length) return 4000
+      return false
+    }
   })
 }
 

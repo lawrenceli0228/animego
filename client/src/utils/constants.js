@@ -1,10 +1,10 @@
 export const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
 
 export const STATUS_OPTIONS = [
-  { value: 'watching',      label: '在看',   color: '#3b82f6' },
-  { value: 'completed',     label: '看完',   color: '#22c55e' },
-  { value: 'plan_to_watch', label: '想看',   color: '#a855f7' },
-  { value: 'dropped',       label: '放弃',   color: '#ef4444' }
+  { value: 'watching',      label: '在看',   color: '#0a84ff' },
+  { value: 'completed',     label: '看完',   color: '#30d158' },
+  { value: 'plan_to_watch', label: '想看',   color: '#5ac8fa' },
+  { value: 'dropped',       label: '放弃',   color: '#ff453a' }
 ];
 
 export function getCurrentSeason() {

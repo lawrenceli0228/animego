@@ -23,7 +23,7 @@ export default function SearchPage() {
   return (
     <div className="container" style={{ paddingTop:40, paddingBottom:40 }}>
       <h1 style={{ fontSize:'clamp(22px,3vw,34px)', marginBottom:24,
-        background:'linear-gradient(135deg,#f1f5f9,#94a3b8)',
+        background:'linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))',
         WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
         {t('search.title')}
       </h1>
@@ -32,7 +32,7 @@ export default function SearchPage() {
       </div>
       <GenreFilter selected={genre} onSelect={setGenre} />
       {!q && !genre ? (
-        <div style={{ textAlign:'center', padding:'60px 0', color:'#64748b',
+        <div style={{ textAlign:'center', padding:'60px 0', color:'rgba(235,235,245,0.30)',
           fontFamily:"'Sora',sans-serif", fontSize:15 }}>
           {t('search.prompt')}
         </div>

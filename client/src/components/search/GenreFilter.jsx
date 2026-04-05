@@ -8,11 +8,11 @@ export default function GenreFilter({ selected, onSelect }) {
         return (
           <button key={g} onClick={() => onSelect(active ? '' : g)}
             style={{
-              padding:'5px 12px', borderRadius:20, fontSize:12, fontWeight:500,
+              padding:'4px 10px', borderRadius:9999, fontSize:12, fontWeight:500,
               cursor:'pointer', border:'1px solid', transition:'all 0.2s',
-              background: active ? 'rgba(124,58,237,0.25)' : 'transparent',
-              borderColor: active ? 'rgba(124,58,237,0.6)' : 'rgba(148,163,184,0.15)',
-              color: active ? '#c4b5fd' : '#94a3b8'
+              background: active ? 'rgba(10,132,255,0.12)' : 'rgba(120,120,128,0.12)',
+              borderColor: active ? 'rgba(10,132,255,0.5)' : 'transparent',
+              color: active ? '#0a84ff' : 'rgba(235,235,245,0.60)'
             }}>{g}</button>
         )
       })}

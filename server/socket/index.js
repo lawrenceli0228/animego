@@ -14,6 +14,16 @@ module.exports = function setupSocket(httpServer) {
   io.use(socketAuth);
 
   io.on('connection', (socket) => {
+    // Lightweight per-event expiry check (avoids full jwt.verify on every packet)
+    socket.use((packet, next) => {
+      if (socket.user?.exp && socket.user.exp * 1000 < Date.now()) {
+        socket.emit('auth:expired');
+        socket.disconnect(true);
+        return next(new Error('token expired'));
+      }
+      next();
+    });
+
     registerDanmakuHandlers(io, socket);
   });
 

@@ -20,7 +20,7 @@ exports.addComment = async (req, res, next) => {
     if (!content || !content.trim()) {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Content is required' } });
     }
-    if (content.length > 500) {
+    if (content.trim().length > 500) {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Content too long' } });
     }
     const comment = await EpisodeComment.create({
