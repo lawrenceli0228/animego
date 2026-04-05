@@ -18,7 +18,8 @@ export function AuthProvider({ children }) {
     didInit.current = true;
     (async () => {
       try {
-        const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
+        const refreshBase = import.meta.env.VITE_API_BASE_URL || '/api';
+        const { data } = await axios.post(`${refreshBase}/auth/refresh`, {}, { withCredentials: true });
         setAccessToken(data.data.accessToken);
         const me = await getMe();
         setUser(me.data.data.user);

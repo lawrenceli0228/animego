@@ -49,6 +49,9 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 const clientDist = path.join(__dirname, '../client/dist');
 app.use(express.static(clientDist));
 app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
+  }
   res.sendFile(path.join(clientDist, 'index.html'));
 });
 
