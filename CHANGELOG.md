@@ -2,6 +2,41 @@
 
 ---
 
+## [0.3.0.0] - 2026-04-05
+
+### 方向决策（CEO Review + Office Hours）
+
+- **产品方向待验证** — Phase 1-4 功能完整但零真实用户。通过 CEO Review 确认：在没有用户数据前不做新功能开发，先验证需求
+- **核心假设重新定义** — 创始人自我审视后认为产品核心不是"社交平台"，而是"观影伴侣"：看完一集后轻量参与的情绪价值（类似 B 站弹幕体验）
+- **dandanplay 集成方向** — dandanplay 有播放+弹幕但无社区，AnimeGo 有社区但无播放。组合可能是差异化方向，决定做独立 PoC 验证
+
+### 计划：10 人验证 + dandanplay PoC
+
+**验证期（2 周）：**
+1. 部署现有 Phase 1-4 到 Railway 生产环境
+2. 招募 10 个追番朋友实际使用，观察留存和行为
+3. dandanplay API 申请 + 独立 HTML PoC（本地视频播放 + 弹幕匹配）
+4. 收集反馈数据，决定下一步方向（追番社区 vs 看番平台）
+
+**Pre-deploy checklist：**
+- `server/.env` 生产配置（独立 JWT_SECRET、MongoDB Atlas URI）
+- `app.set('trust proxy', 1)`（Railway 反向代理 TLS 终止必需，否则 secure cookie 不生效）
+- httpOnly cookie secure 标志 + HTTPS
+- Express morgan 生产日志开启
+- 不开启 Railway autoscaling（单实例 Socket.IO，10 人规模）
+
+**成功标准：** ≥30% 留存（第二周仍在使用）、≥5 条功能反馈、dandanplay API 可行性确认
+
+**失败预案：** 留存不达标 → 转向 dandanplay 集成方向（需独立验证）
+
+### 设计文档
+
+- Office Hours 设计文档：`~/.gstack/projects/.../lawrence_li-feat-community-phase4-design-20260405-121020.md`
+- CEO Plan：`~/.gstack/projects/.../ceo-plans/2026-04-05-validation-direction.md`
+- 审查评分：设计文档 8/10（2 轮对抗性审查）、Outside Voice 发现 6 个问题（trust proxy 已修复）
+
+---
+
 ## [0.2.2.0] - 2026-04-03
 
  ### Changed

@@ -1,0 +1,52 @@
+{
+  "date": "2026-04-05",
+  "window": "7d",
+  "metrics": {
+    "commits": 19,
+    "contributors": 1,
+    "prs_merged": 1,
+    "insertions": 2291,
+    "deletions": 563,
+    "net_loc": 1728,
+    "test_loc": 524,
+    "test_ratio": 0.229,
+    "active_days": 4,
+    "sessions": 5,
+    "deep_sessions": 0,
+    "avg_session_minutes": 12,
+    "loc_per_session_hour": 2300,
+    "feat_pct": 0.105,
+    "fix_pct": 0.579,
+    "style_pct": 0.158,
+    "chore_pct": 0.053,
+    "test_pct": 0.053,
+    "refactor_pct": 0.053,
+    "peak_hour": 22,
+    "ai_assisted_commits": 19
+  },
+  "authors": {
+    "lawrenceli0228": {
+      "commits": 19,
+      "insertions": 2291,
+      "deletions": 563,
+      "test_ratio": 0.229,
+      "top_area": "client/src/components/"
+    }
+  },
+  "version_range": ["0.2.0.0", "0.2.0.0"],
+  "streak_days": 4,
+  "tweetable": "Week of Mar 29: 19 commits, 2.3k LOC, 23% tests, Phase 4 detail page shipped (characters/staff/recs/episode titles) | Streak: 4d",
+  "test_health": {
+    "total_test_files": 12,
+    "tests_added_this_period": 5,
+    "regression_test_commits": 1,
+    "test_files_changed": 5
+  },
+  "backlog": {
+    "total_open": 5,
+    "p0_p1": 0,
+    "p2": 3,
+    "completed_this_period": 1,
+    "added_this_period": 1
+  }
+}
