@@ -49,18 +49,28 @@ exports.getProfile = async (req, res, next) => {
 // GET /api/feed  — activity feed of followed users (requires auth)
 exports.getFeed = async (req, res, next) => {
   try {
+    const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 20;
+    const skip  = (page - 1) * limit;
+
     const follows    = await Follow.find({ followerId: req.user.userId }).select('followeeId').limit(500);
     const followeeIds = follows.map(f => f.followeeId);
 
-    if (followeeIds.length === 0) return res.json({ data: [] });
+    if (followeeIds.length === 0) return res.json({ data: [], hasMore: false, nextPage: null });
 
-    const recentSubs = await Subscription.find({
-      userId:       { $in: followeeIds },
+    const filter = {
+      userId:        { $in: followeeIds },
       lastWatchedAt: { $ne: null },
-    })
-      .populate('userId', 'username')
-      .sort({ lastWatchedAt: -1 })
-      .limit(40);
+    };
+
+    const [recentSubs, total] = await Promise.all([
+      Subscription.find(filter)
+        .populate('userId', 'username')
+        .sort({ lastWatchedAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Subscription.countDocuments(filter),
+    ]);
 
     const anilistIds = [...new Set(recentSubs.map(s => s.anilistId))];
     const animes     = await AnimeCache.find({ anilistId: { $in: anilistIds } });
@@ -79,6 +89,7 @@ exports.getFeed = async (req, res, next) => {
         lastWatchedAt: s.lastWatchedAt,
       }));
 
-    res.json({ data });
+    const hasMore  = skip + limit < total;
+    res.json({ data, hasMore, nextPage: hasMore ? page + 1 : null });
   } catch (err) { next(err); }
 };

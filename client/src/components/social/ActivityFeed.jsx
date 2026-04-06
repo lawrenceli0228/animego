@@ -20,13 +20,15 @@ function timeAgo(date, lang) {
 
 export default function ActivityFeed() {
   const { user } = useAuth()
-  const { data, isLoading, isError } = useFeed()
+  const { data, isLoading, isError, hasNextPage, fetchNextPage, isFetchingNextPage } = useFeed()
   const navigate = useNavigate()
   const { t, lang } = useLang()
 
+  const items = data?.pages?.flatMap(p => p.data) ?? []
+
   if (!user) return null
   if (isError) return null
-  if (!isLoading && (!data || data.length === 0)) return (
+  if (!isLoading && items.length === 0) return (
     <section style={{ marginTop: 40 }}>
       <p style={{ color: 'rgba(235,235,245,0.30)', fontSize: 13, textAlign: 'center', padding: '16px 0' }}>
         {t('social.noActivity')}
@@ -50,7 +52,7 @@ export default function ActivityFeed() {
           ? Array.from({ length: 4 }).map((_, i) => (
               <div key={i} style={{ height: 64, borderRadius: 10, background: 'rgba(255,255,255,0.05)', animation: 'shimmer 1.4s ease-in-out infinite' }} />
             ))
-          : data.map((item) => (
+          : items.map((item) => (
               <div
                 key={`${item.username}:${item.anilistId}:${item.lastWatchedAt}`}
                 onClick={() => navigate(`/anime/${item.anilistId}`)}
@@ -100,6 +102,23 @@ export default function ActivityFeed() {
             ))
         }
       </div>
+
+      {hasNextPage && (
+        <button
+          onClick={() => fetchNextPage()}
+          disabled={isFetchingNextPage}
+          style={{
+            display: 'block', margin: '16px auto 0', padding: '8px 24px',
+            borderRadius: 8, border: '1px solid #38383a', background: 'transparent',
+            color: 'rgba(235,235,245,0.60)', fontSize: 13, fontWeight: 500,
+            cursor: isFetchingNextPage ? 'wait' : 'pointer', transition: 'background 0.2s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+          {isFetchingNextPage ? '...' : t('social.loadMore')}
+        </button>
+      )}
     </section>
   )
 }

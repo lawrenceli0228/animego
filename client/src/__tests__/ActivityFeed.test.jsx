@@ -33,20 +33,22 @@ describe('ActivityFeed', () => {
     useAuth.mockReturnValue({ user: { username: 'alice' } })
   })
 
+  const noop = () => {}
+
   it('renders nothing on error', () => {
-    useFeed.mockReturnValue({ isLoading: false, isError: true, data: null })
+    useFeed.mockReturnValue({ isLoading: false, isError: true, data: null, hasNextPage: false, fetchNextPage: noop, isFetchingNextPage: false })
     const { container } = renderFeed()
     expect(container.firstChild).toBeNull()
   })
 
   it('shows placeholder text when logged in but feed is empty', () => {
-    useFeed.mockReturnValue({ isLoading: false, isError: false, data: [] })
+    useFeed.mockReturnValue({ isLoading: false, isError: false, data: { pages: [{ data: [] }] }, hasNextPage: false, fetchNextPage: noop, isFetchingNextPage: false })
     renderFeed()
     expect(screen.getByText('social.noActivity')).toBeInTheDocument()
   })
 
   it('shows loading skeletons while fetching', () => {
-    useFeed.mockReturnValue({ isLoading: true, isError: false, data: undefined })
+    useFeed.mockReturnValue({ isLoading: true, isError: false, data: undefined, hasNextPage: false, fetchNextPage: noop, isFetchingNextPage: false })
     renderFeed()
     // Section renders with shimmer placeholders (4 skeleton divs)
     const section = document.querySelector('section')
@@ -57,7 +59,10 @@ describe('ActivityFeed', () => {
     useFeed.mockReturnValue({
       isLoading: false,
       isError: false,
-      data: [
+      hasNextPage: false,
+      fetchNextPage: noop,
+      isFetchingNextPage: false,
+      data: { pages: [{ data: [
         {
           username: 'bob',
           anilistId: 101,
@@ -68,7 +73,7 @@ describe('ActivityFeed', () => {
           lastWatchedAt: new Date().toISOString(),
           coverImageUrl: null,
         },
-      ],
+      ] }] },
     })
     renderFeed()
     expect(screen.getByText('bob')).toBeInTheDocument()
@@ -80,7 +85,10 @@ describe('ActivityFeed', () => {
     useFeed.mockReturnValue({
       isLoading: false,
       isError: false,
-      data: [
+      hasNextPage: false,
+      fetchNextPage: noop,
+      isFetchingNextPage: false,
+      data: { pages: [{ data: [
         {
           username: 'bob',
           anilistId: 101,
@@ -91,7 +99,7 @@ describe('ActivityFeed', () => {
           lastWatchedAt: new Date().toISOString(),
           coverImageUrl: null,
         },
-      ],
+      ] }] },
     })
     renderFeed()
     expect(screen.getByText('Test Anime')).toBeInTheDocument()

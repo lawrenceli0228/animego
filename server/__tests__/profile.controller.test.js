@@ -92,9 +92,11 @@ describe('profile.controller', () => {
       const res = await request(buildApp(USER_A.toString())).get('/api/feed')
       expect(res.status).toBe(200)
       expect(res.body.data).toEqual([])
+      expect(res.body.hasMore).toBe(false)
+      expect(res.body.nextPage).toBeNull()
     })
 
-    it('returns activity feed for followed users (limit 40)', async () => {
+    it('returns paginated activity feed for followed users', async () => {
       Follow.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([{ followeeId: USER_B }]),
@@ -102,6 +104,7 @@ describe('profile.controller', () => {
       const subsQuery = {
         populate: jest.fn().mockReturnThis(),
         sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([{
           userId: { username: 'bob' },
           anilistId: 101,
@@ -111,6 +114,7 @@ describe('profile.controller', () => {
         }]),
       }
       Subscription.find = jest.fn().mockReturnValue(subsQuery)
+      Subscription.countDocuments = jest.fn().mockResolvedValue(1)
       AnimeCache.find = jest.fn().mockResolvedValue([
         { anilistId: 101, titleRomaji: 'Test Anime', titleChinese: '测试动漫', coverImageUrl: 'img.jpg',
           toObject: undefined }
@@ -121,6 +125,36 @@ describe('profile.controller', () => {
       expect(res.body.data).toHaveLength(1)
       expect(res.body.data[0].username).toBe('bob')
       expect(res.body.data[0].anilistId).toBe(101)
+      expect(res.body.hasMore).toBe(false)
+      expect(res.body.nextPage).toBeNull()
+    })
+
+    it('returns hasMore=true and nextPage when more items exist', async () => {
+      Follow.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([{ followeeId: USER_B }]),
+      })
+      const subsQuery = {
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([{
+          userId: { username: 'bob' },
+          anilistId: 101,
+          status: 'watching',
+          currentEpisode: 1,
+          lastWatchedAt: new Date(),
+        }]),
+      }
+      Subscription.find = jest.fn().mockReturnValue(subsQuery)
+      Subscription.countDocuments = jest.fn().mockResolvedValue(25)
+      AnimeCache.find = jest.fn().mockResolvedValue([
+        { anilistId: 101, titleRomaji: 'Test', coverImageUrl: 'img.jpg' }
+      ])
+
+      const res = await request(buildApp(USER_A.toString())).get('/api/feed?page=1')
+      expect(res.body.hasMore).toBe(true)
+      expect(res.body.nextPage).toBe(2)
     })
   })
 })

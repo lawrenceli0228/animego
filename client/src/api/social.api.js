@@ -15,5 +15,5 @@ export const getFollowers = (username, page = 1) =>
 export const getFollowing = (username, page = 1) =>
   api.get(`/users/${username}/following`, { params: { page } })
 
-export const getFeed = () =>
-  api.get('/feed')
+export const getFeed = (page = 1) =>
+  api.get('/feed', { params: { page } })
