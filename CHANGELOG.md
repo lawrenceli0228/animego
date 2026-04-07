@@ -2,6 +2,59 @@
 
 ---
 
+## [0.4.0] - 2026-04-07
+
+### Bug 修复
+
+- **Shimmer 骨架屏动画不可见** — `@keyframes shimmer` 动画 `background-position` 对纯色背景无效，6 处骨架屏全部改为渐变背景 + `backgroundSize: '200% 100%'`（`AnimeDetailHero`, `EpisodeList`, `TrendingSection`, `ActivityFeed`）
+
+### 代码质量
+
+- **Follow controller DRY 重构** — `getFollowers`/`getFollowing` 提取公共函数 `paginateFollows`，消除重复逻辑
+- **AnimeDetailHero 样式重构** — 30+ 内联样式提取到模块级 `S` 常量对象，提升可读性
+- **新增骨架屏单元测试** — `AnimeDetailHero.test.jsx` 6 个测试覆盖中英文模式、富化中/完成/未富化场景
+
+### 新功能：管理后台
+
+**RBAC 基础设施：**
+- `User.role` 字段（enum: `'admin'` / `null`）
+- JWT 三路径（register/login/refresh）携带 role 到 accessToken
+- `adminAuth` 中间件，非管理员返回 403
+
+**仪表盘概览（`GET /api/admin/stats`）：**
+- 8 路并行 `countDocuments` 汇总：用户数、番剧数、追番记录、关注关系、待审查数
+- 富化进度条可视化（v0/v1/v2 占比）
+
+**富化管理：**
+- `GET /api/admin/enrichment` — 分页列表 + 4 种筛选（全部/需审查/已修正/未富化）+ 搜索（数字匹配 anilistId，文本匹配三语标题）
+- `POST /api/admin/enrichment/:id/reset` — 重置 bangumiVersion=0，清除富化字段，优先重新入队
+- `POST /api/admin/enrichment/:id/flag` — 设置/清除 adminFlag（needs-review / manually-corrected / null）
+- `AnimeCache.adminFlag` 字段 + 索引
+
+**用户管理（CRUD）：**
+- `POST /api/admin/users` — 创建用户，用户名/邮箱重复检测返回 409
+- `PATCH /api/admin/users/:id` — 编辑用户名/邮箱，重复检测
+- `DELETE /api/admin/users/:id` — 删除用户 + 级联清理（Subscription + Follow），禁止自删
+- `GET /api/admin/users` — 分页列表 + 搜索 + MongoDB aggregate 批量统计追番数/粉丝数
+
+**前端：**
+- `AdminDashboard.jsx` — 三板块 UI：仪表盘概览 / 富化管理（搜索+筛选+分页表格） / 用户管理（创建表单+行内编辑+两步确认删除）
+- Navbar 管理员入口（仅 `role === 'admin'` 可见）
+- 中英文本地化 ~70 个 key
+
+**测试：**
+- `admin.controller.test.js` — 22 个测试覆盖：adminAuth 403、stats、enrichment list/filter/search/reset/flag、user list/create/update/delete/self-delete-prevention/duplicate-detection
+- 服务端 124 tests、客户端 95 tests 全部通过
+
+### 提交记录
+
+| Hash | 描述 |
+|------|------|
+| `f88dcb7` | fix: repair shimmer animations and refactor follow controller + detail hero |
+| `af4b41c` | feat: add admin dashboard with enrichment management and user CRUD |
+
+---
+
 ## [0.3.0.0] - 2026-04-05
 
 ### 方向决策（CEO Review + Office Hours）
