@@ -38,6 +38,7 @@ export default function AnimeDetailHero({ anime }) {
     studios = [], source, duration, startDate,
     bangumiScore, bangumiVotes, relations = [],
   } = anime
+  const isEnriching = (anime.bangumiVersion ?? 0) < 2
 
   const desc = stripHtml(description || '')
   const displayDesc = expanded ? desc : truncate(desc, 300)
@@ -87,10 +88,20 @@ export default function AnimeDetailHero({ anime }) {
 
         {/* Meta */}
         <div style={{ flex:1, paddingTop: bannerImageUrl ? 60 : 0 }}>
-          <h1 style={{ fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 }}>
-            {pickTitle(anime, lang)}
-          </h1>
-          {lang === 'zh' && titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
+          {lang === 'zh' && isEnriching && !anime.titleChinese ? (
+            <>
+              <div style={{ width:'60%', height:36, borderRadius:8, marginBottom:8,
+                background:'#2c2c2e', animation:'shimmer 1.4s ease-in-out infinite' }} />
+              {titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
+            </>
+          ) : (
+            <>
+              <h1 style={{ fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 }}>
+                {pickTitle(anime, lang)}
+              </h1>
+              {lang === 'zh' && titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
+            </>
+          )}
 
           {/* Badges row */}
           <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:16 }}>
@@ -141,6 +152,15 @@ export default function AnimeDetailHero({ anime }) {
                 <span style={{ fontSize:10, opacity:0.8 }}>▶</span>
                 {t('detail.viewOnBgm')}
               </a>
+            )}
+            {/* Skeleton placeholders while Bangumi enrichment is in progress */}
+            {isEnriching && !bangumiScore && (
+              <span style={{ display:'inline-block', width:80, height:26, borderRadius:9999,
+                background:'#2c2c2e', animation:'shimmer 1.4s ease-in-out infinite' }} />
+            )}
+            {isEnriching && !bgmId && (
+              <span style={{ display:'inline-block', width:110, height:26, borderRadius:9999,
+                background:'#2c2c2e', animation:'shimmer 1.4s ease-in-out infinite' }} />
             )}
           </div>
 
