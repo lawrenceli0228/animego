@@ -38,8 +38,6 @@ export default function DanmakuOverlay({ messages }) {
   // Clean up finished animations
   const removeItem = (id) => setItems(prev => prev.filter(i => i.id !== id))
 
-  if (items.length === 0) return null
-
   return (
     <div aria-hidden="true" style={{
       position: 'relative',
