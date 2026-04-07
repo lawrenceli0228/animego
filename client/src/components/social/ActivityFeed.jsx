@@ -56,7 +56,7 @@ export default function ActivityFeed() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {isLoading
           ? Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} style={{ height: 64, borderRadius: 10, background: 'rgba(255,255,255,0.05)', animation: 'shimmer 1.4s ease-in-out infinite' }} />
+              <div key={i} style={{ height: 64, borderRadius: 10, background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.03) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s ease-in-out infinite' }} />
             ))
           : items.map((item) => (
               <div

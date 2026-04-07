@@ -26,6 +26,77 @@ const RELATION_LABEL = {
 }
 const SHOWN_RELATIONS = new Set(['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SPIN_OFF'])
 
+// --- Static styles (extracted to avoid re-creation on every render) ---
+
+const S = {
+  bannerOverlay: {
+    position:'absolute', inset:0,
+    background:'linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.85) 100%)',
+  },
+  cover: {
+    width:210, height:300, objectFit:'cover', borderRadius:12,
+    border:'1px solid #38383a',
+    boxShadow:'0 16px 48px rgba(0,0,0,0.60)',
+  },
+  title: { fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 },
+  subtitle: { color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 },
+  badgeRow: { display:'flex', flexWrap:'wrap', gap:10, marginBottom:16 },
+  badge: (bg, color) => ({ padding:'4px 12px', borderRadius:9999, background:bg, color, fontSize:13 }),
+  scoreBadge: (color) => ({
+    padding:'4px 12px', borderRadius:9999, background:'rgba(255,159,10,0.12)',
+    color, fontWeight:700, fontSize:13, fontFamily:"'JetBrains Mono',monospace",
+  }),
+  bgmScoreBadge: {
+    padding:'4px 12px', borderRadius:9999, background:'rgba(255,69,58,0.10)',
+    color:'#ff453a', fontWeight:700, fontSize:13,
+    display:'inline-flex', alignItems:'center', gap:5,
+    fontFamily:"'JetBrains Mono',monospace",
+  },
+  bgmLabel: { fontSize:10, opacity:0.7, fontFamily:"'DM Sans',sans-serif" },
+  bgmVotes: { fontSize:11, opacity:0.6, fontWeight:400 },
+  bgmLink: {
+    padding:'4px 12px', borderRadius:9999,
+    background:'rgba(255,69,58,0.10)', color:'#ff453a', fontSize:13,
+    textDecoration:'none',
+    display:'inline-flex', alignItems:'center', gap:4, fontWeight:500,
+    transition:'background 0.2s',
+  },
+  shimmer: (width) => ({
+    display:'inline-block', width, height:26, borderRadius:9999,
+    background:'linear-gradient(90deg, #2c2c2e 25%, #3a3a3c 50%, #2c2c2e 75%)',
+    backgroundSize:'200% 100%', animation:'shimmer 1.4s ease-in-out infinite',
+  }),
+  titleShimmer: {
+    width:'60%', height:36, borderRadius:8, marginBottom:8,
+    background:'linear-gradient(90deg, #2c2c2e 25%, #3a3a3c 50%, #2c2c2e 75%)',
+    backgroundSize:'200% 100%', animation:'shimmer 1.4s ease-in-out infinite',
+  },
+  metaRow: { display:'flex', flexWrap:'wrap', gap:'4px 12px', marginBottom:16, alignItems:'center' },
+  metaStudio: { color:'rgba(235,235,245,0.75)', fontSize:13 },
+  metaDot: { color:'rgba(84,84,88,0.65)', fontSize:13 },
+  metaDetail: { color:'rgba(235,235,245,0.50)', fontSize:12 },
+  genreRow: { display:'flex', flexWrap:'wrap', gap:6, marginBottom:20 },
+  genreTag: {
+    padding:'4px 10px', borderRadius:9999,
+    background:'rgba(120,120,128,0.12)', color:'rgba(235,235,245,0.60)', fontSize:12,
+    fontWeight:500,
+  },
+  descText: { color:'rgba(235,235,245,0.60)', fontSize:14, lineHeight:1.8 },
+  readMoreBtn: {
+    color:'#0a84ff', fontSize:13, fontWeight:600, marginTop:8, cursor:'pointer',
+    background:'none', border:'none', padding:0,
+  },
+  relationsRow: { display:'flex', flexWrap:'wrap', gap:8 },
+  relationBtn: {
+    display:'inline-flex', alignItems:'center', gap:6,
+    padding:'5px 12px', borderRadius:8, cursor:'pointer',
+    background:'rgba(120,120,128,0.12)', border:'1px solid rgba(84,84,88,0.65)',
+    color:'rgba(235,235,245,0.60)', fontSize:12, fontWeight:500,
+    transition:'all 0.2s',
+  },
+  relationLabel: { color:'rgba(235,235,245,0.35)', fontSize:11 },
+}
+
 export default function AnimeDetailHero({ anime }) {
   const [expanded, setExpanded] = useState(false)
   const { t, lang } = useLang()
@@ -68,10 +139,7 @@ export default function AnimeDetailHero({ anime }) {
         background: bannerImageUrl ? `url(${bannerImageUrl}) center/cover` : '#000000',
         overflow:'hidden'
       }}>
-        <div style={{
-          position:'absolute', inset:0,
-          background:'linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.85) 100%)'
-        }} />
+        <div style={S.bannerOverlay} />
       </div>
 
       {/* Content */}
@@ -79,9 +147,7 @@ export default function AnimeDetailHero({ anime }) {
         {/* Cover */}
         <div style={{ flexShrink:0 }}>
           <img src={coverImageUrl} alt={titleRomaji}
-            style={{ width:210, height:300, objectFit:'cover', borderRadius:12,
-              border:'1px solid #38383a',
-              boxShadow:'0 16px 48px rgba(0,0,0,0.60)' }}
+            style={S.cover}
             onError={e => { e.target.style.background='#2c2c2e' }}
           />
         </div>
@@ -90,62 +156,44 @@ export default function AnimeDetailHero({ anime }) {
         <div style={{ flex:1, paddingTop: bannerImageUrl ? 60 : 0 }}>
           {lang === 'zh' && isEnriching && !anime.titleChinese ? (
             <>
-              <div style={{ width:'60%', height:36, borderRadius:8, marginBottom:8,
-                background:'#2c2c2e', animation:'shimmer 1.4s ease-in-out infinite' }} />
-              {titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
+              <div style={S.titleShimmer} />
+              {titleNative && <p style={S.subtitle}>{titleNative}</p>}
             </>
           ) : (
             <>
-              <h1 style={{ fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 }}>
-                {pickTitle(anime, lang)}
-              </h1>
-              {lang === 'zh' && titleNative && <p style={{ color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 }}>{titleNative}</p>}
+              <h1 style={S.title}>{pickTitle(anime, lang)}</h1>
+              {lang === 'zh' && titleNative && <p style={S.subtitle}>{titleNative}</p>}
             </>
           )}
 
           {/* Badges row */}
-          <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:16 }}>
-            {/* AniList score */}
+          <div style={S.badgeRow}>
             {averageScore && (
-              <span style={{ padding:'4px 12px', borderRadius:9999, background:'rgba(255,159,10,0.12)',
-                color: scoreColor(averageScore), fontWeight:700, fontSize:13,
-                fontFamily:"'JetBrains Mono',monospace" }}>
+              <span style={S.scoreBadge(scoreColor(averageScore))}>
                 ★ {formatScore(averageScore)}
               </span>
             )}
-            {/* Bangumi score */}
             {bangumiScore > 0 && (
-              <span style={{ padding:'4px 12px', borderRadius:9999, background:'rgba(255,69,58,0.10)',
-                color:'#ff453a', fontWeight:700, fontSize:13,
-                display:'inline-flex', alignItems:'center', gap:5,
-                fontFamily:"'JetBrains Mono',monospace" }}>
-                <span style={{ fontSize:10, opacity:0.7, fontFamily:"'DM Sans',sans-serif" }}>BGM</span>
+              <span style={S.bgmScoreBadge}>
+                <span style={S.bgmLabel}>BGM</span>
                 ★ {bangumiScore.toFixed(1)}
-                {bangumiVotes > 0 && <span style={{ fontSize:11, opacity:0.6, fontWeight:400 }}>({bangumiVotes.toLocaleString()})</span>}
+                {bangumiVotes > 0 && <span style={S.bgmVotes}>({bangumiVotes.toLocaleString()})</span>}
               </span>
             )}
-            {format && <span style={{ padding:'4px 12px', borderRadius:9999, background:'rgba(10,132,255,0.12)',
-              color:'#0a84ff', fontSize:13 }}>{format}</span>}
-            {status && <span style={{ padding:'4px 12px', borderRadius:9999, background:'rgba(90,200,250,0.10)',
-              color:'#5ac8fa', fontSize:13 }}>{statusLabel}</span>}
-            {episodes && <span style={{ padding:'4px 12px', borderRadius:9999, background:'rgba(120,120,128,0.12)',
-              color:'rgba(235,235,245,0.60)', fontSize:13 }}>{episodes} {t('detail.epUnit')}</span>}
-            {season && seasonYear && <span style={{ padding:'4px 12px', borderRadius:9999,
-              background:'rgba(120,120,128,0.12)', color:'rgba(235,235,245,0.60)', fontSize:13 }}>
-              {t(`season.${season}`)} {seasonYear}
-            </span>}
+            {format && <span style={S.badge('rgba(10,132,255,0.12)', '#0a84ff')}>{format}</span>}
+            {status && <span style={S.badge('rgba(90,200,250,0.10)', '#5ac8fa')}>{statusLabel}</span>}
+            {episodes && <span style={S.badge('rgba(120,120,128,0.12)', 'rgba(235,235,245,0.60)')}>{episodes} {t('detail.epUnit')}</span>}
+            {season && seasonYear && (
+              <span style={S.badge('rgba(120,120,128,0.12)', 'rgba(235,235,245,0.60)')}>
+                {t(`season.${season}`)} {seasonYear}
+              </span>
+            )}
             {bgmId && (
               <a
                 href={`https://bgm.tv/subject/${bgmId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{
-                  padding:'4px 12px', borderRadius:9999,
-                  background:'rgba(255,69,58,0.10)', color:'#ff453a', fontSize:13,
-                  textDecoration:'none',
-                  display:'inline-flex', alignItems:'center', gap:4, fontWeight:500,
-                  transition:'background 0.2s'
-                }}
+                style={S.bgmLink}
                 onMouseEnter={e => { e.currentTarget.style.background='rgba(255,69,58,0.20)' }}
                 onMouseLeave={e => { e.currentTarget.style.background='rgba(255,69,58,0.10)' }}
               >
@@ -153,49 +201,34 @@ export default function AnimeDetailHero({ anime }) {
                 {t('detail.viewOnBgm')}
               </a>
             )}
-            {/* Skeleton placeholders while Bangumi enrichment is in progress */}
-            {isEnriching && !bangumiScore && (
-              <span style={{ display:'inline-block', width:80, height:26, borderRadius:9999,
-                background:'#2c2c2e', animation:'shimmer 1.4s ease-in-out infinite' }} />
-            )}
-            {isEnriching && !bgmId && (
-              <span style={{ display:'inline-block', width:110, height:26, borderRadius:9999,
-                background:'#2c2c2e', animation:'shimmer 1.4s ease-in-out infinite' }} />
-            )}
+            {isEnriching && !bangumiScore && <span style={S.shimmer(80)} />}
+            {isEnriching && !bgmId && <span style={S.shimmer(110)} />}
           </div>
 
-          {/* Meta info row: studios · source · duration · date */}
+          {/* Meta info row */}
           {(studios.length > 0 || sourceLabel || durationLabel || startDateLabel) && (
-            <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 12px', marginBottom:16, alignItems:'center' }}>
-              {studios.length > 0 && (
-                <span style={{ color:'rgba(235,235,245,0.75)', fontSize:13 }}>{studios.join(' · ')}</span>
-              )}
+            <div style={S.metaRow}>
+              {studios.length > 0 && <span style={S.metaStudio}>{studios.join(' · ')}</span>}
               {(studios.length > 0 && (sourceLabel || durationLabel || startDateLabel)) && (
-                <span style={{ color:'rgba(84,84,88,0.65)', fontSize:13 }}>·</span>
+                <span style={S.metaDot}>·</span>
               )}
-              {sourceLabel && <span style={{ color:'rgba(235,235,245,0.50)', fontSize:12 }}>{sourceLabel}</span>}
-              {durationLabel && <span style={{ color:'rgba(235,235,245,0.50)', fontSize:12 }}>{durationLabel}</span>}
-              {startDateLabel && <span style={{ color:'rgba(235,235,245,0.50)', fontSize:12 }}>{startDateLabel}</span>}
+              {sourceLabel && <span style={S.metaDetail}>{sourceLabel}</span>}
+              {durationLabel && <span style={S.metaDetail}>{durationLabel}</span>}
+              {startDateLabel && <span style={S.metaDetail}>{startDateLabel}</span>}
             </div>
           )}
 
           {/* Genres */}
-          <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:20 }}>
-            {genres.map(g => (
-              <span key={g} style={{ padding:'4px 10px', borderRadius:9999,
-                background:'rgba(120,120,128,0.12)', color:'rgba(235,235,245,0.60)', fontSize:12,
-                fontWeight:500 }}>{g}</span>
-            ))}
+          <div style={S.genreRow}>
+            {genres.map(g => <span key={g} style={S.genreTag}>{g}</span>)}
           </div>
 
           {/* Description */}
           {desc && (
             <div style={{ marginBottom: visibleRelations.length > 0 ? 20 : 0 }}>
-              <p style={{ color:'rgba(235,235,245,0.60)', fontSize:14, lineHeight:1.8 }}>{displayDesc}</p>
+              <p style={S.descText}>{displayDesc}</p>
               {desc.length > 300 && (
-                <button onClick={() => setExpanded(!expanded)}
-                  style={{ color:'#0a84ff', fontSize:13, fontWeight:600, marginTop:8, cursor:'pointer',
-                    background:'none', border:'none', padding:0 }}>
+                <button onClick={() => setExpanded(!expanded)} style={S.readMoreBtn}>
                   {expanded ? t('detail.collapse') : t('detail.readMore')}
                 </button>
               )}
@@ -204,24 +237,18 @@ export default function AnimeDetailHero({ anime }) {
 
           {/* Relations */}
           {visibleRelations.length > 0 && (
-            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+            <div style={S.relationsRow}>
               {visibleRelations.map(r => {
                 const label = RELATION_LABEL[r.relationType]?.[lang] ?? r.relationType
                 return (
                   <button
                     key={`${r.relationType}-${r.anilistId}`}
                     onClick={() => navigate(`/anime/${r.anilistId}`)}
-                    style={{
-                      display:'inline-flex', alignItems:'center', gap:6,
-                      padding:'5px 12px', borderRadius:8, cursor:'pointer',
-                      background:'rgba(120,120,128,0.12)', border:'1px solid rgba(84,84,88,0.65)',
-                      color:'rgba(235,235,245,0.60)', fontSize:12, fontWeight:500,
-                      transition:'all 0.2s'
-                    }}
+                    style={S.relationBtn}
                     onMouseEnter={e => { e.currentTarget.style.borderColor='#0a84ff'; e.currentTarget.style.color='#0a84ff' }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(84,84,88,0.65)'; e.currentTarget.style.color='rgba(235,235,245,0.60)' }}
                   >
-                    <span style={{ color:'rgba(235,235,245,0.35)', fontSize:11 }}>{label}</span>
+                    <span style={S.relationLabel}>{label}</span>
                     {r.title}
                   </button>
                 )

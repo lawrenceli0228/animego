@@ -28,7 +28,8 @@ export default function TrendingSection() {
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} style={{
               borderRadius: 12, aspectRatio: '3/4',
-              background: 'rgba(255,255,255,0.05)',
+              background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.03) 75%)',
+              backgroundSize: '200% 100%',
               border: '1px solid #38383a',
               animation: 'shimmer 1.4s ease-in-out infinite'
             }} />

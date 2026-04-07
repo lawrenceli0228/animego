@@ -67,7 +67,8 @@ export default function EpisodeList({ anime }) {
               })()}
               {!epTitleMap[ep] && (anime.bangumiVersion ?? 0) < 2 && (
                 <div style={{ width: '70%', height: 8, borderRadius: 4, margin: '4px auto 0',
-                  background: '#2c2c2e', animation: 'shimmer 1.4s ease-in-out infinite' }} />
+                  background: 'linear-gradient(90deg, #2c2c2e 25%, #3a3a3c 50%, #2c2c2e 75%)',
+                  backgroundSize: '200% 100%', animation: 'shimmer 1.4s ease-in-out infinite' }} />
               )}
             </div>
           )
