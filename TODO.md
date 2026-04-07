@@ -284,3 +284,51 @@ _记录时间：2026-03-28（CEO Review 补充）_
 ---
 
 _记录时间：2026-04-03_
+
+---
+
+## ✅ 待办十三：`useFollow` 关注/取关失败 Toast 反馈（已完成 ce3c845）
+
+`useSocial.js` 中 followMut/unfollowMut 已添加 `onError: () => toast.error(t('social.followFailed'))` 和 unfollowFailed。i18n key 已添加。
+
+---
+
+## ✅ 待办十四：`GET /api/feed` 分页支持（已完成 ce3c845）
+
+`profile.controller.js` 的 `getFeed` 已添加 `?page=N` 参数支持，默认 limit 20，返回 `{ data, hasMore, nextPage }`。前端 `ActivityFeed.jsx` 使用 `useInfiniteQuery` + 加载更多按钮。
+
+---
+
+## 待办十六：部署前添加基础错误监控
+
+**What：** 集成 Sentry 或类似的错误监控服务，在生产环境中捕获未处理异常和 API 错误。
+
+**Why：** 当前零监控。部署后如果出错，只能依赖 Railway 日志手动查看。CEO Review 外部声音指出这是重大遗漏——"部署即盲飞"。
+
+**Pros：** 主动发现错误而非等用户反馈；结构化错误报告；免费套餐够用。
+
+**Cons：** 需要第三方服务注册和配置。
+
+**Context：** Express 端添加 `@sentry/node`，客户端添加 `@sentry/react`。ErrorBoundary 组件已可能存在（检查）。DSN 通过环境变量配置。
+
+**Effort：** S（人工 4h / CC ~15min）｜**Priority：** P2｜**Depends on：** 部署平台确定
+
+---
+
+## 待办十七：Admin 重新富化批量操作速率保护
+
+**What：** Admin 仪表盘的 `resetEnrichment` 操作必须走现有 Bangumi 富化队列（800ms/请求），而非绕过直接调用 API。批量操作需要排队机制。
+
+**Why：** 如果 admin 一次标记 50 个番剧重新富化，绕过队列会触发 Bangumi API 429 限速封禁。
+
+**Pros：** 保护 API 配额；与现有架构一致。
+
+**Cons：** 批量操作需要等待时间（50 个番剧 ≈ 40 秒）。
+
+**Context：** Admin MVP 使用现有 `enqueueEnrichment(items, priority=true)` 接口。后续如需批量操作，可添加批量入队接口并在 UI 显示进度。
+
+**Effort：** S（作为 admin 仪表盘实现的一部分）｜**Priority：** P2｜**Depends on：** Admin 仪表盘
+
+---
+
+_记录时间：2026-04-07（CEO Review 补充）_

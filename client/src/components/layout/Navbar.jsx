@@ -77,6 +77,7 @@ export default function Navbar() {
           {user ? (
             <>
               <span style={s.username}>{t('nav.hi')}, {user.username}</span>
+              {user.role === 'admin' && <Link to="/admin" style={s.btnOutline}>{t('admin.navLabel')}</Link>}
               <Link to="/profile" style={s.btnOutline}>{t('nav.myList')}</Link>
               <button style={s.btnOutline} onClick={handleLogout}>{t('nav.logout')}</button>
             </>

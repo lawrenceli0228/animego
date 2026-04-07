@@ -14,6 +14,7 @@ const subscriptionRoutes = require('./routes/subscription.routes');
 const commentRoutes      = require('./routes/comment.routes');
 const userRoutes         = require('./routes/user.routes');
 const danmakuRoutes      = require('./routes/danmaku.routes');
+const adminRoutes        = require('./routes/admin.routes');
 const { authenticateToken } = require('./middleware/auth.middleware');
 const profileCtrl        = require('./controllers/profile.controller');
 const setupSocket        = require('./socket');
@@ -40,6 +41,7 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/comments',      commentRoutes);
 app.use('/api/users',         userRoutes);
 app.use('/api/danmaku',       danmakuRoutes);
+app.use('/api/admin',         adminRoutes);
 app.get('/api/feed',          authenticateToken, profileCtrl.getFeed);
 
 // Health check
