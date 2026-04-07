@@ -142,7 +142,7 @@ const en = {
   // Footer
   footer: {
     siteCol: 'AnimeGo',
-    siteDesc: 'Anime tracking & community platform',
+    siteDesc: 'Rundle Streetが暮れる。東京が灯る。',
     donate: 'Donate',
     apps: 'Apps',
     siteStats: 'Site Stats',
@@ -167,7 +167,7 @@ const en = {
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
     dataCredits: 'Data provided by',
-    copyright: '© {year} AnimeGo · This site does not host or stream video content',
+    copyright: '© {year} AnimeGo · Rundle Streetが暮れる。東京が灯る。',
   },
   // Comments
   comment: {

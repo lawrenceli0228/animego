@@ -142,7 +142,7 @@ const zh = {
   // Footer
   footer: {
     siteCol: 'AnimeGo',
-    siteDesc: '面向中文用户的追番社区平台',
+    siteDesc: 'Rundle Streetが暮れる。東京が灯る。',
     donate: '赞助我们',
     apps: '移动应用',
     siteStats: '站点数据',
@@ -167,7 +167,7 @@ const zh = {
     terms: '服务条款',
     privacy: '隐私政策',
     dataCredits: '数据来自',
-    copyright: '© {year} AnimeGo · 本站不提供视频存储或播放服务',
+    copyright: '© {year} AnimeGo · Rundle Streetが暮れる。東京が灯る。',
   },
   // Comments
   comment: {
