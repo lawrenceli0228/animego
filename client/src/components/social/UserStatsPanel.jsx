@@ -58,33 +58,28 @@ export default function UserStatsPanel({ watching }) {
   const total = watching.length
   if (total === 0) return null
 
-  // Status counts
-  const counts = STATUS_ORDER.reduce((acc, s) => {
-    acc[s] = watching.filter(a => a.subscriptionStatus === s).length
-    return acc
-  }, {})
-
-  // Total episodes watched
-  const totalEps = watching.reduce((sum, a) => sum + (a.currentEpisode || 0), 0)
-
-  // Top 3 genres
+  // Single pass: status counts, episode total, genre counts, season counts
+  const counts = {}
   const genreCounts = {}
-  watching.forEach(a => (a.genres || []).forEach(g => {
-    genreCounts[g] = (genreCounts[g] || 0) + 1
-  }))
-  const topGenres = Object.entries(genreCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([g]) => g)
-
-  // Most active season
   const seasonCounts = {}
-  watching.forEach(a => {
+  let totalEps = 0
+
+  for (const a of watching) {
+    counts[a.subscriptionStatus] = (counts[a.subscriptionStatus] || 0) + 1
+    totalEps += a.currentEpisode || 0
+    for (const g of a.genres || []) {
+      genreCounts[g] = (genreCounts[g] || 0) + 1
+    }
     if (a.season && a.seasonYear) {
       const k = `${a.season}-${a.seasonYear}`
       seasonCounts[k] = (seasonCounts[k] || 0) + 1
     }
-  })
+  }
+
+  const topGenres = Object.entries(genreCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([g]) => g)
   const topSeasonKey = Object.entries(seasonCounts).sort((a, b) => b[1] - a[1])[0]?.[0]
   let topSeasonLabel = null
   if (topSeasonKey) {

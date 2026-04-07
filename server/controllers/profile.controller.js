@@ -47,13 +47,17 @@ exports.getProfile = async (req, res, next) => {
 };
 
 // GET /api/feed  — activity feed of followed users (requires auth)
+const MAX_FOLLOWEES_FOR_FEED = 500;
+
 exports.getFeed = async (req, res, next) => {
   try {
+    if (!req.user?.userId) return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: '需要登录' } });
+
     const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = 20;
     const skip  = (page - 1) * limit;
 
-    const follows    = await Follow.find({ followerId: req.user.userId }).select('followeeId').limit(500);
+    const follows    = await Follow.find({ followerId: req.user.userId }).select('followeeId').limit(MAX_FOLLOWEES_FOR_FEED);
     const followeeIds = follows.map(f => f.followeeId);
 
     if (followeeIds.length === 0) return res.json({ data: [], hasMore: false, nextPage: null });
@@ -73,7 +77,7 @@ exports.getFeed = async (req, res, next) => {
     ]);
 
     const anilistIds = [...new Set(recentSubs.map(s => s.anilistId))];
-    const animes     = await AnimeCache.find({ anilistId: { $in: anilistIds } });
+    const animes     = await AnimeCache.find({ anilistId: { $in: anilistIds } }).lean();
     const animeMap   = Object.fromEntries(animes.map(a => [a.anilistId, a]));
 
     const data = recentSubs

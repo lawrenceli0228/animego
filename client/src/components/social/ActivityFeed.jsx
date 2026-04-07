@@ -27,7 +27,13 @@ export default function ActivityFeed() {
   const items = data?.pages?.flatMap(p => p.data) ?? []
 
   if (!user) return null
-  if (isError) return null
+  if (isError) return (
+    <section style={{ marginTop: 40 }}>
+      <p style={{ color: 'rgba(235,235,245,0.30)', fontSize: 13, textAlign: 'center', padding: '16px 0' }}>
+        {t('social.feedError')}
+      </p>
+    </section>
+  )
   if (!isLoading && items.length === 0) return (
     <section style={{ marginTop: 40 }}>
       <p style={{ color: 'rgba(235,235,245,0.30)', fontSize: 13, textAlign: 'center', padding: '16px 0' }}>
@@ -54,7 +60,7 @@ export default function ActivityFeed() {
             ))
           : items.map((item) => (
               <div
-                key={`${item.username}:${item.anilistId}:${item.lastWatchedAt}`}
+                key={`${item.username}:${item.anilistId}`}
                 onClick={() => navigate(`/anime/${item.anilistId}`)}
                 role="button"
                 tabIndex={0}
@@ -107,6 +113,8 @@ export default function ActivityFeed() {
         <button
           onClick={() => fetchNextPage()}
           disabled={isFetchingNextPage}
+          aria-busy={isFetchingNextPage}
+          aria-label={isFetchingNextPage ? t('common.loading') : t('social.loadMore')}
           style={{
             display: 'block', margin: '16px auto 0', padding: '8px 24px',
             borderRadius: 8, border: '1px solid #38383a', background: 'transparent',

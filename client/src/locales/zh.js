@@ -1,4 +1,6 @@
 const zh = {
+  // Common
+  common: { loading: '加载中...' },
   // Navbar
   nav: {
     home: '首页', season: '季度', search: '搜索',
@@ -111,6 +113,7 @@ const zh = {
     userNotFound: '用户不存在',
     emptyList: '该用户还没有追番记录',
     noActivity: '暂无动态，关注其他用户可见',
+    feedError: '动态加载失败',
     loadMore: '加载更多',
     followedToast: '已关注',
     unfollowedToast: '已取消关注',
@@ -119,6 +122,8 @@ const zh = {
     statsEpisodes: '集已观看',
     statsGenres: '常追类型',
     statsSeason: '最活跃赛季',
+    showMore: '显示更多',
+    showLess: '收起',
     action_watching: '正在看',
     action_completed: '看完了',
     action_plan_to_watch: '想看',

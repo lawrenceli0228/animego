@@ -1,13 +1,9 @@
-const mongoose = require('mongoose');
 const Follow = require('../models/Follow');
 const User   = require('../models/User');
 
 // POST /api/users/:username/follow  — requires auth
 exports.follow = async (req, res, next) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.user.userId)) {
-      return res.status(400).json({ error: { code: 'INVALID_TOKEN', message: '无效的用户 ID' } });
-    }
     const followee = await User.findOne({ username: req.params.username });
     if (!followee) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '用户不存在' } });
 
@@ -27,9 +23,6 @@ exports.follow = async (req, res, next) => {
 // DELETE /api/users/:username/follow  — requires auth
 exports.unfollow = async (req, res, next) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.user.userId)) {
-      return res.status(400).json({ error: { code: 'INVALID_TOKEN', message: '无效的用户 ID' } });
-    }
     const followee = await User.findOne({ username: req.params.username });
     if (!followee) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '用户不存在' } });
 
@@ -57,8 +50,9 @@ exports.getFollowers = async (req, res, next) => {
       Follow.countDocuments({ followeeId: user._id }),
     ]);
 
-    const data = follows.filter(f => f.followerId).map(f => ({ username: f.followerId.username }));
-    res.json({ data, total, page });
+    const data    = follows.filter(f => f.followerId).map(f => ({ username: f.followerId.username }));
+    const hasMore = skip + limit < total;
+    res.json({ data, total, page, hasMore, nextPage: hasMore ? page + 1 : null });
   } catch (err) { next(err); }
 };
 
@@ -81,7 +75,8 @@ exports.getFollowing = async (req, res, next) => {
       Follow.countDocuments({ followerId: user._id }),
     ]);
 
-    const data = follows.filter(f => f.followeeId).map(f => ({ username: f.followeeId.username }));
-    res.json({ data, total, page });
+    const data    = follows.filter(f => f.followeeId).map(f => ({ username: f.followeeId.username }));
+    const hasMore = skip + limit < total;
+    res.json({ data, total, page, hasMore, nextPage: hasMore ? page + 1 : null });
   } catch (err) { next(err); }
 };

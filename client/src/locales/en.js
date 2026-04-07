@@ -1,4 +1,6 @@
 const en = {
+  // Common
+  common: { loading: 'Loading...' },
   // Navbar
   nav: {
     home: 'Home', season: 'Season', search: 'Search',
@@ -111,6 +113,7 @@ const en = {
     userNotFound: 'User not found',
     emptyList: 'No anime tracked yet',
     noActivity: 'No activity yet — follow someone to see their updates',
+    feedError: 'Failed to load activity feed',
     loadMore: 'Load more',
     followedToast: 'Followed',
     unfollowedToast: 'Unfollowed',
@@ -119,6 +122,8 @@ const en = {
     statsEpisodes: 'eps watched',
     statsGenres: 'Top Genres',
     statsSeason: 'Most Active',
+    showMore: 'Show More',
+    showLess: 'Show Less',
     action_watching: 'is watching',
     action_completed: 'completed',
     action_plan_to_watch: 'wants to watch',
