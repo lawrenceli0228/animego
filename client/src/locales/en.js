@@ -218,6 +218,8 @@ const en = {
     resetFailed: 'Reset failed',
     flagSuccess: 'Flag updated',
     flagFailed: 'Flag update failed',
+    enrichUpdateSuccess: 'Enrichment updated',
+    enrichUpdateFailed: 'Enrichment update failed',
     loadError: 'Failed to load',
     navLabel: 'Admin',
     // User management

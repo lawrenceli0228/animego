@@ -6,6 +6,9 @@ export const getAdminStats = () =>
 export const getEnrichmentList = (page = 1, filter = '', q = '') =>
   api.get('/admin/enrichment', { params: { page, filter: filter || undefined, q: q || undefined } })
 
+export const updateEnrichment = (anilistId, data) =>
+  api.patch(`/admin/enrichment/${anilistId}`, data)
+
 export const resetEnrichment = (anilistId) =>
   api.post(`/admin/enrichment/${anilistId}/reset`)
 

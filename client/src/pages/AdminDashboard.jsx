@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useLang } from '../context/LanguageContext'
-import { useAdminStats, useEnrichmentList, useResetEnrichment, useFlagEnrichment, useUserList, useCreateUser, useUpdateUser, useDeleteUser } from '../hooks/useAdmin'
+import { useAdminStats, useEnrichmentList, useUpdateEnrichment, useResetEnrichment, useFlagEnrichment, useUserList, useCreateUser, useUpdateUser, useDeleteUser } from '../hooks/useAdmin'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
 const FILTERS = [
@@ -178,9 +178,13 @@ export default function AdminDashboard() {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({ username: '', email: '' })
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+  // Enrichment editing state
+  const [enrichEditId, setEnrichEditId] = useState(null)
+  const [enrichEditForm, setEnrichEditForm] = useState({ titleChinese: '', bgmId: '', bangumiScore: '' })
 
   const { data: stats } = useAdminStats()
   const { data, isLoading, isError } = useEnrichmentList(page, filter, searchQuery)
+  const enrichUpdateMut = useUpdateEnrichment()
   const resetMut = useResetEnrichment()
   const flagMut = useFlagEnrichment()
   const { data: userData, isLoading: usersLoading, isError: usersError } = useUserList(userPage, userSearchQuery)
@@ -195,6 +199,21 @@ export default function AdminDashboard() {
     e.preventDefault()
     setSearchQuery(search)
     setPage(1)
+  }
+  const startEnrichEdit = (item) => {
+    setEnrichEditId(item.anilistId)
+    setEnrichEditForm({
+      titleChinese: item.titleChinese || '',
+      bgmId: item.bgmId ?? '',
+      bangumiScore: item.bangumiScore ?? '',
+    })
+  }
+  const handleSaveEnrichEdit = (anilistId) => {
+    const payload = {}
+    if (enrichEditForm.titleChinese) payload.titleChinese = enrichEditForm.titleChinese
+    if (enrichEditForm.bgmId !== '') payload.bgmId = Number(enrichEditForm.bgmId) || null
+    if (enrichEditForm.bangumiScore !== '') payload.bangumiScore = Number(enrichEditForm.bangumiScore) || null
+    enrichUpdateMut.mutate({ anilistId, data: payload }, { onSuccess: () => setEnrichEditId(null) })
   }
   const handleUserSearch = (e) => {
     e.preventDefault()
@@ -293,48 +312,82 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {data.data.map(item => (
-                  <tr key={item.anilistId}>
-                    <td style={S.td}>
-                      <a href={`/anime/${item.anilistId}`} style={{ color: '#0a84ff', textDecoration: 'none' }}>
-                        {item.anilistId}
-                      </a>
-                    </td>
-                    <td style={{ ...S.td, ...S.titleCell }}>{item.titleRomaji || '—'}</td>
-                    <td style={S.td}>{item.titleChinese || '—'}</td>
-                    <td style={S.td}>{item.bgmId || '—'}</td>
-                    <td style={S.td}><VersionBadge version={item.bangumiVersion} /></td>
-                    <td style={S.td}>{item.bangumiScore?.toFixed(1) || '—'}</td>
-                    <td style={S.td}><FlagBadge flag={item.adminFlag} t={t} /></td>
-                    <td style={S.td}>
-                      <button
-                        style={S.resetBtn}
-                        onClick={() => resetMut.mutate(item.anilistId)}
-                        disabled={resetMut.isPending}
-                      >
-                        {t('admin.reset')}
-                      </button>
-                      {item.adminFlag !== 'needs-review' && (
-                        <button
-                          style={S.actionBtn}
-                          onClick={() => flagMut.mutate({ anilistId: item.anilistId, flag: 'needs-review' })}
-                          disabled={flagMut.isPending}
-                        >
-                          {t('admin.markReview')}
-                        </button>
-                      )}
-                      {item.adminFlag && (
-                        <button
-                          style={S.actionBtn}
-                          onClick={() => flagMut.mutate({ anilistId: item.anilistId, flag: null })}
-                          disabled={flagMut.isPending}
-                        >
-                          {t('admin.clearFlag')}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {data.data.map(item => {
+                  const isEditing = enrichEditId === item.anilistId
+                  return (
+                    <tr key={item.anilistId}>
+                      <td style={S.td}>
+                        <a href={`/anime/${item.anilistId}`} style={{ color: '#0a84ff', textDecoration: 'none' }}>
+                          {item.anilistId}
+                        </a>
+                      </td>
+                      <td style={{ ...S.td, ...S.titleCell }}>{item.titleRomaji || '—'}</td>
+                      <td style={S.td}>
+                        {isEditing
+                          ? <input style={S.editInput} value={enrichEditForm.titleChinese} onChange={e => setEnrichEditForm({ ...enrichEditForm, titleChinese: e.target.value })} placeholder={t('admin.colTitleCn')} />
+                          : item.titleChinese || '—'
+                        }
+                      </td>
+                      <td style={S.td}>
+                        {isEditing
+                          ? <input style={{ ...S.editInput, width: 80 }} value={enrichEditForm.bgmId} onChange={e => setEnrichEditForm({ ...enrichEditForm, bgmId: e.target.value })} placeholder="BGM ID" />
+                          : item.bgmId || '—'
+                        }
+                      </td>
+                      <td style={S.td}><VersionBadge version={item.bangumiVersion} /></td>
+                      <td style={S.td}>
+                        {isEditing
+                          ? <input style={{ ...S.editInput, width: 60 }} value={enrichEditForm.bangumiScore} onChange={e => setEnrichEditForm({ ...enrichEditForm, bangumiScore: e.target.value })} placeholder={t('admin.colScore')} />
+                          : item.bangumiScore?.toFixed(1) || '—'
+                        }
+                      </td>
+                      <td style={S.td}><FlagBadge flag={item.adminFlag} t={t} /></td>
+                      <td style={S.td}>
+                        {isEditing ? (
+                          <>
+                            <button style={S.saveBtn} onClick={() => handleSaveEnrichEdit(item.anilistId)} disabled={enrichUpdateMut.isPending}>
+                              {t('admin.save')}
+                            </button>
+                            <button style={S.cancelBtn} onClick={() => setEnrichEditId(null)}>
+                              {t('admin.cancel')}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button style={S.actionBtn} onClick={() => startEnrichEdit(item)}>
+                              {t('admin.edit')}
+                            </button>
+                            <button
+                              style={S.resetBtn}
+                              onClick={() => resetMut.mutate(item.anilistId)}
+                              disabled={resetMut.isPending}
+                            >
+                              {t('admin.reset')}
+                            </button>
+                            {item.adminFlag !== 'needs-review' && (
+                              <button
+                                style={S.actionBtn}
+                                onClick={() => flagMut.mutate({ anilistId: item.anilistId, flag: 'needs-review' })}
+                                disabled={flagMut.isPending}
+                              >
+                                {t('admin.markReview')}
+                              </button>
+                            )}
+                            {item.adminFlag && (
+                              <button
+                                style={S.actionBtn}
+                                onClick={() => flagMut.mutate({ anilistId: item.anilistId, flag: null })}
+                                disabled={flagMut.isPending}
+                              >
+                                {t('admin.clearFlag')}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
                 {data.data.length === 0 && (
                   <tr>
                     <td colSpan={8} style={{ ...S.td, textAlign: 'center', color: 'rgba(235,235,245,0.30)' }}>

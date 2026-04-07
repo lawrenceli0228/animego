@@ -218,6 +218,8 @@ const zh = {
     resetFailed: '重置失败',
     flagSuccess: '标记已更新',
     flagFailed: '标记更新失败',
+    enrichUpdateSuccess: '富化信息已更新',
+    enrichUpdateFailed: '富化信息更新失败',
     loadError: '加载失败',
     navLabel: '管理后台',
     // User management

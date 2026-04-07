@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { getAdminStats, getEnrichmentList, resetEnrichment, flagEnrichment, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
+import { getAdminStats, getEnrichmentList, updateEnrichment, resetEnrichment, flagEnrichment, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
 import { useLang } from '../context/LanguageContext'
 
 export function useAdminStats() {
@@ -18,6 +18,22 @@ export function useEnrichmentList(page, filter, q) {
     queryFn: () => getEnrichmentList(page, filter, q).then(r => r.data),
     staleTime: 30 * 1000,
     retry: false,
+  })
+}
+
+export function useUpdateEnrichment() {
+  const queryClient = useQueryClient()
+  const { t } = useLang()
+  return useMutation({
+    mutationFn: ({ anilistId, data }) => updateEnrichment(anilistId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin'] })
+      toast.success(t('admin.enrichUpdateSuccess'))
+    },
+    onError: (err) => {
+      const msg = err.response?.data?.error?.message || t('admin.enrichUpdateFailed')
+      toast.error(msg)
+    },
   })
 }
 

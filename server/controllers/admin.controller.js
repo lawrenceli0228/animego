@@ -137,6 +137,36 @@ exports.flagEnrichment = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// PATCH /api/admin/enrichment/:anilistId
+exports.updateEnrichment = async (req, res, next) => {
+  try {
+    const anilistId = parseInt(req.params.anilistId, 10);
+    if (!anilistId) return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '无效的 anilistId' } });
+
+    const allowed = ['titleChinese', 'bgmId', 'bangumiScore'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '没有可更新的字段' } });
+    }
+
+    // Mark as manually corrected
+    updates.adminFlag = 'manually-corrected';
+
+    const doc = await AnimeCache.findOneAndUpdate(
+      { anilistId },
+      { $set: updates },
+      { new: true }
+    ).select('anilistId titleRomaji titleChinese bgmId bangumiScore adminFlag');
+    if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '番剧不存在' } });
+
+    console.log(`[Admin] ${req.user.username} updated enrichment for anilistId=${anilistId}:`, updates);
+    res.json({ data: doc });
+  } catch (err) { next(err); }
+};
+
 // ==================== User Management ====================
 
 // GET /api/admin/users?page=1&q=keyword

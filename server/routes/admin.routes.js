@@ -8,6 +8,7 @@ router.use(authenticateToken, adminAuth);
 
 router.get('/stats',                   ctrl.getStats);
 router.get('/enrichment',              ctrl.listEnrichment);
+router.patch('/enrichment/:anilistId',        ctrl.updateEnrichment);
 router.post('/enrichment/:anilistId/reset', ctrl.resetEnrichment);
 router.post('/enrichment/:anilistId/flag',  ctrl.flagEnrichment);
 
