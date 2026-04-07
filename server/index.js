@@ -21,7 +21,7 @@ const setupSocket        = require('./socket');
 const app    = express();
 const server = http.createServer(app);
 
-// Trust Railway/Vercel reverse proxy
+// Trust reverse proxy (Nginx / Cloudflare)
 app.set('trust proxy', 1);
 
 // Middleware
