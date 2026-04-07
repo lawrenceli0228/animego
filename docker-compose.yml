@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    container_name: animego
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    env_file:
+      - server/.env
+    environment:
+      - NODE_ENV=production
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,13 @@
+node_modules
+.git
+.gitignore
+*.md
+!README.md
+client/node_modules
+server/node_modules
+server/__tests__
+client/src/__tests__
+.claude
+docs
+.env
+.env.*
