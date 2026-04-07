@@ -1,0 +1,36 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      - mongodb
+    networks:
+      - animego
+
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    command: --wiredTigerCacheSizeGB 0.4
+    networks:
+      - animego
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+    networks:
+      - animego
+
+volumes:
+  mongo-data:
+
+networks:
+  animego:

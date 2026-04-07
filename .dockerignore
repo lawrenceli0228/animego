@@ -1,0 +1,14 @@
+node_modules
+client/node_modules
+server/node_modules
+client/dist
+.env
+.env.*
+!.env.production.example
+.git
+.github
+*.md
+**/__tests__
+**/*.test.js
+**/*.test.ts
+.vscode
