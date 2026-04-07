@@ -251,9 +251,10 @@ async function processPhase4Queue() {
         { anilistId },
         { bangumiVersion: 1, characters: 1, episodeTitles: 1, episodes: 1 }
       ).lean();
-      // Skip if already fully enriched AND episode titles are present (or anime has no episodes)
+      // Skip if already fully enriched AND no missing data
       const needsEpisodes = doc?.episodes > 0 && doc?.episodeTitles == null;
-      if (!doc || (doc.bangumiVersion >= 2 && !needsEpisodes)) continue;
+      const needsCharCn   = doc?.characters?.length > 0 && !doc.characters[0]?.nameCn;
+      if (!doc || (doc.bangumiVersion >= 2 && !needsEpisodes && !needsCharCn)) continue;
 
       const [scoreResult, charsResult, epsResult] = await Promise.allSettled([
         fetchBangumiSubject(item.bgmId),

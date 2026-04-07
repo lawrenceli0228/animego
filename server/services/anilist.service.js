@@ -275,6 +275,7 @@ async function getAnimeDetail(anilistId) {
   const stale = !cached ||
     Date.now() - cached.cachedAt.getTime() >= CACHE_TTL_MS ||
     cached.studios === undefined ||
+    !cached.characters?.length ||
     (cached.characters?.length > 0 && cached.characters[0].role === undefined);
   if (!stale) {
     if (!cached.bangumiVersion) enqueueEnrichment([cached], true);           // Phase 1-3 (priority)
@@ -285,6 +286,9 @@ async function getAnimeDetail(anilistId) {
     }
     else if (cached.bangumiVersion >= 2 && cached.episodes > 0 && cached.episodeTitles == null) {
       enqueuePhase4Enrichment([cached], true); // Re-run to fill missing episodeTitles (priority)
+    }
+    else if (cached.bangumiVersion >= 2 && cached.bgmId && cached.characters?.length > 0 && !cached.characters[0]?.nameCn) {
+      enqueuePhase4Enrichment([cached], true); // Re-run to fill character Chinese names (priority)
     }
     return cached;
   }
