@@ -60,7 +60,8 @@ exports.listEnrichment = async (req, res, next) => {
       if (!isNaN(num) && String(num) === q) {
         filter.anilistId = num;
       } else {
-        const regex = { $regex: q, $options: 'i' };
+        const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = { $regex: escaped, $options: 'i' };
         filter.$or = [{ titleRomaji: regex }, { titleChinese: regex }, { titleNative: regex }];
       }
     }
@@ -179,7 +180,8 @@ exports.listUsers = async (req, res, next) => {
     const filter = {};
     const q = (req.query.q || '').trim();
     if (q) {
-      const regex = { $regex: q, $options: 'i' };
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = { $regex: escaped, $options: 'i' };
       filter.$or = [{ username: regex }, { email: regex }];
     }
 

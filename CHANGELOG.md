@@ -2,6 +2,52 @@
 
 ---
 
+## [0.6.0] - 2026-04-08
+
+### 香港 VPS 部署上线
+
+**基础设施：**
+- Docker 多阶段构建 — Stage 1 编译客户端（Vite build），Stage 2 仅运行 server + 生产依赖
+- `docker-compose.yml` 三服务架构：app（Node.js）、mongodb（mongo:7，wiredTiger 缓存限 0.4GB）、nginx（反向代理）
+- Nginx 反向代理配置 — WebSocket upgrade（Socket.IO）、Cloudflare 真实 IP 透传（`set_real_ip_from`）
+- 自签名 SSL 证书 + Cloudflare Full 模式（443 端口 HTTPS）
+- UFW 防火墙（17776 SSH / 80 HTTP / 443 HTTPS）
+- `scripts/setup.sh` 一键初始化 Debian 12（Docker、git、UFW）
+
+**域名：** animegoclub.com — Cloudflare Registrar + DNS（A 记录 proxied）
+
+### 生产环境 Bug 修复
+
+- **Resend API 崩溃** — `new Resend(undefined)` 启动即抛异常，改为条件初始化 + 未配置时静默跳过
+- **弹幕发送无响应** — JWT payload 字段为 `userId`，danmaku handler 用了 `socket.user.id`，修正为 `socket.user.userId`
+- **弹幕框发完收缩** — `DanmakuOverlay` 在 `items.length === 0` 时 return null 导致容器坍塌，移除提前返回
+- **角色/配音中文名未显示** — `warmCurrentSeason` 不抓角色数据，`getAnimeDetail` 缓存命中时空角色被视为新鲜缓存跳过；Phase 4 对已 v2 记录不重试。修复：stale 检查加入 `!characters?.length`，Phase 4 skip 条件加入 `needsCharCn` 检查，缓存命中分支增加角色缺失时重新入队逻辑
+
+### 管理后台增强
+
+- **富化内容手动编辑** — `PATCH /api/admin/enrichment/:anilistId` 支持修改 `titleChinese`、`bgmId`、`bangumiScore`，自动标记 `manually-corrected`
+- 管理后台富化表格新增行内编辑 UI（编辑/保存/取消按钮，与用户管理同样交互模式）
+
+### 其他
+
+- 站点标语更新为「Rundle Streetが暮れる。東京が灯る。」
+- Footer GitHub 链接指向真实仓库地址
+
+### 提交记录
+
+| Hash | 描述 |
+|------|------|
+| `b5098dd` | feat: add Docker deployment config for Hong Kong VPS |
+| `4f4e78f` | fix: gracefully handle missing Resend API key in production |
+| `900ef0b` | fix: add HTTPS (443) to Nginx for Cloudflare Full SSL mode |
+| `2466895` | fix: use correct JWT field name (userId) in danmaku handler |
+| `5e88820` | fix: keep danmaku overlay area visible when no items are flying |
+| `d508656` | fix: re-fetch from AniList when characters missing, re-run Phase 4 for CN names |
+| `6e6c65c` | feat: add inline enrichment editing in admin dashboard |
+| `bf0823b` | chore: update site tagline and footer GitHub link |
+
+---
+
 ## [0.5.0] - 2026-04-07
 
 ### 首页内容丰富化

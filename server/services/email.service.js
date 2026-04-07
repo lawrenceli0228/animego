@@ -1,7 +1,13 @@
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
-const resend = process.env.RESEND_API_KEY
-  ? new Resend(process.env.RESEND_API_KEY)
+const transporter = process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD
+  ? nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
+    })
   : null;
 
 /**
@@ -10,15 +16,15 @@ const resend = process.env.RESEND_API_KEY
  * @param {string} token - reset token
  */
 exports.sendPasswordResetEmail = async (to, token) => {
-  if (!resend) {
-    console.warn('RESEND_API_KEY not configured, skipping email');
+  if (!transporter) {
+    console.warn('GMAIL_USER or GMAIL_APP_PASSWORD not configured, skipping email');
     return;
   }
   const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
   const resetUrl = `${clientOrigin}/reset-password/${token}`;
 
-  await resend.emails.send({
-    from: 'AnimeGo <onboarding@resend.dev>',
+  await transporter.sendMail({
+    from: `AnimeGo <${process.env.GMAIL_USER}>`,
     to,
     subject: '【AnimeGo】重置你的密码',
     html: `

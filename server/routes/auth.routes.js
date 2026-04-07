@@ -18,7 +18,7 @@ const loginRules = [
 
 router.post('/register',                authLimiter, registerRules, ctrl.register);
 router.post('/login',                   authLimiter, loginRules,    ctrl.login);
-router.post('/refresh',                 ctrl.refresh);
+router.post('/refresh',                 authLimiter, ctrl.refresh);
 router.post('/logout',                  authenticateToken, ctrl.logout);
 router.get('/me',                       authenticateToken, ctrl.me);
 router.post('/forgot-password',         authLimiter, ctrl.forgotPassword);
