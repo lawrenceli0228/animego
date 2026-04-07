@@ -6,7 +6,7 @@ const RATE_LIMIT_MS  = 5000;
 const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 module.exports = function registerDanmakuHandlers(io, socket) {
-  const userId = String(socket.user.id);
+  const userId = String(socket.user.userId);
 
   socket.on('danmaku:join', ({ anilistId, episode }) => {
     const id  = parseInt(anilistId);
@@ -65,7 +65,7 @@ module.exports = function registerDanmakuHandlers(io, socket) {
       const danmaku = await Danmaku.create({
         anilistId: anilistIdNum,
         episode:   episodeNum,
-        userId:    socket.user.id,
+        userId:    socket.user.userId,
         username:  socket.user.username,
         content:   trimmed,
         liveEndsAt,
