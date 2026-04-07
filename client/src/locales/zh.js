@@ -18,6 +18,8 @@ const zh = {
     continueLabel: '继续追番', watchingTitle: '我的在追',
     today: '今天', noUpdates: '今日暂无更新',
     trendingLabel: '本季热追', trendingTitle: '大家都在追',
+    rankingsLabel: '年度高分', rankingsTitle: `${new Date().getFullYear()} 年度榜`,
+    gemsLabel: '完结佳作', gemsTitle: '经典好番推荐', gemsRefresh: '换一批',
   },
   // Anime watchers
   anime: {

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule, getTorrents, getTrending, getWatchers } from '../api/anime.api'
+import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule, getTorrents, getTrending, getWatchers, getCompletedGems, getYearlyTop } from '../api/anime.api'
 
 export function useSeasonalAnime(season, year, page = 1) {
   return useQuery({
@@ -94,6 +94,25 @@ export function useWatchers(anilistId, limit = 5) {
     queryFn: () => getWatchers(anilistId, limit).then(r => r.data),
     enabled: !!anilistId,
     staleTime: 5 * 60 * 1000,
+    retry: false
+  })
+}
+
+export function useYearlyTop(year, limit = 10) {
+  return useQuery({
+    queryKey: ['yearlyTop', year, limit],
+    queryFn: () => getYearlyTop(year, limit).then(r => r.data.data),
+    enabled: !!year,
+    staleTime: 60 * 60 * 1000,
+    retry: false
+  })
+}
+
+export function useCompletedGems(limit = 6) {
+  return useQuery({
+    queryKey: ['completedGems', limit],
+    queryFn: () => getCompletedGems(limit).then(r => r.data.data),
+    staleTime: 30 * 60 * 1000,
     retry: false
   })
 }

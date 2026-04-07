@@ -2,8 +2,12 @@ import { getCurrentSeason } from '../utils/constants'
 import { useSeasonalAnime } from '../hooks/useAnime'
 import HeroCarousel from '../components/anime/HeroCarousel'
 import TrendingSection from '../components/home/TrendingSection'
+import SeasonRankings from '../components/home/SeasonRankings'
+
 import ContinueWatching from '../components/anime/ContinueWatching'
+import CompletedGems from '../components/home/CompletedGems'
 import ActivityFeed from '../components/social/ActivityFeed'
+
 import WeeklySchedule from '../components/anime/WeeklySchedule'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
@@ -30,8 +34,12 @@ export default function HomePage() {
       <div className="container" style={{ paddingTop: 8, paddingBottom: 60 }}>
         <TrendingSection />
         <ContinueWatching />
-        <ActivityFeed />
         <WeeklySchedule />
+
+        <CompletedGems />
+        <ActivityFeed />
+
+        <SeasonRankings />
       </div>
     </div>
   )

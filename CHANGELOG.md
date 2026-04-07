@@ -2,6 +2,31 @@
 
 ---
 
+## [0.5.0] - 2026-04-07
+
+### 首页内容丰富化
+
+**新增区块：**
+- **经典好番推荐 (Completed Gems)** — Bilibili「猜你喜欢」风格，5 列网格，封面全铺 + 底部渐变遮罩叠加标题/类型/评分，"换一批"按钮随机刷新
+  - `GET /api/anime/completed-gems?limit=6` — MongoDB `$sample` 随机采样高分完结番（≥75 分）
+- **年度评分排行榜 (Yearly Rankings)** — Editorial 紧凑列表，Top 10 按评分降序，Top 3 金色排名数字
+  - `GET /api/anime/yearly-top?year=2026&limit=10` — 查 AnimeCache 全年 TV/MOVIE/ONA 按评分排序
+
+**视觉统一：**
+- `AnimeGrid` 从 `auto-fill minmax(160px)` 改为固定 5 列网格（900px→3 列，600px→2 列），季度页/搜索页同步生效
+
+**UX 改进：**
+- 路由切换自动滚顶 — `ScrollToTop` 组件监听 `pathname` 变化调用 `window.scrollTo(0, 0)`
+
+**首页排列顺序调整：**
+Hero → 热追 → 我的在追 → 本周更新 → 经典好番 → 关注动态 → 年度榜
+
+**已创建后删除的功能（代码已清理）：**
+- 类型精选 (Genre Spotlight) — 硬编码类型列表不够灵活，待改为动态热门类型后重做
+- 制作公司精选 (Studio Spotlight) — 封面比例问题 + 偏高级功能，延后
+
+---
+
 ## [0.4.0] - 2026-04-07
 
 ### Bug 修复

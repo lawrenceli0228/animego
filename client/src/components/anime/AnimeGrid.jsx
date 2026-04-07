@@ -16,12 +16,23 @@ export default function AnimeGrid({ animeList, loading, error }) {
     </div>
   )
   return (
-    <div style={{
-      display:'grid',
-      gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))',
-      gap:16, animation:'fadeUp 0.4s ease both'
-    }}>
-      {animeList.map(a => <AnimeCard key={a.anilistId} anime={a} />)}
-    </div>
+    <>
+      <div className="anime-grid-5col" style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(5, 1fr)',
+        gap: 12,
+        animation: 'fadeUp 0.4s ease both',
+      }}>
+        {animeList.map(a => <AnimeCard key={a.anilistId} anime={a} />)}
+      </div>
+      <style>{`
+        @media (max-width: 900px) {
+          .anime-grid-5col { grid-template-columns: repeat(3, 1fr) !important; }
+        }
+        @media (max-width: 600px) {
+          .anime-grid-5col { grid-template-columns: repeat(2, 1fr) !important; }
+        }
+      `}</style>
+    </>
   )
 }

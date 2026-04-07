@@ -18,6 +18,8 @@ const en = {
     continueLabel: 'Continue Watching', watchingTitle: 'Currently Watching',
     today: 'Today', noUpdates: 'No episodes today',
     trendingLabel: 'TRENDING', trendingTitle: 'Most Watched',
+    rankingsLabel: 'TOP RATED', rankingsTitle: `${new Date().getFullYear()} Annual Rankings`,
+    gemsLabel: 'CLASSICS', gemsTitle: 'Completed Gems', gemsRefresh: 'Refresh',
   },
   // Anime watchers
   anime: {
