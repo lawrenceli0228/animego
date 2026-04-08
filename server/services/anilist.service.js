@@ -242,7 +242,14 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
   enqueueEnrichment(animeList);
-  return { pageInfo: data.Page.pageInfo, anime: animeList };
+
+  // Re-read from MongoDB so existing enriched fields (titleChinese, bangumiVersion, etc.)
+  // are included in the response — normalize() only has AniList data.
+  const ids   = animeList.map(a => a.anilistId);
+  const anime = await AnimeCache.find({ anilistId: { $in: ids } })
+    .sort({ averageScore: -1 })
+    .lean();
+  return { pageInfo: data.Page.pageInfo, anime };
 }
 
 // ─── Search anime — in-memory cache ──────────────────────────────────────────
@@ -262,7 +269,13 @@ async function searchAnime(search, genre, page = 1, perPage = 20) {
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
   enqueueEnrichment(animeList); // Bangumi 中文标题后台富化
-  const result = { pageInfo: data.Page.pageInfo, anime: animeList };
+
+  // Re-read from MongoDB to include enriched fields (titleChinese, etc.)
+  const ids   = animeList.map(a => a.anilistId);
+  const anime = await AnimeCache.find({ anilistId: { $in: ids } })
+    .sort({ averageScore: -1 })
+    .lean();
+  const result = { pageInfo: data.Page.pageInfo, anime };
   searchCache.set(key, { data: result, time: Date.now() });
   return result;
 }
@@ -297,7 +310,10 @@ async function getAnimeDetail(anilistId) {
   const anime = normalize(data.Media);
   await upsertCache([anime]);
   enqueueEnrichment([anime], true); // Phase 1-3 first (priority); Phase 4 queued after bgmId is resolved
-  return anime;
+
+  // Re-read from MongoDB to include enriched fields (titleChinese, bangumiScore, characters.nameCn, etc.)
+  const enriched = await AnimeCache.findOne({ anilistId: parseInt(anilistId) }).lean();
+  return enriched || anime;
 }
 
 // ─── Weekly schedule ──────────────────────────────────────────────────────────
