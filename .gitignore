@@ -22,6 +22,9 @@ npm-debug.log*
 .idea/
 .gstack/
 
+# Database backups
+*.archive
+
 # Project docs (contain sensitive deployment info)
 CHANGELOG.md
 CLAUDE.md
