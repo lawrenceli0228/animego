@@ -97,6 +97,24 @@ describe('follow.controller', () => {
       expect(res.body.data).toHaveLength(1)
       expect(res.body.data[0].username).toBe('alice')
       expect(res.body.total).toBe(1)
+      expect(res.body.hasMore).toBe(false)
+      expect(res.body.nextPage).toBeNull()
+    })
+
+    it('returns hasMore=true when more followers exist', async () => {
+      User.findOne = jest.fn().mockReturnValue({ select: () => Promise.resolve({ _id: USER_B }) })
+      const mockQuery = {
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([{ followerId: { username: 'alice' } }]),
+      }
+      Follow.find = jest.fn().mockReturnValue(mockQuery)
+      Follow.countDocuments = jest.fn().mockResolvedValue(25)
+
+      const res = await request(buildApp()).get('/api/users/bob/followers?page=1')
+      expect(res.body.hasMore).toBe(true)
+      expect(res.body.nextPage).toBe(2)
     })
   })
 
@@ -121,6 +139,8 @@ describe('follow.controller', () => {
       const res = await request(buildApp()).get('/api/users/alice/following')
       expect(res.status).toBe(200)
       expect(res.body.data[0].username).toBe('bob')
+      expect(res.body.hasMore).toBe(false)
+      expect(res.body.nextPage).toBeNull()
     })
   })
 })

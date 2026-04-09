@@ -84,6 +84,12 @@ describe('profile.controller', () => {
   })
 
   describe('GET /api/feed', () => {
+    it('returns 401 when user is not authenticated', async () => {
+      const res = await request(buildApp(null)).get('/api/feed')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
+    })
+
     it('returns empty array when user follows nobody', async () => {
       Follow.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnThis(),
@@ -115,10 +121,11 @@ describe('profile.controller', () => {
       }
       Subscription.find = jest.fn().mockReturnValue(subsQuery)
       Subscription.countDocuments = jest.fn().mockResolvedValue(1)
-      AnimeCache.find = jest.fn().mockResolvedValue([
-        { anilistId: 101, titleRomaji: 'Test Anime', titleChinese: '测试动漫', coverImageUrl: 'img.jpg',
-          toObject: undefined }
-      ])
+      AnimeCache.find = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          { anilistId: 101, titleRomaji: 'Test Anime', titleChinese: '测试动漫', coverImageUrl: 'img.jpg' }
+        ])
+      })
 
       const res = await request(buildApp(USER_A.toString())).get('/api/feed')
       expect(res.status).toBe(200)
@@ -148,9 +155,11 @@ describe('profile.controller', () => {
       }
       Subscription.find = jest.fn().mockReturnValue(subsQuery)
       Subscription.countDocuments = jest.fn().mockResolvedValue(25)
-      AnimeCache.find = jest.fn().mockResolvedValue([
-        { anilistId: 101, titleRomaji: 'Test', coverImageUrl: 'img.jpg' }
-      ])
+      AnimeCache.find = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          { anilistId: 101, titleRomaji: 'Test', coverImageUrl: 'img.jpg' }
+        ])
+      })
 
       const res = await request(buildApp(USER_A.toString())).get('/api/feed?page=1')
       expect(res.body.hasMore).toBe(true)

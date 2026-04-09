@@ -1,4 +1,6 @@
 const zh = {
+  // Common
+  common: { loading: '加载中...' },
   // Navbar
   nav: {
     home: '首页', season: '季度', search: '搜索',
@@ -16,6 +18,8 @@ const zh = {
     continueLabel: '继续追番', watchingTitle: '我的在追',
     today: '今天', noUpdates: '今日暂无更新',
     trendingLabel: '本季热追', trendingTitle: '大家都在追',
+    rankingsLabel: '年度高分', rankingsTitle: `${new Date().getFullYear()} 年度榜`,
+    gemsLabel: '完结佳作', gemsTitle: '经典好番推荐', gemsRefresh: '换一批',
   },
   // Anime watchers
   anime: {
@@ -39,7 +43,7 @@ const zh = {
     addToList: '+ 添加到列表',
     watching: '在看', completed: '看完',
     planToWatch: '想看', dropped: '放弃',
-    remove: '移除',
+    remove: '移除', rate: '评分',
     loginToWatch: '登录后追番',
     epUnit: '集',
   },
@@ -111,6 +115,7 @@ const zh = {
     userNotFound: '用户不存在',
     emptyList: '该用户还没有追番记录',
     noActivity: '暂无动态，关注其他用户可见',
+    feedError: '动态加载失败',
     loadMore: '加载更多',
     followedToast: '已关注',
     unfollowedToast: '已取消关注',
@@ -119,6 +124,8 @@ const zh = {
     statsEpisodes: '集已观看',
     statsGenres: '常追类型',
     statsSeason: '最活跃赛季',
+    showMore: '显示更多',
+    showLess: '收起',
     action_watching: '正在看',
     action_completed: '看完了',
     action_plan_to_watch: '想看',
@@ -135,7 +142,7 @@ const zh = {
   // Footer
   footer: {
     siteCol: 'AnimeGo',
-    siteDesc: '面向中文用户的追番社区平台',
+    siteDesc: 'Rundle Streetが暮れる。東京が灯る。',
     donate: '赞助我们',
     apps: '移动应用',
     siteStats: '站点数据',
@@ -160,7 +167,7 @@ const zh = {
     terms: '服务条款',
     privacy: '隐私政策',
     dataCredits: '数据来自',
-    copyright: '© {year} AnimeGo · 本站不提供视频存储或播放服务',
+    copyright: '© {year} AnimeGo · Rundle Streetが暮れる。東京が灯る。',
   },
   // Comments
   comment: {
@@ -170,6 +177,76 @@ const zh = {
     posting: '发布中...', delete: '删除',
     deleteConfirm: '确认删除？',
     tooLong: '评论不能超过500字',
+    cancel: '取消',
+  },
+  // Admin
+  admin: {
+    title: '管理后台',
+    enrichmentTitle: '富化管理',
+    // Dashboard stats
+    statUsers: '注册用户',
+    statAnime: '番剧缓存',
+    statSubs: '追番记录',
+    statFollows: '关注关系',
+    statFlagged: '待审查',
+    // Search
+    searchPlaceholder: '搜索标题或 AniList ID...',
+    searchBtn: '搜索',
+    clearSearch: '清除',
+    noResults: '无结果',
+    // Filters
+    filterAll: '全部',
+    filterNeedsReview: '需审查',
+    filterCorrected: '已修正',
+    filterUnenriched: '未富化',
+    filterNoCn: '缺中文标题',
+    // Table
+    colTitle: '标题',
+    colTitleCn: '中文标题',
+    colVersion: '版本',
+    colScore: '评分',
+    colFlag: '标记',
+    colActions: '操作',
+    reset: '重置',
+    markReview: '标记审查',
+    clearFlag: '清除标记',
+    needsReview: '需审查',
+    corrected: '已修正',
+    prev: '上一页',
+    next: '下一页',
+    totalPrefix: '共',
+    totalSuffix: '条',
+    resetSuccess: '已重置，重新富化中',
+    resetFailed: '重置失败',
+    flagSuccess: '标记已更新',
+    flagFailed: '标记更新失败',
+    enrichUpdateSuccess: '富化信息已更新',
+    enrichUpdateFailed: '富化信息更新失败',
+    healSuccess: '中文标题自愈已触发',
+    healFailed: '批量自愈触发失败',
+    loadError: '加载失败',
+    navLabel: '管理后台',
+    // User management
+    usersTitle: '用户管理',
+    userSearchPlaceholder: '搜索用户名或邮箱...',
+    colUsername: '用户名',
+    colEmail: '邮箱',
+    colSubs: '追番',
+    colFollowers: '粉丝',
+    colJoined: '注册时间',
+    password: '密码',
+    createUser: '+ 创建用户',
+    edit: '编辑',
+    save: '保存',
+    cancel: '取消',
+    delete: '删除',
+    confirmDelete: '确认删除',
+    createSuccess: '用户已创建',
+    createFailed: '创建失败',
+    updateSuccess: '用户已更新',
+    updateFailed: '更新失败',
+    deleteSuccess: '用户已删除',
+    deleteFailed: '删除失败',
   },
 }
 

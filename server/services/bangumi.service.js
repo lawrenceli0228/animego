@@ -236,24 +236,27 @@ async function processPhase4Queue() {
   phase4Running = true;
 
   while (enrichPhase4Priority.length > 0 || enrichPhase4Map.size > 0) {
-    let anilistId, item;
+    let anilistId, item, fromPriority;
     if (enrichPhase4Priority.length > 0) {
       item = enrichPhase4Priority.shift();
       anilistId = item.anilistId;
       enrichPhase4Map.delete(anilistId);
+      fromPriority = true;
     } else {
       [anilistId, item] = enrichPhase4Map.entries().next().value;
       enrichPhase4Map.delete(anilistId);
+      fromPriority = false;
     }
 
     try {
       const doc = await AnimeCache.findOne(
         { anilistId },
-        { bangumiVersion: 1, characters: 1, episodeTitles: 1, episodes: 1 }
+        { bangumiVersion: 1, characters: 1, episodeTitles: 1, episodes: 1, titleChinese: 1 }
       ).lean();
-      // Skip if already fully enriched AND episode titles are present (or anime has no episodes)
+      // Skip if already fully enriched AND no missing data
       const needsEpisodes = doc?.episodes > 0 && doc?.episodeTitles == null;
-      if (!doc || (doc.bangumiVersion >= 2 && !needsEpisodes)) continue;
+      const needsCharCn   = doc?.characters?.length > 0 && !doc.characters[0]?.nameCn;
+      if (!doc || (doc.bangumiVersion >= 2 && !needsEpisodes && !needsCharCn)) continue;
 
       const [scoreResult, charsResult, epsResult] = await Promise.allSettled([
         fetchBangumiSubject(item.bgmId),
@@ -288,6 +291,11 @@ async function processPhase4Queue() {
       await AnimeCache.updateOne({ anilistId }, { $set: update });
 
       console.log(`[Bangumi P4] anilistId=${anilistId} score=${update.bangumiScore ?? '-'} chars=${update.characters?.length ?? 0} eps=${update.episodeTitles?.length ?? 0}`);
+
+      // Auto-enqueue V3 title heal if titleChinese is still null
+      if (!doc.titleChinese && item.bgmId) {
+        enqueueV3Enrichment([{ anilistId, bgmId: item.bgmId }], fromPriority);
+      }
     } catch (err) {
       console.warn(`[Bangumi P4] 富化失败 anilistId=${anilistId}:`, err.message);
     }
@@ -296,4 +304,133 @@ async function processPhase4Queue() {
   phase4Running = false;
 }
 
-module.exports = { enqueueEnrichment, enqueuePhase4Enrichment };
+// ─── Phase V3: 中文标题自愈 — 用 bgmId 直接查 name_cn ─────────────────────
+async function fetchBangumiTitleCn(bgmId) {
+  const res = await rateLimitedFetch(`https://api.bgm.tv/v0/subjects/${bgmId}`);
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  return data?.name_cn || null;
+}
+
+const enrichV3Map = new Map();
+const enrichV3Priority = [];
+let v3Running   = false;
+let v3Paused    = false;
+let v3BatchTotal    = 0;   // 本轮批量自愈总数
+let v3BatchProcessed = 0;  // 本轮已处理数
+let v3BatchHealed    = 0;  // 本轮成功补上中文标题数
+
+/**
+ * 将缺少 titleChinese 但有 bgmId 的条目加入 V3 自愈队列
+ * @param {Array<{anilistId, bgmId}>} items
+ * @param {boolean} priority — true = 插队到队首
+ */
+function enqueueV3Enrichment(items, priority = false) {
+  let added = 0;
+  for (const item of items) {
+    if (!item.anilistId || !item.bgmId) continue;
+    if (item.titleChinese) continue;           // 已有中文标题，无需自愈
+    if ((item.bangumiVersion ?? 0) >= 3) continue;
+    const entry = { anilistId: item.anilistId, bgmId: item.bgmId };
+    if (priority) {
+      enrichV3Map.delete(item.anilistId);
+      if (!enrichV3Priority.some(e => e.anilistId === item.anilistId)) {
+        enrichV3Priority.push(entry);
+        added++;
+      }
+    } else {
+      if (enrichV3Map.has(item.anilistId)) continue;
+      if (enrichV3Priority.some(e => e.anilistId === item.anilistId)) continue;
+      enrichV3Map.set(item.anilistId, entry);
+      added++;
+    }
+  }
+  if (added > 0 && !v3Running && !v3Paused) processV3Queue();
+}
+
+/** 批量自愈入队后调用，重置进度计数器 */
+function startV3Batch(total) {
+  v3BatchTotal     = total;
+  v3BatchProcessed = 0;
+  v3BatchHealed    = 0;
+  v3Paused         = false;
+}
+
+function pauseV3()  { v3Paused = true; }
+
+function resumeV3() {
+  v3Paused = false;
+  if (!v3Running && (enrichV3Priority.length > 0 || enrichV3Map.size > 0)) {
+    processV3Queue();
+  }
+}
+
+async function processV3Queue() {
+  if (v3Running) return;
+  v3Running = true;
+
+  while ((enrichV3Priority.length > 0 || enrichV3Map.size > 0) && !v3Paused) {
+    let anilistId, item;
+    if (enrichV3Priority.length > 0) {
+      item = enrichV3Priority.shift();
+      anilistId = item.anilistId;
+      enrichV3Map.delete(anilistId);
+    } else {
+      [anilistId, item] = enrichV3Map.entries().next().value;
+      enrichV3Map.delete(anilistId);
+    }
+
+    try {
+      const doc = await AnimeCache.findOne(
+        { anilistId },
+        { bangumiVersion: 1, titleChinese: 1 }
+      ).lean();
+      if (!doc || doc.bangumiVersion >= 3) { v3BatchProcessed++; continue; }
+      // Phase 1-3 已获取到中文标题，直接升版本
+      if (doc.titleChinese) {
+        await AnimeCache.updateOne({ anilistId }, { $set: { bangumiVersion: 3 } });
+        v3BatchProcessed++;
+        v3BatchHealed++;
+        continue;
+      }
+
+      const nameCn = await fetchBangumiTitleCn(item.bgmId);
+      const update = { bangumiVersion: 3 };
+      if (nameCn) { update.titleChinese = nameCn; v3BatchHealed++; }
+      await AnimeCache.updateOne({ anilistId }, { $set: update });
+      v3BatchProcessed++;
+
+      if (nameCn) {
+        console.log(`[Bangumi V3] anilistId=${anilistId} healed → ${nameCn}`);
+      } else {
+        console.log(`[Bangumi V3] anilistId=${anilistId} no name_cn on Bangumi`);
+      }
+    } catch (err) {
+      v3BatchProcessed++;
+      console.warn(`[Bangumi V3] 自愈失败 anilistId=${anilistId}:`, err.message);
+    }
+  }
+
+  v3Running = false;
+}
+
+/** 返回三个队列的实时深度 + V3 批量进度（管理员面板用） */
+function getQueueStatus() {
+  const v3Remaining = enrichV3Priority.length + enrichV3Map.size;
+  return {
+    phase1: enrichPriority.length + enrichMap.size,
+    phase4: enrichPhase4Priority.length + enrichPhase4Map.size,
+    v3:     v3Remaining,
+    v3Progress: v3BatchTotal > 0 ? {
+      total:     v3BatchTotal,
+      processed: v3BatchProcessed,
+      healed:    v3BatchHealed,
+      paused:    v3Paused,
+    } : null,
+  };
+}
+
+module.exports = {
+  enqueueEnrichment, enqueuePhase4Enrichment, enqueueV3Enrichment,
+  getQueueStatus, startV3Batch, pauseV3, resumeV3,
+};

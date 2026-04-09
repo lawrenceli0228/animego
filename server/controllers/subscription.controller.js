@@ -20,6 +20,7 @@ exports.getAll = async (req, res, next) => {
       subscriptionId: s._id,
       status: s.status,
       currentEpisode: s.currentEpisode,
+      score: s.score,
       lastWatchedAt: s.lastWatchedAt,
       subscribedAt: s.createdAt
     }));
@@ -70,12 +71,15 @@ exports.update = async (req, res, next) => {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: errors.array()[0].msg } });
     }
 
-    const { status, currentEpisode } = req.body;
+    const { status, currentEpisode, score } = req.body;
     const updates = {};
     if (status !== undefined) updates.status = status;
     if (currentEpisode !== undefined) {
       updates.currentEpisode = currentEpisode;
       updates.lastWatchedAt = new Date();
+    }
+    if (score !== undefined) {
+      updates.score = score === null ? null : Math.min(10, Math.max(1, Math.round(score)));
     }
 
     const sub = await Subscription.findOneAndUpdate(

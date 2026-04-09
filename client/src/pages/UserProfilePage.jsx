@@ -13,11 +13,11 @@ const STATUS_TABS = ['watching', 'completed', 'plan_to_watch', 'dropped']
 const PAGE_SIZE = 12
 
 function ShareButton({ username }) {
-  const { t, lang } = useLang()
+  const { t } = useLang()
   const url = `${window.location.origin}/u/${username}`
   const handle = async () => {
     if (navigator.share) {
-      try { await navigator.share({ title: `${username} 的追番列表 — AnimeGo`, url }) }
+      try { await navigator.share({ title: `${username} ${t('profile.titleSuffix')} — AnimeGo`, url }) }
       catch (_) { /* user cancelled */ }
     } else {
       try {
@@ -46,13 +46,18 @@ function ShareButton({ username }) {
 export default function UserProfilePage() {
   const { username } = useParams()
   const { user: me } = useAuth()
-  const { t, lang } = useLang()
+  const { t } = useLang()
   const navigate = useNavigate()
 
   const { data: profile, isLoading, isError } = useUserProfile(username)
   const [expanded, setExpanded] = useState({})
   // Reset expand state when navigating to a different user's profile
   useEffect(() => { setExpanded({}) }, [username])
+  // Set page title
+  useEffect(() => {
+    if (username) document.title = `${username} ${t('profile.titleSuffix')} — AnimeGo`
+    return () => { document.title = 'AnimeGo' }
+  }, [username, t])
 
   if (isLoading) return (
     <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}>
@@ -168,8 +173,8 @@ export default function UserProfilePage() {
                 }}
               >
                 {isExpanded
-                  ? (lang === 'zh' ? '收起' : 'Show Less')
-                  : (lang === 'zh' ? `显示更多 (${list.length - PAGE_SIZE})` : `Show More (${list.length - PAGE_SIZE})`)
+                  ? t('social.showLess')
+                  : `${t('social.showMore')} (${list.length - PAGE_SIZE})`
                 }
               </button>
             )}

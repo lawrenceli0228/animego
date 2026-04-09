@@ -14,8 +14,11 @@ const subscriptionRoutes = require('./routes/subscription.routes');
 const commentRoutes      = require('./routes/comment.routes');
 const userRoutes         = require('./routes/user.routes');
 const danmakuRoutes      = require('./routes/danmaku.routes');
+const adminRoutes        = require('./routes/admin.routes');
 const { authenticateToken } = require('./middleware/auth.middleware');
 const profileCtrl        = require('./controllers/profile.controller');
+const ogTagsMiddleware   = require('./middleware/ogTags');
+const sitemapMiddleware  = require('./middleware/sitemap');
 const setupSocket        = require('./socket');
 
 const app    = express();
@@ -40,10 +43,25 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/comments',      commentRoutes);
 app.use('/api/users',         userRoutes);
 app.use('/api/danmaku',       danmakuRoutes);
+app.use('/api/admin',         adminRoutes);
 app.get('/api/feed',          authenticateToken, profileCtrl.getFeed);
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+// SEO: robots.txt, sitemap, OG tags (must be before static/SPA catch-all)
+app.get('/robots.txt', (req, res) => {
+  const site = process.env.SITE_URL || `${req.protocol}://${req.get('host')}`;
+  res.type('text/plain').send(`User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: ${site}/sitemap.xml
+`);
+});
+app.get('/sitemap.xml', sitemapMiddleware);
+app.use(ogTagsMiddleware);
 
 // Serve React app in production
 const clientDist = path.join(__dirname, '../client/dist');

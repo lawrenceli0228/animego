@@ -1,0 +1,54 @@
+{
+  "date": "2026-04-08",
+  "window": "7d",
+  "metrics": {
+    "commits": 26,
+    "contributors": 1,
+    "prs_merged": 1,
+    "insertions": 3946,
+    "deletions": 577,
+    "net_loc": 3369,
+    "test_loc": 1815,
+    "test_ratio": 0.46,
+    "active_days": 5,
+    "sessions": 9,
+    "deep_sessions": 0,
+    "avg_session_minutes": 13,
+    "loc_per_session_hour": 2000,
+    "feat_pct": 0.115,
+    "fix_pct": 0.577,
+    "style_pct": 0.115,
+    "chore_pct": 0.038,
+    "test_pct": 0.077,
+    "docs_pct": 0.038,
+    "refactor_pct": 0.038,
+    "peak_hour": 22,
+    "ai_assisted_commits": 26
+  },
+  "authors": {
+    "lawrenceli0228": {
+      "commits": 26,
+      "insertions": 3946,
+      "deletions": 577,
+      "test_ratio": 0.46,
+      "top_area": "client/src/components/"
+    }
+  },
+  "version_range": ["0.2.0.0", "0.3.0.0"],
+  "streak_days": 0,
+  "tweetable": "Week of Apr 1: 26 commits, 3.9k LOC, 46% tests, Phase 4 detail page + design system overhaul + 16 test files | v0.2→v0.3 | Streak: 5d (broken 4/7)",
+  "test_health": {
+    "total_test_files": 27,
+    "tests_added_this_period": 16,
+    "regression_test_commits": 1,
+    "test_files_changed": 16
+  },
+  "skill_usage": {
+    "ship": 2,
+    "design-review": 1,
+    "qa": 1,
+    "browse": 1,
+    "plan-ceo-review": 2,
+    "retro": 1
+  }
+}

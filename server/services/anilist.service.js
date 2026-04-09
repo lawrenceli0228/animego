@@ -3,7 +3,7 @@ const { SEASONAL_ANIME_QUERY }  = require('../queries/seasonalAnime.graphql');
 const { SEARCH_ANIME_QUERY }    = require('../queries/searchAnime.graphql');
 const { ANIME_DETAIL_QUERY }    = require('../queries/animeDetail.graphql');
 const { WEEKLY_SCHEDULE_QUERY } = require('../queries/weeklySchedule.graphql');
-const { enqueueEnrichment, enqueuePhase4Enrichment } = require('./bangumi.service');
+const { enqueueEnrichment, enqueuePhase4Enrichment, enqueueV3Enrichment } = require('./bangumi.service');
 
 const ANILIST_URL   = 'https://graphql.anilist.co';
 const CACHE_TTL_MS  = (parseInt(process.env.CACHE_TTL_HOURS) || 24) * 60 * 60 * 1000;
@@ -62,9 +62,11 @@ function normalize(m) {
   if (m.duration != null) base.duration = m.duration;
   if (m.source)    base.source    = m.source;
   if (m.relations) base.relations = m.relations.edges.map(e => ({
-    anilistId:    e.node.id,
-    relationType: e.relationType,
-    title:        e.node.title?.romaji || e.node.title?.native,
+    anilistId:     e.node.id,
+    relationType:  e.relationType,
+    title:         e.node.title?.romaji || e.node.title?.native,
+    coverImageUrl: e.node.coverImage?.large ?? null,
+    format:        e.node.format ?? null,
   }));
   if (m.characters) base.characters = m.characters.edges.map(e => ({
     nameEn:             e.node.name?.full              ?? null,
@@ -242,7 +244,14 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
   enqueueEnrichment(animeList);
-  return { pageInfo: data.Page.pageInfo, anime: animeList };
+
+  // Re-read from MongoDB so existing enriched fields (titleChinese, bangumiVersion, etc.)
+  // are included in the response — normalize() only has AniList data.
+  const ids   = animeList.map(a => a.anilistId);
+  const anime = await AnimeCache.find({ anilistId: { $in: ids } })
+    .sort({ averageScore: -1 })
+    .lean();
+  return { pageInfo: data.Page.pageInfo, anime };
 }
 
 // ─── Search anime — in-memory cache ──────────────────────────────────────────
@@ -262,7 +271,13 @@ async function searchAnime(search, genre, page = 1, perPage = 20) {
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
   enqueueEnrichment(animeList); // Bangumi 中文标题后台富化
-  const result = { pageInfo: data.Page.pageInfo, anime: animeList };
+
+  // Re-read from MongoDB to include enriched fields (titleChinese, etc.)
+  const ids   = animeList.map(a => a.anilistId);
+  const anime = await AnimeCache.find({ anilistId: { $in: ids } })
+    .sort({ averageScore: -1 })
+    .lean();
+  const result = { pageInfo: data.Page.pageInfo, anime };
   searchCache.set(key, { data: result, time: Date.now() });
   return result;
 }
@@ -275,7 +290,9 @@ async function getAnimeDetail(anilistId) {
   const stale = !cached ||
     Date.now() - cached.cachedAt.getTime() >= CACHE_TTL_MS ||
     cached.studios === undefined ||
-    (cached.characters?.length > 0 && cached.characters[0].role === undefined);
+    !cached.characters?.length ||
+    (cached.characters?.length > 0 && cached.characters[0].role === undefined) ||
+    (cached.relations?.length > 0 && !cached.relations[0].coverImageUrl);
   if (!stale) {
     if (!cached.bangumiVersion) enqueueEnrichment([cached], true);           // Phase 1-3 (priority)
     else if (cached.bangumiVersion === 1 && cached.bgmId) enqueuePhase4Enrichment([cached], true); // Phase 4 (priority)
@@ -286,6 +303,12 @@ async function getAnimeDetail(anilistId) {
     else if (cached.bangumiVersion >= 2 && cached.episodes > 0 && cached.episodeTitles == null) {
       enqueuePhase4Enrichment([cached], true); // Re-run to fill missing episodeTitles (priority)
     }
+    else if (cached.bangumiVersion >= 2 && cached.bgmId && cached.characters?.length > 0 && !cached.characters[0]?.nameCn) {
+      enqueuePhase4Enrichment([cached], true); // Re-run to fill character Chinese names (priority)
+    }
+    else if (cached.bangumiVersion === 2 && cached.bgmId && !cached.titleChinese) {
+      enqueueV3Enrichment([cached], true); // V3: 中文标题自愈 (priority)
+    }
     return cached;
   }
 
@@ -293,7 +316,10 @@ async function getAnimeDetail(anilistId) {
   const anime = normalize(data.Media);
   await upsertCache([anime]);
   enqueueEnrichment([anime], true); // Phase 1-3 first (priority); Phase 4 queued after bgmId is resolved
-  return anime;
+
+  // Re-read from MongoDB to include enriched fields (titleChinese, bangumiScore, characters.nameCn, etc.)
+  const enriched = await AnimeCache.findOne({ anilistId: parseInt(anilistId) }).lean();
+  return enriched || anime;
 }
 
 // ─── Weekly schedule ──────────────────────────────────────────────────────────

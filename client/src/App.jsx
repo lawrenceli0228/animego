@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import ScrollToTop from './components/common/ScrollToTop'
 import Layout from './components/layout/Layout'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import HomePage from './pages/HomePage'
@@ -12,10 +13,12 @@ import UserProfilePage from './pages/UserProfilePage'
 import FollowListPage from './pages/FollowListPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
+import AdminDashboard from './pages/AdminDashboard'
 
 export default function App() {
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Routes>
         <Route element={<Layout />}>
           <Route path="/"          element={<HomePage />} />
@@ -27,6 +30,7 @@ export default function App() {
           <Route path="/forgot-password"         element={<ForgotPasswordPage />} />
           <Route path="/reset-password/:token"   element={<ResetPasswordPage />} />
           <Route path="/profile"                 element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          <Route path="/admin"                   element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/u/:username"             element={<UserProfilePage />} />
           <Route path="/u/:username/followers"  element={<FollowListPage type="followers" />} />
           <Route path="/u/:username/following"  element={<FollowListPage type="following" />} />

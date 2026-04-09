@@ -20,3 +20,9 @@ export const getTrending = (limit = 10) =>
 
 export const getWatchers = (anilistId, limit = 5) =>
   api.get(`/anime/${anilistId}/watchers`, { params: { limit } });
+
+export const getYearlyTop = (year, limit = 10) =>
+  api.get('/anime/yearly-top', { params: { year, limit } });
+
+export const getCompletedGems = (limit = 6) =>
+  api.get('/anime/completed-gems', { params: { limit } });

@@ -1,16 +1,39 @@
 services:
   app:
     build: .
-    container_name: animego
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      - mongodb
+    networks:
+      - animego
+
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    command: --wiredTigerCacheSizeGB 0.4
+    networks:
+      - animego
+
+  nginx:
+    image: nginx:alpine
     restart: unless-stopped
     ports:
-      - "5001:5001"
-    env_file:
-      - server/.env
-    environment:
-      - NODE_ENV=production
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/selfsigned.crt:/etc/nginx/ssl/selfsigned.crt:ro
+      - ./nginx/selfsigned.key:/etc/nginx/ssl/selfsigned.key:ro
+    depends_on:
+      - app
+    networks:
+      - animego
+
+volumes:
+  mongo-data:
+
+networks:
+  animego:

@@ -35,10 +35,10 @@ describe('ActivityFeed', () => {
 
   const noop = () => {}
 
-  it('renders nothing on error', () => {
+  it('renders error message on error', () => {
     useFeed.mockReturnValue({ isLoading: false, isError: true, data: null, hasNextPage: false, fetchNextPage: noop, isFetchingNextPage: false })
-    const { container } = renderFeed()
-    expect(container.firstChild).toBeNull()
+    renderFeed()
+    expect(screen.getByText('social.feedError')).toBeInTheDocument()
   })
 
   it('shows placeholder text when logged in but feed is empty', () => {
@@ -49,10 +49,9 @@ describe('ActivityFeed', () => {
 
   it('shows loading skeletons while fetching', () => {
     useFeed.mockReturnValue({ isLoading: true, isError: false, data: undefined, hasNextPage: false, fetchNextPage: noop, isFetchingNextPage: false })
-    renderFeed()
-    // Section renders with shimmer placeholders (4 skeleton divs)
-    const section = document.querySelector('section')
-    expect(section).toBeInTheDocument()
+    const { container } = renderFeed()
+    const skeletons = container.querySelectorAll('div[style*="shimmer"]')
+    expect(skeletons).toHaveLength(4)
   })
 
   it('renders feed items when data is available', () => {

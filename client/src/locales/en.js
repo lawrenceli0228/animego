@@ -1,4 +1,6 @@
 const en = {
+  // Common
+  common: { loading: 'Loading...' },
   // Navbar
   nav: {
     home: 'Home', season: 'Season', search: 'Search',
@@ -16,6 +18,8 @@ const en = {
     continueLabel: 'Continue Watching', watchingTitle: 'Currently Watching',
     today: 'Today', noUpdates: 'No episodes today',
     trendingLabel: 'TRENDING', trendingTitle: 'Most Watched',
+    rankingsLabel: 'TOP RATED', rankingsTitle: `${new Date().getFullYear()} Annual Rankings`,
+    gemsLabel: 'CLASSICS', gemsTitle: 'Completed Gems', gemsRefresh: 'Refresh',
   },
   // Anime watchers
   anime: {
@@ -39,7 +43,7 @@ const en = {
     addToList: '+ Add to List',
     watching: 'Watching', completed: 'Completed',
     planToWatch: 'Plan to Watch', dropped: 'Dropped',
-    remove: 'Remove',
+    remove: 'Remove', rate: 'Rate',
     loginToWatch: 'Login to Track',
     epUnit: 'Ep',
   },
@@ -111,6 +115,7 @@ const en = {
     userNotFound: 'User not found',
     emptyList: 'No anime tracked yet',
     noActivity: 'No activity yet — follow someone to see their updates',
+    feedError: 'Failed to load activity feed',
     loadMore: 'Load more',
     followedToast: 'Followed',
     unfollowedToast: 'Unfollowed',
@@ -119,6 +124,8 @@ const en = {
     statsEpisodes: 'eps watched',
     statsGenres: 'Top Genres',
     statsSeason: 'Most Active',
+    showMore: 'Show More',
+    showLess: 'Show Less',
     action_watching: 'is watching',
     action_completed: 'completed',
     action_plan_to_watch: 'wants to watch',
@@ -135,7 +142,7 @@ const en = {
   // Footer
   footer: {
     siteCol: 'AnimeGo',
-    siteDesc: 'Anime tracking & community platform',
+    siteDesc: 'Rundle Streetが暮れる。東京が灯る。',
     donate: 'Donate',
     apps: 'Apps',
     siteStats: 'Site Stats',
@@ -160,7 +167,7 @@ const en = {
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
     dataCredits: 'Data provided by',
-    copyright: '© {year} AnimeGo · This site does not host or stream video content',
+    copyright: '© {year} AnimeGo · Rundle Streetが暮れる。東京が灯る。',
   },
   // Comments
   comment: {
@@ -170,6 +177,76 @@ const en = {
     posting: 'Posting...', delete: 'Delete',
     deleteConfirm: 'Delete this comment?',
     tooLong: 'Comment cannot exceed 500 characters',
+    cancel: 'Cancel',
+  },
+  // Admin
+  admin: {
+    title: 'Admin Dashboard',
+    enrichmentTitle: 'Enrichment Management',
+    // Dashboard stats
+    statUsers: 'Users',
+    statAnime: 'Anime Cached',
+    statSubs: 'Subscriptions',
+    statFollows: 'Follows',
+    statFlagged: 'Flagged',
+    // Search
+    searchPlaceholder: 'Search title or AniList ID...',
+    searchBtn: 'Search',
+    clearSearch: 'Clear',
+    noResults: 'No results',
+    // Filters
+    filterAll: 'All',
+    filterNeedsReview: 'Needs Review',
+    filterCorrected: 'Corrected',
+    filterUnenriched: 'Unenriched',
+    filterNoCn: 'Missing CN Title',
+    // Table
+    colTitle: 'Title',
+    colTitleCn: 'Chinese Title',
+    colVersion: 'Version',
+    colScore: 'Score',
+    colFlag: 'Flag',
+    colActions: 'Actions',
+    reset: 'Reset',
+    markReview: 'Flag Review',
+    clearFlag: 'Clear Flag',
+    needsReview: 'Needs Review',
+    corrected: 'Corrected',
+    prev: 'Previous',
+    next: 'Next',
+    totalPrefix: '',
+    totalSuffix: 'items total',
+    resetSuccess: 'Reset complete, re-enriching',
+    resetFailed: 'Reset failed',
+    flagSuccess: 'Flag updated',
+    flagFailed: 'Flag update failed',
+    enrichUpdateSuccess: 'Enrichment updated',
+    enrichUpdateFailed: 'Enrichment update failed',
+    healSuccess: 'CN title heal triggered',
+    healFailed: 'Batch heal trigger failed',
+    loadError: 'Failed to load',
+    navLabel: 'Admin',
+    // User management
+    usersTitle: 'User Management',
+    userSearchPlaceholder: 'Search username or email...',
+    colUsername: 'Username',
+    colEmail: 'Email',
+    colSubs: 'Subscriptions',
+    colFollowers: 'Followers',
+    colJoined: 'Joined',
+    password: 'Password',
+    createUser: '+ Create User',
+    edit: 'Edit',
+    save: 'Save',
+    cancel: 'Cancel',
+    delete: 'Delete',
+    confirmDelete: 'Confirm',
+    createSuccess: 'User created',
+    createFailed: 'Create failed',
+    updateSuccess: 'User updated',
+    updateFailed: 'Update failed',
+    deleteSuccess: 'User deleted',
+    deleteFailed: 'Delete failed',
   },
 }
 

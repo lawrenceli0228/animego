@@ -13,7 +13,7 @@ export function useComments(anilistId, episode) {
 export function useAddComment(anilistId, episode) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (content) => addComment(anilistId, episode, content).then(r => r.data.data),
+    mutationFn: (data) => addComment(anilistId, episode, typeof data === 'string' ? { content: data } : data).then(r => r.data.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['comments', anilistId, episode] })
   })
 }

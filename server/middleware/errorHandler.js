@@ -23,8 +23,11 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
+  const message = process.env.NODE_ENV === 'production'
+    ? '服务器错误'
+    : (err.message || '服务器错误');
   res.status(err.status || 500).json({
-    error: { code: 'SERVER_ERROR', message: err.message || '服务器错误' }
+    error: { code: 'SERVER_ERROR', message }
   });
 };
 

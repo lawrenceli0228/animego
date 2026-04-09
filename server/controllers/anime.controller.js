@@ -70,6 +70,41 @@ exports.getWatchers = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// GET /api/anime/completed-gems?limit=6
+exports.getCompletedGems = async (req, res, next) => {
+  try {
+    const limitNum = Math.min(Number(req.query.limit) || 6, 20);
+    const data = await AnimeCache.aggregate([
+      { $match: { status: 'FINISHED', averageScore: { $gte: 75 }, coverImageUrl: { $ne: null } } },
+      { $sample: { size: limitNum } },
+    ]);
+    res.json({ data });
+  } catch (err) { next(err); }
+};
+
+// In-memory yearly top cache (1h TTL)
+const yearlyTopCache = new Map();
+
+// GET /api/anime/yearly-top?year=2026&limit=10
+exports.getYearlyTop = async (req, res, next) => {
+  try {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const limitNum = Math.min(Number(req.query.limit) || 10, 20);
+    const key = `${year}`;
+    const cached = yearlyTopCache.get(key);
+    if (cached && Date.now() - cached.ts < 60 * 60 * 1000) {
+      return res.json({ data: cached.data.slice(0, limitNum) });
+    }
+    const data = await AnimeCache.find({
+      seasonYear: year,
+      averageScore: { $gt: 0 },
+      format: { $in: ['TV', 'MOVIE', 'ONA'] },
+    }).sort({ averageScore: -1 }).limit(20).lean();
+    yearlyTopCache.set(key, { data, ts: Date.now() });
+    res.json({ data: data.slice(0, limitNum) });
+  } catch (err) { next(err); }
+};
+
 // GET /api/anime/seasonal?season=WINTER&year=2025&page=1&perPage=20
 exports.getSeasonal = async (req, res, next) => {
   try {

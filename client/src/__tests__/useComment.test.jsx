@@ -50,7 +50,7 @@ describe('useAddComment', () => {
     const { result } = renderHook(() => useAddComment(101, 1), { wrapper: createWrapper() });
 
     await result.current.mutateAsync('Nice!');
-    expect(mockAddComment).toHaveBeenCalledWith(101, 1, 'Nice!');
+    expect(mockAddComment).toHaveBeenCalledWith(101, 1, { content: 'Nice!' });
   });
 });
 

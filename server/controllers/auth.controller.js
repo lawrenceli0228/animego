@@ -4,9 +4,11 @@ const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const { sendPasswordResetEmail } = require('../services/email.service');
 
-const signTokens = (userId, username) => {
+const signTokens = (userId, username, role = null) => {
+  const payload = { userId, username };
+  if (role) payload.role = role;
   const accessToken = jwt.sign(
-    { userId, username },
+    payload,
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
   );
@@ -43,7 +45,7 @@ exports.register = async (req, res, next) => {
     }
 
     const user = await User.create({ username, email, password });
-    const { accessToken, refreshToken } = signTokens(user._id, user.username);
+    const { accessToken, refreshToken } = signTokens(user._id, user.username, user.role);
 
     user.refreshToken = refreshToken;
     await user.save();
@@ -67,7 +69,7 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: '邮箱或密码错误' } });
     }
 
-    const { accessToken, refreshToken } = signTokens(user._id, user.username);
+    const { accessToken, refreshToken } = signTokens(user._id, user.username, user.role);
     user.refreshToken = refreshToken;
     await user.save();
 
@@ -89,7 +91,7 @@ exports.refresh = async (req, res, next) => {
       return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: '无效的 token' } });
     }
 
-    const { accessToken, refreshToken } = signTokens(user._id, user.username);
+    const { accessToken, refreshToken } = signTokens(user._id, user.username, user.role);
     user.refreshToken = refreshToken;
     await user.save();
 

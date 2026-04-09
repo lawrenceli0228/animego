@@ -5,6 +5,7 @@ const userSchema = new mongoose.Schema({
   username:             { type: String, required: true, unique: true, trim: true, minlength: 3, maxlength: 50 },
   email:                { type: String, required: true, unique: true, lowercase: true, trim: true },
   password:             { type: String, required: true },
+  role:                 { type: String, enum: ['admin', null], default: null },
   refreshToken:         { type: String, default: null },
   resetPasswordToken:   { type: String, default: null },
   resetPasswordExpires: { type: Date,   default: null }

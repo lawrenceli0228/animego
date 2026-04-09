@@ -18,7 +18,7 @@ const ANIME_DETAIL_QUERY = `
       duration
       source
       studios(isMain: true) { nodes { name } }
-      relations { edges { relationType node { id title { romaji native } } } }
+      relations { edges { relationType node { id title { romaji native } coverImage { large } format } } }
       characters(sort: ROLE, page: 1, perPage: 8) {
         edges { role node { id name { full native } image { medium } }
           voiceActors(language: JAPANESE) { id name { full native } image { medium } } }

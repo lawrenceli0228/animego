@@ -1,15 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule, getTorrents, getTrending, getWatchers } from '../api/anime.api'
+import { getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule, getTorrents, getTrending, getWatchers, getCompletedGems, getYearlyTop } from '../api/anime.api'
 
-export function useSeasonalAnime(season, year, page = 1) {
+export function useSeasonalAnime(season, year, page = 1, perPage = 20) {
   return useQuery({
-    queryKey: ['seasonal', season, year, page],
-    queryFn: () => getSeasonalAnime(season, year, page).then(r => r.data),
+    queryKey: ['seasonal', season, year, page, perPage],
+    queryFn: () => getSeasonalAnime(season, year, page, perPage).then(r => r.data),
     keepPreviousData: true,
     staleTime: 1 * 60 * 1000,
     enabled: !!season && !!year,
-    refetchInterval: (data) => {
-      const items = data?.data ?? []
+    refetchInterval: (query) => {
+      const items = query?.state?.data?.data ?? []
       return items.length > 0 && items.some(a => !a.bangumiVersion) ? 20 * 1000 : false
     }
   })
@@ -40,11 +40,12 @@ export function useAnimeDetail(id) {
       }
       return undefined
     },
-    refetchInterval: (data) => {
-      const anime = data?.data ?? data
+    refetchInterval: (query) => {
+      const anime = query?.state?.data
       if (!anime) return false
       if ((anime.bangumiVersion ?? 0) < 2) return 4000
       if (anime.episodes > 0 && !anime.episodeTitles?.length) return 4000
+      if (anime.bangumiVersion === 2 && anime.bgmId && !anime.titleChinese) return 4000 // V3 title heal
       return false
     }
   })
@@ -94,6 +95,25 @@ export function useWatchers(anilistId, limit = 5) {
     queryFn: () => getWatchers(anilistId, limit).then(r => r.data),
     enabled: !!anilistId,
     staleTime: 5 * 60 * 1000,
+    retry: false
+  })
+}
+
+export function useYearlyTop(year, limit = 10) {
+  return useQuery({
+    queryKey: ['yearlyTop', year, limit],
+    queryFn: () => getYearlyTop(year, limit).then(r => r.data.data),
+    enabled: !!year,
+    staleTime: 60 * 60 * 1000,
+    retry: false
+  })
+}
+
+export function useCompletedGems(limit = 6) {
+  return useQuery({
+    queryKey: ['completedGems', limit],
+    queryFn: () => getCompletedGems(limit).then(r => r.data.data),
+    staleTime: 30 * 60 * 1000,
     retry: false
   })
 }

@@ -17,7 +17,10 @@ export function useUserProfile(username) {
 export function useFollow(username) {
   const queryClient = useQueryClient()
   const { t } = useLang()
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['profile', username] })
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['profile', username] })
+    queryClient.invalidateQueries({ queryKey: ['feed'] })
+  }
 
   const followMut = useMutation({
     mutationFn: () => followUser(username),
@@ -51,7 +54,7 @@ export function useFeed() {
     queryKey: ['feed'],
     queryFn: ({ pageParam = 1 }) => getFeed(pageParam).then(r => r.data),
     initialPageParam: 1,
-    getNextPageParam: (lastPage) => lastPage.nextPage,
+    getNextPageParam: (lastPage) => lastPage?.nextPage ?? undefined,
     enabled: !!user,
     staleTime: 2 * 60 * 1000,
     retry: false,

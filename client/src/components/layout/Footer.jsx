@@ -85,7 +85,7 @@ export default function Footer() {
   ]
 
   const socialLinks = [
-    { href: 'https://github.com', label: t('footer.github') },
+    { href: 'https://github.com/lawrenceli0228/animego', label: t('footer.github') },
     { href: '#', label: t('footer.twitter') },
     { href: '#', label: t('footer.discord') },
     { href: '#', label: t('footer.telegram') },

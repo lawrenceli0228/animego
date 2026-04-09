@@ -1,0 +1,338 @@
+const AnimeCache = require('../models/AnimeCache');
+const User = require('../models/User');
+const Subscription = require('../models/Subscription');
+const Follow = require('../models/Follow');
+const { enqueueEnrichment, enqueueV3Enrichment, getQueueStatus, startV3Batch, pauseV3, resumeV3 } = require('../services/bangumi.service');
+
+// GET /api/admin/stats
+exports.getStats = async (req, res, next) => {
+  try {
+    const [
+      totalUsers,
+      totalAnime,
+      enrichV0,
+      enrichV1,
+      enrichV2,
+      enrichV3,
+      noCnCount,
+      flaggedCount,
+      totalSubs,
+      totalFollows,
+    ] = await Promise.all([
+      User.countDocuments(),
+      AnimeCache.countDocuments(),
+      AnimeCache.countDocuments({ $or: [{ bangumiVersion: 0 }, { bangumiVersion: { $exists: false } }] }),
+      AnimeCache.countDocuments({ bangumiVersion: 1 }),
+      AnimeCache.countDocuments({ bangumiVersion: 2 }),
+      AnimeCache.countDocuments({ bangumiVersion: { $gte: 3 } }),
+      AnimeCache.countDocuments({ bgmId: { $ne: null }, $or: [{ titleChinese: null }, { titleChinese: { $exists: false } }] }),
+      AnimeCache.countDocuments({ adminFlag: { $ne: null } }),
+      Subscription.countDocuments(),
+      Follow.countDocuments(),
+    ]);
+
+    res.json({
+      data: {
+        users: totalUsers,
+        anime: totalAnime,
+        enrichment: { v0: enrichV0, v1: enrichV1, v2: enrichV2, v3: enrichV3, noCn: noCnCount },
+        queue: getQueueStatus(),
+        flagged: flaggedCount,
+        subscriptions: totalSubs,
+        follows: totalFollows,
+      },
+    });
+  } catch (err) { next(err); }
+};
+
+// GET /api/admin/enrichment?page=1&filter=needs-review&q=keyword
+exports.listEnrichment = async (req, res, next) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 30;
+    const skip  = (page - 1) * limit;
+
+    const conditions = [];
+    const f = req.query.filter;
+    if (f === 'needs-review')            conditions.push({ adminFlag: 'needs-review' });
+    else if (f === 'manually-corrected') conditions.push({ adminFlag: 'manually-corrected' });
+    else if (f === 'unenriched')         conditions.push({ bangumiVersion: 0 });
+    else if (f === 'no-cn')              conditions.push({ bgmId: { $ne: null }, $or: [{ titleChinese: null }, { titleChinese: { $exists: false } }] });
+
+    // Search by title or anilistId
+    const q = (req.query.q || '').trim();
+    if (q) {
+      const num = parseInt(q, 10);
+      if (!isNaN(num) && String(num) === q) {
+        conditions.push({ anilistId: num });
+      } else {
+        const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = { $regex: escaped, $options: 'i' };
+        conditions.push({ $or: [{ titleRomaji: regex }, { titleChinese: regex }, { titleNative: regex }] });
+      }
+    }
+
+    const filter = conditions.length > 0 ? (conditions.length === 1 ? conditions[0] : { $and: conditions }) : {};
+
+    const [items, total] = await Promise.all([
+      AnimeCache.find(filter)
+        .select('anilistId titleRomaji titleChinese bgmId bangumiVersion bangumiScore adminFlag')
+        .sort({ cachedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      AnimeCache.countDocuments(filter),
+    ]);
+
+    const hasMore = skip + limit < total;
+    res.json({ data: items, hasMore, total, page });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/enrichment/heal-cn/pause
+exports.pauseHeal = (req, res) => {
+  pauseV3();
+  console.log(`[Admin] ${req.user.username} paused V3 title heal`);
+  res.json({ data: { paused: true } });
+};
+
+// POST /api/admin/enrichment/heal-cn/resume
+exports.resumeHeal = (req, res) => {
+  resumeV3();
+  console.log(`[Admin] ${req.user.username} resumed V3 title heal`);
+  res.json({ data: { paused: false } });
+};
+
+// POST /api/admin/enrichment/:anilistId/reset
+exports.resetEnrichment = async (req, res, next) => {
+  try {
+    const anilistId = parseInt(req.params.anilistId, 10);
+    if (!anilistId) return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '无效的 anilistId' } });
+
+    const doc = await AnimeCache.findOne({ anilistId });
+    if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '番剧不存在' } });
+
+    // Reset enrichment fields
+    doc.bangumiVersion = 0;
+    doc.titleChinese   = null;
+    doc.bgmId          = null;
+    doc.bangumiScore   = undefined;
+    doc.bangumiVotes   = undefined;
+    doc.episodeTitles  = undefined;
+    doc.characters     = undefined;
+    doc.adminFlag      = null;
+    await doc.save();
+
+    // Re-enqueue with priority so it processes next
+    enqueueEnrichment([{
+      anilistId:   doc.anilistId,
+      titleNative: doc.titleNative,
+      titleRomaji: doc.titleRomaji,
+      bangumiVersion: 0,
+    }], true);
+
+    console.log(`[Admin] ${req.user.username} reset enrichment for anilistId=${anilistId}`);
+    res.json({ data: { anilistId, reset: true } });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/enrichment/:anilistId/flag
+exports.flagEnrichment = async (req, res, next) => {
+  try {
+    const anilistId = parseInt(req.params.anilistId, 10);
+    if (!anilistId) return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '无效的 anilistId' } });
+
+    const { flag } = req.body;
+    const allowed = ['needs-review', 'manually-corrected', null];
+    if (!allowed.includes(flag)) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '无效的 flag 值' } });
+    }
+
+    const doc = await AnimeCache.findOneAndUpdate(
+      { anilistId },
+      { adminFlag: flag },
+      { new: true }
+    );
+    if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '番剧不存在' } });
+
+    console.log(`[Admin] ${req.user.username} flagged anilistId=${anilistId} as ${flag}`);
+    res.json({ data: { anilistId, adminFlag: flag } });
+  } catch (err) { next(err); }
+};
+
+// PATCH /api/admin/enrichment/:anilistId
+exports.updateEnrichment = async (req, res, next) => {
+  try {
+    const anilistId = parseInt(req.params.anilistId, 10);
+    if (!anilistId) return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '无效的 anilistId' } });
+
+    const allowed = ['titleChinese', 'bgmId', 'bangumiScore'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '没有可更新的字段' } });
+    }
+
+    // Mark as manually corrected
+    updates.adminFlag = 'manually-corrected';
+
+    const doc = await AnimeCache.findOneAndUpdate(
+      { anilistId },
+      { $set: updates },
+      { new: true }
+    ).select('anilistId titleRomaji titleChinese bgmId bangumiScore adminFlag');
+    if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '番剧不存在' } });
+
+    console.log(`[Admin] ${req.user.username} updated enrichment for anilistId=${anilistId}:`, updates);
+    res.json({ data: doc });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/enrichment/heal-cn — 批量触发 V3 中文标题自愈
+exports.healCnTitles = async (req, res, next) => {
+  try {
+    const docs = await AnimeCache.find(
+      { bgmId: { $ne: null }, bangumiVersion: { $gte: 2, $lt: 3 }, $or: [{ titleChinese: null }, { titleChinese: { $exists: false } }] },
+      { anilistId: 1, bgmId: 1, titleChinese: 1, bangumiVersion: 1 }
+    ).lean();
+
+    if (docs.length === 0) {
+      return res.json({ data: { enqueued: 0 } });
+    }
+
+    enqueueV3Enrichment(docs);
+    startV3Batch(docs.length);
+    console.log(`[Admin] ${req.user.username} triggered V3 title heal for ${docs.length} anime`);
+    res.json({ data: { enqueued: docs.length } });
+  } catch (err) { next(err); }
+};
+
+// ==================== User Management ====================
+
+// GET /api/admin/users?page=1&q=keyword
+exports.listUsers = async (req, res, next) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 30;
+    const skip  = (page - 1) * limit;
+
+    const filter = {};
+    const q = (req.query.q || '').trim();
+    if (q) {
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = { $regex: escaped, $options: 'i' };
+      filter.$or = [{ username: regex }, { email: regex }];
+    }
+
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .select('username email role createdAt')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(filter),
+    ]);
+
+    // Batch fetch subscription and follow counts
+    const userIds = users.map(u => u._id);
+    const [subCounts, followerCounts] = await Promise.all([
+      Subscription.aggregate([
+        { $match: { userId: { $in: userIds } } },
+        { $group: { _id: '$userId', count: { $sum: 1 } } },
+      ]),
+      Follow.aggregate([
+        { $match: { followeeId: { $in: userIds } } },
+        { $group: { _id: '$followeeId', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const subMap = Object.fromEntries(subCounts.map(s => [s._id.toString(), s.count]));
+    const followerMap = Object.fromEntries(followerCounts.map(f => [f._id.toString(), f.count]));
+
+    const data = users.map(u => ({
+      ...u,
+      subscriptions: subMap[u._id.toString()] || 0,
+      followers: followerMap[u._id.toString()] || 0,
+    }));
+
+    const hasMore = skip + limit < total;
+    res.json({ data, hasMore, total, page });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/users
+exports.createUser = async (req, res, next) => {
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '用户名、邮箱和密码为必填项' } });
+    }
+
+    const existing = await User.findOne({ $or: [{ username }, { email }] });
+    if (existing) {
+      const field = existing.username === username ? '用户名' : '邮箱';
+      return res.status(409).json({ error: { code: 'CONFLICT', message: `${field}已存在` } });
+    }
+
+    const user = await User.create({ username, email, password });
+    console.log(`[Admin] ${req.user.username} created user ${username}`);
+    res.status(201).json({ data: { _id: user._id, username: user.username, email: user.email } });
+  } catch (err) { next(err); }
+};
+
+// PATCH /api/admin/users/:userId
+exports.updateUser = async (req, res, next) => {
+  try {
+    const { username, email } = req.body;
+    if (!username && !email) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '至少提供用户名或邮箱' } });
+    }
+
+    const updates = {};
+    if (username) updates.username = username;
+    if (email) updates.email = email;
+
+    // Check for duplicates
+    const conditions = [];
+    if (username) conditions.push({ username });
+    if (email) conditions.push({ email });
+    const dup = await User.findOne({ $or: conditions, _id: { $ne: req.params.userId } });
+    if (dup) {
+      const field = dup.username === username ? '用户名' : '邮箱';
+      return res.status(409).json({ error: { code: 'CONFLICT', message: `${field}已存在` } });
+    }
+
+    const user = await User.findByIdAndUpdate(req.params.userId, updates, { new: true })
+      .select('username email role createdAt');
+    if (!user) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '用户不存在' } });
+
+    console.log(`[Admin] ${req.user.username} updated user ${user.username}`);
+    res.json({ data: user });
+  } catch (err) { next(err); }
+};
+
+// DELETE /api/admin/users/:userId
+exports.deleteUser = async (req, res, next) => {
+  try {
+    // Prevent self-deletion
+    if (req.params.userId === req.user.userId) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '不能删除自己' } });
+    }
+
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '用户不存在' } });
+
+    // Cascade delete related data
+    await Promise.all([
+      Subscription.deleteMany({ userId: user._id }),
+      Follow.deleteMany({ $or: [{ followerId: user._id }, { followeeId: user._id }] }),
+      User.deleteOne({ _id: user._id }),
+    ]);
+
+    console.log(`[Admin] ${req.user.username} deleted user ${user.username}`);
+    res.json({ data: { deleted: true, username: user.username } });
+  } catch (err) { next(err); }
+};

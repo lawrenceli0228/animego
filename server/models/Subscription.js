@@ -9,6 +9,7 @@ const subscriptionSchema = new mongoose.Schema({
     required: true
   },
   currentEpisode: { type: Number, default: 0, min: 0 },
+  score:          { type: Number, default: null, min: 1, max: 10 },
   lastWatchedAt:  { type: Date, default: null }
 }, { timestamps: true });
 
