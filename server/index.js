@@ -49,6 +49,11 @@ app.get('/api/feed',          authenticateToken, profileCtrl.getFeed);
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
+// Google Search Console verification
+app.get('/googlec1c1aceafd3279a2.html', (req, res) => {
+  res.type('text/html').send('google-site-verification: googlec1c1aceafd3279a2.html');
+});
+
 // SEO: robots.txt, sitemap, OG tags (must be before static/SPA catch-all)
 app.get('/robots.txt', (req, res) => {
   const site = process.env.SITE_URL || `${req.protocol}://${req.get('host')}`;
