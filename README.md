@@ -1,3 +1,5 @@
+**English** | [中文](README.zh.md)
+
 # AnimeGo
 
 A full-stack anime discovery and tracking platform. Browse seasonal anime, manage your watchlist, post danmaku (bullet comments), and connect with other fans.
