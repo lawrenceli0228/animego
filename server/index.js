@@ -34,6 +34,15 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
+
+// Block requests from unauthorized host domains (anti-mirror/scraping)
+const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || 'animegoclub.com,localhost').split(',');
+app.use((req, res, next) => {
+  const host = (req.get('host') || '').replace(/:\d+$/, '');
+  if (ALLOWED_HOSTS.some(h => host === h || host.endsWith('.' + h))) return next();
+  res.status(403).send('Forbidden');
+});
+
 app.use('/api', apiLimiter);
 
 // Routes
@@ -62,6 +71,7 @@ Allow: /
 Disallow: /admin
 Disallow: /api/
 
+Host: https://animegoclub.com
 Sitemap: ${site}/sitemap.xml
 `);
 });
