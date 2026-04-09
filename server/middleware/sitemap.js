@@ -1,6 +1,6 @@
 const AnimeCache = require('../models/AnimeCache');
 
-const SITE = process.env.SITE_URL || 'https://animego.site';
+const SITE = process.env.SITE_URL || 'https://animegoclub.com';
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 let cached = { xml: '', at: 0 };
 
