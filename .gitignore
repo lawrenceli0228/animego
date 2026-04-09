@@ -21,3 +21,9 @@ npm-debug.log*
 .vscode/
 .idea/
 .gstack/
+
+# Project docs (contain sensitive deployment info)
+CHANGELOG.md
+CLAUDE.md
+.claude/
+scripts/setup.sh
