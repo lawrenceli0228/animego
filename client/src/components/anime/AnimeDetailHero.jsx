@@ -109,7 +109,8 @@ export default function AnimeDetailHero({ anime }) {
     studios = [], source, duration, startDate,
     bangumiScore, bangumiVotes, relations = [],
   } = anime
-  const isEnriching = (anime.bangumiVersion ?? 0) < 2
+  const isEnriching = (anime.bangumiVersion ?? 0) < 2 ||
+    (anime.bangumiVersion === 2 && anime.bgmId && !anime.titleChinese)
 
   const desc = stripHtml(description || '')
   const displayDesc = expanded ? desc : truncate(desc, 300)

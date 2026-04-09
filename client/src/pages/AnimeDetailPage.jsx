@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useAnimeDetail } from '../hooks/useAnime'
 import { pickTitle } from '../utils/formatters'
@@ -9,9 +9,10 @@ import WatchersAvatarList from '../components/anime/WatchersAvatarList'
 import EpisodeList from '../components/anime/EpisodeList'
 import CharacterSection from '../components/anime/CharacterSection'
 import StaffSection from '../components/anime/StaffSection'
+import RelationSection from '../components/anime/RelationSection'
 import RecommendationSection from '../components/anime/RecommendationSection'
 import TorrentModal from '../components/anime/TorrentModal'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { DetailSkeleton } from '../components/common/Skeleton'
 
 function ShareButton({ anime }) {
   const { t, lang } = useLang()
@@ -43,11 +44,16 @@ function ShareButton({ anime }) {
 
 export default function AnimeDetailPage() {
   const { id } = useParams()
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const { data: anime, isLoading, error } = useAnimeDetail(id)
   const [torrentOpen, setTorrentOpen] = useState(false)
 
-  if (isLoading) return <LoadingSpinner />
+  useEffect(() => {
+    if (anime) document.title = `${pickTitle(anime, lang)} — AnimeGo`
+    return () => { document.title = 'AnimeGo' }
+  }, [anime, lang])
+
+  if (isLoading) return <DetailSkeleton />
   if (error) return (
     <div style={{ textAlign:'center', padding:'80px 0', color:'#ff453a' }}>
       {t('anime.loadError')}：{error.message}
@@ -77,6 +83,7 @@ export default function AnimeDetailPage() {
           )}
         </div>
         <WatchersAvatarList anilistId={anime.anilistId} />
+        <RelationSection relations={anime.relations} />
         <CharacterSection characters={anime.characters} />
         <StaffSection staff={anime.staff} />
         <EpisodeList anime={anime} />

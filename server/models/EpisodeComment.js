@@ -6,9 +6,12 @@ const episodeCommentSchema = new mongoose.Schema({
   userId:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   username:  { type: String, required: true },
   content:   { type: String, required: true, maxlength: 500 },
+  parentId:  { type: mongoose.Schema.Types.ObjectId, ref: 'EpisodeComment', default: null },
+  replyToUsername: { type: String, default: null },
 }, { timestamps: true });
 
 episodeCommentSchema.index({ anilistId: 1, episode: 1 });
 episodeCommentSchema.index({ userId: 1 });
+episodeCommentSchema.index({ parentId: 1 });
 
 module.exports = mongoose.model('EpisodeComment', episodeCommentSchema);

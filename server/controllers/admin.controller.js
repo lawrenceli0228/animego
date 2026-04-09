@@ -2,7 +2,7 @@ const AnimeCache = require('../models/AnimeCache');
 const User = require('../models/User');
 const Subscription = require('../models/Subscription');
 const Follow = require('../models/Follow');
-const { enqueueEnrichment } = require('../services/bangumi.service');
+const { enqueueEnrichment, enqueueV3Enrichment, getQueueStatus, startV3Batch, pauseV3, resumeV3 } = require('../services/bangumi.service');
 
 // GET /api/admin/stats
 exports.getStats = async (req, res, next) => {
@@ -13,15 +13,19 @@ exports.getStats = async (req, res, next) => {
       enrichV0,
       enrichV1,
       enrichV2,
+      enrichV3,
+      noCnCount,
       flaggedCount,
       totalSubs,
       totalFollows,
     ] = await Promise.all([
       User.countDocuments(),
       AnimeCache.countDocuments(),
-      AnimeCache.countDocuments({ bangumiVersion: 0 }),
+      AnimeCache.countDocuments({ $or: [{ bangumiVersion: 0 }, { bangumiVersion: { $exists: false } }] }),
       AnimeCache.countDocuments({ bangumiVersion: 1 }),
-      AnimeCache.countDocuments({ bangumiVersion: { $gte: 2 } }),
+      AnimeCache.countDocuments({ bangumiVersion: 2 }),
+      AnimeCache.countDocuments({ bangumiVersion: { $gte: 3 } }),
+      AnimeCache.countDocuments({ bgmId: { $ne: null }, $or: [{ titleChinese: null }, { titleChinese: { $exists: false } }] }),
       AnimeCache.countDocuments({ adminFlag: { $ne: null } }),
       Subscription.countDocuments(),
       Follow.countDocuments(),
@@ -31,7 +35,8 @@ exports.getStats = async (req, res, next) => {
       data: {
         users: totalUsers,
         anime: totalAnime,
-        enrichment: { v0: enrichV0, v1: enrichV1, v2: enrichV2 },
+        enrichment: { v0: enrichV0, v1: enrichV1, v2: enrichV2, v3: enrichV3, noCn: noCnCount },
+        queue: getQueueStatus(),
         flagged: flaggedCount,
         subscriptions: totalSubs,
         follows: totalFollows,
@@ -47,24 +52,27 @@ exports.listEnrichment = async (req, res, next) => {
     const limit = 30;
     const skip  = (page - 1) * limit;
 
-    const filter = {};
+    const conditions = [];
     const f = req.query.filter;
-    if (f === 'needs-review')            filter.adminFlag = 'needs-review';
-    else if (f === 'manually-corrected') filter.adminFlag = 'manually-corrected';
-    else if (f === 'unenriched')         filter.bangumiVersion = 0;
+    if (f === 'needs-review')            conditions.push({ adminFlag: 'needs-review' });
+    else if (f === 'manually-corrected') conditions.push({ adminFlag: 'manually-corrected' });
+    else if (f === 'unenriched')         conditions.push({ bangumiVersion: 0 });
+    else if (f === 'no-cn')              conditions.push({ bgmId: { $ne: null }, $or: [{ titleChinese: null }, { titleChinese: { $exists: false } }] });
 
     // Search by title or anilistId
     const q = (req.query.q || '').trim();
     if (q) {
       const num = parseInt(q, 10);
       if (!isNaN(num) && String(num) === q) {
-        filter.anilistId = num;
+        conditions.push({ anilistId: num });
       } else {
         const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const regex = { $regex: escaped, $options: 'i' };
-        filter.$or = [{ titleRomaji: regex }, { titleChinese: regex }, { titleNative: regex }];
+        conditions.push({ $or: [{ titleRomaji: regex }, { titleChinese: regex }, { titleNative: regex }] });
       }
     }
+
+    const filter = conditions.length > 0 ? (conditions.length === 1 ? conditions[0] : { $and: conditions }) : {};
 
     const [items, total] = await Promise.all([
       AnimeCache.find(filter)
@@ -79,6 +87,20 @@ exports.listEnrichment = async (req, res, next) => {
     const hasMore = skip + limit < total;
     res.json({ data: items, hasMore, total, page });
   } catch (err) { next(err); }
+};
+
+// POST /api/admin/enrichment/heal-cn/pause
+exports.pauseHeal = (req, res) => {
+  pauseV3();
+  console.log(`[Admin] ${req.user.username} paused V3 title heal`);
+  res.json({ data: { paused: true } });
+};
+
+// POST /api/admin/enrichment/heal-cn/resume
+exports.resumeHeal = (req, res) => {
+  resumeV3();
+  console.log(`[Admin] ${req.user.username} resumed V3 title heal`);
+  res.json({ data: { paused: false } });
 };
 
 // POST /api/admin/enrichment/:anilistId/reset
@@ -165,6 +187,25 @@ exports.updateEnrichment = async (req, res, next) => {
 
     console.log(`[Admin] ${req.user.username} updated enrichment for anilistId=${anilistId}:`, updates);
     res.json({ data: doc });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/enrichment/heal-cn — 批量触发 V3 中文标题自愈
+exports.healCnTitles = async (req, res, next) => {
+  try {
+    const docs = await AnimeCache.find(
+      { bgmId: { $ne: null }, bangumiVersion: { $gte: 2, $lt: 3 }, $or: [{ titleChinese: null }, { titleChinese: { $exists: false } }] },
+      { anilistId: 1, bgmId: 1, titleChinese: 1, bangumiVersion: 1 }
+    ).lean();
+
+    if (docs.length === 0) {
+      return res.json({ data: { enqueued: 0 } });
+    }
+
+    enqueueV3Enrichment(docs);
+    startV3Batch(docs.length);
+    console.log(`[Admin] ${req.user.username} triggered V3 title heal for ${docs.length} anime`);
+    res.json({ data: { enqueued: docs.length } });
   } catch (err) { next(err); }
 };
 

@@ -1,10 +1,10 @@
 import AnimeCard from './AnimeCard'
-import LoadingSpinner from '../common/LoadingSpinner'
+import { AnimeGridSkeleton } from '../common/Skeleton'
 import { useLang } from '../../context/LanguageContext'
 
 export default function AnimeGrid({ animeList, loading, error }) {
   const { t } = useLang()
-  if (loading) return <LoadingSpinner />
+  if (loading) return <AnimeGridSkeleton />
   if (error) return (
     <div style={{ textAlign:'center', padding:'60px 0', color:'#ff453a' }}>
       {t('anime.loadError')}：{error.message}

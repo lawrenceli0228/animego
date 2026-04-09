@@ -65,8 +65,14 @@ describe('AnimeDetailHero', () => {
   })
 
   it('shows title when not enriching even without titleChinese', () => {
-    renderHero({ bangumiVersion: 2, titleChinese: null })
+    renderHero({ bangumiVersion: 3, titleChinese: null })
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument()
+  })
+
+  it('shows shimmer when v2 with bgmId but no titleChinese (v3 healing)', () => {
+    const { container } = renderHero({ bangumiVersion: 2, titleChinese: null, bgmId: 100 })
+    const shimmers = container.querySelectorAll('[style*="shimmer"]')
+    expect(shimmers.length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows badge shimmers when enriching without bangumiScore/bgmId', () => {

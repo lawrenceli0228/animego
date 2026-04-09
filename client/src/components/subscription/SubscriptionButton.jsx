@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../../context/AuthContext'
@@ -38,17 +38,27 @@ export default function SubscriptionButton({ anilistId, episodes }) {
   const update = useUpdateSubscription()
   const remove = useRemoveSubscription()
   const [epInput, setEpInput] = useState(null)
+  const [scoreOpen, setScoreOpen] = useState(false)
+  const scoreRef = useRef(null)
 
   const statusLabels = {
     watching: t('sub.watching'), completed: t('sub.completed'),
     plan_to_watch: t('sub.planToWatch'), dropped: t('sub.dropped')
   }
 
+  useEffect(() => {
+    if (!scoreOpen) return
+    const handler = (e) => { if (scoreRef.current && !scoreRef.current.contains(e.target)) setScoreOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [scoreOpen])
+
   if (!user) return <Link to="/login" style={s.loginBtn}>{t('sub.loginToWatch')}</Link>
   if (isLoading) return null
 
   const currentEp = epInput ?? sub?.currentEpisode ?? 0
   const currentStatus = sub?.status
+  const currentScore = sub?.score ?? null
 
   const handleStatus = async (status) => {
     try {
@@ -64,6 +74,14 @@ export default function SubscriptionButton({ anilistId, episodes }) {
     try {
       if (!sub) await add.mutateAsync({ anilistId, status: 'watching', currentEpisode: val })
       else await update.mutateAsync({ anilistId, currentEpisode: val })
+    } catch { toast.error('!') }
+  }
+
+  const handleScore = async (val) => {
+    const newScore = val === currentScore ? null : val
+    try {
+      await update.mutateAsync({ anilistId, score: newScore })
+      setScoreOpen(false)
     } catch { toast.error('!') }
   }
 
@@ -92,6 +110,41 @@ export default function SubscriptionButton({ anilistId, episodes }) {
           <span style={{ fontSize:12, color:'rgba(235,235,245,0.30)', marginLeft:4 }}>
             {episodes ? `/ ${episodes} ${t('sub.epUnit')}` : t('sub.epUnit')}
           </span>
+        </div>
+      )}
+
+      {sub && (
+        <div ref={scoreRef} style={{ position:'relative' }}>
+          <button
+            onClick={() => setScoreOpen(!scoreOpen)}
+            style={{
+              padding:'8px 14px', borderRadius:8,
+              background: currentScore ? 'rgba(10,132,255,0.12)' : '#2c2c2e',
+              border: currentScore ? '1px solid rgba(10,132,255,0.4)' : '1px solid #38383a',
+              color: currentScore ? '#0a84ff' : 'rgba(235,235,245,0.60)',
+              fontSize:13, fontWeight:600, cursor:'pointer',
+              fontVariantNumeric:'tabular-nums'
+            }}
+          >
+            ★ {currentScore ? `${currentScore}/10` : t('sub.rate')}
+          </button>
+          {scoreOpen && (
+            <div style={{
+              position:'absolute', top:'calc(100% + 6px)', left:0, zIndex:100,
+              background:'#2c2c2e', border:'1px solid #38383a', borderRadius:10,
+              padding:'8px', display:'flex', gap:4, boxShadow:'0 8px 24px rgba(0,0,0,0.5)'
+            }}>
+              {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                <button key={n} onClick={() => handleScore(n)} style={{
+                  width:30, height:30, borderRadius:6, border:'none', cursor:'pointer',
+                  fontSize:12, fontWeight:700, fontVariantNumeric:'tabular-nums',
+                  background: n === currentScore ? '#0a84ff' : 'rgba(120,120,128,0.12)',
+                  color: n === currentScore ? '#fff' : n <= (currentScore || 0) ? '#0a84ff' : 'rgba(235,235,245,0.60)',
+                  transition:'all 0.15s'
+                }}>{n}</button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

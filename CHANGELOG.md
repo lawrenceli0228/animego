@@ -2,6 +2,76 @@
 
 ---
 
+## [0.7.0] - 2026-04-09
+
+### V3 中文标题自愈系统
+
+Phase 1-3 搜索 Bangumi 时需要日文名精确匹配才取 `name_cn`，导致大量有 `bgmId` 但无中文标题的番剧。V3 阶段直接用 `bgmId` 调 `/v0/subjects/{bgmId}` 获取 `name_cn`，自动补全。
+
+**富化管线扩展：**
+- `fetchBangumiTitleCn(bgmId)` — 直接通过 bgmId 查 Bangumi subject 获取 `name_cn`
+- V3 队列系统 — 与 Phase 1-3 / Phase 4 相同的优先队列架构（`enrichV3Map` + `enrichV3Priority`）
+- Phase 4 完成后自动入队 — `processPhase4Queue` 检测 `titleChinese == null && bgmId` 后自动推入 V3
+- `getAnimeDetail` 缓存命中自愈 — `bangumiVersion === 2 && bgmId && !titleChinese` 时以 priority 入队 V3
+- 已有中文标题的条目 — V3 处理时直接升版本号，不发 API 请求
+
+**管理后台进度监控：**
+- Enrichment Status 进度条新增 v3 (蓝色 `#5ac8fa`) 分段
+- `getQueueStatus()` 返回三个队列实时深度 + V3 批量进度 (`total` / `processed` / `healed` / `paused`)
+- **Heal All 按钮** — `POST /api/admin/enrichment/heal-cn` 批量查找 `bgmId != null && bangumiVersion ∈ [2,3) && titleChinese == null` 并入队
+- **进度条动态显示** — 条纹流动动画（`linear-gradient 135deg` + `background-position` 循环），V3 运行中 2 秒轮询，百分比实时更新
+- **暂停/继续** — `POST heal-cn/pause` / `heal-cn/resume`，暂停时进度条变橙色 + PAUSED 标签
+- `VersionBadge` 颜色区分 — v3+ 蓝色、v2 绿色、v1 橙色、v0 红色
+- **缺中文标题筛选** — `no-cn` filter，管理员可快速定位缺标题的条目
+
+**TanStack Query v5 兼容修复：**
+- `refetchInterval` 回调签名从 `(data)` 修正为 `(query)`，数据通过 `query.state.data` 访问
+- 影响 `useAdminStats`、`useAnimeDetail`、`useSeasonalAnime` 三个 hook
+
+### 季度页 Show More
+
+替换分页为 "显示更多" 按钮，一次请求整季全部数据（`perPage=200`），客户端控制可见数量。
+
+- 初始显示 20 部（4 行 × 5 列），每次点击追加 20 部
+- 全部展示完后按钮自动消失
+- 切换季度/筛选条件时重置为初始数量
+- `useSeasonalAnime` 支持 `perPage` 参数
+
+### SEO 基础设施
+
+SPA 应用对搜索引擎不友好（空 `<div id="root">`），补全 SEO 基础：
+
+**`index.html` 增强：**
+- `<title>` / `<meta description>` / `theme-color` / `canonical`
+- Open Graph + Twitter Card 默认值（首页分享卡片）
+
+**动态 sitemap (`/sitemap.xml`)：**
+- 自动包含所有 AnimeCache 番剧详情页 URL（最多 5000 条）
+- 带 `lastmod`（来自 `cachedAt`）、`changefreq`、`priority`
+- 1 小时内存缓存
+
+**`/robots.txt`：**
+- 允许全站爬取，禁止 `/admin` 和 `/api/`
+- 指向 sitemap
+
+**ogTags 中间件扩展：**
+- 新增匹配 Googlebot / Bingbot / Baiduspider / YandexBot / DuckDuckBot
+- 支持 `/`（首页）、`/season`（季度页）、`/search`（搜索页），不再仅限 `/anime/:id`
+- 统一 `sendOgHtml` 函数，包含 `<meta description>` + `<link rel="canonical">`
+
+**客户端动态 `document.title`：**
+- 详情页：`葬送的芙莉莲 第二季 — AnimeGo`
+- 季度页：`2026年春季新番 — AnimeGo`
+- 离开页面时恢复默认标题
+
+### 提交记录
+
+| Hash | 描述 |
+|------|------|
+| *pending* | feat: V3 中文标题自愈 + 管理后台进度监控 + 季度页 Show More + SEO |
+
+---
+
 ## [0.6.0] - 2026-04-08
 
 ### 香港 VPS 部署上线

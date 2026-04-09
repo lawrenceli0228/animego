@@ -43,7 +43,7 @@ const zh = {
     addToList: '+ 添加到列表',
     watching: '在看', completed: '看完',
     planToWatch: '想看', dropped: '放弃',
-    remove: '移除',
+    remove: '移除', rate: '评分',
     loginToWatch: '登录后追番',
     epUnit: '集',
   },
@@ -177,6 +177,7 @@ const zh = {
     posting: '发布中...', delete: '删除',
     deleteConfirm: '确认删除？',
     tooLong: '评论不能超过500字',
+    cancel: '取消',
   },
   // Admin
   admin: {
@@ -198,6 +199,7 @@ const zh = {
     filterNeedsReview: '需审查',
     filterCorrected: '已修正',
     filterUnenriched: '未富化',
+    filterNoCn: '缺中文标题',
     // Table
     colTitle: '标题',
     colTitleCn: '中文标题',
@@ -220,6 +222,8 @@ const zh = {
     flagFailed: '标记更新失败',
     enrichUpdateSuccess: '富化信息已更新',
     enrichUpdateFailed: '富化信息更新失败',
+    healSuccess: '中文标题自愈已触发',
+    healFailed: '批量自愈触发失败',
     loadError: '加载失败',
     navLabel: '管理后台',
     // User management

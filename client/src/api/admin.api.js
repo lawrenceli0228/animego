@@ -15,6 +15,15 @@ export const resetEnrichment = (anilistId) =>
 export const flagEnrichment = (anilistId, flag) =>
   api.post(`/admin/enrichment/${anilistId}/flag`, { flag })
 
+export const healCnTitles = () =>
+  api.post('/admin/enrichment/heal-cn')
+
+export const pauseHeal = () =>
+  api.post('/admin/enrichment/heal-cn/pause')
+
+export const resumeHeal = () =>
+  api.post('/admin/enrichment/heal-cn/resume')
+
 export const getUserList = (page = 1, q = '') =>
   api.get('/admin/users', { params: { page, q: q || undefined } })
 

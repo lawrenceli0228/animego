@@ -43,7 +43,7 @@ const en = {
     addToList: '+ Add to List',
     watching: 'Watching', completed: 'Completed',
     planToWatch: 'Plan to Watch', dropped: 'Dropped',
-    remove: 'Remove',
+    remove: 'Remove', rate: 'Rate',
     loginToWatch: 'Login to Track',
     epUnit: 'Ep',
   },
@@ -177,6 +177,7 @@ const en = {
     posting: 'Posting...', delete: 'Delete',
     deleteConfirm: 'Delete this comment?',
     tooLong: 'Comment cannot exceed 500 characters',
+    cancel: 'Cancel',
   },
   // Admin
   admin: {
@@ -198,6 +199,7 @@ const en = {
     filterNeedsReview: 'Needs Review',
     filterCorrected: 'Corrected',
     filterUnenriched: 'Unenriched',
+    filterNoCn: 'Missing CN Title',
     // Table
     colTitle: 'Title',
     colTitleCn: 'Chinese Title',
@@ -220,6 +222,8 @@ const en = {
     flagFailed: 'Flag update failed',
     enrichUpdateSuccess: 'Enrichment updated',
     enrichUpdateFailed: 'Enrichment update failed',
+    healSuccess: 'CN title heal triggered',
+    healFailed: 'Batch heal trigger failed',
     loadError: 'Failed to load',
     navLabel: 'Admin',
     // User management

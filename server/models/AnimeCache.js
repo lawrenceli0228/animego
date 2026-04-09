@@ -18,7 +18,7 @@ const animeCacheSchema = new mongoose.Schema({
   cachedAt:       { type: Date, default: Date.now },
   // Phase 4 AniList fields
   studios:         [String],
-  relations:       [{ anilistId: Number, relationType: String, title: String }],
+  relations:       [{ anilistId: Number, relationType: String, title: String, coverImageUrl: String, format: String }],
   startDate:       { year: Number, month: Number, day: Number },
   duration:        Number,
   source:          String,

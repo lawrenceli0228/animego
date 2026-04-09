@@ -11,7 +11,7 @@ const AnimeCache = require('../models/AnimeCache')
 const User = require('../models/User')
 const Subscription = require('../models/Subscription')
 const Follow = require('../models/Follow')
-const { enqueueEnrichment } = require('../services/bangumi.service')
+const { enqueueEnrichment, getQueueStatus } = require('../services/bangumi.service')
 const adminAuth = require('../middleware/adminAuth')
 const ctrl = require('../controllers/admin.controller')
 
@@ -62,16 +62,20 @@ describe('GET /api/admin/stats', () => {
       .mockResolvedValueOnce(100) // total anime
       .mockResolvedValueOnce(10)  // v0
       .mockResolvedValueOnce(20)  // v1
-      .mockResolvedValueOnce(70)  // v2
+      .mockResolvedValueOnce(50)  // v2
+      .mockResolvedValueOnce(20)  // v3
+      .mockResolvedValueOnce(8)   // noCn
       .mockResolvedValueOnce(3)   // flagged
     Subscription.countDocuments = jest.fn().mockResolvedValue(50)
     Follow.countDocuments = jest.fn().mockResolvedValue(12)
+    getQueueStatus.mockReturnValue({ phase1: 0, phase4: 2, v3: 1 })
 
     const res = await request(app).get('/api/admin/stats')
     expect(res.status).toBe(200)
     expect(res.body.data.users).toBe(5)
     expect(res.body.data.anime).toBe(100)
-    expect(res.body.data.enrichment).toEqual({ v0: 10, v1: 20, v2: 70 })
+    expect(res.body.data.enrichment).toEqual({ v0: 10, v1: 20, v2: 50, v3: 20, noCn: 8 })
+    expect(res.body.data.queue).toEqual({ phase1: 0, phase4: 2, v3: 1 })
     expect(res.body.data.flagged).toBe(3)
     expect(res.body.data.subscriptions).toBe(50)
     expect(res.body.data.follows).toBe(12)
@@ -134,8 +138,10 @@ describe('GET /api/admin/enrichment', () => {
     mockFind()
     await request(app).get('/api/admin/enrichment?filter=unenriched&q=test')
     const calledFilter = AnimeCache.find.mock.calls[0][0]
-    expect(calledFilter.bangumiVersion).toBe(0)
-    expect(calledFilter.$or).toBeDefined()
+    expect(calledFilter.$and).toBeDefined()
+    expect(calledFilter.$and).toHaveLength(2)
+    expect(calledFilter.$and[0].bangumiVersion).toBe(0)
+    expect(calledFilter.$and[1].$or).toBeDefined()
   })
 })
 

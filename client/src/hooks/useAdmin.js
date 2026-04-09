@@ -1,13 +1,22 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { getAdminStats, getEnrichmentList, updateEnrichment, resetEnrichment, flagEnrichment, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
+import { getAdminStats, getEnrichmentList, updateEnrichment, resetEnrichment, flagEnrichment, healCnTitles, pauseHeal, resumeHeal, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
 import { useLang } from '../context/LanguageContext'
 
 export function useAdminStats() {
   return useQuery({
     queryKey: ['admin', 'stats'],
     queryFn: () => getAdminStats().then(r => r.data.data),
-    staleTime: 60 * 1000,
+    staleTime: 10 * 1000,
+    refetchInterval: (query) => {
+      const stats = query?.state?.data
+      const q = stats?.queue
+      if (!q) return false
+      const prog = q.v3Progress
+      if (prog && prog.total > 0 && prog.processed < prog.total && !prog.paused) return 2000
+      if (q.phase1 + q.phase4 + q.v3 > 0) return 5000
+      return false
+    },
     retry: false,
   })
 }
@@ -60,6 +69,36 @@ export function useFlagEnrichment() {
       toast.success(t('admin.flagSuccess'))
     },
     onError: () => toast.error(t('admin.flagFailed')),
+  })
+}
+
+export function useHealCnTitles() {
+  const queryClient = useQueryClient()
+  const { t } = useLang()
+  return useMutation({
+    mutationFn: () => healCnTitles(),
+    onSuccess: (res) => {
+      const count = res.data?.data?.enqueued ?? 0
+      queryClient.invalidateQueries({ queryKey: ['admin'] })
+      toast.success(`${t('admin.healSuccess')} (${count})`)
+    },
+    onError: () => toast.error(t('admin.healFailed')),
+  })
+}
+
+export function usePauseHeal() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => pauseHeal(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] }),
+  })
+}
+
+export function useResumeHeal() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => resumeHeal(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] }),
   })
 }
 

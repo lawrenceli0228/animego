@@ -1,12 +1,14 @@
 const EpisodeComment = require('../models/EpisodeComment');
 
 // GET /api/comments/:anilistId/:episode
+// Returns flat list; client builds the tree.
+// Top-level comments (parentId=null) sorted newest-first; replies sorted oldest-first.
 exports.getComments = async (req, res, next) => {
   try {
     const { anilistId, episode } = req.params;
     const comments = await EpisodeComment
       .find({ anilistId: Number(anilistId), episode: Number(episode) })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .lean();
     res.json({ data: comments });
   } catch (err) { next(err); }
@@ -23,12 +25,24 @@ exports.addComment = async (req, res, next) => {
     if (content.trim().length > 500) {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Content too long' } });
     }
+    const { parentId, replyToUsername } = req.body;
+
+    // Validate parentId if provided
+    if (parentId) {
+      const parent = await EpisodeComment.findById(parentId).lean();
+      if (!parent) {
+        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Parent comment not found' } });
+      }
+    }
+
     const comment = await EpisodeComment.create({
       anilistId: Number(anilistId),
       episode:   Number(episode),
       userId:    req.user.userId,
       username:  req.user.username,
       content:   content.trim(),
+      parentId:  parentId || null,
+      replyToUsername: replyToUsername || null,
     });
     res.status(201).json({ data: comment });
   } catch (err) { next(err); }

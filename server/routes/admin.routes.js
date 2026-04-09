@@ -9,6 +9,9 @@ router.use(authenticateToken, adminAuth);
 router.get('/stats',                   ctrl.getStats);
 router.get('/enrichment',              ctrl.listEnrichment);
 router.patch('/enrichment/:anilistId',        ctrl.updateEnrichment);
+router.post('/enrichment/heal-cn',              ctrl.healCnTitles);
+router.post('/enrichment/heal-cn/pause',        ctrl.pauseHeal);
+router.post('/enrichment/heal-cn/resume',       ctrl.resumeHeal);
 router.post('/enrichment/:anilistId/reset', ctrl.resetEnrichment);
 router.post('/enrichment/:anilistId/flag',  ctrl.flagEnrichment);
 

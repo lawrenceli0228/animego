@@ -3,7 +3,7 @@ const { SEASONAL_ANIME_QUERY }  = require('../queries/seasonalAnime.graphql');
 const { SEARCH_ANIME_QUERY }    = require('../queries/searchAnime.graphql');
 const { ANIME_DETAIL_QUERY }    = require('../queries/animeDetail.graphql');
 const { WEEKLY_SCHEDULE_QUERY } = require('../queries/weeklySchedule.graphql');
-const { enqueueEnrichment, enqueuePhase4Enrichment } = require('./bangumi.service');
+const { enqueueEnrichment, enqueuePhase4Enrichment, enqueueV3Enrichment } = require('./bangumi.service');
 
 const ANILIST_URL   = 'https://graphql.anilist.co';
 const CACHE_TTL_MS  = (parseInt(process.env.CACHE_TTL_HOURS) || 24) * 60 * 60 * 1000;
@@ -62,9 +62,11 @@ function normalize(m) {
   if (m.duration != null) base.duration = m.duration;
   if (m.source)    base.source    = m.source;
   if (m.relations) base.relations = m.relations.edges.map(e => ({
-    anilistId:    e.node.id,
-    relationType: e.relationType,
-    title:        e.node.title?.romaji || e.node.title?.native,
+    anilistId:     e.node.id,
+    relationType:  e.relationType,
+    title:         e.node.title?.romaji || e.node.title?.native,
+    coverImageUrl: e.node.coverImage?.large ?? null,
+    format:        e.node.format ?? null,
   }));
   if (m.characters) base.characters = m.characters.edges.map(e => ({
     nameEn:             e.node.name?.full              ?? null,
@@ -289,7 +291,8 @@ async function getAnimeDetail(anilistId) {
     Date.now() - cached.cachedAt.getTime() >= CACHE_TTL_MS ||
     cached.studios === undefined ||
     !cached.characters?.length ||
-    (cached.characters?.length > 0 && cached.characters[0].role === undefined);
+    (cached.characters?.length > 0 && cached.characters[0].role === undefined) ||
+    (cached.relations?.length > 0 && !cached.relations[0].coverImageUrl);
   if (!stale) {
     if (!cached.bangumiVersion) enqueueEnrichment([cached], true);           // Phase 1-3 (priority)
     else if (cached.bangumiVersion === 1 && cached.bgmId) enqueuePhase4Enrichment([cached], true); // Phase 4 (priority)
@@ -302,6 +305,9 @@ async function getAnimeDetail(anilistId) {
     }
     else if (cached.bangumiVersion >= 2 && cached.bgmId && cached.characters?.length > 0 && !cached.characters[0]?.nameCn) {
       enqueuePhase4Enrichment([cached], true); // Re-run to fill character Chinese names (priority)
+    }
+    else if (cached.bangumiVersion === 2 && cached.bgmId && !cached.titleChinese) {
+      enqueueV3Enrichment([cached], true); // V3: 中文标题自愈 (priority)
     }
     return cached;
   }
