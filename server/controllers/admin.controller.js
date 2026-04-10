@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Subscription = require('../models/Subscription');
 const Follow = require('../models/Follow');
 const { enqueueEnrichment, enqueueV3Enrichment, getQueueStatus, startV3Batch, pauseV3, resumeV3 } = require('../services/bangumi.service');
+const { warmAllSeasons } = require('../services/anilist.service');
 
 // GET /api/admin/stats
 exports.getStats = async (req, res, next) => {
@@ -334,5 +335,17 @@ exports.deleteUser = async (req, res, next) => {
 
     console.log(`[Admin] ${req.user.username} deleted user ${user.username}`);
     res.json({ data: { deleted: true, username: user.username } });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/warm-all?startYear=2014
+exports.warmAll = async (req, res, next) => {
+  try {
+    const startYear = parseInt(req.query.startYear) || 2014;
+    res.json({ data: { message: `Warming all seasons from ${startYear}. Check server logs.` } });
+    // Run in background after response is sent
+    warmAllSeasons(startYear).catch(err =>
+      console.error('❌ warmAllSeasons error:', err.message)
+    );
   } catch (err) { next(err); }
 };

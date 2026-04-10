@@ -15,6 +15,7 @@ router.post('/enrichment/heal-cn/resume',       ctrl.resumeHeal);
 router.post('/enrichment/:anilistId/reset', ctrl.resetEnrichment);
 router.post('/enrichment/:anilistId/flag',  ctrl.flagEnrichment);
 
+router.post('/warm-all',               ctrl.warmAll);
 router.get('/users',                   ctrl.listUsers);
 router.post('/users',                  ctrl.createUser);
 router.patch('/users/:userId',         ctrl.updateUser);
