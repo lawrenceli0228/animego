@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { getAdminStats, getEnrichmentList, updateEnrichment, resetEnrichment, flagEnrichment, healCnTitles, pauseHeal, resumeHeal, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
+import { getAdminStats, getEnrichmentList, updateEnrichment, resetEnrichment, flagEnrichment, reEnrich, healCnTitles, pauseHeal, resumeHeal, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
 import { useLang } from '../context/LanguageContext'
 
 export function useAdminStats() {
@@ -69,6 +69,22 @@ export function useFlagEnrichment() {
       toast.success(t('admin.flagSuccess'))
     },
     onError: () => toast.error(t('admin.flagFailed')),
+  })
+}
+
+export function useReEnrich() {
+  const queryClient = useQueryClient()
+  const { t } = useLang()
+  return useMutation({
+    mutationFn: (version) => reEnrich(version),
+    onSuccess: (res) => {
+      const { enqueued, version } = res.data?.data ?? {}
+      queryClient.invalidateQueries({ queryKey: ['admin'] })
+      toast.success(`v${version} re-enrich: ${enqueued} enqueued`)
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.error?.message || t('admin.healFailed'))
+    },
   })
 }
 

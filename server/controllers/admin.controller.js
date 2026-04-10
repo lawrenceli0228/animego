@@ -2,7 +2,7 @@ const AnimeCache = require('../models/AnimeCache');
 const User = require('../models/User');
 const Subscription = require('../models/Subscription');
 const Follow = require('../models/Follow');
-const { enqueueEnrichment, enqueueV3Enrichment, getQueueStatus, startV3Batch, pauseV3, resumeV3 } = require('../services/bangumi.service');
+const { enqueueEnrichment, enqueuePhase4Enrichment, enqueueV3Enrichment, getQueueStatus, startV3Batch, pauseV3, resumeV3 } = require('../services/bangumi.service');
 const { warmAllSeasons } = require('../services/anilist.service');
 
 // GET /api/admin/stats
@@ -188,6 +188,40 @@ exports.updateEnrichment = async (req, res, next) => {
 
     console.log(`[Admin] ${req.user.username} updated enrichment for anilistId=${anilistId}:`, updates);
     res.json({ data: doc });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/enrichment/re-enrich — 批量重新富化指定版本
+exports.reEnrich = async (req, res, next) => {
+  try {
+    const version = parseInt(req.query.version);
+    if (![0, 1, 2].includes(version)) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '版本必须为 0、1 或 2' } });
+    }
+
+    const filter = version === 0
+      ? { $or: [{ bangumiVersion: 0 }, { bangumiVersion: { $exists: false } }] }
+      : { bangumiVersion: version };
+
+    const docs = await AnimeCache.find(filter, {
+      anilistId: 1, titleNative: 1, titleRomaji: 1, bgmId: 1, bangumiVersion: 1,
+    }).lean();
+
+    if (docs.length === 0) {
+      return res.json({ data: { enqueued: 0, version } });
+    }
+
+    if (version <= 0) {
+      enqueueEnrichment(docs.map(d => ({ ...d, bangumiVersion: 0 })));
+    } else if (version === 1) {
+      enqueuePhase4Enrichment(docs);
+    } else {
+      enqueueV3Enrichment(docs);
+      startV3Batch(docs.length);
+    }
+
+    console.log(`[Admin] ${req.user.username} triggered re-enrich v${version} for ${docs.length} anime`);
+    res.json({ data: { enqueued: docs.length, version } });
   } catch (err) { next(err); }
 };
 

@@ -15,6 +15,9 @@ export const resetEnrichment = (anilistId) =>
 export const flagEnrichment = (anilistId, flag) =>
   api.post(`/admin/enrichment/${anilistId}/flag`, { flag })
 
+export const reEnrich = (version) =>
+  api.post('/admin/enrichment/re-enrich', null, { params: { version } })
+
 export const healCnTitles = () =>
   api.post('/admin/enrichment/heal-cn')
 
