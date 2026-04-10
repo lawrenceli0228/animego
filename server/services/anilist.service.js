@@ -212,7 +212,6 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   const pageNum    = parseInt(page);
   const perPageNum = parseInt(perPage);
   const yearNum    = parseInt(year);
-  const freshSince = new Date(Date.now() - CACHE_TTL_MS);
   const key        = `${season}-${yearNum}`;
 
   const { warmed, total } = getWarmStatus(season, yearNum);
@@ -221,7 +220,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   if (warmed) {
     const skip  = (pageNum - 1) * perPageNum;
     const anime = await AnimeCache.find({
-      season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+      season, seasonYear: yearNum,
       genres: { $nin: ['Hentai'] }
     })
       .sort({ averageScore: -1 })
