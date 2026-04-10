@@ -13,7 +13,7 @@ const MIN_INTERVAL  = 700; // ms between AniList requests ≈ 85 req/min
 // ─── Rate-limit outgoing AniList requests ────────────────────────────────────
 let lastRequestTime = 0;
 
-async function queryAniList(query, variables) {
+async function queryAniList(query, variables, _retries = 0) {
   const wait = MIN_INTERVAL - (Date.now() - lastRequestTime);
   if (wait > 0) await new Promise(r => setTimeout(r, wait));
   lastRequestTime = Date.now();
@@ -24,12 +24,18 @@ async function queryAniList(query, variables) {
     body:    JSON.stringify({ query, variables })
   });
 
+  if (res.status === 429) {
+    if (_retries >= 3) {
+      throw Object.assign(new Error('AniList 请求过于频繁，请稍后再试'), { status: 429 });
+    }
+    const retryAfter = parseInt(res.headers.get('retry-after')) || 60;
+    console.log(`⏳ AniList 429 — waiting ${retryAfter}s before retry ${_retries + 1}/3`);
+    await new Promise(r => setTimeout(r, retryAfter * 1000));
+    return queryAniList(query, variables, _retries + 1);
+  }
+
   if (!res.ok) {
-    const status = res.status === 429 ? 429 : 502;
-    throw Object.assign(
-      new Error(res.status === 429 ? 'AniList 请求过于频繁，请稍后再试' : `AniList API error: ${res.status}`),
-      { status }
-    );
+    throw Object.assign(new Error(`AniList API error: ${res.status}`), { status: 502 });
   }
 
   const { data, errors } = await res.json();
@@ -167,35 +173,29 @@ async function warmCurrentSeason() {
 
 // Warm ALL seasons from startYear to now (one-time backfill)
 const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
+let warmAllRunning = false;
 async function warmAllSeasons(startYear = 2014) {
-  const { season: curSeason, year: curYear } = getCurrentSeasonInfo();
-  const curIdx = SEASONS.indexOf(curSeason);
-  let failed = 0;
-  for (let y = startYear; y <= curYear; y++) {
-    for (let s = 0; s < SEASONS.length; s++) {
-      if (y === curYear && s > curIdx) break;
-      const key = `${SEASONS[s]}-${y}`;
-      if (warmedSeasons.has(key)) continue;
+  if (warmAllRunning) { console.log('⚠️ warmAllSeasons already running, skipping'); return; }
+  warmAllRunning = true;
+  try {
+    const { season: curSeason, year: curYear } = getCurrentSeasonInfo();
+    const curIdx = SEASONS.indexOf(curSeason);
+    let warmed = 0, skipped = 0;
+    for (let y = startYear; y <= curYear; y++) {
+      for (let s = 0; s < SEASONS.length; s++) {
+        if (y === curYear && s > curIdx) break;
+        const key = `${SEASONS[s]}-${y}`;
+        if (warmedSeasons.has(key)) { skipped++; continue; }
 
-      // Retry up to 3 times with increasing backoff on failure (429)
-      for (let attempt = 0; attempt < 3; attempt++) {
         await warmSeasonCache(SEASONS[s], y);
-        if (warmedSeasons.has(key)) break; // success
-        const backoff = 60_000 * (attempt + 1); // 60s, 120s, 180s
-        console.log(`⏳ warmAllSeasons: ${key} attempt ${attempt + 1} failed, retrying in ${backoff / 1000}s...`);
-        await new Promise(r => setTimeout(r, backoff));
-      }
+        if (warmedSeasons.has(key)) warmed++;
 
-      if (!warmedSeasons.has(key)) {
-        failed++;
-        console.error(`❌ warmAllSeasons: ${key} failed after 3 attempts, skipping`);
+        // 10s cooldown between seasons to stay within AniList rate limits
+        await new Promise(r => setTimeout(r, 10_000));
       }
-
-      // Inter-season cooldown to stay within AniList rate limits
-      await new Promise(r => setTimeout(r, 5000));
     }
-  }
-  console.log(`✅ warmAllSeasons complete (${failed} seasons failed)`);
+    console.log(`✅ warmAllSeasons complete (${warmed} warmed, ${skipped} already cached)`);
+  } finally { warmAllRunning = false; }
 }
 
 // ─── Seasonal anime ───────────────────────────────────────────────────────────
