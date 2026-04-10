@@ -172,6 +172,16 @@ async function warmCurrentSeason() {
   const { season, year } = getCurrentSeasonInfo();
   await warmSeasonCache(season, year);
 
+  // Re-enqueue orphaned v0 entries (enrichment interrupted by previous restart)
+  const orphans = await AnimeCache.find(
+    { $or: [{ bangumiVersion: 0 }, { bangumiVersion: { $exists: false } }] },
+    { anilistId: 1, titleNative: 1, titleRomaji: 1, bangumiVersion: 1 }
+  ).lean();
+  if (orphans.length > 0) {
+    enqueueEnrichment(orphans);
+    console.log(`🔧 Re-enqueued ${orphans.length} orphaned v0 entries for enrichment`);
+  }
+
   // Every 24h: re-warm current year + next season (covers upcoming new anime)
   setInterval(() => {
     const cur = getCurrentSeasonInfo();
