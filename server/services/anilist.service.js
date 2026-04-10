@@ -166,33 +166,38 @@ function getCurrentSeasonInfo() {
   return { season: 'FALL', year };
 }
 
+const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
+
 async function warmCurrentSeason() {
   const { season, year } = getCurrentSeasonInfo();
   await warmSeasonCache(season, year);
 
-  // Every 24h: re-warm all seasons of current year (picks up new anime + handles season transitions)
+  // Every 24h: re-warm current year + next season (covers upcoming new anime)
   setInterval(() => {
     const cur = getCurrentSeasonInfo();
-    console.log(`🔄 Scheduled re-warm: ${cur.year} all seasons`);
-    warmAllSeasons(cur.year).catch(err =>
+    const curIdx = SEASONS.indexOf(cur.season);
+    const nextIdx = (curIdx + 1) % SEASONS.length;
+    const nextYear = nextIdx === 0 ? cur.year + 1 : cur.year;
+    console.log(`🔄 Scheduled re-warm: ${cur.year} → ${SEASONS[nextIdx]} ${nextYear}`);
+    warmAllSeasons(cur.year, { endSeason: SEASONS[nextIdx], endYear: nextYear }).catch(err =>
       console.error('❌ Scheduled warm failed:', err.message)
     );
   }, 24 * 60 * 60 * 1000);
 }
 
-// Warm ALL seasons from startYear to now (one-time backfill)
-const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
+// Warm seasons from startYear up to endSeason/endYear (inclusive)
 let warmAllRunning = false;
-async function warmAllSeasons(startYear = 2014) {
+async function warmAllSeasons(startYear = 2014, { endSeason, endYear } = {}) {
   if (warmAllRunning) { console.log('⚠️ warmAllSeasons already running, skipping'); return; }
   warmAllRunning = true;
   try {
-    const { season: curSeason, year: curYear } = getCurrentSeasonInfo();
-    const curIdx = SEASONS.indexOf(curSeason);
+    const cur = getCurrentSeasonInfo();
+    const limitYear   = endYear   ?? cur.year;
+    const limitIdx    = endSeason ? SEASONS.indexOf(endSeason) : SEASONS.indexOf(cur.season);
     let warmed = 0, skipped = 0;
-    for (let y = startYear; y <= curYear; y++) {
+    for (let y = startYear; y <= limitYear; y++) {
       for (let s = 0; s < SEASONS.length; s++) {
-        if (y === curYear && s > curIdx) break;
+        if (y === limitYear && s > limitIdx) break;
         const key = `${SEASONS[s]}-${y}`;
         if (warmedSeasons.has(key)) { skipped++; continue; }
 
