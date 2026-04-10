@@ -266,12 +266,14 @@ export default function AdminDashboard() {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({ username: '', email: '' })
   const [deleteConfirm, setDeleteConfirm] = useState(null)
-  // Enrichment editing state
+  // Enrichment sorting + editing state
+  const [sortField, setSortField] = useState('')
+  const [sortOrder, setSortOrder] = useState('')
   const [enrichEditId, setEnrichEditId] = useState(null)
   const [enrichEditForm, setEnrichEditForm] = useState({ titleChinese: '', bgmId: '', bangumiScore: '' })
 
   const { data: stats } = useAdminStats()
-  const { data, isLoading, isError } = useEnrichmentList(page, filter, searchQuery)
+  const { data, isLoading, isError } = useEnrichmentList(page, filter, searchQuery, sortField, sortOrder)
   const enrichUpdateMut = useUpdateEnrichment()
   const resetMut = useResetEnrichment()
   const flagMut = useFlagEnrichment()
@@ -286,6 +288,16 @@ export default function AdminDashboard() {
 
   if (!user || user.role !== 'admin') return <Navigate to="/" replace />
 
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortOrder(field === 'bangumiVersion' || field === 'bangumiScore' ? 'desc' : 'asc')
+    }
+    setPage(1)
+  }
+  const sortIndicator = (field) => sortField === field ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''
   const handleFilter = (f) => { setFilter(f); setPage(1) }
   const handleSearch = (e) => {
     e.preventDefault()
@@ -393,12 +405,12 @@ export default function AdminDashboard() {
             <table style={S.table}>
               <thead>
                 <tr>
-                  <th style={S.th}>AniList ID</th>
-                  <th style={S.th}>{t('admin.colTitle')}</th>
-                  <th style={S.th}>{t('admin.colTitleCn')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('anilistId')}>AniList ID{sortIndicator('anilistId')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('titleRomaji')}>{t('admin.colTitle')}{sortIndicator('titleRomaji')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('titleChinese')}>{t('admin.colTitleCn')}{sortIndicator('titleChinese')}</th>
                   <th style={S.th}>BGM ID</th>
-                  <th style={S.th}>{t('admin.colVersion')}</th>
-                  <th style={S.th}>{t('admin.colScore')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('bangumiVersion')}>{t('admin.colVersion')}{sortIndicator('bangumiVersion')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('bangumiScore')}>{t('admin.colScore')}{sortIndicator('bangumiScore')}</th>
                   <th style={S.th}>{t('admin.colFlag')}</th>
                   <th style={S.th}>{t('admin.colActions')}</th>
                 </tr>

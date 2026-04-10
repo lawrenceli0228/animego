@@ -3,8 +3,8 @@ import api from './axiosClient'
 export const getAdminStats = () =>
   api.get('/admin/stats')
 
-export const getEnrichmentList = (page = 1, filter = '', q = '') =>
-  api.get('/admin/enrichment', { params: { page, filter: filter || undefined, q: q || undefined } })
+export const getEnrichmentList = (page = 1, filter = '', q = '', sort = '', order = '') =>
+  api.get('/admin/enrichment', { params: { page, filter: filter || undefined, q: q || undefined, sort: sort || undefined, order: order || undefined } })
 
 export const updateEnrichment = (anilistId, data) =>
   api.patch(`/admin/enrichment/${anilistId}`, data)

@@ -75,10 +75,16 @@ exports.listEnrichment = async (req, res, next) => {
 
     const filter = conditions.length > 0 ? (conditions.length === 1 ? conditions[0] : { $and: conditions }) : {};
 
+    // Sorting: ?sort=titleChinese&order=asc
+    const sortField = req.query.sort || 'cachedAt';
+    const sortOrder = req.query.order === 'asc' ? 1 : -1;
+    const allowedSorts = ['cachedAt', 'titleChinese', 'titleRomaji', 'bangumiVersion', 'bangumiScore', 'anilistId'];
+    const sortKey = allowedSorts.includes(sortField) ? sortField : 'cachedAt';
+
     const [items, total] = await Promise.all([
       AnimeCache.find(filter)
         .select('anilistId titleRomaji titleChinese bgmId bangumiVersion bangumiScore adminFlag')
-        .sort({ cachedAt: -1 })
+        .sort({ [sortKey]: sortOrder })
         .skip(skip)
         .limit(limit)
         .lean(),

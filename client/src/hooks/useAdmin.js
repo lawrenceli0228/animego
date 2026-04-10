@@ -21,10 +21,10 @@ export function useAdminStats() {
   })
 }
 
-export function useEnrichmentList(page, filter, q) {
+export function useEnrichmentList(page, filter, q, sort, order) {
   return useQuery({
-    queryKey: ['admin', 'enrichment', page, filter, q],
-    queryFn: () => getEnrichmentList(page, filter, q).then(r => r.data),
+    queryKey: ['admin', 'enrichment', page, filter, q, sort, order],
+    queryFn: () => getEnrichmentList(page, filter, q, sort, order).then(r => r.data),
     staleTime: 30 * 1000,
     retry: false,
   })
