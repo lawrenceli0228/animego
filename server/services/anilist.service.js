@@ -169,6 +169,15 @@ function getCurrentSeasonInfo() {
 async function warmCurrentSeason() {
   const { season, year } = getCurrentSeasonInfo();
   await warmSeasonCache(season, year);
+
+  // Re-warm current season every 24h to pick up newly added anime
+  setInterval(() => {
+    const cur = getCurrentSeasonInfo();
+    console.log(`🔄 Scheduled re-warm: ${cur.season} ${cur.year}`);
+    warmSeasonCache(cur.season, cur.year).catch(err =>
+      console.error('❌ Scheduled warm failed:', err.message)
+    );
+  }, 24 * 60 * 60 * 1000);
 }
 
 // Warm ALL seasons from startYear to now (one-time backfill)

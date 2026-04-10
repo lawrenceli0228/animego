@@ -102,10 +102,9 @@ const PORT = process.env.PORT || 5001;
   server.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 
-    // Pre-populate current season, then backfill all historical seasons
-    const { warmCurrentSeason, warmAllSeasons } = require('./services/anilist.service');
+    // Pre-populate current season + schedule 24h re-warm
+    const { warmCurrentSeason } = require('./services/anilist.service');
     warmCurrentSeason()
-      .then(() => warmAllSeasons(2014))
       .catch(err => console.error('❌ Season warm failed:', err.message));
   });
 })();
