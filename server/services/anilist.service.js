@@ -170,19 +170,32 @@ const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
 async function warmAllSeasons(startYear = 2014) {
   const { season: curSeason, year: curYear } = getCurrentSeasonInfo();
   const curIdx = SEASONS.indexOf(curSeason);
+  let failed = 0;
   for (let y = startYear; y <= curYear; y++) {
     for (let s = 0; s < SEASONS.length; s++) {
-      if (y === curYear && s > curIdx) break; // don't warm future seasons
+      if (y === curYear && s > curIdx) break;
       const key = `${SEASONS[s]}-${y}`;
       if (warmedSeasons.has(key)) continue;
-      try {
+
+      // Retry up to 3 times with increasing backoff on failure (429)
+      for (let attempt = 0; attempt < 3; attempt++) {
         await warmSeasonCache(SEASONS[s], y);
-      } catch (err) {
-        console.error(`❌ warmAllSeasons: ${key} failed:`, err.message);
+        if (warmedSeasons.has(key)) break; // success
+        const backoff = 60_000 * (attempt + 1); // 60s, 120s, 180s
+        console.log(`⏳ warmAllSeasons: ${key} attempt ${attempt + 1} failed, retrying in ${backoff / 1000}s...`);
+        await new Promise(r => setTimeout(r, backoff));
       }
+
+      if (!warmedSeasons.has(key)) {
+        failed++;
+        console.error(`❌ warmAllSeasons: ${key} failed after 3 attempts, skipping`);
+      }
+
+      // Inter-season cooldown to stay within AniList rate limits
+      await new Promise(r => setTimeout(r, 5000));
     }
   }
-  console.log('✅ All historical seasons warmed');
+  console.log(`✅ warmAllSeasons complete (${failed} seasons failed)`);
 }
 
 // ─── Seasonal anime ───────────────────────────────────────────────────────────
