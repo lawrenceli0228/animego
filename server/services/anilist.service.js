@@ -204,16 +204,18 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
     warmSeasonCache(season, yearNum).catch(() => {});
   }
 
-  // ③ Serve partial MongoDB data while warming (avoids waiting)
+  // ③ Serve cached MongoDB data while warming (avoids waiting)
+  //    No cachedAt filter — stale data is better than missing data;
+  //    the background warm (②) will refresh it.
   const totalCached = await AnimeCache.countDocuments({
-    season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+    season, seasonYear: yearNum,
     genres: { $nin: ['Hentai'] }
   });
 
   if (totalCached > 0) {
     const skip  = (pageNum - 1) * perPageNum;
     const anime = await AnimeCache.find({
-      season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+      season, seasonYear: yearNum,
       genres: { $nin: ['Hentai'] }
     })
       .sort({ averageScore: -1 })
