@@ -109,7 +109,7 @@ exports.getYearlyTop = async (req, res, next) => {
 exports.getSeasonal = async (req, res, next) => {
   try {
     const { season = 'WINTER', year = new Date().getFullYear(), page = 1, perPage = 20 } = req.query;
-    const result = await anilistService.getSeasonalAnime(season, year, page, Math.min(perPage, 50));
+    const result = await anilistService.getSeasonalAnime(season, year, page, Math.min(perPage, 200));
     res.json({
       data: result.anime,
       pagination: {

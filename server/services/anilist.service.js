@@ -238,8 +238,9 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   }
 
   // ④ Cold start (nothing cached yet) → fetch page directly, background warm continues
+  const anilistPerPage = Math.min(perPageNum, 50); // AniList API caps at 50
   const data      = await queryAniList(SEASONAL_ANIME_QUERY, {
-    season, seasonYear: yearNum, page: pageNum, perPage: perPageNum
+    season, seasonYear: yearNum, page: pageNum, perPage: anilistPerPage
   });
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
