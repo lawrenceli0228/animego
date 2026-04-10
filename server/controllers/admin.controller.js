@@ -222,8 +222,19 @@ exports.reEnrich = async (req, res, next) => {
     } else if (version === 1) {
       enqueuePhase4Enrichment(docs);
     } else {
-      enqueueV3Enrichment(docs);
-      startV3Batch(docs.length);
+      // v2: entries without bgmId can't be V3-healed — promote directly to v3
+      const withBgm = docs.filter(d => d.bgmId);
+      const noBgmIds = docs.filter(d => !d.bgmId).map(d => d.anilistId);
+      if (noBgmIds.length > 0) {
+        await AnimeCache.updateMany(
+          { anilistId: { $in: noBgmIds } },
+          { $set: { bangumiVersion: 3 } }
+        );
+      }
+      if (withBgm.length > 0) {
+        enqueueV3Enrichment(withBgm);
+        startV3Batch(withBgm.length);
+      }
     }
 
     console.log(`[Admin] ${req.user.username} triggered re-enrich v${version} for ${docs.length} anime`);
