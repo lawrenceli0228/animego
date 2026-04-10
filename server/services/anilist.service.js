@@ -187,6 +187,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
       .limit(perPageNum)
       .lean();
 
+    console.log(`[seasonal] PATH ① warmed ${key} → ${anime.length} items, cn=${anime.filter(a => a.titleChinese).length}`);
     return {
       pageInfo: {
         total,
@@ -226,6 +227,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
     if (anime.length > 0) {
       const unenriched = anime.filter(a => !a.bangumiVersion);
       if (unenriched.length) enqueueEnrichment(unenriched);
+      console.log(`[seasonal] PATH ③ cached ${key} → ${anime.length} items, cn=${anime.filter(a => a.titleChinese).length}, unenriched=${unenriched.length}`);
       return {
         pageInfo: {
           total:       totalCached,
@@ -240,6 +242,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   }
 
   // ④ Cold start (nothing cached yet) → fetch page directly, background warm continues
+  console.log(`[seasonal] PATH ④ cold start ${key} — totalCached=${totalCached}`);
   const anilistPerPage = Math.min(perPageNum, 50); // AniList API caps at 50
   const data      = await queryAniList(SEASONAL_ANIME_QUERY, {
     season, seasonYear: yearNum, page: pageNum, perPage: anilistPerPage
@@ -254,6 +257,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   const anime = await AnimeCache.find({ anilistId: { $in: ids } })
     .sort({ averageScore: -1 })
     .lean();
+  console.log(`[seasonal] PATH ④ result ${key} → ${anime.length} items, cn=${anime.filter(a => a.titleChinese).length}`);
   return { pageInfo: data.Page.pageInfo, anime };
 }
 
