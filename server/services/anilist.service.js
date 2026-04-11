@@ -462,8 +462,10 @@ async function getWeeklySchedule() {
   return result;
 }
 
+function clearScheduleCache() { scheduleCache.clear(); }
+
 module.exports = {
   getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule,
   warmSeasonCache, warmCurrentSeason, warmAllSeasons,
-  upsertCache, normalize
+  upsertCache, normalize, clearScheduleCache
 };

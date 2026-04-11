@@ -3,7 +3,7 @@ const User = require('../models/User');
 const Subscription = require('../models/Subscription');
 const Follow = require('../models/Follow');
 const { enqueueEnrichment, enqueuePhase4Enrichment, enqueueV3Enrichment, getQueueStatus, startV3Batch, pauseV3, resumeV3 } = require('../services/bangumi.service');
-const { warmAllSeasons } = require('../services/anilist.service');
+const { warmAllSeasons, clearScheduleCache } = require('../services/anilist.service');
 
 // GET /api/admin/stats
 exports.getStats = async (req, res, next) => {
@@ -192,6 +192,7 @@ exports.updateEnrichment = async (req, res, next) => {
     ).select('anilistId titleRomaji titleChinese bgmId bangumiScore adminFlag');
     if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '番剧不存在' } });
 
+    if (updates.titleChinese !== undefined) clearScheduleCache();
     console.log(`[Admin] ${req.user.username} updated enrichment for anilistId=${anilistId}:`, updates);
     res.json({ data: doc });
   } catch (err) { next(err); }
