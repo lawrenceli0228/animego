@@ -20,11 +20,12 @@ function escapeHtml(str) {
 }
 
 const SITE_NAME = 'AnimeGo';
+const DEFAULT_OG_IMAGE = 'https://animegoclub.com/og-default.png';
 
 function sendOgHtml(res, { title, desc, image, url, keywords }) {
   const t = escapeHtml(title);
   const d = escapeHtml(desc);
-  const i = escapeHtml(image);
+  const i = escapeHtml(image || DEFAULT_OG_IMAGE);
   const u = escapeHtml(url);
   const k = keywords ? escapeHtml(keywords) : '';
   res.set('Content-Type', 'text/html; charset=utf-8');
@@ -32,10 +33,12 @@ function sendOgHtml(res, { title, desc, image, url, keywords }) {
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>${t} — ${SITE_NAME}</title>
+<title>${SITE_NAME} - ${t}</title>
 <meta name="description" content="${d}">
 ${k ? `<meta name="keywords" content="${k}">` : ''}
 <link rel="canonical" href="${u}">
+<link rel="icon" type="image/png" sizes="48x48" href="https://animegoclub.com/favicon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="https://animegoclub.com/favicon-192.png">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="${SITE_NAME}">
 <meta property="og:title" content="${t}">
@@ -46,6 +49,9 @@ ${k ? `<meta name="keywords" content="${k}">` : ''}
 <meta name="twitter:title" content="${t}">
 <meta name="twitter:description" content="${d}">
 <meta name="twitter:image" content="${i}">
+<script type="application/ld+json">
+${JSON.stringify({ "@context": "https://schema.org", "@type": "WebSite", "name": "AnimeGo", "url": "https://animegoclub.com", "description": desc })}
+</script>
 </head>
 <body><h1>${t}</h1><p>${d}</p></body>
 </html>`);
@@ -86,7 +92,7 @@ function ogTagsMiddleware(req, res, next) {
     return sendOgHtml(res, {
       title: '季度新番',
       desc: '浏览每季度动画新番，按评分、格式和状态筛选，发现你的下一部追番。',
-      image: '', url: `${base}/season`,
+      image: DEFAULT_OG_IMAGE, url: `${base}/season`,
     });
   }
 
@@ -95,16 +101,16 @@ function ogTagsMiddleware(req, res, next) {
     return sendOgHtml(res, {
       title: '搜索动画',
       desc: '搜索数千部动画作品，查看评分、简介和详细信息。',
-      image: '', url: `${base}/search`,
+      image: DEFAULT_OG_IMAGE, url: `${base}/search`,
     });
   }
 
   // ── / (homepage) ──
   if (req.path === '/') {
     return sendOgHtml(res, {
-      title: '追番 · 发现 · 社区',
+      title: '动漫 · 二次元 · 发现',
       desc: 'AnimeGo 是一个动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。',
-      image: '', url: base,
+      image: DEFAULT_OG_IMAGE, url: base,
     });
   }
 

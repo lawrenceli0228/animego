@@ -3,25 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AnimeGo — 追番 · 发现 · 社区</title>
+    <title>AnimeGo - 动漫 · 二次元 · 发现</title>
     <meta name="description" content="AnimeGo 是一个动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。" />
     <meta name="theme-color" content="#000000" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="canonical" href="https://animegoclub.com/" />
 
     <!-- Open Graph defaults (overridden by ogTags middleware for /anime/:id) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AnimeGo" />
-    <meta property="og:title" content="AnimeGo — 追番 · 发现 · 社区" />
+    <meta property="og:title" content="AnimeGo - 动漫 · 二次元 · 发现" />
     <meta property="og:description" content="动漫追番与发现平台，每季新番、评分、弹幕评论和追番管理。" />
-    <meta property="og:image" content="/og-default.png" />
+    <meta property="og:image" content="https://animegoclub.com/og-default.png" />
+    <meta property="og:url" content="https://animegoclub.com/" />
 
     <!-- Twitter Card defaults -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="AnimeGo — 追番 · 发现 · 社区" />
+    <meta name="twitter:title" content="AnimeGo - 动漫 · 二次元 · 发现" />
     <meta name="twitter:description" content="动漫追番与发现平台，每季新番、评分、弹幕评论和追番管理。" />
-    <meta name="twitter:image" content="/og-default.png" />
+    <meta name="twitter:image" content="https://animegoclub.com/og-default.png" />
+
+    <!-- Structured Data for Google Search -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "AnimeGo",
+      "url": "https://animegoclub.com",
+      "description": "动漫追番与发现平台，每季新番、评分、弹幕评论和追番管理。",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://animegoclub.com/search?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
