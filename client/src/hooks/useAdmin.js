@@ -37,6 +37,7 @@ export function useUpdateEnrichment() {
     mutationFn: ({ anilistId, data }) => updateEnrichment(anilistId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin'] })
+      queryClient.invalidateQueries({ queryKey: ['weeklySchedule'] })
       toast.success(t('admin.enrichUpdateSuccess'))
     },
     onError: (err) => {
