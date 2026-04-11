@@ -107,10 +107,67 @@ function ogTagsMiddleware(req, res, next) {
 
   // ── / (homepage) ──
   if (req.path === '/') {
-    return sendOgHtml(res, {
-      title: '动漫 · 二次元 · 发现',
-      desc: 'AnimeGo 是一个动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。',
-      image: DEFAULT_OG_IMAGE, url: base,
+    return AnimeCache.find({ averageScore: { $gte: 70 } }, {
+      anilistId: 1, titleChinese: 1, titleNative: 1, titleRomaji: 1,
+      titleEnglish: 1, averageScore: 1, genres: 1,
+    }).sort({ averageScore: -1 }).limit(30).lean().then(docs => {
+      const siteDesc = 'AnimeGo 是一个动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。';
+      const t = escapeHtml('动漫 · 二次元 · 发现');
+      const d = escapeHtml(siteDesc);
+
+      let animeLinks = '';
+      if (docs && docs.length) {
+        animeLinks = '<h2>热门动画</h2><ul>' + docs.map(a => {
+          const name = escapeHtml(pickTitle(a));
+          const score = a.averageScore ? ` (${a.averageScore}分)` : '';
+          return `<li><a href="${base}/anime/${a.anilistId}">${name}${score}</a></li>`;
+        }).join('') + '</ul>';
+      }
+
+      const allGenres = [...new Set(docs.flatMap(a => a.genres || []))].slice(0, 15);
+      const genreText = allGenres.length ? `<p>热门类型：${allGenres.map(g => escapeHtml(g)).join('、')}</p>` : '';
+
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      res.send(`<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>${SITE_NAME} - ${t}</title>
+<meta name="description" content="${d}">
+<link rel="canonical" href="${base}">
+<link rel="icon" type="image/png" sizes="48x48" href="https://animegoclub.com/favicon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="https://animegoclub.com/favicon-192.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="${SITE_NAME}">
+<meta property="og:title" content="${t}">
+<meta property="og:description" content="${d}">
+<meta property="og:image" content="${DEFAULT_OG_IMAGE}">
+<meta property="og:url" content="${base}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${t}">
+<meta name="twitter:description" content="${d}">
+<meta name="twitter:image" content="${DEFAULT_OG_IMAGE}">
+<script type="application/ld+json">
+${JSON.stringify({ "@context": "https://schema.org", "@type": "WebSite", "name": "AnimeGo", "url": "https://animegoclub.com", "description": siteDesc, "potentialAction": { "@type": "SearchAction", "target": "https://animegoclub.com/search?q={search_term_string}", "query-input": "required name=search_term_string" } })}
+</script>
+</head>
+<body>
+<h1>AnimeGo - 动漫 · 二次元 · 发现</h1>
+<p>${d}</p>
+<nav>
+<a href="${base}/season">季度新番</a> |
+<a href="${base}/search">搜索动画</a>
+</nav>
+${animeLinks}
+${genreText}
+</body>
+</html>`);
+    }).catch(() => {
+      sendOgHtml(res, {
+        title: '动漫 · 二次元 · 发现',
+        desc: 'AnimeGo 是一个动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。',
+        image: DEFAULT_OG_IMAGE, url: base,
+      });
     });
   }
 

@@ -25,6 +25,16 @@ describe('ogTags middleware', () => {
   beforeEach(() => {
     app = buildApp()
     jest.clearAllMocks()
+    // Default: homepage queries popular anime
+    AnimeCache.find = jest.fn().mockReturnValue({
+      sort: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            { anilistId: 1, titleChinese: '测试动画', averageScore: 90, genres: ['Action'] },
+          ]),
+        }),
+      }),
+    })
   })
 
   describe('crawler detection', () => {
