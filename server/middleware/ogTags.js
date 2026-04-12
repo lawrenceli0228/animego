@@ -37,8 +37,10 @@ function sendOgHtml(res, { title, desc, image, url, keywords }) {
 <meta name="description" content="${d}">
 ${k ? `<meta name="keywords" content="${k}">` : ''}
 <link rel="canonical" href="${u}">
+<link rel="icon" href="https://animegoclub.com/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="48x48" href="https://animegoclub.com/favicon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="https://animegoclub.com/favicon-192.png">
+<link rel="manifest" href="https://animegoclub.com/site.webmanifest">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="${SITE_NAME}">
 <meta property="og:title" content="${t}">
@@ -135,8 +137,10 @@ function ogTagsMiddleware(req, res, next) {
 <title>${SITE_NAME} - ${t}</title>
 <meta name="description" content="${d}">
 <link rel="canonical" href="${base}">
+<link rel="icon" href="https://animegoclub.com/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="48x48" href="https://animegoclub.com/favicon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="https://animegoclub.com/favicon-192.png">
+<link rel="manifest" href="https://animegoclub.com/site.webmanifest">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="${SITE_NAME}">
 <meta property="og:title" content="${t}">
