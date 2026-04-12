@@ -20,27 +20,35 @@ function escapeHtml(str) {
 }
 
 const SITE_NAME = 'AnimeGo';
-const DEFAULT_OG_IMAGE = 'https://animegoclub.com/og-default.png';
+const SITE_URL = 'https://animegoclub.com';
+const DEFAULT_OG_IMAGE = `${SITE_URL}/og-default.png`;
 
-function sendOgHtml(res, { title, desc, image, url, keywords }) {
+const FAVICON_LINKS = `<link rel="icon" href="${SITE_URL}/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="48x48" href="${SITE_URL}/favicon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="${SITE_URL}/favicon-192.png">
+<link rel="manifest" href="${SITE_URL}/site.webmanifest">`;
+
+function sendOgHtml(res, { title, desc, image, url, keywords, jsonLd, breadcrumbs }) {
   const t = escapeHtml(title);
   const d = escapeHtml(desc);
   const i = escapeHtml(image || DEFAULT_OG_IMAGE);
   const u = escapeHtml(url);
   const k = keywords ? escapeHtml(keywords) : '';
+
+  const defaultJsonLd = { "@context": "https://schema.org", "@type": "WebSite", "name": SITE_NAME, "url": SITE_URL, "description": desc };
+  const ldBlocks = [jsonLd || defaultJsonLd];
+  if (breadcrumbs) ldBlocks.push(breadcrumbs);
+
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>${SITE_NAME} - ${t}</title>
+<title>${t} - ${SITE_NAME}</title>
 <meta name="description" content="${d}">
 ${k ? `<meta name="keywords" content="${k}">` : ''}
 <link rel="canonical" href="${u}">
-<link rel="icon" href="https://animegoclub.com/favicon.ico" sizes="any">
-<link rel="icon" type="image/png" sizes="48x48" href="https://animegoclub.com/favicon.png">
-<link rel="icon" type="image/png" sizes="192x192" href="https://animegoclub.com/favicon-192.png">
-<link rel="manifest" href="https://animegoclub.com/site.webmanifest">
+${FAVICON_LINKS}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="${SITE_NAME}">
 <meta property="og:title" content="${t}">
@@ -51,12 +59,56 @@ ${k ? `<meta name="keywords" content="${k}">` : ''}
 <meta name="twitter:title" content="${t}">
 <meta name="twitter:description" content="${d}">
 <meta name="twitter:image" content="${i}">
-<script type="application/ld+json">
-${JSON.stringify({ "@context": "https://schema.org", "@type": "WebSite", "name": "AnimeGo", "url": "https://animegoclub.com", "description": desc })}
-</script>
+${ldBlocks.map(ld => `<script type="application/ld+json">\n${JSON.stringify(ld).replace(/</g, '\\u003c')}\n</script>`).join('\n')}
 </head>
 <body><h1>${t}</h1><p>${d}</p></body>
 </html>`);
+}
+
+function buildBreadcrumbs(items) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": items.map((item, i) => ({
+      "@type": "ListItem",
+      "position": i + 1,
+      "name": item.name,
+      "item": item.url,
+    })),
+  };
+}
+
+const FORMAT_MAP = { TV: 'TVSeries', MOVIE: 'Movie', OVA: 'TVSeries', ONA: 'TVSeries', SPECIAL: 'TVSeries', MUSIC: 'MusicVideoObject' };
+
+function buildAnimeJsonLd(doc, url) {
+  const schemaType = FORMAT_MAP[doc.format] || 'CreativeWork';
+  const title = pickTitle(doc);
+  const ld = {
+    "@context": "https://schema.org",
+    "@type": schemaType,
+    "name": title,
+    "url": url,
+    "image": doc.bannerImageUrl || doc.coverImageUrl || DEFAULT_OG_IMAGE,
+    "description": truncate(stripHtml(doc.description), 300),
+  };
+  if (doc.genres?.length) ld.genre = doc.genres;
+  if (doc.averageScore) {
+    ld.aggregateRating = {
+      "@type": "AggregateRating",
+      "ratingValue": (doc.averageScore / 10).toFixed(1),
+      "bestRating": "10",
+      "worstRating": "1",
+      "ratingCount": doc.bangumiVotes || doc.popularity || 100,
+    };
+  }
+  if (doc.episodes) ld.numberOfEpisodes = doc.episodes;
+  if (doc.startDate?.year) {
+    const m = String(doc.startDate.month || 1).padStart(2, '0');
+    const d = String(doc.startDate.day || 1).padStart(2, '0');
+    ld.datePublished = `${doc.startDate.year}-${m}-${d}`;
+  }
+  if (doc.titleNative && doc.titleNative !== title) ld.alternateName = doc.titleNative;
+  return ld;
 }
 
 /**
@@ -77,14 +129,25 @@ function ogTagsMiddleware(req, res, next) {
     return AnimeCache.findOne({ anilistId }, {
       titleChinese: 1, titleNative: 1, titleRomaji: 1, titleEnglish: 1,
       coverImageUrl: 1, bannerImageUrl: 1, description: 1, genres: 1,
+      averageScore: 1, popularity: 1, episodes: 1, format: 1,
+      startDate: 1, popularity: 1, bangumiVotes: 1,
     }).lean().then(doc => {
       if (!doc) return next();
+      const title = pickTitle(doc);
+      const rawDesc = doc.description;
+      const pageUrl = `${base}/anime/${anilistId}`;
       sendOgHtml(res, {
-        title: pickTitle(doc),
-        desc: truncate(stripHtml(doc.description), 200),
+        title,
+        desc: truncate(stripHtml(rawDesc), 200),
         image: doc.bannerImageUrl || doc.coverImageUrl || '',
-        url: `${base}/anime/${anilistId}`,
-        keywords: doc.genres?.slice(0, 4).join(' / '),
+        url: pageUrl,
+        keywords: doc.genres?.slice(0, 6).join(', '),
+        jsonLd: buildAnimeJsonLd(doc, pageUrl),
+        breadcrumbs: buildBreadcrumbs([
+          { name: '首页', url: base },
+          { name: '动画', url: `${base}/season` },
+          { name: title, url: pageUrl },
+        ]),
       });
     }).catch(() => next());
   }
@@ -95,6 +158,10 @@ function ogTagsMiddleware(req, res, next) {
       title: '季度新番',
       desc: '浏览每季度动画新番，按评分、格式和状态筛选，发现你的下一部追番。',
       image: DEFAULT_OG_IMAGE, url: `${base}/season`,
+      breadcrumbs: buildBreadcrumbs([
+        { name: '首页', url: base },
+        { name: '季度新番', url: `${base}/season` },
+      ]),
     });
   }
 
@@ -104,6 +171,10 @@ function ogTagsMiddleware(req, res, next) {
       title: '搜索动画',
       desc: '搜索数千部动画作品，查看评分、简介和详细信息。',
       image: DEFAULT_OG_IMAGE, url: `${base}/search`,
+      breadcrumbs: buildBreadcrumbs([
+        { name: '首页', url: base },
+        { name: '搜索动画', url: `${base}/search` },
+      ]),
     });
   }
 
@@ -137,10 +208,7 @@ function ogTagsMiddleware(req, res, next) {
 <title>${SITE_NAME} - ${t}</title>
 <meta name="description" content="${d}">
 <link rel="canonical" href="${base}">
-<link rel="icon" href="https://animegoclub.com/favicon.ico" sizes="any">
-<link rel="icon" type="image/png" sizes="48x48" href="https://animegoclub.com/favicon.png">
-<link rel="icon" type="image/png" sizes="192x192" href="https://animegoclub.com/favicon-192.png">
-<link rel="manifest" href="https://animegoclub.com/site.webmanifest">
+${FAVICON_LINKS}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="${SITE_NAME}">
 <meta property="og:title" content="${t}">
@@ -152,7 +220,7 @@ function ogTagsMiddleware(req, res, next) {
 <meta name="twitter:description" content="${d}">
 <meta name="twitter:image" content="${DEFAULT_OG_IMAGE}">
 <script type="application/ld+json">
-${JSON.stringify({ "@context": "https://schema.org", "@type": "WebSite", "name": "AnimeGo", "url": "https://animegoclub.com", "description": siteDesc, "potentialAction": { "@type": "SearchAction", "target": "https://animegoclub.com/search?q={search_term_string}", "query-input": "required name=search_term_string" } })}
+${JSON.stringify({ "@context": "https://schema.org", "@type": "WebSite", "name": "AnimeGo", "url": SITE_URL, "description": siteDesc, "potentialAction": { "@type": "SearchAction", "target": `${SITE_URL}/search?q={search_term_string}`, "query-input": "required name=search_term_string" } }).replace(/</g, '\\u003c')}
 </script>
 </head>
 <body>

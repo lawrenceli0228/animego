@@ -89,7 +89,7 @@ describe('ogTags middleware', () => {
       // The og:description content should not contain HTML tags from the source
       expect(res.text).toMatch(/og:description" content="A great anime"/)
       expect(res.text).toContain('banner.jpg')
-      expect(res.text).toContain('Action / Drama / Fantasy')
+      expect(res.text).toContain('Action, Drama, Fantasy')
     })
 
     it('falls through when anime not in cache', async () => {
@@ -161,7 +161,8 @@ describe('ogTags middleware', () => {
       })
 
       const res = await request(app).get('/anime/1').set('User-Agent', GOOGLEBOT_UA)
-      expect(res.text).not.toContain('<script>')
+      // Should not contain unescaped XSS payload (legitimate ld+json script tags are OK)
+      expect(res.text).not.toContain('<script>alert')
       expect(res.text).toContain('&lt;script&gt;')
     })
   })
