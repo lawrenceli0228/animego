@@ -70,6 +70,11 @@ app.get('/robots.txt', (req, res) => {
 Allow: /
 Disallow: /admin
 Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /profile
 
 Host: https://animegoclub.com
 Sitemap: ${site}/sitemap.xml

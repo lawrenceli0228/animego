@@ -101,13 +101,15 @@ describe('ogTags middleware', () => {
       expect(res.text).toBe('SPA')
     })
 
-    it('falls through on cache error', async () => {
+    it('returns fallback HTML on cache error', async () => {
       AnimeCache.findOne.mockReturnValue({
         lean: jest.fn().mockRejectedValue(new Error('DB error')),
       })
 
       const res = await request(app).get('/anime/12345').set('User-Agent', GOOGLEBOT_UA)
-      expect(res.text).toBe('SPA')
+      expect(res.status).toBe(200)
+      expect(res.text).toContain('动画 #12345')
+      expect(res.text).toContain('AnimeGo')
     })
 
     it('uses fallback title when titleChinese is absent', async () => {

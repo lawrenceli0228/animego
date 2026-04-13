@@ -10,8 +10,8 @@ async function sitemapMiddleware(req, res) {
     return res.send(cached.xml);
   }
 
-  const docs = await AnimeCache.find({}, { anilistId: 1, cachedAt: 1 })
-    .sort({ cachedAt: -1 })
+  const docs = await AnimeCache.find({}, { anilistId: 1, cachedAt: 1, averageScore: 1 })
+    .sort({ averageScore: -1, cachedAt: -1 })
     .limit(5000)
     .lean();
 
@@ -40,10 +40,13 @@ async function sitemapMiddleware(req, res) {
 
   for (const doc of docs) {
     const lastmod = doc.cachedAt ? new Date(doc.cachedAt).toISOString().split('T')[0] : now;
+    // Higher-scored anime get higher priority (0.6-0.9)
+    const score = doc.averageScore || 0;
+    const priority = score >= 80 ? 0.9 : score >= 60 ? 0.8 : score >= 40 ? 0.7 : 0.6;
     xml += `  <url>
     <loc>${SITE}/anime/${doc.anilistId}</loc>
     <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <priority>${priority}</priority>
     <lastmod>${lastmod}</lastmod>
   </url>
 `;
