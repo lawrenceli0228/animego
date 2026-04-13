@@ -80,6 +80,15 @@ function buildBreadcrumbs(items) {
 
 const FORMAT_MAP = { TV: 'TVSeries', MOVIE: 'Movie', OVA: 'TVSeries', ONA: 'TVSeries', SPECIAL: 'TVSeries', MUSIC: 'MusicVideoObject' };
 
+// Google only supports aggregateRating (Review snippets) on these types
+// https://developers.google.com/search/docs/appearance/structured-data/review-snippet#structured-data-type-definitions
+const RATING_SUPPORTED_TYPES = new Set([
+  'Book', 'Course', 'CreativeWorkSeason', 'CreativeWorkSeries', 'Episode',
+  'Event', 'Game', 'HowTo', 'LocalBusiness', 'MediaObject', 'Movie',
+  'MusicPlaylist', 'MusicRecording', 'Organization', 'Product', 'Recipe',
+  'SoftwareApplication',
+]);
+
 // Chinese display labels for crawler HTML
 const FORMAT_CN = { TV: 'TV动画', MOVIE: '剧场版', OVA: 'OVA', ONA: 'ONA', SPECIAL: '特别篇', MUSIC: '音乐' };
 const STATUS_CN = { RELEASING: '连载中', FINISHED: '已完结', NOT_YET_RELEASED: '未开播', CANCELLED: '已取消', HIATUS: '暂停' };
@@ -100,7 +109,7 @@ function buildAnimeJsonLd(doc, url) {
     "description": truncate(stripHtml(doc.description), 300),
   };
   if (doc.genres?.length) ld.genre = doc.genres;
-  if (doc.averageScore) {
+  if (doc.averageScore && RATING_SUPPORTED_TYPES.has(schemaType)) {
     ld.aggregateRating = {
       "@type": "AggregateRating",
       "ratingValue": (doc.averageScore / 10).toFixed(1),
