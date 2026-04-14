@@ -5,7 +5,7 @@ const zh = {
   nav: {
     home: '首页', season: '季度', search: '搜索',
     login: '登录', register: '注册', logout: '登出',
-    myList: '我的追番', hi: 'Hi',
+    myList: '我的追番', hi: 'Hi', player: '播放',
   },
   // Season labels
   season: {
@@ -178,6 +178,37 @@ const zh = {
     deleteConfirm: '确认删除？',
     tooLong: '评论不能超过500字',
     cancel: '取消',
+  },
+  // Player
+  player: {
+    dropLabel: '选择视频文件夹',
+    dropTitle: '拖入番剧文件夹 或 点击选择',
+    singleFile: '也可以选择单个视频文件',
+    noVideos: '未找到视频文件',
+    loaded: '已加载',
+    videos: '个视频',
+    keyword: '关键词',
+    clear: '清除',
+    stepParse: '文件解析',
+    stepMatch: '番剧匹配',
+    stepMap: '弹幕映射',
+    mapped: '集已映射',
+    unmatched: '未匹配',
+    manualHint: '自动匹配未成功，请手动搜索番剧名',
+    searchPlaceholder: '搜索番剧名...',
+    searchBtn: '搜索',
+    select: '选择',
+    noResults: '未找到相关番剧，试试其他关键词',
+    back: '返回',
+    backToList: '返回列表',
+    error: '出错了',
+    errorGeneric: '弹幕服务暂时不可用，请稍后重试',
+    retry: '重试',
+    danmakuCount: '条弹幕',
+    noDanmaku: '该集暂无弹幕',
+    rematch: '重新匹配',
+    desktopOnly: '请在电脑上使用此功能',
+    desktopHint: '视频播放器需要在桌面浏览器上使用',
   },
   // Admin
   admin: {

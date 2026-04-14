@@ -15,6 +15,7 @@ const commentRoutes      = require('./routes/comment.routes');
 const userRoutes         = require('./routes/user.routes');
 const danmakuRoutes      = require('./routes/danmaku.routes');
 const adminRoutes        = require('./routes/admin.routes');
+const dandanplayRoutes   = require('./routes/dandanplay.routes');
 const { authenticateToken } = require('./middleware/auth.middleware');
 const profileCtrl        = require('./controllers/profile.controller');
 const ogTagsMiddleware   = require('./middleware/ogTags');
@@ -53,6 +54,7 @@ app.use('/api/comments',      commentRoutes);
 app.use('/api/users',         userRoutes);
 app.use('/api/danmaku',       danmakuRoutes);
 app.use('/api/admin',         adminRoutes);
+app.use('/api/dandanplay',   dandanplayRoutes);
 app.get('/api/feed',          authenticateToken, profileCtrl.getFeed);
 
 // Health check

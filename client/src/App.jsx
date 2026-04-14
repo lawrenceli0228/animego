@@ -14,6 +14,7 @@ import FollowListPage from './pages/FollowListPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import AdminDashboard from './pages/AdminDashboard'
+import PlayerPage from './pages/PlayerPage'
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/season"    element={<SeasonPage />} />
           <Route path="/anime/:id" element={<AnimeDetailPage />} />
           <Route path="/search"    element={<SearchPage />} />
+          <Route path="/player"    element={<ProtectedRoute><PlayerPage /></ProtectedRoute>} />
           <Route path="/login"                   element={<LoginPage />} />
           <Route path="/register"                element={<RegisterPage />} />
           <Route path="/forgot-password"         element={<ForgotPasswordPage />} />

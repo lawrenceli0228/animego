@@ -68,8 +68,18 @@ export default function Navbar() {
       <div style={s.inner}>
         <Link to="/" style={s.logo}>AnimeGo</Link>
         <div style={s.links}>
-          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search']].map(([to, key]) => (
-            <NavLink key={to} to={to} end={to==='/'} style={({ isActive }) => s.link(isActive)}>{t(key)}</NavLink>
+          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/player','nav.player']].map(([to, key]) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to==='/'}
+              style={({ isActive }) => ({
+                ...s.link(isActive),
+                ...(to === '/player' ? { display: window.innerWidth <= 600 ? 'none' : undefined } : {}),
+              })}
+            >
+              {t(key)}
+            </NavLink>
           ))}
         </div>
         <div style={s.right}>
