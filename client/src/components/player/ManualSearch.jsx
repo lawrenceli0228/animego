@@ -27,7 +27,7 @@ const s = {
     cursor: 'pointer',
   },
   cover: {
-    width: 60, height: 84, borderRadius: 8, objectFit: 'cover',
+    width: 60, aspectRatio: '3/4', borderRadius: 8, objectFit: 'cover',
     background: '#2c2c2e', flexShrink: 0,
   },
   info: { flex: 1, minWidth: 0 },

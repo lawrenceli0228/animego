@@ -20,7 +20,7 @@ const s = {
     display: 'flex', gap: 24, marginBottom: 28, alignItems: 'flex-start',
   },
   cover: {
-    width: 160, height: 224, borderRadius: 10, objectFit: 'cover',
+    width: 160, aspectRatio: '3/4', borderRadius: 12, objectFit: 'cover',
     background: '#2c2c2e', flexShrink: 0,
   },
   info: { flex: 1, minWidth: 0 },
