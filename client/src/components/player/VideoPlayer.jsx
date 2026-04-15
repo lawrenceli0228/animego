@@ -14,8 +14,6 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, subtit
   useEffect(() => {
     if (!containerRef.current || !videoUrl) return;
 
-    // All subtitle types use VTT via Artplayer's native subtitle
-    // (ASS is converted to VTT by the extraction worker)
     const subtitleConfig = subtitleUrl
       ? { url: subtitleUrl, type: 'vtt', encoding: 'utf-8', style: { color: '#fff', fontSize: '20px' } }
       : {};
@@ -49,7 +47,14 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, subtit
       art.destroy(false);
       artRef.current = null;
     };
-  }, [videoUrl, subtitleUrl, subtitleType, subtitleContent]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [videoUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Patch subtitle dynamically without recreating player
+  useEffect(() => {
+    const art = artRef.current;
+    if (!art || !subtitleUrl) return;
+    art.subtitle.switch(subtitleUrl, { type: 'vtt', encoding: 'utf-8' });
+  }, [subtitleUrl]);
 
   useEffect(() => {
     const danmuku = artRef.current?.plugins?.artplayerPluginDanmuku;

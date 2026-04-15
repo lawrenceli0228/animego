@@ -144,53 +144,56 @@ export default function PlayerPage() {
     startMatch(kw, epNums, firstFile, basicFiles, getFilesHashes);
   }, [processFiles, startMatch, t]);
 
-  const handlePlay = useCallback(async (fileItem) => {
-    let subUrl = null;
-    let subType = null;
-    let subContent = null;
-
-    if (fileItem.subtitle) {
-      subUrl = getSubtitleUrl(fileItem.subtitle.file);
-      subType = fileItem.subtitle.type;
-    } else if (/\.mkv$/i.test(fileItem.fileName)) {
-      // Extract embedded subtitle from MKV container
-      const extracted = await new Promise((resolve) => {
-        const w = new Worker(
-          new URL('../workers/mkvSubtitle.worker.js', import.meta.url),
-          { type: 'module' },
-        );
-        const timer = setTimeout(() => { w.terminate(); resolve(null); }, 30000);
-        w.onmessage = (e) => { clearTimeout(timer); w.terminate(); resolve(e.data.result || null); };
-        w.onerror = () => { clearTimeout(timer); w.terminate(); resolve(null); };
-        w.postMessage({ file: fileItem.file });
-      });
-      if (extracted) {
-        subType = extracted.type;
-        if (extracted.type === 'vtt') {
-          subUrl = URL.createObjectURL(new Blob([extracted.content], { type: 'text/vtt' }));
-        } else {
-          // ASS/SSA: pass content for JASSUB, VTT blob as Artplayer fallback
-          subContent = extracted.content;
-          const vtt = extracted.vtt || extracted.content;
-          subUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
-        }
-      }
-    }
-
+  const handlePlay = useCallback((fileItem) => {
+    // Immediately start playback — no blocking await
     const url = getVideoUrl(fileItem.file);
     setVideoUrl(url);
     setPlayingFile(fileItem);
     setPlayingEp(fileItem.episode);
-    setSubtitleUrl(subUrl);
-    setSubtitleType(subType);
-    setSubtitleContent(subContent);
 
-    // Load danmaku
+    // Handle external subtitle files synchronously
+    if (fileItem.subtitle) {
+      setSubtitleUrl(getSubtitleUrl(fileItem.subtitle.file));
+      setSubtitleType(fileItem.subtitle.type);
+      setSubtitleContent(null);
+    } else {
+      setSubtitleUrl(null);
+      setSubtitleType(null);
+      setSubtitleContent(null);
+    }
+
+    // Load danmaku (non-blocking)
     const epData = matchResult?.episodeMap?.[fileItem.episode];
     if (epData?.dandanEpisodeId) {
       loadComments(epData.dandanEpisodeId);
     } else {
       clearComments();
+    }
+
+    // MKV embedded subtitle extraction — async, patches in after ready
+    if (!fileItem.subtitle && /\.mkv$/i.test(fileItem.fileName)) {
+      const w = new Worker(
+        new URL('../workers/mkvSubtitle.worker.js', import.meta.url),
+        { type: 'module' },
+      );
+      const timer = setTimeout(() => { w.terminate(); }, 30000);
+      w.onmessage = (e) => {
+        clearTimeout(timer);
+        w.terminate();
+        const extracted = e.data.result;
+        if (!extracted) return;
+        if (extracted.type === 'vtt') {
+          setSubtitleUrl(URL.createObjectURL(new Blob([extracted.content], { type: 'text/vtt' })));
+          setSubtitleType('vtt');
+        } else {
+          setSubtitleContent(extracted.content);
+          const vtt = extracted.vtt || extracted.content;
+          setSubtitleUrl(URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' })));
+          setSubtitleType(extracted.type);
+        }
+      };
+      w.onerror = () => { clearTimeout(timer); w.terminate(); };
+      w.postMessage({ file: fileItem.file });
     }
   }, [getVideoUrl, getSubtitleUrl, matchResult, loadComments, clearComments]);
 
