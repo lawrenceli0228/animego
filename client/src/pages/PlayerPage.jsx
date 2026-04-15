@@ -27,15 +27,25 @@ const s = {
   },
   playHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    maxWidth: 1400, margin: '0 auto', padding: '16px 0',
+    maxWidth: 1400, margin: '0 auto', padding: '12px 16px',
+    background: 'rgba(28,28,30,0.80)',
+    backdropFilter: 'saturate(180%) blur(20px)',
+    WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+    borderRadius: 12, marginBottom: 12,
   },
   backBtn: {
-    background: 'none', border: 'none', color: 'rgba(235,235,245,0.60)',
-    fontSize: 14, cursor: 'pointer',
+    background: 'rgba(120,120,128,0.12)', border: 'none', borderRadius: 8,
+    padding: '8px 16px', fontSize: 14, fontWeight: 500,
+    color: '#0a84ff', cursor: 'pointer',
+    transition: 'background 150ms',
   },
   epTitle: {
     fontFamily: "'Sora',sans-serif", fontWeight: 600,
-    fontSize: 16, color: '#ffffff',
+    fontSize: 16, color: '#ffffff', textAlign: 'center',
+  },
+  epSubtitle: {
+    fontSize: 13, color: 'rgba(235,235,245,0.40)', marginTop: 2,
+    textAlign: 'center',
   },
   playerWrap: { maxWidth: 1400, margin: '0 auto' },
   danmakuInfo: {
@@ -271,14 +281,34 @@ export default function PlayerPage() {
       {uiPhase === 'playing' && (
         <div style={fadeUp}>
           <div style={s.playHeader}>
-            <button style={s.backBtn} onClick={handleBackToList}>
+            <button
+              style={s.backBtn}
+              onClick={handleBackToList}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.20)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.12)'; }}
+            >
               ← {t('player.backToList')}
             </button>
-            <span style={s.epTitle}>
-              EP{String(playingEp).padStart(2, '0')}
-              {matchResult?.anime?.titleChinese && ` · ${matchResult.anime.titleChinese}`}
-            </span>
-            <div />
+            <div>
+              <div style={s.epTitle}>
+                EP{String(playingEp).padStart(2, '0')}
+                {matchResult?.anime?.titleChinese && ` · ${matchResult.anime.titleChinese}`}
+              </div>
+              {matchResult?.episodeMap?.[playingEp]?.title && (
+                <div style={s.epSubtitle}>{matchResult.episodeMap[playingEp].title}</div>
+              )}
+            </div>
+            <div style={{ minWidth: 80, textAlign: 'right' }}>
+              {danmakuCount > 0 && (
+                <span style={{
+                  padding: '4px 10px', borderRadius: 9999, fontSize: 12,
+                  background: 'rgba(90,200,250,0.10)', color: '#5ac8fa',
+                  fontFamily: "'JetBrains Mono',monospace", fontWeight: 500,
+                }}>
+                  {danmakuCount} {t('player.danmakuCount')}
+                </span>
+              )}
+            </div>
           </div>
           <div style={s.playerWrap}>
             <VideoPlayer
@@ -288,11 +318,9 @@ export default function PlayerPage() {
               subtitleType={subtitleType}
               subtitleContent={subtitleContent}
             />
-            <div style={s.danmakuInfo}>
-              {danmakuCount > 0
-                ? `${danmakuCount} ${t('player.danmakuCount')}`
-                : t('player.noDanmaku')}
-            </div>
+            {danmakuCount === 0 && (
+              <div style={s.danmakuInfo}>{t('player.noDanmaku')}</div>
+            )}
             <EpisodeNav
               episodes={episodes}
               currentEpisode={playingEp}
