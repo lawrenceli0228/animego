@@ -11,6 +11,9 @@ import VideoPlayer from '../components/player/VideoPlayer';
 import EpisodeNav from '../components/player/EpisodeNav';
 import toast from 'react-hot-toast';
 
+const FADE_UP_CSS = `@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`;
+const fadeUp = { animation: 'fadeUp 300ms cubic-bezier(0.4,0,0.2,1) both' };
+
 const s = {
   page: { minHeight: 'calc(100vh - 56px)', padding: '0 24px 48px' },
   mobile: {
@@ -209,12 +212,16 @@ export default function PlayerPage() {
 
   return (
     <div style={s.page}>
+      <style>{FADE_UP_CSS}</style>
+
       {/* IDLE */}
-      {uiPhase === 'idle' && <DropZone onFiles={handleFiles} />}
+      {uiPhase === 'idle' && (
+        <div style={fadeUp}><DropZone onFiles={handleFiles} /></div>
+      )}
 
       {/* MATCHING */}
       {uiPhase === 'matching' && (
-        <div style={{ marginTop: 64 }}>
+        <div style={{ marginTop: 64, ...fadeUp }}>
           <MatchProgress
             fileCount={videoFiles.length}
             keyword={keyword}
@@ -226,7 +233,7 @@ export default function PlayerPage() {
 
       {/* MANUAL */}
       {uiPhase === 'manual' && (
-        <div style={{ marginTop: 32 }}>
+        <div style={{ marginTop: 32, ...fadeUp }}>
           <ManualSearch
             defaultKeyword={keyword}
             onSelect={handleManualSelect}
@@ -237,7 +244,7 @@ export default function PlayerPage() {
 
       {/* ERROR */}
       {uiPhase === 'error' && (
-        <div style={s.errorBox}>
+        <div style={{ ...s.errorBox, ...fadeUp }}>
           <div style={s.errorTitle}>{t('player.error')}</div>
           <div>{error || t('player.errorGeneric')}</div>
           <button style={s.retryBtn} onClick={handleClearAll}>
@@ -248,7 +255,7 @@ export default function PlayerPage() {
 
       {/* READY */}
       {uiPhase === 'ready' && matchResult && (
-        <div style={{ marginTop: 32 }}>
+        <div style={{ marginTop: 32, ...fadeUp }}>
           <EpisodeFileList
             anime={matchResult.anime}
             siteAnime={matchResult.siteAnime}
@@ -262,7 +269,7 @@ export default function PlayerPage() {
 
       {/* PLAYING */}
       {uiPhase === 'playing' && (
-        <>
+        <div style={fadeUp}>
           <div style={s.playHeader}>
             <button style={s.backBtn} onClick={handleBackToList}>
               ← {t('player.backToList')}
@@ -292,7 +299,7 @@ export default function PlayerPage() {
               onSelect={handleEpisodeSwitch}
             />
           </div>
-        </>
+        </div>
       )}
     </div>
   );
