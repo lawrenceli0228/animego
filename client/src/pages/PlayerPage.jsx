@@ -27,7 +27,7 @@ const s = {
   },
   playHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    maxWidth: 1400, margin: '0 auto', padding: '12px 16px',
+    maxWidth: 1400, margin: '16px auto 0', padding: '12px 16px',
     background: 'rgba(28,28,30,0.80)',
     backdropFilter: 'saturate(180%) blur(20px)',
     WebkitBackdropFilter: 'saturate(180%) blur(20px)',

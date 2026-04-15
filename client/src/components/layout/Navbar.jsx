@@ -1,17 +1,20 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useLang } from '../../context/LanguageContext'
 import toast from 'react-hot-toast'
 
 const s = {
-  nav: {
+  nav: (hidden) => ({
     position: 'sticky', top: 0, zIndex: 100,
     background: 'rgba(0,0,0,0.80)',
     backdropFilter: 'saturate(180%) blur(20px)',
     WebkitBackdropFilter: 'saturate(180%) blur(20px)',
     borderBottom: '1px solid rgba(84,84,88,0.65)',
-    padding: '0 24px'
-  },
+    padding: '0 24px',
+    transform: hidden ? 'translateY(-100%)' : 'translateY(0)',
+    transition: 'transform 300ms cubic-bezier(0.4,0,0.2,1)',
+  }),
   inner: {
     maxWidth: 1400, margin: '0 auto',
     display: 'flex', alignItems: 'center',
@@ -56,6 +59,22 @@ export default function Navbar() {
   const { user, logout } = useAuth()
   const { lang, toggle, t } = useLang()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [hidden, setHidden] = useState(false)
+  const lastY = useRef(0)
+
+  const isPlayer = location.pathname === '/player'
+
+  useEffect(() => {
+    if (!isPlayer) { setHidden(false); return; }
+    const onScroll = () => {
+      const y = window.scrollY;
+      setHidden(y > 56 && y > lastY.current);
+      lastY.current = y;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [isPlayer]);
 
   const handleLogout = async () => {
     await logout()
@@ -64,7 +83,7 @@ export default function Navbar() {
   }
 
   return (
-    <nav style={s.nav}>
+    <nav style={s.nav(hidden)}>
       <div style={s.inner}>
         <Link to="/" style={s.logo}>AnimeGo</Link>
         <div style={s.links}>
