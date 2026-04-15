@@ -62,7 +62,7 @@ export default function PlayerPage() {
   const { videoFiles, keyword, processFiles, getVideoUrl, getSubtitleUrl, clear: clearFiles } = useVideoFiles();
   const {
     phase, stepStatus, matchResult, error,
-    startMatch, selectManual, reset: resetMatch, goManual,
+    startMatch, selectManual, reset: resetMatch,
   } = useDandanMatch();
   const { danmakuList, count: danmakuCount, loadComments, clearComments } = useDandanComments();
 
@@ -127,7 +127,8 @@ export default function PlayerPage() {
       return results;
     };
 
-    startMatch(kw, epNums, firstFile, getFilesHashes);
+    const basicFiles = files.map(f => ({ fileName: f.fileName, episode: f.episode, fileSize: f.file.size }));
+    startMatch(kw, epNums, firstFile, basicFiles, getFilesHashes);
   }, [processFiles, startMatch, t]);
 
   const handlePlay = useCallback(async (fileItem) => {
@@ -201,10 +202,6 @@ export default function PlayerPage() {
     resetMatch();
   }, [handleBackToList, clearFiles, resetMatch]);
 
-  const handleRematch = useCallback(() => {
-    goManual();
-  }, [goManual]);
-
   const handleManualSelect = useCallback((anime) => {
     const epNums = videoFiles.map(f => f.episode).filter(Boolean);
     selectManual(anime, epNums);
@@ -254,11 +251,11 @@ export default function PlayerPage() {
         <div style={{ marginTop: 32 }}>
           <EpisodeFileList
             anime={matchResult.anime}
+            siteAnime={matchResult.siteAnime}
             episodeMap={matchResult.episodeMap}
             videoFiles={videoFiles}
             onPlay={handlePlay}
             onClear={handleClearAll}
-            onRematch={handleRematch}
           />
         </div>
       )}

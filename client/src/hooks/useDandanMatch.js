@@ -13,7 +13,7 @@ export default function useDandanMatch() {
   const [matchResult, setMatchResult] = useState(null);
   const [error, setError] = useState(null);
 
-  const startMatch = useCallback(async (keyword, episodes, firstFileName, getFilesHashes) => {
+  const startMatch = useCallback(async (keyword, episodes, firstFileName, basicFiles, getFilesHashes) => {
     setPhase('matching');
     setError(null);
     setStep(1);
@@ -34,11 +34,12 @@ export default function useDandanMatch() {
       setStep(2);
       setStepStatus(s => ({ ...s, 2: 'active' }));
 
-      const body = { keyword, episodes, fileName: firstFileName };
-      if (filesData?.length > 0) {
+      // Always send files list; use hash data when available, fall back to basic info
+      const files = filesData || basicFiles;
+      const body = { keyword, episodes, fileName: firstFileName, files };
+      if (filesData?.[0]?.fileHash) {
         body.fileHash = filesData[0].fileHash;
         body.fileSize = filesData[0].fileSize;
-        body.files = filesData;
       }
 
       const result = await matchAnime(body);
@@ -92,6 +93,29 @@ export default function useDandanMatch() {
       }
 
       setStepStatus(s => ({ ...s, 3: 'done' }));
+
+      // Build siteAnime from animeCache search results
+      const siteAnime = anime.anilistId ? {
+        anilistId: anime.anilistId,
+        titleChinese: anime.titleChinese,
+        titleNative: anime.titleNative || anime.title,
+        titleRomaji: anime.titleRomaji,
+        coverImageUrl: anime.coverImageUrl,
+        episodes: anime.episodes,
+        status: anime.status,
+        season: anime.season,
+        seasonYear: anime.seasonYear,
+        averageScore: anime.averageScore,
+        bangumiScore: anime.bangumiScore,
+        bangumiVotes: anime.bangumiVotes,
+        genres: anime.genres,
+        format: anime.format,
+        bgmId: anime.bgmId,
+        studios: anime.studios,
+        source: anime.animeSource,
+        duration: anime.duration,
+      } : null;
+
       setMatchResult({
         matched: true,
         anime: {
@@ -102,6 +126,7 @@ export default function useDandanMatch() {
           coverImageUrl: anime.coverImageUrl || anime.imageUrl,
           episodes: anime.episodes,
         },
+        siteAnime,
         episodeMap,
         source: anime.source || 'manual',
       });

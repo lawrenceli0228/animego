@@ -1,4 +1,18 @@
 import { useLang } from '../../context/LanguageContext';
+import { formatScore } from '../../utils/formatters';
+
+const scoreColor = (v) => v >= 75 ? '#30d158' : v >= 50 ? '#ff9f0a' : '#ff453a';
+
+const SOURCE_LABEL = {
+  ORIGINAL: { zh: '原创', en: 'Original' },
+  MANGA: { zh: '漫改', en: 'Manga' },
+  LIGHT_NOVEL: { zh: '轻小说改', en: 'Light Novel' },
+  VISUAL_NOVEL: { zh: '视觉小说改', en: 'Visual Novel' },
+  VIDEO_GAME: { zh: '游戏改', en: 'Video Game' },
+  NOVEL: { zh: '小说改', en: 'Novel' },
+  WEB_NOVEL: { zh: '网文改', en: 'Web Novel' },
+  GAME: { zh: '游戏改', en: 'Game' },
+};
 
 const s = {
   container: { maxWidth: 1100, margin: '0 auto' },
@@ -25,16 +39,52 @@ const s = {
     background: 'rgba(90,200,250,0.10)', color: '#5ac8fa',
     fontSize: 13, fontWeight: 500, marginTop: 8,
   },
+  // Site anime info styles
+  siteInfo: {
+    marginTop: 14, paddingTop: 14,
+    borderTop: '1px solid rgba(84,84,88,0.36)',
+  },
+  badgeRow: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  scoreBadge: (color) => ({
+    padding: '3px 10px', borderRadius: 9999, background: 'rgba(255,159,10,0.12)',
+    color, fontWeight: 700, fontSize: 12, fontFamily: "'JetBrains Mono',monospace",
+  }),
+  bgmScoreBadge: {
+    padding: '3px 10px', borderRadius: 9999, background: 'rgba(255,69,58,0.10)',
+    color: '#ff453a', fontWeight: 700, fontSize: 12,
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    fontFamily: "'JetBrains Mono',monospace",
+  },
+  bgmLabel: { fontSize: 9, opacity: 0.7, fontFamily: "'DM Sans',sans-serif" },
+  bgmVotes: { fontSize: 10, opacity: 0.6, fontWeight: 400 },
+  infoBadge: (bg, color) => ({
+    padding: '3px 10px', borderRadius: 9999, background: bg, color, fontSize: 12,
+  }),
+  metaRow: {
+    display: 'flex', flexWrap: 'wrap', gap: '3px 10px', marginBottom: 10,
+    alignItems: 'center',
+  },
+  metaStudio: { color: 'rgba(235,235,245,0.75)', fontSize: 12 },
+  metaDot: { color: 'rgba(84,84,88,0.65)', fontSize: 12 },
+  metaDetail: { color: 'rgba(235,235,245,0.50)', fontSize: 11 },
+  genreRow: { display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 },
+  genreTag: {
+    padding: '3px 8px', borderRadius: 9999,
+    background: 'rgba(120,120,128,0.12)', color: 'rgba(235,235,245,0.60)',
+    fontSize: 11, fontWeight: 500,
+  },
+  detailBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '5px 14px', borderRadius: 8, cursor: 'pointer',
+    background: 'rgba(10,132,255,0.12)', border: '1px solid rgba(10,132,255,0.3)',
+    color: '#0a84ff', fontSize: 13, fontWeight: 500,
+    transition: 'all 0.2s', textDecoration: 'none',
+  },
   headerActions: { display: 'flex', flexDirection: 'column', gap: 8, alignSelf: 'flex-start' },
   clearBtn: {
     background: 'rgba(120,120,128,0.12)', border: 'none', borderRadius: 8,
     padding: '6px 14px', fontSize: 14, fontWeight: 500,
     color: '#0a84ff', cursor: 'pointer',
-  },
-  rematchHeaderBtn: {
-    background: 'none', border: '1px solid rgba(84,84,88,0.65)', borderRadius: 8,
-    padding: '6px 14px', fontSize: 13, fontWeight: 500,
-    color: 'rgba(235,235,245,0.60)', cursor: 'pointer',
   },
   row: (i) => ({
     display: 'flex', alignItems: 'center', gap: 14,
@@ -56,28 +106,19 @@ const s = {
     fontSize: 20, color: hover ? '#0a84ff' : 'rgba(235,235,245,0.30)',
     flexShrink: 0, transition: 'color 150ms',
   }),
-  unmatchedSection: {
-    marginTop: 16, paddingTop: 16,
-    borderTop: '1px solid rgba(84,84,88,0.65)',
-  },
-  unmatchedLabel: {
-    fontSize: 13, color: 'rgba(235,235,245,0.30)', marginBottom: 8,
-  },
-  unmatchedFile: {
-    fontSize: 13, color: 'rgba(235,235,245,0.18)', padding: '4px 0',
-  },
-  rematchBtn: {
-    background: 'none', border: '1px solid rgba(84,84,88,0.65)', borderRadius: 8,
-    padding: '6px 14px', fontSize: 13, fontWeight: 500,
-    color: 'rgba(235,235,245,0.60)', cursor: 'pointer', marginTop: 8,
-  },
 };
 
-export default function EpisodeFileList({ anime, episodeMap, videoFiles, onPlay, onClear, onRematch }) {
-  const { t } = useLang();
+export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear }) {
+  const { t, lang } = useLang();
 
-  const matched = videoFiles.filter(f => f.episode != null && episodeMap[f.episode]);
-  const unmatched = videoFiles.filter(f => f.episode == null || !episodeMap[f.episode]);
+  const sa = siteAnime;
+  const statusLabel = sa?.status ? ({
+    RELEASING: t('detail.releasing'), FINISHED: t('detail.finished'),
+    NOT_YET_RELEASED: t('detail.notYetReleased'), CANCELLED: t('detail.cancelled'),
+  }[sa.status] || sa.status) : null;
+
+  const sourceLabel = sa?.source ? (SOURCE_LABEL[sa.source]?.[lang] ?? null) : null;
+  const durationLabel = sa?.duration ? (lang === 'zh' ? `${sa.duration}分/集` : `${sa.duration} min/ep`) : null;
 
   return (
     <div style={s.container}>
@@ -93,15 +134,78 @@ export default function EpisodeFileList({ anime, episodeMap, videoFiles, onPlay,
             {anime.episodes && `${anime.episodes}${t('detail.epUnit')}`}
           </div>
           <div style={s.badge}>dandanplay · {Object.keys(episodeMap).length} {t('player.mapped')}</div>
+
+          {/* Site anime info */}
+          {sa && (
+            <div style={s.siteInfo}>
+              {/* Score + info badges */}
+              <div style={s.badgeRow}>
+                {sa.averageScore > 0 && (
+                  <span style={s.scoreBadge(scoreColor(sa.averageScore))}>
+                    ★ {formatScore(sa.averageScore)}
+                  </span>
+                )}
+                {sa.bangumiScore > 0 && (
+                  <span style={s.bgmScoreBadge}>
+                    <span style={s.bgmLabel}>BGM</span>
+                    ★ {sa.bangumiScore.toFixed(1)}
+                    {sa.bangumiVotes > 0 && <span style={s.bgmVotes}>({sa.bangumiVotes.toLocaleString()})</span>}
+                  </span>
+                )}
+                {sa.format && <span style={s.infoBadge('rgba(10,132,255,0.12)', '#0a84ff')}>{sa.format}</span>}
+                {statusLabel && <span style={s.infoBadge('rgba(90,200,250,0.10)', '#5ac8fa')}>{statusLabel}</span>}
+                {sa.episodes > 0 && (
+                  <span style={s.infoBadge('rgba(120,120,128,0.12)', 'rgba(235,235,245,0.60)')}>
+                    {sa.episodes} {t('detail.epUnit')}
+                  </span>
+                )}
+                {sa.season && sa.seasonYear && (
+                  <span style={s.infoBadge('rgba(120,120,128,0.12)', 'rgba(235,235,245,0.60)')}>
+                    {t(`season.${sa.season}`)} {sa.seasonYear}
+                  </span>
+                )}
+              </div>
+
+              {/* Studios + meta */}
+              {(sa.studios?.length > 0 || sourceLabel || durationLabel) && (
+                <div style={s.metaRow}>
+                  {sa.studios?.length > 0 && <span style={s.metaStudio}>{sa.studios.join(' · ')}</span>}
+                  {sa.studios?.length > 0 && (sourceLabel || durationLabel) && <span style={s.metaDot}>·</span>}
+                  {sourceLabel && <span style={s.metaDetail}>{sourceLabel}</span>}
+                  {durationLabel && <span style={s.metaDetail}>{durationLabel}</span>}
+                </div>
+              )}
+
+              {/* Genres */}
+              {sa.genres?.length > 0 && (
+                <div style={s.genreRow}>
+                  {sa.genres.map(g => <span key={g} style={s.genreTag}>{g}</span>)}
+                </div>
+              )}
+
+              {/* View detail button */}
+              {sa.anilistId && (
+                <a
+                  href={`/anime/${sa.anilistId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={s.detailBtn}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(10,132,255,0.20)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(10,132,255,0.12)' }}
+                >
+                  {t('detail.viewDetails')} →
+                </a>
+              )}
+            </div>
+          )}
         </div>
         <div style={s.headerActions}>
-          <button style={s.rematchHeaderBtn} onClick={onRematch}>{t('player.rematch')}</button>
           <button style={s.clearBtn} onClick={onClear}>✕ {t('player.clear')}</button>
         </div>
       </div>
 
-      {/* Episode list */}
-      {matched.map((f, i) => (
+      {/* Episode list — all files playable, matched ones show episode title */}
+      {videoFiles.map((f, i) => (
         <EpisodeRow
           key={f.fileName}
           index={i}
@@ -111,15 +215,6 @@ export default function EpisodeFileList({ anime, episodeMap, videoFiles, onPlay,
           onPlay={() => onPlay(f)}
         />
       ))}
-
-      {/* Unmatched files */}
-      {unmatched.length > 0 && (
-        <div style={s.unmatchedSection}>
-          <div style={s.unmatchedLabel}>
-            {t('player.unmatched')}: {unmatched.map(f => f.fileName).join(', ')}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -135,7 +230,7 @@ function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay }) {
       onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(10,132,255,0.12)'}
       onMouseLeave={(e) => e.currentTarget.style.background = index % 2 === 1 ? 'rgba(120,120,128,0.06)' : 'transparent'}
     >
-      <span style={s.epNum}>EP{String(episode).padStart(2, '0')}</span>
+      <span style={s.epNum}>{episode != null ? `EP${String(episode).padStart(2, '0')}` : '—'}</span>
       <div style={s.fileInfo}>
         <div style={s.fileName}>{fileName}</div>
         {episodeTitle && <div style={s.epTitle}>{episodeTitle}</div>}

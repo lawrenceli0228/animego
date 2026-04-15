@@ -1,5 +1,30 @@
 const dandanplay = require('../services/dandanplay.service');
 
+/** Pick fields from an AnimeCache document for the siteAnime response */
+function pickSiteAnime(doc) {
+  if (!doc) return null;
+  return {
+    anilistId: doc.anilistId,
+    titleChinese: doc.titleChinese,
+    titleNative: doc.titleNative,
+    titleRomaji: doc.titleRomaji,
+    coverImageUrl: doc.coverImageUrl,
+    episodes: doc.episodes,
+    status: doc.status,
+    season: doc.season,
+    seasonYear: doc.seasonYear,
+    averageScore: doc.averageScore,
+    bangumiScore: doc.bangumiScore,
+    bangumiVotes: doc.bangumiVotes,
+    genres: doc.genres,
+    format: doc.format,
+    bgmId: doc.bgmId,
+    studios: doc.studios,
+    source: doc.source,
+    duration: doc.duration,
+  };
+}
+
 async function match(req, res, next) {
   try {
     const { keyword, episodes = [], fileName, fileHash, fileSize, files = [] } = req.body;
@@ -11,11 +36,14 @@ async function match(req, res, next) {
         const epData = await dandanplay.fetchDandanEpisodesByAnimeId(combined.animeId);
         if (epData) {
           const episodeMap = dandanplay.buildEpisodeMap(epData.episodes, episodes);
-          await matchUnmappedByHash(episodeMap, episodes, files);
+          await matchUnmappedFiles(episodeMap, episodes, files);
           if (Object.keys(episodeMap).length > 0) {
+            // Try to find matching anime in our own database
+            const cacheHits = await dandanplay.searchAnimeCache(epData.title);
             return res.json({
               matched: true,
               anime: { titleNative: epData.title, coverImageUrl: epData.imageUrl },
+              siteAnime: pickSiteAnime(cacheHits[0]),
               episodeMap,
               source: 'dandanplay',
             });
@@ -32,7 +60,7 @@ async function match(req, res, next) {
         const epData = await dandanplay.fetchDandanEpisodes(anime.bgmId);
         if (epData) {
           const episodeMap = dandanplay.buildEpisodeMap(epData.episodes, episodes);
-          await matchUnmappedByHash(episodeMap, episodes, files);
+          await matchUnmappedFiles(episodeMap, episodes, files);
           if (Object.keys(episodeMap).length > 0) {
             return res.json({
               matched: true,
@@ -44,6 +72,7 @@ async function match(req, res, next) {
                 coverImageUrl: anime.coverImageUrl,
                 episodes: anime.episodes,
               },
+              siteAnime: pickSiteAnime(anime),
               episodeMap,
               source: 'animeCache',
             });
@@ -55,7 +84,7 @@ async function match(req, res, next) {
     // Phase 3: no anime matched — try per-file hash matching directly
     if (files.length > 0) {
       const episodeMap = {};
-      await matchUnmappedByHash(episodeMap, episodes, files);
+      await matchUnmappedFiles(episodeMap, episodes, files);
       if (Object.keys(episodeMap).length > 0) {
         return res.json({
           matched: true,
@@ -73,13 +102,13 @@ async function match(req, res, next) {
   }
 }
 
-/** Per-file hash matching for episodes missing from the episode map */
-async function matchUnmappedByHash(episodeMap, episodes, files) {
+/** Per-file matching for episodes missing from the episode map (hash + fileName) */
+async function matchUnmappedFiles(episodeMap, episodes, files) {
   const unmapped = episodes.filter(ep => !episodeMap[ep]);
   const usedIds = new Set(Object.values(episodeMap).map(e => e.dandanEpisodeId));
   for (const ep of unmapped) {
     const fileInfo = files.find(f => f.episode === ep);
-    if (!fileInfo?.fileHash) continue;
+    if (!fileInfo?.fileName) continue;
     const result = await dandanplay.matchCombined(fileInfo.fileName, fileInfo.fileHash, fileInfo.fileSize);
     if (result?.isMatched && !usedIds.has(result.episodeId)) {
       episodeMap[ep] = { dandanEpisodeId: result.episodeId, title: result.episodeTitle };
@@ -104,6 +133,8 @@ async function search(req, res, next) {
         anilistId: a.anilistId,
         title: a.titleNative || a.titleRomaji,
         titleChinese: a.titleChinese,
+        titleNative: a.titleNative,
+        titleRomaji: a.titleRomaji,
         coverImageUrl: a.coverImageUrl,
         episodes: a.episodes,
         bgmId: a.bgmId,
@@ -111,6 +142,13 @@ async function search(req, res, next) {
         seasonYear: a.seasonYear,
         format: a.format,
         averageScore: a.averageScore,
+        bangumiScore: a.bangumiScore,
+        bangumiVotes: a.bangumiVotes,
+        genres: a.genres,
+        studios: a.studios,
+        animeSource: a.source,
+        duration: a.duration,
+        status: a.status,
       })),
       ...dandanResults.map(a => ({
         source: 'dandanplay',
