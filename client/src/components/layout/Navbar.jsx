@@ -69,7 +69,7 @@ export default function Navbar() {
     if (!isPlayer) { setHidden(false); return; }
     const onScroll = () => {
       const y = window.scrollY;
-      setHidden(y > 56);
+      setHidden(y > 50);
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
