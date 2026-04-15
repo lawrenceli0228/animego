@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useLang } from '../../context/LanguageContext';
 import { formatScore } from '../../utils/formatters';
 
@@ -220,6 +221,7 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
 }
 
 function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay }) {
+  const [hover, setHover] = useState(false);
   return (
     <div
       style={s.row(index)}
@@ -227,15 +229,15 @@ function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay }) {
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter') onPlay(); }}
-      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(10,132,255,0.12)'}
-      onMouseLeave={(e) => e.currentTarget.style.background = index % 2 === 1 ? 'rgba(120,120,128,0.06)' : 'transparent'}
+      onMouseEnter={(e) => { setHover(true); e.currentTarget.style.background = 'rgba(10,132,255,0.12)'; }}
+      onMouseLeave={(e) => { setHover(false); e.currentTarget.style.background = index % 2 === 1 ? 'rgba(120,120,128,0.06)' : 'transparent'; }}
     >
       <span style={s.epNum}>{episode != null ? `EP${String(episode).padStart(2, '0')}` : '—'}</span>
       <div style={s.fileInfo}>
         <div style={s.fileName}>{fileName}</div>
         {episodeTitle && <div style={s.epTitle}>{episodeTitle}</div>}
       </div>
-      <span style={s.playIcon(false)}>▶</span>
+      <span style={s.playIcon(hover)}>▶</span>
     </div>
   );
 }
