@@ -77,12 +77,18 @@ Disallow: /register
 Disallow: /forgot-password
 Disallow: /reset-password
 Disallow: /profile
+Disallow: /player
+Disallow: /u/
 
 Host: https://animegoclub.com
-Sitemap: ${site}/sitemap.xml
+Sitemap: https://animegoclub.com/sitemap.xml
 `);
 });
 app.get('/sitemap.xml', sitemapMiddleware);
+
+// 301 redirect orphan /anime (no ID) to homepage — prevents Google indexing it as a duplicate
+app.get('/anime', (req, res) => res.redirect(301, '/'));
+
 app.use(ogTagsMiddleware);
 
 // Serve React app in production

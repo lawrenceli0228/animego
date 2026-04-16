@@ -11,21 +11,8 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <link rel="canonical" href="https://animegoclub.com/" />
-
-    <!-- Open Graph defaults (overridden by ogTags middleware for /anime/:id) -->
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="AnimeGo" />
-    <meta property="og:title" content="AnimeGo - 动漫 · 二次元 · 发现" />
-    <meta property="og:description" content="动漫追番与发现平台，每季新番、评分、弹幕评论和追番管理。" />
-    <meta property="og:image" content="https://animegoclub.com/og-default.png" />
-    <meta property="og:url" content="https://animegoclub.com/" />
-
-    <!-- Twitter Card defaults -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="AnimeGo - 动漫 · 二次元 · 发现" />
-    <meta name="twitter:description" content="动漫追番与发现平台，每季新番、评分、弹幕评论和追番管理。" />
-    <meta name="twitter:image" content="https://animegoclub.com/og-default.png" />
+    <!-- canonical and og:url are set by ogTags middleware per-route; omitted here to prevent
+         the SPA shell from claiming every uncaught page is the homepage (duplicate-content signal) -->
 
     <!-- Structured Data for Google Search -->
     <script type="application/ld+json">

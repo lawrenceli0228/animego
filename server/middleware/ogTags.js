@@ -16,7 +16,7 @@ function truncate(str, len = 160) {
 }
 
 function escapeHtml(str) {
-  return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, ' ');
 }
 
 const SITE_NAME = 'AnimeGo';
@@ -28,7 +28,9 @@ const FAVICON_LINKS = `<link rel="icon" href="${SITE_URL}/favicon.ico" sizes="an
 <link rel="icon" type="image/png" sizes="192x192" href="${SITE_URL}/favicon-192.png">
 <link rel="manifest" href="${SITE_URL}/site.webmanifest">`;
 
-function sendOgHtml(res, { title, desc, image, url, keywords, jsonLd, breadcrumbs, bodyHtml }) {
+const OG_TYPE_MAP = { TV: 'video.tv_show', MOVIE: 'video.movie', OVA: 'video.tv_show', ONA: 'video.tv_show', SPECIAL: 'video.tv_show', MUSIC: 'video.other' };
+
+function sendOgHtml(res, { title, desc, image, url, keywords, jsonLd, breadcrumbs, bodyHtml, ogType }) {
   const t = escapeHtml(title);
   const d = escapeHtml(desc);
   const i = escapeHtml(image || DEFAULT_OG_IMAGE);
@@ -49,7 +51,7 @@ function sendOgHtml(res, { title, desc, image, url, keywords, jsonLd, breadcrumb
 ${k ? `<meta name="keywords" content="${k}">` : ''}
 <link rel="canonical" href="${u}">
 ${FAVICON_LINKS}
-<meta property="og:type" content="website">
+<meta property="og:type" content="${ogType || 'website'}">
 <meta property="og:site_name" content="${SITE_NAME}">
 <meta property="og:title" content="${t}">
 <meta property="og:description" content="${d}">
@@ -86,7 +88,7 @@ const RATING_SUPPORTED_TYPES = new Set([
   'Book', 'Course', 'CreativeWorkSeason', 'CreativeWorkSeries', 'Episode',
   'Event', 'Game', 'HowTo', 'LocalBusiness', 'MediaObject', 'Movie',
   'MusicPlaylist', 'MusicRecording', 'Organization', 'Product', 'Recipe',
-  'SoftwareApplication',
+  'SoftwareApplication', 'TVSeries',
 ]);
 
 // Chinese display labels for crawler HTML
@@ -109,13 +111,14 @@ function buildAnimeJsonLd(doc, url) {
     "description": truncate(stripHtml(doc.description), 300),
   };
   if (doc.genres?.length) ld.genre = doc.genres;
-  if (doc.averageScore && RATING_SUPPORTED_TYPES.has(schemaType)) {
+  const ratingCount = doc.bangumiVotes || doc.popularity;
+  if (doc.averageScore && ratingCount && RATING_SUPPORTED_TYPES.has(schemaType)) {
     ld.aggregateRating = {
       "@type": "AggregateRating",
       "ratingValue": (doc.averageScore / 10).toFixed(1),
       "bestRating": "10",
       "worstRating": "1",
-      "ratingCount": doc.bangumiVotes || doc.popularity || 100,
+      "ratingCount": ratingCount,
     };
   }
   if (doc.episodes) ld.numberOfEpisodes = doc.episodes;
@@ -245,16 +248,31 @@ function ogTagsMiddleware(req, res, next) {
       studios: 1, status: 1, season: 1, seasonYear: 1, duration: 1, source: 1,
       characters: 1, staff: 1, relations: 1, recommendations: 1, episodeTitles: 1,
     }).lean().then(doc => {
-      if (!doc) return next();
+      if (!doc) {
+        return sendOgHtml(res, {
+          title: `动画 #${anilistId}`,
+          desc: 'AnimeGo 动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。',
+          url: `${base}/anime/${anilistId}`,
+        });
+      }
       const title = pickTitle(doc);
       const pageUrl = `${base}/anime/${anilistId}`;
+      const rawDesc = truncate(stripHtml(doc.description), 200);
+      const desc = rawDesc || [
+        title,
+        FORMAT_CN[doc.format],
+        doc.seasonYear && doc.season ? `${doc.seasonYear}年${SEASON_CN[doc.season]}季` : null,
+        doc.averageScore ? `评分 ${(doc.averageScore / 10).toFixed(1)}` : null,
+        '动画 — AnimeGo',
+      ].filter(Boolean).join(' · ');
       sendOgHtml(res, {
         title,
-        desc: truncate(stripHtml(doc.description), 200),
+        desc,
         image: doc.bannerImageUrl || doc.coverImageUrl || '',
         url: pageUrl,
         keywords: doc.genres?.slice(0, 6).join(', '),
         jsonLd: buildAnimeJsonLd(doc, pageUrl),
+        ogType: OG_TYPE_MAP[doc.format],
         breadcrumbs: buildBreadcrumbs([
           { name: '首页', url: base },
           { name: '动画', url: `${base}/season` },
