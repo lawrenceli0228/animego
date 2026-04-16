@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLang } from '../../context/LanguageContext';
 import { formatScore } from '../../utils/formatters';
+import DanmakuPicker from './DanmakuPicker';
 
 const scoreColor = (v) => v >= 75 ? '#30d158' : v >= 50 ? '#ff9f0a' : '#ff453a';
 
@@ -109,8 +110,9 @@ const s = {
   }),
 };
 
-export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear }) {
+export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear, onUpdateDanmaku, keyword }) {
   const { t, lang } = useLang();
+  const [pickerEp, setPickerEp] = useState(null);
 
   const sa = siteAnime;
   const statusLabel = sa?.status ? ({
@@ -214,14 +216,37 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
           fileName={f.fileName}
           episodeTitle={episodeMap[f.episode]?.title}
           onPlay={() => onPlay(f)}
+          onSetDanmaku={() => setPickerEp(f.episode)}
         />
       ))}
+
+      {/* DanmakuPicker modal */}
+      <DanmakuPicker
+        isOpen={pickerEp != null}
+        onClose={() => setPickerEp(null)}
+        onConfirm={(data, newAnime) => {
+          if (onUpdateDanmaku) onUpdateDanmaku(pickerEp, data, newAnime);
+          setPickerEp(null);
+        }}
+        currentAnime={anime}
+        currentEpisodeId={pickerEp != null ? episodeMap[pickerEp]?.dandanEpisodeId : null}
+        episodeNumber={pickerEp}
+        defaultKeyword={keyword}
+      />
     </div>
   );
 }
 
-function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay }) {
+const danmakuBtnStyle = (hover) => ({
+  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px',
+  fontSize: 16, color: hover ? '#5ac8fa' : 'rgba(235,235,245,0.20)',
+  flexShrink: 0, transition: 'color 150ms', lineHeight: 1,
+  title: '',
+});
+
+function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay, onSetDanmaku }) {
   const [hover, setHover] = useState(false);
+  const [dmHover, setDmHover] = useState(false);
   return (
     <div
       style={s.row(index)}
@@ -237,6 +262,15 @@ function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay }) {
         <div style={s.fileName}>{fileName}</div>
         {episodeTitle && <div style={s.epTitle}>{episodeTitle}</div>}
       </div>
+      <button
+        style={danmakuBtnStyle(dmHover)}
+        onClick={(e) => { e.stopPropagation(); onSetDanmaku(); }}
+        onMouseEnter={() => setDmHover(true)}
+        onMouseLeave={() => setDmHover(false)}
+        aria-label="Set danmaku"
+      >
+        💬
+      </button>
       <span style={s.playIcon(hover)}>▶</span>
     </div>
   );

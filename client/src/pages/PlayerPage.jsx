@@ -9,6 +9,7 @@ import ManualSearch from '../components/player/ManualSearch';
 import EpisodeFileList from '../components/player/EpisodeFileList';
 import VideoPlayer from '../components/player/VideoPlayer';
 import EpisodeNav from '../components/player/EpisodeNav';
+import DanmakuPicker from '../components/player/DanmakuPicker';
 import toast from 'react-hot-toast';
 
 const FADE_UP_CSS = `@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`;
@@ -75,7 +76,7 @@ export default function PlayerPage() {
   const { videoFiles, keyword, processFiles, getVideoUrl, getSubtitleUrl, clear: clearFiles } = useVideoFiles();
   const {
     phase, stepStatus, matchResult, error,
-    startMatch, selectManual, reset: resetMatch,
+    startMatch, selectManual, reset: resetMatch, updateEpisodeMap,
   } = useDandanMatch();
   const { danmakuList, count: danmakuCount, loadComments, clearComments } = useDandanComments();
 
@@ -85,6 +86,7 @@ export default function PlayerPage() {
   const [subtitleUrl, setSubtitleUrl] = useState(null);
   const [subtitleType, setSubtitleType] = useState(null);
   const [subtitleContent, setSubtitleContent] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Mobile guard
   if (isMobile()) {
@@ -223,6 +225,15 @@ export default function PlayerPage() {
     selectManual(anime, epNums);
   }, [videoFiles, selectManual]);
 
+  const handleUpdateDanmaku = useCallback((epNum, data, newAnime) => {
+    updateEpisodeMap(epNum, data, newAnime);
+    // If currently playing this episode, reload danmaku
+    if (playingEp === epNum && data.dandanEpisodeId) {
+      loadComments(data.dandanEpisodeId);
+    }
+    toast.success(t('player.danmakuUpdated'));
+  }, [updateEpisodeMap, playingEp, loadComments, t]);
+
   return (
     <div style={s.page}>
       <style>{FADE_UP_CSS}</style>
@@ -276,6 +287,8 @@ export default function PlayerPage() {
             videoFiles={videoFiles}
             onPlay={handlePlay}
             onClear={handleClearAll}
+            onUpdateDanmaku={handleUpdateDanmaku}
+            keyword={keyword}
           />
         </div>
       )}
@@ -301,7 +314,7 @@ export default function PlayerPage() {
                 <div style={s.epSubtitle}>{matchResult.episodeMap[playingEp].title}</div>
               )}
             </div>
-            <div style={{ minWidth: 80, textAlign: 'right' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {danmakuCount > 0 && (
                 <span style={{
                   padding: '4px 10px', borderRadius: 9999, fontSize: 12,
@@ -311,6 +324,18 @@ export default function PlayerPage() {
                   {danmakuCount} {t('player.danmakuCount')}
                 </span>
               )}
+              <button
+                style={{
+                  background: 'rgba(120,120,128,0.12)', border: 'none', borderRadius: 8,
+                  padding: '6px 12px', fontSize: 13, fontWeight: 500,
+                  color: '#5ac8fa', cursor: 'pointer', transition: 'background 150ms',
+                }}
+                onClick={() => setPickerOpen(true)}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.20)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.12)'; }}
+              >
+                💬 {t('player.setDanmaku')}
+              </button>
             </div>
           </div>
           <div style={s.playerWrap}>
@@ -330,6 +355,18 @@ export default function PlayerPage() {
               onSelect={handleEpisodeSwitch}
             />
           </div>
+          <DanmakuPicker
+            isOpen={pickerOpen}
+            onClose={() => setPickerOpen(false)}
+            onConfirm={(data, newAnime) => {
+              handleUpdateDanmaku(playingEp, data, newAnime);
+              setPickerOpen(false);
+            }}
+            currentAnime={matchResult?.anime}
+            currentEpisodeId={matchResult?.episodeMap?.[playingEp]?.dandanEpisodeId}
+            episodeNumber={playingEp}
+            defaultKeyword={keyword}
+          />
         </div>
       )}
     </div>

@@ -150,8 +150,31 @@ export default function useDandanMatch() {
     setMatchResult(null);
   }, []);
 
+  const updateEpisodeMap = useCallback((epNum, data, newAnime) => {
+    setMatchResult(prev => {
+      if (!prev) return prev;
+      const updated = {
+        ...prev,
+        episodeMap: { ...prev.episodeMap, [epNum]: data },
+      };
+      if (newAnime) {
+        updated.anime = {
+          ...prev.anime,
+          dandanAnimeId: newAnime.dandanAnimeId || prev.anime.dandanAnimeId,
+          bgmId: newAnime.bgmId || prev.anime.bgmId,
+          titleChinese: newAnime.titleChinese || newAnime.title || prev.anime.titleChinese,
+          titleNative: newAnime.titleNative || newAnime.title || prev.anime.titleNative,
+          titleRomaji: newAnime.titleRomaji || prev.anime.titleRomaji,
+          coverImageUrl: newAnime.coverImageUrl || newAnime.imageUrl || prev.anime.coverImageUrl,
+          episodes: newAnime.episodes || prev.anime.episodes,
+        };
+      }
+      return updated;
+    });
+  }, []);
+
   return {
     phase, step, stepStatus, matchResult, error,
-    startMatch, selectManual, reset, goManual,
+    startMatch, selectManual, reset, goManual, updateEpisodeMap,
   };
 }
