@@ -216,6 +216,14 @@ export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime
     }, pickedAnime || null);
   }, [selected, pickedAnime, onConfirm]);
 
+  // ESC to close
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   // Determine what to show in the body based on tab + state
@@ -266,7 +274,10 @@ export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime
                 <div
                   key={item.anilistId || item.dandanAnimeId || i}
                   style={s.animeRow}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handlePickAnime(item)}
+                  onKeyDown={e => { if (e.key === 'Enter') handlePickAnime(item); }}
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(10,132,255,0.12)'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                 >
@@ -311,7 +322,10 @@ export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime
               <div
                 key={ep.dandanEpisodeId}
                 style={s.epRow(isSelected)}
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelected(ep)}
+                onKeyDown={e => { if (e.key === 'Enter') setSelected(ep); }}
                 onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(120,120,128,0.08)'; }}
                 onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
               >

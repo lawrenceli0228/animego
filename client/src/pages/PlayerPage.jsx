@@ -305,7 +305,7 @@ export default function PlayerPage() {
             >
               ← {t('player.backToList')}
             </button>
-            <div>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={s.epTitle}>
                 EP{String(playingEp).padStart(2, '0')}
                 {matchResult?.anime?.titleChinese && ` · ${matchResult.anime.titleChinese}`}

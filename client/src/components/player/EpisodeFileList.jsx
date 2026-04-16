@@ -238,10 +238,9 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
 }
 
 const danmakuBtnStyle = (hover) => ({
-  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px',
+  background: 'none', border: 'none', cursor: 'pointer', padding: '8px 10px',
   fontSize: 16, color: hover ? '#5ac8fa' : 'rgba(235,235,245,0.20)',
   flexShrink: 0, transition: 'color 150ms', lineHeight: 1,
-  title: '',
 });
 
 function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay, onSetDanmaku }) {
