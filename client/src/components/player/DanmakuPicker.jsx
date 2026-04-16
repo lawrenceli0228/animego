@@ -236,6 +236,11 @@ export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime
         <div style={s.header}>
           <span style={s.headerTitle}>
             {t('player.setDanmaku')} — EP{String(episodeNumber).padStart(2, '0')}
+            {currentAnime?.titleChinese && (
+              <span style={{ fontWeight: 400, color: 'rgba(235,235,245,0.45)', marginLeft: 8, fontSize: 14 }}>
+                {currentAnime.titleChinese}
+              </span>
+            )}
           </span>
           <button style={s.closeBtn} onClick={onClose}>✕</button>
         </div>
