@@ -41,5 +41,9 @@ const animeCacheSchema = new mongoose.Schema({
 animeCacheSchema.index({ season: 1, seasonYear: 1 });
 animeCacheSchema.index({ genres: 1 });
 animeCacheSchema.index({ adminFlag: 1 });
+animeCacheSchema.index(
+  { titleChinese: 'text', titleNative: 'text', titleRomaji: 'text', titleEnglish: 'text' },
+  { name: 'title_text' }
+);
 
 module.exports = mongoose.model('AnimeCache', animeCacheSchema);

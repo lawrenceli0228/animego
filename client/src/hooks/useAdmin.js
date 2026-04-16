@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { getAdminStats, getEnrichmentList, updateEnrichment, resetEnrichment, flagEnrichment, healCnTitles, pauseHeal, resumeHeal, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
+import { getAdminStats, getEnrichmentList, updateEnrichment, resetEnrichment, flagEnrichment, reEnrich, healCnTitles, pauseHeal, resumeHeal, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
 import { useLang } from '../context/LanguageContext'
 
 export function useAdminStats() {
@@ -21,10 +21,10 @@ export function useAdminStats() {
   })
 }
 
-export function useEnrichmentList(page, filter, q) {
+export function useEnrichmentList(page, filter, q, sort, order) {
   return useQuery({
-    queryKey: ['admin', 'enrichment', page, filter, q],
-    queryFn: () => getEnrichmentList(page, filter, q).then(r => r.data),
+    queryKey: ['admin', 'enrichment', page, filter, q, sort, order],
+    queryFn: () => getEnrichmentList(page, filter, q, sort, order).then(r => r.data),
     staleTime: 30 * 1000,
     retry: false,
   })
@@ -37,6 +37,7 @@ export function useUpdateEnrichment() {
     mutationFn: ({ anilistId, data }) => updateEnrichment(anilistId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin'] })
+      queryClient.invalidateQueries({ queryKey: ['weeklySchedule'] })
       toast.success(t('admin.enrichUpdateSuccess'))
     },
     onError: (err) => {
@@ -69,6 +70,22 @@ export function useFlagEnrichment() {
       toast.success(t('admin.flagSuccess'))
     },
     onError: () => toast.error(t('admin.flagFailed')),
+  })
+}
+
+export function useReEnrich() {
+  const queryClient = useQueryClient()
+  const { t } = useLang()
+  return useMutation({
+    mutationFn: (version) => reEnrich(version),
+    onSuccess: (res) => {
+      const { enqueued, version } = res.data?.data ?? {}
+      queryClient.invalidateQueries({ queryKey: ['admin'] })
+      toast.success(`v${version} re-enrich: ${enqueued} enqueued`)
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.error?.message || t('admin.healFailed'))
+    },
   })
 }
 

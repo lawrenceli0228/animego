@@ -5,22 +5,12 @@
  */
 
 const AnimeCache = require('../models/AnimeCache');
+const { createRateLimitedFetch } = require('../utils/rateLimitedFetch');
 
 // ─── 速率限制 ───────────────────────────────────────────────────────────────
-const MIN_INTERVAL = 800; // ms between Bangumi requests
-let lastCallAt = 0;
-
-async function rateLimitedFetch(url) {
-  const wait = MIN_INTERVAL - (Date.now() - lastCallAt);
-  if (wait > 0) await new Promise(r => setTimeout(r, wait));
-  lastCallAt = Date.now();
-
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'AnimGo/1.0 (https://github.com/animego)' },
-    signal: AbortSignal.timeout(8000),
-  });
-  return res;
-}
+const rateLimitedFetch = createRateLimitedFetch(800, {
+  'User-Agent': 'AnimGo/1.0 (https://github.com/animego)',
+});
 
 // ─── 核心搜索函数 ───────────────────────────────────────────────────────────
 /**

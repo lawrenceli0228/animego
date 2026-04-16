@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useLang } from '../context/LanguageContext'
-import { useAdminStats, useEnrichmentList, useUpdateEnrichment, useResetEnrichment, useFlagEnrichment, useHealCnTitles, usePauseHeal, useResumeHeal, useUserList, useCreateUser, useUpdateUser, useDeleteUser } from '../hooks/useAdmin'
+import { useAdminStats, useEnrichmentList, useUpdateEnrichment, useResetEnrichment, useFlagEnrichment, useReEnrich, useHealCnTitles, usePauseHeal, useResumeHeal, useUserList, useCreateUser, useUpdateUser, useDeleteUser } from '../hooks/useAdmin'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 
 const FILTERS = [
@@ -145,7 +145,7 @@ function HealSmallBtn({ onClick, disabled, children }) {
   )
 }
 
-function EnrichmentBar({ v0, v1, v2, v3, noCn, queue, total, onHeal, onPause, onResume, healing }) {
+function EnrichmentBar({ v0, v1, v2, v3, noCn, queue, total, onHeal, onPause, onResume, healing, onReEnrich, reEnriching }) {
   if (!total) return null
   const pct = (n) => (n / total) * 100
   const queueTotal = queue ? queue.phase1 + queue.phase4 + queue.v3 : 0
@@ -165,9 +165,18 @@ function EnrichmentBar({ v0, v1, v2, v3, noCn, queue, total, onHeal, onPause, on
       </div>
       <div style={S.enrichLegend}>
         <span style={S.legendItem}><span style={S.legendDot('#5ac8fa')} /> v3 {v3}</span>
-        <span style={S.legendItem}><span style={S.legendDot('#30d158')} /> v2 {v2}</span>
-        <span style={S.legendItem}><span style={S.legendDot('#ff9f0a')} /> v1 {v1}</span>
-        <span style={S.legendItem}><span style={S.legendDot('#ff453a')} /> v0 {v0}</span>
+        <span style={S.legendItem}>
+          <span style={S.legendDot('#30d158')} /> v2 {v2}
+          {v2 > 0 && <HealSmallBtn onClick={() => onReEnrich(2)} disabled={reEnriching}>Re-enrich</HealSmallBtn>}
+        </span>
+        <span style={S.legendItem}>
+          <span style={S.legendDot('#ff9f0a')} /> v1 {v1}
+          {v1 > 0 && <HealSmallBtn onClick={() => onReEnrich(1)} disabled={reEnriching}>Re-enrich</HealSmallBtn>}
+        </span>
+        <span style={S.legendItem}>
+          <span style={S.legendDot('#ff453a')} /> v0 {v0}
+          {v0 > 0 && <HealSmallBtn onClick={() => onReEnrich(0)} disabled={reEnriching}>Re-enrich</HealSmallBtn>}
+        </span>
       </div>
 
       {/* V3 batch progress */}
@@ -257,15 +266,18 @@ export default function AdminDashboard() {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({ username: '', email: '' })
   const [deleteConfirm, setDeleteConfirm] = useState(null)
-  // Enrichment editing state
+  // Enrichment sorting + editing state
+  const [sortField, setSortField] = useState('')
+  const [sortOrder, setSortOrder] = useState('')
   const [enrichEditId, setEnrichEditId] = useState(null)
   const [enrichEditForm, setEnrichEditForm] = useState({ titleChinese: '', bgmId: '', bangumiScore: '' })
 
   const { data: stats } = useAdminStats()
-  const { data, isLoading, isError } = useEnrichmentList(page, filter, searchQuery)
+  const { data, isLoading, isError } = useEnrichmentList(page, filter, searchQuery, sortField, sortOrder)
   const enrichUpdateMut = useUpdateEnrichment()
   const resetMut = useResetEnrichment()
   const flagMut = useFlagEnrichment()
+  const reEnrichMut = useReEnrich()
   const healMut = useHealCnTitles()
   const pauseMut = usePauseHeal()
   const resumeMut = useResumeHeal()
@@ -276,6 +288,16 @@ export default function AdminDashboard() {
 
   if (!user || user.role !== 'admin') return <Navigate to="/" replace />
 
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortOrder(field === 'bangumiVersion' || field === 'bangumiScore' ? 'desc' : 'asc')
+    }
+    setPage(1)
+  }
+  const sortIndicator = (field) => sortField === field ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : ''
   const handleFilter = (f) => { setFilter(f); setPage(1) }
   const handleSearch = (e) => {
     e.preventDefault()
@@ -330,7 +352,7 @@ export default function AdminDashboard() {
           <StatCard value={stats.subscriptions} label={t('admin.statSubs')} />
           <StatCard value={stats.follows} label={t('admin.statFollows')} />
           <StatCard value={stats.flagged} label={t('admin.statFlagged')} color={stats.flagged > 0 ? '#ff9f0a' : undefined} />
-          <EnrichmentBar v0={stats.enrichment.v0} v1={stats.enrichment.v1} v2={stats.enrichment.v2} v3={stats.enrichment.v3} noCn={stats.enrichment.noCn} queue={stats.queue} total={stats.anime} onHeal={() => healMut.mutate()} onPause={() => pauseMut.mutate()} onResume={() => resumeMut.mutate()} healing={healMut.isPending} />
+          <EnrichmentBar v0={stats.enrichment.v0} v1={stats.enrichment.v1} v2={stats.enrichment.v2} v3={stats.enrichment.v3} noCn={stats.enrichment.noCn} queue={stats.queue} total={stats.anime} onHeal={() => healMut.mutate()} onPause={() => pauseMut.mutate()} onResume={() => resumeMut.mutate()} healing={healMut.isPending} onReEnrich={(v) => reEnrichMut.mutate(v)} reEnriching={reEnrichMut.isPending} />
         </div>
       )}
 
@@ -383,12 +405,12 @@ export default function AdminDashboard() {
             <table style={S.table}>
               <thead>
                 <tr>
-                  <th style={S.th}>AniList ID</th>
-                  <th style={S.th}>{t('admin.colTitle')}</th>
-                  <th style={S.th}>{t('admin.colTitleCn')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('anilistId')}>AniList ID{sortIndicator('anilistId')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('titleRomaji')}>{t('admin.colTitle')}{sortIndicator('titleRomaji')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('titleChinese')}>{t('admin.colTitleCn')}{sortIndicator('titleChinese')}</th>
                   <th style={S.th}>BGM ID</th>
-                  <th style={S.th}>{t('admin.colVersion')}</th>
-                  <th style={S.th}>{t('admin.colScore')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('bangumiVersion')}>{t('admin.colVersion')}{sortIndicator('bangumiVersion')}</th>
+                  <th style={{ ...S.th, cursor: 'pointer' }} onClick={() => handleSort('bangumiScore')}>{t('admin.colScore')}{sortIndicator('bangumiScore')}</th>
                   <th style={S.th}>{t('admin.colFlag')}</th>
                   <th style={S.th}>{t('admin.colActions')}</th>
                 </tr>

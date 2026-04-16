@@ -1,0 +1,68 @@
+{
+  "date": "2026-04-09",
+  "window": "7d",
+  "metrics": {
+    "commits": 51,
+    "contributors": 1,
+    "prs_merged": 2,
+    "insertions": 8313,
+    "deletions": 1859,
+    "net_loc": 6454,
+    "test_loc": 2069,
+    "test_ratio": 0.25,
+    "active_days": 8,
+    "sessions": 17,
+    "deep_sessions": 2,
+    "avg_session_minutes": 25,
+    "estimated_hours": 7.0,
+    "loc_per_session_hour": 1188,
+    "feat_pct": 0.235,
+    "fix_pct": 0.431,
+    "style_pct": 0.059,
+    "chore_pct": 0.059,
+    "test_pct": 0.020,
+    "docs_pct": 0.078,
+    "refactor_pct": 0.020,
+    "merge_pct": 0.078,
+    "peak_hour": 16,
+    "ai_assisted_commits": 51
+  },
+  "authors": {
+    "lawrenceli0228": {
+      "commits": 51,
+      "insertions": 8313,
+      "deletions": 1859,
+      "test_ratio": 0.25,
+      "top_area": "client/src/components/anime"
+    }
+  },
+  "prs": [
+    {"number": 4, "title": "feat: Community Phase 3", "additions": 3657, "deletions": 855},
+    {"number": 5, "title": "Community phase4", "additions": 4496, "deletions": 1064}
+  ],
+  "version_range": ["0.3.0.0", "0.4.0.0"],
+  "streak_days": 8,
+  "tweetable": "Week of Apr 2: 51 commits, 8.3k LOC, 25% tests, Phase 3+4 shipped — characters, admin, Docker deploy, security hardening, domain migration | v0.3→v0.4 | Streak: 8d 🔥",
+  "test_health": {
+    "total_test_files": 27,
+    "tests_added_this_period": 18,
+    "test_files_changed": 18
+  },
+  "skill_usage": {
+    "ship": 2,
+    "design-review": 1,
+    "qa": 1,
+    "browse": 2,
+    "plan-ceo-review": 2,
+    "retro": 2
+  },
+  "hotspots": [
+    "server/services/anilist.service.js (11)",
+    "client/src/locales/zh.js (9)",
+    "client/src/locales/en.js (9)",
+    "CHANGELOG.md (8)",
+    "client/src/hooks/useAnime.js (7)",
+    "server/services/bangumi.service.js (6)"
+  ],
+  "prev_retro": "2026-04-08-1.json"
+}

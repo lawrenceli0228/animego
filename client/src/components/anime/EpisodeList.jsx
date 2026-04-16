@@ -33,8 +33,9 @@ export default function EpisodeList({ anime }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: 10 }}>
         {Array.from({ length: total }, (_, i) => i + 1).map(ep => {
-          const watched = currentEp > 0 && ep < currentEp
-          const isCurrent = currentEp > 0 && ep === currentEp
+          const isCompleted = sub?.status === 'completed'
+          const watched = isCompleted || (currentEp > 0 && ep < currentEp) || (currentEp > 0 && currentEp >= total && ep <= currentEp)
+          const isCurrent = !isCompleted && currentEp > 0 && ep === currentEp && currentEp < total
           const isOpen = openEp === ep
 
           let bg = 'rgba(255,255,255,0.04)'

@@ -2,7 +2,8 @@ const AnimeCache = require('../models/AnimeCache');
 const User = require('../models/User');
 const Subscription = require('../models/Subscription');
 const Follow = require('../models/Follow');
-const { enqueueEnrichment, enqueueV3Enrichment, getQueueStatus, startV3Batch, pauseV3, resumeV3 } = require('../services/bangumi.service');
+const { enqueueEnrichment, enqueuePhase4Enrichment, enqueueV3Enrichment, getQueueStatus, startV3Batch, pauseV3, resumeV3 } = require('../services/bangumi.service');
+const { warmAllSeasons, clearScheduleCache } = require('../services/anilist.service');
 
 // GET /api/admin/stats
 exports.getStats = async (req, res, next) => {
@@ -74,10 +75,16 @@ exports.listEnrichment = async (req, res, next) => {
 
     const filter = conditions.length > 0 ? (conditions.length === 1 ? conditions[0] : { $and: conditions }) : {};
 
+    // Sorting: ?sort=titleChinese&order=asc
+    const sortField = req.query.sort || 'cachedAt';
+    const sortOrder = req.query.order === 'asc' ? 1 : -1;
+    const allowedSorts = ['cachedAt', 'titleChinese', 'titleRomaji', 'bangumiVersion', 'bangumiScore', 'anilistId'];
+    const sortKey = allowedSorts.includes(sortField) ? sortField : 'cachedAt';
+
     const [items, total] = await Promise.all([
       AnimeCache.find(filter)
         .select('anilistId titleRomaji titleChinese bgmId bangumiVersion bangumiScore adminFlag')
-        .sort({ cachedAt: -1 })
+        .sort({ [sortKey]: sortOrder })
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -185,8 +192,54 @@ exports.updateEnrichment = async (req, res, next) => {
     ).select('anilistId titleRomaji titleChinese bgmId bangumiScore adminFlag');
     if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: '番剧不存在' } });
 
+    if (updates.titleChinese !== undefined) clearScheduleCache();
     console.log(`[Admin] ${req.user.username} updated enrichment for anilistId=${anilistId}:`, updates);
     res.json({ data: doc });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/enrichment/re-enrich — 批量重新富化指定版本
+exports.reEnrich = async (req, res, next) => {
+  try {
+    const version = parseInt(req.query.version);
+    if (![0, 1, 2].includes(version)) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: '版本必须为 0、1 或 2' } });
+    }
+
+    const filter = version === 0
+      ? { $or: [{ bangumiVersion: 0 }, { bangumiVersion: { $exists: false } }] }
+      : { bangumiVersion: version };
+
+    const docs = await AnimeCache.find(filter, {
+      anilistId: 1, titleNative: 1, titleRomaji: 1, bgmId: 1, bangumiVersion: 1,
+    }).lean();
+
+    if (docs.length === 0) {
+      return res.json({ data: { enqueued: 0, version } });
+    }
+
+    if (version <= 0) {
+      enqueueEnrichment(docs.map(d => ({ ...d, bangumiVersion: 0 })));
+    } else if (version === 1) {
+      enqueuePhase4Enrichment(docs);
+    } else {
+      // v2: entries without bgmId can't be V3-healed — promote directly to v3
+      const withBgm = docs.filter(d => d.bgmId);
+      const noBgmIds = docs.filter(d => !d.bgmId).map(d => d.anilistId);
+      if (noBgmIds.length > 0) {
+        await AnimeCache.updateMany(
+          { anilistId: { $in: noBgmIds } },
+          { $set: { bangumiVersion: 3 } }
+        );
+      }
+      if (withBgm.length > 0) {
+        enqueueV3Enrichment(withBgm);
+        startV3Batch(withBgm.length);
+      }
+    }
+
+    console.log(`[Admin] ${req.user.username} triggered re-enrich v${version} for ${docs.length} anime`);
+    res.json({ data: { enqueued: docs.length, version } });
   } catch (err) { next(err); }
 };
 
@@ -334,5 +387,17 @@ exports.deleteUser = async (req, res, next) => {
 
     console.log(`[Admin] ${req.user.username} deleted user ${user.username}`);
     res.json({ data: { deleted: true, username: user.username } });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/warm-all?startYear=2014
+exports.warmAll = async (req, res, next) => {
+  try {
+    const startYear = parseInt(req.query.startYear) || 2014;
+    res.json({ data: { message: `Warming all seasons from ${startYear}. Check server logs.` } });
+    // Run in background after response is sent
+    warmAllSeasons(startYear).catch(err =>
+      console.error('❌ warmAllSeasons error:', err.message)
+    );
   } catch (err) { next(err); }
 };

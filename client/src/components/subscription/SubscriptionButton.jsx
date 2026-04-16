@@ -38,6 +38,7 @@ export default function SubscriptionButton({ anilistId, episodes }) {
   const update = useUpdateSubscription()
   const remove = useRemoveSubscription()
   const [epInput, setEpInput] = useState(null)
+  const [statusHint, setStatusHint] = useState(null)
   const [scoreOpen, setScoreOpen] = useState(false)
   const scoreRef = useRef(null)
 
@@ -72,8 +73,15 @@ export default function SubscriptionButton({ anilistId, episodes }) {
     const val = Math.max(0, Math.min(ep, episodes || 9999))
     setEpInput(val)
     try {
-      if (!sub) await add.mutateAsync({ anilistId, status: 'watching', currentEpisode: val })
-      else await update.mutateAsync({ anilistId, currentEpisode: val })
+      const autoComplete = episodes > 0 && val >= episodes
+      const autoResume = episodes > 0 && val < episodes && currentStatus === 'completed'
+      const newStatus = autoComplete ? 'completed' : autoResume ? 'watching' : undefined
+      if (!sub) await add.mutateAsync({ anilistId, status: autoComplete ? 'completed' : 'watching', currentEpisode: val })
+      else await update.mutateAsync({ anilistId, currentEpisode: val, ...(newStatus && { status: newStatus }) })
+      if (autoComplete) {
+        setStatusHint('completed')
+        setTimeout(() => setStatusHint(null), 2500)
+      }
     } catch { toast.error('!') }
   }
 
@@ -103,6 +111,20 @@ export default function SubscriptionButton({ anilistId, episodes }) {
       </select>
 
       {sub && (
+        <div style={{ position: 'relative' }}>
+          {statusHint && (
+            <div style={{
+              position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)',
+              background: statusHint === 'completed' ? 'rgba(48,209,88,0.15)' : 'rgba(10,132,255,0.15)',
+              border: `1px solid ${statusHint === 'completed' ? 'rgba(48,209,88,0.4)' : 'rgba(10,132,255,0.4)'}`,
+              borderRadius: 8, padding: '4px 12px', whiteSpace: 'nowrap',
+              fontSize: 12, fontWeight: 600,
+              color: statusHint === 'completed' ? '#30d158' : '#0a84ff',
+              animation: 'fadeUp 0.3s ease both',
+            }}>
+              {statusLabels[statusHint]} ✓
+            </div>
+          )}
         <div style={s.epWrap}>
           <button style={s.epBtn} onClick={() => handleEp(currentEp - 1)}>−</button>
           <span style={s.epNum}>{currentEp}</span>
@@ -110,6 +132,7 @@ export default function SubscriptionButton({ anilistId, episodes }) {
           <span style={{ fontSize:12, color:'rgba(235,235,245,0.30)', marginLeft:4 }}>
             {episodes ? `/ ${episodes} ${t('sub.epUnit')}` : t('sub.epUnit')}
           </span>
+        </div>
         </div>
       )}
 

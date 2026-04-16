@@ -13,7 +13,7 @@ const MIN_INTERVAL  = 700; // ms between AniList requests ≈ 85 req/min
 // ─── Rate-limit outgoing AniList requests ────────────────────────────────────
 let lastRequestTime = 0;
 
-async function queryAniList(query, variables) {
+async function queryAniList(query, variables, _retries = 0) {
   const wait = MIN_INTERVAL - (Date.now() - lastRequestTime);
   if (wait > 0) await new Promise(r => setTimeout(r, wait));
   lastRequestTime = Date.now();
@@ -24,12 +24,18 @@ async function queryAniList(query, variables) {
     body:    JSON.stringify({ query, variables })
   });
 
+  if (res.status === 429) {
+    if (_retries >= 3) {
+      throw Object.assign(new Error('AniList 请求过于频繁，请稍后再试'), { status: 429 });
+    }
+    const retryAfter = parseInt(res.headers.get('retry-after')) || 60;
+    console.log(`⏳ AniList 429 — waiting ${retryAfter}s before retry ${_retries + 1}/3`);
+    await new Promise(r => setTimeout(r, retryAfter * 1000));
+    return queryAniList(query, variables, _retries + 1);
+  }
+
   if (!res.ok) {
-    const status = res.status === 429 ? 429 : 502;
-    throw Object.assign(
-      new Error(res.status === 429 ? 'AniList 请求过于频繁，请稍后再试' : `AniList API error: ${res.status}`),
-      { status }
-    );
+    throw Object.assign(new Error(`AniList API error: ${res.status}`), { status: 502 });
   }
 
   const { data, errors } = await res.json();
@@ -160,9 +166,60 @@ function getCurrentSeasonInfo() {
   return { season: 'FALL', year };
 }
 
+const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
+
 async function warmCurrentSeason() {
   const { season, year } = getCurrentSeasonInfo();
   await warmSeasonCache(season, year);
+
+  // Re-enqueue orphaned v0 entries (enrichment interrupted by previous restart)
+  const orphans = await AnimeCache.find(
+    { $or: [{ bangumiVersion: 0 }, { bangumiVersion: { $exists: false } }] },
+    { anilistId: 1, titleNative: 1, titleRomaji: 1, bangumiVersion: 1 }
+  ).lean();
+  if (orphans.length > 0) {
+    enqueueEnrichment(orphans);
+    console.log(`🔧 Re-enqueued ${orphans.length} orphaned v0 entries for enrichment`);
+  }
+
+  // Every 24h: re-warm current year + next season (covers upcoming new anime)
+  setInterval(() => {
+    const cur = getCurrentSeasonInfo();
+    const curIdx = SEASONS.indexOf(cur.season);
+    const nextIdx = (curIdx + 1) % SEASONS.length;
+    const nextYear = nextIdx === 0 ? cur.year + 1 : cur.year;
+    console.log(`🔄 Scheduled re-warm: ${cur.year} → ${SEASONS[nextIdx]} ${nextYear}`);
+    warmAllSeasons(cur.year, { endSeason: SEASONS[nextIdx], endYear: nextYear }).catch(err =>
+      console.error('❌ Scheduled warm failed:', err.message)
+    );
+  }, 24 * 60 * 60 * 1000);
+}
+
+// Warm seasons from startYear up to endSeason/endYear (inclusive)
+let warmAllRunning = false;
+async function warmAllSeasons(startYear = 2014, { endSeason, endYear } = {}) {
+  if (warmAllRunning) { console.log('⚠️ warmAllSeasons already running, skipping'); return; }
+  warmAllRunning = true;
+  try {
+    const cur = getCurrentSeasonInfo();
+    const limitYear   = endYear   ?? cur.year;
+    const limitIdx    = endSeason ? SEASONS.indexOf(endSeason) : SEASONS.indexOf(cur.season);
+    let warmed = 0, skipped = 0;
+    for (let y = startYear; y <= limitYear; y++) {
+      for (let s = 0; s < SEASONS.length; s++) {
+        if (y === limitYear && s > limitIdx) break;
+        const key = `${SEASONS[s]}-${y}`;
+        if (warmedSeasons.has(key)) { skipped++; continue; }
+
+        await warmSeasonCache(SEASONS[s], y);
+        if (warmedSeasons.has(key)) warmed++;
+
+        // 10s cooldown between seasons to stay within AniList rate limits
+        await new Promise(r => setTimeout(r, 10_000));
+      }
+    }
+    console.log(`✅ warmAllSeasons complete (${warmed} warmed, ${skipped} already cached)`);
+  } finally { warmAllRunning = false; }
 }
 
 // ─── Seasonal anime ───────────────────────────────────────────────────────────
@@ -170,7 +227,6 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   const pageNum    = parseInt(page);
   const perPageNum = parseInt(perPage);
   const yearNum    = parseInt(year);
-  const freshSince = new Date(Date.now() - CACHE_TTL_MS);
   const key        = `${season}-${yearNum}`;
 
   const { warmed, total } = getWarmStatus(season, yearNum);
@@ -179,13 +235,14 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   if (warmed) {
     const skip  = (pageNum - 1) * perPageNum;
     const anime = await AnimeCache.find({
-      season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+      season, seasonYear: yearNum,
       genres: { $nin: ['Hentai'] }
     })
       .sort({ averageScore: -1 })
       .skip(skip)
       .limit(perPageNum)
       .lean();
+
 
     return {
       pageInfo: {
@@ -204,16 +261,18 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
     warmSeasonCache(season, yearNum).catch(() => {});
   }
 
-  // ③ Serve partial MongoDB data while warming (avoids waiting)
+  // ③ Serve cached MongoDB data while warming (avoids waiting)
+  //    No cachedAt filter — stale data is better than missing data;
+  //    the background warm (②) will refresh it.
   const totalCached = await AnimeCache.countDocuments({
-    season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+    season, seasonYear: yearNum,
     genres: { $nin: ['Hentai'] }
   });
 
   if (totalCached > 0) {
     const skip  = (pageNum - 1) * perPageNum;
     const anime = await AnimeCache.find({
-      season, seasonYear: yearNum, cachedAt: { $gt: freshSince },
+      season, seasonYear: yearNum,
       genres: { $nin: ['Hentai'] }
     })
       .sort({ averageScore: -1 })
@@ -224,6 +283,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
     if (anime.length > 0) {
       const unenriched = anime.filter(a => !a.bangumiVersion);
       if (unenriched.length) enqueueEnrichment(unenriched);
+
       return {
         pageInfo: {
           total:       totalCached,
@@ -238,8 +298,10 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   }
 
   // ④ Cold start (nothing cached yet) → fetch page directly, background warm continues
+
+  const anilistPerPage = Math.min(perPageNum, 50); // AniList API caps at 50
   const data      = await queryAniList(SEASONAL_ANIME_QUERY, {
-    season, seasonYear: yearNum, page: pageNum, perPage: perPageNum
+    season, seasonYear: yearNum, page: pageNum, perPage: anilistPerPage
   });
   const animeList = data.Page.media.map(normalize);
   await upsertCache(animeList);
@@ -251,6 +313,7 @@ async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
   const anime = await AnimeCache.find({ anilistId: { $in: ids } })
     .sort({ averageScore: -1 })
     .lean();
+
   return { pageInfo: data.Page.pageInfo, anime };
 }
 
@@ -399,8 +462,10 @@ async function getWeeklySchedule() {
   return result;
 }
 
+function clearScheduleCache() { scheduleCache.clear(); }
+
 module.exports = {
   getSeasonalAnime, searchAnime, getAnimeDetail, getWeeklySchedule,
-  warmSeasonCache, warmCurrentSeason,
-  upsertCache, normalize
+  warmSeasonCache, warmCurrentSeason, warmAllSeasons,
+  upsertCache, normalize, clearScheduleCache
 };

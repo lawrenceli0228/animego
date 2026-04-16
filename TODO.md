@@ -332,3 +332,24 @@ _记录时间：2026-04-03_
 ---
 
 _记录时间：2026-04-07（CEO Review 补充）_
+
+---
+
+## 待办十八：部署后 Google Search Console 操作
+
+**背景：** SEO 修复已提交（`6c170ef`），修复了 SPA 壳 canonical 硬编码首页、未缓存 anime 页穿透到错误 canonical、TVSeries 无评分富片段等问题。部署后需要在 GSC 中触发重新索引。
+
+**部署后操作清单：**
+
+- [ ] URL 检查 → `https://animegoclub.com/` → 请求编入索引
+- [ ] URL 检查 → `https://animegoclub.com/anime` → 验证 301 重定向生效
+- [ ] 挑几个高分动画页面提交重新抓取（如 `/anime/154587`、`/anime/114129`）
+- [ ] Sitemap → 删除旧的 → 重新提交 `https://animegoclub.com/sitemap.xml`
+- [ ] 删除 → 临时删除 `https://animegoclub.com/anime`（加速清除旧索引）
+- [ ] 索引 → 网页 → 检查"未编入索引的原因"，确认"重复网页"类型是否减少
+
+**Effort：** S（人工 10min）｜**Priority：** P1｜**Depends on：** 部署 community-phase4 分支
+
+---
+
+_记录时间：2026-04-16_

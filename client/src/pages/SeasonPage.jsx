@@ -68,7 +68,7 @@ export default function SeasonPage() {
   const setSeason = (s) => { setParams({ season: s, year }); setVisibleCount(INITIAL_COUNT) }
   const setYear   = (y) => { setParams({ season, year: y }); setVisibleCount(INITIAL_COUNT) }
 
-  const { data, isLoading, error, dataUpdatedAt } = useSeasonalAnime(season, year, 1, 200)
+  const { data, isLoading, error } = useSeasonalAnime(season, year, 1, 200)
 
   const filtered = useMemo(() => {
     if (!data?.data) return []
@@ -140,7 +140,7 @@ export default function SeasonPage() {
         </div>
       </div>
 
-      <AnimeGrid key={dataUpdatedAt} animeList={displayed} loading={isLoading} error={error} />
+      <AnimeGrid animeList={displayed} loading={isLoading} error={error} />
 
       {hasMore && (
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 32 }}>

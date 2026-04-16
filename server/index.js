@@ -15,6 +15,7 @@ const commentRoutes      = require('./routes/comment.routes');
 const userRoutes         = require('./routes/user.routes');
 const danmakuRoutes      = require('./routes/danmaku.routes');
 const adminRoutes        = require('./routes/admin.routes');
+const dandanplayRoutes   = require('./routes/dandanplay.routes');
 const { authenticateToken } = require('./middleware/auth.middleware');
 const profileCtrl        = require('./controllers/profile.controller');
 const ogTagsMiddleware   = require('./middleware/ogTags');
@@ -53,6 +54,7 @@ app.use('/api/comments',      commentRoutes);
 app.use('/api/users',         userRoutes);
 app.use('/api/danmaku',       danmakuRoutes);
 app.use('/api/admin',         adminRoutes);
+app.use('/api/dandanplay',   dandanplayRoutes);
 app.get('/api/feed',          authenticateToken, profileCtrl.getFeed);
 
 // Health check
@@ -70,12 +72,23 @@ app.get('/robots.txt', (req, res) => {
 Allow: /
 Disallow: /admin
 Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /profile
+Disallow: /player
+Disallow: /u/
 
 Host: https://animegoclub.com
-Sitemap: ${site}/sitemap.xml
+Sitemap: https://animegoclub.com/sitemap.xml
 `);
 });
 app.get('/sitemap.xml', sitemapMiddleware);
+
+// 301 redirect orphan /anime (no ID) to homepage — prevents Google indexing it as a duplicate
+app.get('/anime', (req, res) => res.redirect(301, '/'));
+
 app.use(ogTagsMiddleware);
 
 // Serve React app in production
@@ -102,10 +115,9 @@ const PORT = process.env.PORT || 5001;
   server.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 
-    // Pre-populate current season into MongoDB (non-blocking, runs in background)
+    // Pre-populate current season + schedule 24h re-warm
     const { warmCurrentSeason } = require('./services/anilist.service');
-    warmCurrentSeason().catch(err =>
-      console.error('❌ Season cache warm failed:', err.message)
-    );
+    warmCurrentSeason()
+      .catch(err => console.error('❌ Season warm failed:', err.message));
   });
 })();
