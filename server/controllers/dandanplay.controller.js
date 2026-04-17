@@ -1,4 +1,34 @@
 const dandanplay = require('../services/dandanplay.service');
+const bangumi = require('../services/bangumi.service');
+const AnimeCache = require('../models/AnimeCache');
+
+const BGM_FALLBACK_TIMEOUT_MS = 2000;
+
+/**
+ * Find the best-matching AnimeCache doc for Phase 1 enrichment.
+ * Falls through 3 levels: dandanplay title → user keyword → bangumi.tv bgmId lookup.
+ * Returns null if all miss; never throws.
+ */
+async function findSiteAnime(title, userKeyword) {
+  if (title) {
+    const byTitle = await dandanplay.searchAnimeCache(title);
+    if (byTitle[0]) return byTitle[0];
+  }
+  if (userKeyword && userKeyword !== title) {
+    const byKeyword = await dandanplay.searchAnimeCache(userKeyword);
+    if (byKeyword[0]) return byKeyword[0];
+  }
+  // Last resort: resolve bgmId via bangumi.tv, then look up AnimeCache by bgmId.
+  // Guarded by timeout so a slow bgm.tv never blocks /match.
+  const bgm = await Promise.race([
+    bangumi.fetchBangumiData(title, userKeyword).catch(() => null),
+    new Promise(resolve => setTimeout(() => resolve(null), BGM_FALLBACK_TIMEOUT_MS)),
+  ]);
+  if (bgm?.bgmId) {
+    return AnimeCache.findOne({ bgmId: bgm.bgmId }).lean();
+  }
+  return null;
+}
 
 /** Pick fields from an AnimeCache document for the siteAnime response */
 function pickSiteAnime(doc) {
@@ -38,12 +68,11 @@ async function match(req, res, next) {
           const episodeMap = dandanplay.buildEpisodeMap(epData.episodes, episodes);
           await matchUnmappedFiles(episodeMap, episodes, files);
           if (Object.keys(episodeMap).length > 0) {
-            // Try to find matching anime in our own database
-            const cacheHits = await dandanplay.searchAnimeCache(epData.title);
+            const siteHit = await findSiteAnime(epData.title, keyword);
             return res.json({
               matched: true,
               anime: { titleNative: epData.title, coverImageUrl: epData.imageUrl },
-              siteAnime: pickSiteAnime(cacheHits[0]),
+              siteAnime: pickSiteAnime(siteHit),
               episodeMap,
               source: 'dandanplay',
             });

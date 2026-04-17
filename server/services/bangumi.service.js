@@ -421,6 +421,7 @@ function getQueueStatus() {
 }
 
 module.exports = {
+  fetchBangumiData,
   enqueueEnrichment, enqueuePhase4Enrichment, enqueueV3Enrichment,
   getQueueStatus, startV3Batch, pauseV3, resumeV3,
 };

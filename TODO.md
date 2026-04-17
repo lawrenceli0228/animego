@@ -346,3 +346,18 @@ _记录时间：2026-04-07（CEO Review 补充）_
 
 _记录时间：2026-04-16_
 _完成时间：2026-04-17_
+
+---
+
+## 待办：enqueueEnrichment 支持 bgmId 键入队
+
+**What:** `server/services/bangumi.service.js:58` 的后台富化队列当前以 `anilistId` 为唯一键。对于仅能从 dandanplay + bangumi.tv 拿到 `bgmId`（没有 anilistId）的番剧，无法触发后台富化。
+
+**Why:** `/plan-eng-review` 2026-04-18 修复"dandanplay 命中但 AnimeCache 未覆盖导致富化缺失"时发现。当前 fallback 链到"用 bgmId 查 AnimeCache"为止；若 AnimeCache 完全没这条，本次请求静默降级为 `siteAnime:null`，下次访问仍然缺失。若队列支持 bgmId 入队，首次命中后后台能拉 AniList 补齐，第二次访问就有富化。
+
+**Pros:** 让"冷门番剧首次访问→第二次自动有富化"闭环。用户体验完整度上一个台阶。
+**Cons:** 改 enqueueMap 键结构（或新增第二张 map by bgmId），需要协调 AniList 反查（bgmId → anilistId 通常要先搜 AniList）。~20 行代码，但涉及两个已稳定运行的 service。
+**Context:** 修复路径在 `server/controllers/dandanplay.controller.js` 的 Phase 1 富化 fallback，bgmId 来自 `bangumi.service.fetchBangumiData`。入队后的拉取需要 AniList 的"按 bgmId 搜"或"按标题搜后匹配 bgmId"兜底。
+**Depends on / blocked by:** 无硬阻塞，优先级低。可独立 PR。
+
+_记录时间：2026-04-18（/plan-eng-review）_
