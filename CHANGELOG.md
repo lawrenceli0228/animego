@@ -2,6 +2,43 @@
 
 ---
 
+## [1.0.4] - 2026-04-17
+
+### 修复 token 过期时 401 级联导致的 React 崩溃
+
+**症状：**
+- access token 过期后进入弹幕播放页，控制台连续报 `/api/auth/refresh` 401、两条 `/api/dandanplay/comments/xxx` 401，紧接着 React minified error #300 和 #520，整棵树白屏
+- 未登录用户打开播放页也触发同一链路（弹弹 play 数据是公开的，不该绑登录）
+
+**根因链：**
+1. access token 过期 → `comments` 请求 401
+2. axios 响应拦截器调用 `/auth/refresh` → refresh cookie 也已过期，再 401
+3. 同步栈内 `setAccessToken(null)` + `dispatchEvent('auth:expired')` + `Promise.reject`
+4. `AuthContext` 监听器同步 `setUser(null)`
+5. `ProtectedRoute` 看到 `!user` 立即 `<Navigate to="/login">`，`PlayerPage` 开始卸载
+6. 此时 `useDandanComments` 的 catch 分支还在跑 `setState`，对一个正在卸载的组件写状态 → React #300（render 期间 update 另一个组件）
+7. 另一条 pending 请求同步走完 catch，触发 #520 包裹错误
+
+**修复（方案 D 全量落地）：**
+
+1. **公开端点去掉 auth gate** — `server/routes/dandanplay.routes.js` 四个路由（`match` / `search` / `comments/:episodeId` / `episodes/:animeId`）是弹弹 play 的透传代理，本身无用户态，不需要登录。移除 `authenticateToken`，游客也能看弹幕。IP 级 `apiLimiter`（300 req/min）已经兜底抗刷。
+
+2. **`auth:expired` 派发延后到 microtask** — `client/src/api/axiosClient.js` 的 refresh 失败分支，把 `window.dispatchEvent(new CustomEvent('auth:expired'))` 包进 `queueMicrotask(() => ...)`。`setUser(null)` 不再发生在 axios reject 的同步栈里，卸载路由的时机也就不会撞到仍 pending 的 setState。
+
+3. **`useIsMounted` + 异步 setState 护栏** — 新增 `client/src/hooks/useIsMounted.js`（useRef + useEffect 清理）。`useDandanComments` 和 `useDandanMatch` 所有 await 点后、catch/finally 里的 `setState` 调用前，先 `if (!mounted.current) return;`。组件卸载后 async 回调静默退出，不再触发警告。
+
+4. **401 静默处理** — 两个 hook 的 catch 里，遇到 `err.response?.status === 401` 时重置 state 并 `return`，不把 401 当错误往 UI 抛。401 的登出流程由全局 `auth:expired` 事件统一处理，hook 自己不该重复报。
+
+**测试：**
+- 新增 `client/src/__tests__/useDandanComments.test.jsx`（6 用例）：happy path、静默 401、非 401 错误仍冒泡、卸载后 pending resolve 不 setState、`clearComments` 重置、falsy episodeId 短路
+- 新增 `client/src/__tests__/axiosClient.test.js`（3 用例）：用 `vi.hoisted` 捕获拦截器 handler，验证 microtask 延迟派发、非 401 直通、refresh 端点自身 401 不再递归
+
+### 提交记录
+
+- `c58e09e` fix(player): stop 401 cascade from crashing react tree on token expiry
+
+---
+
 ## [1.0.3] - 2026-04-17
 
 ### 播放器字幕大小与位置滑块
