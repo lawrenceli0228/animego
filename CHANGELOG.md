@@ -2,6 +2,37 @@
 
 ---
 
+## [1.0.2] - 2026-04-17
+
+### 番剧详情页新增弹幕播放入口
+
+**「▶ 弹幕播放」按钮：**
+- 番剧详情页在「磁力资源」旁新增播放入口，点击在新标签页打开本地弹幕播放器
+- 文案从通用「播放」改为「▶ 弹幕播放」，明确与 VLC 等通用播放器的差异（弹幕是核心卖点）
+- `window.open('/player', '_blank', 'noopener,noreferrer')`：新标签页隔离，防止 `window.opener` 反向访问详情页
+- `aria-label` 包含「在新标签页打开」提示，满足 WCAG 3.2.5（屏幕阅读器点击前可预知行为）
+
+**按钮行视觉与交互统一：**
+- 抽出 `OutlineButton` 组件复用给 Share 和 Torrent,新增完整 hover/focus 状态机（边框 65%→90%、文字 60%→92%、微弱背景、`translateY(-1px)` 抬起、灰色 focus ring）
+- 所有按钮高度统一到 40px(`padding: '10px 18px'`、`minHeight: 40`),满足 iOS HIG 触控目标
+- 主 CTA(蓝色 Play)靠颜色而非尺寸突出,行内节奏均衡,过渡曲线 150ms 一致
+- 父容器改用 `gap: 12` 统一水平间距,移除子级 `marginLeft` 避免重复计算导致的节奏不均
+
+**空番剧防御：**
+- 未开播番剧(`episodes === 0`)时 Play 和 Torrent 共用条件一起隐藏,避免"播放不了"的孤儿按钮出现在 Share 旁边
+
+**i18n：**
+- 新增 `detail.openPlayer` / `detail.openPlayerAria` 中英文键值
+
+### 提交记录
+
+待提交。相关文件：
+- `client/src/pages/AnimeDetailPage.jsx`
+- `client/src/locales/zh.js`
+- `client/src/locales/en.js`
+
+---
+
 ## [1.0.1] - 2026-04-17
 
 ### 播放器稳定性修复 + DanmakuPicker 统一 + 生产上线
