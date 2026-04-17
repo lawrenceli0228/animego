@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { matchAnime, getEpisodes } from '../api/dandanplay.api';
+import useIsMounted from './useIsMounted';
 
 /**
  * Three-tier matching hook.
@@ -12,6 +13,7 @@ export default function useDandanMatch() {
   const [stepStatus, setStepStatus] = useState({ 1: 'pending', 2: 'pending', 3: 'pending' });
   const [matchResult, setMatchResult] = useState(null);
   const [error, setError] = useState(null);
+  const mounted = useIsMounted();
 
   const startMatch = useCallback(async (keyword, episodes, firstFileName, basicFiles, getFilesHashes) => {
     setPhase('matching');
@@ -43,6 +45,7 @@ export default function useDandanMatch() {
       }
 
       const result = await matchAnime(body);
+      if (!mounted.current) return;
 
       if (result.matched) {
         setStepStatus(s => ({ ...s, 2: 'done', 3: 'done' }));
@@ -56,10 +59,13 @@ export default function useDandanMatch() {
       setStepStatus(s => ({ ...s, 2: 'fail', 3: 'fail' }));
       setPhase('manual');
     } catch (err) {
+      if (!mounted.current) return;
+      // 401 is handled globally via auth:expired; don't render an error page
+      if (err?.response?.status === 401) return;
       setError(err.message || 'Match failed');
       setPhase('error');
     }
-  }, []);
+  }, [mounted]);
 
   const selectManual = useCallback(async (anime, episodes) => {
     setPhase('matching');
@@ -73,6 +79,8 @@ export default function useDandanMatch() {
       } else if (anime.dandanAnimeId) {
         epData = await getEpisodes(anime.dandanAnimeId);
       }
+
+      if (!mounted.current) return;
 
       if (!epData) {
         setPhase('error');
@@ -132,10 +140,12 @@ export default function useDandanMatch() {
       });
       setPhase('ready');
     } catch (err) {
+      if (!mounted.current) return;
+      if (err?.response?.status === 401) return;
       setError(err.message || 'Episode fetch failed');
       setPhase('error');
     }
-  }, []);
+  }, [mounted]);
 
   const reset = useCallback(() => {
     setPhase('idle');

@@ -63,8 +63,11 @@ api.interceptors.response.use(
     } catch (refreshErr) {
       processQueue(refreshErr, null);
       setAccessToken(null);
-      // Dispatch event instead of hard redirect — let React Router handle navigation
-      window.dispatchEvent(new CustomEvent('auth:expired'));
+      // Defer to microtask so setUser(null) doesn't fire inside the Promise reject
+      // stack — that caused React #300 when an unmounting route still had pending setState.
+      queueMicrotask(() => {
+        window.dispatchEvent(new CustomEvent('auth:expired'));
+      });
       return Promise.reject(refreshErr);
     } finally {
       isRefreshing = false;
