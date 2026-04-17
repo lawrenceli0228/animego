@@ -145,11 +145,6 @@ export default function useDandanMatch() {
     setError(null);
   }, []);
 
-  const goManual = useCallback(() => {
-    setPhase('manual');
-    setMatchResult(null);
-  }, []);
-
   const updateEpisodeMap = useCallback((epNum, data, newAnime) => {
     setMatchResult(prev => {
       if (!prev) return prev;
@@ -175,6 +170,6 @@ export default function useDandanMatch() {
 
   return {
     phase, step, stepStatus, matchResult, error,
-    startMatch, selectManual, reset, goManual, updateEpisodeMap,
+    startMatch, selectManual, reset, updateEpisodeMap,
   };
 }

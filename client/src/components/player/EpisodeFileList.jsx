@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useLang } from '../../context/LanguageContext';
 import { formatScore } from '../../utils/formatters';
-import DanmakuPicker from './DanmakuPicker';
 
 const scoreColor = (v) => v >= 75 ? '#30d158' : v >= 50 ? '#ff9f0a' : '#ff453a';
 
@@ -110,9 +109,8 @@ const s = {
   }),
 };
 
-export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear, onUpdateDanmaku, keyword }) {
+export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear, onSetDanmaku }) {
   const { t, lang } = useLang();
-  const [pickerEp, setPickerEp] = useState(null);
 
   const sa = siteAnime;
   const statusLabel = sa?.status ? ({
@@ -216,23 +214,9 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
           fileName={f.fileName}
           episodeTitle={episodeMap[f.episode]?.title}
           onPlay={() => onPlay(f)}
-          onSetDanmaku={() => setPickerEp(f.episode)}
+          onSetDanmaku={() => onSetDanmaku(f.episode)}
         />
       ))}
-
-      {/* DanmakuPicker modal */}
-      <DanmakuPicker
-        isOpen={pickerEp != null}
-        onClose={() => setPickerEp(null)}
-        onConfirm={(data, newAnime) => {
-          if (onUpdateDanmaku) onUpdateDanmaku(pickerEp, data, newAnime);
-          setPickerEp(null);
-        }}
-        currentAnime={anime}
-        currentEpisodeId={pickerEp != null ? episodeMap[pickerEp]?.dandanEpisodeId : null}
-        episodeNumber={pickerEp}
-        defaultKeyword={keyword}
-      />
     </div>
   );
 }

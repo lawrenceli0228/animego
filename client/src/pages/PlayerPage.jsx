@@ -86,7 +86,7 @@ export default function PlayerPage() {
   const [subtitleUrl, setSubtitleUrl] = useState(null);
   const [subtitleType, setSubtitleType] = useState(null);
   const [subtitleContent, setSubtitleContent] = useState(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerEp, setPickerEp] = useState(null);
   const [isMobileView, setIsMobileView] = useState(isMobile);
 
   const mkvBlobUrlRef = useRef(null);
@@ -321,8 +321,7 @@ export default function PlayerPage() {
             videoFiles={videoFiles}
             onPlay={handlePlay}
             onClear={handleClearAll}
-            onUpdateDanmaku={handleUpdateDanmaku}
-            keyword={keyword}
+            onSetDanmaku={setPickerEp}
           />
         </div>
       )}
@@ -372,7 +371,7 @@ export default function PlayerPage() {
                   padding: '6px 12px', fontSize: 13, fontWeight: 500,
                   color: '#5ac8fa', cursor: 'pointer', transition: 'background 150ms',
                 }}
-                onClick={() => setPickerOpen(true)}
+                onClick={() => setPickerEp(playingEp)}
                 onMouseEnter={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.20)'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.12)'; }}
               >
@@ -399,20 +398,22 @@ export default function PlayerPage() {
               onSelect={handleEpisodeSwitch}
             />
           </div>
-          <DanmakuPicker
-            isOpen={pickerOpen}
-            onClose={() => setPickerOpen(false)}
-            onConfirm={(data, newAnime) => {
-              handleUpdateDanmaku(playingEp, data, newAnime);
-              setPickerOpen(false);
-            }}
-            currentAnime={matchResult?.anime}
-            currentEpisodeId={matchResult?.episodeMap?.[playingEp]?.dandanEpisodeId}
-            episodeNumber={playingEp}
-            defaultKeyword={keyword}
-          />
         </div>
       )}
+
+      {/* Shared DanmakuPicker — works from both list view and playing view */}
+      <DanmakuPicker
+        isOpen={pickerEp != null}
+        onClose={() => setPickerEp(null)}
+        onConfirm={(data, newAnime) => {
+          handleUpdateDanmaku(pickerEp, data, newAnime);
+          setPickerEp(null);
+        }}
+        currentAnime={matchResult?.anime}
+        currentEpisodeId={pickerEp != null ? matchResult?.episodeMap?.[pickerEp]?.dandanEpisodeId : null}
+        episodeNumber={pickerEp}
+        defaultKeyword={keyword}
+      />
     </div>
   );
 }
