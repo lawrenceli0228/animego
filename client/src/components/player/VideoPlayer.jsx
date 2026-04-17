@@ -12,6 +12,50 @@ const SAVE_INTERVAL_MS = 5000;
 const RESTORE_MIN_SECONDS = 5;
 const RESTORE_TAIL_MARGIN = 10;
 
+// Subtitle font size in px. Range used for the Artplayer slider.
+const SUBTITLE_SIZE_MIN = 14;
+const SUBTITLE_SIZE_MAX = 48;
+const SUBTITLE_SIZE_STEP = 2;
+const SUBTITLE_SIZE_DEFAULT = 20;
+const SUBTITLE_SIZE_KEY = 'animego:subtitleFontSize';
+
+// Distance from bottom of the video in px. Artplayer's progress bar + controls
+// sit in the bottom ~50px, so the default lifts subtitles above them.
+const SUBTITLE_OFFSET_MIN = 10;
+const SUBTITLE_OFFSET_MAX = 200;
+const SUBTITLE_OFFSET_STEP = 5;
+const SUBTITLE_OFFSET_DEFAULT = 60;
+const SUBTITLE_OFFSET_KEY = 'animego:subtitleOffset';
+
+function clamp(n, min, max) {
+  return Math.min(max, Math.max(min, n));
+}
+
+function readNumberPref(key, min, max, fallback) {
+  try {
+    const raw = Number(localStorage.getItem(key));
+    if (!Number.isFinite(raw) || raw === 0) return fallback;
+    return clamp(raw, min, max);
+  } catch {
+    return fallback;
+  }
+}
+
+function writeNumberPref(key, value) {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // storage full or disabled — ignore
+  }
+}
+
+const readSubtitleSize = () =>
+  readNumberPref(SUBTITLE_SIZE_KEY, SUBTITLE_SIZE_MIN, SUBTITLE_SIZE_MAX, SUBTITLE_SIZE_DEFAULT);
+const writeSubtitleSize = (v) => writeNumberPref(SUBTITLE_SIZE_KEY, v);
+const readSubtitleOffset = () =>
+  readNumberPref(SUBTITLE_OFFSET_KEY, SUBTITLE_OFFSET_MIN, SUBTITLE_OFFSET_MAX, SUBTITLE_OFFSET_DEFAULT);
+const writeSubtitleOffset = (v) => writeNumberPref(SUBTITLE_OFFSET_KEY, v);
+
 function readProgress(key) {
   try {
     const raw = localStorage.getItem(key);
@@ -40,6 +84,8 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
   const containerRef = useRef(null);
   const artRef = useRef(null);
   const progressKeyRef = useRef(progressKey);
+  const subtitleSizeRef = useRef(readSubtitleSize());
+  const subtitleOffsetRef = useRef(readSubtitleOffset());
 
   // Keep the ref in sync so event handlers always see the latest key
   useEffect(() => { progressKeyRef.current = progressKey; }, [progressKey]);
@@ -47,8 +93,15 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
   useEffect(() => {
     if (!containerRef.current || !videoUrl) return;
 
+    const initialSize = subtitleSizeRef.current;
+    const initialOffset = subtitleOffsetRef.current;
     const subtitleConfig = subtitleUrl
-      ? { url: subtitleUrl, type: 'vtt', encoding: 'utf-8', style: { color: '#fff', fontSize: '20px' } }
+      ? {
+          url: subtitleUrl,
+          type: 'vtt',
+          encoding: 'utf-8',
+          style: { color: '#fff', fontSize: `${initialSize}px`, bottom: `${initialOffset}px` },
+        }
       : {};
 
     const art = new Artplayer({
@@ -60,6 +113,35 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
       theme: '#0a84ff',
       volume: 0.8,
       subtitle: subtitleConfig,
+      setting: true,
+      settings: [
+        {
+          html: '字幕大小',
+          width: 220,
+          tooltip: `${initialSize}px`,
+          range: [initialSize, SUBTITLE_SIZE_MIN, SUBTITLE_SIZE_MAX, SUBTITLE_SIZE_STEP],
+          onChange(item) {
+            const v = Number(item.range[0]);
+            subtitleSizeRef.current = v;
+            writeSubtitleSize(v);
+            art.subtitle.style({ fontSize: `${v}px` });
+            return `${v}px`;
+          },
+        },
+        {
+          html: '字幕位置',
+          width: 220,
+          tooltip: `${initialOffset}px`,
+          range: [initialOffset, SUBTITLE_OFFSET_MIN, SUBTITLE_OFFSET_MAX, SUBTITLE_OFFSET_STEP],
+          onChange(item) {
+            const v = Number(item.range[0]);
+            subtitleOffsetRef.current = v;
+            writeSubtitleOffset(v);
+            art.subtitle.style({ bottom: `${v}px` });
+            return `${v}px`;
+          },
+        },
+      ],
       plugins: [
         artplayerPluginDanmuku({
           danmuku: danmakuList || [],
@@ -108,11 +190,20 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
     };
   }, [videoUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Patch subtitle dynamically without recreating player
+  // Patch subtitle dynamically without recreating player.
+  // Re-apply the current font size so episode switches don't reset it.
   useEffect(() => {
     const art = artRef.current;
     if (!art || !subtitleUrl) return;
-    art.subtitle.switch(subtitleUrl, { type: 'vtt', encoding: 'utf-8' });
+    art.subtitle.switch(subtitleUrl, {
+      type: 'vtt',
+      encoding: 'utf-8',
+      style: {
+        color: '#fff',
+        fontSize: `${subtitleSizeRef.current}px`,
+        bottom: `${subtitleOffsetRef.current}px`,
+      },
+    });
   }, [subtitleUrl]);
 
   useEffect(() => {

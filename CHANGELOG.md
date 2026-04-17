@@ -2,6 +2,40 @@
 
 ---
 
+## [1.0.3] - 2026-04-17
+
+### 播放器字幕大小与位置滑块
+
+**动机：**
+- MKV 内嵌字幕默认 20px，在 1080p 以上分辨率上偏小，用户反馈看不清
+- 字幕默认紧贴进度条（`bottom: ~10px`），被控制条和进度条遮挡
+
+**实现：**
+- Artplayer 齿轮菜单新增两项原生 `range` 滑块（`settings[]` 内置 API，零新依赖）：
+  - **字幕大小**：14-48px，步长 2，默认 20
+  - **字幕位置**：距底部 10-200px，步长 5，默认 60（把字幕抬离进度条）
+- tooltip 实时跟随滑块当前值（`"28px"` / `"120px"`）
+- `localStorage` 持久化（key：`animego:subtitleFontSize` / `animego:subtitleOffset`），跨集、跨会话保持
+- 读取时 `clamp(value, min, max)`，历史越界数据自动拉回合法区间，不崩
+- 换集时 `art.subtitle.switch(url, { style: ... })` 重新应用当前字号和位置，避免 Artplayer 切字幕轨重置 style
+
+**重构：**
+- 提取 `readNumberPref` / `writeNumberPref` 通用 localStorage 访问函数，字号和位置共用
+- `VideoPlayer.jsx` 新增 `subtitleOffsetRef`，与 `subtitleSizeRef` 并列
+
+**测试：**
+- 新增 `client/src/__tests__/VideoPlayer.test.jsx`（6 个用例）
+- 覆盖：默认值、localStorage 读写、越界 clamp、slider onChange、换集保持
+- mock Artplayer 构造函数捕获 config，断言 `subtitle.style` 和 `settings[].range`
+
+### 提交记录
+
+待提交。相关文件：
+- `client/src/components/player/VideoPlayer.jsx`
+- `client/src/__tests__/VideoPlayer.test.jsx`
+
+---
+
 ## [1.0.2] - 2026-04-17
 
 ### 番剧详情页新增弹幕播放入口
