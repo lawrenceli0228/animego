@@ -2,6 +2,50 @@
 
 ---
 
+## [1.0.1] - 2026-04-17
+
+### 播放器稳定性修复 + DanmakuPicker 统一 + 生产上线
+
+**Hook-order 崩溃修复：**
+- 移动端早期 return 移到所有 hooks 之后；窗口缩放跨越 600px 不再抛 "Rendered fewer hooks than expected"
+- 通过 state + resize listener 驱动，响应式行为保留
+
+**MKV 字幕 blob 内存泄漏修复：**
+- 用 ref 追踪 blob URL，在替换、换集、卸载时统一 `URL.revokeObjectURL`
+- 长会话切换多部 MKV 不再持续吃内存
+
+**播放体验增强：**
+- 自动连播：`VideoPlayer.onEnded` 自动跳到映射的下一集
+- 弹幕加载指示器：顶栏 badge 显示 1-3s fetch 进度，避免用户误以为无弹幕
+- 进度记忆：按 animeId + 集数 localStorage 存取 `currentTime`（30 天 TTL，5s 节流，末 10s 不记录以免跳过片尾）
+
+**DanmakuPicker 架构统一：**
+- 之前 `EpisodeFileList` 和 `PlayerPage` 各自挂一个 picker，跨列表 ↔ 播放视图时搜索词和 tab 状态丢失
+- 现在提升到 `PlayerPage` 单一挂载，由 `pickerEp` state 驱动；`EpisodeFileList` 只发 `onSetDanmaku(epNum)` 事件
+- 移除死代码 `useDandanMatch.goManual`（自 `3f2c854` 以来未被使用）
+
+**文档更新：**
+- README 重写为 v1.0.0 版本，介绍 dandanplay 播放器能力与致谢
+- TODO 待办十五（启动时扫描未富化番剧）标记为 v0.8.0 已完成
+- TODO 待办十八（部署后 GSC 操作）标记完成：sitemap 确认、首页 + 2 个详情页请求编入索引、`/anime` 301 双 UA 验证
+
+### 生产部署
+
+- VPS `45.152.65.208` 更新到 `3415298`
+- 三容器（app/nginx/mongodb）健康，season 缓存预热 SPRING 2026 共 89 部
+- 生产域名 `https://animegoclub.com/` 返回 200
+
+### 提交记录
+
+| Hash | 描述 |
+|------|------|
+| `3415298` | refactor(player): unify DanmakuPicker and drop dead goManual export |
+| `c1f042e` | docs: mark TODO 15 (sweepUnenriched) as completed |
+| `8fc6de5` | fix(player): resolve hook-order crash, blob leak, and add UX polish |
+| `1dd5c4e` | docs: rewrite README for v1.0.0 with dandanplay player and credits |
+
+---
+
 ## [1.0.0] - 2026-04-17
 
 ### 弹幕手动设置 + SEO 修复

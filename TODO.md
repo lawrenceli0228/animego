@@ -323,21 +323,26 @@ _记录时间：2026-04-07（CEO Review 补充）_
 
 ---
 
-## 待办十八：部署后 Google Search Console 操作
+## ✅ 待办十八：部署后 Google Search Console 操作（已完成 2026-04-17）
 
 **背景：** SEO 修复已提交（`6c170ef`），修复了 SPA 壳 canonical 硬编码首页、未缓存 anime 页穿透到错误 canonical、TVSeries 无评分富片段等问题。部署后需要在 GSC 中触发重新索引。
 
-**部署后操作清单：**
+**已完成操作：**
 
-- [ ] URL 检查 → `https://animegoclub.com/` → 请求编入索引
-- [ ] URL 检查 → `https://animegoclub.com/anime` → 验证 301 重定向生效
-- [ ] 挑几个高分动画页面提交重新抓取（如 `/anime/154587`、`/anime/114129`）
-- [ ] Sitemap → 删除旧的 → 重新提交 `https://animegoclub.com/sitemap.xml`
-- [ ] 删除 → 临时删除 `https://animegoclub.com/anime`（加速清除旧索引）
-- [ ] 索引 → 网页 → 检查"未编入索引的原因"，确认"重复网页"类型是否减少
+- [x] URL 检查 → `https://animegoclub.com/` → 请求编入索引
+- [x] URL 检查 → `https://animegoclub.com/anime` → 验证 301 重定向生效（服务端 301 → `/` 确认；Googlebot UA 也返回 301；GSC 从未索引过，无需清除）
+- [x] 高分动画页请求编入索引：`/anime/154587`、`/anime/114129`
+- [x] Sitemap 状态核查（GSC 于 2026-04-16 成功读取，5003 URL，无需删除重提）
+- [~] 临时删除 `/anime` — 跳过（Google 从未索引此 URL，引荐来源为空）
+- [ ] 1-2 周后回看：索引 → 网页 → 「重复网页」类型数量应下降（canonical 修复硬指标）
+- [ ] 2-4 周后回看：增强功能 → 结构化数据应出现 TVSeries 富片段
 
-**Effort：** S（人工 10min）｜**Priority：** P1｜**Depends on：** 部署 community-phase4 分支
+**验证数据：**
+- 服务端 `curl -I /anime` → `301 Moved Permanently, Location: /` ✓
+- Googlebot UA 同样 301 ✓
+- `/anime/114129` GSC 显示「引荐来源网页: sitemap.xml」= Google 已通过 sitemap 发现
 
 ---
 
 _记录时间：2026-04-16_
+_完成时间：2026-04-17_
