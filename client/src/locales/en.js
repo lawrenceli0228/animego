@@ -37,6 +37,8 @@ const en = {
     viewOnBgm: 'View on Bangumi',
     linkCopied: 'Link copied!',
     linkCopyFailed: 'Copy failed — please copy the link manually',
+    openPlayer: '▶ Play with Danmaku',
+    openPlayerAria: 'Open the danmaku player in a new tab, drop local video files to watch',
   },
   // Subscription
   sub: {

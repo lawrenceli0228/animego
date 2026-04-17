@@ -37,6 +37,8 @@ const zh = {
     viewOnBgm: '在 Bangumi 查看',
     linkCopied: '链接已复制',
     linkCopyFailed: '复制失败，请手动复制链接',
+    openPlayer: '▶ 弹幕播放',
+    openPlayerAria: '在新标签页打开弹幕播放器，拖入本地视频观看',
   },
   // Subscription
   sub: {
