@@ -205,6 +205,7 @@ const en = {
     errorGeneric: 'Danmaku service unavailable. Please try again later.',
     retry: 'Retry',
     danmakuCount: 'danmaku',
+    loadingDanmaku: 'Loading danmaku…',
     noDanmaku: 'No danmaku for this episode',
     rematch: 'Try different match',
     setDanmaku: 'Set danmaku',

@@ -205,6 +205,7 @@ const zh = {
     errorGeneric: '弹幕服务暂时不可用，请稍后重试',
     retry: '重试',
     danmakuCount: '条弹幕',
+    loadingDanmaku: '加载弹幕中…',
     noDanmaku: '该集暂无弹幕',
     rematch: '重新匹配',
     setDanmaku: '设置弹幕',

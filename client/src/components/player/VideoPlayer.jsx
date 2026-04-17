@@ -7,9 +7,42 @@ const s = {
   player: { width: '100%', aspectRatio: '16/9', background: '#000' },
 };
 
-export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, subtitleType, subtitleContent, onEnded }) {
+const PROGRESS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const SAVE_INTERVAL_MS = 5000;
+const RESTORE_MIN_SECONDS = 5;
+const RESTORE_TAIL_MARGIN = 10;
+
+function readProgress(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.t !== 'number') return null;
+    if (Date.now() - (parsed.savedAt || 0) > PROGRESS_TTL_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return parsed.t;
+  } catch {
+    return null;
+  }
+}
+
+function writeProgress(key, t) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ t, savedAt: Date.now() }));
+  } catch {
+    // storage full or disabled — ignore
+  }
+}
+
+export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnded, progressKey }) {
   const containerRef = useRef(null);
   const artRef = useRef(null);
+  const progressKeyRef = useRef(progressKey);
+
+  // Keep the ref in sync so event handlers always see the latest key
+  useEffect(() => { progressKeyRef.current = progressKey; }, [progressKey]);
 
   useEffect(() => {
     if (!containerRef.current || !videoUrl) return;
@@ -42,8 +75,34 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, subtit
 
     if (onEnded) art.on('video:ended', onEnded);
 
+    // Progress memory: restore on canplay, throttle-save on timeupdate
+    let restored = false;
+    let lastSaveAt = 0;
+    art.on('video:canplay', () => {
+      const key = progressKeyRef.current;
+      if (!key || restored) return;
+      restored = true;
+      const saved = readProgress(key);
+      if (saved != null && saved > RESTORE_MIN_SECONDS && saved < art.duration - RESTORE_TAIL_MARGIN) {
+        art.currentTime = saved;
+      }
+    });
+    art.on('video:timeupdate', () => {
+      const key = progressKeyRef.current;
+      if (!key) return;
+      const now = Date.now();
+      if (now - lastSaveAt < SAVE_INTERVAL_MS) return;
+      lastSaveAt = now;
+      if (art.currentTime > RESTORE_MIN_SECONDS) writeProgress(key, art.currentTime);
+    });
+
     artRef.current = art;
     return () => {
+      // Save final position before teardown (episode switch or unmount)
+      const key = progressKeyRef.current;
+      if (key && art.currentTime > RESTORE_MIN_SECONDS && art.currentTime < art.duration - RESTORE_TAIL_MARGIN) {
+        writeProgress(key, art.currentTime);
+      }
       art.destroy(false);
       artRef.current = null;
     };

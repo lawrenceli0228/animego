@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useLang } from '../context/LanguageContext';
 import useVideoFiles from '../hooks/useVideoFiles';
 import useDandanMatch from '../hooks/useDandanMatch';
@@ -78,7 +78,7 @@ export default function PlayerPage() {
     phase, stepStatus, matchResult, error,
     startMatch, selectManual, reset: resetMatch, updateEpisodeMap,
   } = useDandanMatch();
-  const { danmakuList, count: danmakuCount, loadComments, clearComments } = useDandanComments();
+  const { danmakuList, count: danmakuCount, loading: loadingDanmaku, loadComments, clearComments } = useDandanComments();
 
   const [playingFile, setPlayingFile] = useState(null);
   const [playingEp, setPlayingEp] = useState(null);
@@ -87,16 +87,22 @@ export default function PlayerPage() {
   const [subtitleType, setSubtitleType] = useState(null);
   const [subtitleContent, setSubtitleContent] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [isMobileView, setIsMobileView] = useState(isMobile);
 
-  // Mobile guard
-  if (isMobile()) {
-    return (
-      <div style={s.mobile}>
-        <div style={s.mobileTitle}>{t('player.desktopOnly')}</div>
-        <div>{t('player.desktopHint')}</div>
-      </div>
-    );
-  }
+  const mkvBlobUrlRef = useRef(null);
+
+  useEffect(() => {
+    const onResize = () => setIsMobileView(isMobile());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => () => {
+    if (mkvBlobUrlRef.current) {
+      URL.revokeObjectURL(mkvBlobUrlRef.current);
+      mkvBlobUrlRef.current = null;
+    }
+  }, []);
 
   // Determine current UI state
   const uiPhase = playingFile ? 'playing' : phase;
@@ -109,6 +115,15 @@ export default function PlayerPage() {
       .map(f => f.episode)
       .sort((a, b) => a - b);
   }, [videoFiles, matchResult]);
+
+  // Stable per-episode key for progress memory (localStorage)
+  const progressKey = useMemo(() => {
+    if (playingEp == null || !matchResult?.anime) return null;
+    const anime = matchResult.anime;
+    const id = anime.anilistId || anime.dandanAnimeId || anime.bgmId;
+    if (!id) return null;
+    return `animego:progress:${id}:${playingEp}`;
+  }, [playingEp, matchResult]);
 
   const handleFiles = useCallback(async (fileList) => {
     const { files, keyword: kw } = processFiles(fileList);
@@ -184,15 +199,13 @@ export default function PlayerPage() {
         w.terminate();
         const extracted = e.data.result;
         if (!extracted) return;
-        if (extracted.type === 'vtt') {
-          setSubtitleUrl(URL.createObjectURL(new Blob([extracted.content], { type: 'text/vtt' })));
-          setSubtitleType('vtt');
-        } else {
-          setSubtitleContent(extracted.content);
-          const vtt = extracted.vtt || extracted.content;
-          setSubtitleUrl(URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' })));
-          setSubtitleType(extracted.type);
-        }
+        const vttText = extracted.type === 'vtt' ? extracted.content : (extracted.vtt || extracted.content);
+        const url = URL.createObjectURL(new Blob([vttText], { type: 'text/vtt' }));
+        if (mkvBlobUrlRef.current) URL.revokeObjectURL(mkvBlobUrlRef.current);
+        mkvBlobUrlRef.current = url;
+        setSubtitleUrl(url);
+        setSubtitleType(extracted.type);
+        if (extracted.type !== 'vtt') setSubtitleContent(extracted.content);
       };
       w.onerror = () => { clearTimeout(timer); w.terminate(); };
       w.postMessage({ file: fileItem.file });
@@ -211,6 +224,10 @@ export default function PlayerPage() {
     setSubtitleUrl(null);
     setSubtitleType(null);
     setSubtitleContent(null);
+    if (mkvBlobUrlRef.current) {
+      URL.revokeObjectURL(mkvBlobUrlRef.current);
+      mkvBlobUrlRef.current = null;
+    }
     clearComments();
   }, [clearComments]);
 
@@ -233,6 +250,23 @@ export default function PlayerPage() {
     }
     toast.success(t('player.danmakuUpdated'));
   }, [updateEpisodeMap, playingEp, loadComments, t]);
+
+  const handleVideoEnded = useCallback(() => {
+    const idx = episodes.indexOf(playingEp);
+    if (idx >= 0 && idx < episodes.length - 1) {
+      handleEpisodeSwitch(episodes[idx + 1]);
+    }
+  }, [episodes, playingEp, handleEpisodeSwitch]);
+
+  // Mobile guard — after all hooks to satisfy Rules of Hooks
+  if (isMobileView) {
+    return (
+      <div style={s.mobile}>
+        <div style={s.mobileTitle}>{t('player.desktopOnly')}</div>
+        <div>{t('player.desktopHint')}</div>
+      </div>
+    );
+  }
 
   return (
     <div style={s.page}>
@@ -315,7 +349,15 @@ export default function PlayerPage() {
               )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {danmakuCount > 0 && (
+              {loadingDanmaku ? (
+                <span style={{
+                  padding: '4px 10px', borderRadius: 9999, fontSize: 12,
+                  background: 'rgba(235,235,245,0.08)', color: 'rgba(235,235,245,0.60)',
+                  fontFamily: "'JetBrains Mono',monospace", fontWeight: 500,
+                }}>
+                  {t('player.loadingDanmaku')}
+                </span>
+              ) : danmakuCount > 0 ? (
                 <span style={{
                   padding: '4px 10px', borderRadius: 9999, fontSize: 12,
                   background: 'rgba(90,200,250,0.10)', color: '#5ac8fa',
@@ -323,7 +365,7 @@ export default function PlayerPage() {
                 }}>
                   {danmakuCount} {t('player.danmakuCount')}
                 </span>
-              )}
+              ) : null}
               <button
                 style={{
                   background: 'rgba(120,120,128,0.12)', border: 'none', borderRadius: 8,
@@ -345,6 +387,8 @@ export default function PlayerPage() {
               subtitleUrl={subtitleUrl}
               subtitleType={subtitleType}
               subtitleContent={subtitleContent}
+              onEnded={handleVideoEnded}
+              progressKey={progressKey}
             />
             {danmakuCount === 0 && (
               <div style={s.danmakuInfo}>{t('player.noDanmaku')}</div>
