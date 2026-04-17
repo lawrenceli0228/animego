@@ -267,19 +267,7 @@ _记录时间：2026-03-28（CEO Review 补充）_
 
 ---
 
-## 待办十五：启动时全量扫描未富化番剧（sweepUnenriched）
-
-**What：** 服务器启动时，对所有 `bangumiVersion < 1` 的 `AnimeCache` 文档调用 `enqueueEnrichment`；对所有 `bangumiVersion = 1` 的文档调用 `enqueuePhase4Enrichment`；对所有 `bangumiVersion >= 2 && episodeTitles == null` 的文档重新入队 Phase 4。
-
-**Why：** 目前只有**当前季度**在服务器启动时预热，历史季度番剧只有用户点击才能触发 Bangumi 富化（中文标题、评分、分集标题）。这意味着从未被访问过的番剧永远不会有中文数据，直到有人点进去为止。
-
-**Pros：** 部署后一次性把历史数据全补齐；用户第一次访问任何番剧都已经有中文标题和分集标题；与"持久化后不需要重复富化"的设计完全吻合。
-
-**Cons：** 启动时会批量入队大量请求（Bangumi 800ms/请求限速），对于数据量大的实例可能需要数小时完成，但完全后台运行不影响服务。
-
-**Context：** 在 `server/index.js` 的 `warmCurrentSeason()` 之后调用 `sweepUnenriched()`（非阻塞）。实现在 `anilist.service.js` 或 `bangumi.service.js` 中，用 `.lean()` 只取 `{ anilistId, titleNative, titleRomaji, bgmId, bangumiVersion, episodeTitles, episodes }` 字段，批量入队即可。
-
-**Effort：** S（人工 2h / CC ~15min）｜**Priority：** P2｜**Depends on：** 无
+## ✅ 待办十五：启动时全量扫描未富化番剧（sweepUnenriched）（已完成）
 
 ---
 
