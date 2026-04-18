@@ -2,6 +2,59 @@
 
 ---
 
+## [1.0.7] - 2026-04-18
+
+### 测试覆盖扩张 — 从关键路径走向全栈覆盖
+
+**背景：**
+- 此前测试集中在核心 hooks、AuthContext、关键 controller/service/model，大量 UI 组件、pages、schema-only 模型、socket 入口未触达
+- 客户端缺少对 home/detail 页次级 section 的渲染断言，dandanplay/播放链路上的小组件（`EpisodeNav`/`MatchProgress`）无 spec
+- 服务端 socket.io 的引导路径（cors、auth、每包 token 过期中间件）完全未测
+
+**新增测试文件（20 个）：**
+
+*客户端 `client/src/__tests__/`（19 个，逐个验证通过）：*
+- `ContinueWatching.test.jsx` — 登录门、loading/空态、`/anime/:id` 链接、进度条裁剪
+- `HeroCarousel.test.jsx` — 空列表、indicator、自动轮播 + 暂停、prev/next 按钮
+- `WeeklySchedule.test.jsx` — 日 tab 切换、per-day 计数、score/airing 格式化
+- `CharacterSection.test.jsx` / `StaffSection.test.jsx` — 中日英命名策略、CV 区块开关、role 映射
+- `RelationSection.test.jsx` / `RecommendationSection.test.jsx` — `ORDER` 排序、titleChinese 偏好、点击/Enter 导航
+- `CompletedGems.test.jsx` / `SeasonRankings.test.jsx` — refresh invalidate、episode badge、rank 分段染色
+- `AnimeStats.test.jsx` — 计算热门 genre/season、donut 中心总数、空态三路 divider
+- `EpisodeNav.test.jsx` / `MatchProgress.test.jsx` — EP 补零、active 禁点、step status 图标映射
+- `ForgotPasswordPage.test.jsx` / `ResetPasswordPage.test.jsx` — mismatch 校验、success navigate、服务端 error message 透传
+- `SearchPage.test.jsx` / `SeasonPage.test.jsx` — URL param 同步、Show More 增量、genre/format/status 过滤
+- `FollowListPage.test.jsx` / `ProfilePage.test.jsx` — 返回导航、tab 切换触发 hook 重调、列表搜索 + 无匹配态
+
+*服务端 `server/__tests__/`（1 个）：*
+- `socket.index.test.js` — `Server` 构造 cors 默认/env 注入、`io.use(socketAuth)`、connection handler 注册、per-packet 过期中间件分路径断言（过期 → `auth:expired` + disconnect；有效 → `next()`）
+
+**顺手修复的既有 flaky 测试：**
+- `ScrollToTop.test.jsx` 第二集：`setTimeout(navigate)` 未被 `act(...)` 包裹导致 scrollTo 只统计到 1 次，改成 `useEffect` 触发 + `await act(async () => render(...))`，稳定到 2 次
+- `useAdmin.test.jsx` 的 `useEnrichmentList` 断言：hook 签名已扩展到 5 个参数，`toHaveBeenCalledWith(1, 'missing', 'naruto')` 不再匹配，补齐 `undefined, undefined`
+
+**测试模式备忘：**
+- `ContinueWatching`/`HeroCarousel` 等只做渲染/交互断言的组件，全部走 `vi.mock('../context/LanguageContext', ...)` + `vi.mock('../hooks/*')` 隔离外部依赖，不再拉起 `QueryClientProvider` + `LanguageProvider`
+- 导航断言统一走 `MemoryRouter` + `<Route path="*" element={<LocationProbe />}>` pattern，比 `mockNavigate` spy 更贴近真实行为
+- schema 校验直接用 `Model.schema.indexes()` / `Model.schema.paths`，不连 MongoDB
+- socket 测试 mock 掉 `socket.io` 的 `Server`，抓 `on('connection', ...)` 的 handler 手动触发，断言 per-packet 中间件逻辑分支
+
+**结果：**
+- 客户端：`npx vitest run` 全绿 — **68 files / 546 tests**
+- 服务端：`npx jest` 全绿 — **31 files / 273 tests**
+- 合计：**99 文件 / 819 tests**，本 session 期间新增 20 文件、修 2 个 pre-existing flaky
+
+**为什么值得记一笔：**
+- 覆盖了用户肉眼能看到的每个主要 UI section（home/detail/profile/search/season/password flow/follow list），对未来视觉或文案改动会立刻被 fail 捕到
+- socket 入口有 auth/过期两条分支的 regression net，以后换 JWT 库或调 cors 不会静默出错
+- 顺手消除的 flaky 测试避免 CI 间歇性红灯（act warning 下只通过一半）
+
+### 提交记录
+
+- 本次改动限于 `client/src/__tests__/*.test.jsx` 与 `server/__tests__/socket.index.test.js`，无生产代码变更
+
+---
+
 ## [1.0.6] - 2026-04-18
 
 ### CSP 放行 blob: 让本地视频在生产环境恢复播放

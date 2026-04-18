@@ -86,7 +86,7 @@ describe('useEnrichmentList', () => {
     })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(mockGetEnrichmentList).toHaveBeenCalledWith(1, 'missing', 'naruto')
+    expect(mockGetEnrichmentList).toHaveBeenCalledWith(1, 'missing', 'naruto', undefined, undefined)
   })
 })
 

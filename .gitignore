@@ -30,3 +30,9 @@ CHANGELOG.md
 CLAUDE.md
 .claude/
 scripts/setup.sh
+
+# Scratch / local-only artifacts
+.gstack-screenshots/
+.context/
+demos/
+docs/designs/implementAnimeGPT.md
