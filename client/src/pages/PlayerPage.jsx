@@ -1,8 +1,9 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useLang } from '../context/LanguageContext';
 import useVideoFiles from '../hooks/useVideoFiles';
 import useDandanMatch from '../hooks/useDandanMatch';
 import useDandanComments from '../hooks/useDandanComments';
+import usePlaybackSession from '../hooks/usePlaybackSession';
 import DropZone from '../components/player/DropZone';
 import MatchProgress from '../components/player/MatchProgress';
 import ManualSearch from '../components/player/ManualSearch';
@@ -79,17 +80,15 @@ export default function PlayerPage() {
     startMatch, selectManual, reset: resetMatch, updateEpisodeMap,
   } = useDandanMatch();
   const { danmakuList, count: danmakuCount, loading: loadingDanmaku, loadComments, clearComments } = useDandanComments();
+  const playback = usePlaybackSession({ getVideoUrl, getSubtitleUrl, loadComments, clearComments });
+  const {
+    phase: playbackPhase,
+    playingFile, playingEp, videoUrl, subtitleUrl, subtitleType, subtitleContent,
+    play: startPlayback, back: stopPlayback,
+  } = playback;
 
-  const [playingFile, setPlayingFile] = useState(null);
-  const [playingEp, setPlayingEp] = useState(null);
-  const [videoUrl, setVideoUrl] = useState(null);
-  const [subtitleUrl, setSubtitleUrl] = useState(null);
-  const [subtitleType, setSubtitleType] = useState(null);
-  const [subtitleContent, setSubtitleContent] = useState(null);
   const [pickerEp, setPickerEp] = useState(null);
   const [isMobileView, setIsMobileView] = useState(isMobile);
-
-  const mkvBlobUrlRef = useRef(null);
 
   useEffect(() => {
     const onResize = () => setIsMobileView(isMobile());
@@ -97,15 +96,8 @@ export default function PlayerPage() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  useEffect(() => () => {
-    if (mkvBlobUrlRef.current) {
-      URL.revokeObjectURL(mkvBlobUrlRef.current);
-      mkvBlobUrlRef.current = null;
-    }
-  }, []);
-
-  // Determine current UI state
-  const uiPhase = playingFile ? 'playing' : phase;
+  // Determine current UI state — playback overlays match phase
+  const uiPhase = playbackPhase === 'playing' ? 'playing' : phase;
 
   // Episode numbers from matched files
   const episodes = useMemo(() => {
@@ -162,80 +154,23 @@ export default function PlayerPage() {
   }, [processFiles, startMatch, t]);
 
   const handlePlay = useCallback((fileItem) => {
-    // Immediately start playback — no blocking await
-    const url = getVideoUrl(fileItem.file);
-    setVideoUrl(url);
-    setPlayingFile(fileItem);
-    setPlayingEp(fileItem.episode);
-
-    // Handle external subtitle files synchronously
-    if (fileItem.subtitle) {
-      setSubtitleUrl(getSubtitleUrl(fileItem.subtitle.file));
-      setSubtitleType(fileItem.subtitle.type);
-      setSubtitleContent(null);
-    } else {
-      setSubtitleUrl(null);
-      setSubtitleType(null);
-      setSubtitleContent(null);
-    }
-
-    // Load danmaku (non-blocking)
-    const epData = matchResult?.episodeMap?.[fileItem.episode];
-    if (epData?.dandanEpisodeId) {
-      loadComments(epData.dandanEpisodeId);
-    } else {
-      clearComments();
-    }
-
-    // MKV embedded subtitle extraction — async, patches in after ready
-    if (!fileItem.subtitle && /\.mkv$/i.test(fileItem.fileName)) {
-      const w = new Worker(
-        new URL('../workers/mkvSubtitle.worker.js', import.meta.url),
-        { type: 'module' },
-      );
-      const timer = setTimeout(() => { w.terminate(); }, 30000);
-      w.onmessage = (e) => {
-        clearTimeout(timer);
-        w.terminate();
-        const extracted = e.data.result;
-        if (!extracted) return;
-        const vttText = extracted.type === 'vtt' ? extracted.content : (extracted.vtt || extracted.content);
-        const url = URL.createObjectURL(new Blob([vttText], { type: 'text/vtt' }));
-        if (mkvBlobUrlRef.current) URL.revokeObjectURL(mkvBlobUrlRef.current);
-        mkvBlobUrlRef.current = url;
-        setSubtitleUrl(url);
-        setSubtitleType(extracted.type);
-        if (extracted.type !== 'vtt') setSubtitleContent(extracted.content);
-      };
-      w.onerror = () => { clearTimeout(timer); w.terminate(); };
-      w.postMessage({ file: fileItem.file });
-    }
-  }, [getVideoUrl, getSubtitleUrl, matchResult, loadComments, clearComments]);
+    startPlayback(fileItem, matchResult?.episodeMap);
+  }, [startPlayback, matchResult]);
 
   const handleEpisodeSwitch = useCallback((epNum) => {
     const fileItem = videoFiles.find(f => f.episode === epNum);
-    if (fileItem) handlePlay(fileItem);
-  }, [videoFiles, handlePlay]);
+    if (fileItem) startPlayback(fileItem, matchResult?.episodeMap);
+  }, [videoFiles, startPlayback, matchResult]);
 
   const handleBackToList = useCallback(() => {
-    setPlayingFile(null);
-    setPlayingEp(null);
-    setVideoUrl(null);
-    setSubtitleUrl(null);
-    setSubtitleType(null);
-    setSubtitleContent(null);
-    if (mkvBlobUrlRef.current) {
-      URL.revokeObjectURL(mkvBlobUrlRef.current);
-      mkvBlobUrlRef.current = null;
-    }
-    clearComments();
-  }, [clearComments]);
+    stopPlayback();
+  }, [stopPlayback]);
 
   const handleClearAll = useCallback(() => {
-    handleBackToList();
+    stopPlayback();
     clearFiles();
     resetMatch();
-  }, [handleBackToList, clearFiles, resetMatch]);
+  }, [stopPlayback, clearFiles, resetMatch]);
 
   const handleManualSelect = useCallback((anime) => {
     const epNums = videoFiles.map(f => f.episode).filter(Boolean);

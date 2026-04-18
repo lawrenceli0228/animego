@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PlayerPage 状态机</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0a0c;
+    --surface: #16161a;
+    --surface-2: #1c1c20;
+    --border: rgba(120,120,128,0.18);
+    --text: #f5f5f7;
+    --text-dim: rgba(235,235,245,0.60);
+    --text-faint: rgba(235,235,245,0.40);
+    --accent: #0a84ff;
+    --accent-2: #5ac8fa;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+  }
+  html, body { background: var(--bg); color: var(--text); margin: 0; }
+  body {
+    font-family: -apple-system, 'SF Pro Text', 'PingFang SC', system-ui, sans-serif;
+    line-height: 1.55;
+    padding: 32px 24px 80px;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  h1 {
+    font-family: 'Sora', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(24px, 3.2vw, 36px);
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--text-dim);
+    font-size: 14px;
+    margin-bottom: 32px;
+  }
+  .sub code {
+    background: rgba(120,120,128,0.16);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12.5px;
+  }
+  h2 {
+    font-family: 'Sora', system-ui, sans-serif;
+    font-size: 20px;
+    margin: 40px 0 12px;
+    letter-spacing: -0.005em;
+  }
+  h2 .tag {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
+    background: rgba(120,120,128,0.16);
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+  }
+  h2 .tag.now { background: rgba(255,159,10,0.16); color: var(--warn); }
+  h2 .tag.next { background: rgba(10,132,255,0.16); color: var(--accent); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 24px;
+    overflow-x: auto;
+  }
+  .mermaid {
+    font-size: 14px;
+  }
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .legend-item {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+  .legend-item .dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  .legend-item b { color: var(--text); font-weight: 600; }
+  .note {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 12px;
+    padding-left: 14px;
+    border-left: 2px solid var(--accent);
+  }
+  .note code {
+    background: rgba(120,120,128,0.16);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  footer {
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--text-faint);
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>PlayerPage 状态机</h1>
+  <div class="sub">
+    对应文件 <code>client/src/pages/PlayerPage.jsx</code> · 版本 v1.0.6 · 生成于 2026-04-18 retro
+  </div>
+
+  <h2>① 当前实现 <span class="tag now">AS-IS</span></h2>
+  <div class="card">
+    <div class="mermaid">
+stateDiagram-v2
+    direction LR
+    [*] --> idle
+
+    idle --> matching : handleFiles<br/>processFiles + md5.worker
+    matching --> ready : matchAnime ok
+    matching --> manual : no-match
+    matching --> error : 网络/服务异常
+    matching --> idle : handleClearAll
+
+    manual --> matching : selectManual<br/>+ getEpisodes
+    manual --> idle : handleClearAll
+
+    ready --> playing : handlePlay<br/>setVideoUrl + mkv.worker + loadComments
+    ready --> idle : handleClearAll
+
+    playing --> playing : 切集 / 自动下一集<br/>(回收旧 blob → 同上)
+    playing --> ready : handleBackToList<br/>revoke mkvBlob + clearComments
+    playing --> idle : handleClearAll
+
+    error --> idle : Retry
+
+    note right of matching
+      副作用
+      • md5.worker × N (10s timeout)
+      • POST /dandanplay/match
+      • 401 静默 (auth:expired 全局)
+    end note
+
+    note right of playing
+      副作用
+      • createObjectURL(video)
+      • createObjectURL(subtitle 外挂)
+      • mkv.worker (.mkv, 30s) → VTT blob
+      • GET /dandanplay/comments/:id
+      • mkvBlobUrlRef 必须在切集 / 退出时 revoke
+    end note
+    </div>
+    <div class="note">
+      <code>uiPhase = playingFile ? 'playing' : phase</code> —— <b>playing 不是 useDandanMatch 的内部状态</b>，
+      而是 PlayerPage 叠在外面的 UI overlay。这就是状态机被劈成两个所有者的根因，也是本周 PlayerPage 改 10 次的来源。
+    </div>
+  </div>
+
+  <h2>② 目标拆分 <span class="tag next">TO-BE</span></h2>
+  <div class="card">
+    <div class="mermaid">
+stateDiagram-v2
+    direction LR
+
+    state "MatchingMachine (useDandanMatch)" as MM {
+      [*] --> idle
+      idle --> matching : startMatch
+      matching --> ready : matched
+      matching --> manual : no-match
+      matching --> error : threw
+      manual --> matching : selectManual
+      ready --> idle : reset
+      manual --> idle : reset
+      error --> idle : reset
+    }
+
+    state "PlaybackMachine (usePlaybackSession)" as PM {
+      [*] --> none
+      none --> loading : play(file, ep)
+      loading --> watching : video ready<br/>+ 字幕仲裁完成
+      watching --> loading : switchEpisode<br/>/ videoEnded
+      watching --> none : back
+      loading --> none : back
+    }
+
+    [*] --> MM
+    MM --> PM : ready + handlePlay
+    PM --> MM : back to list
+    </div>
+    <div class="note">
+      PlayerPage 退化成"按 (matchPhase, playbackPhase) 二元组渲染对应组件"——不再持有 blob、worker、字幕 url 这类生命周期对象。
+    </div>
+  </div>
+
+  <h2>图例 / 不变量</h2>
+  <div class="legend">
+    <div class="legend-item">
+      <span class="dot" style="background:#0a84ff"></span><b>蓝色边</b>
+      —— 用户主动操作触发的转移
+    </div>
+    <div class="legend-item">
+      <span class="dot" style="background:#5ac8fa"></span><b>青色边</b>
+      —— 异步副作用回包驱动的转移
+    </div>
+    <div class="legend-item">
+      <span class="dot" style="background:#ff9f0a"></span><b>橙色 note</b>
+      —— 必须保住的不变量（refactor 时不能破坏）
+    </div>
+    <div class="legend-item">
+      <span class="dot" style="background:#ff453a"></span><b>红色边</b>
+      —— 错误/取消路径
+    </div>
+  </div>
+
+  <footer>
+    渲染：mermaid.js v10 · 配置：dark + neutral 主题 · 这是一次性预览页，正式文档见
+    <code>docs/designs/playerPage-state-machine.md</code>
+  </footer>
+
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#16161a',
+      primaryColor: '#1c1c20',
+      primaryTextColor: '#f5f5f7',
+      primaryBorderColor: '#0a84ff',
+      lineColor: '#5ac8fa',
+      secondaryColor: '#2a2a30',
+      tertiaryColor: '#1c1c20',
+      noteBkgColor: 'rgba(255,159,10,0.08)',
+      noteTextColor: '#ffd28a',
+      noteBorderColor: 'rgba(255,159,10,0.4)',
+    },
+    state: { useMaxWidth: true },
+  });
+</script>
+</body>
+</html>
