@@ -2,6 +2,77 @@
 
 ---
 
+## [1.0.8] - 2026-04-19
+
+### PlayerPage 状态机收敛 — 拆出 usePlaybackSession + resolveSubtitle，补全 DanmakuPicker 测试
+
+**背景：**
+- `PlayerPage.jsx` 419 行,7 块职责耦合在一个组件里:文件投递、dandanplay 三段匹配、弹幕加载、**播放会话(playingFile/Ep/videoUrl/subtitleUrl 等 6 个 useState)**、**字幕来源仲裁(外挂 vs MKV embedded worker)**、**MKV blob 生命周期**、DanmakuPicker 模态触发
+- 4/5/6 块是同一个会话生命周期的三个面向,散在 6 个 useState + 1 个 ref + 3 个 effect 里。每次切集都要手动同步,漏一个就泄漏 blob 或残留旧字幕
+- 隐藏 race:切集时旧 mkv.worker 只在自己回包/onerror 时才 terminate,30s timeout 也只 terminate 不 cancel onmessage —— 用户连续切集,前一集的 worker 5s 后回包污染当前集字幕
+
+**重构(commit `f0e04db`):**
+
+*Step 1 — 抽 `client/src/hooks/usePlaybackSession.js` (118 行):*
+- 内部收敛 6 个 useState (playingFile/Ep/videoUrl/subtitleUrl/subtitleType/subtitleContent) + mkvBlobUrlRef + subtitleTaskRef
+- 暴露 `play(fileItem, episodeMap)` / `back()`,对 `useDandanMatch` 只读 (读 episodeMap,不回调改 MM.phase)
+- **stale-task guard**:`subtitleTaskRef !== sub.task` 时直接 revoke late blob,不污染当前集状态
+- unmount cleanup 收敛到一处 useEffect
+
+*Step 2 — 抽 `client/src/utils/resolveSubtitle.js` (81 行):*
+- 纯函数返回 `{ kind: 'sync' | 'none' | 'mkv', state? | task? }`
+- mkv 路径返回 `{ promise, cancel }` task 对象,30s timeout 由 utility 自管
+- **defensive nullify**:`finish()` 内部先 `worker.onmessage = null; worker.onerror = null` 再 terminate,关掉 worker.terminate 自身的 race window
+- 字幕仲裁逻辑从 PlayerPage 内联 worker 启动剥离,可独立单元测试
+
+*PlayerPage 收尾:*
+- 419 → 354 行,删 6 个 useState + 1 个 ref + 1 个 cleanup effect
+- `handlePlay` 缩成 `startPlayback(fileItem, matchResult?.episodeMap)`
+- `handleBackToList` 缩成 `stopPlayback()`
+- `uiPhase = playbackPhase === 'playing' ? 'playing' : phase` 派生公式不变,UI 渲染零回归
+
+**测试(7 + 8 = 15 cases,全绿):**
+- `usePlaybackSession.test.jsx` — phase 初始态、play/back blob 回收、切集 terminate 旧 worker + 忽略 late 响应、unmount cleanup、external subtitle 短路、null episodeMap 边界
+- `resolveSubtitle.test.jsx` — sync/none/mkv 三路分支、worker error → null、no result → null、cancel terminate + nullify、30s timeout via `vi.useFakeTimers`
+- 调测过程中发现并修了一处真实 bug:test 的 `__respond` 在 cancel 之后还能触发原 onmessage,因为 MockWorker.terminate 不会 nullify handler。defensive nullify 同时解决了真实代码的同名 race
+
+**DanmakuPicker 测试补全(commit `8cb2033`):**
+
+`DanmakuPicker.jsx` (359 行) 此前 0 测试,补 `DanmakuPicker.test.jsx` 32 cases / 7 组:
+- closed state — `isOpen=false` 不挂载、不发请求
+- header & dismiss — ✕ / overlay / ESC / 关闭后 listener 不残留(防内存泄漏)
+- tabs — current 与 search 切换,无 currentAnime 时 current tab 隐藏
+- auto-load — 打开时自动 loadEpisodes、defaultKeyword → titleNative → titleRomaji → titleChinese 回退链、重开时 selected/pickedAnime 全部 reset
+- current anime episode list — EP 补零、rawEpisodeNumber 回退、currentMatch 标记、loading/empty/error 三态
+- search 流 — 按钮 + Enter 触发、whitespace-only 不发请求、结果渲染、无结果空态、API 抛错回退空数组
+- pick → load picked anime episodes → ← 返回搜索
+- onConfirm — current 路径回 `null` anime,search 路径回 picked anime 对象
+
+**测试模式备忘:**
+- Worker 测试用 `class MockWorker` 收所有 instance,`__respond({data})` 手动驱动 onmessage,`await act(async () => ...)` 刷 Promise.then 微任务
+- Cancellable Promise pattern (`{ promise, cancel }`) 比直接传 `AbortSignal` 更适合 worker 场景:cancel 是同步的,可以原地 settle
+- defensive handler nullify 是 worker 重构的标配 —— 不能信任 `terminate()` 单独完成清理
+
+**结果:**
+- 客户端:`npx vitest run` 全绿 — **71 files / 593 tests** (相比 v1.0.7 +3 文件 / +47 cases)
+- 服务端:`npx jest` 全绿 — **31 files / 273 tests** (无变更)
+- 合计:**102 文件 / 866 tests**
+- PlayerPage 状态机 churn 来源消除 —— 切集 race + blob 泄漏 + 字幕残留三个面向收敛到 `usePlaybackSession` 一个所有者
+
+**为什么值得记一笔:**
+- 真实 race bug 修了:之前用户连切两集,前集 mkv.worker 5s 后回包能污染当前集字幕,这是 production 行为不是 refactor 引入的,借抽 hook 顺手治
+- 字幕仲裁纯函数化是 `mkvSubtitle.worker.js` (263 行 0 测试) 后续补覆盖率的入口
+- DanmakuPicker 357 行 0 测试 → 32 测试,UI 文案/交互改动现在会被立刻 fail 捕到
+- PlayerPage churn 在 v1.0.6 retro 里被点名:本周 7 次改 EpisodeFileList + 10 次改 PlayerPage 大半都是手动同步 6 个 useState。这次重构后,后续切集相关 bug 应该收敛到 `usePlaybackSession` 单点
+
+### 提交记录
+
+- `f0e04db` refactor(player): extract usePlaybackSession + resolveSubtitle from PlayerPage
+- `8cb2033` test(player): cover DanmakuPicker — 32 tests across 7 behavioral groups
+- 设计文档:`docs/designs/playerPage-state-machine.md` (含 mermaid as-is/to-be 状态机图、不变量清单、YAGNI 边界)
+
+---
+
 ## [1.0.7] - 2026-04-18
 
 ### 测试覆盖扩张 — 从关键路径走向全栈覆盖
