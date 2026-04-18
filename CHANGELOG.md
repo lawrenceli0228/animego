@@ -2,6 +2,96 @@
 
 ---
 
+## [1.0.6] - 2026-04-18
+
+### CSP 放行 blob: 让本地视频在生产环境恢复播放
+
+**症状：**
+- 生产域名 `animegoclub.com` 上用户拖入本地 mp4/mkv，ArtPlayer 只显示黑幕加播放按钮，点击无响应
+- 开发者工具 console 连 4+ 条 CSP 违规：
+  - `Connecting to 'blob:https://animegoclub.com/...' violates "connect-src 'self' wss://animegoclub.com"`
+  - `Fetch API cannot load blob:... Refused to connect because it violates the document's Content Security Policy`
+  - `Creating a worker from 'blob:...' violates "script-src 'self'"`（worker-src 回退到 script-src）
+  - 最终 `NotSupportedError: The element has no supported sources`
+- 本地 `npm run dev` 正常，只有 nginx 反代后的生产环境触发
+
+**根因：**
+- `client/src/hooks/useVideoFiles.js:52` 用 `URL.createObjectURL(file)` 生成 `blob:https://animegoclub.com/...` URL 交给 ArtPlayer 的 `<video>` 元素
+- `nginx/default.conf:73` 的 CSP 三处同时拦 blob：
+  - `media-src` 未显式声明 → 回退到 `default-src 'self'`，`<video>` 无法加载 blob URL
+  - `worker-src` 未显式声明 → 回退到 `script-src 'self'`，ArtPlayer 内部创建的 blob worker 被阻止
+  - `connect-src 'self' wss://$host` 无 `blob:`，浏览器内部 Fetch 读 blob 字节流被拒
+- 开发环境走 Vite dev server，没挂 nginx 头，所以观察不到
+
+**修复：**
+- `nginx/default.conf` CSP 补三条最小授权：
+  - 新增 `worker-src 'self' blob:` — 单独声明避免 fallback 到 `script-src`，blob 只允许跑 worker，不打开可执行脚本口子
+  - 新增 `media-src 'self' blob:` — 让 `<video>` 加载本地 blob URL
+  - `connect-src` 列表插入 `blob:` — 让 Fetch 能读 blob 字节流
+- 不改 `script-src 'self'`，保持内联脚本注入面不变
+- 部署方式：只改 nginx 配置文件，VPS 上 `git pull && docker compose restart nginx`，无 app 容器重启，无停机
+
+**附带：放行 Cloudflare Web Analytics beacon**
+- CF 对走 proxy 的域名自动注入 `https://static.cloudflareinsights.com/beacon.min.js`，被 `script-src 'self'` 拦，Web Analytics 收不到 RUM 数据
+- `script-src` 加 `https://static.cloudflareinsights.com`，`connect-src` 加 `https://cloudflareinsights.com`（beacon 上报端点）
+- 换来 Core Web Vitals（LCP/INP/CLS）、按国家/设备的访问量、JS 错误率；免 cookie，不影响隐私合规
+
+**安全权衡：**
+- `blob:` URL 永远是同源浏览器内存对象，不引入跨域或外部脚本执行风险
+- `worker-src 'self' blob:` 精确到 worker 场景，没顺手加进 `script-src`
+- Cloudflare 两个域是官方边缘资源，信任边界明确
+
+**验证：**
+- 本机 `curl -sI https://animegoclub.com/ | grep -i content-security-policy` 确认线上头已包含 `worker-src 'self' blob:` / `media-src 'self' blob:` / `connect-src 'self' blob: wss://animegoclub.com https://cloudflareinsights.com` / `script-src 'self' https://static.cloudflareinsights.com`
+- 实机在生产环境播放 `C1 Opening 1.mkv`，视频正常解码、字幕正常渲染、无 console 错误
+
+### 提交记录
+
+- `3d29f63` fix(nginx): allow blob: in CSP for media/worker/connect
+- `4885a7d` fix(nginx): allow Cloudflare Web Analytics beacon in CSP
+
+---
+
+## [1.0.5] - 2026-04-18
+
+### dandanplay 匹配成功后番剧信息富化降级
+
+**症状：**
+- 拖入本地文件夹（如 `/Volumes/T7 Shield/.../Akiba Maid Sensou`），dandanplay 成功匹配 7 集弹幕，页面却只显示标题 `秋叶原女仆战争` + 封面
+- 评分、题材、工作室、制式、`查看详情` 按钮全部不渲染
+- 同样的番剧走「关键字搜索」Phase 2 路径时富化正常，问题只在 Phase 1
+
+**根因：**
+- `POST /api/dandanplay/match` 的 Phase 1 combined /match 路径里，富化只用 `dandanplay.animeTitle`（中文）去 `searchAnimeCache` 命中 AnimeCache
+- 用户文件夹名通常是英文/罗马音（`Akiba Maid Sensou`），AnimeCache 主键命中字段是 `titleRomaji` / `titleEnglish`，dandanplay 返回的中文 `秋叶原女仆战争` 未必出现在缓存文档里
+- 单路径 miss 就直接返回 `siteAnime: null`，前端 `EpisodeFileList.jsx` 的 `{sa && (...)}` 优雅降级成「裸标题+封面」
+
+**修复：**
+
+1. **`findSiteAnime(title, userKeyword)` 3 级降级** — `server/controllers/dandanplay.controller.js` 新增 helper：
+   - ① `searchAnimeCache(dandanplay title)` 命中即返回
+   - ② 未命中 → `searchAnimeCache(user keyword)` 命中即返回（REGRESSION 修复点）
+   - ③ 仍未命中 → `bangumi.fetchBangumiData(title, userKeyword)` 拿 `bgmId` → `AnimeCache.findOne({ bgmId }).lean()`
+   - 全部 miss 返回 `null`，`matched:true` 不受影响
+
+2. **bgm.tv 超时 + 异常吞掉** — 第 3 步包在 `Promise.race` 里，`BGM_FALLBACK_TIMEOUT_MS = 2000`，`.catch(() => null)` 兜住任何 `fetchBangumiData` 抛错。bgm.tv 挂 / 5xx / 网络慢 都不会卡 `/match`，最多延迟 2s 返回 `siteAnime: null`
+
+3. **`bangumi.service.js` 导出 `fetchBangumiData`** — 之前是模块私有函数，controller 拿不到，测试也 mock 不了
+
+**测试：**
+- 新增 `server/__tests__/dandanplay.controller.test.js`（6 用例）：title 命中 / keyword 降级命中（REGRESSION）/ bgmId 降级命中 / 全 miss 返回 null / `fetchBangumiData` 抛错吞掉 / 永挂 2s 超时
+- 实机验证：`Akiba Maid Sensou` 文件夹现在渲染 `★ 7.4 · BGM ★ 6.6 · TV · 已完结 · 12 集 · 秋季 2022 · Action/Comedy/Drama · 查看详情 →`，与 Phase 2 路径一致
+
+**设计文档：** `docs/designs/implementDandanplay.md` 新增「Phase 1 番剧信息富化降级（siteAnime）」小节，记录 3 级降级顺序和超时保护
+
+**已知限制（写入 TODO.md）：** `enqueueEnrichment` 以 `anilistId` 做队列键，bgmId-only 的番剧暂时进不了后台富化。Phase 1 的实时降级已覆盖主要用户路径，后台富化队列的扩展留作 P2 改进
+
+### 提交记录
+
+- `8f12d9c` fix(player): enrich siteAnime when dandanplay title misses AnimeCache
+
+---
+
 ## [1.0.4] - 2026-04-17
 
 ### 修复 token 过期时 401 级联导致的 React 崩溃
