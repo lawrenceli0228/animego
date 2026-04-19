@@ -2,6 +2,55 @@
 
 ---
 
+## [1.0.9] - 2026-04-19
+
+### SEO 品牌统一 — AnimeGo → AnimeGoClub + Organization schema
+
+**背景：**
+- Google 搜 `animegoclub`、`animego`、`animegoclub 番剧` 主页都排不到前几，搜索结果还出现 "Did you mean: animego club" 的拆词提示
+- 根因：站内从 `<title>` / `<h1>` / `og:site_name` 到 JSON-LD 一律自称 `AnimeGo`，域名 `animegoclub.com` 的品牌信号从未在正文落地
+- `AnimeGoClub` 只在 `WebSite` schema 的 `alternateName` 出现过一次，权重不足以让 Google 把它固化成独占 token
+- 搜 `animego` 时前两位是 animego.com.au（Adelaide 线下节）和 animego.net（老牌流媒体），这条战场短期内抢不下来；唯一可独占的品牌词只有 `animegoclub`
+
+**改动（commit `738b91e`）：**
+
+*`server/middleware/ogTags.js`：*
+- `SITE_NAME`: `'AnimeGo'` → `'AnimeGoClub'`
+- 新增模块级 `ORG_JSON_LD` 常量：`Organization` schema，logo 指向 `/favicon-192.png`
+- 主页 title：`AnimeGoClub · 番剧追番 · 动漫发现 · 新番评分`
+- 主页 H1：`AnimeGoClub · 番剧追番与动漫发现平台`
+- 主页新增 `<meta name="keywords">`：`AnimeGoClub,animegoclub,番剧,追番,新番,动漫,二次元,弹幕,动画评分`
+- 主页正文扩写一段业务描述，让品牌词在可见内容中反复出现（最终 HTML 里 `AnimeGoClub` 字符串出现 14 次）
+- 主页 `WebSite` JSON-LD 的 `alternateName` 从单值改为数组 `["AnimeGo", "animegoclub"]`，再独立挂一份 Organization JSON-LD
+- 详情页 fallback 描述文案里的 `AnimeGo` 也统一到 `AnimeGoClub`
+- 搜索关键词里的"动画" → "番剧"（和 Google 中文用户搜索习惯对齐）
+
+*`client/index.html`（SPA shell 同步）：*
+- title / description / keywords 跟服务端保持一致
+- JSON-LD `WebSite.name` → `AnimeGoClub`，`alternateName` 改数组
+- 额外挂 Organization schema
+
+*`server/__tests__/ogTags.test.js`：*
+- 详情页 fallback 断言字符串 `"<title>动画 #99999 - AnimeGo</title>"` → `"...- AnimeGoClub</title>"`
+
+**验证：**
+- `npx jest ogTags.test.js sitemap.test.js` — 17 cases 全绿
+- 线上部署后 `curl -A "Googlebot" https://animegoclub.com/` 返回新 HTML：title / og:site_name / WebSite+Organization schema 均为 AnimeGoClub
+- Google Search Console 已重新提交 sitemap.xml（5003 URLs 已发现）+ 主页请求编入索引
+
+**关键点：**
+- 这不是为了抢 `animego` 关键词（对手太强），而是让 Google 把 `animegoclub` 这个**域名专属 token** 完整识别成一个词、并绑定到本站主页
+- `AnimeGo` 作为 `alternateName` 保留，不是弃用，而是告诉 Google "两个名字指同一实体"
+- Sitelinks（Bilibili 那种"下载"/"GIF 教程"子链接）是 Google 自动生成的，不能通过代码强制触发，只能靠品牌搜索量 + 清晰导航慢慢积累
+
+**预期时间线：**
+- 几小时~1 天：sitemap 重新抓取，"上次读取时间"更新
+- 2-3 天：主页索引状态刷新
+- 1-2 周：搜 `animegoclub` 主页进前几位
+- 2-4 周：搜 `animegoclub` 主页稳定第一，`animegoclub 番剧` 等长尾品牌词也指向主页
+
+---
+
 ## [1.0.8] - 2026-04-19
 
 ### PlayerPage 状态机收敛 — 拆出 usePlaybackSession + resolveSubtitle，补全 DanmakuPicker 测试
