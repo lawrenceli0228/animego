@@ -1534,3 +1534,140 @@ _设计时间：2026-04-14_
 _工程审查：2026-04-14_
 _设计审查：2026-04-14_
 _播放板块审查：2026-04-17_
+
+---
+
+## 弹幕密度节流（2026-04-19）
+
+### 现象
+
+正常播放时弹幕密集涌入偶发"黑一帧"闪屏。4717 条 / 24min 均值 3.3/s，峰值 10~20/s，同屏峰值可到 50~80 条。
+
+### 根因（非电脑性能问题）
+
+artplayer-plugin-danmuku v5.3.0 纯 DOM 模式：
+- 每条弹幕 = 一个 `<div>`，同屏数量堆积 → 样式重算 + 合成层抖动
+- `antiOverlap: true` 在 `getDanmuTop()` 做 O(轨道数) 防撞扫描；同屏 N 越大，每次入场计算越重
+- 后端 404（`/api/subscriptions/:id`）已由 `useSubscription` 吞掉，和闪屏无关
+
+### B 站参考策略（DanmakuFlameMaster）
+
+| 策略 | 作用 |
+|------|------|
+| `maxLines` 硬上限同屏行数 | **先 bound N**，让 antiOverlap 的扫描变常数时间 |
+| `preventOverlapping` 保持开 | 视觉质量不让步 |
+| `CacheStuffer` 字体渲染缓存 | 复用 bitmap，不重绘 |
+| 单条弹幕共享 duration | 减少 timeupdate 触发计算 |
+| Web 播放器双模 | DOM/CSS3（80~90% CPU）vs Canvas（50~60% CPU） |
+
+**启示：** 瓶颈是"同屏数量"，不是"总数"。antiOverlap 不是敌人，**未加 maxLines 的 antiOverlap** 才是。
+
+### 方案：源头密度节流
+
+artplayer-plugin-danmuku 没暴露 `maxLines`。只能在 hook 层预处理近似：
+
+```
+useDandanComments.loadComments
+  ├─ getComments(episodeId)
+  ├─ map(dandanToArtplayer)            ← 现在
+  └─ throttleByDensity(converted, opts) ← 新增
+```
+
+#### 工具函数 `client/src/utils/danmakuThrottle.js`
+
+```js
+// 时间窗口密度节流：按 time 排序后滑窗计数，超阈值丢弃。
+// 为什么存在：artplayer-plugin-danmuku 无 maxLines 选项，
+// 预处理近似同屏上限，避免 DOM 峰值抖动。
+export function throttleByDensity(comments, { maxPerWindow = 8, windowMs = 2000 } = {}) {
+  if (!comments?.length || maxPerWindow <= 0) return [];
+  const sorted = [...comments].sort((a, b) => a.time - b.time);
+  const kept = [];
+  let windowStart = -Infinity;
+  let windowCount = 0;
+  for (const c of sorted) {
+    const tMs = c.time * 1000;
+    if (tMs - windowStart >= windowMs) {
+      windowStart = tMs;
+      windowCount = 0;
+    }
+    if (windowCount < maxPerWindow) {
+      kept.push(c);
+      windowCount++;
+    }
+  }
+  return kept;
+}
+```
+
+#### Hook 改动 `client/src/hooks/useDandanComments.js:21`
+
+```diff
+- const converted = (data.comments || []).map(dandanToArtplayer);
+- setDanmakuList(converted);
+- setCount(data.count || 0);
++ const converted = (data.comments || []).map(dandanToArtplayer);
++ const throttled = throttleByDensity(converted, { maxPerWindow: 8, windowMs: 2000 });
++ setDanmakuList(throttled);
++ setCount(data.count || 0); // 仍显示原始数量，UI 加"已限流"副标签
+```
+
+### 参数推导
+
+- 均值 3.3/s → 阈值给 6/s（≈ 2× 余量） → `maxPerWindow=8, windowMs=2000`
+- 飞行时间 `speed:5` ≈ 5s 穿屏 → 同屏峰值 ≈ 4/s × 5s = **20 条**（DOM 模式舒适区）
+- 非硬限，上层可调
+
+### 测试覆盖（`danmakuThrottle.test.js` 最少 7 例）
+
+| # | 场景 | 期望 |
+|---|------|------|
+| 1 | 空输入 | `[]` |
+| 2 | 稀疏（远低阈值） | 原样 |
+| 3 | 单秒 20 条爆发 | ≤ maxPerWindow |
+| 4 | 窗口边界两侧各 N 条 | 独立计数 |
+| 5 | 同时间戳集群 | 按输入顺序留前 K |
+| 6 | 乱序输入 | 结果时间升序 |
+| 7 | `maxPerWindow=0` | `[]`（防御） |
+
+**回归**：`client/src/__tests__/useDandanComments.test.jsx:15` 的 mock 只 2 条不会触发节流，现有断言保持通过。新增"超阈值过滤"用例。
+
+### 保留的插件配置
+
+```js
+// client/src/components/player/VideoPlayer.jsx:146
+artplayerPluginDanmuku({
+  danmuku: danmakuList || [],
+  speed: 5,
+  opacity: 0.8,
+  fontSize: 24,
+  antiOverlap: true,          // 保留：质量不让步
+  synchronousPlayback: true,  // 保留：倍速时弹幕跟随
+  emitter: false,
+})
+```
+
+**不动插件**。节流彻底在数据源。
+
+### 未做的（权衡记录）
+
+- **Canvas 模式：** 插件 v5 不支持切换，需替换成 `artplayer-plugin-danmuku-canvas` 级项目，改造面太大
+- **runtime `filter` 回调：** 每条弹幕 emit 时跑一次 JS，且跨调用维护窗口状态复杂。选一次性预处理
+- **丢弃的 `laneCount` 参数：** 轨道是插件内部 DOM 分配，不暴露，节流层无法控制，移除
+
+### 风险
+
+- 插件若未来升级引入 `maxLines`，需把此层节流降为兜底或移除 → 在 `danmakuThrottle.js` 头注释标记"为什么存在"
+- `synchronousPlayback:true` 在倍速下会缩短穿屏时间（2× → 2.5s），需要按 1x 基准调档位
+
+### 工作量
+
+| 项 | 预估 |
+|----|------|
+| `danmakuThrottle.js` + 7 单测 | 30 分钟 |
+| `useDandanComments.js` 接入 + 回归测试 | 10 分钟 |
+| UI "已限流" 标签（可选） | 10 分钟 |
+
+**合计 ~50 分钟。**
+
+_弹幕节流设计：2026-04-19_
