@@ -19,9 +19,18 @@ function escapeHtml(str) {
   return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, ' ');
 }
 
-const SITE_NAME = 'AnimeGo';
+const SITE_NAME = 'AnimeGoClub';
 const SITE_URL = 'https://animegoclub.com';
 const DEFAULT_OG_IMAGE = `${SITE_URL}/og-default.png`;
+
+const ORG_JSON_LD = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "AnimeGoClub",
+  "alternateName": ["AnimeGo", "animegoclub"],
+  "url": SITE_URL,
+  "logo": `${SITE_URL}/favicon-192.png`,
+};
 
 const FAVICON_LINKS = `<link rel="icon" href="${SITE_URL}/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="48x48" href="${SITE_URL}/favicon.png">
@@ -251,7 +260,7 @@ function ogTagsMiddleware(req, res, next) {
       if (!doc) {
         return sendOgHtml(res, {
           title: `动画 #${anilistId}`,
-          desc: 'AnimeGo 动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。',
+          desc: 'AnimeGoClub 番剧追番与动漫发现平台，提供每季新番、评分、角色声优、弹幕评论和追番管理。',
           url: `${base}/anime/${anilistId}`,
         });
       }
@@ -283,7 +292,7 @@ function ogTagsMiddleware(req, res, next) {
     }).catch(() => {
       sendOgHtml(res, {
         title: `动画 #${anilistId}`,
-        desc: 'AnimeGo 动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。',
+        desc: 'AnimeGoClub 番剧追番与动漫发现平台，提供每季新番、评分、角色声优、弹幕评论和追番管理。',
         url: `${base}/anime/${anilistId}`,
       });
     });
@@ -321,13 +330,14 @@ function ogTagsMiddleware(req, res, next) {
       anilistId: 1, titleChinese: 1, titleNative: 1, titleRomaji: 1,
       titleEnglish: 1, averageScore: 1, genres: 1,
     }).sort({ averageScore: -1 }).limit(30).lean().then(docs => {
-      const siteDesc = 'AnimeGo 是一个动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。';
-      const t = escapeHtml('动漫 · 二次元 · 发现');
+      const siteDesc = 'AnimeGoClub (animegoclub.com) 是一个番剧追番与动漫发现平台，提供每季新番、作品评分、角色声优、弹幕评论和追番管理。';
+      const t = escapeHtml('番剧追番 · 动漫发现 · 新番评分');
       const d = escapeHtml(siteDesc);
+      const keywords = escapeHtml('AnimeGoClub,animegoclub,番剧,追番,新番,动漫,二次元,弹幕,动画评分');
 
       let animeLinks = '';
       if (docs && docs.length) {
-        animeLinks = '<h2>热门动画</h2><ul>' + docs.map(a => {
+        animeLinks = '<h2>AnimeGoClub 热门番剧</h2><ul>' + docs.map(a => {
           const name = escapeHtml(pickTitle(a));
           const score = a.averageScore ? ` (${a.averageScore}分)` : '';
           return `<li><a href="${base}/anime/${a.anilistId}">${name}${score}</a></li>`;
@@ -337,36 +347,54 @@ function ogTagsMiddleware(req, res, next) {
       const allGenres = [...new Set(docs.flatMap(a => a.genres || []))].slice(0, 15);
       const genreText = allGenres.length ? `<p>热门类型：${allGenres.map(g => escapeHtml(g)).join('、')}</p>` : '';
 
+      const websiteLd = {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": SITE_NAME,
+        "alternateName": ["AnimeGo", "animegoclub"],
+        "url": SITE_URL,
+        "description": siteDesc,
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": `${SITE_URL}/search?q={search_term_string}`,
+          "query-input": "required name=search_term_string",
+        },
+      };
+
       res.set('Content-Type', 'text/html; charset=utf-8');
       res.send(`<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>${SITE_NAME} - ${t}</title>
+<title>${SITE_NAME} · ${t}</title>
 <meta name="description" content="${d}">
+<meta name="keywords" content="${keywords}">
 <link rel="canonical" href="${SITE_URL}/">
 ${FAVICON_LINKS}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="${SITE_NAME}">
-<meta property="og:title" content="${t}">
+<meta property="og:title" content="${SITE_NAME} · ${t}">
 <meta property="og:description" content="${d}">
 <meta property="og:image" content="${DEFAULT_OG_IMAGE}">
 <meta property="og:url" content="${SITE_URL}/">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="${t}">
+<meta name="twitter:title" content="${SITE_NAME} · ${t}">
 <meta name="twitter:description" content="${d}">
 <meta name="twitter:image" content="${DEFAULT_OG_IMAGE}">
 <script type="application/ld+json">
-${JSON.stringify({ "@context": "https://schema.org", "@type": "WebSite", "name": "AnimeGo", "alternateName": "AnimeGoClub", "url": SITE_URL, "description": siteDesc, "potentialAction": { "@type": "SearchAction", "target": `${SITE_URL}/search?q={search_term_string}`, "query-input": "required name=search_term_string" } }).replace(/</g, '\\u003c')}
+${JSON.stringify(websiteLd).replace(/</g, '\\u003c')}
+</script>
+<script type="application/ld+json">
+${JSON.stringify(ORG_JSON_LD).replace(/</g, '\\u003c')}
 </script>
 </head>
 <body>
-<h1>AnimeGo - 动漫 · 二次元 · 发现</h1>
+<h1>AnimeGoClub · 番剧追番与动漫发现平台</h1>
 <p>${d}</p>
-<p>AnimeGoClub (animegoclub.com) 为动漫爱好者提供一站式追番体验：浏览每季新番、查看作品评分与角色信息、发送弹幕评论、管理个人追番列表。</p>
+<p>AnimeGoClub 为番剧爱好者提供一站式追番体验：浏览每季新番、查看作品评分与角色声优信息、发送弹幕评论、管理个人追番列表。AnimeGoClub 汇集 AniList 与 Bangumi 数据，覆盖 TV 动画、剧场版、OVA、ONA 等多种番剧形式。</p>
 <nav>
 <a href="${base}/season">季度新番</a> |
-<a href="${base}/search">搜索动画</a>
+<a href="${base}/search">搜索番剧</a>
 </nav>
 ${animeLinks}
 ${genreText}
@@ -374,8 +402,8 @@ ${genreText}
 </html>`);
     }).catch(() => {
       sendOgHtml(res, {
-        title: '动漫 · 二次元 · 发现',
-        desc: 'AnimeGo 是一个动漫追番与发现平台，提供每季新番、评分、角色信息、弹幕评论和追番管理。',
+        title: '番剧追番 · 动漫发现 · 新番评分',
+        desc: 'AnimeGoClub (animegoclub.com) 是一个番剧追番与动漫发现平台，提供每季新番、作品评分、角色声优、弹幕评论和追番管理。',
         image: DEFAULT_OG_IMAGE, url: `${SITE_URL}/`,
       });
     });

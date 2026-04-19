@@ -99,7 +99,7 @@ describe('ogTags middleware', () => {
 
       const res = await request(app).get('/anime/99999').set('User-Agent', GOOGLEBOT_UA)
       expect(res.status).toBe(200)
-      expect(res.text).toContain('<title>动画 #99999 - AnimeGo</title>')
+      expect(res.text).toContain('<title>动画 #99999 - AnimeGoClub</title>')
       expect(res.text).toContain('<link rel="canonical" href="https://animegoclub.com/anime/99999">')
       expect(res.text).toContain('og:url')
     })
