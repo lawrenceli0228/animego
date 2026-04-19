@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { matchAnime, getEpisodes } from '../api/dandanplay.api';
-import { buildEpisodeMap } from '../../../shared/episodeMap.cjs';
+import { buildEpisodeMap } from '../utils/episodeMap';
 import useIsMounted from './useIsMounted';
 
 /**

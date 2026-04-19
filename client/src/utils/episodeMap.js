@@ -1,7 +1,9 @@
 /**
  * Build a map of {requestedEpisodeNumber -> {dandanEpisodeId, title}} against
- * dandanplay's episode list. Used by both server (match controller) and client
- * (manual anime picker) to keep continuation-season mapping consistent.
+ * dandanplay's episode list.
+ *
+ * ⚠️  KEEP IN SYNC with server/utils/episodeMap.js (CJS copy).
+ *    Same logic, different module system — server is CJS, client is ESM under Vite.
  *
  * Three-level match fallback (applied per requested episode):
  *   1. pure numeric episodeNumber  (e.g. S1 "1"..."12")
@@ -11,7 +13,7 @@
  *      (C1/C2/C3 openings/endings) are filtered out so index lookups land on
  *      the real episode.
  */
-function buildEpisodeMap(dandanEpisodes, requestedEpisodes) {
+export function buildEpisodeMap(dandanEpisodes, requestedEpisodes) {
   const map = {};
   if (!Array.isArray(dandanEpisodes) || dandanEpisodes.length === 0) return map;
 
@@ -35,9 +37,6 @@ function buildEpisodeMap(dandanEpisodes, requestedEpisodes) {
     }
   }
 
-  // Level 3: index-based fallback on regular episodes only.
-  // Filter out specials (C1/C2/C3 openings/endings, O/S OVA/Special prefixes)
-  // so index N - 1 lands on the Nth actual episode for continuation seasons.
   const regulars = dandanEpisodes.filter(e => /^\d+$/.test(String(e.rawEpisodeNumber || '')));
   const pool = regulars.length > 0 ? regulars : dandanEpisodes;
 
@@ -51,5 +50,3 @@ function buildEpisodeMap(dandanEpisodes, requestedEpisodes) {
 
   return map;
 }
-
-module.exports = { buildEpisodeMap };

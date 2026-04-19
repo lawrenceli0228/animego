@@ -1,4 +1,4 @@
-const { buildEpisodeMap } = require('../../shared/episodeMap.cjs');
+const { buildEpisodeMap } = require('../utils/episodeMap');
 
 describe('buildEpisodeMap — level 1: pure number match', () => {
   it('maps requested episodes to dandan episodes by number', () => {

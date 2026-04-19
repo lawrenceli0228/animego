@@ -6,7 +6,7 @@
 
 const AnimeCache = require('../models/AnimeCache');
 const { createRateLimitedFetch } = require('../utils/rateLimitedFetch');
-const { buildEpisodeMap } = require('../../shared/episodeMap.cjs');
+const { buildEpisodeMap } = require('../utils/episodeMap');
 
 const BASE_URL = 'https://api.dandanplay.net';
 
