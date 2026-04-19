@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { matchAnime, getEpisodes } from '../api/dandanplay.api';
+import { buildEpisodeMap } from '../../../shared/episodeMap.cjs';
 import useIsMounted from './useIsMounted';
 
 /**
@@ -88,17 +89,11 @@ export default function useDandanMatch() {
         return;
       }
 
-      // Build episode map from returned episodes
-      const episodeMap = {};
-      for (const epNum of episodes) {
-        const match = epData.episodes.find(e => e.number === epNum);
-        if (match) {
-          episodeMap[epNum] = {
-            dandanEpisodeId: match.dandanEpisodeId,
-            title: match.title,
-          };
-        }
-      }
+      // Build episode map using shared three-level fallback (pure number →
+      // OVA/Special prefix → index-based on regular episodes). The naive
+      // number-only match fails for continuation seasons where dandanplay
+      // numbers episodes as 25..35 instead of 1..11.
+      const episodeMap = buildEpisodeMap(epData.episodes, episodes);
 
       setStepStatus(s => ({ ...s, 3: 'done' }));
 

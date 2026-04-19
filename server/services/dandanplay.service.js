@@ -6,6 +6,7 @@
 
 const AnimeCache = require('../models/AnimeCache');
 const { createRateLimitedFetch } = require('../utils/rateLimitedFetch');
+const { buildEpisodeMap } = require('../../shared/episodeMap.cjs');
 
 const BASE_URL = 'https://api.dandanplay.net';
 
@@ -235,54 +236,6 @@ async function fetchComments(episodeId) {
 
   commentCache.set(episodeId, { data: result, fetchedAt: Date.now() });
   return result;
-}
-
-// ─── Build episode map from dandanplay episodes + user file episodes ─────────
-function buildEpisodeMap(dandanEpisodes, requestedEpisodes) {
-  const map = {};
-
-  // Try matching by parsed episode number
-  for (const epNum of requestedEpisodes) {
-    const match = dandanEpisodes.find(e => e.number === epNum);
-    if (match) {
-      map[epNum] = {
-        dandanEpisodeId: match.dandanEpisodeId,
-        title: match.title,
-      };
-    }
-  }
-
-  // For unmapped episodes, try OVA/Special numbering (O1, O2, S1, S2, etc.)
-  for (const epNum of requestedEpisodes) {
-    if (map[epNum]) continue;
-    const ovaMatch = dandanEpisodes.find(e => {
-      const raw = e.rawEpisodeNumber;
-      if (!raw) return false;
-      const m = raw.match(/^[OS](\d+)$/i);
-      return m && parseInt(m[1], 10) === epNum;
-    });
-    if (ovaMatch) {
-      map[epNum] = {
-        dandanEpisodeId: ovaMatch.dandanEpisodeId,
-        title: ovaMatch.title,
-      };
-    }
-  }
-
-  // Fallback: if no matches at all, try index-based matching
-  if (Object.keys(map).length === 0 && dandanEpisodes.length > 0) {
-    for (const epNum of requestedEpisodes) {
-      const byIndex = dandanEpisodes[epNum - 1];
-      if (byIndex) {
-        map[epNum] = {
-          dandanEpisodeId: byIndex.dandanEpisodeId,
-          title: byIndex.title,
-        };
-      }
-    }
-  }
-
-  return map;
 }
 
 module.exports = {

@@ -130,3 +130,89 @@ describe('dandanplay.controller match() — Phase 1 enrichment fallback', () => 
     expect(elapsed).toBeLessThan(4000)
   }, 10000)
 })
+
+describe('dandanplay.controller match() — Phase 1 gate (isMatched + loose title fallback)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    dandanplay.fetchDandanEpisodesByAnimeId.mockResolvedValue(epDataFixture)
+    dandanplay.buildEpisodeMap.mockReturnValue({ 1: { dandanEpisodeId: 101, title: '第1话' } })
+    dandanplay.searchAnimeCache.mockResolvedValue([])
+    bangumi.fetchBangumiData.mockResolvedValue(null)
+  })
+
+  it('REGRESSION: accepts candidate when isMatched:false but title matches keyword (LoliHouse S3 scenario)', async () => {
+    // Real-world: fansub raw hash is not in dandanplay's index, so isMatched=false
+    // but the top candidate's animeTitle is "【我推的孩子】 第三季" which loosely
+    // matches the user keyword. Previously the controller threw this away.
+    dandanplay.matchCombined.mockResolvedValue({
+      isMatched: false,
+      animeId: 18901,
+      animeTitle: '【我推的孩子】 第三季',
+      episodeId: 9035,
+      episodeTitle: '第35话 那就是一切的开端',
+    })
+    const { res } = await callMatch({
+      keyword: '我推的孩子 第三季',
+      episodes: [11],
+      fileName: '[LoliHouse] Oshi no Ko S3 - 11.mkv',
+      files: [],
+    })
+    expect(res.body.matched).toBe(true)
+    expect(dandanplay.fetchDandanEpisodesByAnimeId).toHaveBeenCalledWith(18901)
+  })
+
+  it('rejects candidate when isMatched:false AND title does NOT match keyword', async () => {
+    // Candidate is a totally different anime — should fall through to Phase 2/3, not match.
+    dandanplay.matchCombined.mockResolvedValue({
+      isMatched: false,
+      animeId: 999,
+      animeTitle: 'Totally Different Show',
+      episodeId: 1,
+      episodeTitle: 'Ep 1',
+    })
+    const { res } = await callMatch({
+      keyword: '我推的孩子',
+      episodes: [1],
+      fileName: 'Oshi no Ko - 01.mkv',
+      files: [],
+    })
+    // Phase 2 + 3 also miss (mocked empty) -> unmatched
+    expect(res.body.matched).toBe(false)
+    expect(dandanplay.fetchDandanEpisodesByAnimeId).not.toHaveBeenCalled()
+  })
+
+  it('normalization strips brackets/spaces when comparing title to keyword', async () => {
+    dandanplay.matchCombined.mockResolvedValue({
+      isMatched: false,
+      animeId: 18901,
+      animeTitle: '【我推的孩子】 第三季',
+      episodeId: 9035,
+      episodeTitle: '第35话',
+    })
+    const { res } = await callMatch({
+      keyword: '我推的孩子第三季', // no space
+      episodes: [11],
+      fileName: 'file.mkv',
+      files: [],
+    })
+    expect(res.body.matched).toBe(true)
+  })
+
+  it('still accepts isMatched:true regardless of keyword match', async () => {
+    dandanplay.matchCombined.mockResolvedValue({
+      isMatched: true,
+      animeId: 100,
+      animeTitle: 'Unrelated Title',
+      episodeId: 1,
+      episodeTitle: 'Ep 1',
+    })
+    const { res } = await callMatch({
+      keyword: 'Different Keyword',
+      episodes: [1],
+      fileName: 'file.mkv',
+      files: [],
+    })
+    expect(res.body.matched).toBe(true)
+    expect(dandanplay.fetchDandanEpisodesByAnimeId).toHaveBeenCalledWith(100)
+  })
+})

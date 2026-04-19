@@ -180,6 +180,38 @@ describe('useDandanMatch.selectManual', () => {
     expect(result.current.phase).toBe('error');
     expect(result.current.error).toBe('boom');
   });
+
+  it('REGRESSION: maps continuation-season episodes via shared index fallback (Oshi no Ko S3 E11 → 第35话)', async () => {
+    // S3 has raw episode numbers 25..35 + C1/C2/C3 openings/endings. Before the
+    // fix, selectManual did a naive number-only match and returned an empty map,
+    // so the user saw "matched but 0 danmaku".
+    const s3Episodes = [
+      ...Array.from({ length: 11 }, (_, i) => ({
+        number: 25 + i,
+        dandanEpisodeId: 9025 + i,
+        title: `第${25 + i}话`,
+        rawEpisodeNumber: String(25 + i),
+      })),
+      { number: null, dandanEpisodeId: 8001, title: 'C1 Opening 1', rawEpisodeNumber: 'C1' },
+      { number: null, dandanEpisodeId: 8002, title: 'C2 Opening 2', rawEpisodeNumber: 'C2' },
+      { number: null, dandanEpisodeId: 8003, title: 'C3 Ending',    rawEpisodeNumber: 'C3' },
+    ];
+    mockGetEpisodes.mockResolvedValue({ episodes: s3Episodes });
+
+    const { result } = renderHook(() => useDandanMatch());
+    await act(async () => {
+      await result.current.selectManual(
+        { dandanAnimeId: 18901, title: '【我推的孩子】 第三季' },
+        [11]
+      );
+    });
+
+    expect(result.current.phase).toBe('ready');
+    // E11 should map to the 11th regular episode (第35话), NOT C1 Opening
+    expect(result.current.matchResult.episodeMap[11]).toBeDefined();
+    expect(result.current.matchResult.episodeMap[11].dandanEpisodeId).toBe(9035);
+    expect(result.current.matchResult.episodeMap[11].dandanEpisodeId).not.toBe(8001);
+  });
 });
 
 describe('useDandanMatch.reset', () => {

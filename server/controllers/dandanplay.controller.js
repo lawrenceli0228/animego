@@ -4,6 +4,22 @@ const AnimeCache = require('../models/AnimeCache');
 
 const BGM_FALLBACK_TIMEOUT_MS = 2000;
 
+// Strip brackets, spaces, season markers, and case for loose title comparison.
+// Used to salvage Phase 1 candidates when dandanplay returns isMatched:false
+// (common for new-season fansub releases that haven't been hash-indexed yet).
+function normalizeTitle(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[\s\[\]【】()《》「」『』,.\-_~!@#$%^&*+=|\\/:;?'"]/g, '');
+}
+
+function titleLooselyMatchesKeyword(animeTitle, keyword) {
+  const a = normalizeTitle(animeTitle);
+  const k = normalizeTitle(keyword);
+  if (!a || !k) return false;
+  return a.includes(k) || k.includes(a);
+}
+
 /**
  * Find the best-matching AnimeCache doc for Phase 1 enrichment.
  * Falls through 3 levels: dandanplay title → user keyword → bangumi.tv bgmId lookup.
@@ -60,9 +76,16 @@ async function match(req, res, next) {
     const { keyword, episodes = [], fileName, fileHash, fileSize, files = [] } = req.body;
 
     // Phase 1: dandanplay combined match (hash + fileName, no matchMode — let API decide)
+    // Accept either a definitive hash match (isMatched:true) OR a candidate whose
+    // title loosely matches the user's keyword — saves new-season fansub releases
+    // whose hashes aren't in dandanplay's index yet.
     if (fileName) {
       const combined = await dandanplay.matchCombined(fileName, fileHash, fileSize);
-      if (combined?.isMatched) {
+      const accept = combined && (
+        combined.isMatched ||
+        (combined.animeId && titleLooselyMatchesKeyword(combined.animeTitle, keyword))
+      );
+      if (accept) {
         const epData = await dandanplay.fetchDandanEpisodesByAnimeId(combined.animeId);
         if (epData) {
           const episodeMap = dandanplay.buildEpisodeMap(epData.episodes, episodes);
