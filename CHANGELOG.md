@@ -2,6 +2,87 @@
 
 ---
 
+## [1.0.10] - 2026-04-20
+
+### 续作季节弹幕映射修复 — loose-title gate + 三级 fallback 提取 shared
+
+**背景：**
+- 用户报告 `[LoliHouse] Oshi no Ko S3 - 11.mkv` 在 dandanplay 里**没有弹幕，手动选择也没有**
+- 实测发现是两个耦合的静默失败：
+  1. **服务端 Phase 1 闸门过严** — 字幕组新番 raw 未入 dandanplay hash 索引时，API 返回 `isMatched:false` 但候选 `animeTitle: "【我推的孩子】 第三季"` 其实宽松匹配用户 keyword。旧闸门 `if (combined?.isMatched)` 直接丢弃，`/match` 响应 `matched:false`，客户端跳转"手动选择"
+  2. **客户端 `selectManual` 只做纯 number 匹配** — 续作季 dandanplay 把 raw number 编成 `25..35` + `C1/C2/C3` OP/ED specials。用户文件名解析出 `epNum=11`，level-1 的 `episodes.find(e => e.number === 11)` 永远返回 undefined，手动选完 episodeMap 空 → 无弹幕
+- 这个 bug 对所有 S2/S3 续作（芙莉蓮 第二季 raw 29..38、DanDaDan 第二季 raw 13..24 等）都潜在，只是 Oshi no Ko S3 因为 C1/C2/C3 specials 打乱数组下标让 Naive index fallback 也失效，才暴露得最彻底
+
+**改动（commit `197a332`）：**
+
+*新增 `shared/episodeMap.cjs` — 三级 fallback util，客户端 + 服务端共用：*
+```js
+// level 1: number === epNum
+// level 2: rawEpisodeNumber 匹配 /^[OS](\d+)$/  (OVA/Special)
+// level 3: pool[epNum - 1]，pool = 只含 /^\d+$/ 的 raw 过滤后数组
+```
+- level-3 关键细节：过滤到纯数字 `rawEpisodeNumber` 的池子里回退，C1/C2/C3 specials 不进池，避免 E12 落到 C1 Opening
+- `.cjs` 扩展名同时兼容服务端 CJS `require` 与 Vite 客户端 ESM `import`
+
+*`server/services/dandanplay.service.js`：*
+- 原 46 行内联 `buildEpisodeMap` 删除，改从 `../../shared/episodeMap.cjs` 引入
+- `module.exports` 继续 re-export，服务端下游代码零改动
+
+*`server/controllers/dandanplay.controller.js`：*
+- 新增 `normalizeTitle(s)` — 小写化 + 剥掉 `[] 【】 ()《》「」『』 空格 标点`
+- 新增 `titleLooselyMatchesKeyword(animeTitle, keyword)` — 归一化后双向 `includes`
+- Phase 1 闸门放宽：
+  ```js
+  const accept = combined && (
+    combined.isMatched ||
+    (combined.animeId && titleLooselyMatchesKeyword(combined.animeTitle, keyword))
+  );
+  if (accept) { ... }
+  ```
+- 对新番 fansub（hash 没入索引但候选标题对）的场景首次可用
+
+*`client/src/hooks/useDandanMatch.js`：*
+- `selectManual` 里内联的 `epData.episodes.forEach(ep => { if (requested.includes(ep.number)) map[...] })` 替换为 `buildEpisodeMap(epData.episodes, episodes)`
+- 手动选择路径首次获得 OVA 前缀 + index fallback 能力
+
+**覆盖：**
+
+*`server/__tests__/episodeMap.test.js`（新）：*
+- level 1 纯 number / level 2 OVA 前缀 / level 3 index fallback 单元测试
+- **Oshi no Ko S3 fixture**（raw `25..35` + `C1/C2/C3`）：
+  - E11 → `9035` 第35话 ✓
+  - E12 → 不能落到 `8001/8002/8003`（C-specials）✓
+  - 批量 `[1..11]` 全部映射 ✓
+- 混合 level-1 + level-3 partial hit 测试
+
+*`server/__tests__/dandanplay.controller.test.js`（扩展）：*
+- Phase 1 闸门 4 个 regression：isMatched:false + 标题匹配 → 接受；不匹配 → 拒绝；bracket/space 归一化；isMatched:true 依然生效
+
+*`client/src/__tests__/useDandanMatch.test.jsx`（扩展）：*
+- `selectManual` Oshi no Ko S3 E11 → `9035`（不是 `8001` C1 Opening）
+
+**E2E 真实文件验证（`scripts/test-real-files.js`）：**
+- 8 个真实 fansub 文件（Enen S3 / Kakkou S2 / Yofukashi S2 / Frieren 第二季 [29-38] / DanDaDan S2 / Sono Bisque S2 / Kaoru Hana / Oshi no Ko S3）计算首 16MB MD5，打 `/api/v2/match`，应用闸门 + `buildEpisodeMap` → 8/8 管道全过
+- Oshi no Ko S3 manual pick（animeId=18901，raw `25..C3`）：
+  ```
+  ep  1 → 189010001  第25话 投入
+  ep  2 → 189010002  第26话 盘算
+  ...
+  ep 11 → 189010011  第35话 那就是一切的开端   ← 原 bug 正确映射
+  ```
+
+**验证：**
+- 服务端 `jest` — 32 suites, **286/286**
+- 客户端 `vitest` — 71 files, **594/594**
+- Oshi no Ko S3 E11 手动选择端到端可用
+
+**关键点 / 附带发现：**
+- dandanplay 对 Oshi no Ko S3 E11 的 hash 索引**错挂到第二季**（id=18086）—— 自动匹配返回 isMatched:true 但 animeTitle 是"我推的孩子 第二季"。这是 dandanplay 数据问题，不是我们的 bug；用户看到的"有弹幕但是上一季第22话"就是这个原因。手动重选 S3（id=18901）走修好的 `selectManual` 路径现在能映射正确
+- 三级 fallback 是保守设计：只在纯 number raw 池里做 index 回退，绝不会把特别篇/OP/ED 当正片。宁可映射失败也不乱映射
+- 抽 shared util 不只是 DRY — 旧客户端 `selectManual` 里的是 **degraded 版** 逻辑（只做 level 1），服务端是完整三级。统一到一处后两边行为对齐，以后只有一处要改
+
+---
+
 ## [1.0.9] - 2026-04-19
 
 ### SEO 品牌统一 — AnimeGo → AnimeGoClub + Organization schema
