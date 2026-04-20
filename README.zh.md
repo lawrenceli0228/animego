@@ -8,6 +8,33 @@
 
 ---
 
+## 项目状态
+
+**状态：** 功能完备 · 维护模式(告一段落)
+**最后活跃开发：** 2026-04-20(v1.0.11)
+**构建方式：** Claude Code 辅助开发(产品方向、决策、部署由作者负责)
+
+### 已上线
+README 下方功能列表全部在 [animegoclub.com](https://animegoclub.com) 线上运行。完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+### 已知限制(有意为之,非 bug)
+- **弹幕匹配** — 不追求 100% 准确率,冷门续作用手动选集兜底。原因见 project memory `feedback_danmaku_matching`(明确不接 LLM/AI 匹配)。
+- **Bangumi 富化** — 后台管道,新番可能需要一个周期才出现中文标题/评分。
+- **单实例 WebSocket** — Socket.IO 弹幕未接 Redis adapter,横向扩容需补(见 TODO.md 待办五)。
+- **无用户隐私开关** — `/u/:username` 追番页当前阶段默认公开(见 TODO.md 待办四)。
+
+### 重启指南(如果将来想接着做)
+1. 读本 README + [CHANGELOG.md](CHANGELOG.md)(最近 2-3 条即可还原当前心智模型)。
+2. 读 [TODO.md](TODO.md) 了解有意推迟的事项。
+3. `npm install && npm run dev:server` + `npm run dev:client` — 本地能跑起来即可。
+4. SSH 到 VPS,`docker compose ps` — 确认生产正常。
+5. 动 UI 前先读 [DESIGN.md](DESIGN.md)。
+
+### 不计划继续
+主动开发暂停。核心产品目标已达成,继续投入属于边际递减的 bug 打磨。代码库足够稳定可以让它自己跑;VPS 通过 docker compose 自动重启。
+
+---
+
 ## 功能特性
 
 ### 浏览与发现

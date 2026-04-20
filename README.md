@@ -8,6 +8,33 @@ A full-stack anime discovery, tracking, and local playback platform. Browse seas
 
 ---
 
+## Project Status
+
+**Status:** Feature-complete · Maintenance mode
+**Last active development:** 2026-04-20 (v1.0.11)
+**Built with:** Claude Code (AI-assisted; product direction, decisions, and deployment by the author)
+
+### What works
+All features in the list below are live and stable on [animegoclub.com](https://animegoclub.com). See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+
+### Known limitations (intentional, not bugs)
+- **Danmaku matching** — accuracy is not pursued to 100%; users fall back to the manual per-episode picker for uncommon sequels. See `feedback_danmaku_matching` in the project memory for the reasoning (no LLM/AI matching by design).
+- **Bangumi enrichment** — background pipeline; newly released anime may take a cycle before Chinese titles/scores appear.
+- **Single-instance WebSocket** — Socket.IO danmaku does not scale horizontally without Redis adapter. See TODO.md item 5.
+- **No user privacy toggle** — watchlists at `/u/:username` are publicly visible by design in this phase. See TODO.md item 4.
+
+### Restart checklist (if picking this up later)
+1. Read this README + [CHANGELOG.md](CHANGELOG.md) (most recent 2-3 entries give you the current mental model).
+2. Read [TODO.md](TODO.md) to see what was intentionally deferred.
+3. `npm install && npm run dev:server` + `npm run dev:client` — verify local runs.
+4. SSH to VPS, `docker compose ps` — verify production is healthy.
+5. Re-read [DESIGN.md](DESIGN.md) before touching UI.
+
+### Not planning to continue
+Active development is paused. Core product goals are met; continued work would be diminishing-returns bug-polish. The codebase is stable enough to leave running; VPS auto-restarts via docker compose.
+
+---
+
 ## Features
 
 ### Browse & Discover
