@@ -2,6 +2,50 @@
 
 ---
 
+## [1.0.11] - 2026-04-20
+
+### 白屏修复 — shared util 拆成 server/utils + client/utils 两份同步副本
+
+**背景：**
+- 上个版本 v1.0.10 为了让服务端 + 客户端共用三级 fallback 逻辑，把 `buildEpisodeMap` 抽到了 `shared/episodeMap.cjs`（CJS 格式）
+- `npm run dev` 起来后整站白屏，控制台报 `ReferenceError: module is not defined`
+- 根因：Vite dev server 把 `.cjs` 文件按静态资源**原样 serve 给浏览器**，末尾的 `module.exports = { buildEpisodeMap }` 在 ESM 环境里直接炸，整个 bundle 加载失败
+- 附带发现：`Dockerfile` 只 `COPY server/`，根本没拷 `shared/` 目录，生产构建启动会 `Cannot find module '../../shared/episodeMap.cjs'`——这条潜在生产 bug 一起修掉
+
+**改动（commit `9badb61`）：**
+
+*新增两份原生格式的副本：*
+- `server/utils/episodeMap.js` —— CJS 原生，服务端 `require` 用
+- `client/src/utils/episodeMap.js` —— ESM 原生，Vite `import` 用
+- 两份文件逻辑字节级一致，开头都有 `⚠️ KEEP IN SYNC with ...` 注释
+
+*更新 4 处 import：*
+- `server/services/dandanplay.service.js`：`require('../../shared/episodeMap.cjs')` → `require('../utils/episodeMap')`
+- `server/__tests__/episodeMap.test.js`：同上
+- `client/src/hooks/useDandanMatch.js`：`import ... from '../../../shared/episodeMap.cjs'` → `import ... from '../utils/episodeMap'`
+- `scripts/test-real-files.js`：同步（本地脚本，未纳入提交）
+
+*删除 `shared/episodeMap.cjs` 和 `shared/` 目录。*
+
+**为什么不用其他方案：**
+- ❌ 升级 Docker 到 Node 22+（支持 `require(ESM)`）—— 影响面太大，生产 Node 20 稳定
+- ❌ 动态 `import()` 包装 —— 给所有调用点加 `async`，侵入性强
+- ❌ UMD wrapper —— 复杂度换取 40 行重复的可读性不划算
+- ✅ 双份副本 + sync 注释 —— 40 行代码、零运行时开销、未来改逻辑两处一起改（本来就不常动）
+
+**验证：**
+- 服务端 `jest` — **286/286** 全绿
+- 客户端 `vitest` — **594/594** 全绿
+- `curl http://localhost:5173/src/utils/episodeMap.js` 正确返回 ESM，末尾无 `module.exports`
+- 浏览器热加载不再白屏
+
+**教训：**
+- Vite 不做 `.cjs` → ESM 的互操作转换，跨 runtime 共享必须选原生格式
+- Docker 多阶段构建 `COPY` 清单要审，否则抽公共目录会在生产静默失败
+- "共享代码"在 monorepo 里最安全的做法是 workspace 子包（有自己的 `package.json` + 构建步骤），次选就是这种同步副本。中间的"放一个目录两边都引用"在 CJS/ESM 混合栈里永远有坑
+
+---
+
 ## [1.0.10] - 2026-04-20
 
 ### 续作季节弹幕映射修复 — loose-title gate + 三级 fallback 提取 shared
