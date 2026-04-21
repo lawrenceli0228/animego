@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { formatScore, stripHtml, truncate, pickTitle } from '../../utils/formatters'
+import { hexToRgbCss } from '../../utils/color'
 import { useLang } from '../../context/LanguageContext'
 
 const scoreColor = (s) => s >= 75 ? '#30d158' : s >= 50 ? '#ff9f0a' : '#ff453a'
@@ -31,12 +32,12 @@ const SHOWN_RELATIONS = new Set(['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'S
 const S = {
   bannerOverlay: {
     position:'absolute', inset:0,
-    background:'linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.85) 100%)',
+    background:'linear-gradient(to bottom, rgba(var(--poster-accent-rgb), 0.14) 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.92) 100%)',
   },
   cover: {
     width:210, height:300, objectFit:'cover', borderRadius:12,
     border:'1px solid #38383a',
-    boxShadow:'0 16px 48px rgba(0,0,0,0.60)',
+    boxShadow:'0 16px 48px rgba(0,0,0,0.60), 0 0 80px -20px var(--poster-accent)',
   },
   title: { fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 },
   subtitle: { color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 },
@@ -108,7 +109,10 @@ export default function AnimeDetailHero({ anime }) {
     averageScore, genres = [], format, bgmId,
     studios = [], source, duration, startDate,
     bangumiScore, bangumiVotes, relations = [],
+    coverImageColor,
   } = anime
+  const accent = coverImageColor || '#8B5CF6'
+  const accentRgb = hexToRgbCss(coverImageColor)
   const isEnriching = (anime.bangumiVersion ?? 0) < 2 ||
     (anime.bangumiVersion === 2 && anime.bgmId && !anime.titleChinese)
 
@@ -133,7 +137,7 @@ export default function AnimeDetailHero({ anime }) {
   const visibleRelations = relations.filter(r => SHOWN_RELATIONS.has(r.relationType))
 
   return (
-    <div>
+    <div style={{ '--poster-accent': accent, '--poster-accent-rgb': accentRgb }}>
       {/* Banner */}
       <div style={{
         position:'relative', height: bannerImageUrl ? 400 : 120,
@@ -246,7 +250,7 @@ export default function AnimeDetailHero({ anime }) {
                     key={`${r.relationType}-${r.anilistId}`}
                     onClick={() => navigate(`/anime/${r.anilistId}`)}
                     style={S.relationBtn}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor='#0a84ff'; e.currentTarget.style.color='#0a84ff' }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor='var(--poster-accent)'; e.currentTarget.style.color='var(--poster-accent)' }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(84,84,88,0.65)'; e.currentTarget.style.color='rgba(235,235,245,0.60)' }}
                   >
                     <span style={S.relationLabel}>{label}</span>
