@@ -104,7 +104,7 @@ export default function AnimeDetailPage() {
     return () => { document.title = 'AnimeGo' }
   }, [anime, lang])
 
-  if (isLoading) return <DetailSkeleton coverImageColor={location.state?.coverImageColor} />
+  if (isLoading) return <DetailSkeleton posterAccent={location.state?.posterAccent} posterAccentRgb={location.state?.posterAccentRgb} />
   if (error) return (
     <div style={{ textAlign:'center', padding:'80px 0', color:'#ff453a' }}>
       {t('anime.loadError')}：{error.message}

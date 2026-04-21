@@ -153,6 +153,32 @@ describe('anilist.service — normalize()', () => {
     expect(normalize(media).coverImageColor).toBeNull();
   });
 
+  it('emits normalized posterAccent fields alongside raw color', () => {
+    const media = {
+      id: 1,
+      title: {},
+      coverImage: { large: 'https://img/l.jpg', color: '#f1c9ae' },
+      genres: [],
+    };
+    const result = normalize(media);
+    expect(result.posterAccent).toMatch(/^#[0-9a-f]{6}$/);
+    expect(result.posterAccent).not.toBe('#f1c9ae'); // pastel boosted
+    expect(result.posterAccentRgb).toMatch(/^\d{1,3}, \d{1,3}, \d{1,3}$/);
+    expect(typeof result.posterAccentContrastOnBlack).toBe('number');
+  });
+
+  it('falls back to brand violet posterAccent when AniList color missing', () => {
+    const media = {
+      id: 1,
+      title: {},
+      coverImage: { large: 'https://img/l.jpg' },
+      genres: [],
+    };
+    const result = normalize(media);
+    expect(result.posterAccent.toLowerCase()).toBe('#8b5cf6');
+    expect(result.posterAccentRgb).toBe('139, 92, 246');
+  });
+
   it('propagates color on relations and recommendations', () => {
     const media = {
       id: 1,
@@ -173,5 +199,7 @@ describe('anilist.service — normalize()', () => {
     const result = normalize(media);
     expect(result.relations[0].coverImageColor).toBe('#123456');
     expect(result.recommendations[0].coverImageColor).toBe('#abcdef');
+    expect(result.relations[0].posterAccent).toMatch(/^#[0-9a-f]{6}$/);
+    expect(result.recommendations[0].posterAccent).toMatch(/^#[0-9a-f]{6}$/);
   });
 });

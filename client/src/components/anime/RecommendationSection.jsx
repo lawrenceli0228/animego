@@ -19,7 +19,7 @@ export default function RecommendationSection({ recommendations }) {
         {recommendations.map(r => (
           <div
             key={r.anilistId}
-            onClick={() => navigate(`/anime/${r.anilistId}`, { state: { coverImageColor: r.coverImageColor } })}
+            onClick={() => navigate(`/anime/${r.anilistId}`, { state: { posterAccent: r.posterAccent, posterAccentRgb: r.posterAccentRgb } })}
             style={{ flexShrink: 0, width: 110, cursor: 'pointer' }}
           >
             <div style={{

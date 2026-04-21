@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { formatScore, stripHtml, truncate, pickTitle } from '../../utils/formatters'
-import { hexToRgbCss } from '../../utils/color'
 import { useLang } from '../../context/LanguageContext'
 
 const scoreColor = (s) => s >= 75 ? '#30d158' : s >= 50 ? '#ff9f0a' : '#ff453a'
@@ -109,10 +108,10 @@ export default function AnimeDetailHero({ anime }) {
     averageScore, genres = [], format, bgmId,
     studios = [], source, duration, startDate,
     bangumiScore, bangumiVotes, relations = [],
-    coverImageColor,
+    posterAccent, posterAccentRgb,
   } = anime
-  const accent = coverImageColor || '#8B5CF6'
-  const accentRgb = hexToRgbCss(coverImageColor)
+  const accent = posterAccent || '#8B5CF6'
+  const accentRgb = posterAccentRgb || '139, 92, 246'
   const isEnriching = (anime.bangumiVersion ?? 0) < 2 ||
     (anime.bangumiVersion === 2 && anime.bgmId && !anime.titleChinese)
 
@@ -248,7 +247,7 @@ export default function AnimeDetailHero({ anime }) {
                 return (
                   <button
                     key={`${r.relationType}-${r.anilistId}`}
-                    onClick={() => navigate(`/anime/${r.anilistId}`, { state: { coverImageColor: r.coverImageColor } })}
+                    onClick={() => navigate(`/anime/${r.anilistId}`, { state: { posterAccent: r.posterAccent, posterAccentRgb: r.posterAccentRgb } })}
                     style={S.relationBtn}
                     onMouseEnter={e => { e.currentTarget.style.borderColor='var(--poster-accent)'; e.currentTarget.style.color='var(--poster-accent)' }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(84,84,88,0.65)'; e.currentTarget.style.color='rgba(235,235,245,0.60)' }}

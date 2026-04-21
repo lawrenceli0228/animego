@@ -4,6 +4,12 @@ const { SEARCH_ANIME_QUERY }    = require('../queries/searchAnime.graphql');
 const { ANIME_DETAIL_QUERY }    = require('../queries/animeDetail.graphql');
 const { WEEKLY_SCHEDULE_QUERY } = require('../queries/weeklySchedule.graphql');
 const { enqueueEnrichment, enqueuePhase4Enrichment, enqueueV3Enrichment } = require('./bangumi.service');
+const { normalizePosterAccent } = require('../utils/normalizeAccent');
+
+function accentFields(rawHex) {
+  const { accent, accentRgb, accentContrastOnBlack } = normalizePosterAccent(rawHex);
+  return { posterAccent: accent, posterAccentRgb: accentRgb, posterAccentContrastOnBlack: accentContrastOnBlack };
+}
 
 const ANILIST_URL   = 'https://graphql.anilist.co';
 const CACHE_TTL_MS  = (parseInt(process.env.CACHE_TTL_HOURS) || 24) * 60 * 60 * 1000;
@@ -52,6 +58,7 @@ function normalize(m) {
     titleNative:    m.title?.native,
     coverImageUrl:   m.coverImage?.extraLarge || m.coverImage?.large,
     coverImageColor: m.coverImage?.color ?? null,
+    ...accentFields(m.coverImage?.color),
     bannerImageUrl: m.bannerImage,
     description:    m.description,
     episodes:       m.episodes,
@@ -74,6 +81,7 @@ function normalize(m) {
     title:           e.node.title?.romaji || e.node.title?.native,
     coverImageUrl:   e.node.coverImage?.large ?? null,
     coverImageColor: e.node.coverImage?.color ?? null,
+    ...accentFields(e.node.coverImage?.color),
     format:          e.node.format ?? null,
   }));
   if (m.characters) base.characters = m.characters.edges.map(e => ({
@@ -98,6 +106,7 @@ function normalize(m) {
       title:           n.mediaRecommendation.title?.romaji || n.mediaRecommendation.title?.native,
       coverImageUrl:   n.mediaRecommendation.coverImage?.large ?? null,
       coverImageColor: n.mediaRecommendation.coverImage?.color ?? null,
+      ...accentFields(n.mediaRecommendation.coverImage?.color),
       averageScore:    n.mediaRecommendation.averageScore ?? null,
     }));
   return base;
@@ -430,6 +439,7 @@ async function getWeeklySchedule() {
       titleChinese:  null, // 下方从 AnimeCache 拼入
       coverImageUrl:   item.media.coverImage?.extraLarge || item.media.coverImage?.large,
       coverImageColor: item.media.coverImage?.color ?? null,
+      ...accentFields(item.media.coverImage?.color),
       format:          item.media.format,
       averageScore:    item.media.averageScore,
       genres:          item.media.genres || []

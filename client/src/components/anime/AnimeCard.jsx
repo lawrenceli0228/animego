@@ -7,8 +7,8 @@ const scoreColor = (s) => s >= 75 ? '#30d158' : s >= 50 ? '#ff9f0a' : '#ff453a'
 export default function AnimeCard({ anime, rank, watcherCount }) {
   const navigate = useNavigate()
   const { lang } = useLang()
-  const { anilistId, titleRomaji, coverImageUrl, coverImageColor, averageScore, genres = [], format } = anime
-  const go = () => navigate(`/anime/${anilistId}`, { state: { coverImageColor } })
+  const { anilistId, titleRomaji, coverImageUrl, posterAccent, posterAccentRgb, averageScore, genres = [], format } = anime
+  const go = () => navigate(`/anime/${anilistId}`, { state: { posterAccent, posterAccentRgb } })
 
   return (
     <div
