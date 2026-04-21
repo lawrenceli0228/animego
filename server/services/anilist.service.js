@@ -50,7 +50,8 @@ function normalize(m) {
     titleRomaji:    m.title?.romaji,
     titleEnglish:   m.title?.english,
     titleNative:    m.title?.native,
-    coverImageUrl:  m.coverImage?.extraLarge || m.coverImage?.large,
+    coverImageUrl:   m.coverImage?.extraLarge || m.coverImage?.large,
+    coverImageColor: m.coverImage?.color ?? null,
     bannerImageUrl: m.bannerImage,
     description:    m.description,
     episodes:       m.episodes,
@@ -68,11 +69,12 @@ function normalize(m) {
   if (m.duration != null) base.duration = m.duration;
   if (m.source)    base.source    = m.source;
   if (m.relations) base.relations = m.relations.edges.map(e => ({
-    anilistId:     e.node.id,
-    relationType:  e.relationType,
-    title:         e.node.title?.romaji || e.node.title?.native,
-    coverImageUrl: e.node.coverImage?.large ?? null,
-    format:        e.node.format ?? null,
+    anilistId:       e.node.id,
+    relationType:    e.relationType,
+    title:           e.node.title?.romaji || e.node.title?.native,
+    coverImageUrl:   e.node.coverImage?.large ?? null,
+    coverImageColor: e.node.coverImage?.color ?? null,
+    format:          e.node.format ?? null,
   }));
   if (m.characters) base.characters = m.characters.edges.map(e => ({
     nameEn:             e.node.name?.full              ?? null,
@@ -92,10 +94,11 @@ function normalize(m) {
   if (m.recommendations) base.recommendations = m.recommendations.nodes
     .filter(n => n.mediaRecommendation)
     .map(n => ({
-      anilistId:    n.mediaRecommendation.id,
-      title:        n.mediaRecommendation.title?.romaji || n.mediaRecommendation.title?.native,
-      coverImageUrl: n.mediaRecommendation.coverImage?.large ?? null,
-      averageScore: n.mediaRecommendation.averageScore ?? null,
+      anilistId:       n.mediaRecommendation.id,
+      title:           n.mediaRecommendation.title?.romaji || n.mediaRecommendation.title?.native,
+      coverImageUrl:   n.mediaRecommendation.coverImage?.large ?? null,
+      coverImageColor: n.mediaRecommendation.coverImage?.color ?? null,
+      averageScore:    n.mediaRecommendation.averageScore ?? null,
     }));
   return base;
 }
@@ -425,10 +428,11 @@ async function getWeeklySchedule() {
       titleEnglish:  item.media.title.english,
       titleNative:   item.media.title.native,
       titleChinese:  null, // 下方从 AnimeCache 拼入
-      coverImageUrl: item.media.coverImage?.extraLarge || item.media.coverImage?.large,
-      format:        item.media.format,
-      averageScore:  item.media.averageScore,
-      genres:        item.media.genres || []
+      coverImageUrl:   item.media.coverImage?.extraLarge || item.media.coverImage?.large,
+      coverImageColor: item.media.coverImage?.color ?? null,
+      format:          item.media.format,
+      averageScore:    item.media.averageScore,
+      genres:          item.media.genres || []
     });
   });
 

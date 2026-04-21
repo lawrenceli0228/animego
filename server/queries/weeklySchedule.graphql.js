@@ -14,7 +14,7 @@ const WEEKLY_SCHEDULE_QUERY = `
           id
           isAdult
           title { romaji english native }
-          coverImage { extraLarge large }
+          coverImage { extraLarge large color }
           format
           averageScore
           genres

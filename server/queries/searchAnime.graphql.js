@@ -11,7 +11,7 @@ const SEARCH_ANIME_QUERY = `
       media(search: $search, genre: $genre, type: ANIME, isAdult: false, sort: SEARCH_MATCH) {
         id
         title { romaji english native }
-        coverImage { extraLarge large }
+        coverImage { extraLarge large color }
         bannerImage
         description(asHtml: false)
         episodes

@@ -132,4 +132,46 @@ describe('anilist.service — normalize()', () => {
     const media = { id: 1, title: {} };
     expect(normalize(media).genres).toEqual([]);
   });
+
+  it('extracts AniList coverImage.color when present', () => {
+    const media = {
+      id: 1,
+      title: {},
+      coverImage: { large: 'https://img/l.jpg', color: '#ffe1b8' },
+      genres: [],
+    };
+    expect(normalize(media).coverImageColor).toBe('#ffe1b8');
+  });
+
+  it('returns null coverImageColor when AniList omits it', () => {
+    const media = {
+      id: 1,
+      title: {},
+      coverImage: { large: 'https://img/l.jpg' },
+      genres: [],
+    };
+    expect(normalize(media).coverImageColor).toBeNull();
+  });
+
+  it('propagates color on relations and recommendations', () => {
+    const media = {
+      id: 1,
+      title: {},
+      genres: [],
+      relations: {
+        edges: [{
+          relationType: 'SEQUEL',
+          node: { id: 300, title: { romaji: 'Sequel' }, coverImage: { large: 'x.jpg', color: '#123456' } },
+        }],
+      },
+      recommendations: {
+        nodes: [
+          { mediaRecommendation: { id: 200, title: { romaji: 'Rec' }, coverImage: { large: 'y.jpg', color: '#abcdef' }, averageScore: 80 } },
+        ],
+      },
+    };
+    const result = normalize(media);
+    expect(result.relations[0].coverImageColor).toBe('#123456');
+    expect(result.recommendations[0].coverImageColor).toBe('#abcdef');
+  });
 });

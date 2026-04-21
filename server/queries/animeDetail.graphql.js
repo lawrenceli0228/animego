@@ -3,7 +3,7 @@ const ANIME_DETAIL_QUERY = `
     Media(id: $id, type: ANIME) {
       id
       title { romaji english native }
-      coverImage { extraLarge large }
+      coverImage { extraLarge large color }
       bannerImage
       description(asHtml: false)
       episodes
@@ -18,7 +18,7 @@ const ANIME_DETAIL_QUERY = `
       duration
       source
       studios(isMain: true) { nodes { name } }
-      relations { edges { relationType node { id title { romaji native } coverImage { large } format } } }
+      relations { edges { relationType node { id title { romaji native } coverImage { large color } format } } }
       characters(sort: ROLE, page: 1, perPage: 8) {
         edges { role node { id name { full native } image { medium } }
           voiceActors(language: JAPANESE) { id name { full native } image { medium } } }
@@ -27,7 +27,7 @@ const ANIME_DETAIL_QUERY = `
         edges { role node { id name { full native } image { medium } } }
       }
       recommendations(sort: RATING_DESC, page: 1, perPage: 6) {
-        nodes { mediaRecommendation { id title { romaji native } coverImage { large } averageScore } }
+        nodes { mediaRecommendation { id title { romaji native } coverImage { large color } averageScore } }
       }
       trailer { id site }
     }

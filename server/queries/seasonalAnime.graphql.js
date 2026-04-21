@@ -11,7 +11,7 @@ const SEASONAL_ANIME_QUERY = `
       media(season: $season, seasonYear: $seasonYear, type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
         id
         title { romaji english native }
-        coverImage { extraLarge large }
+        coverImage { extraLarge large color }
         bannerImage
         description(asHtml: false)
         episodes

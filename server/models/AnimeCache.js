@@ -5,7 +5,8 @@ const animeCacheSchema = new mongoose.Schema({
   titleRomaji:    String,
   titleEnglish:   String,
   titleNative:    String,
-  coverImageUrl:  String,
+  coverImageUrl:   String,
+  coverImageColor: { type: String, default: null }, // AniList-provided dominant color (hex, e.g. '#ffe1b8')
   bannerImageUrl: String,
   description:    String,
   episodes:       Number,
@@ -18,7 +19,7 @@ const animeCacheSchema = new mongoose.Schema({
   cachedAt:       { type: Date, default: Date.now },
   // Phase 4 AniList fields
   studios:         [String],
-  relations:       [{ anilistId: Number, relationType: String, title: String, coverImageUrl: String, format: String }],
+  relations:       [{ anilistId: Number, relationType: String, title: String, coverImageUrl: String, coverImageColor: { type: String, default: null }, format: String }],
   startDate:       { year: Number, month: Number, day: Number },
   duration:        Number,
   source:          String,
@@ -32,7 +33,7 @@ const animeCacheSchema = new mongoose.Schema({
   // Phase 4 rich fields
   characters:    [{ nameEn: String, nameJa: String, nameCn: String, imageUrl: String, role: String, voiceActorEn: String, voiceActorJa: String, voiceActorCn: String, voiceActorImageUrl: String }],
   staff:         [{ nameEn: String, nameJa: String, imageUrl: String, role: String }],
-  recommendations: [{ anilistId: Number, title: String, coverImageUrl: String, averageScore: Number }],
+  recommendations: [{ anilistId: Number, title: String, coverImageUrl: String, coverImageColor: { type: String, default: null }, averageScore: Number }],
   episodeTitles: [{ episode: Number, nameCn: String, name: String }],
   // Admin enrichment management
   adminFlag:     { type: String, enum: ['needs-review', 'manually-corrected', null], default: null },
