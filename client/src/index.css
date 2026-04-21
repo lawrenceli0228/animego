@@ -18,9 +18,9 @@
   --color-error: var(--error);
 
   --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
 
   --font-display: 'Sora', system-ui, sans-serif;
   --font-sans: 'DM Sans', system-ui, sans-serif;
@@ -58,11 +58,19 @@
   --warning: #ff9f0a;
   --error: #ff453a;
 
+  /* Brand gradient (poster-driven fallback) */
+  --gradient-brand: linear-gradient(135deg, #FF3B7F 0%, #8B5CF6 100%);
+  --poster-accent: #8B5CF6;
+
+  /* Elevation — Sprint 2 cards */
+  --shadow-card-hover: 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-card-hover-strong: 0 20px 48px -12px rgba(139, 92, 246, 0.25), 0 0 0 1px rgba(255, 59, 127, 0.3);
+
   /* Border Radius */
   --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
   --radius-full: 9999px;
 
   /* Spacing */
@@ -75,7 +83,10 @@
   --sp-3xl: 64px;
 
   /* Motion */
-  --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
