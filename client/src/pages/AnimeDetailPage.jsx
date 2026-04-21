@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useLocation } from 'react-router-dom'
 import { useAnimeDetail } from '../hooks/useAnime'
 import { pickTitle } from '../utils/formatters'
 import { useLang } from '../context/LanguageContext'
@@ -94,6 +94,7 @@ function ShareButton({ anime }) {
 
 export default function AnimeDetailPage() {
   const { id } = useParams()
+  const location = useLocation()
   const { t, lang } = useLang()
   const { data: anime, isLoading, error } = useAnimeDetail(id)
   const [torrentOpen, setTorrentOpen] = useState(false)
@@ -103,7 +104,7 @@ export default function AnimeDetailPage() {
     return () => { document.title = 'AnimeGo' }
   }, [anime, lang])
 
-  if (isLoading) return <DetailSkeleton />
+  if (isLoading) return <DetailSkeleton coverImageColor={location.state?.coverImageColor} />
   if (error) return (
     <div style={{ textAlign:'center', padding:'80px 0', color:'#ff453a' }}>
       {t('anime.loadError')}：{error.message}

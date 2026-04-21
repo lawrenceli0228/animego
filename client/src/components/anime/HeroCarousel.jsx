@@ -71,7 +71,7 @@ export default function HeroCarousel({ animeList = [] }) {
                       <span style={{ fontSize: 22, fontWeight: 800, color: '#ffffff', fontFamily: "'JetBrains Mono',monospace" }}>{formatScore(anime.averageScore)}</span>
                     </div>
                   )}
-                  <Link to={`/anime/${anime.anilistId}`}
+                  <Link to={`/anime/${anime.anilistId}`} state={{ coverImageColor: anime.coverImageColor }}
                     style={{ padding: '10px 28px', borderRadius: 8, background: '#0a84ff', color: '#fff', fontWeight: 500, fontSize: 14, fontFamily: "'DM Sans',sans-serif", textDecoration: 'none', transition: 'background 0.15s' }}
                     onMouseEnter={e => e.currentTarget.style.background='#409cff'}
                     onMouseLeave={e => e.currentTarget.style.background='#0a84ff'}

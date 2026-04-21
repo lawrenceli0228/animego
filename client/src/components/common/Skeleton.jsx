@@ -2,6 +2,7 @@
  * Reusable skeleton building blocks + preset layouts.
  * Uses a single @keyframes shimmer injected once.
  */
+import { hexToRgbCss } from '../../utils/color';
 
 const shimmerCSS = `
 @keyframes skeleton-shimmer {
@@ -67,16 +68,29 @@ export function AnimeGridSkeleton({ count = 10 }) {
   );
 }
 
-/** Detail page hero + info skeleton */
-export function DetailSkeleton() {
+/**
+ * Detail page hero + info skeleton.
+ * Accepts `coverImageColor` (hex) via route state so the banner/cover can pre-tint
+ * with the same accent the hero will use — avoids color flash on hero mount.
+ */
+export function DetailSkeleton({ coverImageColor } = {}) {
+  const accent = coverImageColor || '#8B5CF6';
+  const accentRgb = hexToRgbCss(coverImageColor);
+  const bannerBg = `linear-gradient(to bottom, rgba(${accentRgb}, 0.18) 0%, rgba(0,0,0,0.35) 35%, rgba(0,0,0,0.92) 100%), linear-gradient(90deg, #1c1c1e 25%, #2c2c2e 50%, #1c1c1e 75%)`;
+  const coverShadow = `0 16px 48px rgba(0,0,0,0.60), 0 0 80px -20px ${accent}`;
   return (
-    <div>
-      {/* Banner */}
-      <Box width="100%" height={280} radius={0} />
+    <div style={{ '--poster-accent': accent, '--poster-accent-rgb': accentRgb }}>
+      {/* Banner — pre-tinted with poster accent */}
+      <div style={{
+        width: '100%', height: 280,
+        background: bannerBg,
+        backgroundSize: '100% 100%, 800px 100%',
+        animation: 'skeleton-shimmer 1.6s ease-in-out infinite',
+      }} />
       <div className="container" style={{ paddingTop: 24 }}>
         <div style={{ display: 'flex', gap: 24 }}>
-          {/* Cover */}
-          <Box width={180} height={260} radius={10} style={{ marginTop: -80 }} />
+          {/* Cover — pre-tinted halo matches hero */}
+          <Box width={180} height={260} radius={10} style={{ marginTop: -80, boxShadow: coverShadow }} />
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 8 }}>
             <Box height={28} width="60%" />
             <Box height={16} width="40%" />

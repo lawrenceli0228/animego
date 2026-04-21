@@ -32,12 +32,12 @@ const SHOWN_RELATIONS = new Set(['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'S
 const S = {
   bannerOverlay: {
     position:'absolute', inset:0,
-    background:'linear-gradient(to bottom, rgba(var(--poster-accent-rgb), 0.35) 0%, rgba(0,0,0,0.35) 35%, rgba(0,0,0,0.92) 100%)',
+    background:'linear-gradient(to bottom, rgba(var(--poster-accent-rgb), 0.18) 0%, rgba(0,0,0,0.35) 35%, rgba(0,0,0,0.92) 100%)',
   },
   cover: {
     width:210, height:300, objectFit:'cover', borderRadius:12,
-    border:'1px solid var(--poster-accent)',
-    boxShadow:'0 16px 48px rgba(0,0,0,0.60), 0 0 60px rgba(var(--poster-accent-rgb), 0.45)',
+    border:'1px solid #38383a',
+    boxShadow:'0 16px 48px rgba(0,0,0,0.60), 0 0 80px -20px var(--poster-accent)',
   },
   title: { fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 },
   subtitle: { color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 },
@@ -248,7 +248,7 @@ export default function AnimeDetailHero({ anime }) {
                 return (
                   <button
                     key={`${r.relationType}-${r.anilistId}`}
-                    onClick={() => navigate(`/anime/${r.anilistId}`)}
+                    onClick={() => navigate(`/anime/${r.anilistId}`, { state: { coverImageColor: r.coverImageColor } })}
                     style={S.relationBtn}
                     onMouseEnter={e => { e.currentTarget.style.borderColor='var(--poster-accent)'; e.currentTarget.style.color='var(--poster-accent)' }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(84,84,88,0.65)'; e.currentTarget.style.color='rgba(235,235,245,0.60)' }}

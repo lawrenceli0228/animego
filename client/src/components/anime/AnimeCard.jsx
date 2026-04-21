@@ -7,14 +7,15 @@ const scoreColor = (s) => s >= 75 ? '#30d158' : s >= 50 ? '#ff9f0a' : '#ff453a'
 export default function AnimeCard({ anime, rank, watcherCount }) {
   const navigate = useNavigate()
   const { lang } = useLang()
-  const { anilistId, titleRomaji, coverImageUrl, averageScore, genres = [], format } = anime
+  const { anilistId, titleRomaji, coverImageUrl, coverImageColor, averageScore, genres = [], format } = anime
+  const go = () => navigate(`/anime/${anilistId}`, { state: { coverImageColor } })
 
   return (
     <div
-      onClick={() => navigate(`/anime/${anilistId}`)}
+      onClick={go}
       role="button"
       tabIndex={0}
-      onKeyDown={e => e.key === 'Enter' && navigate(`/anime/${anilistId}`)}
+      onKeyDown={e => e.key === 'Enter' && go()}
       aria-label={pickTitle(anime, lang)}
       style={{
         position: 'relative', cursor: 'pointer', borderRadius: 12,

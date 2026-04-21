@@ -44,9 +44,9 @@ export default function RelationSection({ relations }) {
         {sorted.map((rel) => (
           <div
             key={`${rel.anilistId}-${rel.relationType}`}
-            onClick={() => navigate(`/anime/${rel.anilistId}`)}
+            onClick={() => navigate(`/anime/${rel.anilistId}`, { state: { coverImageColor: rel.coverImageColor } })}
             role="button" tabIndex={0}
-            onKeyDown={e => e.key === 'Enter' && navigate(`/anime/${rel.anilistId}`)}
+            onKeyDown={e => e.key === 'Enter' && navigate(`/anime/${rel.anilistId}`, { state: { coverImageColor: rel.coverImageColor } })}
             style={{
               display: 'flex', alignItems: 'center', gap: 12,
               background: '#1c1c1e', border: '1px solid #38383a', borderRadius: 10,
