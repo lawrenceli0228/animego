@@ -2,6 +2,97 @@
 
 ---
 
+## [1.0.12] - 2026-04-22
+
+### 前端设计系统现代化 — Tailwind v4 底座 + shadcn 接入 + OKLCH 海报色身份
+
+**背景：**
+- v1.0.11 收尾后一度标了维护模式，但"每个详情页长得一样"这件事越看越不对劲 —— 20 个番放在一起没任何视觉身份，iOS 系统蓝铺满所有 CTA，品牌色 `#8B5CF6` 纸上谈兵从没真的出现
+- Arc / Linear / Apple TV+ 的共同做法是**把调色权交给内容**：每个 tab、workspace、影片都有自己的一抹色，交互表面跟着变，装饰底再跟着呼应。AniList GraphQL 本身就返回 `coverImage.color`（每张封面的 k-means 主色），之前在 schema 里却没透传
+- 同时前端栈也到了需要刷新的节点：自制 style object 散落在各组件里，没有 design token 中心，也没有 primitive 可复用。Sprint 1/2 一并重铺
+
+**Sprint 1 — Tailwind v4 + token 双向同源（commits `d4c54fa` `cd34e92` `bfe6986`）：**
+
+- 接入 `@tailwindcss/vite` v4，配 `@import "tailwindcss"` 一行起步
+- 建立 **token 双向同源**：`client/src/index.css` 里一份 `:root` CSS 变量（color / radius / font / spacing），Tailwind v4 通过 `@theme` 块同步消费，手写 style object 走 `var(--...)`。改一处、两边都跟上
+- 清掉 Vite 脚手架残留的 `App.css`
+- 写 `CONTRIBUTING.md` 锁死 **JSX-only 政策** —— 本项目不引 TypeScript，新组件一律 `.jsx`；给未来的 agent / 贡献者一个明文约束，免得又回到混合栈的老路
+- `tailwindSmoke.test.jsx` 做 CI 级烟雾测试，保证 Tailwind 工具类真的产出样式
+
+**Sprint 2 Step 1 — shadcn JSX 底座（commits `45dd50f` `8220633`）：**
+
+- 由于我们坚持 JSX-only，shadcn CLI 直接不可用。手工搬 `cn` util（`clsx` + `tailwind-merge`）+ `class-variance-authority`，做一版纯 JSX 的 `Button` primitive，variants 抽到独立的 `button-variants.js`
+- token 扩充：新增 `--radius-card` / `--radius-chip` / `--space-section`，圆角全局 -2px（偏硬朗一点，离 Discord-泡沫风格远一步）
+- `button.test.jsx` 做 primitive 行为锁定
+
+**Sprint 2 Step 2 — 海报色身份链（commits `fe84e21` `93acae4` `6ecc386` `1d3e01d` `20e52b2`）：**
+
+这条链是五个递进的 commit，最后一步才让它真的"可信"。按顺序：
+
+*Step 2a — 服务端透传原始 coverImage.color（`fe84e21`）：*
+- `animeDetail.graphql.js` / `seasonalAnime.graphql.js` / `searchAnime.graphql.js` / `weeklySchedule.graphql.js` 四个 query 全部加 `coverImage { color }` 字段
+- `anilist.service.js` normalize 层透传到 JSON API，schema 里加 `coverImageColor: String`
+- 这一步只给"原料"，不做任何归一化
+
+*Step 2b — 客户端 DetailHero 接入（`93acae4`）：*
+- `AnimeDetailHero.jsx` 外层 div 挂 `--poster-accent` / `--poster-accent-rgb` CSS 变量
+- banner 渐变顶部染 14%、cover 图 80px `-20px` 扩散光晕
+- 第一版铺完发现：**肉眼看不见变化**。AniList 返回的色里～30% 是接近中性的淡奶油色（鬼灭的 `#f1c9ae` 之类），在 14% 不透明度下无限趋近于零
+
+*Step 2c — 强度上调，先让肉眼先看见（`6ecc386`）：*
+- banner 14% → 35%、halo 加 border + 60px @ 45%
+- 只是 debug 用途：确认管道通了，用户才看见
+
+*Step 2d — Skeleton 预挂色 + 导航 state 传递（`1d3e01d`）：*
+- 点卡片进详情页时会"闪一下" —— skeleton 是纯灰，mount 完才变色
+- `AnimeCard` / `HeroCarousel` / `RelationSection` / `RecommendationSection` 四个入口全改走 `navigate(path, { state: { posterAccent, posterAccentRgb } })`
+- `DetailSkeleton` 从 `useLocation().state` 读同一批值，让 skeleton 就跟详情页同色 —— 点进去视觉上是连续渐变，不是二段跳
+- 同步把 Step 2c 的强度回退到保守档
+
+*Step 2e — 服务端 OKLCH 归一化，根治"washed pastel"（`20e52b2`）：*
+
+这是整条链的决定性一步。前面四步都在客户端绕，直到一次三 agent review（engineer / design / art-direction 仲裁）判出：**别在消费端改，去源头归一化**。
+
+- 新增 `server/utils/normalizeAccent.js` ~120 行，零依赖手搓 Björn Ottosson 的 sRGB↔linear↔OKLab↔OKLCH 矩阵。选 OKLCH 是因为它的色度 / 亮度跟人眼感知线性对应，clamp 起来不会让红色突然变粉
+- 规则：
+  - 色度 chroma 下限 `0.11` —— 低于此的淡奶油色按品牌紫 `#8B5CF6` 兜底
+  - 亮度 lightness 夹在 `[0.56, 0.70]` —— 暗的抬、亮的压，保证落在"在黑底上看得清、又不刺眼"的带宽
+  - 灰度 / null / malformed / 太短的 hex —— 一律兜底到品牌紫
+- 产物字段：`posterAccent`（归一化后的 hex）、`posterAccentRgb`（"R, G, B" 字符串，前端直接塞 `rgba()`）、`posterAccentContrastOnBlack`（WCAG 对比度预计算，给未来 per-title CTA 染色当 gate 用）
+- 四个 ingest 点接入：main media / relations / recommendations / weekly schedule
+- `AnimeCache.js` 三个 sub-doc（主 + relations + recommendations）都加这三个字段。不做迁移脚本，旧缓存 TTL 24h 自然刷新，空值前端走品牌紫兜底
+- 客户端 `hexToRgbCss` util 删干净 —— RGB 预计算已经下沉到服务端
+
+*Step 2f — Banner 保持干净,身份收敛到 cover 框架（`2cbc120`）：*
+
+归一化接通后做视觉复审，发现亮色系 banner（晴空、浅色调封面）上叠海报色顶部渐变会出现两种失败态：normal-mode 高 alpha 会把亮像素压成接近白的 desat 色块；soft-light 混合在 0.85 alpha 又会把整幅云层染成 accent 色（试过两轮都被打回）。
+
+- 参考 Apple TV+ / A24 / Spotify 的做法：**hero 照片保持干净，accent 身份放在交互框架里**
+- `AnimeDetailHero.jsx` `bannerOverlay` 恢复纯黑底渐变（顶 40% transparent，底 30%→95% rgba(0,0,0)）
+- accent 身份改由三处承载：cover 图 `rgba(accent, 0.55)` 1px 描边 + 双层 boxShadow 扩散光（64px/24px）、Read More 按钮文字走 `var(--poster-accent)`
+- `Skeleton.jsx` `DetailSkeleton` 的 bannerBg / coverShadow 同步镜像修改，保证 skeleton → hero 挂载时不跳色
+- 在鬼灭、你的谎言在四月、Spy × Family 三种差异化 banner 上肉眼验证通过
+
+**验证：**
+- 服务端 `jest` — **307/307** 全绿（含 16 个新 `normalizeAccent` 单测覆盖 null / grayscale / 淡奶油升色 / 饱和红保持 / 暗色抬亮 / 亮色压暗 / idempotent / 大写 hex / 无 `#` 前缀 / 在黑底对比度 > 3）
+- 客户端 `vitest` — **604/604** 全绿
+- 手工在 AoT、Demon Slayer、One Piece、MyGO 等饱和度差异大的标题上肉眼确认：每个详情页都带上了真正属于自己的那抹色，skeleton ↔ hero 之间不再闪
+- 三 agent review 结论：SHIP。两个 MEDIUM issue（sRGB gamut mapping 缺失 + OOG 测试未覆盖）列入后续
+
+**教训：**
+- "给前端原料让前端处理" 是本能的直觉，也是这次走弯的起点。AniList 给的色是"每张封面的统计答案"，不是"能直接上墙的设计 token"；前者到后者之间有 ~30% 失败率（淡色、近灰、极暗极亮），只在消费端调不透明度永远修不好长尾
+- **归一化应该发生在最上游的那次写入里**：这一层做对了，后面详情页、skeleton、未来的 CTA 染色、hover glow 扩展全部免费受益，都只是读同一个已经保证过下限的字段
+- OKLCH > HSL > Lab：HSL 的"亮度"跟人眼感知差得远（纯黄色 HSL 50% 实际看起来亮得刺眼），OKLCH 是目前最能"按设计意图 clamp"的色空间
+- CJS 项目要引 OKLCH 不必上 `culori`（ESM-only）—— Ottosson 的矩阵就那几个数字，手搓 60 行更透明、易审、零依赖
+- 无 TypeScript 项目引 shadcn 要手工搬：CLI 只认 `.tsx`，但把 `cn` + `cva` 这两个关键 util 手抄过来就够了，剩下的 primitive 自己写比 CLI 产物干净
+
+**配套基建：**
+- `CONTRIBUTING.md` 明文锁 JSX-only —— 后续 agent / 贡献者不能偷偷引 `.tsx`
+- `jsconfig.json` 改了 path alias，`@/` 指向 `client/src`，跟 shadcn 对齐
+- `eslint.config.js` 加 JSX token 相关规则
+
+---
+
 ## [1.0.11] - 2026-04-20
 
 ### 白屏修复 — shared util 拆成 server/utils + client/utils 两份同步副本
