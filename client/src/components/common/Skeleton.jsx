@@ -76,8 +76,10 @@ export function AnimeGridSkeleton({ count = 10 }) {
 export function DetailSkeleton({ posterAccent, posterAccentRgb } = {}) {
   const accent = posterAccent || '#8B5CF6';
   const accentRgb = posterAccentRgb || '139, 92, 246';
-  const bannerBg = `linear-gradient(to bottom, rgba(${accentRgb}, 0.18) 0%, rgba(0,0,0,0.35) 35%, rgba(0,0,0,0.92) 100%), linear-gradient(90deg, #1c1c1e 25%, #2c2c2e 50%, #1c1c1e 75%)`;
-  const coverShadow = `0 16px 48px rgba(0,0,0,0.60), 0 0 80px -20px ${accent}`;
+  // Match hero: banner photo (here: shimmer) stays clean, only the bottom
+  // fades to page bg. Accent identity is carried by the cover halo below.
+  const bannerBg = `linear-gradient(to bottom, transparent 0%, transparent 40%, rgba(0,0,0,0.30) 65%, rgba(0,0,0,0.95) 100%), linear-gradient(90deg, #1c1c1e 25%, #2c2c2e 50%, #1c1c1e 75%)`;
+  const coverShadow = `0 16px 48px rgba(0,0,0,0.60), 0 0 64px -8px ${accent}, 0 0 24px -4px ${accent}`;
   return (
     <div style={{ '--poster-accent': accent, '--poster-accent-rgb': accentRgb }}>
       {/* Banner — pre-tinted with poster accent */}

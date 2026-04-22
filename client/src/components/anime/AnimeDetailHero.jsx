@@ -29,14 +29,17 @@ const SHOWN_RELATIONS = new Set(['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'S
 // --- Static styles (extracted to avoid re-creation on every render) ---
 
 const S = {
+  // Banner photo stays clean — no accent tint over the photography.
+  // Accent identity is carried by cover halo + tinted border + Read More link.
+  // Gradient only handles the photo→page-bg transition for the cover overlap.
   bannerOverlay: {
     position:'absolute', inset:0,
-    background:'linear-gradient(to bottom, rgba(var(--poster-accent-rgb), 0.18) 0%, rgba(0,0,0,0.35) 35%, rgba(0,0,0,0.92) 100%)',
+    background:'linear-gradient(to bottom, transparent 0%, transparent 40%, rgba(0,0,0,0.30) 65%, rgba(0,0,0,0.95) 100%)',
   },
   cover: {
     width:210, height:300, objectFit:'cover', borderRadius:12,
-    border:'1px solid #38383a',
-    boxShadow:'0 16px 48px rgba(0,0,0,0.60), 0 0 80px -20px var(--poster-accent)',
+    border:'1px solid rgba(var(--poster-accent-rgb), 0.55)',
+    boxShadow:'0 16px 48px rgba(0,0,0,0.60), 0 0 64px -8px var(--poster-accent), 0 0 24px -4px var(--poster-accent)',
   },
   title: { fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 },
   subtitle: { color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 },
@@ -83,7 +86,7 @@ const S = {
   },
   descText: { color:'rgba(235,235,245,0.60)', fontSize:14, lineHeight:1.8 },
   readMoreBtn: {
-    color:'#0a84ff', fontSize:13, fontWeight:600, marginTop:8, cursor:'pointer',
+    color:'var(--poster-accent)', fontSize:13, fontWeight:600, marginTop:8, cursor:'pointer',
     background:'none', border:'none', padding:0,
   },
   relationsRow: { display:'flex', flexWrap:'wrap', gap:8 },
