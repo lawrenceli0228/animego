@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useAnimeDetail } from '../hooks/useAnime'
 import { pickTitle } from '../utils/formatters'
+import { readAccent, writeAccent } from '../utils/accentCache'
 import { useLang } from '../context/LanguageContext'
 import AnimeDetailHero from '../components/anime/AnimeDetailHero'
 import SubscriptionButton from '../components/subscription/SubscriptionButton'
@@ -99,12 +100,23 @@ export default function AnimeDetailPage() {
   const { data: anime, isLoading, error } = useAnimeDetail(id)
   const [torrentOpen, setTorrentOpen] = useState(false)
 
+  // Fast halo-in: skip the reveal delay when we already know the accent from
+  // either the navigating link's state or a prior visit's localStorage entry.
+  const cachedAccent = useMemo(() => readAccent(id), [id])
+  const knownAccent = location.state?.posterAccent || cachedAccent?.accent || null
+
   useEffect(() => {
     if (anime) document.title = `${pickTitle(anime, lang)} — AnimeGo`
     return () => { document.title = 'AnimeGo' }
   }, [anime, lang])
 
-  if (isLoading) return <DetailSkeleton posterAccent={location.state?.posterAccent} posterAccentRgb={location.state?.posterAccentRgb} />
+  useEffect(() => {
+    if (anime?.posterAccent && anime?.posterAccentRgb) {
+      writeAccent(id, anime.posterAccent, anime.posterAccentRgb)
+    }
+  }, [id, anime?.posterAccent, anime?.posterAccentRgb])
+
+  if (isLoading) return <DetailSkeleton />
   if (error) return (
     <div style={{ textAlign:'center', padding:'80px 0', color:'#ff453a' }}>
       {t('anime.loadError')}：{error.message}
@@ -114,7 +126,7 @@ export default function AnimeDetailPage() {
 
   return (
     <div>
-      <AnimeDetailHero anime={anime} />
+      <AnimeDetailHero anime={anime} fastHalo={!!knownAccent} />
       <div className="container">
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginTop: 16 }}>
           <SubscriptionButton anilistId={anime.anilistId} episodes={anime.episodes} />

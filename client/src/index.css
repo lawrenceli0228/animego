@@ -87,6 +87,11 @@
   --duration-normal: 250ms;
   --duration-slow: 400ms;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Halo reveal — poster accent never flashes from placeholder; it's unveiled. */
+  --duration-halo-in: 260ms;
+  --duration-halo-in-fast: 200ms;
+  --delay-halo-appear: 400ms;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -128,4 +133,30 @@ h1, h2, h3, h4, h5 {
 @keyframes shimmer {
   0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+/* Hero cover halo — neutral by default. The poster's color signature is only
+   painted once the parent hero signals [data-accent-ready="true"], so the user
+   never sees a placeholder purple swap to the real color. */
+.hero-cover {
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.60);
+  transition:
+    box-shadow var(--duration-halo-in) var(--ease-out-expo) var(--delay-halo-appear),
+    border-color var(--duration-halo-in) var(--ease-out-expo) var(--delay-halo-appear);
+}
+[data-accent-ready="true"] .hero-cover {
+  border-color: rgba(var(--poster-accent-rgb), 0.55);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.60),
+              0 0 64px -8px var(--poster-accent),
+              0 0 24px -4px var(--poster-accent);
+}
+[data-accent-ready="true"][data-accent-fast="true"] .hero-cover {
+  transition-delay: 0ms;
+  transition-duration: var(--duration-halo-in-fast);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-cover {
+    transition: none;
+  }
 }

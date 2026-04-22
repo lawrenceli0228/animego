@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { formatScore, stripHtml, truncate, pickTitle } from '../../utils/formatters'
 import { useLang } from '../../context/LanguageContext'
@@ -38,8 +38,8 @@ const S = {
   },
   cover: {
     width:210, height:300, objectFit:'cover', borderRadius:12,
-    border:'1px solid rgba(var(--poster-accent-rgb), 0.55)',
-    boxShadow:'0 16px 48px rgba(0,0,0,0.60), 0 0 64px -8px var(--poster-accent), 0 0 24px -4px var(--poster-accent)',
+    // border + box-shadow live in .hero-cover CSS so halo-in animation can
+    // reveal them on mount instead of painting a placeholder color first.
   },
   title: { fontSize:'clamp(22px,4vw,36px)', color:'#ffffff', marginBottom:4 },
   subtitle: { color:'rgba(235,235,245,0.60)', fontSize:15, marginBottom:16 },
@@ -100,7 +100,7 @@ const S = {
   relationLabel: { color:'rgba(235,235,245,0.35)', fontSize:11 },
 }
 
-export default function AnimeDetailHero({ anime }) {
+export default function AnimeDetailHero({ anime, fastHalo = false }) {
   const [expanded, setExpanded] = useState(false)
   const { t, lang } = useLang()
   const navigate = useNavigate()
@@ -113,8 +113,17 @@ export default function AnimeDetailHero({ anime }) {
     bangumiScore, bangumiVotes, relations = [],
     posterAccent, posterAccentRgb,
   } = anime
-  const accent = posterAccent || '#8B5CF6'
-  const accentRgb = posterAccentRgb || '139, 92, 246'
+  // Only consider the accent "ready" when it's a real poster-derived color,
+  // not the server's brand-violet fallback. An unknown/fallback accent leaves
+  // the cover neutral; halo only appears once a real color is available.
+  const hasRealAccent = !!posterAccent && posterAccent.toLowerCase() !== '#8b5cf6'
+  // Reveal on next frame so CSS transitions fire even on first paint.
+  const [accentRevealed, setAccentRevealed] = useState(false)
+  useEffect(() => {
+    if (!hasRealAccent) { setAccentRevealed(false); return }
+    const id = requestAnimationFrame(() => setAccentRevealed(true))
+    return () => cancelAnimationFrame(id)
+  }, [hasRealAccent])
   const isEnriching = (anime.bangumiVersion ?? 0) < 2 ||
     (anime.bangumiVersion === 2 && anime.bgmId && !anime.titleChinese)
 
@@ -139,7 +148,11 @@ export default function AnimeDetailHero({ anime }) {
   const visibleRelations = relations.filter(r => SHOWN_RELATIONS.has(r.relationType))
 
   return (
-    <div style={{ '--poster-accent': accent, '--poster-accent-rgb': accentRgb }}>
+    <div
+      data-accent-ready={accentRevealed ? 'true' : 'false'}
+      data-accent-fast={fastHalo ? 'true' : 'false'}
+      style={hasRealAccent ? { '--poster-accent': posterAccent, '--poster-accent-rgb': posterAccentRgb } : undefined}
+    >
       {/* Banner */}
       <div style={{
         position:'relative', height: bannerImageUrl ? 400 : 120,
@@ -154,6 +167,7 @@ export default function AnimeDetailHero({ anime }) {
         {/* Cover */}
         <div style={{ flexShrink:0 }}>
           <img src={coverImageUrl} alt={titleRomaji}
+            className="hero-cover"
             style={S.cover}
             onError={e => { e.target.style.background='#2c2c2e' }}
           />

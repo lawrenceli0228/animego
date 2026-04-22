@@ -69,20 +69,16 @@ export function AnimeGridSkeleton({ count = 10 }) {
 
 /**
  * Detail page hero + info skeleton.
- * Accepts normalized `posterAccent` + `posterAccentRgb` via route state so the
- * banner/cover can pre-tint with the same accent the hero will use — avoids
- * color flash on hero mount.
+ * Intentionally neutral: no poster accent halo is painted here. The accent is
+ * the poster's color signature and only appears on Hero mount via halo-in
+ * animation — so the user never sees placeholder→real color flash.
  */
-export function DetailSkeleton({ posterAccent, posterAccentRgb } = {}) {
-  const accent = posterAccent || '#8B5CF6';
-  const accentRgb = posterAccentRgb || '139, 92, 246';
-  // Match hero: banner photo (here: shimmer) stays clean, only the bottom
-  // fades to page bg. Accent identity is carried by the cover halo below.
+export function DetailSkeleton() {
   const bannerBg = `linear-gradient(to bottom, transparent 0%, transparent 40%, rgba(0,0,0,0.30) 65%, rgba(0,0,0,0.95) 100%), linear-gradient(90deg, #1c1c1e 25%, #2c2c2e 50%, #1c1c1e 75%)`;
-  const coverShadow = `0 16px 48px rgba(0,0,0,0.60), 0 0 64px -8px ${accent}, 0 0 24px -4px ${accent}`;
+  const coverShadow = `0 16px 48px rgba(0,0,0,0.60)`;
   return (
-    <div style={{ '--poster-accent': accent, '--poster-accent-rgb': accentRgb }}>
-      {/* Banner — pre-tinted with poster accent */}
+    <div>
+      {/* Banner — neutral shimmer, no tint */}
       <div style={{
         width: '100%', height: 280,
         background: bannerBg,
@@ -91,7 +87,7 @@ export function DetailSkeleton({ posterAccent, posterAccentRgb } = {}) {
       }} />
       <div className="container" style={{ paddingTop: 24 }}>
         <div style={{ display: 'flex', gap: 24 }}>
-          {/* Cover — pre-tinted halo matches hero */}
+          {/* Cover — neutral shadow only; halo is owned by Hero */}
           <Box width={180} height={260} radius={10} style={{ marginTop: -80, boxShadow: coverShadow }} />
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 8 }}>
             <Box height={28} width="60%" />
