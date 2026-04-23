@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useLang } from '../../context/LanguageContext'
@@ -61,7 +61,6 @@ export default function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
   const [hidden, setHidden] = useState(false)
-  const lastY = useRef(0)
 
   const isPlayer = location.pathname === '/player'
 
@@ -86,7 +85,7 @@ export default function Navbar() {
       <div style={s.inner}>
         <Link to="/" style={s.logo}>AnimeGo</Link>
         <div style={s.links}>
-          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/player','nav.player']].map(([to, key]) => (
+          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/player','nav.player'],['/about','关于']].map(([to, key]) => (
             <NavLink
               key={to}
               to={to}
@@ -96,7 +95,7 @@ export default function Navbar() {
                 ...(to === '/player' ? { display: window.innerWidth <= 600 ? 'none' : undefined } : {}),
               })}
             >
-              {t(key)}
+              {key.startsWith('nav.') ? t(key) : key}
             </NavLink>
           ))}
         </div>
