@@ -2,6 +2,72 @@
 
 ---
 
+## [1.0.13] - 2026-04-24
+
+### 介绍首页 `/about` — dark editorial × OKLCH 章节色身份,7 张有密度的 bento
+
+**背景：**
+- v1.0.12 把"海报色身份"做到了详情页,但站点对外没有一张页面讲"我们到底在做什么"。从 Navbar 点 logo 直接进 HomePage 列表页,新用户没有任何着陆体验
+- 要做一张接得住第一眼印象的页面:告诉访客**为什么我们值得收藏**,而不是"又一个 AniList 列表皮"
+- 参考锚点锁死在 **Apple TV+ / A24 / Linear / Spotify Year Wrapped** —— dark editorial + 杂志目录感 + 章节化色身份。不做 Discord-泡沫风,也不做 SaaS-card-grid 模板
+
+**Sprint 1 — `/about` 落地(commit `aaca423`):**
+
+- 9 个 section 单文件,纯 inline style 跟现有 pages 约定一致:`HeroSection` / `StatsRow` / `DataSourcesTribute` / `FeaturesBento` / `PosterIdentityShowcase` / `DifferentiatorSection` / `DanmakuInsert` / `FaqSection` / `FinalCta`
+- 排版锚:Sora 大字 manifesto + JetBrains Mono 做数据 / 代号 / `§01`-`§08` 杂志目录编号。字体对比度足以让"主张"和"证据"分属两套视觉系统
+- **章节色身份系统**:四个 hue(330 粉 / 210 蓝 / 155 绿 / 40 橙)在 StatsRow 竖条、Bento 章节卡、FinalCta 渐变条、FAQ 打开态 bar 四处串联,形成色身份索引。不是装饰渐变,是目录式的编号色
+- Hero showcase hue 锁 295,跟 Bento poster 卡 hue 330 解耦,避免同色语义重复
+- `Navbar` 加 `/about` 入口,删 `lastY` 死代码;`Footer` 站点列加 "关于" 外链(commit `b7c9ac4`)
+- 两轮 engineer review + design review,HIGH 问题全部收掉
+
+**Sprint 2 — §04 bento 重做:从 4 张空旷卡做到 7 张有密度的功能卡(commit `9c5bb7f`):**
+
+v1 的 bento 只有 4 张大卡,用户反馈"太空旷了,看不到到底做了什么"。这个 section 是"我们到底在做什么"的落点,空旷等于沉默。
+
+- 扩到 7 张卡,12 列 asymmetric 网格:hero 带(7+5 + row-span 2)+ 中排(4+4+4)+ 下排(6+6)。每张卡一个 hue,按章节编号递进
+- **7 个 feature 一一对应真实产品能力**,不是榜单式罗列:
+  1. `§01 海报色身份` —— OKLCH 归一化演示(k-means + Lab → OKLCH),ΔE 对比度条 + AA 安全区标注
+  2. `§02 弹幕热力` —— 60 格密度时间线 + 3 个峰值(04:10 / mid / 18:42)+ playhead at 52% + top-3 高频弹幕
+  3. `§03 字幕组聚合` —— 3 个种子源(动漫花园 / Nyaa / ACG.RIP)并行抓取 + 4 行字幕组 release(SubsPlease / LoliHouse / 桜都 / VCB-Studio)+ 过滤 tail。**这一栏 v1 曾写成"多源视频流失效切换(AGE动漫/樱花动漫/Bilibili/Bangumi)"—— 本站根本没有这个能力,是 copy 捏造。v2 改成真正写在 `server/controllers/anime.controller.js` 里的 `Promise.allSettled([fetchDmhy, fetchAcgRip, fetchNyaa])`**
+  4. `§04 手动选集` —— 3 张 FlowCard(bad → pick → locked)+ handoff 箭头动画 + 周统计条 + kbd 提示
+  5. `§05 续播队列` —— next-drop ticker + 3 行带海报色小块 + SVG ProgressRing(r=12, stroke-dasharray, rotate -90)
+  6. `§06 周表` —— 7 列每天 + 当日高亮环 + 每日点阵 stack + next-airing 行
+  7. `§07 拖拽解析` —— drop zone marching dashes + MKV SVG icon + 解析 input/output 预览 + 接受格式 pill(.mkv .mp4 .webm .avi .srt .ass)
+
+- **动效原则**:compositor-only(`transform` / `opacity`),所有 `@keyframes`(`posterBreathe` / `arrowDotTravel` / `dropMarch` / `featPulse` / `featMarch`)在 `prefers-reduced-motion: reduce` 下全部降级到 none
+- 7 张卡 staggered entrance,`viewport={{ once: true }}` 只触发一次,`ease: [0.16, 1, 0.3, 1]` 出场曲线
+- Hover:转成 ::before radial gradient spotlight(跟鼠标),章节 bar 拉高 scale
+
+**f1 海报色身份 —— 三张海报真封面 + 吉祥物(也在 `9c5bb7f`):**
+
+v1 的 f1 卡里三张海报是纯渐变 tile + 烫金标题,没有"这是一张真封面"的说服力。第一稿修成从 trending(10)match 标题取封面,但 `药屋` / `败犬` 不稳定在 top-10 里,刷新一次少一张。
+
+- trending 列从 10 拉到 30 增加 hit rate,但仍非保证
+- 最终方案:**直抓 AniList ID**,三张海报锁死:`154587`(芙莉莲)/ `161645`(药屋少女的呢喃)/ `171457`(败犬女主太多了)。三个 ID 全部走 `curl` 打 graphql.anilist.co 校验过 romaji 匹配
+- `useAnimeDetail(id)` 优先,trending match 保留兜底,两层 fallback 不闪
+- `img` 叠在渐变 tile 上 + 底部黑色 gradient 压字,hue 徽章保留(20°/330°/340°)
+- **右侧补吉祥物**:`public/mascot-wink.png`(蓝发,比耶,眨眼),`position: absolute; right: 0; bottom: 0`,`height: 480px` 延伸到海报 tile 底线,与下方 INPUT/OUTPUT 规格块顶边紧贴。`< 1180px` 隐藏避免挤占
+- 三轮迭代才定位置:top-right 第一版悬空有 gap → 挪进 PosterVisual 的 tile 容器 + `bottom: 0` 锚定才算紧贴
+
+**验证:**
+- 客户端 `vite build` — 全绿(989 kB / 293 kB gzip,相比 v1.0.12 略增是 bento 变密 + 吉祥物 PNG)
+- 真机肉眼在 1920 / 1440 / 1180 / 720 四档断点验证 bento 布局切换:12 col → 6 col → 1 col
+- `prefers-reduced-motion: reduce` 下所有 loop / hover / entrance 降级确认
+- 三张海报 AniList ID 用 graphql 单测校对过 romaji,不会拉错番
+
+**教训:**
+- **空旷 ≠ 极简**。当 section 的职责是"证明我们做了什么",空旷就是沉默。极简留白要放在那些"观众已经同意你的主张"的地方,不是"你正在招募观众"的地方
+- **捏造的 feature 再漂亮也会暴露**。v1 写的"多源视频流失效切换"视觉上很酷,但用户第一眼就指出"我们好像没有这个功能吧你看一下"。写 landing copy 的唯一来源是 `server/controllers/` 里真跑的代码,不是脑补
+- trending 数据做视觉锚点要**假设 miss**。一旦依赖"top-N 里一定有 X",就会有刷新闪烁。要么不依赖,要么给 fallback。锁 ID 是最稳方案
+- 装饰图的放置没有"一次就对"——第一版 bottom-right、第二版 top-right、第三版嵌进 tile 容器 + bottom 锚定才算贴合。图片不是丢进 `<div>` 就结束,是"相对谁贴紧"的布局题
+
+**配套:**
+- `CHANGELOG.md` 本条
+- `public/mascot-wink.png`(2.7 MB PNG,透明底)
+- landing 全站组件同步迭代:HeroSection / StatsRow / DataSourcesTribute / PosterIdentityShowcase / DifferentiatorSection / DanmakuInsert / FaqSection / FinalCta 均有小改(见 `git diff` stat)
+
+---
+
 ## [1.0.12] - 2026-04-22
 
 ### 前端设计系统现代化 — Tailwind v4 底座 + shadcn 接入 + OKLCH 海报色身份
