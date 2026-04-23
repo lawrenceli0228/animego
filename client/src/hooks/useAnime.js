@@ -85,7 +85,7 @@ export function useTrending(limit = 10) {
     queryKey: ['trending', limit],
     queryFn: () => getTrending(limit).then(r => r.data.data),
     staleTime: 60 * 60 * 1000,
-    retry: false
+    retry: 1
   })
 }
 

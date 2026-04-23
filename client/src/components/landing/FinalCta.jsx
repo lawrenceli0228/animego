@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useLang } from '../../context/LanguageContext'
 
 /**
  * Left-aligned editorial closer.
@@ -104,8 +105,9 @@ const s = {
 }
 
 export default function FinalCta() {
+  const { lang, t } = useLang()
   return (
-    <section style={s.section} aria-label="开始使用">
+    <section style={s.section} aria-label={t('landing.finalCta.cta')}>
       <style>{`
         @media (max-width: 880px) {
           .finalcta-grid { grid-template-columns: 1fr !important; gap: 40px !important; align-items: start !important; }
@@ -113,22 +115,27 @@ export default function FinalCta() {
         }
       `}</style>
       <div style={s.chapterBar} aria-hidden />
-      <span style={s.sectionNum} aria-hidden>§08</span>
+      <span style={s.sectionNum} aria-hidden>§09</span>
 
       <div className="container">
         <div className="finalcta-grid" style={s.grid}>
           <div>
-            <div style={s.eyebrow}>End of Issue · 开始追番</div>
+            <div style={s.eyebrow}>{t('landing.finalCta.eyebrow')}</div>
             <h2 className="finalcta-title" style={s.title}>
-              这周末的番,
+              {t('landing.finalCta.titleLine1')}
               <br />
-              替你备好了<span style={s.period}>。</span>
+              {t('landing.finalCta.titleLine2')}
+              <span style={{
+                ...s.period,
+                fontSize: lang === 'en' ? '1.3em' : undefined,
+                marginLeft: lang === 'en' ? '0.05em' : undefined,
+              }}>{t('landing.finalCta.period')}</span>
             </h2>
           </div>
 
           <div style={s.rightCol}>
             <p style={s.sub}>
-              进入首页,开始追这一季 —— 不需要注册,不需要会员,一张封面就是一部番的开始。
+              {t('landing.finalCta.sub')}
             </p>
             <Link
               to="/"
@@ -136,7 +143,7 @@ export default function FinalCta() {
               onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(255,255,255,0.12)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
             >
-              开始追番
+              {t('landing.finalCta.cta')}
               <span aria-hidden>→</span>
             </Link>
           </div>
@@ -144,8 +151,8 @@ export default function FinalCta() {
 
         <div style={s.metaRow}>
           <span>AnimeGo · v1.0.12</span>
-          <span>维护模式 · 2026 春</span>
-          <span>§ 01 ─ 08</span>
+          <span>{t('landing.finalCta.metaMaintenance')}</span>
+          <span>§ 01 ─ 09</span>
         </div>
       </div>
     </section>

@@ -1,13 +1,25 @@
 /**
  * Magazine-style insert page: a 16:9 frozen frame with danmaku pinned in place.
- * Uses a pure-CSS composition (no external images) and a podcast-notes caption.
+ * Uses a real trending poster (via `poster` prop) as the backdrop — blurred and
+ * scrim-darkened so the pinned danmaku stays legible.
  */
 
-const danmaku = [
-  { t: '这镜头绝了',       x: 10, y: 18, size: 15, op: 1    },
-  { t: '芙莉莲会心一击',   x: 56, y: 32, size: 14, op: 0.85 },
-  { t: '每周日就等这个',   x: 22, y: 56, size: 13, op: 0.7  },
-  { t: 'op 泪目',          x: 62, y: 72, size: 13, op: 0.55 },
+import { useLang } from '../../context/LanguageContext'
+import { pickTitle } from '../../utils/formatters'
+
+const FALLBACK_HUE = 210
+
+const laneTop = [
+  '这镜头绝了', '芙莉莲会心一击', 'op 泪目', '这作画给跪了',
+  '周日晚上刚需', '这分镜不得了', '眼泪止不住', '同步率 101%',
+]
+
+// Pinned "frozen" danmaku — evoking "一帧里,三千条人声" without
+// turning the panel into a scrolling LED ticker.
+const pinned = [
+  { t: '每周日就等这个', x: 14, y: 42, size: 13, op: 0.95 },
+  { t: '这分镜不得不服', x: 52, y: 58, size: 14, op: 1 },
+  { t: 'op 又来了泪目',  x: 28, y: 74, size: 12, op: 0.88 },
 ]
 
 const s = {
@@ -26,54 +38,66 @@ const s = {
     color: 'rgba(235,235,245,0.30)',
     textTransform: 'uppercase',
   },
-  frame: {
+  frame: (hue) => ({
     position: 'relative',
     aspectRatio: '16/9',
     borderRadius: 18,
     overflow: 'hidden',
-    background: `
-      radial-gradient(60% 50% at 50% 40%, #1a1a2e 0%, #0a0a14 60%, #000 100%),
-      linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.55) 100%)
-    `,
+    background: `oklch(8% 0.03 ${hue})`,
     border: '1px solid rgba(255,255,255,0.06)',
     boxShadow: '0 32px 80px rgba(0,0,0,0.55)',
+  }),
+  frameImg: {
+    position: 'absolute', inset: 0,
+    width: '100%', height: '100%',
+    objectFit: 'cover',
+    objectPosition: 'center 30%',
+    filter: 'blur(2px) saturate(105%)',
+    transform: 'scale(1.06)',
+    display: 'block',
   },
-  // Fake scenery silhouette — three layered gradient "hills"
-  hill: (z, hue, opacity) => ({
+  frameScrim: (hue) => ({
+    position: 'absolute', inset: 0,
+    background: `
+      linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 100%),
+      linear-gradient(180deg, oklch(14% 0.05 ${hue} / 0.35) 0%, transparent 60%)
+    `,
+    pointerEvents: 'none',
+  }),
+  laneWrap: (topPct) => ({
     position: 'absolute',
     left: 0, right: 0,
-    bottom: 0,
-    height: `${30 + z * 12}%`,
-    background: `linear-gradient(to top, oklch(14% 0.04 ${hue}) 0%, oklch(22% 0.08 ${hue}) 60%, transparent 100%)`,
-    opacity,
-    clipPath: z === 0
-      ? 'polygon(0% 60%, 15% 40%, 35% 55%, 55% 30%, 75% 50%, 100% 35%, 100% 100%, 0% 100%)'
-      : z === 1
-      ? 'polygon(0% 70%, 20% 50%, 40% 65%, 70% 45%, 100% 60%, 100% 100%, 0% 100%)'
-      : 'polygon(0% 80%, 50% 65%, 100% 75%, 100% 100%, 0% 100%)',
+    top: `${topPct}%`,
+    height: 22,
+    overflow: 'hidden',
+    pointerEvents: 'none',
   }),
-  // A faint silhouette of a character/figure
-  figure: {
-    position: 'absolute',
-    left: '50%',
-    bottom: '8%',
-    transform: 'translateX(-50%)',
-    width: '18%',
-    height: '55%',
-    background: 'radial-gradient(ellipse 50% 35% at 50% 20%, rgba(255,255,255,0.08) 0%, transparent 70%), linear-gradient(to top, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.15) 100%)',
-    clipPath: 'polygon(40% 0%, 60% 0%, 65% 25%, 70% 55%, 80% 75%, 80% 100%, 20% 100%, 20% 75%, 30% 55%, 35% 25%)',
-    filter: 'blur(0.3px)',
-  },
-  danmaku: (x, y, size, opacity) => ({
-    position: 'absolute',
-    left: `${x}%`, top: `${y}%`,
+  laneTrack: (dir, duration) => ({
+    display: 'flex',
+    gap: 40,
+    width: 'max-content',
+    animation: `danmakuLane${dir} ${duration}s linear infinite`,
+  }),
+  laneItem: (size, opacity) => ({
     fontFamily: "'DM Sans', sans-serif",
     fontSize: size,
     color: '#fff',
     opacity,
     textShadow: '1px 1px 3px rgba(0,0,0,0.92)',
     whiteSpace: 'nowrap',
+  }),
+  pinned: (x, y, size, opacity) => ({
+    position: 'absolute',
+    left: `${x}%`, top: `${y}%`,
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: size,
+    color: '#fff',
+    opacity,
+    textShadow: '0 1px 2px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.75)',
+    whiteSpace: 'nowrap',
     pointerEvents: 'none',
+    fontWeight: 500,
+    animation: 'danmakuPinFade 600ms var(--ease-out-expo) both',
   }),
   corner: {
     position: 'absolute',
@@ -120,10 +144,25 @@ const s = {
   },
 }
 
-export default function DanmakuInsert() {
+export default function DanmakuInsert({ poster }) {
+  const { lang, t } = useLang()
+  const hue = poster?.posterAccent ?? FALLBACK_HUE
+  const title = (poster ? pickTitle(poster, lang) : '') || (lang === 'en' ? 'A frozen frame' : '精选一帧')
   return (
     <section style={s.section} aria-labelledby="danmaku-title">
-      <span style={s.sectionNum} aria-hidden>§06</span>
+      <style>{`
+        @keyframes danmakuLaneL { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+        @keyframes danmakuPinFade {
+          0%   { opacity: 0; transform: translateY(4px); }
+          100% { opacity: var(--pin-op, 0.7); transform: translateY(0); }
+        }
+        .danmaku-frame:hover .danmaku-track { animation-play-state: paused; }
+        @media (prefers-reduced-motion: reduce) {
+          .danmaku-track { animation: none !important; }
+          .danmaku-pin { animation: none !important; }
+        }
+      `}</style>
+      <span style={s.sectionNum} aria-hidden>§07</span>
       <div className="container">
         <h2 id="danmaku-title" style={{
           fontFamily: "'Sora', sans-serif",
@@ -132,22 +171,45 @@ export default function DanmakuInsert() {
           letterSpacing: '-0.03em', lineHeight: 1.1,
           maxWidth: 560, marginBottom: 48,
         }}>
-          一帧里,三千条人声。
+          {t('landing.danmaku.title')}
         </h2>
 
-        <div style={s.frame} aria-hidden="true">
-          <div style={s.hill(0, 268, 0.6)} aria-hidden />
-          <div style={s.hill(1, 220, 0.75)} aria-hidden />
-          <div style={s.hill(2, 200, 0.9)} aria-hidden />
-          <div style={s.figure} aria-hidden />
+        <div className="danmaku-frame" style={s.frame(hue)} aria-hidden="true">
+          {poster?.coverImageUrl ? (
+            <img
+              src={poster.bannerImageUrl || poster.coverImageUrl}
+              alt=""
+              style={s.frameImg}
+              loading="lazy"
+            />
+          ) : null}
+          <div style={s.frameScrim(hue)} aria-hidden />
 
           <div style={s.corner}>
-            <span>ep.18 · 21:43</span>
-            <span>● LIVE · 3,812 人同时观看</span>
+            <span>{title} · 21:43</span>
+            <span>{t('landing.danmaku.cornerLive')}</span>
           </div>
 
-          {danmaku.map((d, i) => (
-            <span key={i} style={s.danmaku(d.x, d.y, d.size, d.op)}>{d.t}</span>
+          <div style={s.laneWrap(18)}>
+            <div className="danmaku-track" style={s.laneTrack('L', 52)}>
+              {[...laneTop, ...laneTop].map((t, i) => (
+                <span key={`top-${i}`} style={s.laneItem(15, 1)}>{t}</span>
+              ))}
+            </div>
+          </div>
+
+          {pinned.map((d, i) => (
+            <span
+              key={`pin-${i}`}
+              className="danmaku-pin"
+              style={{
+                ...s.pinned(d.x, d.y, d.size, d.op),
+                animationDelay: `${600 + i * 180}ms`,
+                '--pin-op': d.op,
+              }}
+            >
+              {d.t}
+            </span>
           ))}
 
           <div style={s.bottomBar} aria-hidden>
@@ -156,10 +218,9 @@ export default function DanmakuInsert() {
         </div>
 
         <div style={s.caption}>
-          <div style={s.capLabel}>Show notes</div>
+          <div style={s.capLabel}>{t('landing.danmaku.capLabel')}</div>
           <p style={s.capText}>
-            2026-04-21 周日晚 22:14,《葬送的芙莉莲》第 18 话 ——
-            3,812 条弹幕在同一帧里飘过。你不是一个人在追。
+            {t('landing.danmaku.capTextPrefix')}{title}{t('landing.danmaku.capTextSuffix')}
           </p>
         </div>
       </div>

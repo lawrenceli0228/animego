@@ -1,55 +1,56 @@
 /**
- * 2x2 bento with unequal weights.
- * Each cell carries an OKLCH chapter bar (4px × 48px) — reuses the product's
- * poster-accent identity system instead of generic brand colors.
+ * §04 — Seven things, done on purpose.
+ * Asymmetric 12-col bento: hero band (7+5, row-span 2), mid shelf (4+4+4), bottom (6+6).
+ * Each card has a chapter-bar lead-in, staggered entrance, hover spotlight, and a hue-scoped
+ * visual that doubles as product proof (OKLCH readouts, live counters, failover logs).
  */
 
-const features = [
-  {
-    key: 'poster',
-    size: 'lg', // spans 7 cols, 2 rows — headline feature
-    hue: 330,
-    eyebrow: '01 · 海报色身份',
-    title: '颜色就是身份证。',
-    body:
-      '每部番的主色都从封面里真正提出来 —— 不是 Material You、不是主题色映射,是 OKLCH 归一化后的 accent,贯穿详情页、骨架、播放器。封面换了,身份就换了。',
-    visual: 'poster',
-  },
-  {
-    key: 'danmaku',
-    size: 'md',
-    hue: 210,
-    eyebrow: '02 · 弹幕同屏',
-    title: '保留集体观看感。',
-    body: '不做孤岛。你发的弹幕,别人看得见;别人飘过的那条,替你讲了下一句。',
-    visual: 'danmaku',
-  },
-  {
-    key: 'multi',
-    size: 'md',
-    hue: 155,
-    eyebrow: '03 · 多源聚合',
-    title: '一部番,多源,一个播放器。',
-    body: '源出问题就切下一个,不用跳站、不用搜索。播放器自己做决定。',
-    visual: 'multi',
-  },
-  {
-    key: 'manual',
-    size: 'xl', // full-width bottom row
-    hue: 40,
-    eyebrow: '04 · 手动选集',
-    title: '匹配不了?你来点。',
-    body:
-      '我们不装懂。自动匹配搞砸的时候,给你一个"选一次就记住"的 UI —— 比 AI 猜对更可靠,比每次都猜错更体面。',
-    visual: 'manual',
-  },
+import { motion, useReducedMotion } from 'motion/react'
+import { useLang } from '../../context/LanguageContext'
+import {
+  PosterVisual,
+  DanmakuVisual,
+  TorrentVisual,
+  ManualVisual,
+  ResumeVisual,
+  ScheduleVisual,
+  DropVisual,
+} from './features/visuals'
+
+const featureShape = [
+  { key: 'f1', size: 'heroL', hue: 330, visual: 'poster',   hasCta: true  },
+  { key: 'f2', size: 'heroR', hue: 210, visual: 'danmaku',  hasCta: false },
+  { key: 'f3', size: 'md',    hue: 155, visual: 'multi',    hasCta: true  },
+  { key: 'f4', size: 'md',    hue: 40,  visual: 'manual',   hasCta: true  },
+  { key: 'f5', size: 'md',    hue: 260, visual: 'resume',   hasCta: true  },
+  { key: 'f6', size: 'lg',    hue: 195, visual: 'schedule', hasCta: true  },
+  { key: 'f7', size: 'lg',    hue: 70,  visual: 'drop',     hasCta: true  },
 ]
+
+const ENTRANCE_DELAYS = [0, 0.08, 0.18, 0.24, 0.30, 0.38, 0.44]
 
 const s = {
   section: {
     position: 'relative',
     padding: 'clamp(80px, 7vw, 120px) 0',
     background: '#000',
+    overflow: 'hidden',
+  },
+  colorBand: {
+    position: 'absolute',
+    top: -120, right: -120,
+    width: 640, height: 640,
+    background: 'radial-gradient(50% 50% at 50% 50%, oklch(32% 0.18 330 / 0.28) 0%, transparent 70%)',
+    filter: 'blur(40px)',
+    pointerEvents: 'none',
+  },
+  colorBand2: {
+    position: 'absolute',
+    bottom: -180, left: -160,
+    width: 560, height: 560,
+    background: 'radial-gradient(50% 50% at 50% 50%, oklch(32% 0.18 210 / 0.22) 0%, transparent 70%)',
+    filter: 'blur(50px)',
+    pointerEvents: 'none',
   },
   sectionNum: {
     position: 'absolute',
@@ -59,11 +60,9 @@ const s = {
     letterSpacing: '0.14em',
     color: 'rgba(235,235,245,0.30)',
     textTransform: 'uppercase',
+    zIndex: 2,
   },
-  header: {
-    maxWidth: 720,
-    marginBottom: 64,
-  },
+  header: { maxWidth: 720, marginBottom: 64, position: 'relative', zIndex: 1 },
   sectionEyebrow: {
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: 12,
@@ -87,6 +86,15 @@ const s = {
     lineHeight: 1.6,
     maxWidth: 560,
   },
+  gridWrap: {
+    width: 'min(1600px, 100% - 32px)',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    paddingLeft: 'clamp(16px, 3vw, 32px)',
+    paddingRight: 'clamp(16px, 3vw, 32px)',
+    position: 'relative',
+    zIndex: 1,
+  },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(12, 1fr)',
@@ -95,219 +103,333 @@ const s = {
   },
   card: (hue) => ({
     position: 'relative',
-    padding: 32,
+    padding: 28,
     borderRadius: 18,
     background: '#0d0d0f',
     border: '1px solid rgba(84,84,88,0.35)',
-    transition: 'transform 250ms var(--ease-out-expo), border-color 250ms var(--ease-out-expo), box-shadow 250ms var(--ease-out-expo)',
     overflow: 'hidden',
     cursor: 'default',
     '--hue': hue,
+    display: 'flex',
+    flexDirection: 'column',
   }),
   chapterBar: (hue) => ({
     position: 'absolute',
-    top: 32, left: 32,
-    width: 3, height: 48,
+    top: 28, left: 28,
+    width: 3, height: 52,
     background: `oklch(62% 0.19 ${hue})`,
     borderRadius: 2,
     boxShadow: `0 0 24px oklch(62% 0.19 ${hue} / 0.55)`,
+    transformOrigin: 'top',
   }),
   cardEyebrow: {
-    marginLeft: 16,
-    paddingTop: 2,
+    marginLeft: 18,
+    paddingTop: 4,
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: 11,
-    color: 'rgba(235,235,245,0.60)',
+    color: 'rgba(235,235,245,0.7)',
     letterSpacing: '0.08em',
-    marginBottom: 28,
+    marginBottom: 18,
   },
   cardTitle: {
     fontFamily: "'Sora', sans-serif",
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: 700,
     color: '#fff',
     letterSpacing: '-0.02em',
-    lineHeight: 1.2,
-    marginBottom: 14,
+    lineHeight: 1.22,
+    marginBottom: 10,
+  },
+  cardTitleHero: {
+    fontSize: 26,
   },
   cardBody: {
+    fontSize: 13.5,
+    color: 'rgba(235,235,245,0.6)',
+    lineHeight: 1.6,
+    maxWidth: '42ch',
+  },
+  cta: (hue) => ({
+    display: 'inline-block',
+    marginTop: 16,
+    padding: '7px 12px',
+    borderRadius: 8,
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: 12.5,
+    fontWeight: 500,
+    color: `oklch(78% 0.18 ${hue})`,
+    background: `oklch(28% 0.12 ${hue} / 0.2)`,
+    border: `1px solid oklch(62% 0.19 ${hue} / 0.35)`,
+    textDecoration: 'none',
+    transition: 'all 200ms var(--ease-out-expo)',
+    cursor: 'pointer',
+    alignSelf: 'flex-start',
+  }),
+  pullQuote: (hue) => ({
+    marginTop: 14,
+    paddingLeft: 14,
+    borderLeft: `2px solid oklch(62% 0.19 ${hue} / 0.55)`,
+    fontFamily: "'Sora', sans-serif",
+    fontStyle: 'italic',
     fontSize: 15,
-    color: 'rgba(235,235,245,0.60)',
-    lineHeight: 1.65,
-    maxWidth: '58ch',
-  },
-  visualWrap: {
-    marginTop: 28,
-    position: 'relative',
-    minHeight: 120,
-  },
+    color: 'rgba(235,235,245,0.85)',
+    lineHeight: 1.4,
+    maxWidth: '32ch',
+  }),
 }
 
-/* ———————— visual helpers (pure CSS, no images) ———————— */
-
-function PosterVisual({ hue }) {
-  return (
-    <div style={{ display: 'flex', gap: 12, marginTop: 28 }}>
-      {[hue, hue + 40, hue - 55].map((h, i) => (
-        <div
-          key={i}
-          style={{
-            flex: 1,
-            aspectRatio: '3/4',
-            borderRadius: 10,
-            background: `radial-gradient(80% 60% at 50% 30%, oklch(58% 0.2 ${h}) 0%, oklch(25% 0.11 ${h}) 55%, oklch(10% 0.04 ${h}) 100%)`,
-            border: '1px solid rgba(255,255,255,0.05)',
-            boxShadow: `0 12px 32px -8px oklch(58% 0.2 ${h} / 0.28)`,
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function DanmakuVisual() {
-  const lines = [
-    { t: '这集画面神了', y: 10 },
-    { t: '前面高能', y: 38 },
-    { t: 'op 又来了', y: 66 },
-  ]
-  return (
-    <div style={{
-      position: 'relative',
-      marginTop: 28,
-      aspectRatio: '16/6',
-      borderRadius: 10,
-      background: 'linear-gradient(135deg, #141422 0%, #0a0a14 100%)',
-      border: '1px solid rgba(255,255,255,0.05)',
-      overflow: 'hidden',
-    }}>
-      {lines.map((l, i) => (
-        <span key={i} style={{
-          position: 'absolute',
-          top: `${l.y}%`,
-          left: `${10 + i * 12}%`,
-          padding: '2px 8px',
-          fontSize: 11,
-          color: '#fff',
-          fontFamily: "'DM Sans', sans-serif",
-          textShadow: '0 1px 2px rgba(0,0,0,0.85)',
-          whiteSpace: 'nowrap',
-        }}>{l.t}</span>
-      ))}
-    </div>
-  )
-}
-
-function MultiSourceVisual({ hue }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 28 }}>
-      {['源 A · 1080p', '源 B · 720p · 熟肉', '源 C · 4K · 生肉'].map((label, i) => (
-        <div
-          key={i}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '8px 12px',
-            borderRadius: 8,
-            background: i === 0 ? `oklch(22% 0.07 ${hue} / 0.6)` : 'rgba(255,255,255,0.03)',
-            border: i === 0 ? `1px solid oklch(62% 0.19 ${hue} / 0.45)` : '1px solid rgba(255,255,255,0.05)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: 11,
-            color: i === 0 ? '#fff' : 'rgba(235,235,245,0.60)',
-            letterSpacing: '0.04em',
-          }}
-        >
-          <span style={{
-            width: 6, height: 6, borderRadius: 9999,
-            background: i === 0 ? `oklch(70% 0.2 ${hue})` : 'rgba(235,235,245,0.30)',
-          }} />
-          {label}
-          {i === 0 && <span style={{ marginLeft: 'auto', color: 'rgba(235,235,245,0.60)' }}>当前</span>}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ManualPickVisual({ hue }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginTop: 28 }}>
-      {Array.from({ length: 12 }).map((_, i) => {
-        const picked = i === 5
-        return (
-          <div
-            key={i}
-            style={{
-              aspectRatio: '1',
-              borderRadius: 6,
-              background: picked ? `oklch(62% 0.19 ${hue})` : 'rgba(255,255,255,0.04)',
-              border: picked ? `1px solid oklch(78% 0.19 ${hue})` : '1px solid rgba(255,255,255,0.06)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 10,
-              color: picked ? '#000' : 'rgba(235,235,245,0.30)',
-              fontWeight: picked ? 700 : 500,
-              boxShadow: picked ? `0 0 16px oklch(62% 0.19 ${hue} / 0.5)` : 'none',
-            }}
-          >
-            {i + 1}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function Visual({ type, hue }) {
-  if (type === 'poster') return <PosterVisual hue={hue} />
-  if (type === 'danmaku') return <DanmakuVisual />
-  if (type === 'multi') return <MultiSourceVisual hue={hue} />
-  if (type === 'manual') return <ManualPickVisual hue={hue} />
+function Visual({ type, hue, lang, reduced, posters }) {
+  if (type === 'poster')   return <PosterVisual      hue={hue} lang={lang} posters={posters} />
+  if (type === 'danmaku')  return <DanmakuVisual     hue={hue} />
+  if (type === 'multi')    return <TorrentVisual     hue={hue} />
+  if (type === 'manual')   return <ManualVisual      hue={hue} />
+  if (type === 'resume')   return <ResumeVisual      hue={hue} />
+  if (type === 'schedule') return <ScheduleVisual    hue={hue} />
+  if (type === 'drop')     return <DropVisual        hue={hue} />
   return null
 }
 
-export default function FeaturesBento() {
+function handleSpotlight(e) {
+  const r = e.currentTarget.getBoundingClientRect()
+  e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`)
+  e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`)
+}
+
+function BentoCard({ feat, index, lang, reduced, posters }) {
+  const { t } = useLang()
+  const isHero = feat.size === 'heroL' || feat.size === 'heroR'
+
+  return (
+    <motion.article
+      className="bento-card"
+      data-size={feat.size}
+      data-visual={feat.visual}
+      style={s.card(feat.hue)}
+      onMouseMove={handleSpotlight}
+      initial={reduced ? false : { opacity: 0, y: 24, scale: 0.985 }}
+      whileInView={reduced ? undefined : { opacity: 1, y: 0, scale: 1 }}
+      viewport={{ once: true, margin: '0px 0px -15% 0px' }}
+      transition={{
+        duration: 0.7,
+        delay: ENTRANCE_DELAYS[index] ?? 0,
+        ease: [0.16, 1, 0.3, 1],
+      }}
+    >
+      <motion.span
+        className="bento-chapter-bar"
+        style={s.chapterBar(feat.hue)}
+        initial={reduced ? false : { scaleY: 0 }}
+        whileInView={reduced ? undefined : { scaleY: 1 }}
+        viewport={{ once: true, margin: '0px 0px -15% 0px' }}
+        transition={{
+          duration: 0.5,
+          delay: Math.max(0, (ENTRANCE_DELAYS[index] ?? 0) - 0.06),
+          ease: [0.16, 1, 0.3, 1],
+        }}
+      />
+      <div style={s.cardEyebrow}>{t(`landing.features.${feat.key}Eyebrow`)}</div>
+      <h3 style={{ ...s.cardTitle, ...(isHero ? s.cardTitleHero : null) }}>
+        {t(`landing.features.${feat.key}Title`)}
+      </h3>
+      <p style={s.cardBody}>{t(`landing.features.${feat.key}Body`)}</p>
+
+      {feat.key === 'f1' && (
+        <div style={s.pullQuote(feat.hue)}>{t('landing.features.f1Quote')}</div>
+      )}
+      {feat.key === 'f2' && (
+        <div style={s.pullQuote(feat.hue)}>{t('landing.features.f2Quote')}</div>
+      )}
+
+      <Visual type={feat.visual} hue={feat.hue} lang={lang} reduced={reduced} posters={posters} />
+
+      {feat.hasCta && (
+        <a href="#" style={s.cta(feat.hue)} className="bento-cta">
+          {t(`landing.features.${feat.key}Cta`)}
+        </a>
+      )}
+    </motion.article>
+  )
+}
+
+export default function FeaturesBento({ posters }) {
+  const { t, lang } = useLang()
+  const reduced = useReducedMotion()
+
   return (
     <section style={s.section} aria-labelledby="features-title">
-      <span style={s.sectionNum} aria-hidden>§03</span>
+      <div style={s.colorBand} aria-hidden />
+      <div style={s.colorBand2} aria-hidden />
+      <span style={s.sectionNum} aria-hidden>§04</span>
       <style>{`
-        .bento-card[data-size="lg"] { grid-column: span 7; grid-row: span 2; }
-        .bento-card[data-size="md"] { grid-column: span 5; }
-        .bento-card[data-size="xl"] { grid-column: span 12; }
-        @media (max-width: 880px) {
-          .bento-grid { grid-template-columns: 1fr !important; grid-auto-rows: auto !important; }
-          .bento-card { grid-column: 1 / -1 !important; grid-row: auto !important; }
+        .bento-card[data-size="heroL"] { grid-column: span 7; grid-row: span 2; }
+        .bento-card[data-size="heroR"] { grid-column: span 5; grid-row: span 2; }
+        .bento-card[data-size="md"]    { grid-column: span 4; }
+        .bento-card[data-size="lg"]    { grid-column: span 6; }
+        @media (max-width: 1180px) {
+          .bento-card[data-size="heroL"] { grid-column: span 12; grid-row: auto; }
+          .bento-card[data-size="heroR"] { grid-column: span 12; grid-row: auto; }
+          .bento-card[data-size="md"]    { grid-column: span 6; }
+          .bento-card[data-size="lg"]    { grid-column: span 12; }
         }
+        @media (max-width: 720px) {
+          .bento-grid { grid-template-columns: 1fr !important; grid-auto-rows: auto !important; }
+          .bento-card { grid-column: 1 / -1 !important; grid-row: auto !important; padding: 22px !important; }
+        }
+        .bento-card {
+          --mx: 50%;
+          --my: 50%;
+          transition: transform 320ms var(--ease-out-expo),
+                      border-color 260ms var(--ease-out-expo),
+                      box-shadow 320ms var(--ease-out-expo);
+        }
+        .bento-card::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 240ms var(--ease-out-expo);
+          background: radial-gradient(420px circle at var(--mx) var(--my), oklch(62% 0.19 var(--hue) / 0.14), transparent 55%);
+          z-index: 0;
+        }
+        .bento-card:hover::before { opacity: 1; }
+        .bento-card > * { position: relative; z-index: 1; }
         .bento-card:hover {
+          transform: translateY(-5px);
+          border-color: oklch(62% 0.19 var(--hue) / 0.45) !important;
+          box-shadow: 0 18px 48px -14px oklch(62% 0.19 var(--hue) / 0.28) !important;
+        }
+        .bento-card:hover .bento-chapter-bar {
+          transform: scaleY(1) scaleX(1.5) translateY(-2px);
+          height: 68px !important;
+        }
+        .bento-cta:hover {
+          background: oklch(32% 0.14 var(--hue) / 0.3) !important;
+          border-color: oklch(62% 0.19 var(--hue) / 0.6) !important;
+          transform: translateY(-1px);
+        }
+
+        /* ─── Shared keyframes ─── */
+        @keyframes featPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.5; transform: scale(1.25); }
+        }
+        @keyframes featMarch {
+          to { background-position: 200px 0; }
+        }
+
+        /* ─── f1 poster breathing (subtle oscillation around base rotate) ─── */
+        @keyframes posterBreathe0 {
+          0%, 100% { transform: rotate(-4deg) translateY(0); }
+          50%      { transform: rotate(-3.5deg) translateY(-2px); }
+        }
+        @keyframes posterBreathe1 {
+          0%, 100% { transform: rotate(0deg) translateY(0); }
+          50%      { transform: rotate(0.4deg) translateY(-3px); }
+        }
+        @keyframes posterBreathe2 {
+          0%, 100% { transform: rotate(3deg) translateY(0); }
+          50%      { transform: rotate(3.5deg) translateY(-2px); }
+        }
+        .poster-tile-0 { animation: posterBreathe0 7s ease-in-out infinite; }
+        .poster-tile-1 { animation: posterBreathe1 7s ease-in-out infinite 1.2s; }
+        .poster-tile-2 { animation: posterBreathe2 7s ease-in-out infinite 2.4s; }
+
+        /* ─── f4 arrow handoff pulse ─── */
+        @keyframes arrowDot1Travel {
+          0%        { opacity: 0; transform: translateX(-6px) scale(0.6); }
+          12%       { opacity: 1; transform: translateX(-6px) scale(1); }
+          46%       { opacity: 1; transform: translateX(18px) scale(1); }
+          52%       { opacity: 0; transform: translateX(22px) scale(0.6); }
+          100%      { opacity: 0; transform: translateX(22px) scale(0.6); }
+        }
+        @keyframes arrowDot2Travel {
+          0%, 48%   { opacity: 0; transform: translateX(-6px) scale(0.6); }
+          56%       { opacity: 1; transform: translateX(-6px) scale(1); }
+          90%       { opacity: 1; transform: translateX(18px) scale(1); }
+          96%, 100% { opacity: 0; transform: translateX(22px) scale(0.6); }
+        }
+        .bento-card[data-visual="manual"] .arrow-dot-1 {
+          animation: arrowDot1Travel 4.2s var(--ease-out-expo) infinite;
+        }
+        .bento-card[data-visual="manual"] .arrow-dot-2 {
+          animation: arrowDot2Travel 4.2s var(--ease-out-expo) infinite;
+        }
+        @keyframes lockedGlow {
+          0%, 55%, 100% { box-shadow: 0 0 20px oklch(62% 0.19 var(--hue) / 0.3); }
+          82%           { box-shadow: 0 0 32px oklch(62% 0.19 var(--hue) / 0.7); }
+        }
+        .bento-card[data-visual="manual"] .flow-arrow + * {
+          /* placeholder selector kept intentionally empty; locked-glow handled inline on FlowCard */
+        }
+
+        /* ─── f1 mascot (top-right, bottom flush with tile row bottom = spec block top) ─── */
+        .f1-mascot {
+          position: absolute;
+          right: 0;
+          bottom: 0;
+          height: 480px;
+          width: auto;
+          max-width: 340px;
+          object-fit: contain;
+          object-position: bottom right;
+          pointer-events: none;
+          z-index: 0;
+          filter: drop-shadow(0 18px 42px oklch(20% 0.14 330 / 0.45));
+          opacity: 0.95;
+          transition: transform 600ms var(--ease-out-expo), opacity 400ms var(--ease-out-expo);
+        }
+        .bento-card[data-visual="poster"]:hover .f1-mascot {
           transform: translateY(-3px);
-          border-color: rgba(84,84,88,0.75) !important;
-          box-shadow: 0 16px 40px -12px oklch(62% 0.19 var(--hue) / 0.18) !important;
+          opacity: 1;
+        }
+        @media (max-width: 1400px) {
+          .f1-mascot { height: 420px; max-width: 280px; }
+        }
+        @media (max-width: 1180px) {
+          .f1-mascot { display: none; }
+        }
+
+        /* ─── f7 drop-zone marching dash ─── */
+        @keyframes dropMarch {
+          to { background-position: 24px 0; }
+        }
+        .drop-zone {
+          background-image:
+            radial-gradient(60% 80% at 50% 50%, oklch(22% 0.08 var(--hue) / 0.35) 0%, transparent 70%),
+            repeating-linear-gradient(135deg,
+              oklch(62% 0.19 var(--hue) / 0.08) 0px,
+              oklch(62% 0.19 var(--hue) / 0.08) 6px,
+              transparent 6px,
+              transparent 12px);
+          animation: dropMarch 14s linear infinite;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .bento-card { transition: border-color 200ms linear !important; }
+          .bento-card:hover { transform: none !important; }
+          .bento-card:hover .bento-chapter-bar { transform: none !important; height: 52px !important; }
+          .poster-tile-0, .poster-tile-1, .poster-tile-2 { animation: none !important; }
+          .bento-card[data-visual="manual"] .arrow-dot-1,
+          .bento-card[data-visual="manual"] .arrow-dot-2 { animation: none !important; opacity: 0 !important; }
+          .drop-zone { animation: none !important; }
+          .f1-mascot { transition: none !important; transform: none !important; }
         }
       `}</style>
       <div className="container">
         <header style={s.header}>
-          <div style={s.sectionEyebrow}>Features / 核心能力</div>
+          <div style={s.sectionEyebrow}>{t('landing.features.eyebrow')}</div>
           <h2 id="features-title" style={s.sectionTitle}>
-            为"认真追番"做的四件事。
+            {t('landing.features.title')}
           </h2>
-          <p style={s.sectionSub}>
-            不是更多功能,是更少废话。下面这四件事,动漫站普遍没做好,我们挨个做了。
-          </p>
+          <p style={s.sectionSub}>{t('landing.features.sub')}</p>
         </header>
+      </div>
 
+      <div style={s.gridWrap}>
         <div className="bento-grid" style={s.grid}>
-          {features.map((f) => (
-            <article
-              key={f.key}
-              className="bento-card"
-              data-size={f.size}
-              style={s.card(f.hue)}
-            >
-              <span style={s.chapterBar(f.hue)} />
-              <div style={s.cardEyebrow}>{f.eyebrow}</div>
-              <h3 style={s.cardTitle}>{f.title}</h3>
-              <p style={s.cardBody}>{f.body}</p>
-              <Visual type={f.visual} hue={f.hue} />
-            </article>
+          {featureShape.map((feat, i) => (
+            <BentoCard key={feat.key} feat={feat} index={i} lang={lang} reduced={reduced} posters={posters} />
           ))}
         </div>
       </div>

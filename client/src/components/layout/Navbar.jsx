@@ -23,7 +23,7 @@ const s = {
   logo: {
     fontFamily: "'Sora',sans-serif", fontWeight: 700,
     fontSize: 20, letterSpacing: '-0.03em',
-    color: '#ffffff', textDecoration: 'none'
+    color: '#ffffff', textDecoration: 'none',
   },
   links: { display: 'flex', gap: 4, flex: 1 },
   link: (active) => ({
@@ -85,7 +85,7 @@ export default function Navbar() {
       <div style={s.inner}>
         <Link to="/" style={s.logo}>AnimeGo</Link>
         <div style={s.links}>
-          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/player','nav.player'],['/about','关于']].map(([to, key]) => (
+          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/player','nav.player'],['/about','nav.about']].map(([to, key]) => (
             <NavLink
               key={to}
               to={to}
@@ -95,7 +95,7 @@ export default function Navbar() {
                 ...(to === '/player' ? { display: window.innerWidth <= 600 ? 'none' : undefined } : {}),
               })}
             >
-              {key.startsWith('nav.') ? t(key) : key}
+              {t(key)}
             </NavLink>
           ))}
         </div>

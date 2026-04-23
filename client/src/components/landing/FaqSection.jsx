@@ -3,32 +3,14 @@
  * No rotating chevrons, no animated plus-signs — just a hairline reveal.
  */
 
-const faqs = [
-  {
-    q: 'animego 是免费的吗?',
-    a: '是。没有会员、没有集数锁、没有"开通 VIP 解锁"。运营成本靠开源捐赠和自付。',
-    hue: 330,
-  },
-  {
-    q: '为什么要手动选集?自动不行吗?',
-    a: '自动能解决 90% 的情况,剩下 10% 会出岔 —— 番名重复、集数错位、季度拆分。比起让用户发现问题,不如在它发生时给一个一秒选对的 UI。',
-    hue: 40,
-  },
-  {
-    q: '弹幕从哪里来?',
-    a: '站内弹幕 + 弹弹Play API 聚合。你看到的那条可能是昨天别人飘过的,这是设计如此。',
-    hue: 210,
-  },
-  {
-    q: '会不会哪天挂掉?',
-    a: '会。我们是一个维护阶段的项目,不承诺 SLA。但会尽量让挂掉的时候,数据不丢。',
-    hue: 155,
-  },
-  {
-    q: '有移动端 App 吗?',
-    a: '目前只有网页。浏览器打开能用就是能用,不想做一个只为"装上去"的 App。',
-    hue: 330,
-  },
+import { useLang } from '../../context/LanguageContext'
+
+const faqKeys = [
+  { key: 'q1', hue: 330 },
+  { key: 'q2', hue: 40  },
+  { key: 'q3', hue: 210 },
+  { key: 'q4', hue: 155 },
+  { key: 'q5', hue: 330 },
 ]
 
 const s = {
@@ -119,6 +101,7 @@ const s = {
 }
 
 export default function FaqSection() {
+  const { t } = useLang()
   return (
     <section style={s.section} aria-labelledby="faq-title">
       <style>{`
@@ -129,24 +112,28 @@ export default function FaqSection() {
         details:hover > summary { color: #fff; }
         details > summary:focus-visible { outline: 2px solid oklch(62% 0.19 210); outline-offset: 4px; border-radius: 4px; }
       `}</style>
-      <span style={s.sectionNum} aria-hidden>§07</span>
+      <span style={s.sectionNum} aria-hidden>§08</span>
       <div className="container">
         <header style={s.header}>
-          <div style={s.eyebrow}>FAQ / 常见疑问</div>
-          <h2 id="faq-title" style={s.title}>回答一些你可能在想的事。</h2>
+          <div style={s.eyebrow}>{t('landing.faq.eyebrow')}</div>
+          <h2 id="faq-title" style={s.title}>{t('landing.faq.title')}</h2>
         </header>
 
         <div style={s.list}>
-          {faqs.map((f) => (
-            <details key={f.q} style={s.item(f.hue)}>
-              <span className="faq-huebar" style={s.hueBar(f.hue)} aria-hidden />
-              <summary style={s.summary}>
-                <span>{f.q}</span>
-                <span className="faq-marker" style={s.marker}>+</span>
-              </summary>
-              <p style={s.body}>{f.a}</p>
-            </details>
-          ))}
+          {faqKeys.map((f) => {
+            const q = t(`landing.faq.${f.key}`)
+            const a = t(`landing.faq.a${f.key.slice(1)}`)
+            return (
+              <details key={f.key} style={s.item(f.hue)}>
+                <span className="faq-huebar" style={s.hueBar(f.hue)} aria-hidden />
+                <summary style={s.summary}>
+                  <span>{q}</span>
+                  <span className="faq-marker" style={s.marker}>+</span>
+                </summary>
+                <p style={s.body}>{a}</p>
+              </details>
+            )
+          })}
         </div>
       </div>
     </section>

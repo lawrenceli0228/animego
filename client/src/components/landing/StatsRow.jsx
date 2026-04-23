@@ -1,9 +1,54 @@
-const stats = [
-  { value: '12,480', label: '部番剧', note: '覆盖 2005 - 至今', hue: 330 },
-  { value: '3.2M',   label: '弹幕条数', note: '日均新增 8k+',   hue: 210 },
-  { value: '48',     label: '数据源',   note: '多源聚合播放',   hue: 155 },
-  { value: '200+',   label: '日更话数', note: '每日凌晨抓取',   hue: 40  },
+import { useEffect, useRef, useState } from 'react'
+import { useLang } from '../../context/LanguageContext'
+
+const statShape = [
+  { num: 12480, format: 'comma', key: 's1', hue: 330 },
+  { num: 3.2,   format: 'M',     key: 's2', hue: 210 },
+  { num: 48,    format: 'int',   key: 's3', hue: 155 },
+  { num: 200,   format: 'plus',  key: 's4', hue: 40  },
 ]
+
+function formatVal(n, format) {
+  if (format === 'comma') return Math.round(n).toLocaleString('en-US')
+  if (format === 'M') return n.toFixed(1) + 'M'
+  if (format === 'plus') return Math.round(n) + '+'
+  return Math.round(n).toString()
+}
+
+function useInView(threshold = 0.3) {
+  const ref = useRef(null)
+  const [seen, setSeen] = useState(false)
+  useEffect(() => {
+    if (seen || !ref.current) return
+    const obs = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) { setSeen(true); obs.disconnect() }
+    }, { threshold })
+    obs.observe(ref.current)
+    return () => obs.disconnect()
+  }, [seen, threshold])
+  return [ref, seen]
+}
+
+function useCountUp(target, active, duration = 1800) {
+  const [val, setVal] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const reduced = typeof window !== 'undefined'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) { setVal(target); return }
+    const start = performance.now()
+    let raf
+    const step = (now) => {
+      const t = Math.min((now - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - t, 3)
+      setVal(target * eased)
+      if (t < 1) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [active, target, duration])
+  return val
+}
 
 const s = {
   section: {
@@ -30,13 +75,16 @@ const s = {
     position: 'relative',
     paddingLeft: 20,
   },
-  bar: (hue) => ({
+  bar: (hue, active) => ({
     position: 'absolute',
     left: 0, top: 4,
     width: 3, height: 44,
     background: `oklch(62% 0.19 ${hue})`,
     borderRadius: 2,
     boxShadow: `0 0 20px oklch(62% 0.19 ${hue} / 0.45)`,
+    transformOrigin: 'bottom',
+    transform: active ? 'scaleY(1)' : 'scaleY(0)',
+    transition: 'transform 800ms var(--ease-out-expo) 120ms',
   }),
   value: {
     fontFamily: "'Sora', sans-serif",
@@ -63,9 +111,23 @@ const s = {
   },
 }
 
-export default function StatsRow() {
+function Stat({ stat, active, label, note }) {
+  const val = useCountUp(stat.num, active)
   return (
-    <section style={s.section} aria-label="平台数据">
+    <div style={s.cell}>
+      <span style={s.bar(stat.hue, active)} aria-hidden />
+      <div style={s.value}>{formatVal(val, stat.format)}</div>
+      <div style={s.label}>{label}</div>
+      <div style={s.note}>{note}</div>
+    </div>
+  )
+}
+
+export default function StatsRow() {
+  const [ref, inView] = useInView(0.25)
+  const { t } = useLang()
+  return (
+    <section ref={ref} style={s.section} aria-label={t('landing.docTitle')}>
       <style>{`
         @media (max-width: 880px) {
           .stats-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 32px !important; }
@@ -74,13 +136,14 @@ export default function StatsRow() {
       <span style={s.sectionNum} aria-hidden>§02</span>
       <div className="container">
         <div className="stats-grid" style={s.grid}>
-          {stats.map((stat) => (
-            <div key={stat.label} style={s.cell}>
-              <span style={s.bar(stat.hue)} />
-              <div style={s.value}>{stat.value}</div>
-              <div style={s.label}>{stat.label}</div>
-              <div style={s.note}>{stat.note}</div>
-            </div>
+          {statShape.map((stat) => (
+            <Stat
+              key={stat.key}
+              stat={stat}
+              active={inView}
+              label={t(`landing.stats.${stat.key}Label`)}
+              note={t(`landing.stats.${stat.key}Note`)}
+            />
           ))}
         </div>
       </div>
