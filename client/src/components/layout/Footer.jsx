@@ -109,6 +109,7 @@ export default function Footer() {
             <div style={s.colTitle}>{t('footer.siteCol')}</div>
             <p style={s.siteDesc}>{t('footer.siteDesc')}</p>
             <ul style={s.linkList}>
+              <li><Link to="/about" style={s.link} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>关于</Link></li>
               <li><a href="#" style={s.link} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>{t('footer.donate')}</a></li>
               <li><a href="#" style={s.link} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>{t('footer.apps')}</a></li>
               <li><a href="#" style={s.link} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>{t('footer.siteStats')}</a></li>
