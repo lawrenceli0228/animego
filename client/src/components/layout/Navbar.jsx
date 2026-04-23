@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useLang } from '../../context/LanguageContext'
@@ -23,7 +23,7 @@ const s = {
   logo: {
     fontFamily: "'Sora',sans-serif", fontWeight: 700,
     fontSize: 20, letterSpacing: '-0.03em',
-    color: '#ffffff', textDecoration: 'none'
+    color: '#ffffff', textDecoration: 'none',
   },
   links: { display: 'flex', gap: 4, flex: 1 },
   link: (active) => ({
@@ -61,7 +61,6 @@ export default function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
   const [hidden, setHidden] = useState(false)
-  const lastY = useRef(0)
 
   const isPlayer = location.pathname === '/player'
 
@@ -86,7 +85,7 @@ export default function Navbar() {
       <div style={s.inner}>
         <Link to="/" style={s.logo}>AnimeGo</Link>
         <div style={s.links}>
-          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/player','nav.player']].map(([to, key]) => (
+          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/player','nav.player'],['/about','nav.about']].map(([to, key]) => (
             <NavLink
               key={to}
               to={to}

@@ -3,6 +3,7 @@ import ScrollToTop from './components/common/ScrollToTop'
 import Layout from './components/layout/Layout'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import HomePage from './pages/HomePage'
+import LandingPage from './pages/LandingPage'
 import SeasonPage from './pages/SeasonPage'
 import AnimeDetailPage from './pages/AnimeDetailPage'
 import SearchPage from './pages/SearchPage'
@@ -23,6 +24,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/"          element={<HomePage />} />
+          <Route path="/about"     element={<LandingPage />} />
           <Route path="/season"    element={<SeasonPage />} />
           <Route path="/anime/:id" element={<AnimeDetailPage />} />
           <Route path="/search"    element={<SearchPage />} />
