@@ -13,6 +13,11 @@ import { mono, HUD_VIEWPORT } from './shared/hud-tokens'
 import { SectionNum, SectionHeader, ChapterBar } from './shared/hud'
 
 const SECTION_HUE = 260
+// Harmony partners — see Phase A palette plan.
+//   P2 Reticle Lime    → [LOCKED] readout + dot (violet HUD borrows a lime arming signal)
+//   P3 Gunmetal Whisper → row dividers (cold-side structural tone)
+const HUE_LIME = 100
+const HUE_GUN  = 245
 
 const itemKeys = [
   { num: '01', key: 'c1' },
@@ -47,7 +52,7 @@ const s = {
     gridTemplateColumns: '64px 1fr',
     gap: 24,
     padding: '32px 0',
-    borderBottom: '1px solid rgba(84,84,88,0.30)',
+    borderBottom: `1px solid oklch(55% 0.03 ${HUE_GUN} / 0.45)`,
   },
   rowLast: {
     borderBottom: 'none',
@@ -149,13 +154,13 @@ const s = {
     ...mono,
     fontSize: 11,
     letterSpacing: '0.14em',
-    color: `oklch(78% 0.15 ${SECTION_HUE})`,
+    color: `oklch(82% 0.13 ${HUE_LIME})`,
     display: 'inline-flex', alignItems: 'center', gap: 8,
   },
   consoleLockDot: {
     width: 6, height: 6, borderRadius: 9999,
-    background: `oklch(62% 0.19 ${SECTION_HUE})`,
-    boxShadow: `0 0 8px oklch(62% 0.19 ${SECTION_HUE} / 0.6)`,
+    background: `oklch(76% 0.15 ${HUE_LIME})`,
+    boxShadow: `0 0 8px oklch(76% 0.15 ${HUE_LIME} / 0.6)`,
     animation: 'hudBlink 2s var(--ease-out-expo) infinite',
   },
   consoleBarWrap: {

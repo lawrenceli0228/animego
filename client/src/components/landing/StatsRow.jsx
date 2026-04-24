@@ -6,6 +6,11 @@ import { SectionNum } from './shared/hud'
 /* §02 runs on a single hue (210). §04 is the multi-hue showcase; §02 earns
  * its presence through typography + count-up motion, not extra palette. */
 const STAT_HUE = 210
+// Harmony partners — see Phase A palette plan.
+//   P2 Deep Indigo  → hero-cell divider tint (structural, not text)
+//   P3 Brass Signal → readout-tag dot on LIBRARY (key-number signifier)
+const HUE_INDIGO = 255
+const HUE_BRASS  = 75
 const BAR_CONTENT_OFFSET = 12
 
 const statShape = [
@@ -41,7 +46,15 @@ const s = {
   },
   cellHero: {
     paddingRight: 24,
-    borderRight: '1px solid rgba(84,84,88,0.25)',
+    borderRight: `1px solid oklch(58% 0.11 ${HUE_INDIGO} / 0.28)`,
+  },
+  heroDot: {
+    display: 'inline-block',
+    width: 5, height: 5, borderRadius: 9999,
+    background: `oklch(80% 0.10 ${HUE_BRASS})`,
+    boxShadow: `0 0 8px oklch(80% 0.10 ${HUE_BRASS} / 0.55)`,
+    marginRight: 8,
+    verticalAlign: 'middle',
   },
   bar: {
     position: 'absolute',
@@ -120,7 +133,10 @@ function Stat({ stat, index, label, note }) {
         transition={{ duration: 0.6, delay: staggerDelay - 0.04, ease: [0.16, 1, 0.3, 1] }}
         aria-hidden
       />
-      <div style={s.readoutTag}>{stat.tag}</div>
+      <div style={s.readoutTag}>
+        {isHero ? <span style={s.heroDot} aria-hidden /> : null}
+        {stat.tag}
+      </div>
       <div style={s.valueRow}>
         <div style={{ ...s.value, ...(isHero ? s.valueHero : null) }}>{formatVal(val, stat.format)}</div>
         <div style={s.label}>{label}</div>

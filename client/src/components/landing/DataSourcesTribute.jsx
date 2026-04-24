@@ -13,6 +13,11 @@ import { mono, label, useCountUp, HUD_VIEWPORT } from './shared/hud-tokens'
 import { SectionNum, SectionHeader, ChapterBar } from './shared/hud'
 
 const SECTION_HUE = 40
+// Harmony partners — see Phase A palette plan.
+//   P2 Terracotta Ink → chip hover border + wash (warm-pull on interaction)
+//   P3 Straw Highlight → footer count-up number (paper-tone key metric)
+const HUE_TERRA = 25
+const HUE_STRAW = 75
 
 const rowA = [
   'AniList', 'Bangumi', '弹弹Play', 'TMDb', 'AniDB', 'Kitsu',
@@ -124,7 +129,7 @@ const s = {
     color: 'rgba(235,235,245,0.70)',
   },
   footerNodesNum: {
-    color: `oklch(75% 0.15 ${SECTION_HUE})`,
+    color: `oklch(88% 0.08 ${HUE_STRAW})`,
     fontWeight: 600,
   },
   footerBarWrap: {
@@ -156,8 +161,8 @@ const s = {
 
 function SystemNode({ name, idx, latency, blinkPhase }) {
   const hover = (e) => {
-    e.currentTarget.style.borderColor = `oklch(62% 0.19 ${SECTION_HUE} / 0.55)`
-    e.currentTarget.style.background = `oklch(62% 0.19 ${SECTION_HUE} / 0.08)`
+    e.currentTarget.style.borderColor = `oklch(60% 0.09 ${HUE_TERRA} / 0.65)`
+    e.currentTarget.style.background = `oklch(60% 0.09 ${HUE_TERRA} / 0.12)`
     e.currentTarget.style.color = '#fff'
   }
   const leave = (e) => {

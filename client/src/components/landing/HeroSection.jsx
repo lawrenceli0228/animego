@@ -17,6 +17,11 @@ import { mono } from './shared/hud-tokens'
 import { SectionNum, CornerBrackets } from './shared/hud'
 
 const SECTION_HUE = 330
+// Harmony partners — see Phase A palette plan.
+//   P2 Cold Verdigris → ghost-CTA accent (cool counterbalance to magenta)
+//   P3 Paper Cream    → meta-row separators (warm whisper)
+const HUE_GHOST = 175
+const HUE_CREAM = 80
 
 const danmaku = [
   { text: '这集画面神了', y: 18, delay: 0 },
@@ -147,13 +152,13 @@ const s = {
     padding: '14px 22px',
     borderRadius: 4,
     background: 'transparent',
-    color: 'rgba(235,235,245,0.70)',
+    color: `oklch(82% 0.07 ${HUE_GHOST})`,
     ...mono,
     fontSize: 13,
     letterSpacing: '0.08em',
     textDecoration: 'none',
-    border: '1px solid rgba(84,84,88,0.65)',
-    transition: 'border-color 150ms var(--ease-out-expo), color 150ms var(--ease-out-expo)',
+    border: `1px solid oklch(62% 0.09 ${HUE_GHOST} / 0.45)`,
+    transition: 'border-color 150ms var(--ease-out-expo), color 150ms var(--ease-out-expo), background 150ms var(--ease-out-expo)',
     textTransform: 'uppercase',
   },
   metaRow: {
@@ -168,7 +173,7 @@ const s = {
     letterSpacing: '0.06em',
   },
   metaSep: {
-    color: 'rgba(235,235,245,0.22)',
+    color: `oklch(90% 0.06 ${HUE_CREAM} / 0.45)`,
   },
   showcaseWrap: {
     position: 'relative',
@@ -425,8 +430,9 @@ export default function HeroSection({ poster }) {
           outline-offset: 3px;
         }
         .hero-btn-ghost:hover {
-          border-color: rgba(235,235,245,0.45) !important;
-          color: #fff !important;
+          border-color: oklch(72% 0.10 ${HUE_GHOST} / 0.85) !important;
+          color: oklch(92% 0.06 ${HUE_GHOST}) !important;
+          background: oklch(22% 0.05 ${HUE_GHOST} / 0.35) !important;
         }
         @media (prefers-reduced-motion: reduce) {
           [data-danmaku] { animation: none !important; display: none !important; }

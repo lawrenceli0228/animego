@@ -13,6 +13,11 @@ import { mono, HUD_VIEWPORT } from './shared/hud-tokens'
 import { SectionNum, SectionHeader, ChapterBar } from './shared/hud'
 
 const SECTION_HUE = 195
+// Harmony partners — see Phase A palette plan.
+//   P2 Chatter Rose      → accent on one pinned danmaku (transient pop)
+//   P3 Mint Lemon Spark  → right edge of density-peak bar (traffic highlight)
+const HUE_ROSE = 330
+const HUE_MINT = 95
 
 const laneTop = [
   '这镜头绝了', '芙莉莲会心一击', 'op 泪目', '这作画给跪了',
@@ -31,9 +36,10 @@ const laneBot = [
 
 // Pinned "frozen" danmaku — evoking "一帧里,三千条人声" without
 // turning the panel into a scrolling LED ticker.
+// One "pop" pin carries chatter-rose as a transient accent against the cyan HUD.
 const pinned = [
   { t: '每周日就等这个', x: 14, y: 44, size: 13, op: 0.95 },
-  { t: '这分镜不得不服', x: 52, y: 58, size: 14, op: 1 },
+  { t: '这分镜不得不服', x: 52, y: 58, size: 14, op: 1, pop: true },
   { t: 'op 又来了泪目',  x: 28, y: 72, size: 12, op: 0.88 },
 ]
 
@@ -100,17 +106,19 @@ const s = {
     textShadow: '1px 1px 3px rgba(0,0,0,0.92)',
     whiteSpace: 'nowrap',
   }),
-  pinned: (x, y, size, opacity) => ({
+  pinned: (x, y, size, opacity, pop) => ({
     position: 'absolute',
     left: `${x}%`, top: `${y}%`,
     fontFamily: "'DM Sans', sans-serif",
     fontSize: size,
-    color: '#fff',
+    color: pop ? `oklch(78% 0.10 ${HUE_ROSE})` : '#fff',
     opacity,
-    textShadow: '0 1px 2px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.75)',
+    textShadow: pop
+      ? `0 1px 2px rgba(0,0,0,0.95), 0 0 10px oklch(60% 0.14 ${HUE_ROSE} / 0.55)`
+      : '0 1px 2px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.75)',
     whiteSpace: 'nowrap',
     pointerEvents: 'none',
-    fontWeight: 500,
+    fontWeight: pop ? 600 : 500,
     animation: 'danmakuPinFade 600ms var(--ease-out-expo) both',
   }),
   corner: {
@@ -157,7 +165,7 @@ const s = {
   bottomBarFill: {
     position: 'absolute',
     inset: 0,
-    background: `linear-gradient(90deg, oklch(68% 0.13 ${SECTION_HUE}) 0%, oklch(68% 0.13 ${SECTION_HUE} / 0.3) 100%)`,
+    background: `linear-gradient(90deg, oklch(68% 0.13 ${SECTION_HUE}) 0%, oklch(78% 0.11 ${SECTION_HUE}) 60%, oklch(88% 0.09 ${HUE_MINT}) 100%)`,
     transformOrigin: 'left',
   },
   caption: {
@@ -268,7 +276,7 @@ export default function DanmakuInsert({ poster }) {
               key={`pin-${i}`}
               className="danmaku-pin"
               style={{
-                ...s.pinned(d.x, d.y, d.size, d.op),
+                ...s.pinned(d.x, d.y, d.size, d.op, d.pop),
                 animationDelay: `${600 + i * 180}ms`,
                 '--pin-op': d.op,
               }}

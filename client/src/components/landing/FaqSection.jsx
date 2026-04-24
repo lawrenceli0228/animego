@@ -9,6 +9,10 @@ import { mono } from './shared/hud-tokens'
 import { SectionNum, SectionHeader, ChapterBar } from './shared/hud'
 
 const SECTION_HUE = 70
+// Harmony partner — see Phase A palette plan.
+//   P2 Lilac Fog → item / list dividers (low-C "listener" to chartreuse primary)
+// No P3: §08 is intentionally 2-color (primary + lilac listener) for FAQ calm.
+const HUE_LILAC = 300
 
 const faqKeys = ['q1', 'q2', 'q3', 'q4', 'q5']
 
@@ -17,7 +21,7 @@ const s = {
     position: 'relative',
     padding: 'clamp(80px, 7vw, 120px) 0',
     background: '#000',
-    borderTop: '1px solid rgba(84,84,88,0.30)',
+    borderTop: `1px solid oklch(72% 0.05 ${HUE_LILAC} / 0.28)`,
   },
   headerWrap: {
     position: 'relative',
@@ -30,11 +34,11 @@ const s = {
   },
   list: {
     maxWidth: 760,
-    borderTop: '1px solid rgba(84,84,88,0.30)',
+    borderTop: `1px solid oklch(72% 0.05 ${HUE_LILAC} / 0.28)`,
   },
   item: {
     position: 'relative',
-    borderBottom: '1px solid rgba(84,84,88,0.30)',
+    borderBottom: `1px solid oklch(72% 0.05 ${HUE_LILAC} / 0.28)`,
   },
   hueBar: {
     position: 'absolute',
