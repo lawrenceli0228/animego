@@ -307,10 +307,6 @@ export default function FeaturesBento({ posters }) {
           border-color: oklch(62% 0.19 var(--hue) / 0.45) !important;
           box-shadow: 0 18px 48px -14px oklch(62% 0.19 var(--hue) / 0.28) !important;
         }
-        .bento-card:hover .bento-chapter-bar {
-          transform: scaleY(1) scaleX(1.5) translateY(-2px);
-          height: 68px !important;
-        }
         .bento-cta:hover {
           background: oklch(32% 0.14 var(--hue) / 0.3) !important;
           border-color: oklch(62% 0.19 var(--hue) / 0.6) !important;
@@ -443,7 +439,6 @@ export default function FeaturesBento({ posters }) {
         @media (prefers-reduced-motion: reduce) {
           .bento-card { transition: border-color 200ms linear !important; }
           .bento-card:hover { transform: none !important; }
-          .bento-card:hover .bento-chapter-bar { transform: none !important; height: 52px !important; }
           .bento-card[data-visual="manual"] .arrow-dot-1,
           .bento-card[data-visual="manual"] .arrow-dot-2 { animation: none !important; opacity: 0 !important; }
           .bento-card[data-visual="manual"] .flow-card-locked { animation: none !important; }
