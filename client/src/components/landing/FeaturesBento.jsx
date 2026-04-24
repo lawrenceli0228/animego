@@ -122,8 +122,13 @@ const s = {
     boxShadow: `0 0 24px oklch(62% 0.19 ${hue} / 0.55)`,
     transformOrigin: 'top',
   }),
-  cardEyebrow: {
+  textColumn: {
     marginLeft: 18,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+  },
+  cardEyebrow: {
     paddingTop: 4,
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: 11,
@@ -163,7 +168,6 @@ const s = {
     textDecoration: 'none',
     transition: 'all 200ms var(--ease-out-expo)',
     cursor: 'pointer',
-    alignSelf: 'flex-start',
   }),
   pullQuote: (hue) => ({
     marginTop: 14,
@@ -227,25 +231,29 @@ function BentoCard({ feat, index, lang, reduced, posters }) {
           ease: [0.16, 1, 0.3, 1],
         }}
       />
-      <div style={s.cardEyebrow}>{t(`landing.features.${feat.key}Eyebrow`)}</div>
-      <h3 style={{ ...s.cardTitle, ...(isHero ? s.cardTitleHero : null) }}>
-        {t(`landing.features.${feat.key}Title`)}
-      </h3>
-      <p style={s.cardBody}>{t(`landing.features.${feat.key}Body`)}</p>
+      <div style={s.textColumn}>
+        <div style={s.cardEyebrow}>{t(`landing.features.${feat.key}Eyebrow`)}</div>
+        <h3 style={{ ...s.cardTitle, ...(isHero ? s.cardTitleHero : null) }}>
+          {t(`landing.features.${feat.key}Title`)}
+        </h3>
+        <p style={s.cardBody}>{t(`landing.features.${feat.key}Body`)}</p>
 
-      {feat.key === 'f1' && (
-        <div style={s.pullQuote(feat.hue)}>{t('landing.features.f1Quote')}</div>
-      )}
-      {feat.key === 'f2' && (
-        <div style={s.pullQuote(feat.hue)}>{t('landing.features.f2Quote')}</div>
-      )}
+        {feat.key === 'f1' && (
+          <div style={s.pullQuote(feat.hue)}>{t('landing.features.f1Quote')}</div>
+        )}
+        {feat.key === 'f2' && (
+          <div style={s.pullQuote(feat.hue)}>{t('landing.features.f2Quote')}</div>
+        )}
+      </div>
 
       <Visual type={feat.visual} hue={feat.hue} lang={lang} reduced={reduced} posters={posters} />
 
       {feat.hasCta && (
-        <a href="#" style={s.cta(feat.hue)} className="bento-cta">
-          {t(`landing.features.${feat.key}Cta`)}
-        </a>
+        <div style={s.textColumn}>
+          <a href="#" style={s.cta(feat.hue)} className="bento-cta">
+            {t(`landing.features.${feat.key}Cta`)}
+          </a>
+        </div>
       )}
     </motion.article>
   )
