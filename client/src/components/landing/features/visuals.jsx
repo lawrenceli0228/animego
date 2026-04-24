@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react'
+import { animate as animateValue, useInView, useReducedMotion } from 'motion/react'
 import { useLang } from '../../../context/LanguageContext'
 
 /* ─── Shared mono/header tokens (kept inline to avoid a second tokens file) ─── */
@@ -524,18 +526,42 @@ const RESUME_ROWS = [
   { key: 'f5Row3', hue: 340, pct: 0.947 },
 ]
 
-function ProgressRing({ pct, hue }) {
+function ProgressRing({ pct, hue, animate, reduced, delay = 0 }) {
   const r = 12
   const c = 2 * Math.PI * r
   const offset = c * (1 - pct)
+  const target = Math.round(pct * 100)
+  // reduced-motion: static filled. otherwise: start empty, let CSS + JS draw in on enter.
+  const initialOffset = reduced ? offset : c
+
+  // count-up on the numeric readout, synced with ringDraw curve + delay
+  const [display, setDisplay] = useState(reduced ? target : 0)
+  useEffect(() => {
+    if (!animate) return
+    const controls = animateValue(0, target, {
+      duration: 1.1,
+      delay,
+      ease: [0.33, 1, 0.68, 1],
+      onUpdate: (v) => setDisplay(Math.round(v)),
+    })
+    return () => controls.stop()
+  }, [animate, target, delay])
+
   return (
-    <svg width="30" height="30" viewBox="0 0 30 30" style={{ flexShrink: 0 }}>
+    <svg width="30" height="30" viewBox="0 0 30 30" style={{ flexShrink: 0 }} aria-hidden="true">
       <circle cx="15" cy="15" r={r} stroke="rgba(255,255,255,0.08)" strokeWidth="2.5" fill="none" />
       <circle cx="15" cy="15" r={r} stroke={`oklch(72% 0.17 ${hue})`} strokeWidth="2.5" fill="none"
-        strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
-        transform="rotate(-90 15 15)" />
+        strokeDasharray={c} strokeDashoffset={initialOffset} strokeLinecap="round"
+        transform="rotate(-90 15 15)"
+        className={animate ? 'ring-draw' : undefined}
+        style={animate ? {
+          '--ring-c': c,
+          '--ring-offset': offset,
+          '--ring-delay': `${delay}s`,
+        } : undefined}
+      />
       <text x="15" y="18" textAnchor="middle" fill="#fff" fontSize="8" fontFamily="'JetBrains Mono', monospace">
-        {Math.round(pct * 100)}
+        {display}
       </text>
     </svg>
   )
@@ -543,8 +569,12 @@ function ProgressRing({ pct, hue }) {
 
 export function ResumeVisual({ hue }) {
   const { t } = useLang()
+  const ref = useRef(null)
+  const inView = useInView(ref, { once: true, margin: '-20% 0px' })
+  const reduced = useReducedMotion()
+  const animate = inView && !reduced
   return (
-    <div style={{ marginTop: 18 }}>
+    <div ref={ref} style={{ marginTop: 18 }}>
       <div style={{
         marginBottom: 12, padding: '8px 10px', borderRadius: 6,
         background: `oklch(22% 0.08 ${hue} / 0.35)`,
@@ -573,7 +603,7 @@ export function ResumeVisual({ hue }) {
             <div style={{
               flex: 1, ...mono, fontSize: 11, color: 'rgba(235,235,245,0.88)',
             }}>{t(`landing.features.${row.key}`)}</div>
-            <ProgressRing pct={row.pct} hue={row.hue} />
+            <ProgressRing pct={row.pct} hue={row.hue} animate={animate} reduced={reduced} delay={0.14 + i * 0.14} />
           </div>
         ))}
       </div>

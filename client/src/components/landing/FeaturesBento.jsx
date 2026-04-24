@@ -355,6 +355,12 @@ export default function FeaturesBento({ posters }) {
           will-change: transform, opacity;
         }
 
+        /* ─── f5 progress ring draw-in on scroll enter (one-shot per ring) ─── */
+        .ring-draw {
+          animation: ringDraw 1.1s cubic-bezier(0.33, 1, 0.68, 1) forwards;
+          animation-delay: var(--ring-delay, 0s);
+        }
+
         /* ─── f4 arrow handoff — two dots share relayDot with phase offset ─── */
         .bento-card[data-visual="manual"] .arrow-dot-1 {
           animation: relayDot 6.8s var(--ease-out-expo) infinite;
@@ -397,6 +403,7 @@ export default function FeaturesBento({ posters }) {
           .bento-card[data-visual="manual"] .arrow-dot-1,
           .bento-card[data-visual="manual"] .arrow-dot-2 { animation: none !important; opacity: 0 !important; }
           .f2-playhead { animation: none !important; transform: none !important; opacity: 1 !important; }
+          .ring-draw { animation: none !important; }
           .f1-mascot { transition: none !important; transform: none !important; }
         }
       `}</style>
