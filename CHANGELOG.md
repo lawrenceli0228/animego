@@ -2,6 +2,61 @@
 
 ---
 
+## [1.0.14] - 2026-04-25
+
+### `/about` 九章节 HUD 化 · OKLCH 章节色身份 2.0 · 从单色到多色数据流
+
+**背景:**
+- v1.0.13 把 /about 立起来,但九个 section 的视觉语汇还不统一:§04 bento 已经 HUD 风,其余八个是杂志排版。"HUD 感"只存在于一张 bento,散到整页像补丁
+- 另外一个问题:每个 section 都是"一色到底"。§02 Stats 四个数字全蓝,§03 DataSources 48 个 chip 全琥珀,数据密度再高也一眼过,抓不住注意力
+- v1.0.14 做两件事:① HUD 家族扩到 §01–§09 全章节共享基建;② 给颜色单调的密度区"换血",每个单元拿到自己的 hue
+
+**Sprint 1 — 共享基建 + 其余八章节 HUD 升级:**
+
+- `shared/hud.jsx` + `shared/hud-tokens.js` + `shared/motion.css`:SectionNum(右上 §0X 标号)、SectionHeader、ChapterBar(3×52px OKLCH scaleY 入场)、CornerBrackets、`mono`/`label` 令牌、`useCountUp` 滚动计数、共享 keyframes(`hudBlink` 等)
+- 八章节逐个重写(每章都走 engineer + design review gate):
+  - `§01 Hero` 去 iOS 系统色、HUD CTA 取代蓝色胶囊、海报 bezel + CornerBrackets
+  - `§02 Stats` 2-1-1-1 editorial 网格 + 滚动计数
+  - `§03 DataSources` SystemNode (live-dot + idx + 名字 + 延迟) + 遥测 footer (计数 48 + 进度条)
+  - `§05 PosterIdentity` HUD 化 + OKLCH 5 STOPS 调色板
+  - `§06 Differentiator` EP lock console (LOCKED 读出 + 进度条,取代裸 12 格选集)
+  - `§07 Danmaku` 3 车道滚动 + 3 条 pinned + LIVE 角标 + 底部密度条
+  - `§08 FAQ` [OPEN]/[CLOSE] mono marker 取代旋转 "+"
+  - `§09 FinalCta` mask-reveal 标题 + HUD CTA 取代白色大胶囊
+
+**Sprint 2 — OKLCH 调色基建 + gamut 修 + 和声次色:**
+
+三个 subagent 深度分析(editorial 理论 / OKLCH 技术 / 电影造型)给出三条路径,选稳妥路径:
+
+- `hud-tokens.js` 新增 `HUE` / `L` / `C` 令牌矩阵 + `oklchToken(layer, hue, alpha)` 组装器,六级 L 分层 (`trench` / `rail` / `primary` / `readout` / `hot` / `flash`)
+- **sRGB gamut 修**:§02 蓝 `C 0.19→0.17`、§07 青 `L 62→68 C 0.19→0.13`、§08 黄绿 `L 62→82 C 0.19→0.16`。之前在 sRGB 空间夹角色,显示器实际渲染不准
+- **六章节和声次色**:每个 section 除了主色 (P1) 还有 1-2 个和声伙伴色 (P2/P3),比例 70/25/5:
+  - §01 Cold Verdigris 175 (ghost CTA) + Paper Cream 80 (meta 分隔)
+  - §02 Deep Indigo 255 (hero 分隔) + Brass Signal 75 (关键数字 dot)
+  - §03 Terracotta 25 (chip hover) + Straw 75 (footer 计数)
+  - §06 Reticle Lime 100 ([LOCKED] dot) + Gunmetal Whisper 245 (分割线)
+  - §07 Chatter Rose 330 (一条 pinned 弹幕) + Mint Spark 95 (密度条右端)
+  - §08 Lilac Fog 300 (分隔线 listener)
+
+**Sprint 3 — §02 四色数据流 + §03 48 chips 5 色循环:**
+
+用户测试反馈:"§02/§03 颜色太单调不能吸引注意"。单一主色 + 小面积次色还不够,需要让每个数据单元拿到自己的色身份:
+
+- `§02 Stats` 每个 stat 独立取色,顺便回应下游章节:
+  - `LIBRARY` Blue 210 · 数据根基
+  - `DANMAKU` Cyan 195 · 回 §07
+  - `SOURCES` Amber 40 · 回 §03
+  - `DAILY` Chartreuse 85 · 回 §08
+  - 一行 Stats 现在变成整页的"目录预告"
+- `§03 DataSources` 48 chips 的 dot + latency 循环 5 色 (Amber / Cyan / Magenta / Lime / Violet),每条信源自带色身份,marquee 横滚形成多色节奏,琥珀仍占首位
+
+**验收:**
+- 共享基建 + 八章节升级 + 调色 + 多色数据流 = 21 个 commit,每个都过 lint + build green
+- 所有 OKLCH 色值 gamut-safe,WCAG AA 对比度保持
+- reduced-motion 全尊重(所有 hudBlink / 滚动 marquee / spring 入场都有降级分支)
+
+---
+
 ## [1.0.13] - 2026-04-24
 
 ### 介绍首页 `/about` — dark editorial × OKLCH 章节色身份,7 张有密度的 bento

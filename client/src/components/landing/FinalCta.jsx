@@ -243,7 +243,7 @@ export default function FinalCta() {
         </div>
 
         <div className="finalcta-meta" style={s.metaRow}>
-          <span>AnimeGo · v1.0.13</span>
+          <span>AnimeGo · v1.0.14</span>
           <span className="finalcta-meta-center" style={s.metaCenter}>
             ─────────── {t('landing.finalCta.metaMaintenance')} ───────────
           </span>
