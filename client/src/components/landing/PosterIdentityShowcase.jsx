@@ -1,12 +1,21 @@
 /**
- * Product-demo section: shows three "detail pages" as tinted frames,
- * each soaked in its own OKLCH poster accent extracted from the real cover.
- * Background is a color band that interpolates between the three hues —
- * making "color IS identity" visible at a glance.
+ * §05 · Poster Identity Showcase — three tinted "detail pages" demonstrating
+ * "color IS identity". Each frame is hue-accented from its real cover (posterAccent
+ * → OKLCH-normalized). §05 is an intentional multi-hue beat; it does NOT compete
+ * with §04 because the hue IS the message here.
+ *
+ * HUD upgrade:
+ *  - shared SectionNum + SectionHeader
+ *  - replace the 3-bar decoration with a 5-stop OKLCH palette row (the signal
+ *    this section actually wants to expose)
+ *  - keep the colorBand + hover interactions (sample points, pulses, OKLCH
+ *    readout) — those are §05's core demo and already HUD-shaped.
  */
 
 import { useLang } from '../../context/LanguageContext'
 import { pickTitle } from '../../utils/formatters'
+import { mono } from './shared/hud-tokens'
+import { SectionNum, SectionHeader } from './shared/hud'
 
 const FALLBACK_FRAMES = [
   { hue: 330, title: '—', format: 'TV', episodes: '—', coverImageUrl: null },
@@ -15,22 +24,21 @@ const FALLBACK_FRAMES = [
 ]
 const FRAME_HUE_FALLBACK = [330, 40, 155]
 
+// 5 OKLCH lightness stops that sample the same hue — "identity in 5 tones".
+const PALETTE_STOPS = [
+  { l: 28, c: 0.08 },
+  { l: 46, c: 0.15 },
+  { l: 62, c: 0.19 },
+  { l: 76, c: 0.16 },
+  { l: 90, c: 0.08 },
+]
+
 const s = {
   section: {
     position: 'relative',
     padding: 'clamp(80px, 7vw, 120px) 0',
     overflow: 'hidden',
     background: '#000',
-  },
-  sectionNum: {
-    position: 'absolute',
-    top: 28, right: 32,
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
-    letterSpacing: '0.14em',
-    color: 'rgba(235,235,245,0.30)',
-    textTransform: 'uppercase',
-    zIndex: 2,
   },
   colorBand: {
     position: 'absolute',
@@ -44,30 +52,6 @@ const s = {
     pointerEvents: 'none',
   },
   inner: { position: 'relative', zIndex: 1 },
-  header: { maxWidth: 720, marginBottom: 72 },
-  eyebrow: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 12,
-    letterSpacing: '0.12em',
-    color: 'rgba(235,235,245,0.30)',
-    textTransform: 'uppercase',
-    marginBottom: 16,
-  },
-  title: {
-    fontFamily: "'Sora', sans-serif",
-    fontSize: 'clamp(2rem, 1rem + 3vw, 3.5rem)',
-    fontWeight: 800,
-    color: '#fff',
-    letterSpacing: '-0.03em',
-    lineHeight: 1.1,
-    marginBottom: 20,
-  },
-  sub: {
-    fontSize: 16,
-    color: 'rgba(235,235,245,0.60)',
-    lineHeight: 1.6,
-    maxWidth: 560,
-  },
   row: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
@@ -92,7 +76,6 @@ const s = {
     transition: 'transform 300ms var(--ease-out-expo)',
     '--offset-y': `${offsetY}px`,
   }),
-  // Fake detail-page UI inside the frame
   coverWrap: {
     position: 'relative',
     margin: '22px 22px 16px',
@@ -149,9 +132,8 @@ const s = {
     backdropFilter: 'blur(8px)',
     WebkitBackdropFilter: 'blur(8px)',
     border: `1px solid oklch(62% 0.19 ${hue} / 0.45)`,
-    fontFamily: "'JetBrains Mono', monospace",
+    ...mono,
     fontSize: 10,
-    letterSpacing: '0.06em',
     color: '#fff',
     display: 'flex', alignItems: 'center', gap: 8,
     opacity: 0,
@@ -167,9 +149,9 @@ const s = {
   }),
   meta: { padding: '0 22px 20px' },
   metaLabel: (hue) => ({
-    fontFamily: "'JetBrains Mono', monospace",
+    ...mono,
     fontSize: 10,
-    letterSpacing: '0.1em',
+    letterSpacing: '0.12em',
     color: `oklch(78% 0.15 ${hue})`,
     marginBottom: 6,
   }),
@@ -179,14 +161,25 @@ const s = {
     fontWeight: 700,
     color: '#fff',
     letterSpacing: '-0.01em',
+    marginBottom: 12,
+  },
+  paletteLabel: {
+    ...mono,
+    fontSize: 9,
+    letterSpacing: '0.16em',
+    color: 'rgba(235,235,245,0.30)',
     marginBottom: 8,
   },
-  bars: { display: 'flex', flexDirection: 'column', gap: 5 },
-  bar: (w, hue, active) => ({
-    height: 4,
-    width: `${w}%`,
+  paletteRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: 4,
+  },
+  paletteStop: (hue, stop) => ({
+    height: 10,
     borderRadius: 2,
-    background: active ? `oklch(62% 0.19 ${hue})` : 'rgba(255,255,255,0.08)',
+    background: `oklch(${stop.l}% ${stop.c} ${hue})`,
+    boxShadow: stop.l >= 62 ? `0 0 8px oklch(${stop.l}% ${stop.c} ${hue} / 0.4)` : 'none',
   }),
   caption: {
     marginTop: 40,
@@ -240,21 +233,21 @@ export default function PosterIdentityShowcase({ posters = [] }) {
           transform: translateY(0) !important;
         }
         @media (prefers-reduced-motion: reduce) {
+          .showcase-frame:hover { transform: translateY(var(--offset-y, 0px)) !important; }
           .sample-pulse { animation: none !important; }
+          .showcase-frame { transition: none !important; }
         }
       `}</style>
-      <span style={s.sectionNum} aria-hidden>§05</span>
+      <SectionNum n="05" />
       <div style={s.colorBand} aria-hidden />
       <div className="container" style={s.inner}>
-        <header style={s.header}>
-          <div style={s.eyebrow}>{t('landing.identity.eyebrow')}</div>
-          <h2 id="identity-title" style={s.title}>
-            {t('landing.identity.title')}
-          </h2>
-          <p style={s.sub}>
-            {t('landing.identity.sub')}
-          </p>
-        </header>
+        <SectionHeader
+          eyebrow={t('landing.identity.eyebrow')}
+          title={t('landing.identity.title')}
+          sub={t('landing.identity.sub')}
+          titleId="identity-title"
+          style={{ marginBottom: 72 }}
+        />
 
         <div className="showcase-row" style={s.row}>
           {frames.map((f, i) => (
@@ -280,10 +273,11 @@ export default function PosterIdentityShowcase({ posters = [] }) {
               <div style={s.meta}>
                 <div style={s.metaLabel(f.hue)}>{f.format} · {f.episodes}</div>
                 <div style={s.metaTitle}>{f.title}</div>
-                <div style={s.bars}>
-                  <span style={s.bar(68, f.hue, true)} />
-                  <span style={s.bar(48, f.hue, false)} />
-                  <span style={s.bar(32, f.hue, false)} />
+                <div style={s.paletteLabel}>OKLCH · 5 STOPS</div>
+                <div style={s.paletteRow} aria-hidden>
+                  {PALETTE_STOPS.map((stop, idx) => (
+                    <span key={idx} style={s.paletteStop(f.hue, stop)} />
+                  ))}
                 </div>
               </div>
             </div>
