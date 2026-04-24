@@ -361,6 +361,16 @@ export default function FeaturesBento({ posters }) {
           animation-delay: var(--ring-delay, 0s);
         }
 
+        /* ─── f7 drop-zone contour scan — 22px bright cursor laps perimeter ─── */
+        @keyframes dropContourScan {
+          from { stroke-dashoffset: 0; }
+          to   { stroke-dashoffset: -10021; }
+        }
+        .drop-scan rect {
+          animation: dropContourScan 3.6s linear infinite;
+          opacity: 0.85;
+        }
+
         /* ─── f4 arrow handoff — two dots share relayDot with phase offset ─── */
         .bento-card[data-visual="manual"] .arrow-dot-1 {
           animation: relayDot 6.8s var(--ease-out-expo) infinite;
@@ -404,6 +414,7 @@ export default function FeaturesBento({ posters }) {
           .bento-card[data-visual="manual"] .arrow-dot-2 { animation: none !important; opacity: 0 !important; }
           .f2-playhead { animation: none !important; transform: none !important; opacity: 1 !important; }
           .ring-draw { animation: none !important; }
+          .drop-scan rect { animation: none !important; opacity: 0 !important; }
           .f1-mascot { transition: none !important; transform: none !important; }
         }
       `}</style>

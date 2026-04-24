@@ -714,19 +714,34 @@ export function DropVisual({ hue }) {
   const { t } = useLang()
   return (
     <div style={{ marginTop: 18 }}>
-      {/* drop zone tile */}
+      {/* drop zone tile — dashed border is rest state; SVG cursor scans the perimeter */}
       <div className="drop-zone" style={{
         position: 'relative',
         padding: '28px 20px',
         borderRadius: 10,
         background: `radial-gradient(60% 80% at 50% 50%, oklch(22% 0.08 ${hue} / 0.35) 0%, transparent 70%)`,
-        border: `1.5px dashed oklch(62% 0.19 ${hue} / 0.5)`,
+        border: `1.5px dashed oklch(62% 0.19 ${hue} / 0.45)`,
         textAlign: 'center',
         marginBottom: 14,
         overflow: 'hidden',
       }}>
-        {/* file-icon SVG */}
-        <svg width="36" height="44" viewBox="0 0 36 44" fill="none" style={{ marginBottom: 8 }} aria-hidden>
+        {/* contour-scan cursor: a single bright segment laps the perimeter
+            (inset 1.25 so the 2.5-wide stroke sits fully inside and isn't clipped) */}
+        <svg className="drop-scan" aria-hidden="true"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }}>
+          <rect x="1.25" y="1.25"
+            style={{ width: 'calc(100% - 2.5px)', height: 'calc(100% - 2.5px)' }}
+            rx="8.75" ry="8.75"
+            fill="none"
+            stroke={`oklch(85% 0.16 ${hue})`}
+            strokeWidth="2.5"
+            strokeDasharray="28 9999"
+            vectorEffect="non-scaling-stroke" />
+        </svg>
+        {/* file-icon SVG (off-axis -4deg for anti-template pop) */}
+        <svg width="36" height="44" viewBox="0 0 36 44" fill="none"
+          style={{ marginBottom: 8, transform: 'rotate(-4deg)', position: 'relative', zIndex: 1 }}
+          aria-hidden>
           <path d="M4 4 h18 l10 10 v26 a2 2 0 0 1 -2 2 h-26 a2 2 0 0 1 -2 -2 v-34 a2 2 0 0 1 2 -2 z"
             stroke={`oklch(70% 0.15 ${hue})`} strokeWidth="1.5" fill={`oklch(18% 0.06 ${hue} / 0.35)`} />
           <path d="M22 4 v10 h10" stroke={`oklch(70% 0.15 ${hue})`} strokeWidth="1.5" fill="none" />
@@ -735,6 +750,7 @@ export function DropVisual({ hue }) {
         </svg>
         <div style={{
           fontFamily: "'Sora', sans-serif", fontSize: 13, color: '#fff', marginBottom: 4,
+          position: 'relative', zIndex: 1,
         }}>{t('landing.features.f7DropHint')}</div>
       </div>
 
