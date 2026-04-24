@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext'
 import { LanguageProvider } from './context/LanguageContext'
 import App from './App.jsx'
 import './index.css'
+import './components/landing/shared/motion.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

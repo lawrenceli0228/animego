@@ -5,7 +5,7 @@
  * visual that doubles as product proof (OKLCH readouts, live counters, failover logs).
  */
 
-import { motion, useReducedMotion } from 'motion/react'
+import { motion as Motion, useReducedMotion } from 'motion/react'
 import { useLang } from '../../context/LanguageContext'
 import {
   PosterVisual,
@@ -182,7 +182,7 @@ const s = {
   }),
 }
 
-function Visual({ type, hue, lang, reduced, posters }) {
+function Visual({ type, hue, lang, posters }) {
   if (type === 'poster')   return <PosterVisual      hue={hue} lang={lang} posters={posters} />
   if (type === 'danmaku')  return <DanmakuVisual     hue={hue} />
   if (type === 'multi')    return <TorrentVisual     hue={hue} />
@@ -204,7 +204,7 @@ function BentoCard({ feat, index, lang, reduced, posters }) {
   const isHero = feat.size === 'heroL' || feat.size === 'heroR'
 
   return (
-    <motion.article
+    <Motion.article
       className="bento-card"
       data-size={feat.size}
       data-visual={feat.visual}
@@ -219,7 +219,7 @@ function BentoCard({ feat, index, lang, reduced, posters }) {
         ease: [0.16, 1, 0.3, 1],
       }}
     >
-      <motion.span
+      <Motion.span
         className="bento-chapter-bar"
         style={s.chapterBar(feat.hue)}
         initial={reduced ? false : { scaleY: 0 }}
@@ -246,7 +246,7 @@ function BentoCard({ feat, index, lang, reduced, posters }) {
         )}
       </div>
 
-      <Visual type={feat.visual} hue={feat.hue} lang={lang} reduced={reduced} posters={posters} />
+      <Visual type={feat.visual} hue={feat.hue} lang={lang} posters={posters} />
 
       {feat.hasCta && (
         <div style={s.textColumn}>
@@ -255,7 +255,7 @@ function BentoCard({ feat, index, lang, reduced, posters }) {
           </a>
         </div>
       )}
-    </motion.article>
+    </Motion.article>
   )
 }
 
@@ -311,143 +311,6 @@ export default function FeaturesBento({ posters }) {
           background: oklch(32% 0.14 var(--hue) / 0.3) !important;
           border-color: oklch(62% 0.19 var(--hue) / 0.6) !important;
           transform: translateY(-1px);
-        }
-
-        /* ─── Shared keyframes (consumed across cards) ─── */
-        @keyframes hudBlink {
-          0%, 80%, 100% { opacity: 0.55; }
-          85%           { opacity: 1; }
-        }
-        @keyframes relayDot {
-          0%, 6%   { opacity: 0; transform: translateX(-6px); }
-          14%      { opacity: 1; transform: translateX(-6px); }
-          46%      { opacity: 1; transform: translateX(18px); }
-          52%      { opacity: 0; transform: translateX(22px); }
-          100%     { opacity: 0; transform: translateX(22px); }
-        }
-        @keyframes ringDraw {
-          from { stroke-dashoffset: var(--ring-c); }
-          to   { stroke-dashoffset: var(--ring-offset); }
-        }
-        @keyframes barGrow {
-          from { transform: scaleY(0.2); opacity: 0.4; }
-          to   { transform: scaleY(1);   opacity: 1;   }
-        }
-        @keyframes scanSweep {
-          0%       { transform: translateX(0); opacity: 0; }
-          10%, 90% { opacity: 1; }
-          100%     { transform: translateX(var(--sweep-end, 100%)); opacity: 0; }
-        }
-        @keyframes f2PlayheadScrub {
-          0%          { transform: translateX(0%);   opacity: 0; }
-          8%          { opacity: 1; }
-          92%         { opacity: 1; }
-          100%        { transform: translateX(16%);  opacity: 0; }
-        }
-
-        /* ─── f2 density-strip playhead scrub (compositor-friendly) ─── */
-        .f2-playhead {
-          animation: f2PlayheadScrub 6.8s cubic-bezier(0.33, 1, 0.68, 1) infinite;
-          will-change: transform, opacity;
-        }
-
-        /* ─── f5 progress ring draw-in on scroll enter (one-shot per ring) ─── */
-        .ring-draw {
-          animation: ringDraw 1.1s cubic-bezier(0.33, 1, 0.68, 1) forwards;
-          animation-delay: var(--ring-delay, 0s);
-        }
-
-        /* ─── f7 drop-zone contour scan — 22px bright cursor laps perimeter ─── */
-        @keyframes dropContourScan {
-          from { stroke-dashoffset: 0; }
-          to   { stroke-dashoffset: -10021; }
-        }
-        .drop-scan rect {
-          animation: dropContourScan 3.6s linear infinite;
-          opacity: 0.85;
-        }
-
-        /* ─── f6 schedule today-lock sweep — enters, locks on Fri (~64%), exits ─── */
-        @keyframes scheduleLock {
-          0%     { transform: translateX(-4%); opacity: 0; }
-          8%     { opacity: 1; }
-          48%    { transform: translateX(58%); opacity: 1; }
-          68%    { transform: translateX(58%); opacity: 1; }
-          100%   { transform: translateX(102%); opacity: 0; }
-        }
-        .schedule-sweep {
-          animation: scheduleLock 2.4s cubic-bezier(0.33, 1, 0.68, 1) forwards;
-          animation-delay: 0.2s;
-        }
-
-        /* ─── f3 torrent row cascade — staggered ingress via --row-delay ─── */
-        @keyframes torrentRowIngress {
-          from { opacity: 0; transform: translateY(6px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .torrent-row {
-          animation: torrentRowIngress 0.6s cubic-bezier(0.33, 1, 0.68, 1) both;
-          animation-delay: var(--row-delay, 0s);
-        }
-
-        /* ─── f4 arrow handoff — two dots share relayDot with phase offset ─── */
-        .bento-card[data-visual="manual"] .arrow-dot-1 {
-          animation: relayDot 6.8s var(--ease-out-expo) infinite;
-        }
-        .bento-card[data-visual="manual"] .arrow-dot-2 {
-          animation: relayDot 6.8s var(--ease-out-expo) infinite;
-          animation-delay: 3.4s;
-        }
-
-        /* ─── f4 locked pulse — peak at 96% (t ≈ 6.53s) co-lands with dot-2 arrival
-                at 46% local of relayDot (absolute t = 3.4 + 0.46×6.8 = 6.528s) ─── */
-        @keyframes lockedPulse {
-          0%, 88%, 100% { box-shadow: 0 0 20px oklch(62% 0.19 var(--hue) / 0.3); }
-          96%           { box-shadow: 0 0 32px oklch(62% 0.19 var(--hue) / 0.7); }
-        }
-        .bento-card[data-visual="manual"] .flow-card-locked {
-          box-shadow: 0 0 20px oklch(62% 0.19 var(--hue) / 0.3);
-          animation: lockedPulse 6.8s cubic-bezier(0.33, 1, 0.68, 1) infinite;
-        }
-        /* ─── f1 mascot (top-right, bottom flush with tile row bottom = spec block top) ─── */
-        .f1-mascot {
-          position: absolute;
-          right: 0;
-          bottom: 0;
-          height: 480px;
-          width: auto;
-          max-width: 340px;
-          object-fit: contain;
-          object-position: bottom right;
-          pointer-events: none;
-          z-index: 0;
-          filter: drop-shadow(0 18px 42px oklch(20% 0.14 330 / 0.45));
-          opacity: 0.95;
-          transition: transform 600ms var(--ease-out-expo), opacity 400ms var(--ease-out-expo);
-        }
-        .bento-card[data-visual="poster"]:hover .f1-mascot {
-          transform: translateY(-3px);
-          opacity: 1;
-        }
-        @media (max-width: 1400px) {
-          .f1-mascot { height: 420px; max-width: 280px; }
-        }
-        @media (max-width: 1180px) {
-          .f1-mascot { display: none; }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .bento-card { transition: border-color 200ms linear !important; }
-          .bento-card:hover { transform: none !important; }
-          .bento-card[data-visual="manual"] .arrow-dot-1,
-          .bento-card[data-visual="manual"] .arrow-dot-2 { animation: none !important; opacity: 0 !important; }
-          .bento-card[data-visual="manual"] .flow-card-locked { animation: none !important; }
-          .f2-playhead { animation: none !important; transform: none !important; opacity: 1 !important; }
-          .ring-draw { animation: none !important; }
-          .drop-scan rect { animation: none !important; opacity: 0 !important; }
-          .schedule-sweep { animation: none !important; opacity: 0 !important; }
-          .torrent-row { animation: none !important; }
-          .f1-mascot { transition: none !important; transform: none !important; }
         }
       `}</style>
       <div className="container">
