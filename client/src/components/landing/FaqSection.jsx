@@ -1,17 +1,16 @@
 /**
- * Native <details>/<summary> for zero-JS accessibility.
- * No rotating chevrons, no animated plus-signs — just a hairline reveal.
+ * §08 · FAQ — native <details>/<summary> for zero-JS accessibility.
+ * HUD family: single hue=70 (chartreuse / amber-green), shared primitives,
+ * [OPEN]/[CLOSE] mono marker replaces the rotating `+` glyph.
  */
 
 import { useLang } from '../../context/LanguageContext'
+import { mono } from './shared/hud-tokens'
+import { SectionNum, SectionHeader, ChapterBar } from './shared/hud'
 
-const faqKeys = [
-  { key: 'q1', hue: 330 },
-  { key: 'q2', hue: 40  },
-  { key: 'q3', hue: 210 },
-  { key: 'q4', hue: 155 },
-  { key: 'q5', hue: 330 },
-]
+const SECTION_HUE = 70
+
+const faqKeys = ['q1', 'q2', 'q3', 'q4', 'q5']
 
 const s = {
   section: {
@@ -20,61 +19,41 @@ const s = {
     background: '#000',
     borderTop: '1px solid rgba(84,84,88,0.30)',
   },
-  sectionNum: {
-    position: 'absolute',
-    top: 28, right: 32,
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
-    letterSpacing: '0.14em',
-    color: 'rgba(235,235,245,0.30)',
-    textTransform: 'uppercase',
-  },
-  header: {
-    maxWidth: 720,
+  headerWrap: {
+    position: 'relative',
+    paddingLeft: 20,
     marginBottom: 48,
+    maxWidth: 760,
   },
-  eyebrow: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 12,
-    letterSpacing: '0.12em',
-    color: 'rgba(235,235,245,0.30)',
-    textTransform: 'uppercase',
-    marginBottom: 16,
-  },
-  title: {
-    fontFamily: "'Sora', sans-serif",
-    fontSize: 'clamp(2rem, 1rem + 3vw, 3rem)',
-    fontWeight: 800,
-    color: '#fff',
-    letterSpacing: '-0.03em',
-    lineHeight: 1.1,
+  headerOverride: {
+    marginBottom: 0,
   },
   list: {
     maxWidth: 760,
     borderTop: '1px solid rgba(84,84,88,0.30)',
   },
-  item: (hue) => ({
+  item: {
     position: 'relative',
     borderBottom: '1px solid rgba(84,84,88,0.30)',
-    '--faq-hue': hue,
-  }),
-  hueBar: (hue) => ({
+  },
+  hueBar: {
     position: 'absolute',
     left: -20, top: 22,
     width: 3, height: 28,
-    background: `oklch(62% 0.19 ${hue})`,
+    background: `oklch(62% 0.19 ${SECTION_HUE})`,
     borderRadius: 2,
     opacity: 0,
     transform: 'translateX(8px)',
     transition: 'opacity 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo)',
-    boxShadow: `0 0 16px oklch(62% 0.19 ${hue} / 0.5)`,
+    boxShadow: `0 0 16px oklch(62% 0.19 ${SECTION_HUE} / 0.5)`,
     pointerEvents: 'none',
-  }),
+  },
   summary: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '24px 4px',
+    gap: 16,
     cursor: 'pointer',
     listStyle: 'none',
     fontFamily: "'Sora', sans-serif",
@@ -85,11 +64,12 @@ const s = {
     transition: 'color 150ms var(--ease-out-expo)',
   },
   marker: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 16,
-    color: 'rgba(235,235,245,0.30)',
-    marginLeft: 16,
-    transition: 'transform 200ms var(--ease-out-expo), color 200ms',
+    ...mono,
+    fontSize: 11,
+    letterSpacing: '0.14em',
+    color: `oklch(72% 0.15 ${SECTION_HUE} / 0.75)`,
+    whiteSpace: 'nowrap',
+    transition: 'color 200ms var(--ease-out-expo)',
   },
   body: {
     padding: '0 4px 24px',
@@ -107,28 +87,42 @@ export default function FaqSection() {
       <style>{`
         details > summary { list-style: none; }
         details > summary::-webkit-details-marker { display: none; }
-        details[open] .faq-marker { transform: rotate(45deg); color: #fff; }
         details[open] .faq-huebar { opacity: 1 !important; transform: translateX(0) !important; }
+        details[open] .faq-marker-closed { display: none; }
+        details:not([open]) .faq-marker-open { display: none; }
+        details[open] .faq-marker { color: oklch(82% 0.15 ${SECTION_HUE}); }
         details:hover > summary { color: #fff; }
-        details > summary:focus-visible { outline: 2px solid oklch(62% 0.19 210); outline-offset: 4px; border-radius: 4px; }
+        details > summary:focus-visible {
+          outline: 2px solid oklch(62% 0.19 ${SECTION_HUE});
+          outline-offset: 4px;
+          border-radius: 4px;
+        }
       `}</style>
-      <span style={s.sectionNum} aria-hidden>§08</span>
+      <SectionNum n="08" />
       <div className="container">
-        <header style={s.header}>
-          <div style={s.eyebrow}>{t('landing.faq.eyebrow')}</div>
-          <h2 id="faq-title" style={s.title}>{t('landing.faq.title')}</h2>
-        </header>
+        <div style={s.headerWrap}>
+          <ChapterBar hue={SECTION_HUE} style={{ top: 0, left: 0 }} />
+          <SectionHeader
+            eyebrow={t('landing.faq.eyebrow')}
+            title={t('landing.faq.title')}
+            titleId="faq-title"
+            style={s.headerOverride}
+          />
+        </div>
 
         <div style={s.list}>
-          {faqKeys.map((f) => {
-            const q = t(`landing.faq.${f.key}`)
-            const a = t(`landing.faq.a${f.key.slice(1)}`)
+          {faqKeys.map((key) => {
+            const q = t(`landing.faq.${key}`)
+            const a = t(`landing.faq.a${key.slice(1)}`)
             return (
-              <details key={f.key} style={s.item(f.hue)}>
-                <span className="faq-huebar" style={s.hueBar(f.hue)} aria-hidden />
+              <details key={key} style={s.item}>
                 <summary style={s.summary}>
+                  <span className="faq-huebar" style={s.hueBar} aria-hidden />
                   <span>{q}</span>
-                  <span className="faq-marker" style={s.marker}>+</span>
+                  <span className="faq-marker" style={s.marker} aria-hidden="true">
+                    <span className="faq-marker-closed">[OPEN]</span>
+                    <span className="faq-marker-open">[CLOSE]</span>
+                  </span>
                 </summary>
                 <p style={s.body}>{a}</p>
               </details>
