@@ -384,6 +384,16 @@ export default function FeaturesBento({ posters }) {
           animation-delay: 0.2s;
         }
 
+        /* ─── f3 torrent row cascade — staggered ingress via --row-delay ─── */
+        @keyframes torrentRowIngress {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .torrent-row {
+          animation: torrentRowIngress 0.6s cubic-bezier(0.33, 1, 0.68, 1) both;
+          animation-delay: var(--row-delay, 0s);
+        }
+
         /* ─── f4 arrow handoff — two dots share relayDot with phase offset ─── */
         .bento-card[data-visual="manual"] .arrow-dot-1 {
           animation: relayDot 6.8s var(--ease-out-expo) infinite;
@@ -429,6 +439,7 @@ export default function FeaturesBento({ posters }) {
           .ring-draw { animation: none !important; }
           .drop-scan rect { animation: none !important; opacity: 0 !important; }
           .schedule-sweep { animation: none !important; opacity: 0 !important; }
+          .torrent-row { animation: none !important; }
           .f1-mascot { transition: none !important; transform: none !important; }
         }
       `}</style>

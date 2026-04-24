@@ -367,8 +367,26 @@ function MagnetIcon({ hue }) {
 export function TorrentVisual({ hue }) {
   const { t } = useLang()
   const total = AGG_SOURCES.reduce((a, b) => a + b.count, 0)
+  const ref = useRef(null)
+  const inView = useInView(ref, { once: true, margin: '-20% 0px' })
+  const reduced = useReducedMotion()
+  const animate = inView && !reduced
+
+  // count-up on total count; 1.0s duration aligns with cascade completion (490ms + 600ms ≈ 1090ms)
+  const [totalDisplay, setTotalDisplay] = useState(reduced ? total : 0)
+  useEffect(() => {
+    if (!animate) return
+    const controls = animateValue(0, total, {
+      duration: 1.0,
+      delay: 0.1,
+      ease: [0.33, 1, 0.68, 1],
+      onUpdate: (v) => setTotalDisplay(Math.round(v)),
+    })
+    return () => controls.stop()
+  }, [animate, total])
+
   return (
-    <div style={{ marginTop: 18 }}>
+    <div ref={ref} style={{ marginTop: 18 }}>
       {/* aggregator chip row */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
@@ -388,20 +406,23 @@ export function TorrentVisual({ hue }) {
           </span>
         ))}
         <span style={{ ...mono, fontSize: 10, color: 'rgba(235,235,245,0.45)', marginLeft: 'auto' }}>
-          {total} 条
+          {totalDisplay} 条
         </span>
       </div>
 
       {/* release rows */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12 }}>
         {RELEASES.map((r, i) => (
-          <div key={i} style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '7px 10px', borderRadius: 7,
-            background: 'rgba(255,255,255,0.025)',
-            border: '1px solid rgba(255,255,255,0.05)',
-            ...mono, fontSize: 10.5, color: 'rgba(235,235,245,0.85)',
-          }}>
+          <div key={i}
+            className={animate ? 'torrent-row' : undefined}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '7px 10px', borderRadius: 7,
+              background: 'rgba(255,255,255,0.025)',
+              border: '1px solid rgba(255,255,255,0.05)',
+              ...mono, fontSize: 10.5, color: 'rgba(235,235,245,0.85)',
+              ...(animate ? { '--row-delay': `${0.22 + i * 0.09}s` } : {}),
+            }}>
             <span style={{
               padding: '2px 6px', borderRadius: 4,
               background: `oklch(22% 0.08 ${hue} / 0.5)`,
