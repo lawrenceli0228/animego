@@ -3,21 +3,33 @@ import { useLang } from '../../context/LanguageContext'
 import { useCountUp, mono, HUD_VIEWPORT } from './shared/hud-tokens'
 import { SectionNum } from './shared/hud'
 
-/* §02 runs on a single hue (210). §04 is the multi-hue showcase; §02 earns
- * its presence through typography + count-up motion, not extra palette. */
-const STAT_HUE = 210
-// Harmony partners — see Phase A palette plan.
-//   P2 Deep Indigo  → hero-cell divider tint (structural, not text)
-//   P3 Brass Signal → readout-tag dot on LIBRARY (key-number signifier)
-const HUE_INDIGO = 255
-const HUE_BRASS  = 75
+/* §02 · 四色数据流 — 每个 stat 独立取色,顺便回应下游章节:
+ *   LIBRARY  → Blue 210   (数据根基,主色)
+ *   DANMAKU  → Cyan 195   (§07 LIVE 回调)
+ *   SOURCES  → Amber 40   (§03 Sources 回调)
+ *   DAILY    → Chartreuse 85 (§08 清晨/每日抓取)
+ * 色值均 gamut-safe (§07 青/§08 黄绿要拉高 L)。 */
+const HUE_INDIGO = 255 // hero-cell 右侧结构分隔
+const HUE_BRASS  = 75  // LIBRARY readout-tag 前的暖色关键信号 dot
 const BAR_CONTENT_OFFSET = 12
 
 const statShape = [
-  { num: 12480, format: 'comma', key: 's1', tag: 'LIBRARY', span: 2 },
-  { num: 3.2,   format: 'M',     key: 's2', tag: 'DANMAKU', span: 1 },
-  { num: 48,    format: 'int',   key: 's3', tag: 'SOURCES', span: 1 },
-  { num: 200,   format: 'plus',  key: 's4', tag: 'DAILY',   span: 1 },
+  {
+    num: 12480, format: 'comma', key: 's1', tag: 'LIBRARY', span: 2,
+    h: 210, barL: 62, barC: 0.17, tagL: 72, tagC: 0.15,
+  },
+  {
+    num: 3.2, format: 'M', key: 's2', tag: 'DANMAKU', span: 1,
+    h: 195, barL: 68, barC: 0.13, tagL: 74, tagC: 0.11,
+  },
+  {
+    num: 48, format: 'int', key: 's3', tag: 'SOURCES', span: 1,
+    h: 40, barL: 66, barC: 0.17, tagL: 74, tagC: 0.14,
+  },
+  {
+    num: 200, format: 'plus', key: 's4', tag: 'DAILY', span: 1,
+    h: 85, barL: 80, barC: 0.16, tagL: 84, tagC: 0.13,
+  },
 ]
 
 function formatVal(n, format) {
@@ -56,26 +68,26 @@ const s = {
     marginRight: 8,
     verticalAlign: 'middle',
   },
-  bar: {
+  bar: (barL, barC, h) => ({
     position: 'absolute',
     left: 0,
     top: 4,
     width: 3,
     height: 52,
-    background: `oklch(62% 0.17 ${STAT_HUE})`,
+    background: `oklch(${barL}% ${barC} ${h})`,
     borderRadius: 2,
-    boxShadow: `0 0 20px oklch(62% 0.17 ${STAT_HUE} / 0.45)`,
+    boxShadow: `0 0 20px oklch(${barL}% ${barC} ${h} / 0.48)`,
     transformOrigin: 'top',
-  },
-  readoutTag: {
+  }),
+  readoutTag: (tagL, tagC, h) => ({
     ...mono,
     fontSize: 10,
     letterSpacing: '0.14em',
-    color: `oklch(72% 0.15 ${STAT_HUE} / 0.85)`,
+    color: `oklch(${tagL}% ${tagC} ${h})`,
     textTransform: 'uppercase',
     marginLeft: BAR_CONTENT_OFFSET,
     marginBottom: 10,
-  },
+  }),
   valueRow: {
     marginLeft: BAR_CONTENT_OFFSET,
   },
@@ -126,14 +138,14 @@ function Stat({ stat, index, label, note }) {
       }}
     >
       <Motion.span
-        style={s.bar}
+        style={s.bar(stat.barL, stat.barC, stat.h)}
         initial={reduced ? false : { scaleY: 0 }}
         whileInView={reduced ? undefined : { scaleY: 1 }}
         viewport={HUD_VIEWPORT}
         transition={{ duration: 0.6, delay: staggerDelay - 0.04, ease: [0.16, 1, 0.3, 1] }}
         aria-hidden
       />
-      <div style={s.readoutTag}>
+      <div style={s.readoutTag(stat.tagL, stat.tagC, stat.h)}>
         {isHero ? <span style={s.heroDot} aria-hidden /> : null}
         {stat.tag}
       </div>

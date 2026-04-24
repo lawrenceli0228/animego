@@ -13,11 +13,19 @@ import { mono, label, useCountUp, HUD_VIEWPORT } from './shared/hud-tokens'
 import { SectionNum, SectionHeader, ChapterBar } from './shared/hud'
 
 const SECTION_HUE = 40
-// Harmony partners — see Phase A palette plan.
-//   P2 Terracotta Ink → chip hover border + wash (warm-pull on interaction)
-//   P3 Straw Highlight → footer count-up number (paper-tone key metric)
-const HUE_TERRA = 25
-const HUE_STRAW = 75
+// §03 的"多源"本质 = 多色信号源。48 个 chip 的 dot + latency 循环 5 种
+// gamut-safe 色,每条信源拿到自己的 hue,形成 marquee 里滚动的彩色节奏。
+// 琥珀 (P1) 占首位,仍是章节主色;其它 4 色分别回应 §07/§01/§08/§06。
+const CHIP_PALETTE = [
+  { h: 40,  dotL: 62, dotC: 0.19, latL: 72, latC: 0.15 }, // Amber (§03 主)
+  { h: 195, dotL: 68, dotC: 0.13, latL: 74, latC: 0.11 }, // Cyan (§07)
+  { h: 330, dotL: 62, dotC: 0.19, latL: 72, latC: 0.14 }, // Magenta (§01)
+  { h: 110, dotL: 76, dotC: 0.17, latL: 80, latC: 0.14 }, // Lime (§08 邻家)
+  { h: 260, dotL: 62, dotC: 0.19, latL: 72, latC: 0.14 }, // Violet (§06)
+]
+// P2/P3 — 章节小局用,与 chip 多色独立
+const HUE_TERRA = 25  // chip hover border + wash (warm-pull)
+const HUE_STRAW = 75  // footer 48 计数数字 — paper-tone 关键指标
 
 const rowA = [
   'AniList', 'Bangumi', '弹弹Play', 'TMDb', 'AniDB', 'Kitsu',
@@ -85,14 +93,14 @@ const s = {
     transition: 'all 200ms var(--ease-out-expo)',
     cursor: 'default',
   },
-  chipDot: {
+  chipDot: (dotL, dotC, h) => ({
     width: 6, height: 6, borderRadius: 9999,
-    background: `oklch(62% 0.19 ${SECTION_HUE})`,
-    boxShadow: `0 0 8px oklch(62% 0.19 ${SECTION_HUE} / 0.6)`,
+    background: `oklch(${dotL}% ${dotC} ${h})`,
+    boxShadow: `0 0 8px oklch(${dotL}% ${dotC} ${h} / 0.6)`,
     flexShrink: 0,
     animation: 'hudBlink 2.4s var(--ease-out-expo) infinite',
     animationDelay: 'var(--blink-delay, 0s)',
-  },
+  }),
   chipIdx: {
     ...mono,
     fontSize: 10,
@@ -106,12 +114,12 @@ const s = {
     color: 'rgba(235,235,245,0.18)',
     margin: '0 2px',
   },
-  chipLatency: {
+  chipLatency: (latL, latC, h) => ({
     ...mono,
     fontSize: 10,
-    color: `oklch(72% 0.15 ${SECTION_HUE} / 0.75)`,
+    color: `oklch(${latL}% ${latC} ${h} / 0.80)`,
     letterSpacing: '0.06em',
-  },
+  }),
   footer: {
     marginTop: 56,
     paddingTop: 24,
@@ -160,6 +168,7 @@ const s = {
 }
 
 function SystemNode({ name, idx, latency, blinkPhase }) {
+  const palette = CHIP_PALETTE[idx % CHIP_PALETTE.length]
   const hover = (e) => {
     e.currentTarget.style.borderColor = `oklch(60% 0.09 ${HUE_TERRA} / 0.65)`
     e.currentTarget.style.background = `oklch(60% 0.09 ${HUE_TERRA} / 0.12)`
@@ -174,13 +183,13 @@ function SystemNode({ name, idx, latency, blinkPhase }) {
     <span style={s.chip} onMouseEnter={hover} onMouseLeave={leave}>
       <span
         className="hud-blink"
-        style={{ ...s.chipDot, '--blink-delay': `${blinkPhase}s` }}
+        style={{ ...s.chipDot(palette.dotL, palette.dotC, palette.h), '--blink-delay': `${blinkPhase}s` }}
         aria-hidden
       />
       <span style={s.chipIdx}>{String(idx + 1).padStart(2, '0')}</span>
       <span style={s.chipName}>{name}</span>
       <span style={s.chipSep}>·</span>
-      <span style={s.chipLatency}>{latency}ms</span>
+      <span style={s.chipLatency(palette.latL, palette.latC, palette.h)}>{latency}ms</span>
     </span>
   )
 }
