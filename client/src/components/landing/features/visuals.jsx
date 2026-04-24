@@ -17,9 +17,9 @@ const label = {
 /* ─── f1 Poster Identity ─────────────────────────────────────────────── */
 
 const POSTER_ROSTER = [
-  { slot: 'frieren', title: '葬送的芙莉莲', titleEn: 'Frieren',     hue: 330, rotate: -4, z: 1, x: 0,   y: 16, breathe: 0 },
-  { slot: 'apoth',   title: '药屋少女的呢喃', titleEn: 'Apothecary', hue: 20,  rotate: 0,  z: 3, x: 92,  y: 0,  breathe: 1 },
-  { slot: 'losing',  title: '败犬女主太多了', titleEn: 'Losing',     hue: 340, rotate: 3,  z: 2, x: 184, y: 24, breathe: 2 },
+  { slot: 'frieren', title: '葬送的芙莉莲', titleEn: 'Frieren',     hue: 330, rotate: -4, z: 1, x: 0,   y: 16 },
+  { slot: 'apoth',   title: '药屋少女的呢喃', titleEn: 'Apothecary', hue: 20,  rotate: 0,  z: 3, x: 92,  y: 0  },
+  { slot: 'losing',  title: '败犬女主太多了', titleEn: 'Losing',     hue: 340, rotate: 3,  z: 2, x: 184, y: 24 },
 ]
 
 export function PosterVisual({ hue, lang, posters }) {
@@ -40,7 +40,7 @@ export function PosterVisual({ hue, lang, posters }) {
           return (
           <div
             key={i}
-            className={`poster-tile poster-tile-${p.breathe}`}
+            className="poster-tile"
             style={{
               position: 'absolute', left: p.x, top: p.y, width: 136,
               aspectRatio: '3/4', borderRadius: 8,
@@ -54,7 +54,6 @@ export function PosterVisual({ hue, lang, posters }) {
               transform: `rotate(${p.rotate}deg)`,
               zIndex: p.z,
               transition: 'transform 400ms var(--ease-out-expo)',
-              '--base-rot': `${p.rotate}deg`,
             }}
           >
             {cover ? (
@@ -179,7 +178,7 @@ export function PosterVisual({ hue, lang, posters }) {
 
 const DANMAKU_BULLETS = [
   { t: '这帧神了',      x: 8,  y: 18, size: 13, op: 1,   pin: false },
-  { t: '前方高能 ⚠',   x: 38, y: 12, size: 14, op: 1,   pin: true  },
+  { t: '前方高能 ⚠',    x: 38, y: 12, size: 14, op: 1,   pin: true  },
   { t: 'OP 又来了泪目', x: 64, y: 22, size: 12, op: 0.85 },
   { t: '芙莉莲 yyds',  x: 12, y: 42, size: 12, op: 0.75 },
   { t: '这 BGM 是神',  x: 52, y: 38, size: 13, op: 0.95 },
@@ -237,7 +236,7 @@ export function DanmakuVisual({ hue }) {
           <span style={{
             width: 6, height: 6, borderRadius: 9999,
             background: `oklch(70% 0.18 ${hue})`,
-            animation: 'featPulse 1.6s ease-in-out infinite',
+            animation: 'hudBlink 2.4s ease-in-out infinite',
           }} />
           EP 04 · 12:34 / 23:40
         </div>

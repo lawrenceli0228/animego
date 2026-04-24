@@ -318,30 +318,10 @@ export default function FeaturesBento({ posters }) {
         }
 
         /* ─── Shared keyframes ─── */
-        @keyframes featPulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50%      { opacity: 0.5; transform: scale(1.25); }
+        @keyframes hudBlink {
+          0%, 80%, 100% { opacity: 0.55; }
+          85%           { opacity: 1; }
         }
-        @keyframes featMarch {
-          to { background-position: 200px 0; }
-        }
-
-        /* ─── f1 poster breathing (subtle oscillation around base rotate) ─── */
-        @keyframes posterBreathe0 {
-          0%, 100% { transform: rotate(-4deg) translateY(0); }
-          50%      { transform: rotate(-3.5deg) translateY(-2px); }
-        }
-        @keyframes posterBreathe1 {
-          0%, 100% { transform: rotate(0deg) translateY(0); }
-          50%      { transform: rotate(0.4deg) translateY(-3px); }
-        }
-        @keyframes posterBreathe2 {
-          0%, 100% { transform: rotate(3deg) translateY(0); }
-          50%      { transform: rotate(3.5deg) translateY(-2px); }
-        }
-        .poster-tile-0 { animation: posterBreathe0 7s ease-in-out infinite; }
-        .poster-tile-1 { animation: posterBreathe1 7s ease-in-out infinite 1.2s; }
-        .poster-tile-2 { animation: posterBreathe2 7s ease-in-out infinite 2.4s; }
 
         /* ─── f4 arrow handoff pulse ─── */
         @keyframes arrowDot1Travel {
@@ -363,14 +343,6 @@ export default function FeaturesBento({ posters }) {
         .bento-card[data-visual="manual"] .arrow-dot-2 {
           animation: arrowDot2Travel 4.2s var(--ease-out-expo) infinite;
         }
-        @keyframes lockedGlow {
-          0%, 55%, 100% { box-shadow: 0 0 20px oklch(62% 0.19 var(--hue) / 0.3); }
-          82%           { box-shadow: 0 0 32px oklch(62% 0.19 var(--hue) / 0.7); }
-        }
-        .bento-card[data-visual="manual"] .flow-arrow + * {
-          /* placeholder selector kept intentionally empty; locked-glow handled inline on FlowCard */
-        }
-
         /* ─── f1 mascot (top-right, bottom flush with tile row bottom = spec block top) ─── */
         .f1-mascot {
           position: absolute;
@@ -398,29 +370,12 @@ export default function FeaturesBento({ posters }) {
           .f1-mascot { display: none; }
         }
 
-        /* ─── f7 drop-zone marching dash ─── */
-        @keyframes dropMarch {
-          to { background-position: 24px 0; }
-        }
-        .drop-zone {
-          background-image:
-            radial-gradient(60% 80% at 50% 50%, oklch(22% 0.08 var(--hue) / 0.35) 0%, transparent 70%),
-            repeating-linear-gradient(135deg,
-              oklch(62% 0.19 var(--hue) / 0.08) 0px,
-              oklch(62% 0.19 var(--hue) / 0.08) 6px,
-              transparent 6px,
-              transparent 12px);
-          animation: dropMarch 14s linear infinite;
-        }
-
         @media (prefers-reduced-motion: reduce) {
           .bento-card { transition: border-color 200ms linear !important; }
           .bento-card:hover { transform: none !important; }
           .bento-card:hover .bento-chapter-bar { transform: none !important; height: 52px !important; }
-          .poster-tile-0, .poster-tile-1, .poster-tile-2 { animation: none !important; }
           .bento-card[data-visual="manual"] .arrow-dot-1,
           .bento-card[data-visual="manual"] .arrow-dot-2 { animation: none !important; opacity: 0 !important; }
-          .drop-zone { animation: none !important; }
           .f1-mascot { transition: none !important; transform: none !important; }
         }
       `}</style>
