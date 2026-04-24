@@ -40,12 +40,12 @@ const s = {
     position: 'absolute',
     left: -20, top: 22,
     width: 3, height: 28,
-    background: `oklch(62% 0.19 ${SECTION_HUE})`,
+    background: `oklch(82% 0.16 ${SECTION_HUE})`,
     borderRadius: 2,
     opacity: 0,
     transform: 'translateX(8px)',
     transition: 'opacity 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo)',
-    boxShadow: `0 0 16px oklch(62% 0.19 ${SECTION_HUE} / 0.5)`,
+    boxShadow: `0 0 16px oklch(82% 0.16 ${SECTION_HUE} / 0.5)`,
     pointerEvents: 'none',
   },
   summary: {
@@ -67,7 +67,7 @@ const s = {
     ...mono,
     fontSize: 11,
     letterSpacing: '0.14em',
-    color: `oklch(72% 0.15 ${SECTION_HUE} / 0.75)`,
+    color: `oklch(78% 0.14 ${SECTION_HUE} / 0.75)`,
     whiteSpace: 'nowrap',
     transition: 'color 200ms var(--ease-out-expo)',
   },
@@ -90,10 +90,10 @@ export default function FaqSection() {
         details[open] .faq-huebar { opacity: 1 !important; transform: translateX(0) !important; }
         details[open] .faq-marker-closed { display: none; }
         details:not([open]) .faq-marker-open { display: none; }
-        details[open] .faq-marker { color: oklch(82% 0.15 ${SECTION_HUE}); }
+        details[open] .faq-marker { color: oklch(88% 0.13 ${SECTION_HUE}); }
         details:hover > summary { color: #fff; }
         details > summary:focus-visible {
-          outline: 2px solid oklch(62% 0.19 ${SECTION_HUE});
+          outline: 2px solid oklch(82% 0.16 ${SECTION_HUE});
           outline-offset: 4px;
           border-radius: 4px;
         }

@@ -131,13 +131,13 @@ const s = {
   },
   cornerLive: {
     display: 'inline-flex', alignItems: 'center', gap: 8,
-    color: `oklch(82% 0.15 ${SECTION_HUE})`,
+    color: `oklch(84% 0.09 ${SECTION_HUE})`,
     whiteSpace: 'nowrap',
   },
   cornerLiveDot: {
     width: 6, height: 6, borderRadius: 9999,
-    background: `oklch(62% 0.19 ${SECTION_HUE})`,
-    boxShadow: `0 0 10px oklch(62% 0.19 ${SECTION_HUE} / 0.7)`,
+    background: `oklch(68% 0.13 ${SECTION_HUE})`,
+    boxShadow: `0 0 10px oklch(68% 0.13 ${SECTION_HUE} / 0.7)`,
     animation: 'hudBlink 2.2s var(--ease-out-expo) infinite',
   },
   cornerSep: {
@@ -157,7 +157,7 @@ const s = {
   bottomBarFill: {
     position: 'absolute',
     inset: 0,
-    background: `linear-gradient(90deg, oklch(62% 0.19 ${SECTION_HUE}) 0%, oklch(62% 0.19 ${SECTION_HUE} / 0.3) 100%)`,
+    background: `linear-gradient(90deg, oklch(68% 0.13 ${SECTION_HUE}) 0%, oklch(68% 0.13 ${SECTION_HUE} / 0.3) 100%)`,
     transformOrigin: 'left',
   },
   caption: {
@@ -170,7 +170,7 @@ const s = {
   capLabel: {
     ...mono,
     fontSize: 11,
-    color: `oklch(72% 0.15 ${SECTION_HUE} / 0.75)`,
+    color: `oklch(74% 0.11 ${SECTION_HUE} / 0.75)`,
     letterSpacing: '0.12em',
     textTransform: 'uppercase',
     whiteSpace: 'nowrap',

@@ -49,9 +49,9 @@ const s = {
     top: 4,
     width: 3,
     height: 52,
-    background: `oklch(62% 0.19 ${STAT_HUE})`,
+    background: `oklch(62% 0.17 ${STAT_HUE})`,
     borderRadius: 2,
-    boxShadow: `0 0 20px oklch(62% 0.19 ${STAT_HUE} / 0.45)`,
+    boxShadow: `0 0 20px oklch(62% 0.17 ${STAT_HUE} / 0.45)`,
     transformOrigin: 'top',
   },
   readoutTag: {
