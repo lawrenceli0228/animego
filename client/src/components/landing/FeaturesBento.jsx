@@ -371,6 +371,19 @@ export default function FeaturesBento({ posters }) {
           opacity: 0.85;
         }
 
+        /* ─── f6 schedule today-lock sweep — enters, locks on Fri (~64%), exits ─── */
+        @keyframes scheduleLock {
+          0%     { transform: translateX(-4%); opacity: 0; }
+          8%     { opacity: 1; }
+          48%    { transform: translateX(58%); opacity: 1; }
+          68%    { transform: translateX(58%); opacity: 1; }
+          100%   { transform: translateX(102%); opacity: 0; }
+        }
+        .schedule-sweep {
+          animation: scheduleLock 2.4s cubic-bezier(0.33, 1, 0.68, 1) forwards;
+          animation-delay: 0.2s;
+        }
+
         /* ─── f4 arrow handoff — two dots share relayDot with phase offset ─── */
         .bento-card[data-visual="manual"] .arrow-dot-1 {
           animation: relayDot 6.8s var(--ease-out-expo) infinite;
@@ -415,6 +428,7 @@ export default function FeaturesBento({ posters }) {
           .f2-playhead { animation: none !important; transform: none !important; opacity: 1 !important; }
           .ring-draw { animation: none !important; }
           .drop-scan rect { animation: none !important; opacity: 0 !important; }
+          .schedule-sweep { animation: none !important; opacity: 0 !important; }
           .f1-mascot { transition: none !important; transform: none !important; }
         }
       `}</style>

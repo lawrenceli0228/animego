@@ -625,12 +625,31 @@ const WEEK = [
 
 export function ScheduleVisual({ hue }) {
   const { t } = useLang()
+  const ref = useRef(null)
+  const inView = useInView(ref, { once: true, margin: '-20% 0px' })
+  const reduced = useReducedMotion()
+  const animate = inView && !reduced
   return (
-    <div style={{ marginTop: 18 }}>
+    <div ref={ref} style={{ marginTop: 18 }}>
       <div style={{
+        position: 'relative',
         display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8,
         marginBottom: 14,
       }}>
+        {/* today-lock rail: sweeps across, locks on Fri (~64%), exits right.
+            rail is full-width so translateX % maps to grid width, not line width. */}
+        {animate && (
+          <div className="schedule-sweep" style={{
+            position: 'absolute', top: -4, bottom: -4, left: 0, right: 0,
+            pointerEvents: 'none', zIndex: 2,
+          }}>
+            <div style={{
+              position: 'absolute', top: 0, bottom: 0, left: 0,
+              width: 1, background: `oklch(88% 0.15 ${hue})`,
+              boxShadow: `0 0 6px oklch(88% 0.15 ${hue} / 0.7)`,
+            }} />
+          </div>
+        )}
         {WEEK.map((d, i) => {
           const active = d.today
           return (
