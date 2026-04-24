@@ -150,6 +150,9 @@
   .schedule-sweep { animation: none !important; opacity: 0 !important; }
   .torrent-row { animation: none !important; }
   .f1-mascot { transition: none !important; transform: none !important; }
-  /* Any element that opts into hudBlink via class must freeze at steady state. */
+  /* .hud-blink is a reduced-motion FREEZE hook only — it does not drive the
+   * animation itself. Elements that want to blink must set their own inline
+   * `animation: hudBlink ...` (see §03 chipDot, §06 lockDot, §07 liveDot).
+   * The class here just ensures they all stop at steady opacity. */
   .hud-blink { animation: none !important; opacity: 1 !important; }
 }

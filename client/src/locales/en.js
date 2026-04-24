@@ -348,8 +348,10 @@ const en = {
       epLabelSuffix: '',
     },
     danmaku: {
+      eyebrow: 'Danmaku / The sound of one frame',
       title: 'Three thousand voices, one frame.',
-      cornerLive: '● LIVE · 3,812 watching now',
+      cornerLive: 'LIVE · 3,812 WATCHING',
+      cornerRate: '3.2K / MIN',
       capLabel: 'Show notes',
       capTextPrefix: 'Sunday 2026-04-21 22:14 · ',
       capTextSuffix: ' — 3,812 comments flew across the same frame. You\'re not watching alone.',

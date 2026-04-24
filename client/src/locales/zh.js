@@ -348,8 +348,10 @@ const zh = {
       epLabelSuffix: ' 话',
     },
     danmaku: {
+      eyebrow: 'Danmaku / 一帧的声',
       title: '一帧里,三千条人声。',
-      cornerLive: '● LIVE · 3,812 人同时观看',
+      cornerLive: 'LIVE · 3,812 同屏',
+      cornerRate: '3.2K / MIN',
       capLabel: 'Show notes',
       capTextPrefix: '2026-04-21 周日晚 22:14,《',
       capTextSuffix: '》—— 3,812 条弹幕在同一帧里飘过。你不是一个人在追。',
