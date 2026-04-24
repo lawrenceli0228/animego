@@ -7,6 +7,7 @@
 
 import { motion as Motion, useReducedMotion } from 'motion/react'
 import { useLang } from '../../context/LanguageContext'
+import { SectionNum } from './shared/hud'
 import {
   PosterVisual,
   DanmakuVisual,
@@ -51,16 +52,6 @@ const s = {
     background: 'radial-gradient(50% 50% at 50% 50%, oklch(32% 0.18 210 / 0.22) 0%, transparent 70%)',
     filter: 'blur(50px)',
     pointerEvents: 'none',
-  },
-  sectionNum: {
-    position: 'absolute',
-    top: 28, right: 32,
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
-    letterSpacing: '0.14em',
-    color: 'rgba(235,235,245,0.30)',
-    textTransform: 'uppercase',
-    zIndex: 2,
   },
   header: { maxWidth: 720, marginBottom: 64, position: 'relative', zIndex: 1 },
   sectionEyebrow: {
@@ -267,7 +258,7 @@ export default function FeaturesBento({ posters }) {
     <section style={s.section} aria-labelledby="features-title">
       <div style={s.colorBand} aria-hidden />
       <div style={s.colorBand2} aria-hidden />
-      <span style={s.sectionNum} aria-hidden>§04</span>
+      <SectionNum n="04" />
       <style>{`
         .bento-card[data-size="heroL"] { grid-column: span 7; grid-row: span 2; }
         .bento-card[data-size="heroR"] { grid-column: span 5; grid-row: span 2; }
