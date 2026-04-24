@@ -317,31 +317,39 @@ export default function FeaturesBento({ posters }) {
           transform: translateY(-1px);
         }
 
-        /* ─── Shared keyframes ─── */
+        /* ─── Shared keyframes (consumed across cards) ─── */
         @keyframes hudBlink {
           0%, 80%, 100% { opacity: 0.55; }
           85%           { opacity: 1; }
         }
+        @keyframes relayDot {
+          0%, 6%   { opacity: 0; transform: translateX(-6px); }
+          14%      { opacity: 1; transform: translateX(-6px); }
+          46%      { opacity: 1; transform: translateX(18px); }
+          52%      { opacity: 0; transform: translateX(22px); }
+          100%     { opacity: 0; transform: translateX(22px); }
+        }
+        @keyframes ringDraw {
+          from { stroke-dashoffset: var(--ring-c); }
+          to   { stroke-dashoffset: var(--ring-offset); }
+        }
+        @keyframes barGrow {
+          from { transform: scaleY(0.2); opacity: 0.4; }
+          to   { transform: scaleY(1);   opacity: 1;   }
+        }
+        @keyframes scanSweep {
+          0%       { transform: translateX(0); opacity: 0; }
+          10%, 90% { opacity: 1; }
+          100%     { transform: translateX(var(--sweep-end, 100%)); opacity: 0; }
+        }
 
-        /* ─── f4 arrow handoff pulse ─── */
-        @keyframes arrowDot1Travel {
-          0%        { opacity: 0; transform: translateX(-6px) scale(0.6); }
-          12%       { opacity: 1; transform: translateX(-6px) scale(1); }
-          46%       { opacity: 1; transform: translateX(18px) scale(1); }
-          52%       { opacity: 0; transform: translateX(22px) scale(0.6); }
-          100%      { opacity: 0; transform: translateX(22px) scale(0.6); }
-        }
-        @keyframes arrowDot2Travel {
-          0%, 48%   { opacity: 0; transform: translateX(-6px) scale(0.6); }
-          56%       { opacity: 1; transform: translateX(-6px) scale(1); }
-          90%       { opacity: 1; transform: translateX(18px) scale(1); }
-          96%, 100% { opacity: 0; transform: translateX(22px) scale(0.6); }
-        }
+        /* ─── f4 arrow handoff — two dots share relayDot with phase offset ─── */
         .bento-card[data-visual="manual"] .arrow-dot-1 {
-          animation: arrowDot1Travel 4.2s var(--ease-out-expo) infinite;
+          animation: relayDot 6.8s var(--ease-out-expo) infinite;
         }
         .bento-card[data-visual="manual"] .arrow-dot-2 {
-          animation: arrowDot2Travel 4.2s var(--ease-out-expo) infinite;
+          animation: relayDot 6.8s var(--ease-out-expo) infinite;
+          animation-delay: 3.4s;
         }
         /* ─── f1 mascot (top-right, bottom flush with tile row bottom = spec block top) ─── */
         .f1-mascot {

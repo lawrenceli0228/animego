@@ -5,6 +5,7 @@ import { useLang } from '../../../context/LanguageContext'
 const mono = {
   fontFamily: "'JetBrains Mono', monospace",
   letterSpacing: '0.06em',
+  fontVariantNumeric: 'tabular-nums',
 }
 const label = {
   ...mono,
@@ -12,6 +13,28 @@ const label = {
   color: 'rgba(235,235,245,0.45)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
+}
+
+/**
+ * CornerBrackets — 4 HUD-style L brackets insetting a framed instrument panel.
+ * Used by instrument-register cards (f2 density, f5 resume, f7 drop-zone).
+ * Absolute-positioned; parent must be position: relative.
+ */
+export function CornerBrackets({ inset = 6, size = 8, opacity = 0.28 }) {
+  const stroke = `rgba(235,235,245,${opacity})`
+  const corner = (pos) => {
+    const style = { position: 'absolute', width: size, height: size, pointerEvents: 'none' }
+    if (pos === 'tl') { style.top = inset; style.left = inset }
+    if (pos === 'tr') { style.top = inset; style.right = inset; style.transform = 'scaleX(-1)' }
+    if (pos === 'bl') { style.bottom = inset; style.left = inset; style.transform = 'scaleY(-1)' }
+    if (pos === 'br') { style.bottom = inset; style.right = inset; style.transform = 'scale(-1,-1)' }
+    return (
+      <svg key={pos} style={style} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <path d={`M 0 ${size} L 0 0 L ${size} 0`} stroke={stroke} strokeWidth="1" fill="none" />
+      </svg>
+    )
+  }
+  return <>{['tl', 'tr', 'bl', 'br'].map(corner)}</>
 }
 
 /* ─── f1 Poster Identity ─────────────────────────────────────────────── */
