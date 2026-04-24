@@ -402,6 +402,17 @@ export default function FeaturesBento({ posters }) {
           animation: relayDot 6.8s var(--ease-out-expo) infinite;
           animation-delay: 3.4s;
         }
+
+        /* ─── f4 locked pulse — peak at 96% (t ≈ 6.53s) co-lands with dot-2 arrival
+                at 46% local of relayDot (absolute t = 3.4 + 0.46×6.8 = 6.528s) ─── */
+        @keyframes lockedPulse {
+          0%, 88%, 100% { box-shadow: 0 0 20px oklch(62% 0.19 var(--hue) / 0.3); }
+          96%           { box-shadow: 0 0 32px oklch(62% 0.19 var(--hue) / 0.7); }
+        }
+        .bento-card[data-visual="manual"] .flow-card-locked {
+          box-shadow: 0 0 20px oklch(62% 0.19 var(--hue) / 0.3);
+          animation: lockedPulse 6.8s cubic-bezier(0.33, 1, 0.68, 1) infinite;
+        }
         /* ─── f1 mascot (top-right, bottom flush with tile row bottom = spec block top) ─── */
         .f1-mascot {
           position: absolute;
@@ -435,6 +446,7 @@ export default function FeaturesBento({ posters }) {
           .bento-card:hover .bento-chapter-bar { transform: none !important; height: 52px !important; }
           .bento-card[data-visual="manual"] .arrow-dot-1,
           .bento-card[data-visual="manual"] .arrow-dot-2 { animation: none !important; opacity: 0 !important; }
+          .bento-card[data-visual="manual"] .flow-card-locked { animation: none !important; }
           .f2-playhead { animation: none !important; transform: none !important; opacity: 1 !important; }
           .ring-draw { animation: none !important; }
           .drop-scan rect { animation: none !important; opacity: 0 !important; }

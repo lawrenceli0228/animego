@@ -466,13 +466,18 @@ function FlowCard({ hue, state, label: lbl, titleZh, sub }) {
     locked: { border: `oklch(62% 0.19 ${hue} / 0.7)`,     text: `oklch(82% 0.18 ${hue})`, bg: `oklch(22% 0.08 ${hue} / 0.4)` },
   }
   const tone = tones[state]
+  const locked = state === 'locked'
   return (
-    <div style={{
-      flex: 1, padding: '12px 12px', borderRadius: 8,
-      background: tone.bg, border: `1px solid ${tone.border}`,
-      boxShadow: state === 'locked' ? `0 0 20px oklch(62% 0.19 ${hue} / 0.3)` : 'none',
-      minHeight: 84, display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-    }}>
+    <div
+      className={locked ? 'flow-card-locked' : undefined}
+      style={{
+        flex: 1, padding: '12px 12px', borderRadius: 8,
+        background: tone.bg, border: `1px solid ${tone.border}`,
+        // when locked, box-shadow is owned by CSS (pulses in sync with arrow-dot-2 handoff)
+        boxShadow: locked ? undefined : 'none',
+        minHeight: 84, display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+      }}
+    >
       <div style={{ ...mono, fontSize: 9.5, color: tone.text, textTransform: 'uppercase' }}>{lbl}</div>
       <div>
         <div style={{
