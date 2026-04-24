@@ -342,6 +342,18 @@ export default function FeaturesBento({ posters }) {
           10%, 90% { opacity: 1; }
           100%     { transform: translateX(var(--sweep-end, 100%)); opacity: 0; }
         }
+        @keyframes f2PlayheadScrub {
+          0%          { transform: translateX(0%);   opacity: 0; }
+          8%          { opacity: 1; }
+          92%         { opacity: 1; }
+          100%        { transform: translateX(16%);  opacity: 0; }
+        }
+
+        /* ─── f2 density-strip playhead scrub (compositor-friendly) ─── */
+        .f2-playhead {
+          animation: f2PlayheadScrub 6.8s cubic-bezier(0.33, 1, 0.68, 1) infinite;
+          will-change: transform, opacity;
+        }
 
         /* ─── f4 arrow handoff — two dots share relayDot with phase offset ─── */
         .bento-card[data-visual="manual"] .arrow-dot-1 {
@@ -384,6 +396,7 @@ export default function FeaturesBento({ posters }) {
           .bento-card:hover .bento-chapter-bar { transform: none !important; height: 52px !important; }
           .bento-card[data-visual="manual"] .arrow-dot-1,
           .bento-card[data-visual="manual"] .arrow-dot-2 { animation: none !important; opacity: 0 !important; }
+          .f2-playhead { animation: none !important; transform: none !important; opacity: 1 !important; }
           .f1-mascot { transition: none !important; transform: none !important; }
         }
       `}</style>

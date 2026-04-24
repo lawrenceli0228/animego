@@ -291,12 +291,18 @@ export function DanmakuVisual({ hue }) {
               borderRadius: 1,
             }} />
           ))}
-          {/* playhead at ~12:34 (13/24 of the way ≈ 52%) */}
-          <div style={{
-            position: 'absolute', top: -2, bottom: -2, left: '52%',
-            width: 1, background: `oklch(85% 0.15 ${hue})`,
-            boxShadow: `0 0 8px oklch(85% 0.15 ${hue})`,
-          }} />
+          {/* playhead rail: full strip width — animates translateX so the 1px line scrubs
+              41% → 57% of strip (compositor-friendly, left-biased through the density peak) */}
+          <div className="f2-playhead" style={{
+            position: 'absolute', top: -2, bottom: -2, left: 0, right: 0,
+            pointerEvents: 'none',
+          }}>
+            <div style={{
+              position: 'absolute', top: 0, bottom: 0, left: '41%',
+              width: 1, background: `oklch(85% 0.15 ${hue})`,
+              boxShadow: `0 0 6px oklch(85% 0.15 ${hue} / 0.7)`,
+            }} />
+          </div>
         </div>
       </div>
 
