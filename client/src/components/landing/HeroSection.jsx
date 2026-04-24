@@ -1,18 +1,22 @@
-import { Link } from 'react-router-dom'
-import { useState, useRef } from 'react'
-import { motion, useReducedMotion } from 'motion/react'
-import { useLang } from '../../context/LanguageContext'
-import { pickTitle } from '../../utils/formatters'
-
 /**
  * §01 · Hero
  * - Title reveals word-by-word with spring (stiffness 120 / damping 18).
  * - Showcase card uses a real trending poster (passed via `poster` prop),
- *   layered with an OKLCH wash for color identity continuity.
+ *   framed with CornerBrackets + mono readout for HUD-bezel identity.
  * - Custom label cursor follows the pointer inside the showcase.
- * - Decorative "danmaku trails" fly across the hero backdrop.
+ * - HUD upgrade: shared SectionNum, HUD-framed CTAs replacing iOS system blue
+ *   pill; eyebrow dot re-keyed from iOS green to section hue 330 magenta.
  */
-const FALLBACK_HUE = 330
+
+import { Link } from 'react-router-dom'
+import { useState, useRef } from 'react'
+import { motion as Motion, useReducedMotion } from 'motion/react'
+import { useLang } from '../../context/LanguageContext'
+import { pickTitle } from '../../utils/formatters'
+import { mono } from './shared/hud-tokens'
+import { SectionNum, CornerBrackets } from './shared/hud'
+
+const SECTION_HUE = 330
 
 const danmaku = [
   { text: '这集画面神了', y: 18, delay: 0 },
@@ -39,16 +43,6 @@ const s = {
     animation: `heroTrail ${duration}s linear ${delay}s infinite`,
     pointerEvents: 'none',
   }),
-  sectionNum: {
-    position: 'absolute',
-    top: 28, right: 32,
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
-    letterSpacing: '0.14em',
-    color: 'rgba(235,235,245,0.30)',
-    textTransform: 'uppercase',
-    zIndex: 2,
-  },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'minmax(0, 1.25fr) minmax(0, 1fr)',
@@ -63,20 +57,20 @@ const s = {
     gap: 8,
     padding: '5px 12px',
     borderRadius: 9999,
-    border: '1px solid rgba(84,84,88,0.65)',
-    fontFamily: "'JetBrains Mono', monospace",
+    border: `1px solid oklch(62% 0.19 ${SECTION_HUE} / 0.35)`,
+    background: 'transparent',
+    ...mono,
     fontSize: 11,
-    letterSpacing: '0.08em',
-    color: 'rgba(235,235,245,0.60)',
+    letterSpacing: '0.10em',
+    color: `oklch(82% 0.15 ${SECTION_HUE})`,
     marginBottom: 28,
   },
   dot: {
     width: 6, height: 6, borderRadius: 9999,
-    background: '#30d158',
-    boxShadow: '0 0 8px rgba(48,209,88,0.55)',
+    background: `oklch(62% 0.19 ${SECTION_HUE})`,
+    boxShadow: `0 0 10px oklch(62% 0.19 ${SECTION_HUE} / 0.7)`,
+    animation: 'hudBlink 2.2s var(--ease-out-expo) infinite',
   },
-  // Lang-conditional sizing: EN words are wider, so we clamp smaller and
-  // tighten letter-spacing to keep the headline from overflowing the column.
   h1: (lang) => ({
     fontFamily: "'Sora', sans-serif",
     fontWeight: 800,
@@ -91,18 +85,17 @@ const s = {
   word: {
     display: 'inline-block',
   },
-  // EN uses a U+002E period — scale it up so it reads as punctuation,
-  // not a rendering bug, and keep the OKLCH hero accent glow.
   h1Period: (lang) => ({
     display: 'inline-block',
-    color: 'oklch(68% 0.2 330)',
-    textShadow: '0 0 40px oklch(68% 0.2 330 / 0.55)',
+    color: `oklch(68% 0.2 ${SECTION_HUE})`,
+    textShadow: `0 0 40px oklch(68% 0.2 ${SECTION_HUE} / 0.55)`,
     fontSize: lang === 'en' ? '1.3em' : undefined,
     marginLeft: lang === 'en' ? '0.05em' : undefined,
   }),
   sub: {
     marginTop: 24,
     maxWidth: 520,
+    fontFamily: "'DM Sans', sans-serif",
     fontSize: 'clamp(15px, 1vw + 0.5rem, 18px)',
     lineHeight: 1.6,
     color: 'rgba(235,235,245,0.60)',
@@ -110,44 +103,72 @@ const s = {
   ctaRow: {
     marginTop: 36,
     display: 'flex',
-    gap: 12,
+    gap: 14,
     flexWrap: 'wrap',
-    alignItems: 'center',
+    alignItems: 'stretch',
   },
   btnPrimary: {
-    padding: '14px 26px',
-    borderRadius: 10,
-    background: '#0a84ff',
-    color: '#fff',
-    fontWeight: 600,
-    fontSize: 15,
-    fontFamily: "'DM Sans', sans-serif",
+    position: 'relative',
+    display: 'inline-flex',
+    flexDirection: 'column',
+    gap: 4,
+    padding: '14px 26px 14px 22px',
+    borderRadius: 4,
     textDecoration: 'none',
-    transition: 'background 150ms var(--ease-out-expo), transform 150ms var(--ease-out-expo)',
-    display: 'inline-flex', alignItems: 'center', gap: 8,
+    border: `1px solid oklch(62% 0.19 ${SECTION_HUE} / 0.55)`,
+    background: `oklch(22% 0.10 ${SECTION_HUE} / 0.55)`,
+    transition: 'border-color 200ms var(--ease-out-expo), background 200ms var(--ease-out-expo), transform 200ms var(--ease-out-expo)',
+  },
+  btnPrimaryLabel: {
+    ...mono,
+    fontSize: 10,
+    letterSpacing: '0.16em',
+    color: `oklch(82% 0.15 ${SECTION_HUE})`,
+    textTransform: 'uppercase',
+  },
+  btnPrimaryMain: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 12,
+    fontFamily: "'Sora', sans-serif",
+    fontSize: 16,
+    fontWeight: 700,
+    color: '#fff',
+    letterSpacing: '-0.01em',
+  },
+  btnPrimaryArrow: {
+    ...mono,
+    fontSize: 14,
+    color: `oklch(82% 0.15 ${SECTION_HUE})`,
+    transition: 'transform 200ms var(--ease-out-expo)',
   },
   btnGhost: {
+    display: 'inline-flex', alignItems: 'center', gap: 10,
     padding: '14px 22px',
-    borderRadius: 10,
+    borderRadius: 4,
     background: 'transparent',
-    color: 'rgba(235,235,245,0.85)',
-    fontWeight: 500,
-    fontSize: 15,
-    fontFamily: "'DM Sans', sans-serif",
+    color: 'rgba(235,235,245,0.70)',
+    ...mono,
+    fontSize: 13,
+    letterSpacing: '0.08em',
     textDecoration: 'none',
     border: '1px solid rgba(84,84,88,0.65)',
-    transition: 'all 150ms var(--ease-out-expo)',
-    display: 'inline-flex', alignItems: 'center', gap: 8,
+    transition: 'border-color 150ms var(--ease-out-expo), color 150ms var(--ease-out-expo)',
+    textTransform: 'uppercase',
   },
   metaRow: {
     marginTop: 40,
     display: 'flex',
-    gap: 24,
+    gap: 20,
     flexWrap: 'wrap',
-    fontSize: 12,
-    color: 'rgba(235,235,245,0.30)',
-    fontFamily: "'JetBrains Mono', monospace",
-    letterSpacing: '0.04em',
+    alignItems: 'center',
+    ...mono,
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.42)',
+    letterSpacing: '0.06em',
+  },
+  metaSep: {
+    color: 'rgba(235,235,245,0.22)',
   },
   showcaseWrap: {
     position: 'relative',
@@ -158,10 +179,10 @@ const s = {
   },
   showcase: (hue) => ({
     position: 'absolute', inset: 0,
-    borderRadius: 20,
+    borderRadius: 12,
     overflow: 'hidden',
     background: `oklch(12% 0.04 ${hue})`,
-    border: '1px solid rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.08)',
     boxShadow: `0 24px 80px oklch(45% 0.18 ${hue} / 0.25), 0 8px 32px rgba(0,0,0,0.6)`,
     cursor: 'none',
   }),
@@ -195,20 +216,31 @@ const s = {
   showcaseTop: {
     position: 'absolute', top: 18, left: 20, right: 20,
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11, letterSpacing: '0.08em',
-    color: 'rgba(255,255,255,0.75)',
+    ...mono,
+    fontSize: 11, letterSpacing: '0.10em',
+    color: 'rgba(255,255,255,0.80)',
     pointerEvents: 'none',
+    textTransform: 'uppercase',
   },
+  showcaseTopLeft: {
+    display: 'inline-flex', alignItems: 'center', gap: 8,
+  },
+  showcaseTopDot: (hue) => ({
+    width: 6, height: 6, borderRadius: 9999,
+    background: `oklch(62% 0.19 ${hue})`,
+    boxShadow: `0 0 8px oklch(62% 0.19 ${hue} / 0.7)`,
+    animation: 'hudBlink 2.2s var(--ease-out-expo) infinite',
+  }),
   showcaseMeta: {
     position: 'absolute', bottom: 20, left: 20, right: 20,
     pointerEvents: 'none',
   },
   showcaseEpisode: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 12, letterSpacing: '0.08em',
+    ...mono,
+    fontSize: 11, letterSpacing: '0.10em',
     color: 'rgba(255,255,255,0.60)',
     marginBottom: 8,
+    textTransform: 'uppercase',
   },
   showcaseTitle: {
     fontFamily: "'Sora', sans-serif",
@@ -219,25 +251,26 @@ const s = {
     marginBottom: 16,
     textShadow: '0 2px 24px rgba(0,0,0,0.6)',
   },
-  showcaseScore: {
+  showcaseScore: (hue) => ({
     display: 'inline-flex', alignItems: 'center', gap: 6,
     padding: '4px 10px',
-    borderRadius: 9999,
-    background: 'rgba(0,0,0,0.4)',
+    borderRadius: 3,
+    background: 'rgba(0,0,0,0.55)',
     backdropFilter: 'blur(10px)',
     WebkitBackdropFilter: 'blur(10px)',
-    fontFamily: "'JetBrains Mono', monospace",
+    border: `1px solid oklch(62% 0.19 ${hue} / 0.40)`,
+    ...mono,
     fontSize: 12, fontWeight: 700,
-    color: '#ff9f0a',
-  },
+    color: `oklch(82% 0.15 ${hue})`,
+  }),
   danmaku: (y, delay) => ({
     position: 'absolute',
     top: `${y}%`,
     left: 0,
     padding: '4px 10px',
+    fontFamily: "'DM Sans', sans-serif",
     fontSize: 13,
     color: '#fff',
-    fontFamily: "'DM Sans', sans-serif",
     textShadow: '0 1px 2px rgba(0,0,0,0.85)',
     whiteSpace: 'nowrap',
     animation: `danmakuFloat 9s linear ${delay}s infinite`,
@@ -248,38 +281,39 @@ const s = {
     left: x, top: y,
     transform: `translate(12px, 12px) scale(${visible ? 1 : 0.6})`,
     padding: '4px 10px',
-    borderRadius: 9999,
+    borderRadius: 3,
     background: 'rgba(0,0,0,0.85)',
     backdropFilter: 'blur(8px)',
     WebkitBackdropFilter: 'blur(8px)',
-    border: '1px solid rgba(255,255,255,0.18)',
-    fontFamily: "'JetBrains Mono', monospace",
+    border: `1px solid oklch(62% 0.19 ${SECTION_HUE} / 0.50)`,
+    ...mono,
     fontSize: 10,
-    letterSpacing: '0.08em',
+    letterSpacing: '0.10em',
     color: '#fff',
     opacity: visible ? 1 : 0,
     pointerEvents: 'none',
     transition: 'opacity 180ms var(--ease-out-expo), transform 180ms var(--ease-out-expo)',
     zIndex: 20,
     whiteSpace: 'nowrap',
+    textTransform: 'uppercase',
   }),
 }
 
 function AnimatedWord({ children, delay, reduced }) {
   if (reduced) return <span style={s.word}>{children}</span>
   return (
-    <motion.span
+    <Motion.span
       style={s.word}
       initial={{ opacity: 0, y: '0.4em', filter: 'blur(8px)' }}
       animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
       transition={{ type: 'spring', stiffness: 120, damping: 18, mass: 0.8, delay }}
     >
       {children}
-    </motion.span>
+    </Motion.span>
   )
 }
 
-function Showcase({ reduced, poster }) {
+function Showcase({ poster }) {
   const { lang, t } = useLang()
   const [cursor, setCursor] = useState({ x: 0, y: 0, on: false })
   const ref = useRef(null)
@@ -291,7 +325,7 @@ function Showcase({ reduced, poster }) {
   }
   const onLeave = () => setCursor((c) => ({ ...c, on: false }))
 
-  const hue = poster?.posterAccent ?? FALLBACK_HUE
+  const hue = poster?.posterAccent ?? SECTION_HUE
   const title = (poster ? pickTitle(poster, lang) : '') || '—'
   const score = poster?.averageScore != null ? (poster.averageScore / 10).toFixed(1) : null
   const epUnit = t('landing.hero.episodeUnit')
@@ -317,8 +351,13 @@ function Showcase({ reduced, poster }) {
       <div style={s.coverWash} aria-hidden />
       <div style={s.showcaseGrain} aria-hidden />
 
+      <CornerBrackets inset={10} size={10} opacity={0.55} />
+
       <div style={s.showcaseTop}>
-        <span>{t('landing.hero.showcaseLabel')}</span>
+        <span style={s.showcaseTopLeft}>
+          <span style={s.showcaseTopDot(hue)} className="hud-blink" aria-hidden />
+          {t('landing.hero.showcaseLabel')}
+        </span>
         <span>{poster?.format || 'TV'}</span>
       </div>
 
@@ -329,12 +368,10 @@ function Showcase({ reduced, poster }) {
       <div style={s.showcaseMeta}>
         <div style={s.showcaseEpisode}>
           {poster?.seasonYear ? `${poster.seasonYear} · ` : ''}
-          {poster?.episodes
-            ? (lang === 'en' ? `${poster.episodes} ${epUnit}` : `${poster.episodes} ${epUnit}`)
-            : trendingFallback}
+          {poster?.episodes ? `${poster.episodes} ${epUnit}` : trendingFallback}
         </div>
-        <h3 style={s.showcaseTitle}>{title}</h3>
-        {score ? <span style={s.showcaseScore}>★ {score}</span> : null}
+        <p style={s.showcaseTitle}>{title}</p>
+        {score ? <span style={s.showcaseScore(hue)}>★ {score}</span> : null}
       </div>
 
       <span style={s.cursorLabel(cursor.on, cursor.x, cursor.y)} aria-hidden>
@@ -348,8 +385,6 @@ export default function HeroSection({ poster }) {
   const reduced = useReducedMotion()
   const { lang, t } = useLang()
   const base = 0.25
-  // EN has fewer words per line than ZH characters; a larger step per word
-  // preserves the same total reveal duration and rhythm.
   const step = lang === 'en' ? 0.08 : 0.06
 
   const titleLine1 = t('landing.hero.titleLine1')
@@ -357,12 +392,10 @@ export default function HeroSection({ poster }) {
   const period = t('landing.hero.period')
   const line1 = Array.isArray(titleLine1) ? titleLine1 : [titleLine1]
   const line2 = Array.isArray(titleLine2) ? titleLine2 : [titleLine2]
-
-  // Per-word space: in EN we need real spaces between words; in ZH, characters abut.
   const sep = lang === 'en' ? ' ' : ''
 
   return (
-    <section style={s.section} aria-label={t('landing.docTitle')}>
+    <section style={s.section} aria-labelledby="hero-heading">
       <style>{`
         @keyframes danmakuFloat {
           0%   { transform: translateX(110%); opacity: 0; }
@@ -380,9 +413,26 @@ export default function HeroSection({ poster }) {
           .hero-grid { grid-template-columns: 1fr !important; }
           .hero-showcase { margin: 32px auto 0 !important; max-width: 360px !important; }
         }
+        .hero-btn-primary:hover {
+          border-color: oklch(72% 0.19 ${SECTION_HUE} / 0.85) !important;
+          background: oklch(28% 0.12 ${SECTION_HUE} / 0.70) !important;
+          transform: translateY(-1px);
+        }
+        .hero-btn-primary:hover .hero-btn-arrow { transform: translateX(4px); }
+        .hero-btn-primary:focus-visible,
+        .hero-btn-ghost:focus-visible {
+          outline: 2px solid oklch(62% 0.19 ${SECTION_HUE});
+          outline-offset: 3px;
+        }
+        .hero-btn-ghost:hover {
+          border-color: rgba(235,235,245,0.45) !important;
+          color: #fff !important;
+        }
         @media (prefers-reduced-motion: reduce) {
           [data-danmaku] { animation: none !important; display: none !important; }
           .hero-trail { display: none !important; }
+          .hero-btn-primary:hover { transform: none !important; }
+          .hero-btn-primary:hover .hero-btn-arrow { transform: none !important; }
         }
       `}</style>
 
@@ -391,16 +441,16 @@ export default function HeroSection({ poster }) {
       <span className="hero-trail" style={s.bgTrail(64, 2.5,  19, '200px')} aria-hidden />
       <span className="hero-trail" style={s.bgTrail(82, 8,    24, '160px')} aria-hidden />
 
-      <span style={s.sectionNum} aria-hidden>§01</span>
+      <SectionNum n="01" />
 
       <div className="container">
         <div className="hero-grid" style={s.grid}>
           <div>
             <span style={s.eyebrow}>
-              <span style={s.dot} />
+              <span style={s.dot} className="hud-blink" aria-hidden />
               {t('landing.hero.eyebrow')}
             </span>
-            <h1 style={s.h1(lang)}>
+            <h1 id="hero-heading" style={s.h1(lang)}>
               {line1.map((w, i) => (
                 <span key={`a-${i}`}>
                   <AnimatedWord delay={base + i * step} reduced={reduced}>
@@ -421,7 +471,7 @@ export default function HeroSection({ poster }) {
                   {sep && i < line2.length - 1 ? sep : ''}
                 </span>
               ))}
-              <motion.span
+              <Motion.span
                 style={s.h1Period(lang)}
                 initial={reduced ? false : { opacity: 0, scale: 0.6 }}
                 animate={reduced ? undefined : { opacity: 1, scale: 1 }}
@@ -431,59 +481,57 @@ export default function HeroSection({ poster }) {
                 }}
               >
                 {period}
-              </motion.span>
+              </Motion.span>
             </h1>
-            <motion.p
+            <Motion.p
               style={s.sub}
               initial={reduced ? false : { opacity: 0, y: 12 }}
               animate={reduced ? undefined : { opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1], delay: base + 0.65 }}
             >
               {t('landing.hero.sub')}
-            </motion.p>
-            <motion.div
+            </Motion.p>
+            <Motion.div
               style={s.ctaRow}
               initial={reduced ? false : { opacity: 0, y: 12 }}
               animate={reduced ? undefined : { opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1], delay: base + 0.78 }}
             >
-              <Link
-                to="/"
-                style={s.btnPrimary}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#409cff'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#0a84ff'; e.currentTarget.style.transform = 'translateY(0)'; }}
-              >
-                {t('landing.hero.ctaPrimary')}
-                <span aria-hidden>→</span>
+              <Link to="/" className="hero-btn-primary" style={s.btnPrimary}>
+                <span style={s.btnPrimaryLabel} aria-hidden="true">[ START ]</span>
+                <span style={s.btnPrimaryMain}>
+                  {t('landing.hero.ctaPrimary')}
+                  <span className="hero-btn-arrow" style={s.btnPrimaryArrow} aria-hidden>→</span>
+                </span>
               </Link>
               <a
                 href="https://github.com/lawrenceli0228/animego"
                 target="_blank" rel="noreferrer"
+                className="hero-btn-ghost"
                 style={s.btnGhost}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(235,235,245,0.35)'; e.currentTarget.style.color = '#fff'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(84,84,88,0.65)'; e.currentTarget.style.color = 'rgba(235,235,245,0.85)'; }}
               >
                 {t('landing.hero.ctaSecondary')}
+                <span aria-hidden>↗</span>
               </a>
-            </motion.div>
+            </Motion.div>
             <div style={s.metaRow}>
               <span>{t('landing.hero.metaCount')}</span>
-              <span>·</span>
+              <span style={s.metaSep}>·</span>
               <span>{t('landing.hero.metaSources')}</span>
-              <span>·</span>
+              <span style={s.metaSep}>·</span>
               <span>{t('landing.hero.metaDaily')}</span>
             </div>
           </div>
 
-          <motion.div
+          <Motion.div
             className="hero-showcase"
             style={s.showcaseWrap}
             initial={reduced ? false : { opacity: 0, y: 20, scale: 0.96 }}
             animate={reduced ? undefined : { opacity: 1, y: 0, scale: 1 }}
             transition={{ type: 'spring', stiffness: 90, damping: 20, delay: 0.4 }}
           >
-            <Showcase reduced={reduced} poster={poster} />
-          </motion.div>
+            <Showcase poster={poster} />
+          </Motion.div>
         </div>
       </div>
     </section>
