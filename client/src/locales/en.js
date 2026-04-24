@@ -241,6 +241,7 @@ const en = {
       cursorLabel: 'Watch →',
     },
     stats: {
+      sectionLabel: 'System running numbers',
       s1Label: 'titles',     s1Note: '2005 – present',
       s2Label: 'danmaku',    s2Note: '+8k daily',
       s3Label: 'sources',    s3Note: 'multi-source playback',

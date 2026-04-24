@@ -241,6 +241,7 @@ const zh = {
       cursorLabel: '观看 →',
     },
     stats: {
+      sectionLabel: '系统运行数据',
       s1Label: '部番剧',  s1Note: '覆盖 2005 - 至今',
       s2Label: '弹幕条数', s2Note: '日均新增 8k+',
       s3Label: '数据源',  s3Note: '多源聚合播放',
