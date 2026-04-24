@@ -251,8 +251,8 @@ const zh = {
       eyebrow: 'Tribute / 数据出处',
       title: '一部番,它背后站着 48 个名字。',
       sub: '聚合不是魔术。每一条番名、每一段简介、每一轨弹幕,都来自下面这些公开数据源。我们不写爬虫换名字,出处摆在这。',
-      footerCount: '48 个公开数据源 · 全部可查',
-      footerThanks: '感谢 AniList · Bangumi · 弹弹Play 这些年一直在线',
+      footerNodesSuffix: '个数据源在线 · 持续同步',
+      footerStatus: 'STATUS · HEALTHY',
       srLabel: '全部 48 个数据源',
     },
     features: {

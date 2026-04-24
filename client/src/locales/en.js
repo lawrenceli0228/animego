@@ -251,8 +251,8 @@ const en = {
       eyebrow: 'Tribute / Data sources',
       title: 'Behind every show, 48 names.',
       sub: "Aggregation isn't magic. Every title, every synopsis, every danmaku track comes from the public sources below. No rebranded scrapers — credit stays where it belongs.",
-      footerCount: '48 public data sources · all verifiable',
-      footerThanks: 'Thanks to AniList · Bangumi · Dandanplay for staying online all these years',
+      footerNodesSuffix: 'sources online · syncing',
+      footerStatus: 'STATUS · HEALTHY',
       srLabel: 'All 48 data sources',
     },
     features: {

@@ -1,10 +1,18 @@
 /**
  * §03 · Data Sources Tribute
- * 48 sources as a two-row reverse marquee with mono index + hue dot.
+ * 48 sources across two reverse-direction marquee rows. Upgraded to HUD family:
+ * single hue=40 signature, shared ChapterBar + SectionNum + SectionHeader,
+ * chips are now SystemNodes (live-dot + idx + name + latency readout),
+ * footer shows a relay bar with a count-up on the node total.
  * Source names stay verbatim across locales — they are proper nouns.
  */
 
+import { motion as Motion, useReducedMotion } from 'motion/react'
 import { useLang } from '../../context/LanguageContext'
+import { mono, label, useCountUp, HUD_VIEWPORT } from './shared/hud-tokens'
+import { SectionNum, SectionHeader, ChapterBar } from './shared/hud'
+
+const SECTION_HUE = 40
 
 const rowA = [
   'AniList', 'Bangumi', '弹弹Play', 'TMDb', 'AniDB', 'Kitsu',
@@ -20,7 +28,14 @@ const rowB = [
   '风之圣殿', '花园字幕', '雪飄工作室', '诸神字幕组', '白目魔法屋', 'Gugugu Subs',
 ]
 
-const hues = [330, 40, 155, 210]
+/* Fake-but-believable latencies per source index. Static (not measured live) — the
+ * point is giving each chip a distinct numeric identity, not a dashboard. */
+const LATENCIES = [
+  142, 98, 71, 180, 165, 112, 84, 203, 156, 119, 132, 94,
+  168, 145, 176, 103, 127, 88, 152, 139, 197, 115, 91, 147,
+  108, 164, 122, 189, 173, 96, 131, 157, 144, 102, 118, 183,
+  125, 149, 111, 167, 134, 95, 178, 121, 106, 192, 153, 137,
+]
 
 const s = {
   section: {
@@ -31,42 +46,9 @@ const s = {
     borderBottom: '1px solid rgba(84,84,88,0.30)',
     overflow: 'hidden',
   },
-  sectionNum: {
-    position: 'absolute',
-    top: 28, right: 32,
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
-    letterSpacing: '0.14em',
-    color: 'rgba(235,235,245,0.30)',
-    textTransform: 'uppercase',
-    zIndex: 2,
-  },
-  header: {
-    maxWidth: 760,
-    marginBottom: 56,
-  },
-  eyebrow: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 12,
-    letterSpacing: '0.12em',
-    color: 'rgba(235,235,245,0.30)',
-    textTransform: 'uppercase',
-    marginBottom: 16,
-  },
-  title: {
-    fontFamily: "'Sora', sans-serif",
-    fontSize: 'clamp(1.875rem, 1rem + 2.5vw, 3rem)',
-    fontWeight: 800,
-    color: '#fff',
-    letterSpacing: '-0.03em',
-    lineHeight: 1.1,
-    marginBottom: 16,
-  },
-  sub: {
-    fontSize: 15,
-    color: 'rgba(235,235,245,0.60)',
-    lineHeight: 1.6,
-    maxWidth: 560,
+  headerWrap: {
+    position: 'relative',
+    paddingLeft: 20,
   },
   marqueeWrap: {
     position: 'relative',
@@ -82,11 +64,11 @@ const s = {
     width: 'max-content',
     animation: `tributeScroll${dir} ${duration}s linear infinite`,
   }),
-  chip: (hue) => ({
+  chip: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 10,
-    padding: '10px 16px',
+    padding: '10px 14px',
     borderRadius: 8,
     border: '1px solid rgba(84,84,88,0.45)',
     background: 'rgba(255,255,255,0.02)',
@@ -97,37 +79,71 @@ const s = {
     whiteSpace: 'nowrap',
     transition: 'all 200ms var(--ease-out-expo)',
     cursor: 'default',
-    '--chip-hue': hue,
-  }),
-  chipDot: (hue) => ({
+  },
+  chipDot: {
     width: 6, height: 6, borderRadius: 9999,
-    background: `oklch(62% 0.19 ${hue})`,
-    boxShadow: `0 0 8px oklch(62% 0.19 ${hue} / 0.6)`,
+    background: `oklch(62% 0.19 ${SECTION_HUE})`,
+    boxShadow: `0 0 8px oklch(62% 0.19 ${SECTION_HUE} / 0.6)`,
     flexShrink: 0,
-  }),
+    animation: 'hudBlink 2.4s var(--ease-out-expo) infinite',
+    animationDelay: 'var(--blink-delay, 0s)',
+  },
   chipIdx: {
-    fontFamily: "'JetBrains Mono', monospace",
+    ...mono,
     fontSize: 10,
     color: 'rgba(235,235,245,0.30)',
     letterSpacing: '0.06em',
   },
-  footer: {
-    marginTop: 48,
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 12,
-    paddingTop: 20,
-    borderTop: '1px solid rgba(84,84,88,0.30)',
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
-    color: 'rgba(235,235,245,0.30)',
-    letterSpacing: '0.08em',
+  chipName: {
+    flex: '0 0 auto',
   },
-  footerNum: {
-    color: 'rgba(235,235,245,0.60)',
-    fontWeight: 500,
+  chipSep: {
+    color: 'rgba(235,235,245,0.18)',
+    margin: '0 2px',
+  },
+  chipLatency: {
+    ...mono,
+    fontSize: 10,
+    color: `oklch(72% 0.15 ${SECTION_HUE} / 0.75)`,
+    letterSpacing: '0.06em',
+  },
+  footer: {
+    marginTop: 56,
+    paddingTop: 24,
+    borderTop: '1px solid rgba(84,84,88,0.30)',
+    display: 'grid',
+    gridTemplateColumns: 'auto 1fr auto',
+    columnGap: 24,
+    rowGap: 8,
+    alignItems: 'center',
+  },
+  footerNodes: {
+    ...mono,
+    fontSize: 12,
+    letterSpacing: '0.1em',
+    color: 'rgba(235,235,245,0.70)',
+  },
+  footerNodesNum: {
+    color: `oklch(75% 0.15 ${SECTION_HUE})`,
+    fontWeight: 600,
+  },
+  footerBarWrap: {
+    position: 'relative',
+    height: 4,
+    background: 'rgba(235,235,245,0.08)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  footerBarFill: {
+    position: 'absolute',
+    inset: 0,
+    background: `linear-gradient(90deg, oklch(62% 0.19 ${SECTION_HUE} / 0.8) 0%, oklch(62% 0.19 ${SECTION_HUE} / 0.3) 100%)`,
+    transformOrigin: 'left',
+  },
+  footerStatus: {
+    ...label,
+    fontSize: 10,
+    color: 'rgba(235,235,245,0.45)',
   },
   // Visually hidden but available to assistive tech
   srOnly: {
@@ -138,10 +154,10 @@ const s = {
   },
 }
 
-function Chip({ label, idx, hue }) {
+function SystemNode({ name, idx, latency, blinkPhase }) {
   const hover = (e) => {
-    e.currentTarget.style.borderColor = `oklch(62% 0.19 ${hue} / 0.55)`
-    e.currentTarget.style.background = `oklch(62% 0.19 ${hue} / 0.08)`
+    e.currentTarget.style.borderColor = `oklch(62% 0.19 ${SECTION_HUE} / 0.55)`
+    e.currentTarget.style.background = `oklch(62% 0.19 ${SECTION_HUE} / 0.08)`
     e.currentTarget.style.color = '#fff'
   }
   const leave = (e) => {
@@ -150,11 +166,41 @@ function Chip({ label, idx, hue }) {
     e.currentTarget.style.color = 'rgba(235,235,245,0.72)'
   }
   return (
-    <span style={s.chip(hue)} onMouseEnter={hover} onMouseLeave={leave}>
-      <span style={s.chipDot(hue)} aria-hidden />
+    <span style={s.chip} onMouseEnter={hover} onMouseLeave={leave}>
+      <span
+        className="hud-blink"
+        style={{ ...s.chipDot, '--blink-delay': `${blinkPhase}s` }}
+        aria-hidden
+      />
       <span style={s.chipIdx}>{String(idx + 1).padStart(2, '0')}</span>
-      <span>{label}</span>
+      <span style={s.chipName}>{name}</span>
+      <span style={s.chipSep}>·</span>
+      <span style={s.chipLatency}>{latency}ms</span>
     </span>
+  )
+}
+
+function Footer() {
+  const reduced = useReducedMotion()
+  const { t } = useLang()
+  const [countRef, nodes] = useCountUp(48, { duration: 1.4, delay: 0.2 })
+  return (
+    <div className="tribute-footer" style={s.footer}>
+      <div ref={countRef} style={s.footerNodes}>
+        <span style={s.footerNodesNum}>{nodes}</span>{' '}
+        {t('landing.tribute.footerNodesSuffix')} · 03 RELAY · FAIL-OVER READY
+      </div>
+      <div style={s.footerBarWrap}>
+        <Motion.div
+          style={s.footerBarFill}
+          initial={reduced ? false : { scaleX: 0 }}
+          whileInView={reduced ? undefined : { scaleX: 1 }}
+          viewport={HUD_VIEWPORT}
+          transition={{ duration: 1.4, delay: 0.2, ease: [0.33, 1, 0.68, 1] }}
+        />
+      </div>
+      <div style={s.footerStatus}>{t('landing.tribute.footerStatus')}</div>
+    </div>
   )
 }
 
@@ -190,53 +236,63 @@ export default function DataSourcesTribute() {
             -webkit-mask-image: none !important;
           }
         }
+        @media (max-width: 520px) {
+          .tribute-footer {
+            grid-template-columns: 1fr !important;
+          }
+        }
       `}</style>
-      <span style={s.sectionNum} aria-hidden>§03</span>
+      <SectionNum n="03" />
 
       <div className="container">
-        <header style={s.header}>
-          <div style={s.eyebrow}>{t('landing.tribute.eyebrow')}</div>
-          <h2 id="tribute-title" style={s.title}>
-            {t('landing.tribute.title')}
-          </h2>
-          <p style={s.sub}>
-            {t('landing.tribute.sub')}
-          </p>
-        </header>
+        <div style={s.headerWrap}>
+          <ChapterBar hue={SECTION_HUE} style={{ top: 0, left: 0 }} />
+          <SectionHeader
+            eyebrow={t('landing.tribute.eyebrow')}
+            title={t('landing.tribute.title')}
+            sub={t('landing.tribute.sub')}
+            titleId="tribute-title"
+          />
+        </div>
 
         <ul style={s.srOnly} aria-label={t('landing.tribute.srLabel')}>
-          {[...rowA, ...rowB].map((label) => (
-            <li key={`sr-${label}`}>{label}</li>
+          {[...rowA, ...rowB].map((name, i) => (
+            <li key={`sr-${i}`}>{name}</li>
           ))}
         </ul>
 
         <div className="tribute-marquee tribute-wrap" style={s.marqueeWrap} aria-hidden="true">
           <div className="tribute-track" style={s.track('A', 60)}>
-            {doubledA.map((label, i) => (
-              <Chip
-                key={`a-${i}`}
-                label={label}
-                idx={i % rowA.length}
-                hue={hues[i % hues.length]}
-              />
-            ))}
+            {doubledA.map((name, i) => {
+              const baseIdx = i % rowA.length
+              return (
+                <SystemNode
+                  key={`a-${i}`}
+                  name={name}
+                  idx={baseIdx}
+                  latency={LATENCIES[baseIdx]}
+                  blinkPhase={((baseIdx * 0.31) % 2.4).toFixed(2)}
+                />
+              )
+            })}
           </div>
           <div className="tribute-track" style={s.track('B', 72)}>
-            {doubledB.map((label, i) => (
-              <Chip
-                key={`b-${i}`}
-                label={label}
-                idx={(i % rowB.length) + rowA.length}
-                hue={hues[(i + 2) % hues.length]}
-              />
-            ))}
+            {doubledB.map((name, i) => {
+              const baseIdx = i % rowB.length
+              return (
+                <SystemNode
+                  key={`b-${i}`}
+                  name={name}
+                  idx={baseIdx + rowA.length}
+                  latency={LATENCIES[baseIdx + rowA.length]}
+                  blinkPhase={((baseIdx * 0.41 + 1.1) % 2.4).toFixed(2)}
+                />
+              )
+            })}
           </div>
         </div>
 
-        <div style={s.footer}>
-          <span>{t('landing.tribute.footerCount')}</span>
-          <span>{t('landing.tribute.footerThanks')}</span>
-        </div>
+        <Footer />
       </div>
     </section>
   )
