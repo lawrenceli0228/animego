@@ -15,25 +15,25 @@ export function readAccent(id) {
   try {
     const raw = localStorage.getItem(key(id))
     if (!raw) return null
-    const { accent, rgb, t } = JSON.parse(raw)
+    const { accent, rgb, t, source } = JSON.parse(raw)
     if (!accent || !rgb || typeof t !== 'number') return null
     if (Date.now() - t > TTL_MS) {
       localStorage.removeItem(key(id))
       return null
     }
-    return { accent, rgb }
+    return { accent, rgb, source: source ?? 'server' }
   } catch {
     return null
   }
 }
 
-export function writeAccent(id, accent, rgb) {
+export function writeAccent(id, accent, rgb, source = 'server') {
   if (!id || !accent || !rgb || typeof localStorage === 'undefined') return
   // Skip the brand-violet fallback — caching it would carry the "I don't know
   // the real color" state forward into future sessions.
   if (accent.toLowerCase() === FALLBACK_ACCENT.toLowerCase()) return
   try {
-    localStorage.setItem(key(id), JSON.stringify({ accent, rgb, t: Date.now() }))
+    localStorage.setItem(key(id), JSON.stringify({ accent, rgb, t: Date.now(), source }))
   } catch {
     /* quota / private mode — silently skip */
   }

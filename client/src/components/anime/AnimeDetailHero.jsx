@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { formatScore, stripHtml, truncate, pickTitle } from '../../utils/formatters'
+import { sampleCoverAccent } from '../../utils/sampleCoverAccent'
+import { readAccent, writeAccent } from '../../utils/accentCache'
 import { useLang } from '../../context/LanguageContext'
 
 const scoreColor = (s) => s >= 75 ? '#30d158' : s >= 50 ? '#ff9f0a' : '#ff453a'
@@ -113,17 +115,49 @@ export default function AnimeDetailHero({ anime, fastHalo = false }) {
     bangumiScore, bangumiVotes, relations = [],
     posterAccent, posterAccentRgb,
   } = anime
-  // Only consider the accent "ready" when it's a real poster-derived color,
-  // not the server's brand-violet fallback. An unknown/fallback accent leaves
-  // the cover neutral; halo only appears once a real color is available.
-  const hasRealAccent = !!posterAccent && posterAccent.toLowerCase() !== '#8b5cf6'
+  // Server-provided accent only counts when it isn't the brand-violet
+  // fallback. When it is, we try a client-side canvas sample of the cover
+  // before giving up — this rescues titles AniList has no k-means color for.
+  const serverAccentHex = !!posterAccent && posterAccent.toLowerCase() !== '#8b5cf6'
+    ? posterAccent
+    : null
+  const serverAccent = serverAccentHex
+    ? { accent: serverAccentHex, rgb: posterAccentRgb }
+    : null
+
+  const [sampledAccent, setSampledAccent] = useState(null)
+  useEffect(() => {
+    if (serverAccentHex || !coverImageUrl) {
+      // Clear stale sampled state when navigating to a server-color anime
+      // or to one that has no cover URL at all.
+      setSampledAccent(null)
+      return
+    }
+    // Revisit short-circuit: if we sampled this cover before, restore from cache.
+    const cached = anime.anilistId ? readAccent(anime.anilistId) : null
+    if (cached?.source === 'client') {
+      setSampledAccent({ accent: cached.accent, rgb: cached.rgb })
+      return
+    }
+    setSampledAccent(null)
+    const controller = new AbortController()
+    sampleCoverAccent(coverImageUrl, { signal: controller.signal }).then(result => {
+      if (controller.signal.aborted || !result) return
+      setSampledAccent({ accent: result.accent, rgb: result.accentRgb })
+      if (anime.anilistId) writeAccent(anime.anilistId, result.accent, result.accentRgb, 'client')
+    })
+    return () => controller.abort()
+  }, [serverAccentHex, coverImageUrl, anime.anilistId])
+
+  const effectiveAccent = serverAccent ?? sampledAccent
+
   // Reveal on next frame so CSS transitions fire even on first paint.
   const [accentRevealed, setAccentRevealed] = useState(false)
   useEffect(() => {
-    if (!hasRealAccent) { setAccentRevealed(false); return }
+    if (!effectiveAccent) { setAccentRevealed(false); return }
     const id = requestAnimationFrame(() => setAccentRevealed(true))
     return () => cancelAnimationFrame(id)
-  }, [hasRealAccent])
+  }, [effectiveAccent?.accent])
   const isEnriching = (anime.bangumiVersion ?? 0) < 2 ||
     (anime.bangumiVersion === 2 && anime.bgmId && !anime.titleChinese)
 
@@ -150,8 +184,8 @@ export default function AnimeDetailHero({ anime, fastHalo = false }) {
   return (
     <div
       data-accent-ready={accentRevealed ? 'true' : 'false'}
-      data-accent-fast={fastHalo ? 'true' : 'false'}
-      style={hasRealAccent ? { '--poster-accent': posterAccent, '--poster-accent-rgb': posterAccentRgb } : undefined}
+      data-accent-fast={fastHalo && !!serverAccent ? 'true' : 'false'}
+      style={effectiveAccent ? { '--poster-accent': effectiveAccent.accent, '--poster-accent-rgb': effectiveAccent.rgb } : undefined}
     >
       {/* Banner */}
       <div style={{

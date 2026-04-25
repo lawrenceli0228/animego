@@ -2,6 +2,41 @@
 
 ---
 
+## [1.0.15] - 2026-04-25
+
+### 详情页 halo 客户端兜底采样 — AniList 无 k-means 色的番剧也能拿到真实色身份
+
+**问题:**
+- v1.0.13 commit 49b06f8 把 `posterAccent === '#8B5CF6'` 的 halo 渲染显式压住了(品牌紫不当真色用),解决了"假色冒名"问题
+- 但 AniList 对一部分番剧不返回 `coverImage.color`(例如 anilistId 179828 カッコウの許嫁 S2),server 回落到品牌紫,detail 页就完全没 halo,海报旁边一片黑
+- v1.0.15 给这条路加客户端 canvas 兜底:server 没拿到色时,前端从封面采
+
+**实现:**
+
+- `client/src/utils/oklchAccent.js`:`server/utils/normalizeAccent.js` 的 ESM 镜像,Björn Ottosson OKLab 矩阵 + L 0.56–0.70 / C ≥ 0.11 同款 clamp 带,parity test 走 `createRequire` 直接加载服务端模块,任一侧漂移 CI 就红
+- `client/src/utils/sampleCoverAccent.js`:off-DOM `new Image()` + 32×48 canvas downscale + 24-bucket hue 直方图,a/b 笛卡尔累加避开 0/2π 拼接,最大桶 < 12% 视为没主色返回 null。失败路径(CORS/404/decode/灰度/abort)统一返 null,Hero 等价 "no halo"
+- `AnimeDetailHero` 状态机重排:`serverAccentHex`(server 真色) → 若无则 `sampledAccent`(客户端采),`effectiveAccent = serverAccent ?? sampledAccent`,`fastHalo` 仅 server 真色路径享有
+- `accentCache` 加 `source: 'server' | 'client'` 字段,采样结果写入有 7 天 TTL,重访短路秒回
+
+**调试踩坑(写出来给未来自己):**
+
+- 第一版上线后浏览器 console 报 `CORS policy: No Access-Control-Allow-Origin header`。AniList CDN(s4.anilist.co)实际是 origin-reflective 的:带 `Origin` 头才回 CORS header,不带就不回
+- 页面 `<img src>` 先于 sampler 触发,浏览器以非 CORS 模式拿了图并缓存了无 CORS header 的响应。sampler 的 `crossOrigin='anonymous'` 请求复用了同一缓存条目,直接报 CORS 错(根本没到 CDN)
+- 修复:sampler 拼 `?accent=1` 走独立缓存条目,触发新请求时浏览器才会送 `Origin`,AniList 才会回 `Access-Control-Allow-Origin`,canvas 不污染。AniList 忽略未知 query 参数,字节相同
+
+**测试:**
+
+- `oklchAccent.test.js` 16 case 客户端/服务端 parity(含真实 AniList 色 `#c19902`)
+- `sampleCoverAccent.test.js` 10 case 覆盖 solid / split / 灰度 / 黑 / 白 / SecurityError / load fail / abort 全错误路径
+- 完整套件 630/630 通过
+
+**Subagent 参与:**
+
+- planner 给整体规划(三方案选 client canvas)
+- code-reviewer 一轮深审给出 3 HIGH + 5 MEDIUM + 4 LOW 清单,HIGH 全修(SecurityError 局部 try/catch / 状态机简化 / `#8B5CF6` 防御性 guard),MEDIUM 选修(parity test loader / cache-bust 注释)
+
+---
+
 ## [1.0.14] - 2026-04-25
 
 ### `/about` 九章节 HUD 化 · OKLCH 章节色身份 2.0 · 从单色到多色数据流

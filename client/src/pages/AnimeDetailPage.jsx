@@ -111,7 +111,13 @@ export default function AnimeDetailPage() {
   }, [anime, lang])
 
   useEffect(() => {
-    if (anime?.posterAccent && anime?.posterAccentRgb) {
+    // Skip the brand-violet fallback explicitly here too (writeAccent has its
+    // own guard, but caller intent shouldn't rely on the cache layer).
+    if (
+      anime?.posterAccent &&
+      anime?.posterAccentRgb &&
+      anime.posterAccent.toLowerCase() !== '#8b5cf6'
+    ) {
       writeAccent(id, anime.posterAccent, anime.posterAccentRgb)
     }
   }, [id, anime?.posterAccent, anime?.posterAccentRgb])
