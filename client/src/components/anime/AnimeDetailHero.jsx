@@ -200,8 +200,12 @@ export default function AnimeDetailHero({ anime, fastHalo = false }) {
       <div className="container" style={{ display:'flex', gap:32, marginTop: bannerImageUrl ? -80 : 24, position:'relative', zIndex:1, paddingBottom:40 }}>
         {/* Cover */}
         <div style={{ flexShrink:0 }}>
-          <img src={coverImageUrl} alt={titleRomaji}
+          <img src={coverImageUrl} alt={pickTitle(anime, lang)}
             className="hero-cover"
+            width={210}
+            height={300}
+            fetchpriority="high"
+            decoding="async"
             style={S.cover}
             onError={e => { e.target.style.background='#2c2c2e' }}
           />
@@ -290,22 +294,28 @@ export default function AnimeDetailHero({ anime, fastHalo = false }) {
             </div>
           )}
 
-          {/* Relations */}
+          {/* Relations — real <a href> exposes related-anime links to crawlers */}
           {visibleRelations.length > 0 && (
             <div style={S.relationsRow}>
               {visibleRelations.map(r => {
                 const label = RELATION_LABEL[r.relationType]?.[lang] ?? r.relationType
+                const relHref = `/anime/${r.anilistId}`
                 return (
-                  <button
+                  <a
                     key={`${r.relationType}-${r.anilistId}`}
-                    onClick={() => navigate(`/anime/${r.anilistId}`, { state: { posterAccent: r.posterAccent, posterAccentRgb: r.posterAccentRgb } })}
-                    style={S.relationBtn}
+                    href={relHref}
+                    onClick={(e) => {
+                      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                      e.preventDefault()
+                      navigate(relHref, { state: { posterAccent: r.posterAccent, posterAccentRgb: r.posterAccentRgb } })
+                    }}
+                    style={{ ...S.relationBtn, textDecoration: 'none', display: 'inline-flex' }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor='var(--poster-accent)'; e.currentTarget.style.color='var(--poster-accent)' }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor='rgba(84,84,88,0.65)'; e.currentTarget.style.color='rgba(235,235,245,0.60)' }}
                   >
                     <span style={S.relationLabel}>{label}</span>
                     {r.title}
-                  </button>
+                  </a>
                 )
               })}
             </div>

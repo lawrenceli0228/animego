@@ -10,6 +10,7 @@ import AnimeGrid from '../components/anime/AnimeGrid'
 
 const FORMATS = ['TV', 'TV_SHORT', 'MOVIE', 'SPECIAL', 'OVA', 'ONA']
 const STATUSES = ['RELEASING', 'FINISHED', 'NOT_YET_RELEASED']
+const SEASON_ZH = { WINTER: '冬', SPRING: '春', SUMMER: '夏', FALL: '秋' }
 
 const FORMAT_LABELS = {
   zh: { TV: 'TV', TV_SHORT: 'TV短篇', MOVIE: '剧场版', SPECIAL: '特别篇', OVA: 'OVA', ONA: 'ONA' },
@@ -53,17 +54,21 @@ export default function SeasonPage() {
   const [format, setFormat] = useState('')
   const [status, setStatus] = useState('')
   const [sortBy, setSortBy] = useState('score')
-  const { t, lang } = useLang()
+  const { lang } = useLang()
 
   const season = params.get('season') || getCurrentSeason()
   const year   = Number(params.get('year')) || new Date().getFullYear()
 
-  const SEASON_ZH = { WINTER: '冬', SPRING: '春', SUMMER: '夏', FALL: '秋' }
+  // H1 mirrors document.title so the user-visible heading carries the same keywords
+  // (year + season) we want Google ranking for. Avoids a generic "季度番剧" H1.
+  const heading = lang === 'zh'
+    ? `${year}年${SEASON_ZH[season] || ''}季新番`
+    : `${season.charAt(0) + season.slice(1).toLowerCase()} ${year} Anime`
+
   useEffect(() => {
-    const s = lang === 'zh' ? `${year}年${SEASON_ZH[season] || ''}季新番` : `${season} ${year} Anime`
-    document.title = `${s} — AnimeGo`
-    return () => { document.title = 'AnimeGo' }
-  }, [season, year, lang])
+    document.title = `${heading} — AnimeGoClub`
+    return () => { document.title = 'AnimeGoClub' }
+  }, [heading])
 
   const setSeason = (s) => { setParams({ season: s, year }); setVisibleCount(INITIAL_COUNT) }
   const setYear   = (y) => { setParams({ season, year: y }); setVisibleCount(INITIAL_COUNT) }
@@ -100,7 +105,7 @@ export default function SeasonPage() {
   return (
     <div className="container" style={{ paddingTop: 40, paddingBottom: 40 }}>
       <h1 style={{ fontSize: 'clamp(22px,3vw,34px)', marginBottom: 24, color: '#ffffff' }}>
-        {t('seasonPage.title')}
+        {heading}
       </h1>
       <SeasonSelector year={year} season={season} onYearChange={setYear} onSeasonChange={setSeason} />
 

@@ -7,20 +7,27 @@ const scoreColor = (s) => s >= 75 ? '#30d158' : s >= 50 ? '#ff9f0a' : '#ff453a'
 export default function AnimeCard({ anime, rank, watcherCount }) {
   const navigate = useNavigate()
   const { lang } = useLang()
-  const { anilistId, titleRomaji, coverImageUrl, posterAccent, posterAccentRgb, averageScore, genres = [], format } = anime
-  const go = () => navigate(`/anime/${anilistId}`, { state: { posterAccent, posterAccentRgb } })
+  const { anilistId, coverImageUrl, posterAccent, posterAccentRgb, averageScore, genres = [], format } = anime
+  const href = `/anime/${anilistId}`
+  // Plain left-click → SPA-navigate while preserving accent state. Modifier
+  // clicks (cmd/ctrl/shift/alt/middle) fall through so the user can open in a
+  // new tab. Real <a href> exposes the link to crawlers for PageRank flow.
+  const handleClick = (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    navigate(href, { state: { posterAccent, posterAccentRgb } })
+  }
 
   return (
-    <div
-      onClick={go}
-      role="button"
-      tabIndex={0}
-      onKeyDown={e => e.key === 'Enter' && go()}
+    <a
+      href={href}
+      onClick={handleClick}
       aria-label={pickTitle(anime, lang)}
       style={{
-        position: 'relative', cursor: 'pointer', borderRadius: 12,
+        display: 'block', position: 'relative', borderRadius: 12,
         overflow: 'hidden', background: '#1c1c1e',
         border: '1px solid #38383a',
+        textDecoration: 'none', color: 'inherit',
         transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1), box-shadow 0.25s cubic-bezier(0.4,0,0.2,1)',
         aspectRatio: '3/4'
       }}
@@ -36,7 +43,11 @@ export default function AnimeCard({ anime, rank, watcherCount }) {
       }}
     >
       {/* Cover image */}
-      <img src={coverImageUrl} alt={titleRomaji}
+      <img src={coverImageUrl} alt={pickTitle(anime, lang)}
+        loading="lazy"
+        decoding="async"
+        width={230}
+        height={320}
         style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }}
         onError={e => { e.target.style.background = '#2c2c2e' }}
       />
@@ -109,6 +120,6 @@ export default function AnimeCard({ anime, rank, watcherCount }) {
           {pickTitle(anime, lang)}
         </p>
       </div>
-    </div>
+    </a>
   )
 }

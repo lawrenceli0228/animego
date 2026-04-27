@@ -16,6 +16,8 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import AdminDashboard from './pages/AdminDashboard'
 import PlayerPage from './pages/PlayerPage'
+import CalendarPage from './pages/CalendarPage'
+import FaqPage from './pages/FaqPage'
 
 export default function App() {
   return (
@@ -28,6 +30,8 @@ export default function App() {
           <Route path="/season"    element={<SeasonPage />} />
           <Route path="/anime/:id" element={<AnimeDetailPage />} />
           <Route path="/search"    element={<SearchPage />} />
+          <Route path="/calendar"  element={<CalendarPage />} />
+          <Route path="/faq"       element={<FaqPage />} />
           <Route path="/player"    element={<ProtectedRoute><PlayerPage /></ProtectedRoute>} />
           <Route path="/login"                   element={<LoginPage />} />
           <Route path="/register"                element={<RegisterPage />} />
