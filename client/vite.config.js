@@ -22,6 +22,19 @@ export default defineConfig({
       }
     }
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split shared infra so the route chunks stay small. Heavy single-route
+        // libraries (artplayer, motion) intentionally are NOT chunked here so
+        // they ride along with their own route's lazy chunk.
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-query': ['@tanstack/react-query'],
+        },
+      },
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

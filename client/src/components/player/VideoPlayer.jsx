@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 import Artplayer from 'artplayer';
-import artplayerPluginDanmuku from 'artplayer-plugin-danmuku';
 
 const s = {
   wrapper: { width: '100%', position: 'relative' },
@@ -27,14 +26,25 @@ const SUBTITLE_OFFSET_STEP = 5;
 const SUBTITLE_OFFSET_DEFAULT = 60;
 const SUBTITLE_OFFSET_KEY = 'animego:subtitleOffset';
 
+// Playback rate selector — selector mode renders a list, far better UX than slider for discrete steps.
+const PLAYBACK_RATE_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+const PLAYBACK_RATE_DEFAULT = 1.0;
+const PLAYBACK_RATE_KEY = 'animego:playbackRate';
+
+// Danmaku visibility toggle — switch type, persisted across sessions.
+const DANMAKU_VISIBLE_DEFAULT = true;
+const DANMAKU_VISIBLE_KEY = 'animego:danmakuVisible';
+
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
 function readNumberPref(key, min, max, fallback) {
   try {
-    const raw = Number(localStorage.getItem(key));
-    if (!Number.isFinite(raw) || raw === 0) return fallback;
+    const stored = localStorage.getItem(key);
+    if (stored === null) return fallback;
+    const raw = Number(stored);
+    if (!Number.isFinite(raw)) return fallback;
     return clamp(raw, min, max);
   } catch {
     return fallback;
@@ -55,6 +65,43 @@ const writeSubtitleSize = (v) => writeNumberPref(SUBTITLE_SIZE_KEY, v);
 const readSubtitleOffset = () =>
   readNumberPref(SUBTITLE_OFFSET_KEY, SUBTITLE_OFFSET_MIN, SUBTITLE_OFFSET_MAX, SUBTITLE_OFFSET_DEFAULT);
 const writeSubtitleOffset = (v) => writeNumberPref(SUBTITLE_OFFSET_KEY, v);
+
+function readPlaybackRate() {
+  try {
+    const raw = Number(localStorage.getItem(PLAYBACK_RATE_KEY));
+    if (!Number.isFinite(raw) || raw === 0) return PLAYBACK_RATE_DEFAULT;
+    // Snap to nearest known rate so an out-of-list value does not hang the UI.
+    return PLAYBACK_RATE_OPTIONS.includes(raw) ? raw : PLAYBACK_RATE_DEFAULT;
+  } catch {
+    return PLAYBACK_RATE_DEFAULT;
+  }
+}
+
+function writePlaybackRate(v) {
+  try {
+    localStorage.setItem(PLAYBACK_RATE_KEY, String(v));
+  } catch {
+    // ignore
+  }
+}
+
+function readDanmakuVisible() {
+  try {
+    const raw = localStorage.getItem(DANMAKU_VISIBLE_KEY);
+    if (raw == null) return DANMAKU_VISIBLE_DEFAULT;
+    return raw === '1';
+  } catch {
+    return DANMAKU_VISIBLE_DEFAULT;
+  }
+}
+
+function writeDanmakuVisible(v) {
+  try {
+    localStorage.setItem(DANMAKU_VISIBLE_KEY, v ? '1' : '0');
+  } catch {
+    // ignore
+  }
+}
 
 function readProgress(key) {
   try {
@@ -84,17 +131,29 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
   const containerRef = useRef(null);
   const artRef = useRef(null);
   const progressKeyRef = useRef(progressKey);
+  const danmakuListRef = useRef(danmakuList);
   const subtitleSizeRef = useRef(readSubtitleSize());
   const subtitleOffsetRef = useRef(readSubtitleOffset());
+  const playbackRateRef = useRef(readPlaybackRate());
+  const danmakuVisibleRef = useRef(readDanmakuVisible());
 
-  // Keep the ref in sync so event handlers always see the latest key
+  // Keep refs in sync so async init / event handlers always see the latest values.
   useEffect(() => { progressKeyRef.current = progressKey; }, [progressKey]);
+  useEffect(() => { danmakuListRef.current = danmakuList; }, [danmakuList]);
 
   useEffect(() => {
     if (!containerRef.current || !videoUrl) return;
 
+    // Race guard: cleanup must not await but the artplayer init does. Without
+    // this flag, a teardown that fires before the dynamic import resolves
+    // would leak an Artplayer instance.
+    let cancelled = false;
+    let art = null;
+
     const initialSize = subtitleSizeRef.current;
     const initialOffset = subtitleOffsetRef.current;
+    const initialRate = playbackRateRef.current;
+    const initialDanmakuVisible = danmakuVisibleRef.current;
     const subtitleConfig = subtitleUrl
       ? {
           url: subtitleUrl,
@@ -104,88 +163,151 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
         }
       : {};
 
-    const art = new Artplayer({
-      container: containerRef.current,
-      url: videoUrl,
-      autoSize: true,
-      fullscreen: true,
-      autoplay: true,
-      theme: '#0a84ff',
-      volume: 0.8,
-      subtitle: subtitleConfig,
-      setting: true,
-      settings: [
-        {
-          html: '字幕大小',
-          width: 220,
-          tooltip: `${initialSize}px`,
-          range: [initialSize, SUBTITLE_SIZE_MIN, SUBTITLE_SIZE_MAX, SUBTITLE_SIZE_STEP],
-          onChange(item) {
-            const v = Number(item.range[0]);
-            subtitleSizeRef.current = v;
-            writeSubtitleSize(v);
-            art.subtitle.style({ fontSize: `${v}px` });
-            return `${v}px`;
-          },
-        },
-        {
-          html: '字幕位置',
-          width: 220,
-          tooltip: `${initialOffset}px`,
-          range: [initialOffset, SUBTITLE_OFFSET_MIN, SUBTITLE_OFFSET_MAX, SUBTITLE_OFFSET_STEP],
-          onChange(item) {
-            const v = Number(item.range[0]);
-            subtitleOffsetRef.current = v;
-            writeSubtitleOffset(v);
-            art.subtitle.style({ bottom: `${v}px` });
-            return `${v}px`;
-          },
-        },
-      ],
-      plugins: [
-        artplayerPluginDanmuku({
-          danmuku: danmakuList || [],
-          speed: 5,
-          opacity: 0.8,
-          fontSize: 24,
-          antiOverlap: true,
-          synchronousPlayback: true,
-          emitter: false,
-        }),
-      ],
-    });
+    (async () => {
+      // Dynamic import keeps artplayer-plugin-danmuku out of the entry chunk.
+      // The plugin is only fetched the first time a player mounts.
+      const { default: artplayerPluginDanmuku } = await import('artplayer-plugin-danmuku');
+      if (cancelled) return;
 
-    if (onEnded) art.on('video:ended', onEnded);
+      art = new Artplayer({
+        container: containerRef.current,
+        url: videoUrl,
+        autoSize: true,
+        fullscreen: true,
+        autoplay: true,
+        theme: '#0a84ff',
+        volume: 0.8,
+        playbackRate: initialRate,
+        subtitle: subtitleConfig,
+        setting: true,
+        settings: [
+          {
+            html: '字幕大小',
+            width: 220,
+            tooltip: `${initialSize}px`,
+            range: [initialSize, SUBTITLE_SIZE_MIN, SUBTITLE_SIZE_MAX, SUBTITLE_SIZE_STEP],
+            onChange(item) {
+              const v = Number(item.range[0]);
+              subtitleSizeRef.current = v;
+              writeSubtitleSize(v);
+              art.subtitle.style({ fontSize: `${v}px` });
+              return `${v}px`;
+            },
+          },
+          {
+            html: '字幕位置',
+            width: 220,
+            tooltip: `${initialOffset}px`,
+            range: [initialOffset, SUBTITLE_OFFSET_MIN, SUBTITLE_OFFSET_MAX, SUBTITLE_OFFSET_STEP],
+            onChange(item) {
+              const v = Number(item.range[0]);
+              subtitleOffsetRef.current = v;
+              writeSubtitleOffset(v);
+              art.subtitle.style({ bottom: `${v}px` });
+              return `${v}px`;
+            },
+          },
+          {
+            html: '倍速',
+            tooltip: `${initialRate}x`,
+            selector: PLAYBACK_RATE_OPTIONS.map((rate) => ({
+              html: `${rate}x`,
+              value: rate,
+              default: rate === initialRate,
+            })),
+            onSelect(item) {
+              const v = Number(item.value);
+              playbackRateRef.current = v;
+              writePlaybackRate(v);
+              art.playbackRate = v;
+              return `${v}x`;
+            },
+          },
+          {
+            html: '弹幕开关',
+            tooltip: initialDanmakuVisible ? '开' : '关',
+            switch: initialDanmakuVisible,
+            onSwitch(item) {
+              const next = !item.switch;
+              danmakuVisibleRef.current = next;
+              writeDanmakuVisible(next);
+              const danmuku = art.plugins?.artplayerPluginDanmuku;
+              if (next) danmuku?.show?.();
+              else danmuku?.hide?.();
+              return next;
+            },
+          },
+        ],
+        plugins: [
+          artplayerPluginDanmuku({
+            danmuku: danmakuList || [],
+            speed: 5,
+            opacity: 0.8,
+            fontSize: 24,
+            antiOverlap: true,
+            // maxLength caps simultaneously-rendered danmaku so 1k+ comment
+            // streams do not stall the compositor.
+            maxLength: 60,
+            // Disable seek-time backfill: Artplayer's synchronousPlayback batches
+            // queued comments on seek which jank-spikes when the queue is large.
+            synchronousPlayback: false,
+            emitter: false,
+          }),
+        ],
+      });
 
-    // Progress memory: restore on canplay, throttle-save on timeupdate
-    let restored = false;
-    let lastSaveAt = 0;
-    art.on('video:canplay', () => {
-      const key = progressKeyRef.current;
-      if (!key || restored) return;
-      restored = true;
-      const saved = readProgress(key);
-      if (saved != null && saved > RESTORE_MIN_SECONDS && saved < art.duration - RESTORE_TAIL_MARGIN) {
-        art.currentTime = saved;
+      // Apply initial danmaku visibility (plugin defaults to visible).
+      if (!initialDanmakuVisible) {
+        art.plugins?.artplayerPluginDanmuku?.hide?.();
       }
-    });
-    art.on('video:timeupdate', () => {
-      const key = progressKeyRef.current;
-      if (!key) return;
-      const now = Date.now();
-      if (now - lastSaveAt < SAVE_INTERVAL_MS) return;
-      lastSaveAt = now;
-      if (art.currentTime > RESTORE_MIN_SECONDS) writeProgress(key, art.currentTime);
-    });
 
-    artRef.current = art;
+      if (onEnded) art.on('video:ended', onEnded);
+
+      // Progress memory: restore on canplay, throttle-save on timeupdate
+      let restored = false;
+      let lastSaveAt = 0;
+      art.on('video:canplay', () => {
+        const key = progressKeyRef.current;
+        if (!key || restored) return;
+        restored = true;
+        const saved = readProgress(key);
+        if (saved != null && saved > RESTORE_MIN_SECONDS && saved < art.duration - RESTORE_TAIL_MARGIN) {
+          art.currentTime = saved;
+        }
+      });
+      art.on('video:timeupdate', () => {
+        const key = progressKeyRef.current;
+        if (!key) return;
+        const now = Date.now();
+        if (now - lastSaveAt < SAVE_INTERVAL_MS) return;
+        lastSaveAt = now;
+        if (art.currentTime > RESTORE_MIN_SECONDS) writeProgress(key, art.currentTime);
+      });
+
+      if (cancelled) {
+        art.destroy(false);
+        return;
+      }
+      artRef.current = art;
+
+      // The [danmakuList] effect below fires synchronously on render, before
+      // this async init resolves — at that point artRef.current is still null
+      // so its config/load calls are no-ops. Replay the current list now.
+      const danmuku = art.plugins?.artplayerPluginDanmuku;
+      danmuku?.config?.({ danmuku: danmakuListRef.current || [] });
+      danmuku?.load?.();
+    })();
+
     return () => {
+      cancelled = true;
+      const inst = artRef.current || art;
+      if (!inst) return;
       // Save final position before teardown (episode switch or unmount)
       const key = progressKeyRef.current;
-      if (key && art.currentTime > RESTORE_MIN_SECONDS && art.currentTime < art.duration - RESTORE_TAIL_MARGIN) {
-        writeProgress(key, art.currentTime);
+      if (key && inst.currentTime > RESTORE_MIN_SECONDS && inst.currentTime < inst.duration - RESTORE_TAIL_MARGIN) {
+        writeProgress(key, inst.currentTime);
       }
-      art.destroy(false);
+      inst.destroy(false);
       artRef.current = null;
     };
   }, [videoUrl]); // eslint-disable-line react-hooks/exhaustive-deps
