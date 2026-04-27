@@ -1,119 +1,239 @@
 import { useState, useCallback, useEffect } from 'react';
+import { motion as Motion, useReducedMotion } from 'motion/react';
 import { searchAnime, getEpisodes } from '../../api/dandanplay.api';
 import { useLang } from '../../context/LanguageContext';
+import { ChapterBar, CornerBrackets } from '../shared/hud';
+import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+
+const HUE = PLAYER_HUE.ingest;
+const HUE_STREAM = PLAYER_HUE.stream;
 
 const s = {
   overlay: {
     position: 'fixed', inset: 0, zIndex: 9999,
-    background: 'rgba(0,0,0,0.60)',
+    background: 'rgba(0,0,0,0.72)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     paddingTop: '8vh',
   },
   modal: {
+    position: 'relative',
     width: '100%', maxWidth: 720, maxHeight: '80vh',
-    background: '#1c1c1e', borderRadius: 16,
+    background: `linear-gradient(180deg, oklch(14% 0.04 ${HUE} / 0.55) 0%, rgba(20,20,22,0.82) 100%)`,
+    borderRadius: 4,
     display: 'flex', flexDirection: 'column',
-    border: '1px solid rgba(84,84,88,0.36)',
+    border: `1px solid oklch(46% 0.06 ${HUE} / 0.45)`,
+    overflow: 'hidden',
   },
   header: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '16px 20px 12px', borderBottom: '1px solid rgba(84,84,88,0.36)',
+    position: 'relative',
+    padding: '20px 24px 16px 56px',
+    borderBottom: `1px solid oklch(46% 0.06 ${HUE} / 0.30)`,
+  },
+  headerEyebrow: {
+    ...mono,
+    fontSize: 10,
+    color: `oklch(72% 0.15 ${HUE} / 0.85)`,
+    textTransform: 'uppercase',
+    letterSpacing: '0.18em',
+    marginBottom: 6,
+  },
+  headerTitleRow: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12,
   },
   headerTitle: {
-    fontFamily: "'Sora',sans-serif", fontWeight: 600,
-    fontSize: 16, color: '#ffffff',
+    fontFamily: "'Sora',sans-serif", fontWeight: 700,
+    fontSize: 18, color: '#ffffff', letterSpacing: '-0.01em',
+    minWidth: 0,
+  },
+  headerSub: {
+    ...mono,
+    fontWeight: 400,
+    color: 'rgba(235,235,245,0.50)',
+    marginLeft: 10, fontSize: 12,
+    letterSpacing: '0.06em',
   },
   closeBtn: {
-    background: 'none', border: 'none', color: 'rgba(235,235,245,0.60)',
-    fontSize: 20, cursor: 'pointer', padding: '0 4px', lineHeight: 1,
+    background: 'transparent',
+    border: '1px solid rgba(235,235,245,0.20)',
+    borderRadius: 2,
+    color: 'rgba(235,235,245,0.75)',
+    fontSize: 14,
+    cursor: 'pointer',
+    padding: '4px 10px',
+    lineHeight: 1,
+    fontFamily: "'JetBrains Mono',monospace",
   },
   tabs: {
-    display: 'flex', gap: 8, padding: '12px 20px 0',
+    display: 'flex', gap: 8, padding: '12px 24px 0 56px',
   },
   tab: (active) => ({
-    padding: '6px 16px', borderRadius: 9999, fontSize: 13, fontWeight: 500,
-    border: 'none', cursor: 'pointer',
-    background: active ? 'rgba(10,132,255,0.15)' : 'rgba(120,120,128,0.12)',
-    color: active ? '#0a84ff' : 'rgba(235,235,245,0.60)',
+    ...mono,
+    padding: '6px 14px',
+    borderRadius: 2,
+    fontSize: 11,
+    fontWeight: 500,
+    border: active
+      ? `1px solid oklch(62% 0.19 ${HUE} / 0.55)`
+      : '1px solid rgba(235,235,245,0.16)',
+    cursor: 'pointer',
+    background: active ? `oklch(62% 0.19 ${HUE} / 0.16)` : 'transparent',
+    color: active ? `oklch(82% 0.15 ${HUE})` : 'rgba(235,235,245,0.65)',
     transition: 'all 150ms',
+    textTransform: 'uppercase',
+    letterSpacing: '0.14em',
   }),
   body: {
-    flex: 1, overflowY: 'auto', padding: '12px 20px 20px',
+    flex: 1, overflowY: 'auto', padding: '14px 24px 20px 56px',
     minHeight: 200,
   },
-  // Search tab
-  inputRow: { display: 'flex', gap: 8, marginBottom: 12 },
+  // Search input — underline border (HUD style).
+  inputRow: { display: 'flex', gap: 8, marginBottom: 14 },
   input: {
-    flex: 1, padding: '8px 14px', borderRadius: 8,
-    background: '#2c2c2e', border: '1px solid rgba(84,84,88,0.65)',
-    color: '#ffffff', fontSize: 14, outline: 'none',
+    flex: 1, padding: '8px 4px', borderRadius: 0,
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid oklch(46% 0.06 ${HUE_STREAM} / 0.55)`,
+    color: '#ffffff',
+    fontSize: 14, outline: 'none',
+    fontFamily: "'JetBrains Mono', monospace",
+    letterSpacing: '0.04em',
   },
   searchBtn: {
-    padding: '8px 16px', borderRadius: 8,
-    background: '#0a84ff', color: '#fff', border: 'none',
-    fontSize: 13, fontWeight: 500, cursor: 'pointer', flexShrink: 0,
+    ...mono,
+    padding: '8px 16px',
+    borderRadius: 2,
+    background: 'transparent',
+    border: `1px solid oklch(62% 0.19 ${HUE_STREAM} / 0.55)`,
+    color: `oklch(78% 0.15 ${HUE_STREAM})`,
+    fontSize: 11, fontWeight: 500, cursor: 'pointer', flexShrink: 0,
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
-  // Anime result row (search tab step 1)
-  animeRow: {
+  // Anime result row (HUD pattern).
+  animeRow: (hover) => ({
+    position: 'relative',
     display: 'flex', alignItems: 'center', gap: 10,
-    padding: '8px 10px', borderRadius: 8, marginBottom: 6,
+    padding: '8px 12px', borderRadius: 2, marginBottom: 6,
     cursor: 'pointer', transition: 'background 150ms',
-  },
+    background: hover ? `oklch(62% 0.19 ${HUE_STREAM} / 0.10)` : 'transparent',
+    borderLeft: hover
+      ? `2px solid oklch(62% 0.19 ${HUE_STREAM} / 0.85)`
+      : '2px solid transparent',
+  }),
   animeCover: {
-    width: 44, aspectRatio: '3/4', borderRadius: 6, objectFit: 'cover',
+    width: 44, aspectRatio: '3/4', borderRadius: 2, objectFit: 'cover',
     background: '#2c2c2e', flexShrink: 0,
   },
   animeInfo: { flex: 1, minWidth: 0 },
   animeTitle: {
-    fontSize: 14, fontWeight: 500, color: '#ffffff',
+    fontFamily: "'Sora',sans-serif",
+    fontSize: 14, fontWeight: 600, color: '#ffffff',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
-  animeMeta: { fontSize: 12, color: 'rgba(235,235,245,0.30)', marginTop: 2 },
+  animeMeta: {
+    ...mono,
+    fontSize: 11, color: 'rgba(235,235,245,0.45)', marginTop: 3,
+    letterSpacing: '0.06em',
+  },
   // Episode row
   epRow: (selected) => ({
     display: 'flex', alignItems: 'center', gap: 12,
-    padding: '8px 12px', borderRadius: 8, marginBottom: 4,
+    padding: '8px 12px', borderRadius: 2, marginBottom: 4,
     cursor: 'pointer', transition: 'background 150ms',
-    background: selected ? 'rgba(10,132,255,0.15)' : 'transparent',
+    background: selected ? `oklch(62% 0.19 ${HUE_STREAM} / 0.16)` : 'transparent',
+    borderLeft: selected
+      ? `2px solid oklch(62% 0.19 ${HUE_STREAM})`
+      : '2px solid transparent',
   }),
   epNum: (selected) => ({
-    fontWeight: 600, fontSize: 13, width: 48, flexShrink: 0,
-    color: selected ? '#0a84ff' : 'rgba(235,235,245,0.60)',
-    fontFamily: "'JetBrains Mono',monospace",
+    ...mono,
+    fontWeight: 600, fontSize: 12, width: 56, flexShrink: 0,
+    color: selected ? `oklch(82% 0.15 ${HUE_STREAM})` : 'rgba(235,235,245,0.55)',
+    letterSpacing: '0.10em',
   }),
   epTitle: {
-    flex: 1, fontSize: 13, color: 'rgba(235,235,245,0.60)',
+    flex: 1, fontSize: 13, color: 'rgba(235,235,245,0.65)',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
   epCurrent: {
-    fontSize: 11, color: '#5ac8fa', flexShrink: 0,
+    ...mono,
+    fontSize: 10,
+    color: `oklch(72% 0.15 ${HUE})`,
+    flexShrink: 0,
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
   confirmBtn: {
-    margin: '12px 20px 16px', padding: '10px 0', borderRadius: 8,
-    background: '#0a84ff', color: '#fff', border: 'none',
-    fontSize: 14, fontWeight: 500, cursor: 'pointer',
+    ...mono,
+    margin: '12px 24px 16px 56px',
+    padding: '12px 0',
+    borderRadius: 2,
+    background: `oklch(62% 0.19 ${HUE} / 0.16)`,
+    border: `1px solid oklch(62% 0.19 ${HUE} / 0.65)`,
+    color: `oklch(82% 0.15 ${HUE})`,
+    fontSize: 12, fontWeight: 600, cursor: 'pointer',
     transition: 'opacity 150ms',
+    textTransform: 'uppercase', letterSpacing: '0.16em',
   },
   backRow: {
-    display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10,
+    display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12,
   },
   backBtn: {
-    background: 'none', border: 'none', color: '#0a84ff',
-    fontSize: 13, cursor: 'pointer', padding: 0,
+    background: 'transparent',
+    border: '1px solid rgba(235,235,245,0.20)',
+    borderRadius: 2,
+    color: `oklch(78% 0.15 ${HUE_STREAM})`,
+    fontSize: 12, cursor: 'pointer',
+    padding: '4px 10px',
+    fontFamily: "'JetBrains Mono',monospace",
   },
-  backLabel: { fontSize: 13, color: 'rgba(235,235,245,0.40)' },
+  backLabel: {
+    ...mono,
+    fontSize: 12, color: 'rgba(235,235,245,0.45)',
+    letterSpacing: '0.04em',
+  },
   loading: {
+    ...mono,
     textAlign: 'center', padding: 32,
-    color: 'rgba(235,235,245,0.30)', fontSize: 13,
+    color: 'rgba(235,235,245,0.45)', fontSize: 11,
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
   empty: {
+    ...mono,
     textAlign: 'center', padding: 32,
-    color: 'rgba(235,235,245,0.30)', fontSize: 13,
+    color: 'rgba(235,235,245,0.45)', fontSize: 11,
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
 };
 
+function AnimeRow({ item, onPick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      style={s.animeRow(hover)}
+      role="button"
+      tabIndex={0}
+      onClick={() => onPick(item)}
+      onKeyDown={e => { if (e.key === 'Enter') onPick(item); }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      {(item.coverImageUrl || item.imageUrl) && (
+        <img style={s.animeCover} src={item.coverImageUrl || item.imageUrl} alt="" loading="lazy" />
+      )}
+      <div style={s.animeInfo}>
+        <div style={s.animeTitle}>{item.titleChinese || item.title}</div>
+        <div style={s.animeMeta}>
+          {item.seasonYear && `${item.seasonYear} `}
+          {item.format && `· ${item.format} `}
+          {item.episodes && `· ${item.episodes}集`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime, currentEpisodeId, episodeNumber, defaultKeyword }) {
   const { t } = useLang();
+  const reduced = useReducedMotion();
   const hasCurrentAnime = !!(currentAnime?.dandanAnimeId || currentAnime?.bgmId);
   const [tab, setTab] = useState(hasCurrentAnime ? 'current' : 'search');
   const [episodes, setEpisodes] = useState([]);
@@ -229,20 +349,39 @@ export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime
   // Determine what to show in the body based on tab + state
   const showEpisodeList = tab === 'current' || (tab === 'search' && pickedAnime);
 
+  // Motion #10 — modal entrance: scale 0.96→1, opacity 0→1, 200ms
+  const modalMotion = reduced
+    ? { initial: false }
+    : {
+        initial: { opacity: 0, scale: 0.96 },
+        animate: { opacity: 1, scale: 1 },
+        transition: { duration: 0.2, ease: 'easeOut' },
+      };
+
   return (
     <div style={s.overlay} onClick={onClose}>
-      <div style={s.modal} onClick={e => e.stopPropagation()}>
-        {/* Header */}
+      <Motion.div
+        style={s.modal}
+        onClick={e => e.stopPropagation()}
+        {...modalMotion}
+      >
+        <ChapterBar hue={HUE} height={56} top={20} left={20} trigger="mount" />
+        <CornerBrackets inset={6} size={10} opacity={0.36} hue={HUE} />
+
+        {/* Header — HUD eyebrow + Sora title */}
         <div style={s.header}>
-          <span style={s.headerTitle}>
-            {t('player.setDanmaku')} — EP{String(episodeNumber).padStart(2, '0')}
-            {currentAnime?.titleChinese && (
-              <span style={{ fontWeight: 400, color: 'rgba(235,235,245,0.45)', marginLeft: 8, fontSize: 14 }}>
-                {currentAnime.titleChinese}
-              </span>
-            )}
-          </span>
-          <button style={s.closeBtn} onClick={onClose}>✕</button>
+          <div style={s.headerEyebrow} aria-hidden>DANMAKU // PICKER</div>
+          <div style={s.headerTitleRow}>
+            <span style={s.headerTitle}>
+              {t('player.setDanmaku')} — EP{String(episodeNumber).padStart(2, '0')}
+              {currentAnime?.titleChinese && (
+                <span style={s.headerSub}>
+                  {currentAnime.titleChinese}
+                </span>
+              )}
+            </span>
+            <button style={s.closeBtn} onClick={onClose}>✕</button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -276,28 +415,11 @@ export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime
                 </button>
               </div>
               {searchResults.map((item, i) => (
-                <div
+                <AnimeRow
                   key={item.anilistId || item.dandanAnimeId || i}
-                  style={s.animeRow}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => handlePickAnime(item)}
-                  onKeyDown={e => { if (e.key === 'Enter') handlePickAnime(item); }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(10,132,255,0.12)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  {(item.coverImageUrl || item.imageUrl) && (
-                    <img style={s.animeCover} src={item.coverImageUrl || item.imageUrl} alt="" loading="lazy" />
-                  )}
-                  <div style={s.animeInfo}>
-                    <div style={s.animeTitle}>{item.titleChinese || item.title}</div>
-                    <div style={s.animeMeta}>
-                      {item.seasonYear && `${item.seasonYear} `}
-                      {item.format && `· ${item.format} `}
-                      {item.episodes && `· ${item.episodes}集`}
-                    </div>
-                  </div>
-                </div>
+                  item={item}
+                  onPick={handlePickAnime}
+                />
               ))}
               {searched && !searchResults.length && !searchLoading && (
                 <div style={s.empty}>{t('player.noResults')}</div>
@@ -331,8 +453,6 @@ export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime
                 tabIndex={0}
                 onClick={() => setSelected(ep)}
                 onKeyDown={e => { if (e.key === 'Enter') setSelected(ep); }}
-                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(120,120,128,0.08)'; }}
-                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
               >
                 <span style={s.epNum(isSelected)}>
                   {ep.number != null ? `EP${String(ep.number).padStart(2, '0')}` : ep.rawEpisodeNumber || '—'}
@@ -353,7 +473,7 @@ export default function DanmakuPicker({ isOpen, onClose, onConfirm, currentAnime
             {t('player.confirmDanmaku')}
           </button>
         )}
-      </div>
+      </Motion.div>
     </div>
   );
 }

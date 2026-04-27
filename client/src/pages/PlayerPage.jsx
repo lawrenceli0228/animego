@@ -8,13 +8,18 @@ import DropZone from '../components/player/DropZone';
 import MatchProgress from '../components/player/MatchProgress';
 import ManualSearch from '../components/player/ManualSearch';
 import EpisodeFileList from '../components/player/EpisodeFileList';
-import VideoPlayer from '../components/player/VideoPlayer';
+import PlayerHudFrame from '../components/player/PlayerHudFrame';
 import EpisodeNav from '../components/player/EpisodeNav';
 import DanmakuPicker from '../components/player/DanmakuPicker';
+import { ChapterBar, SectionNum, CornerBrackets } from '../components/shared/hud';
+import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
 import toast from 'react-hot-toast';
 
 const FADE_UP_CSS = `@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`;
 const fadeUp = { animation: 'fadeUp 300ms cubic-bezier(0.4,0,0.2,1) both' };
+
+const HUE = PLAYER_HUE.stream;
+const HUE_DANMAKU = PLAYER_HUE.ingest;
 
 const s = {
   page: { minHeight: 'calc(100vh - 56px)', padding: '0 24px 48px' },
@@ -27,32 +32,95 @@ const s = {
     fontFamily: "'Sora',sans-serif", fontWeight: 600,
     fontSize: 20, color: '#ffffff',
   },
+  // HUD-styled play header — replaces the old rounded glass card.
+  // Pattern matches landing primitives: relative parent + ChapterBar + SectionNum + CornerBrackets.
   playHeader: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    maxWidth: 1400, margin: '16px auto 0', padding: '12px 16px',
-    background: 'rgba(28,28,30,0.80)',
-    backdropFilter: 'saturate(180%) blur(20px)',
-    WebkitBackdropFilter: 'saturate(180%) blur(20px)',
-    borderRadius: 12, marginBottom: 12,
+    position: 'relative',
+    display: 'grid',
+    gridTemplateColumns: 'auto 1fr auto',
+    alignItems: 'center',
+    gap: 24,
+    maxWidth: 1400, margin: '16px auto 12px',
+    padding: '20px 28px 20px 56px',
+    background: `linear-gradient(180deg, oklch(14% 0.04 ${HUE} / 0.55) 0%, rgba(20,20,22,0.55) 100%)`,
+    border: `1px solid oklch(46% 0.06 ${HUE} / 0.36)`,
+    borderRadius: 4,
   },
-  backBtn: {
-    background: 'rgba(120,120,128,0.12)', border: 'none', borderRadius: 8,
-    padding: '8px 16px', fontSize: 14, fontWeight: 500,
-    color: '#0a84ff', cursor: 'pointer',
-    transition: 'background 150ms',
+  epEyebrow: {
+    ...mono,
+    fontSize: 10,
+    color: `oklch(72% 0.15 ${HUE} / 0.85)`,
+    letterSpacing: '0.18em',
+    textTransform: 'uppercase',
+    marginBottom: 6,
   },
   epTitle: {
     fontFamily: "'Sora',sans-serif", fontWeight: 600,
-    fontSize: 16, color: '#ffffff', textAlign: 'center',
+    fontSize: 18, color: '#ffffff', letterSpacing: '-0.01em', lineHeight: 1.25,
   },
   epSubtitle: {
-    fontSize: 13, color: 'rgba(235,235,245,0.40)', marginTop: 2,
-    textAlign: 'center',
+    fontSize: 13, color: 'rgba(235,235,245,0.45)', marginTop: 4,
+    fontFamily: "'JetBrains Mono',monospace", letterSpacing: '0.04em',
   },
+  // Outline back button — corner brackets reveal on hover (Motion #12).
+  backBtn: (hover) => ({
+    position: 'relative',
+    background: hover ? `oklch(62% 0.19 ${HUE} / 0.10)` : 'transparent',
+    border: `1px solid oklch(46% 0.06 ${HUE} / ${hover ? 0.65 : 0.40})`,
+    borderRadius: 2,
+    padding: '8px 14px',
+    fontFamily: "'JetBrains Mono',monospace",
+    fontSize: 11,
+    fontWeight: 500, letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+    color: hover ? '#fff' : 'rgba(235,235,245,0.75)',
+    cursor: 'pointer',
+    transition: 'all 150ms cubic-bezier(0.16,1,0.3,1)',
+    overflow: 'visible',
+  }),
+  // Danmaku count chip — OKLCH, monospace, tabular nums.
+  danmakuChip: {
+    ...mono,
+    padding: '5px 12px',
+    borderRadius: 9999,
+    fontSize: 11,
+    background: `oklch(62% 0.19 ${HUE} / 0.10)`,
+    color: `oklch(78% 0.15 ${HUE})`,
+    border: `1px solid oklch(62% 0.19 ${HUE} / 0.28)`,
+    letterSpacing: '0.10em',
+  },
+  loadingChip: {
+    ...mono,
+    padding: '5px 12px',
+    borderRadius: 9999,
+    fontSize: 11,
+    background: 'rgba(235,235,245,0.06)',
+    color: 'rgba(235,235,245,0.55)',
+    border: '1px solid rgba(235,235,245,0.16)',
+    letterSpacing: '0.10em',
+  },
+  // HUD-style "set danmaku" button — transparent + 1px border + mono label.
+  danmakuBtn: (hover) => ({
+    background: hover ? `oklch(62% 0.19 ${HUE_DANMAKU} / 0.12)` : 'transparent',
+    border: `1px solid oklch(62% 0.19 ${HUE_DANMAKU} / ${hover ? 0.55 : 0.32})`,
+    borderRadius: 2,
+    padding: '7px 14px',
+    fontFamily: "'JetBrains Mono',monospace",
+    fontSize: 11,
+    fontWeight: 500,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+    color: hover ? `oklch(78% 0.15 ${HUE_DANMAKU})` : `oklch(72% 0.15 ${HUE_DANMAKU} / 0.85)`,
+    cursor: 'pointer',
+    transition: 'all 150ms',
+  }),
+  headerActions: { display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 },
   playerWrap: { maxWidth: 1400, margin: '0 auto' },
   danmakuInfo: {
-    fontSize: 13, color: 'rgba(235,235,245,0.30)',
+    ...mono,
+    fontSize: 11, color: 'rgba(235,235,245,0.30)',
     textAlign: 'center', padding: '8px 0',
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
   errorBox: {
     maxWidth: 600, margin: '64px auto', textAlign: 'center',
@@ -72,6 +140,37 @@ function isMobile() {
   return window.innerWidth <= 600;
 }
 
+// Header back button — split out so corner-brackets fade-in (Motion #12) can
+// hook into hover state without bloating the parent's render path.
+function HudBackButton({ onClick, label }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      style={s.backBtn(hover)}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <CornerBrackets show={hover} animate inset={-3} size={6} opacity={0.5} hue={PLAYER_HUE.stream} />
+      ← {label}
+    </button>
+  );
+}
+
+function HudDanmakuButton({ onClick, label }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      style={s.danmakuBtn(hover)}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      DANMAKU // {label}
+    </button>
+  );
+}
+
 export default function PlayerPage() {
   const { t } = useLang();
   const { videoFiles, keyword, processFiles, getVideoUrl, getSubtitleUrl, clear: clearFiles } = useVideoFiles();
@@ -83,7 +182,7 @@ export default function PlayerPage() {
   const playback = usePlaybackSession({ getVideoUrl, getSubtitleUrl, loadComments, clearComments });
   const {
     phase: playbackPhase,
-    playingFile, playingEp, videoUrl, subtitleUrl, subtitleType, subtitleContent,
+    playingFile, playingEp, videoUrl, subtitleUrl,
     play: startPlayback, back: stopPlayback,
   } = playback;
 
@@ -264,16 +363,16 @@ export default function PlayerPage() {
       {/* PLAYING */}
       {uiPhase === 'playing' && (
         <div style={fadeUp}>
-          <div style={s.playHeader}>
-            <button
-              style={s.backBtn}
-              onClick={handleBackToList}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.20)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.12)'; }}
-            >
-              ← {t('player.backToList')}
-            </button>
+          <header style={s.playHeader}>
+            {/* HUD identity strip — bar + chapter num + corners */}
+            <ChapterBar hue={HUE} height={56} top={8} left={20} trigger="mount" />
+            <SectionNum n="01" style={{ top: 12, right: 16, fontSize: 10 }} />
+            <CornerBrackets inset={6} size={8} opacity={0.32} />
+
+            <HudBackButton onClick={handleBackToList} label={t('player.backToList')} />
+
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <div style={s.epEyebrow} aria-hidden>EPISODE / 集</div>
               <div style={s.epTitle}>
                 EP{String(playingEp).padStart(2, '0')}
                 {matchResult?.anime?.titleChinese && ` · ${matchResult.anime.titleChinese}`}
@@ -282,47 +381,28 @@ export default function PlayerPage() {
                 <div style={s.epSubtitle}>{matchResult.episodeMap[playingEp].title}</div>
               )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+
+            <div style={s.headerActions}>
               {loadingDanmaku ? (
-                <span style={{
-                  padding: '4px 10px', borderRadius: 9999, fontSize: 12,
-                  background: 'rgba(235,235,245,0.08)', color: 'rgba(235,235,245,0.60)',
-                  fontFamily: "'JetBrains Mono',monospace", fontWeight: 500,
-                }}>
-                  {t('player.loadingDanmaku')}
-                </span>
+                <span style={s.loadingChip}>{t('player.loadingDanmaku')}</span>
               ) : danmakuCount > 0 ? (
-                <span style={{
-                  padding: '4px 10px', borderRadius: 9999, fontSize: 12,
-                  background: 'rgba(90,200,250,0.10)', color: '#5ac8fa',
-                  fontFamily: "'JetBrains Mono',monospace", fontWeight: 500,
-                }}>
-                  {danmakuCount} {t('player.danmakuCount')}
+                <span style={s.danmakuChip}>
+                  {danmakuCount.toLocaleString()} {t('player.danmakuCount')}
                 </span>
               ) : null}
-              <button
-                style={{
-                  background: 'rgba(120,120,128,0.12)', border: 'none', borderRadius: 8,
-                  padding: '6px 12px', fontSize: 13, fontWeight: 500,
-                  color: '#5ac8fa', cursor: 'pointer', transition: 'background 150ms',
-                }}
-                onClick={() => setPickerEp(playingEp)}
-                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.20)'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(120,120,128,0.12)'; }}
-              >
-                💬 {t('player.setDanmaku')}
-              </button>
+              <HudDanmakuButton onClick={() => setPickerEp(playingEp)} label={t('player.setDanmaku')} />
             </div>
-          </div>
+          </header>
+
           <div style={s.playerWrap}>
-            <VideoPlayer
+            <PlayerHudFrame
               videoUrl={videoUrl}
               danmakuList={danmakuList}
               subtitleUrl={subtitleUrl}
-              subtitleType={subtitleType}
-              subtitleContent={subtitleContent}
               onEnded={handleVideoEnded}
               progressKey={progressKey}
+              episode={playingEp}
+              danmakuCount={danmakuCount}
             />
             {danmakuCount === 0 && (
               <div style={s.danmakuInfo}>{t('player.noDanmaku')}</div>

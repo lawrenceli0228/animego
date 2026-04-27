@@ -1,6 +1,11 @@
 import { useState } from 'react';
+import { motion as Motion, useReducedMotion } from 'motion/react';
 import { useLang } from '../../context/LanguageContext';
 import { formatScore } from '../../utils/formatters';
+import { ChapterBar, CornerBrackets } from '../shared/hud';
+import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+
+const HUE = PLAYER_HUE.stream;
 
 const scoreColor = (v) => v >= 75 ? '#30d158' : v >= 50 ? '#ff9f0a' : '#ff453a';
 
@@ -14,6 +19,9 @@ const SOURCE_LABEL = {
   WEB_NOVEL: { zh: '网文改', en: 'Web Novel' },
   GAME: { zh: '游戏改', en: 'Game' },
 };
+
+// OKLCH per-episode hue rotation: 210, 220, 230, ... cycles through the spectrum.
+const epHue = (ep) => 210 + (ep != null ? (ep * 10) % 360 : 0);
 
 const s = {
   container: { maxWidth: 1100, margin: '0 auto' },
@@ -83,31 +91,77 @@ const s = {
   },
   headerActions: { display: 'flex', flexDirection: 'column', gap: 8, alignSelf: 'flex-start' },
   clearBtn: {
-    background: 'rgba(120,120,128,0.12)', border: 'none', borderRadius: 8,
-    padding: '6px 14px', fontSize: 14, fontWeight: 500,
-    color: '#0a84ff', cursor: 'pointer',
+    ...mono,
+    background: 'transparent',
+    border: '1px solid rgba(235,235,245,0.20)',
+    borderRadius: 2,
+    padding: '6px 14px',
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.75)',
+    cursor: 'pointer',
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
-  row: (i) => ({
+  // HUD row: relative for ChapterBar + CornerBrackets fade-in.
+  row: (i, hover) => ({
+    position: 'relative',
     display: 'flex', alignItems: 'center', gap: 14,
-    minHeight: 56, padding: '10px 20px', borderRadius: 8,
-    background: i % 2 === 1 ? 'rgba(120,120,128,0.06)' : 'transparent',
-    transition: 'background 150ms', cursor: 'pointer',
+    minHeight: 56, padding: '12px 22px 12px 24px', borderRadius: 2,
+    background: hover
+      ? 'rgba(10,132,255,0.10)'
+      : i % 2 === 1 ? 'rgba(120,120,128,0.05)' : 'transparent',
+    transition: 'background 150ms, border-color 150ms',
+    cursor: 'pointer',
+    borderLeft: hover
+      ? `2px solid oklch(62% 0.19 ${HUE} / 0.85)`
+      : '2px solid transparent',
   }),
-  epNum: { fontWeight: 600, fontSize: 15, color: '#ffffff', width: 52, flexShrink: 0, alignSelf: 'flex-start', paddingTop: 3 },
+  // Per-episode badge — OKLCH hue rotated per episode number.
+  epBadge: (ep) => ({
+    ...mono,
+    fontSize: 11,
+    width: 64,
+    flexShrink: 0,
+    color: ep != null
+      ? `oklch(78% 0.15 ${epHue(ep)})`
+      : 'rgba(235,235,245,0.30)',
+    letterSpacing: '0.10em',
+    fontWeight: 600,
+    paddingTop: 3,
+    alignSelf: 'flex-start',
+  }),
   fileInfo: { flex: 1, minWidth: 0 },
   fileName: {
-    fontSize: 15, color: 'rgba(235,235,245,0.60)',
+    fontFamily: "'Sora',sans-serif",
+    fontSize: 15, color: 'rgba(235,235,245,0.70)',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
   epTitle: {
-    fontSize: 13, fontWeight: 600, color: 'rgba(235,235,245,0.35)', marginTop: 3,
+    fontSize: 12, fontWeight: 500, color: 'rgba(235,235,245,0.42)', marginTop: 4,
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    fontFamily: "'JetBrains Mono',monospace", letterSpacing: '0.04em',
   },
   playIcon: (hover) => ({
-    fontSize: 20, color: hover ? '#0a84ff' : 'rgba(235,235,245,0.30)',
+    ...mono,
+    fontSize: 11,
+    color: hover ? `oklch(78% 0.15 ${HUE})` : 'rgba(235,235,245,0.30)',
     flexShrink: 0, transition: 'color 150ms',
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   }),
 };
+
+const danmakuBtnStyle = (hover) => ({
+  background: 'transparent',
+  border: `1px solid ${hover ? 'rgba(255,159,10,0.55)' : 'rgba(255,159,10,0.22)'}`,
+  borderRadius: 2,
+  cursor: 'pointer',
+  padding: '5px 8px',
+  fontSize: 11,
+  color: hover ? 'oklch(78% 0.15 30)' : 'rgba(235,235,245,0.55)',
+  flexShrink: 0,
+  transition: 'all 150ms',
+  fontFamily: "'JetBrains Mono',monospace",
+  letterSpacing: '0.10em',
+});
 
 export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear, onSetDanmaku }) {
   const { t, lang } = useLang();
@@ -201,7 +255,7 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
           )}
         </div>
         <div style={s.headerActions}>
-          <button style={s.clearBtn} onClick={onClear}>✕ {t('player.clear')}</button>
+          <button style={s.clearBtn} onClick={onClear}>// {t('player.clear')}</button>
         </div>
       </div>
 
@@ -221,26 +275,36 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
   );
 }
 
-const danmakuBtnStyle = (hover) => ({
-  background: 'none', border: 'none', cursor: 'pointer', padding: '8px 10px',
-  fontSize: 16, color: hover ? '#5ac8fa' : 'rgba(235,235,245,0.20)',
-  flexShrink: 0, transition: 'color 150ms', lineHeight: 1,
-});
-
+/**
+ * EpisodeRow — HUD row.
+ *   - Left edge: 2px OKLCH border on hover (Motion #7)
+ *   - 4 corner brackets fade in on hover (Motion #7, 150ms)
+ *   - Per-episode hue rotation on the EPxx badge
+ */
 function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay, onSetDanmaku }) {
+  const reduced = useReducedMotion();
   const [hover, setHover] = useState(false);
   const [dmHover, setDmHover] = useState(false);
+  const epLabel = episode != null ? `EP${String(episode).padStart(2, '0')}` : '—';
   return (
     <div
-      style={s.row(index)}
+      style={s.row(index, hover)}
       onClick={onPlay}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter') onPlay(); }}
-      onMouseEnter={(e) => { setHover(true); e.currentTarget.style.background = 'rgba(10,132,255,0.12)'; }}
-      onMouseLeave={(e) => { setHover(false); e.currentTarget.style.background = index % 2 === 1 ? 'rgba(120,120,128,0.06)' : 'transparent'; }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
     >
-      <span style={s.epNum}>{episode != null ? `EP${String(episode).padStart(2, '0')}` : '—'}</span>
+      <CornerBrackets
+        show={hover}
+        animate={!reduced}
+        inset={4}
+        size={8}
+        opacity={0.4}
+        hue={episode != null ? epHue(episode) : null}
+      />
+      <span style={s.epBadge(episode)}>{epLabel}</span>
       <div style={s.fileInfo}>
         <div style={s.fileName}>{fileName}</div>
         {episodeTitle && <div style={s.epTitle}>{episodeTitle}</div>}
@@ -252,9 +316,9 @@ function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay, onSetDanma
         onMouseLeave={() => setDmHover(false)}
         aria-label="Set danmaku"
       >
-        💬
+        DANMAKU
       </button>
-      <span style={s.playIcon(hover)}>▶</span>
+      <span style={s.playIcon(hover)}>▶ PLAY</span>
     </div>
   );
 }

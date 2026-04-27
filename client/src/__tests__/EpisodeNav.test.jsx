@@ -30,10 +30,11 @@ describe('EpisodeNav', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('applies active style to the current episode', () => {
+  it('applies HUD active style (OKLCH chip background) to the current episode', () => {
     render(<EpisodeNav episodes={[1, 2]} currentEpisode={1} onSelect={() => {}} />);
-    const btn = screen.getByText('EP01');
-    expect(btn.style.background).toMatch(/rgb\(10, 132, 255\)|#0a84ff/i);
+    const btn = screen.getByText('EP01').closest('button');
+    // HUD aesthetic — active chip carries an OKLCH-tinted background, not a flat blue fill.
+    expect(btn.style.background).toMatch(/oklch/i);
   });
 
   it('renders empty when episodes is empty', () => {

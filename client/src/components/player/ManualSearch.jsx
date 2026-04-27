@@ -1,56 +1,136 @@
 import { useState, useCallback } from 'react';
-import { searchAnime } from '../../api/dandanplay.api';
 import { useLang } from '../../context/LanguageContext';
+import { searchAnime } from '../../api/dandanplay.api';
+import { ChapterBar, CornerBrackets } from '../shared/hud';
+import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+
+const HUE = PLAYER_HUE.ingest;
+const HUE_STREAM = PLAYER_HUE.stream;
 
 const s = {
-  container: { maxWidth: 600, margin: '0 auto' },
+  container: {
+    position: 'relative',
+    maxWidth: 600, margin: '0 auto',
+    padding: '24px 28px 28px 56px',
+    background: `linear-gradient(180deg, oklch(14% 0.04 ${HUE} / 0.55) 0%, rgba(20,20,22,0.55) 100%)`,
+    border: `1px solid oklch(46% 0.06 ${HUE} / 0.36)`,
+    borderRadius: 4,
+  },
+  backBtn: {
+    ...mono,
+    background: 'transparent',
+    border: '1px solid rgba(235,235,245,0.20)',
+    borderRadius: 2,
+    color: 'rgba(235,235,245,0.75)',
+    fontSize: 11, cursor: 'pointer',
+    padding: '6px 12px',
+    marginBottom: 18,
+    textTransform: 'uppercase', letterSpacing: '0.14em',
+  },
   hint: {
-    fontSize: 14, color: 'rgba(235,235,245,0.60)', marginBottom: 16, textAlign: 'center',
+    ...mono,
+    fontSize: 11,
+    color: `oklch(72% 0.15 ${HUE} / 0.85)`,
+    marginBottom: 18,
+    textTransform: 'uppercase',
+    letterSpacing: '0.16em',
   },
   inputRow: {
-    display: 'flex', gap: 8, marginBottom: 20,
+    display: 'flex', gap: 8, marginBottom: 22,
   },
   input: {
-    flex: 1, padding: '10px 16px', borderRadius: 8,
-    background: '#2c2c2e', border: '1px solid rgba(84,84,88,0.65)',
+    flex: 1, padding: '10px 4px',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid oklch(46% 0.06 ${HUE_STREAM} / 0.55)`,
     color: '#ffffff', fontSize: 16, outline: 'none',
+    fontFamily: "'JetBrains Mono', monospace",
+    letterSpacing: '0.04em',
   },
   searchBtn: {
-    padding: '10px 20px', borderRadius: 8,
-    background: '#0a84ff', color: '#fff', border: 'none',
-    fontSize: 14, fontWeight: 500, cursor: 'pointer', flexShrink: 0,
+    ...mono,
+    padding: '10px 18px',
+    borderRadius: 2,
+    background: 'transparent',
+    border: `1px solid oklch(62% 0.19 ${HUE_STREAM} / 0.55)`,
+    color: `oklch(78% 0.15 ${HUE_STREAM})`,
+    fontSize: 11, fontWeight: 500, cursor: 'pointer', flexShrink: 0,
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
-  resultRow: {
+  resultRow: (hover) => ({
+    position: 'relative',
     display: 'flex', alignItems: 'center', gap: 12,
-    padding: '10px 12px', borderRadius: 8, marginBottom: 8,
-    transition: 'background 150ms',
+    padding: '10px 14px', borderRadius: 2, marginBottom: 8,
+    transition: 'background 150ms, border-color 150ms',
     cursor: 'pointer',
-  },
+    background: hover ? `oklch(62% 0.19 ${HUE_STREAM} / 0.10)` : 'transparent',
+    borderLeft: hover
+      ? `2px solid oklch(62% 0.19 ${HUE_STREAM} / 0.85)`
+      : '2px solid transparent',
+  }),
   cover: {
-    width: 60, aspectRatio: '3/4', borderRadius: 8, objectFit: 'cover',
+    width: 60, aspectRatio: '3/4', borderRadius: 2, objectFit: 'cover',
     background: '#2c2c2e', flexShrink: 0,
   },
   info: { flex: 1, minWidth: 0 },
   title: {
-    fontSize: 15, fontWeight: 500, color: '#ffffff',
+    fontFamily: "'Sora',sans-serif",
+    fontSize: 15, fontWeight: 600, color: '#ffffff',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
-  meta: { fontSize: 13, color: 'rgba(235,235,245,0.30)', marginTop: 4 },
+  meta: {
+    ...mono,
+    fontSize: 11, color: 'rgba(235,235,245,0.45)', marginTop: 4,
+    letterSpacing: '0.06em',
+  },
   selectBtn: {
-    padding: '6px 14px', borderRadius: 8,
-    background: 'rgba(120,120,128,0.12)', border: 'none',
-    color: '#0a84ff', fontSize: 14, fontWeight: 500,
+    ...mono,
+    padding: '6px 14px',
+    borderRadius: 2,
+    background: 'transparent',
+    border: `1px solid oklch(62% 0.19 ${HUE} / 0.50)`,
+    color: `oklch(78% 0.15 ${HUE})`,
+    fontSize: 11, fontWeight: 500,
     cursor: 'pointer', flexShrink: 0,
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
   empty: {
+    ...mono,
     textAlign: 'center', padding: 32,
-    color: 'rgba(235,235,245,0.30)', fontSize: 14,
-  },
-  backBtn: {
-    background: 'none', border: 'none', color: 'rgba(235,235,245,0.60)',
-    fontSize: 14, cursor: 'pointer', marginBottom: 16,
+    color: 'rgba(235,235,245,0.45)', fontSize: 11,
+    textTransform: 'uppercase', letterSpacing: '0.14em',
   },
 };
+
+function ResultRow({ item, onSelect, t }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      style={s.resultRow(hover)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <img
+        style={s.cover}
+        src={item.coverImageUrl || item.imageUrl || ''}
+        alt=""
+        loading="lazy"
+      />
+      <div style={s.info}>
+        <div style={s.title}>{item.titleChinese || item.title}</div>
+        <div style={s.meta}>
+          {item.seasonYear && `${item.seasonYear} `}
+          {item.format && `· ${item.format} `}
+          {item.episodes && `· ${item.episodes}${t('detail.epUnit')}`}
+          {item.averageScore && ` · ★ ${item.averageScore}`}
+        </div>
+      </div>
+      <button style={s.selectBtn} onClick={() => onSelect(item)}>
+        {t('player.select')}
+      </button>
+    </div>
+  );
+}
 
 export default function ManualSearch({ defaultKeyword, onSelect, onBack }) {
   const { t } = useLang();
@@ -75,8 +155,11 @@ export default function ManualSearch({ defaultKeyword, onSelect, onBack }) {
 
   return (
     <div style={s.container}>
+      <ChapterBar hue={HUE} height={48} top={20} left={20} trigger="mount" />
+      <CornerBrackets inset={6} size={10} opacity={0.32} hue={HUE} />
+
       <button style={s.backBtn} onClick={onBack}>← {t('player.back')}</button>
-      <div style={s.hint}>{t('player.manualHint')}</div>
+      <div style={s.hint}>// {t('player.manualHint')}</div>
       <div style={s.inputRow}>
         <input
           style={s.input}
@@ -91,31 +174,12 @@ export default function ManualSearch({ defaultKeyword, onSelect, onBack }) {
       </div>
 
       {results.map((item, i) => (
-        <div
+        <ResultRow
           key={item.anilistId || item.dandanAnimeId || i}
-          style={s.resultRow}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(10,132,255,0.12)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-        >
-          <img
-            style={s.cover}
-            src={item.coverImageUrl || item.imageUrl || ''}
-            alt=""
-            loading="lazy"
-          />
-          <div style={s.info}>
-            <div style={s.title}>{item.titleChinese || item.title}</div>
-            <div style={s.meta}>
-              {item.seasonYear && `${item.seasonYear} `}
-              {item.format && `· ${item.format} `}
-              {item.episodes && `· ${item.episodes}${t('detail.epUnit')}`}
-              {item.averageScore && ` · ★ ${item.averageScore}`}
-            </div>
-          </div>
-          <button style={s.selectBtn} onClick={() => onSelect(item)}>
-            {t('player.select')}
-          </button>
-        </div>
+          item={item}
+          onSelect={onSelect}
+          t={t}
+        />
       ))}
 
       {searched && !results.length && !loading && (
