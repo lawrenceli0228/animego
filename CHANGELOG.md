@@ -2,6 +2,42 @@
 
 ---
 
+## [1.0.16] - 2026-04-27
+
+### 切换弹幕时旧弹幕残留 — artplayer-plugin-danmuku 5.3.0 API 误用修复
+
+**问题:**
+
+- 用户进入播放页 → 点 "切换弹幕" 选另一集匹配 → 上方弹幕轨道仍是旧集的内容,新弹幕不显示
+- 复现 100%:点击播放后任何 `loadComments` 触发的列表更新都不生效
+
+**根因:**
+
+- `artplayer-plugin-danmuku@5.3.0` 的 `load()` 内部只在**不带参**时才走 reset 分支(清 queue / states / `$danmuku.textContent`),源码 `dist/artplayer-plugin-danmuku.mjs:361`:
+  ```js
+  if (danmuku === void 0) { this.reset(); this.queue = []; ... }
+  ```
+- 旧代码 `danmuku.load(danmakuList)` 显式传了参数,等于"追加",老队列从来没清掉
+- 另一个隐性 bug:`if (danmuku && danmakuList?.length)` 短路掉了空列表 — 切到 0 弹幕的集数时旧弹幕也保留
+
+**修复(`client/src/components/player/VideoPlayer.jsx:209`):**
+
+```jsx
+useEffect(() => {
+  const danmuku = artRef.current?.plugins?.artplayerPluginDanmuku;
+  if (!danmuku) return;
+  danmuku.config({ danmuku: danmakuList || [] });
+  danmuku.load();  // 不带参才触发内部 reset
+}, [danmakuList]);
+```
+
+**测试:**
+
+- VideoPlayer 单测 +3:list→list 切换 / list→空 切换 / null 归一化
+- 完整 632/632 通过(顺手把 SEO 改造遗留的 5 个 AnimeCard 测试更新到 `getByRole('link')`)
+
+---
+
 ## [1.0.15] - 2026-04-25
 
 ### 详情页 halo 客户端兜底采样 — AniList 无 k-means 色的番剧也能拿到真实色身份
