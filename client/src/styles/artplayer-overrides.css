@@ -1,0 +1,29 @@
+/* Heatmap visual tuning. Knobs exposed as CSS custom properties so the
+   dev-only HeatmapTuner panel can mutate them live. Defaults reflect the
+   currently saved production look. */
+.art-video-player .art-control-heatmap {
+  height: var(--heatmap-h, 2px) !important;
+  top: calc(-1 * var(--heatmap-h, 2px)) !important;
+  left: -12px;
+  width: calc(100% + 24px);
+  background: none;
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+.art-video-player.art-hover .art-control-heatmap,
+.art-video-player[data-heatmap-always="1"] .art-control-heatmap,
+.art-video-player[data-heatmap-tuner-active="1"] .art-control-heatmap {
+  opacity: 1;
+}
+.art-video-player .art-control-heatmap > svg {
+  transform-origin: bottom;
+  transform: scaleY(var(--heatmap-scale-y, 17.35));
+}
+/* Force single-fill teal instead of plugin's blue progress-color gradient.
+   DESIGN.md reserves --accent (#0a84ff) for clickable elements only;
+   --teal (#5ac8fa) is the read-only/info color, which is what the heatmap is. */
+.art-video-player .art-control-heatmap path {
+  fill: var(--heatmap-fill, #ffffff) !important;
+  fill-opacity: var(--heatmap-opacity, 0.4) !important;
+}

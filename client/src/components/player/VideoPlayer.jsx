@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import Artplayer from 'artplayer';
+import { applyHeatmapPath } from '../../lib/heatmapPath';
 
 const s = {
   wrapper: { width: '100%', position: 'relative' },
@@ -92,6 +93,28 @@ function readDanmakuVisible() {
     return raw === '1';
   } catch {
     return DANMAKU_VISIBLE_DEFAULT;
+  }
+}
+
+// Heatmap curve geometry. Plugin's hardcoded yMax=128 keeps peaks subtle, which
+// is the look we want at this band size. HeatmapTuner can override via the
+// 'animego.heatmapConfig' localStorage key.
+const HEATMAP_DEFAULTS = {
+  sampling: 7,
+  smoothing: 0.35,
+  flattening: 0.05,
+  scale: 0.011,
+  minHeight: 4,
+};
+
+function loadHeatmapConfig() {
+  try {
+    const raw = localStorage.getItem('animego.heatmapConfig');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -256,6 +279,11 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
             // queued comments on seek which jank-spikes when the queue is large.
             synchronousPlayback: false,
             emitter: false,
+            heatmap: {
+              ...HEATMAP_DEFAULTS,
+              ...(loadHeatmapConfig() || {}),
+              opacity: 0.4,
+            },
           }),
         ],
       });
@@ -295,11 +323,35 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
         if (art.currentTime > RESTORE_MIN_SECONDS) writeProgress(key, art.currentTime);
       });
 
+      // Heatmap is always visible (design tuning) — set the attribute so the
+      // CSS [data-heatmap-always="1"] rule keeps opacity:1 regardless of hover.
+      const playerEl = art.template?.$player;
+      if (playerEl) playerEl.setAttribute('data-heatmap-always', '1');
+
+      // Per-episode dynamic yMax override. Plugin's hardcoded yMax=128 squashes
+      // peaks to ~8% of band height (max bucket count is typically ~10), so
+      // most of the band is empty above the curve. applyHeatmapPath rescales
+      // yMax to the actual max so peaks fill the band. setTimeout 0 lets
+      // plugin innerHTML resolve before we read svg.viewBox.
+      const heatmapOpts = { ...HEATMAP_DEFAULTS, ...(loadHeatmapConfig() || {}) };
+      const scheduleHeatmapPathOverride = () => {
+        setTimeout(() => applyHeatmapPath(art, heatmapOpts), 0);
+      };
+      art.on('ready', scheduleHeatmapPathOverride);
+      art.on('resize', scheduleHeatmapPathOverride);
+      art.on('artplayerPluginDanmuku:loaded', scheduleHeatmapPathOverride);
+      art.on('artplayerPluginDanmuku:points', scheduleHeatmapPathOverride);
+
       if (cancelled) {
         art.destroy(false);
         return;
       }
       artRef.current = art;
+
+      // Expose for HeatmapTuner — dev-only, gated.
+      if (import.meta.env.DEV || (typeof localStorage !== 'undefined' && localStorage.getItem('animego.heatmapTuner') === '1')) {
+        window.__artInstance = art;
+      }
 
       // The [danmakuList] effect below fires synchronously on render, before
       // this async init resolves — at that point artRef.current is still null
@@ -320,6 +372,9 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
       }
       inst.destroy(false);
       artRef.current = null;
+      if (typeof window !== 'undefined' && window.__artInstance === inst) {
+        window.__artInstance = null;
+      }
     };
   }, [videoUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 

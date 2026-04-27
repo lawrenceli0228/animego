@@ -2,6 +2,43 @@
 
 ---
 
+## [1.0.17] - 2026-04-28
+
+### 弹幕热力图视觉重调 — 缝隙消除 + Tuner/Production 同源
+
+**问题:**
+
+- v1.0.16 上线后,进度条上方的弹幕热力图与进度条之间有明显缝隙,缩放越大缝隙越显眼
+- HeatmapTuner 调参面板显示效果与刷新后 production 渲染不一致(峰值高度差异),无法所见即所得
+
+**根因:**
+
+- 插件 `artplayer-plugin-danmuku@5.3.0` 把 `yMax` 硬编码为 128,而单集真实 max bucket count 通常 ~10,导致 peaks 只占 viewBox 顶部 ~8%,scaleY 放大后那 92% 的空白就是看到的"缝隙"
+- Tuner 走 `buildHeatmapPath` 默认 yMax=128,Production 之前用动态 yMax + 1.18 headroom,两边算法不同,所见非所得
+
+**修复(`client/src/lib/heatmapPath.js`):**
+
+- 新增 `applyHeatmapPath(art, opts)` 共享 helper:动态 `yMax = peak`(无 headroom),peaks 直达带顶,缝隙归零
+- VideoPlayer.jsx 与 HeatmapTuner.jsx 同时调用此 helper — 单一真相来源,Tuner 实时预览即 Production 最终效果
+
+**默认值(design review 收敛):**
+
+- 几何: `sampling=7 / smoothing=0.35 / flattening=0.05 / scale=0.011 / minHeight=4`
+- 视觉: `bandHeight=2px / scaleY=17.35 / fillColor=#ffffff / fillOpacity=0.4`
+- 行为: `alwaysVisible=true`(`data-heatmap-always="1"`),不再随 chrome 淡入淡出
+
+**清理:**
+
+- HeatmapTuner 调参面板从 PlayerPage 卸下挂载,组件本体保留以便后续微调
+- 删除生产代码中过期的 control-fade handler 与 1.18 headroom 常量
+
+**测试:**
+
+- VideoPlayer 单测断言更新到新默认值,删除过期的 fade-with-chrome 测试
+- 663/663 通过
+
+---
+
 ## [1.0.16] - 2026-04-27
 
 ### 切换弹幕时旧弹幕残留 — artplayer-plugin-danmuku 5.3.0 API 误用修复

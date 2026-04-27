@@ -304,4 +304,21 @@ describe('VideoPlayer danmaku plugin tuning', () => {
       emitter: false,
     })
   })
+
+  test('forwards tuned heatmap config to artplayer-plugin-danmuku', async () => {
+    const { default: pluginFactory } = await import('artplayer-plugin-danmuku')
+    pluginFactory.mockClear()
+    render(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={[{ text: 'a', time: 1 }]} />)
+    await flushAsync()
+    expect(pluginFactory).toHaveBeenCalledTimes(1)
+    const opts = pluginFactory.mock.calls[0][0]
+    expect(opts.heatmap.sampling).toBe(7)
+    expect(opts.heatmap.smoothing).toBe(0.35)
+    expect(opts.heatmap.flattening).toBe(0.05)
+    expect(opts.heatmap.scale).toBe(0.011)
+    expect(opts.heatmap.minHeight).toBe(4)
+    expect(opts.heatmap.opacity).toBe(0.4)
+    // Plugin doesn't accept a `color` field — color is driven by CSS variables
+    // (`--heatmap-fill`). Skipping that assertion.
+  })
 })
