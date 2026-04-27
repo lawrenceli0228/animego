@@ -3,6 +3,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 const ctorCalls = []
+const instances = []
 const subtitleStyle = vi.fn()
 const subtitleSwitch = vi.fn()
 const danmukuConfig = vi.fn()
@@ -12,8 +13,9 @@ const danmukuHide = vi.fn()
 
 function makeArtInstance(config) {
   ctorCalls.push(config)
-  return {
-    on: vi.fn(),
+  const handlers = {}
+  const inst = {
+    on: vi.fn((event, fn) => { handlers[event] = fn }),
     destroy: vi.fn(),
     subtitle: { style: subtitleStyle, switch: subtitleSwitch },
     plugins: {
@@ -26,7 +28,11 @@ function makeArtInstance(config) {
     },
     currentTime: 0,
     duration: 1200,
+    playbackRate: 1,
+    handlers,
   }
+  instances.push(inst)
+  return inst
 }
 
 vi.mock('artplayer', () => ({
@@ -58,6 +64,7 @@ async function flushAsync() {
 
 beforeEach(() => {
   ctorCalls.length = 0
+  instances.length = 0
   subtitleStyle.mockClear()
   subtitleSwitch.mockClear()
   danmukuConfig.mockClear()
@@ -187,10 +194,18 @@ describe('VideoPlayer danmaku switching', () => {
 })
 
 describe('VideoPlayer playback rate setting', () => {
-  test('uses default 1.0x when no preference stored', async () => {
+  test('passes playbackRate: false to disable artplayer built-in rate UI', async () => {
     render(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={[]} />)
     await flushAsync()
-    expect(ctorCalls[0].playbackRate).toBe(1.0)
+    // artplayer 5.x: option.playbackRate is a boolean flag, not the rate value.
+    // We pass false so artplayer does not surface its built-in rate UI; our
+    // custom selector replaces it.
+    expect(ctorCalls[0].playbackRate).toBe(false)
+  })
+
+  test('uses default 1.0x in selector when no preference stored', async () => {
+    render(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={[]} />)
+    await flushAsync()
     const rateSetting = ctorCalls[0].settings[2]
     expect(rateSetting.html).toBe('倍速')
     expect(rateSetting.tooltip).toBe('1x')
@@ -198,21 +213,32 @@ describe('VideoPlayer playback rate setting', () => {
     expect(rateSetting.selector.find((o) => o.default).value).toBe(1.0)
   })
 
-  test('hydrates stored playback rate', async () => {
+  test('hydrates stored playback rate into selector default', async () => {
     window.localStorage.setItem(RATE_KEY, '1.5')
     render(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={[]} />)
     await flushAsync()
-    expect(ctorCalls[0].playbackRate).toBe(1.5)
     const rateSetting = ctorCalls[0].settings[2]
     expect(rateSetting.tooltip).toBe('1.5x')
     expect(rateSetting.selector.find((o) => o.default).value).toBe(1.5)
   })
 
-  test('falls back to 1.0x when stored rate is not in option list', async () => {
+  test('applies stored rate to instance after video:loadedmetadata fires', async () => {
+    window.localStorage.setItem(RATE_KEY, '1.5')
+    render(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={[]} />)
+    await flushAsync()
+    const inst = instances[0]
+    expect(inst.handlers['video:loadedmetadata']).toBeTypeOf('function')
+    expect(inst.playbackRate).toBe(1) // not yet applied
+    inst.handlers['video:loadedmetadata']()
+    expect(inst.playbackRate).toBe(1.5)
+  })
+
+  test('falls back to 1.0x in selector when stored rate is not in option list', async () => {
     window.localStorage.setItem(RATE_KEY, '3.0')
     render(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={[]} />)
     await flushAsync()
-    expect(ctorCalls[0].playbackRate).toBe(1.0)
+    const rateSetting = ctorCalls[0].settings[2]
+    expect(rateSetting.selector.find((o) => o.default).value).toBe(1.0)
   })
 
   test('onSelect persists and returns formatted tooltip', async () => {

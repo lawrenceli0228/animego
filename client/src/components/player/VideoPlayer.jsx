@@ -177,7 +177,11 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
         autoplay: true,
         theme: '#0a84ff',
         volume: 0.8,
-        playbackRate: initialRate,
+        // playbackRate option is a boolean flag in artplayer 5.x — it gates
+        // the built-in rate controls. The actual rate is set on the instance
+        // after construction (see below). Keeping our custom selector means
+        // we don't need artplayer's default rate UI.
+        playbackRate: false,
         subtitle: subtitleConfig,
         setting: true,
         settings: [
@@ -260,6 +264,13 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
       if (!initialDanmakuVisible) {
         art.plugins?.artplayerPluginDanmuku?.hide?.();
       }
+
+      // Apply initial playback rate. artplayer.options.playbackRate is a
+      // boolean flag, not a value — the actual rate goes on the instance
+      // after construction, once the <video> element exists.
+      art.on('video:loadedmetadata', () => {
+        if (art.playbackRate !== initialRate) art.playbackRate = initialRate;
+      });
 
       if (onEnded) art.on('video:ended', onEnded);
 
