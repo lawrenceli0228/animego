@@ -208,9 +208,11 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
 
   useEffect(() => {
     const danmuku = artRef.current?.plugins?.artplayerPluginDanmuku;
-    if (danmuku && danmakuList?.length) {
-      danmuku.load(danmakuList);
-    }
+    if (!danmuku) return;
+    // load(list) skips the reset branch (plugin only clears when called with no args).
+    // config + load() ensures old danmaku are cleared before the new list is queued.
+    danmuku.config({ danmuku: danmakuList || [] });
+    danmuku.load();
   }, [danmakuList]);
 
   return (

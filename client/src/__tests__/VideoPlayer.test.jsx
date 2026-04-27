@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 const ctorCalls = []
 const subtitleStyle = vi.fn()
 const subtitleSwitch = vi.fn()
+const danmukuConfig = vi.fn()
+const danmukuLoad = vi.fn()
 
 function makeArtInstance(config) {
   ctorCalls.push(config)
@@ -11,7 +13,9 @@ function makeArtInstance(config) {
     on: vi.fn(),
     destroy: vi.fn(),
     subtitle: { style: subtitleStyle, switch: subtitleSwitch },
-    plugins: {},
+    plugins: {
+      artplayerPluginDanmuku: { config: danmukuConfig, load: danmukuLoad },
+    },
     currentTime: 0,
     duration: 1200,
   }
@@ -36,6 +40,8 @@ beforeEach(() => {
   ctorCalls.length = 0
   subtitleStyle.mockClear()
   subtitleSwitch.mockClear()
+  danmukuConfig.mockClear()
+  danmukuLoad.mockClear()
   window.localStorage.clear()
 })
 
@@ -105,5 +111,43 @@ describe('VideoPlayer subtitle slider settings', () => {
         style: { color: '#fff', fontSize: '24px', bottom: '100px' },
       }),
     )
+  })
+})
+
+describe('VideoPlayer danmaku switching', () => {
+  // Plugin's load(list) skips its internal reset branch; only load() with no args
+  // clears the queue. So we must call config({ danmuku: list }) then load().
+  test('switching danmakuList calls config + load() (no args) to clear old danmaku', () => {
+    const list1 = [{ text: 'a', time: 1 }]
+    const list2 = [{ text: 'b', time: 2 }]
+    const { rerender } = render(
+      <VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={list1} />,
+    )
+    expect(danmukuConfig).toHaveBeenLastCalledWith({ danmuku: list1 })
+    expect(danmukuLoad).toHaveBeenLastCalledWith()
+
+    rerender(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={list2} />)
+    expect(danmukuConfig).toHaveBeenLastCalledWith({ danmuku: list2 })
+    expect(danmukuLoad).toHaveBeenLastCalledWith()
+    expect(danmukuLoad).toHaveBeenCalledTimes(2)
+  })
+
+  test('switching to empty list clears danmaku (does not short-circuit)', () => {
+    const list1 = [{ text: 'a', time: 1 }]
+    const { rerender } = render(
+      <VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={list1} />,
+    )
+    danmukuConfig.mockClear()
+    danmukuLoad.mockClear()
+
+    rerender(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={[]} />)
+    expect(danmukuConfig).toHaveBeenCalledWith({ danmuku: [] })
+    expect(danmukuLoad).toHaveBeenCalledTimes(1)
+  })
+
+  test('null danmakuList is normalized to empty array', () => {
+    render(<VideoPlayer videoUrl="/v.mp4" subtitleUrl="/s.vtt" danmakuList={null} />)
+    expect(danmukuConfig).toHaveBeenCalledWith({ danmuku: [] })
+    expect(danmukuLoad).toHaveBeenCalledWith()
   })
 })

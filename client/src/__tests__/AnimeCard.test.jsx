@@ -63,27 +63,24 @@ describe('AnimeCard', () => {
     expect(screen.queryByText(/人$/)).not.toBeInTheDocument();
   });
 
-  it('navigates to /anime/:id on click', () => {
+  it('renders as <a href> for crawlers and SPA-navigates on plain click', () => {
     renderCard({ anime: baseAnime });
-    fireEvent.click(screen.getByRole('button'));
+    const link = screen.getByRole('link');
+    expect(link).toHaveAttribute('href', '/anime/42');
+    fireEvent.click(link, { button: 0 });
     expect(screen.getByTestId('location')).toHaveTextContent('/anime/42');
   });
 
-  it('navigates on Enter key', () => {
+  it('does not preventDefault on cmd/ctrl-click (lets browser open new tab)', () => {
     renderCard({ anime: baseAnime });
-    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter' });
-    expect(screen.getByTestId('location')).toHaveTextContent('/anime/42');
-  });
-
-  it('does not navigate on other keys', () => {
-    renderCard({ anime: baseAnime });
-    fireEvent.keyDown(screen.getByRole('button'), { key: 'Space' });
+    const link = screen.getByRole('link');
+    fireEvent.click(link, { button: 0, metaKey: true });
     expect(screen.getByTestId('location')).toHaveTextContent('/');
   });
 
   it('sets accessible aria-label with picked title', () => {
     renderCard({ anime: baseAnime });
-    expect(screen.getByRole('button')).toHaveAttribute('aria-label', 'Sample Anime');
+    expect(screen.getByRole('link')).toHaveAttribute('aria-label', 'Sample Anime');
   });
 
   it('renders only first 2 genres', () => {
@@ -100,7 +97,7 @@ describe('AnimeCard', () => {
 
   it('applies hover styles and shows genres overlay on mouseenter', () => {
     const { container } = renderCard({ anime: baseAnime });
-    const card = screen.getByRole('button');
+    const card = screen.getByRole('link');
     const overlay = container.querySelector('.card-overlay');
     expect(overlay.style.opacity).toBe('0');
     fireEvent.mouseEnter(card);
