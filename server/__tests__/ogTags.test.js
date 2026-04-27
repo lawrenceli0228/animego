@@ -99,7 +99,7 @@ describe('ogTags middleware', () => {
 
       const res = await request(app).get('/anime/99999').set('User-Agent', GOOGLEBOT_UA)
       expect(res.status).toBe(200)
-      expect(res.text).toContain('<title>动画 #99999 - AnimeGoClub</title>')
+      expect(res.text).toContain('<title>动画 #99999 — AnimeGoClub</title>')
       expect(res.text).toContain('<link rel="canonical" href="https://animegoclub.com/anime/99999">')
       expect(res.text).toContain('og:url')
     })
@@ -138,6 +138,23 @@ describe('ogTags middleware', () => {
       expect(res.status).toBe(200)
       expect(res.text).toContain('季度新番')
     })
+
+    it('returns dynamic OG tags when ?year=&season= present', async () => {
+      const res = await request(app)
+        .get('/season?year=2025&season=SPRING')
+        .set('User-Agent', GOOGLEBOT_UA)
+      expect(res.status).toBe(200)
+      expect(res.text).toContain('2025年春季新番')
+      expect(res.text).toContain('canonical" href="https://animegoclub.com/season?year=2025&amp;season=SPRING"')
+    })
+
+    it('falls back to default when query is invalid', async () => {
+      const res = await request(app)
+        .get('/season?year=1800&season=BOGUS')
+        .set('User-Agent', GOOGLEBOT_UA)
+      expect(res.status).toBe(200)
+      expect(res.text).toContain('季度新番一览')
+    })
   })
 
   describe('/search route', () => {
@@ -146,11 +163,50 @@ describe('ogTags middleware', () => {
       expect(res.status).toBe(200)
       expect(res.text).toContain('搜索动画')
     })
+
+    it('returns noindex OG tags when ?q= present', async () => {
+      const res = await request(app)
+        .get('/search?q=进击的巨人')
+        .set('User-Agent', GOOGLEBOT_UA)
+      expect(res.status).toBe(200)
+      expect(res.text).toContain('搜索&quot;进击的巨人&quot;')
+      expect(res.text).toContain('noindex')
+    })
+  })
+
+  describe('/about route', () => {
+    it('returns OG tags with AboutPage schema (FAQ lives only on /faq)', async () => {
+      const res = await request(app).get('/about').set('User-Agent', GOOGLEBOT_UA)
+      expect(res.status).toBe(200)
+      expect(res.text).toContain('关于 AnimeGoClub')
+      expect(res.text).toContain('"@type":"AboutPage"')
+      // FAQ schema deliberately not on /about — avoids duplicate FAQ canonicals.
+      expect(res.text).not.toContain('"@type":"FAQPage"')
+    })
+  })
+
+  describe('/faq route', () => {
+    it('returns OG tags with FAQPage schema and rendered Q&A', async () => {
+      const res = await request(app).get('/faq').set('User-Agent', GOOGLEBOT_UA)
+      expect(res.status).toBe(200)
+      expect(res.text).toContain('AnimeGoClub 常见问题')
+      expect(res.text).toContain('"@type":"FAQPage"')
+      expect(res.text).toContain('AnimeGoClub 是免费的吗')
+    })
+  })
+
+  describe('/calendar route', () => {
+    it('returns OG tags for the broadcast calendar', async () => {
+      const res = await request(app).get('/calendar').set('User-Agent', GOOGLEBOT_UA)
+      expect(res.status).toBe(200)
+      expect(res.text).toContain('今日新番放送日历')
+      expect(res.text).toContain('放送日历')
+    })
   })
 
   describe('unknown routes', () => {
     it('falls through for unhandled paths', async () => {
-      const res = await request(app).get('/about').set('User-Agent', GOOGLEBOT_UA)
+      const res = await request(app).get('/profile').set('User-Agent', GOOGLEBOT_UA)
       expect(res.text).toBe('SPA')
     })
   })

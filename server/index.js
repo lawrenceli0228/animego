@@ -38,10 +38,18 @@ app.use(cookieParser());
 
 // Block requests from unauthorized host domains (anti-mirror/scraping)
 const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || 'animegoclub.com,localhost').split(',');
+// Defense-in-depth canonical host (nginx already redirects www → apex).
+const CANONICAL_HOST = process.env.CANONICAL_HOST || 'animegoclub.com';
 app.use((req, res, next) => {
   const host = (req.get('host') || '').replace(/:\d+$/, '');
-  if (ALLOWED_HOSTS.some(h => host === h || host.endsWith('.' + h))) return next();
-  res.status(403).send('Forbidden');
+  if (!ALLOWED_HOSTS.some(h => host === h || host.endsWith('.' + h))) {
+    return res.status(403).send('Forbidden');
+  }
+  // Redirect www and any non-canonical alias to apex so external links consolidate link equity.
+  if (host !== CANONICAL_HOST && host !== 'localhost' && !host.startsWith('localhost')) {
+    return res.redirect(301, `https://${CANONICAL_HOST}${req.originalUrl}`);
+  }
+  next();
 });
 
 app.use('/api', apiLimiter);
@@ -67,7 +75,6 @@ app.get('/googlec1c1aceafd3279a2.html', (req, res) => {
 
 // SEO: robots.txt, sitemap, OG tags (must be before static/SPA catch-all)
 app.get('/robots.txt', (req, res) => {
-  const site = process.env.SITE_URL || `${req.protocol}://${req.get('host')}`;
   res.type('text/plain').send(`User-agent: *
 Allow: /
 Disallow: /admin
@@ -79,6 +86,11 @@ Disallow: /reset-password
 Disallow: /profile
 Disallow: /player
 Disallow: /u/
+Disallow: /search?
+Disallow: /*?utm_
+Disallow: /*?ref=
+Disallow: /*?fbclid=
+Disallow: /*?gclid=
 
 Host: https://animegoclub.com
 Sitemap: https://animegoclub.com/sitemap.xml
