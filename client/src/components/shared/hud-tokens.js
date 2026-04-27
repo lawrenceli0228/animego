@@ -35,11 +35,13 @@ export const HUE = {
 
 /**
  * Player chrome hues — same OKLCH palette, but assigned semantically per
- * player-surface concern. Ingest=amber, stream=blue, status=cyan, live=green.
+ * player-surface concern. All ingest/stream/status surfaces sit in the iOS Blue
+ * family (per DESIGN.md `--accent` #0a84ff); only `live` breaks out for done-state
+ * green so success states stay distinguishable.
  */
 export const PLAYER_HUE = {
   stream: 210,    // header/stream identity
-  ingest: 30,     // DropZone, danmaku picker
+  ingest: 210,    // DropZone, danmaku picker — aligned to stream blue per DESIGN.md
   status: 200,    // MatchProgress connector bar
   live: 140,      // active/done states (greens)
 }

@@ -21,7 +21,7 @@
 import { useEffect, useState } from 'react'
 import { motion as Motion, useReducedMotion } from 'motion/react'
 import VideoPlayer from './VideoPlayer'
-import { CornerBrackets, ChapterBar } from '../shared/hud'
+import { CornerBrackets } from '../shared/hud'
 import { mono, PLAYER_HUE } from '../shared/hud-tokens'
 
 const HUE = PLAYER_HUE.stream
@@ -69,11 +69,6 @@ const s = {
     letterSpacing: '0.16em',
     pointerEvents: 'none',
     zIndex: 2,
-  },
-  progressBarWrap: {
-    position: 'relative',
-    height: 14,
-    marginTop: 10,
   },
 }
 
@@ -149,25 +144,6 @@ export default function PlayerHudFrame({
         >
           // EP {epLabel} //
         </Motion.span>
-      </div>
-
-      {/*
-        Below: thin horizontal chapter bar.
-        `key={progressKey}` re-mounts the bar each time the episode (and its
-        progress identity) changes, retriggering the scaleX entrance — gives a
-        visual "new episode loaded" moment without coupling to playback time.
-      */}
-      <div style={s.progressBarWrap} aria-hidden>
-        <ChapterBar
-          key={progressKey || 'default'}
-          hue={HUE}
-          orientation="horizontal"
-          top={6}
-          left={0}
-          delay={0.15}
-          trigger="mount"
-          style={{ width: '60%', height: 2 }}
-        />
       </div>
     </div>
   )
