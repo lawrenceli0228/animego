@@ -5,10 +5,15 @@
  * 无持久化、无 hash16M(P1 末期 hash 完才有)。
  * P3 落库时 id 从 `name|size|mtime` 软 id rekey 到 `hash(hash16M+size)`。
  *
+ * 字段名以 useVideoFiles 实际产物为准。
+ *
  * @typedef {Object} EpisodeItem
- * @property {string}  id                   - 软 id,格式 `name|size|mtime`
+ * @property {string}  fileId               - 软 id,格式 `name|size|mtime`
  * @property {File}    file                 - 原生 File 对象(不可序列化,仅会话有效)
- * @property {File}    [subtitleFile]       - 配对字幕文件(可选)
+ * @property {string}  fileName             - 文件名(file.name 的快照)
+ * @property {string}  relativePath         - webkitRelativePath 或 fileName
+ * @property {number|null} episode          - 从文件名解析出的集号(null 表示解析失败)
+ * @property {{ file: File, fileName: string, episode: number|null, type: string }|null} [subtitle] - 配对字幕信息(null 表示无字幕)
  * @property {string}  [parsedTitle]        - 从文件名解析出的番剧标题
  * @property {number}  [parsedNumber]       - 从文件名解析出的集号
  * @property {'main'|'sp'|'ova'|'movie'|'pv'|'unknown'} parsedKind - 集类型

@@ -46,8 +46,10 @@ export function createHashPool({
   const idle = [...workers];
 
   // Queue of pending requests waiting for a worker.
-  /** @type {Array<(worker: Worker) => void>} */
+  /** @type {Array<(worker: Worker | null) => void>} */
   const waiters = [];
+
+  let isDisposed = false;
 
   /** Acquire an idle worker, or wait until one becomes available. */
   function acquire() {
@@ -74,10 +76,15 @@ export function createHashPool({
    * Hash a file using a pooled worker.
    * @param {File} file
    * @param {{ timeoutMs?: number }} [opts]
-   * @returns {Promise<string>} hex md5 or '' on timeout/error
+   * @returns {Promise<string>} hex md5 or '' on timeout/error/disposed
    */
   async function hash(file, { timeoutMs = 10000 } = {}) {
+    if (isDisposed) return '';
+
     const worker = await acquire();
+
+    // Pool was disposed while this call was waiting in the queue.
+    if (worker === null) return '';
 
     return new Promise((resolve) => {
       let settled = false;
@@ -118,12 +125,15 @@ export function createHashPool({
 
   /** Terminate all workers. Call on component unmount. */
   function dispose() {
+    if (isDisposed) return;
+    isDisposed = true;
     for (const w of workers) {
       w.terminate();
     }
-    // Drain waiters so any in-flight hash() calls settle immediately.
+    // Drain waiters: resolve with null so hash() returns '' without touching
+    // any terminated worker.
     while (waiters.length > 0) {
-      waiters.shift()(workers[0]); // worker is already terminated; resolve path will hit onerror guard
+      waiters.shift()(null);
     }
   }
 

@@ -7,7 +7,7 @@ function makeFileId(file) {
 }
 
 /** Return the most common value in an array, or undefined if empty. */
-function mode(arr) {
+function mostCommon(arr) {
   if (!arr.length) return undefined;
   const freq = new Map();
   let best = arr[0];
@@ -76,7 +76,7 @@ export default function useVideoFiles() {
     const parsedTitles = parsed
       .map(f => parseAnimeKeyword(f.relativePath.split('/')[0]) || parseAnimeKeyword(f.fileName))
       .filter(Boolean);
-    const kw = mode(parsedTitles) || '';
+    const kw = mostCommon(parsedTitles) || '';
 
     setVideoFiles(prev => {
       if (mergeMode === 'replace') return parsed;

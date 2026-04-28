@@ -197,12 +197,12 @@ export default function PlayerPage() {
   }, []);
 
   const hashPoolRef = useRef(null);
-  if (hashPoolRef.current === null) {
-    hashPoolRef.current = createHashPool();
-  }
   useEffect(() => {
-    const pool = hashPoolRef.current;
-    return () => { pool.dispose(); hashPoolRef.current = null; };
+    hashPoolRef.current = createHashPool();
+    return () => {
+      hashPoolRef.current?.dispose();
+      hashPoolRef.current = null;
+    };
   }, []);
 
   // Determine current UI state — playback overlays match phase
@@ -238,6 +238,9 @@ export default function PlayerPage() {
 
     const pool = hashPoolRef.current;
     const getFilesHashes = async () => {
+      if (!pool) {
+        return files.map(f => ({ fileName: f.fileName, episode: f.episode, fileHash: '', fileSize: f.file.size }));
+      }
       const results = await Promise.all(files.map(async (f) => ({
         fileName: f.fileName,
         episode: f.episode,
