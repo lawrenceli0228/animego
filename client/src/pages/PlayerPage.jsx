@@ -227,7 +227,7 @@ export default function PlayerPage() {
   }, [playingEp, matchResult]);
 
   const handleFiles = useCallback(async (fileList) => {
-    const { files, keyword: kw } = processFiles(fileList);
+    const { files, keyword: kw } = processFiles(fileList, { mode: 'append' });
     if (!files.length) {
       toast.error(t('player.noVideos'));
       return;

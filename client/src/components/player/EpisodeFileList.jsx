@@ -262,7 +262,7 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
       {/* Episode list — all files playable, matched ones show episode title */}
       {videoFiles.map((f, i) => (
         <EpisodeRow
-          key={f.fileName}
+          key={f.fileId || f.fileName}
           index={i}
           episode={f.episode}
           fileName={f.fileName}

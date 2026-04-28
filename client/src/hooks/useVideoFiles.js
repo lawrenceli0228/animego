@@ -1,18 +1,45 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { isVideoFile, isSubtitleFile, parseEpisodeNumber, parseAnimeKeyword, getSubtitleType } from '../utils/episodeParser';
+import { isVideoFile, isSubtitleFile, parseEpisodeNumber, parseAnimeKeyword, getSubtitleType, parseEpisodeMeta } from '../utils/episodeParser';
+
+/** Soft id: stable within a browser session, matches types.js EpisodeItem.id convention. */
+function makeFileId(file) {
+  return `${file.name}|${file.size}|${file.lastModified}`;
+}
+
+/** Return the most common value in an array, or undefined if empty. */
+function mode(arr) {
+  if (!arr.length) return undefined;
+  const freq = new Map();
+  let best = arr[0];
+  let bestN = 0;
+  for (const v of arr) {
+    const n = (freq.get(v) ?? 0) + 1;
+    freq.set(v, n);
+    if (n > bestN) { bestN = n; best = v; }
+  }
+  return best;
+}
 
 export default function useVideoFiles() {
   const [videoFiles, setVideoFiles] = useState([]);
   const [keyword, setKeyword] = useState('');
-  const blobUrlRef = useRef(null);
-  const subBlobUrlRef = useRef(null);
+  // Map<fileId, blobUrl> — each file keeps its own URL; switching episodes does not revoke others.
+  const videoBlobMap = useRef(new Map());
+  const subBlobMap = useRef(new Map());
 
-  const processFiles = useCallback((fileList) => {
+  /**
+   * processFiles(fileList, options)
+   * options.mode = 'append' (default) | 'replace'
+   *   append: merge incoming files into existing list, skip duplicate fileIds.
+   *   replace: discard existing list (old single-file path behaviour).
+   */
+  const processFiles = useCallback((fileList, options = {}) => {
+    const { mode: mergeMode = 'append' } = options;
     const allFiles = Array.from(fileList);
     const videos = allFiles.filter(f => isVideoFile(f.name));
     if (!videos.length) return { files: [], keyword: '' };
 
-    // Collect subtitle files
+    // Collect subtitle files from this batch
     const subs = allFiles.filter(f => isSubtitleFile(f.name)).map(f => ({
       file: f,
       fileName: f.name,
@@ -22,59 +49,83 @@ export default function useVideoFiles() {
 
     const parsed = videos.map(file => {
       const episode = parseEpisodeNumber(file.name);
-      // Match subtitle by episode number, prefer ASS > SSA > SRT > VTT
+      const meta = parseEpisodeMeta(file.name);
       const matchedSub = episode != null
         ? subs
             .filter(s => s.episode === episode)
             .sort((a, b) => subPriority(a.type) - subPriority(b.type))[0]
         : findSubByName(file.name, subs);
       return {
+        fileId: makeFileId(file),
         file,
         fileName: file.name,
         relativePath: file.webkitRelativePath || file.name,
         episode,
         subtitle: matchedSub || null,
+        parsedTitle: meta.title,
+        parsedNumber: meta.number,
+        parsedKind: meta.kind,
+        parsedGroup: meta.group,
+        parsedResolution: meta.resolution,
       };
     });
 
     parsed.sort((a, b) => (a.episode ?? 999) - (b.episode ?? 999));
 
-    const folderName = parsed[0]?.relativePath?.split('/')[0];
-    const kw = parseAnimeKeyword(folderName) || parseAnimeKeyword(parsed[0]?.fileName) || '';
+    // Keyword: mode of parsedTitles across incoming batch, falling back to folder/first-file.
+    const parsedTitles = parsed
+      .map(f => parseAnimeKeyword(f.relativePath.split('/')[0]) || parseAnimeKeyword(f.fileName))
+      .filter(Boolean);
+    const kw = mode(parsedTitles) || '';
 
-    setVideoFiles(parsed);
-    setKeyword(kw);
+    setVideoFiles(prev => {
+      if (mergeMode === 'replace') return parsed;
+      // append: skip files already present (same fileId)
+      const existingIds = new Set(prev.map(f => f.fileId));
+      const incoming = parsed.filter(f => !existingIds.has(f.fileId));
+      if (!incoming.length) return prev;
+      const merged = [...prev, ...incoming];
+      merged.sort((a, b) => (a.episode ?? 999) - (b.episode ?? 999));
+      return merged;
+    });
+
+    setKeyword(prev => kw || prev);
     return { files: parsed, keyword: kw };
   }, []);
 
+  /**
+   * getVideoUrl(file) — returns a stable blob URL per fileId.
+   * Does NOT revoke other files' URLs on call.
+   */
   const getVideoUrl = useCallback((file) => {
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    blobUrlRef.current = URL.createObjectURL(file);
-    return blobUrlRef.current;
+    const id = makeFileId(file);
+    if (!videoBlobMap.current.has(id)) {
+      videoBlobMap.current.set(id, URL.createObjectURL(file));
+    }
+    return videoBlobMap.current.get(id);
   }, []);
 
   const getSubtitleUrl = useCallback((file) => {
-    if (subBlobUrlRef.current) URL.revokeObjectURL(subBlobUrlRef.current);
-    subBlobUrlRef.current = URL.createObjectURL(file);
-    return subBlobUrlRef.current;
+    const id = makeFileId(file);
+    if (!subBlobMap.current.has(id)) {
+      subBlobMap.current.set(id, URL.createObjectURL(file));
+    }
+    return subBlobMap.current.get(id);
   }, []);
 
   const clear = useCallback(() => {
-    if (blobUrlRef.current) {
-      URL.revokeObjectURL(blobUrlRef.current);
-      blobUrlRef.current = null;
-    }
-    if (subBlobUrlRef.current) {
-      URL.revokeObjectURL(subBlobUrlRef.current);
-      subBlobUrlRef.current = null;
-    }
+    videoBlobMap.current.forEach(url => URL.revokeObjectURL(url));
+    videoBlobMap.current.clear();
+    subBlobMap.current.forEach(url => URL.revokeObjectURL(url));
+    subBlobMap.current.clear();
     setVideoFiles([]);
     setKeyword('');
   }, []);
 
+  // Revoke all blob URLs on unmount
   useEffect(() => () => {
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    if (subBlobUrlRef.current) URL.revokeObjectURL(subBlobUrlRef.current);
+    videoBlobMap.current.forEach(url => URL.revokeObjectURL(url));
+    subBlobMap.current.forEach(url => URL.revokeObjectURL(url));
   }, []);
 
   return { videoFiles, keyword, processFiles, getVideoUrl, getSubtitleUrl, clear };

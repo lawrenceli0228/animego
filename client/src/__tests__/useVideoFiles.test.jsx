@@ -84,7 +84,7 @@ describe('useVideoFiles', () => {
     expect(result.current.keyword).toBe(ret.keyword);
   });
 
-  it('getVideoUrl creates a blob URL and revokes the previous one', () => {
+  it('getVideoUrl creates a stable blob URL per file and does not revoke for different files', () => {
     const { result } = renderHook(() => useVideoFiles());
     const a = makeFile('a.mkv');
     const b = makeFile('b.mkv');
@@ -96,17 +96,23 @@ describe('useVideoFiles', () => {
 
     act(() => { url2 = result.current.getVideoUrl(b); });
     expect(url2).toBe('blob:mock-2');
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-1');
+    // New contract: different files each get their own URL; no revocation on a fresh fileId.
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    // Calling again with the same file returns the cached URL without creating a new one.
+    let url1Again;
+    act(() => { url1Again = result.current.getVideoUrl(a); });
+    expect(url1Again).toBe(url1);
+    expect(createObjectURL).toHaveBeenCalledTimes(2); // only 2 total, not 3
   });
 
-  it('getSubtitleUrl tracks its own blob independent of video blob', () => {
+  it('getSubtitleUrl tracks its own blob independent of video blob, no cross-revocation', () => {
     const { result } = renderHook(() => useVideoFiles());
     act(() => { result.current.getVideoUrl(makeFile('v.mkv')); });
     act(() => { result.current.getSubtitleUrl(makeFile('s.ass')); });
-    // Second call of either should revoke only its own kind
+    // Second subtitle call with a different file — no revocation under new Map contract.
     act(() => { result.current.getSubtitleUrl(makeFile('s2.ass')); });
-    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-2');
+    expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 
   it('clear() revokes active URLs and resets state', () => {
