@@ -111,3 +111,78 @@ export function dandanToArtplayer(raw) {
     color: '#' + color.toString(16).padStart(6, '0'),
   };
 }
+
+// ─── P1 新增:集类型与完整元数据解析 ───────────────────────────────────────────
+
+const KIND_PATTERNS = {
+  sp:    /\b(?:SP\d*|OAD\d*)\b/i,
+  ova:   /\bOVA\d*\b/i,
+  movie: /(?:\bMovie\b|劇場版|剧场版)/i,
+  pv:    /(?:\bPV\d*\b|预告|預告)/i,
+};
+
+/**
+ * 从文件名推断集类型。
+ *
+ * 识别规则:
+ * - SP\d* / OAD\d*  → 'sp'
+ * - OVA\d*          → 'ova'
+ * - Movie / 劇場版 / 剧场版 → 'movie'
+ * - PV\d* / 预告 / 預告     → 'pv'
+ * - 有集号或常规文件名       → 'main'
+ * - 无以上特征且无数字       → 'unknown'
+ *
+ * @param {string} filename
+ * @returns {'main'|'sp'|'ova'|'movie'|'pv'|'unknown'}
+ */
+export function parseEpisodeKind(filename) {
+  if (!filename) return 'unknown';
+
+  if (KIND_PATTERNS.sp.test(filename))    return 'sp';
+  if (KIND_PATTERNS.ova.test(filename))   return 'ova';
+  if (KIND_PATTERNS.movie.test(filename)) return 'movie';
+  if (KIND_PATTERNS.pv.test(filename))    return 'pv';
+
+  // 含数字则视为正片,否则无法判断
+  if (/\d/.test(filename)) return 'main';
+  return 'unknown';
+}
+
+const GROUP_RE = /^\[([^\]]{1,30})\]/;
+const RESOLUTION_RE = /\b(2160[Pp]|4[Kk]|1080[Pp]|720[Pp]|480[Pp])\b/i;
+
+const RESOLUTION_LABEL_MAP = {
+  '4k': '2160p',
+};
+
+/**
+ * 从文件名解析剧集完整元数据,内部复用现有 parseEpisodeNumber / parseAnimeKeyword。
+ *
+ * @param {string} filename
+ * @returns {{ title: string|null, number: number|null, kind: 'main'|'sp'|'ova'|'movie'|'pv'|'unknown', group: string|null, resolution: '480p'|'720p'|'1080p'|'2160p'|null }}
+ */
+export function parseEpisodeMeta(filename) {
+  if (!filename) {
+    return { title: null, number: null, kind: 'unknown', group: null, resolution: null };
+  }
+
+  const title      = parseAnimeKeyword(filename);
+  const number     = parseEpisodeNumber(filename);
+  const kind       = parseEpisodeKind(filename);
+
+  const groupMatch = filename.match(GROUP_RE);
+  const group      = groupMatch ? groupMatch[1].trim() : null;
+
+  const resMatch   = filename.match(RESOLUTION_RE);
+  let resolution   = null;
+  if (resMatch) {
+    const raw = resMatch[1].toLowerCase().replace(/\s/g, '');
+    resolution = RESOLUTION_LABEL_MAP[raw] ?? raw.replace('p', 'p');
+    // 归一化为带小写 p 的标准标签
+    if (!resolution.endsWith('p')) resolution = resolution + 'p';
+    // 只接受四档
+    if (!['480p', '720p', '1080p', '2160p'].includes(resolution)) resolution = null;
+  }
+
+  return { title, number, kind, group, resolution };
+}

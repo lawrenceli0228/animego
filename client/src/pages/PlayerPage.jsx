@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { createHashPool } from '../lib/library/hashPool';
 import { useLang } from '../context/LanguageContext';
 import useVideoFiles from '../hooks/useVideoFiles';
 import useDandanMatch from '../hooks/useDandanMatch';
@@ -195,6 +196,15 @@ export default function PlayerPage() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  const hashPoolRef = useRef(null);
+  if (hashPoolRef.current === null) {
+    hashPoolRef.current = createHashPool();
+  }
+  useEffect(() => {
+    const pool = hashPoolRef.current;
+    return () => { pool.dispose(); hashPoolRef.current = null; };
+  }, []);
+
   // Determine current UI state — playback overlays match phase
   const uiPhase = playbackPhase === 'playing' ? 'playing' : phase;
 
@@ -226,23 +236,12 @@ export default function PlayerPage() {
     const epNums = files.map(f => f.episode).filter(Boolean);
     const firstFile = files[0]?.fileName || '';
 
-    const hashFile = (file) => new Promise((resolve) => {
-      try {
-        const worker = new Worker(
-          new URL('../workers/md5.worker.js', import.meta.url),
-          { type: 'module' }
-        );
-        worker.onmessage = (e) => { worker.terminate(); resolve(e.data.hash); };
-        worker.onerror = () => { worker.terminate(); resolve(null); };
-        worker.postMessage({ file });
-      } catch { resolve(null); }
-    });
-
+    const pool = hashPoolRef.current;
     const getFilesHashes = async () => {
       const results = await Promise.all(files.map(async (f) => ({
         fileName: f.fileName,
         episode: f.episode,
-        fileHash: await hashFile(f.file),
+        fileHash: await pool.hash(f.file),
         fileSize: f.file.size,
       })));
       return results;
