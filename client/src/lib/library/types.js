@@ -161,6 +161,19 @@
  */
 
 /**
+ * A persisted record in the fileHandles IDB store.
+ * Stores a FileSystemDirectoryHandle alongside metadata.
+ *
+ * @typedef {Object} HandleRecord
+ * @property {string} id                          - ulid
+ * @property {string} libraryId                   - foreign key to libraries table
+ * @property {string} name                        - handle.name snapshot
+ * @property {FileSystemDirectoryHandle} handle   - the directory handle (IDB-serializable)
+ * @property {number} addedAt                     - unix ms when first saved
+ * @property {number} lastSeenAt                  - unix ms last updated
+ */
+
+/**
  * Events emitted by importPipeline.runImport().
  * Consumers pass an onEvent callback to receive progress updates.
  *
