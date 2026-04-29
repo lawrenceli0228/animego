@@ -385,6 +385,16 @@ const zh = {
       metaMaintenance: '维护模式 · 2026 春',
     },
   },
+  // Library
+  library: {
+    addFolder: '添加文件夹',
+    dropFolder: '拖入文件夹',
+    unsupportedBanner: '当前浏览器不会跨会话保留本地媒体库。',
+    recentlyPlayed: '最近播放',
+    localBadge: '本地',
+    reauthorize: '重新授权',
+    noSeries: '尚无系列 — 添加文件夹以开始。',
+  },
   // Admin
   admin: {
     title: '管理后台',

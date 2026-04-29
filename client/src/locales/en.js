@@ -385,6 +385,16 @@ const en = {
       metaMaintenance: 'Maintenance mode · Spring 2026',
     },
   },
+  // Library
+  library: {
+    addFolder: 'Add folder',
+    dropFolder: 'Drop folder here',
+    unsupportedBanner: 'Your browser does not keep libraries between sessions.',
+    recentlyPlayed: 'Recently played',
+    localBadge: 'LOCAL',
+    reauthorize: 'Reauthorize',
+    noSeries: 'No series yet — add a folder to get started.',
+  },
   // Admin
   admin: {
     title: 'Admin Dashboard',
