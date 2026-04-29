@@ -125,9 +125,9 @@ describe('useFileHandles', () => {
 
     const { result } = renderHook(() => useFileHandles({ db: testDb }));
 
-    await waitFor(() => result.current.status === 'denied' || result.current.status === 'ready');
-    // When any handle has denied permission, status should reflect denied
-    expect(['denied', 'ready']).toContain(result.current.status);
+    await waitFor(() => {
+      expect(['denied', 'ready']).toContain(result.current.status);
+    });
   });
 
   it('dropFolder calls store.dropRoot', async () => {

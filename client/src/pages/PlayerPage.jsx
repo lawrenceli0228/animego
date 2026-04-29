@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { createHashPool } from '../lib/library/hashPool';
 import { groupByFolder } from '../lib/library/grouping';
 import { flattenDropFiles } from '../utils/dropFiles';
@@ -7,6 +8,9 @@ import useVideoFiles from '../hooks/useVideoFiles';
 import useDandanMatch from '../hooks/useDandanMatch';
 import useDandanComments from '../hooks/useDandanComments';
 import usePlaybackSession from '../hooks/usePlaybackSession';
+import useFileHandles from '../hooks/useFileHandles';
+import useSeriesDetail from '../hooks/useSeriesDetail';
+import { db } from '../lib/library/db/db.js';
 import DropZone from '../components/player/DropZone';
 import MatchProgress from '../components/player/MatchProgress';
 import ManualSearch from '../components/player/ManualSearch';
@@ -212,8 +216,43 @@ function HudDanmakuButton({ onClick, label }) {
   );
 }
 
+/**
+ * Adapter: build a minimal pickedItems-compatible array from IDB episodes +
+ * fileRefByEpisode so the existing EpisodeFileList can be reused.
+ *
+ * @param {import('../lib/library/types').Episode[]} episodes
+ * @param {Map<string, import('../lib/library/types').FileRef>} fileRefByEpisode
+ * @returns {import('../lib/library/types').EpisodeItem[]}
+ */
+function episodeListFromSeriesDetail(episodes, fileRefByEpisode) {
+  return episodes.map((ep) => {
+    const ref = fileRefByEpisode.get(ep.id);
+    const fileName = ref ? ref.relPath.split('/').pop() || ref.relPath : `EP${ep.number}`;
+    return {
+      // EpisodeItem-compatible shape (file is null — resolved lazily via getFile)
+      fileId: ep.id,
+      file: null,
+      fileName,
+      relativePath: ref ? ref.relPath : fileName,
+      episode: ep.number,
+      parsedKind: ep.kind || 'main',
+      // library extras
+      _episodeId: ep.id,
+      _episodeRecord: ep,
+      _fileRef: ref || null,
+    };
+  });
+}
+
 export default function PlayerPage() {
   const { t } = useLang();
+  // P3: library mode entry — read seriesId from navigation state
+  const location = useLocation();
+  const locationSeriesId = location?.state?.seriesId ?? null;
+
+  const fileHandles = useFileHandles({ db });
+  const seriesDetail = useSeriesDetail(locationSeriesId, { db, fileHandles });
+
   const { videoFiles, keyword, processFiles, getVideoUrl, getSubtitleUrl, clear: clearFiles } = useVideoFiles();
   const {
     phase, stepStatus, matchResult, error,
@@ -369,6 +408,38 @@ export default function PlayerPage() {
     resetMatch();
   }, [stopPlayback, clearFiles, resetMatch]);
 
+  // P3: library mode — episode click handler
+  const handleLibraryEpisodePlay = useCallback(async (episodeId) => {
+    const file = await seriesDetail.getFile(episodeId);
+    if (!file) {
+      toast.error(t('library.fileMissing'));
+      return;
+    }
+    const ep = seriesDetail.episodes.find((e) => e.id === episodeId);
+    const fileRef = seriesDetail.fileRefByEpisode.get(episodeId);
+    if (!ep || !fileRef) return;
+
+    // Build episodeMap for danmaku pipeline
+    /** @type {Record<number, { dandanEpisodeId?: number }>} */
+    const episodeMap = {};
+    for (const e of seriesDetail.episodes) {
+      if (e.number != null) {
+        episodeMap[e.number] = { dandanEpisodeId: e.episodeId };
+      }
+    }
+
+    const fileItem = {
+      fileId: fileRef.id,
+      file,
+      fileName: fileRef.relPath.split('/').pop() || fileRef.relPath,
+      relativePath: fileRef.relPath,
+      episode: ep.number,
+      parsedKind: ep.kind || 'main',
+    };
+
+    startPlayback(fileItem, episodeMap);
+  }, [seriesDetail, startPlayback, t]);
+
   // Page-level drag/drop. The inner DropZone only renders in idle phase, so
   // dragging files onto the page when match is ready/playing/manual/error
   // would otherwise be silently ignored. Here we accept a drop in any phase
@@ -458,8 +529,37 @@ export default function PlayerPage() {
         </div>
       )}
 
-      {/* IDLE */}
-      {uiPhase === 'idle' && (
+      {/* LIBRARY MODE — seriesId entry path (P3) */}
+      {locationSeriesId && seriesDetail.status === 'ready' && playbackPhase !== 'playing' && (
+        <div data-testid="library-episode-list" style={{ marginTop: 32, ...fadeUp }}>
+          {episodeListFromSeriesDetail(seriesDetail.episodes, seriesDetail.fileRefByEpisode).map((item) => (
+            <button
+              key={item.fileId}
+              onClick={() => handleLibraryEpisodePlay(item._episodeId)}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '10px 16px', marginBottom: 4,
+                background: `oklch(14% 0.04 ${HUE} / 0.55)`,
+                border: `1px solid oklch(46% 0.06 ${HUE} / 0.35)`,
+                borderRadius: 4, cursor: 'pointer', color: '#fff',
+                fontFamily: "'JetBrains Mono',monospace", fontSize: 13,
+              }}
+              type="button"
+            >
+              {`EP ${String(item.episode).padStart(2, '0')}`}
+              {item.fileName && ` · ${item.fileName}`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* IDLE — only shown when NOT in library mode */}
+      {uiPhase === 'idle' && !locationSeriesId && (
+        <div style={fadeUp}><DropZone onFiles={handleFiles} /></div>
+      )}
+
+      {/* IDLE fallback when in library mode but not yet ready */}
+      {locationSeriesId && seriesDetail.status === 'idle' && (
         <div style={fadeUp}><DropZone onFiles={handleFiles} /></div>
       )}
 

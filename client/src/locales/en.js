@@ -394,6 +394,7 @@ const en = {
     localBadge: 'LOCAL',
     reauthorize: 'Reauthorize',
     noSeries: 'No series yet — add a folder to get started.',
+    fileMissing: 'File not found or permission denied',
   },
   // Admin
   admin: {

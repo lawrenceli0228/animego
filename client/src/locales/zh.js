@@ -394,6 +394,7 @@ const zh = {
     localBadge: '本地',
     reauthorize: '重新授权',
     noSeries: '尚无系列 — 添加文件夹以开始。',
+    fileMissing: '文件丢失或未授权访问',
   },
   // Admin
   admin: {
