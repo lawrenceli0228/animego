@@ -45,6 +45,36 @@
 // ─── P3 IDB 冻结锚点(P1 不实现,仅占位供阅读者对齐设计文档 §3) ──────────────
 
 /**
+ * Cluster of groups that share the same normalized title tokens.
+ * Produced by clusterize(); consumed by seriesMatcher.
+ *
+ * @typedef {Object} MatchCluster
+ * @property {string}   clusterKey          - FNV-1a 8-char hex hash of normalizedTokens.join('|'), or groupKey for singletons with empty tokens
+ * @property {string[]} normalizedTokens     - token array used for bucketing
+ * @property {Group[]}  groups              - 1+ groups merged because their parsedTitle normalizes equal
+ * @property {EpisodeItem[]} items          - flattened, sorted by (groupKey, episode|fileName)
+ * @property {EpisodeItem|null} representative - first item with episode!=null and parsedKind=='main', else first item overall
+ * @property {number}   [animeIdHint]       - if any group's first item has parsedTitle matching priorSeasons normalized, prefilled
+ */
+
+/**
+ * The result of matching a single MatchCluster against existing records or building new ones.
+ *
+ * @typedef {Object} MatchVerdict
+ * @property {'reuse'|'new'|'ambiguous'|'failed'} kind
+ * @property {string}  [seriesId]       - when kind='reuse'
+ * @property {string}  [seasonId]       - when kind='reuse'
+ * @property {number}  [animeId]        - when kind='reuse'
+ * @property {Series}  [seriesRecord]   - when kind='new'
+ * @property {Season}  [seasonRecord]   - when kind='new' (null when dandanplay not yet called)
+ * @property {Episode[]} [episodeRecords] - when kind='new'
+ * @property {FileRef[]} [fileRefRecords] - when kind='new'
+ * @property {number}  [confidence]     - when kind='new', 0..1
+ * @property {{ animeId:number, animeTitle:string, score:number }[]} [candidates] - when kind='ambiguous'
+ * @property {string}  [reason]         - when kind='failed'
+ */
+
+/**
  * 系列(跨季聚合,id 永远不用 animeId 派生)。
  * animeId 已下放到 Season.animeId。
  *
