@@ -159,3 +159,16 @@
  * @property {string[]} normalizedTokens  - anitomy 归一化后的标题 token 数组
  * @property {number}   updatedAt
  */
+
+/**
+ * Events emitted by importPipeline.runImport().
+ * Consumers pass an onEvent callback to receive progress updates.
+ *
+ * @typedef {Object} ImportEvent
+ * @property {'clusterStart'|'clusterDone'|'failed'|'finish'} kind
+ * @property {string}  [clusterKey]
+ * @property {number}  [total]
+ * @property {'matched'|'ambiguous'|'failed'} [verdict]
+ * @property {string}  [error]
+ * @property {{clusters:number,matched:number,failed:number,ambiguous:number}} [summary]
+ */
