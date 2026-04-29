@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { createHashPool } from '../lib/library/hashPool';
+import { groupByFolder } from '../lib/library/grouping';
 import { flattenDropFiles } from '../utils/dropFiles';
 import { useLang } from '../context/LanguageContext';
 import useVideoFiles from '../hooks/useVideoFiles';
@@ -165,6 +166,17 @@ const s = {
   },
 };
 
+// Tiny `{{var}}` interpolation for toast strings — t() doesn't support it.
+// Param renamed `tpl` so it doesn't shadow the module-level `s` styles object.
+function fmtTpl(tpl, vars) {
+  return String(tpl).replace(/\{\{(\w+)\}\}/g, (_, k) => (vars[k] ?? ''));
+}
+
+function fmtMmSs(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
 function isMobile() {
   return window.innerWidth <= 600;
 }
@@ -213,6 +225,7 @@ export default function PlayerPage() {
     phase: playbackPhase,
     playingFile, playingEp, videoUrl, subtitleUrl,
     play: startPlayback, back: stopPlayback,
+    resumeAt, setLastTime,
   } = playback;
 
   const [pickerEp, setPickerEp] = useState(null);
@@ -236,14 +249,44 @@ export default function PlayerPage() {
   // Determine current UI state — playback overlays match phase
   const uiPhase = playbackPhase === 'playing' ? 'playing' : phase;
 
-  // Episode numbers from matched files
+  // P2: same-folder grouping. Multi-folder drops auto-pick the largest group;
+  // P3 will replace this auto-pick with a real picker UI.
+  const groups = useMemo(() => groupByFolder(videoFiles), [videoFiles]);
+  const pickedItems = groups[0]?.items ?? videoFiles;
+  const skippedFileCount = useMemo(
+    () => groups.slice(1).reduce((n, g) => n + g.items.length, 0),
+    [groups],
+  );
+
+  // Episode numbers from matched files (now drawn from picked group only)
   const episodes = useMemo(() => {
     if (!matchResult?.episodeMap) return [];
-    return videoFiles
+    return pickedItems
       .filter(f => f.episode != null && matchResult.episodeMap[f.episode])
       .map(f => f.episode)
       .sort((a, b) => a - b);
-  }, [videoFiles, matchResult]);
+  }, [pickedItems, matchResult]);
+
+  // Toast on multi-folder auto-pick. Fires once per groups identity.
+  const lastGroupsKey = useRef(null);
+  useEffect(() => {
+    if (!groups.length) { lastGroupsKey.current = null; return; }
+    const key = groups.map(g => `${g.groupKey}:${g.items.length}`).join('|');
+    if (lastGroupsKey.current === key) return;
+    lastGroupsKey.current = key;
+    if (groups.length > 1) {
+      const picked = groups[0];
+      const labelText = picked.groupKey === '__root__' ? t('player.rootFolder') : picked.label;
+      toast(fmtTpl(t('player.multiFolderToast'), {
+        label: labelText,
+        picked: picked.items.length,
+        others: skippedFileCount,
+      }));
+    }
+    if (groups[0]?.hasAmbiguity) {
+      toast(t('player.alphaFallbackToast'));
+    }
+  }, [groups, skippedFileCount, t]);
 
   // Stable per-episode key for progress memory (localStorage)
   const progressKey = useMemo(() => {
@@ -287,12 +330,36 @@ export default function PlayerPage() {
     startPlayback(fileItem, matchResult?.episodeMap);
   }, [startPlayback, matchResult]);
 
+  // P2: throttled progress tick from VideoPlayer → in-memory lastTime Map.
+  // playingFile read via ref so the throttled callback in VideoPlayer never
+  // sees a stale fileId during the one-render window before its ref syncs.
+  const playingFileIdRef = useRef(null);
+  useEffect(() => { playingFileIdRef.current = playingFile?.fileId ?? null; }, [playingFile]);
+  const handleProgressTick = useCallback((sec) => {
+    const id = playingFileIdRef.current;
+    if (id) setLastTime(id, sec);
+  }, [setLastTime]);
+
+  // P2: resume toast — fires once per play() that actually resumes (>0).
+  // Rendered as info, not error; only when no localStorage progressKey exists
+  // (matched files keep their own restore semantics).
+  const lastResumeToastForFile = useRef(null);
+  useEffect(() => {
+    if (!playingFile || !resumeAt || progressKey) return;
+    if (lastResumeToastForFile.current === playingFile.fileId) return;
+    lastResumeToastForFile.current = playingFile.fileId;
+    toast(fmtTpl(t('player.resumedAt'), { time: fmtMmSs(resumeAt) }));
+  }, [playingFile, resumeAt, progressKey, t]);
+
   const handleEpisodeSwitch = useCallback((epNum) => {
-    const fileItem = videoFiles.find(f => f.episode === epNum);
+    const fileItem = pickedItems.find(f => f.episode === epNum);
     if (fileItem) startPlayback(fileItem, matchResult?.episodeMap);
-  }, [videoFiles, startPlayback, matchResult]);
+  }, [pickedItems, startPlayback, matchResult]);
 
   const handleBackToList = useCallback(() => {
+    // Reset the once-per-file guard so re-playing the same file with an
+    // updated lastTime can re-fire the resume toast.
+    lastResumeToastForFile.current = null;
     stopPlayback();
   }, [stopPlayback]);
 
@@ -343,9 +410,9 @@ export default function PlayerPage() {
   }, [uiPhase, stopPlayback, resetMatch, handleFiles]);
 
   const handleManualSelect = useCallback((anime) => {
-    const epNums = videoFiles.map(f => f.episode).filter(Boolean);
+    const epNums = pickedItems.map(f => f.episode).filter(Boolean);
     selectManual(anime, epNums);
-  }, [videoFiles, selectManual]);
+  }, [pickedItems, selectManual]);
 
   const handleUpdateDanmaku = useCallback((epNum, data, newAnime) => {
     updateEpisodeMap(epNum, data, newAnime);
@@ -437,7 +504,7 @@ export default function PlayerPage() {
             anime={matchResult.anime}
             siteAnime={matchResult.siteAnime}
             episodeMap={matchResult.episodeMap}
-            videoFiles={videoFiles}
+            videoFiles={pickedItems}
             onPlay={handlePlay}
             onClear={handleClearAll}
             onSetDanmaku={setPickerEp}
@@ -488,6 +555,8 @@ export default function PlayerPage() {
               progressKey={progressKey}
               episode={playingEp}
               danmakuCount={danmakuCount}
+              resumeAt={resumeAt}
+              onProgressTick={handleProgressTick}
             />
             {danmakuCount === 0 && (
               <div style={s.danmakuInfo}>{t('player.noDanmaku')}</div>

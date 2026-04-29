@@ -150,7 +150,7 @@ function writeProgress(key, t) {
   }
 }
 
-export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnded, progressKey }) {
+export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnded, progressKey, resumeAt = null, onProgressTick }) {
   const containerRef = useRef(null);
   const artRef = useRef(null);
   const progressKeyRef = useRef(progressKey);
@@ -159,10 +159,15 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
   const subtitleOffsetRef = useRef(readSubtitleOffset());
   const playbackRateRef = useRef(readPlaybackRate());
   const danmakuVisibleRef = useRef(readDanmakuVisible());
+  // P2 in-memory resume — used only when progressKey is absent (unmatched files).
+  const resumeAtRef = useRef(resumeAt);
+  const onProgressTickRef = useRef(onProgressTick);
 
   // Keep refs in sync so async init / event handlers always see the latest values.
   useEffect(() => { progressKeyRef.current = progressKey; }, [progressKey]);
   useEffect(() => { danmakuListRef.current = danmakuList; }, [danmakuList]);
+  useEffect(() => { resumeAtRef.current = resumeAt; }, [resumeAt]);
+  useEffect(() => { onProgressTickRef.current = onProgressTick; }, [onProgressTick]);
 
   useEffect(() => {
     if (!containerRef.current || !videoUrl) return;
@@ -306,21 +311,32 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
       let restored = false;
       let lastSaveAt = 0;
       art.on('video:canplay', () => {
-        const key = progressKeyRef.current;
-        if (!key || restored) return;
+        if (restored) return;
         restored = true;
-        const saved = readProgress(key);
-        if (saved != null && saved > RESTORE_MIN_SECONDS && saved < art.duration - RESTORE_TAIL_MARGIN) {
-          art.currentTime = saved;
+        const key = progressKeyRef.current;
+        // localStorage path (matched files) takes precedence — richer signal,
+        // survives reload. Fall back to in-memory resumeAt only when no key.
+        if (key) {
+          const saved = readProgress(key);
+          if (saved != null && saved > RESTORE_MIN_SECONDS && saved < art.duration - RESTORE_TAIL_MARGIN) {
+            art.currentTime = saved;
+          }
+          return;
+        }
+        const ra = resumeAtRef.current;
+        if (typeof ra === 'number' && ra > RESTORE_MIN_SECONDS && ra < art.duration - RESTORE_TAIL_MARGIN) {
+          art.currentTime = ra;
         }
       });
       art.on('video:timeupdate', () => {
-        const key = progressKeyRef.current;
-        if (!key) return;
         const now = Date.now();
         if (now - lastSaveAt < SAVE_INTERVAL_MS) return;
         lastSaveAt = now;
-        if (art.currentTime > RESTORE_MIN_SECONDS) writeProgress(key, art.currentTime);
+        const key = progressKeyRef.current;
+        if (key && art.currentTime > RESTORE_MIN_SECONDS) writeProgress(key, art.currentTime);
+        // P2: also notify the hook so unmatched files can resume across episode switches.
+        const tick = onProgressTickRef.current;
+        if (tick && art.currentTime > RESTORE_MIN_SECONDS) tick(art.currentTime);
       });
 
       // Heatmap is always visible (design tuning) — set the attribute so the
@@ -369,6 +385,11 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
       const key = progressKeyRef.current;
       if (key && inst.currentTime > RESTORE_MIN_SECONDS && inst.currentTime < inst.duration - RESTORE_TAIL_MARGIN) {
         writeProgress(key, inst.currentTime);
+      }
+      // P2: also flush in-memory tick so the next play() can resume.
+      const tick = onProgressTickRef.current;
+      if (tick && inst.currentTime > RESTORE_MIN_SECONDS && inst.currentTime < inst.duration - RESTORE_TAIL_MARGIN) {
+        tick(inst.currentTime);
       }
       inst.destroy(false);
       artRef.current = null;

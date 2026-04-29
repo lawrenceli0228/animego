@@ -22,6 +22,26 @@
  * @property {string}  [hash16M]            - 首 16MB SparkMD5(P1 末期 hash 完才填入)
  */
 
+// ─── P2 同文件夹分组冻结锚点(P3 SeriesMatcher 复用此形状) ────────────────────
+
+/**
+ * 同文件夹自动分组的产物(P2 引入,P3 SeriesMatcher 直接消费)。
+ * 一次 `groupByFolder(EpisodeItem[])` 调用产出 `Group[]`,按 items.length desc / groupKey asc 排序。
+ *
+ * P3 演化:
+ *   - `id` 在 P2 是会话内随机 ulid,P3 落库时 rekey 为 `hash(libraryId + groupKey)` 跨会话稳定
+ *   - `groupKey` 即 P3 SeriesMatcher 跨 batch 归并的候选键(同 key 进同一 cluster)
+ *   - `Series` 在 P3 含 `Group[]`,所以本形状必须冻结
+ *
+ * @typedef {Object} Group
+ * @property {string}  id            - 会话内随机 id(P3 落库后 rekey 为稳定值)
+ * @property {string}  groupKey      - 目录键(`relativePath` 的 dirname,根目录为 `__root__`)
+ * @property {string}  label         - 给 UI 用的可读名(`groupKey` 末段;根目录显示 `(根)`)
+ * @property {EpisodeItem[]} items   - 已排序(默认按 episode asc,歧义时按 fileName 字母序)
+ * @property {'episode'|'alpha'} sortMode  - 排序模式;'alpha' 表示触发了歧义回退
+ * @property {boolean} hasAmbiguity  - 同集号多 kind / 主线带空洞被 sp/ova 填补 等情况为 true
+ */
+
 // ─── P3 IDB 冻结锚点(P1 不实现,仅占位供阅读者对齐设计文档 §3) ──────────────
 
 /**
