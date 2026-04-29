@@ -185,6 +185,7 @@ const zh = {
   player: {
     dropLabel: '选择视频文件夹',
     dropTitle: '拖入番剧文件夹 或 点击选择',
+    dropReplace: '松开以替换当前内容',
     singleFile: '也可以选择单个视频文件',
     noVideos: '未找到视频文件',
     loaded: '已加载',

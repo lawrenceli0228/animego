@@ -3,6 +3,7 @@ import { motion as Motion, useReducedMotion } from 'motion/react';
 import { useLang } from '../../context/LanguageContext';
 import { ChapterBar, CornerBrackets } from '../shared/hud';
 import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+import { flattenDropFiles } from '../../utils/dropFiles';
 
 const HUE = PLAYER_HUE.ingest;
 
@@ -80,11 +81,12 @@ export default function DropZone({ onFiles }) {
 
   const handleDragLeave = useCallback(() => setDragging(false), []);
 
-  const handleDrop = useCallback((e) => {
+  const handleDrop = useCallback(async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragging(false);
-    const files = e.dataTransfer?.files;
-    if (files?.length) onFiles(files);
+    const files = await flattenDropFiles(e.dataTransfer);
+    if (files.length) onFiles(files);
   }, [onFiles]);
 
   const handleFolderChange = useCallback((e) => {

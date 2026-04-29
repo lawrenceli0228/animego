@@ -37,18 +37,27 @@ describe('dandanplay.service', () => {
       expect(AnimeCache.find).toHaveBeenCalledTimes(1)
     })
 
-    it('escapes regex special characters in keyword', async () => {
+    it('strips punctuation between tokens so `:`/`-`/`~` variants all match', async () => {
+      // After punctuation tolerance, "Kaguya-sama wa Kokurasetai - Otona e no Kaidan"
+      // and "Kaguya-sama wa Kokurasetai: Otona e no Kaidan" produce the same token
+      // sequence and the regex should match the colon-separated cache title.
       AnimeCache.find.mockReturnValue({
         limit: jest.fn().mockReturnValue({
           lean: jest.fn().mockResolvedValue([]),
         }),
       })
+      await dandanplay.searchAnimeCache('Kaguya-sama wa Kokurasetai - Otona e no Kaidan')
+      const regex = AnimeCache.find.mock.calls[0][0].$or[0].titleChinese
+      expect(regex.test('Kaguya-sama wa Kokurasetai: Otona e no Kaidan')).toBe(true)
+      expect(regex.test('Kaguya~sama~wa~Kokurasetai~Otona~e~no~Kaidan')).toBe(true)
+      // Token order still matters — shuffled tokens must not match.
+      expect(regex.test('Otona e no Kaidan Kaguya')).toBe(false)
+    })
 
-      await dandanplay.searchAnimeCache('test.+value')
-      const call = AnimeCache.find.mock.calls[0][0]
-      // The regex should have escaped the dot and plus
-      expect(call.$or[0].titleChinese.source).toContain('\\.')
-      expect(call.$or[0].titleChinese.source).toContain('\\+')
+    it('returns empty result when keyword has no word characters', async () => {
+      const result = await dandanplay.searchAnimeCache('---:::')
+      expect(result).toEqual([])
+      expect(AnimeCache.find).not.toHaveBeenCalled()
     })
   })
 

@@ -39,10 +39,22 @@ function escapeRegex(str) {
 }
 
 // ─── AnimeCache search ───────────────────────────────────────────────────────
+// Build a punctuation-tolerant regex: tokenize the keyword on letters/digits,
+// require tokens in order separated by any non-word run. This way fansub
+// filenames using `-` as the title/subtitle delimiter still match cache rows
+// that store the same title with `:` or `~` (e.g.
+// "Kaguya-sama wa Kokurasetai - Otona ..." vs "Kokurasetai: Otona ...").
+function buildKeywordRegex(keyword) {
+  const tokens = String(keyword).slice(0, 100).match(/[\p{L}\p{N}]+/gu);
+  if (!tokens || !tokens.length) return null;
+  const pattern = tokens.map(escapeRegex).join('[\\W_]*');
+  return new RegExp(pattern, 'i');
+}
+
 async function searchAnimeCache(keyword) {
   if (!keyword) return [];
-  const escaped = escapeRegex(keyword.slice(0, 100));
-  const regex = new RegExp(escaped, 'i');
+  const regex = buildKeywordRegex(keyword);
+  if (!regex) return [];
   const results = await AnimeCache.find({
     $or: [
       { titleChinese: regex },

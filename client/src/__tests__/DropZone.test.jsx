@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import DropZone from '../components/player/DropZone';
 
 vi.mock('../context/LanguageContext', () => ({
@@ -23,16 +23,19 @@ describe('DropZone', () => {
     expect(screen.getByRole('button', { name: 'drop label' })).toBeInTheDocument();
   });
 
-  it('calls onFiles when files are dropped', () => {
+  it('calls onFiles when files are dropped', async () => {
     const onFiles = vi.fn();
     render(<DropZone onFiles={onFiles} />);
     const zone = screen.getByRole('button', { name: 'drop label' });
 
     const files = [makeFile('a.mkv')];
+    // No `items` API in this drop event — flattenDropFiles falls back to
+    // dataTransfer.files. The handler is async (folder recursion path), so
+    // wait for the microtask before asserting.
     fireEvent.drop(zone, { dataTransfer: { files } });
 
-    expect(onFiles).toHaveBeenCalledTimes(1);
-    expect(onFiles.mock.calls[0][0]).toBe(files);
+    await waitFor(() => expect(onFiles).toHaveBeenCalledTimes(1));
+    expect(onFiles.mock.calls[0][0]).toEqual(files);
   });
 
   it('does not call onFiles when a drop event has no files', () => {

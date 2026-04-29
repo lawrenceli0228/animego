@@ -185,6 +185,7 @@ const en = {
   player: {
     dropLabel: 'Select video folder',
     dropTitle: 'Drag anime folder here or click to select',
+    dropReplace: 'Drop to replace current session',
     singleFile: 'Or select a single video file',
     noVideos: 'No video files found',
     loaded: 'Loaded',

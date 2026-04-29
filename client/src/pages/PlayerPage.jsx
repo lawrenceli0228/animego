@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { createHashPool } from '../lib/library/hashPool';
+import { flattenDropFiles } from '../utils/dropFiles';
 import { useLang } from '../context/LanguageContext';
 import useVideoFiles from '../hooks/useVideoFiles';
 import useDandanMatch from '../hooks/useDandanMatch';
@@ -135,6 +136,33 @@ const s = {
     background: '#0a84ff', color: '#fff', border: 'none',
     fontSize: 14, fontWeight: 500, cursor: 'pointer',
   },
+  // Page-level drop overlay — only shown while dragging Files in non-idle phase.
+  dropOverlay: {
+    position: 'fixed', inset: 0, zIndex: 9000,
+    background: `oklch(14% 0.04 ${HUE_DANMAKU} / 0.78)`,
+    backdropFilter: 'blur(6px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  dropOverlayInner: {
+    border: `2px dashed oklch(72% 0.19 ${HUE_DANMAKU})`,
+    borderRadius: 4,
+    padding: '64px 96px',
+    textAlign: 'center',
+    background: `oklch(14% 0.04 ${HUE_DANMAKU} / 0.55)`,
+  },
+  dropOverlayEyebrow: {
+    ...mono,
+    fontSize: 11,
+    color: `oklch(78% 0.15 ${HUE_DANMAKU})`,
+    textTransform: 'uppercase',
+    letterSpacing: '0.20em',
+    marginBottom: 12,
+  },
+  dropOverlayTitle: {
+    fontFamily: "'Sora',sans-serif", fontWeight: 700,
+    fontSize: 28, color: '#fff', letterSpacing: '-0.01em',
+  },
 };
 
 function isMobile() {
@@ -226,8 +254,9 @@ export default function PlayerPage() {
     return `animego:progress:${id}:${playingEp}`;
   }, [playingEp, matchResult]);
 
-  const handleFiles = useCallback(async (fileList) => {
-    const { files, keyword: kw } = processFiles(fileList, { mode: 'append' });
+  const handleFiles = useCallback(async (fileList, opts = {}) => {
+    const mode = opts.mode || 'append';
+    const { files, keyword: kw } = processFiles(fileList, { mode });
     if (!files.length) {
       toast.error(t('player.noVideos'));
       return;
@@ -273,6 +302,46 @@ export default function PlayerPage() {
     resetMatch();
   }, [stopPlayback, clearFiles, resetMatch]);
 
+  // Page-level drag/drop. The inner DropZone only renders in idle phase, so
+  // dragging files onto the page when match is ready/playing/manual/error
+  // would otherwise be silently ignored. Here we accept a drop in any phase
+  // and replace the current session with the new files.
+  const [pageDragging, setPageDragging] = useState(false);
+  const dragCounter = useRef(0);
+
+  const handlePageDragEnter = useCallback((e) => {
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+    e.preventDefault();
+    dragCounter.current += 1;
+    if (uiPhase !== 'idle') setPageDragging(true);
+  }, [uiPhase]);
+
+  const handlePageDragOver = useCallback((e) => {
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+    e.preventDefault();
+  }, []);
+
+  const handlePageDragLeave = useCallback(() => {
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setPageDragging(false);
+  }, []);
+
+  const handlePageDrop = useCallback(async (e) => {
+    dragCounter.current = 0;
+    setPageDragging(false);
+    // In idle, DropZone handles its own drop via stopPropagation. We arrive here
+    // only when (a) phase is non-idle, or (b) user dropped outside DropZone in idle.
+    if (uiPhase === 'idle') return;
+    e.preventDefault();
+    const files = await flattenDropFiles(e.dataTransfer);
+    if (!files.length) return;
+    // Replace current session. processFiles({ mode:'replace' }) revokes prior blob URLs
+    // synchronously and discards prev state in one dispatch — no clearFiles() race.
+    stopPlayback();
+    resetMatch();
+    handleFiles(files, { mode: 'replace' });
+  }, [uiPhase, stopPlayback, resetMatch, handleFiles]);
+
   const handleManualSelect = useCallback((anime) => {
     const epNums = videoFiles.map(f => f.episode).filter(Boolean);
     selectManual(anime, epNums);
@@ -305,8 +374,22 @@ export default function PlayerPage() {
   }
 
   return (
-    <div style={s.page}>
+    <div
+      style={s.page}
+      onDragEnter={handlePageDragEnter}
+      onDragOver={handlePageDragOver}
+      onDragLeave={handlePageDragLeave}
+      onDrop={handlePageDrop}
+    >
       <style>{FADE_UP_CSS}</style>
+      {pageDragging && uiPhase !== 'idle' && (
+        <div style={s.dropOverlay} aria-hidden>
+          <div style={s.dropOverlayInner}>
+            <div style={s.dropOverlayEyebrow}>INGEST //</div>
+            <div style={s.dropOverlayTitle}>{t('player.dropReplace')}</div>
+          </div>
+        </div>
+      )}
 
       {/* IDLE */}
       {uiPhase === 'idle' && (

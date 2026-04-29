@@ -78,6 +78,16 @@ export default function useVideoFiles() {
       .filter(Boolean);
     const kw = mostCommon(parsedTitles) || '';
 
+    // Replace mode discards the prior session — revoke its blob URLs synchronously
+    // here, BEFORE queuing the state update, so callers don't have to call clear()
+    // first (which would be a separate render and racy with the upcoming setState).
+    if (mergeMode === 'replace') {
+      videoBlobMap.current.forEach(url => URL.revokeObjectURL(url));
+      videoBlobMap.current.clear();
+      subBlobMap.current.forEach(url => URL.revokeObjectURL(url));
+      subBlobMap.current.clear();
+    }
+
     setVideoFiles(prev => {
       if (mergeMode === 'replace') return parsed;
       // append: skip files already present (same fileId)
@@ -89,7 +99,7 @@ export default function useVideoFiles() {
       return merged;
     });
 
-    setKeyword(prev => kw || prev);
+    setKeyword(prev => (mergeMode === 'replace' ? kw : (kw || prev)));
     return { files: parsed, keyword: kw };
   }, []);
 
