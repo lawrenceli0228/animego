@@ -106,13 +106,18 @@ const s = {
 export default function SeriesCard({ series, progressPct, onClick }) {
   const title = series.titleEn || series.titleZh || series.titleJa || series.id;
   const initial = title.charAt(0).toUpperCase();
+  // Whitelist https only — IDB-stored values may be attacker-influenced via
+  // crafted matchCache entries or future enrichment paths.
+  const safePoster = typeof series.posterUrl === 'string' && /^https:\/\//i.test(series.posterUrl)
+    ? series.posterUrl
+    : null;
 
   return (
     <button style={s.card} onClick={onClick} type="button" role="button">
       <CornerBrackets inset={4} size={8} opacity={0.25} hue={HUE} />
 
-      {series.posterUrl ? (
-        <img src={series.posterUrl} alt={title} style={s.poster} />
+      {safePoster ? (
+        <img src={safePoster} alt={title} style={s.poster} />
       ) : (
         <div style={s.monogram} data-testid="monogram" aria-hidden>
           {initial}

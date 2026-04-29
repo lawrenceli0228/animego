@@ -14,7 +14,7 @@ import { makeSeriesRepo } from '../lib/library/db/seriesRepo.js';
 import { makeSeasonRepo } from '../lib/library/db/seasonRepo.js';
 import { makeFileRefRepo } from '../lib/library/db/fileRefRepo.js';
 import { makeMatchCacheRepo } from '../lib/library/db/matchCacheRepo.js';
-import { buildSeasonRecord } from '../lib/library/recordFactory.js';
+import { buildSeasonRecord, buildFileRefRecord } from '../lib/library/recordFactory.js';
 
 /**
  * @typedef {{ clusters: number, matched: number, failed: number, ambiguous: number }} ImportSummary
@@ -251,13 +251,8 @@ function buildPersistPayload(verdict, cluster, libraryId, matchStatus) {
  */
 async function persistFileRefsOnly(cluster, libraryId, seasonId, matchStatus, fileRefRepo, db) {
   const fileRefs = cluster.items.map(it => ({
-    id: it.hash16M ? `${it.hash16M}|${it.file?.size ?? 0}` : `${it.fileName}|${it.file?.size ?? 0}`,
-    libraryId,
-    relPath: it.relativePath,
-    size: it.file?.size ?? 0,
-    mtime: it.file?.lastModified ?? 0,
+    ...buildFileRefRecord({ libraryId, episodeId: null, item: it }),
     matchStatus,
-    ...(it.hash16M ? { hash16M: it.hash16M } : {}),
   }));
   if (db) {
     await db.fileRefs.bulkPut(fileRefs);
@@ -272,13 +267,8 @@ async function persistFileRefsOnly(cluster, libraryId, seasonId, matchStatus, fi
  */
 async function persistAmbiguousFileRefs(cluster, libraryId, db) {
   const fileRefs = cluster.items.map(it => ({
-    id: it.hash16M ? `${it.hash16M}|${it.file?.size ?? 0}` : `${it.fileName}|${it.file?.size ?? 0}`,
-    libraryId,
-    relPath: it.relativePath,
-    size: it.file?.size ?? 0,
-    mtime: it.file?.lastModified ?? 0,
+    ...buildFileRefRecord({ libraryId, episodeId: null, item: it }),
     matchStatus: 'ambiguous',
-    ...(it.hash16M ? { hash16M: it.hash16M } : {}),
   }));
   await db.fileRefs.bulkPut(fileRefs);
 }

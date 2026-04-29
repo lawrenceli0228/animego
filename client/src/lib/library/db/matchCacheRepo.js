@@ -44,18 +44,19 @@ export function makeMatchCacheRepo(db, { now = () => Date.now() } = {}) {
    * @returns {Promise<void>}
    */
   async function put(hash16M, verdict) {
-    await db.matchCache.put({ hash16M, verdict, updatedAt: now() });
-
-    const count = await db.matchCache.count();
-    if (count > MAX_ENTRIES) {
-      const excess = count - MAX_ENTRIES;
-      // Collect oldest entries by updatedAt ascending
-      const toDelete = await db.matchCache
-        .orderBy('updatedAt')
-        .limit(excess)
-        .primaryKeys();
-      await db.matchCache.bulkDelete(toDelete);
-    }
+    // Atomic put + evict: prevents under-eviction under concurrent imports.
+    await db.transaction('rw', db.matchCache, async () => {
+      await db.matchCache.put({ hash16M, verdict, updatedAt: now() });
+      const count = await db.matchCache.count();
+      if (count > MAX_ENTRIES) {
+        const excess = count - MAX_ENTRIES;
+        const toDelete = await db.matchCache
+          .orderBy('updatedAt')
+          .limit(excess)
+          .primaryKeys();
+        await db.matchCache.bulkDelete(toDelete);
+      }
+    });
   }
 
   return { get, put };

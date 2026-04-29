@@ -134,6 +134,9 @@ export default function useFileHandles({ db }) {
       }
 
       const segments = relPath.split('/').filter(Boolean);
+      // Reject path traversal: '..' segments could escape the picked root if a
+      // browser's FSA implementation doesn't clamp them. Spec is implementation-defined.
+      if (segments.some(seg => seg === '..' || seg === '.')) return null;
       const fileName = segments.pop();
       if (!fileName) return null;
 

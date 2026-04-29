@@ -1,5 +1,5 @@
 // @ts-check
-import { useSyncExternalStore, useCallback, useRef } from 'react';
+import { useSyncExternalStore, useCallback, useState, useEffect, useMemo } from 'react';
 import { liveQuery } from 'dexie';
 
 /** @typedef {import('../lib/library/types').Series} Series */
@@ -50,20 +50,17 @@ function makeLiveQueryStore(querier) {
  */
 export default function useLibrary({ db }) {
   // Revision counter forces a new liveQuery store on refetch()
-  const revRef = useRef(0);
-  const storeRef = useRef(/** @type {ReturnType<typeof makeLiveQueryStore<Series[]>>|null} */ (null));
+  const [rev, setRev] = useState(0);
 
-  // Build or reuse the store for the current revision
-  function getStore() {
-    if (!storeRef.current) {
-      storeRef.current = makeLiveQueryStore(() =>
-        liveQuery(() => db.series.orderBy('updatedAt').reverse().toArray())
-      );
-    }
-    return storeRef.current;
-  }
+  // Recreate the store when db or rev changes; destroy on unmount/dep-change.
+  const store = useMemo(
+    () => makeLiveQueryStore(() =>
+      liveQuery(() => db.series.orderBy('updatedAt').reverse().toArray())
+    ),
+    [db, rev],
+  );
 
-  const store = getStore();
+  useEffect(() => () => store.destroy(), [store]);
 
   const snapshot = useSyncExternalStore(
     store.subscribe,
@@ -74,20 +71,10 @@ export default function useLibrary({ db }) {
   const loading = snapshot === null;
   const series = snapshot ?? [];
 
-  /**
-   * Force a re-read of the series store by destroying and recreating the live query.
-   */
+  /** Force a re-read by recreating the live query. */
   const refetch = useCallback(() => {
-    if (storeRef.current) {
-      storeRef.current.destroy();
-      storeRef.current = null;
-    }
-    storeRef.current = makeLiveQueryStore(() =>
-      liveQuery(() => db.series.orderBy('updatedAt').reverse().toArray())
-    );
-    // Trigger re-render via the existing subscribe mechanism
-    storeRef.current.subscribe(() => {})();
-  }, [db]);
+    setRev(r => r + 1);
+  }, []);
 
   return { series, loading, refetch };
 }

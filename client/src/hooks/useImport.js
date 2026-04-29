@@ -17,6 +17,7 @@ import { runImport } from '../services/importPipeline.js';
  *   progress: ImportEvent[],
  *   summary: ImportSummary|null,
  *   status: ImportStatus,
+ *   error: string|null,
  *   cancel(): void,
  * }}
  */
@@ -24,6 +25,7 @@ export default function useImport({ db, dandan }) {
   const [status, setStatus] = useState(/** @type {ImportStatus} */ ('idle'));
   const [progress, setProgress] = useState(/** @type {ImportEvent[]} */ ([]));
   const [summary, setSummary] = useState(/** @type {ImportSummary|null} */ (null));
+  const [error, setError] = useState(/** @type {string|null} */ (null));
 
   /** Used to signal cancellation to the in-flight run */
   const cancelledRef = useRef(false);
@@ -46,6 +48,7 @@ export default function useImport({ db, dandan }) {
     cancelledRef.current = false;
     setProgress([]);
     setSummary(null);
+    setError(null);
     setStatus('running');
 
     try {
@@ -66,7 +69,9 @@ export default function useImport({ db, dandan }) {
         setStatus('idle');
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       if (!cancelledRef.current) {
+        setError(msg);
         setStatus('error');
       } else {
         setStatus('idle');
@@ -74,5 +79,5 @@ export default function useImport({ db, dandan }) {
     }
   }, [db, dandan]);
 
-  return { run, progress, summary, status, cancel };
+  return { run, progress, summary, status, error, cancel };
 }

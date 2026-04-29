@@ -1,5 +1,5 @@
 // @ts-check
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useLibrary from '../hooks/useLibrary';
 import useFileHandles from '../hooks/useFileHandles';
@@ -7,22 +7,14 @@ import useImport from '../hooks/useImport';
 import useVideoFiles from '../hooks/useVideoFiles';
 import { isFsaSupported } from '../lib/library/handles/fsaFeatureCheck.js';
 import { collectFromHandle } from '../lib/library/handleTraversal/index.js';
+import { db } from '../lib/library/db/db.js';
+import { ulid } from '../lib/library/ulid.js';
 import LibraryEmptyState from '../components/library/LibraryEmptyState';
 import FsaUnsupportedBanner from '../components/library/FsaUnsupportedBanner';
 import SeriesGrid from '../components/library/SeriesGrid';
 import RecentlyPlayedRow from '../components/library/RecentlyPlayedRow';
 import { useLang } from '../context/LanguageContext';
 import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
-
-/** Lazy DB singleton — only instantiated when the page mounts */
-let _db = null;
-function getDb() {
-  if (!_db) {
-    const { makeDb } = require('../lib/library/db/makeDb.js');
-    _db = makeDb();
-  }
-  return _db;
-}
 
 const HUE = PLAYER_HUE.stream;
 
@@ -97,38 +89,17 @@ export default function LibraryPage() {
   const navigate = useNavigate();
   const fsaSupported = isFsaSupported();
 
-  // Deferred DB init to avoid IDB churn in tests (tests mock the hooks)
-  const dbRef = useRef(/** @type {any} */ (null));
-  function requireDb() {
-    if (!dbRef.current) {
-      // Dynamic import avoided intentionally — IDB via Dexie is sync-init
-      // In tests these hooks are mocked so this branch is never reached
-      try {
-        const { makeDb } = require('../lib/library/db/makeDb.js');
-        dbRef.current = makeDb();
-      } catch {
-        dbRef.current = null;
-      }
-    }
-    return dbRef.current;
-  }
-
-  const db = requireDb();
-
   const dandanStub = { match: async () => null };
-  const { series, loading } = useLibrary({ db: db || {} });
-  const { status, roots, pickFolder } = useFileHandles({ db: db || {} });
-  const { run: runImport, status: importStatus } = useImport({ db: db || {}, dandan: dandanStub });
+  const { series, loading } = useLibrary({ db });
+  const { status, roots, pickFolder } = useFileHandles({ db });
+  const { run: runImport, status: importStatus } = useImport({ db, dandan: dandanStub });
   const { processFiles } = useVideoFiles();
 
   /** Whether to show the add-folder header button (FSA + has series already) */
   const showAddBtn = fsaSupported && series.length > 0;
 
   const handleAddFolder = useCallback(async () => {
-    if (!fsaSupported || !db) return;
-
-    // libraryId is generated inside pickFolder; we need the returned record
-    const { ulid } = await import('../lib/library/ulid.js');
+    if (!fsaSupported) return;
     const libraryId = ulid();
     const record = await pickFolder(libraryId);
     if (!record) return;
@@ -137,7 +108,7 @@ export default function LibraryPage() {
     const allFiles = collected.map(({ file }) => file);
     const { files: items } = processFiles(allFiles);
     await runImport({ items, libraryId: record.libraryId });
-  }, [fsaSupported, db, pickFolder, processFiles, runImport]);
+  }, [fsaSupported, pickFolder, processFiles, runImport]);
 
   const handlePickSeries = useCallback((id) => {
     navigate('/player', { state: { seriesId: id } });

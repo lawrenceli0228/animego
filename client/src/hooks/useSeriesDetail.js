@@ -41,7 +41,7 @@ export default function useSeriesDetail(seriesId, { db, fileHandles }) {
   }, []);
 
   useEffect(() => {
-    if (!seriesId) {
+    if (!seriesId || typeof seriesId !== 'string') {
       setStatus('idle');
       setSeries(null);
       setEpisodes([]);
