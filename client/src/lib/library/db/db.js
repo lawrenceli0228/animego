@@ -1,5 +1,5 @@
 // @ts-check
-// Dexie schema v4 for the animego local library (v3.1 added opsLog).
+// Dexie schema v5 for the animego local library.
 // Pure data layer — no React, no DOM, no service layer.
 
 import Dexie from 'dexie';
@@ -8,8 +8,10 @@ import Dexie from 'dexie';
 const _instances = new Map();
 
 /**
- * Apply schema (v3 → v4) to a Dexie instance.
+ * Apply schema (v3 → v4 → v5) to a Dexie instance.
  * v4 adds `opsLog` for §5.6 undo (24h) and series-detail operation log.
+ * v5 adds `progress` (per-episode resume), `userOverride` (manual merge/split/lock memory),
+ *        `migrationFailures` (legacy progress migration triage queue).
  * @param {Dexie} instance
  */
 function applySchema(instance) {
@@ -24,6 +26,11 @@ function applySchema(instance) {
   });
   instance.version(4).stores({
     opsLog:      'id, [seriesId+ts], undoableUntil, ts',
+  });
+  instance.version(5).stores({
+    progress:           'episodeId, seriesId, updatedAt, [seriesId+updatedAt]',
+    userOverride:       'seriesId, updatedAt',
+    migrationFailures:  'key, attemptedAt',
   });
 }
 

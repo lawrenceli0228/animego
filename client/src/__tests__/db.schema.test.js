@@ -7,7 +7,7 @@ describe('Dexie schema (Slice 4)', () => {
     // Close each db opened by getDb during the test
   });
 
-  it('opens successfully and exposes 8 named stores (v4 adds opsLog)', async () => {
+  it('opens successfully and exposes 11 named stores (v5 adds progress / userOverride / migrationFailures)', async () => {
     await db.open();
     const storeNames = db.tables.map(t => t.name).sort();
     expect(storeNames).toEqual([
@@ -16,9 +16,12 @@ describe('Dexie schema (Slice 4)', () => {
       'fileRefs',
       'libraries',
       'matchCache',
+      'migrationFailures',
       'opsLog',
+      'progress',
       'seasons',
       'series',
+      'userOverride',
     ]);
   });
 

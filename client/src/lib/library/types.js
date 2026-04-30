@@ -143,22 +143,41 @@
 
 /**
  * 观看进度(挂 episodeId 不挂 file,换源不丢进度)。
+ * v5 schema: store key = episodeId, indexes by seriesId/updatedAt for "继续观看" 行排序。
  *
- * @typedef {Object} WatchProgress
- * @property {string}  episodeId
+ * @typedef {Object} Progress
+ * @property {string}  episodeId       - 主键
+ * @property {string}  seriesId        - 用于按系列查询
  * @property {number}  positionSec
  * @property {number}  durationSec
- * @property {number}  watchedAt
+ * @property {number}  updatedAt       - watched-at;统一字段名以匹配索引
  * @property {boolean} completed
  */
 
 /**
- * 用户手动纠错记忆(基于 anitomy 归一化 token,不裸文件名)。
+ * 用户对系列的手动纠错(合并 / 拆分 / 锁定 / 强制 animeId)。
+ * v5 schema: store key = seriesId,优先级高于自动 match。
  *
- * @typedef {Object} ManualOverride
+ * @typedef {Object} UserOverride
  * @property {string}   seriesId
- * @property {string[]} normalizedTokens  - anitomy 归一化后的标题 token 数组
+ * @property {number}   [overrideSeasonAnimeId]  - 强制使用此 animeId 替代 match 结果
+ * @property {string[]} [mergedFrom]              - 此 series 是合并而来的子 seriesId 列表
+ * @property {string}   [splitFrom]               - 此 series 是从某 seriesId 拆出来的
+ * @property {boolean}  [locked]                  - true 时下次 import 不再自动重匹配
+ * @property {string[]} [normalizedTokens]        - anitomy 归一化 token,用于跨 import 复用
  * @property {number}   updatedAt
+ */
+
+/**
+ * 旧版 progress(localStorage / v4 之前)迁移失败的三角档案。
+ * v5 schema: store key = key(原始记录键),attemptedAt 用于重试调度。
+ *
+ * @typedef {Object} MigrationFailure
+ * @property {string}  key                    - 原始 progress 键
+ * @property {string}  reason                 - 失败原因
+ * @property {unknown} [payload]              - 原始记录,便于人工修复
+ * @property {number}  attemptedAt
+ * @property {number}  [attempts]             - 重试次数
  */
 
 /**
