@@ -25,6 +25,23 @@ function fnv1a(str) {
 }
 
 /**
+ * Canonical FileRef id for an item. Single source of truth so that
+ * Episode.primaryFileId and FileRef.id always agree.
+ *
+ * - With hash16M: `fnv1a(hash16M + '|' + size)` — stable across renames/moves.
+ * - Without hash16M: soft id `fileName|size` — re-derives to the hash form
+ *   automatically once the md5 worker fills in hash16M (see useImport hash phase).
+ *
+ * @param {EpisodeItem} item
+ * @returns {string}
+ */
+export function fileRefId(item) {
+  const size = item.file?.size ?? 0;
+  if (item.hash16M) return fnv1a(`${item.hash16M}|${size}`);
+  return `${item.fileName}|${size}`;
+}
+
+/**
  * v3.1: parse revision marker `[01v2]` / `01v2` / `E03v3` → version int.
  * Returns 1 when no marker present.
  * @param {string} fileName
@@ -95,7 +112,7 @@ export function buildEpisodeRecord({ seriesId, seasonId, item, ulidSeed }) {
     ...(seasonId ? { seasonId } : {}),
     number: item.episode ?? 0,
     kind: /** @type {Episode['kind']} */ (item.parsedKind ?? 'main'),
-    primaryFileId: item.fileId,
+    primaryFileId: fileRefId(item),
     alternateFileIds: [],
     version: parseVersion(item.fileName),
     updatedAt: Date.now(),
@@ -105,27 +122,17 @@ export function buildEpisodeRecord({ seriesId, seasonId, item, ulidSeed }) {
 /**
  * Build a FileRef record from an EpisodeItem.
  *
- * When item.hash16M is present, id = fnv1a(hash16M + '|' + size).
- * Otherwise id = softId = `name|size` (P4 will rekey to hash(hash16M+size) once hash is computed).
- *
- * Note (P4 rekey): When the md5 worker completes hashing, callers must update this id
- * from the soft `name|size` format to `fnv1a(hash16M + '|' + size)` and update any
- * Episode.primaryFileId / Episode.alternateFileIds references accordingly.
+ * id derivation lives in `fileRefId()` so Episode.primaryFileId stays in sync.
+ * When useImport's hash phase populates item.hash16M, the id flips from the
+ * soft `name|size` form to the content-addressed `fnv1a(hash16M+size)` form
+ * automatically — Episode.primaryFileId follows the same rule.
  *
  * @param {{ libraryId: string, episodeId: string|null, item: EpisodeItem }} params
  * @returns {FileRef}
  */
 export function buildFileRefRecord({ libraryId, episodeId, item }) {
   const size = item.file?.size ?? 0;
-
-  let id;
-  if (item.hash16M) {
-    // Stable content-addressed id
-    id = fnv1a(`${item.hash16M}|${size}`);
-  } else {
-    // Soft id — will be rekeyed in P4 once hash16M is available
-    id = `${item.fileName}|${size}`;
-  }
+  const id = fileRefId(item);
 
   /** @type {FileRef} */
   const ref = {

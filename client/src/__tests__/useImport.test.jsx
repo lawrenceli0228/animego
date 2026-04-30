@@ -20,9 +20,10 @@ function makeItem(fileName, episode, parsedTitle = 'Test Show') {
   };
 }
 
-function makeDandanMock() {
+function makeDandanMock({ callCount = { value: 0 } } = {}) {
   return {
     async match() {
+      callCount.value++;
       return { isMatched: true, animes: [{ animeId: 42, animeTitle: 'Test Show', episodes: [] }] };
     },
   };
@@ -140,5 +141,129 @@ describe('useImport', () => {
 
     // Progress should have been reset and repopulated
     expect(result.current.progress.length).toBeGreaterThan(0);
+  });
+});
+
+// ── P4-E: hash-phase integration tests ──────────────────────────────────────
+
+/** Build an item WITHOUT hash16M (simulating fresh enumerator output). */
+function makeBareItem(fileName, episode, parsedTitle = 'Test Show') {
+  return {
+    fileId: `${fileName}|1000|0`,
+    file: { name: fileName, size: 1000, lastModified: 0 },
+    fileName,
+    relativePath: `Show/${fileName}`,
+    episode,
+    parsedKind: 'main',
+    parsedTitle,
+  };
+}
+
+describe('useImport (P4-E hash phase)', () => {
+  let testDb;
+
+  beforeEach(async () => {
+    testDb = getDb('test-import-hash-' + Date.now() + Math.random());
+    await testDb.open();
+  });
+
+  it('computes hash16M for items missing it before runImport', async () => {
+    const dandan = makeDandanMock();
+    const stubPool = {
+      hash: vi.fn(async (file) => `stub-${file.name}`),
+      dispose: vi.fn(),
+    };
+    const { result } = renderHook(() =>
+      useImport({ db: testDb, dandan, hashPool: stubPool })
+    );
+
+    const items = [makeBareItem('a.mkv', 1), makeBareItem('b.mkv', 2)];
+    await act(async () => {
+      await result.current.run({ items, libraryId: 'lib-hash-fresh' });
+    });
+    await waitFor(() => expect(result.current.status).toBe('done'));
+
+    expect(stubPool.hash).toHaveBeenCalledTimes(2);
+
+    // The persisted fileRefs should carry the hash and a content-addressed id.
+    const fileRefs = await testDb.fileRefs.toArray();
+    expect(fileRefs.some(fr => fr.hash16M === 'stub-a.mkv')).toBe(true);
+    // No `|` because content-addressed (fnv1a) doesn't include separators
+    expect(fileRefs.every(fr => !fr.id.includes('|'))).toBe(true);
+  });
+
+  it('skips hashing for items that already carry hash16M', async () => {
+    const dandan = makeDandanMock();
+    const stubPool = { hash: vi.fn(), dispose: vi.fn() };
+    const { result } = renderHook(() =>
+      useImport({ db: testDb, dandan, hashPool: stubPool })
+    );
+
+    // Pre-hashed items (e.g., re-import after rekey)
+    const items = [makeItem('preset.mkv', 1)];
+    await act(async () => {
+      await result.current.run({ items, libraryId: 'lib-preset' });
+    });
+    await waitFor(() => expect(result.current.status).toBe('done'));
+
+    expect(stubPool.hash).not.toHaveBeenCalled();
+  });
+
+  it('proceeds gracefully when hashPool returns empty (no crash, no hash16M)', async () => {
+    const dandan = makeDandanMock();
+    const stubPool = {
+      hash: vi.fn(async () => ''), // pool timeout / error
+      dispose: vi.fn(),
+    };
+    const { result } = renderHook(() =>
+      useImport({ db: testDb, dandan, hashPool: stubPool })
+    );
+
+    const items = [makeBareItem('flaky.mkv', 1)];
+    await act(async () => {
+      await result.current.run({ items, libraryId: 'lib-empty-hash' });
+    });
+    await waitFor(() => expect(result.current.status).toBe('done'));
+
+    const fileRefs = await testDb.fileRefs.toArray();
+    expect(fileRefs.length).toBeGreaterThan(0);
+    expect(fileRefs.every(fr => !fr.hash16M)).toBe(true);
+  });
+
+  it('second import of identical files reuses the existing series (cache hit)', async () => {
+    // This is the bug fix: previously every import minted a new series ulid
+    // because cluster.representative.hash16M was undefined and matchCache lookup was skipped.
+    const callCount = { value: 0 };
+    const dandan = makeDandanMock({ callCount });
+    const stubPool = {
+      hash: vi.fn(async (file) => `stable-${file.name}`),
+      dispose: vi.fn(),
+    };
+
+    const { result } = renderHook(() =>
+      useImport({ db: testDb, dandan, hashPool: stubPool })
+    );
+
+    const items = [
+      makeBareItem('ep1.mkv', 1, 'Reuse Show'),
+      makeBareItem('ep2.mkv', 2, 'Reuse Show'),
+    ];
+
+    // First run → creates one series + season, calls dandan once.
+    await act(async () => {
+      await result.current.run({ items, libraryId: 'lib-A' });
+    });
+    await waitFor(() => expect(result.current.status).toBe('done'));
+    expect(await testDb.series.count()).toBe(1);
+    expect(callCount.value).toBe(1);
+
+    // Second run on same files → must hit cache, not duplicate series.
+    await act(async () => {
+      await result.current.run({ items, libraryId: 'lib-B' });
+    });
+    await waitFor(() => expect(result.current.status).toBe('done'));
+
+    expect(await testDb.series.count()).toBe(1);
+    expect(callCount.value).toBe(1);
   });
 });

@@ -114,11 +114,26 @@ describe('buildEpisodeRecord', () => {
     expect(e.number).toBe(2);
   });
 
-  it('sets primaryFileId from item.fileId', () => {
-    const it1 = item({ fileId: 'myFileId' });
+  it('sets primaryFileId to the FileRef id (consistent with buildFileRefRecord)', () => {
+    // P4-E: Episode.primaryFileId must reference the same id as FileRef.id
+    // so cross-table joins work. Previously used soft `name|size|mtime` which
+    // never matched FileRef.id (`name|size` or `fnv1a(hash16M+size)`).
+    const it1 = item({ fileId: 'unused-soft-id' });
+    it1.file = { size: 1234, name: 'ep01.mkv' };
     const e = buildEpisodeRecord({ seriesId: 's1', seasonId: null, item: it1, ulidSeed: 502 });
-    expect(e.primaryFileId).toBe('myFileId');
+    const fr = buildFileRefRecord({ libraryId: 'lib1', episodeId: e.id, item: it1 });
+    expect(e.primaryFileId).toBe(fr.id);
     expect(e.alternateFileIds).toEqual([]);
+  });
+
+  it('primaryFileId becomes content-addressed when item has hash16M', () => {
+    const it1 = item({ hash16M: 'cafebabe' });
+    it1.file = { size: 5000, name: 'ep01.mkv' };
+    const e = buildEpisodeRecord({ seriesId: 's1', seasonId: null, item: it1, ulidSeed: 503 });
+    const fr = buildFileRefRecord({ libraryId: 'lib1', episodeId: e.id, item: it1 });
+    expect(e.primaryFileId).toBe(fr.id);
+    // No pipe — content-addressed hash form
+    expect(e.primaryFileId).not.toContain('|');
   });
 
   // v3.1: Episode.version field
