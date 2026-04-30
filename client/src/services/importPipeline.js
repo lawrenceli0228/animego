@@ -196,6 +196,8 @@ async function callDandan(dandan, rep) {
   const fileName = rep.fileName ?? '';
   const result = await dandan.match(hash16M, fileName);
 
+  if (!result) return { isAmbiguous: false };
+
   const animes = result.animes ?? [];
 
   if (result.isMatched && animes.length === 1) {

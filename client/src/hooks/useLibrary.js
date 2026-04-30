@@ -1,45 +1,14 @@
 // @ts-check
-import { useSyncExternalStore, useCallback, useState, useEffect, useMemo } from 'react';
+import { useSyncExternalStore, useCallback, useState, useRef } from 'react';
 import { liveQuery } from 'dexie';
 
 /** @typedef {import('../lib/library/types').Series} Series */
 
 /**
- * Build a useSyncExternalStore-compatible store from a Dexie liveQuery.
- *
- * @template T
- * @param {() => import('dexie').Observable<T>} querier
- * @returns {{ subscribe(l: () => void): () => void, getSnapshot(): T|null, destroy(): void }}
- */
-function makeLiveQueryStore(querier) {
-  /** @type {T|null} */
-  let snapshot = null;
-  /** @type {Set<() => void>} */
-  const listeners = new Set();
-
-  const sub = querier().subscribe({
-    next: (v) => {
-      snapshot = v;
-      listeners.forEach(l => l());
-    },
-    error: () => {
-      listeners.forEach(l => l());
-    },
-  });
-
-  return {
-    subscribe: (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    getSnapshot: () => snapshot,
-    destroy: () => sub.unsubscribe(),
-  };
-}
-
-/**
  * React hook that subscribes to the series table via Dexie liveQuery.
- * Uses useSyncExternalStore to avoid React 19 concurrent-mode tearing.
+ *
+ * Subscription lifecycle lives inside the subscribe callback so React
+ * (incl. 19 strict-mode dev double-invoke) owns subscribe/unsubscribe.
  *
  * @param {{ db: import('dexie').Dexie }} options
  * @returns {{
@@ -49,31 +18,54 @@ function makeLiveQueryStore(querier) {
  * }}
  */
 export default function useLibrary({ db }) {
-  // Revision counter forces a new liveQuery store on refetch()
   const [rev, setRev] = useState(0);
 
-  // Recreate the store when db or rev changes; destroy on unmount/dep-change.
-  const store = useMemo(
-    () => makeLiveQueryStore(() =>
-      liveQuery(() => db.series.orderBy('updatedAt').reverse().toArray())
-    ),
+  /** @type {React.MutableRefObject<Series[] | null>} */
+  const snapshotRef = useRef(null);
+  /** Track which (db, rev) the current snapshot belongs to so we don't serve stale data after refetch. */
+  const snapshotKeyRef = useRef(/** @type {{ db: any, rev: number } | null} */(null));
+
+  const subscribe = useCallback(
+    (onChange) => {
+      // Reset on (re)subscribe so a fresh liveQuery yields a fresh snapshot.
+      snapshotRef.current = null;
+      snapshotKeyRef.current = { db, rev };
+
+      const sub = liveQuery(() =>
+        db.series.orderBy('updatedAt').reverse().toArray()
+      ).subscribe({
+        next: (v) => {
+          snapshotRef.current = /** @type {Series[]} */ (v);
+          onChange();
+        },
+        error: () => {
+          snapshotRef.current = [];
+          onChange();
+        },
+      });
+
+      return () => {
+        sub.unsubscribe();
+      };
+    },
     [db, rev],
   );
 
-  useEffect(() => () => store.destroy(), [store]);
+  const getSnapshot = useCallback(() => {
+    const key = snapshotKeyRef.current;
+    if (!key || key.db !== db || key.rev !== rev) return null;
+    return snapshotRef.current;
+  }, [db, rev]);
 
-  const snapshot = useSyncExternalStore(
-    store.subscribe,
-    store.getSnapshot,
-    () => /** @type {Series[]} */ ([]),
-  );
+  const getServerSnapshot = useCallback(() => /** @type {Series[]} */ ([]), []);
+
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const loading = snapshot === null;
   const series = snapshot ?? [];
 
-  /** Force a re-read by recreating the live query. */
   const refetch = useCallback(() => {
-    setRev(r => r + 1);
+    setRev((r) => r + 1);
   }, []);
 
   return { series, loading, refetch };
