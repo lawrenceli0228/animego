@@ -6,6 +6,7 @@ import useResume from '../hooks/useResume';
 import useFileHandles from '../hooks/useFileHandles';
 import useImport from '../hooks/useImport';
 import useVideoFiles from '../hooks/useVideoFiles';
+import useUserOverride from '../hooks/useUserOverride';
 import { isFsaSupported } from '../lib/library/handles/fsaFeatureCheck.js';
 import { enumerateAll } from '../lib/library/enumerator.js';
 import { db } from '../lib/library/db/db.js';
@@ -110,6 +111,7 @@ export default function LibraryPage() {
   const { status, roots, pickFolder } = useFileHandles({ db });
   const { run: runImport, status: importStatus } = useImport({ db, dandan: dandanStub });
   const { processFiles } = useVideoFiles();
+  const { all: overrides, lock, unlock, clear } = useUserOverride({ db });
 
   // One-shot legacy progress migration on first mount.
   // Idempotent — second run sees zero legacy keys and exits cheaply.
@@ -146,6 +148,23 @@ export default function LibraryPage() {
   const handleResume = useCallback((id, episodeNumber) => {
     navigate('/player', { state: { seriesId: id, resumeEpisode: episodeNumber } });
   }, [navigate]);
+
+  const handleOverrideAction = useCallback(
+    async (seriesId, action) => {
+      try {
+        if (action === 'lock') await lock(seriesId);
+        else if (action === 'unlock') await unlock(seriesId);
+        else if (action === 'clear') await clear(seriesId);
+        else if (action === 'merge' || action === 'split') {
+          // TODO(P4-F-4 / P4-F-5): open Merge/Split dialog scoped to seriesId.
+          console.warn(`[library] ${action} dialog not yet implemented`);
+        }
+      } catch (err) {
+        console.warn(`[library] override action ${action} failed:`, err);
+      }
+    },
+    [lock, unlock, clear],
+  );
 
   const handleResetLibrary = useCallback(async () => {
     const ok = window.confirm(
@@ -188,7 +207,12 @@ export default function LibraryPage() {
       ) : (
         <>
           <RecentlyPlayedRow entries={resumeEntries} onPlay={handleResume} />
-          <SeriesGrid series={series} onPickSeries={handlePickSeries} />
+          <SeriesGrid
+            series={series}
+            onPickSeries={handlePickSeries}
+            overrides={overrides}
+            onOverrideAction={handleOverrideAction}
+          />
         </>
       )}
 
