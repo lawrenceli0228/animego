@@ -1,13 +1,15 @@
 // @ts-check
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useLibrary from '../hooks/useLibrary';
+import useResume from '../hooks/useResume';
 import useFileHandles from '../hooks/useFileHandles';
 import useImport from '../hooks/useImport';
 import useVideoFiles from '../hooks/useVideoFiles';
 import { isFsaSupported } from '../lib/library/handles/fsaFeatureCheck.js';
 import { enumerateAll } from '../lib/library/enumerator.js';
 import { db } from '../lib/library/db/db.js';
+import { migrateLegacyProgress } from '../lib/library/db/migrateLegacyProgress.js';
 import { ulid } from '../lib/library/ulid.js';
 import LibraryEmptyState from '../components/library/LibraryEmptyState';
 import FsaUnsupportedBanner from '../components/library/FsaUnsupportedBanner';
@@ -104,9 +106,22 @@ export default function LibraryPage() {
 
   const dandanStub = { match: async () => null };
   const { series, loading } = useLibrary({ db });
+  const { entries: resumeEntries } = useResume({ db });
   const { status, roots, pickFolder } = useFileHandles({ db });
   const { run: runImport, status: importStatus } = useImport({ db, dandan: dandanStub });
   const { processFiles } = useVideoFiles();
+
+  // One-shot legacy progress migration on first mount.
+  // Idempotent — second run sees zero legacy keys and exits cheaply.
+  useEffect(() => {
+    let cancelled = false;
+    migrateLegacyProgress({ db }).catch((err) => {
+      if (!cancelled) {
+        console.warn('[LibraryPage] migrateLegacyProgress failed:', err);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   /** Whether to show the add-folder header button (FSA + has series already) */
   const showAddBtn = fsaSupported && series.length > 0;
@@ -126,6 +141,10 @@ export default function LibraryPage() {
 
   const handlePickSeries = useCallback((id) => {
     navigate('/player', { state: { seriesId: id } });
+  }, [navigate]);
+
+  const handleResume = useCallback((id, episodeNumber) => {
+    navigate('/player', { state: { seriesId: id, resumeEpisode: episodeNumber } });
   }, [navigate]);
 
   const handleResetLibrary = useCallback(async () => {
@@ -168,7 +187,7 @@ export default function LibraryPage() {
         />
       ) : (
         <>
-          <RecentlyPlayedRow entries={[]} onPlay={() => {}} />
+          <RecentlyPlayedRow entries={resumeEntries} onPlay={handleResume} />
           <SeriesGrid series={series} onPickSeries={handlePickSeries} />
         </>
       )}
