@@ -52,6 +52,19 @@ const s = {
     textTransform: 'uppercase',
     letterSpacing: '0.12em',
   },
+  resetBtn: {
+    ...mono,
+    padding: '8px 14px',
+    background: 'transparent',
+    border: '1px solid oklch(60% 0.20 25 / 0.50)',
+    borderRadius: 4,
+    color: 'oklch(70% 0.18 25)',
+    cursor: 'pointer',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: '0.12em',
+  },
+  headerActions: { display: 'flex', alignItems: 'center', gap: 8 },
   sectionLabel: {
     ...mono,
     fontSize: 10,
@@ -115,6 +128,16 @@ export default function LibraryPage() {
     navigate('/player', { state: { seriesId: id } });
   }, [navigate]);
 
+  const handleResetLibrary = useCallback(async () => {
+    const ok = window.confirm(
+      '清空整个本地库?将删除全部 series / episodes / fileRefs / matchCache / fileHandles / opsLog。\n(磁盘上的视频文件不会被动)'
+    );
+    if (!ok) return;
+    await db.transaction('rw', db.tables, async () => {
+      await Promise.all(db.tables.map((tbl) => tbl.clear()));
+    });
+  }, []);
+
   const showEmptyState = !loading && series.length === 0;
   const showBanner = !fsaSupported;
 
@@ -124,11 +147,18 @@ export default function LibraryPage() {
 
       <div style={s.header}>
         <h1 style={s.title}>Library</h1>
-        {showAddBtn && (
-          <button style={s.addBtn} onClick={handleAddFolder} type="button">
-            {t('library.addFolder')}
-          </button>
-        )}
+        <div style={s.headerActions}>
+          {series.length > 0 && (
+            <button style={s.resetBtn} onClick={handleResetLibrary} type="button">
+              重置库
+            </button>
+          )}
+          {showAddBtn && (
+            <button style={s.addBtn} onClick={handleAddFolder} type="button">
+              {t('library.addFolder')}
+            </button>
+          )}
+        </div>
       </div>
 
       {showEmptyState ? (
