@@ -29,12 +29,13 @@ export default function useVideoFiles() {
 
   /**
    * processFiles(fileList, options)
-   * options.mode = 'append' (default) | 'replace'
-   *   append: merge incoming files into existing list, skip duplicate fileIds.
-   *   replace: discard existing list (old single-file path behaviour).
+   * options.mode    = 'append' (default) | 'replace'
+   * options.pathMap = optional Map<File, string> — relPath override for FSA-imported files
+   *                   that have no webkitRelativePath. v3.1 enumerator threads this through
+   *                   to preserve directory signal for groupByFolder / clusterize.
    */
   const processFiles = useCallback((fileList, options = {}) => {
-    const { mode: mergeMode = 'append' } = options;
+    const { mode: mergeMode = 'append', pathMap } = options;
     const allFiles = Array.from(fileList);
     const videos = allFiles.filter(f => isVideoFile(f.name));
     if (!videos.length) return { files: [], keyword: '' };
@@ -55,11 +56,12 @@ export default function useVideoFiles() {
             .filter(s => s.episode === episode)
             .sort((a, b) => subPriority(a.type) - subPriority(b.type))[0]
         : findSubByName(file.name, subs);
+      const overridePath = pathMap?.get?.(file);
       return {
         fileId: makeFileId(file),
         file,
         fileName: file.name,
-        relativePath: file.webkitRelativePath || file.name,
+        relativePath: overridePath || file.webkitRelativePath || file.name,
         episode,
         subtitle: matchedSub || null,
         parsedTitle: meta.title,

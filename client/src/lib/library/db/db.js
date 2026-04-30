@@ -1,5 +1,5 @@
 // @ts-check
-// Dexie schema v3 for the animego local library.
+// Dexie schema v4 for the animego local library (v3.1 added opsLog).
 // Pure data layer — no React, no DOM, no service layer.
 
 import Dexie from 'dexie';
@@ -8,7 +8,8 @@ import Dexie from 'dexie';
 const _instances = new Map();
 
 /**
- * Apply schema version 3 to a Dexie instance.
+ * Apply schema (v3 → v4) to a Dexie instance.
+ * v4 adds `opsLog` for §5.6 undo (24h) and series-detail operation log.
  * @param {Dexie} instance
  */
 function applySchema(instance) {
@@ -20,6 +21,9 @@ function applySchema(instance) {
     fileRefs:    'id, episodeId, hash16M, matchStatus, [libraryId+matchStatus], *libraryIds',
     matchCache:  'hash16M, updatedAt',
     fileHandles: 'id, libraryId',
+  });
+  instance.version(4).stores({
+    opsLog:      'id, [seriesId+ts], undoableUntil, ts',
   });
 }
 

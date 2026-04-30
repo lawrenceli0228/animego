@@ -1,0 +1,103 @@
+{
+  "_meta": {
+    "source": "/Volumes/T7 Shield/files for MacBook (2026-04-30)",
+    "purpose": "Stage 0 + Stage 1 真实文件系统验真样本 (v3.1)",
+    "totals": { "video_entries": 88, "real_videos_expected_range": [40, 50], "appledouble": 41, "ds_store": 5, "directories": 49 }
+  },
+  "samples": [
+    {
+      "kind": "mp4-package-outer",
+      "name": "[Airota&YYDM-11FANS][Tengoku_Daimakyou][01][1080p][CHS&JPN].mp4",
+      "isDirectory": true,
+      "relPath": "[Airota][天国大魔境]/[Airota&YYDM-11FANS][Tengoku_Daimakyou][01][1080p][CHS&JPN].mp4",
+      "expectedAction": "drill-into-pick-largest",
+      "note": "macOS ExFAT package: .mp4 显示为目录,需下钻取同扩展名最大文件"
+    },
+    {
+      "kind": "appledouble-sidecar",
+      "name": "._[Airota&YYDM-11FANS][Tengoku_Daimakyou][01][1080p][CHS&JPN].mp4",
+      "isDirectory": false,
+      "size": 4096,
+      "expectedAction": "skip",
+      "note": "macOS metadata 4KB 伪 mp4,name.startsWith('._') 兜过"
+    },
+    {
+      "kind": "ds-store",
+      "name": ".DS_Store",
+      "isDirectory": false,
+      "size": 8196,
+      "expectedAction": "skip",
+      "note": "name === '.DS_Store' 直接跳过"
+    },
+    {
+      "kind": "version-revision",
+      "name": "[ANi] Akiba Maid Sensou - 03v2 [WebRip 1080p HEVC-10bit AAC][CHT].mp4",
+      "isDirectory": false,
+      "expectedAction": "yield",
+      "expectedVersion": 2,
+      "note": "[03v2] 修订版,Episode.version = 2"
+    },
+    {
+      "kind": "halfwidth-mix",
+      "name": "【千夏字幕组】【秋叶原冥途战争_Akiba Maid Sensou】[01][1080p][繁日内嵌].mp4",
+      "isDirectory": false,
+      "expectedAction": "yield",
+      "expectedNFC": true,
+      "note": "全角【】 + 半角[] 混排,需 NFC 归一化"
+    },
+    {
+      "kind": "dual-spelling-outer",
+      "name": "Akiba Maid Sensou",
+      "isDirectory": true,
+      "relPath": "Akiba Maid Sensou",
+      "note": "外层目录用 Sensou(罗马字日译)"
+    },
+    {
+      "kind": "dual-spelling-inner",
+      "name": "Akiba_Maid_War_E01_1080p.mkv",
+      "isDirectory": false,
+      "relPath": "Akiba Maid Sensou/Akiba_Maid_War_E01_1080p.mkv",
+      "note": "内层文件用 War(英译),Stage 2 J-W ≈ 0.79 不达 0.85 阈值,需 Stage 3 dandanplay 仲裁合并"
+    },
+    {
+      "kind": "root-scattered-1",
+      "name": "Heavenly Delusion S01E03 1080p.mkv",
+      "isDirectory": false,
+      "relPath": "Heavenly Delusion S01E03 1080p.mkv",
+      "expectedAction": "yield-as-singleton-cluster",
+      "note": "根目录散文件,禁用同目录簇"
+    },
+    {
+      "kind": "root-scattered-2",
+      "name": "Jigokuraku.E07.WEBRip.1080p.x265.mkv",
+      "isDirectory": false,
+      "relPath": "Jigokuraku.E07.WEBRip.1080p.x265.mkv",
+      "expectedAction": "yield-as-singleton-cluster",
+      "note": "根目录散文件,与 Heavenly Delusion 不同番不可合簇"
+    },
+    {
+      "kind": "root-scattered-3-prologue",
+      "name": "GUNDAM_The_Witch_from_Mercury_PROLOGUE_1080p.mp4",
+      "isDirectory": false,
+      "relPath": "GUNDAM_The_Witch_from_Mercury_PROLOGUE_1080p.mp4",
+      "expectedAction": "yield-as-singleton-cluster",
+      "note": "根目录散文件,J-W 会与 Mercury 主篇错聚 → 必须独立 cluster"
+    },
+    {
+      "kind": "small-fake-mp4",
+      "name": "thumbs.mp4",
+      "isDirectory": false,
+      "size": 12000,
+      "expectedAction": "skip",
+      "note": "size < 1MB 视频扩展名也跳过(防 AppleDouble 漏网 + thumbnail 伪装)"
+    },
+    {
+      "kind": "deep-nested",
+      "name": "ep01.mkv",
+      "isDirectory": false,
+      "relPath": "Show/Season1/Disc1/Extras/Bonus/ep01.mkv",
+      "expectedAction": "skip",
+      "note": "depth >= 3 截断,避免无限递归扫盘"
+    }
+  ]
+}

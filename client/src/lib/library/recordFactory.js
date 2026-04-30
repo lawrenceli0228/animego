@@ -25,6 +25,20 @@ function fnv1a(str) {
 }
 
 /**
+ * v3.1: parse revision marker `[01v2]` / `01v2` / `E03v3` → version int.
+ * Returns 1 when no marker present.
+ * @param {string} fileName
+ * @returns {number}
+ */
+export function parseVersion(fileName) {
+  if (!fileName) return 1;
+  const m = fileName.match(/\d+v(\d+)/i);
+  if (!m) return 1;
+  const v = Number.parseInt(m[1], 10);
+  return Number.isFinite(v) && v >= 1 ? v : 1;
+}
+
+/**
  * Build a Series record from a MatchCluster.
  *
  * @param {MatchCluster} cluster
@@ -83,6 +97,7 @@ export function buildEpisodeRecord({ seriesId, seasonId, item, ulidSeed }) {
     kind: /** @type {Episode['kind']} */ (item.parsedKind ?? 'main'),
     primaryFileId: item.fileId,
     alternateFileIds: [],
+    version: parseVersion(item.fileName),
     updatedAt: Date.now(),
   };
 }

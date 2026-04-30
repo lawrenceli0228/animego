@@ -4,6 +4,7 @@ import {
   buildSeasonRecord,
   buildEpisodeRecord,
   buildFileRefRecord,
+  parseVersion,
 } from '../lib/library/recordFactory';
 
 /** @typedef {import('../lib/library/types').EpisodeItem} EpisodeItem */
@@ -118,6 +119,45 @@ describe('buildEpisodeRecord', () => {
     const e = buildEpisodeRecord({ seriesId: 's1', seasonId: null, item: it1, ulidSeed: 502 });
     expect(e.primaryFileId).toBe('myFileId');
     expect(e.alternateFileIds).toEqual([]);
+  });
+
+  // v3.1: Episode.version field
+  it('defaults version to 1 for plain episode names', () => {
+    const it1 = item({ fileName: '[ANi] Show - 03 [WebRip 1080p].mp4' });
+    const e = buildEpisodeRecord({ seriesId: 's1', seasonId: null, item: it1, ulidSeed: 600 });
+    expect(e.version).toBe(1);
+  });
+
+  it('parses [01v2] revision marker → version 2', () => {
+    const it1 = item({ fileName: '[ANi] Show - 01v2 [WebRip 1080p].mp4' });
+    const e = buildEpisodeRecord({ seriesId: 's1', seasonId: null, item: it1, ulidSeed: 601 });
+    expect(e.version).toBe(2);
+  });
+
+  it('parses [03v3] revision marker → version 3', () => {
+    const it1 = item({ fileName: '[Group][Show][03v3][1080p].mkv' });
+    const e = buildEpisodeRecord({ seriesId: 's1', seasonId: null, item: it1, ulidSeed: 602 });
+    expect(e.version).toBe(3);
+  });
+});
+
+describe('parseVersion', () => {
+  it('returns 1 for filenames without a revision marker', () => {
+    expect(parseVersion('[Group] Show - 01 [1080p].mkv')).toBe(1);
+    expect(parseVersion('Show.E01.1080p.mkv')).toBe(1);
+    expect(parseVersion('')).toBe(1);
+  });
+
+  it('extracts the revision number after vN', () => {
+    expect(parseVersion('[Group] Show - 01v2 [1080p].mkv')).toBe(2);
+    expect(parseVersion('[Group][Show][03v3][1080p].mkv')).toBe(3);
+    expect(parseVersion('Show.E05v4.WEB-DL.mkv')).toBe(4);
+    expect(parseVersion('[01v10].mp4')).toBe(10);
+  });
+
+  it('does not false-positive on unrelated v-strings', () => {
+    expect(parseVersion('Show.x265.10bit.mkv')).toBe(1);
+    expect(parseVersion('vol4.mkv')).toBe(1);
   });
 });
 

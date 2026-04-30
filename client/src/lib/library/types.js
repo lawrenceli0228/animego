@@ -118,6 +118,7 @@
  * @property {string}  [title]
  * @property {string}  primaryFileId
  * @property {string[]} alternateFileIds
+ * @property {number}  version         - v3.1: 修订版本(`[01v2]` → 2,默认 1);primary 优先级 = version > resolution > size > mtime
  * @property {number}  updatedAt
  */
 

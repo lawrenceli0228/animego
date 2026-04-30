@@ -6,7 +6,7 @@ import useFileHandles from '../hooks/useFileHandles';
 import useImport from '../hooks/useImport';
 import useVideoFiles from '../hooks/useVideoFiles';
 import { isFsaSupported } from '../lib/library/handles/fsaFeatureCheck.js';
-import { collectFromHandle } from '../lib/library/handleTraversal/index.js';
+import { enumerateAll } from '../lib/library/enumerator.js';
 import { db } from '../lib/library/db/db.js';
 import { ulid } from '../lib/library/ulid.js';
 import LibraryEmptyState from '../components/library/LibraryEmptyState';
@@ -104,9 +104,10 @@ export default function LibraryPage() {
     const record = await pickFolder(libraryId);
     if (!record) return;
 
-    const collected = await collectFromHandle(record.handle);
+    const collected = await enumerateAll(record.handle);
     const allFiles = collected.map(({ file }) => file);
-    const { files: items } = processFiles(allFiles);
+    const pathMap = new Map(collected.map(({ file, relPath }) => [file, relPath]));
+    const { files: items } = processFiles(allFiles, { pathMap });
     await runImport({ items, libraryId: record.libraryId });
   }, [fsaSupported, pickFolder, processFiles, runImport]);
 

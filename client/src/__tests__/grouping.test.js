@@ -108,15 +108,41 @@ describe('groupByFolder', () => {
     expect(keys).toEqual(['A/Show', 'B/Show']);
   });
 
-  // 7. Flat drop of 5 files (no slash) → single __root__ group
-  it('collects all flat-dropped files into one __root__ group', () => {
+  // 7. v3.1: Flat drop of 5+ files → 5 singleton groups (root-dir cluster exception)
+  // Replaces the v3 behavior of one mega __root__ group; prevents Stage 2 from
+  // mashing 7 different anime into a single cluster (T7 验真).
+  it('splits multi-file __root__ into singleton groups (v3.1 root-dir exception)', () => {
     const files = ['a.mkv', 'b.mkv', 'c.mkv', 'd.mkv', 'e.mkv'].map((name, i) =>
       item({ fileName: name, relativePath: name, episode: i + 1 }),
     );
     const result = groupByFolder(files);
+    expect(result).toHaveLength(5);
+    for (const g of result) {
+      expect(g.items).toHaveLength(1);
+      expect(g.groupKey.startsWith('__root__/')).toBe(true);
+    }
+    // each singleton group's label is the file name
+    const labels = result.map((g) => g.label).sort();
+    expect(labels).toEqual(['a.mkv', 'b.mkv', 'c.mkv', 'd.mkv', 'e.mkv']);
+  });
+
+  // 7b. v3.1: single root file keeps the original __root__ sentinel
+  it('preserves the original __root__ sentinel for a single root file', () => {
+    const result = groupByFolder([item({ fileName: 'lonely.mkv', relativePath: 'lonely.mkv', episode: 1 })]);
     expect(result).toHaveLength(1);
     expect(result[0].groupKey).toBe('__root__');
-    expect(result[0].items).toHaveLength(5);
+  });
+
+  // 7c. v3.1: root-dir exception applies even when files would otherwise share an episode
+  it('splits root files even when episodes collide (different anime, same ep #)', () => {
+    const files = [
+      item({ fileName: 'Heavenly Delusion E01.mkv', relativePath: 'Heavenly Delusion E01.mkv', episode: 1, parsedTitle: 'Heavenly Delusion' }),
+      item({ fileName: 'Jigokuraku E01.mkv', relativePath: 'Jigokuraku E01.mkv', episode: 1, parsedTitle: 'Jigokuraku' }),
+      item({ fileName: 'Mercury E01.mp4', relativePath: 'Mercury E01.mp4', episode: 1, parsedTitle: 'Witch from Mercury' }),
+    ];
+    const result = groupByFolder(files);
+    expect(result).toHaveLength(3);
+    expect(result.every((g) => g.items.length === 1)).toBe(true);
   });
 
   // 8. OVA-only group → uniform kind, no ambiguity, sortMode='episode'

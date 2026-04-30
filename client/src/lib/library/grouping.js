@@ -100,6 +100,24 @@ export function groupByFolder(items) {
   /** @type {Group[]} */
   const groups = [];
   for (const [groupKey, raw] of buckets) {
+    // v3.1 §4 Stage 2 根目录特例:
+    // groupKey === '__root__' && raw.length > 1 → 每文件独立 Group,禁用同目录簇,
+    // 避免不同番(Heavenly Delusion / Jigokuraku / GUNDAM PROLOGUE …)被错合。
+    // 单一根文件保留原 sentinel groupKey,UI 翻译不变。
+    if (groupKey === '__root__' && raw.length > 1) {
+      for (const it of raw) {
+        groups.push({
+          id: `g:__root__/${it.fileId}`,
+          groupKey: `__root__/${it.fileName}`,
+          label: it.fileName,
+          items: [it],
+          sortMode: 'episode',
+          hasAmbiguity: false,
+        });
+      }
+      continue;
+    }
+
     const hasAmbiguity = detectAmbiguity(raw);
     const sortMode = hasAmbiguity ? 'alpha' : 'episode';
     const sorted = [...raw].sort(
@@ -108,9 +126,6 @@ export function groupByFolder(items) {
         : sortByEpisodeThenName,
     );
     const lastSeg = groupKey.split('/').pop();
-    // id is deterministic from groupKey so this stays a pure function — P3 SeriesMatcher
-    // can use it as a stable merge key across re-groupings of the same files.
-    // label for __root__ is the sentinel itself; UI layer translates.
     groups.push({
       id: `g:${groupKey}`,
       groupKey,
