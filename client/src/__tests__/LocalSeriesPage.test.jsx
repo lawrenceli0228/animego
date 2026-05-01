@@ -7,6 +7,13 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 // ── mock hooks / modules used by LocalSeriesPage ──────────────────────────────
 
+// ManualSearch (used inside RematchDialog) reads from useLang(). Provide a
+// no-op implementation so tests don't have to wrap every render in a provider.
+vi.mock('../context/LanguageContext', () => ({
+  useLang: () => ({ lang: 'zh', t: (k) => k, toggle: () => {} }),
+  LanguageProvider: ({ children }) => children,
+}));
+
 vi.mock('../hooks/useFileHandles', () => ({
   default: vi.fn(() => ({
     status: 'ready',
@@ -41,8 +48,22 @@ vi.mock('../lib/library/db/progressRepo.js', () => ({
   })),
 }));
 
+// Minimal db mock: enough surface for useLibrary's liveQuery and SplitDialog's
+// season prefetch. Tables not exercised by the page may simply be missing.
 vi.mock('../lib/library/db/db.js', () => ({
-  db: {},
+  db: {
+    seasons: {
+      where: () => ({
+        equals: () => ({ toArray: () => Promise.resolve([]) }),
+      }),
+    },
+    series: {
+      orderBy: () => ({
+        reverse: () => ({ toArray: () => Promise.resolve([]) }),
+      }),
+    },
+    userOverride: { toArray: () => Promise.resolve([]) },
+  },
   getDb: vi.fn(() => ({})),
 }));
 
@@ -335,5 +356,71 @@ describe('LocalSeriesPage — back button', () => {
     renderAt('series-1');
     fireEvent.click(screen.getByTestId('back-btn'));
     expect(screen.getByTestId('library-route')).toBeInTheDocument();
+  });
+});
+
+describe('LocalSeriesPage — Actions menu', () => {
+  it('hides Actions menu in loading / error / missing states', () => {
+    mockSeriesDetail.status = 'loading';
+    const { unmount } = renderAt('series-1');
+    expect(screen.queryByTestId('actions-btn')).not.toBeInTheDocument();
+    unmount();
+
+    mockSeriesDetail.status = 'error';
+    const e = renderAt('series-1');
+    expect(screen.queryByTestId('actions-btn')).not.toBeInTheDocument();
+    e.unmount();
+
+    mockSeriesDetail.status = 'missing';
+    renderAt('series-1');
+    expect(screen.queryByTestId('actions-btn')).not.toBeInTheDocument();
+  });
+
+  it('shows the Actions menu trigger on the loaded detail page', () => {
+    mockSeriesDetail.series = makeSeries();
+    renderAt('series-1');
+    expect(screen.getByTestId('actions-btn')).toBeInTheDocument();
+  });
+
+  it('clicking [合并到其他系列] opens the MergeDialog', async () => {
+    mockSeriesDetail.series = makeSeries();
+    renderAt('series-1');
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    fireEvent.click(screen.getByTestId('action-merge'));
+    await waitFor(() => {
+      expect(screen.getByTestId('merge-dialog')).toBeInTheDocument();
+    });
+  });
+
+  it('clicking [拆分此系列] opens the SplitDialog', async () => {
+    mockSeriesDetail.series = makeSeries();
+    renderAt('series-1');
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    fireEvent.click(screen.getByTestId('action-split'));
+    await waitFor(() => {
+      expect(screen.getByTestId('split-dialog')).toBeInTheDocument();
+    });
+  });
+
+  it('clicking [重新匹配] opens the RematchDialog', async () => {
+    mockSeriesDetail.series = makeSeries();
+    renderAt('series-1');
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    fireEvent.click(screen.getByTestId('action-rematch'));
+    await waitFor(() => {
+      expect(screen.getByTestId('rematch-dialog')).toBeInTheDocument();
+    });
+  });
+
+  it('Cancel on MergeDialog closes it without errors', async () => {
+    mockSeriesDetail.series = makeSeries();
+    renderAt('series-1');
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    fireEvent.click(screen.getByTestId('action-merge'));
+    await waitFor(() => expect(screen.getByTestId('merge-dialog')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('merge-cancel'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('merge-dialog')).not.toBeInTheDocument();
+    });
   });
 });

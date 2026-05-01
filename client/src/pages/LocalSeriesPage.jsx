@@ -3,10 +3,20 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import useSeriesDetail from '../hooks/useSeriesDetail';
 import useFileHandles from '../hooks/useFileHandles';
+import useLibrary from '../hooks/useLibrary';
 import { db } from '../lib/library/db/db.js';
 import { makeProgressRepo } from '../lib/library/db/progressRepo.js';
+import { ulid } from '../lib/library/ulid.js';
 import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
 import { CornerBrackets } from '../components/shared/hud';
+import MergeDialog from '../components/library/MergeDialog';
+import SplitDialog from '../components/library/SplitDialog';
+import RematchDialog from '../components/library/RematchDialog';
+import SeriesActionsMenu from '../components/library/SeriesActionsMenu';
+import UndoToast from '../components/shared/UndoToast';
+import { performMerge, undoMerge } from '../services/mergeOps.js';
+import { splitSeries } from '../services/splitSeries.js';
+import { rematchSeries } from '../services/rematchSeries.js';
 
 /** @typedef {import('../lib/library/types').Progress} Progress */
 
@@ -26,6 +36,9 @@ const s = {
     display: 'flex',
     alignItems: 'center',
     gap: 12,
+  },
+  topbarSpacer: {
+    flex: 1,
   },
   backBtn: {
     ...mono,
@@ -374,6 +387,131 @@ export default function LocalSeriesPage() {
     handlePlayEpisode(resumeEp.number);
   }, [resumeEp, handlePlayEpisode]);
 
+  // §5.6 Actions menu — 详情页是移动端唯一管理入口。
+  // 共享 LibraryPage 的 dialog 组件、服务层与撤销契约。
+  const { series: allSeries } = useLibrary({ db });
+  const [activeDialog, setActiveDialog] = useState(
+    /** @type {'merge'|'split'|'rematch'|null} */ (null),
+  );
+  const [splitSeasons, setSplitSeasons] = useState(/** @type {any[]} */ ([]));
+  const [undoToast, setUndoToast] = useState(
+    /** @type {{ opIds: string[], title: string, meta?: string }|null} */ (null),
+  );
+
+  // Load seasons for SplitDialog on demand. Cleared when the dialog closes
+  // so a stale list never leaks into a subsequent open. Same pattern as
+  // LibraryPage to keep the data shape consistent.
+  useEffect(() => {
+    if (activeDialog !== 'split' || !seriesId) {
+      setSplitSeasons([]);
+      return undefined;
+    }
+    let cancelled = false;
+    db.seasons
+      .where('seriesId')
+      .equals(seriesId)
+      .toArray()
+      .then((rows) => { if (!cancelled) setSplitSeasons(rows); })
+      .catch((err) => {
+        if (!cancelled) {
+          console.warn('[localseries] failed to load seasons for split:', err);
+          setSplitSeasons([]);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [activeDialog, seriesId]);
+
+  const closeDialog = useCallback(() => setActiveDialog(null), []);
+
+  const handleMergeConfirm = useCallback(
+    async (targetSeriesId) => {
+      if (!seriesId || !series || seriesId === targetSeriesId) {
+        setActiveDialog(null);
+        return;
+      }
+      const targetSeries = allSeries.find((sr) => sr.id === targetSeriesId) ?? null;
+      const targetTitle = pickTitle(targetSeries) || targetSeriesId;
+      const sourceTitle = pickTitle(series) || seriesId;
+      try {
+        const op = await performMerge({
+          db,
+          sourceSeriesId: seriesId,
+          targetSeriesId,
+          summary: { targetTitle, sourceTitle },
+        });
+        if (op) {
+          setUndoToast({
+            opIds: [op.id],
+            title: targetTitle,
+            meta: `从 ${sourceTitle} 合并`,
+          });
+          // Source vanishes from the library after merge — follow the user
+          // to the surviving target so the back button still feels right.
+          navigate(`/library/${targetSeriesId}`, { replace: true });
+        }
+      } catch (err) {
+        console.warn('[localseries] merge failed:', err);
+      } finally {
+        setActiveDialog(null);
+      }
+    },
+    [seriesId, series, allSeries, navigate],
+  );
+
+  const handleSplitConfirm = useCallback(
+    async ({ seasonIds, name }) => {
+      if (!seriesId) return;
+      try {
+        await splitSeries({
+          db,
+          sourceSeriesId: seriesId,
+          seasonIds,
+          name,
+          ulid,
+        });
+      } catch (err) {
+        console.warn('[localseries] split failed:', err);
+      } finally {
+        setActiveDialog(null);
+      }
+    },
+    [seriesId],
+  );
+
+  const handleRematchConfirm = useCallback(
+    async (payload) => {
+      if (!seriesId) return;
+      try {
+        await rematchSeries({
+          db,
+          seriesId,
+          animeId: payload.animeId,
+          titleZh: payload.titleZh,
+          titleEn: payload.titleEn,
+          posterUrl: payload.posterUrl,
+          type: payload.type,
+          ulid,
+        });
+      } catch (err) {
+        console.warn('[localseries] rematch failed:', err);
+      } finally {
+        setActiveDialog(null);
+      }
+    },
+    [seriesId],
+  );
+
+  const handleUndoMerge = useCallback(async () => {
+    if (!undoToast) return;
+    for (const opId of [...undoToast.opIds].reverse()) {
+      try {
+        await undoMerge({ db, opId });
+      } catch (err) {
+        console.warn('[localseries] undo merge failed:', err);
+      }
+    }
+  }, [undoToast]);
+
   if (status === 'loading' || status === 'idle') {
     return (
       <div style={s.page}>
@@ -419,6 +557,12 @@ export default function LocalSeriesPage() {
         <button style={s.backBtn} onClick={handleBack} type="button" data-testid="back-btn">
           ← 返回
         </button>
+        <div style={s.topbarSpacer} />
+        <SeriesActionsMenu
+          onMerge={() => setActiveDialog('merge')}
+          onSplit={() => setActiveDialog('split')}
+          onRematch={() => setActiveDialog('rematch')}
+        />
       </div>
 
       <div style={s.hero} data-testid="series-hero">
@@ -516,6 +660,45 @@ export default function LocalSeriesPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {activeDialog === 'merge' && series && (
+        <MergeDialog
+          open
+          sourceSeries={series}
+          allSeries={allSeries}
+          onClose={closeDialog}
+          onConfirm={handleMergeConfirm}
+        />
+      )}
+
+      {activeDialog === 'split' && series && (
+        <SplitDialog
+          open
+          sourceSeries={series}
+          seasons={splitSeasons}
+          onClose={closeDialog}
+          onConfirm={handleSplitConfirm}
+        />
+      )}
+
+      {activeDialog === 'rematch' && series && (
+        <RematchDialog
+          open
+          sourceSeries={series}
+          onClose={closeDialog}
+          onConfirm={handleRematchConfirm}
+        />
+      )}
+
+      {undoToast && (
+        <UndoToast
+          open
+          title={undoToast.title}
+          meta={undoToast.meta}
+          onUndo={handleUndoMerge}
+          onDismiss={() => setUndoToast(null)}
+        />
       )}
     </div>
   );
