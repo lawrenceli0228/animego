@@ -13,10 +13,12 @@ import MergeDialog from '../components/library/MergeDialog';
 import SplitDialog from '../components/library/SplitDialog';
 import RematchDialog from '../components/library/RematchDialog';
 import SeriesActionsMenu from '../components/library/SeriesActionsMenu';
+import OpsLogDrawer from '../components/library/OpsLogDrawer';
 import UndoToast from '../components/shared/UndoToast';
 import { performMerge, undoMerge } from '../services/mergeOps.js';
 import { splitSeries } from '../services/splitSeries.js';
 import { rematchSeries } from '../services/rematchSeries.js';
+import { makeOpsLogRepo } from '../lib/library/db/opsLogRepo.js';
 
 /** @typedef {import('../lib/library/types').Progress} Progress */
 
@@ -401,9 +403,7 @@ export default function LocalSeriesPage() {
     [episodes, progressByEp],
   );
 
-  // §5.6 file tree — group files by folder, preserve EP order, surface ✓ when watched.
-  // Returns Array<[folder, files[]]> where files are sorted by epNumber. Folders sort
-  // alphabetically; root-level files live under "(根)".
+  // §5.6 file tree — Array<[folder, files[]]>. Files sorted by epNumber, folders alpha.
   const filesByFolder = useMemo(() => {
     /** @type {Map<string, { epId: string, epNumber: number, fileName: string, watched: boolean }[]>} */
     const folders = new Map();
@@ -440,20 +440,18 @@ export default function LocalSeriesPage() {
     handlePlayEpisode(resumeEp.number);
   }, [resumeEp, handlePlayEpisode]);
 
-  // §5.6 Actions menu — 详情页是移动端唯一管理入口。
-  // 共享 LibraryPage 的 dialog 组件、服务层与撤销契约。
+  // §5.6 Actions menu — 详情页是移动端唯一管理入口。共享 LibraryPage 的 dialog/服务/撤销。
   const { series: allSeries } = useLibrary({ db });
   const [activeDialog, setActiveDialog] = useState(
-    /** @type {'merge'|'split'|'rematch'|null} */ (null),
+    /** @type {'merge'|'split'|'rematch'|'opslog'|null} */ (null),
   );
   const [splitSeasons, setSplitSeasons] = useState(/** @type {any[]} */ ([]));
+  const [opsLogEntries, setOpsLogEntries] = useState(/** @type {any[]} */ ([]));
   const [undoToast, setUndoToast] = useState(
     /** @type {{ opIds: string[], title: string, meta?: string }|null} */ (null),
   );
 
-  // Load seasons for SplitDialog on demand. Cleared when the dialog closes
-  // so a stale list never leaks into a subsequent open. Same pattern as
-  // LibraryPage to keep the data shape consistent.
+  // SplitDialog seasons — load on demand, clear on close (mirrors LibraryPage).
   useEffect(() => {
     if (activeDialog !== 'split' || !seriesId) {
       setSplitSeasons([]);
@@ -469,6 +467,25 @@ export default function LocalSeriesPage() {
         if (!cancelled) {
           console.warn('[localseries] failed to load seasons for split:', err);
           setSplitSeasons([]);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [activeDialog, seriesId]);
+
+  // 24h ops log — load on demand, clear on close.
+  useEffect(() => {
+    if (activeDialog !== 'opslog' || !seriesId) {
+      setOpsLogEntries([]);
+      return undefined;
+    }
+    let cancelled = false;
+    makeOpsLogRepo(db)
+      .listForSeries(seriesId, { limit: 50 })
+      .then((rows) => { if (!cancelled) setOpsLogEntries(rows); })
+      .catch((err) => {
+        if (!cancelled) {
+          console.warn('[localseries] failed to load opsLog:', err);
+          setOpsLogEntries([]);
         }
       });
     return () => { cancelled = true; };
@@ -493,13 +510,8 @@ export default function LocalSeriesPage() {
           summary: { targetTitle, sourceTitle },
         });
         if (op) {
-          setUndoToast({
-            opIds: [op.id],
-            title: targetTitle,
-            meta: `从 ${sourceTitle} 合并`,
-          });
-          // Source vanishes from the library after merge — follow the user
-          // to the surviving target so the back button still feels right.
+          setUndoToast({ opIds: [op.id], title: targetTitle, meta: `从 ${sourceTitle} 合并` });
+          // Source vanishes after merge — navigate so back-button stays sane.
           navigate(`/library/${targetSeriesId}`, { replace: true });
         }
       } catch (err) {
@@ -511,48 +523,36 @@ export default function LocalSeriesPage() {
     [seriesId, series, allSeries, navigate],
   );
 
-  const handleSplitConfirm = useCallback(
-    async ({ seasonIds, name }) => {
-      if (!seriesId) return;
-      try {
-        await splitSeries({
-          db,
-          sourceSeriesId: seriesId,
-          seasonIds,
-          name,
-          ulid,
-        });
-      } catch (err) {
-        console.warn('[localseries] split failed:', err);
-      } finally {
-        setActiveDialog(null);
-      }
-    },
-    [seriesId],
-  );
+  const handleSplitConfirm = useCallback(async ({ seasonIds, name }) => {
+    if (!seriesId) return;
+    try {
+      await splitSeries({ db, sourceSeriesId: seriesId, seasonIds, name, ulid });
+    } catch (err) {
+      console.warn('[localseries] split failed:', err);
+    } finally {
+      setActiveDialog(null);
+    }
+  }, [seriesId]);
 
-  const handleRematchConfirm = useCallback(
-    async (payload) => {
-      if (!seriesId) return;
-      try {
-        await rematchSeries({
-          db,
-          seriesId,
-          animeId: payload.animeId,
-          titleZh: payload.titleZh,
-          titleEn: payload.titleEn,
-          posterUrl: payload.posterUrl,
-          type: payload.type,
-          ulid,
-        });
-      } catch (err) {
-        console.warn('[localseries] rematch failed:', err);
-      } finally {
-        setActiveDialog(null);
-      }
-    },
-    [seriesId],
-  );
+  const handleRematchConfirm = useCallback(async (payload) => {
+    if (!seriesId) return;
+    try {
+      await rematchSeries({
+        db,
+        seriesId,
+        animeId: payload.animeId,
+        titleZh: payload.titleZh,
+        titleEn: payload.titleEn,
+        posterUrl: payload.posterUrl,
+        type: payload.type,
+        ulid,
+      });
+    } catch (err) {
+      console.warn('[localseries] rematch failed:', err);
+    } finally {
+      setActiveDialog(null);
+    }
+  }, [seriesId]);
 
   const handleUndoMerge = useCallback(async () => {
     if (!undoToast) return;
@@ -615,6 +615,7 @@ export default function LocalSeriesPage() {
           onMerge={() => setActiveDialog('merge')}
           onSplit={() => setActiveDialog('split')}
           onRematch={() => setActiveDialog('rematch')}
+          onOpsLog={() => setActiveDialog('opslog')}
         />
       </div>
 
@@ -770,6 +771,12 @@ export default function LocalSeriesPage() {
           onConfirm={handleRematchConfirm}
         />
       )}
+
+      <OpsLogDrawer
+        open={activeDialog === 'opslog'}
+        entries={opsLogEntries}
+        onClose={closeDialog}
+      />
 
       {undoToast && (
         <UndoToast

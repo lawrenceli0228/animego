@@ -87,4 +87,21 @@ describe('SeriesActionsMenu', () => {
     mount({ label: '管理 ▾' });
     expect(screen.getByTestId('actions-btn')).toHaveTextContent('管理 ▾');
   });
+
+  it('omits 操作日志 when onOpsLog is not provided', () => {
+    mount();
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    expect(screen.queryByTestId('action-opslog')).not.toBeInTheDocument();
+  });
+
+  it('renders 操作日志 when onOpsLog is provided and fires the callback', () => {
+    const onOpsLog = vi.fn();
+    mount({ onOpsLog });
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    const item = screen.getByTestId('action-opslog');
+    expect(item).toHaveTextContent('操作日志');
+    fireEvent.click(item);
+    expect(onOpsLog).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('actions-menu')).not.toBeInTheDocument();
+  });
 });

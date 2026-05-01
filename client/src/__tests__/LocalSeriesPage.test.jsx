@@ -48,6 +48,17 @@ vi.mock('../lib/library/db/progressRepo.js', () => ({
   })),
 }));
 
+const mockListForSeries = vi.fn().mockResolvedValue([]);
+vi.mock('../lib/library/db/opsLogRepo.js', () => ({
+  makeOpsLogRepo: vi.fn(() => ({
+    append: vi.fn(),
+    get: vi.fn(),
+    listForSeries: mockListForSeries,
+    markUndone: vi.fn(),
+    gc: vi.fn(),
+  })),
+}));
+
 // Minimal db mock: enough surface for useLibrary's liveQuery and SplitDialog's
 // season prefetch. Tables not exercised by the page may simply be missing.
 vi.mock('../lib/library/db/db.js', () => ({
@@ -137,6 +148,7 @@ beforeEach(() => {
   mockSeriesDetail.episodes = [];
   mockSeriesDetail.fileRefByEpisode = new Map();
   mockGetBySeries.mockReset().mockResolvedValue([]);
+  mockListForSeries.mockReset().mockResolvedValue([]);
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -465,6 +477,53 @@ describe('LocalSeriesPage — Actions menu', () => {
     fireEvent.click(screen.getByTestId('merge-cancel'));
     await waitFor(() => {
       expect(screen.queryByTestId('merge-dialog')).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe('LocalSeriesPage — Ops log drawer', () => {
+  it('exposes [操作日志] in the Actions menu', () => {
+    mockSeriesDetail.series = makeSeries();
+    renderAt('series-1');
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    expect(screen.getByTestId('action-opslog')).toBeInTheDocument();
+  });
+
+  it('clicking [操作日志] opens the drawer and queries listForSeries', async () => {
+    mockSeriesDetail.series = makeSeries();
+    mockListForSeries.mockResolvedValue([
+      {
+        id: 'op_1',
+        seriesId: 'series-1',
+        ts: Date.now() - 30_000,
+        kind: 'merge',
+        payload: {},
+        summary: { sourceTitle: 'A', targetTitle: 'B' },
+        undoableUntil: Date.now() + 86_400_000,
+        undone: false,
+      },
+    ]);
+    renderAt('series-1');
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    fireEvent.click(screen.getByTestId('action-opslog'));
+    await waitFor(() => {
+      expect(screen.getByTestId('opslog-drawer')).toBeInTheDocument();
+    });
+    expect(mockListForSeries).toHaveBeenCalledWith('series-1', { limit: 50 });
+    await waitFor(() => {
+      expect(screen.getByTestId('opslog-row-op_1')).toBeInTheDocument();
+    });
+  });
+
+  it('clicking close dismisses the drawer', async () => {
+    mockSeriesDetail.series = makeSeries();
+    renderAt('series-1');
+    fireEvent.click(screen.getByTestId('actions-btn'));
+    fireEvent.click(screen.getByTestId('action-opslog'));
+    await waitFor(() => expect(screen.getByTestId('opslog-drawer')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('opslog-close'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('opslog-drawer')).not.toBeInTheDocument();
     });
   });
 });

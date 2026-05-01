@@ -51,18 +51,20 @@ const s = {
 
 /**
  * SeriesActionsMenu — §5.6 详情页主动作菜单。详情页是移动端唯一管理入口,
- * 这个菜单收敛 [合并到…] / [拆分此系列] / [重新匹配] 三项写库动作。
+ * 这个菜单收敛 [合并到…] / [拆分此系列] / [重新匹配] 三项写库动作,可选挂载
+ * [操作日志] 入口(§5.6 v3,只在详情页提供)。
  *
- * 自管开关与 click-outside,父组件只挂三个回调。
+ * 自管开关与 click-outside,父组件只挂回调。
  *
  * @param {{
  *   onMerge: () => void,
  *   onSplit: () => void,
  *   onRematch: () => void,
+ *   onOpsLog?: () => void,
  *   label?: string,
  * }} props
  */
-export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, label = 'Actions ▾' }) {
+export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLog, label = 'Actions ▾' }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(/** @type {HTMLDivElement|null} */ (null));
 
@@ -123,6 +125,17 @@ export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, label =
           >
             重新匹配…
           </button>
+          {onOpsLog && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="action-opslog"
+              style={s.item}
+              onClick={() => fire(onOpsLog)}
+            >
+              操作日志
+            </button>
+          )}
         </div>
       )}
     </div>
