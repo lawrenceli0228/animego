@@ -65,9 +65,12 @@ describe('LibraryPage', () => {
     vi.resetModules();
   });
 
-  it('shows empty state when IDB is empty and FSA is supported', async () => {
+  it('shows DropZone empty state when IDB is empty and FSA is supported', async () => {
     renderPage();
-    expect(await screen.findByRole('button', { name: /add folder/i })).toBeInTheDocument();
+    const zone = await screen.findByTestId('dropzone');
+    expect(zone).toBeInTheDocument();
+    expect(zone.getAttribute('data-state')).toBe('empty');
+    expect(screen.getByTestId('dropzone-pick')).toBeInTheDocument();
   });
 
   it('shows SeriesGrid when series are present', async () => {

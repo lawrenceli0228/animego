@@ -15,6 +15,7 @@ import { db } from '../lib/library/db/db.js';
 import { migrateLegacyProgress } from '../lib/library/db/migrateLegacyProgress.js';
 import { ulid } from '../lib/library/ulid.js';
 import LibraryEmptyState from '../components/library/LibraryEmptyState';
+import DropZone from '../components/library/DropZone';
 import FsaUnsupportedBanner from '../components/library/FsaUnsupportedBanner';
 import LibraryOfflineBanner from '../components/library/LibraryOfflineBanner';
 import useSeriesLibraryStatus from '../hooks/useSeriesLibraryStatus';
@@ -25,6 +26,7 @@ import MergeDialog from '../components/library/MergeDialog';
 import SplitDialog from '../components/library/SplitDialog';
 import RematchDialog from '../components/library/RematchDialog';
 import ImportDrawer from '../components/library/ImportDrawer';
+import ImportMiniPill from '../components/library/ImportMiniPill';
 import UnclassifiedSection from '../components/library/UnclassifiedSection';
 import useUnclassified from '../hooks/useUnclassified';
 import useSeriesSelection from '../hooks/useSeriesSelection.js';
@@ -38,7 +40,8 @@ import { dedupeSeriesByAnimeId } from '../services/dedupeSeries.js';
 import { createDandanClient } from '../services/dandanClient.js';
 import { refreshAllSeriesMetadata } from '../services/refreshSeriesMetadata.js';
 import { useLang } from '../context/LanguageContext';
-import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
+import { mono, PLAYER_HUE, LOCAL_HEX_GLYPH } from '../components/shared/hud-tokens';
+import { CornerBrackets } from '../components/shared/hud';
 import toast from 'react-hot-toast';
 
 // Tiny `{{var}}` interpolation for toast strings — t() doesn't support it.
@@ -47,16 +50,95 @@ function fmtTpl(tpl, vars) {
 }
 
 const HUE = PLAYER_HUE.stream;
+const PRIVACY_PULSE_CSS = '@keyframes libraryPrivacyPulse{0%,100%{opacity:0.55;transform:scale(0.92)}50%{opacity:1;transform:scale(1)}}';
 
 const s = {
   page: {
-    maxWidth: 1120,
+    maxWidth: 1400,
     margin: '0 auto',
-    padding: '32px 24px',
+    padding: '32px 24px 96px',
     display: 'flex',
     flexDirection: 'column',
     gap: 24,
   },
+  hudHeader: {
+    position: 'relative',
+    padding: '24px 0 32px',
+    borderBottom: '1px solid #38383a',
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 24,
+    flexWrap: 'wrap',
+  },
+  hudHeaderInner: { flex: 1, minWidth: 0 },
+  hudKicker: {
+    ...mono,
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.30)',
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  hudTitle: {
+    fontFamily: "'Sora', sans-serif",
+    fontWeight: 700,
+    fontSize: 32,
+    letterSpacing: '-0.02em',
+    color: '#fff',
+    margin: '0 0 8px',
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 14,
+    flexWrap: 'wrap',
+  },
+  hudTitleEn: {
+    ...mono,
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.30)',
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+  },
+  hudSubtitle: {
+    color: 'rgba(235,235,245,0.60)',
+    fontSize: 13,
+    display: 'flex',
+    gap: 14,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  hudNum: {
+    ...mono,
+    color: '#fff',
+  },
+  hudDot: { color: 'rgba(235,235,245,0.18)' },
+  hudPrivacy: {
+    ...mono,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 10,
+    color: '#30d158',
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+  },
+  hudPrivacyDot: {
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
+    background: '#30d158',
+    boxShadow: '0 0 8px #30d158',
+    animation: 'libraryPrivacyPulse 2s ease-in-out infinite',
+  },
+  hudActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+  },
+  // legacy fallback (kept for selection toolbar compose)
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -564,9 +646,14 @@ export default function LibraryPage() {
 
   const showEmptyState = !loading && series.length === 0;
   const showBanner = !fsaSupported;
+  const totalEpisodes = useMemo(
+    () => series.reduce((sum, sr) => sum + (typeof sr.totalEpisodes === 'number' ? sr.totalEpisodes : 0), 0),
+    [series],
+  );
 
   return (
     <div style={s.page}>
+      <style>{PRIVACY_PULSE_CSS}</style>
       {showBanner && <FsaUnsupportedBanner />}
       <LibraryOfflineBanner
         roots={roots}
@@ -582,9 +669,30 @@ export default function LibraryPage() {
           onMerge={handleBulkMerge}
         />
       ) : (
-        <div style={s.header}>
-          <h1 style={s.title}>Library</h1>
-          <div style={s.headerActions}>
+        <header style={s.hudHeader} data-testid="library-hud-header">
+          <CornerBrackets inset={-8} size={14} opacity={0.30} />
+          <div style={s.hudHeaderInner}>
+            <div style={s.hudKicker}>// 02 / LOCAL · MEDIA · LIBRARY //</div>
+            <h1 style={s.hudTitle}>
+              <span>{t('nav.library')}{` ${LOCAL_HEX_GLYPH}`}</span>
+              <span style={s.hudTitleEn}>LIBRARY</span>
+            </h1>
+            <div style={s.hudSubtitle}>
+              <span><span style={s.hudNum}>{series.length}</span>&nbsp;series</span>
+              {totalEpisodes > 0 && (
+                <>
+                  <span style={s.hudDot}>·</span>
+                  <span><span style={s.hudNum}>{totalEpisodes}</span>&nbsp;episodes</span>
+                </>
+              )}
+              <span style={s.hudDot}>·</span>
+              <span style={s.hudPrivacy}>
+                <span aria-hidden style={s.hudPrivacyDot} />
+                stored on this device
+              </span>
+            </div>
+          </div>
+          <div style={s.hudActions}>
             {series.length > 1 && (
               <button
                 style={s.refreshBtn(dedupeBusy)}
@@ -618,14 +726,18 @@ export default function LibraryPage() {
               </button>
             )}
           </div>
-        </div>
+        </header>
       )}
 
       {showEmptyState ? (
-        <LibraryEmptyState
-          onAddFolder={handleAddFolder}
-          isFsaSupported={fsaSupported}
-        />
+        fsaSupported ? (
+          <DropZone onPick={handleAddFolder} isFsaSupported={fsaSupported} />
+        ) : (
+          <LibraryEmptyState
+            onAddFolder={handleAddFolder}
+            isFsaSupported={fsaSupported}
+          />
+        )
       ) : (
         <>
           <RecentlyPlayedRow entries={resumeEntries} onPlay={handleResume} />
@@ -663,6 +775,7 @@ export default function LibraryPage() {
           )}
           <UnclassifiedSection
             entries={unclassifiedEntries}
+            defaultOpen
             onIgnore={handleIgnoreUnclassified}
           />
         </>
@@ -676,6 +789,15 @@ export default function LibraryPage() {
           error={importError}
           onCancel={cancelImport}
           onDismiss={() => setImportDismissed(true)}
+        />
+      )}
+
+      {importDismissed && (
+        <ImportMiniPill
+          status={importStatus}
+          progress={importProgress}
+          summary={importSummary}
+          onExpand={() => setImportDismissed(false)}
         />
       )}
 

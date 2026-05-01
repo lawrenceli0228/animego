@@ -5,7 +5,7 @@ const en = {
   nav: {
     home: 'Home', season: 'Season', search: 'Search',
     login: 'Login', register: 'Sign Up', logout: 'Logout',
-    myList: 'My List', hi: 'Hi', player: 'Player', about: 'About',
+    myList: 'My List', hi: 'Hi', library: 'Library', about: 'About',
   },
   // Season labels
   season: {

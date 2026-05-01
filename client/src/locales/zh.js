@@ -5,7 +5,7 @@ const zh = {
   nav: {
     home: '首页', season: '季度', search: '搜索',
     login: '登录', register: '注册', logout: '登出',
-    myList: '我的追番', hi: 'Hi', player: '播放', about: '关于',
+    myList: '我的追番', hi: 'Hi', library: '我的库', about: '关于',
   },
   // Season labels
   season: {

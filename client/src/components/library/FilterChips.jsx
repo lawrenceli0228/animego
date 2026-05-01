@@ -1,9 +1,7 @@
 // @ts-check
-import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+import { mono } from '../shared/hud-tokens';
 
 /** @typedef {'recent'|'new'|'inProgress'|'done'|null} LibraryFilter */
-
-const HUE = PLAYER_HUE.stream;
 
 const CHIPS = /** @type {{ id: Exclude<LibraryFilter, null>, label: string }[]} */ ([
   { id: 'recent',     label: '最近播放' },
@@ -17,23 +15,25 @@ const s = {
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
+  // §5.4 — design's filled-accent active chip. Inactive uses Apple system fill
+  // grey (matches the design board tokens). Hover lift handled inline below.
   chip: (active) => ({
-    ...mono,
-    padding: '6px 12px',
-    background: active ? `oklch(62% 0.17 ${HUE} / 0.22)` : 'transparent',
-    border: active
-      ? `1px solid oklch(62% 0.17 ${HUE} / 0.65)`
-      : '1px solid rgba(120,120,128,0.30)',
-    borderRadius: 999,
-    color: active
-      ? `oklch(78% 0.14 ${HUE})`
-      : 'rgba(235,235,245,0.70)',
+    fontFamily: "'DM Sans', sans-serif",
+    height: 32,
+    padding: '0 14px',
+    background: active ? '#0a84ff' : 'rgba(120,120,128,0.12)',
+    border: 'none',
+    borderRadius: 9999,
+    color: active ? '#fff' : 'rgba(235,235,245,0.60)',
     cursor: 'pointer',
-    fontSize: 11,
-    letterSpacing: '0.06em',
-    transition: 'background 120ms ease-out, border-color 120ms ease-out',
+    fontSize: 13,
+    fontWeight: 500,
+    letterSpacing: 0,
+    transition: 'background 150ms ease-out, color 150ms ease-out',
+    display: 'inline-flex',
+    alignItems: 'center',
   }),
   clear: {
     ...mono,

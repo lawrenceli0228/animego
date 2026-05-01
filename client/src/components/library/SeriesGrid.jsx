@@ -6,11 +6,16 @@ import SeriesCard from './SeriesCard';
 /** @typedef {import('../../hooks/useSeriesProgressMap').SeriesProgressInfo} SeriesProgressInfo */
 /** @typedef {'lock'|'unlock'|'clear'|'merge'|'split'} OverrideAction */
 
+// §5.4 — 4-col target at desktop. minmax 280 lands at 4 cols inside the
+// 1400-wide page wrapper (inner ≈1352 after padding); auto-fill steps down
+// to 3 below ~1100 and 2 below ~720, matching the design's breakpoints.
 const gridStyle = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-  gap: 16,
+  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+  gap: 24,
 };
+
+const NEW_WINDOW_MS = 1000 * 60 * 60 * 24 * 3; // 3 days — "刚加入" budget
 
 /**
  * Compute progressPct from completed-episode count over a series' total.
@@ -28,6 +33,26 @@ function computePct(series, info) {
   }
   if (info.completedCount <= 0) return undefined;
   return Math.min(1, info.completedCount / series.totalEpisodes);
+}
+
+/**
+ * Compose the progress overlay label shown next to the bar.
+ *  - "${completed}/${total} ✓" once everything is watched
+ *  - "${completed}/${total}" while in-progress
+ *  - undefined when there's nothing meaningful to show
+ *
+ * @param {Series} series
+ * @param {SeriesProgressInfo | undefined} info
+ * @returns {string | undefined}
+ */
+function computeLabel(series, info) {
+  if (typeof series.totalEpisodes !== 'number' || series.totalEpisodes <= 0) {
+    return undefined;
+  }
+  const total = series.totalEpisodes;
+  const done = info?.completedCount ?? 0;
+  if (done <= 0) return undefined;
+  return done >= total ? `${done}/${total} ✓` : `${done}/${total}`;
 }
 
 /**
@@ -65,7 +90,13 @@ export default function SeriesGrid({
   return (
     <div style={gridStyle} data-testid="series-grid">
       {series.map((s) => {
-        const pct = computePct(s, progressMap?.get(s.id));
+        const info = progressMap?.get(s.id);
+        const pct = computePct(s, info);
+        const label = computeLabel(s, info);
+        const isNew =
+          (info?.completedCount ?? 0) === 0 &&
+          typeof s.createdAt === 'number' &&
+          Date.now() - s.createdAt < NEW_WINDOW_MS;
         return (
           <SeriesCard
             key={s.id}
@@ -73,6 +104,8 @@ export default function SeriesGrid({
             onClick={() => onPickSeries(s.id)}
             override={overrides?.get(s.id)}
             progressPct={pct}
+            progressLabel={label}
+            isNew={isNew}
             onOverrideAction={
               onOverrideAction
                 ? (action) => onOverrideAction(s.id, action)

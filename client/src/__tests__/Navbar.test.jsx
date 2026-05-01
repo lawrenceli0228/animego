@@ -17,7 +17,7 @@ vi.mock('../context/LanguageContext', () => ({
       'nav.home': 'Home',
       'nav.season': 'Season',
       'nav.search': 'Search',
-      'nav.player': 'Player',
+      'nav.library': 'Library',
       'nav.hi': 'Hi',
       'nav.login': 'Log in',
       'nav.register': 'Register',

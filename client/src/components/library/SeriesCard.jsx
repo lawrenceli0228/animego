@@ -190,6 +190,28 @@ const s = {
     fontSize: 11,
     color: `rgba(235,235,245,0.45)`,
   },
+  metaRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.60)',
+    marginTop: 2,
+  },
+  metaDot: {
+    color: 'rgba(235,235,245,0.18)',
+  },
+  metaType: {
+    ...mono,
+    fontSize: 10,
+    letterSpacing: '0.10em',
+    textTransform: 'uppercase',
+    color: 'rgba(235,235,245,0.55)',
+  },
+  metaEpUnit: {
+    color: 'rgba(235,235,245,0.45)',
+    fontSize: 11,
+  },
   duration: {
     ...mono,
     fontSize: 10,
@@ -215,6 +237,30 @@ const s = {
     borderRadius: 999,
     boxShadow: `0 0 6px ${PROGRESS_FILL}66`,
   }),
+  // §5.4 progress count overlay — sits beside the bar at bottom-left of the
+  // poster. Mono digits (e.g. `7/28`), green-toned for ✓ done, accent-toned
+  // for the NEW label. Design-spec text-shadow keeps it legible over any cover.
+  progressText: {
+    ...mono,
+    position: 'absolute',
+    left: 12,
+    bottom: 16,
+    fontSize: 10,
+    color: '#fff',
+    letterSpacing: '0.05em',
+    textShadow: '0 1px 4px rgba(0,0,0,0.85)',
+    fontVariantNumeric: 'tabular-nums',
+    pointerEvents: 'none',
+    zIndex: 3,
+  },
+  progressTextDone: { color: '#30d158' },
+  progressTextNew: {
+    fontSize: 9,
+    color: PROGRESS_FILL,
+    letterSpacing: '0.18em',
+    textTransform: 'uppercase',
+    bottom: 14,
+  },
   kebab: {
     position: 'absolute',
     top: 6,
@@ -302,6 +348,8 @@ const s = {
  *   series: Series,
  *   lastPlayedEp?: number,
  *   progressPct?: number,
+ *   progressLabel?: string,
+ *   isNew?: boolean,
  *   durationLabel?: string,
  *   onClick: (e?: import('react').MouseEvent) => void,
  *   override?: UserOverride,
@@ -318,6 +366,8 @@ const s = {
 export default function SeriesCard({
   series,
   progressPct,
+  progressLabel,
+  isNew = false,
   durationLabel,
   onClick,
   override,
@@ -458,6 +508,18 @@ export default function SeriesCard({
               <div style={s.progressFill(progressPct)} />
             </div>
           )}
+          {(progressLabel || isNew) && (
+            <span
+              style={{
+                ...s.progressText,
+                ...(isNew ? s.progressTextNew : null),
+                ...(progressPct != null && progressPct >= 1 ? s.progressTextDone : null),
+              }}
+              data-testid="progress-label"
+            >
+              {isNew ? 'NEW' : progressLabel}
+            </span>
+          )}
         </div>
 
         <div style={s.body}>
@@ -467,8 +529,21 @@ export default function SeriesCard({
               <span style={s.lockedBadge} data-testid="locked-badge">LOCK</span>
             )}
           </div>
-          {series.totalEpisodes != null && (
-            <span style={s.epCount}>{series.totalEpisodes}</span>
+          {(series.type || series.totalEpisodes != null) && (
+            <div style={s.metaRow}>
+              {series.type && (
+                <span style={s.metaType}>{String(series.type).toUpperCase()}</span>
+              )}
+              {series.type && series.totalEpisodes != null && (
+                <span style={s.metaDot}>·</span>
+              )}
+              {series.totalEpisodes != null && (
+                <>
+                  <span style={s.epCount}>{series.totalEpisodes}</span>
+                  <span style={s.metaEpUnit}>集</span>
+                </>
+              )}
+            </div>
           )}
           {durationLabel && (
             <span style={s.duration} data-testid="duration-label">
