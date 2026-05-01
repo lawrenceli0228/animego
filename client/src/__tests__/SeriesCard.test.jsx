@@ -64,6 +64,68 @@ describe('SeriesCard', () => {
   });
 });
 
+// ── §5.4 visual deltas: ⬡ LOCAL badge teal · iOS Blue progress · duration ───
+
+describe('SeriesCard §5.4 visual markers', () => {
+  it('LOCAL badge contains the ⬡ hexagon glyph', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} />);
+    const badge = screen.getByTestId('local-badge');
+    expect(badge.textContent).toMatch(/⬡/);
+    expect(badge.textContent).toMatch(/LOCAL/);
+  });
+
+  it('LOCAL badge uses teal #5ac8fa color', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} />);
+    const badge = screen.getByTestId('local-badge');
+    expect(badge.style.color).toBe('rgb(90, 200, 250)');
+  });
+
+  it('progress bar fill uses iOS Blue #0a84ff', () => {
+    const { container } = render(
+      <SeriesCard series={makeSeries()} onClick={vi.fn()} progressPct={0.4} />,
+    );
+    const fill = container.querySelector('[data-testid="progress-bar"] > div');
+    expect(fill).not.toBeNull();
+    expect(/** @type {HTMLElement} */(fill).style.background).toContain('rgb(10, 132, 255)');
+  });
+
+  it('progress fill width tracks progressPct (0..1)', () => {
+    const { container } = render(
+      <SeriesCard series={makeSeries()} onClick={vi.fn()} progressPct={0.25} />,
+    );
+    const fill = /** @type {HTMLElement} */ (
+      container.querySelector('[data-testid="progress-bar"] > div')
+    );
+    expect(fill.style.width).toBe('25%');
+  });
+
+  it('clamps progressPct above 1 to 100%', () => {
+    const { container } = render(
+      <SeriesCard series={makeSeries()} onClick={vi.fn()} progressPct={2} />,
+    );
+    const fill = /** @type {HTMLElement} */ (
+      container.querySelector('[data-testid="progress-bar"] > div')
+    );
+    expect(fill.style.width).toBe('100%');
+  });
+
+  it('renders duration label when durationLabel prop is provided', () => {
+    render(
+      <SeriesCard
+        series={makeSeries()}
+        onClick={vi.fn()}
+        durationLabel="11h 23m · 1080p"
+      />,
+    );
+    expect(screen.getByTestId('duration-label')).toHaveTextContent('11h 23m · 1080p');
+  });
+
+  it('omits duration node when durationLabel is absent', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} />);
+    expect(screen.queryByTestId('duration-label')).not.toBeInTheDocument();
+  });
+});
+
 // ── P4-F-2: kebab menu for userOverride actions ──────────────────────────────
 
 describe('SeriesCard kebab menu (P4-F-2)', () => {
@@ -109,6 +171,21 @@ describe('SeriesCard kebab menu (P4-F-2)', () => {
     expect(screen.getByTestId('menu-lock')).toBeInTheDocument();
     expect(screen.getByTestId('menu-merge')).toBeInTheDocument();
     expect(screen.getByTestId('menu-split')).toBeInTheDocument();
+    expect(screen.getByTestId('menu-rematch')).toBeInTheDocument();
+  });
+
+  it('clicking 重新匹配 fires onOverrideAction("rematch")', () => {
+    const onOverrideAction = vi.fn();
+    render(
+      <SeriesCard
+        series={makeSeries()}
+        onClick={vi.fn()}
+        onOverrideAction={onOverrideAction}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('series-kebab'));
+    fireEvent.click(screen.getByTestId('menu-rematch'));
+    expect(onOverrideAction).toHaveBeenCalledWith('rematch');
   });
 
   it('shows "解锁" instead of "锁定" when override.locked is true', () => {
@@ -205,5 +282,160 @@ describe('SeriesCard kebab menu (P4-F-2)', () => {
     expect(screen.getByTestId('series-menu')).toBeInTheDocument();
     fireEvent.mouseDown(screen.getByTestId('outside'));
     expect(screen.queryByTestId('series-menu')).not.toBeInTheDocument();
+  });
+});
+
+// ── §5.6 selection mode: toolbar + long-press + Shift-click ──────────────────
+
+describe('SeriesCard §5.6 selection mode', () => {
+  it('does not render select mark when selectionMode is false', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} selected />);
+    expect(screen.queryByTestId('series-select-mark')).not.toBeInTheDocument();
+  });
+
+  it('renders empty ring mark when selectionMode + not selected', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} selectionMode />);
+    const mark = screen.getByTestId('series-select-mark');
+    expect(mark).toHaveAttribute('data-selected', 'false');
+  });
+
+  it('renders filled check mark when selectionMode + selected', () => {
+    render(
+      <SeriesCard series={makeSeries()} onClick={vi.fn()} selectionMode selected />,
+    );
+    const mark = screen.getByTestId('series-select-mark');
+    expect(mark).toHaveAttribute('data-selected', 'true');
+    expect(mark.textContent).toMatch(/✓/);
+  });
+
+  it('hides kebab when selectionMode is true', () => {
+    render(
+      <SeriesCard
+        series={makeSeries()}
+        onClick={vi.fn()}
+        onOverrideAction={vi.fn()}
+        selectionMode
+      />,
+    );
+    expect(screen.queryByTestId('series-kebab')).not.toBeInTheDocument();
+  });
+
+  it('card click in selectionMode fires onToggleSelect, not onClick', () => {
+    const onClick = vi.fn();
+    const onToggleSelect = vi.fn();
+    render(
+      <SeriesCard
+        series={makeSeries()}
+        onClick={onClick}
+        selectionMode
+        onToggleSelect={onToggleSelect}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('series-card-root').querySelector('button'));
+    expect(onToggleSelect).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('aria-pressed reflects selected state in selectionMode', () => {
+    const { rerender } = render(
+      <SeriesCard series={makeSeries()} onClick={vi.fn()} selectionMode />,
+    );
+    let btn = screen.getByTestId('series-card-root').querySelector('button');
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+
+    rerender(
+      <SeriesCard series={makeSeries()} onClick={vi.fn()} selectionMode selected />,
+    );
+    btn = screen.getByTestId('series-card-root').querySelector('button');
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('long-press fires onLongPress after 500ms', () => {
+    vi.useFakeTimers();
+    const onLongPress = vi.fn();
+    render(
+      <SeriesCard
+        series={makeSeries()}
+        onClick={vi.fn()}
+        onLongPress={onLongPress}
+      />,
+    );
+    const btn = screen.getByTestId('series-card-root').querySelector('button');
+    fireEvent.pointerDown(btn, { clientX: 10, clientY: 10 });
+    expect(onLongPress).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(499);
+    expect(onLongPress).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('long-press is cancelled if pointer moves > tolerance', () => {
+    vi.useFakeTimers();
+    const onLongPress = vi.fn();
+    render(
+      <SeriesCard
+        series={makeSeries()}
+        onClick={vi.fn()}
+        onLongPress={onLongPress}
+      />,
+    );
+    const btn = screen.getByTestId('series-card-root').querySelector('button');
+    fireEvent.pointerDown(btn, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(btn, { clientX: 40, clientY: 40 });
+    vi.advanceTimersByTime(600);
+    expect(onLongPress).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('long-press is cancelled on pointerup before threshold', () => {
+    vi.useFakeTimers();
+    const onLongPress = vi.fn();
+    render(
+      <SeriesCard
+        series={makeSeries()}
+        onClick={vi.fn()}
+        onLongPress={onLongPress}
+      />,
+    );
+    const btn = screen.getByTestId('series-card-root').querySelector('button');
+    fireEvent.pointerDown(btn, { clientX: 10, clientY: 10 });
+    vi.advanceTimersByTime(200);
+    fireEvent.pointerUp(btn);
+    vi.advanceTimersByTime(600);
+    expect(onLongPress).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('click that follows a fired long-press is suppressed', () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    const onLongPress = vi.fn();
+    render(
+      <SeriesCard
+        series={makeSeries()}
+        onClick={onClick}
+        onLongPress={onLongPress}
+      />,
+    );
+    const btn = screen.getByTestId('series-card-root').querySelector('button');
+    fireEvent.pointerDown(btn, { clientX: 10, clientY: 10 });
+    vi.advanceTimersByTime(600);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    fireEvent.pointerUp(btn);
+    fireEvent.click(btn);
+    expect(onClick).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('passes the click event to onClick so callers can read shiftKey', () => {
+    const onClick = vi.fn();
+    render(<SeriesCard series={makeSeries()} onClick={onClick} />);
+    const btn = screen.getByRole('button');
+    fireEvent.click(btn, { shiftKey: true });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    const arg = onClick.mock.calls[0][0];
+    expect(arg).toBeDefined();
+    expect(arg.shiftKey).toBe(true);
   });
 });

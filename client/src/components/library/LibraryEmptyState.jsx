@@ -1,6 +1,7 @@
 // @ts-check
 import { useLang } from '../../context/LanguageContext';
 import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+import PrivacyHint from '../shared/PrivacyHint';
 
 const HUE = PLAYER_HUE.ingest;
 
@@ -60,6 +61,7 @@ export default function LibraryEmptyState({ onAddFolder, isFsaSupported }) {
           {t('library.addFolder')}
         </button>
       )}
+      <PrivacyHint />
     </div>
   );
 }

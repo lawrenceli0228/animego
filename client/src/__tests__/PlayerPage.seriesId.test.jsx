@@ -293,6 +293,88 @@ describe('PlayerPage — seriesId entry path (Slice 12)', () => {
 
   // ─── edge: getFile returns null → toast shown, no startPlayback ───────────
 
+  // ─── happy: resumeEpisode in nav state → auto-plays without click ─────────
+
+  it('happy: resumeEpisode in nav state → auto-calls startPlayback once', async () => {
+    const fakeFile = new File(['data'], 'ep2.mkv', { type: 'video/mp4' });
+    mockGetFile.mockResolvedValue(fakeFile);
+
+    const episodes = [
+      makeEpisode('ep-1', 1, 'fr-1'),
+      makeEpisode('ep-2', 2, 'fr-2'),
+    ];
+    const fileRefByEpisode = new Map([
+      ['ep-1', makeFileRef('fr-1', 'lib-1', 'ep1.mkv')],
+      ['ep-2', makeFileRef('fr-2', 'lib-1', 'ep2.mkv')],
+    ]);
+
+    useSeriesDetail.mockReturnValue({
+      status: 'ready',
+      series: { id: 'S1', titleZh: '进击的巨人', type: 'tv', confidence: 0.9, createdAt: Date.now(), updatedAt: Date.now() },
+      episodes,
+      fileRefByEpisode,
+      getFile: mockGetFile,
+      refresh: mockRefresh,
+    });
+
+    renderPlayerPage({ seriesId: 'S1', resumeEpisode: 2 });
+
+    await waitFor(() => expect(mockStartPlayback).toHaveBeenCalledTimes(1));
+    const [fileItem] = mockStartPlayback.mock.calls[0];
+    expect(fileItem.file).toBe(fakeFile);
+    expect(fileItem.episode).toBe(2);
+
+    // The library list should be hidden during the auto-resume window — it
+    // would re-render only after autoResumeAttempted flips, which happens in
+    // the same effect tick before getFile resolves; either way, click-to-play
+    // is not the entry path here.
+  });
+
+  it('edge: resumeEpisode for missing episode → no playback, list reappears', async () => {
+    const episodes = [makeEpisode('ep-1', 1, 'fr-1')];
+    const fileRefByEpisode = new Map([['ep-1', makeFileRef('fr-1', 'lib-1', 'ep1.mkv')]]);
+
+    useSeriesDetail.mockReturnValue({
+      status: 'ready',
+      series: { id: 'S1', titleZh: '进击的巨人', type: 'tv', confidence: 0.9, createdAt: Date.now(), updatedAt: Date.now() },
+      episodes,
+      fileRefByEpisode,
+      getFile: mockGetFile,
+      refresh: mockRefresh,
+    });
+
+    // resumeEpisode=99 doesn't exist
+    renderPlayerPage({ seriesId: 'S1', resumeEpisode: 99 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('library-episode-list')).toBeInTheDocument();
+    });
+    expect(mockStartPlayback).not.toHaveBeenCalled();
+  });
+
+  it('edge: resumeEpisode but getFile null → no playback, list reappears', async () => {
+    mockGetFile.mockResolvedValue(null);
+
+    const episodes = [makeEpisode('ep-1', 1, 'fr-1')];
+    const fileRefByEpisode = new Map([['ep-1', makeFileRef('fr-1', 'lib-1', 'ep1.mkv')]]);
+
+    useSeriesDetail.mockReturnValue({
+      status: 'ready',
+      series: { id: 'S1', titleZh: '进击的巨人', type: 'tv', confidence: 0.9, createdAt: Date.now(), updatedAt: Date.now() },
+      episodes,
+      fileRefByEpisode,
+      getFile: mockGetFile,
+      refresh: mockRefresh,
+    });
+
+    renderPlayerPage({ seriesId: 'S1', resumeEpisode: 1 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('library-episode-list')).toBeInTheDocument();
+    });
+    expect(mockStartPlayback).not.toHaveBeenCalled();
+  });
+
   it('edge: getFile returns null → toast error shown, startPlayback NOT called', async () => {
     mockGetFile.mockResolvedValue(null);
 

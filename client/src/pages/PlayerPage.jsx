@@ -246,9 +246,13 @@ function episodeListFromSeriesDetail(episodes, fileRefByEpisode) {
 
 export default function PlayerPage() {
   const { t } = useLang();
-  // P3: library mode entry — read seriesId from navigation state
+  // P3: library mode entry — read seriesId + optional resumeEpisode from nav state
   const location = useLocation();
   const locationSeriesId = location?.state?.seriesId ?? null;
+  const locationResumeEpisode =
+    typeof location?.state?.resumeEpisode === 'number'
+      ? location.state.resumeEpisode
+      : null;
 
   const fileHandles = useFileHandles({ db });
   const seriesDetail = useSeriesDetail(locationSeriesId, { db, fileHandles });
@@ -408,6 +412,17 @@ export default function PlayerPage() {
     resetMatch();
   }, [stopPlayback, clearFiles, resetMatch]);
 
+  // P3: library mode — sorted episode numbers used by EpisodeNav prev/next.
+  // Empty array unless seriesDetail is ready, so non-library mode keeps using
+  // the matchResult-derived `episodes` array below.
+  const libraryEpisodeNumbers = useMemo(() => {
+    if (!locationSeriesId || seriesDetail.status !== 'ready') return [];
+    return seriesDetail.episodes
+      .filter((e) => e.kind !== 'sp' && e.number != null)
+      .map((e) => e.number)
+      .sort((a, b) => a - b);
+  }, [locationSeriesId, seriesDetail]);
+
   // P3: library mode — episode click handler
   const handleLibraryEpisodePlay = useCallback(async (episodeId) => {
     const file = await seriesDetail.getFile(episodeId);
@@ -439,6 +454,32 @@ export default function PlayerPage() {
 
     startPlayback(fileItem, episodeMap);
   }, [seriesDetail, startPlayback, t]);
+
+  // P3: library mode prev/next — switch by episode number using seriesDetail.
+  const handleLibraryEpisodeSwitchByNumber = useCallback((epNum) => {
+    if (!locationSeriesId) return;
+    const ep = seriesDetail.episodes.find((e) => e.number === epNum && e.kind !== 'sp');
+    if (!ep) return;
+    handleLibraryEpisodePlay(ep.id);
+  }, [locationSeriesId, seriesDetail, handleLibraryEpisodePlay]);
+
+  // P3: auto-play `state.resumeEpisode` when seriesDetail becomes ready.
+  // One-shot: state flips after a single attempt (success OR failure) so a
+  // failed resume reveals the library list as fallback instead of trapping the
+  // user on a blank page.
+  const [autoResumeAttempted, setAutoResumeAttempted] = useState(false);
+  useEffect(() => {
+    if (!locationSeriesId || locationResumeEpisode == null) return;
+    if (seriesDetail.status !== 'ready') return;
+    if (playbackPhase === 'playing') return;
+    if (autoResumeAttempted) return;
+    const ep = seriesDetail.episodes.find(
+      (e) => e.number === locationResumeEpisode && e.kind !== 'sp',
+    );
+    setAutoResumeAttempted(true);
+    if (!ep) return;
+    handleLibraryEpisodePlay(ep.id);
+  }, [locationSeriesId, locationResumeEpisode, seriesDetail, playbackPhase, autoResumeAttempted, handleLibraryEpisodePlay]);
 
   // Page-level drag/drop. The inner DropZone only renders in idle phase, so
   // dragging files onto the page when match is ready/playing/manual/error
@@ -495,11 +536,26 @@ export default function PlayerPage() {
   }, [updateEpisodeMap, playingEp, loadComments, t]);
 
   const handleVideoEnded = useCallback(() => {
+    // Library mode: advance via libraryEpisodeNumbers + library switcher.
+    if (locationSeriesId && libraryEpisodeNumbers.length > 0) {
+      const idx = libraryEpisodeNumbers.indexOf(playingEp);
+      if (idx >= 0 && idx < libraryEpisodeNumbers.length - 1) {
+        handleLibraryEpisodeSwitchByNumber(libraryEpisodeNumbers[idx + 1]);
+      }
+      return;
+    }
     const idx = episodes.indexOf(playingEp);
     if (idx >= 0 && idx < episodes.length - 1) {
       handleEpisodeSwitch(episodes[idx + 1]);
     }
-  }, [episodes, playingEp, handleEpisodeSwitch]);
+  }, [
+    locationSeriesId,
+    libraryEpisodeNumbers,
+    handleLibraryEpisodeSwitchByNumber,
+    episodes,
+    playingEp,
+    handleEpisodeSwitch,
+  ]);
 
   // Mobile guard — after all hooks to satisfy Rules of Hooks
   if (isMobileView) {
@@ -530,7 +586,7 @@ export default function PlayerPage() {
       )}
 
       {/* LIBRARY MODE — seriesId entry path (P3) */}
-      {locationSeriesId && seriesDetail.status === 'ready' && playbackPhase !== 'playing' && (
+      {locationSeriesId && seriesDetail.status === 'ready' && playbackPhase !== 'playing' && (locationResumeEpisode == null || autoResumeAttempted) && (
         <div data-testid="library-episode-list" style={{ marginTop: 32, ...fadeUp }}>
           {episodeListFromSeriesDetail(seriesDetail.episodes, seriesDetail.fileRefByEpisode).map((item) => (
             <button
@@ -662,9 +718,9 @@ export default function PlayerPage() {
               <div style={s.danmakuInfo}>{t('player.noDanmaku')}</div>
             )}
             <EpisodeNav
-              episodes={episodes}
+              episodes={locationSeriesId ? libraryEpisodeNumbers : episodes}
               currentEpisode={playingEp}
-              onSelect={handleEpisodeSwitch}
+              onSelect={locationSeriesId ? handleLibraryEpisodeSwitchByNumber : handleEpisodeSwitch}
             />
           </div>
         </div>

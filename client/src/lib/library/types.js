@@ -169,6 +169,29 @@
  */
 
 /**
+ * 操作日志条目(§5.6 24h 撤销 + 系列详情页操作历史)。
+ * 写入时机:任何会改库结构的操作(merge / split / rematch / unfile / delete)
+ * 完成后立即写一条;`payload` 持有反向操作所需的最小快照。
+ *
+ * - `id`: ulid,opsLog 主键。
+ * - `seriesId`: 与操作关联的"主"系列;查询某系列的最近操作走 `[seriesId+ts]`。
+ * - `kind`: 区分操作类型,UI 文案与撤销逻辑按 kind 分支。
+ * - `payload`: 撤销时回写所需的快照(merge 操作常存 prior userOverride 状态)。
+ * - `summary`: toast 文案的轻量描述(`{ targetTitle, sourceTitle, sourceCount }`)。
+ * - `undoableUntil`: 创建时间 + 24h;过此点禁止 undo,GC 也以此为标。
+ *
+ * @typedef {Object} OpsLog
+ * @property {string}                                              id
+ * @property {string}                                              seriesId
+ * @property {number}                                              ts
+ * @property {'merge'|'split'|'rematch'|'unfile'|'delete'}         kind
+ * @property {Record<string, unknown>}                             payload
+ * @property {Record<string, unknown>}                             [summary]
+ * @property {number}                                              undoableUntil
+ * @property {boolean}                                             [undone]
+ */
+
+/**
  * 旧版 progress(localStorage / v4 之前)迁移失败的三角档案。
  * v5 schema: store key = key(原始记录键),attemptedAt 用于重试调度。
  *

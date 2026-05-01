@@ -7,8 +7,10 @@ import { liveQuery } from 'dexie';
 /**
  * React hook that subscribes to the series table via Dexie liveQuery.
  *
- * Subscription lifecycle lives inside the subscribe callback so React
- * (incl. 19 strict-mode dev double-invoke) owns subscribe/unsubscribe.
+ * Hides any series whose id appears in some other series' userOverride
+ * `mergedFrom` array. `performMerge` is soft (it never deletes the source
+ * row, so undo can restore the prior override snapshot in one write); the
+ * filter here is what makes the merged source disappear from the grid.
  *
  * @param {{ db: import('dexie').Dexie }} options
  * @returns {{
@@ -31,9 +33,21 @@ export default function useLibrary({ db }) {
       snapshotRef.current = null;
       snapshotKeyRef.current = { db, rev };
 
-      const sub = liveQuery(() =>
-        db.series.orderBy('updatedAt').reverse().toArray()
-      ).subscribe({
+      const sub = liveQuery(async () => {
+        const [allSeries, overrides] = await Promise.all([
+          db.series.orderBy('updatedAt').reverse().toArray(),
+          db.userOverride ? db.userOverride.toArray() : Promise.resolve([]),
+        ]);
+        const merged = new Set();
+        for (const o of overrides) {
+          if (Array.isArray(o?.mergedFrom)) {
+            for (const id of o.mergedFrom) merged.add(id);
+          }
+        }
+        return merged.size === 0
+          ? allSeries
+          : allSeries.filter((s) => !merged.has(s.id));
+      }).subscribe({
         next: (v) => {
           snapshotRef.current = /** @type {Series[]} */ (v);
           onChange();

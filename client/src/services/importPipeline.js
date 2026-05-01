@@ -17,7 +17,17 @@ import { makeMatchCacheRepo } from '../lib/library/db/matchCacheRepo.js';
 import { buildSeasonRecord, buildFileRefRecord } from '../lib/library/recordFactory.js';
 
 /**
- * @typedef {{ clusters: number, matched: number, failed: number, ambiguous: number }} ImportSummary
+ * @typedef {Object} CrossFolderMerge
+ * @property {string}   seriesId
+ * @property {string[]} folders   distinct folder keys (groupKey) that contributed files
+ *
+ * @typedef {{
+ *   clusters: number,
+ *   matched: number,
+ *   failed: number,
+ *   ambiguous: number,
+ *   crossFolderMerges: CrossFolderMerge[]
+ * }} ImportSummary
  */
 
 /**
@@ -49,11 +59,25 @@ export async function runImport(input, ctx) {
   // Stage 2: load prior seasons for animeIdHint resolution
   const priorSeasons = await db.seasons.toArray();
 
+  // Stage 2b: load userOverrides → Map<seriesId, UserOverride> for in-loop lookup.
+  // Loaded once at start; mid-run dialog edits won't affect this batch.
+  const overrideRows = db.userOverride ? await db.userOverride.toArray() : [];
+  const userOverrides = new Map(overrideRows.map((o) => [o.seriesId, o]));
+
   // Stage 3: clusterize
   const clusters = clusterize(groups, priorSeasons);
 
   /** @type {ImportSummary} */
-  const summary = { clusters: clusters.length, matched: 0, failed: 0, ambiguous: 0 };
+  const summary = { clusters: clusters.length, matched: 0, failed: 0, ambiguous: 0, crossFolderMerges: [] };
+
+  /**
+   * Track which folders contributed files to each resolved seriesId across the
+   * batch. Folder keys come from `Group.groupKey` (the dirname). After all
+   * clusters are processed, any seriesId with ≥2 distinct folder keys becomes
+   * a cross-folder merge entry — that's the §5.6 auto-merge toast trigger.
+   * @type {Map<string, Set<string>>}
+   */
+  const seriesFolders = new Map();
 
   // Stage 4: process each cluster independently
   let seedOffset = ulidSeedBase ?? 0;
@@ -67,6 +91,7 @@ export async function runImport(input, ctx) {
         cluster,
         libraryId,
         priorSeasons,
+        userOverrides,
         seriesRepo,
         seasonRepo,
         fileRefRepo,
@@ -76,6 +101,7 @@ export async function runImport(input, ctx) {
         ulidSeed: ulidSeedBase !== undefined ? seedOffset : undefined,
         summary,
         emit,
+        seriesFolders,
       });
     } catch (err) {
       summary.failed++;
@@ -85,6 +111,15 @@ export async function runImport(input, ctx) {
     }
 
     seedOffset += 100;
+  }
+
+  for (const [seriesId, folders] of seriesFolders) {
+    if (folders.size >= 2) {
+      summary.crossFolderMerges.push({
+        seriesId,
+        folders: Array.from(folders).sort(),
+      });
+    }
   }
 
   emit({ kind: 'finish', summary: { ...summary } });
@@ -97,11 +132,22 @@ export async function runImport(input, ctx) {
  */
 async function processCluster(p) {
   const {
-    cluster, libraryId, priorSeasons, seriesRepo, seasonRepo,
-    fileRefRepo, cacheRepo, dandan, ulidSeed, summary, emit,
+    cluster, libraryId, priorSeasons, userOverrides, seriesRepo, seasonRepo,
+    fileRefRepo, cacheRepo, dandan, ulidSeed, summary, emit, seriesFolders,
   } = p;
   const { clusterKey } = cluster;
   const rep = cluster.representative;
+  const trackFolders = (seriesId) => {
+    if (!seriesFolders || !seriesId) return;
+    let set = seriesFolders.get(seriesId);
+    if (!set) {
+      set = new Set();
+      seriesFolders.set(seriesId, set);
+    }
+    for (const g of cluster.groups || []) {
+      if (g?.groupKey) set.add(g.groupKey);
+    }
+  };
 
   // Check match cache first
   let cachedVerdict = null;
@@ -149,15 +195,39 @@ async function processCluster(p) {
     }
   }
 
+  // userOverride routing: if the user pinned a different season under this
+  // series, swap the verdict to reuse the override target. We never fabricate
+  // seasons — if the target animeId isn't already a known season, fall through
+  // so the user notices the missing target rather than getting silent garbage.
+  if (verdict?.kind === 'reuse' && userOverrides) {
+    const override = userOverrides.get(verdict.seriesId);
+    const target = override?.overrideSeasonAnimeId;
+    if (target !== undefined && target !== verdict.animeId) {
+      const targetSeason = priorSeasons.find(
+        (s) => s.seriesId === verdict.seriesId && s.animeId === target,
+      );
+      if (targetSeason) {
+        verdict = {
+          kind: 'reuse',
+          seriesId: targetSeason.seriesId,
+          seasonId: targetSeason.id,
+          animeId: targetSeason.animeId,
+        };
+      }
+    }
+  }
+
   // Persist based on verdict kind
   if (verdict.kind === 'reuse' || verdict.kind === 'new') {
     if (verdict.kind === 'new') {
       const records = buildPersistPayload(verdict, cluster, libraryId, 'matched');
       await seriesRepo.upsertCluster(records);
+      trackFolders(verdict.seriesRecord?.id);
     }
     // For reuse, only write fileRefs if they don't already exist
     if (verdict.kind === 'reuse') {
       await persistFileRefsOnly(cluster, libraryId, verdict.seasonId, 'matched', fileRefRepo, p.db ?? null);
+      trackFolders(verdict.seriesId);
     }
     // Cache the verdict
     if (rep?.hash16M) {

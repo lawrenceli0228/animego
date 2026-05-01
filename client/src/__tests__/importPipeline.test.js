@@ -214,6 +214,99 @@ describe('importPipeline.runImport (Slice 7)', () => {
     expect(callCount.value).toBe(0);
   });
 
+  it('cross-folder merge: same parsedTitle in two folders → summary.crossFolderMerges has one entry with both folders', async () => {
+    // 5 items in Show/正片/ + 2 items in Show/SPs/ — both share parsedTitle
+    // 'Attack on Titan'. Clusterize buckets by normalizedTokens, so they end
+    // up in ONE cluster carrying TWO groups. dandan resolves them to a single
+    // animeId, the pipeline writes one series, and our seriesFolders tracker
+    // records two distinct groupKeys → cross-folder merge entry.
+    const items = [
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeItem(`aot-ep${i + 1}.mkv`, i + 1, `Show/正片/aot-ep${i + 1}.mkv`, 'Attack on Titan')
+      ),
+      ...Array.from({ length: 2 }, (_, i) =>
+        makeItem(`aot-sp${i + 1}.mkv`, 100 + i, `Show/SPs/aot-sp${i + 1}.mkv`, 'Attack on Titan')
+      ),
+    ];
+
+    const summary = await runImport(
+      { items, libraryId: 'lib-merge' },
+      { db: testDb, dandan: makeDandanMock(), ulidSeedBase: 1 },
+    );
+
+    expect(summary.clusters).toBe(1);
+    expect(summary.matched).toBe(1);
+    expect(summary.crossFolderMerges).toHaveLength(1);
+
+    const entry = summary.crossFolderMerges[0];
+    expect(entry.folders).toHaveLength(2);
+    expect(entry.folders).toEqual(['Show/SPs', 'Show/正片']); // sorted asc
+    expect(entry.seriesId).toBeTruthy();
+
+    // The seriesId in the entry should be the actual persisted series id
+    const allSeries = await testDb.series.toArray();
+    expect(allSeries).toHaveLength(1);
+    expect(entry.seriesId).toBe(allSeries[0].id);
+  });
+
+  it('cross-folder merge: same folder only → no entry', async () => {
+    // Sanity check: 5 items in one folder produce no cross-folder merge.
+    const items = Array.from({ length: 5 }, (_, i) =>
+      makeItem(`aot-ep${i + 1}.mkv`, i + 1, `Show/正片/aot-ep${i + 1}.mkv`, 'Attack on Titan')
+    );
+    const summary = await runImport(
+      { items, libraryId: 'lib-single' },
+      { db: testDb, dandan: makeDandanMock(), ulidSeedBase: 1 },
+    );
+    expect(summary.crossFolderMerges).toHaveLength(0);
+  });
+
+  it('cross-folder merge: reuse path also tracked (existing series + new folder)', async () => {
+    // Pre-seed a series with one season; then import items from two new
+    // folders that resolve via dandan to the same animeId. Both folders
+    // attach to the existing series via the reuse verdict.
+    await testDb.series.put({
+      id: 'sr-existing',
+      titleZh: 'Existing AOT',
+      type: 'tv',
+      confidence: 1,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await testDb.seasons.put({
+      id: 'sn-existing',
+      seriesId: 'sr-existing',
+      number: 1,
+      animeId: 1001,
+      updatedAt: 0,
+      _titleHint: 'Attack on Titan',
+    });
+
+    const items = [
+      ...Array.from({ length: 3 }, (_, i) =>
+        makeItem(`aot-a${i + 1}.mkv`, i + 1, `New/正片/aot-a${i + 1}.mkv`, 'Attack on Titan')
+      ),
+      ...Array.from({ length: 2 }, (_, i) =>
+        makeItem(`aot-b${i + 1}.mkv`, 100 + i, `New/SPs/aot-b${i + 1}.mkv`, 'Attack on Titan')
+      ),
+    ];
+
+    const summary = await runImport(
+      { items, libraryId: 'lib-reuse' },
+      { db: testDb, dandan: makeDandanMock(), ulidSeedBase: 1 },
+    );
+
+    expect(summary.clusters).toBe(1);
+    expect(summary.matched).toBe(1);
+    expect(summary.crossFolderMerges).toHaveLength(1);
+    expect(summary.crossFolderMerges[0].seriesId).toBe('sr-existing');
+    expect(summary.crossFolderMerges[0].folders).toEqual(['New/SPs', 'New/正片']);
+
+    // Still exactly one series — no duplicate created.
+    const allSeries = await testDb.series.toArray();
+    expect(allSeries).toHaveLength(1);
+  });
+
   it('error isolation: dandan throws on cluster A → emits failed, cluster B still completes', async () => {
     const items = [
       // Cluster A (will throw)
@@ -248,5 +341,142 @@ describe('importPipeline.runImport (Slice 7)', () => {
 
     const matchedEvents = events.filter(e => e.kind === 'clusterDone' && e.verdict === 'matched');
     expect(matchedEvents.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ── P4-F-3: userOverride routing ───────────────────────────────────────────
+
+describe('importPipeline + userOverride (P4-F-3)', () => {
+  let testDb;
+
+  beforeEach(async () => {
+    testDb = getDb('test-pipeline-override-' + Date.now() + Math.random());
+    await testDb.open();
+  });
+
+  it('overrideSeasonAnimeId reroutes a reuse verdict to the override season', async () => {
+    // Series with two seasons; the user has decided animeId 1002 is the right one.
+    await testDb.series.put({
+      id: 'sr-multi',
+      titleZh: '复数 season',
+      type: 'tv',
+      confidence: 1,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await testDb.seasons.bulkPut([
+      { id: 'sn-1001', seriesId: 'sr-multi', number: 1, animeId: 1001, updatedAt: 0, _titleHint: 'Attack on Titan' },
+      { id: 'sn-1002', seriesId: 'sr-multi', number: 2, animeId: 1002, updatedAt: 0, _titleHint: 'Attack on Titan' },
+    ]);
+    // matchCache says hash → animeId 1001 (the "wrong" one)
+    await testDb.matchCache.put({
+      hash16M: 'fakehash-aot-ep1.mkv',
+      verdict: { kind: 'new', seriesId: 'sr-multi', animeId: 1001 },
+      updatedAt: 0,
+    });
+    // User has overridden series → animeId 1002
+    await testDb.userOverride.put({
+      seriesId: 'sr-multi',
+      overrideSeasonAnimeId: 1002,
+      updatedAt: 1,
+    });
+
+    const items = [makeItem('aot-ep1.mkv', 1, 'Show/aot-ep1.mkv', 'Attack on Titan')];
+    const callCount = { value: 0 };
+    await runImport(
+      { items, libraryId: 'lib-override' },
+      { db: testDb, dandan: makeDandanMock({ callCount }) },
+    );
+
+    // dandan must NOT be called — cache short-circuits
+    expect(callCount.value).toBe(0);
+    // The matchCache should now reflect the override animeId, not the original
+    const updatedCache = await testDb.matchCache.get('fakehash-aot-ep1.mkv');
+    expect(updatedCache?.verdict?.animeId).toBe(1002);
+  });
+
+  it('override with no overrideSeasonAnimeId is a no-op (locked alone does not reroute)', async () => {
+    await testDb.series.put({
+      id: 'sr-locked',
+      titleZh: 'lock only',
+      type: 'tv',
+      confidence: 1,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await testDb.seasons.put({
+      id: 'sn-locked',
+      seriesId: 'sr-locked',
+      number: 1,
+      animeId: 1001,
+      updatedAt: 0,
+      _titleHint: 'Attack on Titan',
+    });
+    await testDb.matchCache.put({
+      hash16M: 'fakehash-aot-ep1.mkv',
+      verdict: { kind: 'new', seriesId: 'sr-locked', animeId: 1001 },
+      updatedAt: 0,
+    });
+    await testDb.userOverride.put({
+      seriesId: 'sr-locked',
+      locked: true,
+      updatedAt: 1,
+    });
+
+    const items = [makeItem('aot-ep1.mkv', 1, 'Show/aot-ep1.mkv', 'Attack on Titan')];
+    await runImport(
+      { items, libraryId: 'lib-locked' },
+      { db: testDb, dandan: makeDandanMock() },
+    );
+
+    // animeId stays 1001
+    const cached = await testDb.matchCache.get('fakehash-aot-ep1.mkv');
+    expect(cached?.verdict?.animeId).toBe(1001);
+    // Still exactly one season under sr-locked
+    const seasons = await testDb.seasons.where('seriesId').equals('sr-locked').toArray();
+    expect(seasons).toHaveLength(1);
+  });
+
+  it('overrideSeasonAnimeId with no matching season is a no-op (no auto-creation)', async () => {
+    // Override points to an animeId that does NOT exist in priorSeasons. The
+    // pipeline must not silently fabricate a season — it should fall through
+    // to the matcher's verdict so the user notices the missing target.
+    await testDb.series.put({
+      id: 'sr-nomatch',
+      titleZh: 'unmatched override',
+      type: 'tv',
+      confidence: 1,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await testDb.seasons.put({
+      id: 'sn-real',
+      seriesId: 'sr-nomatch',
+      number: 1,
+      animeId: 1001,
+      updatedAt: 0,
+      _titleHint: 'Attack on Titan',
+    });
+    await testDb.matchCache.put({
+      hash16M: 'fakehash-aot-ep1.mkv',
+      verdict: { kind: 'new', seriesId: 'sr-nomatch', animeId: 1001 },
+      updatedAt: 0,
+    });
+    await testDb.userOverride.put({
+      seriesId: 'sr-nomatch',
+      overrideSeasonAnimeId: 9999,
+      updatedAt: 1,
+    });
+
+    const items = [makeItem('aot-ep1.mkv', 1, 'Show/aot-ep1.mkv', 'Attack on Titan')];
+    await runImport(
+      { items, libraryId: 'lib-nomatch' },
+      { db: testDb, dandan: makeDandanMock() },
+    );
+
+    const cached = await testDb.matchCache.get('fakehash-aot-ep1.mkv');
+    expect(cached?.verdict?.animeId).toBe(1001);
+    const seasons = await testDb.seasons.where('seriesId').equals('sr-nomatch').toArray();
+    expect(seasons).toHaveLength(1);
   });
 });
