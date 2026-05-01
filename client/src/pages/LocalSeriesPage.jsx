@@ -236,16 +236,55 @@ const s = {
     color: 'rgba(235,235,245,0.35)',
     textAlign: 'right',
   },
-  sourceList: {
+  folderTree: {
     ...mono,
     display: 'flex',
     flexDirection: 'column',
-    gap: 4,
+    gap: 6,
     fontSize: 11,
     color: 'rgba(235,235,245,0.55)',
     padding: 12,
     border: `1px solid oklch(46% 0.06 ${HUE} / 0.20)`,
     borderRadius: 4,
+  },
+  folderGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+  },
+  folderRow: {
+    ...mono,
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.85)',
+    padding: '2px 0',
+    letterSpacing: '0.04em',
+  },
+  fileRow: {
+    ...mono,
+    display: 'grid',
+    gridTemplateColumns: '14px 36px 1fr 16px',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 10.5,
+    color: 'rgba(235,235,245,0.55)',
+    padding: '2px 0 2px 12px',
+  },
+  fileBranch: {
+    color: 'rgba(235,235,245,0.30)',
+    textAlign: 'center',
+  },
+  fileEpBadge: {
+    color: `oklch(72% 0.15 ${HUE})`,
+    letterSpacing: '0.06em',
+  },
+  fileName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  watchedMark: {
+    color: `oklch(70% 0.16 ${HUE})`,
+    textAlign: 'center',
   },
   emptyState: {
     ...mono,
@@ -362,16 +401,30 @@ export default function LocalSeriesPage() {
     [episodes, progressByEp],
   );
 
-  const sourceFolders = useMemo(() => {
-    const s = new Set();
-    for (const ref of fileRefByEpisode.values()) {
-      const dir = ref.relPath.includes('/')
-        ? ref.relPath.slice(0, ref.relPath.lastIndexOf('/'))
-        : '(根)';
-      s.add(dir);
+  // §5.6 file tree — group files by folder, preserve EP order, surface ✓ when watched.
+  // Returns Array<[folder, files[]]> where files are sorted by epNumber. Folders sort
+  // alphabetically; root-level files live under "(根)".
+  const filesByFolder = useMemo(() => {
+    /** @type {Map<string, { epId: string, epNumber: number, fileName: string, watched: boolean }[]>} */
+    const folders = new Map();
+    for (const ep of episodes) {
+      const ref = fileRefByEpisode.get(ep.id);
+      if (!ref) continue;
+      const slash = ref.relPath.lastIndexOf('/');
+      const dir = slash >= 0 ? ref.relPath.slice(0, slash) : '(根)';
+      const fileName = slash >= 0 ? ref.relPath.slice(slash + 1) : ref.relPath;
+      if (!folders.has(dir)) folders.set(dir, []);
+      folders.get(dir).push({
+        epId: ep.id,
+        epNumber: ep.number,
+        fileName,
+        watched: !!progressByEp.get(ep.id)?.completed,
+      });
     }
-    return Array.from(s).sort();
-  }, [fileRefByEpisode]);
+    const entries = Array.from(folders.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [, files] of entries) files.sort((a, b) => a.epNumber - b.epNumber);
+    return entries;
+  }, [episodes, fileRefByEpisode, progressByEp]);
 
   const handleBack = useCallback(() => {
     navigate('/library');
@@ -651,12 +704,39 @@ export default function LocalSeriesPage() {
         )}
       </div>
 
-      {sourceFolders.length > 0 && (
+      {filesByFolder.length > 0 && (
         <div>
           <div style={{ ...s.sectionLabel, marginBottom: 8 }}>// FILE SOURCES //</div>
-          <div style={s.sourceList} data-testid="source-list">
-            {sourceFolders.map((dir) => (
-              <div key={dir}>📁 {dir}</div>
+          <div style={s.folderTree} data-testid="source-list">
+            {filesByFolder.map(([dir, files]) => (
+              <div
+                key={dir}
+                style={s.folderGroup}
+                data-testid={`folder-group-${dir}`}
+              >
+                <div style={s.folderRow}>📁 {dir}/</div>
+                {files.map((f, i) => {
+                  const branch = i === files.length - 1 ? '└' : '├';
+                  return (
+                    <div
+                      key={f.epId}
+                      style={s.fileRow}
+                      data-testid={`file-row-${f.epId}`}
+                    >
+                      <span style={s.fileBranch} aria-hidden>{branch}</span>
+                      <span style={s.fileEpBadge}>EP{String(f.epNumber).padStart(2, '0')}</span>
+                      <span style={s.fileName}>{f.fileName}</span>
+                      <span
+                        style={s.watchedMark}
+                        aria-hidden
+                        data-testid={`file-watched-${f.epId}`}
+                      >
+                        {f.watched ? '✓' : ''}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             ))}
           </div>
         </div>

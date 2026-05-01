@@ -348,6 +348,50 @@ describe('LocalSeriesPage — file source', () => {
     renderAt('series-1');
     expect(screen.queryByTestId('source-list')).not.toBeInTheDocument();
   });
+
+  it('renders a folder group per distinct folder', () => {
+    mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1), makeEpisode('e2', 2)];
+    mockSeriesDetail.fileRefByEpisode = new Map([
+      ['e1', makeFileRef('file-1', '正片/EP01.mkv')],
+      ['e2', makeFileRef('file-2', 'SPs/EP02.mkv')],
+    ]);
+    renderAt('series-1');
+    expect(screen.getByTestId('folder-group-正片')).toBeInTheDocument();
+    expect(screen.getByTestId('folder-group-SPs')).toBeInTheDocument();
+  });
+
+  it('renders a file row per episode with EP badge and filename', () => {
+    mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1), makeEpisode('e2', 2)];
+    mockSeriesDetail.fileRefByEpisode = new Map([
+      ['e1', makeFileRef('file-1', '正片/EP01.mkv')],
+      ['e2', makeFileRef('file-2', '正片/EP02.mkv')],
+    ]);
+    renderAt('series-1');
+    const row1 = screen.getByTestId('file-row-e1');
+    expect(row1.textContent).toMatch(/EP01/);
+    expect(row1.textContent).toMatch(/EP01\.mkv/);
+    const row2 = screen.getByTestId('file-row-e2');
+    expect(row2.textContent).toMatch(/EP02/);
+  });
+
+  it('shows ✓ on watched files only', async () => {
+    mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1), makeEpisode('e2', 2)];
+    mockSeriesDetail.fileRefByEpisode = new Map([
+      ['e1', makeFileRef('file-1', '正片/EP01.mkv')],
+      ['e2', makeFileRef('file-2', '正片/EP02.mkv')],
+    ]);
+    mockGetBySeries.mockResolvedValue([
+      makeProgress('e1', 'series-1', { completed: true }),
+    ]);
+    renderAt('series-1');
+    await waitFor(() => {
+      expect(screen.getByTestId('file-watched-e1').textContent).toBe('✓');
+    });
+    expect(screen.getByTestId('file-watched-e2').textContent).toBe('');
+  });
 });
 
 describe('LocalSeriesPage — back button', () => {
