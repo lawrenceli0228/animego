@@ -47,6 +47,7 @@ function computePct(series, info) {
  *   selectedIds?: Set<string>,
  *   onToggleSelect?: (seriesId: string, e?: import('react').MouseEvent) => void,
  *   onLongPress?: (seriesId: string) => void,
+ *   availabilityBySeries?: Map<string, 'ok'|'partial'|'offline'|'unknown'>,
  * }} props
  */
 export default function SeriesGrid({
@@ -59,6 +60,7 @@ export default function SeriesGrid({
   selectedIds,
   onToggleSelect,
   onLongPress,
+  availabilityBySeries,
 }) {
   return (
     <div style={gridStyle} data-testid="series-grid">
@@ -82,6 +84,7 @@ export default function SeriesGrid({
               onToggleSelect ? (e) => onToggleSelect(s.id, e) : undefined
             }
             onLongPress={onLongPress ? () => onLongPress(s.id) : undefined}
+            availability={availabilityBySeries?.get(s.id)}
           />
         );
       })}

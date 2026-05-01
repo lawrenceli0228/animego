@@ -14,7 +14,19 @@ import { makeSeriesRepo } from '../lib/library/db/seriesRepo.js';
 import { makeSeasonRepo } from '../lib/library/db/seasonRepo.js';
 import { makeFileRefRepo } from '../lib/library/db/fileRefRepo.js';
 import { makeMatchCacheRepo } from '../lib/library/db/matchCacheRepo.js';
-import { buildSeasonRecord, buildFileRefRecord } from '../lib/library/recordFactory.js';
+import {
+  buildSeasonRecord,
+  buildFileRefRecord,
+  buildEpisodeRecord,
+  fileRefId,
+} from '../lib/library/recordFactory.js';
+
+/**
+ * @typedef {Object} DandanEnrichment
+ * @property {string} [titleZh]
+ * @property {string} [titleEn]
+ * @property {string} [posterUrl]
+ */
 
 /**
  * @typedef {Object} CrossFolderMerge
@@ -36,7 +48,7 @@ import { buildSeasonRecord, buildFileRefRecord } from '../lib/library/recordFact
  * @param {{ items: EpisodeItem[], libraryId: string }} input
  * @param {{
  *   db: import('dexie').Dexie,
- *   dandan: { match(hash16M: string, fileName: string): Promise<any> },
+ *   dandan: { match(hash16M: string, fileName: string, opts?: { fileSize?: number }): Promise<any> },
  *   ulidSeedBase?: number,
  *   onEvent?: (e: ImportEvent) => void
  * }} ctx
@@ -165,7 +177,16 @@ async function processCluster(p) {
       if (match) {
         verdict = { kind: 'reuse', seriesId: match.seriesId, seasonId: match.id, animeId: match.animeId };
       } else {
-        verdict = cachedVerdict;
+        // Cache has animeId but the season was wiped — rebuild via the local
+        // matcher and reuse cached enrichment so we skip the dandan call.
+        verdict = matchSingleCluster(cluster, { priorSeasons, libraryId, ulidSeed });
+        if (verdict.kind === 'new') {
+          verdict = applyEnrichment(verdict, {
+            animeId: cachedVerdict.animeId,
+            enrichment: cachedVerdict.enrichment ?? null,
+            ulidSeed,
+          });
+        }
       }
     } else {
       verdict = cachedVerdict;
@@ -175,7 +196,7 @@ async function processCluster(p) {
     verdict = matchSingleCluster(cluster, { priorSeasons, libraryId, ulidSeed });
 
     if (verdict.kind === 'new') {
-      // Call dandanplay to resolve animeId and season
+      // Call dandanplay to resolve animeId, season, and enrichment metadata
       const dandanResult = await callDandan(dandan, rep);
 
       if (dandanResult.isAmbiguous) {
@@ -184,13 +205,25 @@ async function processCluster(p) {
           candidates: dandanResult.candidates,
         };
       } else if (dandanResult.animeId) {
-        // Enrich the verdict with season info
-        const seasonRecord = buildSeasonRecord(
-          verdict.seriesRecord.id,
-          dandanResult.animeId,
-          { ulidSeed: ulidSeed !== undefined ? ulidSeed + 1 : undefined }
-        );
-        verdict = { ...verdict, seasonRecord };
+        // Reuse an existing series when one already owns a season with this
+        // animeId — prevents a duplicate card every time the user re-imports
+        // the same anime under a different folder. The cached-verdict branch
+        // above already does this; the fresh-match branch was missing it.
+        const existing = priorSeasons.find((s) => s.animeId === dandanResult.animeId);
+        if (existing) {
+          verdict = {
+            kind: 'reuse',
+            seriesId: existing.seriesId,
+            seasonId: existing.id,
+            animeId: existing.animeId,
+          };
+        } else {
+          verdict = applyEnrichment(verdict, {
+            animeId: dandanResult.animeId,
+            enrichment: dandanResult.enrichment ?? null,
+            ulidSeed,
+          });
+        }
       }
     }
   }
@@ -222,18 +255,31 @@ async function processCluster(p) {
     if (verdict.kind === 'new') {
       const records = buildPersistPayload(verdict, cluster, libraryId, 'matched');
       await seriesRepo.upsertCluster(records);
+      // Push the freshly persisted season onto priorSeasons so later clusters
+      // in the SAME batch can dedupe against it. Without this, three folders
+      // of the same anime imported together would create three series each
+      // because priorSeasons was snapshot before the loop started.
+      if (verdict.seasonRecord) {
+        priorSeasons.push(verdict.seasonRecord);
+      }
       trackFolders(verdict.seriesRecord?.id);
     }
     // For reuse, only write fileRefs if they don't already exist
     if (verdict.kind === 'reuse') {
-      await persistFileRefsOnly(cluster, libraryId, verdict.seasonId, 'matched', fileRefRepo, p.db ?? null);
+      await persistFileRefsOnly(
+        cluster,
+        libraryId,
+        verdict.seriesId,
+        verdict.seasonId,
+        'matched',
+        p.db ?? null,
+        ulidSeed,
+      );
       trackFolders(verdict.seriesId);
     }
     // Cache the verdict
     if (rep?.hash16M) {
-      const cachePayload = verdict.kind === 'reuse'
-        ? { kind: 'new', animeId: verdict.animeId }
-        : (verdict.seasonRecord ? { kind: 'new', animeId: verdict.seasonRecord?.animeId } : { kind: 'new' });
+      const cachePayload = buildCachePayload(verdict);
       await cacheRepo.put(rep.hash16M, cachePayload);
     }
     summary.matched++;
@@ -254,24 +300,30 @@ async function processCluster(p) {
 }
 
 /**
- * Call dandanplay and normalize the result.
+ * Call dandanplay and normalize the result. Forwards an optional `enrichment`
+ * blob carrying titleZh/titleEn/posterUrl when the client returned them — the
+ * caller patches these onto the Series record so library cards show the real
+ * title and cover instead of the anitomy-derived fansub group fallback.
+ *
  * @param {any} dandan
  * @param {EpisodeItem|null} rep
- * @returns {Promise<{ isAmbiguous: boolean, animeId?: number, candidates?: any[] }>}
+ * @returns {Promise<{ isAmbiguous: boolean, animeId?: number, candidates?: any[], enrichment?: DandanEnrichment }>}
  */
 async function callDandan(dandan, rep) {
   if (!rep) return { isAmbiguous: false };
 
   const hash16M = rep.hash16M ?? '';
   const fileName = rep.fileName ?? '';
-  const result = await dandan.match(hash16M, fileName);
+  const fileSize = rep.file?.size ?? 0;
+  const result = await dandan.match(hash16M, fileName, { fileSize });
 
   if (!result) return { isAmbiguous: false };
 
   const animes = result.animes ?? [];
+  const enrichment = result.enrichment;
 
   if (result.isMatched && animes.length === 1) {
-    return { isAmbiguous: false, animeId: animes[0].animeId };
+    return { isAmbiguous: false, animeId: animes[0].animeId, enrichment };
   }
 
   if (!result.isMatched && animes.length > 1) {
@@ -284,10 +336,76 @@ async function callDandan(dandan, rep) {
   }
 
   if (animes.length >= 1) {
-    return { isAmbiguous: false, animeId: animes[0].animeId };
+    return { isAmbiguous: false, animeId: animes[0].animeId, enrichment };
   }
 
   return { isAmbiguous: false };
+}
+
+/**
+ * Promote a 'new' verdict with the resolved animeId by attaching a fresh
+ * Season record and folding any enrichment fields into the Series record.
+ * No-op when the verdict is missing seriesRecord (defensive guard).
+ *
+ * @param {MatchVerdict} verdict
+ * @param {{ animeId: number, enrichment: DandanEnrichment|null, ulidSeed?: number }} ctx
+ * @returns {MatchVerdict}
+ */
+function applyEnrichment(verdict, { animeId, enrichment, ulidSeed }) {
+  if (!verdict.seriesRecord) return verdict;
+  const seasonRecord = buildSeasonRecord(
+    verdict.seriesRecord.id,
+    animeId,
+    { ulidSeed: ulidSeed !== undefined ? ulidSeed + 1 : undefined },
+  );
+  if (!enrichment) return { ...verdict, seasonRecord };
+
+  /** @type {import('../lib/library/types').Series} */
+  const seriesRecord = {
+    ...verdict.seriesRecord,
+    ...(enrichment.titleZh ? { titleZh: enrichment.titleZh } : {}),
+    ...(enrichment.titleEn ? { titleEn: enrichment.titleEn } : {}),
+    ...(enrichment.posterUrl ? { posterUrl: enrichment.posterUrl } : {}),
+    updatedAt: Date.now(),
+  };
+  return { ...verdict, seriesRecord, seasonRecord };
+}
+
+/**
+ * Pull persisted enrichment fields off a Series record so the matchCache can
+ * carry them across re-imports (e.g. when seasons are wiped but the cache
+ * survives). Returns undefined when nothing useful is set.
+ *
+ * @param {import('../lib/library/types').Series|undefined} series
+ * @returns {DandanEnrichment|undefined}
+ */
+function extractEnrichment(series) {
+  if (!series) return undefined;
+  /** @type {DandanEnrichment} */
+  const out = {};
+  if (series.titleZh) out.titleZh = series.titleZh;
+  if (series.titleEn) out.titleEn = series.titleEn;
+  if (series.posterUrl) out.posterUrl = series.posterUrl;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * Compose the matchCache payload from a positive verdict.
+ *
+ * @param {MatchVerdict} verdict
+ * @returns {{ kind: 'new', animeId?: number, enrichment?: DandanEnrichment }}
+ */
+function buildCachePayload(verdict) {
+  if (verdict.kind === 'reuse') {
+    return { kind: 'new', animeId: verdict.animeId };
+  }
+  if (verdict.seasonRecord) {
+    const enrichment = extractEnrichment(verdict.seriesRecord);
+    return enrichment
+      ? { kind: 'new', animeId: verdict.seasonRecord.animeId, enrichment }
+      : { kind: 'new', animeId: verdict.seasonRecord.animeId };
+  }
+  return { kind: 'new' };
 }
 
 /**
@@ -313,22 +431,81 @@ function buildPersistPayload(verdict, cluster, libraryId, matchStatus) {
 }
 
 /**
- * Write fileRefs for a 'reuse' verdict (no new series/season/episode rows).
+ * Persist a 'reuse' verdict's items into an existing series. We re-use the
+ * series + season but still need Episode rows for any episode number the
+ * existing series doesn't yet cover (e.g. another fansub release of the same
+ * anime resolved to the same dandan animeId — its episode numbers may not
+ * overlap with the original import). Items whose episode number IS already
+ * covered get attached as alternateFileIds on the existing Episode.
+ *
  * @param {import('../lib/library/types').MatchCluster} cluster
  * @param {string} libraryId
+ * @param {string} seriesId
  * @param {string} seasonId
  * @param {string} matchStatus
- * @param {ReturnType<import('../lib/library/db/fileRefRepo.js').makeFileRefRepo>} fileRefRepo
  * @param {import('dexie').Dexie} db
+ * @param {number} [ulidSeed]
  */
-async function persistFileRefsOnly(cluster, libraryId, seasonId, matchStatus, fileRefRepo, db) {
-  const fileRefs = cluster.items.map(it => ({
-    ...buildFileRefRecord({ libraryId, episodeId: null, item: it }),
-    matchStatus,
-  }));
-  if (db) {
-    await db.fileRefs.bulkPut(fileRefs);
+async function persistFileRefsOnly(cluster, libraryId, seriesId, seasonId, matchStatus, db, ulidSeed) {
+  if (!db) return;
+
+  // Snapshot the existing episodes for this series so the cluster items can
+  // either link onto them (alternate source) or create a new row if the
+  // number is new.
+  const existing = await db.episodes.where('seriesId').equals(seriesId).toArray();
+  /** @type {Map<number, import('../lib/library/types').Episode>} */
+  const byNumber = new Map();
+  for (const ep of existing) {
+    if (typeof ep.number === 'number') byNumber.set(ep.number, ep);
   }
+
+  /** @type {import('../lib/library/types').Episode[]} */
+  const episodesToWrite = [];
+  /** @type {import('../lib/library/types').FileRef[]} */
+  const fileRefs = [];
+  let seedOffset = 0;
+
+  for (const item of cluster.items) {
+    const refId = fileRefId(item);
+    let targetEp = item.episode != null ? byNumber.get(item.episode) : undefined;
+
+    if (!targetEp) {
+      // Number is new for this series — create an Episode so the file shows
+      // up in the merged card. ulidSeed offset stays unique by counting only
+      // newly-created episodes inside this cluster.
+      targetEp = buildEpisodeRecord({
+        seriesId,
+        seasonId,
+        item,
+        ulidSeed: ulidSeed !== undefined ? ulidSeed + 100 + seedOffset : undefined,
+      });
+      seedOffset++;
+      episodesToWrite.push(targetEp);
+      if (item.episode != null) byNumber.set(item.episode, targetEp);
+    } else if (targetEp.primaryFileId !== refId) {
+      // Episode exists but for a different file — record this as an
+      // alternate source (multi-resolution / multi-fansub for the same ep).
+      const alts = Array.isArray(targetEp.alternateFileIds) ? targetEp.alternateFileIds : [];
+      if (!alts.includes(refId)) {
+        const updatedEp = {
+          ...targetEp,
+          alternateFileIds: [...alts, refId],
+          updatedAt: Date.now(),
+        };
+        episodesToWrite.push(updatedEp);
+        byNumber.set(item.episode, updatedEp);
+        targetEp = updatedEp;
+      }
+    }
+
+    fileRefs.push({
+      ...buildFileRefRecord({ libraryId, episodeId: targetEp.id, item }),
+      matchStatus,
+    });
+  }
+
+  if (episodesToWrite.length) await db.episodes.bulkPut(episodesToWrite);
+  await db.fileRefs.bulkPut(fileRefs);
 }
 
 /**

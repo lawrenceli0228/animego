@@ -64,15 +64,23 @@ function nfc(relPath) {
  * v3.1 macOS ExFAT `.mp4`-package: directory whose name has a video extension.
  * Drill into it once and pick the largest file matching the same extension.
  *
+ * Returns null when the directory looks like a regular folder rather than a
+ * bundle — i.e. it contains ≥2 substantial same-ext children (e.g. a
+ * `[29-38].mp4` folder a user organized with multiple episodes inside). In
+ * that case the caller should fall back to a normal recursive walk.
+ *
+ * Exported so playback resolution (`useFileHandles.selectFileByName`) can apply
+ * the same drill-in when a stored relPath points at a bundle directory.
+ *
  * @param {any} dirHandle
  * @returns {Promise<{ file: File, name: string } | null>}
  */
-async function pickLargestSameExt(dirHandle) {
+export async function pickLargestSameExt(dirHandle) {
   const targetExt = ext(dirHandle.name);
   if (!targetExt) return null;
 
-  /** @type {{ file: File, name: string } | null} */
-  let pick = null;
+  /** @type {Array<{ file: File, name: string }>} */
+  const candidates = [];
 
   for await (const child of dirHandle.values()) {
     if (child.kind !== 'file') continue;
@@ -82,12 +90,15 @@ async function pickLargestSameExt(dirHandle) {
     const file = await child.getFile();
     if (file.size < MIN_VIDEO_SIZE) continue;
 
-    if (!pick || file.size > pick.file.size) {
-      pick = { file, name: child.name };
-    }
+    candidates.push({ file, name: child.name });
   }
 
-  return pick;
+  if (candidates.length === 0) return null;
+  // Multiple substantial same-ext children → treat as a regular folder, not
+  // an ExFAT directory bundle. Caller (the walk loop in enumerator) will
+  // recurse and yield each child individually.
+  if (candidates.length > 1) return null;
+  return candidates[0];
 }
 
 /**
@@ -139,9 +150,14 @@ async function* walk(dirHandle, prefix, depth) {
       if (hasVideoExt(entry.name) && depth <= 1) {
         const picked = await pickLargestSameExt(entry);
         if (picked) {
+          // Single substantial same-ext child → real ExFAT bundle. Yield
+          // the inner file under the bundle's path and skip recursion.
           yield { file: picked.file, relPath: entryPath, depth, kind: 'video' };
+          continue;
         }
-        continue;
+        // pickLargestSameExt returned null → either zero children or multiple
+        // siblings (regular folder named with a video extension). Fall through
+        // to normal recursion so each child gets enumerated.
       }
 
       if (depth < MAX_DEPTH) {

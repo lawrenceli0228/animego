@@ -16,6 +16,8 @@ import { migrateLegacyProgress } from '../lib/library/db/migrateLegacyProgress.j
 import { ulid } from '../lib/library/ulid.js';
 import LibraryEmptyState from '../components/library/LibraryEmptyState';
 import FsaUnsupportedBanner from '../components/library/FsaUnsupportedBanner';
+import LibraryOfflineBanner from '../components/library/LibraryOfflineBanner';
+import useSeriesLibraryStatus from '../hooks/useSeriesLibraryStatus';
 import SeriesGrid from '../components/library/SeriesGrid';
 import FilterChips from '../components/library/FilterChips';
 import RecentlyPlayedRow from '../components/library/RecentlyPlayedRow';
@@ -31,8 +33,18 @@ import UndoToast from '../components/shared/UndoToast';
 import { splitSeries } from '../services/splitSeries.js';
 import { rematchSeries } from '../services/rematchSeries.js';
 import { performMerge, undoMerge } from '../services/mergeOps.js';
+import { deleteSeriesCascade } from '../services/deleteSeries.js';
+import { dedupeSeriesByAnimeId } from '../services/dedupeSeries.js';
+import { createDandanClient } from '../services/dandanClient.js';
+import { refreshAllSeriesMetadata } from '../services/refreshSeriesMetadata.js';
 import { useLang } from '../context/LanguageContext';
 import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
+import toast from 'react-hot-toast';
+
+// Tiny `{{var}}` interpolation for toast strings — t() doesn't support it.
+function fmtTpl(tpl, vars) {
+  return String(tpl).replace(/\{\{(\w+)\}\}/g, (_, k) => (vars[k] ?? ''));
+}
 
 const HUE = PLAYER_HUE.stream;
 
@@ -82,6 +94,21 @@ const s = {
     textTransform: 'uppercase',
     letterSpacing: '0.12em',
   },
+  refreshBtn: (busy) => ({
+    ...mono,
+    padding: '8px 14px',
+    background: busy
+      ? `oklch(46% 0.06 ${HUE} / 0.20)`
+      : 'transparent',
+    border: `1px solid oklch(46% 0.06 ${HUE} / ${busy ? 0.45 : 0.55})`,
+    borderRadius: 4,
+    color: busy ? 'rgba(235,235,245,0.45)' : 'rgba(235,235,245,0.78)',
+    cursor: busy ? 'wait' : 'pointer',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: '0.12em',
+    opacity: busy ? 0.7 : 1,
+  }),
   headerActions: { display: 'flex', alignItems: 'center', gap: 8 },
   sectionLabel: {
     ...mono,
@@ -103,10 +130,14 @@ export default function LibraryPage() {
   const navigate = useNavigate();
   const fsaSupported = isFsaSupported();
 
-  const dandanStub = { match: async () => null };
+  const dandan = useMemo(() => createDandanClient(), []);
   const { series, loading } = useLibrary({ db });
   const { entries: resumeEntries } = useResume({ db });
-  const { status, roots, pickFolder } = useFileHandles({ db });
+  const { status, roots, pickFolder, libraryStatus, refresh: refreshHandles } = useFileHandles({ db });
+  const { availabilityBySeries, offlineLibraryIds } = useSeriesLibraryStatus({
+    db,
+    libraryStatus,
+  });
   const {
     run: runImport,
     progress: importProgress,
@@ -114,7 +145,7 @@ export default function LibraryPage() {
     status: importStatus,
     error: importError,
     cancel: cancelImport,
-  } = useImport({ db, dandan: dandanStub });
+  } = useImport({ db, dandan });
   const [importDismissed, setImportDismissed] = useState(false);
   const { processFiles } = useVideoFiles();
   const { all: overrides, lock, unlock, clear } = useUserOverride({ db });
@@ -209,7 +240,10 @@ export default function LibraryPage() {
   }, [fsaSupported, pickFolder, processFiles, runImport]);
 
   const handlePickSeries = useCallback((id) => {
-    navigate(`/library/${id}`);
+    // Go straight to /player so the user lands on the same rich
+    // EpisodeFileList surface that the post-import match flow shows. The
+    // library entry is just a different precondition for the same screen.
+    navigate('/player', { state: { seriesId: id } });
   }, [navigate]);
 
   const handleResume = useCallback((id, episodeNumber) => {
@@ -225,11 +259,25 @@ export default function LibraryPage() {
         else if (action === 'merge') setMergeSourceId(seriesId);
         else if (action === 'split') setSplitSourceId(seriesId);
         else if (action === 'rematch') setRematchSourceId(seriesId);
+        else if (action === 'delete') {
+          // Confirm + cascade-delete (series + seasons + episodes + owned
+          // fileRefs + progress + userOverride). On-disk video files are NOT
+          // touched. Re-importing the same folder will recreate the records.
+          const target = series.find((sr) => sr.id === seriesId);
+          const title = target?.titleZh || target?.titleEn || target?.titleJa || seriesId;
+          const ok = window.confirm(
+            `从库里删除「${title}」?\n\n会清掉本地的元数据 / 进度 / 覆盖,但磁盘上的视频文件不会被动。`,
+          );
+          if (!ok) return;
+          await deleteSeriesCascade({ db, seriesId });
+          toast.success(`已删除「${title}」`);
+        }
       } catch (err) {
         console.warn(`[library] override action ${action} failed:`, err);
+        toast.error('删除失败,请重试');
       }
     },
-    [lock, unlock, clear],
+    [lock, unlock, clear, series],
   );
 
   const handleMergeConfirm = useCallback(
@@ -345,7 +393,7 @@ export default function LibraryPage() {
 
   const handleAutoMergeView = useCallback(() => {
     if (!currentAutoMerge) return;
-    navigate(`/library/${currentAutoMerge.seriesId}`);
+    navigate('/player', { state: { seriesId: currentAutoMerge.seriesId } });
   }, [currentAutoMerge, navigate]);
 
   const handleAutoMergeDismiss = useCallback(() => {
@@ -414,12 +462,117 @@ export default function LibraryPage() {
     });
   }, []);
 
+  // One-click "merge duplicates" — find Series sharing a Season.animeId and
+  // merge them into the oldest. Fixes libraries imported before the in-batch
+  // dedup landed in importPipeline.
+  const [dedupeBusy, setDedupeBusy] = useState(false);
+  const handleDedupe = useCallback(async () => {
+    if (dedupeBusy) return;
+    setDedupeBusy(true);
+    try {
+      const result = await dedupeSeriesByAnimeId({ db });
+      if (result.groups === 0) {
+        toast.success('库里没有重复的系列');
+      } else if (result.merged === 0) {
+        toast(`检测到 ${result.groups} 组重复但都已合并过 (skip ${result.skipped})`);
+      } else {
+        toast.success(`合并 ${result.merged} 项 · 共 ${result.groups} 组重复`);
+        if (result.opIds.length > 0) {
+          setUndoToast({
+            opIds: result.opIds,
+            title: `合并重复 (${result.merged} 项)`,
+            meta: `${result.groups} 组 · 同 animeId`,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[library] dedupe failed:', err);
+      toast.error('合并失败,请重试');
+    } finally {
+      setDedupeBusy(false);
+    }
+  }, [dedupeBusy]);
+
+  // Refresh enrichment (titleZh/titleEn/posterUrl) for every series in the
+  // library. Pre-2026-05 imports lack these fields because the dandan client
+  // wasn't forwarding enrichment — this is the in-place fix that keeps
+  // seriesId stable so progress / overrides / opsLog all survive.
+  const [refreshingMeta, setRefreshingMeta] = useState(false);
+  const handleRefreshMetadata = useCallback(async () => {
+    if (refreshingMeta) return;
+    setRefreshingMeta(true);
+    const toastId = toast.loading(
+      fmtTpl(t('library.refreshMetaProgress'), { done: 0, total: series.length }),
+    );
+    try {
+      const summary = await refreshAllSeriesMetadata({
+        db,
+        dandan,
+        onProgress: (done, total, last) => {
+          // Per-series detail logging makes the no-change case debuggable
+          // without a build-and-redeploy cycle. Cheap — runs N times for
+          // small N (library count), never inside a hot loop.
+          console.log('[refresh-meta]', last);
+          toast.loading(
+            fmtTpl(t('library.refreshMetaProgress'), { done, total }),
+            { id: toastId },
+          );
+        },
+      });
+
+      // Group skipReasons so the user sees *why* nothing changed (no-fileref
+      // means hash16M was never persisted; no-match means dandanplay couldn't
+      // identify the file; no-enrichment means matched but server returned
+      // no titleChinese/coverImageUrl).
+      /** @type {Record<string, number>} */
+      const reasonCounts = {};
+      for (const r of summary.results) {
+        if (r.changed) continue;
+        const key = r.skipReason || 'unknown';
+        reasonCounts[key] = (reasonCounts[key] || 0) + 1;
+      }
+      const reasonStr = Object.entries(reasonCounts)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(' / ');
+
+      console.log('[refresh-meta] summary:', summary);
+
+      if (summary.changed === 0) {
+        toast.success(
+          `${t('library.refreshMetaNothing')}${reasonStr ? ` · ${reasonStr}` : ''}`,
+          { id: toastId, duration: 6000 },
+        );
+      } else {
+        toast.success(
+          fmtTpl(t('library.refreshMetaDone'), {
+            changed: summary.changed,
+            total: summary.total,
+          }) + (reasonStr ? ` · ${reasonStr}` : ''),
+          { id: toastId, duration: 6000 },
+        );
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      toast.error(
+        fmtTpl(t('library.refreshMetaFailed'), { error: errMsg }),
+        { id: toastId },
+      );
+    } finally {
+      setRefreshingMeta(false);
+    }
+  }, [refreshingMeta, series.length, dandan, t]);
+
   const showEmptyState = !loading && series.length === 0;
   const showBanner = !fsaSupported;
 
   return (
     <div style={s.page}>
       {showBanner && <FsaUnsupportedBanner />}
+      <LibraryOfflineBanner
+        roots={roots}
+        offlineLibraryIds={offlineLibraryIds}
+        onRetry={refreshHandles}
+      />
 
       {selection.selectionMode ? (
         <BulkActionToolbar
@@ -432,6 +585,28 @@ export default function LibraryPage() {
         <div style={s.header}>
           <h1 style={s.title}>Library</h1>
           <div style={s.headerActions}>
+            {series.length > 1 && (
+              <button
+                style={s.refreshBtn(dedupeBusy)}
+                onClick={handleDedupe}
+                disabled={dedupeBusy}
+                type="button"
+                data-testid="library-dedupe"
+              >
+                {dedupeBusy ? '合并中…' : '合并重复'}
+              </button>
+            )}
+            {series.length > 0 && (
+              <button
+                style={s.refreshBtn(refreshingMeta)}
+                onClick={handleRefreshMetadata}
+                disabled={refreshingMeta}
+                type="button"
+                data-testid="library-refresh-meta"
+              >
+                {t('library.refreshMeta')}
+              </button>
+            )}
             {series.length > 0 && (
               <button style={s.resetBtn} onClick={handleResetLibrary} type="button">
                 重置库
@@ -483,6 +658,7 @@ export default function LibraryPage() {
               selectedIds={new Set(selection.ids)}
               onToggleSelect={(id) => selection.toggle(id)}
               onLongPress={(id) => selection.toggle(id)}
+              availabilityBySeries={availabilityBySeries}
             />
           )}
           <UnclassifiedSection

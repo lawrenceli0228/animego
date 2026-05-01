@@ -278,4 +278,43 @@ describe('useSeriesDetail (Slice 12)', () => {
 
     await waitFor(() => expect(result.current.episodes).toHaveLength(2));
   });
+
+  it('soft-merge: pulls episodes from every series listed in userOverride.mergedFrom', async () => {
+    const db = getDb('test-merged-' + Date.now() + Math.random());
+    await db.open();
+
+    // Target series A keeps its own episodes; B and C are merged into A via
+    // performMerge (soft merge — episodes stay under their original seriesId).
+    await db.series.bulkPut([
+      makeSeries('A'),
+      makeSeries('B'),
+      makeSeries('C'),
+    ]);
+    await db.episodes.bulkPut([
+      makeEpisode('a-ep1', 'A', 31, 'fr-a1'),
+      makeEpisode('a-ep2', 'A', 32, 'fr-a2'),
+      makeEpisode('b-ep1', 'B', 1, 'fr-b1'),
+      makeEpisode('b-ep2', 'B', 2, 'fr-b2'),
+      makeEpisode('c-ep1', 'C', 3, 'fr-c1'),
+    ]);
+    await db.fileRefs.bulkPut([
+      makeFileRef('fr-a1', 'lib', 'baha-31.mp4'),
+      makeFileRef('fr-a2', 'lib', 'baha-32.mp4'),
+      makeFileRef('fr-b1', 'lib', 'sakurato-01.mkv'),
+      makeFileRef('fr-b2', 'lib', 'sakurato-02.mkv'),
+      makeFileRef('fr-c1', 'lib', 'skymoon-03.mkv'),
+    ]);
+    await db.userOverride.put({ seriesId: 'A', mergedFrom: ['B', 'C'], updatedAt: NOW });
+
+    const fileHandles = makeFakeFileHandles();
+    const { useSeriesDetailMod } = await (async () => ({
+      useSeriesDetailMod: (await import('../hooks/useSeriesDetail.js')).default,
+    }))();
+
+    const { result } = renderHook(() => useSeriesDetailMod('A', { db, fileHandles }));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    // 2 from A + 2 from B + 1 from C = 5 episodes; sorted by number ascending
+    const numbers = result.current.episodes.map((e) => e.number);
+    expect(numbers).toEqual([1, 2, 3, 31, 32]);
+  });
 });

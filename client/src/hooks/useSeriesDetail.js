@@ -65,10 +65,25 @@ export default function useSeriesDetail(seriesId, { db, fileHandles }) {
           return;
         }
 
-        // 2. Fetch episodes for this series, sorted ascending by number
+        // performMerge is a SOFT merge — it adds source-seriesIds to the
+        // target's userOverride.mergedFrom but leaves their episodes/fileRefs
+        // under the original seriesIds. Read across the chain so the merged
+        // card shows every contributing episode (and undo still restores the
+        // sources to their own cards).
+        const override = db.userOverride
+          ? await db.userOverride.get(seriesId)
+          : null;
+        if (cancelled) return;
+        const mergedSeriesIds = Array.isArray(override?.mergedFrom)
+          ? override.mergedFrom
+          : [];
+        const allSeriesIds = [seriesId, ...mergedSeriesIds];
+
+        // 2. Fetch episodes for this series + every merged source, sorted
+        //    ascending by number across the whole set.
         const epRecords = await db.episodes
           .where('seriesId')
-          .equals(seriesId)
+          .anyOf(allSeriesIds)
           .toArray();
         if (cancelled) return;
         epRecords.sort((a, b) => a.number - b.number);

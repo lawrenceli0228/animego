@@ -26,18 +26,62 @@ function makeItem(fileName, episode, relativePath, parsedTitle = 'Attack on Tita
   };
 }
 
-/** A dandanplay client mock that returns a matched single result */
-function makeDandanMock({ callCount = { value: 0 } } = {}) {
+/**
+ * Default dandan mock — assigns distinct animeIds per parsed-title prefix so
+ * the import pipeline's "same animeId → reuse existing series" dedup doesn't
+ * collapse logically-different clusters in a single batch test.
+ *
+ * Override `staticAnimeId` when a test wants every call to return the same id
+ * (e.g. cross-folder same-anime scenarios).
+ */
+function makeDandanMock({ callCount = { value: 0 }, staticAnimeId } = {}) {
+  /** @type {Map<string, number>} prefix → animeId */
+  const idByPrefix = new Map();
+  let nextId = 1001;
   return {
     async match(hash16M, fileName) {
       callCount.value++;
+      if (typeof staticAnimeId === 'number') {
+        return {
+          isMatched: true,
+          animes: [{ animeId: staticAnimeId, animeTitle: 'Static', episodes: [] }],
+        };
+      }
+      // Hash16M shape from makeItem: `fakehash-<fileName>`. Group by basename
+      // prefix (chars before "-ep" / "ep01") so series-A and series-B get
+      // different ids, but same-series files share one id.
+      const prefix = (fileName || hash16M || '').split(/-ep|\bep/i)[0] || fileName || hash16M || '';
+      let id = idByPrefix.get(prefix);
+      if (id === undefined) {
+        id = nextId++;
+        idByPrefix.set(prefix, id);
+      }
       return {
         isMatched: true,
-        animes: [{
-          animeId: 1001,
-          animeTitle: 'Attack on Titan S4',
-          episodes: [],
-        }],
+        animes: [{ animeId: id, animeTitle: prefix, episodes: [] }],
+      };
+    },
+  };
+}
+
+/** A dandan mock that returns a single match plus enrichment metadata. */
+function makeEnrichedDandanMock({
+  animeId = 2001,
+  enrichment = {
+    titleZh: '进击的巨人 The Final Season',
+    titleEn: 'Attack on Titan: The Final Season',
+    posterUrl: 'https://example.test/aot-cover.jpg',
+  },
+  callCount = { value: 0 },
+} = {}) {
+  return {
+    async match(hash16M, fileName, opts) {
+      callCount.value++;
+      callCount.lastOpts = opts;
+      return {
+        isMatched: true,
+        animes: [{ animeId, animeTitle: enrichment.titleZh ?? 'enriched' }],
+        enrichment,
       };
     },
   };
@@ -113,6 +157,78 @@ describe('importPipeline.runImport (Slice 7)', () => {
     const finishEvent = events.find(e => e.kind === 'finish');
     expect(finishEvent).toBeTruthy();
     expect(finishEvent.summary.matched).toBe(2);
+  });
+
+  it('in-batch dedup with new episode numbers: reuse path creates Episode rows for previously-unseen numbers', async () => {
+    // Two clusters resolve to the same animeId but cover NON-OVERLAPPING
+    // episode numbers (Baha eps 31-32, Sakurato eps 1-2). Reuse path must
+    // create Episode rows for the second cluster's eps so its files don't
+    // become orphan fileRefs hidden from the merged card.
+    const items = [
+      ...Array.from({ length: 2 }, (_, i) =>
+        makeItem(`[Baha]-ep${i + 31}.mkv`, i + 31, `Baha/ep${i + 31}.mkv`, 'Baha Sousou')
+      ),
+      ...Array.from({ length: 2 }, (_, i) =>
+        makeItem(`[Sakurato]-ep${i + 1}.mkv`, i + 1, `Sakurato/ep${i + 1}.mkv`, 'Sakurato Sousou')
+      ),
+    ];
+    await runImport(
+      { items, libraryId: 'lib1' },
+      { db: testDb, dandan: makeDandanMock({ staticAnimeId: 515759 }), ulidSeedBase: 1 },
+    );
+
+    const allSeries = await testDb.series.toArray();
+    expect(allSeries).toHaveLength(1);
+
+    const allEpisodes = await testDb.episodes.where('seriesId').equals(allSeries[0].id).toArray();
+    const numbers = allEpisodes.map((e) => e.number).sort((a, b) => a - b);
+    expect(numbers).toEqual([1, 2, 31, 32]);
+
+    // Every fileRef should be linked to an episode (no orphans).
+    const allFileRefs = await testDb.fileRefs.toArray();
+    const linkedEpisodeIds = new Set(allEpisodes.flatMap(
+      (e) => [e.primaryFileId, ...(e.alternateFileIds || [])].filter(Boolean),
+    ));
+    for (const ref of allFileRefs) {
+      expect(linkedEpisodeIds.has(ref.id)).toBe(true);
+    }
+  });
+
+  it('in-batch dedup: 3 clusters resolving to the same dandan animeId → 1 series row', async () => {
+    // Three folders that LOOK like different series at the parsed-title level
+    // (different fansub-tagged names) but resolve to the same dandan animeId.
+    // Without the in-batch dedup fix this used to land three duplicate cards.
+    const items = [
+      ...Array.from({ length: 2 }, (_, i) =>
+        makeItem(`[Baha]-ep${i + 1}.mkv`, i + 1, `Baha/ep${i + 1}.mkv`, 'Sousou Baha')
+      ),
+      ...Array.from({ length: 2 }, (_, i) =>
+        makeItem(`[Sakurato]-ep${i + 1}.mkv`, i + 1, `Sakurato/ep${i + 1}.mkv`, 'Sousou Sakurato')
+      ),
+      ...Array.from({ length: 2 }, (_, i) =>
+        makeItem(`[Skymoon]-ep${i + 1}.mkv`, i + 1, `Skymoon/ep${i + 1}.mkv`, 'Sousou Skymoon')
+      ),
+    ];
+
+    const summary = await runImport(
+      { items, libraryId: 'lib1' },
+      {
+        db: testDb,
+        // staticAnimeId forces every match to return the same id — mirrors
+        // the user's real case where 3 fansub releases of the same anime got
+        // imported together and each yielded its own cluster.
+        dandan: makeDandanMock({ staticAnimeId: 515759 }),
+        ulidSeedBase: 1,
+      }
+    );
+
+    expect(summary.clusters).toBeGreaterThanOrEqual(2);
+    expect(summary.matched).toBe(summary.clusters);
+    const allSeries = await testDb.series.toArray();
+    expect(allSeries).toHaveLength(1);
+    const allSeasons = await testDb.seasons.toArray();
+    expect(allSeasons).toHaveLength(1);
+    expect(allSeasons[0].animeId).toBe(515759);
   });
 
   it('reuse: cluster with matching priorSeason animeId → no new series row', async () => {
@@ -305,6 +421,77 @@ describe('importPipeline.runImport (Slice 7)', () => {
     // Still exactly one series — no duplicate created.
     const allSeries = await testDb.series.toArray();
     expect(allSeries).toHaveLength(1);
+  });
+
+  it('enrichment: dandan returns titleZh/titleEn/posterUrl → series row reflects them', async () => {
+    const items = Array.from({ length: 3 }, (_, i) =>
+      makeItem(`enriched-ep${i + 1}.mkv`, i + 1, `Show/enriched-ep${i + 1}.mkv`, 'Generic Fansub'),
+    );
+    const callCount = { value: 0 };
+    await runImport(
+      { items, libraryId: 'lib-enrich' },
+      { db: testDb, dandan: makeEnrichedDandanMock({ callCount }), ulidSeedBase: 1 },
+    );
+
+    expect(callCount.value).toBe(1);
+    expect(callCount.lastOpts).toEqual({ fileSize: 1000 });
+
+    const allSeries = await testDb.series.toArray();
+    expect(allSeries).toHaveLength(1);
+    const series = allSeries[0];
+    expect(series.titleZh).toBe('进击的巨人 The Final Season');
+    expect(series.titleEn).toBe('Attack on Titan: The Final Season');
+    expect(series.posterUrl).toBe('https://example.test/aot-cover.jpg');
+
+    // Cache should now persist enrichment so re-imports keep the metadata.
+    const cached = await testDb.matchCache.get('fakehash-enriched-ep1.mkv');
+    expect(cached?.verdict?.enrichment).toEqual({
+      titleZh: '进击的巨人 The Final Season',
+      titleEn: 'Attack on Titan: The Final Season',
+      posterUrl: 'https://example.test/aot-cover.jpg',
+    });
+    expect(cached?.verdict?.animeId).toBe(2001);
+  });
+
+  it('cache rescue: cached animeId+enrichment with no prior season → rebuild series with enrichment', async () => {
+    // Cache survives but seasons table was wiped. Pipeline must rebuild the
+    // series via the local matcher and reapply the cached enrichment so the
+    // user does not lose the dandan-derived title and poster.
+    const callCount = { value: 0 };
+    await testDb.matchCache.put({
+      hash16M: 'fakehash-rescue-ep1.mkv',
+      verdict: {
+        kind: 'new',
+        animeId: 3001,
+        enrichment: {
+          titleZh: '间谍过家家',
+          titleEn: 'Spy x Family',
+          posterUrl: 'https://example.test/sxf.jpg',
+        },
+      },
+      updatedAt: Date.now(),
+    });
+
+    const items = Array.from({ length: 3 }, (_, i) =>
+      makeItem(`rescue-ep${i + 1}.mkv`, i + 1, `Show/rescue-ep${i + 1}.mkv`, 'Anitomy Fallback'),
+    );
+    await runImport(
+      { items, libraryId: 'lib-rescue' },
+      { db: testDb, dandan: makeEnrichedDandanMock({ callCount }), ulidSeedBase: 10 },
+    );
+
+    // Dandan must NOT be called — cache short-circuits, just enrichment is reapplied.
+    expect(callCount.value).toBe(0);
+
+    const allSeries = await testDb.series.toArray();
+    expect(allSeries).toHaveLength(1);
+    expect(allSeries[0].titleZh).toBe('间谍过家家');
+    expect(allSeries[0].posterUrl).toBe('https://example.test/sxf.jpg');
+
+    // A fresh season was created under the rebuilt series with the cached animeId.
+    const seasons = await testDb.seasons.toArray();
+    expect(seasons).toHaveLength(1);
+    expect(seasons[0].animeId).toBe(3001);
   });
 
   it('error isolation: dandan throws on cluster A → emits failed, cluster B still completes', async () => {

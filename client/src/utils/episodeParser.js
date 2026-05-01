@@ -44,33 +44,14 @@ export function parseEpisodeNumber(filename) {
   return null;
 }
 
-export function parseAnimeKeyword(filename) {
-  if (!filename) return null;
+const TAG_RE = /^(\d{2,4}[Pp]?\b|HEVC|AVC|x26[45]|H\.?26[45]|AAC|FLAC|WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay|CHS|CHT|JPN?|ENG?|BIG5|GB|S\d+E?\d*|\d{1,3}(?:v\d+)?|SP\d*|OVA|OAD|NCOP|NCED|[A-Z0-9 ]+\d{3,4}[Pp])$/i;
+const RANGE_RE = /^\d{1,3}\s*-\s*\d{1,3}$/;
+// ANY quality/codec token inside a bracket → bracket is a tag. Catches
+// space- or underscore-separated compounds the single-token TAG_RE misses,
+// e.g. `AVC 8bit`, `AAC AVC`, `HEVC-10bit 1080p AAC`, `x264_AAC`, `HEVC_FLAC`.
+const QUALITY_HINTS = /\b(HEVC|AVC|x26[45]|H\.?26[45]|AAC|FLAC|10bit|8bit|WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay|HDR|DV|TrueHD|DTS)\b/i;
 
-  // For bracket-heavy filenames like [Group][Title][Ep][Quality][Lang].ext
-  // Only use this path when text outside brackets is minimal (< 5 chars)
-  const textOutside = filename.replace(VIDEO_EXTS, '').replace(/\[[^\]]*\]/g, '').trim();
-  if (textOutside.length < 5) {
-    const TAG_RE = /^(\d{2,4}[Pp]?\b|HEVC|AVC|x26[45]|H\.?26[45]|AAC|FLAC|WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay|CHS|CHT|JPN?|ENG?|BIG5|GB|S\d+E?\d*|\d{1,3}(?:v\d+)?|SP\d*|OVA|OAD|NCOP|NCED|[A-Z0-9 ]+\d{3,4}[Pp])$/i;
-    const brackets = [];
-    const re = /\[([^\]]+)\]/g;
-    let bm;
-    while ((bm = re.exec(filename)) !== null) brackets.push(bm[1]);
-
-    if (brackets.length >= 3) {
-      const titleBracket = brackets
-        .filter(b => !TAG_RE.test(b.trim()) && b.length > 3)
-        .sort((a, b) => b.length - a.length)[0];
-      if (titleBracket) {
-        return titleBracket
-          .replace(/\s*-\s*\d+\s*$/, '')
-          .replace(/\s*EP?\s*\d+\s*$/i, '')
-          .trim() || null;
-      }
-    }
-  }
-
-  // Standard format: strip brackets and clean up
+function tryStandardPath(filename) {
   let name = filename
     .replace(VIDEO_EXTS, '')
     .replace(/\[[^\]]*\]/g, '')       // [SubGroup] [1080p]
@@ -80,15 +61,61 @@ export function parseAnimeKeyword(filename) {
     .replace(/\b(WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay)\b/gi, '')
     .trim();
 
-  // " - 03" format: take part before separator
   const dashMatch = name.match(/^(.+?)\s+-\s+\d+/);
   if (dashMatch) return dashMatch[1].trim();
 
-  // EP03 format: take part before EP
   const epMatch = name.match(/^(.+?)\s*EP?\s*\d+/i);
   if (epMatch) return epMatch[1].trim();
 
   return name.replace(/\s+\d+\s*$/, '').trim() || null;
+}
+
+function tryBracketHeavy(filename) {
+  const brackets = [];
+  const re = /\[([^\]]+)\]/g;
+  let bm;
+  while ((bm = re.exec(filename)) !== null) brackets.push(bm[1]);
+  if (brackets.length < 3) return null;
+
+  const titleBracket = brackets
+    .filter((b) => {
+      const t = b.trim();
+      if (!t || t.length <= 3) return false;
+      if (TAG_RE.test(t)) return false;
+      if (RANGE_RE.test(t)) return false;
+      if (QUALITY_HINTS.test(t)) return false;
+      return true;
+    })
+    .sort((a, b) => b.length - a.length)[0];
+
+  if (!titleBracket) return null;
+  return titleBracket
+    .replace(/\s*-\s*\d+\s*$/, '')
+    .replace(/\s*EP?\s*\d+\s*$/i, '')
+    .replace(/_/g, ' ')
+    .trim() || null;
+}
+
+/**
+ * Decide whether a candidate looks like a real title. Rejects junk left over
+ * from malformed bracket pairings (`-HEVC_opus]`), single-token quality
+ * leftovers, and anything without at least one letter.
+ */
+function looksLikeTitle(candidate) {
+  if (!candidate) return false;
+  if (candidate.length < 4) return false;
+  if (/[\[\]]/.test(candidate)) return false;        // residual bracket char
+  if (!/\p{L}/u.test(candidate)) return false;       // need at least one letter
+  if (TAG_RE.test(candidate)) return false;
+  if (QUALITY_HINTS.test(candidate) && !/\s/.test(candidate)) return false;
+  return true;
+}
+
+export function parseAnimeKeyword(filename) {
+  if (!filename) return null;
+  const standard = tryStandardPath(filename);
+  if (looksLikeTitle(standard)) return standard;
+  return tryBracketHeavy(filename) || standard || null;
 }
 
 /**

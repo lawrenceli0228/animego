@@ -47,6 +47,20 @@ const s = {
     cursor: 'pointer',
     letterSpacing: '0.05em',
   },
+  itemDanger: {
+    ...mono,
+    display: 'block',
+    width: '100%',
+    padding: '8px 14px',
+    background: 'transparent',
+    border: 'none',
+    borderTop: '1px solid rgba(84,84,88,0.45)',
+    color: 'oklch(72% 0.18 25)',
+    textAlign: 'left',
+    fontSize: 11,
+    cursor: 'pointer',
+    letterSpacing: '0.05em',
+  },
 };
 
 /**
@@ -61,10 +75,11 @@ const s = {
  *   onSplit: () => void,
  *   onRematch: () => void,
  *   onOpsLog?: () => void,
+ *   onDelete?: () => void,
  *   label?: string,
  * }} props
  */
-export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLog, label = 'Actions ▾' }) {
+export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLog, onDelete, label = 'Actions ▾' }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(/** @type {HTMLDivElement|null} */ (null));
 
@@ -134,6 +149,17 @@ export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLo
               onClick={() => fire(onOpsLog)}
             >
               操作日志
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="action-delete"
+              style={s.itemDanger}
+              onClick={() => fire(onDelete)}
+            >
+              删除…
             </button>
           )}
         </div>

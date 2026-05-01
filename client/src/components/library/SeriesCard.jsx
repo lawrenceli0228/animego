@@ -141,6 +141,36 @@ const s = {
     fontSize: 11,
     lineHeight: 1,
   },
+  // Offline / partial drive availability badge — sits below LOCAL on the
+  // poster. OKLCH amber for partial (some files reachable), red for offline
+  // (whole drive missing). Sibling to localBadge, not stacked, so it never
+  // covers progressOverlay or kebab.
+  availBadge: (kind) => ({
+    ...mono,
+    position: 'absolute',
+    top: 32,
+    left: 8,
+    height: 20,
+    padding: '0 8px',
+    background: 'rgba(28,28,30,0.78)',
+    border: kind === 'offline'
+      ? '1px solid oklch(60% 0.20 25 / 0.55)'
+      : '1px solid oklch(72% 0.16 70 / 0.55)',
+    color: kind === 'offline' ? 'oklch(78% 0.18 25)' : 'oklch(82% 0.16 70)',
+    borderRadius: 999,
+    fontSize: 9,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.10em',
+    display: 'inline-flex',
+    alignItems: 'center',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    zIndex: 2,
+  }),
+  cardDimmed: {
+    filter: 'saturate(0.6) brightness(0.85)',
+  },
   lockedBadge: {
     ...mono,
     fontSize: 9,
@@ -231,6 +261,20 @@ const s = {
     cursor: 'pointer',
     letterSpacing: '0.05em',
   },
+  menuItemDanger: {
+    ...mono,
+    display: 'block',
+    width: '100%',
+    padding: '8px 12px',
+    background: 'transparent',
+    border: 'none',
+    borderTop: '1px solid rgba(84,84,88,0.45)',
+    color: 'oklch(72% 0.18 25)',
+    textAlign: 'left',
+    fontSize: 11,
+    cursor: 'pointer',
+    letterSpacing: '0.05em',
+  },
 };
 
 /**
@@ -266,7 +310,10 @@ const s = {
  *   selected?: boolean,
  *   onToggleSelect?: (e?: import('react').MouseEvent) => void,
  *   onLongPress?: () => void,
+ *   availability?: 'ok'|'partial'|'offline'|'unknown',
  * }} props
+ *
+ * @typedef {'lock'|'unlock'|'clear'|'merge'|'split'|'rematch'|'delete'} OverrideActionExt
  */
 export default function SeriesCard({
   series,
@@ -279,6 +326,7 @@ export default function SeriesCard({
   selected = false,
   onToggleSelect,
   onLongPress,
+  availability,
 }) {
   const title = series.titleEn || series.titleZh || series.titleJa || series.id;
   const initial = title.charAt(0).toUpperCase();
@@ -357,7 +405,12 @@ export default function SeriesCard({
 
   const isLocked = override?.locked === true;
   const hasOverride = override != null;
-  const cardStyle = selected ? { ...s.card, ...s.cardSelected } : s.card;
+  const dimForAvail = availability === 'offline' || availability === 'partial';
+  const cardStyle = {
+    ...s.card,
+    ...(selected ? s.cardSelected : null),
+    ...(dimForAvail ? s.cardDimmed : null),
+  };
   const showKebab = !!onOverrideAction && !selectionMode;
 
   return (
@@ -390,6 +443,16 @@ export default function SeriesCard({
             <span aria-hidden style={s.localGlyph}>{LOCAL_HEX_GLYPH}</span>
             LOCAL
           </span>
+          {(availability === 'offline' || availability === 'partial') && (
+            <span
+              style={s.availBadge(availability)}
+              data-testid="availability-badge"
+              data-availability={availability}
+              title={availability === 'offline' ? '硬盘未连接' : '部分文件不可用'}
+            >
+              {availability === 'offline' ? '⊘ OFFLINE' : '⚠ PARTIAL'}
+            </span>
+          )}
           {progressPct != null && (
             <div style={s.progressOverlay} data-testid="progress-bar">
               <div style={s.progressFill(progressPct)} />
@@ -519,6 +582,15 @@ export default function SeriesCard({
               清除覆盖
             </button>
           )}
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="menu-delete"
+            style={s.menuItemDanger}
+            onClick={() => fire('delete')}
+          >
+            删除…
+          </button>
         </div>
       )}
     </div>

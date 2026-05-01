@@ -2,7 +2,7 @@
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 // ── mock hooks / modules used by LocalSeriesPage ──────────────────────────────
@@ -73,6 +73,9 @@ vi.mock('../lib/library/db/db.js', () => ({
         reverse: () => ({ toArray: () => Promise.resolve([]) }),
       }),
     },
+    episodes: {
+      update: vi.fn().mockResolvedValue(1),
+    },
     userOverride: { toArray: () => Promise.resolve([]) },
   },
   getDb: vi.fn(() => ({})),
@@ -127,7 +130,7 @@ function makeProgress(episodeId, seriesId, over = {}) {
   };
 }
 
-function renderAt(seriesId, navSpy) {
+function renderAt(seriesId) {
   return render(
     <MemoryRouter initialEntries={[`/library/${seriesId}`]}>
       <Routes>
@@ -171,162 +174,72 @@ describe('LocalSeriesPage — render states', () => {
     renderAt('series-1');
     expect(screen.getByTestId('error-state')).toBeInTheDocument();
   });
+
+  it('renders missing state when series record is loaded but null', () => {
+    mockSeriesDetail.status = 'ready';
+    mockSeriesDetail.series = null;
+    renderAt('series-1');
+    expect(screen.getByTestId('missing-state')).toBeInTheDocument();
+  });
 });
 
-describe('LocalSeriesPage — hero', () => {
-  it('renders the series title from titleZh', () => {
-    mockSeriesDetail.series = makeSeries();
+describe('LocalSeriesPage — series list (rich EpisodeFileList)', () => {
+  it('renders the series title from titleZh in the list header', () => {
+    mockSeriesDetail.series = makeSeries({ titleJa: undefined });
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
-    expect(screen.getByTestId('hero-title').textContent).toBe('进击的巨人');
-  });
-
-  it('falls back to titleEn when titleZh is missing', () => {
-    mockSeriesDetail.series = makeSeries({ titleZh: undefined });
-    renderAt('series-1');
-    expect(screen.getByTestId('hero-title').textContent).toBe('Attack on Titan');
-  });
-
-  it('renders LOCAL badge', () => {
-    mockSeriesDetail.series = makeSeries();
-    renderAt('series-1');
-    expect(screen.getByTestId('hero-local-badge')).toBeInTheDocument();
-  });
-
-  it('renders monogram fallback when posterUrl is absent', () => {
-    mockSeriesDetail.series = makeSeries({ posterUrl: undefined });
-    renderAt('series-1');
-    expect(screen.getByTestId('hero-monogram')).toBeInTheDocument();
+    // titleNative falls back to titleEn → titleZh; titleChinese is titleZh
+    expect(screen.getByTestId('series-list')).toBeInTheDocument();
+    expect(screen.getByText('Attack on Titan')).toBeInTheDocument();
+    expect(screen.getByText('进击的巨人')).toBeInTheDocument();
   });
 
   it('renders an https poster when provided', () => {
     mockSeriesDetail.series = makeSeries({ posterUrl: 'https://example.com/p.jpg' });
-    renderAt('series-1');
-    const img = screen.getByRole('img');
-    expect(img).toHaveAttribute('src', 'https://example.com/p.jpg');
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
+    const { container } = renderAt('series-1');
+    // EpisodeFileList renders the cover with alt="" (decorative), so it has
+    // role="presentation" — use a direct DOM query instead of getByRole.
+    const img = container.querySelector('img[src="https://example.com/p.jpg"]');
+    expect(img).toBeTruthy();
   });
 
-  it('rejects non-https posterUrl (xss guard)', () => {
+  it('omits poster when posterUrl is non-https (xss guard)', () => {
     mockSeriesDetail.series = makeSeries({ posterUrl: 'javascript:alert(1)' });
-    renderAt('series-1');
-    expect(screen.getByTestId('hero-monogram')).toBeInTheDocument();
-  });
-});
-
-describe('LocalSeriesPage — episode list', () => {
-  it('renders one row per episode, sorted by number', () => {
-    mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [
-      makeEpisode('e1', 1, { title: 'first' }),
-      makeEpisode('e2', 2, { title: 'second' }),
-    ];
-    renderAt('series-1');
-    expect(screen.getByTestId('episode-row-1')).toBeInTheDocument();
-    expect(screen.getByTestId('episode-row-2')).toBeInTheDocument();
-  });
-
-  it('shows empty state when no episodes', () => {
-    mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [];
-    renderAt('series-1');
-    expect(screen.getByTestId('no-episodes')).toBeInTheDocument();
-  });
-
-  it('shows ✓ done status for completed episodes', async () => {
-    mockSeriesDetail.series = makeSeries();
     mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
-    mockGetBySeries.mockResolvedValue([
-      makeProgress('e1', 'series-1', { completed: true, positionSec: 1440 }),
-    ]);
-    renderAt('series-1');
-    await waitFor(() => {
-      expect(screen.getByTestId('episode-status-1').textContent).toMatch(/看过/);
-    });
+    const { container } = renderAt('series-1');
+    expect(container.querySelector('img')).toBeNull();
   });
 
-  it('shows progress label for in-progress episodes', async () => {
+  it('renders one row per episode', () => {
     mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
-    mockGetBySeries.mockResolvedValue([
-      makeProgress('e1', 'series-1', { positionSec: 600, durationSec: 1440 }),
-    ]);
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1), makeEpisode('e2', 2)];
     renderAt('series-1');
-    await waitFor(() => {
-      expect(screen.getByTestId('episode-status-1').textContent).toMatch(/进行中/);
-    });
+    expect(screen.getByText(/EP01/)).toBeInTheDocument();
+    expect(screen.getByText(/EP02/)).toBeInTheDocument();
   });
 
-  it('shows 未看 for episodes with no progress', () => {
-    mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
-    renderAt('series-1');
-    expect(screen.getByTestId('episode-status-1').textContent).toMatch(/未看/);
-  });
-
-  it('clicking an episode navigates to /player with seriesId + episode number', () => {
+  it('clicking an episode row navigates to /player with seriesId + episode', () => {
     mockSeriesDetail.series = makeSeries();
     mockSeriesDetail.episodes = [makeEpisode('e1', 5)];
+    mockSeriesDetail.fileRefByEpisode = new Map([
+      ['e1', makeFileRef('file-5', 'EP05.mkv')],
+    ]);
     renderAt('series-1');
-    fireEvent.click(screen.getByTestId('episode-row-5'));
+    // 'EP05.mkv' appears both in the EpisodeFileList row and the file-tree
+    // section below — scope to the EpisodeFileList wrapper to disambiguate.
+    const list = screen.getByTestId('series-list');
+    fireEvent.click(within(list).getByText('EP05.mkv'));
     expect(screen.getByTestId('player-route')).toBeInTheDocument();
   });
-});
 
-describe('LocalSeriesPage — overall progress + continue CTA', () => {
-  it('shows watched / total counter', () => {
-    mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [makeEpisode('e1', 1), makeEpisode('e2', 2)];
-    renderAt('series-1');
-    expect(screen.getByTestId('overall-progress').textContent).toMatch(/0 \/ 2/);
-  });
-
-  it('reflects watched count from progress data', async () => {
-    mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [makeEpisode('e1', 1), makeEpisode('e2', 2)];
-    mockGetBySeries.mockResolvedValue([
-      makeProgress('e1', 'series-1', { completed: true }),
-    ]);
-    renderAt('series-1');
-    await waitFor(() => {
-      expect(screen.getByTestId('overall-progress').textContent).toMatch(/1 \/ 2/);
-    });
-  });
-
-  it('continue button targets the most-recent in-progress episode', async () => {
-    mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [
-      makeEpisode('e1', 1),
-      makeEpisode('e2', 2),
-      makeEpisode('e3', 3),
-    ];
-    mockGetBySeries.mockResolvedValue([
-      makeProgress('e2', 'series-1', { positionSec: 300, updatedAt: 1000 }),
-    ]);
-    renderAt('series-1');
-    await waitFor(() => {
-      expect(screen.getByTestId('continue-btn').textContent).toMatch(/EP02/);
-    });
-  });
-
-  it('continue button picks first episode when nothing has been watched', () => {
-    mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [makeEpisode('e1', 1), makeEpisode('e2', 2)];
-    renderAt('series-1');
-    expect(screen.getByTestId('continue-btn').textContent).toMatch(/EP01/);
-  });
-
-  it('clicking continue navigates to /player', async () => {
+  it('returnToLibrary button (// 返回库 //) navigates to /library', () => {
     mockSeriesDetail.series = makeSeries();
     mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
-    fireEvent.click(screen.getByTestId('continue-btn'));
-    expect(screen.getByTestId('player-route')).toBeInTheDocument();
-  });
-
-  it('hides continue button when there are no episodes', () => {
-    mockSeriesDetail.series = makeSeries();
-    mockSeriesDetail.episodes = [];
-    renderAt('series-1');
-    expect(screen.queryByTestId('continue-btn')).not.toBeInTheDocument();
+    // The label appears in the EpisodeFileList header actions
+    fireEvent.click(screen.getByText(/返回库/));
+    expect(screen.getByTestId('library-route')).toBeInTheDocument();
   });
 });
 
@@ -409,6 +322,7 @@ describe('LocalSeriesPage — file source', () => {
 describe('LocalSeriesPage — back button', () => {
   it('navigates to /library when clicked', () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
     fireEvent.click(screen.getByTestId('back-btn'));
     expect(screen.getByTestId('library-route')).toBeInTheDocument();
@@ -434,12 +348,14 @@ describe('LocalSeriesPage — Actions menu', () => {
 
   it('shows the Actions menu trigger on the loaded detail page', () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
     expect(screen.getByTestId('actions-btn')).toBeInTheDocument();
   });
 
   it('clicking [合并到其他系列] opens the MergeDialog', async () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
     fireEvent.click(screen.getByTestId('actions-btn'));
     fireEvent.click(screen.getByTestId('action-merge'));
@@ -450,6 +366,7 @@ describe('LocalSeriesPage — Actions menu', () => {
 
   it('clicking [拆分此系列] opens the SplitDialog', async () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
     fireEvent.click(screen.getByTestId('actions-btn'));
     fireEvent.click(screen.getByTestId('action-split'));
@@ -460,6 +377,7 @@ describe('LocalSeriesPage — Actions menu', () => {
 
   it('clicking [重新匹配] opens the RematchDialog', async () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
     fireEvent.click(screen.getByTestId('actions-btn'));
     fireEvent.click(screen.getByTestId('action-rematch'));
@@ -470,6 +388,7 @@ describe('LocalSeriesPage — Actions menu', () => {
 
   it('Cancel on MergeDialog closes it without errors', async () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
     fireEvent.click(screen.getByTestId('actions-btn'));
     fireEvent.click(screen.getByTestId('action-merge'));
@@ -484,6 +403,7 @@ describe('LocalSeriesPage — Actions menu', () => {
 describe('LocalSeriesPage — Ops log drawer', () => {
   it('exposes [操作日志] in the Actions menu', () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
     fireEvent.click(screen.getByTestId('actions-btn'));
     expect(screen.getByTestId('action-opslog')).toBeInTheDocument();
@@ -491,6 +411,7 @@ describe('LocalSeriesPage — Ops log drawer', () => {
 
   it('clicking [操作日志] opens the drawer and queries listForSeries', async () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     mockListForSeries.mockResolvedValue([
       {
         id: 'op_1',
@@ -517,6 +438,7 @@ describe('LocalSeriesPage — Ops log drawer', () => {
 
   it('clicking close dismisses the drawer', async () => {
     mockSeriesDetail.series = makeSeries();
+    mockSeriesDetail.episodes = [makeEpisode('e1', 1)];
     renderAt('series-1');
     fireEvent.click(screen.getByTestId('actions-btn'));
     fireEvent.click(screen.getByTestId('action-opslog'));

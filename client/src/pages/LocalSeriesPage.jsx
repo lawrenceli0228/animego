@@ -4,17 +4,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import useSeriesDetail from '../hooks/useSeriesDetail';
 import useFileHandles from '../hooks/useFileHandles';
 import useLibrary from '../hooks/useLibrary';
+import useSiteAnimeForSeries from '../hooks/useSiteAnimeForSeries';
 import { db } from '../lib/library/db/db.js';
 import { makeProgressRepo } from '../lib/library/db/progressRepo.js';
 import { ulid } from '../lib/library/ulid.js';
-import {
-  mono,
-  PLAYER_HUE,
-  LOCAL_HEX_GLYPH,
-  PROGRESS_FILL,
-  PROGRESS_TRACK,
-} from '../components/shared/hud-tokens';
-import { CornerBrackets } from '../components/shared/hud';
+import { buildLibraryMatchResult } from '../lib/library/buildLibraryMatchResult.js';
+import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
+import EpisodeFileList from '../components/player/EpisodeFileList';
+import DanmakuPicker from '../components/player/DanmakuPicker';
 import MergeDialog from '../components/library/MergeDialog';
 import SplitDialog from '../components/library/SplitDialog';
 import RematchDialog from '../components/library/RematchDialog';
@@ -24,7 +21,9 @@ import UndoToast from '../components/shared/UndoToast';
 import { performMerge, undoMerge } from '../services/mergeOps.js';
 import { splitSeries } from '../services/splitSeries.js';
 import { rematchSeries } from '../services/rematchSeries.js';
+import { deleteSeriesCascade } from '../services/deleteSeries.js';
 import { makeOpsLogRepo } from '../lib/library/db/opsLogRepo.js';
+import toast from 'react-hot-toast';
 
 /** @typedef {import('../lib/library/types').Progress} Progress */
 
@@ -60,189 +59,12 @@ const s = {
     textTransform: 'uppercase',
     letterSpacing: '0.12em',
   },
-  hero: {
-    position: 'relative',
-    display: 'grid',
-    gridTemplateColumns: '180px 1fr',
-    gap: 24,
-    padding: 20,
-    background: `oklch(14% 0.04 ${HUE} / 0.55)`,
-    border: `1px solid oklch(46% 0.06 ${HUE} / 0.35)`,
-    borderRadius: 6,
-  },
-  poster: {
-    width: 180,
-    aspectRatio: '2/3',
-    borderRadius: 4,
-    objectFit: 'cover',
-    display: 'block',
-    background: `oklch(18% 0.06 ${HUE} / 0.80)`,
-  },
-  monogram: {
-    width: 180,
-    aspectRatio: '2/3',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: `oklch(18% 0.06 ${HUE} / 0.80)`,
-    fontFamily: "'Sora', sans-serif",
-    fontSize: 64,
-    fontWeight: 700,
-    color: `oklch(72% 0.15 ${HUE})`,
-    borderRadius: 4,
-  },
-  heroBody: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    minWidth: 0,
-  },
-  badgeRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  localBadge: {
-    ...mono,
-    fontSize: 10,
-    padding: '3px 7px',
-    background: `oklch(62% 0.17 ${HUE} / 0.20)`,
-    border: `1px solid oklch(62% 0.17 ${HUE} / 0.45)`,
-    color: `oklch(72% 0.15 ${HUE})`,
-    borderRadius: 2,
-    textTransform: 'uppercase',
-    letterSpacing: '0.14em',
-  },
-  typeBadge: {
-    ...mono,
-    fontSize: 10,
-    padding: '3px 7px',
-    background: 'transparent',
-    border: '1px solid rgba(235,235,245,0.25)',
-    color: 'rgba(235,235,245,0.65)',
-    borderRadius: 2,
-    textTransform: 'uppercase',
-    letterSpacing: '0.14em',
-  },
-  title: {
-    fontFamily: "'Sora', sans-serif",
-    fontWeight: 700,
-    fontSize: 22,
-    color: '#fff',
-    letterSpacing: '-0.01em',
-    lineHeight: 1.25,
-  },
-  subtitle: {
-    ...mono,
-    fontSize: 11,
-    color: 'rgba(235,235,245,0.55)',
-  },
-  overallProgress: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-    marginTop: 4,
-  },
-  progressMeta: {
-    ...mono,
-    fontSize: 10,
-    color: 'rgba(235,235,245,0.55)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.12em',
-  },
-  progressTrack: {
-    height: 3,
-    background: PROGRESS_TRACK,
-    borderRadius: 1.5,
-    overflow: 'hidden',
-  },
-  progressFill: (pct) => ({
-    height: '100%',
-    width: `${Math.max(0, Math.min(1, pct)) * 100}%`,
-    background: PROGRESS_FILL,
-  }),
-  ctaRow: {
-    display: 'flex',
-    gap: 8,
-    flexWrap: 'wrap',
-    marginTop: 8,
-  },
-  primaryBtn: {
-    ...mono,
-    padding: '10px 18px',
-    background: `oklch(62% 0.17 ${HUE} / 0.25)`,
-    border: `1px solid oklch(62% 0.17 ${HUE} / 0.65)`,
-    borderRadius: 4,
-    color: `oklch(80% 0.13 ${HUE})`,
-    cursor: 'pointer',
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: '0.12em',
-  },
   sectionLabel: {
     ...mono,
     fontSize: 10,
     color: 'rgba(235,235,245,0.45)',
     textTransform: 'uppercase',
     letterSpacing: '0.15em',
-  },
-  episodeList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-  },
-  episodeRow: {
-    display: 'grid',
-    gridTemplateColumns: '64px 1fr 90px 24px',
-    alignItems: 'center',
-    gap: 12,
-    padding: '10px 14px',
-    background: `oklch(14% 0.04 ${HUE} / 0.40)`,
-    border: `1px solid oklch(46% 0.06 ${HUE} / 0.20)`,
-    borderRadius: 4,
-    cursor: 'pointer',
-    color: '#fff',
-    textAlign: 'left',
-    width: '100%',
-  },
-  epNumber: {
-    ...mono,
-    fontSize: 12,
-    color: `oklch(72% 0.15 ${HUE})`,
-    letterSpacing: '0.08em',
-  },
-  epTitleCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-    minWidth: 0,
-  },
-  epTitle: {
-    fontSize: 13,
-    color: '#fff',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  epMini: {
-    ...mono,
-    fontSize: 10,
-    color: 'rgba(235,235,245,0.45)',
-  },
-  statusCol: {
-    ...mono,
-    fontSize: 10,
-    textAlign: 'right',
-    color: 'rgba(235,235,245,0.55)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.10em',
-  },
-  arrow: {
-    ...mono,
-    fontSize: 14,
-    color: 'rgba(235,235,245,0.35)',
-    textAlign: 'right',
   },
   folderTree: {
     ...mono,
@@ -313,66 +135,42 @@ function pickTitle(series) {
   );
 }
 
-function fmtDuration(sec) {
-  if (!sec || !Number.isFinite(sec)) return '';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-/**
- * Status label per episode: ✓看过 / 进行中 / 未看
- */
-function statusOf(progress) {
-  if (!progress) return { label: '未看', cls: 'idle' };
-  if (progress.completed) return { label: '✓ 看过', cls: 'done' };
-  return { label: `进行中 ${fmtDuration(progress.positionSec)}`, cls: 'active' };
-}
-
-/**
- * Pick the best episode to resume:
- * - prefer the most-recently-watched non-completed episode
- * - fall back to the first not-yet-watched episode
- * - else the first episode
- *
- * @param {{ id: string, number: number }[]} episodes
- * @param {Map<string, Progress>} progressByEp
- * @returns {{ id: string, number: number } | null}
- */
-function pickResumeEpisode(episodes, progressByEp) {
-  if (!episodes.length) return null;
-
-  let bestActive = null;
-  for (const ep of episodes) {
-    const p = progressByEp.get(ep.id);
-    if (p && !p.completed) {
-      if (!bestActive || p.updatedAt > (progressByEp.get(bestActive.id)?.updatedAt ?? 0)) {
-        bestActive = ep;
-      }
-    }
-  }
-  if (bestActive) return bestActive;
-
-  const firstUnseen = episodes.find((ep) => !progressByEp.get(ep.id)?.completed);
-  return firstUnseen ?? episodes[0];
-}
-
 /**
  * LocalSeriesPage — series detail for a locally-imported series.
  *
  * URL: /library/:seriesId
- * Reads seriesId from the route, hydrates via useSeriesDetail, fetches per-episode
- * progress via progressRepo. Renders hero + episode list + file-source breakdown.
- * Episode click navigates to /player with state.
+ *
+ * Renders the same rich EpisodeFileList that the player uses post-match, so
+ * the user sees one consistent surface whether they came from import or from
+ * the library grid. The file-tree breakdown stays below for folder-level
+ * context the EpisodeFileList doesn't show.
+ *
+ * Click EP → /player with `state.seriesId + resumeEpisode`.
+ * DANMAKU button → local DanmakuPicker; confirm writes the new dandanEpisodeId
+ * back to the IDB Episode record so the next play picks it up.
  */
 export default function LocalSeriesPage() {
   const navigate = useNavigate();
   const { seriesId } = useParams();
   const fileHandles = useFileHandles({ db });
-  const { status, series, episodes, fileRefByEpisode } = useSeriesDetail(
-    seriesId ?? null,
-    { db, fileHandles },
+  const seriesDetail = useSeriesDetail(seriesId ?? null, { db, fileHandles });
+  const { status, series, episodes, fileRefByEpisode, refresh } = seriesDetail;
+
+  const libraryMatchResult = useMemo(
+    () => buildLibraryMatchResult(seriesDetail),
+    [seriesDetail],
   );
+
+  // Fetch siteAnime (rich AniList metadata) by re-searching dandanplay with the
+  // series title. Slot it into libraryMatchResult so EpisodeFileList renders
+  // the same site-info row (score / format / season / studios / genres) the
+  // post-match drop-zone flow shows.
+  const { data: siteAnime, loading: siteAnimeLoading } = useSiteAnimeForSeries({ series });
+  const enrichedMatchResult = useMemo(() => {
+    if (!libraryMatchResult) return null;
+    if (!siteAnime) return libraryMatchResult;
+    return { ...libraryMatchResult, siteAnime };
+  }, [libraryMatchResult, siteAnime]);
 
   const [progressByEp, setProgressByEp] = useState(/** @type {Map<string, Progress>} */ (new Map()));
 
@@ -393,21 +191,6 @@ export default function LocalSeriesPage() {
       });
     return () => { cancelled = true; };
   }, [seriesId, episodes]);
-
-  const watchedCount = useMemo(() => {
-    let n = 0;
-    for (const ep of episodes) {
-      if (progressByEp.get(ep.id)?.completed) n++;
-    }
-    return n;
-  }, [episodes, progressByEp]);
-
-  const overallPct = episodes.length > 0 ? watchedCount / episodes.length : 0;
-
-  const resumeEp = useMemo(
-    () => pickResumeEpisode(episodes, progressByEp),
-    [episodes, progressByEp],
-  );
 
   // §5.6 file tree — Array<[folder, files[]]>. Files sorted by epNumber, folders alpha.
   const filesByFolder = useMemo(() => {
@@ -436,15 +219,48 @@ export default function LocalSeriesPage() {
     navigate('/library');
   }, [navigate]);
 
-  const handlePlayEpisode = useCallback((episodeNumber) => {
+  // EpisodeFileList click → jump straight into the player with a resume hint.
+  const handlePlayItem = useCallback((fileItem) => {
     if (!seriesId) return;
-    navigate('/player', { state: { seriesId, resumeEpisode: episodeNumber } });
+    navigate('/player', {
+      state: { seriesId, resumeEpisode: fileItem.episode },
+    });
   }, [navigate, seriesId]);
 
-  const handleResume = useCallback(() => {
-    if (!resumeEp) return;
-    handlePlayEpisode(resumeEp.number);
-  }, [resumeEp, handlePlayEpisode]);
+  // DanmakuPicker for the EpisodeFileList rows (// DANMAKU // button).
+  // We mount it locally rather than navigating to the player because users
+  // often want to fix mismatched danmaku before pressing play.
+  const [pickerEp, setPickerEp] = useState(/** @type {number|null} */ (null));
+
+  const handleDanmakuConfirm = useCallback(
+    async (data, _newAnime) => {
+      if (pickerEp == null || !data?.dandanEpisodeId) {
+        setPickerEp(null);
+        return;
+      }
+      // Persist new dandanEpisodeId on the matching IDB Episode row so next
+      // play() picks it up. Match by number (and skip 'sp' kind for safety).
+      const target = episodes.find((e) => e.number === pickerEp && e.kind !== 'sp');
+      if (!target) {
+        setPickerEp(null);
+        return;
+      }
+      try {
+        await db.episodes.update(target.id, {
+          episodeId: data.dandanEpisodeId,
+          updatedAt: Date.now(),
+        });
+        refresh();
+        toast.success('弹幕来源已更新');
+      } catch (err) {
+        console.warn('[localseries] failed to update episode danmaku id:', err);
+        toast.error('更新失败');
+      } finally {
+        setPickerEp(null);
+      }
+    },
+    [pickerEp, episodes, refresh],
+  );
 
   // §5.6 Actions menu — 详情页是移动端唯一管理入口。共享 LibraryPage 的 dialog/服务/撤销。
   const { series: allSeries } = useLibrary({ db });
@@ -518,7 +334,7 @@ export default function LocalSeriesPage() {
         if (op) {
           setUndoToast({ opIds: [op.id], title: targetTitle, meta: `从 ${sourceTitle} 合并` });
           // Source vanishes after merge — navigate so back-button stays sane.
-          navigate(`/library/${targetSeriesId}`, { replace: true });
+          navigate('/player', { state: { seriesId: targetSeriesId }, replace: true });
         }
       } catch (err) {
         console.warn('[localseries] merge failed:', err);
@@ -571,6 +387,23 @@ export default function LocalSeriesPage() {
     }
   }, [undoToast]);
 
+  const handleDelete = useCallback(async () => {
+    if (!seriesId || !series) return;
+    const title = pickTitle(series) || seriesId;
+    const ok = window.confirm(
+      `从库里删除「${title}」?\n\n会清掉本地的元数据 / 进度 / 覆盖,但磁盘上的视频文件不会被动。`,
+    );
+    if (!ok) return;
+    try {
+      await deleteSeriesCascade({ db, seriesId });
+      toast.success(`已删除「${title}」`);
+      navigate('/library');
+    } catch (err) {
+      console.warn('[localseries] delete failed:', err);
+      toast.error('删除失败,请重试');
+    }
+  }, [seriesId, series, navigate]);
+
   if (status === 'loading' || status === 'idle') {
     return (
       <div style={s.page}>
@@ -593,7 +426,7 @@ export default function LocalSeriesPage() {
     );
   }
 
-  if (status === 'missing' || !series) {
+  if (status === 'missing' || !series || !libraryMatchResult) {
     return (
       <div style={s.page}>
         <div style={s.topbar}>
@@ -603,12 +436,6 @@ export default function LocalSeriesPage() {
       </div>
     );
   }
-
-  const title = pickTitle(series);
-  const initial = title.charAt(0).toUpperCase();
-  const safePoster = typeof series.posterUrl === 'string' && /^https:\/\//i.test(series.posterUrl)
-    ? series.posterUrl
-    : null;
 
   return (
     <div style={s.page}>
@@ -622,93 +449,22 @@ export default function LocalSeriesPage() {
           onSplit={() => setActiveDialog('split')}
           onRematch={() => setActiveDialog('rematch')}
           onOpsLog={() => setActiveDialog('opslog')}
+          onDelete={handleDelete}
         />
       </div>
 
-      <div style={s.hero} data-testid="series-hero">
-        <CornerBrackets inset={4} size={10} opacity={0.30} hue={HUE} />
-
-        {safePoster ? (
-          <img src={safePoster} alt={title} style={s.poster} />
-        ) : (
-          <div style={s.monogram} aria-hidden data-testid="hero-monogram">{initial}</div>
-        )}
-
-        <div style={s.heroBody}>
-          <div style={s.badgeRow}>
-            <span style={s.localBadge} data-testid="hero-local-badge">{LOCAL_HEX_GLYPH} LOCAL</span>
-            <span style={s.typeBadge}>{(series.type ?? 'tv').toUpperCase()}</span>
-            {series.totalEpisodes != null && (
-              <span style={s.typeBadge}>{series.totalEpisodes} 集</span>
-            )}
-          </div>
-
-          <h1 style={s.title} data-testid="hero-title">{title}</h1>
-
-          {episodes.length > 0 && (
-            <div style={s.overallProgress} data-testid="overall-progress">
-              <span style={s.progressMeta}>
-                已看 {watchedCount} / {episodes.length}
-              </span>
-              <div style={s.progressTrack}>
-                <div style={s.progressFill(overallPct)} />
-              </div>
-            </div>
-          )}
-
-          {resumeEp && (
-            <div style={s.ctaRow}>
-              <button
-                type="button"
-                style={s.primaryBtn}
-                onClick={handleResume}
-                data-testid="continue-btn"
-              >
-                继续播放 EP{String(resumeEp.number).padStart(2, '0')}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div>
-        <div style={{ ...s.sectionLabel, marginBottom: 8 }}>// EPISODES //</div>
-        {episodes.length === 0 ? (
-          <div style={s.emptyState} data-testid="no-episodes">尚无剧集</div>
-        ) : (
-          <div style={s.episodeList} data-testid="episode-list">
-            {episodes.map((ep) => {
-              const progress = progressByEp.get(ep.id);
-              const status = statusOf(progress);
-              const pct = progress && progress.durationSec > 0
-                ? progress.positionSec / progress.durationSec
-                : 0;
-              return (
-                <button
-                  key={ep.id}
-                  type="button"
-                  style={s.episodeRow}
-                  onClick={() => handlePlayEpisode(ep.number)}
-                  data-testid={`episode-row-${ep.number}`}
-                >
-                  <span style={s.epNumber}>EP{String(ep.number).padStart(2, '0')}</span>
-                  <div style={s.epTitleCol}>
-                    <span style={s.epTitle}>{ep.title || `第 ${ep.number} 集`}</span>
-                    {progress && !progress.completed && pct > 0 && (
-                      <div style={s.progressTrack}>
-                        <div style={s.progressFill(pct)} />
-                      </div>
-                    )}
-                  </div>
-                  <span style={s.statusCol} data-testid={`episode-status-${ep.number}`}>
-                    {status.label}
-                  </span>
-                  <span style={s.arrow}>▶</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+      <div data-testid="series-list">
+        <EpisodeFileList
+          anime={enrichedMatchResult.anime}
+          siteAnime={enrichedMatchResult.siteAnime}
+          episodeMap={enrichedMatchResult.episodeMap}
+          videoFiles={enrichedMatchResult.videoFiles}
+          onPlay={handlePlayItem}
+          onClear={handleBack}
+          onSetDanmaku={(epNum) => setPickerEp(epNum)}
+          clearLabel="返回库"
+          siteAnimeLoading={siteAnimeLoading}
+        />
       </div>
 
       {filesByFolder.length > 0 && (
@@ -748,6 +504,16 @@ export default function LocalSeriesPage() {
           </div>
         </div>
       )}
+
+      <DanmakuPicker
+        isOpen={pickerEp != null}
+        onClose={() => setPickerEp(null)}
+        onConfirm={handleDanmakuConfirm}
+        currentAnime={libraryMatchResult.anime}
+        currentEpisodeId={pickerEp != null ? libraryMatchResult.episodeMap?.[pickerEp]?.dandanEpisodeId : null}
+        episodeNumber={pickerEp}
+        defaultKeyword={libraryMatchResult.anime.titleRomaji || libraryMatchResult.anime.titleChinese || ''}
+      />
 
       {activeDialog === 'merge' && series && (
         <MergeDialog

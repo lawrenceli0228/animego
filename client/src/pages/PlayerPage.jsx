@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { createHashPool } from '../lib/library/hashPool';
 import { groupByFolder } from '../lib/library/grouping';
 import { flattenDropFiles } from '../utils/dropFiles';
@@ -11,6 +11,7 @@ import usePlaybackSession from '../hooks/usePlaybackSession';
 import useFileHandles from '../hooks/useFileHandles';
 import useSeriesDetail from '../hooks/useSeriesDetail';
 import { db } from '../lib/library/db/db.js';
+import { episodeListFromSeriesDetail } from '../lib/library/buildLibraryMatchResult.js';
 import DropZone from '../components/player/DropZone';
 import MatchProgress from '../components/player/MatchProgress';
 import ManualSearch from '../components/player/ManualSearch';
@@ -18,6 +19,7 @@ import EpisodeFileList from '../components/player/EpisodeFileList';
 import PlayerHudFrame from '../components/player/PlayerHudFrame';
 import EpisodeNav from '../components/player/EpisodeNav';
 import DanmakuPicker from '../components/player/DanmakuPicker';
+import LibraryAccessEmpty from '../components/library/LibraryAccessEmpty';
 import { ChapterBar, SectionNum, CornerBrackets } from '../components/shared/hud';
 import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
 import toast from 'react-hot-toast';
@@ -216,38 +218,12 @@ function HudDanmakuButton({ onClick, label }) {
   );
 }
 
-/**
- * Adapter: build a minimal pickedItems-compatible array from IDB episodes +
- * fileRefByEpisode so the existing EpisodeFileList can be reused.
- *
- * @param {import('../lib/library/types').Episode[]} episodes
- * @param {Map<string, import('../lib/library/types').FileRef>} fileRefByEpisode
- * @returns {import('../lib/library/types').EpisodeItem[]}
- */
-function episodeListFromSeriesDetail(episodes, fileRefByEpisode) {
-  return episodes.map((ep) => {
-    const ref = fileRefByEpisode.get(ep.id);
-    const fileName = ref ? ref.relPath.split('/').pop() || ref.relPath : `EP${ep.number}`;
-    return {
-      // EpisodeItem-compatible shape (file is null — resolved lazily via getFile)
-      fileId: ep.id,
-      file: null,
-      fileName,
-      relativePath: ref ? ref.relPath : fileName,
-      episode: ep.number,
-      parsedKind: ep.kind || 'main',
-      // library extras
-      _episodeId: ep.id,
-      _episodeRecord: ep,
-      _fileRef: ref || null,
-    };
-  });
-}
 
 export default function PlayerPage() {
   const { t } = useLang();
   // P3: library mode entry — read seriesId + optional resumeEpisode from nav state
   const location = useLocation();
+  const navigate = useNavigate();
   const locationSeriesId = location?.state?.seriesId ?? null;
   const locationResumeEpisode =
     typeof location?.state?.resumeEpisode === 'number'
@@ -256,6 +232,12 @@ export default function PlayerPage() {
 
   const fileHandles = useFileHandles({ db });
   const seriesDetail = useSeriesDetail(locationSeriesId, { db, fileHandles });
+
+  // Becomes true once a library getFile() returns null while permissions are
+  // denied — drives the empty-state switch even before the next render reads
+  // fileHandles.status. Reset on seriesId / refresh.
+  const [denialDetected, setDenialDetected] = useState(false);
+  useEffect(() => { setDenialDetected(false); }, [locationSeriesId]);
 
   const { videoFiles, keyword, processFiles, getVideoUrl, getSubtitleUrl, clear: clearFiles } = useVideoFiles();
   const {
@@ -295,11 +277,25 @@ export default function PlayerPage() {
   // P2: same-folder grouping. Multi-folder drops auto-pick the largest group;
   // P3 will replace this auto-pick with a real picker UI.
   const groups = useMemo(() => groupByFolder(videoFiles), [videoFiles]);
-  const pickedItems = groups[0]?.items ?? videoFiles;
+  const dropZoneItems = groups[0]?.items ?? videoFiles;
   const skippedFileCount = useMemo(
     () => groups.slice(1).reduce((n, g) => n + g.items.length, 0),
     [groups],
   );
+
+  // Library mode pickedItems — episode rows derived from IDB. file=null on
+  // each item; getFile() is called lazily via _episodeId when a row is played.
+  const libraryVideoFiles = useMemo(() => {
+    if (!locationSeriesId || seriesDetail.status !== 'ready') return [];
+    return episodeListFromSeriesDetail(
+      seriesDetail.episodes,
+      seriesDetail.fileRefByEpisode,
+    );
+  }, [locationSeriesId, seriesDetail]);
+
+  // pickedItems unifies the rendered file list across both entry paths so
+  // EpisodeFileList sees the same shape regardless of how matchResult arrived.
+  const pickedItems = locationSeriesId ? libraryVideoFiles : dropZoneItems;
 
   // Episode numbers from matched files (now drawn from picked group only)
   const episodes = useMemo(() => {
@@ -404,6 +400,10 @@ export default function PlayerPage() {
     // updated lastTime can re-fire the resume toast.
     lastResumeToastForFile.current = null;
     stopPlayback();
+    // Same behavior whether the user arrived via drop-zone import or via the
+    // library card → /player path: stop playback and reveal the rich
+    // EpisodeFileList list above. The library card's "// 返回库 //" button
+    // is the explicit exit back to /library when they want to leave.
   }, [stopPlayback]);
 
   const handleClearAll = useCallback(() => {
@@ -423,23 +423,77 @@ export default function PlayerPage() {
       .sort((a, b) => a - b);
   }, [locationSeriesId, seriesDetail]);
 
+  // Library auto-match — when seriesDetail becomes ready, fire the same
+  // startMatch() that the drop-zone flow runs. Inputs come from IDB:
+  //   - hashes already computed at import time (fileRef.hash16M)
+  //   - episode numbers from db.episodes
+  //   - keyword from series titles
+  // The server returns matched anime + siteAnime + episodeMap exactly the way
+  // it does for an upload, so the post-match UI is bit-for-bit identical.
+  const libraryMatchedRef = useRef(/** @type {string|null} */ (null));
+  useEffect(() => {
+    libraryMatchedRef.current = null;
+  }, [locationSeriesId]);
+  useEffect(() => {
+    if (!locationSeriesId) return;
+    if (seriesDetail.status !== 'ready') return;
+    if (libraryVideoFiles.length === 0) return;
+    if (matchResult) return;
+    if (libraryMatchedRef.current === locationSeriesId) return;
+
+    libraryMatchedRef.current = locationSeriesId;
+
+    const epNums = libraryVideoFiles.map((f) => f.episode).filter(Boolean);
+    const firstName = libraryVideoFiles[0]?.fileName || '';
+    const basicFiles = libraryVideoFiles.map((f) => ({
+      fileName: f.fileName,
+      episode: f.episode,
+      fileSize: f._fileRef?.size ?? 0,
+    }));
+    const getFilesHashes = async () => libraryVideoFiles.map((f) => ({
+      fileName: f.fileName,
+      episode: f.episode,
+      fileHash: f._fileRef?.hash16M ?? '',
+      fileSize: f._fileRef?.size ?? 0,
+    }));
+
+    const series = seriesDetail.series;
+    const keyword = series?.titleZh || series?.titleEn || series?.titleJa || '';
+
+    startMatch(keyword, epNums, firstName, basicFiles, getFilesHashes);
+  }, [locationSeriesId, seriesDetail.status, seriesDetail.series, libraryVideoFiles, matchResult, startMatch]);
+
   // P3: library mode — episode click handler
   const handleLibraryEpisodePlay = useCallback(async (episodeId) => {
     const file = await seriesDetail.getFile(episodeId);
     if (!file) {
-      toast.error(t('library.fileMissing'));
+      // selectFileByName flips fileHandles.status to 'denied' synchronously on
+      // NotAllowedError. Read it via the live ref since `fileHandles` from
+      // closure is the previous render's snapshot.
+      if (fileHandles.status === 'denied') {
+        setDenialDetected(true);
+      } else {
+        toast.error(t('library.fileMissing'));
+      }
       return;
     }
     const ep = seriesDetail.episodes.find((e) => e.id === episodeId);
     const fileRef = seriesDetail.fileRefByEpisode.get(episodeId);
     if (!ep || !fileRef) return;
 
-    // Build episodeMap for danmaku pipeline
-    /** @type {Record<number, { dandanEpisodeId?: number }>} */
-    const episodeMap = {};
-    for (const e of seriesDetail.episodes) {
-      if (e.number != null) {
-        episodeMap[e.number] = { dandanEpisodeId: e.episodeId };
+    // Prefer the server-shaped matchResult.episodeMap when the auto-match has
+    // landed; fall back to a synthesis from IDB Episode.episodeId so the
+    // danmaku pipeline still works during the brief window between
+    // "seriesDetail ready" and "matchResult arrived".
+    let episodeMap;
+    if (matchResult?.episodeMap) {
+      episodeMap = matchResult.episodeMap;
+    } else {
+      episodeMap = {};
+      for (const e of seriesDetail.episodes) {
+        if (e.number != null) {
+          episodeMap[e.number] = { dandanEpisodeId: e.episodeId };
+        }
       }
     }
 
@@ -453,7 +507,67 @@ export default function PlayerPage() {
     };
 
     startPlayback(fileItem, episodeMap);
-  }, [seriesDetail, startPlayback, t]);
+  }, [seriesDetail, startPlayback, t, fileHandles.status, matchResult]);
+
+  // Library mode empty-state derivations. The denied path takes precedence
+  // over 'ready' because IDB is fine but FSA can't reach the file — same UX
+  // signal regardless of how denial was detected (proactive at hook level
+  // vs reactive after a click).
+  const libraryEmptyKind = useMemo(() => {
+    if (!locationSeriesId) return null;
+    if (seriesDetail.status === 'loading') return 'loading';
+    if (seriesDetail.status === 'missing') return 'missing';
+    if (seriesDetail.status === 'error') return 'error';
+    if (seriesDetail.status === 'ready'
+        && (fileHandles.status === 'denied' || denialDetected)) {
+      return 'denied';
+    }
+    return null;
+  }, [locationSeriesId, seriesDetail.status, fileHandles.status, denialDetected]);
+
+  const libraryIdsForReauth = useMemo(() => {
+    /** @type {Set<string>} */
+    const ids = new Set();
+    for (const ref of seriesDetail.fileRefByEpisode.values()) {
+      if (ref?.libraryId) ids.add(ref.libraryId);
+    }
+    return Array.from(ids);
+  }, [seriesDetail.fileRefByEpisode]);
+
+  const handleReauthorize = useCallback(async () => {
+    for (const libId of libraryIdsForReauth) {
+      await fileHandles.reauthorize(libId);
+    }
+    setDenialDetected(false);
+    seriesDetail.refresh();
+  }, [fileHandles, libraryIdsForReauth, seriesDetail]);
+
+  const handleBackToLibrary = useCallback(() => {
+    navigate('/library');
+  }, [navigate]);
+
+  // Library mode "back" — exit the player and return to the library grid.
+  // Wired to EpisodeFileList's clear button so it stops feeling like a
+  // destructive "clear" and reads as "exit player".
+  const handleBackToLibraryGrid = useCallback(() => {
+    navigate('/library');
+  }, [navigate]);
+
+  // Unified click handler for EpisodeFileList rows. Library items carry an
+  // `_episodeId` set by the adapter — those route through getFile() so FSA
+  // resolves the actual File before playback. Match-flow items already hold
+  // their File and can hit startPlayback directly.
+  const handleListPlay = useCallback((fileItem) => {
+    if (fileItem?._episodeId) {
+      handleLibraryEpisodePlay(fileItem._episodeId);
+      return;
+    }
+    handlePlay(fileItem);
+  }, [handlePlay, handleLibraryEpisodePlay]);
+
+  const handleRetryLoad = useCallback(() => {
+    seriesDetail.refresh();
+  }, [seriesDetail]);
 
   // P3: library mode prev/next — switch by episode number using seriesDetail.
   const handleLibraryEpisodeSwitchByNumber = useCallback((epNum) => {
@@ -471,6 +585,7 @@ export default function PlayerPage() {
   useEffect(() => {
     if (!locationSeriesId || locationResumeEpisode == null) return;
     if (seriesDetail.status !== 'ready') return;
+    if (libraryEmptyKind) return;
     if (playbackPhase === 'playing') return;
     if (autoResumeAttempted) return;
     const ep = seriesDetail.episodes.find(
@@ -479,7 +594,7 @@ export default function PlayerPage() {
     setAutoResumeAttempted(true);
     if (!ep) return;
     handleLibraryEpisodePlay(ep.id);
-  }, [locationSeriesId, locationResumeEpisode, seriesDetail, playbackPhase, autoResumeAttempted, handleLibraryEpisodePlay]);
+  }, [locationSeriesId, locationResumeEpisode, seriesDetail, playbackPhase, autoResumeAttempted, handleLibraryEpisodePlay, libraryEmptyKind]);
 
   // Page-level drag/drop. The inner DropZone only renders in idle phase, so
   // dragging files onto the page when match is ready/playing/manual/error
@@ -526,14 +641,34 @@ export default function PlayerPage() {
     selectManual(anime, epNums);
   }, [pickedItems, selectManual]);
 
-  const handleUpdateDanmaku = useCallback((epNum, data, newAnime) => {
+  const handleUpdateDanmaku = useCallback(async (epNum, data, newAnime) => {
+    // Always update the in-memory matchResult so the row reflects the change
+    // immediately. Library mode additionally persists to IDB so re-entering
+    // the page on a future visit picks up the corrected episodeId without
+    // re-running the picker.
     updateEpisodeMap(epNum, data, newAnime);
+    if (locationSeriesId && data?.dandanEpisodeId) {
+      const target = seriesDetail.episodes.find(
+        (e) => e.number === epNum && e.kind !== 'sp',
+      );
+      if (target) {
+        try {
+          await db.episodes.update(target.id, {
+            episodeId: data.dandanEpisodeId,
+            updatedAt: Date.now(),
+          });
+          seriesDetail.refresh();
+        } catch (err) {
+          console.warn('[player] failed to persist danmaku update:', err);
+        }
+      }
+    }
     // If currently playing this episode, reload danmaku
     if (playingEp === epNum && data.dandanEpisodeId) {
       loadComments(data.dandanEpisodeId);
     }
     toast.success(t('player.danmakuUpdated'));
-  }, [updateEpisodeMap, playingEp, loadComments, t]);
+  }, [locationSeriesId, seriesDetail, updateEpisodeMap, playingEp, loadComments, t]);
 
   const handleVideoEnded = useCallback(() => {
     // Library mode: advance via libraryEpisodeNumbers + library switcher.
@@ -585,27 +720,15 @@ export default function PlayerPage() {
         </div>
       )}
 
-      {/* LIBRARY MODE — seriesId entry path (P3) */}
-      {locationSeriesId && seriesDetail.status === 'ready' && playbackPhase !== 'playing' && (locationResumeEpisode == null || autoResumeAttempted) && (
-        <div data-testid="library-episode-list" style={{ marginTop: 32, ...fadeUp }}>
-          {episodeListFromSeriesDetail(seriesDetail.episodes, seriesDetail.fileRefByEpisode).map((item) => (
-            <button
-              key={item.fileId}
-              onClick={() => handleLibraryEpisodePlay(item._episodeId)}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left',
-                padding: '10px 16px', marginBottom: 4,
-                background: `oklch(14% 0.04 ${HUE} / 0.55)`,
-                border: `1px solid oklch(46% 0.06 ${HUE} / 0.35)`,
-                borderRadius: 4, cursor: 'pointer', color: '#fff',
-                fontFamily: "'JetBrains Mono',monospace", fontSize: 13,
-              }}
-              type="button"
-            >
-              {`EP ${String(item.episode).padStart(2, '0')}`}
-              {item.fileName && ` · ${item.fileName}`}
-            </button>
-          ))}
+      {/* LIBRARY MODE — empty/denied/error/loading states for seriesId path */}
+      {locationSeriesId && libraryEmptyKind && playbackPhase !== 'playing' && (
+        <div style={fadeUp}>
+          <LibraryAccessEmpty
+            kind={libraryEmptyKind}
+            onReauthorize={libraryIdsForReauth.length ? handleReauthorize : undefined}
+            onRetry={handleRetryLoad}
+            onBackToLibrary={handleBackToLibrary}
+          />
         </div>
       )}
 
@@ -619,14 +742,16 @@ export default function PlayerPage() {
         <div style={fadeUp}><DropZone onFiles={handleFiles} /></div>
       )}
 
-      {/* MATCHING */}
+      {/* MATCHING — drives BOTH drop-zone uploads and library auto-match.
+          Library entry path: keyword falls back to the series title; file
+          count is `pickedItems.length` (libraryVideoFiles when locationSeriesId set). */}
       {uiPhase === 'matching' && (
         <div style={{ marginTop: 64, ...fadeUp }}>
           <MatchProgress
-            fileCount={videoFiles.length}
-            keyword={keyword}
+            fileCount={pickedItems.length || videoFiles.length}
+            keyword={keyword || seriesDetail.series?.titleZh || seriesDetail.series?.titleEn || ''}
             stepStatus={stepStatus}
-            onClear={handleClearAll}
+            onClear={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}
           />
         </div>
       )}
@@ -635,9 +760,9 @@ export default function PlayerPage() {
       {uiPhase === 'manual' && (
         <div style={{ marginTop: 32, ...fadeUp }}>
           <ManualSearch
-            defaultKeyword={keyword}
+            defaultKeyword={keyword || seriesDetail.series?.titleZh || seriesDetail.series?.titleEn || ''}
             onSelect={handleManualSelect}
-            onBack={handleClearAll}
+            onBack={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}
           />
         </div>
       )}
@@ -647,23 +772,26 @@ export default function PlayerPage() {
         <div style={{ ...s.errorBox, ...fadeUp }}>
           <div style={s.errorTitle}>{t('player.error')}</div>
           <div>{error || t('player.errorGeneric')}</div>
-          <button style={s.retryBtn} onClick={handleClearAll}>
+          <button style={s.retryBtn} onClick={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}>
             {t('player.retry')}
           </button>
         </div>
       )}
 
-      {/* READY */}
-      {uiPhase === 'ready' && matchResult && (
-        <div style={{ marginTop: 32, ...fadeUp }}>
+      {/* READY — unified across drop-zone and library entry paths. Both
+          arrive here with the SAME server-shaped matchResult; only the
+          videoFiles source and "clear" semantics diverge. */}
+      {uiPhase === 'ready' && matchResult && !libraryEmptyKind && (locationResumeEpisode == null || autoResumeAttempted) && (
+        <div data-testid={locationSeriesId ? 'library-episode-list' : undefined} style={{ marginTop: 32, ...fadeUp }}>
           <EpisodeFileList
             anime={matchResult.anime}
             siteAnime={matchResult.siteAnime}
             episodeMap={matchResult.episodeMap}
             videoFiles={pickedItems}
-            onPlay={handlePlay}
-            onClear={handleClearAll}
+            onPlay={handleListPlay}
+            onClear={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}
             onSetDanmaku={setPickerEp}
+            clearLabel={locationSeriesId ? '返回库' : undefined}
           />
         </div>
       )}
@@ -726,7 +854,8 @@ export default function PlayerPage() {
         </div>
       )}
 
-      {/* Shared DanmakuPicker — works from both list view and playing view */}
+      {/* Shared DanmakuPicker — works from list view and playing view; both
+          entry paths populate the same `matchResult`. */}
       <DanmakuPicker
         isOpen={pickerEp != null}
         onClose={() => setPickerEp(null)}
@@ -737,7 +866,7 @@ export default function PlayerPage() {
         currentAnime={matchResult?.anime}
         currentEpisodeId={pickerEp != null ? matchResult?.episodeMap?.[pickerEp]?.dandanEpisodeId : null}
         episodeNumber={pickerEp}
-        defaultKeyword={keyword}
+        defaultKeyword={keyword || seriesDetail.series?.titleZh || seriesDetail.series?.titleEn || ''}
       />
     </div>
   );

@@ -142,6 +142,43 @@ describe('enumerator (v3.1 Stage 0)', () => {
     expect(out).toHaveLength(0);
   });
 
+  it('treats a .mp4-named directory with multiple substantial siblings as a regular folder, not a bundle', async () => {
+    // Real-world case: user organized 3 episodes inside a folder named with
+    // a `.mp4` suffix (e.g. "[Group][Show][29-38].mp4"). Old behavior was to
+    // pick only the largest and silently drop the others — fix yields all.
+    const root = makeDirHandle('root', {
+      '[Show][29-38].mp4': {
+        'ep31.mp4': BIG,
+        'ep32.mp4': BIG,
+        'ep37.mp4': BIG,
+      },
+    });
+    const out = await enumerateAll(root);
+    expect(out).toHaveLength(3);
+    const names = out.map((e) => e.relPath).sort();
+    expect(names).toEqual([
+      '[Show][29-38].mp4/ep31.mp4',
+      '[Show][29-38].mp4/ep32.mp4',
+      '[Show][29-38].mp4/ep37.mp4',
+    ]);
+  });
+
+  it('still drills bundles when only a single substantial sibling exists alongside <1MB sidecars', async () => {
+    // Regression guard: real ExFAT bundles often ship a tiny sidecar mp4
+    // (metadata stub). The single-substantial-sibling rule must keep working
+    // alongside any number of small sidecars.
+    const root = makeDirHandle('root', {
+      'movie.mp4': {
+        'real.mp4': BIG,
+        'stub.mp4': TINY,
+        'metadata.mp4': TINY,
+      },
+    });
+    const out = await enumerateAll(root);
+    expect(out).toHaveLength(1);
+    expect(out[0].relPath).toBe('movie.mp4');
+  });
+
   // ── NFC normalization ──────────────────────────────────────────────────────
 
   it('NFC-normalizes relPath at the boundary', async () => {

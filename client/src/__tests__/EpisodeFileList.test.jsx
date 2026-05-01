@@ -161,3 +161,28 @@ describe('EpisodeFileList — episode rows', () => {
     expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'show-02.mkv' }));
   });
 });
+
+describe('EpisodeFileList — siteAnime skeleton', () => {
+  it('renders skeleton when siteAnime is null AND siteAnimeLoading is true', () => {
+    renderList({ siteAnime: null, siteAnimeLoading: true });
+    expect(screen.getByTestId('site-anime-skeleton')).toBeInTheDocument();
+  });
+
+  it('omits skeleton when siteAnime is present (real data wins)', () => {
+    renderList({
+      siteAnime: { averageScore: 80, format: 'TV' },
+      siteAnimeLoading: true,
+    });
+    expect(screen.queryByTestId('site-anime-skeleton')).toBeNull();
+  });
+
+  it('omits skeleton when not loading and siteAnime is null (no rich data available)', () => {
+    renderList({ siteAnime: null, siteAnimeLoading: false });
+    expect(screen.queryByTestId('site-anime-skeleton')).toBeNull();
+  });
+
+  it('omits skeleton by default (backwards compatible — drop-zone match flow never sets the prop)', () => {
+    renderList({ siteAnime: null });
+    expect(screen.queryByTestId('site-anime-skeleton')).toBeNull();
+  });
+});

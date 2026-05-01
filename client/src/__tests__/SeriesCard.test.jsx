@@ -439,3 +439,29 @@ describe('SeriesCard §5.6 selection mode', () => {
     expect(arg.shiftKey).toBe(true);
   });
 });
+
+describe('SeriesCard availability badge', () => {
+  it('renders OFFLINE badge when availability="offline"', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} availability="offline" />);
+    const badge = screen.getByTestId('availability-badge');
+    expect(badge.getAttribute('data-availability')).toBe('offline');
+    expect(badge.textContent).toMatch(/OFFLINE/);
+  });
+
+  it('renders PARTIAL badge when availability="partial"', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} availability="partial" />);
+    const badge = screen.getByTestId('availability-badge');
+    expect(badge.getAttribute('data-availability')).toBe('partial');
+    expect(badge.textContent).toMatch(/PARTIAL/);
+  });
+
+  it('omits badge when availability="ok"', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} availability="ok" />);
+    expect(screen.queryByTestId('availability-badge')).toBeNull();
+  });
+
+  it('omits badge when availability is undefined', () => {
+    render(<SeriesCard series={makeSeries()} onClick={vi.fn()} />);
+    expect(screen.queryByTestId('availability-badge')).toBeNull();
+  });
+});

@@ -149,6 +149,69 @@ const s = {
   }),
 };
 
+// Skeleton — pulse animation injected once per page; mirrors the layout of
+// the real siteAnime block so when the data lands the row positions don't
+// jump.
+const SKELETON_KEYFRAMES = `@keyframes siteAnimeSkeletonPulse{0%{opacity:0.55}50%{opacity:0.95}100%{opacity:0.55}}`;
+const skel = {
+  base: {
+    background: 'rgba(120,120,128,0.16)',
+    borderRadius: 9999,
+    animation: 'siteAnimeSkeletonPulse 1.4s ease-in-out infinite',
+    display: 'inline-block',
+  },
+  chip: (w) => ({
+    background: 'rgba(120,120,128,0.16)',
+    borderRadius: 9999,
+    height: 22,
+    width: w,
+    animation: 'siteAnimeSkeletonPulse 1.4s ease-in-out infinite',
+    display: 'inline-block',
+  }),
+  textLine: (w) => ({
+    background: 'rgba(120,120,128,0.14)',
+    borderRadius: 4,
+    height: 12,
+    width: w,
+    animation: 'siteAnimeSkeletonPulse 1.4s ease-in-out infinite',
+    display: 'inline-block',
+  }),
+  genreTag: (w) => ({
+    background: 'rgba(120,120,128,0.12)',
+    borderRadius: 9999,
+    height: 18,
+    width: w,
+    animation: 'siteAnimeSkeletonPulse 1.4s ease-in-out infinite',
+    display: 'inline-block',
+  }),
+};
+
+function SiteAnimeSkeleton() {
+  return (
+    <div style={s.siteInfo} data-testid="site-anime-skeleton" aria-busy="true">
+      <style>{SKELETON_KEYFRAMES}</style>
+      <div style={s.badgeRow}>
+        <span style={skel.chip(64)} />
+        <span style={skel.chip(80)} />
+        <span style={skel.chip(48)} />
+        <span style={skel.chip(80)} />
+        <span style={skel.chip(56)} />
+        <span style={skel.chip(96)} />
+      </div>
+      <div style={s.metaRow}>
+        <span style={skel.textLine(140)} />
+        <span style={skel.textLine(80)} />
+      </div>
+      <div style={s.genreRow}>
+        <span style={skel.genreTag(48)} />
+        <span style={skel.genreTag(64)} />
+        <span style={skel.genreTag(56)} />
+        <span style={skel.genreTag(40)} />
+      </div>
+    </div>
+  );
+}
+
 const danmakuBtnStyle = (hover) => ({
   background: 'transparent',
   border: `1px solid ${hover ? 'rgba(255,159,10,0.55)' : 'rgba(255,159,10,0.22)'}`,
@@ -163,7 +226,7 @@ const danmakuBtnStyle = (hover) => ({
   letterSpacing: '0.10em',
 });
 
-export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear, onSetDanmaku }) {
+export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear, onSetDanmaku, clearLabel, siteAnimeLoading }) {
   const { t, lang } = useLang();
 
   const sa = siteAnime;
@@ -189,6 +252,10 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
             {anime.episodes && `${anime.episodes}${t('detail.epUnit')}`}
           </div>
           <div style={s.badge}>dandanplay · {Object.keys(episodeMap).length} {t('player.mapped')}</div>
+
+          {/* Skeleton while siteAnime is being fetched (library mode first
+              load). Replaced by the real block below as soon as data lands. */}
+          {!sa && siteAnimeLoading && <SiteAnimeSkeleton />}
 
           {/* Site anime info */}
           {sa && (
@@ -255,7 +322,7 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
           )}
         </div>
         <div style={s.headerActions}>
-          <button style={s.clearBtn} onClick={onClear}>// {t('player.clear')}</button>
+          <button style={s.clearBtn} onClick={onClear}>// {clearLabel || t('player.clear')}</button>
         </div>
       </div>
 

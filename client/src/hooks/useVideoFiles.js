@@ -57,14 +57,23 @@ export default function useVideoFiles() {
             .sort((a, b) => subPriority(a.type) - subPriority(b.type))[0]
         : findSubByName(file.name, subs);
       const overridePath = pathMap?.get?.(file);
+      const relPath = overridePath || file.webkitRelativePath || file.name;
+      // For files nested under a folder (e.g. `Show/Bonus/clip.mp4`), prefer
+      // the outermost folder as the cluster title — bonus/SP folders contain
+      // BD extras whose own filenames would otherwise spawn lone "afterimage"
+      // / "MV" / "Spoiler" cards.
+      const segments = relPath.split('/').filter(Boolean);
+      const folderTitle = segments.length > 1
+        ? parseAnimeKeyword(segments[0])
+        : null;
       return {
         fileId: makeFileId(file),
         file,
         fileName: file.name,
-        relativePath: overridePath || file.webkitRelativePath || file.name,
+        relativePath: relPath,
         episode,
         subtitle: matchedSub || null,
-        parsedTitle: meta.title,
+        parsedTitle: folderTitle || meta.title,
         parsedNumber: meta.number,
         parsedKind: meta.kind,
         parsedGroup: meta.group,
