@@ -7,7 +7,13 @@ import useLibrary from '../hooks/useLibrary';
 import { db } from '../lib/library/db/db.js';
 import { makeProgressRepo } from '../lib/library/db/progressRepo.js';
 import { ulid } from '../lib/library/ulid.js';
-import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
+import {
+  mono,
+  PLAYER_HUE,
+  LOCAL_HEX_GLYPH,
+  PROGRESS_FILL,
+  PROGRESS_TRACK,
+} from '../components/shared/hud-tokens';
 import { CornerBrackets } from '../components/shared/hud';
 import MergeDialog from '../components/library/MergeDialog';
 import SplitDialog from '../components/library/SplitDialog';
@@ -22,7 +28,7 @@ import { makeOpsLogRepo } from '../lib/library/db/opsLogRepo.js';
 
 /** @typedef {import('../lib/library/types').Progress} Progress */
 
-const HUE = PLAYER_HUE.stream;
+const HUE = PLAYER_HUE.local;
 
 const s = {
   page: {
@@ -147,14 +153,14 @@ const s = {
   },
   progressTrack: {
     height: 3,
-    background: `oklch(62% 0.17 ${HUE} / 0.18)`,
+    background: PROGRESS_TRACK,
     borderRadius: 1.5,
     overflow: 'hidden',
   },
   progressFill: (pct) => ({
     height: '100%',
     width: `${Math.max(0, Math.min(1, pct)) * 100}%`,
-    background: `oklch(62% 0.17 ${HUE})`,
+    background: PROGRESS_FILL,
   }),
   ctaRow: {
     display: 'flex',
@@ -630,7 +636,7 @@ export default function LocalSeriesPage() {
 
         <div style={s.heroBody}>
           <div style={s.badgeRow}>
-            <span style={s.localBadge} data-testid="hero-local-badge">⬡ LOCAL</span>
+            <span style={s.localBadge} data-testid="hero-local-badge">{LOCAL_HEX_GLYPH} LOCAL</span>
             <span style={s.typeBadge}>{(series.type ?? 'tv').toUpperCase()}</span>
             {series.totalEpisodes != null && (
               <span style={s.typeBadge}>{series.totalEpisodes} 集</span>

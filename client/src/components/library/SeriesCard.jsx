@@ -1,15 +1,19 @@
 // @ts-check
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+import {
+  mono,
+  PLAYER_HUE,
+  LOCAL_BADGE_COLOR,
+  LOCAL_HEX_GLYPH,
+  PROGRESS_FILL,
+} from '../shared/hud-tokens';
 import { CornerBrackets } from '../shared/hud';
 
 /** @typedef {import('../../lib/library/types').Series} Series */
 /** @typedef {import('../../lib/library/types').UserOverride} UserOverride */
 /** @typedef {'lock'|'unlock'|'clear'|'merge'|'split'|'rematch'} OverrideAction */
 
-const HUE = PLAYER_HUE.stream;
-const TEAL_LOCAL = '#5ac8fa';
-const IOS_BLUE = '#0a84ff';
+const HUE = PLAYER_HUE.local;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_TOL = 10;
 
@@ -119,8 +123,8 @@ const s = {
     height: 20,
     padding: '0 8px 0 6px',
     background: 'rgba(28, 28, 30, 0.75)',
-    border: `1px solid ${TEAL_LOCAL}4D`,
-    color: TEAL_LOCAL,
+    border: `1px solid ${LOCAL_BADGE_COLOR}4D`,
+    color: LOCAL_BADGE_COLOR,
     borderRadius: 999,
     fontSize: 9,
     fontWeight: 500,
@@ -177,9 +181,9 @@ const s = {
   progressFill: (pct) => ({
     height: '100%',
     width: `${Math.max(0, Math.min(1, pct)) * 100}%`,
-    background: IOS_BLUE,
+    background: PROGRESS_FILL,
     borderRadius: 999,
-    boxShadow: `0 0 6px ${IOS_BLUE}66`,
+    boxShadow: `0 0 6px ${PROGRESS_FILL}66`,
   }),
   kebab: {
     position: 'absolute',
@@ -383,7 +387,7 @@ export default function SeriesCard({
             </div>
           )}
           <span style={s.localBadge} data-testid="local-badge">
-            <span aria-hidden style={s.localGlyph}>⬡</span>
+            <span aria-hidden style={s.localGlyph}>{LOCAL_HEX_GLYPH}</span>
             LOCAL
           </span>
           {progressPct != null && (

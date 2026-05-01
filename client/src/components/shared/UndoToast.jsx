@@ -1,9 +1,8 @@
 // @ts-check
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { mono, PLAYER_HUE } from './hud-tokens';
+import { mono, PLAYER_HUE, LOCAL_BADGE_COLOR, LOCAL_HEX_GLYPH } from './hud-tokens';
 
-const HUE = PLAYER_HUE.stream;
-const TEAL = '#5ac8fa';
+const HUE = PLAYER_HUE.local;
 
 const s = {
   region: {
@@ -23,7 +22,7 @@ const s = {
     gap: 12,
     padding: '12px 14px',
     background: 'oklch(14% 0.04 210 / 0.92)',
-    border: `1px solid ${TEAL}55`,
+    border: `1px solid ${LOCAL_BADGE_COLOR}55`,
     borderRadius: 6,
     boxShadow: '0 8px 24px oklch(2% 0 0 / 0.55)',
     backdropFilter: 'blur(10px)',
@@ -38,7 +37,7 @@ const s = {
   glyph: {
     ...mono,
     fontSize: 14,
-    color: TEAL,
+    color: LOCAL_BADGE_COLOR,
   },
   body: {
     flex: 1,
@@ -50,7 +49,7 @@ const s = {
   kicker: {
     ...mono,
     fontSize: 9,
-    color: TEAL,
+    color: LOCAL_BADGE_COLOR,
     textTransform: 'uppercase',
     letterSpacing: '0.18em',
   },
@@ -116,7 +115,7 @@ const s = {
   countdownFill: (pct) => ({
     height: '100%',
     width: `${pct * 100}%`,
-    background: TEAL,
+    background: LOCAL_BADGE_COLOR,
     transition: 'width 80ms linear',
   }),
 };
@@ -251,7 +250,7 @@ export default function UndoToast({
         onBlur={resume}
       >
         <div style={s.glyphCol} aria-hidden>
-          <span style={s.glyph}>⬡</span>
+          <span style={s.glyph}>{LOCAL_HEX_GLYPH}</span>
         </div>
         <div style={s.body}>
           <span style={s.kicker}>{kicker}</span>
