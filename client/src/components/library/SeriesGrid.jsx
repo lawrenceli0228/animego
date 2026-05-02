@@ -1,4 +1,5 @@
 // @ts-check
+import { motion, useReducedMotion } from 'motion/react';
 import SeriesCard from './SeriesCard';
 
 /** @typedef {import('../../lib/library/types').Series} Series */
@@ -13,6 +14,24 @@ const gridStyle = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
   gap: 24,
+};
+
+// Waterfall entrance — container drops a 35ms stagger, items rise + fade.
+// delayChildren waits for the HUD header settle (≈400ms) so the page reads
+// as a sequence: chrome up first, content second.
+const containerVariants = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: 0.035, delayChildren: 0.4 },
+  },
+};
+const itemVariants = {
+  hidden: { opacity: 0, y: 8 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.36, ease: [0.16, 1, 0.3, 1] },
+  },
 };
 
 const NEW_WINDOW_MS = 1000 * 60 * 60 * 24 * 3; // 3 days — "刚加入" budget
@@ -87,8 +106,15 @@ export default function SeriesGrid({
   onLongPress,
   availabilityBySeries,
 }) {
+  const reduced = useReducedMotion();
   return (
-    <div style={gridStyle} data-testid="series-grid">
+    <motion.div
+      style={gridStyle}
+      data-testid="series-grid"
+      initial={reduced ? false : 'hidden'}
+      animate={reduced ? undefined : 'show'}
+      variants={containerVariants}
+    >
       {series.map((s) => {
         const info = progressMap?.get(s.id);
         const pct = computePct(s, info);
@@ -98,29 +124,30 @@ export default function SeriesGrid({
           typeof s.createdAt === 'number' &&
           Date.now() - s.createdAt < NEW_WINDOW_MS;
         return (
-          <SeriesCard
-            key={s.id}
-            series={s}
-            onClick={() => onPickSeries(s.id)}
-            override={overrides?.get(s.id)}
-            progressPct={pct}
-            progressLabel={label}
-            isNew={isNew}
-            onOverrideAction={
-              onOverrideAction
-                ? (action) => onOverrideAction(s.id, action)
-                : undefined
-            }
-            selectionMode={selectionMode}
-            selected={selectedIds ? selectedIds.has(s.id) : false}
-            onToggleSelect={
-              onToggleSelect ? (e) => onToggleSelect(s.id, e) : undefined
-            }
-            onLongPress={onLongPress ? () => onLongPress(s.id) : undefined}
-            availability={availabilityBySeries?.get(s.id)}
-          />
+          <motion.div key={s.id} variants={itemVariants}>
+            <SeriesCard
+              series={s}
+              onClick={() => onPickSeries(s.id)}
+              override={overrides?.get(s.id)}
+              progressPct={pct}
+              progressLabel={label}
+              isNew={isNew}
+              onOverrideAction={
+                onOverrideAction
+                  ? (action) => onOverrideAction(s.id, action)
+                  : undefined
+              }
+              selectionMode={selectionMode}
+              selected={selectedIds ? selectedIds.has(s.id) : false}
+              onToggleSelect={
+                onToggleSelect ? (e) => onToggleSelect(s.id, e) : undefined
+              }
+              onLongPress={onLongPress ? () => onLongPress(s.id) : undefined}
+              availability={availabilityBySeries?.get(s.id)}
+            />
+          </motion.div>
         );
       })}
-    </div>
+    </motion.div>
   );
 }

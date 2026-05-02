@@ -10,7 +10,7 @@ import useUserOverride from '../hooks/useUserOverride';
 import useSeriesProgressMap from '../hooks/useSeriesProgressMap';
 import { isFsaSupported } from '../lib/library/handles/fsaFeatureCheck.js';
 import { enumerateAll } from '../lib/library/enumerator.js';
-import { applySeriesFilter } from '../lib/library/seriesFilter.js';
+import { applySeriesFilter, computeFilterCounts } from '../lib/library/seriesFilter.js';
 import { db } from '../lib/library/db/db.js';
 import { migrateLegacyProgress } from '../lib/library/db/migrateLegacyProgress.js';
 import { ulid } from '../lib/library/ulid.js';
@@ -21,7 +21,10 @@ import LibraryOfflineBanner from '../components/library/LibraryOfflineBanner';
 import useSeriesLibraryStatus from '../hooks/useSeriesLibraryStatus';
 import SeriesGrid from '../components/library/SeriesGrid';
 import FilterChips from '../components/library/FilterChips';
+import SearchBar from '../components/library/SearchBar';
 import RecentlyPlayedRow from '../components/library/RecentlyPlayedRow';
+import WatchRhythmStrip from '../components/library/WatchRhythmStrip';
+import useWatchRhythm from '../hooks/useWatchRhythm';
 import MergeDialog from '../components/library/MergeDialog';
 import SplitDialog from '../components/library/SplitDialog';
 import RematchDialog from '../components/library/RematchDialog';
@@ -40,13 +43,26 @@ import { dedupeSeriesByAnimeId } from '../services/dedupeSeries.js';
 import { createDandanClient } from '../services/dandanClient.js';
 import { refreshAllSeriesMetadata } from '../services/refreshSeriesMetadata.js';
 import { useLang } from '../context/LanguageContext';
-import { mono, PLAYER_HUE, LOCAL_HEX_GLYPH } from '../components/shared/hud-tokens';
+import { mono, PLAYER_HUE, LOCAL_HEX_GLYPH, useCountUp } from '../components/shared/hud-tokens';
 import { CornerBrackets } from '../components/shared/hud';
+import { motion, useReducedMotion } from 'motion/react';
 import toast from 'react-hot-toast';
 
 // Tiny `{{var}}` interpolation for toast strings — t() doesn't support it.
 function fmtTpl(tpl, vars) {
   return String(tpl).replace(/\{\{(\w+)\}\}/g, (_, k) => (vars[k] ?? ''));
+}
+
+/**
+ * Mount-time count-up wrapper. Pulls useCountUp's ref into the rendered <span>
+ * so the value animates from 0 to target on first reveal. Reduced-motion users
+ * see the target value immediately.
+ *
+ * @param {{ value: number, delay?: number, style?: React.CSSProperties }} props
+ */
+function StatNum({ value, delay = 0, style }) {
+  const [ref, n] = useCountUp(value, { duration: 1.0, delay });
+  return <span ref={ref} style={style}>{n}</span>;
 }
 
 const HUE = PLAYER_HUE.stream;
@@ -233,7 +249,11 @@ export default function LibraryPage() {
   const { all: overrides, lock, unlock, clear } = useUserOverride({ db });
   const { entries: unclassifiedEntries } = useUnclassified({ db });
   const { map: progressMap } = useSeriesProgressMap({ db });
+  const watchRhythm = useWatchRhythm({ db });
   const [activeFilter, setActiveFilter] = useState(/** @type {import('../components/library/FilterChips').LibraryFilter} */ (null));
+  const [searchQuery, setSearchQuery] = useState('');
+  /** @type {React.MutableRefObject<import('../components/library/SearchBar').SearchBarHandle | null>} */
+  const searchRef = useRef(/** @type {any} */ (null));
   const [mergeSourceId, setMergeSourceId] = useState(/** @type {string|null} */ (null));
   const [splitSourceId, setSplitSourceId] = useState(/** @type {string|null} */ (null));
   const [splitSeasons, setSplitSeasons] = useState(/** @type {any[]} */ ([]));
@@ -249,8 +269,13 @@ export default function LibraryPage() {
   const selection = useSeriesSelection();
 
   const visibleSeries = useMemo(
-    () => applySeriesFilter(series, progressMap, activeFilter),
-    [series, progressMap, activeFilter],
+    () => applySeriesFilter(series, progressMap, activeFilter, searchQuery),
+    [series, progressMap, activeFilter, searchQuery],
+  );
+
+  const filterCounts = useMemo(
+    () => computeFilterCounts(series, progressMap),
+    [series, progressMap],
   );
 
   const mergeSource = useMemo(
@@ -291,6 +316,21 @@ export default function LibraryPage() {
       });
     return () => { cancelled = true; };
   }, [splitSourceId]);
+
+  // Global `/` keybinding — focuses the SearchBar from anywhere on the page,
+  // matching the convention used by GitHub / Linear / Vercel. Skips if a text
+  // input or contenteditable already has focus so we don't hijack the user.
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key !== '/') return;
+      const t = /** @type {HTMLElement|null} */ (e.target);
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   // One-shot legacy progress migration on first mount.
   // Idempotent — second run sees zero legacy keys and exits cheaply.
@@ -445,6 +485,8 @@ export default function LibraryPage() {
       }
     }
   }, [undoToast]);
+
+  const reducedMotion = useReducedMotion();
 
   // §5.6 auto-merge toast: when an import detects a series spanning ≥2 folders,
   // show an info-only "已合并" toast (no [撤销] — undoing a cross-folder merge
@@ -669,7 +711,13 @@ export default function LibraryPage() {
           onMerge={handleBulkMerge}
         />
       ) : (
-        <header style={s.hudHeader} data-testid="library-hud-header">
+        <motion.header
+          style={s.hudHeader}
+          data-testid="library-hud-header"
+          initial={reducedMotion ? false : { opacity: 0, y: 6 }}
+          animate={reducedMotion ? undefined : { opacity: 1, y: 0 }}
+          transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+        >
           <CornerBrackets inset={-8} size={14} opacity={0.30} />
           <div style={s.hudHeaderInner}>
             <div style={s.hudKicker}>// 02 / LOCAL · MEDIA · LIBRARY //</div>
@@ -678,11 +726,11 @@ export default function LibraryPage() {
               <span style={s.hudTitleEn}>LIBRARY</span>
             </h1>
             <div style={s.hudSubtitle}>
-              <span><span style={s.hudNum}>{series.length}</span>&nbsp;series</span>
+              <span><StatNum value={series.length} delay={0.20} style={s.hudNum} />&nbsp;series</span>
               {totalEpisodes > 0 && (
                 <>
                   <span style={s.hudDot}>·</span>
-                  <span><span style={s.hudNum}>{totalEpisodes}</span>&nbsp;episodes</span>
+                  <span><StatNum value={totalEpisodes} delay={0.30} style={s.hudNum} />&nbsp;episodes</span>
                 </>
               )}
               <span style={s.hudDot}>·</span>
@@ -726,7 +774,7 @@ export default function LibraryPage() {
               </button>
             )}
           </div>
-        </header>
+        </motion.header>
       )}
 
       {showEmptyState ? (
@@ -740,9 +788,22 @@ export default function LibraryPage() {
         )
       ) : (
         <>
+          <WatchRhythmStrip rhythm={watchRhythm} />
           <RecentlyPlayedRow entries={resumeEntries} onPlay={handleResume} />
-          <FilterChips active={activeFilter} onChange={setActiveFilter} />
-          {activeFilter && visibleSeries.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <FilterChips
+              active={activeFilter}
+              counts={filterCounts}
+              onChange={setActiveFilter}
+            />
+            <span style={{ flex: 1 }} />
+            <SearchBar
+              ref={searchRef}
+              value={searchQuery}
+              onChange={setSearchQuery}
+            />
+          </div>
+          {(activeFilter || searchQuery) && visibleSeries.length === 0 ? (
             <div
               style={{
                 ...mono,
