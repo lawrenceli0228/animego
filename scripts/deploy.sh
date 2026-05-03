@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-APP_DIR="/var/www/animego"
+APP_DIR="/opt/animego"
 cd "$APP_DIR"
 
 echo "==> Pulling latest code..."
