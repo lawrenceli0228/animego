@@ -27,3 +27,22 @@
   fill: var(--heatmap-fill, #ffffff) !important;
   fill-opacity: var(--heatmap-opacity, 0.4) !important;
 }
+
+/* Crisp scrolling danmaku.
+   artplayer-plugin-danmuku@5.3 gives each comment item this inline cssText:
+     position: absolute; will-change: transform; perspective: 500px;
+   The `perspective: 500px` pulls every item into a 3D rendering context.
+   Combined with `transform: translateX(...)` motion, the browser
+   re-rasterizes glyphs through a 3D transform matrix which produces
+   subpixel blur + breaks font antialiasing on Chrome / Safari.
+   `will-change: transform` already promotes to a GPU layer; perspective
+   is unnecessary and actively harmful for plain horizontal motion.
+   Force flat 2D and re-enable font smoothing. */
+.art-video-player .art-danmuku > div {
+  perspective: none !important;
+  -webkit-perspective: none !important;
+  transform-style: flat !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
