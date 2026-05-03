@@ -71,22 +71,39 @@ const s = {
     textTransform: 'uppercase',
     letterSpacing: '0.12em',
   }),
+  danger: (disabled) => ({
+    ...mono,
+    padding: '6px 14px',
+    background: disabled ? 'transparent' : 'oklch(60% 0.20 25 / 0.18)',
+    border: disabled
+      ? '1px solid rgba(235,235,245,0.18)'
+      : '1px solid oklch(60% 0.20 25 / 0.55)',
+    borderRadius: 3,
+    color: disabled ? 'rgba(235,235,245,0.35)' : 'oklch(78% 0.18 25)',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: '0.12em',
+  }),
 };
 
 /**
  * BulkActionToolbar — §5.6 iOS-style multi-select toolbar.
  *
  * Renders only when caller passes a non-zero `count`. Layout follows Apple HIG:
- *   [Cancel]   [N 项已选]   [Select All] [合并为系列]
+ *   [Cancel]   [N 项已选]   [Select All] [Delete] [合并为系列]
  *
- * The merge button is disabled when fewer than 2 series are selected (the
- * design's minimum for a merge — pick a target and at least one source).
+ * Delete: red Danger-Zone styling, sits between 全选 and 合并 so it's reachable
+ *   in selection mode without leaving the toolbar. Disabled at count=0; the
+ *   parent confirms via window.confirm before purging.
+ * Merge: disabled below `minMerge` (default 2 — pick a target and a source).
  *
  * @param {{
  *   count: number,
  *   onCancel: () => void,
  *   onSelectAll: () => void,
  *   onMerge: () => void,
+ *   onDelete?: () => void,
  *   minMerge?: number,
  * }} props
  */
@@ -95,9 +112,11 @@ export default function BulkActionToolbar({
   onCancel,
   onSelectAll,
   onMerge,
+  onDelete,
   minMerge = 2,
 }) {
   const canMerge = count >= minMerge;
+  const canDelete = count > 0 && !!onDelete;
   return (
     <div
       data-testid="bulk-toolbar"
@@ -124,6 +143,18 @@ export default function BulkActionToolbar({
       >
         全选
       </button>
+      {onDelete && (
+        <button
+          type="button"
+          data-testid="bulk-toolbar-delete"
+          style={s.danger(!canDelete)}
+          disabled={!canDelete}
+          aria-disabled={!canDelete}
+          onClick={canDelete ? onDelete : undefined}
+        >
+          删除
+        </button>
+      )}
       <button
         type="button"
         data-testid="bulk-toolbar-merge"

@@ -9,6 +9,55 @@ import {
 } from '../shared/hud-tokens';
 import { CornerBrackets } from '../shared/hud';
 
+// Module-level guard: §5.x cinematic hover / focus styles inject once into
+// document.head. Inline-style React doesn't reach :hover or :focus-visible,
+// so a single global stylesheet handles those — without :focus-visible we'd
+// flash the ring on every mouse click, and without `(hover: hover)` we'd
+// scale on touch devices when the press should be flat.
+let __seriesCardStylesInjected = false;
+function ensureSeriesCardStyles() {
+  if (__seriesCardStylesInjected || typeof document === 'undefined') return;
+  __seriesCardStylesInjected = true;
+  const el = document.createElement('style');
+  el.dataset.injectedBy = 'series-card';
+  el.textContent = `
+    [data-series-card-button="true"] {
+      transition:
+        transform 220ms cubic-bezier(0.16,1,0.3,1),
+        box-shadow 220ms ease-out,
+        border-color 180ms ease-out;
+    }
+    @media (hover: hover) {
+      [data-series-card-button="true"]:hover:not([data-selection-mode="true"]):not([disabled]) {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow:
+          0 10px 28px oklch(2% 0 0 / 0.50),
+          0 0 0 1px oklch(62% 0.17 210 / 0.55);
+      }
+      [data-series-card-button="true"]:hover:not([data-selection-mode="true"]) [data-poster-scrim="true"] {
+        opacity: 1;
+      }
+    }
+    [data-series-card-button="true"]:focus-visible {
+      outline: 2px solid oklch(72% 0.16 210 / 0.85);
+      outline-offset: 2px;
+    }
+    [data-series-card-button="true"]:focus:not(:focus-visible) {
+      outline: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      [data-series-card-button="true"] {
+        transition: border-color 180ms ease-out;
+      }
+      [data-series-card-button="true"]:hover {
+        transform: none !important;
+        box-shadow: 0 0 0 1px oklch(62% 0.17 210 / 0.55) !important;
+      }
+    }
+  `;
+  document.head.appendChild(el);
+}
+
 /** @typedef {import('../../lib/library/types').Series} Series */
 /** @typedef {import('../../lib/library/types').UserOverride} UserOverride */
 /** @typedef {'lock'|'unlock'|'clear'|'merge'|'split'|'rematch'} OverrideAction */
@@ -76,6 +125,22 @@ const s = {
   posterWrap: {
     position: 'relative',
     width: '100%',
+  },
+  // §5.x cinematic depth — a soft bottom scrim that's mostly invisible at
+  // rest (0.55 opacity) and deepens to 1.0 on hover. Always present so
+  // posters with light frames don't lose their lower edge against the dark
+  // card background. Sits below every text/badge layer (zIndex 1).
+  posterScrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '40%',
+    background: `linear-gradient(to top, oklch(8% 0.04 ${HUE} / 0.85) 0%, oklch(8% 0.04 ${HUE} / 0.15) 65%, transparent 100%)`,
+    pointerEvents: 'none',
+    zIndex: 1,
+    opacity: 0.55,
+    transition: 'opacity 220ms ease-out',
   },
   poster: {
     width: '100%',
@@ -359,6 +424,7 @@ const s = {
  *   onToggleSelect?: (e?: import('react').MouseEvent) => void,
  *   onLongPress?: () => void,
  *   availability?: 'ok'|'partial'|'offline'|'unknown',
+ *   compact?: boolean,
  * }} props
  *
  * @typedef {'lock'|'unlock'|'clear'|'merge'|'split'|'rematch'|'delete'} OverrideActionExt
@@ -377,6 +443,7 @@ export default function SeriesCard({
   onToggleSelect,
   onLongPress,
   availability,
+  compact = false,
 }) {
   const title = series.titleEn || series.titleZh || series.titleJa || series.id;
   const initial = title.charAt(0).toUpperCase();
@@ -391,6 +458,10 @@ export default function SeriesCard({
   const longPressTimerRef = useRef(/** @type {ReturnType<typeof setTimeout>|null} */ (null));
   const longPressFiredRef = useRef(false);
   const pointerStartRef = useRef(/** @type {{x:number,y:number}|null} */ (null));
+
+  // Inject the §5.x hover / focus-visible stylesheet on first card mount.
+  // No-op on subsequent mounts thanks to the module-level flag.
+  useEffect(() => { ensureSeriesCardStyles(); }, []);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -460,11 +531,17 @@ export default function SeriesCard({
     ...s.card,
     ...(selected ? s.cardSelected : null),
     ...(dimForAvail ? s.cardDimmed : null),
+    ...(compact ? { width: 140, scrollSnapAlign: 'start' } : null),
   };
-  const showKebab = !!onOverrideAction && !selectionMode;
+  const showKebab = !!onOverrideAction && !selectionMode && !compact;
 
   return (
-    <div ref={rootRef} style={{ position: 'relative' }} data-testid="series-card-root">
+    <div
+      ref={rootRef}
+      style={{ position: 'relative', ...(compact ? { flexShrink: 0 } : null) }}
+      data-testid="series-card-root"
+      data-compact={compact ? 'true' : 'false'}
+    >
       <button
         style={cardStyle}
         onClick={handleCardClick}
@@ -478,6 +555,7 @@ export default function SeriesCard({
         aria-pressed={selectionMode ? selected : undefined}
         data-selected={selected ? 'true' : 'false'}
         data-selection-mode={selectionMode ? 'true' : 'false'}
+        data-series-card-button="true"
       >
         <CornerBrackets inset={4} size={8} opacity={0.25} hue={HUE} />
 
@@ -489,6 +567,7 @@ export default function SeriesCard({
               {initial}
             </div>
           )}
+          <div style={s.posterScrim} data-poster-scrim="true" aria-hidden />
           <span style={s.localBadge} data-testid="local-badge">
             <span aria-hidden style={s.localGlyph}>{LOCAL_HEX_GLYPH}</span>
             LOCAL
@@ -522,35 +601,60 @@ export default function SeriesCard({
           )}
         </div>
 
-        <div style={s.body}>
-          <div style={s.titleRow}>
-            <span style={s.title}>{title}</span>
-            {isLocked && (
-              <span style={s.lockedBadge} data-testid="locked-badge">LOCK</span>
-            )}
+        {compact ? (
+          <div
+            style={{
+              padding: '8px 10px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            }}
+          >
+            <span
+              style={{
+                ...s.title,
+                fontSize: 12,
+                lineHeight: 1.25,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                display: 'block',
+              }}
+            >
+              {title}
+            </span>
           </div>
-          {(series.type || series.totalEpisodes != null) && (
-            <div style={s.metaRow}>
-              {series.type && (
-                <span style={s.metaType}>{String(series.type).toUpperCase()}</span>
-              )}
-              {series.type && series.totalEpisodes != null && (
-                <span style={s.metaDot}>·</span>
-              )}
-              {series.totalEpisodes != null && (
-                <>
-                  <span style={s.epCount}>{series.totalEpisodes}</span>
-                  <span style={s.metaEpUnit}>集</span>
-                </>
+        ) : (
+          <div style={s.body}>
+            <div style={s.titleRow}>
+              <span style={s.title}>{title}</span>
+              {isLocked && (
+                <span style={s.lockedBadge} data-testid="locked-badge">LOCK</span>
               )}
             </div>
-          )}
-          {durationLabel && (
-            <span style={s.duration} data-testid="duration-label">
-              {durationLabel}
-            </span>
-          )}
-        </div>
+            {(series.type || series.totalEpisodes != null) && (
+              <div style={s.metaRow}>
+                {series.type && (
+                  <span style={s.metaType}>{String(series.type).toUpperCase()}</span>
+                )}
+                {series.type && series.totalEpisodes != null && (
+                  <span style={s.metaDot}>·</span>
+                )}
+                {series.totalEpisodes != null && (
+                  <>
+                    <span style={s.epCount}>{series.totalEpisodes}</span>
+                    <span style={s.metaEpUnit}>集</span>
+                  </>
+                )}
+              </div>
+            )}
+            {durationLabel && (
+              <span style={s.duration} data-testid="duration-label">
+                {durationLabel}
+              </span>
+            )}
+          </div>
+        )}
       </button>
 
       {selectionMode && (

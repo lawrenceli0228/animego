@@ -8,15 +8,19 @@ import { liveQuery } from 'dexie';
 /**
  * Build a Map<seriesId, Set<libraryId>> via a live join of episodes →
  * fileRefs (joined by primaryFileId). Updates reactively when either table
- * changes.
+ * changes. `ready` flips true after the first liveQuery emission so consumers
+ * can avoid showing pre-computation flashes (rows briefly rendering offline
+ * cards as accessible while the join is still pending).
  *
  * @param {{ db: import('dexie').Dexie }} options
- * @returns {Map<string, Set<string>>}
+ * @returns {{ index: Map<string, Set<string>>, ready: boolean }}
  */
 function useSeriesLibraryIndex({ db }) {
   const [index, setIndex] = useState(/** @type {Map<string, Set<string>>} */ (new Map()));
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    setReady(false);
     const sub = liveQuery(async () => {
       const [episodes, fileRefs] = await Promise.all([
         db.episodes.toArray(),
@@ -35,13 +39,13 @@ function useSeriesLibraryIndex({ db }) {
       }
       return map;
     }).subscribe({
-      next: (v) => setIndex(v),
-      error: () => setIndex(new Map()),
+      next: (v) => { setIndex(v); setReady(true); },
+      error: () => { setIndex(new Map()); setReady(true); },
     });
     return () => sub.unsubscribe();
   }, [db]);
 
-  return index;
+  return { index, ready };
 }
 
 /**
@@ -60,10 +64,11 @@ function useSeriesLibraryIndex({ db }) {
  * @returns {{
  *   availabilityBySeries: Map<string, SeriesAvailability>,
  *   offlineLibraryIds: string[],
+ *   ready: boolean,
  * }}
  */
 export default function useSeriesLibraryStatus({ db, libraryStatus }) {
-  const seriesLibIds = useSeriesLibraryIndex({ db });
+  const { index: seriesLibIds, ready } = useSeriesLibraryIndex({ db });
   const libStatus = libraryStatus instanceof Map ? libraryStatus : new Map();
 
   /** @type {Map<string, SeriesAvailability>} */
@@ -93,5 +98,5 @@ export default function useSeriesLibraryStatus({ db, libraryStatus }) {
     if (st === 'disconnected') offlineLibraryIds.push(libId);
   }
 
-  return { availabilityBySeries, offlineLibraryIds };
+  return { availabilityBySeries, offlineLibraryIds, ready };
 }

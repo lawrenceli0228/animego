@@ -17,12 +17,14 @@ import { ulid } from '../lib/library/ulid.js';
 import LibraryEmptyState from '../components/library/LibraryEmptyState';
 import DropZone from '../components/library/DropZone';
 import FsaUnsupportedBanner from '../components/library/FsaUnsupportedBanner';
-import LibraryOfflineBanner from '../components/library/LibraryOfflineBanner';
 import useSeriesLibraryStatus from '../hooks/useSeriesLibraryStatus';
 import SeriesGrid from '../components/library/SeriesGrid';
 import FilterChips from '../components/library/FilterChips';
 import SearchBar from '../components/library/SearchBar';
-import RecentlyPlayedRow from '../components/library/RecentlyPlayedRow';
+import RecentlyPlayedPosterRow from '../components/library/RecentlyPlayedPosterRow';
+import NewAdditionsRow from '../components/library/NewAdditionsRow';
+import ScrollRow from '../components/library/ScrollRow';
+import SeriesCardSkeleton from '../components/library/SeriesCardSkeleton';
 import WatchRhythmStrip from '../components/library/WatchRhythmStrip';
 import useWatchRhythm from '../hooks/useWatchRhythm';
 import MergeDialog from '../components/library/MergeDialog';
@@ -31,6 +33,10 @@ import RematchDialog from '../components/library/RematchDialog';
 import ImportDrawer from '../components/library/ImportDrawer';
 import ImportMiniPill from '../components/library/ImportMiniPill';
 import UnclassifiedSection from '../components/library/UnclassifiedSection';
+import UnavailableSeriesSection from '../components/library/UnavailableSeriesSection';
+import HudOverflowMenu from '../components/library/HudOverflowMenu';
+import HudCelebration from '../components/library/HudCelebration';
+import SeriesDetailSheet from '../components/library/SeriesDetailSheet';
 import useUnclassified from '../hooks/useUnclassified';
 import useSeriesSelection from '../hooks/useSeriesSelection.js';
 import BulkActionToolbar from '../components/library/BulkActionToolbar';
@@ -67,6 +73,18 @@ function StatNum({ value, delay = 0, style }) {
 
 const HUE = PLAYER_HUE.stream;
 const PRIVACY_PULSE_CSS = '@keyframes libraryPrivacyPulse{0%,100%{opacity:0.55;transform:scale(0.92)}50%{opacity:1;transform:scale(1)}}';
+
+// §5.x — sparse-row threshold (Q1 design decision A). Below this count we
+// skip the discovery rows entirely and surface only the main grid + a
+// "drop more folders" hint, matching Apple TV+ small-library behavior.
+// Source: ~/.gstack/projects/lawrenceli0228-animego/designs/library-decisions-20260503/
+const ROWS_THRESHOLD = 5;
+
+// Skeleton card counts during the availability-loading window. Tuned to
+// match the typical first-paint footprint: 2 rows × 8 + a 4×2 grid.
+const SKELETON_ROW_COUNT = 8;
+const SKELETON_GRID_COUNT = 8;
+const SKELETON_GRID_STYLE = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 24 };
 
 const s = {
   page: {
@@ -231,11 +249,16 @@ export default function LibraryPage() {
   const dandan = useMemo(() => createDandanClient(), []);
   const { series, loading } = useLibrary({ db });
   const { entries: resumeEntries } = useResume({ db });
-  const { status, roots, pickFolder, libraryStatus, refresh: refreshHandles } = useFileHandles({ db });
-  const { availabilityBySeries, offlineLibraryIds } = useSeriesLibraryStatus({
+  const { status, pickFolder, libraryStatus, refresh: refreshHandles } = useFileHandles({ db });
+  const { availabilityBySeries, ready: availabilityIndexReady } = useSeriesLibraryStatus({
     db,
     libraryStatus,
   });
+
+  // Combine: index loaded AND handles probed (or known to be never-probing).
+  // Used to gate the discovery rows so they don't briefly render offline
+  // series as accessible while the async join is still resolving.
+  const availabilityReady = availabilityIndexReady && status !== 'idle' && status !== 'loading';
   const {
     run: runImport,
     progress: importProgress,
@@ -262,6 +285,11 @@ export default function LibraryPage() {
   const [autoMergeQueue, setAutoMergeQueue] = useState(
     /** @type {Array<{ seriesId: string, title: string, meta: string }>} */ ([]),
   );
+  // §5.x — point-click on a grid card opens this sheet instead of navigating
+  // straight to /player. Inside the sheet the user picks a specific episode;
+  // that click closes the sheet and routes through to the player with the
+  // chosen resumeEpisode.
+  const [detailSeriesId, setDetailSeriesId] = useState(/** @type {string|null} */ (null));
   // Track the last importSummary we converted into auto-merge toasts so a
   // re-render with the same summary object doesn't re-enqueue toasts. The
   // useImport hook keeps a stable reference until the next import begins.
@@ -271,6 +299,28 @@ export default function LibraryPage() {
   const visibleSeries = useMemo(
     () => applySeriesFilter(series, progressMap, activeFilter, searchQuery),
     [series, progressMap, activeFilter, searchQuery],
+  );
+
+  // Main grid only shows accessible series. offline / partial drop into the
+  // dedicated UnavailableSeriesSection below the grid so users aren't forced
+  // to look at content they can't currently play.
+  const mainGridSeries = useMemo(
+    () => visibleSeries.filter((sr) => {
+      const av = availabilityBySeries.get(sr.id);
+      return av !== 'offline' && av !== 'partial';
+    }),
+    [visibleSeries, availabilityBySeries],
+  );
+
+  // Unavailable section is anchored to the full library — search/filter chips
+  // don't shrink it. It's an inventory of "what's currently unreachable", not
+  // a search result.
+  const unavailableSeries = useMemo(
+    () => series.filter((sr) => {
+      const av = availabilityBySeries.get(sr.id);
+      return av === 'offline' || av === 'partial';
+    }),
+    [series, availabilityBySeries],
   );
 
   const filterCounts = useMemo(
@@ -362,10 +412,24 @@ export default function LibraryPage() {
   }, [fsaSupported, pickFolder, processFiles, runImport]);
 
   const handlePickSeries = useCallback((id) => {
-    // Go straight to /player so the user lands on the same rich
-    // EpisodeFileList surface that the post-import match flow shows. The
-    // library entry is just a different precondition for the same screen.
-    navigate('/player', { state: { seriesId: id } });
+    // Open the in-page episode picker. The user picks an exact episode there
+    // and `handlePickEpisode` routes to /player with the resume target.
+    setDetailSeriesId(id);
+  }, []);
+
+  const handlePickEpisode = useCallback((seriesId, episodeNumber) => {
+    setDetailSeriesId(null);
+    navigate('/player', { state: { seriesId, resumeEpisode: episodeNumber } });
+  }, [navigate]);
+
+  // §5.x — "弹幕播放" CTA in the detail sheet. Mirrors the legacy
+  // direct-card-click behavior: routes to /player WITHOUT a resumeEpisode
+  // hint so the player owns the dandanplay match + episode-pick flow,
+  // surfacing the EpisodeFileList + DanmakuPicker that the post-import
+  // path already uses.
+  const handlePlaySeries = useCallback((seriesId) => {
+    setDetailSeriesId(null);
+    navigate('/player', { state: { seriesId } });
   }, [navigate]);
 
   const handleResume = useCallback((id, episodeNumber) => {
@@ -435,6 +499,36 @@ export default function LibraryPage() {
     [mergeSourceId, series],
   );
 
+  const handleBulkDelete = useCallback(async () => {
+    const ids = selection.ids;
+    if (ids.length === 0) return;
+    const titles = ids
+      .map((id) => series.find((sr) => sr.id === id))
+      .map((sr) => sr?.titleZh || sr?.titleEn || sr?.titleJa || sr?.id || '?');
+    const preview = titles.slice(0, 3).join('、') + (titles.length > 3 ? `… (共 ${titles.length} 项)` : '');
+    const ok = window.confirm(
+      `从库里删除以下 ${ids.length} 项?\n\n${preview}\n\n会清掉本地的元数据 / 进度 / 覆盖,但磁盘上的视频文件不会被动。`,
+    );
+    if (!ok) return;
+    let okCount = 0;
+    for (const id of ids) {
+      try {
+        await deleteSeriesCascade({ db, seriesId: id });
+        okCount += 1;
+      } catch (err) {
+        console.warn('[library] bulk delete step failed:', err);
+      }
+    }
+    selection.clear();
+    if (okCount === ids.length) {
+      toast.success(`已删除 ${okCount} 项`);
+    } else if (okCount > 0) {
+      toast.success(`已删除 ${okCount}/${ids.length} 项,部分失败`);
+    } else {
+      toast.error('删除失败,请重试');
+    }
+  }, [selection, series]);
+
   const handleBulkMerge = useCallback(async () => {
     const ids = selection.ids;
     if (ids.length < 2) return;
@@ -487,6 +581,26 @@ export default function LibraryPage() {
   }, [undoToast]);
 
   const reducedMotion = useReducedMotion();
+
+  // §5.x — Q2 import-celebration trigger. Fires HudCelebration once per
+  // newly arrived `importSummary`. We dedupe via a ref so a re-render with
+  // the same summary doesn't re-trigger the overlay; the same discipline as
+  // the auto-merge toast queue below. `celebrationStats` snapshots series /
+  // episode counts at trigger time so the readout doesn't morph mid-fade if
+  // the user kicks off another import while this one is still on screen.
+  const celebrationConsumedRef = useRef(/** @type {object|null} */ (null));
+  const [celebrationKey, setCelebrationKey] = useState(/** @type {number|null} */ (null));
+  const [celebrationStats, setCelebrationStats] = useState({ seriesCount: 0, episodeCount: 0 });
+
+  useEffect(() => {
+    if (!importSummary || importSummary === celebrationConsumedRef.current) return;
+    celebrationConsumedRef.current = importSummary;
+    setCelebrationStats({
+      seriesCount: series.length,
+      episodeCount: series.reduce((sum, sr) => sum + (typeof sr.totalEpisodes === 'number' ? sr.totalEpisodes : 0), 0),
+    });
+    setCelebrationKey(Date.now());
+  }, [importSummary, series]);
 
   // §5.6 auto-merge toast: when an import detects a series spanning ≥2 folders,
   // show an info-only "已合并" toast (no [撤销] — undoing a cross-folder merge
@@ -585,6 +699,23 @@ export default function LibraryPage() {
       await Promise.all(db.tables.map((tbl) => tbl.clear()));
     });
   }, []);
+
+  // Re-probe all persisted FSA handles. Drives that came back online flip
+  // 'disconnected' → 'ready' which re-classifies their series and removes
+  // them from the UnavailableSeriesSection. Triggered from the section header
+  // button or the same action inside the overflow menu.
+  const [availRefreshing, setAvailRefreshing] = useState(false);
+  const handleRefreshAvailability = useCallback(async () => {
+    if (availRefreshing) return;
+    setAvailRefreshing(true);
+    try {
+      await refreshHandles();
+    } catch (err) {
+      console.warn('[library] refresh handles failed:', err);
+    } finally {
+      setAvailRefreshing(false);
+    }
+  }, [refreshHandles, availRefreshing]);
 
   // One-click "merge duplicates" — find Series sharing a Season.animeId and
   // merge them into the oldest. Fixes libraries imported before the in-batch
@@ -697,11 +828,6 @@ export default function LibraryPage() {
     <div style={s.page}>
       <style>{PRIVACY_PULSE_CSS}</style>
       {showBanner && <FsaUnsupportedBanner />}
-      <LibraryOfflineBanner
-        roots={roots}
-        offlineLibraryIds={offlineLibraryIds}
-        onRetry={refreshHandles}
-      />
 
       {selection.selectionMode ? (
         <BulkActionToolbar
@@ -709,6 +835,7 @@ export default function LibraryPage() {
           onCancel={selection.clear}
           onSelectAll={handleSelectAllVisible}
           onMerge={handleBulkMerge}
+          onDelete={handleBulkDelete}
         />
       ) : (
         <motion.header
@@ -739,39 +866,60 @@ export default function LibraryPage() {
                 stored on this device
               </span>
             </div>
+            <div style={{ marginTop: 12 }}>
+              <WatchRhythmStrip rhythm={watchRhythm} compact />
+            </div>
           </div>
           <div style={s.hudActions}>
-            {series.length > 1 && (
-              <button
-                style={s.refreshBtn(dedupeBusy)}
-                onClick={handleDedupe}
-                disabled={dedupeBusy}
-                type="button"
-                data-testid="library-dedupe"
-              >
-                {dedupeBusy ? '合并中…' : '合并重复'}
-              </button>
-            )}
-            {series.length > 0 && (
-              <button
-                style={s.refreshBtn(refreshingMeta)}
-                onClick={handleRefreshMetadata}
-                disabled={refreshingMeta}
-                type="button"
-                data-testid="library-refresh-meta"
-              >
-                {t('library.refreshMeta')}
-              </button>
-            )}
-            {series.length > 0 && (
-              <button style={s.resetBtn} onClick={handleResetLibrary} type="button">
-                重置库
-              </button>
-            )}
             {showAddBtn && (
-              <button style={s.addBtn} onClick={handleAddFolder} type="button">
-                {t('library.addFolder')}
+              <button
+                style={s.addBtn}
+                onClick={handleAddFolder}
+                type="button"
+                data-testid="library-add-folder"
+              >
+                + {t('library.addFolder')}
               </button>
+            )}
+            {series.length > 0 && (
+              <HudOverflowMenu
+                testId="library-overflow"
+                items={[
+                  ...(series.length > 1 ? [{
+                    id: 'dedupe',
+                    label: dedupeBusy ? '合并中…' : '合并重复',
+                    onClick: handleDedupe,
+                    disabled: dedupeBusy,
+                    icon: '⇄',
+                    testId: 'library-dedupe',
+                  }] : []),
+                  {
+                    id: 'refresh-meta',
+                    label: refreshingMeta ? '刷新中…' : t('library.refreshMeta'),
+                    onClick: handleRefreshMetadata,
+                    disabled: refreshingMeta,
+                    icon: '↻',
+                    testId: 'library-refresh-meta',
+                  },
+                  {
+                    id: 'refresh-availability',
+                    label: availRefreshing ? '检测中…' : '刷新硬盘可用性',
+                    onClick: handleRefreshAvailability,
+                    disabled: availRefreshing,
+                    icon: '⌐',
+                    testId: 'library-refresh-availability',
+                  },
+                  {
+                    id: 'reset',
+                    label: '重置库',
+                    onClick: handleResetLibrary,
+                    danger: true,
+                    divideBefore: true,
+                    icon: '⊘',
+                    testId: 'library-reset',
+                  },
+                ]}
+              />
             )}
           </div>
         </motion.header>
@@ -788,8 +936,35 @@ export default function LibraryPage() {
         )
       ) : (
         <>
-          <WatchRhythmStrip rhythm={watchRhythm} />
-          <RecentlyPlayedRow entries={resumeEntries} onPlay={handleResume} />
+          {series.length >= ROWS_THRESHOLD && (
+            availabilityReady ? (
+              <>
+                <RecentlyPlayedPosterRow
+                  entries={resumeEntries}
+                  onPlay={handleResume}
+                  availabilityBySeries={availabilityBySeries}
+                />
+                <NewAdditionsRow
+                  series={series}
+                  onPickSeries={handlePickSeries}
+                  availabilityBySeries={availabilityBySeries}
+                />
+              </>
+            ) : (
+              <>
+                <ScrollRow label="// 继续看 //" testId="row-recently-played-skeleton">
+                  {Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (
+                    <SeriesCardSkeleton key={`rp-skel-${i}`} compact />
+                  ))}
+                </ScrollRow>
+                <ScrollRow label="// 最近添加 //" testId="row-new-additions-skeleton">
+                  {Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (
+                    <SeriesCardSkeleton key={`na-skel-${i}`} compact />
+                  ))}
+                </ScrollRow>
+              </>
+            )
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <FilterChips
               active={activeFilter}
@@ -803,7 +978,13 @@ export default function LibraryPage() {
               onChange={setSearchQuery}
             />
           </div>
-          {(activeFilter || searchQuery) && visibleSeries.length === 0 ? (
+          {!availabilityReady ? (
+            <div style={SKELETON_GRID_STYLE} data-testid="library-grid-skeleton">
+              {Array.from({ length: SKELETON_GRID_COUNT }).map((_, i) => (
+                <SeriesCardSkeleton key={`grid-skel-${i}`} />
+              ))}
+            </div>
+          ) : (activeFilter || searchQuery) && mainGridSeries.length === 0 ? (
             <div
               style={{
                 ...mono,
@@ -822,7 +1003,7 @@ export default function LibraryPage() {
             </div>
           ) : (
             <SeriesGrid
-              series={visibleSeries}
+              series={mainGridSeries}
               onPickSeries={handlePickSeries}
               overrides={overrides}
               progressMap={progressMap}
@@ -834,6 +1015,14 @@ export default function LibraryPage() {
               availabilityBySeries={availabilityBySeries}
             />
           )}
+          <UnavailableSeriesSection
+            series={unavailableSeries}
+            availabilityBySeries={availabilityBySeries}
+            onRefresh={handleRefreshAvailability}
+            onPickSeries={handlePickSeries}
+            onDelete={(seriesId) => handleOverrideAction(seriesId, 'delete')}
+            refreshing={availRefreshing}
+          />
           <UnclassifiedSection
             entries={unclassifiedEntries}
             defaultOpen
@@ -890,6 +1079,26 @@ export default function LibraryPage() {
           onConfirm={handleRematchConfirm}
         />
       )}
+
+      <HudCelebration
+        triggerKey={celebrationKey}
+        seriesCount={celebrationStats.seriesCount}
+        episodeCount={celebrationStats.episodeCount}
+        onComplete={() => setCelebrationKey(null)}
+      />
+
+      {detailSeriesId && (() => {
+        const target = series.find((sr) => sr.id === detailSeriesId);
+        if (!target) return null;
+        return (
+          <SeriesDetailSheet
+            series={target}
+            onClose={() => setDetailSeriesId(null)}
+            onPickEpisode={handlePickEpisode}
+            onPlaySeries={handlePlaySeries}
+          />
+        );
+      })()}
 
       {undoToast ? (
         <UndoToast

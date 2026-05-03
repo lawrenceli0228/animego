@@ -11,10 +11,19 @@ vi.mock('../hooks/useFileHandles', () => ({
   default: vi.fn(() => ({
     status: 'ready',
     roots: [],
+    libraryStatus: new Map(),
     pickFolder: vi.fn(),
     reauthorize: vi.fn(),
     dropFolder: vi.fn(),
     selectFileByName: vi.fn(),
+    refresh: vi.fn(),
+  })),
+}));
+vi.mock('../hooks/useSeriesLibraryStatus', () => ({
+  default: vi.fn(() => ({
+    availabilityBySeries: new Map(),
+    offlineLibraryIds: [],
+    ready: true,
   })),
 }));
 vi.mock('../hooks/useImport', () => ({

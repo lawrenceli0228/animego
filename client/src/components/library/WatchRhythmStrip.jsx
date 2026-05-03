@@ -16,6 +16,19 @@ const s = {
     borderRadius: 12,
     flexWrap: 'wrap',
   },
+  // §5.x — when nested into the HUD header (right of the title), drop the
+  // border + bg + padding so it reads as part of the chrome instead of a
+  // separate card.
+  wrapCompact: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: 0,
+    background: 'transparent',
+    border: 'none',
+    borderRadius: 0,
+    flexWrap: 'wrap',
+  },
   label: {
     ...mono,
     fontSize: 10,
@@ -77,9 +90,13 @@ const s = {
  * Hides itself when the user has zero progress in the last 14 days — keeps
  * fresh installs from being shouted at by an empty rhythm widget.
  *
- * @param {{ rhythm: WatchRhythm }} props
+ * §5.x library redesign: passing `compact` drops the border / background /
+ * padding so the strip nests inside the HUD header without looking like a
+ * separate widget pinned below.
+ *
+ * @param {{ rhythm: WatchRhythm, compact?: boolean }} props
  */
-export default function WatchRhythmStrip({ rhythm }) {
+export default function WatchRhythmStrip({ rhythm, compact = false }) {
   // Fresh install / no recent activity → don't render. We also wait until the
   // one-shot fetch resolves; rendering a "0 集" strip during the read window
   // looks broken when we know the answer is coming in 50ms.
@@ -87,7 +104,11 @@ export default function WatchRhythmStrip({ rhythm }) {
   if (rhythm.totalDays === 0) return null;
 
   return (
-    <div style={s.wrap} data-testid="watch-rhythm-strip">
+    <div
+      style={compact ? s.wrapCompact : s.wrap}
+      data-testid="watch-rhythm-strip"
+      data-compact={compact ? 'true' : 'false'}
+    >
       <span style={s.label}>// CADENCE</span>
 
       <div style={s.stat}>
