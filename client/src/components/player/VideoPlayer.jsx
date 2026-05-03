@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import Artplayer from 'artplayer';
 import { applyHeatmapPath } from '../../lib/heatmapPath';
+import { convertAssToVtt, convertSrtToVtt } from '../../utils/subtitleConvert';
 
 const s = {
   wrapper: { width: '100%', position: 'relative' },
@@ -150,9 +151,19 @@ function writeProgress(key, t) {
   }
 }
 
-export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnded, progressKey, resumeAt = null, onProgressTick }) {
+export default function VideoPlayer({
+  videoUrl,
+  danmakuList,
+  subtitleUrl,
+  onEnded,
+  progressKey,
+  resumeAt = null,
+  onProgressTick,
+}) {
   const containerRef = useRef(null);
   const artRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const userSubtitleBlobRef = useRef(null);
   const progressKeyRef = useRef(progressKey);
   const danmakuListRef = useRef(danmakuList);
   const subtitleSizeRef = useRef(readSubtitleSize());
@@ -267,6 +278,15 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
               if (next) danmuku?.show?.();
               else danmuku?.hide?.();
               return next;
+            },
+          },
+          {
+            html: '加载字幕文件',
+            tooltip: '本地 .vtt / .srt / .ass',
+            selector: [{ html: '点击选择…', value: 'pick' }],
+            onSelect() {
+              fileInputRef.current?.click();
+              return '点击选择…';
             },
           },
         ],
@@ -424,9 +444,71 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
     danmuku.load();
   }, [danmakuList]);
 
+  // Manual subtitle file pick — invoked from artplayer's "加载字幕文件"
+  // settings entry. Routes by extension:
+  //   .vtt        → load directly
+  //   .srt        → swap `,` for `.` in timestamps + add WEBVTT header
+  //   .ass / .ssa → convert via subtitleConvert.convertAssToVtt (plain
+  //                 text only — typesetting / colors / animations are
+  //                 stripped because artplayer's renderer is VTT-only;
+  //                 full ASS fidelity needs libass-wasm)
+  async function handleSubtitleFilePick(e) {
+    const input = e.target;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    const art = artRef.current;
+    if (!art) return;
+
+    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
+    let url;
+    try {
+      if (ext === 'vtt') {
+        url = URL.createObjectURL(file);
+      } else if (ext === 'srt') {
+        const text = await file.text();
+        url = URL.createObjectURL(new Blob([convertSrtToVtt(text)], { type: 'text/vtt' }));
+      } else if (ext === 'ass' || ext === 'ssa') {
+        const text = await file.text();
+        url = URL.createObjectURL(new Blob([convertAssToVtt(text)], { type: 'text/vtt' }));
+      } else {
+        // Unknown extension — try as VTT, may fail silently if not parseable.
+        url = URL.createObjectURL(file);
+      }
+    } catch (err) {
+      console.warn('[VideoPlayer] subtitle file load failed:', err);
+      art.notice.show = `字幕加载失败: ${err?.message || err}`;
+      return;
+    }
+
+    if (userSubtitleBlobRef.current) {
+      try { URL.revokeObjectURL(userSubtitleBlobRef.current); } catch { /* ignore */ }
+    }
+    userSubtitleBlobRef.current = url;
+
+    art.subtitle.switch(url, {
+      type: 'vtt',
+      encoding: 'utf-8',
+      style: {
+        color: '#fff',
+        fontSize: `${subtitleSizeRef.current}px`,
+        bottom: `${subtitleOffsetRef.current}px`,
+      },
+    });
+    art.notice.show = `已加载字幕: ${file.name}`;
+  }
+
   return (
     <div style={s.wrapper}>
       <div ref={containerRef} style={s.player} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".vtt,.srt,.ass,.ssa"
+        style={{ display: 'none' }}
+        onChange={handleSubtitleFilePick}
+        data-testid="video-player-subtitle-file-input"
+      />
     </div>
   );
 }

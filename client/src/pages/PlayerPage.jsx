@@ -465,6 +465,11 @@ export default function PlayerPage() {
 
   // P3: library mode — episode click handler
   const handleLibraryEpisodePlay = useCallback(async (episodeId) => {
+    // Subtitle is no longer auto-attached from a sibling .ass file — that
+    // path proved fragile (jassub init in dev was unreliable). mkv internal
+    // tracks still flow through the existing extraction worker; users who
+    // need a specific external .ass/.vtt/.srt can load it via the player's
+    // settings menu ("加载字幕文件").
     const file = await seriesDetail.getFile(episodeId);
     if (!file) {
       // selectFileByName flips fileHandles.status to 'denied' synchronously on
