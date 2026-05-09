@@ -1,20 +1,15 @@
 // @ts-check
 import { mono } from '../shared/hud-tokens';
+import { useLang } from '../../context/LanguageContext';
 
 /** @typedef {'recent'|'new'|'inProgress'|'done'|'almostDone'|'stalled'|'fresh'|null} LibraryFilter */
 /** @typedef {Record<Exclude<LibraryFilter, null>, number>} FilterCounts */
 
-const PRIMARY = /** @type {{ id: Exclude<LibraryFilter, null>, label: string }[]} */ ([
-  { id: 'recent',     label: '最近播放' },
-  { id: 'new',        label: '新加入'   },
-  { id: 'inProgress', label: '未看完'   },
-  { id: 'done',       label: '已完结'   },
+const PRIMARY_IDS = /** @type {Exclude<LibraryFilter, null>[]} */ ([
+  'recent', 'new', 'inProgress', 'done',
 ]);
-
-const SEMANTIC = /** @type {{ id: Exclude<LibraryFilter, null>, label: string, hint: string }[]} */ ([
-  { id: 'almostDone', label: '快看完了', hint: '≥80% 未完结' },
-  { id: 'stalled',    label: '卡住了',   hint: '7 天没动' },
-  { id: 'fresh',      label: '刚开始',   hint: '<10%' },
+const SEMANTIC_IDS = /** @type {Exclude<LibraryFilter, null>[]} */ ([
+  'almostDone', 'stalled', 'fresh',
 ]);
 
 const s = {
@@ -119,18 +114,24 @@ const s = {
  * }} props
  */
 export default function FilterChips({ active, counts, onChange }) {
+  const { t } = useLang();
   const semanticHasAny =
     counts != null &&
     (counts.almostDone > 0 || counts.stalled > 0 || counts.fresh > 0);
 
   return (
     <div style={s.outer}>
-      <div style={s.track} data-testid="library-filters" role="toolbar" aria-label="库筛选">
-        {PRIMARY.map((c) => renderSegment(c, active, counts, onChange))}
+      <div
+        style={s.track}
+        data-testid="library-filters"
+        role="toolbar"
+        aria-label={t('library.filter.aria')}
+      >
+        {PRIMARY_IDS.map((id) => renderSegment(id, active, counts, onChange, t))}
         {semanticHasAny && (
           <>
             <span style={s.divider} aria-hidden />
-            {SEMANTIC.map((c) => renderSegment(c, active, counts, onChange))}
+            {SEMANTIC_IDS.map((id) => renderSegment(id, active, counts, onChange, t))}
           </>
         )}
       </div>
@@ -141,35 +142,44 @@ export default function FilterChips({ active, counts, onChange }) {
           style={s.clear}
           onClick={() => onChange(null)}
         >
-          清除
+          {t('library.filter.clear')}
         </button>
       )}
     </div>
   );
 }
 
+const HINT_KEY = {
+  almostDone: 'library.filter.almostDoneHint',
+  stalled: 'library.filter.stalledHint',
+  fresh: 'library.filter.freshHint',
+};
+
 /**
- * @param {{ id: Exclude<LibraryFilter, null>, label: string, hint?: string }} c
+ * @param {Exclude<LibraryFilter, null>} id
  * @param {LibraryFilter} active
  * @param {FilterCounts | undefined} counts
  * @param {(next: LibraryFilter) => void} onChange
+ * @param {(key: string) => string} t
  */
-function renderSegment(c, active, counts, onChange) {
-  const isActive = active === c.id;
-  const count = counts?.[c.id];
+function renderSegment(id, active, counts, onChange, t) {
+  const isActive = active === id;
+  const count = counts?.[id];
   const dim = count != null && count === 0 && !isActive;
+  const label = t(`library.filter.${id}`);
+  const hint = HINT_KEY[id] ? t(HINT_KEY[id]) : undefined;
   return (
     <button
-      key={c.id}
+      key={id}
       type="button"
-      data-testid={`filter-chip-${c.id}`}
+      data-testid={`filter-chip-${id}`}
       data-active={isActive ? 'true' : 'false'}
       aria-pressed={isActive}
-      title={c.hint}
+      title={hint}
       style={s.segment(isActive, dim)}
-      onClick={() => onChange(isActive ? null : c.id)}
+      onClick={() => onChange(isActive ? null : id)}
     >
-      <span>{c.label}</span>
+      <span>{label}</span>
       {count != null && (
         <span
           style={{
@@ -177,7 +187,7 @@ function renderSegment(c, active, counts, onChange) {
             ...(isActive ? s.countActive : null),
             ...(count === 0 ? s.countZero : null),
           }}
-          data-testid={`filter-chip-${c.id}-count`}
+          data-testid={`filter-chip-${id}-count`}
         >
           {count}
         </span>

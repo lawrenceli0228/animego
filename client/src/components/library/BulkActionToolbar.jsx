@@ -1,5 +1,6 @@
 // @ts-check
 import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+import { useLang } from '../../context/LanguageContext';
 
 const HUE = PLAYER_HUE.stream;
 
@@ -115,13 +116,14 @@ export default function BulkActionToolbar({
   onDelete,
   minMerge = 2,
 }) {
+  const { t } = useLang();
   const canMerge = count >= minMerge;
   const canDelete = count > 0 && !!onDelete;
   return (
     <div
       data-testid="bulk-toolbar"
       role="toolbar"
-      aria-label="批量操作"
+      aria-label={t('library.bulk.aria')}
       style={s.bar}
     >
       <button
@@ -130,10 +132,10 @@ export default function BulkActionToolbar({
         style={s.cancelBtn}
         onClick={onCancel}
       >
-        取消
+        {t('library.bulk.cancel')}
       </button>
       <span style={s.count} data-testid="bulk-toolbar-count">
-        <span style={s.countNum}>{count}</span>项已选
+        <span style={s.countNum}>{count}</span>{t('library.bulk.selectedSuffix')}
       </span>
       <button
         type="button"
@@ -141,7 +143,7 @@ export default function BulkActionToolbar({
         style={s.selectAllBtn}
         onClick={onSelectAll}
       >
-        全选
+        {t('library.bulk.selectAll')}
       </button>
       {onDelete && (
         <button
@@ -152,7 +154,7 @@ export default function BulkActionToolbar({
           aria-disabled={!canDelete}
           onClick={canDelete ? onDelete : undefined}
         >
-          删除
+          {t('library.bulk.delete')}
         </button>
       )}
       <button
@@ -163,7 +165,7 @@ export default function BulkActionToolbar({
         aria-disabled={!canMerge}
         onClick={canMerge ? onMerge : undefined}
       >
-        合并为系列
+        {t('library.bulk.mergeIntoSeries')}
       </button>
     </div>
   );

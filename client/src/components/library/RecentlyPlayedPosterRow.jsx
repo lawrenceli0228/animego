@@ -1,6 +1,7 @@
 // @ts-check
 import SeriesCard from './SeriesCard';
 import ScrollRow from './ScrollRow';
+import { useLang } from '../../context/LanguageContext';
 
 /** @typedef {import('../../lib/library/types').Series} Series */
 /** @typedef {'ok'|'partial'|'offline'|'unknown'} SeriesAvailability */
@@ -39,6 +40,7 @@ export default function RecentlyPlayedPosterRow({
   onPlay,
   availabilityBySeries,
 }) {
+  const { t } = useLang();
   const visible = (entries || []).filter((e) => {
     const av = availabilityBySeries?.get(e.series.id);
     return av !== 'offline';
@@ -47,7 +49,7 @@ export default function RecentlyPlayedPosterRow({
 
   return (
     <ScrollRow
-      label="// 继续看 //"
+      label={t('library.row.continueWatching')}
       count={visible.length}
       testId="row-recently-played"
     >

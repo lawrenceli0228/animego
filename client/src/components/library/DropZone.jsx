@@ -2,6 +2,7 @@
 import { useCallback, useState } from 'react';
 import { mono } from '../shared/hud-tokens';
 import PrivacyHint from '../shared/PrivacyHint';
+import { useLang } from '../../context/LanguageContext';
 
 /** @typedef {'empty'|'hover'|'parsing'} DropZoneState */
 
@@ -379,6 +380,7 @@ export default function DropZone({
   parsing,
   hoverPreview,
 }) {
+  const { t } = useLang();
   // Internal hover tracking — flips when a drag enters the zone, resets on
   // leave/drop. If a parent supplies `state`, that wins (controlled mode).
   const [internalHover, setInternalHover] = useState(false);
@@ -430,10 +432,10 @@ export default function DropZone({
       }}
       aria-label={
         state === 'parsing'
-          ? '导入解析中'
+          ? t('library.drop.ariaParsing')
           : state === 'hover'
-          ? '准备接收文件夹'
-          : '把文件夹拖到这里或选择文件夹'
+          ? t('library.drop.ariaHover')
+          : t('library.drop.ariaIdle')
       }
     >
       <style>{HOVER_GRID_KEYFRAMES}</style>
@@ -441,7 +443,7 @@ export default function DropZone({
       {state === 'hover' && (
         <>
           <span style={s.hoverGrid} aria-hidden />
-          <span style={s.hoverTag}>// 释放以导入</span>
+          <span style={s.hoverTag}>{t('library.drop.releaseToImport')}</span>
         </>
       )}
 
@@ -466,11 +468,11 @@ export default function DropZone({
               <circle cx="28" cy="28" r="1.5" fill="currentColor" stroke="none" />
             </svg>
           </span>
-          <h3 style={s.titleEmpty}>把文件夹拖到这里</h3>
+          <h3 style={s.titleEmpty}>{t('library.drop.title')}</h3>
           <p style={s.subEmpty}>
-            自动识别番剧、归类成系列、对上集号。
+            {t('library.drop.sub1')}
             <br />
-            视频在你电脑上,不上传。
+            {t('library.drop.sub2')}
           </p>
           <button
             type="button"
@@ -480,7 +482,7 @@ export default function DropZone({
             data-testid="dropzone-pick"
           >
             <span style={s.ctaPlusEmpty}>＋</span>
-            选择文件夹
+            {t('library.drop.cta')}
           </button>
           <div style={s.formatRow} aria-hidden>
             <code style={s.formatChip}>.mkv</code>
@@ -497,17 +499,17 @@ export default function DropZone({
       {state === 'hover' && (
         <>
           <div style={s.icon(state)} aria-hidden>⇩</div>
-          <h3 style={s.title(state)}>放下即可开始</h3>
+          <h3 style={s.title(state)}>{t('library.drop.hoverTitle')}</h3>
           <p style={s.help}>
-            检测到{' '}
+            {t('library.drop.hoverDetected')}
             <strong style={{ color: '#fff' }}>
-              {hoverPreview?.folderName ? `1 个文件夹` : '1 个文件夹'}
+              {t('library.drop.hoverFolder1')}
             </strong>
             {hoverPreview?.estimatedCount != null && (
               <>
-                {' · '}估算{' '}
+                {t('library.drop.hoverEstimateMid')}
                 <strong style={{ color: '#fff' }}>
-                  {hoverPreview.estimatedCount} 个媒体文件
+                  {hoverPreview.estimatedCount}{t('library.drop.hoverFiles')}
                 </strong>
               </>
             )}
@@ -534,18 +536,18 @@ export default function DropZone({
                 onClick={parsing.onCancel}
                 data-testid="dropzone-cancel"
               >
-                ⊘ 取消
+                {t('library.drop.parsingCancel')}
               </button>
             )}
           </div>
-          <h3 style={s.parseTitle}>解析中…</h3>
+          <h3 style={s.parseTitle}>{t('library.drop.parsingTitle')}</h3>
           {parsing.currentFile && (
             <div style={s.parseCurrent} title={parsing.currentFile}>
               <span style={s.parseCurrentPrefix}>{'>'}</span>
               {parsing.currentFile}
             </div>
           )}
-          <div style={s.chapterbar} aria-label="文件解析进度">
+          <div style={s.chapterbar} aria-label={t('library.drop.parsingProgressLabel')}>
             <ChapterBarCells
               done={parsing.done}
               warn={parsing.warn}
@@ -577,7 +579,9 @@ export default function DropZone({
               {parsing.done} / {parsing.total}
             </span>
             {parsing.etaSec != null && (
-              <span style={s.parseMeterEta}>ETA {parsing.etaSec} 秒</span>
+              <span style={s.parseMeterEta}>
+                {t('library.drop.parsingEtaPrefix')} {parsing.etaSec} {t('library.drop.parsingEtaUnit')}
+              </span>
             )}
           </div>
         </>

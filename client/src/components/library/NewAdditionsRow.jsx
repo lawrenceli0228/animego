@@ -2,6 +2,7 @@
 import { useMemo } from 'react';
 import SeriesCard from './SeriesCard';
 import ScrollRow from './ScrollRow';
+import { useLang } from '../../context/LanguageContext';
 
 /** @typedef {import('../../lib/library/types').Series} Series */
 /** @typedef {'ok'|'partial'|'offline'|'unknown'} SeriesAvailability */
@@ -35,6 +36,7 @@ export default function NewAdditionsRow({
   onPickSeries,
   availabilityBySeries,
 }) {
+  const { t } = useLang();
   const newest = useMemo(() => {
     const accessible = (series || []).filter((sr) => {
       const av = availabilityBySeries?.get(sr.id);
@@ -49,7 +51,7 @@ export default function NewAdditionsRow({
 
   return (
     <ScrollRow
-      label="// 最近添加 //"
+      label={t('library.row.newAdditions')}
       count={newest.length}
       testId="row-new-additions"
     >

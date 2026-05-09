@@ -1,5 +1,6 @@
 // @ts-check
 import { mono } from '../shared/hud-tokens';
+import { useLang } from '../../context/LanguageContext';
 
 /** @typedef {import('../../hooks/useWatchRhythm').WatchRhythm} WatchRhythm */
 
@@ -97,6 +98,7 @@ const s = {
  * @param {{ rhythm: WatchRhythm, compact?: boolean }} props
  */
 export default function WatchRhythmStrip({ rhythm, compact = false }) {
+  const { t } = useLang();
   // Fresh install / no recent activity → don't render. We also wait until the
   // one-shot fetch resolves; rendering a "0 集" strip during the read window
   // looks broken when we know the answer is coming in 50ms.
@@ -109,23 +111,27 @@ export default function WatchRhythmStrip({ rhythm, compact = false }) {
       data-testid="watch-rhythm-strip"
       data-compact={compact ? 'true' : 'false'}
     >
-      <span style={s.label}>// CADENCE</span>
+      <span style={s.label}>{t('library.rhythm.cadenceLabel')}</span>
 
       <div style={s.stat}>
         <span style={s.num} data-testid="rhythm-this-week">{rhythm.thisWeek}</span>
-        <span style={s.unit}>集本周</span>
+        <span style={s.unit}>{t('library.rhythm.epsThisWeek')}</span>
       </div>
 
       <span style={s.divider} aria-hidden />
 
       <div style={s.stat}>
         <span style={s.num} data-testid="rhythm-streak">{rhythm.streak}</span>
-        <span style={s.unit}>{rhythm.streak === 1 ? '天连续' : '天连续'}</span>
+        <span style={s.unit}>{t('library.rhythm.daysStreak')}</span>
       </div>
 
       <span style={s.divider} aria-hidden />
 
-      <div style={s.cal} data-testid="rhythm-calendar" aria-label={`近 14 天: ${rhythm.totalDays} 天有记录`}>
+      <div
+        style={s.cal}
+        data-testid="rhythm-calendar"
+        aria-label={t('library.rhythm.cal14Aria').replace('{{days}}', String(rhythm.totalDays))}
+      >
         {rhythm.past14.map((filled, i) => (
           <span
             key={i}

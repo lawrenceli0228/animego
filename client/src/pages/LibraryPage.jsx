@@ -884,10 +884,13 @@ export default function LibraryPage() {
             {series.length > 0 && (
               <HudOverflowMenu
                 testId="library-overflow"
+                ariaLabel={t('library.overflow.moreActions')}
                 items={[
                   ...(series.length > 1 ? [{
                     id: 'dedupe',
-                    label: dedupeBusy ? '合并中…' : '合并重复',
+                    label: dedupeBusy
+                      ? t('library.overflow.dedupeBusy')
+                      : t('library.overflow.dedupe'),
                     onClick: handleDedupe,
                     disabled: dedupeBusy,
                     icon: '⇄',
@@ -895,7 +898,9 @@ export default function LibraryPage() {
                   }] : []),
                   {
                     id: 'refresh-meta',
-                    label: refreshingMeta ? '刷新中…' : t('library.refreshMeta'),
+                    label: refreshingMeta
+                      ? t('library.overflow.refreshMetaBusy')
+                      : t('library.refreshMeta'),
                     onClick: handleRefreshMetadata,
                     disabled: refreshingMeta,
                     icon: '↻',
@@ -903,7 +908,9 @@ export default function LibraryPage() {
                   },
                   {
                     id: 'refresh-availability',
-                    label: availRefreshing ? '检测中…' : '刷新硬盘可用性',
+                    label: availRefreshing
+                      ? t('library.overflow.refreshAvailBusy')
+                      : t('library.overflow.refreshAvail'),
                     onClick: handleRefreshAvailability,
                     disabled: availRefreshing,
                     icon: '⌐',
@@ -911,7 +918,7 @@ export default function LibraryPage() {
                   },
                   {
                     id: 'reset',
-                    label: '重置库',
+                    label: t('library.overflow.reset'),
                     onClick: handleResetLibrary,
                     danger: true,
                     divideBefore: true,

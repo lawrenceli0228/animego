@@ -1,6 +1,7 @@
 // @ts-check
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+import { useLang } from '../../context/LanguageContext';
 
 const HUE = PLAYER_HUE.local;
 
@@ -91,6 +92,7 @@ export default function ScrollRow({
   testId = 'scroll-row',
   scrollAmount = 320,
 }) {
+  const { t } = useLang();
   const scrollerRef = useRef(/** @type {HTMLDivElement|null} */ (null));
   const [hovering, setHovering] = useState(false);
   const [canLeft, setCanLeft] = useState(false);
@@ -139,7 +141,7 @@ export default function ScrollRow({
         </div>
         <button
           type="button"
-          aria-label="向左滚动"
+          aria-label={t('library.row.scrollLeft')}
           data-testid={`${testId}-chev-left`}
           style={s.chevron('left', hovering && canLeft)}
           onClick={() => scrollerRef.current?.scrollBy({ left: -scrollAmount, behavior: 'smooth' })}
@@ -148,7 +150,7 @@ export default function ScrollRow({
         </button>
         <button
           type="button"
-          aria-label="向右滚动"
+          aria-label={t('library.row.scrollRight')}
           data-testid={`${testId}-chev-right`}
           style={s.chevron('right', hovering && canRight)}
           onClick={() => scrollerRef.current?.scrollBy({ left: scrollAmount, behavior: 'smooth' })}

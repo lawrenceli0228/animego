@@ -1,6 +1,7 @@
 // @ts-check
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { mono } from '../shared/hud-tokens';
+import { useLang } from '../../context/LanguageContext';
 
 /** @typedef {{ focus: () => void, clear: () => void }} SearchBarHandle */
 
@@ -81,11 +82,13 @@ const s = {
  * @type {React.ForwardRefExoticComponent<SearchBarProps & React.RefAttributes<SearchBarHandle>>}
  */
 const SearchBar = forwardRef(function SearchBar(
-  { value, onChange, placeholder = '搜索系列…' },
+  { value, onChange, placeholder },
   ref,
 ) {
+  const { t } = useLang();
   const inputRef = useRef(/** @type {HTMLInputElement | null} */ (null));
   const [focused, setFocused] = useState(false);
+  const effectivePlaceholder = placeholder ?? t('library.search.placeholder');
 
   useImperativeHandle(
     ref,
@@ -110,7 +113,7 @@ const SearchBar = forwardRef(function SearchBar(
         ref={inputRef}
         type="text"
         data-testid="library-search-input"
-        placeholder={placeholder}
+        placeholder={effectivePlaceholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setFocused(true)}
@@ -127,7 +130,7 @@ const SearchBar = forwardRef(function SearchBar(
           }
         }}
         style={s.input}
-        aria-label="搜索本地库"
+        aria-label={t('library.search.aria')}
       />
       {value.length > 0 ? (
         <button
@@ -138,7 +141,7 @@ const SearchBar = forwardRef(function SearchBar(
             onChange('');
             inputRef.current?.focus();
           }}
-          aria-label="清除搜索"
+          aria-label={t('library.search.clear')}
         >
           ×
         </button>

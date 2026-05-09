@@ -1,6 +1,7 @@
 // @ts-check
 import { useEffect, useRef, useState } from 'react';
 import { mono, PLAYER_HUE } from '../shared/hud-tokens';
+import { useLang } from '../../context/LanguageContext';
 
 const HUE = PLAYER_HUE.stream;
 
@@ -80,6 +81,7 @@ const s = {
  * }} props
  */
 export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLog, onDelete, label = 'Actions ▾' }) {
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(/** @type {HTMLDivElement|null} */ (null));
 
@@ -120,7 +122,7 @@ export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLo
             style={s.item}
             onClick={() => fire(onMerge)}
           >
-            合并到其他系列…
+            {t('library.actionsMenu.mergeTo')}
           </button>
           <button
             type="button"
@@ -129,7 +131,7 @@ export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLo
             style={s.item}
             onClick={() => fire(onSplit)}
           >
-            拆分此系列…
+            {t('library.actionsMenu.splitThis')}
           </button>
           <button
             type="button"
@@ -138,7 +140,7 @@ export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLo
             style={s.item}
             onClick={() => fire(onRematch)}
           >
-            重新匹配…
+            {t('library.actionsMenu.rematch')}
           </button>
           {onOpsLog && (
             <button
@@ -148,7 +150,7 @@ export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLo
               style={s.item}
               onClick={() => fire(onOpsLog)}
             >
-              操作日志
+              {t('library.actionsMenu.opsLog')}
             </button>
           )}
           {onDelete && (
@@ -159,7 +161,7 @@ export default function SeriesActionsMenu({ onMerge, onSplit, onRematch, onOpsLo
               style={s.itemDanger}
               onClick={() => fire(onDelete)}
             >
-              删除…
+              {t('library.actionsMenu.delete')}
             </button>
           )}
         </div>

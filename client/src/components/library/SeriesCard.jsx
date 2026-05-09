@@ -8,6 +8,7 @@ import {
   PROGRESS_FILL,
 } from '../shared/hud-tokens';
 import { CornerBrackets } from '../shared/hud';
+import { useLang } from '../../context/LanguageContext';
 
 // Module-level guard: §5.x cinematic hover / focus styles inject once into
 // document.head. Inline-style React doesn't reach :hover or :focus-visible,
@@ -454,6 +455,7 @@ export default function SeriesCard({
   availability,
   compact = false,
 }) {
+  const { t } = useLang();
   const title = series.titleEn || series.titleZh || series.titleJa || series.id;
   const initial = title.charAt(0).toUpperCase();
   // Whitelist https only — IDB-stored values may be attacker-influenced via
@@ -586,7 +588,7 @@ export default function SeriesCard({
               style={s.availBadge(availability)}
               data-testid="availability-badge"
               data-availability={availability}
-              title={availability === 'offline' ? '硬盘未连接' : '部分文件不可用'}
+              title={availability === 'offline' ? t('library.card.offline') : t('library.card.partial')}
             >
               {availability === 'offline' ? '⊘ OFFLINE' : '⚠ PARTIAL'}
             </span>
@@ -652,7 +654,7 @@ export default function SeriesCard({
                 {series.totalEpisodes != null && (
                   <>
                     <span style={s.epCount}>{series.totalEpisodes}</span>
-                    <span style={s.metaEpUnit}>集</span>
+                    <span style={s.metaEpUnit}>{t('library.card.epUnit')}</span>
                   </>
                 )}
               </div>
@@ -690,7 +692,7 @@ export default function SeriesCard({
         <button
           type="button"
           data-testid="series-kebab"
-          aria-label="操作菜单"
+          aria-label={t('library.card.moreActions')}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={(e) => {
@@ -719,7 +721,7 @@ export default function SeriesCard({
               style={s.menuItem}
               onClick={() => fire('unlock')}
             >
-              解锁匹配
+              {t('library.card.unlock')}
             </button>
           ) : (
             <button
@@ -729,7 +731,7 @@ export default function SeriesCard({
               style={s.menuItem}
               onClick={() => fire('lock')}
             >
-              锁定匹配
+              {t('library.card.lock')}
             </button>
           )}
           <button
@@ -739,7 +741,7 @@ export default function SeriesCard({
             style={s.menuItem}
             onClick={() => fire('merge')}
           >
-            合并到…
+            {t('library.card.mergeTo')}
           </button>
           <button
             type="button"
@@ -748,7 +750,7 @@ export default function SeriesCard({
             style={s.menuItem}
             onClick={() => fire('split')}
           >
-            拆分…
+            {t('library.card.split')}
           </button>
           <button
             type="button"
@@ -757,7 +759,7 @@ export default function SeriesCard({
             style={s.menuItem}
             onClick={() => fire('rematch')}
           >
-            重新匹配…
+            {t('library.card.rematch')}
           </button>
           {hasOverride && (
             <button
@@ -767,7 +769,7 @@ export default function SeriesCard({
               style={s.menuItem}
               onClick={() => fire('clear')}
             >
-              清除覆盖
+              {t('library.card.clearOverride')}
             </button>
           )}
           <button
@@ -777,7 +779,7 @@ export default function SeriesCard({
             style={s.menuItemDanger}
             onClick={() => fire('delete')}
           >
-            删除…
+            {t('library.card.delete')}
           </button>
         </div>
       )}
