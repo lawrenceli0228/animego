@@ -179,6 +179,15 @@ const s = {
     color: '#fff',
     lineHeight: 1.3,
     flex: 1,
+    // Clamp to 2 lines and reserve that space — short titles still occupy
+    // two-line height so cards in the same grid row stay flush.
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    minHeight: 'calc(1.3em * 2)',
+    wordBreak: 'break-word',
   },
   localBadge: {
     ...mono,
