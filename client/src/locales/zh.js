@@ -223,6 +223,7 @@ const zh = {
     currentMatch: '当前匹配',
     confirmDanmaku: '确认',
     danmakuUpdated: '弹幕源已更新',
+    supplementary: '补充内容',
     desktopOnly: '请在电脑上使用此功能',
     desktopHint: '视频播放器需要在桌面浏览器上使用',
   },

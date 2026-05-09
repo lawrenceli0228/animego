@@ -72,6 +72,24 @@ describe('parseEpisodeKind', () => {
     expect(kind).toBe('pv')
   })
 
+  // Commentary variants → 'commentary'. Commentary must outrank the
+  // digit-fallback so episode-numbered commentary tracks aren't misclassified
+  // as main — the negative case below guards the other half of the contract.
+  it.each([
+    ['[Commentary] bracket tag (Re:Zero S1 EP25 commentary cut)', '[DBD-Raws][Re Zero kara Hajimeru Isekai Seikatsu S1][25][Commentary][1080P][BDRip][HEVC-10bit][FLAC].mkv'],
+    ['[Audio Commentary] variant',                                '[SubGroup] AnimeTitle - 12 [Audio Commentary] [1080p].mkv'],
+    ['解说 (simplified Chinese)',                                  'AnimeTitle 12 解说.mkv'],
+    ['解說 (traditional Chinese)',                                  'AnimeTitle 12 解說.mkv'],
+    ['オーディオコメンタリー (Japanese)',                            'AnimeTitle 12 オーディオコメンタリー.mkv'],
+  ])("returns 'commentary' for %s", (_label, filename) => {
+    expect(parseEpisodeKind(filename)).toBe('commentary')
+  })
+
+  it("does NOT classify a plain ep25 file as commentary just because '25' is present", () => {
+    const kind = parseEpisodeKind('[DBD-Raws][Re Zero kara Hajimeru Isekai Seikatsu S1][25][1080P][BDRip][HEVC-10bit][FLACx2].mkv')
+    expect(kind).toBe('main')
+  })
+
   // Regular episode → 'main'
   it("returns 'main' for filename with episode number but no special keyword", () => {
     const kind = parseEpisodeKind('[SubGroup] 进击的巨人 - 03 [1080p].mkv')
@@ -136,6 +154,19 @@ describe('parseEpisodeMeta', () => {
   it('sets resolution to null for a non-standard resolution like 360p', () => {
     const meta = parseEpisodeMeta('[SubGroup] AnimeTitle - 03 [360p].mkv')
     expect(meta.resolution).toBeNull()
+  })
+
+  // Critical contract for commentary cuts: number must still parse so the
+  // downstream danmaku lookup hits the matching main episode's track, while
+  // kind='commentary' lets the UI route this file into the supplementary lane.
+  // title must survive bracket-tag stripping — adding `Commentary` to TAG_RE
+  // could regress this if `[Commentary]` ever shadows the title bracket.
+  it('extracts number=25, kind=commentary, AND title together for Re:Zero S1 commentary cut', () => {
+    const meta = parseEpisodeMeta('[DBD-Raws][Re Zero kara Hajimeru Isekai Seikatsu S1][25][Commentary][1080P][BDRip][HEVC-10bit][FLAC].mkv')
+    expect(meta.number).toBe(25)
+    expect(meta.kind).toBe('commentary')
+    expect(meta.title).toBeTruthy()
+    expect(meta.title).toMatch(/Re Zero/i)
   })
 
   it('returns all-null object for empty string', () => {

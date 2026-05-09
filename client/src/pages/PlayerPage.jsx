@@ -297,11 +297,23 @@ export default function PlayerPage() {
   // EpisodeFileList sees the same shape regardless of how matchResult arrived.
   const pickedItems = locationSeriesId ? libraryVideoFiles : dropZoneItems;
 
-  // Episode numbers from matched files (now drawn from picked group only)
+  // Split commentary cuts off the main list. EpisodeFileList renders them in
+  // a dedicated supplementary lane so they don't sit alongside the main EP25
+  // row with no distinguishing label, and so EpisodeNav chips stay clean.
+  const [pickedMainFiles, pickedSupplementaryFiles] = useMemo(() => {
+    const main = [];
+    const sup = [];
+    for (const f of pickedItems) (f.parsedKind === 'commentary' ? sup : main).push(f);
+    return [main, sup];
+  }, [pickedItems]);
+
+  // Episode numbers from matched files (now drawn from picked group only).
+  // Commentary cuts share an episode number with the main cut and would
+  // otherwise produce duplicate React keys in EpisodeNav (`key={ep}`).
   const episodes = useMemo(() => {
     if (!matchResult?.episodeMap) return [];
     return pickedItems
-      .filter(f => f.episode != null && matchResult.episodeMap[f.episode])
+      .filter(f => f.episode != null && f.parsedKind !== 'commentary' && matchResult.episodeMap[f.episode])
       .map(f => f.episode)
       .sort((a, b) => a - b);
   }, [pickedItems, matchResult]);
@@ -327,14 +339,18 @@ export default function PlayerPage() {
     }
   }, [groups, skippedFileCount, t]);
 
-  // Stable per-episode key for progress memory (localStorage)
+  // Stable per-episode key for progress memory (localStorage). Commentary
+  // tracks share an episode number with the main cut but must not share a
+  // progress slot — otherwise resuming the main cut after watching commentary
+  // would jump to the wrong timestamp.
   const progressKey = useMemo(() => {
     if (playingEp == null || !matchResult?.anime) return null;
     const anime = matchResult.anime;
     const id = anime.anilistId || anime.dandanAnimeId || anime.bgmId;
     if (!id) return null;
-    return `animego:progress:${id}:${playingEp}`;
-  }, [playingEp, matchResult]);
+    const suffix = playingFile?.parsedKind === 'commentary' ? ':commentary' : '';
+    return `animego:progress:${id}:${playingEp}${suffix}`;
+  }, [playingEp, playingFile, matchResult]);
 
   const handleFiles = useCallback(async (fileList, opts = {}) => {
     const mode = opts.mode || 'append';
@@ -391,7 +407,10 @@ export default function PlayerPage() {
   }, [playingFile, resumeAt, progressKey, t]);
 
   const handleEpisodeSwitch = useCallback((epNum) => {
-    const fileItem = pickedItems.find(f => f.episode === epNum);
+    // Prefer the main cut when a commentary file shares the episode number —
+    // file order in pickedItems is filesystem-dependent and could otherwise
+    // make auto-advance land on the commentary track.
+    const fileItem = pickedItems.find(f => f.episode === epNum && f.parsedKind !== 'commentary');
     if (fileItem) startPlayback(fileItem, matchResult?.episodeMap);
   }, [pickedItems, startPlayback, matchResult]);
 
@@ -418,7 +437,7 @@ export default function PlayerPage() {
   const libraryEpisodeNumbers = useMemo(() => {
     if (!locationSeriesId || seriesDetail.status !== 'ready') return [];
     return seriesDetail.episodes
-      .filter((e) => e.kind !== 'sp' && e.number != null)
+      .filter((e) => e.kind !== 'sp' && e.kind !== 'commentary' && e.number != null)
       .map((e) => e.number)
       .sort((a, b) => a - b);
   }, [locationSeriesId, seriesDetail]);
@@ -443,14 +462,17 @@ export default function PlayerPage() {
 
     libraryMatchedRef.current = locationSeriesId;
 
-    const epNums = libraryVideoFiles.map((f) => f.episode).filter(Boolean);
-    const firstName = libraryVideoFiles[0]?.fileName || '';
-    const basicFiles = libraryVideoFiles.map((f) => ({
+    // Exclude commentary so duplicate ep numbers don't skew the dandanplay
+    // episode-count heuristic (mirrors handleManualSelect).
+    const matchInputFiles = libraryVideoFiles.filter((f) => f.parsedKind !== 'commentary');
+    const epNums = matchInputFiles.map((f) => f.episode).filter(Boolean);
+    const firstName = matchInputFiles[0]?.fileName || '';
+    const basicFiles = matchInputFiles.map((f) => ({
       fileName: f.fileName,
       episode: f.episode,
       fileSize: f._fileRef?.size ?? 0,
     }));
-    const getFilesHashes = async () => libraryVideoFiles.map((f) => ({
+    const getFilesHashes = async () => matchInputFiles.map((f) => ({
       fileName: f.fileName,
       episode: f.episode,
       fileHash: f._fileRef?.hash16M ?? '',
@@ -496,9 +518,10 @@ export default function PlayerPage() {
     } else {
       episodeMap = {};
       for (const e of seriesDetail.episodes) {
-        if (e.number != null) {
-          episodeMap[e.number] = { dandanEpisodeId: e.episodeId };
-        }
+        // Mirror buildLibraryMatchResult: commentary inherits main's slot,
+        // never owns it — otherwise last-write-wins clobbers the main cut.
+        if (e.number == null || e.kind === 'commentary') continue;
+        episodeMap[e.number] = { dandanEpisodeId: e.episodeId };
       }
     }
 
@@ -577,7 +600,7 @@ export default function PlayerPage() {
   // P3: library mode prev/next — switch by episode number using seriesDetail.
   const handleLibraryEpisodeSwitchByNumber = useCallback((epNum) => {
     if (!locationSeriesId) return;
-    const ep = seriesDetail.episodes.find((e) => e.number === epNum && e.kind !== 'sp');
+    const ep = seriesDetail.episodes.find((e) => e.number === epNum && e.kind !== 'sp' && e.kind !== 'commentary');
     if (!ep) return;
     handleLibraryEpisodePlay(ep.id);
   }, [locationSeriesId, seriesDetail, handleLibraryEpisodePlay]);
@@ -594,7 +617,7 @@ export default function PlayerPage() {
     if (playbackPhase === 'playing') return;
     if (autoResumeAttempted) return;
     const ep = seriesDetail.episodes.find(
-      (e) => e.number === locationResumeEpisode && e.kind !== 'sp',
+      (e) => e.number === locationResumeEpisode && e.kind !== 'sp' && e.kind !== 'commentary',
     );
     setAutoResumeAttempted(true);
     if (!ep) return;
@@ -642,7 +665,12 @@ export default function PlayerPage() {
   }, [uiPhase, stopPlayback, resetMatch, handleFiles]);
 
   const handleManualSelect = useCallback((anime) => {
-    const epNums = pickedItems.map(f => f.episode).filter(Boolean);
+    // Exclude commentary so duplicate episode numbers don't skew the
+    // dandanplay episode-count heuristic during manual rematch.
+    const epNums = pickedItems
+      .filter(f => f.parsedKind !== 'commentary')
+      .map(f => f.episode)
+      .filter(Boolean);
     selectManual(anime, epNums);
   }, [pickedItems, selectManual]);
 
@@ -654,7 +682,7 @@ export default function PlayerPage() {
     updateEpisodeMap(epNum, data, newAnime);
     if (locationSeriesId && data?.dandanEpisodeId) {
       const target = seriesDetail.episodes.find(
-        (e) => e.number === epNum && e.kind !== 'sp',
+        (e) => e.number === epNum && e.kind !== 'sp' && e.kind !== 'commentary',
       );
       if (target) {
         try {
@@ -676,6 +704,8 @@ export default function PlayerPage() {
   }, [locationSeriesId, seriesDetail, updateEpisodeMap, playingEp, loadComments, t]);
 
   const handleVideoEnded = useCallback(() => {
+    // Commentary tracks don't auto-advance; the user chose them explicitly.
+    if (playingFile?.parsedKind === 'commentary') return;
     // Library mode: advance via libraryEpisodeNumbers + library switcher.
     if (locationSeriesId && libraryEpisodeNumbers.length > 0) {
       const idx = libraryEpisodeNumbers.indexOf(playingEp);
@@ -694,6 +724,7 @@ export default function PlayerPage() {
     handleLibraryEpisodeSwitchByNumber,
     episodes,
     playingEp,
+    playingFile,
     handleEpisodeSwitch,
   ]);
 
@@ -792,7 +823,8 @@ export default function PlayerPage() {
             anime={matchResult.anime}
             siteAnime={matchResult.siteAnime}
             episodeMap={matchResult.episodeMap}
-            videoFiles={pickedItems}
+            videoFiles={pickedMainFiles}
+            supplementaryFiles={pickedSupplementaryFiles}
             onPlay={handleListPlay}
             onClear={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}
             onSetDanmaku={setPickerEp}

@@ -61,16 +61,22 @@ export function buildLibraryMatchResult(seriesDetail) {
   /** @type {Record<number, { dandanEpisodeId?: number, title?: string }>} */
   const episodeMap = {};
   for (const ep of seriesDetail.episodes) {
-    if (ep.number != null) {
-      episodeMap[ep.number] = {
-        dandanEpisodeId: ep.episodeId,
-        title: ep.title || '',
-      };
-    }
+    if (ep.number == null) continue;
+    // Commentary cuts share their episode number with the main cut. They must
+    // not own the episodeMap slot — playback resolves danmaku via map[ep.number],
+    // so we want the commentary file to inherit the main episode's dandanplay
+    // ID and not silently overwrite it (last-write-wins bug).
+    if (ep.kind === 'commentary') continue;
+    episodeMap[ep.number] = {
+      dandanEpisodeId: ep.episodeId,
+      title: ep.title || '',
+    };
   }
-  const videoFiles = episodeListFromSeriesDetail(
+  const allFiles = episodeListFromSeriesDetail(
     seriesDetail.episodes,
     seriesDetail.fileRefByEpisode,
   );
-  return { anime, siteAnime: null, episodeMap, videoFiles };
+  const videoFiles = allFiles.filter((f) => f.parsedKind !== 'commentary');
+  const supplementaryFiles = allFiles.filter((f) => f.parsedKind === 'commentary');
+  return { anime, siteAnime: null, episodeMap, videoFiles, supplementaryFiles };
 }

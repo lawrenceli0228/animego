@@ -223,6 +223,7 @@ const en = {
     currentMatch: 'Current',
     confirmDanmaku: 'Confirm',
     danmakuUpdated: 'Danmaku source updated',
+    supplementary: 'Supplementary',
     desktopOnly: 'Desktop only',
     desktopHint: 'The video player requires a desktop browser',
   },

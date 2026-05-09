@@ -16,7 +16,7 @@
  * @property {{ file: File, fileName: string, episode: number|null, type: string }|null} [subtitle] - 配对字幕信息(null 表示无字幕)
  * @property {string}  [parsedTitle]        - 从文件名解析出的番剧标题
  * @property {number}  [parsedNumber]       - 从文件名解析出的集号
- * @property {'main'|'sp'|'ova'|'movie'|'pv'|'unknown'} parsedKind - 集类型
+ * @property {'main'|'sp'|'ova'|'movie'|'pv'|'commentary'|'unknown'} parsedKind - 集类型
  * @property {string}  [parsedGroup]        - 字幕组(从括号标签提取)
  * @property {'480p'|'720p'|'1080p'|'2160p'} [parsedResolution]   - 分辨率标签
  * @property {string}  [hash16M]            - 首 16MB SparkMD5(P1 末期 hash 完才填入)
@@ -114,7 +114,7 @@
  * @property {string}  [seasonId]
  * @property {number}  [episodeId]     - dandanplay episode id
  * @property {number}  number
- * @property {'main'|'sp'|'ova'|'movie'|'pv'} kind
+ * @property {'main'|'sp'|'ova'|'movie'|'pv'|'commentary'} kind
  * @property {string}  [title]
  * @property {string}  primaryFileId
  * @property {string[]} alternateFileIds

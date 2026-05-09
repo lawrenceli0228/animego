@@ -44,7 +44,7 @@ export function parseEpisodeNumber(filename) {
   return null;
 }
 
-const TAG_RE = /^(\d{2,4}[Pp]?\b|HEVC|AVC|x26[45]|H\.?26[45]|AAC|FLAC|WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay|CHS|CHT|JPN?|ENG?|BIG5|GB|S\d+E?\d*|\d{1,3}(?:v\d+)?|SP\d*|OVA|OAD|NCOP|NCED|[A-Z0-9 ]+\d{3,4}[Pp])$/i;
+const TAG_RE = /^(\d{2,4}[Pp]?\b|HEVC|AVC|x26[45]|H\.?26[45]|AAC|FLAC|WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay|CHS|CHT|JPN?|ENG?|BIG5|GB|S\d+E?\d*|\d{1,3}(?:v\d+)?|SP\d*|OVA|OAD|NCOP|NCED|Commentary|Audio\s+Commentary|[A-Z0-9 ]+\d{3,4}[Pp])$/i;
 const RANGE_RE = /^\d{1,3}\s*-\s*\d{1,3}$/;
 // ANY quality/codec token inside a bracket → bracket is a tag. Catches
 // space- or underscore-separated compounds the single-token TAG_RE misses,
@@ -142,33 +142,37 @@ export function dandanToArtplayer(raw) {
 // ─── P1 新增:集类型与完整元数据解析 ───────────────────────────────────────────
 
 const KIND_PATTERNS = {
-  sp:    /\b(?:SP\d*|OAD\d*)\b/i,
-  ova:   /\bOVA\d*\b/i,
-  movie: /(?:\bMovie\b|劇場版|剧场版)/i,
-  pv:    /(?:\bPV\d*\b|预告|預告)/i,
+  sp:         /\b(?:SP\d*|OAD\d*)\b/i,
+  ova:        /\bOVA\d*\b/i,
+  movie:      /(?:\bMovie\b|劇場版|剧场版)/i,
+  pv:         /(?:\bPV\d*\b|预告|預告)/i,
+  commentary: /(?:\bAudio\s+Commentary\b|\bCommentary\b|解[说說]|オーディオコメンタリー)/i,
 };
 
 /**
  * 从文件名推断集类型。
  *
- * 识别规则:
- * - SP\d* / OAD\d*  → 'sp'
- * - OVA\d*          → 'ova'
- * - Movie / 劇場版 / 剧场版 → 'movie'
- * - PV\d* / 预告 / 預告     → 'pv'
- * - 有集号或常规文件名       → 'main'
- * - 无以上特征且无数字       → 'unknown'
+ * 识别规则（按优先级）:
+ * - SP\d* / OAD\d*               → 'sp'
+ * - OVA\d*                        → 'ova'
+ * - Movie / 劇場版 / 剧场版         → 'movie'
+ * - PV\d* / 预告 / 預告             → 'pv'
+ * - Commentary / Audio Commentary
+ *   / 解说 / 解說 / オーディオコメンタリー → 'commentary'
+ * - 有集号或常规文件名             → 'main'
+ * - 无以上特征且无数字             → 'unknown'
  *
  * @param {string} filename
- * @returns {'main'|'sp'|'ova'|'movie'|'pv'|'unknown'}
+ * @returns {'main'|'sp'|'ova'|'movie'|'pv'|'commentary'|'unknown'}
  */
 export function parseEpisodeKind(filename) {
   if (!filename) return 'unknown';
 
-  if (KIND_PATTERNS.sp.test(filename))    return 'sp';
-  if (KIND_PATTERNS.ova.test(filename))   return 'ova';
-  if (KIND_PATTERNS.movie.test(filename)) return 'movie';
-  if (KIND_PATTERNS.pv.test(filename))    return 'pv';
+  if (KIND_PATTERNS.sp.test(filename))         return 'sp';
+  if (KIND_PATTERNS.ova.test(filename))        return 'ova';
+  if (KIND_PATTERNS.movie.test(filename))      return 'movie';
+  if (KIND_PATTERNS.pv.test(filename))         return 'pv';
+  if (KIND_PATTERNS.commentary.test(filename)) return 'commentary';
 
   // 含数字则视为正片,否则无法判断
   if (/\d/.test(filename)) return 'main';
@@ -186,7 +190,7 @@ const RESOLUTION_LABEL_MAP = {
  * 从文件名解析剧集完整元数据,内部复用现有 parseEpisodeNumber / parseAnimeKeyword。
  *
  * @param {string} filename
- * @returns {{ title: string|null, number: number|null, kind: 'main'|'sp'|'ova'|'movie'|'pv'|'unknown', group: string|null, resolution: '480p'|'720p'|'1080p'|'2160p'|null }}
+ * @returns {{ title: string|null, number: number|null, kind: 'main'|'sp'|'ova'|'movie'|'pv'|'commentary'|'unknown', group: string|null, resolution: '480p'|'720p'|'1080p'|'2160p'|null }}
  */
 export function parseEpisodeMeta(filename) {
   if (!filename) {

@@ -239,8 +239,10 @@ export default function LocalSeriesPage() {
         return;
       }
       // Persist new dandanEpisodeId on the matching IDB Episode row so next
-      // play() picks it up. Match by number (and skip 'sp' kind for safety).
-      const target = episodes.find((e) => e.number === pickerEp && e.kind !== 'sp');
+      // play() picks it up. Match by number, skipping kinds that don't own
+      // the danmaku slot ('sp' has its own picker flow; 'commentary' inherits
+      // from the main cut and must not be redirected here).
+      const target = episodes.find((e) => e.number === pickerEp && e.kind !== 'sp' && e.kind !== 'commentary');
       if (!target) {
         setPickerEp(null);
         return;
@@ -459,6 +461,7 @@ export default function LocalSeriesPage() {
           siteAnime={enrichedMatchResult.siteAnime}
           episodeMap={enrichedMatchResult.episodeMap}
           videoFiles={enrichedMatchResult.videoFiles}
+          supplementaryFiles={enrichedMatchResult.supplementaryFiles || []}
           onPlay={handlePlayItem}
           onClear={handleBack}
           onSetDanmaku={(epNum) => setPickerEp(epNum)}

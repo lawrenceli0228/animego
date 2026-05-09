@@ -162,6 +162,74 @@ describe('EpisodeFileList — episode rows', () => {
   });
 });
 
+describe('EpisodeFileList — supplementary lane', () => {
+  it('does not render the supplementary section when supplementaryFiles is empty or omitted', () => {
+    renderList();
+    expect(screen.queryByText(/player\.supplementary|补充内容/)).not.toBeInTheDocument();
+    expect(screen.queryByText('COMMENTARY')).not.toBeInTheDocument();
+  });
+
+  it('renders commentary rows in a separate section with a COMMENTARY badge', () => {
+    renderList({
+      supplementaryFiles: [
+        { fileName: 'show-25-commentary.mkv', episode: 25, parsedKind: 'commentary' },
+      ],
+    });
+    expect(screen.getByText(/player\.supplementary/)).toBeInTheDocument();
+    expect(screen.getByText('show-25-commentary.mkv')).toBeInTheDocument();
+    expect(screen.getByText('COMMENTARY')).toBeInTheDocument();
+  });
+
+  it('clicking a supplementary row calls onPlay with the supplementary fileItem', () => {
+    const onPlay = vi.fn();
+    renderList({
+      onPlay,
+      supplementaryFiles: [
+        { fileName: 'show-25-commentary.mkv', episode: 25, parsedKind: 'commentary' },
+      ],
+    });
+    fireEvent.click(screen.getByText('show-25-commentary.mkv'));
+    expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({
+      fileName: 'show-25-commentary.mkv',
+      parsedKind: 'commentary',
+    }));
+  });
+
+  it('borrows the main cut episode title from episodeMap so commentary row shows context', () => {
+    renderList({
+      episodeMap: { 1: { title: 'Beginning' }, 25: { title: 'Finale' } },
+      supplementaryFiles: [
+        { fileName: 'show-25-commentary.mkv', episode: 25, parsedKind: 'commentary' },
+      ],
+    });
+    expect(screen.getByText('Finale')).toBeInTheDocument();
+  });
+
+  // Defensive: a legacy IDB row with no parsedKind should still render the
+  // row (it lives in supplementaryFiles for some other reason) without
+  // throwing on undefined.toUpperCase().
+  it('renders a supplementary row with no badge when parsedKind is undefined', () => {
+    renderList({
+      supplementaryFiles: [
+        { fileName: 'mystery-track.mkv', episode: 25 },
+      ],
+    });
+    expect(screen.getByText('mystery-track.mkv')).toBeInTheDocument();
+    expect(screen.queryByText('COMMENTARY')).not.toBeInTheDocument();
+  });
+
+  // Forward-compat: a future kind without a SUPPLEMENTARY_KIND_LABEL entry
+  // falls back to the uppercased parsedKind so the row is still labelled.
+  it('falls back to uppercased parsedKind for kinds not in SUPPLEMENTARY_KIND_LABEL', () => {
+    renderList({
+      supplementaryFiles: [
+        { fileName: 'show-bonus.mkv', episode: 25, parsedKind: 'bonus' },
+      ],
+    });
+    expect(screen.getByText('BONUS')).toBeInTheDocument();
+  });
+});
+
 describe('EpisodeFileList — siteAnime skeleton', () => {
   it('renders skeleton when siteAnime is null AND siteAnimeLoading is true', () => {
     renderList({ siteAnime: null, siteAnimeLoading: true });
