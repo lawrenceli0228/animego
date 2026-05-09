@@ -114,13 +114,21 @@ function TorrentRow({ item, copied, onCopy, onOpen }) {
             <span style={{
               fontSize: 9, padding: '1px 5px', borderRadius: 3, fontWeight: 700,
               textTransform: 'uppercase', letterSpacing: '0.5px',
-              background: item.source === 'nyaa'  ? 'rgba(90,200,250,0.1)'
-                        : item.source === 'dmhy'  ? 'rgba(52,211,153,0.1)'
-                        : 'rgba(84,84,88,0.30)',
-              color: item.source === 'nyaa'  ? '#5ac8fa'
-                   : item.source === 'dmhy'  ? '#34d399'
-                   : 'rgba(235,235,245,0.30)',
-            }}>{item.source === 'dmhy' ? '花园' : item.source}</span>
+              background:
+                item.source === 'nyaa'   ? 'rgba(90,200,250,0.1)'
+              : item.source === 'garden' ? 'rgba(52,211,153,0.1)'
+              : item.source === 'dmhy'   ? 'rgba(52,211,153,0.1)'
+              :                            'rgba(84,84,88,0.30)',
+              color:
+                item.source === 'nyaa'   ? '#5ac8fa'
+              : item.source === 'garden' ? '#34d399'
+              : item.source === 'dmhy'   ? '#34d399'
+              :                            'rgba(235,235,245,0.30)',
+            }}>{
+              item.source === 'garden' ? '花园'
+            : item.source === 'dmhy'   ? '花园'
+            :                            item.source
+            }</span>
           )}
         </div>
       </div>
@@ -254,8 +262,8 @@ export default function TorrentModal({ anime, onClose }) {
         style={{
           background: '#000000',
           border: '1px solid rgba(120,120,128,0.12)',
-          borderRadius: 16, width: '100%', maxWidth: 1060,
-          height: 'min(88vh, 700px)',
+          borderRadius: 16, width: '100%', maxWidth: 1320,
+          height: 'min(90vh, 820px)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}
         onClick={e => e.stopPropagation()}
