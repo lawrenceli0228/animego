@@ -14,6 +14,10 @@ const HOVER_GRID_KEYFRAMES = `
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.55; }
 }
+@keyframes animego-dropzone-hex-breathe {
+  0%, 100% { opacity: 0.7;  transform: scale(1); }
+  50%      { opacity: 0.95; transform: scale(1.04); }
+}
 `;
 
 const s = {
@@ -21,22 +25,25 @@ const s = {
     width: '100%',
     maxWidth: 640,
     margin: '0 auto',
-    aspectRatio: '4 / 3',
-    borderRadius: 16,
-    padding: 24,
+    // §5.x v4: empty no longer locked to 4:3 — content + generous padding
+    // drives the height. Hover keeps 4:3 so the drag-target footprint matches
+    // what the user "saw a moment ago" without a layout pop.
+    ...(state === 'empty' ? null : { aspectRatio: '4 / 3' }),
+    borderRadius: state === 'empty' ? 12 : 16,
+    padding: state === 'empty' ? '64px 48px 56px' : 24,
     display: 'flex',
     flexDirection: 'column',
     alignItems: state === 'parsing' ? 'stretch' : 'center',
     justifyContent: state === 'parsing' ? 'flex-start' : 'center',
     textAlign: state === 'parsing' ? 'left' : 'center',
-    gap: state === 'parsing' ? 14 : 16,
+    gap: state === 'parsing' ? 14 : state === 'empty' ? 18 : 16,
     transition: 'all 250ms cubic-bezier(0.4,0,0.2,1)',
     position: 'relative',
     overflow: 'hidden',
     color: '#fff',
     ...(state === 'empty' ? {
       background: 'rgba(28,28,30,0.40)',
-      border: '1.5px dashed rgba(84,84,88,0.65)',
+      border: '1px dashed rgba(120,120,128,0.32)',
     } : null),
     ...(state === 'hover' ? {
       background: 'rgba(10,132,255,0.06)',
@@ -230,6 +237,84 @@ const s = {
   },
   parseMeterPct: { color: '#0a84ff' },
   parseMeterEta: { color: 'rgba(235,235,245,0.30)' },
+
+  // §5.x v4 — minimal empty state. Single hex glyph, calm type rhythm,
+  // formats as faded mono row, privacy line at the bottom. Replaces the
+  // legacy ▤ + sentence-with-inline-codes layout. Hover state untouched.
+  iconHexEmpty: {
+    width: 56,
+    height: 56,
+    color: '#5ac8fa',
+    opacity: 0.85,
+    animation: 'animego-dropzone-hex-breathe 4.8s ease-in-out infinite',
+    display: 'block',
+    transition: 'color 240ms ease, transform 240ms cubic-bezier(0.16,1,0.3,1)',
+  },
+  titleEmpty: {
+    fontFamily: "'Sora', sans-serif",
+    fontWeight: 600,
+    fontSize: 22,
+    letterSpacing: '-0.012em',
+    color: '#fff',
+    margin: 0,
+    lineHeight: 1.3,
+  },
+  subEmpty: {
+    fontFamily: "'Sora', sans-serif",
+    fontWeight: 400,
+    fontSize: 14,
+    lineHeight: 1.6,
+    color: 'rgba(235,235,245,0.62)',
+    margin: 0,
+    maxWidth: '36ch',
+  },
+  ctaEmpty: {
+    fontFamily: "'Sora', sans-serif",
+    fontWeight: 600,
+    fontSize: 14,
+    height: 44,
+    padding: '0 22px',
+    background: '#0a84ff',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    letterSpacing: '0.005em',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.4)',
+    transition: 'background 150ms ease, transform 150ms cubic-bezier(0.16,1,0.3,1), box-shadow 150ms ease',
+    marginTop: 6,
+  },
+  ctaPlusEmpty: {
+    ...mono,
+    fontSize: 13,
+    fontWeight: 500,
+    opacity: 0.75,
+  },
+  formatRow: {
+    ...mono,
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.38)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    letterSpacing: '0.02em',
+    marginTop: 4,
+  },
+  formatChip: {
+    ...mono,
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.62)',
+    background: 'transparent',
+    padding: 0,
+  },
+  formatSep: {
+    color: 'rgba(235,235,245,0.22)',
+  },
 };
 
 /**
@@ -360,53 +445,74 @@ export default function DropZone({
         </>
       )}
 
-      {state !== 'parsing' && (
+      {state === 'empty' && (
         <>
-          <div style={s.icon(state)} aria-hidden>
-            {state === 'hover' ? '⇩' : '▤'}
+          <span style={s.iconHexEmpty} aria-hidden>
+            <svg
+              width="56"
+              height="56"
+              viewBox="0 0 56 56"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M28 6 L48.7846 18 L48.7846 38 L28 50 L7.2154 38 L7.2154 18 Z" />
+              <path
+                d="M28 16 L39.6 22.7 L39.6 33.3 L28 40 L16.4 33.3 L16.4 22.7 Z"
+                opacity="0.45"
+              />
+              <circle cx="28" cy="28" r="1.5" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
+          <h3 style={s.titleEmpty}>把文件夹拖到这里</h3>
+          <p style={s.subEmpty}>
+            自动识别番剧、归类成系列、对上集号。
+            <br />
+            视频在你电脑上,不上传。
+          </p>
+          <button
+            type="button"
+            style={isFsaSupported ? s.ctaEmpty : { ...s.ctaEmpty, ...s.ctaDisabled }}
+            onClick={onPick}
+            disabled={!isFsaSupported}
+            data-testid="dropzone-pick"
+          >
+            <span style={s.ctaPlusEmpty}>＋</span>
+            选择文件夹
+          </button>
+          <div style={s.formatRow} aria-hidden>
+            <code style={s.formatChip}>.mkv</code>
+            <code style={s.formatChip}>.mp4</code>
+            <code style={s.formatChip}>.mov</code>
+            <span style={s.formatSep}>·</span>
+            <code style={s.formatChip}>.ass</code>
+            <code style={s.formatChip}>.srt</code>
           </div>
-          <h3 style={s.title(state)}>
-            {state === 'hover' ? '放下即可开始' : '把文件夹拖到这里'}
-          </h3>
-          {state === 'hover' ? (
-            <p style={s.help}>
-              检测到{' '}
-              <strong style={{ color: '#fff' }}>
-                {hoverPreview?.folderName ? `1 个文件夹` : '1 个文件夹'}
-              </strong>
-              {hoverPreview?.estimatedCount != null && (
-                <>
-                  {' · '}估算{' '}
-                  <strong style={{ color: '#fff' }}>
-                    {hoverPreview.estimatedCount} 个媒体文件
-                  </strong>
-                </>
-              )}
-            </p>
-          ) : (
-            <p style={s.help}>
-              支持 <code style={s.helpCode}>.mkv</code>{' '}
-              <code style={s.helpCode}>.mp4</code>{' '}
-              <code style={s.helpCode}>.mov</code> · 自动按系列归类
-              <br />
-              所有解析在本地进行,文件不会上传
-            </p>
-          )}
-          {state === 'empty' && (
-            <>
-              <button
-                type="button"
-                style={isFsaSupported ? s.cta : { ...s.cta, ...s.ctaDisabled }}
-                onClick={onPick}
-                disabled={!isFsaSupported}
-                data-testid="dropzone-pick"
-              >
-                ＋ 选择文件夹
-              </button>
-              <PrivacyHint compact />
-            </>
-          )}
-          {state === 'hover' && hoverPreview?.folderName && (
+          <PrivacyHint compact />
+        </>
+      )}
+
+      {state === 'hover' && (
+        <>
+          <div style={s.icon(state)} aria-hidden>⇩</div>
+          <h3 style={s.title(state)}>放下即可开始</h3>
+          <p style={s.help}>
+            检测到{' '}
+            <strong style={{ color: '#fff' }}>
+              {hoverPreview?.folderName ? `1 个文件夹` : '1 个文件夹'}
+            </strong>
+            {hoverPreview?.estimatedCount != null && (
+              <>
+                {' · '}估算{' '}
+                <strong style={{ color: '#fff' }}>
+                  {hoverPreview.estimatedCount} 个媒体文件
+                </strong>
+              </>
+            )}
+          </p>
+          {hoverPreview?.folderName && (
             <div style={{ ...s.secondary, color: '#0a84ff' }}>
               {hoverPreview.folderName.toUpperCase()}/
             </div>
