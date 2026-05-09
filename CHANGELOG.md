@@ -2,6 +2,28 @@
 
 ---
 
+## [1.0.18] - 2026-05-03
+
+### 弹幕滚动模糊修复 — 关掉 plugin 的 perspective:500px
+
+**问题:**
+
+- 弹幕在横向滚动时字体严重模糊,看不清,跨 Chrome / Safari 都有
+
+**根因:**
+
+- `artplayer-plugin-danmuku@5.3.0` 给每条弹幕 `<div>` 设置了 inline `perspective: 500px`,触发 3D 渲染上下文
+- 配合 `transform: translateX(...)` 的横向位移,浏览器按 3D 透视矩阵 rasterize 字形,在非整数像素位置产生亚像素模糊 + 抗锯齿失效
+- `will-change: transform` 已经把元素提到独立 GPU layer,perspective 是好心办坏事
+
+**修复(`client/src/styles/artplayer-overrides.css`):**
+
+- 覆盖 `.art-video-player .art-danmuku > div`:`perspective: none !important` + `transform-style: flat`
+- 加 `-webkit-font-smoothing: antialiased` + `text-rendering: geometricPrecision` 做防御
+- 弹幕回到纯 2D 平移(仍是 GPU 加速),滚动中字体保持锐利
+
+---
+
 ## [1.0.17] - 2026-04-28
 
 ### 弹幕热力图视觉重调 — 缝隙消除 + Tuner/Production 同源
