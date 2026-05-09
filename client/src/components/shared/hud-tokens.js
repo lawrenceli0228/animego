@@ -44,7 +44,30 @@ export const PLAYER_HUE = {
   ingest: 210,    // DropZone, danmaku picker — aligned to stream blue per DESIGN.md
   status: 200,    // MatchProgress connector bar
   live: 140,      // active/done states (greens)
+  local: 210,     // §5.10 LOCAL family — same as stream, named for library scope
 }
+
+/**
+ * Library-scope hue registry (§5.10). Library surfaces (LibraryPage, LocalSeriesPage,
+ * SeriesCard) reuse PLAYER_HUE.local for the LOCAL family; this registry only holds
+ * the off-family hues that don't fit `local` — currently `unclassified` for amber
+ * borders on the unmatched-files dropzone.
+ */
+export const LIBRARY_HUE = {
+  unclassified: 40, // amber — §5.5 未归类 dropzone border
+}
+
+/** §5.10 — `⬡` U+2B22 LOCAL glyph, used by SeriesCard / UndoToast / LocalSeriesPage hero. */
+export const LOCAL_HEX_GLYPH = '⬡'
+
+/** §5.10 — `--local-badge-color`. LOCAL pill text + border (rgba alpha applied at site). */
+export const LOCAL_BADGE_COLOR = '#5ac8fa'
+
+/** §5.10 — `--progress-fill`. Solid iOS Blue for filled portions of progress bars. */
+export const PROGRESS_FILL = '#0a84ff'
+
+/** §5.10 — `--progress-track`. OKLCH track tone for non-poster progress contexts. */
+export const PROGRESS_TRACK = `oklch(62% 0.17 ${PLAYER_HUE.local} / 0.25)`
 
 /**
  * L tier (lightness %) — layered depth, dark→light.

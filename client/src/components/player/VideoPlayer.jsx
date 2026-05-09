@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import Artplayer from 'artplayer';
 import { applyHeatmapPath } from '../../lib/heatmapPath';
+import { convertAssToVtt, convertSrtToVtt } from '../../utils/subtitleConvert';
 
 const s = {
   wrapper: { width: '100%', position: 'relative' },
@@ -150,19 +151,34 @@ function writeProgress(key, t) {
   }
 }
 
-export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnded, progressKey }) {
+export default function VideoPlayer({
+  videoUrl,
+  danmakuList,
+  subtitleUrl,
+  onEnded,
+  progressKey,
+  resumeAt = null,
+  onProgressTick,
+}) {
   const containerRef = useRef(null);
   const artRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const userSubtitleBlobRef = useRef(null);
   const progressKeyRef = useRef(progressKey);
   const danmakuListRef = useRef(danmakuList);
   const subtitleSizeRef = useRef(readSubtitleSize());
   const subtitleOffsetRef = useRef(readSubtitleOffset());
   const playbackRateRef = useRef(readPlaybackRate());
   const danmakuVisibleRef = useRef(readDanmakuVisible());
+  // P2 in-memory resume — used only when progressKey is absent (unmatched files).
+  const resumeAtRef = useRef(resumeAt);
+  const onProgressTickRef = useRef(onProgressTick);
 
   // Keep refs in sync so async init / event handlers always see the latest values.
   useEffect(() => { progressKeyRef.current = progressKey; }, [progressKey]);
   useEffect(() => { danmakuListRef.current = danmakuList; }, [danmakuList]);
+  useEffect(() => { resumeAtRef.current = resumeAt; }, [resumeAt]);
+  useEffect(() => { onProgressTickRef.current = onProgressTick; }, [onProgressTick]);
 
   useEffect(() => {
     if (!containerRef.current || !videoUrl) return;
@@ -264,6 +280,15 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
               return next;
             },
           },
+          {
+            html: '加载字幕文件',
+            tooltip: '本地 .vtt / .srt / .ass',
+            selector: [{ html: '点击选择…', value: 'pick' }],
+            onSelect() {
+              fileInputRef.current?.click();
+              return '点击选择…';
+            },
+          },
         ],
         plugins: [
           artplayerPluginDanmuku({
@@ -306,21 +331,32 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
       let restored = false;
       let lastSaveAt = 0;
       art.on('video:canplay', () => {
-        const key = progressKeyRef.current;
-        if (!key || restored) return;
+        if (restored) return;
         restored = true;
-        const saved = readProgress(key);
-        if (saved != null && saved > RESTORE_MIN_SECONDS && saved < art.duration - RESTORE_TAIL_MARGIN) {
-          art.currentTime = saved;
+        const key = progressKeyRef.current;
+        // localStorage path (matched files) takes precedence — richer signal,
+        // survives reload. Fall back to in-memory resumeAt only when no key.
+        if (key) {
+          const saved = readProgress(key);
+          if (saved != null && saved > RESTORE_MIN_SECONDS && saved < art.duration - RESTORE_TAIL_MARGIN) {
+            art.currentTime = saved;
+          }
+          return;
+        }
+        const ra = resumeAtRef.current;
+        if (typeof ra === 'number' && ra > RESTORE_MIN_SECONDS && ra < art.duration - RESTORE_TAIL_MARGIN) {
+          art.currentTime = ra;
         }
       });
       art.on('video:timeupdate', () => {
-        const key = progressKeyRef.current;
-        if (!key) return;
         const now = Date.now();
         if (now - lastSaveAt < SAVE_INTERVAL_MS) return;
         lastSaveAt = now;
-        if (art.currentTime > RESTORE_MIN_SECONDS) writeProgress(key, art.currentTime);
+        const key = progressKeyRef.current;
+        if (key && art.currentTime > RESTORE_MIN_SECONDS) writeProgress(key, art.currentTime);
+        // P2: also notify the hook so unmatched files can resume across episode switches.
+        const tick = onProgressTickRef.current;
+        if (tick && art.currentTime > RESTORE_MIN_SECONDS) tick(art.currentTime);
       });
 
       // Heatmap is always visible (design tuning) — set the attribute so the
@@ -370,6 +406,11 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
       if (key && inst.currentTime > RESTORE_MIN_SECONDS && inst.currentTime < inst.duration - RESTORE_TAIL_MARGIN) {
         writeProgress(key, inst.currentTime);
       }
+      // P2: also flush in-memory tick so the next play() can resume.
+      const tick = onProgressTickRef.current;
+      if (tick && inst.currentTime > RESTORE_MIN_SECONDS && inst.currentTime < inst.duration - RESTORE_TAIL_MARGIN) {
+        tick(inst.currentTime);
+      }
       inst.destroy(false);
       artRef.current = null;
       if (typeof window !== 'undefined' && window.__artInstance === inst) {
@@ -403,9 +444,71 @@ export default function VideoPlayer({ videoUrl, danmakuList, subtitleUrl, onEnde
     danmuku.load();
   }, [danmakuList]);
 
+  // Manual subtitle file pick — invoked from artplayer's "加载字幕文件"
+  // settings entry. Routes by extension:
+  //   .vtt        → load directly
+  //   .srt        → swap `,` for `.` in timestamps + add WEBVTT header
+  //   .ass / .ssa → convert via subtitleConvert.convertAssToVtt (plain
+  //                 text only — typesetting / colors / animations are
+  //                 stripped because artplayer's renderer is VTT-only;
+  //                 full ASS fidelity needs libass-wasm)
+  async function handleSubtitleFilePick(e) {
+    const input = e.target;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    const art = artRef.current;
+    if (!art) return;
+
+    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
+    let url;
+    try {
+      if (ext === 'vtt') {
+        url = URL.createObjectURL(file);
+      } else if (ext === 'srt') {
+        const text = await file.text();
+        url = URL.createObjectURL(new Blob([convertSrtToVtt(text)], { type: 'text/vtt' }));
+      } else if (ext === 'ass' || ext === 'ssa') {
+        const text = await file.text();
+        url = URL.createObjectURL(new Blob([convertAssToVtt(text)], { type: 'text/vtt' }));
+      } else {
+        // Unknown extension — try as VTT, may fail silently if not parseable.
+        url = URL.createObjectURL(file);
+      }
+    } catch (err) {
+      console.warn('[VideoPlayer] subtitle file load failed:', err);
+      art.notice.show = `字幕加载失败: ${err?.message || err}`;
+      return;
+    }
+
+    if (userSubtitleBlobRef.current) {
+      try { URL.revokeObjectURL(userSubtitleBlobRef.current); } catch { /* ignore */ }
+    }
+    userSubtitleBlobRef.current = url;
+
+    art.subtitle.switch(url, {
+      type: 'vtt',
+      encoding: 'utf-8',
+      style: {
+        color: '#fff',
+        fontSize: `${subtitleSizeRef.current}px`,
+        bottom: `${subtitleOffsetRef.current}px`,
+      },
+    });
+    art.notice.show = `已加载字幕: ${file.name}`;
+  }
+
   return (
     <div style={s.wrapper}>
       <div ref={containerRef} style={s.player} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".vtt,.srt,.ass,.ssa"
+        style={{ display: 'none' }}
+        onChange={handleSubtitleFilePick}
+        data-testid="video-player-subtitle-file-input"
+      />
     </div>
   );
 }

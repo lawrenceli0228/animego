@@ -1,9 +1,17 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { createHashPool } from '../lib/library/hashPool';
+import { groupByFolder } from '../lib/library/grouping';
+import { flattenDropFiles } from '../utils/dropFiles';
 import { useLang } from '../context/LanguageContext';
 import useVideoFiles from '../hooks/useVideoFiles';
 import useDandanMatch from '../hooks/useDandanMatch';
 import useDandanComments from '../hooks/useDandanComments';
 import usePlaybackSession from '../hooks/usePlaybackSession';
+import useFileHandles from '../hooks/useFileHandles';
+import useSeriesDetail from '../hooks/useSeriesDetail';
+import { db } from '../lib/library/db/db.js';
+import { episodeListFromSeriesDetail } from '../lib/library/buildLibraryMatchResult.js';
 import DropZone from '../components/player/DropZone';
 import MatchProgress from '../components/player/MatchProgress';
 import ManualSearch from '../components/player/ManualSearch';
@@ -11,6 +19,7 @@ import EpisodeFileList from '../components/player/EpisodeFileList';
 import PlayerHudFrame from '../components/player/PlayerHudFrame';
 import EpisodeNav from '../components/player/EpisodeNav';
 import DanmakuPicker from '../components/player/DanmakuPicker';
+import LibraryAccessEmpty from '../components/library/LibraryAccessEmpty';
 import { ChapterBar, SectionNum, CornerBrackets } from '../components/shared/hud';
 import { mono, PLAYER_HUE } from '../components/shared/hud-tokens';
 import toast from 'react-hot-toast';
@@ -134,7 +143,45 @@ const s = {
     background: '#0a84ff', color: '#fff', border: 'none',
     fontSize: 14, fontWeight: 500, cursor: 'pointer',
   },
+  // Page-level drop overlay — only shown while dragging Files in non-idle phase.
+  dropOverlay: {
+    position: 'fixed', inset: 0, zIndex: 9000,
+    background: `oklch(14% 0.04 ${HUE_DANMAKU} / 0.78)`,
+    backdropFilter: 'blur(6px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  dropOverlayInner: {
+    border: `2px dashed oklch(72% 0.19 ${HUE_DANMAKU})`,
+    borderRadius: 4,
+    padding: '64px 96px',
+    textAlign: 'center',
+    background: `oklch(14% 0.04 ${HUE_DANMAKU} / 0.55)`,
+  },
+  dropOverlayEyebrow: {
+    ...mono,
+    fontSize: 11,
+    color: `oklch(78% 0.15 ${HUE_DANMAKU})`,
+    textTransform: 'uppercase',
+    letterSpacing: '0.20em',
+    marginBottom: 12,
+  },
+  dropOverlayTitle: {
+    fontFamily: "'Sora',sans-serif", fontWeight: 700,
+    fontSize: 28, color: '#fff', letterSpacing: '-0.01em',
+  },
 };
+
+// Tiny `{{var}}` interpolation for toast strings — t() doesn't support it.
+// Param renamed `tpl` so it doesn't shadow the module-level `s` styles object.
+function fmtTpl(tpl, vars) {
+  return String(tpl).replace(/\{\{(\w+)\}\}/g, (_, k) => (vars[k] ?? ''));
+}
+
+function fmtMmSs(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
 
 function isMobile() {
   return window.innerWidth <= 600;
@@ -171,8 +218,27 @@ function HudDanmakuButton({ onClick, label }) {
   );
 }
 
+
 export default function PlayerPage() {
   const { t } = useLang();
+  // P3: library mode entry — read seriesId + optional resumeEpisode from nav state
+  const location = useLocation();
+  const navigate = useNavigate();
+  const locationSeriesId = location?.state?.seriesId ?? null;
+  const locationResumeEpisode =
+    typeof location?.state?.resumeEpisode === 'number'
+      ? location.state.resumeEpisode
+      : null;
+
+  const fileHandles = useFileHandles({ db });
+  const seriesDetail = useSeriesDetail(locationSeriesId, { db, fileHandles });
+
+  // Becomes true once a library getFile() returns null while permissions are
+  // denied — drives the empty-state switch even before the next render reads
+  // fileHandles.status. Reset on seriesId / refresh.
+  const [denialDetected, setDenialDetected] = useState(false);
+  useEffect(() => { setDenialDetected(false); }, [locationSeriesId]);
+
   const { videoFiles, keyword, processFiles, getVideoUrl, getSubtitleUrl, clear: clearFiles } = useVideoFiles();
   const {
     phase, stepStatus, matchResult, error,
@@ -184,6 +250,7 @@ export default function PlayerPage() {
     phase: playbackPhase,
     playingFile, playingEp, videoUrl, subtitleUrl,
     play: startPlayback, back: stopPlayback,
+    resumeAt, setLastTime,
   } = playback;
 
   const [pickerEp, setPickerEp] = useState(null);
@@ -195,29 +262,99 @@ export default function PlayerPage() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  const hashPoolRef = useRef(null);
+  useEffect(() => {
+    hashPoolRef.current = createHashPool();
+    return () => {
+      hashPoolRef.current?.dispose();
+      hashPoolRef.current = null;
+    };
+  }, []);
+
   // Determine current UI state — playback overlays match phase
   const uiPhase = playbackPhase === 'playing' ? 'playing' : phase;
 
-  // Episode numbers from matched files
+  // P2: same-folder grouping. Multi-folder drops auto-pick the largest group;
+  // P3 will replace this auto-pick with a real picker UI.
+  const groups = useMemo(() => groupByFolder(videoFiles), [videoFiles]);
+  const dropZoneItems = groups[0]?.items ?? videoFiles;
+  const skippedFileCount = useMemo(
+    () => groups.slice(1).reduce((n, g) => n + g.items.length, 0),
+    [groups],
+  );
+
+  // Library mode pickedItems — episode rows derived from IDB. file=null on
+  // each item; getFile() is called lazily via _episodeId when a row is played.
+  const libraryVideoFiles = useMemo(() => {
+    if (!locationSeriesId || seriesDetail.status !== 'ready') return [];
+    return episodeListFromSeriesDetail(
+      seriesDetail.episodes,
+      seriesDetail.fileRefByEpisode,
+    );
+  }, [locationSeriesId, seriesDetail]);
+
+  // pickedItems unifies the rendered file list across both entry paths so
+  // EpisodeFileList sees the same shape regardless of how matchResult arrived.
+  const pickedItems = locationSeriesId ? libraryVideoFiles : dropZoneItems;
+
+  // Split commentary cuts off the main list. EpisodeFileList renders them in
+  // a dedicated supplementary lane so they don't sit alongside the main EP25
+  // row with no distinguishing label, and so EpisodeNav chips stay clean.
+  const [pickedMainFiles, pickedSupplementaryFiles] = useMemo(() => {
+    const main = [];
+    const sup = [];
+    for (const f of pickedItems) (f.parsedKind === 'commentary' ? sup : main).push(f);
+    return [main, sup];
+  }, [pickedItems]);
+
+  // Episode numbers from matched files (now drawn from picked group only).
+  // Commentary cuts share an episode number with the main cut and would
+  // otherwise produce duplicate React keys in EpisodeNav (`key={ep}`).
   const episodes = useMemo(() => {
     if (!matchResult?.episodeMap) return [];
-    return videoFiles
-      .filter(f => f.episode != null && matchResult.episodeMap[f.episode])
+    return pickedItems
+      .filter(f => f.episode != null && f.parsedKind !== 'commentary' && matchResult.episodeMap[f.episode])
       .map(f => f.episode)
       .sort((a, b) => a - b);
-  }, [videoFiles, matchResult]);
+  }, [pickedItems, matchResult]);
 
-  // Stable per-episode key for progress memory (localStorage)
+  // Toast on multi-folder auto-pick. Fires once per groups identity.
+  const lastGroupsKey = useRef(null);
+  useEffect(() => {
+    if (!groups.length) { lastGroupsKey.current = null; return; }
+    const key = groups.map(g => `${g.groupKey}:${g.items.length}`).join('|');
+    if (lastGroupsKey.current === key) return;
+    lastGroupsKey.current = key;
+    if (groups.length > 1) {
+      const picked = groups[0];
+      const labelText = picked.groupKey === '__root__' ? t('player.rootFolder') : picked.label;
+      toast(fmtTpl(t('player.multiFolderToast'), {
+        label: labelText,
+        picked: picked.items.length,
+        others: skippedFileCount,
+      }));
+    }
+    if (groups[0]?.hasAmbiguity) {
+      toast(t('player.alphaFallbackToast'));
+    }
+  }, [groups, skippedFileCount, t]);
+
+  // Stable per-episode key for progress memory (localStorage). Commentary
+  // tracks share an episode number with the main cut but must not share a
+  // progress slot — otherwise resuming the main cut after watching commentary
+  // would jump to the wrong timestamp.
   const progressKey = useMemo(() => {
     if (playingEp == null || !matchResult?.anime) return null;
     const anime = matchResult.anime;
     const id = anime.anilistId || anime.dandanAnimeId || anime.bgmId;
     if (!id) return null;
-    return `animego:progress:${id}:${playingEp}`;
-  }, [playingEp, matchResult]);
+    const suffix = playingFile?.parsedKind === 'commentary' ? ':commentary' : '';
+    return `animego:progress:${id}:${playingEp}${suffix}`;
+  }, [playingEp, playingFile, matchResult]);
 
-  const handleFiles = useCallback(async (fileList) => {
-    const { files, keyword: kw } = processFiles(fileList);
+  const handleFiles = useCallback(async (fileList, opts = {}) => {
+    const mode = opts.mode || 'append';
+    const { files, keyword: kw } = processFiles(fileList, { mode });
     if (!files.length) {
       toast.error(t('player.noVideos'));
       return;
@@ -226,23 +363,15 @@ export default function PlayerPage() {
     const epNums = files.map(f => f.episode).filter(Boolean);
     const firstFile = files[0]?.fileName || '';
 
-    const hashFile = (file) => new Promise((resolve) => {
-      try {
-        const worker = new Worker(
-          new URL('../workers/md5.worker.js', import.meta.url),
-          { type: 'module' }
-        );
-        worker.onmessage = (e) => { worker.terminate(); resolve(e.data.hash); };
-        worker.onerror = () => { worker.terminate(); resolve(null); };
-        worker.postMessage({ file });
-      } catch { resolve(null); }
-    });
-
+    const pool = hashPoolRef.current;
     const getFilesHashes = async () => {
+      if (!pool) {
+        return files.map(f => ({ fileName: f.fileName, episode: f.episode, fileHash: '', fileSize: f.file.size }));
+      }
       const results = await Promise.all(files.map(async (f) => ({
         fileName: f.fileName,
         episode: f.episode,
-        fileHash: await hashFile(f.file),
+        fileHash: await pool.hash(f.file),
         fileSize: f.file.size,
       })));
       return results;
@@ -256,13 +385,44 @@ export default function PlayerPage() {
     startPlayback(fileItem, matchResult?.episodeMap);
   }, [startPlayback, matchResult]);
 
+  // P2: throttled progress tick from VideoPlayer → in-memory lastTime Map.
+  // playingFile read via ref so the throttled callback in VideoPlayer never
+  // sees a stale fileId during the one-render window before its ref syncs.
+  const playingFileIdRef = useRef(null);
+  useEffect(() => { playingFileIdRef.current = playingFile?.fileId ?? null; }, [playingFile]);
+  const handleProgressTick = useCallback((sec) => {
+    const id = playingFileIdRef.current;
+    if (id) setLastTime(id, sec);
+  }, [setLastTime]);
+
+  // P2: resume toast — fires once per play() that actually resumes (>0).
+  // Rendered as info, not error; only when no localStorage progressKey exists
+  // (matched files keep their own restore semantics).
+  const lastResumeToastForFile = useRef(null);
+  useEffect(() => {
+    if (!playingFile || !resumeAt || progressKey) return;
+    if (lastResumeToastForFile.current === playingFile.fileId) return;
+    lastResumeToastForFile.current = playingFile.fileId;
+    toast(fmtTpl(t('player.resumedAt'), { time: fmtMmSs(resumeAt) }));
+  }, [playingFile, resumeAt, progressKey, t]);
+
   const handleEpisodeSwitch = useCallback((epNum) => {
-    const fileItem = videoFiles.find(f => f.episode === epNum);
+    // Prefer the main cut when a commentary file shares the episode number —
+    // file order in pickedItems is filesystem-dependent and could otherwise
+    // make auto-advance land on the commentary track.
+    const fileItem = pickedItems.find(f => f.episode === epNum && f.parsedKind !== 'commentary');
     if (fileItem) startPlayback(fileItem, matchResult?.episodeMap);
-  }, [videoFiles, startPlayback, matchResult]);
+  }, [pickedItems, startPlayback, matchResult]);
 
   const handleBackToList = useCallback(() => {
+    // Reset the once-per-file guard so re-playing the same file with an
+    // updated lastTime can re-fire the resume toast.
+    lastResumeToastForFile.current = null;
     stopPlayback();
+    // Same behavior whether the user arrived via drop-zone import or via the
+    // library card → /player path: stop playback and reveal the rich
+    // EpisodeFileList list above. The library card's "// 返回库 //" button
+    // is the explicit exit back to /library when they want to leave.
   }, [stopPlayback]);
 
   const handleClearAll = useCallback(() => {
@@ -271,26 +431,302 @@ export default function PlayerPage() {
     resetMatch();
   }, [stopPlayback, clearFiles, resetMatch]);
 
-  const handleManualSelect = useCallback((anime) => {
-    const epNums = videoFiles.map(f => f.episode).filter(Boolean);
-    selectManual(anime, epNums);
-  }, [videoFiles, selectManual]);
+  // P3: library mode — sorted episode numbers used by EpisodeNav prev/next.
+  // Empty array unless seriesDetail is ready, so non-library mode keeps using
+  // the matchResult-derived `episodes` array below.
+  const libraryEpisodeNumbers = useMemo(() => {
+    if (!locationSeriesId || seriesDetail.status !== 'ready') return [];
+    return seriesDetail.episodes
+      .filter((e) => e.kind !== 'sp' && e.kind !== 'commentary' && e.number != null)
+      .map((e) => e.number)
+      .sort((a, b) => a - b);
+  }, [locationSeriesId, seriesDetail]);
 
-  const handleUpdateDanmaku = useCallback((epNum, data, newAnime) => {
+  // Library auto-match — when seriesDetail becomes ready, fire the same
+  // startMatch() that the drop-zone flow runs. Inputs come from IDB:
+  //   - hashes already computed at import time (fileRef.hash16M)
+  //   - episode numbers from db.episodes
+  //   - keyword from series titles
+  // The server returns matched anime + siteAnime + episodeMap exactly the way
+  // it does for an upload, so the post-match UI is bit-for-bit identical.
+  const libraryMatchedRef = useRef(/** @type {string|null} */ (null));
+  useEffect(() => {
+    libraryMatchedRef.current = null;
+  }, [locationSeriesId]);
+  useEffect(() => {
+    if (!locationSeriesId) return;
+    if (seriesDetail.status !== 'ready') return;
+    if (libraryVideoFiles.length === 0) return;
+    if (matchResult) return;
+    if (libraryMatchedRef.current === locationSeriesId) return;
+
+    libraryMatchedRef.current = locationSeriesId;
+
+    // Exclude commentary so duplicate ep numbers don't skew the dandanplay
+    // episode-count heuristic (mirrors handleManualSelect).
+    const matchInputFiles = libraryVideoFiles.filter((f) => f.parsedKind !== 'commentary');
+    const epNums = matchInputFiles.map((f) => f.episode).filter(Boolean);
+    const firstName = matchInputFiles[0]?.fileName || '';
+    const basicFiles = matchInputFiles.map((f) => ({
+      fileName: f.fileName,
+      episode: f.episode,
+      fileSize: f._fileRef?.size ?? 0,
+    }));
+    const getFilesHashes = async () => matchInputFiles.map((f) => ({
+      fileName: f.fileName,
+      episode: f.episode,
+      fileHash: f._fileRef?.hash16M ?? '',
+      fileSize: f._fileRef?.size ?? 0,
+    }));
+
+    const series = seriesDetail.series;
+    const keyword = series?.titleZh || series?.titleEn || series?.titleJa || '';
+
+    startMatch(keyword, epNums, firstName, basicFiles, getFilesHashes);
+  }, [locationSeriesId, seriesDetail.status, seriesDetail.series, libraryVideoFiles, matchResult, startMatch]);
+
+  // P3: library mode — episode click handler
+  const handleLibraryEpisodePlay = useCallback(async (episodeId) => {
+    // Subtitle is no longer auto-attached from a sibling .ass file — that
+    // path proved fragile (jassub init in dev was unreliable). mkv internal
+    // tracks still flow through the existing extraction worker; users who
+    // need a specific external .ass/.vtt/.srt can load it via the player's
+    // settings menu ("加载字幕文件").
+    const file = await seriesDetail.getFile(episodeId);
+    if (!file) {
+      // selectFileByName flips fileHandles.status to 'denied' synchronously on
+      // NotAllowedError. Read it via the live ref since `fileHandles` from
+      // closure is the previous render's snapshot.
+      if (fileHandles.status === 'denied') {
+        setDenialDetected(true);
+      } else {
+        toast.error(t('library.fileMissing'));
+      }
+      return;
+    }
+    const ep = seriesDetail.episodes.find((e) => e.id === episodeId);
+    const fileRef = seriesDetail.fileRefByEpisode.get(episodeId);
+    if (!ep || !fileRef) return;
+
+    // Prefer the server-shaped matchResult.episodeMap when the auto-match has
+    // landed; fall back to a synthesis from IDB Episode.episodeId so the
+    // danmaku pipeline still works during the brief window between
+    // "seriesDetail ready" and "matchResult arrived".
+    let episodeMap;
+    if (matchResult?.episodeMap) {
+      episodeMap = matchResult.episodeMap;
+    } else {
+      episodeMap = {};
+      for (const e of seriesDetail.episodes) {
+        // Mirror buildLibraryMatchResult: commentary inherits main's slot,
+        // never owns it — otherwise last-write-wins clobbers the main cut.
+        if (e.number == null || e.kind === 'commentary') continue;
+        episodeMap[e.number] = { dandanEpisodeId: e.episodeId };
+      }
+    }
+
+    const fileItem = {
+      fileId: fileRef.id,
+      file,
+      fileName: fileRef.relPath.split('/').pop() || fileRef.relPath,
+      relativePath: fileRef.relPath,
+      episode: ep.number,
+      parsedKind: ep.kind || 'main',
+    };
+
+    startPlayback(fileItem, episodeMap);
+  }, [seriesDetail, startPlayback, t, fileHandles.status, matchResult]);
+
+  // Library mode empty-state derivations. The denied path takes precedence
+  // over 'ready' because IDB is fine but FSA can't reach the file — same UX
+  // signal regardless of how denial was detected (proactive at hook level
+  // vs reactive after a click).
+  const libraryEmptyKind = useMemo(() => {
+    if (!locationSeriesId) return null;
+    if (seriesDetail.status === 'loading') return 'loading';
+    if (seriesDetail.status === 'missing') return 'missing';
+    if (seriesDetail.status === 'error') return 'error';
+    if (seriesDetail.status === 'ready'
+        && (fileHandles.status === 'denied' || denialDetected)) {
+      return 'denied';
+    }
+    return null;
+  }, [locationSeriesId, seriesDetail.status, fileHandles.status, denialDetected]);
+
+  const libraryIdsForReauth = useMemo(() => {
+    /** @type {Set<string>} */
+    const ids = new Set();
+    for (const ref of seriesDetail.fileRefByEpisode.values()) {
+      if (ref?.libraryId) ids.add(ref.libraryId);
+    }
+    return Array.from(ids);
+  }, [seriesDetail.fileRefByEpisode]);
+
+  const handleReauthorize = useCallback(async () => {
+    for (const libId of libraryIdsForReauth) {
+      await fileHandles.reauthorize(libId);
+    }
+    setDenialDetected(false);
+    seriesDetail.refresh();
+  }, [fileHandles, libraryIdsForReauth, seriesDetail]);
+
+  const handleBackToLibrary = useCallback(() => {
+    navigate('/library');
+  }, [navigate]);
+
+  // Library mode "back" — exit the player and return to the library grid.
+  // Wired to EpisodeFileList's clear button so it stops feeling like a
+  // destructive "clear" and reads as "exit player".
+  const handleBackToLibraryGrid = useCallback(() => {
+    navigate('/library');
+  }, [navigate]);
+
+  // Unified click handler for EpisodeFileList rows. Library items carry an
+  // `_episodeId` set by the adapter — those route through getFile() so FSA
+  // resolves the actual File before playback. Match-flow items already hold
+  // their File and can hit startPlayback directly.
+  const handleListPlay = useCallback((fileItem) => {
+    if (fileItem?._episodeId) {
+      handleLibraryEpisodePlay(fileItem._episodeId);
+      return;
+    }
+    handlePlay(fileItem);
+  }, [handlePlay, handleLibraryEpisodePlay]);
+
+  const handleRetryLoad = useCallback(() => {
+    seriesDetail.refresh();
+  }, [seriesDetail]);
+
+  // P3: library mode prev/next — switch by episode number using seriesDetail.
+  const handleLibraryEpisodeSwitchByNumber = useCallback((epNum) => {
+    if (!locationSeriesId) return;
+    const ep = seriesDetail.episodes.find((e) => e.number === epNum && e.kind !== 'sp' && e.kind !== 'commentary');
+    if (!ep) return;
+    handleLibraryEpisodePlay(ep.id);
+  }, [locationSeriesId, seriesDetail, handleLibraryEpisodePlay]);
+
+  // P3: auto-play `state.resumeEpisode` when seriesDetail becomes ready.
+  // One-shot: state flips after a single attempt (success OR failure) so a
+  // failed resume reveals the library list as fallback instead of trapping the
+  // user on a blank page.
+  const [autoResumeAttempted, setAutoResumeAttempted] = useState(false);
+  useEffect(() => {
+    if (!locationSeriesId || locationResumeEpisode == null) return;
+    if (seriesDetail.status !== 'ready') return;
+    if (libraryEmptyKind) return;
+    if (playbackPhase === 'playing') return;
+    if (autoResumeAttempted) return;
+    const ep = seriesDetail.episodes.find(
+      (e) => e.number === locationResumeEpisode && e.kind !== 'sp' && e.kind !== 'commentary',
+    );
+    setAutoResumeAttempted(true);
+    if (!ep) return;
+    handleLibraryEpisodePlay(ep.id);
+  }, [locationSeriesId, locationResumeEpisode, seriesDetail, playbackPhase, autoResumeAttempted, handleLibraryEpisodePlay, libraryEmptyKind]);
+
+  // Page-level drag/drop. The inner DropZone only renders in idle phase, so
+  // dragging files onto the page when match is ready/playing/manual/error
+  // would otherwise be silently ignored. Here we accept a drop in any phase
+  // and replace the current session with the new files.
+  const [pageDragging, setPageDragging] = useState(false);
+  const dragCounter = useRef(0);
+
+  const handlePageDragEnter = useCallback((e) => {
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+    e.preventDefault();
+    dragCounter.current += 1;
+    if (uiPhase !== 'idle') setPageDragging(true);
+  }, [uiPhase]);
+
+  const handlePageDragOver = useCallback((e) => {
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+    e.preventDefault();
+  }, []);
+
+  const handlePageDragLeave = useCallback(() => {
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setPageDragging(false);
+  }, []);
+
+  const handlePageDrop = useCallback(async (e) => {
+    dragCounter.current = 0;
+    setPageDragging(false);
+    // In idle, DropZone handles its own drop via stopPropagation. We arrive here
+    // only when (a) phase is non-idle, or (b) user dropped outside DropZone in idle.
+    if (uiPhase === 'idle') return;
+    e.preventDefault();
+    const files = await flattenDropFiles(e.dataTransfer);
+    if (!files.length) return;
+    // Replace current session. processFiles({ mode:'replace' }) revokes prior blob URLs
+    // synchronously and discards prev state in one dispatch — no clearFiles() race.
+    stopPlayback();
+    resetMatch();
+    handleFiles(files, { mode: 'replace' });
+  }, [uiPhase, stopPlayback, resetMatch, handleFiles]);
+
+  const handleManualSelect = useCallback((anime) => {
+    // Exclude commentary so duplicate episode numbers don't skew the
+    // dandanplay episode-count heuristic during manual rematch.
+    const epNums = pickedItems
+      .filter(f => f.parsedKind !== 'commentary')
+      .map(f => f.episode)
+      .filter(Boolean);
+    selectManual(anime, epNums);
+  }, [pickedItems, selectManual]);
+
+  const handleUpdateDanmaku = useCallback(async (epNum, data, newAnime) => {
+    // Always update the in-memory matchResult so the row reflects the change
+    // immediately. Library mode additionally persists to IDB so re-entering
+    // the page on a future visit picks up the corrected episodeId without
+    // re-running the picker.
     updateEpisodeMap(epNum, data, newAnime);
+    if (locationSeriesId && data?.dandanEpisodeId) {
+      const target = seriesDetail.episodes.find(
+        (e) => e.number === epNum && e.kind !== 'sp' && e.kind !== 'commentary',
+      );
+      if (target) {
+        try {
+          await db.episodes.update(target.id, {
+            episodeId: data.dandanEpisodeId,
+            updatedAt: Date.now(),
+          });
+          seriesDetail.refresh();
+        } catch (err) {
+          console.warn('[player] failed to persist danmaku update:', err);
+        }
+      }
+    }
     // If currently playing this episode, reload danmaku
     if (playingEp === epNum && data.dandanEpisodeId) {
       loadComments(data.dandanEpisodeId);
     }
     toast.success(t('player.danmakuUpdated'));
-  }, [updateEpisodeMap, playingEp, loadComments, t]);
+  }, [locationSeriesId, seriesDetail, updateEpisodeMap, playingEp, loadComments, t]);
 
   const handleVideoEnded = useCallback(() => {
+    // Commentary tracks don't auto-advance; the user chose them explicitly.
+    if (playingFile?.parsedKind === 'commentary') return;
+    // Library mode: advance via libraryEpisodeNumbers + library switcher.
+    if (locationSeriesId && libraryEpisodeNumbers.length > 0) {
+      const idx = libraryEpisodeNumbers.indexOf(playingEp);
+      if (idx >= 0 && idx < libraryEpisodeNumbers.length - 1) {
+        handleLibraryEpisodeSwitchByNumber(libraryEpisodeNumbers[idx + 1]);
+      }
+      return;
+    }
     const idx = episodes.indexOf(playingEp);
     if (idx >= 0 && idx < episodes.length - 1) {
       handleEpisodeSwitch(episodes[idx + 1]);
     }
-  }, [episodes, playingEp, handleEpisodeSwitch]);
+  }, [
+    locationSeriesId,
+    libraryEpisodeNumbers,
+    handleLibraryEpisodeSwitchByNumber,
+    episodes,
+    playingEp,
+    playingFile,
+    handleEpisodeSwitch,
+  ]);
 
   // Mobile guard — after all hooks to satisfy Rules of Hooks
   if (isMobileView) {
@@ -303,22 +739,55 @@ export default function PlayerPage() {
   }
 
   return (
-    <div style={s.page}>
+    <div
+      style={s.page}
+      onDragEnter={handlePageDragEnter}
+      onDragOver={handlePageDragOver}
+      onDragLeave={handlePageDragLeave}
+      onDrop={handlePageDrop}
+    >
       <style>{FADE_UP_CSS}</style>
+      {pageDragging && uiPhase !== 'idle' && (
+        <div style={s.dropOverlay} aria-hidden>
+          <div style={s.dropOverlayInner}>
+            <div style={s.dropOverlayEyebrow}>INGEST //</div>
+            <div style={s.dropOverlayTitle}>{t('player.dropReplace')}</div>
+          </div>
+        </div>
+      )}
 
-      {/* IDLE */}
-      {uiPhase === 'idle' && (
+      {/* LIBRARY MODE — empty/denied/error/loading states for seriesId path */}
+      {locationSeriesId && libraryEmptyKind && playbackPhase !== 'playing' && (
+        <div style={fadeUp}>
+          <LibraryAccessEmpty
+            kind={libraryEmptyKind}
+            onReauthorize={libraryIdsForReauth.length ? handleReauthorize : undefined}
+            onRetry={handleRetryLoad}
+            onBackToLibrary={handleBackToLibrary}
+          />
+        </div>
+      )}
+
+      {/* IDLE — only shown when NOT in library mode */}
+      {uiPhase === 'idle' && !locationSeriesId && (
         <div style={fadeUp}><DropZone onFiles={handleFiles} /></div>
       )}
 
-      {/* MATCHING */}
+      {/* IDLE fallback when in library mode but not yet ready */}
+      {locationSeriesId && seriesDetail.status === 'idle' && (
+        <div style={fadeUp}><DropZone onFiles={handleFiles} /></div>
+      )}
+
+      {/* MATCHING — drives BOTH drop-zone uploads and library auto-match.
+          Library entry path: keyword falls back to the series title; file
+          count is `pickedItems.length` (libraryVideoFiles when locationSeriesId set). */}
       {uiPhase === 'matching' && (
         <div style={{ marginTop: 64, ...fadeUp }}>
           <MatchProgress
-            fileCount={videoFiles.length}
-            keyword={keyword}
+            fileCount={pickedItems.length || videoFiles.length}
+            keyword={keyword || seriesDetail.series?.titleZh || seriesDetail.series?.titleEn || ''}
             stepStatus={stepStatus}
-            onClear={handleClearAll}
+            onClear={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}
           />
         </div>
       )}
@@ -327,9 +796,9 @@ export default function PlayerPage() {
       {uiPhase === 'manual' && (
         <div style={{ marginTop: 32, ...fadeUp }}>
           <ManualSearch
-            defaultKeyword={keyword}
+            defaultKeyword={keyword || seriesDetail.series?.titleZh || seriesDetail.series?.titleEn || ''}
             onSelect={handleManualSelect}
-            onBack={handleClearAll}
+            onBack={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}
           />
         </div>
       )}
@@ -339,23 +808,27 @@ export default function PlayerPage() {
         <div style={{ ...s.errorBox, ...fadeUp }}>
           <div style={s.errorTitle}>{t('player.error')}</div>
           <div>{error || t('player.errorGeneric')}</div>
-          <button style={s.retryBtn} onClick={handleClearAll}>
+          <button style={s.retryBtn} onClick={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}>
             {t('player.retry')}
           </button>
         </div>
       )}
 
-      {/* READY */}
-      {uiPhase === 'ready' && matchResult && (
-        <div style={{ marginTop: 32, ...fadeUp }}>
+      {/* READY — unified across drop-zone and library entry paths. Both
+          arrive here with the SAME server-shaped matchResult; only the
+          videoFiles source and "clear" semantics diverge. */}
+      {uiPhase === 'ready' && matchResult && !libraryEmptyKind && (locationResumeEpisode == null || autoResumeAttempted) && (
+        <div data-testid={locationSeriesId ? 'library-episode-list' : undefined} style={{ marginTop: 32, ...fadeUp }}>
           <EpisodeFileList
             anime={matchResult.anime}
             siteAnime={matchResult.siteAnime}
             episodeMap={matchResult.episodeMap}
-            videoFiles={videoFiles}
-            onPlay={handlePlay}
-            onClear={handleClearAll}
+            videoFiles={pickedMainFiles}
+            supplementaryFiles={pickedSupplementaryFiles}
+            onPlay={handleListPlay}
+            onClear={locationSeriesId ? handleBackToLibraryGrid : handleClearAll}
             onSetDanmaku={setPickerEp}
+            clearLabel={locationSeriesId ? '返回库' : undefined}
           />
         </div>
       )}
@@ -403,20 +876,23 @@ export default function PlayerPage() {
               progressKey={progressKey}
               episode={playingEp}
               danmakuCount={danmakuCount}
+              resumeAt={resumeAt}
+              onProgressTick={handleProgressTick}
             />
             {danmakuCount === 0 && (
               <div style={s.danmakuInfo}>{t('player.noDanmaku')}</div>
             )}
             <EpisodeNav
-              episodes={episodes}
+              episodes={locationSeriesId ? libraryEpisodeNumbers : episodes}
               currentEpisode={playingEp}
-              onSelect={handleEpisodeSwitch}
+              onSelect={locationSeriesId ? handleLibraryEpisodeSwitchByNumber : handleEpisodeSwitch}
             />
           </div>
         </div>
       )}
 
-      {/* Shared DanmakuPicker — works from both list view and playing view */}
+      {/* Shared DanmakuPicker — works from list view and playing view; both
+          entry paths populate the same `matchResult`. */}
       <DanmakuPicker
         isOpen={pickerEp != null}
         onClose={() => setPickerEp(null)}
@@ -427,7 +903,7 @@ export default function PlayerPage() {
         currentAnime={matchResult?.anime}
         currentEpisodeId={pickerEp != null ? matchResult?.episodeMap?.[pickerEp]?.dandanEpisodeId : null}
         episodeNumber={pickerEp}
-        defaultKeyword={keyword}
+        defaultKeyword={keyword || seriesDetail.series?.titleZh || seriesDetail.series?.titleEn || ''}
       />
     </div>
   );

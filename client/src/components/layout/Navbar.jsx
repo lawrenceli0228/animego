@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useLang } from '../../context/LanguageContext'
+import { LOCAL_HEX_GLYPH } from '../shared/hud-tokens'
 import toast from 'react-hot-toast'
 
 const s = {
@@ -74,6 +75,8 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', onScroll);
   }, [isPlayer]);
 
+  const LOCAL_GLYPH = ' ' + LOCAL_HEX_GLYPH
+
   const handleLogout = async () => {
     await logout()
     toast.success(t('nav.logout'))
@@ -85,17 +88,14 @@ export default function Navbar() {
       <div style={s.inner}>
         <Link to="/" style={s.logo}>AnimeGo</Link>
         <div style={s.links}>
-          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/player','nav.player'],['/about','nav.about']].map(([to, key]) => (
+          {[['/','nav.home'],['/season','nav.season'],['/search','nav.search'],['/library','nav.library'],['/about','nav.about']].map(([to, key]) => (
             <NavLink
               key={to}
               to={to}
               end={to==='/'}
-              style={({ isActive }) => ({
-                ...s.link(isActive),
-                ...(to === '/player' ? { display: window.innerWidth <= 600 ? 'none' : undefined } : {}),
-              })}
+              style={({ isActive }) => s.link(isActive)}
             >
-              {t(key)}
+              {t(key)}{to === '/library' ? LOCAL_GLYPH : ''}
             </NavLink>
           ))}
         </div>

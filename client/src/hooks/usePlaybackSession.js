@@ -11,6 +11,13 @@ import { resolveSubtitle } from '../utils/resolveSubtitle';
  *   1. mkv blob URL revoked on next play / back / unmount
  *   6. pending mkv extraction canceled before next play / on back / unmount,
  *      and a stale task's late resolve is ignored.
+ *
+ * P2 session-resume surface:
+ *   lastTimeRef — volatile Map<fileId, seconds>; cleared only on unmount.
+ *   getLastTime(episodeId) — returns null for unknown ids.
+ *   setLastTime(episodeId, sec) — rounds to integer; rejects empty id, non-numeric,
+ *     and any value that rounds to ≤ 0 (so 0.4 → round 0 → reject).
+ *   resumeAt — read once by VideoPlayer on loadedmetadata; set by play() from Map.
  */
 export default function usePlaybackSession({
   getVideoUrl,
@@ -24,9 +31,11 @@ export default function usePlaybackSession({
   const [subtitleUrl, setSubtitleUrl] = useState(null);
   const [subtitleType, setSubtitleType] = useState(null);
   const [subtitleContent, setSubtitleContent] = useState(null);
+  const [resumeAt, setResumeAt] = useState(null);
 
   const mkvBlobUrlRef = useRef(null);
   const subtitleTaskRef = useRef(null);
+  const lastTimeRef = useRef(new Map());
 
   const cancelSubtitleTask = useCallback(() => {
     if (subtitleTaskRef.current) {
@@ -45,11 +54,28 @@ export default function usePlaybackSession({
   useEffect(() => () => {
     cancelSubtitleTask();
     cleanupMkvBlob();
+    lastTimeRef.current.clear();
   }, [cancelSubtitleTask, cleanupMkvBlob]);
+
+  const getLastTime = useCallback((episodeId) => {
+    const val = lastTimeRef.current.get(episodeId);
+    return val !== undefined ? val : null;
+  }, []);
+
+  const setLastTime = useCallback((episodeId, sec) => {
+    if (!episodeId) return;
+    if (typeof sec !== 'number' || isNaN(sec)) return;
+    const rounded = Math.round(sec);
+    if (rounded <= 0) return;
+    lastTimeRef.current.set(episodeId, rounded);
+  }, []);
 
   const play = useCallback((fileItem, episodeMap) => {
     cancelSubtitleTask();
     cleanupMkvBlob();
+
+    const stored = lastTimeRef.current.get(fileItem.fileId);
+    setResumeAt(stored !== undefined ? stored : null);
 
     setVideoUrl(getVideoUrl(fileItem.file));
     setPlayingFile(fileItem);
@@ -101,7 +127,9 @@ export default function usePlaybackSession({
     setSubtitleUrl(null);
     setSubtitleType(null);
     setSubtitleContent(null);
+    setResumeAt(null);
     clearComments();
+    // lastTimeRef is intentionally NOT cleared — resume survives back→play within session.
   }, [cancelSubtitleTask, cleanupMkvBlob, clearComments]);
 
   return {
@@ -112,7 +140,10 @@ export default function usePlaybackSession({
     subtitleUrl,
     subtitleType,
     subtitleContent,
+    resumeAt,
     play,
     back,
+    getLastTime,
+    setLastTime,
   };
 }

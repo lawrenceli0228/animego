@@ -147,7 +147,106 @@ const s = {
     flexShrink: 0, transition: 'color 150ms',
     textTransform: 'uppercase', letterSpacing: '0.14em',
   }),
+  // Supplementary lane — section divider + label rendered above commentary
+  // rows so they read as "extra content" rather than missing main episodes.
+  supSection: {
+    marginTop: 32,
+    paddingTop: 20,
+    borderTop: '1px solid rgba(235,235,245,0.20)',
+  },
+  supHeader: {
+    ...mono,
+    fontSize: 11,
+    color: 'rgba(235,235,245,0.45)',
+    letterSpacing: '0.18em',
+    textTransform: 'uppercase',
+    marginBottom: 12,
+    paddingLeft: 24,
+  },
+  supBadge: {
+    ...mono,
+    display: 'inline-block',
+    padding: '2px 6px',
+    fontSize: 10,
+    color: 'rgba(255,159,10,0.85)',
+    border: '1px solid rgba(255,159,10,0.30)',
+    borderRadius: 2,
+    letterSpacing: '0.14em',
+    marginLeft: 10,
+    flexShrink: 0,
+    alignSelf: 'flex-start',
+    paddingTop: 3,
+  },
 };
+
+// Per-kind label shown next to the EP badge on supplementary rows. Keep this
+// list lower-case to match parsedKind values; UI uppercases via CSS.
+const SUPPLEMENTARY_KIND_LABEL = {
+  commentary: 'COMMENTARY',
+};
+
+// Skeleton — pulse animation injected once per page; mirrors the layout of
+// the real siteAnime block so when the data lands the row positions don't
+// jump.
+const SKELETON_KEYFRAMES = `@keyframes siteAnimeSkeletonPulse{0%{opacity:0.55}50%{opacity:0.95}100%{opacity:0.55}}`;
+const skel = {
+  base: {
+    background: 'rgba(120,120,128,0.16)',
+    borderRadius: 9999,
+    animation: 'siteAnimeSkeletonPulse 1.4s ease-in-out infinite',
+    display: 'inline-block',
+  },
+  chip: (w) => ({
+    background: 'rgba(120,120,128,0.16)',
+    borderRadius: 9999,
+    height: 22,
+    width: w,
+    animation: 'siteAnimeSkeletonPulse 1.4s ease-in-out infinite',
+    display: 'inline-block',
+  }),
+  textLine: (w) => ({
+    background: 'rgba(120,120,128,0.14)',
+    borderRadius: 4,
+    height: 12,
+    width: w,
+    animation: 'siteAnimeSkeletonPulse 1.4s ease-in-out infinite',
+    display: 'inline-block',
+  }),
+  genreTag: (w) => ({
+    background: 'rgba(120,120,128,0.12)',
+    borderRadius: 9999,
+    height: 18,
+    width: w,
+    animation: 'siteAnimeSkeletonPulse 1.4s ease-in-out infinite',
+    display: 'inline-block',
+  }),
+};
+
+function SiteAnimeSkeleton() {
+  return (
+    <div style={s.siteInfo} data-testid="site-anime-skeleton" aria-busy="true">
+      <style>{SKELETON_KEYFRAMES}</style>
+      <div style={s.badgeRow}>
+        <span style={skel.chip(64)} />
+        <span style={skel.chip(80)} />
+        <span style={skel.chip(48)} />
+        <span style={skel.chip(80)} />
+        <span style={skel.chip(56)} />
+        <span style={skel.chip(96)} />
+      </div>
+      <div style={s.metaRow}>
+        <span style={skel.textLine(140)} />
+        <span style={skel.textLine(80)} />
+      </div>
+      <div style={s.genreRow}>
+        <span style={skel.genreTag(48)} />
+        <span style={skel.genreTag(64)} />
+        <span style={skel.genreTag(56)} />
+        <span style={skel.genreTag(40)} />
+      </div>
+    </div>
+  );
+}
 
 const danmakuBtnStyle = (hover) => ({
   background: 'transparent',
@@ -163,7 +262,7 @@ const danmakuBtnStyle = (hover) => ({
   letterSpacing: '0.10em',
 });
 
-export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, onPlay, onClear, onSetDanmaku }) {
+export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFiles, supplementaryFiles = [], onPlay, onClear, onSetDanmaku, clearLabel, siteAnimeLoading }) {
   const { t, lang } = useLang();
 
   const sa = siteAnime;
@@ -189,6 +288,10 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
             {anime.episodes && `${anime.episodes}${t('detail.epUnit')}`}
           </div>
           <div style={s.badge}>dandanplay · {Object.keys(episodeMap).length} {t('player.mapped')}</div>
+
+          {/* Skeleton while siteAnime is being fetched (library mode first
+              load). Replaced by the real block below as soon as data lands. */}
+          {!sa && siteAnimeLoading && <SiteAnimeSkeleton />}
 
           {/* Site anime info */}
           {sa && (
@@ -255,14 +358,14 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
           )}
         </div>
         <div style={s.headerActions}>
-          <button style={s.clearBtn} onClick={onClear}>// {t('player.clear')}</button>
+          <button style={s.clearBtn} onClick={onClear}>// {clearLabel || t('player.clear')}</button>
         </div>
       </div>
 
       {/* Episode list — all files playable, matched ones show episode title */}
       {videoFiles.map((f, i) => (
         <EpisodeRow
-          key={f.fileName}
+          key={f.fileId || f.fileName}
           index={i}
           episode={f.episode}
           fileName={f.fileName}
@@ -271,6 +374,24 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
           onSetDanmaku={() => onSetDanmaku(f.episode)}
         />
       ))}
+
+      {supplementaryFiles.length > 0 && (
+        <div style={s.supSection}>
+          <div style={s.supHeader}>// {t('player.supplementary')} ({supplementaryFiles.length})</div>
+          {supplementaryFiles.map((f, i) => (
+            <EpisodeRow
+              key={f.fileId || f.fileName}
+              index={i}
+              episode={f.episode}
+              fileName={f.fileName}
+              episodeTitle={episodeMap[f.episode]?.title}
+              kindLabel={SUPPLEMENTARY_KIND_LABEL[f.parsedKind] || f.parsedKind?.toUpperCase()}
+              onPlay={() => onPlay(f)}
+              onSetDanmaku={() => onSetDanmaku(f.episode)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -281,7 +402,7 @@ export default function EpisodeFileList({ anime, siteAnime, episodeMap, videoFil
  *   - 4 corner brackets fade in on hover (Motion #7, 150ms)
  *   - Per-episode hue rotation on the EPxx badge
  */
-function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay, onSetDanmaku }) {
+function EpisodeRow({ index, episode, fileName, episodeTitle, kindLabel, onPlay, onSetDanmaku }) {
   const reduced = useReducedMotion();
   const [hover, setHover] = useState(false);
   const [dmHover, setDmHover] = useState(false);
@@ -305,6 +426,7 @@ function EpisodeRow({ index, episode, fileName, episodeTitle, onPlay, onSetDanma
         hue={episode != null ? epHue(episode) : null}
       />
       <span style={s.epBadge(episode)}>{epLabel}</span>
+      {kindLabel && <span style={s.supBadge}>{kindLabel}</span>}
       <div style={s.fileInfo}>
         <div style={s.fileName}>{fileName}</div>
         {episodeTitle && <div style={s.epTitle}>{episodeTitle}</div>}

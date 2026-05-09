@@ -107,6 +107,8 @@ export default function PlayerHudFrame({
   episode,
   danmakuCount = 0,
   quality = 'AUTO',
+  resumeAt = null,
+  onProgressTick,
 }) {
   const statusText = `STREAM // ${danmakuCount} COMMENTS // ${quality}`
   const typed = useTypeOn(statusText)
@@ -135,6 +137,8 @@ export default function PlayerHudFrame({
           subtitleUrl={subtitleUrl}
           onEnded={onEnded}
           progressKey={progressKey}
+          resumeAt={resumeAt}
+          onProgressTick={onProgressTick}
         />
         <Motion.span
           style={s.callsign}

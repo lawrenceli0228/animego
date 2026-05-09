@@ -84,7 +84,7 @@ describe('useVideoFiles', () => {
     expect(result.current.keyword).toBe(ret.keyword);
   });
 
-  it('getVideoUrl creates a blob URL and revokes the previous one', () => {
+  it('getVideoUrl creates a stable blob URL per file and does not revoke for different files', () => {
     const { result } = renderHook(() => useVideoFiles());
     const a = makeFile('a.mkv');
     const b = makeFile('b.mkv');
@@ -96,17 +96,23 @@ describe('useVideoFiles', () => {
 
     act(() => { url2 = result.current.getVideoUrl(b); });
     expect(url2).toBe('blob:mock-2');
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-1');
+    // New contract: different files each get their own URL; no revocation on a fresh fileId.
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    // Calling again with the same file returns the cached URL without creating a new one.
+    let url1Again;
+    act(() => { url1Again = result.current.getVideoUrl(a); });
+    expect(url1Again).toBe(url1);
+    expect(createObjectURL).toHaveBeenCalledTimes(2); // only 2 total, not 3
   });
 
-  it('getSubtitleUrl tracks its own blob independent of video blob', () => {
+  it('getSubtitleUrl tracks its own blob independent of video blob, no cross-revocation', () => {
     const { result } = renderHook(() => useVideoFiles());
     act(() => { result.current.getVideoUrl(makeFile('v.mkv')); });
     act(() => { result.current.getSubtitleUrl(makeFile('s.ass')); });
-    // Second call of either should revoke only its own kind
+    // Second subtitle call with a different file — no revocation under new Map contract.
     act(() => { result.current.getSubtitleUrl(makeFile('s2.ass')); });
-    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-2');
+    expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 
   it('clear() revokes active URLs and resets state', () => {
@@ -133,5 +139,77 @@ describe('useVideoFiles', () => {
 
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-1');
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-2');
+  });
+
+  // Regression — real release-named Kaguya-sama batch (UHA-WINGS) drops should produce
+  // a stable keyword and per-file episode numbers without any ambiguity.
+  it('processes UHA-WINGS Kaguya-sama batch into ep 1/2 with shared keyword', () => {
+    const { result } = renderHook(() => useVideoFiles());
+    const files = [
+      makeFile('[UHA-WINGS][Kaguya-sama wa Kokurasetai - Otona e no Kaidan][01][1080p HEVC][CHS].mp4'),
+      makeFile('[UHA-WINGS][Kaguya-sama wa Kokurasetai - Otona e no Kaidan][02][1080p HEVC][CHS].mp4'),
+    ];
+    let ret;
+    act(() => { ret = result.current.processFiles(files); });
+
+    expect(ret.files).toHaveLength(2);
+    expect(ret.files.map(f => f.episode).sort()).toEqual([1, 2]);
+    expect(ret.keyword).toBe('Kaguya-sama wa Kokurasetai - Otona e no Kaidan');
+    expect(result.current.videoFiles).toHaveLength(2);
+    expect(result.current.videoFiles[0].parsedGroup).toBe('UHA-WINGS');
+    expect(result.current.videoFiles[0].parsedResolution).toBe('1080p');
+    expect(result.current.videoFiles[0].parsedKind).toBe('main');
+  });
+
+  it('append mode merges a second Kaguya batch onto an existing list with no dup', () => {
+    const { result } = renderHook(() => useVideoFiles());
+    // fileId is name|size|lastModified — pin lastModified so the "dup" file
+    // in batch 2 actually collides with batch 1 across microtask boundaries.
+    const ep1Name = '[UHA-WINGS][Kaguya-sama wa Kokurasetai - Otona e no Kaidan][01][1080p HEVC][CHS].mp4';
+    const ep2Name = '[UHA-WINGS][Kaguya-sama wa Kokurasetai - Otona e no Kaidan][02][1080p HEVC][CHS].mp4';
+    const mkFixed = (name) => new File(['x'], name, { type: 'application/octet-stream', lastModified: 1700000000000 });
+    const first = [mkFixed(ep1Name)];
+    const second = [mkFixed(ep1Name), mkFixed(ep2Name)];
+    act(() => { result.current.processFiles(first, { mode: 'append' }); });
+    act(() => { result.current.processFiles(second, { mode: 'append' }); });
+
+    expect(result.current.videoFiles).toHaveLength(2);
+    expect(result.current.videoFiles.map(f => f.episode)).toEqual([1, 2]);
+  });
+
+  it('replace mode wipes prior list when a new batch arrives', () => {
+    const { result } = renderHook(() => useVideoFiles());
+    act(() => {
+      result.current.processFiles([makeFile('Old Show - 01.mkv')], { mode: 'append' });
+    });
+    expect(result.current.videoFiles).toHaveLength(1);
+
+    act(() => {
+      result.current.processFiles(
+        [makeFile('[UHA-WINGS][Kaguya-sama wa Kokurasetai - Otona e no Kaidan][01][1080p HEVC][CHS].mp4')],
+        { mode: 'replace' },
+      );
+    });
+    expect(result.current.videoFiles).toHaveLength(1);
+    expect(result.current.videoFiles[0].fileName).toContain('Kaguya-sama');
+  });
+
+  // Replace must revoke prior blob URLs in the same dispatch. Otherwise the
+  // page-level drag-drop "replace session" path leaks a URL per swap.
+  it('replace mode revokes blob URLs allocated for prior files', () => {
+    const { result } = renderHook(() => useVideoFiles());
+    const oldFile = makeFile('Old Show - 01.mkv');
+    act(() => { result.current.processFiles([oldFile], { mode: 'append' }); });
+    // Materialise a blob URL for the prior session
+    act(() => { result.current.getVideoUrl(oldFile); });
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.processFiles([makeFile('New Show - 01.mkv')], { mode: 'replace' });
+    });
+    // The single old blob URL should now be revoked.
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-1');
   });
 });

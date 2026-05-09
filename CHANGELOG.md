@@ -2,6 +2,70 @@
 
 ---
 
+## [2.0.0] - 2026-05-10
+
+### 本地影音库 (P1-P5) — 浏览器里的本地番剧管理 + 播放
+
+把 AnimeGo 从"在线追番清单 + 详情页"扩成"本地番剧库 + 弹幕播放器"。所有解析在浏览器内完成,文件不上传,数据存在 IndexedDB。
+
+**新增**
+
+- **Library 模块**: 本地视频库浏览页 (`/library`),支持多文件夹导入、按系列归类、续看、最近添加。
+- **File System Access API 持久化**: 支持跨会话保留文件夹访问授权 (Chrome / Edge / Brave)。Safari 走 drag-and-drop fallback (内存模式)。
+- **Import pipeline**: 文件夹枚举 → 文件名解析 → 哈希指纹 (md5) → dandanplay 双通道匹配 (文件名 + 哈希) → 自动归类成 Series / Season / Episode。
+- **手动覆盖**: 合并、拆分、重新匹配、改集号四种操作。一次选定,后续导入默认这条规则 (`userOverride` 持久层)。
+- **24h 操作日志**: 详情页抽屉式 ops log,展示该系列最近的写库操作,支持撤销。
+- **Watch progress**: 续看进度 (`progressRepo`) 跨设备本地存储,从 localStorage 自动迁移。
+- **Cinematic library UI**: HUD header (// 02 / LOCAL · MEDIA · LIBRARY //) + 横向滚动行 (// 继续看 // / // 最近添加 //) + 主网格 + 详情 sheet + by-folder 文件树 + 控制室 (filter chips · search · watch rhythm strip)。
+- **DropZone 极简空状态**: 单 SVG 六边形 + 类型韵律,替换原"灰底无个性"空态。
+- **跨字幕组合并**: 自动检测同 animeId 的重复系列并合并,支持撤销。
+- **可用性检测**: 硬盘断连时 OFFLINE / PARTIAL 角标,不影响其他系列。
+- **未归类区**: 解析失败的文件单独陈列,支持忽略 / 创建本地系列 / 搜索归番。
+- **批量操作**: 长按进入选择模式,支持批量合并 / 删除。
+- **重置库**: 一键清空 IDB 全部表 (磁盘文件不动)。
+
+**集成**
+
+- **animes.garden 替换 dmhy RSS**: 磁力资源后端从直连 share.dmhy.org RSS 切到 [api.animes.garden](https://api.animes.garden) 的 JSON API。Garden 已聚合 dmhy + bangumi.moe + 其他源,coverage 严格优于直连。结构化 fansub 名称、KB→MB/GB 自动格式化、provider 透传 (在 source pill 显示为 `via dmhy` / `via moe` 工具提示)。
+- **Zero-result tripwire**: garden 返回 200 OK 但 resources 为空时打 `console.warn`,oncall greppable,防止上游 schema 变更静默退化。
+- **Dandanplay 富化**: 命中后写 AnimeCache,后台拉 AniList 补齐 titleZh / titleEn / posterUrl。
+
+**Player 增强**
+
+- **手动字幕拾取 + ASS/SRT → VTT 转换**: 浏览器内字幕格式转换。
+- **解说轨道检测**: 自动识别 commentary 音轨,路由到 supplementary 通道。
+- **弹幕模糊修复**: 关掉 `artplayer-plugin-danmuku` 注入的 `perspective: 500px`,跨 Chrome / Safari 字体清晰。
+- **§5.10 视觉 token 集中化**: 整套 oklch 色板 + JetBrains Mono / Sora 字体 + LOCAL 六边形标识从散落到统一 `shared/hud-tokens.js`。
+
+**i18n**
+
+- **库页面中英文切换补全**: 60+ 新 key 覆盖 DropZone / FilterChips / SearchBar / BulkActionToolbar / WatchRhythmStrip / 行标题 / SeriesCard 菜单 / SeriesActionsMenu / HudOverflowMenu。
+- `useLang()` 加 `FALLBACK_LANG`,组件级单测无需 wrap LanguageProvider。
+
+**Schema 升级**
+
+- IDB schema v5: 新增 `progress` / `userOverride` / `migrationFailures` / `seasons` / `opsLog` 表。
+- 一次性迁移: localStorage 旧进度 → IDB,幂等。
+
+**Tests**
+
+- 1327 client tests / 317 server tests / 0 failures (排除过期 worktree 噪声)。
+- 测试覆盖含: episode parser、series matcher、import pipeline、merge/split/rematch ops、buildLibraryMatchResult、SeriesCard 渲染、SeriesGrid 长按选择、TorrentModal 源分布、anime.garden 解析 (含 KB→MB 格式化、provider 透传、malformed JSON graceful fallback)。
+
+**修复**
+
+- `callDandan` null-guard + `useLibrary` 在 React 19 strict-mode 下双调用安全。
+- `SeriesCard` 标题裁剪到 2 行避免网格卡片高度抖动。
+- 弹弹分隔符容错。
+
+**已知 deferred** (写进 TODO.md)
+
+- 持久化磁力 cache (Redis / 跨进程 cache,缓解 cold-start 风暴)
+- enqueueEnrichment 支持 bgmId 键入队
+- Library 详情页 / 模态对话框 / Drawer 类的 i18n Phase 2
+
+---
+
 ## [1.0.18] - 2026-05-03
 
 ### 弹幕滚动模糊修复 — 关掉 plugin 的 perspective:500px

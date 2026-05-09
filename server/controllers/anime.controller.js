@@ -6,6 +6,10 @@ const AnimeCache   = require('../models/AnimeCache');
 // In-memory torrent cache (1-hour TTL, max 500 entries)
 const torrentCache = new Map();
 const TORRENT_CACHE_MAX = 500;
+// animes.garden default pageSize. 80 is enough to cover most multi-fansub
+// releases of a single anime (typical 12-ep cour × 4-6 fansub groups × 2-3
+// resolutions ≈ 60-100 entries) without paginating.
+const ANIME_GARDEN_PAGE_SIZE = 80;
 
 // In-memory trending cache (1h TTL)
 const trendingCache = { data: null, ts: 0 };
@@ -159,6 +163,18 @@ function formatBytes(bytes) {
   return `${Math.round(n / 1e3)} KB`;
 }
 
+// animes.garden returns `size` in KB (verified against known 1080p movies +
+// post-credit clips: a ~3.5GB AOT movie reports 3460300, a ~40MB ED clip
+// reports 40448). Convert to a human label for the same shape RSS sources
+// produce.
+function formatKb(kb) {
+  const n = parseInt(kb);
+  if (!n || n <= 0) return '';
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} GB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)} MB`;
+  return `${n} KB`;
+}
+
 // Extract fansub name from title brackets e.g. "[SubsPlease]", "[喵萌奶茶屋]", "【云光字幕组】"
 function parseFansub(title) {
   const match = title.match(/^[\[【]([^\]】]+)[\]】]/);
@@ -189,38 +205,51 @@ async function fetchAcgRip(term) {
     .filter(i => i.title && i.magnet && i.magnet.startsWith('magnet:'));
 }
 
-async function fetchDmhy(term) {
-  // dmhy doesn't recognise "Title - 01" pattern; strip separator so "Title 01" matches
-  const dmhyTerm = term.replace(/\s*-\s*(\d+)$/, ' $1').trim();
-  const url = new URL('https://share.dmhy.org/topics/rss/rss.xml');
-  url.searchParams.set('keyword', dmhyTerm);
-  url.searchParams.set('sort_id', '2'); // anime category
-  url.searchParams.set('order', 'date-desc');
+// animes.garden — JSON aggregator that already covers 动漫花园 (dmhy) +
+// bangumi.moe + others, with structured fansub objects and direct magnet
+// URLs. Replaces the legacy direct-RSS dmhy scrape: same coverage at
+// minimum, plus moe and any new sources animes.garden picks up upstream.
+//
+// Endpoint: https://api.animes.garden/resources?search=<term>&type=动画
+// Response: { resources: [{ id, provider, title, magnet, size:KB,
+//   createdAt, fansub:{ name } | undefined, ... }], pagination: { ... } }
+async function fetchAnimeGarden(term) {
+  const url = new URL('https://api.animes.garden/resources');
+  url.searchParams.set('search', term);
+  url.searchParams.set('type', '动画');
+  url.searchParams.set('pageSize', String(ANIME_GARDEN_PAGE_SIZE));
   const resp = await fetch(url.toString(), {
-    headers: { 'User-Agent': 'AnimeGo/1.0' },
+    headers: { 'User-Agent': 'AnimeGo/1.0', Accept: 'application/json' },
     signal: AbortSignal.timeout(8000),
   });
   if (!resp.ok) return [];
-  const xml = await resp.text();
-  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
-  const raw = parser.parse(xml)?.rss?.channel?.item ?? [];
-  const items = Array.isArray(raw) ? raw : [raw];
-  return items
-    .map(item => {
-      const title  = item.title ?? '';
-      // dmhy enclosure url has HTML entities — decode &amp; → &
-      const rawUrl = item.enclosure?.['@_url'] ?? '';
-      const magnet = rawUrl.replace(/&amp;/g, '&');
-      return {
-        title,
-        magnet,
-        size:   '',  // dmhy enclosure length is always "1"
-        fansub: parseFansub(title),
-        date:   item.pubDate ?? null,
-        source: 'dmhy',
-      };
-    })
-    .filter(i => i.title && i.magnet && i.magnet.startsWith('magnet:'));
+  const json = await resp.json().catch(() => null);
+  if (!json || !Array.isArray(json.resources)) return [];
+  const items = json.resources
+    .map((r) => ({
+      title: r.title ?? '',
+      magnet: r.magnet ?? '',
+      // Falls back to bracket parsing for resources without a structured
+      // fansub object (some bangumi.moe submitters skip it).
+      fansub: r.fansub?.name ?? parseFansub(r.title ?? ''),
+      size: formatKb(r.size),
+      date: r.createdAt ?? null,
+      source: 'garden',
+      // Pass-through: lets the frontend disambiguate which upstream this
+      // garden result came from (moe / dmhy / etc) — surfaced as a tooltip
+      // on the source pill in TorrentModal.
+      provider: r.provider ?? null,
+    }))
+    .filter((i) => i.title && i.magnet && i.magnet.startsWith('magnet:'));
+  // Silent-failure tripwire: a 200 OK with zero items for a non-empty query
+  // is the shape of "garden quietly broke" (schema change, route moved,
+  // global filter regression). Other sources (acg.rip + nyaa) still serve
+  // results so users see degraded coverage, not an error — log so an oncall
+  // grep can spot the pattern before users complain.
+  if (items.length === 0 && term && term.trim().length > 0) {
+    console.warn('[garden] zero-result for non-empty query:', term);
+  }
+  return items;
 }
 
 async function fetchNyaa(term) {
@@ -271,16 +300,19 @@ exports.getTorrents = async (req, res, next) => {
       return res.json({ data: cached.data });
     }
 
-    const [dmhyResult, acgResult, nyaaResult] = await Promise.allSettled([
-      fetchDmhy(q.trim()),
+    // animes.garden replaces the legacy direct-dmhy RSS scrape: it already
+    // aggregates dmhy + bangumi.moe + others into a single JSON API, and
+    // returns structured fansub names instead of bracket-parsed strings.
+    const [gardenResult, acgResult, nyaaResult] = await Promise.allSettled([
+      fetchAnimeGarden(q.trim()),
       fetchAcgRip(q.trim()),
       fetchNyaa(q.trim()),
     ]);
 
     const data = [
-      ...(dmhyResult.status  === 'fulfilled' ? dmhyResult.value  : []),
-      ...(acgResult.status   === 'fulfilled' ? acgResult.value   : []),
-      ...(nyaaResult.status  === 'fulfilled' ? nyaaResult.value  : []),
+      ...(gardenResult.status === 'fulfilled' ? gardenResult.value : []),
+      ...(acgResult.status    === 'fulfilled' ? acgResult.value    : []),
+      ...(nyaaResult.status   === 'fulfilled' ? nyaaResult.value   : []),
     ];
 
     // Evict oldest entry if cache is full

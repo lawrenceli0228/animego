@@ -81,6 +81,82 @@ describe('anime.controller', () => {
       expect(res.body.error.code).toBe('VALIDATION_ERROR')
     })
 
+    it('routes animes.garden JSON results into the response (size in KB → MB)', async () => {
+      const gardenJson = {
+        status: 'OK',
+        complete: false,
+        resources: [
+          {
+            id: 1,
+            provider: 'dmhy',
+            title: '[桜都字幕組] Test Anime - 01 (1080p)',
+            magnet: 'magnet:?xt=urn:btih:abc123',
+            size: 702535, // ≈ 686 MB
+            createdAt: '2026-05-09T08:00:00.000Z',
+            fansub: { id: 1, name: '桜都字幕組' },
+          },
+          {
+            id: 2,
+            provider: 'moe',
+            title: 'Bare title with no fansub object',
+            magnet: 'magnet:?xt=urn:btih:def456',
+            size: 3460300, // ≈ 3.5 GB
+            createdAt: '2026-05-08T08:00:00.000Z',
+            // no fansub object — falls back to bracket parsing (none here → null)
+          },
+          {
+            // dropped: no magnet
+            id: 3,
+            provider: 'dmhy',
+            title: 'Broken row',
+            magnet: '',
+            size: 1000,
+            createdAt: '2026-05-07T08:00:00.000Z',
+          },
+        ],
+      }
+      global.fetch = jest.fn((url) => {
+        if (String(url).startsWith('https://api.animes.garden/')) {
+          return Promise.resolve({ ok: true, json: async () => gardenJson, text: async () => '' })
+        }
+        return Promise.resolve({ ok: true, text: async () => '<rss><channel></channel></rss>' })
+      })
+
+      const res = await request(app).get('/api/anime/torrents?q=garden+probe')
+      expect(res.status).toBe(200)
+      const garden = res.body.data.filter((d) => d.source === 'garden')
+      expect(garden).toHaveLength(2)
+      expect(garden[0]).toMatchObject({
+        title: '[桜都字幕組] Test Anime - 01 (1080p)',
+        magnet: 'magnet:?xt=urn:btih:abc123',
+        fansub: '桜都字幕組',
+        size: '703 MB',
+        source: 'garden',
+        provider: 'dmhy',
+      })
+      expect(garden[1]).toMatchObject({
+        magnet: 'magnet:?xt=urn:btih:def456',
+        size: '3.5 GB',
+        provider: 'moe',
+      })
+      delete global.fetch
+    })
+
+    it('survives animes.garden returning malformed JSON (graceful fallback)', async () => {
+      global.fetch = jest.fn((url) => {
+        if (String(url).startsWith('https://api.animes.garden/')) {
+          return Promise.resolve({ ok: true, json: async () => { throw new Error('bad json') }, text: async () => '' })
+        }
+        return Promise.resolve({ ok: true, text: async () => '<rss><channel></channel></rss>' })
+      })
+      const res = await request(app).get('/api/anime/torrents?q=garden+broken')
+      expect(res.status).toBe(200)
+      expect(Array.isArray(res.body.data)).toBe(true)
+      // garden contributed 0 items but the request succeeded
+      expect(res.body.data.filter((d) => d.source === 'garden')).toHaveLength(0)
+      delete global.fetch
+    })
+
     it('uses in-memory cache on second identical request', async () => {
       const rssXml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss><channel>
