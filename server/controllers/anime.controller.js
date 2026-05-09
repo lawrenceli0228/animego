@@ -6,6 +6,10 @@ const AnimeCache   = require('../models/AnimeCache');
 // In-memory torrent cache (1-hour TTL, max 500 entries)
 const torrentCache = new Map();
 const TORRENT_CACHE_MAX = 500;
+// animes.garden default pageSize. 80 is enough to cover most multi-fansub
+// releases of a single anime (typical 12-ep cour × 4-6 fansub groups × 2-3
+// resolutions ≈ 60-100 entries) without paginating.
+const ANIME_GARDEN_PAGE_SIZE = 80;
 
 // In-memory trending cache (1h TTL)
 const trendingCache = { data: null, ts: 0 };
@@ -213,7 +217,7 @@ async function fetchAnimeGarden(term) {
   const url = new URL('https://api.animes.garden/resources');
   url.searchParams.set('search', term);
   url.searchParams.set('type', '动画');
-  url.searchParams.set('pageSize', '80');
+  url.searchParams.set('pageSize', String(ANIME_GARDEN_PAGE_SIZE));
   const resp = await fetch(url.toString(), {
     headers: { 'User-Agent': 'AnimeGo/1.0', Accept: 'application/json' },
     signal: AbortSignal.timeout(8000),
@@ -221,7 +225,7 @@ async function fetchAnimeGarden(term) {
   if (!resp.ok) return [];
   const json = await resp.json().catch(() => null);
   if (!json || !Array.isArray(json.resources)) return [];
-  return json.resources
+  const items = json.resources
     .map((r) => ({
       title: r.title ?? '',
       magnet: r.magnet ?? '',
@@ -232,10 +236,20 @@ async function fetchAnimeGarden(term) {
       date: r.createdAt ?? null,
       source: 'garden',
       // Pass-through: lets the frontend disambiguate which upstream this
-      // garden result came from (moe / dmhy / etc) if it ever wants to.
+      // garden result came from (moe / dmhy / etc) — surfaced as a tooltip
+      // on the source pill in TorrentModal.
       provider: r.provider ?? null,
     }))
     .filter((i) => i.title && i.magnet && i.magnet.startsWith('magnet:'));
+  // Silent-failure tripwire: a 200 OK with zero items for a non-empty query
+  // is the shape of "garden quietly broke" (schema change, route moved,
+  // global filter regression). Other sources (acg.rip + nyaa) still serve
+  // results so users see degraded coverage, not an error — log so an oncall
+  // grep can spot the pattern before users complain.
+  if (items.length === 0 && term && term.trim().length > 0) {
+    console.warn('[garden] zero-result for non-empty query:', term);
+  }
+  return items;
 }
 
 async function fetchNyaa(term) {

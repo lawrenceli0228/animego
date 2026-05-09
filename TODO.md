@@ -361,3 +361,28 @@ _完成时间：2026-04-17_
 **Depends on / blocked by:** 无硬阻塞，优先级低。可独立 PR。
 
 _记录时间：2026-04-18（/plan-eng-review）_
+
+---
+
+## 待办：磁力 cache 持久化（缓解 cold-start 风暴）
+
+**What:** `server/controllers/anime.controller.js:7` 的 `torrentCache` 是进程内 Map（1h TTL，500 entries 上限）。重启即清零。把它换成 Redis（或 SQLite/MongoDB 已有连接）后端,让缓存跨重启存活。
+
+**Why:** 当前 cache 在生产重启窗口内全清。如果重启撞上流量高峰,500 个用户的下一次搜索全部穿透到 animes.garden + acg.rip + nyaa。三家 upstream 同一秒收到 500 倍并发,可能触发临时封 IP / 502。
+更糟:每个搜索打 3 个上游、每个上游 8s timeout,冷启动期间用户感受 = 慢且不稳定。
+
+**Pros:**
+- 重启不再清缓存,upstream 请求量平滑。
+- 1h TTL 可以保留(对"找资源"场景够新鲜)。
+- 跨进程共享(以后多 worker / 多 pod 时直接受益)。
+
+**Cons:**
+- 引入 Redis 依赖(或挪到现有 MongoDB)。
+- 需要序列化/反序列化(目前 Map 直接存 object,要改成 JSON.stringify/parse)。
+- TTL 用 Redis EXPIRE 比手写 timestamp 比较干净,但要测一下 KEY 命名空间不撞别的 service。
+
+**Context:** `/plan-eng-review` 2026-05-10 评 animes.garden 接入 PR (commit `06b4e47`) 时识别出来。当时决定不在那个 PR 解决(scope creep),记成 TODO。当前的 dmhy 时代已经存在这个问题,只是没人 flag 过 — 接 garden 之后 upstream 风险更集中(garden 一家挂了等于 dmhy + moe 一起断)所以更值得做。
+
+**Depends on / blocked by:** 无硬阻塞。建议跟其他 cache 统一(`trendingCache`、`yearlyTopCache` 都是同一个进程内 Map 模式,可以一次性升级)。
+
+_记录时间：2026-05-10（/plan-eng-review）_

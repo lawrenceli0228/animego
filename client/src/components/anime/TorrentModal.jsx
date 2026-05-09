@@ -111,20 +111,28 @@ function TorrentRow({ item, copied, onCopy, onOpen }) {
             <span style={{ fontSize: 10, color: 'rgba(235,235,245,0.30)' }}>{fmtDate(item.date)}</span>
           )}
           {item.source && (
-            <span style={{
-              fontSize: 9, padding: '1px 5px', borderRadius: 3, fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '0.5px',
-              background:
-                item.source === 'nyaa'   ? 'rgba(90,200,250,0.1)'
-              : item.source === 'garden' ? 'rgba(52,211,153,0.1)'
-              : item.source === 'dmhy'   ? 'rgba(52,211,153,0.1)'
-              :                            'rgba(84,84,88,0.30)',
-              color:
-                item.source === 'nyaa'   ? '#5ac8fa'
-              : item.source === 'garden' ? '#34d399'
-              : item.source === 'dmhy'   ? '#34d399'
-              :                            'rgba(235,235,245,0.30)',
-            }}>{
+            <span
+              title={
+                item.source === 'garden' && item.provider
+                  ? `animes.garden · via ${item.provider}`
+                  : item.source === 'garden' ? 'animes.garden'
+                  : undefined
+              }
+              style={{
+                fontSize: 9, padding: '1px 5px', borderRadius: 3, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.5px',
+                background:
+                  item.source === 'nyaa'   ? 'rgba(90,200,250,0.1)'
+                : item.source === 'garden' ? 'rgba(52,211,153,0.1)'
+                : item.source === 'dmhy'   ? 'rgba(52,211,153,0.1)'
+                :                            'rgba(84,84,88,0.30)',
+                color:
+                  item.source === 'nyaa'   ? '#5ac8fa'
+                : item.source === 'garden' ? '#34d399'
+                : item.source === 'dmhy'   ? '#34d399'
+                :                            'rgba(235,235,245,0.30)',
+                cursor: item.source === 'garden' ? 'help' : 'default',
+              }}>{
               item.source === 'garden' ? '花园'
             : item.source === 'dmhy'   ? '花园'
             :                            item.source
