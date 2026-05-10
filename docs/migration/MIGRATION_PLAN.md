@@ -3,7 +3,9 @@
 **启动:** 2026-05-10
 **baseline:** v2.0.0(commit `7af1d3e`)
 **目标终态:** Next.js 14 + TypeScript + Bun runtime 全栈应用
-**总工时估算:** 210-385 hr (中位 300 hr) ~ 业余 5-9 个月
+**总工时估算:** 220-395 hr (中位 310 hr) ~ 业余 5-9 个月
+
+> **UI 迁移风险:** 这是技术栈替换不是重设计,但 SSR 引入 7 个隐形 UI 风险(FOUC、hydration mismatch、accentCache 闪烁等)。详见 § 3.7,共 +10 hr 分摊到 M2/M3/M4/M7。
 
 ---
 
@@ -47,15 +49,15 @@
 ```
 P0  Foundation                            12-25 hr
 P1  API + Auth(Express 89+ endpoint 全迁) 80-140 hr  ← 最大头
-P2  静态/Public 页面                       15-25 hr
-P3  SEO 核心(anime/seasonal/search)       15-30 hr
-P4  Library + Player                      40-80 hr   ← 最难,IndexedDB 边界
+P2  静态/Public 页面                       17-27 hr  (+2 UI mitigation)
+P3  SEO 核心(anime/seasonal/search)       18-33 hr  (+3 UI mitigation)
+P4  Library + Player                      45-85 hr  (+5 UI mitigation) ← 最难
 P5  Admin                                 15-30 hr
 P6  部署架构(双 Dockerfile)               22-45 hr
-P7  测试 + 性能                           15-30 hr
+P7  测试 + 性能                           16-31 hr  (+1 visual regression)
 P8  Bun Canary(production 监控)           5-10 hr
 ─────────────────────────────────────────────
-总: 210-385 hr
+总: 220-395 hr
 ```
 
 ### Phase 0 — Foundation(12-25 hr)
@@ -77,7 +79,11 @@ P8  Bun Canary(production 监控)           5-10 hr
 ├── next.config.js: rewrites 临时回老路由到 Vite 旧实现
 ├── next.config.js: 不要设 output: 'standalone' until M6 (跟 custom server 决策对齐)
 ├── 验证: 改一个文件,build + test + dev 跑通
-└── monorepo 决定: 在 client/ 旁起 next-app/(推荐),还是 client/ → client-legacy/?
+├── monorepo 决定: 在 client/ 旁起 next-app/(推荐),还是 client/ → client-legacy/?
+└── ⚡ UI 风险 inventory (见 §3.7):
+    ├── grep 出全部 localStorage callsite (~25 个,'lang'、'animego.heatmapConfig'、accentCache 等)
+    ├── 写入 docs/migration/UI_RISKS.md(M2/M3/M4 mitigation 对照清单)
+    └── 截 v2.0 visual baseline:首页 / /anime/154587 / /library 各 1 张全屏(1280×800)
 ```
 
 **Tests (P0):**
@@ -198,24 +204,32 @@ nginx :443 ─────►│  /socket.io/*│──► ws-server:3001 (Bun)
 - 关键路径 6-10 个 endpoint 新旧 response shape 对比通过(不是 89+ 全部,**避免 30+ hr 隐藏工作**)
 - E2E auth flow 全绿(包括 socket.io 认证流)
 
-### Phase 2 — Public Pages(15-25 hr)
+### Phase 2 — Public Pages(17-27 hr)
 
 ```
 ├── LandingPage → Server Component
 │   └── 拿 trending / yearly-top from Mongo (RSC fetch)
 ├── About / Privacy / Terms → RSC
 ├── 加 metadata API(title / OG / Twitter card)
-└── sitemap.xml 生成器(基于 anime IDs)
+├── sitemap.xml 生成器(基于 anime IDs)
+└── ⚡ UI mitigation (+2 hr,见 §3.7):
+    ├── A1: app/layout.tsx 加 inline script 同步读 localStorage→data attr(防 lang/danmaku FOUC)
+    └── /、/about、/privacy 各加 loading.tsx skeleton(~20 行)
 ```
 
-### Phase 3 — SEO 核心(15-30 hr)
+### Phase 3 — SEO 核心(18-33 hr)
 
 ```
 ├── /anime/[id] → ISR (revalidate 60s)
 │   └── 这是 SEO 主战场,为每部番生成静态页
 ├── /seasonal/[season]/[year] → ISR
 ├── /search → searchParams 服务端 + 客户端交互混合
-└── robots.txt + structured data (JSON-LD anime schema)
+├── robots.txt + structured data (JSON-LD anime schema)
+└── ⚡ UI mitigation (+3 hr,见 §3.7):
+    ├── B1: anime schema 加 accentColor 字段 + 一次性 migration script 回填存量(防卡片首屏跳色)
+    │       AnimeCard 改读 props.accentColor,accentCache 退化为客户端 fallback
+    ├── /anime/[id]、/seasonal、/search 各加 loading.tsx skeleton
+    └── AnimeCard <Link prefetch={false}>(防首页滑动触发 50+ 卡片预加载)
 ```
 
 ### Phase 4 — Library + Player(40-80 hr)← 最容易翻车
@@ -233,6 +247,11 @@ nginx :443 ─────►│  /socket.io/*│──► ws-server:3001 (Bun)
 ```
 
 **reauth E2E 注意:** v2.0.0 已加 `UnavailableSeriesSection.test.jsx`(4 cases)+ `LibraryPage.test.jsx`(2 cases)wiring 单元覆盖。Phase 4 的 E2E **是补充,不是替代**:E2E 在真浏览器 + 真 IDB + 真 FSA 跑端到端,单元测试不替代但也不删除。两者并存。
+
+**⚡ UI mitigation (+5 hr,见 §3.7):**
+- 'use client' 边界审计:`grep -rn "useState\|useEffect\|window\|document" app/library app/player`,逐个确认入口加了 `'use client'`
+- /library、/player 各加 loading.tsx skeleton(IDB 读取期间不白屏)
+- 50+ 文件夹真机测试:DevTools Console 红色 hydration warning 必须清零
 
 ### Phase 5 — Admin(15-30 hr)
 
@@ -285,7 +304,7 @@ nginx :443 ─────►│  /socket.io/*│──► ws-server:3001 (Bun)
     └── actions/setup-node → oven/setup-bun
 ```
 
-### Phase 7 — 测试 + 性能(15-30 hr)
+### Phase 7 — 测试 + 性能(16-31 hr)
 
 ```
 ├── 137 个测试文件适配:
@@ -296,6 +315,9 @@ nginx :443 ─────►│  /socket.io/*│──► ws-server:3001 (Bun)
 │   ├── 关键 flow: 注册 → 登录 → 添加文件夹 → 播放
 │   ├── 关键 flow: 番剧详情 → 订阅 → watchlist
 │   └── 关键 flow: 重新授权 reauth(本次刚加的 UX)
+├── ⚡ UI 视觉回归 (+1 hr,见 §3.7):
+│   └── Playwright screenshot diff:首页 / /anime/154587 / /library
+│       对照 M0 截的 v2.0 baseline,像素差 ≤ 1% 才能 pass
 └── Lighthouse 验证:
     ├── LCP < 1s on /anime/[id]
     ├── SEO ≥ 95
@@ -369,6 +391,103 @@ nginx :443 ─────►│  /socket.io/*│──► ws-server:3001 (Bun)
 | 待办十七 Admin 富化速率保护 | M5 | resetEnrichment 走 enqueueEnrichment 排队,不绕过 | M5 PR merge |
 
 **强制要求:** phase 实施 PR 必须在 commit message 里写 `Closes TODO #四 (User.isPublic)` 等。否则旧 TODO 状态飘移,Part 2 表格永远清不掉。
+
+---
+
+## 3.7 UI 迁移风险审计
+
+> 这次迁移**没有重设计 UI** — 颜色、字体、布局、组件全部 1:1 平移(JSX → TSX 输出等价)。`DESIGN.md` 设计令牌不动。但 SPA → SSR 的 runtime 变化引入 7 处隐形 UI 风险,每处都能修。
+
+### 风险清单
+
+| # | 风险 | 严重度 | 现象 | Phase | Mitigation |
+|---|------|-------|------|-------|-----------|
+| U0 | Hydration mismatch | ★★★ | 进 `/library` 闪 200–500ms + Console 红色 warning | M4 | 'use client' 审计 + dynamic({ssr:false}) |
+| U1 | localStorage FOUC | ★★★ | 服务器渲 ZH → 客户端切 EN,文字全闪;弹幕开关、播放速率、热图配置同闪 | M2 | **A1** inline script |
+| U2 | accentCache 卡片跳色 | ★★ | 首页 100+ 番剧卡 SSR 出灰色 → hydrate 跳成番剧主色 | M3 | **B1** anime.accentColor 入 schema |
+| U3 | Loading 态切换 | ★★ | SPA 白屏+spinner → RSC 没 fallback 时 Suspense 默认空 | M2/M3/M4 | 5 个 loading.tsx skeleton |
+| U4 | 强制重登期 login 页 | ★★ | M1.2 流量翻倍,旧 UI 暴露 | M1.2 前 | 视觉肉眼审 + 友好提示组件 |
+| U5 | next/link 默认 prefetch | ★ | 滑首页触发 50+ 番剧详情预加载,流量翻倍 | M3 | AnimeCard prefetch={false} |
+| U6 | 视觉回归无 baseline | ★ | 改 1 行 CSS 不知道哪里坏了 | M0 + M7 | M0 截 baseline + M7 Playwright 像素 diff |
+
+### 拍板决策(2026-05-11)
+
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| **A · localStorage FOUC 防护** | **A1: `next-themes` 同款 inline script** | 工业标准,1–2 hr 工作量,first paint 就对 |
+| **B · accentCache 长期方案** | **B1: anime document 加 accentColor 字段 + ISR SSR 直出彩色** | 一次性 migration script,长期受益,符合 ISR 设计哲学 |
+
+### A1 实施模板(M2 落地)
+
+```tsx
+// app/layout.tsx — 必须放 <head> 顶部,React 之前同步执行
+<head>
+  <script dangerouslySetInnerHTML={{ __html: `
+    try {
+      const lang = localStorage.getItem('lang') || 'zh';
+      document.documentElement.setAttribute('data-lang', lang);
+      const dm = localStorage.getItem('animego.danmaku.visible');
+      if (dm !== null) document.documentElement.setAttribute('data-danmaku', dm);
+      const rate = localStorage.getItem('animego.playback.rate');
+      if (rate) document.documentElement.style.setProperty('--player-rate', rate);
+    } catch (e) {}
+  `}} />
+</head>
+```
+
+CSS / 组件根据 `[data-lang]` `[data-danmaku]` 决定渲染分支。`next-themes` 包不直接用(不需要主题切换),但模式抄它的 — 见 [next-themes 源码](https://github.com/pacanukeha/next-themes/blob/main/packages/next-themes/src/index.tsx)。
+
+### B1 实施模板(M3 落地)
+
+```ts
+// server/models/Anime.js (M3 之前,在 server/ 老 schema 加字段)
+const AnimeSchema = new Schema({
+  // ... existing fields ...
+  accentColor: { type: String, default: null },  // hex e.g. "#ff6b9d"
+})
+
+// scripts/migrate-accent-colors.ts (一次性脚本)
+// 读 client/src/utils/accentCache.js 的提取逻辑 (Vibrant.js)
+// 服务器跑一遍,把所有 anime.coverImage → 主色调写回 anime.accentColor
+// production 跑前先 staging 验证,~5000 部番剧约 30 分钟
+
+// app/anime/[id]/page.tsx (M3 ISR 化时)
+const anime = await getAnime(params.id)
+return <AnimeCard anime={anime} accentColor={anime.accentColor} />
+
+// AnimeCard 改读 props,accentCache 客户端只做 cover 换图后的兜底
+```
+
+### 工时账
+
+| Phase | 增量 | 内容 |
+|-------|-----|------|
+| M0 | 0 hr | localStorage inventory + visual baseline 截图(顺路,~30 分钟) |
+| M2 | +2 hr | A1 inline script + 3 个 loading.tsx |
+| M3 | +3 hr | B1 schema + migration script + 3 loading.tsx + prefetch={false} |
+| M4 | +5 hr | 'use client' 审计 + 2 loading.tsx + 50+ 文件夹 hydration 测试 |
+| M7 | +1 hr | Playwright visual regression 配置 |
+| **总** | **+10 hr** | 中位 +10,合并到总工时 220–395 hr |
+
+### 不修的副作用(接受)
+
+- **首屏 LCP 比 SPA 更快**(SSR 直出 HTML)— 这是好事,不算副作用
+- **react-router-dom → next/navigation** 微差(useLocation 拆成 usePathname + useSearchParams)— 用户感知 0,M4 重构期顺手切
+- **Next `<Link>` prefetch 行为** — U5 已修(关掉 AnimeCard 的)
+- **页面切换"感觉"略不同**(Next 等 RSC payload 比 SPA 慢 ~50ms)— 用户感知不到
+
+### M7 视觉回归 baseline 流程
+
+```bash
+# M0 时(还在 v2.0 SPA):
+npx playwright codegen --device "Desktop Chrome" --viewport-size 1280,800
+# 录:首页 → /anime/154587 → /library(已添加 1 个文件夹)
+# 截 3 张 PNG → docs/migration/baseline-screenshots/
+
+# M7 时(Next.js 全栈):
+# Playwright 同样路径截图,跟 baseline 做 pixel diff
+# 阈值 ≤ 1% 像素差才 pass(允许微小渲染差异,大改动会被抓)
+```
 
 ---
 
@@ -640,6 +759,8 @@ bun server.js               # Next standalone + 自定义 server
 | 2026-05-10 | socket.io 跑哪 | A: 放弃 standalone / B: 独立 ws-server / C: Express 留 socket.io | B: 独立 ws-server 微服务 | 读 Next docs 发现 custom server ⛔ standalone,选 B 保持 standalone + 不违背 M1 全迁 |
 | 2026-05-10 | bcrypt vs Bun.password | 切 Bun.password / 保留 bcrypt | 保留 bcrypt | 老 hash 不互通,15% 慢可接受 |
 | 2026-05-10 | middleware runtime | edge / nodejs | nodejs | Bun 不支持 edge runtime,顺便能用 jsonwebtoken |
+| 2026-05-11 | localStorage FOUC 防护 | A1 inline script / A2 cookie / A3 Suspense | A1 inline script | 工业标准,1–2 hr,first paint 就对 |
+| 2026-05-11 | accentColor 长期方案 | B1 schema 字段 / B2 客户端 fade-in | B1 schema 字段 | 一次性 migration,符合 ISR 设计哲学 |
 
 ---
 
@@ -661,4 +782,4 @@ bun server.js               # Next standalone + 自定义 server
 
 ---
 
-**Last updated:** 2026-05-10 (post-docs review:加 ws-server 独立微服务 + Bun runtime 注意点 + Framework Specifics appendix)
+**Last updated:** 2026-05-11 (加 §3.7 UI 迁移风险审计 + A1/B1 决策 + M0/M2/M3/M4/M7 mitigation tasks,共 +10 hr)

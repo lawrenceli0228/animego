@@ -1,0 +1,966 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AnimeGo · 全栈迁移架构图</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --bg-soft: #11141a;
+    --bg-card: #151921;
+    --bg-elev: #1c2230;
+    --line: #232a38;
+    --line-strong: #303a4d;
+    --ink: #e7ebf3;
+    --ink-mute: #97a0b3;
+    --ink-dim: #5e6675;
+
+    --accent: #7cffb2;
+    --accent-soft: rgba(124, 255, 178, 0.12);
+    --warn: #ffb46b;
+    --warn-soft: rgba(255, 180, 107, 0.13);
+    --danger: #ff7a90;
+    --danger-soft: rgba(255, 122, 144, 0.14);
+    --info: #79c4ff;
+    --info-soft: rgba(121, 196, 255, 0.13);
+    --violet: #c89dff;
+    --violet-soft: rgba(200, 157, 255, 0.13);
+
+    --r-sm: 6px;
+    --r-md: 10px;
+    --r-lg: 14px;
+
+    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+
+    --text-display: clamp(2.4rem, 1.6rem + 3vw, 4rem);
+    --text-h2: clamp(1.4rem, 1.1rem + 1vw, 1.85rem);
+    --text-h3: clamp(1.05rem, 0.95rem + 0.4vw, 1.2rem);
+    --text-base: 0.95rem;
+    --text-sm: 0.82rem;
+    --text-xs: 0.72rem;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(124, 255, 178, 0.06), transparent 60%),
+      radial-gradient(900px 500px at -10% 30%, rgba(121, 196, 255, 0.05), transparent 60%),
+      var(--bg);
+    line-height: 1.55;
+    font-size: var(--text-base);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  code, pre, .mono { font-family: var(--mono); }
+
+  .wrap {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+
+  /* ------- Header ------- */
+  header.hero {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 36px;
+    margin-bottom: 48px;
+  }
+  .eyebrow {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-size: var(--text-display);
+    line-height: 1;
+    margin: 0 0 14px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+  h1 .accent { color: var(--accent); }
+  .subtitle {
+    color: var(--ink-mute);
+    font-size: clamp(0.95rem, 0.8rem + 0.4vw, 1.1rem);
+    max-width: 760px;
+  }
+  .meta-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-top: 28px;
+  }
+  .meta {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 14px 16px;
+  }
+  .meta .label {
+    color: var(--ink-dim);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 4px;
+  }
+  .meta .value {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    color: var(--ink);
+  }
+  .meta .value.accent { color: var(--accent); }
+
+  /* ------- Section ------- */
+  section { margin: 64px 0; }
+  h2 {
+    font-size: var(--text-h2);
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  h2 .num {
+    color: var(--ink-dim);
+    font-family: var(--mono);
+    font-size: 0.8em;
+  }
+  h3 {
+    font-size: var(--text-h3);
+    margin: 0 0 10px;
+    letter-spacing: -0.01em;
+  }
+  .lede {
+    color: var(--ink-mute);
+    margin: 0 0 28px;
+    max-width: 780px;
+  }
+
+  /* ------- Phase timeline ------- */
+  .phases {
+    display: grid;
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .phase {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--line-strong);
+    border-radius: var(--r-md);
+    padding: 14px 12px 16px;
+    position: relative;
+    transition: transform 120ms ease, border-color 120ms ease;
+  }
+  .phase:hover { transform: translateY(-2px); border-color: var(--ink-dim); }
+  .phase .id {
+    font-family: var(--mono);
+    color: var(--ink-dim);
+    font-size: var(--text-xs);
+    margin-bottom: 4px;
+  }
+  .phase .name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    line-height: 1.25;
+  }
+  .phase .hr {
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    color: var(--ink-mute);
+  }
+  .phase[data-risk="green"] { border-top-color: var(--accent); }
+  .phase[data-risk="yellow"] { border-top-color: var(--warn); }
+  .phase[data-risk="red"] { border-top-color: var(--danger); }
+
+  .phase[data-risk="red"]::after {
+    content: "high risk";
+    position: absolute;
+    top: 6px; right: 8px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--danger);
+  }
+
+  /* ------- Architecture diagram ------- */
+  .arch {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.02), transparent 30%),
+      var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    padding: 32px;
+    overflow-x: auto;
+  }
+  .arch svg { display: block; width: 100%; height: auto; min-width: 720px; }
+
+  /* ------- Compare grid ------- */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 36px 1fr;
+    gap: 0;
+    align-items: stretch;
+  }
+  .compare .col {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 22px 22px 8px;
+  }
+  .compare .col h4 {
+    margin: 0 0 16px;
+    font-size: 0.88rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink-dim);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .compare .col h4 .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ink-dim);
+  }
+  .compare .col.before h4 .dot { background: var(--ink-dim); }
+  .compare .col.after h4 .dot { background: var(--accent); }
+  .compare .col.after h4 { color: var(--accent); }
+  .compare .arrow {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-dim);
+    font-family: var(--mono);
+    font-size: 1.2rem;
+  }
+  .compare .col ul {
+    margin: 0;
+    padding: 0 0 14px 0;
+    list-style: none;
+  }
+  .compare .col li {
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--line);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.88rem;
+  }
+  .compare .col li:last-child { border-bottom: 0; }
+  .compare .col li .k { color: var(--ink-mute); }
+  .compare .col li .v { color: var(--ink); font-family: var(--mono); font-size: 0.82rem; }
+
+  /* ------- Risk matrix ------- */
+  .risk-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 14px;
+  }
+  .risk {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong);
+    border-radius: var(--r-md);
+    padding: 16px 18px;
+  }
+  .risk .head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+    gap: 10px;
+  }
+  .risk .id {
+    font-family: var(--mono);
+    color: var(--ink-mute);
+    font-size: var(--text-xs);
+    letter-spacing: 0.1em;
+  }
+  .risk .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid;
+  }
+  .risk[data-sev="critical"] { border-left-color: var(--danger); }
+  .risk[data-sev="critical"] .badge { color: var(--danger); border-color: var(--danger-soft); background: var(--danger-soft); }
+  .risk[data-sev="high"] { border-left-color: var(--warn); }
+  .risk[data-sev="high"] .badge { color: var(--warn); border-color: var(--warn-soft); background: var(--warn-soft); }
+  .risk[data-sev="med"] { border-left-color: var(--info); }
+  .risk[data-sev="med"] .badge { color: var(--info); border-color: var(--info-soft); background: var(--info-soft); }
+  .risk[data-sev="low"] { border-left-color: var(--ink-dim); }
+  .risk[data-sev="low"] .badge { color: var(--ink-mute); border-color: var(--line); background: var(--bg-elev); }
+  .risk h4 { margin: 0 0 6px; font-size: 0.95rem; }
+  .risk p { margin: 0; color: var(--ink-mute); font-size: 0.85rem; }
+  .risk .mit { margin-top: 10px; font-size: 0.78rem; color: var(--ink); border-top: 1px dashed var(--line); padding-top: 8px; }
+  .risk .mit b { color: var(--accent); font-weight: 500; font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; }
+
+  /* ------- Tables ------- */
+  table.t {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    font-size: 0.88rem;
+  }
+  table.t th, table.t td {
+    text-align: left;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.t tr:last-child td { border-bottom: 0; }
+  table.t th {
+    background: var(--bg-elev);
+    color: var(--ink-mute);
+    font-weight: 500;
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  table.t code { font-size: 0.78rem; color: var(--accent); }
+  table.t .pri { color: var(--warn); font-family: var(--mono); }
+
+  /* ------- Gates ------- */
+  .gates {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .gate {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 14px 16px;
+  }
+  .gate .from-to {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    margin-bottom: 8px;
+  }
+  .gate .from-to .from { color: var(--ink-mute); }
+  .gate .from-to .arr { color: var(--ink-dim); }
+  .gate .from-to .to { color: var(--accent); }
+  .gate p { margin: 0; font-size: 0.85rem; color: var(--ink); }
+
+  /* ------- Rollback ------- */
+  .rb-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .rb {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .rb::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--accent);
+  }
+  .rb.full::before { background: var(--warn); }
+  .rb h4 { margin: 0 0 4px; font-size: 1rem; }
+  .rb .time {
+    font-family: var(--mono);
+    color: var(--accent);
+    font-size: 0.82rem;
+    margin-bottom: 14px;
+  }
+  .rb.full .time { color: var(--warn); }
+  .rb pre {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    padding: 12px 14px;
+    margin: 0;
+    overflow-x: auto;
+    font-size: 0.78rem;
+    color: var(--ink);
+    line-height: 1.55;
+  }
+  .rb pre .cmt { color: var(--ink-dim); }
+  .rb pre .acc { color: var(--accent); }
+
+  /* ------- Decision log ------- */
+  .decisions {
+    display: grid;
+    gap: 8px;
+  }
+  .decision {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .decision .topic { font-weight: 500; font-size: 0.9rem; }
+  .decision .topic small { display: block; color: var(--ink-dim); font-family: var(--mono); font-size: var(--text-xs); margin-top: 2px; }
+  .decision .pick { font-size: 0.85rem; color: var(--ink-mute); }
+  .decision .pick b { color: var(--accent); font-weight: 500; }
+
+  /* ------- Footer ------- */
+  footer {
+    margin-top: 80px;
+    padding-top: 28px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-dim);
+    font-size: 0.82rem;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer code { color: var(--ink-mute); }
+
+  /* ------- Responsive ------- */
+  @media (max-width: 900px) {
+    .phases { grid-template-columns: repeat(3, 1fr); }
+    .compare { grid-template-columns: 1fr; gap: 14px; }
+    .compare .arrow { display: none; }
+    .rb-grid { grid-template-columns: 1fr; }
+    .decision { grid-template-columns: 1fr; gap: 6px; }
+  }
+  @media (max-width: 560px) {
+    .phases { grid-template-columns: repeat(2, 1fr); }
+    .wrap { padding: 32px 18px 64px; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <div class="eyebrow">Migration Plan · 2026-05-10 Baseline</div>
+    <h1>AnimeGo <span class="accent">→</span> Next.js 14 + Bun</h1>
+    <p class="subtitle">
+      从 Vite SPA + Express 全栈重写到 Next.js App Router + TypeScript + Bun runtime。
+      89+ endpoint、137 测试、socket.io 长连接、IndexedDB 本地媒体库,一次性切干净。
+    </p>
+
+    <div class="meta-row">
+      <div class="meta">
+        <div class="label">总工时(中位)</div>
+        <div class="value accent">300 hr</div>
+      </div>
+      <div class="meta">
+        <div class="label">业余周期</div>
+        <div class="value">5–9 月</div>
+      </div>
+      <div class="meta">
+        <div class="label">阶段</div>
+        <div class="value">M0 – M8</div>
+      </div>
+      <div class="meta">
+        <div class="label">Innovation Tokens</div>
+        <div class="value">4 / 3</div>
+      </div>
+      <div class="meta">
+        <div class="label">回滚 SLA</div>
+        <div class="value">5 min</div>
+      </div>
+      <div class="meta">
+        <div class="label">Baseline Commit</div>
+        <div class="value">7af1d3e</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ PHASE TIMELINE ============ -->
+  <section>
+    <h2><span class="num">01</span>阶段路线图</h2>
+    <p class="lede">9 个阶段、3 个高风险节点(M1·M4·M8)。M1 拆 5 个 sub-PR ship,降低单 PR 爆炸半径。</p>
+
+    <div class="phases">
+      <div class="phase" data-risk="yellow">
+        <div class="id">M0</div>
+        <div class="name">Foundation</div>
+        <div class="hr">12–25 hr</div>
+      </div>
+      <div class="phase" data-risk="red">
+        <div class="id">M1</div>
+        <div class="name">API + Auth 全迁</div>
+        <div class="hr">80–140 hr</div>
+      </div>
+      <div class="phase" data-risk="green">
+        <div class="id">M2</div>
+        <div class="name">Public Pages</div>
+        <div class="hr">15–25 hr</div>
+      </div>
+      <div class="phase" data-risk="green">
+        <div class="id">M3</div>
+        <div class="name">SEO 核心 ISR</div>
+        <div class="hr">15–30 hr</div>
+      </div>
+      <div class="phase" data-risk="red">
+        <div class="id">M4</div>
+        <div class="name">Library + Player</div>
+        <div class="hr">40–80 hr</div>
+      </div>
+      <div class="phase" data-risk="green">
+        <div class="id">M5</div>
+        <div class="name">Admin</div>
+        <div class="hr">15–30 hr</div>
+      </div>
+      <div class="phase" data-risk="yellow">
+        <div class="id">M6</div>
+        <div class="name">部署架构</div>
+        <div class="hr">22–45 hr</div>
+      </div>
+      <div class="phase" data-risk="green">
+        <div class="id">M7</div>
+        <div class="name">测试 + 性能</div>
+        <div class="hr">15–30 hr</div>
+      </div>
+      <div class="phase" data-risk="yellow">
+        <div class="id">M8</div>
+        <div class="name">Bun Canary</div>
+        <div class="hr">5–10 hr</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BEFORE / AFTER ============ -->
+  <section>
+    <h2><span class="num">02</span>当前 vs 终态</h2>
+    <p class="lede">栈层逐项替换,不留双栈。Express 在 M1 期间保留作为流量切换底盘,M6 部署后停机。</p>
+
+    <div class="compare">
+      <div class="col before">
+        <h4><span class="dot"></span>v2.0 现状</h4>
+        <ul>
+          <li><span class="k">前端</span><span class="v">Vite + React 18 + JSX</span></li>
+          <li><span class="k">后端</span><span class="v">Express 4 (89+ ep)</span></li>
+          <li><span class="k">语言</span><span class="v">JS + JSDoc</span></li>
+          <li><span class="k">Auth</span><span class="v">JWT in localStorage</span></li>
+          <li><span class="k">Runtime</span><span class="v">Node.js 22</span></li>
+          <li><span class="k">包管理</span><span class="v">npm + package-lock</span></li>
+          <li><span class="k">实时</span><span class="v">Express + socket.io 同进程</span></li>
+          <li><span class="k">渲染</span><span class="v">CSR(SPA)</span></li>
+          <li><span class="k">SEO</span><span class="v">索引依赖 prerender hack</span></li>
+        </ul>
+      </div>
+      <div class="arrow">→</div>
+      <div class="col after">
+        <h4><span class="dot"></span>终态</h4>
+        <ul>
+          <li><span class="k">前端</span><span class="v">Next 14 App Router + RSC + TSX</span></li>
+          <li><span class="k">后端</span><span class="v">Next API routes</span></li>
+          <li><span class="k">语言</span><span class="v">TypeScript (strict: false)</span></li>
+          <li><span class="k">Auth</span><span class="v">httpOnly cookies + middleware</span></li>
+          <li><span class="k">Runtime</span><span class="v">Bun 1.3 (dev + prod)</span></li>
+          <li><span class="k">包管理</span><span class="v">bun + bun.lockb</span></li>
+          <li><span class="k">实时</span><span class="v">独立 ws-server 微服务 :3001</span></li>
+          <li><span class="k">渲染</span><span class="v">RSC + ISR(60s)</span></li>
+          <li><span class="k">SEO</span><span class="v">真 SSR + JSON-LD + sitemap</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PRODUCTION ARCHITECTURE ============ -->
+  <section>
+    <h2><span class="num">03</span>生产部署架构</h2>
+    <p class="lede">
+      Cloudflare 只 cache 静态资产,HTML 路由 Bypass 让 Next ISR 自管。
+      socket.io 不能跑 Next standalone 内,拆独立 ws-server 容器,nginx 反代分发。
+    </p>
+
+    <div class="arch">
+      <svg viewBox="0 0 1100 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Production architecture">
+        <defs>
+          <linearGradient id="g-app" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#1c2230"/>
+            <stop offset="100%" stop-color="#151921"/>
+          </linearGradient>
+          <linearGradient id="g-ws" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#1c2230"/>
+            <stop offset="100%" stop-color="#151921"/>
+          </linearGradient>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#5e6675"/>
+          </marker>
+          <marker id="arr-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#7cffb2"/>
+          </marker>
+          <marker id="arr-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ffb46b"/>
+          </marker>
+        </defs>
+
+        <!-- Browser layer -->
+        <g>
+          <rect x="40" y="20" width="1020" height="70" rx="10" fill="#11141a" stroke="#232a38"/>
+          <text x="60" y="48" fill="#97a0b3" font-family="ui-monospace,monospace" font-size="12" letter-spacing="2">CLIENT · BROWSER</text>
+          <text x="60" y="74" fill="#e7ebf3" font-size="14">React 18 (RSC + Client Components) · IndexedDB / Dexie · File System Access · artplayer + dandanplay-vi</text>
+        </g>
+
+        <!-- Edge: Cloudflare -->
+        <g>
+          <rect x="40" y="120" width="1020" height="80" rx="10" fill="url(#g-app)" stroke="#303a4d"/>
+          <text x="60" y="146" fill="#97a0b3" font-family="ui-monospace,monospace" font-size="12" letter-spacing="2">EDGE</text>
+          <text x="60" y="170" fill="#e7ebf3" font-size="15" font-weight="600">Cloudflare CDN</text>
+
+          <!-- cache rules pills -->
+          <g font-family="ui-monospace,monospace" font-size="11">
+            <rect x="240" y="155" width="170" height="22" rx="11" fill="#7cffb215" stroke="#7cffb240"/>
+            <text x="252" y="171" fill="#7cffb2">cache /_next/static/* 1y</text>
+
+            <rect x="420" y="155" width="180" height="22" rx="11" fill="#ffb46b15" stroke="#ffb46b40"/>
+            <text x="432" y="171" fill="#ffb46b">bypass /anime/* /seasonal/*</text>
+
+            <rect x="610" y="155" width="120" height="22" rx="11" fill="#ffb46b15" stroke="#ffb46b40"/>
+            <text x="622" y="171" fill="#ffb46b">bypass /api/*</text>
+
+            <rect x="740" y="155" width="180" height="22" rx="11" fill="#79c4ff15" stroke="#79c4ff40"/>
+            <text x="752" y="171" fill="#79c4ff">ws upgrade /socket.io/*</text>
+          </g>
+        </g>
+
+        <!-- nginx -->
+        <g>
+          <rect x="40" y="230" width="1020" height="70" rx="10" fill="url(#g-app)" stroke="#303a4d"/>
+          <text x="60" y="256" fill="#97a0b3" font-family="ui-monospace,monospace" font-size="12" letter-spacing="2">REVERSE PROXY</text>
+          <text x="60" y="280" fill="#e7ebf3" font-size="15" font-weight="600">nginx :443</text>
+          <text x="180" y="282" fill="#97a0b3" font-size="12">TLS · WebSocket upgrade · 路由分发</text>
+        </g>
+
+        <!-- Three lanes (route labels above containers) -->
+        <g font-family="ui-monospace,monospace" font-size="11" fill="#97a0b3">
+          <text x="170" y="328">/socket.io/*</text>
+          <text x="510" y="328">/api/* &nbsp; /_next/static/* &nbsp; /*</text>
+          <text x="855" y="328">internal</text>
+        </g>
+
+        <!-- ws-server container -->
+        <g>
+          <rect x="60" y="345" width="280" height="170" rx="12" fill="url(#g-ws)" stroke="#79c4ff" stroke-width="1.4"/>
+          <text x="80" y="370" fill="#79c4ff" font-family="ui-monospace,monospace" font-size="11" letter-spacing="2">CONTAINER · WS-SERVER</text>
+          <text x="80" y="396" fill="#e7ebf3" font-size="16" font-weight="600">ws-server :3001</text>
+          <text x="80" y="418" fill="#97a0b3" font-size="12">Bun 1.3 · socket.io · jsonwebtoken</text>
+          <line x1="80" y1="432" x2="320" y2="432" stroke="#232a38"/>
+          <g font-size="11.5" fill="#e7ebf3">
+            <text x="80" y="452">· cookie auth (shared JWT secret)</text>
+            <text x="80" y="471">· 弹幕 / 评论实时</text>
+            <text x="80" y="490">· socket.io-redis adapter slot</text>
+            <text x="80" y="509">· 24h soak · 100 并发 gate</text>
+          </g>
+        </g>
+
+        <!-- app container -->
+        <g>
+          <rect x="370" y="345" width="380" height="170" rx="12" fill="url(#g-app)" stroke="#7cffb2" stroke-width="1.4"/>
+          <text x="390" y="370" fill="#7cffb2" font-family="ui-monospace,monospace" font-size="11" letter-spacing="2">CONTAINER · APP</text>
+          <text x="390" y="396" fill="#e7ebf3" font-size="16" font-weight="600">Next.js standalone :3000</text>
+          <text x="390" y="418" fill="#97a0b3" font-size="12">Bun 1.3 · App Router · RSC · API routes</text>
+          <line x1="390" y1="432" x2="730" y2="432" stroke="#232a38"/>
+          <g font-size="11.5" fill="#e7ebf3">
+            <text x="390" y="452">· 88+ /api routes (M1.1–M1.4)</text>
+            <text x="390" y="471">· middleware.ts (runtime: nodejs)</text>
+            <text x="390" y="490">· /anime/[id] · /seasonal · /search ISR</text>
+            <text x="390" y="509">· /library · /player ('use client')</text>
+          </g>
+
+          <!-- alt dockerfile.node tag -->
+          <rect x="570" y="358" width="160" height="20" rx="10" fill="#ffb46b15" stroke="#ffb46b40"/>
+          <text x="582" y="372" fill="#ffb46b" font-family="ui-monospace,monospace" font-size="10">Dockerfile.node fallback</text>
+        </g>
+
+        <!-- mongodb container -->
+        <g>
+          <rect x="780" y="345" width="280" height="170" rx="12" fill="url(#g-app)" stroke="#c89dff" stroke-width="1.4"/>
+          <text x="800" y="370" fill="#c89dff" font-family="ui-monospace,monospace" font-size="11" letter-spacing="2">CONTAINER · DB</text>
+          <text x="800" y="396" fill="#e7ebf3" font-size="16" font-weight="600">MongoDB Atlas</text>
+          <text x="800" y="418" fill="#97a0b3" font-size="12">Mongoose · globalThis cache</text>
+          <line x1="800" y1="432" x2="1040" y2="432" stroke="#232a38"/>
+          <g font-size="11.5" fill="#e7ebf3">
+            <text x="800" y="452">· serverSelectionTimeout 5s</text>
+            <text x="800" y="471">· socketTimeout 45s · pool 10</text>
+            <text x="800" y="490">· anime · users · comments</text>
+            <text x="800" y="509">· danmaku · follow · enrichment</text>
+          </g>
+        </g>
+
+        <!-- arrows from nginx to containers -->
+        <line x1="200" y1="300" x2="200" y2="345" stroke="#79c4ff" stroke-width="1.5" marker-end="url(#arr-acc)"/>
+        <line x1="560" y1="300" x2="560" y2="345" stroke="#7cffb2" stroke-width="1.5" marker-end="url(#arr-acc)"/>
+
+        <!-- app → mongo -->
+        <line x1="750" y1="430" x2="780" y2="430" stroke="#c89dff" stroke-width="1.5" marker-end="url(#arr-acc)"/>
+        <!-- ws-server → mongo (curved) -->
+        <path d="M 340 430 Q 560 555 780 470" fill="none" stroke="#c89dff" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#arr-acc)"/>
+
+        <!-- arrows from edge -->
+        <line x1="550" y1="200" x2="550" y2="230" stroke="#5e6675" stroke-width="1.3" marker-end="url(#arr)"/>
+        <line x1="550" y1="90" x2="550" y2="120" stroke="#5e6675" stroke-width="1.3" marker-end="url(#arr)"/>
+
+        <!-- footer note -->
+        <g font-family="ui-monospace,monospace" font-size="11" fill="#5e6675">
+          <text x="60" y="555">docker-compose.yml: app + ws-server + mongodb + nginx</text>
+          <text x="60" y="575">rollback: docker-compose 切 dockerfile → Dockerfile.node,5 min 内回 Node runtime</text>
+          <text x="60" y="595">flow: client → CF (cache 静态) → nginx (TLS + 路由) → app | ws-server → mongo</text>
+        </g>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ============ M1 sub-milestone breakdown ============ -->
+  <section>
+    <h2><span class="num">04</span>M1 拆分(最大头)</h2>
+    <p class="lede">M1 共 80–140 hr,拆 5 个独立 PR。M1.5 ws-server 是最高风险,前置 24h soak test gate。</p>
+
+    <table class="t">
+      <thead>
+        <tr>
+          <th style="width:10%">Sub-PR</th>
+          <th style="width:30%">范围</th>
+          <th style="width:14%">Effort</th>
+          <th style="width:32%">Tests</th>
+          <th>顺路 TODO</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="pri">M1.1</span></td>
+          <td>Mongoose globalThis pattern + <code>/api/anime/*</code>(9 ep)</td>
+          <td>15–25 hr</td>
+          <td>trending / search / detail 新旧 shape diff</td>
+          <td>⚡ enqueueEnrichment bgmId · 磁力 cache</td>
+        </tr>
+        <tr>
+          <td><span class="pri">M1.2</span></td>
+          <td><code>/api/auth/*</code> (6 ep) + httpOnly cookies + middleware</td>
+          <td>20–35 hr</td>
+          <td>cookie 设置 / me 401 · Playwright register→login→me</td>
+          <td>⚡ 待办四 User.isPublic</td>
+        </tr>
+        <tr>
+          <td><span class="pri">M1.3</span></td>
+          <td><code>/api/admin/*</code> + <code>/api/follow/*</code> + <code>/api/profile/*</code></td>
+          <td>15–25 hr</td>
+          <td>移植 server/__tests__ + profile/feed 分页边界</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td><span class="pri">M1.4</span></td>
+          <td><code>/api/comments/*</code> + <code>/api/danmaku/*</code>(HTTP 部分)</td>
+          <td>10–15 hr</td>
+          <td>移植 + comments POST 权限边界</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td><span class="pri">M1.5</span></td>
+          <td>独立 <code>ws-server/</code> 微服务(Bun + socket.io,:3001)</td>
+          <td>20–40 hr</td>
+          <td><b style="color:var(--danger)">24h soak · 100 并发 gate</b></td>
+          <td>⚡ 待办五 Redis adapter slot 预留</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ RISK MATRIX ============ -->
+  <section>
+    <h2><span class="num">05</span>架构风险矩阵</h2>
+    <p class="lede">R0 / R6 / R7 是 critical。R0 决定 production 是否能继续跑 Bun;R6 是迁移期间的产线连续性;R7 是用户感知唯一硬切点。</p>
+
+    <div class="risk-grid">
+      <article class="risk" data-sev="critical">
+        <div class="head"><span class="id">R0</span><span class="badge">critical</span></div>
+        <h4>socket.io @ Bun 1.3 长连接稳定性</h4>
+        <p>弹幕掉线增多、连接抖动。概率中。</p>
+        <div class="mit"><b>mitigation</b><br/>P8 之前 24h soak;断流 &gt; Node baseline 5% 立刻 rollback</div>
+      </article>
+
+      <article class="risk" data-sev="critical">
+        <div class="head"><span class="id">R6</span><span class="badge">critical</span></div>
+        <h4>P1 大爆破 · 90 endpoint 全迁产线靠老 Express</h4>
+        <p>切流量期间网站不稳。概率高。</p>
+        <div class="mit"><b>mitigation</b><br/>Express 不下线,Next 并行起,M1 完成后再切</div>
+      </article>
+
+      <article class="risk" data-sev="critical">
+        <div class="head"><span class="id">R7</span><span class="badge">critical</span></div>
+        <h4>Auth cookies 切换强制登出</h4>
+        <p>localStorage → httpOnly cookie 后老 token 失效。必然发生。</p>
+        <div class="mit"><b>mitigation</b><br/>切换前公告 + grace period</div>
+      </article>
+
+      <article class="risk" data-sev="high">
+        <div class="head"><span class="id">R5</span><span class="badge">high</span></div>
+        <h4>IndexedDB / FSA / artplayer 漏标 'use client' 白屏</h4>
+        <p>P4 可能堆积大量 hydration mismatch。概率高。</p>
+        <div class="mit"><b>mitigation</b><br/>P4 中段强制完整 E2E,不堆积</div>
+      </article>
+
+      <article class="risk" data-sev="med">
+        <div class="head"><span class="id">R1</span><span class="badge">med</span></div>
+        <h4>RSC streaming + Bun 偶发延迟</h4>
+        <p>LCP 退化。概率中。</p>
+        <div class="mit"><b>mitigation</b><br/>P4 后 Lighthouse 真机对比</div>
+      </article>
+
+      <article class="risk" data-sev="med">
+        <div class="head"><span class="id">R4</span><span class="badge">med</span></div>
+        <h4>Next middleware @ Bun 行为差异</h4>
+        <p>auth 偶发 401。概率中。</p>
+        <div class="mit"><b>mitigation</b><br/>E2E 覆盖 + P8 canary 监控</div>
+      </article>
+
+      <article class="risk" data-sev="low">
+        <div class="head"><span class="id">R2</span><span class="badge">low</span></div>
+        <h4>mongoose Atlas reconnect 偶发不重连</h4>
+        <p>服务挂直到重启。概率低。</p>
+        <div class="mit"><b>mitigation</b><br/>serverSelectionTimeout + healthcheck restart</div>
+      </article>
+
+      <article class="risk" data-sev="low">
+        <div class="head"><span class="id">R3</span><span class="badge">low</span></div>
+        <h4>bcrypt N-API @ Bun 慢约 15%</h4>
+        <p>登录 50ms → 60ms。已知。</p>
+        <div class="mit"><b>mitigation</b><br/>接受;不切 Bun.password(hash 不互通)</div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ PHASE GATING ============ -->
+  <section>
+    <h2><span class="num">06</span>Phase Gating 关键节点</h2>
+    <p class="lede">每个 phase 进下一个之前 4 项硬性 + 特殊 gate。任何 gate 不达标退回修,不进下一个。</p>
+
+    <div class="gates">
+      <div class="gate">
+        <div class="from-to"><span class="from">M0</span><span class="arr">→</span><span class="to">M1</span></div>
+        <p><code>BASELINE.md</code> 已写入:Lighthouse 三路径 + socket.io 7 天断流率 + GSC 索引数</p>
+      </div>
+      <div class="gate">
+        <div class="from-to"><span class="from">M1.5</span><span class="arr">→</span><span class="to">M2</span></div>
+        <p>socket.io 24h soak 通过(单实例 100 并发)</p>
+      </div>
+      <div class="gate">
+        <div class="from-to"><span class="from">M3</span><span class="arr">→</span><span class="to">M4</span></div>
+        <p>ISR 路由 Lighthouse SEO ≥ 95</p>
+      </div>
+      <div class="gate">
+        <div class="from-to"><span class="from">M6</span><span class="arr">→</span><span class="to">M7</span></div>
+        <p>rollback 演练通过 — 5 分钟内手动切 <code>Dockerfile.node</code> 回 Node</p>
+      </div>
+      <div class="gate">
+        <div class="from-to"><span class="from">M7</span><span class="arr">→</span><span class="to">M8</span></div>
+        <p>1650+ vitest + 5 Playwright E2E 全绿,production 部署 stage(canary 10% 流量)</p>
+      </div>
+      <div class="gate">
+        <div class="from-to"><span class="from">M8</span><span class="arr">→</span><span class="to">DONE</span></div>
+        <p>一周稳定 + Lighthouse 不退化 &gt; 10% + Bun 断流率不超 baseline 5%</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ROLLBACK ============ -->
+  <section>
+    <h2><span class="num">07</span>回滚链</h2>
+    <p class="lede">两层回滚。Bun→Node 5 分钟,Next.js→v2.0 SPA 30 分钟。双 Dockerfile 必须从 M6 第一天起就维护。</p>
+
+    <div class="rb-grid">
+      <div class="rb">
+        <h4>Layer 1 · Bun → Node</h4>
+        <div class="time">SLA · 5 min · 双 Dockerfile</div>
+<pre><span class="cmt"># VPS 上手动切</span>
+ssh root@45.152.65.208 <span class="acc">"</span>
+  cd /opt/animego &amp;&amp; \
+  sed -i <span class="acc">'s|Dockerfile$|Dockerfile.node|'</span> docker-compose.yml &amp;&amp; \
+  docker compose build app &amp;&amp; \
+  docker compose up -d app
+<span class="acc">"</span></pre>
+      </div>
+      <div class="rb full">
+        <h4>Layer 2 · Next.js → v2.0 SPA</h4>
+        <div class="time">SLA · 30 min · 全栈回滚</div>
+<pre><span class="cmt"># 万一 Next.js 整体翻车</span>
+ssh root@45.152.65.208 <span class="acc">"</span>
+  cd /opt/animego &amp;&amp; \
+  git checkout v2.0.x-stable &amp;&amp; \
+  docker compose down &amp;&amp; \
+  docker compose build &amp;&amp; \
+  docker compose up -d
+<span class="acc">"</span></pre>
+      </div>
+    </div>
+    <p style="color: var(--ink-dim); font-size: 0.82rem; margin-top: 14px;">
+      迁移期间 v2.0.x 必须保持稳定 tag 在 main 之外,<b style="color:var(--warn)">不能</b> rebase / force push 掉。
+    </p>
+  </section>
+
+  <!-- ============ DECISION LOG ============ -->
+  <section>
+    <h2><span class="num">08</span>关键决策</h2>
+    <p class="lede">所有架构选择在 2026-05-10 一并锁定,不再反复。后续 phase 实施期遇到坑只填,不重议。</p>
+
+    <div class="decisions">
+      <div class="decision">
+        <div class="topic">TS 范围<small>strict 进度</small></div>
+        <div class="pick">全量 .jsx → .tsx + 测试转 + <b>strict: false</b> 起步,strict: true 留迁移后单独 PR(20–40 hr)</div>
+      </div>
+      <div class="decision">
+        <div class="topic">Next.js 路径<small>Path A / B / C</small></div>
+        <div class="pick"><b>Path A: 全栈一步到位</b>。不留双栈、不留半成品</div>
+      </div>
+      <div class="decision">
+        <div class="topic">Express 命运<small>89+ endpoint</small></div>
+        <div class="pick"><b>全迁 Next API routes</b>。M1 期间老 Express 跑兜底,M6 部署后下线</div>
+      </div>
+      <div class="decision">
+        <div class="topic">Runtime<small>Node vs Bun</small></div>
+        <div class="pick"><b>全切 Bun(dev + prod)</b>。Phase 8 canary 兜底,Dockerfile.node fallback 5min 回 Node</div>
+      </div>
+      <div class="decision">
+        <div class="topic">socket.io 跑哪<small>P0 决策</small></div>
+        <div class="pick"><b>独立 ws-server 微服务</b>(端口 3001)。custom server ⛔ Next standalone,选拆服务保 standalone</div>
+      </div>
+      <div class="decision">
+        <div class="topic">bcrypt vs Bun.password<small>登录性能</small></div>
+        <div class="pick"><b>保留 bcrypt</b>。老 hash 跟 Bun.password 不互通,15% 慢可接受</div>
+      </div>
+      <div class="decision">
+        <div class="topic">middleware runtime<small>edge vs nodejs</small></div>
+        <div class="pick"><b>nodejs</b>。Bun 不支持 edge runtime,顺便保留 jsonwebtoken</div>
+      </div>
+      <div class="decision">
+        <div class="topic">Cloudflare 与 ISR<small>cache 协调</small></div>
+        <div class="pick">CF 只 cache <code>/_next/static/*</code>(1y),HTML 路由 <b>Bypass</b>,让 Next ISR 自管 60s revalidate</div>
+      </div>
+      <div class="decision">
+        <div class="topic">testing 框架<small>Bun runtime 下</small></div>
+        <div class="pick">保留 <b>vitest</b>(跑在 Bun)。<code>bun test</code> API 跟 vi.mock 不兼容,不换</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div>
+      <code>docs/migration/MIGRATION_PLAN.md</code> · single source of truth
+    </div>
+    <div>last updated <code>2026-05-10</code></div>
+  </footer>
+
+  </div>
+</body>
+</html>
