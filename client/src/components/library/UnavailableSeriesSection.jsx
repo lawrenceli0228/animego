@@ -56,6 +56,25 @@ const s = {
     flexShrink: 0,
     opacity: busy ? 0.7 : 1,
   }),
+  // Reauthorize is the actual recovery action when permissions lapsed after a
+  // browser restart — refresh only re-probes, it can't re-grant. Styled with
+  // accent fill so it reads as the primary CTA when the section appears.
+  reauthBtn: (busy) => ({
+    ...mono,
+    padding: '6px 12px',
+    background: busy
+      ? `oklch(56% 0.14 ${HUE} / 0.30)`
+      : `oklch(56% 0.14 ${HUE} / 0.18)`,
+    border: `1px solid oklch(70% 0.16 ${HUE} / 0.65)`,
+    borderRadius: 3,
+    color: busy ? 'rgba(235,235,245,0.55)' : `oklch(82% 0.14 ${HUE})`,
+    cursor: busy ? 'wait' : 'pointer',
+    fontSize: 9,
+    textTransform: 'uppercase',
+    letterSpacing: '0.12em',
+    flexShrink: 0,
+    opacity: busy ? 0.7 : 1,
+  }),
   caret: {
     ...mono,
     fontSize: 11,
@@ -177,10 +196,13 @@ const s = {
  * Replaces the in-grid `cardDimmed` treatment so the main grid only shows
  * accessible content. Mirrors the visual pattern of `UnclassifiedSection`.
  *
- * Section header carries a global "刷新可用性" button — clicking it re-probes
- * all persisted handles (via the parent's `onRefresh`, which is wired to
- * `useFileHandles.refresh`). When the handle goes back to 'ready', the
- * series falls out of this section automatically on the next render.
+ * Section header carries two recovery actions:
+ *   - "重新授权" (when `onReauthorize` is provided) prompts the browser
+ *     permission dialog for every offline/denied library — this is the actual
+ *     fix when permissions lapsed after a browser restart, since `probeRoot`
+ *     classifies `prompt`-state handles as denied and renders OFFLINE rows.
+ *   - "刷新可用性" re-probes persisted handles read-only. Useful when a drive
+ *     was just plugged back in and permissions are still granted.
  *
  * Per-row affordances:
  *   - offline → "删除" purges the series record (metadata / progress / overrides)
@@ -194,9 +216,11 @@ const s = {
  *   availabilityBySeries: Map<string, SeriesAvailability>,
  *   roots?: HandleRecord[],
  *   onRefresh: () => void | Promise<void>,
+ *   onReauthorize?: () => void | Promise<void>,
  *   onPickSeries: (id: string) => void,
  *   onDelete?: (seriesId: string) => void,
  *   refreshing?: boolean,
+ *   reauthorizing?: boolean,
  *   defaultOpen?: boolean,
  * }} props
  */
@@ -204,9 +228,11 @@ export default function UnavailableSeriesSection({
   series,
   availabilityBySeries,
   onRefresh,
+  onReauthorize,
   onPickSeries,
   onDelete,
   refreshing = false,
+  reauthorizing = false,
   defaultOpen = false,
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -228,6 +254,7 @@ export default function UnavailableSeriesSection({
 
   function handleHeaderClick(e) {
     if (e.target.closest('[data-testid="unavailable-refresh"]')) return;
+    if (e.target.closest('[data-testid="unavailable-reauthorize"]')) return;
     setOpen((v) => !v);
   }
 
@@ -254,6 +281,21 @@ export default function UnavailableSeriesSection({
           {series.length} 项暂时不可访问
         </span>
         <span style={s.spacer} />
+        {onReauthorize ? (
+          <button
+            type="button"
+            data-testid="unavailable-reauthorize"
+            style={s.reauthBtn(reauthorizing)}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!reauthorizing) onReauthorize();
+            }}
+            disabled={reauthorizing}
+            title="对每个离线文件夹弹出浏览器原生授权框,逐个重新授权"
+          >
+            {reauthorizing ? '授权中…' : '重新授权'}
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid="unavailable-refresh"
@@ -263,6 +305,7 @@ export default function UnavailableSeriesSection({
             if (!refreshing) onRefresh();
           }}
           disabled={refreshing}
+          title="重新探测硬盘连接状态(不会弹授权框)"
         >
           {refreshing ? '检测中…' : '刷新可用性'}
         </button>

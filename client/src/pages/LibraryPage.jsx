@@ -249,7 +249,13 @@ export default function LibraryPage() {
   const dandan = useMemo(() => createDandanClient(), []);
   const { series, loading } = useLibrary({ db });
   const { entries: resumeEntries } = useResume({ db });
-  const { status, pickFolder, libraryStatus, refresh: refreshHandles } = useFileHandles({ db });
+  const {
+    status,
+    pickFolder,
+    libraryStatus,
+    reauthorize: reauthorizeHandle,
+    refresh: refreshHandles,
+  } = useFileHandles({ db });
   const { availabilityBySeries, ready: availabilityIndexReady } = useSeriesLibraryStatus({
     db,
     libraryStatus,
@@ -717,6 +723,35 @@ export default function LibraryPage() {
     }
   }, [refreshHandles, availRefreshing]);
 
+  // Section-level reauthorize: walks every non-ready library and triggers
+  // ensurePermission on each. The browser shows one native permission dialog
+  // per library — they have to be sequential (permission API requires the
+  // current request to settle before the next can prompt). Refresh runs
+  // implicitly inside reauthorize after each grant, so dropping libraries
+  // out of `libraryStatus` mid-iteration is fine.
+  const reauthorizableLibIds = useMemo(() => {
+    /** @type {string[]} */
+    const ids = [];
+    for (const [libId, st] of libraryStatus) {
+      if (st !== 'ready') ids.push(libId);
+    }
+    return ids;
+  }, [libraryStatus]);
+  const [availReauthorizing, setAvailReauthorizing] = useState(false);
+  const handleReauthorizeAll = useCallback(async () => {
+    if (availReauthorizing || reauthorizableLibIds.length === 0) return;
+    setAvailReauthorizing(true);
+    try {
+      for (const libId of reauthorizableLibIds) {
+        await reauthorizeHandle(libId);
+      }
+    } catch (err) {
+      console.warn('[library] reauthorize failed:', err);
+    } finally {
+      setAvailReauthorizing(false);
+    }
+  }, [availReauthorizing, reauthorizableLibIds, reauthorizeHandle]);
+
   // One-click "merge duplicates" — find Series sharing a Season.animeId and
   // merge them into the oldest. Fixes libraries imported before the in-batch
   // dedup landed in importPipeline.
@@ -1026,9 +1061,13 @@ export default function LibraryPage() {
             series={unavailableSeries}
             availabilityBySeries={availabilityBySeries}
             onRefresh={handleRefreshAvailability}
+            onReauthorize={
+              reauthorizableLibIds.length > 0 ? handleReauthorizeAll : undefined
+            }
             onPickSeries={handlePickSeries}
             onDelete={(seriesId) => handleOverrideAction(seriesId, 'delete')}
             refreshing={availRefreshing}
+            reauthorizing={availReauthorizing}
           />
           <UnclassifiedSection
             entries={unclassifiedEntries}

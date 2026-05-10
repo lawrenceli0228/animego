@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import LibraryPage from '../pages/LibraryPage';
 
@@ -102,5 +102,74 @@ describe('LibraryPage', () => {
     expect(
       await screen.findByText('Your browser does not keep libraries between sessions.')
     ).toBeInTheDocument();
+  });
+
+  it('renders the reauthorize CTA when any library is non-ready and wires it to fileHandles.reauthorize', async () => {
+    const useLibrary = (await import('../hooks/useLibrary')).default;
+    useLibrary.mockReturnValue({
+      series: [{ id: 's1', titleEn: 'Offline Show', type: 'tv', confidence: 0.9, createdAt: 1, updatedAt: 1 }],
+      loading: false,
+      refetch: vi.fn(),
+    });
+    const useSeriesLibraryStatus = (await import('../hooks/useSeriesLibraryStatus')).default;
+    useSeriesLibraryStatus.mockReturnValue({
+      availabilityBySeries: new Map([['s1', 'offline']]),
+      offlineLibraryIds: ['lib-1'],
+      ready: true,
+    });
+    const reauthorize = vi.fn().mockResolvedValue();
+    const useFileHandles = (await import('../hooks/useFileHandles')).default;
+    useFileHandles.mockReturnValue({
+      status: 'denied',
+      roots: [],
+      libraryStatus: new Map([['lib-1', 'denied'], ['lib-2', 'disconnected']]),
+      pickFolder: vi.fn(),
+      reauthorize,
+      dropFolder: vi.fn(),
+      selectFileByName: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    renderPage();
+
+    const btn = await screen.findByTestId('unavailable-reauthorize');
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(reauthorize).toHaveBeenCalledTimes(2);
+    });
+    expect(reauthorize).toHaveBeenCalledWith('lib-1');
+    expect(reauthorize).toHaveBeenCalledWith('lib-2');
+  });
+
+  it('omits the reauthorize CTA when every library is ready', async () => {
+    const useLibrary = (await import('../hooks/useLibrary')).default;
+    useLibrary.mockReturnValue({
+      series: [{ id: 's1', titleEn: 'Partial Show', type: 'tv', confidence: 0.9, createdAt: 1, updatedAt: 1 }],
+      loading: false,
+      refetch: vi.fn(),
+    });
+    const useSeriesLibraryStatus = (await import('../hooks/useSeriesLibraryStatus')).default;
+    useSeriesLibraryStatus.mockReturnValue({
+      availabilityBySeries: new Map([['s1', 'partial']]),
+      offlineLibraryIds: [],
+      ready: true,
+    });
+    const useFileHandles = (await import('../hooks/useFileHandles')).default;
+    useFileHandles.mockReturnValue({
+      status: 'ready',
+      roots: [],
+      libraryStatus: new Map([['lib-1', 'ready']]),
+      pickFolder: vi.fn(),
+      reauthorize: vi.fn(),
+      dropFolder: vi.fn(),
+      selectFileByName: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(await screen.findByTestId('unavailable-section')).toBeInTheDocument();
+    expect(screen.queryByTestId('unavailable-reauthorize')).toBeNull();
+    expect(screen.getByTestId('unavailable-refresh')).toBeInTheDocument();
   });
 });
