@@ -74,6 +74,18 @@ export default function usePlaybackSession({
     cancelSubtitleTask();
     cleanupMkvBlob();
 
+    // For MKVs, kick the local-fonts permission prompt from the user-gesture
+    // context of this play() call. jassub's CJK fallback runs deep in an
+    // async chain (worker extract → jassub mount → loadCjkFallback) where
+    // Chrome has already lost transient activation, so calling
+    // queryLocalFonts() there silently fails. Triggering here means the
+    // prompt actually shows on first MKV play; subsequent plays inherit the
+    // granted/denied state. Fire-and-forget — denial falls back to
+    // LiberationSans (CJK as tofu), no error.
+    if (/\.mkv$/i.test(fileItem.fileName) && typeof window.queryLocalFonts === 'function') {
+      try { window.queryLocalFonts().catch(() => {}); } catch { /* unsupported */ }
+    }
+
     const stored = lastTimeRef.current.get(fileItem.fileId);
     setResumeAt(stored !== undefined ? stored : null);
 
