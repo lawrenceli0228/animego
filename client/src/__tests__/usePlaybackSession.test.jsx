@@ -92,12 +92,16 @@ describe('usePlaybackSession — invariant #1: blob lifecycle', () => {
         result: { type: 'vtt', content: 'WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.000\nhi\n' },
       });
     });
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(result.current.subtitleUrl).toBe('blob:mock-1');
+    // createObjectURL is invoked twice per mkv flow now: once for the
+    // worker script blob (createMkvWorker), once for the VTT blob on
+    // success. Worker URL = mock-1, VTT URL = mock-2.
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
+    expect(result.current.subtitleUrl).toBe('blob:mock-2');
 
-    // Back to list — blob must be revoked
+    // Back to list — VTT blob must be revoked (worker blob was already
+    // revoked when the worker terminated on settle)
     act(() => { result.current.back(); });
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-1');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-2');
     expect(result.current.phase).toBe('none');
     expect(result.current.subtitleUrl).toBeNull();
     expect(deps.clearComments).toHaveBeenCalled();
@@ -126,7 +130,10 @@ describe('usePlaybackSession — invariant #6: stale worker isolation', () => {
         result: { type: 'vtt', content: 'WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.000\nSTALE\n' },
       });
     });
-    expect(createObjectURL).not.toHaveBeenCalled();
+    // Two worker blob URLs were created (one per play call) but no VTT
+    // blob URL — the stale worker's onmessage was nullified before its
+    // response landed, so it can't reach the VTT createObjectURL.
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
     expect(result.current.subtitleUrl).toBeNull();
     expect(result.current.playingEp).toBe(2);
   });
@@ -143,11 +150,13 @@ describe('usePlaybackSession — unmount cleanup', () => {
         result: { type: 'vtt', content: 'WEBVTT\n\n' },
       });
     });
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    // First flow: worker blob (mock-1) + VTT blob (mock-2)
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
 
-    // Start a second play — first blob revoked at play() entry, second worker pending
+    // Start a second play — VTT blob (mock-2) revoked at play() entry,
+    // second worker pending (allocates mock-3)
     act(() => { result.current.play(makeFileItem('Show - 02.mkv', 2), { 2: {} }); });
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-1');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-2');
     const pendingWorker = MockWorker.instances[1];
     expect(pendingWorker.terminated).toBe(false);
 

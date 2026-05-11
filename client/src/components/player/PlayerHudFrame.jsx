@@ -102,6 +102,8 @@ export default function PlayerHudFrame({
   videoUrl,
   danmakuList,
   subtitleUrl,
+  subtitleType,
+  subtitleContent,
   onEnded,
   progressKey,
   episode,
@@ -135,6 +137,8 @@ export default function PlayerHudFrame({
           videoUrl={videoUrl}
           danmakuList={danmakuList}
           subtitleUrl={subtitleUrl}
+          subtitleType={subtitleType}
+          subtitleContent={subtitleContent}
           onEnded={onEnded}
           progressKey={progressKey}
           resumeAt={resumeAt}

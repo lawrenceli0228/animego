@@ -27,3 +27,6 @@ tests/tmp/
 *.njsproj
 *.sln
 *.sw?
+
+# jassub assets — copied from node_modules by 'bun run copy:jassub' (postinstall)
+public/jassub/

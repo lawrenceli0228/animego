@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "copy:jassub": "rm -rf public/jassub && mkdir -p public/jassub && cp -r ../node_modules/jassub/dist/wasm ../node_modules/jassub/dist/worker ../node_modules/jassub/dist/default.woff2 public/jassub/",
+    "postinstall": "bun run copy:jassub"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
@@ -19,8 +21,10 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dexie": "^4.4.2",
+    "jassub": "^2.5.1",
     "lucide-react": "^1.8.0",
     "motion": "^12.38.0",
+    "pako": "^2.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",
