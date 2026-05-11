@@ -86,7 +86,11 @@ describe('resolveSubtitle — mkv extraction', () => {
 
     const value = await result.task.promise;
     expect(value).toEqual({
-      url: 'blob:mock-1',
+      // createObjectURL is called twice per mkv flow now:
+      //   #1 — blob URL for the worker script (createMkvWorker)
+      //   #2 — blob URL for the extracted VTT (worker.onmessage path)
+      // Test asserts the VTT result, so we expect mock-2.
+      url: 'blob:mock-2',
       type: 'vtt',
       content: null,
       isBlob: true,
@@ -112,7 +116,7 @@ describe('resolveSubtitle — mkv extraction', () => {
     const value = await result.task.promise;
     expect(value.type).toBe('ass');
     expect(value.content).toBe('[Script Info]\nTitle: ...');
-    expect(value.url).toBe('blob:mock-1');
+    expect(value.url).toBe('blob:mock-2');
     expect(value.isBlob).toBe(true);
   });
 
@@ -137,7 +141,10 @@ describe('resolveSubtitle — mkv extraction', () => {
 
     const value = await result.task.promise;
     expect(value).toBeNull();
-    expect(createObjectURL).not.toHaveBeenCalled();
+    // Worker spawn creates one blob URL for the worker script itself.
+    // We only need to assert that NO ADDITIONAL VTT blob URL was created
+    // (i.e. count stays at 1 = the worker URL, not 2).
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
   });
 
   it('cancel() terminates the worker and resolves to null', async () => {
@@ -154,14 +161,14 @@ describe('resolveSubtitle — mkv extraction', () => {
     expect(w.onmessage).toBeNull();
   });
 
-  it('times out and resolves to null after 30s', async () => {
+  it('times out and resolves to null after 120s', async () => {
     vi.useFakeTimers();
     try {
       const fileItem = { fileName: 'Show - 01.mkv', file: makeFile('Show - 01.mkv') };
       const result = resolveSubtitle(fileItem, getSubtitleUrl);
       const w = MockWorker.instances[0];
 
-      vi.advanceTimersByTime(30000);
+      vi.advanceTimersByTime(120000);
 
       const value = await result.task.promise;
       expect(value).toBeNull();

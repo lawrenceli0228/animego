@@ -4,6 +4,11 @@
  * and reconstructs the subtitle file from embedded data.
  */
 
+// pako is prepended to this worker's source as a Blob URL (see
+// resolveSubtitle.js → createMkvWorker). It exposes self.pako.inflate
+// for synchronous zlib decompression — much faster than per-block
+// DecompressionStream which incurs ~1-2ms async overhead per call
+// (~4s on a 24min episode with 2000+ events).
 self.onmessage = async (e) => {
   try {
     const buffer = await e.data.file.arrayBuffer();
@@ -15,25 +20,37 @@ self.onmessage = async (e) => {
 };
 
 // EBML element IDs
-const SEGMENT        = 0x18538067;
-const SEG_INFO       = 0x1549A966;
-const TC_SCALE       = 0x2AD7B1;
-const TRACKS         = 0x1654AE6B;
-const TRACK_ENTRY    = 0xAE;
-const TRACK_NUMBER   = 0xD7;
-const TRACK_TYPE     = 0x83;
-const CODEC_ID       = 0x86;
-const CODEC_PRIVATE  = 0x63A2;
-const CLUSTER        = 0x1F43B675;
-const CLUSTER_TS     = 0xE7;
-const SIMPLE_BLOCK   = 0xA3;
-const BLOCK_GROUP    = 0xA0;
-const BLOCK          = 0xA1;
-const BLOCK_DURATION = 0x9B;
+const SEGMENT          = 0x18538067;
+const SEG_INFO         = 0x1549A966;
+const TC_SCALE         = 0x2AD7B1;
+const TRACKS           = 0x1654AE6B;
+const TRACK_ENTRY      = 0xAE;
+const TRACK_NUMBER     = 0xD7;
+const TRACK_TYPE       = 0x83;
+const CODEC_ID         = 0x86;
+const CODEC_PRIVATE    = 0x63A2;
+const CONTENT_ENCS     = 0x6D80;
+const CONTENT_ENC      = 0x6240;
+const CONTENT_COMP     = 0x5034;
+const CONTENT_COMP_ALGO = 0x4254;
+const CLUSTER          = 0x1F43B675;
+const CLUSTER_TS       = 0xE7;
+const SIMPLE_BLOCK     = 0xA3;
+const BLOCK_GROUP      = 0xA0;
+const BLOCK            = 0xA1;
+const BLOCK_DURATION   = 0x9B;
 
 const MASTERS = new Set([
   0x1A45DFA3, SEGMENT, SEG_INFO, TRACKS, TRACK_ENTRY, CLUSTER, BLOCK_GROUP,
+  CONTENT_ENCS, CONTENT_ENC, CONTENT_COMP,
 ]);
+
+// Matroska ContentCompAlgo:
+//   0 = zlib (DEFLATE)   ← SweetSub and others commonly use this
+//   1 = bzlib (deprecated, never seen in the wild)
+//   2 = lzo1x (deprecated)
+//   3 = Header Stripping (algo-specific, can ignore for subtitles)
+const COMP_ZLIB = 0;
 
 function readID(dv, pos) {
   if (pos >= dv.byteLength) return null;
@@ -112,8 +129,8 @@ function buildVttFromEvents(sortedEvents) {
 function extract(dv) {
   const fileEnd = dv.byteLength;
   let tcScale = 1000000; // nanoseconds per timestamp unit, default 1ms
-  const subTracks = [];   // { num, codecId, header }
-  const events = [];      // { trackNum, time, dur, text }
+  const subTracks = [];   // { num, codecId, header, compAlgo (null|0) }
+  const events = [];      // { trackNum, time, dur, raw: Uint8Array, text?: string }
   let clusterTs = 0;
 
   function scan(from, to) {
@@ -160,6 +177,7 @@ function extract(dv) {
 
   function parseTrack(from, to) {
     let num = 0, type = 0, codecId = '', header = '';
+    let compAlgo = null;
     let pos = from;
     while (pos < to) {
       const idR = readID(dv, pos);
@@ -173,9 +191,40 @@ function extract(dv) {
       else if (idR.id === TRACK_TYPE) type = readUint(dv, pos, sz);
       else if (idR.id === CODEC_ID) codecId = readStr(dv, pos, sz).replace(/\0/g, '');
       else if (idR.id === CODEC_PRIVATE) header = readStr(dv, pos, sz);
+      else if (idR.id === CONTENT_ENCS) {
+        // Walk ContentEncodings → ContentEncoding → ContentCompression →
+        // ContentCompAlgo to find the compression algorithm. SweetSub and
+        // similar fansub groups commonly zlib-compress subtitle tracks
+        // (saves ~70% on text-heavy ASS); a worker that doesn't decompress
+        // produces garbage cues and libass renders empty.
+        compAlgo = readNestedCompAlgo(pos, pos + sz);
+      } else if (MASTERS.has(idR.id)) {
+        // unknown master container — skip
+      }
       pos += sz;
     }
-    if (type === 17) subTracks.push({ num, codecId, header });
+    if (type === 17) subTracks.push({ num, codecId, header, compAlgo });
+  }
+
+  function readNestedCompAlgo(from, to) {
+    let pos = from;
+    let algo = null;
+    while (pos < to) {
+      const idR = readID(dv, pos);
+      if (!idR) break;
+      pos += idR.len;
+      const szR = readSize(dv, pos);
+      if (!szR) break;
+      pos += szR.len;
+      const sz = szR.val;
+      if (idR.id === CONTENT_COMP_ALGO) algo = readUint(dv, pos, sz);
+      else if (MASTERS.has(idR.id)) {
+        const nested = readNestedCompAlgo(pos, pos + sz);
+        if (nested != null) algo = nested;
+      }
+      pos += sz;
+    }
+    return algo;
   }
 
   function parseBG(from, to) {
@@ -208,15 +257,43 @@ function extract(dv) {
     const textLen = size - tnR.len - 3;
     if (textLen <= 0) return;
 
-    const text = readStr(dv, pos, textLen);
+    // Defer text decode — for compressed tracks we need to inflate the raw
+    // bytes first. Always capture the slice as Uint8Array; we decode (and
+    // decompress if needed) in a post-scan async pass.
+    const raw = new Uint8Array(dv.buffer, dv.byteOffset + pos, textLen);
     const timeMs = (clusterTs + timecode) * tcScale / 1000000;
     const durMs = dur != null ? dur * tcScale / 1000000 : 5000;
 
-    events.push({ trackNum, time: timeMs, dur: durMs, text });
+    events.push({ trackNum, time: timeMs, dur: durMs, raw });
   }
 
   scan(0, fileEnd);
   if (!subTracks.length) return null;
+
+  // Post-scan: decode each event's raw bytes into text. Some MKVs use
+  // Matroska ContentEncoding zlib compression (default algo when only
+  // ContentEncoding header is present, no explicit algo element — common
+  // in SweetSub releases). Sniff the zlib header on raw bytes:
+  //   0x78 0x01 / 0x78 0x9C / 0x78 0xDA / 0x78 0x5E = zlib stream
+  // Anything else is treated as plaintext UTF-8. pako.inflate is sync,
+  // so the whole post-scan stays in one tick — ~500ms for 2000 events
+  // vs ~4s with the previous per-event DecompressionStream.
+  const decoder = new TextDecoder();
+  const ZLIB_FLAGS = new Set([0x01, 0x5E, 0x9C, 0xDA]);
+  const isZlib = (b) => b.length >= 2 && b[0] === 0x78 && ZLIB_FLAGS.has(b[1]);
+  for (const ev of events) {
+    let bytes = ev.raw;
+    if (isZlib(bytes)) {
+      try {
+        bytes = self.pako.inflate(bytes);
+      } catch (err) {
+        // Bad block — skip; other events may still decode cleanly.
+        ev.text = '';
+        continue;
+      }
+    }
+    ev.text = decoder.decode(bytes);
+  }
 
   // Prefer ASS/SSA
   const assTrack = subTracks.find(t => t.codecId === 'S_TEXT/ASS' || t.codecId === 'S_TEXT/SSA');

@@ -248,7 +248,7 @@ export default function PlayerPage() {
   const playback = usePlaybackSession({ getVideoUrl, getSubtitleUrl, loadComments, clearComments });
   const {
     phase: playbackPhase,
-    playingFile, playingEp, videoUrl, subtitleUrl,
+    playingFile, playingEp, videoUrl, subtitleUrl, subtitleType, subtitleContent,
     play: startPlayback, back: stopPlayback,
     resumeAt, setLastTime,
   } = playback;
@@ -872,6 +872,8 @@ export default function PlayerPage() {
               videoUrl={videoUrl}
               danmakuList={danmakuList}
               subtitleUrl={subtitleUrl}
+              subtitleType={subtitleType}
+              subtitleContent={subtitleContent}
               onEnded={handleVideoEnded}
               progressKey={progressKey}
               episode={playingEp}

@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import { applyHeatmapPath } from '../../lib/heatmapPath';
 import { convertAssToVtt, convertSrtToVtt } from '../../utils/subtitleConvert';
+import { mountJassub, destroyJassub } from './jassubOverlay';
 
 const s = {
   wrapper: { width: '100%', position: 'relative' },
@@ -155,6 +156,8 @@ export default function VideoPlayer({
   videoUrl,
   danmakuList,
   subtitleUrl,
+  subtitleType,
+  subtitleContent,
   onEnded,
   progressKey,
   resumeAt = null,
@@ -162,8 +165,13 @@ export default function VideoPlayer({
 }) {
   const containerRef = useRef(null);
   const artRef = useRef(null);
+  const jassubRef = useRef(null);
   const fileInputRef = useRef(null);
   const userSubtitleBlobRef = useRef(null);
+  // Flips to true once the async artplayer init completes. Effects that need
+  // art.video (jassub mount, etc.) gate on this so they don't run before
+  // artRef.current is populated.
+  const [playerReady, setPlayerReady] = useState(false);
   const progressKeyRef = useRef(progressKey);
   const danmakuListRef = useRef(danmakuList);
   const subtitleSizeRef = useRef(readSubtitleSize());
@@ -193,6 +201,10 @@ export default function VideoPlayer({
     const initialOffset = subtitleOffsetRef.current;
     const initialRate = playbackRateRef.current;
     const initialDanmakuVisible = danmakuVisibleRef.current;
+    // Always wire VTT plaintext as the resilient base layer. When jassub
+    // mounts successfully on top, we hide the VTT div so they don't double.
+    // If jassub fails to load, VTT remains visible — user always sees
+    // *something*.
     const subtitleConfig = subtitleUrl
       ? {
           url: subtitleUrl,
@@ -318,11 +330,43 @@ export default function VideoPlayer({
         art.plugins?.artplayerPluginDanmuku?.hide?.();
       }
 
-      // Apply initial playback rate. artplayer.options.playbackRate is a
-      // boolean flag, not a value — the actual rate goes on the instance
-      // after construction, once the <video> element exists.
+      // Chrome auto-exposes embedded MKV subtitle tracks as video.textTracks
+      // and renders cue.text as plaintext — for ASS payloads it prints raw
+      // block bytes ("x?341?6?..."). Force-disable so jassub (or our VTT
+      // fallback) is the only renderer.
+      //
+      // BUT: artplayer adds its own <track> element for the VTT URL we feed
+      // it. Disabling that track sets track.cues to null, and artplayer's
+      // $newTrack.onload reads Array.from(track.cues) → TypeError. So we
+      // must skip artplayer's <track>-backed tracks and only disable the
+      // embedded-from-container ones.
+      const disableNativeTextTracks = () => {
+        const tracks = art.video?.textTracks;
+        if (!tracks) return;
+        const explicitTrackEls = art.video.querySelectorAll('track');
+        const explicit = new Set();
+        for (const node of explicitTrackEls) {
+          if (node.track) explicit.add(node.track);
+        }
+        for (const t of tracks) {
+          if (!explicit.has(t)) t.mode = 'disabled';
+        }
+      };
+
+      // Apply initial playback rate + disable native textTracks together so
+      // a single 'video:loadedmetadata' listener owns both.
       art.on('video:loadedmetadata', () => {
         if (art.playbackRate !== initialRate) art.playbackRate = initialRate;
+        disableNativeTextTracks();
+        // Chrome populates textTracks lazily for MKV-embedded ASS — the
+        // track often appears AFTER loadedmetadata, as the demuxer reaches
+        // the subtitle stream. Listen for addtrack so we catch and disable
+        // those too. Otherwise the late-arriving embedded track renders
+        // raw block bytes as garbage plaintext.
+        const tracks = art.video?.textTracks;
+        if (tracks?.addEventListener) {
+          tracks.addEventListener('addtrack', disableNativeTextTracks);
+        }
       });
 
       if (onEnded) art.on('video:ended', onEnded);
@@ -383,6 +427,7 @@ export default function VideoPlayer({
         return;
       }
       artRef.current = art;
+      setPlayerReady(true);
 
       // Expose for HeatmapTuner — dev-only, gated.
       if (import.meta.env.DEV || (typeof localStorage !== 'undefined' && localStorage.getItem('animego.heatmapTuner') === '1')) {
@@ -400,6 +445,11 @@ export default function VideoPlayer({
     return () => {
       cancelled = true;
       const inst = artRef.current || art;
+      // Tear down jassub before artplayer so its ResizeObserver / RVFC
+      // hooks don't fire against a destroyed video element.
+      const ji = jassubRef.current;
+      jassubRef.current = null;
+      if (ji) destroyJassub(ji);
       if (!inst) return;
       // Save final position before teardown (episode switch or unmount)
       const key = progressKeyRef.current;
@@ -413,6 +463,7 @@ export default function VideoPlayer({
       }
       inst.destroy(false);
       artRef.current = null;
+      setPlayerReady(false);
       if (typeof window !== 'undefined' && window.__artInstance === inst) {
         window.__artInstance = null;
       }
@@ -421,6 +472,8 @@ export default function VideoPlayer({
 
   // Patch subtitle dynamically without recreating player.
   // Re-apply the current font size so episode switches don't reset it.
+  // Always switch (even when ASS is active) so the VTT layer is ready as
+  // a resilient fallback if jassub fails to mount.
   useEffect(() => {
     const art = artRef.current;
     if (!art || !subtitleUrl) return;
@@ -434,6 +487,67 @@ export default function VideoPlayer({
       },
     });
   }, [subtitleUrl]);
+
+  // jassub lifecycle: mount when ASS content is available, tear down on
+  // change/unmount. Gates on playerReady so artRef.current.video is
+  // guaranteed populated. Destroy + recreate on content swap (cheap after
+  // first load — worker is hot) sidesteps coupling to jassub's internal
+  // renderer.setTrack Remote API.
+  //
+  // VTT fallback handshake: artplayer's VTT subtitle stays mounted as the
+  // resilient base layer. When jassub mounts successfully, hide the VTT
+  // div so styled ASS doesn't get doubled by plaintext. When jassub
+  // tears down (or fails), restore VTT visibility.
+  useEffect(() => {
+    if (!playerReady) return;
+
+    const art = artRef.current;
+    let cancelled = false;
+
+    const setVttVisible = (visible) => {
+      const sub = art?.subtitle;
+      if (!sub) return;
+      try {
+        sub.show = visible;
+      } catch {
+        // older artplayer versions may not expose the show setter — ignore
+      }
+    };
+
+    const tearDown = async () => {
+      const inst = jassubRef.current;
+      jassubRef.current = null;
+      if (inst) await destroyJassub(inst);
+      setVttVisible(true);
+    };
+
+    if (subtitleType !== 'ass' || !subtitleContent) {
+      tearDown();
+      return;
+    }
+
+    const video = art?.video;
+    if (!video) return;
+
+    tearDown()
+      .then(() => (cancelled ? null : mountJassub({ video, subContent: subtitleContent })))
+      .then((inst) => {
+        if (cancelled) {
+          if (inst) destroyJassub(inst);
+          return;
+        }
+        jassubRef.current = inst;
+        // Hide VTT only when jassub is actually rendering. If mountJassub
+        // returned null (asset load failed, ctor threw), keep VTT visible
+        // so the user still gets plaintext subtitles.
+        if (inst) setVttVisible(false);
+      });
+
+    return () => {
+      cancelled = true;
+      tearDown();
+    };
+  }, [playerReady, subtitleType, subtitleContent]);
 
   useEffect(() => {
     const danmuku = artRef.current?.plugins?.artplayerPluginDanmuku;

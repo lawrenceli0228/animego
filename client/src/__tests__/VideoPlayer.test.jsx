@@ -18,6 +18,11 @@ function makeArtInstance(config) {
     on: vi.fn((event, fn) => { handlers[event] = fn }),
     destroy: vi.fn(),
     subtitle: { style: subtitleStyle, switch: subtitleSwitch },
+    // Stand-in for the underlying HTMLVideoElement. textTracks lets the
+    // disable-on-loadedmetadata path exercise its iteration without a DOM;
+    // querySelectorAll exposes artplayer's <track> elements so embedded
+    // tracks can be distinguished.
+    video: { textTracks: [], querySelectorAll: vi.fn(() => []) },
     plugins: {
       artplayerPluginDanmuku: {
         config: danmukuConfig,
@@ -43,6 +48,13 @@ vi.mock('artplayer', () => ({
 
 vi.mock('artplayer-plugin-danmuku', () => ({
   default: vi.fn(() => ({ name: 'artplayerPluginDanmuku' })),
+}))
+
+const mountJassub = vi.fn(async () => ({ destroy: vi.fn() }))
+const destroyJassub = vi.fn(async () => {})
+vi.mock('../components/player/jassubOverlay', () => ({
+  mountJassub: (...args) => mountJassub(...args),
+  destroyJassub: (...args) => destroyJassub(...args),
 }))
 
 import VideoPlayer from '../components/player/VideoPlayer'
@@ -71,6 +83,8 @@ beforeEach(() => {
   danmukuLoad.mockClear()
   danmukuShow.mockClear()
   danmukuHide.mockClear()
+  mountJassub.mockClear()
+  destroyJassub.mockClear()
   window.localStorage.clear()
 })
 
@@ -320,5 +334,160 @@ describe('VideoPlayer danmaku plugin tuning', () => {
     expect(opts.heatmap.opacity).toBe(0.4)
     // Plugin doesn't accept a `color` field — color is driven by CSS variables
     // (`--heatmap-fill`). Skipping that assertion.
+  })
+})
+
+describe('VideoPlayer native textTrack disable', () => {
+  test('disables embedded textTracks but leaves artplayer <track> alone', async () => {
+    render(<VideoPlayer videoUrl="/v.mkv" subtitleUrl={null} danmakuList={[]} />)
+    await flushAsync()
+    const inst = instances[0]
+    const embeddedTrack = { mode: 'showing' }
+    const artplayerTrack = { mode: 'hidden' }
+    const trackEl = { track: artplayerTrack }
+    inst.video = {
+      textTracks: [embeddedTrack, artplayerTrack],
+      querySelectorAll: vi.fn(() => [trackEl]),
+    }
+    inst.handlers['video:loadedmetadata']()
+    expect(embeddedTrack.mode).toBe('disabled')
+    // artplayer track must NOT be disabled — otherwise its .cues becomes
+    // null and $newTrack.onload throws TypeError on Array.from(null).
+    expect(artplayerTrack.mode).toBe('hidden')
+  })
+
+  test('skips quietly when video element exposes no textTracks', async () => {
+    render(<VideoPlayer videoUrl="/v.mkv" subtitleUrl={null} danmakuList={[]} />)
+    await flushAsync()
+    const inst = instances[0]
+    inst.video = { querySelectorAll: vi.fn(() => []) } // no textTracks property
+    expect(() => inst.handlers['video:loadedmetadata']()).not.toThrow()
+  })
+})
+
+describe('VideoPlayer jassub overlay', () => {
+  test('does not mount jassub when subtitleType is not ass', async () => {
+    render(
+      <VideoPlayer
+        videoUrl="/v.mp4"
+        subtitleUrl="/s.vtt"
+        subtitleType="vtt"
+        subtitleContent={null}
+        danmakuList={[]}
+      />,
+    )
+    await flushAsync()
+    expect(mountJassub).not.toHaveBeenCalled()
+  })
+
+  test('does not mount jassub when subtitleContent is empty', async () => {
+    render(
+      <VideoPlayer
+        videoUrl="/v.mkv"
+        subtitleUrl={null}
+        subtitleType="ass"
+        subtitleContent={null}
+        danmakuList={[]}
+      />,
+    )
+    await flushAsync()
+    expect(mountJassub).not.toHaveBeenCalled()
+  })
+
+  test('mounts jassub with subContent when ASS extracted from MKV', async () => {
+    const ass = '[Script Info]\nTitle: t\n\n[Events]\nDialogue: 0,0:0:0.0,0:0:1.0,Default,,0,0,0,,hello'
+    render(
+      <VideoPlayer
+        videoUrl="/v.mkv"
+        subtitleUrl="/s.vtt"
+        subtitleType="ass"
+        subtitleContent={ass}
+        danmakuList={[]}
+      />,
+    )
+    // Jassub mount runs in an async useEffect tearDown → mount chain.
+    await flushAsync()
+    await flushAsync()
+    await flushAsync()
+    expect(mountJassub).toHaveBeenCalledTimes(1)
+    expect(mountJassub.mock.calls[0][0]).toMatchObject({ subContent: ass })
+  })
+
+  test('keeps VTT subtitle wired as fallback even when ASS active', async () => {
+    // Resilience contract: if jassub fails to mount (asset error, WASM
+    // refused, etc.), the VTT plaintext layer remains visible so the user
+    // never goes "no subtitle". Hide-the-VTT-div happens only on successful
+    // jassub mount.
+    const ass = '[Script Info]\nTitle: t\n\n[Events]\nDialogue: 0,0:0:0.0,0:0:1.0,Default,,0,0,0,,hi'
+    render(
+      <VideoPlayer
+        videoUrl="/v.mkv"
+        subtitleUrl="/blob:fallback.vtt"
+        subtitleType="ass"
+        subtitleContent={ass}
+        danmakuList={[]}
+      />,
+    )
+    await flushAsync()
+    await flushAsync()
+    expect(ctorCalls[0].subtitle.url).toBe('/blob:fallback.vtt')
+    expect(ctorCalls[0].subtitle.type).toBe('vtt')
+  })
+
+  test('hides artplayer VTT div when jassub mount succeeds', async () => {
+    const ass = '[Script Info]\nTitle: t\n\n[Events]\nDialogue: 0,0:0:0.0,0:0:1.0,Default,,0,0,0,,hi'
+    render(
+      <VideoPlayer
+        videoUrl="/v.mkv"
+        subtitleUrl="/blob:fallback.vtt"
+        subtitleType="ass"
+        subtitleContent={ass}
+        danmakuList={[]}
+      />,
+    )
+    await flushAsync()
+    await flushAsync()
+    await flushAsync()
+    // Default mock returns truthy instance; show should flip false.
+    expect(instances[0].subtitle.show).toBe(false)
+  })
+
+  test('keeps VTT div visible when jassub mount returns null', async () => {
+    mountJassub.mockImplementationOnce(async () => null)
+    const ass = '[Script Info]\nTitle: t\n\n[Events]\nDialogue: 0,0:0:0.0,0:0:1.0,Default,,0,0,0,,hi'
+    render(
+      <VideoPlayer
+        videoUrl="/v.mkv"
+        subtitleUrl="/blob:fallback.vtt"
+        subtitleType="ass"
+        subtitleContent={ass}
+        danmakuList={[]}
+      />,
+    )
+    await flushAsync()
+    await flushAsync()
+    await flushAsync()
+    // mount failed → show stays true (resilient fallback).
+    expect(instances[0].subtitle.show).toBe(true)
+  })
+
+  test('destroys jassub on unmount', async () => {
+    const ass = '[Script Info]\nTitle: t\n\n[Events]\nDialogue: 0,0:0:0.0,0:0:1.0,Default,,0,0,0,,bye'
+    const { unmount } = render(
+      <VideoPlayer
+        videoUrl="/v.mkv"
+        subtitleUrl={null}
+        subtitleType="ass"
+        subtitleContent={ass}
+        danmakuList={[]}
+      />,
+    )
+    await flushAsync()
+    await flushAsync()
+    await flushAsync()
+    expect(mountJassub).toHaveBeenCalledTimes(1)
+    unmount()
+    await flushAsync()
+    expect(destroyJassub).toHaveBeenCalled()
   })
 })
