@@ -291,8 +291,15 @@ nginx :443 ─────►│  /socket.io/*│──► ws-server:3001 (Bun)
 │   ├── location /socket.io/* → proxy_pass http://ws-server:3001 (含 WebSocket upgrade headers)
 │   ├── location /api/* → proxy_pass http://app:3000
 │   ├── location /_next/static/* → proxy_pass http://app:3000 (允许 CF 长 cache)
-│   └── location / → proxy_pass http://app:3000
+│   ├── location / → proxy_pass http://app:3000
+│   └── ⚡ 必须加 cross-origin isolation headers(player route 用 jassub libass-wasm 依赖 SharedArrayBuffer):
+│       add_header Cross-Origin-Opener-Policy "same-origin" always;
+│       add_header Cross-Origin-Embedder-Policy "credentialless" always;
+│       add_header Cross-Origin-Resource-Policy "same-origin" always;
+│       (credentialless 而非 require-corp:AniList/Bangumi 海报 CDN 不发 CORP,credentialless 用 no-cors 兜底)
+│       (production 同 Vite dev config — feat/library-libass 已验证可用)
 │
+
 ├── Cloudflare cache rules (具体方案 — ISR 协调):
 │   ├── ❗ Page Rule 1: /_next/static/* → Edge Cache TTL 1 year (允许 CF 长 cache 静态)
 │   ├── ❗ Page Rule 2: /anime/*、/seasonal/* → Bypass Cache(让 Next ISR 自己管,避免 CF 缓存掉 ISR 输出)

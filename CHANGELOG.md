@@ -2,6 +2,63 @@
 
 ---
 
+## [2.0.1] - 2026-05-11
+
+### libass-wasm 字幕渲染 — MKV 内嵌 ASS 不再乱码
+
+v2.0 上线后看 SweetSub 等组的 MKV,底部字幕区出现 `x□34626□ l□(Q□Up□□1...` 二进制乱流。诊断结论:Chrome 把 MKV 容器内嵌的 ASS 字幕轨自动暴露成 `video.textTracks`,自身没有 ASS 渲染能力,把 SimpleBlock 的原始字节当 plain text 喂到 cue 里。本版本接入 [jassub](https://github.com/ThaUnknown/jassub)(libass 的 WebAssembly 端口)做完整 ASS 渲染。
+
+**新增**
+
+- **jassub libass-wasm 集成**: 当 `subtitleType === 'ass'` 时,挂载 jassub canvas overlay 在 `.art-video-player` 容器内,z-index 在 video 之上 / 控制条之下。完整保留 ASS 的样式、定位、Sign 排版、动画。
+- **MKV ASS 完整解码**: `mkvSubtitle.worker.js` 现在解 Matroska ContentEncoding zlib 压缩(SweetSub 等组常用),改用 pako 同步 inflate(替代 DecompressionStream 的 per-block async 调用)。2000+ 事件解压从 ~4s 降到 ~500ms。
+- **CJK 字体回退**: 通过 `queryLocalFonts()` 加载系统 PingFang SC / Hiragino Sans / Microsoft YaHei / Noto CJK 作为 libass defaultFont。ASS 引用的混淆字体名(`7GYB4TKY`、`GI6JUCQT`、`PJSM6X93` 等 fansub 用的 subsetted Dream Han SC 别名)全部 fallback 到 CJK 系统字体。Chrome 首次需要授权 "本地字体" 权限。
+- **VTT plaintext 兜底**: jassub 加载失败(权限拒、WASM init 失败、SAB 不可用)时自动落回 artplayer 原生 VTT plaintext 字幕,用户不至于"完全没字幕"。
+- **Native textTrack disable**: 拦截 Chrome 自动暴露的内嵌字幕轨,disable 时排除 artplayer 自己 inject 的 `<track>` 元素(否则它的 `.cues` 会变 null,`Array.from(null)` 崩)。`loadedmetadata` 和 `addtrack` 双事件覆盖异步出现的轨道。
+
+**Performance**
+
+- 第一集冷启动:点播放 → 字幕首帧约 1.5s(其中 MKV 读 + EBML 扫 + pako 解压 ~1s,jassub WASM init ~500ms)。
+- 后续切集:~500ms(jassub module + CJK font 已缓存)。
+- jassub WASM 资产 ~2MB,player route 才懒加载。
+
+**Cross-origin isolation**
+
+jassub 内部用 emscripten pthread workers,要求 SharedArrayBuffer,只在 cross-origin isolated context 下可用。`client/vite.config.js` server.headers 加:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: credentialless
+Cross-Origin-Resource-Policy: same-origin
+```
+
+`credentialless` 而非 `require-corp` 因为 AniList / Bangumi 海报 CDN 不发 CORP — `credentialless` 用 no-cors 兜底放行跨域图片。CORP 仍要发(spec:credentialless 不放宽 worker/iframe 子资源)。生产部署 nginx 需要同样的 3 个 header,已加进 `docs/migration/MIGRATION_PLAN.md` § Phase 6。
+
+**资产路径**
+
+- `client/public/jassub/` 由 postinstall 脚本 (`copy:jassub`) 从 `node_modules/jassub/dist/` 拷贝 wasm/worker/default.woff2。原因:Vite 直接 serve `/node_modules/jassub/...` 时给 Content-Type: text/html(SPA fallback),worker 加载失败。
+- `mkvSubtitle.worker.js` 通过 `?raw` import + `URL.createObjectURL(blob)` 加载,bypass Vite worker pipeline,避免 COEP 下的 transform URL 拦截。pako 内联到同一个 Blob(~24KB)。
+- jassub 主 worker 走 Vite `?worker&url` (`dist/worker/worker.js`),Vite bundle 解析 abslink / lfa-ponyfill 等 bare imports。
+
+**Tests**
+
+1342/1342 client tests / 0 failures。`VideoPlayer.test.jsx` 加 9 个新测试(native textTrack 排除 artplayer track / jassub mount lifecycle / VTT fallback / hide-on-success / destroy-on-unmount)。`resolveSubtitle.test.jsx` 和 `usePlaybackSession.test.jsx` 的 createObjectURL 计数 baseline 更新(blob worker URL + VTT URL 两次创建)。
+
+**Tradeoffs**
+
+- CJK 字体回退要 Chrome `local-fonts` 权限。拒绝则降级到 LiberationSans(纯拉丁),CJK 字符渲染为 □ 但 Sign typesetting 和 Latin 字符正常。
+- Firefox 不支持 FSA 持久化 + `queryLocalFonts`,本地媒体库这条线 Firefox 仍是 v2.0 之前的状态(本版本不增强)。
+- libass 在 console.debug 级别输出 `JASSUB: fontselect: Using default font family...`,每个 ASS 事件一行。用户侧解法:DevTools Console filter 关掉 Verbose 级别。代码侧尝试过 wrapper worker + 预注册 Style fonts,前者破坏 jassub 初始化时序,后者让 libass 在 wasm 里崩 `null function`,放弃。
+
+**Refs**
+
+- [jassub](https://github.com/ThaUnknown/jassub)
+- [WICG Credentiallessness](https://wicg.github.io/credentiallessness/)
+- [Chrome dev blog: COEP credentialless](https://developer.chrome.com/blog/coep-credentialless-origin-trial)
+- [Matroska ContentEncoding spec](https://www.matroska.org/technical/notes.html)
+
+---
+
 ## [2.0.0] - 2026-05-10
 
 ### 本地影音库 (P1-P5) — 浏览器里的本地番剧管理 + 播放
