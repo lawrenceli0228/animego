@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "copy:jassub": "rm -rf public/jassub && mkdir -p public/jassub && cp -r ../node_modules/jassub/dist/wasm ../node_modules/jassub/dist/worker ../node_modules/jassub/dist/default.woff2 public/jassub/",
-    "postinstall": "bun run copy:jassub"
+    "postinstall": "rm -rf public/jassub && mkdir -p public/jassub && cp -r ../node_modules/jassub/dist/wasm ../node_modules/jassub/dist/worker ../node_modules/jassub/dist/default.woff2 public/jassub/"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
