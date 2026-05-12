@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+# bun lockfile — local dev tool only. Production Docker uses npm ci
+# against package-lock.json, which is the source of truth.
+bun.lock
+bun.lockb
 
 # Environment variables (contains secrets - never commit)
 .env
