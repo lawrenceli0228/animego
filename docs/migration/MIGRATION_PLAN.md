@@ -4,13 +4,14 @@
 **Supersedes:** v1 (2026-05-10,Next.js + Bun 全栈保留 Mongo + Express)
 **Baseline:** v2.0.1(commit `89516a1`,libass-wasm + Vite SPA + Express + MongoDB)
 **目标终态:**
-- 前端:Next.js 14 App Router + RSC + TSX + Bun runtime
+- 前端:**Next.js 16** App Router + RSC + TSX + Bun runtime(2026-05-12 二轮 review 1A 改正:14 已不在 Active LTS)
 - 后端:Go 1.23 + chi + pgx + sqlc + PostgreSQL 16(VPS 自建)
 - 实时:Node + socket.io 微服务(保留,Go 库未成熟)
 - 部署:big-bang cutover,24h 真实回滚窗口
 
-**总工时估算:** 400-625 hr (中位 510 hr) ~ 业余 7-13 个月
-**Innovation tokens:** 7 / 3(超 budget,用户已知接受)
+**总工时估算:** 410-650 hr (中位 ~530 hr) ~ 业余 7-13 个月
+(二轮 review 加:P2.6 +12hr、P2.8 ws-server split +10-15hr)
+**Innovation tokens:** **6** / 3(Next.js 16 把 14 那个 token 消掉,因为 React 19 默认 = stable,不再算单独 token;仍超 budget 2)
 
 ---
 
@@ -20,7 +21,7 @@
 
 | 组件 | 现状 (v2.0.1) | v1 plan (已废弃) | **v2 plan (本文档)** |
 |------|------|------|------|
-| 前端框架 | Vite SPA + React 18 + JSX | Next.js 14 + RSC + TSX | **Next.js 14 + RSC + TSX** |
+| 前端框架 | Vite SPA + React 18 + JSX | Next.js 14 + RSC + TSX | **Next.js 16 + RSC + TSX**(二轮 review 1A 修正;React 19 默认) |
 | 前端 runtime | Node | Bun 1.3 | **Bun 1.3** |
 | 后端语言 | JS (Node 22 + Express 4) | TS (Bun + Next API routes) | **Go 1.23** |
 | 后端 HTTP | Express | Next API routes | **chi v5** |
@@ -39,7 +40,7 @@
 
 ### 不在范围
 
-- React 19 升级(等 Next 官方 stable + artplayer 兼容)
+- ~~React 19 升级(等 Next 官方 stable + artplayer 兼容)~~ — 1A 决议 Next.js 16 直接给到 React 19 默认,这条 deferral 自动 closed
 - shadcn/ui 等组件库引入
 - 国际化 i18n 拆 lib
 - 完整 TS strict: true(留作迁移后单独 PR)
@@ -52,44 +53,54 @@
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
+| **前端框架版本** | **Next.js 16(Active LTS)** | 二轮 review 1A 修正:14 已不在 Active LTS,16 是 React 19 默认 + Turbopack stable,5-13月期间不 EOL |
 | 后端语言 | Go 1.23 | 单二进制,内存占用小,并发模型适合 webhook + 富化 queue |
 | ORM 策略 | pgx + sqlc(无 ORM) | 类型安全 SQL,0 runtime reflection,SQL 可读 |
 | Postgres 部署 | VPS docker 自建 | 与 mongo 现有模式一致,0 新账单,容器内网 latency 最低 |
 | schema 风格 | 全 normalize | 14 张表,可查"演员配过哪些番"类问题;JOIN 性能信赖 Postgres |
+| **schema FK** | **anime_* 子表 + user_id 全 ON DELETE CASCADE** | 二轮 review 1C:normalize 蕴含 cascade,RESTRICT 会让 admin 删失败 |
 | socket.io 实现 | 保留 Node + socket.io | Go 库 v4 支持不成熟,异构服务架构永久保留 |
+| **ws-server 微服务化** | **P2.8 显式拆出 ws-server/ 目录** | 二轮 review 3A:今天 socket.io 跟 Express 同进程,P8 前必须拆出独立服务 |
 | 迁移路径 | big-bang cutover | 单次切流量,nginx 一行回滚;不维护 strangler-fig 路由复杂度 |
 | 回滚窗口 | 24h 真实 + 30 天 mongodump | 24h 内 nginx 回 Express;超过 24h mongodump 仅作灾难恢复 |
+| **Rollback image 保留** | **cutover T-1d 推 Express :rollback-T0 tag,registry 保留 30天** | 二轮 review 5A:依赖 docker image 不被 prune 不可靠,显式 tag |
+| **Auth 切换过渡** | **Go API 双接 Authorization header + Cookie 7 天** | 二轮 review 4A:0-transition cutover = silent 401 storm,header→cookie 7天平滑 |
 | Cutover 前验证 | shadow traffic 1 周 | nginx mirror 复制 prod 流量到 Go,验证 P99 而不切流量 |
-| 测试编写 | 拆独立 phase P2.7 | testify+testcontainers 等价重写 317 个 Jest,显式 80 hr |
-| 详情页 read path | N+5 join(8 query) | 先信赖 Postgres + index;P10 benchmark,需要时优化 |
+| **Cutover 演练** | **P8.5 day-6 dress rehearsal + day-7 rollback drill** | 二轮 review 1T/2T:P9 T+0 序列从未在 staging 跑过 = 一次性大风险 |
+| 测试编写 | 拆独立 phase P2.7 | testify+testcontainers 等价重写 311(实际)个 Jest,显式 80 hr |
+| 详情页 read path | **P5 dual-mode(8-query / json_agg),P8.5 shadow 对比,P10 拍板** | 二轮 review Pf1:plan 之前接受 N+5,但 P10 才 benchmark 太晚;P5 实现两套 |
 | 迁移工具语言 | Go(单二进制) | 跟 backend 同语言,可重复执行,无 Node deps |
+| **Migration field parity** | **P1 acceptance 加 field-level parity test(10 key field × 1000 row sample)** | 二轮 review 6A:row count diff 过不代表 UI 不跳色;Mongo undefined vs PG NULL |
+| **River vs lean** | **保留 river**(Postgres-backed 队列,事务性入队) | 二轮 review 7A:lean 方案(jobs 表 + 3 goroutine)更轻但 V2/V3 phase crash 恢复要自己写;river 直接给 |
 | Mongo cutover 后 | 保留容器 30 天 + R2 mongodump 90 天 | 灾难恢复 + 法律取证,**不是 rollback 路径** |
+| **T+0 cutover 序列** | **stop ws-server → stop Express → 跑 migration → nginx switch** | 二轮 review 5T:之前序列没 mention ws-server,会有 silent 弹幕丢 |
 
 ---
 
 ## 2. 阶段计划
 
 ```
-P0   Go 项目骨架 + Postgres + R2 backup                            20-35 hr
+P0   Go 项目骨架 + Postgres + R2 backup + scripts/dev.sh           20-35 hr
 P1   Schema migration tool (Mongo → Postgres,Go 单二进制)         40-60 hr  ← critical
 P2.1 /api/anime/* + 富化 queue                                     35-55 hr
-P2.2 /api/auth/* + JWT + Gmail SMTP                                18-28 hr
+P2.2 /api/auth/* + JWT + Gmail SMTP + dual-accept (4A)             18-28 hr
 P2.3 /api/admin/* + adminAuth                                      15-22 hr
 P2.4 /api/subscriptions/* + /api/users/* + /api/feed              12-18 hr
 P2.5 /api/comments/* + /api/danmaku/* (HTTP only)                  8-12 hr
-P2.6 /api/dandanplay/* + 3-phase match                             12-25 hr
-P2.7 testify + testcontainers-go 等价重写 317 测试                 60-80 hr  ← 显式拆出
-P3   Next.js 14 骨架 + Bun + rewrites 通老 Express                 15-25 hr
+P2.6 /api/dandanplay/* + 3-phase match(二轮 review 6C +12hr)      24-37 hr  ← 含 episodeMap + pg_trgm 决策
+P2.7 testify + testcontainers-go 等价重写 311 测试                 60-80 hr  ← 显式拆出
+P2.8 ws-server 拆出 (二轮 review 3A 新增 phase)                    10-15 hr  ← NEW
+P3   Next.js 16 骨架 + Bun + rewrites + prod metrics baseline      15-25 hr
 P4   Public Pages RSC (LandingPage + About + sitemap + metadata)   17-27 hr
-P5   SEO 核心 ISR (/anime/[id] + /seasonal + /search + JSON-LD)    18-33 hr
+P5   SEO 核心 ISR (/anime/[id] dual-mode + /seasonal + /search)    18-33 hr
 P6   Library + Player + libass-wasm + reauth E2E                   45-85 hr  ← 最难
 P7   Admin RSC + middleware role check                             15-25 hr
-P8   部署架构 (Dockerfile × 4 + nginx + COOP/COEP/CORP)             30-50 hr
-P8.5 Shadow traffic 1 周 (nginx mirror,Go 收影子流量验证 P99)     15-25 hr  ← critical gate
-P9   Big-bang cutover (维护窗口 + migration + nginx 切)            10-20 hr
-P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
+P8   部署架构 (Dockerfile × 3 + nginx + COOP/COEP/CORP)             30-50 hr
+P8.5 Shadow traffic 1 周 + day-6 dress rehearsal + day-7 rollback drill   15-25 hr  ← critical gate
+P9   Big-bang cutover (ws-server stop → Express stop → migration → switch)   10-20 hr
+P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 ─────────────────────────────────────────────────────────────────
-总: 400-625 hr (中位 510 hr)
+总: 410-650 hr (中位 ~530 hr)
 ```
 
 ### Phase 0 — Go 项目骨架 + Postgres + Backup (20-35 hr)
@@ -123,11 +134,13 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 - `go test ./go-api/...` 跑通(空套件)
 - pg_dump → R2 → restore 演练成功(必须真跑一次)
 - backup 文件能下载 + 解压 + restore 到 staging
+- R2 30-day retention cleanup cron 实际跑(模拟 31-day 老文件 + 触发 rclone delete --min-age 30d)
 
 **Acceptance:**
 - Go 服务 `:8080/health` 返回 OK
 - Postgres 容器 healthy
 - R2 backup 当天有文件,restore 演练通过
+- **scripts/dev.sh 一键起 6 个进程**(postgres + mongo + go-api + ws-server + Next.js + 加 .env.example check)(二轮 review 2C)
 
 ### Phase 1 — Migration Tool (Mongo → Postgres) (40-60 hr) ← critical
 
@@ -162,11 +175,16 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 - testify 单测每个 transform 函数(覆盖 ObjectId, Date 时区,embedded subdoc nil)
 - testcontainers-go:启 mongo + postgres,导入 fixture mongo data,跑 migration,assert Postgres rows 等价
 - **dry-run on prod mongo dump**:跑全量 dry-run,row count 跟 mongo count 一致,差异 < 0.1%
+- **二轮 review 6A NEW** field-level parity test:10 个 UI-critical field(titleChinese/characters[0].nameCn/coverImageColor/posterAccent/startDate/...)随机抽 1000 行在 mongo 跟刚写入 PG 双查,严格 equal(null 等价容忍)
+- **NEW** idempotency:同一 mongo dump 重跑 PG 不重 row(UPSERT or transaction wrap)
+- **NEW** pg_cron danmaku TTL 实际 DELETE fire test(插 18-month 老 danmaku → 触发 cron 调度 → SELECT count == 0)
 
 **Acceptance:**
 - dry-run + actual run 都通过
 - migration 总耗时 < 30 分钟(P9 cutover 窗口给的预算)
 - 失败行 < 0.01%,失败原因有 log
+- field parity test 全绿
+- pg_cron TTL 真触发
 
 ### Phase 2 — Go API 重写 (5 个 sub-milestone,共 100-160 hr)
 
@@ -193,10 +211,14 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 │   river periodic job 24h cron + 启动时 enqueue v0 orphans
 └── 5 个 in-memory cache (search/schedule/trending/yearly/completed-gems):
     ristretto with TinyLFU, 1h TTL
+    ⚠️ 二轮 review TODO-2:本 phase commit 前决定 2-tier cache 主从 + 文档
+       (ristretto 主 vs Postgres cache 表主),invalidate 路径写下来
 ```
 
 **Tests:** 9 endpoint testify 单测 + 3 关键 shape-diff with Express(trending/search/detail)+ river worker integration test
-**Acceptance:** 9 endpoint shape 与 Express 等价 + 富化 queue Postgres-backed 不丢任务
+- **NEW** river 重试 on transient Bangumi 500:mock 5xx → river 默认 3 retry → 第 4 次 finally fail
+- **NEW** rate limiter goroutine-safe:100 goroutine 并发调用 dandanplay limiter,assert 间隔 ≥ 800ms,无 race(go test -race)
+**Acceptance:** 9 endpoint shape 与 Express 等价 + 富化 queue Postgres-backed 不丢任务 + 2-tier cache 主从决策 documented
 
 #### P2.2 — `/api/auth/*` + JWT + Gmail SMTP (18-28 hr)
 
@@ -212,10 +234,18 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 ├── express-validator → go-playground/validator/v10 struct tag
 ├── express-rate-limit (10 req/15min) → 自实现 in-memory token bucket
 └── 重置密码 crypto.randomBytes(32) → crypto/rand
+
+⚠️ 二轮 review 4A 双接过渡:
+   Go middleware 同时接受 Authorization: Bearer <jwt>(老 localStorage 来源)
+   和 Cookie(新 httpOnly)。Cookie 主、header 后兼容 7 天。
+   UI 在 banner 提示"安全升级,部分用户需重新登录"
+   T+7 cookie-only,header reject 401。
 ```
 
-**Tests:** register→login→me→refresh→logout E2E + bcrypt hash 兼容性(同 password 老 hash 能验过)+ 密码重置邮件 mock
-**Acceptance:** 现有 Express 用户登录在 Go 后端成功(bcrypt 兼容)
+**Tests:** register→login→me→refresh→logout E2E + bcrypt hash 兼容性 + 密码重置邮件 mock
+- **二轮 review 4C** bcrypt fixture **必须用 mongo dump 真 prod hash sample(3-5 条),不是 unit test 时 hash 出的新值**
+- **二轮 review 4A NEW** dual-accept unit + E2E:同一 token 通过 header / cookie 两种方式均能过验,T+7 后 header reject
+**Acceptance:** 现有 Express 用户登录在 Go 后端成功(bcrypt 兼容)+ dual-accept 7-day cutover 平滑
 
 #### P2.3 — `/api/admin/*` + adminAuth (15-22 hr)
 
@@ -256,27 +286,44 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 **Tests:** 评论树读取 ≡ Mongo 输出,递归 CTE 性能 OK
 **Acceptance:** 评论 + 历史弹幕读取等价
 
-#### P2.6 — `/api/dandanplay/*` + 3-phase match (12-25 hr)
+#### P2.6 — `/api/dandanplay/*` + 3-phase match (二轮 review 6C +12hr → **24-37 hr**)
 
 ```
 ├── 4 endpoint(/match /search /comments/:episodeId /episodes/:animeId)
-├── 3-phase match 逻辑:
-│   Phase 1: hash + filename → dandanplay API
-│   Phase 2: keyword → anime_cache → Bangumi bgmId → dandanplay (2s timeout)
-│   Phase 3: per-file hash fallback
+├── 3-phase match 逻辑(二轮 review 6C 修正描述,Bangumi 真实角色:2s timeout 兜底):
+│   Phase 1: matchCombined(fileName + 可选 fileHash/fileSize) → dandanplay /api/v2/match
+│            ⚠️ loose-match accept gate:!isMatched 时若 titleLooselyMatchesKeyword 通过仍接受
+│            (normalizeTitle 剥离的 28-char Unicode 标点表必须按 server/utils/episodeMap.js 全部复刻)
+│   Phase 2: keyword → AnimeCache 4-title regex 搜(Mongo → PG 用 pg_trgm + gin_trgm_ops)
+│            → 候选 bgmId → fetchDandanEpisodes(bgmId);Bangumi 调用仅在 findSiteAnime 2s timeout 兜底
+│   Phase 3: per-file fallback (files[] 提供时);仅接受 isMatched: true
+├── buildEpisodeMap 3-level fallback(高 off-by-one 风险,必须 testify 全覆盖):
+│   L1: 精确数字 e.number == ep
+│   L2: OVA/Special rawEpisodeNumber 匹配 ^[OS](\d+)$
+│   L3: regulars (rawEpisodeNumber ^\d+$) pool index 1-based:pool[epNum - 1]
+│   ⚠️ usedIds dedup(不同集 不能指向同一 dandan episodeId)
+├── 6 个 episode-number regex 优先级(server/services/dandanplay.service.js 第 133-145 行):
+│   Japanese kanji 第N話/话/集 + extractEpisodeNumber 链 — 全部复刻
 ├── 限流共享(golang.org/x/time/rate):
 │   AniList 700ms, Bangumi+Dandanplay 各 800ms,独立 limiter
-├── dandanplay app_id + app_secret 通过 env 注入
-└── ristretto 缓存(30min comments / 24h episodes)
+│   ⚠️ Go 必须 goroutine-safe(原 Express closure 不是 mutex)
+├── dandanplay app_id + app_secret 通过 env 注入(headers X-AppId / X-AppSecret,无 HMAC)
+├── 整体 /match timeout cap(防 Phase 1 + N×Phase 2 + Phase 3 级联 8s 爆走):20s 总 timeout
+└── ristretto 缓存(30min comments / 24h episodes,双 key `bgm:` / `dan:` 前缀)
 ```
 
 **Tests:** /match 3-phase 路径每一条都有 testify case + timeout 兼容
-**Acceptance:** /match 命中率 ≥ Express 的 99%(基于 staging 流量回放)
+- **二轮 review 6C** buildEpisodeMap 3-level edge testify 全覆盖(普通集 / OVA / Special / index 0-based vs 1-based 边界)
+- **NEW** loose-match accept gate testify case(假 dandanplay 返回 !isMatched 但 title 模糊匹配)
+- **NEW** AnimeCache pg_trgm 替换正确性:同 keyword 在 Mongo regex vs PG pg_trgm 命中集 diff < 5%
+- **NEW** findSiteAnime 2s timeout 真触发(mock bangumi 4s response → assert 早退)
+- **NEW** 整体 /match 20s timeout cap 测试(mock Phase 1+2+3 各 8s → 整体 20s abort)
+**Acceptance:** /match 命中率 ≥ Express 的 99%(基于 staging 流量回放)+ buildEpisodeMap 0 off-by-one
 
-#### P2.7 — testify + testcontainers-go 等价重写 317 测试 (60-80 hr) ← 新增 phase
+#### P2.7 — testify + testcontainers-go 等价重写 311 测试 (60-80 hr)
 
 ```
-├── server/__tests__/ 317 个 Jest+Supertest 测试逐一重写为 testify
+├── server/__tests__/ 311 个 Jest+Supertest 测试逐一重写为 testify(原 plan 写 317,实际 311)
 ├── testcontainers-go 起 real postgres,跑每个集成测试隔离 DB
 ├── 测试组织:
 │   go-api/internal/handlers/*_test.go    单元
@@ -287,18 +334,62 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 ```
 
 **Tests:** 这就是测试本身
-**Acceptance:** 317 个测试全绿 + 覆盖率 ≥ 80%
+**Acceptance:** 311 个测试全绿 + 覆盖率 ≥ 80% + shape-diff regression suite 全过
 
 **M2 整体 Acceptance:**
-- 37 个 HTTP endpoint Go 实现完成
-- 317 测试等价覆盖
+- 48 个 HTTP endpoint Go 实现完成(admin 14 + anime 9 + auth 7 + sub 5 + user 5 + comment 3 + danmaku 1 + dandan 4)
+- 311 测试等价覆盖
 - staging 部署的 Go 实例与 Express shape diff 6 关键路径全部等价
 - river 富化 queue 重启不丢任务
 
-### Phase 3 — Next.js 14 骨架 + Bun (15-25 hr)
+#### P2.8 — ws-server 拆分 (二轮 review 3A NEW, 10-15 hr)
+
+今天 socket.io 跟 Express 同进程跑(`server/index.js:125 setupSocket(server)`)。big-bang cutover 前必须拆出独立 Node 服务。
+
+```
+├── 新建 ws-server/ 目录(独立 package.json + Dockerfile + dev script)
+│   ws-server/
+│   ├── index.js                 socket.io setup + JWT verify + handlers
+│   ├── danmaku.handler.js       (从 server/socket/ 平移 + 替换 mongoose → pg)
+│   ├── Dockerfile               (Node 22-alpine)
+│   ├── package.json             (socket.io, pg, jsonwebtoken)
+│   └── .dockerignore
+│
+├── 数据访问改造(平移 server/socket/danmaku.handler.js 逻辑):
+│   ├── EpisodeWindow.findOneAndUpdate → INSERT INTO episode_windows ... 
+│   │                                     ON CONFLICT (anilist_id, episode) DO NOTHING
+│   │                                     RETURNING live_ends_at;
+│   │                                     若 nothing returned 再 SELECT(保留 $setOnInsert 原子性)
+│   ├── Danmaku.create → INSERT INTO danmakus ... RETURNING id
+│   └── 广播 payload {_id} → {id} (Postgres bigint/uuid,client 跟着改)
+│
+├── Auth(共享 JWT_SECRET via env;7C 说明 mirror Go 验证逻辑 <30 行):
+│   socket.handshake.auth.token → jwt.verify(token, process.env.JWT_SECRET)
+│   per-packet exp recheck 保留(server/socket/index.js:18-25 平移)
+│   socket.user.userId 类型 必须跟 Go users.id FK 一致(UUID 或 bigint,Plan 后期定)
+│
+├── 二轮 review 2P:5s rate-limit Map cap 10K silent overflow 修
+│   `Map` → `lru-cache@10000`,evict 最久未用
+│   测:11000 unique userId 并发,assert 第 10001 个无 silent stop tracking
+│
+├── 配置:
+│   PORT 3001,CORS_ORIGIN 改成 :3000(Next.js)(原代码 hardcoded :5173 Vite)
+│   POSTGRES_URL 从 env 注入
+│
+└── 测试:
+    ├── 4 events shape diff(join/leave/send/new)
+    ├── EpisodeWindow ON CONFLICT race test(100 并发 send,assert live_ends_at 一致)
+    ├── JWT 跨进程一致性:Go 签的 token,ws-server verify 成功
+    └── LRU rate-limit 超 cap 之后仍生效
+```
+
+**Acceptance:** ws-server 跑独立容器,弹幕端到端工作,JWT 跨服务一致,LRU rate-limit 0 silent overflow
+
+### Phase 3 — Next.js 16 骨架 + Bun (15-25 hr,二轮 review 1A 改版本)
 
 ```
 ├── bunx create-next-app@latest next-app --typescript --app --src-dir --eslint
+│   ⚠️ Next.js 16:Turbopack stable (build + dev),React 19 默认,async cookies/headers
 ├── package.json scripts 切 bun
 ├── rm package-lock.json && bun install → bun.lockb
 ├── bun add -d bun-types
@@ -306,16 +397,24 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 ├── next.config.js rewrites:
 │   /api/* → http://localhost:8080/api/* (Go staging during dev)
 ├── 启动: bun --bun next dev + go run ./go-api/cmd/server + docker-compose up postgres
-└── baseline 测量:
+└── baseline 测量(二轮 review 8A + TODO-1 扩展):
     docs/migration/BASELINE.md 写入
       - v2.0.1 SPA 当前 Lighthouse(/、/anime/154587、/seasonal/spring/2026)
       - 当前 Express+Mongo 错误率 7 天 baseline
       - socket.io 7 天断流率(M8 canary 对照)
       - GSC 索引数(M2/M3 acceptance 对照)
+      - **二轮 review 8A NEW** Express prod metrics 7 day:
+        ◦ req/s p50/p95/p99 + 日峰值(从 nginx access_log 提)
+        ◦ socket.io 同时在线连接数 7-day max
+        ◦ P8.5 shadow 阈值改成 "P99 < baseline P99 × 1.5",不再 hardcode 200ms
+      - **二轮 review Pf4/TODO-1 NEW** VPS 出方向带宽 30-day baseline:
+        ◦ vnstat / iftop 当前 monthly outbound
+        ◦ VPS 提供商带宽 plan threshold
+        ◦ P8.5 mirror 需要 sample 比率(若 baseline × 2 > threshold 则 mirror 50% throttle)
 ```
 
 **Tests:** Next + Bun dev/build/test 三链路全绿
-**Acceptance:** `localhost:3000` 出 Next 默认页 + API rewrite 到 :8080 拿到真数据 + baseline 数据写入
+**Acceptance:** `localhost:3000` 出 Next 默认页 + API rewrite 到 :8080 拿到真数据 + BASELINE.md 全 7 项数据写入
 
 ### Phase 4 — Public Pages RSC (17-27 hr)
 
@@ -336,7 +435,13 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 
 ```
 ├── /anime/[id] → ISR (revalidate 60s)
-│   通过 Go /api/anime/:id 拿 8 query 拼回的完整数据
+│   通过 Go /api/anime/:id 拿数据
+│   ⚠️ 二轮 review Pf1 dual-mode:
+│      Go API 实现 2 套 query strategy(feature flag):
+│        - "fanout":8 个 SELECT(N+5)
+│        - "agg":single SELECT … json_agg(*) … FROM anime_cache LEFT JOIN …
+│      P8.5 shadow 期间 同 query 两套都跑,Grafana P99 + payload size 对比
+│      P10 拍板默认走哪个,benchmark 在线
 │   JSON-LD TVSeries schema
 ├── /seasonal/[season]/[year] → ISR
 ├── /search → searchParams 服务端 + 客户端混合
@@ -382,11 +487,10 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 ### Phase 8 — 部署架构 (30-50 hr)
 
 ```
-├── 4 个 Dockerfile:
-│   app/Dockerfile (Bun + Next standalone)
-│   app/Dockerfile.node (Node 备用,5min rollback 用)
+├── 3 个 Dockerfile(二轮 review 5C 删 Dockerfile.node;rollback 走 :rollback-T0 Express tag):
+│   app/Dockerfile (Bun + Next 16 standalone)
 │   go-api/Dockerfile (multi-stage build,distroless/static)
-│   ws-server/Dockerfile (Node + socket.io,沿用)
+│   ws-server/Dockerfile (Node + socket.io,二轮 review P2.8 新拆出)
 │
 ├── docker-compose.yml:
 │   ├── app: Next standalone (端口 3000) [Bun]
@@ -416,6 +520,13 @@ P10  Lighthouse CI + Sentry + Playwright E2E + 性能 baseline       15-30 hr
 │   build-go: oven/setup-bun + go test + docker build go-api
 │   build-app: bun build + docker build app
 │   deploy: ssh VPS + docker compose up -d
+│   ⚠️ 二轮 review 5A:cutover T-1d 手动 trigger workflow
+│      $ gh workflow run build-express --ref v2.0.1-stable
+│      推 image tag :rollback-T0 到 registry,registry retention policy ≥ 30 day
+│      docker compose 加 rollback service:
+│         app-express:
+│           image: ghcr.io/lawrenceli0228/animego-express:rollback-T0
+│           profiles: [rollback]  # 默认不起动,docker compose --profile rollback up
 │
 └── ⚡ 顺路完成:待办十六(Sentry)
     sentry-go SDK for go-api
@@ -455,15 +566,35 @@ cutover 前 7 天,nginx mirror 复制 prod 流量到 Go,验证 P99。
 │   shadow 期间 Go 写 staging Postgres(不是 prod Postgres,prod Postgres 是 cutover 时 migration 的目标)
 │   shadow Postgres 用 prod mongodump dry-run 导入的副本
 │
-└── 7 天观察:
-    每日审 dashboard 找 P99 异常
-    fix Go bug,redeploy go-api 容器
-    第 7 天:错误率 < 1% + P99 < 200ms → 进 P9
+└── 7 天观察 + 2 个演练(二轮 review 1T + 2T NEW):
+    Day 1-5:每日审 dashboard 找 P99 异常,fix Go bug,redeploy go-api 容器
+    
+    **Day 6 — Cutover dress rehearsal(1 小时窗口,staging-only)**:
+      precondition:nginx 切到 dummy 503,只在 staging 网络层
+      sequence: stop staging-ws-server → stop staging-Express → 跑 migration tool
+              (用 staging mongo 副本) → row + field parity 反查 → nginx switch
+              → 1h 烟雾 → 验证 cutover.sh 实际能 < 2h 完成
+      acceptance:run 通过,实际耗时 录在 PLAN 状态表
+    
+    **Day 7 — Rollback drill(<5min 计时)**:
+      precondition:staging Go API + Postgres 在线
+      sequence: ssh staging-vps → sed -i 改 nginx upstream 回 Express
+              → docker compose --profile rollback up app-express
+              → nginx restart → curl /api/anime/154587 验证 Express 响应
+      计时:从 sed 开始到 curl 成功,目标 < 5min
+      acceptance:实际耗时 < 5min,录入 PLAN
+    
+    Day 7 收工:错误率 < 1% + P99 < baseline×1.5 + 两个演练都过 → 进 P9
     否则:延期,继续 fix
 ```
 
 **Tests:** 7 天 shadow 期间 endpoint 覆盖 100%(每个 endpoint 都至少被影子访问 > 1k 次)
-**Acceptance:** P99 < 200ms + 错误率 < 1% + 0 Go panic + 0 Postgres deadlock
+- **NEW** Day 6 自动校验脚本:scripts/check-coverage.sh 跑 SELECT count(*) FROM go_request_log WHERE endpoint = ANY(...) GROUP BY endpoint,assert 每个 endpoint count ≥ 1000
+- **NEW** Shadow Postgres 隔离测试:Go 中 SHADOW_TRAFFIC=true 时禁止 INSERT/UPDATE/DELETE,unit test
+- **二轮 review 1T NEW** Day 6 cutover rehearsal 必须过
+- **二轮 review 2T NEW** Day 7 rollback drill 必须 < 5min
+
+**Acceptance:** P99 < baseline×1.5 + 错误率 < 1% + 0 Go panic + 0 Postgres deadlock + cutover rehearsal pass + rollback drill < 5min
 
 ### Phase 9 — Big-Bang Cutover (10-20 hr)
 
@@ -475,11 +606,12 @@ cutover 前 7 天,nginx mirror 复制 prod 流量到 Go,验证 P99。
 ├── 关闭注册 24h 前(避免 cutover 期间新用户写丢)
 └── shadow traffic 最终 review,签字进 cutover
 
-T+0 (03:00 UTC+8):
-├── nginx 503 maintenance mode 上(Cloudflare worker level)
-├── Express + socket.io 容器 stop(只接现有连接,不接新)
-├── 等所有现有 WebSocket 自然关闭(< 60s)
-├── Express 容器 destroy
+T+0 (03:00 UTC+8) — 二轮 review 5T 修正序列:
+├── nginx 503 maintenance mode 上(Cloudflare worker level,/api/* 跟 /socket.io/* 都 503)
+├── **先 stop ws-server**(P2.8 拆出后是独立容器):不接新弹幕写,等现有 WebSocket 自然关闭(<60s)
+├── Express 容器 stop:只接现有 HTTP 完成,不接新
+├── 等所有 in-flight HTTP 完成
+├── ws-server + Express 容器 destroy(image 通过 :rollback-T0 已经在 registry,本机 prune 也无所谓)
 ├── 跑 migration tool:
 │   go run ./go-api/cmd/migrate-mongo --mongo-uri=... --pg-uri=... --commit
 │   预计 < 30 分钟(基于 staging dry-run)
@@ -536,11 +668,30 @@ T+30 day:
 │   /, /anime/154587, /seasonal/spring/2026
 │   LCP regression > 10% → block merge
 ├── Sentry production DSN 接入 go-api + app
+│   **二轮 review TODO-3 NEW**:注入 fake error → 验证 30s 内 Sentry dashboard 可见 + email/Slack 推送收到
+│   acceptance: sentry-cli send-event fake → 真 alert 到 inbox
+├── **二轮 review TODO-4 NEW** Playwright 视觉回归:
+│   threshold 0.1% pixel-diff
+│   CI block > 0.5%
+│   update baseline 需 PR 评论 "visual: ok" 触发 workflow re-snapshot,不手动 approve 文件
+├── **二轮 review (test gap) NEW** Phase 8 五 nginx header 联动测试:
+│   Playwright 启 wasm + libass + cross-origin font load
+│   COOP/COEP/CORP + WASM-CSP + Permissions-Policy 一起跑
+│   console.error 清零
 ├── pg_stat_statements 启用 + slow query > 100ms 告警
-└── client 1342 测试适配 next/navigation
+├── pgx pool size 25 (二轮 review Pf5,从默认 10 提升 shadow 阶段已验)
+├── ristretto sizing(二轮 review Pf6):anime_cache lookup cache 容量按 47K 算 50MB,加监控
+├── P5 dual-mode P10 拍板:基于 P8.5 数据决定 8-query 或 json_agg 默认
+└── client 1328 测试适配 next/navigation(原 plan 写 1342,实际 1328)
 ```
 
-**Acceptance:** 1342 client + 317 go-api + 5 E2E 全绿 + Lighthouse 不退化 > 10%
+**Acceptance:**
+- 1328 client + 311 go-api + 5 E2E 全绿
+- Lighthouse 不退化 > 10%
+- Sentry alert wiring 验证通过
+- 视觉回归 baseline 建立 + workflow 可重 snap
+- 5 nginx header 联动 0 console.error
+- detail page query strategy 决定 + 文档
 
 ---
 
@@ -560,8 +711,15 @@ T+30 day:
 | **R9** | ws-server (Node + socket.io) 跟 Go 服务双 JWT 验证不一致 | 中 | 弹幕被拒 / 越权 | 共享 JWT_SECRET via env + ws-server 验证用 Go 同一套 secret |
 | **R10** | Postgres VPS 自建无 HA,单点故障 | 中 | postgres 崩 → 全站 500 | docker restart unless-stopped + R2 nightly backup + 30s 自愈 |
 | **R11** | 5-runtime 异构栈(Bun/Go/Node/Postgres/mongo)运维心智负担 | 高 | on-call 难 | 文档明示;cutover 后 30 天去 mongo,4-runtime 是稳态 |
+| **R12** | **VPS outbound 带宽 P8.5 mirror 翻倍可能撞 cap**(二轮 review Pf4) | 中 | shadow 流量错乱 | P3 baseline 测当前 outbound;若 ×2 > cap 则 mirror 50% throttle |
+| **R13** | **Cutover T+0 序列首次现场跑**(二轮 review 1T) | 高 | 进度卡死 / 数据 corruption | P8.5 day-6 dress rehearsal,staging-only |
+| **R14** | **24h rollback 链 image 被 prune**(二轮 review 5A) | 中 | 无法 rollback | cutover T-1d 推 :rollback-T0 tag,registry 30天 retain |
+| **R15** | **Auth localStorage → cookie 强制重登 silent 401**(二轮 review 4A) | 高 | UX 灾难 | Go middleware dual-accept header + cookie 7天 + UI banner |
+| **R16** | **ws-server rate-limit Map cap 10K silent overflow**(二轮 review Pf2) | 中 | 弹幕 spam 防御失效 | P2.8 换 LRU 有界 |
+| **R17** | **dandanplay match Go port off-by-one**(二轮 review 6C) | 中 | 部分集 dandanplay 命中错位 | P2.6 testify 全覆盖 buildEpisodeMap 3-level |
+| **R18** | **CASCADE FK 误删数据**(二轮 review 1C) | 低 | admin 误删 user 连带删 sub/follow/comment/danmaku | schema 明确 CASCADE,UI 加 "确认删除 N 条" 二次确认 |
 
-**R0 / R1 / R5 / R8 是 critical**,必须提前规划 mitigation。
+**R0 / R1 / R5 / R8 / R13 / R15 是 critical**,必须提前规划 mitigation。
 
 ---
 
@@ -577,12 +735,13 @@ T+30 day:
 
 特殊 gates:
 
-- **P0 → P1 gate:** R2 backup → pg restore 演练通过
-- **P1 → P2 gate:** migration tool dry-run on prod mongodump 数据通过,row count 差异 < 0.1%
-- **P2.7 → P3 gate:** 317 Go test 全绿 + 覆盖率 ≥ 80%
+- **P0 → P1 gate:** R2 backup → pg restore 演练通过 + scripts/dev.sh 一键起
+- **P1 → P2 gate:** migration tool dry-run on prod mongodump 数据通过,row count diff < 0.1% + field parity 10×1000 全过
+- **P2.7 → P2.8 gate:** 311 Go test 全绿 + 覆盖率 ≥ 80% + dandanplay 0 off-by-one
+- **P2.8 → P3 gate:** ws-server 拆出独立容器,弹幕端到端工作,LRU rate-limit 替代验证
 - **P6 → P7 gate:** 50+ 文件夹无 hydration mismatch + 5 个 client Playwright E2E 绿
-- **P8 → P8.5 gate:** staging 部署完整 4 容器,Sentry 收到 staging error 流
-- **P8.5 → P9 gate (CRITICAL):** 7 天 shadow 错误率 < 1% + P99 < 200ms + 0 Go panic
+- **P8 → P8.5 gate:** staging 部署完整 3 容器(+ rollback profile),Sentry 收到 staging error 流,sentry alert 验证通过
+- **P8.5 → P9 gate (CRITICAL):** 7 天 shadow 错误率 < 1% + P99 < baseline×1.5 + 0 Go panic + Day-6 dress rehearsal pass + Day-7 rollback drill <5min
 - **P9 → P10 gate:** T+24h 错误率累计 < 1%,0 critical bug
 
 **违规处理:** 任何 gate 不达标,**不进下一个 phase**。退回修。
@@ -677,22 +836,27 @@ P0 (Go 骨架 + Postgres) → 必须串行
 P1 (migration tool) → 必须串行,基础
 
 P1 完成后可分 lane 并行:
-  Lane A: P2.1 (anime + 富化)               [worktree-anime]
-  Lane B: P2.2 (auth) + P2.3 (admin)        [worktree-auth-admin]
+  Lane A: P2.1 (anime + 富化)                [worktree-anime]
+  Lane B: P2.2 (auth) + P2.3 (admin)         [worktree-auth-admin]
   Lane C: P2.4 (sub + user) + P2.5 (comment) [worktree-social]
-  Lane D: P2.6 (dandanplay)                  [worktree-dandan]
+  Lane D: P2.6 (dandanplay,二轮 review 6C 加重)  [worktree-dandan]
 
-  P2 完成后:
+  P2.x 完成后(P2.8 独立):
   Lane E: P3 + P4 + P5 (SEO 静态前端)        [worktree-seo]
   Lane F: P6 (Library + Player + libass)     [worktree-app]
   Lane G: P7 (Admin)                          [worktree-admin]
+  Lane H: P2.8 (ws-server 拆分)              [worktree-ws]     ← 二轮 review 3A NEW
+        共享 PG schema + JWT_SECRET,跟其他 lane 独立
 
 P2.7 (测试编写)持续穿插,每个 P2.x 完成后同步写
-P8 (部署架构) 必须等所有 lane 合并
+P8 (部署架构) 必须等所有 lane 合并(含 P2.8)
 P8.5 (shadow) 必须等 P8 完成
-P9 (cutover) 必须等 P8.5 7 天通过
+P9 (cutover) 必须等 P8.5 7 天通过(含 day-6 rehearsal + day-7 rollback drill)
 P10 (测试 + 性能) 持续穿插
 ```
+
+**冲突警告**(二轮 review 加):
+- Lane H(P2.8 ws-server)跟 Lane A(P2.1 anime + 富化)都会创建 PG `danmakus` 表的引用 — schema migration 0001 必须在两 lane 都 fork 之前 land,所以 P1 migrations 是 P2.x 全部 lane 的 base 依赖。
 
 单人 + Claude Code 协作下并行能压缩 30-50 hr。
 
@@ -757,7 +921,8 @@ P0 收工标准:**Go + Postgres 起来,空 chi router :8080/health 返回 OK,R2 
 | P2.5 /api/comments + danmaku | not started | — | — | — |
 | P2.6 /api/dandanplay/* | not started | — | — | — |
 | P2.7 testify + testcontainers | not started | — | — | — |
-| P3 Next.js 骨架 + Bun | not started | — | — | — |
+| P2.8 ws-server 拆出 (NEW) | not started | — | — | — |
+| P3 Next.js 16 骨架 + Bun | not started | — | — | — |
 | P4 Public Pages RSC | not started | — | — | — |
 | P5 SEO 核心 ISR | not started | — | — | — |
 | P6 Library + Player | not started | — | — | — |
@@ -806,20 +971,23 @@ P0 收工标准:**Go + Postgres 起来,空 chi router :8080/health 返回 OK,R2 
 
 按 Garry Tan / Dan McKinley 的 "三个 innovation tokens" 原则,本次迁移使用 **7 个 token**:
 
-1. Next.js 全栈替代 Vite SPA + Express
-2. Express → **Go 重写**(语言切换,37 endpoint + 6 个 domain)
+1. Next.js 全栈替代 Vite SPA + Express(Next.js 16 + React 19 默认 — 二轮 review 1A 修版本不算新 token)
+2. Express → **Go 重写**(语言切换,48 endpoint + 8 个 domain)
 3. **MongoDB → PostgreSQL 重写 schema**(7 collection → 14 表,全 normalize)
 4. Node runtime → **Bun**(前端)
-5. JWT localStorage → httpOnly cookies + 跨语言 middleware
-6. **异构后端**(Go HTTP + Node socket.io 永久微服务)
-7. **Big-bang cutover** + shadow traffic(单次切流量 vs 灰度)
+5. JWT localStorage → httpOnly cookies + 跨语言 middleware(dual-accept 7天过渡)
+6. **异构后端**(Go HTTP + Node socket.io 永久微服务,二轮 review P2.8 显式拆出)
+7. **Big-bang cutover** + shadow traffic + Day-6 rehearsal + Day-7 rollback drill(单次切流量 vs 灰度)
 
 **预算超支 4 个 token**(7 vs 3)。这是高风险 pivot,通过以下方式 hedge:
 
 - **R0 mitigation:** P8.5 shadow traffic 1 周 + 24h 真实回滚窗口
-- **R1 mitigation:** P1 dry-run on prod mongodump 副本
-- **R5 mitigation:** P6 'use client' 边界强制审计
-- **R8 mitigation:** P5/P10 N+5 join benchmark,需要时退到 single JOIN
+- **R1 mitigation:** P1 dry-run on prod mongodump 副本 + field-level parity test(二轮 review 6A)
+- **R5 mitigation:** P6 'use client' 边界强制审计 + 自动 grep assertion script
+- **R8 mitigation:** P5 dual-mode 实现(二轮 review Pf1)+ P8.5 shadow 对比 + P10 拍板
+- **R13 mitigation:** P8.5 Day-6 dress rehearsal(二轮 review 1T)
+- **R14 mitigation:** cutover T-1d 推 :rollback-T0 image tag(二轮 review 5A)
+- **R15 mitigation:** Go middleware dual-accept header + cookie 7 天(二轮 review 4A)
 - **完整 rollback 链:** 24h 内 nginx 一行回 Express;超过 24h 不支持(诚实)
 
 **风险接受声明:** 用户已明确知悉 7 token 超支风险,接受 5-13 月业余周期 + cutover 可能延期 + 测试 100hr 显式成本。
@@ -951,32 +1119,50 @@ func TestGetAnimeByID(t *testing.T) {
 
 完整 SQL 在 `go-api/migrations/0001_init.sql`,这里只列结构。
 
+**FK CASCADE 策略**(二轮 review 1C 决议:全 CASCADE):
+
 ```
 users(id, username UQ, email UQ, password, role, is_public, refresh_token, ...)
-  ├─ subscriptions(user_id FK, anilist_id, status, current_episode, score, last_watched_at, ...) PK(user_id, anilist_id)
-  ├─ follows(follower_id FK, followee_id FK, ...) PK(follower_id, followee_id)
-  ├─ episode_comments(id, anilist_id, episode, user_id FK, content, parent_id FK self, ...)
-  └─ danmakus(id, anilist_id, episode, user_id FK, content, live_ends_at, created_at)
+  ├─ subscriptions(user_id FK ON DELETE CASCADE, anilist_id, status, current_episode, score, last_watched_at, ...) PK(user_id, anilist_id)
+  ├─ follows(follower_id FK ON DELETE CASCADE, followee_id FK ON DELETE CASCADE, ...) PK(follower_id, followee_id)
+  ├─ episode_comments(id, anilist_id, episode, user_id FK ON DELETE CASCADE, content, parent_id FK self ON DELETE CASCADE, ...)
+  └─ danmakus(id, anilist_id, episode, user_id FK ON DELETE CASCADE, content, live_ends_at, created_at)
        └─ pg_cron: DELETE WHERE created_at < NOW() - INTERVAL '1 year'
 
-anime_cache(anilist_id PK, title_*, description, accent_color, season, season_year, ..., start_date DATE)
-  ├─ anime_genres(anime_id FK, genre) PK(anime_id, genre)
-  ├─ anime_studios(anime_id FK, studio) PK(anime_id, studio)
-  ├─ anime_relations(id, anime_id FK, related_anilist_id, relation_type, title, ...)
-  ├─ anime_characters(id, anime_id FK, display_order, name_en, name_ja, name_cn, ..., voice_actor_*)
-  ├─ anime_staff(id, anime_id FK, display_order, name_en, name_ja, image_url, role)
-  ├─ anime_recommendations(id, anime_id FK, rec_anilist_id, title, ...)
-  └─ anime_episode_titles(anime_id FK, episode, name_cn, name) PK(anime_id, episode)
+anime_cache(anilist_id PK, title_chinese, title_native, title_romaji, title_english,
+            search_vec tsvector GENERATED ALWAYS AS (
+              to_tsvector('simple',
+                coalesce(title_chinese,'') || ' ' ||
+                coalesce(title_native,'')  || ' ' ||
+                coalesce(title_romaji,'')  || ' ' ||
+                coalesce(title_english,'')
+              )
+            ) STORED,                                  -- 二轮 review 3P generated column
+            description, accent_color, season, season_year, ..., start_date DATE)
+  ├─ anime_genres(anime_id FK ON DELETE CASCADE, genre) PK(anime_id, genre)
+  ├─ anime_studios(anime_id FK ON DELETE CASCADE, studio) PK(anime_id, studio)
+  ├─ anime_relations(id, anime_id FK ON DELETE CASCADE, related_anilist_id, relation_type, title, ...)
+  ├─ anime_characters(id, anime_id FK ON DELETE CASCADE, display_order, name_en, name_ja, name_cn, ..., voice_actor_*)
+  ├─ anime_staff(id, anime_id FK ON DELETE CASCADE, display_order, name_en, name_ja, image_url, role)
+  ├─ anime_recommendations(id, anime_id FK ON DELETE CASCADE, rec_anilist_id, title, ...)
+  └─ anime_episode_titles(anime_id FK ON DELETE CASCADE, episode, name_cn, name) PK(anime_id, episode)
 
 episode_windows(anilist_id, episode, live_ends_at) PK(anilist_id, episode)
 
 idx:
-  anime_cache: GIN tsvector(title_*) ◇ idx(season, season_year) ◇ idx(admin_flag)
+  anime_cache: GIN(search_vec)                          -- 二轮 review 3P:索引该 generated column 而非 4 列裸 GIN
+              ◇ idx(season, season_year)
+              ◇ idx(admin_flag)
+              ◇ pg_trgm on title_chinese/native/romaji/english (二轮 review 6C: dandanplay AnimeCache regex 替代)
   subscriptions: idx(user_id, status) ◇ idx(anilist_id)
   follows: idx(followee_id)
   episode_comments: idx(anilist_id, episode) ◇ idx(parent_id) ◇ idx(user_id)
   danmakus: idx(anilist_id, episode, created_at)
   anime_*: idx(anime_id) on all child tables
+
+extensions(必须先 CREATE EXTENSION):
+  pg_trgm     -- 用于 dandanplay AnimeCache regex 替代
+  pg_cron     -- 用于 danmaku TTL 任务
 ```
 
 ---
@@ -990,16 +1176,75 @@ idx:
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
-| Codex Review | `/codex review` | Independent 2nd opinion | 0 | skipped | 用户明确跳过 |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 4 issues raised + all resolved (1C, 2A, 3A, 4A) |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | skipped | 用户明确跳过(本次也跳过) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | **2 (deep re-run 2026-05-12 19:00)** | CLEAR (PLAN) | **2nd run: 19 issues raised, 17 resolved + 2 unresolved-accepted** |
 | Design Review | `/plan-design-review` | UI/UX gaps | 1 (stale) | covered | v1 plan §3.7 UI risk audit 平移 |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
 
-**ENG REVIEW 4 critical findings (all resolved):**
+### 1st Eng Review 06:45 (commit 89516a1) — 4 critical findings (all resolved earlier today):
 - Issue 1 [CRITICAL]: Mongo 30-day retention vs Postgres new writes → **1C**: 24h 真实窗口 + mongodump 仅作灾难恢复
 - Issue 2 [CRITICAL]: Big-bang 无 prod 信号 → **2A**: 新增 P8.5 shadow traffic 1 周
 - Issue 3 [HIGH]: 测试工时低估 60-80 hr → **3A**: 显式拆 P2.7 testify+testcontainers phase
 - Issue 4 [HIGH]: 全 normalize 详情页 N+5 join → **4A**: 接受,P5/P10 benchmark
 
-**UNRESOLVED:** 0
-**VERDICT:** ENG CLEARED (PLAN) — ready to implement. Critical findings all incorporated into plan as new phases (P2.7, P8.5) or decision log entries.
+### 2nd Eng Review 19:00 (commit 7f86e28, deep re-run) — 19 new findings, 17 resolved:
+
+**Section 1 — Architecture (8 issues):**
+- 1A [P1] → **B Next.js 14 → 16**(Active LTS,React 19 默认)
+- 2A [P1] → B 保留 "37" label,接受 P2.4/P2.5 工时 overrun 风险(unresolved-accepted)
+- 3A [P1] → **A NEW P2.8 ws-server split phase**(10-15hr)
+- 4A [P1] → **A Go API dual-accept Authorization header + Cookie 7 天**
+- 5A [P1] → **A Express image :rollback-T0 tag + registry 30 天**
+- 6A [P2] → **A P1 加 field-level parity test 10×1000**
+- 7A [P2] → note river vs lean alternative,保留 river(crash recovery for V2/V3)
+- 8A [P2] → **A P3 baseline 加 prod Express metrics + socket 连接数**
+
+**Section 2 — Code Quality (8 issues):**
+- 1C [P1] → **A anime_* + user_id 全 ON DELETE CASCADE**
+- 2C [P1] → **A P0 加 scripts/dev.sh 一键起 6 进程**
+- 3C [P2] → note river migration 排在 schema migration 之后
+- 4C [P2] → note P2.2 bcrypt fixture 用 mongo dump 真 prod hash
+- 5C [P1] → **A 删 Dockerfile.node**(4 → 3 Dockerfile)
+- 6C [P1] → **A P2.6 +12hr 写 3 个明确决策**(phase 2 修正/episodeMap/pg_trgm)
+- 7C [P2] → note ws-server JWT verify mirror Go <30 行
+- 8C [P2] → **C 接受 2-tier cache 主从模糊**(unresolved-accepted,TODO-2 跟到 P2.1)
+
+**Section 3 — Tests (3 issues + diagram):**
+- 1T [P1] → **A P8.5 day-6 cutover dress rehearsal**
+- 2T [P1] → **A P8.5 day-7 rollback drill <5min**
+- 5T [P1] → **A T+0 sequence: stop ws-server before Express**
+
+**Section 4 — Performance (2 issues + 4 notes):**
+- 2P [P1] → **A P2.8 弹幕 rate-limit Map → LRU 有界**(silent overflow bug 修)
+- 3P [P2] → **A search_vec generated column STORED + GIN 索引**
+
+**TODOs (4 → all answered):**
+- TODO-1 → A P3 baseline 加 vnstat + VPS 带宽 plan
+- TODO-2 → A 跟到 P2.1 实现时决定
+- TODO-3 → A P10 Sentry alert wiring fake error 验证
+- TODO-4 → A P10 视觉回归 pixel-diff 0.1% threshold + PR comment trigger
+
+### Cross-Model Tension
+No outside voice ran (user explicitly skipped Codex this session as previous).
+
+### UNRESOLVED (accepted by user):
+1. **2A 工时 overrun**:plan 总 "37 endpoint" label 不改,实际 48,P2.4/P2.5 实施时若 overrun ~20hr,用户接受
+2. **8C 2-tier cache 主从**:推迟到 P2.1 commit 前再决定,plan 写下 TODO
+
+### NEW phases / decisions added
+- **P2.8** ws-server split (NEW, 10-15hr)
+- **Schema CASCADE 全开**(Appendix D 已改)
+- **search_vec generated column**(Appendix D 已改)
+- **Day-6 dress rehearsal + Day-7 rollback drill**(P8.5 acceptance)
+- **dual-accept header+cookie 7 day**(§ Decision log + P2.2)
+- **:rollback-T0 tag retain 30 day**(P8 CI/CD)
+- **P5 dual-mode 详情页 query**(P5 + P10)
+- **Field-level parity test**(P1)
+- **scripts/dev.sh**(P0)
+- **R12-R18 新增**(§ 3)
+- **Innovation tokens still 7**(版本修正不算新 token)
+
+**VERDICT:** ENG CLEARED (PLAN, 2nd deep run) — ready to implement.
+Critical findings all incorporated into plan as new phases (P2.7, P2.8, P8.5),
+decision log entries, schema, and acceptance criteria. 2 unresolved are
+explicitly user-accepted with mitigation paths.

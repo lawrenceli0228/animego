@@ -10,54 +10,58 @@
 
 ## Part 1 — 重构 Workflow 进度
 
-### 🟡 P0: Go 骨架 + Postgres + Backup (0/5)
+### 🟡 P0: Go 骨架 + Postgres + Backup + dev script (0/6,二轮 review 2C 加 dev.sh)
 
-起 `feat/go-backend` 分支 + Go + Postgres + R2 backup。**20-35 hr**
+起 `feat/go-backend` 分支 + Go + Postgres + R2 backup + 本机 dev 一键起。**20-35 hr**
 
 - [ ] 起分支 + `go-api/` 项目结构(chi + pgx + sqlc + river)
 - [ ] docker-compose 加 postgres:16-alpine
 - [ ] Cloudflare R2 bucket + rclone + nightly pg_dump cron
-- [ ] backup → restore 演练通过
-- [ ] 验收:`:8080/health` OK + postgres healthy + R2 backup 当天有文件
+- [ ] backup → restore 演练通过 + R2 30-day retention cron 实跑
+- [ ] **scripts/dev.sh 一键起 6 进程**(postgres + mongo + go-api + ws-server + Next + .env.example check)
+- [ ] 验收:`:8080/health` OK + postgres healthy + R2 backup 当天有文件 + scripts/dev.sh 工作
 
 ---
 
-### 🔴 P1: Migration Tool (0/4) ← critical
+### 🔴 P1: Migration Tool (0/6,二轮 review 6A + tests gap) ← critical
 
 Go 单二进制 `cmd/migrate-mongo`,一次性 Mongo → Postgres。**40-60 hr**
 
-- [ ] 14 张 Postgres 表 + 索引 + tsvector(`migrations/0001_init.sql` + `0002_indexes.sql`)
-- [ ] pg_cron 安装 + danmaku TTL 任务
+- [ ] 14 张 Postgres 表 + 索引 + **search_vec generated column STORED + GIN**(3P)+ **全 CASCADE FK**(1C) + pg_trgm extension
+- [ ] pg_cron 安装 + danmaku TTL 任务 + **pg_cron 实际 fire test**(P1 test gap)
 - [ ] 7 个 collection-specific transform 函数 + testcontainers 测试
+- [ ] **field-level parity test:10 个 UI-critical field × 1000 sample 严格 equal**(6A)
+- [ ] **idempotency:同 mongo dump 重跑 PG 不重 row**(P1 test gap)
 - [ ] **dry-run on prod mongodump 副本通过**,row count 差异 < 0.1%
 
 ---
 
-### 🔴 P2: Go API 重写 (0/7 sub-milestones)
+### 🔴 P2: Go API 重写 (0/8 sub-milestones)
 
-37 endpoint + 317 测试。**100-160 hr + P2.7 测试 60-80 hr**
+48 endpoint + 311 测试。**112-185 hr + P2.7 测试 60-80 hr + P2.8 ws-server 10-15 hr**
 
-拆 7 个 sub-milestone,每个独立 PR ship:
+拆 8 个 sub-milestone,每个独立 PR ship:
 
-- [ ] **P2.1** `/api/anime/*` 9 endpoint + 富化 queue (river)(35-55 hr)
-- [ ] **P2.2** `/api/auth/*` 7 endpoint + JWT + bcrypt + Gmail SMTP(18-28 hr)
+- [ ] **P2.1** `/api/anime/*` 9 endpoint + 富化 queue (river) + 2-tier cache 主从决策(35-55 hr)
+- [ ] **P2.2** `/api/auth/*` 7 endpoint + JWT + bcrypt + Gmail SMTP + **dual-accept header+cookie 7天**(18-28 hr)
 - [ ] **P2.3** `/api/admin/*` 14 endpoint + adminAuth + 富化 queue 控制(15-22 hr)
 - [ ] **P2.4** `/api/subscriptions/*` + `/api/users/*` + `/api/feed`(12-18 hr)
 - [ ] **P2.5** `/api/comments/*` + `/api/danmaku/*`(HTTP only)(8-12 hr)
-- [ ] **P2.6** `/api/dandanplay/*` + 3-phase match(12-25 hr)
-- [ ] **P2.7** testify + testcontainers-go 等价重写 317 测试(60-80 hr)← **显式新拆 phase**
+- [ ] **P2.6** `/api/dandanplay/*` + 3-phase match(**二轮 review 6C +12hr → 24-37 hr**)
+- [ ] **P2.7** testify + testcontainers-go 等价重写 311 测试(60-80 hr)
+- [ ] **P2.8** **ws-server 拆出独立服务**(10-15 hr,二轮 review 3A NEW)← LRU rate-limit + JWT 共享 + PG INSERT ON CONFLICT
 
 ⚡ 顺路完成的旧 TODO:待办四(`is_public`)在 P2.2、enqueueEnrichment bgmId 在 P2.1、磁力 cache 持久化在 P2.1。
 
 ---
 
-### 🟢 P3: Next.js 14 骨架 + Bun (0/3)
+### 🟢 P3: Next.js 16 骨架 + Bun (0/3,二轮 review 1A 改版本)
 
-Next + Bun + rewrites 通老 Express + baseline 测量。**15-25 hr**
+Next 16 + Bun + rewrites 通老 Express + baseline 测量。**15-25 hr**
 
-- [ ] 起 `next-app/` scaffold + bun + bun.lockb
+- [ ] 起 `next-app/` scaffold + bun + bun.lockb (Next.js 16,React 19 默认,Turbopack stable)
 - [ ] next.config.js rewrites 通老 Express:5001(P9 cutover 时改 go-api:8080)
-- [ ] **建 baseline:** v2.0.1 Lighthouse 三路径 + Express 错误率 7 天 + socket.io 断流率 + GSC 索引数
+- [ ] **建 baseline:** v2.0.1 Lighthouse 三路径 + Express 错误率 7 天 + socket.io 断流率 + GSC 索引数 + **prod metrics req/s p50/p95/p99 + 峰值**(8A) + **vnstat 30-day outbound + VPS 带宽 plan**(TODO-1 / Pf4)
 
 ---
 
@@ -108,38 +112,43 @@ middleware role check + admin 页面 RSC。**15-25 hr**
 
 ---
 
-### 🟡 P8: 部署架构 (0/6)
+### 🟡 P8: 部署架构 (0/7,二轮 review 5A+5C+test gap 改)
 
-4 个 Dockerfile(app/Bun + go-api/distroless + ws-server/Node + Express/rollback)+ nginx + Cloudflare + Sentry。**30-50 hr**
+3 个 Dockerfile(app/Bun + go-api/distroless + ws-server/Node;**5C 删 Dockerfile.node**)+ nginx + Cloudflare + Sentry。**30-50 hr**
 
 - [ ] go-api Dockerfile multi-stage distroless
-- [ ] Next.js app Dockerfile (Bun)
-- [ ] docker-compose 5 容器(app + go-api + ws-server + postgres + mongo + nginx)
+- [ ] Next.js app Dockerfile (Bun + Next.js 16)
+- [ ] docker-compose 6 容器(app + go-api + ws-server + postgres + mongo + nginx)+ rollback profile
 - [ ] nginx 路由分发 + COOP/COEP/CORP + WASM CSP + local-fonts Permissions-Policy
-- [ ] Cloudflare cache rules + GitHub Actions CI (setup-go + setup-bun)
-- [ ] 验收:VPS staging 4 容器跑通 + Sentry 收到 staging error 流
+- [ ] **5 nginx header 联动 Playwright 测试:libass + cross-origin font + console.error 清零**(test gap)
+- [ ] Cloudflare cache rules + GitHub Actions CI (setup-go + setup-bun) + **build-express workflow 推 :rollback-T0 tag**(5A)
+- [ ] 验收:VPS staging 3 容器跑通 + Sentry 收到 staging error 流 + sentry alert 验证
 
 ⚡ 顺路完成:待办十六(Sentry)。
 
 ---
 
-### 🔴 P8.5: Shadow Traffic 1 周 (0/4) ← critical gate
+### 🔴 P8.5: Shadow Traffic 1 周 + 演练 (0/6,二轮 review 1T+2T+Pf4 加 2 项) ← critical gate
 
 cutover 前 7 天,nginx mirror 复制 prod 流量到 Go,验证 P99。**15-25 hr**
 
 - [ ] nginx mirror directive + X-Shadow-Traffic header 识别
 - [ ] Go shadow mode:走完所有逻辑但不返回响应,记 metrics
 - [ ] Prometheus + Grafana(docker-compose 加 2 service)+ 告警阈值
-- [ ] **critical gate:** 7 天后错误率 < 1% + P99 < 200ms + 0 Go panic → 进 P9;否则延期
+- [ ] **Pf4 mirror throttle:** 若 baseline outbound × 2 > VPS cap,降到 50% sample
+- [ ] **Day-6 cutover dress rehearsal:** staging 完整 T+0 序列(ws-server stop → Express stop → migration → switch)
+- [ ] **Day-7 rollback drill:** ssh + nginx switch 计时 <5min
+- [ ] **critical gate:** 7 天后错误率 < 1% + P99 < baseline×1.5 + 0 Go panic + 2 演练通过 → 进 P9
 
 ---
 
-### 🔴 P9: Big-Bang Cutover (0/5) ← production critical
+### 🔴 P9: Big-Bang Cutover (0/6,二轮 review 5A+5T) ← production critical
 
 凌晨 3-5am UTC+8 维护窗口,nginx 一次切流量到 go-api。**10-20 hr**
 
 - [ ] T-7 day:全站 banner 公告维护 + 关闭注册 24h 前
-- [ ] T+0 维护窗口:停 Express → 跑 migration → row count 校验 → nginx 改 upstream
+- [ ] **T-1 day:GH Actions trigger build-express + 推 :rollback-T0 tag 到 registry**(5A)
+- [ ] **T+0 维护窗口序列(修正):** stop ws-server → stop Express → 跑 migration → field+row 校验 → nginx 改 upstream(5T)
 - [ ] T+1h:Grafana + Sentry 验证 + 真实用户 smoke test
 - [ ] T+24h:错误率 < 1% + 0 critical bug → cutover 成功
 - [ ] T+30day:停 mongo 容器 + mongodump → R2(灾难恢复,不是 rollback)
@@ -148,14 +157,17 @@ cutover 前 7 天,nginx mirror 复制 prod 流量到 Go,验证 P99。**15-25 hr*
 
 ---
 
-### 🟢 P10: Lighthouse CI + Sentry + Playwright E2E (0/4)
+### 🟢 P10: Lighthouse CI + Sentry + Playwright E2E + 性能拍板 (0/7,二轮 review TODO-3+TODO-4+Pf1+Pf5 加 3 项)
 
 5 关键 E2E + Lighthouse CI + Sentry + pg_stat_statements。**15-30 hr**
 
 - [ ] 5 个 Playwright E2E(注册→播放、详情→订阅、reauth、admin 越权、弹幕实时)
 - [ ] Lighthouse CI on every PR(LCP regression > 10% block)
 - [ ] Sentry production DSN 接入 go-api + app
-- [ ] 1342 client 测试适配 next/navigation
+- [ ] **Sentry alert wiring fire test:注 fake error → 验证 email/Slack 30s 内收到**(TODO-3)
+- [ ] **Playwright 视觉回归:pixel-diff 0.1% threshold + PR 评论 "visual: ok" 触发 CI re-snap**(TODO-4)
+- [ ] **P5 dual-mode 详情页 P10 拍板:基于 P8.5 数据决定 8-query 或 json_agg 默认**(Pf1)+ **pgx pool size 25-50**(Pf5)
+- [ ] 1328 client 测试适配 next/navigation(原 plan 写 1342,实际 1328)
 
 ---
 
@@ -217,4 +229,4 @@ cutover 前 7 天,nginx mirror 复制 prod 流量到 Go,验证 P99。**15-25 hr*
 
 ---
 
-_最后更新:2026-05-12(/plan-eng-review v2 审核后,supersedes v1 plan from 2026-05-10)_
+_最后更新:2026-05-12 19:00(/plan-eng-review **二轮 deep re-run** 后,19 个新 finding,17 resolved + 2 unresolved-accepted。NEW P2.8 ws-server split phase,Next.js 14→16,schema 全 CASCADE + search_vec generated column,P8.5 加 day-6 dress rehearsal + day-7 rollback drill,P9 序列加 stop ws-server)_
