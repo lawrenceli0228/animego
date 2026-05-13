@@ -703,6 +703,25 @@ export default function PlayerPage() {
     toast.success(t('player.danmakuUpdated'));
   }, [locationSeriesId, seriesDetail, updateEpisodeMap, playingEp, loadComments, t]);
 
+  // Toast playback errors raised by VideoPlayer (codec rejection, etc.).
+  // De-dup per playingFile so the same file doesn't fire repeated toasts if
+  // the user clicks play several times.
+  const lastPlaybackErrorFileRef = useRef(null);
+  const handlePlaybackError = useCallback((err) => {
+    const fileId = playingFile?.fileId ?? null;
+    if (lastPlaybackErrorFileRef.current === fileId) return;
+    lastPlaybackErrorFileRef.current = fileId;
+    const msg = err?.kind === 'decode'
+      ? t('player.decodeError')
+      : t('player.errorGeneric');
+    toast.error(msg, { duration: 8000 });
+  }, [playingFile, t]);
+
+  // Reset the de-dup gate on file switch so a new file's failure can re-toast.
+  useEffect(() => {
+    lastPlaybackErrorFileRef.current = null;
+  }, [playingFile?.fileId]);
+
   const handleVideoEnded = useCallback(() => {
     // Commentary tracks don't auto-advance; the user chose them explicitly.
     if (playingFile?.parsedKind === 'commentary') return;
@@ -875,6 +894,7 @@ export default function PlayerPage() {
               subtitleType={subtitleType}
               subtitleContent={subtitleContent}
               onEnded={handleVideoEnded}
+              onPlaybackError={handlePlaybackError}
               progressKey={progressKey}
               episode={playingEp}
               danmakuCount={danmakuCount}

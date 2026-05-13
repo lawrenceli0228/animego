@@ -210,6 +210,8 @@ const en = {
     backToList: 'Back to list',
     error: 'Something went wrong',
     errorGeneric: 'Danmaku service unavailable. Please try again later.',
+    decodeError: 'The browser cannot decode this file (often HE-AAC or an uncommon codec). Try a different release, or remux with ffmpeg.',
+    fileUnreadable: 'File read failed — try reauthorizing the library folder or re-importing this file.',
     retry: 'Retry',
     danmakuCount: 'danmaku',
     loadingDanmaku: 'Loading danmaku…',

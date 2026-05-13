@@ -159,6 +159,7 @@ export default function VideoPlayer({
   subtitleType,
   subtitleContent,
   onEnded,
+  onPlaybackError,
   progressKey,
   resumeAt = null,
   onProgressTick,
@@ -181,12 +182,14 @@ export default function VideoPlayer({
   // P2 in-memory resume — used only when progressKey is absent (unmatched files).
   const resumeAtRef = useRef(resumeAt);
   const onProgressTickRef = useRef(onProgressTick);
+  const onPlaybackErrorRef = useRef(onPlaybackError);
 
   // Keep refs in sync so async init / event handlers always see the latest values.
   useEffect(() => { progressKeyRef.current = progressKey; }, [progressKey]);
   useEffect(() => { danmakuListRef.current = danmakuList; }, [danmakuList]);
   useEffect(() => { resumeAtRef.current = resumeAt; }, [resumeAt]);
   useEffect(() => { onProgressTickRef.current = onProgressTick; }, [onProgressTick]);
+  useEffect(() => { onPlaybackErrorRef.current = onPlaybackError; }, [onPlaybackError]);
 
   useEffect(() => {
     if (!containerRef.current || !videoUrl) return;
@@ -370,6 +373,59 @@ export default function VideoPlayer({
       });
 
       if (onEnded) art.on('video:ended', onEnded);
+
+      // Surface MediaElement errors with structured detail + stop the retry
+      // storm. Two failure modes look similar in the raw console but mean
+      // different things:
+      //   code=3 PIPELINE_ERROR_DECODE / DEMUXER_ERROR_*
+      //     → codec or stream Chrome refuses (e.g. HE-AAC in MKV from ViuTV WEB-DL
+      //       where the first audio packet is rejected). File is fine on disk;
+      //       remuxing or transcoding is the user's path. Tell them.
+      //   code=4 networkState=3 readyState=0 + ERR_FILE_NOT_FOUND on the blob
+      //     → either FSA handle went stale, OR Chrome released its blob
+      //       handle after a prior fatal pipeline error and artplayer is
+      //       retrying into the void. Either way, retrying is useless;
+      //       removeAttribute('src') + load() halts the storm.
+      // erroredOnce gate prevents the first decode failure from spawning 10x
+      // duplicate toasts as artplayer auto-retries.
+      let erroredOnce = false;
+      art.on('video:error', () => {
+        const v = art.video;
+        if (!v) return;
+        const code = v.error?.code;
+        const message = v.error?.message || '(none)';
+        if (erroredOnce) {
+          // Suppress cascade: after the first fatal error Chrome keeps
+          // emitting `error` events as queued range requests reject. We've
+          // already surfaced the real reason to the user; quiet the console.
+          return;
+        }
+        erroredOnce = true;
+        // eslint-disable-next-line no-console
+        console.warn('[VideoPlayer] <video> error',
+          'code=', code,
+          'message=', message,
+          'networkState=', v.networkState,
+          'readyState=', v.readyState,
+          'src=', v.currentSrc?.slice(0, 80));
+        // Halt artplayer's implicit retry loop. Two-step:
+        //   1. Drop the artplayer-managed url so it stops re-applying it to
+        //      the <video> after we strip the attribute.
+        //   2. removeAttribute + load() to abort in-flight range requests.
+        try {
+          if (art.option) art.option.url = '';
+          v.pause();
+          v.removeAttribute('src');
+          v.load();
+        } catch { /* element may already be torn down */ }
+        const isDecode = code === 3
+          || /PIPELINE_ERROR_DECODE|DEMUXER_ERROR/i.test(message);
+        // Hand the categorized failure up to the page so it can toast with
+        // i18n + the existing react-hot-toast UX, rather than relying on
+        // artplayer's in-player notice (gets clobbered by danmaku layer).
+        const cb = onPlaybackErrorRef.current;
+        if (cb) cb({ kind: isDecode ? 'decode' : 'unknown', code, message });
+      });
 
       // Progress memory: restore on canplay, throttle-save on timeupdate
       let restored = false;

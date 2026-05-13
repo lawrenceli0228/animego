@@ -210,6 +210,8 @@ const zh = {
     backToList: '返回列表',
     error: '出错了',
     errorGeneric: '弹幕服务暂时不可用，请稍后重试',
+    decodeError: '浏览器无法解码该文件的音视频流（多为 HE-AAC / 罕见 codec）。建议改用其他压制版本，或用 ffmpeg 重 mux 后再播放。',
+    fileUnreadable: '文件读取失败：请尝试重新授权库目录或重新导入此文件。',
     retry: '重试',
     danmakuCount: '条弹幕',
     loadingDanmaku: '加载弹幕中…',

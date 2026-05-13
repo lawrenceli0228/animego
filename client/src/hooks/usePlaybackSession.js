@@ -74,6 +74,23 @@ export default function usePlaybackSession({
     cancelSubtitleTask();
     cleanupMkvBlob();
 
+    // Pre-flight readability probe: read the first 16 bytes so any FSA-handle
+    // failure surfaces here as a tagged warning instead of downstream as the
+    // <video> element's opaque "NotSupportedError" + a flurry of
+    // ERR_FILE_NOT_FOUND on the blob URL. Common causes when this fails:
+    //   - NotFoundError       → file moved/renamed after import
+    //   - NotAllowedError     → permission revoked / library not reauthorized
+    //   - InvalidStateError   → handle invalidated by browser sandbox
+    // Fire-and-forget so play() stays synchronous (tests + callers expect sync).
+    fileItem.file.slice(0, 16).arrayBuffer().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[playback] file unreadable at play() — likely stale FSA handle',
+        'name=', err?.name,
+        'message=', err?.message,
+        'fileName=', fileItem.fileName,
+        'size=', fileItem.file?.size);
+    });
+
     // For MKVs, kick the local-fonts permission prompt from the user-gesture
     // context of this play() call. jassub's CJK fallback runs deep in an
     // async chain (worker extract → jassub mount → loadCjkFallback) where

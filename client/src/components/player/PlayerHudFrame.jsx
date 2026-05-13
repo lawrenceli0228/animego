@@ -105,6 +105,7 @@ export default function PlayerHudFrame({
   subtitleType,
   subtitleContent,
   onEnded,
+  onPlaybackError,
   progressKey,
   episode,
   danmakuCount = 0,
@@ -140,6 +141,7 @@ export default function PlayerHudFrame({
           subtitleType={subtitleType}
           subtitleContent={subtitleContent}
           onEnded={onEnded}
+          onPlaybackError={onPlaybackError}
           progressKey={progressKey}
           resumeAt={resumeAt}
           onProgressTick={onProgressTick}
