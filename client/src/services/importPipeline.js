@@ -170,10 +170,36 @@ async function processCluster(p) {
   /** @type {MatchVerdict} */
   let verdict;
 
+  // Parser-detected season number for THIS cluster (from `[4th]` / `S2` /
+  // `第N季` in the filenames). Threads through both the REUSE find and the
+  // Season record creation so dandanplay returning a single animeId for
+  // multiple seasons of the same anime can't collapse them into one card.
+  const clusterSeason = cluster.items?.[0]?.parsedSeason ?? null;
+
+  /**
+   * Find an existing priorSeason eligible for REUSE.
+   *
+   * Same animeId is the primary signal. But when the parser detected a season
+   * number on this cluster AND the candidate priorSeason was created for a
+   * different season number, treat them as different content. This blocks a
+   * dandanplay quirk (same animeId across S1/S2/S4 of the same anime) from
+   * merging clearly-distinct seasons into one Series.
+   *
+   * Legacy callers without parsedSeason (and most fansub-variant cases the
+   * existing tests cover) fall through unchanged — the season guard only
+   * kicks in when BOTH sides carry an explicit, conflicting season number.
+   */
+  const findReusableSeason = (animeId) =>
+    priorSeasons.find((s) => {
+      if (s.animeId !== animeId) return false;
+      if (clusterSeason != null && s.number != null && s.number !== clusterSeason) return false;
+      return true;
+    });
+
   if (cachedVerdict) {
     // Reconstruct verdict from cache — check if it matches a prior season (reuse)
     if (cachedVerdict.kind === 'new' && cachedVerdict.animeId !== undefined) {
-      const match = priorSeasons.find(s => s.animeId === cachedVerdict.animeId);
+      const match = findReusableSeason(cachedVerdict.animeId);
       if (match) {
         verdict = { kind: 'reuse', seriesId: match.seriesId, seasonId: match.id, animeId: match.animeId };
       } else {
@@ -185,6 +211,7 @@ async function processCluster(p) {
             animeId: cachedVerdict.animeId,
             enrichment: cachedVerdict.enrichment ?? null,
             ulidSeed,
+            seasonNumber: clusterSeason,
           });
         }
       }
@@ -209,7 +236,7 @@ async function processCluster(p) {
         // animeId — prevents a duplicate card every time the user re-imports
         // the same anime under a different folder. The cached-verdict branch
         // above already does this; the fresh-match branch was missing it.
-        const existing = priorSeasons.find((s) => s.animeId === dandanResult.animeId);
+        const existing = findReusableSeason(dandanResult.animeId);
         if (existing) {
           verdict = {
             kind: 'reuse',
@@ -222,6 +249,7 @@ async function processCluster(p) {
             animeId: dandanResult.animeId,
             enrichment: dandanResult.enrichment ?? null,
             ulidSeed,
+            seasonNumber: clusterSeason,
           });
         }
       }
@@ -347,16 +375,24 @@ async function callDandan(dandan, rep) {
  * Season record and folding any enrichment fields into the Series record.
  * No-op when the verdict is missing seriesRecord (defensive guard).
  *
+ * `seasonNumber` is sourced from the parser (`[4th]` / `S2` / `第N季`) so
+ * the persisted Season record carries the real season ordinal instead of the
+ * legacy `1` default. The REUSE find logic relies on this to reject merging
+ * S1 + S2 of the same anime when dandanplay returns a single animeId.
+ *
  * @param {MatchVerdict} verdict
- * @param {{ animeId: number, enrichment: DandanEnrichment|null, ulidSeed?: number }} ctx
+ * @param {{ animeId: number, enrichment: DandanEnrichment|null, ulidSeed?: number, seasonNumber?: number|null }} ctx
  * @returns {MatchVerdict}
  */
-function applyEnrichment(verdict, { animeId, enrichment, ulidSeed }) {
+function applyEnrichment(verdict, { animeId, enrichment, ulidSeed, seasonNumber }) {
   if (!verdict.seriesRecord) return verdict;
   const seasonRecord = buildSeasonRecord(
     verdict.seriesRecord.id,
     animeId,
-    { ulidSeed: ulidSeed !== undefined ? ulidSeed + 1 : undefined },
+    {
+      ulidSeed: ulidSeed !== undefined ? ulidSeed + 1 : undefined,
+      ...(seasonNumber != null ? { number: seasonNumber } : {}),
+    },
   );
   if (!enrichment) return { ...verdict, seasonRecord };
 

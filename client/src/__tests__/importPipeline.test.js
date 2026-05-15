@@ -231,6 +231,45 @@ describe('importPipeline.runImport (Slice 7)', () => {
     expect(allSeasons[0].animeId).toBe(515759);
   });
 
+  // Regression for the Re:Zero 晚街與燈 import: dandanplay returned the SAME
+  // animeId for S1 (`[...S1][01]...`), S2 (`[...S2][01]...`) and S4
+  // (`[4th - 01][總第67]...`) clusters, and the unconditional REUSE-by-animeId
+  // branch was collapsing all three into one card. With parser-set
+  // `parsedSeason` and the season-mismatch guard, S1/S2/S4 each get their
+  // own Series + Season row even when dandan can't tell them apart.
+  it('does NOT REUSE when the parser-detected season differs from the existing season', async () => {
+    const items = [
+      // Cluster #S1: parsedSeason = 1
+      ...Array.from({ length: 2 }, (_, i) => ({
+        ...makeItem(`[S1]-ep${i + 1}.mkv`, i + 1, `S1/ep${i + 1}.mkv`, 'Re Zero kara Hajimeru Isekai Seikatsu'),
+        parsedSeason: 1,
+      })),
+      // Cluster #S2: parsedSeason = 2
+      ...Array.from({ length: 2 }, (_, i) => ({
+        ...makeItem(`[S2]-ep${i + 1}.mkv`, i + 1, `S2/ep${i + 1}.mkv`, 'Re Zero kara Hajimeru Isekai Seikatsu'),
+        parsedSeason: 2,
+      })),
+    ];
+
+    await runImport(
+      { items, libraryId: 'lib-rezero' },
+      {
+        db: testDb,
+        // dandanplay misbehaves and returns the SAME animeId for both seasons.
+        dandan: makeDandanMock({ staticAnimeId: 9999 }),
+        ulidSeedBase: 1,
+      }
+    );
+
+    const allSeries = await testDb.series.toArray();
+    expect(allSeries).toHaveLength(2);
+    const allSeasons = await testDb.seasons.toArray();
+    expect(allSeasons).toHaveLength(2);
+    // Season.number must reflect the parser hint, not the legacy `1` default.
+    const numbers = allSeasons.map((s) => s.number).sort();
+    expect(numbers).toEqual([1, 2]);
+  });
+
   it('reuse: cluster with matching priorSeason animeId → no new series row', async () => {
     // Pre-seed a series + season
     const existingSeries = {
