@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseEpisodeKind, parseEpisodeMeta } from '../episodeParser.js'
+import { parseEpisodeKind, parseEpisodeMeta, parseSeason, parseAbsoluteEpisode } from '../episodeParser.js'
 
 // ─── parseEpisodeKind ────────────────────────────────────────────────────────
 
@@ -96,6 +96,44 @@ describe('parseEpisodeKind', () => {
     expect(kind).toBe('main')
   })
 
+  // ── BD/Web 特典 kinds (added 2026-05) ──────────────────────────────────────
+  // These need their own kind so 方案 D 的 absolute→season 反推不会把它们
+  // 当成正片喂进 buildEpisodeMap。
+  it.each([
+    ['ncop',      '[VCB-Studio][AnimeTitle][NCOP01][BDRip][1080p].mkv'],
+    ['ncop',      '[VCB-Studio][AnimeTitle][NC OP1][BDRip][1080p].mkv'],
+    ['ncop',      '[Group] AnimeTitle Creditless OP [BDRip].mkv'],
+    ['nced',      '[VCB-Studio][AnimeTitle][NCED01][BDRip][1080p].mkv'],
+    ['nced',      '[Group] AnimeTitle Creditless ED [BDRip].mkv'],
+    ['bonus',     '[Group] AnimeTitle Bonus [BDRip].mkv'],
+    ['bonus',     '[Group] AnimeTitle 特典 1 [BDRip].mkv'],
+    ['bonus',     '[Group] AnimeTitle Extra 03 [BDRip].mkv'],
+    ['bonus',     '[Group] AnimeTitle Disc 2 [BDRip].mkv'],
+    ['cm',        '[Group] AnimeTitle CM 15s [BDRip].mkv'],
+    ['cm',        '[Group] AnimeTitle CM01 [BDRip].mkv'],
+    ['trailer',   '[Group] AnimeTitle Trailer [BDRip].mkv'],
+    ['trailer',   '[Group] AnimeTitle Teaser [BDRip].mkv'],
+    ['interview', '[Group] AnimeTitle Cast Talk [BDRip].mkv'],
+    ['interview', '[Group] AnimeTitle Interview [BDRip].mkv'],
+    ['interview', '[Group] AnimeTitle 访谈 [BDRip].mkv'],
+    ['wp',        '[Group] AnimeTitle WP 01 [BDRip].mkv'],
+    ['wp',        '[Group] AnimeTitle Web Preview 01 [BDRip].mkv'],
+    // BD/DVD menu animations — DBD-Raws ships these in `menu/` subfolders
+    // with `[menu][01]` style names. Without this rule they'd be tagged
+    // 'main' and collide with the real S1E01 in the cluster.
+    ['menu',      '[DBD-Raws][Re Zero kara Hajimeru Isekai Seikatsu S1][menu][01][1080P][BDRip][HEVC-10bit][FLAC].mkv'],
+    ['menu',      '[Group] AnimeTitle BD Menu 02 [BDRip].mkv'],
+  ])("returns '%s' for matching filename", (expected, filename) => {
+    expect(parseEpisodeKind(filename)).toBe(expected)
+  })
+
+  // Make sure NCOP is checked BEFORE the digit-fallback so `NCOP01` doesn't
+  // become kind='main' (NCOP01 contains a digit; without the dedicated rule
+  // the legacy /\d/.test() check pulls it into 'main').
+  it("does NOT classify NCOP01 as main just because '01' is present", () => {
+    expect(parseEpisodeKind('[VCB-Studio][AnimeTitle][NCOP01][BDRip].mkv')).toBe('ncop')
+  })
+
   // Subtitle file with no number, no keyword → 'unknown'
   it("returns 'unknown' for plain English subtitle filename with no number and no keyword", () => {
     const kind = parseEpisodeKind('SomeAnime.srt')
@@ -175,11 +213,148 @@ describe('parseEpisodeMeta', () => {
     // Act
     const meta = parseEpisodeMeta(filename)
     // Assert
-    expect(meta).toEqual({ title: null, number: null, kind: 'unknown', group: null, resolution: null })
+    expect(meta).toEqual({
+      title: null, number: null, kind: 'unknown', group: null, resolution: null,
+      season: null, episodeAlt: null,
+    })
   })
 
   it('returns all-null object for null input', () => {
     const meta = parseEpisodeMeta(null)
-    expect(meta).toEqual({ title: null, number: null, kind: 'unknown', group: null, resolution: null })
+    expect(meta).toEqual({
+      title: null, number: null, kind: 'unknown', group: null, resolution: null,
+      season: null, episodeAlt: null,
+    })
+  })
+
+  // ── DBD-Raws BD bundle real-world cases (test data in /Movies/test) ───────
+  // The 10-bit/x265 codec markers contain digits that the legacy fallback
+  // path picks up as an episode number. After the codec-token strip these
+  // BD-extra files should resolve to either the correct embedded variant
+  // index or null — never to 10 (from `10bit`) or 265 (from `x265`).
+  it('NCOP1 from a DBD-Raws BD release: kind=ncop, number not stolen from 10bit', () => {
+    const meta = parseEpisodeMeta(
+      '[DBD-Raws][Re Zero kara Hajimeru Isekai Seikatsu S1][NCOP1][1080P][BDRip][HEVC-10bit][FLAC].mkv'
+    )
+    expect(meta.kind).toBe('ncop')
+    expect(meta.number).not.toBe(10) // must NOT pull `10` out of `10bit`
+    expect(meta.season).toBe(1)
+  })
+
+  it('NCED2 from a DBD-Raws BD release: kind=nced, number not stolen from 10bit', () => {
+    const meta = parseEpisodeMeta(
+      '[DBD-Raws][Re Zero kara Hajimeru Isekai Seikatsu S1][NCED2][1080P][BDRip][HEVC-10bit][FLAC].mkv'
+    )
+    expect(meta.kind).toBe('nced')
+    expect(meta.number).not.toBe(10)
+    expect(meta.season).toBe(1)
+  })
+
+  // Regression guard: real episode 10 must still parse correctly when the
+  // filename happens to contain `10bit` codec tag. Pattern 5 (`[\d+]`) wins
+  // before the fallback runs, so this should be unaffected by the strip.
+  it('main S1E10 with HEVC-10bit codec tag still parses number=10', () => {
+    const meta = parseEpisodeMeta(
+      '[DBD-Raws][Re Zero kara Hajimeru Isekai Seikatsu S1][10][1080P][BDRip][HEVC-10bit][FLACx2].mkv'
+    )
+    expect(meta.kind).toBe('main')
+    expect(meta.number).toBe(10)
+    expect(meta.season).toBe(1)
+  })
+
+  // ── The Re:Zero file that motivated this work ─────────────────────────────
+  // Filename:  [晚街與燈][Re Zero kara Hajimeru Isekai Seikatsu][4th - 01][總第67]...
+  // Before fix: title='Re Zero...', number=1, season undefined → all 4 seasons
+  //             share the same cluster key and ep=1 collides with S1E1.
+  // After fix:  season=4 (from 4th), number=1 (本季), episodeAlt=67 (总集).
+  it('parses Re:Zero 晚街與燈 4th season episode 1 with absolute episode 67', () => {
+    const meta = parseEpisodeMeta(
+      '[晚街與燈][Re Zero kara Hajimeru Isekai Seikatsu][4th - 01][總第67][WebRip][1080P_AVC_AAC][繁日雙語內嵌].mp4'
+    )
+    expect(meta.season).toBe(4)
+    expect(meta.number).toBe(1)
+    expect(meta.episodeAlt).toBe(67)
+    expect(meta.title).toMatch(/Re Zero/i)
+    expect(meta.kind).toBe('main')
+    expect(meta.group).toBe('晚街與燈')
+    expect(meta.resolution).toBe('1080p')
+  })
+})
+
+// ─── parseSeason ─────────────────────────────────────────────────────────────
+
+describe('parseSeason', () => {
+  // English ordinals
+  it.each([
+    ['4th',                                                    4],
+    ['4th Season',                                             4],
+    ['1st Season',                                             1],
+    ['2nd',                                                    2],
+    ['3rd Cour',                                               3],
+  ])("recognises ordinal '%s' as season %d", (token, expected) => {
+    expect(parseSeason(`[Group][AnimeTitle][${token} - 01][BDRip].mkv`)).toBe(expected)
+  })
+
+  // SxxExx and Sxx alone
+  it('recognises S04E01 as season 4', () => {
+    expect(parseSeason('[Group] AnimeTitle S04E01 [1080p].mkv')).toBe(4)
+  })
+  it('recognises bare S2 token as season 2', () => {
+    expect(parseSeason('[DBD-Raws][Re Zero kara Hajimeru Isekai Seikatsu S2][01].mkv')).toBe(2)
+  })
+
+  // Season N
+  it('recognises Season 4 as season 4', () => {
+    expect(parseSeason('AnimeTitle Season 4 - 01 [1080p].mkv')).toBe(4)
+  })
+
+  // Chinese ordinals (arabic + Chinese)
+  it.each([
+    ['第4季',     4],
+    ['第四季',    4],
+    ['第10季',    10],
+    ['第十季',    10],
+    ['第2期',     2],
+    ['第2部',     2],
+  ])("recognises Chinese '%s' as season %d", (token, expected) => {
+    expect(parseSeason(`AnimeTitle ${token} 01.mkv`)).toBe(expected)
+  })
+
+  // Roman numerals — only when they're clearly season markers, not part of title
+  it('recognises Overlord IV as season 4', () => {
+    expect(parseSeason('[Group][Overlord IV][01][1080p].mkv')).toBe(4)
+  })
+
+  // Negative cases
+  it('returns null when no season info is present', () => {
+    expect(parseSeason('[Group] AnimeTitle - 01 [1080p].mkv')).toBeNull()
+  })
+  it('returns null for null/empty input', () => {
+    expect(parseSeason(null)).toBeNull()
+    expect(parseSeason('')).toBeNull()
+  })
+})
+
+// ─── parseAbsoluteEpisode ────────────────────────────────────────────────────
+
+describe('parseAbsoluteEpisode', () => {
+  it('extracts 67 from 總第67 (traditional)', () => {
+    expect(parseAbsoluteEpisode('[Group][Re Zero][4th - 01][總第67][BDRip].mkv')).toBe(67)
+  })
+  it('extracts 67 from 总第67 (simplified)', () => {
+    expect(parseAbsoluteEpisode('[Group][Re Zero][4th - 01][总第67][BDRip].mkv')).toBe(67)
+  })
+  it('extracts 168 from 總第168 (3 digits)', () => {
+    expect(parseAbsoluteEpisode('[Group][Series][总第168][BDRip].mkv')).toBe(168)
+  })
+  it('handles whitespace between 總第 and the number', () => {
+    expect(parseAbsoluteEpisode('[Group][Series][总第 67][BDRip].mkv')).toBe(67)
+  })
+  it('returns null when 總第 token is absent', () => {
+    expect(parseAbsoluteEpisode('[Group][AnimeTitle][01][1080p].mkv')).toBeNull()
+  })
+  it('returns null for null/empty input', () => {
+    expect(parseAbsoluteEpisode(null)).toBeNull()
+    expect(parseAbsoluteEpisode('')).toBeNull()
   })
 })

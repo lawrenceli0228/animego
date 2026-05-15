@@ -89,27 +89,33 @@ export function clusterize(groups, priorSeasons) {
     }
   }
 
-  /** @type {Map<string, { tokens: string[], groups: Group[] }>} */
+  /** @type {Map<string, { tokens: string[], season: number|null, groups: Group[] }>} */
   const buckets = new Map();
   /** Preserve insertion order of bucket keys */
   const bucketOrder = [];
 
   for (const g of groups) {
-    // Derive tokens from first item's parsedTitle, fallback to group label
-    const source = g.items[0]?.parsedTitle ?? g.label ?? '';
+    // Derive tokens from first item's parsedTitle, fallback to group label.
+    // Derive season from first item's parsedSeason — used to split same-title
+    // releases of different seasons that would otherwise collapse into one
+    // cluster (Re:Zero 4 seasons all normalize to identical tokens).
+    const firstItem = g.items[0];
+    const source = firstItem?.parsedTitle ?? g.label ?? '';
     const tokens = normalizeTokens(source);
+    const season = firstItem?.parsedSeason ?? null;
+    const seasonSuffix = season != null ? `#S${season}` : '';
 
     if (!tokens.length) {
       // Singleton — use groupKey as unique bucket key
-      const key = g.groupKey;
-      buckets.set(key, { tokens: [], groups: [g] });
+      const key = g.groupKey + seasonSuffix;
+      buckets.set(key, { tokens: [], season, groups: [g] });
       bucketOrder.push(key);
       continue;
     }
 
-    const bucketKey = tokens.join('|');
+    const bucketKey = tokens.join('|') + seasonSuffix;
     if (!buckets.has(bucketKey)) {
-      buckets.set(bucketKey, { tokens, groups: [] });
+      buckets.set(bucketKey, { tokens, season, groups: [] });
       bucketOrder.push(bucketKey);
     }
     buckets.get(bucketKey).groups.push(g);
@@ -127,10 +133,15 @@ export function clusterize(groups, priorSeasons) {
     const items = sortClusterItems(allItems, bucketGroups);
     const representative = pickRepresentative(items);
 
-    // Check for animeIdHint
+    // Check for animeIdHint. seasonIndex is keyed by normalized tokens only
+    // (no season suffix) since priorSeasons came in via a per-season hint —
+    // the bucket key may include `#S<n>`, so strip it for the lookup.
     let animeIdHint;
-    if (tokens.length && seasonIndex.has(key)) {
-      animeIdHint = seasonIndex.get(key);
+    if (tokens.length) {
+      const tokenKey = tokens.join('|');
+      if (seasonIndex.has(tokenKey)) {
+        animeIdHint = seasonIndex.get(tokenKey);
+      }
     }
 
     /** @type {MatchCluster} */

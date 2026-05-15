@@ -136,6 +136,36 @@ describe('buildLibraryMatchResult', () => {
     expect(result.supplementaryFiles).toHaveLength(0)
   })
 
+  // BD-extras routing (added 2026-05): NCOP/NCED/PV/menu/bonus/trailer/interview/wp/cm
+  // must NOT mix with main episodes in the same lane. Without this, a
+  // DBD-Raws S1 import dumps `[NCOP1]` (kind=ncop, episode=10 from `10bit`
+  // codec tag) into the main video list and silently overwrites real ep10.
+  it.each([
+    ['ncop'],
+    ['nced'],
+    ['pv'],
+    ['menu'],
+    ['bonus'],
+    ['trailer'],
+    ['interview'],
+    ['wp'],
+    ['cm'],
+  ])('routes %s kind to supplementaryFiles, never videoFiles', (kind) => {
+    const result = buildLibraryMatchResult({
+      status: 'ready',
+      series: baseSeries,
+      episodes: [
+        buildEp({ id: `ep_main_1`, number: 1, kind: 'main', episodeId: 1001 }),
+        buildEp({ id: `ep_extra`,  number: 1, kind, episodeId: 9001 }),
+      ],
+      fileRefByEpisode: new Map(),
+    })
+    expect(result.videoFiles).toHaveLength(1)
+    expect(result.videoFiles[0].parsedKind).toBe('main')
+    expect(result.supplementaryFiles).toHaveLength(1)
+    expect(result.supplementaryFiles[0].parsedKind).toBe(kind)
+  })
+
   // Two commentary cuts on the same episode (e.g. director + cast tracks):
   // both must land in supplementaryFiles, neither owns the episodeMap slot.
   it('keeps multiple commentary cuts at the same episode number, none owning episodeMap', () => {

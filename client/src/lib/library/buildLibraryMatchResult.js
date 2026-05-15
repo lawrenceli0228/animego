@@ -7,6 +7,20 @@
 /** @typedef {import('./types').Episode} Episode */
 /** @typedef {import('./types').FileRef} FileRef */
 
+// Kinds that own a slot in the main `videoFiles` lane. Everything else
+// (commentary, BD/DVD extras, web previews, etc.) routes to
+// `supplementaryFiles` so a DBD-Raws style import where `[NCOP1]` parses
+// as parsedNumber=10 (from `10bit`) can't silently overwrite the real ep10.
+// `unknown` rides along with main for legacy/IDB rows without a kind.
+//
+// Exported so PlayerPage and any future surface can use the SAME definition
+// and the lane assignment stays consistent across drop-zone and library entry
+// paths.
+export const WATCHABLE_KINDS = new Set(['main', 'sp', 'ova', 'movie', 'unknown']);
+export function isWatchableKind(kind) {
+  return WATCHABLE_KINDS.has(kind || 'main');
+}
+
 /**
  * Build EpisodeItem-compatible rows from IDB episodes + fileRefs. Each item
  * carries `_episodeId` so callers can route library clicks through getFile()
@@ -76,7 +90,7 @@ export function buildLibraryMatchResult(seriesDetail) {
     seriesDetail.episodes,
     seriesDetail.fileRefByEpisode,
   );
-  const videoFiles = allFiles.filter((f) => f.parsedKind !== 'commentary');
-  const supplementaryFiles = allFiles.filter((f) => f.parsedKind === 'commentary');
+  const videoFiles = allFiles.filter((f) => isWatchableKind(f.parsedKind));
+  const supplementaryFiles = allFiles.filter((f) => !isWatchableKind(f.parsedKind));
   return { anime, siteAnime: null, episodeMap, videoFiles, supplementaryFiles };
 }

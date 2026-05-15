@@ -78,6 +78,8 @@ export default function useVideoFiles() {
         parsedKind: meta.kind,
         parsedGroup: meta.group,
         parsedResolution: meta.resolution,
+        parsedSeason: meta.season,
+        parsedEpisodeAlt: meta.episodeAlt,
       };
     });
 

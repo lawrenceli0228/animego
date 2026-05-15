@@ -147,4 +147,52 @@ describe('clusterize', () => {
     const clusters = clusterize([g1], priorSeasons);
     expect(clusters[0].animeIdHint).toBeUndefined();
   });
+
+  // ── Season-aware bucketing (added 2026-05) ────────────────────────────────
+  // Motivated by the Re:Zero 晚街與燈 case: 4 seasons share an identical
+  // parsedTitle ("Re Zero kara Hajimeru Isekai Seikatsu") and were collapsing
+  // into a single cluster with overlapping ep=1. With parsedSeason on the
+  // EpisodeItem, S1 and S4 must split into separate clusters.
+
+  it('splits same-title groups by parsedSeason (Re:Zero 4 seasons stay separate)', () => {
+    const s1 = group('__root__/s1ep01.mkv', [
+      item({ parsedTitle: 'Re Zero', episode: 1, parsedSeason: 1, fileName: 's1ep01.mkv', fileId: 's1ep01' }),
+    ]);
+    const s4 = group('__root__/s4ep01.mkv', [
+      item({ parsedTitle: 'Re Zero', episode: 1, parsedSeason: 4, fileName: 's4ep01.mkv', fileId: 's4ep01' }),
+    ]);
+    const clusters = clusterize([s1, s4]);
+    expect(clusters).toHaveLength(2);
+    // Verify each cluster only contains files of its own season
+    const c1 = clusters.find((c) => c.items[0].parsedSeason === 1);
+    const c4 = clusters.find((c) => c.items[0].parsedSeason === 4);
+    expect(c1).toBeDefined();
+    expect(c4).toBeDefined();
+    expect(c1.clusterKey).not.toBe(c4.clusterKey);
+  });
+
+  it('merges groups with same title and same parsedSeason', () => {
+    const a = group('A', [item({ parsedTitle: 'Re Zero', episode: 1, parsedSeason: 4, fileName: 'a01.mkv', fileId: 'a01' })]);
+    const b = group('B', [item({ parsedTitle: 'Re Zero', episode: 2, parsedSeason: 4, fileName: 'b02.mkv', fileId: 'b02' })]);
+    const clusters = clusterize([a, b]);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].items).toHaveLength(2);
+  });
+
+  it('falls back to title-only bucket when parsedSeason is undefined (preserves legacy single-season libraries)', () => {
+    const a = group('A', [item({ parsedTitle: 'Demon Slayer', episode: 1, fileName: 'a01.mkv', fileId: 'a01' })]);
+    const b = group('B', [item({ parsedTitle: 'Demon Slayer', episode: 2, fileName: 'b02.mkv', fileId: 'b02' })]);
+    const clusters = clusterize([a, b]);
+    expect(clusters).toHaveLength(1);
+  });
+
+  it('keeps a no-season group separate from an explicit-S2 group of the same title', () => {
+    // This is intentional: presence-of-season is itself signal. If a release
+    // is labelled "S2", we treat it as a distinct season from an unlabelled
+    // release of the same title. User can manually merge via UI if desired.
+    const noSeason = group('A', [item({ parsedTitle: 'Anime', episode: 1, fileName: 'a01.mkv', fileId: 'a01' })]);
+    const s2      = group('B', [item({ parsedTitle: 'Anime', episode: 1, parsedSeason: 2, fileName: 's2ep01.mkv', fileId: 's2ep01' })]);
+    const clusters = clusterize([noSeason, s2]);
+    expect(clusters).toHaveLength(2);
+  });
 });
