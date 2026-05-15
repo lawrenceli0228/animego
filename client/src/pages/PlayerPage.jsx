@@ -11,7 +11,7 @@ import usePlaybackSession from '../hooks/usePlaybackSession';
 import useFileHandles from '../hooks/useFileHandles';
 import useSeriesDetail from '../hooks/useSeriesDetail';
 import { db } from '../lib/library/db/db.js';
-import { episodeListFromSeriesDetail } from '../lib/library/buildLibraryMatchResult.js';
+import { episodeListFromSeriesDetail, isWatchableKind } from '../lib/library/buildLibraryMatchResult.js';
 import DropZone from '../components/player/DropZone';
 import MatchProgress from '../components/player/MatchProgress';
 import ManualSearch from '../components/player/ManualSearch';
@@ -297,25 +297,34 @@ export default function PlayerPage() {
   // EpisodeFileList sees the same shape regardless of how matchResult arrived.
   const pickedItems = locationSeriesId ? libraryVideoFiles : dropZoneItems;
 
-  // Split commentary cuts off the main list. EpisodeFileList renders them in
-  // a dedicated supplementary lane so they don't sit alongside the main EP25
-  // row with no distinguishing label, and so EpisodeNav chips stay clean.
+  // Split BD/DVD extras (NCOP/NCED/PV/menu/commentary/…) off the main list.
+  // EpisodeFileList renders them in a dedicated supplementary lane so a
+  // DBD-Raws style folder doesn't cram 7 different ep01 rows (main + PV01 +
+  // menu01 + …) into the main EP grid. Shares `isWatchableKind` with the
+  // library-mode matchResult builder so both surfaces agree on what counts
+  // as a main-lane episode.
   const [pickedMainFiles, pickedSupplementaryFiles] = useMemo(() => {
     const main = [];
     const sup = [];
-    for (const f of pickedItems) (f.parsedKind === 'commentary' ? sup : main).push(f);
+    for (const f of pickedItems) (isWatchableKind(f.parsedKind) ? main : sup).push(f);
     return [main, sup];
   }, [pickedItems]);
 
   // Episode numbers from matched files (now drawn from picked group only).
-  // Commentary cuts share an episode number with the main cut and would
-  // otherwise produce duplicate React keys in EpisodeNav (`key={ep}`).
+  // Commentary cuts + BD extras (NCOP/NCED/PV/menu/…) share episode numbers
+  // with the main cut — without dedup, EpisodeNav (`key={ep}`) throws the
+  // "two children with the same key" warning and renders ghost chips.
+  // Restrict to watchable kinds AND dedupe before producing chip numbers.
   const episodes = useMemo(() => {
     if (!matchResult?.episodeMap) return [];
-    return pickedItems
-      .filter(f => f.episode != null && f.parsedKind !== 'commentary' && matchResult.episodeMap[f.episode])
-      .map(f => f.episode)
-      .sort((a, b) => a - b);
+    const seen = new Set();
+    for (const f of pickedItems) {
+      if (f.episode == null) continue;
+      if (!isWatchableKind(f.parsedKind)) continue;
+      if (!matchResult.episodeMap[f.episode]) continue;
+      seen.add(f.episode);
+    }
+    return [...seen].sort((a, b) => a - b);
   }, [pickedItems, matchResult]);
 
   // Toast on multi-folder auto-pick. Fires once per groups identity.
@@ -407,10 +416,10 @@ export default function PlayerPage() {
   }, [playingFile, resumeAt, progressKey, t]);
 
   const handleEpisodeSwitch = useCallback((epNum) => {
-    // Prefer the main cut when a commentary file shares the episode number —
-    // file order in pickedItems is filesystem-dependent and could otherwise
-    // make auto-advance land on the commentary track.
-    const fileItem = pickedItems.find(f => f.episode === epNum && f.parsedKind !== 'commentary');
+    // Prefer a watchable cut when a non-main file (commentary / NCOP / menu /
+    // PV …) shares the episode number — file order in pickedItems is
+    // filesystem-dependent and could otherwise auto-advance into a BD extra.
+    const fileItem = pickedItems.find(f => f.episode === epNum && isWatchableKind(f.parsedKind));
     if (fileItem) startPlayback(fileItem, matchResult?.episodeMap);
   }, [pickedItems, startPlayback, matchResult]);
 
@@ -434,12 +443,22 @@ export default function PlayerPage() {
   // P3: library mode — sorted episode numbers used by EpisodeNav prev/next.
   // Empty array unless seriesDetail is ready, so non-library mode keeps using
   // the matchResult-derived `episodes` array below.
+  //
+  // Dedupe is critical: BD extras (NCOP/NCED/PV/menu) and commentary cuts
+  // can share episode numbers with the main cut. EpisodeNav keys chips by
+  // `ep` so a non-unique list would throw React's "two children with the
+  // same key" warning and render ghost chips. Restrict to watchable kinds
+  // AND `number != null` so file rows with `parsedNumber=null` (e.g.
+  // NCOP1 after the 10bit strip) don't sneak in as `EP00`.
   const libraryEpisodeNumbers = useMemo(() => {
     if (!locationSeriesId || seriesDetail.status !== 'ready') return [];
-    return seriesDetail.episodes
-      .filter((e) => e.kind !== 'sp' && e.kind !== 'commentary' && e.number != null)
-      .map((e) => e.number)
-      .sort((a, b) => a - b);
+    const seen = new Set();
+    for (const e of seriesDetail.episodes) {
+      if (e.number == null) continue;
+      if (!isWatchableKind(e.kind)) continue;
+      seen.add(e.number);
+    }
+    return [...seen].sort((a, b) => a - b);
   }, [locationSeriesId, seriesDetail]);
 
   // Library auto-match — when seriesDetail becomes ready, fire the same
@@ -462,9 +481,9 @@ export default function PlayerPage() {
 
     libraryMatchedRef.current = locationSeriesId;
 
-    // Exclude commentary so duplicate ep numbers don't skew the dandanplay
-    // episode-count heuristic (mirrors handleManualSelect).
-    const matchInputFiles = libraryVideoFiles.filter((f) => f.parsedKind !== 'commentary');
+    // Exclude commentary AND BD extras so duplicate ep numbers don't skew
+    // the dandanplay episode-count heuristic (mirrors handleManualSelect).
+    const matchInputFiles = libraryVideoFiles.filter((f) => isWatchableKind(f.parsedKind));
     const epNums = matchInputFiles.map((f) => f.episode).filter(Boolean);
     const firstName = matchInputFiles[0]?.fileName || '';
     const basicFiles = matchInputFiles.map((f) => ({
@@ -598,9 +617,16 @@ export default function PlayerPage() {
   }, [seriesDetail]);
 
   // P3: library mode prev/next — switch by episode number using seriesDetail.
+  // Prefer the main cut when multiple watchable rows share a number (main +
+  // OVA/Movie variants). Falls back to any watchable kind if no main row
+  // exists. Skips BD extras (NCOP/NCED/PV/menu/…) and commentary cuts —
+  // those live in the supplementary lane and shouldn't be reachable via
+  // EpisodeNav prev/next.
   const handleLibraryEpisodeSwitchByNumber = useCallback((epNum) => {
     if (!locationSeriesId) return;
-    const ep = seriesDetail.episodes.find((e) => e.number === epNum && e.kind !== 'sp' && e.kind !== 'commentary');
+    const ep =
+      seriesDetail.episodes.find((e) => e.number === epNum && e.kind === 'main')
+      ?? seriesDetail.episodes.find((e) => e.number === epNum && isWatchableKind(e.kind));
     if (!ep) return;
     handleLibraryEpisodePlay(ep.id);
   }, [locationSeriesId, seriesDetail, handleLibraryEpisodePlay]);
@@ -616,9 +642,11 @@ export default function PlayerPage() {
     if (libraryEmptyKind) return;
     if (playbackPhase === 'playing') return;
     if (autoResumeAttempted) return;
-    const ep = seriesDetail.episodes.find(
-      (e) => e.number === locationResumeEpisode && e.kind !== 'sp' && e.kind !== 'commentary',
-    );
+    // Prefer main on resume to dodge an OVA/Movie/sp variant accidentally
+    // owning the same number (and to skip BD extras outright).
+    const ep =
+      seriesDetail.episodes.find((e) => e.number === locationResumeEpisode && e.kind === 'main')
+      ?? seriesDetail.episodes.find((e) => e.number === locationResumeEpisode && isWatchableKind(e.kind));
     setAutoResumeAttempted(true);
     if (!ep) return;
     handleLibraryEpisodePlay(ep.id);
@@ -665,10 +693,10 @@ export default function PlayerPage() {
   }, [uiPhase, stopPlayback, resetMatch, handleFiles]);
 
   const handleManualSelect = useCallback((anime) => {
-    // Exclude commentary so duplicate episode numbers don't skew the
-    // dandanplay episode-count heuristic during manual rematch.
+    // Exclude commentary AND BD extras so duplicate episode numbers don't
+    // skew the dandanplay episode-count heuristic during manual rematch.
     const epNums = pickedItems
-      .filter(f => f.parsedKind !== 'commentary')
+      .filter(f => isWatchableKind(f.parsedKind))
       .map(f => f.episode)
       .filter(Boolean);
     selectManual(anime, epNums);
@@ -681,9 +709,11 @@ export default function PlayerPage() {
     // re-running the picker.
     updateEpisodeMap(epNum, data, newAnime);
     if (locationSeriesId && data?.dandanEpisodeId) {
-      const target = seriesDetail.episodes.find(
-        (e) => e.number === epNum && e.kind !== 'sp' && e.kind !== 'commentary',
-      );
+      // Pick the main row to attach the dandan episodeId — anything else
+      // (SP/OVA/Movie variants) gets its own dandan ID via separate flows.
+      const target =
+        seriesDetail.episodes.find((e) => e.number === epNum && e.kind === 'main')
+        ?? seriesDetail.episodes.find((e) => e.number === epNum && isWatchableKind(e.kind));
       if (target) {
         try {
           await db.episodes.update(target.id, {

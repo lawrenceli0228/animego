@@ -328,17 +328,21 @@ const s = {
     opacity: 0.35,
     background: `oklch(8% 0.02 ${HUE} / 0.40)`,
   },
+  // Modifier styles merge over `chip.border` (shorthand). Use the same
+  // shorthand here so React doesn't end up with `{border, borderColor}`
+  // mixed — the inline-style diff throws a "Removing borderColor during
+  // rerender" warning when state flips back to base.
   chipCompleted: {
-    borderColor: '#30d158',
+    border: '1px solid #30d158',
     color: '#30d158',
     background: 'oklch(60% 0.18 145 / 0.10)',
   },
   chipInProgress: {
-    borderColor: PROGRESS_FILL,
+    border: `1px solid ${PROGRESS_FILL}`,
     color: '#fff',
   },
   chipLastWatched: {
-    borderColor: `oklch(72% 0.16 ${HUE})`,
+    border: `1px solid oklch(72% 0.16 ${HUE})`,
     color: '#fff',
     boxShadow: `0 0 0 1px oklch(72% 0.16 ${HUE} / 0.85), 0 0 16px oklch(72% 0.16 ${HUE} / 0.45)`,
   },

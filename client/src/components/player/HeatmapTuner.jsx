@@ -192,7 +192,9 @@ const s = {
   },
   btnPrimary: {
     background: 'rgba(10,132,255,0.18)',
-    borderColor: 'rgba(10,132,255,0.45)',
+    // Match `btn.border` shorthand shape so React doesn't end up diffing
+    // `{border, borderColor}` mixed on rerender.
+    border: '1px solid rgba(10,132,255,0.45)',
   },
   btnConfirm: { color: '#30d158', fontSize: 10 },
 };

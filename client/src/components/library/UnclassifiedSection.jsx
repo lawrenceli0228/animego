@@ -109,7 +109,10 @@ const s = {
     letterSpacing: '0.10em',
   },
   btnDanger: {
-    borderColor: 'oklch(60% 0.20 25 / 0.50)',
+    // Mirror `btn.border` shape (shorthand) so merging `{...btn, ...btnDanger}`
+    // doesn't produce a mixed `border` (shorthand) + `borderColor` (longhand)
+    // style object — React's rerender diff complains about that combination.
+    border: '1px solid oklch(60% 0.20 25 / 0.50)',
     color: 'oklch(72% 0.18 25)',
   },
 };

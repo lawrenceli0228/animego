@@ -27,7 +27,9 @@ const s = {
   },
   triggerOpen: {
     background: `oklch(62% 0.17 ${HUE} / 0.18)`,
-    borderColor: `oklch(62% 0.17 ${HUE} / 0.65)`,
+    // Use the same `border` shorthand as `trigger.border` so the inline-style
+    // diff doesn't end up `{border, borderColor}` mixed on rerender.
+    border: `1px solid oklch(62% 0.17 ${HUE} / 0.65)`,
     color: `oklch(72% 0.15 ${HUE})`,
   },
   bracket: {

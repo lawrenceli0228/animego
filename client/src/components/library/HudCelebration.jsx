@@ -57,11 +57,15 @@ const s = {
   },
   corner: (pos) => {
     const sz = 28;
-    const base = { position: 'absolute', width: sz, height: sz, borderColor: 'currentColor' };
-    if (pos === 'tl') return { ...base, top: 0, left: 0, borderTop: '1px solid', borderLeft: '1px solid' };
-    if (pos === 'tr') return { ...base, top: 0, right: 0, borderTop: '1px solid', borderRight: '1px solid' };
-    if (pos === 'bl') return { ...base, bottom: 0, left: 0, borderBottom: '1px solid', borderLeft: '1px solid' };
-    return { ...base, bottom: 0, right: 0, borderBottom: '1px solid', borderRight: '1px solid' };
+    // Fold color into each `border<Side>` shorthand instead of pairing them
+    // with a separate `borderColor` shorthand — React's rerender diff trips
+    // on mixed shorthand/longhand for the same logical property.
+    const base = { position: 'absolute', width: sz, height: sz };
+    const stroke = '1px solid currentColor';
+    if (pos === 'tl') return { ...base, top: 0, left: 0, borderTop: stroke, borderLeft: stroke };
+    if (pos === 'tr') return { ...base, top: 0, right: 0, borderTop: stroke, borderRight: stroke };
+    if (pos === 'bl') return { ...base, bottom: 0, left: 0, borderBottom: stroke, borderLeft: stroke };
+    return { ...base, bottom: 0, right: 0, borderBottom: stroke, borderRight: stroke };
   },
 };
 

@@ -9,9 +9,9 @@ export default function GenreFilter({ selected, onSelect }) {
           <button key={g} onClick={() => onSelect(active ? '' : g)}
             style={{
               padding:'4px 10px', borderRadius:9999, fontSize:12, fontWeight:500,
-              cursor:'pointer', border:'1px solid', transition:'all 0.2s',
+              cursor:'pointer', transition:'all 0.2s',
               background: active ? 'rgba(10,132,255,0.12)' : 'rgba(120,120,128,0.12)',
-              borderColor: active ? 'rgba(10,132,255,0.5)' : 'transparent',
+              border: `1px solid ${active ? 'rgba(10,132,255,0.5)' : 'transparent'}`,
               color: active ? '#0a84ff' : 'rgba(235,235,245,0.60)'
             }}>{g}</button>
         )

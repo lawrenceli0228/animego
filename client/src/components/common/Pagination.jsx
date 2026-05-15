@@ -1,8 +1,7 @@
 const btn = (disabled) => ({
   padding: '8px 20px',
   borderRadius: 8,
-  border: '1px solid',
-  borderColor: disabled ? 'rgba(84,84,88,0.30)' : 'rgba(84,84,88,0.65)',
+  border: `1px solid ${disabled ? 'rgba(84,84,88,0.30)' : 'rgba(84,84,88,0.65)'}`,
   color: disabled ? 'rgba(235,235,245,0.18)' : '#ffffff',
   background: disabled ? 'transparent' : 'rgba(120,120,128,0.12)',
   cursor: disabled ? 'not-allowed' : 'pointer',
