@@ -209,7 +209,7 @@ func TestEpisodeCommentsTransformMetadata(t *testing.T) {
 	t.Parallel()
 	tr := episodeCommentsTransform{}
 	assert.Equal(t, "episode_comments", tr.Name())
-	assert.Equal(t, "episode_comments", tr.MongoCollection())
+	assert.Equal(t, "episodecomments", tr.MongoCollection())
 	assert.Equal(t, "episode_comments", tr.PGTable())
 	assert.Equal(t, "(id)", tr.ConflictTarget())
 	assert.Equal(t, []string{"users", "anime_cache"}, tr.DependsOn())

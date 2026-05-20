@@ -319,7 +319,7 @@ func TestAnimeCacheTransform_Metadata(t *testing.T) {
 	t.Parallel()
 	tr := animeCacheTransform{}
 	assert.Equal(t, "anime_cache", tr.Name())
-	assert.Equal(t, "anime_cache", tr.MongoCollection())
+	assert.Equal(t, "animecaches", tr.MongoCollection())
 	assert.Equal(t, "anime_cache", tr.PGTable())
 	assert.Equal(t, "(anilist_id)", tr.ConflictTarget())
 	assert.Nil(t, tr.DependsOn())

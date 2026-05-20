@@ -110,7 +110,7 @@ func TestEpisodeWindowsTransformMetadata(t *testing.T) {
 	t.Parallel()
 	tr := episodeWindowsTransform{}
 	assert.Equal(t, "episode_windows", tr.Name())
-	assert.Equal(t, "episode_windows", tr.MongoCollection())
+	assert.Equal(t, "episodewindows", tr.MongoCollection())
 	assert.Equal(t, "episode_windows", tr.PGTable())
 	assert.Equal(t, "(anilist_id, episode)", tr.ConflictTarget())
 	assert.Equal(t, []string{"anime_cache"}, tr.DependsOn())

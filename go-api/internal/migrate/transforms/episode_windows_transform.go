@@ -21,7 +21,8 @@ type episodeWindowsTransform struct{}
 func init() { migrate.Register(&episodeWindowsTransform{}) }
 
 func (episodeWindowsTransform) Name() string            { return "episode_windows" }
-func (episodeWindowsTransform) MongoCollection() string { return "episode_windows" }
+// Mongoose collection: EpisodeWindow → episodewindows (lowercased + s, no underscore).
+func (episodeWindowsTransform) MongoCollection() string { return "episodewindows" }
 func (episodeWindowsTransform) PGTable() string         { return "episode_windows" }
 func (episodeWindowsTransform) ConflictTarget() string  { return "(anilist_id, episode)" }
 func (episodeWindowsTransform) DependsOn() []string     { return []string{"anime_cache"} }

@@ -75,7 +75,15 @@
 <ul>
 <li><a href="#修了-3-个真-bug集成测试暴露">修了 3 个真 bug(集成测试暴露)</a></li>
 </ul></li>
-<li><a href="#p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)</a></li>
+<li><a href="#p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)✓</a>
+<ul>
+<li><a href="#数据获取claude-代跑">数据获取(claude 代跑)</a></li>
+<li><a href="#实际-prod-collection-counts">实际 prod collection counts</a></li>
+<li><a href="#暴露-修了-4-个-bug">暴露 + 修了 4 个 bug</a></li>
+<li><a href="#field-parity-test">Field parity test</a></li>
+<li><a href="#migration-timing">Migration timing</a></li>
+<li><a href="#idempotency-验证未跑推到-p9-cutover-demo">Idempotency 验证(未跑,推到 P9 cutover demo)</a></li>
+</ul></li>
 <li><a href="#p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)</a></li>
 <li><a href="#p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)</a></li>
 <li><a href="#p1-p2-退出条件critical-gate">P1 → P2 退出条件(critical gate)</a></li>
@@ -194,17 +202,91 @@ golang-migrate Go library 应用 0001 + 0002 + 0003 三个 migration</li>
 <li><strong>mongo-driver v2 decode embedded doc 为 bson.D 不是 bson.M</strong> — embedded subdoc(<code>startDate</code>)和数组元素(<code>relations[]</code>、<code>characters[]</code>、…)默认 decode 成 <code>bson.D</code>(ordered),不是 <code>bson.M</code>。<code>GetSubdoc</code> 和 <code>anime_cache.toSubdoc</code> 原来只 case bson.M / map → 全 miss,startDate=NULL 写入 + 子表 0 行。fix:两处都加 <code>case bson.D</code> 转 bson.M。</li>
 </ol>
 <hr />
-<h2 id="p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)</h2>
-<p><strong>[pending]</strong></p>
-<ul>
-<li>VPS 拉 prod mongodump → 本地 mongo 容器导入</li>
-<li><code>go run ./cmd/migrate-mongo --dry-run --collections all</code>,row count diff &lt; 0.1%</li>
-<li>10 个 UI-critical field × 1000 行 random sample,mongo 跟 PG strict equal(null 等价容忍)
-<ul>
-<li><code>titleChinese / characters[0].nameCn / coverImageColor / posterAccent / startDate / averageScore / bangumiScore / episodeTitles[0].nameCn / studios[0] / genres[0]</code></li>
-</ul></li>
-<li>失败行 JSONL 反查 root cause + fix transform</li>
+<h2 id="p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)✓</h2>
+<p>实测在真实 prod 数据上跑通,<strong>Mongo 6493 docs → PG 95008 rows,0 失败,10000 字段比较 100% 全 match</strong>。</p>
+<h3 id="数据获取claude-代跑">数据获取(claude 代跑)</h3>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+SSH 通 VPS(端口 17776),<code>docker exec animego-mongodb-1 mongodump --uri=... --archive --gzip</code> 流式 SSH → 本地 <code>/tmp/animego-prod-mongodump-2026-05-21.archive.gz</code>(6.0MB 压缩,16MB 解压)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>docker cp</code> + <code>mongorestore --nsFrom='animego.*' --nsTo='animego_prod_copy.*'</code> 进 dev mongo,独立 DB 不污染 dev 数据</li>
+<li><input type="checkbox" disabled="" checked="" />
+6493 documents 全部 restored</li>
 </ul>
+<h3 id="实际-prod-collection-counts">实际 prod collection counts</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Mongo collection</th>
+<th>count</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>animecaches</td>
+<td>6425</td>
+</tr>
+<tr class="even">
+<td>subscriptions</td>
+<td>59</td>
+</tr>
+<tr class="odd">
+<td>users</td>
+<td>5</td>
+</tr>
+<tr class="even">
+<td>danmakus</td>
+<td>3</td>
+</tr>
+<tr class="odd">
+<td>episodewindows</td>
+<td>1</td>
+</tr>
+<tr class="even">
+<td>episodecomments</td>
+<td>0</td>
+</tr>
+<tr class="odd">
+<td>follows</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<h3 id="暴露-修了-4-个-bug">暴露 + 修了 4 个 bug</h3>
+<ol type="1">
+<li><strong>Mongoose collection 命名约定</strong>:<code>MongoCollection()</code> 写了 snake_case 名(<code>anime_cache</code>/<code>episode_comments</code>/<code>episode_windows</code>)但 Mongoose 实际存储是 lowercased + ‘s’(<code>animecaches</code>/<code>episodecomments</code>/<code>episodewindows</code>,无 underscore)。集成测试没暴露因为 fixture 跟 transform 用了同一个错名,自我一致。修 3 个 transforms + 3 个 unit test metadata assertion + 3 处集成测试 fixture。</li>
+<li><strong><code>anime_cache.bangumi_version</code> CHECK 0-2 范围太窄</strong>:plan comment “0=unenriched, 1=phase 1-3, 2=phase 4 full” 是 stale,prod 实际 99.95% 是 <code>bangumiVersion=3</code>(phase 5 enrichment)。<strong>0004_relax_bangumi_version migration</strong>:DROP + ADD CHECK <code>&gt;= 0</code>(无上限,允许将来 phase N)。</li>
+<li><strong>Orchestrator child table flush 在 parent 前面 → FK 23503</strong>:batch_size=500 时,anime_episode_titles buffer 比 anime_cache 先满,先 flush 子表,但父行还在 buffer 没进 PG。修 orchestrator:<strong>子表 flush 前,如 parent buffer 非空,先 flush parent</strong>;final-flush 阶段同样 parent first。</li>
+<li><strong><code>anime_cache.episodeTitles</code> 同 episode 重复</strong>:prod 17 个 anime 的 Bangumi enrichment 把新版本 append 而不是替换,导致 PG composite PK <code>(anime_id, episode)</code> 23505。修 transform:dedup 时 keep LAST(最新 enrichment 覆盖旧),17 行 Go 代码。</li>
+</ol>
+<h3 id="field-parity-test">Field parity test</h3>
+<p>工具:<code>go-api/cmd/parity-check/main.go</code>(633 行,subagent 写)</p>
+<pre><code>$ go run ./cmd/parity-check --mongo-uri=... --pg-uri=$DATABASE_URL --sample=1000
+
+Field                          Compared   Match    Mismatch  Match %
+titleChinese                   1000       1000     0         100.00%
+characters[0].nameCn           1000       1000     0         100.00%
+coverImageColor                1000       1000     0         100.00%
+posterAccent                   1000       1000     0         100.00%
+startDate                      1000       1000     0         100.00%
+averageScore                   1000       1000     0         100.00%
+bangumiScore                   1000       1000     0         100.00%
+episodeTitles[first].nameCn    1000       1000     0         100.00%
+studios[*] contains            1000       1000     0         100.00%
+genres[*] contains             1000       1000     0         100.00%
+
+TOTAL                          10000      10000    0         100.00%
+
+PASS  (acceptance threshold: &gt;=99.9% per field)</code></pre>
+<p><strong>10/10 字段,1000 sample each,0 mismatch</strong>。</p>
+<h3 id="migration-timing">Migration timing</h3>
+<ul>
+<li>anime_cache(6425 doc → 95008 fan-out rows):<strong>7.5s</strong></li>
+<li>其它 6 collection 合计:<strong>~50ms</strong></li>
+<li>总耗时:<strong>~10s wall</strong>(含 Mongo cursor stream + transform + pgx batch INSERT)</li>
+</ul>
+<h3 id="idempotency-验证未跑推到-p9-cutover-demo">Idempotency 验证(未跑,推到 P9 cutover demo)</h3>
+<p>Re-run 同 dump 应该 UPSERT 主表,子表会 PK conflict —— 这是已知限制(P1.C 记的)。Cutover 一次性 OK,re-run 前要 <code>TRUNCATE</code> anime_* + 子表。可写 helper script:<code>scripts/migrate-mongo-truncate-and-retry.sh</code>,推 P1.G。</p>
 <hr />
 <h2 id="p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)</h2>
 <p><strong>[pending]</strong> — <strong>先解决 docker image 不带 pg_cron 的问题</strong></p>
@@ -258,6 +340,16 @@ ERD diagram 落进 go-api/README.md</li>
 <li>2026-05-21 02:10 — P1.D 启动。1 subagent 写 testcontainers 集成测试(667 行单文件 + <code>//go:build integration</code> tag)。subagent 写完 sandbox 禁 go,我跑 build + test 3 轮:第一轮 bangumi_version NOT NULL 炸 + 第二轮 orchestrator ConflictTarget 套子表炸 + 第三轮 bson.D 解码炸。每个真 bug 都需要看 PG error code + 反推 transform/orchestrator/util 改一两行。三次后 6/6 PASS,11.5s wall。</li>
 <li>2026-05-21 02:15 — <strong>Subagent 自带 sandbox 限制</strong>:三轮 subagent 全部报 <code>go</code> 命令被 sandbox 拒。subagent 只能写文件不能跑测试,build/test 必须我接力跑。为来后续 phase 节奏:<strong>subagent 适合写文件 + 给 spec,不适合做 verify</strong>;verify 必须我接力跑。</li>
 <li><strong>bson.M vs bson.D 教训</strong>:mongo-driver v2 默认 codec 在 <code>Cursor.Decode(&amp;bsonM)</code> 时,内层 embedded subdoc / 数组元素 decode 成 <code>bson.D</code> 而不是 <code>bson.M</code>(只 outer doc 是 bson.M)。任何在 util 或 transform 里 <code>case bson.M:</code> 但不 <code>case bson.D:</code> 的代码都会 miss。<strong>未来加 transform 时</strong>:任何处理 embedded subdoc 或 array element 的地方一律走 <code>toSubdoc(v) (bson.M, bool)</code> helper,helper 内部三 case 都列。已统一(util.go GetSubdoc + anime_cache.go toSubdoc)。</li>
+<li>2026-05-21 02:25 — P1.E 启动。SSH VPS 拉 6MB mongodump,本地 <code>animego_prod_copy</code> DB restore 6493 docs。</li>
+<li>2026-05-21 02:33-02:42 — 三轮 <code>migrate-mongo --commit</code> failure 调试:
+<ul>
+<li>第一轮:Mongoose collection 名(<code>animecaches</code>、<code>episodecomments</code>、<code>episodewindows</code> 不带 underscore)→ 修 transform <code>MongoCollection()</code> × 3 + 集成测试 fixture × 3 + unit test metadata × 3。</li>
+<li>第二轮:<code>bangumi_version</code> 23514 CHECK 违反 → 加 0004 migration 放宽到 <code>&gt;= 0</code>。</li>
+<li>第三轮:<code>anime_episode_titles_pkey</code> 23505 dup → transform dedup 17 个 anime 的 episodeTitles。</li>
+<li>第四轮(orchestrator 改):FK 23503,child flush before parent → 改 flush 策略,先 parent 再 child。</li>
+</ul></li>
+<li>2026-05-21 02:46 — 最终 <code>--commit</code> PASS:6493 → 95008 rows,0 failures,10s wall。parity-check 10/10 字段 100% match,1000 sample 全过。</li>
+<li><strong>集成测试该 dogfood prod-style collection 名</strong>:测 P1.D 的 fixture 用了跟 transform 一样的错名(<code>Collection("anime_cache")</code>),所以自我一致地“通过”但生产现实会炸。修法:集成测试以后用 mongoose convention(animecaches 等),跟 prod 一致。已修(三处 <code>.Collection(...)</code> 替换)。这是一个广义的测试设计教训:<strong>测试的输入应该模拟生产输入的格式,不是模拟代码自己的预期</strong>。</li>
 </ul>
 </body>
 </html>

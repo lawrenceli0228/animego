@@ -265,6 +265,18 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 		for _, r := range out {
 			buffers[r.Table] = append(buffers[r.Table], r)
 			if len(buffers[r.Table]) >= o.cfg.BatchSize {
+				// FK safety: when about to flush a CHILD table, flush the
+				// parent (t.PGTable()) buffer first so the parent rows
+				// exist in PG when the child INSERT validates its FK.
+				// Without this, anime_episode_titles (etc.) hit
+				// SQLSTATE 23503 against anime_cache rows still buffered.
+				if r.Table != t.PGTable() && len(buffers[t.PGTable()]) > 0 {
+					n := int64(len(buffers[t.PGTable()]))
+					if err := flush(t.PGTable()); err != nil {
+						return rpt, fmt.Errorf("flush parent %s: %w", t.PGTable(), err)
+					}
+					rpt.PGCount += n
+				}
 				if err := flush(r.Table); err != nil {
 					return rpt, fmt.Errorf("flush %s: %w", r.Table, err)
 				}
@@ -277,9 +289,18 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 		return rpt, fmt.Errorf("mongo cursor: %w", err)
 	}
 
-	// Final flushes
+	// Final flushes: parent table first (FK safety), then sorted children.
+	if remaining := int64(len(buffers[t.PGTable()])); remaining > 0 {
+		if err := flush(t.PGTable()); err != nil {
+			return rpt, fmt.Errorf("final flush parent %s: %w", t.PGTable(), err)
+		}
+		rpt.PGCount += remaining
+	}
 	tables := make([]string, 0, len(buffers))
 	for tbl := range buffers {
+		if tbl == t.PGTable() {
+			continue
+		}
 		tables = append(tables, tbl)
 	}
 	sort.Strings(tables)

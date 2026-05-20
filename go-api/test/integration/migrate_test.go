@@ -375,7 +375,7 @@ func TestMigrateAnimeCacheFanOut(t *testing.T) {
 	resetState(t, ctx, pool, cli)
 
 	const anilistID = 12345
-	_, err := cli.Database(mongoDBName).Collection("anime_cache").InsertOne(ctx, bson.M{
+	_, err := cli.Database(mongoDBName).Collection("animecaches").InsertOne(ctx, bson.M{
 		"anilistId":    anilistID,
 		"titleRomaji":  "Test Anime",
 		"titleEnglish": "Test Anime EN",
@@ -477,7 +477,7 @@ func TestMigrateFKRelationships(t *testing.T) {
 	require.NoError(t, err)
 
 	// 1 anime_cache
-	_, err = db.Collection("anime_cache").InsertOne(ctx, bson.M{
+	_, err = db.Collection("animecaches").InsertOne(ctx, bson.M{
 		"anilistId":   anilistID,
 		"titleRomaji": "Sample",
 	})
@@ -506,7 +506,7 @@ func TestMigrateFKRelationships(t *testing.T) {
 	// 2 episode_comments, child references parent (deferred self-FK)
 	parentOID := bson.NewObjectID()
 	childOID := bson.NewObjectID()
-	_, err = db.Collection("episode_comments").InsertMany(ctx, []any{
+	_, err = db.Collection("episodecomments").InsertMany(ctx, []any{
 		bson.M{
 			"_id":       parentOID,
 			"userId":    userOID,
@@ -545,7 +545,7 @@ func TestMigrateFKRelationships(t *testing.T) {
 	require.NoError(t, err)
 
 	// 1 episode_window
-	_, err = db.Collection("episode_windows").InsertOne(ctx, bson.M{
+	_, err = db.Collection("episodewindows").InsertOne(ctx, bson.M{
 		"anilistId":  anilistID,
 		"episode":    1,
 		"liveEndsAt": bson.NewDateTimeFromTime(now.Add(48 * time.Hour)),

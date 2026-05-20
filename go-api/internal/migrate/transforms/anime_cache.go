@@ -50,7 +50,10 @@ type animeCacheTransform struct{}
 func init() { migrate.Register(&animeCacheTransform{}) }
 
 func (animeCacheTransform) Name() string            { return "anime_cache" }
-func (animeCacheTransform) MongoCollection() string { return "anime_cache" }
+// Mongoose pluralizes model names lowercased: AnimeCache → animecaches (no underscore).
+// Transform Name() stays snake_case (orchestrator identifier); PGTable() is the
+// Postgres convention; MongoCollection() is whatever Mongoose actually wrote.
+func (animeCacheTransform) MongoCollection() string { return "animecaches" }
 func (animeCacheTransform) PGTable() string         { return "anime_cache" }
 func (animeCacheTransform) ConflictTarget() string  { return "(anilist_id)" }
 func (animeCacheTransform) DependsOn() []string     { return nil }
@@ -425,6 +428,12 @@ func (animeCacheTransform) TransformRow(_ context.Context, doc bson.M) ([]migrat
 	// -------------------- anime_episode_titles --------------------
 
 	if eps, ok := GetArray(doc, "episodeTitles"); ok {
+		// Dedup by (anime_id, episode) — prod data has ~17 anime where the
+		// Bangumi enrichment pipeline appended new titles instead of
+		// replacing.  Keep the LAST occurrence so the most recent enrichment
+		// wins; first occurrence would freeze stale Phase-1 results.
+		seen := make(map[int]int, len(eps))
+		titles := make([]bson.M, 0, len(eps))
 		for _, e := range eps {
 			sub, ok := toSubdoc(e)
 			if !ok {
@@ -434,6 +443,15 @@ func (animeCacheTransform) TransformRow(_ context.Context, doc bson.M) ([]migrat
 			if !epOK {
 				continue
 			}
+			if idx, dup := seen[epNum]; dup {
+				titles[idx] = sub
+			} else {
+				seen[epNum] = len(titles)
+				titles = append(titles, sub)
+			}
+		}
+		for _, sub := range titles {
+			epNum, _ := GetInt(sub, "episode")
 			nameCn, _ := GetString(sub, "nameCn")
 			name, _ := GetString(sub, "name")
 

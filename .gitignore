@@ -44,3 +44,7 @@ docs/designs/implementAnimeGPT.md
 # migrate-mongo runtime artifacts (failure log written by orchestrator)
 go-api/migrate-failures.jsonl
 migrate-failures.jsonl
+
+# P1.E prod mongodump pulled from VPS (sensitive: user data)
+*-prod-mongodump-*.archive.gz
+/tmp/animego-prod-mongodump*

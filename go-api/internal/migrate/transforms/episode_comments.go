@@ -31,7 +31,8 @@ type episodeCommentsTransform struct{}
 func init() { migrate.Register(&episodeCommentsTransform{}) }
 
 func (episodeCommentsTransform) Name() string            { return "episode_comments" }
-func (episodeCommentsTransform) MongoCollection() string { return "episode_comments" }
+// Mongoose collection: EpisodeComment → episodecomments (lowercased + s, no underscore).
+func (episodeCommentsTransform) MongoCollection() string { return "episodecomments" }
 func (episodeCommentsTransform) PGTable() string         { return "episode_comments" }
 func (episodeCommentsTransform) ConflictTarget() string  { return "(id)" }
 func (episodeCommentsTransform) DependsOn() []string {
