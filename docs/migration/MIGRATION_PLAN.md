@@ -144,6 +144,9 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 - Postgres 容器 healthy
 - R2 backup 当天有文件,restore 演练通过
 - **scripts/dev.sh 一键起 6 个进程**(postgres + mongo + go-api + ws-server + Next.js + 加 .env.example check)(二轮 review 2C)
+- **TTHW < 5 min**(2026-05-20 DX review NEW;2026-05-20 eng review C2 修正):dev.sh 在 3 endpoint 全 200 后写 `/tmp/animego-dev-up.txt` 时间戳;TTHW 测量通过包装脚本 `scripts/measure-tthw.sh` —— 后台启动 dev.sh,前台轮询 marker 文件出现,记录 wall-clock 差。**原 `time bash dev.sh` 方案不可用**,因为 dev.sh 末尾 `wait` 阻塞到 Ctrl+C 才退出,time 测的是用户按键时间不是 magic moment。M1/M2 Mac warm-cache 基准 < 5min;首次 clone 因 Docker pull + bun install 200-400MB 下载可能更长,见 §8 TODO Eng review #5
+- **3 个 health endpoint 全 200 才算 up**(2026-05-20 DX review NEW):`curl :3000/_health && curl :8080/health && curl :3001/health`
+- **Fixture seed**(2026-05-20 DX review NEW):dev.sh 内置 `go run ./cmd/seed --fixture dev_5_anime.sql`,localhost:3000 首页 0 配置见到 5 部 anime(magical moment 锚点)
 
 ### Phase 1 — Migration Tool (Mongo → Postgres) (40-60 hr) ← critical
 
@@ -406,6 +409,17 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 ├── next.config.js rewrites:
 │   /api/* → http://localhost:8080/api/* (Go staging during dev)
 ├── 启动: bun --bun next dev + go run ./go-api/cmd/server + docker-compose up postgres
+├── **README + .env 重写**(2026-05-20 DX review NEW,future-lawrence / OSS contributor 第一道门):
+│   ◇ README.md 顶部 Quick Start 替换 v2.0 `dev:server`/`dev:client` 三行 → `bash scripts/setup.sh && bash scripts/dev.sh`
+│   ◇ README.md Tech Stack 表更新:React 19 / Next 16 / Bun 1.3.x / Go 1.23 / Postgres 16 / ws-server
+│   ◇ Prerequisites 节写明:Docker + Bun + Go(三个一键装命令在 setup.sh 里)
+│   ◇ .env.production.example 重写:加 `POSTGRES_PASSWORD` / `DATABASE_URL` / `JWT_SECRET` 三服务共享说明 / `RIVER_QUEUE_URL` / cutover 后删 `MONGODB_URI`
+│   ◇ .env.example(dev)重写:同上 + `CLIENT_ORIGIN=http://localhost:3000`(原 5173)
+│   ◇ 验收:fresh git clone + 全新 macOS 用户跑 setup.sh + dev.sh ≤ 5min 看到 localhost:3000(P0 TTHW gate)
+├── **创建 `app/api/_health/route.ts`**(2026-05-20 eng review A1 NEW,critical):
+│   ◇ Next 16 App Router:`export async function GET() { return Response.json({ ok: true }, { status: 200 }) }`
+│   ◇ 必须存在,P0 dev.sh 用 `curl :3000/_health` 判健康;不创建则 dev.sh hang 在 health check loop(C1 无 timeout 时永远卡住)
+│   ◇ 验证 P2.1(Go `:8080/health` 已在 Phase 0 acceptance)+ P2.8(ws-server `:3001/health` 需在 P2.8 acceptance 显式加)都存在
 └── baseline 测量(二轮 review 8A + TODO-1 扩展):
     docs/migration/BASELINE.md 写入
       - v2.0.1 SPA 当前 Lighthouse(/、/anime/154587、/seasonal/spring/2026)
@@ -658,6 +672,10 @@ T+24h:
 ├── 错误率累计 < 1% ✓
 ├── Postgres slow query log 没异常
 ├── 用户报告 0 critical bug
+├── **README 顶部 Project Status 同步**(2026-05-20 DX review NEW,future-lawrence 抢救):
+│   ◇ 删除 "Active rewrite" banner,换成 "Live on Go + PG + Next 16 (cutover YYYY-MM-DD)"
+│   ◇ Tech Stack 表 v2.0.x 行 → v3.0 Go/PG/Next/Bun 行
+│   ◇ Local development 节三行命令 production-tested,删除 `npm run dev:server / dev:client` 残留
 └── 宣布 cutover 成功
 
 T+24h 之后:
@@ -976,8 +994,21 @@ P0 收工标准:**Go + Postgres 起来,空 chi router :8080/health 返回 OK,R2 
 - [ ] 待办五:socket.io-redis adapter(多 ws-server 实例时)
 - [ ] **Bun Rust 重写版本观察期 ≥ 60 天**(2026-05-20 补):2026-05-14 Anthropic 协作 Rust 重写 merge 主 repo;v1.3.14 是最后 Zig;patch.0 不上 prod,先 staging
 - [ ] **Per-card refresh feature**(增量库扫描,2026-05-20 补):data model 已就绪(FileRef `id = hash(hash16M + size)` 跨 rename 稳定;REUSE logic 在 importPipeline.js:177-307;Sonarr 路线参考);需补 `fileHandles` ↔ Series 映射 + 卡片刷新按钮 + missing 软删 + parser 冲突 review 队列。**P6 完成 + cutover + 30d 后再做**,跟 Dexie schema 改动解耦
-- [ ] **DX review 跑一遍**(`/plan-devex-review`,2026-05-20 补):0 runs at plan 落地时,P3 启动前补
+- [x] **DX review 跑一遍**(`/plan-devex-review`,2026-05-20 当日完成,trimmed scope):persona = future-lawrence + OSS contributor;3 passes(Getting Started 3→8、Errors 5→8、Dev Env 6→9);5 critical 入 P0/P3/Appendix C/P9
 - [ ] **Codex review at critical gates**(2026-05-20 补):用户主动 skip,但 P8.5 → P9 cutover gate 前建议 1 次 outside cross-model check,廉价保险
+- [ ] **DX polish #1 跨平台 Postgres**:Postgres 16-alpine 在 Mac arm64 下是否需要 `platform: linux/amd64`?P0 dev.sh 起 docker 前实测一次,写进 README
+- [ ] **DX polish #2 Hot reload 预期值**:Air(Go) < 1s、Next 16 Turbopack < 500ms、ws-server `bun --watch` < 500ms,P3 完成后实测填进 README dev 节
+- [ ] **DX polish #3 IDE 配置提交**:`.vscode/launch.json` + `.vscode/extensions.json`(Go + ESLint + Prettier 推荐)+ `.editorconfig`,新 contributor 开 repo 自动配好
+- [ ] **DX polish #4 psql / Postgres GUI 推荐**:`docker exec -it animego-postgres psql -U animego` 一行写进 README,GUI 推荐 TablePlus / DBeaver
+- [ ] **DX polish #5 `bash scripts/test-all.sh` 一行跑全**:go test ./... + bun run vitest + playwright + lint
+- [ ] **DX polish #6 Lockfile drift hook 错误消息 actionable**:不止报 mtime drift,直接打印 `npm install --package-lock-only` 同步命令 + 一行解释
+- [ ] **DX polish #7 Go API error response shape 规范**:`{error: {code, message, request_id}}`,跟 Sentry / slow query log / future-lawrence grep 配套
+- [ ] **Eng review #1 (A2,2026-05-20)** dev.sh 改用 `docker compose exec postgres` 而非 `docker exec animego-postgres`(compose v2 默认加 `-1` 后缀,硬编码不稳)
+- [ ] **Eng review #2 (A3,2026-05-20)** setup.sh 加 Air 安装:`go install github.com/cosmtrek/air@latest`(否则 dev.sh `air -c .air.toml` command not found)
+- [ ] **Eng review #3 (C1,2026-05-20)** dev.sh `until curl` 加 60s timeout + 报哪个 endpoint 没起来(否则一个进程崩,user hang 永远)
+- [ ] **Eng review #4 (C3,2026-05-20)** dev.sh 加 `trap 'kill 0' INT TERM` 确保 Ctrl+C 杀掉 3 个后台进程(默认 SIGINT 传播在 bash 后台不可靠)
+- [ ] **Eng review #5 (P1,2026-05-20)** TTHW 5min 加 "warm caches" 限定 + 首次 clone exempt 文档:5Mbps 网络首次 Docker pull + bun install 撞 5min 墙是预期
+- [ ] **Eng review #6 (P2,2026-05-20)** dev.sh 跳过 already-applied migration:查 `schema_migrations` 目标版本相等就跳 `go run cmd/migrate up`,冷启省 200-500ms
 
 ---
 
@@ -1148,6 +1179,55 @@ func TestGetAnimeByID(t *testing.T) {
 }
 ```
 
+### scripts/dev.sh — 6 进程编排(2026-05-20 DX review NEW)
+
+```bash
+#!/usr/bin/env bash
+# scripts/dev.sh — one-command dev loop (post-migration)
+# Boots: postgres + mongo (transitional) + go-api + ws-server + next + (worker via river)
+# Magical moment target: < 5 min from `git clone` to localhost:3000 with seed data
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# Prerequisites — fail fast with actionable message
+command -v docker >/dev/null || { echo "Install Docker: https://docs.docker.com/get-docker/"; exit 1; }
+command -v bun    >/dev/null || { echo "Install Bun: curl -fsSL https://bun.sh/install | bash"; exit 1; }
+command -v go     >/dev/null || { echo "Install Go 1.23+: brew install go (macOS) | apt install golang (Linux)"; exit 1; }
+
+# .env check
+[ -f .env ] || { echo ".env missing. cp .env.example .env, then fill JWT_SECRET + DANDANPLAY_APP_ID."; exit 1; }
+
+# 1. DB containers
+docker compose -f docker-compose.dev.yml up -d postgres mongo
+
+# 2. Wait Postgres → migrate → seed
+until docker exec animego-postgres pg_isready -U animego >/dev/null 2>&1; do sleep 1; done
+( cd go-api && go run ./cmd/migrate up )
+( cd go-api && go run ./cmd/seed --fixture dev_5_anime.sql )
+
+# 3. 3 app processes with prefixed logs
+(cd go-api    && air -c .air.toml          2>&1 | sed 's/^/[go-api]    /') &
+(cd ws-server && bun --watch index.js      2>&1 | sed 's/^/[ws-server] /') &
+(cd next-app  && bun --bun next dev        2>&1 | sed 's/^/[next]      /') &
+
+# 4. Wait health endpoints
+echo "Waiting for services..."
+for endpoint in :3000/_health :8080/health :3001/health; do
+  until curl -sf "http://localhost${endpoint}" >/dev/null 2>&1; do sleep 1; done
+  echo "  ✓ ${endpoint}"
+done
+echo ""
+echo "Magic at: http://localhost:3000  (seed: 5 anime ready)"
+echo "Ctrl+C stops app procs; docker compose -f docker-compose.dev.yml down for DBs"
+wait
+```
+
+**P0 dev.sh acceptance**:
+- `time bash scripts/dev.sh` 冷启动到 3 endpoint 200 < 5min(M1/M2 Mac 基准)
+- Ctrl+C 杀掉 3 个 app 进程(Docker DB 仍在,显式 `docker compose down`)
+- localhost:3000 首页 0 配置可见 5 部 seed anime(magical moment)
+- 日志 prefix `[go-api]` / `[ws-server]` / `[next]` 让 debug 知道哪个进程出错(DX review Pass 3)
+
 ---
 
 ## Appendix D — Postgres Schema 概要
@@ -1202,7 +1282,7 @@ extensions(必须先 CREATE EXTENSION):
 
 ---
 
-**Last updated:** 2026-05-20(7 gaps audit:Bun 1.3.14 + Rust 重写策略、lockfile 双轨、IndexedDB-on-RSC 契约、R19 + R20、DX/Codex gate)
+**Last updated:** 2026-05-20(7 gaps audit + DX review trimmed:scripts/dev.sh 完整 spec、README 同步 task、health check、fixture seed、cutover-day README header)
 **Initial:** 2026-05-12(初版,supersedes v1 plan from 2026-05-10)
 
 ---
@@ -1213,9 +1293,9 @@ extensions(必须先 CREATE EXTENSION):
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
 | Codex Review | `/codex review` | Independent 2nd opinion | 0 | **skipped(P8.5 → P9 gate 前建议补 1 次)** | 用户主动跳过;cutover gate 前 outside cross-model check 是廉价保险(2026-05-20 注) |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | **2 (deep re-run 2026-05-12 19:00)** | CLEAR (PLAN) | **2nd run: 19 issues raised, 17 resolved + 2 unresolved-accepted** |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | **3 (verification 2026-05-20 14:30)** | CLEAR (PLAN, 3rd run) | **3rd run** verification pass on today's adds:8 findings(A1+C2 critical 已 fix 入 P0/P3,A2/A3/C1/C3/P1/P2 6 polish 入 §8 TODO);2 critical_gap 关闭;1st run resolved 4 critical,2nd run 19→17 resolved |
 | Design Review | `/plan-design-review` | UI/UX gaps | 1 (stale) | covered | v1 plan §3.7 UI risk audit 平移 |
-| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | **TBD before P3** | 2026-05-20 注:scripts/dev.sh 起 6 进程的 dev loop 没人独立检查过,P3 启动前补 |
+| DX Review | `/plan-devex-review` | Developer experience gaps | **1 (trimmed 2026-05-20)** | **CLEAR (POLISH, trimmed)** | persona = future-lawrence + OSS contributor;3 passes(Getting Started 3→8、Errors 5→8、Dev Env 6→9);TTHW 目标 < 5min;5 critical findings 入 P0/P3/Appendix C/P9;7 polish 入 §8 TODO |
 
 ### 1st Eng Review 06:45 (commit 89516a1) — 4 critical findings (all resolved earlier today):
 - Issue 1 [CRITICAL]: Mongo 30-day retention vs Postgres new writes → **1C**: 24h 真实窗口 + mongodump 仅作灾难恢复
