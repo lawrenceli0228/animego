@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN" xml:lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>AnimeGo P0 Progress (2026-05-21)</title>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
+  <style>
+  :root {
+    --bg: #0e1116; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --code-bg: #161b22; --border: #30363d; --highlight: #f0c674;
+  }
+  html { background: var(--bg); color: var(--fg); color-scheme: dark; scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 1100px; margin: 0 auto; padding: 2.5rem 3rem 6rem;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    border-bottom: 1px solid var(--border); padding-bottom: .3em;
+    font-weight: 600; color: var(--fg); margin-top: 2em; margin-bottom: 0.6em;
+  }
+  h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; }
+  h1 { font-size: 1.85rem; color: var(--highlight); }
+  h2 { font-size: 1.45rem; color: var(--highlight); }
+  h3 { font-size: 1.15rem; border-bottom: 1px dashed var(--border); }
+  h4 { font-size: 1rem; border: 0; color: var(--muted); }
+  p { margin: 1em 0; }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+  code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
+    color: #ffa657; border: 1px solid var(--border); }
+  pre { background: var(--code-bg); padding: 1rem 1.2rem; overflow-x: auto;
+    border: 1px solid var(--border); border-radius: 6px; font-size: 0.84em;
+    line-height: 1.55; margin: 1em 0; }
+  pre code { padding: 0; background: transparent; color: var(--fg); font-size: 1em; border: 0; }
+  blockquote { border-left: 3px solid var(--accent); margin: 1em 0; padding: .6em 1.2em;
+    color: var(--muted); background: rgba(88,166,255,0.06); border-radius: 0 4px 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
+  th, td { border: 1px solid var(--border); padding: .55em .85em; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; color: var(--highlight); }
+  tbody tr:nth-child(odd) { background: rgba(255,255,255,0.025); }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+  nav#TOC { background: var(--code-bg); padding: 1.2rem 1.6rem; border-radius: 6px;
+    border: 1px solid var(--border); margin: 1.5rem 0 2.5rem; font-size: 0.88em; }
+  nav#TOC ul { padding-left: 1.4em; margin: 0.3em 0; list-style: none; }
+  nav#TOC > ul { padding-left: 0; }
+  strong { color: var(--highlight); font-weight: 600; }
+  em { color: #a5d6ff; font-style: normal; opacity: 0.85; }
+  li { margin: 0.18em 0; }
+  header.title-block-header { padding-bottom: 1.5em; border-bottom: 2px solid var(--border); margin-bottom: 2em; }
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">AnimeGo P0 Progress (2026-05-21)</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#phase-0-progress-go-骨架-postgres-r2-backup-scriptsdev.sh">Phase 0 Progress — Go 骨架 + Postgres + R2 backup + scripts/dev.sh</a>
+<ul>
+<li><a href="#本地工具链prerequisites">0. 本地工具链(prerequisites)</a></li>
+<li><a href="#cloudflare-r2-账号-bucket">1. Cloudflare R2 账号 + bucket</a></li>
+<li><a href="#目录骨架claude-代做">2. 目录骨架(claude 代做)</a></li>
+<li><a href="#go-module-depsuser-跑-bootstrap">3. Go module + deps(user 跑 bootstrap)</a></li>
+<li><a href="#go-http-server-skeleton">4. Go HTTP server skeleton</a></li>
+<li><a href="#docker-composedev">5. Docker compose(dev)</a></li>
+<li><a href="#scripts">6. scripts/</a></li>
+<li><a href="#r2-crontab-nightly-backup">7. R2 + crontab nightly backup</a></li>
+<li><a href="#env-文件eng-review-a1-dx-review-同步">8. .env 文件(eng review A1 + DX review 同步)</a></li>
+<li><a href="#readme-顶部-active-rewrite-banner">9. README 顶部 “Active rewrite” banner</a></li>
+<li><a href="#tests-acceptancep0-p1-gate">10. Tests + Acceptance(P0 → P1 gate)</a></li>
+<li><a href="#phase-0-退出close-this-file-的条件">11. Phase 0 退出(close this file 的条件)</a></li>
+<li><a href="#notes-decisions随时追加">Notes / Decisions(随时追加)</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="phase-0-progress-go-骨架-postgres-r2-backup-scriptsdev.sh">Phase 0 Progress — Go 骨架 + Postgres + R2 backup + scripts/dev.sh</h1>
+<p><strong>Branch:</strong> <code>feat/go-backend</code>
+<strong>Started:</strong> 2026-05-20
+<strong>Estimated:</strong> 20-35 hr(单人 + Claude Code)
+<strong>Plan reference:</strong> <code>docs/migration/MIGRATION_PLAN.md</code> § Phase 0 + Appendix C(dev.sh)+ §6(起步动作)</p>
+<blockquote>
+<p>本文件用作 P0 执行追踪。每完成一项打勾,把日期 + commit hash 写在右边。
+全部打勾 + P0 → P1 gate 通过(R2 backup → pg restore 演练 + scripts/dev.sh 一键起)后,关闭并合 main 进 P1。</p>
+</blockquote>
+<hr />
+<h2 id="本地工具链prerequisites">0. 本地工具链(prerequisites)</h2>
+<p><strong>这一节要先你自己 terminal 跑,我装不了</strong>(brew install 需要你机器密码)。</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 装 Go + sqlc + rclone + golang-migrate (Homebrew)</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">brew</span> install go sqlc rclone golang-migrate</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 装 Air (Go hot reload) —— 需 Go 已在 PATH</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="ex">go</span> install github.com/cosmtrek/air@latest</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="co"># 装 Goose 或 sqlc-gen-go(按 plan 决策走 sqlc + golang-migrate;Goose 不需要)</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="co"># 验证版本</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="ex">go</span> version           <span class="co"># 需 1.23+</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="ex">sqlc</span> version</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="ex">air</span> <span class="at">-v</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="ex">rclone</span> version</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="ex">migrate</span> <span class="at">-version</span></span></code></pre></div>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Tool</th>
+<th>状态</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Go 1.23+</td>
+<td>[x] <strong>1.26.3</strong> 装好(2026-05-20)</td>
+<td>go-api 整个 backend</td>
+</tr>
+<tr class="even">
+<td>sqlc</td>
+<td>[x] <strong>v1.31.1</strong> 装好(2026-05-20)</td>
+<td>SQL → Go 类型安全 codegen</td>
+</tr>
+<tr class="odd">
+<td>Air</td>
+<td>[x] <strong>v1.65.2</strong> 装好(2026-05-20,via <code>github.com/air-verse/air</code>)</td>
+<td>Go hot reload,dev.sh <code>air -c .air.toml</code></td>
+</tr>
+<tr class="even">
+<td>rclone</td>
+<td>[x] <strong>v1.74.1</strong> 装好(2026-05-20)</td>
+<td>nightly pg_dump → Cloudflare R2</td>
+</tr>
+<tr class="odd">
+<td>golang-migrate</td>
+<td>[x] <strong>v4.19.1</strong> 装好(2026-05-20)</td>
+<td>DB schema migration runner</td>
+</tr>
+<tr class="even">
+<td>jq</td>
+<td>[x] 已有</td>
+<td>restore-pg-drill.sh 解析 rclone lsjson</td>
+</tr>
+<tr class="odd">
+<td>Bun 1.3.14</td>
+<td>[ ] 本地 1.3.11,需 <code>bun upgrade</code>(可推到 P3 启动前)</td>
+<td>Next.js + ws-server runtime</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cloudflare-r2-账号-bucket">1. Cloudflare R2 账号 + bucket</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+Cloudflare R2 Plan 激活,$0/month free tier(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+R2 → Create bucket <code>animego-backup</code>(Automatic location → Oceania,Standard storage class)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>Account API Token</strong> <code>animego-rclone-prod</code>,Object Read &amp; Write,scope 仅 <code>animego-backup</code>,Forever TTL(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+凭据存密码管理器(setup 中 rotated 二次:第一次用户误贴 chat,第二次 claude 的 <code>sed -n '/^\[r2\]/...'</code> 命令打印 conf 文件含 secret;第三次 token 接管,旧 token revoked)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>rclone config</code> 配 remote <code>r2</code>:provider Cloudflare、region auto、endpoint S3 API URL、<strong><code>no_check_bucket = true</code></strong>(否则 rcat 会试 CreateBucket,bucket-scoped token 403)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong><code>brew install flock</code></strong>(backup-pg.sh 并发锁需要;mac 不自带,新装 0.4.0)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+测试 round-trip:<code>rcat _test.txt</code> → <code>ls</code> → <code>cat</code> → <code>delete</code>,5 步全过(2026-05-20)</li>
+</ul>
+<hr />
+<h2 id="目录骨架claude-代做">2. 目录骨架(claude 代做)</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>mkdir -p go-api/{cmd/server,cmd/migrate,cmd/seed,cmd/migrate-mongo}</code> (2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>mkdir -p go-api/internal/{config,db/queries,db/gen,middleware,routes,services}</code> (2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>mkdir -p go-api/migrations</code> + .gitkeep (2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>mkdir -p ws-server</code>(P2.8 占位)+ .gitkeep (2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>mkdir -p scripts</code>(已存在,加 dev.sh / measure-tthw.sh / backup-pg.sh / restore-pg-drill.sh / p0-bootstrap.sh)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+创建 <code>go-api/.air.toml</code>(P0 dev.sh 依赖)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+创建 <code>go-api/sqlc.yaml</code>(2026-05-20)</li>
+</ul>
+<hr />
+<h2 id="go-module-depsuser-跑-bootstrap">3. Go module + deps(user 跑 bootstrap)</h2>
+<blockquote>
+<p>Plan §6 原文 <code>go get github.com/sqlc-dev/sqlc/cmd/sqlc</code> 是错的 —— sqlc 是 CLI 工具,brew 装,不是 Go runtime 依赖。bootstrap 已修正。</p>
+</blockquote>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>bash scripts/p0-bootstrap.sh</code> 跑过(2026-05-20):go mod init + 8 deps + go mod tidy + go test 全绿<ul>
+<li>deps 实际装到:chi/v5 v5.2.5、pgx/v5 v5.9.2、pgxpool、jwt/v5 v5.3.1、river v0.37.1、riverpgxv5 v0.37.1、google/uuid v1.6.0</li>
+</ul></li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go mod tidy</code> 干净(bootstrap 末尾自动跑)</li>
+</ul>
+<hr />
+<h2 id="go-http-server-skeleton">4. Go HTTP server skeleton</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>go-api/cmd/server/main.go</code>:chi router + <code>:8080/health</code> → <code>200 {"ok":true,"service":"go-api","stage":"P0"}</code> + slog JSON + graceful shutdown(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go-api/internal/config/config.go</code>:env 加载(PORT_GO, DATABASE_URL, JWT_SECRET, CLIENT_ORIGIN);P0 容忍 JWT_SECRET 缺(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go-api/internal/middleware/recoverer.go</code>:用 chi/middleware.Recoverer 内置,不另起文件;RequestID + RealIP + Timeout 已 wire(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go test ./go-api/...</code> 跑通(2026-05-20,bootstrap 末尾;cmd/server + internal/config 空套件 pass)</li>
+</ul>
+<hr />
+<h2 id="docker-composedev">5. Docker compose(dev)</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+创建 <code>docker-compose.dev.yml</code>(跟 prod compose 分开,container_name 带 <code>-dev</code> 后缀防冲突)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+Postgres service:<code>postgres:16-alpine</code>,user <code>animego</code>,db <code>animego</code>,volume <code>postgres-dev-data</code>(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+Postgres healthcheck:<code>pg_isready -U animego</code>,间隔 5s 重试 10 次(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+Mongo service(过渡保留):<code>mongo:7</code>,volume <code>mongo-dev-data</code>(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+验证:<code>docker compose -f docker-compose.dev.yml up -d postgres mongo</code> + ps 都 healthy(2026-05-20)</li>
+</ul>
+<hr />
+<h2 id="scripts">6. scripts/</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>scripts/dev.sh</code>:P0 stage(postgres + mongo + go-api),60s timeout、trap、TTHW marker(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>scripts/measure-tthw.sh</code>:marker 文件计时(eng review C2)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>scripts/backup-pg.sh</code>:pg_dump | rclone rcat,flock 锁,env=dev/prod(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>scripts/restore-pg-drill.sh</code>:fetch newest from R2,restore 临时 DB,sanity check,cleanup(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>scripts/p0-bootstrap.sh</code>:idempotent go mod init + 7 deps + smoke test(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>chmod +x scripts/*.sh</code>(2026-05-20)</li>
+<li><input type="checkbox" disabled="" />
+<strong><code>setup.sh</code> 不在 P0 改动范围</strong>:setup.sh 是 Debian VPS 用的 apt 脚本,跟 dev mac 的 brew 不同;dev mac 工具链清单在 README.md / go-api/README.md / 本文件 §0;VPS 部分推到 P8 deployment</li>
+<li><input type="checkbox" disabled="" checked="" />
+验证 <code>bash scripts/dev.sh</code> 起得来:TTHW marker 6 秒出,curl :8080/health 返 <code>{"ok":true,"service":"go-api","stage":"P0"}</code> 200 OK(2026-05-20)</li>
+</ul>
+<hr />
+<h2 id="r2-crontab-nightly-backup">7. R2 + crontab nightly backup</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>scripts/backup-pg.sh</code> 写完(pg_dump -Fc -Z 6 | rclone rcat,流式不落盘)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>scripts/restore-pg-drill.sh</code> 写完(P0 → P1 critical gate)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>docs/migration/P0-CRONTAB.md</code> 写完(VPS crontab + logrotate 参考)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+本地 <code>bash scripts/backup-pg.sh --env=dev</code>:<code>pg-2026-05-20.dump</code> 2786B 上 R2,1s 完成(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong><code>bash scripts/restore-pg-drill.sh</code> PASS</strong> ← <strong>P0 → P1 critical gate 通过</strong>(2026-05-20)<ul>
+<li>download 2786B in 1s → throwaway DB <code>animego_restore_drill</code> → pg_restore 1s → Postgres 16.14 verified → 1 public table (p0_marker, 1 row) → cleanup OK → exit 0</li>
+</ul></li>
+<li><input type="checkbox" disabled="" />
+VPS 上 crontab 三行(见 P0-CRONTAB.md):03:00 backup、04:00 30d retention、Sun 05:00 restore drill ←<strong>P8 deployment 一并装</strong></li>
+<li><input type="checkbox" disabled="" />
+VPS 上 logrotate 装好(<code>/etc/logrotate.d/animego</code>,见 P0-CRONTAB.md)←<strong>P8 deployment 一并装</strong></li>
+<li><input type="checkbox" disabled="" />
+模拟 31 天老文件 → 触发 retention 真删过(P0 acceptance,详 plan)←<strong>可后置,不阻塞 P1</strong></li>
+</ul>
+<hr />
+<h2 id="env-文件eng-review-a1-dx-review-同步">8. .env 文件(eng review A1 + DX review 同步)</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>.env.example</code> 重写:分 Shared / v2.0.x(Express+Mongo)/ feat/go-backend(Go+PG)/ Next.js 四段,POSTGRES_PASSWORD + DATABASE_URL + PORT_GO + PORT_WS 全加(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>.env.production.example</code> mirror:Go + PG 段先注释,cutover 时启用(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>.gitignore</code> 确认 <code>.env</code> <code>.env.production</code> 已在(grep 过,都有)(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>.env</code> 本地生成,JWT_SECRET + JWT_REFRESH_SECRET + POSTGRES_PASSWORD 用 openssl rand 填,chmod 600(2026-05-20)</li>
+</ul>
+<hr />
+<h2 id="readme-顶部-active-rewrite-banner">9. README 顶部 “Active rewrite” banner</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+README.md Project Status 段重写:banner + Tech Stack 更新 + 链到 MIGRATION_PLAN.md / .html / P0-PROGRESS.md(2026-05-20)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go-api/README.md</code> 写完(Go 模块 quick reference)(2026-05-20)</li>
+</ul>
+<hr />
+<h2 id="tests-acceptancep0-p1-gate">10. Tests + Acceptance(P0 → P1 gate)</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" />
+<code>go test ./go-api/...</code> 空套件全绿</li>
+<li><input type="checkbox" disabled="" />
+<strong>R2 backup → restore drill 真跑过</strong>(必须,P0 → P1 critical gate)</li>
+<li><input type="checkbox" disabled="" />
+R2 30-day retention cleanup 真触发过</li>
+<li><input type="checkbox" disabled="" />
+<code>scripts/dev.sh</code> 把 postgres + mongo + go-api 三个起来,<code>:8080/health</code> 200</li>
+<li><input type="checkbox" disabled="" />
+TTHW 测试:<code>bash scripts/measure-tthw.sh</code> 报告 &lt; 5min(M1/M2 Mac warm-cache 基准)</li>
+<li><input type="checkbox" disabled="" />
+<strong>scripts/dev.sh 完整 6 进程跑得起来这个 gate 要到 P3(Next)+ P2.8(ws-server)完成才能验</strong>,P0 阶段只需 go-api 部分工作</li>
+</ul>
+<hr />
+<h2 id="phase-0-退出close-this-file-的条件">11. Phase 0 退出(close this file 的条件)</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+上面 10 节 dev-side 全部勾完(VPS-side 后置:crontab + logrotate 推到 P8 一起,retention drill 推到 P1 schema 上来再跑)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>2026-05-20 第一次 R2 restore drill PASS</strong>:<code>pg-2026-05-20.dump</code> 2786B(p0_marker 1 row)</li>
+<li><input type="checkbox" disabled="" checked="" />
+Commit history 在 <code>feat/go-backend</code> 分支可查(<code>459effe</code> 起,<code>3ae659d</code> scaffold,<code>c991021</code> bootstrap,本 commit P0 closeout)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>准备开 P1</strong>(migration tool: cmd/migrate-mongo + 14 表 schema + dry-run + field parity)</li>
+</ul>
+<hr />
+<h2 id="notes-decisions随时追加">Notes / Decisions(随时追加)</h2>
+<ul>
+<li>2026-05-20 18:xx — 开分支,本文件作为 P0 追踪起点。工具链 4 项(go/sqlc/air/rclone/migrate)都未装,优先级最高。</li>
+<li>2026-05-20 19:xx — claude 代做 §2 / §4 / §5 / §6 / §8 / §9(目录骨架、Go server stub、docker-compose.dev.yml、5 个脚本、.env 双份、README banner)+ <code>docs/migration/P0-CRONTAB.md</code>。subagents 协同产出 <code>.air.toml</code> + <code>sqlc.yaml</code>(google/uuid override + pgx 类型映射)+ <code>backup-pg.sh</code> + <code>restore-pg-drill.sh</code>(flock 锁 + jq newest pick + cleanup trap)。剩 user 跑:brew 工具链 → rclone R2 config → <code>bash scripts/p0-bootstrap.sh</code> → 第一次 backup-pg.sh + restore drill → VPS crontab + logrotate。</li>
+<li>2026-05-20 22:50 — claude 操作:<code>brew install go sqlc rclone golang-migrate</code>(后台 ~5min)+ Docker Desktop 启动 + <code>docker compose up -d postgres mongo</code> 拉镜像 + <code>go install github.com/air-verse/air@latest</code>(注:<code>cosmtrek/air</code> 已迁到 <code>air-verse/air</code>,scripts 里 fallback 顺序已对)+ <code>bash scripts/p0-bootstrap.sh</code> 一遍过 + <code>bash scripts/dev.sh</code> 起来,<strong>TTHW = 6 秒</strong>,curl <code>:8080/health</code> → 200 + <code>{"ok":true,"service":"go-api","stage":"P0"}</code>。P0 关键链路通过。dev.sh + p0-bootstrap.sh 加了一行 <code>export PATH="${PATH}:${GOPATH:-$HOME/go}/bin"</code>,免得 user shell profile 还没 export 时 air 找不到。</li>
+<li>Plan §6 原文写 <code>go get github.com/sqlc-dev/sqlc/cmd/sqlc</code> 是错的(sqlc 是 CLI,不是 runtime lib),p0-bootstrap.sh 已修正,本文件 §3 已 flag。</li>
+<li>DX review polish #2(<code>setup.sh 加 Air 安装</code>)重新分类:setup.sh 是 VPS Debian apt 脚本,Air 是 dev-only 工具,放进 setup.sh 没意义。dev mac 工具链清单写在 §0 + go-api/README.md。已在 §8 TODO Eng review #2 旁边补一条 clarification。</li>
+<li><strong>Air repo 迁移</strong>:<code>github.com/cosmtrek/air</code> → <code>github.com/air-verse/air</code>。p0-bootstrap.sh + 错误消息已优先用 air-verse(cosmtrek fallback)。go-api/README.md 还写 cosmtrek 路径,下一轮顺手改。</li>
+<li>2026-05-20 22:46 — Cloudflare R2 配通,P0 → P1 critical gate 过:
+<ul>
+<li>R2 bucket <code>animego-backup</code> 建好,Account API Token <code>animego-rclone-prod</code> 装好(token 三次 rotate,设置过程暴露了泄露通道,后续不再 sed/cat conf 文件;backup-pg.sh + restore-pg-drill.sh 验证全过)</li>
+<li>rclone config 加 <code>no_check_bucket = true</code>(rcat 默认 CreateBucket 在 bucket-scoped token 下 403)</li>
+<li><code>brew install flock</code> 给 backup-pg.sh 的并发锁补依赖(Linux 自带,Mac 不带)</li>
+<li>p0_marker 临时表用过即删,不污染 dev DB</li>
+</ul></li>
+</ul>
+</body>
+</html>

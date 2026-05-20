@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN" xml:lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>AnimeGo P1 Progress (2026-05-21)</title>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
+  <style>
+  :root {
+    --bg: #0e1116; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --code-bg: #161b22; --border: #30363d; --highlight: #f0c674;
+  }
+  html { background: var(--bg); color: var(--fg); color-scheme: dark; scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 1100px; margin: 0 auto; padding: 2.5rem 3rem 6rem;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    border-bottom: 1px solid var(--border); padding-bottom: .3em;
+    font-weight: 600; color: var(--fg); margin-top: 2em; margin-bottom: 0.6em;
+  }
+  h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; }
+  h1 { font-size: 1.85rem; color: var(--highlight); }
+  h2 { font-size: 1.45rem; color: var(--highlight); }
+  h3 { font-size: 1.15rem; border-bottom: 1px dashed var(--border); }
+  h4 { font-size: 1rem; border: 0; color: var(--muted); }
+  p { margin: 1em 0; }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+  code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
+    color: #ffa657; border: 1px solid var(--border); }
+  pre { background: var(--code-bg); padding: 1rem 1.2rem; overflow-x: auto;
+    border: 1px solid var(--border); border-radius: 6px; font-size: 0.84em;
+    line-height: 1.55; margin: 1em 0; }
+  pre code { padding: 0; background: transparent; color: var(--fg); font-size: 1em; border: 0; }
+  blockquote { border-left: 3px solid var(--accent); margin: 1em 0; padding: .6em 1.2em;
+    color: var(--muted); background: rgba(88,166,255,0.06); border-radius: 0 4px 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
+  th, td { border: 1px solid var(--border); padding: .55em .85em; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; color: var(--highlight); }
+  tbody tr:nth-child(odd) { background: rgba(255,255,255,0.025); }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+  nav#TOC { background: var(--code-bg); padding: 1.2rem 1.6rem; border-radius: 6px;
+    border: 1px solid var(--border); margin: 1.5rem 0 2.5rem; font-size: 0.88em; }
+  nav#TOC ul { padding-left: 1.4em; margin: 0.3em 0; list-style: none; }
+  nav#TOC > ul { padding-left: 0; }
+  strong { color: var(--highlight); font-weight: 600; }
+  em { color: #a5d6ff; font-style: normal; opacity: 0.85; }
+  li { margin: 0.18em 0; }
+  header.title-block-header { padding-bottom: 1.5em; border-bottom: 2px solid var(--border); margin-bottom: 2em; }
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">AnimeGo P1 Progress (2026-05-21)</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#phase-1-progress-migration-tool-mongo-postgres">Phase 1 Progress — Migration Tool (Mongo → Postgres)</a>
+<ul>
+<li><a href="#p1.a-schema8-12-hr">1. P1.A — Schema(8-12 hr)✓</a>
+<ul>
+<li><a href="#已知问题转-p1.f-处理">已知问题(转 P1.F 处理)</a></li>
+</ul></li>
+<li><a href="#p1.b-go-skeleton4-6-hr">2. P1.B — Go skeleton(4-6 hr)✓</a>
+<ul>
+<li><a href="#dep-增量">Dep 增量</a></li>
+</ul></li>
+<li><a href="#p1.c-7-collection-transforms10-15-hr">3. P1.C — 7 collection transforms(10-15 hr)</a></li>
+<li><a href="#p1.d-testcontainers-go-集成测试6-8-hr">4. P1.D — testcontainers-go 集成测试(6-8 hr)</a></li>
+<li><a href="#p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)</a></li>
+<li><a href="#p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)</a></li>
+<li><a href="#p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)</a></li>
+<li><a href="#p1-p2-退出条件critical-gate">P1 → P2 退出条件(critical gate)</a></li>
+<li><a href="#notes-decisions随时追加">Notes / Decisions(随时追加)</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="phase-1-progress-migration-tool-mongo-postgres">Phase 1 Progress — Migration Tool (Mongo → Postgres)</h1>
+<p><strong>Branch:</strong> <code>feat/go-backend</code>
+<strong>Started:</strong> 2026-05-21
+<strong>Estimated:</strong> 40-60 hr(单人 + Claude Code,subagents 协同)
+<strong>Plan reference:</strong> <code>docs/migration/MIGRATION_PLAN.md</code> § Phase 1</p>
+<blockquote>
+<p>追踪 7 个 sub-task(A-G)。Sub-task A 和 B 在 2026-05-21 session 完成。</p>
+</blockquote>
+<hr />
+<h2 id="p1.a-schema8-12-hr">1. P1.A — Schema(8-12 hr)✓</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>go-api/migrations/0001_init.up.sql</code> + <code>.down.sql</code>(14 张表,FK CASCADE 全打)(2026-05-21,subagent A)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go-api/migrations/0002_indexes.up.sql</code> + <code>.down.sql</code>(19 个 secondary index:GIN tsvector + pg_trgm × 4 列 + 复合索引 + partial)(2026-05-21,subagent A)</li>
+<li><input type="checkbox" disabled="" checked="" />
+Schema 应用到 dev DB via <code>golang-migrate up</code>(2026-05-21)<ul>
+<li><code>1/u init</code> 141ms(14 张表 + 1 schema_migrations 元表)</li>
+<li><code>2/u indexes</code> 192ms(21 个 index 含主键约束 + 唯一约束)</li>
+<li>总计 dev DB 36 个 index</li>
+</ul></li>
+<li><input type="checkbox" disabled="" checked="" />
+CASCADE delete 实测:删 anime_cache 一行 → anime_genres 关联 rows 自动消失</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>search_vec</code> generated column 实测:<code>Naruto</code> / <code>ナルト</code> / <code>火影忍者</code> 三种文字 <code>'simple'</code> config 都 tokenize 成功</li>
+<li><input type="checkbox" disabled="" checked="" />
+up → verify → down → verify 空 → up round-trip 干净</li>
+</ul>
+<h3 id="已知问题转-p1.f-处理">已知问题(转 P1.F 处理)</h3>
+<ul>
+<li><strong>pg_cron extension 在 0001 已注释</strong>。<code>postgres:16-alpine</code> 默认不带 pg_cron control 文件,直接 CREATE EXTENSION 会让 golang-migrate 整个 migration 事务回滚。P1.F 任务里换镜像(基于 <code>postgres:16-alpine</code> 编译 pg_cron 进自定义 Dockerfile)再加回来。</li>
+</ul>
+<hr />
+<h2 id="p1.b-go-skeleton4-6-hr">2. P1.B — Go skeleton(4-6 hr)✓</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>cmd/migrate-mongo/main.go</code> — stdlib <code>flag</code> CLI(<code>--mongo-uri --pg-uri --dry-run --commit --collections --batch-size --log-failed --concurrency --version</code>),<code>--dry-run</code> 跟 <code>--commit</code> 必须二选一,密码 mask 进 slog 日志(2026-05-21,subagent B)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transform.go</code> — <code>Transform</code> interface + <code>PGRow{Table, Columns, Values}</code> 输出结构 + 包级 registry(<code>Register</code>/<code>Lookup</code>/<code>Registered</code>)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/mongo_conn.go</code> — mongo-driver v2 client,read-pref primary,ping verify(2026-05-21 修了 <code>SetSocketTimeout</code> —— v2 已删,改用 context.WithTimeout 控制 per-op deadline)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/pg_conn.go</code> — pgxpool,max conns 10,connect+ping timeout 10s</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/orchestrator.go</code> — 拓扑排序(DFS + white/gray/black)+ 批量 UPSERT(动态 <code>INSERT ... ON CONFLICT $target DO UPDATE</code>)+ 失败 JSONL + 每集合 mongo/pg/transformed/failed 报告</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go build ./...</code> + <code>go vet ./...</code> + <code>go test -race ./...</code> 全绿</li>
+<li><input type="checkbox" disabled="" checked="" />
+CLI smoke:<code>--version</code> / <code>--help</code> / flag validation(无 <code>--dry-run</code>/<code>--commit</code> exit 2)三件全过</li>
+</ul>
+<h3 id="dep-增量">Dep 增量</h3>
+<p>P0 bootstrap 装的 7 个 dep 基础上,本轮 <code>go get</code> 自动拉:
+- <code>go.mongodb.org/mongo-driver/v2</code> v2.6.0(+ klauspost/compress、xdg-go/scram、youmark/pkcs8、x/crypto、x/sync、x/text 间接依赖)</p>
+<hr />
+<h2 id="p1.c-7-collection-transforms10-15-hr">3. P1.C — 7 collection transforms(10-15 hr)</h2>
+<p><strong>[pending]</strong> — 下个 session</p>
+<p>每个 transform 一个文件,自注册到 registry 通过 init()。<code>anime_cache</code> 是最大的(一个 Mongo doc fan-out 成 1 anime_cache + N genres + M studios + … 共 7 个子表 rows)。</p>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" />
+<code>internal/migrate/transforms/users.go</code>(_id ObjectId → uuid;timestamps Date → timestamptz)</li>
+<li><input type="checkbox" disabled="" />
+<code>internal/migrate/transforms/anime_cache.go</code>(embedded arrays fan-out 7 child tables;<code>startDate{year,month,day}</code> → <code>make_date()</code>;<code>is_public</code> 默认 true)</li>
+<li><input type="checkbox" disabled="" />
+<code>internal/migrate/transforms/subscriptions.go</code>(userId ObjectId → uuid FK lookup)</li>
+<li><input type="checkbox" disabled="" />
+<code>internal/migrate/transforms/follows.go</code></li>
+<li><input type="checkbox" disabled="" />
+<code>internal/migrate/transforms/episode_comments.go</code>(parentId 自引用 ObjectId → uuid)</li>
+<li><input type="checkbox" disabled="" />
+<code>internal/migrate/transforms/danmakus.go</code>(content length 50 check;<code>liveEndsAt</code> 必填)</li>
+<li><input type="checkbox" disabled="" />
+<code>internal/migrate/transforms/episode_windows.go</code>(无 timestamps)</li>
+<li><input type="checkbox" disabled="" />
+testify 单测每个 transform(ObjectId / Date 时区 / embedded subdoc nil / 边界值)</li>
+<li><input type="checkbox" disabled="" />
+anonymous init() 链 import 到 main.go 让 registry 自动填充</li>
+</ul>
+<hr />
+<h2 id="p1.d-testcontainers-go-集成测试6-8-hr">4. P1.D — testcontainers-go 集成测试(6-8 hr)</h2>
+<p><strong>[pending]</strong></p>
+<p>起 mongo + postgres 容器(testcontainers-go),用 fixture 灌 mongo data,跑 migration commit 模式,assert PG rows 等价(行数 + 关键字段值)。</p>
+<hr />
+<h2 id="p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)</h2>
+<p><strong>[pending]</strong></p>
+<ul>
+<li>VPS 拉 prod mongodump → 本地 mongo 容器导入</li>
+<li><code>go run ./cmd/migrate-mongo --dry-run --collections all</code>,row count diff &lt; 0.1%</li>
+<li>10 个 UI-critical field × 1000 行 random sample,mongo 跟 PG strict equal(null 等价容忍)
+<ul>
+<li><code>titleChinese / characters[0].nameCn / coverImageColor / posterAccent / startDate / averageScore / bangumiScore / episodeTitles[0].nameCn / studios[0] / genres[0]</code></li>
+</ul></li>
+<li>失败行 JSONL 反查 root cause + fix transform</li>
+</ul>
+<hr />
+<h2 id="p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)</h2>
+<p><strong>[pending]</strong> — <strong>先解决 docker image 不带 pg_cron 的问题</strong></p>
+<ol type="1">
+<li>新建 <code>go-api/docker/postgres/Dockerfile</code>:<code>FROM postgres:16-alpine</code> + <code>apk add build-base postgresql16-dev</code> + git clone https://github.com/citusdata/pg_cron + make + make install</li>
+<li><code>docker-compose.dev.yml</code> 改成 <code>build: ./go-api/docker/postgres</code></li>
+<li>新 migration <code>0003_pg_cron.up.sql</code>:<code>CREATE EXTENSION pg_cron;</code> + <code>SELECT cron.schedule('danmaku-ttl', '0 4 * * *', $$DELETE FROM danmakus WHERE created_at &lt; NOW() - INTERVAL '1 year'$$);</code></li>
+<li>18-month 老 danmaku fire test:插入老 row → 触发 cron → SELECT count == 0</li>
+</ol>
+<hr />
+<h2 id="p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)</h2>
+<p><strong>[pending]</strong></p>
+<ul>
+<li>ASCII ERD diagram(14 表 FK 关系)写入 <code>go-api/README.md</code> schema 段</li>
+<li><code>docs/migration/MIGRATION_PLAN.md</code> § Phase 1 加 “P1 实际进度” 链回本文件</li>
+<li>重生成 <code>MIGRATION_PLAN.html</code> + <code>P0-PROGRESS.html</code> + <code>P1-PROGRESS.html</code></li>
+</ul>
+<hr />
+<h2 id="p1-p2-退出条件critical-gate">P1 → P2 退出条件(critical gate)</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" />
+7 transforms 全 testify 单测 ≥ 80% 覆盖</li>
+<li><input type="checkbox" disabled="" />
+testcontainers 集成测试全过(fixture → migration → assert)</li>
+<li><input type="checkbox" disabled="" />
+dry-run on prod mongodump:row diff &lt; 0.1% + 10×1000 field parity 全 strict equal</li>
+<li><input type="checkbox" disabled="" />
+pg_cron TTL 真触发删过 18-month 老 row</li>
+<li><input type="checkbox" disabled="" />
+ERD diagram 落进 go-api/README.md</li>
+</ul>
+<hr />
+<h2 id="notes-decisions随时追加">Notes / Decisions(随时追加)</h2>
+<ul>
+<li>2026-05-21 00:50 — P1 启动。多 subagent 并行设计:Subagent A 出 schema(0001 + 0002),Subagent B 出 Go skeleton(orchestrator + transform interface + connections + CLI)。两者真正独立(SQL vs Go),无 cross-dep。</li>
+<li>2026-05-21 00:55 — Subagent A 第一次撞 API 529 overloaded(Claude 服务端瞬时压力),重派一次成功。耗时 ~45s。</li>
+<li>2026-05-21 01:00 — Subagent B 595s(~10min)完成。质量高:topo-sort、动态 UPSERT、失败 JSONL、密码 mask、context.WithTimeout 编排正确。</li>
+<li>2026-05-21 01:04 — Schema 在 dev DB 完整 roundtrip 测试通过(up + CASCADE + tsvector + down + 再 up)。发现 <code>postgres:16-alpine</code> 不带 pg_cron,转 P1.F。</li>
+<li>2026-05-21 01:11 — Subagent B 写的 mongo_conn.go 用了 <code>SetSocketTimeout</code>,mongo-driver v2 已删,改用 context.WithTimeout per-op deadline。go build/vet/test 全绿后 golang-migrate 实测 PASS。</li>
+<li><strong>决策:Mongo driver 版本</strong> — 用 v2(<code>go.mongodb.org/mongo-driver/v2</code>)而不是 v1。v2 删了若干 deprecated API(SetSocketTimeout 是其中之一),但 bson 语义和 Connect 入口更干净。如果 prod mongodump 有 v1-only 特殊字段问题,P1.C transforms 阶段再回头看。</li>
+</ul>
+</body>
+</html>
