@@ -55,81 +55,83 @@ migrate -version
 
 ## 2. 目录骨架(claude 代做)
 
-- [ ] `mkdir -p go-api/{cmd/server,cmd/migrate,cmd/seed,cmd/migrate-mongo}`
-- [ ] `mkdir -p go-api/internal/{config,db/queries,db/gen,middleware,routes,services}`
-- [ ] `mkdir -p go-api/migrations`
-- [ ] `mkdir -p ws-server`(P2.8 占位)
-- [ ] `mkdir -p scripts`(已存在,加 dev.sh / measure-tthw.sh / backup-pg.sh)
-- [ ] 创建 `go-api/.air.toml`(P0 dev.sh 依赖)
-- [ ] 创建 `go-api/sqlc.yaml`
+- [x] `mkdir -p go-api/{cmd/server,cmd/migrate,cmd/seed,cmd/migrate-mongo}` (2026-05-20)
+- [x] `mkdir -p go-api/internal/{config,db/queries,db/gen,middleware,routes,services}` (2026-05-20)
+- [x] `mkdir -p go-api/migrations` + .gitkeep (2026-05-20)
+- [x] `mkdir -p ws-server`(P2.8 占位)+ .gitkeep (2026-05-20)
+- [x] `mkdir -p scripts`(已存在,加 dev.sh / measure-tthw.sh / backup-pg.sh / restore-pg-drill.sh / p0-bootstrap.sh)(2026-05-20)
+- [x] 创建 `go-api/.air.toml`(P0 dev.sh 依赖)(2026-05-20)
+- [x] 创建 `go-api/sqlc.yaml`(2026-05-20)
 
 ---
 
-## 3. Go module + 5 个 deps
+## 3. Go module + deps(user 跑 bootstrap)
 
-- [ ] `cd go-api && go mod init github.com/lawrenceli0228/animego/go-api`
-- [ ] `go get github.com/go-chi/chi/v5`
-- [ ] `go get github.com/jackc/pgx/v5`
-- [ ] `go get github.com/sqlc-dev/sqlc/cmd/sqlc`
-- [ ] `go get github.com/golang-jwt/jwt/v5`
-- [ ] `go get github.com/riverqueue/river`
-- [ ] `go mod tidy` 干净通过
+> Plan §6 原文 `go get github.com/sqlc-dev/sqlc/cmd/sqlc` 是错的 —— sqlc 是 CLI 工具,brew 装,不是 Go runtime 依赖。bootstrap 已修正。
+
+- [ ] `bash scripts/p0-bootstrap.sh` 跑过(代办 `go mod init` + 6 个 deps + smoke test);需 Go 装好
+  - deps:chi/v5、chi/middleware、pgx/v5、pgxpool、jwt/v5、river、river/riverdriver/riverpgxv5、google/uuid(sqlc UUID override 用)
+- [ ] `go mod tidy` 干净(bootstrap 末尾自动跑)
 
 ---
 
 ## 4. Go HTTP server skeleton
 
-- [ ] `go-api/cmd/server/main.go`:chi router + `:8080/health` → `200 {"ok":true}`
-- [ ] `go-api/internal/config/config.go`:env 加载(DATABASE_URL, JWT_SECRET, PORT)
-- [ ] `go-api/internal/middleware/recoverer.go`:panic → 500 with request id
-- [ ] `go test ./go-api/...` 跑通(空套件 pass 即可)
+- [x] `go-api/cmd/server/main.go`:chi router + `:8080/health` → `200 {"ok":true,"service":"go-api","stage":"P0"}` + slog JSON + graceful shutdown(2026-05-20)
+- [x] `go-api/internal/config/config.go`:env 加载(PORT_GO, DATABASE_URL, JWT_SECRET, CLIENT_ORIGIN);P0 容忍 JWT_SECRET 缺(2026-05-20)
+- [x] `go-api/internal/middleware/recoverer.go`:用 chi/middleware.Recoverer 内置,不另起文件;RequestID + RealIP + Timeout 已 wire(2026-05-20)
+- [ ] `go test ./go-api/...` 跑通(空套件 pass 即可)—— bootstrap 末尾自动跑
 
 ---
 
 ## 5. Docker compose(dev)
 
-- [ ] 创建 `docker-compose.dev.yml`(跟 prod compose 分开)
-- [ ] Postgres service:`postgres:16-alpine`,user `animego`,db `animego`,volume `postgres-data`
-- [ ] Postgres healthcheck:`pg_isready -U animego`
-- [ ] Mongo service(过渡保留,cutover 后 30 天清):`mongo:7`,volume 沿用现有 mongo-data
-- [ ] 验证:`docker compose -f docker-compose.dev.yml up -d postgres mongo` + `docker compose -f docker-compose.dev.yml ps` 都 healthy
+- [x] 创建 `docker-compose.dev.yml`(跟 prod compose 分开,container_name 带 `-dev` 后缀防冲突)(2026-05-20)
+- [x] Postgres service:`postgres:16-alpine`,user `animego`,db `animego`,volume `postgres-dev-data`(2026-05-20)
+- [x] Postgres healthcheck:`pg_isready -U animego`,间隔 5s 重试 10 次(2026-05-20)
+- [x] Mongo service(过渡保留):`mongo:7`,volume `mongo-dev-data`(2026-05-20)
+- [ ] 验证:`docker compose -f docker-compose.dev.yml up -d postgres mongo` + ps 都 healthy ←需 user 跑过一次
 
 ---
 
-## 6. scripts/dev.sh(Appendix C 完整 spec)
+## 6. scripts/
 
-- [ ] 创建 `scripts/dev.sh`(参考 `docs/migration/MIGRATION_PLAN.md` Appendix C)
-- [ ] `chmod +x scripts/dev.sh`
-- [ ] 创建 `scripts/measure-tthw.sh`(C2 修正,marker 文件计时)
-- [ ] 创建 `scripts/backup-pg.sh`(nightly pg_dump → R2)
-- [ ] 更新 `scripts/setup.sh`:加 brew install go/sqlc/rclone/golang-migrate + `go install air@latest`(A3 修)
-- [ ] 验证 `bash scripts/dev.sh` 起得来(Go 服务 :8080/health 必须 200,其它 endpoint 现在还没,所以 dev.sh 完整跑不通,但 Go 部分要工作)
+- [x] `scripts/dev.sh`:P0 stage(postgres + mongo + go-api),60s timeout、trap、TTHW marker(2026-05-20)
+- [x] `scripts/measure-tthw.sh`:marker 文件计时(eng review C2)(2026-05-20)
+- [x] `scripts/backup-pg.sh`:pg_dump | rclone rcat,flock 锁,env=dev/prod(2026-05-20)
+- [x] `scripts/restore-pg-drill.sh`:fetch newest from R2,restore 临时 DB,sanity check,cleanup(2026-05-20)
+- [x] `scripts/p0-bootstrap.sh`:idempotent go mod init + 7 deps + smoke test(2026-05-20)
+- [ ] `chmod +x scripts/*.sh`(下个 commit 顺手)
+- [ ] **`setup.sh` 不在 P0 改动范围**:setup.sh 是 Debian VPS 用的 apt 脚本,跟 dev mac 的 brew 不同;dev mac 工具链清单在 README.md / go-api/README.md / 本文件 §0;VPS 部分推到 P8 deployment
+- [ ] 验证 `bash scripts/dev.sh` 起得来 ←需 user p0-bootstrap.sh 跑过 + .env 配好
 
 ---
 
 ## 7. R2 + crontab nightly backup
 
-- [ ] `scripts/backup-pg.sh` 写完(`docker compose exec postgres pg_dump ... | gzip | rclone rcat r2:animego-backup/pg-$(date +%F).sql.gz`)
-- [ ] 本地手跑一次,确认 R2 里有文件
-- [ ] R2 web UI 下载这个文件 → 解压 → 喂回 staging Postgres `psql` → SELECT 几行,数据完整
-- [ ] VPS 上 crontab 加 `0 3 * * *` nightly backup
-- [ ] VPS 上 crontab 加 `0 4 * * *` `rclone delete --min-age 30d r2:animego-backup/` retention cleanup
-- [ ] 模拟 31 天老文件:`touch -d "31 days ago" /tmp/old.sql.gz && rclone copy /tmp/old.sql.gz r2:animego-backup/ && rclone delete --min-age 30d r2:animego-backup/` → 确认真删
+- [x] `scripts/backup-pg.sh` 写完(pg_dump -Fc -Z 6 | rclone rcat,流式不落盘)(2026-05-20)
+- [x] `scripts/restore-pg-drill.sh` 写完(P0 → P1 critical gate)(2026-05-20)
+- [x] `docs/migration/P0-CRONTAB.md` 写完(VPS crontab + logrotate 参考)(2026-05-20)
+- [ ] 本地跑一次 `bash scripts/backup-pg.sh --env=dev`,确认 R2 里有文件 ←需 rclone 配好
+- [ ] R2 web UI 看到文件 + `bash scripts/restore-pg-drill.sh` PASS ←**P0 → P1 critical gate**
+- [ ] VPS 上 crontab 三行(见 P0-CRONTAB.md):03:00 backup、04:00 30d retention、Sun 05:00 restore drill
+- [ ] VPS 上 logrotate 装好(`/etc/logrotate.d/animego`,见 P0-CRONTAB.md)
+- [ ] 模拟 31 天老文件 → 触发 retention 真删过(P0 acceptance,详 plan)
 
 ---
 
 ## 8. .env 文件(eng review A1 + DX review 同步)
 
-- [ ] `.env.example` 重写:加 `DATABASE_URL=postgres://animego:dev@localhost:5432/animego`、`JWT_SECRET=`、`RIVER_QUEUE_URL=`、`PORT_GO=8080`、`PORT_WS=3001`、`DANDANPLAY_APP_ID=`、`DANDANPLAY_APP_SECRET=`、保留 `MONGODB_URI=`(cutover 后删)
-- [ ] `.env.production.example` mirror 同上,prod 值占位
-- [ ] `.gitignore` 确认 `.env` `.env.production` 已在(目前应该有,double-check)
+- [x] `.env.example` 重写:分 Shared / v2.0.x(Express+Mongo)/ feat/go-backend(Go+PG)/ Next.js 四段,POSTGRES_PASSWORD + DATABASE_URL + PORT_GO + PORT_WS 全加(2026-05-20)
+- [x] `.env.production.example` mirror:Go + PG 段先注释,cutover 时启用(2026-05-20)
+- [ ] `.gitignore` 确认 `.env` `.env.production` 已在(double-check)←需 user 一眼
 
 ---
 
-## 9. README 顶部 "Active rewrite" banner(DX review 推迟到 P3 收口,但 P0 完成时可以加个轻量提示)
+## 9. README 顶部 "Active rewrite" banner
 
-- [ ] README.md 第一段后加一行:
-  > ⚠️ **Active rewrite in progress**(Go + PostgreSQL + Next.js 16),详见 [`docs/migration/MIGRATION_PLAN.md`](docs/migration/MIGRATION_PLAN.md)。当前 main 仍跑 v2.0.x stable,`feat/go-backend` 分支是重写工作流。
+- [x] README.md Project Status 段重写:banner + Tech Stack 更新 + 链到 MIGRATION_PLAN.md / .html / P0-PROGRESS.md(2026-05-20)
+- [x] `go-api/README.md` 写完(Go 模块 quick reference)(2026-05-20)
 
 ---
 
@@ -156,3 +158,6 @@ migrate -version
 ## Notes / Decisions(随时追加)
 
 - 2026-05-20 18:xx — 开分支,本文件作为 P0 追踪起点。工具链 4 项(go/sqlc/air/rclone/migrate)都未装,优先级最高。
+- 2026-05-20 19:xx — claude 代做 §2 / §4 / §5 / §6 / §8 / §9(目录骨架、Go server stub、docker-compose.dev.yml、5 个脚本、.env 双份、README banner)+ `docs/migration/P0-CRONTAB.md`。subagents 协同产出 `.air.toml` + `sqlc.yaml`(google/uuid override + pgx 类型映射)+ `backup-pg.sh` + `restore-pg-drill.sh`(flock 锁 + jq newest pick + cleanup trap)。剩 user 跑:brew 工具链 → rclone R2 config → `bash scripts/p0-bootstrap.sh` → 第一次 backup-pg.sh + restore drill → VPS crontab + logrotate。
+- Plan §6 原文写 `go get github.com/sqlc-dev/sqlc/cmd/sqlc` 是错的(sqlc 是 CLI,不是 runtime lib),p0-bootstrap.sh 已修正,本文件 §3 已 flag。
+- DX review polish #2(`setup.sh 加 Air 安装`)重新分类:setup.sh 是 VPS Debian apt 脚本,Air 是 dev-only 工具,放进 setup.sh 没意义。dev mac 工具链清单写在 §0 + go-api/README.md。已在 §8 TODO Eng review #2 旁边补一条 clarification。

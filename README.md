@@ -10,18 +10,25 @@ A full-stack anime discovery, tracking, and local playback platform. Browse seas
 
 ## Project Status
 
-**Status:** Active rewrite — full-stack migration to Next.js 14 + TypeScript
+> ⚠️ **Active rewrite in progress** — backend is moving to Go + PostgreSQL, frontend to Next.js 16.
+> Current `main` and the live site at [animegoclub.com](https://animegoclub.com) continue to run the v2.0.x Vite SPA + Express + MongoDB stack.
+> Rewrite work happens on branch **`feat/go-backend`**.
+> Full plan: [`docs/migration/MIGRATION_PLAN.md`](docs/migration/MIGRATION_PLAN.md) · HTML view: [`docs/migration/MIGRATION_PLAN.html`](docs/migration/MIGRATION_PLAN.html) · P0 tracking: [`docs/migration/P0-PROGRESS.md`](docs/migration/P0-PROGRESS.md)
+
+**Status:** Active rewrite — v2 plan locked 2026-05-12, 3 rounds of eng review + DX review applied
 **Migration started:** 2026-05-10 (from v2.0.0 baseline)
+**Target stack:** Next.js 16 + Bun + Go 1.23 (chi + pgx + sqlc) + PostgreSQL 16 + Node ws-server (socket.io)
 **Built with:** Claude Code (AI-assisted; product direction, decisions, and deployment by the author)
 
 ### Current rewrite
-The codebase is moving from Vite SPA + Express to a full-stack Next.js + TypeScript app. Goals:
+The codebase is moving from Vite SPA + Express + MongoDB to a polyglot stack: Next.js 16 RSC frontend + Go HTTP backend + Postgres. Goals:
 - Server-side rendering on SEO-relevant routes (`/anime/:id`, `/seasonal`, `/search`)
-- End-to-end type safety across client and API
-- Single deployment runtime (Next.js standalone)
-- 89+ Express endpoints migrating to Next API routes
+- Type-safe SQL via sqlc → pgx v5; no ORM runtime overhead
+- Single big-bang cutover with 24h rollback window
+- 48 HTTP endpoints in Go, danmaku websocket as separate `ws-server` microservice
+- Nightly Postgres pg_dump → Cloudflare R2 (30-day retention)
 
-The live site at [animegoclub.com](https://animegoclub.com) continues to run the v2.0.x Vite SPA build during the migration. See the migration plan committed under `docs/migration/` for phase-by-phase progress.
+The live site at [animegoclub.com](https://animegoclub.com) continues to run the v2.0.x stack during the rewrite. See the migration plan for phase-by-phase progress.
 
 ### Known limitations (intentional, not bugs)
 - **Danmaku matching** — accuracy is not pursued to 100%; users fall back to the manual per-episode picker for uncommon sequels. See `feedback_danmaku_matching` in the project memory for the reasoning (no LLM/AI matching by design).

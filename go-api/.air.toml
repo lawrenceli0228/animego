@@ -1,0 +1,57 @@
+# go-api/.air.toml
+# Air v1.61+ config for github.com/lawrenceli0228/animego/go-api
+# Docs: https://github.com/air-verse/air/blob/master/air_example.toml
+
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  # Build the chi HTTP server entry; sqlc CLI runs out-of-band via Make/Taskfile, not Air.
+  cmd = "go build -o ./tmp/main ./cmd/server"
+  bin = "./tmp/main"
+  full_bin = ""
+
+  # Watch Go sources AND SQL files so editing a query/migration triggers a rebuild
+  # (developer is expected to run `sqlc generate` before reload; see exclude_dir for gen/).
+  include_ext = ["go", "sql", "tpl", "tmpl", "html"]
+
+  # tmp/ = Air build artifacts; internal/db/gen/ = sqlc output, must NOT trigger reload loops;
+  # vendor/ excluded for speed; testdata/ kept out per Air convention.
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "internal/db/gen"]
+  exclude_file = []
+  exclude_regex = ["_test\\.go$"]
+  exclude_unchanged = true
+  follow_symlink = false
+
+  # macOS APFS / fsevents debounce — coalesce burst writes from editors & sqlc generate.
+  delay = 800
+
+  # Give the previous process room to flush DB conns / close chi server before SIGKILL.
+  kill_delay = "500ms"
+  send_interrupt = true
+
+  stop_on_error = true
+  log = "build-errors.log"
+  poll = false
+  poll_interval = 0
+  rerun = false
+  rerun_delay = 500
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  time = true
+  main_only = false
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = true
+  keep_scroll = true
