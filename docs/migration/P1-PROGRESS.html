@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>AnimeGo P1 Progress (2026-05-21)</title>
+  <title>AnimeGo — P1-PROGRESS</title>
   <!--[if lt IE 9]>
     <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
   <![endif]-->
@@ -56,7 +56,7 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">AnimeGo P1 Progress (2026-05-21)</h1>
+<h1 class="title">AnimeGo — P1-PROGRESS</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
@@ -88,8 +88,8 @@
 <ul>
 <li><a href="#一处架构调整顺便记下">一处架构调整(顺便记下)</a></li>
 </ul></li>
-<li><a href="#p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)</a></li>
-<li><a href="#p1-p2-退出条件critical-gate">P1 → P2 退出条件(critical gate)</a></li>
+<li><a href="#p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)✓</a></li>
+<li><a href="#p1-p2-退出条件critical-gate">P1 → P2 退出条件(critical gate)✓</a></li>
 <li><a href="#notes-decisions随时追加">Notes / Decisions(随时追加)</a></li>
 </ul></li>
 </ul>
@@ -318,27 +318,34 @@ Re-run parity-check:10/10 fields × 1000 samples = <strong>100.00% match</strong
 <h3 id="一处架构调整顺便记下">一处架构调整(顺便记下)</h3>
 <p><code>docker compose -f docker-compose.dev.yml down -v</code> 会同时干掉 mongo volume(虽然只是为了换 postgres image)。后果:本地 <code>animego_prod_copy</code> 没了。修复:从 <code>/tmp/animego-prod-mongodump-2026-05-21.archive.gz</code>(P1.E 拉的)再 mongorestore 一次(秒级)。教训:<strong>volume scope 用 named volume per service 可以避免连带删,但配置复杂度上升,目前 down -v + restore 流程足够快</strong>。</p>
 <hr />
-<h2 id="p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)</h2>
-<p><strong>[pending]</strong></p>
-<ul>
-<li>ASCII ERD diagram(14 表 FK 关系)写入 <code>go-api/README.md</code> schema 段</li>
-<li><code>docs/migration/MIGRATION_PLAN.md</code> § Phase 1 加 “P1 实际进度” 链回本文件</li>
-<li>重生成 <code>MIGRATION_PLAN.html</code> + <code>P0-PROGRESS.html</code> + <code>P1-PROGRESS.html</code></li>
+<h2 id="p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)✓</h2>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>docs/migration/ERD.md</code> 写完(独立文件):14 表 ASCII ERD + 索引概览 + extensions + ObjectId → UUID 映射规则。同步生成 <code>ERD.html</code></li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go-api/README.md</code> 大规模 rewrite:Quick Start 7 步 / 完整目录结构 / Schema overview 引用 ERD / 命令表扩 9 行(单测/集成/migrate-mongo/parity-check/truncate-retry)/ 工具链注释 cosmtrek → air-verse / <strong>6 段 P1 lessons 学到的 gotchas</strong>(Mongoose 命名 / mongo-driver bson.D / GOOS 后缀 / ConflictTarget per-table / FK ordering / bangumi_version / episodeTitles dedup)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>scripts/migrate-mongo-truncate-and-retry.sh</code>(72 行 bash):TRUNCATE 14 表 RESTART IDENTITY CASCADE → 跑 migrate-mongo –commit → 报每表 row count。env=dev/prod 切换 compose 文件 + DATABASE_URL。Cutover rehearsal 用,P9 cutover 不用(prod 是首次干净写入)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>docs/migration/MIGRATION_PLAN.md</code> § 7 状态表:P0 + P1 flip 到 <strong>DONE</strong>,链到 P0-PROGRESS.html + P1-PROGRESS.html + ERD.html</li>
+<li><input type="checkbox" disabled="" checked="" />
+HTML 重生:<code>P1-PROGRESS.html</code> / <code>ERD.html</code> / <code>MIGRATION_PLAN.html</code></li>
 </ul>
 <hr />
-<h2 id="p1-p2-退出条件critical-gate">P1 → P2 退出条件(critical gate)</h2>
+<h2 id="p1-p2-退出条件critical-gate">P1 → P2 退出条件(critical gate)✓</h2>
 <ul class="task-list">
-<li><input type="checkbox" disabled="" />
-7 transforms 全 testify 单测 ≥ 80% 覆盖</li>
-<li><input type="checkbox" disabled="" />
-testcontainers 集成测试全过(fixture → migration → assert)</li>
-<li><input type="checkbox" disabled="" />
-dry-run on prod mongodump:row diff &lt; 0.1% + 10×1000 field parity 全 strict equal</li>
-<li><input type="checkbox" disabled="" />
-pg_cron TTL 真触发删过 18-month 老 row</li>
-<li><input type="checkbox" disabled="" />
-ERD diagram 落进 go-api/README.md</li>
+<li><input type="checkbox" disabled="" checked="" />
+7 transforms 全 testify 单测,<strong>91.2% 覆盖</strong>(目标 80%)</li>
+<li><input type="checkbox" disabled="" checked="" />
+testcontainers 集成测试全过,<strong>7/7 PASS 9.76s wall</strong>(含 pg_cron TTL test)</li>
+<li><input type="checkbox" disabled="" checked="" />
+dry-run on prod mongodump:<strong>6493 → 95008 rows 100% transformed, 0 failures</strong>,parity 10×1000 = <strong>100.00% match</strong></li>
+<li><input type="checkbox" disabled="" checked="" />
+pg_cron TTL 真触发删过 18-month 老 row(integration test 直接 exec TTL SQL,等价 cron 调度)</li>
+<li><input type="checkbox" disabled="" checked="" />
+ERD diagram 落进 <a href="ERD.md"><code>ERD.md</code></a> + 链到 <code>go-api/README.md</code></li>
 </ul>
+<p><strong>P1 → P2 gate 全过,可开 P2.1(/api/anime/* + 富化 queue)</strong>。</p>
 <hr />
 <h2 id="notes-decisions随时追加">Notes / Decisions(随时追加)</h2>
 <ul>

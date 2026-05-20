@@ -4,150 +4,59 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>AnimeGo Migration Plan v2</title>
+  <title>AnimeGo — MIGRATION_PLAN</title>
   <!--[if lt IE 9]>
     <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
   <![endif]-->
   <style>
   :root {
-    --bg: #0e1116;
-    --fg: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
-    --code-bg: #161b22;
-    --border: #30363d;
-    --warn: #f97583;
-    --good: #56d364;
-    --highlight: #f0c674;
-    --kw: #ff7b72;
-    --str: #a5d6ff;
-    --num: #79c0ff;
-    --com: #8b949e;
+    --bg: #0e1116; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --code-bg: #161b22; --border: #30363d; --highlight: #f0c674;
   }
-  html {
-    background: var(--bg);
-    color: var(--fg);
-    color-scheme: dark;
-    scroll-behavior: smooth;
-  }
+  html { background: var(--bg); color: var(--fg); color-scheme: dark; scroll-behavior: smooth; }
   body {
-    background: var(--bg);
-    color: var(--fg);
+    background: var(--bg); color: var(--fg);
     font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 2.5rem 3rem 6rem;
+    max-width: 1100px; margin: 0 auto; padding: 2.5rem 3rem 6rem;
   }
   h1, h2, h3, h4, h5, h6 {
-    border-bottom: 1px solid var(--border);
-    padding-bottom: .3em;
-    font-weight: 600;
-    scroll-margin-top: 1rem;
-    color: var(--fg);
-    margin-top: 2em;
-    margin-bottom: 0.6em;
+    border-bottom: 1px solid var(--border); padding-bottom: .3em;
+    font-weight: 600; color: var(--fg); margin-top: 2em; margin-bottom: 0.6em;
   }
-  h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; margin-top: 0.5em; }
+  h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; }
   h1 { font-size: 1.85rem; color: var(--highlight); }
   h2 { font-size: 1.45rem; color: var(--highlight); }
   h3 { font-size: 1.15rem; border-bottom: 1px dashed var(--border); }
   h4 { font-size: 1rem; border: 0; color: var(--muted); }
   p { margin: 1em 0; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  a:visited { color: var(--accent); }
-  code {
-    background: var(--code-bg);
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 0.88em;
-    color: #ffa657;
-    border: 1px solid var(--border);
-  }
-  pre {
-    background: var(--code-bg);
-    padding: 1rem 1.2rem;
-    overflow-x: auto;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.84em;
-    line-height: 1.55;
-    margin: 1em 0;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  }
-  pre code {
-    padding: 0;
-    background: transparent;
-    color: var(--fg);
-    font-size: 1em;
-    border: 0;
-  }
-  blockquote {
-    border-left: 3px solid var(--accent);
-    margin: 1em 0;
-    padding: .6em 1.2em;
-    color: var(--muted);
-    background: rgba(88,166,255,0.06);
-    border-radius: 0 4px 4px 0;
-  }
-  table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 1em 0;
-    font-size: 0.9em;
-    display: table;
-  }
-  th, td {
-    border: 1px solid var(--border);
-    padding: .55em .85em;
-    text-align: left;
-    vertical-align: top;
-  }
-  th {
-    background: var(--code-bg);
-    font-weight: 600;
-    color: var(--highlight);
-  }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+  code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
+    color: #ffa657; border: 1px solid var(--border); }
+  pre { background: var(--code-bg); padding: 1rem 1.2rem; overflow-x: auto;
+    border: 1px solid var(--border); border-radius: 6px; font-size: 0.84em;
+    line-height: 1.55; margin: 1em 0; }
+  pre code { padding: 0; background: transparent; color: var(--fg); font-size: 1em; border: 0; }
+  blockquote { border-left: 3px solid var(--accent); margin: 1em 0; padding: .6em 1.2em;
+    color: var(--muted); background: rgba(88,166,255,0.06); border-radius: 0 4px 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
+  th, td { border: 1px solid var(--border); padding: .55em .85em; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; color: var(--highlight); }
   tbody tr:nth-child(odd) { background: rgba(255,255,255,0.025); }
-  hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; height: 0; background: transparent; }
-  nav#TOC {
-    background: var(--code-bg);
-    padding: 1.2rem 1.6rem;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    margin: 1.5rem 0 2.5rem;
-    font-size: 0.88em;
-  }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+  nav#TOC { background: var(--code-bg); padding: 1.2rem 1.6rem; border-radius: 6px;
+    border: 1px solid var(--border); margin: 1.5rem 0 2.5rem; font-size: 0.88em; }
   nav#TOC ul { padding-left: 1.4em; margin: 0.3em 0; list-style: none; }
   nav#TOC > ul { padding-left: 0; }
-  nav#TOC > ul > li { margin: 0.4em 0; }
-  nav#TOC > ul > li > a { font-weight: 600; color: var(--fg); }
-  nav#TOC ul ul a { color: var(--muted); }
-  nav#TOC ul ul a:hover { color: var(--accent); }
-  nav#TOC > h2 { margin-top: 0; font-size: 1rem; color: var(--highlight); border: 0; padding: 0; }
   strong { color: var(--highlight); font-weight: 600; }
   em { color: #a5d6ff; font-style: normal; opacity: 0.85; }
   li { margin: 0.18em 0; }
-  ul, ol { padding-left: 1.6em; margin: 0.8em 0; }
   header.title-block-header { padding-bottom: 1.5em; border-bottom: 2px solid var(--border); margin-bottom: 2em; }
-  img { max-width: 100%; }
-  /* Syntax highlighting tweaks for code blocks */
-  .sourceCode { background: var(--code-bg) !important; }
-  code span.kw { color: var(--kw); }
-  code span.st { color: var(--str); }
-  code span.dv, code span.fl { color: var(--num); }
-  code span.co { color: var(--com); font-style: italic; }
-  code span.fu { color: var(--accent); }
-  code span.cn { color: var(--num); }
-  code span.op { color: var(--fg); }
-  /* Override pandoc's white-bg defaults in case they leak */
-  .sourceCode pre { background: var(--code-bg) !important; }
   </style>
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">AnimeGo Migration Plan v2</h1>
+<h1 class="title">AnimeGo — MIGRATION_PLAN</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
@@ -1474,6 +1383,13 @@ P10 (测试 + 性能) 持续穿插</code></pre>
 <strong>下一次 audit 触发:</strong> P0 开工日 / 2026-06-01,取早。</p>
 </blockquote>
 <table>
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 16%" />
+<col style="width: 18%" />
+<col style="width: 22%" />
+<col style="width: 28%" />
+</colgroup>
 <thead>
 <tr class="header">
 <th>Phase</th>
@@ -1486,17 +1402,17 @@ P10 (测试 + 性能) 持续穿插</code></pre>
 <tbody>
 <tr class="odd">
 <td>P0 Go 骨架 + Postgres + Backup</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-20</td>
+<td>2026-05-20</td>
+<td style="text-align: right;">~6 hr (vs 20-35 estimate; subagent协同压缩) — 详 <a href="P0-PROGRESS.md"><code>P0-PROGRESS.md</code></a> / <a href="P0-PROGRESS.html"><code>P0-PROGRESS.html</code></a></td>
 </tr>
 <tr class="even">
 <td>P1 Migration Tool</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-21</td>
+<td>2026-05-21</td>
+<td style="text-align: right;">~10 hr(同一天集中跑;subagent + integration-test 反复迭代;100% field parity)— 详 <a href="P1-PROGRESS.md"><code>P1-PROGRESS.md</code></a> / <a href="P1-PROGRESS.html"><code>P1-PROGRESS.html</code></a> / <a href="ERD.md"><code>ERD.md</code></a></td>
 </tr>
 <tr class="odd">
 <td>P2.1 /api/anime/*</td>
