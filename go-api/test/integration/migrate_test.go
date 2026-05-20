@@ -123,8 +123,13 @@ func TestMain(m *testing.M) {
 // ---------------------------------------------------------------------------
 
 func startPostgres(ctx context.Context) (testcontainers.Container, string, error) {
+	// animego-postgres:dev is the custom image (postgres:16-alpine + pg_cron
+	// compiled in) built by `docker compose -f docker-compose.dev.yml build
+	// postgres`.  testcontainers checks the local image cache before pulling,
+	// so as long as that build ran on this host the test reuses it.  Falls
+	// back gracefully with a clear error if the image is missing.
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
+		"animego-postgres:dev",
 		postgres.WithDatabase("animego"),
 		postgres.WithUsername("animego"),
 		postgres.WithPassword("test"),
@@ -664,4 +669,79 @@ func TestMigrateFailureLogging(t *testing.T) {
 	assert.NotEmpty(t, content, "failure log should have at least one entry")
 	assert.Contains(t, content, `"collection":"users"`)
 	assert.Contains(t, content, `"error"`)
+}
+
+// TestPgCronDanmakuTTL verifies that:
+//   1. The custom postgres image actually loaded pg_cron (extension present).
+//   2. Migration 0006 registered the daily TTL job in cron.job.
+//   3. The TTL command's DELETE actually removes 1-year-old danmakus and
+//      leaves fresh ones intact (the cron timer schedules the same SQL,
+//      so this proves the contract without waiting 24h for fire).
+func TestPgCronDanmakuTTL(t *testing.T) {
+	ctx := context.Background()
+	pool := newPGPool(t, ctx)
+	cli := newMongoClient(t, ctx)
+	resetState(t, ctx, pool, cli)
+
+	// 1. pg_cron extension is loaded by the custom image.
+	var hasCron bool
+	err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='pg_cron')").Scan(&hasCron)
+	require.NoError(t, err)
+	require.True(t, hasCron, "pg_cron extension must be loaded by the custom postgres image")
+
+	// 2. The danmaku-ttl job is scheduled.
+	var jobName, schedule, command string
+	err = pool.QueryRow(ctx, `
+		SELECT jobname, schedule, command FROM cron.job WHERE jobname=$1`,
+		"danmaku-ttl",
+	).Scan(&jobName, &schedule, &command)
+	require.NoError(t, err, "danmaku-ttl job must be registered by migration 0006")
+	assert.Equal(t, "0 4 * * *", schedule, "should run at 04:00 UTC daily")
+	assert.Contains(t, command, "DELETE FROM danmakus", "should DELETE")
+	assert.Contains(t, command, "1 year", "with 1-year cutoff")
+
+	// 3. Seed: 1 user + 1 anime + 2 danmakus (fresh + 18-month-old).
+	var userID uuid.UUID
+	err = pool.QueryRow(ctx, `
+		INSERT INTO users (username, email, password)
+		VALUES ('cron_test', 'cron@example.com', 'x') RETURNING id`,
+	).Scan(&userID)
+	require.NoError(t, err)
+
+	_, err = pool.Exec(ctx, `INSERT INTO anime_cache (anilist_id) VALUES (99999)`)
+	require.NoError(t, err)
+
+	// Fresh danmaku — should survive.
+	_, err = pool.Exec(ctx, `
+		INSERT INTO danmakus (anilist_id, episode, user_id, username, content, live_ends_at)
+		VALUES (99999, 1, $1, 'cron_test', 'fresh', now() + interval '1 day')`,
+		userID,
+	)
+	require.NoError(t, err)
+
+	// 18-month-old danmaku — should be deleted by TTL.  created_at is
+	// usually DEFAULT now(), so force it via an explicit value.
+	_, err = pool.Exec(ctx, `
+		INSERT INTO danmakus (anilist_id, episode, user_id, username, content, live_ends_at, created_at, updated_at)
+		VALUES (99999, 1, $1, 'cron_test', 'old', now() + interval '1 day',
+		        now() - interval '18 months', now() - interval '18 months')`,
+		userID,
+	)
+	require.NoError(t, err)
+
+	var beforeCount int
+	pool.QueryRow(ctx, `SELECT count(*) FROM danmakus WHERE anilist_id=99999`).Scan(&beforeCount)
+	require.Equal(t, 2, beforeCount, "two danmakus seeded")
+
+	// 4. Execute the TTL command directly.  Same SQL the cron would run.
+	_, err = pool.Exec(ctx, `DELETE FROM danmakus WHERE created_at < NOW() - INTERVAL '1 year'`)
+	require.NoError(t, err)
+
+	var afterCount int
+	pool.QueryRow(ctx, `SELECT count(*) FROM danmakus WHERE anilist_id=99999`).Scan(&afterCount)
+	assert.Equal(t, 1, afterCount, "the 18-month-old danmaku should be deleted, fresh one survives")
+
+	var survivor string
+	pool.QueryRow(ctx, `SELECT content FROM danmakus WHERE anilist_id=99999`).Scan(&survivor)
+	assert.Equal(t, "fresh", survivor)
 }

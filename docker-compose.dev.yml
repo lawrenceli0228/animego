@@ -15,7 +15,10 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: ./go-api/docker/postgres
+      dockerfile: Dockerfile
+    image: animego-postgres:dev          # local-only tag, also consumed by testcontainers
     container_name: animego-postgres-dev
     restart: unless-stopped
     environment:

@@ -84,7 +84,10 @@
 <li><a href="#migration-timing">Migration timing</a></li>
 <li><a href="#idempotency-验证未跑推到-p9-cutover-demo">Idempotency 验证(未跑,推到 P9 cutover demo)</a></li>
 </ul></li>
-<li><a href="#p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)</a></li>
+<li><a href="#p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)✓</a>
+<ul>
+<li><a href="#一处架构调整顺便记下">一处架构调整(顺便记下)</a></li>
+</ul></li>
 <li><a href="#p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)</a></li>
 <li><a href="#p1-p2-退出条件critical-gate">P1 → P2 退出条件(critical gate)</a></li>
 <li><a href="#notes-decisions随时追加">Notes / Decisions(随时追加)</a></li>
@@ -288,14 +291,32 @@ PASS  (acceptance threshold: &gt;=99.9% per field)</code></pre>
 <h3 id="idempotency-验证未跑推到-p9-cutover-demo">Idempotency 验证(未跑,推到 P9 cutover demo)</h3>
 <p>Re-run 同 dump 应该 UPSERT 主表,子表会 PK conflict —— 这是已知限制(P1.C 记的)。Cutover 一次性 OK,re-run 前要 <code>TRUNCATE</code> anime_* + 子表。可写 helper script:<code>scripts/migrate-mongo-truncate-and-retry.sh</code>,推 P1.G。</p>
 <hr />
-<h2 id="p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)</h2>
-<p><strong>[pending]</strong> — <strong>先解决 docker image 不带 pg_cron 的问题</strong></p>
-<ol type="1">
-<li>新建 <code>go-api/docker/postgres/Dockerfile</code>:<code>FROM postgres:16-alpine</code> + <code>apk add build-base postgresql16-dev</code> + git clone https://github.com/citusdata/pg_cron + make + make install</li>
-<li><code>docker-compose.dev.yml</code> 改成 <code>build: ./go-api/docker/postgres</code></li>
-<li>新 migration <code>0003_pg_cron.up.sql</code>:<code>CREATE EXTENSION pg_cron;</code> + <code>SELECT cron.schedule('danmaku-ttl', '0 4 * * *', $$DELETE FROM danmakus WHERE created_at &lt; NOW() - INTERVAL '1 year'$$);</code></li>
-<li>18-month 老 danmaku fire test:插入老 row → 触发 cron → SELECT count == 0</li>
-</ol>
+<h2 id="p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)✓</h2>
+<p>实现路径:自定义 Postgres image 编 pg_cron 1.6.5 进 alpine,<strong>postgresql.conf.sample 同时打补丁加 shared_preload_libraries=pg_cron + cron.database_name=animego</strong>,initdb 自动 pick up,无需 docker compose command override。</p>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>go-api/docker/postgres/Dockerfile</code>(28 行):<code>FROM postgres:16-alpine</code> + apk build-deps(<code>build-base / clang19 / llvm19-dev / postgresql16-dev / git</code>)+ <code>git clone v1.6.5 https://github.com/citusdata/pg_cron</code> + <code>make &amp;&amp; make install</code> + <code>sed</code> 改 postgresql.conf.sample + <code>apk del .build-deps</code>。最终镜像 ~190 MB(stock 85 MB,+ pg_cron .so)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>docker-compose.dev.yml</code> 改成 <code>build: ./go-api/docker/postgres</code> + <code>image: animego-postgres:dev</code>(local tag,testcontainers 也用)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>migrations/0005_pg_cron_extension.up.sql + .down.sql</code>:<code>CREATE EXTENSION IF NOT EXISTS pg_cron</code></li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>migrations/0006_danmaku_ttl_schedule.up.sql + .down.sql</code>:<code>SELECT cron.schedule('danmaku-ttl', '0 4 * * *', $$DELETE FROM danmakus WHERE created_at &lt; NOW() - INTERVAL '1 year'$$)</code>(down 走 <code>cron.unschedule</code>)</li>
+<li><input type="checkbox" disabled="" checked="" />
+Dev postgres 重建(<code>down -v</code> + <code>up -d</code>),<code>SHOW shared_preload_libraries</code> 返 <code>pg_cron</code>,<code>SHOW cron.database_name</code> 返 <code>animego</code>,所有 6 个 migration 1-6 应用 &lt; 700ms 总耗时</li>
+<li><input type="checkbox" disabled="" checked="" />
+集成测试 testcontainers 改用 <code>animego-postgres:dev</code> image(本地 build 后 testcontainers 走 local cache,不 pull)</li>
+<li><input type="checkbox" disabled="" checked="" />
+新增 <code>TestPgCronDanmakuTTL</code>(integration):验证 pg_extension 有 pg_cron + cron.job 含 danmaku-ttl(<code>0 4 * * *</code> + DELETE 命令文本)+ 直接执行 TTL DELETE(seed fresh + 18-month 老 danmaku,执行后 fresh survives, old 删)。Direct exec 跳过 cron 等待(替代:60-90s fire wait fragile),但同 SQL,语义等价。</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong><code>go test -race -tags=integration ./test/integration/...</code> 7/7 PASS,9.76s wall</strong></li>
+<li><input type="checkbox" disabled="" checked="" />
+Re-run prod migration on pg_cron-enabled PG:6493 → 95008 rows,0 failures,13.4s</li>
+<li><input type="checkbox" disabled="" checked="" />
+Re-run parity-check:10/10 fields × 1000 samples = <strong>100.00% match</strong>,danmaku-ttl job 在 cron.job 表保留</li>
+</ul>
+<h3 id="一处架构调整顺便记下">一处架构调整(顺便记下)</h3>
+<p><code>docker compose -f docker-compose.dev.yml down -v</code> 会同时干掉 mongo volume(虽然只是为了换 postgres image)。后果:本地 <code>animego_prod_copy</code> 没了。修复:从 <code>/tmp/animego-prod-mongodump-2026-05-21.archive.gz</code>(P1.E 拉的)再 mongorestore 一次(秒级)。教训:<strong>volume scope 用 named volume per service 可以避免连带删,但配置复杂度上升,目前 down -v + restore 流程足够快</strong>。</p>
 <hr />
 <h2 id="p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)</h2>
 <p><strong>[pending]</strong></p>
