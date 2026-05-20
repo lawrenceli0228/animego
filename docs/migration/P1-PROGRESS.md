@@ -44,21 +44,23 @@ P0 bootstrap 装的 7 个 dep 基础上,本轮 `go get` 自动拉:
 
 ---
 
-## 3. P1.C — 7 collection transforms(10-15 hr)
+## 3. P1.C — 7 collection transforms(10-15 hr)✓
 
-**[pending]** — 下个 session
+3 个 subagent 并行(X 简单 4 个 / Y 中等 2 个 + 0003 DEFER migration / Z 复杂 1 个 + fan-out)+ 共享 `util.go`(我)+ blank import 注册。
 
-每个 transform 一个文件,自注册到 registry 通过 init()。`anime_cache` 是最大的(一个 Mongo doc fan-out 成 1 anime_cache + N genres + M studios + ... 共 7 个子表 rows)。
-
-- [ ] `internal/migrate/transforms/users.go`(_id ObjectId → uuid;timestamps Date → timestamptz)
-- [ ] `internal/migrate/transforms/anime_cache.go`(embedded arrays fan-out 7 child tables;`startDate{year,month,day}` → `make_date()`;`is_public` 默认 true)
-- [ ] `internal/migrate/transforms/subscriptions.go`(userId ObjectId → uuid FK lookup)
-- [ ] `internal/migrate/transforms/follows.go`
-- [ ] `internal/migrate/transforms/episode_comments.go`(parentId 自引用 ObjectId → uuid)
-- [ ] `internal/migrate/transforms/danmakus.go`(content length 50 check;`liveEndsAt` 必填)
-- [ ] `internal/migrate/transforms/episode_windows.go`(无 timestamps)
-- [ ] testify 单测每个 transform(ObjectId / Date 时区 / embedded subdoc nil / 边界值)
-- [ ] anonymous init() 链 import 到 main.go 让 registry 自动填充
+- [x] `internal/migrate/transforms/util.go`(共享:`MongoIDToUUID` uuid v5 确定性映射、`MongoDateTime`、bson getters、`StringPtr`、`MakeDate`)(2026-05-21)
+- [x] `internal/migrate/transforms/users.go` + test(subagent X)
+- [x] `internal/migrate/transforms/anime_cache.go` + test(subagent Z;7 子表 fan-out;child UUID 用 `uuid.NewSHA1(ns, "table:anilistId:index")` 确定性)(2026-05-21)
+- [x] `internal/migrate/transforms/subscriptions.go` + test(subagent X)
+- [x] `internal/migrate/transforms/follows.go` + test(subagent X)
+- [x] `internal/migrate/transforms/episode_comments.go` + test(subagent Y;parent_id 自引用;DEFER FK 由 0003 处理)
+- [x] `internal/migrate/transforms/danmakus.go` + test(subagent Y;`id bigint IDENTITY` 不入 Columns;ConflictTarget=""—— 非幂等,re-run 前要 TRUNCATE)
+- [x] `internal/migrate/transforms/episode_windows_transform.go` + test(subagent X,原名 `episode_windows.go` 踩坑见 Notes)
+- [x] `internal/migrate/transforms/zzz_registered_test.go` regression guard:assert 7 transforms 全注册
+- [x] `migrations/0003_defer_comment_self_fk.up.sql` + `.down.sql`(subagent Y;`ALTER CONSTRAINT episode_comments_parent_id_fkey DEFERRABLE INITIALLY DEFERRED`)— 已 applied 到 dev DB,`pg_constraint` 查验 `condeferrable=t condeferred=t`
+- [x] `cmd/migrate-mongo/main.go` 加 blank import `_ "internal/migrate/transforms"` 触发所有 init()
+- [x] **`go test -race -cover ./internal/migrate/transforms/...`:91.2% coverage**(38+ test cases,目标 80%,达标)
+- [x] **`migrate-mongo --dry-run` smoke 通过**:`total_registered=7`,topo-sort `[anime_cache, users, danmakus, episode_comments, episode_windows, follows, subscriptions]`,空 Mongo 17ms 跑完
 
 ---
 
@@ -121,4 +123,12 @@ P0 bootstrap 装的 7 个 dep 基础上,本轮 `go get` 自动拉:
 - 2026-05-21 01:04 — Schema 在 dev DB 完整 roundtrip 测试通过(up + CASCADE + tsvector + down + 再 up)。发现 `postgres:16-alpine` 不带 pg_cron,转 P1.F。
 - 2026-05-21 01:11 — Subagent B 写的 mongo_conn.go 用了 `SetSocketTimeout`,mongo-driver v2 已删,改用 context.WithTimeout per-op deadline。go build/vet/test 全绿后 golang-migrate 实测 PASS。
 - **决策:Mongo driver 版本** — 用 v2(`go.mongodb.org/mongo-driver/v2`)而不是 v1。v2 删了若干 deprecated API(SetSocketTimeout 是其中之一),但 bson 语义和 Connect 入口更干净。如果 prod mongodump 有 v1-only 特殊字段问题,P1.C transforms 阶段再回头看。
+- 2026-05-21 01:30 — P1.C 启动。3 subagent 并行设计:X 写 4 简单(users/subscriptions/follows/episode_windows),Y 写 2 中等(danmakus/episode_comments)+ 0003 DEFER migration,Z 写 1 复杂(anime_cache 7 子表 fan-out)。共享 `util.go`(我先写,跑过 build),共享 helper `zipColsVals`(X 写在 users_test.go,Y 跟 Z 引用)。
+- 2026-05-21 01:32 — 3 subagent 全完。我跑 build + vet + test -race 通过,但 dry-run 显示 `total_registered=6` —— `episode_windows` 神秘消失。
+- **2026-05-21 01:44 — GOOS 文件名后缀坑** ❗:`episode_windows.go` / `episode_windows_test.go` 撞 Go 的 build constraint 规则:`*_GOOS.go`(stripped of `_test`)的文件被自动当 OS-specific,只在该 GOOS 下编译。`windows` 是 valid GOOS,所以 Mac/Linux 下整个文件被排除,`go list` 不列、init() 不跑、registry 缺 1 个。**Reserved GOOS 词表**:aix / android / darwin / dragonfly / freebsd / hurd / illumos / ios / js / linux / mips* / netbsd / openbsd / plan9 / solaris / wasip1 / **windows** / zos。修法:rename 加后缀 `_transform`,变成 `episode_windows_transform.go`(`_transform` 不是 GOOS,Go 不排除)。**P1.G 文档要写进 go-api/README.md 命名约定**。
+- `zzz_registered_test.go` 不是 P1.C 范围,但 debug 时加的 registry assert test 留着作为 regression guard —— 未来谁加 transform 忘记 register、或又踩 GOOS 坑,test 会 PASS_COUNT=N 失败响。
+- **Idempotency 限制**:
+  - 6/7 transforms 完全幂等(同 Mongo dump re-run 同 PG 结果,因为 deterministic uuid v5 + ON CONFLICT DO UPDATE)
+  - `danmakus` 非幂等(`id bigint IDENTITY`,ConflictTarget=""),re-run 会 dup。Cutover 前 TRUNCATE 一次,或加 mongo_id 列搞 UPSERT —— P1.E 真跑 prod 数据时再决定要不要补
+  - `anime_cache` 子表(genres/studios/relations/...)主键不是基于 anilist_id,orchestrator 当前用同一 ConflictTarget=`(anilist_id)` 套到子表会报 PK 冲突错。子表的 child UUID 是确定性的,但 INSERT 路径无 ON CONFLICT clause 适配。Cutover 一次性 OK,re-run 前 TRUNCATE anime_*。
 

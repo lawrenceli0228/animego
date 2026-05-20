@@ -70,7 +70,7 @@
 <ul>
 <li><a href="#dep-增量">Dep 增量</a></li>
 </ul></li>
-<li><a href="#p1.c-7-collection-transforms10-15-hr">3. P1.C — 7 collection transforms(10-15 hr)</a></li>
+<li><a href="#p1.c-7-collection-transforms10-15-hr">3. P1.C — 7 collection transforms(10-15 hr)✓</a></li>
 <li><a href="#p1.d-testcontainers-go-集成测试6-8-hr">4. P1.D — testcontainers-go 集成测试(6-8 hr)</a></li>
 <li><a href="#p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)</a></li>
 <li><a href="#p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)</a></li>
@@ -134,28 +134,35 @@ CLI smoke:<code>--version</code> / <code>--help</code> / flag validation(无 <co
 <p>P0 bootstrap 装的 7 个 dep 基础上,本轮 <code>go get</code> 自动拉:
 - <code>go.mongodb.org/mongo-driver/v2</code> v2.6.0(+ klauspost/compress、xdg-go/scram、youmark/pkcs8、x/crypto、x/sync、x/text 间接依赖)</p>
 <hr />
-<h2 id="p1.c-7-collection-transforms10-15-hr">3. P1.C — 7 collection transforms(10-15 hr)</h2>
-<p><strong>[pending]</strong> — 下个 session</p>
-<p>每个 transform 一个文件,自注册到 registry 通过 init()。<code>anime_cache</code> 是最大的(一个 Mongo doc fan-out 成 1 anime_cache + N genres + M studios + … 共 7 个子表 rows)。</p>
+<h2 id="p1.c-7-collection-transforms10-15-hr">3. P1.C — 7 collection transforms(10-15 hr)✓</h2>
+<p>3 个 subagent 并行(X 简单 4 个 / Y 中等 2 个 + 0003 DEFER migration / Z 复杂 1 个 + fan-out)+ 共享 <code>util.go</code>(我)+ blank import 注册。</p>
 <ul class="task-list">
-<li><input type="checkbox" disabled="" />
-<code>internal/migrate/transforms/users.go</code>(_id ObjectId → uuid;timestamps Date → timestamptz)</li>
-<li><input type="checkbox" disabled="" />
-<code>internal/migrate/transforms/anime_cache.go</code>(embedded arrays fan-out 7 child tables;<code>startDate{year,month,day}</code> → <code>make_date()</code>;<code>is_public</code> 默认 true)</li>
-<li><input type="checkbox" disabled="" />
-<code>internal/migrate/transforms/subscriptions.go</code>(userId ObjectId → uuid FK lookup)</li>
-<li><input type="checkbox" disabled="" />
-<code>internal/migrate/transforms/follows.go</code></li>
-<li><input type="checkbox" disabled="" />
-<code>internal/migrate/transforms/episode_comments.go</code>(parentId 自引用 ObjectId → uuid)</li>
-<li><input type="checkbox" disabled="" />
-<code>internal/migrate/transforms/danmakus.go</code>(content length 50 check;<code>liveEndsAt</code> 必填)</li>
-<li><input type="checkbox" disabled="" />
-<code>internal/migrate/transforms/episode_windows.go</code>(无 timestamps)</li>
-<li><input type="checkbox" disabled="" />
-testify 单测每个 transform(ObjectId / Date 时区 / embedded subdoc nil / 边界值)</li>
-<li><input type="checkbox" disabled="" />
-anonymous init() 链 import 到 main.go 让 registry 自动填充</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/util.go</code>(共享:<code>MongoIDToUUID</code> uuid v5 确定性映射、<code>MongoDateTime</code>、bson getters、<code>StringPtr</code>、<code>MakeDate</code>)(2026-05-21)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/users.go</code> + test(subagent X)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/anime_cache.go</code> + test(subagent Z;7 子表 fan-out;child UUID 用 <code>uuid.NewSHA1(ns, "table:anilistId:index")</code> 确定性)(2026-05-21)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/subscriptions.go</code> + test(subagent X)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/follows.go</code> + test(subagent X)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/episode_comments.go</code> + test(subagent Y;parent_id 自引用;DEFER FK 由 0003 处理)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/danmakus.go</code> + test(subagent Y;<code>id bigint IDENTITY</code> 不入 Columns;ConflictTarget=""—— 非幂等,re-run 前要 TRUNCATE)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/episode_windows_transform.go</code> + test(subagent X,原名 <code>episode_windows.go</code> 踩坑见 Notes)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/migrate/transforms/zzz_registered_test.go</code> regression guard:assert 7 transforms 全注册</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>migrations/0003_defer_comment_self_fk.up.sql</code> + <code>.down.sql</code>(subagent Y;<code>ALTER CONSTRAINT episode_comments_parent_id_fkey DEFERRABLE INITIALLY DEFERRED</code>)— 已 applied 到 dev DB,<code>pg_constraint</code> 查验 <code>condeferrable=t condeferred=t</code></li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>cmd/migrate-mongo/main.go</code> 加 blank import <code>_ "internal/migrate/transforms"</code> 触发所有 init()</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong><code>go test -race -cover ./internal/migrate/transforms/...</code>:91.2% coverage</strong>(38+ test cases,目标 80%,达标)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong><code>migrate-mongo --dry-run</code> smoke 通过</strong>:<code>total_registered=7</code>,topo-sort <code>[anime_cache, users, danmakus, episode_comments, episode_windows, follows, subscriptions]</code>,空 Mongo 17ms 跑完</li>
 </ul>
 <hr />
 <h2 id="p1.d-testcontainers-go-集成测试6-8-hr">4. P1.D — testcontainers-go 集成测试(6-8 hr)</h2>
@@ -213,6 +220,16 @@ ERD diagram 落进 go-api/README.md</li>
 <li>2026-05-21 01:04 — Schema 在 dev DB 完整 roundtrip 测试通过(up + CASCADE + tsvector + down + 再 up)。发现 <code>postgres:16-alpine</code> 不带 pg_cron,转 P1.F。</li>
 <li>2026-05-21 01:11 — Subagent B 写的 mongo_conn.go 用了 <code>SetSocketTimeout</code>,mongo-driver v2 已删,改用 context.WithTimeout per-op deadline。go build/vet/test 全绿后 golang-migrate 实测 PASS。</li>
 <li><strong>决策:Mongo driver 版本</strong> — 用 v2(<code>go.mongodb.org/mongo-driver/v2</code>)而不是 v1。v2 删了若干 deprecated API(SetSocketTimeout 是其中之一),但 bson 语义和 Connect 入口更干净。如果 prod mongodump 有 v1-only 特殊字段问题,P1.C transforms 阶段再回头看。</li>
+<li>2026-05-21 01:30 — P1.C 启动。3 subagent 并行设计:X 写 4 简单(users/subscriptions/follows/episode_windows),Y 写 2 中等(danmakus/episode_comments)+ 0003 DEFER migration,Z 写 1 复杂(anime_cache 7 子表 fan-out)。共享 <code>util.go</code>(我先写,跑过 build),共享 helper <code>zipColsVals</code>(X 写在 users_test.go,Y 跟 Z 引用)。</li>
+<li>2026-05-21 01:32 — 3 subagent 全完。我跑 build + vet + test -race 通过,但 dry-run 显示 <code>total_registered=6</code> —— <code>episode_windows</code> 神秘消失。</li>
+<li><strong>2026-05-21 01:44 — GOOS 文件名后缀坑</strong> ❗:<code>episode_windows.go</code> / <code>episode_windows_test.go</code> 撞 Go 的 build constraint 规则:<code>*_GOOS.go</code>(stripped of <code>_test</code>)的文件被自动当 OS-specific,只在该 GOOS 下编译。<code>windows</code> 是 valid GOOS,所以 Mac/Linux 下整个文件被排除,<code>go list</code> 不列、init() 不跑、registry 缺 1 个。<strong>Reserved GOOS 词表</strong>:aix / android / darwin / dragonfly / freebsd / hurd / illumos / ios / js / linux / mips* / netbsd / openbsd / plan9 / solaris / wasip1 / <strong>windows</strong> / zos。修法:rename 加后缀 <code>_transform</code>,变成 <code>episode_windows_transform.go</code>(<code>_transform</code> 不是 GOOS,Go 不排除)。<strong>P1.G 文档要写进 go-api/README.md 命名约定</strong>。</li>
+<li><code>zzz_registered_test.go</code> 不是 P1.C 范围,但 debug 时加的 registry assert test 留着作为 regression guard —— 未来谁加 transform 忘记 register、或又踩 GOOS 坑,test 会 PASS_COUNT=N 失败响。</li>
+<li><strong>Idempotency 限制</strong>:
+<ul>
+<li>6/7 transforms 完全幂等(同 Mongo dump re-run 同 PG 结果,因为 deterministic uuid v5 + ON CONFLICT DO UPDATE)</li>
+<li><code>danmakus</code> 非幂等(<code>id bigint IDENTITY</code>,ConflictTarget=""),re-run 会 dup。Cutover 前 TRUNCATE 一次,或加 mongo_id 列搞 UPSERT —— P1.E 真跑 prod 数据时再决定要不要补</li>
+<li><code>anime_cache</code> 子表(genres/studios/relations/…)主键不是基于 anilist_id,orchestrator 当前用同一 ConflictTarget=<code>(anilist_id)</code> 套到子表会报 PK 冲突错。子表的 child UUID 是确定性的,但 INSERT 路径无 ON CONFLICT clause 适配。Cutover 一次性 OK,re-run 前 TRUNCATE anime_*。</li>
+</ul></li>
 </ul>
 </body>
 </html>

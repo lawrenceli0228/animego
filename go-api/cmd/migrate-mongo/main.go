@@ -24,6 +24,12 @@ import (
 	"syscall"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/migrate"
+
+	// Blank import: pulls every per-collection transform package so its
+	// init() Registers itself with the migrate registry before Run().
+	// Without this, migrate.Registered() returns empty and the orchestrator
+	// refuses to start.
+	_ "github.com/lawrenceli0228/animego/go-api/internal/migrate/transforms"
 )
 
 const (
