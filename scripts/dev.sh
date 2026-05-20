@@ -13,6 +13,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# `go install` puts binaries in $GOPATH/bin (default $HOME/go/bin).  Ensure
+# that directory is on PATH so air / sqlc-built tools are found regardless
+# of whether the user has it in their shell profile yet.
+export PATH="${PATH}:${GOPATH:-$HOME/go}/bin"
+
 # ─── Prerequisites ────────────────────────────────────────────────
 need() {
     command -v "$1" >/dev/null 2>&1 || {

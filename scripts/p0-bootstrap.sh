@@ -11,6 +11,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Ensure $GOPATH/bin on PATH (air lives here after `go install`).
+export PATH="${PATH}:${GOPATH:-$HOME/go}/bin"
+
 MODULE="github.com/lawrenceli0228/animego/go-api"
 
 echo "[1/5] Verifying toolchain..."

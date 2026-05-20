@@ -33,12 +33,13 @@ migrate -version
 
 | Tool | 状态 | 用途 |
 |------|------|------|
-| Go 1.23+ | [ ] | go-api 整个 backend |
-| sqlc | [ ] | SQL → Go 类型安全 codegen |
-| Air | [ ] | Go hot reload,dev.sh `air -c .air.toml` |
-| rclone | [ ] | nightly pg_dump → Cloudflare R2 |
-| golang-migrate | [ ] | DB schema migration runner |
-| Bun 1.3.14 | [ ] | 本地 1.3.11,需 `curl -fsSL https://bun.sh/install \| bash` 升一下(可推到 P3 启动前) |
+| Go 1.23+ | [x] **1.26.3** 装好(2026-05-20) | go-api 整个 backend |
+| sqlc | [x] **v1.31.1** 装好(2026-05-20) | SQL → Go 类型安全 codegen |
+| Air | [x] **v1.65.2** 装好(2026-05-20,via `github.com/air-verse/air`) | Go hot reload,dev.sh `air -c .air.toml` |
+| rclone | [x] **v1.74.1** 装好(2026-05-20) | nightly pg_dump → Cloudflare R2 |
+| golang-migrate | [x] **v4.19.1** 装好(2026-05-20) | DB schema migration runner |
+| jq | [x] 已有 | restore-pg-drill.sh 解析 rclone lsjson |
+| Bun 1.3.14 | [ ] 本地 1.3.11,需 `bun upgrade`(可推到 P3 启动前) | Next.js + ws-server runtime |
 
 ---
 
@@ -69,9 +70,9 @@ migrate -version
 
 > Plan §6 原文 `go get github.com/sqlc-dev/sqlc/cmd/sqlc` 是错的 —— sqlc 是 CLI 工具,brew 装,不是 Go runtime 依赖。bootstrap 已修正。
 
-- [ ] `bash scripts/p0-bootstrap.sh` 跑过(代办 `go mod init` + 6 个 deps + smoke test);需 Go 装好
-  - deps:chi/v5、chi/middleware、pgx/v5、pgxpool、jwt/v5、river、river/riverdriver/riverpgxv5、google/uuid(sqlc UUID override 用)
-- [ ] `go mod tidy` 干净(bootstrap 末尾自动跑)
+- [x] `bash scripts/p0-bootstrap.sh` 跑过(2026-05-20):go mod init + 8 deps + go mod tidy + go test 全绿
+  - deps 实际装到:chi/v5 v5.2.5、pgx/v5 v5.9.2、pgxpool、jwt/v5 v5.3.1、river v0.37.1、riverpgxv5 v0.37.1、google/uuid v1.6.0
+- [x] `go mod tidy` 干净(bootstrap 末尾自动跑)
 
 ---
 
@@ -80,7 +81,7 @@ migrate -version
 - [x] `go-api/cmd/server/main.go`:chi router + `:8080/health` → `200 {"ok":true,"service":"go-api","stage":"P0"}` + slog JSON + graceful shutdown(2026-05-20)
 - [x] `go-api/internal/config/config.go`:env 加载(PORT_GO, DATABASE_URL, JWT_SECRET, CLIENT_ORIGIN);P0 容忍 JWT_SECRET 缺(2026-05-20)
 - [x] `go-api/internal/middleware/recoverer.go`:用 chi/middleware.Recoverer 内置,不另起文件;RequestID + RealIP + Timeout 已 wire(2026-05-20)
-- [ ] `go test ./go-api/...` 跑通(空套件 pass 即可)—— bootstrap 末尾自动跑
+- [x] `go test ./go-api/...` 跑通(2026-05-20,bootstrap 末尾;cmd/server + internal/config 空套件 pass)
 
 ---
 
@@ -90,7 +91,7 @@ migrate -version
 - [x] Postgres service:`postgres:16-alpine`,user `animego`,db `animego`,volume `postgres-dev-data`(2026-05-20)
 - [x] Postgres healthcheck:`pg_isready -U animego`,间隔 5s 重试 10 次(2026-05-20)
 - [x] Mongo service(过渡保留):`mongo:7`,volume `mongo-dev-data`(2026-05-20)
-- [ ] 验证:`docker compose -f docker-compose.dev.yml up -d postgres mongo` + ps 都 healthy ←需 user 跑过一次
+- [x] 验证:`docker compose -f docker-compose.dev.yml up -d postgres mongo` + ps 都 healthy(2026-05-20)
 
 ---
 
@@ -101,9 +102,9 @@ migrate -version
 - [x] `scripts/backup-pg.sh`:pg_dump | rclone rcat,flock 锁,env=dev/prod(2026-05-20)
 - [x] `scripts/restore-pg-drill.sh`:fetch newest from R2,restore 临时 DB,sanity check,cleanup(2026-05-20)
 - [x] `scripts/p0-bootstrap.sh`:idempotent go mod init + 7 deps + smoke test(2026-05-20)
-- [ ] `chmod +x scripts/*.sh`(下个 commit 顺手)
+- [x] `chmod +x scripts/*.sh`(2026-05-20)
 - [ ] **`setup.sh` 不在 P0 改动范围**:setup.sh 是 Debian VPS 用的 apt 脚本,跟 dev mac 的 brew 不同;dev mac 工具链清单在 README.md / go-api/README.md / 本文件 §0;VPS 部分推到 P8 deployment
-- [ ] 验证 `bash scripts/dev.sh` 起得来 ←需 user p0-bootstrap.sh 跑过 + .env 配好
+- [x] 验证 `bash scripts/dev.sh` 起得来:TTHW marker 6 秒出,curl :8080/health 返 `{"ok":true,"service":"go-api","stage":"P0"}` 200 OK(2026-05-20)
 
 ---
 
@@ -124,7 +125,8 @@ migrate -version
 
 - [x] `.env.example` 重写:分 Shared / v2.0.x(Express+Mongo)/ feat/go-backend(Go+PG)/ Next.js 四段,POSTGRES_PASSWORD + DATABASE_URL + PORT_GO + PORT_WS 全加(2026-05-20)
 - [x] `.env.production.example` mirror:Go + PG 段先注释,cutover 时启用(2026-05-20)
-- [ ] `.gitignore` 确认 `.env` `.env.production` 已在(double-check)←需 user 一眼
+- [x] `.gitignore` 确认 `.env` `.env.production` 已在(grep 过,都有)(2026-05-20)
+- [x] `.env` 本地生成,JWT_SECRET + JWT_REFRESH_SECRET + POSTGRES_PASSWORD 用 openssl rand 填,chmod 600(2026-05-20)
 
 ---
 
@@ -159,5 +161,7 @@ migrate -version
 
 - 2026-05-20 18:xx — 开分支,本文件作为 P0 追踪起点。工具链 4 项(go/sqlc/air/rclone/migrate)都未装,优先级最高。
 - 2026-05-20 19:xx — claude 代做 §2 / §4 / §5 / §6 / §8 / §9(目录骨架、Go server stub、docker-compose.dev.yml、5 个脚本、.env 双份、README banner)+ `docs/migration/P0-CRONTAB.md`。subagents 协同产出 `.air.toml` + `sqlc.yaml`(google/uuid override + pgx 类型映射)+ `backup-pg.sh` + `restore-pg-drill.sh`(flock 锁 + jq newest pick + cleanup trap)。剩 user 跑:brew 工具链 → rclone R2 config → `bash scripts/p0-bootstrap.sh` → 第一次 backup-pg.sh + restore drill → VPS crontab + logrotate。
+- 2026-05-20 22:50 — claude 操作:`brew install go sqlc rclone golang-migrate`(后台 ~5min)+ Docker Desktop 启动 + `docker compose up -d postgres mongo` 拉镜像 + `go install github.com/air-verse/air@latest`(注:`cosmtrek/air` 已迁到 `air-verse/air`,scripts 里 fallback 顺序已对)+ `bash scripts/p0-bootstrap.sh` 一遍过 + `bash scripts/dev.sh` 起来,**TTHW = 6 秒**,curl `:8080/health` → 200 + `{"ok":true,"service":"go-api","stage":"P0"}`。P0 关键链路通过。dev.sh + p0-bootstrap.sh 加了一行 `export PATH="${PATH}:${GOPATH:-$HOME/go}/bin"`,免得 user shell profile 还没 export 时 air 找不到。
 - Plan §6 原文写 `go get github.com/sqlc-dev/sqlc/cmd/sqlc` 是错的(sqlc 是 CLI,不是 runtime lib),p0-bootstrap.sh 已修正,本文件 §3 已 flag。
 - DX review polish #2(`setup.sh 加 Air 安装`)重新分类:setup.sh 是 VPS Debian apt 脚本,Air 是 dev-only 工具,放进 setup.sh 没意义。dev mac 工具链清单写在 §0 + go-api/README.md。已在 §8 TODO Eng review #2 旁边补一条 clarification。
+- **Air repo 迁移**:`github.com/cosmtrek/air` → `github.com/air-verse/air`。p0-bootstrap.sh + 错误消息已优先用 air-verse(cosmtrek fallback)。go-api/README.md 还写 cosmtrek 路径,下一轮顺手改。
