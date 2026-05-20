@@ -43,14 +43,15 @@ migrate -version
 
 ---
 
-## 1. Cloudflare R2 账号 + bucket(用户手动)
+## 1. Cloudflare R2 账号 + bucket
 
-- [ ] 注册 / 登录 Cloudflare 账号
-- [ ] R2 → Create bucket `animego-backup`(region: APAC 推荐)
-- [ ] R2 → Manage API tokens → 生成 `Object Read & Write` token,scope 限定到 `animego-backup`
-- [ ] 把 access_key_id + secret_access_key 记在密码管理器,**别 commit**
-- [ ] `rclone config` 跑一遍,新建 remote `r2`(provider = Cloudflare R2,endpoint = `https://<account>.r2.cloudflarestorage.com`)
-- [ ] 测一行:`rclone lsd r2:animego-backup` 不报错
+- [x] Cloudflare R2 Plan 激活,$0/month free tier(2026-05-20)
+- [x] R2 → Create bucket `animego-backup`(Automatic location → Oceania,Standard storage class)(2026-05-20)
+- [x] **Account API Token** `animego-rclone-prod`,Object Read & Write,scope 仅 `animego-backup`,Forever TTL(2026-05-20)
+- [x] 凭据存密码管理器(setup 中 rotated 二次:第一次用户误贴 chat,第二次 claude 的 `sed -n '/^\[r2\]/...'` 命令打印 conf 文件含 secret;第三次 token 接管,旧 token revoked)(2026-05-20)
+- [x] `rclone config` 配 remote `r2`:provider Cloudflare、region auto、endpoint S3 API URL、**`no_check_bucket = true`**(否则 rcat 会试 CreateBucket,bucket-scoped token 403)(2026-05-20)
+- [x] **`brew install flock`**(backup-pg.sh 并发锁需要;mac 不自带,新装 0.4.0)(2026-05-20)
+- [x] 测试 round-trip:`rcat _test.txt` → `ls` → `cat` → `delete`,5 步全过(2026-05-20)
 
 ---
 
@@ -113,11 +114,12 @@ migrate -version
 - [x] `scripts/backup-pg.sh` 写完(pg_dump -Fc -Z 6 | rclone rcat,流式不落盘)(2026-05-20)
 - [x] `scripts/restore-pg-drill.sh` 写完(P0 → P1 critical gate)(2026-05-20)
 - [x] `docs/migration/P0-CRONTAB.md` 写完(VPS crontab + logrotate 参考)(2026-05-20)
-- [ ] 本地跑一次 `bash scripts/backup-pg.sh --env=dev`,确认 R2 里有文件 ←需 rclone 配好
-- [ ] R2 web UI 看到文件 + `bash scripts/restore-pg-drill.sh` PASS ←**P0 → P1 critical gate**
-- [ ] VPS 上 crontab 三行(见 P0-CRONTAB.md):03:00 backup、04:00 30d retention、Sun 05:00 restore drill
-- [ ] VPS 上 logrotate 装好(`/etc/logrotate.d/animego`,见 P0-CRONTAB.md)
-- [ ] 模拟 31 天老文件 → 触发 retention 真删过(P0 acceptance,详 plan)
+- [x] 本地 `bash scripts/backup-pg.sh --env=dev`:`pg-2026-05-20.dump` 2786B 上 R2,1s 完成(2026-05-20)
+- [x] **`bash scripts/restore-pg-drill.sh` PASS** ← **P0 → P1 critical gate 通过**(2026-05-20)
+  - download 2786B in 1s → throwaway DB `animego_restore_drill` → pg_restore 1s → Postgres 16.14 verified → 1 public table (p0_marker, 1 row) → cleanup OK → exit 0
+- [ ] VPS 上 crontab 三行(见 P0-CRONTAB.md):03:00 backup、04:00 30d retention、Sun 05:00 restore drill ←**P8 deployment 一并装**
+- [ ] VPS 上 logrotate 装好(`/etc/logrotate.d/animego`,见 P0-CRONTAB.md)←**P8 deployment 一并装**
+- [ ] 模拟 31 天老文件 → 触发 retention 真删过(P0 acceptance,详 plan)←**可后置,不阻塞 P1**
 
 ---
 
@@ -150,10 +152,10 @@ migrate -version
 
 ## 11. Phase 0 退出(close this file 的条件)
 
-- [ ] 上面 10 节全部勾完
-- [ ] 至少 1 次成功的 R2 restore drill(写下日期 + R2 文件名)
-- [ ] Commit history 在 `feat/go-backend` 分支可查
-- [ ] 准备开 P1(migration tool)
+- [x] 上面 10 节 dev-side 全部勾完(VPS-side 后置:crontab + logrotate 推到 P8 一起,retention drill 推到 P1 schema 上来再跑)
+- [x] **2026-05-20 第一次 R2 restore drill PASS**:`pg-2026-05-20.dump` 2786B(p0_marker 1 row)
+- [x] Commit history 在 `feat/go-backend` 分支可查(`459effe` 起,`3ae659d` scaffold,`c991021` bootstrap,本 commit P0 closeout)
+- [x] **准备开 P1**(migration tool: cmd/migrate-mongo + 14 表 schema + dry-run + field parity)
 
 ---
 
@@ -165,3 +167,8 @@ migrate -version
 - Plan §6 原文写 `go get github.com/sqlc-dev/sqlc/cmd/sqlc` 是错的(sqlc 是 CLI,不是 runtime lib),p0-bootstrap.sh 已修正,本文件 §3 已 flag。
 - DX review polish #2(`setup.sh 加 Air 安装`)重新分类:setup.sh 是 VPS Debian apt 脚本,Air 是 dev-only 工具,放进 setup.sh 没意义。dev mac 工具链清单写在 §0 + go-api/README.md。已在 §8 TODO Eng review #2 旁边补一条 clarification。
 - **Air repo 迁移**:`github.com/cosmtrek/air` → `github.com/air-verse/air`。p0-bootstrap.sh + 错误消息已优先用 air-verse(cosmtrek fallback)。go-api/README.md 还写 cosmtrek 路径,下一轮顺手改。
+- 2026-05-20 22:46 — Cloudflare R2 配通,P0 → P1 critical gate 过:
+  - R2 bucket `animego-backup` 建好,Account API Token `animego-rclone-prod` 装好(token 三次 rotate,设置过程暴露了泄露通道,后续不再 sed/cat conf 文件;backup-pg.sh + restore-pg-drill.sh 验证全过)
+  - rclone config 加 `no_check_bucket = true`(rcat 默认 CreateBucket 在 bucket-scoped token 下 403)
+  - `brew install flock` 给 backup-pg.sh 的并发锁补依赖(Linux 自带,Mac 不带)
+  - p0_marker 临时表用过即删,不污染 dev DB
