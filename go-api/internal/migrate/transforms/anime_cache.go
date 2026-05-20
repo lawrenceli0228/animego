@@ -122,7 +122,10 @@ func (animeCacheTransform) TransformRow(_ context.Context, doc bson.M) ([]migrat
 	duration, durationOK := GetInt(doc, "duration")
 	bgmID, bgmIDOK := GetInt(doc, "bgmId")
 	bangumiVotes, bangumiVotesOK := GetInt(doc, "bangumiVotes")
-	bangumiVersion, bangumiVersionOK := GetInt(doc, "bangumiVersion")
+	// bangumi_version is NOT NULL DEFAULT 0 in the PG schema (matches Mongo default).
+	// If absent in the Mongo doc, fall back to 0 rather than NULL — orchestrator's
+	// INSERT lists the column unconditionally so DEFAULT can't apply server-side.
+	bangumiVersion, _ := GetInt(doc, "bangumiVersion")
 	posterAccentContrastOnBlack, pacOK := GetFloat(doc, "posterAccentContrastOnBlack")
 	averageScore, averageScoreOK := GetFloat(doc, "averageScore")
 	bangumiScore, bangumiScoreOK := GetFloat(doc, "bangumiScore")
@@ -198,7 +201,7 @@ func (animeCacheTransform) TransformRow(_ context.Context, doc bson.M) ([]migrat
 			intPtr(bgmID, bgmIDOK),
 			floatPtr(bangumiScore, bangumiScoreOK),
 			intPtr(bangumiVotes, bangumiVotesOK),
-			intPtr(bangumiVersion, bangumiVersionOK),
+			bangumiVersion,
 			cachedAt,
 			startDate,
 			StringPtr(adminFlag),
@@ -455,12 +458,20 @@ func (animeCacheTransform) TransformRow(_ context.Context, doc bson.M) ([]migrat
 	return rows, nil
 }
 
-// toSubdoc normalizes a value into bson.M.  bson.A elements arrive as either
-// bson.M or map[string]any depending on the codec path; both must be handled.
+// toSubdoc normalizes a value into bson.M.  bson.A elements arrive as one of
+// bson.M / bson.D / map[string]any depending on the codec path; all three must
+// be handled.  mongo-driver v2 decodes nested arrays-of-docs into bson.D by
+// default even when the outer doc is bson.M.
 func toSubdoc(v any) (bson.M, bool) {
 	switch s := v.(type) {
 	case bson.M:
 		return s, true
+	case bson.D:
+		out := make(bson.M, len(s))
+		for _, e := range s {
+			out[e.Key] = e.Value
+		}
+		return out, true
 	case map[string]any:
 		return bson.M(s), true
 	default:

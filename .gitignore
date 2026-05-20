@@ -40,3 +40,7 @@ scripts/setup.sh
 .context/
 demos/
 docs/designs/implementAnimeGPT.md
+
+# migrate-mongo runtime artifacts (failure log written by orchestrator)
+go-api/migrate-failures.jsonl
+migrate-failures.jsonl

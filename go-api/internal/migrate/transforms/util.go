@@ -144,6 +144,10 @@ func GetArray(m bson.M, key string) (bson.A, bool) {
 
 // GetSubdoc extracts m[key] as a bson.M (embedded document).  Returns nil + false
 // if absent / null / wrong type.
+//
+// mongo-driver v2 may decode embedded documents into bson.D (ordered) even when
+// the parent is bson.M — the registry doesn't recurse the M type into nested
+// fields.  Flatten bson.D into bson.M here so downstream Get* helpers work.
 func GetSubdoc(m bson.M, key string) (bson.M, bool) {
 	v, ok := m[key]
 	if !ok || v == nil {
@@ -152,6 +156,12 @@ func GetSubdoc(m bson.M, key string) (bson.M, bool) {
 	switch s := v.(type) {
 	case bson.M:
 		return s, true
+	case bson.D:
+		out := make(bson.M, len(s))
+		for _, e := range s {
+			out[e.Key] = e.Value
+		}
+		return out, true
 	case map[string]any:
 		return bson.M(s), true
 	default:

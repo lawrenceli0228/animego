@@ -64,11 +64,26 @@ P0 bootstrap 装的 7 个 dep 基础上,本轮 `go get` 自动拉:
 
 ---
 
-## 4. P1.D — testcontainers-go 集成测试(6-8 hr)
+## 4. P1.D — testcontainers-go 集成测试(6-8 hr)✓
 
-**[pending]**
+实际产出:`go-api/test/integration/migrate_test.go` 667 行,`//go:build integration` tag(`go test ./...` 默认跳过,显式 `-tags=integration` 才跑)。subagent 写,我修 3 个真 bug 后通过。
 
-起 mongo + postgres 容器(testcontainers-go),用 fixture 灌 mongo data,跑 migration commit 模式,assert PG rows 等价(行数 + 关键字段值)。
+- [x] testcontainers-go 起 postgres:16-alpine + mongo:7(单次,跨测试复用)
+- [x] golang-migrate Go library 应用 0001 + 0002 + 0003 三个 migration
+- [x] 6 个测试:
+  - `TestMigrateEmptyMongo` — 空 Mongo,14 张 PG 表全空
+  - `TestMigrateOneUser` — _id deterministic uuid v5 验,is_public DEFAULT true 自动应用
+  - `TestMigrateAnimeCacheFanOut` — 1 anime + 2 genres + 2 studios + 2 relations + 3 characters + 2 staff + 2 recs + 2 ep titles 共 16 行,display_order 0/1/2,search_vec GENERATED 非空,start_date=2024-01-15
+  - `TestMigrateFKRelationships` — subscription/follow/2-level comments(DEFER self-FK 实测)/danmaku/episode_window 全建,CASCADE 删 user 关联行全消失
+  - `TestMigrateDryRun` — DryRun=true 时 PG 仍空,但 Report.Transformed≥1
+  - `TestMigrateFailureLogging` — malformed _id=42(int) 触发 MongoIDToUUID 错,orchestrator 不 panic,failure JSONL 写一行
+- [x] `go test -race -tags=integration -timeout=300s` PASS,11.5s wall(含容器启动)
+
+### 修了 3 个真 bug(集成测试暴露)
+
+1. **`anime_cache.bangumi_version` NULL** — schema 是 `NOT NULL DEFAULT 0`,但 transform 当 nullable `*int` emit,Mongo doc 缺这字段时塞 `nil`(SQL NULL)→ 违反 NOT NULL。fix:transform 缺失时给 0(匹配 Mongo schema 默认)。
+2. **Orchestrator ConflictTarget 套到子表** — `anime_cache` 一个 Transform emit 多表,orchestrator 把同一个 `(anilist_id)` conflict target 套到所有表,但 `anime_genres` 等子表没有 `anilist_id` 列 → SQLSTATE 42703。fix:`orchestrator.go` flush 时判断 `table == t.PGTable()` 才用 ConflictTarget,子表用 `""`(plain INSERT,re-run 前 TRUNCATE)。
+3. **mongo-driver v2 decode embedded doc 为 bson.D 不是 bson.M** — embedded subdoc(`startDate`)和数组元素(`relations[]`、`characters[]`、...)默认 decode 成 `bson.D`(ordered),不是 `bson.M`。`GetSubdoc` 和 `anime_cache.toSubdoc` 原来只 case bson.M / map → 全 miss,startDate=NULL 写入 + 子表 0 行。fix:两处都加 `case bson.D` 转 bson.M。
 
 ---
 
@@ -130,5 +145,8 @@ P0 bootstrap 装的 7 个 dep 基础上,本轮 `go get` 自动拉:
 - **Idempotency 限制**:
   - 6/7 transforms 完全幂等(同 Mongo dump re-run 同 PG 结果,因为 deterministic uuid v5 + ON CONFLICT DO UPDATE)
   - `danmakus` 非幂等(`id bigint IDENTITY`,ConflictTarget=""),re-run 会 dup。Cutover 前 TRUNCATE 一次,或加 mongo_id 列搞 UPSERT —— P1.E 真跑 prod 数据时再决定要不要补
-  - `anime_cache` 子表(genres/studios/relations/...)主键不是基于 anilist_id,orchestrator 当前用同一 ConflictTarget=`(anilist_id)` 套到子表会报 PK 冲突错。子表的 child UUID 是确定性的,但 INSERT 路径无 ON CONFLICT clause 适配。Cutover 一次性 OK,re-run 前 TRUNCATE anime_*。
+  - `anime_cache` 子表(genres/studios/relations/...)主键不是基于 anilist_id,orchestrator P1.D 修过 ConflictTarget 套用范围:**主表 anime_cache 用 ConflictTarget UPSERT,子表用 plain INSERT**。Re-run 前 TRUNCATE 所有 anime_* + 子表(脚本待补,P1.E)。
+- 2026-05-21 02:10 — P1.D 启动。1 subagent 写 testcontainers 集成测试(667 行单文件 + `//go:build integration` tag)。subagent 写完 sandbox 禁 go,我跑 build + test 3 轮:第一轮 bangumi_version NOT NULL 炸 + 第二轮 orchestrator ConflictTarget 套子表炸 + 第三轮 bson.D 解码炸。每个真 bug 都需要看 PG error code + 反推 transform/orchestrator/util 改一两行。三次后 6/6 PASS,11.5s wall。
+- 2026-05-21 02:15 — **Subagent 自带 sandbox 限制**:三轮 subagent 全部报 `go` 命令被 sandbox 拒。subagent 只能写文件不能跑测试,build/test 必须我接力跑。为来后续 phase 节奏:**subagent 适合写文件 + 给 spec,不适合做 verify**;verify 必须我接力跑。
+- **bson.M vs bson.D 教训**:mongo-driver v2 默认 codec 在 `Cursor.Decode(&bsonM)` 时,内层 embedded subdoc / 数组元素 decode 成 `bson.D` 而不是 `bson.M`(只 outer doc 是 bson.M)。任何在 util 或 transform 里 `case bson.M:` 但不 `case bson.D:` 的代码都会 miss。**未来加 transform 时**:任何处理 embedded subdoc 或 array element 的地方一律走 `toSubdoc(v) (bson.M, bool)` helper,helper 内部三 case 都列。已统一(util.go GetSubdoc + anime_cache.go toSubdoc)。
 

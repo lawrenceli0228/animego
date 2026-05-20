@@ -71,7 +71,10 @@
 <li><a href="#dep-增量">Dep 增量</a></li>
 </ul></li>
 <li><a href="#p1.c-7-collection-transforms10-15-hr">3. P1.C — 7 collection transforms(10-15 hr)✓</a></li>
-<li><a href="#p1.d-testcontainers-go-集成测试6-8-hr">4. P1.D — testcontainers-go 集成测试(6-8 hr)</a></li>
+<li><a href="#p1.d-testcontainers-go-集成测试6-8-hr">4. P1.D — testcontainers-go 集成测试(6-8 hr)✓</a>
+<ul>
+<li><a href="#修了-3-个真-bug集成测试暴露">修了 3 个真 bug(集成测试暴露)</a></li>
+</ul></li>
 <li><a href="#p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)</a></li>
 <li><a href="#p1.f-pg_cron-danmaku-ttl2-3-hr">6. P1.F — pg_cron danmaku TTL(2-3 hr)</a></li>
 <li><a href="#p1.g-erd-docs1-2-hr">7. P1.G — ERD + docs(1-2 hr)</a></li>
@@ -165,9 +168,31 @@ CLI smoke:<code>--version</code> / <code>--help</code> / flag validation(无 <co
 <strong><code>migrate-mongo --dry-run</code> smoke 通过</strong>:<code>total_registered=7</code>,topo-sort <code>[anime_cache, users, danmakus, episode_comments, episode_windows, follows, subscriptions]</code>,空 Mongo 17ms 跑完</li>
 </ul>
 <hr />
-<h2 id="p1.d-testcontainers-go-集成测试6-8-hr">4. P1.D — testcontainers-go 集成测试(6-8 hr)</h2>
-<p><strong>[pending]</strong></p>
-<p>起 mongo + postgres 容器(testcontainers-go),用 fixture 灌 mongo data,跑 migration commit 模式,assert PG rows 等价(行数 + 关键字段值)。</p>
+<h2 id="p1.d-testcontainers-go-集成测试6-8-hr">4. P1.D — testcontainers-go 集成测试(6-8 hr)✓</h2>
+<p>实际产出:<code>go-api/test/integration/migrate_test.go</code> 667 行,<code>//go:build integration</code> tag(<code>go test ./...</code> 默认跳过,显式 <code>-tags=integration</code> 才跑)。subagent 写,我修 3 个真 bug 后通过。</p>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+testcontainers-go 起 postgres:16-alpine + mongo:7(单次,跨测试复用)</li>
+<li><input type="checkbox" disabled="" checked="" />
+golang-migrate Go library 应用 0001 + 0002 + 0003 三个 migration</li>
+<li><input type="checkbox" disabled="" checked="" />
+6 个测试:<ul>
+<li><code>TestMigrateEmptyMongo</code> — 空 Mongo,14 张 PG 表全空</li>
+<li><code>TestMigrateOneUser</code> — _id deterministic uuid v5 验,is_public DEFAULT true 自动应用</li>
+<li><code>TestMigrateAnimeCacheFanOut</code> — 1 anime + 2 genres + 2 studios + 2 relations + 3 characters + 2 staff + 2 recs + 2 ep titles 共 16 行,display_order 0/1/2,search_vec GENERATED 非空,start_date=2024-01-15</li>
+<li><code>TestMigrateFKRelationships</code> — subscription/follow/2-level comments(DEFER self-FK 实测)/danmaku/episode_window 全建,CASCADE 删 user 关联行全消失</li>
+<li><code>TestMigrateDryRun</code> — DryRun=true 时 PG 仍空,但 Report.Transformed≥1</li>
+<li><code>TestMigrateFailureLogging</code> — malformed _id=42(int) 触发 MongoIDToUUID 错,orchestrator 不 panic,failure JSONL 写一行</li>
+</ul></li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go test -race -tags=integration -timeout=300s</code> PASS,11.5s wall(含容器启动)</li>
+</ul>
+<h3 id="修了-3-个真-bug集成测试暴露">修了 3 个真 bug(集成测试暴露)</h3>
+<ol type="1">
+<li><strong><code>anime_cache.bangumi_version</code> NULL</strong> — schema 是 <code>NOT NULL DEFAULT 0</code>,但 transform 当 nullable <code>*int</code> emit,Mongo doc 缺这字段时塞 <code>nil</code>(SQL NULL)→ 违反 NOT NULL。fix:transform 缺失时给 0(匹配 Mongo schema 默认)。</li>
+<li><strong>Orchestrator ConflictTarget 套到子表</strong> — <code>anime_cache</code> 一个 Transform emit 多表,orchestrator 把同一个 <code>(anilist_id)</code> conflict target 套到所有表,但 <code>anime_genres</code> 等子表没有 <code>anilist_id</code> 列 → SQLSTATE 42703。fix:<code>orchestrator.go</code> flush 时判断 <code>table == t.PGTable()</code> 才用 ConflictTarget,子表用 <code>""</code>(plain INSERT,re-run 前 TRUNCATE)。</li>
+<li><strong>mongo-driver v2 decode embedded doc 为 bson.D 不是 bson.M</strong> — embedded subdoc(<code>startDate</code>)和数组元素(<code>relations[]</code>、<code>characters[]</code>、…)默认 decode 成 <code>bson.D</code>(ordered),不是 <code>bson.M</code>。<code>GetSubdoc</code> 和 <code>anime_cache.toSubdoc</code> 原来只 case bson.M / map → 全 miss,startDate=NULL 写入 + 子表 0 行。fix:两处都加 <code>case bson.D</code> 转 bson.M。</li>
+</ol>
 <hr />
 <h2 id="p1.e-dry-run-field-parity4-6-hr">5. P1.E — Dry-run + field parity(4-6 hr)</h2>
 <p><strong>[pending]</strong></p>
@@ -228,8 +253,11 @@ ERD diagram 落进 go-api/README.md</li>
 <ul>
 <li>6/7 transforms 完全幂等(同 Mongo dump re-run 同 PG 结果,因为 deterministic uuid v5 + ON CONFLICT DO UPDATE)</li>
 <li><code>danmakus</code> 非幂等(<code>id bigint IDENTITY</code>,ConflictTarget=""),re-run 会 dup。Cutover 前 TRUNCATE 一次,或加 mongo_id 列搞 UPSERT —— P1.E 真跑 prod 数据时再决定要不要补</li>
-<li><code>anime_cache</code> 子表(genres/studios/relations/…)主键不是基于 anilist_id,orchestrator 当前用同一 ConflictTarget=<code>(anilist_id)</code> 套到子表会报 PK 冲突错。子表的 child UUID 是确定性的,但 INSERT 路径无 ON CONFLICT clause 适配。Cutover 一次性 OK,re-run 前 TRUNCATE anime_*。</li>
+<li><code>anime_cache</code> 子表(genres/studios/relations/…)主键不是基于 anilist_id,orchestrator P1.D 修过 ConflictTarget 套用范围:<strong>主表 anime_cache 用 ConflictTarget UPSERT,子表用 plain INSERT</strong>。Re-run 前 TRUNCATE 所有 anime_* + 子表(脚本待补,P1.E)。</li>
 </ul></li>
+<li>2026-05-21 02:10 — P1.D 启动。1 subagent 写 testcontainers 集成测试(667 行单文件 + <code>//go:build integration</code> tag)。subagent 写完 sandbox 禁 go,我跑 build + test 3 轮:第一轮 bangumi_version NOT NULL 炸 + 第二轮 orchestrator ConflictTarget 套子表炸 + 第三轮 bson.D 解码炸。每个真 bug 都需要看 PG error code + 反推 transform/orchestrator/util 改一两行。三次后 6/6 PASS,11.5s wall。</li>
+<li>2026-05-21 02:15 — <strong>Subagent 自带 sandbox 限制</strong>:三轮 subagent 全部报 <code>go</code> 命令被 sandbox 拒。subagent 只能写文件不能跑测试,build/test 必须我接力跑。为来后续 phase 节奏:<strong>subagent 适合写文件 + 给 spec,不适合做 verify</strong>;verify 必须我接力跑。</li>
+<li><strong>bson.M vs bson.D 教训</strong>:mongo-driver v2 默认 codec 在 <code>Cursor.Decode(&amp;bsonM)</code> 时,内层 embedded subdoc / 数组元素 decode 成 <code>bson.D</code> 而不是 <code>bson.M</code>(只 outer doc 是 bson.M)。任何在 util 或 transform 里 <code>case bson.M:</code> 但不 <code>case bson.D:</code> 的代码都会 miss。<strong>未来加 transform 时</strong>:任何处理 embedded subdoc 或 array element 的地方一律走 <code>toSubdoc(v) (bson.M, bool)</code> helper,helper 内部三 case 都列。已统一(util.go GetSubdoc + anime_cache.go toSubdoc)。</li>
 </ul>
 </body>
 </html>

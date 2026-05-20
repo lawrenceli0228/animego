@@ -207,9 +207,19 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 		if o.cfg.DryRun {
 			return nil
 		}
+		// ConflictTarget is the parent transform's PG-table key (e.g.
+		// "(anilist_id)" for anime_cache).  For fan-out child tables
+		// (anime_genres, anime_characters, ...) those columns do not
+		// exist, so we fall back to plain INSERT for non-primary tables.
+		// Re-running on the same dump therefore raises PK conflicts on
+		// child rows — operator TRUNCATEs anime_* before re-run.
+		conflictTarget := ""
+		if table == t.PGTable() {
+			conflictTarget = t.ConflictTarget()
+		}
 		// On --commit, wrap each flush in its own short transaction so
 		// a single bad batch can't poison the whole collection's writes.
-		return o.writeBatch(ctx, table, t.ConflictTarget(), rows)
+		return o.writeBatch(ctx, table, conflictTarget, rows)
 	}
 
 	for cursor.Next(ctx) {
