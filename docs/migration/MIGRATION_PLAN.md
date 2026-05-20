@@ -22,7 +22,7 @@
 | 组件 | 现状 (v2.0.1) | v1 plan (已废弃) | **v2 plan (本文档)** |
 |------|------|------|------|
 | 前端框架 | Vite SPA + React 18 + JSX | Next.js 14 + RSC + TSX | **Next.js 16 + RSC + TSX**(二轮 review 1A 修正;React 19 默认) |
-| 前端 runtime | Node | Bun 1.3 | **Bun 1.3** |
+| 前端 runtime | Node | Bun 1.3 | **Bun 1.3.x**(P3 启动时取 stable;v1.3.14 是最后 Zig 版,Rust 重写版上线后观察 ≥ 60 天再升) |
 | 后端语言 | JS (Node 22 + Express 4) | TS (Bun + Next API routes) | **Go 1.23** |
 | 后端 HTTP | Express | Next API routes | **chi v5** |
 | ORM/Driver | Mongoose | Mongoose | **pgx v5 + sqlc** |
@@ -54,6 +54,9 @@
 | 决策 | 选择 | 理由 |
 |------|------|------|
 | **前端框架版本** | **Next.js 16(Active LTS)** | 二轮 review 1A 修正:14 已不在 Active LTS,16 是 React 19 默认 + Turbopack stable,5-13月期间不 EOL |
+| **Bun 版本策略**(2026-05-20 补) | **1.3.x pin,Rust 重写版观察 ≥ 60 天再升** | v1.3.14(2026-05-13)是最后 Zig 版;Anthropic 协作的 Rust 重写 2026-05-14 已 merge 主 repo;下一 minor 可能切 Rust,patch.0 不上 prod |
+| **Lockfile 双轨**(2026-05-20 补) | **bun.lock + package-lock.json 并存,Docker 仍 `npm ci`** | 已踩过坑(memory feedback_deploy_bun_npm_lockfile):bun install 不写 package-lock.json,Docker `npm ci` 会炸;约定每次 `bun install` 后跟 `npm install --package-lock-only`,pre-commit hook 兜底 |
+| **IndexedDB 在 RSC 下承载**(2026-05-20 补) | **Dexie 仍 client-only,迁移期 schema v5 冻结** | client/src/lib/library/db/db.js 全 'use client' + 调用方 dynamic({ssr:false});11 个 store 不变;bump v6 推到 cutover + 30d 之后 |
 | 后端语言 | Go 1.23 | 单二进制,内存占用小,并发模型适合 webhook + 富化 queue |
 | ORM 策略 | pgx + sqlc(无 ORM) | 类型安全 SQL,0 runtime reflection,SQL 可读 |
 | Postgres 部署 | VPS docker 自建 | 与 mongo 现有模式一致,0 新账单,容器内网 latency 最低 |
@@ -390,8 +393,14 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 ```
 ├── bunx create-next-app@latest next-app --typescript --app --src-dir --eslint
 │   ⚠️ Next.js 16:Turbopack stable (build + dev),React 19 默认,async cookies/headers
-├── package.json scripts 切 bun
-├── rm package-lock.json && bun install → bun.lockb
+│   ⚠️ Bun 版本:pin 到 P3 启动时 stable(2026-05-20 当前 v1.3.14);Rust 重写版上线 + 60d 后再升(2026-05-20 补)
+├── package.json scripts 切 bun(scripts 内仍可手动 `npm`,Docker 单独走 npm ci 路径)
+├── **lockfile 双轨**(2026-05-20 修正,原文 `rm package-lock.json` 是错的):
+│   ◇ bun.lock — 本地 dev + CI bun 路径
+│   ◇ package-lock.json — Docker `npm ci` 路径(现 Dockerfile 已用,不动)
+│   ◇ 同步流程:`bun install` 之后必跟 `npm install --package-lock-only`
+│   ◇ 兜底:pre-commit hook 检测两 lockfile mtime 必须 ≤ 60s 差,否则 reject commit
+│   ◇ 原因:bun install 不写 package-lock.json,Docker npm ci 会炸;已踩过部署事故
 ├── bun add -d bun-types
 ├── tsconfig.json (strict: false, moduleResolution: bundler, types: ["bun-types"])
 ├── next.config.js rewrites:
@@ -466,13 +475,29 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 │   mkvSubtitle worker(Blob URL + pako)不变
 │   jassubOverlay.js 不变(只是 import 路径)
 ├── reauth E2E(补充 v2.0 已有的 6 个 wiring 单元测试,不替代)
+├── **Dexie / IndexedDB 在 Next.js RSC 下的承载契约**(2026-05-20 补,plan 原文遗漏):
+│   ◇ **DB 名 `animego-library` + Dexie schema v5 迁移期间冻结,禁止 bump v6**
+│     (用户数据全在浏览器,bump version 触发 Dexie 迁移路径,出问题不可服务器侧回滚)
+│   ◇ client/src/lib/library/db/db.js 整文件 `'use client'` + 任何调用方 `dynamic(() => import(...), {ssr:false})`
+│   ◇ getDb() 严禁出现在 RSC tree 任何位置
+│     验证脚本:`grep -rn "from.*lib/library/db" app/` 命中行必全在 `'use client'` 文件
+│   ◇ 11 个 store 在 Next 下读写行为 = Vite 下完全等价:
+│     libraries / series / seasons / episodes / fileRefs / matchCache / fileHandles
+│     / opsLog / progress / userOverride / migrationFailures
+│   ◇ E2E cross-app 验证(P6 必须过):
+│     本地 Chrome profile 在 v2.0.1 Vite 站建库 → 切到 Next 16 dev 同 origin
+│     → `/library` 直接看到原数据,集数、播放进度、override 全在
+│     → 验证 Dexie 跨载体读取 0 数据丢失
+│   ◇ FileSystemDirectoryHandle ↔ Series 映射(per-card refresh feature 预留):
+│     本 phase 不实现,但 schema v5 `fileHandles` store + `[libraryId+matchStatus]` 索引已有承载位
+│     refresh feature 等迁移完成 + 30d 后再做,跟 IndexedDB schema bump 解耦
 └── ⚡ UI mitigation (+5 hr,见 §3.7):
     ├── 'use client' 边界审计:grep -rn "useState|useEffect|window|document" app/library app/player
     ├── /library、/player 各加 loading.tsx skeleton
     └── 50+ 文件夹 hydration 测试,Console 红色 warning 清零
 ```
 
-**Acceptance:** E2E 全 flow + 50+ 文件夹无 hydration mismatch + libass 字幕跟 v2.0.1 一致
+**Acceptance:** E2E 全 flow + 50+ 文件夹无 hydration mismatch + libass 字幕跟 v2.0.1 一致 + **IndexedDB cross-app(Vite v2.0.1 → Next 16)数据无损读** + **Dexie schema 仍 v5,getDb() 0 处在 RSC tree**
 
 ### Phase 7 — Admin RSC + middleware (15-25 hr)
 
@@ -718,8 +743,11 @@ T+30 day:
 | **R16** | **ws-server rate-limit Map cap 10K silent overflow**(二轮 review Pf2) | 中 | 弹幕 spam 防御失效 | P2.8 换 LRU 有界 |
 | **R17** | **dandanplay match Go port off-by-one**(二轮 review 6C) | 中 | 部分集 dandanplay 命中错位 | P2.6 testify 全覆盖 buildEpisodeMap 3-level |
 | **R18** | **CASCADE FK 误删数据**(二轮 review 1C) | 低 | admin 误删 user 连带删 sub/follow/comment/danmaku | schema 明确 CASCADE,UI 加 "确认删除 N 条" 二次确认 |
+| **R19** | **Lockfile 双轨漂移**(2026-05-20 补,已踩过坑) | 中 | Docker `npm ci` 失败,部署炸;或 dev 跟 prod deps 漂移 | P3 显式双轨流程 + `bun install` 后必跟 `npm install --package-lock-only` + pre-commit hook 兜底 |
+| **R20** | **IndexedDB schema 在迁移期间 bump 触发数据丢失**(2026-05-20 补) | 中 | 全员库重建,集数 / 进度 / override 全丢,用户流失 | P6 冻结 Dexie v5 + E2E 验证 Vite → Next cross-app 读取 + 任何 schema 改动延后到 cutover + 30d |
 
-**R0 / R1 / R5 / R8 / R13 / R15 是 critical**,必须提前规划 mitigation。
+**R0 / R1 / R5 / R8 / R13 / R15 / R20 是 critical**,必须提前规划 mitigation。
+**R19 是中危但 P3 启动前必须装好 hook**(否则下一次 deploy 又踩同样的坑)。
 
 ---
 
@@ -910,6 +938,9 @@ P0 收工标准:**Go + Postgres 起来,空 chi router :8080/health 返回 OK,R2 
 
 ## 7. Status Tracking
 
+> **Status check 2026-05-20:** Plan 落地 8 天,全部 phase 仍 `not started`。本周要么起 P0,要么 plan 随上游 stack 演进而陈旧(已发生:Bun 1.3.14 + Zig→Rust 重写,见决策日志新行 + R19/R20)。
+> **下一次 audit 触发:** P0 开工日 / 2026-06-01,取早。
+
 | Phase | Status | Started | Completed | Hours actual |
 |-------|--------|---------|-----------|-------------:|
 | P0 Go 骨架 + Postgres + Backup | not started | — | — | — |
@@ -943,6 +974,10 @@ P0 收工标准:**Go + Postgres 起来,空 chi router :8080/health 返回 OK,R2 
 - [ ] ws-server → Go(等 socket.io v4 Go 库成熟,可能永不迁)
 - [ ] Postgres → managed (Supabase / Neon) 如果 VPS 不够用了
 - [ ] 待办五:socket.io-redis adapter(多 ws-server 实例时)
+- [ ] **Bun Rust 重写版本观察期 ≥ 60 天**(2026-05-20 补):2026-05-14 Anthropic 协作 Rust 重写 merge 主 repo;v1.3.14 是最后 Zig;patch.0 不上 prod,先 staging
+- [ ] **Per-card refresh feature**(增量库扫描,2026-05-20 补):data model 已就绪(FileRef `id = hash(hash16M + size)` 跨 rename 稳定;REUSE logic 在 importPipeline.js:177-307;Sonarr 路线参考);需补 `fileHandles` ↔ Series 映射 + 卡片刷新按钮 + missing 软删 + parser 冲突 review 队列。**P6 完成 + cutover + 30d 后再做**,跟 Dexie schema 改动解耦
+- [ ] **DX review 跑一遍**(`/plan-devex-review`,2026-05-20 补):0 runs at plan 落地时,P3 启动前补
+- [ ] **Codex review at critical gates**(2026-05-20 补):用户主动 skip,但 P8.5 → P9 cutover gate 前建议 1 次 outside cross-model check,廉价保险
 
 ---
 
@@ -1167,7 +1202,8 @@ extensions(必须先 CREATE EXTENSION):
 
 ---
 
-**Last updated:** 2026-05-12(初版,supersedes v1 plan from 2026-05-10)
+**Last updated:** 2026-05-20(7 gaps audit:Bun 1.3.14 + Rust 重写策略、lockfile 双轨、IndexedDB-on-RSC 契约、R19 + R20、DX/Codex gate)
+**Initial:** 2026-05-12(初版,supersedes v1 plan from 2026-05-10)
 
 ---
 
@@ -1176,10 +1212,10 @@ extensions(必须先 CREATE EXTENSION):
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
-| Codex Review | `/codex review` | Independent 2nd opinion | 0 | skipped | 用户明确跳过(本次也跳过) |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | **skipped(P8.5 → P9 gate 前建议补 1 次)** | 用户主动跳过;cutover gate 前 outside cross-model check 是廉价保险(2026-05-20 注) |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | **2 (deep re-run 2026-05-12 19:00)** | CLEAR (PLAN) | **2nd run: 19 issues raised, 17 resolved + 2 unresolved-accepted** |
 | Design Review | `/plan-design-review` | UI/UX gaps | 1 (stale) | covered | v1 plan §3.7 UI risk audit 平移 |
-| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | **TBD before P3** | 2026-05-20 注:scripts/dev.sh 起 6 进程的 dev loop 没人独立检查过,P3 启动前补 |
 
 ### 1st Eng Review 06:45 (commit 89516a1) — 4 critical findings (all resolved earlier today):
 - Issue 1 [CRITICAL]: Mongo 30-day retention vs Postgres new writes → **1C**: 24h 真实窗口 + mongodump 仅作灾难恢复
