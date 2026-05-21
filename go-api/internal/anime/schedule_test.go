@@ -89,6 +89,14 @@ func (e *scheduleFakeEnqueuer) EnqueueV1Many(ctx context.Context, ids []int32) e
 	return fn(ctx, ids)
 }
 
+// EnqueueV2Many is a no-op stub.  /schedule never dispatches V2 jobs —
+// those chain from the V1 worker after a successful Bangumi hit.  Stub
+// is needed only to satisfy the queue.Enqueuer interface that grew the
+// V2 method in P2.1.7.
+func (e *scheduleFakeEnqueuer) EnqueueV2Many(_ context.Context, _ []queue.BangumiV2Args) error {
+	return nil
+}
+
 func (e *scheduleFakeEnqueuer) snapshotCalls() [][]int32 {
 	e.mu.Lock()
 	defer e.mu.Unlock()

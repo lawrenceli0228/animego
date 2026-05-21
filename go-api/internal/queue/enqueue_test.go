@@ -27,6 +27,19 @@ func TestNoopEnqueuer_NoError(t *testing.T) {
 	require.NoError(t, n.EnqueueV1Many(context.Background(), []int32{1, 2, 3}))
 }
 
+// TestNoopEnqueuer_V2NoError asserts NoopEnqueuer.EnqueueV2Many is
+// equally inert for all input shapes — nil, empty, populated.
+func TestNoopEnqueuer_V2NoError(t *testing.T) {
+	t.Parallel()
+
+	n := NoopEnqueuer{}
+
+	require.NoError(t, n.EnqueueV2Many(context.Background(), nil))
+	require.NoError(t, n.EnqueueV2Many(context.Background(), []BangumiV2Args{}))
+	require.NoError(t, n.EnqueueV2Many(context.Background(),
+		[]BangumiV2Args{{AnilistID: 1, BgmID: 100}, {AnilistID: 2, BgmID: 200}}))
+}
+
 // TestRealEnqueuer_EmptyList_NoCall asserts the early-return path runs
 // without touching the underlying river client.  We pass nil for the
 // client — if the implementation tried to call client.InsertMany the
@@ -41,6 +54,17 @@ func TestRealEnqueuer_EmptyList_NoCall(t *testing.T) {
 	// panics — which testify treats as a failure for this subtest.
 	require.NoError(t, e.EnqueueV1Many(context.Background(), nil))
 	require.NoError(t, e.EnqueueV1Many(context.Background(), []int32{}))
+}
+
+// TestRealEnqueuer_V2EmptyList_NoCall — same guard for the V2 path.
+// Empty / nil must short-circuit before the nil client is touched.
+func TestRealEnqueuer_V2EmptyList_NoCall(t *testing.T) {
+	t.Parallel()
+
+	e := NewEnqueuer(nil)
+
+	require.NoError(t, e.EnqueueV2Many(context.Background(), nil))
+	require.NoError(t, e.EnqueueV2Many(context.Background(), []BangumiV2Args{}))
 }
 
 // TestEnqueuer_InterfaceSatisfaction is a runtime sanity check — the

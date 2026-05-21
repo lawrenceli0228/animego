@@ -50,30 +50,48 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/testutil"
 )
 
-// noHitBangumi is a stub BangumiSearcher used by the queue smoke tests
-// to exercise the REAL BangumiV1Worker without hitting api.bgm.tv.  It
-// returns ErrNotFound for every keyword, which drives V1.Work() down
-// the "permanent no-hit → return nil → river marks job completed"
-// branch.  Combined with noRowV1DB below this keeps the V1 job's
-// completion path identical to the old stubBangumiV1Worker (always
-// returns nil) while still going through the production wiring.
+// noHitBangumi is a stub BangumiV12Client used by the queue smoke
+// tests to exercise the REAL V1 + V2 workers without hitting
+// api.bgm.tv.  Search/Subject/Characters all return ErrNotFound, which
+// drives V1.Work() and V2.Work() down the "permanent no-hit → return
+// nil → river marks job completed" branch.  Combined with noRowV12DB
+// below this keeps the V1/V2 completion paths identical to the old
+// stub workers while still going through the production wiring.
 type noHitBangumi struct{}
 
 func (noHitBangumi) Search(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
 	return nil, bangumi.ErrNotFound
 }
 
-// noRowV1DB is a stub V1DB used alongside noHitBangumi.  ErrNoRows on
-// the read short-circuits the worker before Search is even called —
-// belt-and-braces so the smoke test never accidentally races against
-// a real Bangumi HTTP request.
-type noRowV1DB struct{}
+func (noHitBangumi) Subject(_ context.Context, _ int) (*bangumi.Subject, error) {
+	return nil, bangumi.ErrNotFound
+}
 
-func (noRowV1DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+func (noHitBangumi) Characters(_ context.Context, _ int) ([]bangumi.Character, error) {
+	return nil, bangumi.ErrNotFound
+}
+
+// noRowV12DB is a stub V12DB used alongside noHitBangumi.  ErrNoRows
+// on the V1 read short-circuits the worker before Search is even
+// called; UpdateBangumiV2 / UpdateAnimeCharacterCN are unreachable
+// because the V2 worker bails on the Subject ErrNotFound first.
+// Belt-and-braces so the smoke test never accidentally races against
+// a real Bangumi HTTP request.
+type noRowV12DB struct{}
+
+func (noRowV12DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
 	return dbgen.GetAnimeForBangumiSearchRow{}, pgx.ErrNoRows
 }
 
-func (noRowV1DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string) error {
+func (noRowV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string) error {
+	return nil
+}
+
+func (noRowV12DB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int32, _ *string) error {
+	return nil
+}
+
+func (noRowV12DB) UpdateAnimeCharacterCN(_ context.Context, _ int32, _ *string, _ *string, _ *string, _ *string) error {
 	return nil
 }
 
@@ -103,7 +121,7 @@ func bootQueueForTest(t *testing.T, ctx context.Context) *river.Client[pgx.Tx] {
 	testutil.TruncateAll(t, ctx, pool)
 
 	c, err := queue.Boot(pool, queue.Config{
-		Workers: queue.WorkersWithBangumi(noHitBangumi{}, noRowV1DB{}),
+		Workers: queue.WorkersWithBangumi(noHitBangumi{}, noRowV12DB{}, queue.NoopEnqueuer{}),
 	})
 	require.NoError(t, err, "queue.Boot")
 	require.NotNil(t, c, "queue.Boot must return a client")

@@ -64,6 +64,29 @@ type fakeV1DB struct {
 	}
 }
 
+// fakeV1Enqueuer records EnqueueV2Many calls so chain tests can
+// assert which {anilistId, bgmId} pairs were dispatched after a
+// successful V1 update.  EnqueueV1Many is a no-op (V1 worker never
+// calls it on itself) but must be implemented to satisfy Enqueuer.
+type fakeV1Enqueuer struct {
+	v2Fn    func(ctx context.Context, jobs []BangumiV2Args) error
+	v2Calls [][]BangumiV2Args
+}
+
+func (f *fakeV1Enqueuer) EnqueueV1Many(_ context.Context, _ []int32) error {
+	return nil
+}
+
+func (f *fakeV1Enqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) error {
+	dup := make([]BangumiV2Args, len(jobs))
+	copy(dup, jobs)
+	f.v2Calls = append(f.v2Calls, dup)
+	if f.v2Fn == nil {
+		return nil
+	}
+	return f.v2Fn(ctx, jobs)
+}
+
 func (f *fakeV1DB) GetAnimeForBangumiSearch(ctx context.Context, anilistID int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
 	if f.getFn == nil {
 		return dbgen.GetAnimeForBangumiSearchRow{}, nil
@@ -93,9 +116,20 @@ func ptr[T any](v T) *T { return &v }
 
 // runV1 constructs the worker + a stock job and dispatches it through
 // Work().  Returns whatever Work() returns so the caller can assert.
+// Uses NoopEnqueuer{} so tests that don't care about the V2 chain
+// don't have to wire one.  Tests that DO care about the chain should
+// call runV1WithEnq instead.
 func runV1(t *testing.T, b BangumiSearcher, d V1DB, anilistID int) error {
 	t.Helper()
-	w := NewBangumiV1Worker(b, d)
+	return runV1WithEnq(t, b, d, NoopEnqueuer{}, anilistID)
+}
+
+// runV1WithEnq is the explicit-enqueuer variant used by chain tests.
+// The V1 worker chain-enqueues a V2 job after a successful update;
+// these tests capture and assert on what got enqueued.
+func runV1WithEnq(t *testing.T, b BangumiSearcher, d V1DB, e Enqueuer, anilistID int) error {
+	t.Helper()
+	w := NewBangumiV1Worker(b, d, e)
 	return w.Work(context.Background(), &river.Job[BangumiV1Args]{
 		Args: BangumiV1Args{AnilistID: anilistID},
 	})
@@ -546,6 +580,154 @@ func TestSelectHit(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// V2 chain tests — added in P2.1.7 along with the real V2 worker.
+// ---------------------------------------------------------------------------
+
+// TestBangumiV1_HappyPath_ChainsV2 verifies that after a successful
+// V1 update (with a bgmID), the worker chain-enqueues exactly one V2
+// job carrying the same {anilistId, bgmId} pair.
+func TestBangumiV1_HappyPath_ChainsV2(t *testing.T) {
+	t.Parallel()
+
+	native := "ナルト"
+	b := &fakeBangumi{
+		searchFn: func(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+			return &bangumi.SearchResponse{
+				List: []bangumi.SearchResult{
+					{ID: 9999, Name: "ナルト", NameCN: "火影忍者"},
+				},
+			}, nil
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: &native}, nil
+		},
+	}
+	enq := &fakeV1Enqueuer{}
+
+	err := runV1WithEnq(t, b, db, enq, 1234)
+	require.NoError(t, err)
+
+	require.Len(t, enq.v2Calls, 1, "exactly one V2 chain enqueue expected")
+	require.Len(t, enq.v2Calls[0], 1, "exactly one V2 args entry")
+	assert.Equal(t, BangumiV2Args{AnilistID: 1234, BgmID: 9999}, enq.v2Calls[0][0],
+		"V2 chain must carry the same anilistId + bgmId")
+}
+
+// TestBangumiV1_NoHit_DoesNotChainV2 — when Search returns ErrNotFound
+// there's no bgmID to chain, so EnqueueV2Many must NOT be called.
+func TestBangumiV1_NoHit_DoesNotChainV2(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumi{
+		searchFn: func(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+			return nil, bangumi.ErrNotFound
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: ptr("Whatever")}, nil
+		},
+	}
+	enq := &fakeV1Enqueuer{}
+
+	err := runV1WithEnq(t, b, db, enq, 99)
+	require.NoError(t, err)
+	assert.Empty(t, enq.v2Calls, "no Bangumi hit → no V2 chain")
+}
+
+// TestBangumiV1_EmptyList_DoesNotChainV2 — same as ErrNotFound, but
+// the 200/{list:[]} branch.
+func TestBangumiV1_EmptyList_DoesNotChainV2(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumi{
+		searchFn: func(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+			return &bangumi.SearchResponse{List: nil}, nil
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: ptr("X")}, nil
+		},
+	}
+	enq := &fakeV1Enqueuer{}
+
+	err := runV1WithEnq(t, b, db, enq, 5)
+	require.NoError(t, err)
+	assert.Empty(t, enq.v2Calls, "empty list → no V2 chain")
+}
+
+// TestBangumiV1_V2ChainError_NonFatal — V1 succeeded but the chain
+// enqueue errored.  V1 must still return nil — V1 already updated
+// the DB, so river marking this job failed would cause unnecessary
+// retries of the V1 work (and another V2 chain attempt that may
+// duplicate, etc.).
+func TestBangumiV1_V2ChainError_NonFatal(t *testing.T) {
+	t.Parallel()
+
+	native := "Title"
+	b := &fakeBangumi{
+		searchFn: func(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+			return &bangumi.SearchResponse{
+				List: []bangumi.SearchResult{
+					{ID: 42, Name: "Title", NameCN: "标题"},
+				},
+			}, nil
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: &native}, nil
+		},
+	}
+	enq := &fakeV1Enqueuer{
+		v2Fn: func(_ context.Context, _ []BangumiV2Args) error {
+			return errors.New("river client transient err")
+		},
+	}
+
+	err := runV1WithEnq(t, b, db, enq, 8)
+	require.NoError(t, err,
+		"V2 chain failure must NOT cause V1 to retry — V1 already updated DB")
+	require.Equal(t, 1, db.updateCalls, "V1 DB write happened exactly once")
+	assert.Len(t, enq.v2Calls, 1, "V2 chain was attempted")
+}
+
+// TestBangumiV1_NilEnqueuer_Substitutes — passing nil to the
+// constructor must NOT panic; NoopEnqueuer is substituted so the
+// chain call is a safe no-op.
+func TestBangumiV1_NilEnqueuer_Substitutes(t *testing.T) {
+	t.Parallel()
+
+	native := "Title"
+	b := &fakeBangumi{
+		searchFn: func(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+			return &bangumi.SearchResponse{
+				List: []bangumi.SearchResult{
+					{ID: 42, Name: "Title"},
+				},
+			}, nil
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: &native}, nil
+		},
+	}
+
+	w := NewBangumiV1Worker(b, db, nil)
+	require.NotNil(t, w, "constructor should never return nil")
+
+	err := w.Work(context.Background(), &river.Job[BangumiV1Args]{
+		Args: BangumiV1Args{AnilistID: 1},
+	})
+	require.NoError(t, err, "nil enq should be substituted with Noop")
+	require.Equal(t, 1, db.updateCalls)
+}
+
 // Compile-time guard:  dbgen.Querier must satisfy V1DB so production
 // main.go can pass the sqlc Queries directly.  Failing this means we'd
 // need an adapter on the call-site — better to catch it here.
@@ -554,3 +736,7 @@ var _ V1DB = (dbgen.Querier)(nil)
 // Compile-time guard:  *bangumi.Client must satisfy BangumiSearcher.
 // Same rationale — keeps the production wiring trivial.
 var _ BangumiSearcher = (*bangumi.Client)(nil)
+
+// Compile-time guard:  fakeV1Enqueuer must satisfy Enqueuer.  If a
+// new method is added to Enqueuer this fixture must be updated too.
+var _ Enqueuer = (*fakeV1Enqueuer)(nil)

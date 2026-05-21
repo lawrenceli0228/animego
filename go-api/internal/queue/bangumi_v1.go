@@ -18,10 +18,16 @@
 // error).  Permanent "no hit" conditions (ErrNotFound, empty keyword,
 // empty list, no DB row) return nil so the job completes.
 //
-// SCOPE: this worker writes the V1 columns ONLY (bgm_id +
-// title_chinese + bangumi_version).  Enqueuing the V2 follow-up
-// happens elsewhere (the orchestrator that owns the enrichment
-// lifecycle, not here — keeps the worker single-purpose).
+// SCOPE: this worker writes the V1 columns (bgm_id + title_chinese +
+// bangumi_version) AND chain-enqueues the V2 follow-up job when a
+// bgm_id was found.  Chaining lives here (not in a separate
+// orchestrator) because the V1 worker has the only authoritative
+// signal that a bgm_id was just assigned — bridging that to a separate
+// "watch for new bgm_ids" component would race against the V1 write
+// and add a polling stage for no benefit.  V2 enqueue failure is
+// non-fatal: V1 already succeeded (row bumped to version=1), so the
+// row won't be re-picked by the orphan scan; worst case is V2 never
+// runs for this row, which is acceptable.
 package queue
 
 import (
@@ -71,18 +77,32 @@ type V1DB interface {
 // river.Worker[BangumiV1Args] by embedding river.WorkerDefaults, which
 // wires up the retry / timeout / middleware defaults so only Work has
 // to be overridden.
+//
+// enq is used ONLY to chain a V2 job after a successful V1 write with
+// a non-nil bgmID.  Pass NoopEnqueuer{} (or nil — the constructor
+// substitutes Noop) in unit tests that don't want to assert on the
+// V2 chain.
 type BangumiV1Worker struct {
 	river.WorkerDefaults[BangumiV1Args]
 	bangumi BangumiSearcher
 	db      V1DB
+	enq     Enqueuer
 }
 
 // NewBangumiV1Worker constructs a worker bound to the given bangumi
-// client and DB.  Both dependencies are required; passing nil will
-// panic when the first job fires (intentional — misconfiguration
-// should crash loudly, not silently no-op).
-func NewBangumiV1Worker(bangumiClient BangumiSearcher, db V1DB) *BangumiV1Worker {
-	return &BangumiV1Worker{bangumi: bangumiClient, db: db}
+// client, DB, and Enqueuer.  bangumiClient + db are required; nil
+// panics on the first job (intentional — misconfiguration should
+// crash loudly, not silently no-op).
+//
+// enq is OPTIONAL — nil is replaced with NoopEnqueuer{} so the V2
+// chain is a safe no-op when the caller hasn't wired river yet.  V2
+// chain enqueue failure is non-fatal (logged + swallowed) so a busted
+// river client cannot block V1 from completing.
+func NewBangumiV1Worker(bangumiClient BangumiSearcher, db V1DB, enq Enqueuer) *BangumiV1Worker {
+	if enq == nil {
+		enq = NoopEnqueuer{}
+	}
+	return &BangumiV1Worker{bangumi: bangumiClient, db: db, enq: enq}
 }
 
 // Work is the river dispatch entrypoint.  See package doc for the
@@ -173,6 +193,23 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 			"bgmId", bgmID,
 			"err", err)
 		return fmt.Errorf("bangumi_v1 update %d: %w", anilistID, err)
+	}
+
+	// 9. Chain V2 — best-effort.  V1 already succeeded, so a chain
+	//    enqueue failure shouldn't roll back V1's write.  Log the
+	//    failure and continue: the row is now at version=1 and the
+	//    orphan scan won't re-pick it, so worst case is V2 never
+	//    fires for this row.  Acceptable given the failure mode is
+	//    almost always "river client momentarily unavailable" and
+	//    the next manual sweep will catch it.
+	if cErr := w.enq.EnqueueV2Many(ctx, []BangumiV2Args{{
+		AnilistID: int(anilistID),
+		BgmID:     int(bgmID),
+	}}); cErr != nil {
+		slog.WarnContext(ctx, "bangumi_v1 chain v2 enqueue error",
+			"anilistId", anilistID,
+			"bgmId", bgmID,
+			"err", cErr)
 	}
 
 	slog.InfoContext(ctx, "bangumi_v1 done",

@@ -88,28 +88,38 @@ func TestWorkers_RegistersStubs(t *testing.T) {
 }
 
 // TestWorkersWithBangumi_RegistersAll3 verifies the production wiring
-// constructor binds V1 (real) + V2/V3 (stubs) all three Kinds.  Uses
-// a noop BangumiSearcher + V1DB — we never invoke Work here, only
-// inspect what's been registered.
+// constructor binds V1 + V2 (real) + V3 (stub) — all three Kinds
+// occupied.  Uses noopBangumi + noopV12DB — we never invoke Work
+// here, only inspect what's been registered.
 func TestWorkersWithBangumi_RegistersAll3(t *testing.T) {
 	t.Parallel()
 
-	w := WorkersWithBangumi(noopBangumi{}, noopV1DB{})
+	w := WorkersWithBangumi(noopBangumi{}, noopV12DB{}, NoopEnqueuer{})
 	require.NotNil(t, w, "WorkersWithBangumi must return a non-nil bundle")
 
 	// All 3 slots should be taken: re-registration returns
 	// "already registered".
-	err := river.AddWorkerSafely(w, NewBangumiV1Worker(noopBangumi{}, noopV1DB{}))
+	err := river.AddWorkerSafely(w, NewBangumiV1Worker(noopBangumi{}, noopV12DB{}, NoopEnqueuer{}))
 	require.Error(t, err, "v1 slot should already be occupied")
 	assert.Contains(t, err.Error(), "bangumi_v1")
 
-	err = river.AddWorkerSafely(w, &stubBangumiV2Worker{})
+	err = river.AddWorkerSafely(w, NewBangumiV2Worker(noopBangumi{}, noopV12DB{}))
 	require.Error(t, err, "v2 slot should already be occupied")
 	assert.Contains(t, err.Error(), "bangumi_v2")
 
 	err = river.AddWorkerSafely(w, &stubBangumiV3Worker{})
 	require.Error(t, err, "v3 slot should already be occupied")
 	assert.Contains(t, err.Error(), "bangumi_v3")
+}
+
+// TestWorkersWithBangumi_NilEnqueuerOK asserts the constructor
+// accepts a nil Enqueuer without panicking — V1Worker substitutes
+// NoopEnqueuer{} internally.
+func TestWorkersWithBangumi_NilEnqueuerOK(t *testing.T) {
+	t.Parallel()
+
+	w := WorkersWithBangumi(noopBangumi{}, noopV12DB{}, nil)
+	require.NotNil(t, w)
 }
 
 // TestWorkers_FreshBundlePerCall asserts Workers() returns an
@@ -243,18 +253,39 @@ func TestStubWorkers_LogContext(t *testing.T) {
 // river.AddWorker.
 // ---------------------------------------------------------------------------
 
+// noopBangumi satisfies BangumiV12Client (Search + Subject + Characters)
+// with always-NotFound responses.  Used by the registration tests where
+// the worker is never actually dispatched against this fake.
 type noopBangumi struct{}
 
 func (noopBangumi) Search(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
 	return nil, bangumi.ErrNotFound
 }
 
-type noopV1DB struct{}
+func (noopBangumi) Subject(_ context.Context, _ int) (*bangumi.Subject, error) {
+	return nil, bangumi.ErrNotFound
+}
 
-func (noopV1DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+func (noopBangumi) Characters(_ context.Context, _ int) ([]bangumi.Character, error) {
+	return nil, bangumi.ErrNotFound
+}
+
+// noopV12DB satisfies V12DB (V1 + V2 read/write surface).  All methods
+// no-op; the registration tests never invoke these methods.
+type noopV12DB struct{}
+
+func (noopV12DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
 	return dbgen.GetAnimeForBangumiSearchRow{}, nil
 }
 
-func (noopV1DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string) error {
+func (noopV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string) error {
+	return nil
+}
+
+func (noopV12DB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int32, _ *string) error {
+	return nil
+}
+
+func (noopV12DB) UpdateAnimeCharacterCN(_ context.Context, _ int32, _ *string, _ *string, _ *string, _ *string) error {
 	return nil
 }
