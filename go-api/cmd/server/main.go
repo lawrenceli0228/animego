@@ -23,11 +23,13 @@ import (
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
+	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/torrents"
 )
 
@@ -72,6 +74,36 @@ func main() {
 	// single sliding window matching Express MIN_INTERVAL.
 	anilistClient := anilist.NewClient()
 
+	// Bangumi API client — single instance, 800ms throttle, shared by
+	// the V1 enrichment worker (and V2/V3 in P2.1.6 / P2.1.7).
+	bangumiClient := bangumi.NewClient()
+
+	// River queue boot: real V1 worker (uses bangumiClient + q) + stub
+	// V2/V3.  Boot returns the client unstarted — explicit Start() below
+	// gates dispatch on the postgres handshake succeeding above.
+	riverClient, err := queue.Boot(pool, queue.Config{
+		Workers: queue.WorkersWithBangumi(bangumiClient, q),
+		Logger:  slog.Default(),
+	})
+	if err != nil {
+		slog.Error("river queue boot failed", "err", err)
+		os.Exit(1)
+	}
+	queueCtx, queueCancel := context.WithCancel(context.Background())
+	defer queueCancel()
+	if err := riverClient.Start(queueCtx); err != nil {
+		slog.Error("river queue start failed", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := riverClient.Stop(stopCtx); err != nil {
+			slog.Warn("river queue stop", "err", err)
+		}
+	}()
+	slog.Info("river queue ready", "workers", "v1(real)+v2(stub)+v3(stub)")
+
 	searchSvc, err := anime.NewSearchService(anilistClient, q)
 	if err != nil {
 		slog.Error("search service init failed", "err", err)
@@ -80,6 +112,11 @@ func main() {
 	scheduleSvc, err := anime.NewScheduleService(anilistClient, q)
 	if err != nil {
 		slog.Error("schedule service init failed", "err", err)
+		os.Exit(1)
+	}
+	detailSvc, err := anime.NewDetailService(q)
+	if err != nil {
+		slog.Error("detail service init failed", "err", err)
 		os.Exit(1)
 	}
 
@@ -105,6 +142,7 @@ func main() {
 		r.Get("/search", searchSvc.Handler())
 		r.Get("/schedule", scheduleSvc.Handler())
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))
+		r.Get("/{anilistId}", detailSvc.Handler())
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -118,7 +156,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.4")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.5")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
