@@ -16,6 +16,23 @@ type Querier interface {
 	// Total active watchers for /api/anime/:anilistId/watchers (the `total`
 	// meta field in the envelope).
 	CountWatchers(ctx context.Context, anilistID int32) (int64, error)
+	DeleteAnimeCharacters(ctx context.Context, animeID int32) error
+	// -------------------------------------------------------------------------
+	// Child-table upsert pairs for /:anilistId AniList re-fetch (P2.1.6).
+	//
+	// The "delete then insert" pattern matches Express's
+	// mongoose findOneAndUpdate({...$set:{arrays}}) semantics: each child
+	// array is wholly replaced, never merged.  Callers MUST run each
+	// Delete+Insert pair as one logical operation; P2.1.6 accepts non-
+	// transactional execution because the only observable failure mode is
+	// "next read sees partial children" and the next stale-detection sweep
+	// re-fetches.
+	// -------------------------------------------------------------------------
+	DeleteAnimeGenres(ctx context.Context, animeID int32) error
+	DeleteAnimeRecommendations(ctx context.Context, animeID int32) error
+	DeleteAnimeRelations(ctx context.Context, animeID int32) error
+	DeleteAnimeStaff(ctx context.Context, animeID int32) error
+	DeleteAnimeStudios(ctx context.Context, animeID int32) error
 	// Bulk read for /search post-upsert re-read so enriched fields
 	// (title_chinese, bangumi_*) flow into the response even when the upsert
 	// only carried AniList-side data.  Returns the same 16-column shape as
@@ -90,6 +107,24 @@ type Querier interface {
 	// /api/anime/yearly-top, replacing anime.controller.js:93-110.
 	// Express limit is 20 hard, slice down to query limit in handler.
 	GetYearlyTop(ctx context.Context, seasonYear *int32, limit int32) ([]GetYearlyTopRow, error)
+	// display_order is the slice index (0-based) so the relational re-read
+	// preserves the AniList edge ordering Express got for free from
+	// Mongoose's array indexing.
+	InsertAnimeCharacter(ctx context.Context, arg InsertAnimeCharacterParams) error
+	InsertAnimeGenre(ctx context.Context, animeID int32, genre string) error
+	InsertAnimeRecommendation(ctx context.Context, arg InsertAnimeRecommendationParams) error
+	// Relations have a uuid PK; the table's default gen_random_uuid()
+	// assigns the id automatically.  Same anilist_id may appear twice for a
+	// parent with two relationship facets (e.g. SEQUEL + ALTERNATIVE) so no
+	// ON CONFLICT clause — the uuid PK keeps the rows separate.
+	InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelationParams) error
+	InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error
+	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
+	// Boot-time orphan scan: returns anilist_ids of rows where
+	// bangumi_version=0 (never enriched).  Paginated via limit/offset so
+	// the caller can batch-enqueue without loading the whole table into
+	// memory.  Ordered by anilist_id ASC for deterministic batching.
+	ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error)
 	// Phase 1 result write — set bgm_id + title_chinese (the latter only
 	// when the Bangumi search produced an exact native match with a
 	// non-empty name_cn).  bangumi_version=1 marks ready for Phase 2.

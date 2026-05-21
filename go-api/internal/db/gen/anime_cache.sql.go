@@ -49,6 +49,72 @@ func (q *Queries) CountWatchers(ctx context.Context, anilistID int32) (int64, er
 	return total, err
 }
 
+const deleteAnimeCharacters = `-- name: DeleteAnimeCharacters :exec
+DELETE FROM anime_characters WHERE anime_id = $1
+`
+
+func (q *Queries) DeleteAnimeCharacters(ctx context.Context, animeID int32) error {
+	_, err := q.db.Exec(ctx, deleteAnimeCharacters, animeID)
+	return err
+}
+
+const deleteAnimeGenres = `-- name: DeleteAnimeGenres :exec
+
+DELETE FROM anime_genres WHERE anime_id = $1
+`
+
+// -------------------------------------------------------------------------
+// Child-table upsert pairs for /:anilistId AniList re-fetch (P2.1.6).
+//
+// The "delete then insert" pattern matches Express's
+// mongoose findOneAndUpdate({...$set:{arrays}}) semantics: each child
+// array is wholly replaced, never merged.  Callers MUST run each
+// Delete+Insert pair as one logical operation; P2.1.6 accepts non-
+// transactional execution because the only observable failure mode is
+// "next read sees partial children" and the next stale-detection sweep
+// re-fetches.
+// -------------------------------------------------------------------------
+func (q *Queries) DeleteAnimeGenres(ctx context.Context, animeID int32) error {
+	_, err := q.db.Exec(ctx, deleteAnimeGenres, animeID)
+	return err
+}
+
+const deleteAnimeRecommendations = `-- name: DeleteAnimeRecommendations :exec
+DELETE FROM anime_recommendations WHERE anime_id = $1
+`
+
+func (q *Queries) DeleteAnimeRecommendations(ctx context.Context, animeID int32) error {
+	_, err := q.db.Exec(ctx, deleteAnimeRecommendations, animeID)
+	return err
+}
+
+const deleteAnimeRelations = `-- name: DeleteAnimeRelations :exec
+DELETE FROM anime_relations WHERE anime_id = $1
+`
+
+func (q *Queries) DeleteAnimeRelations(ctx context.Context, animeID int32) error {
+	_, err := q.db.Exec(ctx, deleteAnimeRelations, animeID)
+	return err
+}
+
+const deleteAnimeStaff = `-- name: DeleteAnimeStaff :exec
+DELETE FROM anime_staff WHERE anime_id = $1
+`
+
+func (q *Queries) DeleteAnimeStaff(ctx context.Context, animeID int32) error {
+	_, err := q.db.Exec(ctx, deleteAnimeStaff, animeID)
+	return err
+}
+
+const deleteAnimeStudios = `-- name: DeleteAnimeStudios :exec
+DELETE FROM anime_studios WHERE anime_id = $1
+`
+
+func (q *Queries) DeleteAnimeStudios(ctx context.Context, animeID int32) error {
+	_, err := q.db.Exec(ctx, deleteAnimeStudios, animeID)
+	return err
+}
+
 const getAnimeByAnilistIDs = `-- name: GetAnimeByAnilistIDs :many
 SELECT
     anilist_id,
@@ -989,6 +1055,221 @@ func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertAnimeCharacter = `-- name: InsertAnimeCharacter :exec
+INSERT INTO anime_characters (
+    anime_id, display_order,
+    name_en, name_ja, name_cn,
+    image_url, role,
+    voice_actor_en, voice_actor_ja, voice_actor_image_url
+) VALUES (
+    $1, $2,
+    $3, $4, $5,
+    $6, $7,
+    $8, $9, $10
+)
+`
+
+type InsertAnimeCharacterParams struct {
+	AnimeID            int32   `json:"animeId"`
+	DisplayOrder       int32   `json:"displayOrder"`
+	NameEn             *string `json:"nameEn"`
+	NameJa             *string `json:"nameJa"`
+	NameCn             *string `json:"nameCn"`
+	ImageUrl           *string `json:"imageUrl"`
+	Role               *string `json:"role"`
+	VoiceActorEn       *string `json:"voiceActorEn"`
+	VoiceActorJa       *string `json:"voiceActorJa"`
+	VoiceActorImageUrl *string `json:"voiceActorImageUrl"`
+}
+
+// display_order is the slice index (0-based) so the relational re-read
+// preserves the AniList edge ordering Express got for free from
+// Mongoose's array indexing.
+func (q *Queries) InsertAnimeCharacter(ctx context.Context, arg InsertAnimeCharacterParams) error {
+	_, err := q.db.Exec(ctx, insertAnimeCharacter,
+		arg.AnimeID,
+		arg.DisplayOrder,
+		arg.NameEn,
+		arg.NameJa,
+		arg.NameCn,
+		arg.ImageUrl,
+		arg.Role,
+		arg.VoiceActorEn,
+		arg.VoiceActorJa,
+		arg.VoiceActorImageUrl,
+	)
+	return err
+}
+
+const insertAnimeGenre = `-- name: InsertAnimeGenre :exec
+INSERT INTO anime_genres (anime_id, genre) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) InsertAnimeGenre(ctx context.Context, animeID int32, genre string) error {
+	_, err := q.db.Exec(ctx, insertAnimeGenre, animeID, genre)
+	return err
+}
+
+const insertAnimeRecommendation = `-- name: InsertAnimeRecommendation :exec
+INSERT INTO anime_recommendations (
+    anime_id, anilist_id, title,
+    cover_image_url, cover_image_color,
+    poster_accent, poster_accent_rgb, poster_accent_contrast_on_black,
+    average_score
+) VALUES (
+    $1, $2, $3,
+    $4, $5,
+    $6, $7, $8,
+    $9
+)
+`
+
+type InsertAnimeRecommendationParams struct {
+	AnimeID                     int32    `json:"animeId"`
+	AnilistID                   int32    `json:"anilistId"`
+	Title                       *string  `json:"title"`
+	CoverImageUrl               *string  `json:"coverImageUrl"`
+	CoverImageColor             *string  `json:"coverImageColor"`
+	PosterAccent                *string  `json:"posterAccent"`
+	PosterAccentRgb             *string  `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64 `json:"posterAccentContrastOnBlack"`
+	AverageScore                *float64 `json:"averageScore"`
+}
+
+func (q *Queries) InsertAnimeRecommendation(ctx context.Context, arg InsertAnimeRecommendationParams) error {
+	_, err := q.db.Exec(ctx, insertAnimeRecommendation,
+		arg.AnimeID,
+		arg.AnilistID,
+		arg.Title,
+		arg.CoverImageUrl,
+		arg.CoverImageColor,
+		arg.PosterAccent,
+		arg.PosterAccentRgb,
+		arg.PosterAccentContrastOnBlack,
+		arg.AverageScore,
+	)
+	return err
+}
+
+const insertAnimeRelation = `-- name: InsertAnimeRelation :exec
+INSERT INTO anime_relations (
+    anime_id, anilist_id, relation_type, title,
+    cover_image_url, cover_image_color,
+    poster_accent, poster_accent_rgb, poster_accent_contrast_on_black,
+    format
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6,
+    $7, $8, $9,
+    $10
+)
+`
+
+type InsertAnimeRelationParams struct {
+	AnimeID                     int32    `json:"animeId"`
+	AnilistID                   int32    `json:"anilistId"`
+	RelationType                *string  `json:"relationType"`
+	Title                       *string  `json:"title"`
+	CoverImageUrl               *string  `json:"coverImageUrl"`
+	CoverImageColor             *string  `json:"coverImageColor"`
+	PosterAccent                *string  `json:"posterAccent"`
+	PosterAccentRgb             *string  `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64 `json:"posterAccentContrastOnBlack"`
+	Format                      *string  `json:"format"`
+}
+
+// Relations have a uuid PK; the table's default gen_random_uuid()
+// assigns the id automatically.  Same anilist_id may appear twice for a
+// parent with two relationship facets (e.g. SEQUEL + ALTERNATIVE) so no
+// ON CONFLICT clause — the uuid PK keeps the rows separate.
+func (q *Queries) InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelationParams) error {
+	_, err := q.db.Exec(ctx, insertAnimeRelation,
+		arg.AnimeID,
+		arg.AnilistID,
+		arg.RelationType,
+		arg.Title,
+		arg.CoverImageUrl,
+		arg.CoverImageColor,
+		arg.PosterAccent,
+		arg.PosterAccentRgb,
+		arg.PosterAccentContrastOnBlack,
+		arg.Format,
+	)
+	return err
+}
+
+const insertAnimeStaffMember = `-- name: InsertAnimeStaffMember :exec
+INSERT INTO anime_staff (
+    anime_id, display_order,
+    name_en, name_ja, image_url, role
+) VALUES (
+    $1, $2,
+    $3, $4, $5, $6
+)
+`
+
+type InsertAnimeStaffMemberParams struct {
+	AnimeID      int32   `json:"animeId"`
+	DisplayOrder int32   `json:"displayOrder"`
+	NameEn       *string `json:"nameEn"`
+	NameJa       *string `json:"nameJa"`
+	ImageUrl     *string `json:"imageUrl"`
+	Role         *string `json:"role"`
+}
+
+func (q *Queries) InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error {
+	_, err := q.db.Exec(ctx, insertAnimeStaffMember,
+		arg.AnimeID,
+		arg.DisplayOrder,
+		arg.NameEn,
+		arg.NameJa,
+		arg.ImageUrl,
+		arg.Role,
+	)
+	return err
+}
+
+const insertAnimeStudio = `-- name: InsertAnimeStudio :exec
+INSERT INTO anime_studios (anime_id, studio) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error {
+	_, err := q.db.Exec(ctx, insertAnimeStudio, animeID, studio)
+	return err
+}
+
+const listUnenrichedAnilistIDs = `-- name: ListUnenrichedAnilistIDs :many
+SELECT anilist_id
+FROM anime_cache
+WHERE bangumi_version = 0
+ORDER BY anilist_id
+LIMIT $1 OFFSET $2
+`
+
+// Boot-time orphan scan: returns anilist_ids of rows where
+// bangumi_version=0 (never enriched).  Paginated via limit/offset so
+// the caller can batch-enqueue without loading the whole table into
+// memory.  Ordered by anilist_id ASC for deterministic batching.
+func (q *Queries) ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listUnenrichedAnilistIDs, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var anilist_id int32
+		if err := rows.Scan(&anilist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, anilist_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
