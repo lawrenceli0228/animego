@@ -246,15 +246,57 @@ Integration 回归:15/15 PASS,13.4s wall(P1.D 7 + P2.0 4 + P2.1 queue 4)
 | /schedule | ✓ P2.1.4 | enqueue V1 → P2.1.6 |
 | /:anilistId | ✓ P2.1.5 | cache-only;stale + AniList re-fetch + child upsert → P2.1.6 |
 
-### P2.1.6 — 待开
+### P2.1.6 — V1 trigger source + /:anilistId stale re-fetch ✓(2026-05-21,3 commit)
 
-- V1 enqueue 触发源:/search post-upsert + /schedule unenriched lookup + boot-time orphan re-enqueue(`bangumi_version=0` 全表扫一次)
-- /:anilistId AniList Detail re-fetch on stale + 6 个 child-table upsert SQL
-- /seasonal 冷启 AniList path
-- /trending / /yearly-top / /completed-gems 接 1h ristretto cache
-- V2 worker(Bangumi Subject + Characters + Episodes → anime_characters/anime_staff/anime_recommendations 写入)
-- V3 worker(heal-CN 第二轮)
-- warmCurrentSeason / warmSeasonCache(river periodic 24h cron)
+**P2.1.6 SQL**(`74c6043`):13 个新 sqlc method
+- `ListUnenrichedAnilistIDs(limit, offset)` 给 boot orphan scan
+- 12 个 child-table 操作(6 Delete + 6 Insert):genres / studios / relations / characters / staff / recommendations
+- DELETE + INSERT 模式而非 UPSERT(child tables UUID PK 无 natural conflict key);service layer 非事务包(partial-update 容忍,下次请求再 re-fetch 一遍)
+
+**P2.1.6a**(实质上同一个 commit hash `74c6043` 包含 SQL,加 `bbca9d3` 之前的 V1 trigger commit):V1 enqueue 触发源
+- `internal/queue/enqueue.go`:`Enqueuer` 接口 + `RealEnqueuer`(river `InsertMany` 批量)+ `NoopEnqueuer` 给 nil-safe 默认
+- `internal/queue/orphan.go`:`ScanAndEnqueueOrphans` 100-batch 分页扫 bangumi_version=0
+- `search.go` + `schedule.go`:第三个参数 `enq queue.Enqueuer`,upsert/lookup 后过滤 bangumi_version=0 调 EnqueueV1Many(非致命错误)
+- `main.go`:`queue.NewEnqueuer(riverClient)` + boot goroutine `ScanAndEnqueueOrphans(60s subctx)`
+
+**P2.1.6b**(`bbca9d3`):/:anilistId stale + AniList Detail re-fetch + child upserts
+- `normalize.go` +5 函数:`StudiosFromMedia` / `RelationsFromMedia` / `CharactersFromMedia` / `StaffFromMedia` / `RecommendationsFromMedia` + 4 个 Row types
+- 关键 byte parity:relations + recommendations 用 `.large` **不**用 `.extraLarge`(Express 特殊决定保留)/ characters first VoiceActor only / recommendations 过滤 mediaRecommendation 为 nil 的节点 / DisplayOrder = slice index
+- `detail.go` 重构:`DetailDB` 拆 `DetailReader` + `DetailWriter` composite / 新 `AniListDetailer` 接口 / `NewDetailService(db, anilistClient)` 签名变 / `isStale` helper(cached_at >= 1h OR studios 空 OR characters 空 OR characters[0].Role nil OR relations[0].CoverImageUrl nil)
+- fetchDetail 新流:cache hit → 返 / cache miss → main read → ErrNoRows+anilist → re-fetch(支持新番,我们 DB 还没有) / ErrNoRows+nil anilist → 404 / 老数据 stale → re-fetch / re-fetch 失败 → fallback 返 stale(strictly better than 500)
+- `refetchFromAniList`:15s subcontext(AniList HTTP timeout + 700ms throttle 超 5s queryTimeout)+ `upsertFromMedia` 主表 + 6 child Delete+Insert 链
+- AniList `ErrUpstream{Status:404}` 专门 map 到 404 `番剧不存在`(语义更准 —— AniList 说没有这媒体)
+- **Coverage anime 92.2%**(detail.go + normalize.go 合 95.2%)
+
+**main.go wire**:
+- `bangumi.NewClient()` + `queue.Boot` + `riverClient.Start` 都之前已有(P2.1.5)
+- 新:`enqueuer := queue.NewEnqueuer(riverClient)` 单 instance 共享 search/schedule/orphan
+- 新:goroutine 启 60s subctx `queue.ScanAndEnqueueOrphans` 不阻 server
+- 新:`NewDetailService(q, anilistClient)` 启 stale re-fetch path
+- stage P2.1.5 → P2.1.6
+
+**Live smoke**(docker compose pg + curl):
+- Boot:`river queue ready workers=v1(real)+v2(stub)+v3(stub)` + 立即 `orphan scan enqueued V1 jobs count=1`(bangumi_version=0 行 1 个)
+- V1 worker dispatched 自动跑:keyword="NARUTO -ナルト-" → Bangumi `no_hit` → return nil 干净完成 ✓
+- `/api/anime/20`(Naruto)第一次 read → isStale 触发(characters 是空)→ AniList Detail re-fetch → upsertFromMedia 写 12 relations + 8 chars + 10 staff + 6 recos + 6 genres + 1 studio → response 1462→**12063 bytes** ✓
+- cache hit 18ms ✓
+- `/api/anime/99999999` → AniList 404 → mapped 到 our 404 `番剧不存在` byte-exact ✓
+- `/api/anime/0` `/api/anime/abc` → 400 `无效的番剧 ID` byte-exact ✓
+
+### 9 endpoint 状态 — **9/9 full parity**
+
+| Endpoint | 状态 | 备注 |
+|---|---|---|
+| 8 endpoints | ✓ P2.1.0-P2.1.4 | — |
+| /:anilistId | ✓ P2.1.5 + P2.1.6 | cache → DB → AniList re-fetch on stale → upsert 6 child tables |
+
+### P2.1.7 — 待开
+
+- V2 worker(Bangumi Subject + Characters + Episodes → anime_characters voice_actor_cn / anime_staff / character roles 等中文 enrichment)
+- V3 worker(heal-CN 第二轮,跑过 v1 又跑 v3 捡漏)
+- /seasonal 冷启 AniList path(cache miss 时 AniList Seasonal,目前空季节返 0 行)
+- /trending / /yearly-top / /completed-gems 1h ristretto cache 接入(目前每请求都跑 DB)
+- warmCurrentSeason / warmSeasonCache(river periodic 24h cron 启动时 + 隔天 re-warm 当前 + 下一季)
 - 9 endpoint byte fixture(从 Express 真 prod 响应回写,Phase 8.5 shadow diff 前置)
 
 ---
@@ -287,6 +329,9 @@ Integration 回归:15/15 PASS,13.4s wall(P1.D 7 + P2.0 4 + P2.1 queue 4)
 - **教训:/schedule 不能用 5s queryTimeout**:AniList weekly 分页 + HTTP 10s timeout 实际能跑 8-15s(2 页 × 700ms throttle + 10s per page 防呆)。每个 endpoint 都套同 const 5s 会触发 504 false-positive。**建议**:P2.1.5 抽 per-endpoint timeout config(seasonal 10s / schedule 20s / detail 15s),不要 const 一刀切。
 - 2026-05-21 P2.1.5a/b/c - ef6b737 + 994519b + 4aa005c:10 sqlc method(V1 update + 7 detail + relations enrichment)+ 真 V1 worker(`internal/queue/bangumi_v1.go` 100% cov / fetchBangumiData 8 步 / WorkersWithBangumi 取代 stub registration)+ /:anilistId detail(518 行,18 test,Express byte-exact 32 字段顺序,pgtype.Date 直接 marshal)+ main.go river boot(`riverClient.Start(queueCtx)` 前于 HTTP / defer Stop 10s)。**9/9 endpoint 全 landed**(/:anilistId 还是 cache-only,AniList re-fetch + child upsert + V1 enqueue 触发源都待 P2.1.6)。
 - **教训:integration smoke 跟 stub registration 强耦合**:V1 stub 删 → integration test `c.Insert(BangumiV1Args{})` 找不到 worker 直接 fail。subagent 选 "用 WorkersWithBangumi 配 stub bangumi+stub db doubles" 而非 "切到 V2Args" 是对的 —— 跟 production wiring 路径走 / 不偏离测试意图。**教训普适化**:删任何 Workers() 里的 worker 之前 grep `BangumiV*Args` 看 integration test 有没有插同 kind 的 job。
+- 2026-05-21 P2.1.6 - 74c6043 + bbca9d3:13 sqlc method(V1 trigger + child upserts)+ V1 enqueue 触发源(internal/queue/enqueue.go + orphan.go,search/schedule 加 Enqueuer 参数,main.go boot goroutine 60s subctx 跑 orphan scan)+ /:anilistId stale 检测 + AniList Detail re-fetch(15s subctx)+ 6 child-table upsert chain。9/9 endpoint full parity。Live smoke:orphan 1 V1 job dispatched + V1 no_hit clean / /:anilistId/20 stale fired re-fetch 写 12 relations + 8 chars + 10 staff + 6 recos / response 1462 → 12063 bytes byte-exact 32 字段 ✓
+- **教训:subagent prompt 写 "DO NOT touch main.go" 不够 —— 改了 constructor 签名 build 就会断**。Subagent A 必须改 main.go 加 nil 参数才能 `go build ./...` 过,即使我说过 "我来 wire"。**教训普适化**:任何改 exported 函数/构造器签名的 subagent prompt 都得显式说 "main.go 必须同步更新 nil 占位 + TODO 注释 + 测试 build green",或者让 subagent 不变签名(用 functional options 等)。这次接受 subagent 选择是对的(否则 build 就断)。
+- **教训:isStale 用 1h 不是 24h**:Express 用 24h CACHE_TTL_MS 算 staleness;我们用 1h(跟 ristretto eviction TTL 对齐)。结果是 ristretto 1h 之内的 cache hit 短路 isStale 检查,1h 过期后 re-fetch 触发。Express 24h 之内 stale 不触发 re-fetch 是 Mongo 慢查询的妥协;Postgres 加 ristretto 我们能 1h 频更新且 RT 不退化。**取舍**:多一些 AniList API 调用换 fresher 数据 / 用户始终看到最近 1h 内的状态。Acceptable。
 - **教训:Express 多 envelope 形状不止一种**:`/follow` 用 `{data,total,page,hasMore,nextPage}`(httpx.Pagination 走这套),但 `/seasonal` 用 `{data,pagination:{page,perPage,total,totalPages}}`,`/watchers` 用 `{data,total}`(单 sibling),`/trending` 用 flat `{data:[]}`。每个 endpoint 写之前先 `grep ctrl.*\$res.json` Express,确认 envelope 形状再选 helper(httpx.Data / httpx.Page / 私有 writeMultiKeyEnvelope)。盲套 httpx.Data 会双重 wrap。
 - **教训:struct embed 不能强制 JSON 字段顺序**:`dbgen.GetTrendingWithCountsRow` `WatcherCount` 是最后字段;Express 要 `rank, watcherCount` 在 anime fields **前**。embed 顺序由 Go 决定,与 Express 不匹配 → 必须手写 longhand struct 复制字段顺序。每加一个 endpoint,先看 Express ctrl 的 `data` 字段顺序,确认 dbgen row 顺序匹配,**不匹配就手写 struct,不要 embed**。
 - **教训:byte-level envelope 测试在 Phase 2 早期是 boil-the-lake 例子**。Unit logic test 验"NotFound 码=NOT_FOUND"是不够的,真要捕捉 shadow traffic 阶段会 fail 的差异(key 顺序 / null vs 缺失字段 / HTML escape),必须从 Express 真实输出回写字节做 `bytes.Equal`。`httpx/express_fixture_test.go` 6 case 是模板,P2.x 每加 endpoint 写一组同模板的 byte fixture。
