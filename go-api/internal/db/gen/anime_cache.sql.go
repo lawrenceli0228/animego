@@ -47,6 +47,90 @@ func (q *Queries) CountWatchers(ctx context.Context, anilistID int32) (int64, er
 	return total, err
 }
 
+const getAnimeByAnilistIDs = `-- name: GetAnimeByAnilistIDs :many
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    average_score,
+    bangumi_score,
+    episodes,
+    season,
+    season_year,
+    status,
+    format,
+    description
+FROM anime_cache
+WHERE anilist_id = ANY($1::int[])
+ORDER BY average_score DESC NULLS LAST
+`
+
+type GetAnimeByAnilistIDsRow struct {
+	AnilistID       int32    `json:"anilistId"`
+	TitleRomaji     *string  `json:"titleRomaji"`
+	TitleEnglish    *string  `json:"titleEnglish"`
+	TitleNative     *string  `json:"titleNative"`
+	TitleChinese    *string  `json:"titleChinese"`
+	CoverImageUrl   *string  `json:"coverImageUrl"`
+	CoverImageColor *string  `json:"coverImageColor"`
+	PosterAccent    *string  `json:"posterAccent"`
+	AverageScore    *float64 `json:"averageScore"`
+	BangumiScore    *float64 `json:"bangumiScore"`
+	Episodes        *int32   `json:"episodes"`
+	Season          *string  `json:"season"`
+	SeasonYear      *int32   `json:"seasonYear"`
+	Status          *string  `json:"status"`
+	Format          *string  `json:"format"`
+	Description     *string  `json:"description"`
+}
+
+// Bulk read for /search post-upsert re-read so enriched fields
+// (title_chinese, bangumi_*) flow into the response even when the upsert
+// only carried AniList-side data.  Returns the same 16-column shape as
+// /completed-gems / /yearly-top so handlers can reuse the response
+// struct treatment.
+func (q *Queries) GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetAnimeByAnilistIDsRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeByAnilistIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeByAnilistIDsRow{}
+	for rows.Next() {
+		var i GetAnimeByAnilistIDsRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleRomaji,
+			&i.TitleEnglish,
+			&i.TitleNative,
+			&i.TitleChinese,
+			&i.CoverImageUrl,
+			&i.CoverImageColor,
+			&i.PosterAccent,
+			&i.AverageScore,
+			&i.BangumiScore,
+			&i.Episodes,
+			&i.Season,
+			&i.SeasonYear,
+			&i.Status,
+			&i.Format,
+			&i.Description,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCompletedGems = `-- name: GetCompletedGems :many
 
 SELECT
@@ -233,6 +317,41 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 			&i.Format,
 			&i.Description,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTitleChineseByAnilistIDs = `-- name: GetTitleChineseByAnilistIDs :many
+SELECT anilist_id, title_chinese, bangumi_version
+FROM anime_cache
+WHERE anilist_id = ANY($1::int[])
+`
+
+type GetTitleChineseByAnilistIDsRow struct {
+	AnilistID      int32   `json:"anilistId"`
+	TitleChinese   *string `json:"titleChinese"`
+	BangumiVersion int32   `json:"bangumiVersion"`
+}
+
+// Lightweight enrichment lookup for /schedule — only the 3 fields the
+// schedule items need.  bangumi_version is included so the caller can
+// decide whether to enqueue v1 enrichment for unenriched entries.
+func (q *Queries) GetTitleChineseByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetTitleChineseByAnilistIDsRow, error) {
+	rows, err := q.db.Query(ctx, getTitleChineseByAnilistIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTitleChineseByAnilistIDsRow{}
+	for rows.Next() {
+		var i GetTitleChineseByAnilistIDsRow
+		if err := rows.Scan(&i.AnilistID, &i.TitleChinese, &i.BangumiVersion); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -457,4 +576,104 @@ func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertAnimeCache = `-- name: UpsertAnimeCache :exec
+INSERT INTO anime_cache (
+    anilist_id,
+    title_romaji, title_english, title_native,
+    cover_image_url, cover_image_color,
+    poster_accent, poster_accent_rgb, poster_accent_contrast_on_black,
+    banner_image_url,
+    description,
+    episodes, status, season, season_year,
+    average_score, format,
+    cached_at, updated_at
+) VALUES (
+    $1,
+    $2, $3, $4,
+    $5, $6,
+    $7, $8, $9,
+    $10,
+    $11,
+    $12, $13, $14, $15,
+    $16, $17,
+    now(), now()
+)
+ON CONFLICT (anilist_id) DO UPDATE SET
+    title_romaji = EXCLUDED.title_romaji,
+    title_english = EXCLUDED.title_english,
+    title_native = EXCLUDED.title_native,
+    cover_image_url = EXCLUDED.cover_image_url,
+    cover_image_color = EXCLUDED.cover_image_color,
+    poster_accent = EXCLUDED.poster_accent,
+    poster_accent_rgb = EXCLUDED.poster_accent_rgb,
+    poster_accent_contrast_on_black = EXCLUDED.poster_accent_contrast_on_black,
+    banner_image_url = EXCLUDED.banner_image_url,
+    description = EXCLUDED.description,
+    episodes = EXCLUDED.episodes,
+    status = EXCLUDED.status,
+    season = EXCLUDED.season,
+    season_year = EXCLUDED.season_year,
+    average_score = EXCLUDED.average_score,
+    format = EXCLUDED.format,
+    cached_at = now(),
+    updated_at = now()
+`
+
+type UpsertAnimeCacheParams struct {
+	AnilistID                   int32    `json:"anilistId"`
+	TitleRomaji                 *string  `json:"titleRomaji"`
+	TitleEnglish                *string  `json:"titleEnglish"`
+	TitleNative                 *string  `json:"titleNative"`
+	CoverImageUrl               *string  `json:"coverImageUrl"`
+	CoverImageColor             *string  `json:"coverImageColor"`
+	PosterAccent                *string  `json:"posterAccent"`
+	PosterAccentRgb             *string  `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64 `json:"posterAccentContrastOnBlack"`
+	BannerImageUrl              *string  `json:"bannerImageUrl"`
+	Description                 *string  `json:"description"`
+	Episodes                    *int32   `json:"episodes"`
+	Status                      *string  `json:"status"`
+	Season                      *string  `json:"season"`
+	SeasonYear                  *int32   `json:"seasonYear"`
+	AverageScore                *float64 `json:"averageScore"`
+	Format                      *string  `json:"format"`
+}
+
+// Upsert anime_cache main row from AniList sync.  Bangumi columns
+// (title_chinese, bgm_id, bangumi_score, bangumi_votes, bangumi_version)
+// are intentionally NOT overwritten on conflict — the enrichment workers
+// own those, and an AniList re-fetch should NOT clobber them.  Same goes
+// for admin_flag (manual override) and created_at (immutable).
+//
+// cached_at + updated_at always bump to now() on both insert and update
+// so the stale-detection logic in /:anilistId can rely on monotonic
+// ordering.
+//
+// Child tables (anime_genres / anime_studios / relations / characters /
+// staff / recommendations) are NOT touched here — callers must update
+// them in a separate transaction if needed.  /search + /schedule never
+// mutate child tables; only /:anilistId detail-fetch does.
+func (q *Queries) UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCacheParams) error {
+	_, err := q.db.Exec(ctx, upsertAnimeCache,
+		arg.AnilistID,
+		arg.TitleRomaji,
+		arg.TitleEnglish,
+		arg.TitleNative,
+		arg.CoverImageUrl,
+		arg.CoverImageColor,
+		arg.PosterAccent,
+		arg.PosterAccentRgb,
+		arg.PosterAccentContrastOnBlack,
+		arg.BannerImageUrl,
+		arg.Description,
+		arg.Episodes,
+		arg.Status,
+		arg.Season,
+		arg.SeasonYear,
+		arg.AverageScore,
+		arg.Format,
+	)
+	return err
 }

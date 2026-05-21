@@ -16,6 +16,12 @@ type Querier interface {
 	// Total active watchers for /api/anime/:anilistId/watchers (the `total`
 	// meta field in the envelope).
 	CountWatchers(ctx context.Context, anilistID int32) (int64, error)
+	// Bulk read for /search post-upsert re-read so enriched fields
+	// (title_chinese, bangumi_*) flow into the response even when the upsert
+	// only carried AniList-side data.  Returns the same 16-column shape as
+	// /completed-gems / /yearly-top so handlers can reuse the response
+	// struct treatment.
+	GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetAnimeByAnilistIDsRow, error)
 	// Queries against anime_cache and its child tables.
 	//
 	// Each :one / :many / :exec annotation tells sqlc which result shape to
@@ -38,6 +44,10 @@ type Querier interface {
 	// the cached fallback in anilist.service.js getSeasonalAnime ②③.
 	// Hentai filter is preserved verbatim — Express skipped via $nin.
 	GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error)
+	// Lightweight enrichment lookup for /schedule — only the 3 fields the
+	// schedule items need.  bangumi_version is included so the caller can
+	// decide whether to enqueue v1 enrichment for unenriched entries.
+	GetTitleChineseByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetTitleChineseByAnilistIDsRow, error)
 	// Most-subscribed anime with their cached metadata, ordered by watcher
 	// count desc.  Backs /api/anime/trending and replaces the
 	// Subscription.aggregate + AnimeCache.find round-trip in
@@ -56,6 +66,21 @@ type Querier interface {
 	// /api/anime/yearly-top, replacing anime.controller.js:93-110.
 	// Express limit is 20 hard, slice down to query limit in handler.
 	GetYearlyTop(ctx context.Context, seasonYear *int32, limit int32) ([]GetYearlyTopRow, error)
+	// Upsert anime_cache main row from AniList sync.  Bangumi columns
+	// (title_chinese, bgm_id, bangumi_score, bangumi_votes, bangumi_version)
+	// are intentionally NOT overwritten on conflict — the enrichment workers
+	// own those, and an AniList re-fetch should NOT clobber them.  Same goes
+	// for admin_flag (manual override) and created_at (immutable).
+	//
+	// cached_at + updated_at always bump to now() on both insert and update
+	// so the stale-detection logic in /:anilistId can rely on monotonic
+	// ordering.
+	//
+	// Child tables (anime_genres / anime_studios / relations / characters /
+	// staff / recommendations) are NOT touched here — callers must update
+	// them in a separate transaction if needed.  /search + /schedule never
+	// mutate child tables; only /:anilistId detail-fetch does.
+	UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCacheParams) error
 }
 
 var _ Querier = (*Queries)(nil)
