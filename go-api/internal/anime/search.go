@@ -33,6 +33,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 )
 
 // searchCacheTTL is the in-memory TTL for /search responses.  Matches
@@ -57,15 +58,19 @@ type AniListSearcher interface {
 	Search(ctx context.Context, v anilist.SearchVars) (*anilist.SearchAnimeResponse, error)
 }
 
-// SearchService composes the AniList client, the ristretto cache, and
-// the sqlc-generated Querier into a single /api/anime/search handler.
-// Built once at server startup via NewSearchService and reused across
-// requests — the cache lives on the service value so requests within a
-// 10-minute window can short-circuit before reaching AniList.
+// SearchService composes the AniList client, the ristretto cache, the
+// sqlc-generated Querier, and the V1-enrichment Enqueuer into a single
+// /api/anime/search handler.  Built once at server startup via
+// NewSearchService and reused across requests — the cache lives on the
+// service value so requests within a 10-minute window can short-circuit
+// before reaching AniList.  The Enqueuer dispatches Bangumi V1 jobs for
+// any returned anilist_id whose bangumi_version is still 0, so the next
+// time the row is fetched titleChinese is populated.
 type SearchService struct {
-	anilist AniListSearcher
-	cache   *cache.Cache[SearchPage]
-	db      dbgen.Querier
+	anilist  AniListSearcher
+	cache    *cache.Cache[SearchPage]
+	db       dbgen.Querier
+	enqueuer queue.Enqueuer
 }
 
 // SearchPage is the cache-value shape: AniList page info + the post-
@@ -83,12 +88,20 @@ type SearchPage struct {
 // configuration — in practice the zero Config{} with DefaultTTL set is
 // always accepted.  Callers should close the cache at shutdown via
 // SearchService.Close to release ristretto's background goroutines.
-func NewSearchService(client AniListSearcher, db dbgen.Querier) (*SearchService, error) {
+//
+// enq is the V1-enrichment dispatcher.  Pass nil to disable enqueue
+// (the constructor swaps in a queue.NoopEnqueuer so the rest of the
+// pipeline stays nil-safe).  Tests that don't care about enqueue can
+// pass queue.NoopEnqueuer{} or nil interchangeably.
+func NewSearchService(client AniListSearcher, db dbgen.Querier, enq queue.Enqueuer) (*SearchService, error) {
+	if enq == nil {
+		enq = queue.NoopEnqueuer{}
+	}
 	c, err := cache.New[SearchPage](cache.Config{DefaultTTL: searchCacheTTL})
 	if err != nil {
 		return nil, fmt.Errorf("anime/search: build cache: %w", err)
 	}
-	return &SearchService{anilist: client, cache: c, db: db}, nil
+	return &SearchService{anilist: client, cache: c, db: db, enqueuer: enq}, nil
 }
 
 // Close releases the underlying ristretto cache.  Safe to call multiple
@@ -214,10 +227,6 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 		return nil, err
 	}
 
-	// TODO P2.1.5: enqueue Bangumi V1 enrichment for entries with
-	// bangumi_version=0 — the river workers are still stubs in P2.1.0,
-	// so search runs the upsert-only path and lets a future cron warm
-	// the title_chinese / bangumi_score columns asynchronously.
 	for _, m := range resp.Page.Media {
 		args := NormalizeMainRow(m)
 		if upErr := s.db.UpsertAnimeCache(ctx, args); upErr != nil {
@@ -243,6 +252,35 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 	rows, err := s.db.GetAnimeByAnilistIDs(ctx, ids)
 	if err != nil {
 		return nil, err
+	}
+
+	// V1 enrichment trigger: query bangumi_version for these IDs and
+	// enqueue the ones still at 0.  Runs only on cache-miss path —
+	// cache hits return early above before reaching here.  Failures
+	// are non-fatal — the response has already been shaped from the DB
+	// re-read above; missing the enqueue just means titleChinese stays
+	// null until the next miss.  Express equivalent:
+	// services/anilist.service.js:333-358 enqueueEnrichment(animeList).
+	if len(ids) > 0 {
+		versRows, vErr := s.db.GetTitleChineseByAnilistIDs(ctx, ids)
+		if vErr != nil {
+			slog.WarnContext(ctx, "anime/search: enqueue lookup failed", "err", vErr)
+		} else {
+			toEnqueue := make([]int32, 0, len(versRows))
+			for _, r := range versRows {
+				if r.BangumiVersion == 0 {
+					toEnqueue = append(toEnqueue, r.AnilistID)
+				}
+			}
+			if len(toEnqueue) > 0 {
+				if eErr := s.enqueuer.EnqueueV1Many(ctx, toEnqueue); eErr != nil {
+					slog.WarnContext(ctx, "anime/search: enqueue v1 failed",
+						"err", eErr,
+						"count", len(toEnqueue),
+					)
+				}
+			}
+		}
 	}
 
 	sp := SearchPage{

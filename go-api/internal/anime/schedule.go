@@ -14,6 +14,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/colorx"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 )
 
 // scheduleCacheTTL mirrors Express's SCHEDULE_TTL (30 minutes) in
@@ -49,16 +50,20 @@ type AniListScheduler interface {
 	Schedule(ctx context.Context, v anilist.ScheduleVars) (*anilist.WeeklyScheduleResponse, error)
 }
 
-// ScheduleService composes the AniList client, ristretto cache, and
-// sqlc-generated Querier into one /api/anime/schedule handler.  The
-// cache is keyed by local-tz 'YYYY-MM-DD' with a 30-minute TTL, matching
-// Express's SCHEDULE_TTL.  Cache hits skip both the AniList pagination
-// and the DB titleChinese lookup, so warm-day requests serve in
-// sub-millisecond time.
+// ScheduleService composes the AniList client, ristretto cache,
+// sqlc-generated Querier, and V1-enrichment Enqueuer into one
+// /api/anime/schedule handler.  The cache is keyed by local-tz
+// 'YYYY-MM-DD' with a 30-minute TTL, matching Express's SCHEDULE_TTL.
+// Cache hits skip both the AniList pagination, the DB titleChinese
+// lookup, AND the enqueue step — so warm-day requests serve in
+// sub-millisecond time.  Cache-miss path filters bangumi_version=0
+// rows from the titleChinese lookup result and enqueues V1 jobs for
+// each.
 type ScheduleService struct {
-	anilist AniListScheduler
-	cache   *cache.Cache[ScheduleResponse]
-	db      dbgen.Querier
+	anilist  AniListScheduler
+	cache    *cache.Cache[ScheduleResponse]
+	db       dbgen.Querier
+	enqueuer queue.Enqueuer
 
 	// tzOverride is test-only — production uses time.Local.  Tests pin
 	// time.UTC so the local-date grouping logic is deterministic across
@@ -109,19 +114,27 @@ type ScheduleResponse struct {
 }
 
 // NewScheduleService builds a ScheduleService with a 30-minute ristretto
-// cache.  The caller passes the AniList client (or test stub) and the
-// sqlc Querier; the cache is constructed internally because its lifetime
-// is tied to the service itself.
-func NewScheduleService(client AniListScheduler, db dbgen.Querier) (*ScheduleService, error) {
+// cache.  The caller passes the AniList client (or test stub), the sqlc
+// Querier, and the V1-enrichment Enqueuer; the cache is constructed
+// internally because its lifetime is tied to the service itself.
+//
+// enq is the V1-enrichment dispatcher.  Pass nil to disable enqueue
+// (the constructor swaps in a queue.NoopEnqueuer so the cache-miss
+// path stays nil-safe).
+func NewScheduleService(client AniListScheduler, db dbgen.Querier, enq queue.Enqueuer) (*ScheduleService, error) {
+	if enq == nil {
+		enq = queue.NoopEnqueuer{}
+	}
 	c, err := cache.New[ScheduleResponse](cache.Config{DefaultTTL: scheduleCacheTTL})
 	if err != nil {
 		return nil, fmt.Errorf("anime/schedule: build cache: %w", err)
 	}
 	return &ScheduleService{
-		anilist: client,
-		cache:   c,
-		db:      db,
-		nowFn:   time.Now,
+		anilist:  client,
+		cache:    c,
+		db:       db,
+		enqueuer: enq,
+		nowFn:    time.Now,
 	}, nil
 }
 
@@ -135,8 +148,11 @@ func NewScheduleService(client AniListScheduler, db dbgen.Querier) (*ScheduleSer
 // returns 200 with titleChinese fields left nil, which the frontend
 // already handles for unenriched cache rows.
 //
-// TODO P2.1.5: enqueue Bangumi V1 enrichment for entries with
-// bangumi_version=0 (workers currently stubs).
+// V1 enrichment trigger is wired in fetchSchedule (cache-miss path
+// only): rows with bangumi_version=0 from the titleChinese lookup are
+// batched into a single InsertMany call.  Enqueue failures are
+// non-fatal — the response is shaped from the AniList payload + DB
+// titleChinese join independently.
 func (s *ScheduleService) Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), scheduleQueryTimeout)
@@ -247,6 +263,26 @@ func (s *ScheduleService) fetchSchedule(ctx context.Context) (*ScheduleResponse,
 						}
 					}
 					groups[key] = items
+				}
+
+				// V1 enrichment trigger: rows with bangumi_version=0
+				// get enqueued.  The titleChinese lookup above already
+				// returned bangumi_version per row, so we don't need
+				// an extra DB call.  Enqueue failure is non-fatal —
+				// the response shape is already complete.
+				toEnqueue := make([]int32, 0, len(rows))
+				for _, r := range rows {
+					if r.BangumiVersion == 0 {
+						toEnqueue = append(toEnqueue, r.AnilistID)
+					}
+				}
+				if len(toEnqueue) > 0 {
+					if eErr := s.enqueuer.EnqueueV1Many(ctx, toEnqueue); eErr != nil {
+						slog.WarnContext(ctx, "anime/schedule: enqueue v1 failed",
+							"err", eErr,
+							"count", len(toEnqueue),
+						)
+					}
 				}
 			}
 		}

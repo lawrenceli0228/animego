@@ -16,6 +16,7 @@ import (
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 )
 
 // -----------------------------------------------------------------------------
@@ -53,9 +54,10 @@ func (f *fakeSearcher) lastVars() anilist.SearchVars {
 	return f.last
 }
 
-// searchFakeQuerier extends fakeQuerier with the two Querier methods
-// /search consumes (UpsertAnimeCache, GetAnimeByAnilistIDs).  Hand-
-// rolled rather than mockgen to keep the diff focused and let each test
+// searchFakeQuerier extends fakeQuerier with the three Querier methods
+// /search consumes (UpsertAnimeCache, GetAnimeByAnilistIDs, and
+// GetTitleChineseByAnilistIDs for the V1 enqueue trigger).  Hand-rolled
+// rather than mockgen to keep the diff focused and let each test
 // override only the methods it needs.
 //
 // The embedded fakeQuerier (from handlers_test.go) provides default
@@ -67,11 +69,13 @@ type searchFakeQuerier struct {
 
 	upsertAnimeCacheFn     func(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
 	getAnimeByAnilistIDsFn func(ctx context.Context, ids []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error)
+	getTitleChineseFn      func(ctx context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error)
 
 	mu             sync.Mutex
 	upsertedIDs    []int32
 	upsertedParams []dbgen.UpsertAnimeCacheParams
 	gotReadIDs     []int32
+	enqueueLookups int
 }
 
 func (f *searchFakeQuerier) UpsertAnimeCache(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error {
@@ -97,6 +101,21 @@ func (f *searchFakeQuerier) GetAnimeByAnilistIDs(ctx context.Context, ids []int3
 	return f.getAnimeByAnilistIDsFn(ctx, ids)
 }
 
+// GetTitleChineseByAnilistIDs is the enqueue-lookup hook.  Default
+// behaviour (no fn set) returns an empty slice so the enqueue path
+// becomes a noop — tests that don't care about enqueue can leave the
+// fn nil.  Tests that DO care set getTitleChineseFn to return the
+// bangumi_version values they want filtered.
+func (f *searchFakeQuerier) GetTitleChineseByAnilistIDs(ctx context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+	f.mu.Lock()
+	f.enqueueLookups++
+	f.mu.Unlock()
+	if f.getTitleChineseFn == nil {
+		return []dbgen.GetTitleChineseByAnilistIDsRow{}, nil
+	}
+	return f.getTitleChineseFn(ctx, ids)
+}
+
 func (f *searchFakeQuerier) snapshotUpserts() (ids []int32, params []dbgen.UpsertAnimeCacheParams) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -113,12 +132,53 @@ func (f *searchFakeQuerier) snapshotReadIDs() []int32 {
 	return dup
 }
 
-// newService builds a SearchService for tests with the given fake
-// searcher + querier.  t.Cleanup closes the cache so ristretto's
+func (f *searchFakeQuerier) snapshotEnqueueLookups() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.enqueueLookups
+}
+
+// searchFakeEnqueuer records EnqueueV1Many invocations so tests can
+// assert which (and how many) IDs were dispatched.  Function-pointer
+// hook lets a test inject an error to exercise the non-fatal log path.
+type searchFakeEnqueuer struct {
+	mu        sync.Mutex
+	enqueueFn func(ctx context.Context, ids []int32) error
+	calls     [][]int32
+}
+
+func (e *searchFakeEnqueuer) EnqueueV1Many(ctx context.Context, ids []int32) error {
+	e.mu.Lock()
+	dup := make([]int32, len(ids))
+	copy(dup, ids)
+	e.calls = append(e.calls, dup)
+	fn := e.enqueueFn
+	e.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, ids)
+}
+
+func (e *searchFakeEnqueuer) snapshotCalls() [][]int32 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	dup := make([][]int32, len(e.calls))
+	for i, c := range e.calls {
+		inner := make([]int32, len(c))
+		copy(inner, c)
+		dup[i] = inner
+	}
+	return dup
+}
+
+// newSearchService builds a SearchService for tests with the given fake
+// searcher + querier + enqueuer.  Pass nil for fe to leave enqueue
+// disabled (NoopEnqueuer).  t.Cleanup closes the cache so ristretto's
 // background goroutines don't leak between parallel tests.
-func newSearchService(t *testing.T, fs *fakeSearcher, fq *searchFakeQuerier) *SearchService {
+func newSearchService(t *testing.T, fs *fakeSearcher, fq *searchFakeQuerier, fe queue.Enqueuer) *SearchService {
 	t.Helper()
-	s, err := NewSearchService(fs, fq)
+	s, err := NewSearchService(fs, fq, fe)
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	return s
@@ -168,7 +228,7 @@ func TestSearch_MissingBothParams(t *testing.T) {
 
 	fs := &fakeSearcher{}
 	fq := &searchFakeQuerier{}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search", nil))
@@ -187,7 +247,7 @@ func TestSearch_OnlyWhitespaceTreatedAsMissing(t *testing.T) {
 
 	fs := &fakeSearcher{}
 	fq := &searchFakeQuerier{}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=%20%20&genre=%20", nil))
@@ -219,7 +279,7 @@ func TestSearch_Defaults(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=naruto", nil))
@@ -250,7 +310,7 @@ func TestSearch_PerPageCappedAt50(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x&perPage=100", nil))
@@ -276,7 +336,7 @@ func TestSearch_NegativePageFallsBack(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x&page=-1", nil))
@@ -302,7 +362,7 @@ func TestSearch_ZeroPerPageFallsBack(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x&perPage=0", nil))
@@ -320,7 +380,7 @@ func TestSearch_DeadlineExceeded_504(t *testing.T) {
 		},
 	}
 	fq := &searchFakeQuerier{}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
@@ -346,7 +406,7 @@ func TestSearch_NonNumericPagePerPageFallsBack(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x&page=abc&perPage=xyz", nil))
@@ -370,7 +430,7 @@ func TestSearch_AniListUpstreamError_502(t *testing.T) {
 		},
 	}
 	fq := &searchFakeQuerier{}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=naruto", nil))
@@ -390,7 +450,7 @@ func TestSearch_AniListRateLimited_502(t *testing.T) {
 		},
 	}
 	fq := &searchFakeQuerier{}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
@@ -416,7 +476,7 @@ func TestSearch_DBReadError_500(t *testing.T) {
 			return nil, errors.New("simulated postgres failure")
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
@@ -447,7 +507,7 @@ func TestSearch_CacheHit_NoAniListCall(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	// First call populates the cache.
 	rec1 := httptest.NewRecorder()
@@ -483,7 +543,7 @@ func TestSearch_DifferentParams_DifferentCacheKey(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=a", nil))
@@ -520,7 +580,7 @@ func TestSearch_UpsertCalledPerMedia(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
@@ -555,7 +615,7 @@ func TestSearch_UpsertErrorSkippedNotFailed(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
@@ -589,7 +649,7 @@ func TestSearch_ReReadByIDs(t *testing.T) {
 			return rows, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
@@ -638,7 +698,7 @@ func TestSearch_EnvelopeShape(t *testing.T) {
 			return []dbgen.GetAnimeByAnilistIDsRow{{AnilistID: 1}}, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=naruto", nil))
@@ -702,7 +762,7 @@ func TestSearch_TotalPages_RoundUp(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x&perPage=10", nil))
@@ -736,7 +796,7 @@ func TestSearch_EmptyResultsNonNullArray(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=zzzz", nil))
@@ -763,7 +823,7 @@ func TestSearch_GenreOnlyQuery(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newSearchService(t, fs, fq)
+	svc := newSearchService(t, fs, fq, nil)
 
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?genre=Action", nil))
@@ -778,3 +838,201 @@ func TestSearch_GenreOnlyQuery(t *testing.T) {
 // Compile-time guard: ensure searchFakeQuerier satisfies dbgen.Querier
 // (via the embedded fakeQuerier providing the other methods).
 var _ dbgen.Querier = (*searchFakeQuerier)(nil)
+
+// -----------------------------------------------------------------------------
+// V1 enrichment enqueue trigger.
+//
+// /search post-upsert path queries bangumi_version for the result IDs
+// and dispatches V1 jobs for any row still at 0.  These tests cover:
+//   - happy path (mixed versions → only the 0-rows enqueued)
+//   - all-enriched skip (no enqueue when every row is already ≥1)
+//   - non-fatal enqueue error (response still 200, no second attempt)
+//   - cache hit short-circuits before reaching the enqueue lookup
+// -----------------------------------------------------------------------------
+
+func TestSearch_EnqueuesUnenriched(t *testing.T) {
+	t.Parallel()
+
+	media := []anilist.Media{mediaWith(10), mediaWith(20), mediaWith(30)}
+	fs := &fakeSearcher{
+		fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			return &anilist.SearchAnimeResponse{
+				Page: anilist.MediaPage{
+					PageInfo: anilist.PageInfo{Total: 3, CurrentPage: 1, LastPage: 1, PerPage: 20},
+					Media:    media,
+				},
+			}, nil
+		},
+	}
+	fq := &searchFakeQuerier{
+		getAnimeByAnilistIDsFn: func(_ context.Context, ids []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error) {
+			out := make([]dbgen.GetAnimeByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				out = append(out, dbgen.GetAnimeByAnilistIDsRow{AnilistID: id})
+			}
+			return out, nil
+		},
+		// versions: [0, 1, 0] — IDs 10 and 30 still unenriched.
+		getTitleChineseFn: func(_ context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+			rows := make([]dbgen.GetTitleChineseByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				ver := int32(0)
+				if id == 20 {
+					ver = 1
+				}
+				rows = append(rows, dbgen.GetTitleChineseByAnilistIDsRow{
+					AnilistID:      id,
+					BangumiVersion: ver,
+				})
+			}
+			return rows, nil
+		},
+	}
+	fe := &searchFakeEnqueuer{}
+	svc := newSearchService(t, fs, fq, fe)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	calls := fe.snapshotCalls()
+	require.Len(t, calls, 1, "exactly one EnqueueV1Many call expected")
+	assert.ElementsMatch(t, []int32{10, 30}, calls[0],
+		"only bangumi_version=0 IDs should be enqueued")
+}
+
+func TestSearch_NoEnqueueWhenAllEnriched(t *testing.T) {
+	t.Parallel()
+
+	media := []anilist.Media{mediaWith(1), mediaWith(2)}
+	fs := &fakeSearcher{
+		fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			return &anilist.SearchAnimeResponse{
+				Page: anilist.MediaPage{
+					PageInfo: anilist.PageInfo{Total: 2, CurrentPage: 1, LastPage: 1, PerPage: 20},
+					Media:    media,
+				},
+			}, nil
+		},
+	}
+	fq := &searchFakeQuerier{
+		getAnimeByAnilistIDsFn: func(_ context.Context, _ []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error) {
+			return nil, nil
+		},
+		getTitleChineseFn: func(_ context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+			rows := make([]dbgen.GetTitleChineseByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				rows = append(rows, dbgen.GetTitleChineseByAnilistIDsRow{
+					AnilistID:      id,
+					BangumiVersion: 1, // all already enriched
+				})
+			}
+			return rows, nil
+		},
+	}
+	fe := &searchFakeEnqueuer{}
+	svc := newSearchService(t, fs, fq, fe)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, fe.snapshotCalls(),
+		"no enqueue call expected when every row is already enriched")
+}
+
+func TestSearch_EnqueueErrorIsNonFatal(t *testing.T) {
+	t.Parallel()
+
+	media := []anilist.Media{mediaWith(1)}
+	fs := &fakeSearcher{
+		fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			return &anilist.SearchAnimeResponse{
+				Page: anilist.MediaPage{
+					PageInfo: anilist.PageInfo{Total: 1, CurrentPage: 1, LastPage: 1, PerPage: 20},
+					Media:    media,
+				},
+			}, nil
+		},
+	}
+	fq := &searchFakeQuerier{
+		getAnimeByAnilistIDsFn: func(_ context.Context, _ []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error) {
+			return nil, nil
+		},
+		getTitleChineseFn: func(_ context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+			rows := make([]dbgen.GetTitleChineseByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				rows = append(rows, dbgen.GetTitleChineseByAnilistIDsRow{
+					AnilistID:      id,
+					BangumiVersion: 0,
+				})
+			}
+			return rows, nil
+		},
+	}
+	fe := &searchFakeEnqueuer{
+		enqueueFn: func(_ context.Context, _ []int32) error {
+			return errors.New("simulated river outage")
+		},
+	}
+	svc := newSearchService(t, fs, fq, fe)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code, "enqueue failure must not fail the search request")
+	// One attempt was made — we don't retry inside the handler.
+	require.Len(t, fe.snapshotCalls(), 1, "enqueue attempted once even when it errors")
+}
+
+func TestSearch_EnqueueNotCalledOnCacheHit(t *testing.T) {
+	t.Parallel()
+
+	media := []anilist.Media{mediaWith(1)}
+	fs := &fakeSearcher{
+		fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			return &anilist.SearchAnimeResponse{
+				Page: anilist.MediaPage{
+					PageInfo: anilist.PageInfo{Total: 1, CurrentPage: 1, LastPage: 1, PerPage: 20},
+					Media:    media,
+				},
+			}, nil
+		},
+	}
+	fq := &searchFakeQuerier{
+		getAnimeByAnilistIDsFn: func(_ context.Context, _ []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error) {
+			return nil, nil
+		},
+		getTitleChineseFn: func(_ context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+			rows := make([]dbgen.GetTitleChineseByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				rows = append(rows, dbgen.GetTitleChineseByAnilistIDsRow{
+					AnilistID:      id,
+					BangumiVersion: 0,
+				})
+			}
+			return rows, nil
+		},
+	}
+	fe := &searchFakeEnqueuer{}
+	svc := newSearchService(t, fs, fq, fe)
+
+	// First call populates cache + triggers one enqueue.
+	rec1 := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=cached", nil))
+	require.Equal(t, http.StatusOK, rec1.Code)
+	require.Len(t, fe.snapshotCalls(), 1, "first call enqueues")
+	require.Equal(t, 1, fq.snapshotEnqueueLookups(), "first call hits the enqueue lookup")
+
+	// ristretto writes are async — wait so the second call sees the hot entry.
+	svc.cache.Wait()
+
+	// Second identical call should be served from cache: NO AniList,
+	// NO upsert, NO enqueue lookup, NO enqueue dispatch.
+	rec2 := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=cached", nil))
+	require.Equal(t, http.StatusOK, rec2.Code)
+	assert.Len(t, fe.snapshotCalls(), 1, "cache hit must NOT dispatch a second enqueue")
+	assert.Equal(t, 1, fq.snapshotEnqueueLookups(), "cache hit must NOT issue a second enqueue lookup")
+	assert.Equal(t, int32(1), fs.callCount(), "cache hit must NOT call AniList again")
+}

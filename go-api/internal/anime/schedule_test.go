@@ -17,6 +17,7 @@ import (
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 )
 
 // -----------------------------------------------------------------------------
@@ -66,17 +67,61 @@ func (s *scheduleQuerier) GetTitleChineseByAnilistIDs(ctx context.Context, ids [
 // any future signature drift to fail at build time.
 var _ dbgen.Querier = (*scheduleQuerier)(nil)
 
+// scheduleFakeEnqueuer records EnqueueV1Many calls so tests can assert
+// which IDs got dispatched.  Function-pointer hook lets a test inject
+// an error for the non-fatal log path.
+type scheduleFakeEnqueuer struct {
+	mu        sync.Mutex
+	enqueueFn func(ctx context.Context, ids []int32) error
+	calls     [][]int32
+}
+
+func (e *scheduleFakeEnqueuer) EnqueueV1Many(ctx context.Context, ids []int32) error {
+	e.mu.Lock()
+	dup := make([]int32, len(ids))
+	copy(dup, ids)
+	e.calls = append(e.calls, dup)
+	fn := e.enqueueFn
+	e.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, ids)
+}
+
+func (e *scheduleFakeEnqueuer) snapshotCalls() [][]int32 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	dup := make([][]int32, len(e.calls))
+	for i, c := range e.calls {
+		inner := make([]int32, len(c))
+		copy(inner, c)
+		dup[i] = inner
+	}
+	return dup
+}
+
 // -----------------------------------------------------------------------------
 // Test helpers.
 // -----------------------------------------------------------------------------
 
 // newTestService builds a ScheduleService with the test scheduler / DB
 // stubs and a fixed clock (Mon, 2026-05-25 00:00:00 UTC) so date keys
-// are deterministic across CI environments.  Caller can override the
-// clock via wantNow / wantTZ if a test needs a different anchor.
+// are deterministic across CI environments.  Pass nil enqueuer to
+// leave V1 dispatch disabled (NoopEnqueuer); tests that exercise the
+// trigger pass &scheduleFakeEnqueuer{}.
 func newTestService(t *testing.T, sched AniListScheduler, db dbgen.Querier) *ScheduleService {
 	t.Helper()
-	s, err := NewScheduleService(sched, db)
+	return newTestServiceWithEnqueuer(t, sched, db, nil)
+}
+
+// newTestServiceWithEnqueuer is the explicit-enqueuer variant.  Most
+// pre-existing tests don't care about V1 dispatch — they call
+// newTestService.  The four enqueue-focused tests below use this entry
+// point so they can assert on the recorded calls.
+func newTestServiceWithEnqueuer(t *testing.T, sched AniListScheduler, db dbgen.Querier, enq queue.Enqueuer) *ScheduleService {
+	t.Helper()
+	s, err := NewScheduleService(sched, db, enq)
 	require.NoError(t, err)
 	s.tzOverride = time.UTC
 	s.nowFn = func() time.Time {
@@ -413,7 +458,7 @@ func TestSchedule_GroupKeyIsLocalDate(t *testing.T) {
 		require.NoError(t, err)
 
 		db := emptyTitleChineseDB()
-		s, err := NewScheduleService(makeSched(), db)
+		s, err := NewScheduleService(makeSched(), db, nil)
 		require.NoError(t, err)
 		t.Cleanup(s.cache.Close)
 		s.tzOverride = tokyo
@@ -817,4 +862,206 @@ func TestSchedule_EmptyResponse(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &parsed))
 	assert.Equal(t, "2026-05-25", parsed.Data.Today)
 	assert.Empty(t, parsed.Data.Groups)
+}
+
+// -----------------------------------------------------------------------------
+// V1 enrichment enqueue trigger.
+//
+// /schedule cache-miss path:  the titleChinese lookup already returns
+// bangumi_version per row, so the handler can filter unenriched ids
+// without an extra DB round-trip.  These tests cover:
+//   - happy path (mixed versions → only 0-rows enqueued)
+//   - all-enriched skip
+//   - non-fatal enqueue error
+//   - cache hit short-circuit (no enqueue on second identical request)
+// -----------------------------------------------------------------------------
+
+func TestSchedule_EnqueuesUnenriched(t *testing.T) {
+	t.Parallel()
+
+	monMidnight := int64(1779667200)
+	monAfternoon := monMidnight + 14*60*60
+
+	sched := &fakeScheduler{
+		scheduleFn: func(_ context.Context, _ anilist.ScheduleVars) (*anilist.WeeklyScheduleResponse, error) {
+			return &anilist.WeeklyScheduleResponse{
+				Page: anilist.SchedulePage{
+					PageInfo: anilist.PageInfo{HasNextPage: false},
+					AiringSchedules: []anilist.AiringSchedule{
+						mkSchedule(1, monAfternoon, 1, mkMedia(101, "Alpha")),
+						mkSchedule(2, monAfternoon+3600, 1, mkMedia(102, "Beta")),
+						mkSchedule(3, monAfternoon+7200, 1, mkMedia(103, "Gamma")),
+					},
+				},
+			}, nil
+		},
+	}
+	db := &scheduleQuerier{
+		// versions: [0, 1, 0] — 101 and 103 unenriched, 102 already at v1.
+		getTitleChineseFn: func(_ context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+			rows := make([]dbgen.GetTitleChineseByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				ver := int32(0)
+				if id == 102 {
+					ver = 1
+				}
+				rows = append(rows, dbgen.GetTitleChineseByAnilistIDsRow{
+					AnilistID:      id,
+					BangumiVersion: ver,
+				})
+			}
+			return rows, nil
+		},
+	}
+	fe := &scheduleFakeEnqueuer{}
+	svc := newTestServiceWithEnqueuer(t, sched, db, fe)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/schedule", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	calls := fe.snapshotCalls()
+	require.Len(t, calls, 1, "exactly one EnqueueV1Many call expected")
+	assert.ElementsMatch(t, []int32{101, 103}, calls[0],
+		"only bangumi_version=0 IDs should be enqueued")
+}
+
+func TestSchedule_NoEnqueueWhenAllEnriched(t *testing.T) {
+	t.Parallel()
+
+	monMidnight := int64(1779667200)
+	monAfternoon := monMidnight + 14*60*60
+
+	sched := &fakeScheduler{
+		scheduleFn: func(_ context.Context, _ anilist.ScheduleVars) (*anilist.WeeklyScheduleResponse, error) {
+			return &anilist.WeeklyScheduleResponse{
+				Page: anilist.SchedulePage{
+					PageInfo: anilist.PageInfo{HasNextPage: false},
+					AiringSchedules: []anilist.AiringSchedule{
+						mkSchedule(1, monAfternoon, 1, mkMedia(101, "Alpha")),
+						mkSchedule(2, monAfternoon+3600, 1, mkMedia(102, "Beta")),
+					},
+				},
+			}, nil
+		},
+	}
+	db := &scheduleQuerier{
+		getTitleChineseFn: func(_ context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+			rows := make([]dbgen.GetTitleChineseByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				rows = append(rows, dbgen.GetTitleChineseByAnilistIDsRow{
+					AnilistID:      id,
+					BangumiVersion: 1,
+				})
+			}
+			return rows, nil
+		},
+	}
+	fe := &scheduleFakeEnqueuer{}
+	svc := newTestServiceWithEnqueuer(t, sched, db, fe)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/schedule", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, fe.snapshotCalls(),
+		"no enqueue call expected when every row is already enriched")
+}
+
+func TestSchedule_EnqueueErrorIsNonFatal(t *testing.T) {
+	t.Parallel()
+
+	monMidnight := int64(1779667200)
+	monAfternoon := monMidnight + 14*60*60
+
+	sched := &fakeScheduler{
+		scheduleFn: func(_ context.Context, _ anilist.ScheduleVars) (*anilist.WeeklyScheduleResponse, error) {
+			return &anilist.WeeklyScheduleResponse{
+				Page: anilist.SchedulePage{
+					PageInfo: anilist.PageInfo{HasNextPage: false},
+					AiringSchedules: []anilist.AiringSchedule{
+						mkSchedule(1, monAfternoon, 1, mkMedia(101, "Alpha")),
+					},
+				},
+			}, nil
+		},
+	}
+	db := &scheduleQuerier{
+		getTitleChineseFn: func(_ context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+			rows := make([]dbgen.GetTitleChineseByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				rows = append(rows, dbgen.GetTitleChineseByAnilistIDsRow{
+					AnilistID:      id,
+					BangumiVersion: 0,
+				})
+			}
+			return rows, nil
+		},
+	}
+	fe := &scheduleFakeEnqueuer{
+		enqueueFn: func(_ context.Context, _ []int32) error {
+			return errors.New("simulated river outage")
+		},
+	}
+	svc := newTestServiceWithEnqueuer(t, sched, db, fe)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/schedule", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code, "enqueue failure must not fail the schedule request")
+	require.Len(t, fe.snapshotCalls(), 1, "enqueue attempted once even when it errors")
+}
+
+func TestSchedule_EnqueueNotCalledOnCacheHit(t *testing.T) {
+	t.Parallel()
+
+	monMidnight := int64(1779667200)
+	monAfternoon := monMidnight + 14*60*60
+
+	sched := &fakeScheduler{
+		scheduleFn: func(_ context.Context, _ anilist.ScheduleVars) (*anilist.WeeklyScheduleResponse, error) {
+			return &anilist.WeeklyScheduleResponse{
+				Page: anilist.SchedulePage{
+					PageInfo: anilist.PageInfo{HasNextPage: false},
+					AiringSchedules: []anilist.AiringSchedule{
+						mkSchedule(1, monAfternoon, 1, mkMedia(101, "Alpha")),
+					},
+				},
+			}, nil
+		},
+	}
+	db := &scheduleQuerier{
+		getTitleChineseFn: func(_ context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+			rows := make([]dbgen.GetTitleChineseByAnilistIDsRow, 0, len(ids))
+			for _, id := range ids {
+				rows = append(rows, dbgen.GetTitleChineseByAnilistIDsRow{
+					AnilistID:      id,
+					BangumiVersion: 0,
+				})
+			}
+			return rows, nil
+		},
+	}
+	fe := &scheduleFakeEnqueuer{}
+	svc := newTestServiceWithEnqueuer(t, sched, db, fe)
+
+	// First call populates cache + triggers one enqueue.
+	rec1 := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/anime/schedule", nil))
+	require.Equal(t, http.StatusOK, rec1.Code)
+	require.Len(t, fe.snapshotCalls(), 1, "first call enqueues")
+	require.Equal(t, int64(1), sched.calls.Load(), "first call hits AniList")
+	require.Equal(t, int64(1), db.calls.Load(), "first call hits DB")
+
+	// ristretto writes are async — must Wait() before the second call.
+	svc.cache.Wait()
+
+	// Second identical call should be served from cache: no AniList,
+	// no DB lookup, no enqueue.
+	rec2 := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/anime/schedule", nil))
+	require.Equal(t, http.StatusOK, rec2.Code)
+	assert.Len(t, fe.snapshotCalls(), 1, "cache hit must NOT dispatch a second enqueue")
+	assert.Equal(t, int64(1), sched.calls.Load(), "cache hit must NOT call AniList again")
+	assert.Equal(t, int64(1), db.calls.Load(), "cache hit must NOT hit the DB again")
 }
