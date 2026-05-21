@@ -1,12 +1,15 @@
 // Package main is the chi HTTP server entry point for go-api.
 //
-// P0 scope: minimal :8080/health endpoint, structured slog JSON logging,
-// graceful shutdown on SIGINT/SIGTERM.  No DB access yet — Postgres connection
-// pool wiring lands in P2.1 when the first endpoint needs it.
+// P2.0.A scope: chi router with pgxpool wired in, /health upgraded to
+// ping the DB.  Envelope helpers (httpx package) land in P2.0.C — for
+// now the handler writes the {"data":{...}}/{"error":{...}} shape with
+// raw encoding/json so the response is already byte-compatible with
+// what httpx.Data/Fail will emit.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,8 +21,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
+	"github.com/lawrenceli0228/animego/go-api/internal/db"
 )
 
 func main() {
@@ -34,17 +39,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	connectCtx, cancelConnect := context.WithTimeout(context.Background(), db.ConnectTimeout)
+	pool, err := db.NewPool(connectCtx, cfg.DatabaseURL)
+	cancelConnect()
+	if err != nil {
+		slog.Error("postgres pool init failed", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+	slog.Info("postgres pool ready", "max_conns", db.MaxConns)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	// Health endpoint — dev.sh and Docker healthcheck both depend on this.
-	r.Get("/health", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintln(w, `{"ok":true,"service":"go-api","stage":"P0"}`)
-	})
+	// Health endpoint pings the DB pool.  dev.sh and docker healthcheck
+	// only require HTTP 200; humans inspecting the body get the envelope.
+	r.Get("/health", healthHandler(pool))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{
@@ -57,7 +70,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P0")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.0.A")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
@@ -76,4 +89,40 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("server stopped")
+}
+
+// healthHandler reports liveness + DB reachability in the same envelope
+// shape that httpx.Data / httpx.Fail will produce in P2.0.C.
+//
+// 200 →  {"data":{"ok":true,"service":"go-api","stage":"P2.0","db":"up"}}
+// 503 →  {"error":{"code":"SERVER_ERROR","message":"database unreachable"}}
+//
+// TODO(P2.0.C): swap the inline JSON for httpx.Data / httpx.Fail.
+func healthHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		ctx, cancel := context.WithTimeout(req.Context(), db.PingTimeout)
+		defer cancel()
+		if err := pool.Ping(ctx); err != nil {
+			slog.Warn("health ping failed", "err", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]string{
+					"code":    "SERVER_ERROR",
+					"message": "database unreachable",
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"ok":      true,
+				"service": "go-api",
+				"stage":   "P2.0",
+				"db":      "up",
+			},
+		})
+	}
 }
