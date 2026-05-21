@@ -109,25 +109,57 @@ document-css: false
 
 合 17 文件 / +4173 行。
 
-### P2.1.3 — 待开:handler + service + 富化 worker
+### P2.1.3 — 5 endpoint wire(2026-05-21,2 commit)
 
-启动前必须做的事(来自 P2.0 → P2.1 handoff,见 [`P2.0-DESIGN.md`](P2.0-DESIGN.md) § 10):
+**P2.1.3a** — sqlc 扩展(`623f23f` + 補 `66f809f` querier.go):6 个新 query 方法
 
-- [ ] **每个 handler 第一行加 query-level timeout** — `ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second); defer cancel()`,堵 P2.0 design § 5 风险表里 pgxpool 连接耗尽 / 用户挂 60s 问题
-- [ ] **endpoint shape diff harness** — Phase 8.5 shadow traffic 前需要 diff 工具。P2.1 写第一个 endpoint 时**同步**写 `test/shadow/diff_anime_detail_test.go`,跟 Express 真 prod 响应做 byte 比对。P2.0 byte fixture 是 envelope 层,这是 endpoint 层。
+| Query | Endpoint | 用法 |
+|---|---|---|
+| `GetYearlyTop` | /yearly-top | year + limit 20 然后 Go slice |
+| `GetSeasonalAnime` | /seasonal | season+year+limit+offset 分页 |
+| `CountSeasonal` | /seasonal | pagination meta total |
+| `GetTrendingWithCounts` | /trending | 单 JOIN 替 Express 两步 aggregate+find |
+| `GetWatchers` | /:anilistId/watchers | usernames 数组 |
+| `CountWatchers` | /:anilistId/watchers | total meta |
 
-### 8 endpoint 待 wire(已有 `/completed-gems`)
+**P2.1.3b** — handlers + 路由(`66f809f`,subagent 单人):5 endpoint
 
-- GET `/seasonal` — anilist client + cache + db re-read(titleChinese 拼入)
-- GET `/search` — anilist client + 10min cache
-- GET `/schedule` — anilist client + 30min cache + groups by 'YYYY-MM-DD'
-- GET `/torrents` — `internal/torrents/aggregator.go` 现成
-- GET `/trending` — subscriptions aggregate join anime_cache + 1h cache
-- GET `/yearly-top` — anime_cache filter by seasonYear/format/score + 1h cache
-- GET `/:anilistId/watchers` — subscriptions populate user.username
-- GET `/:anilistId` — anime_cache cache-first(stale 检测复杂)+ trigger v0 enrichment
+| Endpoint | Envelope shape | 关键决策 |
+|---|---|---|
+| GET /seasonal | `{data, pagination:{page,perPage,total,totalPages}}` | **不**走 `httpx.Pagination`(那是 hasMore/nextPage 形状)/ `writeMultiKeyEnvelope` helper / errgroup 并发 List+Count / WINTER 等 4 季验证 / perPage 上限 200 |
+| GET /yearly-top | `{data:[]}` flat | 总是 query 20 行然后 Go slice 到 limit(byte-parity Express) |
+| GET /trending | `{data:[{rank, watcherCount, ...16 anime fields}]}` | longhand `trendingItem` struct 不是 embed(Express rank/watcherCount **在** anime fields **前**)/ 1h cache 延 P2.1.4 |
+| GET /:anilistId/watchers | `{data:[{username}], total}` | chi.URLParam + Atoi 校验,bad id → 400 `无效的番剧 ID` byte-exact 中文 / errgroup 并发 List+Count |
+| GET /torrents | `{data:[...]}` flat | wraps `internal/torrents.Aggregator`(boot 时 `torrents.New()`)/ q required ≤200 char,验失败 "Missing query" / "Query too long" |
 
-外加:替换 `internal/queue/` stub workers 为真 Bangumi 富化(用 `internal/bangumi/` client)+ warmCurrentSeason / warmSeasonCache(river periodic)。
+main.go:`torrentsAgg` boot 时构造一次复用 / 5 个新路由注册 / `stage` 由 P2.0 → P2.1 / startup log P2.0.D → P2.1.3。
+
+**handlers.go**:84 → ~530 行,共享 `queryTimeout = 5*time.Second` const + `parseLimit` helper(P2.0 → P2.1 carry-over § 10 第 3 条 query-level timeout 已落)
+
+**handlers_test.go**:184 → ~870 行,34 unit test,hand-rolled `fakeQuerier` 7 function-pointer fields。**Coverage 92.9%**(target ≥80%)。
+
+**Live smoke**(`go run ./cmd/server` + docker compose postgres + curl):
+- `/health` 200:`{"data":{"ok":true,"service":"go-api","stage":"P2.1","db":"up"}}`
+- `/completed-gems`:limit=2 → 2 anime,真 anilistId=9890
+- `/seasonal?season=WINTER&year=2025&perPage=3` → 3 anime + `pagination:{page:1,perPage:3,total:95,totalPages:32}` ✓
+- `/yearly-top?year=2025&limit=3` → 3 anime flat array ✓
+- `/trending?limit=1` → field 顺序 `[rank, watcherCount, anilistId, titleRomaji, ...]` ✓
+- `/42/watchers` → `{"data":[],"total":0}`(无订阅时 empty slice ≠ null)✓
+- 验证错误:`/torrents`(no q) → 400 `Missing query` / `/abc/watchers` → 400 `无效的番剧 ID` / `/seasonal?season=invalid` → 400 `invalid season`
+
+Integration 回归:15/15 PASS,13.4s wall(P1.D 7 + P2.0 4 + P2.1 queue 4)
+
+### P2.1.4 — 待开
+
+3 个剩余 endpoint:`/search` + `/schedule` + `/:anilistId`(都需 AniList client + service layer)
+
+外加 service layer 杂活:
+- `internal/anime/service.go` orchestrator(anilist + cache + db re-read 拼 titleChinese 逻辑)
+- 5 个 ristretto cache 接入(search/schedule/trending/yearly-top/completed-gems)
+- 替换 `internal/queue/` stub workers 为真 Bangumi 富化(用 `internal/bangumi/` client + sqlc upsert query)
+- warmCurrentSeason / warmSeasonCache(river periodic 24h cron + 启动时 enqueue v0 orphans)
+- /:anilistId 详情用 join 加 genres/studios/relations/characters/staff/recommendations
+- 9 endpoint byte fixture(从 Express 真 prod 响应回写)
 
 ---
 
@@ -152,6 +184,10 @@ document-css: false
 - 2026-05-21 P2.1.0 - dbbd780/601d6ad/e287472 pre-work(river migration + sqlc + testutil)
 - 2026-05-21 P2.1.1 - 20a341e:anilist + cache + colorx 3 包 subagent 并行,unit + race + cover ≥91% 全过
 - 2026-05-21 P2.1.2 - 4903b64:torrents + queue + bangumi 3 包 subagent 并行,unit + race + cover ≥91% 全过;integration 15/15(7 P1.D + 4 P2.0 + 4 P2.1 queue smoke)12.1s wall
+- 2026-05-21 P2.1.3a - 623f23f / querier.go 補 66f809f:6 个 sqlc query 方法(seasonal/yearly-top/trending/watchers + 2 个 count)
+- 2026-05-21 P2.1.3b - 66f809f:5 endpoint handlers + 路由 + 34 unit test cover 92.9% / live smoke 全过(/health → /seasonal pagination → /watchers 空 + 中文 400 → /torrents q 验证 全 byte-correct)
+- **教训:Express 多 envelope 形状不止一种**:`/follow` 用 `{data,total,page,hasMore,nextPage}`(httpx.Pagination 走这套),但 `/seasonal` 用 `{data,pagination:{page,perPage,total,totalPages}}`,`/watchers` 用 `{data,total}`(单 sibling),`/trending` 用 flat `{data:[]}`。每个 endpoint 写之前先 `grep ctrl.*\$res.json` Express,确认 envelope 形状再选 helper(httpx.Data / httpx.Page / 私有 writeMultiKeyEnvelope)。盲套 httpx.Data 会双重 wrap。
+- **教训:struct embed 不能强制 JSON 字段顺序**:`dbgen.GetTrendingWithCountsRow` `WatcherCount` 是最后字段;Express 要 `rank, watcherCount` 在 anime fields **前**。embed 顺序由 Go 决定,与 Express 不匹配 → 必须手写 longhand struct 复制字段顺序。每加一个 endpoint,先看 Express ctrl 的 `data` 字段顺序,确认 dbgen row 顺序匹配,**不匹配就手写 struct,不要 embed**。
 - **教训:byte-level envelope 测试在 Phase 2 早期是 boil-the-lake 例子**。Unit logic test 验"NotFound 码=NOT_FOUND"是不够的,真要捕捉 shadow traffic 阶段会 fail 的差异(key 顺序 / null vs 缺失字段 / HTML escape),必须从 Express 真实输出回写字节做 `bytes.Equal`。`httpx/express_fixture_test.go` 6 case 是模板,P2.x 每加 endpoint 写一组同模板的 byte fixture。
 - **教训:Go internal 包名跟 third-party 撞**:`internal/middleware/` 跟 `github.com/go-chi/chi/v5/middleware` 冲突,任何同时用本地中间件 + chi 自带 RequestID 的文件都要 alias 一个。改 `internal/httpmw/`(或 `httpx/` 也行)完全没这问题。Go 惯例:`internal/<short-prefix>` 优先,不重 stdlib / popular-third-party 包名。
 - **教训:docker healthcheck 日志洪水**:Docker `start_period: 30s` 每 30s 探一次 /health,prod 一个 pod 一天 2880 条 log。RequestLog 必须 verbatim skip `/health` 路径(`if req.URL.Path == "/health" { next.ServeHTTP(w, req); return }`)。如果只走 Debug level skip 会丢 5xx healthcheck 报警 —— P2.0.D 选了 verbatim skip + 业务 endpoint 全级别 log。
