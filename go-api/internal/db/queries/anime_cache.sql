@@ -266,3 +266,129 @@ ORDER BY average_score DESC NULLS LAST;
 SELECT anilist_id, title_chinese, bangumi_version
 FROM anime_cache
 WHERE anilist_id = ANY($1::int[]);
+
+-- name: GetAnimeForBangumiSearch :one
+-- Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
+-- the keyword for Bangumi search.  Mirrors anilist.service.js V1
+-- enqueue (fetchBangumiData first arg).
+SELECT title_native, title_romaji
+FROM anime_cache
+WHERE anilist_id = $1;
+
+-- name: UpdateBangumiV1 :exec
+-- Phase 1 result write — set bgm_id + title_chinese (the latter only
+-- when the Bangumi search produced an exact native match with a
+-- non-empty name_cn).  bangumi_version=1 marks ready for Phase 2.
+--
+-- title_chinese is *string so callers can pass nil when no exact match
+-- (keeps the column NULL).  bgm_id is also *int because Bangumi search
+-- may legitimately return no hits at all → caller sets bangumi_version
+-- via a separate path or leaves it 0.
+UPDATE anime_cache
+SET bgm_id         = $2,
+    title_chinese  = $3,
+    bangumi_version = 1,
+    updated_at     = now()
+WHERE anilist_id = $1;
+
+-- name: GetAnimeMainByID :one
+-- Full main-row read for /:anilistId detail.  Returns every column
+-- the response payload needs (vs the trimmed 16-column shape
+-- /completed-gems / /yearly-top use).  Child arrays come from the
+-- 6 GetAnime*ByID queries below; service layer assembles them into
+-- one nested response.
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    poster_accent_rgb,
+    poster_accent_contrast_on_black,
+    banner_image_url,
+    description,
+    episodes,
+    status,
+    season,
+    season_year,
+    average_score,
+    format,
+    duration,
+    source,
+    start_date,
+    bgm_id,
+    bangumi_score,
+    bangumi_votes,
+    bangumi_version,
+    cached_at
+FROM anime_cache
+WHERE anilist_id = $1;
+
+-- name: GetAnimeGenresByID :many
+SELECT genre FROM anime_genres WHERE anime_id = $1 ORDER BY genre;
+
+-- name: GetAnimeStudiosByID :many
+SELECT studio FROM anime_studios WHERE anime_id = $1 ORDER BY studio;
+
+-- name: GetAnimeRelationsByID :many
+SELECT
+    anilist_id,
+    relation_type,
+    title,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    poster_accent_rgb,
+    poster_accent_contrast_on_black,
+    format
+FROM anime_relations
+WHERE anime_id = $1;
+
+-- name: GetAnimeCharactersByID :many
+-- Sorted by display_order so the response preserves the AniList role
+-- ordering (MAIN → SUPPORTING → BACKGROUND).  Phase 4 worker writes
+-- name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
+-- until enrichment runs.
+SELECT
+    name_en,
+    name_ja,
+    name_cn,
+    image_url,
+    role,
+    voice_actor_en,
+    voice_actor_ja,
+    voice_actor_cn,
+    voice_actor_image_url
+FROM anime_characters
+WHERE anime_id = $1
+ORDER BY display_order;
+
+-- name: GetAnimeStaffByID :many
+SELECT name_en, name_ja, image_url, role
+FROM anime_staff
+WHERE anime_id = $1
+ORDER BY display_order;
+
+-- name: GetAnimeRecommendationsByID :many
+SELECT
+    anilist_id,
+    title,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    poster_accent_rgb,
+    poster_accent_contrast_on_black,
+    average_score
+FROM anime_recommendations
+WHERE anime_id = $1;
+
+-- name: GetRelationEnrichmentByIDs :many
+-- /:anilistId detail enriches relations[].titleChinese + .coverImageUrl
+-- from anime_cache when the relation row itself has stale values.
+-- Mirrors server/controllers/detail.controller.js:14-28.
+SELECT anilist_id, title_chinese, cover_image_url
+FROM anime_cache
+WHERE anilist_id = ANY($1::int[]);

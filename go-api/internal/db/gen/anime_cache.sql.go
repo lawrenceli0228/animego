@@ -7,6 +7,8 @@ package dbgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countSeasonal = `-- name: CountSeasonal :one
@@ -131,6 +133,387 @@ func (q *Queries) GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([
 	return items, nil
 }
 
+const getAnimeCharactersByID = `-- name: GetAnimeCharactersByID :many
+SELECT
+    name_en,
+    name_ja,
+    name_cn,
+    image_url,
+    role,
+    voice_actor_en,
+    voice_actor_ja,
+    voice_actor_cn,
+    voice_actor_image_url
+FROM anime_characters
+WHERE anime_id = $1
+ORDER BY display_order
+`
+
+type GetAnimeCharactersByIDRow struct {
+	NameEn             *string `json:"nameEn"`
+	NameJa             *string `json:"nameJa"`
+	NameCn             *string `json:"nameCn"`
+	ImageUrl           *string `json:"imageUrl"`
+	Role               *string `json:"role"`
+	VoiceActorEn       *string `json:"voiceActorEn"`
+	VoiceActorJa       *string `json:"voiceActorJa"`
+	VoiceActorCn       *string `json:"voiceActorCn"`
+	VoiceActorImageUrl *string `json:"voiceActorImageUrl"`
+}
+
+// Sorted by display_order so the response preserves the AniList role
+// ordering (MAIN → SUPPORTING → BACKGROUND).  Phase 4 worker writes
+// name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
+// until enrichment runs.
+func (q *Queries) GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeCharactersByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeCharactersByIDRow{}
+	for rows.Next() {
+		var i GetAnimeCharactersByIDRow
+		if err := rows.Scan(
+			&i.NameEn,
+			&i.NameJa,
+			&i.NameCn,
+			&i.ImageUrl,
+			&i.Role,
+			&i.VoiceActorEn,
+			&i.VoiceActorJa,
+			&i.VoiceActorCn,
+			&i.VoiceActorImageUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAnimeForBangumiSearch = `-- name: GetAnimeForBangumiSearch :one
+SELECT title_native, title_romaji
+FROM anime_cache
+WHERE anilist_id = $1
+`
+
+type GetAnimeForBangumiSearchRow struct {
+	TitleNative *string `json:"titleNative"`
+	TitleRomaji *string `json:"titleRomaji"`
+}
+
+// Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
+// the keyword for Bangumi search.  Mirrors anilist.service.js V1
+// enqueue (fetchBangumiData first arg).
+func (q *Queries) GetAnimeForBangumiSearch(ctx context.Context, anilistID int32) (GetAnimeForBangumiSearchRow, error) {
+	row := q.db.QueryRow(ctx, getAnimeForBangumiSearch, anilistID)
+	var i GetAnimeForBangumiSearchRow
+	err := row.Scan(&i.TitleNative, &i.TitleRomaji)
+	return i, err
+}
+
+const getAnimeGenresByID = `-- name: GetAnimeGenresByID :many
+SELECT genre FROM anime_genres WHERE anime_id = $1 ORDER BY genre
+`
+
+func (q *Queries) GetAnimeGenresByID(ctx context.Context, animeID int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, getAnimeGenresByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var genre string
+		if err := rows.Scan(&genre); err != nil {
+			return nil, err
+		}
+		items = append(items, genre)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAnimeMainByID = `-- name: GetAnimeMainByID :one
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    poster_accent_rgb,
+    poster_accent_contrast_on_black,
+    banner_image_url,
+    description,
+    episodes,
+    status,
+    season,
+    season_year,
+    average_score,
+    format,
+    duration,
+    source,
+    start_date,
+    bgm_id,
+    bangumi_score,
+    bangumi_votes,
+    bangumi_version,
+    cached_at
+FROM anime_cache
+WHERE anilist_id = $1
+`
+
+type GetAnimeMainByIDRow struct {
+	AnilistID                   int32              `json:"anilistId"`
+	TitleRomaji                 *string            `json:"titleRomaji"`
+	TitleEnglish                *string            `json:"titleEnglish"`
+	TitleNative                 *string            `json:"titleNative"`
+	TitleChinese                *string            `json:"titleChinese"`
+	CoverImageUrl               *string            `json:"coverImageUrl"`
+	CoverImageColor             *string            `json:"coverImageColor"`
+	PosterAccent                *string            `json:"posterAccent"`
+	PosterAccentRgb             *string            `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64           `json:"posterAccentContrastOnBlack"`
+	BannerImageUrl              *string            `json:"bannerImageUrl"`
+	Description                 *string            `json:"description"`
+	Episodes                    *int32             `json:"episodes"`
+	Status                      *string            `json:"status"`
+	Season                      *string            `json:"season"`
+	SeasonYear                  *int32             `json:"seasonYear"`
+	AverageScore                *float64           `json:"averageScore"`
+	Format                      *string            `json:"format"`
+	Duration                    *int32             `json:"duration"`
+	Source                      *string            `json:"source"`
+	StartDate                   pgtype.Date        `json:"startDate"`
+	BgmID                       *int32             `json:"bgmId"`
+	BangumiScore                *float64           `json:"bangumiScore"`
+	BangumiVotes                *int32             `json:"bangumiVotes"`
+	BangumiVersion              int32              `json:"bangumiVersion"`
+	CachedAt                    pgtype.Timestamptz `json:"cachedAt"`
+}
+
+// Full main-row read for /:anilistId detail.  Returns every column
+// the response payload needs (vs the trimmed 16-column shape
+// /completed-gems / /yearly-top use).  Child arrays come from the
+// 6 GetAnime*ByID queries below; service layer assembles them into
+// one nested response.
+func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error) {
+	row := q.db.QueryRow(ctx, getAnimeMainByID, anilistID)
+	var i GetAnimeMainByIDRow
+	err := row.Scan(
+		&i.AnilistID,
+		&i.TitleRomaji,
+		&i.TitleEnglish,
+		&i.TitleNative,
+		&i.TitleChinese,
+		&i.CoverImageUrl,
+		&i.CoverImageColor,
+		&i.PosterAccent,
+		&i.PosterAccentRgb,
+		&i.PosterAccentContrastOnBlack,
+		&i.BannerImageUrl,
+		&i.Description,
+		&i.Episodes,
+		&i.Status,
+		&i.Season,
+		&i.SeasonYear,
+		&i.AverageScore,
+		&i.Format,
+		&i.Duration,
+		&i.Source,
+		&i.StartDate,
+		&i.BgmID,
+		&i.BangumiScore,
+		&i.BangumiVotes,
+		&i.BangumiVersion,
+		&i.CachedAt,
+	)
+	return i, err
+}
+
+const getAnimeRecommendationsByID = `-- name: GetAnimeRecommendationsByID :many
+SELECT
+    anilist_id,
+    title,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    poster_accent_rgb,
+    poster_accent_contrast_on_black,
+    average_score
+FROM anime_recommendations
+WHERE anime_id = $1
+`
+
+type GetAnimeRecommendationsByIDRow struct {
+	AnilistID                   int32    `json:"anilistId"`
+	Title                       *string  `json:"title"`
+	CoverImageUrl               *string  `json:"coverImageUrl"`
+	CoverImageColor             *string  `json:"coverImageColor"`
+	PosterAccent                *string  `json:"posterAccent"`
+	PosterAccentRgb             *string  `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64 `json:"posterAccentContrastOnBlack"`
+	AverageScore                *float64 `json:"averageScore"`
+}
+
+func (q *Queries) GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]GetAnimeRecommendationsByIDRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeRecommendationsByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeRecommendationsByIDRow{}
+	for rows.Next() {
+		var i GetAnimeRecommendationsByIDRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.Title,
+			&i.CoverImageUrl,
+			&i.CoverImageColor,
+			&i.PosterAccent,
+			&i.PosterAccentRgb,
+			&i.PosterAccentContrastOnBlack,
+			&i.AverageScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAnimeRelationsByID = `-- name: GetAnimeRelationsByID :many
+SELECT
+    anilist_id,
+    relation_type,
+    title,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    poster_accent_rgb,
+    poster_accent_contrast_on_black,
+    format
+FROM anime_relations
+WHERE anime_id = $1
+`
+
+type GetAnimeRelationsByIDRow struct {
+	AnilistID                   int32    `json:"anilistId"`
+	RelationType                *string  `json:"relationType"`
+	Title                       *string  `json:"title"`
+	CoverImageUrl               *string  `json:"coverImageUrl"`
+	CoverImageColor             *string  `json:"coverImageColor"`
+	PosterAccent                *string  `json:"posterAccent"`
+	PosterAccentRgb             *string  `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64 `json:"posterAccentContrastOnBlack"`
+	Format                      *string  `json:"format"`
+}
+
+func (q *Queries) GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeRelationsByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeRelationsByIDRow{}
+	for rows.Next() {
+		var i GetAnimeRelationsByIDRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.RelationType,
+			&i.Title,
+			&i.CoverImageUrl,
+			&i.CoverImageColor,
+			&i.PosterAccent,
+			&i.PosterAccentRgb,
+			&i.PosterAccentContrastOnBlack,
+			&i.Format,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAnimeStaffByID = `-- name: GetAnimeStaffByID :many
+SELECT name_en, name_ja, image_url, role
+FROM anime_staff
+WHERE anime_id = $1
+ORDER BY display_order
+`
+
+type GetAnimeStaffByIDRow struct {
+	NameEn   *string `json:"nameEn"`
+	NameJa   *string `json:"nameJa"`
+	ImageUrl *string `json:"imageUrl"`
+	Role     *string `json:"role"`
+}
+
+func (q *Queries) GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeStaffByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeStaffByIDRow{}
+	for rows.Next() {
+		var i GetAnimeStaffByIDRow
+		if err := rows.Scan(
+			&i.NameEn,
+			&i.NameJa,
+			&i.ImageUrl,
+			&i.Role,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAnimeStudiosByID = `-- name: GetAnimeStudiosByID :many
+SELECT studio FROM anime_studios WHERE anime_id = $1 ORDER BY studio
+`
+
+func (q *Queries) GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, getAnimeStudiosByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var studio string
+		if err := rows.Scan(&studio); err != nil {
+			return nil, err
+		}
+		items = append(items, studio)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCompletedGems = `-- name: GetCompletedGems :many
 
 SELECT
@@ -221,6 +604,41 @@ func (q *Queries) GetCompletedGems(ctx context.Context, limit int32) ([]GetCompl
 			&i.Format,
 			&i.Description,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getRelationEnrichmentByIDs = `-- name: GetRelationEnrichmentByIDs :many
+SELECT anilist_id, title_chinese, cover_image_url
+FROM anime_cache
+WHERE anilist_id = ANY($1::int[])
+`
+
+type GetRelationEnrichmentByIDsRow struct {
+	AnilistID     int32   `json:"anilistId"`
+	TitleChinese  *string `json:"titleChinese"`
+	CoverImageUrl *string `json:"coverImageUrl"`
+}
+
+// /:anilistId detail enriches relations[].titleChinese + .coverImageUrl
+// from anime_cache when the relation row itself has stale values.
+// Mirrors server/controllers/detail.controller.js:14-28.
+func (q *Queries) GetRelationEnrichmentByIDs(ctx context.Context, dollar_1 []int32) ([]GetRelationEnrichmentByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getRelationEnrichmentByIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetRelationEnrichmentByIDsRow{}
+	for rows.Next() {
+		var i GetRelationEnrichmentByIDsRow
+		if err := rows.Scan(&i.AnilistID, &i.TitleChinese, &i.CoverImageUrl); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -576,6 +994,28 @@ func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateBangumiV1 = `-- name: UpdateBangumiV1 :exec
+UPDATE anime_cache
+SET bgm_id         = $2,
+    title_chinese  = $3,
+    bangumi_version = 1,
+    updated_at     = now()
+WHERE anilist_id = $1
+`
+
+// Phase 1 result write — set bgm_id + title_chinese (the latter only
+// when the Bangumi search produced an exact native match with a
+// non-empty name_cn).  bangumi_version=1 marks ready for Phase 2.
+//
+// title_chinese is *string so callers can pass nil when no exact match
+// (keeps the column NULL).  bgm_id is also *int because Bangumi search
+// may legitimately return no hits at all → caller sets bangumi_version
+// via a separate path or leaves it 0.
+func (q *Queries) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string) error {
+	_, err := q.db.Exec(ctx, updateBangumiV1, anilistID, bgmID, titleChinese)
+	return err
 }
 
 const upsertAnimeCache = `-- name: UpsertAnimeCache :exec

@@ -22,6 +22,26 @@ type Querier interface {
 	// /completed-gems / /yearly-top so handlers can reuse the response
 	// struct treatment.
 	GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetAnimeByAnilistIDsRow, error)
+	// Sorted by display_order so the response preserves the AniList role
+	// ordering (MAIN → SUPPORTING → BACKGROUND).  Phase 4 worker writes
+	// name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
+	// until enrichment runs.
+	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error)
+	// Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
+	// the keyword for Bangumi search.  Mirrors anilist.service.js V1
+	// enqueue (fetchBangumiData first arg).
+	GetAnimeForBangumiSearch(ctx context.Context, anilistID int32) (GetAnimeForBangumiSearchRow, error)
+	GetAnimeGenresByID(ctx context.Context, animeID int32) ([]string, error)
+	// Full main-row read for /:anilistId detail.  Returns every column
+	// the response payload needs (vs the trimmed 16-column shape
+	// /completed-gems / /yearly-top use).  Child arrays come from the
+	// 6 GetAnime*ByID queries below; service layer assembles them into
+	// one nested response.
+	GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error)
+	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]GetAnimeRecommendationsByIDRow, error)
+	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
+	GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error)
+	GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error)
 	// Queries against anime_cache and its child tables.
 	//
 	// Each :one / :many / :exec annotation tells sqlc which result shape to
@@ -39,6 +59,10 @@ type Querier interface {
 	// min 19, max 91, avg 64.25).  The Express threshold of 75 corresponds
 	// to "highly rated by AniList community" and is preserved verbatim.
 	GetCompletedGems(ctx context.Context, limit int32) ([]GetCompletedGemsRow, error)
+	// /:anilistId detail enriches relations[].titleChinese + .coverImageUrl
+	// from anime_cache when the relation row itself has stale values.
+	// Mirrors server/controllers/detail.controller.js:14-28.
+	GetRelationEnrichmentByIDs(ctx context.Context, dollar_1 []int32) ([]GetRelationEnrichmentByIDsRow, error)
 	// Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
 	// and replaces the warmed-cache branch of anime.controller.js:113-127 +
 	// the cached fallback in anilist.service.js getSeasonalAnime ②③.
@@ -66,6 +90,15 @@ type Querier interface {
 	// /api/anime/yearly-top, replacing anime.controller.js:93-110.
 	// Express limit is 20 hard, slice down to query limit in handler.
 	GetYearlyTop(ctx context.Context, seasonYear *int32, limit int32) ([]GetYearlyTopRow, error)
+	// Phase 1 result write — set bgm_id + title_chinese (the latter only
+	// when the Bangumi search produced an exact native match with a
+	// non-empty name_cn).  bangumi_version=1 marks ready for Phase 2.
+	//
+	// title_chinese is *string so callers can pass nil when no exact match
+	// (keeps the column NULL).  bgm_id is also *int because Bangumi search
+	// may legitimately return no hits at all → caller sets bangumi_version
+	// via a separate path or leaves it 0.
+	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string) error
 	// Upsert anime_cache main row from AniList sync.  Bangumi columns
 	// (title_chinese, bgm_id, bangumi_score, bangumi_votes, bangumi_version)
 	// are intentionally NOT overwritten on conflict — the enrichment workers
