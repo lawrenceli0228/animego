@@ -40,3 +40,138 @@ WHERE
     AND cover_image_url IS NOT NULL
 ORDER BY random()
 LIMIT $1;
+
+-- name: GetYearlyTop :many
+-- Top-rated TV/Movie/ONA anime for a single year.  Backs
+-- /api/anime/yearly-top, replacing anime.controller.js:93-110.
+-- Express limit is 20 hard, slice down to query limit in handler.
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    average_score,
+    bangumi_score,
+    episodes,
+    season,
+    season_year,
+    status,
+    format,
+    description
+FROM anime_cache
+WHERE
+    season_year = $1
+    AND average_score > 0
+    AND format IN ('TV', 'MOVIE', 'ONA')
+ORDER BY average_score DESC
+LIMIT $2;
+
+-- name: GetSeasonalAnime :many
+-- Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
+-- and replaces the warmed-cache branch of anime.controller.js:113-127 +
+-- the cached fallback in anilist.service.js getSeasonalAnime ②③.
+-- Hentai filter is preserved verbatim — Express skipped via $nin.
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    average_score,
+    bangumi_score,
+    episodes,
+    season,
+    season_year,
+    status,
+    format,
+    description
+FROM anime_cache
+WHERE
+    season = $1
+    AND season_year = $2
+    AND NOT EXISTS (
+        SELECT 1 FROM anime_genres
+        WHERE anime_genres.anime_id = anime_cache.anilist_id
+          AND anime_genres.genre = 'Hentai'
+    )
+ORDER BY average_score DESC NULLS LAST
+LIMIT $3 OFFSET $4;
+
+-- name: CountSeasonal :one
+-- Total non-Hentai entries for a given season + year.  Drives the
+-- pagination meta in /api/anime/seasonal so the frontend can render
+-- "X of Y" without a separate count call.
+SELECT count(*)::bigint AS total
+FROM anime_cache
+WHERE
+    season = $1
+    AND season_year = $2
+    AND NOT EXISTS (
+        SELECT 1 FROM anime_genres
+        WHERE anime_genres.anime_id = anime_cache.anilist_id
+          AND anime_genres.genre = 'Hentai'
+    );
+
+-- name: GetTrendingWithCounts :many
+-- Most-subscribed anime with their cached metadata, ordered by watcher
+-- count desc.  Backs /api/anime/trending and replaces the
+-- Subscription.aggregate + AnimeCache.find round-trip in
+-- anime.controller.js:17-50.  Single SQL with JOIN — no need for the
+-- Express two-query pattern.
+--
+-- watching-only is preserved (the Mongo agg counts everything; the
+-- Postgres replacement scopes to status='watching' to match the
+-- frontend's "X watchers" semantic).
+SELECT
+    a.anilist_id,
+    a.title_romaji,
+    a.title_english,
+    a.title_native,
+    a.title_chinese,
+    a.cover_image_url,
+    a.cover_image_color,
+    a.poster_accent,
+    a.average_score,
+    a.bangumi_score,
+    a.episodes,
+    a.season,
+    a.season_year,
+    a.status,
+    a.format,
+    a.description,
+    s.watcher_count
+FROM anime_cache a
+JOIN (
+    SELECT anilist_id, count(*)::bigint AS watcher_count
+    FROM subscriptions
+    WHERE status = 'watching'
+    GROUP BY anilist_id
+    ORDER BY count(*) DESC
+    LIMIT 20
+) s ON s.anilist_id = a.anilist_id
+ORDER BY s.watcher_count DESC
+LIMIT $1;
+
+-- name: GetWatchers :many
+-- Public watcher list for one anime.  Backs /api/anime/:anilistId/watchers.
+-- Replaces anime.controller.js:53-75 — single SQL with JOIN drops the
+-- Express two-step (find + populate) pattern.
+SELECT u.username
+FROM subscriptions s
+JOIN users u ON u.id = s.user_id
+WHERE s.anilist_id = $1 AND s.status = 'watching'
+LIMIT $2;
+
+-- name: CountWatchers :one
+-- Total active watchers for /api/anime/:anilistId/watchers (the `total`
+-- meta field in the envelope).
+SELECT count(*)::bigint AS total
+FROM subscriptions
+WHERE anilist_id = $1 AND status = 'watching';

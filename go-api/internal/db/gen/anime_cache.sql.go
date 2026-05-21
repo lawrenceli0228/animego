@@ -9,6 +9,44 @@ import (
 	"context"
 )
 
+const countSeasonal = `-- name: CountSeasonal :one
+SELECT count(*)::bigint AS total
+FROM anime_cache
+WHERE
+    season = $1
+    AND season_year = $2
+    AND NOT EXISTS (
+        SELECT 1 FROM anime_genres
+        WHERE anime_genres.anime_id = anime_cache.anilist_id
+          AND anime_genres.genre = 'Hentai'
+    )
+`
+
+// Total non-Hentai entries for a given season + year.  Drives the
+// pagination meta in /api/anime/seasonal so the frontend can render
+// "X of Y" without a separate count call.
+func (q *Queries) CountSeasonal(ctx context.Context, season *string, seasonYear *int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countSeasonal, season, seasonYear)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
+const countWatchers = `-- name: CountWatchers :one
+SELECT count(*)::bigint AS total
+FROM subscriptions
+WHERE anilist_id = $1 AND status = 'watching'
+`
+
+// Total active watchers for /api/anime/:anilistId/watchers (the `total`
+// meta field in the envelope).
+func (q *Queries) CountWatchers(ctx context.Context, anilistID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countWatchers, anilistID)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const getCompletedGems = `-- name: GetCompletedGems :many
 
 SELECT
@@ -81,6 +119,318 @@ func (q *Queries) GetCompletedGems(ctx context.Context, limit int32) ([]GetCompl
 	items := []GetCompletedGemsRow{}
 	for rows.Next() {
 		var i GetCompletedGemsRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleRomaji,
+			&i.TitleEnglish,
+			&i.TitleNative,
+			&i.TitleChinese,
+			&i.CoverImageUrl,
+			&i.CoverImageColor,
+			&i.PosterAccent,
+			&i.AverageScore,
+			&i.BangumiScore,
+			&i.Episodes,
+			&i.Season,
+			&i.SeasonYear,
+			&i.Status,
+			&i.Format,
+			&i.Description,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getSeasonalAnime = `-- name: GetSeasonalAnime :many
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    average_score,
+    bangumi_score,
+    episodes,
+    season,
+    season_year,
+    status,
+    format,
+    description
+FROM anime_cache
+WHERE
+    season = $1
+    AND season_year = $2
+    AND NOT EXISTS (
+        SELECT 1 FROM anime_genres
+        WHERE anime_genres.anime_id = anime_cache.anilist_id
+          AND anime_genres.genre = 'Hentai'
+    )
+ORDER BY average_score DESC NULLS LAST
+LIMIT $3 OFFSET $4
+`
+
+type GetSeasonalAnimeRow struct {
+	AnilistID       int32    `json:"anilistId"`
+	TitleRomaji     *string  `json:"titleRomaji"`
+	TitleEnglish    *string  `json:"titleEnglish"`
+	TitleNative     *string  `json:"titleNative"`
+	TitleChinese    *string  `json:"titleChinese"`
+	CoverImageUrl   *string  `json:"coverImageUrl"`
+	CoverImageColor *string  `json:"coverImageColor"`
+	PosterAccent    *string  `json:"posterAccent"`
+	AverageScore    *float64 `json:"averageScore"`
+	BangumiScore    *float64 `json:"bangumiScore"`
+	Episodes        *int32   `json:"episodes"`
+	Season          *string  `json:"season"`
+	SeasonYear      *int32   `json:"seasonYear"`
+	Status          *string  `json:"status"`
+	Format          *string  `json:"format"`
+	Description     *string  `json:"description"`
+}
+
+// Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
+// and replaces the warmed-cache branch of anime.controller.js:113-127 +
+// the cached fallback in anilist.service.js getSeasonalAnime ②③.
+// Hentai filter is preserved verbatim — Express skipped via $nin.
+func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error) {
+	rows, err := q.db.Query(ctx, getSeasonalAnime,
+		season,
+		seasonYear,
+		limit,
+		offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetSeasonalAnimeRow{}
+	for rows.Next() {
+		var i GetSeasonalAnimeRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleRomaji,
+			&i.TitleEnglish,
+			&i.TitleNative,
+			&i.TitleChinese,
+			&i.CoverImageUrl,
+			&i.CoverImageColor,
+			&i.PosterAccent,
+			&i.AverageScore,
+			&i.BangumiScore,
+			&i.Episodes,
+			&i.Season,
+			&i.SeasonYear,
+			&i.Status,
+			&i.Format,
+			&i.Description,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTrendingWithCounts = `-- name: GetTrendingWithCounts :many
+SELECT
+    a.anilist_id,
+    a.title_romaji,
+    a.title_english,
+    a.title_native,
+    a.title_chinese,
+    a.cover_image_url,
+    a.cover_image_color,
+    a.poster_accent,
+    a.average_score,
+    a.bangumi_score,
+    a.episodes,
+    a.season,
+    a.season_year,
+    a.status,
+    a.format,
+    a.description,
+    s.watcher_count
+FROM anime_cache a
+JOIN (
+    SELECT anilist_id, count(*)::bigint AS watcher_count
+    FROM subscriptions
+    WHERE status = 'watching'
+    GROUP BY anilist_id
+    ORDER BY count(*) DESC
+    LIMIT 20
+) s ON s.anilist_id = a.anilist_id
+ORDER BY s.watcher_count DESC
+LIMIT $1
+`
+
+type GetTrendingWithCountsRow struct {
+	AnilistID       int32    `json:"anilistId"`
+	TitleRomaji     *string  `json:"titleRomaji"`
+	TitleEnglish    *string  `json:"titleEnglish"`
+	TitleNative     *string  `json:"titleNative"`
+	TitleChinese    *string  `json:"titleChinese"`
+	CoverImageUrl   *string  `json:"coverImageUrl"`
+	CoverImageColor *string  `json:"coverImageColor"`
+	PosterAccent    *string  `json:"posterAccent"`
+	AverageScore    *float64 `json:"averageScore"`
+	BangumiScore    *float64 `json:"bangumiScore"`
+	Episodes        *int32   `json:"episodes"`
+	Season          *string  `json:"season"`
+	SeasonYear      *int32   `json:"seasonYear"`
+	Status          *string  `json:"status"`
+	Format          *string  `json:"format"`
+	Description     *string  `json:"description"`
+	WatcherCount    int64    `json:"watcherCount"`
+}
+
+// Most-subscribed anime with their cached metadata, ordered by watcher
+// count desc.  Backs /api/anime/trending and replaces the
+// Subscription.aggregate + AnimeCache.find round-trip in
+// anime.controller.js:17-50.  Single SQL with JOIN — no need for the
+// Express two-query pattern.
+//
+// watching-only is preserved (the Mongo agg counts everything; the
+// Postgres replacement scopes to status='watching' to match the
+// frontend's "X watchers" semantic).
+func (q *Queries) GetTrendingWithCounts(ctx context.Context, limit int32) ([]GetTrendingWithCountsRow, error) {
+	rows, err := q.db.Query(ctx, getTrendingWithCounts, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTrendingWithCountsRow{}
+	for rows.Next() {
+		var i GetTrendingWithCountsRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleRomaji,
+			&i.TitleEnglish,
+			&i.TitleNative,
+			&i.TitleChinese,
+			&i.CoverImageUrl,
+			&i.CoverImageColor,
+			&i.PosterAccent,
+			&i.AverageScore,
+			&i.BangumiScore,
+			&i.Episodes,
+			&i.Season,
+			&i.SeasonYear,
+			&i.Status,
+			&i.Format,
+			&i.Description,
+			&i.WatcherCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getWatchers = `-- name: GetWatchers :many
+SELECT u.username
+FROM subscriptions s
+JOIN users u ON u.id = s.user_id
+WHERE s.anilist_id = $1 AND s.status = 'watching'
+LIMIT $2
+`
+
+// Public watcher list for one anime.  Backs /api/anime/:anilistId/watchers.
+// Replaces anime.controller.js:53-75 — single SQL with JOIN drops the
+// Express two-step (find + populate) pattern.
+func (q *Queries) GetWatchers(ctx context.Context, anilistID int32, limit int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, getWatchers, anilistID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var username string
+		if err := rows.Scan(&username); err != nil {
+			return nil, err
+		}
+		items = append(items, username)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getYearlyTop = `-- name: GetYearlyTop :many
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    average_score,
+    bangumi_score,
+    episodes,
+    season,
+    season_year,
+    status,
+    format,
+    description
+FROM anime_cache
+WHERE
+    season_year = $1
+    AND average_score > 0
+    AND format IN ('TV', 'MOVIE', 'ONA')
+ORDER BY average_score DESC
+LIMIT $2
+`
+
+type GetYearlyTopRow struct {
+	AnilistID       int32    `json:"anilistId"`
+	TitleRomaji     *string  `json:"titleRomaji"`
+	TitleEnglish    *string  `json:"titleEnglish"`
+	TitleNative     *string  `json:"titleNative"`
+	TitleChinese    *string  `json:"titleChinese"`
+	CoverImageUrl   *string  `json:"coverImageUrl"`
+	CoverImageColor *string  `json:"coverImageColor"`
+	PosterAccent    *string  `json:"posterAccent"`
+	AverageScore    *float64 `json:"averageScore"`
+	BangumiScore    *float64 `json:"bangumiScore"`
+	Episodes        *int32   `json:"episodes"`
+	Season          *string  `json:"season"`
+	SeasonYear      *int32   `json:"seasonYear"`
+	Status          *string  `json:"status"`
+	Format          *string  `json:"format"`
+	Description     *string  `json:"description"`
+}
+
+// Top-rated TV/Movie/ONA anime for a single year.  Backs
+// /api/anime/yearly-top, replacing anime.controller.js:93-110.
+// Express limit is 20 hard, slice down to query limit in handler.
+func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int32) ([]GetYearlyTopRow, error) {
+	rows, err := q.db.Query(ctx, getYearlyTop, seasonYear, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetYearlyTopRow{}
+	for rows.Next() {
+		var i GetYearlyTopRow
 		if err := rows.Scan(
 			&i.AnilistID,
 			&i.TitleRomaji,
