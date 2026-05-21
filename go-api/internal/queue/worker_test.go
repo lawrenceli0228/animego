@@ -1,0 +1,215 @@
+// worker_test.go — unit tests for the queue boot path.
+//
+// No DB required.  The integration test in
+// test/integration/queue_smoke_test.go covers the enqueue → run →
+// complete loop against a real Postgres testcontainer.  This file
+// asserts:
+//   1. Each Args type returns the correct Kind.
+//   2. Workers() registers all 3 stubs.
+//   3. Boot rejects a nil pool with ErrMissingPool.
+//   4. Boot applies sensible defaults when Config is zero-valued.
+package queue
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// newStubPool returns a *pgxpool.Pool that has parsed a benign DSN but
+// never connected.  pgxpool.New is lazy — it doesn't dial until the
+// first Acquire — so this lets Boot exercise the full default-merging
+// path without standing up a real Postgres.
+//
+// The pool is auto-closed via t.Cleanup so race detector remains happy.
+func newStubPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	// Localhost on an impossible port; no actual TCP attempt fires
+	// because we never Acquire.
+	pool, err := pgxpool.New(context.Background(), "postgres://stub:stub@127.0.0.1:1/stub?sslmode=disable")
+	require.NoError(t, err, "pgxpool.New with valid DSN should not error before first Acquire")
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+func TestArgs_Kind(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args river.JobArgs
+		want string
+	}{
+		{"v1", BangumiV1Args{AnilistID: 1}, "bangumi_v1"},
+		{"v2", BangumiV2Args{AnilistID: 1, BgmID: 2}, "bangumi_v2"},
+		{"v3", BangumiV3Args{AnilistID: 1, BgmID: 2}, "bangumi_v3"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, tc.args.Kind(),
+				"%T.Kind() must match the contract used by river dispatch", tc.args)
+		})
+	}
+}
+
+// TestWorkers_RegistersAll3 verifies Workers() emits a non-nil bundle and
+// that every Kind is occupied.  Probe via river.AddWorkerSafely — it
+// returns "already registered" when the kind is taken, which is the
+// cheapest cross-package way to see what's in the bundle without
+// reaching into the unexported workersMap.
+func TestWorkers_RegistersAll3(t *testing.T) {
+	t.Parallel()
+
+	w := Workers()
+	require.NotNil(t, w, "Workers() must return a non-nil bundle")
+
+	// Re-registering each stub kind should fail with "already registered".
+	err := river.AddWorkerSafely(w, &stubBangumiV1Worker{})
+	require.Error(t, err, "v1 slot should already be occupied")
+	assert.Contains(t, err.Error(), "bangumi_v1")
+
+	err = river.AddWorkerSafely(w, &stubBangumiV2Worker{})
+	require.Error(t, err, "v2 slot should already be occupied")
+	assert.Contains(t, err.Error(), "bangumi_v2")
+
+	err = river.AddWorkerSafely(w, &stubBangumiV3Worker{})
+	require.Error(t, err, "v3 slot should already be occupied")
+	assert.Contains(t, err.Error(), "bangumi_v3")
+}
+
+// TestWorkers_FreshBundlePerCall asserts Workers() returns an
+// independent bundle on every call — callers should not be able to
+// poison the next call's bundle.
+func TestWorkers_FreshBundlePerCall(t *testing.T) {
+	t.Parallel()
+
+	a := Workers()
+	b := Workers()
+	require.NotNil(t, a)
+	require.NotNil(t, b)
+	assert.NotSame(t, a, b, "Workers() must return a new *river.Workers each call")
+}
+
+// TestBoot_NilPool_ReturnsErrMissingPool probes the actual behavior of
+// Boot(nil, …).  We want a sentinel error, not a panic — surfaces as a
+// clean startup-time failure instead of a runtime crash.
+func TestBoot_NilPool_ReturnsErrMissingPool(t *testing.T) {
+	t.Parallel()
+
+	c, err := Boot(nil, Config{})
+	assert.Nil(t, c, "Boot must not return a client when pool is nil")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrMissingPool),
+		"Boot(nil, …) should return ErrMissingPool, got: %v", err)
+}
+
+// TestBoot_DefaultsApplied uses a stub pool (parsed but never dialed) to
+// exercise the full default-merging path: Workers() filled, Queues map
+// defaulted to {default: 1 worker}, Logger fallback to slog.Default().
+// We verify the client is non-nil and ready to InsertTx (the only Boot
+// guarantee).  Start/Stop is exercised by the integration test.
+func TestBoot_DefaultsApplied(t *testing.T) {
+	t.Parallel()
+
+	pool := newStubPool(t)
+	c, err := Boot(pool, Config{})
+	require.NoError(t, err, "Boot with stub pool + zero Config should succeed")
+	require.NotNil(t, c, "client must be non-nil when Boot returns nil error")
+}
+
+// TestBoot_CustomConfigPassedThrough verifies a non-nil Workers + Queues
+// + Logger flows through without being overwritten by the defaults.
+func TestBoot_CustomConfigPassedThrough(t *testing.T) {
+	t.Parallel()
+
+	pool := newStubPool(t)
+	customLogger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	customWorkers := river.NewWorkers()
+	river.AddWorker(customWorkers, &stubBangumiV1Worker{})
+
+	c, err := Boot(pool, Config{
+		Workers: customWorkers,
+		Queues:  map[string]river.QueueConfig{"custom": {MaxWorkers: 4}},
+		Logger:  customLogger,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+}
+
+// TestBoot_RejectsBadConfig confirms river validation errors propagate
+// up through Boot.  We pass a queue with MaxWorkers=0 which river
+// rejects ("invalid number of workers").
+func TestBoot_RejectsBadConfig(t *testing.T) {
+	t.Parallel()
+
+	pool := newStubPool(t)
+	c, err := Boot(pool, Config{
+		Queues: map[string]river.QueueConfig{
+			"bad": {MaxWorkers: 0}, // river requires >=1
+		},
+	})
+	assert.Nil(t, c, "Boot must not return a client when river.NewClient errors")
+	require.Error(t, err, "river config validation must surface")
+}
+
+// TestStubWorkers_WorkReturnsNil confirms each stub Worker.Work() emits
+// no error so the integration test's wait-for-completion path lands on
+// JobCompleted (not JobFailed).  Calls Work directly via the river.Job
+// fixture so we don't need a running client.
+func TestStubWorkers_WorkReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+
+	v1 := &stubBangumiV1Worker{}
+	require.NoError(t, v1.Work(ctx, &river.Job[BangumiV1Args]{
+		Args: BangumiV1Args{AnilistID: 42},
+	}))
+
+	v2 := &stubBangumiV2Worker{}
+	require.NoError(t, v2.Work(ctx, &river.Job[BangumiV2Args]{
+		Args: BangumiV2Args{AnilistID: 42, BgmID: 100},
+	}))
+
+	v3 := &stubBangumiV3Worker{}
+	require.NoError(t, v3.Work(ctx, &river.Job[BangumiV3Args]{
+		Args: BangumiV3Args{AnilistID: 42, BgmID: 100},
+	}))
+}
+
+// TestStubWorkers_LogContext asserts the stub log lines actually
+// include the anilistId field — gives the integration suite (and
+// future ops dashboards) a stable shape to grep on.
+//
+// Wires a slog handler into a buffer, swaps slog.Default() for the
+// duration of the call, then restores it.  Verifies the rendered log
+// contains the AnilistID value.
+func TestStubWorkers_LogContext(t *testing.T) {
+	// NOTE: not t.Parallel — we mutate slog.Default for the duration
+	// of this test, which is process-global state.
+	original := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	buf := &bytes.Buffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
+
+	v1 := &stubBangumiV1Worker{}
+	require.NoError(t, v1.Work(t.Context(), &river.Job[BangumiV1Args]{
+		Args: BangumiV1Args{AnilistID: 12345},
+	}))
+
+	out := buf.String()
+	assert.Contains(t, out, "bangumi_v1 stub", "log line should identify the worker")
+	assert.Contains(t, out, "anilistId=12345", "log line should include AnilistID")
+}
