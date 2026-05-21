@@ -1,8 +1,9 @@
 // Package main is the chi HTTP server entry point for go-api.
 //
-// P2.0.C scope: handler uses httpx.Data / httpx.Fail for envelope output.
-// Middleware chain is still chi-default — P2.0.D swaps in the envelope-aware
-// Recoverer, CORS, and /health-skipping RequestLog.
+// P2.0.D scope: middleware chain is now full envelope-aware + /health-
+// skipping + CORS-fronted.  Chain order (locked by /plan-eng-review):
+//
+//	CORS  → RequestID  → RealIP  → RequestLog  → Recoverer  → Timeout
 package main
 
 import (
@@ -22,6 +23,7 @@ import (
 
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
+	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
 
@@ -48,13 +50,16 @@ func main() {
 	slog.Info("postgres pool ready", "max_conns", db.MaxConns)
 
 	r := chi.NewRouter()
+	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
+	r.Use(httpmw.RequestLog(slog.Default()))
+	r.Use(httpmw.Recoverer(slog.Default()))
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	// Health endpoint pings the DB pool.  dev.sh and docker healthcheck
-	// only require HTTP 200; humans inspecting the body get the envelope.
+	// Health endpoint pings the DB pool.  Docker healthcheck only
+	// requires HTTP 200; RequestLog skips this path to avoid drowning
+	// real traffic in 2880 probe lines per pod per day.
 	r.Get("/health", healthHandler(pool))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -68,7 +73,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.0.A")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.0.D")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
