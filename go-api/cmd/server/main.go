@@ -1,15 +1,12 @@
 // Package main is the chi HTTP server entry point for go-api.
 //
-// P2.0.A scope: chi router with pgxpool wired in, /health upgraded to
-// ping the DB.  Envelope helpers (httpx package) land in P2.0.C — for
-// now the handler writes the {"data":{...}}/{"error":{...}} shape with
-// raw encoding/json so the response is already byte-compatible with
-// what httpx.Data/Fail will emit.
+// P2.0.C scope: handler uses httpx.Data / httpx.Fail for envelope output.
+// Middleware chain is still chi-default — P2.0.D swaps in the envelope-aware
+// Recoverer, CORS, and /health-skipping RequestLog.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -25,6 +22,7 @@ import (
 
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
+	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
 
 func main() {
@@ -91,38 +89,36 @@ func main() {
 	slog.Info("server stopped")
 }
 
-// healthHandler reports liveness + DB reachability in the same envelope
-// shape that httpx.Data / httpx.Fail will produce in P2.0.C.
+// healthHandler reports liveness + DB reachability via the httpx envelope.
 //
 // 200 →  {"data":{"ok":true,"service":"go-api","stage":"P2.0","db":"up"}}
 // 503 →  {"error":{"code":"SERVER_ERROR","message":"database unreachable"}}
 //
-// TODO(P2.0.C): swap the inline JSON for httpx.Data / httpx.Fail.
+// Field order matches Express: ok, service, stage, db.  Use a struct (not
+// map[string]any, which marshals alphabetically) so the byte output matches
+// what shadow traffic diff expects.
 func healthHandler(pool *pgxpool.Pool) http.HandlerFunc {
-	return func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	type healthOK struct {
+		OK      bool   `json:"ok"`
+		Service string `json:"service"`
+		Stage   string `json:"stage"`
+		DB      string `json:"db"`
+	}
 
+	return func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), db.PingTimeout)
 		defer cancel()
 		if err := pool.Ping(ctx); err != nil {
-			slog.Warn("health ping failed", "err", err)
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"error": map[string]string{
-					"code":    "SERVER_ERROR",
-					"message": "database unreachable",
-				},
-			})
+			httpx.Fail(w, httpx.NewError(
+				http.StatusServiceUnavailable,
+				httpx.CodeServerError,
+				"database unreachable",
+				httpx.WithCause(err),
+			))
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{
-				"ok":      true,
-				"service": "go-api",
-				"stage":   "P2.0",
-				"db":      "up",
-			},
+		httpx.Data(w, http.StatusOK, healthOK{
+			OK: true, Service: "go-api", Stage: "P2.0", DB: "up",
 		})
 	}
 }
