@@ -21,8 +21,10 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/anime"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
+	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
@@ -49,6 +51,8 @@ func main() {
 	defer pool.Close()
 	slog.Info("postgres pool ready", "max_conns", db.MaxConns)
 
+	q := dbgen.New(pool)
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -61,6 +65,10 @@ func main() {
 	// requires HTTP 200; RequestLog skips this path to avoid drowning
 	// real traffic in 2880 probe lines per pod per day.
 	r.Get("/health", healthHandler(pool))
+
+	r.Route("/api/anime", func(r chi.Router) {
+		r.Get("/completed-gems", anime.CompletedGems(q))
+	})
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{

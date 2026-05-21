@@ -58,5 +58,19 @@ sql:
               import: "encoding/json"
               type: "RawMessage"
 
+          # numeric(4,2) score columns (average_score, bangumi_score,
+          # poster_accent_contrast_on_black).  pgtype.Numeric serialises
+          # as "83.00" — Express MongoDB returns Number which JSON.stringify
+          # outputs as "83" (trailing zeros dropped).  Override to *float64
+          # for byte parity.  Loses sub-2-decimal precision but no source
+          # writes more than 2 decimals anyway.
+          - db_type: "pg_catalog.numeric"
+            go_type: "float64"
+          - db_type: "pg_catalog.numeric"
+            nullable: true
+            go_type:
+              type: "float64"
+              pointer: true
+
     rules:
       - sqlc/db-prepare        # validates queries against schema at generate-time
