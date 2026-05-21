@@ -17,76 +17,13 @@
   <!--[if lt IE 9]>
     <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
   <![endif]-->
-    <style>
-    :root {
-      --bg: #0e1116; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
-      --code-bg: #161b22; --border: #30363d; --highlight: #f0c674;
-    }
-    html { background: var(--bg); color: var(--fg); color-scheme: dark; scroll-behavior: smooth; }
-    body {
-      background: var(--bg); color: var(--fg);
-      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      max-width: 1100px; margin: 0 auto; padding: 2.5rem 3rem 6rem;
-    }
-    h1, h2, h3, h4, h5, h6 {
-      border-bottom: 1px solid var(--border); padding-bottom: .3em;
-      font-weight: 600; color: var(--fg); margin-top: 2em; margin-bottom: 0.6em;
-    }
-    h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; }
-    h1 { font-size: 1.85rem; color: var(--highlight); }
-    h2 { font-size: 1.45rem; color: var(--highlight); }
-    h3 { font-size: 1.15rem; border-bottom: 1px dashed var(--border); }
-    h4 { font-size: 1rem; border: 0; color: var(--muted); }
-    p { margin: 1em 0; }
-    a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
-    code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px;
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
-      color: #ffa657; border: 1px solid var(--border); }
-    pre { background: var(--code-bg); padding: 1rem 1.2rem; overflow-x: auto;
-      border: 1px solid var(--border); border-radius: 6px; font-size: 0.84em;
-      line-height: 1.55; margin: 1em 0; }
-    pre code { padding: 0; background: transparent; color: var(--fg); font-size: 1em; border: 0; }
-    blockquote { border-left: 3px solid var(--accent); margin: 1em 0; padding: .6em 1.2em;
-      color: var(--muted); background: rgba(88,166,255,0.06); border-radius: 0 4px 4px 0; }
-    table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
-    th, td { border: 1px solid var(--border); padding: .55em .85em; text-align: left; vertical-align: top; }
-    th { background: var(--code-bg); font-weight: 600; color: var(--highlight); }
-    tbody tr:nth-child(odd) { background: rgba(255,255,255,0.025); }
-    hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
-    nav#TOC { background: var(--code-bg); padding: 1.2rem 1.6rem; border-radius: 6px;
-      border: 1px solid var(--border); margin: 1.5rem 0 2.5rem; font-size: 0.88em; }
-    nav#TOC ul { padding-left: 1.4em; margin: 0.3em 0; list-style: none; }
-    nav#TOC > ul { padding-left: 0; }
-    strong { color: var(--highlight); font-weight: 600; }
-    em { color: #a5d6ff; font-style: normal; opacity: 0.85; }
-    li { margin: 0.18em 0; }
-    header.title-block-header { padding-bottom: 1.5em; border-bottom: 2px solid var(--border); margin-bottom: 2em; }
-    </style>
 </head>
 <body>
 <header id="title-block-header">
 <h1 class="title">AnimeGo — P2-PROGRESS</h1>
 </header>
 <nav id="TOC" role="doc-toc">
-<ul>
-<li><a href="#phase-2-progress-go-api-rewrite">Phase 2 Progress — Go API Rewrite</a>
-<ul>
-<li><a href="#p2.0-chi-骨架7-10-hr">P2.0 — chi 骨架(7-10 hr)✓</a>
-<ul>
-<li><a href="#完成的-5-commit">完成的 5 commit</a></li>
-<li><a href="#sub-task-结果">5 sub-task 结果</a></li>
-<li><a href="#退出条件p2.0-p2.1-gate-全部">退出条件(P2.0 → P2.1 gate)— 全部 ✓</a></li>
-<li><a href="#关键设计取舍已锁p2.x-不允许偏">关键设计取舍(已锁,P2.x 不允许偏)</a></li>
-<li><a href="#实际-commit-timeline">实际 commit timeline</a></li>
-</ul></li>
-<li><a href="#p2.1-apianime-富化-queue待开35-55-hr">P2.1 — <code>/api/anime/*</code> + 富化 queue(待开,35-55 hr)</a>
-<ul>
-<li><a href="#endpoint-待实现">9 endpoint 待实现</a></li>
-</ul></li>
-<li><a href="#p2.2---p2.6-待开">P2.2 - P2.6 待开</a></li>
-<li><a href="#notes-decisions随时追加">Notes / Decisions(随时追加)</a></li>
-</ul></li>
-</ul>
+
 </nav>
 <h1 id="phase-2-progress-go-api-rewrite">Phase 2 Progress — Go API Rewrite</h1>
 <p><strong>Branch:</strong> <code>feat/go-backend</code> <strong>Started:</strong> 2026-05-21 <strong>Estimated total:</strong> 100-160 hr,6 个 sub-milestone(P2.1 - P2.6) + P2.0 骨架 <strong>Plan reference:</strong> <a href="MIGRATION_PLAN.md"><code>MIGRATION_PLAN.md</code></a> § Phase 2</p>
@@ -188,30 +125,115 @@ PR 合到 <code>feat/go-backend</code> 分支(单 PR 5 commit)</li>
 13:05  live server + curl smoke    /health 200 + envelope byte-exact
 ~6 hr total wall (across multiple Claude Code sessions)</code></pre>
 <hr />
-<h2 id="p2.1-apianime-富化-queue待开35-55-hr">P2.1 — <code>/api/anime/*</code> + 富化 queue(待开,35-55 hr)</h2>
+<h2 id="p2.1-apianime-富化-queue进行中35-55-hr-估时">P2.1 — <code>/api/anime/*</code> + 富化 queue(进行中,35-55 hr 估时)</h2>
 <p><a href="MIGRATION_PLAN.md"><code>MIGRATION_PLAN.md</code></a> § Phase 2 详细规划。</p>
+<h3 id="p2.1.0-pre-work-2026-05-213-commit">P2.1.0 — pre-work ✓(2026-05-21,3 commit)</h3>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+river migration <code>0007_river_initial</code> + <code>0008_river_pending_use</code>(P2 design § 10 ENUM split)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>make sqlc-generate</code> 第一次跑通,<code>/completed-gems</code> endpoint 用 dbgen.Querier 接入</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/testutil/</code> 提取,P1.D <code>migrate_test.go</code> 同期 refactor 复用(Rule of three)</li>
+</ul>
+<h3 id="p2.1.1-leaf-packages-第一批-2026-05-211-commit20a341e">P2.1.1 — leaf packages 第一批 ✓(2026-05-21,1 commit:<code>20a341e</code>)</h3>
+<p>3 个 subagent 并行(用户:“继续可以用多subagents协助”),全独立无相互依赖:</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Package</th>
+<th>行</th>
+<th>Coverage</th>
+<th>关键决策</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>internal/anilist/</code></td>
+<td>client + types + queries 4 文件</td>
+<td><strong>91.5%</strong></td>
+<td>rate.NewLimiter(rate.Every(700ms), 1) 单 token / 429 retry 3 次读 Retry-After / *ErrUpstream 包 5xx + GraphQL errors[0] / 内部 wire struct + json.RawMessage 绕开锁定的 types.go <code>Variables map[string]any</code></td>
+</tr>
+<tr class="even">
+<td><code>internal/cache/</code></td>
+<td>2 文件</td>
+<td><strong>100.0%</strong></td>
+<td>ristretto/v2 泛型 <code>Cache[V any]</code> Wait() 必调 / Defaults: NumCounters=1e7 MaxCost=1e8 BufferItems=64</td>
+</tr>
+<tr class="odd">
+<td><code>internal/colorx/</code></td>
+<td>2 文件 stdlib only</td>
+<td><strong>96.8%</strong></td>
+<td>OKLab/OKLCH port <code>server/utils/normalizeAccent.js</code> / 5 fixture 通过 <code>node -e ...</code> 实跑 JS 锁定字节 parity / brand fallback <code>#8B5CF6</code></td>
+</tr>
+</tbody>
+</table>
+<p>合 8 文件 / +2486 行。</p>
+<h3 id="p2.1.2-leaf-packages-第二批-2026-05-211-commit4903b64">P2.1.2 — leaf packages 第二批 ✓(2026-05-21,1 commit:<code>4903b64</code>)</h3>
+<p>3 个 subagent 并行,基础设施层:</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Package</th>
+<th>行</th>
+<th>Coverage</th>
+<th>关键决策</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>internal/torrents/</code></td>
+<td>9 文件(types + 3 源 + aggregator + 4 test)</td>
+<td><strong>91.9%</strong></td>
+<td>errgroup.WithContext 并发 / 8s per-source timeout(<code>http.RoundTripper</code> rewrite injection)/ partial-tolerance 失败源返空 slice / ristretto 1h TTL 500 entry / <code>parseIntJSLike</code> 匹配 JS <code>parseInt("1234abc") → 1234</code> 字节 parity / Go encoding/xml namespace 用 URI 不是 <code>nyaa:</code> alias</td>
+</tr>
+<tr class="even">
+<td><code>internal/queue/</code></td>
+<td>3 文件 + 1 integration</td>
+<td><strong>100.0%</strong> unit</td>
+<td>river <code>Boot(pool, Config) (*river.Client[pgx.Tx], error)</code> ErrMissingPool / 3 stub workers BangumiV1/2/3 待 P2.1.3 填实 / Subscribe channel 必须 Boot 前订阅否则 events drop / 不调 <code>river-migrate</code> —— 0007+0008 已 schema-applied</td>
+</tr>
+<tr class="odd">
+<td><code>internal/bangumi/</code></td>
+<td>2 文件</td>
+<td><strong>98.1%</strong></td>
+<td>rate.NewLimiter 800ms burst=1 / User-Agent <code>AnimGo/1.0</code> typo 保留 byte-exact(Bangumi rate-limit allowlist 可能 hash UA)/ 4 endpoint:Search + Subject + Characters + Episodes(用 OLD v1 <code>/subject/{id}/ep</code> 不是 v0)/ ErrNotFound 区分 404 vs *ErrUpstream / Episode.Sort <code>float64</code>(Bangumi 给 1.5 表示 SP)</td>
+</tr>
+</tbody>
+</table>
+<p>合 17 文件 / +4173 行。</p>
+<h3 id="p2.1.3-待开handler-service-富化-worker">P2.1.3 — 待开:handler + service + 富化 worker</h3>
 <p>启动前必须做的事(来自 P2.0 → P2.1 handoff,见 <a href="P2.0-DESIGN.md"><code>P2.0-DESIGN.md</code></a> § 10):</p>
 <ul class="task-list">
-<li><input type="checkbox" disabled="" />
-<strong>首次 sqlc generate</strong> — 写完 <code>internal/db/queries/anime_cache.sql</code> 的 <code>GetByAnilistID</code> 之后跑 <code>make sqlc-generate</code>(Makefile target 同期加),验产出落 <code>internal/db/gen/</code></li>
-<li><input type="checkbox" disabled="" />
-<strong><code>internal/testutil/</code> 提取(Rule of three)</strong> — P2.1 第一个 <code>anime_endpoints_test.go</code> 是第二次用 testcontainers + chi + pool 三件套,<strong>那时</strong>提取 testutil + 同期 refactor:<ul>
-<li><code>test/integration/migrate_test.go</code>(P1.D)startPostgres → testutil.SetupPG</li>
-<li><code>test/integration/health_smoke_test.go</code>(P2.0 smoke)setupSmokeRouter / newWebPool → testutil</li>
-<li>新写的 <code>anime_endpoints_test.go</code> import testutil</li>
-</ul></li>
 <li><input type="checkbox" disabled="" />
 <strong>每个 handler 第一行加 query-level timeout</strong> — <code>ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second); defer cancel()</code>,堵 P2.0 design § 5 风险表里 pgxpool 连接耗尽 / 用户挂 60s 问题</li>
 <li><input type="checkbox" disabled="" />
 <strong>endpoint shape diff harness</strong> — Phase 8.5 shadow traffic 前需要 diff 工具。P2.1 写第一个 endpoint 时<strong>同步</strong>写 <code>test/shadow/diff_anime_detail_test.go</code>,跟 Express 真 prod 响应做 byte 比对。P2.0 byte fixture 是 envelope 层,这是 endpoint 层。</li>
 </ul>
-<h3 id="endpoint-待实现">9 endpoint 待实现</h3>
+<h3 id="endpoint-待-wire已有-completed-gems">8 endpoint 待 wire(已有 <code>/completed-gems</code>)</h3>
 <ul>
-<li>GET <code>/seasonal</code> / <code>/search</code> / <code>/schedule</code> / <code>/torrents</code> / <code>/trending</code> / <code>/yearly-top</code> / <code>/completed-gems</code></li>
-<li>GET <code>/:anilistId/watchers</code></li>
-<li>GET <code>/:anilistId</code></li>
+<li>GET <code>/seasonal</code> — anilist client + cache + db re-read(titleChinese 拼入)</li>
+<li>GET <code>/search</code> — anilist client + 10min cache</li>
+<li>GET <code>/schedule</code> — anilist client + 30min cache + groups by ‘YYYY-MM-DD’</li>
+<li>GET <code>/torrents</code> — <code>internal/torrents/aggregator.go</code> 现成</li>
+<li>GET <code>/trending</code> — subscriptions aggregate join anime_cache + 1h cache</li>
+<li>GET <code>/yearly-top</code> — anime_cache filter by seasonYear/format/score + 1h cache</li>
+<li>GET <code>/:anilistId/watchers</code> — subscriptions populate user.username</li>
+<li>GET <code>/:anilistId</code> — anime_cache cache-first(stale 检测复杂)+ trigger v0 enrichment</li>
 </ul>
-<p>3-source 磁力聚合(animes.garden + acg.rip + nyaa.si) + AniList GraphQL client + 3-phase 富化 queue(river)+ 5 个 ristretto cache 都在 P2.1 范围。</p>
+<p>外加:替换 <code>internal/queue/</code> stub workers 为真 Bangumi 富化(用 <code>internal/bangumi/</code> client)+ warmCurrentSeason / warmSeasonCache(river periodic)。</p>
 <hr />
 <h2 id="p2.2---p2.6-待开">P2.2 - P2.6 待开</h2>
 <table>
@@ -268,6 +290,9 @@ PR 合到 <code>feat/go-backend</code> 分支(单 PR 5 commit)</li>
 <ul>
 <li>2026-05-21 12:30 — P2.0 设计文档 v1 出(22 文件 / 6 子任务 / 10-15 hr)。<code>/plan-eng-review</code> 跑 8 个 AskUserQuestion,削掉 B+E 到 P2.1,锁 CORS 顺序 / nextPage null / Page 泛型 / Data 无 error 返回 / NewError WithCause / /health skip log / inline smoke / 6 byte fixture。</li>
 <li>2026-05-21 13:00 — P2.0.A/C/D/smoke/F 全过。整 phase 单一 PR,5 commit。</li>
+<li>2026-05-21 P2.1.0 - dbbd780/601d6ad/e287472 pre-work(river migration + sqlc + testutil)</li>
+<li>2026-05-21 P2.1.1 - 20a341e:anilist + cache + colorx 3 包 subagent 并行,unit + race + cover ≥91% 全过</li>
+<li>2026-05-21 P2.1.2 - 4903b64:torrents + queue + bangumi 3 包 subagent 并行,unit + race + cover ≥91% 全过;integration 15/15(7 P1.D + 4 P2.0 + 4 P2.1 queue smoke)12.1s wall</li>
 <li><strong>教训:byte-level envelope 测试在 Phase 2 早期是 boil-the-lake 例子</strong>。Unit logic test 验“NotFound 码=NOT_FOUND”是不够的,真要捕捉 shadow traffic 阶段会 fail 的差异(key 顺序 / null vs 缺失字段 / HTML escape),必须从 Express 真实输出回写字节做 <code>bytes.Equal</code>。<code>httpx/express_fixture_test.go</code> 6 case 是模板,P2.x 每加 endpoint 写一组同模板的 byte fixture。</li>
 <li><strong>教训:Go internal 包名跟 third-party 撞</strong>:<code>internal/middleware/</code> 跟 <code>github.com/go-chi/chi/v5/middleware</code> 冲突,任何同时用本地中间件 + chi 自带 RequestID 的文件都要 alias 一个。改 <code>internal/httpmw/</code>(或 <code>httpx/</code> 也行)完全没这问题。Go 惯例:<code>internal/&lt;short-prefix&gt;</code> 优先,不重 stdlib / popular-third-party 包名。</li>
 <li><strong>教训:docker healthcheck 日志洪水</strong>:Docker <code>start_period: 30s</code> 每 30s 探一次 /health,prod 一个 pod 一天 2880 条 log。RequestLog 必须 verbatim skip <code>/health</code> 路径(<code>if req.URL.Path == "/health" { next.ServeHTTP(w, req); return }</code>)。如果只走 Debug level skip 会丢 5xx healthcheck 报警 —— P2.0.D 选了 verbatim skip + 业务 endpoint 全级别 log。</li>
