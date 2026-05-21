@@ -78,17 +78,25 @@ func main() {
 	// the V1 enrichment worker (and V2/V3 in P2.1.6 / P2.1.7).
 	bangumiClient := bangumi.NewClient()
 
-	// River queue boot: real V1 worker (uses bangumiClient + q) + stub
-	// V2/V3.  Boot returns the client unstarted — explicit Start() below
-	// gates dispatch on the postgres handshake succeeding above.
+	// Enqueuer must exist BEFORE workers are built (V1 worker captures
+	// it to chain V2 jobs) but its underlying river client is the
+	// OUTPUT of Boot below.  LateBoundEnqueuer breaks the cycle: it
+	// no-ops until Bind is called, then forwards to a RealEnqueuer.
+	enqueuer := &queue.LateBoundEnqueuer{}
+
+	// River queue boot: real V1 + V2 workers (use bangumiClient + q +
+	// enqueuer for V1→V2 chain) + V3 stub.  Boot returns the client
+	// unstarted — explicit Start() below gates dispatch on the
+	// postgres handshake succeeding above.
 	riverClient, err := queue.Boot(pool, queue.Config{
-		Workers: queue.WorkersWithBangumi(bangumiClient, q),
+		Workers: queue.WorkersWithBangumi(bangumiClient, q, enqueuer),
 		Logger:  slog.Default(),
 	})
 	if err != nil {
 		slog.Error("river queue boot failed", "err", err)
 		os.Exit(1)
 	}
+	enqueuer.Bind(riverClient)
 	queueCtx, queueCancel := context.WithCancel(context.Background())
 	defer queueCancel()
 	if err := riverClient.Start(queueCtx); err != nil {
@@ -102,13 +110,7 @@ func main() {
 			slog.Warn("river queue stop", "err", err)
 		}
 	}()
-	slog.Info("river queue ready", "workers", "v1(real)+v2(stub)+v3(stub)")
-
-	// V1 enrichment trigger source — handed to /search + /schedule so
-	// post-upsert / post-titleChinese-lookup paths can enqueue V1 jobs
-	// for bangumi_version=0 rows.  Boot-time orphan scan also uses this
-	// (kicked off below in a goroutine so the HTTP server doesn't wait).
-	enqueuer := queue.NewEnqueuer(riverClient)
+	slog.Info("river queue ready", "workers", "v1(real)+v2(real)+v3(stub)")
 
 	searchSvc, err := anime.NewSearchService(anilistClient, q, enqueuer)
 	if err != nil {
@@ -125,6 +127,7 @@ func main() {
 		slog.Error("detail service init failed", "err", err)
 		os.Exit(1)
 	}
+	seasonalSvc := anime.NewSeasonalService(q, anilistClient)
 
 	// Boot-time orphan scan: catches anime_cache rows with
 	// bangumi_version=0 that were upserted during a previous worker
@@ -158,7 +161,7 @@ func main() {
 
 	r.Route("/api/anime", func(r chi.Router) {
 		r.Get("/completed-gems", anime.CompletedGems(q))
-		r.Get("/seasonal", anime.Seasonal(q))
+		r.Get("/seasonal", seasonalSvc.Handler())
 		r.Get("/yearly-top", anime.YearlyTop(q))
 		r.Get("/trending", anime.Trending(q))
 		r.Get("/torrents", anime.Torrents(torrentsAgg))
@@ -179,7 +182,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.6")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.7")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)

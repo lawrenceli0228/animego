@@ -16,7 +16,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -73,116 +72,9 @@ func CompletedGems(q dbgen.Querier) http.HandlerFunc {
 	}
 }
 
-// Seasonal implements GET /api/anime/seasonal — paginated season listing
-// from the local anime_cache table.  Cold-start (cache miss) AniList path
-// lands in P2.1.4 with the service-layer wiring.  Replaces the warmed-
-// cache branch of anime.controller.js:113-127.
-//
-// Query parameters:
-//
-//	season   default WINTER, must be one of WINTER/SPRING/SUMMER/FALL
-//	year     default <current>, range 1900..3000
-//	page     default 1, min 1
-//	perPage  default 20, max 200
-//
-// Response envelope:
-//
-//	{"data":[...], "pagination":{"page":1,"perPage":20,"total":N,"totalPages":M}}
-func Seasonal(q dbgen.Querier) http.HandlerFunc {
-	const (
-		defaultPerPage = 20
-		maxPerPage     = 200
-	)
-	return func(w http.ResponseWriter, req *http.Request) {
-		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
-		defer cancel()
-
-		qs := req.URL.Query()
-
-		// Season: default WINTER, must be one of the four canonical values.
-		season := qs.Get("season")
-		if season == "" {
-			season = "WINTER"
-		}
-		if !validSeason(season) {
-			httpx.Fail(w, httpx.NewError(
-				http.StatusBadRequest,
-				httpx.CodeValidationError,
-				"invalid season",
-			))
-			return
-		}
-
-		// Year: default current, sanity range 1900..3000.  Express coerces
-		// query strings via Number(...) — non-numeric falls through to the
-		// default via JS's `||` on NaN.  We mirror that with the parseInt
-		// fallback below.
-		year := parseYear(qs.Get("year"))
-
-		// Page: default 1, min 1.
-		page := parseIntDefault(qs.Get("page"), 1)
-		if page < 1 {
-			page = 1
-		}
-
-		// PerPage: default 20, capped at 200 (Express's Math.min(perPage, 200)).
-		perPage := parseIntDefault(qs.Get("perPage"), defaultPerPage)
-		if perPage < 1 {
-			perPage = defaultPerPage
-		}
-		if perPage > maxPerPage {
-			perPage = maxPerPage
-		}
-
-		offset := int32((page - 1) * perPage)
-		limit := int32(perPage)
-		yearI32 := int32(year)
-
-		// Fetch the page + the total count in parallel.  errgroup is
-		// overkill for two calls but the pattern scales when P2.1.4
-		// adds genre filters and a third aggregate.
-		var (
-			rows  []dbgen.GetSeasonalAnimeRow
-			total int64
-		)
-		g, gctx := errgroup.WithContext(ctx)
-		g.Go(func() error {
-			var err error
-			rows, err = q.GetSeasonalAnime(gctx, &season, &yearI32, limit, offset)
-			return err
-		})
-		g.Go(func() error {
-			var err error
-			total, err = q.CountSeasonal(gctx, &season, &yearI32)
-			return err
-		})
-		if err := g.Wait(); err != nil {
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
-			return
-		}
-
-		totalPages := 0
-		if perPage > 0 {
-			totalPages = int(math.Ceil(float64(total) / float64(perPage)))
-		}
-
-		// Express:  res.json({data, pagination}) — flat sibling keys, not
-		// wrapped via the canonical httpx.Data {data: payload} envelope.
-		// Ensure rows is never nil so an empty result serialises as [].
-		if rows == nil {
-			rows = []dbgen.GetSeasonalAnimeRow{}
-		}
-		writeMultiKeyEnvelope(w, http.StatusOK, seasonalResponse{
-			Data: rows,
-			Pagination: seasonalPagination{
-				Page:       page,
-				PerPage:    perPage,
-				Total:      int(total),
-				TotalPages: totalPages,
-			},
-		})
-	}
-}
+// Seasonal has moved to seasonal.go as SeasonalService.  See
+// NewSeasonalService for the constructor — main.go wires it with the
+// AniList client so the cold-start (cache-miss) path activates.
 
 // YearlyTop implements GET /api/anime/yearly-top — top-rated TV/Movie/ONA
 // anime for the given year.  Replaces anime.controller.js:93-110.
