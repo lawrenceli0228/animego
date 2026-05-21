@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
@@ -65,6 +66,23 @@ func main() {
 	}
 	defer torrentsAgg.Close()
 
+	// AniList GraphQL client — single instance shared by /search +
+	// /schedule (and later /:anilistId).  Internal rate limiter is one
+	// token per 700ms, burst=1, so concurrent callers serialise on a
+	// single sliding window matching Express MIN_INTERVAL.
+	anilistClient := anilist.NewClient()
+
+	searchSvc, err := anime.NewSearchService(anilistClient, q)
+	if err != nil {
+		slog.Error("search service init failed", "err", err)
+		os.Exit(1)
+	}
+	scheduleSvc, err := anime.NewScheduleService(anilistClient, q)
+	if err != nil {
+		slog.Error("schedule service init failed", "err", err)
+		os.Exit(1)
+	}
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -84,6 +102,8 @@ func main() {
 		r.Get("/yearly-top", anime.YearlyTop(q))
 		r.Get("/trending", anime.Trending(q))
 		r.Get("/torrents", anime.Torrents(torrentsAgg))
+		r.Get("/search", searchSvc.Handler())
+		r.Get("/schedule", scheduleSvc.Handler())
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))
 	})
 
@@ -98,7 +118,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.3")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.4")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
