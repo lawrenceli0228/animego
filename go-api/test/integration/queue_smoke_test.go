@@ -44,9 +44,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
+	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/testutil"
 )
+
+// noHitBangumi is a stub BangumiSearcher used by the queue smoke tests
+// to exercise the REAL BangumiV1Worker without hitting api.bgm.tv.  It
+// returns ErrNotFound for every keyword, which drives V1.Work() down
+// the "permanent no-hit → return nil → river marks job completed"
+// branch.  Combined with noRowV1DB below this keeps the V1 job's
+// completion path identical to the old stubBangumiV1Worker (always
+// returns nil) while still going through the production wiring.
+type noHitBangumi struct{}
+
+func (noHitBangumi) Search(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+	return nil, bangumi.ErrNotFound
+}
+
+// noRowV1DB is a stub V1DB used alongside noHitBangumi.  ErrNoRows on
+// the read short-circuits the worker before Search is even called —
+// belt-and-braces so the smoke test never accidentally races against
+// a real Bangumi HTTP request.
+type noRowV1DB struct{}
+
+func (noRowV1DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+	return dbgen.GetAnimeForBangumiSearchRow{}, pgx.ErrNoRows
+}
+
+func (noRowV1DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string) error {
+	return nil
+}
 
 // queueSmokeWaitTimeout bounds how long we wait for a stub job to
 // land in the JobCompleted subscription channel.  Stubs return nil
@@ -60,6 +89,11 @@ const queueSmokeWaitTimeout = 10 * time.Second
 // via t.Cleanup so each Test* gets an independent dispatch loop and
 // teardown is deterministic even on test failure.
 //
+// The V1 worker is the REAL BangumiV1Worker but bound to noHitBangumi
+// + noRowV1DB so it always lands on the "no hit → return nil" branch.
+// This exercises the production WorkersWithBangumi wiring while
+// keeping the smoke deterministic (no live HTTP, no real DB row).
+//
 // Returns the client (typed concretely for the Subscribe + Insert
 // surface the tests need).
 func bootQueueForTest(t *testing.T, ctx context.Context) *river.Client[pgx.Tx] {
@@ -68,7 +102,9 @@ func bootQueueForTest(t *testing.T, ctx context.Context) *river.Client[pgx.Tx] {
 	pool := testutil.NewWebPool(t, ctx, pgURIGlobal)
 	testutil.TruncateAll(t, ctx, pool)
 
-	c, err := queue.Boot(pool, queue.Config{})
+	c, err := queue.Boot(pool, queue.Config{
+		Workers: queue.WorkersWithBangumi(noHitBangumi{}, noRowV1DB{}),
+	})
 	require.NoError(t, err, "queue.Boot")
 	require.NotNil(t, c, "queue.Boot must return a client")
 

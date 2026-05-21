@@ -1,10 +1,11 @@
 // worker.go — river client boot + stub workers.
 //
-// The 3 stub workers below log + return nil.  Real enrichment logic
-// lands in P2.1.2 (the bangumi package) by re-registering replacement
-// workers before Boot.  Keeping stubs here lets the integration test
-// prove the dispatch loop (insert → fetch → run → complete) is wired
-// correctly before any phase logic exists.
+// The 2 remaining stub workers (V2 + V3) log + return nil.  V1 has a
+// real implementation in bangumi_v1.go; callers wanting the production
+// wiring should call WorkersWithBangumi instead of Workers().  Keeping
+// the stubs lets the integration test prove the dispatch loop
+// (insert → fetch → run → complete) is wired correctly without
+// dragging a Bangumi HTTP client into the smoke suite.
 //
 // Pattern decision:  Boot returns a non-started client so callers can
 // (a) test InsertTx without a running fetcher, or (b) gate Start on
@@ -29,22 +30,6 @@ import (
 // misconfiguration is caught by the server's own healthcheck instead of
 // the river log.
 var ErrMissingPool = errors.New("queue.Boot: pool is required")
-
-// stubBangumiV1Worker is the placeholder phase-1 worker.  It implements
-// river.Worker[BangumiV1Args] by embedding river.WorkerDefaults — that
-// embed wires up the retry/timeout/middleware defaults so we only have
-// to override Work.
-type stubBangumiV1Worker struct {
-	river.WorkerDefaults[BangumiV1Args]
-}
-
-// Work is the V1 stub.  Logs at info level and returns nil so river
-// marks the job completed.  Real implementation will call the Bangumi
-// search API; see P2.1.2.
-func (w *stubBangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args]) error {
-	slog.InfoContext(ctx, "queue: bangumi_v1 stub", "anilistId", job.Args.AnilistID)
-	return nil
-}
 
 // stubBangumiV2Worker — phase-2 placeholder.
 type stubBangumiV2Worker struct {
@@ -74,16 +59,33 @@ func (w *stubBangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3
 	return nil
 }
 
-// Workers returns a *river.Workers bundle with the 3 stub workers
-// registered.  P2.1.2 enrichment code will call river.AddWorker with
-// concrete implementations on a fresh bundle from river.NewWorkers().
+// Workers returns a *river.Workers bundle with the 2 stub workers
+// (V2 + V3) registered.  V1 has a real implementation — production
+// callers should use WorkersWithBangumi instead.  This bundle is kept
+// for the dispatch-loop integration smoke and any future test that
+// wants to exercise river plumbing without injecting a bangumi mock.
 //
 // Returning a new bundle on every call (rather than caching) keeps
 // tests independent and lets callers register additional workers
 // before passing the bundle into Boot.
 func Workers() *river.Workers {
 	w := river.NewWorkers()
-	river.AddWorker(w, &stubBangumiV1Worker{})
+	river.AddWorker(w, &stubBangumiV2Worker{})
+	river.AddWorker(w, &stubBangumiV3Worker{})
+	return w
+}
+
+// WorkersWithBangumi returns a *river.Workers bundle with the REAL
+// BangumiV1Worker (using the provided bangumi client + DB) plus the
+// V2/V3 stubs that haven't been replaced yet (P2.1.6 / P2.1.7 will
+// swap those in turn).
+//
+// Production main.go wires the live bangumi.Client and dbgen.Queries
+// through this constructor.  Tests for the dispatch loop alone still
+// use Workers() (V2/V3 stubs only) to avoid pulling in a bangumi mock.
+func WorkersWithBangumi(bangumiClient BangumiSearcher, db V1DB) *river.Workers {
+	w := river.NewWorkers()
+	river.AddWorker(w, NewBangumiV1Worker(bangumiClient, db))
 	river.AddWorker(w, &stubBangumiV2Worker{})
 	river.AddWorker(w, &stubBangumiV3Worker{})
 	return w
@@ -94,7 +96,8 @@ func Workers() *river.Workers {
 // (rather than wrapping it in another constructor func) lets the
 // enrichment package re-register workers without learning a new API.
 type Config struct {
-	// Workers — if nil, Boot calls Workers() to register the 3 stubs.
+	// Workers — if nil, Boot calls Workers() to register the V2+V3
+	// stubs (V1 has a real worker; use WorkersWithBangumi for prod).
 	Workers *river.Workers
 
 	// Queues — if nil, Boot defaults to {river.QueueDefault: {MaxWorkers: 1}}.

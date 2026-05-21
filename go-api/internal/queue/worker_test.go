@@ -5,7 +5,8 @@
 // complete loop against a real Postgres testcontainer.  This file
 // asserts:
 //   1. Each Args type returns the correct Kind.
-//   2. Workers() registers all 3 stubs.
+//   2. Workers() registers the V2 + V3 stubs (V1 lives in
+//      bangumi_v1.go — its tests are in bangumi_v1_test.go).
 //   3. Boot rejects a nil pool with ErrMissingPool.
 //   4. Boot applies sensible defaults when Config is zero-valued.
 package queue
@@ -21,6 +22,9 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
+	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
 // newStubPool returns a *pgxpool.Pool that has parsed a benign DSN but
@@ -61,19 +65,41 @@ func TestArgs_Kind(t *testing.T) {
 	}
 }
 
-// TestWorkers_RegistersAll3 verifies Workers() emits a non-nil bundle and
-// that every Kind is occupied.  Probe via river.AddWorkerSafely — it
-// returns "already registered" when the kind is taken, which is the
-// cheapest cross-package way to see what's in the bundle without
-// reaching into the unexported workersMap.
-func TestWorkers_RegistersAll3(t *testing.T) {
+// TestWorkers_RegistersStubs verifies Workers() emits a non-nil bundle
+// and that the V2 + V3 stub Kinds are occupied (V1 is intentionally
+// absent — see WorkersWithBangumi for the production wiring).  Probes
+// via river.AddWorkerSafely — it returns "already registered" when the
+// kind is taken, which is the cheapest cross-package way to see what's
+// in the bundle without reaching into the unexported workersMap.
+func TestWorkers_RegistersStubs(t *testing.T) {
 	t.Parallel()
 
 	w := Workers()
 	require.NotNil(t, w, "Workers() must return a non-nil bundle")
 
 	// Re-registering each stub kind should fail with "already registered".
-	err := river.AddWorkerSafely(w, &stubBangumiV1Worker{})
+	err := river.AddWorkerSafely(w, &stubBangumiV2Worker{})
+	require.Error(t, err, "v2 slot should already be occupied")
+	assert.Contains(t, err.Error(), "bangumi_v2")
+
+	err = river.AddWorkerSafely(w, &stubBangumiV3Worker{})
+	require.Error(t, err, "v3 slot should already be occupied")
+	assert.Contains(t, err.Error(), "bangumi_v3")
+}
+
+// TestWorkersWithBangumi_RegistersAll3 verifies the production wiring
+// constructor binds V1 (real) + V2/V3 (stubs) all three Kinds.  Uses
+// a noop BangumiSearcher + V1DB — we never invoke Work here, only
+// inspect what's been registered.
+func TestWorkersWithBangumi_RegistersAll3(t *testing.T) {
+	t.Parallel()
+
+	w := WorkersWithBangumi(noopBangumi{}, noopV1DB{})
+	require.NotNil(t, w, "WorkersWithBangumi must return a non-nil bundle")
+
+	// All 3 slots should be taken: re-registration returns
+	// "already registered".
+	err := river.AddWorkerSafely(w, NewBangumiV1Worker(noopBangumi{}, noopV1DB{}))
 	require.Error(t, err, "v1 slot should already be occupied")
 	assert.Contains(t, err.Error(), "bangumi_v1")
 
@@ -134,7 +160,7 @@ func TestBoot_CustomConfigPassedThrough(t *testing.T) {
 	pool := newStubPool(t)
 	customLogger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	customWorkers := river.NewWorkers()
-	river.AddWorker(customWorkers, &stubBangumiV1Worker{})
+	river.AddWorker(customWorkers, &stubBangumiV2Worker{})
 
 	c, err := Boot(pool, Config{
 		Workers: customWorkers,
@@ -161,19 +187,16 @@ func TestBoot_RejectsBadConfig(t *testing.T) {
 	require.Error(t, err, "river config validation must surface")
 }
 
-// TestStubWorkers_WorkReturnsNil confirms each stub Worker.Work() emits
-// no error so the integration test's wait-for-completion path lands on
-// JobCompleted (not JobFailed).  Calls Work directly via the river.Job
-// fixture so we don't need a running client.
+// TestStubWorkers_WorkReturnsNil confirms each remaining stub
+// Worker.Work() emits no error so the integration test's
+// wait-for-completion path lands on JobCompleted (not JobFailed).
+// Calls Work directly via the river.Job fixture so we don't need a
+// running client.  V1 has its own test file (bangumi_v1_test.go) now
+// that the stub is gone.
 func TestStubWorkers_WorkReturnsNil(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-
-	v1 := &stubBangumiV1Worker{}
-	require.NoError(t, v1.Work(ctx, &river.Job[BangumiV1Args]{
-		Args: BangumiV1Args{AnilistID: 42},
-	}))
 
 	v2 := &stubBangumiV2Worker{}
 	require.NoError(t, v2.Work(ctx, &river.Job[BangumiV2Args]{
@@ -186,13 +209,13 @@ func TestStubWorkers_WorkReturnsNil(t *testing.T) {
 	}))
 }
 
-// TestStubWorkers_LogContext asserts the stub log lines actually
-// include the anilistId field — gives the integration suite (and
-// future ops dashboards) a stable shape to grep on.
+// TestStubWorkers_LogContext asserts the V2 stub log line actually
+// includes the structured fields — gives the integration suite (and
+// future ops dashboards) a stable shape to grep on.  V1 has its own
+// (richer) log-shape test in bangumi_v1_test.go.
 //
 // Wires a slog handler into a buffer, swaps slog.Default() for the
-// duration of the call, then restores it.  Verifies the rendered log
-// contains the AnilistID value.
+// duration of the call, then restores it.
 func TestStubWorkers_LogContext(t *testing.T) {
 	// NOTE: not t.Parallel — we mutate slog.Default for the duration
 	// of this test, which is process-global state.
@@ -204,12 +227,34 @@ func TestStubWorkers_LogContext(t *testing.T) {
 		Level: slog.LevelDebug,
 	})))
 
-	v1 := &stubBangumiV1Worker{}
-	require.NoError(t, v1.Work(t.Context(), &river.Job[BangumiV1Args]{
-		Args: BangumiV1Args{AnilistID: 12345},
+	v2 := &stubBangumiV2Worker{}
+	require.NoError(t, v2.Work(t.Context(), &river.Job[BangumiV2Args]{
+		Args: BangumiV2Args{AnilistID: 12345, BgmID: 999},
 	}))
 
 	out := buf.String()
-	assert.Contains(t, out, "bangumi_v1 stub", "log line should identify the worker")
+	assert.Contains(t, out, "bangumi_v2 stub", "log line should identify the worker")
 	assert.Contains(t, out, "anilistId=12345", "log line should include AnilistID")
+}
+
+// ---------------------------------------------------------------------------
+// Test doubles for WorkersWithBangumi registration assertions.  These
+// never have their methods invoked — only the type identity matters for
+// river.AddWorker.
+// ---------------------------------------------------------------------------
+
+type noopBangumi struct{}
+
+func (noopBangumi) Search(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+	return nil, bangumi.ErrNotFound
+}
+
+type noopV1DB struct{}
+
+func (noopV1DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+	return dbgen.GetAnimeForBangumiSearchRow{}, nil
+}
+
+func (noopV1DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string) error {
+	return nil
 }
