@@ -27,6 +27,7 @@ import (
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/torrents"
 )
 
 func main() {
@@ -53,6 +54,17 @@ func main() {
 
 	q := dbgen.New(pool)
 
+	// Torrents aggregator: 3-source BT magnet fan-out (animes.garden +
+	// acg.rip + nyaa.si) with a per-query 1h cache + partial-failure
+	// tolerance.  Constructed once at boot and reused across requests —
+	// the underlying *http.Client + *cache.Cache are goroutine-safe.
+	torrentsAgg, err := torrents.New(torrents.WithLogger(slog.Default()))
+	if err != nil {
+		slog.Error("torrents aggregator init failed", "err", err)
+		os.Exit(1)
+	}
+	defer torrentsAgg.Close()
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -68,6 +80,11 @@ func main() {
 
 	r.Route("/api/anime", func(r chi.Router) {
 		r.Get("/completed-gems", anime.CompletedGems(q))
+		r.Get("/seasonal", anime.Seasonal(q))
+		r.Get("/yearly-top", anime.YearlyTop(q))
+		r.Get("/trending", anime.Trending(q))
+		r.Get("/torrents", anime.Torrents(torrentsAgg))
+		r.Get("/{anilistId}/watchers", anime.Watchers(q))
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -81,7 +98,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.0.D")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.3")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
@@ -104,7 +121,7 @@ func main() {
 
 // healthHandler reports liveness + DB reachability via the httpx envelope.
 //
-// 200 →  {"data":{"ok":true,"service":"go-api","stage":"P2.0","db":"up"}}
+// 200 →  {"data":{"ok":true,"service":"go-api","stage":"P2.1","db":"up"}}
 // 503 →  {"error":{"code":"SERVER_ERROR","message":"database unreachable"}}
 //
 // Field order matches Express: ok, service, stage, db.  Use a struct (not
@@ -131,7 +148,7 @@ func healthHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		httpx.Data(w, http.StatusOK, healthOK{
-			OK: true, Service: "go-api", Stage: "P2.0", DB: "up",
+			OK: true, Service: "go-api", Stage: "P2.1", DB: "up",
 		})
 	}
 }

@@ -9,6 +9,13 @@ import (
 )
 
 type Querier interface {
+	// Total non-Hentai entries for a given season + year.  Drives the
+	// pagination meta in /api/anime/seasonal so the frontend can render
+	// "X of Y" without a separate count call.
+	CountSeasonal(ctx context.Context, season *string, seasonYear *int32) (int64, error)
+	// Total active watchers for /api/anime/:anilistId/watchers (the `total`
+	// meta field in the envelope).
+	CountWatchers(ctx context.Context, anilistID int32) (int64, error)
 	// Queries against anime_cache and its child tables.
 	//
 	// Each :one / :many / :exec annotation tells sqlc which result shape to
@@ -26,6 +33,29 @@ type Querier interface {
 	// min 19, max 91, avg 64.25).  The Express threshold of 75 corresponds
 	// to "highly rated by AniList community" and is preserved verbatim.
 	GetCompletedGems(ctx context.Context, limit int32) ([]GetCompletedGemsRow, error)
+	// Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
+	// and replaces the warmed-cache branch of anime.controller.js:113-127 +
+	// the cached fallback in anilist.service.js getSeasonalAnime ②③.
+	// Hentai filter is preserved verbatim — Express skipped via $nin.
+	GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error)
+	// Most-subscribed anime with their cached metadata, ordered by watcher
+	// count desc.  Backs /api/anime/trending and replaces the
+	// Subscription.aggregate + AnimeCache.find round-trip in
+	// anime.controller.js:17-50.  Single SQL with JOIN — no need for the
+	// Express two-query pattern.
+	//
+	// watching-only is preserved (the Mongo agg counts everything; the
+	// Postgres replacement scopes to status='watching' to match the
+	// frontend's "X watchers" semantic).
+	GetTrendingWithCounts(ctx context.Context, limit int32) ([]GetTrendingWithCountsRow, error)
+	// Public watcher list for one anime.  Backs /api/anime/:anilistId/watchers.
+	// Replaces anime.controller.js:53-75 — single SQL with JOIN drops the
+	// Express two-step (find + populate) pattern.
+	GetWatchers(ctx context.Context, anilistID int32, limit int32) ([]string, error)
+	// Top-rated TV/Movie/ONA anime for a single year.  Backs
+	// /api/anime/yearly-top, replacing anime.controller.js:93-110.
+	// Express limit is 20 hard, slice down to query limit in handler.
+	GetYearlyTop(ctx context.Context, seasonYear *int32, limit int32) ([]GetYearlyTopRow, error)
 }
 
 var _ Querier = (*Queries)(nil)
