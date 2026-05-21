@@ -213,7 +213,7 @@ type Character struct {
 	ID       int    `json:"id"`
 	Name     string `json:"name"`
 	NameCN   string `json:"name_cn"`
-	Relation int    `json:"relation"`
+	Relation string `json:"relation"`
 	Type     int    `json:"type"`
 	Images   *struct {
 		Medium string `json:"medium"`

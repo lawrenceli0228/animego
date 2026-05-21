@@ -294,7 +294,7 @@ func TestClient_Characters_OK(t *testing.T) {
 	    "id": 1,
 	    "name": "艾伦·耶格尔",
 	    "name_cn": "艾伦·耶格尔",
-	    "relation": 1,
+	    "relation": "主角",
 	    "type": 1,
 	    "images": { "medium": "https://lain.bgm.tv/r/200/pic/crt/m/eren.jpg" },
 	    "actors": [
@@ -305,7 +305,7 @@ func TestClient_Characters_OK(t *testing.T) {
 	    "id": 2,
 	    "name": "三笠·阿克曼",
 	    "name_cn": "三笠·阿克曼",
-	    "relation": 1,
+	    "relation": "主角",
 	    "type": 1,
 	    "actors": [
 	      { "id": 12, "name": "石川由依" }
@@ -315,7 +315,7 @@ func TestClient_Characters_OK(t *testing.T) {
 	    "id": 3,
 	    "name": "Hannes",
 	    "name_cn": "韩斯",
-	    "relation": 2,
+	    "relation": "配角",
 	    "type": 1
 	  }
 	]`
@@ -335,14 +335,14 @@ func TestClient_Characters_OK(t *testing.T) {
 	require.Len(t, chars, 3)
 	assert.Equal(t, 1, chars[0].ID)
 	assert.Equal(t, "艾伦·耶格尔", chars[0].Name)
-	assert.Equal(t, 1, chars[0].Relation) // 主角
+	assert.Equal(t, "主角", chars[0].Relation)
 	require.NotNil(t, chars[0].Images)
 	assert.Equal(t, "https://lain.bgm.tv/r/200/pic/crt/m/eren.jpg", chars[0].Images.Medium)
 	require.Len(t, chars[0].Actors, 1)
 	assert.Equal(t, "梶裕貴", chars[0].Actors[0].Name)
 	// Character with no actors / no images should still decode.
 	assert.Equal(t, 3, chars[2].ID)
-	assert.Equal(t, 2, chars[2].Relation) // 配角
+	assert.Equal(t, "配角", chars[2].Relation)
 	assert.Empty(t, chars[2].Actors)
 	assert.Nil(t, chars[2].Images)
 }
