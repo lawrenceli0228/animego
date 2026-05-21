@@ -304,9 +304,123 @@ river migration <code>0007_river_initial</code> + <code>0008_river_pending_use</
 <p><strong>handlers_test.go</strong>:184 → ~870 行,34 unit test,hand-rolled <code>fakeQuerier</code> 7 function-pointer fields。<strong>Coverage 92.9%</strong>(target ≥80%)。</p>
 <p><strong>Live smoke</strong>(<code>go run ./cmd/server</code> + docker compose postgres + curl): - <code>/health</code> 200:<code>{"data":{"ok":true,"service":"go-api","stage":"P2.1","db":"up"}}</code> - <code>/completed-gems</code>:limit=2 → 2 anime,真 anilistId=9890 - <code>/seasonal?season=WINTER&amp;year=2025&amp;perPage=3</code> → 3 anime + <code>pagination:{page:1,perPage:3,total:95,totalPages:32}</code> ✓ - <code>/yearly-top?year=2025&amp;limit=3</code> → 3 anime flat array ✓ - <code>/trending?limit=1</code> → field 顺序 <code>[rank, watcherCount, anilistId, titleRomaji, ...]</code> ✓ - <code>/42/watchers</code> → <code>{"data":[],"total":0}</code>(无订阅时 empty slice ≠ null)✓ - 验证错误:<code>/torrents</code>(no q) → 400 <code>Missing query</code> / <code>/abc/watchers</code> → 400 <code>无效的番剧 ID</code> / <code>/seasonal?season=invalid</code> → 400 <code>invalid season</code></p>
 <p>Integration 回归:15/15 PASS,13.4s wall(P1.D 7 + P2.0 4 + P2.1 queue 4)</p>
-<h3 id="p2.1.4-待开">P2.1.4 — 待开</h3>
-<p>3 个剩余 endpoint:<code>/search</code> + <code>/schedule</code> + <code>/:anilistId</code>(都需 AniList client + service layer)</p>
-<p>外加 service layer 杂活: - <code>internal/anime/service.go</code> orchestrator(anilist + cache + db re-read 拼 titleChinese 逻辑) - 5 个 ristretto cache 接入(search/schedule/trending/yearly-top/completed-gems) - 替换 <code>internal/queue/</code> stub workers 为真 Bangumi 富化(用 <code>internal/bangumi/</code> client + sqlc upsert query) - warmCurrentSeason / warmSeasonCache(river periodic 24h cron + 启动时 enqueue v0 orphans) - /:anilistId 详情用 join 加 genres/studios/relations/characters/staff/recommendations - 9 endpoint byte fixture(从 Express 真 prod 响应回写)</p>
+<h3 id="p2.1.4-search-schedule-配套基础-2026-05-213-commit">P2.1.4 — /search + /schedule + 配套基础 ✓(2026-05-21,3 commit)</h3>
+<p><strong>P2.1.4a</strong>(<code>fb07a7c</code>):3 个新 sqlc method - <code>UpsertAnimeCache(17 params struct)</code> — main row only,ON CONFLICT 保 title_chinese + bgm_* + bangumi_version(enrichment workers 拥有那些列,AniList re-fetch 不能 clobber) - <code>GetAnimeByAnilistIDs([]int32)</code> — /search post-upsert 16-field 重读 - <code>GetTitleChineseByAnilistIDs([]int32)</code> — /schedule 3-field 轻量富化查询(anilist_id + title_chinese + bangumi_version)</p>
+<p><strong>P2.1.4b</strong>(<code>a2f8027</code>):normalize.go — port Express <code>normalize()</code> AniList Media → UpsertAnimeCacheParams - <code>NormalizeMainRow(m)</code> 折叠 <code>accentFields()</code> 进 colorx 已实现的 brand fallback - <code>coverImage.extraLarge || coverImage.large</code> 用 JS <code>||</code> falsy-skip 语义(空 string 也跳) - <code>*int → *int32</code>(episodes/seasonYear) / <code>*int → *float64</code>(averageScore numeric(4,2)) - <code>title_chinese / bgm_id / bangumi_*</code> <strong>不</strong>设(enrichment 拥有,upsert 保留 ON CONFLICT) - <code>Genres(m)</code> 也导出(never nil → []string)给 P2.1.5 child-table upsert</p>
+<p><strong>P2.1.4c</strong>(本批最后一个 commit):2 个 endpoint subagent 并行</p>
+<table style="width:100%;">
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 16%" />
+<col style="width: 16%" />
+<col style="width: 16%" />
+<col style="width: 16%" />
+<col style="width: 16%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Endpoint</th>
+<th>Service</th>
+<th>Cache</th>
+<th>TTL</th>
+<th>文件</th>
+<th>测试</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>/search</td>
+<td><code>SearchService</code> composes anilist + cache + db</td>
+<td><code>Cache[SearchPage]</code></td>
+<td>10min</td>
+<td>search.go ~280 行</td>
+<td>20 case</td>
+</tr>
+<tr class="even">
+<td>/schedule</td>
+<td><code>ScheduleService</code> composes anilist + cache + db</td>
+<td><code>Cache[ScheduleResponse]</code></td>
+<td>30min</td>
+<td>schedule.go ~320 行</td>
+<td>14 case (含 tz 跨日 UTC vs Tokyo 测试)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键决策</strong>: - <code>AniListSearcher</code> / <code>AniListScheduler</code> 各定义自己的小 interface(use-site interfaces),concrete <code>*anilist.Client</code> 满足两个 → test stub 干净 - /search 错误映射:<code>*anilist.ErrUpstream</code> → 502,<code>anilist.ErrRateLimited</code> → 502,<code>context.DeadlineExceeded</code> → 504(Express 500 — 我们更精确) - /schedule <strong>不</strong>用 5s queryTimeout 用 20s(分页循环 + AniList HTTP 10s timeout 超 5s) - /schedule DB 查 titleChinese 失败 → 200 + nil TitleChinese 优雅退化(schedule 无中文 strictly 比 500 好) - /schedule pagination loop <strong>10 page sanity cap</strong> 防 runaway / AniList weekly 通常 1-2 page - /search 验证 q AND genre 都空 → 400 byte-exact <code>请提供搜索关键词或类型</code> - /schedule cache key 是 local-tz today YYYY-MM-DD(tz 注入用 <code>tzOverride</code> + <code>nowFn</code> 给测试确定性)</p>
+<p><strong>Coverage</strong>:<code>./internal/anime/...</code> 92.2%(70+ tests across handlers + normalize + search + schedule + 各种 helper)</p>
+<p><strong>main.go wire</strong>(P2.1.4c):新建 <code>anilist.NewClient()</code> 单 instance 复用(700ms throttle 全局共享)→ <code>NewSearchService</code> + <code>NewScheduleService</code> → 注册 <code>/search</code> 和 <code>/schedule</code> 路由 → stage <code>P2.1.3 → P2.1.4</code></p>
+<p><strong>Live smoke</strong>(docker compose pg + AniList prod + curl): - <code>/search?q=naruto&amp;perPage=2</code> → 真 anilistId=20 NARUTO + pagination <code>total:5000,totalPages:2500</code> ✓ - <code>/search</code> 无参 → 400 <code>请提供搜索关键词或类型</code> byte-exact ✓ - <code>/search</code> cache hit → &lt;0.02s(命中本地 ristretto)✓ - <code>/schedule</code> → 7 天 groups(2026-05-21 至 5-27),5/21 当天 15 items,16 fields 顺序对 ✓ - <code>/schedule</code> cache hit → &lt;0.02s ✓</p>
+<h3 id="endpoint-状态">9 endpoint 状态</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Endpoint</th>
+<th>状态</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>/completed-gems</td>
+<td>✓ P2.1.0</td>
+<td>—</td>
+</tr>
+<tr class="even">
+<td>/seasonal</td>
+<td>✓ P2.1.3</td>
+<td>warmed-cache only;冷启 AniList → P2.1.5</td>
+</tr>
+<tr class="odd">
+<td>/yearly-top</td>
+<td>✓ P2.1.3</td>
+<td>1h cache 待加 P2.1.5</td>
+</tr>
+<tr class="even">
+<td>/trending</td>
+<td>✓ P2.1.3</td>
+<td>1h cache 待加</td>
+</tr>
+<tr class="odd">
+<td>/:anilistId/watchers</td>
+<td>✓ P2.1.3</td>
+<td>—</td>
+</tr>
+<tr class="even">
+<td>/torrents</td>
+<td>✓ P2.1.3</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<td>/search</td>
+<td>✓ P2.1.4</td>
+<td>10min cache + 真 AniList + DB upsert + re-read</td>
+</tr>
+<tr class="even">
+<td>/schedule</td>
+<td>✓ P2.1.4</td>
+<td>30min cache + paginated AniList + tz-local 分组</td>
+</tr>
+<tr class="odd">
+<td>/:anilistId</td>
+<td>✗ 待 P2.1.5</td>
+<td>需 7 个 child table join + stale 检测 + AniList re-fetch</td>
+</tr>
+</tbody>
+</table>
+<h3 id="p2.1.5-待开">P2.1.5 — 待开</h3>
+<ul>
+<li>/:anilistId detail:full join(genres/studios/relations/characters/staff/recommendations)+ AniList Detail re-fetch on stale + child table upserts</li>
+<li>替换 <code>internal/queue/</code> stub workers 为真 Bangumi V1/V2/V3 富化(用 <code>internal/bangumi/</code> client + sqlc bangumi update queries)</li>
+<li>warmCurrentSeason / warmSeasonCache(river periodic 24h cron + 启动时 enqueue v0 orphans)</li>
+<li>/seasonal 冷启 AniList path(cache miss 时也走 AniList Seasonal 而不只是 DB)</li>
+<li>/trending / /yearly-top / /completed-gems 接 1h ristretto cache</li>
+<li>9 endpoint byte fixture(从 Express 真 prod 响应回写)</li>
+</ul>
 <hr />
 <h2 id="p2.2---p2.6-待开">P2.2 - P2.6 待开</h2>
 <table>
@@ -368,6 +482,9 @@ river migration <code>0007_river_initial</code> + <code>0008_river_pending_use</
 <li>2026-05-21 P2.1.2 - 4903b64:torrents + queue + bangumi 3 包 subagent 并行,unit + race + cover ≥91% 全过;integration 15/15(7 P1.D + 4 P2.0 + 4 P2.1 queue smoke)12.1s wall</li>
 <li>2026-05-21 P2.1.3a - 623f23f / querier.go 補 66f809f:6 个 sqlc query 方法(seasonal/yearly-top/trending/watchers + 2 个 count)</li>
 <li>2026-05-21 P2.1.3b - 66f809f:5 endpoint handlers + 路由 + 34 unit test cover 92.9% / live smoke 全过(/health → /seasonal pagination → /watchers 空 + 中文 400 → /torrents q 验证 全 byte-correct)</li>
+<li>2026-05-21 P2.1.4a/b/c - fb07a7c + a2f8027 + (handlers commit):3 sqlc method(Upsert + 2 bulk read)+ normalize.go(AniList→cache row,colorx 折叠 brand fallback)+ /search subagent 20 case 92.2% + /schedule subagent 14 case(含 UTC vs Tokyo tz 跨日)+ main.go wire,live smoke /search 真 anilistId=20 NARUTO / /schedule 真 7-day groups / cache hit &lt;0.02s</li>
+<li><strong>教训:Express envelope shape 不能套 httpx.Pagination</strong>(再次):/search 用 <code>{data, pagination: {page, perPage, total, totalPages}}</code> 跟 /seasonal 同形 但跟 /follow 的 <code>httpx.Pagination</code>(hasMore/nextPage)<strong>不</strong>同形。第二个 endpoint 重蹈 P2.1.3b 同坑 → 私有 <code>writeSearchEnvelope</code> 复刻 <code>writeMultiKeyEnvelope</code> 模式。建议下次抽公共 helper <code>writeAnimePagination</code> 到 <code>internal/anime/</code> 内部,或在 P2.1.5 detail 之前抽掉这个 duplication。</li>
+<li><strong>教训:/schedule 不能用 5s queryTimeout</strong>:AniList weekly 分页 + HTTP 10s timeout 实际能跑 8-15s(2 页 × 700ms throttle + 10s per page 防呆)。每个 endpoint 都套同 const 5s 会触发 504 false-positive。<strong>建议</strong>:P2.1.5 抽 per-endpoint timeout config(seasonal 10s / schedule 20s / detail 15s),不要 const 一刀切。</li>
 <li><strong>教训:Express 多 envelope 形状不止一种</strong>:<code>/follow</code> 用 <code>{data,total,page,hasMore,nextPage}</code>(httpx.Pagination 走这套),但 <code>/seasonal</code> 用 <code>{data,pagination:{page,perPage,total,totalPages}}</code>,<code>/watchers</code> 用 <code>{data,total}</code>(单 sibling),<code>/trending</code> 用 flat <code>{data:[]}</code>。每个 endpoint 写之前先 <code>grep ctrl.*\$res.json</code> Express,确认 envelope 形状再选 helper(httpx.Data / httpx.Page / 私有 writeMultiKeyEnvelope)。盲套 httpx.Data 会双重 wrap。</li>
 <li><strong>教训:struct embed 不能强制 JSON 字段顺序</strong>:<code>dbgen.GetTrendingWithCountsRow</code> <code>WatcherCount</code> 是最后字段;Express 要 <code>rank, watcherCount</code> 在 anime fields <strong>前</strong>。embed 顺序由 Go 决定,与 Express 不匹配 → 必须手写 longhand struct 复制字段顺序。每加一个 endpoint,先看 Express ctrl 的 <code>data</code> 字段顺序,确认 dbgen row 顺序匹配,<strong>不匹配就手写 struct,不要 embed</strong>。</li>
 <li><strong>教训:byte-level envelope 测试在 Phase 2 早期是 boil-the-lake 例子</strong>。Unit logic test 验“NotFound 码=NOT_FOUND”是不够的,真要捕捉 shadow traffic 阶段会 fail 的差异(key 顺序 / null vs 缺失字段 / HTML escape),必须从 Express 真实输出回写字节做 <code>bytes.Equal</code>。<code>httpx/express_fixture_test.go</code> 6 case 是模板,P2.x 每加 endpoint 写一组同模板的 byte fixture。</li>
