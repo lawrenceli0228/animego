@@ -291,6 +291,48 @@ SET bgm_id         = $2,
     updated_at     = now()
 WHERE anilist_id = $1;
 
+-- name: UpdateBangumiV2 :exec
+-- Phase 2 result: write bangumi_score + bangumi_votes from Bangumi
+-- Subject API.  Also conditionally fills title_chinese if it's still
+-- NULL (V1 only writes it on exact native match; V2 has another shot
+-- via the Subject's name_cn).  bangumi_version = 2 on completion.
+--
+-- title_chinese semantics: COALESCE keeps any existing CN string
+-- (V1 may have set it from an exact-match search hit).  Pass nil for
+-- title_chinese to leave existing value untouched.
+UPDATE anime_cache
+SET bangumi_score  = $2,
+    bangumi_votes  = $3,
+    title_chinese  = COALESCE(title_chinese, $4),
+    bangumi_version = 2,
+    updated_at     = now()
+WHERE anilist_id = $1;
+
+-- name: UpdateBangumiV3 :exec
+-- Phase 3 heal-CN: re-fetches Subject's name_cn for v2-completed
+-- entries whose title_chinese is still NULL.  Tiny operation —
+-- bumps bangumi_version=3 either way (success or null).
+UPDATE anime_cache
+SET title_chinese  = $2,
+    bangumi_version = 3,
+    updated_at     = now()
+WHERE anilist_id = $1;
+
+-- name: UpdateAnimeCharacterCN :exec
+-- Phase 2 character enrichment: match by anime_id + name_en
+-- (Bangumi character.name vs our anime_characters.name_en) and fill
+-- name_cn + voice_actor_cn + voice_actor_image_url.  Rows that don't
+-- match a Bangumi entry stay as AniList-only.
+--
+-- name_en match is a coarse heuristic (Bangumi sometimes has English
+-- names slightly different from AniList's romaji).  Future: fuzzy
+-- match via trigram if needed.  For P2.1.7 exact match is OK.
+UPDATE anime_characters
+SET name_cn               = $3,
+    voice_actor_cn        = $4,
+    voice_actor_image_url = $5
+WHERE anime_id = $1 AND name_en = $2;
+
 -- name: GetAnimeMainByID :one
 -- Full main-row read for /:anilistId detail.  Returns every column
 -- the response payload needs (vs the trimmed 16-column shape

@@ -1299,6 +1299,77 @@ func (q *Queries) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *i
 	return err
 }
 
+const updateBangumiV2 = `-- name: UpdateBangumiV2 :exec
+UPDATE anime_cache
+SET bangumi_score  = $2,
+    bangumi_votes  = $3,
+    title_chinese  = COALESCE(title_chinese, $4),
+    bangumi_version = 2,
+    updated_at     = now()
+WHERE anilist_id = $1
+`
+
+// Phase 2 result: write bangumi_score + bangumi_votes from Bangumi
+// Subject API.  Also conditionally fills title_chinese if it's still
+// NULL (V1 only writes it on exact native match; V2 has another shot
+// via the Subject's name_cn).  bangumi_version = 2 on completion.
+//
+// title_chinese semantics: COALESCE keeps any existing CN string
+// (V1 may have set it from an exact-match search hit).  Pass nil for
+// title_chinese to leave existing value untouched.
+func (q *Queries) UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error {
+	_, err := q.db.Exec(ctx, updateBangumiV2,
+		anilistID,
+		bangumiScore,
+		bangumiVotes,
+		titleChinese,
+	)
+	return err
+}
+
+const updateBangumiV3 = `-- name: UpdateBangumiV3 :exec
+UPDATE anime_cache
+SET title_chinese  = $2,
+    bangumi_version = 3,
+    updated_at     = now()
+WHERE anilist_id = $1
+`
+
+// Phase 3 heal-CN: re-fetches Subject's name_cn for v2-completed
+// entries whose title_chinese is still NULL.  Tiny operation —
+// bumps bangumi_version=3 either way (success or null).
+func (q *Queries) UpdateBangumiV3(ctx context.Context, anilistID int32, titleChinese *string) error {
+	_, err := q.db.Exec(ctx, updateBangumiV3, anilistID, titleChinese)
+	return err
+}
+
+const updateAnimeCharacterCN = `-- name: UpdateAnimeCharacterCN :exec
+UPDATE anime_characters
+SET name_cn               = $3,
+    voice_actor_cn        = $4,
+    voice_actor_image_url = $5
+WHERE anime_id = $1 AND name_en = $2
+`
+
+// Phase 2 character enrichment: match by anime_id + name_en
+// (Bangumi character.name vs our anime_characters.name_en) and fill
+// name_cn + voice_actor_cn + voice_actor_image_url.  Rows that don't
+// match a Bangumi entry stay as AniList-only.
+//
+// name_en match is a coarse heuristic (Bangumi sometimes has English
+// names slightly different from AniList's romaji).  Future: fuzzy
+// match via trigram if needed.  For P2.1.7 exact match is OK.
+func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCn *string, voiceActorCn *string, voiceActorImageUrl *string) error {
+	_, err := q.db.Exec(ctx, updateAnimeCharacterCN,
+		animeID,
+		nameEn,
+		nameCn,
+		voiceActorCn,
+		voiceActorImageUrl,
+	)
+	return err
+}
+
 const upsertAnimeCache = `-- name: UpsertAnimeCache :exec
 INSERT INTO anime_cache (
     anilist_id,
