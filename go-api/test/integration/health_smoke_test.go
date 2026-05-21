@@ -41,6 +41,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/testutil"
 )
 
 // healthHandler is a verbatim copy of cmd/server/main.go's handler — the
@@ -84,15 +85,13 @@ func newSmokeRouter(pool *pgxpool.Pool) http.Handler {
 	return r
 }
 
-// newWebPool opens a fresh pgxpool using the web-tier db.NewPool helper
-// against the shared testcontainer URI from TestMain.  Each test gets its
-// own pool so a Close in one cannot poison another.
+// newWebPool is a thin wrapper around testutil.NewWebPool that
+// re-uses the package-global pgURIGlobal set up by migrate_test.go's
+// TestMain.  Kept as a one-line wrapper rather than inlined at every
+// call site so the existing tests below stay readable.
 func newWebPool(t *testing.T, ctx context.Context) *pgxpool.Pool {
 	t.Helper()
-	pool, err := db.NewPool(ctx, pgURIGlobal)
-	require.NoError(t, err, "db.NewPool")
-	t.Cleanup(pool.Close)
-	return pool
+	return testutil.NewWebPool(t, ctx, pgURIGlobal)
 }
 
 func TestHealthSmoke_DBUp(t *testing.T) {

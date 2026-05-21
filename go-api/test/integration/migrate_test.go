@@ -23,27 +23,23 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	gomigrate "github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/migrate"
+	"github.com/lawrenceli0228/animego/go-api/internal/testutil"
 
 	// Named import (rather than the usual blank import in
 	// cmd/migrate-mongo) so tests can call MongoIDToUUID for FK
@@ -62,7 +58,9 @@ var (
 )
 
 // pgTables enumerates every table the migration touches.  Used for
-// TRUNCATE between tests and for empty-state assertions.
+// empty-state assertions in the schema/CASCADE tests.  Truncation now
+// goes through testutil.TruncateAll, which knows the broader schema
+// including the river_* queue tables.
 var pgTables = []string{
 	"users",
 	"anime_cache",
@@ -82,19 +80,17 @@ var pgTables = []string{
 
 // TestMain owns the container lifecycle.  Containers are reused across
 // every Test* in this package so the ~30s startup cost is paid once.
+// Postgres setup + migration apply are now delegated to testutil so the
+// P2.0 smoke test and any future P2.x integration test share one path.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
-	pgC, pgURI, err := startPostgres(ctx)
+	pgURI, pgCleanup, err := testutil.SetupPGForMain(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start postgres: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() {
-		if err := pgC.Terminate(context.Background()); err != nil {
-			fmt.Fprintf(os.Stderr, "terminate postgres: %v\n", err)
-		}
-	}()
+	defer pgCleanup()
 
 	mongoC, mongoURI, err := startMongo(ctx)
 	if err != nil {
@@ -107,11 +103,6 @@ func TestMain(m *testing.M) {
 		}
 	}()
 
-	if err := applySchema(ctx, pgURI); err != nil {
-		fmt.Fprintf(os.Stderr, "apply schema: %v\n", err)
-		os.Exit(1)
-	}
-
 	pgURIGlobal = pgURI
 	mongoURIGlobal = mongoURI
 
@@ -121,33 +112,6 @@ func TestMain(m *testing.M) {
 // ---------------------------------------------------------------------------
 // Container helpers
 // ---------------------------------------------------------------------------
-
-func startPostgres(ctx context.Context) (testcontainers.Container, string, error) {
-	// animego-postgres:dev is the custom image (postgres:16-alpine + pg_cron
-	// compiled in) built by `docker compose -f docker-compose.dev.yml build
-	// postgres`.  testcontainers checks the local image cache before pulling,
-	// so as long as that build ran on this host the test reuses it.  Falls
-	// back gracefully with a clear error if the image is missing.
-	pgContainer, err := postgres.Run(ctx,
-		"animego-postgres:dev",
-		postgres.WithDatabase("animego"),
-		postgres.WithUsername("animego"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-	if err != nil {
-		return nil, "", fmt.Errorf("postgres.Run: %w", err)
-	}
-	uri, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		return nil, "", fmt.Errorf("postgres ConnectionString: %w", err)
-	}
-	return pgContainer, uri, nil
-}
 
 func startMongo(ctx context.Context) (testcontainers.Container, string, error) {
 	mongoContainer, err := mongodb.Run(ctx,
@@ -171,46 +135,6 @@ func startMongo(ctx context.Context) (testcontainers.Container, string, error) {
 		base += "/"
 	}
 	return mongoContainer, base + mongoDBName, nil
-}
-
-// applySchema runs `migrate up` programmatically via golang-migrate's Go API.
-// Source is the local go-api/migrations directory.
-func applySchema(ctx context.Context, pgURI string) error {
-	_ = ctx // migrate.Up doesn't accept a ctx in v4
-	migrationsDir, err := migrationsDirAbs()
-	if err != nil {
-		return err
-	}
-	sourceURL := "file://" + migrationsDir
-
-	m, err := gomigrate.New(sourceURL, pgURI)
-	if err != nil {
-		return fmt.Errorf("migrate.New: %w", err)
-	}
-	if err := m.Up(); err != nil && err != gomigrate.ErrNoChange {
-		return fmt.Errorf("migrate.Up: %w", err)
-	}
-	if srcErr, dbErr := m.Close(); srcErr != nil || dbErr != nil {
-		return fmt.Errorf("migrate close: src=%v db=%v", srcErr, dbErr)
-	}
-	return nil
-}
-
-// migrationsDirAbs resolves go-api/migrations relative to this test file
-// so the test still locates the SQL even if the CWD differs at runtime.
-func migrationsDirAbs() (string, error) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("runtime.Caller failed")
-	}
-	// thisFile == .../go-api/test/integration/migrate_test.go
-	// migrations live at  .../go-api/migrations/
-	dir := filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations")
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", fmt.Errorf("abs: %w", err)
-	}
-	return abs, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -238,19 +162,6 @@ func newMongoClient(t *testing.T, ctx context.Context) *mongo.Client {
 	return cli
 }
 
-// truncateAllPG wipes every migration-target table in one CASCADE statement
-// so each test starts from an empty PG state.
-func truncateAllPG(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
-	t.Helper()
-	quoted := make([]string, len(pgTables))
-	for i, tbl := range pgTables {
-		quoted[i] = `"` + tbl + `"`
-	}
-	stmt := "TRUNCATE TABLE " + strings.Join(quoted, ", ") + " RESTART IDENTITY CASCADE"
-	_, err := pool.Exec(ctx, stmt)
-	require.NoError(t, err, "truncate: %s", stmt)
-}
-
 // dropMongoDB removes every collection so each test gets a fresh Mongo state.
 func dropMongoDB(t *testing.T, ctx context.Context, cli *mongo.Client) {
 	t.Helper()
@@ -260,7 +171,7 @@ func dropMongoDB(t *testing.T, ctx context.Context, cli *mongo.Client) {
 // resetState clears both stores; call at the top of every Test*.
 func resetState(t *testing.T, ctx context.Context, pool *pgxpool.Pool, cli *mongo.Client) {
 	t.Helper()
-	truncateAllPG(t, ctx, pool)
+	testutil.TruncateAll(t, ctx, pool)
 	dropMongoDB(t, ctx, cli)
 }
 
