@@ -104,21 +104,44 @@ func main() {
 	}()
 	slog.Info("river queue ready", "workers", "v1(real)+v2(stub)+v3(stub)")
 
-	searchSvc, err := anime.NewSearchService(anilistClient, q)
+	// V1 enrichment trigger source — handed to /search + /schedule so
+	// post-upsert / post-titleChinese-lookup paths can enqueue V1 jobs
+	// for bangumi_version=0 rows.  Boot-time orphan scan also uses this
+	// (kicked off below in a goroutine so the HTTP server doesn't wait).
+	enqueuer := queue.NewEnqueuer(riverClient)
+
+	searchSvc, err := anime.NewSearchService(anilistClient, q, enqueuer)
 	if err != nil {
 		slog.Error("search service init failed", "err", err)
 		os.Exit(1)
 	}
-	scheduleSvc, err := anime.NewScheduleService(anilistClient, q)
+	scheduleSvc, err := anime.NewScheduleService(anilistClient, q, enqueuer)
 	if err != nil {
 		slog.Error("schedule service init failed", "err", err)
 		os.Exit(1)
 	}
-	detailSvc, err := anime.NewDetailService(q)
+	detailSvc, err := anime.NewDetailService(q, anilistClient)
 	if err != nil {
 		slog.Error("detail service init failed", "err", err)
 		os.Exit(1)
 	}
+
+	// Boot-time orphan scan: catches anime_cache rows with
+	// bangumi_version=0 that were upserted during a previous worker
+	// outage.  Runs in a goroutine so server startup is not blocked
+	// (river's queue can absorb the inserts in parallel with HTTP serving).
+	go func() {
+		scanCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		total, err := queue.ScanAndEnqueueOrphans(scanCtx, q, enqueuer)
+		if err != nil {
+			slog.Warn("orphan scan failed", "err", err, "enqueued_before_failure", total)
+			return
+		}
+		if total > 0 {
+			slog.Info("orphan scan enqueued V1 jobs", "count", total)
+		}
+	}()
 
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
@@ -156,7 +179,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.5")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.6")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)

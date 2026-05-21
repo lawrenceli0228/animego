@@ -10,12 +10,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
@@ -25,11 +28,16 @@ import (
 
 // detailFakeDB implements DetailDB for the detail tests.  Each method is
 // a function-pointer field; unset fields return a clear "not set" error
-// so accidental cross-call shows up immediately.  Mutex + counters track
-// invocation count for cache-hit assertions.
+// (for the main row read) or a sensible zero (for everything else) so
+// accidental cross-call shows up immediately without forcing each test
+// to wire up all twenty methods.
+//
+// Mutex + counters track invocation count for cache-hit and upsert-call
+// assertions (re-fetch path tests).
 type detailFakeDB struct {
 	mu sync.Mutex
 
+	// Readers
 	getAnimeMainByIDFn            func(ctx context.Context, id int32) (dbgen.GetAnimeMainByIDRow, error)
 	getAnimeGenresByIDFn          func(ctx context.Context, id int32) ([]string, error)
 	getAnimeStudiosByIDFn         func(ctx context.Context, id int32) ([]string, error)
@@ -39,9 +47,49 @@ type detailFakeDB struct {
 	getAnimeRecommendationsByIDFn func(ctx context.Context, id int32) ([]dbgen.GetAnimeRecommendationsByIDRow, error)
 	getRelationEnrichmentByIDsFn  func(ctx context.Context, ids []int32) ([]dbgen.GetRelationEnrichmentByIDsRow, error)
 
+	// Writers (P2.1.6 re-fetch path).  Defaults return nil error.
+	upsertAnimeCacheFn            func(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
+	deleteAnimeGenresFn           func(ctx context.Context, id int32) error
+	insertAnimeGenreFn            func(ctx context.Context, id int32, g string) error
+	deleteAnimeStudiosFn          func(ctx context.Context, id int32) error
+	insertAnimeStudioFn           func(ctx context.Context, id int32, s string) error
+	deleteAnimeRelationsFn        func(ctx context.Context, id int32) error
+	insertAnimeRelationFn         func(ctx context.Context, arg dbgen.InsertAnimeRelationParams) error
+	deleteAnimeCharactersFn       func(ctx context.Context, id int32) error
+	insertAnimeCharacterFn        func(ctx context.Context, arg dbgen.InsertAnimeCharacterParams) error
+	deleteAnimeStaffFn            func(ctx context.Context, id int32) error
+	insertAnimeStaffMemberFn      func(ctx context.Context, arg dbgen.InsertAnimeStaffMemberParams) error
+	deleteAnimeRecommendationsFn  func(ctx context.Context, id int32) error
+	insertAnimeRecommendationFn   func(ctx context.Context, arg dbgen.InsertAnimeRecommendationParams) error
+
 	mainCalls       atomic.Int32
 	enrichmentCalls atomic.Int32
 	enrichmentIDs   [][]int32
+
+	// Writer call counts — used by upsert-path tests to assert the
+	// expected number of Delete+Insert pairs ran.
+	upsertMainCalls           atomic.Int32
+	deleteGenresCalls         atomic.Int32
+	insertGenreCalls          atomic.Int32
+	deleteStudiosCalls        atomic.Int32
+	insertStudioCalls         atomic.Int32
+	deleteRelationsCalls      atomic.Int32
+	insertRelationCalls       atomic.Int32
+	deleteCharactersCalls     atomic.Int32
+	insertCharacterCalls      atomic.Int32
+	deleteStaffCalls          atomic.Int32
+	insertStaffCalls          atomic.Int32
+	deleteRecommendationsCalls atomic.Int32
+	insertRecommendationCalls  atomic.Int32
+
+	// Captured args for byte-shape assertions on the re-fetch path.
+	upsertParams          []dbgen.UpsertAnimeCacheParams
+	insertedGenres        []string
+	insertedStudios       []string
+	insertedRelations     []dbgen.InsertAnimeRelationParams
+	insertedCharacters    []dbgen.InsertAnimeCharacterParams
+	insertedStaff         []dbgen.InsertAnimeStaffMemberParams
+	insertedRecommendations []dbgen.InsertAnimeRecommendationParams
 }
 
 func (f *detailFakeDB) GetAnimeMainByID(ctx context.Context, id int32) (dbgen.GetAnimeMainByIDRow, error) {
@@ -107,12 +155,178 @@ func (f *detailFakeDB) GetRelationEnrichmentByIDs(ctx context.Context, ids []int
 	return f.getRelationEnrichmentByIDsFn(ctx, ids)
 }
 
-// newDetailService builds a DetailService for tests.  t.Cleanup closes
-// the cache so ristretto's background goroutines don't leak between
-// parallel tests.
+// -----------------------------------------------------------------------------
+// Writer methods (P2.1.6 re-fetch path).  Each captures the argument under
+// mu so tests can inspect the byte shape, and increments the call counter
+// for "how many times did this run" assertions.
+// -----------------------------------------------------------------------------
+
+func (f *detailFakeDB) UpsertAnimeCache(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error {
+	f.upsertMainCalls.Add(1)
+	f.mu.Lock()
+	f.upsertParams = append(f.upsertParams, arg)
+	f.mu.Unlock()
+	if f.upsertAnimeCacheFn != nil {
+		return f.upsertAnimeCacheFn(ctx, arg)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) DeleteAnimeGenres(ctx context.Context, id int32) error {
+	f.deleteGenresCalls.Add(1)
+	if f.deleteAnimeGenresFn != nil {
+		return f.deleteAnimeGenresFn(ctx, id)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) InsertAnimeGenre(ctx context.Context, id int32, g string) error {
+	f.insertGenreCalls.Add(1)
+	f.mu.Lock()
+	f.insertedGenres = append(f.insertedGenres, g)
+	f.mu.Unlock()
+	if f.insertAnimeGenreFn != nil {
+		return f.insertAnimeGenreFn(ctx, id, g)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) DeleteAnimeStudios(ctx context.Context, id int32) error {
+	f.deleteStudiosCalls.Add(1)
+	if f.deleteAnimeStudiosFn != nil {
+		return f.deleteAnimeStudiosFn(ctx, id)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) InsertAnimeStudio(ctx context.Context, id int32, s string) error {
+	f.insertStudioCalls.Add(1)
+	f.mu.Lock()
+	f.insertedStudios = append(f.insertedStudios, s)
+	f.mu.Unlock()
+	if f.insertAnimeStudioFn != nil {
+		return f.insertAnimeStudioFn(ctx, id, s)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) DeleteAnimeRelations(ctx context.Context, id int32) error {
+	f.deleteRelationsCalls.Add(1)
+	if f.deleteAnimeRelationsFn != nil {
+		return f.deleteAnimeRelationsFn(ctx, id)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) InsertAnimeRelation(ctx context.Context, arg dbgen.InsertAnimeRelationParams) error {
+	f.insertRelationCalls.Add(1)
+	f.mu.Lock()
+	f.insertedRelations = append(f.insertedRelations, arg)
+	f.mu.Unlock()
+	if f.insertAnimeRelationFn != nil {
+		return f.insertAnimeRelationFn(ctx, arg)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) DeleteAnimeCharacters(ctx context.Context, id int32) error {
+	f.deleteCharactersCalls.Add(1)
+	if f.deleteAnimeCharactersFn != nil {
+		return f.deleteAnimeCharactersFn(ctx, id)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) InsertAnimeCharacter(ctx context.Context, arg dbgen.InsertAnimeCharacterParams) error {
+	f.insertCharacterCalls.Add(1)
+	f.mu.Lock()
+	f.insertedCharacters = append(f.insertedCharacters, arg)
+	f.mu.Unlock()
+	if f.insertAnimeCharacterFn != nil {
+		return f.insertAnimeCharacterFn(ctx, arg)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) DeleteAnimeStaff(ctx context.Context, id int32) error {
+	f.deleteStaffCalls.Add(1)
+	if f.deleteAnimeStaffFn != nil {
+		return f.deleteAnimeStaffFn(ctx, id)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) InsertAnimeStaffMember(ctx context.Context, arg dbgen.InsertAnimeStaffMemberParams) error {
+	f.insertStaffCalls.Add(1)
+	f.mu.Lock()
+	f.insertedStaff = append(f.insertedStaff, arg)
+	f.mu.Unlock()
+	if f.insertAnimeStaffMemberFn != nil {
+		return f.insertAnimeStaffMemberFn(ctx, arg)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) DeleteAnimeRecommendations(ctx context.Context, id int32) error {
+	f.deleteRecommendationsCalls.Add(1)
+	if f.deleteAnimeRecommendationsFn != nil {
+		return f.deleteAnimeRecommendationsFn(ctx, id)
+	}
+	return nil
+}
+
+func (f *detailFakeDB) InsertAnimeRecommendation(ctx context.Context, arg dbgen.InsertAnimeRecommendationParams) error {
+	f.insertRecommendationCalls.Add(1)
+	f.mu.Lock()
+	f.insertedRecommendations = append(f.insertedRecommendations, arg)
+	f.mu.Unlock()
+	if f.insertAnimeRecommendationFn != nil {
+		return f.insertAnimeRecommendationFn(ctx, arg)
+	}
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+// fakeAniListDetailer — AniListDetailer test double.
+// -----------------------------------------------------------------------------
+
+// fakeAniListDetailer captures Detail() invocations and returns a canned
+// response or error.  Used by every stale / re-fetch test.
+type fakeAniListDetailer struct {
+	mu       sync.Mutex
+	detailFn func(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error)
+	calls    atomic.Int32
+	gotVars  []anilist.DetailVars
+}
+
+func (f *fakeAniListDetailer) Detail(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+	f.calls.Add(1)
+	f.mu.Lock()
+	f.gotVars = append(f.gotVars, v)
+	f.mu.Unlock()
+	if f.detailFn == nil {
+		return &anilist.AnimeDetailResponse{}, nil
+	}
+	return f.detailFn(ctx, v)
+}
+
+// newDetailService builds a DetailService for tests with anilist=nil
+// (cache-only path).  t.Cleanup closes the cache so ristretto's
+// background goroutines don't leak between parallel tests.
 func newDetailService(t *testing.T, db DetailDB) *DetailService {
 	t.Helper()
-	s, err := NewDetailService(db)
+	s, err := NewDetailService(db, nil)
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+	return s
+}
+
+// newDetailServiceWithAniList builds a DetailService for tests that
+// exercise the re-fetch path.  Pass a *fakeAniListDetailer with the
+// desired detailFn canned response.
+func newDetailServiceWithAniList(t *testing.T, db DetailDB, al AniListDetailer) *DetailService {
+	t.Helper()
+	s, err := NewDetailService(db, al)
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	return s
@@ -722,4 +936,678 @@ func TestDetail_EnrichmentIDsCollected(t *testing.T) {
 	defer db.mu.Unlock()
 	require.Len(t, db.enrichmentIDs, 1)
 	assert.ElementsMatch(t, []int32{100, 200, 300}, db.enrichmentIDs[0])
+}
+
+// =============================================================================
+// P2.1.6 stale detection + AniList re-fetch tests.
+//
+// Two cohorts:
+//   1. isStale unit tests — pure function over the four input slices, no
+//      service spin-up.  Easier to read than HTTP round-trips for the
+//      boolean logic and they catch regressions in the threshold rules.
+//   2. End-to-end re-fetch tests through Handler() — assert the right
+//      DB writer methods get called the right number of times based on
+//      the canned AniList payload, and that the final HTTP envelope
+//      reflects post-refetch values.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// isStale: pure function tests.
+// -----------------------------------------------------------------------------
+
+// freshTimestamp builds a non-stale cached_at — 5 minutes ago, well
+// inside the staleCacheTTL window.
+func freshTimestamp() pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: time.Now().Add(-5 * time.Minute), Valid: true}
+}
+
+// staleTimestamp builds a stale cached_at — 2 hours ago, beyond the 1h
+// staleCacheTTL threshold.
+func staleTimestamp() pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: time.Now().Add(-2 * time.Hour), Valid: true}
+}
+
+// TestIsStale_FreshNotStale: all five checks pass → false.
+func TestIsStale_FreshNotStale(t *testing.T) {
+	t.Parallel()
+
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	studios := []string{"MAPPA"}
+	characters := []dbgen.GetAnimeCharactersByIDRow{
+		{NameEn: ptrString("Alice"), Role: ptrString("MAIN")},
+	}
+	relations := []dbgen.GetAnimeRelationsByIDRow{
+		{AnilistID: 100, CoverImageUrl: ptrString("https://cdn/100.jpg")},
+	}
+	assert.False(t, isStale(main, studios, characters, relations))
+}
+
+// TestIsStale_CachedAtPastTTL: cached_at > staleCacheTTL ago → true.
+func TestIsStale_CachedAtPastTTL(t *testing.T) {
+	t.Parallel()
+
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: staleTimestamp()}
+	studios := []string{"MAPPA"}
+	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
+	relations := []dbgen.GetAnimeRelationsByIDRow{}
+	assert.True(t, isStale(main, studios, characters, relations), "old cached_at must trip stale")
+}
+
+// TestIsStale_EmptyStudios: characters present but studios empty → true.
+func TestIsStale_EmptyStudios(t *testing.T) {
+	t.Parallel()
+
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
+	assert.True(t, isStale(main, []string{}, characters, nil), "empty studios must trip stale")
+}
+
+// TestIsStale_EmptyCharacters: studios present but characters empty → true.
+func TestIsStale_EmptyCharacters(t *testing.T) {
+	t.Parallel()
+
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	assert.True(t, isStale(main, []string{"MAPPA"}, []dbgen.GetAnimeCharactersByIDRow{}, nil),
+		"empty characters must trip stale")
+}
+
+// TestIsStale_FirstCharacterRoleNil: characters[0].Role missing → true.
+// Express checks `cached.characters?.length > 0 && cached.characters[0].role === undefined`.
+func TestIsStale_FirstCharacterRoleNil(t *testing.T) {
+	t.Parallel()
+
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	characters := []dbgen.GetAnimeCharactersByIDRow{{NameEn: ptrString("Bob"), Role: nil}}
+	assert.True(t, isStale(main, []string{"MAPPA"}, characters, nil),
+		"first character with nil role must trip stale")
+}
+
+// TestIsStale_FirstRelationCoverNil: relations[0].CoverImageUrl missing → true.
+// Express's last branch:
+//
+//	cached.relations?.length > 0 && !cached.relations[0].coverImageUrl
+func TestIsStale_FirstRelationCoverNil(t *testing.T) {
+	t.Parallel()
+
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
+	relations := []dbgen.GetAnimeRelationsByIDRow{{AnilistID: 100, CoverImageUrl: nil}}
+	assert.True(t, isStale(main, []string{"MAPPA"}, characters, relations),
+		"first relation with nil cover_image_url must trip stale")
+}
+
+// TestIsStale_NoRelations_NotTriggerByCover: when relations is empty, the
+// "first relation cover nil" check must NOT fire (Express: relations length > 0
+// is the guard).
+func TestIsStale_NoRelations_NotTriggerByCover(t *testing.T) {
+	t.Parallel()
+
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
+	assert.False(t, isStale(main, []string{"MAPPA"}, characters, []dbgen.GetAnimeRelationsByIDRow{}),
+		"empty relations slice must not by itself trip stale")
+}
+
+// -----------------------------------------------------------------------------
+// fetchDetail re-fetch path: nil anilist client.
+// -----------------------------------------------------------------------------
+
+// TestDetail_NilAniList_StaleNeverFires verifies the cache-only path: even
+// when the cached row is patently stale (no characters, no studios), the
+// service returns the DB rows as-is and does NOT call any writer methods.
+//
+// This guards the "AniList not wired" deployment shape so a half-installed
+// service still serves whatever's in the cache.
+func TestDetail_NilAniList_StaleNeverFires(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			// Stale row: no characters → would trip isStale=true.
+			return dbgen.GetAnimeMainByIDRow{AnilistID: 1, CachedAt: freshTimestamp()}, nil
+		},
+		// characters/studios fns are nil → return empty slices (stale).
+	}
+	svc := newDetailService(t, db) // nil anilist
+
+	rec := serveDetail(t, svc, "/api/anime/1")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// No writer methods were called — proves the re-fetch path stayed off.
+	assert.Equal(t, int32(0), db.upsertMainCalls.Load())
+	assert.Equal(t, int32(0), db.deleteCharactersCalls.Load())
+	assert.Equal(t, int32(0), db.deleteStudiosCalls.Load())
+}
+
+// TestDetail_NotInCache_AniListNil_404 verifies the original behaviour: when
+// there's no cache row AND no anilist client, return 404 with the Chinese
+// message.  Same shape as the pre-P2.1.6 TestDetail_NotInCache_404 but with
+// the new constructor signature.
+func TestDetail_NotInCache_AniListNil_404(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+		},
+	}
+	svc := newDetailService(t, db) // nil anilist
+	rec := serveDetail(t, svc, "/api/anime/12345")
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	body := rec.Body.String()
+	require.Contains(t, body, `"NOT_FOUND"`)
+	require.Contains(t, body, "番剧不存在")
+}
+
+// -----------------------------------------------------------------------------
+// fetchDetail re-fetch path: AniList client wired.
+// -----------------------------------------------------------------------------
+
+// makeDetailMedia builds a minimal but fully-populated anilist.Media for
+// re-fetch tests.  Each field that drives a child-table write is present
+// so the test can assert one row of each insert was attempted.
+func makeDetailMedia(id int) anilist.Media {
+	romaji := "Re-fetched Title"
+	cover := "https://cdn/cover.jpg"
+	color := "#3b82f6"
+	studio := "WIT"
+	relType := "SEQUEL"
+	relTitle := "Sequel"
+	relCover := "https://cdn/rel.jpg"
+	chFull := "Hero"
+	chRole := "MAIN"
+	vaFull := "VA"
+	staffFull := "Director"
+	staffRole := "Director"
+	recTitle := "Rec"
+	recCover := "https://cdn/rec.jpg"
+	avgScore := 88
+
+	return anilist.Media{
+		ID:           id,
+		Title:        &anilist.Title{Romaji: &romaji},
+		CoverImage:   &anilist.CoverImage{Large: &cover, Color: &color},
+		Genres:       []string{"Action"},
+		Studios:      &anilist.StudioConnection{Nodes: []anilist.Studio{{Name: studio}}},
+		Relations: &anilist.RelationConnection{Edges: []anilist.RelationEdge{
+			{
+				RelationType: &relType,
+				Node: anilist.RelationNode{
+					ID:         500,
+					Title:      &anilist.Title{Romaji: &relTitle},
+					CoverImage: &anilist.CoverImage{Large: &relCover, Color: &color},
+				},
+			},
+		}},
+		Characters: &anilist.CharacterConnection{Edges: []anilist.CharacterEdge{
+			{
+				Role: &chRole,
+				Node: anilist.CharacterNode{Name: &anilist.PersonName{Full: &chFull}},
+				VoiceActors: []anilist.VoiceActor{
+					{Name: &anilist.PersonName{Full: &vaFull}},
+				},
+			},
+		}},
+		Staff: &anilist.StaffConnection{Edges: []anilist.StaffEdge{
+			{Role: &staffRole, Node: anilist.StaffNode{Name: &anilist.PersonName{Full: &staffFull}}},
+		}},
+		Recommendations: &anilist.RecommendationConnection{Nodes: []anilist.RecommendationNode{
+			{MediaRecommendation: &anilist.MediaRecommendation{
+				ID:           600,
+				Title:        &anilist.Title{Romaji: &recTitle},
+				CoverImage:   &anilist.CoverImage{Large: &recCover, Color: &color},
+				AverageScore: &avgScore,
+			}},
+		}},
+	}
+}
+
+// TestDetail_NotInCache_AniListReFetchSucceeds verifies: pgx.ErrNoRows on
+// main → re-fetch via AniList → upsert main + 6 child tables → re-read +
+// return 200 OK with the re-fetched data.
+//
+// readCount tracks the GetAnimeMainByID call count: the FIRST call is the
+// pre-refetch read (returns ErrNoRows), the SECOND is the post-refetch
+// re-read (must return a populated row).
+func TestDetail_NotInCache_AniListReFetchSucceeds(t *testing.T) {
+	t.Parallel()
+
+	var readCount atomic.Int32
+	romaji := "Re-fetched Title"
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			if readCount.Add(1) == 1 {
+				return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+			}
+			// Post-refetch re-read.
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   42,
+				TitleRomaji: &romaji,
+				CachedAt:    freshTimestamp(),
+			}, nil
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			require.Equal(t, 42, v.ID)
+			return &anilist.AnimeDetailResponse{Media: makeDetailMedia(42)}, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/42")
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	body := rec.Body.String()
+	require.Contains(t, body, `"anilistId":42`)
+	require.Contains(t, body, `"titleRomaji":"Re-fetched Title"`)
+
+	// Re-fetch was attempted.
+	assert.Equal(t, int32(1), al.calls.Load(), "AniList.Detail must be called exactly once")
+	// Main row upsert + 6 Delete + N Inserts ran.  Counts: 1 genre / 1
+	// studio / 1 relation / 1 character / 1 staff / 1 recommendation.
+	assert.Equal(t, int32(1), db.upsertMainCalls.Load())
+	assert.Equal(t, int32(1), db.deleteGenresCalls.Load())
+	assert.Equal(t, int32(1), db.insertGenreCalls.Load())
+	assert.Equal(t, int32(1), db.deleteStudiosCalls.Load())
+	assert.Equal(t, int32(1), db.insertStudioCalls.Load())
+	assert.Equal(t, int32(1), db.deleteRelationsCalls.Load())
+	assert.Equal(t, int32(1), db.insertRelationCalls.Load())
+	assert.Equal(t, int32(1), db.deleteCharactersCalls.Load())
+	assert.Equal(t, int32(1), db.insertCharacterCalls.Load())
+	assert.Equal(t, int32(1), db.deleteStaffCalls.Load())
+	assert.Equal(t, int32(1), db.insertStaffCalls.Load())
+	assert.Equal(t, int32(1), db.deleteRecommendationsCalls.Load())
+	assert.Equal(t, int32(1), db.insertRecommendationCalls.Load())
+}
+
+// TestDetail_StaleDetected_AniListReFetchSucceeds verifies the cache-miss
+// + stale path: main row exists but characters are empty → isStale=true →
+// AniList re-fetch fires, writer methods run, response reflects the
+// re-fetched data.
+func TestDetail_StaleDetected_AniListReFetchSucceeds(t *testing.T) {
+	t.Parallel()
+
+	var readCount atomic.Int32
+	romaji := "Stale Pre-Refetch"
+	romajiAfter := "Refetched"
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			c := readCount.Add(1)
+			if c == 1 {
+				return dbgen.GetAnimeMainByIDRow{
+					AnilistID:   77,
+					TitleRomaji: &romaji,
+					CachedAt:    freshTimestamp(),
+					// no characters → triggers stale check below
+				}, nil
+			}
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   77,
+				TitleRomaji: &romajiAfter,
+				CachedAt:    freshTimestamp(),
+			}, nil
+		},
+		// characters/studios fns nil → empty slices → isStale=true.
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			require.Equal(t, 77, v.ID)
+			return &anilist.AnimeDetailResponse{Media: makeDetailMedia(77)}, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/77")
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	body := rec.Body.String()
+	require.Contains(t, body, `"titleRomaji":"Refetched"`, "must reflect post-refetch title")
+	assert.Equal(t, int32(1), al.calls.Load(), "AniList.Detail must fire once")
+	assert.Equal(t, int32(1), db.upsertMainCalls.Load())
+}
+
+// TestDetail_StaleDetected_AniListFails_FallbackToStale verifies the
+// resilience contract: when AniList re-fetch fails, the request still
+// returns the in-flight stale row (200 OK) instead of a 5xx.
+func TestDetail_StaleDetected_AniListFails_FallbackToStale(t *testing.T) {
+	t.Parallel()
+
+	staleTitle := "Stale But Visible"
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   88,
+				TitleRomaji: &staleTitle,
+				CachedAt:    freshTimestamp(),
+			}, nil
+			// no characters → isStale=true
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return nil, errors.New("upstream blew up")
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/88")
+
+	require.Equal(t, http.StatusOK, rec.Code, "must fall back to stale, not 500")
+	require.Contains(t, rec.Body.String(), `"titleRomaji":"Stale But Visible"`)
+	assert.Equal(t, int32(1), al.calls.Load(), "AniList.Detail was attempted")
+	assert.Equal(t, int32(0), db.upsertMainCalls.Load(), "upsert did not run after AniList failed")
+}
+
+// TestDetail_FreshNotStale_SkipsReFetch verifies the inverse: when the
+// cached row passes all five isStale checks, NO AniList call is made even
+// though the anilist client is wired.
+func TestDetail_FreshNotStale_SkipsReFetch(t *testing.T) {
+	t.Parallel()
+
+	romaji := "Already Fresh"
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   99,
+				TitleRomaji: &romaji,
+				CachedAt:    freshTimestamp(),
+			}, nil
+		},
+		getAnimeStudiosByIDFn: func(_ context.Context, _ int32) ([]string, error) {
+			return []string{"MAPPA"}, nil
+		},
+		getAnimeCharactersByIDFn: func(_ context.Context, _ int32) ([]dbgen.GetAnimeCharactersByIDRow, error) {
+			return []dbgen.GetAnimeCharactersByIDRow{
+				{NameEn: ptrString("Alice"), Role: ptrString("MAIN")},
+			}, nil
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			t.Fatal("AniList.Detail must NOT be called for fresh row")
+			return nil, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/99")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(0), al.calls.Load(), "no AniList call for fresh row")
+	assert.Equal(t, int32(0), db.upsertMainCalls.Load(), "no upsert for fresh row")
+}
+
+// TestDetail_StaleByCachedAt verifies the time-based stale path: even when
+// every content check passes, an old cached_at trips the stale flag and
+// triggers a re-fetch.
+func TestDetail_StaleByCachedAt(t *testing.T) {
+	t.Parallel()
+
+	var readCount atomic.Int32
+	romajiPre := "Pre-stale"
+	romajiPost := "Post-stale"
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			if readCount.Add(1) == 1 {
+				return dbgen.GetAnimeMainByIDRow{
+					AnilistID:   55,
+					TitleRomaji: &romajiPre,
+					CachedAt:    staleTimestamp(), // > 1h ago
+				}, nil
+			}
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   55,
+				TitleRomaji: &romajiPost,
+				CachedAt:    freshTimestamp(),
+			}, nil
+		},
+		// Content checks all pass — only cached_at is stale.
+		getAnimeStudiosByIDFn: func(_ context.Context, _ int32) ([]string, error) {
+			return []string{"WIT"}, nil
+		},
+		getAnimeCharactersByIDFn: func(_ context.Context, _ int32) ([]dbgen.GetAnimeCharactersByIDRow, error) {
+			return []dbgen.GetAnimeCharactersByIDRow{
+				{NameEn: ptrString("X"), Role: ptrString("MAIN")},
+			}, nil
+		},
+		getAnimeRelationsByIDFn: func(_ context.Context, _ int32) ([]dbgen.GetAnimeRelationsByIDRow, error) {
+			return []dbgen.GetAnimeRelationsByIDRow{
+				{AnilistID: 100, CoverImageUrl: ptrString("https://cdn/100.jpg")},
+			}, nil
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return &anilist.AnimeDetailResponse{Media: makeDetailMedia(v.ID)}, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/55")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(1), al.calls.Load(), "stale cached_at must trigger re-fetch")
+	require.Contains(t, rec.Body.String(), `"titleRomaji":"Post-stale"`)
+}
+
+// TestDetail_UpsertFromMedia_ChildrenShapesAreCorrect inspects the captured
+// args from a re-fetch run to confirm:
+//   - InsertAnimeRelation rows carry the parent anime_id and the relation's
+//     own anilist_id.
+//   - DisplayOrder is the 0-based slice index on characters/staff.
+//   - Accent fields are non-nil (came through colorx).
+func TestDetail_UpsertFromMedia_ChildrenShapesAreCorrect(t *testing.T) {
+	t.Parallel()
+
+	var readCount atomic.Int32
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			if readCount.Add(1) == 1 {
+				return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+			}
+			return dbgen.GetAnimeMainByIDRow{AnilistID: 42, CachedAt: freshTimestamp()}, nil
+		},
+	}
+	media := makeDetailMedia(42)
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return &anilist.AnimeDetailResponse{Media: media}, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/42")
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	require.Len(t, db.insertedRelations, 1)
+	rel := db.insertedRelations[0]
+	assert.Equal(t, int32(42), rel.AnimeID, "parent anime_id propagated")
+	assert.Equal(t, int32(500), rel.AnilistID, "relation's own anilist_id from Media")
+	require.NotNil(t, rel.PosterAccent)
+	require.NotNil(t, rel.PosterAccentRgb)
+	require.NotNil(t, rel.PosterAccentContrastOnBlack)
+	require.NotNil(t, rel.CoverImageUrl)
+	assert.Equal(t, "https://cdn/rel.jpg", *rel.CoverImageUrl, ".large preferred for relation cover")
+
+	require.Len(t, db.insertedCharacters, 1)
+	ch := db.insertedCharacters[0]
+	assert.Equal(t, int32(42), ch.AnimeID)
+	assert.Equal(t, int32(0), ch.DisplayOrder, "first character gets display_order=0")
+	require.NotNil(t, ch.NameEn)
+	assert.Equal(t, "Hero", *ch.NameEn)
+	require.NotNil(t, ch.VoiceActorEn)
+	assert.Equal(t, "VA", *ch.VoiceActorEn)
+	assert.Nil(t, ch.NameCn, "AniList never sets name_cn")
+
+	require.Len(t, db.insertedStaff, 1)
+	st := db.insertedStaff[0]
+	assert.Equal(t, int32(42), st.AnimeID)
+	assert.Equal(t, int32(0), st.DisplayOrder)
+	require.NotNil(t, st.NameEn)
+	assert.Equal(t, "Director", *st.NameEn)
+
+	require.Len(t, db.insertedRecommendations, 1)
+	rec2 := db.insertedRecommendations[0]
+	assert.Equal(t, int32(42), rec2.AnimeID)
+	assert.Equal(t, int32(600), rec2.AnilistID)
+	require.NotNil(t, rec2.AverageScore)
+	assert.InDelta(t, 88.0, *rec2.AverageScore, 0.0001)
+
+	assert.Equal(t, []string{"Action"}, db.insertedGenres)
+	assert.Equal(t, []string{"WIT"}, db.insertedStudios)
+}
+
+// TestDetail_AniListReturnsNullMedia_404 verifies that an AniList response
+// whose Media is the zero value (Media: null on the wire) maps to 404
+// "番剧不存在" — Express's getAnimeDetail does the same when the upstream
+// id is unknown.
+func TestDetail_AniListReturnsNullMedia_404(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			// Media.ID = 0 — distinguishes "AniList said unknown" from a
+			// transport error.
+			return &anilist.AnimeDetailResponse{Media: anilist.Media{}}, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/99999")
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Contains(t, rec.Body.String(), "番剧不存在")
+	assert.Equal(t, int32(0), db.upsertMainCalls.Load(), "no upsert when AniList returned null")
+}
+
+// TestDetail_AniListUpstreamError_502 verifies that a 500-class upstream
+// error on the initial-fetch path maps to a 502 BAD_GATEWAY (so frontend
+// can distinguish "we tried but AniList broke" from "we couldn't find it").
+func TestDetail_AniListUpstreamError_502(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return nil, &anilist.ErrUpstream{Status: 500, Message: "AniList down"}
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/12345")
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Contains(t, rec.Body.String(), `"SERVER_ERROR"`)
+}
+
+// TestDetail_AniListReturnsUpstream404_MapsTo404 verifies the special
+// case: when AniList itself returns 404 (rare — usually means a
+// hard-deleted id), surface it as the same Chinese 404 message the cache
+// path uses, not a 502.
+func TestDetail_AniListReturnsUpstream404_MapsTo404(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return nil, &anilist.ErrUpstream{Status: 404, Message: "Media not found"}
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/99999")
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Contains(t, rec.Body.String(), "番剧不存在")
+}
+
+// TestDetail_UpsertFromMedia_DeleteGenresFails_500 forces a writer-method
+// failure inside the upsert path and verifies the request maps to 500
+// SERVER_ERROR.  This guards the wrap-and-rethrow chain on each
+// sub-step of upsertFromMedia.
+func TestDetail_UpsertFromMedia_DeleteGenresFails_500(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+		},
+		deleteAnimeGenresFn: func(_ context.Context, _ int32) error {
+			return errors.New("genres delete blew up")
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return &anilist.AnimeDetailResponse{Media: makeDetailMedia(42)}, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/42")
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Contains(t, rec.Body.String(), `"SERVER_ERROR"`)
+	require.NotContains(t, rec.Body.String(), "genres delete blew up", "internal cause must not leak")
+}
+
+// TestDetail_UpsertFromMedia_InsertRelationFails_500 hits a different
+// sub-step of the upsert pipeline (the relations Insert) — this branch
+// would otherwise be unreachable through happy-path tests.
+func TestDetail_UpsertFromMedia_InsertRelationFails_500(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+		},
+		insertAnimeRelationFn: func(_ context.Context, _ dbgen.InsertAnimeRelationParams) error {
+			return errors.New("relation insert blew up")
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return &anilist.AnimeDetailResponse{Media: makeDetailMedia(42)}, nil
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/42")
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// TestConvertRelationsToDetailRelations exercises the fallback path used
+// when relations enrichment fails post-refetch.  Pure function, no HTTP
+// wiring needed.
+func TestConvertRelationsToDetailRelations(t *testing.T) {
+	t.Run("empty input returns empty slice", func(t *testing.T) {
+		got := convertRelationsToDetailRelations(nil)
+		assert.Empty(t, got)
+		assert.NotNil(t, got)
+	})
+	t.Run("preserves row fields one-for-one", func(t *testing.T) {
+		got := convertRelationsToDetailRelations([]dbgen.GetAnimeRelationsByIDRow{
+			{
+				AnilistID:     100,
+				RelationType:  ptrString("SEQUEL"),
+				Title:         ptrString("Sequel"),
+				CoverImageUrl: ptrString("https://cdn/100.jpg"),
+			},
+		})
+		require.Len(t, got, 1)
+		assert.Equal(t, int32(100), got[0].AnilistID)
+		require.NotNil(t, got[0].Title)
+		assert.Equal(t, "Sequel", *got[0].Title)
+		assert.Nil(t, got[0].TitleChinese, "fallback path leaves titleChinese nil")
+	})
 }
