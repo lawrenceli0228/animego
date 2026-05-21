@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN" xml:lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>AnimeGo — P2-PROGRESS</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
+    <style>
+    :root {
+      --bg: #0e1116; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+      --code-bg: #161b22; --border: #30363d; --highlight: #f0c674;
+    }
+    html { background: var(--bg); color: var(--fg); color-scheme: dark; scroll-behavior: smooth; }
+    body {
+      background: var(--bg); color: var(--fg);
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      max-width: 1100px; margin: 0 auto; padding: 2.5rem 3rem 6rem;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      border-bottom: 1px solid var(--border); padding-bottom: .3em;
+      font-weight: 600; color: var(--fg); margin-top: 2em; margin-bottom: 0.6em;
+    }
+    h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; }
+    h1 { font-size: 1.85rem; color: var(--highlight); }
+    h2 { font-size: 1.45rem; color: var(--highlight); }
+    h3 { font-size: 1.15rem; border-bottom: 1px dashed var(--border); }
+    h4 { font-size: 1rem; border: 0; color: var(--muted); }
+    p { margin: 1em 0; }
+    a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+    code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
+      color: #ffa657; border: 1px solid var(--border); }
+    pre { background: var(--code-bg); padding: 1rem 1.2rem; overflow-x: auto;
+      border: 1px solid var(--border); border-radius: 6px; font-size: 0.84em;
+      line-height: 1.55; margin: 1em 0; }
+    pre code { padding: 0; background: transparent; color: var(--fg); font-size: 1em; border: 0; }
+    blockquote { border-left: 3px solid var(--accent); margin: 1em 0; padding: .6em 1.2em;
+      color: var(--muted); background: rgba(88,166,255,0.06); border-radius: 0 4px 4px 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
+    th, td { border: 1px solid var(--border); padding: .55em .85em; text-align: left; vertical-align: top; }
+    th { background: var(--code-bg); font-weight: 600; color: var(--highlight); }
+    tbody tr:nth-child(odd) { background: rgba(255,255,255,0.025); }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+    nav#TOC { background: var(--code-bg); padding: 1.2rem 1.6rem; border-radius: 6px;
+      border: 1px solid var(--border); margin: 1.5rem 0 2.5rem; font-size: 0.88em; }
+    nav#TOC ul { padding-left: 1.4em; margin: 0.3em 0; list-style: none; }
+    nav#TOC > ul { padding-left: 0; }
+    strong { color: var(--highlight); font-weight: 600; }
+    em { color: #a5d6ff; font-style: normal; opacity: 0.85; }
+    li { margin: 0.18em 0; }
+    header.title-block-header { padding-bottom: 1.5em; border-bottom: 2px solid var(--border); margin-bottom: 2em; }
+    </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">AnimeGo — P2-PROGRESS</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#phase-2-progress-go-api-rewrite">Phase 2 Progress — Go API Rewrite</a>
+<ul>
+<li><a href="#p2.0-chi-骨架7-10-hr">P2.0 — chi 骨架(7-10 hr)✓</a>
+<ul>
+<li><a href="#完成的-5-commit">完成的 5 commit</a></li>
+<li><a href="#sub-task-结果">5 sub-task 结果</a></li>
+<li><a href="#退出条件p2.0-p2.1-gate-全部">退出条件(P2.0 → P2.1 gate)— 全部 ✓</a></li>
+<li><a href="#关键设计取舍已锁p2.x-不允许偏">关键设计取舍(已锁,P2.x 不允许偏)</a></li>
+<li><a href="#实际-commit-timeline">实际 commit timeline</a></li>
+</ul></li>
+<li><a href="#p2.1-apianime-富化-queue待开35-55-hr">P2.1 — <code>/api/anime/*</code> + 富化 queue(待开,35-55 hr)</a>
+<ul>
+<li><a href="#endpoint-待实现">9 endpoint 待实现</a></li>
+</ul></li>
+<li><a href="#p2.2---p2.6-待开">P2.2 - P2.6 待开</a></li>
+<li><a href="#notes-decisions随时追加">Notes / Decisions(随时追加)</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="phase-2-progress-go-api-rewrite">Phase 2 Progress — Go API Rewrite</h1>
+<p><strong>Branch:</strong> <code>feat/go-backend</code> <strong>Started:</strong> 2026-05-21 <strong>Estimated total:</strong> 100-160 hr,6 个 sub-milestone(P2.1 - P2.6) + P2.0 骨架 <strong>Plan reference:</strong> <a href="MIGRATION_PLAN.md"><code>MIGRATION_PLAN.md</code></a> § Phase 2</p>
+<blockquote>
+<p>P2.0 (chi 骨架) 不在原 plan 单列,P1 → P2 gate 之后追加的,设计经 <code>/plan-eng-review</code> 跑过(8 个决策记录在 <a href="P2.0-DESIGN.md"><code>P2.0-DESIGN.md</code></a> § 9)。</p>
+</blockquote>
+<hr />
+<h2 id="p2.0-chi-骨架7-10-hr">P2.0 — chi 骨架(7-10 hr)✓</h2>
+<p>实际耗时 ~6 hr(2026-05-21 同一天打完,A+C+D 多 subagent 协作 + 我手动 review/wire)。</p>
+<h3 id="完成的-5-commit">完成的 5 commit</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Commit</th>
+<th>Subject</th>
+<th>文件 / 行数</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>0b62ae5</code></td>
+<td>docs(migration): P2.0 design v2 — eng-review decisions baked in</td>
+<td>2 文件 / +1561</td>
+</tr>
+<tr class="even">
+<td><code>f12ab85</code></td>
+<td>feat(go-api): P2.0.A — pgxpool + /health Ping</td>
+<td>3 文件 / +240</td>
+</tr>
+<tr class="odd">
+<td><code>03683cf</code></td>
+<td>feat(go-api): P2.0.C — httpx envelope + APIError + 6 byte fixture</td>
+<td>7 文件 / +950</td>
+</tr>
+<tr class="even">
+<td><code>8b666aa</code></td>
+<td>feat(go-api): P2.0.D — httpmw (logger /health skip / cors / recoverer)</td>
+<td>9 文件 / +632</td>
+</tr>
+<tr class="odd">
+<td><code>f431f65</code></td>
+<td>test(go-api): P2.0 health smoke integration — 4/4 PASS, byte-exact envelope</td>
+<td>1 文件 / +194</td>
+</tr>
+</tbody>
+</table>
+<p>合 22 文件,<strong>+3577 行</strong>(代码 + 测试 + docs)。</p>
+<h3 id="sub-task-结果">5 sub-task 结果</h3>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<strong>A</strong> — <code>internal/db/pool.go</code>(76 行)+ <code>pool_test.go</code>(97 行,<strong>7 case PASS</strong>)。web-tier pgxpool:MaxConns=20 / HealthCheckPeriod=30s / MaxConnLifetime=1h / MaxConnIdleTime=30min / ConnectTimeout=10s / PingTimeout=2s。<code>cmd/server/main.go</code> 接 pool + 改 <code>/health</code> 走 envelope。</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>C</strong> — <code>internal/httpx/</code> 4 .go 文件(codes / error / envelope + 共 ~280 行)+ 3 测试文件(error_test 16+ case / envelope_test 15 case / express_fixture_test <strong>6 byte-exact case</strong>)。<strong>coverage 97.9%</strong>。</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>D</strong> — <code>internal/httpmw/</code> 3 .go 文件(logger 100 行 / cors 30 行 / recoverer 70 行)+ 3 测试文件(共 14+ case)。<strong>coverage 97.4%</strong>。包名 <code>httpmw</code> 而非 <code>middleware</code> 避开跟 <code>github.com/go-chi/chi/v5/middleware</code> 包名冲突。</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>smoke</strong> — <code>test/integration/health_smoke_test.go</code>(194 行,<code>//go:build integration</code>,4 case 跨 DB up/down + CORS preflight + Recoverer panic)。复用 P1.D TestMain 的共享 PG container。<code>go test -race -tags=integration</code> <strong>11/11 PASS,8.6s wall</strong>(7 P1.D + 4 P2.0)。</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>F</strong> — 本文档 + <code>go-api/README.md</code> 加 P2.0 速查 + <a href="MIGRATION_PLAN.md"><code>MIGRATION_PLAN.md</code></a> § 7 状态表加 P2.0 行。</li>
+</ul>
+<h3 id="退出条件p2.0-p2.1-gate-全部">退出条件(P2.0 → P2.1 gate)— 全部 ✓</h3>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" checked="" />
+<code>go build ./...</code> + <code>go vet ./...</code> + <code>go test -race ./...</code> 全绿</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>go test -race -tags=integration -timeout=300s ./test/integration/...</code> <strong>11/11 PASS,8.6s</strong>(7 P1.D + 4 P2.0 smoke)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>Live <code>curl http://localhost:8080/health</code></strong> 返 <code>{"data":{"ok":true,"service":"go-api","stage":"P2.0","db":"up"}}</code> HTTP 200,64 字节,<code>Content-Type: application/json; charset=utf-8</code>,<strong>byte-exact 验证通过</strong>(hex dump 确认无 BOM、无尾换行)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>Live OPTIONS preflight</strong> 验 CORS:<code>Origin: http://localhost:3000</code> → 200 + <code>Access-Control-Allow-Origin</code> + <code>Access-Control-Allow-Credentials: true</code> + <code>Access-Control-Max-Age: 300</code></li>
+<li><input type="checkbox" disabled="" checked="" />
+<strong>Live /health log 静默</strong> 验 RequestLog skip:404 路径有 WARN log,/health 路径无 log(2880 条/天/pod noise 已消除)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/httpx/</code> 单测覆盖率 97.9%(目标 ≥90%)</li>
+<li><input type="checkbox" disabled="" checked="" />
+<code>internal/httpmw/</code> 单测覆盖率 97.4%</li>
+<li><input type="checkbox" disabled="" checked="" />
+PR 合到 <code>feat/go-backend</code> 分支(单 PR 5 commit)</li>
+</ul>
+<h3 id="关键设计取舍已锁p2.x-不允许偏">关键设计取舍(已锁,P2.x 不允许偏)</h3>
+<ol type="1">
+<li><strong>envelope 字节级 Express 兼容</strong> — <code>httpx.Data</code> / <code>Page[T]</code> / <code>Fail</code> 通过 <code>json.Encoder</code> + <code>SetEscapeHTML(false)</code> + 剥尾换行,跟 Express <code>JSON.stringify</code> 输出字节一致。</li>
+<li><strong><code>Pagination.NextPage</code> 是 <code>*int</code> 不带 omitempty</strong> — nil → JSON <code>null</code>,跟 <code>follow.controller.js:59</code> <code>nextPage: hasMore ? page+1 : null</code> 字节匹配。</li>
+<li><strong><code>Page[T any]</code> 是泛型</strong> — 编译期保证 items 是 slice,非 <code>any</code>(YAGNI/explicit 偏好)。</li>
+<li><strong><code>Fail</code> 三态 fallback</strong> — APIError → 走自带 status/code;非 APIError → 500 + SERVER_ERROR(cause 进 slog);nil → 500 SERVER_ERROR(防御性)。</li>
+<li><strong><code>NewError(..., WithCause(err) Option)</code></strong> — 函数式 options 模式,跟 Go patterns rule 对齐。</li>
+<li><strong><code>internal/httpmw/</code> 而不是 <code>internal/middleware/</code></strong> — 避开 chi.middleware 包名冲突,所有文件无需 alias import。</li>
+<li><strong>中间件链顺序锁定:</strong><code>CORS → RequestID → RealIP → RequestLog → Recoverer → Timeout</code>。</li>
+<li><strong><code>/health</code> 在 RequestLog 内 skip</strong> — verbatim 字符串匹配(<code>req.URL.Path == "/health"</code>),省 2880 条/天/pod docker probe 日志。</li>
+</ol>
+<h3 id="实际-commit-timeline">实际 commit timeline</h3>
+<pre><code>13:01  docker compose up postgres  (dev env restart from session pause)
+13:01  go test -tags=integration   11/11 PASS in 8.6s
+13:05  live server + curl smoke    /health 200 + envelope byte-exact
+~6 hr total wall (across multiple Claude Code sessions)</code></pre>
+<hr />
+<h2 id="p2.1-apianime-富化-queue待开35-55-hr">P2.1 — <code>/api/anime/*</code> + 富化 queue(待开,35-55 hr)</h2>
+<p><a href="MIGRATION_PLAN.md"><code>MIGRATION_PLAN.md</code></a> § Phase 2 详细规划。</p>
+<p>启动前必须做的事(来自 P2.0 → P2.1 handoff,见 <a href="P2.0-DESIGN.md"><code>P2.0-DESIGN.md</code></a> § 10):</p>
+<ul class="task-list">
+<li><input type="checkbox" disabled="" />
+<strong>首次 sqlc generate</strong> — 写完 <code>internal/db/queries/anime_cache.sql</code> 的 <code>GetByAnilistID</code> 之后跑 <code>make sqlc-generate</code>(Makefile target 同期加),验产出落 <code>internal/db/gen/</code></li>
+<li><input type="checkbox" disabled="" />
+<strong><code>internal/testutil/</code> 提取(Rule of three)</strong> — P2.1 第一个 <code>anime_endpoints_test.go</code> 是第二次用 testcontainers + chi + pool 三件套,<strong>那时</strong>提取 testutil + 同期 refactor:<ul>
+<li><code>test/integration/migrate_test.go</code>(P1.D)startPostgres → testutil.SetupPG</li>
+<li><code>test/integration/health_smoke_test.go</code>(P2.0 smoke)setupSmokeRouter / newWebPool → testutil</li>
+<li>新写的 <code>anime_endpoints_test.go</code> import testutil</li>
+</ul></li>
+<li><input type="checkbox" disabled="" />
+<strong>每个 handler 第一行加 query-level timeout</strong> — <code>ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second); defer cancel()</code>,堵 P2.0 design § 5 风险表里 pgxpool 连接耗尽 / 用户挂 60s 问题</li>
+<li><input type="checkbox" disabled="" />
+<strong>endpoint shape diff harness</strong> — Phase 8.5 shadow traffic 前需要 diff 工具。P2.1 写第一个 endpoint 时<strong>同步</strong>写 <code>test/shadow/diff_anime_detail_test.go</code>,跟 Express 真 prod 响应做 byte 比对。P2.0 byte fixture 是 envelope 层,这是 endpoint 层。</li>
+</ul>
+<h3 id="endpoint-待实现">9 endpoint 待实现</h3>
+<ul>
+<li>GET <code>/seasonal</code> / <code>/search</code> / <code>/schedule</code> / <code>/torrents</code> / <code>/trending</code> / <code>/yearly-top</code> / <code>/completed-gems</code></li>
+<li>GET <code>/:anilistId/watchers</code></li>
+<li>GET <code>/:anilistId</code></li>
+</ul>
+<p>3-source 磁力聚合(animes.garden + acg.rip + nyaa.si) + AniList GraphQL client + 3-phase 富化 queue(river)+ 5 个 ristretto cache 都在 P2.1 范围。</p>
+<hr />
+<h2 id="p2.2---p2.6-待开">P2.2 - P2.6 待开</h2>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Sub-milestone</th>
+<th>范围</th>
+<th>endpoint 数</th>
+<th>估时</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>P2.2</td>
+<td><code>/api/auth/*</code> + JWT + bcrypt + Gmail SMTP + dual-accept 7-day cutover</td>
+<td>7</td>
+<td>18-28 hr</td>
+</tr>
+<tr class="even">
+<td>P2.3</td>
+<td><code>/api/admin/*</code> + adminAuth + warm-all + 级联删除</td>
+<td>14</td>
+<td>15-22 hr</td>
+</tr>
+<tr class="odd">
+<td>P2.4</td>
+<td><code>/api/subscriptions/*</code> + <code>/api/users/*</code> + <code>/api/feed</code></td>
+<td>11</td>
+<td>12-18 hr</td>
+</tr>
+<tr class="even">
+<td>P2.5</td>
+<td><code>/api/comments/*</code> + <code>/api/danmaku/*</code> HTTP(读)</td>
+<td>4</td>
+<td>8-12 hr</td>
+</tr>
+<tr class="odd">
+<td>P2.6</td>
+<td><code>/api/dandanplay/*</code> + 3-phase match + 6 regex + 限流共享</td>
+<td>4</td>
+<td>24-37 hr</td>
+</tr>
+</tbody>
+</table>
+<p>每个独立 PR,部署 staging 跟 Express 跑 shape diff。完成后进 Phase 3 (Next.js + Bun)。</p>
+<hr />
+<h2 id="notes-decisions随时追加">Notes / Decisions(随时追加)</h2>
+<ul>
+<li>2026-05-21 12:30 — P2.0 设计文档 v1 出(22 文件 / 6 子任务 / 10-15 hr)。<code>/plan-eng-review</code> 跑 8 个 AskUserQuestion,削掉 B+E 到 P2.1,锁 CORS 顺序 / nextPage null / Page 泛型 / Data 无 error 返回 / NewError WithCause / /health skip log / inline smoke / 6 byte fixture。</li>
+<li>2026-05-21 13:00 — P2.0.A/C/D/smoke/F 全过。整 phase 单一 PR,5 commit。</li>
+<li><strong>教训:byte-level envelope 测试在 Phase 2 早期是 boil-the-lake 例子</strong>。Unit logic test 验“NotFound 码=NOT_FOUND”是不够的,真要捕捉 shadow traffic 阶段会 fail 的差异(key 顺序 / null vs 缺失字段 / HTML escape),必须从 Express 真实输出回写字节做 <code>bytes.Equal</code>。<code>httpx/express_fixture_test.go</code> 6 case 是模板,P2.x 每加 endpoint 写一组同模板的 byte fixture。</li>
+<li><strong>教训:Go internal 包名跟 third-party 撞</strong>:<code>internal/middleware/</code> 跟 <code>github.com/go-chi/chi/v5/middleware</code> 冲突,任何同时用本地中间件 + chi 自带 RequestID 的文件都要 alias 一个。改 <code>internal/httpmw/</code>(或 <code>httpx/</code> 也行)完全没这问题。Go 惯例:<code>internal/&lt;short-prefix&gt;</code> 优先,不重 stdlib / popular-third-party 包名。</li>
+<li><strong>教训:docker healthcheck 日志洪水</strong>:Docker <code>start_period: 30s</code> 每 30s 探一次 /health,prod 一个 pod 一天 2880 条 log。RequestLog 必须 verbatim skip <code>/health</code> 路径(<code>if req.URL.Path == "/health" { next.ServeHTTP(w, req); return }</code>)。如果只走 Debug level skip 会丢 5xx healthcheck 报警 —— P2.0.D 选了 verbatim skip + 业务 endpoint 全级别 log。</li>
+</ul>
+</body>
+</html>

@@ -4,59 +4,131 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>AnimeGo — MIGRATION_PLAN</title>
+  <title>AnimeGo — MIGRATION-PLAN</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
   <!--[if lt IE 9]>
     <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
   <![endif]-->
-  <style>
-  :root {
-    --bg: #0e1116; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
-    --code-bg: #161b22; --border: #30363d; --highlight: #f0c674;
-  }
-  html { background: var(--bg); color: var(--fg); color-scheme: dark; scroll-behavior: smooth; }
-  body {
-    background: var(--bg); color: var(--fg);
-    font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    max-width: 1100px; margin: 0 auto; padding: 2.5rem 3rem 6rem;
-  }
-  h1, h2, h3, h4, h5, h6 {
-    border-bottom: 1px solid var(--border); padding-bottom: .3em;
-    font-weight: 600; color: var(--fg); margin-top: 2em; margin-bottom: 0.6em;
-  }
-  h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; }
-  h1 { font-size: 1.85rem; color: var(--highlight); }
-  h2 { font-size: 1.45rem; color: var(--highlight); }
-  h3 { font-size: 1.15rem; border-bottom: 1px dashed var(--border); }
-  h4 { font-size: 1rem; border: 0; color: var(--muted); }
-  p { margin: 1em 0; }
-  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
-  code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
-    color: #ffa657; border: 1px solid var(--border); }
-  pre { background: var(--code-bg); padding: 1rem 1.2rem; overflow-x: auto;
-    border: 1px solid var(--border); border-radius: 6px; font-size: 0.84em;
-    line-height: 1.55; margin: 1em 0; }
-  pre code { padding: 0; background: transparent; color: var(--fg); font-size: 1em; border: 0; }
-  blockquote { border-left: 3px solid var(--accent); margin: 1em 0; padding: .6em 1.2em;
-    color: var(--muted); background: rgba(88,166,255,0.06); border-radius: 0 4px 4px 0; }
-  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
-  th, td { border: 1px solid var(--border); padding: .55em .85em; text-align: left; vertical-align: top; }
-  th { background: var(--code-bg); font-weight: 600; color: var(--highlight); }
-  tbody tr:nth-child(odd) { background: rgba(255,255,255,0.025); }
-  hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
-  nav#TOC { background: var(--code-bg); padding: 1.2rem 1.6rem; border-radius: 6px;
-    border: 1px solid var(--border); margin: 1.5rem 0 2.5rem; font-size: 0.88em; }
-  nav#TOC ul { padding-left: 1.4em; margin: 0.3em 0; list-style: none; }
-  nav#TOC > ul { padding-left: 0; }
-  strong { color: var(--highlight); font-weight: 600; }
-  em { color: #a5d6ff; font-style: normal; opacity: 0.85; }
-  li { margin: 0.18em 0; }
-  header.title-block-header { padding-bottom: 1.5em; border-bottom: 2px solid var(--border); margin-bottom: 2em; }
-  </style>
+    <style>
+    :root {
+      --bg: #0e1116; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+      --code-bg: #161b22; --border: #30363d; --highlight: #f0c674;
+    }
+    html { background: var(--bg); color: var(--fg); color-scheme: dark; scroll-behavior: smooth; }
+    body {
+      background: var(--bg); color: var(--fg);
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      max-width: 1100px; margin: 0 auto; padding: 2.5rem 3rem 6rem;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      border-bottom: 1px solid var(--border); padding-bottom: .3em;
+      font-weight: 600; color: var(--fg); margin-top: 2em; margin-bottom: 0.6em;
+    }
+    h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; }
+    h1 { font-size: 1.85rem; color: var(--highlight); }
+    h2 { font-size: 1.45rem; color: var(--highlight); }
+    h3 { font-size: 1.15rem; border-bottom: 1px dashed var(--border); }
+    h4 { font-size: 1rem; border: 0; color: var(--muted); }
+    p { margin: 1em 0; }
+    a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+    code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
+      color: #ffa657; border: 1px solid var(--border); }
+    pre { background: var(--code-bg); padding: 1rem 1.2rem; overflow-x: auto;
+      border: 1px solid var(--border); border-radius: 6px; font-size: 0.84em;
+      line-height: 1.55; margin: 1em 0; }
+    pre code { padding: 0; background: transparent; color: var(--fg); font-size: 1em; border: 0; }
+    blockquote { border-left: 3px solid var(--accent); margin: 1em 0; padding: .6em 1.2em;
+      color: var(--muted); background: rgba(88,166,255,0.06); border-radius: 0 4px 4px 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
+    th, td { border: 1px solid var(--border); padding: .55em .85em; text-align: left; vertical-align: top; }
+    th { background: var(--code-bg); font-weight: 600; color: var(--highlight); }
+    tbody tr:nth-child(odd) { background: rgba(255,255,255,0.025); }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+    nav#TOC { background: var(--code-bg); padding: 1.2rem 1.6rem; border-radius: 6px;
+      border: 1px solid var(--border); margin: 1.5rem 0 2.5rem; font-size: 0.88em; }
+    nav#TOC ul { padding-left: 1.4em; margin: 0.3em 0; list-style: none; }
+    nav#TOC > ul { padding-left: 0; }
+    strong { color: var(--highlight); font-weight: 600; }
+    em { color: #a5d6ff; font-style: normal; opacity: 0.85; }
+    li { margin: 0.18em 0; }
+    header.title-block-header { padding-bottom: 1.5em; border-bottom: 2px solid var(--border); margin-bottom: 2em; }
+    </style>
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">AnimeGo — MIGRATION_PLAN</h1>
+<h1 class="title">AnimeGo — MIGRATION-PLAN</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
@@ -122,17 +194,8 @@
 </ul>
 </nav>
 <h1 id="animego-全栈重构计划-v2">AnimeGo 全栈重构计划 v2</h1>
-<p><strong>启动:</strong> 2026-05-12
-<strong>Supersedes:</strong> v1 (2026-05-10,Next.js + Bun 全栈保留 Mongo + Express)
-<strong>Baseline:</strong> v2.0.1(commit <code>89516a1</code>,libass-wasm + Vite SPA + Express + MongoDB)
-<strong>目标终态:</strong>
-- 前端:<strong>Next.js 16</strong> App Router + RSC + TSX + Bun runtime(2026-05-12 二轮 review 1A 改正:14 已不在 Active LTS)
-- 后端:Go 1.23 + chi + pgx + sqlc + PostgreSQL 16(VPS 自建)
-- 实时:Node + socket.io 微服务(保留,Go 库未成熟)
-- 部署:big-bang cutover,24h 真实回滚窗口</p>
-<p><strong>总工时估算:</strong> 410-650 hr (中位 ~530 hr) ~ 业余 7-13 个月
-(二轮 review 加:P2.6 +12hr、P2.8 ws-server split +10-15hr)
-<strong>Innovation tokens:</strong> <strong>6</strong> / 3(Next.js 16 把 14 那个 token 消掉,因为 React 19 默认 = stable,不再算单独 token;仍超 budget 2)</p>
+<p><strong>启动:</strong> 2026-05-12 <strong>Supersedes:</strong> v1 (2026-05-10,Next.js + Bun 全栈保留 Mongo + Express) <strong>Baseline:</strong> v2.0.1(commit <code>89516a1</code>,libass-wasm + Vite SPA + Express + MongoDB) <strong>目标终态:</strong> - 前端:<strong>Next.js 16</strong> App Router + RSC + TSX + Bun runtime(2026-05-12 二轮 review 1A 改正:14 已不在 Active LTS) - 后端:Go 1.23 + chi + pgx + sqlc + PostgreSQL 16(VPS 自建) - 实时:Node + socket.io 微服务(保留,Go 库未成熟) - 部署:big-bang cutover,24h 真实回滚窗口</p>
+<p><strong>总工时估算:</strong> 410-650 hr (中位 ~530 hr) ~ 业余 7-13 个月 (二轮 review 加:P2.6 +12hr、P2.8 ws-server split +10-15hr) <strong>Innovation tokens:</strong> <strong>6</strong> / 3(Next.js 16 把 14 那个 token 消掉,因为 React 19 默认 = stable,不再算单独 token;仍超 budget 2)</p>
 <hr />
 <h2 id="决策摘要">1. 决策摘要</h2>
 <h3 id="范围">范围</h3>
@@ -444,19 +507,8 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 │     | gzip | rclone rcat r2:animego-backup/pg-$(date +\%F).sql.gz
 │   0 4 * * * rclone delete --min-age 30d r2:animego-backup/
 └── 验证: bun --bun next dev (frontend) + go run ./go-api/cmd/server (backend) + docker-compose up postgres</code></pre>
-<p><strong>Tests (P0):</strong>
-- <code>go test ./go-api/...</code> 跑通(空套件)
-- pg_dump → R2 → restore 演练成功(必须真跑一次)
-- backup 文件能下载 + 解压 + restore 到 staging
-- R2 30-day retention cleanup cron 实际跑(模拟 31-day 老文件 + 触发 rclone delete –min-age 30d)</p>
-<p><strong>Acceptance:</strong>
-- Go 服务 <code>:8080/health</code> 返回 OK
-- Postgres 容器 healthy
-- R2 backup 当天有文件,restore 演练通过
-- <strong>scripts/dev.sh 一键起 6 个进程</strong>(postgres + mongo + go-api + ws-server + Next.js + 加 .env.example check)(二轮 review 2C)
-- <strong>TTHW &lt; 5 min</strong>(2026-05-20 DX review NEW;2026-05-20 eng review C2 修正):dev.sh 在 3 endpoint 全 200 后写 <code>/tmp/animego-dev-up.txt</code> 时间戳;TTHW 测量通过包装脚本 <code>scripts/measure-tthw.sh</code> —— 后台启动 dev.sh,前台轮询 marker 文件出现,记录 wall-clock 差。<strong>原 <code>time bash dev.sh</code> 方案不可用</strong>,因为 dev.sh 末尾 <code>wait</code> 阻塞到 Ctrl+C 才退出,time 测的是用户按键时间不是 magic moment。M1/M2 Mac warm-cache 基准 &lt; 5min;首次 clone 因 Docker pull + bun install 200-400MB 下载可能更长,见 §8 TODO Eng review #5
-- <strong>3 个 health endpoint 全 200 才算 up</strong>(2026-05-20 DX review NEW):<code>curl :3000/_health &amp;&amp; curl :8080/health &amp;&amp; curl :3001/health</code>
-- <strong>Fixture seed</strong>(2026-05-20 DX review NEW):dev.sh 内置 <code>go run ./cmd/seed --fixture dev_5_anime.sql</code>,localhost:3000 首页 0 配置见到 5 部 anime(magical moment 锚点)</p>
+<p><strong>Tests (P0):</strong> - <code>go test ./go-api/...</code> 跑通(空套件) - pg_dump → R2 → restore 演练成功(必须真跑一次) - backup 文件能下载 + 解压 + restore 到 staging - R2 30-day retention cleanup cron 实际跑(模拟 31-day 老文件 + 触发 rclone delete –min-age 30d)</p>
+<p><strong>Acceptance:</strong> - Go 服务 <code>:8080/health</code> 返回 OK - Postgres 容器 healthy - R2 backup 当天有文件,restore 演练通过 - <strong>scripts/dev.sh 一键起 6 个进程</strong>(postgres + mongo + go-api + ws-server + Next.js + 加 .env.example check)(二轮 review 2C) - <strong>TTHW &lt; 5 min</strong>(2026-05-20 DX review NEW;2026-05-20 eng review C2 修正):dev.sh 在 3 endpoint 全 200 后写 <code>/tmp/animego-dev-up.txt</code> 时间戳;TTHW 测量通过包装脚本 <code>scripts/measure-tthw.sh</code> —— 后台启动 dev.sh,前台轮询 marker 文件出现,记录 wall-clock 差。<strong>原 <code>time bash dev.sh</code> 方案不可用</strong>,因为 dev.sh 末尾 <code>wait</code> 阻塞到 Ctrl+C 才退出,time 测的是用户按键时间不是 magic moment。M1/M2 Mac warm-cache 基准 &lt; 5min;首次 clone 因 Docker pull + bun install 200-400MB 下载可能更长,见 §8 TODO Eng review #5 - <strong>3 个 health endpoint 全 200 才算 up</strong>(2026-05-20 DX review NEW):<code>curl :3000/_health &amp;&amp; curl :8080/health &amp;&amp; curl :3001/health</code> - <strong>Fixture seed</strong>(2026-05-20 DX review NEW):dev.sh 内置 <code>go run ./cmd/seed --fixture dev_5_anime.sql</code>,localhost:3000 首页 0 配置见到 5 部 anime(magical moment 锚点)</p>
 <h3 id="phase-1-migration-tool-mongo-postgres-40-60-hr-critical">Phase 1 — Migration Tool (Mongo → Postgres) (40-60 hr) ← critical</h3>
 <p>写一个 Go 单二进制 <code>cmd/migrate-mongo</code>,一次性把 Mongo 数据 → Postgres。</p>
 <pre><code>├── go-api/cmd/migrate-mongo/main.go
@@ -481,19 +533,8 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 └── Dry-run mode:
     --dry-run = 全程读 + transform + count,但不写 Postgres
     输出 &quot;would insert N rows to anime_cache, N to anime_characters, ...&quot;</code></pre>
-<p><strong>Tests (P1):</strong>
-- testify 单测每个 transform 函数(覆盖 ObjectId, Date 时区,embedded subdoc nil)
-- testcontainers-go:启 mongo + postgres,导入 fixture mongo data,跑 migration,assert Postgres rows 等价
-- <strong>dry-run on prod mongo dump</strong>:跑全量 dry-run,row count 跟 mongo count 一致,差异 &lt; 0.1%
-- <strong>二轮 review 6A NEW</strong> field-level parity test:10 个 UI-critical field(titleChinese/characters[0].nameCn/coverImageColor/posterAccent/startDate/…)随机抽 1000 行在 mongo 跟刚写入 PG 双查,严格 equal(null 等价容忍)
-- <strong>NEW</strong> idempotency:同一 mongo dump 重跑 PG 不重 row(UPSERT or transaction wrap)
-- <strong>NEW</strong> pg_cron danmaku TTL 实际 DELETE fire test(插 18-month 老 danmaku → 触发 cron 调度 → SELECT count == 0)</p>
-<p><strong>Acceptance:</strong>
-- dry-run + actual run 都通过
-- migration 总耗时 &lt; 30 分钟(P9 cutover 窗口给的预算)
-- 失败行 &lt; 0.01%,失败原因有 log
-- field parity test 全绿
-- pg_cron TTL 真触发</p>
+<p><strong>Tests (P1):</strong> - testify 单测每个 transform 函数(覆盖 ObjectId, Date 时区,embedded subdoc nil) - testcontainers-go:启 mongo + postgres,导入 fixture mongo data,跑 migration,assert Postgres rows 等价 - <strong>dry-run on prod mongo dump</strong>:跑全量 dry-run,row count 跟 mongo count 一致,差异 &lt; 0.1% - <strong>二轮 review 6A NEW</strong> field-level parity test:10 个 UI-critical field(titleChinese/characters[0].nameCn/coverImageColor/posterAccent/startDate/…)随机抽 1000 行在 mongo 跟刚写入 PG 双查,严格 equal(null 等价容忍) - <strong>NEW</strong> idempotency:同一 mongo dump 重跑 PG 不重 row(UPSERT or transaction wrap) - <strong>NEW</strong> pg_cron danmaku TTL 实际 DELETE fire test(插 18-month 老 danmaku → 触发 cron 调度 → SELECT count == 0)</p>
+<p><strong>Acceptance:</strong> - dry-run + actual run 都通过 - migration 总耗时 &lt; 30 分钟(P9 cutover 窗口给的预算) - 失败行 &lt; 0.01%,失败原因有 log - field parity test 全绿 - pg_cron TTL 真触发</p>
 <h3 id="phase-2-go-api-重写-5-个-sub-milestone共-100-160-hr">Phase 2 — Go API 重写 (5 个 sub-milestone,共 100-160 hr)</h3>
 <p>每个 sub-milestone 独立 PR ship。每个完成后 stage 部署到 staging Go 实例,跟 Express 跑 shape diff 对照。</p>
 <h4 id="p2.1-apianime-富化-queue-35-55-hr">P2.1 — <code>/api/anime/*</code> + 富化 queue (35-55 hr)</h4>
@@ -517,10 +558,7 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
     ristretto with TinyLFU, 1h TTL
     ⚠️ 二轮 review TODO-2:本 phase commit 前决定 2-tier cache 主从 + 文档
        (ristretto 主 vs Postgres cache 表主),invalidate 路径写下来</code></pre>
-<p><strong>Tests:</strong> 9 endpoint testify 单测 + 3 关键 shape-diff with Express(trending/search/detail)+ river worker integration test
-- <strong>NEW</strong> river 重试 on transient Bangumi 500:mock 5xx → river 默认 3 retry → 第 4 次 finally fail
-- <strong>NEW</strong> rate limiter goroutine-safe:100 goroutine 并发调用 dandanplay limiter,assert 间隔 ≥ 800ms,无 race(go test -race)
-<strong>Acceptance:</strong> 9 endpoint shape 与 Express 等价 + 富化 queue Postgres-backed 不丢任务 + 2-tier cache 主从决策 documented</p>
+<p><strong>Tests:</strong> 9 endpoint testify 单测 + 3 关键 shape-diff with Express(trending/search/detail)+ river worker integration test - <strong>NEW</strong> river 重试 on transient Bangumi 500:mock 5xx → river 默认 3 retry → 第 4 次 finally fail - <strong>NEW</strong> rate limiter goroutine-safe:100 goroutine 并发调用 dandanplay limiter,assert 间隔 ≥ 800ms,无 race(go test -race) <strong>Acceptance:</strong> 9 endpoint shape 与 Express 等价 + 富化 queue Postgres-backed 不丢任务 + 2-tier cache 主从决策 documented</p>
 <h4 id="p2.2-apiauth-jwt-gmail-smtp-18-28-hr">P2.2 — <code>/api/auth/*</code> + JWT + Gmail SMTP (18-28 hr)</h4>
 <pre><code>├── 7 个 endpoint:
 │   POST /register /login /refresh /logout /forgot-password /reset-password/:token
@@ -539,18 +577,14 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
    和 Cookie(新 httpOnly)。Cookie 主、header 后兼容 7 天。
    UI 在 banner 提示&quot;安全升级,部分用户需重新登录&quot;
    T+7 cookie-only,header reject 401。</code></pre>
-<p><strong>Tests:</strong> register→login→me→refresh→logout E2E + bcrypt hash 兼容性 + 密码重置邮件 mock
-- <strong>二轮 review 4C</strong> bcrypt fixture <strong>必须用 mongo dump 真 prod hash sample(3-5 条),不是 unit test 时 hash 出的新值</strong>
-- <strong>二轮 review 4A NEW</strong> dual-accept unit + E2E:同一 token 通过 header / cookie 两种方式均能过验,T+7 后 header reject
-<strong>Acceptance:</strong> 现有 Express 用户登录在 Go 后端成功(bcrypt 兼容)+ dual-accept 7-day cutover 平滑</p>
+<p><strong>Tests:</strong> register→login→me→refresh→logout E2E + bcrypt hash 兼容性 + 密码重置邮件 mock - <strong>二轮 review 4C</strong> bcrypt fixture <strong>必须用 mongo dump 真 prod hash sample(3-5 条),不是 unit test 时 hash 出的新值</strong> - <strong>二轮 review 4A NEW</strong> dual-accept unit + E2E:同一 token 通过 header / cookie 两种方式均能过验,T+7 后 header reject <strong>Acceptance:</strong> 现有 Express 用户登录在 Go 后端成功(bcrypt 兼容)+ dual-accept 7-day cutover 平滑</p>
 <h4 id="p2.3-apiadmin-adminauth-15-22-hr">P2.3 — <code>/api/admin/*</code> + adminAuth (15-22 hr)</h4>
 <pre><code>├── 14 个 endpoint(stats/enrichment CRUD/users CRUD/heal-cn pause-resume/warm-all)
 ├── adminAuth middleware:JWT 解码 role 字段 = &quot;admin&quot;
 ├── 富化 queue 控制(pause/resume V3 queue,通过 river PauseQueue)
 ├── warm-all 后台跑,respond 立即(goroutine + sync.Mutex 防并发)
 └── 用户 CRUD 级联删除(事务):DELETE users + subscriptions + follows</code></pre>
-<p><strong>Tests:</strong> 14 endpoint shape diff + 越权 E2E(非 admin 401)+ 级联删除事务测试
-<strong>Acceptance:</strong> admin 流程跟 Express 等价</p>
+<p><strong>Tests:</strong> 14 endpoint shape diff + 越权 E2E(非 admin 401)+ 级联删除事务测试 <strong>Acceptance:</strong> admin 流程跟 Express 等价</p>
 <h4 id="p2.4-apisubscriptions-apiusers-apifeed-12-18-hr">P2.4 — <code>/api/subscriptions/*</code> + <code>/api/users/*</code> + <code>/api/feed</code> (12-18 hr)</h4>
 <pre><code>├── /api/subscriptions: 5 endpoint(list/get/upsert/update/delete)
 ├── /api/users/:username/{follow,followers,following,profile}: 5 endpoint
@@ -558,15 +592,13 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 ├── follow 表设计:UNIQUE (follower_id, followee_id)
 ├── feed:JOIN subscriptions + users + anime_cache,500 followee 上限
 └── 创建 subscription 时 side-effect:确保 anime 在 cache 里(否则触发 AniList fetch)</code></pre>
-<p><strong>Tests:</strong> 移植 server/<strong>tests</strong>/follow.controller.test.js 和 profile.controller.test.js 的 23 个测试到 testify
-<strong>Acceptance:</strong> follow/profile/feed 跟 Express 等价</p>
+<p><strong>Tests:</strong> 移植 server/<strong>tests</strong>/follow.controller.test.js 和 profile.controller.test.js 的 23 个测试到 testify <strong>Acceptance:</strong> follow/profile/feed 跟 Express 等价</p>
 <h4 id="p2.5-apicomments-apidanmaku-http-8-12-hr">P2.5 — <code>/api/comments/*</code> + <code>/api/danmaku/*</code> HTTP (8-12 hr)</h4>
 <pre><code>├── /api/comments: 3 endpoint(list/post/delete)
 │   adjacency-list 回复树通过递归 CTE 实现
 ├── /api/danmaku/:anilistId/:episode: 1 endpoint(读 500 条 + live_ends_at)
 └── 写弹幕走 socket.io,不在本 phase</code></pre>
-<p><strong>Tests:</strong> 评论树读取 ≡ Mongo 输出,递归 CTE 性能 OK
-<strong>Acceptance:</strong> 评论 + 历史弹幕读取等价</p>
+<p><strong>Tests:</strong> 评论树读取 ≡ Mongo 输出,递归 CTE 性能 OK <strong>Acceptance:</strong> 评论 + 历史弹幕读取等价</p>
 <h4 id="p2.6-apidandanplay-3-phase-match-二轮-review-6c-12hr-24-37-hr">P2.6 — <code>/api/dandanplay/*</code> + 3-phase match (二轮 review 6C +12hr → <strong>24-37 hr</strong>)</h4>
 <pre><code>├── 4 endpoint(/match /search /comments/:episodeId /episodes/:animeId)
 ├── 3-phase match 逻辑(二轮 review 6C 修正描述,Bangumi 真实角色:2s timeout 兜底):
@@ -589,13 +621,7 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 ├── dandanplay app_id + app_secret 通过 env 注入(headers X-AppId / X-AppSecret,无 HMAC)
 ├── 整体 /match timeout cap(防 Phase 1 + N×Phase 2 + Phase 3 级联 8s 爆走):20s 总 timeout
 └── ristretto 缓存(30min comments / 24h episodes,双 key `bgm:` / `dan:` 前缀)</code></pre>
-<p><strong>Tests:</strong> /match 3-phase 路径每一条都有 testify case + timeout 兼容
-- <strong>二轮 review 6C</strong> buildEpisodeMap 3-level edge testify 全覆盖(普通集 / OVA / Special / index 0-based vs 1-based 边界)
-- <strong>NEW</strong> loose-match accept gate testify case(假 dandanplay 返回 !isMatched 但 title 模糊匹配)
-- <strong>NEW</strong> AnimeCache pg_trgm 替换正确性:同 keyword 在 Mongo regex vs PG pg_trgm 命中集 diff &lt; 5%
-- <strong>NEW</strong> findSiteAnime 2s timeout 真触发(mock bangumi 4s response → assert 早退)
-- <strong>NEW</strong> 整体 /match 20s timeout cap 测试(mock Phase 1+2+3 各 8s → 整体 20s abort)
-<strong>Acceptance:</strong> /match 命中率 ≥ Express 的 99%(基于 staging 流量回放)+ buildEpisodeMap 0 off-by-one</p>
+<p><strong>Tests:</strong> /match 3-phase 路径每一条都有 testify case + timeout 兼容 - <strong>二轮 review 6C</strong> buildEpisodeMap 3-level edge testify 全覆盖(普通集 / OVA / Special / index 0-based vs 1-based 边界) - <strong>NEW</strong> loose-match accept gate testify case(假 dandanplay 返回 !isMatched 但 title 模糊匹配) - <strong>NEW</strong> AnimeCache pg_trgm 替换正确性:同 keyword 在 Mongo regex vs PG pg_trgm 命中集 diff &lt; 5% - <strong>NEW</strong> findSiteAnime 2s timeout 真触发(mock bangumi 4s response → assert 早退) - <strong>NEW</strong> 整体 /match 20s timeout cap 测试(mock Phase 1+2+3 各 8s → 整体 20s abort) <strong>Acceptance:</strong> /match 命中率 ≥ Express 的 99%(基于 staging 流量回放)+ buildEpisodeMap 0 off-by-one</p>
 <h4 id="p2.7-testify-testcontainers-go-等价重写-311-测试-60-80-hr">P2.7 — testify + testcontainers-go 等价重写 311 测试 (60-80 hr)</h4>
 <pre><code>├── server/__tests__/ 311 个 Jest+Supertest 测试逐一重写为 testify(原 plan 写 317,实际 311)
 ├── testcontainers-go 起 real postgres,跑每个集成测试隔离 DB
@@ -605,13 +631,8 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
 │   go-api/test/integration/*_test.go     端到端
 ├── Go test coverage gate:`go test -cover` ≥ 80%(对标 client 现有 1342)
 └── CI: GitHub Actions 跑 go test + testcontainers (需 Docker-in-Docker)</code></pre>
-<p><strong>Tests:</strong> 这就是测试本身
-<strong>Acceptance:</strong> 311 个测试全绿 + 覆盖率 ≥ 80% + shape-diff regression suite 全过</p>
-<p><strong>M2 整体 Acceptance:</strong>
-- 48 个 HTTP endpoint Go 实现完成(admin 14 + anime 9 + auth 7 + sub 5 + user 5 + comment 3 + danmaku 1 + dandan 4)
-- 311 测试等价覆盖
-- staging 部署的 Go 实例与 Express shape diff 6 关键路径全部等价
-- river 富化 queue 重启不丢任务</p>
+<p><strong>Tests:</strong> 这就是测试本身 <strong>Acceptance:</strong> 311 个测试全绿 + 覆盖率 ≥ 80% + shape-diff regression suite 全过</p>
+<p><strong>M2 整体 Acceptance:</strong> - 48 个 HTTP endpoint Go 实现完成(admin 14 + anime 9 + auth 7 + sub 5 + user 5 + comment 3 + danmaku 1 + dandan 4) - 311 测试等价覆盖 - staging 部署的 Go 实例与 Express shape diff 6 关键路径全部等价 - river 富化 queue 重启不丢任务</p>
 <h4 id="p2.8-ws-server-拆分-二轮-review-3a-new-10-15-hr">P2.8 — ws-server 拆分 (二轮 review 3A NEW, 10-15 hr)</h4>
 <p>今天 socket.io 跟 Express 同进程跑(<code>server/index.js:125 setupSocket(server)</code>)。big-bang cutover 前必须拆出独立 Node 服务。</p>
 <pre><code>├── 新建 ws-server/ 目录(独立 package.json + Dockerfile + dev script)
@@ -690,8 +711,7 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
         ◦ vnstat / iftop 当前 monthly outbound
         ◦ VPS 提供商带宽 plan threshold
         ◦ P8.5 mirror 需要 sample 比率(若 baseline × 2 &gt; threshold 则 mirror 50% throttle)</code></pre>
-<p><strong>Tests:</strong> Next + Bun dev/build/test 三链路全绿
-<strong>Acceptance:</strong> <code>localhost:3000</code> 出 Next 默认页 + API rewrite 到 :8080 拿到真数据 + BASELINE.md 全 7 项数据写入</p>
+<p><strong>Tests:</strong> Next + Bun dev/build/test 三链路全绿 <strong>Acceptance:</strong> <code>localhost:3000</code> 出 Next 默认页 + API rewrite 到 :8080 拿到真数据 + BASELINE.md 全 7 项数据写入</p>
 <h3 id="phase-4-public-pages-rsc-17-27-hr">Phase 4 — Public Pages RSC (17-27 hr)</h3>
 <pre><code>├── LandingPage → Server Component
 │   fetch from Go /api/anime/trending + yearly-top (RSC fetch)
@@ -850,11 +870,7 @@ P10  Lighthouse CI + Sentry alert wiring + Playwright + baseline   15-30 hr
     
     Day 7 收工:错误率 &lt; 1% + P99 &lt; baseline×1.5 + 两个演练都过 → 进 P9
     否则:延期,继续 fix</code></pre>
-<p><strong>Tests:</strong> 7 天 shadow 期间 endpoint 覆盖 100%(每个 endpoint 都至少被影子访问 &gt; 1k 次)
-- <strong>NEW</strong> Day 6 自动校验脚本:scripts/check-coverage.sh 跑 SELECT count(*) FROM go_request_log WHERE endpoint = ANY(…) GROUP BY endpoint,assert 每个 endpoint count ≥ 1000
-- <strong>NEW</strong> Shadow Postgres 隔离测试:Go 中 SHADOW_TRAFFIC=true 时禁止 INSERT/UPDATE/DELETE,unit test
-- <strong>二轮 review 1T NEW</strong> Day 6 cutover rehearsal 必须过
-- <strong>二轮 review 2T NEW</strong> Day 7 rollback drill 必须 &lt; 5min</p>
+<p><strong>Tests:</strong> 7 天 shadow 期间 endpoint 覆盖 100%(每个 endpoint 都至少被影子访问 &gt; 1k 次) - <strong>NEW</strong> Day 6 自动校验脚本:scripts/check-coverage.sh 跑 SELECT count(*) FROM go_request_log WHERE endpoint = ANY(…) GROUP BY endpoint,assert 每个 endpoint count ≥ 1000 - <strong>NEW</strong> Shadow Postgres 隔离测试:Go 中 SHADOW_TRAFFIC=true 时禁止 INSERT/UPDATE/DELETE,unit test - <strong>二轮 review 1T NEW</strong> Day 6 cutover rehearsal 必须过 - <strong>二轮 review 2T NEW</strong> Day 7 rollback drill 必须 &lt; 5min</p>
 <p><strong>Acceptance:</strong> P99 &lt; baseline×1.5 + 错误率 &lt; 1% + 0 Go panic + 0 Postgres deadlock + cutover rehearsal pass + rollback drill &lt; 5min</p>
 <h3 id="phase-9-big-bang-cutover-10-20-hr">Phase 9 — Big-Bang Cutover (10-20 hr)</h3>
 <p>凌晨 3-5am UTC+8 维护窗口。提前 7 天 announce。</p>
@@ -906,13 +922,7 @@ T+30 day:
 ├── docker compose rm mongodb
 ├── 删 mongo-data volume
 └── R2 mongodump 保留 90 天后删</code></pre>
-<p><strong>Tests:</strong> P8.5 已覆盖 + cutover 后 1h smoke test
-<strong>Acceptance:</strong>
-- T+24h 错误率 &lt; 1%
-- 0 critical bug
-- nginx switch &lt; 5 分钟
-- migration tool &lt; 30 分钟
-- 总 maintenance window &lt; 2 小时</p>
+<p><strong>Tests:</strong> P8.5 已覆盖 + cutover 后 1h smoke test <strong>Acceptance:</strong> - T+24h 错误率 &lt; 1% - 0 critical bug - nginx switch &lt; 5 分钟 - migration tool &lt; 30 分钟 - 总 maintenance window &lt; 2 小时</p>
 <h3 id="phase-10-lighthouse-ci-sentry-playwright-e2e-15-30-hr">Phase 10 — Lighthouse CI + Sentry + Playwright E2E (15-30 hr)</h3>
 <pre><code>├── 5 个关键 Playwright E2E:
 │   注册 → 登录 → 加文件夹 → 播放
@@ -939,13 +949,7 @@ T+30 day:
 ├── ristretto sizing(二轮 review Pf6):anime_cache lookup cache 容量按 47K 算 50MB,加监控
 ├── P5 dual-mode P10 拍板:基于 P8.5 数据决定 8-query 或 json_agg 默认
 └── client 1328 测试适配 next/navigation(原 plan 写 1342,实际 1328)</code></pre>
-<p><strong>Acceptance:</strong>
-- 1328 client + 311 go-api + 5 E2E 全绿
-- Lighthouse 不退化 &gt; 10%
-- Sentry alert wiring 验证通过
-- 视觉回归 baseline 建立 + workflow 可重 snap
-- 5 nginx header 联动 0 console.error
-- detail page query strategy 决定 + 文档</p>
+<p><strong>Acceptance:</strong> - 1328 client + 311 go-api + 5 E2E 全绿 - Lighthouse 不退化 &gt; 10% - Sentry alert wiring 验证通过 - 视觉回归 baseline 建立 + workflow 可重 snap - 5 nginx header 联动 0 console.error - detail page query strategy 决定 + 文档</p>
 <hr />
 <h2 id="architecture-risks">3. Architecture Risks</h2>
 <table>
@@ -1115,8 +1119,7 @@ T+30 day:
 </tr>
 </tbody>
 </table>
-<p><strong>R0 / R1 / R5 / R8 / R13 / R15 / R20 是 critical</strong>,必须提前规划 mitigation。
-<strong>R19 是中危但 P3 启动前必须装好 hook</strong>(否则下一次 deploy 又踩同样的坑)。</p>
+<p><strong>R0 / R1 / R5 / R8 / R13 / R15 / R20 是 critical</strong>,必须提前规划 mitigation。 <strong>R19 是中危但 P3 启动前必须装好 hook</strong>(否则下一次 deploy 又踩同样的坑)。</p>
 <hr />
 <h2 id="phase-gating-规则">3.5 Phase Gating 规则</h2>
 <p>每个 phase 进下一个之前必须满足:</p>
@@ -1291,16 +1294,10 @@ T+30 day:
 <span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a><span class="st">  docker compose start mongodb &amp;&amp; </span><span class="dt">\</span></span>
 <span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a><span class="st">  docker compose start app-express  # 重启 Express(P8 必须保留 Express dockerfile + image)</span></span>
 <span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;</span></span></code></pre></div>
-<p><strong>前提条件:</strong>
-- Express + Mongo image 仍在 docker images 列表里(不要 prune)
-- mongo 容器 stop 不 destroy(volume 保留)
-- nginx config 有 “回 Express” 的注释 + 一行能恢复</p>
+<p><strong>前提条件:</strong> - Express + Mongo image 仍在 docker images 列表里(不要 prune) - mongo 容器 stop 不 destroy(volume 保留) - nginx config 有 “回 Express” 的注释 + 一行能恢复</p>
 <p><strong>数据损失:</strong> 24h 之间 Postgres 的所有 user-side 写入(注册、订阅、评论、弹幕)。Mongo 是 cutover 时的冻结快照。</p>
 <h3 id="超过-24h不再支持-rollback">超过 24h:不再支持 Rollback</h3>
-<p><strong>24h 之后,cutover 是 irreversible。</strong> mongo 30 天保留 + R2 mongodump 90 天只用于:
-1. <strong>法律取证</strong> — 用户数据 GDPR delete request 历史追溯
-2. <strong>灾难恢复</strong> — Postgres 完全崩溃且 R2 pg_dump 同时不可用的极端 case
-3. <strong>审计</strong> — schema 迁移 bug 事后复盘</p>
+<p><strong>24h 之后,cutover 是 irreversible。</strong> mongo 30 天保留 + R2 mongodump 90 天只用于: 1. <strong>法律取证</strong> — 用户数据 GDPR delete request 历史追溯 2. <strong>灾难恢复</strong> — Postgres 完全崩溃且 R2 pg_dump 同时不可用的极端 case 3. <strong>审计</strong> — schema 迁移 bug 事后复盘</p>
 <p><strong>不可用作 rollback 路径。</strong> 任何“切回 mongo”的操作都会丢失 cutover 后的所有用户写入。</p>
 <h3 id="完整-v2.0-spa-回滚放弃整个-plan">完整 v2.0 SPA 回滚(放弃整个 plan)</h3>
 <div class="sourceCode" id="cb22"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> root@45.152.65.208 <span class="st">&quot;cd /opt/animego &amp;&amp; </span><span class="dt">\</span></span>
@@ -1333,8 +1330,7 @@ P8 (部署架构) 必须等所有 lane 合并(含 P2.8)
 P8.5 (shadow) 必须等 P8 完成
 P9 (cutover) 必须等 P8.5 7 天通过(含 day-6 rehearsal + day-7 rollback drill)
 P10 (测试 + 性能) 持续穿插</code></pre>
-<p><strong>冲突警告</strong>(二轮 review 加):
-- Lane H(P2.8 ws-server)跟 Lane A(P2.1 anime + 富化)都会创建 PG <code>danmakus</code> 表的引用 — schema migration 0001 必须在两 lane 都 fork 之前 land,所以 P1 migrations 是 P2.x 全部 lane 的 base 依赖。</p>
+<p><strong>冲突警告</strong>(二轮 review 加): - Lane H(P2.8 ws-server)跟 Lane A(P2.1 anime + 富化)都会创建 PG <code>danmakus</code> 表的引用 — schema migration 0001 必须在两 lane 都 fork 之前 land,所以 P1 migrations 是 P2.x 全部 lane 的 base 依赖。</p>
 <p>单人 + Claude Code 协作下并行能压缩 30-50 hr。</p>
 <hr />
 <h2 id="起步动作-p0-第一天">6. 起步动作 (P0 第一天)</h2>
@@ -1379,8 +1375,7 @@ P10 (测试 + 性能) 持续穿插</code></pre>
 <hr />
 <h2 id="status-tracking">7. Status Tracking</h2>
 <blockquote>
-<p><strong>Status check 2026-05-20:</strong> Plan 落地 8 天,全部 phase 仍 <code>not started</code>。本周要么起 P0,要么 plan 随上游 stack 演进而陈旧(已发生:Bun 1.3.14 + Zig→Rust 重写,见决策日志新行 + R19/R20)。
-<strong>下一次 audit 触发:</strong> P0 开工日 / 2026-06-01,取早。</p>
+<p><strong>Status check 2026-05-20:</strong> Plan 落地 8 天,全部 phase 仍 <code>not started</code>。本周要么起 P0,要么 plan 随上游 stack 演进而陈旧(已发生:Bun 1.3.14 + Zig→Rust 重写,见决策日志新行 + R19/R20)。 <strong>下一次 audit 触发:</strong> P0 开工日 / 2026-06-01,取早。</p>
 </blockquote>
 <table>
 <colgroup>
@@ -1415,118 +1410,125 @@ P10 (测试 + 性能) 持续穿插</code></pre>
 <td style="text-align: right;">~10 hr(同一天集中跑;subagent + integration-test 反复迭代;100% field parity)— 详 <a href="P1-PROGRESS.md"><code>P1-PROGRESS.md</code></a> / <a href="P1-PROGRESS.html"><code>P1-PROGRESS.html</code></a> / <a href="ERD.md"><code>ERD.md</code></a></td>
 </tr>
 <tr class="odd">
+<td>P2.0 chi 骨架(eng-review 后追加)</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-21</td>
+<td>2026-05-21</td>
+<td style="text-align: right;">~6 hr(vs 7-10 estimate;A/C 并行 subagent + D 我手写 + smoke + live curl)— 详 <a href="P2.0-DESIGN.md"><code>P2.0-DESIGN.md</code></a> / <a href="P2.0-DESIGN.html"><code>P2.0-DESIGN.html</code></a> / <a href="P2-PROGRESS.md"><code>P2-PROGRESS.md</code></a> / <a href="P2-PROGRESS.html"><code>P2-PROGRESS.html</code></a></td>
+</tr>
+<tr class="even">
 <td>P2.1 /api/anime/*</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>P2.2 /api/auth/*</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>P2.3 /api/admin/*</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>P2.4 /api/sub + user + feed</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>P2.5 /api/comments + danmaku</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>P2.6 /api/dandanplay/*</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>P2.7 testify + testcontainers</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>P2.8 ws-server 拆出 (NEW)</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>P3 Next.js 16 骨架 + Bun</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>P4 Public Pages RSC</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>P5 SEO 核心 ISR</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>P6 Library + Player</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>P7 Admin RSC</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>P8 部署架构</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>P8.5 Shadow Traffic</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>P9 Big-Bang Cutover</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
 <td style="text-align: right;">—</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>P10 Lighthouse + Sentry + E2E</td>
 <td>not started</td>
 <td>—</td>
@@ -1864,11 +1866,7 @@ Postgres → managed (Supabase / Neon) 如果 VPS 不够用了</li>
 <span id="cb31-36"><a href="#cb31-36" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Magic at: http://localhost:3000  (seed: 5 anime ready)&quot;</span></span>
 <span id="cb31-37"><a href="#cb31-37" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Ctrl+C stops app procs; docker compose -f docker-compose.dev.yml down for DBs&quot;</span></span>
 <span id="cb31-38"><a href="#cb31-38" aria-hidden="true" tabindex="-1"></a><span class="bu">wait</span></span></code></pre></div>
-<p><strong>P0 dev.sh acceptance</strong>:
-- <code>time bash scripts/dev.sh</code> 冷启动到 3 endpoint 200 &lt; 5min(M1/M2 Mac 基准)
-- Ctrl+C 杀掉 3 个 app 进程(Docker DB 仍在,显式 <code>docker compose down</code>)
-- localhost:3000 首页 0 配置可见 5 部 seed anime(magical moment)
-- 日志 prefix <code>[go-api]</code> / <code>[ws-server]</code> / <code>[next]</code> 让 debug 知道哪个进程出错(DX review Pass 3)</p>
+<p><strong>P0 dev.sh acceptance</strong>: - <code>time bash scripts/dev.sh</code> 冷启动到 3 endpoint 200 &lt; 5min(M1/M2 Mac 基准) - Ctrl+C 杀掉 3 个 app 进程(Docker DB 仍在,显式 <code>docker compose down</code>) - localhost:3000 首页 0 配置可见 5 部 seed anime(magical moment) - 日志 prefix <code>[go-api]</code> / <code>[ws-server]</code> / <code>[next]</code> 让 debug 知道哪个进程出错(DX review Pass 3)</p>
 <hr />
 <h2 id="appendix-d-postgres-schema-概要">Appendix D — Postgres Schema 概要</h2>
 <p>完整 SQL 在 <code>go-api/migrations/0001_init.sql</code>,这里只列结构。</p>
@@ -1915,8 +1913,7 @@ extensions(必须先 CREATE EXTENSION):
   pg_trgm     -- 用于 dandanplay AnimeCache regex 替代
   pg_cron     -- 用于 danmaku TTL 任务</code></pre>
 <hr />
-<p><strong>Last updated:</strong> 2026-05-20(7 gaps audit + DX review trimmed:scripts/dev.sh 完整 spec、README 同步 task、health check、fixture seed、cutover-day README header)
-<strong>Initial:</strong> 2026-05-12(初版,supersedes v1 plan from 2026-05-10)</p>
+<p><strong>Last updated:</strong> 2026-05-20(7 gaps audit + DX review trimmed:scripts/dev.sh 完整 spec、README 同步 task、health check、fixture seed、cutover-day README header) <strong>Initial:</strong> 2026-05-12(初版,supersedes v1 plan from 2026-05-10)</p>
 <hr />
 <h2 id="gstack-review-report">GSTACK REVIEW REPORT</h2>
 <table style="width:100%;">
@@ -1989,36 +1986,11 @@ extensions(必须先 CREATE EXTENSION):
 <li>Issue 4 [HIGH]: 全 normalize 详情页 N+5 join → <strong>4A</strong>: 接受,P5/P10 benchmark</li>
 </ul>
 <h3 id="nd-eng-review-1900-commit-7f86e28-deep-re-run-19-new-findings-17-resolved">2nd Eng Review 19:00 (commit 7f86e28, deep re-run) — 19 new findings, 17 resolved:</h3>
-<p><strong>Section 1 — Architecture (8 issues):</strong>
-- 1A [P1] → <strong>B Next.js 14 → 16</strong>(Active LTS,React 19 默认)
-- 2A [P1] → B 保留 “37” label,接受 P2.4/P2.5 工时 overrun 风险(unresolved-accepted)
-- 3A [P1] → <strong>A NEW P2.8 ws-server split phase</strong>(10-15hr)
-- 4A [P1] → <strong>A Go API dual-accept Authorization header + Cookie 7 天</strong>
-- 5A [P1] → <strong>A Express image :rollback-T0 tag + registry 30 天</strong>
-- 6A [P2] → <strong>A P1 加 field-level parity test 10×1000</strong>
-- 7A [P2] → note river vs lean alternative,保留 river(crash recovery for V2/V3)
-- 8A [P2] → <strong>A P3 baseline 加 prod Express metrics + socket 连接数</strong></p>
-<p><strong>Section 2 — Code Quality (8 issues):</strong>
-- 1C [P1] → <strong>A anime_* + user_id 全 ON DELETE CASCADE</strong>
-- 2C [P1] → <strong>A P0 加 scripts/dev.sh 一键起 6 进程</strong>
-- 3C [P2] → note river migration 排在 schema migration 之后
-- 4C [P2] → note P2.2 bcrypt fixture 用 mongo dump 真 prod hash
-- 5C [P1] → <strong>A 删 Dockerfile.node</strong>(4 → 3 Dockerfile)
-- 6C [P1] → <strong>A P2.6 +12hr 写 3 个明确决策</strong>(phase 2 修正/episodeMap/pg_trgm)
-- 7C [P2] → note ws-server JWT verify mirror Go &lt;30 行
-- 8C [P2] → <strong>C 接受 2-tier cache 主从模糊</strong>(unresolved-accepted,TODO-2 跟到 P2.1)</p>
-<p><strong>Section 3 — Tests (3 issues + diagram):</strong>
-- 1T [P1] → <strong>A P8.5 day-6 cutover dress rehearsal</strong>
-- 2T [P1] → <strong>A P8.5 day-7 rollback drill &lt;5min</strong>
-- 5T [P1] → <strong>A T+0 sequence: stop ws-server before Express</strong></p>
-<p><strong>Section 4 — Performance (2 issues + 4 notes):</strong>
-- 2P [P1] → <strong>A P2.8 弹幕 rate-limit Map → LRU 有界</strong>(silent overflow bug 修)
-- 3P [P2] → <strong>A search_vec generated column STORED + GIN 索引</strong></p>
-<p><strong>TODOs (4 → all answered):</strong>
-- TODO-1 → A P3 baseline 加 vnstat + VPS 带宽 plan
-- TODO-2 → A 跟到 P2.1 实现时决定
-- TODO-3 → A P10 Sentry alert wiring fake error 验证
-- TODO-4 → A P10 视觉回归 pixel-diff 0.1% threshold + PR comment trigger</p>
+<p><strong>Section 1 — Architecture (8 issues):</strong> - 1A [P1] → <strong>B Next.js 14 → 16</strong>(Active LTS,React 19 默认) - 2A [P1] → B 保留 “37” label,接受 P2.4/P2.5 工时 overrun 风险(unresolved-accepted) - 3A [P1] → <strong>A NEW P2.8 ws-server split phase</strong>(10-15hr) - 4A [P1] → <strong>A Go API dual-accept Authorization header + Cookie 7 天</strong> - 5A [P1] → <strong>A Express image :rollback-T0 tag + registry 30 天</strong> - 6A [P2] → <strong>A P1 加 field-level parity test 10×1000</strong> - 7A [P2] → note river vs lean alternative,保留 river(crash recovery for V2/V3) - 8A [P2] → <strong>A P3 baseline 加 prod Express metrics + socket 连接数</strong></p>
+<p><strong>Section 2 — Code Quality (8 issues):</strong> - 1C [P1] → <strong>A anime_* + user_id 全 ON DELETE CASCADE</strong> - 2C [P1] → <strong>A P0 加 scripts/dev.sh 一键起 6 进程</strong> - 3C [P2] → note river migration 排在 schema migration 之后 - 4C [P2] → note P2.2 bcrypt fixture 用 mongo dump 真 prod hash - 5C [P1] → <strong>A 删 Dockerfile.node</strong>(4 → 3 Dockerfile) - 6C [P1] → <strong>A P2.6 +12hr 写 3 个明确决策</strong>(phase 2 修正/episodeMap/pg_trgm) - 7C [P2] → note ws-server JWT verify mirror Go &lt;30 行 - 8C [P2] → <strong>C 接受 2-tier cache 主从模糊</strong>(unresolved-accepted,TODO-2 跟到 P2.1)</p>
+<p><strong>Section 3 — Tests (3 issues + diagram):</strong> - 1T [P1] → <strong>A P8.5 day-6 cutover dress rehearsal</strong> - 2T [P1] → <strong>A P8.5 day-7 rollback drill &lt;5min</strong> - 5T [P1] → <strong>A T+0 sequence: stop ws-server before Express</strong></p>
+<p><strong>Section 4 — Performance (2 issues + 4 notes):</strong> - 2P [P1] → <strong>A P2.8 弹幕 rate-limit Map → LRU 有界</strong>(silent overflow bug 修) - 3P [P2] → <strong>A search_vec generated column STORED + GIN 索引</strong></p>
+<p><strong>TODOs (4 → all answered):</strong> - TODO-1 → A P3 baseline 加 vnstat + VPS 带宽 plan - TODO-2 → A 跟到 P2.1 实现时决定 - TODO-3 → A P10 Sentry alert wiring fake error 验证 - TODO-4 → A P10 视觉回归 pixel-diff 0.1% threshold + PR comment trigger</p>
 <h3 id="cross-model-tension">Cross-Model Tension</h3>
 <p>No outside voice ran (user explicitly skipped Codex this session as previous).</p>
 <h3 id="unresolved-accepted-by-user">UNRESOLVED (accepted by user):</h3>
@@ -2040,9 +2012,6 @@ extensions(必须先 CREATE EXTENSION):
 <li><strong>R12-R18 新增</strong>(§ 3)</li>
 <li><strong>Innovation tokens still 7</strong>(版本修正不算新 token)</li>
 </ul>
-<p><strong>VERDICT:</strong> ENG CLEARED (PLAN, 2nd deep run) — ready to implement.
-Critical findings all incorporated into plan as new phases (P2.7, P2.8, P8.5),
-decision log entries, schema, and acceptance criteria. 2 unresolved are
-explicitly user-accepted with mitigation paths.</p>
+<p><strong>VERDICT:</strong> ENG CLEARED (PLAN, 2nd deep run) — ready to implement. Critical findings all incorporated into plan as new phases (P2.7, P2.8, P8.5), decision log entries, schema, and acceptance criteria. 2 unresolved are explicitly user-accepted with mitigation paths.</p>
 </body>
 </html>

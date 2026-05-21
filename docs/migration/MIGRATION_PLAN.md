@@ -963,6 +963,7 @@ P0 收工标准:**Go + Postgres 起来,空 chi router :8080/health 返回 OK,R2 
 |-------|--------|---------|-----------|-------------:|
 | P0 Go 骨架 + Postgres + Backup | **DONE** | 2026-05-20 | 2026-05-20 | ~6 hr (vs 20-35 estimate; subagent协同压缩) — 详 [`P0-PROGRESS.md`](P0-PROGRESS.md) / [`P0-PROGRESS.html`](P0-PROGRESS.html) |
 | P1 Migration Tool | **DONE** | 2026-05-21 | 2026-05-21 | ~10 hr(同一天集中跑;subagent + integration-test 反复迭代;100% field parity)— 详 [`P1-PROGRESS.md`](P1-PROGRESS.md) / [`P1-PROGRESS.html`](P1-PROGRESS.html) / [`ERD.md`](ERD.md) |
+| P2.0 chi 骨架(eng-review 后追加) | **DONE** | 2026-05-21 | 2026-05-21 | ~6 hr(vs 7-10 estimate;A/C 并行 subagent + D 我手写 + smoke + live curl)— 详 [`P2.0-DESIGN.md`](P2.0-DESIGN.md) / [`P2.0-DESIGN.html`](P2.0-DESIGN.html) / [`P2-PROGRESS.md`](P2-PROGRESS.md) / [`P2-PROGRESS.html`](P2-PROGRESS.html) |
 | P2.1 /api/anime/* | not started | — | — | — |
 | P2.2 /api/auth/* | not started | — | — | — |
 | P2.3 /api/admin/* | not started | — | — | — |
