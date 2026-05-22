@@ -24,12 +24,14 @@ import (
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
+	"github.com/lawrenceli0228/animego/go-api/internal/auth"
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/torrents"
 )
@@ -188,6 +190,18 @@ func main() {
 		}
 	}()
 
+	// JWT signer — both secrets required from P2.2 onward.  Fail-fast
+	// at boot so misconfigured prod doesn't accept any sign-ins.
+	signer, err := jwtx.NewSigner(cfg.JWTSecret, cfg.JWTRefreshSecret, cfg.JWTExpiresIn, cfg.JWTRefreshExpiresIn)
+	if err != nil {
+		slog.Error("jwt signer init failed", "err", err)
+		os.Exit(1)
+	}
+	isProd := os.Getenv("GO_ENV") == "production"
+	authHandlers := auth.NewHandlers(q, signer, cfg.JWTRefreshExpiresIn, isProd)
+	authRateLimit := auth.NewRateLimiter(10, 15*time.Minute)
+	defer authRateLimit.Stop()
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -200,6 +214,18 @@ func main() {
 	// requires HTTP 200; RequestLog skips this path to avoid drowning
 	// real traffic in 2880 probe lines per pod per day.
 	r.Get("/health", healthHandler(pool))
+
+	// P2.2 auth: 5 of 7 endpoints — forgot/reset-password deferred to
+	// P2.2.3 (waits on Gmail SMTP infra).  Rate-limiter wraps the
+	// public flows (register/login/refresh); logout + /me are gated
+	// by RequireAuth instead.
+	r.Route("/api/auth", func(r chi.Router) {
+		r.With(authRateLimit.Middleware()).Post("/register", authHandlers.Register)
+		r.With(authRateLimit.Middleware()).Post("/login", authHandlers.Login)
+		r.With(authRateLimit.Middleware()).Post("/refresh", authHandlers.Refresh)
+		r.With(jwtx.RequireAuth(signer)).Post("/logout", authHandlers.Logout)
+		r.With(jwtx.RequireAuth(signer)).Get("/me", authHandlers.Me)
+	})
 
 	r.Route("/api/anime", func(r chi.Router) {
 		r.Get("/completed-gems", anime.CompletedGems(q))
@@ -224,7 +250,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.9")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.2.2")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
