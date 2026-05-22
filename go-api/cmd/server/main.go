@@ -29,6 +29,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/email"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
@@ -198,7 +199,20 @@ func main() {
 		os.Exit(1)
 	}
 	isProd := os.Getenv("GO_ENV") == "production"
-	authHandlers := auth.NewHandlers(q, signer, cfg.JWTRefreshExpiresIn, isProd)
+
+	// Gmail SMTP sender — when GMAIL_USER/GMAIL_APP_PASSWORD are
+	// unset (dev without email), NoopSender lets forgot-password
+	// still return 200 (privacy/enumeration parity) while logging
+	// the skipped send.  Same semantic as Express.
+	var emailSender email.Sender = email.NoopSender{}
+	if smtp, err := email.NewSMTPSender(cfg.GmailUser, cfg.GmailAppPassword); err == nil {
+		emailSender = smtp
+		slog.Info("email: Gmail SMTP configured", "user", cfg.GmailUser)
+	} else {
+		slog.Warn("email: Gmail SMTP not configured, password-reset emails will be skipped")
+	}
+
+	authHandlers := auth.NewHandlers(q, signer, emailSender, cfg.ClientOrigin, cfg.JWTRefreshExpiresIn, isProd)
 	authRateLimit := auth.NewRateLimiter(10, 15*time.Minute)
 	defer authRateLimit.Stop()
 
@@ -215,14 +229,15 @@ func main() {
 	// real traffic in 2880 probe lines per pod per day.
 	r.Get("/health", healthHandler(pool))
 
-	// P2.2 auth: 5 of 7 endpoints — forgot/reset-password deferred to
-	// P2.2.3 (waits on Gmail SMTP infra).  Rate-limiter wraps the
-	// public flows (register/login/refresh); logout + /me are gated
-	// by RequireAuth instead.
+	// P2.2 auth: 7 endpoints.  Rate-limiter wraps the public flows
+	// (register/login/refresh + forgot/reset-password); logout + /me
+	// are gated by RequireAuth instead.
 	r.Route("/api/auth", func(r chi.Router) {
 		r.With(authRateLimit.Middleware()).Post("/register", authHandlers.Register)
 		r.With(authRateLimit.Middleware()).Post("/login", authHandlers.Login)
 		r.With(authRateLimit.Middleware()).Post("/refresh", authHandlers.Refresh)
+		r.With(authRateLimit.Middleware()).Post("/forgot-password", authHandlers.ForgotPassword)
+		r.With(authRateLimit.Middleware()).Post("/reset-password/{token}", authHandlers.ResetPassword)
 		r.With(jwtx.RequireAuth(signer)).Post("/logout", authHandlers.Logout)
 		r.With(jwtx.RequireAuth(signer)).Get("/me", authHandlers.Me)
 	})
@@ -250,7 +265,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.2.2")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.2")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
