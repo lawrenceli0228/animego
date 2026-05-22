@@ -85,6 +85,13 @@ func (f *fakeEnqueuer) EnqueueV3Many(_ context.Context, _ []BangumiV3Args) error
 	return nil
 }
 
+// EnqueueWarmSeasonNow is a no-op stub — orphan scan only dispatches
+// V1 jobs; warm-season jobs are seeded by main.go directly.
+// Satisfies the Enqueuer interface contract added in P2.1.7c.
+func (f *fakeEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonArgs) error {
+	return nil
+}
+
 func (f *fakeEnqueuer) snapshotCalls() [][]int32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()

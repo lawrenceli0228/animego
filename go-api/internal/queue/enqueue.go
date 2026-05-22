@@ -46,6 +46,11 @@ type Enqueuer interface {
 	EnqueueV1Many(ctx context.Context, anilistIDs []int32) error
 	EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) error
 	EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error
+	// EnqueueWarmSeasonNow inserts a single WarmSeasonArgs job for
+	// immediate dispatch.  Used at boot time to seed the initial
+	// current + next season pair; the 24h periodic schedule (configured
+	// via queue.Config.PeriodicJobs) handles steady-state re-warm.
+	EnqueueWarmSeasonNow(ctx context.Context, args WarmSeasonArgs) error
 }
 
 // RealEnqueuer wraps a river client and batches V1 inserts via
@@ -130,6 +135,17 @@ func (e *RealEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) 
 	return nil
 }
 
+// EnqueueWarmSeasonNow inserts a single WarmSeasonArgs job for
+// immediate dispatch.  Used by main.go at boot time (current +
+// next season pair) — periodic re-fire is configured separately
+// via queue.Config.PeriodicJobs + PeriodicWarmSeasonJob().
+func (e *RealEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args WarmSeasonArgs) error {
+	if _, err := e.client.Insert(ctx, args, nil); err != nil {
+		return fmt.Errorf("queue.EnqueueWarmSeasonNow (%s %d): %w", args.Season, args.Year, err)
+	}
+	return nil
+}
+
 // NoopEnqueuer satisfies Enqueuer without doing anything.  Use as a
 // safe default when callers haven't wired river yet (e.g. server is
 // in unit-test mode, or a boot stage runs before river.Start).
@@ -147,6 +163,11 @@ func (NoopEnqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) err
 
 // EnqueueV3Many returns nil regardless of input.
 func (NoopEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
+	return nil
+}
+
+// EnqueueWarmSeasonNow returns nil regardless of input.
+func (NoopEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args WarmSeasonArgs) error {
 	return nil
 }
 
@@ -213,6 +234,20 @@ func (l *LateBoundEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3A
 		return nil
 	}
 	return e.EnqueueV3Many(ctx, jobs)
+}
+
+// EnqueueWarmSeasonNow delegates to the bound RealEnqueuer, or no-ops
+// when unbound.  Main.go uses this at boot time to seed the initial
+// current + next season warm; binding happens immediately after Boot
+// so the unbound window is effectively zero in production.
+func (l *LateBoundEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args WarmSeasonArgs) error {
+	l.mu.RLock()
+	e := l.inner
+	l.mu.RUnlock()
+	if e == nil {
+		return nil
+	}
+	return e.EnqueueWarmSeasonNow(ctx, args)
 }
 
 // Compile-time guards: all implementations must satisfy Enqueuer.

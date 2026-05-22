@@ -45,6 +45,22 @@ type BangumiV3Args struct {
 // Kind returns the river job kind for V3 enrichment.
 func (BangumiV3Args) Kind() string { return "bangumi_v3" }
 
+// WarmSeasonArgs is the job payload for the periodic seasonal warm
+// worker.  One job per (season, year) pair — boot enqueues two
+// instances (current season + next season) and river's PeriodicJobs
+// re-fires every 24h.
+//
+// Season uses AniList's canonical uppercase values (WINTER / SPRING /
+// SUMMER / FALL).  Year is the AniList seasonYear int.  Mirrors
+// Express anilist.service.js warmSeasonCache(season, year).
+type WarmSeasonArgs struct {
+	Season string `json:"season"`
+	Year   int    `json:"year"`
+}
+
+// Kind returns the river job kind for seasonal cache warming.
+func (WarmSeasonArgs) Kind() string { return "warm_season" }
+
 // Compile-time guard that every Args satisfies river.JobArgs.  river's
 // validation also enforces this at NewClient time, but failing at compile
 // time catches drift the moment a field is renamed.
@@ -52,4 +68,5 @@ var (
 	_ river.JobArgs = (*BangumiV1Args)(nil)
 	_ river.JobArgs = (*BangumiV2Args)(nil)
 	_ river.JobArgs = (*BangumiV3Args)(nil)
+	_ river.JobArgs = (*WarmSeasonArgs)(nil)
 )

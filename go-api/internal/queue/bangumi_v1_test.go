@@ -84,6 +84,12 @@ func (f *fakeV1Enqueuer) EnqueueV3Many(_ context.Context, _ []BangumiV3Args) err
 	return nil
 }
 
+// EnqueueWarmSeasonNow — V1 worker never triggers warm-season jobs.
+// No-op to satisfy the Enqueuer interface.
+func (f *fakeV1Enqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonArgs) error {
+	return nil
+}
+
 func (f *fakeV1Enqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) error {
 	dup := make([]BangumiV2Args, len(jobs))
 	copy(dup, jobs)

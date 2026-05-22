@@ -176,6 +176,15 @@ func (e *searchFakeEnqueuer) EnqueueV3Many(_ context.Context, _ []queue.BangumiV
 	return nil
 }
 
+// EnqueueWarmSeasonNow is a no-op stub.  /search never dispatches
+// warm-season jobs — those are seeded by main.go at boot time and
+// re-fired by river's PeriodicJobs.  Stub is needed only to satisfy
+// the queue.Enqueuer interface that grew the warm-season method in
+// P2.1.7c.
+func (e *searchFakeEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ queue.WarmSeasonArgs) error {
+	return nil
+}
+
 func (e *searchFakeEnqueuer) snapshotCalls() [][]int32 {
 	e.mu.Lock()
 	defer e.mu.Unlock()

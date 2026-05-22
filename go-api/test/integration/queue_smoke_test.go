@@ -44,6 +44,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
@@ -103,6 +104,37 @@ func (noRowV12DB) UpdateAnimeCharacterCN(_ context.Context, _ int32, _ *string, 
 	return nil
 }
 
+// UpsertAnimeCache satisfies queue.WarmSeasonDB.  The warm-season smoke
+// test uses a stub AniList that returns an empty page, so this method
+// is never actually called — but it must exist for the V12DB embedding
+// to compile.
+func (noRowV12DB) UpsertAnimeCache(_ context.Context, _ dbgen.UpsertAnimeCacheParams) error {
+	return nil
+}
+
+// GetTitleChineseByAnilistIDs satisfies queue.WarmSeasonDB.  Returns
+// an empty slice so any code path that reaches it short-circuits the
+// "filter version=0" branch cleanly.
+func (noRowV12DB) GetTitleChineseByAnilistIDs(_ context.Context, _ []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
+	return []dbgen.GetTitleChineseByAnilistIDsRow{}, nil
+}
+
+// emptyAniList is a stub AniListSeasonalFetcher used by the queue
+// smoke tests.  Seasonal() returns an empty page with HasNextPage=false
+// so the warm-season worker's page loop exits after one fetch — clean
+// "completed" terminal state without dragging a real AniList HTTP
+// fake into the smoke suite.
+type emptyAniList struct{}
+
+func (emptyAniList) Seasonal(_ context.Context, _ anilist.SeasonalVars) (*anilist.SeasonalAnimeResponse, error) {
+	return &anilist.SeasonalAnimeResponse{
+		Page: anilist.MediaPage{
+			PageInfo: anilist.PageInfo{HasNextPage: false},
+			Media:    []anilist.Media{},
+		},
+	}, nil
+}
+
 // queueSmokeWaitTimeout bounds how long we wait for a stub job to
 // land in the JobCompleted subscription channel.  Stubs return nil
 // immediately, but river's fetch interval (~100ms FetchCooldown +
@@ -131,7 +163,7 @@ func bootQueueForTest(t *testing.T, ctx context.Context) *river.Client[pgx.Tx] {
 	testutil.TruncateAll(t, ctx, pool)
 
 	c, err := queue.Boot(pool, queue.Config{
-		Workers: queue.WorkersWithBangumi(noHitBangumi{}, noRowV12DB{}, queue.NoopEnqueuer{}),
+		Workers: queue.WorkersWithBangumi(noHitBangumi{}, emptyAniList{}, noRowV12DB{}, queue.NoopEnqueuer{}),
 	})
 	require.NoError(t, err, "queue.Boot")
 	require.NotNil(t, c, "queue.Boot must return a client")
@@ -279,4 +311,43 @@ func TestQueue_BootRejectsNilPool(t *testing.T) {
 	assert.Nil(t, c)
 	assert.True(t, errors.Is(err, queue.ErrMissingPool),
 		"Boot(nil, …) should return ErrMissingPool, got: %v", err)
+}
+
+// TestQueue_WarmSeason_Dispatched exercises the new warm-season worker
+// end-to-end through the river dispatch loop.  Uses emptyAniList so the
+// worker's page loop exits after one fetch (empty media → empty upsert
+// batch → no enqueue) and lands in "completed" state — no real AniList
+// HTTP, no real cache row needed.
+//
+// This validates that:
+//   - WorkersWithBangumi registers the warm_season kind correctly
+//   - WarmSeasonArgs round-trips through river's serializer
+//   - The worker completes without error on an empty season
+func TestQueue_WarmSeason_Dispatched(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	c := bootQueueForTest(t, ctx)
+
+	subscribeChan, subscribeCancel := c.Subscribe(river.EventKindJobCompleted)
+	defer subscribeCancel()
+
+	_, err := c.Insert(ctx, queue.WarmSeasonArgs{Season: "WINTER", Year: 2026}, nil)
+	require.NoError(t, err, "client.Insert warm_season")
+
+	waitCtx, waitCancel := context.WithTimeout(ctx, queueSmokeWaitTimeout)
+	defer waitCancel()
+
+	select {
+	case ev := <-subscribeChan:
+		require.NotNil(t, ev, "subscribe channel must not deliver nil events")
+		require.NotNil(t, ev.Job, "event.Job must be populated")
+		assert.Equal(t, "warm_season", ev.Job.Kind,
+			"completed job kind drift")
+		assert.Equal(t, "completed", string(ev.Job.State),
+			"warm_season job must reach completed state")
+	case <-waitCtx.Done():
+		t.Fatalf("timed out after %s waiting for warm_season completion: %v",
+			queueSmokeWaitTimeout, waitCtx.Err())
+	}
 }

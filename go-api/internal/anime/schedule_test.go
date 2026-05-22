@@ -105,6 +105,14 @@ func (e *scheduleFakeEnqueuer) EnqueueV3Many(_ context.Context, _ []queue.Bangum
 	return nil
 }
 
+// EnqueueWarmSeasonNow is a no-op stub.  /schedule never dispatches
+// warm-season jobs — those are seeded by main.go at boot time.  Stub
+// is needed only to satisfy the queue.Enqueuer interface that grew
+// the warm-season method in P2.1.7c.
+func (e *scheduleFakeEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ queue.WarmSeasonArgs) error {
+	return nil
+}
+
 func (e *scheduleFakeEnqueuer) snapshotCalls() [][]int32 {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -82,38 +82,70 @@ type BangumiV12Client interface {
 	BangumiV2Client
 }
 
-// V12DB merges the sqlc subsets V1 + V2 + V3 workers need.
-// dbgen.Querier satisfies it; tests can supply a single fake that
-// covers all three surfaces without having to split.  The name keeps
-// "V12" for historical reasons even though V3 is now a member —
-// "V123DB" is uglier and this is an internal type whose surface
-// doesn't leak into the API.
+// V12DB merges the sqlc subsets V1 + V2 + V3 + WarmSeason workers
+// need.  dbgen.Querier satisfies it; tests can supply a single fake
+// that covers all surfaces without having to split.  The name keeps
+// "V12" for historical reasons even though V3 and WarmSeason are now
+// members — renaming would churn callers for no observable benefit
+// (this type doesn't leak into the API).
 type V12DB interface {
 	V1DB
 	V2DB
 	V3DB
+	WarmSeasonDB
 }
 
-// WorkersWithBangumi returns a *river.Workers bundle with all three
-// REAL bangumi workers (V1 + V2 + V3) wired against the provided
-// bangumi client + DB + enqueuer.  Production main.go calls this
-// with the live *bangumi.Client + *dbgen.Queries + a *RealEnqueuer
-// (or *LateBoundEnqueuer that gets Bound after Boot).
+// WorkersWithBangumi returns a *river.Workers bundle with all four
+// REAL workers (V1 + V2 + V3 + WarmSeason) wired against the provided
+// bangumi + anilist clients + DB + enqueuer.
 //
-// enq is consumed by V1Worker (chains V2 after a Bangumi search hit)
-// AND by V2Worker (chains V3 after a V2 update with no Chinese title).
-// Pass NoopEnqueuer{} (or nil — each worker substitutes Noop when
-// nil) in tests that don't want the V1→V2 or V2→V3 chains.  V3 is
-// terminal — does not consume the enqueuer.
+// This 4-arg form wires the WarmSeasonWorker with a stub MainRowNormalizer
+// (id-only) — it exists for the smoke-test path where the AniList stub
+// returns empty media so the normalizer is never invoked.  Production
+// main.go MUST call WorkersWithBangumiAndNormalizer instead and pass
+// anime.NormalizeMainRow so warm-season upserts populate every column.
+//
+// enq is consumed by V1Worker (chains V2 after a Bangumi search hit),
+// V2Worker (chains V3 after a V2 update with no Chinese title), AND
+// WarmSeasonWorker (chains V1 for bangumi_version=0 rows after the
+// seasonal upsert).  Pass NoopEnqueuer{} (or nil — each worker
+// substitutes Noop when nil) in tests that don't want the chains.
+// V3 is terminal — does not consume the enqueuer.
 //
 // Tests that only need the dispatch loop (without injecting a
 // bangumi mock) can still use Workers() — that bundle now contains
 // only the V2 stub since V1 + V3 have real implementations.
-func WorkersWithBangumi(bangumiClient BangumiV12Client, db V12DB, enq Enqueuer) *river.Workers {
+func WorkersWithBangumi(
+	bangumiClient BangumiV12Client,
+	anilistClient AniListSeasonalFetcher,
+	db V12DB,
+	enq Enqueuer,
+) *river.Workers {
+	return WorkersWithBangumiAndNormalizer(bangumiClient, anilistClient, db, enq, nil)
+}
+
+// WorkersWithBangumiAndNormalizer is the production form of
+// WorkersWithBangumi.  Accepts a MainRowNormalizer (typically
+// anime.NormalizeMainRow) so the WarmSeasonWorker can populate every
+// anime_cache column during the seasonal upsert.  Wired separately
+// from WorkersWithBangumi to keep this package import-cycle-free
+// with internal/anime (anime already imports queue for the Enqueuer
+// surface).
+//
+// Nil normalize falls back to the stub id-only normalizer — only
+// useful for tests; production must pass anime.NormalizeMainRow.
+func WorkersWithBangumiAndNormalizer(
+	bangumiClient BangumiV12Client,
+	anilistClient AniListSeasonalFetcher,
+	db V12DB,
+	enq Enqueuer,
+	normalize MainRowNormalizer,
+) *river.Workers {
 	w := river.NewWorkers()
 	river.AddWorker(w, NewBangumiV1Worker(bangumiClient, db, enq))
 	river.AddWorker(w, NewBangumiV2Worker(bangumiClient, db, enq))
 	river.AddWorker(w, NewBangumiV3Worker(bangumiClient, db))
+	river.AddWorker(w, NewWarmSeasonWorkerWithNormalizer(anilistClient, db, enq, normalize))
 	return w
 }
 
@@ -132,6 +164,12 @@ type Config struct {
 
 	// Logger — if nil, Boot uses slog.Default().
 	Logger *slog.Logger
+
+	// PeriodicJobs — passed straight through to river.Config.PeriodicJobs.
+	// Production main.go includes PeriodicWarmSeasonJob() here so the
+	// seasonal cache stays warm across 24h cycles.  Nil / empty disables
+	// periodic scheduling (boot-time one-shot enqueue still works).
+	PeriodicJobs []*river.PeriodicJob
 }
 
 // Boot constructs a *river.Client[pgx.Tx] attached to pool.  The client
@@ -167,9 +205,10 @@ func Boot(pool *pgxpool.Pool, c Config) (*river.Client[pgx.Tx], error) {
 	}
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:  queues,
-		Workers: workers,
-		Logger:  logger,
+		Queues:       queues,
+		Workers:      workers,
+		Logger:       logger,
+		PeriodicJobs: c.PeriodicJobs,
 	})
 	if err != nil {
 		return nil, err

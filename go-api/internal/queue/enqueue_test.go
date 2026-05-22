@@ -107,6 +107,34 @@ func TestLateBoundEnqueuer_V3Unbound_NoOp(t *testing.T) {
 		[]BangumiV3Args{{AnilistID: 1, BgmID: 100}}))
 }
 
+// TestNoopEnqueuer_WarmSeasonNoError asserts NoopEnqueuer's
+// EnqueueWarmSeasonNow path is equally inert.  Both the zero-value
+// and populated WarmSeasonArgs return nil — documents that
+// NoopEnqueuer is a safe drop-in default for tests that don't care
+// about the warm-season trigger.
+func TestNoopEnqueuer_WarmSeasonNoError(t *testing.T) {
+	t.Parallel()
+
+	n := NoopEnqueuer{}
+
+	require.NoError(t, n.EnqueueWarmSeasonNow(context.Background(), WarmSeasonArgs{}))
+	require.NoError(t, n.EnqueueWarmSeasonNow(context.Background(),
+		WarmSeasonArgs{Season: "WINTER", Year: 2026}))
+}
+
+// TestLateBoundEnqueuer_WarmSeasonUnbound_NoOp asserts the
+// LateBoundEnqueuer WarmSeason path silently no-ops when the inner
+// *RealEnqueuer hasn't been bound yet — matches the V1/V2/V3
+// contracts so main.go can safely call EnqueueWarmSeasonNow before
+// (or in the same nanosecond as) Bind without spurious errors.
+func TestLateBoundEnqueuer_WarmSeasonUnbound_NoOp(t *testing.T) {
+	t.Parallel()
+
+	l := &LateBoundEnqueuer{}
+	require.NoError(t, l.EnqueueWarmSeasonNow(context.Background(),
+		WarmSeasonArgs{Season: "SPRING", Year: 2026}))
+}
+
 // TestEnqueuer_InterfaceSatisfaction is a runtime sanity check — the
 // var blocks at the bottom of enqueue.go give us compile-time
 // guarantees, but an extra runtime guard documents the intent for
