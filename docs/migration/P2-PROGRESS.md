@@ -345,16 +345,41 @@ Integration 回归:15/15 PASS,13.4s wall(P1.D 7 + P2.0 4 + P2.1 queue 4)
 - /search 触发 V1 done anilistId=16436 hasChinese=true → chain V2 → V2 done chars=5 ✓
 - SQL 直接验:`name_en='天使恵' OR name_ja='天使恵'` 单 row update 成功(P2.1.7 是 0)✓
 
-### P2.1.9 — 待开(剩 2 项)
+### P2.1.9 — warm_season + byte fixture harness ✓(2026-05-22,3 commit)
 
-| 项目 | 估时 | 优先级 |
-|---|---|---|
-| warmCurrentSeason periodic(river 24h cron + 启动时 enqueue + 隔天 re-warm 当季 + 下季) | 2-3hr | 中 — 新番自动化发现 |
-| 9 endpoint byte fixture(Phase 8.5 shadow diff 前置) | 4-6hr | **高** — shadow traffic critical gate |
+**P2.1.9a** `80ca0a8`:warm_season worker(95.6% cov,13 unit test)
+- `WarmSeasonWorker`:分页拉 AniList Seasonal(perPage=50,20-page sanity cap)→ `NormalizeMainRow` + `UpsertAnimeCache` → 查 v0 → `EnqueueV1Many`
+- `CurrentSeason(time.Now())` + `NextSeason(s, y)` 纯函数(FALL→WINTER+1y rollover)
+- `PeriodicWarmSeasonJob()` 返 `river.NewPeriodicJob` 24h interval,fire 时重算当季
+- **Import-cycle 解法**:`queue` 不能 import `anime`(anime 已 import queue.Enqueuer)。`NormalizeMainRow` 通过 `MainRowNormalizer func` 注入。`WorkersWithBangumiAndNormalizer` production 5-arg / `WorkersWithBangumi` test 4-arg 用 id-only no-op
+- V12DB embed WarmSeasonDB;Enqueuer 加 `EnqueueWarmSeasonNow`;WorkersWithBangumi 签名 4 arg(加 anilistClient);`river.Config.PeriodicJobs` 透传
+
+**P2.1.9b** `052d45d`:byte fixture 测试 harness
+- `test/byteparity/` 走 `//go:build byteparity` tag,默认 `go test ./...` 跳过
+- `harness.go`:Fixture(name/method/path/status/body file)/ LoadAll / LoadBody(opaque bytes 不 JSON 解码 保留 trailing newline 和 escape)/ FetchActual / CompareBytes(byte-exact + offset + ±50 byte context + 行 diff)
+- `byteparity_test.go`:table-driven,每 fixture 一 t.Parallel subtest
+- 2 demo fixture:`trending-limit-3.body`(3549 byte deterministic cache-served)+ `watchers-invalid-id.body`(68 byte byte-exact 中文 400)
+- `Makefile` 加 `make byteparity` target
+- **P8.5 handoff**:每个 `.body` 用 Express prod `curl` 重抓 → 同一 harness gates Go vs Express byte parity
+
+**P2.1.9c** `a19cce5`:main.go wire
+- `WorkersWithBangumiAndNormalizer(bangumi, anilist, q, enqueuer, anime.NormalizeMainRow)` 解 import cycle
+- `Config.PeriodicJobs: []*river.PeriodicJob{queue.PeriodicWarmSeasonJob()}` 注 24h periodic
+- Boot goroutine `EnqueueWarmSeasonNow` 当季 + 下季初始 warm(不阻 server start)
+- log `workers=v1+v2+v3+warm_season` / stage P2.1.8 → P2.1.9
+
+**Live smoke**(docker compose pg + go run):
+- Boot 30ms 内 enqueued SPRING 2026 + SUMMER 2026
+- WarmSeason SPRING done:2 pages / 94 upserted / 0 failed / 0 enqueued(都过 v0 了)
+- WarmSeason SUMMER done:2 pages / 76 upserted
+- river_job 2 warm_season + 6 v1 + 1 v2 全 completed
+- `make byteparity` 2/2 PASS
+
+**P2.1 完成**(2026-05-22):9 endpoint full parity + V1+V2+V3+WarmSeason 全 real worker + byte-parity harness 在位 + 1h cache wraps(trending/yearly-top)+ AniList stale re-fetch + 6 child-table upserts + Bangumi enrichment 自动化链路(orphan/search/schedule → V1 → V2 → V3)+ warm_season 24h periodic + boot 当季+下季初始 warm。
 
 `bangumi.Episodes` 接入(episode titles)— Express Phase 4 写 episodeTitles,新前端不一定用,**延后**到真前端跑起来需要时再补。
 
-合计 ~6-9hr 收尾 P2.1。
+byteparity harness 当前只有 2 demo fixture,剩 7 endpoint 的 fixture + Express prod 真实捕获留 **Phase 8.5** 落地。
 
 ---
 
@@ -395,6 +420,9 @@ Integration 回归:15/15 PASS,13.4s wall(P1.D 7 + P2.0 4 + P2.1 queue 4)
 - 2026-05-22 P2.1.8 - ce15551 + d7c1a5f + a7a99ce:`UpdateAnimeCharacterCN` `name_en OR name_ja` 修 P2.1.7 0% match + V3 heal-CN worker(`bangumi_v3.go` 100% line cov + V2→V3 chain)+ Trending/YearlyTop 1h ristretto cache wrap(CompletedGems 故意不缓存)。9/9 endpoint 全功能 parity + V1+V2+V3 enrichment 全 real。
 - **教训:port API 字段类型必须先 grep schema 看准列名再决定 WHERE**:P2.1.7 写 V2 worker `WHERE anime_id=$1 AND name_en=$2` —— 没注意到 Bangumi `character.Name` 是日文 应该 match `name_ja`。**0% match 才暴露**。 修法是 `OR` 两列。**普适化**:port enrichment / matching SQL 之前,grep 真实数据样本(`SELECT name_en, name_ja FROM ... LIMIT 5`),确认 source-side 给的字段语义跟 target-side 哪列对得上。Single-column WHERE 在多语言混合场景容易盲。
 - **教训:`/completed-gems` 故意不缓存**:第一次想"3 handler 都套 1h cache" 的时候差点把 CompletedGems 也包了。但 `ORDER BY random() LIMIT N` 套 cache 等于固化结果集,毁掉 random sample 的全部意义。**普适化**:写 cache wrap 之前,看清楚 endpoint 的 source query 是不是 deterministic(`ORDER BY x DESC LIMIT N` deterministic 适合缓存 / `ORDER BY random()` 不 deterministic 不适合)。
+- 2026-05-22 P2.1.9 - 80ca0a8 + 052d45d + a19cce5:warm_season periodic worker(95.6% cov,river PeriodicJobs 24h interval + boot 当季+下季 EnqueueWarmSeasonNow)+ byte fixture harness(`//go:build byteparity` tag,2 demo fixture 验证 byte-exact `bytes.Equal` 比较)+ main.go wire 完整 4 worker + 24h cron。P2.1 全 done。
+- **教训:queue → anime import cycle 解法是函数注入**:`internal/anime` 已 import `internal/queue`(用 Enqueuer 接口),所以 `queue` 不能反过来 import `anime` 来调 `NormalizeMainRow`。subagent 试图直接 import 卡住。解法是把 normalizer 定义成 `type MainRowNormalizer func(anilist.Media) dbgen.UpsertAnimeCacheParams`,production main.go 把 `anime.NormalizeMainRow` 注入到 worker。**普适化**:Go 包循环 import 的最佳解通常不是抽公共子包(那也是层级偏移),而是把"被需要的函数"声明成 func 类型由调用者注入 — 跟 dependency injection 一脉相承。
+- **教训:byte fixture 用 `//go:build` tag 隔离**:`go test ./...` 不能走 byte fixture(需要 live server,无法 unit test)。但又想留 fixture 文件在 repo + 测试 harness 可复用。解法:加 `//go:build byteparity` tag,默认构建跳过,显式 `go test -tags=byteparity` 才编。`Makefile` 加 `make byteparity` target 当快捷方式。**普适化**:任何需要"外部依赖才能跑"的测试(live server / 外部 API / 长时间 IO)都该走 build tag 隔离,别污染默认 CI 通道。
 - **教训:Express 多 envelope 形状不止一种**:`/follow` 用 `{data,total,page,hasMore,nextPage}`(httpx.Pagination 走这套),但 `/seasonal` 用 `{data,pagination:{page,perPage,total,totalPages}}`,`/watchers` 用 `{data,total}`(单 sibling),`/trending` 用 flat `{data:[]}`。每个 endpoint 写之前先 `grep ctrl.*\$res.json` Express,确认 envelope 形状再选 helper(httpx.Data / httpx.Page / 私有 writeMultiKeyEnvelope)。盲套 httpx.Data 会双重 wrap。
 - **教训:struct embed 不能强制 JSON 字段顺序**:`dbgen.GetTrendingWithCountsRow` `WatcherCount` 是最后字段;Express 要 `rank, watcherCount` 在 anime fields **前**。embed 顺序由 Go 决定,与 Express 不匹配 → 必须手写 longhand struct 复制字段顺序。每加一个 endpoint,先看 Express ctrl 的 `data` 字段顺序,确认 dbgen row 顺序匹配,**不匹配就手写 struct,不要 embed**。
 - **教训:byte-level envelope 测试在 Phase 2 早期是 boil-the-lake 例子**。Unit logic test 验"NotFound 码=NOT_FOUND"是不够的,真要捕捉 shadow traffic 阶段会 fail 的差异(key 顺序 / null vs 缺失字段 / HTML escape),必须从 Express 真实输出回写字节做 `bytes.Equal`。`httpx/express_fixture_test.go` 6 case 是模板,P2.x 每加 endpoint 写一组同模板的 byte fixture。
