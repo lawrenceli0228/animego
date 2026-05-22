@@ -13,11 +13,12 @@ A full-stack anime discovery, tracking, and local playback platform. Browse seas
 > ⚠️ **Active rewrite in progress** — backend is moving to Go + PostgreSQL, frontend to Next.js 16.
 > Current `main` and the live site at [animegoclub.com](https://animegoclub.com) continue to run the v2.0.x Vite SPA + Express + MongoDB stack.
 > Rewrite work happens on branch **`feat/go-backend`**.
-> Full plan: [`docs/migration/MIGRATION_PLAN.md`](docs/migration/MIGRATION_PLAN.md) · HTML view: [`docs/migration/MIGRATION_PLAN.html`](docs/migration/MIGRATION_PLAN.html) · P0 tracking: [`docs/migration/P0-PROGRESS.md`](docs/migration/P0-PROGRESS.md)
+> Full plan: [`docs/migration/MIGRATION_PLAN.md`](docs/migration/MIGRATION_PLAN.md) · Phase 2 progress: [`docs/migration/P2-PROGRESS.md`](docs/migration/P2-PROGRESS.md) · Status snapshot: [`docs/migration/P2.1-STATUS.html`](docs/migration/P2.1-STATUS.html)
 
-**Status:** Active rewrite — v2 plan locked 2026-05-12, 3 rounds of eng review + DX review applied
+**Status:** Active rewrite — Phase 2.1 (`/api/anime/*`) feature-complete on `feat/go-backend`
 **Migration started:** 2026-05-10 (from v2.0.0 baseline)
-**Target stack:** Next.js 16 + Bun + Go 1.23 (chi + pgx + sqlc) + PostgreSQL 16 + Node ws-server (socket.io)
+**Current milestone (2026-05-22):** P2.1.8 — 9/9 anime endpoints in Go (chi + pgx + sqlc) with envelope byte parity vs Express; Bangumi V1+V2+V3 enrichment workers running on river queue; 1h ristretto cache wraps for trending/yearly-top; AniList Detail re-fetch on stale `/:anilistId`
+**Target stack:** Next.js 16 + Bun + Go 1.26 (chi + pgx + sqlc) + PostgreSQL 16 + Node ws-server (socket.io)
 **Built with:** Claude Code (AI-assisted; product direction, decisions, and deployment by the author)
 
 ### Current rewrite
