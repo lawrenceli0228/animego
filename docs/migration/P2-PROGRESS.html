@@ -518,15 +518,40 @@ river migration <code>0007_river_initial</code> + <code>0008_river_pending_use</
 <p><strong>P2.1.7a</strong> <code>e0cb67a</code>:V2 worker + V1→V2 chain - <code>internal/queue/bangumi_v2.go</code>:errgroup 并发 Subject+Characters / Subject ErrNotFound → 返 nil permanent skip / Characters ErrNotFound 容忍 / UpdateBangumiV2 写 rating + title_chinese / 每 character UPDATE 匹配 anime_id+name_en / ≥50% char 错才 retry。15 test。<strong>Cov 100% line</strong> - <code>bangumi_v1.go</code>:V1 hit + bgmID 非 nil 后 chain <code>EnqueueV2Many</code>,失败非致命 - <code>enqueue.go</code> 新 <code>LateBoundEnqueuer</code>:解决 chicken-egg(WorkersWithBangumi 需 Enqueuer 给 V1,但 RealEnqueuer wrap riverClient 是 Boot 输出)。<code>sync.RWMutex</code> 保护 inner pointer,Bind 后转发到 RealEnqueuer - <code>worker.go</code> WorkersWithBangumi 签名:<code>(BangumiV12Client, V12DB, Enqueuer)</code> - 测试 + integration smoke 都过</p>
 <p><strong>P2.1.7b</strong> <code>a3dc667</code>:/seasonal cold-start + main.go 整体 wire - <code>seasonal.go</code>:<code>SeasonalService</code> composes db + anilist;warm 路径不变;cold(total==0+anilist 非 nil)→ AniList Seasonal(perPage cap 50)→ Normalize+Upsert→ 再 GetSeasonalAnime 重读(避免 row type 二元化) - AniList soft-fail:upstream 错全返 empty 200(不 502)。Cold 是 warm 增强,upstream 挂不该破坏 endpoint - 15s cold-start timeout(5s queryTimeout 不够,AniList 700ms throttle+HTTP 10s) - 18 test,<strong>cov 97.6%</strong> - handlers.go 删旧 Seasonal func + handlers_test.go 删 TestSeasonal_* - main.go:<code>LateBoundEnqueuer</code> wrap → <code>Boot(Workers: WorkersWithBangumi(client, q, enqueuer))</code> → <code>enqueuer.Bind(riverClient)</code> → <code>seasonalSvc := NewSeasonalService(q, anilistClient)</code> → 路由 <code>/seasonal</code> 用 svc.Handler() / stage P2.1.6 → P2.1.7</p>
 <p><strong>Live smoke</strong>: - Boot 日志:<code>v1(real)+v2(real)+v3(stub)</code> ✓ - Orphan scan enqueue 1 V1 → V1 worker <code>bangumi_v1 done anilistId=200 bgmId=2411 hasChinese=true</code> → chain V2 → V2 worker <code>bangumi_v2 done anilistId=200 bgmId=2411 hasScore=true hasChinese=true chars=9</code> ✓ - anilist_id=200 row final:bangumi_version=2,bgm_id=2411,bangumi_score=7.00,bangumi_votes=147,title_chinese=“天使的小生意气” ✓ - character UPDATE 0 matched(Bangumi vs AniList name_en 不同;fuzzy match → P2.1.8) - <code>/seasonal?season=SUMMER&amp;year=2014</code> 20 anime / total=119 / totalPages=6 ✓ - /search 触发 V1 enqueue / cache hit &lt;20ms 全过 ✓</p>
-<h3 id="p2.1.8-待开">P2.1.8 — 待开</h3>
-<ul>
-<li>V3 worker(heal-CN 第二轮:bangumi_version=2 + title_chinese 还 NULL 的行,重 Subject 一次 fill name_cn)</li>
-<li>character fuzzy match(name_en 不严格匹配会丢 V2 character 富化;实测 anilist_id=200 Bangumi 9 chars 全 0 matched)</li>
-<li>/trending / /yearly-top / /completed-gems 接 1h ristretto cache(当前每请求 DB)</li>
-<li>warmCurrentSeason / warmSeasonCache(river periodic 24h cron)</li>
-<li>9 endpoint byte fixture(Phase 8.5 shadow diff 前置)</li>
-<li>bangumi.Episodes 接入(目前 V2 不用,Express 4-phase 用了写 episodeTitles)</li>
-</ul>
+<h3 id="p2.1.8-v3-worker-1h-cache-name_ja-match-2026-05-223-commit">P2.1.8 — V3 worker + 1h cache + name_ja match ✓(2026-05-22,3 commit)</h3>
+<p><strong>P2.1.8 SQL</strong> <code>ce15551</code>:<code>UpdateAnimeCharacterCN</code> WHERE 改 <code>(name_en = $2 OR name_ja = $2)</code>。P2.1.7 0% match → 直接 SQL 验证现在 1 row matched(Bangumi character.name 日文匹 anime_characters.name_ja)。Fuzzy trigram 留 future。</p>
+<p><strong>P2.1.8a</strong> <code>d7c1a5f</code>:V3 heal-CN worker 全实现 - <code>bangumi_v3.go</code>:<code>Subject(bgmID)</code> → <code>NameCN</code> → <code>UpdateBangumiV3</code>,<code>bangumi_version=3</code> 无条件 bump(success 或 nil 都终态) - ErrNotFound 是 SOFT(V2 是 permanent skip 无 write;V3 是 write nil + bump,语义不同 —— V3 唯一目的就是 retry V2 漏的 Subject,“再试还是没有” 也算合法终态) - V2→V3 chain:V2 完成且 titleChinese nil 时 enqueue V3 一次(避免重复 API 调用 if V1 已经填了) - 12 test,<strong>100% line cov</strong>;<code>Enqueuer</code> 加 <code>EnqueueV3Many</code> + 三 impl;V12DB embed V3DB - WorkersWithBangumi 注册真 V3(stub 删);Workers()(stub-only)保 V2 stub 给 integration plumbing test 用</p>
+<p><strong>P2.1.8b</strong> <code>a7a99ce</code>:1h cache wrap(Trending + YearlyTop) - Trending 签名 <code>(q, c *cache.Cache[[]trendingItem])</code>,key <code>"trending"</code> 单全局,<code>?refresh=true</code> bypass - YearlyTop 签名 <code>(q, c *cache.Cache[[]dbgen.GetYearlyTopRow])</code>,key <code>strconv.Itoa(year)</code> 每年,不 honor refresh(跟 Express 一致) - Cache value 总 full 20 行,response 时按 ?limit 切片(<code>?limit=10</code> warmup 满足后续 <code>?limit=15</code>) - <strong>CompletedGems 不缓存</strong>(random sample,缓存毁随机性 — Express 也不缓存) - 5 新 cache 测试;coverage anime 92.2% - <code>anime.NewTrendingCache()</code> + <code>NewYearlyTopCache()</code> factory 隐藏 package-private 类型给 main.go 用 - main.go stage P2.1.7 → P2.1.8;log 改 <code>v1(real)+v2(real)+v3(real)</code></p>
+<p><strong>Live smoke</strong>: - Boot:<code>river queue ready workers=v1(real)+v2(real)+v3(real)</code> ✓ - <code>/trending?limit=3</code> 第二次 &lt;20ms cache hit ✓ - /search 触发 V1 done anilistId=16436 hasChinese=true → chain V2 → V2 done chars=5 ✓ - SQL 直接验:<code>name_en='天使恵' OR name_ja='天使恵'</code> 单 row update 成功(P2.1.7 是 0)✓</p>
+<h3 id="p2.1.9-待开剩-2-项">P2.1.9 — 待开(剩 2 项)</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>项目</th>
+<th>估时</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>warmCurrentSeason periodic(river 24h cron + 启动时 enqueue + 隔天 re-warm 当季 + 下季)</td>
+<td>2-3hr</td>
+<td>中 — 新番自动化发现</td>
+</tr>
+<tr class="even">
+<td>9 endpoint byte fixture(Phase 8.5 shadow diff 前置)</td>
+<td>4-6hr</td>
+<td><strong>高</strong> — shadow traffic critical gate</td>
+</tr>
+</tbody>
+</table>
+<p><code>bangumi.Episodes</code> 接入(episode titles)— Express Phase 4 写 episodeTitles,新前端不一定用,<strong>延后</strong>到真前端跑起来需要时再补。</p>
+<p>合计 ~6-9hr 收尾 P2.1。</p>
 <hr />
 <h2 id="p2.2---p2.6-待开">P2.2 - P2.6 待开</h2>
 <table>
@@ -599,6 +624,9 @@ river migration <code>0007_river_initial</code> + <code>0008_river_pending_use</
 <li>2026-05-22 P2.1.7 - a887a07 + c014040 + e0cb67a + a3dc667:V2 worker 全跑通 + V1→V2 LateBoundEnqueuer 解 chicken-egg + /seasonal cold-start + bangumi.Character.Relation 类型 bugfix。Live 验证 V1 chain V2 完整链路 + 真 Bangumi rating(7.00,147 votes)写入 DB。</li>
 <li><strong>教训:port 第三方 API struct 的类型只能信文档不能信猜测</strong>:<code>bangumi.Character.Relation</code> P2.1.2 port 为 int(像 type 字段一样)。Bangumi 实际返中文 string “主角”/“配角”。单元 test fixture 用了同样错的 int 值所以从来没炸,直到 P2.1.7 V2 worker 真跑 Bangumi prod 才暴露。<strong>教训普适化</strong>:port 时遇到非 ID/count 类的字段(role/type/category/status 这种),先用真 API 跑一次 <code>curl ... | jq .field</code> 看真 type,别按“看起来应该是 enum int”猜。</li>
 <li><strong>教训:chicken-egg 解法 LateBoundEnqueuer</strong>:V1 worker 注册时(WorkersWithBangumi)需 Enqueuer 链 V2,但 RealEnqueuer wrap 的 riverClient 是 Boot 输出。用 mutex-protected pointer wrapper(Bind 前 no-op,Bind 后转发)解。<strong>适用面</strong>:任何 “A 构造需 B,B 构造需 A 的 OUTPUT” 的循环,Late-Bind wrapper 是最干净的解(比延迟初始化 / 闭包捕获指针都直观)。</li>
+<li>2026-05-22 P2.1.8 - ce15551 + d7c1a5f + a7a99ce:<code>UpdateAnimeCharacterCN</code> <code>name_en OR name_ja</code> 修 P2.1.7 0% match + V3 heal-CN worker(<code>bangumi_v3.go</code> 100% line cov + V2→V3 chain)+ Trending/YearlyTop 1h ristretto cache wrap(CompletedGems 故意不缓存)。9/9 endpoint 全功能 parity + V1+V2+V3 enrichment 全 real。</li>
+<li><strong>教训:port API 字段类型必须先 grep schema 看准列名再决定 WHERE</strong>:P2.1.7 写 V2 worker <code>WHERE anime_id=$1 AND name_en=$2</code> —— 没注意到 Bangumi <code>character.Name</code> 是日文 应该 match <code>name_ja</code>。<strong>0% match 才暴露</strong>。 修法是 <code>OR</code> 两列。<strong>普适化</strong>:port enrichment / matching SQL 之前,grep 真实数据样本(<code>SELECT name_en, name_ja FROM ... LIMIT 5</code>),确认 source-side 给的字段语义跟 target-side 哪列对得上。Single-column WHERE 在多语言混合场景容易盲。</li>
+<li><strong>教训:<code>/completed-gems</code> 故意不缓存</strong>:第一次想“3 handler 都套 1h cache” 的时候差点把 CompletedGems 也包了。但 <code>ORDER BY random() LIMIT N</code> 套 cache 等于固化结果集,毁掉 random sample 的全部意义。<strong>普适化</strong>:写 cache wrap 之前,看清楚 endpoint 的 source query 是不是 deterministic(<code>ORDER BY x DESC LIMIT N</code> deterministic 适合缓存 / <code>ORDER BY random()</code> 不 deterministic 不适合)。</li>
 <li><strong>教训:Express 多 envelope 形状不止一种</strong>:<code>/follow</code> 用 <code>{data,total,page,hasMore,nextPage}</code>(httpx.Pagination 走这套),但 <code>/seasonal</code> 用 <code>{data,pagination:{page,perPage,total,totalPages}}</code>,<code>/watchers</code> 用 <code>{data,total}</code>(单 sibling),<code>/trending</code> 用 flat <code>{data:[]}</code>。每个 endpoint 写之前先 <code>grep ctrl.*\$res.json</code> Express,确认 envelope 形状再选 helper(httpx.Data / httpx.Page / 私有 writeMultiKeyEnvelope)。盲套 httpx.Data 会双重 wrap。</li>
 <li><strong>教训:struct embed 不能强制 JSON 字段顺序</strong>:<code>dbgen.GetTrendingWithCountsRow</code> <code>WatcherCount</code> 是最后字段;Express 要 <code>rank, watcherCount</code> 在 anime fields <strong>前</strong>。embed 顺序由 Go 决定,与 Express 不匹配 → 必须手写 longhand struct 复制字段顺序。每加一个 endpoint,先看 Express ctrl 的 <code>data</code> 字段顺序,确认 dbgen row 顺序匹配,<strong>不匹配就手写 struct,不要 embed</strong>。</li>
 <li><strong>教训:byte-level envelope 测试在 Phase 2 早期是 boil-the-lake 例子</strong>。Unit logic test 验“NotFound 码=NOT_FOUND”是不够的,真要捕捉 shadow traffic 阶段会 fail 的差异(key 顺序 / null vs 缺失字段 / HTML escape),必须从 Express 真实输出回写字节做 <code>bytes.Equal</code>。<code>httpx/express_fixture_test.go</code> 6 case 是模板,P2.x 每加 endpoint 写一组同模板的 byte fixture。</li>
