@@ -44,6 +44,13 @@ type Config struct {
 	// days.  Same cookie maxAge is set when the token is issued.
 	JWTRefreshExpiresIn time.Duration
 
+	// GmailUser + GmailAppPassword — credentials for transactional
+	// email (password reset).  Both empty → email sending is skipped
+	// (forgot-password still returns 200 to avoid enumeration), matches
+	// Express's behavior when env vars are unset.
+	GmailUser        string
+	GmailAppPassword string
+
 	// ClientOrigin is the CORS allow-list for dev.  Production overrides via env.
 	ClientOrigin string
 }
@@ -78,6 +85,8 @@ func Load() (*Config, error) {
 		JWTRefreshSecret:    os.Getenv("JWT_REFRESH_SECRET"),
 		JWTExpiresIn:        accessTTL,
 		JWTRefreshExpiresIn: refreshTTL,
+		GmailUser:           os.Getenv("GMAIL_USER"),
+		GmailAppPassword:    os.Getenv("GMAIL_APP_PASSWORD"),
 		ClientOrigin:        getEnv("CLIENT_ORIGIN", "http://localhost:3000"),
 	}, nil
 }
