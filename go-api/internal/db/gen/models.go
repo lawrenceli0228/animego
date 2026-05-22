@@ -9,6 +9,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Subscription struct {
+	UserID         uuid.UUID          `json:"userId"`
+	AnilistID      int32              `json:"anilistId"`
+	Status         string             `json:"status"`
+	CurrentEpisode int32              `json:"currentEpisode"`
+	Score          *int32             `json:"score"`
+	LastWatchedAt  pgtype.Timestamptz `json:"lastWatchedAt"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
+}
+
 type User struct {
 	ID                   uuid.UUID          `json:"id"`
 	Username             string             `json:"username"`

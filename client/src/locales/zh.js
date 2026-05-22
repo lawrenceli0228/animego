@@ -37,6 +37,13 @@ const zh = {
     'No fields to update': '没有可更新的字段',
     'Invalid flag value': '无效的 flag 值',
     'Version must be 0, 1, or 2': '版本必须为 0、1 或 2',
+    // Subscriptions / social (P2.4)
+    'Invalid anime ID': '无效的番剧 ID',
+    'Invalid status': '无效的状态',
+    'Episode must be a non-negative integer': '集数必须为非负整数',
+    'Subscription not found': '未找到订阅',
+    'Deleted': '已删除',
+    'Cannot follow yourself': '不能关注自己',
   },
   // Navbar
   nav: {

@@ -33,6 +33,11 @@ type Querier interface {
 	// overrides it.  Both empty means the handler returns 400 before we
 	// reach this query.
 	AdminUpdateUser(ctx context.Context, username *string, email *string, userID uuid.UUID) (AdminUpdateUserRow, error)
+	// Total for pagination — same filter as ListFeedActivities sans paging.
+	CountFeedActivities(ctx context.Context, dollar_1 []uuid.UUID) (int64, error)
+	// Total follower count for the pagination envelope.
+	CountFollowers(ctx context.Context, followeeID uuid.UUID) (int64, error)
+	CountFollowing(ctx context.Context, followerID uuid.UUID) (int64, error)
 	// Total non-Hentai entries for a given season + year.  Drives the
 	// pagination meta in /api/anime/seasonal so the frontend can render
 	// "X of Y" without a separate count call.
@@ -79,11 +84,24 @@ type Querier interface {
 	DeleteAnimeRelations(ctx context.Context, animeID int32) error
 	DeleteAnimeStaff(ctx context.Context, animeID int32) error
 	DeleteAnimeStudios(ctx context.Context, animeID int32) error
+	// DELETE /api/users/:username/follow.  Returns affected row count;
+	// the handler always returns 200 { following: false } regardless of
+	// whether a row was deleted (matches Express's findOneAndDelete which
+	// returned 200 on either match-and-delete or no-match).
+	DeleteFollow(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (int64, error)
+	// DELETE /api/subscriptions/:anilistId.  Returns the affected row count
+	// so the handler can 404 when no row matched (matches Express's
+	// findOneAndDelete returning null → 404 "Subscription not found").
+	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 	// POST /api/admin/enrichment/:anilistId/flag — set admin_flag to one of
 	// 'needs-review' / 'manually-corrected' / NULL.  CHECK constraint on the
 	// column enforces the allow-list at DB level; handler also pre-validates
 	// so the 400 message is friendly.
 	FlagAnimeEnrichment(ctx context.Context, anilistID int32, adminFlag *string) (FlagAnimeEnrichmentRow, error)
+	// Is requester following the profile owner?  Used by the public
+	// profile endpoint to compute isFollowing — null when caller is
+	// anonymous (handler skips this query for anon callers).
+	FollowExists(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (bool, error)
 	// Queries for /api/admin/* (P2.3).
 	//
 	// Most admin reads are single-row aggregates or list-by-version batches.
@@ -156,6 +174,13 @@ type Querier interface {
 	// min 19, max 91, avg 64.25).  The Express threshold of 75 corresponds
 	// to "highly rated by AniList community" and is preserved verbatim.
 	GetCompletedGems(ctx context.Context, limit int32) ([]GetCompletedGemsRow, error)
+	// ==================== Public profile ====================
+	// Aggregate counts for the profile header.  Two correlated subqueries
+	// so it's one round-trip.  followers = "how many follow this user",
+	// following = "how many this user follows".  Named parameter binds
+	// both subqueries to the same uuid value without sqlc complaining
+	// about ambiguous column reference.
+	GetProfileCounts(ctx context.Context, userID uuid.UUID) (GetProfileCountsRow, error)
 	// /:anilistId detail enriches relations[].titleChinese + .coverImageUrl
 	// from anime_cache when the relation row itself has stale values.
 	// Mirrors server/controllers/detail.controller.js:14-28.
@@ -165,6 +190,9 @@ type Querier interface {
 	// the cached fallback in anilist.service.js getSeasonalAnime ②③.
 	// Hentai filter is preserved verbatim — Express skipped via $nin.
 	GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error)
+	// /api/subscriptions/:anilistId — single subscription read.
+	// pgx.ErrNoRows → 404 "Subscription not found".
+	GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (Subscription, error)
 	// Lightweight enrichment lookup for /schedule — only the 3 fields the
 	// schedule items need.  bangumi_version is included so the caller can
 	// decide whether to enqueue v1 enrichment for unenriched entries.
@@ -194,6 +222,23 @@ type Querier interface {
 	// Uniqueness check during register (we also rely on the unique index,
 	// but a pre-check gives a friendlier 400 vs a 500-looking pg error).
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	// Queries for the social surface (P2.4) — follows + public profile + feed.
+	//
+	// Backs five endpoints:
+	//   GET    /api/users/:username                    → GetPublicProfile (+ companion lists)
+	//   POST   /api/users/:username/follow             → UpsertFollow
+	//   DELETE /api/users/:username/follow             → DeleteFollow
+	//   GET    /api/users/:username/followers          → ListFollowers + CountFollowers
+	//   GET    /api/users/:username/following          → ListFollowing + CountFollowing
+	//   GET    /api/feed                                → ListFeedFolloweeIDs + ListFeedActivities
+	//
+	// Express loaded these via Mongoose populate(); Postgres uses JOINs so
+	// the round-trip count drops from 3-4 (find followee → populate → count)
+	// down to one query per logical step.
+	// Helper: username → uuid lookup used by every social endpoint that
+	// takes a username path param.  Returns id + canonical username
+	// (handler echoes it back).  ErrNoRows → 404 "User not found".
+	GetUserIDByUsername(ctx context.Context, username string) (GetUserIDByUsernameRow, error)
 	// Public watcher list for one anime.  Backs /api/anime/:anilistId/watchers.
 	// Replaces anime.controller.js:53-75 — single SQL with JOIN drops the
 	// Express two-step (find + populate) pattern.
@@ -231,6 +276,26 @@ type Querier interface {
 	// updateMany.  This query is the SELECT half; PromoteAnimeToV3 is the
 	// UPDATE half.
 	ListEnrichedV2WithoutBgm(ctx context.Context) ([]int32, error)
+	// Step 2 of /api/feed: most-recent watching activities of the supplied
+	// followee_ids.  Filters out rows where last_watched_at IS NULL
+	// (subscriptions that never had an episode marked).  JOINs users for
+	// the username + anime_cache for the card columns.  Ordered by the
+	// watch event time DESC so the feed reads chronologically.
+	ListFeedActivities(ctx context.Context, column1 []uuid.UUID, limit int32, offset int32) ([]ListFeedActivitiesRow, error)
+	// ==================== Feed ====================
+	// Step 1 of /api/feed: load the followees the caller follows.
+	// Hard cap 500 matches Express's MAX_FOLLOWEES_FOR_FEED.  Anything
+	// beyond that and the feed degrades (older activities drop off the
+	// bottom; rare in practice for a watch-list site).
+	ListFeedFolloweeIDs(ctx context.Context, followerID uuid.UUID) ([]uuid.UUID, error)
+	// ==================== Followers / following lists ====================
+	// GET /api/users/:username/followers — paginated list of users who
+	// follow the target user.  Returns the follower's username; Express
+	// also only exposed username, not email or any other PII.
+	ListFollowers(ctx context.Context, followeeID uuid.UUID, limit int32, offset int32) ([]ListFollowersRow, error)
+	// GET /api/users/:username/following — paginated list of users this
+	// user is following.  Same shape as ListFollowers but reverse FK.
+	ListFollowing(ctx context.Context, followerID uuid.UUID, limit int32, offset int32) ([]ListFollowingRow, error)
 	// POST /api/admin/enrichment/heal-cn — Express filter:
 	//   bgmId: { $ne: null }
 	//   bangumiVersion: { $gte: 2, $lt: 3 }   // i.e. version = 2
@@ -239,11 +304,38 @@ type Querier interface {
 	// Returns the queue payload shape (anilistId / bgmId / titleChinese /
 	// bangumiVersion) so the handler can build V3 jobs directly.
 	ListHealCnCandidates(ctx context.Context) ([]ListHealCnCandidatesRow, error)
+	// The "watching" list shown on the public profile.  200-row cap matches
+	// Express; the join is the same shape as the subscriptions list query
+	// but only returns the cardview projection.
+	ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]ListProfileWatchingRow, error)
 	// Boot-time orphan scan: returns anilist_ids of rows where
 	// bangumi_version=0 (never enriched).  Paginated via limit/offset so
 	// the caller can batch-enqueue without loading the whole table into
 	// memory.  Ordered by anilist_id ASC for deterministic batching.
 	ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error)
+	// Queries against the subscriptions table (P2.4).
+	//
+	// The subscriptions table has a (user_id, anilist_id) composite PK + FKs
+	// to users(id) ON DELETE CASCADE and anime_cache(anilist_id) ON DELETE
+	// CASCADE.  Five endpoints back this surface:
+	//
+	//   GET    /api/subscriptions               → ListUserSubscriptions
+	//   GET    /api/subscriptions/:anilistId    → GetSubscription
+	//   POST   /api/subscriptions               → UpsertSubscription
+	//   PATCH  /api/subscriptions/:anilistId    → UpdateSubscription
+	//   DELETE /api/subscriptions/:anilistId    → DeleteSubscription
+	//
+	// Express joined Subscription + AnimeCache in application code; here we
+	// do the join in SQL so the network round-trip is one query for the
+	// list endpoint.  Single-row reads + writes don't need the join because
+	// the upstream handler already has the anilist context.
+	// /api/subscriptions — list every subscription for one user, joined to
+	// anime_cache for the listing-card columns the frontend needs.
+	// Optional status filter:  when status is NULL the WHERE clause is a
+	// tautology; passing a literal status filters to that bucket.
+	// LEFT JOIN preserves rows even if anime_cache was cleared (unlikely
+	// given ON DELETE CASCADE, but defensive).
+	ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]ListUserSubscriptionsRow, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error
@@ -311,6 +403,14 @@ type Querier interface {
 	// entries whose title_chinese is still NULL.  Tiny operation —
 	// bumps bangumi_version=3 either way (success or null).
 	UpdateBangumiV3(ctx context.Context, anilistID int32, titleChinese *string) error
+	// PATCH /api/subscriptions/:anilistId — selective update.
+	// COALESCE pattern keeps unchanged columns untouched.  `last_watched_at`
+	// only bumps when current_episode is explicitly set, matching Express
+	// behaviour (only the current_episode mutation refreshes the watch
+	// timestamp; status changes don't).  Score is clamped to [1,10] by the
+	// application layer, not here — the DB constraint enforces it but
+	// silently rejecting clamps would surprise the caller.
+	UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) (Subscription, error)
 	// Called after login / refresh (set new token) and logout (set NULL).
 	// updated_at bumps to now() so callers can audit last-session activity.
 	UpdateUserRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error
@@ -329,6 +429,17 @@ type Querier interface {
 	// them in a separate transaction if needed.  /search + /schedule never
 	// mutate child tables; only /:anilistId detail-fetch does.
 	UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCacheParams) error
+	// ==================== Follow CRUD ====================
+	// POST /api/users/:username/follow.  ON CONFLICT DO NOTHING — re-follow
+	// is idempotent (Express used findOneAndUpdate with upsert; same effect).
+	// The handler validates follower != followee before calling.
+	UpsertFollow(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) error
+	// POST /api/subscriptions — create-or-update on (user_id, anilist_id).
+	// Caller MUST have ensured anime_cache row exists (else the FK kicks).
+	// ON CONFLICT only writes status — Express also only patches `status`
+	// in the upsert payload, leaving current_episode/score untouched on
+	// re-add.  RETURNING gives the canonical post-write state.
+	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (Subscription, error)
 }
 
 var _ Querier = (*Queries)(nil)

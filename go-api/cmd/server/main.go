@@ -28,6 +28,8 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/auth"
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
+	"github.com/lawrenceli0228/animego/go-api/internal/social"
+	"github.com/lawrenceli0228/animego/go-api/internal/subscriptions"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/email"
@@ -251,6 +253,14 @@ func main() {
 	adminUserHandlers := admin.NewUserHandlers(q, enqueuer)
 	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
 
+	// P2.4 — subscriptions + social.  Subscriptions handler depends on
+	// anime.EnsureCached for the FK pre-fill (POST /api/subscriptions
+	// requires the anime_cache row to exist; if missing, EnsureCached
+	// triggers a one-shot AniList Detail fetch + upsert).  Social
+	// handlers are pure DB readers/writers — no external deps.
+	subscriptionsHandlers := subscriptions.NewHandlers(pool, q, q, anilistClient, nil)
+	socialHandlers := social.NewHandlers(pool, q)
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -288,6 +298,31 @@ func main() {
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
+
+	// P2.4 — subscriptions: 5 endpoints, every route RequireAuth.
+	r.Route("/api/subscriptions", func(r chi.Router) {
+		r.Use(jwtx.RequireAuth(signer))
+		r.Get("/", subscriptionsHandlers.ListSubscriptions)
+		r.Post("/", subscriptionsHandlers.CreateSubscription)
+		r.Get("/{anilistId}", subscriptionsHandlers.GetSubscriptionByAnilistID)
+		r.Patch("/{anilistId}", subscriptionsHandlers.UpdateSubscription)
+		r.Delete("/{anilistId}", subscriptionsHandlers.DeleteSubscription)
+	})
+
+	// P2.4 — users public profile + follows.  GET /:username uses
+	// OptionalAuth so anon callers still see the profile (isFollowing
+	// is null); follow/unfollow require auth; followers/following lists
+	// are public reads.
+	r.Route("/api/users", func(r chi.Router) {
+		r.With(jwtx.OptionalAuth(signer)).Get("/{username}", socialHandlers.GetProfile)
+		r.With(jwtx.RequireAuth(signer)).Post("/{username}/follow", socialHandlers.Follow)
+		r.With(jwtx.RequireAuth(signer)).Delete("/{username}/follow", socialHandlers.Unfollow)
+		r.Get("/{username}/followers", socialHandlers.ListFollowers)
+		r.Get("/{username}/following", socialHandlers.ListFollowing)
+	})
+
+	// P2.4 — activity feed of followed users.  Requires auth.
+	r.With(jwtx.RequireAuth(signer)).Get("/api/feed", socialHandlers.GetFeed)
 
 	// P2.3 admin: 14 endpoints behind RequireAuth + RequireAdmin chain.
 	// Express equivalent: server/routes/admin.routes.js with the same
@@ -331,7 +366,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.3")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.4")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
