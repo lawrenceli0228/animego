@@ -34,6 +34,10 @@ test-integration: ## Run testcontainers integration tests (requires Docker).
 
 # ----- sqlc ---------------------------------------------------------------
 
+.PHONY: byteparity
+byteparity: ## Run byte-parity fixtures against a running server (assumes BYTEPARITY_BASE_URL or localhost:8080)
+	go test -tags=byteparity -count=1 ./test/byteparity/... -v
+
 .PHONY: sqlc-generate
 sqlc-generate: ## Regenerate internal/db/gen from internal/db/queries.
 	sqlc generate
