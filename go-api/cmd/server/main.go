@@ -110,7 +110,7 @@ func main() {
 			slog.Warn("river queue stop", "err", err)
 		}
 	}()
-	slog.Info("river queue ready", "workers", "v1(real)+v2(real)+v3(stub)")
+	slog.Info("river queue ready", "workers", "v1(real)+v2(real)+v3(real)")
 
 	searchSvc, err := anime.NewSearchService(anilistClient, q, enqueuer)
 	if err != nil {
@@ -128,6 +128,21 @@ func main() {
 		os.Exit(1)
 	}
 	seasonalSvc := anime.NewSeasonalService(q, anilistClient)
+
+	// 1h in-memory caches for /trending + /yearly-top (Express had these
+	// as Map-based caches; we use ristretto for accurate eviction).
+	// /completed-gems is a random sample — Express does NOT cache it
+	// (would always return the same rows); we match that.
+	trendingCache, err := anime.NewTrendingCache()
+	if err != nil {
+		slog.Error("trending cache init failed", "err", err)
+		os.Exit(1)
+	}
+	yearlyTopCache, err := anime.NewYearlyTopCache()
+	if err != nil {
+		slog.Error("yearly-top cache init failed", "err", err)
+		os.Exit(1)
+	}
 
 	// Boot-time orphan scan: catches anime_cache rows with
 	// bangumi_version=0 that were upserted during a previous worker
@@ -162,8 +177,8 @@ func main() {
 	r.Route("/api/anime", func(r chi.Router) {
 		r.Get("/completed-gems", anime.CompletedGems(q))
 		r.Get("/seasonal", seasonalSvc.Handler())
-		r.Get("/yearly-top", anime.YearlyTop(q))
-		r.Get("/trending", anime.Trending(q))
+		r.Get("/yearly-top", anime.YearlyTop(q, yearlyTopCache))
+		r.Get("/trending", anime.Trending(q, trendingCache))
 		r.Get("/torrents", anime.Torrents(torrentsAgg))
 		r.Get("/search", searchSvc.Handler())
 		r.Get("/schedule", scheduleSvc.Handler())
@@ -182,7 +197,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.7")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.8")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)

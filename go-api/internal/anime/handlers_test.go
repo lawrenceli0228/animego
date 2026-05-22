@@ -15,9 +15,31 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/cache"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/torrents"
 )
+
+// newYearlyTopCache builds a fresh 1h cache for YearlyTop tests.  Each
+// test gets its own instance so cache state cannot leak between cases
+// when t.Parallel() is in use.
+func newYearlyTopCache(t *testing.T) *cache.Cache[[]dbgen.GetYearlyTopRow] {
+	t.Helper()
+	c, err := cache.New[[]dbgen.GetYearlyTopRow](cache.Config{DefaultTTL: 1 * time.Hour})
+	require.NoError(t, err)
+	t.Cleanup(c.Close)
+	return c
+}
+
+// newTrendingCache builds a fresh 1h cache for Trending tests.  Same
+// per-test isolation guarantee as newYearlyTopCache.
+func newTrendingCache(t *testing.T) *cache.Cache[[]trendingItem] {
+	t.Helper()
+	c, err := cache.New[[]trendingItem](cache.Config{DefaultTTL: 1 * time.Hour})
+	require.NoError(t, err)
+	t.Cleanup(c.Close)
+	return c
+}
 
 // fakeQuerier is a hand-rolled mock of dbgen.Querier.  Each method is a
 // function-pointer field; unset fields panic loudly via the embedded
@@ -281,7 +303,7 @@ func TestYearlyTop_QueriesYear20_SlicesToLimit(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	YearlyTop(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top?limit=5", nil))
+	YearlyTop(q, newYearlyTopCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top?limit=5", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, int32(20), gotLimit, "DB always called with 20")
@@ -306,7 +328,7 @@ func TestYearlyTop_DefaultYearIsCurrent(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	YearlyTop(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top", nil))
+	YearlyTop(q, newYearlyTopCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, gotYear)
@@ -328,7 +350,7 @@ func TestYearlyTop_DefaultLimit(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	YearlyTop(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top", nil))
+	YearlyTop(q, newYearlyTopCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var parsed struct {
@@ -348,9 +370,107 @@ func TestYearlyTop_DBError(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	YearlyTop(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top", nil))
+	YearlyTop(q, newYearlyTopCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top", nil))
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// TestYearlyTop_CacheHit_NoSecondDBCall verifies that a second request
+// for the same year is served entirely from cache: the fakeQuerier's
+// call counter must remain 1 after two back-to-back requests.
+func TestYearlyTop_CacheHit_NoSecondDBCall(t *testing.T) {
+	t.Parallel()
+
+	var dbCalls int
+	q := &fakeQuerier{
+		getYearlyTopFn: func(_ context.Context, _ *int32, _ int32) ([]dbgen.GetYearlyTopRow, error) {
+			dbCalls++
+			rows := make([]dbgen.GetYearlyTopRow, 20)
+			for i := 0; i < 20; i++ {
+				rows[i].AnilistID = int32(i + 1)
+			}
+			return rows, nil
+		},
+	}
+	c := newYearlyTopCache(t)
+	h := YearlyTop(q, c)
+
+	// First request — DB hit, populates cache.
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top?year=2024&limit=5", nil))
+	require.Equal(t, http.StatusOK, rec1.Code)
+
+	// Ristretto writes are batched through a channel; force flush so
+	// the second Get observes the entry.
+	c.Wait()
+
+	// Second request — must come from cache.
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top?year=2024&limit=5", nil))
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	assert.Equal(t, 1, dbCalls, "DB should be queried exactly once across two requests for the same year")
+	assert.Equal(t, rec1.Body.String(), rec2.Body.String(), "cached response must match initial response")
+}
+
+// TestYearlyTop_CacheKeyByYear verifies cache key isolation: requesting
+// year=2024 then year=2025 must trigger two distinct DB queries.
+func TestYearlyTop_CacheKeyByYear(t *testing.T) {
+	t.Parallel()
+
+	var dbCalls int
+	q := &fakeQuerier{
+		getYearlyTopFn: func(_ context.Context, year *int32, _ int32) ([]dbgen.GetYearlyTopRow, error) {
+			dbCalls++
+			// Return distinct payload per year so we can verify the
+			// caller receives the right cached payload.
+			return []dbgen.GetYearlyTopRow{
+				{AnilistID: *year},
+			}, nil
+		},
+	}
+	c := newYearlyTopCache(t)
+	h := YearlyTop(q, c)
+
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top?year=2024", nil))
+	require.Equal(t, http.StatusOK, rec1.Code)
+	c.Wait()
+
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top?year=2025", nil))
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	assert.Equal(t, 2, dbCalls, "different years → different cache keys → DB queried twice")
+	assert.NotEqual(t, rec1.Body.String(), rec2.Body.String(), "year-keyed cache must return distinct payloads")
+}
+
+// TestYearlyTop_NoRefreshParam confirms Express semantics: ?refresh=true
+// on /yearly-top is NOT honored (only /trending honors it).  Two requests
+// — one with refresh=true — should still result in a single DB call.
+func TestYearlyTop_NoRefreshParam(t *testing.T) {
+	t.Parallel()
+
+	var dbCalls int
+	q := &fakeQuerier{
+		getYearlyTopFn: func(_ context.Context, _ *int32, _ int32) ([]dbgen.GetYearlyTopRow, error) {
+			dbCalls++
+			return []dbgen.GetYearlyTopRow{{AnilistID: 1}}, nil
+		},
+	}
+	c := newYearlyTopCache(t)
+	h := YearlyTop(q, c)
+
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top?year=2024", nil))
+	require.Equal(t, http.StatusOK, rec1.Code)
+	c.Wait()
+
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/anime/yearly-top?year=2024&refresh=true", nil))
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	assert.Equal(t, 1, dbCalls, "?refresh=true is not honored on /yearly-top — second request must hit cache")
 }
 
 // -----------------------------------------------------------------------------
@@ -371,7 +491,7 @@ func TestTrending_RankAndWatcherCount(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	Trending(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
+	Trending(q, newTrendingCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var parsed struct {
@@ -407,7 +527,7 @@ func TestTrending_LimitSlicing(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	Trending(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending?limit=5", nil))
+	Trending(q, newTrendingCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending?limit=5", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var parsed struct {
@@ -434,7 +554,7 @@ func TestTrending_LimitCappedAt20(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	Trending(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending?limit=999", nil))
+	Trending(q, newTrendingCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending?limit=999", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var parsed struct {
@@ -454,7 +574,7 @@ func TestTrending_DBError(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	Trending(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
+	Trending(q, newTrendingCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -474,7 +594,7 @@ func TestTrending_FieldOrder_RankFirst(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	Trending(q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
+	Trending(q, newTrendingCache(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
 
 	body := rec.Body.String()
 	rankIdx := strings.Index(body, `"rank"`)
@@ -485,6 +605,120 @@ func TestTrending_FieldOrder_RankFirst(t *testing.T) {
 	require.Greater(t, anilistIdx, -1)
 	assert.True(t, rankIdx < watcherIdx, "rank should come before watcherCount")
 	assert.True(t, watcherIdx < anilistIdx, "watcherCount should come before anilistId")
+}
+
+// TestTrending_CacheHit_NoSecondDBCall verifies the warm path: two
+// consecutive requests with identical params should result in exactly
+// one DB call.
+func TestTrending_CacheHit_NoSecondDBCall(t *testing.T) {
+	t.Parallel()
+
+	var dbCalls int
+	q := &fakeQuerier{
+		getTrendingWithCountsFn: func(_ context.Context, _ int32) ([]dbgen.GetTrendingWithCountsRow, error) {
+			dbCalls++
+			rows := make([]dbgen.GetTrendingWithCountsRow, 20)
+			for i := 0; i < 20; i++ {
+				rows[i] = dbgen.GetTrendingWithCountsRow{
+					AnilistID:    int32(i + 1),
+					WatcherCount: int64(100 - i),
+				}
+			}
+			return rows, nil
+		},
+	}
+	c := newTrendingCache(t)
+	h := Trending(q, c)
+
+	// First request — populates cache.
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/anime/trending?limit=5", nil))
+	require.Equal(t, http.StatusOK, rec1.Code)
+
+	// Flush ristretto write buffer so the next Get sees the entry.
+	c.Wait()
+
+	// Second request — must be served from cache.
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/anime/trending?limit=5", nil))
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	assert.Equal(t, 1, dbCalls, "DB should be queried exactly once across two requests")
+	assert.Equal(t, rec1.Body.String(), rec2.Body.String(), "cached response must match initial response")
+}
+
+// TestTrending_RefreshBypassesCache verifies that ?refresh=true forces
+// a fresh DB query even when a cached entry exists.
+func TestTrending_RefreshBypassesCache(t *testing.T) {
+	t.Parallel()
+
+	var dbCalls int
+	q := &fakeQuerier{
+		getTrendingWithCountsFn: func(_ context.Context, _ int32) ([]dbgen.GetTrendingWithCountsRow, error) {
+			dbCalls++
+			return []dbgen.GetTrendingWithCountsRow{
+				{AnilistID: int32(dbCalls), WatcherCount: int64(dbCalls)},
+			}, nil
+		},
+	}
+	c := newTrendingCache(t)
+	h := Trending(q, c)
+
+	// First request — populates cache (dbCalls=1).
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
+	require.Equal(t, http.StatusOK, rec1.Code)
+	c.Wait()
+
+	// Second request with refresh=true — must bypass cache (dbCalls=2).
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/anime/trending?refresh=true", nil))
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	assert.Equal(t, 2, dbCalls, "?refresh=true must trigger a fresh DB query")
+
+	// Sanity check: payloads differ because the stub embeds dbCalls in
+	// the response, so the refreshed response is observably distinct.
+	assert.NotEqual(t, rec1.Body.String(), rec2.Body.String(), "refreshed payload should differ from cached payload")
+}
+
+// TestTrending_RefreshRepopulatesCache verifies that a refresh request
+// not only bypasses the cache but also writes its fresh value back, so
+// a subsequent non-refresh request reads the new value.
+func TestTrending_RefreshRepopulatesCache(t *testing.T) {
+	t.Parallel()
+
+	var dbCalls int
+	q := &fakeQuerier{
+		getTrendingWithCountsFn: func(_ context.Context, _ int32) ([]dbgen.GetTrendingWithCountsRow, error) {
+			dbCalls++
+			return []dbgen.GetTrendingWithCountsRow{
+				{AnilistID: int32(dbCalls), WatcherCount: int64(dbCalls * 10)},
+			}, nil
+		},
+	}
+	c := newTrendingCache(t)
+	h := Trending(q, c)
+
+	// Warm the cache.
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
+	require.Equal(t, http.StatusOK, rec1.Code)
+	c.Wait()
+
+	// Refresh — re-queries DB + repopulates.
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/anime/trending?refresh=true", nil))
+	require.Equal(t, http.StatusOK, rec2.Code)
+	c.Wait()
+
+	// Third request — no refresh; should hit the just-repopulated cache.
+	rec3 := httptest.NewRecorder()
+	h.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/api/anime/trending", nil))
+	require.Equal(t, http.StatusOK, rec3.Code)
+
+	assert.Equal(t, 2, dbCalls, "third request must hit the repopulated cache, not the DB")
+	assert.Equal(t, rec2.Body.String(), rec3.Body.String(), "third request should match the refreshed payload")
 }
 
 // -----------------------------------------------------------------------------

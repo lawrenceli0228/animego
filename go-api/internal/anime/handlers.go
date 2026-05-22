@@ -23,10 +23,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/cache"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/torrents"
 )
+
+// trendingCacheKey is the single global key for the Trending cache.
+// Express keeps top-N trending in a single module-level variable
+// (trendingCache.data) — there is no per-user variation, so one key
+// is sufficient.  Per-request limit slicing happens after cache lookup.
+const trendingCacheKey = "trending"
 
 // queryTimeout bounds every handler's database round-trip.  Five seconds
 // is generous for the kinds of queries P2.1 issues — bulk anime_cache
@@ -82,8 +89,18 @@ func CompletedGems(q dbgen.Querier) http.HandlerFunc {
 // Express semantics preserved: the DB is always queried with limit=20,
 // then sliced down to the caller's limit in Go.  This matches the
 // 1h cache key Express uses (year only, not year+limit) — so a cache
-// warmed by ?limit=10 can satisfy ?limit=15 from the same entry.  The
-// cache itself lands in P2.1.4; for now every request hits Postgres.
+// warmed by ?limit=10 can satisfy ?limit=15 from the same entry.
+//
+// Caching:
+//
+//   - Backed by a 1h in-memory ristretto cache keyed on year (decimal
+//     string).  Cache value is the full []dbgen.GetYearlyTopRow slice
+//     (length up to 20) returned by the DB; the per-request limit cap
+//     is applied AFTER cache hit/populate.
+//   - Cache miss → DB → cache populate → response.
+//   - Cache hit → respond directly, no DB round-trip.
+//   - ?refresh=true is NOT honored here (Express only honors it on
+//     /trending; we match Express by ignoring it on /yearly-top).
 //
 // Query parameters:
 //
@@ -93,7 +110,7 @@ func CompletedGems(q dbgen.Querier) http.HandlerFunc {
 // Response envelope:
 //
 //	{"data":[{...anime fields...}, ...]}
-func YearlyTop(q dbgen.Querier) http.HandlerFunc {
+func YearlyTop(q dbgen.Querier, c *cache.Cache[[]dbgen.GetYearlyTopRow]) http.HandlerFunc {
 	const (
 		defaultLimit = 10
 		maxLimit     = 20
@@ -107,11 +124,23 @@ func YearlyTop(q dbgen.Querier) http.HandlerFunc {
 		year := parseYear(qs.Get("year"))
 		limit := parseLimit(qs.Get("limit"), defaultLimit, maxLimit)
 
-		yearI32 := int32(year)
-		rows, err := q.GetYearlyTop(ctx, &yearI32, int32(maxLimit))
-		if err != nil {
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
-			return
+		cacheKey := strconv.Itoa(year)
+
+		rows, hit := c.Get(cacheKey)
+		if !hit {
+			yearI32 := int32(year)
+			fresh, err := q.GetYearlyTop(ctx, &yearI32, int32(maxLimit))
+			if err != nil {
+				httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
+				return
+			}
+			rows = fresh
+			// Cache the full 20-row slice; let the per-request limit
+			// slice happen below.  Set may return false under cost
+			// pressure — log + continue (next request will re-query).
+			if ok := c.Set(cacheKey, rows); !ok {
+				slog.Warn("yearly-top cache set rejected", "year", year, "rows", len(rows))
+			}
 		}
 
 		// Express:  data.slice(0, limitNum)  — query 20 then trim in code.
@@ -127,18 +156,30 @@ func YearlyTop(q dbgen.Querier) http.HandlerFunc {
 // ordered by watcher count desc.  Replaces anime.controller.js:17-50.
 //
 // The Express two-query (Subscription.aggregate + AnimeCache.find) is
-// folded into a single SQL JOIN via dbgen.GetTrendingWithCounts.  The
-// 1h in-memory cache from Express lands in P2.1.4 with the cache
-// package wiring; for now every request hits Postgres (2 cheap queries).
+// folded into a single SQL JOIN via dbgen.GetTrendingWithCounts.
+//
+// Caching:
+//
+//   - Backed by a 1h in-memory ristretto cache under a single global key
+//     ("trending") — the top-N list is identical for every client, so
+//     there is no per-user variation worth keying on.
+//   - Cache value is the full mapped []trendingItem slice (length up to
+//     20, rank + watcherCount injected); per-request limit slicing
+//     happens after the cache hit/populate.
+//   - Cache miss → DB → map → cache populate → response.
+//   - Cache hit → respond directly, no DB round-trip.
+//   - ?refresh=true bypasses the cache lookup: re-queries the DB and
+//     repopulates the entry.  Matches Express anime.controller.js:17-19.
 //
 // Query parameters:
 //
-//	limit  default 10, max 20
+//	limit    default 10, max 20
+//	refresh  optional; "true" bypasses cache
 //
 // Response envelope (rank/watcherCount injected at the top, anime fields follow):
 //
 //	{"data":[{"rank":1, "watcherCount":42, "anilistId":..., ...}, ...]}
-func Trending(q dbgen.Querier) http.HandlerFunc {
+func Trending(q dbgen.Querier, c *cache.Cache[[]trendingItem]) http.HandlerFunc {
 	const (
 		defaultLimit = 10
 		maxLimit     = 20
@@ -147,40 +188,62 @@ func Trending(q dbgen.Querier) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
 		defer cancel()
 
-		limit := parseLimit(req.URL.Query().Get("limit"), defaultLimit, maxLimit)
+		qs := req.URL.Query()
+		limit := parseLimit(qs.Get("limit"), defaultLimit, maxLimit)
+		bypass := qs.Get("refresh") == "true"
 
-		rows, err := q.GetTrendingWithCounts(ctx, int32(maxLimit))
-		if err != nil {
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
-			return
+		var (
+			items []trendingItem
+			hit   bool
+		)
+		if !bypass {
+			items, hit = c.Get(trendingCacheKey)
 		}
 
-		// Express:  agg.filter(r => animeMap[r._id]).map((r, i) => ({rank: i+1, ...}))
-		// The SQL JOIN already drops anime_cache misses, so we can map
-		// 1:1 without filtering.  Rank is iteration order, 1-indexed.
-		items := make([]trendingItem, 0, len(rows))
-		for i, r := range rows {
-			items = append(items, trendingItem{
-				Rank:            i + 1,
-				WatcherCount:    r.WatcherCount,
-				AnilistID:       r.AnilistID,
-				TitleRomaji:     r.TitleRomaji,
-				TitleEnglish:    r.TitleEnglish,
-				TitleNative:     r.TitleNative,
-				TitleChinese:    r.TitleChinese,
-				CoverImageUrl:   r.CoverImageUrl,
-				CoverImageColor: r.CoverImageColor,
-				PosterAccent:    r.PosterAccent,
-				AverageScore:    r.AverageScore,
-				BangumiScore:    r.BangumiScore,
-				Episodes:        r.Episodes,
-				Season:          r.Season,
-				SeasonYear:      r.SeasonYear,
-				Status:          r.Status,
-				Format:          r.Format,
-				Description:     r.Description,
-			})
+		if !hit {
+			rows, err := q.GetTrendingWithCounts(ctx, int32(maxLimit))
+			if err != nil {
+				httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
+				return
+			}
+
+			// Express:  agg.filter(r => animeMap[r._id]).map((r, i) => ({rank: i+1, ...}))
+			// The SQL JOIN already drops anime_cache misses, so we can map
+			// 1:1 without filtering.  Rank is iteration order, 1-indexed.
+			items = make([]trendingItem, 0, len(rows))
+			for i, r := range rows {
+				items = append(items, trendingItem{
+					Rank:            i + 1,
+					WatcherCount:    r.WatcherCount,
+					AnilistID:       r.AnilistID,
+					TitleRomaji:     r.TitleRomaji,
+					TitleEnglish:    r.TitleEnglish,
+					TitleNative:     r.TitleNative,
+					TitleChinese:    r.TitleChinese,
+					CoverImageUrl:   r.CoverImageUrl,
+					CoverImageColor: r.CoverImageColor,
+					PosterAccent:    r.PosterAccent,
+					AverageScore:    r.AverageScore,
+					BangumiScore:    r.BangumiScore,
+					Episodes:        r.Episodes,
+					Season:          r.Season,
+					SeasonYear:      r.SeasonYear,
+					Status:          r.Status,
+					Format:          r.Format,
+					Description:     r.Description,
+				})
+			}
+
+			// Cache the full mapped slice (≤20); per-request limit is
+			// applied below.  A rejected Set under cost pressure is not
+			// fatal — next request just re-populates.
+			if ok := c.Set(trendingCacheKey, items); !ok {
+				slog.Warn("trending cache set rejected", "items", len(items))
+			}
 		}
+
+		// Slice to the per-request limit AFTER cache lookup/populate so
+		// the cache always carries the full top-20.
 		if len(items) > limit {
 			items = items[:limit]
 		}
@@ -479,4 +542,18 @@ func validSeason(s string) bool {
 	default:
 		return false
 	}
+}
+
+// NewTrendingCache constructs the 1h ristretto cache used by Trending.
+// Hides the package-private trendingItem type from callers (main.go)
+// so they can wire the handler without referencing internals.
+func NewTrendingCache() (*cache.Cache[[]trendingItem], error) {
+	return cache.New[[]trendingItem](cache.Config{DefaultTTL: 1 * time.Hour})
+}
+
+// NewYearlyTopCache constructs the 1h ristretto cache used by YearlyTop.
+// Keyed per year ("2024", "2025", ...); values are the full 20-row slice
+// from GetYearlyTop, sliced per request at response time.
+func NewYearlyTopCache() (*cache.Cache[[]dbgen.GetYearlyTopRow], error) {
+	return cache.New[[]dbgen.GetYearlyTopRow](cache.Config{DefaultTTL: 1 * time.Hour})
 }
