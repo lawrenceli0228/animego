@@ -1277,6 +1277,37 @@ func (q *Queries) ListUnenrichedAnilistIDs(ctx context.Context, limit int32, off
 	return items, nil
 }
 
+const updateAnimeCharacterCN = `-- name: UpdateAnimeCharacterCN :exec
+UPDATE anime_characters
+SET name_cn               = $3,
+    voice_actor_cn        = $4,
+    voice_actor_image_url = $5
+WHERE anime_id = $1
+  AND (name_en = $2 OR name_ja = $2)
+`
+
+// Phase 2 character enrichment: match by anime_id + (name_en OR name_ja).
+// Bangumi character.name is typically Japanese (e.g. "天使ヶ原恵") while
+// AniList stores it under name_ja; some AniList entries have English/
+// romaji names that match Bangumi's English alias instead.  Try both
+// columns to maximise the per-character hit rate.
+//
+// P2.1.7 used name_en only — Bangumi vs AniList romanisation diffs
+// yielded 0% match in live smoke (anilist_id=200 Tenshi: 9 chars / 0
+// matched).  Switching to (name_en OR name_ja) recovers the typical
+// case where Bangumi-name == AniList.name.native; fuzzy trigram match
+// can land later if exact-Japanese still misses too many.
+func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCn *string, voiceActorCn *string, voiceActorImageUrl *string) error {
+	_, err := q.db.Exec(ctx, updateAnimeCharacterCN,
+		animeID,
+		nameEn,
+		nameCn,
+		voiceActorCn,
+		voiceActorImageUrl,
+	)
+	return err
+}
+
 const updateBangumiV1 = `-- name: UpdateBangumiV1 :exec
 UPDATE anime_cache
 SET bgm_id         = $2,
@@ -1340,33 +1371,6 @@ WHERE anilist_id = $1
 // bumps bangumi_version=3 either way (success or null).
 func (q *Queries) UpdateBangumiV3(ctx context.Context, anilistID int32, titleChinese *string) error {
 	_, err := q.db.Exec(ctx, updateBangumiV3, anilistID, titleChinese)
-	return err
-}
-
-const updateAnimeCharacterCN = `-- name: UpdateAnimeCharacterCN :exec
-UPDATE anime_characters
-SET name_cn               = $3,
-    voice_actor_cn        = $4,
-    voice_actor_image_url = $5
-WHERE anime_id = $1 AND name_en = $2
-`
-
-// Phase 2 character enrichment: match by anime_id + name_en
-// (Bangumi character.name vs our anime_characters.name_en) and fill
-// name_cn + voice_actor_cn + voice_actor_image_url.  Rows that don't
-// match a Bangumi entry stay as AniList-only.
-//
-// name_en match is a coarse heuristic (Bangumi sometimes has English
-// names slightly different from AniList's romaji).  Future: fuzzy
-// match via trigram if needed.  For P2.1.7 exact match is OK.
-func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCn *string, voiceActorCn *string, voiceActorImageUrl *string) error {
-	_, err := q.db.Exec(ctx, updateAnimeCharacterCN,
-		animeID,
-		nameEn,
-		nameCn,
-		voiceActorCn,
-		voiceActorImageUrl,
-	)
 	return err
 }
 
