@@ -97,6 +97,14 @@ func (e *scheduleFakeEnqueuer) EnqueueV2Many(_ context.Context, _ []queue.Bangum
 	return nil
 }
 
+// EnqueueV3Many is a no-op stub.  /schedule never dispatches V3 jobs —
+// those chain from the V2 worker when its Subject didn't supply a
+// Chinese title.  Stub is needed only to satisfy the queue.Enqueuer
+// interface that grew the V3 method in P2.1.8.
+func (e *scheduleFakeEnqueuer) EnqueueV3Many(_ context.Context, _ []queue.BangumiV3Args) error {
+	return nil
+}
+
 func (e *scheduleFakeEnqueuer) snapshotCalls() [][]int32 {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -77,6 +77,13 @@ func (f *fakeV1Enqueuer) EnqueueV1Many(_ context.Context, _ []int32) error {
 	return nil
 }
 
+// EnqueueV3Many — V1 worker never calls V3 enqueue (V3 is chained
+// from V2).  Implemented as a no-op to satisfy the Enqueuer
+// interface.
+func (f *fakeV1Enqueuer) EnqueueV3Many(_ context.Context, _ []BangumiV3Args) error {
+	return nil
+}
+
 func (f *fakeV1Enqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) error {
 	dup := make([]BangumiV2Args, len(jobs))
 	copy(dup, jobs)

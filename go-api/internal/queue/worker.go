@@ -1,12 +1,16 @@
 // worker.go — river client boot + stub workers.
 //
-// One remaining stub worker (V3) logs + returns nil.  V1 + V2 have
-// real implementations in bangumi_v1.go / bangumi_v2.go; callers
-// wanting the production wiring should call WorkersWithBangumi
-// instead of Workers().  Keeping the V2+V3 stubs available via
-// Workers() lets the integration test prove the dispatch loop
-// (insert → fetch → run → complete) is wired correctly without
-// dragging a Bangumi HTTP client into the smoke suite.
+// All three production workers (V1, V2, V3) now have real
+// implementations in bangumi_v1.go / bangumi_v2.go / bangumi_v3.go.
+// Callers wanting the production wiring should call
+// WorkersWithBangumi instead of Workers().  Workers() now registers
+// only the V2 stub — kept around so the integration smoke test can
+// exercise the dispatch loop (insert → fetch → run → complete)
+// without dragging a Bangumi HTTP client into the smoke suite.  V3
+// has no stub anymore because the smoke suite swapped to using
+// WorkersWithBangumi with a NotFound-returning bangumi double, which
+// drives the real V3 worker down its terminal "bump version=3"
+// branch.
 //
 // Pattern decision:  Boot returns a non-started client so callers can
 // (a) test InsertTx without a running fetcher, or (b) gate Start on
@@ -35,8 +39,9 @@ var ErrMissingPool = errors.New("queue.Boot: pool is required")
 // stubBangumiV2Worker — phase-2 placeholder used ONLY by Workers()
 // (the stub-only bundle).  The real BangumiV2Worker lives in
 // bangumi_v2.go and is wired by WorkersWithBangumi.  This stub
-// remains so the integration smoke test can exercise the dispatch
-// loop without dragging in a Bangumi HTTP fake.
+// remains so the integration smoke test (and any future test that
+// only needs the dispatch loop) can exercise river plumbing without
+// dragging in a Bangumi HTTP fake.
 type stubBangumiV2Worker struct {
 	river.WorkerDefaults[BangumiV2Args]
 }
@@ -50,25 +55,14 @@ func (w *stubBangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2
 	return nil
 }
 
-// stubBangumiV3Worker — phase-3 placeholder (heal-CN).
-type stubBangumiV3Worker struct {
-	river.WorkerDefaults[BangumiV3Args]
-}
-
-// Work logs the v3 heal-CN attempt and returns nil.
-func (w *stubBangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3Args]) error {
-	slog.InfoContext(ctx, "queue: bangumi_v3 stub",
-		"anilistId", job.Args.AnilistID,
-		"bgmId", job.Args.BgmID,
-	)
-	return nil
-}
-
-// Workers returns a *river.Workers bundle with the 2 stub workers
-// (V2 + V3) registered.  V1 has a real implementation — production
-// callers should use WorkersWithBangumi instead.  This bundle is kept
-// for the dispatch-loop integration smoke and any future test that
-// wants to exercise river plumbing without injecting a bangumi mock.
+// Workers returns a *river.Workers bundle with only the V2 stub
+// worker registered.  V1 + V3 have real implementations — production
+// callers should use WorkersWithBangumi instead.  This bundle is
+// kept for backward compatibility and for any future test that wants
+// to exercise river plumbing without injecting a bangumi mock; V3
+// stub was removed when the real V3 worker landed (smoke tests now
+// drive the real V3 worker via WorkersWithBangumi + a NotFound bangumi
+// double instead).
 //
 // Returning a new bundle on every call (rather than caching) keeps
 // tests independent and lets callers register additional workers
@@ -76,7 +70,6 @@ func (w *stubBangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3
 func Workers() *river.Workers {
 	w := river.NewWorkers()
 	river.AddWorker(w, &stubBangumiV2Worker{})
-	river.AddWorker(w, &stubBangumiV3Worker{})
 	return w
 }
 
@@ -89,32 +82,38 @@ type BangumiV12Client interface {
 	BangumiV2Client
 }
 
-// V12DB merges the sqlc subsets V1 + V2 workers need.  dbgen.Querier
-// satisfies it; tests can supply a single fake that covers both
-// surfaces without having to split.
+// V12DB merges the sqlc subsets V1 + V2 + V3 workers need.
+// dbgen.Querier satisfies it; tests can supply a single fake that
+// covers all three surfaces without having to split.  The name keeps
+// "V12" for historical reasons even though V3 is now a member —
+// "V123DB" is uglier and this is an internal type whose surface
+// doesn't leak into the API.
 type V12DB interface {
 	V1DB
 	V2DB
+	V3DB
 }
 
-// WorkersWithBangumi returns a *river.Workers bundle with the REAL
-// BangumiV1Worker + BangumiV2Worker (using the provided bangumi
-// client + DB + enqueuer) plus the V3 stub that hasn't been replaced
-// yet (P2.1.8 will swap V3).
+// WorkersWithBangumi returns a *river.Workers bundle with all three
+// REAL bangumi workers (V1 + V2 + V3) wired against the provided
+// bangumi client + DB + enqueuer.  Production main.go calls this
+// with the live *bangumi.Client + *dbgen.Queries + a *RealEnqueuer
+// (or *LateBoundEnqueuer that gets Bound after Boot).
 //
-// enq is consumed by V1Worker so it can chain V2 enqueue after a
-// successful Bangumi hit.  Pass NoopEnqueuer{} (or nil — V1Worker
-// substitutes Noop when nil) in tests that don't want the V2 chain.
+// enq is consumed by V1Worker (chains V2 after a Bangumi search hit)
+// AND by V2Worker (chains V3 after a V2 update with no Chinese title).
+// Pass NoopEnqueuer{} (or nil — each worker substitutes Noop when
+// nil) in tests that don't want the V1→V2 or V2→V3 chains.  V3 is
+// terminal — does not consume the enqueuer.
 //
-// Production main.go wires the live bangumi.Client + dbgen.Queries +
-// real RealEnqueuer through this constructor.  Tests for the
-// dispatch loop alone still use Workers() (V2/V3 stubs only) to
-// avoid pulling in a bangumi mock.
+// Tests that only need the dispatch loop (without injecting a
+// bangumi mock) can still use Workers() — that bundle now contains
+// only the V2 stub since V1 + V3 have real implementations.
 func WorkersWithBangumi(bangumiClient BangumiV12Client, db V12DB, enq Enqueuer) *river.Workers {
 	w := river.NewWorkers()
 	river.AddWorker(w, NewBangumiV1Worker(bangumiClient, db, enq))
-	river.AddWorker(w, NewBangumiV2Worker(bangumiClient, db))
-	river.AddWorker(w, &stubBangumiV3Worker{})
+	river.AddWorker(w, NewBangumiV2Worker(bangumiClient, db, enq))
+	river.AddWorker(w, NewBangumiV3Worker(bangumiClient, db))
 	return w
 }
 
@@ -123,8 +122,9 @@ func WorkersWithBangumi(bangumiClient BangumiV12Client, db V12DB, enq Enqueuer) 
 // (rather than wrapping it in another constructor func) lets the
 // enrichment package re-register workers without learning a new API.
 type Config struct {
-	// Workers — if nil, Boot calls Workers() to register the V2+V3
-	// stubs (V1 has a real worker; use WorkersWithBangumi for prod).
+	// Workers — if nil, Boot calls Workers() to register the V2 stub
+	// only (V1 + V3 have real workers; use WorkersWithBangumi for
+	// the full production wiring).
 	Workers *river.Workers
 
 	// Queues — if nil, Boot defaults to {river.QueueDefault: {MaxWorkers: 1}}.

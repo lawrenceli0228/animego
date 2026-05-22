@@ -78,6 +78,13 @@ func (f *fakeEnqueuer) EnqueueV2Many(_ context.Context, _ []BangumiV2Args) error
 	return nil
 }
 
+// EnqueueV3Many is a no-op stub — ScanAndEnqueueOrphans only
+// dispatches V1 jobs (V3 chains from V2 worker, not the orphan
+// scan).  Satisfies the Enqueuer interface contract added in P2.1.8.
+func (f *fakeEnqueuer) EnqueueV3Many(_ context.Context, _ []BangumiV3Args) error {
+	return nil
+}
+
 func (f *fakeEnqueuer) snapshotCalls() [][]int32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()

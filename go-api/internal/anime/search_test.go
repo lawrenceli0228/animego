@@ -168,6 +168,14 @@ func (e *searchFakeEnqueuer) EnqueueV2Many(_ context.Context, _ []queue.BangumiV
 	return nil
 }
 
+// EnqueueV3Many is a no-op stub.  /search never dispatches V3 jobs —
+// those chain from the V2 worker when its Subject didn't supply a
+// Chinese title.  Stub is needed only to satisfy the queue.Enqueuer
+// interface that grew the V3 method in P2.1.8.
+func (e *searchFakeEnqueuer) EnqueueV3Many(_ context.Context, _ []queue.BangumiV3Args) error {
+	return nil
+}
+
 func (e *searchFakeEnqueuer) snapshotCalls() [][]int32 {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -160,12 +160,61 @@ func (f *fakeV2DB) snapshotCharCalls() []v2CharCall {
 // ---------------------------------------------------------------------------
 
 // runV2 constructs the worker + a stock job and dispatches via Work().
+// Uses NoopEnqueuer{} so tests that don't care about the V3 chain
+// don't have to wire one.  Tests that DO care about the chain should
+// call runV2WithEnq instead.
 func runV2(t *testing.T, b BangumiV2Client, d V2DB, anilistID, bgmID int) error {
 	t.Helper()
-	w := NewBangumiV2Worker(b, d)
+	return runV2WithEnq(t, b, d, NoopEnqueuer{}, anilistID, bgmID)
+}
+
+// runV2WithEnq is the explicit-enqueuer variant used by chain tests.
+// The V2 worker chain-enqueues a V3 job when this run's Subject did
+// not supply a Chinese title; these tests capture and assert on what
+// got enqueued.
+func runV2WithEnq(t *testing.T, b BangumiV2Client, d V2DB, e Enqueuer, anilistID, bgmID int) error {
+	t.Helper()
+	w := NewBangumiV2Worker(b, d, e)
 	return w.Work(context.Background(), &river.Job[BangumiV2Args]{
 		Args: BangumiV2Args{AnilistID: anilistID, BgmID: bgmID},
 	})
+}
+
+// fakeV2Enqueuer records EnqueueV3Many calls so chain tests can
+// assert which {anilistId, bgmId} pairs were dispatched after a
+// successful V2 update.  EnqueueV1Many and EnqueueV2Many are no-ops
+// (V2 worker never calls those on itself) but must be implemented to
+// satisfy Enqueuer.
+type fakeV2Enqueuer struct {
+	mu      sync.Mutex
+	v3Fn    func(ctx context.Context, jobs []BangumiV3Args) error
+	v3Calls [][]BangumiV3Args
+}
+
+func (f *fakeV2Enqueuer) EnqueueV1Many(_ context.Context, _ []int32) error { return nil }
+func (f *fakeV2Enqueuer) EnqueueV2Many(_ context.Context, _ []BangumiV2Args) error {
+	return nil
+}
+
+func (f *fakeV2Enqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
+	dup := make([]BangumiV3Args, len(jobs))
+	copy(dup, jobs)
+	f.mu.Lock()
+	f.v3Calls = append(f.v3Calls, dup)
+	fn := f.v3Fn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, jobs)
+}
+
+func (f *fakeV2Enqueuer) snapshotV3Calls() [][]BangumiV3Args {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([][]BangumiV3Args, len(f.v3Calls))
+	copy(dup, f.v3Calls)
+	return dup
 }
 
 // makeSubject builds a Subject with optional rating + NameCN.  Saves
@@ -602,6 +651,101 @@ func TestBangumiV2_ParallelFetch_BothCalled(t *testing.T) {
 	assert.Equal(t, 1, b.charactersCalls, "Characters called exactly once")
 	assert.Equal(t, 100, b.lastSubjectID, "bgmId propagated to Subject")
 	assert.Equal(t, 100, b.lastCharsID, "bgmId propagated to Characters")
+}
+
+// TestBangumiV2_NoSubjectNameCN_ChainsV3 — V2 happy path with
+// Subject.NameCN="" → fakeEnq.EnqueueV3Many called exactly once with
+// the right {anilistId, bgmId} pair.
+func TestBangumiV2_NoSubjectNameCN_ChainsV3(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			// Subject has score but no name_cn — V2's COALESCE leaves
+			// title_chinese untouched, so chain V3 to retry.
+			return makeSubject(100, "", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+	enq := &fakeV2Enqueuer{}
+
+	err := runV2WithEnq(t, b, db, enq, 1234, 9999)
+	require.NoError(t, err)
+
+	v3Calls := enq.snapshotV3Calls()
+	require.Len(t, v3Calls, 1, "exactly one V3 chain batch expected")
+	require.Len(t, v3Calls[0], 1, "batch should carry one V3 job")
+	assert.Equal(t, 1234, v3Calls[0][0].AnilistID, "AnilistID propagates to V3")
+	assert.Equal(t, 9999, v3Calls[0][0].BgmID, "BgmID propagates to V3")
+}
+
+// TestBangumiV2_SubjectHasNameCN_NoV3Chain — V2 happy path with
+// Subject.NameCN populated → V3 NOT chained (the title_chinese was
+// already supplied this run).
+func TestBangumiV2_SubjectHasNameCN_NoV3Chain(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "标题", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+	enq := &fakeV2Enqueuer{}
+
+	err := runV2WithEnq(t, b, db, enq, 1234, 9999)
+	require.NoError(t, err)
+
+	assert.Empty(t, enq.snapshotV3Calls(),
+		"Subject.NameCN populated → V3 must NOT be chained")
+}
+
+// TestBangumiV2_V3ChainError_NonFatal — Enqueuer.EnqueueV3Many returns
+// error → V2 worker still returns nil (V2 already succeeded, chain
+// failure is logged + swallowed).
+func TestBangumiV2_V3ChainError_NonFatal(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+	enq := &fakeV2Enqueuer{
+		v3Fn: func(_ context.Context, _ []BangumiV3Args) error {
+			return errors.New("river client unavailable")
+		},
+	}
+
+	err := runV2WithEnq(t, b, db, enq, 1234, 9999)
+	require.NoError(t, err, "V3 chain enqueue failure must NOT bubble up — V2 already succeeded")
+
+	// V3 was attempted exactly once even though it errored.
+	assert.Len(t, enq.snapshotV3Calls(), 1)
+}
+
+// TestBangumiV2_NilEnqueuer_DoesNotPanic — nil Enqueuer is replaced
+// by NoopEnqueuer{} inside the constructor.  Confirms the V3 chain
+// path is safe with a nil enqueuer (the chain just no-ops).
+func TestBangumiV2_NilEnqueuer_DoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	require.NotPanics(t, func() {
+		w := NewBangumiV2Worker(b, db, nil)
+		require.NotNil(t, w)
+		err := w.Work(context.Background(), &river.Job[BangumiV2Args]{
+			Args: BangumiV2Args{AnilistID: 1, BgmID: 100},
+		})
+		require.NoError(t, err)
+	})
 }
 
 // ---------------------------------------------------------------------------

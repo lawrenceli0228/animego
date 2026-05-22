@@ -4,11 +4,12 @@
 // test/integration/queue_smoke_test.go covers the enqueue → run →
 // complete loop against a real Postgres testcontainer.  This file
 // asserts:
-//   1. Each Args type returns the correct Kind.
-//   2. Workers() registers the V2 + V3 stubs (V1 lives in
-//      bangumi_v1.go — its tests are in bangumi_v1_test.go).
-//   3. Boot rejects a nil pool with ErrMissingPool.
-//   4. Boot applies sensible defaults when Config is zero-valued.
+//  1. Each Args type returns the correct Kind.
+//  2. Workers() registers only the V2 stub (V1 + V3 have real
+//     workers — tests live in bangumi_v1_test.go / bangumi_v3_test.go).
+//  3. WorkersWithBangumi registers all 3 real workers.
+//  4. Boot rejects a nil pool with ErrMissingPool.
+//  5. Boot applies sensible defaults when Config is zero-valued.
 package queue
 
 import (
@@ -66,29 +67,27 @@ func TestArgs_Kind(t *testing.T) {
 }
 
 // TestWorkers_RegistersStubs verifies Workers() emits a non-nil bundle
-// and that the V2 + V3 stub Kinds are occupied (V1 is intentionally
-// absent — see WorkersWithBangumi for the production wiring).  Probes
-// via river.AddWorkerSafely — it returns "already registered" when the
-// kind is taken, which is the cheapest cross-package way to see what's
-// in the bundle without reaching into the unexported workersMap.
+// and that the V2 stub Kind is occupied (V1 + V3 are intentionally
+// absent now that both have real implementations — see
+// WorkersWithBangumi for the production wiring).  Probes via
+// river.AddWorkerSafely — it returns "already registered" when the
+// kind is taken, which is the cheapest cross-package way to see
+// what's in the bundle without reaching into the unexported
+// workersMap.
 func TestWorkers_RegistersStubs(t *testing.T) {
 	t.Parallel()
 
 	w := Workers()
 	require.NotNil(t, w, "Workers() must return a non-nil bundle")
 
-	// Re-registering each stub kind should fail with "already registered".
+	// V2 slot should be occupied.
 	err := river.AddWorkerSafely(w, &stubBangumiV2Worker{})
 	require.Error(t, err, "v2 slot should already be occupied")
 	assert.Contains(t, err.Error(), "bangumi_v2")
-
-	err = river.AddWorkerSafely(w, &stubBangumiV3Worker{})
-	require.Error(t, err, "v3 slot should already be occupied")
-	assert.Contains(t, err.Error(), "bangumi_v3")
 }
 
 // TestWorkersWithBangumi_RegistersAll3 verifies the production wiring
-// constructor binds V1 + V2 (real) + V3 (stub) — all three Kinds
+// constructor binds V1 + V2 + V3 (all real) — all three Kinds
 // occupied.  Uses noopBangumi + noopV12DB — we never invoke Work
 // here, only inspect what's been registered.
 func TestWorkersWithBangumi_RegistersAll3(t *testing.T) {
@@ -103,11 +102,11 @@ func TestWorkersWithBangumi_RegistersAll3(t *testing.T) {
 	require.Error(t, err, "v1 slot should already be occupied")
 	assert.Contains(t, err.Error(), "bangumi_v1")
 
-	err = river.AddWorkerSafely(w, NewBangumiV2Worker(noopBangumi{}, noopV12DB{}))
+	err = river.AddWorkerSafely(w, NewBangumiV2Worker(noopBangumi{}, noopV12DB{}, NoopEnqueuer{}))
 	require.Error(t, err, "v2 slot should already be occupied")
 	assert.Contains(t, err.Error(), "bangumi_v2")
 
-	err = river.AddWorkerSafely(w, &stubBangumiV3Worker{})
+	err = river.AddWorkerSafely(w, NewBangumiV3Worker(noopBangumi{}, noopV12DB{}))
 	require.Error(t, err, "v3 slot should already be occupied")
 	assert.Contains(t, err.Error(), "bangumi_v3")
 }
@@ -197,12 +196,10 @@ func TestBoot_RejectsBadConfig(t *testing.T) {
 	require.Error(t, err, "river config validation must surface")
 }
 
-// TestStubWorkers_WorkReturnsNil confirms each remaining stub
-// Worker.Work() emits no error so the integration test's
-// wait-for-completion path lands on JobCompleted (not JobFailed).
-// Calls Work directly via the river.Job fixture so we don't need a
-// running client.  V1 has its own test file (bangumi_v1_test.go) now
-// that the stub is gone.
+// TestStubWorkers_WorkReturnsNil confirms the remaining V2 stub
+// Worker.Work() emits no error so legacy tests that rely on Workers()
+// (V2 stub only) get JobCompleted.  V1 + V3 tests live in their own
+// files now that both have real implementations.
 func TestStubWorkers_WorkReturnsNil(t *testing.T) {
 	t.Parallel()
 
@@ -211,11 +208,6 @@ func TestStubWorkers_WorkReturnsNil(t *testing.T) {
 	v2 := &stubBangumiV2Worker{}
 	require.NoError(t, v2.Work(ctx, &river.Job[BangumiV2Args]{
 		Args: BangumiV2Args{AnilistID: 42, BgmID: 100},
-	}))
-
-	v3 := &stubBangumiV3Worker{}
-	require.NoError(t, v3.Work(ctx, &river.Job[BangumiV3Args]{
-		Args: BangumiV3Args{AnilistID: 42, BgmID: 100},
 	}))
 }
 
@@ -270,8 +262,8 @@ func (noopBangumi) Characters(_ context.Context, _ int) ([]bangumi.Character, er
 	return nil, bangumi.ErrNotFound
 }
 
-// noopV12DB satisfies V12DB (V1 + V2 read/write surface).  All methods
-// no-op; the registration tests never invoke these methods.
+// noopV12DB satisfies V12DB (V1 + V2 + V3 read/write surface).  All
+// methods no-op; the registration tests never invoke these methods.
 type noopV12DB struct{}
 
 func (noopV12DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
@@ -283,6 +275,10 @@ func (noopV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string
 }
 
 func (noopV12DB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int32, _ *string) error {
+	return nil
+}
+
+func (noopV12DB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) error {
 	return nil
 }
 

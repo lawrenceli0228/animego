@@ -26,9 +26,17 @@
 //     Protects against a wedged DB connection silently degrading
 //     enrichment quality while still tolerating per-row mismatches.
 //
-// SCOPE: writes ONLY V2 fields.  Does NOT enqueue V3 (the heal-CN
-// phase) — that decision is owned by the lifecycle layer, not the V2
-// worker itself (keeps the worker single-purpose).
+// SCOPE: writes V2 fields AND chain-enqueues a V3 heal-CN job when
+// the Subject we just fetched didn't supply a Chinese title (i.e.
+// we passed nil titleChinese into UpdateBangumiV2, leaving any
+// existing value via SQL COALESCE).  V3 will re-fetch the Subject
+// and overwrite title_chinese unconditionally as the terminal heal
+// attempt.  Chaining lives here (not in a separate orchestrator)
+// because the V2 worker has the only authoritative signal that the
+// Subject's name_cn was missing this run — bridging that to a
+// separate "watch for v2 with no CN" component would race against
+// the V2 write and add a polling stage for no benefit.  V3 enqueue
+// failure is non-fatal: V2 already succeeded.
 package queue
 
 import (
@@ -100,18 +108,33 @@ type V2DB interface {
 
 // BangumiV2Worker is the real Phase 2 worker.  Embeds
 // river.WorkerDefaults so only Work has to be overridden.
+//
+// enq is used ONLY to chain a V3 job after a successful V2 update
+// when this run's Subject didn't supply a Chinese title (Subject
+// fetch may have a fresher copy on the next call).  Pass
+// NoopEnqueuer{} (or nil — the constructor substitutes Noop) in
+// unit tests that don't want to assert on the V3 chain.
 type BangumiV2Worker struct {
 	river.WorkerDefaults[BangumiV2Args]
 	bangumi BangumiV2Client
 	db      V2DB
+	enq     Enqueuer
 }
 
 // NewBangumiV2Worker constructs a worker bound to the given bangumi
-// client and DB.  Both dependencies are required; nil panics on the
-// first job (intentional — misconfiguration should crash loudly, not
-// silently no-op).
-func NewBangumiV2Worker(bangumiClient BangumiV2Client, db V2DB) *BangumiV2Worker {
-	return &BangumiV2Worker{bangumi: bangumiClient, db: db}
+// client, DB, and Enqueuer.  bangumiClient + db are required; nil
+// panics on the first job (intentional — misconfiguration should
+// crash loudly, not silently no-op).
+//
+// enq is OPTIONAL — nil is replaced with NoopEnqueuer{} so the V3
+// chain is a safe no-op when the caller hasn't wired river yet.  V3
+// chain enqueue failure is non-fatal (logged + swallowed) so a busted
+// river client cannot block V2 from completing.
+func NewBangumiV2Worker(bangumiClient BangumiV2Client, db V2DB, enq Enqueuer) *BangumiV2Worker {
+	if enq == nil {
+		enq = NoopEnqueuer{}
+	}
+	return &BangumiV2Worker{bangumi: bangumiClient, db: db, enq: enq}
 }
 
 // Work is the river dispatch entrypoint.  See package doc for the
@@ -274,6 +297,35 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 			"bgmId", bgmID,
 			"failures", charFailures,
 			"total", totalChars)
+	}
+
+	// Chain V3 heal-CN when this V2 run did NOT supply a Chinese
+	// title.  Reasoning: V2's UpdateBangumiV2 uses SQL COALESCE on
+	// title_chinese, so passing nil here means the column is either
+	// already set (V1 hit an exact native match → CN already
+	// populated) OR still NULL (neither V1 nor V2's Subject had
+	// name_cn).  We can't distinguish without an extra read, so we
+	// just chain V3 whenever V2's Subject was empty — if the column
+	// is already set, V3's overwrite is idempotent (re-fetches the
+	// same Subject and writes the same nil-or-value).  Trading one
+	// extra Bangumi API call per "V2-no-CN" row for not adding a
+	// pre-chain read; manageable cost given the heal pipeline only
+	// processes each row at most three times.
+	//
+	// V3 enqueue failure is non-fatal — V2 already succeeded and the
+	// row is at version=2.  Worst case: V3 never fires, row stays at
+	// version=2 with possibly NULL title_chinese.  Acceptable: the
+	// orphan scan can re-pick stuck rows later.
+	if titleChinese == nil {
+		if cErr := w.enq.EnqueueV3Many(ctx, []BangumiV3Args{{
+			AnilistID: int(anilistID),
+			BgmID:     bgmID,
+		}}); cErr != nil {
+			slog.WarnContext(ctx, "bangumi_v2 chain v3 enqueue error",
+				"anilistId", anilistID,
+				"bgmId", bgmID,
+				"err", cErr)
+		}
 	}
 
 	slog.InfoContext(ctx, "bangumi_v2 done",

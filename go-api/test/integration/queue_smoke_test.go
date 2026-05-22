@@ -51,12 +51,13 @@ import (
 )
 
 // noHitBangumi is a stub BangumiV12Client used by the queue smoke
-// tests to exercise the REAL V1 + V2 workers without hitting
+// tests to exercise the REAL V1 + V2 + V3 workers without hitting
 // api.bgm.tv.  Search/Subject/Characters all return ErrNotFound, which
 // drives V1.Work() and V2.Work() down the "permanent no-hit → return
-// nil → river marks job completed" branch.  Combined with noRowV12DB
-// below this keeps the V1/V2 completion paths identical to the old
-// stub workers while still going through the production wiring.
+// nil" branch and V3.Work() down its "Subject not found → still bump
+// version=3" terminal branch.  Combined with noRowV12DB below this
+// keeps the V1/V2/V3 completion paths deterministic while still
+// going through the production wiring.
 type noHitBangumi struct{}
 
 func (noHitBangumi) Search(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
@@ -72,9 +73,12 @@ func (noHitBangumi) Characters(_ context.Context, _ int) ([]bangumi.Character, e
 }
 
 // noRowV12DB is a stub V12DB used alongside noHitBangumi.  ErrNoRows
-// on the V1 read short-circuits the worker before Search is even
-// called; UpdateBangumiV2 / UpdateAnimeCharacterCN are unreachable
-// because the V2 worker bails on the Subject ErrNotFound first.
+// on the V1 read short-circuits V1.Work() before Search is even
+// called.  UpdateBangumiV2 / UpdateAnimeCharacterCN are unreachable
+// because V2.Work() bails on Subject ErrNotFound first.  V3.Work()
+// always calls UpdateBangumiV3 (terminal heal bumps version=3 even
+// on 404) so the V3 write is implemented as a no-op so the smoke
+// test path doesn't fail on row-not-found.
 // Belt-and-braces so the smoke test never accidentally races against
 // a real Bangumi HTTP request.
 type noRowV12DB struct{}
@@ -88,6 +92,10 @@ func (noRowV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *strin
 }
 
 func (noRowV12DB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int32, _ *string) error {
+	return nil
+}
+
+func (noRowV12DB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) error {
 	return nil
 }
 
@@ -107,10 +115,12 @@ const queueSmokeWaitTimeout = 10 * time.Second
 // via t.Cleanup so each Test* gets an independent dispatch loop and
 // teardown is deterministic even on test failure.
 //
-// The V1 worker is the REAL BangumiV1Worker but bound to noHitBangumi
-// + noRowV1DB so it always lands on the "no hit → return nil" branch.
-// This exercises the production WorkersWithBangumi wiring while
-// keeping the smoke deterministic (no live HTTP, no real DB row).
+// All three workers (V1, V2, V3) are REAL — bound to noHitBangumi +
+// noRowV12DB so they always land on the deterministic "no-hit /
+// no-subject → return nil" branches.  This exercises the production
+// WorkersWithBangumi wiring (including V3 which is new in P2.1.8)
+// while keeping the smoke deterministic (no live HTTP, no real DB
+// row).
 //
 // Returns the client (typed concretely for the Subscribe + Insert
 // surface the tests need).

@@ -38,11 +38,14 @@ import (
 // V1 jobs are seeded by the upsert paths (/search, /schedule, boot
 // orphan scan).  V2 jobs are chained from the V1 worker when a
 // Bangumi hit produced a bgm_id — services do NOT call EnqueueV2Many
-// directly.  Both methods live on the same interface so the V1
-// worker can hold a single dependency rather than two narrow ones.
+// directly.  V3 jobs are chained from the V2 worker when V2's Subject
+// didn't supply a Chinese title; services do NOT call EnqueueV3Many
+// directly.  All three methods live on the same interface so each
+// worker can hold a single dependency rather than three narrow ones.
 type Enqueuer interface {
 	EnqueueV1Many(ctx context.Context, anilistIDs []int32) error
 	EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) error
+	EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error
 }
 
 // RealEnqueuer wraps a river client and batches V1 inserts via
@@ -102,6 +105,31 @@ func (e *RealEnqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) 
 	return nil
 }
 
+// EnqueueV3Many inserts V3 heal-CN jobs for each {anilistId, bgmId}
+// pair.  Empty slice → noop.  Uses river.Client.InsertMany so the
+// round-trip is one statement per batch.  Errors are wrapped with
+// the batch size so the call site (V2 worker chain) can distinguish
+// "1 of N failed" from "all N failed" without re-deriving from pg
+// error.
+//
+// Production: only the V2 worker calls this (after a successful
+// UpdateBangumiV2 where Subject.NameCN was empty — the row may still
+// be NULL on title_chinese).  Services that seed V1 jobs do NOT
+// touch V3 — keeps the lifecycle one-way (V1 → V2 → V3).
+func (e *RealEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	params := make([]river.InsertManyParams, len(jobs))
+	for i, j := range jobs {
+		params[i] = river.InsertManyParams{Args: j}
+	}
+	if _, err := e.client.InsertMany(ctx, params); err != nil {
+		return fmt.Errorf("queue.EnqueueV3Many (n=%d): %w", len(jobs), err)
+	}
+	return nil
+}
+
 // NoopEnqueuer satisfies Enqueuer without doing anything.  Use as a
 // safe default when callers haven't wired river yet (e.g. server is
 // in unit-test mode, or a boot stage runs before river.Start).
@@ -114,6 +142,11 @@ func (NoopEnqueuer) EnqueueV1Many(ctx context.Context, anilistIDs []int32) error
 
 // EnqueueV2Many returns nil regardless of input.
 func (NoopEnqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) error {
+	return nil
+}
+
+// EnqueueV3Many returns nil regardless of input.
+func (NoopEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
 	return nil
 }
 
@@ -169,6 +202,17 @@ func (l *LateBoundEnqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2A
 		return nil
 	}
 	return e.EnqueueV2Many(ctx, jobs)
+}
+
+// EnqueueV3Many delegates to the bound RealEnqueuer, or no-ops when unbound.
+func (l *LateBoundEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
+	l.mu.RLock()
+	e := l.inner
+	l.mu.RUnlock()
+	if e == nil {
+		return nil
+	}
+	return e.EnqueueV3Many(ctx, jobs)
 }
 
 // Compile-time guards: all implementations must satisfy Enqueuer.

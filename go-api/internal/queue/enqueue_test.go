@@ -40,6 +40,20 @@ func TestNoopEnqueuer_V2NoError(t *testing.T) {
 		[]BangumiV2Args{{AnilistID: 1, BgmID: 100}, {AnilistID: 2, BgmID: 200}}))
 }
 
+// TestNoopEnqueuer_V3NoError — same inert-for-all-inputs guarantee
+// for the V3 method.  Documents that NoopEnqueuer is safe as a
+// drop-in default in tests that don't care about the V3 chain.
+func TestNoopEnqueuer_V3NoError(t *testing.T) {
+	t.Parallel()
+
+	n := NoopEnqueuer{}
+
+	require.NoError(t, n.EnqueueV3Many(context.Background(), nil))
+	require.NoError(t, n.EnqueueV3Many(context.Background(), []BangumiV3Args{}))
+	require.NoError(t, n.EnqueueV3Many(context.Background(),
+		[]BangumiV3Args{{AnilistID: 1, BgmID: 100}, {AnilistID: 2, BgmID: 200}}))
+}
+
 // TestRealEnqueuer_EmptyList_NoCall asserts the early-return path runs
 // without touching the underlying river client.  We pass nil for the
 // client — if the implementation tried to call client.InsertMany the
@@ -67,6 +81,32 @@ func TestRealEnqueuer_V2EmptyList_NoCall(t *testing.T) {
 	require.NoError(t, e.EnqueueV2Many(context.Background(), []BangumiV2Args{}))
 }
 
+// TestRealEnqueuer_V3EmptyList_NoCall — same guard for the V3 path.
+// Empty / nil must short-circuit before the nil client is touched.
+func TestRealEnqueuer_V3EmptyList_NoCall(t *testing.T) {
+	t.Parallel()
+
+	e := NewEnqueuer(nil)
+
+	require.NoError(t, e.EnqueueV3Many(context.Background(), nil))
+	require.NoError(t, e.EnqueueV3Many(context.Background(), []BangumiV3Args{}))
+}
+
+// TestLateBoundEnqueuer_V3Unbound_NoOp asserts the LateBoundEnqueuer
+// V3 path silently no-ops when the inner *RealEnqueuer hasn't been
+// bound yet — matches the V1 + V2 contracts so the constructor can
+// safely accept a not-yet-bound *LateBoundEnqueuer without surprising
+// callers.
+func TestLateBoundEnqueuer_V3Unbound_NoOp(t *testing.T) {
+	t.Parallel()
+
+	l := &LateBoundEnqueuer{}
+	require.NoError(t, l.EnqueueV3Many(context.Background(), nil))
+	require.NoError(t, l.EnqueueV3Many(context.Background(), []BangumiV3Args{}))
+	require.NoError(t, l.EnqueueV3Many(context.Background(),
+		[]BangumiV3Args{{AnilistID: 1, BgmID: 100}}))
+}
+
 // TestEnqueuer_InterfaceSatisfaction is a runtime sanity check — the
 // var blocks at the bottom of enqueue.go give us compile-time
 // guarantees, but an extra runtime guard documents the intent for
@@ -77,4 +117,5 @@ func TestEnqueuer_InterfaceSatisfaction(t *testing.T) {
 
 	var _ Enqueuer = (*RealEnqueuer)(nil)
 	var _ Enqueuer = NoopEnqueuer{}
+	var _ Enqueuer = (*LateBoundEnqueuer)(nil)
 }
