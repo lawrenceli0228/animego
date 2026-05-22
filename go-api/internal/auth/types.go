@@ -43,6 +43,28 @@ type LoginReq struct {
 	Password string `json:"password" validate:"required"`
 }
 
+// ForgotPasswordReq is the POST /api/auth/forgot-password body shape.
+// Only the email is required — successful + not-found paths BOTH return
+// the same generic 200 to prevent email enumeration via response shape.
+type ForgotPasswordReq struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+// ResetPasswordReq is the POST /api/auth/reset-password/:token body.
+// The token comes from the URL path (chi.URLParam), NOT this struct.
+//
+// Min length 6 matches Express's only validator hook on the reset path
+// (`if (!password || password.length < 6)`) — bcrypt cost is the actual
+// entropy gate, not the validator.
+//
+// We deliberately use `min=6` without `required` so empty and short
+// inputs map to the SAME "密码至少 6 位" message — Express collapses
+// both failure modes into a single error.  `min=6` on a string already
+// rejects the empty case (len("") = 0 < 6) so this works.
+type ResetPasswordReq struct {
+	Password string `json:"password" validate:"min=6"`
+}
+
 // SafeUser is the public user shape returned in /me, /login, /register
 // responses.  Field order matches Express's mongoose toJSON default
 // (which mirrors insertion order in the schema): id, username, email,

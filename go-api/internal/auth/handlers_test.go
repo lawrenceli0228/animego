@@ -14,10 +14,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	validatorPkg "github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -44,6 +46,24 @@ type fakeAuthDB struct {
 	updateUserRefreshToken  func(ctx context.Context, id uuid.UUID, refreshToken *string) error
 	updateRefreshCalledWith *string
 	updateRefreshCalledID   uuid.UUID
+
+	// Password-reset trio (P2.2.1).  Each Fn is optional — unset Fn
+	// panics on invocation so a test that forgets to wire one fails
+	// loudly rather than silently no-oping.  Call-capture fields below
+	// let tests assert exactly what landed in the DB without per-test
+	// boilerplate.
+	setResetPasswordTokenFn func(ctx context.Context, id uuid.UUID, token *string, expires pgtype.Timestamptz) error
+	getUserByResetTokenFn   func(ctx context.Context, token *string) (dbgen.User, error)
+	resetUserPasswordFn     func(ctx context.Context, id uuid.UUID, password string) error
+
+	setResetTokenCalledID      uuid.UUID
+	setResetTokenCalledToken   *string
+	setResetTokenCalledExpires pgtype.Timestamptz
+	setResetTokenCallCount     int
+
+	resetPasswordCalledID       uuid.UUID
+	resetPasswordCalledPassword string
+	resetPasswordCallCount      int
 }
 
 func (f *fakeAuthDB) CreateUser(ctx context.Context, username, email, password string) (dbgen.User, error) {
@@ -82,6 +102,67 @@ func (f *fakeAuthDB) UpdateUserRefreshToken(ctx context.Context, id uuid.UUID, r
 		return nil
 	}
 	return f.updateUserRefreshToken(ctx, id, refreshToken)
+}
+
+// SetResetPasswordToken captures the (id, token, expires) tuple AND
+// delegates to setResetPasswordTokenFn if set.  Tests that don't care
+// about the return value can leave the Fn nil — the call is still
+// recorded so absence-of-call tests (e.g. unknown-email) can assert
+// `setResetTokenCallCount == 0`.
+func (f *fakeAuthDB) SetResetPasswordToken(ctx context.Context, id uuid.UUID, token *string, expires pgtype.Timestamptz) error {
+	f.setResetTokenCalledID = id
+	if token != nil {
+		v := *token
+		f.setResetTokenCalledToken = &v
+	} else {
+		f.setResetTokenCalledToken = nil
+	}
+	f.setResetTokenCalledExpires = expires
+	f.setResetTokenCallCount++
+	if f.setResetPasswordTokenFn == nil {
+		return nil
+	}
+	return f.setResetPasswordTokenFn(ctx, id, token, expires)
+}
+
+func (f *fakeAuthDB) GetUserByResetToken(ctx context.Context, token *string) (dbgen.User, error) {
+	if f.getUserByResetTokenFn == nil {
+		panic("fakeAuthDB.GetUserByResetToken not set")
+	}
+	return f.getUserByResetTokenFn(ctx, token)
+}
+
+// ResetUserPassword captures (id, password) AND delegates to
+// resetUserPasswordFn if set.  Capturing the password lets tests
+// verify the bcrypt hash that landed in storage (round-trip via
+// jwtx.ComparePassword).
+func (f *fakeAuthDB) ResetUserPassword(ctx context.Context, id uuid.UUID, password string) error {
+	f.resetPasswordCalledID = id
+	f.resetPasswordCalledPassword = password
+	f.resetPasswordCallCount++
+	if f.resetUserPasswordFn == nil {
+		return nil
+	}
+	return f.resetUserPasswordFn(ctx, id, password)
+}
+
+// fakeEmailCall records a single SendPasswordReset invocation.
+type fakeEmailCall struct {
+	to       string
+	resetURL string
+}
+
+// fakeEmailSender is an in-package email.Sender stub.  Captures every
+// SendPasswordReset call so tests can assert recipient + URL shape; the
+// `err` field forces a particular send-failure return.
+type fakeEmailSender struct {
+	calls []fakeEmailCall
+	err   error
+}
+
+func (f *fakeEmailSender) SendPasswordReset(_ context.Context, to, resetURL string) error {
+	f.calls = append(f.calls, fakeEmailCall{to: to, resetURL: resetURL})
+	return f.err
 }
 
 // newTestSigner builds a real jwtx.Signer with dummy secrets and short
@@ -168,7 +249,7 @@ func TestRegister_HappyPath_201(t *testing.T) {
 			return out, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"new@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
@@ -200,7 +281,7 @@ func TestRegister_HappyPath_201(t *testing.T) {
 func TestRegister_InvalidUsernameShort_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"ab","email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -212,7 +293,7 @@ func TestRegister_InvalidUsernameShort_400(t *testing.T) {
 func TestRegister_InvalidEmail_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"not-an-email","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -224,7 +305,7 @@ func TestRegister_InvalidEmail_400(t *testing.T) {
 func TestRegister_PasswordTooShort_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"x@example.com","password":"12345"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -245,7 +326,7 @@ func TestRegister_DuplicateEmail_400(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"taken@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -266,7 +347,7 @@ func TestRegister_DuplicateUsername_400(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"new@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -278,7 +359,7 @@ func TestRegister_DuplicateUsername_400(t *testing.T) {
 func TestRegister_BadJSON_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{not-json`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -302,7 +383,7 @@ func TestLogin_HappyPath_200(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"email":"lawrence@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
@@ -333,7 +414,7 @@ func TestLogin_BadEmail_401(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"email":"ghost@example.com","password":"whatever"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
@@ -352,7 +433,7 @@ func TestLogin_BadPassword_401(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"email":"lawrence@example.com","password":"wrong-pony"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
@@ -366,7 +447,7 @@ func TestLogin_BadPassword_401(t *testing.T) {
 func TestLogin_MissingPassword_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"email":"lawrence@example.com","password":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
 	rec := httptest.NewRecorder()
@@ -382,7 +463,7 @@ func TestLogin_MissingPassword_400(t *testing.T) {
 func TestRefresh_NoCookie_401_NoToken(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	rec := httptest.NewRecorder()
 	h.Refresh(rec, req)
@@ -393,7 +474,7 @@ func TestRefresh_NoCookie_401_NoToken(t *testing.T) {
 func TestRefresh_BadToken_401_InvalidToken(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: "not-a-jwt"})
 	rec := httptest.NewRecorder()
@@ -421,7 +502,7 @@ func TestRefresh_DBTokenMismatch_401(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, signer, 7*24*time.Hour, false)
+	h := NewHandlers(db, signer, nil, "http://localhost:3000", 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
 	rec := httptest.NewRecorder()
@@ -446,7 +527,7 @@ func TestRefresh_DBTokenNil_401(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, signer, 7*24*time.Hour, false)
+	h := NewHandlers(db, signer, nil, "http://localhost:3000", 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
 	rec := httptest.NewRecorder()
@@ -471,7 +552,7 @@ func TestRefresh_HappyPath_200(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, signer, 7*24*time.Hour, false)
+	h := NewHandlers(db, signer, nil, "http://localhost:3000", 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
 	rec := httptest.NewRecorder()
@@ -507,7 +588,7 @@ func TestLogout_ClearsDBAndCookie(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req = req.WithContext(injectClaims(req.Context(), user.ID, user.Username, user.Role))
@@ -556,7 +637,7 @@ func TestMe_HappyPath(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req = req.WithContext(injectClaims(req.Context(), user.ID, user.Username, user.Role))
@@ -585,7 +666,7 @@ func TestMe_UserDeleted_404(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req = req.WithContext(injectClaims(req.Context(), user.ID, user.Username, user.Role))
@@ -598,7 +679,7 @@ func TestMe_UserDeleted_404(t *testing.T) {
 func TestMe_NoClaims_500(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	rec := httptest.NewRecorder()
 	h.Me(rec, req)
@@ -755,7 +836,7 @@ func TestRegister_RaceUniqueViolation_400(t *testing.T) {
 			return dbgen.User{}, &pgconnPgError{Code: "23505"}
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -778,7 +859,7 @@ func TestRegister_CreateUserGenericError_500(t *testing.T) {
 			return dbgen.User{}, errors.New("connection refused")
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -800,7 +881,7 @@ func TestRegister_DuplicateCheckDBError_500(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -819,7 +900,7 @@ func TestLogin_DBError_500(t *testing.T) {
 			return dbgen.User{}, errors.New("db down")
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
 	rec := httptest.NewRecorder()
@@ -833,7 +914,7 @@ func TestLogin_DBError_500(t *testing.T) {
 func TestLogin_BadJSON_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{ malformed`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
 	rec := httptest.NewRecorder()
@@ -859,7 +940,7 @@ func TestRefresh_UserNotFound_401(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, signer, 7*24*time.Hour, false)
+	h := NewHandlers(db, signer, nil, "http://localhost:3000", 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
 	rec := httptest.NewRecorder()
@@ -871,7 +952,7 @@ func TestRefresh_UserNotFound_401(t *testing.T) {
 func TestLogout_NoClaims_500(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	rec := httptest.NewRecorder()
 	h.Logout(rec, req)
@@ -927,5 +1008,585 @@ func TestSetClearRefreshCookie_ProdMode(t *testing.T) {
 	}
 	if cc.MaxAge >= 0 {
 		t.Errorf("MaxAge = %d, want negative (cleared)", cc.MaxAge)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// ForgotPassword (P2.2.1)
+// -----------------------------------------------------------------------------
+//
+// The forgot-password contract is "always 200, same message" so most of
+// the tests below assert behaviour-around-the-200 rather than the
+// status code:  was the token persisted? was the email sent? did the
+// not-found path skip both side effects?
+
+// hex64Pattern matches the 32-byte hex token shape emitted by
+// crypto/rand → hex.EncodeToString.  Used by tests that capture the
+// reset URL and assert it ends with a valid token.
+var hex64Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// extractTokenFromResetURL pulls the suffix after the last "/" from a
+// reset URL.  Tests use this to verify the token shape captured by the
+// fakeEmailSender.
+func extractTokenFromResetURL(t *testing.T, resetURL string) string {
+	t.Helper()
+	idx := strings.LastIndex(resetURL, "/")
+	if idx == -1 || idx+1 >= len(resetURL) {
+		t.Fatalf("reset URL has no token suffix: %s", resetURL)
+	}
+	return resetURL[idx+1:]
+}
+
+// newForgotPasswordHandler is a tiny constructor used by every
+// ForgotPassword test — wires the fake db + email sender + a known
+// client origin so the reset URL is deterministic.
+func newForgotPasswordHandler(t *testing.T, db AuthDB, sender *fakeEmailSender, clientOrigin string) *Handlers {
+	t.Helper()
+	return NewHandlers(db, newTestSigner(t), sender, clientOrigin, 7*24*time.Hour, false)
+}
+
+func TestForgotPassword_HappyPath_UserExists(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	sender := &fakeEmailSender{}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	before := time.Now()
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+	after := time.Now()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	// Byte-exact envelope including the generic message.
+	wantBody := `{"data":{"message":"如果该邮箱已注册，你将收到重置链接"}}`
+	if got := rec.Body.String(); got != wantBody {
+		t.Errorf("body mismatch\n got: %s\nwant: %s", got, wantBody)
+	}
+
+	if db.setResetTokenCallCount != 1 {
+		t.Fatalf("SetResetPasswordToken call count = %d, want 1", db.setResetTokenCallCount)
+	}
+	if db.setResetTokenCalledID != user.ID {
+		t.Errorf("SetResetPasswordToken id = %s, want %s", db.setResetTokenCalledID, user.ID)
+	}
+	if db.setResetTokenCalledToken == nil || !hex64Pattern.MatchString(*db.setResetTokenCalledToken) {
+		t.Errorf("token shape = %v, want 64-char hex", db.setResetTokenCalledToken)
+	}
+	// Expiry is now+~1h.  Allow a small drift for the time.Now() reads.
+	if !db.setResetTokenCalledExpires.Valid {
+		t.Fatal("expires Valid = false")
+	}
+	gotExpiresIn := db.setResetTokenCalledExpires.Time.Sub(before)
+	maxExpiresIn := after.Add(time.Hour + 5*time.Second).Sub(before)
+	if gotExpiresIn < time.Hour-time.Second {
+		t.Errorf("expires offset = %s, want >= 1h", gotExpiresIn)
+	}
+	if gotExpiresIn > maxExpiresIn {
+		t.Errorf("expires offset = %s, want <= 1h + drift", gotExpiresIn)
+	}
+
+	if len(sender.calls) != 1 {
+		t.Fatalf("sender call count = %d, want 1", len(sender.calls))
+	}
+	if sender.calls[0].to != user.Email {
+		t.Errorf("sender to = %q, want %q", sender.calls[0].to, user.Email)
+	}
+	if !strings.HasPrefix(sender.calls[0].resetURL, "http://localhost:3000/reset-password/") {
+		t.Errorf("resetURL prefix mismatch: %s", sender.calls[0].resetURL)
+	}
+}
+
+func TestForgotPassword_UnknownEmail_StillReturns200(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return dbgen.User{}, pgx.ErrNoRows
+		},
+	}
+	sender := &fakeEmailSender{}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	body := bytes.NewBufferString(`{"email":"ghost@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	wantBody := `{"data":{"message":"如果该邮箱已注册，你将收到重置链接"}}`
+	if got := rec.Body.String(); got != wantBody {
+		t.Errorf("body mismatch\n got: %s\nwant: %s", got, wantBody)
+	}
+
+	// No side effects on the unknown-email path.
+	if db.setResetTokenCallCount != 0 {
+		t.Errorf("SetResetPasswordToken called %d times, want 0", db.setResetTokenCallCount)
+	}
+	if len(sender.calls) != 0 {
+		t.Errorf("sender invoked %d times, want 0", len(sender.calls))
+	}
+}
+
+func TestForgotPassword_InvalidEmail_400(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAuthDB{}
+	sender := &fakeEmailSender{}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	body := bytes.NewBufferString(`{"email":"not-an-email"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "邮箱格式不正确")
+	if db.setResetTokenCallCount != 0 {
+		t.Errorf("SetResetPasswordToken called %d times on invalid email, want 0", db.setResetTokenCallCount)
+	}
+	if len(sender.calls) != 0 {
+		t.Errorf("sender invoked %d times on invalid email, want 0", len(sender.calls))
+	}
+}
+
+func TestForgotPassword_DBLookupError_StillReturns200(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return dbgen.User{}, errors.New("db down")
+		},
+	}
+	sender := &fakeEmailSender{}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	wantBody := `{"data":{"message":"如果该邮箱已注册，你将收到重置链接"}}`
+	if got := rec.Body.String(); got != wantBody {
+		t.Errorf("body mismatch\n got: %s\nwant: %s", got, wantBody)
+	}
+	if db.setResetTokenCallCount != 0 {
+		t.Errorf("SetResetPasswordToken called %d times after db lookup error, want 0", db.setResetTokenCallCount)
+	}
+	if len(sender.calls) != 0 {
+		t.Errorf("sender invoked %d times after db lookup error, want 0", len(sender.calls))
+	}
+}
+
+func TestForgotPassword_DBSetTokenError_StillReturns200(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return user, nil
+		},
+		setResetPasswordTokenFn: func(ctx context.Context, id uuid.UUID, token *string, expires pgtype.Timestamptz) error {
+			return errors.New("update failed")
+		},
+	}
+	sender := &fakeEmailSender{}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	// The DB call IS attempted (we want the operator to see the slog
+	// failure) but the email is NOT sent — sending a token that didn't
+	// persist would lock the user out.
+	if db.setResetTokenCallCount != 1 {
+		t.Errorf("SetResetPasswordToken called %d times, want 1", db.setResetTokenCallCount)
+	}
+	if len(sender.calls) != 0 {
+		t.Errorf("sender invoked %d times after persist failure, want 0", len(sender.calls))
+	}
+}
+
+func TestForgotPassword_SendEmailError_StillReturns200(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	sender := &fakeEmailSender{err: errors.New("smtp timeout")}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	// Token IS persisted; the email failure is logged, not surfaced.
+	if db.setResetTokenCallCount != 1 {
+		t.Errorf("SetResetPasswordToken count = %d, want 1", db.setResetTokenCallCount)
+	}
+	if len(sender.calls) != 1 {
+		t.Errorf("sender call count = %d, want 1", len(sender.calls))
+	}
+}
+
+func TestForgotPassword_TokenIsHex64(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	sender := &fakeEmailSender{}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if len(sender.calls) != 1 {
+		t.Fatalf("sender call count = %d, want 1", len(sender.calls))
+	}
+	token := extractTokenFromResetURL(t, sender.calls[0].resetURL)
+	if !hex64Pattern.MatchString(token) {
+		t.Errorf("token = %q, want 64-char hex", token)
+	}
+	// And the DB-side token matches the one in the URL — they must
+	// stay in sync or the user can never redeem the link.
+	if db.setResetTokenCalledToken == nil || *db.setResetTokenCalledToken != token {
+		t.Errorf("DB token = %v, URL token = %s — mismatch", db.setResetTokenCalledToken, token)
+	}
+}
+
+func TestForgotPassword_ResetURL_Format(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	sender := &fakeEmailSender{}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if len(sender.calls) != 1 {
+		t.Fatalf("sender call count = %d, want 1", len(sender.calls))
+	}
+	if !strings.HasPrefix(sender.calls[0].resetURL, "http://localhost:3000/reset-password/") {
+		t.Errorf("resetURL = %q, want prefix http://localhost:3000/reset-password/", sender.calls[0].resetURL)
+	}
+	if strings.Contains(sender.calls[0].resetURL, "//reset-password") {
+		t.Errorf("resetURL has double slash before path: %s", sender.calls[0].resetURL)
+	}
+}
+
+func TestForgotPassword_ResetURL_TrimsTrailingSlash(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	sender := &fakeEmailSender{}
+	// Trailing slash on the origin — handler must trim before joining
+	// or the URL would have a double slash.
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000/")
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if len(sender.calls) != 1 {
+		t.Fatalf("sender call count = %d, want 1", len(sender.calls))
+	}
+	if !strings.HasPrefix(sender.calls[0].resetURL, "http://localhost:3000/reset-password/") {
+		t.Errorf("resetURL = %q, want prefix http://localhost:3000/reset-password/", sender.calls[0].resetURL)
+	}
+	if strings.Contains(sender.calls[0].resetURL, "//reset-password") {
+		t.Errorf("trailing-slash origin produced double slash: %s", sender.calls[0].resetURL)
+	}
+}
+
+func TestForgotPassword_NilEmailSender_FallsBackToNoop(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	// nil sender — NewHandlers must substitute NoopSender (otherwise
+	// the SendPasswordReset call would nil-panic).
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestForgotPassword_BadJSON_400(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAuthDB{}
+	sender := &fakeEmailSender{}
+	h := newForgotPasswordHandler(t, db, sender, "http://localhost:3000")
+
+	body := bytes.NewBufferString(`{not-json`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
+	rec := httptest.NewRecorder()
+	h.ForgotPassword(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// ResetPassword (P2.2.1)
+// -----------------------------------------------------------------------------
+
+// resetPasswordRouter wraps h.ResetPassword in a chi router so
+// chi.URLParam can resolve {token}.  Calling h.ResetPassword directly
+// via httptest.NewRequest would see an empty token string.
+func resetPasswordRouter(h *Handlers) http.Handler {
+	r := chi.NewRouter()
+	r.Post("/api/auth/reset-password/{token}", h.ResetPassword)
+	return r
+}
+
+func TestResetPassword_HappyPath_200(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByResetTokenFn: func(ctx context.Context, token *string) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
+	rec := httptest.NewRecorder()
+	resetPasswordRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	wantBody := `{"data":{"message":"密码已重置，请重新登录"}}`
+	if got := rec.Body.String(); got != wantBody {
+		t.Errorf("body mismatch\n got: %s\nwant: %s", got, wantBody)
+	}
+
+	if db.resetPasswordCallCount != 1 {
+		t.Fatalf("ResetUserPassword call count = %d, want 1", db.resetPasswordCallCount)
+	}
+	if db.resetPasswordCalledID != user.ID {
+		t.Errorf("ResetUserPassword id = %s, want %s", db.resetPasswordCalledID, user.ID)
+	}
+	// Verify the password is a bcrypt hash of "newPassword123".  This
+	// confirms the handler hashes before storing — never accepts the
+	// plaintext on the way through.
+	if db.resetPasswordCalledPassword == "newPassword123" {
+		t.Error("stored value equals plaintext — handler did not hash")
+	}
+	if err := jwtx.ComparePassword(db.resetPasswordCalledPassword, "newPassword123"); err != nil {
+		t.Errorf("stored hash does not match plaintext: %v", err)
+	}
+}
+
+func TestResetPassword_TokenNotFound_400(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAuthDB{
+		getUserByResetTokenFn: func(ctx context.Context, token *string) (dbgen.User, error) {
+			return dbgen.User{}, pgx.ErrNoRows
+		},
+	}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/bad-token", body)
+	rec := httptest.NewRecorder()
+	resetPasswordRouter(h).ServeHTTP(rec, req)
+
+	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "链接无效或已过期，请重新申请")
+	if db.resetPasswordCallCount != 0 {
+		t.Errorf("ResetUserPassword called %d times on invalid token, want 0", db.resetPasswordCallCount)
+	}
+}
+
+func TestResetPassword_PasswordTooShort_400(t *testing.T) {
+	t.Parallel()
+
+	// GetUserByResetTokenFn left nil intentionally — handler must
+	// short-circuit on validation BEFORE the DB lookup.  If the test
+	// hits the panic, the validation order regressed.
+	db := &fakeAuthDB{}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"password":"12345"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
+	rec := httptest.NewRecorder()
+	resetPasswordRouter(h).ServeHTTP(rec, req)
+
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "密码至少 6 位")
+}
+
+func TestResetPassword_PasswordEmpty_400(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAuthDB{}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"password":""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
+	rec := httptest.NewRecorder()
+	resetPasswordRouter(h).ServeHTTP(rec, req)
+
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "密码至少 6 位")
+}
+
+func TestResetPassword_EmptyTokenPath_400(t *testing.T) {
+	t.Parallel()
+
+	// Direct invocation (no chi router) — chi.URLParam returns "" so
+	// the handler should treat as invalid-token without ever touching
+	// the DB.
+	db := &fakeAuthDB{}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/", body)
+	rec := httptest.NewRecorder()
+	h.ResetPassword(rec, req)
+
+	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "链接无效或已过期，请重新申请")
+}
+
+func TestResetPassword_ExpiredToken_StillReturns400(t *testing.T) {
+	t.Parallel()
+
+	// Expired tokens surface as ErrNoRows because the SQL `WHERE
+	// reset_password_expires > now()` filter drops them at read time.
+	// We must NOT differentiate the message — leaking expired-vs-never
+	// would let an attacker probe whether a given token ever lived.
+	db := &fakeAuthDB{
+		getUserByResetTokenFn: func(ctx context.Context, token *string) (dbgen.User, error) {
+			return dbgen.User{}, pgx.ErrNoRows
+		},
+	}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/expired-token", body)
+	rec := httptest.NewRecorder()
+	resetPasswordRouter(h).ServeHTTP(rec, req)
+
+	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "链接无效或已过期，请重新申请")
+}
+
+func TestResetPassword_DBLookupError_500(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAuthDB{
+		getUserByResetTokenFn: func(ctx context.Context, token *string) (dbgen.User, error) {
+			return dbgen.User{}, errors.New("db down")
+		},
+	}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
+	rec := httptest.NewRecorder()
+	resetPasswordRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestResetPassword_ResetWriteError_500(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByResetTokenFn: func(ctx context.Context, token *string) (dbgen.User, error) {
+			return user, nil
+		},
+		resetUserPasswordFn: func(ctx context.Context, id uuid.UUID, password string) error {
+			return errors.New("write failed")
+		},
+	}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
+	rec := httptest.NewRecorder()
+	resetPasswordRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestResetPassword_BadJSON_400(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAuthDB{}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{not-json`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
+	rec := httptest.NewRecorder()
+	resetPasswordRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
