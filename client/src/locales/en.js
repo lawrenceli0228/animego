@@ -1,6 +1,10 @@
 const en = {
   // Common
   common: { loading: 'Loading...' },
+  // Backend already emits English error.message strings; passthrough is
+  // handled by the t(`errors.${msg}`, { defaultValue: msg }) call site.
+  // This empty block keeps en/zh structurally symmetric for audits.
+  errors: {},
   // Navbar
   nav: {
     home: 'Home', season: 'Season', search: 'Search',

@@ -97,7 +97,7 @@ func TestRequireAuth_NoHeaderNoCookie_401_NoToken(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.False(t, called, "inner handler must not be invoked on auth failure")
 	assert.Contains(t, rec.Body.String(), `"NO_TOKEN"`)
-	assert.Contains(t, rec.Body.String(), `"需要登录"`)
+	assert.Contains(t, rec.Body.String(), `"Authentication required"`)
 }
 
 func TestRequireAuth_BadHeader_401_InvalidToken(t *testing.T) {
@@ -157,7 +157,7 @@ func TestRequireAuth_EnvelopeShape_NoToken(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	expected := []byte(`{"error":{"code":"NO_TOKEN","message":"需要登录"}}`)
+	expected := []byte(`{"error":{"code":"NO_TOKEN","message":"Authentication required"}}`)
 	assert.True(t, bytes.Equal(body, expected),
 		"envelope bytes mismatch\nwant: %s\n got: %s", expected, body)
 	assert.Equal(t, "application/json; charset=utf-8", resp.Header.Get("Content-Type"))
@@ -177,7 +177,7 @@ func TestRequireAuth_EnvelopeShape_InvalidToken(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	expected := []byte(`{"error":{"code":"INVALID_TOKEN","message":"无效的 token"}}`)
+	expected := []byte(`{"error":{"code":"INVALID_TOKEN","message":"Invalid token"}}`)
 	assert.True(t, bytes.Equal(body, expected),
 		"envelope bytes mismatch\nwant: %s\n got: %s", expected, body)
 }

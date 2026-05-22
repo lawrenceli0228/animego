@@ -80,7 +80,7 @@ func TestRequireAdmin_RejectsMissingClaims(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
-	expectBody(t, rec, `{"error":{"code":"FORBIDDEN","message":"无权限"}}`)
+	expectBody(t, rec, `{"error":{"code":"FORBIDDEN","message":"Forbidden"}}`)
 }
 
 func TestRequireAdmin_HandlesNilContext(t *testing.T) {
@@ -97,8 +97,8 @@ func TestRequireAdmin_HandlesNilContext(t *testing.T) {
 }
 
 func TestForbiddenBody_ByteExact(t *testing.T) {
-	// Phase 8.5 shadow-traffic guarantee: bytes match Express literal.
-	expected := []byte(`{"error":{"code":"FORBIDDEN","message":"无权限"}}`)
+	// Envelope is canonical English; frontend i18n maps to localized text.
+	expected := []byte(`{"error":{"code":"FORBIDDEN","message":"Forbidden"}}`)
 	if !bytes.Equal(forbiddenBody, expected) {
 		t.Fatalf("forbiddenBody = %q, want %q", forbiddenBody, expected)
 	}
@@ -122,7 +122,7 @@ func assertForbidden(t *testing.T, claims *AccessClaims) {
 	if got := rec.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
 		t.Fatalf("Content-Type = %q, want application/json; charset=utf-8", got)
 	}
-	expectBody(t, rec, `{"error":{"code":"FORBIDDEN","message":"无权限"}}`)
+	expectBody(t, rec, `{"error":{"code":"FORBIDDEN","message":"Forbidden"}}`)
 }
 
 func expectBody(t *testing.T, rec *httptest.ResponseRecorder, want string) {

@@ -4,9 +4,10 @@ package jwtx
 // the *AccessClaims out of the request context (set by RequireAuth) and
 // gates anything where claims.Role is not "admin".
 //
-// The 403 envelope is byte-exact to server/middleware/adminAuth.js:
+// The 403 envelope uses the canonical English message; the frontend
+// i18n layer maps it to localized strings:
 //
-//	res.status(403).json({ error: { code: 'FORBIDDEN', message: '无权限' } })
+//	res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Forbidden' } })
 //
 // Chain order matters:  RequireAdmin assumes claims are already in
 // context.  Mounting it without RequireAuth in front would mean every
@@ -23,7 +24,7 @@ import (
 
 const (
 	codeForbidden = "FORBIDDEN"
-	msgForbidden  = "无权限"
+	msgForbidden  = "Forbidden"
 
 	adminRole = "admin"
 )
@@ -41,7 +42,7 @@ var forbiddenBody = mustMarshalEnvelope(codeForbidden, msgForbidden)
 // Failure modes:
 //   - No claims in context (RequireAuth wasn't mounted, or returned
 //     early): 403 with the same envelope — caller bug, log it.
-//   - Role nil or != "admin":  403 byte-exact 无权限.
+//   - Role nil or != "admin":  403 byte-exact Forbidden.
 func RequireAdmin() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,8 +67,8 @@ func RequireAdmin() func(http.Handler) http.Handler {
 	}
 }
 
-// writeForbidden emits the canonical 403 body.  Content-Type + bytes
-// match Express's adminAuth middleware exactly.
+// writeForbidden emits the canonical 403 body with the English
+// envelope message (frontend i18n maps to localized strings).
 func writeForbidden(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
@@ -83,7 +84,7 @@ func writeForbidden(w http.ResponseWriter) {
 //
 //nolint:gochecknoinits
 func init() {
-	expected := []byte(`{"error":{"code":"FORBIDDEN","message":"无权限"}}`)
+	expected := []byte(`{"error":{"code":"FORBIDDEN","message":"Forbidden"}}`)
 	if !bytes.Equal(forbiddenBody, expected) {
 		panic("jwtx: forbidden envelope bytes drifted — fix mustMarshalEnvelope")
 	}

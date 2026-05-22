@@ -13,19 +13,28 @@ vi.mock('../context/AuthContext', () => ({
 
 vi.mock('../context/LanguageContext', () => ({
   useLang: () => ({
-    t: (key) => ({
-      'login.title': 'Sign in',
-      'login.subtitle': 'Welcome back',
-      'login.email': 'Email',
-      'login.password': 'Password',
-      'login.submit': 'Log in',
-      'login.submitting': 'Logging in...',
-      'login.success': 'Welcome back!',
-      'login.fail': 'Login failed',
-      'login.noAccount': 'No account?',
-      'login.registerLink': 'Register',
-      'login.forgotPassword': 'Forgot password?',
-    }[key] || key),
+    // Mirrors the real t(key, { defaultValue }) signature so error i18n
+    // passthrough works in tests.
+    t: (key, opts) => {
+      const table = {
+        'login.title': 'Sign in',
+        'login.subtitle': 'Welcome back',
+        'login.email': 'Email',
+        'login.password': 'Password',
+        'login.submit': 'Log in',
+        'login.submitting': 'Logging in...',
+        'login.success': 'Welcome back!',
+        'login.fail': 'Login failed',
+        'login.noAccount': 'No account?',
+        'login.registerLink': 'Register',
+        'login.forgotPassword': 'Forgot password?',
+      };
+      if (Object.prototype.hasOwnProperty.call(table, key)) return table[key];
+      if (opts && Object.prototype.hasOwnProperty.call(opts, 'defaultValue')) {
+        return opts.defaultValue;
+      }
+      return key;
+    },
   }),
 }));
 

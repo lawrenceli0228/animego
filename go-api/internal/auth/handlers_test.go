@@ -287,7 +287,7 @@ func TestRegister_InvalidUsernameShort_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Register(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "用户名需 3-50 个字符")
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "Username must be 3-50 characters")
 }
 
 func TestRegister_InvalidEmail_400(t *testing.T) {
@@ -299,7 +299,7 @@ func TestRegister_InvalidEmail_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Register(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "邮箱格式不正确")
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid email format")
 }
 
 func TestRegister_PasswordTooShort_400(t *testing.T) {
@@ -311,7 +311,7 @@ func TestRegister_PasswordTooShort_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Register(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "密码至少 6 位")
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "Password must be at least 6 characters")
 }
 
 func TestRegister_DuplicateEmail_400(t *testing.T) {
@@ -332,7 +332,7 @@ func TestRegister_DuplicateEmail_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Register(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "DUPLICATE_ERROR", "用户名或邮箱已存在")
+	assertError(t, rec, http.StatusBadRequest, "DUPLICATE_ERROR", "Username or email already exists")
 }
 
 func TestRegister_DuplicateUsername_400(t *testing.T) {
@@ -353,7 +353,7 @@ func TestRegister_DuplicateUsername_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Register(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "DUPLICATE_ERROR", "用户名或邮箱已存在")
+	assertError(t, rec, http.StatusBadRequest, "DUPLICATE_ERROR", "Username or email already exists")
 }
 
 func TestRegister_BadJSON_400(t *testing.T) {
@@ -421,7 +421,7 @@ func TestLogin_BadEmail_401(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Login(rec, req)
 
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_CREDENTIALS", "邮箱或密码错误")
+	assertError(t, rec, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password")
 }
 
 func TestLogin_BadPassword_401(t *testing.T) {
@@ -441,7 +441,7 @@ func TestLogin_BadPassword_401(t *testing.T) {
 	h.Login(rec, req)
 
 	// Same message as bad-email — no enumeration.
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_CREDENTIALS", "邮箱或密码错误")
+	assertError(t, rec, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password")
 }
 
 func TestLogin_MissingPassword_400(t *testing.T) {
@@ -453,7 +453,7 @@ func TestLogin_MissingPassword_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Login(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "密码不能为空")
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "Password is required")
 }
 
 // -----------------------------------------------------------------------------
@@ -468,7 +468,7 @@ func TestRefresh_NoCookie_401_NoToken(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Refresh(rec, req)
 
-	assertError(t, rec, http.StatusUnauthorized, "NO_TOKEN", "需要重新登录")
+	assertError(t, rec, http.StatusUnauthorized, "NO_TOKEN", "Please log in again")
 }
 
 func TestRefresh_BadToken_401_InvalidToken(t *testing.T) {
@@ -480,7 +480,7 @@ func TestRefresh_BadToken_401_InvalidToken(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Refresh(rec, req)
 
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "无效的 token")
+	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
 }
 
 func TestRefresh_DBTokenMismatch_401(t *testing.T) {
@@ -508,7 +508,7 @@ func TestRefresh_DBTokenMismatch_401(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Refresh(rec, req)
 
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "无效的 token")
+	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
 }
 
 func TestRefresh_DBTokenNil_401(t *testing.T) {
@@ -533,7 +533,7 @@ func TestRefresh_DBTokenNil_401(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Refresh(rec, req)
 
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "无效的 token")
+	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
 }
 
 func TestRefresh_HappyPath_200(t *testing.T) {
@@ -616,11 +616,11 @@ func TestLogout_ClearsDBAndCookie(t *testing.T) {
 		t.Errorf("MaxAge = %d, want <= 0", c.MaxAge)
 	}
 
-	// Body: {"data":{"message":"已登出"}}
+	// Body: {"data":{"message":"Logged out"}}
 	var data MessageData
 	decodeData(t, rec.Body.Bytes(), &data)
-	if data.Message != "已登出" {
-		t.Errorf("message = %q, want 已登出", data.Message)
+	if data.Message != "Logged out" {
+		t.Errorf("message = %q, want Logged out", data.Message)
 	}
 }
 
@@ -673,7 +673,7 @@ func TestMe_UserDeleted_404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Me(rec, req)
 
-	assertError(t, rec, http.StatusNotFound, "NOT_FOUND", "用户不存在")
+	assertError(t, rec, http.StatusNotFound, "NOT_FOUND", "User not found")
 }
 
 func TestMe_NoClaims_500(t *testing.T) {
@@ -842,7 +842,7 @@ func TestRegister_RaceUniqueViolation_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Register(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "DUPLICATE_ERROR", "用户名或邮箱已存在")
+	assertError(t, rec, http.StatusBadRequest, "DUPLICATE_ERROR", "Username or email already exists")
 }
 
 func TestRegister_CreateUserGenericError_500(t *testing.T) {
@@ -946,7 +946,7 @@ func TestRefresh_UserNotFound_401(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Refresh(rec, req)
 
-	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "无效的 token")
+	assertError(t, rec, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
 }
 
 func TestLogout_NoClaims_500(t *testing.T) {
@@ -971,15 +971,15 @@ func TestValidationMessage_UnknownField_Generic(t *testing.T) {
 	v := validatorPkg.New(validatorPkg.WithRequiredStructEnabled())
 	err := v.Struct(&Unknown{})
 	msg := validationMessage(err)
-	if msg != "参数错误" {
-		t.Errorf("validationMessage = %q, want generic %q", msg, "参数错误")
+	if msg != "Invalid request" {
+		t.Errorf("validationMessage = %q, want generic %q", msg, "Invalid request")
 	}
 }
 
 func TestValidationMessage_NonValidatorError(t *testing.T) {
 	t.Parallel()
 	msg := validationMessage(errors.New("not a validator error"))
-	if msg != "参数错误" {
+	if msg != "Invalid request" {
 		t.Errorf("validationMessage = %q, want generic", msg)
 	}
 }
@@ -1068,7 +1068,7 @@ func TestForgotPassword_HappyPath_UserExists(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	// Byte-exact envelope including the generic message.
-	wantBody := `{"data":{"message":"如果该邮箱已注册，你将收到重置链接"}}`
+	wantBody := `{"data":{"message":"If the email is registered, you will receive a reset link"}}`
 	if got := rec.Body.String(); got != wantBody {
 		t.Errorf("body mismatch\n got: %s\nwant: %s", got, wantBody)
 	}
@@ -1125,7 +1125,7 @@ func TestForgotPassword_UnknownEmail_StillReturns200(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	wantBody := `{"data":{"message":"如果该邮箱已注册，你将收到重置链接"}}`
+	wantBody := `{"data":{"message":"If the email is registered, you will receive a reset link"}}`
 	if got := rec.Body.String(); got != wantBody {
 		t.Errorf("body mismatch\n got: %s\nwant: %s", got, wantBody)
 	}
@@ -1151,7 +1151,7 @@ func TestForgotPassword_InvalidEmail_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ForgotPassword(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "邮箱格式不正确")
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid email format")
 	if db.setResetTokenCallCount != 0 {
 		t.Errorf("SetResetPasswordToken called %d times on invalid email, want 0", db.setResetTokenCallCount)
 	}
@@ -1179,7 +1179,7 @@ func TestForgotPassword_DBLookupError_StillReturns200(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	wantBody := `{"data":{"message":"如果该邮箱已注册，你将收到重置链接"}}`
+	wantBody := `{"data":{"message":"If the email is registered, you will receive a reset link"}}`
 	if got := rec.Body.String(); got != wantBody {
 		t.Errorf("body mismatch\n got: %s\nwant: %s", got, wantBody)
 	}
@@ -1418,7 +1418,7 @@ func TestResetPassword_HappyPath_200(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	wantBody := `{"data":{"message":"密码已重置，请重新登录"}}`
+	wantBody := `{"data":{"message":"Password has been reset, please log in again"}}`
 	if got := rec.Body.String(); got != wantBody {
 		t.Errorf("body mismatch\n got: %s\nwant: %s", got, wantBody)
 	}
@@ -1455,7 +1455,7 @@ func TestResetPassword_TokenNotFound_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	resetPasswordRouter(h).ServeHTTP(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "链接无效或已过期，请重新申请")
+	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "The link is invalid or has expired, please request a new one")
 	if db.resetPasswordCallCount != 0 {
 		t.Errorf("ResetUserPassword called %d times on invalid token, want 0", db.resetPasswordCallCount)
 	}
@@ -1475,7 +1475,7 @@ func TestResetPassword_PasswordTooShort_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	resetPasswordRouter(h).ServeHTTP(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "密码至少 6 位")
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "Password must be at least 6 characters")
 }
 
 func TestResetPassword_PasswordEmpty_400(t *testing.T) {
@@ -1489,7 +1489,7 @@ func TestResetPassword_PasswordEmpty_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	resetPasswordRouter(h).ServeHTTP(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "密码至少 6 位")
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "Password must be at least 6 characters")
 }
 
 func TestResetPassword_EmptyTokenPath_400(t *testing.T) {
@@ -1506,7 +1506,7 @@ func TestResetPassword_EmptyTokenPath_400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ResetPassword(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "链接无效或已过期，请重新申请")
+	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "The link is invalid or has expired, please request a new one")
 }
 
 func TestResetPassword_ExpiredToken_StillReturns400(t *testing.T) {
@@ -1528,7 +1528,7 @@ func TestResetPassword_ExpiredToken_StillReturns400(t *testing.T) {
 	rec := httptest.NewRecorder()
 	resetPasswordRouter(h).ServeHTTP(rec, req)
 
-	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "链接无效或已过期，请重新申请")
+	assertError(t, rec, http.StatusBadRequest, "INVALID_TOKEN", "The link is invalid or has expired, please request a new one")
 }
 
 func TestResetPassword_DBLookupError_500(t *testing.T) {

@@ -4,11 +4,10 @@ package auth
 //
 // Each handler bounds its DB round-trip with a 5s query timeout, decodes
 // the request body into the validation-tagged struct, runs the
-// validator, and writes a byte-compatible httpx envelope on the response.
+// validator, and writes the canonical httpx envelope on the response.
 //
-// Port targets server/controllers/auth.controller.js — error codes and
-// Chinese messages must match the Express output byte-for-byte so the
-// shadow-traffic diff at cutover passes.
+// Error codes match the Express enum; the `message` strings are English
+// — the frontend's i18n layer maps them to localized text.
 
 import (
 	"context"
@@ -70,35 +69,33 @@ const (
 	codeServerError        = httpx.CodeServerError
 )
 
-// Chinese user-facing messages — copied verbatim from
-// server/controllers/auth.controller.js + server/routes/auth.routes.js.
-// Any drift here breaks the shadow-traffic byte-diff at cutover.
+// User-facing messages — emitted in English; the frontend i18n layer
+// maps each string to a localized translation keyed on the English text.
 const (
-	msgDuplicate          = "用户名或邮箱已存在"
-	msgInvalidCredentials = "邮箱或密码错误"
-	msgNoToken            = "需要重新登录"
-	msgInvalidToken       = "无效的 token"
-	msgUserNotFound       = "用户不存在"
-	msgLoggedOut          = "已登出"
-	msgInvalidBody        = "请求体格式错误"
+	msgDuplicate          = "Username or email already exists"
+	msgInvalidCredentials = "Invalid email or password"
+	msgNoToken            = "Please log in again"
+	msgInvalidToken       = "Invalid token"
+	msgUserNotFound       = "User not found"
+	msgLoggedOut          = "Logged out"
+	msgInvalidBody        = "Invalid request body"
 
-	// Password-reset flow messages — match Express byte-for-byte.
-	// `msgForgotPasswordGeneric` is intentionally identical for the
-	// real-user and not-found paths to prevent email enumeration via
-	// response-shape diff.  See ForgotPassword for the timing-channel
-	// trade-off discussion.
-	msgForgotPasswordGeneric = "如果该邮箱已注册，你将收到重置链接"
-	msgResetTokenInvalid     = "链接无效或已过期，请重新申请"
-	msgResetPasswordSuccess  = "密码已重置，请重新登录"
+	// Password-reset flow messages — `msgForgotPasswordGeneric` is
+	// intentionally identical for the real-user and not-found paths to
+	// prevent email enumeration via response-shape diff.  See
+	// ForgotPassword for the timing-channel trade-off discussion.
+	msgForgotPasswordGeneric = "If the email is registered, you will receive a reset link"
+	msgResetTokenInvalid     = "The link is invalid or has expired, please request a new one"
+	msgResetPasswordSuccess  = "Password has been reset, please log in again"
 
 	// Validator field-message map.
-	msgUsernameLen       = "用户名需 3-50 个字符"
-	msgEmailFormat       = "邮箱格式不正确"
-	msgPasswordMin       = "密码至少 6 位"
-	msgPasswordRequired  = "密码不能为空"
-	msgUsernameRequired  = "用户名需 3-50 个字符"
-	msgEmailRequired     = "邮箱格式不正确"
-	msgValidationGeneric = "参数错误"
+	msgUsernameLen       = "Username must be 3-50 characters"
+	msgEmailFormat       = "Invalid email format"
+	msgPasswordMin       = "Password must be at least 6 characters"
+	msgPasswordRequired  = "Password is required"
+	msgUsernameRequired  = "Username must be 3-50 characters"
+	msgEmailRequired     = "Invalid email format"
+	msgValidationGeneric = "Invalid request"
 )
 
 // AuthDB is the sqlc subset that auth handlers consume.  Defined here
@@ -494,11 +491,11 @@ func isUniqueViolation(err error) bool {
 // unconfigured Gmail (email.NoopSender) is treated as success.
 //
 // Validation:
-//   - email: required + RFC 5322 → "邮箱格式不正确" on miss
+//   - email: required + RFC 5322 → "Invalid email format" on miss
 //
 // Response (200, both real-user and not-found paths):
 //
-//	{"data":{"message":"如果该邮箱已注册，你将收到重置链接"}}
+//	{"data":{"message":"If the email is registered, you will receive a reset link"}}
 func (h *Handlers) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
@@ -578,11 +575,11 @@ func (h *Handlers) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 // statement clears reset_token + reset_expires + refresh_token — the
 // last clear forces every active session to re-authenticate.
 //
-// Response messages (byte-exact):
+// Response messages:
 //
-//	400 VALIDATION_ERROR "密码至少 6 位"
-//	400 INVALID_TOKEN    "链接无效或已过期，请重新申请"
-//	200 success          {"data":{"message":"密码已重置，请重新登录"}}
+//	400 VALIDATION_ERROR "Password must be at least 6 characters"
+//	400 INVALID_TOKEN    "The link is invalid or has expired, please request a new one"
+//	200 success          {"data":{"message":"Password has been reset, please log in again"}}
 //
 // Note: expired-token and never-existed-token both surface as
 // pgx.ErrNoRows (the SQL filters `reset_password_expires > now()` in
@@ -646,13 +643,11 @@ func writeForgotPasswordSuccess(w http.ResponseWriter) {
 }
 
 // validationMessage maps the FIRST validator FieldError on a struct to
-// the Chinese message Express's express-validator middleware would have
-// emitted.  Matching this byte-for-byte is required because the front-
-// end consumes the message string directly in toast UI.
+// the user-facing English message the frontend i18n layer translates.
 //
 // Falls back to msgValidationGeneric for any tag/field combination we
 // haven't explicitly mapped — better to ship a generic message than to
-// leak the validator's stock English message into the response.
+// leak the validator's stock library English message into the response.
 func validationMessage(err error) string {
 	var verrs validator.ValidationErrors
 	if !errors.As(err, &verrs) || len(verrs) == 0 {

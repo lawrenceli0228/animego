@@ -1,6 +1,43 @@
 const zh = {
   // Common
   common: { loading: '加载中...' },
+  // Backend error.message → 中文 (lookup by exact English string)
+  // Backend is the source of truth for English wording; if it changes,
+  // these keys must be updated to match.
+  errors: {
+    // Auth
+    'Authentication required': '需要登录',
+    'Invalid token': '无效的 token',
+    'Please log in again': '需要重新登录',
+    'Username or email already exists': '用户名或邮箱已存在',
+    'Invalid email or password': '邮箱或密码错误',
+    'User not found': '用户不存在',
+    'Logged out': '已登出',
+    'Invalid request body': '请求体格式错误',
+    'If the email is registered, you will receive a reset link': '如果该邮箱已注册，你将收到重置链接',
+    'The link is invalid or has expired, please request a new one': '链接无效或已过期，请重新申请',
+    'Password has been reset, please log in again': '密码已重置，请重新登录',
+    'Username must be 3-50 characters': '用户名需 3-50 个字符',
+    'Invalid email format': '邮箱格式不正确',
+    'Password must be at least 6 characters': '密码至少 6 位',
+    'Password is required': '密码不能为空',
+    'Invalid request': '参数错误',
+    'Too many requests, please try again later': '请求过于频繁，请稍后再试',
+
+    // Admin
+    'Forbidden': '无权限',
+    'Username, email and password are required': '用户名、邮箱和密码为必填项',
+    'At least one of username or email is required': '至少提供用户名或邮箱',
+    'Username already exists': '用户名已存在',
+    'Email already exists': '邮箱已存在',
+    'Cannot delete yourself': '不能删除自己',
+    'Invalid user ID': '无效的用户 ID',
+    'Invalid anilistId': '无效的 anilistId',
+    'Anime not found': '番剧不存在',
+    'No fields to update': '没有可更新的字段',
+    'Invalid flag value': '无效的 flag 值',
+    'Version must be 0, 1, or 2': '版本必须为 0、1 或 2',
+  },
   // Navbar
   nav: {
     home: '首页', season: '季度', search: '搜索',

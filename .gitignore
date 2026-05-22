@@ -52,3 +52,12 @@ migrate-failures.jsonl
 # Go-built binaries (parity-check binary from 'go build ./cmd/parity-check')
 go-api/parity-check
 go-api/migrate-mongo
+
+# Per-phase status / progress / design docs — generated locally, not part of source tree.
+# Already-committed P0/P1/P2-PROGRESS files remain (git ignore does not touch tracked files).
+docs/migration/*STATUS*
+docs/migration/PHASE*-STATUS*
+docs/**/*-DESIGN.md
+docs/**/*-DESIGN.html
+docs/migration/P*-PROGRESS.md
+docs/migration/P*-PROGRESS.html

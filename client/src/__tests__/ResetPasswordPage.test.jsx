@@ -14,7 +14,17 @@ vi.mock('react-hot-toast', () => ({
 }));
 
 vi.mock('../context/LanguageContext', () => ({
-  useLang: () => ({ t: (k) => k }),
+  useLang: () => ({
+    // Mirrors the real t(key, { defaultValue }) signature so error i18n
+    // passthrough works in tests (the missing-key 'errors.<msg>' case falls
+    // through to the backend-supplied English string).
+    t: (k, opts) => {
+      if (opts && Object.prototype.hasOwnProperty.call(opts, 'defaultValue')) {
+        return opts.defaultValue;
+      }
+      return k;
+    },
+  }),
 }));
 
 function LocationProbe() {

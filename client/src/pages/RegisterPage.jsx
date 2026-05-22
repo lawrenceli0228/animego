@@ -3,6 +3,7 @@ import { Link, useNavigate, Navigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../context/AuthContext'
 import { useLang } from '../context/LanguageContext'
+import { errorDisplay } from '../utils/errorDisplay'
 
 export default function RegisterPage() {
   const { register, user, initializing } = useAuth()
@@ -26,7 +27,7 @@ export default function RegisterPage() {
       toast.success(t('register.success'))
       navigate('/')
     } catch (err) {
-      setError(err.response?.data?.error?.message || t('register.fail'))
+      setError(errorDisplay(t, err, 'register.fail'))
     } finally { setLoading(false) }
   }
 

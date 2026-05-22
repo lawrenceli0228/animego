@@ -320,7 +320,7 @@ func TestCreateUser_MissingFields_400_ChineseExact(t *testing.T) {
 				bytes.NewBufferString(tc.body))
 			rec := httptest.NewRecorder()
 			h.CreateUser(rec, req)
-			assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "用户名、邮箱和密码为必填项")
+			assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "Username, email and password are required")
 		})
 	}
 }
@@ -343,7 +343,7 @@ func TestCreateUser_DuplicateUsername_409_ChineseExact(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.CreateUser(rec, req)
 
-	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "用户名已存在")
+	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "Username already exists")
 }
 
 func TestCreateUser_DuplicateEmail_409_ChineseExact(t *testing.T) {
@@ -364,7 +364,7 @@ func TestCreateUser_DuplicateEmail_409_ChineseExact(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.CreateUser(rec, req)
 
-	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "邮箱已存在")
+	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "Email already exists")
 }
 
 func TestCreateUser_UniqueViolationRace_409(t *testing.T) {
@@ -399,7 +399,7 @@ func TestCreateUser_UniqueViolationRace_409(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.CreateUser(rec, req)
 
-	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "用户名已存在")
+	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "Username already exists")
 }
 
 func TestCreateUser_UniqueViolationRace_FallbackOnLookupFailure(t *testing.T) {
@@ -425,7 +425,7 @@ func TestCreateUser_UniqueViolationRace_FallbackOnLookupFailure(t *testing.T) {
 		bytes.NewBufferString(`{"username":"lawrence","email":"lawrence@example.com","password":"pw"}`))
 	rec := httptest.NewRecorder()
 	h.CreateUser(rec, req)
-	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "用户名已存在")
+	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "Username already exists")
 }
 
 func TestCreateUser_PreCheckDBError_500(t *testing.T) {
@@ -634,7 +634,7 @@ func TestUpdateUser_BothMissing_400_ChineseExact(t *testing.T) {
 			req := requestWithUserID(t, http.MethodPatch, "/api/admin/users/"+id.String(), body, id.String())
 			rec := httptest.NewRecorder()
 			h.UpdateUser(rec, req)
-			assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "至少提供用户名或邮箱")
+			assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "At least one of username or email is required")
 		})
 	}
 }
@@ -646,7 +646,7 @@ func TestUpdateUser_InvalidUUID_400_ChineseExact(t *testing.T) {
 		`{"username":"x"}`, "not-a-uuid")
 	rec := httptest.NewRecorder()
 	h.UpdateUser(rec, req)
-	assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "无效的用户 ID")
+	assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "Invalid user ID")
 }
 
 func TestUpdateUser_DuplicateUsername_409_ChineseExact(t *testing.T) {
@@ -668,7 +668,7 @@ func TestUpdateUser_DuplicateUsername_409_ChineseExact(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.UpdateUser(rec, req)
 
-	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "用户名已存在")
+	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "Username already exists")
 }
 
 func TestUpdateUser_DuplicateEmail_409_ChineseExact(t *testing.T) {
@@ -690,7 +690,7 @@ func TestUpdateUser_DuplicateEmail_409_ChineseExact(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.UpdateUser(rec, req)
 
-	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "邮箱已存在")
+	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "Email already exists")
 }
 
 func TestUpdateUser_UserNotFound_404_ChineseExact(t *testing.T) {
@@ -711,7 +711,7 @@ func TestUpdateUser_UserNotFound_404_ChineseExact(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.UpdateUser(rec, req)
 
-	assertErrorEnvelope(t, rec, http.StatusNotFound, "NOT_FOUND", "用户不存在")
+	assertErrorEnvelope(t, rec, http.StatusNotFound, "NOT_FOUND", "User not found")
 }
 
 func TestUpdateUser_InvalidJSONBody_400(t *testing.T) {
@@ -797,7 +797,7 @@ func TestUpdateUser_UpdateUniqueViolation_409(t *testing.T) {
 		`{"username":"raced"}`, id.String())
 	rec := httptest.NewRecorder()
 	h.UpdateUser(rec, req)
-	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "用户名已存在")
+	assertErrorEnvelope(t, rec, http.StatusConflict, "CONFLICT", "Username already exists")
 }
 
 // -----------------------------------------------------------------------------
@@ -866,7 +866,7 @@ func TestDeleteUser_SelfDelete_400_ChineseExact(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.DeleteUser(rec, req)
 
-	assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "不能删除自己")
+	assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "Cannot delete yourself")
 	if atomic.LoadInt32(&db.adminDeleteUserCallCount) != 0 {
 		t.Errorf("AdminDeleteUser called despite self-delete check, want 0 calls")
 	}
@@ -889,7 +889,7 @@ func TestDeleteUser_UserNotFound_404_ChineseExact(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.DeleteUser(rec, req)
 
-	assertErrorEnvelope(t, rec, http.StatusNotFound, "NOT_FOUND", "用户不存在")
+	assertErrorEnvelope(t, rec, http.StatusNotFound, "NOT_FOUND", "User not found")
 	if atomic.LoadInt32(&db.adminDeleteUserCallCount) != 0 {
 		t.Errorf("AdminDeleteUser called despite missing user, want 0 calls")
 	}
@@ -904,7 +904,7 @@ func TestDeleteUser_InvalidUUID_400_ChineseExact(t *testing.T) {
 		chiCtxOver(t, ctx, "garbage"))
 	rec := httptest.NewRecorder()
 	h.DeleteUser(rec, req)
-	assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "无效的用户 ID")
+	assertErrorEnvelope(t, rec, http.StatusBadRequest, "BAD_REQUEST", "Invalid user ID")
 }
 
 func TestDeleteUser_MissingClaims_500(t *testing.T) {
@@ -989,15 +989,15 @@ func TestNewUserHandlers_NilEnqueuerPanics(t *testing.T) {
 
 func TestDupMessage_UsernameMatch(t *testing.T) {
 	t.Parallel()
-	if got := dupMessage("alice", "alice"); got != "用户名已存在" {
-		t.Errorf("dupMessage match = %q, want 用户名已存在", got)
+	if got := dupMessage("alice", "alice"); got != "Username already exists" {
+		t.Errorf("dupMessage match = %q, want Username already exists", got)
 	}
 }
 
 func TestDupMessage_NoMatch_DefaultsToEmail(t *testing.T) {
 	t.Parallel()
-	if got := dupMessage("alice", "bob"); got != "邮箱已存在" {
-		t.Errorf("dupMessage no-match = %q, want 邮箱已存在", got)
+	if got := dupMessage("alice", "bob"); got != "Email already exists" {
+		t.Errorf("dupMessage no-match = %q, want Email already exists", got)
 	}
 }
 

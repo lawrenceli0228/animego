@@ -121,7 +121,7 @@ func TestRateLimiter_Middleware_429Envelope(t *testing.T) {
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("over-budget status = %d, want 429", rec.Code)
 	}
-	want := `{"error":{"code":"RATE_LIMITED","message":"请求过于频繁，请稍后再试"}}`
+	want := `{"error":{"code":"RATE_LIMITED","message":"Too many requests, please try again later"}}`
 	if got := rec.Body.String(); got != want {
 		t.Errorf("body mismatch\n got: %s\nwant: %s", got, want)
 	}

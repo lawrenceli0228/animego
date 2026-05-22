@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { getAdminStats, getEnrichmentList, updateEnrichment, resetEnrichment, flagEnrichment, reEnrich, healCnTitles, pauseHeal, resumeHeal, getUserList, createUser, updateUser, deleteUser } from '../api/admin.api'
 import { useLang } from '../context/LanguageContext'
+import { errorDisplay } from '../utils/errorDisplay'
 
 export function useAdminStats() {
   return useQuery({
@@ -41,8 +42,7 @@ export function useUpdateEnrichment() {
       toast.success(t('admin.enrichUpdateSuccess'))
     },
     onError: (err) => {
-      const msg = err.response?.data?.error?.message || t('admin.enrichUpdateFailed')
-      toast.error(msg)
+      toast.error(errorDisplay(t, err, 'admin.enrichUpdateFailed'))
     },
   })
 }
@@ -84,7 +84,7 @@ export function useReEnrich() {
       toast.success(`v${version} re-enrich: ${enqueued} enqueued`)
     },
     onError: (err) => {
-      toast.error(err.response?.data?.error?.message || t('admin.healFailed'))
+      toast.error(errorDisplay(t, err, 'admin.healFailed'))
     },
   })
 }
@@ -138,8 +138,7 @@ export function useCreateUser() {
       toast.success(t('admin.createSuccess'))
     },
     onError: (err) => {
-      const msg = err.response?.data?.error?.message || t('admin.createFailed')
-      toast.error(msg)
+      toast.error(errorDisplay(t, err, 'admin.createFailed'))
     },
   })
 }
@@ -154,8 +153,7 @@ export function useUpdateUser() {
       toast.success(t('admin.updateSuccess'))
     },
     onError: (err) => {
-      const msg = err.response?.data?.error?.message || t('admin.updateFailed')
-      toast.error(msg)
+      toast.error(errorDisplay(t, err, 'admin.updateFailed'))
     },
   })
 }
@@ -170,8 +168,7 @@ export function useDeleteUser() {
       toast.success(t('admin.deleteSuccess'))
     },
     onError: (err) => {
-      const msg = err.response?.data?.error?.message || t('admin.deleteFailed')
-      toast.error(msg)
+      toast.error(errorDisplay(t, err, 'admin.deleteFailed'))
     },
   })
 }

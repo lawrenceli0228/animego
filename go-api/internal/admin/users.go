@@ -12,11 +12,11 @@
 // goroutine, no DB writes), and keeping the two surfaces separate makes
 // the per-handler intent obvious at a glance.
 //
-// All responses are byte-compatible with server/controllers/admin.controller.js
-// — Chinese error messages match exactly, error codes match the Express
-// enum (BAD_REQUEST / CONFLICT / NOT_FOUND), and the success envelope
-// uses the `_id` field name (Mongo legacy) preserved via json tags so
-// the front-end consumer doesn't need to learn a new key.
+// Responses use the canonical English envelope (frontend i18n maps to
+// localized text), error codes match the Express enum
+// (BAD_REQUEST / CONFLICT / NOT_FOUND), and the success envelope uses
+// the `_id` field name (Mongo legacy) preserved via json tags so the
+// front-end consumer doesn't need to learn a new key.
 
 package admin
 
@@ -58,19 +58,17 @@ const userQueryTimeout = 5 * time.Second
 // the pre-check would have used.
 const pgUniqueViolation = "23505"
 
-// Chinese user-facing messages — copied verbatim from
-// server/controllers/admin.controller.js.  Drift here breaks the
-// shadow-traffic byte-diff at cutover so every string is constant and
-// reviewed against the Express source.
+// User-facing messages — emitted in English; the frontend i18n layer
+// maps each string to a localized translation keyed on the English text.
 const (
-	msgMissingFields     = "用户名、邮箱和密码为必填项"
-	msgAtLeastOne        = "至少提供用户名或邮箱"
-	msgUsernameConflict  = "用户名已存在"
-	msgEmailConflict     = "邮箱已存在"
-	msgUserNotFound      = "用户不存在"
-	msgCannotDeleteSelf  = "不能删除自己"
-	msgInvalidUserID     = "无效的用户 ID"
-	msgInvalidRequestBody = "请求体格式错误"
+	msgMissingFields      = "Username, email and password are required"
+	msgAtLeastOne         = "At least one of username or email is required"
+	msgUsernameConflict   = "Username already exists"
+	msgEmailConflict      = "Email already exists"
+	msgUserNotFound       = "User not found"
+	msgCannotDeleteSelf   = "Cannot delete yourself"
+	msgInvalidUserID      = "Invalid user ID"
+	msgInvalidRequestBody = "Invalid request body"
 )
 
 // UserDB is the sqlc subset the user-CRUD handlers consume.  Defined at
@@ -150,7 +148,8 @@ type createUserResp struct {
 //  1. Decode + check all three required fields present (Express's
 //     non-validator early-return is byte-compatible here).
 //  2. Pre-check dup via AdminFindUserByUsernameOrEmail.  Hit → 409
-//     with the field-specific message ("用户名已存在" vs "邮箱已存在").
+//     with the field-specific message ("Username already exists" vs
+//     "Email already exists").
 //  3. bcrypt-hash via jwtx.HashPassword (cost=10).
 //  4. AdminCreateUser → 201 with {_id, username, email}.
 //  5. Unique-violation race (23505) maps to the same 409 as pre-check.
@@ -354,7 +353,7 @@ type deleteUserResp struct {
 // Flow:
 //  1. Parse :userId path param as UUID; invalid → 400 BAD_REQUEST.
 //  2. Pull current admin's user id from claims; if :userId equals
-//     claims.UserID → 400 BAD_REQUEST 不能删除自己.  This matches
+//     claims.UserID → 400 BAD_REQUEST "Cannot delete yourself".  Matches
 //     Express's req.params.userId === req.user.userId guard.
 //  3. GetUserByID — if pgx.ErrNoRows → 404 NOT_FOUND.  Express does
 //     this same lookup so it can echo the deleted username in the
@@ -426,19 +425,20 @@ func parseUserID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	return id, true
 }
 
-// dupMessage selects the right Chinese conflict string by comparing the
-// existing row's username to the requested username.  Matches Express:
+// dupMessage selects the right conflict string by comparing the
+// existing row's username to the requested username.  Mirrors the
+// Express logic:
 //
-//	const field = existing.username === username ? '用户名' : '邮箱';
-//	`${field}已存在`
+//	const field = existing.username === username ? 'Username' : 'Email';
+//	`${field} already exists`
 //
 // The semantics: if the dup row's username equals the user's *requested*
 // username, the conflict is on username; otherwise it's on email.  This
 // correctly handles the three cases:
-//   - both fields conflict on the same row: returns "用户名已存在" (Express
-//     preference — the username message takes precedence).
-//   - only username conflicts: returns "用户名已存在".
-//   - only email conflicts: returns "邮箱已存在".
+//   - both fields conflict on the same row: returns "Username already
+//     exists" (Express preference — the username message takes precedence).
+//   - only username conflicts: returns "Username already exists".
+//   - only email conflicts: returns "Email already exists".
 func dupMessage(existingUsername, requestedUsername string) string {
 	if existingUsername == requestedUsername {
 		return msgUsernameConflict
@@ -447,7 +447,7 @@ func dupMessage(existingUsername, requestedUsername string) string {
 }
 
 // raceConflictMessage runs a fresh lookup after a unique-violation race
-// to pick the right Chinese message.  Used by CreateUser when the
+// to pick the right conflict message.  Used by CreateUser when the
 // INSERT fails on 23505 even though the pre-check returned ErrNoRows
 // (parallel admin operation slipped in between).  Best-effort: on
 // lookup failure default to username conflict (the more common case).

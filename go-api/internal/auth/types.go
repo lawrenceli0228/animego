@@ -58,9 +58,10 @@ type ForgotPasswordReq struct {
 // entropy gate, not the validator.
 //
 // We deliberately use `min=6` without `required` so empty and short
-// inputs map to the SAME "密码至少 6 位" message — Express collapses
-// both failure modes into a single error.  `min=6` on a string already
-// rejects the empty case (len("") = 0 < 6) so this works.
+// inputs map to the SAME "Password must be at least 6 characters"
+// message — Express collapses both failure modes into a single error.
+// `min=6` on a string already rejects the empty case (len("") = 0 < 6)
+// so this works.
 type ResetPasswordReq struct {
 	Password string `json:"password" validate:"min=6"`
 }

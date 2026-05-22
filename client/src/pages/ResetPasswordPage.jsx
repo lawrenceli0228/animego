@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../api/axiosClient'
 import { useLang } from '../context/LanguageContext'
+import { errorDisplay } from '../utils/errorDisplay'
 
 export default function ResetPasswordPage() {
   const { t } = useLang()
@@ -32,8 +33,7 @@ export default function ResetPasswordPage() {
       toast.success(t('resetPassword.success'))
       navigate('/login')
     } catch (err) {
-      const msg = err.response?.data?.error?.message || t('resetPassword.invalidToken')
-      setError(msg)
+      setError(errorDisplay(t, err, 'resetPassword.invalidToken'))
     } finally { setLoading(false) }
   }
 

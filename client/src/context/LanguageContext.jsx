@@ -17,11 +17,18 @@ export function LanguageProvider({ children }) {
   }, [])
 
   // t('nav.home') → looks up DICTS[lang].nav.home
-  const t = useCallback((key) => {
+  // t('errors.<English>', { defaultValue }) → returns defaultValue when the
+  // key is missing from the dict (used for backend error passthrough on en
+  // and for any English string the zh dict doesn't yet cover).
+  const t = useCallback((key, opts) => {
     const parts = key.split('.')
     let val = DICTS[lang]
     for (const p of parts) val = val?.[p]
-    return val ?? key
+    if (val !== undefined && val !== null) return val
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'defaultValue')) {
+      return opts.defaultValue
+    }
+    return key
   }, [lang])
 
   return (
@@ -38,11 +45,15 @@ export function LanguageProvider({ children }) {
 const FALLBACK_LANG = {
   lang: 'zh',
   toggle: () => {},
-  t: (key) => {
+  t: (key, opts) => {
     const parts = String(key).split('.')
     let val = DICTS.zh
     for (const p of parts) val = val?.[p]
-    return val ?? key
+    if (val !== undefined && val !== null) return val
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'defaultValue')) {
+      return opts.defaultValue
+    }
+    return key
   },
 }
 

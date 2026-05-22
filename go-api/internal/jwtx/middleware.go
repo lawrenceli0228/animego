@@ -17,9 +17,10 @@ package jwtx
 // secret on every API call, which defeats the point of short-lived
 // access tokens.
 //
-// Error responses match the Express envelope byte-for-byte:
-//   - No token at all → 401 { error: { code: NO_TOKEN, message: 需要登录 } }
-//   - Token present but invalid → 401 { error: { code: INVALID_TOKEN, message: 无效的 token } }
+// Error responses use the canonical envelope (English message; the
+// frontend i18n layer maps these to localized strings):
+//   - No token at all → 401 { error: { code: NO_TOKEN, message: Authentication required } }
+//   - Token present but invalid → 401 { error: { code: INVALID_TOKEN, message: Invalid token } }
 //
 // We deliberately collapse expired / malformed / wrong-signature into a
 // single INVALID_TOKEN to avoid leaking the specific failure reason.
@@ -44,8 +45,8 @@ const (
 	codeNoToken      = "NO_TOKEN"
 	codeInvalidToken = "INVALID_TOKEN"
 
-	msgNoToken      = "需要登录"
-	msgInvalidToken = "无效的 token"
+	msgNoToken      = "Authentication required"
+	msgInvalidToken = "Invalid token"
 )
 
 // Pre-marshaled 401 bodies.  json.Marshal is deterministic for these

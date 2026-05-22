@@ -23,8 +23,8 @@
 // The reset path runs INSIDE a pgx transaction so the column blank-out +
 // child-table DELETE never leave the row half-cleared on failure.
 //
-// Chinese error messages are byte-exact with Express; constants below
-// guard against silent translation drift.
+// Error messages are emitted in English; the frontend i18n layer maps
+// them to localized strings keyed on the English text.
 
 package admin
 
@@ -53,16 +53,15 @@ import (
 // admin surface share the same observable failure mode.
 const enrichmentQueryTimeout = 5 * time.Second
 
-// Chinese user-facing messages — copied verbatim from
-// server/controllers/admin.controller.js so the shadow-traffic diff
-// at cutover sees identical bytes.
+// User-facing messages — emitted in English; the frontend i18n layer
+// maps each string to a localized translation keyed on the English text.
 const (
-	msgInvalidAnilistID   = "无效的 anilistId"
-	msgAnimeNotFound      = "番剧不存在"
-	msgNoFieldsToUpdate   = "没有可更新的字段"
-	msgInvalidFlagValue   = "无效的 flag 值"
-	msgInvalidVersion     = "版本必须为 0、1 或 2"
-	msgInvalidRequestJSON = "请求体格式错误"
+	msgInvalidAnilistID   = "Invalid anilistId"
+	msgAnimeNotFound      = "Anime not found"
+	msgNoFieldsToUpdate   = "No fields to update"
+	msgInvalidFlagValue   = "Invalid flag value"
+	msgInvalidVersion     = "Version must be 0, 1, or 2"
+	msgInvalidRequestJSON = "Invalid request body"
 )
 
 // allowedFlagValues mirrors the Express allow-list:
@@ -177,9 +176,9 @@ type updateEnrichmentBody struct {
 // UpdateEnrichment handles PATCH /api/admin/enrichment/:anilistId.
 //
 // Express behaviour preserved:
-//   - invalid anilistId path param → 400 BAD_REQUEST `无效的 anilistId`
-//   - empty body (no recognised fields) → 400 BAD_REQUEST `没有可更新的字段`
-//   - missing row → 404 NOT_FOUND `番剧不存在`
+//   - invalid anilistId path param → 400 BAD_REQUEST `Invalid anilistId`
+//   - empty body (no recognised fields) → 400 BAD_REQUEST `No fields to update`
+//   - missing row → 404 NOT_FOUND `Anime not found`
 //   - successful update → 200 with the projection row (anilistId,
 //     titleRomaji, titleChinese, bgmId, bangumiScore, adminFlag).
 //   - admin_flag is unconditionally set to 'manually-corrected' as a
@@ -390,7 +389,7 @@ type reEnrichResponse struct {
 //	2  → ListEnrichedV2WithBgm  + EnqueueV3Many (BangumiV3Args)
 //	     ListEnrichedV2WithoutBgm + PromoteAnimeToV3   (can't V3 without bgmId)
 //
-// Other versions → 400 `版本必须为 0、1 或 2`.
+// Other versions → 400 `Version must be 0, 1, or 2`.
 func (h *EnrichmentHandlers) ReEnrich(w http.ResponseWriter, r *http.Request) {
 	versionStr := r.URL.Query().Get("version")
 	v, err := strconv.Atoi(versionStr)
