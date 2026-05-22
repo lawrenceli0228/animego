@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN" xml:lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>P2.2 — Auth 进度汇报</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
+  <style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 2px solid #2563eb; padding-bottom: 0.3rem; }
+  h2 { color: #2563eb; margin-top: 2rem; }
+  h3 { color: #475569; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #d1d5db; padding: 0.5rem 0.75rem; text-align: left; }
+  th { background: #f3f4f6; }
+  code { background: #f3f4f6; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85em; }
+  pre code { background: transparent; color: inherit; }
+  blockquote { border-left: 4px solid #2563eb; padding-left: 1rem; color: #475569; margin: 1rem 0; }
+  nav#TOC { background: #f9fafb; padding: 1rem 1.5rem; border-radius: 6px; margin-bottom: 2rem; }
+  nav#TOC ul { margin: 0; padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">P2.2 — Auth 进度汇报</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#p2.2-进度汇报">P2.2 进度汇报</a>
+<ul>
+<li><a href="#一句话概括">一句话概括</a></li>
+<li><a href="#endpoint-状态">endpoint 状态</a></li>
+<li><a href="#实现层">实现层</a>
+<ul>
+<li><a href="#新增包">新增包</a></li>
+<li><a href="#internaljwtx">internal/jwtx</a></li>
+<li><a href="#internalauth">internal/auth</a></li>
+<li><a href="#validator-中文消息映射">Validator → 中文消息映射</a></li>
+</ul></li>
+<li><a href="#sql-层">SQL 层</a></li>
+<li><a href="#config-加项">Config 加项</a></li>
+<li><a href="#live-smoke2026-05-22">Live smoke(2026-05-22)</a></li>
+<li><a href="#commit-历史p2.2">Commit 历史(P2.2)</a></li>
+<li><a href="#p2.2.4-待开剩-2-endpoint">P2.2.4 — 待开(剩 2 endpoint)</a></li>
+<li><a href="#p2.3-之后">P2.3 之后</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="p2.2-进度汇报">P2.2 进度汇报</h1>
+<p><strong>Branch:</strong> <code>feat/go-backend</code> <strong>当前 stage:</strong> P2.2.2 已推送 origin (<code>6838cb4..f87f3d6</code>) <strong>日期:</strong> 2026-05-22</p>
+<hr />
+<h2 id="一句话概括">一句话概括</h2>
+<p>7 个 auth endpoint 已落 5 个(register / login / refresh / logout / me),全链路 dual-accept(Bearer header + cookie)+ rate limit + 中文错误信息 byte-exact,实战验证过完整 flow。剩 forgot-password + reset-password 等 Gmail SMTP 接入。</p>
+<hr />
+<h2 id="endpoint-状态">endpoint 状态</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Endpoint</th>
+<th>状态</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>POST <code>/api/auth/register</code></td>
+<td>✓</td>
+<td>rate-limited / 重复 + validation 400 byte-exact</td>
+</tr>
+<tr class="even">
+<td>POST <code>/api/auth/login</code></td>
+<td>✓</td>
+<td>错密码 / 不存在邮箱同 message 防 enumeration</td>
+</tr>
+<tr class="odd">
+<td>POST <code>/api/auth/refresh</code></td>
+<td>✓</td>
+<td>读 refreshToken cookie / 双 check DB.refresh_token vs cookie</td>
+</tr>
+<tr class="even">
+<td>POST <code>/api/auth/logout</code></td>
+<td>✓</td>
+<td>RequireAuth 守 / 清 DB.refresh_token + 清 cookie</td>
+</tr>
+<tr class="odd">
+<td>GET <code>/api/auth/me</code></td>
+<td>✓</td>
+<td>RequireAuth 守 / 返 SafeUser(无 password)</td>
+</tr>
+<tr class="even">
+<td>POST <code>/api/auth/forgot-password</code></td>
+<td>✗</td>
+<td>待 P2.2.4 — 需 Gmail SMTP</td>
+</tr>
+<tr class="odd">
+<td>POST <code>/api/auth/reset-password/:token</code></td>
+<td>✗</td>
+<td>待 P2.2.4 — 需 token 校验链路</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="实现层">实现层</h2>
+<h3 id="新增包">新增包</h3>
+<table>
+<thead>
+<tr class="header">
+<th>包</th>
+<th>LoC</th>
+<th>Coverage</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>internal/jwtx</code></td>
+<td>~660</td>
+<td><strong>92.4%</strong></td>
+<td>双 HS256 密钥 + 33 test</td>
+</tr>
+<tr class="even">
+<td><code>internal/auth</code></td>
+<td>~2080</td>
+<td><strong>87.9%</strong></td>
+<td>5 handler + ratelimiter + cookies</td>
+</tr>
+</tbody>
+</table>
+<h3 id="internaljwtx">internal/jwtx</h3>
+<ul>
+<li><code>Signer</code> 双密钥(access 15m + refresh 7d,JWT_SECRET / JWT_REFRESH_SECRET 分开,leak 一个不能伪造另一个)</li>
+<li><code>AccessClaims{UserID, Username, Role *string omitempty, exp/iat}</code> — Role nil 时 JSON 不出现(跟 Express conditional spread 一致)</li>
+<li><code>RefreshClaims{UserID, exp/iat}</code> — userId only</li>
+<li><code>HashPassword</code> + <code>ComparePassword</code> cost=10(跟 Express bcryptjs 互通,Mongo migration 老 hash 直接验)</li>
+<li><code>RequireAuth</code> middleware dual-accept:<code>Authorization: Bearer &lt;token&gt;</code> OR <code>accessToken</code> cookie。Header 优先。401 envelope byte-exact 中文(<code>需要登录</code> / <code>无效的 token</code>)</li>
+<li>alg-confusion defense:<code>*jwt.SigningMethodHMAC</code> 强制 assert,挡 <code>alg=none</code> + <code>alg=RS256</code> 攻击</li>
+<li><code>ClaimsFrom(ctx)</code> accessor + package-private context key(外部不能伪造 key)</li>
+</ul>
+<h3 id="internalauth">internal/auth</h3>
+<ul>
+<li><code>SafeUser</code> 投影脱敏 password / refreshToken / resetPasswordToken / resetPasswordExpires 4 字段 — <code>ToSafeUser(dbgen.User)</code> 单一转换点</li>
+<li>5 handler 全用 <code>errgroup</code> / <code>validator.v10</code> / pgconn.PgError race-detect</li>
+<li>Register <code>pgconn 23505</code> SQLSTATE → 400 DUPLICATE(防 pre-check race condition)</li>
+<li>Login 错邮箱 + 错密码同 <code>INVALID_CREDENTIALS</code> + <code>邮箱或密码错误</code> message(防 enumeration)</li>
+<li>Refresh 双 check:<code>signer.VerifyRefresh</code> + DB.<code>refresh_token</code> 必须等于 cookie(rotation defense)</li>
+<li>Logout <code>UpdateUserRefreshToken(id, nil)</code> 清 DB + <code>ClearRefreshCookie</code> 清客户端</li>
+<li>Cookies:<code>httpOnly</code> + <code>SameSite=strict</code>(dev)/<code>none</code>(prod)+ <code>path=/api</code>(限 CSRF 面)+ <code>maxAge=7d</code></li>
+<li>Rate limiter:fixed-window 10 req / 15 min per IP,sweeper goroutine 每 5min GC,<code>Stop()</code> <code>sync.Once</code> 守</li>
+</ul>
+<h3 id="validator-中文消息映射">Validator → 中文消息映射</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Validator 错</th>
+<th>中文消息(byte-exact Express)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>username min/max</td>
+<td><code>用户名需 3-50 个字符</code></td>
+</tr>
+<tr class="even">
+<td>email</td>
+<td><code>邮箱格式不正确</code></td>
+</tr>
+<tr class="odd">
+<td>password min</td>
+<td><code>密码至少 6 位</code></td>
+</tr>
+<tr class="even">
+<td>password required(login)</td>
+<td><code>密码不能为空</code></td>
+</tr>
+<tr class="odd">
+<td>unmapped</td>
+<td><code>参数错误</code>(默认 fallback,不泄露 validator 英文)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="sql-层">SQL 层</h2>
+<p><code>internal/db/queries/users.sql</code> 加 8 个 sqlc method:</p>
+<pre class="text"><code>CreateUser(username, email, hashed_pw) → User
+GetUserByEmail(email) → User
+GetUserByUsername(username) → User
+GetUserByID(uuid) → User
+UpdateUserRefreshToken(id, *token) → ()
+SetResetPasswordToken(id, *token, expires) → ()
+GetUserByResetToken(token) → User       ← P2.2.4 用
+ResetUserPassword(id, hashed_pw) → ()   ← P2.2.4 用</code></pre>
+<p>前 5 个被 P2.2.2 handlers 消费,后 3 个等 P2.2.4 forgot/reset 接入。</p>
+<hr />
+<h2 id="config-加项">Config 加项</h2>
+<pre class="text"><code>JWTSecret               (HS256 access secret,P2.2 起必填)
+JWTRefreshSecret        (HS256 refresh secret,跟 access 分开)
+JWTExpiresIn            (default 15m,支持 Express &quot;15m&quot; shorthand)
+JWTRefreshExpiresIn     (default 7d,支持 &quot;7d&quot; shorthand 也支持 Go duration)</code></pre>
+<p><code>envDuration</code> helper 处理 Express 的 <code>7d</code> 简写(Go <code>time.ParseDuration</code> 不认 d)。</p>
+<hr />
+<h2 id="live-smoke2026-05-22">Live smoke(2026-05-22)</h2>
+<p>docker compose pg + <code>go run ./cmd/server</code>(JWT secrets 注入)+ curl:</p>
+<pre class="text"><code>=== /register happy ===
+HTTP/1.1 201 Created
+Set-Cookie: refreshToken=eyJhbG...; Path=/api; Max-Age=604800; HttpOnly; SameSite=Strict
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;data&quot;: {
+    &quot;accessToken&quot;: &quot;eyJhbG...&quot;,
+    &quot;user&quot;: {
+      &quot;id&quot;: &quot;17617008-fcf6-479e-92d3-a5b6a8bede86&quot;,
+      &quot;username&quot;: &quot;alice2&quot;,
+      &quot;email&quot;: &quot;alice2@example.com&quot;,
+      &quot;role&quot;: null,
+      &quot;isPublic&quot;: true,
+      &quot;createdAt&quot;: &quot;2026-05-22T22:09:53...&quot;,
+      &quot;updatedAt&quot;: &quot;2026-05-22T22:09:53...&quot;
+    }
+  }
+}</code></pre>
+<p>(注意:<strong>无 password / refreshToken / resetPasswordToken 字段</strong> — SafeUser 投影把那 4 列剥掉了。)</p>
+<table>
+<thead>
+<tr class="header">
+<th>用例</th>
+<th>实际结果</th>
+<th>byte-exact 中文</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>/register</code> 重复</td>
+<td>400 DUPLICATE_ERROR</td>
+<td><code>用户名或邮箱已存在</code> ✓</td>
+</tr>
+<tr class="even">
+<td><code>/register</code> 短名</td>
+<td>400 VALIDATION_ERROR</td>
+<td><code>用户名需 3-50 个字符</code> ✓</td>
+</tr>
+<tr class="odd">
+<td><code>/login</code> 错密码</td>
+<td>401 INVALID_CREDENTIALS</td>
+<td><code>邮箱或密码错误</code> ✓</td>
+</tr>
+<tr class="even">
+<td><code>/me</code> 无 token</td>
+<td>401 NO_TOKEN</td>
+<td><code>需要登录</code> ✓</td>
+</tr>
+<tr class="odd">
+<td><code>/me</code> Bearer</td>
+<td>200 + SafeUser</td>
+<td>—</td>
+</tr>
+<tr class="even">
+<td><code>/refresh</code> via cookie</td>
+<td>200 + 新 accessToken</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<td><code>/logout</code></td>
+<td>200</td>
+<td><code>已登出</code> ✓</td>
+</tr>
+<tr class="even">
+<td>Rate limit 第 11 req</td>
+<td>429 RATE_LIMITED</td>
+<td><code>请求过于频繁，请稍后再试</code> ✓</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="commit-历史p2.2">Commit 历史(P2.2)</h2>
+<pre class="text"><code>f87f3d6 feat P2.2.3 main.go wires /api/auth/* (5 endpoints)
+a5dc9c1 feat P2.2.2 internal/auth (5 handlers + ratelimit + cookies)
+4351790 feat P2.2.1 internal/jwtx (JWT + bcrypt + RequireAuth)
+636457d feat P2.2.0 sqlc users CRUD + JWT/validator deps + config</code></pre>
+<p>合 4 commit / ~3700 行(代码 + 测试 + sqlc 生成)。</p>
+<hr />
+<h2 id="p2.2.4-待开剩-2-endpoint">P2.2.4 — 待开(剩 2 endpoint)</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>项目</th>
+<th>估时</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>internal/email/</code> Gmail SMTP wrapper(net/smtp + GMAIL_USER + GMAIL_APP_PASSWORD)+ 邮件模板 HTML 移植</td>
+<td>2-3hr</td>
+<td>Express nodemailer 用 service: ‘gmail’,Go 用 net/smtp + smtp.PlainAuth Gmail SMTP 服务器</td>
+</tr>
+<tr class="even">
+<td><code>forgot-password</code> handler:GetUserByEmail → 生成 crypto/rand 32-byte hex token → SetResetPasswordToken(1h 过期)→ sendPasswordResetEmail。<strong>始终</strong>返 200 防 email enumeration</td>
+<td>1-2hr</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<td><code>reset-password/:token</code> handler:GetUserByResetToken → bcrypt.HashPassword → ResetUserPassword(清 reset_token + reset_expires + refresh_token,踢全部 session)</td>
+<td>1hr</td>
+<td>—</td>
+</tr>
+<tr class="even">
+<td>main.go wire 2 路由 + email.NewSender</td>
+<td>0.5hr</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<td>Live smoke(本地真发 Gmail 测试邮件 → 收件 → 点链接 → 重置 → 旧 session 全失效)</td>
+<td>1hr</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>合计 ~5-7hr P2.2 收尾。</p>
+<hr />
+<h2 id="p2.3-之后">P2.3 之后</h2>
+<p>参 <code>MIGRATION_PLAN.md</code>:P2.3 admin → P2.4 subscriptions/users/feed → P2.5 comments/danmaku → P2.6 dandanplay → P2.7 testify → P2.8 ws-server → P3 Next.js。</p>
+</body>
+</html>
