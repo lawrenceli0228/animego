@@ -12,6 +12,27 @@ import (
 )
 
 type Querier interface {
+	// POST /api/admin/users — create-by-admin path.  Caller bcrypts password
+	// before passing it in.  RETURNING only the projection Express's
+	// response uses ({ _id, username, email }) — handler maps to {id, ...}.
+	// Unique violation (23505) bubbles up to handler → 409 with the field
+	// name in the message.
+	AdminCreateUser(ctx context.Context, username string, email string, password string) (AdminCreateUserRow, error)
+	// DELETE /api/admin/users/:userId.  Subscriptions / follows / comments /
+	// danmakus all ON DELETE CASCADE to users.id (see 0001_init.up.sql) so
+	// a single DELETE removes everything Express did via Promise.all.
+	AdminDeleteUser(ctx context.Context, id uuid.UUID) error
+	// Pre-create dup check (no id exclusion since the row doesn't exist yet).
+	AdminFindUserByUsernameOrEmail(ctx context.Context, username *string, email *string) (AdminFindUserByUsernameOrEmailRow, error)
+	// Pre-update dup check.  Looks for an existing row with the same
+	// username or email but a DIFFERENT id — i.e. would violate uniqueness
+	// if the update went through.  Returns ErrNoRows when no conflict.
+	AdminFindUserByUsernameOrEmailExcluding(ctx context.Context, username *string, email *string, excludeID uuid.UUID) (AdminFindUserByUsernameOrEmailExcludingRow, error)
+	// PATCH /api/admin/users/:userId — partial update of username/email.
+	// COALESCE() lets the caller pass nil to skip a field; passing a value
+	// overrides it.  Both empty means the handler returns 400 before we
+	// reach this query.
+	AdminUpdateUser(ctx context.Context, username *string, email *string, userID uuid.UUID) (AdminUpdateUserRow, error)
 	// Total non-Hentai entries for a given season + year.  Drives the
 	// pagination meta in /api/anime/seasonal so the frontend can render
 	// "X of Y" without a separate count call.
@@ -37,6 +58,11 @@ type Querier interface {
 	// as pgx.PgError code 23505 — handler catches + maps to 400 DUPLICATE.
 	CreateUser(ctx context.Context, username string, email string, password string) (User, error)
 	DeleteAnimeCharacters(ctx context.Context, animeID int32) error
+	// Wipe child tables when Reset clears a row.  Express puts characters /
+	// episode_titles back to `undefined` in the document — Postgres mirrors
+	// that with a DELETE inside the reset transaction.
+	DeleteAnimeCharactersForReset(ctx context.Context, animeID int32) error
+	DeleteAnimeEpisodeTitlesForReset(ctx context.Context, animeID int32) error
 	// -------------------------------------------------------------------------
 	// Child-table upsert pairs for /:anilistId AniList re-fetch (P2.1.6).
 	//
@@ -53,12 +79,46 @@ type Querier interface {
 	DeleteAnimeRelations(ctx context.Context, animeID int32) error
 	DeleteAnimeStaff(ctx context.Context, animeID int32) error
 	DeleteAnimeStudios(ctx context.Context, animeID int32) error
+	// POST /api/admin/enrichment/:anilistId/flag — set admin_flag to one of
+	// 'needs-review' / 'manually-corrected' / NULL.  CHECK constraint on the
+	// column enforces the allow-list at DB level; handler also pre-validates
+	// so the 400 message is friendly.
+	FlagAnimeEnrichment(ctx context.Context, anilistID int32, adminFlag *string) (FlagAnimeEnrichmentRow, error)
+	// Queries for /api/admin/* (P2.3).
+	//
+	// Most admin reads are single-row aggregates or list-by-version batches.
+	// ListEnrichment + ListAdminUsers are intentionally NOT here because they
+	// need dynamic ORDER BY + filter composition that sqlc cannot express
+	// without an explosion of query variants — those run as raw pgxpool
+	// queries in internal/admin/list.go with a column-name allow-list.
+	//
+	// Conventions:
+	//   * count() cast to ::bigint so sqlc generates int64 (matching Express's
+	//     JS Number which is int64-safe up to 2^53).
+	//   * Selective UPDATE uses COALESCE($1, column) only when the field is
+	//     *string and "nil means skip" semantics apply.  Setting a field to
+	//     NULL on purpose uses a pgtype.Text wrapper in the handler.
+	//   * RETURNING the projection columns matches Express's .select() shape.
+	// /api/admin/stats — 10 COUNT()s in a single round-trip.
+	// Replaces Promise.all() of 10 Mongo countDocuments calls.  All counts
+	// run as correlated subqueries so we get one row, one fetch.
+	GetAdminStats(ctx context.Context) (GetAdminStatsRow, error)
+	// ==================== User management ====================
+	// Batch fetch sub_count + follower_count for a slice of user ids.
+	// Replaces the two Promise.all aggregate pipelines in listUsers.
+	// Returns 0 for users with no rows on either side via LEFT JOIN.
+	GetAdminUserSubFollowCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]GetAdminUserSubFollowCountsRow, error)
 	// Bulk read for /search post-upsert re-read so enriched fields
 	// (title_chinese, bangumi_*) flow into the response even when the upsert
 	// only carried AniList-side data.  Returns the same 16-column shape as
 	// /completed-gems / /yearly-top so handlers can reuse the response
 	// struct treatment.
 	GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetAnimeByAnilistIDsRow, error)
+	// Read the row Reset will mutate.  Returns the projection columns the
+	// handler needs to re-enqueue: anilist_id, title_native, title_romaji.
+	// Errors out cleanly with pgx.ErrNoRows when the anime doesn't exist
+	// (handler maps → 404).
+	GetAnimeCacheRowForReset(ctx context.Context, anilistID int32) (GetAnimeCacheRowForResetRow, error)
 	// Sorted by display_order so the response preserves the AniList role
 	// ordering (MAIN → SUPPORTING → BACKGROUND).  Phase 4 worker writes
 	// name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
@@ -155,11 +215,52 @@ type Querier interface {
 	InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelationParams) error
 	InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
+	// Batch reader for re-enrich.  Returns the fields the queue payload
+	// needs.  Filtering by version covers v0/v1/v2 — handler dispatches each
+	// via the appropriate enqueue function.
+	//
+	// For v0 the Express code accepts `bangumiVersion: 0` OR `$exists: false`.
+	// In PG the column is `NOT NULL DEFAULT 0` (see 0001_init.up.sql:53) so
+	// "missing" is impossible — a single = 0 covers it.
+	ListAnimeForReEnrichByVersion(ctx context.Context, bangumiVersion int32) ([]ListAnimeForReEnrichByVersionRow, error)
+	// For re-enrich v=2:  rows that have a bgm_id can be V3-healed.
+	// Returns the queue-payload fields directly.
+	ListEnrichedV2WithBgm(ctx context.Context) ([]ListEnrichedV2WithBgmRow, error)
+	// For re-enrich v=2:  rows that lack a bgm_id can't be V3-healed (V3
+	// needs Bangumi subject id).  Express promotes them directly to v3 via
+	// updateMany.  This query is the SELECT half; PromoteAnimeToV3 is the
+	// UPDATE half.
+	ListEnrichedV2WithoutBgm(ctx context.Context) ([]int32, error)
+	// POST /api/admin/enrichment/heal-cn — Express filter:
+	//   bgmId: { $ne: null }
+	//   bangumiVersion: { $gte: 2, $lt: 3 }   // i.e. version = 2
+	//   $or: [{ titleChinese: null }, { titleChinese: { $exists: false } }]
+	//
+	// Returns the queue payload shape (anilistId / bgmId / titleChinese /
+	// bangumiVersion) so the handler can build V3 jobs directly.
+	ListHealCnCandidates(ctx context.Context) ([]ListHealCnCandidatesRow, error)
 	// Boot-time orphan scan: returns anilist_ids of rows where
 	// bangumi_version=0 (never enriched).  Paginated via limit/offset so
 	// the caller can batch-enqueue without loading the whole table into
 	// memory.  Ordered by anilist_id ASC for deterministic batching.
 	ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error)
+	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
+	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
+	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error
+	// POST /api/admin/enrichment/:anilistId/reset — Express:
+	//   doc.bangumiVersion = 0
+	//   doc.titleChinese   = null
+	//   doc.bgmId          = null
+	//   doc.bangumiScore   = undefined
+	//   doc.bangumiVotes   = undefined
+	//   doc.adminFlag      = null
+	//   await doc.save()
+	//
+	// characters/episode_titles also wiped in Express (doc.episodeTitles +
+	// doc.characters undefined).  In PG those are separate tables — handler
+	// runs the corresponding DELETE inside the same transaction so the
+	// re-enqueue produces a fresh enrichment cycle.
+	ResetAnimeEnrichment(ctx context.Context, anilistID int32) error
 	// reset-password write: sets new bcrypt hash, clears both reset-token
 	// columns, AND nulls refresh_token (invalidates all existing sessions).
 	// Matches Express's multi-field $set in resetPassword.
@@ -180,6 +281,14 @@ type Querier interface {
 	// case where Bangumi-name == AniList.name.native; fuzzy trigram match
 	// can land later if exact-Japanese still misses too many.
 	UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCn *string, voiceActorCn *string, voiceActorImageUrl *string) error
+	// PATCH /api/admin/enrichment/:anilistId — partial update.  COALESCE
+	// pattern: pass NULL for fields the caller doesn't want to touch.  The
+	// *string / *float64 / *int parameters serialize correctly via pgx; the
+	// handler converts request body absent/present into nil/pointer.
+	//
+	// admin_flag is always set to 'manually-corrected' as a side effect
+	// (Express:  updates.adminFlag = 'manually-corrected').
+	UpdateAnimeEnrichmentSelective(ctx context.Context, titleChinese *string, bgmID *int32, bangumiScore *float64, anilistID int32) (UpdateAnimeEnrichmentSelectiveRow, error)
 	// Phase 1 result write — set bgm_id + title_chinese (the latter only
 	// when the Bangumi search produced an exact native match with a
 	// non-empty name_cn).  bangumi_version=1 marks ready for Phase 2.

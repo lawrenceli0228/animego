@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/admin"
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
 	"github.com/lawrenceli0228/animego/go-api/internal/auth"
@@ -101,6 +102,17 @@ func main() {
 			enqueuer,
 			anime.NormalizeMainRow,
 		),
+		// Queues: default for V1+V2+warm_season, bangumi_v3 for V3 only.
+		// The dedicated V3 queue is what makes the admin /heal-cn/pause
+		// endpoint isolate the heal-CN workload — pausing the default
+		// queue would also freeze enrichment and seasonal warming.
+		// MaxWorkers=1 on both queues matches the conservative serial
+		// throttle the V1/V2/V3 workers use to respect Bangumi's
+		// 800ms-per-request budget (only one worker per queue).
+		Queues: map[string]river.QueueConfig{
+			river.QueueDefault:         {MaxWorkers: 1},
+			queue.BangumiV3QueueName:   {MaxWorkers: 1},
+		},
 		PeriodicJobs: []*river.PeriodicJob{queue.PeriodicWarmSeasonJob()},
 		Logger:       slog.Default(),
 	})
@@ -216,6 +228,29 @@ func main() {
 	authRateLimit := auth.NewRateLimiter(10, 15*time.Minute)
 	defer authRateLimit.Stop()
 
+	// Admin handler bundles — P2.3.
+	//   read:        /api/admin/{stats,enrichment,users}
+	//   enrichment:  /api/admin/enrichment/* writes (re-enrich, heal-cn, reset, flag)
+	//   userCRUD:    /api/admin/{users,warm-all} writes
+	//
+	// QueueStatusFn injects river-derived V3 pause info into the /stats
+	// response.  Phase1/Phase4/V3 depth counters are 0 today — the
+	// in-memory counters Express maintained were removed when V1/V2/V3
+	// moved to river; the next phase can layer a JobList-based depth
+	// reading on top without changing the response shape.
+	queueStatusFn := func(ctx context.Context) (admin.QueueSnapshot, error) {
+		snap := admin.QueueSnapshot{}
+		s, err := queue.Status(ctx, riverClient)
+		if err != nil {
+			return snap, err
+		}
+		snap.V3Progress = &admin.V3BatchProgress{Paused: s.V3Paused}
+		return snap, nil
+	}
+	adminReadHandlers := admin.NewHandlers(pool, q, queueStatusFn, nil)
+	adminUserHandlers := admin.NewUserHandlers(q, enqueuer)
+	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -254,6 +289,37 @@ func main() {
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
 
+	// P2.3 admin: 14 endpoints behind RequireAuth + RequireAdmin chain.
+	// Express equivalent: server/routes/admin.routes.js with the same
+	// `router.use(authenticateToken, adminAuth)` gate.  Order of mounts
+	// matters for chi path resolution — more-specific paths
+	// (`/enrichment/heal-cn/pause`) must register BEFORE the
+	// parameterised variants (`/enrichment/{anilistId}/...`).
+	r.Route("/api/admin", func(r chi.Router) {
+		r.Use(jwtx.RequireAuth(signer))
+		r.Use(jwtx.RequireAdmin())
+
+		// Reads.
+		r.Get("/stats", adminReadHandlers.GetStats)
+		r.Get("/enrichment", adminReadHandlers.ListEnrichment)
+		r.Get("/users", adminReadHandlers.ListUsers)
+
+		// Enrichment writes — static paths first to keep chi happy.
+		r.Post("/enrichment/re-enrich", adminEnrichmentHandlers.ReEnrich)
+		r.Post("/enrichment/heal-cn", adminEnrichmentHandlers.HealCn)
+		r.Post("/enrichment/heal-cn/pause", adminEnrichmentHandlers.PauseHeal)
+		r.Post("/enrichment/heal-cn/resume", adminEnrichmentHandlers.ResumeHeal)
+		r.Patch("/enrichment/{anilistId}", adminEnrichmentHandlers.UpdateEnrichment)
+		r.Post("/enrichment/{anilistId}/reset", adminEnrichmentHandlers.ResetEnrichment)
+		r.Post("/enrichment/{anilistId}/flag", adminEnrichmentHandlers.FlagEnrichment)
+
+		// Warm-all (fire-and-forget) + user CRUD.
+		r.Post("/warm-all", adminUserHandlers.WarmAll)
+		r.Post("/users", adminUserHandlers.CreateUser)
+		r.Patch("/users/{userId}", adminUserHandlers.UpdateUser)
+		r.Delete("/users/{userId}", adminUserHandlers.DeleteUser)
+	})
+
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
@@ -265,7 +331,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.2")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.3")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)

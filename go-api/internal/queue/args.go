@@ -45,6 +45,18 @@ type BangumiV3Args struct {
 // Kind returns the river job kind for V3 enrichment.
 func (BangumiV3Args) Kind() string { return "bangumi_v3" }
 
+// InsertOpts routes V3 jobs to the dedicated "bangumi_v3" river queue
+// (see BangumiV3QueueName in control.go).  Pinning V3 to its own queue
+// is what makes the admin pause/resume endpoint actually pause only V3
+// jobs — pausing the default queue would freeze V1 + V2 + warm_season
+// too.  River resolves Queue lookup at insert time so the queue MUST
+// exist in the Config.Queues map at Boot, otherwise InsertMany fails
+// fast with "queue not found".  See cmd/server/main.go for the boot
+// wiring that adds the queue.
+func (BangumiV3Args) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: BangumiV3QueueName}
+}
+
 // WarmSeasonArgs is the job payload for the periodic seasonal warm
 // worker.  One job per (season, year) pair — boot enqueues two
 // instances (current season + next season) and river's PeriodicJobs
