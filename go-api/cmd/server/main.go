@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
@@ -84,13 +85,21 @@ func main() {
 	// no-ops until Bind is called, then forwards to a RealEnqueuer.
 	enqueuer := &queue.LateBoundEnqueuer{}
 
-	// River queue boot: real V1 + V2 workers (use bangumiClient + q +
-	// enqueuer for V1→V2 chain) + V3 stub.  Boot returns the client
-	// unstarted — explicit Start() below gates dispatch on the
-	// postgres handshake succeeding above.
+	// River queue boot: real V1+V2+V3 (Bangumi enrichment trilogy) +
+	// real WarmSeason worker.  WorkersWithBangumiAndNormalizer takes
+	// the AniList client (for warm_season's Seasonal calls) + an
+	// injected normalizer (anime.NormalizeMainRow — avoids the
+	// queue→anime import cycle).  Boot returns the client unstarted.
 	riverClient, err := queue.Boot(pool, queue.Config{
-		Workers: queue.WorkersWithBangumi(bangumiClient, q, enqueuer),
-		Logger:  slog.Default(),
+		Workers: queue.WorkersWithBangumiAndNormalizer(
+			bangumiClient,
+			anilistClient,
+			q,
+			enqueuer,
+			anime.NormalizeMainRow,
+		),
+		PeriodicJobs: []*river.PeriodicJob{queue.PeriodicWarmSeasonJob()},
+		Logger:       slog.Default(),
 	})
 	if err != nil {
 		slog.Error("river queue boot failed", "err", err)
@@ -110,7 +119,25 @@ func main() {
 			slog.Warn("river queue stop", "err", err)
 		}
 	}()
-	slog.Info("river queue ready", "workers", "v1(real)+v2(real)+v3(real)")
+	slog.Info("river queue ready", "workers", "v1+v2+v3+warm_season")
+
+	// Boot-time warm: enqueue current + next season immediately so the
+	// dispatch loop has something to chew on as soon as it starts.
+	// Periodic 24h re-fire is handled by the PeriodicJob registered
+	// above.
+	go func() {
+		warmCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		curSeason, curYear := queue.CurrentSeason(time.Now())
+		if err := enqueuer.EnqueueWarmSeasonNow(warmCtx, queue.WarmSeasonArgs{Season: curSeason, Year: curYear}); err != nil {
+			slog.Warn("warm_season boot enqueue (current)", "err", err)
+		}
+		nextSeason, nextYear := queue.NextSeason(curSeason, curYear)
+		if err := enqueuer.EnqueueWarmSeasonNow(warmCtx, queue.WarmSeasonArgs{Season: nextSeason, Year: nextYear}); err != nil {
+			slog.Warn("warm_season boot enqueue (next)", "err", err)
+		}
+		slog.Info("warm_season boot enqueued", "current", curSeason, "next", nextSeason, "year", curYear)
+	}()
 
 	searchSvc, err := anime.NewSearchService(anilistClient, q, enqueuer)
 	if err != nil {
@@ -197,7 +224,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.8")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.1.9")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
