@@ -3,3 +3,22 @@
 //   sqlc v1.31.1
 
 package dbgen
+
+import (
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type User struct {
+	ID                   uuid.UUID          `json:"id"`
+	Username             string             `json:"username"`
+	Email                string             `json:"email"`
+	Password             string             `json:"password"`
+	Role                 *string            `json:"role"`
+	RefreshToken         *string            `json:"refreshToken"`
+	ResetPasswordToken   *string            `json:"resetPasswordToken"`
+	ResetPasswordExpires pgtype.Timestamptz `json:"resetPasswordExpires"`
+	IsPublic             bool               `json:"isPublic"`
+	CreatedAt            pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt            pgtype.Timestamptz `json:"updatedAt"`
+}

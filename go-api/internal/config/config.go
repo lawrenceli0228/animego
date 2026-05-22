@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config holds runtime values read from the process environment.
@@ -24,10 +25,24 @@ type Config struct {
 	// Default points at the dev docker-compose Postgres.
 	DatabaseURL string
 
-	// JWTSecret is the HS256 signing secret shared with the Next.js middleware
-	// (which verifies tokens) and the ws-server (which verifies socket auth).
-	// P0 is allowed to start without this; P2.2 onward requires it.
+	// JWTSecret is the HS256 signing secret for access tokens — shared
+	// with the Next.js middleware (which verifies tokens) and the
+	// ws-server (which verifies socket auth).  P2.2 requires this.
 	JWTSecret string
+
+	// JWTRefreshSecret is a separate HS256 secret for refresh tokens.
+	// Using a distinct secret means a leaked access token can't be
+	// re-signed as a refresh.  Required from P2.2 onward.
+	JWTRefreshSecret string
+
+	// JWTExpiresIn is the access-token lifetime.  Default 15 minutes
+	// (matches Express JWT_EXPIRES_IN default).  Override via env to
+	// shorten in prod or extend during local dev.
+	JWTExpiresIn time.Duration
+
+	// JWTRefreshExpiresIn is the refresh-token lifetime.  Default 7
+	// days.  Same cookie maxAge is set when the token is issued.
+	JWTRefreshExpiresIn time.Duration
 
 	// ClientOrigin is the CORS allow-list for dev.  Production overrides via env.
 	ClientOrigin string
@@ -47,12 +62,48 @@ func Load() (*Config, error) {
 		"postgres://animego:devpassword@localhost:5432/animego?sslmode=disable",
 	)
 
+	accessTTL, err := envDuration("JWT_EXPIRES_IN", 15*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	refreshTTL, err := envDuration("JWT_REFRESH_EXPIRES_IN", 7*24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
-		Port:         port,
-		DatabaseURL:  dbURL,
-		JWTSecret:    os.Getenv("JWT_SECRET"), // empty OK at P0; P2.2 will validate
-		ClientOrigin: getEnv("CLIENT_ORIGIN", "http://localhost:3000"),
+		Port:                port,
+		DatabaseURL:         dbURL,
+		JWTSecret:           os.Getenv("JWT_SECRET"),
+		JWTRefreshSecret:    os.Getenv("JWT_REFRESH_SECRET"),
+		JWTExpiresIn:        accessTTL,
+		JWTRefreshExpiresIn: refreshTTL,
+		ClientOrigin:        getEnv("CLIENT_ORIGIN", "http://localhost:3000"),
 	}, nil
+}
+
+// envDuration parses a Go duration string ("15m", "7d" via custom 'd' handling).
+// time.ParseDuration doesn't understand 'd' for days — special-case it
+// since Express uses '7d' / '15m' shorthand and shipping the same env
+// var across both runtimes is a hard requirement during dual-accept.
+func envDuration(key string, def time.Duration) (time.Duration, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	// Handle '7d' shorthand: convert to '168h'.
+	if len(v) > 1 && v[len(v)-1] == 'd' {
+		days, derr := strconv.Atoi(v[:len(v)-1])
+		if derr != nil {
+			return 0, fmt.Errorf("env %s = %q: %w", key, v, derr)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("env %s = %q: %w", key, v, err)
+	}
+	return d, nil
 }
 
 func envInt(key string, def int) (int, error) {

@@ -6,6 +6,9 @@ package dbgen
 
 import (
 	"context"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -16,6 +19,23 @@ type Querier interface {
 	// Total active watchers for /api/anime/:anilistId/watchers (the `total`
 	// meta field in the envelope).
 	CountWatchers(ctx context.Context, anilistID int32) (int64, error)
+	// Queries against the users table.  Auth flow (register / login / refresh
+	// / logout / me) drives the read+write contract.  Password reset adds
+	// token-keyed reads + multi-column update.
+	//
+	// Conventions:
+	//   * uuid PK type-mapped to google/uuid.UUID via sqlc.yaml override.
+	//   * password column holds bcrypt hash; bcrypt comparison happens in
+	//     application code (bcrypt.CompareHashAndPassword).
+	//   * refresh_token / reset_password_token are nullable text — passed
+	//     as *string so sqlc can NULL them out via direct nil-pointer.
+	// Inserts a new user.  Caller hashes password via bcrypt BEFORE calling
+	// this.  Returns the full row so the handler can echo the public fields
+	// in the response without a second read.
+	//
+	// Unique constraint violations (username/email already taken) surface
+	// as pgx.PgError code 23505 — handler catches + maps to 400 DUPLICATE.
+	CreateUser(ctx context.Context, username string, email string, password string) (User, error)
 	DeleteAnimeCharacters(ctx context.Context, animeID int32) error
 	// -------------------------------------------------------------------------
 	// Child-table upsert pairs for /:anilistId AniList re-fetch (P2.1.6).
@@ -99,6 +119,21 @@ type Querier interface {
 	// Postgres replacement scopes to status='watching' to match the
 	// frontend's "X watchers" semantic).
 	GetTrendingWithCounts(ctx context.Context, limit int32) ([]GetTrendingWithCountsRow, error)
+	// Login lookup.  Returns the row including the password hash so the
+	// handler can bcrypt.CompareHashAndPassword.  pgx.ErrNoRows → 401
+	// INVALID_CREDENTIALS (intentionally same message as wrong password
+	// to avoid email enumeration).
+	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// /me + refresh + logout lookups by JWT-derived user id.  pgx.ErrNoRows
+	// → 404 NOT_FOUND (user was deleted after token issued, rare).
+	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	// reset-password lookup by token AND not-expired.  Single query
+	// replaces Express's MongoDB compound find — keeps the
+	// token-validity check atomic with the read.
+	GetUserByResetToken(ctx context.Context, resetPasswordToken *string) (User, error)
+	// Uniqueness check during register (we also rely on the unique index,
+	// but a pre-check gives a friendlier 400 vs a 500-looking pg error).
+	GetUserByUsername(ctx context.Context, username string) (User, error)
 	// Public watcher list for one anime.  Backs /api/anime/:anilistId/watchers.
 	// Replaces anime.controller.js:53-75 — single SQL with JOIN drops the
 	// Express two-step (find + populate) pattern.
@@ -125,6 +160,14 @@ type Querier interface {
 	// the caller can batch-enqueue without loading the whole table into
 	// memory.  Ordered by anilist_id ASC for deterministic batching.
 	ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error)
+	// reset-password write: sets new bcrypt hash, clears both reset-token
+	// columns, AND nulls refresh_token (invalidates all existing sessions).
+	// Matches Express's multi-field $set in resetPassword.
+	ResetUserPassword(ctx context.Context, iD uuid.UUID, password string) error
+	// forgot-password sets the token + 1h expiry.  Caller generates the
+	// token via crypto/rand (32 random bytes hex-encoded — matches
+	// Express's crypto.randomBytes(32).toString('hex')).
+	SetResetPasswordToken(ctx context.Context, iD uuid.UUID, resetPasswordToken *string, resetPasswordExpires pgtype.Timestamptz) error
 	// Phase 2 character enrichment: match by anime_id + (name_en OR name_ja).
 	// Bangumi character.name is typically Japanese (e.g. "天使ヶ原恵") while
 	// AniList stores it under name_ja; some AniList entries have English/
@@ -159,6 +202,9 @@ type Querier interface {
 	// entries whose title_chinese is still NULL.  Tiny operation —
 	// bumps bangumi_version=3 either way (success or null).
 	UpdateBangumiV3(ctx context.Context, anilistID int32, titleChinese *string) error
+	// Called after login / refresh (set new token) and logout (set NULL).
+	// updated_at bumps to now() so callers can audit last-session activity.
+	UpdateUserRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error
 	// Upsert anime_cache main row from AniList sync.  Bangumi columns
 	// (title_chinese, bgm_id, bangumi_score, bangumi_votes, bangumi_version)
 	// are intentionally NOT overwritten on conflict — the enrichment workers
