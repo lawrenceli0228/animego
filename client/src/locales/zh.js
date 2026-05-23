@@ -44,6 +44,13 @@ const zh = {
     'Subscription not found': '未找到订阅',
     'Deleted': '已删除',
     'Cannot follow yourself': '不能关注自己',
+    // Comments / danmaku (P2.5)
+    'Content is required': '评论内容不能为空',
+    'Content too long': '评论内容过长',
+    'Parent comment not found': '父评论不存在',
+    'Comment not found': '评论不存在',
+    'Not your comment': '不是你的评论',
+    'Invalid params': '参数无效',
   },
   // Navbar
   nav: {

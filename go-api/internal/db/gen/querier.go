@@ -45,6 +45,12 @@ type Querier interface {
 	// Total active watchers for /api/anime/:anilistId/watchers (the `total`
 	// meta field in the envelope).
 	CountWatchers(ctx context.Context, anilistID int32) (int64, error)
+	// POST /api/comments/:anilistId/:episode.  Caller has already
+	// validated content length + parent existence.  parent_id may be NULL
+	// (top-level comment) or a uuid pointer.  reply_to_username is a
+	// denormalised string used by the frontend to render "@username"
+	// prefix; nullable.
+	CreateComment(ctx context.Context, arg CreateCommentParams) (EpisodeComment, error)
 	// Queries against the users table.  Auth flow (register / login / refresh
 	// / logout / me) drives the read+write contract.  Password reset adds
 	// token-keyed reads + multi-column update.
@@ -84,6 +90,10 @@ type Querier interface {
 	DeleteAnimeRelations(ctx context.Context, animeID int32) error
 	DeleteAnimeStaff(ctx context.Context, animeID int32) error
 	DeleteAnimeStudios(ctx context.Context, animeID int32) error
+	// DELETE /api/comments/:id.  ON DELETE CASCADE handles any reply
+	// children — Express deleteOne() left them dangling, which is a bug
+	// the Postgres FK definition fixes for free.
+	DeleteComment(ctx context.Context, id uuid.UUID) error
 	// DELETE /api/users/:username/follow.  Returns affected row count;
 	// the handler always returns 200 { following: false } regardless of
 	// whether a row was deleted (matches Express's findOneAndDelete which
@@ -157,6 +167,15 @@ type Querier interface {
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
 	GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error)
 	GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error)
+	// DELETE pre-check: read the row so we can confirm ownership before
+	// deleting.  Returns the user_id the comment was authored by; handler
+	// compares against claims.UserID.
+	GetCommentByID(ctx context.Context, id uuid.UUID) (GetCommentByIDRow, error)
+	// Pre-INSERT check: confirms the supplied parent_id exists AND points
+	// at the same (anilist_id, episode) — defense against cross-thread
+	// reply abuse (someone passing a random comment id from a different
+	// episode).  ErrNoRows → handler 400 "Parent comment not found".
+	GetCommentParentForValidation(ctx context.Context, iD uuid.UUID, anilistID int32, episode int32) (uuid.UUID, error)
 	// Queries against anime_cache and its child tables.
 	//
 	// Each :one / :many / :exec annotation tells sqlc which result shape to
@@ -174,6 +193,9 @@ type Querier interface {
 	// min 19, max 91, avg 64.25).  The Express threshold of 75 corresponds
 	// to "highly rated by AniList community" and is preserved verbatim.
 	GetCompletedGems(ctx context.Context, limit int32) ([]GetCompletedGemsRow, error)
+	// Returns the liveEndsAt timestamp for this episode if a live window
+	// exists, else pgx.ErrNoRows (handler maps → null in the envelope).
+	GetEpisodeWindow(ctx context.Context, anilistID int32, episode int32) (EpisodeWindow, error)
 	// ==================== Public profile ====================
 	// Aggregate counts for the profile header.  Two correlated subqueries
 	// so it's one round-trip.  followers = "how many follow this user",
@@ -268,6 +290,23 @@ type Querier interface {
 	// In PG the column is `NOT NULL DEFAULT 0` (see 0001_init.up.sql:53) so
 	// "missing" is impossible — a single = 0 covers it.
 	ListAnimeForReEnrichByVersion(ctx context.Context, bangumiVersion int32) ([]ListAnimeForReEnrichByVersionRow, error)
+	// Queries against danmakus + episode_windows (P2.5).
+	//
+	// HTTP surface is read-only for danmaku — writes go through socket.io
+	// (P2.8).  One endpoint:
+	//
+	//   GET /api/danmaku/:anilistId/:episode → ListDanmakuRecent + GetEpisodeWindow
+	//
+	// The endpoint emits a special envelope:  `{ data: [...], liveEndsAt }`
+	// (liveEndsAt is a SIBLING of data, not nested inside it).  Express's
+	// controller marshalled the two via res.json({data, liveEndsAt}) — we
+	// mirror byte-for-byte via a custom envelope helper at the handler layer.
+	// 500-row cap matches Express ($limit 500 + reverse to chronological).
+	// We return DESC then handler reverses in memory — keeps the LIMIT cap
+	// selecting the *latest* 500 instead of the oldest.  Chronological
+	// order is what the player expects so the bullet-screen overlay can
+	// replay danmakus in send order.
+	ListDanmakuRecent(ctx context.Context, anilistID int32, episode int32) ([]ListDanmakuRecentRow, error)
 	// For re-enrich v=2:  rows that have a bgm_id can be V3-healed.
 	// Returns the queue-payload fields directly.
 	ListEnrichedV2WithBgm(ctx context.Context) ([]ListEnrichedV2WithBgmRow, error)
@@ -276,6 +315,26 @@ type Querier interface {
 	// updateMany.  This query is the SELECT half; PromoteAnimeToV3 is the
 	// UPDATE half.
 	ListEnrichedV2WithoutBgm(ctx context.Context) ([]int32, error)
+	// Queries against episode_comments (P2.5).
+	//
+	// Express's controller returns a flat list sorted by created_at ASC
+	// and lets the client render the tree (parent_id adjacency).  We do
+	// the same — no recursive CTE needed.  Three endpoints:
+	//
+	//   GET    /api/comments/:anilistId/:episode  → ListEpisodeComments
+	//   POST   /api/comments/:anilistId/:episode  → CreateComment (auth)
+	//   DELETE /api/comments/:id                  → DeleteComment (auth + own-row check)
+	//
+	// Schema reminders:
+	//   * id uuid (gen_random_uuid)
+	//   * parent_id uuid nullable, REFERENCES episode_comments(id) ON DELETE CASCADE
+	//     → delete-parent automatically cascades children.
+	//   * content CHECK char_length <= 500 — validated in handler too so the
+	//     400 error message is friendly.
+	// /api/comments/:anilistId/:episode — flat tree, oldest first.  Hard
+	// LIMIT 500 caps abuse (Express has no limit; we add one because
+	// pulling 50k rows on a popular episode would blow the response).
+	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]EpisodeComment, error)
 	// Step 2 of /api/feed: most-recent watching activities of the supplied
 	// followee_ids.  Filters out rows where last_watched_at IS NULL
 	// (subscriptions that never had an episode marked).  JOINs users for

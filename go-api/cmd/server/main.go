@@ -27,7 +27,9 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
 	"github.com/lawrenceli0228/animego/go-api/internal/auth"
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
+	"github.com/lawrenceli0228/animego/go-api/internal/comments"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
+	"github.com/lawrenceli0228/animego/go-api/internal/danmaku"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
 	"github.com/lawrenceli0228/animego/go-api/internal/subscriptions"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
@@ -261,6 +263,13 @@ func main() {
 	subscriptionsHandlers := subscriptions.NewHandlers(pool, q, q, anilistClient, nil)
 	socialHandlers := social.NewHandlers(pool, q)
 
+	// P2.5 — comments + danmaku HTTP handlers.  Both are simple
+	// pool+queries handlers (no external service deps).  Comments POST
+	// is the only auth-gated write; danmaku writes go through socket.io
+	// (P2.8), so only the read endpoint lives here.
+	commentsHandlers := comments.NewHandlers(pool, q)
+	danmakuHandlers := danmaku.NewHandlers(pool, q)
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -324,6 +333,27 @@ func main() {
 	// P2.4 — activity feed of followed users.  Requires auth.
 	r.With(jwtx.RequireAuth(signer)).Get("/api/feed", socialHandlers.GetFeed)
 
+	// P2.5 — episode comments (3 endpoints).  List is public; add +
+	// delete require auth.  delete has an own-row check inside the
+	// handler so RequireAuth alone is enough (no admin role needed).
+	//
+	// Routing note: GET/POST take a 2-segment path
+	// `/{anilistId}/{episode}`, DELETE takes a 1-segment `/{id}`.  Chi's
+	// RadixTree treats these as distinct depths, but registering them
+	// in the SAME r.Route block sometimes makes chi pin the first
+	// param name (`anilistId`) into the radix node and then refuse the
+	// later `{id}` registration silently.  Mount DELETE at the parent
+	// scope so the two route shapes live in separate trees.
+	r.Route("/api/comments", func(r chi.Router) {
+		r.Get("/{anilistId}/{episode}", commentsHandlers.ListComments)
+		r.With(jwtx.RequireAuth(signer)).Post("/{anilistId}/{episode}", commentsHandlers.AddComment)
+	})
+	r.With(jwtx.RequireAuth(signer)).Delete("/api/comments/{id}", commentsHandlers.DeleteComment)
+
+	// P2.5 — historical danmaku list (1 endpoint).  Public read.
+	// Writes go through socket.io (P2.8, ws-server).
+	r.Get("/api/danmaku/{anilistId}/{episode}", danmakuHandlers.GetDanmaku)
+
 	// P2.3 admin: 14 endpoints behind RequireAuth + RequireAdmin chain.
 	// Express equivalent: server/routes/admin.routes.js with the same
 	// `router.use(authenticateToken, adminAuth)` gate.  Order of mounts
@@ -366,7 +396,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.4")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.5")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
