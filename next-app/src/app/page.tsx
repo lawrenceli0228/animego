@@ -1,4 +1,5 @@
 import "@/components/landing/shared/motion.css";
+import type { Metadata } from "next";
 import HeroSection from "@/components/landing/HeroSection";
 import StatsRow from "@/components/landing/StatsRow";
 import DataSourcesTribute from "@/components/landing/DataSourcesTribute";
@@ -9,7 +10,7 @@ import DanmakuInsert from "@/components/landing/DanmakuInsert";
 import FaqSection from "@/components/landing/FaqSection";
 import FinalCta from "@/components/landing/FinalCta";
 import { apiGet, ApiError } from "@/lib/api";
-import { getDict } from "@/lib/i18n";
+import { getDict, getLang } from "@/lib/i18n";
 import type { AnimeDetail, TrendingItem } from "@/lib/types";
 
 const FEATURE_POSTER_IDS = {
@@ -85,6 +86,71 @@ async function safeTrending(): Promise<TrendingItem[]> {
     console.warn("[LandingPage] trending fetch failed:", err);
     return [];
   }
+}
+
+// Resolve metadata on the server before render. Re-uses the same cached
+// fetches as LandingPage() (revalidate 60/3600), so this does not double
+// the API load -- Next memoizes fetch() within a request.
+//
+// OG image fallback chain (most-specific first):
+//   1. frierenDetail.bannerImageUrl  (16:9 banner, ideal for social cards)
+//   2. frierenDetail.coverImageUrl   (portrait poster)
+//   3. trending[0].coverImageUrl     (fallback if Frieren detail 404s)
+//   4. omit images                   (Next falls back to siteName card)
+export async function generateMetadata(): Promise<Metadata> {
+  const [dict, lang, frierenDetail, trending] = await Promise.all([
+    getDict(),
+    getLang(),
+    safeDetail(FEATURE_POSTER_IDS.frieren),
+    safeTrending(),
+  ]);
+
+  const heroImage =
+    frierenDetail?.bannerImageUrl ||
+    frierenDetail?.coverImageUrl ||
+    trending[0]?.coverImageUrl ||
+    null;
+
+  const title = dict.landing.docTitle;
+  const description = dict.landing.hero.sub;
+  const locale = lang === "en" ? "en_US" : "zh_CN";
+
+  // Next 16 metadata merging is shallow across segments: setting `openGraph`
+  // or `alternates` here REPLACES the layout's version wholesale. So we
+  // re-emit the layout defaults (siteName, alternateLocale, hreflang
+  // alternates) here to keep them on the rendered <head>.
+  const openGraph: Metadata["openGraph"] = {
+    title,
+    description,
+    siteName: "AnimeGo",
+    locale,
+    alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
+    type: "website",
+    url: "/",
+  };
+  const twitter: Metadata["twitter"] = {
+    card: "summary_large_image",
+    title,
+    description,
+  };
+  if (heroImage) {
+    openGraph.images = [heroImage];
+    twitter.images = [heroImage];
+  }
+
+  return {
+    title: { absolute: title },
+    description,
+    openGraph,
+    twitter,
+    alternates: {
+      canonical: "/",
+      languages: {
+        "zh-CN": "/",
+        "en-US": "/?lang=en",
+      },
+    },
+  };
 }
 
 export default async function LandingPage() {
