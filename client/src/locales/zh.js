@@ -51,6 +51,9 @@ const zh = {
     'Comment not found': '评论不存在',
     'Not your comment': '不是你的评论',
     'Invalid params': '参数无效',
+    // Dandanplay (P2.6)
+    'Invalid episodeId': '无效的 episodeId',
+    'Anime not found on dandanplay': '弹弹Play 中找不到该番剧',
   },
   // Navbar
   nav: {

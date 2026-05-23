@@ -29,6 +29,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/comments"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
+	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
 	"github.com/lawrenceli0228/animego/go-api/internal/danmaku"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
 	"github.com/lawrenceli0228/animego/go-api/internal/subscriptions"
@@ -270,6 +271,22 @@ func main() {
 	commentsHandlers := comments.NewHandlers(pool, q)
 	danmakuHandlers := danmaku.NewHandlers(pool, q)
 
+	// P2.6 — dandanplay 3-phase match.  Independent rate limiter
+	// (800ms, separate from Bangumi's 800ms) so admin enrichment
+	// queues don't starve user-triggered /match calls.  X-AppId /
+	// X-AppSecret read from env; absent values mean public-tier
+	// requests (stricter dandanplay limits, but the API still
+	// responds).
+	dandanClient, err := dandanplay.NewClient(
+		dandanplay.WithCredentials(os.Getenv("DANDANPLAY_APP_ID"), os.Getenv("DANDANPLAY_APP_SECRET")),
+	)
+	if err != nil {
+		slog.Error("dandanplay client init failed", "err", err)
+		os.Exit(1)
+	}
+	defer dandanClient.Close()
+	dandanplayHandlers := dandanplay.NewHandlers(q, dandanClient, bangumiClient)
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -354,6 +371,15 @@ func main() {
 	// Writes go through socket.io (P2.8, ws-server).
 	r.Get("/api/danmaku/{anilistId}/{episode}", danmakuHandlers.GetDanmaku)
 
+	// P2.6 — dandanplay 4 endpoints.  All public (no user-scoped
+	// state); IP-level rate limiting protects against abuse.
+	r.Route("/api/dandanplay", func(r chi.Router) {
+		r.Post("/match", dandanplayHandlers.Match)
+		r.Get("/search", dandanplayHandlers.Search)
+		r.Get("/comments/{episodeId}", dandanplayHandlers.GetComments)
+		r.Get("/episodes/{animeId}", dandanplayHandlers.GetEpisodes)
+	})
+
 	// P2.3 admin: 14 endpoints behind RequireAuth + RequireAdmin chain.
 	// Express equivalent: server/routes/admin.routes.js with the same
 	// `router.use(authenticateToken, adminAuth)` gate.  Order of mounts
@@ -396,7 +422,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("go-api starting", "addr", addr, "stage", "P2.5")
+		slog.Info("go-api starting", "addr", addr, "stage", "P2.6")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)

@@ -142,6 +142,14 @@ type Querier interface {
 	// /completed-gems / /yearly-top so handlers can reuse the response
 	// struct treatment.
 	GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetAnimeByAnilistIDsRow, error)
+	// findSiteAnime last-resort lookup:  Bangumi search yields a bgmId, this
+	// query resolves it to a local anime_cache row so the /match handler
+	// can return a populated siteAnime envelope.  Same projection as
+	// SearchAnimeCacheForDandanplay for consistent downstream mapping.
+	//
+	// Returns pgx.ErrNoRows when no row matches — handler treats that as a
+	// null siteAnime (Express returned `null` in the same branch).
+	GetAnimeByBgmID(ctx context.Context, bgmID *int32) (GetAnimeByBgmIDRow, error)
 	// Read the row Reset will mutate.  Returns the projection columns the
 	// handler needs to re-enqueue: anilist_id, title_native, title_romaji.
 	// Errors out cleanly with pgx.ErrNoRows when the anime doesn't exist
@@ -416,6 +424,24 @@ type Querier interface {
 	// columns, AND nulls refresh_token (invalidates all existing sessions).
 	// Matches Express's multi-field $set in resetPassword.
 	ResetUserPassword(ctx context.Context, iD uuid.UUID, password string) error
+	// Queries used by /api/dandanplay/* orchestration (P2.6).
+	//
+	// One query — SearchAnimeCacheForDandanplay — replaces Express's
+	// buildKeywordRegex + AnimeCache.find($or 4 titles).  We use ILIKE
+	// with tokenised pattern building (handler tokenises the keyword,
+	// joins with '%' wildcards, passes the single pattern via $1).  The
+	// existing trgm GIN indexes on title_chinese / title_native /
+	// title_romaji / title_english make this cheap.
+	//
+	// The handler is responsible for keyword token extraction (same regex
+	// as Express's `[\p{L}\p{N}]+` group) and pattern composition.  This
+	// keeps the SQL stable across keyword shapes and avoids generating
+	// dynamic SQL per request.
+	// Returns up to 10 anime_cache rows whose title columns ILIKE the
+	// caller-built keyword pattern.  Field selection mirrors the projection
+	// Express exposed via .lean() — every column the 3-phase /match path
+	// + /search route needs.
+	SearchAnimeCacheForDandanplay(ctx context.Context, titleChinese *string) ([]SearchAnimeCacheForDandanplayRow, error)
 	// forgot-password sets the token + 1h expiry.  Caller generates the
 	// token via crypto/rand (32 random bytes hex-encoded — matches
 	// Express's crypto.randomBytes(32).toString('hex')).

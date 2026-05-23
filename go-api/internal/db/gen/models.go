@@ -9,6 +9,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type EpisodeComment struct {
+	ID              uuid.UUID          `json:"id"`
+	AnilistID       int32              `json:"anilistId"`
+	Episode         int32              `json:"episode"`
+	UserID          uuid.UUID          `json:"userId"`
+	Username        string             `json:"username"`
+	Content         string             `json:"content"`
+	ParentID        *uuid.UUID         `json:"parentId"`
+	ReplyToUsername *string            `json:"replyToUsername"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type EpisodeWindow struct {
+	AnilistID  int32              `json:"anilistId"`
+	Episode    int32              `json:"episode"`
+	LiveEndsAt pgtype.Timestamptz `json:"liveEndsAt"`
+}
+
 type Subscription struct {
 	UserID         uuid.UUID          `json:"userId"`
 	AnilistID      int32              `json:"anilistId"`
