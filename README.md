@@ -152,6 +152,26 @@ bash scripts/dev.sh
 
 Open `http://localhost:3000`.
 
+### Local prod stack (`docker compose` HTTPS via nginx)
+
+To exercise the production layout (nginx routing next-app + legacy Express,
+self-signed SSL, full docker stack) before deploying to the VPS:
+
+```bash
+# 1. Generate the local self-signed cert (one-time per machine).
+bash scripts/gen-local-cert.sh
+
+# 2. Copy and fill the prod env template (or copy .env, then edit values for docker DNS).
+cp .env.production.example .env.production
+# ⚠️  Required: ALLOWED_HOSTS=animegoclub.com,localhost,app
+# ⚠️  Required: MONGODB_URI=mongodb://mongodb:27017/animego  (Docker service name, not localhost)
+
+# 3. Build + bring up the full stack (next-app, Express, Mongo, ws-server, nginx).
+docker compose up -d --build
+
+# 4. Open https://localhost (accept the self-signed cert warning).
+```
+
 ### Dev Ports
 
 | Port | Service | Notes |
