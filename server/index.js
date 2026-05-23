@@ -38,15 +38,24 @@ app.use(cookieParser());
 
 // Block requests from unauthorized host domains (anti-mirror/scraping)
 const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || 'animegoclub.com,localhost').split(',');
-// Defense-in-depth canonical host (nginx already redirects www → apex).
+// Defense-in-depth canonical host. nginx already 301s www -> apex at the
+// edge (see nginx/default.conf), so we only fire this redirect for the
+// www alias as a backup. Internal Docker service names (e.g. `app` when
+// next-app's RSC fetches via Docker DNS) MUST NOT be redirected — the
+// old logic redirected every non-canonical host, which sent docker-
+// internal requests through Cloudflare back to public nginx, creating
+// a cross-network round-trip on every RSC fetch (and breaking
+// notFound() status codes because the page never actually rendered
+// against local data).
 const CANONICAL_HOST = process.env.CANONICAL_HOST || 'animegoclub.com';
 app.use((req, res, next) => {
   const host = (req.get('host') || '').replace(/:\d+$/, '');
   if (!ALLOWED_HOSTS.some(h => host === h || host.endsWith('.' + h))) {
     return res.status(403).send('Forbidden');
   }
-  // Redirect www and any non-canonical alias to apex so external links consolidate link equity.
-  if (host !== CANONICAL_HOST && host !== 'localhost' && !host.startsWith('localhost')) {
+  // Only redirect the www alias to apex. All other allowlisted hosts
+  // (localhost, app, etc.) are served directly without redirect.
+  if (host === 'www.' + CANONICAL_HOST) {
     return res.redirect(301, `https://${CANONICAL_HOST}${req.originalUrl}`);
   }
   next();

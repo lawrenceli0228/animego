@@ -41,7 +41,15 @@ async function queryAniList(query, variables, _retries = 0) {
   }
 
   if (!res.ok) {
-    throw Object.assign(new Error(`AniList API error: ${res.status}`), { status: 502 });
+    // AniList 404 (anime ID does not exist) needs to surface as 404 to
+    // callers so next-app's loadDetail can return null and the page can
+    // call notFound(). Mapping every AniList failure to 502 was
+    // collapsing real "not found" cases into "server error" and
+    // breaking the next-app HTTP 404 status path (page rendered the
+    // not-found body but the response status stayed 200 because the
+    // upstream throw never made it through generateMetadata + page).
+    const status = res.status === 404 ? 404 : 502;
+    throw Object.assign(new Error(`AniList API error: ${res.status}`), { status });
   }
 
   const { data, errors } = await res.json();
