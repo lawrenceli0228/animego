@@ -67,3 +67,7 @@ docs/**/*-DESIGN.md
 docs/**/*-DESIGN.html
 docs/migration/P*-PROGRESS.md
 docs/migration/P*-PROGRESS.html
+
+# BASELINE raw data dumps (lighthouse JSON, nginx logs, etc.) — local-only
+# for reproducibility; the distilled numbers live in BASELINE.md itself.
+docs/migration/data/

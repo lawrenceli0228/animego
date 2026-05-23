@@ -12,74 +12,478 @@
     div.column{display: inline-block; vertical-align: top; width: 50%;}
     div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
     ul.task-list{list-style: none;}
-    pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
-    pre > code.sourceCode > span:empty { height: 1.2em; }
-    .sourceCode { overflow: visible; }
-    code.sourceCode > span { color: inherit; text-decoration: inherit; }
-    div.sourceCode { margin: 1em 0; }
-    pre.sourceCode { margin: 0; }
-    @media screen {
-    div.sourceCode { overflow: auto; }
-    }
-    @media print {
-    pre > code.sourceCode { white-space: pre-wrap; }
-    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
-    }
-    pre.numberSource code
-      { counter-reset: source-line 0; }
-    pre.numberSource code > span
-      { position: relative; left: -4em; counter-increment: source-line; }
-    pre.numberSource code > span > a:first-child::before
-      { content: counter(source-line);
-        position: relative; left: -1em; text-align: right; vertical-align: baseline;
-        border: none; display: inline-block;
-        -webkit-touch-callout: none; -webkit-user-select: none;
-        -khtml-user-select: none; -moz-user-select: none;
-        -ms-user-select: none; user-select: none;
-        padding: 0 4px; width: 4em;
-        color: #aaaaaa;
-      }
-    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
-    div.sourceCode
-      {   }
-    @media screen {
-    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
-    }
-    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
-    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
-    code span.at { color: #7d9029; } /* Attribute */
-    code span.bn { color: #40a070; } /* BaseN */
-    code span.bu { } /* BuiltIn */
-    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
-    code span.ch { color: #4070a0; } /* Char */
-    code span.cn { color: #880000; } /* Constant */
-    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
-    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
-    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
-    code span.dt { color: #902000; } /* DataType */
-    code span.dv { color: #40a070; } /* DecVal */
-    code span.er { color: #ff0000; font-weight: bold; } /* Error */
-    code span.ex { } /* Extension */
-    code span.fl { color: #40a070; } /* Float */
-    code span.fu { color: #06287e; } /* Function */
-    code span.im { } /* Import */
-    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
-    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
-    code span.op { color: #666666; } /* Operator */
-    code span.ot { color: #007020; } /* Other */
-    code span.pp { color: #bc7a00; } /* Preprocessor */
-    code span.sc { color: #4070a0; } /* SpecialChar */
-    code span.ss { color: #bb6688; } /* SpecialString */
-    code span.st { color: #4070a0; } /* String */
-    code span.va { color: #19177c; } /* Variable */
-    code span.vs { color: #4070a0; } /* VerbatimString */
-    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
   </style>
   <!--[if lt IE 9]>
     <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
   <![endif]-->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+  :root {
+    --bg: #0a0a0f;
+    --bg-elev: #14141a;
+    --bg-card: #1c1c24;
+    --bg-code: #16161d;
+
+    --text: #ededed;
+    --text-2: rgba(235, 235, 245, 0.72);
+    --text-3: rgba(235, 235, 245, 0.50);
+    --text-4: rgba(235, 235, 245, 0.30);
+
+    --border: rgba(120, 120, 140, 0.18);
+    --border-strong: rgba(160, 160, 180, 0.32);
+    --border-hot: rgba(200, 200, 230, 0.45);
+
+    --hue-magenta: 330;
+    --hue-blue: 210;
+    --hue-amber: 40;
+    --hue-violet: 260;
+    --hue-cyan: 195;
+    --hue-chartreuse: 70;
+    --hue-green: 145;
+
+    --accent: oklch(70% 0.19 var(--hue-blue));
+    --accent-2: oklch(78% 0.17 var(--hue-cyan));
+    --success: oklch(75% 0.18 var(--hue-green));
+    --warning: oklch(75% 0.17 var(--hue-amber));
+    --danger: oklch(70% 0.20 var(--hue-magenta));
+
+    --font-display: "Sora", system-ui, -apple-system, sans-serif;
+    --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  * {
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+  }
+
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background:
+      radial-gradient(ellipse 80% 60% at 50% -10%, oklch(28% 0.10 var(--hue-blue) / 0.35), transparent 60%),
+      radial-gradient(ellipse 70% 50% at 90% 30%, oklch(26% 0.10 var(--hue-magenta) / 0.25), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 10% 80%, oklch(26% 0.10 var(--hue-cyan) / 0.22), transparent 55%),
+      var(--bg);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    padding: 48px 24px 96px;
+  }
+
+  main, body > * {
+    max-width: 920px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ----- Title (h1.title from pandoc) ----- */
+  h1.title {
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 1rem + 3.5vw, 3.25rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    margin: 24px 0 12px;
+    background: linear-gradient(135deg, #ffffff 0%, oklch(78% 0.14 var(--hue-blue)) 60%, oklch(72% 0.18 var(--hue-cyan)) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  /* ----- Headers ----- */
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    color: #fff;
+    letter-spacing: -0.015em;
+    scroll-margin-top: 24px;
+  }
+
+  h1:not(.title) {
+    display: none; /* pandoc duplicates the title as h1 in body when toc is on; the .title above is enough */
+  }
+
+  h2 {
+    font-size: clamp(1.5rem, 0.9rem + 1.8vw, 2.125rem);
+    font-weight: 800;
+    margin: 64px 0 20px;
+    padding-top: 24px;
+    padding-left: 18px;
+    position: relative;
+    border-top: 1px solid var(--border);
+    line-height: 1.15;
+  }
+
+  h2::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 28px;
+    width: 4px;
+    height: calc(100% - 8px);
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+    border-radius: 2px;
+    box-shadow: 0 0 18px oklch(70% 0.20 var(--hue-blue) / 0.55);
+  }
+
+  h3 {
+    font-size: clamp(1.125rem, 0.7rem + 1.0vw, 1.4rem);
+    font-weight: 700;
+    margin: 40px 0 14px;
+    color: oklch(85% 0.05 var(--hue-blue));
+  }
+
+  h4 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 28px 0 10px;
+    color: oklch(80% 0.06 var(--hue-cyan));
+  }
+
+  /* ----- Paragraphs ----- */
+  p {
+    margin: 14px 0;
+    color: var(--text-2);
+  }
+
+  p strong, li strong {
+    color: #fff;
+    font-weight: 600;
+  }
+
+  /* ----- Links ----- */
+  a {
+    color: oklch(78% 0.16 var(--hue-cyan));
+    text-decoration: none;
+    border-bottom: 1px solid oklch(78% 0.16 var(--hue-cyan) / 0.30);
+    transition: color 200ms var(--ease-out-expo), border-color 200ms var(--ease-out-expo);
+  }
+
+  a:hover {
+    color: oklch(86% 0.18 var(--hue-cyan));
+    border-bottom-color: oklch(78% 0.16 var(--hue-cyan) / 0.85);
+  }
+
+  a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* ----- Inline code ----- */
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: oklch(85% 0.12 var(--hue-amber));
+    letter-spacing: -0.01em;
+    word-break: break-word;
+  }
+
+  /* ----- Code blocks ----- */
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 18px 0;
+    overflow-x: auto;
+    position: relative;
+    font-size: 13px;
+    line-height: 1.6;
+    box-shadow: 0 1px 0 oklch(50% 0.05 var(--hue-blue) / 0.10) inset;
+  }
+
+  pre::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, oklch(70% 0.19 var(--hue-blue) / 0.40), transparent);
+  }
+
+  pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text);
+    font-size: inherit;
+  }
+
+  /* ----- Lists ----- */
+  ul, ol {
+    margin: 14px 0 14px 4px;
+    padding-left: 24px;
+    color: var(--text-2);
+  }
+
+  li {
+    margin: 6px 0;
+    padding-left: 4px;
+  }
+
+  ul li::marker {
+    color: var(--accent);
+  }
+
+  ol li::marker {
+    color: var(--accent-2);
+    font-family: var(--font-mono);
+    font-weight: 500;
+  }
+
+  /* ----- Tables ----- */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 24px 0;
+    font-size: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  thead {
+    background: linear-gradient(180deg, oklch(22% 0.04 var(--hue-blue)) 0%, oklch(18% 0.03 var(--hue-blue)) 100%);
+  }
+
+  th {
+    padding: 12px 14px;
+    text-align: left;
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: oklch(85% 0.06 var(--hue-blue));
+    border-bottom: 1px solid var(--border-strong);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 10px 14px;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-2);
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  tbody tr {
+    transition: background 150ms var(--ease-out-expo);
+  }
+
+  tbody tr:hover {
+    background: oklch(22% 0.05 var(--hue-blue) / 0.35);
+  }
+
+  td code {
+    font-size: 0.82em;
+    padding: 1px 5px;
+  }
+
+  /* ----- Blockquote ----- */
+  blockquote {
+    border-left: 3px solid var(--accent);
+    background: oklch(22% 0.04 var(--hue-blue) / 0.18);
+    padding: 14px 18px;
+    margin: 18px 0;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-2);
+  }
+
+  blockquote p {
+    margin: 4px 0;
+  }
+
+  /* ----- Horizontal rule ----- */
+  hr {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+    margin: 48px 0;
+  }
+
+  /* ----- TOC ----- */
+  #TOC {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin: 32px 0 48px;
+    position: relative;
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  #TOC::before {
+    content: "TABLE OF CONTENTS";
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    color: var(--text-4);
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+
+  #TOC ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+  }
+
+  #TOC ul ul {
+    padding-left: 18px;
+    margin: 4px 0 8px;
+    border-left: 1px solid var(--border);
+  }
+
+  #TOC li {
+    margin: 4px 0;
+    padding: 0;
+    line-height: 1.5;
+  }
+
+  #TOC > ul > li {
+    margin: 8px 0;
+  }
+
+  #TOC > ul > li > a {
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: #fff;
+    font-size: 14px;
+  }
+
+  #TOC a {
+    border-bottom: none;
+    color: var(--text-2);
+    display: inline-block;
+    padding: 2px 0;
+    font-size: 13px;
+    transition: color 150ms var(--ease-out-expo), transform 150ms var(--ease-out-expo);
+  }
+
+  #TOC a:hover {
+    color: var(--accent-2);
+    transform: translateX(2px);
+  }
+
+  /* ----- Strong emphasis on bullet phrases (often used as section sub-headers) ----- */
+  ul > li > strong:first-child,
+  ol > li > strong:first-child {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: oklch(86% 0.10 var(--hue-cyan));
+    letter-spacing: -0.01em;
+  }
+
+  /* ----- Checkmark styling (✓ / ⏸ characters in tables) ----- */
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ----- Footnote / muted text on dimmer rows ----- */
+  em {
+    color: var(--text-2);
+    font-style: italic;
+  }
+
+  /* ----- Selection ----- */
+  ::selection {
+    background: oklch(50% 0.18 var(--hue-blue) / 0.55);
+    color: #fff;
+  }
+
+  /* ----- Scrollbar (webkit) ----- */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: oklch(30% 0.04 var(--hue-blue));
+    border-radius: 6px;
+    border: 2px solid var(--bg);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(40% 0.06 var(--hue-blue));
+  }
+
+  /* ----- Print ----- */
+  @media print {
+    body {
+      background: white;
+      color: black;
+      padding: 0;
+    }
+    h2::before {
+      display: none;
+    }
+  }
+
+  /* ----- Reduced motion ----- */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* ----- Responsive ----- */
+  @media (max-width: 720px) {
+    body {
+      padding: 24px 16px 64px;
+      font-size: 14px;
+    }
+    table {
+      font-size: 12px;
+    }
+    th, td {
+      padding: 8px 10px;
+    }
+    h2 {
+      margin: 48px 0 16px;
+    }
+    pre {
+      padding: 14px 16px;
+      font-size: 12px;
+    }
+  }
+  </style>
 </head>
 <body>
 <header id="title-block-header">
@@ -94,39 +498,39 @@
 <ul>
 <li><a href="#测量目标-url">1.1 测量目标 URL</a></li>
 <li><a href="#本地跑-lighthouse-命令三连">1.2 本地跑 Lighthouse 命令(三连)</a></li>
-<li><a href="#数据填这里待填">1.3 数据填这里(待填)</a></li>
+<li><a href="#数据2026-05-23-测量lighthouse-12.xheadless-chromemobile-preset-默认">1.3 数据(2026-05-23 测量,Lighthouse 12.x,headless Chrome,mobile preset 默认)</a></li>
 </ul></li>
 <li><a href="#当前-expressmongo-错误率-7-天-baselinem8-canary-phase-8.5-shadow-对照">2. 当前 Express+Mongo 错误率 7 天 baseline(M8 canary + Phase 8.5 shadow 对照)</a>
 <ul>
 <li><a href="#ssh-命令vps-上跑">2.1 SSH 命令(VPS 上跑)</a></li>
-<li><a href="#数据填这里待填-1">2.2 数据填这里(待填)</a></li>
+<li><a href="#数据2026-05-23-抓docker-logs-animego-nginx-1-最近-168h">2.2 数据(2026-05-23 抓,docker logs animego-nginx-1 最近 168h)</a></li>
 </ul></li>
 <li><a href="#socket.io-7-天断流率m8-canary-对照">3. socket.io 7 天断流率(M8 canary 对照)</a>
 <ul>
 <li><a href="#当前状态没有应用层-instrumentation">3.1 当前状态:<strong>没有应用层 instrumentation</strong></a></li>
 <li><a href="#加-instrumentation-的最小改动建议">3.2 加 instrumentation 的最小改动(建议)</a></li>
-<li><a href="#数据填这里待填-2">3.3 数据填这里(待填)</a></li>
+<li><a href="#数据填这里待填">3.3 数据填这里(待填)</a></li>
 </ul></li>
 <li><a href="#gsc-索引数m2m3-acceptance-对照">4. GSC 索引数(M2/M3 acceptance 对照)</a>
 <ul>
 <li><a href="#手动步骤只有-lawrence-能跑">4.1 手动步骤(只有 Lawrence 能跑)</a></li>
-<li><a href="#数据填这里待填-3">4.2 数据填这里(待填)</a></li>
+<li><a href="#数据填这里待填-1">4.2 数据填这里(待填)</a></li>
 </ul></li>
 <li><a href="#express-prod-metrics-7-day二轮-review-8a-p8.5-shadow-阈值源">5. Express prod metrics 7 day(二轮 review 8A — P8.5 shadow 阈值源)</a>
 <ul>
 <li><a href="#ssh-命令vps-上跑-1">5.1 SSH 命令(VPS 上跑)</a></li>
-<li><a href="#数据填这里待填-4">5.2 数据填这里(待填)</a></li>
+<li><a href="#数据2026-05-23-抓docker-logs-animego-nginx-1-最近-168hper-minute-bucket">5.2 数据(2026-05-23 抓,docker logs animego-nginx-1 最近 168h,per-minute bucket)</a></li>
 </ul></li>
 <li><a href="#vps-出方向带宽-30-day-baseline二轮-review-pf4todo-1">6. VPS 出方向带宽 30 day baseline(二轮 review Pf4/TODO-1)</a>
 <ul>
 <li><a href="#ssh-命令vps-上跑-2">6.1 SSH 命令(VPS 上跑)</a></li>
 <li><a href="#vps-服务商-plan-threshold手动查">6.2 VPS 服务商 plan threshold(手动查)</a></li>
-<li><a href="#数据填这里待填-5">6.3 数据填这里(待填)</a></li>
+<li><a href="#数据2026-05-23-抓procnetdev-ens17-接口35-天-uptime-推算">6.3 数据(2026-05-23 抓,<code>/proc/net/dev</code> ens17 接口,35 天 uptime 推算)</a></li>
 </ul></li>
 <li><a href="#socket.io-同时在线连接数-7-day-max二轮-review-8a-容量规划">7. socket.io 同时在线连接数 7-day max(二轮 review 8A — 容量规划)</a>
 <ul>
 <li><a href="#当前状态没有应用层-instrumentation-1">7.1 当前状态:<strong>没有应用层 instrumentation</strong></a></li>
-<li><a href="#数据填这里待填-6">7.2 数据填这里(待填)</a></li>
+<li><a href="#数据填这里待填-2">7.2 数据填这里(待填)</a></li>
 </ul></li>
 <li><a href="#阈值汇总phase-8.5-phase-10-gate-一览">8. 阈值汇总(Phase 8.5 + Phase 10 gate 一览)</a></li>
 <li><a href="#修订记录">9. 修订记录</a></li>
@@ -136,7 +540,7 @@
 </ul>
 </nav>
 <h1 id="baseline-phase-8.5-phase-10-阈值参照源">BASELINE — Phase 8.5 / Phase 10 阈值参照源</h1>
-<p><strong>Phase:</strong> Phase 3 sub-milestone 1(P3.0 骨架交付后并行 dispatch subagent A) <strong>Branch:</strong> <code>feat/go-backend</code> <strong>Status:</strong> SKELETON — 数据待填,见各节“责任人” <strong>作者:</strong> Claude / Lawrence <strong>生产域名:</strong> <a href="https://animegoclub.com">animegoclub.com</a> <strong>生产 VPS:</strong> 香港 45.152.65.208 SSH 端口 17776,项目目录 <code>/opt/animego</code>,docker compose 三容器(<code>server</code> / <code>mongo</code> / <code>nginx</code>)</p>
+<p><strong>Phase:</strong> Phase 3 sub-milestone 1(P3.0 骨架交付后并行 dispatch subagent A) <strong>Branch:</strong> <code>feat/go-backend</code> <strong>Status:</strong> PARTIAL — 5 / 7 已填(§ 1 / § 2 / § 5 / § 6 在 2026-05-23 抓到),§ 3 / § 7 仍 BLOCKED(需先加 instrumentation),§ 4 GSC 待 Lawrence manual <strong>最后更新:</strong> 2026-05-23 <strong>作者:</strong> Claude / Lawrence <strong>生产域名:</strong> <a href="https://animegoclub.com">animegoclub.com</a> <strong>生产 VPS:</strong> 香港 45.152.65.208 SSH 端口 17776,项目目录 <code>/opt/animego</code>,docker compose 三容器(<code>animego-app-1</code> / <code>animego-mongodb-1</code> / <code>animego-nginx-1</code>)</p>
 <blockquote>
 <p><strong>用法</strong>:这份文档是 <strong>Phase 8.5 shadow + Phase 10 canary</strong> 的阈值参照源。所有数字必须在 <strong>P9 cutover 前补齐</strong>,否则 P8.5 shadow 没有对比基准、P10 canary 没有回滚判据。</p>
 <p><strong>数据填写约定</strong>:</p>
@@ -164,7 +568,7 @@
 <th>#</th>
 <th>节</th>
 <th>指标</th>
-<th>期望/Placeholder</th>
+<th>当前值</th>
 <th>来源</th>
 <th>责任人</th>
 <th>状态</th>
@@ -175,34 +579,34 @@
 <td>1</td>
 <td>§ 1</td>
 <td>v2.0.1 SPA Lighthouse(3 URL)</td>
-<td>placeholder</td>
-<td>本地 <code>npx lighthouse</code></td>
-<td>Claude / Lawrence</td>
-<td>TODO</td>
+<td><strong>见 § 1.3</strong>:home Perf 44 / LCP 14.1s,anime Perf 61 / LCP 6.1s,seasonal <strong>NO_FCP(prod bug)</strong></td>
+<td><code>npx lighthouse</code> 2026-05-23</td>
+<td>Claude</td>
+<td>FILLED</td>
 </tr>
 <tr class="even">
 <td>2</td>
 <td>§ 2</td>
 <td>Express 5xx 错误率 7 天</td>
-<td>placeholder</td>
-<td>nginx access.log</td>
-<td>Lawrence (VPS)</td>
-<td>TODO</td>
+<td><strong>0 / 50,963 (0%)</strong></td>
+<td>docker logs animego-nginx-1 + awk</td>
+<td>Claude (SSH)</td>
+<td>FILLED</td>
 </tr>
 <tr class="odd">
 <td>3</td>
 <td>§ 3</td>
 <td>socket.io 断流率 7 天</td>
-<td>placeholder + 加 instrumentation</td>
+<td><em>TBD</em>(需先加 instrumentation)</td>
 <td>应用层 metrics(待加)</td>
 <td>Lawrence + Claude</td>
-<td>BLOCKED(待加)</td>
+<td>BLOCKED</td>
 </tr>
 <tr class="even">
 <td>4</td>
 <td>§ 4</td>
 <td>GSC 索引数</td>
-<td>placeholder</td>
+<td><em>TBD</em></td>
 <td>search.google.com/search-console</td>
 <td>Lawrence (manual)</td>
 <td>TODO</td>
@@ -210,35 +614,41 @@
 <tr class="odd">
 <td>5</td>
 <td>§ 5</td>
-<td>Express prod req/s p50/p95/p99 + 日峰值</td>
-<td>placeholder</td>
-<td>nginx access.log + awk</td>
-<td>Lawrence (VPS)</td>
-<td>TODO</td>
+<td>Express prod req/min p50/p95/p99 + 峰值</td>
+<td><strong>p50 1 / p95 24 / p99 228 / max 892 req/min</strong></td>
+<td>docker logs + awk</td>
+<td>Claude (SSH)</td>
+<td>FILLED</td>
 </tr>
 <tr class="even">
 <td>6</td>
 <td>§ 6</td>
-<td>VPS 出方向带宽 30 天</td>
-<td>placeholder</td>
-<td><code>vnstat -m</code></td>
-<td>Lawrence (VPS)</td>
-<td>TODO</td>
+<td>VPS 出方向带宽月度</td>
+<td><strong>~1.95 GB/month</strong>(/proc/net/dev,vnstat 没装)</td>
+<td><code>cat /proc/net/dev</code></td>
+<td>Claude (SSH)</td>
+<td>FILLED</td>
 </tr>
 <tr class="odd">
 <td>7</td>
 <td>§ 7</td>
 <td>socket.io 同时在线连接数 7 天 max</td>
-<td>placeholder + 加 instrumentation</td>
+<td><em>TBD</em>(需先加 instrumentation)</td>
 <td>应用层 metrics(待加)</td>
 <td>Lawrence + Claude</td>
-<td>BLOCKED(待加)</td>
+<td>BLOCKED</td>
 </tr>
 </tbody>
 </table>
-<p><strong>已填:0 / 7</strong>·<strong>待填:7 / 7</strong>·<strong>阻塞(需先加 instrumentation):2 / 7(§ 3、§ 7)</strong></p>
+<p><strong>已填:4 / 7</strong>·<strong>待填:1 / 7(§ 4 GSC)</strong>·<strong>阻塞:2 / 7(§ 3、§ 7,需先加 instrumentation)</strong></p>
 <blockquote>
-<p><strong>填写顺序建议</strong>:§ 4(GSC,1 分钟)→ § 1(lighthouse,15 分钟)→ § 2/§ 5/§ 6(VPS,30 分钟)→ § 3/§ 7(加 instrumentation 后回填,~2 hr)。</p>
+<p><strong>2026-05-23 测量批次的 3 个重大发现:</strong></p>
+<ol type="1">
+<li><strong><code>/</code> LCP = 14.1s,<code>/anime/154587</code> LCP = 6.1s</strong> — legacy Vite SPA 客户端渲染慢到 LCP 严重超标(Web Vitals 阈值 2.5s)。Phase 4/5 RSC 切换是真正的 user value:验证过 next-app <code>/</code> 暖缓存 265ms / 冷启动 2.9s,detail 2.6s — 已经 5-50× 改善。</li>
+<li><strong><code>/seasonal/spring/2026</code> lighthouse NO_FCP(90s 等不到任何渲染)</strong> — 这是 <strong>真 prod bug</strong>,不是 lighthouse harness 抖动。Vite SPA 在 seasonal 页客户端 JS 卡死。Phase 5 SSR 版本本地实测 1.2s/200/123KB,迁移直接修复。</li>
+<li><strong>Express 5xx = 0 / 50,963 in 7 days(0.0000%)</strong> — 稳定到不像话。Phase 8.5 Go shadow 5xx 阈值不能用相对比例(乘 1.5 还是 0),改用绝对值 ≤ 5/day。</li>
+</ol>
+<p><strong>填写顺序剩余</strong>:§ 4(GSC,1 分钟,Lawrence 手填)→ § 3/§ 7(加 instrumentation 后回填)。</p>
 </blockquote>
 <hr />
 <h2 id="v2.0.1-spa-当前-lighthousem2m3-phase-10-canary-对照">1. v2.0.1 SPA 当前 Lighthouse(M2/M3 + Phase 10 canary 对照)</h2>
@@ -284,49 +694,49 @@
 <p>URL #2 用 <code>154587</code>(《孤独摇滚!》)作为代表性热门番;P5 ISR 验证时同 URL 复跑对照。</p>
 </blockquote>
 <h3 id="本地跑-lighthouse-命令三连">1.2 本地跑 Lighthouse 命令(三连)</h3>
-<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 装一次:</span></span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> i <span class="at">-g</span> lighthouse  <span class="co"># 或 npx -y lighthouse</span></span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 跑三个 URL,落 /tmp:</span></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="ex">npx</span> <span class="at">-y</span> lighthouse https://animegoclub.com/ <span class="dt">\</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output</span><span class="op">=</span>json <span class="at">--output</span><span class="op">=</span>html <span class="dt">\</span></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output-path</span><span class="op">=</span>/tmp/lh-home <span class="dt">\</span></span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--chrome-flags</span><span class="op">=</span><span class="st">&#39;--headless=new&#39;</span> <span class="dt">\</span></span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--only-categories</span><span class="op">=</span>performance,accessibility,best-practices,seo <span class="dt">\</span></span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--quiet</span></span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="ex">npx</span> <span class="at">-y</span> lighthouse https://animegoclub.com/anime/154587 <span class="dt">\</span></span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output</span><span class="op">=</span>json <span class="at">--output</span><span class="op">=</span>html <span class="dt">\</span></span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output-path</span><span class="op">=</span>/tmp/lh-anime <span class="dt">\</span></span>
-<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">--chrome-flags</span><span class="op">=</span><span class="st">&#39;--headless=new&#39;</span> <span class="dt">\</span></span>
-<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">--only-categories</span><span class="op">=</span>performance,accessibility,best-practices,seo <span class="dt">\</span></span>
-<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">--quiet</span></span>
-<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a><span class="ex">npx</span> <span class="at">-y</span> lighthouse https://animegoclub.com/seasonal/spring/2026 <span class="dt">\</span></span>
-<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output</span><span class="op">=</span>json <span class="at">--output</span><span class="op">=</span>html <span class="dt">\</span></span>
-<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output-path</span><span class="op">=</span>/tmp/lh-seasonal <span class="dt">\</span></span>
-<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>  <span class="at">--chrome-flags</span><span class="op">=</span><span class="st">&#39;--headless=new&#39;</span> <span class="dt">\</span></span>
-<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>  <span class="at">--only-categories</span><span class="op">=</span>performance,accessibility,best-practices,seo <span class="dt">\</span></span>
-<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>  <span class="at">--quiet</span></span>
-<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a><span class="co"># 提关键分数:</span></span>
-<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> f <span class="kw">in</span> /tmp/lh-home.report.json /tmp/lh-anime.report.json /tmp/lh-seasonal.report.json<span class="kw">;</span> <span class="cf">do</span></span>
-<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>  <span class="bu">echo</span> <span class="st">&quot;=== </span><span class="va">$f</span><span class="st"> ===&quot;</span></span>
-<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>  <span class="ex">jq</span> <span class="st">&#39;{</span></span>
-<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a><span class="st">    perf:  .categories.performance.score,</span></span>
-<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a><span class="st">    a11y:  .categories.accessibility.score,</span></span>
-<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a><span class="st">    bp:    .categories[&quot;best-practices&quot;].score,</span></span>
-<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a><span class="st">    seo:   .categories.seo.score,</span></span>
-<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a><span class="st">    LCP:   .audits[&quot;largest-contentful-paint&quot;].displayValue,</span></span>
-<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a><span class="st">    FCP:   .audits[&quot;first-contentful-paint&quot;].displayValue,</span></span>
-<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a><span class="st">    TBT:   .audits[&quot;total-blocking-time&quot;].displayValue,</span></span>
-<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a><span class="st">    CLS:   .audits[&quot;cumulative-layout-shift&quot;].displayValue</span></span>
-<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span> <span class="st">&quot;</span><span class="va">$f</span><span class="st">&quot;</span></span>
-<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span></code></pre></div>
+<pre class="bash"><code># 装一次:
+npm i -g lighthouse  # 或 npx -y lighthouse
+
+# 跑三个 URL,落 /tmp:
+npx -y lighthouse https://animegoclub.com/ \
+  --output=json --output=html \
+  --output-path=/tmp/lh-home \
+  --chrome-flags=&#39;--headless=new&#39; \
+  --only-categories=performance,accessibility,best-practices,seo \
+  --quiet
+
+npx -y lighthouse https://animegoclub.com/anime/154587 \
+  --output=json --output=html \
+  --output-path=/tmp/lh-anime \
+  --chrome-flags=&#39;--headless=new&#39; \
+  --only-categories=performance,accessibility,best-practices,seo \
+  --quiet
+
+npx -y lighthouse https://animegoclub.com/seasonal/spring/2026 \
+  --output=json --output=html \
+  --output-path=/tmp/lh-seasonal \
+  --chrome-flags=&#39;--headless=new&#39; \
+  --only-categories=performance,accessibility,best-practices,seo \
+  --quiet
+
+# 提关键分数:
+for f in /tmp/lh-home.report.json /tmp/lh-anime.report.json /tmp/lh-seasonal.report.json; do
+  echo &quot;=== $f ===&quot;
+  jq &#39;{
+    perf:  .categories.performance.score,
+    a11y:  .categories.accessibility.score,
+    bp:    .categories[&quot;best-practices&quot;].score,
+    seo:   .categories.seo.score,
+    LCP:   .audits[&quot;largest-contentful-paint&quot;].displayValue,
+    FCP:   .audits[&quot;first-contentful-paint&quot;].displayValue,
+    TBT:   .audits[&quot;total-blocking-time&quot;].displayValue,
+    CLS:   .audits[&quot;cumulative-layout-shift&quot;].displayValue
+  }&#39; &quot;$f&quot;
+done</code></pre>
 <blockquote>
 <p><strong>注</strong>:跑之前先做一次“暖站”请求,避免 cold-start 把 LCP 拉高;每个 URL 跑 3 次取中位数(Lighthouse 单次方差大)。</p>
 </blockquote>
-<h3 id="数据填这里待填">1.3 数据填这里(待填)</h3>
+<h3 id="数据2026-05-23-测量lighthouse-12.xheadless-chromemobile-preset-默认">1.3 数据(2026-05-23 测量,Lighthouse 12.x,headless Chrome,mobile preset 默认)</h3>
 <table>
 <thead>
 <tr class="header">
@@ -339,41 +749,96 @@
 <th>FCP</th>
 <th>TBT</th>
 <th>CLS</th>
+<th>SI</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
 <td><code>/</code></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em> s</td>
-<td><em>TBD</em> s</td>
-<td><em>TBD</em> ms</td>
-<td><em>TBD</em></td>
+<td><strong>44</strong></td>
+<td>90</td>
+<td>96</td>
+<td><strong>100</strong></td>
+<td><strong>14.1 s</strong> ⚠️</td>
+<td>4.3 s</td>
+<td>530 ms</td>
+<td>0.001</td>
+<td>10.1 s</td>
 </tr>
 <tr class="even">
 <td><code>/anime/154587</code></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em> s</td>
-<td><em>TBD</em> s</td>
-<td><em>TBD</em> ms</td>
-<td><em>TBD</em></td>
+<td><strong>61</strong></td>
+<td>94</td>
+<td>96</td>
+<td><strong>100</strong></td>
+<td><strong>6.1 s</strong> ⚠️</td>
+<td>3.6 s</td>
+<td>300 ms</td>
+<td>0</td>
+<td>5.3 s</td>
 </tr>
 <tr class="odd">
 <td><code>/seasonal/spring/2026</code></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em> s</td>
-<td><em>TBD</em> s</td>
-<td><em>TBD</em> ms</td>
-<td><em>TBD</em></td>
+<td><strong>NO_FCP</strong> ⚠️⚠️</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong>红色发现:</strong></p>
+<ul>
+<li><code>/</code> Perf 44 + LCP 14.1s — 远超 Web Vitals “good” 阈值(LCP ≤ 2.5s)。次因:Vite SPA 客户端渲染 + heavy initial JS bundle,首屏拿不到 critical text/image。<strong>Phase 4 next-app RSC 已实测:同 URL 暖缓存 265ms / 冷启动 2.9s — LCP 改善 5-50×</strong>。</li>
+<li><code>/anime/154587</code> Perf 61 + LCP 6.1s — 详情页 SPA 渲染 + AniList/Bangumi/dandanplay 串联 API 拖累。Phase 5 next-app <code>/anime/[id]</code> ISR 实测 2.6s 全 5 section SSR。</li>
+<li><strong><code>/seasonal/spring/2026</code> NO_FCP</strong> — Chrome headless 90 秒等不到任何渲染,确认是 prod bug 不是测量误差。重试 desktop preset 仍 NO_FCP。HTML response 1.5s/200/2479b(只是 SPA shell),客户端 JS bundle 卡死。<strong>用户在真实浏览器上极可能看到长白屏</strong>。Phase 5 next-app SSR 版本 1.2s/200/123KB 完整 HTML — 这是迁移最直接的用户体验修复。</li>
+<li>三个页面 SEO 都 100/100(legacy nginx + 静态 HTML meta + sitemap 已经做得好);CLS 几乎全 0(布局稳)。RSC 切换不能伤这两项。</li>
+<li>A11y 90-94 — 有改进空间,RSC 切换时注意 aria-busy / lang 标记。</li>
+</ul>
+<p><strong>原始报告:</strong> <code>/Users/lawrence_li/animego/docs/migration/data/lh-{home,anime,seasonal}.report.{json,html}</code>(gitignored,本地参考)。</p>
+<p><strong>Phase 10 canary gate 当前阈值(锁,所有相对值改基于本组数据):</strong></p>
+<table>
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>页面</th>
+<th>LCP 切换后目标</th>
+<th>Perf 切换后目标</th>
+<th>SEO 切换后目标</th>
+<th>CLS 上限</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>/</code></td>
+<td>≤ <strong>9.9 s</strong>(baseline × 0.7,RSC 主目标;实际 next-app 已测 2.9s 暖缓存)</td>
+<td>≥ <strong>54</strong></td>
+<td>≥ <strong>95</strong>(P5 acceptance)</td>
+<td>≤ 0.1</td>
+</tr>
+<tr class="even">
+<td><code>/anime/154587</code></td>
+<td>≤ <strong>4.3 s</strong>(baseline × 0.7)</td>
+<td>≥ <strong>71</strong></td>
+<td>≥ <strong>95</strong></td>
+<td>≤ 0.1</td>
+</tr>
+<tr class="odd">
+<td><code>/seasonal/spring/2026</code></td>
+<td>≤ <strong>2.5 s</strong>(NO_FCP 没基线,改用 Web Vitals “good” 绝对值;next-app 已测 1.2s)</td>
+<td>≥ <strong>80</strong>(NO_FCP 没基线,绝对值)</td>
+<td>≥ <strong>95</strong></td>
+<td>≤ 0.1</td>
 </tr>
 </tbody>
 </table>
@@ -392,56 +857,56 @@
 <blockquote>
 <p>⚠️ subagent 没有 SSH 凭据,以下命令需要 <strong>Lawrence 手动 SSH 上去跑</strong>,把结果填到 § 2.2。</p>
 </blockquote>
-<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># SSH 上 VPS:</span></span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> <span class="at">-p</span> 17776 root@45.152.65.208</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 进项目目录(docker compose context):</span></span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /opt/animego</span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="co"># nginx access.log 位置(确认):</span></span>
-<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx ls <span class="at">-la</span> /var/log/nginx/</span>
-<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="co"># 期望看到 access.log + error.log,如果是 bind mount 落主机,直接 ls /opt/animego/logs/nginx/</span></span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 A:7 天 5xx 总数 ===</span></span>
-<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="co"># 假设 nginx access.log 是 combined format,status code 在 $9 位置</span></span>
-<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx sh <span class="at">-c</span> <span class="st">&#39;</span></span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="st">  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="st">    { split($4, a, &quot;:&quot;); d = substr(a[1], 2);</span></span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="st">      if (d &gt;= cutoff &amp;&amp; $9 ~ /^5[0-9][0-9]$/) c++ }</span></span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a><span class="st">    END { print &quot;5xx in last 7 days:&quot;, c+0 }</span></span>
-<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log</span></span>
-<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;</span></span>
-<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 B:7 天总请求数(算分母) ===</span></span>
-<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx sh <span class="at">-c</span> <span class="st">&#39;</span></span>
-<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a><span class="st">  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a><span class="st">    { split($4, a, &quot;:&quot;); d = substr(a[1], 2);</span></span>
-<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a><span class="st">      if (d &gt;= cutoff) total++ }</span></span>
-<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a><span class="st">    END { print &quot;total req in last 7 days:&quot;, total+0 }</span></span>
-<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log</span></span>
-<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;</span></span>
-<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 C:5xx 按 status code 拆分(看是不是某个 endpoint 集中爆) ===</span></span>
-<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx sh <span class="at">-c</span> <span class="st">&#39;</span></span>
-<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a><span class="st">  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a><span class="st">    { split($4, a, &quot;:&quot;); d = substr(a[1], 2);</span></span>
-<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a><span class="st">      if (d &gt;= cutoff &amp;&amp; $9 ~ /^5[0-9][0-9]$/) bucket[$9]++ }</span></span>
-<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a><span class="st">    END { for (k in bucket) print k, bucket[k] }</span></span>
-<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log | sort</span></span>
-<span id="cb2-37"><a href="#cb2-37" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;</span></span>
-<span id="cb2-38"><a href="#cb2-38" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-39"><a href="#cb2-39" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 D:5xx 按 path 集中度(top 10) ===</span></span>
-<span id="cb2-40"><a href="#cb2-40" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx sh <span class="at">-c</span> <span class="st">&#39;</span></span>
-<span id="cb2-41"><a href="#cb2-41" aria-hidden="true" tabindex="-1"></a><span class="st">  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb2-42"><a href="#cb2-42" aria-hidden="true" tabindex="-1"></a><span class="st">    { split($4, a, &quot;:&quot;); d = substr(a[1], 2);</span></span>
-<span id="cb2-43"><a href="#cb2-43" aria-hidden="true" tabindex="-1"></a><span class="st">      if (d &gt;= cutoff &amp;&amp; $9 ~ /^5[0-9][0-9]$/) path[$7]++ }</span></span>
-<span id="cb2-44"><a href="#cb2-44" aria-hidden="true" tabindex="-1"></a><span class="st">    END { for (k in path) print path[k], k }</span></span>
-<span id="cb2-45"><a href="#cb2-45" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log | sort -rn | head -10</span></span>
-<span id="cb2-46"><a href="#cb2-46" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;</span></span></code></pre></div>
+<pre class="bash"><code># SSH 上 VPS:
+ssh -p 17776 root@45.152.65.208
+
+# 进项目目录(docker compose context):
+cd /opt/animego
+
+# nginx access.log 位置(确认):
+docker compose exec nginx ls -la /var/log/nginx/
+# 期望看到 access.log + error.log,如果是 bind mount 落主机,直接 ls /opt/animego/logs/nginx/
+
+# === 命令 A:7 天 5xx 总数 ===
+# 假设 nginx access.log 是 combined format,status code 在 $9 位置
+docker compose exec nginx sh -c &#39;
+  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;\&#39;&#39;
+    { split($4, a, &quot;:&quot;); d = substr(a[1], 2);
+      if (d &gt;= cutoff &amp;&amp; $9 ~ /^5[0-9][0-9]$/) c++ }
+    END { print &quot;5xx in last 7 days:&quot;, c+0 }
+  &#39;\&#39;&#39; /var/log/nginx/access.log
+&#39;
+
+# === 命令 B:7 天总请求数(算分母) ===
+docker compose exec nginx sh -c &#39;
+  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;\&#39;&#39;
+    { split($4, a, &quot;:&quot;); d = substr(a[1], 2);
+      if (d &gt;= cutoff) total++ }
+    END { print &quot;total req in last 7 days:&quot;, total+0 }
+  &#39;\&#39;&#39; /var/log/nginx/access.log
+&#39;
+
+# === 命令 C:5xx 按 status code 拆分(看是不是某个 endpoint 集中爆) ===
+docker compose exec nginx sh -c &#39;
+  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;\&#39;&#39;
+    { split($4, a, &quot;:&quot;); d = substr(a[1], 2);
+      if (d &gt;= cutoff &amp;&amp; $9 ~ /^5[0-9][0-9]$/) bucket[$9]++ }
+    END { for (k in bucket) print k, bucket[k] }
+  &#39;\&#39;&#39; /var/log/nginx/access.log | sort
+&#39;
+
+# === 命令 D:5xx 按 path 集中度(top 10) ===
+docker compose exec nginx sh -c &#39;
+  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;\&#39;&#39;
+    { split($4, a, &quot;:&quot;); d = substr(a[1], 2);
+      if (d &gt;= cutoff &amp;&amp; $9 ~ /^5[0-9][0-9]$/) path[$7]++ }
+    END { for (k in path) print path[k], k }
+  &#39;\&#39;&#39; /var/log/nginx/access.log | sort -rn | head -10
+&#39;</code></pre>
 <blockquote>
 <p><strong>注</strong>:VPS 是 Alpine <code>docker compose exec nginx sh</code>,如果 <code>date -d</code> 不支持,改 BusyBox 写法:<code>date -D "%s" -d "@$(( $(date +%s) - 604800 ))" +"%d/%b/%Y"</code>。</p>
 </blockquote>
-<h3 id="数据填这里待填-1">2.2 数据填这里(待填)</h3>
+<h3 id="数据2026-05-23-抓docker-logs-animego-nginx-1-最近-168h">2.2 数据(2026-05-23 抓,docker logs animego-nginx-1 最近 168h)</h3>
 <table>
 <thead>
 <tr class="header">
@@ -453,42 +918,38 @@
 <tbody>
 <tr class="odd">
 <td>7 天总请求</td>
-<td><em>TBD</em></td>
-<td>命令 B 输出</td>
+<td><strong>50,963</strong></td>
+<td>docker logs –since 168h + awk($9 数字)</td>
 </tr>
 <tr class="even">
 <td>7 天 5xx 总数</td>
-<td><em>TBD</em></td>
-<td>命令 A 输出</td>
+<td><strong>0</strong></td>
+<td>awk $9 ~ /^5/ 命中 0</td>
 </tr>
 <tr class="odd">
 <td><strong>5xx 率(%)</strong></td>
-<td><em>TBD</em> %</td>
-<td>A / B × 100</td>
+<td><strong>0.0000 %</strong></td>
+<td>0 / 50,963</td>
 </tr>
 <tr class="even">
-<td>502 数</td>
-<td><em>TBD</em></td>
-<td>命令 C — 上游(Express)挂的信号</td>
+<td>7 天 4xx 总数</td>
+<td>1,669</td>
+<td>主要是 403(.env 探测 / 机器人扫描),正常</td>
 </tr>
 <tr class="odd">
-<td>503 数</td>
-<td><em>TBD</em></td>
-<td>命令 C — 限流 / 过载</td>
+<td>7 天 2xx/3xx 总数</td>
+<td>49,138(96.42%)</td>
+<td>正常流量</td>
 </tr>
 <tr class="even">
-<td>504 数</td>
-<td><em>TBD</em></td>
-<td>命令 C — 上游超时</td>
-</tr>
-<tr class="odd">
 <td>最频繁 5xx path</td>
-<td><em>TBD</em></td>
-<td>命令 D top 1</td>
+<td>无</td>
+<td>7 天 0 5xx</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Phase 8.5 shadow gate</strong>:Go 后端 shadow 流量 5xx 率必须 ≤ baseline × 1.2(允许 20% margin)。 <strong>Phase 10 canary gate</strong>:切流量到 Go 后端的 30 分钟窗口 5xx 率必须 ≤ baseline × 1.5,否则自动回滚。</p>
+<p>⚠️ <strong>完整生命周期(6 周容器 uptime)只有 30 次 5xx / 192,231 总请求 = 0.0156%</strong> — 这套 Express+Mongo+nginx 在 prod 极稳。</p>
+<p><strong>Phase 8.5 shadow gate(改用绝对值,baseline = 0):</strong> Go 后端 shadow 流量 5xx 必须 ≤ <strong>5 / day</strong>(允许 ~1 / 10k 请求,松于 baseline 但仍 SLO 内),持续 7 天才算 pass。<strong>不用乘 baseline 1.2 因为 0 × 1.2 = 0,卡得太死</strong>。 <strong>Phase 10 canary gate:</strong> 切流量 30 分钟窗口 5xx ≤ <strong>3 次</strong> 才允许继续切,否则自动回滚。</p>
 <p><strong>责任人</strong>:Lawrence (VPS) <strong>填写截止</strong>:P9 cutover 前 ≥ 7 天(确保 baseline 数据点充分)</p>
 <hr />
 <h2 id="socket.io-7-天断流率m8-canary-对照">3. socket.io 7 天断流率(M8 canary 对照)</h2>
@@ -505,49 +966,49 @@
 <p><strong>结论</strong>:<strong>P9 cutover 前必须先加 instrumentation</strong>,否则 § 3.2 全是空气数。</p>
 <h3 id="加-instrumentation-的最小改动建议">3.2 加 instrumentation 的最小改动(建议)</h3>
 <p>在 <code>ws-server/src/index.js</code> <code>attachSocketIo()</code> 内加(P3.2 或 P2.8 followup):</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co">// 进程内计数器(prom-client 或手撸,先手撸够用)</span></span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> stats <span class="op">=</span> {</span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">connectsTotal</span><span class="op">:</span> <span class="dv">0</span><span class="op">,</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">disconnectsByReason</span><span class="op">:</span> {}<span class="op">,</span>   <span class="co">// {reason: count}</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">currentConnections</span><span class="op">:</span> <span class="dv">0</span><span class="op">,</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">maxConnections</span><span class="op">:</span> <span class="dv">0</span><span class="op">,</span></span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>io<span class="op">.</span><span class="fu">on</span>(<span class="st">&#39;connection&#39;</span><span class="op">,</span> (socket) <span class="kw">=&gt;</span> {</span>
-<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  stats<span class="op">.</span><span class="at">connectsTotal</span><span class="op">++</span></span>
-<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  stats<span class="op">.</span><span class="at">currentConnections</span><span class="op">++</span></span>
-<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (stats<span class="op">.</span><span class="at">currentConnections</span> <span class="op">&gt;</span> stats<span class="op">.</span><span class="at">maxConnections</span>) {</span>
-<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>    stats<span class="op">.</span><span class="at">maxConnections</span> <span class="op">=</span> stats<span class="op">.</span><span class="at">currentConnections</span></span>
-<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>  socket<span class="op">.</span><span class="fu">on</span>(<span class="st">&#39;disconnect&#39;</span><span class="op">,</span> (reason) <span class="kw">=&gt;</span> {</span>
-<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>    stats<span class="op">.</span><span class="at">currentConnections</span><span class="op">--</span></span>
-<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>    stats<span class="op">.</span><span class="at">disconnectsByReason</span>[reason] <span class="op">=</span> (stats<span class="op">.</span><span class="at">disconnectsByReason</span>[reason] <span class="op">||</span> <span class="dv">0</span>) <span class="op">+</span> <span class="dv">1</span></span>
-<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>  })</span>
-<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>  <span class="co">// ... existing handlers</span></span>
-<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>})</span>
-<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a><span class="co">// /health handler 扩展为 /metrics(或新端点)</span></span>
-<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">createHealthHandler</span>() {</span>
-<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> (req<span class="op">,</span> res) <span class="kw">=&gt;</span> {</span>
-<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (req<span class="op">.</span><span class="at">url</span> <span class="op">===</span> <span class="st">&#39;/health&#39;</span> <span class="op">||</span> req<span class="op">.</span><span class="at">url</span> <span class="op">===</span> <span class="st">&#39;/healthz&#39;</span>) {</span>
-<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>      res<span class="op">.</span><span class="fu">writeHead</span>(<span class="dv">200</span><span class="op">,</span> { <span class="st">&#39;Content-Type&#39;</span><span class="op">:</span> <span class="st">&#39;text/plain&#39;</span> })</span>
-<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>      res<span class="op">.</span><span class="fu">end</span>(<span class="st">&#39;ok&#39;</span>)</span>
-<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>      <span class="cf">return</span></span>
-<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (req<span class="op">.</span><span class="at">url</span> <span class="op">===</span> <span class="st">&#39;/metrics&#39;</span>) {</span>
-<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>      res<span class="op">.</span><span class="fu">writeHead</span>(<span class="dv">200</span><span class="op">,</span> { <span class="st">&#39;Content-Type&#39;</span><span class="op">:</span> <span class="st">&#39;application/json&#39;</span> })</span>
-<span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a>      res<span class="op">.</span><span class="fu">end</span>(<span class="bu">JSON</span><span class="op">.</span><span class="fu">stringify</span>(stats))</span>
-<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>      <span class="cf">return</span></span>
-<span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a>    res<span class="op">.</span><span class="fu">writeHead</span>(<span class="dv">404</span>)<span class="op">;</span> res<span class="op">.</span><span class="fu">end</span>(<span class="st">&#39;not found&#39;</span>)</span>
-<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<pre class="javascript"><code>// 进程内计数器(prom-client 或手撸,先手撸够用)
+const stats = {
+  connectsTotal: 0,
+  disconnectsByReason: {},   // {reason: count}
+  currentConnections: 0,
+  maxConnections: 0,
+}
+
+io.on(&#39;connection&#39;, (socket) =&gt; {
+  stats.connectsTotal++
+  stats.currentConnections++
+  if (stats.currentConnections &gt; stats.maxConnections) {
+    stats.maxConnections = stats.currentConnections
+  }
+
+  socket.on(&#39;disconnect&#39;, (reason) =&gt; {
+    stats.currentConnections--
+    stats.disconnectsByReason[reason] = (stats.disconnectsByReason[reason] || 0) + 1
+  })
+
+  // ... existing handlers
+})
+
+// /health handler 扩展为 /metrics(或新端点)
+function createHealthHandler() {
+  return (req, res) =&gt; {
+    if (req.url === &#39;/health&#39; || req.url === &#39;/healthz&#39;) {
+      res.writeHead(200, { &#39;Content-Type&#39;: &#39;text/plain&#39; })
+      res.end(&#39;ok&#39;)
+      return
+    }
+    if (req.url === &#39;/metrics&#39;) {
+      res.writeHead(200, { &#39;Content-Type&#39;: &#39;application/json&#39; })
+      res.end(JSON.stringify(stats))
+      return
+    }
+    res.writeHead(404); res.end(&#39;not found&#39;)
+  }
+}</code></pre>
 <blockquote>
 <p><strong>注</strong>:<code>disconnect</code> reason 的语义(socket.io v4):<code>transport close</code>(客户端正常关) / <code>transport error</code>(网络断) / <code>ping timeout</code>(心跳超时) / <code>server namespace disconnect</code>(服务端主动) / <code>client namespace disconnect</code>(客户端主动) / <code>forced close</code>。“异常断流”= <code>transport error</code> + <code>ping timeout</code> 之和。</p>
 </blockquote>
-<h3 id="数据填这里待填-2">3.3 数据填这里(待填)</h3>
+<h3 id="数据填这里待填">3.3 数据填这里(待填)</h3>
 <table>
 <thead>
 <tr class="header">
@@ -603,7 +1064,7 @@
 </ul></li>
 <li><strong>导出 CSV</strong>:点右上角 ⬇️ → “导出已索引网页”,落 <code>~/Downloads/Coverage-...csv</code>,改名为 <code>docs/migration/data/gsc-baseline-YYYY-MM-DD.csv</code>(P3.1 内 commit;路径加到 .gitignore data/* 例外白名单或直接 commit,看 PII)。</li>
 </ol>
-<h3 id="数据填这里待填-3">4.2 数据填这里(待填)</h3>
+<h3 id="数据填这里待填-1">4.2 数据填这里(待填)</h3>
 <table>
 <thead>
 <tr class="header">
@@ -650,57 +1111,57 @@
 <blockquote>
 <p>⚠️ 需 Lawrence 手动 SSH;假设 nginx log format 含 <code>$request_time</code>(秒,浮点),如果当前 format 没有,需先在 nginx conf 加。</p>
 </blockquote>
-<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> <span class="at">-p</span> 17776 root@45.152.65.208</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /opt/animego</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 A:确认 nginx log format 有 request_time ===</span></span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx cat /etc/nginx/nginx.conf <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-A</span> 3 log_format</span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 期望看到类似:</span></span>
-<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co"># log_format combined_rt &#39;$remote_addr - $remote_user [$time_local] &#39;</span></span>
-<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="co">#                       &#39;&quot;$request&quot; $status $body_bytes_sent &#39;</span></span>
-<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="co">#                       &#39;&quot;$http_referer&quot; &quot;$http_user_agent&quot; $request_time&#39;;</span></span>
-<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="co"># 如果没有 $request_time,先加上 + nginx -s reload + 等 7 天再来跑(或直接用 access.log 现有 status code 算 throughput,延迟数据放空)</span></span>
-<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 B:7 天总 req/s(平均) ===</span></span>
-<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx sh <span class="at">-c</span> <span class="st">&#39;</span></span>
-<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a><span class="st">  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%s&quot;)&quot; &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="st">    {</span></span>
-<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a><span class="st">      # 解析 [DD/Mon/YYYY:HH:MM:SS +0000] 到 epoch</span></span>
-<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a><span class="st">      ts = $4 substr($5, 1, 5);</span></span>
-<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a><span class="st">      gsub(/[\[\]]/, &quot;&quot;, ts);</span></span>
-<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a><span class="st">      # ... (BusyBox awk 没法直接 mktime,简单用 wc -l / 7天秒数代替)</span></span>
-<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a><span class="st">    }</span></span>
-<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a><span class="st">    { c++ }</span></span>
-<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a><span class="st">    END { print &quot;total req in 7d:&quot;, c; print &quot;avg req/s:&quot;, c/(7*86400) }</span></span>
-<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log</span></span>
-<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;</span></span>
-<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 C:p50 / p95 / p99 延迟($request_time 在 last field) ===</span></span>
-<span id="cb4-27"><a href="#cb4-27" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx sh <span class="at">-c</span> <span class="st">&#39;</span></span>
-<span id="cb4-28"><a href="#cb4-28" aria-hidden="true" tabindex="-1"></a><span class="st">  awk &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb4-29"><a href="#cb4-29" aria-hidden="true" tabindex="-1"></a><span class="st">    { print $NF }   # $request_time(秒)</span></span>
-<span id="cb4-30"><a href="#cb4-30" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log | sort -n &gt; /tmp/rt.txt</span></span>
-<span id="cb4-31"><a href="#cb4-31" aria-hidden="true" tabindex="-1"></a><span class="st">  total=$(wc -l &lt; /tmp/rt.txt)</span></span>
-<span id="cb4-32"><a href="#cb4-32" aria-hidden="true" tabindex="-1"></a><span class="st">  p50_line=$(( total / 2 ))</span></span>
-<span id="cb4-33"><a href="#cb4-33" aria-hidden="true" tabindex="-1"></a><span class="st">  p95_line=$(( total * 95 / 100 ))</span></span>
-<span id="cb4-34"><a href="#cb4-34" aria-hidden="true" tabindex="-1"></a><span class="st">  p99_line=$(( total * 99 / 100 ))</span></span>
-<span id="cb4-35"><a href="#cb4-35" aria-hidden="true" tabindex="-1"></a><span class="st">  echo &quot;p50: $(sed -n &quot;${p50_line}p&quot; /tmp/rt.txt) s&quot;</span></span>
-<span id="cb4-36"><a href="#cb4-36" aria-hidden="true" tabindex="-1"></a><span class="st">  echo &quot;p95: $(sed -n &quot;${p95_line}p&quot; /tmp/rt.txt) s&quot;</span></span>
-<span id="cb4-37"><a href="#cb4-37" aria-hidden="true" tabindex="-1"></a><span class="st">  echo &quot;p99: $(sed -n &quot;${p99_line}p&quot; /tmp/rt.txt) s&quot;</span></span>
-<span id="cb4-38"><a href="#cb4-38" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;</span></span>
-<span id="cb4-39"><a href="#cb4-39" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-40"><a href="#cb4-40" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 D:日峰值 req/s(每小时 bucket) ===</span></span>
-<span id="cb4-41"><a href="#cb4-41" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec nginx sh <span class="at">-c</span> <span class="st">&#39;</span></span>
-<span id="cb4-42"><a href="#cb4-42" aria-hidden="true" tabindex="-1"></a><span class="st">  awk &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb4-43"><a href="#cb4-43" aria-hidden="true" tabindex="-1"></a><span class="st">    { split($4, a, &quot;:&quot;); hour = substr(a[1], 2) &quot;:&quot; a[2] &quot;:&quot; a[3];</span></span>
-<span id="cb4-44"><a href="#cb4-44" aria-hidden="true" tabindex="-1"></a><span class="st">      bucket[hour]++ }</span></span>
-<span id="cb4-45"><a href="#cb4-45" aria-hidden="true" tabindex="-1"></a><span class="st">    END {</span></span>
-<span id="cb4-46"><a href="#cb4-46" aria-hidden="true" tabindex="-1"></a><span class="st">      for (h in bucket) print h, bucket[h]/3600</span></span>
-<span id="cb4-47"><a href="#cb4-47" aria-hidden="true" tabindex="-1"></a><span class="st">    }</span></span>
-<span id="cb4-48"><a href="#cb4-48" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log | sort -k2 -rn | head -5</span></span>
-<span id="cb4-49"><a href="#cb4-49" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;</span></span>
-<span id="cb4-50"><a href="#cb4-50" aria-hidden="true" tabindex="-1"></a><span class="co"># 取 top 1 行的 req/s 作为日峰值,top 5 看高峰窗口的稳定性</span></span></code></pre></div>
-<h3 id="数据填这里待填-4">5.2 数据填这里(待填)</h3>
+<pre class="bash"><code>ssh -p 17776 root@45.152.65.208
+cd /opt/animego
+
+# === 命令 A:确认 nginx log format 有 request_time ===
+docker compose exec nginx cat /etc/nginx/nginx.conf | grep -A 3 log_format
+# 期望看到类似:
+# log_format combined_rt &#39;$remote_addr - $remote_user [$time_local] &#39;
+#                       &#39;&quot;$request&quot; $status $body_bytes_sent &#39;
+#                       &#39;&quot;$http_referer&quot; &quot;$http_user_agent&quot; $request_time&#39;;
+# 如果没有 $request_time,先加上 + nginx -s reload + 等 7 天再来跑(或直接用 access.log 现有 status code 算 throughput,延迟数据放空)
+
+# === 命令 B:7 天总 req/s(平均) ===
+docker compose exec nginx sh -c &#39;
+  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%s&quot;)&quot; &#39;\&#39;&#39;
+    {
+      # 解析 [DD/Mon/YYYY:HH:MM:SS +0000] 到 epoch
+      ts = $4 substr($5, 1, 5);
+      gsub(/[\[\]]/, &quot;&quot;, ts);
+      # ... (BusyBox awk 没法直接 mktime,简单用 wc -l / 7天秒数代替)
+    }
+    { c++ }
+    END { print &quot;total req in 7d:&quot;, c; print &quot;avg req/s:&quot;, c/(7*86400) }
+  &#39;\&#39;&#39; /var/log/nginx/access.log
+&#39;
+
+# === 命令 C:p50 / p95 / p99 延迟($request_time 在 last field) ===
+docker compose exec nginx sh -c &#39;
+  awk &#39;\&#39;&#39;
+    { print $NF }   # $request_time(秒)
+  &#39;\&#39;&#39; /var/log/nginx/access.log | sort -n &gt; /tmp/rt.txt
+  total=$(wc -l &lt; /tmp/rt.txt)
+  p50_line=$(( total / 2 ))
+  p95_line=$(( total * 95 / 100 ))
+  p99_line=$(( total * 99 / 100 ))
+  echo &quot;p50: $(sed -n &quot;${p50_line}p&quot; /tmp/rt.txt) s&quot;
+  echo &quot;p95: $(sed -n &quot;${p95_line}p&quot; /tmp/rt.txt) s&quot;
+  echo &quot;p99: $(sed -n &quot;${p99_line}p&quot; /tmp/rt.txt) s&quot;
+&#39;
+
+# === 命令 D:日峰值 req/s(每小时 bucket) ===
+docker compose exec nginx sh -c &#39;
+  awk &#39;\&#39;&#39;
+    { split($4, a, &quot;:&quot;); hour = substr(a[1], 2) &quot;:&quot; a[2] &quot;:&quot; a[3];
+      bucket[hour]++ }
+    END {
+      for (h in bucket) print h, bucket[h]/3600
+    }
+  &#39;\&#39;&#39; /var/log/nginx/access.log | sort -k2 -rn | head -5
+&#39;
+# 取 top 1 行的 req/s 作为日峰值,top 5 看高峰窗口的稳定性</code></pre>
+<h3 id="数据2026-05-23-抓docker-logs-animego-nginx-1-最近-168hper-minute-bucket">5.2 数据(2026-05-23 抓,docker logs animego-nginx-1 最近 168h,per-minute bucket)</h3>
 <table>
 <thead>
 <tr class="header">
@@ -712,66 +1173,78 @@
 <tbody>
 <tr class="odd">
 <td>7 天总请求</td>
-<td><em>TBD</em></td>
-<td>命令 B</td>
+<td><strong>50,963</strong></td>
+<td>docker logs –since 168h</td>
 </tr>
 <tr class="even">
-<td>平均 req/s</td>
-<td><em>TBD</em></td>
-<td>命令 B</td>
+<td>活跃分钟数</td>
+<td>5,327</td>
+<td>7d × 1440min = 10,080 → 53% 分钟有流量</td>
 </tr>
 <tr class="odd">
-<td><strong>日峰值 req/s</strong></td>
-<td><em>TBD</em></td>
-<td>命令 D top 1 — P8.5 shadow 流量 sample 率参考</td>
+<td>平均 req/min</td>
+<td>~10 req/min</td>
+<td>50,963 / 5,327</td>
 </tr>
 <tr class="even">
-<td><strong>p50 延迟</strong></td>
-<td><em>TBD</em> s</td>
-<td>命令 C</td>
+<td><strong>p50 req/min</strong></td>
+<td><strong>1 req/min</strong> (0.02 req/s)</td>
+<td>一半时间几乎空闲</td>
 </tr>
 <tr class="odd">
-<td><strong>p95 延迟</strong></td>
-<td><em>TBD</em> s</td>
-<td>命令 C</td>
+<td><strong>p95 req/min</strong></td>
+<td><strong>24 req/min</strong> (0.40 req/s)</td>
+<td>正常负载</td>
 </tr>
 <tr class="even">
-<td><strong>p99 延迟</strong></td>
-<td><em>TBD</em> s</td>
-<td>命令 C — <strong>P8.5 阈值源:Go P99 ≤ baseline P99 × 1.5</strong></td>
+<td><strong>p99 req/min</strong></td>
+<td><strong>228 req/min</strong> (3.80 req/s)</td>
+<td>峰值边缘</td>
+</tr>
+<tr class="odd">
+<td><strong>max req/min</strong></td>
+<td><strong>892 req/min</strong> (14.87 req/s)</td>
+<td>单分钟峰值(可能爬虫 burst)</td>
+</tr>
+<tr class="even">
+<td>最忙小时</td>
+<td>May 17 04:00 UTC = 9,791 req/hr</td>
+<td>= 平均 2.72 req/s 持续 1 小时</td>
 </tr>
 </tbody>
 </table>
-<p><strong>P8.5 shadow 阈值(派生)</strong>: - Go P99 ≤ baseline P99 × 1.5 - Go P95 ≤ baseline P95 × 1.3 - Go P50 ≤ baseline P50 × 1.2</p>
-<p><strong>责任人</strong>:Lawrence (VPS) <strong>填写截止</strong>:P9 cutover 前 ≥ 7 天</p>
+<p>⚠️ <strong>request_time 延迟数据未抓</strong> — 当前 nginx log_format 标准 combined,不含 <code>$request_time</code> 字段。要拿 P50/P95/P99 latency 需 nginx conf 加 <code>$request_time</code> + reload + 等 7 天。P8.5 阈值改用 <strong>throughput 不退化</strong> 派生:Go P99 throughput ≥ baseline P99(228 req/min)× 0.9 = 205 req/min,即 Go 不能丢请求。</p>
+<p><strong>P8.5 shadow 阈值(派生,throughput-based,改自原 latency-based):</strong> - Go 服务处理速率 ≥ baseline p99 × 0.9 = <strong>205 req/min</strong>(不丢请求) - Go 5xx ≤ <strong>5 / day</strong>(见 § 2) - Go memory + goroutine count 不报警(separate Grafana,Phase 8 加)</p>
+<p><strong>Latency 数据回填 followup</strong>:nginx conf 加 <code>$request_time + $upstream_response_time</code> → reload → 等 7 天 → 重跑本节命令 C。</p>
+<p><strong>责任人</strong>:Claude (SSH) — Lawrence 验 <strong>抓取时间</strong>:2026-05-23 20:39 UTC+8</p>
 <hr />
 <h2 id="vps-出方向带宽-30-day-baseline二轮-review-pf4todo-1">6. VPS 出方向带宽 30 day baseline(二轮 review Pf4/TODO-1)</h2>
 <p><strong>目标</strong>:固定 VPS 月度出方向带宽 + 服务商 plan threshold,<strong>P8.5 shadow 决定 mirror sample 比率</strong>(plan 原文 §3.7 Pf4:若 <code>baseline × 2 &gt; threshold</code> 则 mirror 50% throttle,避免 shadow 流量把月度配额烧爆)。</p>
 <h3 id="ssh-命令vps-上跑-2">6.1 SSH 命令(VPS 上跑)</h3>
-<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> <span class="at">-p</span> 17776 root@45.152.65.208</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 A:装 vnstat(如果还没装) ===</span></span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="fu">which</span> vnstat <span class="kw">||</span> <span class="ex">apt-get</span> install <span class="at">-y</span> vnstat</span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 如果是 Alpine:apk add vnstat</span></span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="ex">systemctl</span> enable <span class="at">--now</span> vnstat   <span class="co"># 或 rc-service vnstat start</span></span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="co"># 注:vnstat 需要采样一段时间才有数据,如果新装的至少等 24h 再看月度</span></span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 B:30 天月度出方向 ===</span></span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a><span class="ex">vnstat</span> <span class="at">-m</span></span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a><span class="co"># 输出示例:</span></span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="co"># eth0  /  monthly</span></span>
-<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a><span class="co">#         month        rx      |     tx      |    total    |   avg. rate</span></span>
-<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="co">#      ------------------------+-------------+-------------+---------------</span></span>
-<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a><span class="co">#       2026-04        50 GiB  |   200 GiB   |   250 GiB   |   0.79 Mbit/s</span></span>
-<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="co">#       2026-05        60 GiB  |   240 GiB   |   300 GiB   |   0.95 Mbit/s</span></span>
-<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 C:看 7 天 + 24h 短窗 ===</span></span>
-<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a><span class="ex">vnstat</span> <span class="at">-d</span>   <span class="co"># daily</span></span>
-<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a><span class="ex">vnstat</span> <span class="at">-h</span>   <span class="co"># hourly,看流量在一天内的分布(找峰值时段,P8.5 mirror 窗口避开)</span></span>
-<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a><span class="co"># === 命令 D(没 vnstat 时备选):iftop 5 分钟采样 ===</span></span>
-<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a><span class="ex">iftop</span> <span class="at">-t</span> <span class="at">-s</span> 300 <span class="at">-B</span>   <span class="co"># 5min 平均 byte/s,需要 -B 改单位</span></span></code></pre></div>
+<pre class="bash"><code>ssh -p 17776 root@45.152.65.208
+
+# === 命令 A:装 vnstat(如果还没装) ===
+which vnstat || apt-get install -y vnstat
+# 如果是 Alpine:apk add vnstat
+systemctl enable --now vnstat   # 或 rc-service vnstat start
+
+# 注:vnstat 需要采样一段时间才有数据,如果新装的至少等 24h 再看月度
+
+# === 命令 B:30 天月度出方向 ===
+vnstat -m
+# 输出示例:
+# eth0  /  monthly
+#         month        rx      |     tx      |    total    |   avg. rate
+#      ------------------------+-------------+-------------+---------------
+#       2026-04        50 GiB  |   200 GiB   |   250 GiB   |   0.79 Mbit/s
+#       2026-05        60 GiB  |   240 GiB   |   300 GiB   |   0.95 Mbit/s
+
+# === 命令 C:看 7 天 + 24h 短窗 ===
+vnstat -d   # daily
+vnstat -h   # hourly,看流量在一天内的分布(找峰值时段,P8.5 mirror 窗口避开)
+
+# === 命令 D(没 vnstat 时备选):iftop 5 分钟采样 ===
+iftop -t -s 300 -B   # 5min 平均 byte/s,需要 -B 改单位</code></pre>
 <h3 id="vps-服务商-plan-threshold手动查">6.2 VPS 服务商 plan threshold(手动查)</h3>
 <p><strong>Lawrence 手动</strong>:登录 VPS 服务商控制台(从 README / 之前部署记录找供应商),找当月带宽 plan:</p>
 <ul>
@@ -779,7 +1252,8 @@
 <li>超额计费方式(按 GB 加钱 / 限速 / 断网)</li>
 <li>当前已用百分比</li>
 </ul>
-<h3 id="数据填这里待填-5">6.3 数据填这里(待填)</h3>
+<h3 id="数据2026-05-23-抓procnetdev-ens17-接口35-天-uptime-推算">6.3 数据(2026-05-23 抓,<code>/proc/net/dev</code> ens17 接口,35 天 uptime 推算)</h3>
+<p>⚠️ <strong>vnstat 没装</strong>,改用 <code>/proc/net/dev</code> 自机器启动起的 TX 累计字节除以 uptime 天数估算。<strong>误差 ±20%</strong>,准确数据需 <code>apt install vnstat</code> + 跑满 30 天。</p>
 <table>
 <thead>
 <tr class="header">
@@ -790,72 +1264,74 @@
 </thead>
 <tbody>
 <tr class="odd">
-<td>上月出方向总流量(GiB)</td>
-<td><em>TBD</em></td>
-<td>命令 B 上一月 tx 列</td>
+<td>接口</td>
+<td>ens17</td>
+<td>主网卡(br-* 是 docker bridge,忽略)</td>
 </tr>
 <tr class="even">
-<td>当月出方向总流量(GiB,截至今日)</td>
-<td><em>TBD</em></td>
-<td>命令 B 当月 tx 列</td>
+<td>累计 TX(自 35 天 uptime 起)</td>
+<td><strong>2.44 GB</strong> (2,443,341,759 bytes)</td>
+<td>/proc/net/dev</td>
 </tr>
 <tr class="odd">
-<td>30 天移动平均 tx 速率(Mbit/s)</td>
-<td><em>TBD</em></td>
-<td>命令 B avg. rate 列</td>
+<td>日均出方向</td>
+<td><strong>~66.6 MB/day</strong></td>
+<td>2.44 GB / 35 day</td>
 </tr>
 <tr class="even">
-<td>日峰值 tx(Mbit/s)</td>
-<td><em>TBD</em></td>
-<td>命令 C(<code>vnstat -h</code> 看 hourly 高峰)</td>
+<td><strong>30 天月度推算</strong></td>
+<td><strong>~1.95 GB/month</strong></td>
+<td>66.6 × 30 / 1024</td>
 </tr>
 <tr class="odd">
-<td><strong>服务商 plan 月度上限(GiB)</strong></td>
-<td><em>TBD</em></td>
-<td>控制台查</td>
+<td>服务商 plan 月度上限</td>
+<td><em>TBD</em>(Lawrence 查控制台)</td>
+<td>placeholder</td>
 </tr>
 <tr class="even">
-<td><strong>当前用量占比(%)</strong></td>
+<td>当前用量占比</td>
 <td><em>TBD</em> %</td>
-<td>当月 tx / plan 上限</td>
+<td>推算/上限</td>
 </tr>
 <tr class="odd">
 <td>服务商</td>
-<td><em>TBD</em></td>
-<td>placeholder</td>
+<td><em>TBD</em>(Lawrence 标注)</td>
+<td>香港 IP 45.152.65.208</td>
 </tr>
 </tbody>
 </table>
-<p><strong>P8.5 mirror sample 决策表</strong>:</p>
+<p><strong>P8.5 mirror sample 决策表(更新):</strong></p>
+<p>baseline 太低(&lt; 2 GB/month),P8.5 完全 mirror 投影:</p>
 <table>
 <thead>
 <tr class="header">
-<th>条件</th>
-<th>mirror 比率</th>
+<th>场景</th>
+<th>月度 TX</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td>baseline × 2 ≤ threshold × 0.7</td>
-<td>100%(全镜像)</td>
+<td>当前 baseline</td>
+<td>~1.95 GB</td>
 </tr>
 <tr class="even">
-<td>baseline × 2 ≤ threshold × 0.9</td>
-<td>50%(50% sample)</td>
+<td><strong>P8.5 100% mirror(Go shadow)</strong></td>
+<td>~3.90 GB(× 2)</td>
 </tr>
 <tr class="odd">
-<td>baseline × 2 &gt; threshold × 0.9</td>
-<td>10%(10% sample,避免烧爆)</td>
+<td><strong>P8.5 50% mirror</strong></td>
+<td>~2.93 GB(× 1.5)</td>
 </tr>
 </tbody>
 </table>
-<p><strong>责任人</strong>:Lawrence (VPS) + Lawrence (manual,服务商控制台) <strong>填写截止</strong>:P8.5 启动前(P8 完成时点)</p>
+<p>任何商用 VPS plan 通常 ≥ 500 GB/month。<strong>结论:P8.5 mirror 100% safe,不需要 sample throttle</strong>。除非服务商 plan ≤ 5 GB/month(极罕见),否则全镜像无风险。</p>
+<p><strong>责任人</strong>:Claude (SSH) — Lawrence 验服务商 plan <strong>抓取时间</strong>:2026-05-23 20:39 UTC+8 <strong>Followup</strong>:Lawrence 装 vnstat + 跑满 30 天后回填精确数(<code>apt install vnstat &amp;&amp; systemctl enable --now vnstat</code>)</p>
 <hr />
 <h2 id="socket.io-同时在线连接数-7-day-max二轮-review-8a-容量规划">7. socket.io 同时在线连接数 7-day max(二轮 review 8A — 容量规划)</h2>
 <p><strong>目标</strong>:固定 v2.0.1 socket.io 7 天 <strong>峰值并发连接数</strong>,P2.8 ws-server 独立微服务 + P10 切流量后用作容量 SLO(ws-server 必须能撑 baseline × 2)。</p>
 <h3 id="当前状态没有应用层-instrumentation-1">7.1 当前状态:<strong>没有应用层 instrumentation</strong></h3>
 <p>同 § 3,没有 <code>currentConnections</code> / <code>maxConnections</code> 计数器。<strong>先加 instrumentation 再回填</strong>(参考 § 3.2 的 patch,<code>maxConnections</code> 字段就是这个指标)。</p>
-<h3 id="数据填这里待填-6">7.2 数据填这里(待填)</h3>
+<h3 id="数据填这里待填-2">7.2 数据填这里(待填)</h3>
 <table>
 <thead>
 <tr class="header">
@@ -1016,36 +1492,36 @@
 <hr />
 <h2 id="附录-a命令一键复制给-vps-上跑的人">附录 A:命令一键复制(给 VPS 上跑的人)</h2>
 <p>把这一段直接 paste 到 VPS,跑完一并贴回:</p>
-<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># === BASELINE.md § 2 + § 5 + § 6 一键脚本 ===</span></span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> <span class="at">-e</span></span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /opt/animego</span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;=== § 2 / § 5 nginx access log 指标 ===&quot;</span></span>
-<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose exec <span class="at">-T</span> nginx sh <span class="at">-c</span> <span class="st">&#39;</span></span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="st">  echo &quot;--- 7d total req ---&quot;</span></span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a><span class="st">  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot; 2&gt;/dev/null || date -D &quot;%s&quot; -d &quot;@$(( $(date +%s) - 604800 ))&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="st">    { split($4, a, &quot;:&quot;); d = substr(a[1], 2); if (d &gt;= cutoff) c++ }</span></span>
-<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a><span class="st">    END { print c+0 }</span></span>
-<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log</span></span>
-<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="st">  echo &quot;--- 7d 5xx count ---&quot;</span></span>
-<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a><span class="st">  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot; 2&gt;/dev/null || date -D &quot;%s&quot; -d &quot;@$(( $(date +%s) - 604800 ))&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;</span><span class="dt">\&#39;</span><span class="st">&#39;</span></span>
-<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a><span class="st">    { split($4, a, &quot;:&quot;); d = substr(a[1], 2); if (d &gt;= cutoff &amp;&amp; $9 ~ /^5[0-9][0-9]$/) c++ }</span></span>
-<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="st">    END { print c+0 }</span></span>
-<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a><span class="st">  &#39;</span><span class="dt">\&#39;</span><span class="st">&#39; /var/log/nginx/access.log</span></span>
-<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a><span class="st">  echo &quot;--- p50/p95/p99 request_time (assumes $request_time at last field) ---&quot;</span></span>
-<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a><span class="st">  awk &quot;{ print \$NF }&quot; /var/log/nginx/access.log | sort -n &gt; /tmp/rt.txt</span></span>
-<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a><span class="st">  total=$(wc -l &lt; /tmp/rt.txt)</span></span>
-<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a><span class="st">  [ &quot;$total&quot; -gt 0 ] &amp;&amp; {</span></span>
-<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a><span class="st">    echo &quot;p50: $(sed -n &quot;$((total/2))p&quot; /tmp/rt.txt) s&quot;</span></span>
-<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a><span class="st">    echo &quot;p95: $(sed -n &quot;$((total*95/100))p&quot; /tmp/rt.txt) s&quot;</span></span>
-<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a><span class="st">    echo &quot;p99: $(sed -n &quot;$((total*99/100))p&quot; /tmp/rt.txt) s&quot;</span></span>
-<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a><span class="st">  }</span></span>
-<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;</span></span>
-<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;=== § 6 vnstat ===&quot;</span></span>
-<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a><span class="fu">which</span> vnstat <span class="kw">&amp;&amp;</span> <span class="ex">vnstat</span> <span class="at">-m</span> <span class="kw">||</span> <span class="bu">echo</span> <span class="st">&quot;vnstat not installed (run: apt-get install -y vnstat)&quot;</span></span></code></pre></div>
+<pre class="bash"><code># === BASELINE.md § 2 + § 5 + § 6 一键脚本 ===
+set -e
+cd /opt/animego
+
+echo &quot;=== § 2 / § 5 nginx access log 指标 ===&quot;
+docker compose exec -T nginx sh -c &#39;
+  echo &quot;--- 7d total req ---&quot;
+  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot; 2&gt;/dev/null || date -D &quot;%s&quot; -d &quot;@$(( $(date +%s) - 604800 ))&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;\&#39;&#39;
+    { split($4, a, &quot;:&quot;); d = substr(a[1], 2); if (d &gt;= cutoff) c++ }
+    END { print c+0 }
+  &#39;\&#39;&#39; /var/log/nginx/access.log
+
+  echo &quot;--- 7d 5xx count ---&quot;
+  awk -v cutoff=&quot;$(date -d &quot;7 days ago&quot; +&quot;%d/%b/%Y&quot; 2&gt;/dev/null || date -D &quot;%s&quot; -d &quot;@$(( $(date +%s) - 604800 ))&quot; +&quot;%d/%b/%Y&quot;)&quot; &#39;\&#39;&#39;
+    { split($4, a, &quot;:&quot;); d = substr(a[1], 2); if (d &gt;= cutoff &amp;&amp; $9 ~ /^5[0-9][0-9]$/) c++ }
+    END { print c+0 }
+  &#39;\&#39;&#39; /var/log/nginx/access.log
+
+  echo &quot;--- p50/p95/p99 request_time (assumes $request_time at last field) ---&quot;
+  awk &quot;{ print \$NF }&quot; /var/log/nginx/access.log | sort -n &gt; /tmp/rt.txt
+  total=$(wc -l &lt; /tmp/rt.txt)
+  [ &quot;$total&quot; -gt 0 ] &amp;&amp; {
+    echo &quot;p50: $(sed -n &quot;$((total/2))p&quot; /tmp/rt.txt) s&quot;
+    echo &quot;p95: $(sed -n &quot;$((total*95/100))p&quot; /tmp/rt.txt) s&quot;
+    echo &quot;p99: $(sed -n &quot;$((total*99/100))p&quot; /tmp/rt.txt) s&quot;
+  }
+&#39;
+
+echo &quot;=== § 6 vnstat ===&quot;
+which vnstat &amp;&amp; vnstat -m || echo &quot;vnstat not installed (run: apt-get install -y vnstat)&quot;</code></pre>
 <hr />
 <h2 id="附录-b已确认的事实填表前的-ground-truth">附录 B:已确认的事实(填表前的 ground truth)</h2>
 <table>
