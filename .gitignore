@@ -62,6 +62,7 @@ go-api/migrate-mongo
 # Already-committed P0/P1/P2-PROGRESS files remain (git ignore does not touch tracked files).
 docs/migration/*STATUS*
 docs/migration/PHASE*-STATUS*
+docs/migration/PHASE*-COMPLETE*
 docs/**/*-DESIGN.md
 docs/**/*-DESIGN.html
 docs/migration/P*-PROGRESS.md
