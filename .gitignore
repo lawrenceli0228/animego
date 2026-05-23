@@ -5,6 +5,11 @@ node_modules/
 bun.lock
 bun.lockb
 
+# Exception: next-app/bun.lock IS tracked (Phase 3 dual-rail per
+# MIGRATION_PLAN.md §Phase 3 lockfile 双轨; pre-commit hook in P3.1
+# will enforce mtime sync with package-lock.json)
+!next-app/bun.lock
+
 # Environment variables (contains secrets - never commit)
 .env
 .env.local
