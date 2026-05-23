@@ -1,5 +1,9 @@
 services:
   app:
+    # Legacy Express + Mongo stack.  Stays live until P9 cutover; nginx
+    # currently routes /api + /socket.io + / to this service.  P9 switches
+    # /api → go-api and /socket.io → ws-server, then this service is
+    # removed and `mongodb` follows on the +30d retention window.
     build: .
     restart: unless-stopped
     env_file: .env.production
@@ -9,6 +13,8 @@ services:
       - animego
 
   mongodb:
+    # Removed at cutover + 30d.  Until then it backs `app` and the
+    # parity-check binary that compares Express vs Go responses.
     image: mongo:7
     restart: unless-stopped
     volumes:
@@ -16,6 +22,38 @@ services:
     command: --wiredTigerCacheSizeGB 0.4
     networks:
       - animego
+
+  # ─── P2.8: ws-server (socket.io danmaku) ─────────────────────────────
+  # Standalone Node 20 process speaking the socket.io v4 protocol that
+  # client/src/hooks/useDanmaku.js already uses.  Reads JWT_SECRET shared
+  # with go-api + the Express `app` service so a single login token works
+  # for all three surfaces.  Writes danmakus + episode_windows directly
+  # to Postgres (P9 cutover wires this in; until then the service is
+  # built and healthy but receives no traffic because nginx still
+  # routes /socket.io → `app`).
+  ws-server:
+    build:
+      context: ./ws-server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      PORT_WS: 3001
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+    # NOTE: prod postgres service is added in the P9 cutover commit;
+    # ws-server's DATABASE_URL in .env.production points at the postgres
+    # host that will exist by then.  Listing it as depends_on here would
+    # break `docker compose up` today.
+    networks:
+      - animego
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   nginx:
     image: nginx:alpine
