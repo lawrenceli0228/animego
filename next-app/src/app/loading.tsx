@@ -1,80 +1,112 @@
-// Streaming fallback for the LandingPage RSC tree. Shown while
-// page.tsx awaits getDict() + Go API (trending + 3 anime detail) on cold
-// cache. Without this, visitors get a blank screen for ~2-3s on the
-// first request after revalidate expires.
-//
-// Visual rhythm matches the section grid so the layout shift on swap is
-// minimal. The chapter bars are pure CSS (no motion lib) to keep the
-// loading bundle as small as possible -- this is the LAST thing we want
-// to slow down.
+// HomePage skeleton: hero block (LCP placeholder) + 6 section bands so
+// the layout shift on swap is minimal. Pure CSS shimmer, prefers-reduced-
+// motion freezes to flat opacity.
 
-const sectionStyle = {
+const heroStyle = {
   position: "relative" as const,
-  padding: "clamp(48px, 4vw, 80px) 0",
-  borderBottom: "1px solid rgba(84,84,88,0.30)",
-  background: "#000",
+  width: "100%",
+  height: "clamp(420px, 55vh, 600px)",
+  overflow: "hidden",
+  background: "#0a0a0a",
 };
 
-const barStyle = (hue: number, height: number) => ({
-  position: "absolute" as const,
-  left: 28,
-  top: 28,
-  width: 3,
-  height,
-  background: `oklch(62% 0.19 ${hue})`,
-  borderRadius: 2,
-  boxShadow: `0 0 24px oklch(62% 0.19 ${hue} / 0.55)`,
-  opacity: 0.7,
-});
+const sectionStyle = {
+  padding: "32px 0 16px",
+  borderTop: "1px solid rgba(84,84,88,0.18)",
+};
 
-const skeletonBoxStyle = (w: string, h: number) => ({
-  background: "linear-gradient(90deg, rgba(60,60,66,0.30) 0%, rgba(84,84,88,0.40) 50%, rgba(60,60,66,0.30) 100%)",
+const titleSkeleton = {
+  background:
+    "linear-gradient(90deg, rgba(60,60,66,0.30) 0%, rgba(84,84,88,0.40) 50%, rgba(60,60,66,0.30) 100%)",
   backgroundSize: "200% 100%",
-  animation: "landingPulse 1.6s ease-in-out infinite",
+  animation: "homePulse 1.6s ease-in-out infinite",
   borderRadius: 4,
-  width: w,
-  height: h,
-});
+  width: "min(280px, 50vw)",
+  height: 28,
+  marginBottom: 16,
+};
 
-const sectionHues = [330, 210, 40, 260, 195, 70, 40];
+const labelSkeleton = {
+  ...titleSkeleton,
+  width: 96,
+  height: 12,
+  marginBottom: 12,
+};
 
-export default function LandingLoading() {
+const cardSkeleton = {
+  aspectRatio: "3/4" as const,
+  background:
+    "linear-gradient(90deg, rgba(28,28,30,0.85) 0%, rgba(44,44,46,0.9) 50%, rgba(28,28,30,0.85) 100%)",
+  backgroundSize: "200% 100%",
+  animation: "homePulse 1.6s ease-in-out infinite",
+  borderRadius: 12,
+};
+
+const gridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+  gap: 16,
+};
+
+export default function HomeLoading() {
   return (
     <main aria-busy="true" aria-live="polite">
       <style>{`
-        @keyframes landingPulse {
+        @keyframes homePulse {
           0%, 100% { background-position: 0% 50%; }
           50%      { background-position: 100% 50%; }
         }
         @media (prefers-reduced-motion: reduce) {
-          [data-landing-pulse] { animation: none !important; opacity: 0.35; }
+          [data-home-pulse] { animation: none !important; opacity: 0.35; }
         }
       `}</style>
-      {sectionHues.map((hue, idx) => (
-        <section key={idx} style={sectionStyle}>
-          <span style={barStyle(hue, 52)} aria-hidden />
-          <div
-            className="container"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 24,
-              paddingLeft: 60,
-              paddingTop: 4,
-            }}
-          >
-            <div data-landing-pulse style={skeletonBoxStyle("12rem", 16)} />
-            <div data-landing-pulse style={skeletonBoxStyle("min(640px, 60vw)", 44)} />
-            <div data-landing-pulse style={skeletonBoxStyle("min(480px, 50vw)", 14)} />
-            {idx === 0 && (
-              <div
-                data-landing-pulse
-                style={{ ...skeletonBoxStyle("100%", 280), marginTop: 24 }}
-              />
-            )}
+
+      <div style={heroStyle}>
+        <div
+          className="container"
+          style={{
+            position: "relative",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ maxWidth: 560 }}>
+            <div data-home-pulse style={{ ...labelSkeleton, width: 120, height: 14 }} />
+            <div data-home-pulse style={{ ...titleSkeleton, width: "90%", height: 40, marginBottom: 12 }} />
+            <div data-home-pulse style={{ ...titleSkeleton, width: "60%", height: 28, marginBottom: 16 }} />
+            <div data-home-pulse style={{ ...titleSkeleton, width: 160, height: 44 }} />
           </div>
-        </section>
-      ))}
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            gap: 8,
+          }}
+        >
+          {[28, 6, 6, 6, 6].map((w, i) => (
+            <div key={i} data-home-pulse style={{ ...cardSkeleton, width: w, height: 6, borderRadius: 3, aspectRatio: "unset" }} />
+          ))}
+        </div>
+      </div>
+
+      <div className="container" style={{ paddingTop: 8, paddingBottom: 60 }}>
+        {[0, 1, 2, 3, 4, 5].map((idx) => (
+          <section key={idx} style={sectionStyle}>
+            <div data-home-pulse style={labelSkeleton} />
+            <div data-home-pulse style={titleSkeleton} />
+            <div style={gridStyle}>
+              {[0, 1, 2, 3, 4, 5].map((c) => (
+                <div key={c} data-home-pulse style={cardSkeleton} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
     </main>
   );
 }
