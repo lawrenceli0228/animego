@@ -141,3 +141,13 @@ export interface DetailRecommendation {
 export interface WatcherItem {
   username: string;
 }
+
+// ─── LandingPoster ─────────────────────────────────────────────────
+// Cover-card payload shared by landing surfaces. The landing page hydrates
+// 3 known anilist IDs with full AnimeDetail (banner image, accent contrast,
+// full description) and falls back to the lighter TrendingItem when detail
+// enrichment lags or 404s. Components only read the common fields
+// (title*, coverImageUrl, posterAccent, seasonYear, episodes, averageScore,
+// description), so the union type is structurally safe.
+
+export type LandingPoster = TrendingItem | AnimeDetail;
