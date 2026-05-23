@@ -1,0 +1,523 @@
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --bg: #0a0a0f;
+  --bg-elev: #14141a;
+  --bg-card: #1c1c24;
+  --bg-code: #16161d;
+
+  --text: #ededed;
+  --text-2: rgba(235, 235, 245, 0.72);
+  --text-3: rgba(235, 235, 245, 0.50);
+  --text-4: rgba(235, 235, 245, 0.30);
+
+  --border: rgba(120, 120, 140, 0.18);
+  --border-strong: rgba(160, 160, 180, 0.32);
+  --border-hot: rgba(200, 200, 230, 0.45);
+
+  --hue-magenta: 330;
+  --hue-blue: 210;
+  --hue-amber: 40;
+  --hue-violet: 260;
+  --hue-cyan: 195;
+  --hue-chartreuse: 70;
+  --hue-green: 145;
+
+  --accent: oklch(70% 0.19 var(--hue-blue));
+  --accent-2: oklch(78% 0.17 var(--hue-cyan));
+  --success: oklch(75% 0.18 var(--hue-green));
+  --warning: oklch(75% 0.17 var(--hue-amber));
+  --danger: oklch(70% 0.20 var(--hue-magenta));
+
+  --font-display: "Sora", system-ui, -apple-system, sans-serif;
+  --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --content-width: 980px;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+  background: var(--bg);
+}
+
+body {
+  /* Center the whole document. Single point of truth for layout width
+     so every section, table, code block lines up against the same axis. */
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 56px 40px 120px;
+
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, oklch(28% 0.10 var(--hue-blue) / 0.35), transparent 60%),
+    radial-gradient(ellipse 70% 50% at 90% 30%, oklch(26% 0.10 var(--hue-magenta) / 0.25), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 10% 80%, oklch(26% 0.10 var(--hue-cyan) / 0.22), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* ----- Title (h1.title from pandoc) ----- */
+header#title-block-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+h1.title {
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 1rem + 4vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 16px 0 8px;
+  background: linear-gradient(135deg, #ffffff 0%, oklch(78% 0.14 var(--hue-blue)) 60%, oklch(72% 0.18 var(--hue-cyan)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ----- Headers ----- */
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  color: #fff;
+  letter-spacing: -0.015em;
+  scroll-margin-top: 24px;
+}
+
+h1:not(.title) {
+  /* pandoc duplicates the title as h1 in body when toc is on. The .title
+     above is enough. */
+  display: none;
+}
+
+h2 {
+  font-size: clamp(1.625rem, 0.9rem + 2vw, 2.25rem);
+  font-weight: 800;
+  margin: 72px 0 24px;
+  padding-top: 28px;
+  padding-left: 22px;
+  position: relative;
+  border-top: 1px solid var(--border);
+  line-height: 1.15;
+}
+
+h2::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 32px;
+  width: 4px;
+  height: calc(100% - 8px);
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+  border-radius: 2px;
+  box-shadow: 0 0 18px oklch(70% 0.20 var(--hue-blue) / 0.55);
+}
+
+h3 {
+  font-size: clamp(1.2rem, 0.7rem + 1.1vw, 1.5rem);
+  font-weight: 700;
+  margin: 44px 0 16px;
+  color: oklch(85% 0.05 var(--hue-blue));
+}
+
+h4 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 32px 0 12px;
+  color: oklch(80% 0.06 var(--hue-cyan));
+}
+
+/* ----- Paragraphs ----- */
+p {
+  margin: 16px 0;
+  color: var(--text-2);
+}
+
+p strong, li strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ----- Links ----- */
+a {
+  color: oklch(78% 0.16 var(--hue-cyan));
+  text-decoration: none;
+  border-bottom: 1px solid oklch(78% 0.16 var(--hue-cyan) / 0.30);
+  transition: color 200ms var(--ease-out-expo), border-color 200ms var(--ease-out-expo);
+}
+
+a:hover {
+  color: oklch(86% 0.18 var(--hue-cyan));
+  border-bottom-color: oklch(78% 0.16 var(--hue-cyan) / 0.85);
+}
+
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* ----- Inline code ----- */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: oklch(85% 0.12 var(--hue-amber));
+  letter-spacing: -0.01em;
+  word-break: break-word;
+}
+
+/* ----- Code blocks ----- */
+pre {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  margin: 20px 0;
+  overflow-x: auto;
+  position: relative;
+  font-size: 13px;
+  line-height: 1.7;
+  box-shadow: 0 1px 0 oklch(50% 0.05 var(--hue-blue) / 0.10) inset;
+}
+
+pre::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(70% 0.19 var(--hue-blue) / 0.40), transparent);
+}
+
+pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font-size: inherit;
+}
+
+/* ----- Lists ----- */
+ul, ol {
+  margin: 16px 0 16px 4px;
+  padding-left: 28px;
+  color: var(--text-2);
+}
+
+li {
+  margin: 8px 0;
+  padding-left: 6px;
+}
+
+li > ul,
+li > ol {
+  margin: 6px 0 4px;
+}
+
+ul li::marker {
+  color: var(--accent);
+}
+
+ol li::marker {
+  color: var(--accent-2);
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+/* Checkbox-style task list items (pandoc renders `- [ ]` as
+   <li><input type="checkbox" disabled> ...).  Override default ugly
+   appearance with a custom dark-friendly box. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-code);
+  margin-right: 10px;
+  margin-left: -22px;
+  margin-bottom: -3px;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: border-color 150ms, background 150ms;
+}
+
+input[type="checkbox"]:hover {
+  border-color: var(--accent);
+}
+
+input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  position: relative;
+}
+
+input[type="checkbox"]:checked::after {
+  content: "✓";
+  position: absolute;
+  top: -3px;
+  left: 2px;
+  color: #000;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+/* ----- Tables ----- */
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 28px 0;
+  font-size: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35);
+}
+
+thead {
+  background: linear-gradient(180deg, oklch(22% 0.04 var(--hue-blue)) 0%, oklch(18% 0.03 var(--hue-blue)) 100%);
+}
+
+th {
+  padding: 14px 16px;
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: oklch(85% 0.06 var(--hue-blue));
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+td {
+  padding: 12px 16px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr {
+  transition: background 150ms var(--ease-out-expo);
+}
+
+tbody tr:hover {
+  background: oklch(22% 0.05 var(--hue-blue) / 0.35);
+}
+
+td code {
+  font-size: 0.82em;
+  padding: 1px 5px;
+}
+
+/* ----- Blockquote ----- */
+blockquote {
+  border-left: 3px solid var(--accent);
+  background: oklch(22% 0.04 var(--hue-blue) / 0.18);
+  padding: 16px 22px;
+  margin: 20px 0;
+  border-radius: 0 8px 8px 0;
+  color: var(--text-2);
+}
+
+blockquote p {
+  margin: 6px 0;
+}
+
+/* ----- Horizontal rule ----- */
+hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+  margin: 56px 0;
+}
+
+/* ----- TOC ----- */
+#TOC {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 26px 32px;
+  margin: 32px 0 56px;
+  position: relative;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35);
+}
+
+#TOC::before {
+  content: "TABLE OF CONTENTS";
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: var(--text-4);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+}
+
+#TOC ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+#TOC ul ul {
+  padding-left: 22px;
+  margin: 4px 0 10px;
+  border-left: 1px solid var(--border);
+}
+
+#TOC li {
+  margin: 5px 0;
+  padding: 0;
+  line-height: 1.55;
+}
+
+#TOC > ul > li {
+  margin: 10px 0;
+}
+
+#TOC > ul > li > a {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: #fff;
+  font-size: 14.5px;
+}
+
+#TOC a {
+  border-bottom: none;
+  color: var(--text-2);
+  display: inline-block;
+  padding: 3px 0;
+  font-size: 13.5px;
+  transition: color 150ms var(--ease-out-expo), transform 150ms var(--ease-out-expo);
+}
+
+#TOC a:hover {
+  color: var(--accent-2);
+  transform: translateX(2px);
+}
+
+/* ----- Strong emphasis on bullet phrases (often used as section sub-headers) ----- */
+ul > li > strong:first-child,
+ol > li > strong:first-child {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: oklch(86% 0.10 var(--hue-cyan));
+  letter-spacing: -0.01em;
+}
+
+/* ----- Footnote / muted text on dimmer rows ----- */
+em {
+  color: var(--text-2);
+  font-style: italic;
+}
+
+/* ----- Selection ----- */
+::selection {
+  background: oklch(50% 0.18 var(--hue-blue) / 0.55);
+  color: #fff;
+}
+
+/* ----- Scrollbar (webkit) ----- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(30% 0.04 var(--hue-blue));
+  border-radius: 6px;
+  border: 2px solid var(--bg);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(40% 0.06 var(--hue-blue));
+}
+
+/* ----- Print ----- */
+@media print {
+  body {
+    background: white;
+    color: black;
+    padding: 0;
+    max-width: none;
+  }
+  h2::before {
+    display: none;
+  }
+}
+
+/* ----- Reduced motion ----- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ----- Responsive ----- */
+@media (max-width: 1040px) {
+  body {
+    padding: 40px 28px 96px;
+  }
+}
+
+@media (max-width: 720px) {
+  body {
+    padding: 24px 16px 64px;
+    font-size: 14.5px;
+  }
+  table {
+    font-size: 12.5px;
+  }
+  th, td {
+    padding: 10px 12px;
+  }
+  h2 {
+    margin: 52px 0 18px;
+    padding-left: 18px;
+  }
+  pre {
+    padding: 16px 18px;
+    font-size: 12.5px;
+  }
+}
+</style>

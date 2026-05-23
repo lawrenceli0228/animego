@@ -56,6 +56,8 @@
     --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
     --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+    --content-width: 980px;
   }
 
   * {
@@ -67,9 +69,16 @@
   html {
     color-scheme: dark;
     scroll-behavior: smooth;
+    background: var(--bg);
   }
 
   body {
+    /* Center the whole document. Single point of truth for layout width
+       so every section, table, code block lines up against the same axis. */
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding: 56px 40px 120px;
+
     background:
       radial-gradient(ellipse 80% 60% at 50% -10%, oklch(28% 0.10 var(--hue-blue) / 0.35), transparent 60%),
       radial-gradient(ellipse 70% 50% at 90% 30%, oklch(26% 0.10 var(--hue-magenta) / 0.25), transparent 55%),
@@ -78,28 +87,26 @@
     background-attachment: fixed;
     color: var(--text);
     font-family: var(--font-sans);
-    font-size: 15px;
-    line-height: 1.65;
+    font-size: 15.5px;
+    line-height: 1.7;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-height: 100vh;
-    padding: 48px 24px 96px;
-  }
-
-  main, body > * {
-    max-width: 920px;
-    margin-left: auto;
-    margin-right: auto;
   }
 
   /* ----- Title (h1.title from pandoc) ----- */
+  header#title-block-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+
   h1.title {
     font-family: var(--font-display);
-    font-size: clamp(2rem, 1rem + 3.5vw, 3.25rem);
+    font-size: clamp(2.25rem, 1rem + 4vw, 3.5rem);
     font-weight: 800;
     letter-spacing: -0.03em;
     line-height: 1.05;
-    margin: 24px 0 12px;
+    margin: 16px 0 8px;
     background: linear-gradient(135deg, #ffffff 0%, oklch(78% 0.14 var(--hue-blue)) 60%, oklch(72% 0.18 var(--hue-cyan)) 100%);
     -webkit-background-clip: text;
     background-clip: text;
@@ -116,15 +123,17 @@
   }
 
   h1:not(.title) {
-    display: none; /* pandoc duplicates the title as h1 in body when toc is on; the .title above is enough */
+    /* pandoc duplicates the title as h1 in body when toc is on. The .title
+       above is enough. */
+    display: none;
   }
 
   h2 {
-    font-size: clamp(1.5rem, 0.9rem + 1.8vw, 2.125rem);
+    font-size: clamp(1.625rem, 0.9rem + 2vw, 2.25rem);
     font-weight: 800;
-    margin: 64px 0 20px;
-    padding-top: 24px;
-    padding-left: 18px;
+    margin: 72px 0 24px;
+    padding-top: 28px;
+    padding-left: 22px;
     position: relative;
     border-top: 1px solid var(--border);
     line-height: 1.15;
@@ -134,7 +143,7 @@
     content: "";
     position: absolute;
     left: 0;
-    top: 28px;
+    top: 32px;
     width: 4px;
     height: calc(100% - 8px);
     background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
@@ -143,22 +152,22 @@
   }
 
   h3 {
-    font-size: clamp(1.125rem, 0.7rem + 1.0vw, 1.4rem);
+    font-size: clamp(1.2rem, 0.7rem + 1.1vw, 1.5rem);
     font-weight: 700;
-    margin: 40px 0 14px;
+    margin: 44px 0 16px;
     color: oklch(85% 0.05 var(--hue-blue));
   }
 
   h4 {
-    font-size: 1.05rem;
+    font-size: 1.1rem;
     font-weight: 600;
-    margin: 28px 0 10px;
+    margin: 32px 0 12px;
     color: oklch(80% 0.06 var(--hue-cyan));
   }
 
   /* ----- Paragraphs ----- */
   p {
-    margin: 14px 0;
+    margin: 16px 0;
     color: var(--text-2);
   }
 
@@ -189,7 +198,7 @@
   /* ----- Inline code ----- */
   code {
     font-family: var(--font-mono);
-    font-size: 0.88em;
+    font-size: 0.86em;
     background: var(--bg-code);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -204,12 +213,12 @@
     background: var(--bg-code);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 18px 20px;
-    margin: 18px 0;
+    padding: 20px 24px;
+    margin: 20px 0;
     overflow-x: auto;
     position: relative;
     font-size: 13px;
-    line-height: 1.6;
+    line-height: 1.7;
     box-shadow: 0 1px 0 oklch(50% 0.05 var(--hue-blue) / 0.10) inset;
   }
 
@@ -233,14 +242,19 @@
 
   /* ----- Lists ----- */
   ul, ol {
-    margin: 14px 0 14px 4px;
-    padding-left: 24px;
+    margin: 16px 0 16px 4px;
+    padding-left: 28px;
     color: var(--text-2);
   }
 
   li {
-    margin: 6px 0;
-    padding-left: 4px;
+    margin: 8px 0;
+    padding-left: 6px;
+  }
+
+  li > ul,
+  li > ol {
+    margin: 6px 0 4px;
   }
 
   ul li::marker {
@@ -253,12 +267,51 @@
     font-weight: 500;
   }
 
+  /* Checkbox-style task list items (pandoc renders `- [ ]` as
+     <li><input type="checkbox" disabled> ...).  Override default ugly
+     appearance with a custom dark-friendly box. */
+  input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--bg-code);
+    margin-right: 10px;
+    margin-left: -22px;
+    margin-bottom: -3px;
+    vertical-align: middle;
+    cursor: pointer;
+    transition: border-color 150ms, background 150ms;
+  }
+
+  input[type="checkbox"]:hover {
+    border-color: var(--accent);
+  }
+
+  input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+    position: relative;
+  }
+
+  input[type="checkbox"]:checked::after {
+    content: "✓";
+    position: absolute;
+    top: -3px;
+    left: 2px;
+    color: #000;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
   /* ----- Tables ----- */
   table {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    margin: 24px 0;
+    margin: 28px 0;
     font-size: 14px;
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -272,7 +325,7 @@
   }
 
   th {
-    padding: 12px 14px;
+    padding: 14px 16px;
     text-align: left;
     font-family: var(--font-display);
     font-size: 11px;
@@ -285,7 +338,7 @@
   }
 
   td {
-    padding: 10px 14px;
+    padding: 12px 16px;
     vertical-align: top;
     border-bottom: 1px solid var(--border);
     color: var(--text-2);
@@ -312,14 +365,14 @@
   blockquote {
     border-left: 3px solid var(--accent);
     background: oklch(22% 0.04 var(--hue-blue) / 0.18);
-    padding: 14px 18px;
-    margin: 18px 0;
+    padding: 16px 22px;
+    margin: 20px 0;
     border-radius: 0 8px 8px 0;
     color: var(--text-2);
   }
 
   blockquote p {
-    margin: 4px 0;
+    margin: 6px 0;
   }
 
   /* ----- Horizontal rule ----- */
@@ -327,7 +380,7 @@
     border: none;
     height: 1px;
     background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
-    margin: 48px 0;
+    margin: 56px 0;
   }
 
   /* ----- TOC ----- */
@@ -335,8 +388,8 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 24px 28px;
-    margin: 32px 0 48px;
+    padding: 26px 32px;
+    margin: 32px 0 56px;
     position: relative;
     box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35);
   }
@@ -349,7 +402,7 @@
     font-weight: 500;
     letter-spacing: 0.18em;
     color: var(--text-4);
-    margin-bottom: 14px;
+    margin-bottom: 16px;
     text-transform: uppercase;
   }
 
@@ -360,34 +413,34 @@
   }
 
   #TOC ul ul {
-    padding-left: 18px;
-    margin: 4px 0 8px;
+    padding-left: 22px;
+    margin: 4px 0 10px;
     border-left: 1px solid var(--border);
   }
 
   #TOC li {
-    margin: 4px 0;
+    margin: 5px 0;
     padding: 0;
-    line-height: 1.5;
+    line-height: 1.55;
   }
 
   #TOC > ul > li {
-    margin: 8px 0;
+    margin: 10px 0;
   }
 
   #TOC > ul > li > a {
     font-family: var(--font-display);
     font-weight: 600;
     color: #fff;
-    font-size: 14px;
+    font-size: 14.5px;
   }
 
   #TOC a {
     border-bottom: none;
     color: var(--text-2);
     display: inline-block;
-    padding: 2px 0;
-    font-size: 13px;
+    padding: 3px 0;
+    font-size: 13.5px;
     transition: color 150ms var(--ease-out-expo), transform 150ms var(--ease-out-expo);
   }
 
@@ -403,11 +456,6 @@
     font-weight: 700;
     color: oklch(86% 0.10 var(--hue-cyan));
     letter-spacing: -0.01em;
-  }
-
-  /* ----- Checkmark styling (✓ / ⏸ characters in tables) ----- */
-  td {
-    font-variant-numeric: tabular-nums;
   }
 
   /* ----- Footnote / muted text on dimmer rows ----- */
@@ -448,6 +496,7 @@
       background: white;
       color: black;
       padding: 0;
+      max-width: none;
     }
     h2::before {
       display: none;
@@ -464,23 +513,30 @@
   }
 
   /* ----- Responsive ----- */
+  @media (max-width: 1040px) {
+    body {
+      padding: 40px 28px 96px;
+    }
+  }
+
   @media (max-width: 720px) {
     body {
       padding: 24px 16px 64px;
-      font-size: 14px;
+      font-size: 14.5px;
     }
     table {
-      font-size: 12px;
+      font-size: 12.5px;
     }
     th, td {
-      padding: 8px 10px;
+      padding: 10px 12px;
     }
     h2 {
-      margin: 48px 0 16px;
+      margin: 52px 0 18px;
+      padding-left: 18px;
     }
     pre {
-      padding: 14px 16px;
-      font-size: 12px;
+      padding: 16px 18px;
+      font-size: 12.5px;
     }
   }
   </style>

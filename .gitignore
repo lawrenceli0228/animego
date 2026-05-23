@@ -63,6 +63,7 @@ go-api/migrate-mongo
 docs/migration/*STATUS*
 docs/migration/PHASE*-STATUS*
 docs/migration/PHASE*-COMPLETE*
+docs/migration/LOCAL-TEST*
 docs/**/*-DESIGN.md
 docs/**/*-DESIGN.html
 docs/migration/P*-PROGRESS.md
