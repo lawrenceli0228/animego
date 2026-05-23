@@ -245,11 +245,45 @@ func main() {
 	// reading on top without changing the response shape.
 	queueStatusFn := func(ctx context.Context) (admin.QueueSnapshot, error) {
 		snap := admin.QueueSnapshot{}
-		s, err := queue.Status(ctx, riverClient)
-		if err != nil {
-			return snap, err
+
+		// V3 paused flag — survives process restart (river_queue.paused_at).
+		if s, err := queue.Status(ctx, riverClient); err == nil {
+			snap.V3Progress = &admin.V3BatchProgress{Paused: s.V3Paused}
+		} else {
+			slog.WarnContext(ctx, "admin: queue.Status failed", "err", err)
 		}
-		snap.V3Progress = &admin.V3BatchProgress{Paused: s.V3Paused}
+
+		// G5 — depth counters by river job kind.  Express tracked these
+		// via in-memory Map sizes in bangumi.service.js; river persists
+		// the state in river_job, so a one-shot aggregate replaces the
+		// counter bookkeeping the in-memory model needed.  Soft-fail —
+		// if the query errors we still return the paused flag.
+		rows, err := pool.Query(ctx, `
+			SELECT kind, count(*)::bigint
+			FROM river_job
+			WHERE state IN ('available','running','pending','retryable','scheduled')
+			GROUP BY kind
+		`)
+		if err != nil {
+			slog.WarnContext(ctx, "admin: queue depth query failed", "err", err)
+			return snap, nil
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var kind string
+			var cnt int64
+			if err := rows.Scan(&kind, &cnt); err != nil {
+				continue
+			}
+			switch kind {
+			case "bangumi_v1":
+				snap.Phase1 = cnt
+			case "bangumi_v2":
+				snap.Phase4 = cnt
+			case "bangumi_v3":
+				snap.V3 = cnt
+			}
+		}
 		return snap, nil
 	}
 	adminReadHandlers := admin.NewHandlers(pool, q, queueStatusFn, nil)
@@ -287,6 +321,15 @@ func main() {
 	defer dandanClient.Close()
 	dandanplayHandlers := dandanplay.NewHandlers(q, dandanClient, bangumiClient)
 
+	// G4 — global per-IP rate limiter for /api/*.  Express applied
+	// apiLimiter (300/15min) across the whole /api/* tree; Go has only
+	// the strict 10/15min auth limiter so far, leaving anime/dandanplay
+	// /admin/comments/etc unmetered.  This middleware skips itself for
+	// /health + /api/health (see shouldLimitPath in api_ratelimit.go)
+	// so LB probes are never throttled.
+	apiRateLimit := httpmw.NewAPIRateLimiter()
+	defer apiRateLimit.Stop()
+
 	r := chi.NewRouter()
 	r.Use(httpmw.CORS(cfg.ClientOrigin))
 	r.Use(middleware.RequestID)
@@ -294,11 +337,28 @@ func main() {
 	r.Use(httpmw.RequestLog(slog.Default()))
 	r.Use(httpmw.Recoverer(slog.Default()))
 	r.Use(middleware.Timeout(60 * time.Second))
+	// G2 — 1 MiB request body cap.  Without this a single 1GB POST
+	// to /api/auth/register or /api/comments would allocate the full
+	// buffer in RAM before validation rejects it.  The cap surfaces
+	// downstream as a JSON decode error → 400 "Invalid request body".
+	r.Use(httpmw.MaxBodyBytes(httpmw.DefaultMaxBodyBytes))
+	// G4 wiring (see comment above).
+	r.Use(apiRateLimit.Middleware())
+
+	// G3 — chi defaults emit plain-text "404 page not found" / "405
+	// Method Not Allowed" for unmatched routes.  Frontend retry logic
+	// branches on error.code === "NOT_FOUND" — emit the byte-exact
+	// Express envelope so that path keeps working.
+	r.NotFound(httpmw.NotFound)
+	r.MethodNotAllowed(httpmw.MethodNotAllowed)
 
 	// Health endpoint pings the DB pool.  Docker healthcheck only
 	// requires HTTP 200; RequestLog skips this path to avoid drowning
-	// real traffic in 2880 probe lines per pod per day.
+	// real traffic in 2880 probe lines per pod per day.  G1: register
+	// at BOTH /health and /api/health so existing nginx upstream probes
+	// (currently pointed at Express's /api/health) survive cutover.
 	r.Get("/health", healthHandler(pool))
+	r.Get("/api/health", healthHandler(pool))
 
 	// P2.2 auth: 7 endpoints.  Rate-limiter wraps the public flows
 	// (register/login/refresh + forgot/reset-password); logout + /me

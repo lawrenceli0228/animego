@@ -26,6 +26,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -172,6 +173,11 @@ func (h *UserHandlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// G6 — normalise email to lowercase before any DB touch.  Mirrors
+	// auth.Register; users_email_lowercase_chk (migration 0009) is
+	// defense-in-depth — handler is canonical normaliser.
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+
 	username := req.Username
 	email := req.Email
 	dup, err := h.db.AdminFindUserByUsernameOrEmail(ctx, &username, &email)
@@ -291,7 +297,10 @@ func (h *UserHandlers) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		v := req.Username
 		usernamePtr = &v
 	}
+	// G6 — normalise update email to lowercase (defense-in-depth
+	// matches CHECK in migration 0009).
 	if req.Email != "" {
+		req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 		v := req.Email
 		emailPtr = &v
 	}

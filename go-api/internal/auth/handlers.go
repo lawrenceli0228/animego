@@ -192,6 +192,13 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// G6 — normalise email to lowercase before any DB touch.  The
+	// users_email_lowercase_chk constraint added in migration 0009 is
+	// defense-in-depth; the application layer is the canonical source
+	// of normalisation so the user-facing error stays "Username or
+	// email already exists" instead of leaking a CHECK violation.
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+
 	if dup, err := h.checkDuplicate(ctx, req.Email, req.Username); err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "duplicate check failed"))
 		return
@@ -254,6 +261,10 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, codeValidation, validationMessage(err)))
 		return
 	}
+
+	// G6 — match lookup against the lowercase canonical form (rows
+	// are stored lowercase by Register + admin CreateUser).
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
 	user, err := h.db.GetUserByEmail(ctx, req.Email)
 	if err != nil {
