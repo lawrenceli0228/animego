@@ -71,3 +71,9 @@ docs/migration/P*-PROGRESS.html
 # BASELINE raw data dumps (lighthouse JSON, nginx logs, etc.) — local-only
 # for reproducibility; the distilled numbers live in BASELINE.md itself.
 docs/migration/data/
+
+# nginx self-signed cert — generated locally + on the VPS independently.
+# Prod uses Let's Encrypt via the deploy script. Local dev uses openssl
+# self-signed (browser cert warning, accept once).
+nginx/selfsigned.crt
+nginx/selfsigned.key

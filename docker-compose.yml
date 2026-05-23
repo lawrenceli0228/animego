@@ -23,6 +23,45 @@ services:
     networks:
       - animego
 
+  # ─── P8.1: next-app (Next.js 16 RSC) ─────────────────────────────────
+  # Standalone Bun-built Next.js process. nginx routes public SEO pages
+  # (/, /anime/, /seasonal/, /search, /welcome, /sitemap.xml, /robots.txt,
+  # /_next/) to this service; everything else (auth, /library, /player,
+  # /admin, /api/*, /socket.io/) stays on the legacy `app` Express
+  # service. RSC fetches go to `app:5001` directly via the Docker
+  # network (GO_API_INTERNAL_URL), NOT through nginx, since Express
+  # serves the same byte-compatible envelope go-api produces. Phase 8.5
+  # flips RSC fetches to go_api:8080 once that service deploys.
+  next-app:
+    build:
+      context: .
+      dockerfile: next-app/Dockerfile
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      # RSC server-side fetch base. Points at the Express container by
+      # service name (Docker DNS resolves it). When Go API ships to
+      # prod (P8.5), flip this to http://go-api:8080.
+      GO_API_INTERNAL_URL: http://app:5001
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    depends_on:
+      - app
+    networks:
+      - animego
+    healthcheck:
+      # Use 127.0.0.1 not localhost: alpine resolves localhost to ::1
+      # first, but next 16 standalone server only binds the IPv4
+      # wildcard (HOSTNAME=0.0.0.0). v6 connect fails, container shows
+      # unhealthy even though every external request works.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
   # ─── P2.8: ws-server (socket.io danmaku) ─────────────────────────────
   # Standalone Node 20 process speaking the socket.io v4 protocol that
   # client/src/hooks/useDanmaku.js already uses.  Reads JWT_SECRET shared
@@ -67,6 +106,7 @@ services:
       - ./nginx/selfsigned.key:/etc/nginx/ssl/selfsigned.key:ro
     depends_on:
       - app
+      - next-app
     networks:
       - animego
 

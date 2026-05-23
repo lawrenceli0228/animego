@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { getLang } from "@/lib/i18n";
+import Navbar from "@/components/layout/Navbar";
+import Footer from "@/components/layout/Footer";
+import { getDict, getLang } from "@/lib/i18n";
 import "./globals.css";
 
 // Root-level defaults applied to every route segment unless a child page
@@ -59,15 +61,38 @@ export const viewport: Viewport = {
   colorScheme: "dark",
 };
 
+type Season = "WINTER" | "SPRING" | "SUMMER" | "FALL";
+
+function getCurrentSeason(): Season {
+  const m = new Date().getMonth() + 1;
+  if (m <= 3) return "WINTER";
+  if (m <= 6) return "SPRING";
+  if (m <= 9) return "SUMMER";
+  return "FALL";
+}
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const lang = await getLang();
+  const [lang, dict] = await Promise.all([getLang(), getDict()]);
+  const season = getCurrentSeason();
+  const year = new Date().getFullYear();
+
   return (
     <html lang={lang === "en" ? "en" : "zh-CN"}>
-      <body>{children}</body>
+      <body
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <Navbar dict={dict} lang={lang} season={season} year={year} />
+        <div style={{ flex: 1 }}>{children}</div>
+        <Footer dict={dict} season={season} year={year} />
+      </body>
     </html>
   );
 }
