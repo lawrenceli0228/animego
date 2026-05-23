@@ -1,17 +1,32 @@
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap");
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #000;
+  --bg-card: #0a0a0a;
+  --bg-elevated: #141414;
+  --text: #fff;
+  --text-secondary: rgba(235, 235, 245, 0.85);
+  --text-tertiary: rgba(235, 235, 245, 0.60);
+  --text-quaternary: rgba(235, 235, 245, 0.30);
+  --separator: rgba(84, 84, 88, 0.30);
+  --accent: #0a84ff;
+
+  --font-display: "Sora", system-ui, sans-serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
 }
 
 html {
   height: 100%;
+  color-scheme: dark;
 }
 
 html,
@@ -22,19 +37,11 @@ body {
 
 body {
   min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
 }
 
 a {
@@ -42,8 +49,31 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 0 16px;
+  }
+}
+
+/* HUD blink — landing components opt in by setting their own `animation`
+ * declaration; this class only provides the reduced-motion freeze. The
+ * matching @keyframes hudBlink lives in components/landing/shared/motion.css. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-blink {
+    animation: none !important;
+    opacity: 1 !important;
   }
 }

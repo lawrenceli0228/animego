@@ -3,8 +3,7 @@
   "private": true,
   "workspaces": [
     "client",
-    "server",
-    "next-app"
+    "server"
   ],
   "scripts": {
     "dev:server": "npm run dev --workspace=server",
