@@ -64,6 +64,17 @@ describe('parseEpisodeNumber', () => {
   it('uses fallback for standalone 2-digit numbers', () => {
     expect(parseEpisodeNumber('Anime_05_final.mkv')).toBe(5)
   })
+
+  // Regression: word like "de" before a digit (Japanese romaji "2-banme" titles)
+  // used to bind the EP? pattern to `e 2` and collapse every file in the cluster
+  // onto ep2 during import. Word boundary on EP? prevents that.
+  it('does not pick up "e 2" from prose like "Class de 2-banme" — dash format wins', () => {
+    const base = '[LoliHouse] Class de 2-banme ni Kawaii Onnanoko to Tomodachi ni Natta'
+    const tail = '[WebRip 1080p HEVC-10bit AAC SRTx2].mkv'
+    expect(parseEpisodeNumber(`${base} - 01 ${tail}`)).toBe(1)
+    expect(parseEpisodeNumber(`${base} - 02 ${tail}`)).toBe(2)
+    expect(parseEpisodeNumber(`${base} - 07 ${tail}`)).toBe(7)
+  })
 })
 
 describe('parseAnimeKeyword', () => {

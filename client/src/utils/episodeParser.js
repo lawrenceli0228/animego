@@ -36,8 +36,11 @@ function stripTechTokens(s) {
 
 export function parseEpisodeNumber(filename) {
   const patterns = [
-    /S\d+E(\d+)/i,                  // S01E03
-    /EP?\s*(\d+)/i,                 // EP03, E03, EP 03
+    /\bS\d+E(\d+)/i,                // S01E03
+    // `\b` is load-bearing — without it, `e 2` inside prose like
+    // "Class de 2-banme" matched and stole the episode number across all 7
+    // files in the cluster, collapsing them onto ep2 in the import flow.
+    /\bEP?\s*(\d+)/i,               // EP03, E03, EP 03
     /第(\d+)[話话集]/,               // 第03話, 第3集
     /\s-\s(\d+)\s/,                 // " - 03 "
     /\[(\d+)(?:v\d+)?\]/,          // [03], [03v2]
