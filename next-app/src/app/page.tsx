@@ -13,6 +13,7 @@ import { getDict, getLang } from "@/lib/i18n";
 import type {
   SeasonalAnime,
   TrendingItem,
+  YearlyTopItem,
   ApiPagedEnvelope,
 } from "@/lib/types";
 
@@ -92,6 +93,20 @@ async function safeSchedule(): Promise<ScheduleResponse> {
   }
 }
 
+async function safeYearlyTop(year: number): Promise<YearlyTopItem[]> {
+  try {
+    return await apiGet<YearlyTopItem[]>(
+      `/api/anime/yearly-top?year=${year}&limit=10`,
+      { revalidate: 300 },
+    );
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 404) {
+      console.warn("[HomePage] yearly-top fetch failed:", err);
+    }
+    return [];
+  }
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDict();
   // Use the legacy site title and a discovery-oriented description.
@@ -118,19 +133,21 @@ export default async function HomePage() {
   const season = getCurrentSeason();
   const year = new Date().getFullYear();
 
-  const [dict, lang, seasonal, trending, gems, schedule] = await Promise.all([
-    getDict(),
-    getLang(),
-    safeSeasonal(season, year),
-    safeTrending(),
-    safeCompletedGems(),
-    safeSchedule(),
-  ]);
+  const [dict, lang, seasonal, trending, gems, schedule, yearlyTop] =
+    await Promise.all([
+      getDict(),
+      getLang(),
+      safeSeasonal(season, year),
+      safeTrending(),
+      safeCompletedGems(),
+      safeSchedule(),
+      safeYearlyTop(year),
+    ]);
 
-  // Hero takes the top 5 of the current season; SeasonRankings shows the
-  // full first page (overlap with hero is intentional, matches legacy).
+  // Hero takes the top 5 of the current season. SeasonRankings is the
+  // 年度榜 (annual top 10) ranking list — not the same data set as the
+  // season grid, matches legacy client/src/components/home/SeasonRankings.jsx.
   const heroList = seasonal.data.slice(0, 5);
-  const rankingsList = seasonal.data;
 
   return (
     <main>
@@ -144,13 +161,7 @@ export default async function HomePage() {
         <WeeklySchedule schedule={schedule} dict={dict} lang={lang} />
         <CompletedGems items={gems} dict={dict} lang={lang} />
         <ActivityFeed dict={dict} lang={lang} />
-        <SeasonRankings
-          items={rankingsList}
-          dict={dict}
-          lang={lang}
-          season={season}
-          year={year}
-        />
+        <SeasonRankings items={yearlyTop} dict={dict} lang={lang} />
       </div>
     </main>
   );

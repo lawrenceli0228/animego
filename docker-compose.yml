@@ -11,6 +11,12 @@ services:
       - mongodb
     networks:
       - animego
+    mem_limit: 400m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   mongodb:
     # Removed at cutover + 30d.  Until then it backs `app` and the
@@ -22,6 +28,12 @@ services:
     command: --wiredTigerCacheSizeGB 0.4
     networks:
       - animego
+    mem_limit: 500m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ─── P8.1: next-app (Next.js 16 RSC) ─────────────────────────────────
   # Standalone Bun-built Next.js process. nginx routes public SEO pages
@@ -47,6 +59,14 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
+      # Server-side timezone. Without this the container defaults to UTC
+      # and any toLocaleTimeString / toLocaleDateString call SSR-renders
+      # a different string than the client (browser local TZ) →
+      # React error #418 hydration text mismatch. Asia/Shanghai matches
+      # the primary user base (CN/HK/TW/海外华人). Browser-side TZ
+      # outliers (US/EU users) will still mismatch — those callsites
+      # need suppressHydrationWarning as a separate fix.
+      TZ: Asia/Shanghai
     depends_on:
       - app
     networks:
@@ -61,6 +81,12 @@ services:
       timeout: 3s
       retries: 3
       start_period: 30s
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ─── P2.8: ws-server (socket.io danmaku) ─────────────────────────────
   # Standalone Node 20 process speaking the socket.io v4 protocol that
@@ -93,6 +119,12 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nginx:
     image: nginx:alpine
@@ -109,6 +141,12 @@ services:
       - next-app
     networks:
       - animego
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   mongo-data:

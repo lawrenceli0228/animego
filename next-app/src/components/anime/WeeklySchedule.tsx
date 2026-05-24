@@ -78,9 +78,24 @@ const DAY_EN: Record<number, string> = {
   6: "Sat",
 };
 
+// Lock to Asia/Shanghai so SSR (server TZ) and hydrate (browser TZ)
+// emit identical text. Without an explicit timeZone, server and any
+// non-CST browser disagree on hour → React error #418. Anime airing
+// schedules are conventionally shown in JST/CST, not the viewer's
+// local zone, so this also matches user expectations.
+const SCHEDULE_TZ = "Asia/Shanghai";
+
 function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: SCHEDULE_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === "year")?.value ?? "0000";
+  const m = parts.find((p) => p.type === "month")?.value ?? "00";
+  const d = parts.find((p) => p.type === "day")?.value ?? "00";
+  return `${y}-${m}-${d}`;
 }
 
 function formatTime(unixSec: number): string {
@@ -88,6 +103,7 @@ function formatTime(unixSec: number): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: SCHEDULE_TZ,
   });
 }
 
