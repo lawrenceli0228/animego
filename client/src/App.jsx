@@ -7,8 +7,10 @@ import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 
 // Route-level code splitting: keep HomePage + LoginPage eager, lazy-load the rest
-// to trim the landing/login bundle. PlayerPage / LandingPage / AdminDashboard are
-// the heaviest (artplayer + motion + admin charts) so they MUST stay lazy.
+// to trim the landing/login bundle. PlayerPage / LandingPage are the heaviest
+// (artplayer + motion) so they MUST stay lazy.
+// AdminDashboard removed in P7: /admin migrated to next-app/src/app/admin/page.tsx,
+// nginx routes /admin → next-app upstream now.
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const SeasonPage = lazy(() => import('./pages/SeasonPage'))
 const AnimeDetailPage = lazy(() => import('./pages/AnimeDetailPage'))
@@ -19,7 +21,6 @@ const UserProfilePage = lazy(() => import('./pages/UserProfilePage'))
 const FollowListPage = lazy(() => import('./pages/FollowListPage'))
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'))
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const PlayerPage = lazy(() => import('./pages/PlayerPage'))
 const LibraryPage = lazy(() => import('./pages/LibraryPage'))
 const LocalSeriesPage = lazy(() => import('./pages/LocalSeriesPage'))
@@ -48,7 +49,10 @@ export default function App() {
             <Route path="/forgot-password"         element={<ForgotPasswordPage />} />
             <Route path="/reset-password/:token"   element={<ResetPasswordPage />} />
             <Route path="/profile"                 element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-            <Route path="/admin"                   element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+            {/* /admin moved to next-app in P7 — nginx routes that prefix
+                to next_app upstream now. If the user lands here via a
+                stale bookmark while next-app is down, the SPA shows the
+                404 page (no Route match). */}
             <Route path="/u/:username"             element={<UserProfilePage />} />
             <Route path="/u/:username/followers"  element={<FollowListPage type="followers" />} />
             <Route path="/u/:username/following"  element={<FollowListPage type="following" />} />

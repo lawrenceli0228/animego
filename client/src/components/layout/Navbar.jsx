@@ -104,7 +104,12 @@ export default function Navbar() {
           {user ? (
             <>
               <span style={s.username}>{t('nav.hi')}, {user.username}</span>
-              {user.role === 'admin' && <Link to="/admin" style={s.btnOutline}>{t('admin.navLabel')}</Link>}
+              {/* /admin moved to next-app in P7. Use a plain <a> for a
+                  full page navigation so nginx routes the request to
+                  the next-app upstream instead of React Router doing
+                  a client-side push that lands on a 404 (the SPA no
+                  longer has the /admin route). */}
+              {user.role === 'admin' && <a href="/admin" style={s.btnOutline}>{t('admin.navLabel')}</a>}
               <Link to="/profile" style={s.btnOutline}>{t('nav.myList')}</Link>
               <button style={s.btnOutline} onClick={handleLogout}>{t('nav.logout')}</button>
             </>
