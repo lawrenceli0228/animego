@@ -1,24 +1,27 @@
-// Phase 8.0 port of client/src/components/home/CompletedGems.jsx.
+"use client";
+
+// Visual + behavior parity with client/src/components/home/CompletedGems.jsx.
 //
-// Stateless server component: parent page fetches /api/anime/completed-gems
-// (limit=6 per spec; legacy uses 10) and passes items in. The legacy
-// "refresh batch" button required React Query cache invalidation, which
-// only makes sense on the client; we drop the button here because the
-// list is static per render. If we re-introduce refresh later, mark this
-// 'use client' and lift to a state-bearing parent.
-//
-// ASCII comments only — Unicode in source can panic Turbopack.
+// The /api/anime/completed-gems endpoint returns a RANDOM sample on
+// every call — that is the whole point of the "换一批" (refresh batch)
+// button. A pure RSC version (Phase 8.0 initial port) lost that
+// behavior by treating items as static parent-fetched props. Restored
+// here: parent still SSR-fetches initialItems so SEO + first paint stay
+// fast, but the refresh button re-fetches client-side and swaps the
+// list in place — same UX as the legacy React Query
+// queryClient.invalidateQueries(['completedGems']) call.
 
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import { useCallback, useState, type CSSProperties } from "react";
 import { formatScore, pickTitle } from "@/lib/formatters";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { TrendingItem } from "@/lib/types";
 
 export interface CompletedGemsProps {
-  items: TrendingItem[];
+  initialItems: TrendingItem[];
   dict: Dict;
   lang: Lang;
+  limit?: number;
 }
 
 const sectionStyle: CSSProperties = { marginTop: 48 };
@@ -42,6 +45,27 @@ const labelStyle: CSSProperties = {
 const titleStyle: CSSProperties = {
   fontSize: "clamp(22px,3vw,32px)",
   color: "#ffffff",
+};
+
+const refreshButtonStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "8px 18px",
+  borderRadius: 9999,
+  fontSize: 13,
+  fontWeight: 500,
+  border: "1px solid #38383a",
+  background: "transparent",
+  color: "rgba(235,235,245,0.60)",
+  cursor: "pointer",
+  transition: "all 0.2s",
+};
+
+const refreshButtonBusyStyle: CSSProperties = {
+  ...refreshButtonStyle,
+  opacity: 0.6,
+  cursor: "wait",
 };
 
 const gridStyle: CSSProperties = {
@@ -126,7 +150,44 @@ const genresStyle: CSSProperties = {
   textOverflow: "ellipsis",
 };
 
-export default function CompletedGems({ items, dict, lang }: CompletedGemsProps) {
+type GemItem = TrendingItem & { genres?: string[] };
+
+export default function CompletedGems({
+  initialItems,
+  dict,
+  lang,
+  limit = 10,
+}: CompletedGemsProps) {
+  const [items, setItems] = useState<GemItem[]>(initialItems as GemItem[]);
+  const [busy, setBusy] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      // Cache-buster query param so any HTTP/CDN cache layer between us
+      // and the API returns a fresh random sample instead of replaying
+      // the previous response. The endpoint itself shuffles per call,
+      // but Cloudflare / nginx could collapse identical URLs.
+      const res = await fetch(
+        `/api/anime/completed-gems?limit=${limit}&_=${Date.now()}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) return;
+      const body = (await res.json()) as
+        | { data: GemItem[] }
+        | GemItem[];
+      const next = Array.isArray(body) ? body : body.data;
+      if (Array.isArray(next) && next.length > 0) setItems(next);
+    } catch {
+      // Silent: refresh failure leaves the previous batch on screen,
+      // matching legacy behavior (React Query also silently keeps the
+      // last successful query result on a failed refetch).
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, limit]);
+
   if (!items || items.length === 0) return null;
 
   return (
@@ -136,14 +197,39 @@ export default function CompletedGems({ items, dict, lang }: CompletedGemsProps)
           <p style={labelStyle}>{dict.home.gemsLabel}</p>
           <h2 style={titleStyle}>{dict.home.gemsTitle}</h2>
         </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={busy}
+          aria-label={dict.home.gemsRefresh}
+          className="gems-refresh-btn"
+          style={busy ? refreshButtonBusyStyle : refreshButtonStyle}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              animation: busy ? "gems-spin 0.9s linear infinite" : undefined,
+            }}
+          >
+            <path d="M21 2v6h-6" />
+            <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+            <path d="M3 22v-6h6" />
+            <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+          </svg>
+          {dict.home.gemsRefresh}
+        </button>
       </div>
 
       <div className="gems-grid" style={gridStyle}>
         {items.map((item) => {
-          // TrendingItem.genres is not on the type (it lives on
-          // AnimeDetail). Fall back to an empty array via a structural
-          // read so the file does not depend on Phase 5 detail shape.
-          const genres = ((item as unknown) as { genres?: string[] }).genres ?? [];
+          const genres = item.genres ?? [];
           const score = item.averageScore ?? 0;
           const episodes = item.episodes ?? 0;
           const title = pickTitle(item, lang);
@@ -191,6 +277,14 @@ export default function CompletedGems({ items, dict, lang }: CompletedGemsProps)
       <style>{`
         .gems-card { transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), box-shadow 0.3s cubic-bezier(0.4,0,0.2,1); }
         .gems-card:hover { transform: translateY(-6px); box-shadow: 0 12px 28px rgba(0,0,0,0.50); }
+        .gems-refresh-btn:hover:not(:disabled) {
+          border-color: #0a84ff !important;
+          color: #0a84ff !important;
+        }
+        @keyframes gems-spin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
         @media (max-width: 900px) {
           .gems-grid { grid-template-columns: repeat(3, 1fr) !important; }
         }

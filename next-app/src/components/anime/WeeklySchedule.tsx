@@ -78,11 +78,12 @@ const DAY_EN: Record<number, string> = {
   6: "Sat",
 };
 
-// Lock to Asia/Shanghai so SSR (server TZ) and hydrate (browser TZ)
-// emit identical text. Without an explicit timeZone, server and any
-// non-CST browser disagree on hour → React error #418. Anime airing
-// schedules are conventionally shown in JST/CST, not the viewer's
-// local zone, so this also matches user expectations.
+// localToday is locked to Asia/Shanghai because it picks which tab is
+// "today" — and the upstream /api/anime/schedule "today" field is also
+// CST-computed on the server. If we let localToday float to browser
+// TZ, an AEST/UTC user crossing midnight would highlight a different
+// tab than the one the API thinks is today, causing an off-by-one day
+// in the rolling-week display.
 const SCHEDULE_TZ = "Asia/Shanghai";
 
 function localToday(): string {
@@ -98,12 +99,19 @@ function localToday(): string {
   return `${y}-${m}-${d}`;
 }
 
+// Airing-time string follows the viewer's browser TZ (matches the
+// legacy SPA's toLocaleTimeString default). Without an explicit
+// timeZone the server (TZ=Asia/Shanghai) and a non-CST browser will
+// emit different strings → React error #418 hydration mismatch on
+// every card. The fix is suppressHydrationWarning on the rendered
+// <span>: React keeps the SSR string in the HTML (good for SEO +
+// noscript users) and silently lets the client first render replace
+// it with the browser-local time, no console error.
 function formatTime(unixSec: number): string {
   return new Date(unixSec * 1000).toLocaleTimeString("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-    timeZone: SCHEDULE_TZ,
   });
 }
 
@@ -341,7 +349,9 @@ export default function WeeklySchedule({
                       {dict.detail.ep} {item.episode} {dict.detail.epUnit}
                     </span>
                     <div style={timeScoreStyle}>
-                      <span style={timeStyle}>{formatTime(item.airingAt)}</span>
+                      <span style={timeStyle} suppressHydrationWarning>
+                        {formatTime(item.airingAt)}
+                      </span>
                       {score > 0 ? (
                         <span style={scoreStyle}>
                           {"★ "}

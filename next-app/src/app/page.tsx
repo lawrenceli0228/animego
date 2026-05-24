@@ -17,10 +17,25 @@ import type {
   ApiPagedEnvelope,
 } from "@/lib/types";
 
-// Phase 8.0: HomePage replaces the LandingPage at /. The marketing page
-// moved to /welcome. revalidate=60 mirrors trending freshness; seasonal
-// + gems + schedule tolerate the same window.
-export const revalidate = 60;
+// Phase 8.0: HomePage replaces the LandingPage at /. The marketing
+// page moved to /welcome.
+//
+// dynamic = "force-dynamic" instead of revalidate = 60:
+// The homepage aggregates 6 different upstream fetches with different
+// freshness needs (schedule changes hourly as Mongo rotates the
+// window; trending tightens every minute; yearly-top barely changes).
+// A single page-level revalidate window forces every fetch through
+// the same ISR cache and effectively silences each fetcher's own
+// `cache` / `revalidate` option — that's how schedule ended up
+// showing day-old tab counts even after we switched it to "no-store"
+// (the page-level revalidate=60 overrode it). Force-dynamic keeps
+// the page SSR per request; each safe* fetcher then honors its own
+// revalidate / cache mode, so schedule stays live while trending /
+// yearly-top can still cache. Cost: ~one server render per page
+// hit. The actual cards still benefit from Cloudflare HTML cache
+// in prod, and the per-page render is cheap because the upstream
+// API responses are themselves cached on the Express side.
+export const dynamic = "force-dynamic";
 
 type Season = "WINTER" | "SPRING" | "SUMMER" | "FALL";
 
@@ -68,10 +83,16 @@ async function safeTrending(): Promise<TrendingItem[]> {
   }
 }
 
+// Match legacy useCompletedGems(10) — 10 cards in a 5-col grid (3 mobile / 2
+// narrow). Endpoint returns a random sample per call; the component owns
+// "换一批" client-side refetch, so revalidate stays low to avoid serving
+// the same SSR cache for too long.
+const COMPLETED_GEMS_LIMIT = 10;
+
 async function safeCompletedGems(): Promise<TrendingItem[]> {
   try {
     return await apiGet<TrendingItem[]>(
-      "/api/anime/completed-gems?limit=6",
+      `/api/anime/completed-gems?limit=${COMPLETED_GEMS_LIMIT}`,
       { revalidate: 60 },
     );
   } catch (err) {
@@ -82,10 +103,20 @@ async function safeCompletedGems(): Promise<TrendingItem[]> {
   }
 }
 
+// /api/anime/schedule is a rolling 7-day window keyed off "today".
+// Mongo rotates the window every day, and within a day items get
+// re-scored / re-counted as enrichment lands. With revalidate=60 Next
+// 16 would serve a build-time static snapshot until the first stale
+// hit triggers a background regen — so per-day counts on the tab bar
+// (今天 18 / 周一 6 / ...) lag behind the legacy SPA by hours/days.
+// cache: "no-store" forces every RSC render to re-fetch and matches
+// the legacy useWeeklySchedule() React Query default (refetch on focus,
+// no long stale window). Cost is one upstream HTTP per page hit, which
+// the upstream nginx-cache layer can still absorb in prod.
 async function safeSchedule(): Promise<ScheduleResponse> {
   try {
     return await apiGet<ScheduleResponse>("/api/anime/schedule", {
-      revalidate: 60,
+      cache: "no-store",
     });
   } catch (err) {
     console.warn("[HomePage] schedule fetch failed:", err);
@@ -159,7 +190,12 @@ export default async function HomePage() {
         <TrendingSection items={trending} dict={dict} lang={lang} />
         <ContinueWatching dict={dict} lang={lang} />
         <WeeklySchedule schedule={schedule} dict={dict} lang={lang} />
-        <CompletedGems items={gems} dict={dict} lang={lang} />
+        <CompletedGems
+          initialItems={gems}
+          dict={dict}
+          lang={lang}
+          limit={COMPLETED_GEMS_LIMIT}
+        />
         <ActivityFeed dict={dict} lang={lang} />
         <SeasonRankings items={yearlyTop} dict={dict} lang={lang} />
       </div>
