@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import jwt from "jsonwebtoken";
-import Link from "next/link";
 
 // Belt-and-suspenders role re-check. `proxy.ts` already guards
 // /admin/:path*, but proxy matcher misconfigurations are an easy way to
@@ -46,16 +45,20 @@ export default async function AdminLayout({
       <header style={styles.header}>
         <div style={styles.headerInner}>
           <h1 style={styles.title}>管理后台</h1>
+          {/* Monolithic single-page admin — anchor scrolls instead of
+              Link navigations. Three sections live on /admin: #overview
+              (stats grid + EnrichmentBar), #enrichment (data review
+              table), #users (CRUD). */}
           <nav style={styles.nav} aria-label="Admin navigation">
-            <Link href="/admin" style={styles.navLink}>
+            <a href="#overview" style={styles.navLink}>
               总览
-            </Link>
-            <Link href="/admin/enrichment" style={styles.navLink}>
+            </a>
+            <a href="#enrichment" style={styles.navLink}>
               数据富化
-            </Link>
-            <Link href="/admin/users" style={styles.navLink}>
+            </a>
+            <a href="#users" style={styles.navLink}>
               用户管理
-            </Link>
+            </a>
           </nav>
           <div style={styles.userBadge}>
             <span style={styles.userLabel}>Hi,</span>{" "}

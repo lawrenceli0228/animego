@@ -111,7 +111,7 @@ export async function createAdminUser(data: {
       { body: { username, email, password } },
     );
     revalidateTag("admin:users", "max");
-    revalidatePath("/admin/users");
+    revalidatePath("/admin");
     return created;
   } catch (err) {
     throw toActionError("createAdminUser", err);
@@ -156,7 +156,7 @@ export async function updateAdminUser(
     );
     revalidateTag("admin:users", "max");
     revalidateTag(`user:profile:${userId}`, "max");
-    revalidatePath("/admin/users");
+    revalidatePath("/admin");
     return updated;
   } catch (err) {
     throw toActionError("updateAdminUser", err);
@@ -186,7 +186,7 @@ export async function deleteAdminUser(
     );
     revalidateTag("admin:users", "max");
     revalidateTag(`user:profile:${userId}`, "max");
-    revalidatePath("/admin/users");
+    revalidatePath("/admin");
     return result;
   } catch (err) {
     throw toActionError("deleteAdminUser", err);

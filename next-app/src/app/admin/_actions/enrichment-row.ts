@@ -50,7 +50,7 @@ export async function patchEnrichmentRow(
   // current view still renders. For immediate read-your-own-writes
   // semantics use updateTag, but admin edits don't need that here.
   revalidateTag(`anime:detail:${anilistId}`, "max");
-  revalidatePath("/admin/enrichment");
+  revalidatePath("/admin");
   return updated;
 }
 
@@ -70,7 +70,7 @@ export async function flagEnrichmentRow(
     { body: { flag } },
   );
   revalidateTag(`anime:detail:${anilistId}`, "max");
-  revalidatePath("/admin/enrichment");
+  revalidatePath("/admin");
   return res;
 }
 
@@ -87,6 +87,6 @@ export async function resetEnrichmentRow(
     "POST",
   );
   revalidateTag(`anime:detail:${anilistId}`, "max");
-  revalidatePath("/admin/enrichment");
+  revalidatePath("/admin");
   return res;
 }
