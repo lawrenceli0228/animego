@@ -76,7 +76,19 @@ function waitForMetadata(video, timeoutMs) {
 // glyph box. We override the default with PingFang SC / Microsoft YaHei /
 // Noto CJK depending on what's available locally. Cached after first load
 // so subsequent mounts skip the re-scan.
-let cjkFontCache = null; // { name, bytes } | 'none'
+// Only successful loads are cached. Earlier code persisted a 'none'
+// sentinel on every failure path, which collided with the first-play
+// permission flow: the user gesture in usePlaybackSession fires
+// queryLocalFonts() to prompt, but jassub mount races ahead — its
+// loadCjkFallback() reads perm.state === 'prompt' (user hasn't clicked
+// yet), caches 'none', and even after the user grants permission every
+// subsequent episode/refresh-less mount keeps returning the stale miss.
+// Outcome: subtitles tofu until the page is hard-reloaded.
+//
+// Now we cache only the success. A miss returns null without poisoning
+// the module state, so the next jassub mount (next episode / re-pick)
+// retries with the now-granted permission and resolves to PingFang SC.
+let cjkFontCache = null; // { name, bytes } when loaded; never set on failure
 const CJK_PREFERENCE = [
   'PingFang SC', 'PingFang TC',         // macOS
   'Hiragino Sans',                       // macOS (Japanese)
@@ -86,18 +98,11 @@ const CJK_PREFERENCE = [
 ];
 
 async function loadCjkFallback() {
-  if (cjkFontCache === 'none') return null;
   if (cjkFontCache) return cjkFontCache;
-  if (typeof window.queryLocalFonts !== 'function') {
-    cjkFontCache = 'none';
-    return null;
-  }
+  if (typeof window.queryLocalFonts !== 'function') return null;
   try {
     const perm = await navigator.permissions.query({ name: 'local-fonts' });
-    if (perm.state !== 'granted') {
-      cjkFontCache = 'none';
-      return null;
-    }
+    if (perm.state !== 'granted') return null;
     const all = await window.queryLocalFonts();
     for (const name of CJK_PREFERENCE) {
       const match = all.find((f) => f.family === name && /regular/i.test(f.style));
@@ -111,7 +116,6 @@ async function loadCjkFallback() {
     // eslint-disable-next-line no-console
     console.warn('[jassub] CJK fallback load failed:', err);
   }
-  cjkFontCache = 'none';
   return null;
 }
 
