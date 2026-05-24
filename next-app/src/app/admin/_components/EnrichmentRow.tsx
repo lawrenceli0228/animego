@@ -37,8 +37,13 @@ interface EditFormState {
 function initialForm(row: EnrichmentRowData): EditFormState {
   return {
     titleChinese: row.titleChinese ?? "",
-    bgmId: row.bgmId !== null ? String(row.bgmId) : "",
-    bangumiScore: row.bangumiScore !== null ? String(row.bangumiScore) : "",
+    // Loose `!= null` checks instead of strict `!== null` — go-api uses
+    // JSON omitempty so absent fields arrive as `undefined`, not `null`;
+    // strict-equality would let `undefined` slip through into
+    // `String(undefined)` and the input would render the literal text
+    // "undefined".
+    bgmId: row.bgmId != null ? String(row.bgmId) : "",
+    bangumiScore: row.bangumiScore != null ? String(row.bangumiScore) : "",
   };
 }
 
@@ -226,7 +231,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
               style={styles.input}
               disabled={pending}
             />
-          ) : row.titleChinese !== null ? (
+          ) : row.titleChinese != null ? (
             row.titleChinese
           ) : (
             <span style={styles.dim}>—</span>
@@ -243,7 +248,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
               style={{ ...styles.input, width: 96 }}
               disabled={pending}
             />
-          ) : row.bgmId !== null ? (
+          ) : row.bgmId != null ? (
             row.bgmId
           ) : (
             <span style={styles.dim}>—</span>
@@ -265,7 +270,10 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
               style={{ ...styles.input, width: 72 }}
               disabled={pending}
             />
-          ) : row.bangumiScore !== null ? (
+          ) : typeof row.bangumiScore === "number" ? (
+            // typeof check rather than `!== null` because go-api uses
+            // JSON omitempty — absent score arrives as `undefined`,
+            // not `null`, and `undefined.toFixed(...)` was crashing SSR.
             row.bangumiScore.toFixed(1)
           ) : (
             <span style={styles.dim}>—</span>
@@ -333,7 +341,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
                     标已校正
                   </button>
                 )}
-                {row.adminFlag !== null && (
+                {row.adminFlag != null && (
                   <button
                     type="button"
                     onClick={() => handleFlag(null)}
