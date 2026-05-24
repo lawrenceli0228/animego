@@ -57,6 +57,36 @@ describe('authenticateToken', () => {
     authenticateToken(req, res, next);
     expect(next).toHaveBeenCalledWith(expect.any(Error));
   });
+
+  // P8.1 cookie dual-track — RSC can't read localStorage, so the
+  // browser forwards the `session` cookie via next-app/src/lib/api.ts
+  // and the middleware accepts it as a Bearer-equivalent credential.
+  it('accepts a valid session cookie when no Authorization header', () => {
+    const { req, res, next } = mockReqResNext();
+    const token = jwt.sign({ userId: 'rsc-1', username: 'rsc' }, process.env.JWT_SECRET);
+    req.cookies = { session: token };
+    authenticateToken(req, res, next);
+    expect(req.user).toMatchObject({ userId: 'rsc-1', username: 'rsc' });
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('prefers Authorization header when both Bearer and cookie present', () => {
+    const { req, res, next } = mockReqResNext();
+    const bearerToken = jwt.sign({ userId: 'bearer', username: 'spa' }, process.env.JWT_SECRET);
+    const cookieToken = jwt.sign({ userId: 'cookie', username: 'rsc' }, process.env.JWT_SECRET);
+    req.headers['authorization'] = `Bearer ${bearerToken}`;
+    req.cookies = { session: cookieToken };
+    authenticateToken(req, res, next);
+    expect(req.user).toMatchObject({ userId: 'bearer', username: 'spa' });
+  });
+
+  it('returns 401 when neither Authorization nor cookie present', () => {
+    const { req, res, next } = mockReqResNext();
+    req.cookies = {}; // explicit empty jar
+    authenticateToken(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
 });
 
 describe('optionalAuth', () => {
@@ -81,6 +111,15 @@ describe('optionalAuth', () => {
     req.headers['authorization'] = 'Bearer bad-token';
     optionalAuth(req, res, next);
     expect(req.user).toBeUndefined();
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('reads session cookie when no Authorization header', () => {
+    const { req, res, next } = mockReqResNext();
+    const token = jwt.sign({ userId: 'rsc-2', username: 'cookieuser' }, process.env.JWT_SECRET);
+    req.cookies = { session: token };
+    optionalAuth(req, res, next);
+    expect(req.user).toMatchObject({ userId: 'rsc-2', username: 'cookieuser' });
     expect(next).toHaveBeenCalled();
   });
 });

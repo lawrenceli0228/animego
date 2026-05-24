@@ -30,6 +30,26 @@ const setRefreshCookie = (res, token) => {
   });
 };
 
+// P8.1: short-lived session cookie mirrors the accessToken so RSC fetches
+// (which can't read localStorage) can authenticate via the browser's
+// Cookie header forwarded by next-app/src/lib/api.ts. The SPA path keeps
+// using Authorization: Bearer from localStorage — both work, see
+// middleware/auth.middleware.js readToken().
+//
+// 15 minutes matches JWT_EXPIRES_IN default. Refresh flow rotates this
+// cookie alongside the refreshToken on every /refresh hit, so the
+// effective session window is still the refresh-token's 7 days.
+const SESSION_COOKIE_MAX_AGE = 15 * 60 * 1000;
+const setSessionCookie = (res, accessToken) => {
+  const isProd = process.env.NODE_ENV === 'production';
+  res.cookie('session', accessToken, {
+    httpOnly: true,
+    sameSite: isProd ? 'none' : 'strict',
+    secure: isProd,
+    maxAge: SESSION_COOKIE_MAX_AGE,
+  });
+};
+
 // POST /api/auth/register
 exports.register = async (req, res, next) => {
   try {
@@ -51,6 +71,7 @@ exports.register = async (req, res, next) => {
     await user.save();
 
     setRefreshCookie(res, refreshToken);
+    setSessionCookie(res, accessToken);
     res.status(201).json({ data: { accessToken, user } });
   } catch (err) { next(err); }
 };
@@ -74,6 +95,7 @@ exports.login = async (req, res, next) => {
     await user.save();
 
     setRefreshCookie(res, refreshToken);
+    setSessionCookie(res, accessToken);
     res.json({ data: { accessToken, user } });
   } catch (err) { next(err); }
 };
@@ -96,6 +118,7 @@ exports.refresh = async (req, res, next) => {
     await user.save();
 
     setRefreshCookie(res, refreshToken);
+    setSessionCookie(res, accessToken);
     res.json({ data: { accessToken } });
   } catch (err) { next(err); }
 };
@@ -106,6 +129,7 @@ exports.logout = async (req, res, next) => {
     const user = await User.findById(req.user.userId);
     if (user) { user.refreshToken = null; await user.save(); }
     res.clearCookie('refreshToken');
+    res.clearCookie('session');
     res.json({ data: { message: '已登出' } });
   } catch (err) { next(err); }
 };

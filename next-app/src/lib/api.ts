@@ -4,6 +4,14 @@ import type {
   ApiPagedEnvelope,
 } from "./types";
 
+// `next/headers` only resolves inside a real RSC / route-handler /
+// server-action call stack. We import it lazily inside buildHeaders()
+// to keep client bundles free of the server-only module reference and
+// to make the call survive contexts where `cookies()` would throw
+// (e.g. static prerender, middleware-level fetches).
+type CookieJar = { toString(): string };
+type CookiesFn = () => Promise<CookieJar> | CookieJar;
+
 export class ApiError extends Error {
   constructor(
     public code: string,
@@ -49,6 +57,30 @@ interface NextFetchInit extends RequestInit {
   };
 }
 
+// P8.1 cookie dual-track:
+//
+// When this module runs in an RSC / server-component / route-handler
+// context, forward the browser's Cookie header so the upstream Express
+// can authenticate via the `session` cookie (see
+// server/middleware/auth.middleware.js readToken). Without this, every
+// RSC fetch is anonymous and any user-scoped data path silently 401s.
+//
+// Skipped silently if cookies() throws (no RSC context, e.g. static
+// prerender) — the request just goes out anonymously, same as before.
+async function buildHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (typeof window !== "undefined") return headers;
+  try {
+    const mod = (await import("next/headers")) as { cookies: CookiesFn };
+    const jar = await mod.cookies();
+    const cookieStr = jar.toString();
+    if (cookieStr) headers.Cookie = cookieStr;
+  } catch {
+    /* no RSC context — forward nothing */
+  }
+  return headers;
+}
+
 async function fetchEnvelope(
   path: string,
   opts: FetchOptions,
@@ -57,7 +89,7 @@ async function fetchEnvelope(
 
   const init: NextFetchInit = {
     method: "GET",
-    headers: { Accept: "application/json" },
+    headers: await buildHeaders(),
     signal: opts.signal,
   };
   if (typeof opts.revalidate === "number") {

@@ -120,6 +120,26 @@ describe('auth.controller', () => {
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
     });
+
+    // P8.1 cookie dual-track: login must set both refreshToken (7d)
+    // and session (15m mirror of accessToken) cookies so RSC fetches
+    // forwarded from next-app/src/lib/api.ts can authenticate.
+    it('sets both refreshToken and session cookies on success', async () => {
+      const loginUser = { ...mockUser, comparePassword: jest.fn().mockResolvedValue(true), save: jest.fn().mockResolvedValue(true) };
+      User.findOne.mockResolvedValue(loginUser);
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'alice@test.com', password: '123456' });
+
+      expect(res.status).toBe(200);
+      const cookies = res.headers['set-cookie'] || [];
+      expect(cookies.some(c => /^refreshToken=/.test(c))).toBe(true);
+      expect(cookies.some(c => /^session=/.test(c))).toBe(true);
+      // session cookie must carry the same accessToken returned in JSON
+      const sessionCookie = cookies.find(c => /^session=/.test(c));
+      expect(sessionCookie).toContain(res.body.data.accessToken);
+    });
   });
 
   describe('POST /api/auth/refresh', () => {
@@ -154,10 +174,25 @@ describe('auth.controller', () => {
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe('INVALID_TOKEN');
     });
+
+    it('rotates both refreshToken and session cookies on success', async () => {
+      const refreshToken = jwt.sign({ userId: 'user123' }, process.env.JWT_REFRESH_SECRET);
+      const refreshUser = { ...mockUser, refreshToken, save: jest.fn().mockResolvedValue(true) };
+      User.findById.mockResolvedValue(refreshUser);
+
+      const res = await request(app)
+        .post('/api/auth/refresh')
+        .set('Cookie', `refreshToken=${refreshToken}`);
+
+      expect(res.status).toBe(200);
+      const cookies = res.headers['set-cookie'] || [];
+      expect(cookies.some(c => /^refreshToken=/.test(c))).toBe(true);
+      expect(cookies.some(c => /^session=/.test(c))).toBe(true);
+    });
   });
 
   describe('POST /api/auth/logout', () => {
-    it('clears refreshToken and cookie', async () => {
+    it('clears refreshToken and both cookies', async () => {
       const logoutUser = { ...mockUser, save: jest.fn().mockResolvedValue(true) };
       User.findById.mockResolvedValue(logoutUser);
       const token = jwt.sign({ userId: 'user123', username: 'alice' }, process.env.JWT_SECRET);
@@ -169,6 +204,11 @@ describe('auth.controller', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.message).toBe('已登出');
       expect(logoutUser.refreshToken).toBeNull();
+      // P8.1 dual-track: logout must clear both cookies — express
+      // sends Set-Cookie with an Expires in the past for each clear.
+      const cookies = res.headers['set-cookie'] || [];
+      expect(cookies.some(c => /^refreshToken=;/.test(c))).toBe(true);
+      expect(cookies.some(c => /^session=;/.test(c))).toBe(true);
     });
 
     it('returns 401 when not authenticated', async () => {
