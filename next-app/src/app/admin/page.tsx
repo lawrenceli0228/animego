@@ -1,4 +1,5 @@
 import { apiGet } from "@/lib/api";
+import { EnrichmentBar } from "./_components/EnrichmentBar";
 import { StatCard } from "./_components/StatCard";
 import type { AdminStats } from "./_types";
 
@@ -55,17 +56,11 @@ export default async function AdminOverviewPage() {
         </div>
       </section>
 
-      {/* EnrichmentBar mount slot — wired in Task 5. */}
       <section aria-labelledby="enrichment-heading" style={styles.section}>
         <h2 id="enrichment-heading" style={styles.sectionTitle}>
           数据富化
         </h2>
-        <div style={styles.placeholder}>
-          <span style={styles.placeholderLabel}>EnrichmentBar</span>
-          <span style={styles.placeholderHint}>
-            动画进度条 + 暂停/继续/Heal-CN 按钮 (Task 5)
-          </span>
-        </div>
+        <EnrichmentBar initial={stats} />
       </section>
     </div>
   );

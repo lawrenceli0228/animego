@@ -81,6 +81,16 @@ async function buildHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+type MutationMethod = "POST" | "PATCH" | "DELETE" | "PUT";
+
+interface MutationOptions {
+  /** Request body — will be JSON.stringified. Skip for endpoints
+   *  with no body. */
+  body?: unknown;
+  /** AbortSignal for cancellation. */
+  signal?: AbortSignal;
+}
+
 async function fetchEnvelope(
   path: string,
   opts: FetchOptions,
@@ -153,6 +163,79 @@ export async function apiGet<T>(
  *   const page = await apiGetPaged<SeasonalAnime>('/api/anime/seasonal?page=1');
  *   if (page.hasMore) loadPage(page.nextPage!);
  */
+/**
+ * Non-GET request that unwraps the `{data: T}` envelope.
+ *
+ * Used by Server Actions for admin mutations (PATCH /enrichment/:id,
+ * POST /users, DELETE /users/:id, etc). Forwards the same Cookie
+ * header buildHeaders attaches to GETs, so server-action callers
+ * authenticate as the requesting user without extra wiring.
+ *
+ * @example
+ *   await apiMutate<{ anilistId: number; reset: true }>(
+ *     "/api/admin/enrichment/154587/reset",
+ *     "POST",
+ *   );
+ *   const created = await apiMutate<AdminUser>(
+ *     "/api/admin/users", "POST",
+ *     { body: { username, email, password } },
+ *   );
+ */
+export async function apiMutate<T>(
+  path: string,
+  method: MutationMethod,
+  opts: MutationOptions = {},
+): Promise<T> {
+  const url = `${getApiBase()}${path}`;
+  const headers = await buildHeaders();
+  if (opts.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const init: RequestInit = {
+    method,
+    headers,
+    signal: opts.signal,
+    cache: "no-store",
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (err) {
+    throw new ApiError("NETWORK_ERROR", "fetch failed", 0, err);
+  }
+
+  // 204 No Content or empty body — return undefined cast to T (callers
+  // for delete-style endpoints can ignore the return).
+  if (res.status === 204) return undefined as T;
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch (err) {
+    throw new ApiError(
+      "INVALID_JSON",
+      `non-JSON response (status ${res.status})`,
+      res.status,
+      err,
+    );
+  }
+
+  if (!res.ok || (body && typeof body === "object" && "error" in body)) {
+    const errBody = (body as ApiErrorBody | undefined)?.error;
+    throw new ApiError(
+      errBody?.code || "SERVER_ERROR",
+      errBody?.message || `HTTP ${res.status}`,
+      res.status,
+    );
+  }
+
+  const env = body as ApiEnvelope<T>;
+  return env.data;
+}
+
 export async function apiGetPaged<T>(
   path: string,
   opts: FetchOptions = {},

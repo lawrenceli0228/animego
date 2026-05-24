@@ -37,7 +37,9 @@ GET /api/anime/1                       200 -
 GET /api/healthz                       404 -
 GET /library                           200 -
 GET /login                             200 -
-GET /admin                             200 -
+GET /admin                             307 -
+GET /admin/enrichment                  307 -
+GET /admin/users                       307 -
 EOF
 )
 
