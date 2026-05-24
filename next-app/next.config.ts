@@ -25,6 +25,32 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+
+  // /seasonal -> /seasonal/<current-season>/<current-year> at the HTTP
+  // layer (308 Permanent Redirect). Computed at build time, so the
+  // destination freezes to whatever season the Docker image was built
+  // in — same lifecycle as sitemap.ts's CURRENT_SEASON_URL, which is
+  // also build-time-pinned. A rebuild is required at each season
+  // boundary; this is fine because every Phase release rebuilds anyway.
+  //
+  // Without this redirect, bare /seasonal triggered an infinite loop:
+  // nginx's `^~ /seasonal/` location emits an implicit add-slash 301
+  // for the bare form, and next-app's trailingSlash=false 308'd
+  // /seasonal/ back to /seasonal.
+  async redirects() {
+    const now = new Date();
+    const m = now.getMonth() + 1;
+    const season =
+      m <= 3 ? "winter" : m <= 6 ? "spring" : m <= 9 ? "summer" : "fall";
+    const year = now.getFullYear();
+    return [
+      {
+        source: "/seasonal",
+        destination: `/seasonal/${season}/${year}`,
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
