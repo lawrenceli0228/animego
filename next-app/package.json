@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "dexie": "^4.4.2",
     "jsonwebtoken": "^9.0.3",
     "motion": "^12",
     "next": "16.2.6",
