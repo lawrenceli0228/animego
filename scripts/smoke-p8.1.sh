@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # P8.1 nginx routing smoke test.
 #
-# Verifies the 14 routing rules in nginx/default.conf land on the
+# Verifies the routing rules in nginx/default.conf land on the
 # expected upstream and return expected status codes. Run on the VPS
 # (or locally against `docker compose up -d`) right after every deploy
 # that touches nginx, next-app, or Express routes.
@@ -35,7 +35,9 @@ GET /robots.txt                        200 -
 GET /about                             301 -
 GET /api/anime/1                       200 -
 GET /api/healthz                       404 -
-GET /library                           200 -
+GET /library                           307 -
+GET /library/abc123                    307 -
+GET /player                            307 -
 GET /login                             200 -
 GET /admin                             307 -
 EOF
@@ -72,7 +74,7 @@ done <<< "$CHECKS"
 
 printf "\n"
 if [ "$FAIL" -eq 0 ]; then
-  printf "ALL 14 CHECKS PASSED\n"
+  printf "ALL 16 CHECKS PASSED\n"
   exit 0
 else
   printf "%d CHECK(S) FAILED — investigate before declaring deploy healthy\n" "$FAIL"
