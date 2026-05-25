@@ -98,3 +98,55 @@ describe("proxy /admin gate", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 });
+
+describe("proxy /library + /player gate (P6 — auth required, no role check)", () => {
+  test("/library no session → /login redirect with from preserved", () => {
+    const res = proxy(buildRequest("/library"));
+    expect(res.status).toBe(307);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/login");
+    expect(loc.searchParams.get("from")).toBe("/library");
+  });
+
+  test("/player no session → /login redirect with from preserved", () => {
+    const res = proxy(buildRequest("/player?seriesId=abc&fileId=42"));
+    expect(res.status).toBe(307);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/login");
+    expect(loc.searchParams.get("from")).toBe(
+      "/player?seriesId=abc&fileId=42",
+    );
+  });
+
+  test("/library passes through with a non-admin valid session", () => {
+    const token = jwt.sign(
+      { userId: "u1", username: "alice", role: "user" },
+      SECRET,
+    );
+    const res = proxy(buildRequest("/library", { session: token }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  test("/player passes through with no role claim (just a logged-in user)", () => {
+    const token = jwt.sign({ userId: "u1", username: "alice" }, SECRET);
+    const res = proxy(buildRequest("/player", { session: token }));
+    expect(res.status).toBe(200);
+  });
+
+  test("/library/123 nested path still gated", () => {
+    const res = proxy(buildRequest("/library/abc123"));
+    expect(res.status).toBe(307);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.searchParams.get("from")).toBe("/library/abc123");
+  });
+
+  test("/admin still requires admin role even with the new shared matcher", () => {
+    const token = jwt.sign(
+      { userId: "u1", username: "alice", role: "user" },
+      SECRET,
+    );
+    const res = proxy(buildRequest("/admin/enrichment", { session: token }));
+    expect(res.status).toBe(403);
+  });
+});

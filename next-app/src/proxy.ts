@@ -1,13 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
 import jwt from "jsonwebtoken";
 
-// P7: server-side gate for /admin/*.
+// P7 + P6: server-side gate for /admin/*, /library/*, /player/*.
 //
 // Reads the `session` cookie (issued by Express /api/auth/login since
-// commit cc073f9), verifies the JWT against JWT_SECRET, and 403s if
-// the decoded role isn't "admin". Unauthenticated visitors get a 302
-// to /login?from=<originally-requested-path> so post-login they land
-// where they intended.
+// commit cc073f9), verifies the JWT against JWT_SECRET, redirects to
+// /login?from=<originally-requested-path> if absent/expired/tampered.
+//
+// Role split:
+//   /admin/*               → role MUST be "admin" (403 otherwise)
+//   /library/*, /player/*  → any valid session (no role check)
+//
+// The two non-admin surfaces ride on the same gate because Dexie +
+// File System Access + jassub all live behind authentication in the
+// legacy SPA, and the P6 reauth E2E ("session expires → /login →
+// continue") requires a server-side redirect rather than a hydration
+// dance.
 //
 // Notes:
 // - Next 16 deprecated the `middleware` file convention in favour of
@@ -27,7 +35,7 @@ interface SessionPayload {
 }
 
 export const config = {
-  matcher: "/admin/:path*",
+  matcher: ["/admin/:path*", "/library/:path*", "/player/:path*"],
 };
 
 export function proxy(req: NextRequest) {
@@ -55,7 +63,9 @@ export function proxy(req: NextRequest) {
     return res;
   }
 
-  if (decoded.role !== "admin") {
+  // Role check only for /admin. Library + Player just need a valid
+  // session — they're regular-user surfaces.
+  if (req.nextUrl.pathname.startsWith("/admin") && decoded.role !== "admin") {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
