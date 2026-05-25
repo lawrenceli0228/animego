@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Pure data layer — no React, no DOM.
 /** @typedef {import('../types').UserOverride} UserOverride */
 

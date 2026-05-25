@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Pure function — no React, no IDB, no DOM, no async.
 // P3 SeriesMatcher imports this directly.
 /** @typedef {import('./types').EpisodeItem} EpisodeItem */

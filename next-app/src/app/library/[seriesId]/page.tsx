@@ -1,3 +1,6 @@
+"use client";
+
+import { use } from "react";
 import dynamic from "next/dynamic";
 
 // Same `ssr: false` strategy as /library — the shell touches Dexie
@@ -28,8 +31,11 @@ interface PageProps {
   params: Promise<{ seriesId: string }>;
 }
 
-export default async function LocalSeriesPage({ params }: PageProps) {
-  const { seriesId } = await params;
+// Client Component receives a Promise for params (Next 16 contract).
+// `use()` unwraps the promise — synchronous from the component's POV
+// because Next streams the params resolution.
+export default function LocalSeriesPage({ params }: PageProps) {
+  const { seriesId } = use(params);
   return <LocalSeriesShell seriesId={seriesId} />;
 }
 

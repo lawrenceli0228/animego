@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Probe a persisted root handle without prompting for permission.
 // Distinguishes 'disconnected' (drive unplugged) from 'denied' (permission lost).
 

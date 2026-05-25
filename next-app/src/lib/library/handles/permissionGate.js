@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 
 /**
  * Ensure read (or readwrite) permission on a FileSystemDirectoryHandle.

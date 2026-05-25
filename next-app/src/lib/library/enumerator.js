@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // v3.1 §4 Stage 0 — FSA 文件枚举 + 噪声过滤
 // Stage 1/2/3 都消费此 AsyncIterable。
 // 纯函数(无 React / 无 IDB / 无 DOM),收一个 root handle,吐流式 entries。

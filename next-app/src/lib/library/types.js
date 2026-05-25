@@ -230,3 +230,7 @@
  * @property {string}  [error]
  * @property {{clusters:number,matched:number,failed:number,ambiguous:number}} [summary]
  */
+
+// P6: ambient JSDoc-only module needs an explicit export for TS to
+// treat it as a module so `import('@/lib/library/types').X` resolves.
+export {};

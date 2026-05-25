@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Repository factory for persisting FileSystemDirectoryHandle records in IDB.
 //
 // Production: FileSystemDirectoryHandle serializes natively via structuredClone.

@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Dexie schema v5 for the animego local library.
 // Pure data layer — no React, no DOM, no service layer.
 

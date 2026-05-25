@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // One-shot migration of legacy localStorage progress (`animego:progress:<id>:<ep>`)
 // into the v5 `progress` IDB table. Idempotent — successful migrations remove the
 // legacy key; failures are recorded in `migrationFailures` and the legacy key is

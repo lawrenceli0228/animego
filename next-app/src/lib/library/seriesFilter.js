@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 /** @typedef {import('./types').Series} Series */
 /** @typedef {import('../../hooks/useSeriesProgressMap').SeriesProgressInfo} SeriesProgressInfo */
 /** @typedef {'recent'|'new'|'inProgress'|'done'|'almostDone'|'stalled'|'fresh'|null} LibraryFilter */

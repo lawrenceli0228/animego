@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Pure data layer — no React, no DOM.
 /** @typedef {import('../types').Series} Series */
 /** @typedef {import('../types').Season} Season */

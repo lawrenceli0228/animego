@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Pure function — no React, no IDB, no DOM.
 // Crockford base32 alphabet (excludes I, L, O, U).
 

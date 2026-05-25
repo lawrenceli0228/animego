@@ -1,3 +1,5 @@
+"use client";
+
 import dynamic from "next/dynamic";
 
 // `ssr: false` makes Next skip the server pass entirely for this

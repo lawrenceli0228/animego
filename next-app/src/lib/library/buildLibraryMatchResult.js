@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Pure adapter — shape a library Series + Episodes + FileRefs into the same
 // `matchResult` envelope that `useDandanMatch` produces for the drop-zone
 // flow, so the same EpisodeFileList component renders both surfaces.

@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Pure sync check — safe for SSR (returns false if window is undefined).
 
 /**

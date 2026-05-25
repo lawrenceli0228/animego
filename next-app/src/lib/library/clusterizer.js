@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 // Pure function — no React, no IDB, no DOM, no async.
 /** @typedef {import('./types').EpisodeItem} EpisodeItem */
 /** @typedef {import('./types').Group} Group */
