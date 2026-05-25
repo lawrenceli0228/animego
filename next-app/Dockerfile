@@ -28,7 +28,11 @@ COPY next-app/ ./
 # Disable Next telemetry at build time. Production opt-out lives in the
 # runner stage too.
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN bun --bun next build
+# P6.6 pin: --webpack. Next 16's turbopack default deadlocks on the
+# Library + Player port surface (23k LOC + 4.5 MB jassub WASM + worker
+# URLs in usePlaybackSession). Webpack mode compiles in ~15 s. Drop
+# the flag when turbopack stabilises asset-handling for those paths.
+RUN bun --bun next build --webpack
 
 FROM node:22-alpine AS runner
 WORKDIR /app
