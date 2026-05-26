@@ -6,6 +6,11 @@ import { useTransition } from "react";
 import type { CSSProperties } from "react";
 import type { Dict, Lang } from "@/lib/i18n";
 
+export interface NavUser {
+  username: string;
+  role?: string | null;
+}
+
 interface NavbarProps {
   dict: Dict;
   lang: Lang;
@@ -16,6 +21,12 @@ interface NavbarProps {
    */
   season: string;
   year: number;
+  /**
+   * SSR-resolved user from /api/auth/me (forwarded via buildHeaders'
+   * cookie). null = anonymous (show login/register CTAs). P6.9 work —
+   * the auth-state hole the original "Phase 6 work" comment flagged.
+   */
+  user?: NavUser | null;
 }
 
 const s = {
@@ -102,6 +113,11 @@ const s = {
     background: "none",
     transition: "all 0.2s",
   } as CSSProperties,
+  username: {
+    fontSize: 13,
+    color: "rgba(235,235,245,0.75)",
+    padding: "0 4px",
+  } as CSSProperties,
 };
 
 function isActive(pathname: string, href: string): boolean {
@@ -109,7 +125,13 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-export default function Navbar({ dict, lang, season, year }: NavbarProps) {
+export default function Navbar({
+  dict,
+  lang,
+  season,
+  year,
+  user,
+}: NavbarProps) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -117,6 +139,21 @@ export default function Navbar({ dict, lang, season, year }: NavbarProps) {
   // Season link points at the live /seasonal route (legacy /season has
   // no params; next-app uses /seasonal/[season]/[year]).
   const seasonHref = `/seasonal/${season.toLowerCase()}/${year}`;
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+    } catch {
+      /* swallow — local cookie still gets cleared server-side */
+    }
+    // router.refresh re-runs the layout server fetch so the Navbar
+    // re-renders with user=null and the route-level proxy.ts gates
+    // catch the now-missing session cookie.
+    startTransition(() => router.refresh());
+  }
 
   const links: Array<{ href: string; label: string; key: string }> = [
     { href: "/", label: dict.nav.home, key: "home" },
@@ -162,18 +199,45 @@ export default function Navbar({ dict, lang, season, year }: NavbarProps) {
           >
             {lang === "zh" ? "EN" : "中"}
           </button>
-          {/*
-            Auth state is Phase 6 work (login + AuthContext + Dexie).
-            For now, render the unauthenticated CTAs every time. The
-            stub ContinueWatching + ActivityFeed sections on the
-            homepage carry the same "login to see your stuff" message.
-          */}
-          <Link href="/login" prefetch={false} style={s.btnOutline}>
-            {dict.nav.login}
-          </Link>
-          <Link href="/register" prefetch={false} style={s.btnFill}>
-            {dict.nav.register}
-          </Link>
+          {/* P6.9: SSR-resolved auth state. user is fetched in
+              src/app/layout.tsx via apiGet('/api/auth/me'), forwarded
+              cookie-authenticated. null → anonymous CTAs; logged in →
+              greeting + admin-conditional admin link + my-list +
+              logout. Logout calls /api/auth/logout and then
+              router.refresh() so the next render's layout fetch sees
+              the cleared session cookie. */}
+          {user ? (
+            <>
+              <span style={s.username}>
+                {dict.nav.hi}, {user.username}
+              </span>
+              {user.role === "admin" && (
+                <Link href="/admin" prefetch={false} style={s.btnOutline}>
+                  {dict.admin.title}
+                </Link>
+              )}
+              <Link href="/library" prefetch={false} style={s.btnOutline}>
+                {dict.nav.myList}
+              </Link>
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={pending}
+                style={s.btnOutline}
+              >
+                {dict.nav.logout}
+              </button>
+            </>
+          ) : (
+            <>
+              <Link href="/login" prefetch={false} style={s.btnOutline}>
+                {dict.nav.login}
+              </Link>
+              <Link href="/register" prefetch={false} style={s.btnFill}>
+                {dict.nav.register}
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </nav>
