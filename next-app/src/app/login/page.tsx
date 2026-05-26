@@ -3,8 +3,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import jwt from "jsonwebtoken";
 import { getDict } from "@/lib/i18n";
+import { sanitizeFromParam } from "@/lib/authForm";
 import LoginForm from "./_components/LoginForm";
-import { sanitizeFromParam } from "./_lib/loginFlow";
 
 // P9 — Next.js port of legacy client/src/pages/LoginPage.jsx.
 //

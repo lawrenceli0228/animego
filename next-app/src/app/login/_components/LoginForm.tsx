@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type CSSProperties, type FormEvent } from "react";
 import type { Dict } from "@/lib/i18n";
+import { translateErrorMessage } from "@/lib/authForm";
 import { submitLogin } from "../_lib/loginFlow";
 
 interface LoginFormProps {
@@ -158,8 +159,9 @@ export default function LoginForm({ from, dict }: LoginFormProps) {
         // Backend response.error.message is already localized on the
         // server (legacy Express returns Chinese for INVALID_CREDENTIALS);
         // fall back to dict.login.fail when the message is missing or
-        // generic.
-        const translated = translateMessage(result.message, dict);
+        // generic. translateErrorMessage handles the dict.errors lookup
+        // + prototype-key safety + 200-char cap.
+        const translated = translateErrorMessage(result.message, dict);
         setError(translated || t.fail);
       }
     } finally {
@@ -234,21 +236,3 @@ export default function LoginForm({ from, dict }: LoginFormProps) {
   );
 }
 
-// Best-effort lookup of an English error string in dict.errors. The
-// legacy SPA does the same thing via utils/errorDisplay — backend
-// occasionally returns English (validation messages) and dict.errors
-// is keyed by exact English wording.
-//
-// dict.errors is always defined on the zh shape (Dict = typeof zh);
-// the cast to Record<string, string> only widens the literal-key
-// object to allow dynamic-key access. Result is capped at 200 chars
-// so a misbehaving backend can't push a wall of text into the inline
-// error region.
-const MAX_ERROR_LENGTH = 200;
-function translateMessage(message: string, dict: Dict): string {
-  const map = dict.errors as Record<string, string>;
-  const translated = map[message];
-  const out =
-    typeof translated === "string" && translated.length > 0 ? translated : message;
-  return out.slice(0, MAX_ERROR_LENGTH);
-}
