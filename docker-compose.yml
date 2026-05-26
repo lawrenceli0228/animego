@@ -136,6 +136,13 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/selfsigned.crt:/etc/nginx/ssl/selfsigned.crt:ro
       - ./nginx/selfsigned.key:/etc/nginx/ssl/selfsigned.key:ro
+      # P8.1 Day-1 Fix: static maintenance page served as the `error_page`
+      # target whenever next-app is unreachable (default.conf 502/503/504
+      # `@next_app_down`) or whenever a P6/P7/P9 surface is requested while
+      # nginx is on default.legacy.conf rollback (Express has no handler).
+      # Bind-mount, not COPY, so editing the file + `docker compose restart
+      # nginx` is enough — no image rebuild.
+      - ./nginx/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
     depends_on:
       - app
       - next-app
