@@ -1,22 +1,50 @@
 #!/bin/bash
+# Deploy the current branch on the VPS. Default branch is feat/go-backend
+# because that's the canonical branch through P0-P10 (main is 119 commits
+# behind as of 2026-05-26 and will be merged after P10 lands).
+#
+# Usage:
+#   ./scripts/deploy.sh                   # pulls feat/go-backend
+#   ./scripts/deploy.sh main              # pulls main (post-merge)
+#   ./scripts/deploy.sh some/other-branch # pulls some/other-branch
+#
+# Pre-flight (one-time on a fresh VPS):
+#   - /opt/animego cloned from git@github.com:lawrenceli0228/animego.git
+#   - .env.production + nginx/selfsigned.* present (gitignored, copied
+#     manually from local + chmod 600)
+#   - docker + docker compose installed
 set -e
 
 APP_DIR="/opt/animego"
+BRANCH="${1:-feat/go-backend}"
+
 cd "$APP_DIR"
 
-echo "==> Pulling latest code..."
-git pull origin main
+echo "==> Pulling latest code from origin/$BRANCH..."
+git fetch origin "$BRANCH"
+git checkout "$BRANCH"
+git reset --hard "origin/$BRANCH"
 
-echo "==> Building Docker image..."
+echo "==> Building Docker images..."
 docker compose build
 
-echo "==> Starting container..."
+echo "==> Bringing services up..."
 docker compose up -d
 
-echo "==> Reloading Nginx..."
-sudo nginx -t && sudo systemctl reload nginx
+# nginx config is a bind-mount (./nginx/default.conf →
+# /etc/nginx/conf.d/default.conf). After `git pull`/reset the inode
+# changes, and `nginx -s reload` reads the stale fd. `restart` re-opens
+# the file. See memory feedback_deploy_nginx_bind_mount_restart.
+echo "==> Restarting nginx to pick up bind-mounted conf changes..."
+docker compose restart nginx
 
-echo "==> Done! Checking status..."
+echo "==> Status:"
 docker compose ps
-curl -s http://127.0.0.1:5001/api/health
+
+echo "==> Smoke (via nginx, -k for self-signed cert)..."
+curl -sk -o /dev/null -w "HTTP %{http_code} from /api/health\n" https://localhost/api/health
+curl -sk -o /dev/null -w "HTTP %{http_code} from /\n" https://localhost/
+curl -sk -o /dev/null -w "HTTP %{http_code} from /anime/154587\n" https://localhost/anime/154587
+
 echo ""
+echo "==> Done. If a smoke line shows 5xx, check 'docker compose logs --tail=50 <service>'."
