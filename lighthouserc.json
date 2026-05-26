@@ -1,0 +1,43 @@
+{
+  "ci": {
+    "collect": {
+      "url": [
+        "https://animegoclub.com/",
+        "https://animegoclub.com/anime/154587",
+        "https://animegoclub.com/seasonal/spring/2026",
+        "https://animegoclub.com/welcome"
+      ],
+      "numberOfRuns": 3,
+      "settings": {
+        "formFactor": "mobile",
+        "throttlingMethod": "simulate",
+        "onlyCategories": ["performance", "accessibility", "best-practices", "seo"],
+        "chromeFlags": "--no-sandbox --disable-dev-shm-usage"
+      }
+    },
+    "assert": {
+      "preset": "lighthouse:no-pwa",
+      "assertions": {
+        "categories:performance": ["warn", {"minScore": 0.48}],
+        "categories:accessibility": ["warn", {"minScore": 0.9}],
+        "categories:seo": ["warn", {"minScore": 0.95}],
+        "largest-contentful-paint": ["warn", {"maxNumericValue": 9700}],
+        "cumulative-layout-shift": ["warn", {"maxNumericValue": 0.1}],
+        "first-contentful-paint": ["warn", {"maxNumericValue": 2720}],
+        "total-blocking-time": ["warn", {"maxNumericValue": 820}],
+        "speed-index": ["warn", {"maxNumericValue": 5430}],
+        "interaction-to-next-paint": "off",
+        "uses-text-compression": "warn",
+        "uses-responsive-images": "warn",
+        "render-blocking-resources": "off",
+        "unused-javascript": "off",
+        "unused-css-rules": "off",
+        "uses-long-cache-ttl": "off",
+        "csp-xss": "off"
+      }
+    },
+    "upload": {
+      "target": "temporary-public-storage"
+    }
+  }
+}
