@@ -244,6 +244,14 @@ async function warmAllSeasons(startYear = 2014, { endSeason, endYear } = {}) {
 
 // ─── Seasonal anime ───────────────────────────────────────────────────────────
 async function getSeasonalAnime(season, year, page = 1, perPage = 20) {
+  // Normalize season to uppercase. AniList GraphQL `MediaSeason` enum
+  // is uppercase (`WINTER`/`SPRING`/`SUMMER`/`FALL`) and the Mongo cache
+  // stores it the same way. Passing `season=fall` (lowercase) from a
+  // user-facing URL would miss the cache AND get rejected by AniList
+  // with 400 → wrapped to 502 by queryAniList. Normalizing here makes
+  // the endpoint case-insensitive without touching the cache schema or
+  // the upstream call.
+  season = String(season || '').toUpperCase();
   const pageNum    = parseInt(page);
   const perPageNum = parseInt(perPage);
   const yearNum    = parseInt(year);
