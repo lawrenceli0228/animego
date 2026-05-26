@@ -958,28 +958,30 @@ P0 收工标准:**Go + Postgres 起来,空 chi router :8080/health 返回 OK,R2 
 
 > **Status check 2026-05-20:** Plan 落地 8 天,全部 phase 仍 `not started`。本周要么起 P0,要么 plan 随上游 stack 演进而陈旧(已发生:Bun 1.3.14 + Zig→Rust 重写,见决策日志新行 + R19/R20)。
 > **下一次 audit 触发:** P0 开工日 / 2026-06-01,取早。
+>
+> **Status sweep 2026-05-26:** P0 → P8 全部落地,但 plan 表格从 P2.1 起一直 `not started` 未跟。本次扫一遍 commit 日志(`git log --grep`)按短语规整。P8.5 shadow traffic 策略改为**增量 cutover**(P6.1 /library/player → P7 /admin → P8.0 HomePage → P8.1 SEO edge → P9.x auth 表面),不再走 big-bang。P9 因此从"一次性切换"重新定义成"剩余 auth 表面增量港"。
 
-| Phase | Status | Started | Completed | Hours actual |
-|-------|--------|---------|-----------|-------------:|
+| Phase | Status | Started | Completed | Notes |
+|-------|--------|---------|-----------|-------|
 | P0 Go 骨架 + Postgres + Backup | **DONE** | 2026-05-20 | 2026-05-20 | ~6 hr (vs 20-35 estimate; subagent协同压缩) — 详 [`P0-PROGRESS.md`](P0-PROGRESS.md) / [`P0-PROGRESS.html`](P0-PROGRESS.html) |
 | P1 Migration Tool | **DONE** | 2026-05-21 | 2026-05-21 | ~10 hr(同一天集中跑;subagent + integration-test 反复迭代;100% field parity)— 详 [`P1-PROGRESS.md`](P1-PROGRESS.md) / [`P1-PROGRESS.html`](P1-PROGRESS.html) / [`ERD.md`](ERD.md) |
 | P2.0 chi 骨架(eng-review 后追加) | **DONE** | 2026-05-21 | 2026-05-21 | ~6 hr(vs 7-10 estimate;A/C 并行 subagent + D 我手写 + smoke + live curl)— 详 [`P2.0-DESIGN.md`](P2.0-DESIGN.md) / [`P2.0-DESIGN.html`](P2.0-DESIGN.html) / [`P2-PROGRESS.md`](P2-PROGRESS.md) / [`P2-PROGRESS.html`](P2-PROGRESS.html) |
-| P2.1 /api/anime/* | not started | — | — | — |
-| P2.2 /api/auth/* | not started | — | — | — |
-| P2.3 /api/admin/* | not started | — | — | — |
-| P2.4 /api/sub + user + feed | not started | — | — | — |
-| P2.5 /api/comments + danmaku | not started | — | — | — |
-| P2.6 /api/dandanplay/* | not started | — | — | — |
-| P2.7 testify + testcontainers | not started | — | — | — |
-| P2.8 ws-server 拆出 (NEW) | not started | — | — | — |
-| P3 Next.js 16 骨架 + Bun | not started | — | — | — |
-| P4 Public Pages RSC | not started | — | — | — |
-| P5 SEO 核心 ISR | not started | — | — | — |
-| P6 Library + Player | not started | — | — | — |
-| P7 Admin RSC | not started | — | — | — |
-| P8 部署架构 | not started | — | — | — |
-| P8.5 Shadow Traffic | not started | — | — | — |
-| P9 Big-Bang Cutover | not started | — | — | — |
+| P2.1 /api/anime/* | **DONE** | 2026-05-21 | 2026-05-22 | P2.1.0–P2.1.9 全 9 子步骤 + warm_season + byte-parity 验证;`feat(go-api): P2.1.*` 系列 |
+| P2.2 /api/auth/* | **DONE** | 2026-05-22 | 2026-05-22 | P2.2.0–P2.2.4c(sqlc users + jwtx + auth handlers + Gmail SMTP + forgot/reset);[`P2.2-STATUS.md`](P2.2-STATUS.md) |
+| P2.3 /api/admin/* | **DONE** | 2026-05-23 | 2026-05-23 | 14 endpoints + adminAuth + river queue control endpoint(`41b61d3`) |
+| P2.4 /api/sub + user + feed | **DONE** | 2026-05-23 | 2026-05-23 | 11 endpoints(`129547b`) |
+| P2.5 /api/comments + danmaku | **DONE** | 2026-05-23 | 2026-05-23 | 4 endpoints(`13ef200`) |
+| P2.6 /api/dandanplay/* | **DONE** | 2026-05-23 | 2026-05-23 | 4 endpoints + 3-phase match(`8bea942`) |
+| P2.7 testify + testcontainers | **DONE** | 2026-05-21 | 2026-05-23 | 折进 P1.D testcontainers 跑通 + 各 P2.x 同步落 `_test.go`;`go.mod` 含 `testify v1.11.1` / `testcontainers-go v0.42.0`(mongo + postgres modules) |
+| P2.8 ws-server 拆出 (NEW) | **DONE** | 2026-05-23 | 2026-05-23 | socket.io danmaku 抽出独立 Node 服务(`c9a3f20`) |
+| P3 Next.js 16 骨架 + Bun | **DONE** | 2026-05-23 | 2026-05-23 | `c15d2bf` P3.0 skeleton + `45e269e` scripts/dev.sh 串完整 stack |
+| P4 Public Pages RSC | **DONE** | 2026-05-23 | 2026-05-23 | P4.0 RSC fetch + types(`346cfc9`)、P4.1.0/.1 landing infra + 8 components、P4.2/.3/.5 metadata + sitemap + robots + loading skeleton |
+| P5 SEO 核心 ISR | **DONE** | 2026-05-23 | 2026-05-23 | `/anime/[id]` + `/seasonal` + `/search` ISR pages(`596e4ba`) |
+| P6 Library + Player | **DONE** | 2026-05-25 | 2026-05-26 | P6.1–P6.9(proxy gate → Dexie/handles → Library shell → 3-subagent 卡片 fan-out → Player route + jassub WASM → Player components fan-out → authFetch 401 retry + nginx routing → P6.8 dandanplay POST fix → P6.9 Navbar SSR auth state + legacy SPA 删);snapshot in [`P6-INVENTORY.md`](P6-INVENTORY.md) |
+| P7 Admin RSC | **DONE** | 2026-05-24 | 2026-05-25 | scaffold → 三 lane(enrichment + users + queue)→ SSR fix → monolithic 单页 refactor + server-action tests → legacy admin SPA 删(`96795f5`) |
+| P8 部署架构 | **DONE** | 2026-05-23 | 2026-05-24 | P8.0 HomePage 移到 `/` + LandingPage 到 `/welcome`(`47ac240`);P8.1 SEO edge rollout(auth cookie dual-track、partial cutover infra、本地 docker stack 完整验证、deploy-day toolkit + rollback conf);[`P8.1-STATUS.md`](P8.1-STATUS.md) |
+| P8.5 Shadow Traffic | **SUPERSEDED** | — | — | 策略改为增量 cutover(P6.1 / P7 / P8.0 / P8.1 / P9.x 各自小步切),不再起独立 shadow 期。Day-6 dress rehearsal + Day-7 rollback drill 也跟着 retire |
+| P9 Big-Bang Cutover | **IN PROGRESS** | 2026-05-26 | — | 重定义为"剩余 auth 表面增量港":/login DONE(`8658437` + nginx `eb6f855`)。Remaining: /register、/forgot-password、/reset-password/:token |
 | P10 Lighthouse + Sentry + E2E | not started | — | — | — |
 
 ---
