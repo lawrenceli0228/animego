@@ -148,6 +148,10 @@ function extractEpisodeNumber(title) {
 async function matchByFileName(fileName) {
   const res = await dandanFetch(`${BASE_URL}/api/v2/match`, {
     method: 'POST',
+    // P6.9: dandanplay rejects POST without Content-Type; Node 18+ undici
+    // defaults to text/plain which trips a fetch-level error before the
+    // 4xx surfaces. Set explicit JSON content-type on every POST.
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       fileName,
       fileHash: '',
@@ -172,6 +176,7 @@ async function matchByFileName(fileName) {
 async function matchByHash(fileName, fileHash, fileSize) {
   const res = await dandanFetch(`${BASE_URL}/api/v2/match`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       fileName,
       fileHash,
@@ -200,6 +205,7 @@ async function matchCombined(fileName, fileHash, fileSize) {
 
   const res = await dandanFetch(`${BASE_URL}/api/v2/match`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   if (!res.ok) return null;
