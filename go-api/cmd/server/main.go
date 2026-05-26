@@ -1,9 +1,17 @@
 // Package main is the chi HTTP server entry point for go-api.
 //
 // P2.0.D scope: middleware chain is now full envelope-aware + /health-
-// skipping + CORS-fronted.  Chain order (locked by /plan-eng-review):
+// skipping + CORS-fronted.  Chain order (locked by /plan-eng-review;
+// P10 observability lane added Sentry after Recoverer):
 //
-//	CORS  → RequestID  → RealIP  → RequestLog  → Recoverer  → Timeout
+//	CORS  → RequestID  → RealIP  → RequestLog  → Recoverer  → Sentry  → Timeout
+//
+// Sentry sits AFTER Recoverer so the project's envelope-aware recoverer
+// catches the panic first (and writes the JSON 500 envelope clients
+// expect), then Repanic:true re-panics so sentryhttp captures the stack
+// for reporting.  Empty SENTRY_DSN is a supported no-op (dev/staging
+// default); no manual guard needed — sentry-go silently drops events
+// when Dsn:"".
 package main
 
 import (
@@ -17,6 +25,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,6 +58,24 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
+
+	// Sentry init — P10 observability lane.  Empty SENTRY_DSN is the
+	// intended no-op for dev/staging (sentry-go drops events silently
+	// when Dsn:"").  Tracing is off by default; only error capture +
+	// panic reporting are enabled for now.  Init returns an error only
+	// for malformed DSN — log and continue so a typo can't crash boot.
+	if err := sentry.Init(sentry.ClientOptions{
+		Dsn:              os.Getenv("SENTRY_DSN"),
+		EnableTracing:    false,
+		TracesSampleRate: 0.0,
+		Release:          os.Getenv("GIT_SHA"),
+		Environment:      os.Getenv("APP_ENV"),
+		ServerName:       "go-api",
+		AttachStacktrace: true,
+	}); err != nil {
+		slog.Warn("sentry init failed", "err", err)
+	}
+	defer sentry.Flush(2 * time.Second)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -336,6 +364,12 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(httpmw.RequestLog(slog.Default()))
 	r.Use(httpmw.Recoverer(slog.Default()))
+	// P10 — Sentry panic capture.  Repanic:true means sentryhttp
+	// re-throws after Hub.Recover so the project's Recoverer (above)
+	// remains the surface that turns the panic into the canonical
+	// SERVER_ERROR JSON envelope.  Order matters: Recoverer must be
+	// outer (registered first) so it catches the re-panic emitted here.
+	r.Use(sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle)
 	r.Use(middleware.Timeout(60 * time.Second))
 	// G2 — 1 MiB request body cap.  Without this a single 1GB POST
 	// to /api/auth/register or /api/comments would allocate the full

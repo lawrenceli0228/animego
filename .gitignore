@@ -59,9 +59,11 @@ migrate-failures.jsonl
 *-prod-mongodump-*.archive.gz
 /tmp/animego-prod-mongodump*
 
-# Go-built binaries (parity-check binary from 'go build ./cmd/parity-check')
+# Go-built binaries (output of `go build ./cmd/<name>` — runtime uses
+# the docker image, host-built binaries are local artifacts only).
 go-api/parity-check
 go-api/migrate-mongo
+go-api/server
 
 # Per-phase status / progress / design docs — generated locally, not part of source tree.
 # Already-committed P0/P1/P2-PROGRESS files remain (git ignore does not touch tracked files).
