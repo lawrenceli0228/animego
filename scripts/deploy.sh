@@ -25,21 +25,29 @@ git fetch origin "$BRANCH"
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
+# --env-file=.env.production:
+#   - feeds `${VAR}` substitutions in docker-compose.yml (e.g.
+#     NEXT_PUBLIC_SENTRY_DSN passed as a build arg into Dockerfile so
+#     Next.js can inline it into the client bundle at build time).
+#   - also overrides the default `.env` lookup so service `env_file:`
+#     references stay consistent across build + runtime.
+COMPOSE="docker compose --env-file=.env.production"
+
 echo "==> Building Docker images..."
-docker compose build
+$COMPOSE build
 
 echo "==> Bringing services up..."
-docker compose up -d
+$COMPOSE up -d
 
 # nginx config is a bind-mount (./nginx/default.conf →
 # /etc/nginx/conf.d/default.conf). After `git pull`/reset the inode
 # changes, and `nginx -s reload` reads the stale fd. `restart` re-opens
 # the file. See memory feedback_deploy_nginx_bind_mount_restart.
 echo "==> Restarting nginx to pick up bind-mounted conf changes..."
-docker compose restart nginx
+$COMPOSE restart nginx
 
 echo "==> Status:"
-docker compose ps
+$COMPOSE ps
 
 echo "==> Smoke (via nginx, -k for self-signed cert)..."
 curl -sk -o /dev/null -w "HTTP %{http_code} from /api/health\n" https://localhost/api/health

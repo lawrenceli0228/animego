@@ -28,6 +28,17 @@ COPY next-app/ ./
 # Disable Next telemetry at build time. Production opt-out lives in the
 # runner stage too.
 ENV NEXT_TELEMETRY_DISABLED=1
+# Sentry build-time variables. NEXT_PUBLIC_SENTRY_DSN MUST be available
+# at build because Next inlines NEXT_PUBLIC_* into the client bundle —
+# runtime env is too late, the bundle is already compiled. Default ""
+# means a build without these args still succeeds (Sentry SDK no-ops on
+# falsy DSN). SENTRY_AUTH_TOKEN drives source-map upload via
+# next.config.ts's `sourcemaps.disable: !process.env.SENTRY_AUTH_TOKEN`
+# gate — without it, the upload step skips and the build still passes.
+ARG NEXT_PUBLIC_SENTRY_DSN=
+ARG SENTRY_AUTH_TOKEN=
+ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
+ENV SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN
 # P6.6 pin: --webpack. Next 16's turbopack default deadlocks on the
 # Library + Player port surface (23k LOC + 4.5 MB jassub WASM + worker
 # URLs in usePlaybackSession). Webpack mode compiles in ~15 s. Drop

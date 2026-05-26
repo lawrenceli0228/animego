@@ -48,6 +48,13 @@ services:
     build:
       context: .
       dockerfile: next-app/Dockerfile
+      # Build args read from the env file (deploy.sh + docker compose
+      # both pull --env-file=.env.production). NEXT_PUBLIC_SENTRY_DSN
+      # MUST land at build because Next inlines NEXT_PUBLIC_* into the
+      # client bundle. Empty default keeps a build-without-env working.
+      args:
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
     restart: unless-stopped
     env_file: .env.production
     environment:
