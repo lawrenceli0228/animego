@@ -2,6 +2,8 @@
 // JSON field names match Go json tags exactly (camelCase).
 // When go-api adds/removes fields, this file must be updated in the same commit.
 
+import type { FuzzyDate } from "./formatters";
+
 // ─── Envelope ──────────────────────────────────────────────────────
 
 export interface ApiEnvelope<T> {
@@ -51,6 +53,10 @@ export interface TrendingItem {
 
 export type YearlyTopItem = Omit<TrendingItem, "rank" | "watcherCount">;
 
+// Re-exported so consumers can `import type { FuzzyDate }` from the
+// same surface as AnimeDetail itself.
+export type { FuzzyDate };
+
 // ─── Seasonal (/api/anime/seasonal) ────────────────────────────────
 
 export interface SeasonalAnime {
@@ -94,7 +100,11 @@ export interface AnimeDetail {
   format: string | null;
   duration: number | null;
   source: string | null;
-  startDate: string | null;
+  // AniList fuzzy date: {year, month, day} with each component nullable
+  // when the source only knows part of the date. The Mongo cache stores
+  // the raw shape, so consumers must format via lib/formatters before
+  // rendering. Legacy ISO strings are tolerated by formatFuzzyDate.
+  startDate: FuzzyDate | string | null;
   genres: string[];
   studios: string[];
   relations: DetailRelation[];

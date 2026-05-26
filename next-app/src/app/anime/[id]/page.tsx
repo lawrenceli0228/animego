@@ -18,7 +18,7 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import AnimeCard from "@/components/anime/AnimeCard";
 import { apiGet, ApiError } from "@/lib/api";
-import { formatScore, pickTitle, stripHtml, truncate } from "@/lib/formatters";
+import { formatFuzzyDate, formatScore, pickTitle, stripHtml, truncate } from "@/lib/formatters";
 import { getDict, getLang } from "@/lib/i18n";
 import type { Dict, Lang } from "@/lib/i18n";
 import type {
@@ -207,7 +207,8 @@ function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
   const desc = stripHtml(detail.description || "");
   if (desc) ld.description = desc;
   if (detail.episodes) ld.numberOfEpisodes = detail.episodes;
-  if (detail.startDate) ld.startDate = detail.startDate;
+  const formattedStartDate = formatFuzzyDate(detail.startDate);
+  if (formattedStartDate) ld.startDate = formattedStartDate;
   if (detail.genres?.length) ld.genre = detail.genres;
   if (detail.averageScore && detail.averageScore > 0) {
     ld.aggregateRating = {
@@ -348,6 +349,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   const seasonLab = seasonLabel(dict, detail.season);
   const score = detail.averageScore;
   const accent = detail.posterAccent || null;
+  const startDateLabel = formatFuzzyDate(detail.startDate);
 
   return (
     <div>
@@ -457,18 +459,18 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
           </div>
 
           {/* Meta row */}
-          {(detail.studios.length > 0 || sourceLabel || durationLabel || detail.startDate) && (
+          {(detail.studios.length > 0 || sourceLabel || durationLabel || startDateLabel) && (
             <div style={S.metaRow}>
               {detail.studios.length > 0 && (
                 <span style={S.metaStudio}>{detail.studios.join(" · ")}</span>
               )}
               {detail.studios.length > 0 &&
-                (sourceLabel || durationLabel || detail.startDate) && (
+                (sourceLabel || durationLabel || startDateLabel) && (
                   <span style={S.metaDot}>{"·"}</span>
                 )}
               {sourceLabel && <span style={S.metaDetail}>{sourceLabel}</span>}
               {durationLabel && <span style={S.metaDetail}>{durationLabel}</span>}
-              {detail.startDate && <span style={S.metaDetail}>{detail.startDate}</span>}
+              {startDateLabel && <span style={S.metaDetail}>{startDateLabel}</span>}
             </div>
           )}
 
