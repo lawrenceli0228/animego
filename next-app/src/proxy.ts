@@ -73,7 +73,14 @@ export function proxy(req: NextRequest) {
 }
 
 function redirectToLogin(req: NextRequest) {
-  const url = req.nextUrl.clone();
+  // Build the /login URL from scratch instead of cloning the request URL.
+  // Cloning carried over the source request's query string ("?id=test"),
+  // which then appeared alongside the `from=` param on /login — making
+  // /player/episode?id=test redirect to /login?id=test&from=... instead
+  // of /login?from=... . The `from` round-trip is the canonical place
+  // for the original path + query; the top-level /login URL should be
+  // clean.
+  const url = new URL(req.nextUrl.origin);
   url.pathname = "/login";
   url.searchParams.set("from", req.nextUrl.pathname + req.nextUrl.search);
   return NextResponse.redirect(url);

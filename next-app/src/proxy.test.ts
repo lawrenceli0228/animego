@@ -45,6 +45,17 @@ describe("proxy /admin gate", () => {
     expect(loc.searchParams.get("from")).toBe("/admin/users?page=2&q=alice");
   });
 
+  test("does not leak original query params to the /login top-level URL", () => {
+    // Regression: ISSUE-002 — the cloned URL inherited the source request's
+    // query string, so /player/episode?id=test redirected to
+    // /login?id=test&from=%2Fplayer%2Fepisode%3Fid%3Dtest. The `id` belongs
+    // inside the `from` round-trip, not as a top-level /login param.
+    const res = proxy(buildRequest("/admin/users?page=2&q=alice"));
+    const loc = new URL(res.headers.get("location")!);
+    const paramKeys = Array.from(loc.searchParams.keys());
+    expect(paramKeys).toEqual(["from"]);
+  });
+
   test("returns 500 when JWT_SECRET is missing", () => {
     delete process.env.JWT_SECRET;
     const token = jwt.sign({ role: "admin" }, "anything-since-secret-is-gone");
