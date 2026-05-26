@@ -1,0 +1,34 @@
+# CI-only docker-compose override.
+#
+# Why this file exists:
+#   1. docker-compose.yml binds `mongodb` to the internal `animego`
+#      network only — no host port mapping. Correct for prod, but
+#      blocks e2e sandbox fixtures that connect via
+#      mongodb://localhost:27017 from the GitHub Actions runner.
+#   2. `ws-server` is in a known restart loop in prod (DATABASE_URL
+#      missing until P9 brings up Postgres). In CI, `docker compose
+#      up --wait` would hang on its failing healthcheck until the
+#      --wait-timeout fires. v2 sandbox specs don't exercise
+#      /socket.io/, so we neuter ws-server here: replace its command
+#      with a sleep, disable its healthcheck. Container stays alive
+#      so nginx's `depends_on` is satisfied; danmaku is unreachable
+#      but no v2 test cares.
+#
+# Merge in CI:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
+#
+# Do NOT use this on the prod VPS. The base file is canonical.
+services:
+  mongodb:
+    ports:
+      - "27017:27017"
+
+  ws-server:
+    # Override the entrypoint so the container starts and stays running
+    # without trying (and failing) to connect to Postgres. tini/dumb-init
+    # not needed — `tail -f /dev/null` is enough for a wait-friendly
+    # idle process.
+    entrypoint: ["sh", "-c"]
+    command: ["echo '[ws-server] disabled in CI for e2e sandbox' && tail -f /dev/null"]
+    healthcheck:
+      disable: true

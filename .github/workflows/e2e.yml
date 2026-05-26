@@ -46,12 +46,15 @@ jobs:
         working-directory: e2e
         run: bunx playwright install --with-deps chromium
 
-      - name: Run Playwright
+      - name: Run Playwright (prod project only)
         working-directory: e2e
         env:
           E2E_BASE_URL: https://animegoclub.com
           CI: "true"
-        run: bunx playwright test
+        # --project=chromium-prod skips the chromium-sandbox project
+        # (which needs the docker compose stack — separate workflow at
+        # .github/workflows/e2e-sandbox.yml).
+        run: bunx playwright test --project=chromium-prod
 
       - name: Upload report on failure
         if: failure()

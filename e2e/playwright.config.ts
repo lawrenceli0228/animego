@@ -1,15 +1,26 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * P10 Lane B — Playwright E2E config.
+ * P10 — Playwright E2E config.
  *
- * v1 targets the public read-only surface against live prod by default
- * (no docker required in CI). To run against a local stack instead:
- *   E2E_BASE_URL=https://localhost bunx playwright test
+ * Two test projects:
+ *
+ *   chromium-prod    — v1 read-only specs against live prod by default
+ *                      (specs/*.spec.ts at top level). Used by
+ *                      .github/workflows/e2e.yml.
+ *   chromium-sandbox — v2 write-path specs against a docker compose
+ *                      stack (specs/sandbox/**\/*.spec.ts). Used by
+ *                      .github/workflows/e2e-sandbox.yml. baseURL
+ *                      defaults to https://localhost (the nginx self-
+ *                      signed-cert container in docker compose).
+ *
+ * Override per project at runtime:
+ *   E2E_BASE_URL=... bunx playwright test --project=chromium-prod
+ *   E2E_SANDBOX_BASE_URL=... bunx playwright test --project=chromium-sandbox
+ *   MONGO_URL=mongodb://localhost:27017 ... (sandbox fixture inserts)
  *
  * Self-signed certs from the local nginx are accepted via
- * `ignoreHTTPSErrors`. CI sets `E2E_BASE_URL=https://animegoclub.com`
- * (the default below), so no docker stack is needed.
+ * `ignoreHTTPSErrors`.
  */
 
 const isCI = !!process.env.CI;
@@ -26,7 +37,6 @@ export default defineConfig({
     ...(isCI ? [["github"] as ["github"]] : []),
   ],
   use: {
-    baseURL: process.env.E2E_BASE_URL || "https://animegoclub.com",
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
     actionTimeout: 10_000,
@@ -34,8 +44,24 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      name: "chromium-prod",
+      // Glob is relative to testDir. Top-level *.spec.ts only — sandbox/
+      // is excluded so this project never tries to hit a docker stack.
+      testMatch: "*.spec.ts",
+      testIgnore: "sandbox/**",
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: process.env.E2E_BASE_URL || "https://animegoclub.com",
+      },
+    },
+    {
+      name: "chromium-sandbox",
+      // Everything under sandbox/.
+      testMatch: "sandbox/**/*.spec.ts",
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: process.env.E2E_SANDBOX_BASE_URL || "https://localhost",
+      },
     },
   ],
 });
