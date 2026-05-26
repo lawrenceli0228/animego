@@ -10,6 +10,11 @@ bun.lockb
 # will enforce mtime sync with package-lock.json)
 !next-app/bun.lock
 
+# Exception: e2e/bun.lock IS tracked (P10 Lane B — Playwright e2e
+# project. e2e/ runs against live prod, not the docker stack, so
+# bun is the only runtime; no npm lockfile counterpart is needed.)
+!e2e/bun.lock
+
 # Environment variables (contains secrets - never commit)
 .env
 .env.local

@@ -1,0 +1,14 @@
+# Playwright artifacts
+playwright-report/
+test-results/
+.last-run.json
+
+# Local node modules
+node_modules/
+
+# Build / cache
+.next/
+dist/
+
+# OS
+.DS_Store

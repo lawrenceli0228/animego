@@ -1,0 +1,62 @@
+name: E2E (Playwright)
+
+# v1 (P10 Lane B) runs the public read-only suite against live prod.
+#
+# Why prod and not a docker-compose stack?
+#   - .env.production is gitignored and holds secrets the CI runner
+#     cannot reconstruct; spinning up the local stack would require
+#     vaulting the env or rebuilding it from GitHub Secrets, which is
+#     out of scope for v1.
+#   - All v1 specs are READ-ONLY (no writes, no auth, no library, no
+#     player, no admin). Pointing at live prod is safe and exercises
+#     the actual SSR / ISR / CDN path users hit.
+#   - Future v2 (auth, library, player) will need a sandbox stack; at
+#     that point add a separate workflow that boots docker-compose with
+#     test fixtures rather than touching prod data.
+on:
+  pull_request:
+    branches: [main, feat/go-backend]
+  workflow_dispatch:
+
+# Only one suite per branch in flight — duplicate runs against live
+# prod add no signal and double the artifact bill.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright against live prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install e2e deps
+        working-directory: e2e
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: bunx playwright install --with-deps chromium
+
+      - name: Run Playwright
+        working-directory: e2e
+        env:
+          E2E_BASE_URL: https://animegoclub.com
+          CI: "true"
+        run: bunx playwright test
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 14
