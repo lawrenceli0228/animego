@@ -836,7 +836,7 @@ T+30 day:
 cutover 后 **24 小时内** 出现 critical bug,nginx 一行回 Express:
 
 ```bash
-ssh root@45.152.65.208 "cd /opt/animego && \
+ssh root@<OLD_IP> "cd /opt/animego && \
   sed -i 's|proxy_pass http://go-api:8080|proxy_pass http://app:5001|' nginx/default.conf && \
   docker compose restart nginx && \
   docker compose start mongodb && \
@@ -863,7 +863,7 @@ ssh root@45.152.65.208 "cd /opt/animego && \
 ### 完整 v2.0 SPA 回滚(放弃整个 plan)
 
 ```bash
-ssh root@45.152.65.208 "cd /opt/animego && \
+ssh root@<OLD_IP> "cd /opt/animego && \
   git checkout v2.0.1-stable && \
   docker compose down && \
   docker compose build && \

@@ -1,11 +1,141 @@
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN" xml:lang="zh-CN">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
 <head>
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>AnimeGo — MIGRATION-PLAN</title>
+  <title>AnimeGo Migration Plan</title>
   <style>
+    html {
+      line-height: 1.5;
+      font-family: Georgia, serif;
+      font-size: 20px;
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      word-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 1em;
+      }
+    }
+    @media print {
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, 'Lucida Console', Consolas, monospace;
+      font-size: 85%;
+      margin: 0;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
     code{white-space: pre-wrap;}
     span.smallcaps{font-variant: small-caps;}
     span.underline{text-decoration: underline;}
@@ -80,55 +210,533 @@
   <!--[if lt IE 9]>
     <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
   <![endif]-->
-    <style>
-    :root {
-      --bg: #0e1116; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
-      --code-bg: #161b22; --border: #30363d; --highlight: #f0c674;
-    }
-    html { background: var(--bg); color: var(--fg); color-scheme: dark; scroll-behavior: smooth; }
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+  :root {
+    --bg: #0a0a0f;
+    --bg-elev: #14141a;
+    --bg-card: #1c1c24;
+    --bg-code: #16161d;
+
+    --text: #ededed;
+    --text-2: rgba(235, 235, 245, 0.72);
+    --text-3: rgba(235, 235, 245, 0.50);
+    --text-4: rgba(235, 235, 245, 0.30);
+
+    --border: rgba(120, 120, 140, 0.18);
+    --border-strong: rgba(160, 160, 180, 0.32);
+    --border-hot: rgba(200, 200, 230, 0.45);
+
+    --hue-magenta: 330;
+    --hue-blue: 210;
+    --hue-amber: 40;
+    --hue-violet: 260;
+    --hue-cyan: 195;
+    --hue-chartreuse: 70;
+    --hue-green: 145;
+
+    --accent: oklch(70% 0.19 var(--hue-blue));
+    --accent-2: oklch(78% 0.17 var(--hue-cyan));
+    --success: oklch(75% 0.18 var(--hue-green));
+    --warning: oklch(75% 0.17 var(--hue-amber));
+    --danger: oklch(70% 0.20 var(--hue-magenta));
+
+    --font-display: "Sora", system-ui, -apple-system, sans-serif;
+    --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+    --content-width: 980px;
+  }
+
+  * {
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+  }
+
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+    background: var(--bg);
+  }
+
+  body {
+    /* Center the whole document. Single point of truth for layout width
+       so every section, table, code block lines up against the same axis. */
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding: 56px 40px 120px;
+
+    background:
+      radial-gradient(ellipse 80% 60% at 50% -10%, oklch(28% 0.10 var(--hue-blue) / 0.35), transparent 60%),
+      radial-gradient(ellipse 70% 50% at 90% 30%, oklch(26% 0.10 var(--hue-magenta) / 0.25), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 10% 80%, oklch(26% 0.10 var(--hue-cyan) / 0.22), transparent 55%),
+      var(--bg);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15.5px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+
+  /* ----- Title (h1.title from pandoc) ----- */
+  header#title-block-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+
+  h1.title {
+    font-family: var(--font-display);
+    font-size: clamp(2.25rem, 1rem + 4vw, 3.5rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    margin: 16px 0 8px;
+    background: linear-gradient(135deg, #ffffff 0%, oklch(78% 0.14 var(--hue-blue)) 60%, oklch(72% 0.18 var(--hue-cyan)) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  /* ----- Headers ----- */
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    color: #fff;
+    letter-spacing: -0.015em;
+    scroll-margin-top: 24px;
+  }
+
+  h1:not(.title) {
+    /* pandoc duplicates the title as h1 in body when toc is on. The .title
+       above is enough. */
+    display: none;
+  }
+
+  h2 {
+    font-size: clamp(1.625rem, 0.9rem + 2vw, 2.25rem);
+    font-weight: 800;
+    margin: 72px 0 24px;
+    padding-top: 28px;
+    padding-left: 22px;
+    position: relative;
+    border-top: 1px solid var(--border);
+    line-height: 1.15;
+  }
+
+  h2::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 32px;
+    width: 4px;
+    height: calc(100% - 8px);
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+    border-radius: 2px;
+    box-shadow: 0 0 18px oklch(70% 0.20 var(--hue-blue) / 0.55);
+  }
+
+  h3 {
+    font-size: clamp(1.2rem, 0.7rem + 1.1vw, 1.5rem);
+    font-weight: 700;
+    margin: 44px 0 16px;
+    color: oklch(85% 0.05 var(--hue-blue));
+  }
+
+  h4 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 32px 0 12px;
+    color: oklch(80% 0.06 var(--hue-cyan));
+  }
+
+  /* ----- Paragraphs ----- */
+  p {
+    margin: 16px 0;
+    color: var(--text-2);
+  }
+
+  p strong, li strong {
+    color: #fff;
+    font-weight: 600;
+  }
+
+  /* ----- Links ----- */
+  a {
+    color: oklch(78% 0.16 var(--hue-cyan));
+    text-decoration: none;
+    border-bottom: 1px solid oklch(78% 0.16 var(--hue-cyan) / 0.30);
+    transition: color 200ms var(--ease-out-expo), border-color 200ms var(--ease-out-expo);
+  }
+
+  a:hover {
+    color: oklch(86% 0.18 var(--hue-cyan));
+    border-bottom-color: oklch(78% 0.16 var(--hue-cyan) / 0.85);
+  }
+
+  a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* ----- Inline code ----- */
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: oklch(85% 0.12 var(--hue-amber));
+    letter-spacing: -0.01em;
+    word-break: break-word;
+  }
+
+  /* ----- Code blocks ----- */
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 20px 0;
+    overflow-x: auto;
+    position: relative;
+    font-size: 13px;
+    line-height: 1.7;
+    box-shadow: 0 1px 0 oklch(50% 0.05 var(--hue-blue) / 0.10) inset;
+  }
+
+  pre::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, oklch(70% 0.19 var(--hue-blue) / 0.40), transparent);
+  }
+
+  pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text);
+    font-size: inherit;
+  }
+
+  /* ----- Lists ----- */
+  ul, ol {
+    margin: 16px 0 16px 4px;
+    padding-left: 28px;
+    color: var(--text-2);
+  }
+
+  li {
+    margin: 8px 0;
+    padding-left: 6px;
+  }
+
+  li > ul,
+  li > ol {
+    margin: 6px 0 4px;
+  }
+
+  ul li::marker {
+    color: var(--accent);
+  }
+
+  ol li::marker {
+    color: var(--accent-2);
+    font-family: var(--font-mono);
+    font-weight: 500;
+  }
+
+  /* Checkbox-style task list items (pandoc renders `- [ ]` as
+     <li><input type="checkbox" disabled> ...).  Override default ugly
+     appearance with a custom dark-friendly box. */
+  input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--bg-code);
+    margin-right: 10px;
+    margin-left: -22px;
+    margin-bottom: -3px;
+    vertical-align: middle;
+    cursor: pointer;
+    transition: border-color 150ms, background 150ms;
+  }
+
+  input[type="checkbox"]:hover {
+    border-color: var(--accent);
+  }
+
+  input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+    position: relative;
+  }
+
+  input[type="checkbox"]:checked::after {
+    content: "✓";
+    position: absolute;
+    top: -3px;
+    left: 2px;
+    color: #000;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  /* ----- Tables ----- */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 28px 0;
+    font-size: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  thead {
+    background: linear-gradient(180deg, oklch(22% 0.04 var(--hue-blue)) 0%, oklch(18% 0.03 var(--hue-blue)) 100%);
+  }
+
+  th {
+    padding: 14px 16px;
+    text-align: left;
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: oklch(85% 0.06 var(--hue-blue));
+    border-bottom: 1px solid var(--border-strong);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 12px 16px;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-2);
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  tbody tr {
+    transition: background 150ms var(--ease-out-expo);
+  }
+
+  tbody tr:hover {
+    background: oklch(22% 0.05 var(--hue-blue) / 0.35);
+  }
+
+  td code {
+    font-size: 0.82em;
+    padding: 1px 5px;
+  }
+
+  /* ----- Blockquote ----- */
+  blockquote {
+    border-left: 3px solid var(--accent);
+    background: oklch(22% 0.04 var(--hue-blue) / 0.18);
+    padding: 16px 22px;
+    margin: 20px 0;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-2);
+  }
+
+  blockquote p {
+    margin: 6px 0;
+  }
+
+  /* ----- Horizontal rule ----- */
+  hr {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+    margin: 56px 0;
+  }
+
+  /* ----- TOC ----- */
+  #TOC {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 26px 32px;
+    margin: 32px 0 56px;
+    position: relative;
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  #TOC::before {
+    content: "TABLE OF CONTENTS";
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    color: var(--text-4);
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+
+  #TOC ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+  }
+
+  #TOC ul ul {
+    padding-left: 22px;
+    margin: 4px 0 10px;
+    border-left: 1px solid var(--border);
+  }
+
+  #TOC li {
+    margin: 5px 0;
+    padding: 0;
+    line-height: 1.55;
+  }
+
+  #TOC > ul > li {
+    margin: 10px 0;
+  }
+
+  #TOC > ul > li > a {
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: #fff;
+    font-size: 14.5px;
+  }
+
+  #TOC a {
+    border-bottom: none;
+    color: var(--text-2);
+    display: inline-block;
+    padding: 3px 0;
+    font-size: 13.5px;
+    transition: color 150ms var(--ease-out-expo), transform 150ms var(--ease-out-expo);
+  }
+
+  #TOC a:hover {
+    color: var(--accent-2);
+    transform: translateX(2px);
+  }
+
+  /* ----- Strong emphasis on bullet phrases (often used as section sub-headers) ----- */
+  ul > li > strong:first-child,
+  ol > li > strong:first-child {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: oklch(86% 0.10 var(--hue-cyan));
+    letter-spacing: -0.01em;
+  }
+
+  /* ----- Footnote / muted text on dimmer rows ----- */
+  em {
+    color: var(--text-2);
+    font-style: italic;
+  }
+
+  /* ----- Selection ----- */
+  ::selection {
+    background: oklch(50% 0.18 var(--hue-blue) / 0.55);
+    color: #fff;
+  }
+
+  /* ----- Scrollbar (webkit) ----- */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: oklch(30% 0.04 var(--hue-blue));
+    border-radius: 6px;
+    border: 2px solid var(--bg);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(40% 0.06 var(--hue-blue));
+  }
+
+  /* ----- Print ----- */
+  @media print {
     body {
-      background: var(--bg); color: var(--fg);
-      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      max-width: 1100px; margin: 0 auto; padding: 2.5rem 3rem 6rem;
+      background: white;
+      color: black;
+      padding: 0;
+      max-width: none;
     }
-    h1, h2, h3, h4, h5, h6 {
-      border-bottom: 1px solid var(--border); padding-bottom: .3em;
-      font-weight: 600; color: var(--fg); margin-top: 2em; margin-bottom: 0.6em;
+    h2::before {
+      display: none;
     }
-    h1.title { font-size: 2.2rem; color: var(--highlight); border-bottom: 2px solid var(--border); padding-bottom: .6em; }
-    h1 { font-size: 1.85rem; color: var(--highlight); }
-    h2 { font-size: 1.45rem; color: var(--highlight); }
-    h3 { font-size: 1.15rem; border-bottom: 1px dashed var(--border); }
-    h4 { font-size: 1rem; border: 0; color: var(--muted); }
-    p { margin: 1em 0; }
-    a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
-    code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px;
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
-      color: #ffa657; border: 1px solid var(--border); }
-    pre { background: var(--code-bg); padding: 1rem 1.2rem; overflow-x: auto;
-      border: 1px solid var(--border); border-radius: 6px; font-size: 0.84em;
-      line-height: 1.55; margin: 1em 0; }
-    pre code { padding: 0; background: transparent; color: var(--fg); font-size: 1em; border: 0; }
-    blockquote { border-left: 3px solid var(--accent); margin: 1em 0; padding: .6em 1.2em;
-      color: var(--muted); background: rgba(88,166,255,0.06); border-radius: 0 4px 4px 0; }
-    table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
-    th, td { border: 1px solid var(--border); padding: .55em .85em; text-align: left; vertical-align: top; }
-    th { background: var(--code-bg); font-weight: 600; color: var(--highlight); }
-    tbody tr:nth-child(odd) { background: rgba(255,255,255,0.025); }
-    hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
-    nav#TOC { background: var(--code-bg); padding: 1.2rem 1.6rem; border-radius: 6px;
-      border: 1px solid var(--border); margin: 1.5rem 0 2.5rem; font-size: 0.88em; }
-    nav#TOC ul { padding-left: 1.4em; margin: 0.3em 0; list-style: none; }
-    nav#TOC > ul { padding-left: 0; }
-    strong { color: var(--highlight); font-weight: 600; }
-    em { color: #a5d6ff; font-style: normal; opacity: 0.85; }
-    li { margin: 0.18em 0; }
-    header.title-block-header { padding-bottom: 1.5em; border-bottom: 2px solid var(--border); margin-bottom: 2em; }
-    </style>
+  }
+
+  /* ----- Reduced motion ----- */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* ----- Responsive ----- */
+  @media (max-width: 1040px) {
+    body {
+      padding: 40px 28px 96px;
+    }
+  }
+
+  @media (max-width: 720px) {
+    body {
+      padding: 24px 16px 64px;
+      font-size: 14.5px;
+    }
+    table {
+      font-size: 12.5px;
+    }
+    th, td {
+      padding: 10px 12px;
+    }
+    h2 {
+      margin: 52px 0 18px;
+      padding-left: 18px;
+    }
+    pre {
+      padding: 16px 18px;
+      font-size: 12.5px;
+    }
+  }
+  </style>
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">AnimeGo — MIGRATION-PLAN</h1>
+<h1 class="title">AnimeGo Migration Plan</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
@@ -1288,7 +1896,7 @@ T+30 day:
 <h2 id="rollback-plan">4. Rollback Plan</h2>
 <h3 id="h-真实窗口p9-cutover-后">24h 真实窗口(P9 cutover 后)</h3>
 <p>cutover 后 <strong>24 小时内</strong> 出现 critical bug,nginx 一行回 Express:</p>
-<div class="sourceCode" id="cb21"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> root@45.152.65.208 <span class="st">&quot;cd /opt/animego &amp;&amp; </span><span class="dt">\</span></span>
+<div class="sourceCode" id="cb21"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> root@<span class="op">&lt;</span>OLD_IP<span class="op">&gt;</span> <span class="st">&quot;cd /opt/animego &amp;&amp; </span><span class="dt">\</span></span>
 <span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="st">  sed -i &#39;s|proxy_pass http://go-api:8080|proxy_pass http://app:5001|&#39; nginx/default.conf &amp;&amp; </span><span class="dt">\</span></span>
 <span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a><span class="st">  docker compose restart nginx &amp;&amp; </span><span class="dt">\</span></span>
 <span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a><span class="st">  docker compose start mongodb &amp;&amp; </span><span class="dt">\</span></span>
@@ -1300,7 +1908,7 @@ T+30 day:
 <p><strong>24h 之后,cutover 是 irreversible。</strong> mongo 30 天保留 + R2 mongodump 90 天只用于: 1. <strong>法律取证</strong> — 用户数据 GDPR delete request 历史追溯 2. <strong>灾难恢复</strong> — Postgres 完全崩溃且 R2 pg_dump 同时不可用的极端 case 3. <strong>审计</strong> — schema 迁移 bug 事后复盘</p>
 <p><strong>不可用作 rollback 路径。</strong> 任何“切回 mongo”的操作都会丢失 cutover 后的所有用户写入。</p>
 <h3 id="完整-v2.0-spa-回滚放弃整个-plan">完整 v2.0 SPA 回滚(放弃整个 plan)</h3>
-<div class="sourceCode" id="cb22"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> root@45.152.65.208 <span class="st">&quot;cd /opt/animego &amp;&amp; </span><span class="dt">\</span></span>
+<div class="sourceCode" id="cb22"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> root@<span class="op">&lt;</span>OLD_IP<span class="op">&gt;</span> <span class="st">&quot;cd /opt/animego &amp;&amp; </span><span class="dt">\</span></span>
 <span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="st">  git checkout v2.0.1-stable &amp;&amp; </span><span class="dt">\</span></span>
 <span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a><span class="st">  docker compose down &amp;&amp; </span><span class="dt">\</span></span>
 <span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="st">  docker compose build &amp;&amp; </span><span class="dt">\</span></span>
@@ -1376,14 +1984,15 @@ P10 (测试 + 性能) 持续穿插</code></pre>
 <h2 id="status-tracking">7. Status Tracking</h2>
 <blockquote>
 <p><strong>Status check 2026-05-20:</strong> Plan 落地 8 天,全部 phase 仍 <code>not started</code>。本周要么起 P0,要么 plan 随上游 stack 演进而陈旧(已发生:Bun 1.3.14 + Zig→Rust 重写,见决策日志新行 + R19/R20)。 <strong>下一次 audit 触发:</strong> P0 开工日 / 2026-06-01,取早。</p>
+<p><strong>Status sweep 2026-05-26:</strong> P0 → P8 全部落地,但 plan 表格从 P2.1 起一直 <code>not started</code> 未跟。本次扫一遍 commit 日志(<code>git log --grep</code>)按短语规整。P8.5 shadow traffic 策略改为<strong>增量 cutover</strong>(P6.1 /library/player → P7 /admin → P8.0 HomePage → P8.1 SEO edge → P9.x auth 表面),不再走 big-bang。P9 因此从“一次性切换”重新定义成“剩余 auth 表面增量港”。</p>
 </blockquote>
-<table>
+<table style="width:100%;">
 <colgroup>
-<col style="width: 14%" />
 <col style="width: 16%" />
-<col style="width: 18%" />
-<col style="width: 22%" />
-<col style="width: 28%" />
+<col style="width: 19%" />
+<col style="width: 21%" />
+<col style="width: 26%" />
+<col style="width: 16%" />
 </colgroup>
 <thead>
 <tr class="header">
@@ -1391,7 +2000,7 @@ P10 (测试 + 性能) 持续穿插</code></pre>
 <th>Status</th>
 <th>Started</th>
 <th>Completed</th>
-<th style="text-align: right;">Hours actual</th>
+<th>Notes</th>
 </tr>
 </thead>
 <tbody>
@@ -1400,140 +2009,140 @@ P10 (测试 + 性能) 持续穿插</code></pre>
 <td><strong>DONE</strong></td>
 <td>2026-05-20</td>
 <td>2026-05-20</td>
-<td style="text-align: right;">~6 hr (vs 20-35 estimate; subagent协同压缩) — 详 <a href="P0-PROGRESS.md"><code>P0-PROGRESS.md</code></a> / <a href="P0-PROGRESS.html"><code>P0-PROGRESS.html</code></a></td>
+<td>~6 hr (vs 20-35 estimate; subagent协同压缩) — 详 <a href="P0-PROGRESS.md"><code>P0-PROGRESS.md</code></a> / <a href="P0-PROGRESS.html"><code>P0-PROGRESS.html</code></a></td>
 </tr>
 <tr class="even">
 <td>P1 Migration Tool</td>
 <td><strong>DONE</strong></td>
 <td>2026-05-21</td>
 <td>2026-05-21</td>
-<td style="text-align: right;">~10 hr(同一天集中跑;subagent + integration-test 反复迭代;100% field parity)— 详 <a href="P1-PROGRESS.md"><code>P1-PROGRESS.md</code></a> / <a href="P1-PROGRESS.html"><code>P1-PROGRESS.html</code></a> / <a href="ERD.md"><code>ERD.md</code></a></td>
+<td>~10 hr(同一天集中跑;subagent + integration-test 反复迭代;100% field parity)— 详 <a href="P1-PROGRESS.md"><code>P1-PROGRESS.md</code></a> / <a href="P1-PROGRESS.html"><code>P1-PROGRESS.html</code></a> / <a href="ERD.md"><code>ERD.md</code></a></td>
 </tr>
 <tr class="odd">
 <td>P2.0 chi 骨架(eng-review 后追加)</td>
 <td><strong>DONE</strong></td>
 <td>2026-05-21</td>
 <td>2026-05-21</td>
-<td style="text-align: right;">~6 hr(vs 7-10 estimate;A/C 并行 subagent + D 我手写 + smoke + live curl)— 详 <a href="P2.0-DESIGN.md"><code>P2.0-DESIGN.md</code></a> / <a href="P2.0-DESIGN.html"><code>P2.0-DESIGN.html</code></a> / <a href="P2-PROGRESS.md"><code>P2-PROGRESS.md</code></a> / <a href="P2-PROGRESS.html"><code>P2-PROGRESS.html</code></a></td>
+<td>~6 hr(vs 7-10 estimate;A/C 并行 subagent + D 我手写 + smoke + live curl)— 详 <a href="P2.0-DESIGN.md"><code>P2.0-DESIGN.md</code></a> / <a href="P2.0-DESIGN.html"><code>P2.0-DESIGN.html</code></a> / <a href="P2-PROGRESS.md"><code>P2-PROGRESS.md</code></a> / <a href="P2-PROGRESS.html"><code>P2-PROGRESS.html</code></a></td>
 </tr>
 <tr class="even">
 <td>P2.1 /api/anime/*</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-21</td>
+<td>2026-05-22</td>
+<td>P2.1.0–P2.1.9 全 9 子步骤 + warm_season + byte-parity 验证;<code>feat(go-api): P2.1.*</code> 系列</td>
 </tr>
 <tr class="odd">
 <td>P2.2 /api/auth/*</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-22</td>
+<td>2026-05-22</td>
+<td>P2.2.0–P2.2.4c(sqlc users + jwtx + auth handlers + Gmail SMTP + forgot/reset);<a href="P2.2-STATUS.md"><code>P2.2-STATUS.md</code></a></td>
 </tr>
 <tr class="even">
 <td>P2.3 /api/admin/*</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-23</td>
+<td>14 endpoints + adminAuth + river queue control endpoint(<code>41b61d3</code>)</td>
 </tr>
 <tr class="odd">
 <td>P2.4 /api/sub + user + feed</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-23</td>
+<td>11 endpoints(<code>129547b</code>)</td>
 </tr>
 <tr class="even">
 <td>P2.5 /api/comments + danmaku</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-23</td>
+<td>4 endpoints(<code>13ef200</code>)</td>
 </tr>
 <tr class="odd">
 <td>P2.6 /api/dandanplay/*</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-23</td>
+<td>4 endpoints + 3-phase match(<code>8bea942</code>)</td>
 </tr>
 <tr class="even">
 <td>P2.7 testify + testcontainers</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-21</td>
+<td>2026-05-23</td>
+<td>折进 P1.D testcontainers 跑通 + 各 P2.x 同步落 <code>_test.go</code>;<code>go.mod</code> 含 <code>testify v1.11.1</code> / <code>testcontainers-go v0.42.0</code>(mongo + postgres modules)</td>
 </tr>
 <tr class="odd">
 <td>P2.8 ws-server 拆出 (NEW)</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-23</td>
+<td>socket.io danmaku 抽出独立 Node 服务(<code>c9a3f20</code>)</td>
 </tr>
 <tr class="even">
 <td>P3 Next.js 16 骨架 + Bun</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-23</td>
+<td><code>c15d2bf</code> P3.0 skeleton + <code>45e269e</code> scripts/dev.sh 串完整 stack</td>
 </tr>
 <tr class="odd">
 <td>P4 Public Pages RSC</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-23</td>
+<td>P4.0 RSC fetch + types(<code>346cfc9</code>)、P4.1.0/.1 landing infra + 8 components、P4.2/.3/.5 metadata + sitemap + robots + loading skeleton</td>
 </tr>
 <tr class="even">
 <td>P5 SEO 核心 ISR</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-23</td>
+<td><code>/anime/[id]</code> + <code>/seasonal</code> + <code>/search</code> ISR pages(<code>596e4ba</code>)</td>
 </tr>
 <tr class="odd">
 <td>P6 Library + Player</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-25</td>
+<td>2026-05-26</td>
+<td>P6.1–P6.9(proxy gate → Dexie/handles → Library shell → 3-subagent 卡片 fan-out → Player route + jassub WASM → Player components fan-out → authFetch 401 retry + nginx routing → P6.8 dandanplay POST fix → P6.9 Navbar SSR auth state + legacy SPA 删);snapshot in <a href="P6-INVENTORY.md"><code>P6-INVENTORY.md</code></a></td>
 </tr>
 <tr class="even">
 <td>P7 Admin RSC</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-24</td>
+<td>2026-05-25</td>
+<td>scaffold → 三 lane(enrichment + users + queue)→ SSR fix → monolithic 单页 refactor + server-action tests → legacy admin SPA 删(<code>96795f5</code>)</td>
 </tr>
 <tr class="odd">
 <td>P8 部署架构</td>
-<td>not started</td>
-<td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td><strong>DONE</strong></td>
+<td>2026-05-23</td>
+<td>2026-05-24</td>
+<td>P8.0 HomePage 移到 <code>/</code> + LandingPage 到 <code>/welcome</code>(<code>47ac240</code>);P8.1 SEO edge rollout(auth cookie dual-track、partial cutover infra、本地 docker stack 完整验证、deploy-day toolkit + rollback conf);<a href="P8.1-STATUS.md"><code>P8.1-STATUS.md</code></a></td>
 </tr>
 <tr class="even">
 <td>P8.5 Shadow Traffic</td>
-<td>not started</td>
+<td><strong>SUPERSEDED</strong></td>
 <td>—</td>
 <td>—</td>
-<td style="text-align: right;">—</td>
+<td>策略改为增量 cutover(P6.1 / P7 / P8.0 / P8.1 / P9.x 各自小步切),不再起独立 shadow 期。Day-6 dress rehearsal + Day-7 rollback drill 也跟着 retire</td>
 </tr>
 <tr class="odd">
 <td>P9 Big-Bang Cutover</td>
-<td>not started</td>
+<td><strong>IN PROGRESS</strong></td>
+<td>2026-05-26</td>
 <td>—</td>
-<td>—</td>
-<td style="text-align: right;">—</td>
+<td>重定义为“剩余 auth 表面增量港”:/login DONE(<code>8658437</code> + nginx <code>eb6f855</code>)。Remaining: /register、/forgot-password、/reset-password/:token</td>
 </tr>
 <tr class="even">
 <td>P10 Lighthouse + Sentry + E2E</td>
 <td>not started</td>
 <td>—</td>
 <td>—</td>
-<td style="text-align: right;">—</td>
+<td>—</td>
 </tr>
 </tbody>
 </table>

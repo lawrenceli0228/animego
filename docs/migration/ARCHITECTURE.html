@@ -884,7 +884,7 @@
         <h4>Layer 1 · Bun → Node</h4>
         <div class="time">SLA · 5 min · 双 Dockerfile</div>
 <pre><span class="cmt"># VPS 上手动切</span>
-ssh root@45.152.65.208 <span class="acc">"</span>
+ssh root@[OLD_IP] <span class="acc">"</span>
   cd /opt/animego &amp;&amp; \
   sed -i <span class="acc">'s|Dockerfile$|Dockerfile.node|'</span> docker-compose.yml &amp;&amp; \
   docker compose build app &amp;&amp; \
@@ -895,7 +895,7 @@ ssh root@45.152.65.208 <span class="acc">"</span>
         <h4>Layer 2 · Next.js → v2.0 SPA</h4>
         <div class="time">SLA · 30 min · 全栈回滚</div>
 <pre><span class="cmt"># 万一 Next.js 整体翻车</span>
-ssh root@45.152.65.208 <span class="acc">"</span>
+ssh root@[OLD_IP] <span class="acc">"</span>
   cd /opt/animego &amp;&amp; \
   git checkout v2.0.x-stable &amp;&amp; \
   docker compose down &amp;&amp; \

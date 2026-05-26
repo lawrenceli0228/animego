@@ -14,6 +14,11 @@ bun.lockb
 .env
 .env.local
 .env.production
+.env.deploy
+
+# Internal docs — kept local only (含 deploy runbook + 设计 + 迁移笔记，
+# 可能含 IP/port/路径/账号等 operational 细节，公开仓库一律不入)
+docs/
 
 # Build output
 client/dist/

@@ -14,7 +14,7 @@ document-css: false
 **最后更新:** 2026-05-23
 **作者:** Claude / Lawrence
 **生产域名:** [animegoclub.com](https://animegoclub.com)
-**生产 VPS:** 香港 45.152.65.208 SSH 端口 17776,项目目录 `/opt/animego`,docker compose 三容器(`animego-app-1` / `animego-mongodb-1` / `animego-nginx-1`)
+**生产 VPS:** 香港 <OLD_IP> SSH 端口 <OLD_SSH_PORT>,项目目录 `/opt/animego`,docker compose 三容器(`animego-app-1` / `animego-mongodb-1` / `animego-nginx-1`)
 
 > **用法**:这份文档是 **Phase 8.5 shadow + Phase 10 canary** 的阈值参照源。所有数字必须在 **P9 cutover 前补齐**,否则 P8.5 shadow 没有对比基准、P10 canary 没有回滚判据。
 >
@@ -160,7 +160,7 @@ done
 
 ```bash
 # SSH 上 VPS:
-ssh -p 17776 root@45.152.65.208
+ssh -p <OLD_SSH_PORT> root@<OLD_IP>
 
 # 进项目目录(docker compose context):
 cd /opt/animego
@@ -358,7 +358,7 @@ function createHealthHandler() {
 > ⚠️ 需 Lawrence 手动 SSH;假设 nginx log format 含 `$request_time`(秒,浮点),如果当前 format 没有,需先在 nginx conf 加。
 
 ```bash
-ssh -p 17776 root@45.152.65.208
+ssh -p <OLD_SSH_PORT> root@<OLD_IP>
 cd /opt/animego
 
 # === 命令 A:确认 nginx log format 有 request_time ===
@@ -444,7 +444,7 @@ docker compose exec nginx sh -c '
 ### 6.1 SSH 命令(VPS 上跑)
 
 ```bash
-ssh -p 17776 root@45.152.65.208
+ssh -p <OLD_SSH_PORT> root@<OLD_IP>
 
 # === 命令 A:装 vnstat(如果还没装) ===
 which vnstat || apt-get install -y vnstat
@@ -490,7 +490,7 @@ iftop -t -s 300 -B   # 5min 平均 byte/s,需要 -B 改单位
 | **30 天月度推算** | **~1.95 GB/month** | 66.6 × 30 / 1024 |
 | 服务商 plan 月度上限 | _TBD_(Lawrence 查控制台) | placeholder |
 | 当前用量占比 | _TBD_ % | 推算/上限 |
-| 服务商 | _TBD_(Lawrence 标注) | 香港 IP 45.152.65.208 |
+| 服务商 | _TBD_(Lawrence 标注) | 香港 IP <OLD_IP> |
 
 **P8.5 mirror sample 决策表(更新):**
 
@@ -612,7 +612,7 @@ which vnstat && vnstat -m || echo "vnstat not installed (run: apt-get install -y
 | 事实 | 来源 | 备注 |
 |---|---|---|
 | 生产域名 | README.md L7 | `animegoclub.com`(不是 `animego.io`) |
-| VPS IP / 端口 | MEMORY.md project_deployment_status | 45.152.65.208 / SSH 17776 |
+| VPS IP / 端口 | MEMORY.md project_deployment_status | <OLD_IP> / SSH <OLD_SSH_PORT> |
 | docker compose 服务 | MEMORY.md | server / mongo / nginx 三容器 |
 | ws-server 已分离 | 8bea942 commit (P2.8) | 独立 Node 微服务,端口 3001 |
 | socket.io 无 metrics | server/socket/index.js + ws-server/src/index.js 已读 | 必须先加 instrumentation 才能填 § 3 / § 7 |
