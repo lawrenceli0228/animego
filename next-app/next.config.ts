@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
@@ -53,4 +54,38 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry wraps the Next config so the webpack plugin can (a) inject the
+// SDK at build time and (b) upload source maps to Sentry when an auth
+// token is provided. The plugin is safe to invoke unconditionally: with
+// no DSN at runtime the SDK no-ops, and with no auth token at build time
+// the source-map upload step is skipped (see `sourcemaps.disable` below).
+//
+// CSP note: we deliberately do NOT set `tunnelRoute`. Sentry events go
+// direct to ingest.sentry.io, which keeps nginx's strict CSP block in
+// `nginx/default.conf` untouched. If ad-blocker bypass becomes a need,
+// add the tunnel route here AND amend the CSP `connect-src` -- not one
+// without the other.
+export default withSentryConfig(nextConfig, {
+  // Suppress the SDK's verbose build logs locally; CI still sees them so
+  // source-map upload failures stay visible in build logs.
+  silent: !process.env.CI,
+  // Don't widen client source maps to include Next internals + deps --
+  // keeps source-map upload (and the resulting bundle) smaller. Trade-off
+  // is unreadable stack frames inside node_modules, which is fine.
+  widenClientFileUpload: false,
+  webpack: {
+    // Keep the SDK's small internal logger in the bundle. Useful for
+    // debugging Sentry itself; cost is negligible (a few hundred bytes).
+    treeshake: {
+      removeDebugLogging: false,
+    },
+    // Not on Vercel -- disable the Vercel-Cron auto-monitor feature.
+    automaticVercelMonitors: false,
+  },
+  // Source-map upload is gated on SENTRY_AUTH_TOKEN. Without the token
+  // the plugin skips upload entirely so dev / unauthenticated CI builds
+  // don't fail. With the token set (prod CI), maps upload normally.
+  sourcemaps: {
+    disable: !process.env.SENTRY_AUTH_TOKEN,
+  },
+});
