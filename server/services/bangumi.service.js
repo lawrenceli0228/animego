@@ -154,7 +154,14 @@ async function fetchBangumiSubject(bgmId) {
   return { bangumiScore: data.rating.score ?? null, bangumiVotes: data.rating.total ?? null };
 }
 
-// Returns [{ nameCn, voiceActorCn }] sorted by main role first (for index-match with AniList)
+// Returns [{ nameCn, voiceActorCn }] sorted by main role first (for index-match with AniList).
+//
+// Bug history (2026-05-27): originally read `c.name` and `c.actors[0].name`,
+// but Bangumi's `name` field is the ORIGINAL (Japanese) name, not Chinese.
+// The Chinese rendering is in `name_cn`. Reading `name` shipped Japanese
+// katakana into our `nameCn` slot, which the UI then surfaced as
+// (wrong-language + sometimes off-by-one because index matching against
+// AniList is fragile). Use `name_cn` for both character and voice actor.
 async function fetchBangumiCharacters(bgmId) {
   const res = await rateLimitedFetch(`https://api.bgm.tv/v0/subjects/${bgmId}/characters`);
   if (!res.ok) return null;
@@ -163,8 +170,8 @@ async function fetchBangumiCharacters(bgmId) {
   // relation: 1=主角 2=配角 3=客串 — sort same order as AniList (main first)
   list.sort((a, b) => (a.relation ?? 9) - (b.relation ?? 9));
   return list.map(c => ({
-    nameCn:       c.name           ?? null,
-    voiceActorCn: c.actors?.[0]?.name ?? null,
+    nameCn:       c.name_cn          || null,
+    voiceActorCn: c.actors?.[0]?.name_cn || null,
   }));
 }
 

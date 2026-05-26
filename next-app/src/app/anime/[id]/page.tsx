@@ -18,7 +18,15 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import AnimeCard from "@/components/anime/AnimeCard";
 import { apiGet, ApiError } from "@/lib/api";
-import { formatFuzzyDate, formatScore, pickTitle, stripHtml, truncate } from "@/lib/formatters";
+import {
+  formatFuzzyDate,
+  formatScore,
+  pickCharacterName,
+  pickTitle,
+  pickVoiceActorName,
+  stripHtml,
+  truncate,
+} from "@/lib/formatters";
 import { getDict, getLang } from "@/lib/i18n";
 import type { Dict, Lang } from "@/lib/i18n";
 import type {
@@ -655,8 +663,11 @@ function CharactersSection({
           const roleKey = c.role?.toUpperCase() || "SUPPORTING";
           const roleLabel =
             CHARACTER_ROLE_LABEL[lang]?.[roleKey] ?? roleKey;
-          const charName = c.name || "—";
-          const va = c.voiceActor;
+          // Field shape on the wire is {nameEn|nameJa|nameCn, voiceActor*}.
+          // pickCharacterName picks lang-appropriate with fallback so a
+          // missing nameCn surfaces nameJa instead of "—".
+          const charName = pickCharacterName(c, lang) || "—";
+          const va = pickVoiceActorName(c, lang) || null;
           return (
             <div
               key={`${charName}-${i}`}

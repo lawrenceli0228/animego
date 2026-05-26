@@ -32,6 +32,46 @@ export function formatScore(score: number | null | undefined): string {
   return score ? `${score / 10}` : "N/A";
 }
 
+type CharacterNameBearing = {
+  nameEn?: string | null;
+  nameJa?: string | null;
+  nameCn?: string | null;
+};
+
+type VoiceActorNameBearing = {
+  voiceActorEn?: string | null;
+  voiceActorJa?: string | null;
+  voiceActorCn?: string | null;
+};
+
+/**
+ * Pick a character display name per language preference.
+ *
+ * - `zh`: nameCn > nameJa > nameEn
+ * - `en`: nameEn > nameJa > nameCn
+ *
+ * Returns "" when every field is empty. nameCn may be unreliable
+ * (Bangumi enrichment historically wrote Japanese into the Cn slot
+ * before the 2026-05-27 fix), so the zh fallback ladder still has to
+ * tolerate non-Chinese strings — surfacing a Japanese name beats
+ * showing nothing. The enrichment cache will heal over time as series
+ * pick up bangumiVersion = 2+ writes with the correct field.
+ */
+export function pickCharacterName(c: CharacterNameBearing, lang: Lang): string {
+  if (lang === "zh") {
+    return c.nameCn || c.nameJa || c.nameEn || "";
+  }
+  return c.nameEn || c.nameJa || c.nameCn || "";
+}
+
+/** Same ladder as pickCharacterName, applied to voice actor fields. */
+export function pickVoiceActorName(c: VoiceActorNameBearing, lang: Lang): string {
+  if (lang === "zh") {
+    return c.voiceActorCn || c.voiceActorJa || c.voiceActorEn || "";
+  }
+  return c.voiceActorEn || c.voiceActorJa || c.voiceActorCn || "";
+}
+
 /** Strip HTML tags and entity references from a string. */
 export function stripHtml(html: string | null | undefined): string {
   if (!html) return "";

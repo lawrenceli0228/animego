@@ -126,10 +126,21 @@ export interface DetailRelation {
 }
 
 export interface DetailCharacter {
-  name: string;
+  // Raw shape from `/api/anime/:id` — Express stores characters as the
+  // AniList payload + Bangumi `nameCn` / `voiceActorCn` merged in. The
+  // server does NOT pre-resolve a single display name per request lang;
+  // the client picks via pickCharacterName() per the Accept-Language.
+  // Bug from 2026-05-27: previous shape declared `{name, voiceActor}`
+  // which doesn't exist on the wire — every render fell back to "—".
+  nameEn: string | null;
+  nameJa: string | null;
+  nameCn: string | null;
   role: string;
   imageUrl: string | null;
-  voiceActor: string | null;
+  voiceActorEn: string | null;
+  voiceActorJa: string | null;
+  voiceActorCn: string | null;
+  voiceActorImageUrl: string | null;
 }
 
 export interface DetailStaff {
