@@ -6,11 +6,11 @@ import ProtectedRoute from './components/common/ProtectedRoute'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 
-// Route-level code splitting: keep HomePage + LoginPage eager, lazy-load the rest
-// to trim the landing/login bundle. PlayerPage / LandingPage are the heaviest
-// (artplayer + motion) so they MUST stay lazy.
-// AdminDashboard removed in P7: /admin migrated to next-app/src/app/admin/page.tsx,
-// nginx routes /admin → next-app upstream now.
+// Route-level code splitting: keep HomePage + LoginPage eager, lazy-load the rest.
+// LandingPage stays lazy (motion). Migrations history:
+//   - AdminDashboard removed in P7   (commit 96795f5) — /admin → next-app
+//   - LibraryPage, LocalSeriesPage,
+//     PlayerPage removed in P6.9    — /library, /library/:id, /player → next-app
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const SeasonPage = lazy(() => import('./pages/SeasonPage'))
 const AnimeDetailPage = lazy(() => import('./pages/AnimeDetailPage'))
@@ -21,9 +21,6 @@ const UserProfilePage = lazy(() => import('./pages/UserProfilePage'))
 const FollowListPage = lazy(() => import('./pages/FollowListPage'))
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'))
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
-const PlayerPage = lazy(() => import('./pages/PlayerPage'))
-const LibraryPage = lazy(() => import('./pages/LibraryPage'))
-const LocalSeriesPage = lazy(() => import('./pages/LocalSeriesPage'))
 const CalendarPage = lazy(() => import('./pages/CalendarPage'))
 const FaqPage = lazy(() => import('./pages/FaqPage'))
 
@@ -41,9 +38,10 @@ export default function App() {
             <Route path="/search"    element={<SearchPage />} />
             <Route path="/calendar"  element={<CalendarPage />} />
             <Route path="/faq"       element={<FaqPage />} />
-            <Route path="/player"    element={<ProtectedRoute><PlayerPage /></ProtectedRoute>} />
-            <Route path="/library"   element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
-            <Route path="/library/:seriesId" element={<ProtectedRoute><LocalSeriesPage /></ProtectedRoute>} />
+            {/* /player, /library, /library/:seriesId moved to next-app in
+                P6.9. nginx ^~ /player and ^~ /library route to next_app
+                upstream; the routes here are intentionally gone so a
+                stale SPA bookmark falls through to the SPA 404. */}
             <Route path="/login"                   element={<LoginPage />} />
             <Route path="/register"                element={<RegisterPage />} />
             <Route path="/forgot-password"         element={<ForgotPasswordPage />} />
