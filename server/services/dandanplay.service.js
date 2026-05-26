@@ -10,6 +10,17 @@ const { buildEpisodeMap } = require('../utils/episodeMap');
 
 const BASE_URL = 'https://api.dandanplay.net';
 
+// dandanplay /api/v2/match server-side validation (tightened ~2026-05):
+// rejects requests with empty `fileHash` or zero `fileSize` even when
+// `matchMode: fileNameOnly` is set. `errorCode: 2 — 一个或多个参数不符合
+// 规则`. Empirically, the server ignores the actual hash bytes — any
+// 32-char placeholder lets the filename-matching fallback kick in. So
+// when we don't have a real MD5 (matchByFileName path), we send 32 zeros
+// + size 1 to satisfy validation; real-hash callers still send their
+// real values and get proper hash-based matches.
+const PLACEHOLDER_HASH = '0'.repeat(32);
+const PLACEHOLDER_SIZE = 1;
+
 const dandanFetch = createRateLimitedFetch(800, {
   'X-AppId': process.env.DANDANPLAY_APP_ID || '',
   'X-AppSecret': process.env.DANDANPLAY_APP_SECRET || '',
@@ -152,17 +163,19 @@ async function matchByFileName(fileName) {
     // defaults to text/plain which trips a fetch-level error before the
     // 4xx surfaces. Set explicit JSON content-type on every POST.
     headers: { 'Content-Type': 'application/json' },
+    // dandanplay validation rejects empty fileHash / zero fileSize even
+    // for fileNameOnly mode. Send placeholders to satisfy validation;
+    // server falls back to filename matching when hash doesn't match.
     body: JSON.stringify({
       fileName,
-      fileHash: '',
-      fileSize: 0,
-      matchMode: 'fileNameOnly',
+      fileHash: PLACEHOLDER_HASH,
+      fileSize: PLACEHOLDER_SIZE,
     }),
   });
   if (!res.ok) return null;
 
   const data = await res.json();
-  if (!data.isMatched || !data.matches?.length) return null;
+  if (!data.matches?.length) return null;
 
   const best = data.matches[0];
   return {
@@ -177,17 +190,17 @@ async function matchByHash(fileName, fileHash, fileSize) {
   const res = await dandanFetch(`${BASE_URL}/api/v2/match`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fileName,
-      fileHash,
-      fileSize,
-      matchMode: 'hashAndFileName',
-    }),
+    // matchMode dropped — current dandanplay API ignores it and
+    // auto-selects between hash + filename matching based on whether
+    // the hash collides with a known file. Drop isMatched gate too:
+    // a candidate match by filename is still useful when the hash
+    // doesn't collide.
+    body: JSON.stringify({ fileName, fileHash, fileSize }),
   });
   if (!res.ok) return null;
 
   const data = await res.json();
-  if (!data.isMatched || !data.matches?.length) return null;
+  if (!data.matches?.length) return null;
 
   const best = data.matches[0];
   return {
@@ -199,9 +212,15 @@ async function matchByHash(fileName, fileHash, fileSize) {
 }
 
 async function matchCombined(fileName, fileHash, fileSize) {
-  const body = { fileName };
-  if (fileHash) body.fileHash = fileHash;
-  if (fileSize) body.fileSize = fileSize;
+  // Always send fileHash + fileSize — current dandanplay validation
+  // rejects empties (errorCode 2). Use placeholders when the caller
+  // doesn't have real values; the server falls back to filename
+  // matching automatically.
+  const body = {
+    fileName,
+    fileHash: fileHash || PLACEHOLDER_HASH,
+    fileSize: fileSize || PLACEHOLDER_SIZE,
+  };
 
   const res = await dandanFetch(`${BASE_URL}/api/v2/match`, {
     method: 'POST',
