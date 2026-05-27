@@ -2,17 +2,14 @@
 
 // Action row that sits between Hero and the data sections on
 // /anime/[id]. Hosts the five legacy interactions:
-//   1. SubscriptionButton  — auth-aware, probes /api/subscriptions/:id
+//   1. SubscriptionButton (v2 panel: status select + ep ± + score + remove)
 //   2. ShareButton         — Web Share API / clipboard fallback
 //   3. MagnetButton        — opens TorrentModal (when episodes > 0)
 //   4. PlayButton          — opens /player in a new tab (when episodes > 0)
 //   5. TorrentModal        — rendered when state.torrentOpen is true
 //
-// The wrapper is a client component because TorrentModal open/close
-// state needs to live somewhere outside the modal itself (clicking
-// the trigger from MagnetButton flips it, ESC inside the modal also
-// flips it back). Buttons themselves are also clients, but their
-// state is contained to each button — they don't share with siblings.
+// Labels arrive flat from page.tsx and we shape them per child here so
+// each child component stays decoupled from the parent dict layout.
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
@@ -21,10 +18,6 @@ import ShareButton from "./ShareButton";
 import MagnetButton from "./MagnetButton";
 import PlayButton from "./PlayButton";
 
-// Defer the modal bundle until first open — it's not on the critical
-// path and the legacy modal was 466 lines (this v1 is smaller, but
-// the pattern stands for when v2 swaps the empty-state for a real
-// list).
 const TorrentModal = dynamic(() => import("./TorrentModal"), {
   ssr: false,
 });
@@ -39,19 +32,35 @@ interface DetailActionsProps {
   coverImageUrl: string | null;
   shareTitle: string;
   labels: {
+    // SubscriptionButton v2
     subAdd: string;
-    subWatching: string;
     subRemove: string;
     subLogin: string;
     subLoginAria: string;
+    subRate: string;
+    subEpUnit: string;
+    subWatching: string;
+    subCompleted: string;
+    subPlanToWatch: string;
+    subDropped: string;
+    // ShareButton
     share: string;
     shareCopied: string;
     shareCopyFailed: string;
+    // MagnetButton + TorrentModal
     torrents: string;
     torrentsTitle: string;
-    torrentsEmpty: string;
-    torrentsSearchExternally: string;
+    torrentsSearchBtn: string;
+    torrentsPlaceholder: string;
+    torrentsGroupAll: string;
+    torrentsEpAll: string;
+    torrentsLoading: string;
+    torrentsNoResults: string;
     torrentsClose: string;
+    torrentsCopy: string;
+    torrentsCopied: string;
+    torrentsOpenMagnet: string;
+    // PlayButton
     play: string;
     playAria: string;
   };
@@ -84,12 +93,18 @@ export default function DetailActions({
       <div style={rowStyle}>
         <SubscriptionButton
           anilistId={anilistId}
+          episodes={episodes}
           labels={{
             add: labels.subAdd,
-            watching: labels.subWatching,
             remove: labels.subRemove,
             login: labels.subLogin,
             loginAria: labels.subLoginAria,
+            rate: labels.subRate,
+            epUnit: labels.subEpUnit,
+            watching: labels.subWatching,
+            completed: labels.subCompleted,
+            planToWatch: labels.subPlanToWatch,
+            dropped: labels.subDropped,
           }}
         />
         <ShareButton
@@ -115,6 +130,7 @@ export default function DetailActions({
         <TorrentModal
           anime={{
             anilistId,
+            episodes,
             titleRomaji,
             titleEnglish,
             titleChinese,
@@ -123,9 +139,16 @@ export default function DetailActions({
           }}
           labels={{
             title: labels.torrentsTitle,
-            empty: labels.torrentsEmpty,
-            searchExternally: labels.torrentsSearchExternally,
+            searchBtn: labels.torrentsSearchBtn,
+            placeholder: labels.torrentsPlaceholder,
+            groupAll: labels.torrentsGroupAll,
+            epAll: labels.torrentsEpAll,
+            loading: labels.torrentsLoading,
+            noResults: labels.torrentsNoResults,
             close: labels.torrentsClose,
+            copy: labels.torrentsCopy,
+            copied: labels.torrentsCopied,
+            openMagnet: labels.torrentsOpenMagnet,
           }}
           onClose={() => setTorrentOpen(false)}
         />

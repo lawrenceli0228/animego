@@ -1,129 +1,167 @@
 // Streaming fallback for /anime/[id] while page.tsx awaits the Go
-// /api/anime/:id payload. Mirrors the LandingLoading visual rhythm
-// (dark sections + chapter hue bar + CSS shimmer) so the cold-cache
-// frame doesn't flash a blank page on first request after ISR expires.
+// /api/anime/:id payload.
 //
-// 5 blocks match the rendered section order:
-//   hero | relations | characters | staff | recommendations
+// Design intent matches legacy DetailSkeleton (client/src/components/common/Skeleton.jsx:76-124):
+// ONE block mirroring the real page geometry so the content swap is invisible.
+// Banner 400px + 210×300 cover overlapping -80px + meta column at padding-top
+// 60 — same numbers page.tsx Hero renders, so layout doesn't shift when the
+// real payload lands.
 
 import type { CSSProperties } from "react";
 
-const sectionStyle: CSSProperties = {
-  position: "relative",
-  padding: "clamp(48px, 4vw, 80px) 0",
-  borderBottom: "1px solid rgba(84,84,88,0.30)",
-  background: "#000",
-};
+const SHIMMER_BG =
+  "linear-gradient(90deg, #1c1c1e 25%, #2c2c2e 50%, #1c1c1e 75%)";
 
-const barStyle = (hue: number, height: number): CSSProperties => ({
-  position: "absolute",
-  left: 28,
-  top: 28,
-  width: 3,
-  height,
-  background: `oklch(62% 0.19 ${hue})`,
-  borderRadius: 2,
-  boxShadow: `0 0 24px oklch(62% 0.19 ${hue} / 0.55)`,
-  opacity: 0.7,
-});
-
-const skeletonBoxStyle = (w: string, h: number): CSSProperties => ({
-  background:
-    "linear-gradient(90deg, rgba(60,60,66,0.30) 0%, rgba(84,84,88,0.40) 50%, rgba(60,60,66,0.30) 100%)",
-  backgroundSize: "200% 100%",
-  animation: "detailPulse 1.6s ease-in-out infinite",
-  borderRadius: 4,
+const shimmer = (
+  w: number | string,
+  h: number,
+  extra?: CSSProperties,
+): CSSProperties => ({
   width: w,
   height: h,
+  background: SHIMMER_BG,
+  backgroundSize: "200% 100%",
+  animation: "skeletonShimmer 1.4s ease-in-out infinite",
+  borderRadius: 4,
+  ...extra,
 });
 
-const containerStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 24,
-  paddingLeft: 60,
-  paddingTop: 4,
-};
-
-// hero / relations / characters / staff / recommendations
-const sectionHues = [330, 210, 195, 260, 70];
-
 export default function AnimeDetailLoading() {
+  const bannerOverlay =
+    "linear-gradient(to bottom, transparent 0%, transparent 40%, rgba(0,0,0,0.30) 65%, rgba(0,0,0,0.95) 100%)";
+
   return (
     <main aria-busy="true" aria-live="polite">
       <style>{`
-        @keyframes detailPulse {
-          0%, 100% { background-position: 0% 50%; }
-          50%      { background-position: 100% 50%; }
+        @keyframes skeletonShimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
         }
         @media (prefers-reduced-motion: reduce) {
-          [data-detail-pulse] { animation: none !important; opacity: 0.35; }
+          [data-skeleton] { animation: none !important; opacity: 0.6; }
         }
       `}</style>
 
-      {/* Hero block: banner placeholder + cover + meta column */}
-      <section style={{ ...sectionStyle, padding: 0, borderBottom: "none" }}>
-        <div data-detail-pulse style={{ ...skeletonBoxStyle("100%", 320), borderRadius: 0 }} />
+      {/* Banner — same 400px height as the real hero so the cover's
+          -80px overlap lands on the same pixel after the swap. */}
+      <div
+        style={{
+          position: "relative",
+          height: 400,
+          background: SHIMMER_BG,
+          backgroundSize: "200% 100%",
+          animation: "skeletonShimmer 1.4s ease-in-out infinite",
+          overflow: "hidden",
+        }}
+        data-skeleton
+      >
+        <div style={{ position: "absolute", inset: 0, background: bannerOverlay }} />
+      </div>
+
+      <div
+        className="container"
+        style={{
+          display: "flex",
+          gap: 32,
+          marginTop: -80,
+          position: "relative",
+          zIndex: 1,
+          paddingBottom: 40,
+          flexWrap: "wrap",
+        }}
+      >
+        {/* Cover — exact 210×300 + 12px radius matches Hero S.cover. */}
         <div
-          className="container"
+          data-skeleton
+          style={shimmer(210, 300, { borderRadius: 12, flexShrink: 0 })}
+        />
+
+        {/* Meta column — padding-top 60 matches Hero meta div. */}
+        <div
           style={{
+            flex: 1,
+            minWidth: 280,
+            paddingTop: 60,
             display: "flex",
-            gap: 32,
-            marginTop: -80,
-            position: "relative",
-            zIndex: 1,
-            paddingBottom: 40,
-            flexWrap: "wrap",
+            flexDirection: "column",
+            gap: 14,
           }}
         >
-          <div data-detail-pulse style={{ ...skeletonBoxStyle("210px", 300), borderRadius: 12, flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 280, paddingTop: 60, display: "flex", flexDirection: "column", gap: 14 }}>
-            <div data-detail-pulse style={skeletonBoxStyle("min(60%, 480px)", 36)} />
-            <div data-detail-pulse style={skeletonBoxStyle("min(40%, 320px)", 18)} />
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-              {[64, 80, 56, 96, 72].map((w, i) => (
-                <div key={i} data-detail-pulse style={{ ...skeletonBoxStyle(`${w}px`, 24), borderRadius: 9999 }} />
-              ))}
-            </div>
-            <div data-detail-pulse style={skeletonBoxStyle("min(90%, 720px)", 14)} />
-            <div data-detail-pulse style={skeletonBoxStyle("min(85%, 680px)", 14)} />
-            <div data-detail-pulse style={skeletonBoxStyle("min(70%, 540px)", 14)} />
+          {/* Title (clamp 22-36px range; render at 36) */}
+          <div data-skeleton style={shimmer("min(60%, 520px)", 36, { borderRadius: 6 })} />
+          {/* Native subtitle */}
+          <div data-skeleton style={shimmer("min(35%, 280px)", 18)} />
+          {/* Badge row: 5 rounded pills matching score + BGM + TV + status + episodes */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 4 }}>
+            {[70, 110, 50, 70, 60, 90].map((w, i) => (
+              <div
+                key={i}
+                data-skeleton
+                style={shimmer(w, 26, { borderRadius: 9999 })}
+              />
+            ))}
           </div>
+          {/* Meta dot row: studios · source · duration · date */}
+          <div data-skeleton style={shimmer("min(55%, 360px)", 14, { marginTop: 6 })} />
+          {/* Genre chips */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            {[64, 82, 56, 74, 88, 60].map((w, i) => (
+              <div
+                key={i}
+                data-skeleton
+                style={shimmer(w, 22, { borderRadius: 9999 })}
+              />
+            ))}
+          </div>
+          {/* Description lines */}
+          <div data-skeleton style={shimmer("min(92%, 760px)", 14, { marginTop: 12 })} />
+          <div data-skeleton style={shimmer("min(88%, 720px)", 14 )} />
+          <div data-skeleton style={shimmer("min(70%, 560px)", 14)} />
         </div>
-      </section>
+      </div>
 
-      {/* Relations / Characters / Staff / Recommendations blocks */}
-      {sectionHues.slice(1).map((hue, idx) => (
-        <section key={idx} style={sectionStyle}>
-          <span style={barStyle(hue, 52)} aria-hidden />
-          <div className="container" style={containerStyle}>
-            <div data-detail-pulse style={skeletonBoxStyle("10rem", 14)} />
+      <div className="container">
+        {/* Action row — matches DetailActions: sub button + share + magnet + play */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 16 }}>
+          <div data-skeleton style={shimmer(150, 40, { borderRadius: 8 })} />
+          <div data-skeleton style={shimmer(80, 40, { borderRadius: 8 })} />
+          <div data-skeleton style={shimmer(96, 40, { borderRadius: 8 })} />
+          <div data-skeleton style={shimmer(108, 40, { borderRadius: 8 })} />
+        </div>
+
+        {/* Watchers row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 24 }}>
+          <div data-skeleton style={shimmer(28, 28, { borderRadius: "50%" })} />
+          <div data-skeleton style={shimmer(70, 12)} />
+        </div>
+
+        {/* Characters section — section label + grid of 6 avatar+name pairs */}
+        <div data-skeleton style={shimmer(120, 14, { marginTop: 40 })} />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+            gap: 12,
+            marginTop: 16,
+          }}
+        >
+          {Array.from({ length: 6 }).map((_, i) => (
             <div
-              style={{
-                display: "grid",
-                gridTemplateColumns:
-                  idx === 0
-                    ? "repeat(auto-fill, minmax(260px, 1fr))"
-                    : idx === 1
-                      ? "repeat(auto-fill, minmax(340px, 1fr))"
-                      : idx === 2
-                        ? "repeat(auto-fill, minmax(200px, 1fr))"
-                        : "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-                marginTop: 8,
-              }}
+              key={i}
+              style={{ display: "flex", alignItems: "center", gap: 10 }}
             >
-              {Array.from({ length: idx === 3 ? 8 : 6 }).map((_, j) => (
-                <div
-                  key={j}
-                  data-detail-pulse
-                  style={skeletonBoxStyle("100%", idx === 3 ? 220 : idx === 1 ? 96 : 64)}
-                />
-              ))}
+              <div
+                data-skeleton
+                style={shimmer(58, 76, { borderRadius: 4, flexShrink: 0 })}
+              />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div data-skeleton style={shimmer("80%", 13)} />
+                <div data-skeleton style={shimmer("50%", 11)} />
+              </div>
             </div>
-          </div>
-        </section>
-      ))}
+          ))}
+        </div>
+      </div>
     </main>
   );
 }

@@ -16,6 +16,13 @@
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Per-anime poster accent (overridden by HeroAccent wrapper on the detail page) */
+  --poster-accent: #8b5cf6;
+  --poster-accent-rgb: 139, 92, 246;
+  --duration-halo-in: 260ms;
+  --duration-halo-in-fast: 200ms;
+  --delay-halo-appear: 400ms;
 }
 
 * {
@@ -76,4 +83,44 @@ h4 {
     animation: none !important;
     opacity: 1 !important;
   }
+}
+
+/* Hero cover halo — neutral by default. The poster's color signature is only
+ * painted once the parent HeroAccent signals [data-accent-ready="true"], so the
+ * user never sees a placeholder purple swap to the real color. */
+.hero-cover {
+  border: 2px solid transparent;
+  transition:
+    box-shadow var(--duration-halo-in) var(--ease-out-expo) var(--delay-halo-appear),
+    border-color var(--duration-halo-in) var(--ease-out-expo) var(--delay-halo-appear);
+}
+[data-accent-ready="true"] .hero-cover {
+  border-color: rgba(var(--poster-accent-rgb), 0.55);
+  box-shadow:
+    0 0 64px -8px var(--poster-accent),
+    0 0 24px -4px var(--poster-accent);
+}
+[data-accent-ready="true"][data-accent-fast="true"] .hero-cover {
+  transition-delay: 0ms;
+  transition-duration: var(--duration-halo-in-fast);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-cover {
+    transition: none;
+  }
+}
+
+/* Inline relation chip in the hero — neutral by default, tints to the
+ * per-anime accent on hover. Matches legacy AnimeDetailHero.jsx inline
+ * onMouseEnter/Leave behavior, but done in CSS so the chip can stay a
+ * plain <Link> inside the RSC tree (no client wrapper just for hover). */
+.hero-relation-chip {
+  transition:
+    border-color 150ms var(--ease-out-expo),
+    color 150ms var(--ease-out-expo);
+}
+.hero-relation-chip:hover,
+.hero-relation-chip:focus-visible {
+  border-color: var(--poster-accent) !important;
+  color: var(--poster-accent) !important;
 }

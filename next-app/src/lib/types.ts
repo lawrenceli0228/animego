@@ -139,7 +139,11 @@ export interface DetailEpisodeTitle {
 export interface DetailRelation {
   anilistId: number;
   relationType: string;
-  titleRomaji: string | null;
+  // Wire shape: relations carry a flat `title` (romaji from AniList) +
+  // `titleChinese` (Bangumi enrichment). They do NOT have `titleRomaji`
+  // — that field exists only on the top-level AnimeDetail, not the
+  // relation children. Legacy AnimeDetailHero.jsx reads r.title directly.
+  title: string | null;
   titleChinese: string | null;
   coverImageUrl: string | null;
   format: string | null;
@@ -177,7 +181,10 @@ export interface DetailStaff {
 
 export interface DetailRecommendation {
   anilistId: number;
-  titleRomaji: string | null;
+  // Wire shape: recommendations carry a flat `title` (romaji from AniList).
+  // No titleRomaji/titleChinese — same shape as DetailRelation. Legacy
+  // RecommendationSection.jsx reads r.title directly.
+  title: string | null;
   titleChinese: string | null;
   coverImageUrl: string | null;
   averageScore: number | null;

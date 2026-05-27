@@ -1,13 +1,11 @@
 "use client";
 
-// Open the danmaku player in a new tab. The /player route is gated
-// by proxy.ts — anonymous viewers land on /login first, which is the
-// right behaviour (player needs auth for local file access + library).
-//
-// The legacy SPA opened `/player` with no params and let the
-// DropZone handle the rest. We preserve that surface; threading an
-// anilistId here would mean teaching the player drop flow to seed
-// from a series ID, which is out of scope for v1.
+// Open the user's library in a new tab. Legacy SPA opened the bare
+// /player drop zone; the new flow lands on /library because users
+// already curate series there — picking an existing series and
+// jumping into the player is a shorter path than re-dropping files.
+// /library is auth-gated by proxy.ts, so anonymous viewers still
+// bounce to /login first.
 
 import { useState } from "react";
 
@@ -35,7 +33,7 @@ export default function PlayButton({ ariaLabel, children }: PlayButtonProps) {
 
   const handleClick = () => {
     if (typeof window === "undefined") return;
-    window.open("/player", "_blank", "noopener,noreferrer");
+    window.open("/library", "_blank", "noopener,noreferrer");
   };
 
   return (

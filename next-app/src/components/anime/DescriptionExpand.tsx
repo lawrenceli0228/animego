@@ -16,11 +16,10 @@ const textStyle: CSSProperties = {
   fontSize: 14,
   lineHeight: 1.8,
   margin: 0,
-  whiteSpace: "pre-wrap",
 };
 
 const buttonStyle: CSSProperties = {
-  color: "#0a84ff",
+  color: "var(--poster-accent, #0a84ff)",
   fontSize: 13,
   fontWeight: 600,
   marginTop: 8,
@@ -46,10 +45,6 @@ export default function DescriptionExpand({
   collapseLabel,
 }: DescriptionExpandProps) {
   const [expanded, setExpanded] = useState(false);
-  // Whitespace inside the source description is collapsed during
-  // stripHtml so a single string + whiteSpace:pre-wrap matches the
-  // legacy "single paragraph that wraps" look without the visible
-  // blank-line gaps that <br><br> produces.
   return (
     <div>
       <p style={textStyle}>{expanded ? full : truncated}</p>

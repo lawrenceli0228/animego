@@ -16,9 +16,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
-import AnimeCard from "@/components/anime/AnimeCard";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
+import EpisodesGrid from "@/components/anime/EpisodesGrid";
+import HeroAccent from "@/components/anime/HeroAccent";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import { apiGet, ApiError } from "@/lib/api";
 import {
@@ -336,7 +337,6 @@ const S = {
     color: "rgba(235,235,245,0.75)",
     fontSize: 14,
     lineHeight: 1.8,
-    whiteSpace: "pre-wrap" as const,
   },
   sectionLabel: {
     color: "#0a84ff",
@@ -416,7 +416,8 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
           flexWrap: "wrap",
         }}
       >
-        {/* Cover */}
+        {/* Cover — `hero-cover` class lets HeroAccent's halo CSS attach.
+            Halo color comes from --poster-accent on the HeroAccent wrapper. */}
         <div style={{ flexShrink: 0 }}>
           {detail.coverImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -427,10 +428,8 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
               height={300}
               fetchPriority="high"
               decoding="async"
-              style={{
-                ...S.cover,
-                ...(accent ? { boxShadow: `0 12px 36px ${accent}55` } : {}),
-              }}
+              className="hero-cover"
+              style={S.cover}
             />
           ) : (
             <div style={{ ...S.cover, background: "#2c2c2e" }} aria-hidden />
@@ -551,15 +550,16 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
               {heroRelations.map((r) => {
                 const relLabel =
                   RELATION_LABEL[r.relationType]?.[lang] ?? r.relationType;
+                // Legacy AnimeDetailHero.jsx uses r.title (romaji from
+                // AniList) regardless of UI language. Wire field is
+                // `title` not `titleRomaji` — see DetailRelation type.
                 const relTitle =
-                  (lang === "zh" ? r.titleChinese : null) ||
-                  r.titleRomaji ||
-                  r.titleChinese ||
-                  `Anime #${r.anilistId}`;
+                  r.title || r.titleChinese || `Anime #${r.anilistId}`;
                 return (
                   <Link
                     key={`${r.relationType}-${r.anilistId}`}
                     href={`/anime/${r.anilistId}`}
+                    className="hero-relation-chip"
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
@@ -633,8 +633,9 @@ function RelationsSection({
         {sorted.map((rel) => {
           const label =
             RELATION_LABEL[rel.relationType]?.[lang] ?? rel.relationType;
-          const relTitle =
-            (lang === "zh" && rel.titleChinese) || rel.titleRomaji || "";
+          // Cards mirror the inline hero chips: romaji wins so the text
+          // matches the legacy SPA. Wire field is `title` not `titleRomaji`.
+          const relTitle = rel.title || rel.titleChinese || "";
           return (
             <Link
               key={`${rel.anilistId}-${rel.relationType}`}
@@ -987,7 +988,7 @@ function StaffSectionView({ staff, lang }: { staff: DetailStaff[]; lang: Lang })
   );
 }
 
-// --- Recommendations section (uses AnimeCard for visual parity) ---
+// --- Recommendations section ---
 
 function RecommendationsSection({
   recommendations,
@@ -998,32 +999,98 @@ function RecommendationsSection({
 }) {
   if (!recommendations.length) return null;
   const label = lang === "zh" ? "看了这部还在看" : "You Might Also Like";
-  const items = recommendations.slice(0, 8);
+  // Legacy shows up to ~10 in a single horizontal-scroll strip with
+  // 110×155 covers + title + score below (NOT the bento AnimeCard with
+  // overlaid metadata). See client/src/components/anime/RecommendationSection.jsx.
+  const items = recommendations.slice(0, 10);
 
   return (
     <section style={{ marginTop: 40, marginBottom: 60 }}>
       <h2 style={S.sectionLabel as CSSProperties}>{label}</h2>
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+          display: "flex",
           gap: 12,
+          overflowX: "auto",
+          paddingBottom: 8,
+          scrollbarWidth: "none",
+          msOverflowStyle: "none",
         }}
       >
-        {items.map((r) => (
-          <AnimeCard
-            key={r.anilistId}
-            anime={{
-              anilistId: r.anilistId,
-              titleRomaji: r.titleRomaji,
-              titleChinese: r.titleChinese,
-              coverImageUrl: r.coverImageUrl,
-              averageScore: r.averageScore,
-            }}
-            lang={lang}
-            prefetch={false}
-          />
-        ))}
+        {items.map((r) => {
+          // Wire field is `title` (romaji), not `titleRomaji`. Legacy
+          // RecommendationSection.jsx renders r.title regardless of lang.
+          const title = r.title || r.titleChinese || `Anime #${r.anilistId}`;
+          return (
+            <Link
+              key={r.anilistId}
+              href={`/anime/${r.anilistId}`}
+              prefetch={false}
+              style={{
+                flexShrink: 0,
+                width: 110,
+                color: "inherit",
+                textDecoration: "none",
+              }}
+            >
+              <div
+                style={{
+                  width: 110,
+                  height: 155,
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  background: "#2c2c2e",
+                  marginBottom: 6,
+                  border: "1px solid #38383a",
+                }}
+              >
+                {r.coverImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={r.coverImageUrl}
+                    alt={title}
+                    loading="lazy"
+                    decoding="async"
+                    width={110}
+                    height={155}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                ) : null}
+              </div>
+              <div
+                title={title}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "rgba(235,235,245,0.75)",
+                  lineHeight: 1.3,
+                  overflow: "hidden",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                }}
+              >
+                {title}
+              </div>
+              {r.averageScore && r.averageScore > 0 ? (
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "#30d158",
+                    marginTop: 3,
+                  }}
+                >
+                  ★ {(r.averageScore / 10).toFixed(1)}
+                </div>
+              ) : null}
+            </Link>
+          );
+        })}
       </div>
     </section>
   );
@@ -1073,44 +1140,57 @@ function EpisodesSection({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-          gap: 8,
+          gridTemplateColumns: "repeat(auto-fill, minmax(88px, 1fr))",
+          gap: 10,
         }}
       >
         {cells.map((cell) => (
           <div
             key={cell.n}
             style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(84,84,88,0.30)",
-              borderRadius: 6,
-              padding: "10px 12px",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid #38383a",
+              borderRadius: 10,
+              padding: "10px 8px 8px",
+              textAlign: "center",
               minWidth: 0,
             }}
           >
             <div
               style={{
-                fontSize: 12,
+                fontSize: 10,
+                color: "rgba(235,235,245,0.30)",
+                marginBottom: 3,
                 fontWeight: 600,
-                color: "rgba(235,235,245,0.60)",
-                marginBottom: cell.title ? 4 : 0,
-                fontFamily: "'JetBrains Mono', monospace",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
               }}
             >
-              {lang === "zh" ? `第${cell.n}集` : `Ep ${cell.n}`}
+              {dict.detail.ep}
+            </div>
+            <div
+              style={{
+                fontSize: 20,
+                fontWeight: 800,
+                color: "rgba(235,235,245,0.60)",
+                lineHeight: 1,
+                marginBottom: cell.title ? 5 : 0,
+                fontFamily: "'Sora', sans-serif",
+              }}
+            >
+              {cell.n}
             </div>
             {cell.title && (
               <div
+                title={cell.title}
                 style={{
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: "#ffffff",
-                  lineHeight: 1.35,
+                  fontSize: 9,
+                  color: "rgba(235,235,245,0.35)",
+                  marginTop: 2,
+                  lineHeight: 1.2,
                   overflow: "hidden",
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  wordBreak: "break-word",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {cell.title}
@@ -1152,7 +1232,14 @@ export default async function AnimeDetailPage({ params }: PageProps) {
         }}
       />
       <main>
-        <Hero detail={detail} lang={lang} dict={dict} />
+        <HeroAccent
+          anilistId={detail.anilistId}
+          coverImageUrl={detail.coverImageUrl}
+          posterAccent={detail.posterAccent ?? null}
+          posterAccentRgb={detail.posterAccentRgb ?? null}
+        >
+          <Hero detail={detail} lang={lang} dict={dict} />
+        </HeroAccent>
         <div className="container">
           <DetailActions
             anilistId={detail.anilistId}
@@ -1165,18 +1252,30 @@ export default async function AnimeDetailPage({ params }: PageProps) {
             shareTitle={pickTitle(detail, lang)}
             labels={{
               subAdd: dict.sub.addToList,
-              subWatching: dict.sub.watching,
               subRemove: dict.sub.remove,
               subLogin: dict.sub.loginToWatch,
               subLoginAria: dict.sub.loginToWatch,
+              subRate: dict.sub.rate,
+              subEpUnit: dict.sub.epUnit,
+              subWatching: dict.sub.watching,
+              subCompleted: dict.sub.completed,
+              subPlanToWatch: dict.sub.planToWatch,
+              subDropped: dict.sub.dropped,
               share: dict.social.share,
               shareCopied: dict.detail.linkCopied,
               shareCopyFailed: dict.detail.linkCopyFailed,
               torrents: dict.torrent.download,
               torrentsTitle: dict.torrent.title,
-              torrentsEmpty: dict.torrent.empty,
-              torrentsSearchExternally: dict.torrent.searchExternally,
+              torrentsSearchBtn: dict.torrent.searchBtn,
+              torrentsPlaceholder: dict.torrent.placeholder,
+              torrentsGroupAll: dict.torrent.groupAll,
+              torrentsEpAll: dict.torrent.epAll,
+              torrentsLoading: dict.torrent.loading,
+              torrentsNoResults: dict.torrent.noResults,
               torrentsClose: dict.torrent.close,
+              torrentsCopy: dict.torrent.copy,
+              torrentsCopied: dict.torrent.copied,
+              torrentsOpenMagnet: dict.torrent.openMagnet,
               play: dict.detail.openPlayer,
               playAria: dict.detail.openPlayerAria,
             }}
@@ -1185,7 +1284,8 @@ export default async function AnimeDetailPage({ params }: PageProps) {
           <RelationsSection relations={detail.relations} lang={lang} />
           <CharactersSection characters={detail.characters} lang={lang} />
           <StaffSectionView staff={detail.staff} lang={lang} />
-          <EpisodesSection
+          <EpisodesGrid
+            anilistId={detail.anilistId}
             episodes={detail.episodes}
             episodeTitles={detail.episodeTitles ?? []}
             lang={lang}
