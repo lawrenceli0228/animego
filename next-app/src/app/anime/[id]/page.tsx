@@ -32,6 +32,7 @@ import type { Dict, Lang } from "@/lib/i18n";
 import type {
   AnimeDetail,
   DetailCharacter,
+  DetailEpisodeTitle,
   DetailRecommendation,
   DetailRelation,
   DetailStaff,
@@ -766,8 +767,20 @@ function CharactersSection({
                         background: "#2c2c2e",
                         border: "1px solid #38383a",
                       }}
-                      aria-hidden
-                    />
+                    >
+                      {c.voiceActorImageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={c.voiceActorImageUrl}
+                          alt={va}
+                          loading="lazy"
+                          decoding="async"
+                          width={58}
+                          height={76}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      ) : null}
+                    </div>
                     <div style={{ minWidth: 0 }}>
                       <div
                         style={{
@@ -922,6 +935,100 @@ function RecommendationsSection({
   );
 }
 
+// --- Episodes section ---
+//
+// Static SEO surface: a grid of numbered cells, one per episode index from
+// 1 to `episodes`. Each cell shows the episode number plus a title when
+// the matching `episodeTitles` entry has one. No clickability — player
+// integration lives behind auth on a client route (Phase 6+).
+//
+// Many shows have `episodes > 0` but an empty `episodeTitles` array
+// (Bangumi enrichment ran and found nothing). We still render numbered
+// cells in that case; just the number alone is fine — no placeholder dash.
+
+function EpisodesSection({
+  episodes,
+  episodeTitles,
+  lang,
+  dict,
+}: {
+  episodes: number | null;
+  episodeTitles: DetailEpisodeTitle[];
+  lang: Lang;
+  dict: Dict;
+}) {
+  if (!episodes || episodes <= 0) return null;
+
+  // Index titles by episode number for O(1) lookup. The wire array is
+  // typically small (<= 100) and sparse, so a Map is overkill but cheap.
+  const titleByEpisode = new Map<number, DetailEpisodeTitle>();
+  for (const t of episodeTitles) {
+    if (typeof t.episode === "number") titleByEpisode.set(t.episode, t);
+  }
+
+  const cells: { n: number; title: string }[] = [];
+  for (let n = 1; n <= episodes; n += 1) {
+    const t = titleByEpisode.get(n);
+    const title = t ? (lang === "zh" ? t.nameCn || t.name || "" : t.name || t.nameCn || "") : "";
+    cells.push({ n, title });
+  }
+
+  return (
+    <section style={{ marginTop: 40, marginBottom: 60 }}>
+      <h2 style={S.sectionLabel as CSSProperties}>{dict.detail.episodes}</h2>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+          gap: 8,
+        }}
+      >
+        {cells.map((cell) => (
+          <div
+            key={cell.n}
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(84,84,88,0.30)",
+              borderRadius: 6,
+              padding: "10px 12px",
+              minWidth: 0,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: "rgba(235,235,245,0.60)",
+                marginBottom: cell.title ? 4 : 0,
+                fontFamily: "'JetBrains Mono', monospace",
+              }}
+            >
+              {lang === "zh" ? `第${cell.n}集` : `Ep ${cell.n}`}
+            </div>
+            {cell.title && (
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "#ffffff",
+                  lineHeight: 1.35,
+                  overflow: "hidden",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  wordBreak: "break-word",
+                }}
+              >
+                {cell.title}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // --- Page entry ---
 
 export default async function AnimeDetailPage({ params }: PageProps) {
@@ -959,6 +1066,12 @@ export default async function AnimeDetailPage({ params }: PageProps) {
           <RecommendationsSection
             recommendations={detail.recommendations}
             lang={lang}
+          />
+          <EpisodesSection
+            episodes={detail.episodes}
+            episodeTitles={detail.episodeTitles ?? []}
+            lang={lang}
+            dict={dict}
           />
         </div>
       </main>

@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
-import AnimeCard from "@/components/anime/AnimeCard";
 import SeasonNav from "@/components/seasonal/SeasonNav";
-import SeasonalPagination from "@/components/seasonal/SeasonalPagination";
+import SeasonalFilters from "@/components/seasonal/SeasonalFilters";
 import { apiGetPaged } from "@/lib/api";
 import { getDict, getDictByLang, getLang } from "@/lib/i18n";
 import type { SeasonalAnime } from "@/lib/types";
@@ -25,20 +24,24 @@ const SEASON_ZH: Record<SeasonKey, string> = {
   winter: "冬",
 };
 
-// Empty envelope returned when the Go API throws. Keeps the page render
-// strictly client-shaped (no error UI here -- it just looks like "0
+// Fetch the full season in one shot (capped at 200 by the API). The
+// legacy SeasonPage.jsx requested ?perPage=200 too — anything smaller
+// regresses the user-visible count from ~96 back to 20. Client-side
+// filtering and show-more pagination then operate on the cached list
+// with zero extra round-trips.
+//
+// Note: the API param is `perPage` (Go-API + Express both use this).
+// Earlier drafts of this page used the implicit default (20) which is
+// the exact "20 vs 96" gap users reported.
+const SEASONAL_PAGE_SIZE = 200;
+
+// Empty fallback returned when the API throws. Keeps the page render
+// strictly client-shaped (no error UI here — it just looks like "0
 // anime") so a flapping API does not produce a 500.
-const EMPTY_PAGE = {
-  data: [] as SeasonalAnime[],
-  total: 0,
-  page: 1,
-  hasMore: false,
-  nextPage: null,
-};
+const EMPTY_ITEMS: SeasonalAnime[] = [];
 
 interface PageProps {
   params: Promise<{ season: string; year: string }>;
-  searchParams: Promise<{ page?: string }>;
 }
 
 function parseSeasonYear(season: string, year: string): { season: SeasonKey; year: number } | null {
@@ -56,7 +59,7 @@ function headingFor(season: SeasonKey, year: number, lang: "zh" | "en"): string 
   return `${capitalized} ${year} Anime`;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: PageProps["params"] }): Promise<Metadata> {
   const { season, year } = await params;
   const parsed = parseSeasonYear(season, year);
   if (!parsed) return { title: "Seasonal Anime" };
@@ -109,83 +112,36 @@ const headingStyle: CSSProperties = {
   fontFamily: "'Sora', sans-serif",
 };
 
-const gridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-  gap: 12,
-  animation: "fadeUp 0.4s ease both",
-};
-
-const emptyStyle: CSSProperties = {
-  textAlign: "center",
-  padding: "60px 0",
-  color: "rgba(235,235,245,0.30)",
-  fontFamily: "'Sora', sans-serif",
-};
-
-const countStyle: CSSProperties = {
-  fontSize: 12,
-  color: "rgba(235,235,245,0.30)",
-  marginBottom: 12,
-  display: "block",
-};
-
-export default async function SeasonalPage({ params, searchParams }: PageProps) {
+export default async function SeasonalPage({ params }: PageProps) {
   const { season, year } = await params;
   const parsed = parseSeasonYear(season, year);
   if (!parsed) notFound();
 
-  const { page: pageStr } = await searchParams;
-  const page = Math.max(1, Number(pageStr) || 1);
-
   const apiSeason = parsed.season.toUpperCase();
-  const [dict, lang, response] = await Promise.all([
+  const [dict, lang, items] = await Promise.all([
     getDict(),
     getLang(),
+    // Fetch the full season once on the server, hand off to the client
+    // <SeasonalFilters> for filter/sort/show-more. Page=1 + perPage=200
+    // is enough to cover every real season (currently caps in the 90s
+    // for any given quarter — see verify.md in the plan).
     apiGetPaged<SeasonalAnime>(
-      `/api/anime/seasonal?season=${apiSeason}&year=${parsed.year}&page=${page}`,
+      `/api/anime/seasonal?season=${apiSeason}&year=${parsed.year}&page=1&perPage=${SEASONAL_PAGE_SIZE}`,
       { revalidate: 300 },
-    ).catch(() => EMPTY_PAGE),
+    )
+      .then((env) => env.data ?? EMPTY_ITEMS)
+      .catch(() => EMPTY_ITEMS),
   ]);
 
   const heading = headingFor(parsed.season, parsed.year, lang);
-  const items = response.data;
 
   return (
     <main className="container" style={containerStyle}>
-      <style>{`
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: none; }
-        }
-      `}</style>
       <h1 style={headingStyle}>{heading}</h1>
 
       <SeasonNav season={parsed.season} year={parsed.year} dict={dict} lang={lang} />
 
-      {response.total > 0 ? (
-        <span style={countStyle}>
-          {response.total} {lang === "zh" ? "部" : "anime"}
-        </span>
-      ) : null}
-
-      {items.length === 0 ? (
-        <div style={emptyStyle}>{dict.anime.noAnime}</div>
-      ) : (
-        <div style={gridStyle}>
-          {items.map((a) => (
-            <AnimeCard key={a.anilistId} anime={a} lang={lang} prefetch={false} />
-          ))}
-        </div>
-      )}
-
-      <SeasonalPagination
-        season={parsed.season}
-        year={parsed.year}
-        page={page}
-        total={response.total}
-        lang={lang}
-      />
+      <SeasonalFilters items={items} lang={lang} />
     </main>
   );
 }

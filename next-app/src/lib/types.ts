@@ -74,6 +74,15 @@ export interface SeasonalAnime {
   seasonYear: number | null;
   status: string | null;
   format: string | null;
+  // Optional because the Go API's /seasonal endpoint plan returns only
+  // the 16-column main row (see go-api/internal/anime/seasonal.go
+  // header) — child tables like genres are not joined. The legacy
+  // Express endpoint that still serves /api/anime/seasonal today DOES
+  // surface genres from the Mongo enrichment cache, and the seasonal
+  // page client-side filter relies on that. When the Go cutover
+  // (P8.5/P9) lands, either the seasonal handler grows a genre join or
+  // this field stays optional and the filter quietly no-ops.
+  genres?: string[] | null;
 }
 
 // ─── AnimeDetail (/api/anime/:id) ──────────────────────────────────
@@ -114,6 +123,17 @@ export interface AnimeDetail {
   bgmId: number | null;
   bangumiScore: number | null;
   bangumiVotes: number | null;
+  // Bangumi-enriched per-episode titles. Sparse by design: many shows
+  // have an empty array even when `episodes > 0` (enrichment ran but the
+  // upstream had no titles). Express schema:
+  // `{ episode: number, nameCn: string|null, name: string|null }`.
+  episodeTitles: DetailEpisodeTitle[];
+}
+
+export interface DetailEpisodeTitle {
+  episode: number;
+  nameCn: string | null;
+  name: string | null;
 }
 
 export interface DetailRelation {
