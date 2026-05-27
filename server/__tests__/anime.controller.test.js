@@ -183,6 +183,131 @@ describe('anime.controller', () => {
 
       delete global.fetch
     })
+
+    describe('adaptive TTL', () => {
+      // Regression coverage for the 2026-05-27 fix: partial upstream failures
+      // (e.g. animes.garden returns empty / throws) used to be cached for a
+      // full hour, locking users out of the missing fansub group until TTL
+      // expired. The fix shortens the TTL to 5min when garden+nyaa weren't
+      // both populated, so the next request retries the empty source.
+      //
+      // Both `getTorrents` and its private fetchers live in the same module,
+      // so we can't dependency-inject — instead drive everything through
+      // global.fetch and rely on the cache key being lowercase-trimmed.
+      const gardenJsonOk = {
+        status: 'OK',
+        complete: false,
+        resources: [
+          {
+            id: 1,
+            provider: 'dmhy',
+            title: '[Test] Foo - 01 (1080p)',
+            magnet: 'magnet:?xt=urn:btih:abc',
+            size: 1000,
+            createdAt: '2026-05-09T08:00:00.000Z',
+          },
+        ],
+      }
+      const gardenJsonEmpty = { status: 'OK', complete: false, resources: [] }
+      const nyaaRss = `<?xml version="1.0" encoding="UTF-8"?>
+<rss><channel><item>
+  <title>Test - 01</title>
+  <link>https://nyaa.si/view/1</link>
+  <pubDate>Mon, 01 Jan 2025 00:00:00 +0000</pubDate>
+  <enclosure url="https://nyaa.si/view/1.torrent"/>
+  <nyaa:infoHash xmlns:nyaa="https://nyaa.si/xmlns/nyaa">deadbeef</nyaa:infoHash>
+</item></channel></rss>`
+      const acgRipRss = '<?xml version="1.0"?><rss><channel></channel></rss>'
+
+      function buildMockFetch(gardenPayload) {
+        return jest.fn(async (url) => {
+          const u = String(url)
+          if (u.startsWith('https://api.animes.garden/')) {
+            return { ok: true, json: async () => gardenPayload, text: async () => '' }
+          }
+          if (u.includes('nyaa.si')) {
+            return { ok: true, text: async () => nyaaRss }
+          }
+          // acg.rip — keep empty so the success/failure axis is owned by garden+nyaa.
+          return { ok: true, text: async () => acgRipRss }
+        })
+      }
+
+      it('caches a FULL success (garden+nyaa populated) for the long 60min TTL', async () => {
+        const fetchMock = buildMockFetch(gardenJsonOk)
+        global.fetch = fetchMock
+
+        // First fetch primes the cache.
+        let res = await request(app).get('/api/anime/torrents?q=ttl+full')
+        expect(res.status).toBe(200)
+        expect(res.body.data.filter((d) => d.source === 'garden').length).toBeGreaterThan(0)
+        expect(res.body.data.filter((d) => d.source === 'nyaa').length).toBeGreaterThan(0)
+        const baselineCalls = fetchMock.mock.calls.length
+
+        // 30 minutes later — still inside the 60min full-success TTL.
+        const realNow = Date.now
+        Date.now = () => realNow() + 30 * 60 * 1000
+        try {
+          res = await request(app).get('/api/anime/torrents?q=ttl+full')
+          expect(res.status).toBe(200)
+          expect(fetchMock).toHaveBeenCalledTimes(baselineCalls)
+        } finally {
+          Date.now = realNow
+          delete global.fetch
+        }
+      })
+
+      it('expires a PARTIAL response (garden empty) after 5min so a retry fires', async () => {
+        // Round 1: garden returns empty -> partial cache, 5min TTL.
+        const partialFetch = buildMockFetch(gardenJsonEmpty)
+        global.fetch = partialFetch
+
+        let res = await request(app).get('/api/anime/torrents?q=ttl+partial')
+        expect(res.status).toBe(200)
+        expect(res.body.data.filter((d) => d.source === 'garden')).toHaveLength(0)
+        const baselineCalls = partialFetch.mock.calls.length
+
+        // 6 minutes later — past the partial-TTL but well before the long one.
+        // Swap in a healthy fetch so we can observe the recovery.
+        const realNow = Date.now
+        Date.now = () => realNow() + 6 * 60 * 1000
+        const healthyFetch = buildMockFetch(gardenJsonOk)
+        global.fetch = healthyFetch
+        try {
+          res = await request(app).get('/api/anime/torrents?q=ttl+partial')
+          expect(res.status).toBe(200)
+          // Garden recovers because the partial cache entry was evicted.
+          expect(res.body.data.filter((d) => d.source === 'garden').length).toBeGreaterThan(0)
+          expect(healthyFetch.mock.calls.length).toBeGreaterThan(0)
+          // And the original mock saw no further calls in the recovery round.
+          expect(partialFetch).toHaveBeenCalledTimes(baselineCalls)
+        } finally {
+          Date.now = realNow
+          delete global.fetch
+        }
+      })
+
+      it('serves a partial entry from cache when re-queried inside 5min', async () => {
+        const partialFetch = buildMockFetch(gardenJsonEmpty)
+        global.fetch = partialFetch
+
+        await request(app).get('/api/anime/torrents?q=ttl+partial+warm')
+        const baselineCalls = partialFetch.mock.calls.length
+
+        // 2 minutes later — still inside the 5min partial TTL.
+        const realNow = Date.now
+        Date.now = () => realNow() + 2 * 60 * 1000
+        try {
+          const res = await request(app).get('/api/anime/torrents?q=ttl+partial+warm')
+          expect(res.status).toBe(200)
+          // Served from cache: no new fetch calls.
+          expect(partialFetch).toHaveBeenCalledTimes(baselineCalls)
+        } finally {
+          Date.now = realNow
+          delete global.fetch
+        }
+      })
+    })
   })
 
   describe('GET /api/anime/seasonal', () => {

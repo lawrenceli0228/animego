@@ -3,9 +3,14 @@ const { XMLParser } = require('fast-xml-parser');
 const Subscription = require('../models/Subscription');
 const AnimeCache   = require('../models/AnimeCache');
 
-// In-memory torrent cache (1-hour TTL, max 500 entries)
+// In-memory torrent cache. TTL is adaptive: full success (all 3 sources
+// returned something) caches 1h; partial success (some source returned 0,
+// likely upstream hiccup) caches only 5min so we retry the empty source
+// before the user sees missing results for an hour.
 const torrentCache = new Map();
 const TORRENT_CACHE_MAX = 500;
+const TORRENT_CACHE_TTL_FULL_MS = 60 * 60 * 1000;
+const TORRENT_CACHE_TTL_PARTIAL_MS = 5 * 60 * 1000;
 // animes.garden default pageSize. 80 is enough to cover most multi-fansub
 // releases of a single anime (typical 12-ep cour × 4-6 fansub groups × 2-3
 // resolutions ≈ 60-100 entries) without paginating.
@@ -296,7 +301,7 @@ exports.getTorrents = async (req, res, next) => {
 
     const key = q.trim().toLowerCase();
     const cached = torrentCache.get(key);
-    if (cached && Date.now() - cached.ts < 60 * 60 * 1000) {
+    if (cached && Date.now() - cached.ts < cached.ttl) {
       return res.json({ data: cached.data });
     }
 
@@ -309,17 +314,25 @@ exports.getTorrents = async (req, res, next) => {
       fetchNyaa(q.trim()),
     ]);
 
-    const data = [
-      ...(gardenResult.status === 'fulfilled' ? gardenResult.value : []),
-      ...(acgResult.status    === 'fulfilled' ? acgResult.value    : []),
-      ...(nyaaResult.status   === 'fulfilled' ? nyaaResult.value   : []),
-    ];
+    const garden = gardenResult.status === 'fulfilled' ? gardenResult.value : [];
+    const acg    = acgResult.status    === 'fulfilled' ? acgResult.value    : [];
+    const nyaa   = nyaaResult.status   === 'fulfilled' ? nyaaResult.value   : [];
+    const data = [...garden, ...acg, ...nyaa];
+
+    // Adaptive TTL: if any source returned nothing it likely tripped (rate
+    // limit / timeout / 5xx) — keep that result for only 5min so we retry
+    // soon instead of serving missing fansubs for a full hour. ACG.RIP is
+    // historically flaky so we only require garden+nyaa for "full" status.
+    const ttl =
+      garden.length > 0 && nyaa.length > 0
+        ? TORRENT_CACHE_TTL_FULL_MS
+        : TORRENT_CACHE_TTL_PARTIAL_MS;
 
     // Evict oldest entry if cache is full
     if (torrentCache.size >= TORRENT_CACHE_MAX) {
       torrentCache.delete(torrentCache.keys().next().value);
     }
-    torrentCache.set(key, { data, ts: Date.now() });
+    torrentCache.set(key, { data, ts: Date.now(), ttl });
     res.json({ data });
   } catch (err) { next(err); }
 };
