@@ -17,11 +17,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import AnimeCard from "@/components/anime/AnimeCard";
+import DescriptionExpand from "@/components/anime/DescriptionExpand";
+import DetailActions from "@/components/anime/DetailActions";
+import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import { apiGet, ApiError } from "@/lib/api";
 import {
   formatFuzzyDate,
   formatScore,
   pickCharacterName,
+  pickStaffName,
   pickTitle,
   pickVoiceActorName,
   stripHtml,
@@ -346,9 +350,32 @@ const S = {
 
 // --- Hero (banner + cover + meta block) ---
 
+// Relation types we surface inline in the hero (matches the legacy
+// SHOWN_RELATIONS set). RecommendationsSection further down still
+// renders the full relation set; this inline strip is a UX shortcut so
+// users see the prequel/sequel without scrolling.
+const HERO_SHOWN_RELATIONS = new Set([
+  "PREQUEL",
+  "SEQUEL",
+  "PARENT",
+  "SIDE_STORY",
+  "SPIN_OFF",
+]);
+
+const DESC_TRUNCATE_THRESHOLD = 300;
+
 function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: Dict }) {
   const title = pickTitle(detail, lang);
-  const desc = truncate(stripHtml(detail.description || ""), 600);
+  // Full description for SEO; truncated mirror for the collapsed UI
+  // state. The client-side toggle in DescriptionExpand swaps between
+  // them so the rendered HTML always contains both (crawlers see the
+  // full text inside the rendered <p>).
+  const descFull = stripHtml(detail.description || "");
+  const descTruncated = truncate(descFull, DESC_TRUNCATE_THRESHOLD);
+  const descNeedsToggle = descFull.length > DESC_TRUNCATE_THRESHOLD;
+  const heroRelations = (detail.relations ?? []).filter((r) =>
+    HERO_SHOWN_RELATIONS.has(r.relationType),
+  );
   const sourceLabel = detail.source ? SOURCE_LABEL[detail.source]?.[lang] ?? null : null;
   const durationLabel = detail.duration
     ? lang === "zh"
@@ -358,7 +385,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   const seasonLab = seasonLabel(dict, detail.season);
   const score = detail.averageScore;
   const accent = detail.posterAccent || null;
-  const startDateLabel = formatFuzzyDate(detail.startDate);
+  const startDateLabel = formatFuzzyDate(detail.startDate, lang);
 
   return (
     <div>
@@ -494,10 +521,71 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
             </div>
           )}
 
-          {/* Description */}
-          {desc && (
-            <div>
-              <p style={S.descText}>{desc}</p>
+          {/* Description with 展开更多 / 收起 toggle */}
+          {descFull && (
+            <div style={{ marginBottom: heroRelations.length > 0 ? 20 : 0 }}>
+              <DescriptionExpand
+                truncated={descTruncated}
+                full={descFull}
+                needsToggle={descNeedsToggle}
+                expandLabel={dict.detail.readMore}
+                collapseLabel={dict.detail.collapse}
+              />
+            </div>
+          )}
+
+          {/* Inline relations (prequel / sequel / parent / side story /
+              spin-off) — matches legacy AnimeDetailHero.jsx behavior of
+              keeping the most important relations close to the title
+              instead of forcing the user to scroll to the relations
+              section. The full RelationsSection still renders below. */}
+          {heroRelations.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              {heroRelations.map((r) => {
+                const relLabel =
+                  RELATION_LABEL[r.relationType]?.[lang] ?? r.relationType;
+                const relTitle =
+                  (lang === "zh" ? r.titleChinese : null) ||
+                  r.titleRomaji ||
+                  r.titleChinese ||
+                  `Anime #${r.anilistId}`;
+                return (
+                  <Link
+                    key={`${r.relationType}-${r.anilistId}`}
+                    href={`/anime/${r.anilistId}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "5px 12px",
+                      borderRadius: 8,
+                      background: "rgba(120,120,128,0.12)",
+                      border: "1px solid rgba(84,84,88,0.65)",
+                      color: "rgba(235,235,245,0.60)",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      textDecoration: "none",
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: "rgba(235,235,245,0.35)",
+                        fontSize: 11,
+                      }}
+                    >
+                      {relLabel}
+                    </span>
+                    {relTitle}
+                  </Link>
+                );
+              })}
             </div>
           )}
         </div>
@@ -830,9 +918,14 @@ function StaffSectionView({ staff, lang }: { staff: DetailStaff[]; lang: Lang })
           gap: "10px 16px",
         }}
       >
-        {staff.map((s, i) => (
+        {staff.map((s, i) => {
+          // Wire shape is {nameEn, nameJa, role, imageUrl} — no top-level
+          // `name`. pickStaffName: zh prefers Japanese (legacy convention),
+          // en prefers English. Falls back across both before "—".
+          const staffName = pickStaffName(s, lang) || "—";
+          return (
           <div
-            key={`${s.name}-${i}`}
+            key={`${staffName}-${i}`}
             style={{ display: "flex", alignItems: "center", gap: 10 }}
           >
             <div
@@ -850,7 +943,7 @@ function StaffSectionView({ staff, lang }: { staff: DetailStaff[]; lang: Lang })
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={s.imageUrl}
-                  alt={s.name}
+                  alt={staffName}
                   loading="lazy"
                   decoding="async"
                   width={36}
@@ -870,7 +963,7 @@ function StaffSectionView({ staff, lang }: { staff: DetailStaff[]; lang: Lang })
                   whiteSpace: "nowrap",
                 }}
               >
-                {s.name || "—"}
+                {staffName}
               </div>
               {s.role && (
                 <div
@@ -887,7 +980,8 @@ function StaffSectionView({ staff, lang }: { staff: DetailStaff[]; lang: Lang })
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -1060,18 +1154,46 @@ export default async function AnimeDetailPage({ params }: PageProps) {
       <main>
         <Hero detail={detail} lang={lang} dict={dict} />
         <div className="container">
+          <DetailActions
+            anilistId={detail.anilistId}
+            episodes={detail.episodes}
+            titleRomaji={detail.titleRomaji}
+            titleEnglish={detail.titleEnglish}
+            titleChinese={detail.titleChinese}
+            titleNative={detail.titleNative}
+            coverImageUrl={detail.coverImageUrl}
+            shareTitle={pickTitle(detail, lang)}
+            labels={{
+              subAdd: dict.sub.addToList,
+              subWatching: dict.sub.watching,
+              subRemove: dict.sub.remove,
+              subLogin: dict.sub.loginToWatch,
+              subLoginAria: dict.sub.loginToWatch,
+              share: dict.social.share,
+              shareCopied: dict.detail.linkCopied,
+              shareCopyFailed: dict.detail.linkCopyFailed,
+              torrents: dict.torrent.download,
+              torrentsTitle: dict.torrent.title,
+              torrentsEmpty: dict.torrent.empty,
+              torrentsSearchExternally: dict.torrent.searchExternally,
+              torrentsClose: dict.torrent.close,
+              play: dict.detail.openPlayer,
+              playAria: dict.detail.openPlayerAria,
+            }}
+          />
+          <WatchersAvatarList anilistId={detail.anilistId} />
           <RelationsSection relations={detail.relations} lang={lang} />
           <CharactersSection characters={detail.characters} lang={lang} />
           <StaffSectionView staff={detail.staff} lang={lang} />
-          <RecommendationsSection
-            recommendations={detail.recommendations}
-            lang={lang}
-          />
           <EpisodesSection
             episodes={detail.episodes}
             episodeTitles={detail.episodeTitles ?? []}
             lang={lang}
             dict={dict}
+          />
+          <RecommendationsSection
+            recommendations={detail.recommendations}
+            lang={lang}
           />
         </div>
       </main>

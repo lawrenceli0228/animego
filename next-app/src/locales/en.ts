@@ -111,6 +111,9 @@ const en = {
     noResults: 'No results found',
     loading: 'Searching...', placeholder: 'Search...',
     groupAll: 'All', epAll: 'All',
+    empty: 'Built-in torrent search is not yet wired up. Search externally using the title below.',
+    searchExternally: 'Search on Nyaa →',
+    close: 'Close',
   },
   // Social
   social: {

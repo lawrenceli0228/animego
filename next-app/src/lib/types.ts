@@ -164,7 +164,13 @@ export interface DetailCharacter {
 }
 
 export interface DetailStaff {
-  name: string;
+  // Wire shape from /api/anime/:id is `{nameEn, nameJa, role, imageUrl}`
+  // — there is no top-level `name`. The previous shape declared `name`
+  // which made every staff row render as "—" on the detail page. Use
+  // pickStaffName(s, lang) to render; zh prefers Japanese (matches the
+  // legacy StaffSection.jsx convention).
+  nameEn: string | null;
+  nameJa: string | null;
   role: string;
   imageUrl: string | null;
 }
@@ -181,6 +187,71 @@ export interface DetailRecommendation {
 
 export interface WatcherItem {
   username: string;
+}
+
+// Wire shape for /api/anime/:id/watchers — flat envelope with `data`
+// (the list) plus `total` (overall count, useful when `limit` truncates
+// the list). Unlike most endpoints, the watchers handler does NOT use
+// the paged envelope (no page / hasMore / nextPage); the total is a
+// scalar so the UI can render "N 人在追" beside the avatar overflow row.
+export interface WatchersResponse {
+  data: WatcherItem[];
+  total: number;
+}
+
+// ─── Subscriptions detail row (/api/subscriptions/:anilistId) ──────
+// 404 means "viewer has no subscription record for this anime". 200
+// returns the raw Subscription doc — status + currentEpisode + score.
+// Used by the SubscriptionButton to flip between "+ 追番" and the
+// progress / score / remove inline controls.
+
+export interface SubscriptionDetail {
+  anilistId: number;
+  status: string;
+  currentEpisode: number;
+  score: number | null;
+  lastWatchedAt: string | null;
+}
+
+// ─── Subscriptions (/api/subscriptions?status=...) — requires session ─
+// One row per anime the viewer has marked in a status bucket. The
+// "watching" subset drives the homepage ContinueWatching cards
+// (progress bar + ep counter). Backend joins AnimeCache on anilistId
+// so title/cover/episodes come pre-resolved.
+
+export interface WatchingItem {
+  anilistId: number;
+  status: string;
+  currentEpisode: number;
+  episodes: number | null;
+  titleRomaji: string | null;
+  titleEnglish: string | null;
+  titleNative: string | null;
+  titleChinese: string | null;
+  coverImageUrl: string | null;
+  lastWatchedAt: string | null;
+}
+
+// ─── Activity feed (/api/feed) — requires session ─────────────────
+// Each row is one Subscription record from a user the viewer follows,
+// joined with the AnimeCache. lastWatchedAt drives ORDER BY DESC and
+// the timeAgo render.
+
+export interface FeedItem {
+  username: string;
+  anilistId: number;
+  title: string;
+  titleChinese: string | null;
+  coverImageUrl: string | null;
+  episode: number;
+  status: string;
+  lastWatchedAt: string;
+}
+
+export interface FeedResponse {
+  data: FeedItem[];
+  hasMore: boolean;
+  nextPage: number | null;
 }
 
 // ─── LandingPoster ─────────────────────────────────────────────────

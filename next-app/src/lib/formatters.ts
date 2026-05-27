@@ -72,6 +72,28 @@ export function pickVoiceActorName(c: VoiceActorNameBearing, lang: Lang): string
   return c.voiceActorEn || c.voiceActorJa || c.voiceActorCn || "";
 }
 
+type StaffNameBearing = {
+  nameEn?: string | null;
+  nameJa?: string | null;
+};
+
+/**
+ * Pick a staff display name. zh prefers JP (matches the legacy
+ * StaffSection.jsx which intentionally favoured Japanese for Chinese
+ * users because staff Chinese translations are mostly absent in
+ * Bangumi). en prefers EN. Falls back across the available fields.
+ *
+ * The wire shape from /api/anime/:id is `{nameEn, nameJa, role,
+ * imageUrl}` — there is no top-level `name` field; an earlier render
+ * mistakenly read `s.name` and rendered "—" for every staff row.
+ */
+export function pickStaffName(s: StaffNameBearing, lang: Lang): string {
+  if (lang === "zh") {
+    return s.nameJa || s.nameEn || "";
+  }
+  return s.nameEn || s.nameJa || "";
+}
+
 /** Strip HTML tags and entity references from a string. */
 export function stripHtml(html: string | null | undefined): string {
   if (!html) return "";
@@ -116,15 +138,40 @@ function isFuzzyDate(value: unknown): value is FuzzyDate {
  */
 export function formatFuzzyDate(
   date: FuzzyDate | string | null | undefined,
+  lang: Lang = "en",
 ): string | null {
   if (date == null) return null;
-  if (typeof date === "string") return date;
-  if (!isFuzzyDate(date)) return null;
-  if (date.year == null) return null;
-  const yyyy = String(date.year);
-  if (date.month == null) return yyyy;
-  const mm = String(date.month).padStart(2, "0");
-  if (date.day == null) return `${yyyy}-${mm}`;
-  const dd = String(date.day).padStart(2, "0");
+
+  // Coerce a string date (legacy ISO) to FuzzyDate so localization
+  // still works for both representations.
+  let fd: FuzzyDate;
+  if (typeof date === "string") {
+    // Accept "YYYY", "YYYY-MM", "YYYY-MM-DD". Anything else surfaced as-is.
+    const m = date.match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/);
+    if (!m) return date;
+    fd = {
+      year: Number(m[1]),
+      month: m[2] ? Number(m[2]) : null,
+      day: m[3] ? Number(m[3]) : null,
+    };
+  } else {
+    if (!isFuzzyDate(date)) return null;
+    fd = date;
+  }
+
+  if (fd.year == null) return null;
+
+  if (lang === "zh") {
+    const y = `${fd.year}年`;
+    const m = fd.month ? `${fd.month}月` : "";
+    const d = fd.day ? `${fd.day}日` : "";
+    return `${y}${m}${d}`;
+  }
+  // en: ISO-style stays for parity with previous behavior.
+  const yyyy = String(fd.year);
+  if (fd.month == null) return yyyy;
+  const mm = String(fd.month).padStart(2, "0");
+  if (fd.day == null) return `${yyyy}-${mm}`;
+  const dd = String(fd.day).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }

@@ -243,3 +243,26 @@ export async function apiGetPaged<T>(
   const body = await fetchEnvelope(path, opts);
   return body as ApiPagedEnvelope<T>;
 }
+
+/**
+ * GET request that returns the raw envelope body without unwrapping
+ * `data`. Use this for endpoints whose JSON shape is a custom envelope
+ * — e.g. `/api/anime/:id/watchers` returns `{data, total}` where
+ * `total` lives at the top level rather than nested under `data`.
+ *
+ * Errors map to ApiError just like apiGet/apiGetPaged, so callers can
+ * handle 401/404 via `err.status`.
+ *
+ * @example
+ *   const env = await apiGetEnvelope<WatchersResponse>(
+ *     `/api/anime/${anilistId}/watchers?limit=8`
+ *   );
+ *   const { data, total } = env;
+ */
+export async function apiGetEnvelope<T>(
+  path: string,
+  opts: FetchOptions = {},
+): Promise<T> {
+  const body = await fetchEnvelope(path, opts);
+  return body as T;
+}

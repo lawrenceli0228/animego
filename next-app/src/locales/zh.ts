@@ -161,6 +161,9 @@ const zh = {
     noResults: '暂无搜索结果',
     loading: '搜索中...', placeholder: '搜索词...',
     groupAll: '全部', epAll: '全集',
+    empty: '内置磁力搜索暂未上线。可在外部站点用本作标题继续查找。',
+    searchExternally: '在 Nyaa 搜索 →',
+    close: '关闭',
   },
   // Social
   social: {
