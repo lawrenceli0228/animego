@@ -689,8 +689,21 @@ function PlayerShellInner() {
       }));
 
     const series = seriesDetail.series;
+    // Keyword fallback chain matches legacy PlayerPage.jsx: title fields
+    // are populated by importPipeline ONLY when dandanplay enrichment
+    // succeeded at import time. When it didn't, the series record is
+    // bare and titleZh/En/Ja are all empty -- in that case fall through
+    // to series.name (the parsed series folder name) and finally the
+    // first filename so dandanplay has SOMETHING to match against. An
+    // empty keyword + filename guarantees matched:false and the user
+    // never sees ManualSearch because phase races to "ready" anyway.
     const kw =
-      series?.titleZh || series?.titleEn || series?.titleJa || "";
+      series?.titleZh ||
+      series?.titleEn ||
+      series?.titleJa ||
+      (series as { name?: string } | undefined)?.name ||
+      firstName ||
+      "";
 
     startMatch(kw, epNums, firstName, basicFiles, getFilesHashes);
   }, [
@@ -701,6 +714,26 @@ function PlayerShellInner() {
     matchResult,
     startMatch,
   ]);
+
+  // Race-condition guard: user can click an episode BEFORE auto-match
+  // completes. startPlayback then runs with an empty episodeMap and
+  // loadComments never fires. When matchResult later lands with a
+  // dandanEpisodeId for the currently-playing episode, retry the
+  // comments fetch so the danmaku overlay catches up automatically.
+  const danmakuRetryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!matchResult?.episodeMap) return;
+    if (playbackPhase !== "playing") return;
+    if (playingEp == null) return;
+    const entry = matchResult.episodeMap[playingEp];
+    const eid = entry?.dandanEpisodeId;
+    if (!eid) return;
+    const retryKey = `${playingFile?.fileId ?? ""}:${eid}`;
+    if (danmakuRetryRef.current === retryKey) return;
+    danmakuRetryRef.current = retryKey;
+    loadComments(eid);
+  }, [matchResult, playbackPhase, playingEp, playingFile, loadComments]);
+
 
   // P3: library mode — episode click handler
   const handleLibraryEpisodePlay = useCallback(

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiGet, ApiError } from "@/lib/api";
 
 /**
  * dandanplay comment record (raw HTTP shape).
@@ -32,7 +31,8 @@ export interface ArtplayerDanmaku {
  */
 const MODE_MAP: Record<number, 0 | 1 | 2> = { 1: 0, 4: 2, 5: 1 };
 
-function dandanToArtplayer(raw: DandanCommentRaw): ArtplayerDanmaku {
+// Exported for unit tests — pure transform with no React deps.
+export function dandanToArtplayer(raw: DandanCommentRaw): ArtplayerDanmaku {
   const parts = raw.p.split(",");
   const time = parseFloat(parts[0]);
   const type = parseInt(parts[1], 10);
@@ -75,21 +75,33 @@ export function useDandanComments(): UseDandanCommentsResult {
     setError(null);
 
     try {
-      const data = await apiGet<DandanCommentsResponse>(
-        `/api/dandanplay/comments/${episodeId}`,
-      );
+      // dandanplay /comments/:id returns FLAT `{count, comments}` — no
+      // `{data: ...}` envelope, so apiGet (which unwraps env.data) yields
+      // undefined and silently sets count=0. Plain fetch sees the raw
+      // shape directly. /search and /episodes follow the same flat
+      // pattern; /match too. Matches DanmakuPicker's plain-fetch style.
+      const res = await fetch(`/api/dandanplay/comments/${episodeId}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      });
+      if (!mounted.current) return;
+      // 401 is handled globally via auth:expired — don't surface as load error
+      if (res.status === 401) {
+        setDanmakuList([]);
+        setCount(0);
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`loadComments: HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as DandanCommentsResponse;
       if (!mounted.current) return;
       const converted = (data.comments || []).map(dandanToArtplayer);
       setDanmakuList(converted);
       setCount(data.count || 0);
     } catch (err) {
       if (!mounted.current) return;
-      // 401 is handled globally via auth:expired — don't surface it as a load error
-      if (err instanceof ApiError && err.status === 401) {
-        setDanmakuList([]);
-        setCount(0);
-        return;
-      }
       const msg =
         err instanceof Error ? err.message : "Failed to load comments";
       setError(msg);
