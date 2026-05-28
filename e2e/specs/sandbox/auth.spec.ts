@@ -12,10 +12,11 @@ import { test, expect } from "@playwright/test";
 import { collectConsoleErrors } from "../_helpers";
 import {
   closeMongo,
-  getResetTokenForEmail,
   insertUser,
 } from "../../fixtures/mongo";
 import { makeUser } from "../../fixtures/users";
+import { closePg, getResetTokenFromPg, insertPgUser } from "../../fixtures/pg";
+import { getResetTokenForEmail } from "../../fixtures/mongo";
 
 // Start every test with a clean cookie jar so the already-authed
 // bypass on /login + /register doesn't redirect us off the form.
@@ -27,6 +28,7 @@ test.use({ storageState: { cookies: [], origins: [] } });
 // runs are tolerable in the sandbox DB.
 test.afterAll(async () => {
   await closeMongo();
+  await closePg();
 });
 
 test.describe("auth journey", () => {
@@ -108,7 +110,14 @@ test.describe("auth journey", () => {
   }) => {
     const errors = collectConsoleErrors(page);
     const user = makeUser();
+    // Insert into Mongo (legacy) and Postgres (Go API) so both stacks
+    // can find the user during the forgot-password flow.
     await insertUser(user);
+    await insertPgUser({
+      username: user.username,
+      email: user.email,
+      passwordHash: user.passwordHash,
+    });
 
     // ── Forgot password — submit the email
     await page.goto("/forgot-password");
@@ -122,11 +131,14 @@ test.describe("auth journey", () => {
       page.getByText(/Reset link sent|重置链接已发送/),
     ).toBeVisible();
 
-    // ── Read token directly from Mongo. The sandbox stack does not
-    // wire a real mail provider (sendPasswordResetEmail is best-effort
-    // and the test runner never sees the email), so we sidestep email
-    // entirely and pull `resetPasswordToken` straight off the user doc.
-    const reset = await getResetTokenForEmail(user.email);
+    // ── Read token from whichever DB the active API wrote to.
+    // Go API (P8.5 dress rehearsal) writes to Postgres; Express writes to Mongo.
+    // Try Postgres first; fall back to Mongo so this spec stays green on
+    // both the dress-rehearsal stack and the Express baseline.
+    let reset = await getResetTokenFromPg(user.email);
+    if (!reset) {
+      reset = await getResetTokenForEmail(user.email);
+    }
     expect(reset).not.toBeNull();
     const token = reset!.token;
 

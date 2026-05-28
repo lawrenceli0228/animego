@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { cleanupAllTestUsers, closeMongo } from "./fixtures/mongo";
+import { closePg, ensureSeedUserInPostgres } from "./fixtures/pg";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -102,6 +103,12 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   await closeMongo();
 
   await seed();
+
+  // P8.5: ensure the seed user also exists in Postgres so the browser
+  // login goes through the Go API (which reads Postgres) and the
+  // storageState carries a valid session cookie.
+  await ensureSeedUserInPostgres(SEED_USER_USERNAME, SEED_USER_EMAIL);
+  await closePg();
 
   const browser = await chromium.launch();
   const context = await browser.newContext({ ignoreHTTPSErrors: true });

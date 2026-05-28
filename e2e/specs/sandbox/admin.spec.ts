@@ -12,11 +12,14 @@
 import { test, expect } from "@playwright/test";
 import { collectConsoleErrors } from "../_helpers";
 import { closeMongo, insertAdmin } from "../../fixtures/mongo";
+import { closePg, insertPgUser } from "../../fixtures/pg";
+import { TEST_PASSWORD_HASH } from "../../fixtures/users";
 
 // Cleanup is centralized in globalSetup so it runs once before any
 // worker starts. Doing it per-spec races with parallel test files.
 test.afterAll(async () => {
   await closeMongo();
+  await closePg();
 });
 
 test.describe("non-admin rejection", () => {
@@ -44,6 +47,13 @@ test.describe("admin dashboard", () => {
     const { user } = await insertAdmin(
       `e2e-test-admin-${Date.now()}@animego.test`,
     );
+    // Also insert into Postgres so Go API login can authenticate the admin.
+    await insertPgUser({
+      username: user.username,
+      email: user.email,
+      passwordHash: TEST_PASSWORD_HASH,
+      role: "admin",
+    });
 
     await page.goto("/login");
     await page.locator("#login-email").fill(user.email);

@@ -1,4 +1,24 @@
 import { defineConfig, devices } from "@playwright/test";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Source .env.production from the repo root so e2e/fixtures/pg.ts can
+// reach Postgres without a hard-coded password fallback. CI sets these
+// vars directly via the workflow env block; locally we read the dotenv.
+// Don't fail if the file is missing — CI / fresh checkouts won't have it.
+(function loadRepoEnv() {
+  const envFile = path.resolve(__dirname, "..", ".env.production");
+  if (!fs.existsSync(envFile)) return;
+  for (const line of fs.readFileSync(envFile, "utf8").split("\n")) {
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+    if (!m) continue;
+    const [, k, v] = m;
+    if (process.env[k] === undefined) process.env[k] = v.trim();
+  }
+})();
 
 /**
  * P10 — Playwright E2E config.
