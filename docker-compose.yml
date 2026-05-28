@@ -111,13 +111,9 @@ services:
     env_file: .env.production
     environment:
       PORT_WS: 3001
-    # depends_on:
-    #   postgres:
-    #     condition: service_healthy
-    # NOTE: prod postgres service is added in the P9 cutover commit;
-    # ws-server's DATABASE_URL in .env.production points at the postgres
-    # host that will exist by then.  Listing it as depends_on here would
-    # break `docker compose up` today.
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - animego
     healthcheck:
@@ -127,6 +123,73 @@ services:
       retries: 3
       start_period: 5s
     mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── P8.5: postgres (Postgres 16 + pg_cron) ───────────────────────────
+  # Custom image bundles pg_cron for danmaku TTL jobs and River queue
+  # extension support.  pg_cron is loaded via shared_preload_libraries
+  # baked into the image's postgresql.conf.sample — no runtime flag
+  # needed beyond the command below (which is belt-and-suspenders for
+  # fresh volumes that haven't run initdb yet).
+  # go-api + ws-server both connect via DATABASE_URL constructed in their
+  # respective environment blocks; neither reads POSTGRES_PASSWORD directly.
+  postgres:
+    build:
+      context: ./go-api/docker/postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: animego
+      POSTGRES_USER: animego
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    command: ["postgres", "-c", "shared_preload_libraries=pg_cron", "-c", "cron.database_name=animego"]
+    networks:
+      - animego
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U animego -d animego"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    mem_limit: 400m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── P8.5: go-api (Go HTTP API) ───────────────────────────────────────
+  # Chi-based Go server.  Waits for postgres healthcheck before starting
+  # so pgxpool.Connect at boot never races a cold DB.
+  # DATABASE_URL is constructed here from POSTGRES_PASSWORD so the
+  # literal password never lands in .env.production (only the bare var does).
+  # PORT_GO matches go-api/internal/config/config.go envInt("PORT_GO", 8080).
+  # GO_API_INTERNAL_URL in next-app still points at `app:5001` until P9 flip.
+  go-api:
+    build:
+      context: ./go-api
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable
+      PORT_GO: "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - animego
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: 200m
     logging:
       driver: json-file
       options:
@@ -164,6 +227,7 @@ services:
 
 volumes:
   mongo-data:
+  postgres-data:
 
 networks:
   animego:
