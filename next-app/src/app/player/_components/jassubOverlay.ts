@@ -37,9 +37,19 @@ const ASSET_BASE = '/jassub';
 const wasmUrl = `${ASSET_BASE}/wasm/jassub-worker.wasm`;
 const modernWasmUrl = `${ASSET_BASE}/wasm/jassub-worker-modern.wasm`;
 const defaultFontUrl = `${ASSET_BASE}/default.woff2`;
+// jassub's worker.js ships as ESM with bare specifier imports
+// (`import { finalizer } from "abslink"` etc). Module workers can't
+// resolve bare specifiers without an import map; webpack's worker
+// emit doesn't follow transitive deps either. Result: every native
+// pattern (`new URL('jassub/dist/worker/worker.js', import.meta.url)`,
+// static URL to the raw npm dist) yields a worker stuck on init.
+// Solution: pre-bundle the worker with esbuild at build time —
+// `bun run build:jassub` produces worker.bundle.js with all bare
+// specifiers resolved + transitive deps inlined. Self-contained,
+// decoupled from any bundler's worker handling.
+const workerUrl = `${ASSET_BASE}/worker/worker.bundle.js`;
 
 let JASSUB = null;
-let workerUrl = null;
 let loadPromise = null;
 
 function loadAssets() {
@@ -47,11 +57,6 @@ function loadAssets() {
   loadPromise = (async () => {
     const mod = await import('jassub');
     JASSUB = mod.default;
-    // Webpack pattern: `new URL('jassub/dist/worker/worker.js', import.meta.url)`
-    // gets walked by the bundler — webpack emits the worker bundle and
-    // rewrites the URL to the emitted asset path. This replaces the
-    // legacy Vite `?worker&url` import trick.
-    workerUrl = new URL('jassub/dist/worker/worker.js', import.meta.url).href;
   })();
   return loadPromise;
 }
