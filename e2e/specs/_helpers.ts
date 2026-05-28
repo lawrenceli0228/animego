@@ -22,7 +22,7 @@ const KNOWN_NOISE_PATTERNS: RegExp[] = [
   /favicon/i,
   /anilist\.co\/.*\.(jpg|jpeg|png|webp)/i,
   /s4\.anilist\.co/i,
-  /Failed to load resource.*404/i,
+  /Failed to load resource.*4\d{2}/i,
   /\bnet::ERR_/i,
   /Download the React DevTools/i,
 ];

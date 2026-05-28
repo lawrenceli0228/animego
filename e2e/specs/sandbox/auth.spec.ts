@@ -11,7 +11,6 @@
 import { test, expect } from "@playwright/test";
 import { collectConsoleErrors } from "../_helpers";
 import {
-  cleanupAllTestUsers,
   closeMongo,
   getResetTokenForEmail,
   insertUser,
@@ -22,12 +21,11 @@ import { makeUser } from "../../fixtures/users";
 // bypass on /login + /register doesn't redirect us off the form.
 test.use({ storageState: { cookies: [], origins: [] } });
 
-test.beforeAll(async () => {
-  await cleanupAllTestUsers();
-});
-
+// Cleanup happens once in globalSetup before any spec runs. Per-spec
+// cleanup races with the admin spec in parallel mode (it would nuke
+// admin's freshly-inserted user mid-login). Stragglers from killed
+// runs are tolerable in the sandbox DB.
 test.afterAll(async () => {
-  await cleanupAllTestUsers();
   await closeMongo();
 });
 
@@ -57,7 +55,13 @@ test.describe("auth journey", () => {
     // Wait for the anonymous CTAs to come back before asserting we're
     // signed out — otherwise we race with the RSC re-render.
     await navbar.getByRole("button", { name: /登出|Logout/ }).click();
-    await expect(navbar.locator('a[href="/login"]')).toBeVisible();
+    // router.refresh() round-trip (clear cookie + re-run layout's
+    // fetchCurrentUser + reconcile) can take ~10s on a cold prod build.
+    // The langToggle lock bug (shared useTransition) is fixed; this is
+    // legitimate RSC latency, not a regression.
+    await expect(navbar.locator('a[href="/login"]')).toBeVisible({
+      timeout: 15_000,
+    });
 
     // ── Login with the just-registered credentials
     await page.goto("/login");
@@ -88,7 +92,9 @@ test.describe("auth journey", () => {
     // the Chinese key and falls through to the raw server message. We
     // match on the message substring rather than the entire `t.fail`
     // fallback because the form actually shows the backend wording.
-    const alert = page.getByRole("alert");
+    // Scope to form — Next.js 16 adds a global `__next-route-announcer__`
+    // div with role="alert" that would otherwise trip strict-mode.
+    const alert = page.locator("form").getByRole("alert");
     await expect(alert).toContainText(/邮箱或密码错误|Invalid email or password|登录失败|Login failed/);
 
     // URL stayed on /login — the failed submit must not redirect.
@@ -109,11 +115,12 @@ test.describe("auth journey", () => {
     await page.locator("#forgot-email").fill(user.email);
     await page.locator('button[type="submit"]').click();
 
-    // Form swaps to the "sent" view (✉️ + success message + back link).
-    // The success copy is dict.forgotPassword.success — match a
-    // substring stable across locales (the ✉️ glyph is aria-hidden so
-    // pick the back-to-login link as the "sent" sentinel).
-    await expect(page.getByRole("link", { name: /返回登录|Back to login/ })).toBeVisible();
+    // Wait for the success copy (form unmounts, sent view replaces it).
+    // The footer back-to-login link is inside the form too, so matching on
+    // the link alone passes prematurely. Match the success message text.
+    await expect(
+      page.getByText(/Reset link sent|重置链接已发送/),
+    ).toBeVisible();
 
     // ── Read token directly from Mongo. The sandbox stack does not
     // wire a real mail provider (sendPasswordResetEmail is best-effort

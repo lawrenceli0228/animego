@@ -36,6 +36,7 @@ export default defineConfig({
     ["html", { open: "never" }],
     ...(isCI ? [["github"] as ["github"]] : []),
   ],
+  globalSetup: "./globalSetup.ts",
   use: {
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
@@ -61,6 +62,7 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         baseURL: process.env.E2E_SANDBOX_BASE_URL || "https://localhost",
+        storageState: "./.auth/user.json",
       },
     },
   ],

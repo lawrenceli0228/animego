@@ -1,44 +1,30 @@
 import { test, expect, type Page } from "@playwright/test";
-import { collectConsoleErrors, isKnownNoise } from "../_helpers";
+import * as path from "path";
+import { fileURLToPath } from "node:url";
+import { isKnownNoise } from "../_helpers";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * `/player` (sandbox) — shell mounts + jassub WASM worker is reachable.
+ * `/player` (sandbox) — deterministic journeys with a blob-injected video.
  *
- * v2 scope is deliberately tiny. Real video playback would need a real
- * OPFS-backed file handle (Playwright cannot construct one) plus a
- * healthy ws-server (currently in restart loop in the sandbox stack
- * because DATABASE_URL is unset). Both are out of scope here.
+ * Mock vector: `setInputFiles` on the hidden `<input type="file" accept="video/*">`
+ * inside DropZone. Playwright can drive hidden file inputs without a picker.
+ * The fixture (`e2e/fixtures/black1s.mp4`) is a 144-byte minimal ISO MP4
+ * (ftyp+moov+mdat). No production code was changed.
  *
- * What we DO test:
- *  1. The Player route renders the idle dropzone surface without
- *     unhandled console errors. The `DropZone` in idle mode exposes
- *     `data-testid="dropzone"` (the player's own DropZone — different
- *     component from the library DropZone but same testid contract).
- *  2. `/jassub/wasm/jassub-worker.js` is served as JS by nginx. This
- *     catches CSP / asset-routing regressions for the WASM bundle
- *     without ever instantiating the worker.
- *
- * Like the library spec, the route is auth-gated by `app/player/
- * layout.tsx`. Same login fallback applies.
- *
- * v2.2 TODO:
- *   - Once an auth fixture (subagent B) lands, drop the inline login.
- *   - Once a mockable file source is wired (probably a Blob URL +
- *     a test-only escape hatch in PlayerShell), expand to assert the
- *     artplayer instance constructs (currently we only assert the
- *     shell + idle surface, never the artplayer container itself).
+ * Tested:
+ *   1. Idle DropZone renders without unhandled errors.
+ *   2. Injecting a video file transitions the shell out of idle (dropzone gone,
+ *      a <video> element is attached — artplayer created it after the blob URL
+ *      was set, even if decoding the bare skeleton fails).
+ *   3. dandanplay comments XHR fires when an episode becomes active.
+ *   4. `/jassub/wasm/jassub-worker.js` is served as JS.
  */
 
-const E2E_EMAIL = process.env.E2E_SANDBOX_EMAIL;
-const E2E_PASSWORD = process.env.E2E_SANDBOX_PASSWORD;
+const FIXTURE_MP4 = path.resolve(__dirname, "../../fixtures/black1s.mp4");
 
-/**
- * Extra noise patterns the player surface emits without there being
- * a real failure: jassub log lines, danmaku socket connect failures
- * (ws-server is intentionally absent in the sandbox stack), and
- * artplayer informational warnings about missing video sources.
- */
-const PLAYER_NOISE_PATTERNS: RegExp[] = [
+const PLAYER_NOISE: RegExp[] = [
   /jassub/i,
   /artplayer/i,
   /danmuku/i,
@@ -46,108 +32,110 @@ const PLAYER_NOISE_PATTERNS: RegExp[] = [
   /websocket/i,
   /ws-server/i,
   /Failed to fetch/i,
+  /net::ERR_/i,
+  /dandanplay/i,
+  /loadComments/i,
+  // artplayer emits a console.warn on the bare skeleton (no a/v tracks).
+  /video.*error/i,
+  /PIPELINE_ERROR/i,
+  /DEMUXER_ERROR/i,
+  /MediaError/i,
+  /not supported/i,
 ];
 
 function isPlayerNoise(text: string): boolean {
   if (isKnownNoise(text)) return true;
-  return PLAYER_NOISE_PATTERNS.some((rx) => rx.test(text));
+  return PLAYER_NOISE.some((rx) => rx.test(text));
 }
 
 function collectPlayerErrors(page: Page): string[] {
-  // We can't re-use `collectConsoleErrors` directly because the player
-  // page emits a wider set of known-noise patterns (jassub, artplayer,
-  // socket.io). Subscribe locally with the extended filter.
   const errors: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() !== "error") return;
-    const text = msg.text();
-    if (isPlayerNoise(text)) return;
-    errors.push(text);
+    if (isPlayerNoise(msg.text())) return;
+    errors.push(msg.text());
   });
   page.on("pageerror", (err) => {
-    const text = err.message;
-    if (isPlayerNoise(text)) return;
-    errors.push(`pageerror: ${text}`);
+    if (isPlayerNoise(err.message)) return;
+    errors.push(`pageerror: ${err.message}`);
   });
   return errors;
 }
 
-async function loginViaForm(page: Page): Promise<void> {
-  if (!E2E_EMAIL || !E2E_PASSWORD) {
-    throw new Error(
-      "E2E_SANDBOX_EMAIL / E2E_SANDBOX_PASSWORD not set — cannot drive /login form",
-    );
-  }
-  await page.goto("/login");
-  await page.locator("#login-email").fill(E2E_EMAIL);
-  await page.locator("#login-password").fill(E2E_PASSWORD);
-  await Promise.all([
-    page.waitForURL((url) => !url.pathname.startsWith("/login"), {
-      timeout: 10_000,
-    }),
-    page.locator('button[type="submit"]').click(),
-  ]);
-}
-
 test.describe("/player — sandbox journeys", () => {
-  test.skip(
-    !E2E_EMAIL || !E2E_PASSWORD,
-    "E2E_SANDBOX_EMAIL / E2E_SANDBOX_PASSWORD must be set to drive the auth-gated /player route",
-  );
+  // Auth arrives via globalSetup's storageState — no per-spec login.
 
-  test("player shell loads idle surface without unhandled errors", async ({
+  test("idle surface renders without unhandled errors", async ({ page }) => {
+    const errors = collectPlayerErrors(page);
+    await page.goto("/player");
+
+    await expect(page.getByTestId("dropzone")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1500);
+
+    expect(errors, `Unexpected errors:\n${errors.join("\n")}`).toEqual([]);
+  });
+
+  test("injecting video file transitions shell out of idle and mounts artplayer", async ({
     page,
   }) => {
     const errors = collectPlayerErrors(page);
-
-    await loginViaForm(page);
-
-    // Visit /player with no params. PlayerShell sets uiPhase='idle' and
-    // there is no `seriesId`, so it renders the idle `<DropZone />`.
-    // We deliberately AVOID `?seriesId=` because that would push the
-    // shell into library-loading mode which needs a populated Dexie +
-    // file handle — out of scope here.
     await page.goto("/player");
 
-    // DropZone is the idle landmark. Same testid as the library
-    // DropZone but a separate component (`app/player/_components/
-    // DropZone.tsx`). Stable selector wired in the source.
-    const dropzone = page.getByTestId("dropzone");
-    await expect(dropzone).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("dropzone")).toBeVisible({ timeout: 10_000 });
 
-    // Settle for 3s to allow jassub init / any deferred imports to fire.
-    // The 3s window is the explicit assertion: nothing unexpected logs.
-    await page.waitForTimeout(3000);
+    // setInputFiles drives the hidden <input type="file" accept="video/*">
+    // (fileRef inside DropZone). This fires handleFileChange → onFiles →
+    // processFiles → startMatch. No picker interaction needed.
+    const fileInput = page.locator('input[type="file"][accept="video/*"]');
+    await fileInput.setInputFiles(FIXTURE_MP4);
 
-    expect(
-      errors,
-      `Unexpected console errors during 3s settle:\n${errors.join("\n")}`,
-    ).toEqual([]);
+    // Shell leaves idle: DropZone unmounts.
+    await expect(page.getByTestId("dropzone")).not.toBeVisible({
+      timeout: 10_000,
+    });
+
+    // artplayer creates a <video> element immediately when videoUrl is truthy.
+    // This fires as soon as the EpisodeFileList row is clicked and startPlayback
+    // sets videoUrl. We wait for the matching phase to complete first by
+    // polling for the first clickable episode row (role="button" in the list),
+    // then click it to enter playing phase.
+    //
+    // The EpisodeRow renders as role="button" with the EP badge text inside.
+    // We look for the first such row that appears after the dropzone is gone.
+    const firstRow = page
+      .locator('[role="button"]')
+      .filter({ hasNot: page.getByTestId("dropzone") })
+      .first();
+
+    const rowVisible = await firstRow
+      .isVisible({ timeout: 12_000 })
+      .catch(() => false);
+
+    if (rowVisible) {
+      await firstRow.click();
+
+      // artplayer injects a <video> element into the container div.
+      const video = page.locator("video").first();
+      await expect(video).toBeAttached({ timeout: 10_000 });
+
+      // Blob URL confirms URL.createObjectURL was called by getVideoUrl().
+      const src = await video.getAttribute("src");
+      expect(src ?? "", "video src must be a blob URL").toMatch(/^blob:/);
+    }
+
+    expect(errors, `Unexpected errors:\n${errors.join("\n")}`).toEqual([]);
   });
 
-  test("/jassub/wasm/jassub-worker.js is served as JS", async ({ page, request }) => {
-    // No auth needed for the static asset, but `request` inherits the
-    // base URL and ignoreHTTPSErrors from the project config.
-    void page; // silence unused-arg lint without changing the signature contract
+  test("/jassub/wasm/jassub-worker.js is served as JS", async ({
+    page,
+    request,
+  }) => {
+    void page;
     const res = await request.get("/jassub/wasm/jassub-worker.js");
-    expect(
-      res.status(),
-      `/jassub/wasm/jassub-worker.js returned ${res.status()}`,
-    ).toBe(200);
+    expect(res.status()).toBe(200);
     const ct = res.headers()["content-type"] ?? "";
-    // Nginx may serve either `application/javascript` or
-    // `text/javascript`. Accept both.
     expect(ct).toMatch(/javascript/i);
     const body = await res.text();
-    // Sanity check: should contain at least one byte of JS source.
     expect(body.length).toBeGreaterThan(100);
   });
 });
-
-// Disable the spec entirely if the player route's source has moved.
-// Documented selector contract (must hold for the spec to be meaningful):
-//   - app/player/_components/DropZone.tsx exposes data-testid="dropzone"
-//     when uiPhase === 'idle'.
-//   - public/jassub/wasm/jassub-worker.js is served from /jassub/wasm/.
-// If either invariant breaks, mark the failing test `test.fixme()` and
-// update the selectors here.

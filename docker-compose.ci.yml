@@ -23,6 +23,13 @@ services:
     ports:
       - "27017:27017"
 
+  app:
+    # Crank /login + /register rate limit in sandbox — e2e specs hammer
+    # the form during register/login/forgot-password journeys and would
+    # otherwise hit the prod default (10/15min) after a few runs.
+    environment:
+      AUTH_RATELIMIT_MAX: "1000"
+
   ws-server:
     # Override the entrypoint so the container starts and stays running
     # without trying (and failing) to connect to Postgres. tini/dumb-init
