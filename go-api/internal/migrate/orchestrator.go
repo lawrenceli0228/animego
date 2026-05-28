@@ -198,14 +198,14 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 
 	var transformed, failed atomic.Int64
 
-	flush := func(table string) error {
+	flush := func(table string) (int, error) {
 		rows := buffers[table]
 		if len(rows) == 0 {
-			return nil
+			return 0, nil
 		}
 		buffers[table] = rows[:0]
 		if o.cfg.DryRun {
-			return nil
+			return len(rows), nil
 		}
 		// ConflictTarget is the parent transform's PG-table key (e.g.
 		// "(anilist_id)" for anime_cache).  For fan-out child tables
@@ -217,9 +217,10 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 		if table == t.PGTable() {
 			conflictTarget = t.ConflictTarget()
 		}
-		// On --commit, wrap each flush in its own short transaction so
-		// a single bad batch can't poison the whole collection's writes.
-		return o.writeBatch(ctx, table, conflictTarget, rows)
+		return o.writeBatch(ctx, table, conflictTarget, rows, func(_ int, r PGRow, err error) {
+			failed.Add(1)
+			o.logFail(t.Name(), nil, fmt.Errorf("table %s: constraint: %w", r.Table, err), nil)
+		})
 	}
 
 	for cursor.Next(ctx) {
@@ -271,16 +272,17 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 				// Without this, anime_episode_titles (etc.) hit
 				// SQLSTATE 23503 against anime_cache rows still buffered.
 				if r.Table != t.PGTable() && len(buffers[t.PGTable()]) > 0 {
-					n := int64(len(buffers[t.PGTable()]))
-					if err := flush(t.PGTable()); err != nil {
+					n, err := flush(t.PGTable())
+					if err != nil {
 						return rpt, fmt.Errorf("flush parent %s: %w", t.PGTable(), err)
 					}
-					rpt.PGCount += n
+					rpt.PGCount += int64(n)
 				}
-				if err := flush(r.Table); err != nil {
+				n, err := flush(r.Table)
+				if err != nil {
 					return rpt, fmt.Errorf("flush %s: %w", r.Table, err)
 				}
-				rpt.PGCount += int64(o.cfg.BatchSize)
+				rpt.PGCount += int64(n)
 			}
 		}
 		transformed.Add(1)
@@ -290,11 +292,12 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 	}
 
 	// Final flushes: parent table first (FK safety), then sorted children.
-	if remaining := int64(len(buffers[t.PGTable()])); remaining > 0 {
-		if err := flush(t.PGTable()); err != nil {
+	if len(buffers[t.PGTable()]) > 0 {
+		n, err := flush(t.PGTable())
+		if err != nil {
 			return rpt, fmt.Errorf("final flush parent %s: %w", t.PGTable(), err)
 		}
-		rpt.PGCount += remaining
+		rpt.PGCount += int64(n)
 	}
 	tables := make([]string, 0, len(buffers))
 	for tbl := range buffers {
@@ -305,11 +308,11 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 	}
 	sort.Strings(tables)
 	for _, tbl := range tables {
-		remaining := int64(len(buffers[tbl]))
-		if err := flush(tbl); err != nil {
+		n, err := flush(tbl)
+		if err != nil {
 			return rpt, fmt.Errorf("final flush %s: %w", tbl, err)
 		}
-		rpt.PGCount += remaining
+		rpt.PGCount += int64(n)
 	}
 
 	rpt.Transformed = transformed.Load()
@@ -329,38 +332,46 @@ func (o *Orchestrator) runOne(ctx context.Context, t Transform) (CollectionRepor
 }
 
 // writeBatch performs a transactional UPSERT (or plain INSERT when
-// ConflictTarget is empty) for one table.  Uses pgx.Batch to pipeline
-// per-row statements; pgx coalesces these into a single round trip per
-// batch.
-func (o *Orchestrator) writeBatch(ctx context.Context, table, conflictTarget string, rows []PGRow) error {
+// ConflictTarget is empty) for one table.  Each row is guarded by a
+// savepoint so a constraint violation (e.g. FK miss) is isolated to that
+// row: the savepoint is rolled back, onRowFail is called with the
+// offending row + error, and the transaction continues with the next row.
+// Returns the count of rows that were successfully written.
+func (o *Orchestrator) writeBatch(ctx context.Context, table, conflictTarget string, rows []PGRow, onRowFail func(i int, r PGRow, err error)) (int, error) {
 	if len(rows) == 0 {
-		return nil
+		return 0, nil
 	}
 	tx, err := o.pgPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return 0, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	batch := &pgx.Batch{}
-	for _, r := range rows {
-		stmt := buildUpsert(table, r.Columns, conflictTarget)
-		batch.Queue(stmt, r.Values...)
-	}
-	br := tx.SendBatch(ctx, batch)
-	for i := range rows {
-		if _, err := br.Exec(); err != nil {
-			_ = br.Close()
-			return fmt.Errorf("batch row %d (table=%s): %w", i, table, err)
+	written := 0
+	for i, r := range rows {
+		sp := fmt.Sprintf("sp%d", i)
+		if _, err := tx.Exec(ctx, "SAVEPOINT "+sp); err != nil {
+			return written, fmt.Errorf("savepoint %s: %w", sp, err)
 		}
-	}
-	if err := br.Close(); err != nil {
-		return fmt.Errorf("batch close: %w", err)
+		stmt := buildUpsert(table, r.Columns, conflictTarget)
+		if _, err := tx.Exec(ctx, stmt, r.Values...); err != nil {
+			if _, rbErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+sp); rbErr != nil {
+				return written, fmt.Errorf("rollback savepoint %s: %w", sp, rbErr)
+			}
+			if onRowFail != nil {
+				onRowFail(i, r, err)
+			}
+			continue
+		}
+		if _, err := tx.Exec(ctx, "RELEASE SAVEPOINT "+sp); err != nil {
+			return written, fmt.Errorf("release savepoint %s: %w", sp, err)
+		}
+		written++
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return written, fmt.Errorf("commit: %w", err)
 	}
-	return nil
+	return written, nil
 }
 
 // buildUpsert composes the INSERT ... ON CONFLICT DO UPDATE statement
