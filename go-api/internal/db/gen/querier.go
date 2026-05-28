@@ -160,6 +160,10 @@ type Querier interface {
 	// name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
 	// until enrichment runs.
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error)
+	// Backs AnimeDetail.episodeTitles in /:anilistId.  Matches Express's
+	// episodeTitles array shape: {episode, name, nameCn}.  Ordered by
+	// episode ASC so the response is stable across re-fetches.
+	GetAnimeEpisodeTitlesByID(ctx context.Context, animeID int32) ([]GetAnimeEpisodeTitlesByIDRow, error)
 	// Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
 	// the keyword for Bangumi search.  Mirrors anilist.service.js V1
 	// enqueue (fetchBangumiData first arg).

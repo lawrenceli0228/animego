@@ -98,7 +98,8 @@ type AnimeDetail struct {
 	Relations                   []DetailRelation       `json:"relations"`
 	Characters                  []DetailCharacter      `json:"characters"`
 	Staff                       []DetailStaff          `json:"staff"`
-	Recommendations             []DetailRecommendation `json:"recommendations"`
+	Recommendations             []DetailRecommendation  `json:"recommendations"`
+	EpisodeTitles               []DetailEpisodeTitle    `json:"episodeTitles"`
 	BgmID                       *int32                 `json:"bgmId"`
 	BangumiScore                *float64               `json:"bangumiScore"`
 	BangumiVotes                *int32                 `json:"bangumiVotes"`
@@ -166,6 +167,14 @@ type DetailRecommendation struct {
 	AverageScore                *float64 `json:"averageScore"`
 }
 
+// DetailEpisodeTitle mirrors the anime_episode_titles table.  Matches
+// Express episodeTitles array shape: {episode, name, nameCn}.
+type DetailEpisodeTitle struct {
+	Episode int32   `json:"episode"`
+	Name    *string `json:"name"`
+	NameCn  *string `json:"nameCn"`
+}
+
 // DetailReader is the read-only slice of DetailDB.  Eight queries — one
 // main row, six child arrays, plus the relations enrichment lookup.
 type DetailReader interface {
@@ -176,6 +185,7 @@ type DetailReader interface {
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeCharactersByIDRow, error)
 	GetAnimeStaffByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeStaffByIDRow, error)
 	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeRecommendationsByIDRow, error)
+	GetAnimeEpisodeTitlesByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeEpisodeTitlesByIDRow, error)
 	GetRelationEnrichmentByIDs(ctx context.Context, ids []int32) ([]dbgen.GetRelationEnrichmentByIDsRow, error)
 }
 
@@ -357,7 +367,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 	}
 
 	// Six independent child reads run in parallel.
-	genres, studios, relations, characters, staffRows, recommendations, err := s.fetchChildren(ctx, anilistID)
+	genres, studios, relations, characters, staffRows, recommendations, episodeTitles, err := s.fetchChildren(ctx, anilistID)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +395,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 		return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 	}
 
-	detail := assembleDetail(main, genres, studios, enrichedRelations, characters, staffRows, recommendations)
+	detail := assembleDetail(main, genres, studios, enrichedRelations, characters, staffRows, recommendations, episodeTitles)
 
 	// Populate cache.  Set is best-effort — ristretto may reject under
 	// contention but the next request will re-read from DB without
@@ -411,6 +421,7 @@ func (s *DetailService) fetchChildren(ctx context.Context, anilistID int32) (
 	characters []dbgen.GetAnimeCharactersByIDRow,
 	staffRows []dbgen.GetAnimeStaffByIDRow,
 	recommendations []dbgen.GetAnimeRecommendationsByIDRow,
+	episodeTitles []dbgen.GetAnimeEpisodeTitlesByIDRow,
 	err error,
 ) {
 	g, gctx := errgroup.WithContext(ctx)
@@ -442,6 +453,11 @@ func (s *DetailService) fetchChildren(ctx context.Context, anilistID int32) (
 	g.Go(func() error {
 		var e error
 		recommendations, e = s.db.GetAnimeRecommendationsByID(gctx, anilistID)
+		return e
+	})
+	g.Go(func() error {
+		var e error
+		episodeTitles, e = s.db.GetAnimeEpisodeTitlesByID(gctx, anilistID)
 		return e
 	})
 	if waitErr := g.Wait(); waitErr != nil {
@@ -546,7 +562,7 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 		// 500 so the failure is visible in logs.
 		return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "post-refetch read failed")
 	}
-	genres, studios, relations, characters, staffRows, recommendations, err := s.fetchChildren(ctx, anilistID)
+	genres, studios, relations, characters, staffRows, recommendations, episodeTitles, err := s.fetchChildren(ctx, anilistID)
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +574,7 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 		enrichedRelations = convertRelationsToDetailRelations(relations)
 	}
 
-	detail := assembleDetail(main, genres, studios, enrichedRelations, characters, staffRows, recommendations)
+	detail := assembleDetail(main, genres, studios, enrichedRelations, characters, staffRows, recommendations, episodeTitles)
 	if ok := s.cache.Set(strconv.FormatInt(int64(anilistID), 10), detail); !ok {
 		slog.Debug("anime/detail: cache set rejected post-refetch", "anilistId", anilistID)
 	}
@@ -796,6 +812,7 @@ func assembleDetail(
 	characters []dbgen.GetAnimeCharactersByIDRow,
 	staffRows []dbgen.GetAnimeStaffByIDRow,
 	recommendations []dbgen.GetAnimeRecommendationsByIDRow,
+	episodeTitlesRows []dbgen.GetAnimeEpisodeTitlesByIDRow,
 ) *AnimeDetail {
 	if genres == nil {
 		genres = []string{}
@@ -846,6 +863,15 @@ func assembleDetail(
 		})
 	}
 
+	epTitles := make([]DetailEpisodeTitle, 0, len(episodeTitlesRows))
+	for _, t := range episodeTitlesRows {
+		epTitles = append(epTitles, DetailEpisodeTitle{
+			Episode: t.Episode,
+			Name:    t.Name,
+			NameCn:  t.NameCn,
+		})
+	}
+
 	return &AnimeDetail{
 		AnilistID:                   main.AnilistID,
 		TitleRomaji:                 main.TitleRomaji,
@@ -874,6 +900,7 @@ func assembleDetail(
 		Characters:                  chars,
 		Staff:                       staff,
 		Recommendations:             recs,
+		EpisodeTitles:               epTitles,
 		BgmID:                       main.BgmID,
 		BangumiScore:                main.BangumiScore,
 		BangumiVotes:                main.BangumiVotes,

@@ -261,6 +261,42 @@ func (q *Queries) GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]
 	return items, nil
 }
 
+const getAnimeEpisodeTitlesByID = `-- name: GetAnimeEpisodeTitlesByID :many
+SELECT episode, name, name_cn
+FROM anime_episode_titles
+WHERE anime_id = $1
+ORDER BY episode
+`
+
+type GetAnimeEpisodeTitlesByIDRow struct {
+	Episode int32   `json:"episode"`
+	Name    *string `json:"name"`
+	NameCn  *string `json:"nameCn"`
+}
+
+// Backs AnimeDetail.episodeTitles in /:anilistId.  Matches Express's
+// episodeTitles array shape: {episode, name, nameCn}.  Ordered by
+// episode ASC so the response is stable across re-fetches.
+func (q *Queries) GetAnimeEpisodeTitlesByID(ctx context.Context, animeID int32) ([]GetAnimeEpisodeTitlesByIDRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeEpisodeTitlesByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeEpisodeTitlesByIDRow{}
+	for rows.Next() {
+		var i GetAnimeEpisodeTitlesByIDRow
+		if err := rows.Scan(&i.Episode, &i.Name, &i.NameCn); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAnimeForBangumiSearch = `-- name: GetAnimeForBangumiSearch :one
 SELECT title_native, title_romaji
 FROM anime_cache

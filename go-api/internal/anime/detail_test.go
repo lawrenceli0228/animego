@@ -45,6 +45,7 @@ type detailFakeDB struct {
 	getAnimeCharactersByIDFn      func(ctx context.Context, id int32) ([]dbgen.GetAnimeCharactersByIDRow, error)
 	getAnimeStaffByIDFn           func(ctx context.Context, id int32) ([]dbgen.GetAnimeStaffByIDRow, error)
 	getAnimeRecommendationsByIDFn func(ctx context.Context, id int32) ([]dbgen.GetAnimeRecommendationsByIDRow, error)
+	getAnimeEpisodeTitlesByIDFn   func(ctx context.Context, id int32) ([]dbgen.GetAnimeEpisodeTitlesByIDRow, error)
 	getRelationEnrichmentByIDsFn  func(ctx context.Context, ids []int32) ([]dbgen.GetRelationEnrichmentByIDsRow, error)
 
 	// Writers (P2.1.6 re-fetch path).  Defaults return nil error.
@@ -140,6 +141,13 @@ func (f *detailFakeDB) GetAnimeRecommendationsByID(ctx context.Context, id int32
 		return []dbgen.GetAnimeRecommendationsByIDRow{}, nil
 	}
 	return f.getAnimeRecommendationsByIDFn(ctx, id)
+}
+
+func (f *detailFakeDB) GetAnimeEpisodeTitlesByID(ctx context.Context, id int32) ([]dbgen.GetAnimeEpisodeTitlesByIDRow, error) {
+	if f.getAnimeEpisodeTitlesByIDFn == nil {
+		return []dbgen.GetAnimeEpisodeTitlesByIDRow{}, nil
+	}
+	return f.getAnimeEpisodeTitlesByIDFn(ctx, id)
 }
 
 func (f *detailFakeDB) GetRelationEnrichmentByIDs(ctx context.Context, ids []int32) ([]dbgen.GetRelationEnrichmentByIDsRow, error) {

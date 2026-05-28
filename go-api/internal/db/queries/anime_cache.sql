@@ -540,3 +540,12 @@ INSERT INTO anime_recommendations (
     $6, $7, $8,
     $9
 );
+
+-- name: GetAnimeEpisodeTitlesByID :many
+-- Backs AnimeDetail.episodeTitles in /:anilistId.  Matches Express's
+-- episodeTitles array shape: {episode, name, nameCn}.  Ordered by
+-- episode ASC so the response is stable across re-fetches.
+SELECT episode, name, name_cn
+FROM anime_episode_titles
+WHERE anime_id = $1
+ORDER BY episode;
