@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
+import { Suspense } from "react";
 import SeasonNav from "@/components/seasonal/SeasonNav";
-import SeasonalFilters from "@/components/seasonal/SeasonalFilters";
+import SeasonalFilterChips, { GENRES } from "@/components/seasonal/SeasonalFilterChips";
+import type { Genre } from "@/components/seasonal/SeasonalFilterChips";
+import AnimeCard from "@/components/anime/AnimeCard";
+import SeasonalShowMore from "@/components/seasonal/SeasonalShowMore";
 import { apiGetPaged } from "@/lib/api";
 import { getDict, getDictByLang, getLang } from "@/lib/i18n";
+import { pickTitle } from "@/lib/formatters";
 import type { SeasonalAnime } from "@/lib/types";
 
-// 5-minute ISR window keeps the seasonal listing fresh enough for the
-// "new airing today" use case without forcing a Go-API hit on every
-// request. Aligned with the explicit fetch revalidate below so Next
-// does not generate two different cache buckets.
 export const revalidate = 300;
 
 const VALID_SEASONS = new Set(["spring", "summer", "fall", "winter"]);
@@ -24,24 +25,18 @@ const SEASON_ZH: Record<SeasonKey, string> = {
   winter: "冬",
 };
 
-// Fetch the full season in one shot (capped at 200 by the API). The
-// legacy SeasonPage.jsx requested ?perPage=200 too — anything smaller
-// regresses the user-visible count from ~96 back to 20. Client-side
-// filtering and show-more pagination then operate on the cached list
-// with zero extra round-trips.
-//
-// Note: the API param is `perPage` (Go-API + Express both use this).
-// Earlier drafts of this page used the implicit default (20) which is
-// the exact "20 vs 96" gap users reported.
 const SEASONAL_PAGE_SIZE = 200;
+const INITIAL_COUNT = 20;
+const LOAD_MORE = 20;
 
-// Empty fallback returned when the API throws. Keeps the page render
-// strictly client-shaped (no error UI here — it just looks like "0
-// anime") so a flapping API does not produce a 500.
+const FORMATS = ["TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA"] as const;
+type Format = (typeof FORMATS)[number];
+
 const EMPTY_ITEMS: SeasonalAnime[] = [];
 
 interface PageProps {
   params: Promise<{ season: string; year: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 function parseSeasonYear(season: string, year: string): { season: SeasonKey; year: number } | null {
@@ -59,6 +54,48 @@ function headingFor(season: SeasonKey, year: number, lang: "zh" | "en"): string 
   return `${capitalized} ${year} Anime`;
 }
 
+function getString(v: string | string[] | undefined): string {
+  if (!v) return "";
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function applyFilters(
+  items: SeasonalAnime[],
+  genre: string,
+  format: string,
+  status: string,
+  sortBy: string,
+  lang: "zh" | "en",
+): SeasonalAnime[] {
+  let list = items;
+  if (genre && GENRES.includes(genre as Genre)) {
+    list = list.filter((a) => a.genres?.includes(genre));
+  }
+  if (format && FORMATS.includes(format as Format)) {
+    list = list.filter((a) => a.format === format);
+  }
+  if (status) {
+    list = list.filter((a) => a.status === status);
+  }
+
+  const sorted = [...list];
+  switch (sortBy) {
+    case "title":
+      sorted.sort((a, b) => pickTitle(a, lang).localeCompare(pickTitle(b, lang)));
+      break;
+    case "format":
+      sorted.sort(
+        (a, b) =>
+          FORMATS.indexOf(a.format as Format) - FORMATS.indexOf(b.format as Format) ||
+          (b.averageScore ?? 0) - (a.averageScore ?? 0),
+      );
+      break;
+    default:
+      break;
+  }
+  return sorted;
+}
+
 export async function generateMetadata({ params }: { params: PageProps["params"] }): Promise<Metadata> {
   const { season, year } = await params;
   const parsed = parseSeasonYear(season, year);
@@ -71,7 +108,7 @@ export async function generateMetadata({ params }: { params: PageProps["params"]
       ? `${title} — 评分、集数、剧情简介一站搞定。${dict.landing.hero.sub}`
       : `${title} -- scores, episodes, synopses in one place. ${dict.landing.hero.sub}`;
   const canonical = `/seasonal/${parsed.season}/${parsed.year}`;
-  const altSeason = parsed.season; // canonical path identical between locales
+  const altSeason = parsed.season;
   return {
     title: { absolute: title },
     description,
@@ -112,19 +149,35 @@ const headingStyle: CSSProperties = {
   fontFamily: "'Sora', sans-serif",
 };
 
-export default async function SeasonalPage({ params }: PageProps) {
+const gridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const emptyStyle: CSSProperties = {
+  textAlign: "center",
+  padding: "60px 0",
+  color: "rgba(235,235,245,0.30)",
+  fontFamily: "'Sora', sans-serif",
+};
+
+export default async function SeasonalPage({ params, searchParams }: PageProps) {
   const { season, year } = await params;
   const parsed = parseSeasonYear(season, year);
   if (!parsed) notFound();
+
+  const sp = await searchParams;
+  const genre = getString(sp.genre);
+  const format = getString(sp.format);
+  const status = getString(sp.status);
+  const sortBy = getString(sp.sort) || "score";
+  const visibleCount = Math.max(INITIAL_COUNT, Number(getString(sp.show)) || INITIAL_COUNT);
 
   const apiSeason = parsed.season.toUpperCase();
   const [dict, lang, items] = await Promise.all([
     getDict(),
     getLang(),
-    // Fetch the full season once on the server, hand off to the client
-    // <SeasonalFilters> for filter/sort/show-more. Page=1 + perPage=200
-    // is enough to cover every real season (currently caps in the 90s
-    // for any given quarter — see verify.md in the plan).
     apiGetPaged<SeasonalAnime>(
       `/api/anime/seasonal?season=${apiSeason}&year=${parsed.year}&page=1&perPage=${SEASONAL_PAGE_SIZE}`,
       { revalidate: 300 },
@@ -134,6 +187,10 @@ export default async function SeasonalPage({ params }: PageProps) {
   ]);
 
   const heading = headingFor(parsed.season, parsed.year, lang);
+  const filtered = applyFilters(items, genre, format, status, sortBy, lang);
+  const displayed = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+  const emptyLabel = lang === "zh" ? "暂无番剧" : "No anime found";
 
   return (
     <main className="container" style={containerStyle}>
@@ -141,7 +198,25 @@ export default async function SeasonalPage({ params }: PageProps) {
 
       <SeasonNav season={parsed.season} year={parsed.year} dict={dict} lang={lang} />
 
-      <SeasonalFilters items={items} lang={lang} />
+      <Suspense>
+        <SeasonalFilterChips lang={lang} filteredCount={filtered.length} />
+      </Suspense>
+
+      {displayed.length === 0 ? (
+        <div style={emptyStyle}>{emptyLabel}</div>
+      ) : (
+        <div style={gridStyle}>
+          {displayed.map((a, i) => (
+            <AnimeCard key={a.anilistId} anime={a} lang={lang} prefetch={false} priority={i === 0} />
+          ))}
+        </div>
+      )}
+
+      {hasMore && (
+        <Suspense>
+          <SeasonalShowMore lang={lang} currentCount={visibleCount} step={LOAD_MORE} />
+        </Suspense>
+      )}
     </main>
   );
 }

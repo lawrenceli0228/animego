@@ -134,7 +134,8 @@ export default function Navbar({
 }: NavbarProps) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [langPending, startLangTransition] = useTransition();
+  const [logoutPending, startLogoutTransition] = useTransition();
 
   // Season link points at the live /seasonal route (legacy /season has
   // no params; next-app uses /seasonal/[season]/[year]).
@@ -152,7 +153,7 @@ export default function Navbar({
     // router.refresh re-runs the layout server fetch so the Navbar
     // re-renders with user=null and the route-level proxy.ts gates
     // catch the now-missing session cookie.
-    startTransition(() => router.refresh());
+    startLogoutTransition(() => router.refresh());
   }
 
   const links: Array<{ href: string; label: string; key: string }> = [
@@ -167,7 +168,7 @@ export default function Navbar({
     const next = lang === "zh" ? "en" : "zh";
     // 1y expiry, same-site, root path so all routes see the switch.
     document.cookie = `lang=${next}; max-age=${60 * 60 * 24 * 365}; path=/; samesite=lax`;
-    startTransition(() => router.refresh());
+    startLangTransition(() => router.refresh());
   }
 
   return (
@@ -194,7 +195,7 @@ export default function Navbar({
             type="button"
             style={s.langBtn}
             onClick={toggleLang}
-            disabled={pending}
+            disabled={langPending}
             aria-label={lang === "zh" ? "Switch to English" : "切换到中文"}
           >
             {lang === "zh" ? "EN" : "中"}
@@ -226,7 +227,7 @@ export default function Navbar({
               <button
                 type="button"
                 onClick={handleLogout}
-                disabled={pending}
+                disabled={logoutPending}
                 style={s.btnOutline}
               >
                 {dict.nav.logout}

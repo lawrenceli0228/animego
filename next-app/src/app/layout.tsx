@@ -1,14 +1,37 @@
 import type { Metadata, Viewport } from "next";
+import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
+import { Toaster } from "react-hot-toast";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { getDict, getLang } from "@/lib/i18n";
 import { apiGet, ApiError } from "@/lib/api";
 import "./globals.css";
 
-// SSR-side auth probe. `apiGet` (lib/api.ts) forwards the browser's
-// session cookie via buildHeaders, so this request reaches Express
-// /api/auth/me authenticated whenever the user has a valid session.
-// 401 / network failure → fall back to anonymous Navbar.
+const sora = Sora({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-display",
+  display: "swap",
+  preload: true,
+});
+
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600"],
+  style: ["normal", "italic"],
+  variable: "--font-sans",
+  display: "swap",
+  preload: true,
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-mono",
+  display: "swap",
+  preload: false,
+});
+
 interface NavUser {
   username: string;
   role?: string | null;
@@ -25,12 +48,6 @@ async function fetchCurrentUser(): Promise<NavUser | null> {
   }
 }
 
-// Root-level defaults applied to every route segment unless a child page
-// overrides them. Per Next 16, `viewport` and `themeColor` MUST be exported
-// from a separate `viewport` object (split from `metadata` in Next 14+).
-//
-// `metadataBase` lets child segments use relative paths in openGraph.images
-// and alternates.canonical -- the production domain is animegoclub.com.
 export const metadata: Metadata = {
   metadataBase: new URL("https://animegoclub.com"),
   title: {
@@ -75,8 +92,6 @@ export const metadata: Metadata = {
   },
 };
 
-// Next 16: themeColor and colorScheme moved out of `metadata` into `viewport`.
-// Project ships a dark theme by default, so we pin both here.
 export const viewport: Viewport = {
   themeColor: "#000000",
   colorScheme: "dark",
@@ -106,7 +121,10 @@ export default async function RootLayout({
   const year = new Date().getFullYear();
 
   return (
-    <html lang={lang === "en" ? "en" : "zh-CN"}>
+    <html
+      lang={lang === "en" ? "en" : "zh-CN"}
+      className={`${sora.variable} ${dmSans.variable} ${jetbrainsMono.variable}`}
+    >
       <body
         style={{
           minHeight: "100vh",
@@ -120,6 +138,17 @@ export default async function RootLayout({
           season={season}
           year={year}
           user={user}
+        />
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            duration: 3500,
+            style: {
+              background: "#141414",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.08)",
+            },
+          }}
         />
         <div style={{ flex: 1 }}>{children}</div>
         <Footer dict={dict} season={season} year={year} />

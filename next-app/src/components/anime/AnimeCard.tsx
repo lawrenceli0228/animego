@@ -37,6 +37,8 @@ interface AnimeCardProps {
    * stampede the Go API).
    */
   prefetch?: boolean;
+  /** Set true for the first above-the-fold card — disables lazy load and sets fetchpriority=high. */
+  priority?: boolean;
 }
 
 function scoreColor(s: number): string {
@@ -169,6 +171,7 @@ export default function AnimeCard({
   rank,
   watcherCount,
   prefetch = false,
+  priority = false,
 }: AnimeCardProps) {
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const href = `/anime/${anime.anilistId}`;
@@ -201,8 +204,9 @@ export default function AnimeCard({
         <img
           src={anime.coverImageUrl}
           alt={title}
-          loading="lazy"
-          decoding="async"
+          loading={priority ? "eager" : "lazy"}
+          fetchPriority={priority ? "high" : "low"}
+          decoding={priority ? "sync" : "async"}
           width={230}
           height={320}
           style={imgStyle}

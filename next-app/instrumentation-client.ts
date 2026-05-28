@@ -15,12 +15,23 @@ import * as Sentry from "@sentry/nextjs";
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
   tracesSampleRate: 0.1,
-  // Session replay: zero baseline cost (no sampling of healthy sessions),
-  // 100% capture once an error fires. Keeps the replay quota focused on
-  // actionable failures instead of background noise.
-  replaysSessionSampleRate: 0,
-  replaysOnErrorSampleRate: 1.0,
   debug: false,
+  // Replay intentionally omitted from init. The full replay SDK (~500 kB
+  // gzipped) is loaded lazily on first error so it does not bloat the
+  // landing-page bundle. replaysSessionSampleRate stays 0 (no background
+  // recording); on-error capture is wired below via beforeSend.
+  beforeSend(event) {
+    if (event.level === "error" || event.level === "fatal") {
+      Sentry.lazyLoadIntegration("replayIntegration")
+        .then((ReplayIntegration) => {
+          Sentry.addIntegration(
+            ReplayIntegration({ maskAllText: false, blockAllMedia: false }),
+          );
+        })
+        .catch(() => {});
+    }
+    return event;
+  },
 });
 
 // Required by @sentry/nextjs for App Router navigation spans -- without
