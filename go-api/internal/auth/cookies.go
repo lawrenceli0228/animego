@@ -77,3 +77,50 @@ func ClearRefreshCookie(w http.ResponseWriter, isProd bool) {
 		Expires:  time.Unix(0, 0),
 	})
 }
+
+// sessionCookieName matches Express's P8.1 `session` cookie that
+// next-app/src/proxy.ts and RSC layouts read to verify the user.
+const sessionCookieName = "session"
+
+// sessionCookiePath is site-wide (empty = "/") so next-app's SSR
+// requests to any path carry the cookie.
+const sessionCookiePath = "/"
+
+// SetSessionCookie writes the short-lived `session` cookie carrying the
+// accessToken.  Mirrors Express auth.controller.js setSessionCookie
+// (P8.1).  next-app/src/proxy.ts reads this cookie to gate /admin,
+// /library, /player; RSC layouts read it for fetchCurrentUser.
+func SetSessionCookie(w http.ResponseWriter, accessToken string, ttl time.Duration, isProd bool) {
+	sameSite := http.SameSiteStrictMode
+	if isProd {
+		sameSite = http.SameSiteNoneMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    accessToken,
+		Path:     sessionCookiePath,
+		HttpOnly: true,
+		Secure:   isProd,
+		SameSite: sameSite,
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  time.Now().Add(ttl),
+	})
+}
+
+// ClearSessionCookie expires the session cookie on logout.
+func ClearSessionCookie(w http.ResponseWriter, isProd bool) {
+	sameSite := http.SameSiteStrictMode
+	if isProd {
+		sameSite = http.SameSiteNoneMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     sessionCookiePath,
+		HttpOnly: true,
+		Secure:   isProd,
+		SameSite: sameSite,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+}

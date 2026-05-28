@@ -45,9 +45,13 @@ import (
 // gives normal callers ~10x headroom over what the SPA produces in
 // active use (typical anime listing page: ~6 API calls/second on cold
 // hit, then ~1 / 10s ambient).
+//
+// DefaultAPIRate and DefaultAPIBurst are exported so main.go can read
+// them when constructing the limiter with an env-driven burst override.
 const (
-	defaultAPIRate  = 1.0 / 3.0 // 1 token per 3 seconds (sustained)
-	defaultAPIBurst = 20        // burst size (rate.Limiter standard)
+	DefaultAPIRate  = rate.Limit(1.0 / 3.0) // 1 token per 3 seconds (sustained)
+	DefaultAPIBurst = 20                     // burst size (rate.Limiter standard)
+
 	defaultAPISweepInterval = 5 * time.Minute
 	defaultAPIIPMaxIdle     = 30 * time.Minute
 )
@@ -77,10 +81,17 @@ type ipLimiter struct {
 // NewAPIRateLimiter constructs the store with the Express-parity
 // 300/15min defaults.  Caller must defer Stop() to halt the sweeper.
 func NewAPIRateLimiter() *apiLimiterStore {
+	return NewAPIRateLimiterWithBurst(DefaultAPIRate, DefaultAPIBurst)
+}
+
+// NewAPIRateLimiterWithBurst constructs the store with explicit token-bucket
+// parameters.  Exported so main.go can wire env-driven overrides for CI.
+// Pass rate=0 or burst=0 to disable limiting (all requests pass through).
+func NewAPIRateLimiterWithBurst(r rate.Limit, burst int) *apiLimiterStore {
 	s := &apiLimiterStore{
 		limiters:      make(map[netip.Addr]*ipLimiter),
-		rateLimit:     rate.Limit(defaultAPIRate),
-		burst:         defaultAPIBurst,
+		rateLimit:     r,
+		burst:         burst,
 		sweepInterval: defaultAPISweepInterval,
 		ipMaxIdle:     defaultAPIIPMaxIdle,
 		stopCh:        make(chan struct{}),
@@ -106,6 +117,11 @@ func NewAPIRateLimiter() *apiLimiterStore {
 func (s *apiLimiterStore) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Disabled limiter (burst=0) passes all requests through.
+			if s.burst <= 0 {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if !shouldLimitPath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return

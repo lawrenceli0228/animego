@@ -133,6 +133,7 @@ type Handlers struct {
 	signer       *jwtx.Signer
 	email        email.Sender
 	isProd       bool
+	accessTTL    time.Duration
 	refreshTTL   time.Duration
 	clientOrigin string
 	validator    *validator.Validate
@@ -149,7 +150,7 @@ type Handlers struct {
 // clientOrigin is the front-end origin used to assemble the reset URL
 // (e.g. "https://animego.app").  Trailing slash is stripped before use
 // so we never emit a double-slash URL.
-func NewHandlers(db AuthDB, signer *jwtx.Signer, emailSender email.Sender, clientOrigin string, refreshTTL time.Duration, isProd bool) *Handlers {
+func NewHandlers(db AuthDB, signer *jwtx.Signer, emailSender email.Sender, clientOrigin string, accessTTL, refreshTTL time.Duration, isProd bool) *Handlers {
 	if emailSender == nil {
 		emailSender = email.NoopSender{}
 	}
@@ -158,6 +159,7 @@ func NewHandlers(db AuthDB, signer *jwtx.Signer, emailSender email.Sender, clien
 		signer:       signer,
 		email:        emailSender,
 		isProd:       isProd,
+		accessTTL:    accessTTL,
 		refreshTTL:   refreshTTL,
 		clientOrigin: clientOrigin,
 		validator:    validator.New(validator.WithRequiredStructEnabled()),
@@ -237,6 +239,7 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
+	SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
 	httpx.Data(w, http.StatusCreated, AuthData{AccessToken: accessToken, User: ToSafeUser(user)})
 }
 
@@ -293,6 +296,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
+	SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
 	httpx.Data(w, http.StatusOK, AuthData{AccessToken: accessToken, User: ToSafeUser(user)})
 }
 
@@ -350,6 +354,7 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
+	SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
 	httpx.Data(w, http.StatusOK, RefreshData{AccessToken: accessToken})
 }
 
@@ -383,6 +388,7 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ClearRefreshCookie(w, h.isProd)
+	ClearSessionCookie(w, h.isProd)
 	httpx.Data(w, http.StatusOK, MessageData{Message: msgLoggedOut})
 }
 

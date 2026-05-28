@@ -38,6 +38,11 @@ import (
 // set the same name when issuing the cookie on login/refresh.
 const AccessTokenCookieName = "accessToken"
 
+// SessionCookieName is the P8.1 Express-compatible name that next-app
+// SSR requests carry.  The middleware accepts both names so RSC fetches
+// (which forward the browser cookie jar) authenticate correctly.
+const SessionCookieName = "session"
+
 // envelope helpers — exported codes / messages so tests + the auth
 // controller can reference the same constants.  Kept verbatim to match
 // server/middleware/auth.middleware.js error envelopes.
@@ -122,6 +127,13 @@ func extractToken(r *http.Request) (string, bool) {
 
 	// 2. Cookie: accessToken=<token>
 	if c, err := r.Cookie(AccessTokenCookieName); err == nil && c.Value != "" {
+		return c.Value, true
+	}
+
+	// 3. Cookie: session=<token> — P8.1 Express-compatible name forwarded
+	// by next-app SSR requests (the browser cookie jar carries `session`
+	// which apiGet / cookies() pass through verbatim).
+	if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {
 		return c.Value, true
 	}
 

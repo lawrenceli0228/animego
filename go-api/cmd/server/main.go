@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -257,8 +258,14 @@ func main() {
 		slog.Warn("email: Gmail SMTP not configured, password-reset emails will be skipped")
 	}
 
-	authHandlers := auth.NewHandlers(q, signer, emailSender, cfg.ClientOrigin, cfg.JWTRefreshExpiresIn, isProd)
-	authRateLimit := auth.NewRateLimiter(10, 15*time.Minute)
+	authHandlers := auth.NewHandlers(q, signer, emailSender, cfg.ClientOrigin, cfg.JWTExpiresIn, cfg.JWTRefreshExpiresIn, isProd)
+	authRateLimitMax := 10
+	if v := os.Getenv("AUTH_RATELIMIT_MAX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			authRateLimitMax = n
+		}
+	}
+	authRateLimit := auth.NewRateLimiter(authRateLimitMax, 15*time.Minute)
 	defer authRateLimit.Stop()
 
 	// Admin handler bundles — P2.3.
@@ -355,7 +362,14 @@ func main() {
 	// /admin/comments/etc unmetered.  This middleware skips itself for
 	// /health + /api/health (see shouldLimitPath in api_ratelimit.go)
 	// so LB probes are never throttled.
-	apiRateLimit := httpmw.NewAPIRateLimiter()
+	// API_RATELIMIT_BURST=0 disables the limiter (used in CI/e2e).
+	apiRateLimitBurst := httpmw.DefaultAPIBurst
+	if v := os.Getenv("API_RATELIMIT_BURST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			apiRateLimitBurst = n
+		}
+	}
+	apiRateLimit := httpmw.NewAPIRateLimiterWithBurst(httpmw.DefaultAPIRate, apiRateLimitBurst)
 	defer apiRateLimit.Stop()
 
 	r := chi.NewRouter()

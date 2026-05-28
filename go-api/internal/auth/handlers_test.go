@@ -249,7 +249,7 @@ func TestRegister_HappyPath_201(t *testing.T) {
 			return out, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"new@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
@@ -281,7 +281,7 @@ func TestRegister_HappyPath_201(t *testing.T) {
 func TestRegister_InvalidUsernameShort_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"ab","email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -293,7 +293,7 @@ func TestRegister_InvalidUsernameShort_400(t *testing.T) {
 func TestRegister_InvalidEmail_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"not-an-email","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -305,7 +305,7 @@ func TestRegister_InvalidEmail_400(t *testing.T) {
 func TestRegister_PasswordTooShort_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"x@example.com","password":"12345"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -326,7 +326,7 @@ func TestRegister_DuplicateEmail_400(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"taken@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -347,7 +347,7 @@ func TestRegister_DuplicateUsername_400(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"new@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -359,7 +359,7 @@ func TestRegister_DuplicateUsername_400(t *testing.T) {
 func TestRegister_BadJSON_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{not-json`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -383,7 +383,7 @@ func TestLogin_HappyPath_200(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"email":"lawrence@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
@@ -414,7 +414,7 @@ func TestLogin_BadEmail_401(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"email":"ghost@example.com","password":"whatever"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
@@ -433,7 +433,7 @@ func TestLogin_BadPassword_401(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"email":"lawrence@example.com","password":"wrong-pony"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
@@ -447,7 +447,7 @@ func TestLogin_BadPassword_401(t *testing.T) {
 func TestLogin_MissingPassword_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"email":"lawrence@example.com","password":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
 	rec := httptest.NewRecorder()
@@ -463,7 +463,7 @@ func TestLogin_MissingPassword_400(t *testing.T) {
 func TestRefresh_NoCookie_401_NoToken(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	rec := httptest.NewRecorder()
 	h.Refresh(rec, req)
@@ -474,7 +474,7 @@ func TestRefresh_NoCookie_401_NoToken(t *testing.T) {
 func TestRefresh_BadToken_401_InvalidToken(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
 	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: "not-a-jwt"})
 	rec := httptest.NewRecorder()
@@ -588,7 +588,7 @@ func TestLogout_ClearsDBAndCookie(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req = req.WithContext(injectClaims(req.Context(), user.ID, user.Username, user.Role))
@@ -637,7 +637,7 @@ func TestMe_HappyPath(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req = req.WithContext(injectClaims(req.Context(), user.ID, user.Username, user.Role))
@@ -666,7 +666,7 @@ func TestMe_UserDeleted_404(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req = req.WithContext(injectClaims(req.Context(), user.ID, user.Username, user.Role))
@@ -679,7 +679,7 @@ func TestMe_UserDeleted_404(t *testing.T) {
 func TestMe_NoClaims_500(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	rec := httptest.NewRecorder()
 	h.Me(rec, req)
@@ -836,7 +836,7 @@ func TestRegister_RaceUniqueViolation_400(t *testing.T) {
 			return dbgen.User{}, &pgconnPgError{Code: "23505"}
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -859,7 +859,7 @@ func TestRegister_CreateUserGenericError_500(t *testing.T) {
 			return dbgen.User{}, errors.New("connection refused")
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -881,7 +881,7 @@ func TestRegister_DuplicateCheckDBError_500(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"username":"lawrence","email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	rec := httptest.NewRecorder()
@@ -900,7 +900,7 @@ func TestLogin_DBError_500(t *testing.T) {
 			return dbgen.User{}, errors.New("db down")
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{"email":"x@example.com","password":"correct-horse"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
 	rec := httptest.NewRecorder()
@@ -914,7 +914,7 @@ func TestLogin_DBError_500(t *testing.T) {
 func TestLogin_BadJSON_400(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	body := bytes.NewBufferString(`{ malformed`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
 	rec := httptest.NewRecorder()
@@ -952,7 +952,7 @@ func TestRefresh_UserNotFound_401(t *testing.T) {
 func TestLogout_NoClaims_500(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(&fakeAuthDB{}, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	rec := httptest.NewRecorder()
 	h.Logout(rec, req)
@@ -1357,7 +1357,7 @@ func TestForgotPassword_NilEmailSender_FallsBackToNoop(t *testing.T) {
 	}
 	// nil sender — NewHandlers must substitute NoopSender (otherwise
 	// the SendPasswordReset call would nil-panic).
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"email":"lawrence@example.com"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", body)
@@ -1408,7 +1408,7 @@ func TestResetPassword_HappyPath_200(t *testing.T) {
 			return user, nil
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
@@ -1448,7 +1448,7 @@ func TestResetPassword_TokenNotFound_400(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/bad-token", body)
@@ -1468,7 +1468,7 @@ func TestResetPassword_PasswordTooShort_400(t *testing.T) {
 	// short-circuit on validation BEFORE the DB lookup.  If the test
 	// hits the panic, the validation order regressed.
 	db := &fakeAuthDB{}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"password":"12345"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
@@ -1482,7 +1482,7 @@ func TestResetPassword_PasswordEmpty_400(t *testing.T) {
 	t.Parallel()
 
 	db := &fakeAuthDB{}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"password":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
@@ -1499,7 +1499,7 @@ func TestResetPassword_EmptyTokenPath_400(t *testing.T) {
 	// the handler should treat as invalid-token without ever touching
 	// the DB.
 	db := &fakeAuthDB{}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/", body)
@@ -1521,7 +1521,7 @@ func TestResetPassword_ExpiredToken_StillReturns400(t *testing.T) {
 			return dbgen.User{}, pgx.ErrNoRows
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/expired-token", body)
@@ -1539,7 +1539,7 @@ func TestResetPassword_DBLookupError_500(t *testing.T) {
 			return dbgen.User{}, errors.New("db down")
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
@@ -1563,7 +1563,7 @@ func TestResetPassword_ResetWriteError_500(t *testing.T) {
 			return errors.New("write failed")
 		},
 	}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{"password":"newPassword123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
@@ -1579,7 +1579,7 @@ func TestResetPassword_BadJSON_400(t *testing.T) {
 	t.Parallel()
 
 	db := &fakeAuthDB{}
-	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 7*24*time.Hour, false)
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
 
 	body := bytes.NewBufferString(`{not-json`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password/sometoken", body)
