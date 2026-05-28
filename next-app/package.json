@@ -6,7 +6,7 @@
     "dev": "next dev",
     "prebuild": "bun run build:jassub",
     "build": "next build --webpack",
-    "build:jassub": "bunx esbuild node_modules/jassub/dist/worker/worker.js --bundle --format=esm --target=es2022 --outfile=public/jassub/worker/worker.bundle.js",
+    "build:jassub": "bunx esbuild node_modules/jassub/dist/worker/worker.js --bundle --format=esm --target=es2022 --outfile=public/jassub/wasm/worker.bundle.js",
     "start": "next start",
     "lint": "eslint"
   },

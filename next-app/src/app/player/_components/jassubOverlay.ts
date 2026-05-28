@@ -47,7 +47,12 @@ const defaultFontUrl = `${ASSET_BASE}/default.woff2`;
 // `bun run build:jassub` produces worker.bundle.js with all bare
 // specifiers resolved + transitive deps inlined. Self-contained,
 // decoupled from any bundler's worker handling.
-const workerUrl = `${ASSET_BASE}/worker/worker.bundle.js`;
+// Bundle lives in /jassub/wasm/ (next to jassub-worker.js). Emscripten
+// pthread spawn uses `new URL("jassub-worker.js", import.meta.url)`
+// which resolves relative to the bundle's own URL — so the bundle
+// must sit in the same directory as jassub-worker.js, or pthread
+// spawn 404s and the WASM init hangs forever.
+const workerUrl = `${ASSET_BASE}/wasm/worker.bundle.js`;
 
 let JASSUB = null;
 let loadPromise = null;
