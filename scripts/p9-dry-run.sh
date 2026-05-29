@@ -23,6 +23,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# --- compose files -----------------------------------------------------
+# Step 5 runs `go run migrate-mongo` on the HOST against localhost:27017 /
+# localhost:5432. The base docker-compose.yml deliberately does NOT publish
+# mongo/postgres ports (prod safety); docker-compose.ci.yml does. So a local
+# dry-run MUST layer in the ci overlay or the migrate step can't connect.
+# COMPOSE_FILE makes every `docker compose` call in this script use both.
+# Absolute paths so it holds regardless of CWD (the script cd's around).
+export COMPOSE_FILE="${COMPOSE_FILE:-$REPO_ROOT/docker-compose.yml:$REPO_ROOT/docker-compose.ci.yml}"
+
 # --- log file ----------------------------------------------------------
 TS="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="/tmp/p9-dry-run-${TS}.log"
@@ -101,13 +110,18 @@ run() {
 # --- timer helper -----------------------------------------------------
 time_step() {
     local label="$1"; shift
-    local start end elapsed
+    local start end elapsed rc
     start="$(date +%s)"
-    "$@"
+    # Preserve the wrapped command's exit code. Without this, a failing
+    # step (e.g. smoke returning 1) was masked because the function's
+    # last command (printf) returned 0, so the caller's `|| RC=$?` never
+    # fired and the gate falsely reported PASS.
+    "$@" && rc=0 || rc=$?
     end="$(date +%s)"
     elapsed=$((end - start))
     ok "$label finished in ${elapsed}s"
     printf "%s\t%ds\n" "$label" "$elapsed" >> "/tmp/p9-dry-run-timing-${TS}.txt"
+    return "$rc"
 }
 
 # ======================================================================
@@ -214,7 +228,11 @@ MIGRATE_CMD=(
         --dry-run
         --log-failed="$MIGRATE_FAILURES"
 )
-info "\$ ${MIGRATE_CMD[*]}"
+# Mask POSTGRES_PASSWORD in the echoed command so it never lands in the
+# tee'd log or CI output. The migrator's own structured log already masks
+# it (pg_uri shows ***); only this command-echo leaked the cleartext.
+MIGRATE_DISPLAY="${MIGRATE_CMD[*]}"
+info "\$ ${MIGRATE_DISPLAY//$PG_PASS/***}"
 time_step "migrate" "${MIGRATE_CMD[@]}"
 cd "$REPO_ROOT"
 
