@@ -149,12 +149,6 @@ const headingStyle: CSSProperties = {
   fontFamily: "'Sora', sans-serif",
 };
 
-const gridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-  gap: 12,
-};
-
 const emptyStyle: CSSProperties = {
   textAlign: "center",
   padding: "60px 0",
@@ -205,7 +199,7 @@ export default async function SeasonalPage({ params, searchParams }: PageProps) 
       {displayed.length === 0 ? (
         <div style={emptyStyle}>{emptyLabel}</div>
       ) : (
-        <div style={gridStyle}>
+        <div className="anime-grid-5col">
           {displayed.map((a, i) => (
             <AnimeCard key={a.anilistId} anime={a} lang={lang} prefetch={false} priority={i === 0} />
           ))}

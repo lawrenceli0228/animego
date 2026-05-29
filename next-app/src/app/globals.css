@@ -123,3 +123,40 @@ h4 {
   border-color: var(--poster-accent) !important;
   color: var(--poster-accent) !important;
 }
+
+/* Anime card grid — matches legacy AnimeGrid.jsx exactly: a fixed
+ * 5-column desktop grid stepping down to 3 (≤900px) then 2 (≤600px).
+ * The next-app port had used `auto-fill minmax(180px)`, which packed
+ * 7-8 small cards per row on wide screens; the legacy 5-col grid gives
+ * the larger cards the old site used. gap + fade-in match the legacy. */
+.anime-grid-5col {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  animation: animeGridFadeUp 0.4s ease both;
+}
+@media (max-width: 900px) {
+  .anime-grid-5col {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .anime-grid-5col {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@keyframes animeGridFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anime-grid-5col {
+    animation: none;
+  }
+}
