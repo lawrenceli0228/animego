@@ -58,10 +58,11 @@ services:
     restart: unless-stopped
     env_file: .env.production
     environment:
-      # RSC server-side fetch base. Points at the Express container by
-      # service name (Docker DNS resolves it). When Go API ships to
-      # prod (P8.5), flip this to http://go-api:8080.
-      GO_API_INTERNAL_URL: http://app:5001
+      # RSC server-side fetch base. Points at the Go API container by
+      # service name (Docker DNS resolves it). P9 cutover flipped this
+      # from http://app:5001 (legacy Express) to http://go-api:8080 so
+      # RSC pages render off the Go stack.
+      GO_API_INTERNAL_URL: http://go-api:8080
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
