@@ -43,9 +43,11 @@ type fakeBangumiV2 struct {
 
 	subjectFn    func(ctx context.Context, bgmID int) (*bangumi.Subject, error)
 	charactersFn func(ctx context.Context, bgmID int) ([]bangumi.Character, error)
+	episodesFn   func(ctx context.Context, bgmID int) (*bangumi.EpisodesResponse, error)
 
 	subjectCalls    int
 	charactersCalls int
+	episodesCalls   int
 	lastSubjectID   int
 	lastCharsID     int
 }
@@ -74,6 +76,19 @@ func (f *fakeBangumiV2) Characters(ctx context.Context, bgmID int) ([]bangumi.Ch
 	return fn(ctx, bgmID)
 }
 
+func (f *fakeBangumiV2) Episodes(ctx context.Context, bgmID int) (*bangumi.EpisodesResponse, error) {
+	f.mu.Lock()
+	f.episodesCalls++
+	fn := f.episodesFn
+	f.mu.Unlock()
+	if fn == nil {
+		// Default: no episodes → worker writes nothing, existing tests
+		// that don't exercise episode titles stay unaffected.
+		return &bangumi.EpisodesResponse{}, nil
+	}
+	return fn(ctx, bgmID)
+}
+
 // v2UpdateCall snapshots one UpdateBangumiV2 invocation.
 type v2UpdateCall struct {
 	anilistID    int32
@@ -91,6 +106,14 @@ type v2CharCall struct {
 	voiceActorImageURL *string
 }
 
+// v2EpTitleCall snapshots one UpsertEpisodeTitle invocation.
+type v2EpTitleCall struct {
+	animeID int32
+	episode int32
+	nameCN  *string
+	name    *string
+}
+
 // fakeV2DB is a programmable V2DB.  Hooks let each test inject an
 // error for the retry/non-retry paths; call snapshots let assertions
 // inspect what got written without smuggling globals.
@@ -99,9 +122,11 @@ type fakeV2DB struct {
 
 	updateV2Fn   func(ctx context.Context, c v2UpdateCall) error
 	updateCharFn func(ctx context.Context, c v2CharCall) error
+	upsertEpFn   func(ctx context.Context, c v2EpTitleCall) error
 
 	updateV2Calls   []v2UpdateCall
 	updateCharCalls []v2CharCall
+	upsertEpCalls   []v2EpTitleCall
 }
 
 func (f *fakeV2DB) UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error {
@@ -137,6 +162,26 @@ func (f *fakeV2DB) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, na
 		return nil
 	}
 	return fn(ctx, call)
+}
+
+func (f *fakeV2DB) UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCN *string, name *string) error {
+	call := v2EpTitleCall{animeID: animeID, episode: episode, nameCN: nameCN, name: name}
+	f.mu.Lock()
+	f.upsertEpCalls = append(f.upsertEpCalls, call)
+	fn := f.upsertEpFn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, call)
+}
+
+func (f *fakeV2DB) snapshotEpTitleCalls() []v2EpTitleCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]v2EpTitleCall, len(f.upsertEpCalls))
+	copy(dup, f.upsertEpCalls)
+	return dup
 }
 
 func (f *fakeV2DB) snapshotV2Calls() []v2UpdateCall {
@@ -763,3 +808,81 @@ var _ V2DB = (dbgen.Querier)(nil)
 
 // *bangumi.Client must satisfy BangumiV2Client.
 var _ BangumiV2Client = (*bangumi.Client)(nil)
+
+// ---------------------------------------------------------------------------
+// Episode titles (Express Phase-4 parity)
+// ---------------------------------------------------------------------------
+
+func TestNormalizeEpisodeTitles_FiltersAndNulls(t *testing.T) {
+	got := normalizeEpisodeTitles([]bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "Asteroid Blues", NameCN: "小行星浪人"},
+		{Sort: 2, Type: 0, Name: "Stray Dog Strut", NameCN: ""}, // empty CN → nil
+		{Sort: 0, Type: 0, Name: "drop: sort 0"},                 // sort<=0 dropped
+		{Sort: 1, Type: 1, Name: "drop: SP"},                     // type!=0 dropped
+	})
+	if len(got) != 2 {
+		t.Fatalf("want 2 main episodes, got %d: %+v", len(got), got)
+	}
+	if got[0].episode != 1 || got[0].name == nil || *got[0].name != "Asteroid Blues" ||
+		got[0].nameCN == nil || *got[0].nameCN != "小行星浪人" {
+		t.Fatalf("ep1 wrong: %+v", got[0])
+	}
+	if got[1].episode != 2 || got[1].nameCN != nil {
+		t.Fatalf("ep2 wrong (empty NameCN should be nil): %+v", got[1])
+	}
+}
+
+func TestNormalizeEpisodeTitles_SequelOffset(t *testing.T) {
+	// A sequel whose eps start at sort 29 (S1 had 28) maps to 1..N.
+	got := normalizeEpisodeTitles([]bangumi.Episode{
+		{Sort: 30, Type: 0, Name: "S2E2"},
+		{Sort: 29, Type: 0, Name: "S2E1"}, // out of order on purpose
+	})
+	if len(got) != 2 || got[0].episode != 1 || got[1].episode != 2 {
+		t.Fatalf("sequel offset not normalized to 1-based: %+v", got)
+	}
+}
+
+func TestBangumiV2_WritesEpisodeTitles(t *testing.T) {
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			return makeSubject(id, "中文名", 80, 100), nil
+		},
+		episodesFn: func(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
+			return &bangumi.EpisodesResponse{Eps: []bangumi.Episode{
+				{Sort: 1, Type: 0, Name: "E1", NameCN: "第一集"},
+				{Sort: 2, Type: 0, Name: "E2", NameCN: "第二集"},
+			}}, nil
+		},
+	}
+	d := &fakeV2DB{}
+	if err := runV2(t, b, d, 100, 555); err != nil {
+		t.Fatalf("Work: %v", err)
+	}
+	eps := d.snapshotEpTitleCalls()
+	if len(eps) != 2 {
+		t.Fatalf("want 2 episode-title writes, got %d", len(eps))
+	}
+	if eps[0].animeID != 100 || eps[0].episode != 1 ||
+		eps[0].nameCN == nil || *eps[0].nameCN != "第一集" {
+		t.Fatalf("episode write wrong: %+v", eps[0])
+	}
+}
+
+func TestBangumiV2_EpisodesNotFound_DoesNotFail(t *testing.T) {
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			return makeSubject(id, "中文名", 80, 100), nil
+		},
+		episodesFn: func(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
+			return nil, bangumi.ErrNotFound
+		},
+	}
+	d := &fakeV2DB{}
+	if err := runV2(t, b, d, 100, 555); err != nil {
+		t.Fatalf("episodes ErrNotFound must be tolerated, got: %v", err)
+	}
+	if n := len(d.snapshotEpTitleCalls()); n != 0 {
+		t.Fatalf("no episode writes expected on not-found, got %d", n)
+	}
+}

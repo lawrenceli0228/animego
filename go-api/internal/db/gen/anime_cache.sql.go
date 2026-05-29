@@ -1509,3 +1509,25 @@ func (q *Queries) UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCachePara
 	)
 	return err
 }
+
+const upsertEpisodeTitle = `-- name: UpsertEpisodeTitle :exec
+INSERT INTO anime_episode_titles (anime_id, episode, name_cn, name)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (anime_id, episode) DO UPDATE
+  SET name_cn = EXCLUDED.name_cn,
+      name    = EXCLUDED.name
+`
+
+// Written by the Bangumi V2 worker (the Phase-4 enrichment analog) after
+// fetching /subject/{bgmId}/ep.  Express set the whole episodeTitles array;
+// we upsert per episode so a re-enrich refreshes names in place. ON CONFLICT
+// overwrites so corrected Bangumi data wins on the next pass.
+func (q *Queries) UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCn *string, name *string) error {
+	_, err := q.db.Exec(ctx, upsertEpisodeTitle,
+		animeID,
+		episode,
+		nameCn,
+		name,
+	)
+	return err
+}

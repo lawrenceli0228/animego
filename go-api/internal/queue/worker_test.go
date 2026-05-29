@@ -268,6 +268,10 @@ func (noopBangumi) Characters(_ context.Context, _ int) ([]bangumi.Character, er
 	return nil, bangumi.ErrNotFound
 }
 
+func (noopBangumi) Episodes(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
+	return &bangumi.EpisodesResponse{}, nil
+}
+
 // noopV12DB satisfies V12DB (V1 + V2 + V3 read/write surface).  All
 // methods no-op; the registration tests never invoke these methods.
 type noopV12DB struct{}
@@ -289,6 +293,10 @@ func (noopV12DB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) error {
 }
 
 func (noopV12DB) UpdateAnimeCharacterCN(_ context.Context, _ int32, _ *string, _ *string, _ *string, _ *string) error {
+	return nil
+}
+
+func (noopV12DB) UpsertEpisodeTitle(_ context.Context, _ int32, _ int32, _ *string, _ *string) error {
 	return nil
 }
 

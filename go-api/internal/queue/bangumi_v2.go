@@ -44,6 +44,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"sort"
 	"time"
 
 	"github.com/riverqueue/river"
@@ -78,13 +80,22 @@ type BangumiCharactersFetcher interface {
 	Characters(ctx context.Context, bgmID int) ([]bangumi.Character, error)
 }
 
+// BangumiEpisodesFetcher is the small use-site interface for the episode
+// list fetch (/subject/{bgmId}/ep).  *bangumi.Client satisfies it. This
+// is the half that ports Express's Phase-4 episodeTitles enrichment —
+// without it go-api could never fill in per-episode names.
+type BangumiEpisodesFetcher interface {
+	Episodes(ctx context.Context, bgmID int) (*bangumi.EpisodesResponse, error)
+}
+
 // BangumiV2Client is the merged interface BangumiV2Worker needs.  We
-// keep the two halves separate above so future workers can compose
-// just the surface they need; this alias is for production wiring
-// (one client, one type) and test-time fakes that satisfy both.
+// keep the halves separate above so future workers can compose just the
+// surface they need; this alias is for production wiring (one client,
+// one type) and test-time fakes that satisfy all three.
 type BangumiV2Client interface {
 	BangumiSubjector
 	BangumiCharactersFetcher
+	BangumiEpisodesFetcher
 }
 
 // V2Writer is the sqlc subset V2Worker writes.  Two methods:
@@ -95,6 +106,7 @@ type BangumiV2Client interface {
 type V2Writer interface {
 	UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error
 	UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCN *string, voiceActorCN *string, voiceActorImageURL *string) error
+	UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCN *string, name *string) error
 }
 
 // V2DB combines the read + write surfaces this worker needs.  V2 has
@@ -157,8 +169,10 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 	var (
 		subject    *bangumi.Subject
 		characters []bangumi.Character
+		episodes   *bangumi.EpisodesResponse
 		subErr     error
 		charErr    error
+		epErr      error
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -175,6 +189,12 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		cs, err := w.bangumi.Characters(gctx, bgmID)
 		characters = cs
 		charErr = err
+		return nil
+	})
+	g.Go(func() error {
+		eps, err := w.bangumi.Episodes(gctx, bgmID)
+		episodes = eps
+		epErr = err
 		return nil
 	})
 	// errgroup.Wait won't actually error (we returned nil from both
@@ -299,6 +319,34 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 			"total", totalChars)
 	}
 
+	// 3) Episode titles — Express Phase-4 parity. Best-effort, like the
+	//    per-character writes: an episodes ErrNotFound / transport error
+	//    (or a write failure) is logged + skipped, never fails the job —
+	//    the subject + character writes already committed. Without this
+	//    block go-api had no path to fill per-episode names at all.
+	epTitlesWritten := 0
+	if epErr != nil {
+		if !errors.Is(epErr, bangumi.ErrNotFound) {
+			slog.WarnContext(ctx, "bangumi_v2 episodes fetch error",
+				"anilistId", anilistID, "bgmId", bgmID, "err", epErr)
+		}
+	} else if episodes != nil {
+		titles := normalizeEpisodeTitles(episodes.Eps)
+		epFailures := 0
+		for _, t := range titles {
+			if err := w.db.UpsertEpisodeTitle(ctx, anilistID, t.episode, t.nameCN, t.name); err != nil {
+				epFailures++
+				continue
+			}
+			epTitlesWritten++
+		}
+		if epFailures > 0 {
+			slog.WarnContext(ctx, "bangumi_v2 episode title write failures",
+				"anilistId", anilistID, "bgmId", bgmID,
+				"failures", epFailures, "total", len(titles))
+		}
+	}
+
 	// Chain V3 heal-CN when this V2 run did NOT supply a Chinese
 	// title.  Reasoning: V2's UpdateBangumiV2 uses SQL COALESCE on
 	// title_chinese, so passing nil here means the column is either
@@ -333,6 +381,56 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		"bgmId", bgmID,
 		"hasScore", bangumiScore != nil,
 		"hasChinese", titleChinese != nil,
-		"chars", totalChars-charFailures)
+		"chars", totalChars-charFailures,
+		"epTitles", epTitlesWritten)
 	return nil
+}
+
+// epTitle is a normalized episode-title row ready for UpsertEpisodeTitle.
+type epTitle struct {
+	episode int32
+	nameCN  *string
+	name    *string
+}
+
+// normalizeEpisodeTitles ports Express fetchBangumiEpisodes
+// (server/services/bangumi.service.js):
+//   - keep only main episodes (Type 0, Sort > 0) — drops SP/OP/ED/PV
+//   - sort by Sort ascending
+//   - normalize the sort offset: a sequel's eps may start at e.g. 29
+//     (S1 had 28 eps), so map the first to 1 and the rest relative to it,
+//     aligning episode numbers with AniList's 1..N
+//   - empty Bangumi strings become nil so the column stays NULL, not ""
+func normalizeEpisodeTitles(raw []bangumi.Episode) []epTitle {
+	mains := make([]bangumi.Episode, 0, len(raw))
+	for _, e := range raw {
+		if e.Type == 0 && e.Sort > 0 {
+			mains = append(mains, e)
+		}
+	}
+	if len(mains) == 0 {
+		return nil
+	}
+	sort.Slice(mains, func(i, j int) bool { return mains[i].Sort < mains[j].Sort })
+
+	offset := int(math.Floor(mains[0].Sort)) - 1
+	out := make([]epTitle, 0, len(mains))
+	for _, e := range mains {
+		ep := int32(int(math.Round(e.Sort)) - offset)
+		if ep <= 0 {
+			continue // guard the episode > 0 CHECK constraint
+		}
+		var nameCN *string
+		if e.NameCN != "" {
+			cn := e.NameCN
+			nameCN = &cn
+		}
+		var name *string
+		if e.Name != "" {
+			n := e.Name
+			name = &n
+		}
+		out = append(out, epTitle{episode: ep, nameCN: nameCN, name: name})
+	}
+	return out
 }

@@ -518,6 +518,11 @@ type Querier interface {
 	// them in a separate transaction if needed.  /search + /schedule never
 	// mutate child tables; only /:anilistId detail-fetch does.
 	UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCacheParams) error
+	// Written by the Bangumi V2 worker (the Phase-4 enrichment analog) after
+	// fetching /subject/{bgmId}/ep.  Express set the whole episodeTitles array;
+	// we upsert per episode so a re-enrich refreshes names in place. ON CONFLICT
+	// overwrites so corrected Bangumi data wins on the next pass.
+	UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCn *string, name *string) error
 	// ==================== Follow CRUD ====================
 	// POST /api/users/:username/follow.  ON CONFLICT DO NOTHING — re-follow
 	// is idempotent (Express used findOneAndUpdate with upsert; same effect).

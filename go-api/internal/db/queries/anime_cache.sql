@@ -549,3 +549,14 @@ SELECT episode, name, name_cn
 FROM anime_episode_titles
 WHERE anime_id = $1
 ORDER BY episode;
+
+-- name: UpsertEpisodeTitle :exec
+-- Written by the Bangumi V2 worker (the Phase-4 enrichment analog) after
+-- fetching /subject/{bgmId}/ep.  Express set the whole episodeTitles array;
+-- we upsert per episode so a re-enrich refreshes names in place. ON CONFLICT
+-- overwrites so corrected Bangumi data wins on the next pass.
+INSERT INTO anime_episode_titles (anime_id, episode, name_cn, name)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (anime_id, episode) DO UPDATE
+  SET name_cn = EXCLUDED.name_cn,
+      name    = EXCLUDED.name;
