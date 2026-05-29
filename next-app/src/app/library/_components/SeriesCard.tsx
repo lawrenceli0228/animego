@@ -9,6 +9,7 @@ import {
   PROGRESS_FILL,
 } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
+import FadeImage from "@/components/ui/FadeImage";
 import { useLang } from "@/lib/lang-client";
 
 // Module-level guard: §5.x cinematic hover / focus styles inject once into
@@ -608,8 +609,7 @@ function SeriesCard({
 
         <div style={s.posterWrap}>
           {safePoster ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={safePoster} alt={title} style={s.poster} />
+            <FadeImage src={safePoster} alt={title} style={s.poster} />
           ) : (
             <div style={s.monogram} data-testid="monogram" aria-hidden>
               {initial}

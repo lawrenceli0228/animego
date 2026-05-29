@@ -4,6 +4,7 @@ import { useState, type CSSProperties } from "react";
 import { useReducedMotion } from "motion/react";
 import { useLang } from "@/lib/lang-client";
 import { formatScore } from "@/lib/formatters";
+import FadeImage from "@/components/ui/FadeImage";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 
@@ -450,7 +451,7 @@ function EpisodeFileList({
       {/* Anime info header */}
       <div style={s.animeInfo}>
         {anime.coverImageUrl && (
-          <img style={s.cover} src={anime.coverImageUrl} alt="" />
+          <FadeImage style={s.cover} src={anime.coverImageUrl} alt="" />
         )}
         <div style={s.info}>
           <div style={s.title}>{anime.titleNative || anime.titleRomaji}</div>

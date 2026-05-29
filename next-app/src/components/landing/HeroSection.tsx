@@ -24,6 +24,7 @@ import {
 import { motion as Motion, useReducedMotion } from "motion/react";
 import { mono } from "./shared/hud-tokens";
 import { SectionNum, CornerBrackets } from "./shared/hud";
+import FadeImage from "@/components/ui/FadeImage";
 import type { Dict } from "@/lib/i18n";
 import type { LandingPoster } from "@/lib/types";
 
@@ -434,15 +435,13 @@ function Showcase({ poster, lang, hero }: ShowcaseProps) {
       onMouseLeave={onLeave}
     >
       {poster?.coverImageUrl ? (
-        // Legacy parity: <img> with eager loading + fetchPriority.
+        // Legacy parity: eager + high-priority (single hero / LCP image).
         // Next/Image is unnecessary here (single hero, already high-priority).
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <FadeImage
           src={poster.coverImageUrl}
           alt={title}
           style={s.posterImg}
-          loading="eager"
-          fetchPriority="high"
+          priority
         />
       ) : null}
       <div style={s.posterTint(hue)} aria-hidden />

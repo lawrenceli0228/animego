@@ -13,6 +13,7 @@
 
 import { useState, useCallback, type CSSProperties } from "react";
 import { useLang } from "@/lib/lang-client";
+import FadeImage from "@/components/ui/FadeImage";
 import { ChapterBar, CornerBrackets } from "@/components/landing/shared/hud";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 
@@ -190,11 +191,10 @@ function ResultRow({ item, onSelect, t }: ResultRowProps) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <img
+      <FadeImage
         style={s.cover as CSSProperties}
         src={item.coverImageUrl || item.imageUrl || ""}
         alt=""
-        loading="lazy"
       />
       <div style={s.info as CSSProperties}>
         <div style={s.title as CSSProperties}>

@@ -18,6 +18,7 @@
 import { useState, useCallback, useEffect, type CSSProperties } from "react";
 import { motion as Motion, useReducedMotion } from "motion/react";
 import { useLang } from "@/lib/lang-client";
+import FadeImage from "@/components/ui/FadeImage";
 import { ChapterBar, CornerBrackets } from "@/components/landing/shared/hud";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 
@@ -362,11 +363,10 @@ function AnimeRow({ item, onPick }: AnimeRowProps) {
       onMouseLeave={() => setHover(false)}
     >
       {(item.coverImageUrl || item.imageUrl) && (
-        <img
+        <FadeImage
           style={s.animeCover as CSSProperties}
           src={item.coverImageUrl || item.imageUrl}
           alt=""
-          loading="lazy"
         />
       )}
       <div style={s.animeInfo as CSSProperties}>

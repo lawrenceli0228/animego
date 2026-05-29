@@ -13,6 +13,7 @@
 
 import Link from "next/link";
 import { useCallback, useState, type CSSProperties } from "react";
+import FadeImage from "@/components/ui/FadeImage";
 import { formatScore, pickTitle } from "@/lib/formatters";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { TrendingItem } from "@/lib/types";
@@ -243,12 +244,10 @@ export default function CompletedGems({
               style={cardStyle}
             >
               {item.coverImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <FadeImage
                   src={item.coverImageUrl}
                   alt={title}
                   style={coverStyle}
-                  loading="lazy"
                 />
               ) : (
                 <div style={coverStyle} aria-hidden />

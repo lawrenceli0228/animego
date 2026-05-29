@@ -15,6 +15,7 @@ import type { CSSProperties } from "react";
 import { motion as Motion, useReducedMotion } from "motion/react";
 import { mono, HUD_VIEWPORT } from "./shared/hud-tokens";
 import { SectionNum, SectionHeader, ChapterBar } from "./shared/hud";
+import FadeImage from "@/components/ui/FadeImage";
 import type { Dict } from "@/lib/i18n";
 import type { LandingPoster } from "@/lib/types";
 
@@ -281,11 +282,10 @@ export default function DanmakuInsert({ dict, poster }: DanmakuInsertProps) {
 
         <div className="danmaku-frame" style={s.frame} aria-hidden="true">
           {imgSrc ? (
-            <img
+            <FadeImage
               src={imgSrc}
               alt=""
               style={s.frameImg}
-              loading="lazy"
             />
           ) : null}
           <div style={s.frameScrim} aria-hidden />

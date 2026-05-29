@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ApiError, apiGet } from "@/lib/api";
 import { pickTitle } from "@/lib/formatters";
+import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { WatchingItem } from "@/lib/types";
 
@@ -247,12 +248,9 @@ function WatchingGrid({
           >
             <div style={cardInnerStyle}>
               {item.coverImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <FadeImage
                   src={item.coverImageUrl}
                   alt={pickTitle(item, lang)}
-                  loading="lazy"
-                  decoding="async"
                   style={cardImgStyle}
                 />
               ) : (

@@ -15,6 +15,7 @@ import {
   PROGRESS_FILL,
 } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
+import FadeImage from "@/components/ui/FadeImage";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — JSDoc-only JS module
 import { db } from "@/lib/library/db/db.js";
@@ -635,7 +636,7 @@ export function SeriesDetailSheet({
           <div style={s.hero}>
             <div style={s.posterWrap}>
               {posterUrl ? (
-                <img src={posterUrl} alt="" style={s.poster} />
+                <FadeImage src={posterUrl} alt="" style={s.poster} />
               ) : (
                 <div style={s.monogram} aria-hidden>
                   {(title.charAt(0) || "?").toUpperCase()}

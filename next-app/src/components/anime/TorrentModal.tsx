@@ -37,6 +37,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, ApiError } from "@/lib/api";
+import FadeImage from "@/components/ui/FadeImage";
 
 // Module-level cache: keyed by lowercased query, 5min TTL — matches the
 // legacy TanStack Query `staleTime: 5 * 60 * 1000` in client/src/hooks/
@@ -973,12 +974,10 @@ export default function TorrentModal({
             }}
           >
             {anime.coverImageUrl && (
-              // Plain <img> instead of next/image: cover URL comes from
-              // AniList CDN with arbitrary host; runtime image optimizer
-              // is overkill for a 106×152 modal thumbnail that loads once
-              // per modal-open.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              // 106×152 modal thumbnail. FadeImage gives it the same
+              // load-fade as every other cover on the site (AniList CDN
+              // arbitrary host, so plain <img> not next/image).
+              <FadeImage
                 src={anime.coverImageUrl}
                 alt={anime.titleRomaji ?? heroTitle ?? ""}
                 style={{

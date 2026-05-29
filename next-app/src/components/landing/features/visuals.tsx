@@ -9,6 +9,7 @@ import {
 } from "motion/react";
 import { mono, label } from "../shared/hud-tokens";
 import { CornerBrackets } from "../shared/hud";
+import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { LandingPoster } from "@/lib/types";
 
@@ -63,13 +64,11 @@ export function PosterVisual({ hue, lang, posters, features }: PosterVisualProps
   return (
     <div style={{ position: "relative", marginTop: 20 }}>
       <div style={{ position: "relative", height: 220, marginBottom: 16 }}>
-        <img
+        <FadeImage
           src="/mascot-wink.png"
           alt=""
           aria-hidden="true"
           className="f1-mascot"
-          loading="lazy"
-          decoding="async"
         />
         {POSTER_ROSTER.map((p, i) => {
           const cover = posters?.[p.slot]?.coverImageUrl ?? null;
@@ -93,10 +92,9 @@ export function PosterVisual({ hue, lang, posters, features }: PosterVisualProps
             }}
           >
             {cover ? (
-              <img
+              <FadeImage
                 src={cover}
                 alt={p.title}
-                loading="lazy"
                 style={{
                   position: "absolute", inset: 0,
                   width: "100%", height: "100%", objectFit: "cover",

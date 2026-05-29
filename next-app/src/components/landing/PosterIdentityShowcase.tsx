@@ -17,6 +17,7 @@
 import type { CSSProperties } from "react";
 import { mono } from "./shared/hud-tokens";
 import { SectionNum, SectionHeader } from "./shared/hud";
+import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { TrendingItem } from "@/lib/types";
 
@@ -316,7 +317,7 @@ export default function PosterIdentityShowcase({ dict, posters }: PosterIdentity
               <div style={s.coverWrap}>
                 <div style={s.cover(f.hue)}>
                   {f.coverImageUrl ? (
-                    <img src={f.coverImageUrl} alt={f.title} style={s.coverImg} loading="lazy" />
+                    <FadeImage src={f.coverImageUrl} alt={f.title} style={s.coverImg} />
                   ) : null}
                   <div style={s.coverTint(f.hue)} aria-hidden />
                 </div>

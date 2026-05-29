@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
+import FadeImage from "@/components/ui/FadeImage";
 import { formatScore, pickTitle } from "@/lib/formatters";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { YearlyTopItem } from "@/lib/types";
@@ -150,11 +151,10 @@ export default function SeasonRankings({
             >
               <span style={rankStyle(i)}>{i + 1}</span>
               {anime.coverImageUrl && (
-                <img
+                <FadeImage
                   src={anime.coverImageUrl}
                   alt={anime.titleRomaji ?? ""}
                   style={coverStyle}
-                  loading="lazy"
                 />
               )}
               <div style={infoStyle}>

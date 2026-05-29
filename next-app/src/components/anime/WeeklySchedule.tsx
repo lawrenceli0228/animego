@@ -18,6 +18,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import { pickTitle } from "@/lib/formatters";
+import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
 
 export interface ScheduleItem {
@@ -332,12 +333,10 @@ export default function WeeklySchedule({
                 onMouseLeave={onCardLeave}
               >
                 {item.coverImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <FadeImage
                     src={item.coverImageUrl}
                     alt={title}
                     style={coverStyle}
-                    loading="lazy"
                   />
                 ) : (
                   <div style={coverStyle} aria-hidden />

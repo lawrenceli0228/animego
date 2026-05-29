@@ -18,6 +18,7 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
+import FadeImage from "@/components/ui/FadeImage";
 import EpisodesGrid from "@/components/anime/EpisodesGrid";
 import HeroAccent from "@/components/anime/HeroAccent";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
@@ -421,13 +422,12 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
         <div style={{ flexShrink: 0 }}>
           {detail.coverImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <FadeImage
               src={detail.coverImageUrl}
               alt={title}
               width={210}
               height={300}
-              fetchPriority="high"
-              decoding="async"
+              priority
               className="hero-cover"
               style={S.cover}
             />
@@ -655,11 +655,9 @@ function RelationsSection({
             >
               {rel.coverImageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <FadeImage
                   src={rel.coverImageUrl}
                   alt={relTitle}
-                  loading="lazy"
-                  decoding="async"
                   width={48}
                   height={64}
                   style={{
@@ -793,11 +791,9 @@ function CharactersSection({
                 >
                   {c.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <FadeImage
                       src={c.imageUrl}
                       alt={charName}
-                      loading="lazy"
-                      decoding="async"
                       width={58}
                       height={76}
                       style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -859,11 +855,9 @@ function CharactersSection({
                     >
                       {c.voiceActorImageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img
+                        <FadeImage
                           src={c.voiceActorImageUrl}
                           alt={va}
-                          loading="lazy"
-                          decoding="async"
                           width={58}
                           height={76}
                           style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -942,11 +936,9 @@ function StaffSectionView({ staff, lang }: { staff: DetailStaff[]; lang: Lang })
             >
               {s.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <FadeImage
                   src={s.imageUrl}
                   alt={staffName}
-                  loading="lazy"
-                  decoding="async"
                   width={36}
                   height={36}
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -1046,11 +1038,9 @@ function RecommendationsSection({
               >
                 {r.coverImageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <FadeImage
                     src={r.coverImageUrl}
                     alt={title}
-                    loading="lazy"
-                    decoding="async"
                     width={110}
                     height={155}
                     style={{

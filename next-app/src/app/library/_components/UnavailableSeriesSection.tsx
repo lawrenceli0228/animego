@@ -12,6 +12,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import FadeImage from "@/components/ui/FadeImage";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 // P6 TODO: tighten when useLibrary gets typed exports; for now widen to any
 // eslint-disable-next-line -eslint/no-explicit-any
@@ -334,7 +335,7 @@ export function UnavailableSeriesSection({
                 style={s.row}
               >
                 {poster ? (
-                  <img src={poster} alt="" style={s.poster} />
+                  <FadeImage src={poster} alt="" style={s.poster} />
                 ) : (
                   <div style={s.monogram} aria-hidden>
                     {initial}

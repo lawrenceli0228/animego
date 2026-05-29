@@ -1,4 +1,5 @@
 import Link from "next/link";
+import FadeImage from "@/components/ui/FadeImage";
 import { ApiError, apiGet } from "@/lib/api";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { FeedItem, FeedResponse } from "@/lib/types";
@@ -269,12 +270,9 @@ function FeedList({ items, dict, lang }: { items: FeedItem[]; dict: Dict; lang: 
             >
               <div style={itemCoverStyle}>
                 {item.coverImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <FadeImage
                     src={item.coverImageUrl}
                     alt={pickFeedTitle(item, lang)}
-                    loading="lazy"
-                    decoding="async"
                     width={36}
                     height={52}
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
