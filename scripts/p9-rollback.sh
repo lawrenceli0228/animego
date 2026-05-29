@@ -11,10 +11,10 @@
 #     --cf-token=$CF_API_TOKEN
 #     --cf-zone-id=$CF_ZONE_ID
 #     --cf-record-id=$CF_RECORD_ID
-#     --old-vps-ip=45.152.65.208
-#     --old-vps-ssh-port=57777
+#     --old-vps-ip=45.152.65.208      (CF A-record rollback target)
+#     --old-vps-host=animego-old      (~/.ssh/config alias: 17776/id_rsa)
 #     --new-vps-ip=45.145.228.171
-#     --new-vps-ssh-port=57777
+#     --new-vps-host=animego-new      (~/.ssh/config alias: 57777/id_ed25519_animego)
 #
 # Env:
 #   CI_AUTO=1   skip y/N confirmation (use carefully)
@@ -60,10 +60,12 @@ REASON=""
 CF_TOKEN="${CF_API_TOKEN:-}"
 CF_ZONE="${CF_ZONE_ID:-}"
 CF_RECORD="${CF_RECORD_ID:-}"
-OLD_IP="45.152.65.208"
-OLD_PORT="57777"
-NEW_IP="45.145.228.171"
-NEW_PORT="57777"
+OLD_IP="45.152.65.208"   # CF A-record rollback target (DNS flips back here)
+NEW_IP="45.145.228.171"  # display only
+# SSH via ~/.ssh/config aliases. old=17776/id_rsa, new=57777/id_ed25519_animego.
+# Single OLD_PORT=57777 default was wrong for the old VPS — fixed 2026-05-29.
+OLD_HOST="animego-old"
+NEW_HOST="animego-new"
 
 for arg in "$@"; do
     case "$arg" in
@@ -72,9 +74,9 @@ for arg in "$@"; do
         --cf-zone-id=*)       CF_ZONE="${arg#--cf-zone-id=}" ;;
         --cf-record-id=*)     CF_RECORD="${arg#--cf-record-id=}" ;;
         --old-vps-ip=*)       OLD_IP="${arg#--old-vps-ip=}" ;;
-        --old-vps-ssh-port=*) OLD_PORT="${arg#--old-vps-ssh-port=}" ;;
+        --old-vps-host=*)     OLD_HOST="${arg#--old-vps-host=}" ;;
         --new-vps-ip=*)       NEW_IP="${arg#--new-vps-ip=}" ;;
-        --new-vps-ssh-port=*) NEW_PORT="${arg#--new-vps-ssh-port=}" ;;
+        --new-vps-host=*)     NEW_HOST="${arg#--new-vps-host=}" ;;
         --help|-h)
             printf "usage: %s --reason=\"<text>\" [--cf-token=... --cf-zone-id=... --cf-record-id=...] [--old-vps-ip=...] [--new-vps-ip=...]\n" "$0"
             exit 0
@@ -177,7 +179,7 @@ printf "%s\tCF PATCH\tHTTP=%s\tip=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CF_CO
 # ======================================================================
 info "STEP 2/4 — verify old VPS ($OLD_IP) stack is healthy"
 
-OLD_SSH=(ssh -p "$OLD_PORT" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "root@${OLD_IP}")
+OLD_SSH=(ssh -o ConnectTimeout=10 "$OLD_HOST")
 printf "%s[CMD]%s %s 'cd /opt/animego && docker compose ps'\n" "$C_BOLD" "$C_RESET" "${OLD_SSH[*]}"
 
 OLD_PS="/tmp/p9-rollback-old-ps-${TS}.txt"
@@ -221,7 +223,7 @@ printf "%s\told VPS verify\tapp_up=%s\tmongo_up=%s\n" "$(date -u +%Y-%m-%dT%H:%M
 # ======================================================================
 info "STEP 3/4 — new VPS ($NEW_IP) into maintenance mode"
 
-NEW_SSH=(ssh -p "$NEW_PORT" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "root@${NEW_IP}")
+NEW_SSH=(ssh -o ConnectTimeout=10 "$NEW_HOST")
 NEW_CMD='cd /opt/animego && cp nginx/default.maintenance.conf nginx/default.conf && docker compose restart nginx'
 
 printf "%s[CMD]%s %s '%s'\n" "$C_BOLD" "$C_RESET" "${NEW_SSH[*]}" "$NEW_CMD"

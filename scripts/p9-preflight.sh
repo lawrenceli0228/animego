@@ -75,7 +75,12 @@ CF_ZONE="${CF_ZONE_ID:-}"
 CF_RECORD="${CF_RECORD_ID:-}"
 OLD_IP="45.152.65.208"
 NEW_IP="45.145.228.171"
-SSH_PORT="57777"
+# SSH via ~/.ssh/config aliases. Old and new differ in BOTH port and key
+# (old = 17776/id_rsa, new = 57777/id_ed25519_animego), so the previous
+# single --ssh-port=57777 default silently broke every old-VPS check.
+# Verified + fixed 2026-05-29.
+OLD_HOST="animego-old"
+NEW_HOST="animego-new"
 
 for arg in "$@"; do
     case "$arg" in
@@ -87,7 +92,8 @@ for arg in "$@"; do
         --cf-record-id=*) CF_RECORD="${arg#--cf-record-id=}" ;;
         --old-vps-ip=*)   OLD_IP="${arg#--old-vps-ip=}" ;;
         --new-vps-ip=*)   NEW_IP="${arg#--new-vps-ip=}" ;;
-        --ssh-port=*)     SSH_PORT="${arg#--ssh-port=}" ;;
+        --old-vps-host=*) OLD_HOST="${arg#--old-vps-host=}" ;;
+        --new-vps-host=*) NEW_HOST="${arg#--new-vps-host=}" ;;
         --help|-h)
             cat <<EOF
 usage: $0 [--t-3d | --t-1d | --all] [options]
@@ -101,9 +107,10 @@ options:
   --cf-token=<token>        Cloudflare API token (env: CF_API_TOKEN)
   --cf-zone-id=<id>         Cloudflare zone ID    (env: CF_ZONE_ID)
   --cf-record-id=<id>       A-record ID to flip   (env: CF_RECORD_ID)
-  --old-vps-ip=<ip>         default: 45.152.65.208
+  --old-vps-ip=<ip>         default: 45.152.65.208 (CF A-record compare only)
   --new-vps-ip=<ip>         default: 45.145.228.171
-  --ssh-port=<port>         default: 57777
+  --old-vps-host=<alias>    default: animego-old (~/.ssh/config: 17776/id_rsa)
+  --new-vps-host=<alias>    default: animego-new (~/.ssh/config: 57777/id_ed25519_animego)
 
 env:
   CI_AUTO=1   skip interactive confirmations (auto-yes)
@@ -123,12 +130,12 @@ info "mode: $MODE"
 
 # --- SSH helper (centralised flags to keep checks short) -------------
 ssh_old() {
-    show_cmd "ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@${OLD_IP} '$*'"
-    ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "root@${OLD_IP}" "$@"
+    show_cmd "ssh $OLD_HOST '$*'"
+    ssh -o ConnectTimeout=10 "$OLD_HOST" "$@"
 }
 ssh_new() {
-    show_cmd "ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@${NEW_IP} '$*'"
-    ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "root@${NEW_IP}" "$@"
+    show_cmd "ssh $NEW_HOST '$*'"
+    ssh -o ConnectTimeout=10 "$NEW_HOST" "$@"
 }
 
 # --- confirm helper (CI_AUTO=1 → auto-yes) ---------------------------
