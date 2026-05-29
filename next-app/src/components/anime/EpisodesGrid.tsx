@@ -23,6 +23,7 @@ import {
 } from "@/lib/subscriptionBus";
 import type { DetailEpisodeTitle } from "@/lib/types";
 import type { Dict, Lang } from "@/lib/i18n";
+import EpisodeComments from "@/components/anime/EpisodeComments";
 
 interface EpisodesGridProps {
   anilistId: number;
@@ -75,6 +76,10 @@ export default function EpisodesGrid({
   dict,
 }: EpisodesGridProps) {
   const [sub, setSub] = useState<SubscriptionDoc | null>(null);
+  // Which episode's expand panel is open. null = all collapsed. Matches
+  // legacy EpisodeList click-to-expand: click a cell to open its comment
+  // panel below, click again to collapse.
+  const [openEp, setOpenEp] = useState<number | null>(null);
 
   // Mount-time probe — silent on 401 / 404 so anonymous users see the
   // neutral grid without an auth bounce. Cancel on unmount in case the
@@ -159,6 +164,7 @@ export default function EpisodesGrid({
             currentEp > 0 &&
             cell.n === currentEp &&
             currentEp < total;
+          const isOpen = openEp === cell.n;
 
           let bg = "rgba(255,255,255,0.04)";
           let border = "#38383a";
@@ -172,10 +178,28 @@ export default function EpisodesGrid({
             border = "rgba(48,209,88,0.30)";
             numColor = "#30d158";
           }
+          // Open-panel highlight overrides current/watched (legacy parity).
+          if (isOpen) {
+            bg = "rgba(10,132,255,0.12)";
+            border = "rgba(10,132,255,0.55)";
+            numColor = "#0a84ff";
+          }
 
           return (
             <div
               key={cell.n}
+              role="button"
+              tabIndex={0}
+              aria-expanded={isOpen}
+              onClick={() =>
+                setOpenEp((prev) => (prev === cell.n ? null : cell.n))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setOpenEp((prev) => (prev === cell.n ? null : cell.n));
+                }
+              }}
               style={{
                 background: bg,
                 border: `1px solid ${border}`,
@@ -183,6 +207,7 @@ export default function EpisodesGrid({
                 padding: "10px 8px 8px",
                 textAlign: "center",
                 minWidth: 0,
+                cursor: "pointer",
                 transition: "background 200ms, border-color 200ms",
               }}
             >
@@ -250,6 +275,27 @@ export default function EpisodesGrid({
           );
         })}
       </div>
+      {/* Legacy parity: click-to-expand panel under the grid, one episode
+          at a time. (DanmakuSection — the legacy panel's live-danmaku half
+          — is still deferred; it needs the ws-server socket hooks.) */}
+      {openEp !== null && (
+        <div
+          style={{
+            marginTop: 16,
+            borderRadius: 12,
+            overflow: "hidden",
+            border: "1px solid #38383a",
+            background: "rgba(255,255,255,0.02)",
+          }}
+        >
+          <EpisodeComments
+            anilistId={anilistId}
+            episode={openEp}
+            dict={dict}
+            lang={lang}
+          />
+        </div>
+      )}
     </section>
   );
 }
