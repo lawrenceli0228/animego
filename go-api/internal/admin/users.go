@@ -70,6 +70,7 @@ const (
 	msgCannotDeleteSelf   = "Cannot delete yourself"
 	msgInvalidUserID      = "Invalid user ID"
 	msgInvalidRequestBody = "Invalid request body"
+	msgPasswordTooShort   = "Password must be at least 6 characters"
 )
 
 // UserDB is the sqlc subset the user-CRUD handlers consume.  Defined at
@@ -85,6 +86,7 @@ type UserDB interface {
 	AdminCreateUser(ctx context.Context, username, email, password string) (dbgen.AdminCreateUserRow, error)
 	AdminUpdateUser(ctx context.Context, username, email *string, userID uuid.UUID) (dbgen.AdminUpdateUserRow, error)
 	AdminDeleteUser(ctx context.Context, id uuid.UUID) error
+	AdminSetUserPassword(ctx context.Context, id uuid.UUID, password string) error
 	AdminFindUserByUsernameOrEmail(ctx context.Context, username, email *string) (dbgen.AdminFindUserByUsernameOrEmailRow, error)
 	AdminFindUserByUsernameOrEmailExcluding(ctx context.Context, username, email *string, excludeID uuid.UUID) (dbgen.AdminFindUserByUsernameOrEmailExcludingRow, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (dbgen.User, error)
@@ -419,6 +421,70 @@ func (h *UserHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		Deleted:  true,
 		Username: user.Username,
 	})
+}
+
+// setPasswordReq is the JSON body for POST /api/admin/users/:userId/password.
+type setPasswordReq struct {
+	Password string `json:"password"`
+}
+
+// SetUserPassword implements POST /api/admin/users/:userId/password.
+//
+// Admin-initiated password change for any account. Flow:
+//  1. Parse :userId (400 on bad UUID).
+//  2. Decode {password}; require >= 6 chars (matches the register rule).
+//  3. GetUserByID — 404 if the account doesn't exist (the UPDATE is a
+//     silent no-op on a missing id, so check first to return a real 404).
+//  4. bcrypt-hash via jwtx.HashPassword (cost=10).
+//  5. AdminSetUserPassword — writes the hash + nulls refresh_token so the
+//     target's existing sessions are invalidated (forces re-login).
+//  6. 200 { success: true }.
+func (h *UserHandlers) SetUserPassword(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), userQueryTimeout)
+	defer cancel()
+
+	userID, ok := parseUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req setPasswordReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, msgInvalidRequestBody))
+		return
+	}
+	if len(req.Password) < 6 {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, msgPasswordTooShort))
+		return
+	}
+
+	user, err := h.db.GetUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
+			return
+		}
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "user lookup failed"))
+		return
+	}
+
+	hash, err := jwtx.HashPassword(req.Password)
+	if err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "password hash failed"))
+		return
+	}
+
+	if err := h.db.AdminSetUserPassword(ctx, userID, hash); err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "set password failed"))
+		return
+	}
+
+	if claims, ok := jwtx.ClaimsFrom(r.Context()); ok {
+		slog.InfoContext(r.Context(), "admin set user password",
+			"admin", claims.Username, "username", user.Username)
+	}
+
+	httpx.Data(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // parseUserID extracts :userId from the chi route and returns it as a

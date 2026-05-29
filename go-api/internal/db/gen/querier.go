@@ -28,6 +28,12 @@ type Querier interface {
 	// username or email but a DIFFERENT id — i.e. would violate uniqueness
 	// if the update went through.  Returns ErrNoRows when no conflict.
 	AdminFindUserByUsernameOrEmailExcluding(ctx context.Context, username *string, email *string, excludeID uuid.UUID) (AdminFindUserByUsernameOrEmailExcludingRow, error)
+	// Admin-initiated password change (POST /api/admin/users/:id/password).
+	// Sets a new bcrypt hash and nulls refresh_token so the target user's
+	// existing sessions are invalidated (forces re-login with the new
+	// password). Unlike ResetUserPassword it leaves the reset-token columns
+	// alone — those belong to the self-serve forgot-password flow.
+	AdminSetUserPassword(ctx context.Context, iD uuid.UUID, password string) error
 	// PATCH /api/admin/users/:userId — partial update of username/email.
 	// COALESCE() lets the caller pass nil to skip a field; passing a value
 	// overrides it.  Both empty means the handler returns 400 before we

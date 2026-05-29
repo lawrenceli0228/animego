@@ -15,8 +15,15 @@
 // is in flight.
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { deleteAdminUser, updateAdminUser } from "../_actions/users";
+import { toast } from "react-hot-toast";
+import {
+  deleteAdminUser,
+  setAdminUserPassword,
+  updateAdminUser,
+} from "../_actions/users";
 import type { AdminUser } from "../_types";
+
+const PASSWORD_MIN = 6;
 
 interface UserRowProps {
   user: AdminUser;
@@ -86,6 +93,8 @@ export function UserRow({ user }: UserRowProps) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditFormState>(() => initialForm(user));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [pwMode, setPwMode] = useState(false);
+  const [pw, setPw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -167,6 +176,40 @@ export function UserRow({ user }: UserRowProps) {
     setError(null);
   };
 
+  const startPw = () => {
+    setPw("");
+    setEditing(false);
+    setConfirmingDelete(false);
+    setError(null);
+    setPwMode(true);
+  };
+
+  const cancelPw = () => {
+    setPwMode(false);
+    setPw("");
+    setError(null);
+  };
+
+  const handleSavePw = () => {
+    if (pw.length < PASSWORD_MIN) {
+      setError(`密码长度不能少于 ${PASSWORD_MIN} 位`);
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      try {
+        await setAdminUserPassword(user._id, pw);
+        setPwMode(false);
+        setPw("");
+        // Password isn't a displayed field, so the row won't visibly
+        // change — a toast is the only success signal.
+        toast.success(`已重置 ${user.username} 的密码`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "改密码失败");
+      }
+    });
+  };
+
   const rowStyle: React.CSSProperties = {
     ...styles.row,
     ...(editing ? styles.editingRow : null),
@@ -186,6 +229,17 @@ export function UserRow({ user }: UserRowProps) {
               style={styles.input}
               disabled={pending}
               aria-label="用户名"
+            />
+          ) : pwMode ? (
+            <input
+              type="password"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              placeholder={`${user.username} 的新密码 (≥${PASSWORD_MIN} 位)`}
+              style={styles.input}
+              disabled={pending}
+              aria-label={`${user.username} 的新密码`}
+              autoFocus
             />
           ) : (
             user.username
@@ -214,7 +268,26 @@ export function UserRow({ user }: UserRowProps) {
         <td style={{ ...styles.td, ...styles.numCell }}>{user.followers}</td>
         <td style={styles.td}>
           <div style={styles.actions}>
-            {editing ? (
+            {pwMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleSavePw}
+                  disabled={pending}
+                  style={styles.saveBtn}
+                >
+                  保存密码
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelPw}
+                  disabled={pending}
+                  style={styles.btn}
+                >
+                  取消
+                </button>
+              </>
+            ) : editing ? (
               <>
                 <button
                   type="button"
@@ -261,6 +334,14 @@ export function UserRow({ user }: UserRowProps) {
                   style={styles.btn}
                 >
                   编辑
+                </button>
+                <button
+                  type="button"
+                  onClick={startPw}
+                  disabled={pending}
+                  style={styles.btn}
+                >
+                  改密码
                 </button>
                 <button
                   type="button"

@@ -119,6 +119,35 @@ export async function createAdminUser(data: {
 }
 
 /**
+ * POST /api/admin/users/:id/password — admin sets a new password for any
+ * account. go-api bcrypt-hashes it (cost 10) and nulls the target's
+ * refresh_token, invalidating their existing sessions so they must
+ * re-login with the new password. Returns { success: true }.
+ *
+ * No user-list revalidation — password is not a displayed field — but we
+ * bust user:profile:{id} in case any per-user page keys on session state.
+ */
+export async function setAdminUserPassword(
+  userId: string,
+  password: string,
+): Promise<void> {
+  try {
+    if (!userId) {
+      throw new UserActionError("VALIDATION_ERROR", "缺少用户 ID", 400);
+    }
+    const pw = validatePassword(password);
+    await apiMutate<{ success: boolean }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/password`,
+      "POST",
+      { body: { password: pw } },
+    );
+    revalidateTag(`user:profile:${userId}`, "max");
+  } catch (err) {
+    throw toActionError("setAdminUserPassword", err);
+  }
+}
+
+/**
  * PATCH /api/admin/users/:id — update username and/or email. Only
  * fields the caller passes are sent to the backend (backend treats
  * undefined as no-op). Empty strings are rejected as validation

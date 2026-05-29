@@ -42,9 +42,11 @@ type fakeUserDB struct {
 	adminFindFn               func(ctx context.Context, username, email *string) (dbgen.AdminFindUserByUsernameOrEmailRow, error)
 	adminFindExcludingFn      func(ctx context.Context, username, email *string, excludeID uuid.UUID) (dbgen.AdminFindUserByUsernameOrEmailExcludingRow, error)
 	getUserByIDFn             func(ctx context.Context, id uuid.UUID) (dbgen.User, error)
+	adminSetPasswordFn        func(ctx context.Context, id uuid.UUID, password string) error
 	adminDeleteUserCallCount  int32
 	adminCreateUserCallCount  int32
 	adminUpdateUserCallCount  int32
+	adminSetPasswordCallCount int32
 }
 
 func (f *fakeUserDB) AdminCreateUser(ctx context.Context, username, email, password string) (dbgen.AdminCreateUserRow, error) {
@@ -90,6 +92,14 @@ func (f *fakeUserDB) GetUserByID(ctx context.Context, id uuid.UUID) (dbgen.User,
 		panic("fakeUserDB.GetUserByID not set")
 	}
 	return f.getUserByIDFn(ctx, id)
+}
+
+func (f *fakeUserDB) AdminSetUserPassword(ctx context.Context, id uuid.UUID, password string) error {
+	atomic.AddInt32(&f.adminSetPasswordCallCount, 1)
+	if f.adminSetPasswordFn == nil {
+		return nil
+	}
+	return f.adminSetPasswordFn(ctx, id, password)
 }
 
 // fakeEnqueuer satisfies queue.Enqueuer with no-op stubs.  The

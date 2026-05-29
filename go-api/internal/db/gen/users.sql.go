@@ -12,6 +12,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const adminSetUserPassword = `-- name: AdminSetUserPassword :exec
+UPDATE users
+SET password      = $2,
+    refresh_token = NULL,
+    updated_at    = now()
+WHERE id = $1
+`
+
+// Admin-initiated password change (POST /api/admin/users/:id/password).
+// Sets a new bcrypt hash and nulls refresh_token so the target user's
+// existing sessions are invalidated (forces re-login with the new
+// password). Unlike ResetUserPassword it leaves the reset-token columns
+// alone — those belong to the self-serve forgot-password flow.
+func (q *Queries) AdminSetUserPassword(ctx context.Context, iD uuid.UUID, password string) error {
+	_, err := q.db.Exec(ctx, adminSetUserPassword, iD, password)
+	return err
+}
+
 const createUser = `-- name: CreateUser :one
 
 INSERT INTO users (username, email, password)

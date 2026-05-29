@@ -516,6 +516,7 @@ func main() {
 		r.Post("/warm-all", adminUserHandlers.WarmAll)
 		r.Post("/users", adminUserHandlers.CreateUser)
 		r.Patch("/users/{userId}", adminUserHandlers.UpdateUser)
+		r.Post("/users/{userId}/password", adminUserHandlers.SetUserPassword)
 		r.Delete("/users/{userId}", adminUserHandlers.DeleteUser)
 	})
 
