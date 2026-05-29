@@ -58,11 +58,17 @@ services:
     restart: unless-stopped
     env_file: .env.production
     environment:
-      # RSC server-side fetch base. Points at the Go API container by
-      # service name (Docker DNS resolves it). P9 cutover flipped this
-      # from http://app:5001 (legacy Express) to http://go-api:8080 so
-      # RSC pages render off the Go stack.
-      GO_API_INTERNAL_URL: http://go-api:8080
+      # RSC server-side fetch base (next-app server → backend directly,
+      # NOT via nginx). Default http://app:5001 (legacy Express) keeps a
+      # fresh `docker compose up` COHERENT with default.conf, which routes
+      # /api/ → app. The P9 cutover flips BOTH switches together:
+      #   1. cp nginx/default.p9.conf → nginx/default.conf  (/api/ → go-api)
+      #   2. GO_API_INTERNAL_URL=http://go-api:8080 in .env.production
+      # See docs/migration/P9-CUTOVER.md T+0. Pairing them prevents the
+      # half-flip where RSC reads go-api/postgres while /api/ writes
+      # Express/mongo — mismatched user IDs (ObjectId vs uuid) silently
+      # log the user out (looked like "login just refreshes").
+      GO_API_INTERNAL_URL: ${GO_API_INTERNAL_URL:-http://app:5001}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
