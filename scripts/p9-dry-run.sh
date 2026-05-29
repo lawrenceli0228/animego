@@ -16,6 +16,16 @@
 #   0  — full pipeline OK, failures.jsonl == 0 lines (gate passes)
 #   1  — any step failed, or failures.jsonl > 0 (gate fails)
 #   2  — bad arguments / preflight failure
+#
+# Schema note (P9 cutover blocker fix):
+#   The Postgres volume is wiped+recreated in STEP 2, so it boots with NO
+#   schema. Nothing in the codebase auto-applies migrations on server boot
+#   (cmd/migrate is an empty stub; dev.sh's `go run ./cmd/migrate up` was
+#   never wired). go-api's River queue (river_job/river_leader/river_queue)
+#   crash-loops on an empty DB. So STEP 4 below applies the FULL schema with
+#   golang-migrate BEFORE the go-api stack-up in STEP 8. River is NOT a
+#   separate migrator — its tables are bundled into go-api/migrations/0007+
+#   0008, so one `migrate ... up` creates app schema AND River schema.
 
 set -euo pipefail
 
@@ -127,7 +137,7 @@ time_step() {
 # ======================================================================
 # STEP 1 — preflight
 # ======================================================================
-info "STEP 1/8 — preflight"
+info "STEP 1/9 — preflight"
 
 ENV_FILE="$REPO_ROOT/.env.production"
 if [ ! -f "$ENV_FILE" ]; then
@@ -145,13 +155,23 @@ if [ -z "$PG_PASS" ]; then
 fi
 ok "POSTGRES_PASSWORD is set in .env.production"
 
+# golang-migrate is required for STEP 4 (apply Postgres schema). It is a
+# host tool (installed via scripts/p0-bootstrap.sh — `brew install
+# golang-migrate`), NOT bundled into the go-api runtime image. Fail fast
+# here rather than 3 steps in.
+if ! command -v migrate >/dev/null 2>&1; then
+    fail "golang-migrate ('migrate') not on PATH — install it: brew install golang-migrate"
+    exit 2
+fi
+ok "golang-migrate present: $(migrate -version 2>&1 | head -1)"
+
 cd "$REPO_ROOT"
 
 # ======================================================================
 # STEP 2 — reset mongo + postgres
 # ======================================================================
 if [ "$SKIP_RESTORE" -eq 0 ]; then
-    info "STEP 2/8 — reset mongodb + postgres volumes"
+    info "STEP 2/9 — reset mongodb + postgres volumes"
     confirm "docker compose down mongodb postgres + volume rm (DESTROYS local data)"
 
     run docker compose down mongodb postgres || warn "down had non-zero exit (probably not running yet, ok)"
@@ -162,13 +182,13 @@ if [ "$SKIP_RESTORE" -eq 0 ]; then
     run docker volume rm animego_postgres-data 2>/dev/null || warn "animego_postgres-data already gone"
     ok "volumes wiped"
 else
-    info "STEP 2/8 — skipped (--skip-restore)"
+    info "STEP 2/9 — skipped (--skip-restore)"
 fi
 
 # ======================================================================
 # STEP 3 — bring up mongo + postgres, wait healthy
 # ======================================================================
-info "STEP 3/8 — start mongodb + postgres"
+info "STEP 3/9 — start mongodb + postgres"
 run docker compose --env-file=.env.production up -d mongodb postgres
 
 info "waiting up to 60s for mongo + postgres to become healthy..."
@@ -193,22 +213,60 @@ fi
 ok "mongo + postgres up"
 
 # ======================================================================
-# STEP 4 — mongorestore from dump
+# STEP 4 — apply Postgres schema (app migrations + River)  [P9 fix]
+# ======================================================================
+# CRITICAL for cutover: STEP 2 wiped the postgres volume, so it has NO
+# schema. The go-api server does NOT migrate on boot — its River queue
+# (river_job/river_leader/river_queue) crash-loops against an empty DB
+# ("relation \"river_queue\" does not exist"). We must apply the schema
+# here, BEFORE the go-api stack-up in STEP 8, or step 8's smoke fails.
+#
+# River is NOT a separate migrator: river v0.37 internal migrations are
+# baked into go-api/migrations/0007_river_initial + 0008_river_pending_use,
+# so a SINGLE golang-migrate `up` creates BOTH the app tables (anime_cache,
+# users, subscriptions, danmakus, episode_windows, ...) AND the River
+# tables. Order within that one command is fixed by file numbering 0001..N.
+#
+# DATA NOTE: this dry-run keeps STEP 6 as migrate-mongo --dry-run (gate
+# semantics unchanged — it counts/validates but does NOT write PG). So
+# go-api in STEP 8 boots against schema-only, EMPTY tables. That is fine:
+# the smoke checks go-api /health (DB connectivity + River boot), which
+# only needs the schema to exist, not rows. To also exercise a real data
+# endpoint here you would flip STEP 6 to --commit — deliberately NOT done,
+# to preserve the T-3d "no writes" gate.
+info "STEP 4/9 — apply Postgres schema (golang-migrate: app + River)"
+
+# pg is published on localhost:5432 by the ci overlay (see COMPOSE_FILE
+# header). Mirror STEP 6's localhost wiring. golang-migrate is idempotent:
+# re-running with --skip-restore on an already-migrated DB is a no-op.
+PG_URI_LOCAL="postgres://animego:${PG_PASS}@localhost:5432/animego?sslmode=disable"
+MIGRATE_SCHEMA_CMD=(migrate -path "$REPO_ROOT/go-api/migrations" -database "$PG_URI_LOCAL" up)
+# Mask POSTGRES_PASSWORD in the echoed command (see STEP 6 for rationale).
+MIGRATE_SCHEMA_DISPLAY="${MIGRATE_SCHEMA_CMD[*]}"
+info "\$ ${MIGRATE_SCHEMA_DISPLAY//$PG_PASS/***}"
+# `migrate ... up` prints "no change" + exits 0 when already at head, so
+# this is safe under --skip-restore. Any real failure (bad SQL, dirty
+# state) is fatal — the cutover must not proceed on a half-applied schema.
+time_step "schema" "${MIGRATE_SCHEMA_CMD[@]}"
+ok "Postgres schema applied (app tables + River queue tables)"
+
+# ======================================================================
+# STEP 5 — mongorestore from dump
 # ======================================================================
 if [ "$SKIP_RESTORE" -eq 0 ]; then
-    info "STEP 4/8 — mongorestore from $DUMP_SOURCE"
+    info "STEP 5/9 — mongorestore from $DUMP_SOURCE"
     confirm "stream $DUMP_SOURCE into docker compose exec mongodb mongorestore (will overwrite collections)"
 
     time_step "restore" bash -c "docker compose exec -T mongodb mongorestore --gzip --archive --drop < '$DUMP_SOURCE'"
     ok "mongorestore done"
 else
-    info "STEP 4/8 — skipped (--skip-restore)"
+    info "STEP 5/9 — skipped (--skip-restore)"
 fi
 
 # ======================================================================
-# STEP 5 — migrate-mongo --dry-run
+# STEP 6 — migrate-mongo --dry-run
 # ======================================================================
-info "STEP 5/8 — migrate-mongo dry-run"
+info "STEP 6/9 — migrate-mongo dry-run"
 
 # IMPORTANT: the runbook §3 step 3 snippet OMITS --dry-run/--commit but
 # go-api/cmd/migrate-mongo/main.go REQUIRES exactly one of them
@@ -237,9 +295,9 @@ time_step "migrate" "${MIGRATE_CMD[@]}"
 cd "$REPO_ROOT"
 
 # ======================================================================
-# STEP 6 — inspect failures.jsonl
+# STEP 7 — inspect failures.jsonl
 # ======================================================================
-info "STEP 6/8 — inspect failures.jsonl"
+info "STEP 7/9 — inspect failures.jsonl"
 if [ -f "$MIGRATE_FAILURES" ]; then
     LINE_COUNT="$(wc -l < "$MIGRATE_FAILURES" | tr -d ' ')"
 else
@@ -257,13 +315,38 @@ else
 fi
 
 # ======================================================================
-# STEP 7 — full Go stack + smoke
+# STEP 8 — full Go stack + smoke
 # ======================================================================
-info "STEP 7/8 — bring up Go stack + smoke"
+info "STEP 8/9 — bring up Go stack + smoke"
 run docker compose --env-file=.env.production up -d postgres go-api ws-server next-app nginx
 
 info "waiting 20s for stack to settle..."
 sleep 20
+
+# go-api health gate (validates the STEP 4 schema fix): before the schema
+# was applied, go-api crash-looped on River's missing tables. We poll its
+# compose healthcheck (Up ... (healthy)) and hit /health directly. The ci
+# overlay does NOT publish go-api's port, so probe via `compose exec`.
+# Failure here means the schema/River boot is broken — fail the gate.
+GO_API_RC=0
+GO_API_HEALTHY=0
+for i in $(seq 1 30); do
+    GA_STATE="$(docker compose ps --format '{{.Service}}={{.Status}}' 2>/dev/null | grep '^go-api=' || true)"
+    if echo "$GA_STATE" | grep -qi "healthy"; then
+        GO_API_HEALTHY=1
+        break
+    fi
+    sleep 2
+done
+if [ "$GO_API_HEALTHY" -eq 1 ] && \
+   docker compose exec -T go-api wget -qO- http://localhost:8080/health 2>/dev/null | grep -q '"db":"up"'; then
+    ok "go-api healthy + /health reports db:up (River boot OK on migrated schema)"
+else
+    fail "go-api did NOT come healthy — schema/River boot likely broken"
+    info "go-api state: ${GA_STATE:-<none>}"
+    docker compose logs go-api --tail 20 2>&1 | grep -iE "river|relation|error" || true
+    GO_API_RC=1
+fi
 
 SMOKE_SCRIPT="$REPO_ROOT/scripts/smoke-p8.1.sh"
 if [ ! -x "$SMOKE_SCRIPT" ]; then
@@ -278,16 +361,16 @@ else
 fi
 
 # ======================================================================
-# STEP 8 — timing summary
+# STEP 9 — timing summary
 # ======================================================================
-info "STEP 8/8 — timing summary"
+info "STEP 9/9 — timing summary"
 if [ -f "/tmp/p9-dry-run-timing-${TS}.txt" ]; then
     printf "\n%s%-12s %s%s\n" "$C_BOLD" "STEP" "ELAPSED" "$C_RESET"
     cat "/tmp/p9-dry-run-timing-${TS}.txt"
 fi
 
 printf "\n"
-if [ "$GATE_PASS" -eq 1 ] && [ "$SMOKE_RC" -eq 0 ]; then
+if [ "$GATE_PASS" -eq 1 ] && [ "$SMOKE_RC" -eq 0 ] && [ "$GO_API_RC" -eq 0 ]; then
     ok "DRY-RUN GATE: PASS — clear to schedule T+0"
     info "log: $LOG_FILE"
     exit 0
