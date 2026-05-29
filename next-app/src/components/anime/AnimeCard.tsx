@@ -68,6 +68,17 @@ const imgStyle: CSSProperties = {
   display: "block",
 };
 
+// Non-priority cards fade in on load so the grid fills in as a smooth,
+// uniform reveal instead of each image popping abruptly at its own decode
+// time. The card's #1c1c1e bg is the shared placeholder underneath, so
+// every cell looks identical until its image arrives. Priority (LCP) card
+// keeps imgStyle — opacity 1, no transition — so its paint isn't delayed.
+const imgFadeStyle: CSSProperties = {
+  ...imgStyle,
+  opacity: 0,
+  transition: "opacity 0.4s ease",
+};
+
 const rankBadgeStyle: CSSProperties = {
   position: "absolute",
   top: 8,
@@ -209,7 +220,16 @@ export default function AnimeCard({
           decoding={priority ? "sync" : "async"}
           width={230}
           height={320}
-          style={imgStyle}
+          ref={(el) => {
+            // Cached images can finish decoding before React binds onLoad,
+            // which would leave them stuck at opacity 0. Reveal immediately
+            // if already complete.
+            if (el && el.complete && el.naturalWidth > 0) el.style.opacity = "1";
+          }}
+          onLoad={(e) => {
+            e.currentTarget.style.opacity = "1";
+          }}
+          style={priority ? imgStyle : imgFadeStyle}
         />
       ) : (
         <div style={{ ...imgStyle, background: "#2c2c2e" }} aria-hidden />
