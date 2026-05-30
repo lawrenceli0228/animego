@@ -82,6 +82,7 @@ SELECT
     title_native,
     title_chinese,
     cover_image_url,
+    banner_image_url,
     cover_image_color,
     poster_accent,
     average_score,

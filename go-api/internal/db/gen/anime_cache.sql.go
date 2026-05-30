@@ -759,6 +759,7 @@ SELECT
     title_native,
     title_chinese,
     cover_image_url,
+    banner_image_url,
     cover_image_color,
     poster_accent,
     average_score,
@@ -789,6 +790,7 @@ type GetSeasonalAnimeRow struct {
 	TitleNative     *string  `json:"titleNative"`
 	TitleChinese    *string  `json:"titleChinese"`
 	CoverImageUrl   *string  `json:"coverImageUrl"`
+	BannerImageUrl  *string  `json:"bannerImageUrl"`
 	CoverImageColor *string  `json:"coverImageColor"`
 	PosterAccent    *string  `json:"posterAccent"`
 	AverageScore    *float64 `json:"averageScore"`
@@ -826,6 +828,7 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 			&i.TitleNative,
 			&i.TitleChinese,
 			&i.CoverImageUrl,
+			&i.BannerImageUrl,
 			&i.CoverImageColor,
 			&i.PosterAccent,
 			&i.AverageScore,
