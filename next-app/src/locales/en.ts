@@ -1,6 +1,16 @@
 const en = {
   // Common
   common: { loading: 'Loading...' },
+  // Root <head> metadata (browser title, description, SEO keywords).
+  meta: {
+    titleDefault: 'AnimeGo . Catch the episode you came for',
+    description:
+      'An anime site that makes the cover art the star. Multi-source aggregation, on-screen danmaku, manual episode picking as a fallback — no algorithmic feed, no paywalled episodes.',
+    keywords: [
+      'anime', 'donghua', 'binge watch', 'danmaku', 'AnimeGo', 'anime streaming',
+      'bullet comments', 'OKLCH', 'cover colors', 'fansub groups', 'local player',
+    ],
+  },
   // Backend already emits English error.message strings; passthrough is
   // handled by the t(`errors.${msg}`, { defaultValue: msg }) call site.
   // This empty block keeps en/zh structurally symmetric for audits.

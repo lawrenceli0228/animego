@@ -3,7 +3,7 @@ import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
-import { getDict, getLang } from "@/lib/i18n";
+import { getDict, getDictByLang, getLang } from "@/lib/i18n";
 import { LanguageProvider } from "@/lib/lang-client";
 import { apiGet, ApiError } from "@/lib/api";
 import "./globals.css";
@@ -49,49 +49,40 @@ async function fetchCurrentUser(): Promise<NavUser | null> {
   }
 }
 
-export const metadata: Metadata = {
-  metadataBase: new URL("https://animegoclub.com"),
-  title: {
-    template: "%s . AnimeGo",
-    default: "AnimeGo . 追你该追的那一话",
-  },
-  description:
-    "把封面当主角的动漫站。多源聚合、弹幕同屏、手动选集兜底 -- 不做信息流推荐，不藏 VIP 集数。",
-  applicationName: "AnimeGo",
-  authors: [{ name: "AnimeGo" }],
-  generator: "Next.js",
-  keywords: [
-    "动漫",
-    "番剧",
-    "追番",
-    "弹幕",
-    "AnimeGo",
-    "anime",
-    "danmaku",
-    "OKLCH",
-    "海报色",
-    "字幕组",
-    "本地播放器",
-  ],
-  robots: { index: true, follow: true },
-  openGraph: {
-    siteName: "AnimeGo",
-    type: "website",
-    locale: "zh_CN",
-    alternateLocale: ["en_US"],
-  },
-  twitter: {
-    card: "summary_large_image",
-    site: "@animegoclub",
-  },
-  alternates: {
-    canonical: "/",
-    languages: {
-      "zh-CN": "/",
-      "en-US": "/?lang=en",
+export async function generateMetadata(): Promise<Metadata> {
+  const lang = await getLang();
+  const dict = getDictByLang(lang);
+  return {
+    metadataBase: new URL("https://animegoclub.com"),
+    title: {
+      template: "%s . AnimeGo",
+      default: dict.meta.titleDefault,
     },
-  },
-};
+    description: dict.meta.description,
+    applicationName: "AnimeGo",
+    authors: [{ name: "AnimeGo" }],
+    generator: "Next.js",
+    keywords: dict.meta.keywords,
+    robots: { index: true, follow: true },
+    openGraph: {
+      siteName: "AnimeGo",
+      type: "website",
+      locale: lang === "en" ? "en_US" : "zh_CN",
+      alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
+    },
+    twitter: {
+      card: "summary_large_image",
+      site: "@animegoclub",
+    },
+    alternates: {
+      canonical: "/",
+      languages: {
+        "zh-CN": "/",
+        "en-US": "/?lang=en",
+      },
+    },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: "#000000",

@@ -1,6 +1,16 @@
 const zh = {
   // Common
   common: { loading: '加载中...' },
+  // Root <head> metadata (browser title, description, SEO keywords).
+  meta: {
+    titleDefault: 'AnimeGo . 追你该追的那一话',
+    description:
+      '把封面当主角的动漫站。多源聚合、弹幕同屏、手动选集兜底 -- 不做信息流推荐，不藏 VIP 集数。',
+    keywords: [
+      '动漫', '番剧', '追番', '弹幕', 'AnimeGo', 'anime',
+      'danmaku', 'OKLCH', '海报色', '字幕组', '本地播放器',
+    ],
+  },
   // Backend error.message → 中文 (lookup by exact English string)
   // Backend is the source of truth for English wording; if it changes,
   // these keys must be updated to match.
