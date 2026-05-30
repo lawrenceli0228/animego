@@ -216,13 +216,11 @@ export default function Navbar({
                   {dict.admin.title}
                 </Link>
               )}
-              {/* /profile is still the legacy Express SPA route (P9 残余).
-                  Use plain <a> for a full-page nav so nginx routes the
-                  request to the Express upstream instead of next-router
-                  pushing client-side to a 404 on the next-app side. */}
-              <a href="/profile" style={s.btnOutline}>
+              {/* P11: /profile migrated off the legacy Express SPA to
+                  next-app — client-side <Link> nav again. */}
+              <Link href="/profile" prefetch={false} style={s.btnOutline}>
                 {dict.nav.myList}
-              </a>
+              </Link>
               <button
                 type="button"
                 onClick={handleLogout}

@@ -55,6 +55,14 @@ const nextConfig: NextConfig = {
         destination: `/seasonal/${season}/${year}`,
         permanent: true,
       },
+      {
+        // P11: legacy /season (old SPA path, retired with the Express SPA)
+        // -> the live seasonal grid. Keeps old bookmarks / search-index
+        // URLs out of the dead legacy route.
+        source: "/season",
+        destination: `/seasonal/${season}/${year}`,
+        permanent: true,
+      },
     ];
   },
 };

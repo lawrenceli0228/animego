@@ -41,6 +41,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "weekly",
       priority: 0.9,
     },
+    {
+      // P11: weekly airing calendar (migrated off legacy SPA).
+      url: `${SITE}/calendar`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.6,
+    },
+    {
+      // P11: FAQ (migrated off legacy SPA).
+      url: `${SITE}/faq`,
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.4,
+    },
   ];
 
   let animeUrls: MetadataRoute.Sitemap = [];

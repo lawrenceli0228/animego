@@ -16,12 +16,13 @@ import jwt from "jsonwebtoken";
 //      browser (Set-Cookie). Without this, a logged-in user looks logged
 //      out after 15 min on any navigation / language toggle.
 //
-//   2. AUTH GATE (only /admin, /library, /player) — verify the (now
+//   2. AUTH GATE (/admin, /library, /player, /profile) — verify the (now
 //      possibly refreshed) session against JWT_SECRET and redirect to
 //      /login?from=<path> if absent/expired/tampered. /admin additionally
 //      requires role "admin". Library + Player ride the same gate because
 //      Dexie + File System Access + jassub live behind auth in the legacy
-//      SPA, and the P6 reauth E2E needs a server-side redirect.
+//      SPA, and the P6 reauth E2E needs a server-side redirect. /profile
+//      (P11) is the user's own subscription list — auth-only.
 //
 // Runtime: Next 16 renamed the deprecated `middleware` convention to this
 // `proxy.ts`. Proxy runs on the Node.js runtime (the `runtime` config is
@@ -58,7 +59,8 @@ function isGated(path: string): boolean {
   return (
     path.startsWith("/admin") ||
     path.startsWith("/library") ||
-    path.startsWith("/player")
+    path.startsWith("/player") ||
+    path.startsWith("/profile")
   );
 }
 

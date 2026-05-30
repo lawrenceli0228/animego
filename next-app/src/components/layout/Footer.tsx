@@ -97,6 +97,7 @@ export default function Footer({ dict, season, year }: FooterProps) {
     { to: seasonHref, label: dict.footer.seasonal },
     { to: "/", label: dict.footer.trending },
     { to: "/search", label: dict.footer.search },
+    { to: "/calendar", label: dict.home.scheduleLabel }, // P11: 放送日历
     { href: "#", label: dict.footer.topRated },
     { href: "#", label: dict.footer.upcoming },
   ];
@@ -108,8 +109,8 @@ export default function Footer({ dict, season, year }: FooterProps) {
     { href: "#", label: dict.footer.telegram },
   ];
 
-  const supportLinks: Array<{ label: string }> = [
-    { label: dict.footer.faq },
+  const supportLinks: Array<{ label: string; to?: string }> = [
+    { label: dict.footer.faq, to: "/faq" }, // P11: /faq now a real next-app page
     { label: dict.footer.contact },
     { label: dict.footer.feedback },
     { label: dict.footer.api },
