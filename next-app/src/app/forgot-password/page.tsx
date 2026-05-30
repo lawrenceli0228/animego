@@ -12,11 +12,14 @@ import ForgotPasswordForm from "./_components/ForgotPasswordForm";
 // reads the per-request `lang` cookie.
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "忘记密码",
-  // Auth surfaces stay off-index — see /login for the same posture.
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const dict = await getDict();
+  return {
+    title: dict.forgotPassword.pageTitle,
+    // Auth surfaces stay off-index — see /login for the same posture.
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function ForgotPasswordPage() {
   const dict = await getDict();

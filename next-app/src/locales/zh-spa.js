@@ -636,6 +636,34 @@ const zh = {
       backToLibrary: '返回库',
       rootFolder: '(根)',
     },
+    // SplitDialog
+    splitDialog: {
+      title: '拆分系列',
+      newSeriesName: '新系列名称',
+      namePlaceholder: '例如:Re:Zero 第二季',
+      cannotSplit: '源系列只有一个 season,无法拆分',
+      selectSeason: '选择要拆出的 season',
+      confirm: '拆分',
+    },
+    // MergeDialog
+    mergeDialog: {
+      title: '合并到…',
+      searchPlaceholder: '搜索目标系列…',
+      searchAria: '搜索目标系列',
+      emptyNoOthers: '暂无其它系列可作为合并目标',
+      emptyNoMatch: '没有匹配的系列',
+    },
+    // RematchDialog
+    rematchDialog: {
+      title: '重新匹配系列',
+    },
+    // UnclassifiedSection
+    unclassified: {
+      fileCount: '{{count}} 个文件',
+      searchAnime: '搜索归番',
+      createLocal: '创建本地',
+      ignore: '忽略',
+    },
     // UnavailableSeriesSection
     unavailable: {
       count: '{{count}} 项暂时不可访问',

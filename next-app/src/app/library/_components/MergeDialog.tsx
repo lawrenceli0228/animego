@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
+import { useLang } from "@/lib/lang-client";
 
 const HUE = PLAYER_HUE.stream;
 
@@ -45,6 +46,7 @@ export function MergeDialog({
   onClose,
   onConfirm,
 }: MergeDialogProps) {
+  const { t } = useLang();
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -93,7 +95,7 @@ export function MergeDialog({
         <CornerBrackets inset={4} size={10} opacity={0.35} hue={HUE} />
 
         <div style={s.header}>
-          <span style={s.kicker}>合并到…</span>
+          <span style={s.kicker}>{t("library.mergeDialog.title")}</span>
           <span
             id="merge-source-title"
             data-testid="merge-source-title"
@@ -109,9 +111,9 @@ export function MergeDialog({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索目标系列…"
+            placeholder={t("library.mergeDialog.searchPlaceholder")}
             style={s.search}
-            aria-label="搜索目标系列"
+            aria-label={t("library.mergeDialog.searchAria")}
           />
         </div>
 
@@ -119,8 +121,8 @@ export function MergeDialog({
           {candidates.length === 0 ? (
             <div data-testid="merge-empty" style={s.empty}>
               {allSeries.length <= 1
-                ? "暂无其它系列可作为合并目标"
-                : "没有匹配的系列"}
+                ? t("library.mergeDialog.emptyNoOthers")
+                : t("library.mergeDialog.emptyNoMatch")}
             </div>
           ) : (
             candidates.map((sr) => (
@@ -147,7 +149,7 @@ export function MergeDialog({
             style={s.cancel}
             onClick={onClose}
           >
-            取消
+            {t("library.bulk.cancel")}
           </button>
         </div>
       </div>

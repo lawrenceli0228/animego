@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import dynamic from "next/dynamic";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
+import { useLang } from "@/lib/lang-client";
 
 // ManualSearch is owned by the P6.6 Player port (subagent C in the next
 // fan-out). It doesn't exist in next-app yet; this dynamic import resolves
@@ -94,6 +95,8 @@ export function RematchDialog({
   onClose,
   onConfirm,
 }: RematchDialogProps) {
+  const { t } = useLang();
+
   useEffect(() => {
     if (!open) return undefined;
     function onKey(e: KeyboardEvent) {
@@ -129,7 +132,7 @@ export function RematchDialog({
         <CornerBrackets inset={4} size={10} opacity={0.35} hue={HUE} />
 
         <div style={s.header}>
-          <span style={s.kicker}>重新匹配系列</span>
+          <span style={s.kicker}>{t("library.rematchDialog.title")}</span>
           <span
             id="rematch-source-title"
             data-testid="rematch-source-title"
@@ -154,7 +157,7 @@ export function RematchDialog({
             style={s.cancelBtn}
             onClick={onClose}
           >
-            取消
+            {t("library.bulk.cancel")}
           </button>
         </div>
       </div>

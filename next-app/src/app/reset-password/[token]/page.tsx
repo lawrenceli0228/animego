@@ -19,11 +19,14 @@ import ResetPasswordForm from "./_components/ResetPasswordForm";
 //     would have been used to validate; INVALID_TOKEN surfaces inline.
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "重置密码",
-  // Reset links are private per-user surfaces — keep them out of indexes.
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const dict = await getDict();
+  return {
+    title: dict.resetPassword.pageTitle,
+    // Reset links are private per-user surfaces — keep them out of indexes.
+    robots: { index: false, follow: false },
+  };
+}
 
 interface ResetPasswordPageProps {
   // Next 16 makes both `params` and `searchParams` Promises (see

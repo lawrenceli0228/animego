@@ -586,6 +586,34 @@ const en = {
       backToLibrary: 'Back to library',
       rootFolder: '(root)',
     },
+    // SplitDialog
+    splitDialog: {
+      title: 'Split series',
+      newSeriesName: 'New series name',
+      namePlaceholder: 'e.g. Re:Zero Season 2',
+      cannotSplit: 'Source series has only one season — nothing to split',
+      selectSeason: 'Select seasons to extract',
+      confirm: 'Split',
+    },
+    // MergeDialog
+    mergeDialog: {
+      title: 'Merge into…',
+      searchPlaceholder: 'Search target series…',
+      searchAria: 'Search target series',
+      emptyNoOthers: 'No other series available as merge target',
+      emptyNoMatch: 'No matching series',
+    },
+    // RematchDialog
+    rematchDialog: {
+      title: 'Rematch series',
+    },
+    // UnclassifiedSection
+    unclassified: {
+      fileCount: '{{count}} file(s)',
+      searchAnime: 'Search anime',
+      createLocal: 'Create local',
+      ignore: 'Ignore',
+    },
     // UnavailableSeriesSection
     unavailable: {
       count: '{{count}} item(s) temporarily unavailable',

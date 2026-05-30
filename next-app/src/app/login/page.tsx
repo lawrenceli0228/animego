@@ -12,12 +12,15 @@ import LoginForm from "./_components/LoginForm";
 // ?from= round-trip), so static prerender is impossible by construction.
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "登录",
-  // Keep auth pages out of the index — they have no organic value and
-  // crawlers shouldn't be the ones discovering /login.
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const dict = await getDict();
+  return {
+    title: dict.login.pageTitle,
+    // Keep auth pages out of the index — they have no organic value and
+    // crawlers shouldn't be the ones discovering /login.
+    robots: { index: false, follow: false },
+  };
+}
 
 interface LoginPageProps {
   // Next 16: searchParams is a Promise.

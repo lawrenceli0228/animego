@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
+import { useLang } from "@/lib/lang-client";
 
 const HUE = PLAYER_HUE.stream;
 
@@ -113,6 +114,7 @@ export function SplitDialog({
   onClose,
   onConfirm,
 }: SplitDialogProps) {
+  const { t } = useLang();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [name, setName] = useState("");
 
@@ -177,7 +179,7 @@ export function SplitDialog({
         <CornerBrackets inset={4} size={10} opacity={0.35} hue={HUE} />
 
         <div style={s.header}>
-          <span style={s.kicker}>拆分系列</span>
+          <span style={s.kicker}>{t("library.splitDialog.title")}</span>
           <span
             id="split-source-title"
             data-testid="split-source-title"
@@ -189,7 +191,7 @@ export function SplitDialog({
 
         <div style={s.nameWrap}>
           <label style={s.fieldLabel} htmlFor="split-name-input">
-            新系列名称
+            {t("library.splitDialog.newSeriesName")}
           </label>
           <input
             id="split-name-input"
@@ -197,18 +199,18 @@ export function SplitDialog({
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="例如:Re:Zero 第二季"
+            placeholder={t("library.splitDialog.namePlaceholder")}
             style={s.nameInput}
           />
         </div>
 
         {!canSplit ? (
           <div data-testid="split-empty" style={s.empty}>
-            源系列只有一个 season,无法拆分
+            {t("library.splitDialog.cannotSplit")}
           </div>
         ) : (
           <div style={s.list}>
-            <span style={s.listLabel}>选择要拆出的 season</span>
+            <span style={s.listLabel}>{t("library.splitDialog.selectSeason")}</span>
             {seasons.map((sn) => {
               const isSel = selected.has(sn.id);
               return (
@@ -235,7 +237,7 @@ export function SplitDialog({
             style={buttonStyle(false, false)}
             onClick={onClose}
           >
-            取消
+            {t("library.bulk.cancel")}
           </button>
           <button
             data-testid="split-confirm"
@@ -246,7 +248,7 @@ export function SplitDialog({
               onConfirm({ seasonIds: selectedIds, name: trimmedName })
             }
           >
-            拆分
+            {t("library.splitDialog.confirm")}
           </button>
         </div>
       </div>

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
+import { useLang } from "@/lib/lang-client";
 
 type MatchStatus = "pending" | "failed" | "ambiguous" | string;
 
@@ -139,12 +140,12 @@ function fileNameOf(p: string | undefined): string {
 }
 
 /**
- * Trim relPath to its parent directory. Returns "(根)" for root files.
+ * Trim relPath to its parent directory. Returns rootLabel for root files.
  */
-function dirOf(p: string | undefined): string {
+function dirOf(p: string | undefined, rootLabel: string): string {
   if (!p) return "";
   const idx = p.lastIndexOf("/");
-  return idx >= 0 ? p.slice(0, idx) : "(根)";
+  return idx >= 0 ? p.slice(0, idx) : rootLabel;
 }
 
 interface UnclassifiedSectionProps {
@@ -173,8 +174,10 @@ function UnclassifiedSection({
   onCreateLocal,
   onIgnore,
 }: UnclassifiedSectionProps) {
+  const { t } = useLang();
   const rows = entries ?? [];
   const [open, setOpen] = useState(defaultOpen);
+  const rootLabel = t("library.localSeries.rootFolder");
 
   const sorted = useMemo(() => {
     return [...rows].sort((a, b) =>
@@ -201,7 +204,7 @@ function UnclassifiedSection({
       >
         <span style={s.kicker}>{"// UNCLASSIFIED //"}</span>
         <span style={s.count} data-testid="unclassified-count">
-          {rows.length} 个文件
+          {t("library.unclassified.fileCount").replace("{{count}}", String(rows.length))}
         </span>
         <span
           style={{
@@ -231,7 +234,7 @@ function UnclassifiedSection({
                   <span style={s.fileName} title={fr.relPath}>
                     {fileNameOf(fr.relPath)}
                   </span>
-                  <span style={s.rowMeta}>{dirOf(fr.relPath)}</span>
+                  <span style={s.rowMeta}>{dirOf(fr.relPath, rootLabel)}</span>
                 </div>
                 <div style={s.actions}>
                   <button
@@ -241,7 +244,7 @@ function UnclassifiedSection({
                     onClick={() => onSearch?.(fr)}
                     disabled={!onSearch}
                   >
-                    搜索归番
+                    {t("library.unclassified.searchAnime")}
                   </button>
                   <button
                     type="button"
@@ -250,7 +253,7 @@ function UnclassifiedSection({
                     onClick={() => onCreateLocal?.(fr)}
                     disabled={!onCreateLocal}
                   >
-                    创建本地
+                    {t("library.unclassified.createLocal")}
                   </button>
                   <button
                     type="button"
@@ -259,7 +262,7 @@ function UnclassifiedSection({
                     onClick={() => onIgnore?.(fr)}
                     disabled={!onIgnore}
                   >
-                    忽略
+                    {t("library.unclassified.ignore")}
                   </button>
                 </div>
               </div>

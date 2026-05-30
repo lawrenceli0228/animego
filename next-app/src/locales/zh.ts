@@ -131,7 +131,7 @@ const zh = {
   },
   // Login
   login: {
-    title: 'AnimeGo', subtitle: '欢迎回来，继续追番之旅',
+    title: 'AnimeGo', pageTitle: '登录', subtitle: '欢迎回来，继续追番之旅',
     email: '邮箱', password: '密码',
     submit: '登录', submitting: '登录中...',
     noAccount: '还没有账号？', registerLink: '立即注册',
@@ -139,14 +139,14 @@ const zh = {
     success: '登录成功！', fail: '登录失败',
   },
   forgotPassword: {
-    title: '重置密码', subtitle: '输入注册邮箱，我们将发送重置链接',
+    title: '重置密码', pageTitle: '忘记密码', subtitle: '输入注册邮箱，我们将发送重置链接',
     email: '邮箱', submit: '发送重置链接', submitting: '发送中...',
     success: '重置链接已发送，请查收邮件（包括垃圾邮件）',
     backToLogin: '返回登录',
     fail: '发送失败，请稍后重试',
   },
   resetPassword: {
-    title: '设置新密码', subtitle: '请输入你的新密码',
+    title: '设置新密码', pageTitle: '重置密码', subtitle: '请输入你的新密码',
     password: '新密码（至少 6 位）', confirm: '确认新密码',
     submit: '确认重置', submitting: '重置中...',
     mismatch: '两次密码不一致',
@@ -155,7 +155,7 @@ const zh = {
   },
   // Register
   register: {
-    title: '创建账号', subtitle: '加入 AnimeGo，开始你的追番列表',
+    title: '创建账号', pageTitle: '注册', subtitle: '加入 AnimeGo，开始你的追番列表',
     username: '用户名', email: '邮箱', password: '密码（至少6位）',
     submit: '创建账号', submitting: '注册中...',
     hasAccount: '已有账号？', loginLink: '立即登录',

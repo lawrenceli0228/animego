@@ -11,11 +11,14 @@ import RegisterForm from "./_components/RegisterForm";
 // rendering driven by ?from= and the session cookie).
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "注册",
-  // Auth pages are off-index — see /login for the same robots posture.
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const dict = await getDict();
+  return {
+    title: dict.register.pageTitle,
+    // Auth pages are off-index — see /login for the same robots posture.
+    robots: { index: false, follow: false },
+  };
+}
 
 interface RegisterPageProps {
   searchParams: Promise<{ from?: string | string[] }>;

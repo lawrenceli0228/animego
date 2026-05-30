@@ -81,7 +81,7 @@ const en = {
   },
   // Login
   login: {
-    title: 'AnimeGo', subtitle: 'Welcome back, continue your journey',
+    title: 'AnimeGo', pageTitle: 'Login', subtitle: 'Welcome back, continue your journey',
     email: 'Email', password: 'Password',
     submit: 'Login', submitting: 'Logging in...',
     noAccount: "Don't have an account? ", registerLink: 'Sign Up',
@@ -89,14 +89,14 @@ const en = {
     success: 'Logged in!', fail: 'Login failed',
   },
   forgotPassword: {
-    title: 'Reset Password', subtitle: "Enter your email and we'll send a reset link",
+    title: 'Reset Password', pageTitle: 'Forgot Password', subtitle: "Enter your email and we'll send a reset link",
     email: 'Email', submit: 'Send Reset Link', submitting: 'Sending...',
     success: 'Reset link sent! Check your inbox (including spam folder)',
     backToLogin: 'Back to Login',
     fail: 'Send failed, please try again later',
   },
   resetPassword: {
-    title: 'Set New Password', subtitle: 'Enter your new password below',
+    title: 'Set New Password', pageTitle: 'Reset Password', subtitle: 'Enter your new password below',
     password: 'New Password (min. 6 chars)', confirm: 'Confirm New Password',
     submit: 'Reset Password', submitting: 'Resetting...',
     mismatch: 'Passwords do not match',
@@ -105,7 +105,7 @@ const en = {
   },
   // Register
   register: {
-    title: 'Create Account', subtitle: 'Join AnimeGo and start your watchlist',
+    title: 'Create Account', pageTitle: 'Sign Up', subtitle: 'Join AnimeGo and start your watchlist',
     username: 'Username', email: 'Email', password: 'Password (min. 6 chars)',
     submit: 'Create Account', submitting: 'Creating...',
     hasAccount: 'Already have an account? ', loginLink: 'Login',
