@@ -362,6 +362,7 @@ const zh = {
       f3Eyebrow: '03 · 字幕组聚合', f3Title: '找到你信的那组字幕。',
       f3Body: '详情页一键并行抓 动漫花园、Nyaa、ACG.RIP —— 按字幕组和分辨率过滤,magnet 一步到位。',
       f3AggLabel: '并行抓取 · 3 个源',
+      f3TotalSuffix: ' 条',
       f3FilterLabel: '按 字幕组 × 分辨率 × 日期 过滤',
       f3Cta: '在芙莉莲详情页打开种子 →',
       f4Eyebrow: '04 · 手动选集', f4Title: '匹配不了?你来点。',

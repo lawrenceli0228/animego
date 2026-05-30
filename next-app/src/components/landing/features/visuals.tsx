@@ -449,7 +449,7 @@ export function TorrentVisual({ hue, features }: TorrentVisualProps) {
           </span>
         ))}
         <span style={{ ...mono, fontSize: 10, color: "rgba(235,235,245,0.45)", marginLeft: "auto" }}>
-          {totalDisplay} 条
+          {totalDisplay}{features.f3TotalSuffix}
         </span>
       </div>
 

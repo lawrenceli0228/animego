@@ -312,6 +312,7 @@ const en = {
       f3Eyebrow: '03 · Fansub lookup', f3Title: 'Find the fansub you trust.',
       f3Body: 'One click from the detail page. Parallel pulls from DMHY, Nyaa, and ACG.RIP — filter by fansub group and resolution. Magnet, one step.',
       f3AggLabel: 'parallel fetch · 3 sources',
+      f3TotalSuffix: '',
       f3FilterLabel: 'filter · group × resolution × date',
       f3Cta: "Open torrents on Frieren's page →",
       f4Eyebrow: '04 · Manual picking', f4Title: "Can't match? You pick.",
