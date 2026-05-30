@@ -232,6 +232,27 @@ const en = {
     supplementary: 'Supplementary',
     desktopOnly: 'Desktop only',
     desktopHint: 'The video player requires a desktop browser',
+    // VideoPlayer artplayer settings panel labels
+    subtitleSize: 'Subtitle size',
+    subtitlePosition: 'Subtitle position',
+    playbackSpeed: 'Speed',
+    danmakuToggle: 'Danmaku',
+    danmakuOn: 'On',
+    danmakuOff: 'Off',
+    loadSubtitleFile: 'Load subtitle file',
+    subtitleFileTooltip: 'Local .vtt / .srt / .ass',
+    clickToSelect: 'Click to select…',
+    subtitleLoadFailed: 'Subtitle load failed: ',
+    subtitleLoaded: 'Loaded subtitle: ',
+    // PlayerShell
+    backToLibrary: 'Back to library',
+    // DropZone (keys used with defaultValue fallback)
+    parseCancel: 'Cancel',
+    parsing: 'Parsing…',
+    // DanmakuPicker episode count suffix
+    epSuffix: 'eps',
+    // page.tsx skeleton
+    loadingPlayer: 'Loading player…',
   },
   // Landing / About page
   landing: {

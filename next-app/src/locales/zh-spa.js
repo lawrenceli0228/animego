@@ -282,6 +282,27 @@ const zh = {
     supplementary: '补充内容',
     desktopOnly: '请在电脑上使用此功能',
     desktopHint: '视频播放器需要在桌面浏览器上使用',
+    // VideoPlayer artplayer settings panel labels
+    subtitleSize: '字幕大小',
+    subtitlePosition: '字幕位置',
+    playbackSpeed: '倍速',
+    danmakuToggle: '弹幕开关',
+    danmakuOn: '开',
+    danmakuOff: '关',
+    loadSubtitleFile: '加载字幕文件',
+    subtitleFileTooltip: '本地 .vtt / .srt / .ass',
+    clickToSelect: '点击选择…',
+    subtitleLoadFailed: '字幕加载失败: ',
+    subtitleLoaded: '已加载字幕: ',
+    // PlayerShell
+    backToLibrary: '返回库',
+    // DropZone (keys used with defaultValue fallback)
+    parseCancel: '取消',
+    parsing: '解析中…',
+    // DanmakuPicker episode count suffix
+    epSuffix: '集',
+    // page.tsx skeleton
+    loadingPlayer: '正在加载播放器…',
   },
   // Landing / About page
   landing: {

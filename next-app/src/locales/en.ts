@@ -612,6 +612,17 @@ const en = {
     updateFailed: 'Update failed',
     deleteSuccess: 'User deleted',
     deleteFailed: 'Delete failed',
+    // Server-action validation messages (thrown by users.ts; resolved via getDict())
+    userActions: {
+      usernameEmpty: 'Username is required',
+      usernameMinMax: 'Username must be {{min}}-{{max}} characters',
+      emailEmpty: 'Email is required',
+      emailInvalid: 'Invalid email format',
+      passwordEmpty: 'Password is required',
+      passwordMinLen: 'Password must be at least {{len}} characters',
+      missingUserId: 'Missing user ID',
+      noUpdateFields: 'No fields to update',
+    },
   },
 }
 

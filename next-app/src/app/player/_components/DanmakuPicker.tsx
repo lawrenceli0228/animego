@@ -350,6 +350,7 @@ interface AnimeRowProps {
 
 function AnimeRow({ item, onPick }: AnimeRowProps) {
   const [hover, setHover] = useState(false);
+  const { t } = useLang();
   return (
     <div
       style={(s.animeRow as (h: boolean) => CSSProperties)(hover)}
@@ -376,7 +377,7 @@ function AnimeRow({ item, onPick }: AnimeRowProps) {
         <div style={s.animeMeta as CSSProperties}>
           {item.seasonYear && `${item.seasonYear} `}
           {item.format && `· ${item.format} `}
-          {item.episodes && `· ${item.episodes}集`}
+          {item.episodes && `· ${item.episodes} ${t("player.epSuffix")}`}
         </div>
       </div>
     </div>

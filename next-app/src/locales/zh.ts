@@ -662,6 +662,17 @@ const zh = {
     updateFailed: '更新失败',
     deleteSuccess: '用户已删除',
     deleteFailed: '删除失败',
+    // Server-action validation messages (thrown by users.ts; resolved via getDict())
+    userActions: {
+      usernameEmpty: '用户名不能为空',
+      usernameMinMax: '用户名长度必须在 {{min}}-{{max}} 字符之间',
+      emailEmpty: '邮箱不能为空',
+      emailInvalid: '邮箱格式无效',
+      passwordEmpty: '密码不能为空',
+      passwordMinLen: '密码长度不能少于 {{len}} 位',
+      missingUserId: '缺少用户 ID',
+      noUpdateFields: '未提供更新字段',
+    },
   },
 }
 

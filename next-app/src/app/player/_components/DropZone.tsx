@@ -300,12 +300,12 @@ function DropZone({
                     textTransform: "uppercase",
                   }}
                 >
-                  ⊘ {t("player.parseCancel", { defaultValue: "取消" })}
+                  ⊘ {t("player.parseCancel")}
                 </button>
               )}
             </div>
             <div style={s.parseTitle} data-testid="dropzone-parse-title">
-              {t("player.parsing", { defaultValue: "解析中…" })}
+              {t("player.parsing")}
             </div>
             {currentFileName && (
               <div

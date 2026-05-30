@@ -2,6 +2,7 @@
 
 import { Suspense } from "react";
 import dynamic from "next/dynamic";
+import { useLang } from "@/lib/lang-client";
 
 // PlayerShell is the entire Player surface — artplayer + jassub +
 // danmaku + episode list — all of which is 100 % browser-DOM. ssr:
@@ -17,10 +18,11 @@ const PlayerShell = dynamic(
 );
 
 function PlayerSkeleton() {
+  const { t } = useLang();
   return (
     <div style={styles.skeleton}>
       <div style={styles.skeletonVideo}>
-        <div style={styles.skeletonSpinner}>正在加载播放器…</div>
+        <div style={styles.skeletonSpinner}>{t("player.loadingPlayer")}</div>
       </div>
     </div>
   );

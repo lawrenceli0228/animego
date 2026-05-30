@@ -17,6 +17,7 @@
 
 import { revalidatePath, revalidateTag } from "next/cache";
 import { ApiError, apiMutate } from "@/lib/api";
+import { getDict, type Dict } from "@/lib/i18n";
 import {
   type AdminUserFull,
   type AdminUserMinimal,
@@ -46,40 +47,61 @@ const USERNAME_MAX = 50;
 const PASSWORD_MIN = 6;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function validateUsername(raw: string): string {
+function validateUsername(raw: string, dict: Dict): string {
   const trimmed = raw.trim();
   if (trimmed === "") {
-    throw new UserActionError("VALIDATION_ERROR", "用户名不能为空", 400);
+    throw new UserActionError(
+      "VALIDATION_ERROR",
+      dict.admin.userActions.usernameEmpty,
+      400,
+    );
   }
   if (trimmed.length < USERNAME_MIN || trimmed.length > USERNAME_MAX) {
     throw new UserActionError(
       "VALIDATION_ERROR",
-      `用户名长度必须在 ${USERNAME_MIN}-${USERNAME_MAX} 字符之间`,
+      dict.admin.userActions.usernameMinMax
+        .replace("{{min}}", String(USERNAME_MIN))
+        .replace("{{max}}", String(USERNAME_MAX)),
       400,
     );
   }
   return trimmed;
 }
 
-function validateEmail(raw: string): string {
+function validateEmail(raw: string, dict: Dict): string {
   const trimmed = raw.trim();
   if (trimmed === "") {
-    throw new UserActionError("VALIDATION_ERROR", "邮箱不能为空", 400);
+    throw new UserActionError(
+      "VALIDATION_ERROR",
+      dict.admin.userActions.emailEmpty,
+      400,
+    );
   }
   if (!EMAIL_RE.test(trimmed)) {
-    throw new UserActionError("VALIDATION_ERROR", "邮箱格式无效", 400);
+    throw new UserActionError(
+      "VALIDATION_ERROR",
+      dict.admin.userActions.emailInvalid,
+      400,
+    );
   }
   return trimmed;
 }
 
-function validatePassword(raw: string): string {
+function validatePassword(raw: string, dict: Dict): string {
   if (raw === "") {
-    throw new UserActionError("VALIDATION_ERROR", "密码不能为空", 400);
+    throw new UserActionError(
+      "VALIDATION_ERROR",
+      dict.admin.userActions.passwordEmpty,
+      400,
+    );
   }
   if (raw.length < PASSWORD_MIN) {
     throw new UserActionError(
       "VALIDATION_ERROR",
-      `密码长度不能少于 ${PASSWORD_MIN} 位`,
+      dict.admin.userActions.passwordMinLen.replace(
+        "{{len}}",
+        String(PASSWORD_MIN),
+      ),
       400,
     );
   }
@@ -101,9 +123,10 @@ export async function createAdminUser(data: {
   password: string;
 }): Promise<AdminUserMinimal> {
   try {
-    const username = validateUsername(data.username);
-    const email = validateEmail(data.email);
-    const password = validatePassword(data.password);
+    const dict = await getDict();
+    const username = validateUsername(data.username, dict);
+    const email = validateEmail(data.email, dict);
+    const password = validatePassword(data.password, dict);
 
     const created = await apiMutate<AdminUserMinimal>(
       "/api/admin/users",
@@ -132,10 +155,15 @@ export async function setAdminUserPassword(
   password: string,
 ): Promise<void> {
   try {
+    const dict = await getDict();
     if (!userId) {
-      throw new UserActionError("VALIDATION_ERROR", "缺少用户 ID", 400);
+      throw new UserActionError(
+        "VALIDATION_ERROR",
+        dict.admin.userActions.missingUserId,
+        400,
+      );
     }
-    const pw = validatePassword(password);
+    const pw = validatePassword(password, dict);
     await apiMutate<{ success: boolean }>(
       `/api/admin/users/${encodeURIComponent(userId)}/password`,
       "POST",
@@ -164,18 +192,27 @@ export async function updateAdminUser(
   patch: { username?: string; email?: string },
 ): Promise<AdminUserFull> {
   try {
+    const dict = await getDict();
     if (!userId) {
-      throw new UserActionError("VALIDATION_ERROR", "缺少用户 ID", 400);
+      throw new UserActionError(
+        "VALIDATION_ERROR",
+        dict.admin.userActions.missingUserId,
+        400,
+      );
     }
     const body: { username?: string; email?: string } = {};
     if (patch.username !== undefined) {
-      body.username = validateUsername(patch.username);
+      body.username = validateUsername(patch.username, dict);
     }
     if (patch.email !== undefined) {
-      body.email = validateEmail(patch.email);
+      body.email = validateEmail(patch.email, dict);
     }
     if (Object.keys(body).length === 0) {
-      throw new UserActionError("VALIDATION_ERROR", "未提供更新字段", 400);
+      throw new UserActionError(
+        "VALIDATION_ERROR",
+        dict.admin.userActions.noUpdateFields,
+        400,
+      );
     }
 
     const updated = await apiMutate<AdminUserFull>(
@@ -206,8 +243,13 @@ export async function deleteAdminUser(
   userId: string,
 ): Promise<DeleteUserResult> {
   try {
+    const dict = await getDict();
     if (!userId) {
-      throw new UserActionError("VALIDATION_ERROR", "缺少用户 ID", 400);
+      throw new UserActionError(
+        "VALIDATION_ERROR",
+        dict.admin.userActions.missingUserId,
+        400,
+      );
     }
     const result = await apiMutate<DeleteUserResult>(
       `/api/admin/users/${encodeURIComponent(userId)}`,

@@ -6,6 +6,7 @@ import type { Danmu } from "artplayer-plugin-danmuku";
 import { applyHeatmapPath } from "@/lib/heatmapPath";
 import { convertAssToVtt, convertSrtToVtt } from "@/lib/subtitleConvert";
 import { mountJassub, destroyJassub } from "./jassubOverlay";
+import { useLang } from "@/lib/lang-client";
 
 // Inline-style object — matches the SeriesCard pattern used elsewhere in
 // the next-app port. Page chrome (background/colors) is owned by the
@@ -219,6 +220,7 @@ export function VideoPlayer({
   resumeAt = null,
   onProgressTick,
 }: VideoPlayerProps) {
+  const { t } = useLang();
   const containerRef = useRef<HTMLDivElement | null>(null);
   // artplayer & jassub instances are typed loosely — both libraries have
   // dynamic shapes the player code reads/writes directly. `any` is
@@ -318,7 +320,7 @@ export function VideoPlayer({
         setting: true,
         settings: [
           {
-            html: "字幕大小",
+            html: t("player.subtitleSize"),
             width: 220,
             tooltip: `${initialSize}px`,
             range: [
@@ -337,7 +339,7 @@ export function VideoPlayer({
             },
           },
           {
-            html: "字幕位置",
+            html: t("player.subtitlePosition"),
             width: 220,
             tooltip: `${initialOffset}px`,
             range: [
@@ -356,7 +358,7 @@ export function VideoPlayer({
             },
           },
           {
-            html: "倍速",
+            html: t("player.playbackSpeed"),
             tooltip: `${initialRate}x`,
             selector: PLAYBACK_RATE_OPTIONS.map((rate) => ({
               html: `${rate}x`,
@@ -373,8 +375,8 @@ export function VideoPlayer({
             },
           },
           {
-            html: "弹幕开关",
-            tooltip: initialDanmakuVisible ? "开" : "关",
+            html: t("player.danmakuToggle"),
+            tooltip: initialDanmakuVisible ? t("player.danmakuOn") : t("player.danmakuOff"),
             switch: initialDanmakuVisible,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             onSwitch(item: any) {
@@ -388,12 +390,12 @@ export function VideoPlayer({
             },
           },
           {
-            html: "加载字幕文件",
-            tooltip: "本地 .vtt / .srt / .ass",
-            selector: [{ html: "点击选择…", value: "pick" }],
+            html: t("player.loadSubtitleFile"),
+            tooltip: t("player.subtitleFileTooltip"),
+            selector: [{ html: t("player.clickToSelect"), value: "pick" }],
             onSelect() {
               fileInputRef.current?.click();
-              return "点击选择…";
+              return t("player.clickToSelect");
             },
           },
         ],
@@ -797,7 +799,7 @@ export function VideoPlayer({
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn("[VideoPlayer] subtitle file load failed:", err);
-      art.notice.show = `字幕加载失败: ${(err as Error)?.message || err}`;
+      art.notice.show = `${t("player.subtitleLoadFailed")}${(err as Error)?.message || String(err)}`;
       return;
     }
 
@@ -819,7 +821,7 @@ export function VideoPlayer({
         bottom: `${subtitleOffsetRef.current}px`,
       },
     });
-    art.notice.show = `已加载字幕: ${file.name}`;
+    art.notice.show = `${t("player.subtitleLoaded")}${file.name}`;
   }
 
   return (

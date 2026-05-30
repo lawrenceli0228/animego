@@ -1160,7 +1160,7 @@ function PlayerShellInner() {
                 locationSeriesId ? handleBackToLibraryGrid : handleClearAll
               }
               onSetDanmaku={setPickerEp}
-              clearLabel={locationSeriesId ? "返回库" : undefined}
+              clearLabel={locationSeriesId ? t("player.backToLibrary") : undefined}
             />
           </div>
         )}
