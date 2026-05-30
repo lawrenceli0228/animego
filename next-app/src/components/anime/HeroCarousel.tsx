@@ -276,7 +276,7 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
         };
 
         return (
-          <div key={anime.anilistId} style={slideStyle} aria-hidden={!isActive}>
+          <div key={anime.anilistId} style={slideStyle} aria-hidden={!isActive} inert={!isActive}>
             {bg ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img

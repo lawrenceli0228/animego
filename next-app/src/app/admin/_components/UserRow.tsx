@@ -245,6 +245,7 @@ export function UserRow({ user }: UserRowProps) {
           ) : pwMode ? (
             <input
               type="password"
+              autoComplete="new-password"
               value={pw}
               onChange={(e) => setPw(e.target.value)}
               placeholder={t("admin.newPasswordPlaceholder")

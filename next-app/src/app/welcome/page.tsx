@@ -144,10 +144,10 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph,
     twitter,
     alternates: {
-      canonical: "/",
+      canonical: "/welcome",
       languages: {
-        "zh-CN": "/",
-        "en-US": "/?lang=en",
+        "zh-CN": "/welcome",
+        "en-US": "/welcome?lang=en",
       },
     },
   };
