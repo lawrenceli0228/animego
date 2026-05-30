@@ -18,6 +18,8 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
+  useState,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -33,6 +35,7 @@ export type Lang = "zh" | "en";
 const DICTS: Record<Lang, Dict> = { zh, en };
 
 const LANG_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
+const LANG_CHANGE_EVENT = "animego:langchange";
 
 /**
  * Persist the language choice in the `lang` cookie — the single place the
@@ -42,6 +45,12 @@ const LANG_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
  */
 export function writeLangCookie(lang: Lang): void {
   document.cookie = `lang=${lang}; max-age=${LANG_COOKIE_MAX_AGE}; path=/; samesite=lax`;
+  // Notify provider-less islands (the ssr:false Library/Player chunks — see
+  // useLang) to re-read the cookie so they switch in lockstep with the
+  // Navbar toggle even though they can't see the RootLayout provider.
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(LANG_CHANGE_EVENT));
+  }
 }
 
 interface LangContextValue {
@@ -107,13 +116,36 @@ export function LanguageProvider({
   );
 }
 
-// Fallback dict resolves against zh — keeps tests + accidental
-// bare-mounted components from crashing or showing raw keys.
-const FALLBACK: LangContextValue = {
-  lang: "zh",
-  toggle: () => {},
-  t: (key, opts) => resolve(DICTS.zh, key, opts),
-};
+/** Read the `lang` cookie on the client; zh during SSR (no document). */
+function cookieLang(): Lang {
+  if (typeof document === "undefined") return "zh";
+  return /(?:^|;\s*)lang=en\b/.test(document.cookie) ? "en" : "zh";
+}
 
-export const useLang = (): LangContextValue =>
-  useContext(LanguageContext) ?? FALLBACK;
+/**
+ * Returns the RootLayout provider's context when present. When it is NOT —
+ * inside an `ssr: false` dynamic island (library/player), whose async chunk
+ * resolves a *separate* LanguageContext instance and so can't see the
+ * provider — fall back to the `lang` cookie (the same source the server
+ * reads) instead of hardcoding zh, staying reactive to Navbar toggles via
+ * the langchange event. Hooks run unconditionally (rules-of-hooks).
+ */
+export const useLang = (): LangContextValue => {
+  const ctx = useContext(LanguageContext);
+  const [fallbackLang, setFallbackLang] = useState<Lang>(cookieLang);
+
+  useEffect(() => {
+    if (ctx) return; // provider present — fallback unused
+    const sync = () => setFallbackLang(cookieLang());
+    sync(); // reconcile after mount (SSR seeded zh; cookie may be en)
+    window.addEventListener(LANG_CHANGE_EVENT, sync);
+    return () => window.removeEventListener(LANG_CHANGE_EVENT, sync);
+  }, [ctx]);
+
+  if (ctx) return ctx;
+  return {
+    lang: fallbackLang,
+    toggle: () => writeLangCookie(fallbackLang === "zh" ? "en" : "zh"),
+    t: (key, opts) => resolve(DICTS[fallbackLang], key, opts),
+  };
+};
