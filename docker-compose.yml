@@ -170,6 +170,35 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ─── P9: schema migrate (one-shot) ────────────────────────────────────
+  # Applies go-api/migrations/*.sql (golang-migrate) to the postgres volume.
+  # NOT in the default `up` set — guarded behind the `migrate` profile so it
+  # only runs on an explicit `docker compose --profile migrate run --rm
+  # migrate`. The cutover MUST run this before go-api starts: go-api's River
+  # queue crash-loops on an empty DB (no river_job table). There is no other
+  # schema-apply path — go-api/cmd/migrate does not exist, migrations are not
+  # embedded in the server binary, and the VPS has no host golang-migrate.
+  # Connects over the internal animego network (postgres:5432), so it dodges
+  # the host-port IPv6/first-init race that p9-dry-run.sh works around.
+  # Pinned to v4.19.1 to match the golang-migrate used locally.
+  migrate:
+    image: migrate/migrate:v4.19.1
+    profiles: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./go-api/migrations:/migrations:ro
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable",
+        "up",
+      ]
+    networks:
+      - animego
+    restart: "no"
+
   # ─── P8.5: go-api (Go HTTP API) ───────────────────────────────────────
   # Chi-based Go server.  Waits for postgres healthcheck before starting
   # so pgxpool.Connect at boot never races a cold DB.
