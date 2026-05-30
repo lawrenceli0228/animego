@@ -49,8 +49,14 @@ import (
 // DefaultAPIRate and DefaultAPIBurst are exported so main.go can read
 // them when constructing the limiter with an env-driven burst override.
 const (
-	DefaultAPIRate  = rate.Limit(1.0 / 3.0) // 1 token per 3 seconds (sustained)
-	DefaultAPIBurst = 20                     // burst size (rate.Limiter standard)
+	// The Next.js RSC home render alone fires ~8 server-side /api fetches
+	// (trending, schedule, seasonal, rankings, activity, continue-watching,
+	// auth/me, ...), and a language-toggle router.refresh re-runs all of
+	// them. With next-app now forwarding X-Real-IP the budget is per real
+	// user, so size it for a few full renders rather than the old shared
+	// next-app-container bucket: 1/sec sustained with a 60-token burst.
+	DefaultAPIRate  = rate.Limit(1.0) // 1 token per second (sustained)
+	DefaultAPIBurst = 60              // ~7 full RSC renders before throttling
 
 	defaultAPISweepInterval = 5 * time.Minute
 	defaultAPIIPMaxIdle     = 30 * time.Minute

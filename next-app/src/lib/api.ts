@@ -11,6 +11,8 @@ import type {
 // (e.g. static prerender, middleware-level fetches).
 type CookieJar = { toString(): string };
 type CookiesFn = () => Promise<CookieJar> | CookieJar;
+type HeaderBag = { get(name: string): string | null };
+type HeadersFn = () => Promise<HeaderBag> | HeaderBag;
 
 export class ApiError extends Error {
   constructor(
@@ -71,10 +73,23 @@ async function buildHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (typeof window !== "undefined") return headers;
   try {
-    const mod = (await import("next/headers")) as { cookies: CookiesFn };
+    const mod = (await import("next/headers")) as {
+      cookies: CookiesFn;
+      headers: HeadersFn;
+    };
     const jar = await mod.cookies();
     const cookieStr = jar.toString();
     if (cookieStr) headers.Cookie = cookieStr;
+    // Forward the real client IP so go-api's per-IP rate limiter attributes
+    // each SSR fetch to the actual user. Without this every server-side
+    // fetch reaches go-api from the next-app container's single IP, so all
+    // users share one rate-limit bucket and a multi-fetch page render — or a
+    // router.refresh from the language toggle — trips a spurious 429.
+    const reqHeaders = await mod.headers();
+    const realIp = reqHeaders.get("x-real-ip");
+    if (realIp) headers["X-Real-IP"] = realIp;
+    const forwardedFor = reqHeaders.get("x-forwarded-for");
+    if (forwardedFor) headers["X-Forwarded-For"] = forwardedFor;
   } catch {
     /* no RSC context — forward nothing */
   }
