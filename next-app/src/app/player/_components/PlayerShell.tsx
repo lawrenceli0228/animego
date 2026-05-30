@@ -29,7 +29,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 
-import { useLang, LanguageProvider } from "@/lib/lang-client";
+import { useLang } from "@/lib/lang-client";
 import {
   ChapterBar,
   CornerBrackets,
@@ -1280,15 +1280,13 @@ function PlayerShellInner() {
 }
 
 /**
- * Outer wrapper that provides the LanguageProvider for the ported legacy
- * `useLang()` call sites. Mirrors LibraryShell's pattern.
+ * Player surface. The `useLang()` call sites resolve against the
+ * cookie-driven LanguageProvider mounted in RootLayout, so Player follows
+ * the site-wide language toggle instead of an independent localStorage
+ * copy.
  */
 export function PlayerShell() {
-  return (
-    <LanguageProvider>
-      <PlayerShellInner />
-    </LanguageProvider>
-  );
+  return <PlayerShellInner />;
 }
 
 export default PlayerShell;

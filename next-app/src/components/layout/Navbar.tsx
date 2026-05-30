@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
 import type { CSSProperties } from "react";
 import type { Dict, Lang } from "@/lib/i18n";
+import { writeLangCookie } from "@/lib/lang-client";
 
 export interface NavUser {
   username: string;
@@ -165,9 +166,7 @@ export default function Navbar({
   ];
 
   function toggleLang() {
-    const next = lang === "zh" ? "en" : "zh";
-    // 1y expiry, same-site, root path so all routes see the switch.
-    document.cookie = `lang=${next}; max-age=${60 * 60 * 24 * 365}; path=/; samesite=lax`;
+    writeLangCookie(lang === "zh" ? "en" : "zh");
     startLangTransition(() => router.refresh());
   }
 

@@ -4,6 +4,7 @@ import { Toaster } from "react-hot-toast";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { getDict, getLang } from "@/lib/i18n";
+import { LanguageProvider } from "@/lib/lang-client";
 import { apiGet, ApiError } from "@/lib/api";
 import "./globals.css";
 
@@ -150,7 +151,9 @@ export default async function RootLayout({
             },
           }}
         />
-        <div style={{ flex: 1 }}>{children}</div>
+        <div style={{ flex: 1 }}>
+          <LanguageProvider lang={lang}>{children}</LanguageProvider>
+        </div>
         <Footer dict={dict} season={season} year={year} />
       </body>
     </html>
