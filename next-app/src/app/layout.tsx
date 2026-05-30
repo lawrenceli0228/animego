@@ -74,13 +74,14 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       site: "@animegoclub",
     },
-    alternates: {
-      canonical: "/",
-      languages: {
-        "zh-CN": "/",
-        "en-US": "/?lang=en",
-      },
-    },
+    // No blanket `alternates` default. A layout-level canonical:"/" makes every
+    // page that doesn't set its own canonical (e.g. /search) point at the
+    // homepage, telling Google those pages duplicate "/" — Lighthouse flags
+    // "canonical points to root instead of an equivalent page". Each page sets
+    // its own self-referential canonical (home/seasonal/anime/welcome already
+    // do); pages without one fall back to Google's self-canonical default.
+    // Self-referential hreflang for every route (via an x-pathname header from
+    // proxy.ts) is the follow-up — task #41.
   };
 }
 

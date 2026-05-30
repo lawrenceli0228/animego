@@ -145,7 +145,10 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: { absolute: "AnimeGoClub" },
     description: dict.landing.hero.sub,
-    alternates: { canonical: "/" },
+    alternates: {
+      canonical: "/",
+      languages: { "zh-CN": "/", "en-US": "/?lang=en" },
+    },
     openGraph: {
       title: "AnimeGoClub",
       description: dict.landing.hero.sub,
