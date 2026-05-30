@@ -498,6 +498,11 @@ func (h *EnrichmentHandlers) ReEnrich(w http.ResponseWriter, r *http.Request) {
 					httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
 					return
 				}
+				// Seed the in-memory batch tracker — mirrors Express's
+				// startV3Batch(withBgm.length) in bangumi.service.js.
+				// Only the withBgm slice feeds V3 jobs (noBgm rows go
+				// through PromoteAnimeToV3 directly without a worker).
+				queue.V3BatchStart(int64(len(jobs)))
 			}
 		}
 
@@ -555,6 +560,10 @@ func (h *EnrichmentHandlers) HealCn(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
 			return
 		}
+		// Seed the in-memory batch tracker so queueStatusFn can expose
+		// Total/Processed/Healed to the admin UI.  Mirrors Express's
+		// startV3Batch(docs.length) call in bangumi.service.js.
+		queue.V3BatchStart(int64(len(jobs)))
 	}
 
 	// Express returns docs.length (matches len(rows)).

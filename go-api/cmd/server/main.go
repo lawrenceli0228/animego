@@ -273,19 +273,30 @@ func main() {
 	//   enrichment:  /api/admin/enrichment/* writes (re-enrich, heal-cn, reset, flag)
 	//   userCRUD:    /api/admin/{users,warm-all} writes
 	//
-	// QueueStatusFn injects river-derived V3 pause info into the /stats
-	// response.  Phase1/Phase4/V3 depth counters are 0 today — the
-	// in-memory counters Express maintained were removed when V1/V2/V3
-	// moved to river; the next phase can layer a JobList-based depth
-	// reading on top without changing the response shape.
+	// QueueStatusFn assembles the /stats `queue` field: per-kind river_job
+	// depth counts (Phase1/Phase4/V3), the V3 batch progress
+	// (total/processed/healed from the in-memory tracker that the heal-cn /
+	// re-enrich-v2 endpoints seed and the V3 worker increments), and the
+	// river-persisted V3 pause flag.
 	queueStatusFn := func(ctx context.Context) (admin.QueueSnapshot, error) {
 		snap := admin.QueueSnapshot{}
 
 		// V3 paused flag — survives process restart (river_queue.paused_at).
-		if s, err := queue.Status(ctx, riverClient); err == nil {
-			snap.V3Progress = &admin.V3BatchProgress{Paused: s.V3Paused}
-		} else {
-			slog.WarnContext(ctx, "admin: queue.Status failed", "err", err)
+		// Also attach the in-memory batch counters so the frontend's
+		// striped-progress animation activates when a batch is running.
+		{
+			total, processed, healed := queue.V3BatchSnapshot()
+			prog := &admin.V3BatchProgress{
+				Total:     total,
+				Processed: processed,
+				Healed:    healed,
+			}
+			if s, err := queue.Status(ctx, riverClient); err == nil {
+				prog.Paused = s.V3Paused
+			} else {
+				slog.WarnContext(ctx, "admin: queue.Status failed", "err", err)
+			}
+			snap.V3Progress = prog
 		}
 
 		// G5 — depth counters by river job kind.  Express tracked these

@@ -136,7 +136,14 @@ func (w *BangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3Args
 		return fmt.Errorf("bangumi_v3 update %d (bgmId=%d): %w", anilistID, bgmID, err)
 	}
 
-	// 4. Logging.  Two distinct lines so dashboards can chart "v3 no
+	// 4. Record batch progress.  V3BatchRecordProcessed is called on
+	//    every completed job (success + soft-404), mirroring Express's
+	//    v3BatchProcessed++ on every dispatch iteration.  healed=true
+	//    only when a non-nil CN title was actually written (the Bangumi
+	//    subject had a name_cn), matching Express's v3BatchHealed++.
+	V3BatchRecordProcessed(titleChinese != nil)
+
+	// 5. Logging.  Two distinct lines so dashboards can chart "v3 no
 	//    subject" vs "v3 completed with/without CN" separately.
 	if subj == nil {
 		slog.InfoContext(ctx, "bangumi_v3 no_subject",
