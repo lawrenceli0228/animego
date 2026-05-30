@@ -236,10 +236,13 @@ ok "mongo + postgres up"
 # to preserve the T-3d "no writes" gate.
 info "STEP 4/9 — apply Postgres schema (golang-migrate: app + River)"
 
-# pg is published on localhost:5432 by the ci overlay (see COMPOSE_FILE
-# header). Mirror STEP 6's localhost wiring. golang-migrate is idempotent:
-# re-running with --skip-restore on an already-migrated DB is a no-op.
-PG_URI_LOCAL="postgres://animego:${PG_PASS}@localhost:5432/animego?sslmode=disable"
+# pg is published on 127.0.0.1:5432 by the ci overlay (see COMPOSE_FILE
+# header). Pin 127.0.0.1, NOT localhost: localhost resolves to ::1 first, and
+# golang-migrate fails fast when the freshly-booted postgres resets that IPv6
+# connection during its pg_cron first-init restart. Mirror STEP 6's wiring.
+# golang-migrate is idempotent: re-running with --skip-restore on an
+# already-migrated DB is a no-op.
+PG_URI_LOCAL="postgres://animego:${PG_PASS}@127.0.0.1:5432/animego?sslmode=disable"
 MIGRATE_SCHEMA_CMD=(migrate -path "$REPO_ROOT/go-api/migrations" -database "$PG_URI_LOCAL" up)
 # Mask POSTGRES_PASSWORD in the echoed command (see STEP 6 for rationale).
 MIGRATE_SCHEMA_DISPLAY="${MIGRATE_SCHEMA_CMD[*]}"
@@ -247,7 +250,20 @@ info "\$ ${MIGRATE_SCHEMA_DISPLAY//$PG_PASS/***}"
 # `migrate ... up` prints "no change" + exits 0 when already at head, so
 # this is safe under --skip-restore. Any real failure (bad SQL, dirty
 # state) is fatal — the cutover must not proceed on a half-applied schema.
-time_step "schema" "${MIGRATE_SCHEMA_CMD[@]}"
+# Retry the schema migrate: postgres can report container-healthy (STEP 3)
+# while the host-published :5432 still resets connections during first-boot
+# init (pg_cron shared_preload restart). This IS the exact host->:5432 path
+# STEP 6's migrate-mongo uses, so a green here also proves STEP 6 can connect.
+schema_ok=0
+for attempt in $(seq 1 15); do
+    if time_step "schema" "${MIGRATE_SCHEMA_CMD[@]}"; then
+        schema_ok=1
+        break
+    fi
+    warn "schema migrate attempt ${attempt}/15 failed (postgres host-TCP not ready yet) — retrying in 2s"
+    sleep 2
+done
+[ "$schema_ok" -eq 1 ] || { fail "Postgres schema migrate failed after 15 attempts (~30s)"; exit 1; }
 ok "Postgres schema applied (app tables + River queue tables)"
 
 # ======================================================================
@@ -281,8 +297,8 @@ rm -f "$MIGRATE_FAILURES"
 cd "$REPO_ROOT/go-api"
 MIGRATE_CMD=(
     go run ./cmd/migrate-mongo
-        --mongo-uri="mongodb://localhost:27017/animego"
-        --pg-uri="postgres://animego:${PG_PASS}@localhost:5432/animego?sslmode=disable"
+        --mongo-uri="mongodb://127.0.0.1:27017/animego"
+        --pg-uri="postgres://animego:${PG_PASS}@127.0.0.1:5432/animego?sslmode=disable"
         --dry-run
         --log-failed="$MIGRATE_FAILURES"
 )
@@ -347,6 +363,15 @@ else
     docker compose logs go-api --tail 20 2>&1 | grep -iE "river|relation|error" || true
     GO_API_RC=1
 fi
+
+# nginx restart (NOT reload): STEP 8's `up -d` recreated go-api/next-app/
+# ws-server/app with NEW container IPs, but left nginx Running on its OLD
+# cached upstream IPs, so every proxied route 503s. nginx only re-resolves
+# its upstreams on a full restart (reload keeps the stale resolver cache).
+# This is the exact prod-cutover gotcha: after any force-recreate, restart
+# nginx before trusting a smoke result.
+run docker compose restart nginx
+sleep 2
 
 SMOKE_SCRIPT="$REPO_ROOT/scripts/smoke-p8.1.sh"
 if [ ! -x "$SMOKE_SCRIPT" ]; then
