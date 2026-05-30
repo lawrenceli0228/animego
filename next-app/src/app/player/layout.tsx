@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import jwt from "jsonwebtoken";
+import { getDict } from "@/lib/i18n";
 
 // Player auth gate — proxy.ts already covers /player/:path* (P6.1);
 // this layout is the belt-and-suspenders second line of defence.
@@ -22,10 +24,13 @@ async function requireSession(): Promise<void> {
   }
 }
 
-export const metadata = {
-  title: "播放器 — AnimeGo",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const dict = await getDict();
+  return {
+    title: dict.player.pageTitle,
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function PlayerLayout({
   children,

@@ -23,32 +23,33 @@ import type {
   EnrichmentSort,
   PagedResponse,
 } from "../_types";
+import { useLang } from "@/lib/lang-client";
 
 interface FilterButton {
   value: EnrichmentFilter | "";
-  label: string;
+  labelKey: string;
 }
 
 const FILTERS: FilterButton[] = [
-  { value: "", label: "全部" },
-  { value: "needs-review", label: "待复核" },
-  { value: "manually-corrected", label: "已校正" },
-  { value: "unenriched", label: "未富化" },
-  { value: "no-cn", label: "缺中文" },
+  { value: "", labelKey: "admin.filterLabelAll" },
+  { value: "needs-review", labelKey: "admin.filterLabelNeedsReview" },
+  { value: "manually-corrected", labelKey: "admin.filterLabelCorrected" },
+  { value: "unenriched", labelKey: "admin.filterLabelUnenriched" },
+  { value: "no-cn", labelKey: "admin.filterLabelNoCn" },
 ];
 
 interface SortButton {
   value: EnrichmentSort;
-  label: string;
+  labelKey: string;
 }
 
 const SORTS: SortButton[] = [
-  { value: "cachedAt", label: "缓存时间" },
-  { value: "title_chinese", label: "中文标题" },
-  { value: "title_romaji", label: "罗马音" },
-  { value: "bangumi_version", label: "富化版本" },
-  { value: "bangumi_score", label: "评分" },
-  { value: "anilist_id", label: "AniList ID" },
+  { value: "cachedAt", labelKey: "admin.sortCachedAt" },
+  { value: "title_chinese", labelKey: "admin.sortTitleChinese" },
+  { value: "title_romaji", labelKey: "admin.sortTitleRomaji" },
+  { value: "bangumi_version", labelKey: "admin.sortVersion" },
+  { value: "bangumi_score", labelKey: "admin.sortScore" },
+  { value: "anilist_id", labelKey: "" },
 ];
 
 type Order = "asc" | "desc";
@@ -76,6 +77,7 @@ function buildApiUrl(
 }
 
 export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
+  const { t } = useLang();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [qInput, setQInput] = useState("");
@@ -129,7 +131,7 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
         });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "加载失败");
+        setError(err instanceof Error ? err.message : t("admin.loadError"));
       }
     });
     return () => abort.abort();
@@ -148,10 +150,10 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
     <section id="enrichment" aria-labelledby="enrichment-heading">
       <header style={styles.header}>
         <h2 id="enrichment-heading" style={styles.title}>
-          数据富化记录
+          {t("admin.enrichmentRecordsTitle")}
         </h2>
         <span style={styles.totalHint}>
-          共 {data.total.toLocaleString("zh-CN")} 条
+          {t("admin.totalItems").replace("{{count}}", data.total.toLocaleString())}
         </span>
       </header>
 
@@ -169,9 +171,9 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
             type="search"
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
-            placeholder="搜索 anilistId / 罗马音 / 中文标题"
+            placeholder={t("admin.searchEnrichment")}
             style={styles.searchInput}
-            aria-label="搜索富化记录"
+            aria-label={t("admin.searchEnrichmentLabel")}
           />
           {qInput && (
             <button
@@ -182,7 +184,7 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
                 setPage(1);
               }}
               style={styles.clearBtn}
-              aria-label="清除搜索"
+              aria-label={t("admin.clearSearch")}
             >
               ×
             </button>
@@ -203,7 +205,7 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
                 ...(filter === f.value ? styles.filterBtnActive : null),
               }}
             >
-              {f.label}
+              {t(f.labelKey)}
             </button>
           ))}
         </div>
@@ -237,7 +239,7 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
                     onClick={() => handleSortClick(col.value)}
                     style={styles.sortBtn}
                   >
-                    {col.label}
+                    {col.labelKey ? t(col.labelKey) : "AniList ID"}
                     {sort === col.value ? (
                       <span style={styles.sortArrow}>
                         {order === "asc" ? " ↑" : " ↓"}
@@ -246,15 +248,15 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
                   </button>
                 </th>
               ))}
-              <th style={styles.th}>标记</th>
-              <th style={styles.th}>操作</th>
+              <th style={styles.th}>{t("admin.colFlag")}</th>
+              <th style={styles.th}>{t("admin.colActions")}</th>
             </tr>
           </thead>
           <tbody>
             {data.data.length === 0 ? (
               <tr>
                 <td style={styles.empty} colSpan={SORTS.length + 2}>
-                  没有匹配的记录
+                  {t("admin.noMatchingRecords")}
                 </td>
               </tr>
             ) : (
@@ -273,10 +275,12 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
           disabled={page <= 1}
           style={styles.pageBtn}
         >
-          ← 上一页
+          ← {t("admin.prev")}
         </button>
         <span style={styles.pageIndicator}>
-          第 {page} 页 · 共 {data.total.toLocaleString("zh-CN")} 条
+          {t("admin.pageIndicator")
+            .replace("{{page}}", String(page))
+            .replace("{{total}}", data.total.toLocaleString())}
         </span>
         <button
           type="button"
@@ -284,7 +288,7 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
           disabled={!data.hasMore}
           style={styles.pageBtn}
         >
-          下一页 →
+          {t("admin.next")} →
         </button>
       </footer>
     </section>

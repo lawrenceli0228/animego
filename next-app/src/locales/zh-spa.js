@@ -546,6 +546,10 @@ const zh = {
       reset: '重置库',
       refreshMetaBusy: '刷新中…',
     },
+    privacy: {
+      compact: '本地存储 · 不上传',
+      full: '文件存储在此设备 · 不上传服务器',
+    },
     // ImportDrawer
     importDrawer: {
       ariaLabel: '导入进度',
@@ -766,7 +770,8 @@ const zh = {
     userSearchPlaceholder: '搜索用户名或邮箱...',
     colUsername: '用户名',
     colEmail: '邮箱',
-    colSubs: '追番',
+    colRole: '角色',
+    colSubs: '订阅',
     colFollowers: '粉丝',
     colJoined: '注册时间',
     password: '密码',
@@ -782,6 +787,63 @@ const zh = {
     updateFailed: '更新失败',
     deleteSuccess: '用户已删除',
     deleteFailed: '删除失败',
+    // User management — inline form & row actions
+    changePassword: '改密码',
+    savePassword: '保存密码',
+    clickToConfirmDelete: '再次点击确认删除',
+    usernamePlaceholder: '用户名 (3-50 字符)',
+    emailPlaceholder: '邮箱',
+    passwordPlaceholder: '密码 (至少 6 位)',
+    usernameLabel: '用户名',
+    emailLabel: '邮箱',
+    passwordLabel: '密码',
+    newPasswordPlaceholder: '{{username}} 的新密码 (≥{{min}} 位)',
+    newPasswordLabel: '{{username}} 的新密码',
+    usernameMinMax: '用户名长度必须在 {{min}}-{{max}} 字符之间',
+    invalidEmail: '邮箱格式无效',
+    passwordMinLen: '密码长度不能少于 {{min}} 位',
+    creatingUser: '创建中...',
+    createdUser: '✓ 已创建 {{username}}',
+    noMatchingUsers: '没有匹配的用户',
+    totalUsers: '共 {{count}} 个用户',
+    // Enrichment section
+    enrichmentRecordsTitle: '数据富化记录',
+    totalItems: '共 {{count}} 条',
+    pageIndicator: '第 {{page}} 页 · 共 {{total}} 条',
+    noMatchingRecords: '没有匹配的记录',
+    searchEnrichment: '搜索 anilistId / 罗马音 / 中文标题',
+    searchEnrichmentLabel: '搜索富化记录',
+    // EnrichmentBar
+    enrichmentDistTitle: '富化版本分布',
+    missingCn: '缺中文 {{n}}',
+    v3FullEnrich: 'v3 完整富化',
+    // EnrichmentRow — filter labels (used in FILTERS array)
+    filterLabelAll: '全部',
+    filterLabelNeedsReview: '待复核',
+    filterLabelCorrected: '已校正',
+    filterLabelUnenriched: '未富化',
+    filterLabelNoCn: '缺中文',
+    // EnrichmentRow — sort labels (used in SORTS array)
+    sortCachedAt: '缓存时间',
+    sortTitleChinese: '中文标题',
+    sortTitleRomaji: '罗马音',
+    sortVersion: '富化版本',
+    sortScore: '评分',
+    // EnrichmentRow — flag badges
+    needsReviewBadge: '待复核',
+    correctedBadge: '已人工校正',
+    // EnrichmentRow — action buttons
+    flagNeedsReview: '标待复核',
+    flagCorrected: '标已校正',
+    // EnrichmentRow — validation errors
+    bgmIdMustBePositiveInt: 'BGM ID 必须为正整数',
+    scoreMustBeRange: '评分必须为 0-10 之间且至多 1 位小数',
+    // EnrichmentRow — placeholders
+    cnTitlePlaceholder: '中文标题',
+    scorePlaceholder: '评分',
+    // Password reset toast
+    passwordResetSuccess: '已重置 {{username}} 的密码',
+    passwordChangeFailed: '改密码失败',
   },
 }
 

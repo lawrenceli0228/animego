@@ -1,4 +1,6 @@
 import { apiGet, apiGetPaged } from "@/lib/api";
+import { getDict } from "@/lib/i18n";
+import type { Dict } from "@/lib/i18n";
 import { EnrichmentBar } from "./_components/EnrichmentBar";
 import { EnrichmentSection } from "./_components/EnrichmentSection";
 import { StatCard } from "./_components/StatCard";
@@ -38,7 +40,8 @@ async function safeGet<T>(promise: Promise<T>, fallback: T): Promise<T> {
 }
 
 export default async function AdminPage() {
-  const [stats, enrichment, users] = await Promise.all([
+  const [dict, stats, enrichment, users] = await Promise.all([
+    getDict(),
     safeGet<AdminStats | null>(
       apiGet<AdminStats>("/api/admin/stats", { cache: "no-store" }),
       null,
@@ -58,7 +61,7 @@ export default async function AdminPage() {
 
   return (
     <div style={styles.page}>
-      <Overview stats={stats} />
+      <Overview stats={stats} dict={dict} />
       <hr style={styles.divider} />
       <EnrichmentSection initial={enrichment} />
       <hr style={styles.divider} />
@@ -67,7 +70,7 @@ export default async function AdminPage() {
   );
 }
 
-function Overview({ stats }: { stats: AdminStats | null }) {
+function Overview({ stats, dict }: { stats: AdminStats | null; dict: Dict }) {
   if (!stats) {
     return (
       <section
@@ -76,10 +79,10 @@ function Overview({ stats }: { stats: AdminStats | null }) {
         style={styles.overview}
       >
         <h2 id="overview-heading" style={styles.sectionTitle}>
-          总览
+          {dict.admin.overviewHeading}
         </h2>
         <div style={styles.errorBox}>
-          无法加载统计数据。请检查 API 服务状态。
+          {dict.admin.statsLoadError}
         </div>
       </section>
     );
@@ -104,26 +107,26 @@ function Overview({ stats }: { stats: AdminStats | null }) {
       style={styles.overview}
     >
       <h2 id="overview-heading" style={styles.sectionTitle}>
-        总览
+        {dict.admin.overviewHeading}
       </h2>
       <div style={styles.grid}>
-        <StatCard label="用户" value={stats.users} />
+        <StatCard label={dict.admin.statUsers} value={stats.users} />
         <StatCard
-          label="番剧缓存"
+          label={dict.admin.statAnime}
           value={stats.anime}
-          hint={`V3 富化 ${v3Pct}%`}
+          hint={dict.admin.v3EnrichPct.replace("{{pct}}", String(v3Pct))}
         />
-        <StatCard label="订阅" value={stats.subscriptions} />
-        <StatCard label="关注" value={stats.follows} />
-        <StatCard label="待复核" value={stats.flagged} hint="needs-review" />
+        <StatCard label={dict.admin.statSubs} value={stats.subscriptions} />
+        <StatCard label={dict.admin.statFollows} value={stats.follows} />
+        <StatCard label={dict.admin.statFlagged} value={stats.flagged} hint="needs-review" />
         <StatCard
-          label="队列任务"
+          label={dict.admin.statQueue}
           value={queueTotal}
           hint={`phase1 ${stats.queue.phase1} · phase4 ${stats.queue.phase4} · v3 ${stats.queue.v3}`}
         />
       </div>
       <div style={styles.barWrap}>
-        <h3 style={styles.subTitle}>数据富化</h3>
+        <h3 style={styles.subTitle}>{dict.admin.dataEnrichment}</h3>
         <EnrichmentBar initial={stats} />
       </div>
     </section>

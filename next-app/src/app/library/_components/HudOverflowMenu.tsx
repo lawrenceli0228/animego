@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
+import { useLang } from "@/lib/lang-client";
 
 const HUE = PLAYER_HUE.local;
 
@@ -41,8 +42,10 @@ interface HudOverflowMenuProps {
 export function HudOverflowMenu({
   items,
   testId = "overflow-menu",
-  ariaLabel = "更多操作",
+  ariaLabel,
 }: HudOverflowMenuProps) {
+  const { t } = useLang();
+  const resolvedAriaLabel = ariaLabel ?? t("library.overflow.moreActions");
   const [open, setOpen] = useState(false);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -116,7 +119,7 @@ export function HudOverflowMenu({
         ref={triggerRef}
         type="button"
         data-testid={`${testId}-trigger`}
-        aria-label={ariaLabel}
+        aria-label={resolvedAriaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{ ...s.trigger, ...(open ? s.triggerOpen : null) }}

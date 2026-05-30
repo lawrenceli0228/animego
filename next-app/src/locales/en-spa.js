@@ -496,6 +496,10 @@ const en = {
       reset: 'Reset library',
       refreshMetaBusy: 'Refreshing…',
     },
+    privacy: {
+      compact: 'Local storage · Not uploaded',
+      full: 'Files stay on this device · Nothing uploads',
+    },
     // ImportDrawer
     importDrawer: {
       ariaLabel: 'Import progress',
@@ -716,6 +720,7 @@ const en = {
     userSearchPlaceholder: 'Search username or email...',
     colUsername: 'Username',
     colEmail: 'Email',
+    colRole: 'Role',
     colSubs: 'Subscriptions',
     colFollowers: 'Followers',
     colJoined: 'Joined',
@@ -732,6 +737,63 @@ const en = {
     updateFailed: 'Update failed',
     deleteSuccess: 'User deleted',
     deleteFailed: 'Delete failed',
+    // User management — inline form & row actions
+    changePassword: 'Change password',
+    savePassword: 'Save password',
+    clickToConfirmDelete: 'Click again to confirm delete',
+    usernamePlaceholder: 'Username (3–50 chars)',
+    emailPlaceholder: 'Email',
+    passwordPlaceholder: 'Password (min. 6 chars)',
+    usernameLabel: 'Username',
+    emailLabel: 'Email',
+    passwordLabel: 'Password',
+    newPasswordPlaceholder: 'New password for {{username}} (≥{{min}} chars)',
+    newPasswordLabel: 'New password for {{username}}',
+    usernameMinMax: 'Username must be {{min}}–{{max}} characters',
+    invalidEmail: 'Invalid email format',
+    passwordMinLen: 'Password must be at least {{min}} characters',
+    creatingUser: 'Creating...',
+    createdUser: '✓ Created {{username}}',
+    noMatchingUsers: 'No matching users',
+    totalUsers: '{{count}} users',
+    // Enrichment section
+    enrichmentRecordsTitle: 'Enrichment Records',
+    totalItems: '{{count}} total',
+    pageIndicator: 'Page {{page}} · {{total}} total',
+    noMatchingRecords: 'No matching records',
+    searchEnrichment: 'Search anilistId / romaji / Chinese title',
+    searchEnrichmentLabel: 'Search enrichment records',
+    // EnrichmentBar
+    enrichmentDistTitle: 'Enrichment version distribution',
+    missingCn: 'Missing CN {{n}}',
+    v3FullEnrich: 'v3 complete',
+    // EnrichmentRow — filter labels (used in FILTERS array)
+    filterLabelAll: 'All',
+    filterLabelNeedsReview: 'Needs Review',
+    filterLabelCorrected: 'Corrected',
+    filterLabelUnenriched: 'Unenriched',
+    filterLabelNoCn: 'Missing CN',
+    // EnrichmentRow — sort labels (used in SORTS array)
+    sortCachedAt: 'Cached at',
+    sortTitleChinese: 'Chinese title',
+    sortTitleRomaji: 'Romaji',
+    sortVersion: 'Version',
+    sortScore: 'Score',
+    // EnrichmentRow — flag badges
+    needsReviewBadge: 'Needs Review',
+    correctedBadge: 'Manually Corrected',
+    // EnrichmentRow — action buttons
+    flagNeedsReview: 'Flag: Review',
+    flagCorrected: 'Flag: Corrected',
+    // EnrichmentRow — validation errors
+    bgmIdMustBePositiveInt: 'BGM ID must be a positive integer',
+    scoreMustBeRange: 'Score must be 0–10 with at most 1 decimal place',
+    // EnrichmentRow — placeholders
+    cnTitlePlaceholder: 'Chinese title',
+    scorePlaceholder: 'Score',
+    // Password reset toast
+    passwordResetSuccess: 'Password reset for {{username}}',
+    passwordChangeFailed: 'Failed to change password',
   },
 }
 

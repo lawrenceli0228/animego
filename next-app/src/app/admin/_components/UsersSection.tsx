@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { CreateUserForm } from "./CreateUserForm";
 import { UserRow } from "./UserRow";
 import type { AdminUser, PagedResponse } from "../_types";
+import { useLang } from "@/lib/lang-client";
 
 const DEBOUNCE_MS = 400;
 
@@ -24,6 +25,7 @@ function buildApiUrl(page: number, q: string): string {
 }
 
 export function UsersSection({ initial }: UsersSectionProps) {
+  const { t } = useLang();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [qInput, setQInput] = useState("");
@@ -71,7 +73,7 @@ export function UsersSection({ initial }: UsersSectionProps) {
         });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "加载失败");
+        setError(err instanceof Error ? err.message : t("admin.loadError"));
       }
     });
     return () => abort.abort();
@@ -81,10 +83,10 @@ export function UsersSection({ initial }: UsersSectionProps) {
     <section id="users" aria-labelledby="users-heading">
       <header style={styles.header}>
         <h2 id="users-heading" style={styles.title}>
-          用户管理
+          {t("admin.usersTitle")}
         </h2>
         <span style={styles.totalHint}>
-          共 {data.total.toLocaleString("zh-CN")} 个用户
+          {t("admin.totalUsers").replace("{{count}}", data.total.toLocaleString())}
         </span>
       </header>
 
@@ -103,9 +105,9 @@ export function UsersSection({ initial }: UsersSectionProps) {
           type="search"
           value={qInput}
           onChange={(e) => setQInput(e.target.value)}
-          placeholder="搜索用户名或邮箱"
+          placeholder={t("admin.userSearchPlaceholder")}
           style={styles.searchInput}
-          aria-label="搜索用户"
+          aria-label={t("admin.usersTitle")}
         />
         {qInput && (
           <button
@@ -116,7 +118,7 @@ export function UsersSection({ initial }: UsersSectionProps) {
               setPage(1);
             }}
             style={styles.clearBtn}
-            aria-label="清除搜索"
+            aria-label={t("admin.clearSearch")}
           >
             ×
           </button>
@@ -133,20 +135,20 @@ export function UsersSection({ initial }: UsersSectionProps) {
         <table style={styles.table}>
           <thead>
             <tr>
-              <th style={styles.th}>用户名</th>
-              <th style={styles.th}>邮箱</th>
-              <th style={styles.th}>角色</th>
-              <th style={styles.th}>注册时间</th>
-              <th style={{ ...styles.th, textAlign: "right" }}>订阅</th>
-              <th style={{ ...styles.th, textAlign: "right" }}>粉丝</th>
-              <th style={styles.th}>操作</th>
+              <th style={styles.th}>{t("admin.colUsername")}</th>
+              <th style={styles.th}>{t("admin.colEmail")}</th>
+              <th style={styles.th}>{t("admin.colRole")}</th>
+              <th style={styles.th}>{t("admin.colJoined")}</th>
+              <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colSubs")}</th>
+              <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colFollowers")}</th>
+              <th style={styles.th}>{t("admin.colActions")}</th>
             </tr>
           </thead>
           <tbody>
             {data.data.length === 0 ? (
               <tr>
                 <td style={styles.empty} colSpan={7}>
-                  没有匹配的用户
+                  {t("admin.noMatchingUsers")}
                 </td>
               </tr>
             ) : (
@@ -163,10 +165,12 @@ export function UsersSection({ initial }: UsersSectionProps) {
           disabled={page <= 1}
           style={styles.pageBtn}
         >
-          ← 上一页
+          ← {t("admin.prev")}
         </button>
         <span style={styles.pageIndicator}>
-          第 {page} 页 · 共 {data.total.toLocaleString("zh-CN")} 条
+          {t("admin.pageIndicator")
+            .replace("{{page}}", String(page))
+            .replace("{{total}}", data.total.toLocaleString())}
         </span>
         <button
           type="button"
@@ -174,7 +178,7 @@ export function UsersSection({ initial }: UsersSectionProps) {
           disabled={!data.hasMore}
           style={styles.pageBtn}
         >
-          下一页 →
+          {t("admin.next")} →
         </button>
       </footer>
     </section>

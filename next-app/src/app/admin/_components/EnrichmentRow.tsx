@@ -20,6 +20,7 @@ import {
   resetEnrichmentRow,
 } from "../_actions/enrichment-row";
 import type { EnrichmentFlag, EnrichmentRow as EnrichmentRowData } from "../_types";
+import { useLang } from "@/lib/lang-client";
 
 interface EnrichmentRowProps {
   row: EnrichmentRowData;
@@ -54,6 +55,7 @@ function initialForm(row: EnrichmentRowData): EditFormState {
 function buildPatch(
   form: EditFormState,
   row: EnrichmentRowData,
+  tFn: (key: string) => string,
 ): { patch: Parameters<typeof patchEnrichmentRow>[1]; error: string | null } {
   const patch: Parameters<typeof patchEnrichmentRow>[1] = {};
 
@@ -71,11 +73,11 @@ function buildPatch(
     bgmNext = null;
   } else {
     if (!/^\d+$/.test(bgmRaw)) {
-      return { patch, error: "BGM ID 必须为正整数" };
+      return { patch, error: tFn("admin.bgmIdMustBePositiveInt") };
     }
     const n = parseInt(bgmRaw, 10);
     if (!Number.isFinite(n) || n <= 0) {
-      return { patch, error: "BGM ID 必须为正整数" };
+      return { patch, error: tFn("admin.bgmIdMustBePositiveInt") };
     }
     bgmNext = n;
   }
@@ -90,11 +92,11 @@ function buildPatch(
     scoreNext = null;
   } else {
     if (!/^\d+(\.\d)?$/.test(scoreRaw)) {
-      return { patch, error: "评分必须为 0-10 之间且至多 1 位小数" };
+      return { patch, error: tFn("admin.scoreMustBeRange") };
     }
     const n = Number(scoreRaw);
     if (!Number.isFinite(n) || n < 0 || n > 10) {
-      return { patch, error: "评分必须为 0-10 之间且至多 1 位小数" };
+      return { patch, error: tFn("admin.scoreMustBeRange") };
     }
     scoreNext = n;
   }
@@ -105,15 +107,15 @@ function buildPatch(
   return { patch, error: null };
 }
 
-function FlagBadge({ flag }: { flag: EnrichmentFlag }) {
+function FlagBadge({ flag, tFn }: { flag: EnrichmentFlag; tFn: (key: string) => string }) {
   if (flag === "needs-review") {
     return (
-      <span style={{ ...styles.badge, ...styles.badgeWarn }}>待复核</span>
+      <span style={{ ...styles.badge, ...styles.badgeWarn }}>{tFn("admin.needsReviewBadge")}</span>
     );
   }
   if (flag === "manually-corrected") {
     return (
-      <span style={{ ...styles.badge, ...styles.badgeOk }}>已人工校正</span>
+      <span style={{ ...styles.badge, ...styles.badgeOk }}>{tFn("admin.correctedBadge")}</span>
     );
   }
   return <span style={styles.dim}>—</span>;
@@ -140,6 +142,7 @@ function VersionBadge({ version }: { version: number }) {
 }
 
 export function EnrichmentRow({ row }: EnrichmentRowProps) {
+  const { t } = useLang();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditFormState>(() => initialForm(row));
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +160,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
   };
 
   const handleSave = () => {
-    const { patch, error: validationError } = buildPatch(form, row);
+    const { patch, error: validationError } = buildPatch(form, row, t);
     if (validationError) {
       setError(validationError);
       return;
@@ -174,7 +177,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
         await patchEnrichmentRow(row.anilistId, patch);
         setEditing(false);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "更新失败");
+        setError(err instanceof Error ? err.message : t("admin.updateFailed"));
       }
     });
   };
@@ -185,7 +188,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
       try {
         await flagEnrichmentRow(row.anilistId, next);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "标记失败");
+        setError(err instanceof Error ? err.message : t("admin.flagFailed"));
       }
     });
   };
@@ -199,7 +202,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
       try {
         await resetEnrichmentRow(row.anilistId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "重置失败");
+        setError(err instanceof Error ? err.message : t("admin.resetFailed"));
       }
     });
   };
@@ -227,7 +230,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
               onChange={(e) =>
                 setForm({ ...form, titleChinese: e.target.value })
               }
-              placeholder="中文标题"
+              placeholder={t("admin.cnTitlePlaceholder")}
               style={styles.input}
               disabled={pending}
             />
@@ -266,7 +269,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
               onChange={(e) =>
                 setForm({ ...form, bangumiScore: e.target.value })
               }
-              placeholder="评分"
+              placeholder={t("admin.scorePlaceholder")}
               style={{ ...styles.input, width: 72 }}
               disabled={pending}
             />
@@ -280,7 +283,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
           )}
         </td>
         <td style={styles.td}>
-          <FlagBadge flag={row.adminFlag} />
+          <FlagBadge flag={row.adminFlag} tFn={t} />
         </td>
         <td style={styles.td}>
           <div style={styles.actions}>
@@ -292,7 +295,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
                   disabled={pending}
                   style={styles.saveBtn}
                 >
-                  保存
+                  {t("admin.save")}
                 </button>
                 <button
                   type="button"
@@ -300,7 +303,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
                   disabled={pending}
                   style={styles.btn}
                 >
-                  取消
+                  {t("admin.cancel")}
                 </button>
               </>
             ) : (
@@ -311,7 +314,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
                   disabled={pending}
                   style={styles.btn}
                 >
-                  编辑
+                  {t("admin.edit")}
                 </button>
                 <button
                   type="button"
@@ -319,7 +322,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
                   disabled={pending}
                   style={styles.resetBtn}
                 >
-                  重置
+                  {t("admin.reset")}
                 </button>
                 {row.adminFlag !== "needs-review" && (
                   <button
@@ -328,7 +331,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
                     disabled={pending}
                     style={styles.btn}
                   >
-                    标待复核
+                    {t("admin.flagNeedsReview")}
                   </button>
                 )}
                 {row.adminFlag !== "manually-corrected" && (
@@ -338,7 +341,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
                     disabled={pending}
                     style={styles.btn}
                   >
-                    标已校正
+                    {t("admin.flagCorrected")}
                   </button>
                 )}
                 {row.adminFlag != null && (
@@ -348,7 +351,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
                     disabled={pending}
                     style={styles.btn}
                   >
-                    清除标记
+                    {t("admin.clearFlag")}
                   </button>
                 )}
               </>

@@ -19,6 +19,7 @@ import {
   reEnrich,
   resumeHealCn,
 } from "../_actions/enrichment-queue";
+import { useLang } from "@/lib/lang-client";
 
 interface EnrichmentBarProps {
   initial: AdminStats;
@@ -55,6 +56,7 @@ async function fetchStats(signal: AbortSignal): Promise<AdminStats | null> {
 }
 
 export function EnrichmentBar({ initial }: EnrichmentBarProps) {
+  const { t } = useLang();
   const [stats, setStats] = useState<AdminStats>(initial);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -100,7 +102,7 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
               ? `${label}: ${err.message}`
               : err instanceof Error
                 ? `${label}: ${err.message}`
-                : `${label}: 未知错误`;
+                : `${label}: ${t("admin.loadError")}`;
           setError(message);
         }
       });
@@ -125,17 +127,17 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
       <style>{stripeKeyframes}</style>
 
       <div style={styles.heading}>
-        <span>富化版本分布</span>
+        <span>{t("admin.enrichmentDistTitle")}</span>
         <span style={styles.headingMeta}>
           v3 {v3} · v2 {v2} · v1 {v1} · v0 {v0}
-          {noCn > 0 ? ` · 缺中文 ${noCn}` : ""}
+          {noCn > 0 ? ` · ${t("admin.missingCn").replace("{{n}}", String(noCn))}` : ""}
         </span>
       </div>
 
       <div
         style={styles.bar}
         role="img"
-        aria-label={`富化版本分布: v3 ${v3}, v2 ${v2}, v1 ${v1}, v0 ${v0}`}
+        aria-label={`${t("admin.enrichmentDistTitle")}: v3 ${v3}, v2 ${v2}, v1 ${v1}, v0 ${v0}`}
       >
         <div style={{ ...styles.segV3, width: `${pct(v3)}%` }}>
           {v3Active && !v3Paused ? <div style={styles.stripeOverlay} /> : null}
@@ -155,12 +157,16 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
       ) : null}
 
       <div style={styles.legend} aria-hidden>
-        {LEGEND_ITEMS.map(({ color, label }) => (
-          <span key={label} style={styles.legendItem}>
-            <span style={{ ...styles.legendDot, background: color }} />
-            {label}
-          </span>
-        ))}
+        {LEGEND_COLORS.map((color, i) => {
+          const key = LEGEND_LABEL_KEYS[i];
+          const label = key.startsWith("admin.") ? t(key) : key;
+          return (
+            <span key={color} style={styles.legendItem}>
+              <span style={{ ...styles.legendDot, background: color }} />
+              {label}
+            </span>
+          );
+        })}
       </div>
 
       <div style={styles.actions}>
@@ -236,12 +242,14 @@ const COLOR_V2 = "#30d158";
 const COLOR_V1 = "#ff9f0a";
 const COLOR_V0 = "#ff453a";
 
-const LEGEND_ITEMS: ReadonlyArray<{ color: string; label: string }> = [
-  { color: COLOR_V3, label: "v3 完整富化" },
-  { color: COLOR_V2, label: "v2" },
-  { color: COLOR_V1, label: "v1" },
-  { color: COLOR_V0, label: "v0" },
-];
+// Labels are resolved at render time via t() — see legendItems() in the component.
+const LEGEND_COLORS = [COLOR_V3, COLOR_V2, COLOR_V1, COLOR_V0] as const;
+const LEGEND_LABEL_KEYS = [
+  "admin.v3FullEnrich",
+  "v2",
+  "v1",
+  "v0",
+] as const;
 
 const btnBase: React.CSSProperties = {
   padding: "8px 14px",

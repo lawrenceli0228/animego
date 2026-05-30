@@ -22,6 +22,7 @@ import {
   updateAdminUser,
 } from "../_actions/users";
 import type { AdminUser } from "../_types";
+import { useLang } from "@/lib/lang-client";
 
 const PASSWORD_MIN = 6;
 
@@ -49,6 +50,7 @@ function initialForm(user: AdminUser): EditFormState {
 function buildPatch(
   form: EditFormState,
   user: AdminUser,
+  tFn: (key: string) => string,
 ): {
   patch: { username?: string; email?: string } | null;
   error: string | null;
@@ -57,10 +59,15 @@ function buildPatch(
   const emailTrim = form.email.trim();
 
   if (usernameTrim.length < USERNAME_MIN || usernameTrim.length > USERNAME_MAX) {
-    return { patch: null, error: `用户名长度必须在 ${USERNAME_MIN}-${USERNAME_MAX} 字符之间` };
+    return {
+      patch: null,
+      error: tFn("admin.usernameMinMax")
+        .replace("{{min}}", String(USERNAME_MIN))
+        .replace("{{max}}", String(USERNAME_MAX)),
+    };
   }
   if (!EMAIL_RE.test(emailTrim)) {
-    return { patch: null, error: "邮箱格式无效" };
+    return { patch: null, error: tFn("admin.invalidEmail") };
   }
 
   const patch: { username?: string; email?: string } = {};
@@ -90,6 +97,7 @@ function formatDate(iso: string): string {
 }
 
 export function UserRow({ user }: UserRowProps) {
+  const { t } = useLang();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditFormState>(() => initialForm(user));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -129,7 +137,7 @@ export function UserRow({ user }: UserRowProps) {
   };
 
   const handleSave = () => {
-    const { patch, error: validationError } = buildPatch(form, user);
+    const { patch, error: validationError } = buildPatch(form, user, t);
     if (validationError) {
       setError(validationError);
       return;
@@ -146,7 +154,7 @@ export function UserRow({ user }: UserRowProps) {
         await updateAdminUser(user._id, patch);
         setEditing(false);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "更新失败");
+        setError(err instanceof Error ? err.message : t("admin.updateFailed"));
       }
     });
   };
@@ -165,7 +173,7 @@ export function UserRow({ user }: UserRowProps) {
         // Don't reset confirmingDelete — RSC re-render will drop this
         // row from the table entirely.
       } catch (err) {
-        setError(err instanceof Error ? err.message : "删除失败");
+        setError(err instanceof Error ? err.message : t("admin.deleteFailed"));
         setConfirmingDelete(false);
       }
     });
@@ -192,7 +200,9 @@ export function UserRow({ user }: UserRowProps) {
 
   const handleSavePw = () => {
     if (pw.length < PASSWORD_MIN) {
-      setError(`密码长度不能少于 ${PASSWORD_MIN} 位`);
+      setError(
+        t("admin.passwordMinLen").replace("{{min}}", String(PASSWORD_MIN)),
+      );
       return;
     }
     setError(null);
@@ -203,9 +213,11 @@ export function UserRow({ user }: UserRowProps) {
         setPw("");
         // Password isn't a displayed field, so the row won't visibly
         // change — a toast is the only success signal.
-        toast.success(`已重置 ${user.username} 的密码`);
+        toast.success(
+          t("admin.passwordResetSuccess").replace("{{username}}", user.username),
+        );
       } catch (err) {
-        setError(err instanceof Error ? err.message : "改密码失败");
+        setError(err instanceof Error ? err.message : t("admin.passwordChangeFailed"));
       }
     });
   };
@@ -225,20 +237,22 @@ export function UserRow({ user }: UserRowProps) {
               type="text"
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
-              placeholder="用户名"
+              placeholder={t("admin.usernameLabel")}
               style={styles.input}
               disabled={pending}
-              aria-label="用户名"
+              aria-label={t("admin.usernameLabel")}
             />
           ) : pwMode ? (
             <input
               type="password"
               value={pw}
               onChange={(e) => setPw(e.target.value)}
-              placeholder={`${user.username} 的新密码 (≥${PASSWORD_MIN} 位)`}
+              placeholder={t("admin.newPasswordPlaceholder")
+                .replace("{{username}}", user.username)
+                .replace("{{min}}", String(PASSWORD_MIN))}
               style={styles.input}
               disabled={pending}
-              aria-label={`${user.username} 的新密码`}
+              aria-label={t("admin.newPasswordLabel").replace("{{username}}", user.username)}
               autoFocus
             />
           ) : (
@@ -251,10 +265,10 @@ export function UserRow({ user }: UserRowProps) {
               type="email"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              placeholder="邮箱"
+              placeholder={t("admin.emailLabel")}
               style={styles.input}
               disabled={pending}
-              aria-label="邮箱"
+              aria-label={t("admin.emailLabel")}
             />
           ) : (
             user.email
@@ -276,7 +290,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.saveBtn}
                 >
-                  保存密码
+                  {t("admin.savePassword")}
                 </button>
                 <button
                   type="button"
@@ -284,7 +298,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.btn}
                 >
-                  取消
+                  {t("admin.cancel")}
                 </button>
               </>
             ) : editing ? (
@@ -295,7 +309,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.saveBtn}
                 >
-                  保存
+                  {t("admin.save")}
                 </button>
                 <button
                   type="button"
@@ -303,7 +317,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.btn}
                 >
-                  取消
+                  {t("admin.cancel")}
                 </button>
               </>
             ) : confirmingDelete ? (
@@ -314,7 +328,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.confirmDeleteBtn}
                 >
-                  再次点击确认删除
+                  {t("admin.clickToConfirmDelete")}
                 </button>
                 <button
                   type="button"
@@ -322,7 +336,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.btn}
                 >
-                  取消
+                  {t("admin.cancel")}
                 </button>
               </>
             ) : (
@@ -333,7 +347,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.btn}
                 >
-                  编辑
+                  {t("admin.edit")}
                 </button>
                 <button
                   type="button"
@@ -341,7 +355,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.btn}
                 >
-                  改密码
+                  {t("admin.changePassword")}
                 </button>
                 <button
                   type="button"
@@ -349,7 +363,7 @@ export function UserRow({ user }: UserRowProps) {
                   disabled={pending}
                   style={styles.deleteBtn}
                 >
-                  删除
+                  {t("admin.delete")}
                 </button>
               </>
             )}

@@ -7,6 +7,7 @@
 // without crossing route segments.
 
 import { mono } from "@/components/landing/shared/hud-tokens";
+import { useLang } from "@/lib/lang-client";
 
 const PRIVACY_PULSE_CSS =
   "@keyframes privacyDot{0%,100%{opacity:0.55;transform:scale(0.92)}50%{opacity:1;transform:scale(1)}}";
@@ -47,12 +48,13 @@ interface PrivacyHintProps {
  * ImportDrawer, and any other surface that touches user files.
  */
 function PrivacyHint({ compact = false }: PrivacyHintProps) {
+  const { t } = useLang();
   return (
     <div style={s.wrap} data-testid="privacy-hint">
       <style>{PRIVACY_PULSE_CSS}</style>
       <span style={s.dot} aria-hidden />
       <span>
-        {compact ? "本地存储 · 不上传" : "文件存储在此设备 · 不上传服务器"}
+        {compact ? t("library.privacy.compact") : t("library.privacy.full")}
       </span>
     </div>
   );

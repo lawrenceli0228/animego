@@ -256,6 +256,7 @@ const zh = {
   },
   // Player
   player: {
+    pageTitle: '播放器 — AnimeGo',
     dropLabel: '选择视频文件夹',
     dropTitle: '拖入番剧文件夹 或 点击选择',
     dropReplace: '松开以替换当前内容',
@@ -463,6 +464,7 @@ const zh = {
   },
   // Library
   library: {
+    pageTitle: '我的库 — AnimeGo',
     addFolder: '添加文件夹',
     dropFolder: '拖入文件夹',
     unsupportedBanner: '当前浏览器不会跨会话保留本地媒体库。',
@@ -586,7 +588,16 @@ const zh = {
   // Admin
   admin: {
     title: '管理后台',
+    pageTitle: '管理后台 — AnimeGo',
     enrichmentTitle: '富化管理',
+    navOverview: '总览',
+    navEnrichment: '数据富化',
+    navUsers: '用户管理',
+    overviewHeading: '总览',
+    statsLoadError: '无法加载统计数据。请检查 API 服务状态。',
+    dataEnrichment: '数据富化',
+    statQueue: '队列任务',
+    v3EnrichPct: 'V3 富化 {{pct}}%',
     // Dashboard stats
     statUsers: '注册用户',
     statAnime: '番剧缓存',

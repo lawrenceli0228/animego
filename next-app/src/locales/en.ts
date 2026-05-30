@@ -206,6 +206,7 @@ const en = {
   },
   // Player
   player: {
+    pageTitle: 'Player — AnimeGo',
     dropLabel: 'Select video folder',
     dropTitle: 'Drag anime folder here or click to select',
     dropReplace: 'Drop to replace current session',
@@ -413,6 +414,7 @@ const en = {
   },
   // Library
   library: {
+    pageTitle: 'My Library — AnimeGo',
     addFolder: 'Add folder',
     dropFolder: 'Drop folder here',
     unsupportedBanner: 'Your browser does not keep libraries between sessions.',
@@ -536,7 +538,16 @@ const en = {
   // Admin
   admin: {
     title: 'Admin Dashboard',
+    pageTitle: 'Admin Dashboard — AnimeGo',
     enrichmentTitle: 'Enrichment Management',
+    navOverview: 'Overview',
+    navEnrichment: 'Enrichment',
+    navUsers: 'Users',
+    overviewHeading: 'Overview',
+    statsLoadError: 'Failed to load stats. Check the API service status.',
+    dataEnrichment: 'Data Enrichment',
+    statQueue: 'Queue Jobs',
+    v3EnrichPct: 'V3 enriched {{pct}}%',
     // Dashboard stats
     statUsers: 'Users',
     statAnime: 'Anime Cached',

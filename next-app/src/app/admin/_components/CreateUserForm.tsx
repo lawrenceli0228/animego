@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { createAdminUser } from "../_actions/users";
+import { useLang } from "@/lib/lang-client";
 
 const SUCCESS_MS = 3000;
 
@@ -28,22 +29,24 @@ const EMPTY_FORM: FormState = { username: "", email: "", password: "" };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function validate(form: FormState): string | null {
+function validate(form: FormState, tFn: (key: string) => string): string | null {
   const username = form.username.trim();
   if (username.length < 3 || username.length > 50) {
-    return "用户名长度必须在 3-50 字符之间";
+    return tFn("admin.usernameMinMax")
+      .replace("{{min}}", "3")
+      .replace("{{max}}", "50");
   }
   const email = form.email.trim();
   if (!EMAIL_RE.test(email)) {
-    return "邮箱格式无效";
+    return tFn("admin.invalidEmail");
   }
   if (form.password.length < 6) {
-    return "密码长度不能少于 6 位";
+    return tFn("admin.passwordMinLen").replace("{{min}}", "6");
   }
   return null;
 }
 
-function SubmitButton() {
+function SubmitButton({ tFn }: { tFn: (key: string) => string }) {
   const { pending } = useFormStatus();
   return (
     <button
@@ -51,12 +54,13 @@ function SubmitButton() {
       disabled={pending}
       style={pending ? { ...styles.submitBtn, ...styles.submitDisabled } : styles.submitBtn}
     >
-      {pending ? "创建中..." : "创建用户"}
+      {pending ? tFn("admin.creatingUser") : tFn("admin.createUser")}
     </button>
   );
 }
 
 export function CreateUserForm() {
+  const { t } = useLang();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -74,7 +78,7 @@ export function CreateUserForm() {
 
   const onSubmit = async () => {
     setError(null);
-    const validationError = validate(form);
+    const validationError = validate(form, t);
     if (validationError) {
       setError(validationError);
       return;
@@ -86,14 +90,14 @@ export function CreateUserForm() {
         password: form.password,
       });
       setForm(EMPTY_FORM);
-      setSuccess(`✓ 已创建 ${created.username}`);
+      setSuccess(t("admin.createdUser").replace("{{username}}", created.username));
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
       successTimerRef.current = setTimeout(() => {
         setSuccess(null);
         successTimerRef.current = null;
       }, SUCCESS_MS);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建失败");
+      setError(err instanceof Error ? err.message : t("admin.createFailed"));
     }
   };
 
@@ -105,32 +109,32 @@ export function CreateUserForm() {
           name="username"
           value={form.username}
           onChange={(e) => setForm({ ...form, username: e.target.value })}
-          placeholder="用户名 (3-50 字符)"
+          placeholder={t("admin.usernamePlaceholder")}
           autoComplete="off"
           style={styles.input}
-          aria-label="用户名"
+          aria-label={t("admin.usernameLabel")}
         />
         <input
           type="email"
           name="email"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
-          placeholder="邮箱"
+          placeholder={t("admin.emailPlaceholder")}
           autoComplete="off"
           style={styles.input}
-          aria-label="邮箱"
+          aria-label={t("admin.emailLabel")}
         />
         <input
           type="password"
           name="password"
           value={form.password}
           onChange={(e) => setForm({ ...form, password: e.target.value })}
-          placeholder="密码 (至少 6 位)"
+          placeholder={t("admin.passwordPlaceholder")}
           autoComplete="new-password"
           style={{ ...styles.input, ...styles.passwordInput }}
-          aria-label="密码"
+          aria-label={t("admin.passwordLabel")}
         />
-        <SubmitButton />
+        <SubmitButton tFn={t} />
       </form>
       {error && (
         <p role="alert" style={styles.error}>

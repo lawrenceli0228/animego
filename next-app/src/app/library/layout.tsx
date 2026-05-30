@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import jwt from "jsonwebtoken";
+import { getDict } from "@/lib/i18n";
 
 // Server-side auth gate. proxy.ts (matcher: /library/:path*) already
 // catches unauthenticated traffic at the request edge with a redirect
@@ -28,10 +30,13 @@ async function requireSession(): Promise<{ username: string }> {
   }
 }
 
-export const metadata = {
-  title: "我的库 — AnimeGo",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const dict = await getDict();
+  return {
+    title: dict.library.pageTitle,
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function LibraryLayout({
   children,

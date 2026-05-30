@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import jwt from "jsonwebtoken";
+import { getDict } from "@/lib/i18n";
 
 // Belt-and-suspenders role re-check. `proxy.ts` already guards
 // /admin/:path*, but proxy matcher misconfigurations are an easy way to
@@ -28,36 +30,39 @@ async function requireAdmin(): Promise<{ username: string }> {
   }
 }
 
-export const metadata = {
-  title: "管理后台 — AnimeGo",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const dict = await getDict();
+  return {
+    title: dict.admin.pageTitle,
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { username } = await requireAdmin();
+  const [{ username }, dict] = await Promise.all([requireAdmin(), getDict()]);
 
   return (
     <div style={styles.shell}>
       <header style={styles.header}>
         <div style={styles.headerInner}>
-          <h1 style={styles.title}>管理后台</h1>
+          <h1 style={styles.title}>{dict.admin.title}</h1>
           {/* Monolithic single-page admin — anchor scrolls instead of
               Link navigations. Three sections live on /admin: #overview
               (stats grid + EnrichmentBar), #enrichment (data review
               table), #users (CRUD). */}
           <nav style={styles.nav} aria-label="Admin navigation">
             <a href="#overview" style={styles.navLink}>
-              总览
+              {dict.admin.navOverview}
             </a>
             <a href="#enrichment" style={styles.navLink}>
-              数据富化
+              {dict.admin.navEnrichment}
             </a>
             <a href="#users" style={styles.navLink}>
-              用户管理
+              {dict.admin.navUsers}
             </a>
           </nav>
           <div style={styles.userBadge}>
