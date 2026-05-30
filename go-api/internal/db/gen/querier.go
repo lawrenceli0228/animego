@@ -254,6 +254,9 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	// /me + refresh + logout lookups by JWT-derived user id.  pgx.ErrNoRows
 	// → 404 NOT_FOUND (user was deleted after token issued, rare).
+	// Includes the grace-window columns (previous_refresh_token,
+	// refresh_rotated_at) so the Refresh handler can tolerate the
+	// immediately-previous token for 30 s after rotation.
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	// reset-password lookup by token AND not-expired.  Single query
 	// replaces Express's MongoDB compound find — keeps the
@@ -434,6 +437,11 @@ type Querier interface {
 	// columns, AND nulls refresh_token (invalidates all existing sessions).
 	// Matches Express's multi-field $set in resetPassword.
 	ResetUserPassword(ctx context.Context, iD uuid.UUID, password string) error
+	// Atomically moves current refresh_token → previous_refresh_token and
+	// writes the new token.  refresh_rotated_at is set to now() so the
+	// Refresh handler can enforce the 30 s grace window.
+	// Called on every NORMAL (non-grace) refresh rotation.
+	RotateRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error
 	// Queries used by /api/dandanplay/* orchestration (P2.6).
 	//
 	// One query — SearchAnimeCacheForDandanplay — replaces Express's
@@ -506,7 +514,9 @@ type Querier interface {
 	// application layer, not here — the DB constraint enforces it but
 	// silently rejecting clamps would surprise the caller.
 	UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) (Subscription, error)
-	// Called after login / refresh (set new token) and logout (set NULL).
+	// Called after login (set new token) and logout (set NULL for all three
+	// token columns — clears both current and grace-window state so a stolen
+	// cookie is fully invalidated).
 	// updated_at bumps to now() so callers can audit last-session activity.
 	UpdateUserRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error
 	// Upsert anime_cache main row from AniList sync.  Bangumi columns

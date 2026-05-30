@@ -21,7 +21,8 @@ VALUES ($1, $2, $3)
 RETURNING
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at;
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at;
 
 -- name: GetUserByEmail :one
 -- Login lookup.  Returns the row including the password hash so the
@@ -31,7 +32,8 @@ RETURNING
 SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 FROM users
 WHERE email = $1;
 
@@ -41,26 +43,47 @@ WHERE email = $1;
 SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 FROM users
 WHERE username = $1;
 
 -- name: GetUserByID :one
 -- /me + refresh + logout lookups by JWT-derived user id.  pgx.ErrNoRows
 -- → 404 NOT_FOUND (user was deleted after token issued, rare).
+-- Includes the grace-window columns (previous_refresh_token,
+-- refresh_rotated_at) so the Refresh handler can tolerate the
+-- immediately-previous token for 30 s after rotation.
 SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 FROM users
 WHERE id = $1;
 
 -- name: UpdateUserRefreshToken :exec
--- Called after login / refresh (set new token) and logout (set NULL).
+-- Called after login (set new token) and logout (set NULL for all three
+-- token columns — clears both current and grace-window state so a stolen
+-- cookie is fully invalidated).
 -- updated_at bumps to now() so callers can audit last-session activity.
 UPDATE users
-SET refresh_token = $2,
-    updated_at    = now()
+SET refresh_token          = $2,
+    previous_refresh_token = NULL,
+    refresh_rotated_at     = NULL,
+    updated_at             = now()
+WHERE id = $1;
+
+-- name: RotateRefreshToken :exec
+-- Atomically moves current refresh_token → previous_refresh_token and
+-- writes the new token.  refresh_rotated_at is set to now() so the
+-- Refresh handler can enforce the 30 s grace window.
+-- Called on every NORMAL (non-grace) refresh rotation.
+UPDATE users
+SET previous_refresh_token = refresh_token,
+    refresh_token          = $2,
+    refresh_rotated_at     = now(),
+    updated_at             = now()
 WHERE id = $1;
 
 -- name: SetResetPasswordToken :exec
@@ -80,7 +103,8 @@ WHERE id = $1;
 SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 FROM users
 WHERE reset_password_token = $1
   AND reset_password_expires > now();

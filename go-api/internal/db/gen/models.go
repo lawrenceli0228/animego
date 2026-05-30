@@ -51,4 +51,6 @@ type User struct {
 	IsPublic             bool               `json:"isPublic"`
 	CreatedAt            pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt            pgtype.Timestamptz `json:"updatedAt"`
+	PreviousRefreshToken *string            `json:"previousRefreshToken"`
+	RefreshRotatedAt     pgtype.Timestamptz `json:"refreshRotatedAt"`
 }

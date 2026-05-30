@@ -37,7 +37,8 @@ VALUES ($1, $2, $3)
 RETURNING
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 `
 
 // Queries against the users table.  Auth flow (register / login / refresh
@@ -72,6 +73,8 @@ func (q *Queries) CreateUser(ctx context.Context, username string, email string,
 		&i.IsPublic,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PreviousRefreshToken,
+		&i.RefreshRotatedAt,
 	)
 	return i, err
 }
@@ -80,7 +83,8 @@ const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 FROM users
 WHERE email = $1
 `
@@ -104,6 +108,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.IsPublic,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PreviousRefreshToken,
+		&i.RefreshRotatedAt,
 	)
 	return i, err
 }
@@ -112,13 +118,17 @@ const getUserByID = `-- name: GetUserByID :one
 SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 FROM users
 WHERE id = $1
 `
 
 // /me + refresh + logout lookups by JWT-derived user id.  pgx.ErrNoRows
 // → 404 NOT_FOUND (user was deleted after token issued, rare).
+// Includes the grace-window columns (previous_refresh_token,
+// refresh_rotated_at) so the Refresh handler can tolerate the
+// immediately-previous token for 30 s after rotation.
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i User
@@ -134,6 +144,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.IsPublic,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PreviousRefreshToken,
+		&i.RefreshRotatedAt,
 	)
 	return i, err
 }
@@ -142,7 +154,8 @@ const getUserByResetToken = `-- name: GetUserByResetToken :one
 SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 FROM users
 WHERE reset_password_token = $1
   AND reset_password_expires > now()
@@ -166,6 +179,8 @@ func (q *Queries) GetUserByResetToken(ctx context.Context, resetPasswordToken *s
 		&i.IsPublic,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PreviousRefreshToken,
+		&i.RefreshRotatedAt,
 	)
 	return i, err
 }
@@ -174,7 +189,8 @@ const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
-    is_public, created_at, updated_at
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at
 FROM users
 WHERE username = $1
 `
@@ -196,6 +212,8 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.IsPublic,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PreviousRefreshToken,
+		&i.RefreshRotatedAt,
 	)
 	return i, err
 }
@@ -218,6 +236,24 @@ func (q *Queries) ResetUserPassword(ctx context.Context, iD uuid.UUID, password 
 	return err
 }
 
+const rotateRefreshToken = `-- name: RotateRefreshToken :exec
+UPDATE users
+SET previous_refresh_token = refresh_token,
+    refresh_token          = $2,
+    refresh_rotated_at     = now(),
+    updated_at             = now()
+WHERE id = $1
+`
+
+// Atomically moves current refresh_token → previous_refresh_token and
+// writes the new token.  refresh_rotated_at is set to now() so the
+// Refresh handler can enforce the 30 s grace window.
+// Called on every NORMAL (non-grace) refresh rotation.
+func (q *Queries) RotateRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error {
+	_, err := q.db.Exec(ctx, rotateRefreshToken, iD, refreshToken)
+	return err
+}
+
 const setResetPasswordToken = `-- name: SetResetPasswordToken :exec
 UPDATE users
 SET reset_password_token   = $2,
@@ -236,12 +272,16 @@ func (q *Queries) SetResetPasswordToken(ctx context.Context, iD uuid.UUID, reset
 
 const updateUserRefreshToken = `-- name: UpdateUserRefreshToken :exec
 UPDATE users
-SET refresh_token = $2,
-    updated_at    = now()
+SET refresh_token          = $2,
+    previous_refresh_token = NULL,
+    refresh_rotated_at     = NULL,
+    updated_at             = now()
 WHERE id = $1
 `
 
-// Called after login / refresh (set new token) and logout (set NULL).
+// Called after login (set new token) and logout (set NULL for all three
+// token columns — clears both current and grace-window state so a stolen
+// cookie is fully invalidated).
 // updated_at bumps to now() so callers can audit last-session activity.
 func (q *Queries) UpdateUserRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error {
 	_, err := q.db.Exec(ctx, updateUserRefreshToken, iD, refreshToken)

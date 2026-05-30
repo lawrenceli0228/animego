@@ -40,6 +40,14 @@ import (
 // that a hung Postgres won't hold a goroutine pool indefinitely.
 const queryTimeout = 5 * time.Second
 
+// refreshGraceWindow is how long the immediately-previous refresh token
+// is accepted after rotation.  Near-simultaneous refresh requests
+// (Next.js RSC prefetch + navigation) can race: the first rotates the
+// token, the second arrives with the old value.  Within this window the
+// handler issues a new ACCESS token and re-sets the refresh cookie to
+// the CURRENT token — no re-rotation — so the client catches up.
+const refreshGraceWindow = 30 * time.Second
+
 // resetPasswordTokenTTL is how long a forgot-password token stays valid.
 // One hour matches Express server/controllers/auth.controller.js.
 const resetPasswordTokenTTL = time.Hour
@@ -108,6 +116,11 @@ type AuthDB interface {
 	GetUserByUsername(ctx context.Context, username string) (dbgen.User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (dbgen.User, error)
 	UpdateUserRefreshToken(ctx context.Context, id uuid.UUID, refreshToken *string) error
+
+	// RotateRefreshToken atomically moves current→previous and writes the
+	// new token.  Called on every NORMAL refresh rotation so the grace
+	// window always holds the immediately-previous value.
+	RotateRefreshToken(ctx context.Context, id uuid.UUID, refreshToken *string) error
 
 	// Password-reset write/read trio.  SetResetPasswordToken is called
 	// by ForgotPassword to stage a token + 1h expiry.  GetUserByResetToken
@@ -337,33 +350,60 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "user lookup failed"))
 		return
 	}
-	if user.RefreshToken == nil || *user.RefreshToken != cookieToken {
-		httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidToken, msgInvalidToken))
+	// NORMAL path: cookie matches the current DB token.
+	if user.RefreshToken != nil && *user.RefreshToken == cookieToken {
+		accessToken, refreshToken, err := h.issueTokens(user)
+		if err != nil {
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "sign token failed"))
+			return
+		}
+
+		if err := h.db.RotateRefreshToken(ctx, user.ID, &refreshToken); err != nil {
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "persist refresh token failed"))
+			return
+		}
+
+		SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
+		SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
+		httpx.Data(w, http.StatusOK, RefreshData{AccessToken: accessToken})
 		return
 	}
 
-	accessToken, refreshToken, err := h.issueTokens(user)
-	if err != nil {
-		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "sign token failed"))
+	// GRACE path: cookie matches the previous token and is still within
+	// the 30 s grace window.  Issue a new access token; re-set the
+	// refresh cookie to the CURRENT token so the client catches up.
+	// Do NOT call RotateRefreshToken — re-rotating here would overwrite
+	// the previous slot with the token the client just sent, which is
+	// already stale on the other concurrent request.
+	if user.PreviousRefreshToken != nil &&
+		*user.PreviousRefreshToken == cookieToken &&
+		user.RefreshRotatedAt.Valid &&
+		time.Since(user.RefreshRotatedAt.Time) < refreshGraceWindow {
+
+		accessToken, _, err := h.issueTokens(user)
+		if err != nil {
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "sign token failed"))
+			return
+		}
+
+		// Re-set refresh cookie to the CURRENT token (the one that won
+		// the rotation race) so the client aligns after this response.
+		SetRefreshCookie(w, *user.RefreshToken, h.refreshTTL, h.isProd)
+		SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
+		httpx.Data(w, http.StatusOK, RefreshData{AccessToken: accessToken})
 		return
 	}
 
-	if err := h.db.UpdateUserRefreshToken(ctx, user.ID, &refreshToken); err != nil {
-		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "persist refresh token failed"))
-		return
-	}
-
-	SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
-	SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
-	httpx.Data(w, http.StatusOK, RefreshData{AccessToken: accessToken})
+	httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidToken, msgInvalidToken))
 }
 
 // Logout implements POST /api/auth/logout.  Requires the route to be
 // wrapped in jwtx.RequireAuth so the access claims are present in ctx.
 //
 // Side effects:
-//   - DB: nulls users.refresh_token so any stolen refresh cookie is
-//     invalidated (the DB-match check in /refresh will fail).
+//   - DB: UpdateUserRefreshToken(nil) nulls refresh_token, previous_refresh_token,
+//     and refresh_rotated_at in one shot, so any stolen refresh cookie
+//     (including one still inside the grace window) is fully invalidated.
 //   - Cookie: ClearRefreshCookie writes a Max-Age=-1 Set-Cookie so the
 //     browser drops the cookie immediately.
 func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
