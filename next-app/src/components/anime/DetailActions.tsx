@@ -17,6 +17,7 @@ import SubscriptionButton from "./SubscriptionButton";
 import ShareButton from "./ShareButton";
 import MagnetButton from "./MagnetButton";
 import PlayButton from "./PlayButton";
+import type { Lang } from "@/lib/i18n";
 
 const TorrentModal = dynamic(() => import("./TorrentModal"), {
   ssr: false,
@@ -31,6 +32,7 @@ interface DetailActionsProps {
   titleNative: string | null;
   coverImageUrl: string | null;
   shareTitle: string;
+  lang: Lang;
   labels: {
     // SubscriptionButton v2
     subAdd: string;
@@ -83,6 +85,7 @@ export default function DetailActions({
   titleNative,
   coverImageUrl,
   shareTitle,
+  lang,
   labels,
 }: DetailActionsProps) {
   const [torrentOpen, setTorrentOpen] = useState(false);
@@ -151,6 +154,7 @@ export default function DetailActions({
             openMagnet: labels.torrentsOpenMagnet,
           }}
           onClose={() => setTorrentOpen(false)}
+          lang={lang}
         />
       )}
     </>

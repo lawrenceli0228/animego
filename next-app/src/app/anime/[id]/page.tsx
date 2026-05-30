@@ -1246,6 +1246,7 @@ export default async function AnimeDetailPage({ params }: PageProps) {
             titleNative={detail.titleNative}
             coverImageUrl={detail.coverImageUrl}
             shareTitle={pickTitle(detail, lang)}
+            lang={lang}
             labels={{
               subAdd: dict.sub.addToList,
               subRemove: dict.sub.remove,

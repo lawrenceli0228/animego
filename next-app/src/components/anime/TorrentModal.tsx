@@ -38,6 +38,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, ApiError } from "@/lib/api";
 import FadeImage from "@/components/ui/FadeImage";
+import type { Lang } from "@/lib/i18n";
 
 // Module-level cache: keyed by lowercased query, 5min TTL — matches the
 // legacy TanStack Query `staleTime: 5 * 60 * 1000` in client/src/hooks/
@@ -90,6 +91,8 @@ interface TorrentModalProps {
   anime: AnimeSummary;
   labels: TorrentLabels;
   onClose: () => void;
+  /** Language used to localise internal source labels (e.g. "花园" → "Garden"). Defaults to "en". */
+  lang?: Lang;
 }
 
 interface TitleOption {
@@ -223,6 +226,7 @@ interface TorrentRowProps {
   copyLabel: string;
   copiedLabel: string;
   openLabel: string;
+  lang: Lang;
 }
 
 function sourceBg(source: string): string {
@@ -237,8 +241,8 @@ function sourceColor(source: string): string {
   return "rgba(235,235,245,0.30)";
 }
 
-function sourceLabel(source: string): string {
-  if (source === "garden" || source === "dmhy") return "花园";
+function sourceLabel(source: string, lang: Lang = "en"): string {
+  if (source === "garden" || source === "dmhy") return lang === "zh" ? "花园" : "Garden";
   return source;
 }
 
@@ -258,6 +262,7 @@ function TorrentRow({
   copyLabel,
   copiedLabel,
   openLabel,
+  lang,
 }: TorrentRowProps) {
   const { resolution, tags } = parseTags(item.title);
   const [hovered, setHovered] = useState(false);
@@ -369,7 +374,7 @@ function TorrentRow({
                 cursor: item.source === "garden" ? "help" : "default",
               }}
             >
-              {sourceLabel(item.source)}
+              {sourceLabel(item.source, lang)}
             </span>
           )}
         </div>
@@ -437,6 +442,7 @@ export default function TorrentModal({
   anime,
   labels,
   onClose,
+  lang = "en",
 }: TorrentModalProps) {
   const defaultQ = anime.titleRomaji || anime.titleEnglish || "";
 
@@ -537,7 +543,7 @@ export default function TorrentModal({
   // ─── Title variant pills (dedup by value) ──────────────────────
   const titleOptions: TitleOption[] = useMemo(() => {
     const raw: (TitleOption | null)[] = [
-      anime.titleChinese ? { label: "中文", value: anime.titleChinese } : null,
+      anime.titleChinese ? { label: lang === "zh" ? "中文" : "Chinese", value: anime.titleChinese } : null,
       anime.titleRomaji ? { label: "Romaji", value: anime.titleRomaji } : null,
       anime.titleEnglish && anime.titleEnglish !== anime.titleRomaji
         ? { label: "English", value: anime.titleEnglish }
@@ -954,6 +960,7 @@ export default function TorrentModal({
                     copyLabel={labels.copy}
                     copiedLabel={labels.copied}
                     openLabel={labels.openMagnet}
+                    lang={lang}
                   />
                 ))}
               </div>
