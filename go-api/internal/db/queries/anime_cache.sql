@@ -275,6 +275,15 @@ SELECT title_native, title_romaji
 FROM anime_cache
 WHERE anilist_id = $1;
 
+-- name: MarkBangumiV1NotFound :exec
+-- Phase-1 found no Bangumi match. Mirror Express's no-bgmId branch:
+-- terminal version=2 with null title_chinese + bgm_id so the orphan
+-- scan (version=0) and re-enrich stop re-processing this row. Guarded
+-- on bangumi_version=0 so we never clobber a row another worker advanced.
+UPDATE anime_cache
+SET title_chinese = NULL, bgm_id = NULL, bangumi_version = 2
+WHERE anilist_id = $1 AND bangumi_version = 0;
+
 -- name: UpdateBangumiV1 :exec
 -- Phase 1 result write — set bgm_id + title_chinese (the latter only
 -- when the Bangumi search produced an exact native match with a

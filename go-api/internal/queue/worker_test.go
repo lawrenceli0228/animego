@@ -284,6 +284,10 @@ func (noopV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string
 	return nil
 }
 
+func (noopV12DB) MarkBangumiV1NotFound(_ context.Context, _ int32) error {
+	return nil
+}
+
 func (noopV12DB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int32, _ *string) error {
 	return nil
 }

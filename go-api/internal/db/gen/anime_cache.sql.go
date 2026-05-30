@@ -1313,6 +1313,21 @@ func (q *Queries) ListUnenrichedAnilistIDs(ctx context.Context, limit int32, off
 	return items, nil
 }
 
+const markBangumiV1NotFound = `-- name: MarkBangumiV1NotFound :exec
+UPDATE anime_cache
+SET title_chinese = NULL, bgm_id = NULL, bangumi_version = 2
+WHERE anilist_id = $1 AND bangumi_version = 0
+`
+
+// Phase-1 found no Bangumi match. Mirror Express's no-bgmId branch:
+// terminal version=2 with null title_chinese + bgm_id so the orphan
+// scan (version=0) and re-enrich stop re-processing this row. Guarded
+// on bangumi_version=0 so we never clobber a row another worker advanced.
+func (q *Queries) MarkBangumiV1NotFound(ctx context.Context, anilistID int32) error {
+	_, err := q.db.Exec(ctx, markBangumiV1NotFound, anilistID)
+	return err
+}
+
 const updateAnimeCharacterCN = `-- name: UpdateAnimeCharacterCN :exec
 UPDATE anime_characters
 SET name_cn               = $3,

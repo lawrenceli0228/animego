@@ -49,19 +49,22 @@ func (f *fakeBangumi) Search(ctx context.Context, keyword string) (*bangumi.Sear
 	return f.searchFn(ctx, keyword)
 }
 
-// fakeV1DB is a programmable V1DB.  Each test sets the two fn fields;
+// fakeV1DB is a programmable V1DB.  Each test sets the fn fields;
 // the lastUpdate snapshot lets assertions inspect what was written
 // without smuggling globals.
 type fakeV1DB struct {
-	getFn    func(ctx context.Context, id int32) (dbgen.GetAnimeForBangumiSearchRow, error)
-	updateFn func(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string) error
+	getFn          func(ctx context.Context, id int32) (dbgen.GetAnimeForBangumiSearchRow, error)
+	updateFn       func(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string) error
+	markNotFoundFn func(ctx context.Context, anilistID int32) error
 
-	updateCalls int
-	lastUpdate  struct {
+	updateCalls       int
+	markNotFoundCalls int
+	lastUpdate        struct {
 		anilistID    int32
 		bgmID        *int32
 		titleChinese *string
 	}
+	lastMarkNotFoundID int32
 }
 
 // fakeV1Enqueuer records EnqueueV2Many calls so chain tests can
@@ -116,6 +119,15 @@ func (f *fakeV1DB) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *
 		return nil
 	}
 	return f.updateFn(ctx, anilistID, bgmID, titleChinese)
+}
+
+func (f *fakeV1DB) MarkBangumiV1NotFound(ctx context.Context, anilistID int32) error {
+	f.markNotFoundCalls++
+	f.lastMarkNotFoundID = anilistID
+	if f.markNotFoundFn == nil {
+		return nil
+	}
+	return f.markNotFoundFn(ctx, anilistID)
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +194,9 @@ func TestBangumiV1_EmptyKeyword_ReturnsNil(t *testing.T) {
 	err := runV1(t, b, db, 1234)
 	require.NoError(t, err)
 	assert.Equal(t, 0, b.calls, "empty keyword → Search must NOT be called")
-	assert.Equal(t, 0, db.updateCalls, "empty keyword → Update must NOT be called")
+	assert.Equal(t, 0, db.updateCalls, "empty keyword → UpdateBangumiV1 must NOT be called")
+	assert.Equal(t, 1, db.markNotFoundCalls, "empty keyword → MarkBangumiV1NotFound must be called once")
+	assert.Equal(t, int32(1234), db.lastMarkNotFoundID)
 }
 
 func TestBangumiV1_EmptyKeyword_EmptyStringTreatedAsMissing(t *testing.T) {
@@ -203,6 +217,7 @@ func TestBangumiV1_EmptyKeyword_EmptyStringTreatedAsMissing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, b.calls, "empty string keyword must be treated as missing")
 	assert.Equal(t, 0, db.updateCalls)
+	assert.Equal(t, 1, db.markNotFoundCalls, "empty string keyword → MarkBangumiV1NotFound must be called once")
 }
 
 func TestBangumiV1_HappyPath_ExactMatch(t *testing.T) {
@@ -382,7 +397,9 @@ func TestBangumiV1_NotFound_ReturnsNil(t *testing.T) {
 	err := runV1(t, b, db, 4)
 	require.NoError(t, err, "ErrNotFound is permanent — must not retry")
 	assert.Equal(t, 1, b.calls)
-	assert.Equal(t, 0, db.updateCalls, "no hit → no DB write")
+	assert.Equal(t, 0, db.updateCalls, "no hit → UpdateBangumiV1 must NOT be called")
+	assert.Equal(t, 1, db.markNotFoundCalls, "ErrNotFound → MarkBangumiV1NotFound must be called once")
+	assert.Equal(t, int32(4), db.lastMarkNotFoundID)
 }
 
 func TestBangumiV1_EmptyList_ReturnsNil(t *testing.T) {
@@ -403,7 +420,9 @@ func TestBangumiV1_EmptyList_ReturnsNil(t *testing.T) {
 	err := runV1(t, b, db, 5)
 	require.NoError(t, err, "empty list must be treated as no-hit, not error")
 	assert.Equal(t, 1, b.calls)
-	assert.Equal(t, 0, db.updateCalls, "empty list → no DB write")
+	assert.Equal(t, 0, db.updateCalls, "empty list → UpdateBangumiV1 must NOT be called")
+	assert.Equal(t, 1, db.markNotFoundCalls, "empty list → MarkBangumiV1NotFound must be called once")
+	assert.Equal(t, int32(5), db.lastMarkNotFoundID)
 }
 
 func TestBangumiV1_BangumiTransientError_Retries(t *testing.T) {
@@ -631,6 +650,7 @@ func TestBangumiV1_HappyPath_ChainsV2(t *testing.T) {
 
 // TestBangumiV1_NoHit_DoesNotChainV2 — when Search returns ErrNotFound
 // there's no bgmID to chain, so EnqueueV2Many must NOT be called.
+// MarkBangumiV1NotFound IS called to terminate the orphan scan.
 func TestBangumiV1_NoHit_DoesNotChainV2(t *testing.T) {
 	t.Parallel()
 
@@ -649,10 +669,11 @@ func TestBangumiV1_NoHit_DoesNotChainV2(t *testing.T) {
 	err := runV1WithEnq(t, b, db, enq, 99)
 	require.NoError(t, err)
 	assert.Empty(t, enq.v2Calls, "no Bangumi hit → no V2 chain")
+	assert.Equal(t, 1, db.markNotFoundCalls, "ErrNotFound → MarkBangumiV1NotFound must be called")
 }
 
 // TestBangumiV1_EmptyList_DoesNotChainV2 — same as ErrNotFound, but
-// the 200/{list:[]} branch.
+// the 200/{list:[]} branch.  MarkBangumiV1NotFound IS called.
 func TestBangumiV1_EmptyList_DoesNotChainV2(t *testing.T) {
 	t.Parallel()
 
@@ -671,6 +692,7 @@ func TestBangumiV1_EmptyList_DoesNotChainV2(t *testing.T) {
 	err := runV1WithEnq(t, b, db, enq, 5)
 	require.NoError(t, err)
 	assert.Empty(t, enq.v2Calls, "empty list → no V2 chain")
+	assert.Equal(t, 1, db.markNotFoundCalls, "empty list → MarkBangumiV1NotFound must be called")
 }
 
 // TestBangumiV1_V2ChainError_NonFatal — V1 succeeded but the chain
@@ -739,6 +761,78 @@ func TestBangumiV1_NilEnqueuer_Substitutes(t *testing.T) {
 	})
 	require.NoError(t, err, "nil enq should be substituted with Noop")
 	require.Equal(t, 1, db.updateCalls)
+}
+
+// ---------------------------------------------------------------------------
+// MarkBangumiV1NotFound error-propagation tests (no-match DB write fails)
+// ---------------------------------------------------------------------------
+
+// TestBangumiV1_EmptyKeyword_MarkNotFoundError — MarkBangumiV1NotFound
+// DB error on the empty-keyword branch must surface so river retries.
+func TestBangumiV1_EmptyKeyword_MarkNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	dbErr := errors.New("db unavailable")
+	db := &fakeV1DB{
+		getFn: func(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: nil, TitleRomaji: nil}, nil
+		},
+		markNotFoundFn: func(_ context.Context, _ int32) error { return dbErr },
+	}
+
+	err := runV1(t, &fakeBangumi{}, db, 100)
+	require.Error(t, err, "MarkBangumiV1NotFound error must surface for river retry")
+	assert.ErrorIs(t, err, dbErr)
+	assert.Equal(t, 1, db.markNotFoundCalls)
+}
+
+// TestBangumiV1_SearchNotFound_MarkNotFoundError — MarkBangumiV1NotFound
+// DB error on the ErrNotFound branch must surface so river retries.
+func TestBangumiV1_SearchNotFound_MarkNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	dbErr := errors.New("write timeout")
+	b := &fakeBangumi{
+		searchFn: func(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+			return nil, bangumi.ErrNotFound
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: ptr("Something")}, nil
+		},
+		markNotFoundFn: func(_ context.Context, _ int32) error { return dbErr },
+	}
+
+	err := runV1(t, b, db, 101)
+	require.Error(t, err, "MarkBangumiV1NotFound error must surface for river retry")
+	assert.ErrorIs(t, err, dbErr)
+	assert.Contains(t, err.Error(), "101")
+	assert.Equal(t, 1, db.markNotFoundCalls)
+}
+
+// TestBangumiV1_EmptyList_MarkNotFoundError — MarkBangumiV1NotFound
+// DB error on the empty-list branch must surface so river retries.
+func TestBangumiV1_EmptyList_MarkNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	dbErr := errors.New("connection reset")
+	b := &fakeBangumi{
+		searchFn: func(_ context.Context, _ string) (*bangumi.SearchResponse, error) {
+			return &bangumi.SearchResponse{List: nil}, nil
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: ptr("Something")}, nil
+		},
+		markNotFoundFn: func(_ context.Context, _ int32) error { return dbErr },
+	}
+
+	err := runV1(t, b, db, 102)
+	require.Error(t, err, "MarkBangumiV1NotFound error must surface for river retry")
+	assert.ErrorIs(t, err, dbErr)
+	assert.Equal(t, 1, db.markNotFoundCalls)
 }
 
 // Compile-time guard:  dbgen.Querier must satisfy V1DB so production

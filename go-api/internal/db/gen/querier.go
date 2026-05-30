@@ -416,6 +416,11 @@ type Querier interface {
 	// LEFT JOIN preserves rows even if anime_cache was cleared (unlikely
 	// given ON DELETE CASCADE, but defensive).
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]ListUserSubscriptionsRow, error)
+	// Phase-1 found no Bangumi match. Mirror Express's no-bgmId branch:
+	// terminal version=2 with null title_chinese + bgm_id so the orphan
+	// scan (version=0) and re-enrich stop re-processing this row. Guarded
+	// on bangumi_version=0 so we never clobber a row another worker advanced.
+	MarkBangumiV1NotFound(ctx context.Context, anilistID int32) error
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error

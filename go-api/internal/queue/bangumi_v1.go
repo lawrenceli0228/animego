@@ -58,11 +58,12 @@ type V1Reader interface {
 	GetAnimeForBangumiSearch(ctx context.Context, anilistID int32) (dbgen.GetAnimeForBangumiSearchRow, error)
 }
 
-// V1Writer is the sqlc subset BangumiV1Worker writes — only the V1
-// column update.  Split from V1Reader so future workers can compose
-// just the surface they need.
+// V1Writer is the sqlc subset BangumiV1Worker writes — the V1 column
+// update on a hit, and the terminal no-match write on a miss.  Split
+// from V1Reader so future workers can compose just the surface they need.
 type V1Writer interface {
 	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string) error
+	MarkBangumiV1NotFound(ctx context.Context, anilistID int32) error
 }
 
 // V1DB combines the read + write surfaces this worker needs.
@@ -133,6 +134,9 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 	if keyword == "" {
 		slog.InfoContext(ctx, "bangumi_v1 no_keyword",
 			"anilistId", anilistID)
+		if err := w.db.MarkBangumiV1NotFound(ctx, anilistID); err != nil {
+			return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, err)
+		}
 		return nil
 	}
 
@@ -141,11 +145,14 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 	if err != nil {
 		if errors.Is(err, bangumi.ErrNotFound) {
 			// 404 → no Bangumi record for this title.  Permanent, not
-			// retryable.  Express returns null here; we return nil so
-			// river marks the job completed.
+			// retryable.  Mirror Express: write terminal version=2 so the
+			// orphan scan (version=0) stops re-queuing this row.
 			slog.InfoContext(ctx, "bangumi_v1 no_hit",
 				"anilistId", anilistID,
 				"keyword", keyword)
+			if err := w.db.MarkBangumiV1NotFound(ctx, anilistID); err != nil {
+				return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, err)
+			}
 			return nil
 		}
 		// Any other error (network, 5xx, decode failure) is
@@ -160,10 +167,14 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 	// 4. Empty list is treated the same as ErrNotFound — Express
 	//    returns null here too.  Bangumi sometimes returns 200 with
 	//    {list:[]} for queries that don't pattern-match a real subject.
+	//    Write terminal version=2 so the orphan scan stops re-queuing.
 	if len(resp.List) == 0 {
 		slog.InfoContext(ctx, "bangumi_v1 no_hit",
 			"anilistId", anilistID,
 			"keyword", keyword)
+		if err := w.db.MarkBangumiV1NotFound(ctx, anilistID); err != nil {
+			return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, err)
+		}
 		return nil
 	}
 
