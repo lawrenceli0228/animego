@@ -520,16 +520,16 @@ export function LibraryShell() {
             target?.titleJa ||
             seriesId;
           const ok = window.confirm(
-            `从库里删除「${title}」?\n\n会清掉本地的元数据 / 进度 / 覆盖,但磁盘上的视频文件不会被动。`,
+            t("library.confirm.deleteSingle").replace("{{title}}", title),
           );
           if (!ok) return;
           await deleteSeriesCascade({ db, seriesId });
-          toast.success(`已删除「${title}」`);
+          toast.success(t("library.toast.deleteSuccess").replace("{{title}}", title));
         }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn(`[library] override action ${action} failed:`, err);
-        toast.error("删除失败,请重试");
+        toast.error(t("library.toast.deleteFailed"));
       }
     },
     [lock, unlock, clear, series],
@@ -566,7 +566,7 @@ export function LibraryShell() {
           setUndoToast({
             opIds: [op.id],
             title: targetTitle,
-            meta: `从 ${sourceTitle} 合并`,
+            meta: t("library.undoToast.mergeFromSource").replace("{{source}}", sourceTitle),
           });
         }
       } catch (err) {
@@ -586,10 +586,14 @@ export function LibraryShell() {
       .map((id) => series.find((sr) => sr.id === id))
       .map((sr) => sr?.titleZh || sr?.titleEn || sr?.titleJa || sr?.id || "?");
     const preview =
-      titles.slice(0, 3).join("、") +
-      (titles.length > 3 ? `… (共 ${titles.length} 项)` : "");
+      titles.slice(0, 3).join(", ") +
+      (titles.length > 3
+        ? t("library.confirm.deleteBulkPreviewMore").replace("{{total}}", String(titles.length))
+        : "");
     const ok = window.confirm(
-      `从库里删除以下 ${ids.length} 项?\n\n${preview}\n\n会清掉本地的元数据 / 进度 / 覆盖,但磁盘上的视频文件不会被动。`,
+      t("library.confirm.deleteBulk")
+        .replace("{{count}}", String(ids.length))
+        .replace("{{preview}}", preview),
     );
     if (!ok) return;
     let okCount = 0;
@@ -604,11 +608,15 @@ export function LibraryShell() {
     }
     selection.clear();
     if (okCount === ids.length) {
-      toast.success(`已删除 ${okCount} 项`);
+      toast.success(t("library.toast.deleteSuccessCount").replace("{{count}}", String(okCount)));
     } else if (okCount > 0) {
-      toast.success(`已删除 ${okCount}/${ids.length} 项,部分失败`);
+      toast.success(
+        t("library.toast.deleteSuccessPartial")
+          .replace("{{ok}}", String(okCount))
+          .replace("{{total}}", String(ids.length)),
+      );
     } else {
-      toast.error("删除失败,请重试");
+      toast.error(t("library.toast.deleteFailed"));
     }
   }, [selection, series]);
 
@@ -642,8 +650,8 @@ export function LibraryShell() {
     if (opIds.length > 0) {
       setUndoToast({
         opIds,
-        title: `合并到 ${targetTitle}`,
-        meta: `${opIds.length} 项`,
+        title: t("library.undoToast.mergeBulkTitle").replace("{{target}}", targetTitle),
+        meta: t("library.undoToast.mergeBulkMeta").replace("{{count}}", String(opIds.length)),
       });
     }
   }, [selection, series]);
@@ -709,7 +717,9 @@ export function LibraryShell() {
       return {
         seriesId: m.seriesId,
         title,
-        meta: `来自 ${m.folders.length} 个文件夹 (${folderLabels})`,
+        meta: t("library.undoToast.autoMergeMeta")
+          .replace("{{folderCount}}", String(m.folders.length))
+          .replace("{{folderLabels}}", folderLabels),
       };
     });
     setAutoMergeQueue((q) => [...q, ...entries]);
@@ -792,9 +802,7 @@ export function LibraryShell() {
   }, []);
 
   const handleResetLibrary = useCallback(async () => {
-    const ok = window.confirm(
-      "清空整个本地库?将删除全部 series / episodes / fileRefs / matchCache / fileHandles / opsLog。\n(磁盘上的视频文件不会被动)",
-    );
+    const ok = window.confirm(t("library.confirm.resetLibrary"));
     if (!ok) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tables = db as any;
@@ -851,27 +859,31 @@ export function LibraryShell() {
     try {
       const result = await dedupeSeriesByAnimeId({ db });
       if (result.groups === 0) {
-        toast.success("库里没有重复的系列");
+        toast.success(t("library.toast.dedupeNone"));
       } else if (result.merged === 0) {
         toast(
-          `检测到 ${result.groups} 组重复但都已合并过 (skip ${result.skipped})`,
+          t("library.toast.dedupeSkipped")
+            .replace("{{groups}}", String(result.groups))
+            .replace("{{skipped}}", String(result.skipped)),
         );
       } else {
         toast.success(
-          `合并 ${result.merged} 项 · 共 ${result.groups} 组重复`,
+          t("library.toast.dedupeSuccess")
+            .replace("{{merged}}", String(result.merged))
+            .replace("{{groups}}", String(result.groups)),
         );
         if (result.opIds.length > 0) {
           setUndoToast({
             opIds: result.opIds,
-            title: `合并重复 (${result.merged} 项)`,
-            meta: `${result.groups} 组 · 同 animeId`,
+            title: t("library.undoToast.dedupeBulkTitle").replace("{{count}}", String(result.merged)),
+            meta: t("library.undoToast.dedupeBulkMeta").replace("{{groups}}", String(result.groups)),
           });
         }
       }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn("[library] dedupe failed:", err);
-      toast.error("合并失败,请重试");
+      toast.error(t("library.toast.mergeFailed"));
     } finally {
       setDedupeBusy(false);
     }
@@ -1106,7 +1118,7 @@ export function LibraryShell() {
             ) : (
               <>
                 <ScrollRow
-                  label="// 继续看 //"
+                  label={t("library.row.continueWatching")}
                   testId="row-recently-played-skeleton"
                 >
                   {Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (
@@ -1114,7 +1126,7 @@ export function LibraryShell() {
                   ))}
                 </ScrollRow>
                 <ScrollRow
-                  label="// 最近添加 //"
+                  label={t("library.row.newAdditions")}
                   testId="row-new-additions-skeleton"
                 >
                   {Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (

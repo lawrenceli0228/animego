@@ -14,6 +14,7 @@ import {
 } from "react";
 import FadeImage from "@/components/ui/FadeImage";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
+import { useLang } from "@/lib/lang-client";
 // P6 TODO: tighten when useLibrary gets typed exports; for now widen to any
 // eslint-disable-next-line -eslint/no-explicit-any
 type SeriesRecord = any;
@@ -227,6 +228,7 @@ export function UnavailableSeriesSection({
   reauthorizing = false,
   defaultOpen = false,
 }: UnavailableSeriesSectionProps) {
+  const { t } = useLang();
   const [open, setOpen] = useState(defaultOpen);
 
   const sorted = useMemo(() => {
@@ -272,7 +274,7 @@ export function UnavailableSeriesSection({
       >
         <span style={s.kicker}>// UNAVAILABLE //</span>
         <span style={s.count} data-testid="unavailable-count">
-          {series.length} 项暂时不可访问
+          {t("library.unavailable.count").replace("{{count}}", String(series.length))}
         </span>
         <span style={s.spacer} />
         {onReauthorize ? (
@@ -285,9 +287,9 @@ export function UnavailableSeriesSection({
               if (!reauthorizing) onReauthorize();
             }}
             disabled={reauthorizing}
-            title="对每个离线文件夹弹出浏览器原生授权框,逐个重新授权"
+            title={t("library.unavailable.reauthTitle")}
           >
-            {reauthorizing ? "授权中…" : "重新授权"}
+            {reauthorizing ? t("library.unavailable.reauthorizing") : t("library.unavailable.reauthorize")}
           </button>
         ) : null}
         <button
@@ -299,9 +301,9 @@ export function UnavailableSeriesSection({
             if (!refreshing) onRefresh();
           }}
           disabled={refreshing}
-          title="重新探测硬盘连接状态(不会弹授权框)"
+          title={t("library.unavailable.refreshTitle")}
         >
-          {refreshing ? "检测中…" : "刷新可用性"}
+          {refreshing ? t("library.unavailable.refreshing") : t("library.unavailable.refresh")}
         </button>
         <span
           style={{
@@ -326,7 +328,7 @@ export function UnavailableSeriesSection({
               /^https:\/\//i.test(sr.posterUrl)
                 ? sr.posterUrl
                 : null;
-            const reason = isPartial ? "部分集缺失" : "硬盘未连接";
+            const reason = isPartial ? t("library.unavailable.reasonPartial") : t("library.unavailable.reasonOffline");
             return (
               <div
                 key={sr.id}
@@ -362,7 +364,7 @@ export function UnavailableSeriesSection({
                     style={s.actionBtn("partial")}
                     onClick={() => onPickSeries(sr.id)}
                   >
-                    打开
+                    {t("library.unavailable.openBtn")}
                   </button>
                 ) : (
                   <button
@@ -371,9 +373,9 @@ export function UnavailableSeriesSection({
                     style={s.actionBtn(onDelete ? "danger" : "offline")}
                     onClick={() => onDelete?.(sr.id)}
                     disabled={!onDelete}
-                    title="从库里删除（不会动磁盘文件，重连后可重新导入）"
+                    title={t("library.unavailable.deleteTitle")}
                   >
-                    删除
+                    {t("library.unavailable.deleteBtn")}
                   </button>
                 )}
               </div>

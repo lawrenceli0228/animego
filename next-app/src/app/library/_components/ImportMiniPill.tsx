@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { mono } from "@/components/landing/shared/hud-tokens";
 import { aggregateEvents } from "./ImportDrawer";
+import { useLang } from "@/lib/lang-client";
 import type { ImportSummary } from "../_services/importPipeline";
 
 // Loose ImportEvent shape — matches the legacy type but kept generic to avoid
@@ -40,6 +41,7 @@ export function ImportMiniPill({
   summary,
   onExpand,
 }: ImportMiniPillProps) {
+  const { t } = useLang();
   const { rows, total, finished } = useMemo(
     () => aggregateEvents(progress ?? []),
     [progress],
@@ -58,16 +60,16 @@ export function ImportMiniPill({
       data-testid="import-mini-pill"
       style={s.pill}
       onClick={onExpand}
-      aria-label="展开导入进度抽屉"
+      aria-label={t("library.miniPill.ariaLabel")}
     >
       <style>{SPIN_KEYFRAMES}</style>
       <span aria-hidden style={s.spinner} />
-      <span>导入中</span>
+      <span>{t("library.miniPill.importing")}</span>
       <span style={s.counter}>
         {counterDone} <span style={s.total}>/ {counterTotal}</span>
       </span>
       <span style={s.expand} aria-hidden>
-        展开 ↗
+        {t("library.miniPill.expand")}
       </span>
     </button>
   );

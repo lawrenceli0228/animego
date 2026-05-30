@@ -599,9 +599,11 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
 function RelationsSection({
   relations,
   lang,
+  dict,
 }: {
   relations: DetailRelation[];
   lang: Lang;
+  dict: Dict;
 }) {
   if (!relations.length) return null;
   const sorted = [...relations].sort((a, b) => {
@@ -621,7 +623,7 @@ function RelationsSection({
           marginBottom: 16,
         }}
       >
-        {lang === "zh" ? "关联作品" : "Relations"}
+        {dict.detail.relations}
       </h2>
       <div
         style={{
@@ -729,13 +731,15 @@ function RelationsSection({
 function CharactersSection({
   characters,
   lang,
+  dict,
 }: {
   characters: DetailCharacter[];
   lang: Lang;
+  dict: Dict;
 }) {
   if (!characters.length) return null;
-  const label = lang === "zh" ? "角色 & 配音" : "Characters";
-  const jaLabel = lang === "zh" ? "日语" : "Japanese";
+  const label = dict.detail.characters;
+  const jaLabel = dict.detail.voiceActorLang;
 
   return (
     <section style={{ marginTop: 40 }}>
@@ -899,9 +903,9 @@ function CharactersSection({
 
 // --- Staff section ---
 
-function StaffSectionView({ staff, lang }: { staff: DetailStaff[]; lang: Lang }) {
+function StaffSectionView({ staff, lang, dict }: { staff: DetailStaff[]; lang: Lang; dict: Dict }) {
   if (!staff.length) return null;
-  const label = lang === "zh" ? "制作人员" : "Staff";
+  const label = dict.detail.staff;
 
   return (
     <section style={{ marginTop: 40 }}>
@@ -985,12 +989,14 @@ function StaffSectionView({ staff, lang }: { staff: DetailStaff[]; lang: Lang })
 function RecommendationsSection({
   recommendations,
   lang,
+  dict,
 }: {
   recommendations: DetailRecommendation[];
   lang: Lang;
+  dict: Dict;
 }) {
   if (!recommendations.length) return null;
-  const label = lang === "zh" ? "看了这部还在看" : "You Might Also Like";
+  const label = dict.detail.recommendations;
   // Legacy shows up to ~10 in a single horizontal-scroll strip with
   // 110×155 covers + title + score below (NOT the bento AnimeCard with
   // overlaid metadata). See client/src/components/anime/RecommendationSection.jsx.
@@ -1271,9 +1277,9 @@ export default async function AnimeDetailPage({ params }: PageProps) {
             }}
           />
           <WatchersAvatarList anilistId={detail.anilistId} />
-          <RelationsSection relations={detail.relations} lang={lang} />
-          <CharactersSection characters={detail.characters} lang={lang} />
-          <StaffSectionView staff={detail.staff} lang={lang} />
+          <RelationsSection relations={detail.relations} lang={lang} dict={dict} />
+          <CharactersSection characters={detail.characters} lang={lang} dict={dict} />
+          <StaffSectionView staff={detail.staff} lang={lang} dict={dict} />
           <EpisodesGrid
             anilistId={detail.anilistId}
             episodes={detail.episodes}
@@ -1284,6 +1290,7 @@ export default async function AnimeDetailPage({ params }: PageProps) {
           <RecommendationsSection
             recommendations={detail.recommendations}
             lang={lang}
+            dict={dict}
           />
         </div>
       </main>

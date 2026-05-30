@@ -7,6 +7,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
+import { useLang } from "@/lib/lang-client";
 
 export interface OpsLogEntry {
   id: string;
@@ -27,12 +28,13 @@ interface KindMeta {
   color: string;
 }
 
+// label values are i18n keys resolved at render time via t()
 const KIND_META: Record<string, KindMeta> = {
-  merge: { glyph: "⇉", label: "合并", color: `oklch(72% 0.15 ${HUE})` },
-  split: { glyph: "⇇", label: "拆分", color: "oklch(75% 0.15 145)" },
-  rematch: { glyph: "⟲", label: "重新匹配", color: "oklch(78% 0.16 70)" },
-  unfile: { glyph: "✕", label: "取消归档", color: "rgba(235,235,245,0.55)" },
-  delete: { glyph: "⌫", label: "删除", color: "oklch(70% 0.20 25)" },
+  merge: { glyph: "⇉", label: "library.opsLog.kindMerge", color: `oklch(72% 0.15 ${HUE})` },
+  split: { glyph: "⇇", label: "library.opsLog.kindSplit", color: "oklch(75% 0.15 145)" },
+  rematch: { glyph: "⟲", label: "library.opsLog.kindRematch", color: "oklch(78% 0.16 70)" },
+  unfile: { glyph: "✕", label: "library.opsLog.kindUnfile", color: "rgba(235,235,245,0.55)" },
+  delete: { glyph: "⌫", label: "library.opsLog.kindDelete", color: "oklch(70% 0.20 25)" },
 };
 
 const s = {
@@ -160,40 +162,52 @@ const s = {
   } as CSSProperties,
 };
 
-/** Relative time formatter — Chinese only (matches legacy). */
-export function formatTimeAgo(ts: number, now: number = Date.now()): string {
+/** Relative time formatter — language resolved via t(). */
+export function formatTimeAgo(
+  ts: number,
+  now: number = Date.now(),
+  t?: (key: string) => string,
+): string {
+  const tr = (key: string, n: number) =>
+    t ? t(key).replace("{{n}}", String(n)) : key;
   const diff = Math.floor((now - ts) / 1000);
-  if (diff < 60) return "刚刚";
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 60) return t ? t("library.opsLog.timeJustNow") : "just now";
+  if (diff < 3600) return tr("library.opsLog.timeMinutesAgo", Math.floor(diff / 60));
+  if (diff < 86400) return tr("library.opsLog.timeHoursAgo", Math.floor(diff / 3600));
   const days = Math.floor(diff / 86400);
-  if (days < 30) return `${days} 天前`;
+  if (days < 30) return tr("library.opsLog.timeDaysAgo", days);
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate(),
   ).padStart(2, "0")}`;
 }
 
-function summaryLineFor(entry: OpsLogEntry): string {
+function summaryLineFor(entry: OpsLogEntry, t: (key: string) => string): string {
   const sum = (entry.summary ?? {}) as Record<string, string | number | undefined>;
   const target = typeof sum.targetTitle === "string" ? sum.targetTitle : "";
   const source = typeof sum.sourceTitle === "string" ? sum.sourceTitle : "";
   const name = typeof sum.name === "string" ? sum.name : "";
   switch (entry.kind) {
     case "merge":
-      if (source && target) return `合并 ${source} → ${target}`;
-      if (target) return `合并到 ${target}`;
-      return "合并";
+      if (source && target)
+        return t("library.opsLog.summaryMergeBoth")
+          .replace("{{source}}", source)
+          .replace("{{target}}", target);
+      if (target)
+        return t("library.opsLog.summaryMergeTarget").replace("{{target}}", target);
+      return t("library.opsLog.summaryMerge");
     case "split":
-      if (name) return `拆分出新系列「${name}」`;
-      return "拆分系列";
+      if (name)
+        return t("library.opsLog.summarySplitName").replace("{{name}}", name);
+      return t("library.opsLog.summarySplit");
     case "rematch":
-      if (target) return `重新匹配为 ${target}`;
-      return "重新匹配";
+      if (target)
+        return t("library.opsLog.summaryRematchTarget").replace("{{target}}", target);
+      return t("library.opsLog.summaryRematch");
     case "unfile":
-      return "从系列移除";
+      return t("library.opsLog.summaryUnfile");
     case "delete":
-      return "删除";
+      return t("library.opsLog.summaryDelete");
     default:
       return entry.kind;
   }
@@ -212,6 +226,7 @@ export function OpsLogDrawer({
   onClose,
   now,
 }: OpsLogDrawerProps) {
+  const { t } = useLang();
   const drawerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -236,7 +251,7 @@ export function OpsLogDrawer({
       <div
         ref={drawerRef}
         role="dialog"
-        aria-label="操作日志"
+        aria-label={t("library.opsLog.ariaLabel")}
         data-testid="opslog-drawer"
         style={s.drawer}
       >
@@ -251,7 +266,7 @@ export function OpsLogDrawer({
             data-testid="opslog-close"
             style={s.closeBtn}
             onClick={onClose}
-            aria-label="关闭"
+            aria-label={t("library.opsLog.close")}
           >
             ×
           </button>
@@ -260,7 +275,7 @@ export function OpsLogDrawer({
         <div style={s.list} data-testid="opslog-list">
           {entries.length === 0 ? (
             <div style={s.empty} data-testid="opslog-empty">
-              该系列暂无近期操作
+              {t("library.opsLog.empty")}
             </div>
           ) : (
             entries.map((entry) => {
@@ -282,16 +297,16 @@ export function OpsLogDrawer({
                     {meta.glyph}
                   </span>
                   <div style={s.body}>
-                    <span style={s.kindLabel}>{meta.label}</span>
+                    <span style={s.kindLabel}>{t(meta.label)}</span>
                     <span
                       style={{
                         ...s.summary,
                         ...(undone ? s.summaryUndone : null),
                       }}
                     >
-                      {summaryLineFor(entry)}
+                      {summaryLineFor(entry, t)}
                     </span>
-                    <span style={s.ts}>{formatTimeAgo(entry.ts, now)}</span>
+                    <span style={s.ts}>{formatTimeAgo(entry.ts, now, t)}</span>
                   </div>
                   {undone && (
                     <span

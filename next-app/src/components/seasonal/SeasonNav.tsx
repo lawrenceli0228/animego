@@ -94,7 +94,7 @@ const yearChipStyle = (active: boolean): CSSProperties => ({
   transition: "all 0.2s",
 });
 
-export default function SeasonNav({ season, year, dict, lang }: SeasonNavProps) {
+export default function SeasonNav({ season, year, dict }: SeasonNavProps) {
   const prev = adjacent(season, year, -1);
   const next = adjacent(season, year, 1);
 
@@ -111,14 +111,14 @@ export default function SeasonNav({ season, year, dict, lang }: SeasonNavProps) 
   const yearWord = dict.season.year;
 
   return (
-    <nav style={wrapStyle} aria-label={lang === "zh" ? "季度切换" : "Season navigation"}>
+    <nav style={wrapStyle} aria-label={dict.seasonPage.navAria}>
       <Link
         href={`/seasonal/${prev.season}/${prev.year}`}
         prefetch={false}
         style={navBtnStyle}
-        aria-label={lang === "zh" ? "上一季" : "Previous season"}
+        aria-label={dict.seasonPage.prevSeasonAria}
       >
-        {lang === "zh" ? "← 上一季" : "← Prev"}
+        {dict.seasonPage.prevSeason}
       </Link>
 
       <div style={tabsStyle}>
@@ -143,12 +143,12 @@ export default function SeasonNav({ season, year, dict, lang }: SeasonNavProps) 
         href={`/seasonal/${next.season}/${next.year}`}
         prefetch={false}
         style={navBtnStyle}
-        aria-label={lang === "zh" ? "下一季" : "Next season"}
+        aria-label={dict.seasonPage.nextSeasonAria}
       >
-        {lang === "zh" ? "下一季 →" : "Next →"}
+        {dict.seasonPage.nextSeason}
       </Link>
 
-      <div style={yearListStyle} aria-label={lang === "zh" ? "切换年份" : "Switch year"}>
+      <div style={yearListStyle} aria-label={dict.seasonPage.switchYear}>
         {years.map((y) => (
           <Link
             key={y}

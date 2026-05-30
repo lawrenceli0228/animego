@@ -17,6 +17,7 @@ import {
   LOCAL_BADGE_COLOR,
   LOCAL_HEX_GLYPH,
 } from "@/components/landing/shared/hud-tokens";
+import { useLang } from "@/lib/lang-client";
 
 const HUE = PLAYER_HUE.local;
 
@@ -154,15 +155,19 @@ export function UndoToast({
   open,
   title,
   meta,
-  kicker = "已合并",
-  undoLabel = "撤销",
-  viewLabel = "查看",
+  kicker,
+  undoLabel,
+  viewLabel,
   onUndo,
   onDismiss,
   onView,
   durationMs = 5000,
   testId = "undo-toast",
 }: UndoToastProps) {
+  const { t } = useLang();
+  const resolvedKicker = kicker ?? t("library.undoToast.kicker");
+  const resolvedUndoLabel = undoLabel ?? t("library.undoToast.undoLabel");
+  const resolvedViewLabel = viewLabel ?? t("library.undoToast.viewLabel");
   const [remaining, setRemaining] = useState(durationMs);
   const [paused, setPaused] = useState(false);
   const remainingRef = useRef(durationMs);
@@ -258,7 +263,7 @@ export function UndoToast({
           <span style={s.glyph}>{LOCAL_HEX_GLYPH}</span>
         </div>
         <div style={s.body}>
-          <span style={s.kicker}>{kicker}</span>
+          <span style={s.kicker}>{resolvedKicker}</span>
           <span style={s.title} data-testid={`${testId}-title`}>
             {title}
           </span>
@@ -276,7 +281,7 @@ export function UndoToast({
               style={s.btn}
               onClick={handleUndo}
             >
-              {undoLabel}
+              {resolvedUndoLabel}
             </button>
           )}
           {onView && (
@@ -286,7 +291,7 @@ export function UndoToast({
               style={s.btnGhost}
               onClick={handleView}
             >
-              {viewLabel}
+              {resolvedViewLabel}
             </button>
           )}
         </div>

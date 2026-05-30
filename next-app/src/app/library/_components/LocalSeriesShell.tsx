@@ -19,6 +19,7 @@ import {
   mono,
   PLAYER_HUE,
 } from "@/components/landing/shared/hud-tokens";
+import { useLang } from "@/lib/lang-client";
 
 // Library lib (P6.2 ported)
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -221,6 +222,7 @@ interface LocalSeriesShellProps {
 }
 
 export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
+  const { t } = useLang();
   const router = useRouter();
   const fileHandles = useFileHandles({ db });
   const seriesDetail = useSeriesDetail(seriesId ?? null, {
@@ -287,7 +289,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
       const ref = fileRefByEpisode.get(ep.id) as FileRefRow | undefined;
       if (!ref) continue;
       const slash = ref.relPath.lastIndexOf("/");
-      const dir = slash >= 0 ? ref.relPath.slice(0, slash) : "(根)";
+      const dir = slash >= 0 ? ref.relPath.slice(0, slash) : t("library.localSeries.rootFolder");
       const fileName =
         slash >= 0 ? ref.relPath.slice(slash + 1) : ref.relPath;
       if (!folders.has(dir)) folders.set(dir, []);
@@ -351,11 +353,11 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
           updatedAt: Date.now(),
         });
         refresh();
-        toast.success("弹幕来源已更新");
+        toast.success(t("library.toast.danmakuUpdated"));
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn("[localseries] failed to update episode danmaku id:", err);
-        toast.error("更新失败");
+        toast.error(t("library.toast.danmakuUpdateFailed"));
       } finally {
         setPickerEp(null);
       }
@@ -455,7 +457,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
           setUndoToast({
             opIds: [op.id],
             title: targetTitle,
-            meta: `从 ${sourceTitle} 合并`,
+            meta: t("library.undoToast.mergeFromSource").replace("{{source}}", sourceTitle),
           });
           // Source vanishes after merge — navigate so back-button stays sane.
           router.replace(
@@ -539,17 +541,17 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
     if (!seriesId || !series) return;
     const title = pickTitle(series) || seriesId;
     const ok = window.confirm(
-      `从库里删除「${title}」?\n\n会清掉本地的元数据 / 进度 / 覆盖,但磁盘上的视频文件不会被动。`,
+      t("library.confirm.deleteSingle").replace("{{title}}", title),
     );
     if (!ok) return;
     try {
       await deleteSeriesCascade({ db, seriesId });
-      toast.success(`已删除「${title}」`);
+      toast.success(t("library.toast.deleteSuccess").replace("{{title}}", title));
       router.push("/library");
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn("[localseries] delete failed:", err);
-      toast.error("删除失败,请重试");
+      toast.error(t("library.toast.deleteFailed"));
     }
   }, [seriesId, series, router]);
 
@@ -558,11 +560,11 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
       <div style={s.page}>
         <div style={s.topbar}>
           <button style={s.backBtn} onClick={handleBack} type="button">
-            ← 返回
+            {t("library.localSeries.backBtn")}
           </button>
         </div>
         <div style={s.emptyState} data-testid="loading-state">
-          载入中…
+          {t("library.localSeries.loading")}
         </div>
       </div>
     );
@@ -573,11 +575,11 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
       <div style={s.page}>
         <div style={s.topbar}>
           <button style={s.backBtn} onClick={handleBack} type="button">
-            ← 返回
+            {t("library.localSeries.backBtn")}
           </button>
         </div>
         <div style={s.emptyState} data-testid="error-state">
-          载入失败,请重试
+          {t("library.localSeries.loadFailed")}
         </div>
       </div>
     );
@@ -588,11 +590,11 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
       <div style={s.page}>
         <div style={s.topbar}>
           <button style={s.backBtn} onClick={handleBack} type="button">
-            ← 返回
+            {t("library.localSeries.backBtn")}
           </button>
         </div>
         <div style={s.emptyState} data-testid="missing-state">
-          该系列不存在或已被删除
+          {t("library.localSeries.notFound")}
         </div>
       </div>
     );
@@ -607,7 +609,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
           type="button"
           data-testid="back-btn"
         >
-          ← 返回
+          {t("library.localSeries.backBtn")}
         </button>
         <div style={s.topbarSpacer} />
         <SeriesActionsMenu
@@ -629,7 +631,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
           onPlay={handlePlayItem}
           onClear={handleBack}
           onSetDanmaku={(epNum: number) => setPickerEp(epNum)}
-          clearLabel="返回库"
+          clearLabel={t("library.localSeries.backToLibrary")}
           siteAnimeLoading={siteAnimeLoading}
         />
       </div>

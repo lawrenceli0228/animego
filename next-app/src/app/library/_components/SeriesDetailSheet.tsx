@@ -16,6 +16,7 @@ import {
 } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import FadeImage from "@/components/ui/FadeImage";
+import { useLang } from "@/lib/lang-client";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — JSDoc-only JS module
 import { db } from "@/lib/library/db/db.js";
@@ -481,6 +482,7 @@ export function SeriesDetailSheet({
   onPickEpisode,
   onPlaySeries,
 }: SeriesDetailSheetProps) {
+  const { t } = useLang();
   const reduced = useReducedMotion();
   const [episodes, setEpisodes] = useState<EpisodeRow[]>([]);
   const [progressById, setProgressById] = useState<Map<string, ProgressRow>>(
@@ -626,7 +628,7 @@ export function SeriesDetailSheet({
             type="button"
             style={s.closeBtn}
             onClick={onClose}
-            aria-label="关闭"
+            aria-label={t("library.detail.close")}
             data-testid="series-detail-close"
           >
             ×
@@ -666,14 +668,16 @@ export function SeriesDetailSheet({
                 {total > 0 && (
                   <>
                     <span style={s.metaDot}>·</span>
-                    <span>{total} 集</span>
+                    <span>{t("library.detail.epCount").replace("{{count}}", String(total))}</span>
                   </>
                 )}
                 {completedCount > 0 && (
                   <>
                     <span style={s.metaDot}>·</span>
                     <span>
-                      {completedCount}/{total} 已看
+                      {t("library.detail.watched")
+                        .replace("{{done}}", String(completedCount))
+                        .replace("{{total}}", String(total))}
                     </span>
                   </>
                 )}
@@ -698,7 +702,7 @@ export function SeriesDetailSheet({
                       onClick={handleResume}
                       data-testid="series-detail-resume"
                     >
-                      ▶ 继续看 EP {lastResume.episode.number}
+                      {t("library.detail.resumeBtn").replace("{{ep}}", String(lastResume.episode.number))}
                     </button>
                   )}
                   {onPlaySeries && (
@@ -708,7 +712,7 @@ export function SeriesDetailSheet({
                       style={s.ctaDanmaku}
                       onClick={() => onPlaySeries(series.id)}
                       data-testid="series-detail-play-danmaku"
-                      title="走 dandanplay 匹配,加载在线弹幕后播放"
+                      title={t("library.detail.danmakuPlayTitle")}
                     >
                       <span style={s.danmakuGlyph} aria-hidden>
                         <span style={s.playTri}>▶</span>
@@ -718,7 +722,7 @@ export function SeriesDetailSheet({
                           <span style={s.streak(2)} />
                         </span>
                       </span>
-                      弹幕播放
+                      {t("library.detail.danmakuPlayBtn")}
                     </button>
                   )}
                 </div>
@@ -732,7 +736,9 @@ export function SeriesDetailSheet({
               <span style={s.episodeKicker}>// EPISODES //</span>
               {loaded && total > 0 && (
                 <span style={s.episodeStats}>
-                  {episodes.length} / {total} 已索引
+                  {t("library.detail.indexedStats")
+                    .replace("{{indexed}}", String(episodes.length))
+                    .replace("{{total}}", String(total))}
                 </span>
               )}
             </div>
@@ -804,7 +810,7 @@ export function SeriesDetailSheet({
                           },
                         },
                       }}
-                      title={ep ? `EP ${num}` : `EP ${num} · 缺失`}
+                      title={ep ? `EP ${num}` : t("library.detail.epMissing").replace("{{num}}", String(num))}
                     >
                       <span style={s.chipNum}>
                         {String(num).padStart(2, "0")}

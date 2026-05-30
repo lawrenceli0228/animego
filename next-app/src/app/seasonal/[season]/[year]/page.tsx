@@ -103,10 +103,7 @@ export async function generateMetadata({ params }: { params: PageProps["params"]
   const lang = await getLang();
   const dict = getDictByLang(lang);
   const title = headingFor(parsed.season, parsed.year, lang);
-  const description =
-    lang === "zh"
-      ? `${title} — 评分、集数、剧情简介一站搞定。${dict.landing.hero.sub}`
-      : `${title} -- scores, episodes, synopses in one place. ${dict.landing.hero.sub}`;
+  const description = `${title} — ${dict.seasonPage.metaDescSuffix} ${dict.landing.hero.sub}`;
   const canonical = `/seasonal/${parsed.season}/${parsed.year}`;
   const altSeason = parsed.season;
   return {
@@ -184,7 +181,7 @@ export default async function SeasonalPage({ params, searchParams }: PageProps) 
   const filtered = applyFilters(items, genre, format, status, sortBy, lang);
   const displayed = filtered.slice(0, visibleCount);
   const hasMore = visibleCount < filtered.length;
-  const emptyLabel = lang === "zh" ? "暂无番剧" : "No anime found";
+  const emptyLabel = dict.seasonPage.noAnime;
 
   return (
     <main className="container" style={containerStyle}>

@@ -43,6 +43,11 @@ const en = {
     linkCopyFailed: 'Copy failed — please copy the link manually',
     openPlayer: '▶ Play with Danmaku',
     openPlayerAria: 'Open the danmaku player in a new tab, drop local video files to watch',
+    relations: 'Relations',
+    characters: 'Characters',
+    voiceActorLang: 'Japanese',
+    staff: 'Staff',
+    recommendations: 'You Might Also Like',
   },
   // Subscription
   sub: {
@@ -62,6 +67,17 @@ const en = {
   // Season page
   seasonPage: {
     title: 'Seasonal Anime',
+    noAnime: 'No anime found',
+    metaDescSuffix: 'scores, episodes, and synopses in one place.',
+    navAria: 'Season navigation',
+    prevSeason: '← Prev',
+    prevSeasonAria: 'Previous season',
+    nextSeason: 'Next →',
+    nextSeasonAria: 'Next season',
+    switchYear: 'Switch year',
+    paginationAria: 'Pagination',
+    prevPage: 'Prev',
+    nextPage: 'Next',
   },
   // Login
   login: {

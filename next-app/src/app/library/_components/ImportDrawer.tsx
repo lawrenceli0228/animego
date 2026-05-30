@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import PrivacyHint from "./PrivacyHint";
+import { useLang } from "@/lib/lang-client";
 import type { ImportSummary } from "../_services/importPipeline";
 
 const HUE = PLAYER_HUE.stream;
@@ -32,37 +33,32 @@ interface ImportEvent {
 // inline so we don't need to detect hex/rgba color formats.
 const STATUS_META: Record<
   RowState,
-  { glyph: string; color: string; bg: string; label: string }
+  { glyph: string; color: string; bg: string }
 > = {
   matched: {
     glyph: "✓",
     color: "#30d158",
     bg: "rgba(48,209,88,0.14)",
-    label: "已识别",
   },
   running: {
     glyph: "⟳",
     color: "#0a84ff",
     bg: "rgba(10,132,255,0.14)",
-    label: "解析中",
   },
   pending: {
     glyph: "·",
     color: "rgba(235,235,245,0.40)",
     bg: "rgba(235,235,245,0.06)",
-    label: "待解析",
   },
   ambiguous: {
     glyph: "⚠",
     color: "#ff9f0a",
     bg: "rgba(255,159,10,0.14)",
-    label: "待选",
   },
   failed: {
     glyph: "✗",
     color: "#ff453a",
     bg: "rgba(255,69,58,0.14)",
-    label: "失败",
   },
 };
 
@@ -181,6 +177,7 @@ export function ImportDrawer({
   onCancel,
   onDismiss,
 }: ImportDrawerProps) {
+  const { t } = useLang();
   const styleTagInjected = useRef(false);
   useEffect(() => {
     if (styleTagInjected.current) return;
@@ -253,7 +250,7 @@ export function ImportDrawer({
         data-testid="import-drawer"
         role="status"
         aria-live="polite"
-        aria-label="导入进度"
+        aria-label={t("library.importDrawer.ariaLabel")}
         style={s.drawer}
       >
         <CornerBrackets inset={6} size={12} opacity={0.30} hue={HUE} />
@@ -264,18 +261,18 @@ export function ImportDrawer({
             <span data-testid="import-drawer-title">{"// IMPORT.QUEUE //"}</span>
             <span style={s.privacyMini}>
               <span aria-hidden style={s.privacyMiniDot} />
-              所有解析在本地
+              {t("library.importDrawer.privacyLocal")}
             </span>
           </div>
           <h2 style={s.titleRow}>
-            <span>导入本地文件</span>
+            <span>{t("library.importDrawer.title")}</span>
             {showDismiss && (
               <button
                 type="button"
                 data-testid="import-drawer-close"
                 style={s.closeBtn}
                 onClick={onDismiss}
-                aria-label="关闭"
+                aria-label={t("library.importDrawer.close")}
               >
                 ×
               </button>
@@ -283,14 +280,15 @@ export function ImportDrawer({
           </h2>
           {counterTotal > 0 && (
             <div style={s.subtitle}>
-              共 <strong style={{ color: "#fff" }}>{counterTotal}</strong> 个集群 ·
-              进度 {Math.round(meterPct * 100)}%
+              {t("library.importDrawer.clusterCount")
+                .replace("{{total}}", String(counterTotal))
+                .replace("{{pct}}", String(Math.round(meterPct * 100)))}
             </div>
           )}
 
           <div style={s.meter}>
             <div style={s.meterRow}>
-              <span style={s.meterLabel}>{"// 解析进度"}</span>
+              <span style={s.meterLabel}>{t("library.importDrawer.parseProgress")}</span>
               <span style={s.meterCounter}>
                 {counterDone}{" "}
                 <span style={s.meterCounterTotal}>/ {counterTotal || "—"}</span>
@@ -302,19 +300,19 @@ export function ImportDrawer({
             <div style={s.meterStats}>
               <span style={statStyle(STATUS_META.matched.color)}>
                 <span aria-hidden>{STATUS_META.matched.glyph}</span>
-                <span style={s.statNum}>{stats.matched}</span> 成功
+                <span style={s.statNum}>{stats.matched}</span> {t("library.importDrawer.statMatched")}
               </span>
               <span style={statStyle(STATUS_META.running.color)}>
                 <span aria-hidden>{STATUS_META.running.glyph}</span>
-                <span style={s.statNum}>{stats.running}</span> 解析中
+                <span style={s.statNum}>{stats.running}</span> {t("library.importDrawer.statRunning")}
               </span>
               <span style={statStyle(STATUS_META.ambiguous.color)}>
                 <span aria-hidden>{STATUS_META.ambiguous.glyph}</span>
-                <span style={s.statNum}>{stats.ambiguous}</span> 待选
+                <span style={s.statNum}>{stats.ambiguous}</span> {t("library.importDrawer.statAmbiguous")}
               </span>
               <span style={statStyle(STATUS_META.failed.color)}>
                 <span aria-hidden>{STATUS_META.failed.glyph}</span>
-                <span style={s.statNum}>{stats.failed}</span> 失败
+                <span style={s.statNum}>{stats.failed}</span> {t("library.importDrawer.statFailed")}
               </span>
             </div>
           </div>
@@ -324,7 +322,7 @@ export function ImportDrawer({
         <div style={s.body} data-testid="import-drawer-list">
           {rows.length === 0 ? (
             <div style={s.empty} data-testid="import-drawer-empty">
-              准备中…
+              {t("library.importDrawer.preparing")}
             </div>
           ) : (
             groups.map(({ state, rows: groupRowsList }) => {
@@ -332,7 +330,7 @@ export function ImportDrawer({
               return (
                 <div key={state} data-testid={`import-group-${state}`}>
                   <div style={s.groupLabel}>
-                    <span>{`// ${meta.label}`}</span>
+                    <span>{`// ${t(`library.statusLabel.${state}`)}`}</span>
                     <span style={s.groupCount}>{groupRowsList.length}</span>
                   </div>
                   {groupRowsList.map((row) => {
@@ -378,12 +376,16 @@ export function ImportDrawer({
         <div style={s.footer}>
           <div style={s.footerSummary}>
             <span data-testid="import-drawer-counter" style={s.counter}>
-              完成 {counterDone} / {counterTotal}
+              {t("library.importDrawer.counter")
+                .replace("{{done}}", String(counterDone))
+                .replace("{{total}}", String(counterTotal))}
             </span>
             {stats.ambiguous > 0 && (
               <>
                 <span style={{ color: "rgba(235,235,245,0.18)" }}>·</span>
-                <span style={s.warnCount}>{stats.ambiguous} 项待选</span>
+                <span style={s.warnCount}>
+                  {t("library.importDrawer.warnAmbiguous").replace("{{count}}", String(stats.ambiguous))}
+                </span>
               </>
             )}
           </div>
@@ -395,7 +397,7 @@ export function ImportDrawer({
                 style={s.btnDanger}
                 onClick={onCancel}
               >
-                取消导入
+                {t("library.importDrawer.cancelBtn")}
               </button>
             ) : null}
             {showBackground ? (
@@ -405,7 +407,7 @@ export function ImportDrawer({
                 style={s.btnPrimary}
                 onClick={onDismiss}
               >
-                在后台运行
+                {t("library.importDrawer.backgroundBtn")}
               </button>
             ) : null}
             {showDismiss ? (
@@ -415,7 +417,7 @@ export function ImportDrawer({
                 style={s.btnPrimary}
                 onClick={onDismiss}
               >
-                完成
+                {t("library.importDrawer.doneBtn")}
               </button>
             ) : null}
           </div>

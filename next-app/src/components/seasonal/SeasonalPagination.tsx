@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import type { Lang } from "@/lib/i18n";
+import type { Dict, Lang } from "@/lib/i18n";
 
 // Server-rendered pagination. Plan §UI mitigation requires that the
 // seasonal grid not trigger a stampede of prefetches -- using <Link>
@@ -22,6 +22,7 @@ interface SeasonalPaginationProps {
   total: number;
   pageSize?: number;
   lang: Lang;
+  dict: Dict;
 }
 
 const PAGE_SIZE_DEFAULT = 20;
@@ -95,7 +96,7 @@ export default function SeasonalPagination({
   page,
   total,
   pageSize = PAGE_SIZE_DEFAULT,
-  lang,
+  dict,
 }: SeasonalPaginationProps) {
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
   if (lastPage <= 1) return null;
@@ -106,11 +107,11 @@ export default function SeasonalPagination({
       : `/seasonal/${season}/${year}?page=${p}`;
 
   const items = buildPageList(page, lastPage);
-  const prevLabel = lang === "zh" ? "上一页" : "Prev";
-  const nextLabel = lang === "zh" ? "下一页" : "Next";
+  const prevLabel = dict.seasonPage.prevPage;
+  const nextLabel = dict.seasonPage.nextPage;
 
   return (
-    <nav style={wrapStyle} aria-label={lang === "zh" ? "分页" : "Pagination"}>
+    <nav style={wrapStyle} aria-label={dict.seasonPage.paginationAria}>
       {page > 1 ? (
         <Link href={href(page - 1)} prefetch={false} style={baseChipStyle} rel="prev">
           {prevLabel}
