@@ -114,6 +114,7 @@ type enrichmentItem struct {
 	BangumiVersion int32    `json:"bangumiVersion"`
 	BangumiScore   *float64 `json:"bangumiScore"`
 	AdminFlag      *string  `json:"adminFlag"`
+	BgmMatchSource *string  `json:"bgmMatchSource"`
 }
 
 // enrichmentListResponse is the full /api/admin/enrichment envelope.

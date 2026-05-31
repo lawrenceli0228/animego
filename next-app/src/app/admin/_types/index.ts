@@ -39,6 +39,9 @@ export interface EnrichmentRow {
   bangumiVersion: number;
   bangumiScore: number | null;
   adminFlag: EnrichmentFlag;
+  // How bgm_id was bound: "id_map" (authoritative) | "fuzzy_high" |
+  // "fuzzy_low" (low-confidence, needs review) | null (unenriched).
+  bgmMatchSource: string | null;
 }
 
 export interface PagedResponse<T> {
@@ -60,7 +63,8 @@ export type EnrichmentSort =
   | "title_romaji"
   | "bangumi_version"
   | "bangumi_score"
-  | "anilist_id";
+  | "anilist_id"
+  | "bgm_match_source";
 
 export interface AdminUser {
   _id: string;

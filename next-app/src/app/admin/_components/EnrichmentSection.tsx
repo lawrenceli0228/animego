@@ -38,18 +38,28 @@ const FILTERS: FilterButton[] = [
   { value: "no-cn", labelKey: "admin.filterLabelNoCn" },
 ];
 
-interface SortButton {
-  value: EnrichmentSort;
-  labelKey: string;
+// Table columns mirror the data cells rendered in <EnrichmentRow> in the
+// SAME order — AniList ID · Romaji · Chinese · BGM ID · Version · Score.
+// They were previously out of order (and included a phantom "cachedAt"
+// column the API never returns), so every header sat above the wrong
+// column: "缓存时间" showed the AniList ID, "中文标题" showed the romaji,
+// "罗马音" showed the Chinese title, etc. A column with a `sort` key
+// renders a clickable sort button; BGM ID has no backend sort key, so it
+// renders as a plain (non-sortable) label.
+interface Column {
+  labelKey: string; // i18n key; "" means use `literal`
+  literal?: string; // literal label used when there is no i18n key
+  sort?: EnrichmentSort; // present = sortable header
 }
 
-const SORTS: SortButton[] = [
-  { value: "cachedAt", labelKey: "admin.sortCachedAt" },
-  { value: "title_chinese", labelKey: "admin.sortTitleChinese" },
-  { value: "title_romaji", labelKey: "admin.sortTitleRomaji" },
-  { value: "bangumi_version", labelKey: "admin.sortVersion" },
-  { value: "bangumi_score", labelKey: "admin.sortScore" },
-  { value: "anilist_id", labelKey: "" },
+const COLUMNS: Column[] = [
+  { labelKey: "", literal: "AniList ID", sort: "anilist_id" },
+  { labelKey: "admin.sortTitleRomaji", sort: "title_romaji" },
+  { labelKey: "admin.sortTitleChinese", sort: "title_chinese" },
+  { labelKey: "", literal: "BGM ID" },
+  { labelKey: "", literal: "匹配来源", sort: "bgm_match_source" },
+  { labelKey: "admin.sortVersion", sort: "bangumi_version" },
+  { labelKey: "admin.sortScore", sort: "bangumi_score" },
 ];
 
 type Order = "asc" | "desc";
@@ -82,7 +92,9 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
   const [q, setQ] = useState("");
   const [qInput, setQInput] = useState("");
   const [filter, setFilter] = useState<EnrichmentFilter | "">("");
-  const [sort, setSort] = useState<EnrichmentSort>("cachedAt");
+  // Default sort is anilist_id (the visible first column) rather than the
+  // old "cachedAt", which no longer has a column to show its sort arrow.
+  const [sort, setSort] = useState<EnrichmentSort>("anilist_id");
   const [order, setOrder] = useState<Order>("desc");
   const [data, setData] = useState<PagedResponse<EnrichmentRowData>>(initial);
   const [error, setError] = useState<string | null>(null);
@@ -221,33 +233,45 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
         <table style={styles.table}>
           <thead>
             <tr>
-              {SORTS.map((col) => (
-                <th
-                  key={col.value}
-                  style={styles.th}
-                  scope="col"
-                  aria-sort={
-                    sort === col.value
-                      ? order === "asc"
-                        ? "ascending"
-                        : "descending"
-                      : "none"
-                  }
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleSortClick(col.value)}
-                    style={styles.sortBtn}
+              {COLUMNS.map((col, i) => {
+                const label = col.labelKey ? t(col.labelKey) : col.literal;
+                if (!col.sort) {
+                  // Non-sortable column (e.g. BGM ID) — plain header.
+                  return (
+                    <th key={i} style={styles.th} scope="col">
+                      {label}
+                    </th>
+                  );
+                }
+                const sortKey = col.sort;
+                return (
+                  <th
+                    key={i}
+                    style={styles.th}
+                    scope="col"
+                    aria-sort={
+                      sort === sortKey
+                        ? order === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                    }
                   >
-                    {col.labelKey ? t(col.labelKey) : "AniList ID"}
-                    {sort === col.value ? (
-                      <span style={styles.sortArrow}>
-                        {order === "asc" ? " ↑" : " ↓"}
-                      </span>
-                    ) : null}
-                  </button>
-                </th>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() => handleSortClick(sortKey)}
+                      style={styles.sortBtn}
+                    >
+                      {label}
+                      {sort === sortKey ? (
+                        <span style={styles.sortArrow}>
+                          {order === "asc" ? " ↑" : " ↓"}
+                        </span>
+                      ) : null}
+                    </button>
+                  </th>
+                );
+              })}
               <th style={styles.th}>{t("admin.colFlag")}</th>
               <th style={styles.th}>{t("admin.colActions")}</th>
             </tr>
@@ -255,7 +279,7 @@ export function EnrichmentSection({ initial }: EnrichmentSectionProps) {
           <tbody>
             {data.data.length === 0 ? (
               <tr>
-                <td style={styles.empty} colSpan={SORTS.length + 2}>
+                <td style={styles.empty} colSpan={COLUMNS.length + 2}>
                   {t("admin.noMatchingRecords")}
                 </td>
               </tr>

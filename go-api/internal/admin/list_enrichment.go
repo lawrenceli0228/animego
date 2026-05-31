@@ -45,18 +45,20 @@ type enrichmentListParams struct {
 // the implicit camelCase ↔ snake_case mapping that the Mongoose
 // schema uses for the same fields.
 var enrichmentSortColumns = map[string]string{
-	"cachedAt":        "cached_at",
-	"cached_at":       "cached_at",
-	"title_chinese":   "title_chinese",
-	"titleChinese":    "title_chinese",
-	"title_romaji":    "title_romaji",
-	"titleRomaji":     "title_romaji",
-	"bangumi_version": "bangumi_version",
-	"bangumiVersion":  "bangumi_version",
-	"bangumi_score":   "bangumi_score",
-	"bangumiScore":    "bangumi_score",
-	"anilist_id":      "anilist_id",
-	"anilistId":       "anilist_id",
+	"cachedAt":         "cached_at",
+	"cached_at":        "cached_at",
+	"title_chinese":    "title_chinese",
+	"titleChinese":     "title_chinese",
+	"title_romaji":     "title_romaji",
+	"titleRomaji":      "title_romaji",
+	"bangumi_version":  "bangumi_version",
+	"bangumiVersion":   "bangumi_version",
+	"bangumi_score":    "bangumi_score",
+	"bangumiScore":     "bangumi_score",
+	"anilist_id":       "anilist_id",
+	"anilistId":        "anilist_id",
+	"bgm_match_source": "bgm_match_source",
+	"bgmMatchSource":   "bgm_match_source",
 }
 
 // buildEnrichmentListSQL composes the page-fetch SQL + parameter
@@ -68,7 +70,7 @@ var enrichmentSortColumns = map[string]string{
 // drives it through every filter / q / sort / order branch without
 // needing a live DB.
 func buildEnrichmentListSQL(p enrichmentListParams) (listSQL string, countSQL string, args []any) {
-	const projection = `anilist_id, title_romaji, title_chinese, bgm_id, bangumi_version, bangumi_score, admin_flag`
+	const projection = `anilist_id, title_romaji, title_chinese, bgm_id, bangumi_version, bangumi_score, admin_flag, bgm_match_source`
 	const tableName = `anime_cache`
 
 	args = make([]any, 0, 4)
@@ -209,6 +211,7 @@ func runEnrichmentList(ctx context.Context, pool *pgxpool.Pool, p enrichmentList
 				&it.BangumiVersion,
 				&it.BangumiScore,
 				&it.AdminFlag,
+				&it.BgmMatchSource,
 			); err != nil {
 				return fmt.Errorf("enrichment list scan: %w", err)
 			}

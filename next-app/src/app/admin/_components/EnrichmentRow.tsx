@@ -141,6 +141,26 @@ function VersionBadge({ version }: { version: number }) {
   );
 }
 
+// How the row's bgm_id was bound, surfaced so reviewers can tell an
+// authoritative id-map bind from a low-confidence fuzzy guess at a glance.
+// Raw value (id_map / fuzzy_high / fuzzy_low) is kept in the title tooltip.
+function MatchSourceBadge({ source }: { source: string | null }) {
+  if (source == null || source === "") {
+    return <span style={styles.dim}>—</span>;
+  }
+  const map: Record<string, { label: string; bg: string; fg: string }> = {
+    id_map: { label: "权威", bg: "#1d3a25", fg: "#30d158" },
+    fuzzy_high: { label: "高置信", bg: "#1c3845", fg: "#5ac8fa" },
+    fuzzy_low: { label: "低置信", bg: "#3a2b15", fg: "#ff9f0a" },
+  };
+  const m = map[source] ?? { label: source, bg: "#26262f", fg: "#a8a8b8" };
+  return (
+    <span style={{ ...styles.badge, background: m.bg, color: m.fg }} title={source}>
+      {m.label}
+    </span>
+  );
+}
+
 export function EnrichmentRow({ row }: EnrichmentRowProps) {
   const { t } = useLang();
   const [editing, setEditing] = useState(false);
@@ -252,10 +272,21 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
               disabled={pending}
             />
           ) : row.bgmId != null ? (
-            row.bgmId
+            <a
+              href={`https://bgm.tv/subject/${row.bgmId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={styles.bgmLink}
+              title="bgm.tv"
+            >
+              {row.bgmId}
+            </a>
           ) : (
             <span style={styles.dim}>—</span>
           )}
+        </td>
+        <td style={styles.td}>
+          <MatchSourceBadge source={row.bgmMatchSource} />
         </td>
         <td style={styles.td}>
           <VersionBadge version={row.bangumiVersion} />
@@ -361,7 +392,7 @@ export function EnrichmentRow({ row }: EnrichmentRowProps) {
       </tr>
       {error && (
         <tr style={styles.errorRow}>
-          <td colSpan={8} style={styles.errorCell}>
+          <td colSpan={9} style={styles.errorCell}>
             {error}
           </td>
         </tr>
@@ -388,6 +419,13 @@ const styles: Record<string, React.CSSProperties> = {
   idLink: {
     color: "#5ac8fa",
     textDecoration: "none",
+    fontFeatureSettings: '"tnum"',
+  },
+  bgmLink: {
+    color: "#5ac8fa",
+    textDecoration: "underline",
+    textDecorationStyle: "dotted",
+    textUnderlineOffset: 2,
     fontFeatureSettings: '"tnum"',
   },
   dim: {

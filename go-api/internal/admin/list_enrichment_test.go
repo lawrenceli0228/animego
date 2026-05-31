@@ -257,7 +257,8 @@ func TestBuildEnrichmentListSQL_ProjectionMatchesExpress(t *testing.T) {
 	listSQL, _, _ := buildEnrichmentListSQL(enrichmentListParams{Page: 1})
 
 	// Express .select('anilistId titleRomaji titleChinese bgmId
-	// bangumiVersion bangumiScore adminFlag')
+	// bangumiVersion bangumiScore adminFlag'), plus bgm_match_source —
+	// the post-Express match-provenance column the admin table surfaces.
 	for _, col := range []string{
 		"anilist_id",
 		"title_romaji",
@@ -266,6 +267,7 @@ func TestBuildEnrichmentListSQL_ProjectionMatchesExpress(t *testing.T) {
 		"bangumi_version",
 		"bangumi_score",
 		"admin_flag",
+		"bgm_match_source",
 	} {
 		assert.True(t, strings.Contains(listSQL, col), "projection missing %s", col)
 	}
