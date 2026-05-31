@@ -64,15 +64,25 @@ export async function generateMetadata(): Promise<Metadata> {
     generator: "Next.js",
     keywords: dict.meta.keywords,
     robots: { index: true, follow: true },
+    icons: {
+      // favicon.ico is the app/ file convention; apple-touch-icon (180×180,
+      // reused from the legacy site) has no file convention so declare it.
+      apple: "/apple-touch-icon.png",
+    },
     openGraph: {
       siteName: "AnimeGo",
       type: "website",
       locale: lang === "en" ? "en_US" : "zh_CN",
       alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
+      // Site-wide default share card (1200×630, reused from the legacy
+      // site's og-default.png). Pages with their own image (e.g. anime
+      // detail) override this via their own openGraph.images.
+      images: ["/og-default.png"],
     },
     twitter: {
       card: "summary_large_image",
       site: "@animegoclub",
+      images: ["/og-default.png"],
     },
     // No blanket `alternates` default. A layout-level canonical:"/" makes every
     // page that doesn't set its own canonical (e.g. /search) point at the

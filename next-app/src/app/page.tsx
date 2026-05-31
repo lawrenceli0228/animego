@@ -166,6 +166,7 @@ const HOME_JSON_LD = {
       name: "AnimeGoClub",
       alternateName: "AnimeGo",
       url: "https://animegoclub.com",
+      logo: "https://animegoclub.com/favicon-192.png",
       description:
         "番剧追番与动漫发现平台 — 每季新番、评分、声优、弹幕评论与追番管理。",
       sameAs: ["https://github.com/lawrenceli0228/animego"],
@@ -207,11 +208,13 @@ export async function generateMetadata(): Promise<Metadata> {
       description: dict.meta.homeDescription,
       url: "/",
       type: "website",
+      images: ["/og-default.png"],
     },
     twitter: {
       card: "summary_large_image",
       title: dict.meta.homeTitle,
       description: dict.meta.homeDescription,
+      images: ["/og-default.png"],
     },
   };
 }

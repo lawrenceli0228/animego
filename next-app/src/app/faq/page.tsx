@@ -62,6 +62,24 @@ const subStyle: CSSProperties = {
 export default async function FaqPage() {
   const [dict, lang] = await Promise.all([getDict(), getLang()]);
 
+  // FAQPage structured data, built from the SAME dict.landing.faq Q&A that
+  // FaqSection renders visibly below — Google requires the JSON-LD FAQ to
+  // match on-page content. Powers the SERP expandable-Q&A rich result and
+  // the Search Console "常见问题解答" enhancement report.
+  const faqStrings = dict.landing.faq as unknown as Record<string, string>;
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: ["1", "2", "3", "4", "5"]
+      .map((n) => ({ q: faqStrings[`q${n}`], a: faqStrings[`a${n}`] }))
+      .filter((x) => x.q && x.a)
+      .map((x) => ({
+        "@type": "Question",
+        name: x.q,
+        acceptedAnswer: { "@type": "Answer", text: x.a },
+      })),
+  };
+
   const heading =
     lang === "zh" ? "AnimeGoClub 常见问题" : "Frequently Asked Questions";
   const sub =
@@ -71,6 +89,10 @@ export default async function FaqPage() {
 
   return (
     <main>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+      />
       <div className="container" style={headerWrapStyle}>
         <h1 style={h1Style}>{heading}</h1>
         <p style={subStyle}>{sub}</p>
