@@ -10,8 +10,10 @@
 
 ## 项目状态
 
-**状态：** 全栈重构中 — 迁移到 Next.js 14 + TypeScript
+**状态：** 重构已上线生产环境（2026-05-31 切换）— 完整新架构在 `feat/go-backend` 分支
 **重构启动：** 2026-05-10(基于 v2.0.0)
+**生产架构：** Next.js 16 + Bun + Go 1.26（chi · pgx · sqlc）+ PostgreSQL 16 + Node ws-server（Socket.IO）
+**当前分支（`main`）：** v2.0.x — Vite SPA + Express + MongoDB（重构前，下文描述的是这套代码）
 **构建方式：** Claude Code 辅助开发(产品方向、决策、部署由作者负责)
 
 ### 当前重构
@@ -265,4 +267,4 @@ npm run test --workspace=server
 
 ## 许可证
 
-MIT
+**保留所有权利（All Rights Reserved）。** 本仓库源码仅为透明与参考目的公开，**并非**开源软件。未经事先书面许可，不授予任何使用、复制、修改、运行、托管或分发代码的权利。完整条款见 [LICENSE](LICENSE)。该许可仅覆盖本仓库的原创代码，不含其集成的第三方数据/接口（AniList、Bangumi、dandanplay、ACG.rip）。
