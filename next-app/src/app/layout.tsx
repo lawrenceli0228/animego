@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import Navbar from "@/components/layout/Navbar";
@@ -52,6 +53,9 @@ async function fetchCurrentUser(): Promise<NavUser | null> {
 export async function generateMetadata(): Promise<Metadata> {
   const lang = await getLang();
   const dict = getDictByLang(lang);
+  // proxy.ts injects x-pathname on every request so this RSC can build a
+  // self-referential canonical + hreflang per route (#41).
+  const pathname = (await headers()).get("x-pathname");
   return {
     metadataBase: new URL("https://animegoclub.com"),
     title: {
@@ -84,14 +88,23 @@ export async function generateMetadata(): Promise<Metadata> {
       site: "@animegoclub",
       images: ["/og-default.png"],
     },
-    // No blanket `alternates` default. A layout-level canonical:"/" makes every
-    // page that doesn't set its own canonical (e.g. /search) point at the
-    // homepage, telling Google those pages duplicate "/" — Lighthouse flags
-    // "canonical points to root instead of an equivalent page". Each page sets
-    // its own self-referential canonical (home/seasonal/anime/welcome already
-    // do); pages without one fall back to Google's self-canonical default.
-    // Self-referential hreflang for every route (via an x-pathname header from
-    // proxy.ts) is the follow-up — task #41.
+    // Self-referential canonical + hreflang per route (#41). Each page
+    // canonicalises to ITSELF via x-pathname — NOT the homepage (the bug the
+    // old blanket canonical:"/" caused). Pages that set their own alternates
+    // (home/welcome/seasonal/anime/faq/calendar/...) override this. If
+    // x-pathname is absent, omit alternates and let Google self-canonicalise
+    // — never re-introduce a "/"-pointing default.
+    ...(pathname
+      ? {
+          alternates: {
+            canonical: pathname,
+            languages: {
+              "zh-CN": pathname,
+              "en-US": `${pathname}?lang=en`,
+            },
+          },
+        }
+      : {}),
   };
 }
 

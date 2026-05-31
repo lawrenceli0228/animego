@@ -179,7 +179,14 @@ export async function proxy(req: NextRequest) {
     }
   }
 
-  // --- 3. Emit, attaching refreshed cookies to request + response ---
+  // --- 3. Emit. Forward x-pathname on every request so RSC (layout.tsx
+  // generateMetadata) can emit a self-referential canonical + hreflang per
+  // route — a Server Component can't otherwise read the request path. The
+  // path carries NO query string, so /search?q=… canonicalises to /search
+  // (avoids indexing infinite query variants). (#41) ---
+  const reqHeaders = new Headers(req.headers);
+  reqHeaders.set("x-pathname", req.nextUrl.pathname);
+
   if (setCookies) {
     const updates: Record<string, string> = {};
     const newSession = valueFromSetCookies(setCookies, "session");
@@ -187,7 +194,6 @@ export async function proxy(req: NextRequest) {
     if (newSession) updates.session = newSession;
     if (newRefresh) updates.refreshToken = newRefresh;
 
-    const reqHeaders = new Headers(req.headers);
     reqHeaders.set(
       "cookie",
       rebuildCookieHeader(req.headers.get("cookie") ?? "", updates),
@@ -198,7 +204,7 @@ export async function proxy(req: NextRequest) {
     return res;
   }
 
-  return NextResponse.next();
+  return NextResponse.next({ request: { headers: reqHeaders } });
 }
 
 function redirectToLogin(req: NextRequest) {
