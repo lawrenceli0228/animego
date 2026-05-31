@@ -12,10 +12,8 @@ COPY . .
 # Build the real binaries; CGO disabled for a fully static output.
 # bgmbackfill is the one-shot enrichment re-validation/backfill ops tool,
 # invoked via the docker-compose `backfill` service (profile: tools).
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/server        ./cmd/server      && \
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/migrate-mongo ./cmd/migrate-mongo && \
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/parity-check  ./cmd/parity-check && \
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/bgmbackfill   ./cmd/bgmbackfill
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/server      ./cmd/server && \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/bgmbackfill ./cmd/bgmbackfill
 
 # Stage 2 — runtime
 FROM alpine:3.20

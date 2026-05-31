@@ -1,49 +1,11 @@
 services:
-  app:
-    # Legacy Express + Mongo stack.  Stays live until P9 cutover; nginx
-    # currently routes /api + /socket.io + / to this service.  P9 switches
-    # /api → go-api and /socket.io → ws-server, then this service is
-    # removed and `mongodb` follows on the +30d retention window.
-    build: .
-    restart: unless-stopped
-    env_file: .env.production
-    depends_on:
-      - mongodb
-    networks:
-      - animego
-    mem_limit: 400m
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  mongodb:
-    # Removed at cutover + 30d.  Until then it backs `app` and the
-    # parity-check binary that compares Express vs Go responses.
-    image: mongo:7
-    restart: unless-stopped
-    volumes:
-      - mongo-data:/data/db
-    command: --wiredTigerCacheSizeGB 0.4
-    networks:
-      - animego
-    mem_limit: 500m
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # ─── P8.1: next-app (Next.js 16 RSC) ─────────────────────────────────
-  # Standalone Bun-built Next.js process. nginx routes public SEO pages
-  # (/, /anime/, /seasonal/, /search, /welcome, /sitemap.xml, /robots.txt,
-  # /_next/) to this service; everything else (auth, /library, /player,
-  # /admin, /api/*, /socket.io/) stays on the legacy `app` Express
-  # service. RSC fetches go to `app:5001` directly via the Docker
-  # network (GO_API_INTERNAL_URL), NOT through nginx, since Express
-  # serves the same byte-compatible envelope go-api produces. Phase 8.5
-  # flips RSC fetches to go_api:8080 once that service deploys.
+  # ─── next-app (Next.js 16 RSC) ───────────────────────────────────────
+  # Standalone Bun-built Next.js process. After the legacy retirement
+  # nginx routes EVERY user-facing route here (SEO pages, auth, /library,
+  # /player, /admin, and the catch-all). RSC server-side fetches go
+  # straight to go-api:8080 via the Docker network (GO_API_INTERNAL_URL),
+  # NOT through nginx. At the nginx layer /api/* → go-api and
+  # /socket.io/ → ws-server.
   next-app:
     build:
       context: .
@@ -58,17 +20,11 @@ services:
     restart: unless-stopped
     env_file: .env.production
     environment:
-      # RSC server-side fetch base (next-app server → backend directly,
-      # NOT via nginx). Default http://app:5001 (legacy Express) keeps a
-      # fresh `docker compose up` COHERENT with default.conf, which routes
-      # /api/ → app. The P9 cutover flips BOTH switches together:
-      #   1. cp nginx/default.p9.conf → nginx/default.conf  (/api/ → go-api)
-      #   2. GO_API_INTERNAL_URL=http://go-api:8080 in .env.production
-      # See docs/migration/P9-CUTOVER.md T+0. Pairing them prevents the
-      # half-flip where RSC reads go-api/postgres while /api/ writes
-      # Express/mongo — mismatched user IDs (ObjectId vs uuid) silently
-      # log the user out (looked like "login just refreshes").
-      GO_API_INTERNAL_URL: ${GO_API_INTERNAL_URL:-http://app:5001}
+      # RSC server-side fetch base (next-app server → go-api directly via
+      # the Docker network, NOT through nginx). .env.production also sets
+      # this; the default here keeps a bare `docker compose up` coherent
+      # now that the legacy Express `app` service is retired.
+      GO_API_INTERNAL_URL: ${GO_API_INTERNAL_URL:-http://go-api:8080}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
@@ -82,7 +38,7 @@ services:
       # need suppressHydrationWarning as a separate fix.
       TZ: Asia/Shanghai
     depends_on:
-      - app
+      - go-api
     networks:
       - animego
     healthcheck:
@@ -102,14 +58,11 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ─── P2.8: ws-server (socket.io danmaku) ─────────────────────────────
-  # Standalone Node 20 process speaking the socket.io v4 protocol that
-  # client/src/hooks/useDanmaku.js already uses.  Reads JWT_SECRET shared
-  # with go-api + the Express `app` service so a single login token works
-  # for all three surfaces.  Writes danmakus + episode_windows directly
-  # to Postgres (P9 cutover wires this in; until then the service is
-  # built and healthy but receives no traffic because nginx still
-  # routes /socket.io → `app`).
+  # ─── ws-server (socket.io danmaku) ───────────────────────────────────
+  # Standalone Node 20 process speaking socket.io v4. Reads JWT_SECRET
+  # shared with go-api so one login token works across surfaces. Writes
+  # danmakus + episode_windows directly to Postgres. nginx routes
+  # /socket.io/ here (the legacy Express `app` it used to share is retired).
   ws-server:
     build:
       context: ./ws-server
@@ -205,7 +158,6 @@ services:
   # DATABASE_URL is constructed here from POSTGRES_PASSWORD so the
   # literal password never lands in .env.production (only the bare var does).
   # PORT_GO matches go-api/internal/config/config.go envInt("PORT_GO", 8080).
-  # GO_API_INTERNAL_URL in next-app still points at `app:5001` until P9 flip.
   go-api:
     build:
       context: ./go-api
@@ -290,7 +242,6 @@ services:
       # nginx` is enough — no image rebuild.
       - ./nginx/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
     depends_on:
-      - app
       - next-app
     networks:
       - animego
@@ -302,7 +253,6 @@ services:
         max-file: "3"
 
 volumes:
-  mongo-data:
   postgres-data:
 
 networks:
