@@ -82,17 +82,18 @@ type BangumiV12Client interface {
 	BangumiV2Client
 }
 
-// V12DB merges the sqlc subsets V1 + V2 + V3 + WarmSeason workers
-// need.  dbgen.Querier satisfies it; tests can supply a single fake
-// that covers all surfaces without having to split.  The name keeps
-// "V12" for historical reasons even though V3 and WarmSeason are now
-// members — renaming would churn callers for no observable benefit
+// V12DB merges the sqlc subsets V1 + V2 + V3 + WarmSeason + OrphanScan
+// workers need.  dbgen.Querier satisfies it; tests can supply a single
+// fake that covers all surfaces without having to split.  The name keeps
+// "V12" for historical reasons even though V3, WarmSeason, and OrphanScan
+// are now members — renaming would churn callers for no observable benefit
 // (this type doesn't leak into the API).
 type V12DB interface {
 	V1DB
 	V2DB
 	V3DB
 	WarmSeasonDB
+	OrphanReader
 }
 
 // WorkersWithBangumi returns a *river.Workers bundle with all four
@@ -146,6 +147,7 @@ func WorkersWithBangumiAndNormalizer(
 	river.AddWorker(w, NewBangumiV2Worker(bangumiClient, db, enq))
 	river.AddWorker(w, NewBangumiV3Worker(bangumiClient, db))
 	river.AddWorker(w, NewWarmSeasonWorkerWithNormalizer(anilistClient, db, enq, normalize))
+	river.AddWorker(w, NewOrphanScanWorker(db, enq))
 	return w
 }
 

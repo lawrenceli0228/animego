@@ -7,7 +7,7 @@
 //  1. Each Args type returns the correct Kind.
 //  2. Workers() registers only the V2 stub (V1 + V3 have real
 //     workers — tests live in bangumi_v1_test.go / bangumi_v3_test.go).
-//  3. WorkersWithBangumi registers all 3 real workers.
+//  3. WorkersWithBangumi registers all 5 real workers.
 //  4. Boot rejects a nil pool with ErrMissingPool.
 //  5. Boot applies sensible defaults when Config is zero-valued.
 package queue
@@ -58,6 +58,7 @@ func TestArgs_Kind(t *testing.T) {
 		{"v2", BangumiV2Args{AnilistID: 1, BgmID: 2}, "bangumi_v2"},
 		{"v3", BangumiV3Args{AnilistID: 1, BgmID: 2}, "bangumi_v3"},
 		{"warm_season", WarmSeasonArgs{Season: "WINTER", Year: 2026}, "warm_season"},
+		{"orphan_scan", OrphanScanArgs{}, "orphan_scan"},
 	}
 
 	for _, tc := range tests {
@@ -89,17 +90,18 @@ func TestWorkers_RegistersStubs(t *testing.T) {
 	assert.Contains(t, err.Error(), "bangumi_v2")
 }
 
-// TestWorkersWithBangumi_RegistersAll4 verifies the production wiring
-// constructor binds V1 + V2 + V3 + WarmSeason (all real) — all four
-// Kinds occupied.  Uses noopBangumi + noopAniList + noopV12DB — we
-// never invoke Work here, only inspect what's been registered.
-func TestWorkersWithBangumi_RegistersAll4(t *testing.T) {
+// TestWorkersWithBangumi_RegistersAll5 verifies the production wiring
+// constructor binds V1 + V2 + V3 + WarmSeason + OrphanScan (all real)
+// — all five Kinds occupied.  Uses noopBangumi + noopAniList +
+// noopV12DB — we never invoke Work here, only inspect what's been
+// registered.
+func TestWorkersWithBangumi_RegistersAll5(t *testing.T) {
 	t.Parallel()
 
 	w := WorkersWithBangumi(noopBangumi{}, noopAniList{}, noopV12DB{}, NoopEnqueuer{})
 	require.NotNil(t, w, "WorkersWithBangumi must return a non-nil bundle")
 
-	// All 4 slots should be taken: re-registration returns
+	// All 5 slots should be taken: re-registration returns
 	// "already registered".
 	err := river.AddWorkerSafely(w, NewBangumiV1Worker(noopBangumi{}, noopV12DB{}, NoopEnqueuer{}))
 	require.Error(t, err, "v1 slot should already be occupied")
@@ -116,6 +118,10 @@ func TestWorkersWithBangumi_RegistersAll4(t *testing.T) {
 	err = river.AddWorkerSafely(w, NewWarmSeasonWorker(noopAniList{}, noopV12DB{}, NoopEnqueuer{}))
 	require.Error(t, err, "warm_season slot should already be occupied")
 	assert.Contains(t, err.Error(), "warm_season")
+
+	err = river.AddWorkerSafely(w, NewOrphanScanWorker(noopV12DB{}, NoopEnqueuer{}))
+	require.Error(t, err, "orphan_scan slot should already be occupied")
+	assert.Contains(t, err.Error(), "orphan_scan")
 }
 
 // TestWorkersWithBangumi_NilEnqueuerOK asserts the constructor
@@ -323,6 +329,12 @@ func (noopV12DB) UpsertAnimeCache(_ context.Context, _ dbgen.UpsertAnimeCachePar
 // tests never invoke this method.
 func (noopV12DB) GetTitleChineseByAnilistIDs(_ context.Context, _ []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
 	return []dbgen.GetTitleChineseByAnilistIDsRow{}, nil
+}
+
+// ListUnenrichedAnilistIDs satisfies OrphanReader.  Registration tests
+// never invoke this method.
+func (noopV12DB) ListUnenrichedAnilistIDs(_ context.Context, _ int32, _ int32) ([]int32, error) {
+	return []int32{}, nil
 }
 
 // noopAniList satisfies AniListSeasonalFetcher.  Returns an empty page

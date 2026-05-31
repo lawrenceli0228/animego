@@ -148,7 +148,7 @@ func main() {
 			river.QueueDefault:       {MaxWorkers: 1},
 			queue.BangumiV3QueueName: {MaxWorkers: 1},
 		},
-		PeriodicJobs: []*river.PeriodicJob{queue.PeriodicWarmSeasonJob()},
+		PeriodicJobs: []*river.PeriodicJob{queue.PeriodicWarmSeasonJob(), queue.PeriodicOrphanScanJob()},
 		Logger:       slog.Default(),
 	})
 	if err != nil {
@@ -169,7 +169,7 @@ func main() {
 			slog.Warn("river queue stop", "err", err)
 		}
 	}()
-	slog.Info("river queue ready", "workers", "v1+v2+v3+warm_season")
+	slog.Info("river queue ready", "workers", "v1+v2+v3+warm_season+orphan_scan")
 
 	// Boot-time warm: enqueue current + next season immediately so the
 	// dispatch loop has something to chew on as soon as it starts.
