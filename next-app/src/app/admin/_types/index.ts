@@ -11,6 +11,12 @@ export interface AdminStats {
     v2: number;
     v3: number;
     noCn: number;
+    hasCn: number;
+    healCnReal: number;
+    cnStuck: number;
+    srcIdMap: number;
+    srcFuzzyHigh: number;
+    srcFuzzyLow: number;
   };
   queue: {
     phase1: number;

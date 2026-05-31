@@ -15,7 +15,7 @@
 --   * RETURNING the projection columns matches Express's .select() shape.
 
 -- name: GetAdminStats :one
--- /api/admin/stats — 10 COUNT()s in a single round-trip.
+-- /api/admin/stats — COUNT()s in a single round-trip.
 -- Replaces Promise.all() of 10 Mongo countDocuments calls.  All counts
 -- run as correlated subqueries so we get one row, one fetch.
 SELECT
@@ -26,6 +26,14 @@ SELECT
     (SELECT count(*) FROM anime_cache WHERE bangumi_version = 2)::bigint                              AS enrich_v2,
     (SELECT count(*) FROM anime_cache WHERE bangumi_version >= 3)::bigint                             AS enrich_v3,
     (SELECT count(*) FROM anime_cache WHERE bgm_id IS NOT NULL AND title_chinese IS NULL)::bigint     AS no_cn,
+    -- Honesty fields (P3/P4): real CN coverage + the "Heal CN can actually
+    -- fix" count + the unhealable v3-no-cn + the by-source breakdown.
+    (SELECT count(*) FROM anime_cache WHERE title_chinese IS NOT NULL)::bigint                        AS has_cn,
+    (SELECT count(*) FROM anime_cache WHERE bgm_id IS NOT NULL AND bangumi_version = 2 AND title_chinese IS NULL)::bigint AS heal_cn_real,
+    (SELECT count(*) FROM anime_cache WHERE bangumi_version >= 3 AND bgm_id IS NOT NULL AND title_chinese IS NULL)::bigint AS cn_stuck,
+    (SELECT count(*) FROM anime_cache WHERE bgm_match_source = 'id_map')::bigint                      AS src_id_map,
+    (SELECT count(*) FROM anime_cache WHERE bgm_match_source = 'fuzzy_high')::bigint                  AS src_fuzzy_high,
+    (SELECT count(*) FROM anime_cache WHERE bgm_match_source = 'fuzzy_low')::bigint                   AS src_fuzzy_low,
     (SELECT count(*) FROM anime_cache WHERE admin_flag IS NOT NULL)::bigint                           AS flagged,
     (SELECT count(*) FROM subscriptions)::bigint                                                      AS total_subs,
     (SELECT count(*) FROM follows)::bigint                                                            AS total_follows;
@@ -65,6 +73,7 @@ SET
     bangumi_score   = NULL,
     bangumi_votes   = NULL,
     admin_flag      = NULL,
+    bgm_match_source = NULL,
     updated_at      = now()
 WHERE anilist_id = $1;
 

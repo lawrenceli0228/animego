@@ -232,6 +232,46 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ─── Enrichment backfill (one-shot ops tool) ──────────────────────────
+  # Re-validates every existing bgm binding against the authoritative id-map
+  # + dandanplay, then fixes the legacy backlog (wrong bindings → reset for
+  # re-enrich; missing CN → healed from dandanplay). NOT in the default `up`
+  # set — guarded behind the `tools` profile. Reuses the go-api image (which
+  # now bundles the bgmbackfill binary) + its env, overriding the entrypoint.
+  # Runs as root so it can write report.json / backup-*.json into
+  # ./backfill-out on the host — the operator reviews the report and KEEPS
+  # the backup as the --apply rollback.
+  #
+  # Run on the VPS AFTER deploy + migrate, reviewing the report first:
+  #   mkdir -p backfill-out
+  #   docker compose --env-file .env.production --profile tools run --rm backfill --report
+  #   docker compose --env-file .env.production --profile tools run --rm backfill --apply
+  #   docker compose --env-file .env.production restart go-api   # orphan scan re-enriches the reset rows
+  #   docker compose --env-file .env.production --profile tools run --rm backfill --heal
+  backfill:
+    build:
+      context: ./go-api
+    profiles: ["tools"]
+    user: "0:0"
+    working_dir: /out
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable
+    volumes:
+      - ./backfill-out:/out
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - animego
+    entrypoint: ["bgmbackfill"]
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   nginx:
     image: nginx:alpine
     restart: unless-stopped

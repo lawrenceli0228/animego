@@ -39,6 +39,13 @@ type Querier interface {
 	// overrides it.  Both empty means the handler returns 400 before we
 	// reach this query.
 	AdminUpdateUser(ctx context.Context, username *string, email *string, userID uuid.UUID) (AdminUpdateUserRow, error)
+	// Apply step: reset a batch of flagged rows so the fixed pipeline re-enriches
+	// them from scratch.  Nulls the (possibly wrong) bgm_id + title_chinese +
+	// score/votes so the bad data disappears immediately; bangumi_version=0
+	// re-queues them via the orphan scan / a follow-up V1 enqueue.
+	BackfillResetRows(ctx context.Context, dollar_1 []int32) error
+	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
+	CountBgmIdMap(ctx context.Context) (int64, error)
 	// Total for pagination — same filter as ListFeedActivities sans paging.
 	CountFeedActivities(ctx context.Context, dollar_1 []uuid.UUID) (int64, error)
 	// Total follower count for the pagination envelope.
@@ -133,7 +140,7 @@ type Querier interface {
 	//     *string and "nil means skip" semantics apply.  Setting a field to
 	//     NULL on purpose uses a pgtype.Text wrapper in the handler.
 	//   * RETURNING the projection columns matches Express's .select() shape.
-	// /api/admin/stats — 10 COUNT()s in a single round-trip.
+	// /api/admin/stats — COUNT()s in a single round-trip.
 	// Replaces Promise.all() of 10 Mongo countDocuments calls.  All counts
 	// run as correlated subqueries so we get one row, one fetch.
 	GetAdminStats(ctx context.Context) (GetAdminStatsRow, error)
@@ -172,7 +179,9 @@ type Querier interface {
 	GetAnimeEpisodeTitlesByID(ctx context.Context, animeID int32) ([]GetAnimeEpisodeTitlesByIDRow, error)
 	// Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
 	// the keyword for Bangumi search.  Mirrors anilist.service.js V1
-	// enqueue (fetchBangumiData first arg).
+	// enqueue (fetchBangumiData first arg).  title_english / season_year /
+	// episodes feed the match scorer (internal/bangumi.PickBest) so a
+	// low-confidence candidate is rejected instead of blindly bound.
 	GetAnimeForBangumiSearch(ctx context.Context, anilistID int32) (GetAnimeForBangumiSearchRow, error)
 	GetAnimeGenresByID(ctx context.Context, animeID int32) ([]string, error)
 	// Full main-row read for /:anilistId detail.  Returns every column
@@ -211,6 +220,15 @@ type Querier interface {
 	// min 19, max 91, avg 64.25).  The Express threshold of 75 corresponds
 	// to "highly rated by AniList community" and is preserved verbatim.
 	GetCompletedGems(ctx context.Context, limit int32) ([]GetCompletedGemsRow, error)
+	// ddp.sql — dandanplay cross-validation cache (ddp_bgm_title).
+	// dandanplay's Chinese animeTitle for a bgm.tv subject id, fetched via the
+	// existing dandanplay client (/api/v2/bangumi/bgmtv/:bgmId) and cached here
+	// keyed by bgm_id so validation + CN-heal never re-call the API for the same
+	// subject — the open platform explicitly asks callers to cache and adds a
+	// quota mechanism from 2026-06-25.
+	// Cache hit returns dandanplay's title (anime_title may be NULL = looked up,
+	// none found) plus when it was checked, so the caller can skip stale rows.
+	GetDdpTitle(ctx context.Context, bgmID int32) (GetDdpTitleRow, error)
 	// Returns the liveEndsAt timestamp for this episode if a live window
 	// exists, else pgx.ErrNoRows (handler maps → null in the envelope).
 	GetEpisodeWindow(ctx context.Context, anilistID int32, episode int32) (EpisodeWindow, error)
@@ -290,6 +308,10 @@ type Querier interface {
 	// /api/anime/yearly-top, replacing anime.controller.js:93-110.
 	// Express limit is 20 hard, slice down to query limit in handler.
 	GetYearlyTop(ctx context.Context, seasonYear *int32, limit int32) ([]GetYearlyTopRow, error)
+	// Write a Chinese title sourced from dandanplay onto a trusted row.  Guarded
+	// on title_chinese IS NULL so a concurrent enrichment that already filled CN
+	// is never clobbered.
+	HealCnTitle(ctx context.Context, anilistID int32, titleChinese *string) error
 	// display_order is the slice index (0-based) so the relational re-read
 	// preserves the AniList edge ordering Express got for free from
 	// Mongoose's array indexing.
@@ -303,6 +325,9 @@ type Querier interface {
 	InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelationParams) error
 	InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
+	// Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
+	// updated_at takes its column DEFAULT now().
+	InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error)
 	// Batch reader for re-enrich.  Returns the fields the queue payload
 	// needs.  Filtering by version covers v0/v1/v2 — handler dispatches each
 	// via the appropriate enqueue function.
@@ -311,6 +336,14 @@ type Querier interface {
 	// In PG the column is `NOT NULL DEFAULT 0` (see 0001_init.up.sql:53) so
 	// "missing" is impossible — a single = 0 covers it.
 	ListAnimeForReEnrichByVersion(ctx context.Context, bangumiVersion int32) ([]ListAnimeForReEnrichByVersionRow, error)
+	// backfill.sql — one-time re-validation of existing bgm bindings
+	// (cmd/bgmbackfill).  The new matcher + dandanplay cross-check flag rows
+	// whose bgm_id is likely wrong; the apply step RESETS them so the fixed V1
+	// pipeline re-enriches (id_map -> authoritative, or search+score -> the
+	// needs-review gate).  The reset nulls the wrong data immediately.
+	// Every row that currently has a bgm_id — the universe the backfill audits.
+	// Returns the fields the scorer + the dandanplay CN cross-check need.
+	ListBgmBoundForBackfill(ctx context.Context) ([]ListBgmBoundForBackfillRow, error)
 	// Queries against danmakus + episode_windows (P2.5).
 	//
 	// HTTP surface is read-only for danmaku — writes go through socket.io
@@ -384,6 +417,12 @@ type Querier interface {
 	// Returns the queue payload shape (anilistId / bgmId / titleChinese /
 	// bangumiVersion) so the handler can build V3 jobs directly.
 	ListHealCnCandidates(ctx context.Context) ([]ListHealCnCandidatesRow, error)
+	// Heal targets for the dandanplay CN backfill: rows whose CURRENT bgm_id IS
+	// the authoritative id-map binding (so the subject is trusted) but that still
+	// have no Chinese title.  Healing these from dandanplay's animeTitle is safe
+	// precisely because the bgm_id is map-confirmed — we never heal a fuzzy or
+	// uncertain bind (whose dandanplay title could belong to the wrong subject).
+	ListIdMapRowsMissingCn(ctx context.Context) ([]ListIdMapRowsMissingCnRow, error)
 	// The "watching" list shown on the public profile.  200-row cap matches
 	// Express; the join is the same shape as the subscriptions list query
 	// but only returns the cardview projection.
@@ -416,6 +455,18 @@ type Querier interface {
 	// LEFT JOIN preserves rows even if anime_cache was cleared (unlikely
 	// given ON DELETE CASCADE, but defensive).
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]ListUserSubscriptionsRow, error)
+	// Authoritative AniList->Bangumi binding from the vendored id map
+	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
+	// consults this BEFORE any Bangumi search; a hit binds the subject with
+	// source='id_map' and skips fuzzy matching entirely.  pgx.ErrNoRows means
+	// "not in the map" → caller falls through to the search + scorer path.
+	LookupBgmIdMap(ctx context.Context, anilistID int32) (int32, error)
+	// Phase-1 scorer found candidates but none confident enough to bind.  We
+	// REFUSE to guess: no bgm_id is written.  Park the row terminal
+	// (bangumi_version=2) so the auto-pipeline stops re-processing it, flag it
+	// for a human, and record why via bgm_match_source='fuzzy_low'.  Guarded on
+	// bangumi_version=0 so we never clobber a row another worker advanced.
+	MarkBangumiNeedsReview(ctx context.Context, anilistID int32) error
 	// Phase-1 found no Bangumi match. Mirror Express's no-bgmId branch:
 	// terminal version=2 with null title_chinese + bgm_id so the orphan
 	// scan (version=0) and re-enrich stop re-processing this row. Guarded
@@ -469,6 +520,13 @@ type Querier interface {
 	// token via crypto/rand (32 random bytes hex-encoded — matches
 	// Express's crypto.randomBytes(32).toString('hex')).
 	SetResetPasswordToken(ctx context.Context, iD uuid.UUID, resetPasswordToken *string, resetPasswordExpires pgtype.Timestamptz) error
+	// bgm_id_map.sql — queries for the vendored AniList->Bangumi id map.
+	// The map is generated by cmd/bgmmap (Fribb x BangumiExtLinker joined on
+	// MAL id), embedded via internal/bgmidmap, and seeded at boot.
+	// Full-replace seed: clear before COPY so a refreshed map that DROPPED an
+	// entry doesn't leave a stale row behind.  Runs in the same tx as the COPY
+	// so the table is never observably empty to concurrent readers.
+	TruncateBgmIdMap(ctx context.Context) error
 	// Phase 2 character enrichment: match by anime_id + (name_en OR name_ja).
 	// Bangumi character.name is typically Japanese (e.g. "天使ヶ原恵") while
 	// AniList stores it under name_ja; some AniList entries have English/
@@ -497,7 +555,7 @@ type Querier interface {
 	// (keeps the column NULL).  bgm_id is also *int because Bangumi search
 	// may legitimately return no hits at all → caller sets bangumi_version
 	// via a separate path or leaves it 0.
-	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string) error
+	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error
 	// Phase 2 result: write bangumi_score + bangumi_votes from Bangumi
 	// Subject API.  Also conditionally fills title_chinese if it's still
 	// NULL (V1 only writes it on exact native match; V2 has another shot
@@ -539,6 +597,9 @@ type Querier interface {
 	// them in a separate transaction if needed.  /search + /schedule never
 	// mutate child tables; only /:anilistId detail-fetch does.
 	UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCacheParams) error
+	// Persist a dandanplay lookup result (title, or NULL for a confirmed miss)
+	// keyed by bgm_id.
+	UpsertDdpTitle(ctx context.Context, bgmID int32, animeTitle *string) error
 	// Written by the Bangumi V2 worker (the Phase-4 enrichment analog) after
 	// fetching /subject/{bgmId}/ep.  Express set the whole episodeTitles array;
 	// we upsert per episode so a re-enrich refreshes names in place. ON CONFLICT

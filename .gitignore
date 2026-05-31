@@ -90,3 +90,16 @@ docs/migration/data/
 # self-signed (browser cert warning, accept once).
 nginx/selfsigned.crt
 nginx/selfsigned.key
+
+# Enrichment backfill ops tool: outputs + stray local-build binaries.
+# report.json / backup-*.json land in backfill-out/ (bind-mounted by the
+# `backfill` compose service). The cmd binaries are built into the Docker
+# image, never committed.
+backfill-out/
+report.json
+backup-*.json
+/go-api/bgmbackfill
+/go-api/bgmmap
+/go-api/server
+/go-api/migrate-mongo
+/go-api/parity-check

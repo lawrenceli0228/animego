@@ -110,7 +110,7 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
     [],
   );
 
-  const { v0, v1, v2, v3, noCn } = stats.enrichment;
+  const { v0, v1, v2, v3, noCn, hasCn, healCnReal, cnStuck } = stats.enrichment;
   const total = v0 + v1 + v2 + v3;
   const prog = stats.queue.v3Progress;
   const v3Active = !!(prog && prog.total > 0 && prog.processed < prog.total);
@@ -130,14 +130,16 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
         <span>{t("admin.enrichmentDistTitle")}</span>
         <span style={styles.headingMeta}>
           v3 {v3} · v2 {v2} · v1 {v1} · v0 {v0}
-          {noCn > 0 ? ` · ${t("admin.missingCn").replace("{{n}}", String(noCn))}` : ""}
+          {(healCnReal > 0 || cnStuck > 0)
+            ? ` · 缺中文 可修 ${healCnReal} · 卡死 ${cnStuck}`
+            : noCn > 0 ? ` · ${t("admin.missingCn").replace("{{n}}", String(noCn))}` : ""}
         </span>
       </div>
 
       <div
         style={styles.bar}
         role="img"
-        aria-label={`${t("admin.enrichmentDistTitle")}: v3 ${v3}, v2 ${v2}, v1 ${v1}, v0 ${v0}`}
+        aria-label={`${t("admin.enrichmentDistTitle")}: v3 ${v3}, v2 ${v2}, v1 ${v1}, v0 ${v0}; 中文覆盖 ${hasCn}/${total}`}
       >
         <div style={{ ...styles.segV3, width: `${pct(v3)}%` }}>
           {v3Active && !v3Paused ? <div style={styles.stripeOverlay} /> : null}
@@ -160,23 +162,35 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
         {LEGEND_COLORS.map((color, i) => {
           const key = LEGEND_LABEL_KEYS[i];
           const label = key.startsWith("admin.") ? t(key) : key;
+          const isV3 = i === 0;
           return (
             <span key={color} style={styles.legendItem}>
               <span style={{ ...styles.legendDot, background: color }} />
               {label}
+              {isV3 && cnStuck > 0
+                ? <span style={styles.legendSub}> 其中 {cnStuck} 无中文</span>
+                : null}
             </span>
           );
         })}
       </div>
 
+      <div style={styles.cnCoverage}>
+        中文覆盖{" "}
+        <span style={{ fontFeatureSettings: '"tnum"' }}>
+          {hasCn}/{total}
+          {total > 0 ? ` (${Math.round((hasCn / total) * 100)}%)` : ""}
+        </span>
+      </div>
+
       <div style={styles.actions}>
         <button
           type="button"
-          style={styles.btnPrimary}
-          disabled={pending}
+          style={healCnReal === 0 ? styles.btnPrimaryDisabled : styles.btnPrimary}
+          disabled={pending || healCnReal === 0}
           onClick={() => runAction("Heal CN", healCn)}
         >
-          Heal CN{noCn > 0 ? ` (${noCn})` : ""}
+          Heal CN ({healCnReal})
         </button>
 
         {v3Active && !v3Paused ? (
@@ -304,6 +318,8 @@ const styles: Record<string, React.CSSProperties> = {
   legend: { display: "flex", flexWrap: "wrap", gap: 16, fontSize: 11, color: "#7c7c8c" },
   legendItem: { display: "inline-flex", alignItems: "center", gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: "50%", display: "inline-block" },
+  legendSub: { color: "#5c5c6e", fontFeatureSettings: '"tnum"' },
+  cnCoverage: { fontSize: 12, color: "#8c8c9c", fontFeatureSettings: '"tnum"' },
   actions: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 },
   btnPrimary: {
     ...btnBase,
@@ -311,6 +327,14 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fff",
     border: "1px solid #3a6eef",
     fontWeight: 500,
+  },
+  btnPrimaryDisabled: {
+    ...btnBase,
+    background: "#1a1a28",
+    color: "#4a4a5a",
+    border: "1px solid #2a2a38",
+    fontWeight: 500,
+    cursor: "not-allowed",
   },
   btnWarn: {
     ...btnBase,

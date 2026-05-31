@@ -167,13 +167,15 @@ func NewClient(opts ...Option) *Client {
 
 // SearchResult is one entry in the {list} array returned by
 // /search/subject.  Fields trimmed to what the enrichment workers
-// consume — id + name + name_cn.  Other fields exist on the wire (type,
-// images, summary, etc.) but workers ignore them, so we don't map them
-// here.
+// consume — id + name + name_cn + date + eps.  Other fields exist on
+// the wire (type, images, summary, etc.) but workers ignore them, so
+// we don't map them here.
 type SearchResult struct {
 	ID     int    `json:"id"`
-	Name   string `json:"name"`    // native title (the Bangumi-side spelling)
-	NameCN string `json:"name_cn"` // Chinese title, empty when missing
+	Name   string `json:"name"`     // native title (the Bangumi-side spelling)
+	NameCN string `json:"name_cn"`  // Chinese title, empty when missing
+	Date   string `json:"air_date"` // "YYYY-MM-DD" (legacy /search uses air_date, NOT date); empty when missing
+	Eps    int    `json:"eps"`      // episode count; populated only at responseGroup=medium+
 }
 
 // SearchResponse wraps the {list} envelope returned by /search/subject.
@@ -231,8 +233,8 @@ type Character struct {
 // v0/episodes) — normalises sort offset for sequels".
 type Episode struct {
 	ID     int     `json:"id"`
-	Sort   float64 `json:"sort"`   // episode number within type (may be non-integer for specials)
-	Type   int     `json:"type"`   // 0=正篇, 1=SP, ...
+	Sort   float64 `json:"sort"` // episode number within type (may be non-integer for specials)
+	Type   int     `json:"type"` // 0=正篇, 1=SP, ...
 	Name   string  `json:"name"`
 	NameCN string  `json:"name_cn"`
 	Status string  `json:"status"` // e.g. "Air"
@@ -247,7 +249,7 @@ type EpisodesResponse struct {
 // Public endpoint methods
 // ---------------------------------------------------------------------------
 
-// Search hits GET /search/subject/<keyword>?type=2&responseGroup=small&max_results=5.
+// Search hits GET /search/subject/<keyword>?type=2&responseGroup=large&max_results=5.
 // keyword is URL-path-encoded with url.PathEscape (NOT QueryEscape — it
 // lives in the path segment, not a query value).
 //
@@ -262,10 +264,10 @@ type EpisodesResponse struct {
 // The keyword argument is URL-path-encoded — pass it raw (e.g.
 // "進撃の巨人") and the method handles encoding.
 func (c *Client) Search(ctx context.Context, keyword string) (*SearchResponse, error) {
-	// /search/subject/<keyword>?type=2&responseGroup=small&max_results=5
+	// /search/subject/<keyword>?type=2&responseGroup=large&max_results=5
 	// keyword lives in the PATH segment, so PathEscape (not QueryEscape).
 	path := "/search/subject/" + url.PathEscape(keyword)
-	query := "?type=2&responseGroup=small&max_results=5"
+	query := "?type=2&responseGroup=large&max_results=5"
 
 	var dest SearchResponse
 	if err := c.get(ctx, path+query, &dest); err != nil {

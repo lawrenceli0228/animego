@@ -97,6 +97,10 @@ function Overview({ stats, dict }: { stats: AdminStats | null; dict: Dict }) {
     enrichedTotal > 0
       ? Math.round((stats.enrichment.v3 / enrichedTotal) * 100)
       : 0;
+  const cnPct =
+    enrichedTotal > 0
+      ? Math.round(((stats.enrichment.hasCn ?? 0) / enrichedTotal) * 100)
+      : 0;
   const queueTotal =
     stats.queue.phase1 + stats.queue.phase4 + stats.queue.v3;
 
@@ -114,7 +118,7 @@ function Overview({ stats, dict }: { stats: AdminStats | null; dict: Dict }) {
         <StatCard
           label={dict.admin.statAnime}
           value={stats.anime}
-          hint={dict.admin.v3EnrichPct.replace("{{pct}}", String(v3Pct))}
+          hint={`${dict.admin.v3EnrichPct.replace("{{pct}}", String(v3Pct))} · 中文 ${cnPct}%`}
         />
         <StatCard label={dict.admin.statSubs} value={stats.subscriptions} />
         <StatCard label={dict.admin.statFollows} value={stats.follows} />

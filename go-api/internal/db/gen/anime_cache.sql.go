@@ -298,23 +298,34 @@ func (q *Queries) GetAnimeEpisodeTitlesByID(ctx context.Context, animeID int32) 
 }
 
 const getAnimeForBangumiSearch = `-- name: GetAnimeForBangumiSearch :one
-SELECT title_native, title_romaji
+SELECT title_native, title_romaji, title_english, season_year, episodes
 FROM anime_cache
 WHERE anilist_id = $1
 `
 
 type GetAnimeForBangumiSearchRow struct {
-	TitleNative *string `json:"titleNative"`
-	TitleRomaji *string `json:"titleRomaji"`
+	TitleNative  *string `json:"titleNative"`
+	TitleRomaji  *string `json:"titleRomaji"`
+	TitleEnglish *string `json:"titleEnglish"`
+	SeasonYear   *int32  `json:"seasonYear"`
+	Episodes     *int32  `json:"episodes"`
 }
 
 // Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
 // the keyword for Bangumi search.  Mirrors anilist.service.js V1
-// enqueue (fetchBangumiData first arg).
+// enqueue (fetchBangumiData first arg).  title_english / season_year /
+// episodes feed the match scorer (internal/bangumi.PickBest) so a
+// low-confidence candidate is rejected instead of blindly bound.
 func (q *Queries) GetAnimeForBangumiSearch(ctx context.Context, anilistID int32) (GetAnimeForBangumiSearchRow, error) {
 	row := q.db.QueryRow(ctx, getAnimeForBangumiSearch, anilistID)
 	var i GetAnimeForBangumiSearchRow
-	err := row.Scan(&i.TitleNative, &i.TitleRomaji)
+	err := row.Scan(
+		&i.TitleNative,
+		&i.TitleRomaji,
+		&i.TitleEnglish,
+		&i.SeasonYear,
+		&i.Episodes,
+	)
 	return i, err
 }
 
@@ -1316,6 +1327,43 @@ func (q *Queries) ListUnenrichedAnilistIDs(ctx context.Context, limit int32, off
 	return items, nil
 }
 
+const lookupBgmIdMap = `-- name: LookupBgmIdMap :one
+SELECT bgm_id FROM bgm_id_map WHERE anilist_id = $1
+`
+
+// Authoritative AniList->Bangumi binding from the vendored id map
+// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
+// consults this BEFORE any Bangumi search; a hit binds the subject with
+// source='id_map' and skips fuzzy matching entirely.  pgx.ErrNoRows means
+// "not in the map" → caller falls through to the search + scorer path.
+func (q *Queries) LookupBgmIdMap(ctx context.Context, anilistID int32) (int32, error) {
+	row := q.db.QueryRow(ctx, lookupBgmIdMap, anilistID)
+	var bgm_id int32
+	err := row.Scan(&bgm_id)
+	return bgm_id, err
+}
+
+const markBangumiNeedsReview = `-- name: MarkBangumiNeedsReview :exec
+UPDATE anime_cache
+SET bgm_id           = NULL,
+    title_chinese    = NULL,
+    bgm_match_source = 'fuzzy_low',
+    admin_flag       = 'needs-review',
+    bangumi_version  = 2,
+    updated_at       = now()
+WHERE anilist_id = $1 AND bangumi_version = 0
+`
+
+// Phase-1 scorer found candidates but none confident enough to bind.  We
+// REFUSE to guess: no bgm_id is written.  Park the row terminal
+// (bangumi_version=2) so the auto-pipeline stops re-processing it, flag it
+// for a human, and record why via bgm_match_source='fuzzy_low'.  Guarded on
+// bangumi_version=0 so we never clobber a row another worker advanced.
+func (q *Queries) MarkBangumiNeedsReview(ctx context.Context, anilistID int32) error {
+	_, err := q.db.Exec(ctx, markBangumiNeedsReview, anilistID)
+	return err
+}
+
 const markBangumiV1NotFound = `-- name: MarkBangumiV1NotFound :exec
 UPDATE anime_cache
 SET title_chinese = NULL, bgm_id = NULL, bangumi_version = 2
@@ -1364,10 +1412,11 @@ func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nam
 
 const updateBangumiV1 = `-- name: UpdateBangumiV1 :exec
 UPDATE anime_cache
-SET bgm_id         = $2,
-    title_chinese  = $3,
-    bangumi_version = 1,
-    updated_at     = now()
+SET bgm_id           = $2,
+    title_chinese    = $3,
+    bgm_match_source = $4,
+    bangumi_version  = 1,
+    updated_at       = now()
 WHERE anilist_id = $1
 `
 
@@ -1379,8 +1428,13 @@ WHERE anilist_id = $1
 // (keeps the column NULL).  bgm_id is also *int because Bangumi search
 // may legitimately return no hits at all → caller sets bangumi_version
 // via a separate path or leaves it 0.
-func (q *Queries) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string) error {
-	_, err := q.db.Exec(ctx, updateBangumiV1, anilistID, bgmID, titleChinese)
+func (q *Queries) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error {
+	_, err := q.db.Exec(ctx, updateBangumiV1,
+		anilistID,
+		bgmID,
+		titleChinese,
+		bgmMatchSource,
+	)
 	return err
 }
 

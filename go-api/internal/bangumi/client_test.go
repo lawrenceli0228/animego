@@ -92,7 +92,7 @@ func TestClient_Search_OK(t *testing.T) {
 	assert.Equal(t, http.MethodGet, seenMethod)
 	// Server decodes the path before exposing it; assert the decoded form.
 	assert.Equal(t, "/search/subject/進撃の巨人", seenPath)
-	assert.Equal(t, "type=2&responseGroup=small&max_results=5", seenQuery)
+	assert.Equal(t, "type=2&responseGroup=large&max_results=5", seenQuery)
 	require.Len(t, resp.List, 2)
 	assert.Equal(t, 326, resp.List[0].ID)
 	assert.Equal(t, "進撃の巨人", resp.List[0].Name)
@@ -162,6 +162,26 @@ func TestClient_Search_KeywordPathEscape(t *testing.T) {
 	// Sanity-check that the encoded form contains URL-encoded bytes.
 	assert.Contains(t, seenRawPath, "%E9%80%B2",
 		"expected CJK bytes to be percent-encoded; got %s", seenRawPath)
+}
+
+// TestClient_Search_ParsesAirDateAndEps locks the legacy /search/subject
+// field names: the endpoint returns air_date (NOT date) plus eps, and the
+// match scorer depends on both. Guards against the SearchResult tag
+// regressing to `json:"date"`, which silently nulls the year signal in prod.
+func TestClient_Search_ParsesAirDateAndEps(t *testing.T) {
+	t.Parallel()
+	const body = `{"list":[{"id":7,"name":"進撃の巨人","name_cn":"进击的巨人","type":2,"air_date":"2013-04-06","eps":25}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, body)
+	}))
+	defer srv.Close()
+
+	c := testClient(t, srv.URL)
+	resp, err := c.Search(context.Background(), "進撃の巨人")
+	require.NoError(t, err)
+	require.Len(t, resp.List, 1)
+	assert.Equal(t, "2013-04-06", resp.List[0].Date, "air_date must map to SearchResult.Date")
+	assert.Equal(t, 25, resp.List[0].Eps, "eps must map to SearchResult.Eps")
 }
 
 // ---------------------------------------------------------------------------

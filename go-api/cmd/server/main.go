@@ -38,12 +38,11 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
 	"github.com/lawrenceli0228/animego/go-api/internal/auth"
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
+	"github.com/lawrenceli0228/animego/go-api/internal/bgmidmap"
 	"github.com/lawrenceli0228/animego/go-api/internal/comments"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
 	"github.com/lawrenceli0228/animego/go-api/internal/danmaku"
-	"github.com/lawrenceli0228/animego/go-api/internal/social"
-	"github.com/lawrenceli0228/animego/go-api/internal/subscriptions"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/email"
@@ -51,6 +50,8 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
+	"github.com/lawrenceli0228/animego/go-api/internal/social"
+	"github.com/lawrenceli0228/animego/go-api/internal/subscriptions"
 	"github.com/lawrenceli0228/animego/go-api/internal/torrents"
 )
 
@@ -144,8 +145,8 @@ func main() {
 		// throttle the V1/V2/V3 workers use to respect Bangumi's
 		// 800ms-per-request budget (only one worker per queue).
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault:         {MaxWorkers: 1},
-			queue.BangumiV3QueueName:   {MaxWorkers: 1},
+			river.QueueDefault:       {MaxWorkers: 1},
+			queue.BangumiV3QueueName: {MaxWorkers: 1},
 		},
 		PeriodicJobs: []*river.PeriodicJob{queue.PeriodicWarmSeasonJob()},
 		Logger:       slog.Default(),
@@ -220,11 +221,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Boot-time orphan scan: catches anime_cache rows with
-	// bangumi_version=0 that were upserted during a previous worker
-	// outage.  Runs in a goroutine so server startup is not blocked
-	// (river's queue can absorb the inserts in parallel with HTTP serving).
+	// Boot-time setup, off the critical path so HTTP serving starts
+	// immediately. Order matters: seed the AniList->Bangumi id map BEFORE
+	// the orphan scan enqueues V1 jobs, so those jobs can bind mapped
+	// titles authoritatively instead of falling to the fuzzy scorer.
 	go func() {
+		// Seed the vendored id map (internal/bgmidmap embed → bgm_id_map).
+		// Idempotent full-replace; failure is non-fatal — the V1 worker just
+		// degrades to the search + scorer path for everything.
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		if n, err := bgmidmap.Seed(seedCtx, pool); err != nil {
+			slog.Warn("bgm_id_map seed failed", "err", err)
+		} else {
+			slog.Info("bgm_id_map seeded", "entries", n)
+		}
+		seedCancel()
+
+		// Orphan scan: catches anime_cache rows with bangumi_version=0 that
+		// were upserted during a previous worker outage.  river's queue can
+		// absorb the inserts in parallel with HTTP serving.
 		scanCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		total, err := queue.ScanAndEnqueueOrphans(scanCtx, q, enqueuer)

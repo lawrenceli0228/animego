@@ -27,13 +27,22 @@ import (
 )
 
 // statsEnrichment is the nested counts object inside StatsData.  Field
-// order matches Express:  v0, v1, v2, v3, noCn.
+// order matches Express:  v0, v1, v2, v3, noCn.  The six additional
+// fields (hasCn…srcFuzzyLow) surface the real enrichment-quality
+// numbers that the DB now computes — they were absent in the Mongo port
+// because Mongo's aggregation pipeline didn't track them.
 type statsEnrichment struct {
-	V0   int64 `json:"v0"`
-	V1   int64 `json:"v1"`
-	V2   int64 `json:"v2"`
-	V3   int64 `json:"v3"`
-	NoCn int64 `json:"noCn"`
+	V0           int64 `json:"v0"`
+	V1           int64 `json:"v1"`
+	V2           int64 `json:"v2"`
+	V3           int64 `json:"v3"`
+	NoCn         int64 `json:"noCn"`
+	HasCn        int64 `json:"hasCn"`
+	HealCnReal   int64 `json:"healCnReal"`
+	CnStuck      int64 `json:"cnStuck"`
+	SrcIDMap     int64 `json:"srcIdMap"`
+	SrcFuzzyHigh int64 `json:"srcFuzzyHigh"`
+	SrcFuzzyLow  int64 `json:"srcFuzzyLow"`
 }
 
 // QueueSnapshot is the byte-exact queue object inside /api/admin/stats'
@@ -48,9 +57,9 @@ type statsEnrichment struct {
 // river's JobList API, the injected QueueStatusFn will return this
 // QueueSnapshot ready-shaped for the response.
 type QueueSnapshot struct {
-	Phase1     int64           `json:"phase1"`
-	Phase4     int64           `json:"phase4"`
-	V3         int64           `json:"v3"`
+	Phase1     int64            `json:"phase1"`
+	Phase4     int64            `json:"phase4"`
+	V3         int64            `json:"v3"`
 	V3Progress *V3BatchProgress `json:"v3Progress"`
 }
 

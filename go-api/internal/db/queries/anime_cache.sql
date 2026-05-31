@@ -271,8 +271,10 @@ WHERE anilist_id = ANY($1::int[]);
 -- name: GetAnimeForBangumiSearch :one
 -- Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
 -- the keyword for Bangumi search.  Mirrors anilist.service.js V1
--- enqueue (fetchBangumiData first arg).
-SELECT title_native, title_romaji
+-- enqueue (fetchBangumiData first arg).  title_english / season_year /
+-- episodes feed the match scorer (internal/bangumi.PickBest) so a
+-- low-confidence candidate is rejected instead of blindly bound.
+SELECT title_native, title_romaji, title_english, season_year, episodes
 FROM anime_cache
 WHERE anilist_id = $1;
 
@@ -295,11 +297,35 @@ WHERE anilist_id = $1 AND bangumi_version = 0;
 -- may legitimately return no hits at all → caller sets bangumi_version
 -- via a separate path or leaves it 0.
 UPDATE anime_cache
-SET bgm_id         = $2,
-    title_chinese  = $3,
-    bangumi_version = 1,
-    updated_at     = now()
+SET bgm_id           = $2,
+    title_chinese    = $3,
+    bgm_match_source = $4,
+    bangumi_version  = 1,
+    updated_at       = now()
 WHERE anilist_id = $1;
+
+-- name: LookupBgmIdMap :one
+-- Authoritative AniList->Bangumi binding from the vendored id map
+-- (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
+-- consults this BEFORE any Bangumi search; a hit binds the subject with
+-- source='id_map' and skips fuzzy matching entirely.  pgx.ErrNoRows means
+-- "not in the map" → caller falls through to the search + scorer path.
+SELECT bgm_id FROM bgm_id_map WHERE anilist_id = $1;
+
+-- name: MarkBangumiNeedsReview :exec
+-- Phase-1 scorer found candidates but none confident enough to bind.  We
+-- REFUSE to guess: no bgm_id is written.  Park the row terminal
+-- (bangumi_version=2) so the auto-pipeline stops re-processing it, flag it
+-- for a human, and record why via bgm_match_source='fuzzy_low'.  Guarded on
+-- bangumi_version=0 so we never clobber a row another worker advanced.
+UPDATE anime_cache
+SET bgm_id           = NULL,
+    title_chinese    = NULL,
+    bgm_match_source = 'fuzzy_low',
+    admin_flag       = 'needs-review',
+    bangumi_version  = 2,
+    updated_at       = now()
+WHERE anilist_id = $1 AND bangumi_version = 0;
 
 -- name: UpdateBangumiV2 :exec
 -- Phase 2 result: write bangumi_score + bangumi_votes from Bangumi

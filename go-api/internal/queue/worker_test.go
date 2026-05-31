@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/assert"
@@ -280,11 +281,19 @@ func (noopV12DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.Get
 	return dbgen.GetAnimeForBangumiSearchRow{}, nil
 }
 
-func (noopV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string) error {
+func (noopV12DB) LookupBgmIdMap(_ context.Context, _ int32) (int32, error) {
+	return 0, pgx.ErrNoRows
+}
+
+func (noopV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string, _ *string) error {
 	return nil
 }
 
 func (noopV12DB) MarkBangumiV1NotFound(_ context.Context, _ int32) error {
+	return nil
+}
+
+func (noopV12DB) MarkBangumiNeedsReview(_ context.Context, _ int32) error {
 	return nil
 }
 

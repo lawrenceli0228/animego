@@ -54,6 +54,9 @@ var allTables = []string{
 	"episode_comments",
 	"danmakus",
 	"episode_windows",
+	// Enrichment match-accuracy tables (migration 0011).
+	"bgm_id_map",
+	"ddp_bgm_title",
 	// river queue tables (migrations 0007/0008).
 	"river_client",
 	"river_client_queue",

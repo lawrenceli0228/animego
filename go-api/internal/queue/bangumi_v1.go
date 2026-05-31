@@ -1,33 +1,33 @@
 // bangumi_v1.go — Phase 1 Bangumi enrichment worker.
 //
-// Replaces the stubBangumiV1Worker placeholder.  Mirrors
-// server/services/bangumi.service.js's fetchBangumiData + processQueue
-// V1 branch:
+// Binds an AniList anime to its Bangumi subject, then chains Phase 2.
+// Replaces the old exact-string-or-list[0] matcher — which bound ~10% of
+// rows to the WRONG subject (a live audit found wrong title_chinese +
+// bangumi_score attached) — with a two-tier, confidence-gated flow:
 //
-//  1. Read titleNative + titleRomaji from anime_cache for the job's
-//     anilistId.
-//  2. keyword = titleNative || titleRomaji.  Empty → no-op completion.
-//  3. POST /search/subject/<keyword>?type=2&responseGroup=small&max_results=5.
-//  4. Pick the exact-native match if present, else list[0].
-//  5. Write back bgm_id + (titleChinese when exact native match with a
-//     real CN translation).  bangumi_version = 1.
+//  0. Authoritative id-map (bgm_id_map, the vendored AniList->Bangumi map):
+//     a hit binds the subject with source='id_map' and SKIPS search.
+//  1. Otherwise read titleNative/Romaji/English + season_year/episodes.
+//  2. keyword = titleNative || titleRomaji.  Empty → terminal no-match.
+//  3. GET /search/subject/<keyword> (responseGroup=large → air_date + eps).
+//  4. bangumi.PickBest scores every candidate (title sim + year + eps):
+//     - TierHigh → bind bgm_id, source='fuzzy_high', chain V2.
+//     - TierLow / TierNone → REFUSE to bind; MarkBangumiNeedsReview parks
+//     the row (no bgm_id, version=2, admin_flag='needs-review').  This
+//     is the core fix: we never guess a subject onto a row.  We would
+//     rather show AniList romaji than a wrong Chinese name.
 //
 // Retry policy:  errors returned from Work cause river to retry per its
-// configured policy (default 3 attempts with exponential backoff).  We
-// only return error for transient failures (network / 5xx / DB write
-// error).  Permanent "no hit" conditions (ErrNotFound, empty keyword,
-// empty list, no DB row) return nil so the job completes.
+// configured policy (default 3 attempts, exp backoff).  We return error
+// only for transient failures (network / 5xx / DB).  Permanent outcomes
+// (no hit, empty keyword, low-confidence, no DB row) return nil so the
+// job completes.
 //
-// SCOPE: this worker writes the V1 columns (bgm_id + title_chinese +
-// bangumi_version) AND chain-enqueues the V2 follow-up job when a
-// bgm_id was found.  Chaining lives here (not in a separate
-// orchestrator) because the V1 worker has the only authoritative
-// signal that a bgm_id was just assigned — bridging that to a separate
-// "watch for new bgm_ids" component would race against the V1 write
-// and add a polling stage for no benefit.  V2 enqueue failure is
-// non-fatal: V1 already succeeded (row bumped to version=1), so the
-// row won't be re-picked by the orphan scan; worst case is V2 never
-// runs for this row, which is acceptable.
+// SCOPE: writes the V1 columns (bgm_id + title_chinese + bgm_match_source
+// + bangumi_version) AND chain-enqueues V2 when a bgm_id was bound.
+// Chaining lives here because the V1 worker has the only authoritative
+// signal that a bgm_id was just assigned.  V2 enqueue failure is
+// non-fatal: V1 already succeeded, so the row won't be re-picked.
 package queue
 
 import (
@@ -51,19 +51,27 @@ type BangumiSearcher interface {
 	Search(ctx context.Context, keyword string) (*bangumi.SearchResponse, error)
 }
 
-// V1Reader is the sqlc subset BangumiV1Worker reads — only the row
-// lookup for titleNative / titleRomaji.  Defined at use-site (Accept
-// interfaces, return structs) so tests can stub a single method.
+// V1Reader is the sqlc read subset BangumiV1Worker needs.
 type V1Reader interface {
 	GetAnimeForBangumiSearch(ctx context.Context, anilistID int32) (dbgen.GetAnimeForBangumiSearchRow, error)
+	// LookupBgmIdMap returns the authoritative bgm_id for an anilist_id
+	// from the vendored map (bgm_id_map), or pgx.ErrNoRows when the anime
+	// is not mapped — in which case the worker falls back to search.
+	LookupBgmIdMap(ctx context.Context, anilistID int32) (int32, error)
 }
 
-// V1Writer is the sqlc subset BangumiV1Worker writes — the V1 column
-// update on a hit, and the terminal no-match write on a miss.  Split
-// from V1Reader so future workers can compose just the surface they need.
+// V1Writer is the sqlc write subset BangumiV1Worker needs.
 type V1Writer interface {
-	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string) error
+	// UpdateBangumiV1 binds bgm_id (+ optional title_chinese) and records
+	// HOW it was bound via bgmMatchSource ('id_map' | 'fuzzy_high').
+	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error
+	// MarkBangumiV1NotFound parks a row Bangumi has no record for at all
+	// (no keyword / 404 / empty list): terminal version=2, no bgm_id.
 	MarkBangumiV1NotFound(ctx context.Context, anilistID int32) error
+	// MarkBangumiNeedsReview parks a row the scorer found candidates for
+	// but none confident enough to bind: no bgm_id written, version=2,
+	// admin_flag='needs-review', bgm_match_source='fuzzy_low'.
+	MarkBangumiNeedsReview(ctx context.Context, anilistID int32) error
 }
 
 // V1DB combines the read + write surfaces this worker needs.
@@ -74,15 +82,21 @@ type V1DB interface {
 	V1Writer
 }
 
+// bgm_match_source values this worker writes.  'fuzzy_low' is written by
+// MarkBangumiNeedsReview's SQL (not here) since it pairs with the park.
+const (
+	matchSourceIDMap     = "id_map"
+	matchSourceFuzzyHigh = "fuzzy_high"
+)
+
 // BangumiV1Worker is the real Phase 1 worker.  It implements
 // river.Worker[BangumiV1Args] by embedding river.WorkerDefaults, which
 // wires up the retry / timeout / middleware defaults so only Work has
 // to be overridden.
 //
-// enq is used ONLY to chain a V2 job after a successful V1 write with
-// a non-nil bgmID.  Pass NoopEnqueuer{} (or nil — the constructor
-// substitutes Noop) in unit tests that don't want to assert on the
-// V2 chain.
+// enq is used ONLY to chain a V2 job after a successful bind.  Pass
+// NoopEnqueuer{} (or nil — the constructor substitutes Noop) in unit
+// tests that don't want to assert on the V2 chain.
 type BangumiV1Worker struct {
 	river.WorkerDefaults[BangumiV1Args]
 	bangumi BangumiSearcher
@@ -106,128 +120,131 @@ func NewBangumiV1Worker(bangumiClient BangumiSearcher, db V1DB, enq Enqueuer) *B
 	return &BangumiV1Worker{bangumi: bangumiClient, db: db, enq: enq}
 }
 
-// Work is the river dispatch entrypoint.  See package doc for the
-// 5-step flow.  Returns nil on permanent "no hit" outcomes, an error
-// wrapped with anilistId context for retryable failures.
+// Work is the river dispatch entrypoint.  See the package doc for the
+// id-map-first → search → score → gate flow.
 func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args]) error {
 	anilistID := int32(job.Args.AnilistID)
 
-	// 1. Read titleNative + titleRomaji from anime_cache.
+	// 0. Authoritative id-map first.  A hit binds the subject without any
+	//    Bangumi search — the safest bindings we have.
+	if bgmID, err := w.db.LookupBgmIdMap(ctx, anilistID); err == nil {
+		id := bgmID
+		src := matchSourceIDMap
+		if uErr := w.db.UpdateBangumiV1(ctx, anilistID, &id, nil, &src); uErr != nil {
+			return fmt.Errorf("bangumi_v1 id_map update %d: %w", anilistID, uErr)
+		}
+		w.chainV2(ctx, anilistID, id)
+		slog.InfoContext(ctx, "bangumi_v1 id_map", "anilistId", anilistID, "bgmId", id)
+		return nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		// Transient DB error on the map lookup — let river retry.
+		return fmt.Errorf("bangumi_v1 id_map lookup %d: %w", anilistID, err)
+	}
+
+	// 1. Not mapped → read the row for keyword + scoring signals.
 	row, err := w.db.GetAnimeForBangumiSearch(ctx, anilistID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Anime row absent — nothing to enrich.  Not a retryable
-			// failure: another writer would need to insert the row
-			// first, but that's outside the V1 worker's contract.
-			slog.InfoContext(ctx, "bangumi_v1 no_row",
-				"anilistId", anilistID)
+			// Anime row absent — nothing to enrich.  Not retryable.
+			slog.InfoContext(ctx, "bangumi_v1 no_row", "anilistId", anilistID)
 			return nil
 		}
 		return fmt.Errorf("bangumi_v1 read anime_cache %d: %w", anilistID, err)
 	}
 
-	// 2. Compute keyword.  titleNative first, else titleRomaji.  Treat
-	//    empty string the same as nil (defensive — sqlc returns nil
-	//    pointers for SQL NULL, but a value-side empty string would
-	//    look like a present-but-meaningless keyword to Bangumi).
+	// 2. keyword = titleNative || titleRomaji.  Empty (both NULL/"") →
+	//    terminal no-match so the orphan scan stops re-queuing the row.
 	keyword := pickKeyword(row.TitleNative, row.TitleRomaji)
 	if keyword == "" {
-		slog.InfoContext(ctx, "bangumi_v1 no_keyword",
-			"anilistId", anilistID)
-		if err := w.db.MarkBangumiV1NotFound(ctx, anilistID); err != nil {
-			return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, err)
+		slog.InfoContext(ctx, "bangumi_v1 no_keyword", "anilistId", anilistID)
+		if mErr := w.db.MarkBangumiV1NotFound(ctx, anilistID); mErr != nil {
+			return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, mErr)
 		}
 		return nil
 	}
 
-	// 3. Hit the Bangumi search endpoint.
+	// 3. Search Bangumi (responseGroup=large carries air_date + eps).
 	resp, err := w.bangumi.Search(ctx, keyword)
 	if err != nil {
 		if errors.Is(err, bangumi.ErrNotFound) {
-			// 404 → no Bangumi record for this title.  Permanent, not
-			// retryable.  Mirror Express: write terminal version=2 so the
-			// orphan scan (version=0) stops re-queuing this row.
-			slog.InfoContext(ctx, "bangumi_v1 no_hit",
-				"anilistId", anilistID,
-				"keyword", keyword)
-			if err := w.db.MarkBangumiV1NotFound(ctx, anilistID); err != nil {
-				return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, err)
+			// 404 → no Bangumi record. Permanent → terminal no-match.
+			slog.InfoContext(ctx, "bangumi_v1 no_hit", "anilistId", anilistID, "keyword", keyword)
+			if mErr := w.db.MarkBangumiV1NotFound(ctx, anilistID); mErr != nil {
+				return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, mErr)
 			}
 			return nil
 		}
-		// Any other error (network, 5xx, decode failure) is
-		// transient — let river retry per its policy.
-		slog.WarnContext(ctx, "bangumi_v1 search error",
-			"anilistId", anilistID,
-			"keyword", keyword,
-			"err", err)
+		// Network / 5xx / decode — transient; let river retry.
+		slog.WarnContext(ctx, "bangumi_v1 search error", "anilistId", anilistID, "keyword", keyword, "err", err)
 		return fmt.Errorf("bangumi_v1 search %d: %w", anilistID, err)
 	}
 
-	// 4. Empty list is treated the same as ErrNotFound — Express
-	//    returns null here too.  Bangumi sometimes returns 200 with
-	//    {list:[]} for queries that don't pattern-match a real subject.
-	//    Write terminal version=2 so the orphan scan stops re-queuing.
+	// 4. Empty list → terminal no-match (same as 404).
 	if len(resp.List) == 0 {
-		slog.InfoContext(ctx, "bangumi_v1 no_hit",
-			"anilistId", anilistID,
-			"keyword", keyword)
-		if err := w.db.MarkBangumiV1NotFound(ctx, anilistID); err != nil {
-			return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, err)
+		slog.InfoContext(ctx, "bangumi_v1 no_hit", "anilistId", anilistID, "keyword", keyword)
+		if mErr := w.db.MarkBangumiV1NotFound(ctx, anilistID); mErr != nil {
+			return fmt.Errorf("bangumi_v1 mark_not_found %d: %w", anilistID, mErr)
 		}
 		return nil
 	}
 
-	// 5. Pick the hit: exact native-title match if present, else list[0].
-	hit, exactMatch := selectHit(resp.List, row.TitleNative)
+	// 5. Score every candidate.  Replaces the exact-or-list[0] fallback
+	//    that bound wrong subjects.
+	in := bangumi.MatchInput{
+		TitleNative:  strDeref(row.TitleNative),
+		TitleRomaji:  strDeref(row.TitleRomaji),
+		TitleEnglish: strDeref(row.TitleEnglish),
+		SeasonYear:   i32Deref(row.SeasonYear),
+		Episodes:     i32Deref(row.Episodes),
+	}
+	best, score, tier := bangumi.PickBest(in, resp.List)
 
-	// 6. Decide titleChinese.  Express: only when exact match + non-empty
-	//    name_cn that actually differs from name (i.e. a real translation).
+	// 6. Confidence gate.  Anything short of high → REFUSE to bind and
+	//    park for human review.  No bgm_id is written: no wrong CN/score.
+	if tier != bangumi.TierHigh || best == nil {
+		slog.InfoContext(ctx, "bangumi_v1 low_confidence",
+			"anilistId", anilistID, "keyword", keyword,
+			"tier", string(tier), "score", score)
+		if mErr := w.db.MarkBangumiNeedsReview(ctx, anilistID); mErr != nil {
+			return fmt.Errorf("bangumi_v1 mark_needs_review %d: %w", anilistID, mErr)
+		}
+		return nil
+	}
+
+	// 7. High confidence → bind.  title_chinese only when the chosen hit
+	//    carries a real CN translation (non-empty and != native name).
 	var titleChinese *string
-	if exactMatch && hit.NameCN != "" && hit.NameCN != hit.Name {
-		// Take a local copy before pointing at it so the loop variable
-		// (or future caller mutation of hit) cannot affect the value
-		// we hand to the DB layer.
-		cn := hit.NameCN
+	if best.NameCN != "" && best.NameCN != best.Name {
+		cn := best.NameCN
 		titleChinese = &cn
 	}
-
-	// 7. bgmID is always set when we have a hit, regardless of CN
-	//    translation availability.  Phase 2 needs bgm_id; CN is a
-	//    bonus only available on exact matches.
-	bgmID := int32(hit.ID)
-
-	// 8. Persist.  Any DB error is transient; river retries.
-	if err := w.db.UpdateBangumiV1(ctx, anilistID, &bgmID, titleChinese); err != nil {
-		slog.WarnContext(ctx, "bangumi_v1 db update error",
-			"anilistId", anilistID,
-			"bgmId", bgmID,
-			"err", err)
-		return fmt.Errorf("bangumi_v1 update %d: %w", anilistID, err)
+	bgmID := int32(best.ID)
+	src := matchSourceFuzzyHigh
+	if uErr := w.db.UpdateBangumiV1(ctx, anilistID, &bgmID, titleChinese, &src); uErr != nil {
+		slog.WarnContext(ctx, "bangumi_v1 db update error", "anilistId", anilistID, "bgmId", bgmID, "err", uErr)
+		return fmt.Errorf("bangumi_v1 update %d: %w", anilistID, uErr)
 	}
 
-	// 9. Chain V2 — best-effort.  V1 already succeeded, so a chain
-	//    enqueue failure shouldn't roll back V1's write.  Log the
-	//    failure and continue: the row is now at version=1 and the
-	//    orphan scan won't re-pick it, so worst case is V2 never
-	//    fires for this row.  Acceptable given the failure mode is
-	//    almost always "river client momentarily unavailable" and
-	//    the next manual sweep will catch it.
+	// 8. Chain V2 — best-effort.
+	w.chainV2(ctx, anilistID, bgmID)
+	slog.InfoContext(ctx, "bangumi_v1 done",
+		"anilistId", anilistID, "bgmId", bgmID,
+		"tier", "high", "hasChinese", titleChinese != nil)
+	return nil
+}
+
+// chainV2 enqueues the Phase-2 follow-up for a freshly bound bgm_id.
+// Best-effort: V1 already committed, so an enqueue failure is logged and
+// swallowed (the row is at version=1 and won't be re-picked by the orphan
+// scan; worst case V2 never fires for it).
+func (w *BangumiV1Worker) chainV2(ctx context.Context, anilistID, bgmID int32) {
 	if cErr := w.enq.EnqueueV2Many(ctx, []BangumiV2Args{{
 		AnilistID: int(anilistID),
 		BgmID:     int(bgmID),
 	}}); cErr != nil {
 		slog.WarnContext(ctx, "bangumi_v1 chain v2 enqueue error",
-			"anilistId", anilistID,
-			"bgmId", bgmID,
-			"err", cErr)
+			"anilistId", anilistID, "bgmId", bgmID, "err", cErr)
 	}
-
-	slog.InfoContext(ctx, "bangumi_v1 done",
-		"anilistId", anilistID,
-		"bgmId", bgmID,
-		"hasChinese", titleChinese != nil)
-	return nil
 }
 
 // pickKeyword returns titleNative if non-empty, else titleRomaji if
@@ -243,20 +260,18 @@ func pickKeyword(native, romaji *string) string {
 	return ""
 }
 
-// selectHit walks the search results, prefers an exact native-title
-// match, falls back to list[0].  exactMatch reports whether the chosen
-// hit's Name equals titleNative (only true when titleNative is non-nil
-// AND a matching entry was found).
-//
-// list MUST be non-empty (caller checks); panics otherwise — caller
-// contract violation, not a runtime error.
-func selectHit(list []bangumi.SearchResult, titleNative *string) (*bangumi.SearchResult, bool) {
-	if titleNative != nil && *titleNative != "" {
-		for i := range list {
-			if list[i].Name == *titleNative {
-				return &list[i], true
-			}
-		}
+// strDeref returns the pointed-to string, or "" for nil.
+func strDeref(s *string) string {
+	if s == nil {
+		return ""
 	}
-	return &list[0], false
+	return *s
+}
+
+// i32Deref returns the pointed-to int32 as an int, or 0 for nil.
+func i32Deref(n *int32) int {
+	if n == nil {
+		return 0
+	}
+	return int(*n)
 }
