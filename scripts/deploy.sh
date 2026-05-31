@@ -33,6 +33,23 @@ git reset --hard "origin/$BRANCH"
 #     references stay consistent across build + runtime.
 COMPOSE="docker compose --env-file=.env.production"
 
+# git reset --hard above reverts nginx/default.conf to the committed (legacy)
+# version. Restore the P9 routing config (/api -> go-api, /socket.io ->
+# ws-server) BEFORE the `restart nginx` below, or /api silently drops back
+# onto the legacy Express `app` service (mismatched ObjectId vs uuid logs
+# users out). See memory feedback_deploy_nginx_bind_mount_restart +
+# project_dns_rollback.
+echo "==> Restoring P9 nginx routing (default.p9.conf -> default.conf)..."
+cp nginx/default.p9.conf nginx/default.conf
+
+# Apply DB migrations BEFORE recreating go-api. The new Go binary + River
+# queue reference columns/tables added by go-api/migrations/* (e.g. P11's
+# bgm_match_source / bgm_id_map); bringing go-api up against an un-migrated
+# DB 500s (GetAdminStats) or crash-loops the queue. Postgres is already up;
+# the migrate profile applies the chain idempotently (no-op when current).
+echo "==> Applying DB migrations..."
+$COMPOSE --profile migrate run --rm migrate
+
 echo "==> Building Docker images..."
 $COMPOSE build
 
