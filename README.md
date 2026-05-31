@@ -11,14 +11,12 @@ A full-stack anime discovery, tracking, and local playback platform. Browse seas
 ## Project Status
 
 > ✅ **The Go + Next.js rewrite is now live in production** (cut over 2026-05-31).
-> The current stack — Next.js 16 (RSC) + Go (chi · pgx · sqlc) + PostgreSQL 16 + a Socket.IO `ws-server` — runs the live site at [animegoclub.com](https://animegoclub.com) and lives on branch **`feat/go-backend`**.
-> This `main` branch still holds the previous **v2.0.x** stack (Vite SPA + Express + MongoDB) that the rewrite replaced; it is being merged up to `feat/go-backend`. The technical sections below describe that v2.0.x code on this branch.
+> **This branch (`feat/go-backend`) is the live production stack** — Next.js 16 (RSC) + Go (chi · pgx · sqlc) + PostgreSQL 16 + a Socket.IO `ws-server` — serving [animegoclub.com](https://animegoclub.com). It is being merged down into `main`, which still holds the previous v2.0.x stack (Vite SPA + Express + MongoDB).
 > Full plan: [`docs/migration/MIGRATION_PLAN.md`](docs/migration/MIGRATION_PLAN.md)
 
-**Status:** Rewrite live in production (cut over 2026-05-31) — full stack on `feat/go-backend`
+**Status:** Live in production (cut over 2026-05-31) — this branch is the production stack
 **Migration started:** 2026-05-10 (from v2.0.0 baseline)
 **Production stack:** Next.js 16 + Bun + Go 1.26 (chi + pgx + sqlc) + PostgreSQL 16 + Node ws-server (Socket.IO)
-**This branch (`main`):** v2.0.x — Vite SPA + Express + MongoDB (pre-rewrite; documented below)
 **Built with:** Claude Code (AI-assisted; product direction, decisions, and deployment by the author)
 
 ### Current rewrite
@@ -29,7 +27,7 @@ The codebase is moving from Vite SPA + Express + MongoDB to a polyglot stack: Ne
 - 48 HTTP endpoints in Go, danmaku websocket as separate `ws-server` microservice
 - Nightly Postgres pg_dump → Cloudflare R2 (30-day retention)
 
-The live site at [animegoclub.com](https://animegoclub.com) now runs this new stack (cut over 2026-05-31); this `main` branch's code is the pre-rewrite v2.0.x. See the migration plan for phase-by-phase progress.
+The live site at [animegoclub.com](https://animegoclub.com) now runs this new stack (cut over 2026-05-31). See the migration plan for phase-by-phase progress.
 
 ### Known limitations (intentional, not bugs)
 - **Danmaku matching** — accuracy is not pursued to 100%; users fall back to the manual per-episode picker for uncommon sequels. See `feedback_danmaku_matching` in the project memory for the reasoning (no LLM/AI matching by design).
@@ -40,7 +38,7 @@ The live site at [animegoclub.com](https://animegoclub.com) now runs this new st
 ### Local development
 1. Read this README + [CHANGELOG.md](CHANGELOG.md) (most recent 2-3 entries give you the current mental model).
 2. Read [TODO.md](TODO.md) to see what was intentionally deferred.
-3. `npm install && npm run dev:server` + `npm run dev:client` — verify local runs.
+3. `cp .env.example .env && bash scripts/dev.sh` — verify the new stack boots locally.
 4. SSH to VPS, `docker compose ps` — verify production is healthy.
 5. Re-read [DESIGN.md](DESIGN.md) before touching UI.
 
@@ -100,67 +98,125 @@ The live site at [animegoclub.com](https://animegoclub.com) now runs this new st
 
 ## Tech Stack
 
+Phase 3.0+ has landed — the polyglot stack below is now the production stack (cut over 2026-05-31). The v2.0.x legacy stack it replaced remains only on `main` until the branches merge.
+
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 19 · Vite · TanStack Query v5 · React Router v7 |
-| Backend | Node.js · Express · Socket.IO |
-| Database | MongoDB · Mongoose |
+| Frontend | React 19 · Next.js 16 (App Router, RSC) · Bun 1.3.x · libass-wasm · artplayer · dandanplay-vi |
+| Backend | Go 1.23 · chi router · pgx v5 · sqlc · river queue · ristretto cache |
+| Database | PostgreSQL 16 · pg_cron · pg_trgm |
+| Realtime | ws-server — standalone Node + socket.io process (extracted in P2.8) |
 | Auth | JWT (access 15m + refresh 7d) · bcrypt · httpOnly cookies |
-| Player | Artplayer · JASSUB (ASS subtitles) · Web Workers (MD5 hash, MKV parsing) |
+| Player | Artplayer · libass-wasm (ASS subtitles) · Web Workers (MD5 hash, MKV parsing) |
 | External APIs | AniList GraphQL · Bangumi API · dandanplay API · ACG.rip RSS |
 | Deployment | Docker Compose · Nginx reverse proxy · SSL |
-| SEO | Dynamic sitemap · JSON-LD structured data · OG tags · robots.txt |
+| SEO | Server components on `/anime/:id`, `/seasonal`, `/search` · Dynamic sitemap · JSON-LD · OG tags |
+| Legacy (retiring) | Express + Mongoose + Socket.IO (`server/`, retires at P9) · Vite + React Router v7 (`client/`, retires at P10) · MongoDB (drops at P9) |
 
 ---
 
 ## Quick Start
 
+Fresh clone to `http://localhost:3000` should take under 5 minutes on a clean macOS box.
+
 ### Prerequisites
 
-- Node.js 20+
-- MongoDB (local or [MongoDB Atlas](https://mongodb.com/atlas) free tier)
+Install once:
+
+```bash
+# Docker Desktop (Postgres + Mongo containers)
+brew install --cask docker
+
+# Bun 1.3+ (Next.js runtime + ws-server)
+curl -fsSL https://bun.sh/install | bash
+
+# Go 1.23+ (go-api) and Air (hot reload)
+brew install go
+go install github.com/cosmtrek/air@latest
+```
+
+> `scripts/setup.sh` automates this for Debian 12 VPS bootstrap (Docker + UFW). For local macOS dev, run the three commands above once.
 
 ### Install & Run
 
 ```bash
-# Install dependencies
-npm install
+# 1. Copy env template and fill secrets (JWT, dandanplay app id/secret)
+cp .env.example .env
 
-# Terminal 1: start backend (port 5001)
-npm run dev:server
-
-# Terminal 2: start frontend (port 5173)
-npm run dev:client
+# 2. One-shot dev loop: brings up Postgres + Mongo, runs go-api with Air,
+#    ws-server (Bun + socket.io), and next-app (Bun + Next.js 16).
+bash scripts/dev.sh
 ```
 
-Open `http://localhost:5173`
+Open `http://localhost:3000`.
+
+### Local prod stack (`docker compose` HTTPS via nginx)
+
+To exercise the production layout (nginx routing next-app + legacy Express,
+self-signed SSL, full docker stack) before deploying to the VPS:
+
+```bash
+# 1. Generate the local self-signed cert (one-time per machine).
+bash scripts/gen-local-cert.sh
+
+# 2. Copy and fill the prod env template (or copy .env, then edit values for docker DNS).
+cp .env.production.example .env.production
+# ⚠️  Required: ALLOWED_HOSTS=animegoclub.com,localhost,app
+# ⚠️  Required: MONGODB_URI=mongodb://mongodb:27017/animego  (Docker service name, not localhost)
+
+# 3. Build + bring up the full stack (next-app, Express, Mongo, ws-server, nginx).
+docker compose up -d --build
+
+# 4. Open https://localhost (accept the self-signed cert warning).
+```
+
+### Dev Ports
+
+| Port | Service | Notes |
+|------|---------|-------|
+| 3000 | next-app | new App Router frontend (RSC) |
+| 3001 | ws-server | socket.io danmaku |
+| 8080 | go-api | chi + pgx |
+| 5432 | postgres | new primary store |
+| 27017 | mongo | legacy, retires at P9 |
+| 5001 | server (Express) | legacy, retires at P9; `dev.sh` does not start it |
+| 5173 | client (Vite) | legacy, retires at P10; `dev.sh` does not start it |
 
 ### Environment Variables
 
-Copy `.env.example` to `server/.env` and fill in:
+`.env.example` documents every key with a comment. The required block:
 
 ```env
-MONGODB_URI=mongodb+srv://...
-JWT_SECRET=your_jwt_secret
-JWT_REFRESH_SECRET=your_refresh_secret
+# Shared across all stacks
+JWT_SECRET=fill-with-32-byte-random-hex
+JWT_REFRESH_SECRET=fill-with-another-32-byte-random-hex
 JWT_EXPIRES_IN=15m
 JWT_REFRESH_EXPIRES_IN=7d
+DANDANPLAY_APP_ID=fill-with-your-app-id
+DANDANPLAY_APP_SECRET=fill-with-your-secret
+
+# Postgres (Go API) — matches docker-compose.dev.yml
+POSTGRES_PASSWORD=devpassword
+DATABASE_URL=postgres://animego:devpassword@localhost:5432/animego?sslmode=disable
+PORT_GO=8080
+
+# Legacy Mongo + Express — still wired during cutover
+MONGODB_URI=mongodb://localhost:27017/animego
 PORT=5001
-CLIENT_ORIGIN=http://localhost:5173
-CACHE_TTL_HOURS=24
-DANDANPLAY_APP_ID=your_dandanplay_app_id
-DANDANPLAY_APP_SECRET=your_dandanplay_app_secret
+CLIENT_ORIGIN=http://localhost:3000
 ```
 
-> dandanplay API credentials can be obtained at [api.dandanplay.net](https://api.dandanplay.net/)
+> dandanplay API credentials can be obtained at [api.dandanplay.net](https://api.dandanplay.net/).
 
-**`client/.env`**
+### Legacy Scripts (during cutover)
 
-```env
-VITE_API_BASE_URL=
+Both legacy stacks remain runnable for parity verification and the cutover rollback window. They are intentionally **not** started by `scripts/dev.sh`:
+
+```bash
+npm run dev:server   # Express on :5001 (retires at P9)
+npm run dev:client   # Vite on :5173   (retires at P10)
+npm run dev:next     # Next.js on :3000 (same as scripts/dev.sh path)
 ```
-
-> Leave `VITE_API_BASE_URL` empty for development — Vite proxies `/api` to `localhost:5001`.
 
 ---
 

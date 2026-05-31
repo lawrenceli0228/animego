@@ -10,10 +10,9 @@
 
 ## 项目状态
 
-**状态：** 重构已上线生产环境（2026-05-31 切换）— 完整新架构在 `feat/go-backend` 分支
+**状态：** 已上线生产环境（2026-05-31 切换）— 本分支就是生产栈
 **重构启动：** 2026-05-10(基于 v2.0.0)
 **生产架构：** Next.js 16 + Bun + Go 1.26（chi · pgx · sqlc）+ PostgreSQL 16 + Node ws-server（Socket.IO）
-**当前分支（`main`）：** v2.0.x — Vite SPA + Express + MongoDB（重构前，下文描述的是这套代码）
 **构建方式：** Claude Code 辅助开发(产品方向、决策、部署由作者负责)
 
 ### 当前重构
@@ -23,7 +22,7 @@
 - 单一运行时部署(Next.js standalone)
 - 89+ Express endpoint 迁移到 Next API routes
 
-线上 [animegoclub.com](https://animegoclub.com) 在重构期间继续跑 v2.0.x 的 Vite SPA 构建。迁移分阶段计划见 `docs/migration/`。
+线上 [animegoclub.com](https://animegoclub.com) 现在跑的是新栈（2026-05-31 切换）。迁移分阶段计划见 `docs/migration/`。
 
 ### 已知限制(有意为之,非 bug)
 - **弹幕匹配** — 不追求 100% 准确率,冷门续作用手动选集兜底。原因见 project memory `feedback_danmaku_matching`(明确不接 LLM/AI 匹配)。
@@ -34,7 +33,7 @@
 ### 本地开发
 1. 读本 README + [CHANGELOG.md](CHANGELOG.md)(最近 2-3 条即可还原当前心智模型)。
 2. 读 [TODO.md](TODO.md) 了解有意推迟的事项。
-3. `npm install && npm run dev:server` + `npm run dev:client` — 本地能跑起来即可。
+3. `cp .env.example .env && bash scripts/dev.sh` — 新栈本地能跑起来即可。
 4. SSH 到 VPS,`docker compose ps` — 确认生产正常。
 5. 动 UI 前先读 [DESIGN.md](DESIGN.md)。
 
@@ -94,67 +93,105 @@
 
 ## 技术栈
 
+Phase 3.0+ 已 land — 下方多语言栈现在是生产环境栈（2026-05-31 切换）。它取代的 v2.0.x 旧栈只剩在 `main` 分支上，直到两条分支合并。
+
 | 层级 | 技术 |
 |------|------|
-| 前端 | React 19 · Vite · TanStack Query v5 · React Router v7 |
-| 后端 | Node.js · Express · Socket.IO |
-| 数据库 | MongoDB · Mongoose |
+| 前端 | React 19 · Next.js 16（App Router、RSC）· Bun 1.3.x · libass-wasm · artplayer · dandanplay-vi |
+| 后端 | Go 1.23 · chi 路由 · pgx v5 · sqlc · river 队列 · ristretto 缓存 |
+| 数据库 | PostgreSQL 16 · pg_cron · pg_trgm |
+| 实时 | ws-server — 独立 Node + socket.io 进程（P2.8 拆出） |
 | 认证 | JWT（access 15m + refresh 7d）· bcrypt · httpOnly Cookie |
-| 播放器 | Artplayer · JASSUB（ASS 字幕）· Web Workers（MD5 hash、MKV 解析） |
+| 播放器 | Artplayer · libass-wasm（ASS 字幕）· Web Workers（MD5 hash、MKV 解析） |
 | 外部 API | AniList GraphQL · Bangumi API · 弹弹Play API · ACG.rip RSS |
 | 部署 | Docker Compose · Nginx 反向代理 · SSL |
-| SEO | 动态站点地图 · JSON-LD 结构化数据 · OG 标签 · robots.txt |
+| SEO | `/anime/:id`、`/seasonal`、`/search` 服务端组件 · 动态站点地图 · JSON-LD · OG 标签 |
+| 旧栈（退役中） | Express + Mongoose + Socket.IO（`server/`，P9 退役）· Vite + React Router v7（`client/`，P10 退役）· MongoDB（P9 切断） |
 
 ---
 
 ## 快速开始
 
+全新 clone 在干净 macOS 上 5 分钟内应能跑到 `http://localhost:3000`。
+
 ### 前置条件
 
-- Node.js 20+
-- MongoDB（本地或 [MongoDB Atlas](https://mongodb.com/atlas) 免费版）
+一次性安装：
+
+```bash
+# Docker Desktop（Postgres + Mongo 容器）
+brew install --cask docker
+
+# Bun 1.3+（Next.js 运行时 + ws-server）
+curl -fsSL https://bun.sh/install | bash
+
+# Go 1.23+（go-api）与 Air（热重载）
+brew install go
+go install github.com/cosmtrek/air@latest
+```
+
+> `scripts/setup.sh` 用于 Debian 12 VPS bootstrap（Docker + UFW）自动化。macOS 本地开发跑上面三条即可。
 
 ### 安装与启动
 
 ```bash
-# 安装依赖
-npm install
+# 1. 复制 env 模板并填密钥（JWT、弹弹Play app id/secret）
+cp .env.example .env
 
-# 终端 1：启动后端（端口 5001）
-npm run dev:server
-
-# 终端 2：启动前端（端口 5173）
-npm run dev:client
+# 2. 一键 dev loop：拉起 Postgres + Mongo，启动 go-api（Air 热重载）、
+#    ws-server（Bun + socket.io）、next-app（Bun + Next.js 16）。
+bash scripts/dev.sh
 ```
 
-访问 `http://localhost:5173`
+访问 `http://localhost:3000`。
+
+### 开发端口
+
+| 端口 | 服务 | 说明 |
+|------|------|------|
+| 3000 | next-app | 新 App Router 前端（RSC） |
+| 3001 | ws-server | socket.io 弹幕 |
+| 8080 | go-api | chi + pgx |
+| 5432 | postgres | 新主库 |
+| 27017 | mongo | 旧库，P9 退役 |
+| 5001 | server（Express） | 旧栈，P9 退役;`dev.sh` 不启动 |
+| 5173 | client（Vite） | 旧栈，P10 退役;`dev.sh` 不启动 |
 
 ### 环境变量
 
-复制 `.env.example` 到 `server/.env` 并填写：
+`.env.example` 已为每个 key 加注释。必填部分：
 
 ```env
-MONGODB_URI=mongodb+srv://...
-JWT_SECRET=your_jwt_secret
-JWT_REFRESH_SECRET=your_refresh_secret
+# 所有栈共享
+JWT_SECRET=fill-with-32-byte-random-hex
+JWT_REFRESH_SECRET=fill-with-another-32-byte-random-hex
 JWT_EXPIRES_IN=15m
 JWT_REFRESH_EXPIRES_IN=7d
+DANDANPLAY_APP_ID=fill-with-your-app-id
+DANDANPLAY_APP_SECRET=fill-with-your-secret
+
+# Postgres（Go API）— 与 docker-compose.dev.yml 默认对齐
+POSTGRES_PASSWORD=devpassword
+DATABASE_URL=postgres://animego:devpassword@localhost:5432/animego?sslmode=disable
+PORT_GO=8080
+
+# 旧 Mongo + Express — cutover 期间仍接线
+MONGODB_URI=mongodb://localhost:27017/animego
 PORT=5001
-CLIENT_ORIGIN=http://localhost:5173
-CACHE_TTL_HOURS=24
-DANDANPLAY_APP_ID=你的弹弹Play AppId
-DANDANPLAY_APP_SECRET=你的弹弹Play AppSecret
+CLIENT_ORIGIN=http://localhost:3000
 ```
 
-> 弹弹Play API 凭据可在 [api.dandanplay.net](https://api.dandanplay.net/) 申请
+> 弹弹Play API 凭据可在 [api.dandanplay.net](https://api.dandanplay.net/) 申请。
 
-**`client/.env`**
+### 旧栈命令（cutover 期间）
 
-```env
-VITE_API_BASE_URL=
+两套旧栈保留可跑状态用于 parity 验证和 cutover 回滚窗口。`scripts/dev.sh` **不会**自动启动它们：
+
+```bash
+npm run dev:server   # Express :5001（P9 退役）
+npm run dev:client   # Vite :5173    （P10 退役）
+npm run dev:next     # Next.js :3000（等同 scripts/dev.sh 路径）
 ```
-
-> 开发环境留空即可，Vite 会将 `/api` 代理到 `localhost:5001`。
 
 ---
 

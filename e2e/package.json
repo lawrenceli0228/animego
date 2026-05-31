@@ -1,0 +1,17 @@
+{
+  "name": "e2e",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "mongodb": "^7.2.0",
+    "postgres": "^3.4.9"
+  }
+}

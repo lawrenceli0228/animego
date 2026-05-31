@@ -1,0 +1,17 @@
+# Playwright artifacts
+playwright-report/
+test-results/
+.last-run.json
+
+# Auth state (contains session cookies — never commit)
+.auth/
+
+# Local node modules
+node_modules/
+
+# Build / cache
+.next/
+dist/
+
+# OS
+.DS_Store

@@ -1,0 +1,65 @@
+name: Refresh AniList→Bangumi map
+
+# Regenerates the vendored AniList→Bangumi id map
+# (go-api/internal/bgmidmap/anilist_bgm_map.json) by re-joining the two
+# upstream community datasets on MAL id:
+#   - Fribb/anime-lists        (anilist_id ↔ mal_id ↔ anidb_id)
+#   - Rhilip/BangumiExtLinker  (bgm_id ↔ mal_id)
+#
+# Why a vendored file + weekly PR instead of fetching at runtime?
+#   - The go-api binary embeds the map (go:embed) so prod has no runtime
+#     dependency on GitHub raw, and no new VPS→github egress (the origin
+#     is locked to Cloudflare). The map ships baked into the image.
+#   - A PR makes every refresh a reviewable diff you can roll back, instead
+#     of a silent black-box table mutation.
+#   - Upstream datasets refresh ~weekly, and brand-new seasonal anime lag
+#     them anyway (those fall to the in-process scorer + needs-review gate),
+#     so weekly cadence is plenty.
+
+on:
+  schedule:
+    # Mondays 03:00 UTC — after the upstream datasets' usual weekly bump.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-bgm-map
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Regenerate + open PR if changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go-api/go.mod
+
+      - name: Regenerate map
+        working-directory: go-api
+        run: go run ./cmd/bgmmap
+
+      - name: Open PR if the map changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          # Only fires when the regenerated JSON differs from what's vendored.
+          add-paths: go-api/internal/bgmidmap/anilist_bgm_map.json
+          branch: chore/refresh-bgm-map
+          commit-message: "chore(enrichment): refresh AniList→Bangumi id map"
+          title: "chore(enrichment): refresh AniList→Bangumi id map"
+          body: |
+            Automated weekly regeneration of the vendored AniList→Bangumi id map
+            (Fribb/anime-lists × Rhilip/BangumiExtLinker, joined on MAL id).
+
+            Review the diff, then merge + redeploy go-api to ship the updated map
+            (it is embedded via go:embed and seeded into bgm_id_map at boot).
+          delete-branch: true

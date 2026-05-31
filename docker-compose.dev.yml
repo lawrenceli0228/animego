@@ -1,0 +1,58 @@
+# docker-compose.dev.yml — local development services only.
+#
+# This file is SEPARATE from prod docker-compose.yml.  Prod still runs the
+# v2.0.x Express + Mongo stack until P9 cutover.  Use this dev compose to
+# run Postgres + Mongo for the feat/go-backend rewrite.
+#
+# Usage:  docker compose -f docker-compose.dev.yml up -d postgres mongo
+#         docker compose -f docker-compose.dev.yml down
+#
+# Container names have `-dev` suffix so they do not collide with the prod
+# compose's `animego-mongodb-1` etc. on the same machine.
+#
+# Ports: 5432 (Postgres) and 27017 (Mongo) bind to localhost.  If you have
+# native installs of either, stop them first or change the host port here.
+
+services:
+  postgres:
+    build:
+      context: ./go-api/docker/postgres
+      dockerfile: Dockerfile
+    image: animego-postgres:dev          # local-only tag, also consumed by testcontainers
+    container_name: animego-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: animego
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: animego
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U animego"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  mongo:
+    # Transitional: read-only source for P1 migration tool development.
+    # Removed from this dev compose at cutover + 30d (see MIGRATION_PLAN.md § Phase 9).
+    image: mongo:7
+    container_name: animego-mongo-dev
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-dev-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep -q 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  postgres-dev-data:
+  mongo-dev-data:

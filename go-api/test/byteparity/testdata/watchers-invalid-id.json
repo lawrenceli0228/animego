@@ -1,0 +1,10 @@
+{
+  "name": "watchers-invalid-id",
+  "method": "GET",
+  "path": "/api/anime/abc/watchers",
+  "expected_status": 400,
+  "expected_body_path": "watchers-invalid-id.body",
+  "captured_from": "go-api@stage=P2.1.9 commit-pending",
+  "captured_at": "2026-05-22T10:32:04Z",
+  "notes": "Deterministic 400 envelope: {\"error\":{\"code\":\"VALIDATION_ERROR\",\"message\":\"无效的番剧 ID\"}} — no DB or AniList dependency, no trailing newline. The safest fixture to gate byte-level shadow parity with Express."
+}

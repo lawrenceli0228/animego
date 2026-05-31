@@ -1,0 +1,166 @@
+// P10 sandbox — auth journey end-to-end.
+//
+// Three flows against the live sandbox stack (Express + Mongo + Next-app
+// + nginx on https://localhost). Every spec uses a fresh user; no shared
+// state between tests so order doesn't matter.
+//
+// Why this lives in specs/sandbox/ (not the top-level specs/): the
+// chromium-prod project explicitly ignores sandbox/** so these writes
+// never hit the live VPS. See e2e/playwright.config.ts.
+
+import { test, expect } from "@playwright/test";
+import { collectConsoleErrors } from "../_helpers";
+import {
+  closeMongo,
+  insertUser,
+} from "../../fixtures/mongo";
+import { makeUser } from "../../fixtures/users";
+import { closePg, getResetTokenFromPg, insertPgUser } from "../../fixtures/pg";
+import { getResetTokenForEmail } from "../../fixtures/mongo";
+
+// Start every test with a clean cookie jar so the already-authed
+// bypass on /login + /register doesn't redirect us off the form.
+test.use({ storageState: { cookies: [], origins: [] } });
+
+// Cleanup happens once in globalSetup before any spec runs. Per-spec
+// cleanup races with the admin spec in parallel mode (it would nuke
+// admin's freshly-inserted user mid-login). Stragglers from killed
+// runs are tolerable in the sandbox DB.
+test.afterAll(async () => {
+  await closeMongo();
+  await closePg();
+});
+
+test.describe("auth journey", () => {
+  test("register → logout → login lands authenticated", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    const user = makeUser();
+
+    // ── Register
+    await page.goto("/register");
+    await page.locator("#register-username").fill(user.username);
+    await page.locator("#register-email").fill(user.email);
+    await page.locator("#register-password").fill(user.password);
+    await page.locator('button[type="submit"]').click();
+
+    // Successful register replaces the route to `from` (default "/").
+    // Wait for the navbar's logged-in CTAs to surface so we know the
+    // session cookie has been committed and the layout's /api/auth/me
+    // fetch resolved.
+    await expect(page).toHaveURL(/\/$/);
+    const navbar = page.locator('nav[aria-label="主导航"], nav[aria-label="Main navigation"]');
+    await expect(navbar.getByRole("button", { name: /登出|Logout/ })).toBeVisible();
+
+    // ── Logout (navbar button — see Navbar.tsx:222-229)
+    //
+    // The button fires POST /api/auth/logout then router.refresh().
+    // Wait for the anonymous CTAs to come back before asserting we're
+    // signed out — otherwise we race with the RSC re-render.
+    await navbar.getByRole("button", { name: /登出|Logout/ }).click();
+    // router.refresh() round-trip (clear cookie + re-run layout's
+    // fetchCurrentUser + reconcile) can take ~10s on a cold prod build.
+    // The langToggle lock bug (shared useTransition) is fixed; this is
+    // legitimate RSC latency, not a regression.
+    await expect(navbar.locator('a[href="/login"]')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // ── Login with the just-registered credentials
+    await page.goto("/login");
+    await page.locator("#login-email").fill(user.email);
+    await page.locator("#login-password").fill(user.password);
+    await page.locator('button[type="submit"]').click();
+
+    // Same authenticated-landing signal as the register branch.
+    await expect(page).toHaveURL(/\/$/);
+    await expect(navbar.getByRole("button", { name: /登出|Logout/ })).toBeVisible();
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+  });
+
+  test("login with wrong password surfaces inline error", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    const user = makeUser();
+    await insertUser(user);
+
+    await page.goto("/login");
+    await page.locator("#login-email").fill(user.email);
+    await page.locator("#login-password").fill("definitely-not-the-password");
+    await page.locator('button[type="submit"]').click();
+
+    // Inline error sits in <p role="alert" aria-live="polite"> inside
+    // the form. Backend returns Chinese "邮箱或密码错误" verbatim (see
+    // server/controllers/auth.controller.js:90); the dict lookup misses
+    // the Chinese key and falls through to the raw server message. We
+    // match on the message substring rather than the entire `t.fail`
+    // fallback because the form actually shows the backend wording.
+    // Scope to form — Next.js 16 adds a global `__next-route-announcer__`
+    // div with role="alert" that would otherwise trip strict-mode.
+    const alert = page.locator("form").getByRole("alert");
+    await expect(alert).toContainText(/邮箱或密码错误|Invalid email or password|登录失败|Login failed/);
+
+    // URL stayed on /login — the failed submit must not redirect.
+    await expect(page).toHaveURL(/\/login(\?|$)/);
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+  });
+
+  test("forgot-password → reset-password → login with new password", async ({
+    page,
+  }) => {
+    const errors = collectConsoleErrors(page);
+    const user = makeUser();
+    // Insert into Mongo (legacy) and Postgres (Go API) so both stacks
+    // can find the user during the forgot-password flow.
+    await insertUser(user);
+    await insertPgUser({
+      username: user.username,
+      email: user.email,
+      passwordHash: user.passwordHash,
+    });
+
+    // ── Forgot password — submit the email
+    await page.goto("/forgot-password");
+    await page.locator("#forgot-email").fill(user.email);
+    await page.locator('button[type="submit"]').click();
+
+    // Wait for the success copy (form unmounts, sent view replaces it).
+    // The footer back-to-login link is inside the form too, so matching on
+    // the link alone passes prematurely. Match the success message text.
+    await expect(
+      page.getByText(/Reset link sent|重置链接已发送/),
+    ).toBeVisible();
+
+    // ── Read token from whichever DB the active API wrote to.
+    // Go API (P8.5 dress rehearsal) writes to Postgres; Express writes to Mongo.
+    // Try Postgres first; fall back to Mongo so this spec stays green on
+    // both the dress-rehearsal stack and the Express baseline.
+    let reset = await getResetTokenFromPg(user.email);
+    if (!reset) {
+      reset = await getResetTokenForEmail(user.email);
+    }
+    expect(reset).not.toBeNull();
+    const token = reset!.token;
+
+    // ── Visit /reset-password/<token>, set the new password
+    const newPassword = "e2e-test-newpass-456";
+    await page.goto(`/reset-password/${token}`);
+    await page.locator("#reset-password").fill(newPassword);
+    await page.locator("#reset-confirm").fill(newPassword);
+    await page.locator('button[type="submit"]').click();
+
+    // Reset success → router.replace("/login") + router.refresh(). The
+    // form unmounts; assert the URL settled on /login.
+    await expect(page).toHaveURL(/\/login(\?|$)/);
+
+    // ── Log in with the new password
+    await page.locator("#login-email").fill(user.email);
+    await page.locator("#login-password").fill(newPassword);
+    await page.locator('button[type="submit"]').click();
+
+    const navbar = page.locator('nav[aria-label="主导航"], nav[aria-label="Main navigation"]');
+    await expect(navbar.getByRole("button", { name: /登出|Logout/ })).toBeVisible();
+
+    expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
+  });
+});

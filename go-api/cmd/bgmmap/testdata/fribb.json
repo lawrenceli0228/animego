@@ -1,0 +1,8 @@
+[
+  {"anilist_id": 1, "mal_id": 101, "anidb_id": 201},
+  {"anilist_id": 2, "mal_id": 102, "anidb_id": 202},
+  {"anilist_id": 3, "mal_id":   0, "anidb_id": 203},
+  {"anilist_id": 4, "mal_id": 104, "anidb_id":   0},
+  {"anilist_id": 0, "mal_id": 105, "anidb_id": 205},
+  {"anilist_id": 5, "mal_id": 999, "anidb_id": 999}
+]

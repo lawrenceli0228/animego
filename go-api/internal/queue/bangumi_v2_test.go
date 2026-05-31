@@ -1,0 +1,888 @@
+// bangumi_v2_test.go — unit tests for the Phase 2 Bangumi worker.
+//
+// No real Bangumi HTTP server, no real DB.  Each test wires a fake
+// BangumiV2Client + V2DB and asserts:
+//
+//   - Subject + Characters fetched in parallel, results combined.
+//   - ErrNotFound on subject → permanent skip (return nil, no writes).
+//   - ErrNotFound on characters → still update subject (no char writes).
+//   - Other errors → wrapped, surfaced for river retry.
+//   - Nullable fields (Rating, NameCN, NameCN per char, Images, Actors)
+//     all pass nil through to the SQL layer when upstream is missing.
+//   - Per-char update errors below threshold → non-fatal completion.
+//   - Per-char update errors at-or-above threshold → return error.
+//
+// In-package tests so we can inspect helpers and reuse the ptr[T]
+// generic from bangumi_v1_test.go.
+package queue
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"testing"
+
+	"github.com/riverqueue/river"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
+	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+)
+
+// ---------------------------------------------------------------------------
+// Test doubles
+// ---------------------------------------------------------------------------
+
+// fakeBangumiV2 is a programmable BangumiV2Client.  Each test wires
+// subjectFn / charactersFn to control the upstream behaviour.  Calls
+// are recorded so negative assertions stay precise.
+type fakeBangumiV2 struct {
+	mu sync.Mutex
+
+	subjectFn    func(ctx context.Context, bgmID int) (*bangumi.Subject, error)
+	charactersFn func(ctx context.Context, bgmID int) ([]bangumi.Character, error)
+	episodesFn   func(ctx context.Context, bgmID int) (*bangumi.EpisodesResponse, error)
+
+	subjectCalls    int
+	charactersCalls int
+	episodesCalls   int
+	lastSubjectID   int
+	lastCharsID     int
+}
+
+func (f *fakeBangumiV2) Subject(ctx context.Context, bgmID int) (*bangumi.Subject, error) {
+	f.mu.Lock()
+	f.subjectCalls++
+	f.lastSubjectID = bgmID
+	fn := f.subjectFn
+	f.mu.Unlock()
+	if fn == nil {
+		return &bangumi.Subject{ID: bgmID}, nil
+	}
+	return fn(ctx, bgmID)
+}
+
+func (f *fakeBangumiV2) Characters(ctx context.Context, bgmID int) ([]bangumi.Character, error) {
+	f.mu.Lock()
+	f.charactersCalls++
+	f.lastCharsID = bgmID
+	fn := f.charactersFn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil, nil
+	}
+	return fn(ctx, bgmID)
+}
+
+func (f *fakeBangumiV2) Episodes(ctx context.Context, bgmID int) (*bangumi.EpisodesResponse, error) {
+	f.mu.Lock()
+	f.episodesCalls++
+	fn := f.episodesFn
+	f.mu.Unlock()
+	if fn == nil {
+		// Default: no episodes → worker writes nothing, existing tests
+		// that don't exercise episode titles stay unaffected.
+		return &bangumi.EpisodesResponse{}, nil
+	}
+	return fn(ctx, bgmID)
+}
+
+// v2UpdateCall snapshots one UpdateBangumiV2 invocation.
+type v2UpdateCall struct {
+	anilistID    int32
+	bangumiScore *float64
+	bangumiVotes *int32
+	titleChinese *string
+}
+
+// v2CharCall snapshots one UpdateAnimeCharacterCN invocation.
+type v2CharCall struct {
+	animeID            int32
+	nameEn             *string
+	nameCN             *string
+	voiceActorCN       *string
+	voiceActorImageURL *string
+}
+
+// v2EpTitleCall snapshots one UpsertEpisodeTitle invocation.
+type v2EpTitleCall struct {
+	animeID int32
+	episode int32
+	nameCN  *string
+	name    *string
+}
+
+// fakeV2DB is a programmable V2DB.  Hooks let each test inject an
+// error for the retry/non-retry paths; call snapshots let assertions
+// inspect what got written without smuggling globals.
+type fakeV2DB struct {
+	mu sync.Mutex
+
+	updateV2Fn   func(ctx context.Context, c v2UpdateCall) error
+	updateCharFn func(ctx context.Context, c v2CharCall) error
+	upsertEpFn   func(ctx context.Context, c v2EpTitleCall) error
+
+	updateV2Calls   []v2UpdateCall
+	updateCharCalls []v2CharCall
+	upsertEpCalls   []v2EpTitleCall
+}
+
+func (f *fakeV2DB) UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error {
+	call := v2UpdateCall{
+		anilistID:    anilistID,
+		bangumiScore: bangumiScore,
+		bangumiVotes: bangumiVotes,
+		titleChinese: titleChinese,
+	}
+	f.mu.Lock()
+	f.updateV2Calls = append(f.updateV2Calls, call)
+	fn := f.updateV2Fn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, call)
+}
+
+func (f *fakeV2DB) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCN *string, voiceActorCN *string, voiceActorImageURL *string) error {
+	call := v2CharCall{
+		animeID:            animeID,
+		nameEn:             nameEn,
+		nameCN:             nameCN,
+		voiceActorCN:       voiceActorCN,
+		voiceActorImageURL: voiceActorImageURL,
+	}
+	f.mu.Lock()
+	f.updateCharCalls = append(f.updateCharCalls, call)
+	fn := f.updateCharFn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, call)
+}
+
+func (f *fakeV2DB) UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCN *string, name *string) error {
+	call := v2EpTitleCall{animeID: animeID, episode: episode, nameCN: nameCN, name: name}
+	f.mu.Lock()
+	f.upsertEpCalls = append(f.upsertEpCalls, call)
+	fn := f.upsertEpFn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, call)
+}
+
+func (f *fakeV2DB) snapshotEpTitleCalls() []v2EpTitleCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]v2EpTitleCall, len(f.upsertEpCalls))
+	copy(dup, f.upsertEpCalls)
+	return dup
+}
+
+func (f *fakeV2DB) snapshotV2Calls() []v2UpdateCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]v2UpdateCall, len(f.updateV2Calls))
+	copy(dup, f.updateV2Calls)
+	return dup
+}
+
+func (f *fakeV2DB) snapshotCharCalls() []v2CharCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]v2CharCall, len(f.updateCharCalls))
+	copy(dup, f.updateCharCalls)
+	return dup
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// runV2 constructs the worker + a stock job and dispatches via Work().
+// Uses NoopEnqueuer{} so tests that don't care about the V3 chain
+// don't have to wire one.  Tests that DO care about the chain should
+// call runV2WithEnq instead.
+func runV2(t *testing.T, b BangumiV2Client, d V2DB, anilistID, bgmID int) error {
+	t.Helper()
+	return runV2WithEnq(t, b, d, NoopEnqueuer{}, anilistID, bgmID)
+}
+
+// runV2WithEnq is the explicit-enqueuer variant used by chain tests.
+// The V2 worker chain-enqueues a V3 job when this run's Subject did
+// not supply a Chinese title; these tests capture and assert on what
+// got enqueued.
+func runV2WithEnq(t *testing.T, b BangumiV2Client, d V2DB, e Enqueuer, anilistID, bgmID int) error {
+	t.Helper()
+	w := NewBangumiV2Worker(b, d, e)
+	return w.Work(context.Background(), &river.Job[BangumiV2Args]{
+		Args: BangumiV2Args{AnilistID: anilistID, BgmID: bgmID},
+	})
+}
+
+// fakeV2Enqueuer records EnqueueV3Many calls so chain tests can
+// assert which {anilistId, bgmId} pairs were dispatched after a
+// successful V2 update.  EnqueueV1Many and EnqueueV2Many are no-ops
+// (V2 worker never calls those on itself) but must be implemented to
+// satisfy Enqueuer.
+type fakeV2Enqueuer struct {
+	mu      sync.Mutex
+	v3Fn    func(ctx context.Context, jobs []BangumiV3Args) error
+	v3Calls [][]BangumiV3Args
+}
+
+func (f *fakeV2Enqueuer) EnqueueV1Many(_ context.Context, _ []int32) error { return nil }
+func (f *fakeV2Enqueuer) EnqueueV2Many(_ context.Context, _ []BangumiV2Args) error {
+	return nil
+}
+
+// EnqueueWarmSeasonNow — V2 worker never triggers warm-season jobs.
+// No-op to satisfy the Enqueuer interface.
+func (f *fakeV2Enqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonArgs) error {
+	return nil
+}
+
+func (f *fakeV2Enqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
+	dup := make([]BangumiV3Args, len(jobs))
+	copy(dup, jobs)
+	f.mu.Lock()
+	f.v3Calls = append(f.v3Calls, dup)
+	fn := f.v3Fn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, jobs)
+}
+
+func (f *fakeV2Enqueuer) snapshotV3Calls() [][]BangumiV3Args {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([][]BangumiV3Args, len(f.v3Calls))
+	copy(dup, f.v3Calls)
+	return dup
+}
+
+// makeSubject builds a Subject with optional rating + NameCN.  Saves
+// boilerplate in tests that don't care about Tags / Images / etc.
+func makeSubject(id int, nameCN string, score float64, votes int) *bangumi.Subject {
+	s := &bangumi.Subject{ID: id, NameCN: nameCN}
+	if score > 0 || votes > 0 {
+		s.Rating = &struct {
+			Score float64 `json:"score"`
+			Count int     `json:"total"`
+		}{Score: score, Count: votes}
+	}
+	return s
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+// TestBangumiV2_HappyPath_FullUpdate — subject + 2 chars → 1
+// UpdateBangumiV2 + 2 UpdateAnimeCharacterCN calls, all args correct.
+func TestBangumiV2_HappyPath_FullUpdate(t *testing.T) {
+	t.Parallel()
+
+	chars := []bangumi.Character{
+		{
+			Name:   "Naruto Uzumaki",
+			NameCN: "漩涡鸣人",
+			Images: &struct {
+				Medium string `json:"medium"`
+			}{Medium: "https://example.com/naruto.jpg"},
+			Actors: []struct {
+				ID     int    `json:"id"`
+				Name   string `json:"name"`
+				NameCN string `json:"name_cn"`
+			}{
+				{ID: 1, Name: "Junko Takeuchi", NameCN: "竹内顺子"},
+			},
+		},
+		{
+			Name:   "Sasuke Uchiha",
+			NameCN: "宇智波佐助",
+			Actors: []struct {
+				ID     int    `json:"id"`
+				Name   string `json:"name"`
+				NameCN string `json:"name_cn"`
+			}{
+				{ID: 2, Name: "Noriaki Sugiyama", NameCN: "杉山纪彰"},
+			},
+		},
+	}
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, bgmID int) (*bangumi.Subject, error) {
+			require.Equal(t, 9999, bgmID)
+			return makeSubject(9999, "火影忍者", 8.7, 5000), nil
+		},
+		charactersFn: func(_ context.Context, bgmID int) ([]bangumi.Character, error) {
+			require.Equal(t, 9999, bgmID)
+			return chars, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1234, 9999)
+	require.NoError(t, err)
+
+	v2Calls := db.snapshotV2Calls()
+	require.Len(t, v2Calls, 1, "exactly one UpdateBangumiV2 call expected")
+	assert.Equal(t, int32(1234), v2Calls[0].anilistID)
+	require.NotNil(t, v2Calls[0].bangumiScore)
+	assert.InDelta(t, 8.7, *v2Calls[0].bangumiScore, 1e-9)
+	require.NotNil(t, v2Calls[0].bangumiVotes)
+	assert.Equal(t, int32(5000), *v2Calls[0].bangumiVotes)
+	require.NotNil(t, v2Calls[0].titleChinese)
+	assert.Equal(t, "火影忍者", *v2Calls[0].titleChinese)
+
+	charCalls := db.snapshotCharCalls()
+	require.Len(t, charCalls, 2, "two character UPDATEs expected")
+
+	// First char.
+	assert.Equal(t, int32(1234), charCalls[0].animeID)
+	require.NotNil(t, charCalls[0].nameEn)
+	assert.Equal(t, "Naruto Uzumaki", *charCalls[0].nameEn)
+	require.NotNil(t, charCalls[0].nameCN)
+	assert.Equal(t, "漩涡鸣人", *charCalls[0].nameCN)
+	require.NotNil(t, charCalls[0].voiceActorCN)
+	assert.Equal(t, "竹内顺子", *charCalls[0].voiceActorCN)
+	require.NotNil(t, charCalls[0].voiceActorImageURL)
+	assert.Equal(t, "https://example.com/naruto.jpg", *charCalls[0].voiceActorImageURL)
+
+	// Second char (no image → voiceActorImageURL nil).
+	assert.Equal(t, int32(1234), charCalls[1].animeID)
+	require.NotNil(t, charCalls[1].nameEn)
+	assert.Equal(t, "Sasuke Uchiha", *charCalls[1].nameEn)
+	require.NotNil(t, charCalls[1].voiceActorCN)
+	assert.Equal(t, "杉山纪彰", *charCalls[1].voiceActorCN)
+	assert.Nil(t, charCalls[1].voiceActorImageURL, "no Images.Medium → nil")
+}
+
+// TestBangumiV2_SubjectNotFound_ReturnsNil — Subject 404 → return nil,
+// NO DB writes (Express dropped the row the same way).
+func TestBangumiV2_SubjectNotFound_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return nil, bangumi.ErrNotFound
+		},
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return nil, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.NoError(t, err, "ErrNotFound subject is permanent — must not retry")
+	assert.Empty(t, db.snapshotV2Calls(), "subject 404 → no UpdateBangumiV2")
+	assert.Empty(t, db.snapshotCharCalls(), "subject 404 → no char UPDATEs")
+}
+
+// TestBangumiV2_CharactersNotFound_ContinuesWithSubject — characters
+// 404 is benign; the subject-only write still happens.
+func TestBangumiV2_CharactersNotFound_ContinuesWithSubject(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "测试", 7.5, 200), nil
+		},
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return nil, bangumi.ErrNotFound
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 7, 100)
+	require.NoError(t, err)
+
+	v2Calls := db.snapshotV2Calls()
+	require.Len(t, v2Calls, 1, "subject-only update should still happen")
+	require.NotNil(t, v2Calls[0].bangumiScore)
+	assert.InDelta(t, 7.5, *v2Calls[0].bangumiScore, 1e-9)
+
+	assert.Empty(t, db.snapshotCharCalls(), "characters 404 → no char UPDATEs")
+}
+
+// TestBangumiV2_SubjectError_RetriesUp — non-NotFound subject errors
+// must surface so river retries the whole job.
+func TestBangumiV2_SubjectError_RetriesUp(t *testing.T) {
+	t.Parallel()
+
+	upstream := &bangumi.ErrUpstream{Status: 503, Message: "Bangumi API error"}
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return nil, upstream
+		},
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return nil, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.Error(t, err, "subject 503 must surface")
+	assert.ErrorIs(t, err, upstream)
+	assert.Empty(t, db.snapshotV2Calls(), "subject failure → no DB write")
+}
+
+// TestBangumiV2_CharactersError_RetriesUp — non-NotFound characters
+// errors must surface so river retries (no half-update of the row).
+func TestBangumiV2_CharactersError_RetriesUp(t *testing.T) {
+	t.Parallel()
+
+	upstream := &bangumi.ErrUpstream{Status: 500, Message: "Bangumi API error"}
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "标题", 8.0, 100), nil
+		},
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return nil, upstream
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.Error(t, err, "characters 500 must surface")
+	assert.ErrorIs(t, err, upstream)
+	assert.Empty(t, db.snapshotV2Calls(),
+		"characters transport failure → don't half-update the row")
+}
+
+// TestBangumiV2_RatingNil_PassesNilScore — when subject.Rating is nil
+// the worker must pass nil for both score and votes.
+func TestBangumiV2_RatingNil_PassesNilScore(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			// No Rating field populated.
+			return &bangumi.Subject{ID: 100, NameCN: "标题"}, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.NoError(t, err)
+
+	v2Calls := db.snapshotV2Calls()
+	require.Len(t, v2Calls, 1)
+	assert.Nil(t, v2Calls[0].bangumiScore, "Rating=nil → nil score")
+	assert.Nil(t, v2Calls[0].bangumiVotes, "Rating=nil → nil votes")
+	require.NotNil(t, v2Calls[0].titleChinese, "NameCN populated → titleChinese set")
+	assert.Equal(t, "标题", *v2Calls[0].titleChinese)
+}
+
+// TestBangumiV2_NameCNEmpty_PassesNilTitleChinese — when subject.NameCN
+// is "" the SQL must receive nil so COALESCE leaves the column alone.
+func TestBangumiV2_NameCNEmpty_PassesNilTitleChinese(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.NoError(t, err)
+
+	v2Calls := db.snapshotV2Calls()
+	require.Len(t, v2Calls, 1)
+	assert.Nil(t, v2Calls[0].titleChinese,
+		"empty NameCN → nil titleChinese (let COALESCE preserve existing)")
+}
+
+// TestBangumiV2_CharacterNameCNEmpty_PassesNilNameCN — character
+// NameCN="" must pass nil to the SQL.
+func TestBangumiV2_CharacterNameCNEmpty_PassesNilNameCN(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return []bangumi.Character{
+				{Name: "Some Char", NameCN: ""},
+			}, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.NoError(t, err)
+
+	charCalls := db.snapshotCharCalls()
+	require.Len(t, charCalls, 1)
+	require.NotNil(t, charCalls[0].nameEn)
+	assert.Equal(t, "Some Char", *charCalls[0].nameEn)
+	assert.Nil(t, charCalls[0].nameCN, "empty NameCN → nil")
+}
+
+// TestBangumiV2_ActorMissing_PassesNilVoiceActorCN — char with no
+// Actors → voiceActorCN nil.
+func TestBangumiV2_ActorMissing_PassesNilVoiceActorCN(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return []bangumi.Character{
+				{Name: "No Voice", NameCN: "无声", Actors: nil},
+			}, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.NoError(t, err)
+
+	charCalls := db.snapshotCharCalls()
+	require.Len(t, charCalls, 1)
+	assert.Nil(t, charCalls[0].voiceActorCN, "no Actors → nil voiceActorCN")
+}
+
+// TestBangumiV2_ImageMissing_PassesNilImage — char.Images nil → image
+// param nil.
+func TestBangumiV2_ImageMissing_PassesNilImage(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return []bangumi.Character{
+				{Name: "No Image", NameCN: "无图", Images: nil},
+			}, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.NoError(t, err)
+
+	charCalls := db.snapshotCharCalls()
+	require.Len(t, charCalls, 1)
+	assert.Nil(t, charCalls[0].voiceActorImageURL, "Images=nil → nil")
+}
+
+// TestBangumiV2_DBUpdateError_NonFatal — one char UPDATE errors but
+// the rest succeed.  Worker returns nil (best-effort partial success).
+func TestBangumiV2_DBUpdateError_NonFatal(t *testing.T) {
+	t.Parallel()
+
+	chars := make([]bangumi.Character, 4)
+	for i := range chars {
+		chars[i] = bangumi.Character{
+			Name:   fmt.Sprintf("Char%d", i),
+			NameCN: "CN",
+		}
+	}
+
+	b := &fakeBangumiV2{
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return chars, nil
+		},
+	}
+
+	failOnce := errors.New("transient")
+	calls := 0
+	db := &fakeV2DB{
+		updateCharFn: func(_ context.Context, _ v2CharCall) error {
+			calls++
+			if calls == 1 {
+				return failOnce
+			}
+			return nil
+		},
+	}
+
+	err := runV2(t, b, db, 1, 100)
+	require.NoError(t, err, "1/4 failures = 25% — below threshold, worker returns nil")
+	assert.Len(t, db.snapshotCharCalls(), 4, "all 4 char UPDATEs attempted")
+}
+
+// TestBangumiV2_AllCharsErrored_Retries — half-or-more chars fail →
+// return error so river retries.
+func TestBangumiV2_AllCharsErrored_Retries(t *testing.T) {
+	t.Parallel()
+
+	chars := make([]bangumi.Character, 4)
+	for i := range chars {
+		chars[i] = bangumi.Character{Name: fmt.Sprintf("Char%d", i)}
+	}
+
+	b := &fakeBangumiV2{
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return chars, nil
+		},
+	}
+	db := &fakeV2DB{
+		updateCharFn: func(_ context.Context, _ v2CharCall) error {
+			return errors.New("db wedged")
+		},
+	}
+
+	err := runV2(t, b, db, 1, 100)
+	require.Error(t, err, "all chars failed → retry the whole job")
+	assert.Contains(t, err.Error(), "too many char failures")
+	assert.Len(t, db.snapshotCharCalls(), 4,
+		"all 4 char UPDATEs attempted even though they all error")
+}
+
+// TestBangumiV2_ZeroCharacters_StillUpdatesSubject — empty characters
+// slice still triggers UpdateBangumiV2 (subject side), no char calls.
+func TestBangumiV2_ZeroCharacters_StillUpdatesSubject(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "标题", 7.0, 50), nil
+		},
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return []bangumi.Character{}, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	err := runV2(t, b, db, 1, 100)
+	require.NoError(t, err)
+
+	v2Calls := db.snapshotV2Calls()
+	require.Len(t, v2Calls, 1)
+	assert.Empty(t, db.snapshotCharCalls(), "no chars → no char UPDATEs")
+}
+
+// TestBangumiV2_DBSubjectUpdateError_Surfaces — UpdateBangumiV2 errors
+// must surface so river retries (don't silently drop enrichment).
+func TestBangumiV2_DBSubjectUpdateError_Surfaces(t *testing.T) {
+	t.Parallel()
+
+	dbErr := errors.New("write conflict")
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "标题", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{
+		updateV2Fn: func(_ context.Context, _ v2UpdateCall) error {
+			return dbErr
+		},
+	}
+
+	err := runV2(t, b, db, 1, 100)
+	require.Error(t, err, "UpdateBangumiV2 failure must surface")
+	assert.ErrorIs(t, err, dbErr)
+	assert.Empty(t, db.snapshotCharCalls(),
+		"subject update failed → char UPDATEs must NOT proceed")
+}
+
+// TestBangumiV2_ParallelFetch_BothCalled — under the happy path both
+// Bangumi endpoints get hit exactly once.
+func TestBangumiV2_ParallelFetch_BothCalled(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "X", 7, 10), nil
+		},
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return nil, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	require.NoError(t, runV2(t, b, db, 1, 100))
+	assert.Equal(t, 1, b.subjectCalls, "Subject called exactly once")
+	assert.Equal(t, 1, b.charactersCalls, "Characters called exactly once")
+	assert.Equal(t, 100, b.lastSubjectID, "bgmId propagated to Subject")
+	assert.Equal(t, 100, b.lastCharsID, "bgmId propagated to Characters")
+}
+
+// TestBangumiV2_NoSubjectNameCN_ChainsV3 — V2 happy path with
+// Subject.NameCN="" → fakeEnq.EnqueueV3Many called exactly once with
+// the right {anilistId, bgmId} pair.
+func TestBangumiV2_NoSubjectNameCN_ChainsV3(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			// Subject has score but no name_cn — V2's COALESCE leaves
+			// title_chinese untouched, so chain V3 to retry.
+			return makeSubject(100, "", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+	enq := &fakeV2Enqueuer{}
+
+	err := runV2WithEnq(t, b, db, enq, 1234, 9999)
+	require.NoError(t, err)
+
+	v3Calls := enq.snapshotV3Calls()
+	require.Len(t, v3Calls, 1, "exactly one V3 chain batch expected")
+	require.Len(t, v3Calls[0], 1, "batch should carry one V3 job")
+	assert.Equal(t, 1234, v3Calls[0][0].AnilistID, "AnilistID propagates to V3")
+	assert.Equal(t, 9999, v3Calls[0][0].BgmID, "BgmID propagates to V3")
+}
+
+// TestBangumiV2_SubjectHasNameCN_NoV3Chain — V2 happy path with
+// Subject.NameCN populated → V3 NOT chained (the title_chinese was
+// already supplied this run).
+func TestBangumiV2_SubjectHasNameCN_NoV3Chain(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "标题", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+	enq := &fakeV2Enqueuer{}
+
+	err := runV2WithEnq(t, b, db, enq, 1234, 9999)
+	require.NoError(t, err)
+
+	assert.Empty(t, enq.snapshotV3Calls(),
+		"Subject.NameCN populated → V3 must NOT be chained")
+}
+
+// TestBangumiV2_V3ChainError_NonFatal — Enqueuer.EnqueueV3Many returns
+// error → V2 worker still returns nil (V2 already succeeded, chain
+// failure is logged + swallowed).
+func TestBangumiV2_V3ChainError_NonFatal(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+	enq := &fakeV2Enqueuer{
+		v3Fn: func(_ context.Context, _ []BangumiV3Args) error {
+			return errors.New("river client unavailable")
+		},
+	}
+
+	err := runV2WithEnq(t, b, db, enq, 1234, 9999)
+	require.NoError(t, err, "V3 chain enqueue failure must NOT bubble up — V2 already succeeded")
+
+	// V3 was attempted exactly once even though it errored.
+	assert.Len(t, enq.snapshotV3Calls(), 1)
+}
+
+// TestBangumiV2_NilEnqueuer_DoesNotPanic — nil Enqueuer is replaced
+// by NoopEnqueuer{} inside the constructor.  Confirms the V3 chain
+// path is safe with a nil enqueuer (the chain just no-ops).
+func TestBangumiV2_NilEnqueuer_DoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return makeSubject(100, "", 8.0, 100), nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	require.NotPanics(t, func() {
+		w := NewBangumiV2Worker(b, db, nil)
+		require.NotNil(t, w)
+		err := w.Work(context.Background(), &river.Job[BangumiV2Args]{
+			Args: BangumiV2Args{AnilistID: 1, BgmID: 100},
+		})
+		require.NoError(t, err)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Compile-time guards: production types must satisfy the interfaces.
+// ---------------------------------------------------------------------------
+
+// dbgen.Querier must satisfy V2DB so main.go can pass *Queries directly.
+var _ V2DB = (dbgen.Querier)(nil)
+
+// *bangumi.Client must satisfy BangumiV2Client.
+var _ BangumiV2Client = (*bangumi.Client)(nil)
+
+// ---------------------------------------------------------------------------
+// Episode titles (Express Phase-4 parity)
+// ---------------------------------------------------------------------------
+
+func TestNormalizeEpisodeTitles_FiltersAndNulls(t *testing.T) {
+	got := normalizeEpisodeTitles([]bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "Asteroid Blues", NameCN: "小行星浪人"},
+		{Sort: 2, Type: 0, Name: "Stray Dog Strut", NameCN: ""}, // empty CN → nil
+		{Sort: 0, Type: 0, Name: "drop: sort 0"},                 // sort<=0 dropped
+		{Sort: 1, Type: 1, Name: "drop: SP"},                     // type!=0 dropped
+	})
+	if len(got) != 2 {
+		t.Fatalf("want 2 main episodes, got %d: %+v", len(got), got)
+	}
+	if got[0].episode != 1 || got[0].name == nil || *got[0].name != "Asteroid Blues" ||
+		got[0].nameCN == nil || *got[0].nameCN != "小行星浪人" {
+		t.Fatalf("ep1 wrong: %+v", got[0])
+	}
+	if got[1].episode != 2 || got[1].nameCN != nil {
+		t.Fatalf("ep2 wrong (empty NameCN should be nil): %+v", got[1])
+	}
+}
+
+func TestNormalizeEpisodeTitles_SequelOffset(t *testing.T) {
+	// A sequel whose eps start at sort 29 (S1 had 28) maps to 1..N.
+	got := normalizeEpisodeTitles([]bangumi.Episode{
+		{Sort: 30, Type: 0, Name: "S2E2"},
+		{Sort: 29, Type: 0, Name: "S2E1"}, // out of order on purpose
+	})
+	if len(got) != 2 || got[0].episode != 1 || got[1].episode != 2 {
+		t.Fatalf("sequel offset not normalized to 1-based: %+v", got)
+	}
+}
+
+func TestBangumiV2_WritesEpisodeTitles(t *testing.T) {
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			return makeSubject(id, "中文名", 80, 100), nil
+		},
+		episodesFn: func(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
+			return &bangumi.EpisodesResponse{Eps: []bangumi.Episode{
+				{Sort: 1, Type: 0, Name: "E1", NameCN: "第一集"},
+				{Sort: 2, Type: 0, Name: "E2", NameCN: "第二集"},
+			}}, nil
+		},
+	}
+	d := &fakeV2DB{}
+	if err := runV2(t, b, d, 100, 555); err != nil {
+		t.Fatalf("Work: %v", err)
+	}
+	eps := d.snapshotEpTitleCalls()
+	if len(eps) != 2 {
+		t.Fatalf("want 2 episode-title writes, got %d", len(eps))
+	}
+	if eps[0].animeID != 100 || eps[0].episode != 1 ||
+		eps[0].nameCN == nil || *eps[0].nameCN != "第一集" {
+		t.Fatalf("episode write wrong: %+v", eps[0])
+	}
+}
+
+func TestBangumiV2_EpisodesNotFound_DoesNotFail(t *testing.T) {
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			return makeSubject(id, "中文名", 80, 100), nil
+		},
+		episodesFn: func(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
+			return nil, bangumi.ErrNotFound
+		},
+	}
+	d := &fakeV2DB{}
+	if err := runV2(t, b, d, 100, 555); err != nil {
+		t.Fatalf("episodes ErrNotFound must be tolerated, got: %v", err)
+	}
+	if n := len(d.snapshotEpTitleCalls()); n != 0 {
+		t.Fatalf("no episode writes expected on not-found, got %d", n)
+	}
+}

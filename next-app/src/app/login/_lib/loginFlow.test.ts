@@ -1,0 +1,88 @@
+import { describe, expect, test, mock } from "bun:test";
+import { submitLogin } from "./loginFlow";
+
+// sanitizeFromParam + extractServerMessage are tested in
+// lib/authForm.test.ts — this file only covers the /login-specific
+// wire-up (endpoint, payload shape, credential mode, status mapping).
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+describe("submitLogin", () => {
+  test("posts JSON + credentials and returns ok on 200", async () => {
+    let captured: { url: string; init: RequestInit } | null = null;
+    const fetchFn = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      captured = { url: String(input), init: init ?? {} };
+      return jsonResponse(200, { data: { accessToken: "tok", user: { username: "alice" } } });
+    });
+
+    const result = await submitLogin("alice@example.com", "hunter2", {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    expect(result).toEqual({ ok: true, status: 200, message: "" });
+    expect(captured).not.toBeNull();
+    expect(captured!.url).toBe("/api/auth/login");
+    expect(captured!.init.method).toBe("POST");
+    expect(captured!.init.credentials).toBe("same-origin");
+    const headers = captured!.init.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(captured!.init.body).toBe(
+      JSON.stringify({ email: "alice@example.com", password: "hunter2" }),
+    );
+  });
+
+  test("maps 401 server message into the result", async () => {
+    const fetchFn = mock(async () =>
+      jsonResponse(401, {
+        error: { code: "INVALID_CREDENTIALS", message: "邮箱或密码错误" },
+      }),
+    );
+    const result = await submitLogin("a@b.c", "wrong", {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    expect(result).toEqual({ ok: false, status: 401, message: "邮箱或密码错误" });
+  });
+
+  test("maps 400 validation error", async () => {
+    const fetchFn = mock(async () =>
+      jsonResponse(400, {
+        error: { code: "VALIDATION_ERROR", message: "Invalid email format" },
+      }),
+    );
+    const result = await submitLogin("not-an-email", "x", {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      message: "Invalid email format",
+    });
+  });
+
+  test("falls back to HTTP status string when error body has no message", async () => {
+    const fetchFn = mock(async () =>
+      new Response("upstream exploded", { status: 502 }),
+    );
+    const result = await submitLogin("a@b.c", "x", {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    expect(result).toEqual({ ok: false, status: 502, message: "HTTP 502" });
+  });
+
+  test("returns ok:false on network failure (fetch throws)", async () => {
+    const fetchFn = mock(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    const result = await submitLogin("a@b.c", "x", {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(0);
+    expect(result.message).toBe("Failed to fetch");
+  });
+});

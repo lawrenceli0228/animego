@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>animegoclub — 维护中 / Maintenance</title>
+    <style>
+      :root {
+        --bg: #000;
+        --bg-card: #0a0a0a;
+        --text: #fff;
+        --text-secondary: rgba(235, 235, 245, 0.85);
+        --text-tertiary: rgba(235, 235, 245, 0.6);
+        --separator: rgba(84, 84, 88, 0.3);
+        --accent: #0a84ff;
+        --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+        --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; padding: 0; margin: 0; }
+      html { color-scheme: dark; }
+      body {
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      main {
+        max-width: 520px;
+        width: 100%;
+        text-align: center;
+      }
+      h1 {
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: clamp(1.75rem, 4vw + 1rem, 2.5rem);
+        letter-spacing: -0.01em;
+        margin-bottom: 1.25rem;
+      }
+      .accent { color: var(--accent); }
+      .lang-block {
+        padding: 1.25rem 0;
+      }
+      .lang-block + .lang-block {
+        border-top: 1px solid var(--separator);
+      }
+      .lang-label {
+        font-family: var(--font-display);
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--text-tertiary);
+        margin-bottom: 0.5rem;
+      }
+      p {
+        font-size: 1rem;
+        line-height: 1.6;
+        color: var(--text-secondary);
+      }
+      p + p { margin-top: 0.75rem; }
+      .meta {
+        margin-top: 2rem;
+        font-size: 0.8125rem;
+        color: var(--text-tertiary);
+      }
+      .meta code {
+        font-family: ui-monospace, "JetBrains Mono", monospace;
+        font-size: 0.875em;
+        background: var(--bg-card);
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+        border: 1px solid var(--separator);
+      }
+    </style>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600&family=DM+Sans:wght@400;500&display=swap"
+    />
+  </head>
+  <body>
+    <main>
+      <h1>animego<span class="accent">.</span></h1>
+
+      <section class="lang-block">
+        <div class="lang-label">中文</div>
+        <p>站点正在维护中,请稍后再试。</p>
+        <p>这通常只需要几分钟,你的账号和收藏不会受影响。</p>
+      </section>
+
+      <section class="lang-block">
+        <div class="lang-label">English</div>
+        <p>This page is temporarily unavailable.</p>
+        <p>We're back in a few minutes. Your account and library are safe.</p>
+      </section>
+
+      <p class="meta">
+        <code>503</code> · animegoclub.com
+      </p>
+    </main>
+  </body>
+</html>

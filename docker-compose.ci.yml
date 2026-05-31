@@ -1,0 +1,56 @@
+# CI-only docker-compose override.
+#
+# Why this file exists:
+#   1. docker-compose.yml binds `mongodb` to the internal `animego`
+#      network only — no host port mapping. Correct for prod, but
+#      blocks e2e sandbox fixtures that connect via
+#      mongodb://localhost:27017 from the GitHub Actions runner.
+#   2. `ws-server` is in a known restart loop in prod (DATABASE_URL
+#      missing until P9 brings up Postgres). In CI, `docker compose
+#      up --wait` would hang on its failing healthcheck until the
+#      --wait-timeout fires. v2 sandbox specs don't exercise
+#      /socket.io/, so we neuter ws-server here: replace its command
+#      with a sleep, disable its healthcheck. Container stays alive
+#      so nginx's `depends_on` is satisfied; danmaku is unreachable
+#      but no v2 test cares.
+#
+# Merge in CI:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
+#
+# Do NOT use this on the prod VPS. The base file is canonical.
+services:
+  mongodb:
+    ports:
+      - "27017:27017"
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  app:
+    # Crank /login + /register rate limit in sandbox — e2e specs hammer
+    # the form during register/login/forgot-password journeys and would
+    # otherwise hit the prod default (10/15min) after a few runs.
+    environment:
+      AUTH_RATELIMIT_MAX: "1000"
+
+  # next-app GO_API_INTERNAL_URL remains at default (http://app:5001)
+  # for prod safety. The P8.5 dress rehearsal flips it temporarily; this
+  # revert keeps the working tree in the safe baseline state.
+
+  go-api:
+    # Extend session cookie TTL so storageState saved by globalSetup
+    # doesn't expire mid-run. 2h >> worst-case Playwright run time.
+    # Disable auth + global rate limits so parallel e2e specs don't 429.
+    environment:
+      JWT_EXPIRES_IN: 2h
+      AUTH_RATELIMIT_MAX: "1000"
+      API_RATELIMIT_BURST: "0"
+
+  ws-server:
+    # P8.5 dress rehearsal: ws-server runs for real against Postgres.
+    # Override DATABASE_URL so it resolves to the postgres container, not
+    # localhost (which is what .env.production carries and is wrong inside
+    # the Docker network).
+    environment:
+      DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable

@@ -1,0 +1,76 @@
+# go-api/sqlc.yaml
+# sqlc v2 config for github.com/lawrenceli0228/animego/go-api
+# Docs: https://docs.sqlc.dev/en/latest/reference/config.html
+
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "internal/db/queries"
+    # Point at golang-migrate dir so CREATE TABLE statements from *.up.sql become the schema source.
+    # sqlc parses migrations in lexical order; *.down.sql is ignored automatically.
+    schema: "migrations"
+    gen:
+      go:
+        package: "dbgen"
+        out: "internal/db/gen"
+        sql_package: "pgx/v5"                  # pgx v5 + pgxpool (NOT database/sql, NOT lib/pq)
+        emit_json_tags: true                   # structs serialize directly in chi HTTP handlers
+        emit_db_tags: false                    # pgx uses positional scan, db tags are noise
+        emit_pointers_for_null_types: true     # *string / *int over sql.NullString — cleaner JSON
+        emit_prepared_queries: false           # river + pgxpool prefer ad-hoc; prepared adds churn
+        emit_interface: true                   # generates Querier — enables mockgen in services
+        emit_exact_table_names: false          # `users` table → `User` struct (idiomatic Go)
+        emit_empty_slices: true                # `[]` not `null` in JSON list responses
+        emit_result_struct_pointers: false
+        emit_params_struct_pointers: false
+        emit_methods_with_db_argument: false
+        json_tags_case_style: "camel"          # matches Next.js frontend conventions
+        omit_unused_structs: true              # skip codegen for tables with no queries yet
+        query_parameter_limit: 5               # >5 args → generated Params struct (readability)
+
+        # Map Postgres types pgx v5 returns natively to avoid sql.Null* leakage in handlers.
+        overrides:
+          # UUID columns: pgx v5 returns pgtype.UUID, but google/uuid is the ecosystem standard
+          # (river, chi middleware request IDs, etc.) — keep one UUID type across the codebase.
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+          - db_type: "uuid"
+            nullable: true
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+              pointer: true
+
+          # timestamptz: prefer stdlib time.Time over pgtype.Timestamptz for JSON marshaling.
+          - db_type: "pg_catalog.timestamptz"
+            go_type: "time.Time"
+          - db_type: "pg_catalog.timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+
+          # jsonb: keep as encoding/json.RawMessage so handlers can pass-through without re-marshal.
+          - db_type: "pg_catalog.jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+
+          # numeric(4,2) score columns (average_score, bangumi_score,
+          # poster_accent_contrast_on_black).  pgtype.Numeric serialises
+          # as "83.00" — Express MongoDB returns Number which JSON.stringify
+          # outputs as "83" (trailing zeros dropped).  Override to *float64
+          # for byte parity.  Loses sub-2-decimal precision but no source
+          # writes more than 2 decimals anyway.
+          - db_type: "pg_catalog.numeric"
+            go_type: "float64"
+          - db_type: "pg_catalog.numeric"
+            nullable: true
+            go_type:
+              type: "float64"
+              pointer: true
+
+    rules:
+      - sqlc/db-prepare        # validates queries against schema at generate-time

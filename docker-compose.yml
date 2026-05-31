@@ -1,21 +1,228 @@
 services:
-  app:
-    build: .
+  # ─── next-app (Next.js 16 RSC) ───────────────────────────────────────
+  # Standalone Bun-built Next.js process. After the legacy retirement
+  # nginx routes EVERY user-facing route here (SEO pages, auth, /library,
+  # /player, /admin, and the catch-all). RSC server-side fetches go
+  # straight to go-api:8080 via the Docker network (GO_API_INTERNAL_URL),
+  # NOT through nginx. At the nginx layer /api/* → go-api and
+  # /socket.io/ → ws-server.
+  next-app:
+    build:
+      context: .
+      dockerfile: next-app/Dockerfile
+      # Build args read from the env file (deploy.sh + docker compose
+      # both pull --env-file=.env.production). NEXT_PUBLIC_SENTRY_DSN
+      # MUST land at build because Next inlines NEXT_PUBLIC_* into the
+      # client bundle. Empty default keeps a build-without-env working.
+      args:
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
     restart: unless-stopped
     env_file: .env.production
+    environment:
+      # RSC server-side fetch base (next-app server → go-api directly via
+      # the Docker network, NOT through nginx). .env.production also sets
+      # this; the default here keeps a bare `docker compose up` coherent
+      # now that the legacy Express `app` service is retired.
+      GO_API_INTERNAL_URL: ${GO_API_INTERNAL_URL:-http://go-api:8080}
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      # Server-side timezone. Without this the container defaults to UTC
+      # and any toLocaleTimeString / toLocaleDateString call SSR-renders
+      # a different string than the client (browser local TZ) →
+      # React error #418 hydration text mismatch. Asia/Shanghai matches
+      # the primary user base (CN/HK/TW/海外华人). Browser-side TZ
+      # outliers (US/EU users) will still mismatch — those callsites
+      # need suppressHydrationWarning as a separate fix.
+      TZ: Asia/Shanghai
     depends_on:
-      - mongodb
+      - go-api
     networks:
       - animego
+    healthcheck:
+      # Use 127.0.0.1 not localhost: alpine resolves localhost to ::1
+      # first, but next 16 standalone server only binds the IPv4
+      # wildcard (HOSTNAME=0.0.0.0). v6 connect fails, container shows
+      # unhealthy even though every external request works.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  mongodb:
-    image: mongo:7
+  # ─── ws-server (socket.io danmaku) ───────────────────────────────────
+  # Standalone Node 20 process speaking socket.io v4. Reads JWT_SECRET
+  # shared with go-api so one login token works across surfaces. Writes
+  # danmakus + episode_windows directly to Postgres. nginx routes
+  # /socket.io/ here (the legacy Express `app` it used to share is retired).
+  ws-server:
+    build:
+      context: ./ws-server
+      dockerfile: Dockerfile
     restart: unless-stopped
-    volumes:
-      - mongo-data:/data/db
-    command: --wiredTigerCacheSizeGB 0.4
+    env_file: .env.production
+    environment:
+      PORT_WS: 3001
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - animego
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── P8.5: postgres (Postgres 16 + pg_cron) ───────────────────────────
+  # Custom image bundles pg_cron for danmaku TTL jobs and River queue
+  # extension support.  pg_cron is loaded via shared_preload_libraries
+  # baked into the image's postgresql.conf.sample — no runtime flag
+  # needed beyond the command below (which is belt-and-suspenders for
+  # fresh volumes that haven't run initdb yet).
+  # go-api + ws-server both connect via DATABASE_URL constructed in their
+  # respective environment blocks; neither reads POSTGRES_PASSWORD directly.
+  postgres:
+    build:
+      context: ./go-api/docker/postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: animego
+      POSTGRES_USER: animego
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    command: ["postgres", "-c", "shared_preload_libraries=pg_cron", "-c", "cron.database_name=animego"]
+    networks:
+      - animego
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U animego -d animego"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    mem_limit: 400m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── P9: schema migrate (one-shot) ────────────────────────────────────
+  # Applies go-api/migrations/*.sql (golang-migrate) to the postgres volume.
+  # NOT in the default `up` set — guarded behind the `migrate` profile so it
+  # only runs on an explicit `docker compose --profile migrate run --rm
+  # migrate`. The cutover MUST run this before go-api starts: go-api's River
+  # queue crash-loops on an empty DB (no river_job table). There is no other
+  # schema-apply path — go-api/cmd/migrate does not exist, migrations are not
+  # embedded in the server binary, and the VPS has no host golang-migrate.
+  # Connects over the internal animego network (postgres:5432), so it dodges
+  # the host-port IPv6/first-init race that p9-dry-run.sh works around.
+  # Pinned to v4.19.1 to match the golang-migrate used locally.
+  migrate:
+    image: migrate/migrate:v4.19.1
+    profiles: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./go-api/migrations:/migrations:ro
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable",
+        "up",
+      ]
+    networks:
+      - animego
+    restart: "no"
+
+  # ─── P8.5: go-api (Go HTTP API) ───────────────────────────────────────
+  # Chi-based Go server.  Waits for postgres healthcheck before starting
+  # so pgxpool.Connect at boot never races a cold DB.
+  # DATABASE_URL is constructed here from POSTGRES_PASSWORD so the
+  # literal password never lands in .env.production (only the bare var does).
+  # PORT_GO matches go-api/internal/config/config.go envInt("PORT_GO", 8080).
+  go-api:
+    build:
+      context: ./go-api
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable
+      PORT_GO: "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - animego
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: 200m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── Enrichment backfill (one-shot ops tool) ──────────────────────────
+  # Re-validates every existing bgm binding against the authoritative id-map
+  # + dandanplay, then fixes the legacy backlog (wrong bindings → reset for
+  # re-enrich; missing CN → healed from dandanplay). NOT in the default `up`
+  # set — guarded behind the `tools` profile. Reuses the go-api image (which
+  # now bundles the bgmbackfill binary) + its env, overriding the entrypoint.
+  # Runs as root so it can write report.json / backup-*.json into
+  # ./backfill-out on the host — the operator reviews the report and KEEPS
+  # the backup as the --apply rollback.
+  #
+  # Run on the VPS AFTER deploy + migrate, reviewing the report first:
+  #   mkdir -p backfill-out
+  #   docker compose --env-file .env.production --profile tools run --rm backfill --report
+  #   docker compose --env-file .env.production --profile tools run --rm backfill --apply
+  #   docker compose --env-file .env.production restart go-api   # orphan scan re-enriches the reset rows
+  #   docker compose --env-file .env.production --profile tools run --rm backfill --heal
+  backfill:
+    build:
+      context: ./go-api
+    profiles: ["tools"]
+    user: "0:0"
+    working_dir: /out
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable
+    volumes:
+      - ./backfill-out:/out
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - animego
+    entrypoint: ["bgmbackfill"]
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nginx:
     image: nginx:alpine
@@ -27,13 +234,26 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/selfsigned.crt:/etc/nginx/ssl/selfsigned.crt:ro
       - ./nginx/selfsigned.key:/etc/nginx/ssl/selfsigned.key:ro
+      # P8.1 Day-1 Fix: static maintenance page served as the `error_page`
+      # target whenever next-app is unreachable (default.conf 502/503/504
+      # `@next_app_down`) or whenever a P6/P7/P9 surface is requested while
+      # nginx is on default.legacy.conf rollback (Express has no handler).
+      # Bind-mount, not COPY, so editing the file + `docker compose restart
+      # nginx` is enough — no image rebuild.
+      - ./nginx/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
     depends_on:
-      - app
+      - next-app
     networks:
       - animego
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
-  mongo-data:
+  postgres-data:
 
 networks:
   animego:

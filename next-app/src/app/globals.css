@@ -1,0 +1,162 @@
+
+:root {
+  --bg: #000;
+  --bg-card: #0a0a0a;
+  --bg-elevated: #141414;
+  --text: #fff;
+  --text-secondary: rgba(235, 235, 245, 0.85);
+  --text-tertiary: rgba(235, 235, 245, 0.60);
+  --text-quaternary: rgba(235, 235, 245, 0.30);
+  --separator: rgba(84, 84, 88, 0.30);
+  --accent: #0a84ff;
+
+  --font-display: "Sora", system-ui, sans-serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Per-anime poster accent (overridden by HeroAccent wrapper on the detail page) */
+  --poster-accent: #8b5cf6;
+  --poster-accent-rgb: 139, 92, 246;
+  --duration-halo-in: 260ms;
+  --duration-halo-in-fast: 200ms;
+  --delay-halo-appear: 400ms;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html {
+  height: 100%;
+  color-scheme: dark;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 0 16px;
+  }
+}
+
+/* HUD blink — landing components opt in by setting their own `animation`
+ * declaration; this class only provides the reduced-motion freeze. The
+ * matching @keyframes hudBlink lives in components/landing/shared/motion.css. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-blink {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+}
+
+/* Hero cover halo — neutral by default. The poster's color signature is only
+ * painted once the parent HeroAccent signals [data-accent-ready="true"], so the
+ * user never sees a placeholder purple swap to the real color. */
+.hero-cover {
+  border: 2px solid transparent;
+  transition:
+    box-shadow var(--duration-halo-in) var(--ease-out-expo) var(--delay-halo-appear),
+    border-color var(--duration-halo-in) var(--ease-out-expo) var(--delay-halo-appear);
+}
+[data-accent-ready="true"] .hero-cover {
+  border-color: rgba(var(--poster-accent-rgb), 0.55);
+  box-shadow:
+    0 0 64px -8px var(--poster-accent),
+    0 0 24px -4px var(--poster-accent);
+}
+[data-accent-ready="true"][data-accent-fast="true"] .hero-cover {
+  transition-delay: 0ms;
+  transition-duration: var(--duration-halo-in-fast);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-cover {
+    transition: none;
+  }
+}
+
+/* Inline relation chip in the hero — neutral by default, tints to the
+ * per-anime accent on hover. Matches legacy AnimeDetailHero.jsx inline
+ * onMouseEnter/Leave behavior, but done in CSS so the chip can stay a
+ * plain <Link> inside the RSC tree (no client wrapper just for hover). */
+.hero-relation-chip {
+  transition:
+    border-color 150ms var(--ease-out-expo),
+    color 150ms var(--ease-out-expo);
+}
+.hero-relation-chip:hover,
+.hero-relation-chip:focus-visible {
+  border-color: var(--poster-accent) !important;
+  color: var(--poster-accent) !important;
+}
+
+/* Anime card grid — matches legacy AnimeGrid.jsx exactly: a fixed
+ * 5-column desktop grid stepping down to 3 (≤900px) then 2 (≤600px).
+ * The next-app port had used `auto-fill minmax(180px)`, which packed
+ * 7-8 small cards per row on wide screens; the legacy 5-col grid gives
+ * the larger cards the old site used. gap + fade-in match the legacy. */
+.anime-grid-5col {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  animation: animeGridFadeUp 0.4s ease both;
+}
+@media (max-width: 900px) {
+  .anime-grid-5col {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .anime-grid-5col {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@keyframes animeGridFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anime-grid-5col {
+    animation: none;
+  }
+}
