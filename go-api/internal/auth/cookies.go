@@ -4,9 +4,8 @@ package auth
 // in dev, sameSite=none + secure in prod (matches Express's
 // auth.controller.js:23-31 setRefreshCookie).
 //
-// Cookie name is "refreshToken" verbatim; the path is scoped to /api so
-// the cookie never travels with static asset requests (CSRF surface
-// reduction).
+// Cookie name is "refreshToken" verbatim; path is site-wide ("/") — see
+// refreshCookiePath for why the earlier /api scoping broke SSR refresh.
 
 import (
 	"net/http"
@@ -18,10 +17,19 @@ import (
 // look up the same key on read.
 const RefreshCookieName = "refreshToken"
 
-// refreshCookiePath scopes the cookie to /api so it isn't sent with
-// page navigations or static asset GETs.  Reduces CSRF surface vs a
-// site-wide cookie.
-const refreshCookiePath = "/api"
+// refreshCookiePath is site-wide ("/"), matching sessionCookiePath.
+//
+// It was "/api" (CSRF-surface reduction) but that BROKE the SSR refresh:
+// next-app/src/proxy.ts refreshes on page navigations (/, /profile, ...),
+// and a /api-scoped cookie is NOT sent on those paths, so proxy.ts could
+// never read the current refresh token there — the access token expired,
+// the SSR refresh silently failed, and the user got logged out (every
+// ~15m once JWT_EXPIRES_IN dropped to 15m). Site-wide path lets every
+// page navigation carry the cookie so the rotation stays consistent.
+// The cookie stays httpOnly + sameSite=none + secure, so the widened
+// path doesn't add XSS exposure; CSRF on /auth/refresh only forces a
+// harmless token rotation.
+const refreshCookiePath = "/"
 
 // SetRefreshCookie writes the refreshToken cookie with the same
 // attributes Express uses:
@@ -29,7 +37,7 @@ const refreshCookiePath = "/api"
 //   - httpOnly: true (no JS access — prevents XSS exfiltration)
 //   - secure: prod only (HTTPS-only)
 //   - sameSite: prod=none (cross-origin cookies for SSR fetch) / dev=strict
-//   - path: /api (scoped to API — minimizes CSRF surface)
+//   - path: "/" (site-wide, so SSR page-nav refresh in proxy.ts works)
 //   - maxAge: ttl seconds (caller passes the same JWT_REFRESH_EXPIRES_IN
 //     used to sign the token so both expire together)
 //
