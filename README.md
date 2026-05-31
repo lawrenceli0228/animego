@@ -10,15 +10,13 @@ A full-stack anime discovery, tracking, and local playback platform. Browse seas
 
 ## Project Status
 
-> ⚠️ **Active rewrite in progress** — backend is moving to Go + PostgreSQL, frontend to Next.js 16.
-> Current `main` and the live site at [animegoclub.com](https://animegoclub.com) continue to run the v2.0.x Vite SPA + Express + MongoDB stack.
-> Rewrite work happens on branch **`feat/go-backend`**.
-> Full plan: [`docs/migration/MIGRATION_PLAN.md`](docs/migration/MIGRATION_PLAN.md) · Phase 2 progress: [`docs/migration/P2-PROGRESS.md`](docs/migration/P2-PROGRESS.md) · Status snapshot: [`docs/migration/P2.1-STATUS.html`](docs/migration/P2.1-STATUS.html)
+> ✅ **The Go + Next.js rewrite is now live in production** (cut over 2026-05-31).
+> **This branch (`feat/go-backend`) is the live production stack** — Next.js 16 (RSC) + Go (chi · pgx · sqlc) + PostgreSQL 16 + a Socket.IO `ws-server` — serving [animegoclub.com](https://animegoclub.com). It is being merged down into `main`, which still holds the previous v2.0.x stack (Vite SPA + Express + MongoDB).
+> Full plan: [`docs/migration/MIGRATION_PLAN.md`](docs/migration/MIGRATION_PLAN.md)
 
-**Status:** Active rewrite — Phase 2.1 (`/api/anime/*`) feature-complete on `feat/go-backend`
+**Status:** Live in production (cut over 2026-05-31) — this branch is the production stack
 **Migration started:** 2026-05-10 (from v2.0.0 baseline)
-**Current milestone (2026-05-22):** P2.1.8 — 9/9 anime endpoints in Go (chi + pgx + sqlc) with envelope byte parity vs Express; Bangumi V1+V2+V3 enrichment workers running on river queue; 1h ristretto cache wraps for trending/yearly-top; AniList Detail re-fetch on stale `/:anilistId`
-**Target stack:** Next.js 16 + Bun + Go 1.26 (chi + pgx + sqlc) + PostgreSQL 16 + Node ws-server (socket.io)
+**Production stack:** Next.js 16 + Bun + Go 1.26 (chi + pgx + sqlc) + PostgreSQL 16 + Node ws-server (Socket.IO)
 **Built with:** Claude Code (AI-assisted; product direction, decisions, and deployment by the author)
 
 ### Current rewrite
@@ -29,7 +27,7 @@ The codebase is moving from Vite SPA + Express + MongoDB to a polyglot stack: Ne
 - 48 HTTP endpoints in Go, danmaku websocket as separate `ws-server` microservice
 - Nightly Postgres pg_dump → Cloudflare R2 (30-day retention)
 
-The live site at [animegoclub.com](https://animegoclub.com) continues to run the v2.0.x stack during the rewrite. See the migration plan for phase-by-phase progress.
+The live site at [animegoclub.com](https://animegoclub.com) now runs this new stack (cut over 2026-05-31). See the migration plan for phase-by-phase progress.
 
 ### Known limitations (intentional, not bugs)
 - **Danmaku matching** — accuracy is not pursued to 100%; users fall back to the manual per-episode picker for uncommon sequels. See `feedback_danmaku_matching` in the project memory for the reasoning (no LLM/AI matching by design).
@@ -100,7 +98,7 @@ The live site at [animegoclub.com](https://animegoclub.com) continues to run the
 
 ## Tech Stack
 
-Phase 3.0 has landed — the polyglot stack below now coexists with the v2.0.x legacy stack on `feat/go-backend`. Legacy services keep running until P9-P10 cutover.
+Phase 3.0+ has landed — the polyglot stack below is now the production stack (cut over 2026-05-31). The v2.0.x legacy stack it replaced remains only on `main` until the branches merge.
 
 | Layer | Technology |
 |-------|-----------|
@@ -331,4 +329,4 @@ npm run test --workspace=server
 
 ## License
 
-MIT
+**All rights reserved.** This source is published for transparency and reference only; it is **not** open-source software. No permission is granted to use, copy, modify, run, host, or distribute the code without prior written consent. See [LICENSE](LICENSE) for the full terms. The license covers only the original code in this repository, not the third-party data/APIs it integrates (AniList, Bangumi, dandanplay, ACG.rip).

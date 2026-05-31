@@ -10,8 +10,9 @@
 
 ## 项目状态
 
-**状态：** 全栈重构中 — 迁移到 Next.js 14 + TypeScript
+**状态：** 已上线生产环境（2026-05-31 切换）— 本分支就是生产栈
 **重构启动：** 2026-05-10(基于 v2.0.0)
+**生产架构：** Next.js 16 + Bun + Go 1.26（chi · pgx · sqlc）+ PostgreSQL 16 + Node ws-server（Socket.IO）
 **构建方式：** Claude Code 辅助开发(产品方向、决策、部署由作者负责)
 
 ### 当前重构
@@ -21,7 +22,7 @@
 - 单一运行时部署(Next.js standalone)
 - 89+ Express endpoint 迁移到 Next API routes
 
-线上 [animegoclub.com](https://animegoclub.com) 在重构期间继续跑 v2.0.x 的 Vite SPA 构建。迁移分阶段计划见 `docs/migration/`。
+线上 [animegoclub.com](https://animegoclub.com) 现在跑的是新栈（2026-05-31 切换）。迁移分阶段计划见 `docs/migration/`。
 
 ### 已知限制(有意为之,非 bug)
 - **弹幕匹配** — 不追求 100% 准确率,冷门续作用手动选集兜底。原因见 project memory `feedback_danmaku_matching`(明确不接 LLM/AI 匹配)。
@@ -92,7 +93,7 @@
 
 ## 技术栈
 
-Phase 3.0 已 land — 下方多语言栈现在与 v2.0.x 旧栈在 `feat/go-backend` 上共存。旧服务在 P9-P10 cutover 前继续运行。
+Phase 3.0+ 已 land — 下方多语言栈现在是生产环境栈（2026-05-31 切换）。它取代的 v2.0.x 旧栈只剩在 `main` 分支上，直到两条分支合并。
 
 | 层级 | 技术 |
 |------|------|
@@ -303,4 +304,4 @@ npm run test --workspace=server
 
 ## 许可证
 
-MIT
+**保留所有权利（All Rights Reserved）。** 本仓库源码仅为透明与参考目的公开，**并非**开源软件。未经事先书面许可，不授予任何使用、复制、修改、运行、托管或分发代码的权利。完整条款见 [LICENSE](LICENSE)。该许可仅覆盖本仓库的原创代码，不含其集成的第三方数据/接口（AniList、Bangumi、dandanplay、ACG.rip）。
