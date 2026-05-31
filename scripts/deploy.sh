@@ -25,6 +25,16 @@ git fetch origin "$BRANCH"
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
+# FOOTGUN GUARD: this shell still holds the PRE-pull deploy.sh in memory, so
+# any steps the pull ADDED below (migrate, nginx cp) would be silently skipped
+# — exactly how the first P11 deploy left /api on legacy Express + the DB
+# un-migrated. Re-exec the freshly-pulled script once so the new steps run.
+# DEPLOY_REEXEC guards against an infinite loop.
+if [ -z "${DEPLOY_REEXEC:-}" ]; then
+  echo "==> Re-exec'ing freshly pulled deploy.sh..."
+  exec env DEPLOY_REEXEC=1 bash "$APP_DIR/scripts/deploy.sh" "$@"
+fi
+
 # --env-file=.env.production:
 #   - feeds `${VAR}` substitutions in docker-compose.yml (e.g.
 #     NEXT_PUBLIC_SENTRY_DSN passed as a build arg into Dockerfile so
