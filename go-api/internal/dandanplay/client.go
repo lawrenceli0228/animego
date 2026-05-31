@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -55,6 +56,13 @@ const (
 
 	commentTTL = 30 * time.Minute
 	episodeTTL = 24 * time.Hour
+)
+
+// Retry policy constants.
+const (
+	maxRetries  = 3 // 4 total attempts
+	backoffBase = 500 * time.Millisecond
+	backoffCap  = 8 * time.Second
 )
 
 // Client is the dandanplay HTTP caller.  Construct once at boot, share
@@ -189,28 +197,90 @@ type CommentsResponse struct {
 
 // ─── HTTP plumbing ──────────────────────────────────────────────────────────
 
-// do is the shared call path — limiter wait + header injection +
-// JSON decode + error envelope.  Caller-supplied `dest` is the typed
-// struct to decode the response body into.  Returns (true, nil) on
-// success, (false, nil) on 4xx (mirrors JS `!res.ok` → null), (false, err)
-// on network / 5xx / decode failure.
+// do is the shared call path — limiter wait + retry-with-backoff +
+// header injection + JSON decode + error envelope.  Caller-supplied
+// `dest` is the typed struct to decode the response body into.
+// Returns (true, nil) on success, (false, nil) on non-429/non-5xx 4xx
+// (mirrors JS `!res.ok` → null), (false, err) on network / 5xx /
+// decode failure.
+//
+// Retry policy (see doWithRetry for full detail):
+//   - HTTP 429 → honor Retry-After header; otherwise exponential backoff
+//     with full jitter (base 500ms, cap 8s).
+//   - HTTP 5xx (500/502/503/504) → same backoff schedule.
+//   - Transient network errors (i/o timeout, EOF, connection reset) → same.
+//   - Up to 3 retries (4 total attempts).
+//   - The rate-limiter Wait is consumed on EVERY attempt, including retries.
+//   - Every backoff sleep is context-cancellable.
 func (c *Client) do(ctx context.Context, method, path string, body any, dest any) (bool, error) {
-	if err := c.limiter.Wait(ctx); err != nil {
-		return false, fmt.Errorf("dandanplay: limiter wait: %w", err)
-	}
-
-	var bodyReader io.Reader
+	// Encode the body once; each attempt re-reads from the same bytes.
+	var bodyBytes []byte
 	if body != nil {
-		buf, err := json.Marshal(body)
+		var err error
+		bodyBytes, err = json.Marshal(body)
 		if err != nil {
 			return false, fmt.Errorf("dandanplay: encode body: %w", err)
 		}
-		bodyReader = bytes.NewReader(buf)
+	}
+	return c.doWithRetry(ctx, method, path, bodyBytes, dest)
+}
+
+// doWithRetry executes one HTTP attempt and retries on 429 / 5xx /
+// transient network errors with exponential-backoff-plus-full-jitter.
+// bodyBytes may be nil for GET requests.
+func (c *Client) doWithRetry(ctx context.Context, method, path string, bodyBytes []byte, dest any) (bool, error) {
+	for attempt := 0; ; attempt++ {
+		// Check context before every attempt (including the first).
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+
+		// Rate-limiter gates EVERY attempt, including retries.
+		if err := c.limiter.Wait(ctx); err != nil {
+			return false, fmt.Errorf("dandanplay: limiter wait: %w", err)
+		}
+
+		ok, retry, retryAfter, err := c.doOnce(ctx, method, path, bodyBytes, dest)
+		if !retry {
+			// Success, 4xx-miss, decode error, or non-retryable error.
+			return ok, err
+		}
+
+		// retry == true: 429, 5xx, or transient network error.
+		if attempt >= maxRetries {
+			// Exhausted retries — surface the last error.
+			return false, err
+		}
+
+		d := backoffDelay(attempt, retryAfter)
+		slog.WarnContext(ctx, "dandanplay: retrying",
+			"method", method, "path", path,
+			"attempt", attempt+1, "backoff", d, "reason", err)
+
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(d):
+		}
+	}
+}
+
+// doOnce performs a single HTTP round-trip without any retry logic.
+// Returns:
+//
+//	(true,  false, 0, nil)   — 2xx success, dest decoded
+//	(false, false, 0, nil)   — 4xx miss (caller treats as "not found")
+//	(false, true,  d, err)   — 429 / 5xx / network error → caller should retry
+//	(false, false, 0, err)   — non-retryable error (bad request, decode fail)
+func (c *Client) doOnce(ctx context.Context, method, path string, bodyBytes []byte, dest any) (ok, retry bool, retryAfter time.Duration, err error) {
+	var bodyReader io.Reader
+	if bodyBytes != nil {
+		bodyReader = bytes.NewReader(bodyBytes)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, c.endpoint+path, bodyReader)
 	if err != nil {
-		return false, fmt.Errorf("dandanplay: build request: %w", err)
+		return false, false, 0, fmt.Errorf("dandanplay: build request: %w", err)
 	}
 	if c.appID != "" {
 		req.Header.Set("X-AppId", c.appID)
@@ -218,34 +288,99 @@ func (c *Client) do(ctx context.Context, method, path string, body any, dest any
 	if c.appSecret != "" {
 		req.Header.Set("X-AppSecret", c.appSecret)
 	}
-	if body != nil {
+	if bodyBytes != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("dandanplay: HTTP %s %s: %w", method, path, err)
+		// Transient network errors (i/o timeout, EOF, connection reset).
+		return false, true, 0, fmt.Errorf("dandanplay: HTTP %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 500 {
-		return false, fmt.Errorf("dandanplay: %s %s: HTTP %d", method, path, resp.StatusCode)
-	}
-	if resp.StatusCode >= 400 {
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests: // 429
+		d := parseRetryAfter(resp.Header.Get("Retry-After"))
+		return false, true, d, fmt.Errorf("dandanplay: %s %s: HTTP 429", method, path)
+
+	case resp.StatusCode == 500 ||
+		resp.StatusCode == 502 ||
+		resp.StatusCode == 503 ||
+		resp.StatusCode == 504:
+		return false, true, 0, fmt.Errorf("dandanplay: %s %s: HTTP %d", method, path, resp.StatusCode)
+
+	case resp.StatusCode >= 500:
+		// Other 5xx — treat as non-retryable to avoid hammering on
+		// permanent server errors (e.g. 501 Not Implemented).
+		return false, false, 0, fmt.Errorf("dandanplay: %s %s: HTTP %d", method, path, resp.StatusCode)
+
+	case resp.StatusCode >= 400:
 		// Express used `if (!res.ok) return null` — caller treats this
 		// as a miss, not an error.  Logging stays at debug so we don't
 		// spam every 404 from a stale dandanAnimeId lookup.
 		slog.DebugContext(ctx, "dandanplay: non-2xx",
 			"method", method, "path", path, "status", resp.StatusCode)
-		return false, nil
+		return false, false, 0, nil
 	}
 
+	// 2xx — decode body into dest.
 	if dest != nil {
 		if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
-			return false, fmt.Errorf("dandanplay: decode %s: %w", path, err)
+			return false, false, 0, fmt.Errorf("dandanplay: decode %s: %w", path, err)
 		}
 	}
-	return true, nil
+	return true, false, 0, nil
+}
+
+// backoffDelay returns the duration to sleep before attempt number
+// `attempt` (0-indexed).  If retryAfter > 0 it was parsed from a
+// Retry-After header and is returned directly.  Otherwise the function
+// applies full-jitter exponential backoff: a random value in
+// [0, min(backoffCap, backoffBase * 2^attempt)].
+func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		return retryAfter
+	}
+	// Exponential cap: backoffBase << attempt, clamped to backoffCap.
+	shift := attempt
+	if shift > 10 {
+		shift = 10 // prevent overflow on large attempt counts
+	}
+	ceiling := backoffBase * (1 << shift)
+	if ceiling > backoffCap || ceiling <= 0 {
+		ceiling = backoffCap
+	}
+	// Full jitter: uniform random in [0, ceiling).
+	return time.Duration(rand.Int64N(int64(ceiling)))
+}
+
+// parseRetryAfter parses the Retry-After response header.  The header
+// may be an integer (seconds) or an HTTP-date.  Returns 0 if the header
+// is absent or unparseable.
+func parseRetryAfter(header string) time.Duration {
+	if header == "" {
+		return 0
+	}
+	// Try integer seconds first.
+	if secs, err := strconv.ParseFloat(header, 64); err == nil && secs > 0 {
+		return time.Duration(secs * float64(time.Second))
+	}
+	// Try HTTP-date (RFC 1123, RFC 850, ANSI C asctime).
+	for _, layout := range []string{
+		http.TimeFormat,                  // Mon, 02 Jan 2006 15:04:05 GMT
+		"Monday, 02-Jan-06 15:04:05 MST", // RFC 850
+		"Mon Jan _2 15:04:05 2006",       // ANSI C
+	} {
+		if t, err := time.Parse(layout, header); err == nil {
+			d := time.Until(t)
+			if d > 0 {
+				return d
+			}
+			return 0
+		}
+	}
+	return 0
 }
 
 // ─── /api/v2/match ──────────────────────────────────────────────────────────

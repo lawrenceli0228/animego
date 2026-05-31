@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // newTestClient builds a Client pointed at a fake server with cached
@@ -212,6 +214,92 @@ func TestRateLimiter_SerialisesRequests(t *testing.T) {
 	if elapsed < 500*time.Millisecond {
 		t.Errorf("two calls took %v; expected ≥500ms (limiter active)", elapsed)
 	}
+}
+
+// ─── Retry-with-backoff tests ───────────────────────────────────────────────
+
+// TestRetry_429ThenSuccess verifies that the client retries on HTTP 429 and
+// ultimately returns the successful response on the third attempt.
+func TestRetry_429ThenSuccess(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if n <= 2 {
+			// First two requests: 429 with no Retry-After (forces jitter backoff).
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		// Third request: success.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"animes":[{"animeId":7,"animeTitle":"Retry Show","type":"tv","imageUrl":"","episodeCount":1}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := NewClient(
+		WithEndpoint(srv.URL),
+		// Use a very fast rate limiter so the test does not take 800ms × 3.
+		WithHTTPClient(&http.Client{Timeout: 5 * time.Second}),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	// Override the limiter to burst=3 so the rate limit doesn't dominate timing.
+	c.limiter = newFastLimiter()
+	t.Cleanup(c.Close)
+
+	got, err := c.SearchAnime(context.Background(), "retry")
+	if err != nil {
+		t.Fatalf("SearchAnime returned error: %v", err)
+	}
+	if len(got) != 1 || got[0].DandanAnimeID != 7 {
+		t.Fatalf("SearchAnime result = %+v, want [{DandanAnimeID:7}]", got)
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("server saw %d calls, want 3 (2 × 429 + 1 success)", n)
+	}
+}
+
+// TestRetry_ContextCancellation verifies that a cancelled context causes
+// the retry loop to abort promptly instead of sleeping through the backoff.
+func TestRetry_ContextCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Always return 429 so the client would keep retrying.
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := NewClient(
+		WithEndpoint(srv.URL),
+		WithHTTPClient(&http.Client{Timeout: 5 * time.Second}),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	c.limiter = newFastLimiter()
+	t.Cleanup(c.Close)
+
+	// Cancel the context immediately after the first request completes.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err = c.SearchAnime(ctx, "cancel")
+	elapsed := time.Since(start)
+
+	// Must finish well within the full backoffCap (8s) — the context
+	// deadline of 200ms should be what stops it.
+	if elapsed > 2*time.Second {
+		t.Errorf("call took %v; context cancellation did not abort the backoff sleep", elapsed)
+	}
+	if err == nil {
+		t.Error("expected a non-nil error after context cancellation")
+	}
+}
+
+// newFastLimiter returns a rate.Limiter with a 1ms interval and burst=10
+// so retry tests are not bottlenecked by the 800ms production limiter.
+func newFastLimiter() *rate.Limiter {
+	return rate.NewLimiter(rate.Every(time.Millisecond), 10)
 }
 
 // silence the unused import warning when json is only referenced via
