@@ -73,11 +73,11 @@ MODE="all"
 CF_TOKEN="${CF_API_TOKEN:-}"
 CF_ZONE="${CF_ZONE_ID:-}"
 CF_RECORD="${CF_RECORD_ID:-}"
-OLD_IP="45.152.65.208"
-NEW_IP="45.145.228.171"
+OLD_IP="${OLD_VPS_IP:-}"
+NEW_IP="${NEW_VPS_IP:-}"
 # SSH via ~/.ssh/config aliases. Old and new differ in BOTH port and key
-# (old = 17776/id_rsa, new = 57777/id_ed25519_animego), so the previous
-# single --ssh-port=57777 default silently broke every old-VPS check.
+# (old = <OLD_SSH_PORT>/id_rsa, new = <NEW_SSH_PORT>/<NEW_SSH_KEY>), so the previous
+# single --ssh-port=<NEW_SSH_PORT> default silently broke every old-VPS check.
 # Verified + fixed 2026-05-29.
 OLD_HOST="animego-old"
 NEW_HOST="animego-new"
@@ -107,10 +107,10 @@ options:
   --cf-token=<token>        Cloudflare API token (env: CF_API_TOKEN)
   --cf-zone-id=<id>         Cloudflare zone ID    (env: CF_ZONE_ID)
   --cf-record-id=<id>       A-record ID to flip   (env: CF_RECORD_ID)
-  --old-vps-ip=<ip>         default: 45.152.65.208 (CF A-record compare only)
-  --new-vps-ip=<ip>         default: 45.145.228.171
-  --old-vps-host=<alias>    default: animego-old (~/.ssh/config: 17776/id_rsa)
-  --new-vps-host=<alias>    default: animego-new (~/.ssh/config: 57777/id_ed25519_animego)
+  --old-vps-ip=<ip>         default: <OLD_VPS_IP> (CF A-record compare only)
+  --new-vps-ip=<ip>         default: <NEW_VPS_IP>
+  --old-vps-host=<alias>    default: animego-old (~/.ssh/config: <OLD_SSH_PORT>/id_rsa)
+  --new-vps-host=<alias>    default: animego-new (~/.ssh/config: <NEW_SSH_PORT>/<NEW_SSH_KEY>)
 
 env:
   CI_AUTO=1   skip interactive confirmations (auto-yes)

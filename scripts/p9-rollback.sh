@@ -11,10 +11,10 @@
 #     --cf-token=$CF_API_TOKEN
 #     --cf-zone-id=$CF_ZONE_ID
 #     --cf-record-id=$CF_RECORD_ID
-#     --old-vps-ip=45.152.65.208      (CF A-record rollback target)
-#     --old-vps-host=animego-old      (~/.ssh/config alias: 17776/id_rsa)
-#     --new-vps-ip=45.145.228.171
-#     --new-vps-host=animego-new      (~/.ssh/config alias: 57777/id_ed25519_animego)
+#     --old-vps-ip=<OLD_VPS_IP>      (CF A-record rollback target)
+#     --old-vps-host=animego-old      (~/.ssh/config alias: <OLD_SSH_PORT>/id_rsa)
+#     --new-vps-ip=<NEW_VPS_IP>
+#     --new-vps-host=animego-new      (~/.ssh/config alias: <NEW_SSH_PORT>/<NEW_SSH_KEY>)
 #
 # Env:
 #   CI_AUTO=1   skip y/N confirmation (use carefully)
@@ -60,10 +60,10 @@ REASON=""
 CF_TOKEN="${CF_API_TOKEN:-}"
 CF_ZONE="${CF_ZONE_ID:-}"
 CF_RECORD="${CF_RECORD_ID:-}"
-OLD_IP="45.152.65.208"   # CF A-record rollback target (DNS flips back here)
-NEW_IP="45.145.228.171"  # display only
-# SSH via ~/.ssh/config aliases. old=17776/id_rsa, new=57777/id_ed25519_animego.
-# Single OLD_PORT=57777 default was wrong for the old VPS — fixed 2026-05-29.
+OLD_IP="${OLD_VPS_IP:-}"   # CF A-record rollback target (DNS flips back here)
+NEW_IP="${NEW_VPS_IP:-}"  # display only
+# SSH via ~/.ssh/config aliases. old=<OLD_SSH_PORT>/id_rsa, new=<NEW_SSH_PORT>/<NEW_SSH_KEY>.
+# Single OLD_PORT=<NEW_SSH_PORT> default was wrong for the old VPS — fixed 2026-05-29.
 OLD_HOST="animego-old"
 NEW_HOST="animego-new"
 
