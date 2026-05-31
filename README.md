@@ -10,24 +10,21 @@ A full-stack anime discovery, tracking, and local playback platform. Browse seas
 
 ## Project Status
 
-> ✅ **The Go + Next.js rewrite is now live in production** (cut over 2026-05-31).
-> **This branch (`feat/go-backend`) is the live production stack** — Next.js 16 (RSC) + Go (chi · pgx · sqlc) + PostgreSQL 16 + a Socket.IO `ws-server` — serving [animegoclub.com](https://animegoclub.com). It is being merged down into `main`, which still holds the previous v2.0.x stack (Vite SPA + Express + MongoDB).
-> Full plan: [`docs/migration/MIGRATION_PLAN.md`](docs/migration/MIGRATION_PLAN.md)
+> **The Go + Next.js stack is the canonical production branch.**
+> `main` is the stable/production branch — only tested, reviewed code lands here; production deploys from `main`. `feat/go-backend` is the active development branch where new work is staged before merging into `main`.
+> The legacy Express + MongoDB + Vite SPA stack was fully retired on 2026-06-01. There is no longer a `client/` or `server/` directory in this repository.
 
-**Status:** Live in production (cut over 2026-05-31) — this branch is the production stack
+**Status:** Live in production (cut over 2026-05-31; legacy retired 2026-06-01)
 **Migration started:** 2026-05-10 (from v2.0.0 baseline)
 **Production stack:** Next.js 16 + Bun + Go 1.26 (chi + pgx + sqlc) + PostgreSQL 16 + Node ws-server (Socket.IO)
 **Built with:** Claude Code (AI-assisted; product direction, decisions, and deployment by the author)
 
-### Current rewrite
-The codebase is moving from Vite SPA + Express + MongoDB to a polyglot stack: Next.js 16 RSC frontend + Go HTTP backend + Postgres. Goals:
-- Server-side rendering on SEO-relevant routes (`/anime/:id`, `/seasonal`, `/search`)
-- Type-safe SQL via sqlc → pgx v5; no ORM runtime overhead
-- Single big-bang cutover with 24h rollback window
-- 48 HTTP endpoints in Go, danmaku websocket as separate `ws-server` microservice
-- Nightly Postgres pg_dump → Cloudflare R2 (30-day retention)
+### Branch model
 
-The live site at [animegoclub.com](https://animegoclub.com) now runs this new stack (cut over 2026-05-31). See the migration plan for phase-by-phase progress.
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable / production. Deploys from here. Only merges in after testing + review. |
+| `feat/go-backend` | Active development. New features and fixes land here first. |
 
 ### Known limitations (intentional, not bugs)
 - **Danmaku matching** — accuracy is not pursued to 100%; users fall back to the manual per-episode picker for uncommon sequels. See `feedback_danmaku_matching` in the project memory for the reasoning (no LLM/AI matching by design).
@@ -38,7 +35,7 @@ The live site at [animegoclub.com](https://animegoclub.com) now runs this new st
 ### Local development
 1. Read this README + [CHANGELOG.md](CHANGELOG.md) (most recent 2-3 entries give you the current mental model).
 2. Read [TODO.md](TODO.md) to see what was intentionally deferred.
-3. `cp .env.example .env && bash scripts/dev.sh` — verify the new stack boots locally.
+3. `cp .env.example .env && bash scripts/dev.sh` — verify the stack boots locally.
 4. SSH to VPS, `docker compose ps` — verify production is healthy.
 5. Re-read [DESIGN.md](DESIGN.md) before touching UI.
 
@@ -98,20 +95,17 @@ The live site at [animegoclub.com](https://animegoclub.com) now runs this new st
 
 ## Tech Stack
 
-Phase 3.0+ has landed — the polyglot stack below is now the production stack (cut over 2026-05-31). The v2.0.x legacy stack it replaced remains only on `main` until the branches merge.
-
 | Layer | Technology |
 |-------|-----------|
 | Frontend | React 19 · Next.js 16 (App Router, RSC) · Bun 1.3.x · libass-wasm · artplayer · dandanplay-vi |
-| Backend | Go 1.23 · chi router · pgx v5 · sqlc · river queue · ristretto cache |
+| Backend | Go 1.26 · chi router · pgx v5 · sqlc · river queue · ristretto cache |
 | Database | PostgreSQL 16 · pg_cron · pg_trgm |
-| Realtime | ws-server — standalone Node + socket.io process (extracted in P2.8) |
-| Auth | JWT (access 15m + refresh 7d) · bcrypt · httpOnly cookies |
+| Realtime | ws-server — standalone Node + socket.io process |
+| Auth | JWT (access 15m + refresh 14d) · bcrypt · httpOnly cookies |
 | Player | Artplayer · libass-wasm (ASS subtitles) · Web Workers (MD5 hash, MKV parsing) |
 | External APIs | AniList GraphQL · Bangumi API · dandanplay API · ACG.rip RSS |
-| Deployment | Docker Compose · Nginx reverse proxy · SSL |
+| Deployment | Docker Compose · Nginx reverse proxy · Cloudflare · SSL |
 | SEO | Server components on `/anime/:id`, `/seasonal`, `/search` · Dynamic sitemap · JSON-LD · OG tags |
-| Legacy (retiring) | Express + Mongoose + Socket.IO (`server/`, retires at P9) · Vite + React Router v7 (`client/`, retires at P10) · MongoDB (drops at P9) |
 
 ---
 
@@ -124,13 +118,13 @@ Fresh clone to `http://localhost:3000` should take under 5 minutes on a clean ma
 Install once:
 
 ```bash
-# Docker Desktop (Postgres + Mongo containers)
+# Docker Desktop (Postgres container)
 brew install --cask docker
 
 # Bun 1.3+ (Next.js runtime + ws-server)
 curl -fsSL https://bun.sh/install | bash
 
-# Go 1.23+ (go-api) and Air (hot reload)
+# Go 1.26+ (go-api) and Air (hot reload)
 brew install go
 go install github.com/cosmtrek/air@latest
 ```
@@ -143,7 +137,7 @@ go install github.com/cosmtrek/air@latest
 # 1. Copy env template and fill secrets (JWT, dandanplay app id/secret)
 cp .env.example .env
 
-# 2. One-shot dev loop: brings up Postgres + Mongo, runs go-api with Air,
+# 2. One-shot dev loop: brings up Postgres, runs go-api with Air,
 #    ws-server (Bun + socket.io), and next-app (Bun + Next.js 16).
 bash scripts/dev.sh
 ```
@@ -152,20 +146,20 @@ Open `http://localhost:3000`.
 
 ### Local prod stack (`docker compose` HTTPS via nginx)
 
-To exercise the production layout (nginx routing next-app + legacy Express,
+To exercise the production layout (nginx routing next-app + go-api + ws-server,
 self-signed SSL, full docker stack) before deploying to the VPS:
 
 ```bash
 # 1. Generate the local self-signed cert (one-time per machine).
 bash scripts/gen-local-cert.sh
 
-# 2. Copy and fill the prod env template (or copy .env, then edit values for docker DNS).
+# 2. Copy and fill the prod env template.
 cp .env.production.example .env.production
 # ⚠️  Required: ALLOWED_HOSTS=animegoclub.com,localhost,app
-# ⚠️  Required: MONGODB_URI=mongodb://mongodb:27017/animego  (Docker service name, not localhost)
+# ⚠️  Required: DATABASE_URL=postgres://animego:password@postgres:5432/animego
 
-# 3. Build + bring up the full stack (next-app, Express, Mongo, ws-server, nginx).
-docker compose up -d --build
+# 3. Build + bring up the full stack (next-app, go-api, ws-server, postgres, nginx).
+docker compose --env-file .env.production up -d --build
 
 # 4. Open https://localhost (accept the self-signed cert warning).
 ```
@@ -174,24 +168,21 @@ docker compose up -d --build
 
 | Port | Service | Notes |
 |------|---------|-------|
-| 3000 | next-app | new App Router frontend (RSC) |
+| 3000 | next-app | App Router frontend (RSC) |
 | 3001 | ws-server | socket.io danmaku |
 | 8080 | go-api | chi + pgx |
-| 5432 | postgres | new primary store |
-| 27017 | mongo | legacy, retires at P9 |
-| 5001 | server (Express) | legacy, retires at P9; `dev.sh` does not start it |
-| 5173 | client (Vite) | legacy, retires at P10; `dev.sh` does not start it |
+| 5432 | postgres | primary datastore |
 
 ### Environment Variables
 
 `.env.example` documents every key with a comment. The required block:
 
 ```env
-# Shared across all stacks
+# Shared
 JWT_SECRET=fill-with-32-byte-random-hex
 JWT_REFRESH_SECRET=fill-with-another-32-byte-random-hex
 JWT_EXPIRES_IN=15m
-JWT_REFRESH_EXPIRES_IN=7d
+JWT_REFRESH_EXPIRES_IN=14d
 DANDANPLAY_APP_ID=fill-with-your-app-id
 DANDANPLAY_APP_SECRET=fill-with-your-secret
 
@@ -199,78 +190,71 @@ DANDANPLAY_APP_SECRET=fill-with-your-secret
 POSTGRES_PASSWORD=devpassword
 DATABASE_URL=postgres://animego:devpassword@localhost:5432/animego?sslmode=disable
 PORT_GO=8080
-
-# Legacy Mongo + Express — still wired during cutover
-MONGODB_URI=mongodb://localhost:27017/animego
-PORT=5001
-CLIENT_ORIGIN=http://localhost:3000
 ```
 
 > dandanplay API credentials can be obtained at [api.dandanplay.net](https://api.dandanplay.net/).
-
-### Legacy Scripts (during cutover)
-
-Both legacy stacks remain runnable for parity verification and the cutover rollback window. They are intentionally **not** started by `scripts/dev.sh`:
-
-```bash
-npm run dev:server   # Express on :5001 (retires at P9)
-npm run dev:client   # Vite on :5173   (retires at P10)
-npm run dev:next     # Next.js on :3000 (same as scripts/dev.sh path)
-```
 
 ---
 
 ## Docker Deployment
 
 ```bash
-docker compose up -d --build
+docker compose --env-file .env.production up -d --build
 ```
 
-Services: `app` (Node.js) · `mongodb` (Mongo 7) · `nginx` (reverse proxy with SSL)
+Services: `go-api` · `next-app` · `ws-server` · `postgres` (16) · `nginx`
 
 ---
 
 ## Architecture
 
 ```
-Client (React SPA)
-  | /api/*
-Express API -> Controllers -> Services
-  |                             |
-MongoDB (cache + user data)   AniList GraphQL API
-                                | (background enrichment)
-                               Bangumi API (Chinese titles, scores, characters, episodes)
-                                | (on-demand)
-                               dandanplay API (danmaku matching, episode mapping, comments)
-                                | (real-time)
-                               Socket.IO (live danmaku)
+Browser
+  │  (local video files stay in the browser — bytes never touch the server)
+  │
+Cloudflare
+  │
+nginx (reverse proxy + SSL, origin locked to Cloudflare ranges)
+  ├── /              → next-app  (Next.js 16 SSR — all user-facing routes)
+  ├── /api/          → go-api    (Go 1.26, chi router)
+  └── /socket.io/    → ws-server (Node + socket.io — real-time danmaku)
+
+go-api
+  ├── PostgreSQL 16  (pg_cron · pg_trgm — cache + user data + danmaku)
+  ├── AniList GraphQL
+  ├── Bangumi API
+  ├── dandanplay API (offline cross-check oracle for enrichment bindings)
+  └── ACG.rip RSS
 ```
+
+next-app serves every user-facing route via SSR: home, `/anime/:id`, `/seasonal`, `/search`, `/login`, `/library`, `/player`, `/admin`, `/u/:username`.
 
 ### Data Pipeline
 
-1. **AniList fetch** — seasonal/search/detail queries with 700ms throttle
-2. **MongoDB cache** — 24h TTL, auto-refresh on expiry
-3. **Bangumi enrichment** — 4-phase background pipeline:
-   - Phase 1-3: keyword search -> `titleChinese` + `bgmId`
-   - Phase 4: scores, character Chinese names, episode titles
-   - V3: self-heal missing Chinese titles via direct `bgmId` lookup
-4. **Priority queue** — user-requested anime jumps to front of enrichment queue
-5. **Cache warming** — current season pre-populated on server start
+1. **AniList fetch** — seasonal/search/detail queries with 700 ms throttle
+2. **PostgreSQL** — single primary datastore; pg_cron handles danmaku TTL cleanup
+3. **Bangumi enrichment** — background pipeline via river queue, progressing through four confidence gates:
+   - **v0** — raw AniList data, no Chinese title
+   - **v1** — bind to the correct Bangumi subject via an authoritative AniList↔Bangumi id-map plus a confidence-gated fuzzy scorer; low-confidence bindings are parked for human review, never auto-guessed ("rather show romaji than a wrong Chinese title")
+   - **v2** — Bangumi score, character Chinese names, episode titles
+   - **v3** — terminal Chinese-title heal via direct `bgmId` lookup
+4. **dandanplay** — independent offline cross-check oracle for binding validation; not on the request hot path
+5. **Priority queue** — user-requested anime jumps to the front of the enrichment queue
 
 ### Danmaku Matching Flow
 
 1. **File parsing** — extract episode numbers from filenames (supports `[Group] Title - 01.mkv`, `S01E01`, `EP01`, etc.)
-2. **Hash computation** — MD5 of first 16MB via Web Worker (matches dandanplay spec)
-3. **Three-phase matching** — hash+filename combined match -> AnimeCache keyword match -> per-file hash fallback
+2. **Hash computation** — MD5 of first 16 MB via Web Worker (matches dandanplay spec)
+3. **Three-phase matching** — hash+filename combined match -> keyword match -> per-file hash fallback
 4. **Episode mapping** — dandanplay episode IDs mapped to local files, with OVA/SP support (`O1`, `S1` patterns)
 5. **Comment fetch** — danmaku loaded by dandanplay episode ID, rendered via Artplayer danmaku plugin
 
 ### Auth Flow
 
-- `accessToken` in React memory only (never localStorage)
-- `refreshToken` in httpOnly cookie
-- Automatic 401 -> refresh -> retry via Axios interceptor
-- `auth:expired` event triggers logout
+- `accessToken` — JWT, 15 min TTL, stored in memory only (never localStorage)
+- `refreshToken` — JWT, 14 day TTL, stored in httpOnly cookie
+- SSR-aware silent refresh: Next.js middleware reads the cookie server-side and refreshes before rendering protected pages
+- bcrypt for password hashing
 
 ---
 
@@ -309,11 +293,11 @@ Rate limit: 100 requests / 15 min / IP on all `/api` routes.
 ## Testing
 
 ```bash
-# Client tests (Vitest + jsdom)
-npm run test --workspace=client
+# Go API tests
+cd go-api && go test ./...
 
-# Server tests (Jest)
-npm run test --workspace=server
+# Next.js (next-app) tests — Bun's built-in test runner
+cd next-app && bun test
 ```
 
 ---

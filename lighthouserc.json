@@ -33,7 +33,18 @@
         "unused-javascript": "off",
         "unused-css-rules": "off",
         "uses-long-cache-ttl": "off",
-        "csp-xss": "off"
+        "csp-xss": "off",
+
+        "bf-cache": "warn",
+        "color-contrast": "warn",
+        "label-content-name-mismatch": "warn",
+        "target-size": "warn",
+        "lcp-lazy-loaded": "warn",
+        "prioritize-lcp-image": "warn",
+        "non-composited-animations": "warn",
+        "total-byte-weight": "warn",
+        "uses-optimized-images": "warn",
+        "errors-in-console": "warn"
       }
     },
     "upload": {

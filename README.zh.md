@@ -10,31 +10,33 @@
 
 ## 项目状态
 
-**状态：** 已上线生产环境（2026-05-31 切换）— 本分支就是生产栈
-**重构启动：** 2026-05-10(基于 v2.0.0)
+> **Go + Next.js 栈已是正式生产分支。**
+> `main` 是稳定/生产分支 — 只有经过测试和审查的代码才会合并进来；生产部署从 `main` 发出。`feat/go-backend` 是活跃开发分支，新工作在合并到 `main` 前先在此落地。
+> 旧的 Express + MongoDB + Vite SPA 栈已于 2026-06-01 完全退役。本仓库不再有 `client/` 或 `server/` 目录。
+
+**状态：** 已上线生产环境（2026-05-31 切换；旧栈 2026-06-01 退役）
+**重构启动：** 2026-05-10（基于 v2.0.0）
 **生产架构：** Next.js 16 + Bun + Go 1.26（chi · pgx · sqlc）+ PostgreSQL 16 + Node ws-server（Socket.IO）
-**构建方式：** Claude Code 辅助开发(产品方向、决策、部署由作者负责)
+**构建方式：** Claude Code 辅助开发（产品方向、决策、部署由作者负责）
 
-### 当前重构
-代码库正从 Vite SPA + Express 迁移到全栈 Next.js + TypeScript。目标:
-- 在 SEO 关键路由(`/anime/:id`、`/seasonal`、`/search`)启用服务端渲染
-- 客户端与 API 端到端类型安全
-- 单一运行时部署(Next.js standalone)
-- 89+ Express endpoint 迁移到 Next API routes
+### 分支模型
 
-线上 [animegoclub.com](https://animegoclub.com) 现在跑的是新栈（2026-05-31 切换）。迁移分阶段计划见 `docs/migration/`。
+| 分支 | 用途 |
+|------|------|
+| `main` | 稳定 / 生产。从此处部署。仅在测试 + 审查后合并代码。 |
+| `feat/go-backend` | 活跃开发。新功能和修复先在此落地。 |
 
-### 已知限制(有意为之,非 bug)
-- **弹幕匹配** — 不追求 100% 准确率,冷门续作用手动选集兜底。原因见 project memory `feedback_danmaku_matching`(明确不接 LLM/AI 匹配)。
-- **Bangumi 富化** — 后台管道,新番可能需要一个周期才出现中文标题/评分。
-- **单实例 WebSocket** — Socket.IO 弹幕未接 Redis adapter,横向扩容需补(见 TODO.md 待办五)。
-- **无用户隐私开关** — `/u/:username` 追番页当前阶段默认公开(见 TODO.md 待办四)。
+### 已知限制（有意为之，非 bug）
+- **弹幕匹配** — 不追求 100% 准确率，冷门续作用手动选集兜底。原因见 project memory `feedback_danmaku_matching`（明确不接 LLM/AI 匹配）。
+- **Bangumi 富化** — 后台管道，新番可能需要一个周期才出现中文标题/评分。
+- **单实例 WebSocket** — Socket.IO 弹幕未接 Redis adapter，横向扩容需补（见 TODO.md 待办五）。
+- **无用户隐私开关** — `/u/:username` 追番页当前阶段默认公开（见 TODO.md 待办四）。
 
 ### 本地开发
-1. 读本 README + [CHANGELOG.md](CHANGELOG.md)(最近 2-3 条即可还原当前心智模型)。
+1. 读本 README + [CHANGELOG.md](CHANGELOG.md)（最近 2-3 条即可还原当前心智模型）。
 2. 读 [TODO.md](TODO.md) 了解有意推迟的事项。
-3. `cp .env.example .env && bash scripts/dev.sh` — 新栈本地能跑起来即可。
-4. SSH 到 VPS,`docker compose ps` — 确认生产正常。
+3. `cp .env.example .env && bash scripts/dev.sh` — 验证本地能跑起来。
+4. SSH 到 VPS，`docker compose ps` — 确认生产正常。
 5. 动 UI 前先读 [DESIGN.md](DESIGN.md)。
 
 ---
@@ -93,20 +95,17 @@
 
 ## 技术栈
 
-Phase 3.0+ 已 land — 下方多语言栈现在是生产环境栈（2026-05-31 切换）。它取代的 v2.0.x 旧栈只剩在 `main` 分支上，直到两条分支合并。
-
 | 层级 | 技术 |
 |------|------|
 | 前端 | React 19 · Next.js 16（App Router、RSC）· Bun 1.3.x · libass-wasm · artplayer · dandanplay-vi |
-| 后端 | Go 1.23 · chi 路由 · pgx v5 · sqlc · river 队列 · ristretto 缓存 |
+| 后端 | Go 1.26 · chi 路由 · pgx v5 · sqlc · river 队列 · ristretto 缓存 |
 | 数据库 | PostgreSQL 16 · pg_cron · pg_trgm |
-| 实时 | ws-server — 独立 Node + socket.io 进程（P2.8 拆出） |
-| 认证 | JWT（access 15m + refresh 7d）· bcrypt · httpOnly Cookie |
+| 实时 | ws-server — 独立 Node + socket.io 进程 |
+| 认证 | JWT（access 15m + refresh 14d）· bcrypt · httpOnly Cookie |
 | 播放器 | Artplayer · libass-wasm（ASS 字幕）· Web Workers（MD5 hash、MKV 解析） |
 | 外部 API | AniList GraphQL · Bangumi API · 弹弹Play API · ACG.rip RSS |
-| 部署 | Docker Compose · Nginx 反向代理 · SSL |
+| 部署 | Docker Compose · Nginx 反向代理 · Cloudflare · SSL |
 | SEO | `/anime/:id`、`/seasonal`、`/search` 服务端组件 · 动态站点地图 · JSON-LD · OG 标签 |
-| 旧栈（退役中） | Express + Mongoose + Socket.IO（`server/`，P9 退役）· Vite + React Router v7（`client/`，P10 退役）· MongoDB（P9 切断） |
 
 ---
 
@@ -119,13 +118,13 @@ Phase 3.0+ 已 land — 下方多语言栈现在是生产环境栈（2026-05-31 
 一次性安装：
 
 ```bash
-# Docker Desktop（Postgres + Mongo 容器）
+# Docker Desktop（Postgres 容器）
 brew install --cask docker
 
 # Bun 1.3+（Next.js 运行时 + ws-server）
 curl -fsSL https://bun.sh/install | bash
 
-# Go 1.23+（go-api）与 Air（热重载）
+# Go 1.26+（go-api）与 Air（热重载）
 brew install go
 go install github.com/cosmtrek/air@latest
 ```
@@ -138,35 +137,51 @@ go install github.com/cosmtrek/air@latest
 # 1. 复制 env 模板并填密钥（JWT、弹弹Play app id/secret）
 cp .env.example .env
 
-# 2. 一键 dev loop：拉起 Postgres + Mongo，启动 go-api（Air 热重载）、
+# 2. 一键 dev loop：拉起 Postgres，启动 go-api（Air 热重载）、
 #    ws-server（Bun + socket.io）、next-app（Bun + Next.js 16）。
 bash scripts/dev.sh
 ```
 
 访问 `http://localhost:3000`。
 
+### 本地生产栈（`docker compose` HTTPS + nginx）
+
+在部署到 VPS 前，本地复现生产布局（nginx 路由 next-app + go-api + ws-server，自签名 SSL，完整 docker 栈）：
+
+```bash
+# 1. 生成本地自签名证书（每台机器一次性操作）。
+bash scripts/gen-local-cert.sh
+
+# 2. 复制并填写生产 env 模板。
+cp .env.production.example .env.production
+# ⚠️  必填：ALLOWED_HOSTS=animegoclub.com,localhost,app
+# ⚠️  必填：DATABASE_URL=postgres://animego:password@postgres:5432/animego
+
+# 3. 构建并拉起完整栈（next-app、go-api、ws-server、postgres、nginx）。
+docker compose --env-file .env.production up -d --build
+
+# 4. 访问 https://localhost（接受自签名证书警告）。
+```
+
 ### 开发端口
 
 | 端口 | 服务 | 说明 |
 |------|------|------|
-| 3000 | next-app | 新 App Router 前端（RSC） |
+| 3000 | next-app | App Router 前端（RSC） |
 | 3001 | ws-server | socket.io 弹幕 |
 | 8080 | go-api | chi + pgx |
-| 5432 | postgres | 新主库 |
-| 27017 | mongo | 旧库，P9 退役 |
-| 5001 | server（Express） | 旧栈，P9 退役;`dev.sh` 不启动 |
-| 5173 | client（Vite） | 旧栈，P10 退役;`dev.sh` 不启动 |
+| 5432 | postgres | 主数据库 |
 
 ### 环境变量
 
 `.env.example` 已为每个 key 加注释。必填部分：
 
 ```env
-# 所有栈共享
+# 共享
 JWT_SECRET=fill-with-32-byte-random-hex
 JWT_REFRESH_SECRET=fill-with-another-32-byte-random-hex
 JWT_EXPIRES_IN=15m
-JWT_REFRESH_EXPIRES_IN=7d
+JWT_REFRESH_EXPIRES_IN=14d
 DANDANPLAY_APP_ID=fill-with-your-app-id
 DANDANPLAY_APP_SECRET=fill-with-your-secret
 
@@ -174,78 +189,71 @@ DANDANPLAY_APP_SECRET=fill-with-your-secret
 POSTGRES_PASSWORD=devpassword
 DATABASE_URL=postgres://animego:devpassword@localhost:5432/animego?sslmode=disable
 PORT_GO=8080
-
-# 旧 Mongo + Express — cutover 期间仍接线
-MONGODB_URI=mongodb://localhost:27017/animego
-PORT=5001
-CLIENT_ORIGIN=http://localhost:3000
 ```
 
 > 弹弹Play API 凭据可在 [api.dandanplay.net](https://api.dandanplay.net/) 申请。
-
-### 旧栈命令（cutover 期间）
-
-两套旧栈保留可跑状态用于 parity 验证和 cutover 回滚窗口。`scripts/dev.sh` **不会**自动启动它们：
-
-```bash
-npm run dev:server   # Express :5001（P9 退役）
-npm run dev:client   # Vite :5173    （P10 退役）
-npm run dev:next     # Next.js :3000（等同 scripts/dev.sh 路径）
-```
 
 ---
 
 ## Docker 部署
 
 ```bash
-docker compose up -d --build
+docker compose --env-file .env.production up -d --build
 ```
 
-服务：`app`（Node.js）· `mongodb`（Mongo 7）· `nginx`（反向代理 + SSL）
+服务：`go-api` · `next-app` · `ws-server` · `postgres`（16）· `nginx`
 
 ---
 
 ## 架构
 
 ```
-客户端 (React SPA)
-  | /api/*
-Express API -> 控制器 -> 服务层
-  |                       |
-MongoDB（缓存 + 用户数据） AniList GraphQL API
-                            |（后台富化）
-                           Bangumi API（中文标题、评分、角色、分集）
-                            |（按需调用）
-                           弹弹Play API（弹幕匹配、集数映射、弹幕评论）
-                            |（实时）
-                           Socket.IO（实时弹幕）
+浏览器
+  │  （本地视频文件留在浏览器端 — 视频字节永远不触碰服务器）
+  │
+Cloudflare
+  │
+nginx（反向代理 + SSL，源站锁定为 Cloudflare IP 段）
+  ├── /              → next-app  （Next.js 16 SSR — 所有面向用户的路由）
+  ├── /api/          → go-api    （Go 1.26，chi 路由）
+  └── /socket.io/    → ws-server （Node + socket.io — 实时弹幕）
+
+go-api
+  ├── PostgreSQL 16  （pg_cron · pg_trgm — 缓存 + 用户数据 + 弹幕）
+  ├── AniList GraphQL
+  ├── Bangumi API
+  ├── 弹弹Play API   （离线交叉校验 oracle，不在请求热路径上）
+  └── ACG.rip RSS
 ```
+
+next-app 通过 SSR 服务所有面向用户的路由：首页、`/anime/:id`、`/seasonal`、`/search`、`/login`、`/library`、`/player`、`/admin`、`/u/:username`。
 
 ### 数据管道
 
-1. **AniList 请求** — 季度/搜索/详情查询，700ms 节流
-2. **MongoDB 缓存** — 24h TTL，过期自动刷新
-3. **Bangumi 富化** — 4 阶段后台管道：
-   - Phase 1-3：关键词搜索 -> `titleChinese` + `bgmId`
-   - Phase 4：评分、角色中文名、分集标题
-   - V3：通过 `bgmId` 直接查询修复缺失的中文标题
-4. **优先队列** — 用户请求的番剧插队到队首
-5. **缓存预热** — 服务启动时预填充当季番剧
+1. **AniList 请求** — 季度/搜索/详情查询，700 ms 节流
+2. **PostgreSQL** — 唯一主数据库；pg_cron 处理弹幕 TTL 清理
+3. **Bangumi 富化** — 通过 river 队列的后台管道，经过四个置信度关卡：
+   - **v0** — 原始 AniList 数据，无中文标题
+   - **v1** — 通过权威 AniList↔Bangumi id-map 加置信度门控模糊评分器绑定到正确的 Bangumi 条目；低置信度绑定挂起人工审核，从不自动猜测（"宁可显示罗马音也不显示错误中文标题"）
+   - **v2** — Bangumi 评分、角色中文名、分集标题
+   - **v3** — 通过 `bgmId` 直接查询的终态中文标题自愈
+4. **弹弹Play** — 独立的离线交叉校验 oracle，用于验证绑定；不在请求热路径上
+5. **优先队列** — 用户请求的番剧插队到富化队列队首
 
 ### 弹幕匹配流程
 
 1. **文件解析** — 从文件名提取集数号（支持 `[字幕组] 标题 - 01.mkv`、`S01E01`、`EP01` 等格式）
-2. **Hash 计算** — Web Worker 计算文件前 16MB 的 MD5（符合弹弹Play 规范）
-3. **三阶段匹配** — hash+文件名组合匹配 -> AnimeCache 关键词匹配 -> 逐文件 hash 回退
+2. **Hash 计算** — Web Worker 计算文件前 16 MB 的 MD5（符合弹弹Play 规范）
+3. **三阶段匹配** — hash+文件名组合匹配 -> 关键词匹配 -> 逐文件 hash 回退
 4. **集数映射** — 弹弹Play 集数 ID 映射到本地文件，支持 OVA/SP（`O1`、`S1` 格式）
 5. **弹幕加载** — 通过弹弹Play 集数 ID 加载弹幕，由 Artplayer 弹幕插件渲染
 
 ### 认证流程
 
-- `accessToken` 仅存于 React 内存（不写 localStorage）
-- `refreshToken` 存于 httpOnly Cookie
-- Axios 拦截器自动处理 401 -> 刷新 -> 重试
-- `auth:expired` 事件触发登出
+- `accessToken` — JWT，15 分钟有效期，仅存于内存（不写 localStorage）
+- `refreshToken` — JWT，14 天有效期，存于 httpOnly Cookie
+- SSR 感知静默刷新：Next.js middleware 服务端读取 cookie 并在渲染受保护页面前刷新 token
+- 密码使用 bcrypt 哈希
 
 ---
 
@@ -284,11 +292,11 @@ MongoDB（缓存 + 用户数据） AniList GraphQL API
 ## 测试
 
 ```bash
-# 客户端测试（Vitest + jsdom）
-npm run test --workspace=client
+# Go API 测试
+cd go-api && go test ./...
 
-# 服务端测试（Jest）
-npm run test --workspace=server
+# Next.js（next-app）测试 — Bun 内置测试运行器
+cd next-app && bun test
 ```
 
 ---

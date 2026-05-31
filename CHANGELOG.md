@@ -2,6 +2,41 @@
 
 ---
 
+## [3.0.0] - 2026-06-01
+
+### 全栈 Go 架构 + 老栈退役 — Express / Mongo / Vite SPA 全部退场
+
+历时 2026-05-10 → 06-01,把 AnimeGo 从 Vite SPA + Express + MongoDB 整体重写为 **Next.js 16 (RSC) + Go + PostgreSQL** 多语言栈,并在 06-01 物理退役全部 legacy 代码。线上 [animegoclub.com](https://animegoclub.com) 已跑新栈(05-31 切换)。
+
+**架构(现 5 个服务)**
+
+- **go-api**(Go 1.26 · chi · pgx v5 · sqlc · river queue · ristretto):48 个 HTTP endpoint 全量重写替代 Express;类型安全 SQL(sqlc);富化走 river 后台队列。
+- **next-app**(Next.js 16 App Router / RSC · Bun 构建 · standalone Node):SSR 接管所有用户路由替代 Vite SPA;SEO 关键页(`/anime/:id`、`/seasonal`、`/search`)服务端渲染。
+- **ws-server**(独立 Node + socket.io):弹幕实时层从 Express 抽出成独立微服务。
+- **postgres**(PostgreSQL 16 · pg_cron · pg_trgm):单一主存储替代 MongoDB;normalize schema + 生成列全文检索 + 弹幕 TTL pg_cron。
+- **nginx**:反代 + SSL,源站锁 Cloudflare 段。
+
+**富化匹配重构**
+
+- 老 `selectHit` 抓搜索 `list[0]`、无相似度校验 → ~10% bgm 错绑(错中文名 + 错评分)。重写为**置信度分级匹配**:权威 AniList↔Bangumi id-map(10,972 条)命中直接绑;否则评分模糊匹配(标题相似度 + 年份 + 集数),高置信绑、**低置信宁可不绑、转人工复核**(「宁可显示罗马音也不显示错的中文名」)。
+- 富化版本 v0→v1(绑定)→v2(评分 / 角色中文名 / 集数)→v3(中文补救)分阶段链式。dandanplay 作为**离线独立交叉验证 oracle**(不在请求热路径)。
+- 一次性 backfill 修正存量 **340 个 id-map 错绑**(One Piece 等被绑到剧场版的全部修回主条目),零 dandanplay 配额。
+
+**老栈退役(2026-06-01)**
+
+- 删除 `app`(Express)+ `mongodb` 服务、`client/`(Vite SPA)+ `server/`(Express)目录、根 Dockerfile + mongo 迁移工具(共 46,002 行删除)。
+- mongo 数据 `mongodump` 归档后删容器 + 卷;prod 内存占用降约 900MB。
+
+**其它**
+
+- dandanplay client 加 429 / 5xx 退避(认 Retry-After + full-jitter 指数退避、ctx 可取消)。
+- admin 富化表:表头 / 数据列错位修复 + 匹配来源列(id_map / fuzzy_high / fuzzy_low 徽章)+ BGM ID 跳 bgm.tv 链接。
+- Auth:JWT access 15m / refresh 14d,httpOnly cookie,SSR 感知刷新。
+- 部署:单 `docker compose` 5 服务 + nginx SSL,VPS 在 Cloudflare 后。
+- **分支模型**:`main` = 稳定 / 生产(只进测试过的代码,从此部署);`feat/go-backend` = 活跃开发。
+
+---
+
 ## [2.0.1] - 2026-05-11
 
 ### libass-wasm 字幕渲染 — MKV 内嵌 ASS 不再乱码

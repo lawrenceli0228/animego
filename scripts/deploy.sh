@@ -1,11 +1,12 @@
 #!/bin/bash
-# Deploy the current branch on the VPS. Default branch is feat/go-backend
-# because that's the canonical branch through P0-P10 (main is 119 commits
-# behind as of 2026-05-26 and will be merged after P10 lands).
+# Deploy a branch on the VPS. Default is `main` — the stable/production
+# branch (only tested, reviewed code lands there; production deploys from
+# it). Active development happens on feat/go-backend; pass a branch name
+# explicitly to deploy a dev build.
 #
 # Usage:
-#   ./scripts/deploy.sh                   # pulls feat/go-backend
-#   ./scripts/deploy.sh main              # pulls main (post-merge)
+#   ./scripts/deploy.sh                   # pulls main (production)
+#   ./scripts/deploy.sh feat/go-backend   # pulls the dev branch
 #   ./scripts/deploy.sh some/other-branch # pulls some/other-branch
 #
 # Pre-flight (one-time on a fresh VPS):
@@ -16,7 +17,7 @@
 set -e
 
 APP_DIR="/opt/animego"
-BRANCH="${1:-feat/go-backend}"
+BRANCH="${1:-main}"
 
 cd "$APP_DIR"
 

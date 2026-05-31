@@ -1,10 +1,18 @@
 # AnimeGo 待办
 
-> **当前阶段:** 全栈重构期 v2(2026-05-12 起)。详细 plan 见 [docs/migration/MIGRATION_PLAN.md](docs/migration/MIGRATION_PLAN.md) — single source of truth。
->
-> **v2 vs v1:** 后端从 Bun+Next.js → **Go+PostgreSQL**;迁移路径从 strangler-fig → **big-bang + shadow traffic**;schema 从 hybrid → **全 normalize**。详见 plan §1 决策日志。
->
-> 本文档只追踪进度,详细 Tasks / Tests / Acceptance 在 MIGRATION_PLAN.md。
+> **状态(2026-06-01):全栈 Go 重构 + 老栈退役已完成上线**(v3.0.0,见 CHANGELOG)。下方 Part 1 的 P0–P11 重构阶段全部完成,保留作历史记录。活跃开发在 `feat/go-backend`,稳定代码合入 `main` 部署。
+
+## 🔭 退役后 follow-ups(新)
+
+- [ ] **老 bug 在新架构复查**:退役前 main 上 2 个 fix 改的是已删老文件,但 bug 本身可能在新代码复现 —— ① 季节查询参数大小写归一(老 `server` 修过;查 go-api seasonal handler 是否归一,否则 lowercase `?season=fall` 会 cache miss + AniList 400);② 剧集解析正则词边界(老 `client` 修过 `EP?\s*(\d+)` 缺 `\b` 导致 prose 误匹配;查 next-app 解析是否有同坑)。
+- [ ] **SlamDunk(anilist 170)id-map 可疑**:backfill 后绑到 bgm 3731「灌篮高手 剧场版」(score 7.30);若 170 实为 TV 则是上游 Fribb 映射错 —— 人工核 + 必要时 admin 表手动纠。
+- [ ] **dandanplay 全量 report + heal**:429 退避已上线,可跑带 ddp 的全量 `--report`(出 QUARANTINE)+ `--heal` 补中文 —— 抢在 dandanplay 2026-06-25 配额上线前。
+- [ ] **匹配来源列数据稀疏**:`bgm_match_source` 仅最近重富化的 ~3366 行有值,7185 行(migration 0011 前的老绑)为空,随 periodic sweep 重富化逐步填。
+- [ ] **`/welcome` 1.18s 偏慢**(其余路由 <0.12s):复测确认是冷启动还是稳定慢。
+- [ ] **Lighthouse 质量项**(2026-06-01 把这些从 error 降成 warn 让 CI 过,值得真修):LCP 图提 `fetchpriority="high"` 且不懒加载(`lcp-lazy-loaded`/`prioritize-lcp-image`)· 上 WebP/AVIF(`uses-optimized-images`/`modern-image-formats`)· 对比度(`color-contrast`)· 移动端触控目标(`target-size`)· 控制台报错(`errors-in-console`)· bf-cache 不可用排查。CI 跑 mobile 对 live prod。
+- [ ] 决定 deploy 切 main 后是否退役 `feat/go-backend` 分支(目前两分支内容一致)。
+
+---
 
 ---
 
