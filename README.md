@@ -271,6 +271,12 @@ npm run test --workspace=server
 
 ---
 
+## Contributing
+
+This is a proprietary project (see [License](#license)) — it is **not** open source. External code contributions (pull requests) are not accepted at this time, as no contributor license agreement (CLA) is in place. Bug reports and feedback via issues are welcome. A CLA may be introduced later if the project opens up to community contributions.
+
+---
+
 ## License
 
 **All rights reserved.** This source is published for transparency and reference only; it is **not** open-source software. No permission is granted to use, copy, modify, run, host, or distribute the code without prior written consent. See [LICENSE](LICENSE) for the full terms. The license covers only the original code in this repository, not the third-party data/APIs it integrates (AniList, Bangumi, dandanplay, ACG.rip).
