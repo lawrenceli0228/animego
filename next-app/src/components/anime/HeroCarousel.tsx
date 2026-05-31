@@ -303,7 +303,10 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
                     {seasonLabel(dict, anime.season)} {anime.seasonYear}
                   </p>
                 ) : null}
-                <h1 style={titleStyle}>{title}</h1>
+                {/* h2: the page-level <h1> is the brand heading on the
+                    homepage (app/page.tsx); the hero anime title is a
+                    featured sub-heading. */}
+                <h2 style={titleStyle}>{title}</h2>
                 {anime.genres && anime.genres.length > 0 ? (
                   <div style={genresRowStyle}>
                     {anime.genres.slice(0, 4).map((g) => (

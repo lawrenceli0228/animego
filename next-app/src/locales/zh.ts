@@ -10,6 +10,13 @@ const zh = {
       '动漫', '番剧', '追番', '弹幕', 'AnimeGo', 'anime',
       'danmaku', 'OKLCH', '海报色', '字幕组', '本地播放器',
     ],
+    // Homepage SEO: brand + 番剧 front-loaded so the brand+category query
+    // "animegoclub 番剧" matches the homepage, not a detail page. See
+    // app/page.tsx generateMetadata + the visually-hidden <h1>.
+    homeTitle: 'AnimeGoClub · 番剧追番与动漫发现平台 · Rundle Streetが暮れる。東京が灯る。',
+    homeDescription:
+      'AnimeGoClub 是番剧追番与动漫发现平台 —— 每季新番、评分、声优、弹幕评论与追番管理。',
+    homeH1: 'AnimeGoClub —— 番剧追番与动漫发现平台',
   },
   // Backend error.message → 中文 (lookup by exact English string)
   // Backend is the source of truth for English wording; if it changes,

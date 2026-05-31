@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { CSSProperties } from "react";
 import HeroCarousel from "@/components/anime/HeroCarousel";
 import TrendingSection from "@/components/home/TrendingSection";
 import ContinueWatching from "@/components/anime/ContinueWatching";
@@ -138,27 +139,79 @@ async function safeYearlyTop(year: number): Promise<YearlyTopItem[]> {
   }
 }
 
+// Visually-hidden style for the SEO <h1> — keeps the hero design intact
+// while giving the homepage a brand+category primary heading.
+const SR_ONLY: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
+
+// schema.org Organization + WebSite for the homepage (the entity's
+// canonical URL). inLanguage zh-CN + alternateName "AnimeGo" disambiguate
+// us from the Russian piracy site "AnimeGO.org" that Google's AI Overview
+// conflates with this brand; the SearchAction can earn a sitelinks box.
+const HOME_JSON_LD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://animegoclub.com/#organization",
+      name: "AnimeGoClub",
+      alternateName: "AnimeGo",
+      url: "https://animegoclub.com",
+      description:
+        "番剧追番与动漫发现平台 — 每季新番、评分、声优、弹幕评论与追番管理。",
+      sameAs: ["https://github.com/lawrenceli0228/animego"],
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://animegoclub.com/#website",
+      url: "https://animegoclub.com",
+      name: "AnimeGoClub",
+      alternateName: "AnimeGo",
+      inLanguage: "zh-CN",
+      publisher: { "@id": "https://animegoclub.com/#organization" },
+      potentialAction: {
+        "@type": "SearchAction",
+        target: {
+          "@type": "EntryPoint",
+          urlTemplate: "https://animegoclub.com/search?q={search_term_string}",
+        },
+        "query-input": "required name=search_term_string",
+      },
+    },
+  ],
+};
+
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDict();
-  // Use the legacy site title and a discovery-oriented description.
-  // The marketing copy from LandingPage now lives on /welcome.
+  // Homepage title + description lead with the brand and the 番剧 category
+  // keyword (dict.meta.home*) so the brand+category query "animegoclub 番剧"
+  // resolves to the homepage rather than a detail page.
   return {
-    title: { absolute: "AnimeGoClub" },
-    description: dict.landing.hero.sub,
+    title: { absolute: dict.meta.homeTitle },
+    description: dict.meta.homeDescription,
     alternates: {
       canonical: "/",
       languages: { "zh-CN": "/", "en-US": "/?lang=en" },
     },
     openGraph: {
-      title: "AnimeGoClub",
-      description: dict.landing.hero.sub,
+      title: dict.meta.homeTitle,
+      description: dict.meta.homeDescription,
       url: "/",
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: "AnimeGoClub",
-      description: dict.landing.hero.sub,
+      title: dict.meta.homeTitle,
+      description: dict.meta.homeDescription,
     },
   };
 }
@@ -185,6 +238,14 @@ export default async function HomePage() {
 
   return (
     <main>
+      {/* SEO: the homepage's primary heading is the brand + category, not
+          the rotating hero anime title (an <h2> inside HeroCarousel).
+          Visually hidden so the hero design is unchanged. */}
+      <h1 style={SR_ONLY}>{dict.meta.homeH1}</h1>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(HOME_JSON_LD) }}
+      />
       <HeroCarousel animeList={heroList} dict={dict} lang={lang} />
       <div
         className="container"

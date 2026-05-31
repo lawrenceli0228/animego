@@ -10,6 +10,11 @@ const en = {
       'anime', 'donghua', 'binge watch', 'danmaku', 'AnimeGo', 'anime streaming',
       'bullet comments', 'OKLCH', 'cover colors', 'fansub groups', 'local player',
     ],
+    // Homepage SEO — mirror of zh.meta.home* (brand + category front-loaded).
+    homeTitle: 'AnimeGoClub · Anime tracking & discovery · Rundle Streetが暮れる。東京が灯る。',
+    homeDescription:
+      'AnimeGoClub is an anime tracking & discovery platform — seasonal premieres, ratings, voice cast, danmaku comments, and watchlist management.',
+    homeH1: 'AnimeGoClub — Anime tracking & discovery',
   },
   // Backend already emits English error.message strings; passthrough is
   // handled by the t(`errors.${msg}`, { defaultValue: msg }) call site.
