@@ -27,7 +27,7 @@ async function safeSchedule(): Promise<ScheduleResponse> {
 export async function generateMetadata(): Promise<Metadata> {
   const [dict, lang] = await Promise.all([getDict(), getLang()]);
   const title =
-    lang === "zh" ? "今日新番放送日历 — AnimeGo" : "Airing Calendar — AnimeGo";
+    lang === "zh" ? "今日新番放送日历" : "Airing Calendar";
   const description =
     lang === "zh"
       ? "本周新番放送时间表，按周一至周日分组，覆盖连载中的 TV 动画与 ONA。每日更新。"

@@ -48,12 +48,12 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL("https://animegoclub.com"),
     title: {
-      template: "%s . AnimeGo",
+      template: "%s . AnimeGoClub",
       default: dict.meta.titleDefault,
     },
     description: dict.meta.description,
-    applicationName: "AnimeGo",
-    authors: [{ name: "AnimeGo" }],
+    applicationName: "AnimeGoClub",
+    authors: [{ name: "AnimeGoClub" }],
     generator: "Next.js",
     keywords: dict.meta.keywords,
     robots: { index: true, follow: true },
@@ -63,7 +63,7 @@ export async function generateMetadata(): Promise<Metadata> {
       apple: "/apple-touch-icon.png",
     },
     openGraph: {
-      siteName: "AnimeGo",
+      siteName: "AnimeGoClub",
       type: "website",
       locale: lang === "en" ? "en_US" : "zh_CN",
       alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],

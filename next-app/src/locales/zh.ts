@@ -3,7 +3,7 @@ const zh = {
   common: { loading: '加载中...' },
   // Root <head> metadata (browser title, description, SEO keywords).
   meta: {
-    titleDefault: 'AnimeGo . 追你该追的那一话',
+    titleDefault: 'AnimeGoClub . 追你该追的那一话',
     description:
       '把封面当主角的动漫站。多源聚合、弹幕同屏、手动选集兜底 -- 不做信息流推荐，不藏 VIP 集数。',
     keywords: [
@@ -322,7 +322,7 @@ const zh = {
   },
   // Landing / About page
   landing: {
-    docTitle: 'AnimeGo · 追你该追的那一话',
+    docTitle: 'AnimeGoClub · 追你该追的那一话',
     hero: {
       eyebrow: 'v1.0.12 · OKLCH 海报色身份',
       titleLine1: ['追', '你', '该', '追', '的'],

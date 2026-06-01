@@ -3,7 +3,7 @@ const en = {
   common: { loading: 'Loading...' },
   // Root <head> metadata (browser title, description, SEO keywords).
   meta: {
-    titleDefault: 'AnimeGo . Catch the episode you came for',
+    titleDefault: 'AnimeGoClub . Catch the episode you came for',
     description:
       'An anime site that makes the cover art the star. Multi-source aggregation, on-screen danmaku, manual episode picking as a fallback — no algorithmic feed, no paywalled episodes.',
     keywords: [
@@ -270,7 +270,7 @@ const en = {
   },
   // Landing / About page
   landing: {
-    docTitle: 'AnimeGo · Watch the one you came for',
+    docTitle: 'AnimeGoClub · Watch the one you came for',
     hero: {
       eyebrow: 'v1.0.12 · OKLCH poster identity',
       titleLine1: ['Watch', 'the', 'one'],

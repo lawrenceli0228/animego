@@ -49,11 +49,11 @@ async function safeSubscriptions(
 export async function generateMetadata(): Promise<Metadata> {
   const [dict, lang] = await Promise.all([getDict(), getLang()]);
   const title =
-    lang === "zh" ? "我的追番 — AnimeGo" : "My Watchlist — AnimeGo";
+    lang === "zh" ? "我的追番 — AnimeGoClub" : "My Watchlist — AnimeGoClub";
   const description =
     lang === "zh"
       ? `${dict.profile.label} — ${dict.meta.description}`
-      : `Your personal watchlist on AnimeGo.`;
+      : `Your personal watchlist on AnimeGoClub.`;
 
   return {
     title: { absolute: title },

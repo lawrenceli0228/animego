@@ -20,7 +20,7 @@ export default function ShareButtonIsland({
 
   const handle = async () => {
     const url = `${window.location.origin}/u/${username}`;
-    const title = `${username} — AnimeGo`;
+    const title = `${username} — AnimeGoClub`;
 
     if (navigator.share) {
       try {

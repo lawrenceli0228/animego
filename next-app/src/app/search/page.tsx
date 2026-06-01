@@ -149,8 +149,8 @@ export async function generateMetadata({
     title,
     description: hasQuery
       ? lang === "zh"
-        ? `AnimeGo 搜索结果: ${q || genre}`
-        : `AnimeGo search results for ${q || genre}`
+        ? `AnimeGoClub 搜索结果: ${q || genre}`
+        : `AnimeGoClub search results for ${q || genre}`
       : dict.search.prompt,
     robots: hasQuery
       ? { index: false, follow: true }

@@ -69,11 +69,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const canonical = `/u/${username}`;
 
   return {
-    title: { absolute: `${title} · AnimeGo` },
+    title: { absolute: `${title} · AnimeGoClub` },
     description:
       lang === "zh"
-        ? `${username} 的追番列表和社交主页 — AnimeGo`
-        : `${username}'s watchlist and social profile on AnimeGo`,
+        ? `${username} 的追番列表和社交主页 — AnimeGoClub`
+        : `${username}'s watchlist and social profile on AnimeGoClub`,
     alternates: {
       canonical,
       languages: {
@@ -83,7 +83,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     },
     openGraph: {
       title,
-      siteName: "AnimeGo",
+      siteName: "AnimeGoClub",
       type: "profile",
       url: canonical,
     },
