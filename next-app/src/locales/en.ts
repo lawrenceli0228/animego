@@ -221,7 +221,7 @@ const en = {
   },
   // Player
   player: {
-    pageTitle: 'Player — AnimeGo',
+    pageTitle: 'Player',
     dropLabel: 'Select video folder',
     dropTitle: 'Drag anime folder here or click to select',
     dropReplace: 'Drop to replace current session',
@@ -430,7 +430,7 @@ const en = {
   },
   // Library
   library: {
-    pageTitle: 'My Library — AnimeGo',
+    pageTitle: 'My Library',
     addFolder: 'Add folder',
     dropFolder: 'Drop folder here',
     unsupportedBanner: 'Your browser does not keep libraries between sessions.',
@@ -554,7 +554,7 @@ const en = {
   // Admin
   admin: {
     title: 'Admin Dashboard',
-    pageTitle: 'Admin Dashboard — AnimeGo',
+    pageTitle: 'Admin Dashboard',
     enrichmentTitle: 'Enrichment Management',
     navOverview: 'Overview',
     navEnrichment: 'Enrichment',
