@@ -160,3 +160,27 @@ h4 {
     animation: none;
   }
 }
+
+/* ── Player: fullscreen subtitle-cue flicker ───────────────────────────
+   artplayer rewrites .art-subtitle innerHTML on every `cuechange` and
+   toggles its display between dialogue lines. The element is a full-width,
+   bottom-anchored, z-index:20 overlay with a 4-layer text-shadow outline.
+   In fullscreen the browser re-rasterizes/re-composites that large layer on
+   each cue and bleeds a repaint into the bottom region it overlaps (controls
+   + danmaku heatmap) → a visible flicker every time a subtitle line appears
+   or changes. Windowed mode is too small to notice; only fullscreen shows it.
+   Known Chrome fullscreen + subtitle compositing quirk (cf. Stremio #644).
+
+   Fix: promote the subtitle (and the heatmap it overlaps) onto their own
+   stable GPU compositor layers and contain the subtitle's paint, so a cue
+   swap re-rasterizes only the subtitle's own texture and never invalidates
+   the controls/heatmap underneath. Pure compositing hints — no behaviour
+   change. */
+.art-video-player .art-subtitle {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  contain: layout paint;
+}
+.art-video-player .art-control-heatmap {
+  transform: translateZ(0);
+}
