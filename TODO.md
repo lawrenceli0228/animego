@@ -11,6 +11,7 @@
 - [ ] **`/welcome` 1.18s 偏慢**(其余路由 <0.12s):复测确认是冷启动还是稳定慢。
 - [ ] **Lighthouse 质量项**(2026-06-01 把这些从 error 降成 warn 让 CI 过,值得真修):LCP 图提 `fetchpriority="high"` 且不懒加载(`lcp-lazy-loaded`/`prioritize-lcp-image`)· 上 WebP/AVIF(`uses-optimized-images`/`modern-image-formats`)· 对比度(`color-contrast`)· 移动端触控目标(`target-size`)· 控制台报错(`errors-in-console`)· bf-cache 不可用排查。CI 跑 mobile 对 live prod。
 - [ ] 决定 deploy 切 main 后是否退役 `feat/go-backend` 分支(目前两分支内容一致)。
+- [ ] **e2e sandbox 套件退役后陈旧**:`e2e/globalSetup.ts` 仍 seed 已退役的 MongoDB + 需本地 stack 登录,chromium-sandbox(auth/library/player 写路径)在 CI 跑不起来。真修 = 去 Mongo seed(只留 Postgres)+ CI 起一次性测试 PG(用扔掉的测试密码,**非 prod**)+ 在 e2e-sandbox.yml / docker-compose.ci.yml 设 `E2E_SANDBOX=1` opt-in。本次 fix/e2e-prod-globalsetup 已让只读 chromium-prod 在 CI 转绿(globalSetup 默认 no-op),sandbox 单独修。
 
 ---
 
