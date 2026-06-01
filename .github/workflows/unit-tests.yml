@@ -1,0 +1,102 @@
+name: Unit Tests
+
+# Gates the per-service unit suites that were previously ungated (and had
+# silently rotted). One job per service, all run in parallel:
+#   - go-api    : `go test ./...` — table-driven + testcontainers(Postgres).
+#                 GitHub-hosted ubuntu runners ship Docker, so the PG-backed
+#                 packages (admin/comments/social/subscriptions/danmaku/
+#                 dandanplay/bgmidmap) spin their own container and run for real.
+#   - next-app  : `bun test` (bun:test) — proxy gate, server actions, lib utils.
+#   - ws-server : `jest` — socket auth, danmaku handler, connection lifecycle.
+#
+# This is the safety net that keeps the suites GREEN. E2E (live prod) and
+# Lighthouse live in sibling workflows; this one is the fast unit gate.
+on:
+  pull_request:
+    branches: [main, feat/go-backend]
+  push:
+    branches: [main, feat/go-backend]
+  workflow_dispatch:
+
+# One run per branch in flight; a newer push supersedes an in-flight run.
+concurrency:
+  group: unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-api:
+    name: go-api (go test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go-api/go.mod
+          cache-dependency-path: go-api/go.sum
+
+      - name: Build
+        working-directory: go-api
+        run: go build ./...
+
+      # The Postgres-backed packages (admin/comments/social/subscriptions/
+      # danmaku/dandanplay/bgmidmap) use testcontainers with a CUSTOM image
+      # — postgres:16-alpine + pg_cron compiled from source (the schema does
+      # `CREATE EXTENSION pg_cron`, so stock postgres won't apply it). That
+      # image only exists as a local tag, so build it here; otherwise
+      # testcontainers tries to PULL `animego-postgres:dev` and the run fails
+      # with "pull access denied". ubuntu-latest ships Docker, so this just works.
+      - name: Build test Postgres image (animego-postgres:dev — pg_cron)
+        run: docker build -t animego-postgres:dev go-api/docker/postgres
+
+      - name: Test
+        working-directory: go-api
+        run: go test ./... -count=1
+
+  next-app:
+    name: next-app (bun test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned (not `latest`) so a Bun release can't silently flip the gate.
+          bun-version: "1.3.11"
+
+      - name: Install
+        working-directory: next-app
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        working-directory: next-app
+        run: bun test
+
+  ws-server:
+    name: ws-server (jest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ws-server/package-lock.json
+
+      - name: Install
+        working-directory: ws-server
+        run: npm ci
+
+      - name: Test
+        working-directory: ws-server
+        run: npm test
