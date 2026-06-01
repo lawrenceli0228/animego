@@ -257,7 +257,7 @@ export default function FinalCta({ dict }: FinalCtaProps) {
         </div>
 
         <div className="finalcta-meta" style={s.metaRow}>
-          <span>AnimeGo · v1.0.14</span>
+          <span>AnimeGoClub · v1.0.14</span>
           <span className="finalcta-meta-center" style={s.metaCenter}>
             ─────────── {finalCta.metaMaintenance} ───────────
           </span>

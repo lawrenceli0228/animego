@@ -200,7 +200,7 @@ function LoggedOutStub({ dict, lang }: ContinueWatchingProps) {
       ? "登录后追番进度会出现在这里"
       : "Login to track your watching progress";
   const cta = dict.nav.login;
-  const ctaAria = lang === "zh" ? "登录 AnimeGo" : "Login to AnimeGo";
+  const ctaAria = lang === "zh" ? "登录 AnimeGoClub" : "Login to AnimeGoClub";
   return (
     <section style={sectionStyle} aria-label={dict.home.watchingTitle}>
       <div style={headerStyle}>

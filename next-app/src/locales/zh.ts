@@ -148,7 +148,7 @@ const zh = {
   },
   // Login
   login: {
-    title: 'AnimeGo', pageTitle: '登录', subtitle: '欢迎回来，继续追番之旅',
+    title: 'AnimeGoClub', pageTitle: '登录', subtitle: '欢迎回来，继续追番之旅',
     email: '邮箱', password: '密码',
     submit: '登录', submitting: '登录中...',
     noAccount: '还没有账号？', registerLink: '立即注册',
@@ -172,7 +172,7 @@ const zh = {
   },
   // Register
   register: {
-    title: '创建账号', pageTitle: '注册', subtitle: '加入 AnimeGo，开始你的追番列表',
+    title: '创建账号', pageTitle: '注册', subtitle: '加入 AnimeGoClub，开始你的追番列表',
     username: '用户名', email: '邮箱', password: '密码（至少6位）',
     submit: '创建账号', submitting: '注册中...',
     hasAccount: '已有账号？', loginLink: '立即登录',
@@ -233,7 +233,7 @@ const zh = {
   },
   // Footer
   footer: {
-    siteCol: 'AnimeGo',
+    siteCol: 'AnimeGoClub',
     siteDesc: 'Rundle Streetが暮れる。東京が灯る。',
     donate: '赞助我们',
     apps: '移动应用',
@@ -259,7 +259,7 @@ const zh = {
     terms: '服务条款',
     privacy: '隐私政策',
     dataCredits: '数据来自',
-    copyright: '© {year} AnimeGo · Rundle Streetが暮れる。東京が灯る。',
+    copyright: '© {year} AnimeGoClub · Rundle Streetが暮れる。東京が灯る。',
   },
   // Comments
   comment: {

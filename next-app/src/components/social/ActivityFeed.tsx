@@ -219,7 +219,7 @@ function LoggedOutStub({ dict, lang }: ActivityFeedProps) {
       ? "登录后查看关注的人在追什么"
       : "Login to see what your friends are watching";
   const cta = dict.nav.login;
-  const ctaAria = lang === "zh" ? "登录 AnimeGo" : "Login to AnimeGo";
+  const ctaAria = lang === "zh" ? "登录 AnimeGoClub" : "Login to AnimeGoClub";
   return (
     <section style={sectionStyle} aria-label={dict.social.feedTitle}>
       <div style={headerStyle}>
