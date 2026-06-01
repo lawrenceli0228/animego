@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { authFetch } from "@/lib/authFetch";
+import { hasAuthHint } from "@/lib/clientAuth";
 import {
   subscribeToBus,
   type SubscriptionDoc,
@@ -31,9 +32,6 @@ interface EpisodesGridProps {
   episodeTitles: DetailEpisodeTitle[];
   lang: Lang;
   dict: Dict;
-  // Server-known login signal from the RSC parent — gates the mount probe
-  // so logged-out views skip the 401-storming subscription fetch (ISSUE-001).
-  loggedIn: boolean;
 }
 
 const VALID_STATUSES: ReadonlyArray<SubStatus> = [
@@ -77,7 +75,6 @@ export default function EpisodesGrid({
   episodeTitles,
   lang,
   dict,
-  loggedIn,
 }: EpisodesGridProps) {
   const [sub, setSub] = useState<SubscriptionDoc | null>(null);
   // Which episode's expand panel is open. null = all collapsed. Matches
@@ -85,11 +82,13 @@ export default function EpisodesGrid({
   // panel below, click again to collapse.
   const [openEp, setOpenEp] = useState<number | null>(null);
 
-  // Mount-time probe — silent on 401 / 404 so anonymous users see the
-  // neutral grid without an auth bounce. Cancel on unmount in case the
-  // user navigates fast.
+  // Mount-time probe — gate on the client `auth_hint` cookie so logged-out
+  // visitors skip the fetch entirely and the grid stays neutral (ISSUE-001;
+  // the page is now ISR/static and can't pass a server login signal). 401 /
+  // 404 are still handled silently below as a fallback. Cancel on unmount in
+  // case the user navigates fast.
   useEffect(() => {
-    if (!loggedIn) return;
+    if (!hasAuthHint()) return;
     let cancelled = false;
     (async () => {
       try {
@@ -107,7 +106,7 @@ export default function EpisodesGrid({
     return () => {
       cancelled = true;
     };
-  }, [anilistId, loggedIn]);
+  }, [anilistId]);
 
   // Listen for SubscriptionButton mutations. We only care about events
   // for THIS anime; the bus is global.

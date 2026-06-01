@@ -82,7 +82,10 @@ export default async function WatchersAvatarList({
   try {
     const env = await apiGetEnvelope<WatchersResponse>(
       `/api/anime/${anilistId}/watchers?limit=${AVATAR_LIMIT}`,
-      { cache: "no-store" },
+      // ISR-safe: public "who's watching" data (no auth gate at the Go
+      // handler), so `auth: false` skips the cookies()/headers() read that
+      // would force the detail page dynamic. 60s window matches the page.
+      { revalidate: 60, auth: false },
     );
     watchers = Array.isArray(env.data) ? env.data : [];
     total = typeof env.total === "number" ? env.total : watchers.length;

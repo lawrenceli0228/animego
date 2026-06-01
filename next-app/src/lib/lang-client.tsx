@@ -22,7 +22,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
 // locales/*-spa.js are unchecked JS dicts copied from the legacy SPA.
 // Keeping them in .js form avoids a 638-line type rewrite; tsc resolves
 // them fine because tsconfig allows JS module resolution.
@@ -90,18 +89,31 @@ function resolve(
  * useLang() consumer re-renders in lockstep.
  */
 export function LanguageProvider({
-  lang,
+  lang: seed,
   children,
 }: {
   lang: Lang;
   children: ReactNode;
 }) {
-  const router = useRouter();
+  // ISR islanding: the server renders the canonical default (`seed` = "zh")
+  // and no longer reads the `lang` cookie at render (that forced every page
+  // dynamic). Resolve the real language on the CLIENT from the cookie after
+  // hydration, and stay reactive to the Navbar toggle via the langchange
+  // event — the same source the ssr:false island fallback (useLang) reads,
+  // so server content + chrome + islands all switch in lockstep.
+  const [lang, setLang] = useState<Lang>(seed);
+
+  useEffect(() => {
+    const sync = () => setLang(cookieLang());
+    sync(); // reconcile after mount (SSR seeded zh; cookie may be en)
+    window.addEventListener(LANG_CHANGE_EVENT, sync);
+    return () => window.removeEventListener(LANG_CHANGE_EVENT, sync);
+  }, []);
 
   const toggle = useCallback(() => {
+    // writeLangCookie dispatches langchange → sync() re-reads the cookie.
     writeLangCookie(lang === "zh" ? "en" : "zh");
-    router.refresh();
-  }, [lang, router]);
+  }, [lang]);
 
   const t = useCallback(
     (key: string, opts?: { defaultValue?: string }) =>

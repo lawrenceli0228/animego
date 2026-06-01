@@ -1042,6 +1042,243 @@ func TestSetClearRefreshCookie_ProdMode(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// auth_hint cookie — non-httpOnly session-existence hint
+// -----------------------------------------------------------------------------
+
+// TestAuthHint_SetOnLogin asserts that a successful login response includes
+// auth_hint=1 with HttpOnly UNSET so client JS can read it.
+func TestAuthHint_SetOnLogin(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"email":"lawrence@example.com","password":"correct-horse"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	rec := httptest.NewRecorder()
+	h.Login(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	c := getSetCookie(rec, AuthHintCookieName)
+	if c == nil {
+		t.Fatal("auth_hint cookie not set on login")
+	}
+	if c.Value != "1" {
+		t.Errorf("auth_hint value = %q, want \"1\"", c.Value)
+	}
+	if c.HttpOnly {
+		t.Error("auth_hint HttpOnly = true, want false (client JS must be able to read it)")
+	}
+	if c.MaxAge <= 0 {
+		t.Errorf("auth_hint MaxAge = %d, want > 0", c.MaxAge)
+	}
+	if c.Path != "/" {
+		t.Errorf("auth_hint Path = %q, want \"/\"", c.Path)
+	}
+}
+
+// TestAuthHint_SetOnRegister asserts that a successful register response
+// includes auth_hint=1 with HttpOnly UNSET.
+func TestAuthHint_SetOnRegister(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{
+		getUserByEmail: func(ctx context.Context, email string) (dbgen.User, error) {
+			return dbgen.User{}, pgx.ErrNoRows
+		},
+		getUserByUsername: func(ctx context.Context, username string) (dbgen.User, error) {
+			return dbgen.User{}, pgx.ErrNoRows
+		},
+		createUser: func(ctx context.Context, username, email, password string) (dbgen.User, error) {
+			out := user
+			out.Username = username
+			out.Email = email
+			out.Password = password
+			return out, nil
+		},
+	}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
+
+	body := bytes.NewBufferString(`{"username":"lawrence","email":"new@example.com","password":"correct-horse"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	rec := httptest.NewRecorder()
+	h.Register(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+
+	c := getSetCookie(rec, AuthHintCookieName)
+	if c == nil {
+		t.Fatal("auth_hint cookie not set on register")
+	}
+	if c.Value != "1" {
+		t.Errorf("auth_hint value = %q, want \"1\"", c.Value)
+	}
+	if c.HttpOnly {
+		t.Error("auth_hint HttpOnly = true, want false")
+	}
+}
+
+// TestAuthHint_SetOnRefresh_NormalPath asserts that a successful refresh
+// (normal rotation) includes auth_hint=1 with HttpOnly UNSET.
+func TestAuthHint_SetOnRefresh_NormalPath(t *testing.T) {
+	t.Parallel()
+
+	signer := newTestSigner(t)
+	user := fixtureUser(t)
+	cookieToken, err := signer.SignRefresh(user.ID)
+	if err != nil {
+		t.Fatalf("SignRefresh: %v", err)
+	}
+	user.RefreshToken = &cookieToken
+
+	db := &fakeAuthDB{
+		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: cookieToken})
+	rec := httptest.NewRecorder()
+	h.Refresh(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	c := getSetCookie(rec, AuthHintCookieName)
+	if c == nil {
+		t.Fatal("auth_hint cookie not set on refresh (normal path)")
+	}
+	if c.Value != "1" {
+		t.Errorf("auth_hint value = %q, want \"1\"", c.Value)
+	}
+	if c.HttpOnly {
+		t.Error("auth_hint HttpOnly = true, want false")
+	}
+	if c.MaxAge <= 0 {
+		t.Errorf("auth_hint MaxAge = %d, want > 0", c.MaxAge)
+	}
+}
+
+// TestAuthHint_SetOnRefresh_GracePath asserts that a refresh on the grace
+// path also sets auth_hint=1 with HttpOnly UNSET.
+func TestAuthHint_SetOnRefresh_GracePath(t *testing.T) {
+	t.Parallel()
+
+	signer := newTestSigner(t)
+	user := fixtureUser(t)
+
+	oldToken, err := signer.SignRefresh(user.ID)
+	if err != nil {
+		t.Fatalf("SignRefresh old: %v", err)
+	}
+	currentToken := "current-token-sentinel-auth-hint"
+	user.RefreshToken = &currentToken
+	user.PreviousRefreshToken = &oldToken
+	user.RefreshRotatedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+
+	db := &fakeAuthDB{
+		getUserByID: func(ctx context.Context, id uuid.UUID) (dbgen.User, error) {
+			return user, nil
+		},
+	}
+	h := NewHandlers(db, signer, nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: RefreshCookieName, Value: oldToken})
+	rec := httptest.NewRecorder()
+	h.Refresh(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	c := getSetCookie(rec, AuthHintCookieName)
+	if c == nil {
+		t.Fatal("auth_hint cookie not set on refresh (grace path)")
+	}
+	if c.Value != "1" {
+		t.Errorf("auth_hint value = %q, want \"1\"", c.Value)
+	}
+	if c.HttpOnly {
+		t.Error("auth_hint HttpOnly = true, want false")
+	}
+}
+
+// TestAuthHint_ClearedOnLogout asserts that a successful logout response
+// expires auth_hint (MaxAge <= 0) via a Set-Cookie header.
+func TestAuthHint_ClearedOnLogout(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	db := &fakeAuthDB{}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req = req.WithContext(injectClaims(req.Context(), user.ID, user.Username, user.Role))
+	rec := httptest.NewRecorder()
+	h.Logout(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	c := getSetCookie(rec, AuthHintCookieName)
+	if c == nil {
+		t.Fatal("auth_hint Set-Cookie not present on logout")
+	}
+	if c.MaxAge > 0 {
+		t.Errorf("auth_hint MaxAge = %d, want <= 0 (cleared)", c.MaxAge)
+	}
+}
+
+// TestAuthHint_ProdMode verifies that in prod mode auth_hint is Secure=true
+// and SameSite=None (matching the other prod cookies) but still HttpOnly=false.
+func TestAuthHint_ProdMode(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	SetAuthHintCookie(rec, time.Hour, true)
+	c := getSetCookie(rec, AuthHintCookieName)
+	if c == nil {
+		t.Fatal("auth_hint cookie not set in prod mode")
+	}
+	if !c.Secure {
+		t.Error("auth_hint Secure not set in prod mode")
+	}
+	if c.SameSite != http.SameSiteNoneMode {
+		t.Errorf("auth_hint SameSite = %v, want None in prod", c.SameSite)
+	}
+	if c.HttpOnly {
+		t.Error("auth_hint HttpOnly = true in prod mode, want false")
+	}
+	if c.Value != "1" {
+		t.Errorf("auth_hint value = %q, want \"1\"", c.Value)
+	}
+
+	rec2 := httptest.NewRecorder()
+	ClearAuthHintCookie(rec2, true)
+	cc := getSetCookie(rec2, AuthHintCookieName)
+	if cc == nil {
+		t.Fatal("cleared auth_hint cookie not set in prod mode")
+	}
+	if cc.MaxAge >= 0 {
+		t.Errorf("auth_hint MaxAge = %d after clear, want negative", cc.MaxAge)
+	}
+}
+
+// -----------------------------------------------------------------------------
 // ForgotPassword (P2.2.1)
 // -----------------------------------------------------------------------------
 //

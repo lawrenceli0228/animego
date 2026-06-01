@@ -50,6 +50,18 @@ interface FetchOptions {
   revalidate?: number;
   /** AbortSignal for cancellation. */
   signal?: AbortSignal;
+  /**
+   * Send the request authenticated (default) or anonymously.
+   *
+   * Omitted / `true`: forward the caller's Cookie + real-IP headers via
+   * `buildHeaders` exactly as before — every existing call site is
+   * unchanged.
+   *
+   * `false`: ISR-safe anonymous path. `buildHeaders` skips `cookies()` /
+   * `headers()` entirely so the fetch never reads request state and the
+   * enclosing page can stay statically prerendered / ISR-cacheable.
+   */
+  auth?: boolean;
 }
 
 interface NextFetchInit extends RequestInit {
@@ -69,8 +81,23 @@ interface NextFetchInit extends RequestInit {
 //
 // Skipped silently if cookies() throws (no RSC context, e.g. static
 // prerender) — the request just goes out anonymously, same as before.
-async function buildHeaders(): Promise<Record<string, string>> {
+//
+// @param auth  When `true` (default) read + forward the request's Cookie
+//   and real-IP headers — the authed path, byte-for-byte the original
+//   behavior. When `false` take the anonymous ISR-safe path: return only
+//   the minimal headers and never call `cookies()` / `headers()`, so the
+//   caller never reads request state and the page can stay statically
+//   prerendered. The lazy `next/headers` import is kept either way (so
+//   client bundles never reference the server-only module) — we simply
+//   skip *calling* it on the anon path.
+//
+// Exported so the anon-vs-authed branching can be unit-tested directly
+// without standing up a real RSC context.
+export async function buildHeaders(
+  auth: boolean = true,
+): Promise<Record<string, string>> {
   const headers: Record<string, string> = { Accept: "application/json" };
+  if (auth === false) return headers;
   if (typeof window !== "undefined") return headers;
   try {
     const mod = (await import("next/headers")) as {
@@ -104,6 +131,13 @@ interface MutationOptions {
   body?: unknown;
   /** AbortSignal for cancellation. */
   signal?: AbortSignal;
+  /**
+   * Send the request authenticated (default) or anonymously. See
+   * {@link FetchOptions.auth}. Mutations are user-scoped, so this stays
+   * `true` for every existing caller; `false` only suits the rare
+   * anonymous state-changing endpoint.
+   */
+  auth?: boolean;
 }
 
 async function fetchEnvelope(
@@ -114,7 +148,7 @@ async function fetchEnvelope(
 
   const init: NextFetchInit = {
     method: "GET",
-    headers: await buildHeaders(),
+    headers: await buildHeaders(opts.auth),
     signal: opts.signal,
   };
   if (typeof opts.revalidate === "number") {
@@ -202,7 +236,7 @@ export async function apiMutate<T>(
   opts: MutationOptions = {},
 ): Promise<T> {
   const url = `${getApiBase()}${path}`;
-  const headers = await buildHeaders();
+  const headers = await buildHeaders(opts.auth);
   if (opts.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }

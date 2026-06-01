@@ -25,8 +25,6 @@ const TorrentModal = dynamic(() => import("./TorrentModal"), {
 
 interface DetailActionsProps {
   anilistId: number;
-  // Server-known login signal, threaded to SubscriptionButton (ISSUE-001).
-  loggedIn: boolean;
   episodes: number | null;
   titleRomaji: string | null;
   titleEnglish: string | null;
@@ -80,7 +78,6 @@ const rowStyle = {
 
 export default function DetailActions({
   anilistId,
-  loggedIn,
   episodes,
   titleRomaji,
   titleEnglish,
@@ -99,7 +96,6 @@ export default function DetailActions({
       <div style={rowStyle}>
         <SubscriptionButton
           anilistId={anilistId}
-          loggedIn={loggedIn}
           episodes={episodes}
           labels={{
             add: labels.subAdd,

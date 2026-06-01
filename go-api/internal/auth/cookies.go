@@ -132,3 +132,49 @@ func ClearSessionCookie(w http.ResponseWriter, isProd bool) {
 		Expires:  time.Unix(0, 0),
 	})
 }
+
+// AuthHintCookieName is the non-httpOnly companion cookie that client JS
+// can read to cheaply determine whether a session probably exists, without
+// touching the httpOnly session/refreshToken cookies.  It carries NO
+// secret — its value is always the literal string "1".
+const AuthHintCookieName = "auth_hint"
+
+// SetAuthHintCookie writes the auth_hint=1 companion cookie.  It mirrors
+// the refreshToken cookie's Path/SameSite/Secure attributes but sets
+// HttpOnly=false so client JS can read it.  Max-Age matches the refresh
+// TTL so the hint outlives the 15m access token.
+func SetAuthHintCookie(w http.ResponseWriter, ttl time.Duration, isProd bool) {
+	sameSite := http.SameSiteStrictMode
+	if isProd {
+		sameSite = http.SameSiteNoneMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     AuthHintCookieName,
+		Value:    "1",
+		Path:     refreshCookiePath,
+		HttpOnly: false,
+		Secure:   isProd,
+		SameSite: sameSite,
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  time.Now().Add(ttl),
+	})
+}
+
+// ClearAuthHintCookie expires the auth_hint cookie on logout.  Mirrors
+// ClearRefreshCookie so the browser drops both at the same time.
+func ClearAuthHintCookie(w http.ResponseWriter, isProd bool) {
+	sameSite := http.SameSiteStrictMode
+	if isProd {
+		sameSite = http.SameSiteNoneMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     AuthHintCookieName,
+		Value:    "",
+		Path:     refreshCookiePath,
+		HttpOnly: false,
+		Secure:   isProd,
+		SameSite: sameSite,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+}

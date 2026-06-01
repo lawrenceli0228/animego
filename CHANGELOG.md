@@ -2,6 +2,24 @@
 
 ---
 
+## [3.1.0] - 2026-06-01
+
+### SEO 详情页 ISR — `/anime/[id]` 从动态渲染变静态缓存(前端 islanding,不动 URL)
+
+`/qa` 巡检 + `/seo` 调查发现:标榜 ISR 的 SEO 页其实全是 per-request 动态 SSR(`Cf-Cache-Status: DYNAMIC`,详情页 TTFB ~844ms),根因是 root layout 渲染时读 cookie/header(语言)+ 一个 no-store 的 `/api/auth/me` 取用户,且 `api.ts` 每个服务端 fetch 都转发 cookie —— 全把页面打成动态。经 eng review + 独立 outside-voice 评审,放弃原计划的 `/[lang]/` URL 分段大迁移(省掉几周 + 全站重索引),改用前端 islanding 的便宜路。
+
+`next build` 现在把 `/anime/[id]` 标为 `●`(SSG/ISR),不再是 `ƒ`(Dynamic)。
+
+- **layout / Navbar**:root layout 不再服务端拉 `/api/auth/me`(no-store forcer)—— Navbar(`"use client"`)挂载时自己取用户,gate 在新的 `auth_hint` cookie 上,**登出访客零 auth 请求**;去掉 `x-pathname` header 读取。
+- **i18n**:`getLang()` 不再读 cookie/header —— 服务端渲规范默认 `zh`,`lang-client` 客户端读 `lang` cookie 并在 hydration + 切换时 swap(中文优先,zh 为 SEO 索引目标)。
+- **api.ts**:`buildHeaders` 加 `auth` 开关(默认 `true` 不变);公开 ISR fetch(`loadDetail`、watchers)走 `auth:false` 跳过 cookie/header。
+- **page.tsx**:去掉服务端 `cookies()` 的 loggedIn 读取(ISSUE-001)—— 客户端组件改读 `auth_hint`;加 `generateStaticParams`(Next 16 里 `[param]` 路由需要它才能 ISR)。
+- **go-api**:登录/注册/刷新设非 httpOnly `auth_hint=1` 伴随 cookie、登出清除 —— 客户端可读的"会话大概存在"信号,不读服务端 cookie 也能保住 ISSUE-001 的"登出不探测"。
+
+**验证**:`next build` → `/anime/[id]` = `●`;`bun test` 全绿;go-api auth 测试绿;活体实测 —— 登出详情页 auth 请求 0(旧 3 个)+ 控制台 0 错误,语言切换客户端 swap + 跨页持久。EN 详情内容现为 zh(服务端规范默认),chrome + 客户端岛切 EN。`welcome`/`home`/`sitemap` 仍动态(与 main 一致,可同样 `auth:false` follow-up)。
+
+---
+
 ## [3.0.0] - 2026-06-01
 
 ### 全栈 Go 架构 + 老栈退役 — Express / Mongo / Vite SPA 全部退场
