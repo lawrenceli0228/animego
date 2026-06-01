@@ -12,6 +12,7 @@
 - [ ] **Lighthouse 质量项**(2026-06-01 把这些从 error 降成 warn 让 CI 过,值得真修):LCP 图提 `fetchpriority="high"` 且不懒加载(`lcp-lazy-loaded`/`prioritize-lcp-image`)· 上 WebP/AVIF(`uses-optimized-images`/`modern-image-formats`)· 对比度(`color-contrast`)· 移动端触控目标(`target-size`)· 控制台报错(`errors-in-console`)· bf-cache 不可用排查。CI 跑 mobile 对 live prod。
 - [ ] 决定 deploy 切 main 后是否退役 `feat/go-backend` 分支(目前两分支内容一致)。
 - [ ] **e2e sandbox 套件退役后陈旧**:`e2e/globalSetup.ts` 仍 seed 已退役的 MongoDB + 需本地 stack 登录,chromium-sandbox(auth/library/player 写路径)在 CI 跑不起来。真修 = 去 Mongo seed(只留 Postgres)+ CI 起一次性测试 PG(用扔掉的测试密码,**非 prod**)+ 在 e2e-sandbox.yml / docker-compose.ci.yml 设 `E2E_SANDBOX=1` opt-in。本次 fix/e2e-prod-globalsetup 已让只读 chromium-prod 在 CI 转绿(globalSetup 默认 no-op),sandbox 单独修。
+- [ ] **soft-404 详情页真 404**:`/anime/{坏id}`(及 `/seasonal/*`、`/welcome`)因 `loading.tsx` 流式渲染,`notFound()` 返 HTTP **200 非 404**(`not-found.tsx` 那句"root not-found 设 404"是 comment rot)。Next 自动注入 `noindex` 已护住索引(2026-06-01 实测),实际危害近零 → **LOW**。真修两条路:① `global-not-found.js`(Next 16 experimental,但文档显示它是给"压根不匹配任何路由"的 URL,对"匹配路由内 streaming notFound"大概率**无效**,需部署后 curl 验);② 删 `/anime/[id]/loading.tsx`(保证真 404,但丢冷 id 骨架屏)。**eng-review pass-2(2026-06-01)决定 feat/detail-seo-fixes PR 不修,defer。**
 
 ---
 
