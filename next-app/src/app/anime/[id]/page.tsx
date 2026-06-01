@@ -165,16 +165,16 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { id } = await params;
   const anilistId = Number(id);
   if (!Number.isFinite(anilistId) || anilistId <= 0) {
-    return { title: "AnimeGo" };
+    return { title: { absolute: "AnimeGoClub" } };
   }
 
   const [lang, detail] = await Promise.all([getLang(), loadDetail(anilistId)]);
   if (!detail) {
-    return { title: "AnimeGo" };
+    return { title: { absolute: "AnimeGoClub" } };
   }
 
   const title = pickTitle(detail, lang);
-  const titleFull = `${title} · AnimeGo`;
+  const titleFull = `${title} · AnimeGoClub`;
   const description = truncate(stripHtml(detail.description || ""), 160);
   const locale = lang === "en" ? "en_US" : "zh_CN";
   const heroImage = detail.bannerImageUrl || detail.coverImageUrl || null;
@@ -183,7 +183,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const openGraph: Metadata["openGraph"] = {
     title,
     description,
-    siteName: "AnimeGo",
+    siteName: "AnimeGoClub",
     locale,
     alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
     type: "video.tv_show",

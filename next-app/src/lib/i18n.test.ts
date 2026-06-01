@@ -122,7 +122,7 @@ describe("tFromDict", () => {
     const dict = getDictByLang("zh");
     const t = tFromDict(dict);
     // meta.titleDefault exists in zh
-    expect(t("meta.titleDefault")).toContain("AnimeGo");
+    expect(t("meta.titleDefault")).toContain("AnimeGoClub");
   });
 
   test("coerces a non-string leaf value to string", () => {

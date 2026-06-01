@@ -180,7 +180,7 @@ export default function Navbar({ season, year }: NavbarProps) {
     <nav style={s.nav} aria-label={lang === "zh" ? "主导航" : "Main navigation"}>
       <div style={s.inner}>
         <Link href="/" style={s.logo} prefetch={false}>
-          AnimeGo
+          AnimeGoClub
         </Link>
         <div style={s.links}>
           {links.map((l) => (

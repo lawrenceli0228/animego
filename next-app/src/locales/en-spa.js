@@ -65,7 +65,7 @@ const en = {
   },
   // Login
   login: {
-    title: 'AnimeGo', subtitle: 'Welcome back, continue your journey',
+    title: 'AnimeGoClub', subtitle: 'Welcome back, continue your journey',
     email: 'Email', password: 'Password',
     submit: 'Login', submitting: 'Logging in...',
     noAccount: "Don't have an account? ", registerLink: 'Sign Up',
@@ -89,7 +89,7 @@ const en = {
   },
   // Register
   register: {
-    title: 'Create Account', subtitle: 'Join AnimeGo and start your watchlist',
+    title: 'Create Account', subtitle: 'Join AnimeGoClub and start your watchlist',
     username: 'Username', email: 'Email', password: 'Password (min. 6 chars)',
     submit: 'Create Account', submitting: 'Creating...',
     hasAccount: 'Already have an account? ', loginLink: 'Login',
@@ -147,7 +147,7 @@ const en = {
   },
   // Footer
   footer: {
-    siteCol: 'AnimeGo',
+    siteCol: 'AnimeGoClub',
     siteDesc: 'Rundle Streetが暮れる。東京が灯る。',
     donate: 'Donate',
     apps: 'Apps',
@@ -173,7 +173,7 @@ const en = {
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
     dataCredits: 'Data provided by',
-    copyright: '© {year} AnimeGo · Rundle Streetが暮れる。東京が灯る。',
+    copyright: '© {year} AnimeGoClub · Rundle Streetが暮れる。東京が灯る。',
   },
   // Comments
   comment: {
@@ -256,7 +256,7 @@ const en = {
   },
   // Landing / About page
   landing: {
-    docTitle: 'AnimeGo · Watch the one you came for',
+    docTitle: 'AnimeGoClub · Watch the one you came for',
     hero: {
       eyebrow: 'v1.0.12 · OKLCH poster identity',
       titleLine1: ['Watch', 'the', 'one'],

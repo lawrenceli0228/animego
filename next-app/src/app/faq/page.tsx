@@ -11,8 +11,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const lang = await getLang();
   const title =
     lang === "zh"
-      ? "常见问题 — AnimeGo"
-      : "Frequently Asked Questions — AnimeGo";
+      ? "常见问题"
+      : "Frequently Asked Questions";
   const description =
     lang === "zh"
       ? "关于 AnimeGoClub 是否免费、与 Bangumi/AniList/MAL 的区别、弹幕来源、OVA/ONA/剧场版的差异等。"

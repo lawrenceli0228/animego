@@ -41,11 +41,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const title = `${dict.social.following} · ${username}`;
   const canonical = `/u/${username}/following`;
   return {
-    title: { absolute: `${title} · AnimeGo` },
+    title: { absolute: `${title} · AnimeGoClub` },
     description:
       lang === "zh"
-        ? `查看 ${username} 关注的用户 — AnimeGo`
-        : `Users that ${username} follows on AnimeGo`,
+        ? `查看 ${username} 关注的用户 — AnimeGoClub`
+        : `Users that ${username} follows on AnimeGoClub`,
     alternates: {
       canonical,
       languages: {

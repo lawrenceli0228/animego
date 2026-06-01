@@ -119,7 +119,7 @@ export async function generateMetadata({ params }: { params: PageProps["params"]
     openGraph: {
       title,
       description,
-      siteName: "AnimeGo",
+      siteName: "AnimeGoClub",
       locale: lang === "en" ? "en_US" : "zh_CN",
       alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
       type: "website",

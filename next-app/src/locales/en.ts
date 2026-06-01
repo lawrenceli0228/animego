@@ -3,7 +3,7 @@ const en = {
   common: { loading: 'Loading...' },
   // Root <head> metadata (browser title, description, SEO keywords).
   meta: {
-    titleDefault: 'AnimeGo . Catch the episode you came for',
+    titleDefault: 'AnimeGoClub . Catch the episode you came for',
     description:
       'An anime site that makes the cover art the star. Multi-source aggregation, on-screen danmaku, manual episode picking as a fallback — no algorithmic feed, no paywalled episodes.',
     keywords: [
@@ -96,7 +96,7 @@ const en = {
   },
   // Login
   login: {
-    title: 'AnimeGo', pageTitle: 'Login', subtitle: 'Welcome back, continue your journey',
+    title: 'AnimeGoClub', pageTitle: 'Login', subtitle: 'Welcome back, continue your journey',
     email: 'Email', password: 'Password',
     submit: 'Login', submitting: 'Logging in...',
     noAccount: "Don't have an account? ", registerLink: 'Sign Up',
@@ -120,7 +120,7 @@ const en = {
   },
   // Register
   register: {
-    title: 'Create Account', pageTitle: 'Sign Up', subtitle: 'Join AnimeGo and start your watchlist',
+    title: 'Create Account', pageTitle: 'Sign Up', subtitle: 'Join AnimeGoClub and start your watchlist',
     username: 'Username', email: 'Email', password: 'Password (min. 6 chars)',
     submit: 'Create Account', submitting: 'Creating...',
     hasAccount: 'Already have an account? ', loginLink: 'Login',
@@ -181,7 +181,7 @@ const en = {
   },
   // Footer
   footer: {
-    siteCol: 'AnimeGo',
+    siteCol: 'AnimeGoClub',
     siteDesc: 'Rundle Streetが暮れる。東京が灯る。',
     donate: 'Donate',
     apps: 'Apps',
@@ -207,7 +207,7 @@ const en = {
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
     dataCredits: 'Data provided by',
-    copyright: '© {year} AnimeGo · Rundle Streetが暮れる。東京が灯る。',
+    copyright: '© {year} AnimeGoClub · Rundle Streetが暮れる。東京が灯る。',
   },
   // Comments
   comment: {
@@ -270,7 +270,7 @@ const en = {
   },
   // Landing / About page
   landing: {
-    docTitle: 'AnimeGo · Watch the one you came for',
+    docTitle: 'AnimeGoClub · Watch the one you came for',
     hero: {
       eyebrow: 'v1.0.12 · OKLCH poster identity',
       titleLine1: ['Watch', 'the', 'one'],

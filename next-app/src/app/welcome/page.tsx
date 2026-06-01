@@ -122,7 +122,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const openGraph: Metadata["openGraph"] = {
     title,
     description,
-    siteName: "AnimeGo",
+    siteName: "AnimeGoClub",
     locale,
     alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
     type: "website",

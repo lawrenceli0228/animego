@@ -60,7 +60,7 @@ export default function ShareButton({
       typeof window !== "undefined"
         ? `${window.location.origin}/anime/${anilistId}`
         : `/anime/${anilistId}`;
-    const titleFull = `${shareTitle} — AnimeGo`;
+    const titleFull = `${shareTitle} — AnimeGoClub`;
 
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
