@@ -31,13 +31,15 @@ function buildDatabaseUrl(): string {
   return `postgres://animego:${pw}@localhost:5432/animego?sslmode=disable`;
 }
 
-const DATABASE_URL = buildDatabaseUrl();
-
 let _sql: ReturnType<typeof postgres> | null = null;
 
 function getSql(): ReturnType<typeof postgres> {
   if (!_sql) {
-    _sql = postgres(DATABASE_URL, { max: 3, connect_timeout: 5 });
+    // Lazy: resolve the connection string (and throw on a missing password)
+    // only when a DB helper is actually called. Importing this module must
+    // stay side-effect-free — globalSetup imports it unconditionally, and the
+    // read-only chromium-prod project never touches Postgres.
+    _sql = postgres(buildDatabaseUrl(), { max: 3, connect_timeout: 5 });
   }
   return _sql;
 }

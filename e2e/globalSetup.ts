@@ -95,6 +95,14 @@ async function seed(): Promise<void> {
 }
 
 export default async function globalSetup(_config: FullConfig): Promise<void> {
+  // Sandbox-only setup: seed Mongo + Postgres, then browser-login to mint the
+  // storageState the chromium-sandbox project reuses. The read-only
+  // chromium-prod project (and any `playwright test --project=chromium-prod`,
+  // e.g. .github/workflows/e2e.yml) needs none of it — and would trip over the
+  // retired Mongo / an absent POSTGRES_PASSWORD. Opt IN via E2E_SANDBOX so
+  // prod-style runs are a no-op by default.
+  if (!process.env.E2E_SANDBOX) return;
+
   fs.mkdirSync(path.dirname(STORAGE_STATE_PATH), { recursive: true });
 
   // Wipe stragglers from prior runs BEFORE seeding, so per-spec cleanup
