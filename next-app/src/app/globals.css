@@ -162,20 +162,33 @@ h4 {
 }
 
 /* ── Player: fullscreen subtitle-cue flicker ───────────────────────────
-   artplayer rewrites .art-subtitle innerHTML on every `cuechange` and
-   toggles its display between dialogue lines. The element is a full-width,
-   bottom-anchored, z-index:20 overlay with a 4-layer text-shadow outline.
-   In fullscreen the browser re-rasterizes/re-composites that large layer on
-   each cue and bleeds a repaint into the bottom region it overlaps (controls
-   + danmaku heatmap) → a visible flicker every time a subtitle line appears
-   or changes. Windowed mode is too small to notice; only fullscreen shows it.
-   Known Chrome fullscreen + subtitle compositing quirk (cf. Stremio #644).
+   Real root cause (confirmed by live testing): in NATIVE fullscreen Chrome
+   promotes the <video> to a hardware OVERLAY plane (scanned out directly,
+   beneath the DOM). artplayer's subtitle + controls + danmaku heatmap are DOM
+   overlays composited on top. On every subtitle `cuechange` artplayer rewrites
+   .art-subtitle innerHTML; the overlay-plane ↔ DOM recomposite desyncs and the
+   bottom region (controls + heatmap) flickers once per dialogue line. Only in
+   native fullscreen (the overlay plane is a fullscreen optimisation); windowed
+   is fine; independent of the subtitle on/off toggle (the track stays hidden,
+   cues keep firing). Known Chrome fullscreen+subtitle compositing quirk
+   (cf. Stremio #644).
 
-   Fix: promote the subtitle (and the heatmap it overlaps) onto their own
-   stable GPU compositor layers and contain the subtitle's paint, so a cue
-   swap re-rasterizes only the subtitle's own texture and never invalidates
-   the controls/heatmap underneath. Pure compositing hints — no behaviour
-   change. */
+   Primary fix: in fullscreen, put a `filter` on the <video> so Chrome can't
+   promote it to the overlay plane — video + subtitle + controls then composite
+   in one GPU path and stay in sync. Scoped to fullscreen so windowed playback
+   keeps the efficient hardware overlay (no extra GPU/power cost). Promoting the
+   DOM layers alone did NOT fix it (the desync is between the overlay plane and
+   the DOM, not within the DOM).
+
+   The .art-subtitle / .art-control-heatmap layer hints below are supplementary
+   (they isolate those elements' own repaints and shaved part of the flicker on
+   their own); kept as defence-in-depth. */
+.art-video-player.art-fullscreen video,
+.art-video-player:fullscreen video,
+:fullscreen .art-video-player video {
+  /* opacity() filter disqualifies the <video> from hardware-overlay promotion */
+  filter: opacity(0.999);
+}
 .art-video-player .art-subtitle {
   transform: translateZ(0);
   backface-visibility: hidden;
