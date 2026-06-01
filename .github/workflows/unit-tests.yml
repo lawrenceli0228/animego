@@ -27,7 +27,7 @@ jobs:
   go-api:
     name: go-api (go test)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -42,8 +42,16 @@ jobs:
         working-directory: go-api
         run: go build ./...
 
-      # Docker is preinstalled on ubuntu-latest, so testcontainers-go drives
-      # the Postgres-backed integration tests without an extra service block.
+      # The Postgres-backed packages (admin/comments/social/subscriptions/
+      # danmaku/dandanplay/bgmidmap) use testcontainers with a CUSTOM image
+      # — postgres:16-alpine + pg_cron compiled from source (the schema does
+      # `CREATE EXTENSION pg_cron`, so stock postgres won't apply it). That
+      # image only exists as a local tag, so build it here; otherwise
+      # testcontainers tries to PULL `animego-postgres:dev` and the run fails
+      # with "pull access denied". ubuntu-latest ships Docker, so this just works.
+      - name: Build test Postgres image (animego-postgres:dev — pg_cron)
+        run: docker build -t animego-postgres:dev go-api/docker/postgres
+
       - name: Test
         working-directory: go-api
         run: go test ./... -count=1
@@ -79,7 +87,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
