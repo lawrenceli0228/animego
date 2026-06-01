@@ -1,6 +1,6 @@
 # AnimeGo 待办
 
-> **状态(2026-06-01):全栈 Go 重构 + 老栈退役已完成上线**(v3.0.0,见 CHANGELOG)。下方 Part 1 的 P0–P11 重构阶段全部完成,保留作历史记录。活跃开发在 `feat/go-backend`,稳定代码合入 `main` 部署。
+> **状态(2026-06-01):全栈 Go 重构 + 老栈退役已完成上线**(v3.0.0,见 CHANGELOG)。下方 Part 1 的 P0–P11 重构阶段全部完成,保留作历史记录。**分支模型(2026-06-01 简化):`main` = 唯一 canonical 分支**(生产 + 开发基线);`feat/go-backend` 已退役删除,新功能走从 main 切的短命 topic 分支 → PR → squash-merge → 从 main 部署。
 
 ## 🔭 退役后 follow-ups(新)
 
@@ -10,8 +10,7 @@
 - [ ] **匹配来源列数据稀疏**:`bgm_match_source` 仅最近重富化的 ~3366 行有值,7185 行(migration 0011 前的老绑)为空,随 periodic sweep 重富化逐步填。
 - [ ] **`/welcome` 1.18s 偏慢**(其余路由 <0.12s):复测确认是冷启动还是稳定慢。
 - [ ] **Lighthouse 质量项**(2026-06-01 把这些从 error 降成 warn 让 CI 过,值得真修):LCP 图提 `fetchpriority="high"` 且不懒加载(`lcp-lazy-loaded`/`prioritize-lcp-image`)· 上 WebP/AVIF(`uses-optimized-images`/`modern-image-formats`)· 对比度(`color-contrast`)· 移动端触控目标(`target-size`)· 控制台报错(`errors-in-console`)· bf-cache 不可用排查。CI 跑 mobile 对 live prod。
-- [ ] 决定 deploy 切 main 后是否退役 `feat/go-backend` 分支(目前两分支内容一致)。
-- [ ] **e2e sandbox 套件退役后陈旧**:`e2e/globalSetup.ts` 仍 seed 已退役的 MongoDB + 需本地 stack 登录,chromium-sandbox(auth/library/player 写路径)在 CI 跑不起来。真修 = 去 Mongo seed(只留 Postgres)+ CI 起一次性测试 PG(用扔掉的测试密码,**非 prod**)+ 在 e2e-sandbox.yml / docker-compose.ci.yml 设 `E2E_SANDBOX=1` opt-in。本次 fix/e2e-prod-globalsetup 已让只读 chromium-prod 在 CI 转绿(globalSetup 默认 no-op),sandbox 单独修。
+- [ ] **e2e sandbox 套件陈旧(workflow 已删,specs/config 仍在)**:`.github/workflows/e2e-sandbox.yml` 已于 2026-06-01 删除 —— 它启已退役的 Mongo/Express 栈,每个 PR 失败一次刷失败邮件。残留待清(无害,不跑就行):`e2e/globalSetup.ts` 的 Mongo seed、`e2e/specs/sandbox/**`(auth/library/player/admin 写路径)、playwright `chromium-sandbox` project、`docker-compose.ci.yml` 里的 `mongodb`/`app` 死服务。想恢复写路径 E2E 才需真修 = 去 Mongo seed(只留 Postgres)+ CI 起一次性测试 PG(扔掉的测试密码,**非 prod**)+ 新建 opt-in workflow。只读 chromium-prod 在 CI 已绿(globalSetup 默认 no-op)。
 - [ ] **soft-404 详情页真 404**:`/anime/{坏id}`(及 `/seasonal/*`、`/welcome`)因 `loading.tsx` 流式渲染,`notFound()` 返 HTTP **200 非 404**(`not-found.tsx` 那句"root not-found 设 404"是 comment rot)。Next 自动注入 `noindex` 已护住索引(2026-06-01 实测),实际危害近零 → **LOW**。真修两条路:① `global-not-found.js`(Next 16 experimental,但文档显示它是给"压根不匹配任何路由"的 URL,对"匹配路由内 streaming notFound"大概率**无效**,需部署后 curl 验);② 删 `/anime/[id]/loading.tsx`(保证真 404,但丢冷 id 骨架屏)。**eng-review pass-2(2026-06-01)决定 feat/detail-seo-fixes PR 不修,defer。**
 
 ---
