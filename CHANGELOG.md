@@ -2,6 +2,22 @@
 
 ---
 
+## [3.1.1] - 2026-06-01
+
+### 修复 — 播放器字幕缓存 · 详情页 SEO 信号 · 品牌图标 · 标题重复
+
+ISR 上线当天修掉的几个用户可见问题(均已部署上线)。
+
+- **播放器字幕偶尔不出(jassub WASM 缓存)** — 2MB 的 jassub worker WASM(`/jassub/wasm/jassub-worker.wasm`)用 Next `public/` 默认 `max-age=0` 服务,且 Cloudflare 默认不按扩展名缓存 `.wasm`(`Cf-Cache-Status: DYNAMIC`),每次开播放器都从香港源站重下 2MB;慢加载时超过 jassub 10s init 预算 → 字幕暂时不出(控制台 `[jassub] renderer.ready still pending after 10s`)。加 `next.config` `headers()`:`/jassub/:path*` → `max-age=2592000`(30 天,不加 `immutable` 因路径非 content-hash、升级可自愈)。CJK 回退字体走本地系统字体(Font Access API),非网络瓶颈。(#15)
+- **假 hreflang** — `/anime/[id]` 的 `generateMetadata` 对外宣称 `?lang=en` 是 en-US 版,但 `getLang()` 恒 `zh`、服务端忽略该 query,实测吐相同中文 → 无效 hreflang + 重复缓存键。删 `alternates.languages`,留 zh canonical,等真有本地化 URL 再加。(#15)
+- **详情页匿名守卫** — `/anime/*` 被 CF 边缘缓存,`page.tsx` 顶部加注释守卫:服务端渲染须保持匿名(勿读 `cookies()`/`headers()`/per-user fetch),防未来回归把某用户的个性化页缓存给所有人。(#15)
+- **浏览器标签图标** — `app/favicon.ico` 一直是 `create-next-app` 自带的黑底白三角占位图(P3.0 skeleton 起从没换过),品牌角色图只放进了 `public/`(`apple-touch-icon.png` / `favicon-192.png`)。从角色图重新生成 `favicon.ico`(48×48,9.8KB)。(#16)
+- **标签标题 AnimeGo 重复** — player/library/admin layout 设 `title: dict.X.pageTitle`,过根模板 `"%s . AnimeGo"`;而 pageTitle 串已含 "— AnimeGo" → 渲成 `我的库 — AnimeGo . AnimeGo`。去掉 pageTitle 里的 "— AnimeGo"(zh + en 共 6 处)。(#17)
+
+**延后(未做)**:① 详情页 soft-404 — `/anime/{坏id}` 因 streaming `loading.tsx` 返 HTTP 200 非 404;Next 自动注入 `noindex` 已护住索引 → LOW,记 TODO(`global-not-found.js` 实验特性对匹配路由内 streaming notFound 大概率无效)。② CF 边缘缓存规则(`/anime/*` HTML + `/jassub/*` WASM)—— 浏览器 / 源站层已修,全球首次加载的边缘层待建,**不急**,完整方案见 `docs/migration/CF-EDGE-CACHE-PLAN.md`。
+
+---
+
 ## [3.1.0] - 2026-06-01
 
 ### SEO 详情页 ISR — `/anime/[id]` 从动态渲染变静态缓存(前端 islanding,不动 URL)
