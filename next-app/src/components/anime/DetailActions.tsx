@@ -4,8 +4,10 @@
 // /anime/[id]. Hosts the five legacy interactions:
 //   1. SubscriptionButton (v2 panel: status select + ep ± + score + remove)
 //   2. ShareButton         — Web Share API / clipboard fallback
-//   3. MagnetButton        — opens TorrentModal (when episodes > 0)
-//   4. PlayButton          — opens /player in a new tab (when episodes > 0)
+//   3. MagnetButton        — opens TorrentModal (always; torrent search is
+//      title-based, needs no episode count)
+//   4. PlayButton          — opens /player in a new tab (always; the player
+//      selects episodes itself)
 //   5. TorrentModal        — rendered when state.torrentOpen is true
 //
 // Labels arrive flat from page.tsx and we shape them per child here so
@@ -89,7 +91,6 @@ export default function DetailActions({
   labels,
 }: DetailActionsProps) {
   const [torrentOpen, setTorrentOpen] = useState(false);
-  const hasEpisodes = typeof episodes === "number" && episodes > 0;
 
   return (
     <>
@@ -119,15 +120,15 @@ export default function DetailActions({
             copyFailed: labels.shareCopyFailed,
           }}
         />
-        {hasEpisodes && (
-          <>
-            <MagnetButton
-              onOpen={() => setTorrentOpen(true)}
-              label={labels.torrents}
-            />
-            <PlayButton ariaLabel={labels.playAria}>{labels.play}</PlayButton>
-          </>
-        )}
+        {/* Always shown. Torrent search works off the title (no episode count
+            needed) and the player selects episodes itself. Gating these on
+            AniList's `episodes` total hid them for every currently-airing show,
+            where AniList returns episodes=null until the run finishes. */}
+        <MagnetButton
+          onOpen={() => setTorrentOpen(true)}
+          label={labels.torrents}
+        />
+        <PlayButton ariaLabel={labels.playAria}>{labels.play}</PlayButton>
       </div>
       {torrentOpen && (
         <TorrentModal
