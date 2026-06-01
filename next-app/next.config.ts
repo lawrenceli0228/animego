@@ -65,6 +65,30 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+
+  // Cache the jassub subtitle-engine static binaries (WASM / worker / font) hard.
+  // They live in public/jassub/ (built by `build:jassub` at prebuild) at stable,
+  // non-content-hashed paths, so Next serves them with the public/ default
+  // `Cache-Control: public, max-age=0`. That means the ~2 MB worker WASM is
+  // re-fetched from the origin on every player open; on a slow load it blows
+  // jassub's 10 s init budget and subtitles silently fail to appear (Cf-Cache-
+  // Status was DYNAMIC because CF doesn't edge-cache .wasm by extension either).
+  // A long max-age lets the browser AND the CF edge cache them. No `immutable`:
+  // the paths are not content-hashed, so a 30-day window self-heals after a
+  // jassub upgrade instead of pinning a stale worker for a year. Verified vs the
+  // Next 16 headers() docs — headers are checked before /public, and non-hashed
+  // public assets CAN have Cache-Control overridden (only SHA-hashed
+  // /_next/static immutable assets cannot).
+  async headers() {
+    return [
+      {
+        source: "/jassub/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=2592000" }, // 30 days
+        ],
+      },
+    ];
+  },
 };
 
 // Sentry wraps the Next config so the webpack plugin can (a) inject the

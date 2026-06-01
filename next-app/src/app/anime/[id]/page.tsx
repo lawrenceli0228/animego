@@ -204,12 +204,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     description,
     openGraph,
     twitter,
+    // hreflang intentionally omitted: the site is zh-canonical only. An
+    // `en-US` alternate at `?lang=en` was a false signal — getLang() is
+    // hardcoded `zh`, so that URL serves byte-identical Chinese HTML (verified
+    // on prod). Re-add a real languages map only when localized URLs exist
+    // (the deferred URL-i18n initiative), not before.
     alternates: {
       canonical,
-      languages: {
-        "zh-CN": canonical,
-        "en-US": `${canonical}?lang=en`,
-      },
     },
   };
 }
@@ -1231,6 +1232,15 @@ function EpisodesSection({
 // --- Page entry ---
 
 export default async function AnimeDetailPage({ params }: PageProps) {
+  // CF EDGE-CACHED ROUTE — keep this server render ANONYMOUS.
+  // `/anime/*` is served from a Cloudflare edge cache (see
+  // docs/migration/CF-EDGE-CACHE-PLAN.md). The cached HTML is handed to every
+  // visitor, so do NOT read cookies()/headers()/searchParams or run any
+  // per-user server fetch on this path: that either forces the page dynamic
+  // (killing ISR) or caches one user's personalized HTML for everyone. Per-user
+  // state hydrates client-side (auth_hint gate, see lib/clientAuth). If this
+  // route ever must become per-user, update/remove the CF cache rule in the
+  // same change.
   const { id } = await params;
   const anilistId = Number(id);
   if (!Number.isFinite(anilistId) || anilistId <= 0) notFound();
