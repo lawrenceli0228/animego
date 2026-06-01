@@ -2,6 +2,21 @@
 
 ---
 
+## [3.1.2] - 2026-06-02
+
+### 全屏字幕闪修复 · 品牌名统一 AnimeGoClub · 详情页按钮解 gate · CI 清理
+
+3.1.1 之后陆续合并的几项,本批一起记录。
+
+- **播放器全屏字幕闪(控制条 / 弹幕热图)** — 全屏下每当字幕换行,artplayer 重写 `.art-subtitle` innerHTML + 切 display;该元素是全宽、底部、`z-index:20`、带 4 层 text-shadow 的覆盖层,浏览器全屏重绘这块时**连带把它压着的底部控制条 + 热图一起闪**(每句对白闪一下、暂停即停、窗口模式太小看不出)。是 Chrome 全屏 + 字幕的已知合成层毛病(cf. Stremio #644)。修:`globals.css` 给 `.art-subtitle` + `.art-control-heatmap` 各提独立 GPU 合成层(`translateZ(0)`)+ 字幕 `contain: layout paint`,换行只重绘字幕自己、不波及控制条。纯合成提示,零行为变化。**本地全栈 + 真片源全屏复现验证通过**(DevTools cuechange 日志定位 + artplayer 源码确证)。(#22)
+- **品牌名全站统一为 AnimeGoClub** — 之前分裂:首页 title/h1/JSON-LD = AnimeGoClub,其余页 title 后缀 / `og:site_name` / 导航 logo / 页脚 = AnimeGo。AnimeGo 是红海通用词(撞俄罗斯盗版站 AnimeGO.org),animegoclub 与域名一致、独特、能稳排第一;分裂信号拖慢 Google 实体消歧。统一搜索信号 + 视觉字标为 AnimeGoClub(title 模板 / 各页 og:site_name / titleDefault / 详情页·`/u`·`/search`·`/welcome`·`/calendar`·`/faq` 标题 / navbar / footer / 登录注册页 / spa locales);仅保留 JSON-LD `alternateName` + keywords 里的 "AnimeGo" 当别名。顺带修了 `/calendar`+`/faq` 预存的双品牌标题 bug(plain title 内嵌品牌又被模板追加)。(#21)
+- **详情页磁力 / 播放按钮不再 gate 在 AniList 集数** — 之前 `episodes` 为 null(连载中番剧 AniList 不给总集数)就把磁力 + 播放按钮藏了;但种子搜索靠标题、播放器自己选集,与集数无关。改为始终显示。(#19)
+- **删废 CI workflow** — `e2e-sandbox.yml` 启的是已退役的 Mongo/Express 老栈(`docker-compose.yml` 早无 mongo),每个 PR ~10 秒就挂、刷失败邮件、给 PR 挂红叉、零信号。删除;保留其余 workflow 的真失败邮件。残留 sandbox 套件(specs / config / globalSetup 的 mongo seed)记 TODO 单独清。(#20)
+
+**已知 / 延后**:`HeatmapTuner` + `VideoPlayer` 设的热图自定义样式 CSS 变量(`--heatmap-h` / `--heatmap-scale-y` / `--heatmap-fill` / `--heatmap-opacity` / `[data-heatmap-always]`)在迁移时整块丢失,仓库里无消费这些变量的规则 —— 热图当前走 artplayer 默认样式(`applyHeatmapPath` 仍直接改 SVG path,形状正常)。与本次闪修复无关,单独一轮重建。
+
+---
+
 ## [3.1.1] - 2026-06-01
 
 ### 修复 — 播放器字幕缓存 · 详情页 SEO 信号 · 品牌图标 · 标题重复
