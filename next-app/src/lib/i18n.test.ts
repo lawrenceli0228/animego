@@ -3,22 +3,33 @@ import { describe, expect, test, mock, afterAll, beforeEach } from "bun:test";
 // Mutable state that each test can configure before importing i18n.
 let mockLangCookie: string | undefined = undefined;
 let mockAcceptLanguage = "";
+// Tracks whether the server-only Dynamic APIs were touched. getLang() is now
+// ISR-islanded — it must NEVER read cookies()/headers() (that forced every
+// page dynamic), so these must stay false through any getLang/getDict call.
+let cookiesCalled = false;
+let headersCalled = false;
 
 mock.module("next/headers", () => ({
-  cookies: async () => ({
-    get: (name: string) => {
-      if (name === "lang" && mockLangCookie !== undefined) {
-        return { value: mockLangCookie };
-      }
-      return undefined;
-    },
-  }),
-  headers: async () => ({
-    get: (name: string) => {
-      if (name === "accept-language") return mockAcceptLanguage || null;
-      return null;
-    },
-  }),
+  cookies: async () => {
+    cookiesCalled = true;
+    return {
+      get: (name: string) => {
+        if (name === "lang" && mockLangCookie !== undefined) {
+          return { value: mockLangCookie };
+        }
+        return undefined;
+      },
+    };
+  },
+  headers: async () => {
+    headersCalled = true;
+    return {
+      get: (name: string) => {
+        if (name === "accept-language") return mockAcceptLanguage || null;
+        return null;
+      },
+    };
+  },
 }));
 
 const { getLang, getDict, getDictByLang, tFromDict } = await import(
@@ -32,41 +43,31 @@ afterAll(() => {
 beforeEach(() => {
   mockLangCookie = undefined;
   mockAcceptLanguage = "";
+  cookiesCalled = false;
+  headersCalled = false;
 });
 
-describe("getLang", () => {
-  test("returns zh when lang cookie is zh", async () => {
-    mockLangCookie = "zh";
-    expect(await getLang()).toBe("zh");
-  });
-
-  test("returns en when lang cookie is en", async () => {
+describe("getLang (ISR-islanded — always zh, never reads cookies/headers)", () => {
+  test("returns zh regardless of the lang cookie", async () => {
     mockLangCookie = "en";
-    expect(await getLang()).toBe("en");
-  });
-
-  test("falls back to Accept-Language zh when no lang cookie", async () => {
-    mockLangCookie = undefined;
-    mockAcceptLanguage = "zh-CN,zh;q=0.9,en;q=0.8";
     expect(await getLang()).toBe("zh");
   });
 
-  test("falls back to Accept-Language en when no lang cookie and first pref is en", async () => {
-    mockLangCookie = undefined;
+  test("returns zh regardless of Accept-Language", async () => {
     mockAcceptLanguage = "en-US,en;q=0.9";
-    expect(await getLang()).toBe("en");
-  });
-
-  test("defaults to zh when no cookie and no Accept-Language header", async () => {
-    mockLangCookie = undefined;
-    mockAcceptLanguage = "";
     expect(await getLang()).toBe("zh");
   });
 
-  test("ignores unrecognised cookie value and uses Accept-Language", async () => {
-    mockLangCookie = "fr";  // not zh or en
-    mockAcceptLanguage = "en-GB";
-    expect(await getLang()).toBe("en");
+  test("returns zh with no cookie and no header", async () => {
+    expect(await getLang()).toBe("zh");
+  });
+
+  test("does NOT read cookies() or headers() — the whole ISR point", async () => {
+    mockLangCookie = "en";
+    mockAcceptLanguage = "en-US";
+    await getLang();
+    expect(cookiesCalled).toBe(false);
+    expect(headersCalled).toBe(false);
   });
 });
 

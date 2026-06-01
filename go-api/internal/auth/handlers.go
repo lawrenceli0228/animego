@@ -253,6 +253,7 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 
 	SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
 	SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
+	SetAuthHintCookie(w, h.refreshTTL, h.isProd)
 	httpx.Data(w, http.StatusCreated, AuthData{AccessToken: accessToken, User: ToSafeUser(user)})
 }
 
@@ -310,6 +311,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 
 	SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
 	SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
+	SetAuthHintCookie(w, h.refreshTTL, h.isProd)
 	httpx.Data(w, http.StatusOK, AuthData{AccessToken: accessToken, User: ToSafeUser(user)})
 }
 
@@ -365,6 +367,7 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 
 		SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
 		SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
+		SetAuthHintCookie(w, h.refreshTTL, h.isProd)
 		httpx.Data(w, http.StatusOK, RefreshData{AccessToken: accessToken})
 		return
 	}
@@ -390,6 +393,7 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		// the rotation race) so the client aligns after this response.
 		SetRefreshCookie(w, *user.RefreshToken, h.refreshTTL, h.isProd)
 		SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
+		SetAuthHintCookie(w, h.refreshTTL, h.isProd)
 		httpx.Data(w, http.StatusOK, RefreshData{AccessToken: accessToken})
 		return
 	}
@@ -429,6 +433,7 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
 
 	ClearRefreshCookie(w, h.isProd)
 	ClearSessionCookie(w, h.isProd)
+	ClearAuthHintCookie(w, h.isProd)
 	httpx.Data(w, http.StatusOK, MessageData{Message: msgLoggedOut})
 }
 

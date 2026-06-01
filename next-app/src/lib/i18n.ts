@@ -1,4 +1,3 @@
-import { cookies, headers } from "next/headers";
 import zh from "@/locales/zh";
 import en from "@/locales/en";
 
@@ -21,18 +20,14 @@ const DICTS: Record<Lang, Dict> = { zh, en: en as unknown as Dict };
  *   2. Accept-Language header (first preference matching zh* or en*)
  *   3. Default to 'zh' (project audience is Chinese-first)
  */
+// ISR islanding: the server NO LONGER reads the `lang` cookie/header at
+// render time (that forced every page dynamic, killing ISR). Every server
+// render is the canonical default `zh`; the client (lang-client.tsx) reads
+// the `lang` cookie after hydration and swaps the UI to `en` if set. SEO
+// pages are zh-canonical (project is Chinese-first), which is the intended
+// indexing target. Dynamic/app pages also render zh server-side, then the
+// client provider swaps — same as before, just resolved client-side.
 export async function getLang(): Promise<Lang> {
-  const cookieStore = await cookies();
-  const cookieLang = cookieStore.get("lang")?.value;
-  if (cookieLang === "zh" || cookieLang === "en") return cookieLang;
-
-  const hdrs = await headers();
-  const accept = hdrs.get("accept-language") ?? "";
-  for (const tag of accept.split(",").map((s) => s.trim().toLowerCase())) {
-    if (tag.startsWith("zh")) return "zh";
-    if (tag.startsWith("en")) return "en";
-  }
-
   return "zh";
 }
 

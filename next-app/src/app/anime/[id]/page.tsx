@@ -15,8 +15,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { cookies } from "next/headers";
-import { loggedInFromCookies } from "@/lib/serverAuth";
 import type { CSSProperties } from "react";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
@@ -50,6 +48,30 @@ import type {
 // upstream payloads cascade naturally.
 export const revalidate = 60;
 
+// A `[param]` route is `ƒ Dynamic` (and `revalidate` is ignored) unless it
+// exports generateStaticParams. We prerender the trending set at build time;
+// dynamicParams=true keeps every other id ISR-on-demand (rendered + cached on
+// first request) instead of 404. Without this the whole route stays dynamic.
+export const dynamicParams = true;
+
+// Prerender a small, hot set of detail pages from the trending endpoint —
+// same path + unwrapped TrendingItem[] shape the landing page's safeTrending
+// uses (/api/anime/trending?limit=N → TrendingItem[] with `anilistId`).
+// auth:false keeps the build-time fetch anonymous (no cookies()/headers()).
+// MUST NOT break a build where go-api is unreachable: on any error we return
+// [] so 0 pages prerender and all ids fall through to ISR-on-demand.
+export async function generateStaticParams(): Promise<Array<{ id: string }>> {
+  try {
+    const trending = await apiGet<Array<{ anilistId: number }>>(
+      "/api/anime/trending?limit=20",
+      { revalidate: 3600, auth: false },
+    );
+    return trending.map((a) => ({ id: String(a.anilistId) }));
+  } catch {
+    return [];
+  }
+}
+
 interface PageProps {
   params: Promise<{ id: string }>;
 }
@@ -58,7 +80,12 @@ interface PageProps {
 
 async function loadDetail(id: number): Promise<AnimeDetail | null> {
   try {
-    return await apiGet<AnimeDetail>(`/api/anime/${id}`, { revalidate: 60 });
+    // auth:false — detail data is public / not user-scoped, so skip the
+    // cookies()/headers() read that would force this page dynamic (ISR-safe).
+    return await apiGet<AnimeDetail>(`/api/anime/${id}`, {
+      revalidate: 60,
+      auth: false,
+    });
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
@@ -1208,22 +1235,17 @@ export default async function AnimeDetailPage({ params }: PageProps) {
   const anilistId = Number(id);
   if (!Number.isFinite(anilistId) || anilistId <= 0) notFound();
 
-  const [dict, lang, detail, cookieStore] = await Promise.all([
+  const [dict, lang, detail] = await Promise.all([
     getDict(),
     getLang(),
     loadDetail(anilistId),
-    cookies(),
   ]);
   if (!detail) notFound();
 
-  // ISSUE-001: gate the client-side subscription probes on a server-known
-  // login signal. This page already reads cookies via getLang(), so it is
-  // already rendered dynamically (Cf-Cache-Status: DYNAMIC) — reading one
-  // more cookie adds no caching cost. A logged-out visitor carries neither
-  // cookie and the client components skip the probe instead of firing
-  // GET /api/subscriptions/:id ×2 → 401 → /api/auth/refresh → 401.
-  const loggedIn = loggedInFromCookies(cookieStore);
-
+  // ISSUE-001 now lives client-side: SubscriptionButton / EpisodesGrid read
+  // the non-httpOnly `auth_hint` cookie on mount (see lib/clientAuth) and skip
+  // their /api/subscriptions/:id probe when it's absent. That keeps this page
+  // off cookies() so it can stay statically prerendered / ISR-cacheable.
   const jsonLd = buildJsonLd(detail, lang);
 
   return (
@@ -1249,7 +1271,6 @@ export default async function AnimeDetailPage({ params }: PageProps) {
         </HeroAccent>
         <div className="container">
           <DetailActions
-            loggedIn={loggedIn}
             anilistId={detail.anilistId}
             episodes={detail.episodes}
             titleRomaji={detail.titleRomaji}
@@ -1294,7 +1315,6 @@ export default async function AnimeDetailPage({ params }: PageProps) {
           <CharactersSection characters={detail.characters} lang={lang} dict={dict} />
           <StaffSectionView staff={detail.staff} lang={lang} dict={dict} />
           <EpisodesGrid
-            loggedIn={loggedIn}
             anilistId={detail.anilistId}
             episodes={detail.episodes}
             episodeTitles={detail.episodeTitles ?? []}

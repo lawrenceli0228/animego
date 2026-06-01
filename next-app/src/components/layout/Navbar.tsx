@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { Dict, Lang } from "@/lib/i18n";
-import { writeLangCookie } from "@/lib/lang-client";
+import { useLang } from "@/lib/lang-client";
+import { hasAuthHint } from "@/lib/clientAuth";
 
 export interface NavUser {
   username: string;
@@ -13,21 +13,13 @@ export interface NavUser {
 }
 
 interface NavbarProps {
-  dict: Dict;
-  lang: Lang;
   /**
-   * Current season and year resolved server-side so the Season link goes
-   * to the live /seasonal/[s]/[y] route. Phase 6 will read these from a
-   * route-level config or a /seasonal redirect handler.
+   * Current season + year resolved server-side so the Season link targets
+   * the live /seasonal/[s]/[y] route. These are deterministic (date-based),
+   * not per-user, so they don't force dynamic rendering.
    */
   season: string;
   year: number;
-  /**
-   * SSR-resolved user from /api/auth/me (forwarded via buildHeaders'
-   * cookie). null = anonymous (show login/register CTAs). P6.9 work —
-   * the auth-state hole the original "Phase 6 work" comment flagged.
-   */
-  user?: NavUser | null;
 }
 
 const s = {
@@ -126,49 +118,63 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-export default function Navbar({
-  dict,
-  lang,
-  season,
-  year,
-  user,
-}: NavbarProps) {
+export default function Navbar({ season, year }: NavbarProps) {
   const pathname = usePathname() ?? "/";
-  const router = useRouter();
-  const [langPending, startLangTransition] = useTransition();
-  const [logoutPending, startLogoutTransition] = useTransition();
+  // Client i18n: the layout renders the canonical default (zh) and no longer
+  // resolves lang server-side (that forced dynamic). useLang() reads the
+  // `lang` cookie on the client + reacts to the toggle, so the chrome
+  // switches to en for en visitors without a server round-trip.
+  const { lang, t, toggle } = useLang();
 
-  // Season link points at the live /seasonal route (legacy /season has
-  // no params; next-app uses /seasonal/[season]/[year]).
+  // Islanded auth state: the layout no longer fetches /api/auth/me server-side
+  // (that no-store call forced every page dynamic). Fetch it here, on mount,
+  // and ONLY when the non-httpOnly `auth_hint` cookie says a session likely
+  // exists — so an anonymous page load fires zero auth requests (ISSUE-001).
+  const [user, setUser] = useState<NavUser | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  useEffect(() => {
+    if (!hasAuthHint()) return;
+    let cancelled = false;
+    fetch("/api/auth/me", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (!cancelled) setUser(json?.data?.user ?? null);
+      })
+      .catch(() => {
+        /* network / 401 — stay anonymous */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Season link points at the live /seasonal route (legacy /season has no
+  // params; next-app uses /seasonal/[season]/[year]).
   const seasonHref = `/seasonal/${season.toLowerCase()}/${year}`;
 
   async function handleLogout() {
+    setLoggingOut(true);
     try {
       await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "same-origin",
       });
     } catch {
-      /* swallow — local cookie still gets cleared server-side */
+      /* swallow — the server still clears the cookies */
     }
-    // router.refresh re-runs the layout server fetch so the Navbar
-    // re-renders with user=null and the route-level proxy.ts gates
-    // catch the now-missing session cookie.
-    startLogoutTransition(() => router.refresh());
+    // go-api also clears the auth_hint cookie; reflect logged-out state now.
+    setUser(null);
+    setLoggingOut(false);
   }
 
   const links: Array<{ href: string; label: string; key: string }> = [
-    { href: "/", label: dict.nav.home, key: "home" },
-    { href: seasonHref, label: dict.nav.season, key: "season" },
-    { href: "/search", label: dict.nav.search, key: "search" },
-    { href: "/library", label: dict.nav.library, key: "library" },
-    { href: "/welcome", label: dict.nav.about, key: "about" },
+    { href: "/", label: t("nav.home"), key: "home" },
+    { href: seasonHref, label: t("nav.season"), key: "season" },
+    { href: "/search", label: t("nav.search"), key: "search" },
+    { href: "/library", label: t("nav.library"), key: "library" },
+    { href: "/welcome", label: t("nav.about"), key: "about" },
   ];
-
-  function toggleLang() {
-    writeLangCookie(lang === "zh" ? "en" : "zh");
-    startLangTransition(() => router.refresh());
-  }
 
   return (
     <nav style={s.nav} aria-label={lang === "zh" ? "主导航" : "Main navigation"}>
@@ -193,50 +199,40 @@ export default function Navbar({
           <button
             type="button"
             style={s.langBtn}
-            onClick={toggleLang}
-            disabled={langPending}
+            onClick={toggle}
             aria-label={lang === "zh" ? "Switch to English" : "切换到中文"}
           >
             {lang === "zh" ? "EN" : "中"}
           </button>
-          {/* P6.9: SSR-resolved auth state. user is fetched in
-              src/app/layout.tsx via apiGet('/api/auth/me'), forwarded
-              cookie-authenticated. null → anonymous CTAs; logged in →
-              greeting + admin-conditional admin link + my-list +
-              logout. Logout calls /api/auth/logout and then
-              router.refresh() so the next render's layout fetch sees
-              the cleared session cookie. */}
           {user ? (
             <>
               <span style={s.username}>
-                {dict.nav.hi}, {user.username}
+                {t("nav.hi")}, {user.username}
               </span>
               {user.role === "admin" && (
                 <Link href="/admin" prefetch={false} style={s.btnOutline}>
-                  {dict.admin.title}
+                  {t("admin.title", { defaultValue: "Admin" })}
                 </Link>
               )}
-              {/* P11: /profile migrated off the legacy Express SPA to
-                  next-app — client-side <Link> nav again. */}
               <Link href="/profile" prefetch={false} style={s.btnOutline}>
-                {dict.nav.myList}
+                {t("nav.myList")}
               </Link>
               <button
                 type="button"
                 onClick={handleLogout}
-                disabled={logoutPending}
+                disabled={loggingOut}
                 style={s.btnOutline}
               >
-                {dict.nav.logout}
+                {t("nav.logout")}
               </button>
             </>
           ) : (
             <>
               <Link href="/login" prefetch={false} style={s.btnOutline}>
-                {dict.nav.login}
+                {t("nav.login")}
               </Link>
               <Link href="/register" prefetch={false} style={s.btnFill}>
-                {dict.nav.register}
+                {t("nav.register")}
               </Link>
             </>
           )}
