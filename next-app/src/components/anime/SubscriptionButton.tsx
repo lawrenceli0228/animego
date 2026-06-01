@@ -59,6 +59,10 @@ interface SubscriptionButtonProps {
   anilistId: number;
   episodes: number | null;
   labels: Labels;
+  // Server-known login signal from the RSC parent (it read the session /
+  // refreshToken cookie). Gates the mount probe so logged-out detail-page
+  // views don't 401-storm — restores legacy useSubscription({enabled:!!user}).
+  loggedIn: boolean;
 }
 
 type SubStatus = "watching" | "completed" | "plan_to_watch" | "dropped";
@@ -276,9 +280,14 @@ export default function SubscriptionButton({
   anilistId,
   episodes,
   labels,
+  loggedIn,
 }: SubscriptionButtonProps) {
   const router = useRouter();
-  const [state, setState] = useState<LoadState>("loading");
+  // Logged-out visitors start directly in the anonymous CTA state (no
+  // loading flash, no network) — the probe below is skipped for them.
+  const [state, setState] = useState<LoadState>(
+    loggedIn ? "loading" : "anonymous",
+  );
   const [sub, setSub] = useState<SubscriptionDoc | null>(null);
   const [busy, setBusy] = useState(false);
   const [scoreOpen, setScoreOpen] = useState(false);
@@ -293,7 +302,11 @@ export default function SubscriptionButton({
   };
 
   // Mount probe — mirrors legacy useSubscription({enabled:!!user}).
+  // Skip entirely when logged out: the httpOnly session cookie is
+  // unreadable here, so without this gate every anonymous detail-page
+  // view fires GET /api/subscriptions/:id → 401 → refresh → 401 (ISSUE-001).
   useEffect(() => {
+    if (!loggedIn) return;
     let cancelled = false;
     (async () => {
       try {
@@ -338,7 +351,7 @@ export default function SubscriptionButton({
     return () => {
       cancelled = true;
     };
-  }, [anilistId]);
+  }, [anilistId, loggedIn]);
 
   // Outside-click close for score popup (matches legacy mousedown
   // listener pattern).

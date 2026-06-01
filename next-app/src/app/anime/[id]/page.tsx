@@ -15,6 +15,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
+import { loggedInFromCookies } from "@/lib/serverAuth";
 import type { CSSProperties } from "react";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
@@ -1206,12 +1208,21 @@ export default async function AnimeDetailPage({ params }: PageProps) {
   const anilistId = Number(id);
   if (!Number.isFinite(anilistId) || anilistId <= 0) notFound();
 
-  const [dict, lang, detail] = await Promise.all([
+  const [dict, lang, detail, cookieStore] = await Promise.all([
     getDict(),
     getLang(),
     loadDetail(anilistId),
+    cookies(),
   ]);
   if (!detail) notFound();
+
+  // ISSUE-001: gate the client-side subscription probes on a server-known
+  // login signal. This page already reads cookies via getLang(), so it is
+  // already rendered dynamically (Cf-Cache-Status: DYNAMIC) — reading one
+  // more cookie adds no caching cost. A logged-out visitor carries neither
+  // cookie and the client components skip the probe instead of firing
+  // GET /api/subscriptions/:id ×2 → 401 → /api/auth/refresh → 401.
+  const loggedIn = loggedInFromCookies(cookieStore);
 
   const jsonLd = buildJsonLd(detail, lang);
 
@@ -1238,6 +1249,7 @@ export default async function AnimeDetailPage({ params }: PageProps) {
         </HeroAccent>
         <div className="container">
           <DetailActions
+            loggedIn={loggedIn}
             anilistId={detail.anilistId}
             episodes={detail.episodes}
             titleRomaji={detail.titleRomaji}
@@ -1282,6 +1294,7 @@ export default async function AnimeDetailPage({ params }: PageProps) {
           <CharactersSection characters={detail.characters} lang={lang} dict={dict} />
           <StaffSectionView staff={detail.staff} lang={lang} dict={dict} />
           <EpisodesGrid
+            loggedIn={loggedIn}
             anilistId={detail.anilistId}
             episodes={detail.episodes}
             episodeTitles={detail.episodeTitles ?? []}

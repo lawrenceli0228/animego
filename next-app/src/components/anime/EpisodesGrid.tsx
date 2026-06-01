@@ -31,6 +31,9 @@ interface EpisodesGridProps {
   episodeTitles: DetailEpisodeTitle[];
   lang: Lang;
   dict: Dict;
+  // Server-known login signal from the RSC parent — gates the mount probe
+  // so logged-out views skip the 401-storming subscription fetch (ISSUE-001).
+  loggedIn: boolean;
 }
 
 const VALID_STATUSES: ReadonlyArray<SubStatus> = [
@@ -74,6 +77,7 @@ export default function EpisodesGrid({
   episodeTitles,
   lang,
   dict,
+  loggedIn,
 }: EpisodesGridProps) {
   const [sub, setSub] = useState<SubscriptionDoc | null>(null);
   // Which episode's expand panel is open. null = all collapsed. Matches
@@ -85,6 +89,7 @@ export default function EpisodesGrid({
   // neutral grid without an auth bounce. Cancel on unmount in case the
   // user navigates fast.
   useEffect(() => {
+    if (!loggedIn) return;
     let cancelled = false;
     (async () => {
       try {
@@ -102,7 +107,7 @@ export default function EpisodesGrid({
     return () => {
       cancelled = true;
     };
-  }, [anilistId]);
+  }, [anilistId, loggedIn]);
 
   // Listen for SubscriptionButton mutations. We only care about events
   // for THIS anime; the bus is global.
