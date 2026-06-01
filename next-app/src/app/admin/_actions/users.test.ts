@@ -6,12 +6,36 @@ import {
   mock,
   afterAll,
 } from "bun:test";
+import type { Dict } from "@/lib/i18n";
 
 interface ApiMutateCall {
   path: string;
   method: string;
   body?: unknown;
 }
+
+// Minimal static dict that satisfies the Dict shape users.ts reads.
+// Mirrors the zh.admin.userActions keys so validation messages flow through.
+const STATIC_DICT: Pick<Dict, "admin"> = {
+  admin: {
+    userActions: {
+      usernameEmpty: "Username cannot be empty",
+      usernameMinMax: "Username must be {{min}}-{{max}} chars",
+      emailEmpty: "Email cannot be empty",
+      emailInvalid: "Invalid email format",
+      passwordEmpty: "Password cannot be empty",
+      passwordMinLen: "Password must be at least {{len}} chars",
+      missingUserId: "Missing user ID",
+      noUpdateFields: "No fields to update",
+    },
+  } as Dict["admin"],
+};
+
+mock.module("@/lib/i18n", () => ({
+  getDict: async () => STATIC_DICT as Dict,
+  getLang: async () => "en",
+  getDictByLang: () => STATIC_DICT as Dict,
+}));
 
 const apiMutateCalls: ApiMutateCall[] = [];
 let apiMutateImpl: (path: string, method: string, opts?: { body?: unknown }) => Promise<unknown> =
@@ -45,9 +69,12 @@ mock.module("next/cache", () => ({
   },
 }));
 
-const { createAdminUser, updateAdminUser, deleteAdminUser } = await import(
-  "./users"
-);
+const {
+  createAdminUser,
+  updateAdminUser,
+  deleteAdminUser,
+  setAdminUserPassword,
+} = await import("./users");
 const { UserActionError } = await import("./_shared");
 
 afterAll(() => {
@@ -151,6 +178,42 @@ describe("createAdminUser", () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(UserActionError);
+    expect(apiMutateCalls).toHaveLength(0);
+  });
+
+  test("rejects empty email before the network call", async () => {
+    let thrown: unknown;
+    try {
+      await createAdminUser({
+        username: "alice",
+        email: "   ",
+        password: "secret123",
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UserActionError);
+    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(apiMutateCalls).toHaveLength(0);
+  });
+
+  test("rejects empty password before the network call", async () => {
+    let thrown: unknown;
+    try {
+      await createAdminUser({
+        username: "alice",
+        email: "alice@example.com",
+        password: "",
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UserActionError);
+    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
+      "VALIDATION_ERROR",
+    );
     expect(apiMutateCalls).toHaveLength(0);
   });
 });
@@ -264,5 +327,112 @@ describe("deleteAdminUser", () => {
     }
     expect(thrown).toBeInstanceOf(UserActionError);
     expect(apiMutateCalls).toHaveLength(0);
+  });
+});
+
+describe("setAdminUserPassword", () => {
+  test("POSTs password to /api/admin/users/:id/password", async () => {
+    apiMutateImpl = async () => ({ success: true });
+    await setAdminUserPassword("u1", "newpassword");
+    expect(apiMutateCalls[0]).toMatchObject({
+      path: "/api/admin/users/u1/password",
+      method: "POST",
+      body: { password: "newpassword" },
+    });
+  });
+
+  test("revalidates user:profile:{id} only (no admin:users)", async () => {
+    apiMutateImpl = async () => ({ success: true });
+    await setAdminUserPassword("u2", "newpassword");
+    expect(revalidateTagCalls).toContainEqual({
+      tag: "user:profile:u2",
+      profile: "max",
+    });
+    // password change does not bust the user list
+    expect(revalidateTagCalls.map((c) => c.tag)).not.toContain("admin:users");
+  });
+
+  test("encodes user ID in the path", async () => {
+    apiMutateImpl = async () => ({ success: true });
+    await setAdminUserPassword("weird/id", "pw123456");
+    expect(apiMutateCalls[0]?.path).toBe(
+      "/api/admin/users/weird%2Fid/password",
+    );
+  });
+
+  test("throws VALIDATION_ERROR when userId is missing", async () => {
+    let thrown: unknown;
+    try {
+      await setAdminUserPassword("", "pw123456");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UserActionError);
+    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(apiMutateCalls).toHaveLength(0);
+  });
+
+  test("throws VALIDATION_ERROR when password is too short", async () => {
+    let thrown: unknown;
+    try {
+      await setAdminUserPassword("u1", "12345");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UserActionError);
+    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(apiMutateCalls).toHaveLength(0);
+  });
+});
+
+describe("toActionError — ApiError path", () => {
+  // Verify that an upstream ApiError from the mock apiMutate is converted
+  // to a UserActionError with the same code/status (tests line 30-35 in
+  // users.ts which were previously uncovered).
+  test("re-wraps ApiError from apiMutate as UserActionError with original code", async () => {
+    const { ApiError } = await import("@/lib/api");
+    apiMutateImpl = async () => {
+      throw new ApiError("CONFLICT", "Username already exists", 409);
+    };
+    let thrown: unknown;
+    try {
+      await createAdminUser({
+        username: "alice",
+        email: "alice@example.com",
+        password: "secret123",
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UserActionError);
+    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
+      "CONFLICT",
+    );
+    expect((thrown as InstanceType<typeof UserActionError>).status).toBe(409);
+  });
+
+  test("wraps a plain Error as UNEXPECTED UserActionError (unknown throw path)", async () => {
+    // Throw a plain Error (not ApiError, not UserActionError) from apiMutate
+    // to exercise the UNEXPECTED fallback branch in toActionError.
+    apiMutateImpl = async () => {
+      throw new Error("database connection lost");
+    };
+    let thrown: unknown;
+    try {
+      await deleteAdminUser("u1");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UserActionError);
+    expect((thrown as InstanceType<typeof UserActionError>).code).toBe(
+      "UNEXPECTED",
+    );
+    expect((thrown as InstanceType<typeof UserActionError>).message).toBe(
+      "database connection lost",
+    );
   });
 });

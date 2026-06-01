@@ -1,5 +1,5 @@
 import { describe, expect, mock, test, beforeEach, afterEach } from "bun:test";
-import { ApiError, apiGet, apiGetPaged, getApiBase } from "./api";
+import { ApiError, apiGet, apiGetEnvelope, apiGetPaged, apiMutate, getApiBase } from "./api";
 
 const originalFetch = globalThis.fetch;
 const originalWindow = (globalThis as { window?: unknown }).window;
@@ -185,5 +185,138 @@ describe("apiGetPaged", () => {
     const result = await apiGetPaged<{ id: number }>("/x");
     expect(result.nextPage).toBeNull();
     expect(result.hasMore).toBe(false);
+  });
+});
+
+describe("apiMutate", () => {
+  test("POSTs body as JSON and unwraps envelope", async () => {
+    globalThis.fetch = mock(
+      async () =>
+        new Response(
+          JSON.stringify({ data: { _id: "u1", username: "alice" } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    ) as typeof fetch;
+    const result = await apiMutate<{ _id: string; username: string }>(
+      "/api/admin/users",
+      "POST",
+      { body: { username: "alice", email: "a@b.c", password: "pw" } },
+    );
+    expect(result).toEqual({ _id: "u1", username: "alice" });
+  });
+
+  test("sets Content-Type: application/json when body is provided", async () => {
+    const spy = mock(
+      async () =>
+        new Response(JSON.stringify({ data: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+    await apiMutate("/x", "POST", { body: { key: "val" } });
+    const init = spy.mock.calls[0][1] as { headers?: Record<string, string> };
+    expect(init.headers?.["Content-Type"]).toBe("application/json");
+  });
+
+  test("omits Content-Type header when no body", async () => {
+    const spy = mock(
+      async () =>
+        new Response(JSON.stringify({ data: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+    await apiMutate("/x", "DELETE");
+    const init = spy.mock.calls[0][1] as { headers?: Record<string, string> };
+    expect(init.headers?.["Content-Type"]).toBeUndefined();
+  });
+
+  test("returns undefined for 204 No Content", async () => {
+    globalThis.fetch = mock(
+      async () => new Response(null, { status: 204 }),
+    ) as typeof fetch;
+    const result = await apiMutate("/x", "DELETE");
+    expect(result).toBeUndefined();
+  });
+
+  test("throws ApiError on 4xx response with error envelope", async () => {
+    globalThis.fetch = mock(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: "FORBIDDEN", message: "nope" } }),
+          { status: 403, headers: { "content-type": "application/json" } },
+        ),
+    ) as typeof fetch;
+    await expect(apiMutate("/x", "POST")).rejects.toBeInstanceOf(ApiError);
+    await expect(apiMutate("/x", "POST")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      status: 403,
+    });
+  });
+
+  test("throws ApiError on network failure", async () => {
+    globalThis.fetch = mock(async () => {
+      throw new Error("timeout");
+    }) as typeof fetch;
+    await expect(apiMutate("/x", "PATCH", { body: {} })).rejects.toMatchObject(
+      { code: "NETWORK_ERROR", status: 0 },
+    );
+  });
+
+  test("throws ApiError on non-JSON body", async () => {
+    globalThis.fetch = mock(
+      async () =>
+        new Response("Gateway Timeout", {
+          status: 504,
+          headers: { "content-type": "text/plain" },
+        }),
+    ) as typeof fetch;
+    await expect(apiMutate("/x", "POST")).rejects.toMatchObject({
+      code: "INVALID_JSON",
+      status: 504,
+    });
+  });
+
+  test("uses DELETE method on the wire", async () => {
+    const spy = mock(
+      async () =>
+        new Response(JSON.stringify({ data: { deleted: true } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+    await apiMutate("/api/admin/users/u1", "DELETE");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+});
+
+describe("apiGetEnvelope", () => {
+  test("returns the raw envelope body without unwrapping data", async () => {
+    const envelope = { data: [{ id: 1 }], total: 1 };
+    globalThis.fetch = mock(
+      async () =>
+        new Response(JSON.stringify(envelope), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    ) as typeof fetch;
+    const result = await apiGetEnvelope<typeof envelope>("/x");
+    expect(result).toEqual(envelope);
+  });
+
+  test("throws ApiError on error response", async () => {
+    globalThis.fetch = mock(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: "NOT_FOUND", message: "gone" } }),
+          { status: 404, headers: { "content-type": "application/json" } },
+        ),
+    ) as typeof fetch;
+    await expect(
+      apiGetEnvelope("/x"),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });
