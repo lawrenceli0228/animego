@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { useLang } from "@/lib/lang-client";
 import { hasAuthHint } from "@/lib/clientAuth";
+import { authFetch } from "@/lib/authFetch";
 
 export interface NavUser {
   username: string;
@@ -134,20 +135,29 @@ export default function Navbar({ season, year }: NavbarProps) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
-    if (!hasAuthHint()) return;
     let cancelled = false;
-    fetch("/api/auth/me", { credentials: "same-origin" })
+    // No hint cookie → render anonymous (logout clears both the hint and our
+    // local state, so there's nothing to reset here).
+    if (!hasAuthHint()) return;
+    // authFetch self-heals an expired 15-min `session` via the 7-day refresh
+    // cookie. A raw fetch would 401 the moment the access token lapses and
+    // make a still-logged-in user look logged out (the phantom-logout that
+    // forced repeated re-logins). skipRedirectOnFailure so a genuinely
+    // expired visitor just renders anonymous instead of bouncing to /login.
+    // Re-runs on pathname change so a fresh client-side login (LoginForm
+    // navigates here) updates the nav without a manual page reload.
+    authFetch("/api/auth/me", { skipRedirectOnFailure: true })
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         if (!cancelled) setUser(json?.data?.user ?? null);
       })
       .catch(() => {
-        /* network / 401 — stay anonymous */
+        /* network blip — keep the last known state */
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pathname]);
 
   // Season link points at the live /seasonal route (legacy /season has no
   // params; next-app uses /seasonal/[season]/[year]).
