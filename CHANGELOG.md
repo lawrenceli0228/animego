@@ -2,6 +2,14 @@
 
 ---
 
+## [3.1.3] - 2026-06-02
+
+### 详情页 AggregateRating 富媒体修复 — 补 ratingCount
+
+- **GSC 报「应指定 ratingCount 或 reviewCount」(38 个 `/anime/*` 页无效)** — 详情页注入的 `TVSeries` JSON-LD 里的 `AggregateRating` 用的是 AniList `averageScore`,而 Schema.org 要求 `AggregateRating` 必须带评分人数(`ratingCount`/`reviewCount`)。查后端,AniList 这条数据**只存分数、无投票计数**(`go-api` schema 仅 `average_score`),凑不出 count → Google 全部判无效 → 这些页拿不到搜索结果里的⭐星级富媒体(从 5/27 起随新页收录涨到 38)。**修法**:改用 Bangumi 的 `score + votes`(`bangumi_votes` ← `Subject.Rating.Count`,有真实计数),且与详情页本就可见的「★ x.x (n)」徽章一致(满足 Google「结构化数据须与可见内容一致」)。门槛 `bangumiVotes > 0` 才输出 rating;无 Bangumi 票数的冷门页不输出评分(AniList-only 本就无效,输出也是白报错)。被收录的多为高分热门番、Bangumi 票数齐全,覆盖面几乎不受影响。部署后在 GSC 点「验证修正情况」清掉 38。
+
+---
+
 ## [3.1.2] - 2026-06-02
 
 ### 全屏字幕闪修复 · 品牌名统一 AnimeGoClub · 详情页按钮解 gate · CI 清理
