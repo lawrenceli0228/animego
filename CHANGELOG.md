@@ -2,6 +2,14 @@
 
 ---
 
+## [3.1.4] - 2026-06-03
+
+### 修复 — 登录态"假掉线" + 登录后导航不刷新
+
+- **反复"掉登录"被迫重登 / 登录成功后导航栏不变(需手动刷新)** — 两个症状同一处根因:`Navbar.tsx` 的登录态探测。排查实据:go-api 与 next-app 的 `JWT_SECRET` 一致、容器稳定运行 23h 且 0 重启、`proxy.ts`(Next 16 新版 middleware)的服务端 session 刷新在跑 —— **排除密钥失效 / 部署冲 token / middleware 没跑**。真因:① Navbar 用**裸 `fetch("/api/auth/me")`**,15 分钟的 `session`(access token)一过即 401 → 显示未登录,但 7 天的 `refreshToken` 仍有效、裸 fetch 不会刷新 → **假掉线**,用户误以为 JWT 失效而重登;② 探测 effect 依赖为 `[]`,只在挂载跑一次,客户端登录后 `router.refresh()` 不重挂该客户端组件 → 导航卡在未登录、须整页刷新。**修法**(只动 `Navbar.tsx`):`/api/auth/me` 改走 **`authFetch(..., { skipRedirectOnFailure: true })`**(401 自动用 refresh token 刷新重试,session 过期自愈;真过期则渲染匿名、不强跳 /login);effect 依赖改 `[pathname]`,登录跳转后即刻重探、导航实时更新。本地 typecheck + eslint 通过。
+
+---
+
 ## [3.1.3] - 2026-06-02
 
 ### 详情页 AggregateRating 富媒体修复 — 补 ratingCount
