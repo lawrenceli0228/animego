@@ -220,6 +220,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 interface JsonLdAggregateRating {
   "@type": "AggregateRating";
   ratingValue: number;
+  // Google rejects AggregateRating without a count (ratingCount/reviewCount).
+  // Only Bangumi gives us a real vote count, so the rating is sourced from
+  // Bangumi (score + votes), matching the visible "★ x.x (n)" badge on-page.
+  ratingCount: number;
   bestRating: number;
   worstRating: number;
 }
@@ -255,12 +259,21 @@ function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
   const formattedStartDate = formatFuzzyDate(detail.startDate);
   if (formattedStartDate) ld.startDate = formattedStartDate;
   if (detail.genres?.length) ld.genre = detail.genres;
-  if (detail.averageScore && detail.averageScore > 0) {
+  // Bangumi rating carries a real vote count (Subject.Rating.Count), which
+  // Google requires for a valid AggregateRating. AniList's averageScore has
+  // no count, so an AniList-sourced rating is always rejected — omit it.
+  if (
+    detail.bangumiScore &&
+    detail.bangumiScore > 0 &&
+    detail.bangumiVotes &&
+    detail.bangumiVotes > 0
+  ) {
     ld.aggregateRating = {
       "@type": "AggregateRating",
-      ratingValue: detail.averageScore / 10,
+      ratingValue: detail.bangumiScore,
+      ratingCount: detail.bangumiVotes,
       bestRating: 10,
-      worstRating: 0,
+      worstRating: 1,
     };
   }
   if (detail.studios?.length) {
