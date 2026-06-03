@@ -417,7 +417,10 @@ func TestGetByAnilistID_HappyPath(t *testing.T) {
 	assert.Equal(t, int32(42), sub.AnilistID)
 }
 
-func TestGetByAnilistID_NotFound_404(t *testing.T) {
+// Not subscribed returns 200 with null data (not 404). The detail page probes
+// this on every view; a 404 would surface as a noisy failed request in the
+// browser console. The frontend reads data:null as "available / not subscribed".
+func TestGetByAnilistID_NotSubscribed_200Null(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
@@ -432,7 +435,8 @@ func TestGetByAnilistID_NotFound_404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.GetSubscriptionByAnilistID(rec, req)
 
-	assertError(t, rec, http.StatusNotFound, "NOT_FOUND", "Subscription not found")
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.JSONEq(t, `{"data":null}`, rec.Body.String())
 }
 
 func TestGetByAnilistID_InvalidPath_400(t *testing.T) {
