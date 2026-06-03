@@ -74,7 +74,8 @@ cat <<EOF
     4. bash scripts/measure-tthw.sh  →  TTHW report
     5. Configure rclone: rclone config new (provider Cloudflare R2)
     6. bash scripts/backup-pg.sh --env=dev  →  verify R2 upload
-    7. bash scripts/restore-pg-drill.sh  →  P0 → P1 critical gate
+    7. bash scripts/backup-avatars.sh --env=dev  →  member-pass photo volume → R2
+    8. bash scripts/restore-pg-drill.sh  →  P0 → P1 critical gate
 ══════════════════════════════════════════════════
 
 EOF
