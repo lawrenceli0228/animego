@@ -996,29 +996,36 @@ func (q *Queries) GetTrendingWithCounts(ctx context.Context, limit int32) ([]Get
 }
 
 const getWatchers = `-- name: GetWatchers :many
-SELECT u.username
+SELECT u.username, u.avatar_url, bc.cover_image_url AS backdrop_cover_url
 FROM subscriptions s
 JOIN users u ON u.id = s.user_id
+LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE s.anilist_id = $1 AND s.status = 'watching'
 LIMIT $2
 `
 
+type GetWatchersRow struct {
+	Username         string  `json:"username"`
+	AvatarUrl        *string `json:"avatarUrl"`
+	BackdropCoverUrl *string `json:"backdropCoverUrl"`
+}
+
 // Public watcher list for one anime.  Backs /api/anime/:anilistId/watchers.
 // Replaces anime.controller.js:53-75 — single SQL with JOIN drops the
 // Express two-step (find + populate) pattern.
-func (q *Queries) GetWatchers(ctx context.Context, anilistID int32, limit int32) ([]string, error) {
+func (q *Queries) GetWatchers(ctx context.Context, anilistID int32, limit int32) ([]GetWatchersRow, error) {
 	rows, err := q.db.Query(ctx, getWatchers, anilistID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []string{}
+	items := []GetWatchersRow{}
 	for rows.Next() {
-		var username string
-		if err := rows.Scan(&username); err != nil {
+		var i GetWatchersRow
+		if err := rows.Scan(&i.Username, &i.AvatarUrl, &i.BackdropCoverUrl); err != nil {
 			return nil, err
 		}
-		items = append(items, username)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

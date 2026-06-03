@@ -3,10 +3,15 @@
 import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import { pickTitle, formatScore } from "@/lib/formatters";
+import { pickTitle } from "@/lib/formatters";
 import type { Lang, Dict } from "@/lib/i18n";
 import type { SubscriptionListItem, SubscriptionStatus } from "./types";
-import AnimeStatsPanel from "./AnimeStatsPanel";
+import ProfileHero from "@/components/profile/ProfileHero";
+import {
+  memberNo as makeMemberNo,
+  sinceLabel,
+} from "@/components/profile/memberIdentity";
+import type { BackdropOption } from "@/components/profile/backdropTypes";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -17,25 +22,18 @@ const STATUS_OPTIONS: { value: SubscriptionStatus; color: string }[] = [
   { value: "dropped", color: "#ff453a" },
 ];
 
-const SORT_OPTIONS: {
-  value: "updatedAt" | "score" | "title" | "avgScore";
-  zh: string;
-  en: string;
-}[] = [
+type SortValue = "updatedAt" | "score" | "title";
+
+const SORT_OPTIONS: { value: SortValue; zh: string; en: string }[] = [
   { value: "updatedAt", zh: "最近更新", en: "Recently Updated" },
   { value: "score", zh: "我的评分", en: "My Score" },
   { value: "title", zh: "标题", en: "Title" },
-  // avgScore is kept for UI parity but will silently no-op since
-  // GET /api/subscriptions does not include averageScore in its response.
-  { value: "avgScore", zh: "均分", en: "Average Score" },
 ];
 
-function scoreColor(s: number | null | undefined): string {
-  if (!s) return "rgba(235,235,245,0.40)";
-  if (s >= 75) return "#30d158";
-  if (s >= 50) return "#ff9f0a";
-  return "#ff453a";
-}
+const SEASON_LABELS: Record<Lang, Record<string, string>> = {
+  zh: { WINTER: "冬季", SPRING: "春季", SUMMER: "夏季", FALL: "秋季" },
+  en: { WINTER: "Winter", SPRING: "Spring", SUMMER: "Summer", FALL: "Fall" },
+};
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -233,6 +231,14 @@ function AnimeCard({ item, lang }: AnimeCardProps) {
 interface ProfileClientProps {
   /** Username from /api/auth/me — null when SSR fetch 401s. */
   username: string | null;
+  /** User uuid from /api/auth/me — drives the deterministic member number. */
+  userId: string | null;
+  /** Account creation timestamp — drives the pass "SINCE" line. */
+  createdAt: string | null;
+  /** DB-persisted pass photo (card face + avatar). */
+  avatarUrl: string | null;
+  /** DB-persisted chosen backdrop anime. */
+  backdropAnilistId: number | null;
   /** Initial "watching" list SSR-fetched for fast first paint. */
   initialItems: SubscriptionListItem[];
   /** All subscriptions (no status filter) for the stats panel. */
@@ -243,15 +249,17 @@ interface ProfileClientProps {
 
 export default function ProfileClient({
   username,
+  userId,
+  createdAt,
+  avatarUrl,
+  backdropAnilistId,
   initialItems,
   allSubsInitial,
   dict,
   lang,
 }: ProfileClientProps) {
   const [activeStatus, setActiveStatus] = useState<SubscriptionStatus>("watching");
-  const [sortBy, setSortBy] = useState<"updatedAt" | "score" | "title" | "avgScore">(
-    "updatedAt",
-  );
+  const [sortBy, setSortBy] = useState<SortValue>("updatedAt");
   const [search, setSearch] = useState("");
   // Client-side cache keyed by status. Seeded with SSR data.
   const [cache, setCache] = useState<Partial<Record<SubscriptionStatus, SubscriptionListItem[]>>>(
@@ -311,10 +319,6 @@ export default function ProfileClient({
           pickTitle(a, lang).localeCompare(pickTitle(b, lang)),
         );
         break;
-      case "avgScore":
-        // averageScore is absent from the subscriptions list endpoint.
-        // No-op sort (keep server order) to avoid breaking the UI.
-        break;
       default:
         // updatedAt: already sorted DESC by server
         break;
@@ -329,41 +333,82 @@ export default function ProfileClient({
     dropped: dict.sub.dropped,
   };
 
+  // ─── Hero data (donut + readouts + backdrop covers) ───────────────────────
+  const hero = useMemo(() => {
+    const labelOf: Record<SubscriptionStatus, string> = {
+      watching: dict.sub.watching,
+      completed: dict.sub.completed,
+      plan_to_watch: dict.sub.planToWatch,
+      dropped: dict.sub.dropped,
+    };
+    const counts: Record<SubscriptionStatus, number> = {
+      watching: 0,
+      completed: 0,
+      plan_to_watch: 0,
+      dropped: 0,
+    };
+    const seasonCounts: Record<string, number> = {};
+    const seen = new Set<number>();
+    const backdropOptions: BackdropOption[] = [];
+    for (const it of allSubs) {
+      const s = it.status as SubscriptionStatus;
+      if (s in counts) counts[s] += 1;
+      if (it.season && it.seasonYear) {
+        const k = `${it.seasonYear}-${it.season}`;
+        seasonCounts[k] = (seasonCounts[k] ?? 0) + 1;
+      }
+      if (it.coverImageUrl && !seen.has(it.anilistId)) {
+        seen.add(it.anilistId);
+        backdropOptions.push({
+          anilistId: it.anilistId,
+          title: pickTitle(it, lang),
+          coverUrl: it.coverImageUrl,
+          bannerUrl: it.bannerImageUrl ?? null,
+        });
+      }
+    }
+    const live = STATUS_OPTIONS.filter((o) => counts[o.value] > 0);
+    const topSeasonEntry = Object.entries(seasonCounts).sort(
+      (a, b) => b[1] - a[1],
+    )[0];
+    let topSeason: string | null = null;
+    if (topSeasonEntry) {
+      const [year, season] = topSeasonEntry[0].split("-");
+      topSeason = `${year} ${SEASON_LABELS[lang][season] ?? ""}`.trim();
+    }
+    return {
+      segments: live.map((o) => ({ value: counts[o.value], color: o.color })),
+      legend: live.map((o) => ({
+        label: labelOf[o.value],
+        count: counts[o.value],
+        color: o.color,
+      })),
+      topSeason,
+      totalCount: allSubs.length,
+      watchedCount: counts.completed,
+      backdropOptions: backdropOptions.slice(0, 60),
+    };
+  }, [allSubs, lang, dict]);
+
   const displayName = username ?? (lang === "zh" ? "我" : "My");
 
   return (
-    <div className="container" style={{ paddingTop: 40, paddingBottom: 60 }}>
-      {/* Page header */}
-      <div style={{ marginBottom: 36 }}>
-        <p
-          style={{
-            color: "#0a84ff",
-            fontSize: 13,
-            fontWeight: 600,
-            letterSpacing: "2px",
-            textTransform: "uppercase",
-            marginBottom: 8,
-          }}
-        >
-          {dict.profile.label}
-        </p>
-        <h1
-          style={{
-            fontSize: "clamp(24px, 3.5vw, 38px)",
-            color: "#ffffff",
-            fontFamily: "'Sora', sans-serif",
-            margin: 0,
-          }}
-        >
-          {displayName}
-          {dict.profile.titleSuffix}
-        </h1>
-      </div>
-
-      {/* Stats panel — computed from all subscriptions */}
-      <AnimeStatsPanel allSubs={allSubs} lang={lang} />
-
-      {/* Status tabs */}
+    <ProfileHero
+      username={displayName}
+      memberNo={makeMemberNo(userId)}
+      since={sinceLabel(createdAt)}
+      totalCount={hero.totalCount}
+      segments={hero.segments}
+      legend={hero.legend}
+      watchedCount={hero.watchedCount}
+      topSeason={hero.topSeason}
+      backdropOptions={hero.backdropOptions}
+      avatarUrl={avatarUrl}
+      backdropAnilistId={backdropAnilistId}
+      lang={lang}
+    >
+      <div style={{ paddingTop: 8, paddingBottom: 60 }}>
+        {/* Status tabs */}
       <nav
         aria-label={lang === "zh" ? "追番状态" : "Watch status"}
         style={{
@@ -445,11 +490,7 @@ export default function ProfileClient({
         />
         <select
           value={sortBy}
-          onChange={(e) =>
-            setSortBy(
-              e.target.value as "updatedAt" | "score" | "title" | "avgScore",
-            )
-          }
+          onChange={(e) => setSortBy(e.target.value as SortValue)}
           aria-label={lang === "zh" ? "排序方式" : "Sort by"}
           style={{
             padding: "8px 14px",
@@ -505,6 +546,7 @@ export default function ProfileClient({
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </ProfileHero>
   );
 }

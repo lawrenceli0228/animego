@@ -1,0 +1,325 @@
+/* settings.css — standard user settings page. */
+
+.set-page {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+.set-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+.set-head-titles {
+  min-width: 0;
+}
+
+/* live nav mini-card preview (top-right) — mirrors the navbar dropdown card
+   so picking a backdrop shows its banner immediately. */
+.set-minicard {
+  position: relative;
+  width: 290px;
+  max-width: 100%;
+  min-height: 78px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1c1c1e;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+}
+.set-minicard-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+}
+.set-minicard-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(16, 16, 20, 0.9), rgba(16, 16, 20, 0.42));
+}
+.set-minicard > .av,
+.set-minicard > .info {
+  position: relative;
+  z-index: 1;
+}
+.set-minicard .av {
+  width: 44px;
+  height: 44px;
+  border-radius: 9px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(140deg, #0a84ff, #0050c8);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 18px;
+  text-transform: uppercase;
+  font-family: var(--font-display), sans-serif;
+}
+.set-minicard .av img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.set-minicard .info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.set-minicard .info b {
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  font-family: var(--font-display), sans-serif;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.set-minicard .info span {
+  font-size: 11px;
+  color: rgba(235, 235, 245, 0.62);
+  letter-spacing: 0.02em;
+}
+.set-kicker {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent, #0a84ff);
+  margin: 0 0 8px;
+}
+.set-title {
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(24px, 3.5vw, 34px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #fff;
+  margin: 0;
+}
+
+.set-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 28px;
+  align-items: start;
+}
+.set-preview {
+  position: sticky;
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.set-preview .hint {
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.4);
+  text-align: center;
+}
+.set-id {
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.7);
+  letter-spacing: 0.06em;
+}
+
+.set-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.set-card {
+  background: #1c1c1e;
+  border: 1px solid #38383a;
+  border-radius: 16px;
+  padding: 22px;
+}
+.set-card h2 {
+  font-family: var(--font-display), sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 4px;
+}
+.set-card .sub {
+  font-size: 13px;
+  color: rgba(235, 235, 245, 0.5);
+  margin: 0 0 18px;
+}
+.set-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+.set-field label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.7);
+}
+.set-input {
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid #48484a;
+  background: #2c2c2e;
+  color: #fff;
+  font-size: 14px;
+  font-family: var(--font-sans), sans-serif;
+  outline: none;
+  transition: border-color 160ms ease;
+}
+.set-input:focus {
+  border-color: var(--accent, #0a84ff);
+}
+
+.set-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.set-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: var(--accent, #0a84ff);
+  color: #fff;
+  transition: background 160ms ease, opacity 160ms ease, transform 120ms ease;
+}
+.set-btn:hover {
+  background: #409cff;
+}
+.set-btn:active {
+  transform: scale(0.98);
+}
+.set-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.set-btn.ghost {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.set-btn.ghost:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+.set-btn.danger {
+  background: rgba(255, 69, 58, 0.14);
+  border-color: rgba(255, 69, 58, 0.4);
+  color: #ff7b72;
+}
+.set-btn.danger:hover {
+  background: rgba(255, 69, 58, 0.22);
+}
+.set-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.set-msg {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.set-msg.ok {
+  color: #30d158;
+}
+.set-msg.err {
+  color: #ff453a;
+}
+
+/* photo row */
+.set-photo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.set-thumb {
+  width: 60px;
+  height: 84px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #2c2c2e;
+  flex-shrink: 0;
+}
+
+/* backdrop grid */
+.set-grid-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  gap: 9px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 4px;
+  padding-right: 4px;
+}
+.set-cell {
+  position: relative;
+  aspect-ratio: 5 / 7;
+  border-radius: 9px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  background: #2c2c2e;
+  padding: 0;
+  transition: transform 140ms ease, border-color 140ms ease;
+}
+.set-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.set-cell:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+.set-cell[aria-pressed="true"] {
+  border-color: var(--accent, #0a84ff);
+}
+.set-cell[aria-pressed="true"]::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  font-weight: 800;
+  color: #fff;
+  background: rgba(10, 132, 255, 0.42);
+}
+
+@media (max-width: 760px) {
+  .set-grid {
+    grid-template-columns: 1fr;
+  }
+  .set-preview {
+    position: static;
+  }
+}

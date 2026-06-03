@@ -171,6 +171,25 @@ func (f *fakeAuthDB) ResetUserPassword(ctx context.Context, id uuid.UUID, passwo
 	return f.resetUserPasswordFn(ctx, id, password)
 }
 
+// Self-serve account mutation stubs (PATCH /api/auth/me + change-password).
+// No existing test exercises these endpoints yet; zero-value returns keep
+// fakeAuthDB satisfying the AuthDB interface.
+func (f *fakeAuthDB) UpdateUsername(ctx context.Context, id uuid.UUID, username string) (dbgen.User, error) {
+	return dbgen.User{ID: id, Username: username}, nil
+}
+func (f *fakeAuthDB) SetUserAvatar(ctx context.Context, id uuid.UUID, avatarUrl *string) error {
+	return nil
+}
+func (f *fakeAuthDB) SetUserBackdrop(ctx context.Context, id uuid.UUID, backdropAnilistID *int32) error {
+	return nil
+}
+func (f *fakeAuthDB) UpdateUserPassword(ctx context.Context, id uuid.UUID, password string) error {
+	return nil
+}
+func (f *fakeAuthDB) GetAnimeImages(ctx context.Context, anilistID int32) (dbgen.GetAnimeImagesRow, error) {
+	return dbgen.GetAnimeImagesRow{}, nil
+}
+
 // fakeEmailCall records a single SendPasswordReset invocation.
 type fakeEmailCall struct {
 	to       string

@@ -4,8 +4,14 @@
 // no other agent is writing that file concurrently.
 
 export interface UserProfileData {
+  /** User uuid — drives the deterministic member number (#AGC-…). */
+  id: string;
   username: string;
   createdAt: string;
+  /** DB-persisted pass photo (card face + avatar); null → cover. */
+  avatarUrl: string | null;
+  /** DB-persisted chosen backdrop anime; null → first list item. */
+  backdropAnilistId: number | null;
   followerCount: number;
   followingCount: number;
   /** null when the requesting user is anonymous */
@@ -20,6 +26,8 @@ export interface WatchingEntry {
   titleNative: string | null;
   titleChinese: string | null;
   coverImageUrl: string | null;
+  /** Wide landscape banner; used to resolve the cinematic backdrop. */
+  bannerImageUrl: string | null;
   coverImageColor: string | null;
   posterAccent: string | null;
   episodes: number | null;
@@ -37,4 +45,6 @@ export interface WatchingEntry {
 
 export interface FollowListItem {
   username: string;
+  avatarUrl?: string | null;
+  backdropCoverUrl?: string | null;
 }

@@ -7,10 +7,17 @@ import type { CSSProperties } from "react";
 import { useLang } from "@/lib/lang-client";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { authFetch } from "@/lib/authFetch";
+import AvatarMenu from "./AvatarMenu";
 
 export interface NavUser {
   username: string;
   role?: string | null;
+  /** DB-persisted pass photo, shown as the avatar when set. */
+  avatarUrl?: string | null;
+  /** Chosen backdrop anime's wide banner — themes the dropdown mini-card. */
+  backdropBannerUrl?: string | null;
+  /** Chosen backdrop anime's cover — fills the avatar tile when no photo. */
+  backdropCoverUrl?: string | null;
 }
 
 interface NavbarProps {
@@ -206,38 +213,24 @@ export default function Navbar({ season, year }: NavbarProps) {
           ))}
         </div>
         <div style={s.right}>
-          <button
-            type="button"
-            style={s.langBtn}
-            onClick={toggle}
-            aria-label={lang === "zh" ? "Switch to English" : "切换到中文"}
-          >
-            {lang === "zh" ? "EN" : "中"}
-          </button>
           {user ? (
-            <>
-              <span style={s.username}>
-                {t("nav.hi")}, {user.username}
-              </span>
-              {user.role === "admin" && (
-                <Link href="/admin" prefetch={false} style={s.btnOutline}>
-                  {t("admin.title", { defaultValue: "Admin" })}
-                </Link>
-              )}
-              <Link href="/profile" prefetch={false} style={s.btnOutline}>
-                {t("nav.myList")}
-              </Link>
-              <button
-                type="button"
-                onClick={handleLogout}
-                disabled={loggingOut}
-                style={s.btnOutline}
-              >
-                {t("nav.logout")}
-              </button>
-            </>
+            // Logged-in chrome (Hi / 我的追番 / language / 登出) collapses into
+            // the avatar dropdown, which also hosts 卡片个性化.
+            <AvatarMenu
+              user={user}
+              onLogout={handleLogout}
+              loggingOut={loggingOut}
+            />
           ) : (
             <>
+              <button
+                type="button"
+                style={s.langBtn}
+                onClick={toggle}
+                aria-label={lang === "zh" ? "Switch to English" : "切换到中文"}
+              >
+                {lang === "zh" ? "EN" : "中"}
+              </button>
               <Link href="/login" prefetch={false} style={s.btnOutline}>
                 {t("nav.login")}
               </Link>

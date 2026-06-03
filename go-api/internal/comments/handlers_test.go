@@ -700,14 +700,14 @@ func TestNewHandlers_NilQueriesPanics(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 type fakeDB struct {
-	listFn      func(ctx context.Context, anilistID, episode int32) ([]dbgen.EpisodeComment, error)
+	listFn      func(ctx context.Context, anilistID, episode int32) ([]dbgen.ListEpisodeCommentsRow, error)
 	createFn    func(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error)
 	parentFn    func(ctx context.Context, id uuid.UUID, anilistID, episode int32) (uuid.UUID, error)
 	getByIDFn   func(ctx context.Context, id uuid.UUID) (dbgen.GetCommentByIDRow, error)
 	deleteFn    func(ctx context.Context, id uuid.UUID) error
 }
 
-func (f *fakeDB) ListEpisodeComments(ctx context.Context, anilistID, episode int32) ([]dbgen.EpisodeComment, error) {
+func (f *fakeDB) ListEpisodeComments(ctx context.Context, anilistID, episode int32) ([]dbgen.ListEpisodeCommentsRow, error) {
 	if f.listFn == nil {
 		panic("fakeDB.ListEpisodeComments not set")
 	}

@@ -117,15 +117,17 @@ func (q *Queries) GetProfileCounts(ctx context.Context, userID uuid.UUID) (GetPr
 
 const getUserIDByUsername = `-- name: GetUserIDByUsername :one
 
-SELECT id, username, created_at
+SELECT id, username, created_at, avatar_url, backdrop_anilist_id
 FROM users
 WHERE username = $1
 `
 
 type GetUserIDByUsernameRow struct {
-	ID        uuid.UUID          `json:"id"`
-	Username  string             `json:"username"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+	ID                uuid.UUID          `json:"id"`
+	Username          string             `json:"username"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	AvatarUrl         *string            `json:"avatarUrl"`
+	BackdropAnilistID *int32             `json:"backdropAnilistId"`
 }
 
 // Queries for the social surface (P2.4) — follows + public profile + feed.
@@ -148,7 +150,13 @@ type GetUserIDByUsernameRow struct {
 func (q *Queries) GetUserIDByUsername(ctx context.Context, username string) (GetUserIDByUsernameRow, error) {
 	row := q.db.QueryRow(ctx, getUserIDByUsername, username)
 	var i GetUserIDByUsernameRow
-	err := row.Scan(&i.ID, &i.Username, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.CreatedAt,
+		&i.AvatarUrl,
+		&i.BackdropAnilistID,
+	)
 	return i, err
 }
 
@@ -255,18 +263,23 @@ const listFollowers = `-- name: ListFollowers :many
 SELECT
     u.id,
     u.username,
+    u.avatar_url,
+    bc.cover_image_url AS backdrop_cover_url,
     f.created_at AS followed_at
 FROM follows f
 JOIN users u ON u.id = f.follower_id
+LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE f.followee_id = $1
 ORDER BY f.created_at DESC
 LIMIT $2 OFFSET $3
 `
 
 type ListFollowersRow struct {
-	ID         uuid.UUID          `json:"id"`
-	Username   string             `json:"username"`
-	FollowedAt pgtype.Timestamptz `json:"followedAt"`
+	ID               uuid.UUID          `json:"id"`
+	Username         string             `json:"username"`
+	AvatarUrl        *string            `json:"avatarUrl"`
+	BackdropCoverUrl *string            `json:"backdropCoverUrl"`
+	FollowedAt       pgtype.Timestamptz `json:"followedAt"`
 }
 
 // ==================== Followers / following lists ====================
@@ -282,7 +295,13 @@ func (q *Queries) ListFollowers(ctx context.Context, followeeID uuid.UUID, limit
 	items := []ListFollowersRow{}
 	for rows.Next() {
 		var i ListFollowersRow
-		if err := rows.Scan(&i.ID, &i.Username, &i.FollowedAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.AvatarUrl,
+			&i.BackdropCoverUrl,
+			&i.FollowedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -297,18 +316,23 @@ const listFollowing = `-- name: ListFollowing :many
 SELECT
     u.id,
     u.username,
+    u.avatar_url,
+    bc.cover_image_url AS backdrop_cover_url,
     f.created_at AS followed_at
 FROM follows f
 JOIN users u ON u.id = f.followee_id
+LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE f.follower_id = $1
 ORDER BY f.created_at DESC
 LIMIT $2 OFFSET $3
 `
 
 type ListFollowingRow struct {
-	ID         uuid.UUID          `json:"id"`
-	Username   string             `json:"username"`
-	FollowedAt pgtype.Timestamptz `json:"followedAt"`
+	ID               uuid.UUID          `json:"id"`
+	Username         string             `json:"username"`
+	AvatarUrl        *string            `json:"avatarUrl"`
+	BackdropCoverUrl *string            `json:"backdropCoverUrl"`
+	FollowedAt       pgtype.Timestamptz `json:"followedAt"`
 }
 
 // GET /api/users/:username/following — paginated list of users this
@@ -322,7 +346,13 @@ func (q *Queries) ListFollowing(ctx context.Context, followerID uuid.UUID, limit
 	items := []ListFollowingRow{}
 	for rows.Next() {
 		var i ListFollowingRow
-		if err := rows.Scan(&i.ID, &i.Username, &i.FollowedAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.AvatarUrl,
+			&i.BackdropCoverUrl,
+			&i.FollowedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -344,6 +374,7 @@ SELECT
     a.title_native,
     a.title_chinese,
     a.cover_image_url,
+    a.banner_image_url,
     a.cover_image_color,
     a.poster_accent,
     a.episodes,
@@ -368,6 +399,7 @@ type ListProfileWatchingRow struct {
 	TitleNative     *string            `json:"titleNative"`
 	TitleChinese    *string            `json:"titleChinese"`
 	CoverImageUrl   *string            `json:"coverImageUrl"`
+	BannerImageUrl  *string            `json:"bannerImageUrl"`
 	CoverImageColor *string            `json:"coverImageColor"`
 	PosterAccent    *string            `json:"posterAccent"`
 	Episodes        *int32             `json:"episodes"`
@@ -399,6 +431,7 @@ func (q *Queries) ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]
 			&i.TitleNative,
 			&i.TitleChinese,
 			&i.CoverImageUrl,
+			&i.BannerImageUrl,
 			&i.CoverImageColor,
 			&i.PosterAccent,
 			&i.Episodes,

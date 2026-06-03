@@ -13,6 +13,8 @@ export interface SubscriptionListItem {
   titleNative: string | null;
   titleChinese: string | null;
   coverImageUrl: string | null;
+  /** Wide landscape banner (AniList bannerImage); used for the cinematic backdrop. */
+  bannerImageUrl: string | null;
   coverImageColor: string | null;
   posterAccent: string | null;
   episodes: number | null;

@@ -60,7 +60,8 @@ function isGated(path: string): boolean {
     path.startsWith("/admin") ||
     path.startsWith("/library") ||
     path.startsWith("/player") ||
-    path.startsWith("/profile")
+    path.startsWith("/profile") ||
+    path.startsWith("/settings")
   );
 }
 

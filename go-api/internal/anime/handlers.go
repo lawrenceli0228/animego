@@ -294,13 +294,13 @@ func Watchers(q dbgen.Querier) http.HandlerFunc {
 		idI32 := int32(id)
 
 		var (
-			usernames []string
-			total     int64
+			watchers []dbgen.GetWatchersRow
+			total    int64
 		)
 		g, gctx := errgroup.WithContext(ctx)
 		g.Go(func() error {
 			var err error
-			usernames, err = q.GetWatchers(gctx, idI32, int32(limit))
+			watchers, err = q.GetWatchers(gctx, idI32, int32(limit))
 			return err
 		})
 		g.Go(func() error {
@@ -313,12 +313,12 @@ func Watchers(q dbgen.Querier) http.HandlerFunc {
 			return
 		}
 
-		// Map []string → []watcherItem so the JSON shape carries an
-		// object per element ({username: "..."}) instead of a raw
-		// string array.  Match the Express map(s => ({username: ...})).
-		items := make([]watcherItem, 0, len(usernames))
-		for _, u := range usernames {
-			items = append(items, watcherItem{Username: u})
+		// Map rows → []watcherItem so the JSON shape carries an object per
+		// element ({username, avatarUrl}). avatarUrl drives the watcher
+		// avatar thumbnails; nil renders the initial fallback.
+		items := make([]watcherItem, 0, len(watchers))
+		for _, row := range watchers {
+			items = append(items, watcherItem{Username: row.Username, AvatarURL: row.AvatarUrl, BackdropCoverURL: row.BackdropCoverUrl})
 		}
 
 		// Express:  res.json({data, total}) — flat sibling keys, not
@@ -433,7 +433,9 @@ type trendingItem struct {
 // watcherItem is one element of /api/anime/:anilistId/watchers' data
 // array.  Express: map(s => ({username: s.userId.username})).
 type watcherItem struct {
-	Username string `json:"username"`
+	Username         string  `json:"username"`
+	AvatarURL        *string `json:"avatarUrl"`
+	BackdropCoverURL *string `json:"backdropCoverUrl"`
 }
 
 // watchersResponse is the full envelope for /api/anime/:anilistId/watchers.

@@ -36,6 +36,7 @@ SELECT
     a.title_native,
     a.title_chinese,
     a.cover_image_url,
+    a.banner_image_url,
     a.cover_image_color,
     a.poster_accent,
     a.episodes,

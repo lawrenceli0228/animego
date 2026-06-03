@@ -327,9 +327,15 @@ export default function SubscriptionButton({
         }
         if (res.ok) {
           const body = (await res.json().catch(() => null)) as
-            | { data?: Partial<SubscriptionDoc> }
+            | { data?: Partial<SubscriptionDoc> | null }
             | null;
-          const data = body?.data ?? {};
+          // 200 + data:null = not subscribed (the endpoint returns this
+          // instead of 404 so the probe doesn't spam the console).
+          if (body?.data == null) {
+            setState("available");
+            return;
+          }
+          const data = body.data;
           const parsed: SubscriptionDoc = {
             status: (data.status as SubStatus) ?? "watching",
             currentEpisode:

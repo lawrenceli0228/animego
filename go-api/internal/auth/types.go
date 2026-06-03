@@ -78,13 +78,19 @@ type ResetPasswordReq struct {
 // resetPasswordToken, resetPasswordExpires.  See ToSafeUser comment for
 // the trust boundary.
 type SafeUser struct {
-	ID        uuid.UUID `json:"id"`
-	Username  string    `json:"username"`
-	Email     string    `json:"email"`
-	Role      *string   `json:"role"`
-	IsPublic  bool      `json:"isPublic"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID                uuid.UUID `json:"id"`
+	Username          string    `json:"username"`
+	Email             string    `json:"email"`
+	Role              *string   `json:"role"`
+	IsPublic          bool      `json:"isPublic"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	AvatarURL         *string   `json:"avatarUrl"`
+	BackdropAnilistID *int32    `json:"backdropAnilistId"`
+	// Resolved from BackdropAnilistID by the handler (not ToSafeUser) so the
+	// navbar avatar can theme its mini-card with the chosen anime's art.
+	BackdropBannerURL *string `json:"backdropBannerUrl"`
+	BackdropCoverURL  *string `json:"backdropCoverUrl"`
 }
 
 // ToSafeUser strips the secret columns out of a dbgen.User row before
@@ -96,13 +102,15 @@ type SafeUser struct {
 // explicitly added here.
 func ToSafeUser(u dbgen.User) SafeUser {
 	return SafeUser{
-		ID:        u.ID,
-		Username:  u.Username,
-		Email:     u.Email,
-		Role:      u.Role,
-		IsPublic:  u.IsPublic,
-		CreatedAt: u.CreatedAt.Time,
-		UpdatedAt: u.UpdatedAt.Time,
+		ID:                u.ID,
+		Username:          u.Username,
+		Email:             u.Email,
+		Role:              u.Role,
+		IsPublic:          u.IsPublic,
+		CreatedAt:         u.CreatedAt.Time,
+		UpdatedAt:         u.UpdatedAt.Time,
+		AvatarURL:         u.AvatarUrl,
+		BackdropAnilistID: u.BackdropAnilistID,
 	}
 }
 

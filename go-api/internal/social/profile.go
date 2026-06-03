@@ -118,12 +118,15 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.Data(w, http.StatusOK, profileResponse{
-		Username:       user.Username,
-		CreatedAt:      user.CreatedAt,
-		FollowerCount:  counts.FollowerCount,
-		FollowingCount: counts.FollowingCount,
-		IsFollowing:    isFollowing,
-		Watching:       mapWatching(watchingRows),
+		ID:                user.ID.String(),
+		Username:          user.Username,
+		CreatedAt:         user.CreatedAt,
+		AvatarURL:         user.AvatarUrl,
+		BackdropAnilistID: user.BackdropAnilistID,
+		FollowerCount:     counts.FollowerCount,
+		FollowingCount:    counts.FollowingCount,
+		IsFollowing:       isFollowing,
+		Watching:          mapWatching(watchingRows),
 	})
 }
 
@@ -149,6 +152,7 @@ func mapWatching(rows []dbgen.ListProfileWatchingRow) []watchingItem {
 			TitleNative:        row.TitleNative,
 			TitleChinese:       row.TitleChinese,
 			CoverImageUrl:      row.CoverImageUrl,
+			BannerImageUrl:     row.BannerImageUrl,
 			CoverImageColor:    row.CoverImageColor,
 			PosterAccent:       row.PosterAccent,
 			Episodes:           row.Episodes,

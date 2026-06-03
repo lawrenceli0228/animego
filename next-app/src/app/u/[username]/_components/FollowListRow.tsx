@@ -4,6 +4,8 @@ import Link from "next/link";
 import type { FollowListItem } from "./types";
 import FollowButton from "./FollowButton";
 import type { Lang } from "@/lib/i18n";
+import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import FallbackImg from "@/components/ui/FallbackImg";
 
 interface FollowListRowProps {
   user: FollowListItem;
@@ -63,9 +65,14 @@ export default function FollowListRow({
             fontWeight: 800,
             color: "#fff",
             textTransform: "uppercase",
+            overflow: "hidden",
           }}
         >
-          {user.username[0]}
+          <FallbackImg
+            src={user.avatarUrl ?? user.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
+            fallback={DEFAULT_CARD_IMAGE}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
         </div>
         <span style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}>
           {user.username}

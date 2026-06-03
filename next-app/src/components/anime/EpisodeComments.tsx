@@ -25,6 +25,8 @@ import {
 } from "react";
 import Link from "next/link";
 import { authFetch } from "@/lib/authFetch";
+import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import FallbackImg from "@/components/ui/FallbackImg";
 import type { Dict, Lang } from "@/lib/i18n";
 
 interface CommentDoc {
@@ -33,6 +35,8 @@ interface CommentDoc {
   episode: number;
   userId: string;
   username: string;
+  avatarUrl?: string | null;
+  backdropCoverUrl?: string | null;
   content: string;
   parentId: string | null;
   replyToUsername: string | null;
@@ -225,9 +229,14 @@ function CommentItem({
             fontWeight: 700,
             color: "#fff",
             textTransform: "uppercase",
+            overflow: "hidden",
           }}
         >
-          {c.username.slice(0, 1)}
+          <FallbackImg
+            src={c.avatarUrl ?? c.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
+            fallback={DEFAULT_CARD_IMAGE}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div

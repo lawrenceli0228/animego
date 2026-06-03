@@ -1,0 +1,168 @@
+/*
+ * avatar-menu.css — the navbar account avatar + dropdown that collapses the
+ * logged-in chrome (Hi/我的追番/语言/登出) and integrates 卡片个性化.
+ */
+
+.agc-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+}
+/* Steam-style square avatar tile; the chosen anime art themes it. */
+.agc-avatar {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(140deg, #0a84ff, #0050c8);
+  color: #fff;
+  font-family: var(--font-display), sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  text-transform: uppercase;
+  transition: box-shadow 200ms ease, transform 150ms ease;
+}
+.agc-avatar:hover {
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.3);
+}
+.agc-avatar:active {
+  transform: scale(0.95);
+}
+.agc-avatar img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.agc-avatar-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 200;
+  width: 244px;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(18, 18, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 24px 64px -20px rgba(0, 0, 0, 0.9);
+}
+/* mini-card: the chosen anime banner backs the avatar + name (Steam mini profile) */
+.agc-avatar-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 12px;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 6px;
+  min-height: 64px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.agc-avatar-head-banner {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+}
+.agc-avatar-head-banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(16, 16, 20, 0.92), rgba(16, 16, 20, 0.5));
+}
+.agc-avatar-head > .agc-avatar,
+.agc-avatar-head > .nm {
+  position: relative;
+  z-index: 1;
+}
+.agc-avatar-head .agc-avatar {
+  width: 40px;
+  height: 40px;
+  cursor: default;
+}
+.agc-avatar-head .nm b {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+.agc-avatar-head .nm {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.agc-avatar-head .nm b {
+  font-family: var(--font-display), sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agc-avatar-head .nm span {
+  font-size: 11px;
+  color: rgba(235, 235, 245, 0.45);
+}
+
+.agc-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: rgba(235, 235, 245, 0.85);
+  font-family: var(--font-sans), sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  transition: background 160ms ease, color 160ms ease;
+}
+.agc-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.agc-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.agc-menu-item.danger {
+  color: #ff7b72;
+}
+.agc-menu-item.danger:hover {
+  background: rgba(255, 69, 58, 0.14);
+  color: #ff8b82;
+}
+.agc-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.agc-menu-item .spacer {
+  margin-left: auto;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.5);
+}
+.agc-menu-sep {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 6px 4px;
+}

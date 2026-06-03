@@ -19,7 +19,8 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/server      ./cmd/server && 
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates wget tzdata && \
-    adduser -D -u 1000 app
+    adduser -D -u 1000 app && \
+    mkdir -p /data/avatars && chown -R app:app /data
 
 COPY --from=builder /out/ /usr/local/bin/
 

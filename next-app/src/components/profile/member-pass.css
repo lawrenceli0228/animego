@@ -1,0 +1,500 @@
+/*
+ * member-pass.css — AnimeGoClub 会员通行证 (member pass) holographic card.
+ *
+ * Ported from the agc-pass C2 demo (Special Illustration Rare archetype),
+ * front-face only, no rarity tiers. The signature is the etched-linework
+ * rainbow foil + cursor glare lit over a full-bleed cover. The engraved
+ * hatch/pebble textures from C2 are intentionally omitted — over a real
+ * photo/cover they read as scratchy mosaic; we keep the smooth gloss.
+ *
+ * Live pointer vars (--rx/--ry/--px/--py/--bgx/--bgy/--from-center) are set
+ * by useHoloTilt; safe at-rest defaults below. Font/accent vars come from
+ * the app (layout.tsx next/font + globals.css :root).
+ */
+
+.agcpass-bay {
+  --w: clamp(238px, 26vw, 320px);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur: 220ms;
+  --dur-slow: 520ms;
+  --rx: 0deg;
+  --ry: 0deg;
+  --px: 50%;
+  --py: 50%;
+  --bgx: 50%;
+  --bgy: 50%;
+  --from-center: 0;
+  --active: 0;
+  /* SIR (C2) holo identity — purple etched-foil bloom */
+  --pass-edge: rgba(191, 120, 242, 0.62);
+  --pass-ink: #d9a8ff;
+  --pass-bloom: rgba(191, 90, 242, 0.4);
+  --pass-bloom-r: 58px;
+  --foil: 0.92;
+  --sparkle: 0.55;
+
+  perspective: 1600px;
+  perspective-origin: center 40%;
+  display: grid;
+  place-items: center;
+  padding: clamp(6px, 2vw, 18px);
+}
+
+.agcpass-card {
+  width: var(--w);
+  aspect-ratio: 63 / 88;
+  position: relative;
+  border-radius: 22px;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform var(--dur-slow) var(--ease-out-expo);
+  cursor: pointer;
+  will-change: transform;
+  -webkit-tap-highlight-color: transparent;
+}
+.agcpass-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.6);
+}
+
+/* floor shadow that tracks the tilt */
+.agcpass-shadow {
+  position: absolute;
+  inset: 6% 4% -10% 4%;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.62), transparent 78%);
+  filter: blur(18px);
+  transform: translate3d(calc((var(--px) - 50%) * 0.35), 18px, -40px) scale(0.92);
+  opacity: calc(0.5 + var(--from-center) * 0.4);
+  transition: opacity var(--dur-slow) var(--ease),
+    transform var(--dur-slow) var(--ease-out-expo);
+}
+
+.agcpass-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  background: linear-gradient(160deg, #1c1428, #0c0812);
+  border: 1px solid var(--pass-edge);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 1px 1px rgba(0, 0, 0, 0.6), 0 24px 50px rgba(0, 0, 0, 0.6),
+    0 0 var(--pass-bloom-r) var(--pass-bloom);
+}
+
+/* ── full-bleed cover / photo ── */
+.agcpass-art {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(155deg, #1b2330, #0a0d14);
+}
+.agcpass-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scale(1.08)
+    translate3d(
+      calc((var(--bgx) - 50%) * -0.12),
+      calc((var(--bgy) - 50%) * -0.12),
+      0
+    );
+  transition: transform var(--dur-slow) var(--ease-out-expo);
+}
+.agcpass-art.has-photo img {
+  transform: scale(1.06)
+    translate3d(
+      calc((var(--bgx) - 50%) * -0.05),
+      calc((var(--bgy) - 50%) * -0.05),
+      0
+    );
+}
+/* readability scrims: top (name/number) + bottom (nameplate) */
+.agcpass-art::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, transparent 22%),
+    linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.78) 0%,
+      rgba(0, 0, 0, 0.3) 24%,
+      transparent 44%
+    );
+}
+
+/* ── holo planes ── */
+.agcpass-rainbow,
+.agcpass-glare,
+.agcpass-sparkle {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 22px;
+  will-change: opacity, background-position;
+}
+.agcpass-rainbow {
+  mix-blend-mode: color-dodge;
+  opacity: calc(var(--from-center) * var(--foil, 0) * 0.85);
+  filter: brightness(0.72) contrast(1.55) saturate(1.1);
+  background-image: repeating-linear-gradient(
+    -48deg,
+    hsl(0, 70%, 42%) 0%,
+    hsl(38, 66%, 44%) 7%,
+    hsl(88, 62%, 40%) 13%,
+    hsl(170, 64%, 40%) 20%,
+    hsl(208, 66%, 46%) 27%,
+    hsl(268, 60%, 40%) 34%,
+    hsl(326, 64%, 44%) 41%,
+    hsl(0, 70%, 42%) 48%
+  );
+  background-size: 340% 340%;
+  background-position: var(--bgx) var(--bgy);
+  transition: opacity var(--dur-slow) var(--ease);
+}
+.agcpass-glare {
+  mix-blend-mode: overlay;
+  opacity: calc(0.28 + var(--from-center) * 0.6);
+  background-image: radial-gradient(
+    farthest-corner circle at var(--px) var(--py),
+    rgba(255, 255, 255, 0.85) 6%,
+    rgba(255, 255, 255, 0.36) 22%,
+    rgba(0, 0, 0, 0.5) 95%
+  );
+  transition: opacity var(--dur-slow) var(--ease);
+}
+.agcpass-sparkle {
+  mix-blend-mode: color-dodge;
+  opacity: calc(var(--from-center) * var(--sparkle, 0) * 0.9);
+  background-image: radial-gradient(circle at 14% 20%, #fff 0.7px, transparent 1.5px),
+    radial-gradient(circle at 66% 12%, #fff 0.6px, transparent 1.4px),
+    radial-gradient(circle at 34% 54%, #fff 0.8px, transparent 1.6px),
+    radial-gradient(circle at 86% 64%, #fff 0.6px, transparent 1.4px),
+    radial-gradient(circle at 52% 84%, #fff 0.6px, transparent 1.4px),
+    radial-gradient(circle at 22% 88%, #fff 0.5px, transparent 1.3px),
+    radial-gradient(circle at 92% 34%, #fff 0.7px, transparent 1.5px),
+    radial-gradient(circle at 8% 62%, #fff 0.5px, transparent 1.3px);
+  background-size: 150% 150%;
+  background-position: var(--bgx) var(--bgy);
+  animation: agcpassTwinkle 3.6s steps(1) infinite;
+  transition: opacity var(--dur-slow) var(--ease);
+}
+@keyframes agcpassTwinkle {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(0.45);
+  }
+}
+
+/* ── chrome (text above the foil) ── */
+.agcpass-chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  padding: 15px 16px;
+}
+.agcpass-top-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.agcpass-cn {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+  font-size: clamp(15px, 1.8vw, 18px);
+  letter-spacing: -0.02em;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.agcpass-cn b {
+  color: var(--accent, #0a84ff);
+}
+.agcpass-cn .agcpass-vf {
+  color: #6cc6ff;
+  display: inline-flex;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+}
+.agcpass-cn .agcpass-vf svg {
+  width: 15px;
+  height: 15px;
+}
+.agcpass-credential {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.agcpass-cred-no {
+  font-family: var(--font-mono), monospace;
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+  letter-spacing: 0.05em;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.agcpass-cred-no i {
+  font-style: normal;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.5);
+}
+.agcpass-cred-since {
+  font-family: var(--font-mono), monospace;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.55);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+.agcpass-passpill {
+  align-self: flex-start;
+  margin-top: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px 4px 8px;
+  border-radius: 99px;
+  background: rgba(8, 10, 16, 0.46);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.agcpass-passpill .agcpass-pp-ico {
+  width: 14px;
+  height: 14px;
+  color: #cfe6ff;
+  display: inline-flex;
+}
+.agcpass-passpill .agcpass-pp-ico svg {
+  width: 14px;
+  height: 14px;
+}
+.agcpass-passpill .agcpass-pp-zh {
+  font-weight: 800;
+  color: #fff;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.agcpass-passpill .agcpass-pp-en {
+  font-family: var(--font-mono), monospace;
+  font-size: 7.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ── lower nameplate ── */
+.agcpass-plate {
+  margin-top: auto;
+  position: relative;
+  padding: 12px 14px 11px;
+  border-radius: 15px;
+  background: linear-gradient(
+    180deg,
+    rgba(10, 10, 14, 0.18),
+    rgba(8, 8, 12, 0.66)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-top-color: rgba(255, 255, 255, 0.24);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 8px 22px rgba(0, 0, 0, 0.42);
+}
+.agcpass-plate-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.agcpass-uname {
+  font-weight: 900;
+  color: #fff;
+  font-size: clamp(21px, 2.6vw, 26px);
+  letter-spacing: 0.01em;
+  line-height: 1;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.agcpass-uname .agcpass-romaji {
+  font-family: var(--font-mono), monospace;
+  font-weight: 500;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.agcpass-status {
+  font-size: 9.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+  color: #7fe0a8;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.agcpass-status::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #30d158;
+  box-shadow: 0 0 6px #30d158;
+}
+
+.agcpass-plate-foot {
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.agcpass-rec-group {
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.agcpass-rec {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  text-align: left;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.agcpass-rec + .agcpass-rec {
+  border-left: 1px solid rgba(255, 255, 255, 0.13);
+  margin-left: 16px;
+  padding-left: 16px;
+}
+.agcpass-rec b {
+  font-family: var(--font-mono), monospace;
+  font-weight: 700;
+  font-size: 15.5px;
+  color: #fff;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.agcpass-rec.agcpass-rec-season b {
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+.agcpass-rec i {
+  font-style: normal;
+  font-size: 8.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.08em;
+}
+
+/* ── barcode (bottom-right credential mark) ── */
+.agcpass-barcode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 52%;
+  overflow: hidden;
+}
+.agcpass-barcode .agcpass-bars {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  height: 26px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(248, 249, 251, 0.96);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.agcpass-barcode .agcpass-bars i {
+  display: block;
+  width: 1px;
+  background: #0a0a0e;
+}
+.agcpass-barcode .agcpass-bars i.w2 {
+  width: 2px;
+}
+.agcpass-barcode .agcpass-bars i.w3 {
+  width: 3px;
+}
+.agcpass-barcode .agcpass-bars i.g {
+  background: transparent;
+}
+.agcpass-barcode .agcpass-bc-no {
+  font-family: var(--font-mono), monospace;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.74);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* ── reduced motion: freeze tilt, show a fixed lit sheen ── */
+@media (prefers-reduced-motion: reduce) {
+  .agcpass-card {
+    transform: rotateX(7deg) rotateY(-9deg) !important;
+    transition: none !important;
+  }
+  .agcpass-rainbow,
+  .agcpass-glare {
+    --bgx: 34%;
+    --bgy: 30%;
+    --px: 36%;
+    --py: 28%;
+    --from-center: 1;
+  }
+  .agcpass-sparkle {
+    opacity: 0;
+    animation: none !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .agcpass-bay {
+    --w: min(80vw, 300px);
+  }
+}

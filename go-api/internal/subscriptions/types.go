@@ -83,6 +83,7 @@ type listItem struct {
 	TitleNative     *string `json:"titleNative"`
 	TitleChinese    *string `json:"titleChinese"`
 	CoverImageURL   *string `json:"coverImageUrl"`
+	BannerImageURL  *string `json:"bannerImageUrl"`
 	CoverImageColor *string `json:"coverImageColor"`
 	PosterAccent    *string `json:"posterAccent"`
 	Episodes        *int32  `json:"episodes"`
@@ -113,6 +114,7 @@ func toListItem(row dbgen.ListUserSubscriptionsRow) listItem {
 		TitleNative:     row.TitleNative,
 		TitleChinese:    row.TitleChinese,
 		CoverImageURL:   row.CoverImageUrl,
+		BannerImageURL:  row.BannerImageUrl,
 		CoverImageColor: row.CoverImageColor,
 		PosterAccent:    row.PosterAccent,
 		Episodes:        row.Episodes,

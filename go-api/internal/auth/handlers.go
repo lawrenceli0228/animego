@@ -132,6 +132,18 @@ type AuthDB interface {
 	SetResetPasswordToken(ctx context.Context, id uuid.UUID, resetPasswordToken *string, resetPasswordExpires pgtype.Timestamptz) error
 	GetUserByResetToken(ctx context.Context, resetPasswordToken *string) (dbgen.User, error)
 	ResetUserPassword(ctx context.Context, id uuid.UUID, password string) error
+
+	// Self-serve account mutations (PATCH /api/auth/me + change-password).
+	// UpdateUsername surfaces 23505 on the username unique index → 409
+	// DUPLICATE. SetUserAvatar / SetUserBackdrop take nil to clear.
+	UpdateUsername(ctx context.Context, id uuid.UUID, username string) (dbgen.User, error)
+	SetUserAvatar(ctx context.Context, id uuid.UUID, avatarUrl *string) error
+	SetUserBackdrop(ctx context.Context, id uuid.UUID, backdropAnilistID *int32) error
+	UpdateUserPassword(ctx context.Context, id uuid.UUID, password string) error
+
+	// GetAnimeImages resolves the chosen backdrop anime → banner + cover so
+	// /me + PATCH /me can theme the navbar avatar mini-card.
+	GetAnimeImages(ctx context.Context, anilistID int32) (dbgen.GetAnimeImagesRow, error)
 }
 
 // Handlers carries deps shared by all auth handlers.  Construct once at
@@ -150,7 +162,15 @@ type Handlers struct {
 	refreshTTL   time.Duration
 	clientOrigin string
 	validator    *validator.Validate
+	// avatarDir is the volume path where uploaded pass photos are written
+	// (set via SetAvatarDir at startup). Empty in tests that don't exercise
+	// avatar upload.
+	avatarDir string
 }
+
+// SetAvatarDir configures where UpdateMe writes uploaded avatar files.
+// Called once at startup after NewHandlers.
+func (h *Handlers) SetAvatarDir(dir string) { h.avatarDir = dir }
 
 // NewHandlers constructs a Handlers bundle.  refreshTTL must match the
 // Signer's refresh-token TTL so the cookie maxAge and the JWT exp align
@@ -463,7 +483,7 @@ func (h *Handlers) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.Data(w, http.StatusOK, MeData{User: ToSafeUser(user)})
+	httpx.Data(w, http.StatusOK, MeData{User: h.fillBackdropImages(ctx, ToSafeUser(user))})
 }
 
 // checkDuplicate runs the two uniqueness reads in parallel.  Returns

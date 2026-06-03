@@ -1,0 +1,201 @@
+/*
+ * cinematic.css — P3 atmospheric profile shell.
+ *
+ * A blurred, darkened anime cover fills the profile area as a backdrop
+ * (scoped inside the profile wrapper, not the viewport, so the global
+ * Navbar/Footer stacking is untouched). Grain + vignette + a bottom fade
+ * sit on top; the member pass and content render above with their own
+ * scrim. The backdrop cross-fades when the user picks a different anime.
+ */
+
+.agc-cine-root {
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+/* ── backdrop layer ── */
+/* Fixed-size banner region at the top (like the navbar mini-card): a clear
+   wide banner, not a blurred full-bleed wash. It fades into the page below. */
+.agc-cine-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: clamp(400px, 50vh, 560px);
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.agc-cine-bg-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center 28%;
+  filter: saturate(116%) brightness(0.82);
+  opacity: 0;
+  transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.agc-cine-bg-img.is-shown {
+  opacity: 1;
+}
+/* readability scrim: light over the banner, fading to the page bg at the
+   bottom edge so the banner blends into the dark content area. */
+.agc-cine-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+      130% 90% at 50% 0%,
+      rgba(10, 132, 255, 0.12),
+      transparent 52%
+    ),
+    radial-gradient(120% 100% at 50% 18%, transparent 42%, rgba(5, 5, 7, 0.42) 100%),
+    linear-gradient(
+      180deg,
+      rgba(5, 5, 7, 0.32) 0%,
+      rgba(5, 5, 7, 0.14) 28%,
+      rgba(5, 5, 7, 0.5) 64%,
+      rgba(5, 5, 7, 0.9) 90%,
+      #050507 100%
+    );
+}
+/* fine grain */
+.agc-cine-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.045) 0.5px,
+    transparent 0.6px
+  );
+  background-size: 3px 3px;
+  -webkit-mask: radial-gradient(80% 70% at 50% 30%, #000, transparent 85%);
+  mask: radial-gradient(80% 70% at 50% 30%, #000, transparent 85%);
+}
+
+/* ── content above the atmosphere ── */
+.agc-cine-content {
+  position: relative;
+  z-index: 2;
+}
+
+/* ── hero: pass + identity readouts ── */
+.agc-hero {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: clamp(20px, 4vw, 52px);
+  align-items: center;
+  padding: clamp(28px, 5vw, 60px) 0 clamp(22px, 3vw, 40px);
+}
+.agc-hero-ident {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.agc-hero-kicker {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #6cb8ff;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.95), 0 0 14px rgba(0, 0, 0, 0.75);
+}
+.agc-hero-name {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  color: #fff;
+  font-size: clamp(30px, 5.4vw, 60px);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.92), 0 1px 30px rgba(0, 0, 0, 0.5);
+  margin: 0;
+}
+.agc-hero-name .suffix {
+  color: rgba(235, 235, 245, 0.74);
+  font-weight: 700;
+}
+
+/* readout row: donut + numeric reads */
+.agc-hero-reads {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 2.5vw, 30px);
+  flex-wrap: wrap;
+}
+.agc-read {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.agc-read b {
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(20px, 2.4vw, 26px);
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+.agc-read.season b {
+  font-size: clamp(15px, 1.8vw, 19px);
+}
+.agc-read span {
+  font-size: 11px;
+  color: rgba(235, 235, 245, 0.78);
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.92);
+}
+.agc-read-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 34px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* status legend chips */
+.agc-hero-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.agc-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: rgba(235, 235, 245, 0.85);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.92);
+}
+.agc-legend-item i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.agc-legend-item b {
+  color: #fff;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .agc-hero {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+    gap: 22px;
+  }
+  .agc-hero-ident {
+    align-items: center;
+  }
+  .agc-hero-reads,
+  .agc-hero-legend {
+    justify-content: center;
+  }
+}

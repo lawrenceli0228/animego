@@ -197,7 +197,11 @@ func (h *Handlers) GetSubscriptionByAnilistID(w http.ResponseWriter, r *http.Req
 	sub, err := h.Queries.GetSubscription(ctx, claims.UserID, anilistID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgSubscriptionNotFound))
+			// Not subscribed: return 200 with null data rather than 404. The
+			// detail page probes this on every view; a 404 there shows up as a
+			// failed request in the browser console (noisy, looks like a bug).
+			// The frontend reads data:null as "available / not subscribed".
+			httpx.Data(w, http.StatusOK, nil)
 			return
 		}
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "get subscription failed"))

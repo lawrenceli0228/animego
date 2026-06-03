@@ -37,6 +37,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
 	"github.com/lawrenceli0228/animego/go-api/internal/auth"
+	"github.com/lawrenceli0228/animego/go-api/internal/avatars"
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/bgmidmap"
 	"github.com/lawrenceli0228/animego/go-api/internal/comments"
@@ -274,6 +275,11 @@ func main() {
 	}
 
 	authHandlers := auth.NewHandlers(q, signer, emailSender, cfg.ClientOrigin, cfg.JWTExpiresIn, cfg.JWTRefreshExpiresIn, isProd)
+	avatarDir := os.Getenv("AVATAR_DIR")
+	if avatarDir == "" {
+		avatarDir = "/data/avatars"
+	}
+	authHandlers.SetAvatarDir(avatarDir)
 	authRateLimitMax := 10
 	if v := os.Getenv("AUTH_RATELIMIT_MAX"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -433,6 +439,9 @@ func main() {
 	// (currently pointed at Express's /api/health) survive cutover.
 	r.Get("/health", healthHandler(pool))
 	r.Get("/api/health", healthHandler(pool))
+	// Public avatar files (member-pass photos), served from the volume with
+	// long immutable cache; the stored URL's ?v= busts CF on change.
+	r.Get("/api/avatars/{name}", avatars.ServeAvatar(avatarDir))
 
 	// P2.2 auth: 7 endpoints.  Rate-limiter wraps the public flows
 	// (register/login/refresh + forgot/reset-password); logout + /me
@@ -445,6 +454,7 @@ func main() {
 		r.With(authRateLimit.Middleware()).Post("/reset-password/{token}", authHandlers.ResetPassword)
 		r.With(jwtx.RequireAuth(signer)).Post("/logout", authHandlers.Logout)
 		r.With(jwtx.RequireAuth(signer)).Get("/me", authHandlers.Me)
+		r.With(jwtx.RequireAuth(signer)).Patch("/me", authHandlers.UpdateMe)
 	})
 
 	r.Route("/api/anime", func(r chi.Router) {

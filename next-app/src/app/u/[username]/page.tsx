@@ -14,15 +14,13 @@
 // primary content — the page is fully rendered on first paint.
 
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { CSSProperties } from "react";
 import { apiGet, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
 import FollowButton from "./_components/FollowButton";
-import UserStatsPanel from "./_components/UserStatsPanel";
 import WatchingSection from "./_components/WatchingSection";
 import ShareButtonIsland from "./_components/ShareButtonIsland";
+import PublicProfileHero from "./_components/PublicProfileHero";
 import type { UserProfileData } from "./_components/types";
 
 export const dynamic = "force-dynamic";
@@ -94,54 +92,6 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 // ─── Page ─────────────────────────────────────────────────────────────────
 
-const containerStyle: CSSProperties = { paddingTop: 40, paddingBottom: 60 };
-
-const headerStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 16,
-  marginBottom: 32,
-  flexWrap: "wrap",
-};
-
-const avatarStyle: CSSProperties = {
-  width: 64,
-  height: 64,
-  borderRadius: "50%",
-  background: "#0a84ff",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontSize: 26,
-  fontWeight: 800,
-  color: "#fff",
-  flexShrink: 0,
-  textTransform: "uppercase",
-};
-
-const nameStyle: CSSProperties = {
-  fontSize: "clamp(20px,3vw,30px)",
-  color: "#ffffff",
-  fontWeight: 800,
-  marginBottom: 4,
-  fontFamily: "'Sora', sans-serif",
-};
-
-const countLinkStyle: CSSProperties = {
-  background: "none",
-  border: "none",
-  color: "rgba(235,235,245,0.60)",
-  fontSize: 13,
-  cursor: "pointer",
-  padding: 0,
-  textDecoration: "none",
-};
-
-const countStrongStyle: CSSProperties = {
-  color: "#ffffff",
-  fontWeight: 700,
-};
-
 export default async function UserProfilePage({ params }: PageProps) {
   const { username } = await params;
 
@@ -164,51 +114,38 @@ export default async function UserProfilePage({ params }: PageProps) {
     : null;
 
   return (
-    <main className="container" style={containerStyle}>
-      {/* ── Header ─────────────────────────────────────────────────── */}
-      <header style={headerStyle}>
-        {/* Avatar */}
-        <div style={avatarStyle} aria-hidden="true">
-          {username[0]}
+    <main>
+      <PublicProfileHero
+        id={profile.id}
+        username={username}
+        createdAt={profile.createdAt}
+        avatarUrl={profile.avatarUrl}
+        backdropAnilistId={profile.backdropAnilistId}
+        followerCount={profile.followerCount}
+        followingCount={profile.followingCount}
+        watching={profile.watching}
+        lang={lang}
+        actions={
+          <>
+            <ShareButtonIsland
+              username={username}
+              shareLabel={dict.social.share}
+              copiedLabel={dict.detail.linkCopied}
+              copyFailedLabel={dict.detail.linkCopyFailed}
+            />
+            <FollowButton
+              username={username}
+              initialIsFollowing={initialIsFollowing}
+              isSelf={isSelf}
+              lang={lang}
+            />
+          </>
+        }
+      >
+        <div style={{ paddingTop: 8, paddingBottom: 60 }}>
+          <WatchingSection watching={profile.watching} lang={lang} />
         </div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={nameStyle}>{username}</h1>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <Link href={`/u/${username}/followers`} style={countLinkStyle}>
-              <strong style={countStrongStyle}>{profile.followerCount}</strong>
-              {" "}
-              {dict.social.followers}
-            </Link>
-            <Link href={`/u/${username}/following`} style={countLinkStyle}>
-              <strong style={countStrongStyle}>{profile.followingCount}</strong>
-              {" "}
-              {dict.social.following}
-            </Link>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <ShareButtonIsland
-            username={username}
-            shareLabel={dict.social.share}
-            copiedLabel={dict.detail.linkCopied}
-            copyFailedLabel={dict.detail.linkCopyFailed}
-          />
-          <FollowButton
-            username={username}
-            initialIsFollowing={initialIsFollowing}
-            isSelf={isSelf}
-            lang={lang}
-          />
-        </div>
-      </header>
-
-      {/* ── Stats panel ────────────────────────────────────────────── */}
-      <UserStatsPanel watching={profile.watching} lang={lang} />
-
-      {/* ── Watching lists by status ───────────────────────────────── */}
-      <WatchingSection watching={profile.watching} lang={lang} />
+      </PublicProfileHero>
     </main>
   );
 }
