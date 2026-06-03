@@ -27,7 +27,12 @@ import (
 
 const (
 	msgAvatarTooLarge = "Photo is too large"
-	maxAvatarChars    = 900_000 // data-URL length cap (~650KB JPEG)
+	msgAvatarNotImage = "Please upload an image file"
+	msgAvatarFormat   = "Unsupported image format — use JPEG or PNG"
+	msgAvatarUndecode = "Could not read that image"
+	msgAvatarBadURL   = "Invalid avatar URL"
+	maxAvatarChars    = 900_000 // data-URL length cap (~675KB JPEG)
+	avatarURLPrefix   = "/api/avatars/"
 	minUsernameLen    = 3
 	maxUsernameLen    = 50
 )
@@ -78,16 +83,18 @@ func (h *Handlers) UpdateMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var avatar *string // nil = clear
+		clearFile := false
 		switch {
 		case val == "":
-			// clear: drop the stored file too
-			avatars.Delete(h.avatarDir, claims.UserID.String())
+			// clear: defer the file removal until the DB clear succeeds, so a
+			// failed write never leaves the row pointing at a deleted file.
+			clearFile = true
 		case strings.HasPrefix(val, "data:"):
 			// uploaded photo: write to the volume, store the short URL
 			url, err := avatars.Save(h.avatarDir, claims.UserID.String(), val)
 			if err != nil {
-				if avatars.IsBadImage(err) {
-					httpx.Fail(w, httpx.NewError(http.StatusBadRequest, codeValidation, msgAvatarTooLarge))
+				if msg, bad := avatarErrMessage(err); bad {
+					httpx.Fail(w, httpx.NewError(http.StatusBadRequest, codeValidation, msg))
 				} else {
 					httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "save avatar failed"))
 				}
@@ -95,12 +102,23 @@ func (h *Handlers) UpdateMe(w http.ResponseWriter, r *http.Request) {
 			}
 			avatar = &url
 		default:
-			// already a URL (back-compat, e.g. an external cover) → store as-is
+			// A non-data, non-empty value is only valid when it's one of our own
+			// avatar URLs re-submitted unchanged (e.g. the client saves a backdrop
+			// change and round-trips the existing photo URL). Reject arbitrary
+			// external URLs: they'd render as <img src> for every visitor, a
+			// third-party tracking-pixel vector.
+			if !strings.HasPrefix(val, avatarURLPrefix) {
+				httpx.Fail(w, httpx.NewError(http.StatusBadRequest, codeValidation, msgAvatarBadURL))
+				return
+			}
 			avatar = &val
 		}
 		if err := h.db.SetUserAvatar(ctx, claims.UserID, avatar); err != nil {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "update avatar failed"))
 			return
+		}
+		if clearFile {
+			avatars.Delete(h.avatarDir, claims.UserID.String())
 		}
 	}
 
@@ -126,6 +144,25 @@ func (h *Handlers) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.Data(w, http.StatusOK, MeData{User: h.fillBackdropImages(ctx, ToSafeUser(user))})
+}
+
+// avatarErrMessage maps an avatars.Save failure to a precise 400 message.
+// The second return is false for server-side write failures (→ 500). Without
+// this, every failure showed "Photo is too large", which is confusing for an
+// unsupported format or an unreadable file.
+func avatarErrMessage(err error) (string, bool) {
+	switch {
+	case avatars.IsNotImage(err):
+		return msgAvatarNotImage, true
+	case avatars.IsUnsupportedFormat(err):
+		return msgAvatarFormat, true
+	case avatars.IsTooLarge(err):
+		return msgAvatarTooLarge, true
+	case avatars.IsBadImage(err): // remaining: undecodable
+		return msgAvatarUndecode, true
+	default:
+		return "", false
+	}
 }
 
 // fillBackdropImages resolves the chosen backdrop anime (if any) into the
