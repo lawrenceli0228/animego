@@ -71,6 +71,7 @@ export default function FollowListRow({
           <FallbackImg
             src={user.avatarUrl ?? user.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
             fallback={DEFAULT_CARD_IMAGE}
+            alt={user.username}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         </div>

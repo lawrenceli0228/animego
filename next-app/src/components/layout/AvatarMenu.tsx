@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useLang } from "@/lib/lang-client";
 import { DEFAULT_CARD_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
+import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
 import type { NavUser } from "./Navbar";
 import "./avatar-menu.css";
@@ -53,7 +54,7 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
   const avatarSrc = photo ?? cover ?? DEFAULT_CARD_IMAGE;
 
   const avatar = () => (
-    <FallbackImg src={avatarSrc} fallback={DEFAULT_CARD_IMAGE} />
+    <FallbackImg src={avatarSrc} fallback={DEFAULT_CARD_IMAGE} alt={user.username} />
   );
 
   return (
@@ -75,7 +76,7 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
             {banner && (
               <span
                 className="agc-avatar-head-banner"
-                style={{ backgroundImage: `url("${banner}")` }}
+                style={{ backgroundImage: cssUrl(banner, DEFAULT_BACKDROP_IMAGE) }}
                 aria-hidden="true"
               />
             )}

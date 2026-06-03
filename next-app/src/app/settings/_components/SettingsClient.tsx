@@ -11,6 +11,7 @@ import { downscaleImage } from "@/components/profile/imageDownscale";
 import { memberNo as makeMemberNo, sinceLabel } from "@/components/profile/memberIdentity";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
 import { DEFAULT_CARD_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
+import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
 import "./settings.css";
 
@@ -175,7 +176,7 @@ export default function SettingsClient({
           {chosenBanner && (
             <div
               className="set-minicard-bg"
-              style={{ backgroundImage: `url("${chosenBanner}")` }}
+              style={{ backgroundImage: cssUrl(chosenBanner, DEFAULT_BACKDROP_IMAGE) }}
               aria-hidden="true"
             />
           )}
@@ -267,8 +268,12 @@ export default function SettingsClient({
                       title={o.title}
                       onClick={() => pickBackdrop(o.anilistId)}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={o.coverUrl as string} alt={o.title} loading="lazy" />
+                      <FallbackImg
+                        src={o.coverUrl ?? o.bannerUrl ?? DEFAULT_CARD_IMAGE}
+                        fallback={DEFAULT_CARD_IMAGE}
+                        alt={o.title}
+                        loading="lazy"
+                      />
                     </button>
                   ))}
                 </div>

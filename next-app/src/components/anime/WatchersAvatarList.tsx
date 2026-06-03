@@ -132,6 +132,7 @@ export default async function WatchersAvatarList({
               <FallbackImg
                 src={w.avatarUrl ?? w.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
                 fallback={DEFAULT_CARD_IMAGE}
+                alt={w.username}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             </Link>

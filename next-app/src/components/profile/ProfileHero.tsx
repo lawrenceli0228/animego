@@ -4,6 +4,7 @@ import type { Lang } from "@/lib/i18n";
 import MemberPass from "./MemberPass";
 import type { BackdropOption } from "./backdropTypes";
 import { DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
+import { cssUrl } from "@/lib/cssUrl";
 import "./cinematic.css";
 
 // ProfileHero — the cinematic identity head of /profile. The member pass is
@@ -123,7 +124,7 @@ export default function ProfileHero({
         {backdrop && (
           <div
             className="agc-cine-bg-img is-shown"
-            style={{ backgroundImage: `url("${backdrop}")` }}
+            style={{ backgroundImage: cssUrl(backdrop, DEFAULT_BACKDROP_IMAGE) }}
           />
         )}
       </div>

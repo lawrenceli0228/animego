@@ -6,6 +6,7 @@ import type { Lang } from "@/lib/i18n";
 import MemberPass from "@/components/profile/MemberPass";
 import { memberNo as makeMemberNo, sinceLabel } from "@/components/profile/memberIdentity";
 import { DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
+import { cssUrl } from "@/lib/cssUrl";
 import "@/components/profile/cinematic.css";
 import type { WatchingEntry } from "./types";
 
@@ -114,7 +115,7 @@ export default function PublicProfileHero({
   return (
     <div className="agc-cine-root">
       <div className="agc-cine-bg" aria-hidden="true">
-        {backdrop && <div className="agc-cine-bg-img is-shown" style={{ backgroundImage: `url("${backdrop}")` }} />}
+        {backdrop && <div className="agc-cine-bg-img is-shown" style={{ backgroundImage: cssUrl(backdrop, DEFAULT_BACKDROP_IMAGE) }} />}
       </div>
       <div className="agc-cine-grain" aria-hidden="true" />
 

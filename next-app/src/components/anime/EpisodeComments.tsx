@@ -235,6 +235,7 @@ function CommentItem({
           <FallbackImg
             src={c.avatarUrl ?? c.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
             fallback={DEFAULT_CARD_IMAGE}
+            alt={c.username}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         </div>
