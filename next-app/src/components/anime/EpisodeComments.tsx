@@ -24,6 +24,7 @@ import {
   type CSSProperties,
 } from "react";
 import Link from "next/link";
+import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import FallbackImg from "@/components/ui/FallbackImg";
@@ -475,14 +476,16 @@ export default function EpisodeComments({
         if (res.ok) {
           onDone();
           await load();
+        } else {
+          toast.error(lang === "zh" ? "发表失败，请重试" : "Couldn't post, try again");
         }
       } catch {
-        /* swallow — user can retry */
+        toast.error(lang === "zh" ? "网络错误，请重试" : "Network error, try again");
       } finally {
         setPosting(false);
       }
     },
-    [anilistId, episode, load],
+    [anilistId, episode, load, lang],
   );
 
   const handlePost = (text: string, onDone: () => void) => {
@@ -510,11 +513,12 @@ export default function EpisodeComments({
       try {
         const res = await authFetch(`/api/comments/${id}`, { method: "DELETE" });
         if (res.ok) await load();
+        else toast.error(lang === "zh" ? "删除失败，请重试" : "Couldn't delete, try again");
       } catch {
-        /* swallow */
+        toast.error(lang === "zh" ? "网络错误，请重试" : "Network error, try again");
       }
     },
-    [load],
+    [load, lang],
   );
 
   return (
