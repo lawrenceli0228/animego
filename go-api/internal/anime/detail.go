@@ -382,6 +382,25 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 			return det, nil
 		} else {
 			slog.WarnContext(ctx, "anime/detail: AniList re-fetch failed, returning stale", "anilistId", anilistID, "err", refetchErr)
+			// Graceful degradation: serve the stale rows we ALREADY read.
+			// Do NOT touch the DB again on `ctx` here — a failed re-fetch can
+			// leave the request context deadline-exhausted, so enrichRelations
+			// (or any query) on it fails with "context deadline exceeded" and
+			// 500s the page. That dead-context query was the cause of the
+			// Internal Server Errors during AniList upstream slowness.
+			//
+			// Relation titleChinese/cover backfill is a best-effort nicety;
+			// skip it via the no-DB converter rather than 500. Cache the stale
+			// result so a herd of stale requests during an AniList outage
+			// doesn't each repeat the (blocking, ~5s) re-fetch attempt and
+			// pile up on the worker pool.
+			stale := assembleDetail(
+				main, genres, studios,
+				convertRelationsToDetailRelations(relations),
+				characters, staffRows, recommendations, episodeTitles,
+			)
+			s.cache.Set(key, stale)
+			return stale, nil
 		}
 	}
 
