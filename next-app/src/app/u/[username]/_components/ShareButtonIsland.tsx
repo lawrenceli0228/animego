@@ -19,7 +19,7 @@ export default function ShareButtonIsland({
   const { t: _t } = useLang(); // keep lang context hydrated
 
   const handle = async () => {
-    const url = `${window.location.origin}/u/${username}`;
+    const url = `${window.location.origin}/u/${encodeURIComponent(username)}`;
     const title = `${username} — AnimeGoClub`;
 
     if (navigator.share) {

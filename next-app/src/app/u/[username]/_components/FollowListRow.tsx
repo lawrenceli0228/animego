@@ -47,7 +47,7 @@ export default function FollowListRow({
     >
       {/* Avatar */}
       <Link
-        href={`/u/${user.username}`}
+        href={`/u/${encodeURIComponent(user.username)}`}
         style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 12, flex: 1 }}
       >
         <div

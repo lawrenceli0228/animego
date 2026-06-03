@@ -239,6 +239,9 @@ interface ProfileClientProps {
   avatarUrl: string | null;
   /** DB-persisted chosen backdrop anime. */
   backdropAnilistId: number | null;
+  /** Server-resolved backdrop banner/cover (same source as the navbar mini-card). */
+  backdropBannerUrl: string | null;
+  backdropCoverUrl: string | null;
   /** Initial "watching" list SSR-fetched for fast first paint. */
   initialItems: SubscriptionListItem[];
   /** All subscriptions (no status filter) for the stats panel. */
@@ -253,6 +256,8 @@ export default function ProfileClient({
   createdAt,
   avatarUrl,
   backdropAnilistId,
+  backdropBannerUrl,
+  backdropCoverUrl,
   initialItems,
   allSubsInitial,
   dict,
@@ -405,6 +410,8 @@ export default function ProfileClient({
       backdropOptions={hero.backdropOptions}
       avatarUrl={avatarUrl}
       backdropAnilistId={backdropAnilistId}
+      backdropBannerUrl={backdropBannerUrl}
+      backdropCoverUrl={backdropCoverUrl}
       lang={lang}
     >
       <div style={{ paddingTop: 8, paddingBottom: 60 }}>

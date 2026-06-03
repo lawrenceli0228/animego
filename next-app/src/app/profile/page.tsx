@@ -19,6 +19,8 @@ interface MeResponse {
     createdAt?: string | null;
     avatarUrl?: string | null;
     backdropAnilistId?: number | null;
+    backdropBannerUrl?: string | null;
+    backdropCoverUrl?: string | null;
   } | null;
 }
 
@@ -28,6 +30,8 @@ export interface ProfileIdentity {
   createdAt: string | null;
   avatarUrl: string | null;
   backdropAnilistId: number | null;
+  backdropBannerUrl: string | null;
+  backdropCoverUrl: string | null;
 }
 
 async function safeMe(): Promise<ProfileIdentity | null> {
@@ -41,6 +45,8 @@ async function safeMe(): Promise<ProfileIdentity | null> {
       createdAt: u.createdAt ?? null,
       avatarUrl: u.avatarUrl ?? null,
       backdropAnilistId: u.backdropAnilistId ?? null,
+      backdropBannerUrl: u.backdropBannerUrl ?? null,
+      backdropCoverUrl: u.backdropCoverUrl ?? null,
     };
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return null;
@@ -110,6 +116,8 @@ export default async function ProfilePage() {
         createdAt={identity?.createdAt ?? null}
         avatarUrl={identity?.avatarUrl ?? null}
         backdropAnilistId={identity?.backdropAnilistId ?? null}
+        backdropBannerUrl={identity?.backdropBannerUrl ?? null}
+        backdropCoverUrl={identity?.backdropCoverUrl ?? null}
         initialItems={initialItems}
         allSubsInitial={allSubsInitial}
         dict={dict}

@@ -11,6 +11,7 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
+import { decodeUsername } from "@/lib/username";
 import FollowListRow from "../_components/FollowListRow";
 import type { FollowListItem } from "../_components/types";
 
@@ -36,10 +37,11 @@ async function fetchMe(): Promise<{ username: string } | null> {
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { username } = await params;
+  const { username: usernameSlug } = await params;
+  const username = decodeUsername(usernameSlug);
   const [lang, dict] = await Promise.all([getLang(), getDict()]);
   const title = `${dict.social.following} · ${username}`;
-  const canonical = `/u/${username}/following`;
+  const canonical = `/u/${encodeURIComponent(username)}/following`;
   return {
     title: { absolute: `${title} · AnimeGoClub` },
     description:
@@ -104,7 +106,8 @@ const emptyStyle: CSSProperties = {
 };
 
 export default async function FollowingPage({ params, searchParams }: PageProps) {
-  const { username } = await params;
+  const { username: usernameSlug } = await params;
+  const username = decodeUsername(usernameSlug);
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
 
@@ -136,7 +139,7 @@ export default async function FollowingPage({ params, searchParams }: PageProps)
     <main className="container" style={containerStyle}>
       {/* Breadcrumb */}
       <nav aria-label={lang === "zh" ? "面包屑" : "Breadcrumb"} style={breadcrumbStyle}>
-        <Link href={`/u/${username}`} style={backLinkStyle}>
+        <Link href={`/u/${encodeURIComponent(username)}`} style={backLinkStyle}>
           ← {username}
         </Link>
         <span style={separatorStyle} aria-hidden="true">
@@ -182,7 +185,7 @@ export default async function FollowingPage({ params, searchParams }: PageProps)
         >
           {page > 1 && (
             <Link
-              href={`/u/${username}/following?page=${page - 1}`}
+              href={`/u/${encodeURIComponent(username)}/following?page=${page - 1}`}
               style={{
                 padding: "8px 20px",
                 borderRadius: 8,
@@ -199,7 +202,7 @@ export default async function FollowingPage({ params, searchParams }: PageProps)
           )}
           {hasMore && nextPage !== null && (
             <Link
-              href={`/u/${username}/following?page=${nextPage}`}
+              href={`/u/${encodeURIComponent(username)}/following?page=${nextPage}`}
               style={{
                 padding: "8px 20px",
                 borderRadius: 8,

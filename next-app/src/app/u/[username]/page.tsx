@@ -17,6 +17,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { apiGet, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
+import { decodeUsername } from "@/lib/username";
 import FollowButton from "./_components/FollowButton";
 import WatchingSection from "./_components/WatchingSection";
 import ShareButtonIsland from "./_components/ShareButtonIsland";
@@ -47,7 +48,7 @@ async function fetchMe(): Promise<{ username: string } | null> {
 
 async function fetchProfile(username: string): Promise<UserProfileData | null> {
   try {
-    return await apiGet<UserProfileData>(`/api/users/${username}`, {
+    return await apiGet<UserProfileData>(`/api/users/${encodeURIComponent(username)}`, {
       cache: "no-store",
     });
   } catch (err) {
@@ -59,12 +60,13 @@ async function fetchProfile(username: string): Promise<UserProfileData | null> {
 // ─── generateMetadata ──────────────────────────────────────────────────────
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { username } = await params;
+  const { username: usernameSlug } = await params;
+  const username = decodeUsername(usernameSlug);
   const [lang, dict] = await Promise.all([getLang(), getDict()]);
   // dict.profile.titleSuffix = "'s Watchlist" / "的追番"
   const suffix = dict.profile.titleSuffix;
   const title = `${username} ${suffix}`;
-  const canonical = `/u/${username}`;
+  const canonical = `/u/${encodeURIComponent(username)}`;
 
   return {
     title: { absolute: `${title} · AnimeGoClub` },
@@ -93,7 +95,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 // ─── Page ─────────────────────────────────────────────────────────────────
 
 export default async function UserProfilePage({ params }: PageProps) {
-  const { username } = await params;
+  const { username: usernameSlug } = await params;
+  const username = decodeUsername(usernameSlug);
 
   const [dict, lang, profile, me] = await Promise.all([
     getDict(),

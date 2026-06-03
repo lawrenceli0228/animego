@@ -30,12 +30,17 @@ interface ProfileHeroProps {
   /** 看过 · 部 (completed count). */
   watchedCount: number;
   topSeason: string | null;
-  /** Covers + banners from the user's list, to resolve the chosen backdrop. */
+  /** Covers + banners from the user's list (fallback resolver for the backdrop). */
   backdropOptions: BackdropOption[];
   /** DB-persisted pass photo (card face + avatar); null → cover. */
   avatarUrl: string | null;
-  /** DB-persisted chosen backdrop anime; null → first list item. */
+  /** DB-persisted chosen backdrop anime. */
   backdropAnilistId: number | null;
+  /** Server-resolved backdrop banner/cover — same source as the navbar mini-card,
+   *  so /profile and the navbar always show the same chosen backdrop. Preferred
+   *  over backdropOptions, which is capped and can't resolve a choice past the cap. */
+  backdropBannerUrl?: string | null;
+  backdropCoverUrl?: string | null;
   lang: Lang;
   /** Page content (tabs / search / list) rendered over the same atmosphere. */
   children?: React.ReactNode;
@@ -104,19 +109,27 @@ export default function ProfileHero({
   backdropOptions,
   avatarUrl,
   backdropAnilistId,
+  backdropBannerUrl,
+  backdropCoverUrl,
   lang,
   children,
 }: ProfileHeroProps) {
   const photoUrl = avatarUrl;
 
-  const chosen =
-    backdropOptions.find((o) => o.anilistId === backdropAnilistId) ??
-    backdropOptions[0] ??
-    null;
-  // Backdrop prefers the wide banner; cover, then the default, fill in when
-  // the user hasn't chosen a backdrop with one.
-  const backdrop = chosen?.bannerUrl ?? chosen?.coverUrl ?? DEFAULT_BACKDROP_IMAGE;
-  const cardArt = chosen?.coverUrl ?? null;
+  // When the user HAS chosen a backdrop, prefer the server-resolved banner/cover
+  // (same source as the navbar, resolved straight from the chosen anilist id — no
+  // list cap), then the options-list match. The old code fell back to
+  // backdropOptions[0] on a miss, which showed the user's FIRST anime whenever
+  // their actual choice sat past the 60-item cap — the wrong backdrop. Only when
+  // nothing is chosen do we auto-fill from the first list item.
+  const chosen = backdropOptions.find((o) => o.anilistId === backdropAnilistId) ?? null;
+  const chosenBackdrop =
+    backdropAnilistId != null
+      ? (backdropBannerUrl ?? backdropCoverUrl ?? chosen?.bannerUrl ?? chosen?.coverUrl ?? null)
+      : null;
+  const auto = backdropOptions[0]?.bannerUrl ?? backdropOptions[0]?.coverUrl ?? null;
+  const backdrop = chosenBackdrop ?? auto ?? DEFAULT_BACKDROP_IMAGE;
+  const cardArt = backdropCoverUrl ?? chosen?.coverUrl ?? backdropOptions[0]?.coverUrl ?? null;
 
   return (
     <div className="agc-cine-root">

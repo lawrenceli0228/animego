@@ -106,9 +106,13 @@ export default function PublicProfileHero({
     topSeason = zh ? `${year} ${SEASON_LABELS.zh[season] ?? ""}`.trim() : `${SEASON_LABELS.en[season] ?? ""} ${year}`.trim();
   }
 
-  const chosen = watching.find((w) => w.anilistId === backdropAnilistId) ?? watching[0] ?? null;
-  const backdrop = chosen?.bannerImageUrl ?? chosen?.coverImageUrl ?? DEFAULT_BACKDROP_IMAGE;
-  const cardArt = chosen?.coverImageUrl ?? null;
+  // A chosen backdrop that isn't in the (capped) watching list falls through to
+  // the default — never to a random first anime. The first entry auto-fills only
+  // when no backdrop is chosen.
+  const chosen = watching.find((w) => w.anilistId === backdropAnilistId) ?? null;
+  const pick = chosen ?? (backdropAnilistId == null ? (watching[0] ?? null) : null);
+  const backdrop = pick?.bannerImageUrl ?? pick?.coverImageUrl ?? DEFAULT_BACKDROP_IMAGE;
+  const cardArt = pick?.coverImageUrl ?? null;
   const memberNo = makeMemberNo(id);
   const total = watching.length;
 
@@ -137,10 +141,10 @@ export default function PublicProfileHero({
             <h1 className="agc-hero-name">{username}</h1>
 
             <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
-              <Link href={`/u/${username}/followers`} style={{ color: "rgba(235,235,245,0.7)", fontSize: 14, textDecoration: "none" }}>
+              <Link href={`/u/${encodeURIComponent(username)}/followers`} style={{ color: "rgba(235,235,245,0.7)", fontSize: 14, textDecoration: "none" }}>
                 <strong style={{ color: "#fff", fontWeight: 700 }}>{followerCount}</strong> {zh ? "粉丝" : "Followers"}
               </Link>
-              <Link href={`/u/${username}/following`} style={{ color: "rgba(235,235,245,0.7)", fontSize: 14, textDecoration: "none" }}>
+              <Link href={`/u/${encodeURIComponent(username)}/following`} style={{ color: "rgba(235,235,245,0.7)", fontSize: 14, textDecoration: "none" }}>
                 <strong style={{ color: "#fff", fontWeight: 700 }}>{followingCount}</strong> {zh ? "关注" : "Following"}
               </Link>
             </div>

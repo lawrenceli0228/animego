@@ -44,7 +44,7 @@ export default function FollowButton({
 
     const method = optimistic ? "POST" : "DELETE";
     try {
-      const res = await fetch(`/api/users/${username}/follow`, {
+      const res = await fetch(`/api/users/${encodeURIComponent(username)}/follow`, {
         method,
         headers: { Accept: "application/json" },
         credentials: "include",
