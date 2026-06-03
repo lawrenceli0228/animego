@@ -24,7 +24,10 @@ import {
   type CSSProperties,
 } from "react";
 import Link from "next/link";
+import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
+import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import FallbackImg from "@/components/ui/FallbackImg";
 import type { Dict, Lang } from "@/lib/i18n";
 
 interface CommentDoc {
@@ -33,6 +36,8 @@ interface CommentDoc {
   episode: number;
   userId: string;
   username: string;
+  avatarUrl?: string | null;
+  backdropCoverUrl?: string | null;
   content: string;
   parentId: string | null;
   replyToUsername: string | null;
@@ -225,9 +230,15 @@ function CommentItem({
             fontWeight: 700,
             color: "#fff",
             textTransform: "uppercase",
+            overflow: "hidden",
           }}
         >
-          {c.username.slice(0, 1)}
+          <FallbackImg
+            src={c.avatarUrl ?? c.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
+            fallback={DEFAULT_CARD_IMAGE}
+            alt={c.username}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -465,14 +476,16 @@ export default function EpisodeComments({
         if (res.ok) {
           onDone();
           await load();
+        } else {
+          toast.error(lang === "zh" ? "发表失败，请重试" : "Couldn't post, try again");
         }
       } catch {
-        /* swallow — user can retry */
+        toast.error(lang === "zh" ? "网络错误，请重试" : "Network error, try again");
       } finally {
         setPosting(false);
       }
     },
-    [anilistId, episode, load],
+    [anilistId, episode, load, lang],
   );
 
   const handlePost = (text: string, onDone: () => void) => {
@@ -500,11 +513,12 @@ export default function EpisodeComments({
       try {
         const res = await authFetch(`/api/comments/${id}`, { method: "DELETE" });
         if (res.ok) await load();
+        else toast.error(lang === "zh" ? "删除失败，请重试" : "Couldn't delete, try again");
       } catch {
-        /* swallow */
+        toast.error(lang === "zh" ? "网络错误，请重试" : "Network error, try again");
       }
     },
-    [load],
+    [load, lang],
   );
 
   return (

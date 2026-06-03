@@ -78,6 +78,7 @@ SELECT
     a.title_native,
     a.title_chinese,
     a.cover_image_url,
+    a.banner_image_url,
     a.cover_image_color,
     a.poster_accent,
     a.episodes,
@@ -106,6 +107,7 @@ type ListUserSubscriptionsRow struct {
 	TitleNative     *string            `json:"titleNative"`
 	TitleChinese    *string            `json:"titleChinese"`
 	CoverImageUrl   *string            `json:"coverImageUrl"`
+	BannerImageUrl  *string            `json:"bannerImageUrl"`
 	CoverImageColor *string            `json:"coverImageColor"`
 	PosterAccent    *string            `json:"posterAccent"`
 	Episodes        *int32             `json:"episodes"`
@@ -160,6 +162,7 @@ func (q *Queries) ListUserSubscriptions(ctx context.Context, userID uuid.UUID, s
 			&i.TitleNative,
 			&i.TitleChinese,
 			&i.CoverImageUrl,
+			&i.BannerImageUrl,
 			&i.CoverImageColor,
 			&i.PosterAccent,
 			&i.Episodes,

@@ -166,6 +166,11 @@ services:
     environment:
       DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable
       PORT_GO: "8080"
+      AVATAR_DIR: /data/avatars
+    volumes:
+      # Member-pass photos live here (served at /api/avatars/*). A named
+      # volume keeps them across deploys — back this up alongside postgres.
+      - avatars:/data/avatars
     depends_on:
       postgres:
         condition: service_healthy
@@ -254,6 +259,7 @@ services:
 
 volumes:
   postgres-data:
+  avatars:
 
 networks:
   animego:

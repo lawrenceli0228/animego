@@ -16,6 +16,8 @@
 import Link from "next/link";
 import { ApiError, apiGetEnvelope } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
+import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import FallbackImg from "@/components/ui/FallbackImg";
 import type { WatcherItem, WatchersResponse } from "@/lib/types";
 
 interface WatchersAvatarListProps {
@@ -124,9 +126,15 @@ export default async function WatchersAvatarList({
                 ...stack,
                 background: avatarColor(w.username),
                 position: "relative",
+                overflow: "hidden",
               }}
             >
-              {w.username[0]}
+              <FallbackImg
+                src={w.avatarUrl ?? w.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
+                fallback={DEFAULT_CARD_IMAGE}
+                alt={w.username}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
             </Link>
           );
         })}

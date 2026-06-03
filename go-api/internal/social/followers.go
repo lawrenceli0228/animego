@@ -73,7 +73,7 @@ func (h *Handlers) ListFollowers(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]followListItem, len(rows))
 	for i, row := range rows {
-		items[i] = followListItem{Username: row.Username}
+		items[i] = followListItem{Username: row.Username, AvatarURL: row.AvatarUrl, BackdropCoverURL: row.BackdropCoverUrl}
 	}
 	writeFollowListEnvelope(w, items, total, page)
 }
@@ -127,7 +127,7 @@ func (h *Handlers) ListFollowing(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]followListItem, len(rows))
 	for i, row := range rows {
-		items[i] = followListItem{Username: row.Username}
+		items[i] = followListItem{Username: row.Username, AvatarURL: row.AvatarUrl, BackdropCoverURL: row.BackdropCoverUrl}
 	}
 	writeFollowListEnvelope(w, items, total, page)
 }

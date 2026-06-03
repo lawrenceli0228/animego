@@ -164,9 +164,10 @@ LIMIT $1;
 -- Public watcher list for one anime.  Backs /api/anime/:anilistId/watchers.
 -- Replaces anime.controller.js:53-75 — single SQL with JOIN drops the
 -- Express two-step (find + populate) pattern.
-SELECT u.username
+SELECT u.username, u.avatar_url, bc.cover_image_url AS backdrop_cover_url
 FROM subscriptions s
 JOIN users u ON u.id = s.user_id
+LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE s.anilist_id = $1 AND s.status = 'watching'
 LIMIT $2;
 

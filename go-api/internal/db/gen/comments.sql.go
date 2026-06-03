@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createComment = `-- name: CreateComment :one
@@ -133,22 +134,41 @@ func (q *Queries) GetCommentParentForValidation(ctx context.Context, iD uuid.UUI
 const listEpisodeComments = `-- name: ListEpisodeComments :many
 
 SELECT
-    id,
-    anilist_id,
-    episode,
-    user_id,
-    username,
-    content,
-    parent_id,
-    reply_to_username,
-    created_at,
-    updated_at
-FROM episode_comments
-WHERE anilist_id = $1
-  AND episode = $2
-ORDER BY created_at ASC
+    c.id,
+    c.anilist_id,
+    c.episode,
+    c.user_id,
+    c.username,
+    c.content,
+    c.parent_id,
+    c.reply_to_username,
+    c.created_at,
+    c.updated_at,
+    u.avatar_url,
+    bc.cover_image_url AS backdrop_cover_url
+FROM episode_comments c
+LEFT JOIN users u ON u.id = c.user_id
+LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
+WHERE c.anilist_id = $1
+  AND c.episode = $2
+ORDER BY c.created_at ASC
 LIMIT 500
 `
+
+type ListEpisodeCommentsRow struct {
+	ID               uuid.UUID          `json:"id"`
+	AnilistID        int32              `json:"anilistId"`
+	Episode          int32              `json:"episode"`
+	UserID           uuid.UUID          `json:"userId"`
+	Username         string             `json:"username"`
+	Content          string             `json:"content"`
+	ParentID         *uuid.UUID         `json:"parentId"`
+	ReplyToUsername  *string            `json:"replyToUsername"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt        pgtype.Timestamptz `json:"updatedAt"`
+	AvatarUrl        *string            `json:"avatarUrl"`
+	BackdropCoverUrl *string            `json:"backdropCoverUrl"`
+}
 
 // Queries against episode_comments (P2.5).
 //
@@ -170,15 +190,15 @@ LIMIT 500
 // /api/comments/:anilistId/:episode — flat tree, oldest first.  Hard
 // LIMIT 500 caps abuse (Express has no limit; we add one because
 // pulling 50k rows on a popular episode would blow the response).
-func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]EpisodeComment, error) {
+func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]ListEpisodeCommentsRow, error) {
 	rows, err := q.db.Query(ctx, listEpisodeComments, anilistID, episode)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []EpisodeComment{}
+	items := []ListEpisodeCommentsRow{}
 	for rows.Next() {
-		var i EpisodeComment
+		var i ListEpisodeCommentsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.AnilistID,
@@ -190,6 +210,8 @@ func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, epis
 			&i.ReplyToUsername,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AvatarUrl,
+			&i.BackdropCoverUrl,
 		); err != nil {
 			return nil, err
 		}

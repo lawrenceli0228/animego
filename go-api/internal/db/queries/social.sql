@@ -16,7 +16,7 @@
 -- Helper: username → uuid lookup used by every social endpoint that
 -- takes a username path param.  Returns id + canonical username
 -- (handler echoes it back).  ErrNoRows → 404 "User not found".
-SELECT id, username, created_at
+SELECT id, username, created_at, avatar_url, backdrop_anilist_id
 FROM users
 WHERE username = $1;
 
@@ -58,9 +58,12 @@ SELECT EXISTS (
 SELECT
     u.id,
     u.username,
+    u.avatar_url,
+    bc.cover_image_url AS backdrop_cover_url,
     f.created_at AS followed_at
 FROM follows f
 JOIN users u ON u.id = f.follower_id
+LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE f.followee_id = $1
 ORDER BY f.created_at DESC
 LIMIT $2 OFFSET $3;
@@ -77,9 +80,12 @@ WHERE followee_id = $1;
 SELECT
     u.id,
     u.username,
+    u.avatar_url,
+    bc.cover_image_url AS backdrop_cover_url,
     f.created_at AS followed_at
 FROM follows f
 JOIN users u ON u.id = f.followee_id
+LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE f.follower_id = $1
 ORDER BY f.created_at DESC
 LIMIT $2 OFFSET $3;
@@ -115,6 +121,7 @@ SELECT
     a.title_native,
     a.title_chinese,
     a.cover_image_url,
+    a.banner_image_url,
     a.cover_image_color,
     a.poster_accent,
     a.episodes,

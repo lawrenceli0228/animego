@@ -53,4 +53,6 @@ type User struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updatedAt"`
 	PreviousRefreshToken *string            `json:"previousRefreshToken"`
 	RefreshRotatedAt     pgtype.Timestamptz `json:"refreshRotatedAt"`
+	AvatarUrl            *string            `json:"avatarUrl"`
+	BackdropAnilistID    *int32             `json:"backdropAnilistId"`
 }

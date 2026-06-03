@@ -22,7 +22,8 @@ RETURNING
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at;
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id;
 
 -- name: GetUserByEmail :one
 -- Login lookup.  Returns the row including the password hash so the
@@ -33,7 +34,8 @@ SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 FROM users
 WHERE email = $1;
 
@@ -44,7 +46,8 @@ SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 FROM users
 WHERE username = $1;
 
@@ -58,7 +61,8 @@ SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 FROM users
 WHERE id = $1;
 
@@ -104,7 +108,8 @@ SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 FROM users
 WHERE reset_password_token = $1
   AND reset_password_expires > now();
@@ -132,3 +137,49 @@ SET password      = $2,
     refresh_token = NULL,
     updated_at    = now()
 WHERE id = $1;
+
+-- name: UpdateUsername :one
+-- PATCH /api/auth/me — self-serve rename. Unique violation (23505) on the
+-- username index → handler maps to 400 DUPLICATE. Returns the full row so
+-- the handler echoes the updated SafeUser.
+UPDATE users
+SET username   = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING
+    id, username, email, password, role,
+    refresh_token, reset_password_token, reset_password_expires,
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id;
+
+-- name: SetUserAvatar :exec
+-- PATCH /api/auth/me — set ($2 = data URL) or clear ($2 = NULL) the pass photo.
+UPDATE users
+SET avatar_url = $2,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: SetUserBackdrop :exec
+-- PATCH /api/auth/me — set ($2 = anilist id) or clear ($2 = NULL) the backdrop.
+UPDATE users
+SET backdrop_anilist_id = $2,
+    updated_at          = now()
+WHERE id = $1;
+
+-- name: UpdateUserPassword :exec
+-- Dormant: there is no self-serve change-password endpoint (password
+-- changes go through the email reset flow). Kept so the column write is
+-- available if a verified flow ever needs it.
+UPDATE users
+SET password   = $2,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: GetAnimeImages :one
+-- banner + cover for one anime, to theme the navbar avatar mini-card from
+-- the user's chosen backdrop (resolves users.backdrop_anilist_id → images).
+-- pgx.ErrNoRows when the anime isn't cached → handler leaves the fields nil.
+SELECT banner_image_url, cover_image_url
+FROM anime_cache
+WHERE anilist_id = $1;

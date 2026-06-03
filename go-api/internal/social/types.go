@@ -39,12 +39,15 @@ import (
 // JSON `null` (Express emits `null` via `isFollowing !== null ? !!isFollowing : null`).
 // Auth'd callers get true/false based on the FollowExists query.
 type profileResponse struct {
-	Username       string             `json:"username"`
-	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
-	FollowerCount  int64              `json:"followerCount"`
-	FollowingCount int64              `json:"followingCount"`
-	IsFollowing    *bool              `json:"isFollowing"`
-	Watching       []watchingItem     `json:"watching"`
+	ID                string             `json:"id"`
+	Username          string             `json:"username"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	AvatarURL         *string            `json:"avatarUrl"`
+	BackdropAnilistID *int32             `json:"backdropAnilistId"`
+	FollowerCount     int64              `json:"followerCount"`
+	FollowingCount    int64              `json:"followingCount"`
+	IsFollowing       *bool              `json:"isFollowing"`
+	Watching          []watchingItem     `json:"watching"`
 }
 
 // watchingItem is one entry in the profile's watching list.  Mirrors
@@ -66,6 +69,7 @@ type watchingItem struct {
 	TitleNative        *string `json:"titleNative"`
 	TitleChinese       *string `json:"titleChinese"`
 	CoverImageUrl      *string `json:"coverImageUrl"`
+	BannerImageUrl     *string `json:"bannerImageUrl"`
 	CoverImageColor    *string `json:"coverImageColor"`
 	PosterAccent       *string `json:"posterAccent"`
 	Episodes           *int32  `json:"episodes"`
@@ -93,7 +97,9 @@ type followToggleResponse struct {
 // Express returns `{ username }` only (no _id / email PII — matches the
 // .select() projection in follow.controller.js paginateFollows).
 type followListItem struct {
-	Username string `json:"username"`
+	Username         string  `json:"username"`
+	AvatarURL        *string `json:"avatarUrl"`
+	BackdropCoverURL *string `json:"backdropCoverUrl"`
 }
 
 // feedItem is one row in the GET /api/feed response.  Field naming

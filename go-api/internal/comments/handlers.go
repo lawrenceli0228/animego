@@ -50,7 +50,7 @@ const queryTimeout = 5 * time.Second
 // GetCommentParentForValidation) for POST, plus the read/delete pair
 // (GetCommentByID + DeleteComment) for DELETE.
 type CommentsDB interface {
-	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]dbgen.EpisodeComment, error)
+	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]dbgen.ListEpisodeCommentsRow, error)
 	CreateComment(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error)
 	GetCommentParentForValidation(ctx context.Context, iD uuid.UUID, anilistID int32, episode int32) (uuid.UUID, error)
 	GetCommentByID(ctx context.Context, id uuid.UUID) (dbgen.GetCommentByIDRow, error)
@@ -136,7 +136,7 @@ func (h *Handlers) ListComments(w http.ResponseWriter, r *http.Request) {
 	// not `"data":null` on the unlikely off-chance ListEpisodeComments
 	// returns nil.
 	if rows == nil {
-		rows = []dbgen.EpisodeComment{}
+		rows = []dbgen.ListEpisodeCommentsRow{}
 	}
 	httpx.Data(w, http.StatusOK, rows)
 }

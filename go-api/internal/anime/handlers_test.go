@@ -56,7 +56,7 @@ type fakeQuerier struct {
 	getSeasonalAnimeFn      func(ctx context.Context, season *string, year *int32, limit, offset int32) ([]dbgen.GetSeasonalAnimeRow, error)
 	countSeasonalFn         func(ctx context.Context, season *string, year *int32) (int64, error)
 	getTrendingWithCountsFn func(ctx context.Context, limit int32) ([]dbgen.GetTrendingWithCountsRow, error)
-	getWatchersFn           func(ctx context.Context, id int32, limit int32) ([]string, error)
+	getWatchersFn           func(ctx context.Context, id int32, limit int32) ([]dbgen.GetWatchersRow, error)
 	countWatchersFn         func(ctx context.Context, id int32) (int64, error)
 }
 
@@ -95,7 +95,7 @@ func (f *fakeQuerier) GetTrendingWithCounts(ctx context.Context, limit int32) ([
 	return f.getTrendingWithCountsFn(ctx, limit)
 }
 
-func (f *fakeQuerier) GetWatchers(ctx context.Context, id int32, limit int32) ([]string, error) {
+func (f *fakeQuerier) GetWatchers(ctx context.Context, id int32, limit int32) ([]dbgen.GetWatchersRow, error) {
 	if f.getWatchersFn == nil {
 		return nil, errors.New("fakeQuerier: GetWatchers not set")
 	}
@@ -750,8 +750,8 @@ func TestWatchers_EnvelopeShape(t *testing.T) {
 	t.Parallel()
 
 	q := &fakeQuerier{
-		getWatchersFn: func(_ context.Context, _ int32, _ int32) ([]string, error) {
-			return []string{"alice", "bob"}, nil
+		getWatchersFn: func(_ context.Context, _ int32, _ int32) ([]dbgen.GetWatchersRow, error) {
+			return []dbgen.GetWatchersRow{{Username: "alice"}, {Username: "bob"}}, nil
 		},
 		countWatchersFn: func(_ context.Context, _ int32) (int64, error) {
 			return 2, nil
@@ -789,7 +789,7 @@ func TestWatchers_LimitCap20(t *testing.T) {
 
 	var gotLimit int32
 	q := &fakeQuerier{
-		getWatchersFn: func(_ context.Context, _ int32, limit int32) ([]string, error) {
+		getWatchersFn: func(_ context.Context, _ int32, limit int32) ([]dbgen.GetWatchersRow, error) {
 			gotLimit = limit
 			return nil, nil
 		},
@@ -810,7 +810,7 @@ func TestWatchers_DefaultLimit(t *testing.T) {
 
 	var gotLimit int32
 	q := &fakeQuerier{
-		getWatchersFn: func(_ context.Context, _ int32, limit int32) ([]string, error) {
+		getWatchersFn: func(_ context.Context, _ int32, limit int32) ([]dbgen.GetWatchersRow, error) {
 			gotLimit = limit
 			return nil, nil
 		},
@@ -830,7 +830,7 @@ func TestWatchers_DBError(t *testing.T) {
 	t.Parallel()
 
 	q := &fakeQuerier{
-		getWatchersFn: func(_ context.Context, _ int32, _ int32) ([]string, error) {
+		getWatchersFn: func(_ context.Context, _ int32, _ int32) ([]dbgen.GetWatchersRow, error) {
 			return nil, errors.New("boom")
 		},
 		countWatchersFn: func(_ context.Context, _ int32) (int64, error) {
@@ -849,7 +849,7 @@ func TestWatchers_AnilistIDPassedThrough(t *testing.T) {
 
 	var gotID int32
 	q := &fakeQuerier{
-		getWatchersFn: func(_ context.Context, id int32, _ int32) ([]string, error) {
+		getWatchersFn: func(_ context.Context, id int32, _ int32) ([]dbgen.GetWatchersRow, error) {
 			gotID = id
 			return nil, nil
 		},

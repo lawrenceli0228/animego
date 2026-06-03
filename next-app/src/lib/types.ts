@@ -194,6 +194,9 @@ export interface DetailRecommendation {
 
 export interface WatcherItem {
   username: string;
+  avatarUrl?: string | null;
+  /** Chosen backdrop anime's cover — avatar fallback before the default. */
+  backdropCoverUrl?: string | null;
 }
 
 // Wire shape for /api/anime/:id/watchers — flat envelope with `data`

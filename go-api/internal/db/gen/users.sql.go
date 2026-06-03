@@ -38,7 +38,8 @@ RETURNING
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 `
 
 // Queries against the users table.  Auth flow (register / login / refresh
@@ -75,7 +76,30 @@ func (q *Queries) CreateUser(ctx context.Context, username string, email string,
 		&i.UpdatedAt,
 		&i.PreviousRefreshToken,
 		&i.RefreshRotatedAt,
+		&i.AvatarUrl,
+		&i.BackdropAnilistID,
 	)
+	return i, err
+}
+
+const getAnimeImages = `-- name: GetAnimeImages :one
+SELECT banner_image_url, cover_image_url
+FROM anime_cache
+WHERE anilist_id = $1
+`
+
+type GetAnimeImagesRow struct {
+	BannerImageUrl *string `json:"bannerImageUrl"`
+	CoverImageUrl  *string `json:"coverImageUrl"`
+}
+
+// banner + cover for one anime, to theme the navbar avatar mini-card from
+// the user's chosen backdrop (resolves users.backdrop_anilist_id → images).
+// pgx.ErrNoRows when the anime isn't cached → handler leaves the fields nil.
+func (q *Queries) GetAnimeImages(ctx context.Context, anilistID int32) (GetAnimeImagesRow, error) {
+	row := q.db.QueryRow(ctx, getAnimeImages, anilistID)
+	var i GetAnimeImagesRow
+	err := row.Scan(&i.BannerImageUrl, &i.CoverImageUrl)
 	return i, err
 }
 
@@ -84,7 +108,8 @@ SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 FROM users
 WHERE email = $1
 `
@@ -110,6 +135,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 		&i.PreviousRefreshToken,
 		&i.RefreshRotatedAt,
+		&i.AvatarUrl,
+		&i.BackdropAnilistID,
 	)
 	return i, err
 }
@@ -119,7 +146,8 @@ SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 FROM users
 WHERE id = $1
 `
@@ -146,6 +174,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UpdatedAt,
 		&i.PreviousRefreshToken,
 		&i.RefreshRotatedAt,
+		&i.AvatarUrl,
+		&i.BackdropAnilistID,
 	)
 	return i, err
 }
@@ -155,7 +185,8 @@ SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 FROM users
 WHERE reset_password_token = $1
   AND reset_password_expires > now()
@@ -181,6 +212,8 @@ func (q *Queries) GetUserByResetToken(ctx context.Context, resetPasswordToken *s
 		&i.UpdatedAt,
 		&i.PreviousRefreshToken,
 		&i.RefreshRotatedAt,
+		&i.AvatarUrl,
+		&i.BackdropAnilistID,
 	)
 	return i, err
 }
@@ -190,7 +223,8 @@ SELECT
     id, username, email, password, role,
     refresh_token, reset_password_token, reset_password_expires,
     is_public, created_at, updated_at,
-    previous_refresh_token, refresh_rotated_at
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
 FROM users
 WHERE username = $1
 `
@@ -214,6 +248,8 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.UpdatedAt,
 		&i.PreviousRefreshToken,
 		&i.RefreshRotatedAt,
+		&i.AvatarUrl,
+		&i.BackdropAnilistID,
 	)
 	return i, err
 }
@@ -270,6 +306,47 @@ func (q *Queries) SetResetPasswordToken(ctx context.Context, iD uuid.UUID, reset
 	return err
 }
 
+const setUserAvatar = `-- name: SetUserAvatar :exec
+UPDATE users
+SET avatar_url = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+// PATCH /api/auth/me — set ($2 = data URL) or clear ($2 = NULL) the pass photo.
+func (q *Queries) SetUserAvatar(ctx context.Context, iD uuid.UUID, avatarUrl *string) error {
+	_, err := q.db.Exec(ctx, setUserAvatar, iD, avatarUrl)
+	return err
+}
+
+const setUserBackdrop = `-- name: SetUserBackdrop :exec
+UPDATE users
+SET backdrop_anilist_id = $2,
+    updated_at          = now()
+WHERE id = $1
+`
+
+// PATCH /api/auth/me — set ($2 = anilist id) or clear ($2 = NULL) the backdrop.
+func (q *Queries) SetUserBackdrop(ctx context.Context, iD uuid.UUID, backdropAnilistID *int32) error {
+	_, err := q.db.Exec(ctx, setUserBackdrop, iD, backdropAnilistID)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET password   = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+// Dormant: there is no self-serve change-password endpoint (password
+// changes go through the email reset flow). Kept so the column write is
+// available if a verified flow ever needs it.
+func (q *Queries) UpdateUserPassword(ctx context.Context, iD uuid.UUID, password string) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, iD, password)
+	return err
+}
+
 const updateUserRefreshToken = `-- name: UpdateUserRefreshToken :exec
 UPDATE users
 SET refresh_token          = $2,
@@ -286,4 +363,43 @@ WHERE id = $1
 func (q *Queries) UpdateUserRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error {
 	_, err := q.db.Exec(ctx, updateUserRefreshToken, iD, refreshToken)
 	return err
+}
+
+const updateUsername = `-- name: UpdateUsername :one
+UPDATE users
+SET username   = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING
+    id, username, email, password, role,
+    refresh_token, reset_password_token, reset_password_expires,
+    is_public, created_at, updated_at,
+    previous_refresh_token, refresh_rotated_at,
+    avatar_url, backdrop_anilist_id
+`
+
+// PATCH /api/auth/me — self-serve rename. Unique violation (23505) on the
+// username index → handler maps to 400 DUPLICATE. Returns the full row so
+// the handler echoes the updated SafeUser.
+func (q *Queries) UpdateUsername(ctx context.Context, iD uuid.UUID, username string) (User, error) {
+	row := q.db.QueryRow(ctx, updateUsername, iD, username)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.Password,
+		&i.Role,
+		&i.RefreshToken,
+		&i.ResetPasswordToken,
+		&i.ResetPasswordExpires,
+		&i.IsPublic,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PreviousRefreshToken,
+		&i.RefreshRotatedAt,
+		&i.AvatarUrl,
+		&i.BackdropAnilistID,
+	)
+	return i, err
 }
