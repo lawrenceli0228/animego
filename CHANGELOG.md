@@ -2,6 +2,14 @@
 
 ---
 
+## [3.1.5] - 2026-06-03
+
+### 修复 — 详情页 AniList 上游抖动时 500(降级失效)
+
+- **`/anime/{id}` 间歇 Internal Server Error** — go-api 详情接口在缓存过期时会向 AniList 重拉刷新。根因双重:① `refetchFromAniList` 注释声称用 15s 独立超时"不占用 5s 请求预算",但 `context.WithTimeout(parentCtx, 15s)` 会被父 ctx 的 5s `queryTimeout` 截断,重拉实际把 5s 预算吃光;② AniList 上游变慢/失败时重拉耗尽 5s 后失败,本应"返回旧缓存"降级,但紧接着的 `enrichRelations(ctx)` 用的还是那个**已到期的 ctx** → `context deadline exceeded` → 500 `query failed`。于是 AniList 一抖,所有缓存过期的详情页(SEO 主战场)就 500。**修法**:重拉失败时直接用**已读到的旧行**组装返回(关系富化走无 DB 的 `convertRelationsToDetailRelations` 兜底,不再在到期 ctx 上查库),并把旧结果写入缓存——避免上游抖动期一堆过期页各自重试 5s 拖垮 worker 池。go build / vet / `go test ./internal/anime/...` 全过。
+
+---
+
 ## [3.1.4] - 2026-06-03
 
 ### 修复 — 登录态"假掉线" + 登录后导航不刷新
