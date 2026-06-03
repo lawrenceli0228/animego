@@ -818,7 +818,7 @@ func TestDeleteComment_DeleteFails_500(t *testing.T) {
 func TestListComments_ReturnsEmptyOnNilFromDB(t *testing.T) {
 	// Defensive coverage for the "rows == nil" branch in ListComments.
 	db := &fakeDB{
-		listFn: func(_ context.Context, _, _ int32) ([]dbgen.EpisodeComment, error) {
+		listFn: func(_ context.Context, _, _ int32) ([]dbgen.ListEpisodeCommentsRow, error) {
 			return nil, nil
 		},
 	}
