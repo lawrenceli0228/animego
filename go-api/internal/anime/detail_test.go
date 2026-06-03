@@ -1619,3 +1619,77 @@ func TestConvertRelationsToDetailRelations(t *testing.T) {
 		assert.Nil(t, got[0].TitleChinese, "fallback path leaves titleChinese nil")
 	})
 }
+
+// TestDetail_StaleRefetchFails_ServesStale guards the graceful-degradation
+// path added after the prod Internal Server Errors (3.1.5): when the cached
+// row is stale AND the AniList re-fetch FAILS (upstream slow / 5xx), the
+// handler must return 200 with the stale rows ALREADY read — NOT 500.
+//
+// The bug it pins: after a failed re-fetch the code fell through to
+// enrichRelations(ctx) on a request context whose deadline was exhausted by
+// the failed re-fetch, producing "context deadline exceeded" → 500. The fix
+// returns the stale rows via the no-DB convertRelationsToDetailRelations and
+// caches them. Asserts three things:
+//   - 200 with stale data (not 500)
+//   - the enrichment query does NOT run on the fallback path
+//   - the stale result is cached (a herd doesn't each repeat the re-fetch)
+func TestDetail_StaleRefetchFails_ServesStale(t *testing.T) {
+	t.Parallel()
+
+	romaji := "Stale But Served"
+	relCover := "https://cdn/rel-500.jpg"
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			// stale cached_at is the only stale trigger here → re-fetch attempted
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   42,
+				TitleRomaji: &romaji,
+				CachedAt:    staleTimestamp(),
+			}, nil
+		},
+		getAnimeStudiosByIDFn: func(_ context.Context, _ int32) ([]string, error) {
+			return []string{"MAPPA"}, nil
+		},
+		getAnimeCharactersByIDFn: func(_ context.Context, _ int32) ([]dbgen.GetAnimeCharactersByIDRow, error) {
+			return []dbgen.GetAnimeCharactersByIDRow{{NameEn: ptrString("Alice"), Role: ptrString("MAIN")}}, nil
+		},
+		getAnimeRelationsByIDFn: func(_ context.Context, _ int32) ([]dbgen.GetAnimeRelationsByIDRow, error) {
+			return []dbgen.GetAnimeRelationsByIDRow{
+				{AnilistID: 500, RelationType: ptrString("SEQUEL"), Title: ptrString("Sequel"), CoverImageUrl: &relCover},
+			}, nil
+		},
+		// MUST NOT run on the stale-fallback path. If a regression re-introduced
+		// the enrichRelations(ctx) call, this error would 500 the request — which
+		// the http.StatusOK assertion below would then catch.
+		getRelationEnrichmentByIDsFn: func(_ context.Context, _ []int32) ([]dbgen.GetRelationEnrichmentByIDsRow, error) {
+			return nil, errors.New("enrichment must not run on the stale-fallback path")
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			// the AniList upstream slowness/outage that caused the incident
+			return nil, &anilist.ErrUpstream{Status: http.StatusBadGateway, Message: "AniList upstream error"}
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/42")
+
+	require.Equal(t, http.StatusOK, rec.Code, "stale row + failed re-fetch must serve stale, not 500")
+	body := rec.Body.String()
+	require.Contains(t, body, `"anilistId":42`)
+	require.Contains(t, body, `"titleRomaji":"Stale But Served"`)
+	require.Contains(t, body, `"anilistId":500`, "relation still served (un-enriched via no-DB converter)")
+
+	assert.Equal(t, int32(1), al.calls.Load(), "re-fetch must have been attempted once")
+	assert.Equal(t, int32(0), db.enrichmentCalls.Load(),
+		"enrichment must NOT query the deadline-exhausted context on the stale-fallback path")
+
+	// Stale result is cached so a herd of stale requests during an AniList
+	// outage doesn't each repeat the (blocking ~5s) re-fetch attempt.
+	svc.cache.Wait()
+	rec2 := serveDetail(t, svc, "/api/anime/42")
+	require.Equal(t, http.StatusOK, rec2.Code)
+	assert.Equal(t, int32(1), al.calls.Load(), "stale result cached → second request must not re-fetch")
+	assert.Equal(t, int32(1), db.mainCalls.Load(), "second request served from cache, no DB read")
+}
