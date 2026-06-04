@@ -26,6 +26,7 @@ type InsertBgmIdMapCopyParams struct {
 	BgmID     int32  `json:"bgmId"`
 	MalID     *int32 `json:"malId"`
 	Source    string `json:"source"`
+	AnidbID   *int32 `json:"anidbId"`
 }
 
 const truncateBgmIdMap = `-- name: TruncateBgmIdMap :exec

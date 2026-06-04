@@ -33,6 +33,7 @@ func (r iteratorForInsertBgmIdMapCopy) Values() ([]interface{}, error) {
 		r.rows[0].BgmID,
 		r.rows[0].MalID,
 		r.rows[0].Source,
+		r.rows[0].AnidbID,
 	}, nil
 }
 
@@ -41,7 +42,9 @@ func (r iteratorForInsertBgmIdMapCopy) Err() error {
 }
 
 // Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
-// updated_at takes its column DEFAULT now().
+// updated_at takes its column DEFAULT now().  anidb_id is last to match the
+// physical column order (added by migration 0013 via ALTER); pgx CopyFrom
+// binds positionally, so the generated column list must mirror that order.
 func (q *Queries) InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"bgm_id_map"}, []string{"anilist_id", "bgm_id", "mal_id", "source"}, &iteratorForInsertBgmIdMapCopy{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"bgm_id_map"}, []string{"anilist_id", "bgm_id", "mal_id", "source", "anidb_id"}, &iteratorForInsertBgmIdMapCopy{rows: arg})
 }

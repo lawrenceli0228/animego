@@ -24,7 +24,8 @@ var rawMap []byte
 type Entry struct {
 	AnilistID int32  `json:"anilist_id"`
 	BgmID     int32  `json:"bgm_id"`
-	MalID     int32  `json:"mal_id"` // 0 when the join used the anidb fallback
+	MalID     int32  `json:"mal_id"`   // 0 when the join used the anidb fallback
+	AnidbID   int32  `json:"anidb_id"` // 0 when Fribb listed no anidb_id; feeds AnimeTosho aid lookup
 	Source    string `json:"source"`
 }
 
@@ -58,10 +59,16 @@ func Seed(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 			m := e.MalID
 			malID = &m
 		}
+		var anidbID *int32
+		if e.AnidbID != 0 {
+			a := e.AnidbID
+			anidbID = &a
+		}
 		rows[i] = dbgen.InsertBgmIdMapCopyParams{
 			AnilistID: e.AnilistID,
 			BgmID:     e.BgmID,
 			MalID:     malID,
+			AnidbID:   anidbID,
 			Source:    e.Source,
 		}
 	}

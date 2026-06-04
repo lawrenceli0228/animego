@@ -330,7 +330,9 @@ type Querier interface {
 	InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
 	// Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
-	// updated_at takes its column DEFAULT now().
+	// updated_at takes its column DEFAULT now().  anidb_id is last to match the
+	// physical column order (added by migration 0013 via ALTER); pgx CopyFrom
+	// binds positionally, so the generated column list must mirror that order.
 	InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error)
 	// Batch reader for re-enrich.  Returns the fields the queue payload
 	// needs.  Filtering by version covers v0/v1/v2 — handler dispatches each
