@@ -28,6 +28,8 @@ package torrents
 import (
 	"context"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -392,6 +394,120 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 		return cached, nil
 	}
 
+	merged, err := a.fanOut(ctx, q)
+	if err != nil {
+		// fanOut only surfaces an error when the parent ctx was cancelled
+		// before any goroutine completed (runOne never returns non-nil).
+		// Propagate as-is.
+		return nil, err
+	}
+
+	// Normalise → dedup → rank → cache.  Shared with FetchForAnime so the
+	// single-query and multi-variant paths collapse duplicates and apply the
+	// quality-aware TTL identically.
+	merged = a.finalise(merged)
+	a.cacheResult(key, merged)
+
+	return merged, nil
+}
+
+// FetchForAnime is the id-keyed counterpart to Fetch: instead of a single
+// caller-supplied keyword it runs the registry fan-out once PER title
+// variant and, when anidbID is non-nil, folds in AnimeTosho's complete
+// AniDB-id feed (?aid=).  The combined rows are deduped (by infohash, so
+// the inevitable overlap between AnimeTosho's keyword hits and its aid
+// feed collapses harmlessly) and ranked by seeders exactly like Fetch.
+//
+// Behaviour:
+//
+//  1. Variants are trimmed of surrounding whitespace and empties dropped.
+//     With no usable variant AND no anidbID there is nothing to search →
+//     return [] immediately (no upstream calls, no cache).
+//  2. Cache key is the sorted-join of the cleaned variant set plus the
+//     optional aid, so a show whose four titles produce the same variant
+//     set shares ONE cache entry rather than caching each variant
+//     separately.  A hit returns the cached slice as-is.
+//  3. Cache miss → fan out the registry over every variant concurrently
+//     (errgroup), plus one AnimeTosho aid-feed call when anidbID != nil.
+//     Per-variant / per-source failures are absorbed exactly as in Fetch
+//     (logged, treated as empty) — only a parent-ctx cancellation surfaces
+//     as a top-level error.
+//  4. Merge → dedup → rank → cache, sharing finalise + cacheResult with
+//     Fetch (same quality-aware TTL: long for a non-empty result, short
+//     for an all-source miss).
+//
+// The per-source outbound throttle (runOne → limiterFor) still paces each
+// upstream, so even though this issues variants × sources requests the
+// token buckets keep any single source's outbound rate bounded.
+func (a *Aggregator) FetchForAnime(ctx context.Context, variants []string, anidbID *int32) ([]TorrentItem, error) {
+	clean := cleanVariants(variants)
+	if len(clean) == 0 && anidbID == nil {
+		// Nothing to search on — neither a keyword variant nor an aid feed.
+		return []TorrentItem{}, nil
+	}
+
+	key := animeCacheKey(clean, anidbID)
+	if cached, hit := a.cache.Get(key); hit {
+		return cached, nil
+	}
+
+	// Collect every variant's fan-out result plus the optional aid feed into
+	// position-indexed slots so the merge order is deterministic regardless
+	// of which goroutine finishes first: variants in their (cleaned) order,
+	// then the aid feed last.
+	results := make([][]TorrentItem, len(clean)+1)
+
+	g, gctx := errgroup.WithContext(ctx)
+	for i, v := range clean {
+		i, v := i, v
+		g.Go(func() error {
+			items, err := a.fanOut(gctx, v)
+			if err != nil {
+				return err
+			}
+			results[i] = items
+			return nil
+		})
+	}
+	if anidbID != nil {
+		aid := int(*anidbID)
+		g.Go(func() error {
+			results[len(clean)] = a.runToshoAniDB(gctx, aid)
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		// Only a parent-ctx cancellation reaches here (fanOut/runToshoAniDB
+		// absorb per-source failures).  Propagate as-is.
+		return nil, err
+	}
+
+	total := 0
+	for _, r := range results {
+		total += len(r)
+	}
+	merged := make([]TorrentItem, 0, total)
+	for _, r := range results {
+		merged = append(merged, r...)
+	}
+
+	merged = a.finalise(merged)
+	a.cacheResult(key, merged)
+
+	return merged, nil
+}
+
+// fanOut runs the registry fan-out for a SINGLE query q: one goroutine per
+// registered source (errgroup, per-source 8s timeout + partial-failure
+// tolerance via runOne), merged in registration order.  It does NOT dedup,
+// rank, or cache — the callers (Fetch for one query, FetchForAnime for many
+// variants) own that so a multi-variant result is deduped across variants
+// rather than within each.
+//
+// Returns (nil, ctx.Err()) only when the caller's context is cancelled
+// before any goroutine completes — per-source failures are never errors.
+func (a *Aggregator) fanOut(ctx context.Context, q string) ([]TorrentItem, error) {
 	sources := a.registry.Sources()
 
 	// errgroup.WithContext gives each goroutine a derived context that
@@ -428,28 +544,64 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 	for _, r := range results {
 		merged = append(merged, r...)
 	}
+	return merged, nil
+}
 
-	// Normalise → dedup → rank, in that order, before caching.  parseInfohash
-	// runs off each row's magnet (source-agnostic), so the same torrent
-	// surfaced by two sources collapses to a single best copy, and the
-	// survivors come back ordered by seeders (nil sinks last) → date → source
-	// priority.  ranks is derived from the registry once and threaded through
-	// both passes so the per-source tie-break is consistent.  All three
-	// helpers return fresh slices (immutability), so `merged` is never
-	// mutated in place.
+// finalise runs the normalise → dedup → rank pipeline over a merged,
+// multi-source (and, for FetchForAnime, multi-variant) slice before it is
+// cached/returned.  parseInfohash runs off each row's magnet
+// (source-agnostic), so the same torrent surfaced by two sources — or by
+// AnimeTosho's keyword search and its aid feed — collapses to a single best
+// copy, and the survivors come back ordered by seeders (nil sinks last) →
+// date → source priority.  ranks is derived from the registry once and
+// threaded through both passes so the per-source tie-break is consistent.
+// Both helpers return fresh slices (immutability), so the input is never
+// mutated in place.
+func (a *Aggregator) finalise(merged []TorrentItem) []TorrentItem {
 	ranks := sourceRanks(a.registry)
-	merged = rankItems(dedupByInfohash(merged, ranks), ranks)
+	return rankItems(dedupByInfohash(merged, ranks), ranks)
+}
 
-	// Quality-aware TTL: a non-empty result is stable for the full hour;
-	// an empty one (every source missed) is cached only briefly so a
-	// transient upstream blip doesn't pin the query empty for an hour.
+// cacheResult writes a finalised slice under key with the quality-aware
+// TTL: a non-empty result is stable for the full hour; an empty one (every
+// source missed) is cached only briefly (emptyCacheTTL) so a transient
+// upstream blip doesn't pin the query empty for an hour.  Shared by Fetch
+// and FetchForAnime so both paths cache identically.
+func (a *Aggregator) cacheResult(key string, merged []TorrentItem) {
 	if len(merged) > 0 {
 		a.cache.Set(key, merged)
 	} else {
 		a.cache.SetWithTTL(key, merged, a.emptyCacheTTL)
 	}
+}
 
-	return merged, nil
+// runToshoAniDB wraps the AnimeTosho aid-feed fetch (FetchAnimeToshoByAniDB)
+// with the same per-source timeout + partial-failure tripwire runOne applies
+// to a registry source.  It is NOT a registry Fetcher (the aid feed is keyed
+// by an integer id, not the query string the Fetcher interface carries), so
+// it gets its own thin wrapper here that mirrors runOne's contract: always
+// return a non-nil-safe slice (empty on failure) and never panic.  The
+// throttle uses SourceTosho's bucket so the aid feed shares the keyword
+// source's outbound rate budget.
+func (a *Aggregator) runToshoAniDB(parent context.Context, aid int) []TorrentItem {
+	ctx, cancel := context.WithTimeout(parent, perSourceTimeout)
+	defer cancel()
+
+	if err := a.limiterFor(SourceTosho).Wait(ctx); err != nil {
+		if a.logger != nil {
+			a.logger.Warn("torrents: tosho aid-feed rate-limit wait aborted", "aid", aid, "error", err.Error())
+		}
+		return nil
+	}
+
+	items, err := FetchAnimeToshoByAniDB(ctx, a.httpClient, aid)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("torrents: tosho aid-feed failed", "aid", aid, "error", err.Error())
+		}
+		return nil
+	}
+	return items
 }
 
 // runOne wraps a single Fetcher with the per-source 8s timeout and the
@@ -485,4 +637,44 @@ func (a *Aggregator) runOne(parent context.Context, src Fetcher, q string) []Tor
 		return nil
 	}
 	return items
+}
+
+// cleanVariants trims surrounding whitespace from each variant and drops
+// empties, preserving input order.  Case-insensitive de-duplication is the
+// handler's job (it builds the variant set from the four titles and caps it
+// at 4 before calling FetchForAnime); this is the defensive
+// trim-and-drop-empty pass so a stray "" or "  " variant never issues a
+// pointless fan-out.  Returns a fresh slice; the input is not mutated.
+func cleanVariants(variants []string) []string {
+	out := make([]string, 0, len(variants))
+	for _, v := range variants {
+		if t := strings.TrimSpace(v); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// animeCacheKey builds the FetchForAnime cache key from a cleaned variant
+// set plus the optional AniDB id.  The variants are lower-cased and SORTED
+// before joining so a show whose titles arrive in any order — or whose
+// variant set is identical to another request's — collapses to ONE cache
+// entry rather than caching per variant or per ordering.  The aid (when
+// present) is appended so a keyword-only request and an aid-augmented one
+// for the same titles don't collide (the aid feed can add rows the keyword
+// search misses).  A leading marker namespaces these keys away from Fetch's
+// single-query keys so a one-keyword Fetch and a single-variant
+// FetchForAnime never alias.
+func animeCacheKey(clean []string, anidbID *int32) string {
+	lowered := make([]string, len(clean))
+	for i, v := range clean {
+		lowered[i] = strings.ToLower(v)
+	}
+	sort.Strings(lowered)
+
+	key := "anime:" + strings.Join(lowered, "\x00")
+	if anidbID != nil {
+		key += "|aid=" + strconv.Itoa(int(*anidbID))
+	}
+	return key
 }

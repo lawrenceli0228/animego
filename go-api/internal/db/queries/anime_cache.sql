@@ -269,6 +269,26 @@ SELECT anilist_id, title_chinese, bangumi_version
 FROM anime_cache
 WHERE anilist_id = ANY($1::int[]);
 
+-- name: GetTorrentQueryInputsByAnilistID :one
+-- Resolves the inputs the magnet aggregator needs to search by AniList id
+-- instead of a raw keyword.  Backs the /api/anime/torrents?anilistId=N path:
+-- the handler turns the four titles into deduped search variants and uses
+-- anidb_id (when present) to pull AnimeTosho's complete aid feed.
+--
+-- LEFT JOIN bgm_id_map so a row missing from the id map (or with a NULL
+-- anidb_id) still returns its titles — anidb_id comes back NULL and the
+-- handler degrades to keyword-only (no aid feed).  pgx.ErrNoRows means "no
+-- such anime cached" → handler 404s.
+SELECT
+    a.title_romaji,
+    a.title_native,
+    a.title_english,
+    a.title_chinese,
+    m.anidb_id
+FROM anime_cache a
+LEFT JOIN bgm_id_map m ON m.anilist_id = a.anilist_id
+WHERE a.anilist_id = $1;
+
 -- name: GetAnimeForBangumiSearch :one
 -- Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
 -- the keyword for Bangumi search.  Mirrors anilist.service.js V1

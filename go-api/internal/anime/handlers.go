@@ -15,12 +15,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
@@ -331,28 +334,109 @@ func Watchers(q dbgen.Querier) http.HandlerFunc {
 	}
 }
 
-// Torrents implements GET /api/anime/torrents — 3-source magnet aggregator
-// (animes.garden + acg.rip + nyaa.si) wired into internal/torrents.
-// Replaces anime.controller.js:291-325 — the per-source partial-tolerance
-// + per-query 1h cache live in the aggregator package.
+// maxTorrentVariants caps how many title variants the anilistId path expands
+// into.  An anime has at most four cached titles (romaji / native / english /
+// chinese); even after de-duplication four is the ceiling, but the cap is
+// explicit so a future extra title column can't silently widen the
+// variants × sources fan-out.
+const maxTorrentVariants = 4
+
+// TorrentsDB is the slice of dbgen.Querier the Torrents handler needs —
+// just the by-anilist-id input lookup.  Declared at the use site (small
+// interface) so handler tests can supply a one-method fake without the full
+// Querier surface.
+type TorrentsDB interface {
+	GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistID int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error)
+}
+
+// Torrents implements GET /api/anime/torrents — multi-source magnet
+// aggregator (animes.garden + acg.rip + nyaa.si + dmhy + mikan + AnimeTosho)
+// wired into internal/torrents.  Replaces anime.controller.js:291-325 — the
+// per-source partial-tolerance + per-query 1h cache live in the aggregator
+// package.
+//
+// Two entry points share one response shape:
+//
+//   - ?anilistId=N (primary): resolve the anime's four cached titles into
+//     deduped search variants and, when the id map carries an AniDB id, pull
+//     AnimeTosho's complete aid feed alongside the keyword fan-out.  Server
+//     -side title resolution is what unlocks full coverage — the client no
+//     longer has to guess a single keyword.
+//   - ?q=<keyword> (fallback): the legacy single-keyword fan-out, unchanged.
+//
+// Resolution precedence: anilistId wins when both are present (the richer
+// path).  Neither present → 400.
 //
 // Query parameters:
 //
-//	q  required, 1..200 chars
+//	anilistId  optional; integer AniList id (primary path)
+//	q          optional; 1..200 chars (fallback path)
 //
 // Response envelope:
 //
-//	{"data":[{"title":..., "magnet":..., "size":..., "fansub":..., "date":..., "source":..., "provider":...}, ...]}
-func Torrents(agg *torrents.Aggregator) http.HandlerFunc {
+//	{"data":[{"title":..., "magnet":..., "size":..., "fansub":..., "date":..., "source":..., "seeders":..., "infohash":..., "provider":...}, ...]}
+func Torrents(agg *torrents.Aggregator, db TorrentsDB) http.HandlerFunc {
 	const maxQueryLen = 200
 
 	return func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
 		defer cancel()
 
-		q := req.URL.Query().Get("q")
-		if q == "" {
-			// Express: 'Missing query'
+		qs := req.URL.Query()
+		rawAnilistID := qs.Get("anilistId")
+		q := qs.Get("q")
+
+		var (
+			items []torrents.TorrentItem
+			err   error
+		)
+
+		switch {
+		case rawAnilistID != "":
+			// Primary path: resolve titles + anidb_id by id, then fan out
+			// over the variant set.  An unparseable id is a client error.
+			id, convErr := strconv.Atoi(rawAnilistID)
+			if convErr != nil {
+				httpx.Fail(w, httpx.NewError(
+					http.StatusBadRequest,
+					httpx.CodeValidationError,
+					"无效的番剧 ID",
+				))
+				return
+			}
+
+			row, lookupErr := db.GetTorrentQueryInputsByAnilistID(ctx, int32(id))
+			if lookupErr != nil {
+				if errors.Is(lookupErr, pgx.ErrNoRows) {
+					httpx.Fail(w, httpx.NewError(
+						http.StatusNotFound,
+						httpx.CodeNotFound,
+						"番剧不存在",
+					))
+					return
+				}
+				httpx.Fail(w, httpx.WrapError(lookupErr, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
+				return
+			}
+
+			variants := buildTorrentVariants(row)
+			items, err = agg.FetchForAnime(ctx, variants, row.AnidbID)
+
+		case q != "":
+			// Fallback path: single-keyword fan-out (legacy behaviour).
+			if len(q) > maxQueryLen {
+				// Express: 'Query too long'
+				httpx.Fail(w, httpx.NewError(
+					http.StatusBadRequest,
+					httpx.CodeValidationError,
+					"Query too long",
+				))
+				return
+			}
+			items, err = agg.Fetch(ctx, q)
+
+		default:
+			// Neither param — Express: 'Missing query'.
 			httpx.Fail(w, httpx.NewError(
 				http.StatusBadRequest,
 				httpx.CodeValidationError,
@@ -360,17 +444,7 @@ func Torrents(agg *torrents.Aggregator) http.HandlerFunc {
 			))
 			return
 		}
-		if len(q) > maxQueryLen {
-			// Express: 'Query too long'
-			httpx.Fail(w, httpx.NewError(
-				http.StatusBadRequest,
-				httpx.CodeValidationError,
-				"Query too long",
-			))
-			return
-		}
 
-		items, err := agg.Fetch(ctx, q)
 		if err != nil {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "torrents fetch failed"))
 			return
@@ -381,6 +455,47 @@ func Torrents(agg *torrents.Aggregator) http.HandlerFunc {
 
 		httpx.Data(w, http.StatusOK, items)
 	}
+}
+
+// buildTorrentVariants turns an anime's four cached titles into the deduped
+// search-variant set FetchForAnime fans out over.  Rules:
+//
+//   - Only non-nil, non-blank titles contribute (each is trimmed).
+//   - De-duplication is case-insensitive (romaji and english are often the
+//     same string in different cases; native and chinese can coincide for
+//     CJK-original shows) — the FIRST spelling seen is kept so the variant
+//     reads naturally in logs.
+//   - The set is capped at maxTorrentVariants to bound the
+//     variants × sources fan-out.
+//
+// Simplified/traditional Chinese folding is deliberately NOT done here yet
+// (YAGNI — no evidence the upstreams index both forms differently enough to
+// justify the conversion table).  TODO: revisit if zh-Hant titles start
+// missing zh-Hans-indexed releases.
+func buildTorrentVariants(row dbgen.GetTorrentQueryInputsByAnilistIDRow) []string {
+	candidates := []*string{row.TitleRomaji, row.TitleNative, row.TitleEnglish, row.TitleChinese}
+
+	out := make([]string, 0, maxTorrentVariants)
+	seen := make(map[string]struct{}, maxTorrentVariants)
+	for _, c := range candidates {
+		if c == nil {
+			continue
+		}
+		t := strings.TrimSpace(*c)
+		if t == "" {
+			continue
+		}
+		key := strings.ToLower(t)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, t)
+		if len(out) == maxTorrentVariants {
+			break
+		}
+	}
+	return out
 }
 
 // -----------------------------------------------------------------------------
