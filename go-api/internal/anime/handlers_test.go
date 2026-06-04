@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -58,6 +62,7 @@ type fakeQuerier struct {
 	getTrendingWithCountsFn func(ctx context.Context, limit int32) ([]dbgen.GetTrendingWithCountsRow, error)
 	getWatchersFn           func(ctx context.Context, id int32, limit int32) ([]dbgen.GetWatchersRow, error)
 	countWatchersFn         func(ctx context.Context, id int32) (int64, error)
+	getTorrentQueryInputsFn func(ctx context.Context, anilistID int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error)
 }
 
 func (f *fakeQuerier) GetCompletedGems(ctx context.Context, limit int32) ([]dbgen.GetCompletedGemsRow, error) {
@@ -107,6 +112,13 @@ func (f *fakeQuerier) CountWatchers(ctx context.Context, id int32) (int64, error
 		return 0, errors.New("fakeQuerier: CountWatchers not set")
 	}
 	return f.countWatchersFn(ctx, id)
+}
+
+func (f *fakeQuerier) GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistID int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error) {
+	if f.getTorrentQueryInputsFn == nil {
+		return dbgen.GetTorrentQueryInputsByAnilistIDRow{}, errors.New("fakeQuerier: GetTorrentQueryInputsByAnilistID not set")
+	}
+	return f.getTorrentQueryInputsFn(ctx, anilistID)
 }
 
 // -----------------------------------------------------------------------------
@@ -870,14 +882,20 @@ func TestWatchers_AnilistIDPassedThrough(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 // newStubAggregator returns a torrents.Aggregator wired with all-static
-// stub fetchers via the test-only With{Garden,Acg,Nyaa}Fn options.  The
-// caller controls each source's payload independently.
+// stub fetchers via the test-only With{Garden,Acg,Nyaa,Dmhy,Mikan,Tosho}Fn
+// options.  The caller controls garden/acg/nyaa payloads independently;
+// dmhy + mikan + tosho (also in the default registry) are stubbed to
+// return nothing so these handler tests stay off the network and assert
+// only on the caller-provided sources.
 func newStubAggregator(t *testing.T, garden, acg, nyaa []torrents.TorrentItem) *torrents.Aggregator {
 	t.Helper()
 	a, err := torrents.New(
 		torrents.WithGardenFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return garden, nil }),
 		torrents.WithAcgFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return acg, nil }),
 		torrents.WithNyaaFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nyaa, nil }),
+		torrents.WithDmhyFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
+		torrents.WithMikanFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
+		torrents.WithToshoFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
 	)
 	require.NoError(t, err)
 	t.Cleanup(a.Close)
@@ -889,7 +907,7 @@ func TestTorrents_MissingQuery(t *testing.T) {
 
 	agg := newStubAggregator(t, nil, nil, nil)
 	rec := httptest.NewRecorder()
-	Torrents(agg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents", nil))
+	Torrents(agg, &fakeQuerier{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents", nil))
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "Missing query")
@@ -903,7 +921,7 @@ func TestTorrents_QueryTooLong(t *testing.T) {
 	rec := httptest.NewRecorder()
 	longQ := strings.Repeat("a", 201)
 	rec = httptest.NewRecorder()
-	Torrents(agg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q="+longQ, nil))
+	Torrents(agg, &fakeQuerier{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q="+longQ, nil))
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "Query too long")
@@ -928,7 +946,7 @@ func TestTorrents_HappyPath(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
-	Torrents(agg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q=naruto", nil))
+	Torrents(agg, &fakeQuerier{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q=naruto", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
@@ -950,11 +968,236 @@ func TestTorrents_EmptyResults(t *testing.T) {
 
 	agg := newStubAggregator(t, nil, nil, nil)
 	rec := httptest.NewRecorder()
-	Torrents(agg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q=zzzz", nil))
+	Torrents(agg, &fakeQuerier{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?q=zzzz", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	// Empty array, not null.
 	assert.Equal(t, `{"data":[]}`, rec.Body.String())
+}
+
+// -----------------------------------------------------------------------------
+// Torrents ?anilistId — server-side variant resolution + AniDB aid feed.
+// -----------------------------------------------------------------------------
+
+// animeRewriteTransport rewrites every outgoing request's scheme+host to the
+// test server while preserving path + query.  Mirrors the torrents package's
+// test-only rewrite trick (which is unexported, so it's re-declared here) so
+// the AnimeTosho aid-feed call — which hits a hard-coded production endpoint —
+// can be redirected at an httptest server and its ?aid= query inspected.
+type animeRewriteTransport struct {
+	target string
+}
+
+func (t animeRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	u, err := url.Parse(t.target)
+	if err != nil {
+		return nil, err
+	}
+	req.URL.Scheme = u.Scheme
+	req.URL.Host = u.Host
+	req.Host = u.Host
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+func newRewriteClient(target string) *http.Client {
+	return &http.Client{Transport: animeRewriteTransport{target: target}}
+}
+
+// capturingAggregator returns a torrents.Aggregator whose garden stub records
+// the query string it is called with (one call per variant in the fan-out),
+// plus an httptest server that records whether AnimeTosho's aid feed was
+// requested (and with which aid).  acg / nyaa / dmhy / mikan are stubbed
+// empty so only the garden capture and the aid-feed probe matter.
+//
+// Returns the aggregator, a function yielding the captured variant queries,
+// and a function yielding the aid the feed was requested with (-1 if never).
+func capturingAggregator(t *testing.T) (*torrents.Aggregator, func() []string, func() int) {
+	t.Helper()
+
+	var mu sync.Mutex
+	var seenQueries []string
+	gotAid := -1
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if aid := r.URL.Query().Get("aid"); aid != "" {
+			mu.Lock()
+			if n, err := strconv.Atoi(aid); err == nil {
+				gotAid = n
+			}
+			mu.Unlock()
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	gardenFn := func(_ context.Context, q string) ([]torrents.TorrentItem, error) {
+		mu.Lock()
+		seenQueries = append(seenQueries, q)
+		mu.Unlock()
+		return nil, nil
+	}
+
+	a, err := torrents.New(
+		torrents.WithGardenFn(gardenFn),
+		torrents.WithAcgFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
+		torrents.WithNyaaFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
+		torrents.WithDmhyFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
+		torrents.WithMikanFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
+		// tosho keyword source stubbed empty; the aid feed (separate code
+		// path) is routed to srv via the rewrite client below.
+		torrents.WithToshoFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
+		torrents.WithHTTPClient(newRewriteClient(srv.URL)),
+	)
+	require.NoError(t, err)
+	t.Cleanup(a.Close)
+
+	queries := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]string, len(seenQueries))
+		copy(out, seenQueries)
+		return out
+	}
+	aid := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return gotAid
+	}
+	return a, queries, aid
+}
+
+func strptr(s string) *string { return &s }
+
+func TestTorrents_ByAnilistID_ResolvesVariantsAndAidFeed(t *testing.T) {
+	t.Parallel()
+
+	anidb := int32(17389)
+	q := &fakeQuerier{
+		getTorrentQueryInputsFn: func(_ context.Context, id int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error) {
+			assert.Equal(t, int32(21), id, "anilistId path-parsed and passed to the lookup")
+			return dbgen.GetTorrentQueryInputsByAnilistIDRow{
+				TitleRomaji:  strptr("One Piece"),
+				TitleNative:  strptr("ワンピース"),
+				TitleEnglish: strptr("One Piece"), // dup of romaji (case-equal) → folded out
+				TitleChinese: strptr("海贼王"),
+				AnidbID:      &anidb,
+			}, nil
+		},
+	}
+
+	agg, queries, aidSeen := capturingAggregator(t)
+	rec := httptest.NewRecorder()
+	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, `{"data":[]}`, rec.Body.String(), "all sources empty → empty envelope")
+
+	// Variants: romaji + native + chinese (english deduped against romaji).
+	got := queries()
+	assert.ElementsMatch(t, []string{"One Piece", "ワンピース", "海贼王"}, got,
+		"each distinct title fans out once; the case-equal english dup is folded")
+	assert.Len(t, got, 3, "exactly three distinct variants (no dup)")
+
+	assert.Equal(t, 17389, aidSeen(), "anidb_id resolved → AnimeTosho aid feed requested")
+}
+
+func TestTorrents_ByAnilistID_NoAnidb_DegradesNoFeed(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQuerier{
+		getTorrentQueryInputsFn: func(_ context.Context, _ int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error) {
+			return dbgen.GetTorrentQueryInputsByAnilistIDRow{
+				TitleRomaji: strptr("Bleach"),
+				AnidbID:     nil, // not in id map / no anidb id
+			}, nil
+		},
+	}
+
+	agg, queries, aidSeen := capturingAggregator(t)
+	rec := httptest.NewRecorder()
+	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=99", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"Bleach"}, queries(), "single title → single variant fan-out")
+	assert.Equal(t, -1, aidSeen(), "nil anidb_id → no aid feed requested (degrade to keyword-only)")
+}
+
+func TestTorrents_ByAnilistID_NotFound_404(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQuerier{
+		getTorrentQueryInputsFn: func(_ context.Context, _ int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error) {
+			return dbgen.GetTorrentQueryInputsByAnilistIDRow{}, pgx.ErrNoRows
+		},
+	}
+
+	agg := newStubAggregator(t, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=404404", nil))
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Contains(t, rec.Body.String(), `"NOT_FOUND"`)
+	require.Contains(t, rec.Body.String(), "番剧不存在")
+}
+
+func TestTorrents_ByAnilistID_Invalid_400(t *testing.T) {
+	t.Parallel()
+
+	// DB must never be consulted for an unparseable id.
+	q := &fakeQuerier{
+		getTorrentQueryInputsFn: func(_ context.Context, _ int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error) {
+			t.Fatal("lookup must not run for an invalid anilistId")
+			return dbgen.GetTorrentQueryInputsByAnilistIDRow{}, nil
+		},
+	}
+
+	agg := newStubAggregator(t, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=abc", nil))
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), `"VALIDATION_ERROR"`)
+	require.Contains(t, rec.Body.String(), "无效的番剧 ID")
+}
+
+func TestTorrents_ByAnilistID_DBError_500(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQuerier{
+		getTorrentQueryInputsFn: func(_ context.Context, _ int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error) {
+			return dbgen.GetTorrentQueryInputsByAnilistIDRow{}, errors.New("simulated postgres failure")
+		},
+	}
+
+	agg := newStubAggregator(t, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21", nil))
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Contains(t, rec.Body.String(), `"SERVER_ERROR"`)
+	require.NotContains(t, rec.Body.String(), "simulated postgres failure", "body must not leak cause")
+}
+
+// anilistId takes precedence over q when both are present (the richer path).
+func TestTorrents_AnilistIDWinsOverQ(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	q := &fakeQuerier{
+		getTorrentQueryInputsFn: func(_ context.Context, id int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error) {
+			called = true
+			assert.Equal(t, int32(21), id)
+			return dbgen.GetTorrentQueryInputsByAnilistIDRow{TitleRomaji: strptr("Resolved")}, nil
+		},
+	}
+
+	agg, queries, _ := capturingAggregator(t)
+	rec := httptest.NewRecorder()
+	Torrents(agg, q).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/torrents?anilistId=21&q=ignored", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, called, "anilistId path runs even when q is also present")
+	assert.Equal(t, []string{"Resolved"}, queries(), "the resolved title is used, not the raw q")
 }
 
 // -----------------------------------------------------------------------------

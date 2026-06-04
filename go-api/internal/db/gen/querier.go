@@ -259,6 +259,16 @@ type Querier interface {
 	// schedule items need.  bangumi_version is included so the caller can
 	// decide whether to enqueue v1 enrichment for unenriched entries.
 	GetTitleChineseByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetTitleChineseByAnilistIDsRow, error)
+	// Resolves the inputs the magnet aggregator needs to search by AniList id
+	// instead of a raw keyword.  Backs the /api/anime/torrents?anilistId=N path:
+	// the handler turns the four titles into deduped search variants and uses
+	// anidb_id (when present) to pull AnimeTosho's complete aid feed.
+	//
+	// LEFT JOIN bgm_id_map so a row missing from the id map (or with a NULL
+	// anidb_id) still returns its titles — anidb_id comes back NULL and the
+	// handler degrades to keyword-only (no aid feed).  pgx.ErrNoRows means "no
+	// such anime cached" → handler 404s.
+	GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistID int32) (GetTorrentQueryInputsByAnilistIDRow, error)
 	// Most-subscribed anime with their cached metadata, ordered by watcher
 	// count desc.  Backs /api/anime/trending and replaces the
 	// Subscription.aggregate + AnimeCache.find round-trip in
@@ -330,7 +340,9 @@ type Querier interface {
 	InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
 	// Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
-	// updated_at takes its column DEFAULT now().
+	// updated_at takes its column DEFAULT now().  anidb_id is last to match the
+	// physical column order (added by migration 0013 via ALTER); pgx CopyFrom
+	// binds positionally, so the generated column list must mirror that order.
 	InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error)
 	// Batch reader for re-enrich.  Returns the fields the queue payload
 	// needs.  Filtering by version covers v0/v1/v2 — handler dispatches each

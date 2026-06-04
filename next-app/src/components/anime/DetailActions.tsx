@@ -64,6 +64,7 @@ interface DetailActionsProps {
     torrentsCopy: string;
     torrentsCopied: string;
     torrentsOpenMagnet: string;
+    torrentsSeeders: string;
     // PlayButton
     play: string;
     playAria: string;
@@ -153,6 +154,7 @@ export default function DetailActions({
             copy: labels.torrentsCopy,
             copied: labels.torrentsCopied,
             openMagnet: labels.torrentsOpenMagnet,
+            seeders: labels.torrentsSeeders,
           }}
           onClose={() => setTorrentOpen(false)}
           lang={lang}

@@ -9,6 +9,8 @@
 //   - garden.go   : animes.garden JSON aggregator (covers 动漫花园 + bangumi.moe)
 //   - acgrip.go   : acg.rip RSS scrape
 //   - nyaa.go     : nyaa.si RSS scrape
+//   - source.go   : Source interface + Capabilities + funcSource adapter
+//   - registry.go : ordered, pluggable collection of Sources to fan out to
 //   - aggregator.go : parallel fan-out + cache + partial-tolerance
 //
 // types.go owns the wire-level result struct and the helpers shared by
@@ -64,6 +66,28 @@ type TorrentItem struct {
 	Date     *string `json:"date"`
 	Source   Source  `json:"source"`
 	Provider *string `json:"provider,omitempty"`
+
+	// Seeders is the peer seed count when the source can report it.
+	// It is a pointer so the JSON discriminates three states:
+	//   - non-nil → a known count (may legitimately be 0 = "0 seeders")
+	//   - nil     → UNKNOWN (the source can't report seeders) — this is
+	//     the case for the RSS scrapes (acg / nyaa) and any garden row
+	//     missing the field.
+	// nil is deliberately NOT the same as 0: the ranker sinks "unknown"
+	// to the bottom rather than treating it as a genuine zero-seed
+	// torrent.  omitempty drops the key entirely when nil, matching the
+	// "key absent when upstream didn't set it" convention the other
+	// optional fields use.
+	Seeders *int `json:"seeders,omitempty"`
+
+	// Infohash is the normalised BitTorrent infohash parsed from Magnet
+	// (lowercase hex; base32 v1 hashes are decoded to 40-char hex; v1 is
+	// 40 hex chars, v2 is 64).  Empty when the magnet carries no parseable
+	// xt=urn:btih:<hash>.  It is the dedup key — two rows with the same
+	// non-empty Infohash are the same torrent regardless of which source
+	// surfaced them.  omitempty drops the key when no hash could be
+	// derived, keeping the wire shape stable for magnet-less rows.
+	Infohash string `json:"infohash,omitempty"`
 }
 
 // magnetScheme is the required prefix for any magnet URI.  Items whose
@@ -80,7 +104,7 @@ func hasMagnetScheme(s string) bool {
 // FormatBytes mirrors server/controllers/anime.controller.js:158
 // formatBytes.  Input is a raw byte count (e.g. acg.rip RSS
 // enclosure[@length]).  Empty / zero / negative / non-numeric prefix →
-// returns the empty string, matching JS `if (!n || n <= 0) return '';`.
+// returns the empty string, matching JS `if (!n || n <= 0) return ”;`.
 //
 // Output format (Express parity):
 //   - n >= 1e9 → "X.X GB" via toFixed(1)
@@ -91,9 +115,9 @@ func hasMagnetScheme(s string) bool {
 //   - parseInt is permissive — "1234abc" parses as 1234.  We mimic
 //     this by stripping any non-digit suffix.
 //   - parseInt("") and parseInt("abc") return NaN, which JS coerces
-//     to falsy → '' is returned.
+//     to falsy → ” is returned.
 //   - Negative inputs (parseInt("-5") = -5) are also caught by the
-//     <= 0 guard and return ''.
+//     <= 0 guard and return ”.
 func FormatBytes(raw string) string {
 	n, ok := parseIntJSLike(raw)
 	if !ok || n <= 0 {
@@ -189,7 +213,7 @@ func stringPtr(s string) *string {
 //   - No digits → returns (0, false).
 //
 // Returns (n, true) on a valid parse.  The bool lets callers distinguish
-// "0 parsed" from "no number" — currently both code paths return ''
+// "0 parsed" from "no number" — currently both code paths return ”
 // from Format{Bytes,Kb} so it's a defensive distinction, but it keeps
 // the helper honest if a future call site cares.
 func parseIntJSLike(raw string) (int, bool) {

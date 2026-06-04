@@ -13,35 +13,55 @@
 //   copy               — title attr on copy button, e.g. "复制"
 //   copied             — short ✓ confirmation, e.g. "已复制" / "Copied!"
 //   openMagnet         — title attr on open button, e.g. "打开"
+//   seeders            — short seed-count prefix, e.g. "做种" / "Seeds"
 //
-// All eleven keys exist in next-app/src/locales/{zh,en}.ts under `torrent`.
-// The DetailActions parent agent just needs to map them through.
+// All twelve keys exist in next-app/src/locales/{zh,en}.ts under `torrent`.
+// The DetailActions parent maps them through.
 // ─────────────────────────────────────────────────────────────────────
 //
-// Full v2 port of client/src/components/anime/TorrentModal.jsx (466 lines).
-// Matches legacy layout exactly: 3-column body (185px fansub list / center
-// scrollable rows / 128px cover thumbnail), title-variant pills, episode
-// pills, fansub filter, episode-relevance + resolution + date sort, copy /
-// open-magnet actions, ESC + backdrop close, body scroll-lock.
+// v2 port of client/src/components/anime/TorrentModal.jsx, now driven by
+// anilistId. Layout: 3-column body (185px fansub list / center scrollable
+// rows / 128px cover thumbnail), title-variant pills, episode pills,
+// fansub filter, copy / open-magnet actions, ESC + backdrop close, body
+// scroll-lock.
 //
-// Data source: GET /api/anime/torrents?q=<query>
-//   Server controller: server/controllers/anime.controller.js getTorrents.
+// Data source (primary): GET /api/anime/torrents?anilistId=<number>
+//   go-api resolves the AniList title variants + AnimeTosho aid feed,
+//   dedups by infohash, and returns the list ALREADY SORTED by seeders
+//   desc (unknown-seeder rows sink to the bottom). The front-end therefore
+//   does NOT re-rank the full list — it preserves server order and only
+//   buckets by fansub / filters by selected episode.
+//
+// Data source (manual fallback): GET /api/anime/torrents?q=<keyword>
+//   The search box + title-variant pills still issue keyword searches so a
+//   user can override the auto query (e.g. an alternate romanisation the
+//   variant expansion missed). Both modes return the same envelope.
+//
 //   Response envelope: { data: TorrentItem[] }  — apiGet unwraps `data`.
-//   Per-item shape (verified against fetchAnimeGarden / fetchAcgRip /
-//   fetchNyaa): { title, magnet, size, fansub, date, source, provider? }
+//   Per-item shape: { title, magnet, size, fansub, date, source, seeders,
+//   infohash, provider? }. `seeders` is omitted/`null` when the source
+//   can't report it; `infohash` is the server-side dedup key.
 //
-// Cache behavior: backend caches results 1h server-side per lowercased
-// query. We pass `cache: 'no-store'` so each modal-open / new search hits
-// the backend fresh — bandwidth is cheap (server-cached) and torrents
+// Cache behavior: backend caches results 1h server-side per request key.
+// We pass `cache: 'no-store'` so each modal-open / new query hits the
+// backend fresh — bandwidth is cheap (server-cached) and torrents
 // staleness matters more than CDN economics for this surface.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, ApiError } from "@/lib/api";
 import FadeImage from "@/components/ui/FadeImage";
 import type { Lang } from "@/lib/i18n";
+import {
+  buildTorrentRequest,
+  epRelevance,
+  fmtDate,
+  parseTags,
+  seederColor,
+} from "./torrentModalLogic";
 
-// Module-level cache: keyed by lowercased query, 5min TTL — matches the
-// legacy TanStack Query `staleTime: 5 * 60 * 1000` in client/src/hooks/
+// Module-level cache: keyed by the request key (anilistId-derived for the
+// primary path, lowercased keyword for manual searches), 5min TTL — matches
+// the legacy TanStack Query `staleTime: 5 * 60 * 1000` in client/src/hooks/
 // useAnime.js so re-opening the modal (or switching title-variant pills
 // within the same modal) returns instantly instead of round-tripping to
 // the backend on every interaction. Backend already caches 1h server-
@@ -60,6 +80,19 @@ interface TorrentItem {
   fansub: string | null;
   date: string | null;
   source: "garden" | "nyaa" | "acg" | "dmhy" | string;
+  /**
+   * Peer seed count, or null/undefined when the source can't report it.
+   * go-api emits `seeders` with `omitempty`, so the key is absent (→
+   * undefined) for RSS scrapes and any garden row missing the field; a
+   * known 0 is a genuine zero-seed torrent. Both undefined and null are
+   * treated as "unknown" by the UI.
+   */
+  seeders: number | null;
+  /**
+   * Normalised BitTorrent infohash (server-side dedup key). Absent when the
+   * magnet carries no parseable hash, hence optional.
+   */
+  infohash?: string;
   provider?: string | null;
 }
 
@@ -85,6 +118,8 @@ interface TorrentLabels {
   copy: string;
   copied: string;
   openMagnet: string;
+  /** Short label prefixed to the seed count, e.g. "Seeds" / "做种". */
+  seeders: string;
 }
 
 interface TorrentModalProps {
@@ -100,51 +135,8 @@ interface TitleOption {
   value: string;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────
-
-function parseTags(title: string): {
-  resolution: string | null;
-  tags: string[];
-} {
-  const res =
-    title.match(/\b(4K|2160[Pp]|1080[Pp]|720[Pp]|480[Pp])\b/)?.[1]?.toUpperCase() ?? null;
-  const codec = title.match(/\b(HEVC|AVC|x265|x264|H\.?265|H\.?264)\b/i)?.[1] ?? null;
-  const source = title.match(/\b(WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay)\b/i)?.[1] ?? null;
-  return { resolution: res, tags: [codec, source].filter((t): t is string => Boolean(t)) };
-}
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
-}
-
-// Score 1 if title contains this specific episode number (common patterns).
-// Mirrors legacy epRelevance in client/src/components/anime/TorrentModal.jsx
-// so sort / filter behavior matches across the two surfaces.
-function epRelevance(title: string, epPad: string): number {
-  const epNum = String(parseInt(epPad, 10));
-  const patterns = [
-    `- ${epPad}`,
-    `- ${epNum} `,
-    `- ${epNum}]`,
-    `- ${epNum}.`,
-    `[${epPad}]`,
-    `[${epNum}]`,
-    ` ${epPad} `,
-    ` ${epPad}.`,
-  ];
-  return patterns.some((p) => title.includes(p)) ? 1 : 0;
-}
-
-function resScore(title: string): number {
-  if (/2160[Pp]|4K/i.test(title)) return 4;
-  if (/1080[Pp]/i.test(title)) return 3;
-  if (/720[Pp]/i.test(title)) return 2;
-  if (/480[Pp]/i.test(title)) return 1;
-  return 0;
-}
+// ─── Helpers: parseTags / fmtDate / epRelevance / seederColor /
+//     buildTorrentRequest live in ./torrentModalLogic (unit-tested there).
 
 // ─── GroupRow sub-component ─────────────────────────────────────────
 
@@ -226,6 +218,7 @@ interface TorrentRowProps {
   copyLabel: string;
   copiedLabel: string;
   openLabel: string;
+  seedersLabel: string;
   lang: Lang;
 }
 
@@ -262,10 +255,14 @@ function TorrentRow({
   copyLabel,
   copiedLabel,
   openLabel,
+  seedersLabel,
   lang,
 }: TorrentRowProps) {
   const { resolution, tags } = parseTags(item.title);
   const [hovered, setHovered] = useState(false);
+  // null/undefined → unknown count; a known number (incl. 0) renders.
+  const seeders =
+    typeof item.seeders === "number" ? item.seeders : null;
 
   return (
     <div
@@ -310,6 +307,26 @@ function TorrentRow({
             gap: 5,
           }}
         >
+          {/* Seed count — list is server-ranked by seeders desc, so this
+              leads the meta row. Unknown (null) renders a muted dash. */}
+          <span
+            title={seedersLabel}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              fontSize: 10,
+              fontWeight: 700,
+              fontVariantNumeric: "tabular-nums",
+              padding: "1px 6px",
+              borderRadius: 4,
+              background: "rgba(52,211,153,0.1)",
+              color: seeders === null ? "rgba(235,235,245,0.30)" : seederColor(seeders),
+            }}
+          >
+            <span aria-hidden="true">🌱</span>
+            {seeders === null ? "—" : seeders}
+          </span>
           {resolution && (
             <span
               style={{
@@ -446,8 +463,11 @@ export default function TorrentModal({
 }: TorrentModalProps) {
   const defaultQ = anime.titleRomaji || anime.titleEnglish || "";
 
+  // `query` is the search-box text. `manualQ` is the active manual override:
+  //   - null  → primary path, fetch by anilistId (server expands variants)
+  //   - "..." → fetch that keyword via ?q= (search box / title pill)
   const [query, setQuery] = useState(defaultQ);
-  const [searchQ, setSearchQ] = useState(defaultQ);
+  const [manualQ, setManualQ] = useState<string | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string>("ALL");
   const [selectedEp, setSelectedEp] = useState<number | null>(null);
@@ -456,23 +476,28 @@ export default function TorrentModal({
   const [isLoading, setIsLoading] = useState(false);
 
   // ─── Data fetch ─────────────────────────────────────────────────
-  // No react-query in next-app; manage state by hand. Cancel in-flight
-  // request when query changes mid-load so a fast double-search doesn't
+  // No react-query in next-app; manage state by hand. Cancel any in-flight
+  // request when the query changes mid-load so a fast double-search doesn't
   // race a slow first request to overwrite fresh results.
+  //
+  // Primary path queries by anilistId — go-api resolves the title variants,
+  // pulls the AnimeTosho aid feed, dedups, and returns the list already
+  // sorted by seeders desc. A manual override (search box / title pill)
+  // switches to keyword ?q=. Either way the response is TorrentItem[].
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const term = searchQ.trim();
-    if (!term) {
+    const { skip, path, cacheKey } = buildTorrentRequest(anime.anilistId, manualQ);
+
+    // Manual search with an empty box → nothing to query.
+    if (skip) {
       setTorrents([]);
       setIsLoading(false);
       return;
     }
 
-    // Stale-while-revalidate: paint cached entry immediately (if fresh),
-    // skip the network round-trip entirely. Falls through to fetch when
-    // there's no cached entry or the entry is past TTL.
-    const cacheKey = term.toLowerCase();
+    // Stale-while-revalidate: paint a fresh cached entry immediately and
+    // skip the network round-trip. Falls through to fetch on miss / expiry.
     const cached = torrentCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < TORRENT_CACHE_TTL_MS) {
       setTorrents(cached.items);
@@ -485,10 +510,7 @@ export default function TorrentModal({
     abortRef.current = controller;
 
     setIsLoading(true);
-    apiGet<TorrentItem[]>(
-      `/api/anime/torrents?q=${encodeURIComponent(term)}`,
-      { signal: controller.signal },
-    )
+    apiGet<TorrentItem[]>(path, { signal: controller.signal })
       .then((data) => {
         if (controller.signal.aborted) return;
         const items = Array.isArray(data) ? data : [];
@@ -498,19 +520,16 @@ export default function TorrentModal({
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
-        // Abort errors swallow silently; surface anything else as empty
-        // list (the noResults copy already covers the user-facing case,
-        // and detail page logs ApiError through its own boundary).
-        if (err instanceof ApiError) {
-          setTorrents([]);
-        } else {
-          setTorrents([]);
-        }
+        // Abort errors swallow silently; surface anything else as an empty
+        // list (the noResults copy covers the user-facing case, and the
+        // detail page logs ApiError through its own boundary).
+        void (err instanceof ApiError);
+        setTorrents([]);
         setIsLoading(false);
       });
 
     return () => controller.abort();
-  }, [searchQ]);
+  }, [manualQ, anime.anilistId]);
 
   // ─── Escape + body scroll lock ──────────────────────────────────
   useEffect(() => {
@@ -561,8 +580,10 @@ export default function TorrentModal({
     anime.titleNative,
   ]);
 
+  // Manual keyword search (search box Enter / button, or a title pill).
+  // Switches the fetch off the anilistId path and onto ?q=<keyword>.
   const triggerSearch = useCallback((newQ: string) => {
-    setSearchQ(newQ);
+    setManualQ(newQ);
     setSelectedGroup("ALL");
   }, []);
 
@@ -594,35 +615,28 @@ export default function TorrentModal({
         ? torrents
         : (grouped[selectedGroup] ?? []);
 
-    // Episode filter with fallback: when a specific ep is selected and
-    // no titles contain its number, show the unfiltered group instead
-    // (legacy behavior — better than empty-state when fansubs use
-    // unconventional numbering).
-    let filtered = base;
+    // The server already returns the list ranked by seeders desc, so we do
+    // NOT re-rank. The only client-side reshaping is the optional episode
+    // filter: when a specific ep is selected, surface its rows first.
+    //
+    // Episode partition with fallback: keep rows whose title matches the
+    // selected episode ahead of the rest while preserving the server's
+    // seeder order within each partition (stable). If nothing matches the
+    // episode number (fansubs with unconventional numbering), fall back to
+    // the unfiltered, server-ranked list rather than showing an empty state.
+    let filteredTorrents = base;
     if (epPad) {
-      const epFiltered = base.filter(
-        (item) => epRelevance(item.title, epPad) > 0,
-      );
-      filtered = epFiltered.length > 0 ? epFiltered : base;
-    }
-
-    const sorted = [...filtered].sort((a, b) => {
-      if (epPad) {
-        const epDiff =
-          epRelevance(b.title, epPad) - epRelevance(a.title, epPad);
-        if (epDiff !== 0) return epDiff;
+      const matched = base.filter((item) => epRelevance(item.title, epPad) > 0);
+      if (matched.length > 0) {
+        const rest = base.filter((item) => epRelevance(item.title, epPad) === 0);
+        filteredTorrents = [...matched, ...rest];
       }
-      const resDiff = resScore(b.title) - resScore(a.title);
-      if (resDiff !== 0) return resDiff;
-      const da = a.date ? new Date(a.date).getTime() : 0;
-      const db = b.date ? new Date(b.date).getTime() : 0;
-      return db - da;
-    });
+    }
 
     return {
       groups: grouped,
       groupNames: sortedNames,
-      filteredTorrents: sorted,
+      filteredTorrents,
     };
   }, [torrents, selectedGroup, selectedEp]);
 
@@ -952,7 +966,7 @@ export default function TorrentModal({
               >
                 {filteredTorrents.map((item, i) => (
                   <TorrentRow
-                    key={`${item.source}-${item.magnet.slice(0, 64)}-${i}`}
+                    key={`${item.infohash || item.magnet.slice(0, 64)}-${i}`}
                     item={item}
                     copied={copiedIdx === i}
                     onCopy={() => copyMagnet(item.magnet, i)}
@@ -960,6 +974,7 @@ export default function TorrentModal({
                     copyLabel={labels.copy}
                     copiedLabel={labels.copied}
                     openLabel={labels.openMagnet}
+                    seedersLabel={labels.seeders}
                     lang={lang}
                   />
                 ))}

@@ -462,7 +462,7 @@ func main() {
 		r.Get("/seasonal", seasonalSvc.Handler())
 		r.Get("/yearly-top", anime.YearlyTop(q, yearlyTopCache))
 		r.Get("/trending", anime.Trending(q, trendingCache))
-		r.Get("/torrents", anime.Torrents(torrentsAgg))
+		r.Get("/torrents", anime.Torrents(torrentsAgg, q))
 		r.Get("/search", searchSvc.Handler())
 		r.Get("/schedule", scheduleSvc.Handler())
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))

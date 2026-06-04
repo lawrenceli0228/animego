@@ -32,9 +32,22 @@ import (
 
 // newTestAggregator constructs an Aggregator with a fast cache and
 // per-test stubs.  Returns the aggregator + a teardown closure.
+//
+// dmhy + mikan + tosho are in the default registry (New) but no
+// orchestration test below stubs them, so they would otherwise hit the
+// live network here.  We prepend empty-returning no-op stubs for all three
+// BEFORE the caller's opts so every Fetch-driven test stays offline and
+// its garden/acg/nyaa assertions are unchanged; a test that wants to drive
+// dmhy/mikan/tosho can still pass its own WithDmhyFn/WithMikanFn/WithToshoFn
+// after these (later options win).
 func newTestAggregator(t *testing.T, opts ...Option) *Aggregator {
 	t.Helper()
-	a, err := New(opts...)
+	base := []Option{
+		WithDmhyFn(staticFn(nil, nil)),
+		WithMikanFn(staticFn(nil, nil)),
+		WithToshoFn(staticFn(nil, nil)),
+	}
+	a, err := New(append(base, opts...)...)
 	require.NoError(t, err)
 	t.Cleanup(a.Close)
 	return a
@@ -185,6 +198,84 @@ func TestAggregator_CacheHit_SkipsFetchers(t *testing.T) {
 	assert.Equal(t, int32(1), gc.Load(), "garden fetcher should not run on cache hit")
 	assert.Equal(t, int32(1), ac.Load(), "acg fetcher should not run on cache hit")
 	assert.Equal(t, int32(1), nc.Load(), "nyaa fetcher should not run on cache hit")
+}
+
+// ---------------------------------------------------------------------------
+// Quality-aware cache TTL: an EMPTY (all-sources-missed) result is cached
+// only briefly so a transient upstream blip isn't pinned for the full hour;
+// a NON-EMPTY result keeps the long default TTL.  Regression for the latent
+// "empty cached 1h" bug ported verbatim from Express.
+// ---------------------------------------------------------------------------
+
+func TestAggregator_EmptyResult_ShortTTL_ReFetchesAfterExpiry(t *testing.T) {
+	t.Parallel()
+
+	var gc, ac, nc atomic.Int32
+	a := newTestAggregator(t,
+		WithGardenFn(staticFn(nil, &gc)),
+		WithAcgFn(staticFn(nil, &ac)),
+		WithNyaaFn(staticFn(nil, &nc)),
+		WithEmptyCacheTTL(50*time.Millisecond),
+	)
+
+	// First fetch: all sources miss → empty; each fetcher ran once.
+	out, err := a.Fetch(context.Background(), "obscure-ova")
+	require.NoError(t, err)
+	require.Empty(t, out)
+	require.Equal(t, int32(1), gc.Load())
+	require.Equal(t, int32(1), ac.Load())
+	require.Equal(t, int32(1), nc.Load())
+
+	a.cache.Wait()
+
+	// Within the short window the empty result IS cached — a re-query does
+	// NOT re-hit upstream (a momentary burst of identical empties is absorbed).
+	out, err = a.Fetch(context.Background(), "obscure-ova")
+	require.NoError(t, err)
+	require.Empty(t, out)
+	assert.Equal(t, int32(1), gc.Load(), "empty result should be cached within its TTL")
+	assert.Equal(t, int32(1), ac.Load())
+	assert.Equal(t, int32(1), nc.Load())
+
+	// After the short TTL elapses the empty entry expires → fetchers run
+	// again.  Before the fix this used the 1h TTL, so the count stayed 1 and
+	// a transient all-source miss blackholed the query for a whole hour.
+	time.Sleep(150 * time.Millisecond)
+	out, err = a.Fetch(context.Background(), "obscure-ova")
+	require.NoError(t, err)
+	require.Empty(t, out)
+	assert.Equal(t, int32(2), gc.Load(), "empty entry must expire fast and re-fetch")
+	assert.Equal(t, int32(2), ac.Load())
+	assert.Equal(t, int32(2), nc.Load())
+}
+
+func TestAggregator_NonEmptyResult_KeepsLongTTL(t *testing.T) {
+	t.Parallel()
+
+	var gc atomic.Int32
+	a := newTestAggregator(t,
+		WithGardenFn(staticFn([]TorrentItem{stubItem(SourceGarden)}, &gc)),
+		WithAcgFn(staticFn(nil, nil)),
+		WithNyaaFn(staticFn(nil, nil)),
+		// A short empty-TTL must NOT touch a non-empty result — it keeps the
+		// long default (1h) TTL.
+		WithEmptyCacheTTL(50*time.Millisecond),
+	)
+
+	out, err := a.Fetch(context.Background(), "naruto")
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Equal(t, int32(1), gc.Load())
+
+	a.cache.Wait()
+
+	// Past the short empty-TTL window: a non-empty result is cached under the
+	// 1h default, so it's still a hit and garden is NOT re-called.
+	time.Sleep(150 * time.Millisecond)
+	out, err = a.Fetch(context.Background(), "naruto")
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Equal(t, int32(1), gc.Load(), "non-empty result must keep the long TTL, not the short empty one")
 }
 
 // ---------------------------------------------------------------------------

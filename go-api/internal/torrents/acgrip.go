@@ -42,6 +42,20 @@ import (
 // acgEndpoint is the acg.rip RSS XML endpoint.
 const acgEndpoint = "https://acg.rip/.xml"
 
+// acgSource is the Source adapter for acg.rip.  Thin wrapper binding the
+// shared *http.Client and delegating to FetchAcgRip — fetch logic
+// unchanged.  Being an RSS scrape it deliberately does NOT implement
+// Capable (no seeders, no special budget).
+type acgSource struct {
+	client *http.Client
+}
+
+func (s acgSource) Name() Source { return SourceAcg }
+
+func (s acgSource) Fetch(ctx context.Context, q string) ([]TorrentItem, error) {
+	return FetchAcgRip(ctx, s.client, q)
+}
+
 // acgEnclosure mirrors the <enclosure> element.  acg.rip puts the
 // magnet URI directly in the @url attribute (not the typical http link)
 // and the byte count in @length.

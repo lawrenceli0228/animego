@@ -896,6 +896,48 @@ func (q *Queries) GetTitleChineseByAnilistIDs(ctx context.Context, dollar_1 []in
 	return items, nil
 }
 
+const getTorrentQueryInputsByAnilistID = `-- name: GetTorrentQueryInputsByAnilistID :one
+SELECT
+    a.title_romaji,
+    a.title_native,
+    a.title_english,
+    a.title_chinese,
+    m.anidb_id
+FROM anime_cache a
+LEFT JOIN bgm_id_map m ON m.anilist_id = a.anilist_id
+WHERE a.anilist_id = $1
+`
+
+type GetTorrentQueryInputsByAnilistIDRow struct {
+	TitleRomaji  *string `json:"titleRomaji"`
+	TitleNative  *string `json:"titleNative"`
+	TitleEnglish *string `json:"titleEnglish"`
+	TitleChinese *string `json:"titleChinese"`
+	AnidbID      *int32  `json:"anidbId"`
+}
+
+// Resolves the inputs the magnet aggregator needs to search by AniList id
+// instead of a raw keyword.  Backs the /api/anime/torrents?anilistId=N path:
+// the handler turns the four titles into deduped search variants and uses
+// anidb_id (when present) to pull AnimeTosho's complete aid feed.
+//
+// LEFT JOIN bgm_id_map so a row missing from the id map (or with a NULL
+// anidb_id) still returns its titles — anidb_id comes back NULL and the
+// handler degrades to keyword-only (no aid feed).  pgx.ErrNoRows means "no
+// such anime cached" → handler 404s.
+func (q *Queries) GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistID int32) (GetTorrentQueryInputsByAnilistIDRow, error) {
+	row := q.db.QueryRow(ctx, getTorrentQueryInputsByAnilistID, anilistID)
+	var i GetTorrentQueryInputsByAnilistIDRow
+	err := row.Scan(
+		&i.TitleRomaji,
+		&i.TitleNative,
+		&i.TitleEnglish,
+		&i.TitleChinese,
+		&i.AnidbID,
+	)
+	return i, err
+}
+
 const getTrendingWithCounts = `-- name: GetTrendingWithCounts :many
 SELECT
     a.anilist_id,

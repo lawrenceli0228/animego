@@ -10,9 +10,11 @@ TRUNCATE bgm_id_map;
 
 -- name: InsertBgmIdMapCopy :copyfrom
 -- Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
--- updated_at takes its column DEFAULT now().
-INSERT INTO bgm_id_map (anilist_id, bgm_id, mal_id, source)
-VALUES ($1, $2, $3, $4);
+-- updated_at takes its column DEFAULT now().  anidb_id is last to match the
+-- physical column order (added by migration 0013 via ALTER); pgx CopyFrom
+-- binds positionally, so the generated column list must mirror that order.
+INSERT INTO bgm_id_map (anilist_id, bgm_id, mal_id, source, anidb_id)
+VALUES ($1, $2, $3, $4, $5);
 
 -- name: CountBgmIdMap :one
 -- Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.

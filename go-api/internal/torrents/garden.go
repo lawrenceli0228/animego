@@ -56,6 +56,25 @@ const gardenType = "动画"
 // uses "AnimeGo/1.0" exactly; we mirror it for parity in upstream logs.
 const userAgent = "AnimeGo/1.0"
 
+// gardenSource is the Source adapter for animes.garden.  It is a thin
+// wrapper that binds the shared *http.Client + optional Logger and
+// delegates straight to FetchGarden — the fetch logic itself is
+// unchanged.  Registered by New() as the first (highest-priority by
+// merge order) source.
+//
+// Unlike the RSS sources it carries a logger because FetchGarden emits a
+// silent-failure tripwire (200 OK + zero items) the others don't.
+type gardenSource struct {
+	client *http.Client
+	logger Logger
+}
+
+func (s gardenSource) Name() Source { return SourceGarden }
+
+func (s gardenSource) Fetch(ctx context.Context, q string) ([]TorrentItem, error) {
+	return FetchGarden(ctx, s.client, s.logger, q)
+}
+
 // gardenResource is the minimal field set we decode from each item in
 // the upstream resources array.  Unknown fields are silently dropped by
 // encoding/json — animes.garden adds new fields freely and we don't
@@ -191,7 +210,7 @@ func mapGardenResources(rs []gardenResource) []TorrentItem {
 	return out
 }
 
-// pickGardenFansub mirrors `r.fansub?.name ?? parseFansub(r.title ?? '')`.
+// pickGardenFansub mirrors `r.fansub?.name ?? parseFansub(r.title ?? ”)`.
 // If the upstream provided a structured fansub object with a non-empty
 // name, use it.  Otherwise fall back to bracket parsing on the title.
 func pickGardenFansub(r gardenResource) *string {
