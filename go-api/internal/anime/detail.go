@@ -52,7 +52,8 @@ const detailCacheTTL = 1 * time.Hour
 // re-fetch frequency ~24x so a crawl mostly serves straight from the DB
 // row without touching AniList at all.  Freshness loss is negligible:
 // AniList metadata for an existing title rarely changes within a day, and
-// the scheduled cache-warm worker refreshes hot titles independently.
+// the scheduled seasonal cache-warm worker (internal/queue/warm_season.go)
+// refreshes current-season titles independently of this TTL.
 const staleCacheTTL = 24 * time.Hour
 
 // refetchTimeout bounds the AniList round-trip + upsert path.  Longer
