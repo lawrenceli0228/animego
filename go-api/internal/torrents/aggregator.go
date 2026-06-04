@@ -33,10 +33,20 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
 )
 
-// torrentCacheTTL is the per-query result TTL.  Express uses 1h
-// (60 * 60 * 1000ms).  An hour is generous; raw upstream RSS feeds
-// rarely change within that window.
+// torrentCacheTTL is the per-query result TTL for a NON-EMPTY result.
+// Express uses 1h (60 * 60 * 1000ms).  An hour is generous; raw upstream
+// RSS feeds rarely change within that window.
 const torrentCacheTTL = 1 * time.Hour
+
+// torrentEmptyCacheTTL is the (much shorter) TTL for an EMPTY result —
+// every source returned nothing.  An all-source miss is far more often a
+// transient upstream hiccup (timeout / rate-limit / one-off schema blip)
+// than a genuine "no torrents exist for this query", so pinning it for the
+// full hour would blackhole the query long after the sources recover.  A
+// short TTL still absorbs a burst of identical empty queries while letting
+// a retry re-hit upstream soon.  (Express cached empties for the full hour
+// too — this is a deliberate divergence that fixes that latent bug.)
+const torrentEmptyCacheTTL = 5 * time.Minute
 
 // torrentCacheMax is the maximum number of distinct queries cached
 // at once.  Express uses 500.  When the LRU is full ristretto evicts
@@ -80,6 +90,11 @@ type Aggregator struct {
 	httpClient *http.Client
 	cache      *cache.Cache[[]TorrentItem]
 	logger     Logger
+
+	// emptyCacheTTL is how long an empty (all-sources-missed) result is
+	// cached.  Defaults to torrentEmptyCacheTTL; WithEmptyCacheTTL overrides
+	// it (test-only, so the short-TTL regression test doesn't wait minutes).
+	emptyCacheTTL time.Duration
 
 	// gardenFn / acgFn / nyaaFn are the wrapped fetchers.  In
 	// production they close over Aggregator.httpClient + .logger.  In
@@ -134,6 +149,17 @@ func WithLogger(l Logger) Option {
 	}
 }
 
+// WithEmptyCacheTTL overrides how long an empty (all-sources-returned-
+// nothing) result stays cached.  Production uses torrentEmptyCacheTTL; this
+// is a test-only knob so the short-TTL regression can assert expiry without
+// waiting the real window.  Mirrors the WithGardenFn/WithAcgFn/WithNyaaFn
+// test-affordance pattern already in this package.
+func WithEmptyCacheTTL(d time.Duration) Option {
+	return func(a *Aggregator) {
+		a.emptyCacheTTL = d
+	}
+}
+
 // WithGardenFn replaces the garden fetcher.  Test-only.  Allows
 // aggregator tests to control timing, failure, and result content
 // without spinning up an httptest server.
@@ -169,8 +195,9 @@ func WithNyaaFn(f fetchFn) Option {
 // here, but the error is surfaced for completeness).
 func New(opts ...Option) (*Aggregator, error) {
 	a := &Aggregator{
-		httpClient: &http.Client{},
-		ownsCache:  true,
+		httpClient:    &http.Client{},
+		ownsCache:     true,
+		emptyCacheTTL: torrentEmptyCacheTTL,
 	}
 
 	// Default cache.  Numeric inputs chosen to match Express's
@@ -239,7 +266,9 @@ func (a *Aggregator) Close() {
 //	   lifetime management — its own error channel is never returned
 //	   (we don't propagate per-source errors up).
 //	4. Merge in deterministic order: garden, acg, nyaa.  Cache the
-//	   merged slice.
+//	   merged slice — a non-empty result for the full 1h TTL, an empty
+//	   one only briefly (emptyCacheTTL) so a transient all-source miss
+//	   isn't pinned for an hour after the sources recover.
 //
 // Returns (nil, ctx.Err()) only when the caller's context is cancelled
 // before any goroutine completes — partial failures are never errors.
@@ -295,7 +324,14 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 	merged = append(merged, acgResults...)
 	merged = append(merged, nyaaResults...)
 
-	a.cache.Set(key, merged)
+	// Quality-aware TTL: a non-empty result is stable for the full hour;
+	// an empty one (every source missed) is cached only briefly so a
+	// transient upstream blip doesn't pin the query empty for an hour.
+	if len(merged) > 0 {
+		a.cache.Set(key, merged)
+	} else {
+		a.cache.SetWithTTL(key, merged, a.emptyCacheTTL)
+	}
 
 	return merged, nil
 }
