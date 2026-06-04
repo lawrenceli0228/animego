@@ -26,7 +26,8 @@ type MapEntry struct {
 	AnilistID int    `json:"anilist_id"`
 	BgmID     int    `json:"bgm_id"`
 	MalID     int    `json:"mal_id,omitempty"`
-	Source    string `json:"source"` // "mal" or "anidb"
+	AnidbID   int    `json:"anidb_id,omitempty"` // Fribb's anidb_id; 0 when absent. Enables anilist_id -> anidb_id -> AnimeTosho aid.
+	Source    string `json:"source"`             // "mal" or "anidb"
 }
 
 // Stats carries summary counters returned alongside the built map.
@@ -97,7 +98,9 @@ func BuildMap(fribb []FribbEntry, bel []BelEntry) ([]MapEntry, Stats) {
 			bgmViaAnidb = anidbToBgm[f.AnidbID]
 		}
 
-		// Pick the best candidate for this entry.
+		// Pick the best candidate for this entry. AnidbID carries Fribb's
+		// anidb_id whichever join resolved the bgm_id — a MAL-sourced binding
+		// still has a usable AniDB id when Fribb lists one.
 		var candidate MapEntry
 		switch {
 		case bgmViaMal != 0:
@@ -105,12 +108,14 @@ func BuildMap(fribb []FribbEntry, bel []BelEntry) ([]MapEntry, Stats) {
 				AnilistID: f.AnilistID,
 				BgmID:     bgmViaMal,
 				MalID:     f.MalID,
+				AnidbID:   f.AnidbID,
 				Source:    "mal",
 			}
 		case bgmViaAnidb != 0:
 			candidate = MapEntry{
 				AnilistID: f.AnilistID,
 				BgmID:     bgmViaAnidb,
+				AnidbID:   f.AnidbID,
 				Source:    "anidb",
 			}
 		default:

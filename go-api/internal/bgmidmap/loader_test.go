@@ -16,6 +16,7 @@ func TestLoad_EmbeddedMapParses(t *testing.T) {
 	}
 
 	checked := min(100, len(entries))
+	withAnidb := 0
 	for i := 0; i < checked; i++ {
 		e := entries[i]
 		if e.AnilistID <= 0 || e.BgmID <= 0 {
@@ -24,5 +25,16 @@ func TestLoad_EmbeddedMapParses(t *testing.T) {
 		if e.Source == "" {
 			t.Fatalf("entry %d has empty source", i)
 		}
+		if e.AnidbID < 0 {
+			t.Fatalf("entry %d negative anidb_id: %d", i, e.AnidbID)
+		}
+		if e.AnidbID > 0 {
+			withAnidb++
+		}
+	}
+	// anidb_id feeds the AnimeTosho aid lookup; the vendored map should carry
+	// it for the vast majority of rows (absent only when Fribb lists none).
+	if withAnidb == 0 {
+		t.Fatalf("no anidb_id present in first %d entries; embedded map missing the column", checked)
 	}
 }

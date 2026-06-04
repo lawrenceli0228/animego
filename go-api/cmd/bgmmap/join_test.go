@@ -57,6 +57,10 @@ func TestBuildMap_MalJoinHit(t *testing.T) {
 	if e.MalID != 100 {
 		t.Errorf("mal_id: want 100, got %d", e.MalID)
 	}
+	// A MAL-sourced binding still carries Fribb's anidb_id (feeds AnimeTosho).
+	if e.AnidbID != 200 {
+		t.Errorf("anidb_id: want 200, got %d", e.AnidbID)
+	}
 	if e.Source != "mal" {
 		t.Errorf("source: want mal, got %s", e.Source)
 	}
@@ -84,6 +88,10 @@ func TestBuildMap_AnidbFallback(t *testing.T) {
 	}
 	if e.MalID != 0 {
 		t.Errorf("mal_id: want 0 (omitted), got %d", e.MalID)
+	}
+	// AniDB-sourced binding must carry the bridging anidb_id.
+	if e.AnidbID != 300 {
+		t.Errorf("anidb_id: want 300, got %d", e.AnidbID)
 	}
 }
 
@@ -219,6 +227,9 @@ func TestBuildMap_Fixtures(t *testing.T) {
 	}
 	if entry3.BgmID != 33 {
 		t.Errorf("fixture: anilist_id=3 bgm_id: want 33, got %d", entry3.BgmID)
+	}
+	if entry3.AnidbID != 203 {
+		t.Errorf("fixture: anilist_id=3 anidb_id: want 203, got %d", entry3.AnidbID)
 	}
 
 	// Verify stats counts.

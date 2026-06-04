@@ -1,0 +1,11 @@
+-- 0013: add anidb_id to bgm_id_map.
+--
+-- The vendored AniList->Bangumi map (bgm_id_map) is built by cmd/bgmmap, which
+-- already JOINs Fribb's anidb_id when resolving a bgm_id but never carried that
+-- id into the table. Persisting anidb_id lets a handler resolve
+--   anilist_id -> anidb_id -> AnimeTosho aid
+-- so the upcoming AnimeTosho source can pull a complete feed by AniDB id.
+--
+-- Nullable: Fribb does not list an anidb_id for every entry, and AniDB-fallback
+-- bindings always have one but MAL-sourced bindings may not.
+ALTER TABLE bgm_id_map ADD COLUMN IF NOT EXISTS anidb_id integer;
