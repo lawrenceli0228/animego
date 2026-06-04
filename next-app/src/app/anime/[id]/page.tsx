@@ -1329,6 +1329,7 @@ export default async function AnimeDetailPage({ params }: PageProps) {
               torrentsCopy: dict.torrent.copy,
               torrentsCopied: dict.torrent.copied,
               torrentsOpenMagnet: dict.torrent.openMagnet,
+              torrentsSeeders: dict.torrent.seeders,
               play: dict.detail.openPlayer,
               playAria: dict.detail.openPlayerAria,
             }}
