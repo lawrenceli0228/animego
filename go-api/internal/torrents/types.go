@@ -66,6 +66,28 @@ type TorrentItem struct {
 	Date     *string `json:"date"`
 	Source   Source  `json:"source"`
 	Provider *string `json:"provider,omitempty"`
+
+	// Seeders is the peer seed count when the source can report it.
+	// It is a pointer so the JSON discriminates three states:
+	//   - non-nil → a known count (may legitimately be 0 = "0 seeders")
+	//   - nil     → UNKNOWN (the source can't report seeders) — this is
+	//     the case for the RSS scrapes (acg / nyaa) and any garden row
+	//     missing the field.
+	// nil is deliberately NOT the same as 0: the ranker sinks "unknown"
+	// to the bottom rather than treating it as a genuine zero-seed
+	// torrent.  omitempty drops the key entirely when nil, matching the
+	// "key absent when upstream didn't set it" convention the other
+	// optional fields use.
+	Seeders *int `json:"seeders,omitempty"`
+
+	// Infohash is the normalised BitTorrent infohash parsed from Magnet
+	// (lowercase hex; base32 v1 hashes are decoded to 40-char hex; v1 is
+	// 40 hex chars, v2 is 64).  Empty when the magnet carries no parseable
+	// xt=urn:btih:<hash>.  It is the dedup key — two rows with the same
+	// non-empty Infohash are the same torrent regardless of which source
+	// surfaced them.  omitempty drops the key when no hash could be
+	// derived, keeping the wire shape stable for magnet-less rows.
+	Infohash string `json:"infohash,omitempty"`
 }
 
 // magnetScheme is the required prefix for any magnet URI.  Items whose

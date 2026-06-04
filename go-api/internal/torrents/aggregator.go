@@ -358,6 +358,17 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 		merged = append(merged, r...)
 	}
 
+	// Normalise → dedup → rank, in that order, before caching.  parseInfohash
+	// runs off each row's magnet (source-agnostic), so the same torrent
+	// surfaced by two sources collapses to a single best copy, and the
+	// survivors come back ordered by seeders (nil sinks last) → date → source
+	// priority.  ranks is derived from the registry once and threaded through
+	// both passes so the per-source tie-break is consistent.  All three
+	// helpers return fresh slices (immutability), so `merged` is never
+	// mutated in place.
+	ranks := sourceRanks(a.registry)
+	merged = rankItems(dedupByInfohash(merged, ranks), ranks)
+
 	// Quality-aware TTL: a non-empty result is stable for the full hour;
 	// an empty one (every source missed) is cached only briefly so a
 	// transient upstream blip doesn't pin the query empty for an hour.
