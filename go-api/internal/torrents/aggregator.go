@@ -29,9 +29,11 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
 )
@@ -121,6 +123,27 @@ type Aggregator struct {
 	// must Close it on Aggregator teardown) versus the caller
 	// supplying one via WithCache.  Close() consults this flag.
 	ownsCache bool
+
+	// sourceLimiters holds the per-source outbound rate limiter
+	// (*rate.Limiter), keyed by Source.  runOne paces each upstream call
+	// through limiterFor(src).Wait so the fan-out (variant expansion +
+	// concurrent multi-source queries) can't burst a single source hard
+	// enough to earn an IP ban.  See throttle.go.
+	//
+	// Deliberately a sync.Map whose ZERO VALUE is usable: it needs no
+	// initialisation in New(), so this throttle touches only runOne and
+	// this one field — the constructor (and the source registration that
+	// lives there) stays untouched.  Limiters are built lazily on first
+	// request to each source via LoadOrStore (concurrency-safe).
+	sourceLimiters sync.Map
+
+	// sourceRate / sourceBurst are optional per-Aggregator overrides for
+	// the per-source token bucket, set by WithSourceRate.  Zero means
+	// "unset" → limiterFor falls back to defaultSourceRate /
+	// defaultSourceBurst.  Keeping the default in the zero value is what
+	// lets New() stay untouched.
+	sourceRate  rate.Limit
+	sourceBurst int
 }
 
 // Option mutates an Aggregator during construction.  See New().
@@ -438,6 +461,21 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 func (a *Aggregator) runOne(parent context.Context, src Fetcher, q string) []TorrentItem {
 	ctx, cancel := context.WithTimeout(parent, perSourceTimeout)
 	defer cancel()
+
+	// Per-source outbound throttle (throttle.go).  Wait blocks until this
+	// source's token bucket admits the request or ctx is done; with the
+	// default burst the first request for a source passes through instantly,
+	// so a single-request-per-source query is never paced — only a burst
+	// past the bucket depth is.  Wait consumes the per-source ctx budget, so
+	// a cancelled/expired ctx makes it return that error; we treat that
+	// exactly like any other source failure (log + empty slice) rather than
+	// letting it panic or propagate.
+	if err := a.limiterFor(src.Name()).Wait(ctx); err != nil {
+		if a.logger != nil {
+			a.logger.Warn("torrents: source rate-limit wait aborted", "source", string(src.Name()), "error", err.Error())
+		}
+		return nil
+	}
 
 	items, err := src.Fetch(ctx, q)
 	if err != nil {
