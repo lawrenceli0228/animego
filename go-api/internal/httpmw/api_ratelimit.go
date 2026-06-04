@@ -132,6 +132,12 @@ func (s *apiLimiterStore) Middleware() func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			// Public catalog reads bypass the per-IP limiter — see
+			// isPublicReadExempt for the SSR-collapse rationale.
+			if isPublicReadExempt(r.Method, r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			ip := extractIP(r)
 			if !ip.IsValid() {
 				// Couldn't parse — fail open rather than 429 every
@@ -161,6 +167,41 @@ func shouldLimitPath(p string) bool {
 		return false
 	}
 	return strings.HasPrefix(p, "/api/")
+}
+
+// isPublicReadExempt reports whether a request is a public, cacheable
+// catalog read that must NOT be per-IP rate limited.
+//
+// Why this exists: /anime/[id] and the catalog list pages are server-
+// rendered with auth:false, so next-app fetches them from go-api WITHOUT
+// forwarding the visitor's X-Real-IP — reading request headers there would
+// force the page dynamic and defeat ISR / Cloudflare edge caching. Every
+// such SSR read therefore reaches go-api from the single next-app
+// container IP and collapses into one shared per-IP bucket. Under an SEO
+// crawl of the full catalog (Bingbot / Ahrefs / Googlebot walking
+// thousands of distinct pages) that one bucket is permanently drained, so
+// the 1 req/s limiter starts 429ing legitimate reads — which next-app's
+// loadDetail re-throws as a user-facing 500.
+//
+// These reads are GETs, idempotent, public, and already protected by the
+// 1h ristretto cache (and Cloudflare). The expensive external fan-outs
+// under /api/anime/ keep their inbound limit because they carry real
+// upstream cost and are NOT on the SSR/crawl path — they're browser-
+// initiated (X-Real-IP forwarded, so limited per real user):
+//   - /api/anime/search   → AniList GraphQL
+//   - /api/anime/torrents  → BT scraper fan-out
+func isPublicReadExempt(method, path string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	if !strings.HasPrefix(path, "/api/anime/") {
+		return false
+	}
+	if strings.HasPrefix(path, "/api/anime/search") ||
+		strings.HasPrefix(path, "/api/anime/torrents") {
+		return false
+	}
+	return true
 }
 
 // limiterFor returns the per-IP limiter, creating one on first sight.

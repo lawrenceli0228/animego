@@ -41,6 +41,47 @@ func TestShouldLimitPath(t *testing.T) {
 	}
 }
 
+// ─── isPublicReadExempt ──────────────────────────────────────────────────────
+
+func TestIsPublicReadExempt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		exempt bool
+	}{
+		// Public catalog reads — collapse to next-app's IP under SSR, so exempt.
+		{"detail GET", http.MethodGet, "/api/anime/1", true},
+		{"watchers GET", http.MethodGet, "/api/anime/1/watchers", true},
+		{"trending GET", http.MethodGet, "/api/anime/trending", true},
+		{"seasonal GET", http.MethodGet, "/api/anime/seasonal", true},
+		// Expensive external fan-outs — keep inbound limit (own upstream cost).
+		{"search GET", http.MethodGet, "/api/anime/search", false},
+		{"torrents GET", http.MethodGet, "/api/anime/torrents", false},
+		// Non-GET on an anime path (no such route today, but the method gate
+		// must hold regardless).
+		{"detail POST", http.MethodPost, "/api/anime/1", false},
+		// Other API surfaces are never exempt.
+		{"subscriptions GET", http.MethodGet, "/api/subscriptions", false},
+		{"dandanplay GET", http.MethodGet, "/api/dandanplay/match", false},
+		{"auth login POST", http.MethodPost, "/api/auth/login", false},
+		{"non-api GET", http.MethodGet, "/anime/1", false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := isPublicReadExempt(tc.method, tc.path)
+			if got != tc.exempt {
+				t.Errorf("isPublicReadExempt(%q, %q) = %v, want %v", tc.method, tc.path, got, tc.exempt)
+			}
+		})
+	}
+}
+
 // ─── extractIP ──────────────────────────────────────────────────────────────
 
 func TestExtractIP(t *testing.T) {
@@ -145,6 +186,60 @@ func TestAPIRateLimiter_HealthSkipped(t *testing.T) {
 	}
 }
 
+func TestAPIRateLimiter_PublicReadExempt(t *testing.T) {
+	t.Parallel()
+	// The bug this guards: a flood of catalog GET reads from ONE IP — the
+	// SSR-collapse case, where next-app fans an entire SEO crawl through a
+	// single container IP — must all pass. With a burst of 1 the per-IP
+	// limiter would 429 the 2nd request onward; the exemption keeps them 200.
+	s := NewAPIRateLimiterWithBurst(rate.Limit(0.001), 1)
+	defer s.Stop()
+
+	mw := s.Middleware()
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/anime/1", nil)
+		req.RemoteAddr = "172.18.0.5:4321" // next-app container IP
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("catalog read %d: got %d, want 200 (exempt)", i, rec.Code)
+		}
+	}
+}
+
+func TestAPIRateLimiter_ExpensiveAnimePathsStillLimited(t *testing.T) {
+	t.Parallel()
+	// The external fan-outs under /api/anime/ are NOT exempt: a flood from a
+	// single IP must hit 429 once the burst is spent.
+	for _, path := range []string{"/api/anime/torrents?q=x", "/api/anime/search?q=x"} {
+		s := NewAPIRateLimiterWithBurst(rate.Limit(0.001), 1)
+		mw := s.Middleware()
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		var got429 bool
+		for i := 0; i < 5; i++ {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.RemoteAddr = "1.2.3.4:1234"
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code == http.StatusTooManyRequests {
+				got429 = true
+				break
+			}
+		}
+		s.Stop()
+		if !got429 {
+			t.Errorf("%s: expected a 429 once burst was spent, never got one", path)
+		}
+	}
+}
+
 func TestAPIRateLimiter_ApiHealthSkipped(t *testing.T) {
 	t.Parallel()
 	s := NewAPIRateLimiterWithBurst(rate.Limit(0.001), 1)
@@ -201,7 +296,9 @@ func TestAPIRateLimiter_Throttles(t *testing.T) {
 	const ip = "5.6.7.8:9999"
 	statuses := make([]int, 5)
 	for i := 0; i < 5; i++ {
-		req := httptest.NewRequest(http.MethodGet, "/api/anime/1", nil)
+		// dandanplay/match is a limited endpoint — public catalog GET reads
+		// (/api/anime/*) are now exempt, see TestAPIRateLimiter_PublicReadExempt.
+		req := httptest.NewRequest(http.MethodGet, "/api/dandanplay/match", nil)
 		req.RemoteAddr = ip
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)

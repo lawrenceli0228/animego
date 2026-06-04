@@ -39,20 +39,21 @@ import (
 const detailCacheTTL = 1 * time.Hour
 
 // staleCacheTTL is the cached_at age threshold that flips a DB-read row
-// into "stale, re-fetch from AniList".  Express uses 24h (CACHE_TTL_MS);
-// we use 1h here for two reasons:
+// into "stale, re-fetch from AniList".  Set to 24h to match Express's
+// original CACHE_TTL_MS.
 //
-//   1. The ristretto cache already evicts after 1h (detailCacheTTL above),
-//      so a cache miss with cached_at < 1h is impossible — the row was
-//      either just written by the cache-warm worker or by a prior
-//      re-fetch.  Using 1h aligns the two windows.
-//   2. AniList side updates land in our DB hourly instead of daily, at
-//      the cost of more AniList calls.  AniList's 90 req/min budget has
-//      headroom, and the /:anilistId endpoint is low-volume.
-//
-// This is deliberately tighter than Express; document the divergence
-// here so the next reader doesn't "fix" it.
-const staleCacheTTL = 1 * time.Hour
+// History: this was briefly 1h (to align with the ristretto window), but
+// the /:anilistId endpoint is NOT low-volume — SEO crawlers (Bingbot,
+// Ahrefs, Googlebot, ...) walk the full catalog, thousands of distinct
+// pages per crawl.  At 1h, every crawled page older than an hour fired a
+// synchronous, blocking AniList re-fetch; a full-catalog sweep produced
+// thousands of live AniList calls, blew AniList's per-IP rate limit, and
+// turned cold (not-yet-cached) anime into user-facing 502→500s.  24h cuts
+// re-fetch frequency ~24x so a crawl mostly serves straight from the DB
+// row without touching AniList at all.  Freshness loss is negligible:
+// AniList metadata for an existing title rarely changes within a day, and
+// the scheduled cache-warm worker refreshes hot titles independently.
+const staleCacheTTL = 24 * time.Hour
 
 // refetchTimeout bounds the AniList round-trip + upsert path.  Longer
 // than queryTimeout (5s) because the AniList call alone can take up to
