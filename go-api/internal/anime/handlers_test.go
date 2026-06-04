@@ -870,14 +870,19 @@ func TestWatchers_AnilistIDPassedThrough(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 // newStubAggregator returns a torrents.Aggregator wired with all-static
-// stub fetchers via the test-only With{Garden,Acg,Nyaa}Fn options.  The
-// caller controls each source's payload independently.
+// stub fetchers via the test-only With{Garden,Acg,Nyaa,Dmhy,Mikan}Fn
+// options.  The caller controls garden/acg/nyaa payloads independently;
+// dmhy + mikan (also in the default registry) are stubbed to return
+// nothing so these handler tests stay off the network and assert only on
+// the caller-provided sources.
 func newStubAggregator(t *testing.T, garden, acg, nyaa []torrents.TorrentItem) *torrents.Aggregator {
 	t.Helper()
 	a, err := torrents.New(
 		torrents.WithGardenFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return garden, nil }),
 		torrents.WithAcgFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return acg, nil }),
 		torrents.WithNyaaFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nyaa, nil }),
+		torrents.WithDmhyFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
+		torrents.WithMikanFn(func(_ context.Context, _ string) ([]torrents.TorrentItem, error) { return nil, nil }),
 	)
 	require.NoError(t, err)
 	t.Cleanup(a.Close)

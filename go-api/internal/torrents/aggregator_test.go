@@ -32,9 +32,21 @@ import (
 
 // newTestAggregator constructs an Aggregator with a fast cache and
 // per-test stubs.  Returns the aggregator + a teardown closure.
+//
+// dmhy + mikan are in the default registry (New) but no orchestration
+// test below stubs them, so they would otherwise hit the live network
+// here.  We prepend empty-returning no-op stubs for both BEFORE the
+// caller's opts so every Fetch-driven test stays offline and its
+// garden/acg/nyaa assertions are unchanged; a test that wants to drive
+// dmhy/mikan can still pass its own WithDmhyFn/WithMikanFn after these
+// (later options win).
 func newTestAggregator(t *testing.T, opts ...Option) *Aggregator {
 	t.Helper()
-	a, err := New(opts...)
+	base := []Option{
+		WithDmhyFn(staticFn(nil, nil)),
+		WithMikanFn(staticFn(nil, nil)),
+	}
+	a, err := New(append(base, opts...)...)
 	require.NoError(t, err)
 	t.Cleanup(a.Close)
 	return a
