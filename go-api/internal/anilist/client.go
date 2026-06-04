@@ -34,6 +34,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -65,6 +66,17 @@ const defaultRetryAfter = 60 * time.Second
 // survive AniList's worst observed latency without hanging callers
 // forever.  Override with WithHTTPClient(...) to tune.
 const httpTimeout = 10 * time.Second
+
+// breakerCooldown is how long the circuit stays open after AniList rate-
+// limits us (a 429 that exhausts the retry budget).  While open, do()
+// short-circuits to ErrRateLimited WITHOUT making the HTTP call — so a
+// caller (e.g. the detail handler under an SEO crawl) degrades to stale
+// data in microseconds instead of burning the full retry budget (up to
+// refetchTimeout, ~15s) on every request during an AniList rate-limit
+// storm.  It also stops us hammering AniList while it's asking us to back
+// off.  After the cooldown the next call probes upstream again (a 429
+// re-trips it).  Set to 0 via WithBreakerCooldown to disable (tests).
+const breakerCooldown = 30 * time.Second
 
 // ErrRateLimited is returned after maxRetries exhausted on HTTP 429.
 // Express raises an Error with status=429 and a Chinese message; the
@@ -112,6 +124,14 @@ type Client struct {
 	// without real elapsed time.  The function must respect the passed
 	// duration semantically — production code uses time.Sleep equivalent.
 	sleep func(context.Context, time.Duration) error
+
+	// Circuit breaker (see breakerCooldown). breakerCooldown==0 disables
+	// it. openUntil is the instant the circuit closes again; now() is a
+	// hook so tests can advance time without sleeping. mu guards both.
+	breakerCooldown time.Duration
+	now             func() time.Time
+	mu              sync.Mutex
+	openUntil       time.Time
 }
 
 // Option mutates a Client during construction.  See NewClient.
@@ -157,15 +177,33 @@ func WithSleep(f func(context.Context, time.Duration) error) Option {
 // the AniList URL (tests) and WithHTTPClient to swap timeout / transport.
 func NewClient(opts ...Option) *Client {
 	c := &Client{
-		endpoint: DefaultEndpoint,
-		http:     &http.Client{Timeout: httpTimeout},
-		limiter:  rate.NewLimiter(rate.Every(minInterval), 1),
-		sleep:    defaultSleep,
+		endpoint:        DefaultEndpoint,
+		http:            &http.Client{Timeout: httpTimeout},
+		limiter:         rate.NewLimiter(rate.Every(minInterval), 1),
+		sleep:           defaultSleep,
+		breakerCooldown: breakerCooldown,
+		now:             time.Now,
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
 	return c
+}
+
+// WithBreakerCooldown overrides the circuit-breaker cooldown.  Pass 0 to
+// disable the breaker entirely (tests that assert raw retry behaviour).
+func WithBreakerCooldown(d time.Duration) Option {
+	return func(c *Client) {
+		c.breakerCooldown = d
+	}
+}
+
+// WithNow replaces the breaker clock.  Test-only — lets a test open the
+// circuit and then jump past the cooldown without real elapsed time.
+func WithNow(f func() time.Time) Option {
+	return func(c *Client) {
+		c.now = f
+	}
 }
 
 // defaultSleep is the production retry-sleep implementation.  It honours
@@ -183,6 +221,31 @@ func defaultSleep(ctx context.Context, d time.Duration) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// breakerOpen reports whether the AniList circuit is currently open
+// (recently rate-limited).  While open, do() short-circuits to
+// ErrRateLimited without making the HTTP call.
+func (c *Client) breakerOpen() bool {
+	if c.breakerCooldown <= 0 {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now().Before(c.openUntil)
+}
+
+// tripBreaker opens the circuit for breakerCooldown after AniList rate-
+// limits us, so subsequent calls back off immediately instead of each
+// burning the full retry budget against an upstream that's saying "slow
+// down".
+func (c *Client) tripBreaker() {
+	if c.breakerCooldown <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.openUntil = c.now().Add(c.breakerCooldown)
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +342,13 @@ func (c *Client) Schedule(ctx context.Context, v ScheduleVars) (*WeeklyScheduleR
 // the corresponding GraphQL response shape (see types.go for the four
 // concrete payload types).
 func (c *Client) do(ctx context.Context, query string, vars any, dest any) error {
+	// Circuit breaker: while AniList is rate-limiting us, fail fast so the
+	// caller degrades immediately (e.g. detail → stale data) instead of
+	// every request blocking on the retry budget. See breakerCooldown.
+	if c.breakerOpen() {
+		return ErrRateLimited
+	}
+
 	// Marshal the body once — variables may not change between retries,
 	// so we can reuse the same payload buffer.  Build via anonymous
 	// struct so the per-query *Vars omitempty tags decide which fields
@@ -323,6 +393,7 @@ func (c *Client) do(ctx context.Context, query string, vars any, dest any) error
 			_ = res.Body.Close()
 
 			if attempt >= maxRetries {
+				c.tripBreaker()
 				return ErrRateLimited
 			}
 			retryAfter := parseRetryAfter(res.Header.Get("Retry-After"))

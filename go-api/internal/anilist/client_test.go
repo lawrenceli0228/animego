@@ -331,6 +331,72 @@ func TestClient_429_GiveUpAfter3Retries(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Circuit breaker
+// ---------------------------------------------------------------------------
+
+func TestClient_Breaker_ShortCircuitsWhileOpen(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	sleepHook, _ := newNoopSleep()
+	c := NewClient(WithEndpoint(srv.URL), WithSleep(sleepHook))
+	c.limiter = rate.NewLimiter(rate.Inf, 0)
+
+	// First call exhausts the retry budget (1 + 3 = 4 attempts) and trips
+	// the breaker.
+	_, err := c.Search(context.Background(), SearchVars{Page: 1, PerPage: 20})
+	require.ErrorIs(t, err, ErrRateLimited)
+	require.Equal(t, int32(4), callCount.Load())
+
+	// Second call: breaker is open → short-circuit with ZERO HTTP calls.
+	_, err = c.Detail(context.Background(), DetailVars{ID: 1})
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.Equal(t, int32(4), callCount.Load(), "open breaker must not touch AniList")
+}
+
+func TestClient_Breaker_ClosesAfterCooldown(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	now := time.Unix(1_000_000, 0)
+	sleepHook, _ := newNoopSleep()
+	c := NewClient(
+		WithEndpoint(srv.URL),
+		WithSleep(sleepHook),
+		WithNow(func() time.Time { return now }),
+	)
+	c.limiter = rate.NewLimiter(rate.Inf, 0)
+
+	// Trip the breaker.
+	_, _ = c.Search(context.Background(), SearchVars{Page: 1, PerPage: 20})
+	require.Equal(t, int32(4), callCount.Load())
+
+	// Still inside the cooldown window → short-circuit, no new HTTP attempts.
+	now = now.Add(breakerCooldown - time.Second)
+	_, _ = c.Detail(context.Background(), DetailVars{ID: 1})
+	require.Equal(t, int32(4), callCount.Load(), "within cooldown: no upstream call")
+
+	// Past the cooldown → probe upstream again (4 more attempts; it 429s anew).
+	now = now.Add(2 * time.Second)
+	_, _ = c.Detail(context.Background(), DetailVars{ID: 1})
+	assert.Equal(t, int32(8), callCount.Load(), "after cooldown: probes upstream again")
+}
+
+// ---------------------------------------------------------------------------
 // Non-2xx / GraphQL error wrapping
 // ---------------------------------------------------------------------------
 

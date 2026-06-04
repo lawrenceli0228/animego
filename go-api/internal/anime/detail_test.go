@@ -969,10 +969,10 @@ func freshTimestamp() pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: time.Now().Add(-5 * time.Minute), Valid: true}
 }
 
-// staleTimestamp builds a stale cached_at — 2 hours ago, beyond the 1h
+// staleTimestamp builds a stale cached_at — 25 hours ago, beyond the 24h
 // staleCacheTTL threshold.
 func staleTimestamp() pgtype.Timestamptz {
-	return pgtype.Timestamptz{Time: time.Now().Add(-2 * time.Hour), Valid: true}
+	return pgtype.Timestamptz{Time: time.Now().Add(-25 * time.Hour), Valid: true}
 }
 
 // TestIsStale_FreshNotStale: all five checks pass → false.
