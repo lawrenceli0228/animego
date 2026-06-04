@@ -101,15 +101,20 @@ type Aggregator struct {
 	// it (test-only, so the short-TTL regression test doesn't wait minutes).
 	emptyCacheTTL time.Duration
 
-	// gardenFn / acgFn / nyaaFn hold the per-source override stubs set by
-	// WithGardenFn / WithAcgFn / WithNyaaFn.  In production New() also
-	// fills them with closures over the real source adapters, then folds
-	// them into the registry — so they double as the resolved fetcher for
-	// each built-in source.  Tests swap them to control fetch behaviour
-	// without an httptest server.
+	// gardenFn / acgFn / nyaaFn / dmhyFn / mikanFn hold the per-source
+	// override stubs set by WithGardenFn / WithAcgFn / WithNyaaFn /
+	// WithDmhyFn / WithMikanFn.  In production New() also fills them with
+	// closures over the real source adapters, then folds them into the
+	// registry — so they double as the resolved fetcher for each built-in
+	// source.  Tests swap them to control fetch behaviour without an
+	// httptest server (and, for dmhy/mikan, to keep the aggregator's own
+	// orchestration tests off the network now that those two are in the
+	// default registry).
 	gardenFn fetchFn
 	acgFn    fetchFn
 	nyaaFn   fetchFn
+	dmhyFn   fetchFn
+	mikanFn  fetchFn
 
 	// ownsCache marks whether New created the cache (and therefore
 	// must Close it on Aggregator teardown) versus the caller
@@ -194,6 +199,26 @@ func WithNyaaFn(f fetchFn) Option {
 	}
 }
 
+// WithDmhyFn overrides the share.dmhy.org source with a single-function
+// stub.  Test-only.  See WithGardenFn.  Because dmhy is in the default
+// registry, the aggregator's own orchestration tests use this to keep the
+// dmhy slot off the network.
+func WithDmhyFn(f fetchFn) Option {
+	return func(a *Aggregator) {
+		a.dmhyFn = f
+	}
+}
+
+// WithMikanFn overrides the mikanani.me source with a single-function
+// stub.  Test-only.  See WithGardenFn.  Because mikan is in the default
+// registry, the aggregator's own orchestration tests use this to keep the
+// mikan slot off the network.
+func WithMikanFn(f fetchFn) Option {
+	return func(a *Aggregator) {
+		a.mikanFn = f
+	}
+}
+
 // New constructs an Aggregator with sensible production defaults:
 //
 //   - 1-hour TTL cache sized to 500 entries
@@ -232,14 +257,18 @@ func New(opts ...Option) (*Aggregator, error) {
 	}
 
 	// Build the default fan-out registry in the canonical merge order:
-	// garden → acg → nyaa.  These are the real source adapters, binding
-	// a.httpClient + a.logger as they stood AFTER options were applied —
-	// so the gardenSource / acgSource / nyaaSource structs are the genuine
-	// production path, not dead code.
+	// garden → acg → nyaa → dmhy → mikan.  These are the real source
+	// adapters, binding a.httpClient + a.logger as they stood AFTER
+	// options were applied — so the source structs are the genuine
+	// production path, not dead code.  dmhy + mikan are appended last so
+	// the established garden/acg/nyaa ordering (which several tests assert)
+	// is unchanged; they share the same *http.Client as the others.
 	a.registry = NewRegistry(
 		gardenSource{client: a.httpClient, logger: a.logger},
 		acgSource{client: a.httpClient},
 		nyaaSource{client: a.httpClient},
+		dmhySource{client: a.httpClient},
+		mikanSource{client: a.httpClient},
 	)
 
 	// Apply any per-source override stubs (WithGardenFn / WithAcgFn /
@@ -251,6 +280,8 @@ func New(opts ...Option) (*Aggregator, error) {
 	a.gardenFn = a.resolveSource(SourceGarden, a.gardenFn)
 	a.acgFn = a.resolveSource(SourceAcg, a.acgFn)
 	a.nyaaFn = a.resolveSource(SourceNyaa, a.nyaaFn)
+	a.dmhyFn = a.resolveSource(SourceDmhy, a.dmhyFn)
+	a.mikanFn = a.resolveSource(SourceMikan, a.mikanFn)
 
 	return a, nil
 }
