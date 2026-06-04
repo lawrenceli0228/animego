@@ -65,6 +65,20 @@ const (
 	nyaaTracker2 = "http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce"
 )
 
+// nyaaSource is the Source adapter for nyaa.si.  Thin wrapper binding
+// the shared *http.Client and delegating to FetchNyaa — fetch logic
+// unchanged.  Like acgSource it is an RSS scrape and does NOT implement
+// Capable.
+type nyaaSource struct {
+	client *http.Client
+}
+
+func (s nyaaSource) Name() Source { return SourceNyaa }
+
+func (s nyaaSource) Fetch(ctx context.Context, q string) ([]TorrentItem, error) {
+	return FetchNyaa(ctx, s.client, q)
+}
+
 // nyaaItem mirrors a single <item> in the nyaa.si RSS feed.
 //
 // The custom-namespace tags require the full URI form

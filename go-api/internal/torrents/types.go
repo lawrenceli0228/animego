@@ -9,6 +9,8 @@
 //   - garden.go   : animes.garden JSON aggregator (covers 动漫花园 + bangumi.moe)
 //   - acgrip.go   : acg.rip RSS scrape
 //   - nyaa.go     : nyaa.si RSS scrape
+//   - source.go   : Source interface + Capabilities + funcSource adapter
+//   - registry.go : ordered, pluggable collection of Sources to fan out to
 //   - aggregator.go : parallel fan-out + cache + partial-tolerance
 //
 // types.go owns the wire-level result struct and the helpers shared by
@@ -80,7 +82,7 @@ func hasMagnetScheme(s string) bool {
 // FormatBytes mirrors server/controllers/anime.controller.js:158
 // formatBytes.  Input is a raw byte count (e.g. acg.rip RSS
 // enclosure[@length]).  Empty / zero / negative / non-numeric prefix →
-// returns the empty string, matching JS `if (!n || n <= 0) return '';`.
+// returns the empty string, matching JS `if (!n || n <= 0) return ”;`.
 //
 // Output format (Express parity):
 //   - n >= 1e9 → "X.X GB" via toFixed(1)
@@ -91,9 +93,9 @@ func hasMagnetScheme(s string) bool {
 //   - parseInt is permissive — "1234abc" parses as 1234.  We mimic
 //     this by stripping any non-digit suffix.
 //   - parseInt("") and parseInt("abc") return NaN, which JS coerces
-//     to falsy → '' is returned.
+//     to falsy → ” is returned.
 //   - Negative inputs (parseInt("-5") = -5) are also caught by the
-//     <= 0 guard and return ''.
+//     <= 0 guard and return ”.
 func FormatBytes(raw string) string {
 	n, ok := parseIntJSLike(raw)
 	if !ok || n <= 0 {
@@ -189,7 +191,7 @@ func stringPtr(s string) *string {
 //   - No digits → returns (0, false).
 //
 // Returns (n, true) on a valid parse.  The bool lets callers distinguish
-// "0 parsed" from "no number" — currently both code paths return ''
+// "0 parsed" from "no number" — currently both code paths return ”
 // from Format{Bytes,Kb} so it's a defensive distinction, but it keeps
 // the helper honest if a future call site cares.
 func parseIntJSLike(raw string) (int, bool) {

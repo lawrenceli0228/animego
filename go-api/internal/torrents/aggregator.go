@@ -1,12 +1,15 @@
 // Package torrents — aggregator.go
 //
 // Parallel fan-out + cache + partial-tolerance.  This is the
-// orchestrating layer the HTTP handler will call; the three
-// FetchXxx functions in garden.go / acgrip.go / nyaa.go are leaves.
+// orchestrating layer the HTTP handler will call.  It fans out over a
+// pluggable Registry of Sources (source.go / registry.go) instead of
+// naming the upstreams directly; the concrete fetch logic still lives in
+// the FetchXxx functions in garden.go / acgrip.go / nyaa.go, which the
+// per-source adapters wrap.
 //
 // Behaviour port of server/controllers/anime.controller.js:289-325:
-//   - Three upstream fetchers run concurrently (errgroup; in Express
-//     it's Promise.allSettled).
+//   - The registered upstream sources run concurrently (errgroup; in
+//     Express it's Promise.allSettled).
 //   - One source failing does NOT propagate as a top-level error —
 //     the aggregator logs and returns an empty slice for that source
 //     so the other two still flow through.  This matches Express's
@@ -73,33 +76,37 @@ type Logger interface {
 	Warn(msg string, args ...any)
 }
 
-// fetchFn is the shape of a single upstream fetcher.  Defining it as
-// a named type lets the Option setters swap in test stubs without
-// caring about the underlying concrete fetcher.
-type fetchFn func(ctx context.Context, q string) ([]TorrentItem, error)
-
-// Aggregator runs the three upstream fetchers in parallel with a
+// Aggregator runs the registered upstream sources in parallel with a
 // per-source timeout, partial-failure tolerance, and a 1-hour
 // per-query cache.  Constructed via New().
 //
 // All fields are package-private; callers configure via Option
 // setters at construction time.  Aggregator is safe for concurrent
 // Fetch calls — the underlying *http.Client and *cache.Cache are
-// both goroutine-safe.
+// both goroutine-safe, and the Registry is treated as read-only once
+// New returns.
 type Aggregator struct {
 	httpClient *http.Client
 	cache      *cache.Cache[[]TorrentItem]
 	logger     Logger
+
+	// registry holds the ordered set of Fetchers fanned out to in Fetch.
+	// New() populates it with garden, acg, nyaa (in that order); the
+	// WithGardenFn / WithAcgFn / WithNyaaFn options override individual
+	// entries in place so merge order is preserved.
+	registry *Registry
 
 	// emptyCacheTTL is how long an empty (all-sources-missed) result is
 	// cached.  Defaults to torrentEmptyCacheTTL; WithEmptyCacheTTL overrides
 	// it (test-only, so the short-TTL regression test doesn't wait minutes).
 	emptyCacheTTL time.Duration
 
-	// gardenFn / acgFn / nyaaFn are the wrapped fetchers.  In
-	// production they close over Aggregator.httpClient + .logger.  In
-	// tests they're swapped via WithGardenFn / WithAcgFn / WithNyaaFn
-	// to control fetch behaviour without an httptest server.
+	// gardenFn / acgFn / nyaaFn hold the per-source override stubs set by
+	// WithGardenFn / WithAcgFn / WithNyaaFn.  In production New() also
+	// fills them with closures over the real source adapters, then folds
+	// them into the registry — so they double as the resolved fetcher for
+	// each built-in source.  Tests swap them to control fetch behaviour
+	// without an httptest server.
 	gardenFn fetchFn
 	acgFn    fetchFn
 	nyaaFn   fetchFn
@@ -160,23 +167,27 @@ func WithEmptyCacheTTL(d time.Duration) Option {
 	}
 }
 
-// WithGardenFn replaces the garden fetcher.  Test-only.  Allows
-// aggregator tests to control timing, failure, and result content
-// without spinning up an httptest server.
+// WithGardenFn overrides the garden source with a single-function stub.
+// Test-only.  New() folds the stub into the registry under the garden
+// Name (preserving its merge position), so aggregator tests can control
+// timing, failure, and result content without spinning up an httptest
+// server.
 func WithGardenFn(f fetchFn) Option {
 	return func(a *Aggregator) {
 		a.gardenFn = f
 	}
 }
 
-// WithAcgFn replaces the acg.rip fetcher.  Test-only.
+// WithAcgFn overrides the acg.rip source with a single-function stub.
+// Test-only.  See WithGardenFn.
 func WithAcgFn(f fetchFn) Option {
 	return func(a *Aggregator) {
 		a.acgFn = f
 	}
 }
 
-// WithNyaaFn replaces the nyaa.si fetcher.  Test-only.
+// WithNyaaFn overrides the nyaa.si source with a single-function stub.
+// Test-only.  See WithGardenFn.
 func WithNyaaFn(f fetchFn) Option {
 	return func(a *Aggregator) {
 		a.nyaaFn = f
@@ -220,26 +231,50 @@ func New(opts ...Option) (*Aggregator, error) {
 		opt(a)
 	}
 
-	// Wire production fetchers, but only if the caller didn't supply
-	// test stubs.  Closures capture a.httpClient + a.logger as they
-	// stood AFTER options were applied.
-	if a.gardenFn == nil {
-		a.gardenFn = func(ctx context.Context, q string) ([]TorrentItem, error) {
-			return FetchGarden(ctx, a.httpClient, a.logger, q)
-		}
-	}
-	if a.acgFn == nil {
-		a.acgFn = func(ctx context.Context, q string) ([]TorrentItem, error) {
-			return FetchAcgRip(ctx, a.httpClient, q)
-		}
-	}
-	if a.nyaaFn == nil {
-		a.nyaaFn = func(ctx context.Context, q string) ([]TorrentItem, error) {
-			return FetchNyaa(ctx, a.httpClient, q)
-		}
-	}
+	// Build the default fan-out registry in the canonical merge order:
+	// garden → acg → nyaa.  These are the real source adapters, binding
+	// a.httpClient + a.logger as they stood AFTER options were applied —
+	// so the gardenSource / acgSource / nyaaSource structs are the genuine
+	// production path, not dead code.
+	a.registry = NewRegistry(
+		gardenSource{client: a.httpClient, logger: a.logger},
+		acgSource{client: a.httpClient},
+		nyaaSource{client: a.httpClient},
+	)
+
+	// Apply any per-source override stubs (WithGardenFn / WithAcgFn /
+	// WithNyaaFn) by swapping the matching source IN PLACE, so an override
+	// keeps its merge position.  The gardenFn / acgFn / nyaaFn fields are
+	// also normalised to the resolved fetcher (override stub or the
+	// adapter's Fetch) so the field-introspection tests still see them
+	// non-nil and pointing at what actually runs.
+	a.gardenFn = a.resolveSource(SourceGarden, a.gardenFn)
+	a.acgFn = a.resolveSource(SourceAcg, a.acgFn)
+	a.nyaaFn = a.resolveSource(SourceNyaa, a.nyaaFn)
 
 	return a, nil
+}
+
+// resolveSource reconciles a per-source override stub with the registry:
+//   - override != nil → replace the registry entry named name with a
+//     funcSource wrapping the stub (preserving position) and return the
+//     stub as the resolved fn.
+//   - override == nil → look up the default source already in the
+//     registry under name and return its Fetch as the resolved fn.
+//
+// The returned fn is stored back on the matching gardenFn / acgFn /
+// nyaaFn field so it always reflects the fetcher that actually runs.
+func (a *Aggregator) resolveSource(name Source, override fetchFn) fetchFn {
+	if override != nil {
+		a.registry.replaceByName(newFuncSource(name, override))
+		return override
+	}
+	for _, s := range a.registry.Sources() {
+		if s.Name() == name {
+			return s.Fetch
+		}
+	}
+	return nil
 }
 
 // Close releases the underlying ristretto cache.  Safe to call
@@ -252,23 +287,23 @@ func (a *Aggregator) Close() {
 	}
 }
 
-// Fetch returns aggregated torrents from all three sources for q.
+// Fetch returns aggregated torrents from every registered source for q.
 //
 // Behaviour:
 //
-//	1. Trim + lowercase q.  Empty → return [] immediately, no cache,
-//	   no upstream calls.
-//	2. Cache hit → return the cached slice as-is.
-//	3. Cache miss → kick off three goroutines via errgroup.WithContext,
-//	   each with its own 8s ctx.WithTimeout.  Per-source errors are
-//	   logged via the optional Logger and converted to an empty slice
-//	   for that source.  errgroup is used purely for goroutine
-//	   lifetime management — its own error channel is never returned
-//	   (we don't propagate per-source errors up).
-//	4. Merge in deterministic order: garden, acg, nyaa.  Cache the
-//	   merged slice — a non-empty result for the full 1h TTL, an empty
-//	   one only briefly (emptyCacheTTL) so a transient all-source miss
-//	   isn't pinned for an hour after the sources recover.
+//  1. Trim + lowercase q.  Empty → return [] immediately, no cache,
+//     no upstream calls.
+//  2. Cache hit → return the cached slice as-is.
+//  3. Cache miss → kick off one goroutine per registered source via
+//     errgroup.WithContext, each with its own 8s ctx.WithTimeout.
+//     Per-source errors are logged via the optional Logger and
+//     converted to an empty slice for that source.  errgroup is used
+//     purely for goroutine lifetime management — its own error channel
+//     is never returned (we don't propagate per-source errors up).
+//  4. Merge in registration order (garden, acg, nyaa by default).
+//     Cache the merged slice — a non-empty result for the full 1h TTL,
+//     an empty one only briefly (emptyCacheTTL) so a transient
+//     all-source miss isn't pinned for an hour after the sources recover.
 //
 // Returns (nil, ctx.Err()) only when the caller's context is cancelled
 // before any goroutine completes — partial failures are never errors.
@@ -277,8 +312,8 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 	if key == "" {
 		// Defensive — the HTTP handler validates q upstream and
 		// rejects empty queries with a 400.  This guard just stops a
-		// misconfigured caller from triggering three upstream calls
-		// for nothing.
+		// misconfigured caller from triggering upstream calls for
+		// nothing.
 		return []TorrentItem{}, nil
 	}
 
@@ -286,32 +321,27 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 		return cached, nil
 	}
 
+	sources := a.registry.Sources()
+
 	// errgroup.WithContext gives each goroutine a derived context that
 	// is cancelled the moment any goroutine returns an error.  We never
 	// return non-nil from a goroutine (per-source errors are absorbed
-	// below) so the group context survives until all three finish.
+	// below) so the group context survives until all sources finish.
 	// That preserves Express's Promise.allSettled "wait for everyone"
 	// semantics.
 	g, gctx := errgroup.WithContext(ctx)
 
-	var (
-		gardenResults []TorrentItem
-		acgResults    []TorrentItem
-		nyaaResults   []TorrentItem
-	)
+	// results is indexed by source position so the merge below stays in
+	// registration order regardless of which goroutine finishes first.
+	results := make([][]TorrentItem, len(sources))
 
-	g.Go(func() error {
-		gardenResults = a.runOne(gctx, "garden", a.gardenFn, q)
-		return nil
-	})
-	g.Go(func() error {
-		acgResults = a.runOne(gctx, "acg", a.acgFn, q)
-		return nil
-	})
-	g.Go(func() error {
-		nyaaResults = a.runOne(gctx, "nyaa", a.nyaaFn, q)
-		return nil
-	})
+	for i, src := range sources {
+		i, src := i, src // capture per iteration for the goroutine closure
+		g.Go(func() error {
+			results[i] = a.runOne(gctx, src, q)
+			return nil
+		})
+	}
 
 	if err := g.Wait(); err != nil {
 		// runOne never returns non-nil, so g.Wait() can only surface
@@ -319,10 +349,14 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 		return nil, err
 	}
 
-	merged := make([]TorrentItem, 0, len(gardenResults)+len(acgResults)+len(nyaaResults))
-	merged = append(merged, gardenResults...)
-	merged = append(merged, acgResults...)
-	merged = append(merged, nyaaResults...)
+	total := 0
+	for _, r := range results {
+		total += len(r)
+	}
+	merged := make([]TorrentItem, 0, total)
+	for _, r := range results {
+		merged = append(merged, r...)
+	}
 
 	// Quality-aware TTL: a non-empty result is stable for the full hour;
 	// an empty one (every source missed) is cached only briefly so a
@@ -336,20 +370,20 @@ func (a *Aggregator) Fetch(ctx context.Context, q string) ([]TorrentItem, error)
 	return merged, nil
 }
 
-// runOne wraps a single fetchFn with the per-source 8s timeout and the
+// runOne wraps a single Fetcher with the per-source 8s timeout and the
 // partial-failure tripwire.  Always returns a non-nil slice (possibly
 // empty) so the caller can append unconditionally.
 //
-// The source parameter is purely for logging — it tags the warning
+// The fetcher's Name is used purely for logging — it tags the warning
 // with which upstream failed so an oncall grep can pinpoint the cause.
-func (a *Aggregator) runOne(parent context.Context, source string, fn fetchFn, q string) []TorrentItem {
+func (a *Aggregator) runOne(parent context.Context, src Fetcher, q string) []TorrentItem {
 	ctx, cancel := context.WithTimeout(parent, perSourceTimeout)
 	defer cancel()
 
-	items, err := fn(ctx, q)
+	items, err := src.Fetch(ctx, q)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Warn("torrents: source failed", "source", source, "error", err.Error())
+			a.logger.Warn("torrents: source failed", "source", string(src.Name()), "error", err.Error())
 		}
 		return nil
 	}
