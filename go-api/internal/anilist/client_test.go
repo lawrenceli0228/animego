@@ -44,6 +44,21 @@ func newNoopSleep() (func(context.Context, time.Duration) error, *[]time.Duratio
 	return hook, &recorded
 }
 
+// freshConnClient returns an *http.Client with keep-alives disabled, so the
+// 429 retry loop opens a new connection per attempt.  The retry tests fire
+// several sequential POSTs at the httptest server; reusing a keep-alive
+// connection races the server closing an idle conn, and net/http does NOT
+// auto-retry a non-idempotent POST on a stale connection — it surfaces the
+// error, which cuts the retry loop short and flakes the asserted attempt
+// count under CI load (observed: TestClient_Breaker_ClosesAfterCooldown got
+// 5 calls instead of 8).  A fresh connection per attempt removes the race.
+func freshConnClient() *http.Client {
+	return &http.Client{
+		Timeout:   httpTimeout,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+}
+
 // testClient builds a Client pointed at the given fake URL.  The
 // limiter is replaced with an unrestricted one so individual tests
 // don't pay the 700ms tax — TestClient_Throttle_700ms is the only
@@ -317,7 +332,7 @@ func TestClient_429_GiveUpAfter3Retries(t *testing.T) {
 	defer srv.Close()
 
 	sleepHook, recorded := newNoopSleep()
-	c := NewClient(WithEndpoint(srv.URL), WithSleep(sleepHook))
+	c := NewClient(WithEndpoint(srv.URL), WithSleep(sleepHook), WithHTTPClient(freshConnClient()))
 	c.limiter = rate.NewLimiter(rate.Inf, 0)
 
 	_, err := c.Search(context.Background(), SearchVars{Page: 1, PerPage: 20})
@@ -346,7 +361,7 @@ func TestClient_Breaker_ShortCircuitsWhileOpen(t *testing.T) {
 	defer srv.Close()
 
 	sleepHook, _ := newNoopSleep()
-	c := NewClient(WithEndpoint(srv.URL), WithSleep(sleepHook))
+	c := NewClient(WithEndpoint(srv.URL), WithSleep(sleepHook), WithHTTPClient(freshConnClient()))
 	c.limiter = rate.NewLimiter(rate.Inf, 0)
 
 	// First call exhausts the retry budget (1 + 3 = 4 attempts) and trips
@@ -378,6 +393,7 @@ func TestClient_Breaker_ClosesAfterCooldown(t *testing.T) {
 		WithEndpoint(srv.URL),
 		WithSleep(sleepHook),
 		WithNow(func() time.Time { return now }),
+		WithHTTPClient(freshConnClient()),
 	)
 	c.limiter = rate.NewLimiter(rate.Inf, 0)
 
