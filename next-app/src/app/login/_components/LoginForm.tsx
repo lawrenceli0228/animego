@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, useTransition, type CSSProperties, type FormEvent } from "react";
+import { useState, type CSSProperties, type FormEvent } from "react";
 import type { Dict } from "@/lib/i18n";
 import { translateErrorMessage } from "@/lib/authForm";
 import { authFormStyles } from "@/lib/authFormStyles";
@@ -42,15 +41,15 @@ const styles = {
 };
 
 export default function LoginForm({ from, dict }: LoginFormProps) {
-  const router = useRouter();
   const [form, setForm] = useState<FormState>({ email: "", password: "" });
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(false);
-  const [navigating, startTransition] = useTransition();
   const [focused, setFocused] = useState<"email" | "password" | null>(null);
 
   const t = dict.login;
-  const busy = loading || navigating;
+  // `loading` stays true through the post-success full navigation (the page
+  // unloads), keeping the submit button disabled until we leave.
+  const busy = loading;
 
   function updateField<K extends keyof FormState>(key: K) {
     return (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -67,19 +66,17 @@ export default function LoginForm({ from, dict }: LoginFormProps) {
     try {
       const result = await submitLogin(form.email, form.password);
       if (result.ok) {
-        // Navigate to the sanitized `from`, then refresh so the root
-        // layout's /api/auth/me fetch re-runs and Navbar flips from
-        // anonymous to logged-in CTAs.
-        //
-        // No race on router.refresh() reading a stale cookie: the
-        // browser commits Set-Cookie from /api/auth/login before the
-        // fetch promise resolves, so by the time this branch runs the
-        // session cookie is already in the jar and the RSC refetch
-        // attaches it.
-        startTransition(() => {
-          router.replace(from);
-          router.refresh();
-        });
+        // Full navigation (NOT router.replace): the Navbar is a client island
+        // that reads the auth_hint cookie + probes /api/auth/me in its OWN
+        // effect — the root layout no longer fetches auth server-side (that
+        // comment was rot). A soft router.replace only re-runs that effect on
+        // the pathname change, and racily: it can read document.cookie before
+        // this response's Set-Cookie is committed, leaving the nav stuck
+        // "logged out" until a manual refresh. A full navigation remounts
+        // everything with the cookies already in the jar (exactly what that
+        // manual refresh does), so the nav reliably shows logged-in. `from` is
+        // server-sanitized to a same-origin path.
+        window.location.replace(from);
       } else {
         // Backend response.error.message is already localized on the
         // server (legacy Express returns Chinese for INVALID_CREDENTIALS);

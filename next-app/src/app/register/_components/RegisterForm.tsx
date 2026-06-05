@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, useTransition, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import type { Dict } from "@/lib/i18n";
 import { translateErrorMessage } from "@/lib/authForm";
 import { authFormStyles } from "@/lib/authFormStyles";
@@ -30,15 +29,15 @@ const PASSWORD_MIN_LENGTH = 6;
 const styles = authFormStyles;
 
 export default function RegisterForm({ from, dict }: RegisterFormProps) {
-  const router = useRouter();
   const [form, setForm] = useState<FormState>({ username: "", email: "", password: "" });
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(false);
-  const [navigating, startTransition] = useTransition();
   const [focused, setFocused] = useState<FieldKey | null>(null);
 
   const t = dict.register;
-  const busy = loading || navigating;
+  // `loading` stays true through the post-success full navigation (the page
+  // unloads), keeping the submit button disabled until we leave.
+  const busy = loading;
 
   function updateField<K extends keyof FormState>(key: K) {
     return (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -64,14 +63,11 @@ export default function RegisterForm({ from, dict }: RegisterFormProps) {
     try {
       const result = await submitRegister(form.username, form.email, form.password);
       if (result.ok) {
-        // Cookies committed before the promise resolves (same invariant
-        // as /login). router.replace + router.refresh re-runs the root
-        // layout's /api/auth/me fetch so Navbar flips to logged-in
-        // CTAs and the new account lands on `from`.
-        startTransition(() => {
-          router.replace(from);
-          router.refresh();
-        });
+        // Full navigation (NOT router.replace) — same reasoning as /login: the
+        // Navbar is a client island that probes auth in its own effect, so a
+        // soft replace updates it only racily. A full nav lands the new account
+        // on `from` with cookies committed, so the nav reliably shows logged-in.
+        window.location.replace(from);
       } else {
         const translated = translateErrorMessage(result.message, dict);
         setError(translated || t.fail);
