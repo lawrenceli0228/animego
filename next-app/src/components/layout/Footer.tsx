@@ -111,11 +111,12 @@ export default function Footer({ dict, season, year }: FooterProps) {
 
   const supportLinks: Array<{ label: string; to?: string }> = [
     { label: dict.footer.faq, to: "/faq" }, // P11: /faq now a real next-app page
+    { label: dict.footer.terms, to: "/terms" },
+    { label: dict.footer.privacy, to: "/privacy" },
+    { label: dict.footer.copyrightNotice, to: "/copyright" },
     { label: dict.footer.contact },
     { label: dict.footer.feedback },
     { label: dict.footer.api },
-    { label: dict.footer.terms },
-    { label: dict.footer.privacy },
   ];
 
   return (
@@ -176,7 +177,11 @@ export default function Footer({ dict, season, year }: FooterProps) {
             <ul style={s.linkList}>
               {supportLinks.map((l) => (
                 <li key={l.label}>
-                  <a href="#" style={s.link}>{l.label}</a>
+                  {l.to ? (
+                    <Link href={l.to} prefetch={false} style={s.link}>{l.label}</Link>
+                  ) : (
+                    <a href="#" style={s.link}>{l.label}</a>
+                  )}
                 </li>
               ))}
             </ul>

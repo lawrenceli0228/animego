@@ -13,7 +13,7 @@ const zh = {
     // Homepage SEO: brand + 番剧 front-loaded so the brand+category query
     // "animegoclub 番剧" matches the homepage, not a detail page. See
     // app/page.tsx generateMetadata + the visually-hidden <h1>.
-    homeTitle: 'AnimeGoClub · 番剧追番与动漫发现平台 · Rundle Streetが暮れる。東京が灯る。',
+    homeTitle: 'AnimeGoClub · Rundle Streetが暮れる。東京が灯る。',
     homeDescription:
       'AnimeGoClub 是番剧追番与动漫发现平台 —— 每季新番、评分、声优、弹幕评论与追番管理。',
     homeH1: 'AnimeGoClub —— 番剧追番与动漫发现平台',
@@ -258,6 +258,7 @@ const zh = {
     api: 'API',
     terms: '服务条款',
     privacy: '隐私政策',
+    copyrightNotice: '版权 · 侵权处理',
     dataCredits: '数据来自',
     copyright: '© {year} AnimeGoClub · Rundle Streetが暮れる。東京が灯る。',
   },
