@@ -58,10 +58,7 @@ export default function CopyrightPage() {
         进行核查，并移除或禁用相应信息。
       </p>
 
-      <h2 style={x.h2}>三、重复侵权</h2>
-      <p style={x.p}>对于多次被认定侵权的账号或来源，我们将在适当情况下终止其使用。</p>
-
-      <h2 style={x.h2}>四、联系</h2>
+      <h2 style={x.h2}>三、联系</h2>
       <p style={x.p}>
         版权与侵权相关事宜，请联系 <a style={x.a} href={`mailto:${CONTACT}`}>{CONTACT}</a>。
         本声明受中华人民共和国香港特别行政区法律管辖。
