@@ -686,6 +686,7 @@ function RelationsSection({
               key={`${rel.anilistId}-${rel.relationType}`}
               href={`/anime/${rel.anilistId}`}
               prefetch={false}
+              className="card-lift"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -1067,6 +1068,7 @@ function RecommendationsSection({
               key={r.anilistId}
               href={`/anime/${r.anilistId}`}
               prefetch={false}
+              className="card-lift"
               style={{
                 flexShrink: 0,
                 width: 110,

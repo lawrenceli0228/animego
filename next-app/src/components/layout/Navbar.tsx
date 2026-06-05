@@ -205,6 +205,7 @@ export default function Navbar({ season, year }: NavbarProps) {
               key={l.key}
               href={l.href}
               prefetch={false}
+              className="nav-link"
               style={s.link(isActive(pathname, l.href))}
               aria-current={isActive(pathname, l.href) ? "page" : undefined}
             >

@@ -197,3 +197,41 @@ h4 {
 .art-video-player .art-control-heatmap {
   transform: translateZ(0);
 }
+
+/* ── Card hover lift (relation / recommendation cards on /anime/[id]) ──────
+   Compositor-only transform; reduced-motion safe. */
+@media (prefers-reduced-motion: no-preference) {
+  .card-lift {
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .card-lift:hover {
+    transform: translateY(-4px);
+  }
+}
+
+/* ── Navbar link: underline wipes in on hover ─────────────────────────────
+   Active state keeps its existing pill (set inline); this only adds the
+   hover affordance. transform-only (scaleX), reduced-motion safe. */
+.nav-link {
+  position: relative;
+}
+.nav-link::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 5px;
+  height: 2px;
+  border-radius: 2px;
+  background: #0a84ff;
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nav-link::after {
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+.nav-link:hover::after {
+  transform: scaleX(1);
+}
