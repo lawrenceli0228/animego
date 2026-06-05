@@ -21,21 +21,26 @@ import type {
 // Phase 8.0: HomePage replaces the LandingPage at /. The marketing
 // page moved to /welcome.
 //
-// dynamic = "force-dynamic" instead of revalidate = 60:
-// The homepage aggregates 6 different upstream fetches with different
-// freshness needs (schedule changes hourly as Mongo rotates the
-// window; trending tightens every minute; yearly-top barely changes).
-// A single page-level revalidate window forces every fetch through
-// the same ISR cache and effectively silences each fetcher's own
-// `cache` / `revalidate` option — that's how schedule ended up
-// showing day-old tab counts even after we switched it to "no-store"
-// (the page-level revalidate=60 overrode it). Force-dynamic keeps
-// the page SSR per request; each safe* fetcher then honors its own
-// revalidate / cache mode, so schedule stays live while trending /
-// yearly-top can still cache. Cost: ~one server render per page
-// hit. The actual cards still benefit from Cloudflare HTML cache
-// in prod, and the per-page render is cheap because the upstream
-// API responses are themselves cached on the Express side.
+// dynamic = "force-dynamic" — and it STAYS, deliberately:
+//
+//   1. go-api is unreachable at `next build` (GO_API_INTERNAL_URL is a runtime
+//      env, not a build arg), so ISR would prerender an EMPTY homepage and keep
+//      serving it for the whole revalidate window after every deploy. Detail
+//      pages dodge this via generateStaticParams → [] → ISR-on-demand; a
+//      paramless static route has no such escape hatch. force-dynamic keeps the
+//      page rendering REAL data on first request.
+//   2. The two per-user sections (ContinueWatching, ActivityFeed) are now
+//      CLIENT islands, so this dynamic HTML is byte-identical for every
+//      anonymous visitor — no per-user data, no cache-poisoning risk.
+//
+// Caching is therefore done at the EDGE, not via Next ISR: a Cloudflare Cache
+// Rule on `/` with Edge TTL "override origin" (60s) + stale-while-revalidate
+// caches the anonymous render despite the no-store header force-dynamic emits,
+// and bypasses on the session / refreshToken cookie so logged-in users always
+// hit the origin. Anonymous + crawler traffic (the load that drove the
+// detail-page 500 incident) is served from the CF edge; the origin renders
+// ~once per 60s per PoP. Per-fetcher freshness (schedule no-store, etc.) still
+// holds at the origin; CF just caps how often anonymous traffic reaches it.
 export const dynamic = "force-dynamic";
 
 type Season = "WINTER" | "SPRING" | "SUMMER" | "FALL";
