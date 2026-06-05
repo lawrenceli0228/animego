@@ -27,6 +27,7 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
+import { authChrome } from "@/lib/authChrome";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import FallbackImg from "@/components/ui/FallbackImg";
 import type { Dict, Lang } from "@/lib/i18n";
@@ -535,6 +536,10 @@ export default function EpisodeComments({
     [load, lang],
   );
 
+  // "authed" → comment box · "probing" → neutral placeholder (never the login
+  // prompt mid-probe) · "anonymous" → login prompt. See lib/authChrome.
+  const chrome = authChrome(Boolean(user), probing);
+
   return (
     <div style={{ padding: "20px 24px 24px" }}>
       <p style={sectionLabel}>
@@ -552,16 +557,7 @@ export default function EpisodeComments({
         )}
       </p>
 
-      {user ? (
-        <div style={{ marginBottom: 20 }}>
-          <CommentInput
-            onSubmit={handlePost}
-            isPending={posting && !replyTarget}
-            placeholder={dict.comment.placeholder}
-            dict={dict}
-          />
-        </div>
-      ) : probing ? (
+      {chrome === "probing" ? (
         // auth_hint says logged in but /api/auth/me hasn't resolved — neutral
         // placeholder, not the login prompt, so a logged-in user doesn't flash
         // "登录后发表评论" before the comment box appears.
@@ -577,6 +573,15 @@ export default function EpisodeComments({
           }}
           aria-hidden
         />
+      ) : user ? (
+        <div style={{ marginBottom: 20 }}>
+          <CommentInput
+            onSubmit={handlePost}
+            isPending={posting && !replyTarget}
+            placeholder={dict.comment.placeholder}
+            dict={dict}
+          />
+        </div>
       ) : (
         <div
           style={{

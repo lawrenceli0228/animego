@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { useLang } from "@/lib/lang-client";
 import { hasAuthHint } from "@/lib/clientAuth";
+import { authChrome } from "@/lib/authChrome";
 import { authFetch } from "@/lib/authFetch";
 import AvatarMenu from "./AvatarMenu";
 
@@ -218,6 +219,10 @@ export default function Navbar({ season, year }: NavbarProps) {
     { href: "/welcome", label: t("nav.about"), key: "about" },
   ];
 
+  // "authed" → avatar · "probing" → neutral skeleton (never the login CTA mid-
+  // probe) · "anonymous" → login/register. See lib/authChrome.
+  const chrome = authChrome(Boolean(user), probing);
+
   return (
     <nav style={s.nav} aria-label={lang === "zh" ? "主导航" : "Main navigation"}>
       <div style={s.inner}>
@@ -239,7 +244,12 @@ export default function Navbar({ season, year }: NavbarProps) {
           ))}
         </div>
         <div style={s.right}>
-          {user ? (
+          {chrome === "probing" ? (
+            // auth_hint says a session likely exists but /api/auth/me hasn't
+            // resolved — show a neutral avatar placeholder, never the login CTA,
+            // so a logged-in visitor doesn't flash "login" before their avatar.
+            <div style={s.avatarSkeleton} aria-hidden />
+          ) : user ? (
             // Logged-in chrome (Hi / 我的追番 / language / 登出) collapses into
             // the avatar dropdown, which also hosts 卡片个性化.
             <AvatarMenu
@@ -247,11 +257,6 @@ export default function Navbar({ season, year }: NavbarProps) {
               onLogout={handleLogout}
               loggingOut={loggingOut}
             />
-          ) : probing ? (
-            // auth_hint says a session likely exists but /api/auth/me hasn't
-            // resolved — show a neutral avatar placeholder, never the login CTA,
-            // so a logged-in visitor doesn't flash "login" before their avatar.
-            <div style={s.avatarSkeleton} aria-hidden />
           ) : (
             <>
               <button
