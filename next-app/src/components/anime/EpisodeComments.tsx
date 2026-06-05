@@ -26,6 +26,8 @@ import {
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
+import { hasAuthHint } from "@/lib/clientAuth";
+import { authChrome } from "@/lib/authChrome";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import FallbackImg from "@/components/ui/FallbackImg";
 import type { Dict, Lang } from "@/lib/i18n";
@@ -393,26 +395,39 @@ export default function EpisodeComments({
   const [comments, setComments] = useState<CommentDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<CurrentUser | null>(null);
+  // True while the auth_hint-gated /api/auth/me probe is in flight — the input
+  // area shows a neutral placeholder (not the login prompt) during this window
+  // so a logged-in user doesn't flash "登录后发表评论" before the box appears.
+  const [probing, setProbing] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [posting, setPosting] = useState(false);
 
-  // One-time auth probe — silent on 401 so anonymous users just see the
-  // login prompt instead of a redirect.
+  // One-time auth probe, gated on the auth_hint cookie so an anonymous panel
+  // open fires zero auth requests. While the probe is in flight `probing` is
+  // true so the input area renders a neutral placeholder instead of the login
+  // prompt; a logged-in user otherwise flashes "登录后发表评论" until
+  // /api/auth/me resolves. Silent on 401 — anonymous users just see the prompt.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const resolve = async () => {
+      if (!hasAuthHint()) return;
+      if (!cancelled) setProbing(true);
       try {
         const res = await authFetch("/api/auth/me", {
           skipRedirectOnFailure: true,
         });
-        if (cancelled || !res.ok) return;
-        const json = (await res.json()) as { data?: { user?: CurrentUser } };
-        if (json?.data?.user?.id) setUser(json.data.user);
+        if (!cancelled && res.ok) {
+          const json = (await res.json()) as { data?: { user?: CurrentUser } };
+          if (!cancelled && json?.data?.user?.id) setUser(json.data.user);
+        }
       } catch {
         /* anonymous — leave user null */
+      } finally {
+        if (!cancelled) setProbing(false);
       }
-    })();
+    };
+    void resolve();
     return () => {
       cancelled = true;
     };
@@ -521,6 +536,10 @@ export default function EpisodeComments({
     [load, lang],
   );
 
+  // "authed" → comment box · "probing" → neutral placeholder (never the login
+  // prompt mid-probe) · "anonymous" → login prompt. See lib/authChrome.
+  const chrome = authChrome(Boolean(user), probing);
+
   return (
     <div style={{ padding: "20px 24px 24px" }}>
       <p style={sectionLabel}>
@@ -538,7 +557,23 @@ export default function EpisodeComments({
         )}
       </p>
 
-      {user ? (
+      {chrome === "probing" ? (
+        // auth_hint says logged in but /api/auth/me hasn't resolved — neutral
+        // placeholder, not the login prompt, so a logged-in user doesn't flash
+        // "登录后发表评论" before the comment box appears.
+        <div
+          style={{
+            marginBottom: 20,
+            // ~matches the 2-row CommentInput footprint (textarea + button row)
+            // so the placeholder → input swap doesn't shift the comment list.
+            height: 88,
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid #2c2c2e",
+          }}
+          aria-hidden
+        />
+      ) : user ? (
         <div style={{ marginBottom: 20 }}>
           <CommentInput
             onSubmit={handlePost}
