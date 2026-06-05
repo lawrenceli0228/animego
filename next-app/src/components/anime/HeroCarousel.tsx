@@ -263,6 +263,17 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
     >
       {animeList.map((anime, i) => {
         const isActive = i === current;
+        // Banner load window: only the active slide + its two neighbors mount
+        // their <img>. The outgoing (prev) slide stays mounted to fade OUT; the
+        // incoming (next) slide is preloaded so the crossfade is instant. The
+        // rest render a neutral placeholder until they rotate into the window.
+        // Opacity:0 does NOT make an <img> off-screen, so loading="lazy" alone
+        // never deferred them — gating the render keeps ~2 hidden banners off
+        // the initial critical path.
+        const inWindow =
+          i === current ||
+          i === (current + 1) % len ||
+          i === (current - 1 + len) % len;
         const bg = anime.bannerImageUrl || anime.coverImageUrl || "";
         const title = pickTitle(anime, lang);
         const slideStyle: CSSProperties = {
@@ -277,14 +288,15 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
 
         return (
           <div key={anime.anilistId} style={slideStyle} aria-hidden={!isActive} inert={!isActive}>
-            {bg ? (
+            {bg && inWindow ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={bg}
                 alt=""
                 aria-hidden
-                // First slide is LCP candidate -> eager + high priority.
-                // Remaining slides lazy load (off-screen via opacity:0).
+                // First slide is the LCP candidate -> eager + high priority.
+                // The other in-window slides render now so they're decoded
+                // before they become active (the crossfade needs them ready).
                 loading={i === 0 ? "eager" : "lazy"}
                 fetchPriority={i === 0 ? "high" : "auto"}
                 decoding={i === 0 ? "sync" : "async"}
