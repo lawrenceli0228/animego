@@ -119,6 +119,15 @@ const s = {
     color: "rgba(235,235,245,0.75)",
     padding: "0 4px",
   } as CSSProperties,
+  // Neutral stand-in for the avatar while the auth probe is in flight — matches
+  // the .agc-avatar tile footprint (36x36, radius 8) so the swap to the real
+  // avatar causes no layout shift.
+  avatarSkeleton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    background: "rgba(255,255,255,0.08)",
+  } as CSSProperties,
 };
 
 function isActive(pathname: string, href: string): boolean {
@@ -139,28 +148,44 @@ export default function Navbar({ season, year }: NavbarProps) {
   // and ONLY when the non-httpOnly `auth_hint` cookie says a session likely
   // exists — so an anonymous page load fires zero auth requests (ISSUE-001).
   const [user, setUser] = useState<NavUser | null>(null);
+  // `probing` covers the window where the non-httpOnly auth_hint cookie says a
+  // session probably exists but the /api/auth/me probe hasn't resolved yet. In
+  // that window we render a neutral avatar placeholder instead of the
+  // login/register CTA, so a logged-in visitor never flashes "login" first.
+  const [probing, setProbing] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    // No hint cookie → render anonymous (logout clears both the hint and our
-    // local state, so there's nothing to reset here).
-    if (!hasAuthHint()) return;
-    // authFetch self-heals an expired 15-min `session` via the 7-day refresh
-    // cookie. A raw fetch would 401 the moment the access token lapses and
-    // make a still-logged-in user look logged out (the phantom-logout that
-    // forced repeated re-logins). skipRedirectOnFailure so a genuinely
-    // expired visitor just renders anonymous instead of bouncing to /login.
+    // hasAuthHint() reads the non-httpOnly `auth_hint` cookie (client-only), so
+    // this resolves post-hydration. No hint → genuinely anonymous; leave the
+    // login/register CTA. Hint present → flip `probing` first so the chrome
+    // shows a neutral avatar placeholder (NOT the login CTA) while the probe is
+    // in flight, then swaps straight to the avatar. Without this a logged-in
+    // visitor sees a ~0.5s "login" flash before their avatar appears — very
+    // visible now the page paints instantly from the CF edge cache.
+    //
+    // setState lives inside the async helper (never synchronously in the effect
+    // body) to satisfy react-hooks/set-state-in-effect.
+    const resolve = async () => {
+      if (!hasAuthHint()) return;
+      if (!cancelled) setProbing(true);
+      try {
+        // authFetch self-heals an expired 15-min `session` via the 7-day
+        // refresh cookie; skipRedirectOnFailure so a truly-expired visitor
+        // renders anonymous instead of bouncing to /login.
+        const r = await authFetch("/api/auth/me", { skipRedirectOnFailure: true });
+        const json = r.ok ? await r.json() : null;
+        if (!cancelled) setUser(json?.data?.user ?? null);
+      } catch {
+        /* network blip — keep the last known state */
+      } finally {
+        if (!cancelled) setProbing(false);
+      }
+    };
     // Re-runs on pathname change so a fresh client-side login (LoginForm
     // navigates here) updates the nav without a manual page reload.
-    authFetch("/api/auth/me", { skipRedirectOnFailure: true })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json) => {
-        if (!cancelled) setUser(json?.data?.user ?? null);
-      })
-      .catch(() => {
-        /* network blip — keep the last known state */
-      });
+    void resolve();
     return () => {
       cancelled = true;
     };
@@ -222,6 +247,11 @@ export default function Navbar({ season, year }: NavbarProps) {
               onLogout={handleLogout}
               loggingOut={loggingOut}
             />
+          ) : probing ? (
+            // auth_hint says a session likely exists but /api/auth/me hasn't
+            // resolved — show a neutral avatar placeholder, never the login CTA,
+            // so a logged-in visitor doesn't flash "login" before their avatar.
+            <div style={s.avatarSkeleton} aria-hidden />
           ) : (
             <>
               <button
