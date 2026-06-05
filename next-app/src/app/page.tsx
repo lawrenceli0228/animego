@@ -21,26 +21,26 @@ import type {
 // Phase 8.0: HomePage replaces the LandingPage at /. The marketing
 // page moved to /welcome.
 //
-// dynamic = "force-dynamic" — and it STAYS, deliberately:
+// dynamic = "force-dynamic", deliberately:
 //
 //   1. go-api is unreachable at `next build` (GO_API_INTERNAL_URL is a runtime
 //      env, not a build arg), so ISR would prerender an EMPTY homepage and keep
-//      serving it for the whole revalidate window after every deploy. Detail
-//      pages dodge this via generateStaticParams → [] → ISR-on-demand; a
-//      paramless static route has no such escape hatch. force-dynamic keeps the
-//      page rendering REAL data on first request.
-//   2. The two per-user sections (ContinueWatching, ActivityFeed) are now
-//      CLIENT islands, so this dynamic HTML is byte-identical for every
-//      anonymous visitor — no per-user data, no cache-poisoning risk.
+//      serving it for the whole revalidate window after every deploy.
+//   2. ContinueWatching + ActivityFeed render the SIGNED-IN user's own data
+//      server-side (they read the session cookie via apiGet), so the page is
+//      genuinely per-user. Every load runs proxy.ts, which refreshes an
+//      expiring session server-side BEFORE this render — so the chrome shows
+//      logged-in without the client having to race a token refresh.
 //
-// Caching is therefore done at the EDGE, not via Next ISR: a Cloudflare Cache
-// Rule on `/` with Edge TTL "override origin" (60s) + stale-while-revalidate
-// caches the anonymous render despite the no-store header force-dynamic emits,
-// and bypasses on the session / refreshToken cookie so logged-in users always
-// hit the origin. Anonymous + crawler traffic (the load that drove the
-// detail-page 500 incident) is served from the CF edge; the origin renders
-// ~once per 60s per PoP. Per-fetcher freshness (schedule no-store, etc.) still
-// holds at the origin; CF just caps how often anonymous traffic reaches it.
+// History: PR #45 islanded these two sections (client fetch) + edge-cached `/`
+// to speed up anonymous/crawler hits. That turned the homepage into a
+// cached + per-user surface and repeatedly broke logged-in auth (the navbar
+// flash #47, the login nav #48, and a refresh-token rotation race: proxy.ts and
+// the client island both refreshing a 2-slot rotating token → eviction → 401
+// storm → "logged out until refresh"). Reverted to server-render; the CF Cache
+// Rule on `/` is dropped (anonymous now hits the origin, ~0.7s — acceptable).
+// `/anime/*` keeps its edge cache (the larger, stable SEO win). Don't re-island
+// `/` without solving the dual-refresher race first.
 export const dynamic = "force-dynamic";
 
 type Season = "WINTER" | "SPRING" | "SUMMER" | "FALL";
