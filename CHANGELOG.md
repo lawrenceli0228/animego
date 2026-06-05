@@ -2,6 +2,20 @@
 
 ---
 
+## [3.2.2] - 2026-06-05
+
+### 性能 — 首页走 CF 边缘缓存(冷启动 1.6s → 0.12s)
+
+详情页 `/anime/*` 早先已上 CF 边缘缓存(实测 HIT ~0.2s),首页 `/` 却一直 `cf-cache-status: DYNAMIC`、冷启动 TTFB 1.6s —— 每次访问(含爬虫 + 匿名 SSR 读)都回香港源站全量渲染,正是当初引发详情页 500 爬虫事故的那批流量。本次把首页也搬到边缘。
+
+- **根因:3 个服务端 `no-store` fetch** — `safeSchedule` + `ContinueWatching` + `ActivityFeed`,任何一个都让整页 dynamic;其中两个还**读 cookie 渲个性化数据**(你的在追 / 关注动态),HTML 因人而异,**不能直接缓存**(否则一个人的追番列表会被发给所有匿名访客 = 缓存投毒)。`page.tsx` 那句"prod 有 CF HTML cache 兜底"的旧注释实测是错的(一直 DYNAMIC,从没缓存到)。
+- **修法:把两个按用户区块 island 化** — 新增 `useAuthGatedList` hook(`auth_hint` cookie gate → `authFetch` → loading 骨架 / 匿名 stub / 数据;SSR 初始恒渲 loading 骨架,人人一样、可安全缓存),`ContinueWatching` / `ActivityFeed` 从服务端组件改成客户端岛(挂载后自取,匿名零 auth 请求)。沿用 Navbar / 详情页同款 `auth_hint` 探测模式。
+- **`force-dynamic` 故意保留** — 首页是无参静态路由,**不能**像 `/anime/[id]` 那样靠 `generateStaticParams→[]` 躲成 ISR-on-demand;而构建时 go-api 不可达(`GO_API_INTERNAL_URL` 是 runtime env 非 build arg),首页若转 ISR 会把空数据烤进构建、每次部署后首页空 60s。故保留 `force-dynamic`(每次源站渲染拿真数据),缓存放边缘。
+- **CF Cache Rule on `/`** — Edge TTL 选「Ignore cache-control header and use this TTL = 1 分钟」(覆盖源站发的 no-store)+ serve-stale-while-revalidating;带 `session`/`refreshToken` cookie(登录用户)或 `rsc` header(客户端导航预取)的请求 bypass。
+- **实测**:匿名首次 MISS → 之后 HIT、TTFB **1.6s → 0.12s**;登录用户 / RSC 请求全 `DYNAMIC`(拿个性化、不吃缓存);匿名 HTML 只有骨架、无登录 CTA、无用户数据。tsc / eslint / 生产构建(`/` 仍 `ƒ Dynamic`)/ `useAuthGatedList` 单测(7)全过。部署 prod + CF 规则上线 + 四项 live 验证通过。(PR #45,`5484478`)
+
+---
+
 ## [3.2.1] - 2026-06-03
 
 ### 修复 — 公开页用户名 %20 · 主页背景显示错番
