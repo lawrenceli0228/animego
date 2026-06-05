@@ -1,20 +1,20 @@
+"use client";
+
 import Link from "next/link";
-import { ApiError, apiGet } from "@/lib/api";
 import { pickTitle } from "@/lib/formatters";
 import FadeImage from "@/components/ui/FadeImage";
+import { useAuthGatedList } from "@/lib/useAuthGatedList";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { WatchingItem } from "@/lib/types";
 
-// RSC ContinueWatching. Server-side tries
-// `/api/subscriptions?status=watching`. 401 → render the logged-out
-// CTA stub. Authed-with-zero-rows → hide the section entirely (matches
-// legacy ContinueWatching.jsx: `if (!user || !list?.length) return null`
-// becomes "show stub when no auth, hide when authed-but-empty" — a
-// homepage with the CTA still makes sense for new visitors).
-//
-// Cookie forwarding via lib/api.ts buildHeaders() — same path the
-// ActivityFeed sibling uses. Both rely on P8.1 cookie dual-track
-// (commit cc073f9).
+// Client island ContinueWatching. Was an async RSC that read cookies()
+// server-side — that personalized the homepage HTML and blocked edge caching
+// (a cached watch list would leak across anonymous visitors). Now it fetches
+// `/api/subscriptions?status=watching` on the client, gated on the `auth_hint`
+// cookie (see useAuthGatedList): anonymous loads fire zero auth requests and
+// render the CTA stub; authed loads show the grid (or hide the section when the
+// watching bucket is empty). The homepage shell around it stays anonymous and
+// CF-cacheable.
 
 interface ContinueWatchingProps {
   dict: Dict;
@@ -275,28 +275,37 @@ function WatchingGrid({
   );
 }
 
-export default async function ContinueWatching({
+// Initial / first-paint state — the neutral blurred grid that lands in the
+// edge-cached HTML (no overlay, no user data, same for everyone). The client
+// swaps it for the stub or the real grid after hydration.
+function LoadingSkeleton({ dict }: { dict: Dict }) {
+  return (
+    <section style={sectionStyle} aria-label={dict.home.watchingTitle}>
+      <div style={headerStyle}>
+        <p style={labelStyle}>{dict.home.continueLabel}</p>
+        <h2 style={titleStyle}>{dict.home.watchingTitle}</h2>
+      </div>
+      <div style={wrapStyle}>
+        <div style={stubGridStyle} aria-hidden="true">
+          {Array.from({ length: PLACEHOLDER_COUNT }).map((_, i) => (
+            <div key={i} style={placeholderCardStyle} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export default function ContinueWatching({
   dict,
   lang,
 }: ContinueWatchingProps) {
-  let items: WatchingItem[] = [];
-  let loggedOut = false;
-  try {
-    items = await apiGet<WatchingItem[]>(
-      "/api/subscriptions?status=watching",
-      { cache: "no-store" },
-    );
-  } catch (err) {
-    if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-      loggedOut = true;
-    } else {
-      loggedOut = true;
-    }
-  }
+  const { status, items } = useAuthGatedList<WatchingItem>(
+    "/api/subscriptions?status=watching",
+  );
 
-  if (loggedOut) {
-    return <LoggedOutStub dict={dict} lang={lang} />;
-  }
+  if (status === "loading") return <LoadingSkeleton dict={dict} />;
+  if (status === "anonymous") return <LoggedOutStub dict={dict} lang={lang} />;
   // Authed but nothing in this bucket — hide the section entirely.
   // Matches legacy ContinueWatching.jsx: `if (!list?.length) return null`.
   if (items.length === 0) return null;
