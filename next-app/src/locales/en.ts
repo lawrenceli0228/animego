@@ -206,6 +206,7 @@ const en = {
     api: 'API',
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
+    copyrightNotice: 'Copyright & Takedown',
     dataCredits: 'Data provided by',
     copyright: '© {year} AnimeGoClub · Rundle Streetが暮れる。東京が灯る。',
   },
