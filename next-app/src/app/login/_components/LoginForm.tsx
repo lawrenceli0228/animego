@@ -6,6 +6,7 @@ import type { Dict } from "@/lib/i18n";
 import { translateErrorMessage } from "@/lib/authForm";
 import { authFormStyles } from "@/lib/authFormStyles";
 import { submitLogin } from "../_lib/loginFlow";
+import { redirectAfterAuth } from "@/lib/authRedirect";
 
 interface LoginFormProps {
   /**
@@ -66,17 +67,11 @@ export default function LoginForm({ from, dict }: LoginFormProps) {
     try {
       const result = await submitLogin(form.email, form.password);
       if (result.ok) {
-        // Full navigation (NOT router.replace): the Navbar is a client island
-        // that reads the auth_hint cookie + probes /api/auth/me in its OWN
-        // effect — the root layout no longer fetches auth server-side (that
-        // comment was rot). A soft router.replace only re-runs that effect on
-        // the pathname change, and racily: it can read document.cookie before
-        // this response's Set-Cookie is committed, leaving the nav stuck
-        // "logged out" until a manual refresh. A full navigation remounts
-        // everything with the cookies already in the jar (exactly what that
-        // manual refresh does), so the nav reliably shows logged-in. `from` is
+        // Full navigation, not a soft router.replace — see redirectAfterAuth
+        // (the Navbar is a client island; a soft nav updates it only racily, so
+        // the user lands "logged out" until a manual refresh). `from` is
         // server-sanitized to a same-origin path.
-        window.location.replace(from);
+        redirectAfterAuth(from);
       } else {
         // Backend response.error.message is already localized on the
         // server (legacy Express returns Chinese for INVALID_CREDENTIALS);

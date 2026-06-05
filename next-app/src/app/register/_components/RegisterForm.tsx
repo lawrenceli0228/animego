@@ -6,6 +6,7 @@ import type { Dict } from "@/lib/i18n";
 import { translateErrorMessage } from "@/lib/authForm";
 import { authFormStyles } from "@/lib/authFormStyles";
 import { submitRegister } from "../_lib/registerFlow";
+import { redirectAfterAuth } from "@/lib/authRedirect";
 
 interface RegisterFormProps {
   from: string;
@@ -63,11 +64,10 @@ export default function RegisterForm({ from, dict }: RegisterFormProps) {
     try {
       const result = await submitRegister(form.username, form.email, form.password);
       if (result.ok) {
-        // Full navigation (NOT router.replace) — same reasoning as /login: the
-        // Navbar is a client island that probes auth in its own effect, so a
-        // soft replace updates it only racily. A full nav lands the new account
-        // on `from` with cookies committed, so the nav reliably shows logged-in.
-        window.location.replace(from);
+        // Full navigation, not a soft router.replace — see redirectAfterAuth
+        // (same reasoning as /login: the client-island Navbar updates only
+        // racily on a soft nav). Lands the new account on `from`.
+        redirectAfterAuth(from);
       } else {
         const translated = translateErrorMessage(result.message, dict);
         setError(translated || t.fail);
