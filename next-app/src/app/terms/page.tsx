@@ -96,9 +96,9 @@ export default function TermsPage() {
       <h2 style={x.h2}>十、条款变更</h2>
       <p style={x.p}>我们可能不时更新本条款，变更将于本页公布并更新“最后更新”日期。</p>
 
-      <h2 style={x.h2}>十一、适用法律与联系</h2>
+      <h2 style={x.h2}>十一、联系</h2>
       <p style={x.p}>
-        本条款受中华人民共和国香港特别行政区法律管辖。如有疑问请联系{" "}
+        如有疑问请联系{" "}
         <a style={x.a} href={`mailto:${CONTACT}`}>{CONTACT}</a>。
       </p>
     </LegalDoc>

@@ -105,7 +105,6 @@ export default function PrivacyPage() {
       <h2 style={x.h2}>九、联系我们</h2>
       <p style={x.p}>
         如对本政策有任何疑问，请联系 <a style={x.a} href={`mailto:${CONTACT}`}>{CONTACT}</a>。
-        本政策受中华人民共和国香港特别行政区法律管辖。
       </p>
     </LegalDoc>
   );

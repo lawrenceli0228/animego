@@ -61,7 +61,6 @@ export default function CopyrightPage() {
       <h2 style={x.h2}>三、联系</h2>
       <p style={x.p}>
         版权与侵权相关事宜，请联系 <a style={x.a} href={`mailto:${CONTACT}`}>{CONTACT}</a>。
-        本声明受中华人民共和国香港特别行政区法律管辖。
       </p>
     </LegalDoc>
   );
