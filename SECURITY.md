@@ -20,7 +20,7 @@ Instead, use one of these private channels:
 1. **GitHub Security Advisories** (preferred) — open a private report via the
    repository's **Security → Report a vulnerability** page:
    <https://github.com/lawrenceli0228/animego/security/advisories/new>
-2. **Email** — security@animegoclub.com
+2. **Email** — backpack71@gmail.com
 
 Please include:
 
