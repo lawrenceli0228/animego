@@ -1,0 +1,19 @@
+# Code owners for AnimeGo.
+#
+# A pull request that modifies a path below automatically requests a review from
+# the listed owner. To make this binding, enable
+# "Require review from Code Owners" in the branch protection rules for `main`.
+#
+# See CONTRIBUTING.md for what is / isn't open to external contributions.
+
+# Default: the project owner reviews all changes.
+*                                                           @lawrenceli0228
+
+# ── Out of scope for external contributions ─────────────────────────────────
+# The torrent/magnet metadata-search subsystem is maintained solely by the
+# owner and is NOT open to external code contributions. PRs touching these
+# paths will be closed without merge (see CONTRIBUTING.md → "Out of scope").
+/go-api/internal/torrents/                                  @lawrenceli0228
+/next-app/src/components/anime/TorrentModal.tsx             @lawrenceli0228
+/next-app/src/components/anime/torrentModalLogic.ts         @lawrenceli0228
+/next-app/src/components/anime/torrentModalLogic.test.ts    @lawrenceli0228

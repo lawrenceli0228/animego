@@ -313,10 +313,10 @@ cd next-app && bun test
 
 ## Contributing
 
-This is a proprietary project (see [License](#license)) — it is **not** open source. External code contributions (pull requests) are not accepted at this time, as no contributor license agreement (CLA) is in place. Bug reports and feedback via issues are welcome. A CLA may be introduced later if the project opens up to community contributions.
+AnimeGo is open source under the **GNU AGPL-3.0** license, and contributions are welcome. By submitting a pull request you agree to license your contribution under AGPL-3.0 and to sign off on the [Developer Certificate of Origin](DCO) (`git commit -s`). Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. Note that the torrent/magnet metadata-search subsystem is **out of scope** for external contributions — bug reports via issues are welcome, but code PRs for that area are not accepted. See also our [Code of Conduct](CODE_OF_CONDUCT.md) and [Security Policy](SECURITY.md).
 
 ---
 
 ## License
 
-**All rights reserved.** This source is published for transparency and reference only; it is **not** open-source software. No permission is granted to use, copy, modify, run, host, or distribute the code without prior written consent. See [LICENSE](LICENSE) for the full terms. The license covers only the original code in this repository, not the third-party data/APIs it integrates (AniList, Bangumi, dandanplay, ACG.rip).
+AnimeGo is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0). You may use, study, modify, and redistribute it under the terms of that license; in particular, if you run a modified version as a network service, you must make your modified source available to its users. See [LICENSE](LICENSE) for the full text. © 2026 lawrenceli0228 (AnimeGo · animegoclub.com). This license covers only the original code in this repository, not the third-party data/APIs it integrates (AniList, Bangumi, MyAnimeList, dandanplay, ACG.rip), which remain subject to their owners' terms.

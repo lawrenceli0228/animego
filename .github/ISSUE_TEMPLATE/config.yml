@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & Discussions
+    url: https://github.com/lawrenceli0228/animego/discussions
+    about: Ask questions, share ideas, or discuss the project before filing an issue.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/lawrenceli0228/animego/security/advisories/new
+    about: Please report security issues privately — not as public issues. See SECURITY.md.
+  - name: ⚖️ Copyright / takedown requests
+    url: https://animegoclub.com
+    about: For copyright or takedown matters, use the contact channel on the website.

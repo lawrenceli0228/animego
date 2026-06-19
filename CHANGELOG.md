@@ -2,6 +2,20 @@
 
 ---
 
+## [3.3.0] - 2026-06-19
+
+### 开源 — 项目改用 AGPL-3.0 许可 + 社区贡献治理骨架
+
+AnimeGo 从「公开可见但专有（All rights reserved）」正式转为 **GNU AGPL-3.0 开源**并开放社区贡献。本次只动许可证与治理文档，**无任何运行时 / 代码行为改动**。
+
+- **许可证：专有 → AGPL-3.0** — `LICENSE` 由原「仅供透明 / 参考、未授予任何使用权」的专有声明替换为官方 AGPL-3.0 全文。选 AGPL 而非 MIT/Apache 的理由：强 copyleft + **网络服务条款**（别人若把修改版当线上服务跑，必须向其用户公开修改后的源码），既防被闭源 fork 走、又与同类动漫弹幕项目（Animeko 等）的许可一致。`README.md` / `README.zh.md` 的 License 与 Contributing 两段同步翻新（EN+ZH），旧的「proprietary / 暂不接 PR」措辞全部替换。
+- **可单方面 relicense 的前提已核实** — 全部提交的人类作者均为本人的不同 git 身份；历史里仅有的 `Co-authored-by` 是 Claude 各型号（Anthropic），AI 产出不构成独立版权人 → 本人为唯一人类版权人，有权单方面把许可从专有改为 AGPL。
+- **DCO 而非 CLA** — 贡献走 [Developer Certificate of Origin 1.1](DCO)：贡献者保留各自版权、仅签核（`git commit -s`）声明有权提交，符合 AGPL 社区惯例、对贡献者更友好。代价（已知并接受）：DCO 下无法日后单方面把整库闭源或卖闭源 fork（需全体贡献者同意），要留这条路才需改用 CLA。
+- **磁力子系统不接外部贡献（三层围栏）** — 种子 / 磁力元数据搜索子系统（`go-api/internal/torrents/`、`TorrentModal*`）因法务与维护原因由 owner 独维，**不接受外部代码 PR**（欢迎提 issue）：`.github/CODEOWNERS` 锁目录 + `CONTRIBUTING.md` 列明 out-of-scope + `PULL_REQUEST_TEMPLATE.md` 加「本 PR 不碰磁力子系统」勾选项。注：真正 block 合并要在 GitHub 后台给 `main` 开「Require review from Code Owners」，该开关属仓库设置、不在本仓文件内。
+- **新增治理文件** — `CONTRIBUTING.md`（DCO + 贡献范围 + Conventional Commits + 本地测试命令）、`CODE_OF_CONDUCT.md`（Contributor Covenant 2.1）、`SECURITY.md`（私密漏洞披露，不走公开 issue）、`DCO`、`.github/` 下 PR 模板 + bug/feature issue 表单 + config。
+
+---
+
 ## [3.2.2] - 2026-06-05
 
 ### 性能 — 首页走 CF 边缘缓存(冷启动 1.6s → 0.12s)

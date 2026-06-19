@@ -312,10 +312,10 @@ cd next-app && bun test
 
 ## 贡献
 
-本项目为专有项目（见 [许可证](#许可证)），**并非**开源项目。目前**不接受**外部代码贡献（Pull Request），因为尚未设立贡献者许可协议（CLA）。欢迎通过 issue 提交 bug 反馈与建议。未来若开放社区贡献，可能会引入 CLA。
+AnimeGo 以 **GNU AGPL-3.0** 许可开源，欢迎贡献。提交 Pull Request 即表示你同意将贡献以 AGPL-3.0 授权，并签署[开发者原创声明（DCO）](DCO)（提交时加 `git commit -s`）。开 PR 前请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。注意：磁力/种子元数据搜索子系统**不在外部贡献范围内**——欢迎通过 issue 反馈 bug，但不接受该部分的代码 PR。另见[行为准则](CODE_OF_CONDUCT.md)与[安全政策](SECURITY.md)。
 
 ---
 
 ## 许可证
 
-**保留所有权利（All Rights Reserved）。** 本仓库源码仅为透明与参考目的公开，**并非**开源软件。未经事先书面许可，不授予任何使用、复制、修改、运行、托管或分发代码的权利。完整条款见 [LICENSE](LICENSE)。该许可仅覆盖本仓库的原创代码，不含其集成的第三方数据/接口（AniList、Bangumi、dandanplay、ACG.rip）。
+AnimeGo 采用 **GNU Affero 通用公共许可证 v3.0（AGPL-3.0）**。你可在该许可下使用、研究、修改与再分发本项目；特别地，若以网络服务形式运行修改版，须向其用户提供修改后的源码。完整条款见 [LICENSE](LICENSE)。© 2026 lawrenceli0228（AnimeGo · animegoclub.com）。该许可仅覆盖本仓库的原创代码，不含其集成的第三方数据/接口（AniList、Bangumi、MyAnimeList、dandanplay、ACG.rip），后者仍受各自所有者条款约束。
