@@ -18,13 +18,14 @@ import {
   ResumeVisual,
   ScheduleVisual,
   DropVisual,
+  MemberPassVisual,
 } from "./features/visuals";
 import type { PosterSlotMap } from "./features/visuals";
 import type { Dict, Lang } from "@/lib/i18n";
 
-type CardSize = "heroL" | "heroR" | "md" | "lg";
-type VisualType = "poster" | "danmaku" | "multi" | "manual" | "resume" | "schedule" | "drop";
-type FeatureKey = "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7";
+type CardSize = "heroL" | "heroR" | "md" | "lg" | "full";
+type VisualType = "poster" | "danmaku" | "multi" | "manual" | "resume" | "schedule" | "drop" | "memberpass";
+type FeatureKey = "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8";
 
 interface FeatureShape {
   key: FeatureKey;
@@ -32,6 +33,8 @@ interface FeatureShape {
   hue: number;
   visual: VisualType;
   hasCta: boolean;
+  /** Real destination for the card CTA; defaults to "#" (placeholder). */
+  ctaHref?: string;
 }
 
 const featureShape: FeatureShape[] = [
@@ -42,9 +45,10 @@ const featureShape: FeatureShape[] = [
   { key: "f5", size: "md",    hue: 260, visual: "resume",   hasCta: true  },
   { key: "f6", size: "lg",    hue: 195, visual: "schedule", hasCta: true  },
   { key: "f7", size: "lg",    hue: 70,  visual: "drop",     hasCta: true  },
+  { key: "f8", size: "full",  hue: 300, visual: "memberpass", hasCta: true, ctaHref: "/settings" },
 ];
 
-const ENTRANCE_DELAYS = [0, 0.08, 0.18, 0.24, 0.30, 0.38, 0.44];
+const ENTRANCE_DELAYS = [0, 0.08, 0.18, 0.24, 0.30, 0.38, 0.44, 0.50];
 
 type FeaturesDict = Dict["landing"]["features"];
 
@@ -201,9 +205,11 @@ interface VisualProps {
   lang: Lang;
   posters: PosterSlotMap;
   features: FeaturesDict;
+  memberCardArt: string | null;
+  memberCardBanner: string | null;
 }
 
-function Visual({ type, hue, lang, posters, features }: VisualProps) {
+function Visual({ type, hue, lang, posters, features, memberCardArt, memberCardBanner }: VisualProps) {
   if (type === "poster")   return <PosterVisual      hue={hue} lang={lang} posters={posters} features={features} />;
   if (type === "danmaku")  return <DanmakuVisual     hue={hue} features={features} />;
   if (type === "multi")    return <TorrentVisual     hue={hue} features={features} />;
@@ -211,6 +217,7 @@ function Visual({ type, hue, lang, posters, features }: VisualProps) {
   if (type === "resume")   return <ResumeVisual      hue={hue} features={features} />;
   if (type === "schedule") return <ScheduleVisual    hue={hue} features={features} />;
   if (type === "drop")     return <DropVisual        hue={hue} features={features} />;
+  if (type === "memberpass") return <MemberPassVisual hue={hue} features={features} lang={lang} art={memberCardArt} banner={memberCardBanner} />;
   return null;
 }
 
@@ -227,9 +234,11 @@ interface BentoCardProps {
   reduced: boolean;
   posters: PosterSlotMap;
   features: FeaturesDict;
+  memberCardArt: string | null;
+  memberCardBanner: string | null;
 }
 
-function BentoCard({ feat, index, lang, reduced, posters, features }: BentoCardProps) {
+function BentoCard({ feat, index, lang, reduced, posters, features, memberCardArt, memberCardBanner }: BentoCardProps) {
   const isHero = feat.size === "heroL" || feat.size === "heroR";
 
   return (
@@ -275,11 +284,11 @@ function BentoCard({ feat, index, lang, reduced, posters, features }: BentoCardP
         )}
       </div>
 
-      <Visual type={feat.visual} hue={feat.hue} lang={lang} posters={posters} features={features} />
+      <Visual type={feat.visual} hue={feat.hue} lang={lang} posters={posters} features={features} memberCardArt={memberCardArt} memberCardBanner={memberCardBanner} />
 
       {feat.hasCta && (
         <div style={s.textColumn}>
-          <a href="#" style={s.cta(feat.hue)} className="bento-cta">
+          <a href={feat.ctaHref ?? "#"} style={s.cta(feat.hue)} className="bento-cta">
             {fStr(features, `${feat.key}Cta`)}
           </a>
         </div>
@@ -291,9 +300,13 @@ function BentoCard({ feat, index, lang, reduced, posters, features }: BentoCardP
 interface FeaturesBentoProps {
   dict: Dict;
   posters: PosterSlotMap;
+  /** Random in-season anime cover used as the f8 Member Pass card face. */
+  memberCardArt?: string | null;
+  /** Random 16:9 banner used as the f8 profile-preview backdrop. */
+  memberCardBanner?: string | null;
 }
 
-export default function FeaturesBento({ dict, posters }: FeaturesBentoProps) {
+export default function FeaturesBento({ dict, posters, memberCardArt = null, memberCardBanner = null }: FeaturesBentoProps) {
   const features = dict.landing.features;
   // Detect lang via stable Chinese sentinel in identity.airing (zh: '放送中', en: 'Airing').
   // landing/* code path-locks lang via dict identity; no cookies/headers on the client side.
@@ -310,6 +323,7 @@ export default function FeaturesBento({ dict, posters }: FeaturesBentoProps) {
         .bento-card[data-size="heroR"] { grid-column: span 5; grid-row: span 2; }
         .bento-card[data-size="md"]    { grid-column: span 4; }
         .bento-card[data-size="lg"]    { grid-column: span 6; }
+        .bento-card[data-size="full"]  { grid-column: span 12; }
         @media (max-width: 1180px) {
           .bento-card[data-size="heroL"] { grid-column: span 12; grid-row: auto; }
           .bento-card[data-size="heroR"] { grid-column: span 12; grid-row: auto; }
@@ -371,6 +385,8 @@ export default function FeaturesBento({ dict, posters }: FeaturesBentoProps) {
               reduced={!!reduced}
               posters={posters}
               features={features}
+              memberCardArt={memberCardArt}
+              memberCardBanner={memberCardBanner}
             />
           ))}
         </div>

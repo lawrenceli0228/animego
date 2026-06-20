@@ -6,10 +6,11 @@ import DataSourcesTribute from "@/components/landing/DataSourcesTribute";
 import FeaturesBento from "@/components/landing/FeaturesBento";
 import PosterIdentityShowcase from "@/components/landing/PosterIdentityShowcase";
 import DifferentiatorSection from "@/components/landing/DifferentiatorSection";
-import DanmakuInsert from "@/components/landing/DanmakuInsert";
+import OpenSourceSection from "@/components/landing/OpenSourceSection";
 import FaqSection from "@/components/landing/FaqSection";
 import FinalCta from "@/components/landing/FinalCta";
 import { apiGet, ApiError } from "@/lib/api";
+import { getRepoStats } from "@/lib/github";
 import { getDict, getLang } from "@/lib/i18n";
 import type { AnimeDetail, TrendingItem } from "@/lib/types";
 
@@ -154,13 +155,14 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function LandingPage() {
-  const [dict, trending, frierenDetail, apothDetail, losingDetail] =
+  const [dict, trending, frierenDetail, apothDetail, losingDetail, repoStats] =
     await Promise.all([
       getDict(),
       safeTrending(),
       safeDetail(FEATURE_POSTER_IDS.frieren),
       safeDetail(FEATURE_POSTER_IDS.apoth),
       safeDetail(FEATURE_POSTER_IDS.losing),
+      getRepoStats(),
     ]);
 
   const trendingPosters = pickFeaturePosters(trending);
@@ -172,6 +174,22 @@ export default async function LandingPage() {
     apoth: apothDetail ?? trendingPosters.apoth ?? null,
     losing: losingDetail ?? trendingPosters.losing ?? null,
   };
+
+  // Random in-season cover for the §04 Member Pass card face (f8). Re-rolls
+  // each ISR revalidation, so the showcase card cycles through real shows.
+  const coverPool = trending.filter((t) => t.coverImageUrl);
+  const memberCardArt = coverPool.length
+    ? coverPool[Math.floor(Math.random() * coverPool.length)].coverImageUrl
+    : null;
+  // Profile-preview backdrop wants a wide 16:9 banner (covers crop badly in a
+  // wide header). Only AnimeDetail carries bannerImageUrl, so pool the feature
+  // details we already fetched.
+  const bannerPool = [frierenDetail, apothDetail, losingDetail]
+    .map((d) => d?.bannerImageUrl ?? null)
+    .filter((b): b is string => Boolean(b));
+  const memberCardBanner = bannerPool.length
+    ? bannerPool[Math.floor(Math.random() * bannerPool.length)]
+    : null;
 
   const showcase = pickShowcase(trending);
   const showcaseIds = new Set(showcase.map((a) => a.anilistId));
@@ -188,10 +206,19 @@ export default async function LandingPage() {
       <HeroSection dict={dict} poster={hero} />
       <StatsRow dict={dict} />
       <DataSourcesTribute dict={dict} />
-      <FeaturesBento dict={dict} posters={featurePosters} />
+      <FeaturesBento
+        dict={dict}
+        posters={featurePosters}
+        memberCardArt={memberCardArt}
+        memberCardBanner={memberCardBanner}
+      />
       <PosterIdentityShowcase dict={dict} posters={showcase} />
+      <OpenSourceSection
+        dict={dict}
+        stats={repoStats}
+        poster={danmakuBg ?? featurePosters.apoth ?? hero}
+      />
       <DifferentiatorSection dict={dict} />
-      <DanmakuInsert dict={dict} poster={danmakuBg} />
       <FaqSection dict={dict} />
       <FinalCta dict={dict} />
     </main>
