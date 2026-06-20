@@ -10,6 +10,7 @@ import {
 import { mono, label } from "../shared/hud-tokens";
 import { CornerBrackets } from "../shared/hud";
 import FadeImage from "@/components/ui/FadeImage";
+import MemberPass from "@/components/profile/MemberPass";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { LandingPoster } from "@/lib/types";
 
@@ -940,6 +941,170 @@ export function DropVisual({ hue, features }: DropVisualProps) {
             color: "rgba(235,235,245,0.75)",
           }}>{ext}</span>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// --- f8 Member Pass ----------------------------------------------------
+
+interface MemberPassVisualProps {
+  hue: number;
+  features: FeaturesDict;
+  lang: Lang;
+  /** Portrait cover used as the card face / avatar. */
+  art: string | null;
+  /** Wide 16:9 banner used as the profile-preview backdrop (covers crop badly
+   *  in a wide header). Falls back to `art` when no banner is available. */
+  banner: string | null;
+}
+
+// Swatch hues for the "pick a backdrop" row - varied so it reads as a
+// gallery of different shows, not a monochrome set.
+const BACKDROP_HUES = [20, 200, 320, 95];
+
+export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPassVisualProps) {
+  const zh = lang === "zh";
+  const backdrop = banner ?? art; // wide banner preferred for the profile header
+  return (
+    <div style={{ marginTop: 20, display: "flex", gap: "clamp(24px, 3vw, 44px)", flexWrap: "wrap", alignItems: "center" }}>
+      {/* 1) the real Member Pass card, identical to the profile / settings
+            preview. artUrl = a random in-season cover; photoUrl null so the
+            show art is the card face until the user uploads their own. */}
+      <div style={{ flexShrink: 0 }}>
+        <MemberPass
+          username="@you"
+          memberNo="AGC-000142"
+          since="SINCE 2026"
+          watchedCount={42}
+          topSeason={zh ? "2026 春季" : "2026 Spring"}
+          artUrl={art}
+          photoUrl={null}
+          lang={lang}
+        />
+      </div>
+
+      {/* 2) what YOU set: the two customizations + where the identity shows up */}
+      <div style={{ flex: "0 1 280px", minWidth: 220, display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* (1) card photo */}
+        <div>
+          <div style={{ ...label, marginBottom: 9 }}>
+            <span style={{ color: `oklch(80% 0.12 ${hue})` }}>{String.fromCharCode(9312)} </span>
+            {fStr(features, "f8PhotoLabel")}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+            <div style={{
+              position: "relative", width: 40, height: 40, borderRadius: 9999, flexShrink: 0,
+              background: `conic-gradient(from 140deg, oklch(70% 0.16 ${hue}), oklch(60% 0.14 ${(hue + 60) % 360}), oklch(70% 0.16 ${hue}))`,
+              border: "1.5px solid rgba(255,255,255,0.25)",
+            }}>
+              <span style={{
+                position: "absolute", right: -3, bottom: -3, width: 17, height: 17, borderRadius: 9999,
+                background: `oklch(64% 0.17 ${hue})`, display: "flex", alignItems: "center", justifyContent: "center",
+                border: "1.5px solid #0d0d0f",
+              }}>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#0a0a0e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 19V6" /><path d="M5 12l7-7 7 7" />
+                </svg>
+              </span>
+            </div>
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "rgba(235,235,245,0.7)", lineHeight: 1.4 }}>
+              {fStr(features, "f8PhotoHint")}
+            </span>
+          </div>
+        </div>
+
+        {/* (2) profile backdrop */}
+        <div>
+          <div style={{ ...label, marginBottom: 9 }}>
+            <span style={{ color: `oklch(80% 0.12 ${hue})` }}>{String.fromCharCode(9313)} </span>
+            {fStr(features, "f8PickLabel")}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {BACKDROP_HUES.map((h, i) => (
+              <div key={i} style={{
+                width: 48, height: 30, borderRadius: 6,
+                background: `linear-gradient(135deg, oklch(44% 0.13 ${h}) 0%, oklch(20% 0.07 ${h}) 100%)`,
+                border: i === 0 ? `2px solid oklch(75% 0.17 ${hue})` : "1px solid rgba(255,255,255,0.08)",
+                boxShadow: i === 0 ? `0 0 14px oklch(62% 0.17 ${hue} / 0.4)` : "none",
+              }} />
+            ))}
+          </div>
+        </div>
+
+        {/* synced everywhere */}
+        <div>
+          <div style={{ ...label, marginBottom: 8 }}>{fStr(features, "f8SyncLabel")}</div>
+          {["f8Sync1", "f8Sync2", "f8Sync3"].map((k, i) => (
+            <div key={k} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 0",
+              borderTop: i === 0 ? "none" : "1px solid rgba(84,84,88,0.28)",
+            }}>
+              <span style={{
+                width: 20, height: 20, borderRadius: 9999, flexShrink: 0,
+                background: `oklch(30% 0.10 ${hue} / 0.5)`,
+                border: `1px solid oklch(62% 0.17 ${hue} / 0.45)`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={`oklch(86% 0.14 ${hue})`} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </span>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "rgba(235,235,245,0.78)" }}>
+                {fStr(features, k)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 3) live profile preview: how the picked backdrop reads on your page.
+            Grows to absorb the wide tile so the section never looks half-empty. */}
+      <div style={{ flex: "1 1 340px", minWidth: 280, alignSelf: "center" }}>
+        <div style={{ ...label, marginBottom: 12 }}>{fStr(features, "f8PreviewLabel")}</div>
+        <div style={{
+          position: "relative", borderRadius: 14, overflow: "hidden",
+          background: "#0d0d0f", border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: `0 20px 48px -16px rgba(0,0,0,0.7), 0 0 32px oklch(62% 0.17 ${hue} / 0.12)`,
+        }}>
+          {/* backdrop banner = the backdrop you picked */}
+          <div style={{ position: "relative", height: 108 }}>
+            {backdrop ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={backdrop} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 35%" }} />
+            ) : (
+              <div style={{ position: "absolute", inset: 0, background: `linear-gradient(135deg, oklch(40% 0.13 ${hue}) 0%, oklch(20% 0.07 ${hue}) 100%)` }} />
+            )}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(13,13,15,0.88) 100%)" }} />
+          </div>
+          {/* avatar straddling the banner + name */}
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, padding: "0 18px", marginTop: -32, position: "relative" }}>
+            <div style={{
+              width: 62, height: 62, borderRadius: 9999, flexShrink: 0,
+              border: "3px solid #0d0d0f", overflow: "hidden", background: `oklch(30% 0.1 ${hue})`,
+            }}>
+              {art ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={art} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : null}
+            </div>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 7, paddingBottom: 8 }}>
+              <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 18, color: "#fff", letterSpacing: "-0.01em" }}>@you</span>
+              <span style={{ width: 7, height: 7, borderRadius: 9999, background: `oklch(74% 0.18 ${hue})`, boxShadow: `0 0 8px oklch(74% 0.18 ${hue})` }} aria-hidden />
+            </span>
+          </div>
+          {/* stats row */}
+          <div style={{ padding: "12px 18px 16px", display: "flex", alignItems: "baseline", gap: 12, ...mono, fontSize: 11, color: "rgba(235,235,245,0.5)" }}>
+            <span>
+              <b style={{ fontFamily: "'Sora', sans-serif", fontSize: 15, color: "#fff", marginRight: 4 }}>42</b>
+              {fStr(features, "f8PreviewWatched")}
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
+            <span>2026 {zh ? "春季" : "Spring"}</span>
+            <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
+            <span style={{ color: `oklch(80% 0.10 ${hue})` }}>#AGC-000142</span>
+          </div>
+        </div>
       </div>
     </div>
   );

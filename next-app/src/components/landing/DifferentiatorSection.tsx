@@ -332,7 +332,7 @@ export default function DifferentiatorSection({
           .diff-console { grid-template-columns: 1fr !important; row-gap: 8px !important; }
         }
       `}</style>
-      <SectionNum n="06" />
+      <SectionNum n="07" />
       <div className="container">
         <div className="diff-grid" style={s.grid}>
           <div className="diff-sticky" style={s.stickyLeft}>
