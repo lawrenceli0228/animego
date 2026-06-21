@@ -31,6 +31,10 @@ interface MemberPassProps {
   /** Membership status chip, defaults to 在籍 · 有效 / Active. */
   statusText?: string;
   lang: "zh" | "en";
+  /** Defer the card art (loading="lazy"). Default eager — the card is the LCP
+   *  hero on profile/settings pages. The landing /welcome card opts in because
+   *  it sits far below the fold (Lighthouse offscreen-images). */
+  lazy?: boolean;
 }
 
 /** Tinted SVG used when the cover fails to load — never a broken-image box. */
@@ -61,6 +65,7 @@ export default function MemberPass({
   photoUrl,
   statusText,
   lang,
+  lazy = false,
 }: MemberPassProps) {
   const cardRef = useHoloTilt<HTMLDivElement>();
   // SVG gradient is the last-ditch onError target; the default card image is
@@ -103,6 +108,8 @@ export default function MemberPass({
             <img
               src={src}
               alt={hasPhoto ? "我的卡面照片" : `${username} 卡面`}
+              loading={lazy ? "lazy" : "eager"}
+              decoding="async"
               onError={() => {
                 if (src !== fallback) setSrc(fallback);
               }}

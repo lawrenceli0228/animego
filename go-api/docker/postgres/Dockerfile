@@ -9,19 +9,27 @@ FROM postgres:16-alpine
 ARG PG_CRON_VERSION=1.6.5
 
 # Build deps installed transiently — removed at end of layer to keep the
-# image lean (final image ~190 MB vs ~85 MB stock, mostly the pg_cron .so).
+# image lean (final image ~225 MB, mostly the pg_cron .so + headers churn).
+#
+# NB: we deliberately do NOT pull clang/llvm. Those were pinned (clang19 /
+# llvm19-dev) only to let PGXS emit JIT bitcode (*.bc) for the extension, and
+# the pin rotted the moment `postgres:16-alpine` floated onto a newer Alpine
+# (3.24 ships clang16/18/22, llvm15..22 — no 19), so `apk add` failed with
+# "unable to select packages" and broke BOTH the CI postgres-image build and
+# the prod deploy build. Bitcode is a pure optimization: the .so loads and
+# pg_cron schedules run identically without it, so we build `with_llvm=no`
+# and drop the toolchain entirely. What's left (build-base + postgresql16-dev)
+# tracks the base image's major version and does not pin a disappearing minor.
 RUN apk add --no-cache --virtual .build-deps \
         build-base \
-        clang19 \
-        llvm19-dev \
         postgresql16-dev \
         git \
         ca-certificates \
  && cd /tmp \
  && git clone --depth=1 --branch v${PG_CRON_VERSION} https://github.com/citusdata/pg_cron.git \
  && cd pg_cron \
- && make \
- && make install \
+ && make with_llvm=no \
+ && make with_llvm=no install \
  && cd / && rm -rf /tmp/pg_cron \
  && apk del .build-deps
 
