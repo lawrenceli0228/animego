@@ -615,9 +615,17 @@ const zh = {
       dedupeBusy: '合并中…',
       refreshAvail: '刷新硬盘可用性',
       refreshAvailBusy: '检测中…',
+      rescan: '重新扫描文件夹',
+      rescanBusy: '扫描中…',
       reset: '重置库',
       refreshMetaBusy: '刷新中…',
     },
+    scanToast: {
+      kicker: '自动扫描',
+      title: '发现 {{count}} 个新剧集',
+    },
+    persistHint:
+      '提示:重新授权时选择「每次访问时都允许」,或把本站安装为应用——重启浏览器后新下载会自动进库,无需再次点击。',
     access: {
       loadingEyebrow: 'LIBRARY // LOADING',
       loadingTitle: '正在读取本地库...',

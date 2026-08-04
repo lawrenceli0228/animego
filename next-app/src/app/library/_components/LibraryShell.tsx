@@ -65,6 +65,7 @@ import { useSeriesLibraryStatus } from "../_hooks/useSeriesLibraryStatus";
 // These files don't exist yet while this subagent runs — trust the integrator.
 import { useFileHandles } from "../_hooks/useFileHandles";
 import { useImport } from "../_hooks/useImport";
+import { useAutoRescan } from "../_hooks/useAutoRescan";
 import { useUserOverride } from "../_hooks/useUserOverride";
 import { useSeriesSelection } from "../_hooks/useSeriesSelection";
 
@@ -305,6 +306,27 @@ export function LibraryShell() {
   } = useImport({ db, dandan });
   const [importDismissed, setImportDismissed] = useState(false);
   const { processFiles } = useVideoFiles();
+
+  // Watch-folder auto rescan: reconciliation scan on mount + tab-return.
+  // Silent runs pre-dismiss the drawer (mini pill only) and surface new
+  // episodes via NewAdditionsRow (liveQuery) plus a light toast.
+  const [scanToast, setScanToast] = useState<number | null>(null);
+  const {
+    scanning: rescanBusy,
+    manualRescan,
+    yieldToManual,
+  } = useAutoRescan({
+    db,
+    handlesStatus: status,
+    importStatus,
+    runImport,
+    processFiles,
+    refreshHandles,
+    onBeforeSilentRun: () => setImportDismissed(true),
+    onScanComplete: (result: { newCount: number }) => {
+      if (result.newCount > 0) setScanToast(result.newCount);
+    },
+  });
   const {
     all: overrides,
     lock,
@@ -458,6 +480,11 @@ export function LibraryShell() {
       collected.map(({ file, relPath }: any) => [file, relPath]),
     );
     const { files: items } = processFiles(allFiles, { pathMap });
+    // D2 preemption: cancel any in-flight silent auto-scan and wait (bounded)
+    // for it to exit — two concurrent runImports race the priorSeasons
+    // snapshot and can mint duplicate series. Placed AFTER pickFolder so the
+    // picker keeps its transient-activation window.
+    await yieldToManual();
     setImportDismissed(false);
     // P6 type widen: ParsedEpisodeItem.parsedKind is string after
     // processFiles; EpisodeItem types it as a union literal. Legacy
@@ -465,7 +492,7 @@ export function LibraryShell() {
     // parity by widening to `any` at the boundary.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await runImport({ items: items as any, libraryId: record.libraryId });
-  }, [fsaSupported, pickFolder, processFiles, runImport]);
+  }, [fsaSupported, pickFolder, processFiles, runImport, yieldToManual]);
 
   const handlePickSeries = useCallback((id: string) => {
     // Open the in-page episode picker. The user picks an exact episode there
@@ -851,6 +878,22 @@ export function LibraryShell() {
     }
   }, [availReauthorizing, reauthorizableLibIds, reauthorizeHandle]);
 
+  // Manual watch-folder rescan (gesture path). Unlike the automatic scan,
+  // this MAY reauthorize non-ready roots first — requestPermission needs the
+  // click's transient activation, which effects never have.
+  const handleRescanFolders = useCallback(async () => {
+    if (rescanBusy) return;
+    try {
+      for (const libId of reauthorizableLibIds) {
+        await reauthorizeHandle(libId);
+      }
+      await manualRescan();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[library] manual rescan failed:", err);
+    }
+  }, [rescanBusy, reauthorizableLibIds, reauthorizeHandle, manualRescan]);
+
   // One-click "merge duplicates".
   const [dedupeBusy, setDedupeBusy] = useState(false);
   const handleDedupe = useCallback(async () => {
@@ -1075,6 +1118,16 @@ export function LibraryShell() {
                     testId: "library-refresh-availability",
                   },
                   {
+                    id: "rescan-folders",
+                    label: rescanBusy
+                      ? t("library.overflow.rescanBusy")
+                      : t("library.overflow.rescan"),
+                    onClick: handleRescanFolders,
+                    disabled: rescanBusy,
+                    icon: "⟳",
+                    testId: "library-rescan-folders",
+                  },
+                  {
                     id: "reset",
                     label: t("library.overflow.reset"),
                     onClick: handleResetLibrary,
@@ -1208,6 +1261,19 @@ export function LibraryShell() {
             refreshing={availRefreshing}
             reauthorizing={availReauthorizing}
           />
+          {reauthorizableLibIds.length > 0 && (
+            <p
+              data-testid="library-persist-hint"
+              style={{
+                margin: "8px 0 0",
+                fontSize: 12,
+                lineHeight: 1.7,
+                color: "rgba(235,235,245,0.45)",
+              }}
+            >
+              {t("library.persistHint")}
+            </p>
+          )}
           <UnclassifiedSection
             entries={unclassifiedEntries}
             defaultOpen
@@ -1309,6 +1375,18 @@ export function LibraryShell() {
           meta={currentAutoMerge.meta}
           onView={handleAutoMergeView}
           onDismiss={handleAutoMergeDismiss}
+        />
+      ) : scanToast !== null ? (
+        <UndoToast
+          open
+          key={`scan-${scanToast}`}
+          testId="scan-toast"
+          kicker={t("library.scanToast.kicker")}
+          title={t("library.scanToast.title").replace(
+            "{{count}}",
+            String(scanToast),
+          )}
+          onDismiss={() => setScanToast(null)}
         />
       ) : null}
     </div>

@@ -28,6 +28,11 @@ test.describe("/library — sandbox journeys", () => {
     await expect(cards.first()).toBeVisible({ timeout: 10_000 });
     expect(await cards.count()).toBeGreaterThanOrEqual(1);
 
+    // Watch-folder auto-rescan must be a silent no-op here (no fileHandles
+    // seeded): the full-screen import drawer/scrim must never cover the grid.
+    await expect(page.getByTestId("import-drawer")).toHaveCount(0);
+    await expect(page.getByTestId("import-drawer-scrim")).toHaveCount(0);
+
     await page.waitForLoadState("networkidle");
 
     expect(

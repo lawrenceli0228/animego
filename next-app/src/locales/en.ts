@@ -563,9 +563,17 @@ const en = {
       dedupeBusy: 'Merging…',
       refreshAvail: 'Refresh drive availability',
       refreshAvailBusy: 'Detecting…',
+      rescan: 'Rescan folders',
+      rescanBusy: 'Scanning…',
       reset: 'Reset library',
       refreshMetaBusy: 'Refreshing…',
     },
+    scanToast: {
+      kicker: 'AUTO SCAN',
+      title: '{{count}} new episodes found',
+    },
+    persistHint:
+      'Tip: choose "Allow on every visit" when re-authorizing, or install this site as an app — new downloads will then flow in automatically after a browser restart, no extra click needed.',
     access: {
       loadingEyebrow: 'LIBRARY // LOADING',
       loadingTitle: 'Loading your library...',
