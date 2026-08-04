@@ -59,6 +59,9 @@ import { flattenDropFiles } from "@/lib/dropFiles";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — JS module
 import { useFileHandles } from "@/app/library/_hooks/useFileHandles";
+import { useImport } from "@/app/library/_hooks/useImport";
+import { useAutoRescan } from "@/app/library/_hooks/useAutoRescan";
+import { createDandanClient } from "@/app/library/_services/dandanClient";
 import { useSeriesDetail } from "@/app/library/_hooks/useSeriesDetail";
 import { useVideoFiles } from "@/app/library/_hooks/useVideoFiles";
 
@@ -424,6 +427,34 @@ function PlayerShellInner() {
     resumeAt,
     setLastTime,
   } = playback;
+
+  // PR-2 watch-folder rescan on tab-return (library mode only). Mount scans
+  // are /library's job — here we only catch "downloaded the next episode
+  // while watching, tabbed back, expects it in the episode nav". Never while
+  // the video is actively playing (hash workers must not compete with
+  // decode); the deferred scan simply fires on the next tab-return.
+  const rescanDandan = useMemo(() => createDandanClient(), []);
+  const { run: rescanImport, status: rescanImportStatus } = useImport({
+    db,
+    dandan: rescanDandan,
+  });
+  useAutoRescan({
+    db,
+    handlesStatus: fileHandles.status,
+    importStatus: rescanImportStatus,
+    runImport: rescanImport,
+    processFiles,
+    refreshHandles: fileHandles.refresh,
+    enabled: Boolean(locationSeriesId),
+    triggers: { mount: false, visibility: true },
+    shouldDefer: () => playbackPhase === "playing",
+    onBeforeSilentRun: () => {},
+    // useSeriesDetail is a one-shot load (not liveQuery) — pull the fresh
+    // episode list so the new download appears in EpisodeNav immediately.
+    onScanComplete: (result: { newCount: number }) => {
+      if (result.newCount > 0) seriesDetail.refresh();
+    },
+  });
 
   const [pickerEp, setPickerEp] = useState<number | null>(null);
   const [isMobileView, setIsMobileView] = useState<boolean>(isMobile);
