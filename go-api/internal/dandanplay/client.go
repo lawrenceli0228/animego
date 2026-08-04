@@ -40,6 +40,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -175,6 +176,14 @@ type EpisodeData struct {
 	Title         string          `json:"title"`
 	ImageURL      string          `json:"imageUrl"`
 	Episodes      []DandanEpisode `json:"episodes"`
+
+	// AniListID / BgmID are dandanplay's own cross-links to the entry,
+	// parsed out of the bangumi detail payload.  0 = dandanplay didn't
+	// publish that link for this entry.  They let /match resolve
+	// siteAnime by exact id instead of re-searching anime_cache by
+	// title, which cannot distinguish "無職転生Ⅱ" from "無職転生Ⅲ".
+	AniListID int32 `json:"anilistId"`
+	BgmID     int32 `json:"bgmId"`
 }
 
 // DandanAnime is one entry returned by /api/v2/search/anime.
@@ -446,12 +455,46 @@ type bangumiEnvelope struct {
 		AnimeID    int64  `json:"animeId"`
 		AnimeTitle string `json:"animeTitle"`
 		ImageURL   string `json:"imageUrl"`
-		Episodes   []struct {
+		// BangumiURL is the bgm.tv subject permalink
+		// ("https://bangumi.tv/subject/501963").  NOTE: the sibling
+		// `bangumiId` field is NOT this id — it repeats dandanplay's own
+		// animeId as a string, so it is deliberately not parsed here.
+		BangumiURL string `json:"bangumiUrl"`
+		// OnlineDatabases cross-links the entry to AniList / MAL / AniDB
+		// / Bangumi.tv.  The AniList link is the strongest identity we
+		// get from dandanplay — anime_cache is keyed by anilist_id.
+		OnlineDatabases []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"onlineDatabases"`
+		Episodes []struct {
 			EpisodeID     int64  `json:"episodeId"`
 			EpisodeTitle  string `json:"episodeTitle"`
 			EpisodeNumber string `json:"episodeNumber"`
 		} `json:"episodes"`
 	} `json:"bangumi"`
+}
+
+// anilistURLRe / bgmSubjectURLRe extract the numeric ids out of the
+// cross-link URLs dandanplay ships in the bangumi detail payload.
+// bangumi.tv and bgm.tv are the same site under two domains.
+var (
+	anilistURLRe    = regexp.MustCompile(`anilist\.co/anime/(\d+)`)
+	bgmSubjectURLRe = regexp.MustCompile(`(?:bangumi|bgm)\.tv/subject/(\d+)`)
+)
+
+// idFromURL returns the first capture group of re against s parsed as an
+// int32, or 0 when the pattern misses or the number doesn't fit.
+func idFromURL(re *regexp.Regexp, s string) int32 {
+	m := re.FindStringSubmatch(s)
+	if m == nil {
+		return 0
+	}
+	n, err := strconv.ParseInt(m[1], 10, 32)
+	if err != nil {
+		return 0
+	}
+	return int32(n)
 }
 
 // FetchEpisodesByBgmID hits /api/v2/bangumi/bgmtv/:bgmId.  bgmId is the
@@ -502,7 +545,14 @@ func (c *Client) fetchEpisodes(ctx context.Context, path string) (*EpisodeData, 
 		DandanAnimeID: env.Bangumi.AnimeID,
 		Title:         env.Bangumi.AnimeTitle,
 		ImageURL:      env.Bangumi.ImageURL,
+		BgmID:         idFromURL(bgmSubjectURLRe, env.Bangumi.BangumiURL),
 		Episodes:      make([]DandanEpisode, 0, len(env.Bangumi.Episodes)),
+	}
+	for _, db := range env.Bangumi.OnlineDatabases {
+		if id := idFromURL(anilistURLRe, db.URL); id != 0 {
+			out.AniListID = id
+			break
+		}
 	}
 	for _, e := range env.Bangumi.Episodes {
 		ep := DandanEpisode{

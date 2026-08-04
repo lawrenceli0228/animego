@@ -37,18 +37,18 @@ import (
 type fakeClient struct {
 	mu sync.Mutex
 
-	matchFn        func(ctx context.Context, fileName, fileHash string, fileSize int64) (*MatchResult, error)
-	episodesBgmFn  func(ctx context.Context, bgmID int32) (*EpisodeData, error)
-	episodesDanFn  func(ctx context.Context, animeID int64) (*EpisodeData, error)
-	searchFn       func(ctx context.Context, keyword string) ([]DandanAnime, error)
-	commentsFn     func(ctx context.Context, episodeID int64) (*CommentsResponse, error)
+	matchFn       func(ctx context.Context, fileName, fileHash string, fileSize int64) (*MatchResult, error)
+	episodesBgmFn func(ctx context.Context, bgmID int32) (*EpisodeData, error)
+	episodesDanFn func(ctx context.Context, animeID int64) (*EpisodeData, error)
+	searchFn      func(ctx context.Context, keyword string) ([]DandanAnime, error)
+	commentsFn    func(ctx context.Context, episodeID int64) (*CommentsResponse, error)
 
-	matchCalls        atomic.Int32
-	matchInvocations  []matchCall
-	episodesBgmCalls  atomic.Int32
-	episodesDanCalls  atomic.Int32
-	searchCalls       atomic.Int32
-	commentsCalls     atomic.Int32
+	matchCalls       atomic.Int32
+	matchInvocations []matchCall
+	episodesBgmCalls atomic.Int32
+	episodesDanCalls atomic.Int32
+	searchCalls      atomic.Int32
+	commentsCalls    atomic.Int32
 }
 
 type matchCall struct {
@@ -104,14 +104,24 @@ func (f *fakeClient) FetchComments(ctx context.Context, episodeID int64) (*Comme
 // hooks so the 20s timeout test can simulate a slow Postgres.
 type fakeDB struct {
 	searchFn    func(ctx context.Context, pattern *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error)
+	byAnilistFn func(ctx context.Context, anilistID int32) (dbgen.GetAnimeByAnilistIDForDandanplayRow, error)
 	byBgmFn     func(ctx context.Context, bgmID *int32) (dbgen.GetAnimeByBgmIDRow, error)
 	genresFn    func(ctx context.Context, animeID int32) ([]string, error)
 	studiosFn   func(ctx context.Context, animeID int32) ([]string, error)
 
-	searchCalls  atomic.Int32
-	byBgmCalls   atomic.Int32
-	genresCalls  atomic.Int32
-	studiosCalls atomic.Int32
+	searchCalls    atomic.Int32
+	byAnilistCalls atomic.Int32
+	byBgmCalls     atomic.Int32
+	genresCalls    atomic.Int32
+	studiosCalls   atomic.Int32
+}
+
+func (f *fakeDB) GetAnimeByAnilistIDForDandanplay(ctx context.Context, anilistID int32) (dbgen.GetAnimeByAnilistIDForDandanplayRow, error) {
+	f.byAnilistCalls.Add(1)
+	if f.byAnilistFn == nil {
+		return dbgen.GetAnimeByAnilistIDForDandanplayRow{}, pgx.ErrNoRows
+	}
+	return f.byAnilistFn(ctx, anilistID)
 }
 
 func (f *fakeDB) SearchAnimeCacheForDandanplay(ctx context.Context, pattern *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
@@ -167,8 +177,8 @@ func newTestHandlers(db DBQuerier, client DandanClient, bgm BangumiSearcher) *Ha
 }
 
 // strPtr is a tiny helper because Go disallows `&"x"`.
-func strPtr(s string) *string { return &s }
-func i32Ptr(n int32) *int32   { return &n }
+func strPtr(s string) *string   { return &s }
+func i32Ptr(n int32) *int32     { return &n }
 func f64Ptr(f float64) *float64 { return &f }
 
 func postMatch(t *testing.T, h *Handlers, body MatchRequest) *httptest.ResponseRecorder {
@@ -376,8 +386,8 @@ func TestMatch_Phase2_CacheHit(t *testing.T) {
 func TestMatch_Phase2_SkipsRowsWithoutBgmID(t *testing.T) {
 	bgmID := int32(555)
 	rows := []dbgen.SearchAnimeCacheForDandanplayRow{
-		{AnilistID: 1, BgmID: nil},          // skipped
-		{AnilistID: 2, BgmID: &bgmID},       // tried
+		{AnilistID: 1, BgmID: nil, TitleNative: strPtr("x")},    // skipped
+		{AnilistID: 2, BgmID: &bgmID, TitleNative: strPtr("x")}, // tried
 	}
 	db := &fakeDB{
 		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
@@ -403,8 +413,8 @@ func TestMatch_Phase2_CandidateMissesFallThrough(t *testing.T) {
 	bgmA := int32(1)
 	bgmB := int32(2)
 	rows := []dbgen.SearchAnimeCacheForDandanplayRow{
-		{AnilistID: 10, BgmID: &bgmA},
-		{AnilistID: 20, BgmID: &bgmB},
+		{AnilistID: 10, BgmID: &bgmA, TitleNative: strPtr("x")},
+		{AnilistID: 20, BgmID: &bgmB, TitleNative: strPtr("x")},
 	}
 	db := &fakeDB{
 		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
@@ -640,7 +650,7 @@ func TestFindSiteAnime_Level1_TitleHit(t *testing.T) {
 }
 
 func TestFindSiteAnime_Level2_KeywordHit(t *testing.T) {
-	row := dbgen.SearchAnimeCacheForDandanplayRow{AnilistID: 2}
+	row := dbgen.SearchAnimeCacheForDandanplayRow{AnilistID: 2, TitleNative: strPtr("title-x")}
 	calls := atomic.Int32{}
 	db := &fakeDB{
 		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
@@ -968,8 +978,8 @@ func TestMatch_Phase2_EpisodesFetchError_ContinuesToNext(t *testing.T) {
 	db := &fakeDB{
 		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
 			return []dbgen.SearchAnimeCacheForDandanplayRow{
-				{AnilistID: 10, BgmID: &bgmA},
-				{AnilistID: 20, BgmID: &bgmB},
+				{AnilistID: 10, BgmID: &bgmA, TitleNative: strPtr("x")},
+				{AnilistID: 20, BgmID: &bgmB, TitleNative: strPtr("x")},
 			}, nil
 		},
 	}
@@ -1068,4 +1078,161 @@ func TestMatchUnmappedFiles_FillsGaps(t *testing.T) {
 	var ep map[string]EpisodeMapEntry
 	require.NoError(t, json.Unmarshal(out["episodeMap"], &ep))
 	assert.Len(t, ep, 3, "all three episodes should be mapped via per-file fallback")
+}
+
+// ─── siteAnime identity resolution (season-mismatch regression) ───────────
+
+// mushokuS3EpisodeData is what dandanplay returns for a hash hit on a
+// 無職転生Ⅲ file: the correct entry, carrying its own cross-links to
+// AniList 178789 and bgm.tv 501963.
+func mushokuS3EpisodeData() *EpisodeData {
+	ep := makeEpisodeData(18727, "无职转生Ⅲ ～到了异世界就拿出真本事～")
+	ep.AniListID = 178789
+	ep.BgmID = 501963
+	return ep
+}
+
+// TestMatch_Phase1_SiteAnimeUsesExactAniListID is the regression test for
+// the live bug: a season 3 file matched correctly by hash, but siteAnime
+// was re-derived by searching anime_cache for the title and taking the
+// first row — which was season 2.  The card then showed season 2's
+// score, year, episode count and "view details" link under a season 3
+// title.
+func TestMatch_Phase1_SiteAnimeUsesExactAniListID(t *testing.T) {
+	db := &fakeDB{
+		byAnilistFn: func(_ context.Context, id int32) (dbgen.GetAnimeByAnilistIDForDandanplayRow, error) {
+			require.Equal(t, int32(178789), id)
+			return dbgen.GetAnimeByAnilistIDForDandanplayRow{
+				AnilistID:    178789,
+				TitleChinese: strPtr("无职转生 第三季 ～到了异世界就拿出真本事～"),
+				SeasonYear:   i32Ptr(2026),
+				BangumiScore: f64Ptr(7.9),
+			}, nil
+		},
+		// The fuzzy leg would return season 2 first, as prod does.
+		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
+			return mushokuRows(), nil
+		},
+	}
+	client := &fakeClient{
+		matchFn: func(_ context.Context, _, _ string, _ int64) (*MatchResult, error) {
+			return &MatchResult{IsMatched: true, AnimeID: 18727, AnimeTitle: "无职转生Ⅲ ～到了异世界就拿出真本事～"}, nil
+		},
+		episodesDanFn: func(_ context.Context, _ int64) (*EpisodeData, error) {
+			return mushokuS3EpisodeData(), nil
+		},
+	}
+	h := newTestHandlers(db, client, nil)
+
+	rec := postMatch(t, h, MatchRequest{
+		Keyword:  "无职转生",
+		Episodes: []int{1},
+		FileName: "Mushoku.Tensei.S3.E01.mkv",
+		FileHash: "d41d8cd98f00b204e9800998ecf8427e",
+	})
+	out := unmarshalMatch(t, rec)
+
+	var site struct {
+		AnilistID    int32    `json:"anilistId"`
+		TitleChinese *string  `json:"titleChinese"`
+		SeasonYear   *int32   `json:"seasonYear"`
+		BangumiScore *float64 `json:"bangumiScore"`
+	}
+	require.NoError(t, json.Unmarshal(out["siteAnime"], &site))
+	assert.Equal(t, int32(178789), site.AnilistID, "must be season 3, not season 2 (146065)")
+	require.NotNil(t, site.SeasonYear)
+	assert.Equal(t, int32(2026), *site.SeasonYear)
+	assert.Zero(t, db.searchCalls.Load(), "exact id hit must not fall through to the fuzzy search")
+}
+
+// TestResolveSiteAnime_LegPrecedence pins the ordering: anilist id wins,
+// bgm id is next, and the fuzzy search only runs when dandanplay
+// published no cross-link at all.
+func TestResolveSiteAnime_LegPrecedence(t *testing.T) {
+	t.Run("anilist id preferred over bgm id", func(t *testing.T) {
+		db := &fakeDB{
+			byAnilistFn: func(_ context.Context, _ int32) (dbgen.GetAnimeByAnilistIDForDandanplayRow, error) {
+				return dbgen.GetAnimeByAnilistIDForDandanplayRow{AnilistID: 178789}, nil
+			},
+		}
+		h := newTestHandlers(db, &fakeClient{}, nil)
+		got := h.resolveSiteAnime(context.Background(), mushokuS3EpisodeData(), "无职转生")
+		require.NotNil(t, got)
+		assert.Equal(t, int32(178789), got.AnilistID)
+		assert.Zero(t, db.byBgmCalls.Load())
+		assert.Zero(t, db.searchCalls.Load())
+	})
+
+	t.Run("falls back to bgm id when anilist row is absent", func(t *testing.T) {
+		bgm := int32(501963)
+		db := &fakeDB{
+			byBgmFn: func(_ context.Context, id *int32) (dbgen.GetAnimeByBgmIDRow, error) {
+				require.NotNil(t, id)
+				assert.Equal(t, int32(501963), *id)
+				return dbgen.GetAnimeByBgmIDRow{AnilistID: 178789, BgmID: &bgm}, nil
+			},
+		}
+		h := newTestHandlers(db, &fakeClient{}, nil)
+		got := h.resolveSiteAnime(context.Background(), mushokuS3EpisodeData(), "无职转生")
+		require.NotNil(t, got)
+		assert.Equal(t, int32(178789), got.AnilistID)
+		assert.Equal(t, int32(1), db.byAnilistCalls.Load(), "anilist leg tried first")
+		assert.Zero(t, db.searchCalls.Load())
+	})
+
+	t.Run("falls back to fuzzy search when no cross-links", func(t *testing.T) {
+		db := &fakeDB{
+			searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
+				return mushokuRows(), nil
+			},
+		}
+		h := newTestHandlers(db, &fakeClient{}, nil)
+		ep := makeEpisodeData(18727, "无职转生Ⅲ ～到了异世界就拿出真本事～") // no ids
+		got := h.resolveSiteAnime(context.Background(), ep, "无职转生")
+		require.NotNil(t, got)
+		// Even the fuzzy leg must land on season 3 — the season gate
+		// reads the marker off the dandanplay title.
+		assert.Equal(t, int32(178789), got.AnilistID)
+		assert.Zero(t, db.byAnilistCalls.Load(), "no id → no id lookup")
+	})
+}
+
+// TestFindSiteAnime_KeywordWidensSearchButTitleDecides is the precision
+// half of the fix.  A folder name ("无职转生") is all the level-2 search
+// gets, and it matches every season of the franchise.  The authoritative
+// dandanplay title is what adjudicates, so a bare keyword can never
+// downgrade a season 3 request into whichever row came back first.
+func TestFindSiteAnime_KeywordWidensSearchButTitleDecides(t *testing.T) {
+	calls := atomic.Int32{}
+	db := &fakeDB{
+		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
+			if calls.Add(1) == 1 {
+				// Level 1: the full CN title finds nothing, because the
+				// cache stores "第三季" where dandanplay writes "Ⅲ".
+				return []dbgen.SearchAnimeCacheForDandanplayRow{}, nil
+			}
+			return mushokuRows(), nil
+		},
+	}
+	h := newTestHandlers(db, &fakeClient{}, nil)
+
+	got := h.findSiteAnime(context.Background(), "无职转生Ⅲ ～到了异世界就拿出真本事～", "无职转生")
+	require.NotNil(t, got)
+	assert.Equal(t, int32(178789), got.AnilistID)
+	assert.Equal(t, int32(2), calls.Load(), "level 1 miss then level 2 hit")
+}
+
+// TestFindSiteAnime_ReturnsNilRatherThanWrongSeason — when the requested
+// season simply isn't cached, siteAnime must be null.  An un-enriched
+// card is a far smaller error than a wrong score plus a link to the
+// wrong anime.
+func TestFindSiteAnime_ReturnsNilRatherThanWrongSeason(t *testing.T) {
+	db := &fakeDB{
+		searchFn: func(_ context.Context, _ *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error) {
+			return mushokuRows(), nil
+		},
+	}
+	h := newTestHandlers(db, &fakeClient{}, nil)
+	got := h.findSiteAnime(context.Background(), "无职转生Ⅳ ～到了异世界就拿出真本事～", "无职转生")
+	assert.Nil(t, got)
 }

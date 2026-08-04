@@ -9,6 +9,91 @@ import (
 	"context"
 )
 
+const getAnimeByAnilistIDForDandanplay = `-- name: GetAnimeByAnilistIDForDandanplay :one
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    episodes,
+    status,
+    season,
+    season_year,
+    format,
+    average_score,
+    bangumi_score,
+    bangumi_votes,
+    bgm_id,
+    source,
+    duration
+FROM anime_cache
+WHERE anilist_id = $1
+LIMIT 1
+`
+
+type GetAnimeByAnilistIDForDandanplayRow struct {
+	AnilistID       int32    `json:"anilistId"`
+	TitleRomaji     *string  `json:"titleRomaji"`
+	TitleEnglish    *string  `json:"titleEnglish"`
+	TitleNative     *string  `json:"titleNative"`
+	TitleChinese    *string  `json:"titleChinese"`
+	CoverImageUrl   *string  `json:"coverImageUrl"`
+	CoverImageColor *string  `json:"coverImageColor"`
+	PosterAccent    *string  `json:"posterAccent"`
+	Episodes        *int32   `json:"episodes"`
+	Status          *string  `json:"status"`
+	Season          *string  `json:"season"`
+	SeasonYear      *int32   `json:"seasonYear"`
+	Format          *string  `json:"format"`
+	AverageScore    *float64 `json:"averageScore"`
+	BangumiScore    *float64 `json:"bangumiScore"`
+	BangumiVotes    *int32   `json:"bangumiVotes"`
+	BgmID           *int32   `json:"bgmId"`
+	Source          *string  `json:"source"`
+	Duration        *int32   `json:"duration"`
+}
+
+// Exact siteAnime resolution for the Phase 1 hit path.  dandanplay's
+// /api/v2/bangumi/:animeId response carries the entry's AniList URL in
+// `onlineDatabases`, which the client parses into EpisodeData.AniListID.
+// anilist_id is anime_cache's PRIMARY KEY, so this is the strongest
+// lookup we have — it replaces a fuzzy title search that could not tell
+// season 2 from season 3 of the same franchise.  Same projection as
+// SearchAnimeCacheForDandanplay for consistent downstream mapping.
+//
+// Returns pgx.ErrNoRows when the AniList entry isn't cached locally —
+// the handler then falls through to the bgm_id / fuzzy legs.
+func (q *Queries) GetAnimeByAnilistIDForDandanplay(ctx context.Context, anilistID int32) (GetAnimeByAnilistIDForDandanplayRow, error) {
+	row := q.db.QueryRow(ctx, getAnimeByAnilistIDForDandanplay, anilistID)
+	var i GetAnimeByAnilistIDForDandanplayRow
+	err := row.Scan(
+		&i.AnilistID,
+		&i.TitleRomaji,
+		&i.TitleEnglish,
+		&i.TitleNative,
+		&i.TitleChinese,
+		&i.CoverImageUrl,
+		&i.CoverImageColor,
+		&i.PosterAccent,
+		&i.Episodes,
+		&i.Status,
+		&i.Season,
+		&i.SeasonYear,
+		&i.Format,
+		&i.AverageScore,
+		&i.BangumiScore,
+		&i.BangumiVotes,
+		&i.BgmID,
+		&i.Source,
+		&i.Duration,
+	)
+	return i, err
+}
+
 const getAnimeByBgmID = `-- name: GetAnimeByBgmID :one
 SELECT
     anilist_id,
@@ -119,6 +204,7 @@ WHERE
     OR title_native ILIKE $1
     OR title_romaji ILIKE $1
     OR title_english ILIKE $1
+ORDER BY anilist_id
 LIMIT 10
 `
 
@@ -161,6 +247,12 @@ type SearchAnimeCacheForDandanplayRow struct {
 // caller-built keyword pattern.  Field selection mirrors the projection
 // Express exposed via .lean() — every column the 3-phase /match path
 // + /search route needs.
+//
+// ORDER BY anilist_id is for DETERMINISM ONLY, not relevance: without it
+// the LIMIT truncates an arbitrary heap-order slice, so which rows of a
+// multi-season franchise even reach the caller could drift with vacuum.
+// Relevance ranking happens in Go (rankCacheRows) because it needs the
+// season/part gate, which SQL can't express cheaply.
 func (q *Queries) SearchAnimeCacheForDandanplay(ctx context.Context, titleChinese *string) ([]SearchAnimeCacheForDandanplayRow, error) {
 	rows, err := q.db.Query(ctx, searchAnimeCacheForDandanplay, titleChinese)
 	if err != nil {

@@ -199,9 +199,9 @@ func (h *Handlers) tryPhase1(ctx context.Context, req *MatchRequest) (matchRespo
 	}
 
 	// Best-effort siteAnime enrichment — never block on it.  Errors
-	// inside findSiteAnime are already swallowed; pickSiteAnime
+	// inside resolveSiteAnime are already swallowed; pickSiteAnime
 	// returns nil for nil input.
-	siteHit := h.findSiteAnime(ctx, epData.Title, req.Keyword)
+	siteHit := h.resolveSiteAnime(ctx, epData, req.Keyword)
 	siteAnime := h.pickSiteAnime(ctx, siteHit)
 
 	return matchResponse{
@@ -231,6 +231,13 @@ func (h *Handlers) tryPhase2(ctx context.Context, req *MatchRequest) (matchRespo
 			"err", err, "keyword", req.Keyword)
 		return matchResponse{}, false
 	}
+	// Walk in ranked order, not index order.  The loop accepts the first
+	// candidate whose episodes resolve, and for a multi-season franchise
+	// EVERY season resolves episodes 1..n — so whichever row came back
+	// first silently won.  rankCacheRows drops rows whose season/part
+	// contradicts the keyword and orders the rest by title similarity,
+	// making the first-wins loop pick the entry the user actually has.
+	cacheRows = rankCacheRows(cacheRows, req.Keyword)
 	for i := range cacheRows {
 		row := cacheRows[i]
 		if row.BgmID == nil {

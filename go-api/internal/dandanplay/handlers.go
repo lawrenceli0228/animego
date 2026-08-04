@@ -62,6 +62,7 @@ const (
 //	GetAnimeStudiosByID            — pickSiteAnime enrichment
 type DBQuerier interface {
 	SearchAnimeCacheForDandanplay(ctx context.Context, pattern *string) ([]dbgen.SearchAnimeCacheForDandanplayRow, error)
+	GetAnimeByAnilistIDForDandanplay(ctx context.Context, anilistID int32) (dbgen.GetAnimeByAnilistIDForDandanplayRow, error)
 	GetAnimeByBgmID(ctx context.Context, bgmID *int32) (dbgen.GetAnimeByBgmIDRow, error)
 	GetAnimeGenresByID(ctx context.Context, animeID int32) ([]string, error)
 	GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error)
