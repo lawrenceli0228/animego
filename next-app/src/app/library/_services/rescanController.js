@@ -51,6 +51,7 @@ export const YIELD_TIMEOUT_MS = 5_000;
  *   refreshHandles: () => Promise<void>,
  *   now: () => number,
  *   sleep?: (ms: number) => Promise<void>,
+ *   shouldDefer?: () => boolean,
  * }} deps
  */
 export function createRescanController(deps) {
@@ -187,6 +188,9 @@ export function createRescanController(deps) {
    */
   async function maybeScan({ trigger }) {
     if (!deps.isFsaSupported()) return { outcome: "unsupported", trigger };
+    // Host veto (optional dep): e.g. the player page defers while a video is
+    // actively playing so hash workers never compete with decode.
+    if (deps.shouldDefer?.()) return { outcome: "host-deferred", trigger };
     if (running) return { outcome: "busy", trigger };
     if (deps.getImportStatus() === "running") {
       return { outcome: "import-busy", trigger };

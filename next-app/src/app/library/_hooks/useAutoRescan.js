@@ -34,7 +34,16 @@ import {
  *   refreshHandles: () => Promise<void>,
  *   onBeforeSilentRun: () => void,
  *   onScanComplete: (result: any) => void,
+ *   enabled?: boolean,
+ *   triggers?: { mount?: boolean, visibility?: boolean },
+ *   shouldDefer?: () => boolean,
  * }} params
+ *
+ * `triggers` picks which DOM triggers this host wires ({mount, visibility},
+ * both default true — /library uses both, the player only visibility).
+ * `shouldDefer` is a host veto evaluated inside the controller's guard chain
+ * (e.g. "video is playing"); `enabled` gates the whole hook (e.g. player
+ * drop-mode has no library context to scan for).
  */
 export function useAutoRescan({
   db,
@@ -45,7 +54,12 @@ export function useAutoRescan({
   refreshHandles,
   onBeforeSilentRun,
   onScanComplete,
+  enabled = true,
+  triggers = {},
+  shouldDefer,
 }) {
+  const wantMount = triggers.mount !== false;
+  const wantVisibility = triggers.visibility !== false;
   const [scanning, setScanning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
 
@@ -59,6 +73,7 @@ export function useAutoRescan({
     refreshHandles,
     onBeforeSilentRun,
     onScanComplete,
+    shouldDefer,
   };
 
   const controllerRef = useRef(null);
@@ -85,6 +100,7 @@ export function useAutoRescan({
         refreshHandles: () =>
           Promise.resolve(latest.current.refreshHandles?.()),
         now: () => Date.now(),
+        shouldDefer: () => Boolean(latest.current.shouldDefer?.()),
       });
     }
     return controllerRef.current;
@@ -109,20 +125,22 @@ export function useAutoRescan({
   // 'no-roots' outcome with zero state changes.
   const mountFiredRef = useRef(false);
   useEffect(() => {
+    if (!enabled || !wantMount) return;
     if (mountFiredRef.current) return;
     if (handlesStatus !== "ready" && handlesStatus !== "denied") return;
     mountFiredRef.current = true;
     void scan("mount");
-  }, [handlesStatus, scan]);
+  }, [enabled, wantMount, handlesStatus, scan]);
 
   // Visibility trigger: "downloaded in another window, tabbed back".
   useEffect(() => {
+    if (!enabled || !wantVisibility) return;
     const onVisibility = () => {
       if (document.visibilityState === "visible") void scan("visibility");
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [scan]);
+  }, [enabled, wantVisibility, scan]);
 
   /** Gesture-path rescan from the overflow menu; bypasses the throttle. */
   const manualRescan = useCallback(() => scan("manual"), [scan]);
