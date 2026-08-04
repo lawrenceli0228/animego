@@ -26,6 +26,16 @@ concurrency:
   group: refresh-bgm-map
   cancel-in-progress: true
 
+# `pull-requests: write` alone is NOT enough to open the PR. The repo
+# setting Settings → Actions → General → "Allow GitHub Actions to create
+# and approve pull requests" gates it separately, and with it off this job
+# pushes the branch fine and then dies on the very last step with
+# "GitHub Actions is not permitted to create or approve pull requests."
+# That is exactly how this silently stopped producing PRs for a month —
+# the branch kept updating, so nothing looked broken from the branch list.
+# Verify with:
+#   gh api repos/OWNER/REPO/actions/permissions/workflow
+# and expect can_approve_pull_request_reviews: true.
 permissions:
   contents: write
   pull-requests: write
@@ -37,10 +47,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go-api/go.mod
 
@@ -49,7 +59,7 @@ jobs:
         run: go run ./cmd/bgmmap
 
       - name: Open PR if the map changed
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           # Only fires when the regenerated JSON differs from what's vendored.
           add-paths: go-api/internal/bgmidmap/anilist_bgm_map.json
