@@ -21,10 +21,24 @@
 //     ▼
 //   verify vs fresh baseline → newCount / failedKeys → onScanComplete
 
-import { baselineKey } from "./rescanService.js";
+import { baselineKey, QUIET_PERIOD_MS } from "./rescanService.js";
 
 /** Minimum gap between automatic scans. Manual rescans bypass this. */
 export const MIN_SCAN_INTERVAL_MS = 60_000;
+
+/**
+ * Tighter gap for event-driven triggers ('watch' from FileSystemObserver and
+ * the internal 'deferred-retry') — these fire only when something actually
+ * changed, so the coarse 60s throttle would defeat their purpose.
+ */
+export const WATCH_MIN_INTERVAL_MS = 10_000;
+
+/**
+ * When a scan defers still-in-quiet-period files, retry once after the guard
+ * window (+ slack) so a file that finished writing while the page stays open
+ * gets imported without waiting for the next tab-return.
+ */
+export const DEFERRED_RETRY_DELAY_MS = QUIET_PERIOD_MS + 5_000;
 
 /**
  * How long yieldToManual waits for an in-flight scan to acknowledge the
@@ -56,14 +70,30 @@ export const YIELD_TIMEOUT_MS = 5_000;
  */
 export function createRescanController(deps) {
   const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const setTimer = deps.setTimer ?? setTimeout;
+  const clearTimer = deps.clearTimer ?? clearTimeout;
 
   let running = false;
   let currentRun = null;
   let cancelRequested = false;
   let lastScanAt = 0;
   let lastResult = null;
+  let retryTimer = null;
+  let disposed = false;
   /** Session-scoped skip set for import-failed entries (D7). */
   const failedKeys = new Set();
+
+  /**
+   * Arm a single pending retry for quiet-period-deferred files. One at a
+   * time — a retry that still defers re-arms itself via its own result.
+   */
+  function armDeferredRetry() {
+    if (retryTimer !== null || disposed) return;
+    retryTimer = setTimer(() => {
+      retryTimer = null;
+      if (!disposed) void maybeScan({ trigger: "deferred-retry" });
+    }, DEFERRED_RETRY_DELAY_MS);
+  }
 
   const entryKey = (entry) =>
     baselineKey(entry.relPath, entry.file?.size ?? 0);
@@ -171,6 +201,7 @@ export function createRescanController(deps) {
       skippedRoots,
       failedCount: failedKeys.size,
     };
+    if (deferredCount > 0 && trigger !== "manual") armDeferredRetry();
     lastResult = result;
     try {
       deps.onScanComplete(result);
@@ -195,10 +226,11 @@ export function createRescanController(deps) {
     if (deps.getImportStatus() === "running") {
       return { outcome: "import-busy", trigger };
     }
-    if (
-      trigger !== "manual" &&
-      deps.now() - lastScanAt < MIN_SCAN_INTERVAL_MS
-    ) {
+    const minInterval =
+      trigger === "watch" || trigger === "deferred-retry"
+        ? WATCH_MIN_INTERVAL_MS
+        : MIN_SCAN_INTERVAL_MS;
+    if (trigger !== "manual" && deps.now() - lastScanAt < minInterval) {
       return { outcome: "throttled", trigger };
     }
 
@@ -238,8 +270,19 @@ export function createRescanController(deps) {
       lastScanAt,
       lastResult,
       failedKeyCount: failedKeys.size,
+      retryArmed: retryTimer !== null,
     };
   }
 
-  return { maybeScan, yieldToManual, getState };
+  /** Cancel timers on host unmount; the controller must not outlive it. */
+  function dispose() {
+    disposed = true;
+    cancelRequested = true;
+    if (retryTimer !== null) {
+      clearTimer(retryTimer);
+      retryTimer = null;
+    }
+  }
+
+  return { maybeScan, yieldToManual, getState, dispose };
 }

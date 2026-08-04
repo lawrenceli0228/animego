@@ -18,6 +18,7 @@ import { isFsaSupported } from "@/lib/library/handles/fsaFeatureCheck.js";
 import { probeRootStatus } from "@/lib/library/handles/probeRoot.js";
 import { makeFileHandleStore } from "@/lib/library/handles/fileHandleStore.js";
 import { createRescanController } from "../_services/rescanController.js";
+import { createFolderWatcher } from "../_services/folderWatcher.js";
 import {
   buildBaseline,
   diffScanRoot,
@@ -39,8 +40,11 @@ import {
  *   shouldDefer?: () => boolean,
  * }} params
  *
- * `triggers` picks which DOM triggers this host wires ({mount, visibility},
- * both default true — /library uses both, the player only visibility).
+ * `triggers` picks which triggers this host wires ({mount, visibility,
+ * watch}, all default true — /library uses all, the player skips mount).
+ * `watch` is the FileSystemObserver live watch (Chrome/Edge 133+ desktop):
+ * a progressive enhancement over the reconciliation scans, never a
+ * replacement — observation only lives while the page is open.
  * `shouldDefer` is a host veto evaluated inside the controller's guard chain
  * (e.g. "video is playing"); `enabled` gates the whole hook (e.g. player
  * drop-mode has no library context to scan for).
@@ -60,6 +64,7 @@ export function useAutoRescan({
 }) {
   const wantMount = triggers.mount !== false;
   const wantVisibility = triggers.visibility !== false;
+  const wantWatch = triggers.watch !== false;
   const [scanning, setScanning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
 
@@ -141,6 +146,49 @@ export function useAutoRescan({
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [enabled, wantVisibility, scan]);
+
+  // Live watch (PR-3): observe every 'ready' root while the page is open.
+  // Events are hints — the action is always the same diff scan ('watch'
+  // trigger, tighter throttle). 'errored' records (root deleted, grant
+  // revoked) route into the availability re-probe instead. Keyed on
+  // handlesStatus so a reauthorize (denied → ready) re-arms observation.
+  useEffect(() => {
+    if (!enabled || !wantWatch) return;
+    if (handlesStatus !== "ready") return;
+    const watcher = createFolderWatcher({
+      onChange: () => void scan("watch"),
+      onRootError: () =>
+        void Promise.resolve(latest.current.refreshHandles?.()).catch(() => {}),
+    });
+    if (!watcher.supported) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const store = makeFileHandleStore(db);
+        const roots = await store.listRoots();
+        for (const record of roots) {
+          if (cancelled) return;
+          const status = await probeRootStatus(record.handle);
+          if (status === "ready") await watcher.observe(record.handle);
+        }
+      } catch {
+        // Watch setup is best-effort; reconciliation scans remain the truth.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      watcher.disconnect();
+    };
+  }, [enabled, wantWatch, handlesStatus, db, scan]);
+
+  // The controller owns a deferred-retry timer; kill it with the host.
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.dispose?.();
+    };
+  }, []);
 
   /** Gesture-path rescan from the overflow menu; bypasses the throttle. */
   const manualRescan = useCallback(() => scan("manual"), [scan]);

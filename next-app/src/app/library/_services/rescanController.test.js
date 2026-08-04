@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createRescanController,
   MIN_SCAN_INTERVAL_MS,
+  WATCH_MIN_INTERVAL_MS,
 } from "./rescanController.js";
 import { baselineKey } from "./rescanService.js";
 
@@ -312,6 +313,76 @@ describe("import flow", () => {
     const result = await controller.maybeScan({ trigger: "mount" });
     expect(result.deferredCount).toBe(2);
     expect(calls.imports).toHaveLength(0);
+  });
+});
+
+// ---- watch trigger + deferred retry (PR-3) --------------------------------
+
+describe("watch trigger and deferred retry", () => {
+  function timedHarness(overrides = {}) {
+    const timers = [];
+    const base = harness({
+      listRoots: async () => [root("lib1", 1)],
+      setTimer: (fn, ms) => {
+        timers.push({ fn, ms });
+        return timers.length;
+      },
+      clearTimer: () => {},
+      ...overrides,
+    });
+    return { ...base, timers };
+  }
+
+  test("'watch' trigger uses the tighter interval, not the 60s throttle", async () => {
+    const { controller, advance } = timedHarness();
+    expect((await controller.maybeScan({ trigger: "watch" })).outcome).toBe("scanned");
+    advance(WATCH_MIN_INTERVAL_MS - 1000);
+    expect((await controller.maybeScan({ trigger: "watch" })).outcome).toBe("throttled");
+    advance(2000);
+    expect((await controller.maybeScan({ trigger: "watch" })).outcome).toBe("scanned");
+  });
+
+  test("quiet-period deferral arms exactly one retry, which rescans", async () => {
+    let scans = 0;
+    const { controller, timers, advance } = timedHarness({
+      diffScanRoot: async () => {
+        scans++;
+        return { ...emptyDiff(), deferredCount: 1 };
+      },
+    });
+    await controller.maybeScan({ trigger: "watch" });
+    await controller.maybeScan({ trigger: "manual" }); // manual defers too but must NOT arm
+    expect(timers).toHaveLength(1);
+    expect(controller.getState().retryArmed).toBe(true);
+    expect(scans).toBe(2);
+
+    advance(WATCH_MIN_INTERVAL_MS + 1000);
+    timers[0].fn();
+    // Firing the retry runs a real scan (async) — settle it.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(scans).toBe(3);
+  });
+
+  test("no deferral → no retry armed", async () => {
+    const { controller, timers } = timedHarness();
+    await controller.maybeScan({ trigger: "mount" });
+    expect(timers).toHaveLength(0);
+    expect(controller.getState().retryArmed).toBe(false);
+  });
+
+  test("dispose cancels the pending retry and blocks future scans' timers", async () => {
+    let cleared = 0;
+    const { controller, timers } = timedHarness({
+      clearTimer: () => {
+        cleared++;
+      },
+      diffScanRoot: async () => ({ ...emptyDiff(), deferredCount: 1 }),
+    });
+    await controller.maybeScan({ trigger: "mount" });
+    expect(timers).toHaveLength(1);
+    controller.dispose();
+    expect(cleared).toBe(1);
+    expect(controller.getState().retryArmed).toBe(false);
   });
 });
 
