@@ -21,6 +21,7 @@ import {
   buildEpisodeRecord,
   fileRefId,
 } from '@/lib/library/recordFactory.js';
+import { normalizeTokens } from '@/lib/library/normalize.js';
 
 /**
  * @typedef {Object} DandanEnrichment
@@ -72,6 +73,16 @@ export async function runImport(input, ctx) {
   // Stage 2: load prior seasons for animeIdHint resolution
   const priorSeasons = await db.seasons.toArray();
 
+  // Cross-batch home indexes (folder + title). Best-effort: a fake db in
+  // tests may not implement toArray on every table — degrade to null and the
+  // structural fallbacks simply stay off.
+  let homeIndexes = null;
+  try {
+    homeIndexes = await buildHomeIndexes(db, priorSeasons);
+  } catch {
+    homeIndexes = null;
+  }
+
   // Stage 2b: load userOverrides → Map<seriesId, UserOverride> for in-loop lookup.
   // Loaded once at start; mid-run dialog edits won't affect this batch.
   const overrideRows = db.userOverride ? await db.userOverride.toArray() : [];
@@ -104,6 +115,7 @@ export async function runImport(input, ctx) {
         cluster,
         libraryId,
         priorSeasons,
+        homeIndexes,
         userOverrides,
         seriesRepo,
         seasonRepo,
@@ -288,13 +300,27 @@ async function processCluster(p) {
     }
   }
 
-  // Re-import guard: when EVERY file in the cluster is already homed in the
-  // library (same content ⇒ same content-hash fileRef id, each attached to an
-  // episode of ONE series), never mint a new series — flip to reuse of that
-  // series. Covers moved/renamed unchanged files and the "matchCache expired
-  // + dandan unreachable" tail, both of which previously duplicated the card.
+  // Home guards — three structural signals, strongest first, that stop a
+  // 'new' verdict from minting a duplicate card:
+  //
+  //   1. content hash  — every file already homed on one series (re-import)
+  //   2. same folder   — the new episode landed in a directory whose existing
+  //                      files all belong to one series (the watch-folder
+  //                      case: a brand-new episode dandanplay can't match yet)
+  //   3. same title    — normalized title tokens uniquely match one existing
+  //                      series, season-compatible (flat download folders)
+  //
+  // 2 and 3 only apply when the verdict carries NO dandan identity
+  // (seasonRecord.animeId): when dandanplay positively identified the content
+  // as something new, its answer outranks folder/title heuristics. All three
+  // bail to 'new' (manual merge stays the fallback) on any ambiguity.
   if (verdict.kind === 'new' && p.db) {
-    const home = await deriveExistingHome(cluster, p.db);
+    let home = await deriveExistingHome(cluster, p.db);
+    if (!home && !verdict.seasonRecord?.animeId && p.homeIndexes) {
+      home =
+        deriveFolderHome(cluster, p.homeIndexes, clusterSeason) ??
+        deriveTitleHome(cluster, p.homeIndexes, clusterSeason);
+    }
     if (home) {
       verdict = {
         kind: 'reuse',
@@ -358,6 +384,155 @@ async function processCluster(p) {
     summary.failed++;
     emit({ kind: 'clusterDone', clusterKey, verdict: 'failed' });
   }
+}
+
+/**
+ * Build the cross-batch home indexes consumed by deriveFolderHome /
+ * deriveTitleHome.
+ *
+ * - folderIndex: dirname(relPath) → Set<seriesId> over every live
+ *   (non-superseded, episode-attached) fileRef. A directory owned by exactly
+ *   one series is a strong structural signal for new files landing in it.
+ * - titleIndex: normalized-title-token key → seriesId, tombstoned (null) on
+ *   collision so only UNIQUE titles ever match.
+ * - seasonsBySeries: seriesId → Season[] for season-compatibility checks and
+ *   seasonId selection.
+ *
+ * @param {import('dexie').Dexie} db
+ * @param {any[]} priorSeasons
+ */
+async function buildHomeIndexes(db, priorSeasons) {
+  const dirnameOf = (relPath) => {
+    const idx = relPath.lastIndexOf('/');
+    return idx === -1 ? '__root__' : relPath.slice(0, idx);
+  };
+
+  const [fileRefs, episodes, seriesRows] = await Promise.all([
+    db.fileRefs.toArray(),
+    db.episodes.toArray(),
+    db.series.toArray(),
+  ]);
+
+  const episodeSeries = new Map();
+  for (const ep of episodes) {
+    if (ep?.id && ep.seriesId) episodeSeries.set(ep.id, ep.seriesId);
+  }
+
+  /** @type {Map<string, Set<string>>} */
+  const folderIndex = new Map();
+  for (const ref of fileRefs) {
+    if (!ref?.relPath || ref.supersededAt || !ref.episodeId) continue;
+    const seriesId = episodeSeries.get(ref.episodeId);
+    if (!seriesId) continue;
+    const dir = dirnameOf(ref.relPath);
+    let set = folderIndex.get(dir);
+    if (!set) {
+      set = new Set();
+      folderIndex.set(dir, set);
+    }
+    set.add(seriesId);
+  }
+
+  /** @type {Map<string, string|null>} */
+  const titleIndex = new Map();
+  for (const s of seriesRows) {
+    if (!s?.id) continue;
+    const titles = new Set([s.titleZh, s.titleEn, s.titleJa].filter(Boolean));
+    for (const title of titles) {
+      const tokens = normalizeTokens(title);
+      if (!tokens.length) continue;
+      const key = tokens.join('|');
+      const existing = titleIndex.get(key);
+      if (existing === undefined) titleIndex.set(key, s.id);
+      else if (existing !== s.id) titleIndex.set(key, null); // collision → tombstone
+    }
+  }
+
+  /** @type {Map<string, any[]>} */
+  const seasonsBySeries = new Map();
+  for (const season of priorSeasons ?? []) {
+    if (!season?.seriesId) continue;
+    const list = seasonsBySeries.get(season.seriesId);
+    if (list) list.push(season);
+    else seasonsBySeries.set(season.seriesId, [season]);
+  }
+
+  return { folderIndex, titleIndex, seasonsBySeries };
+}
+
+/**
+ * Pick the season to attach reused items to, honoring the cluster's parsed
+ * season number. Returns { conflict: true } when the cluster names a season
+ * the series demonstrably doesn't have — the caller must NOT merge then
+ * (S2 files must not collapse into an S1-only card).
+ *
+ * @param {any[]|undefined} seasons
+ * @param {number|null} clusterSeason
+ */
+function pickHomeSeason(seasons, clusterSeason) {
+  const list = seasons ?? [];
+  if (clusterSeason != null) {
+    const exact = list.find((s) => s.number === clusterSeason);
+    if (exact) return { season: exact };
+    if (list.some((s) => s.number != null && s.number !== clusterSeason)) {
+      return { conflict: true };
+    }
+    return { season: null };
+  }
+  if (list.length === 1) return { season: list[0] };
+  return { season: null };
+}
+
+/**
+ * Structural home #2 — the folder signal. Every directory this cluster's
+ * files came from must already be owned by exactly ONE series; mixed or
+ * unknown folders bail. This is what merges a brand-new episode (unknown to
+ * dandanplay) dropped into an existing show's folder by the watch-folder
+ * rescan.
+ *
+ * @returns {{seriesId: string, seasonId: string|null, animeId: number|undefined}|null}
+ */
+function deriveFolderHome(cluster, homeIndexes, clusterSeason) {
+  const { folderIndex, seasonsBySeries } = homeIndexes;
+  const owners = new Set();
+  for (const group of cluster.groups ?? []) {
+    const set = group?.groupKey ? folderIndex.get(group.groupKey) : undefined;
+    if (!set || set.size === 0) return null; // unknown folder → no signal
+    for (const id of set) owners.add(id);
+    if (owners.size > 1) return null; // mixed folder → ambiguous
+  }
+  if (owners.size !== 1) return null;
+  const seriesId = owners.values().next().value;
+  const picked = pickHomeSeason(seasonsBySeries.get(seriesId), clusterSeason);
+  if (picked.conflict) return null;
+  return {
+    seriesId,
+    seasonId: picked.season?.id ?? null,
+    animeId: picked.season?.animeId,
+  };
+}
+
+/**
+ * Structural home #3 — the title signal, for flat download folders where the
+ * folder is shared by many shows. Normalized title tokens must match exactly
+ * ONE existing series (collisions are tombstoned at index build) and pass the
+ * season-compatibility check.
+ *
+ * @returns {{seriesId: string, seasonId: string|null, animeId: number|undefined}|null}
+ */
+function deriveTitleHome(cluster, homeIndexes, clusterSeason) {
+  const { titleIndex, seasonsBySeries } = homeIndexes;
+  const tokens = cluster.normalizedTokens ?? [];
+  if (!tokens.length) return null;
+  const seriesId = titleIndex.get(tokens.join('|'));
+  if (!seriesId) return null; // absent or tombstoned collision
+  const picked = pickHomeSeason(seasonsBySeries.get(seriesId), clusterSeason);
+  if (picked.conflict) return null;
+  return {
+    seriesId,
+    seasonId: picked.season?.id ?? null,
+    animeId: picked.season?.animeId,
+  };
 }
 
 /**
