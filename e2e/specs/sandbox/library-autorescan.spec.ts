@@ -24,7 +24,11 @@ import { clearLibrary } from "../../fixtures/dexie-seed";
 
 const DB_NAME = "animego-library";
 const WATCH_DIR = "e2e-autorescan-watch";
-const VIDEO_NAME = "[E2E] Autorescan Smoke - 01.mkv";
+// NOTE: no "E2E" in fixture filenames — the episode parser reads the "E2"
+// inside "[E2E]" as episode 2, which collapses every fixture onto the same
+// episode number (second file attaches as an alternate source instead of a
+// new episode) and breaks episode-count assertions.
+const VIDEO_NAME = "[Sub] Autorescan Smoke - 01.mkv";
 const LIB_ID = "e2e-autorescan-lib";
 const CLOCK_SHIFT_MS = 5 * 60 * 1000;
 
@@ -56,6 +60,9 @@ test.describe("/library — watch-folder auto-rescan (OPFS-backed)", () => {
   test("new file in a watched folder is imported on mount and surfaces a card", async ({
     page,
   }) => {
+    // Two full import rounds (initial + second-episode regression) in one
+    // journey — the 30s default test budget is not enough in dev mode.
+    test.setTimeout(120_000);
     const errors = collectConsoleErrors(page);
 
     await page.goto("/welcome");
@@ -127,7 +134,55 @@ test.describe("/library — watch-folder auto-rescan (OPFS-backed)", () => {
     await expect(page.getByTestId("import-drawer")).toHaveCount(0);
     await expect(page.getByTestId("import-drawer-scrim")).toHaveCount(0);
 
-    await page.waitForLoadState("networkidle");
+    // Cross-batch home regression: a SECOND episode dropped into the same
+    // watched folder must JOIN the existing card (folder/title home guards),
+    // never mint a duplicate series. This was the original watch-folder bug:
+    // dandanplay can't identify brand-new episodes, and before the home
+    // guards every rescan minted a fresh card.
+    await page.evaluate(
+      async ({ watchDir }: { watchDir: string }) => {
+        const opfs = await navigator.storage.getDirectory();
+        const dir = await opfs.getDirectoryHandle(watchDir);
+        const fh = await dir.getFileHandle("[Sub] Autorescan Smoke - 02.mkv", {
+          create: true,
+        });
+        const writable = await fh.createWritable();
+        await writable.write(new Uint8Array(3 * 1024 * 1024));
+        await writable.close();
+      },
+      { watchDir: WATCH_DIR },
+    );
+    await page.reload();
+
+    // Wait until the second import has actually landed (2 episodes in IDB)…
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              new Promise<number>((resolve) => {
+                const req = indexedDB.open("animego-library");
+                req.onsuccess = () => {
+                  const db = req.result;
+                  const tx = db.transaction("episodes", "readonly");
+                  const count = tx.objectStore("episodes").count();
+                  count.onsuccess = () => {
+                    db.close();
+                    resolve(count.result);
+                  };
+                  count.onerror = () => {
+                    db.close();
+                    resolve(-1);
+                  };
+                };
+                req.onerror = () => resolve(-1);
+              }),
+          ),
+        { timeout: 30_000 },
+      )
+      .toBe(2);
+    // …then the card count must still be ONE.
+    await expect(page.getByTestId("series-card-root")).toHaveCount(1);
 
     expect(
       errors,
