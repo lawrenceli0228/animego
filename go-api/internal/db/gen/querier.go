@@ -149,6 +149,17 @@ type Querier interface {
 	// Replaces the two Promise.all aggregate pipelines in listUsers.
 	// Returns 0 for users with no rows on either side via LEFT JOIN.
 	GetAdminUserSubFollowCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]GetAdminUserSubFollowCountsRow, error)
+	// Exact siteAnime resolution for the Phase 1 hit path.  dandanplay's
+	// /api/v2/bangumi/:animeId response carries the entry's AniList URL in
+	// `onlineDatabases`, which the client parses into EpisodeData.AniListID.
+	// anilist_id is anime_cache's PRIMARY KEY, so this is the strongest
+	// lookup we have — it replaces a fuzzy title search that could not tell
+	// season 2 from season 3 of the same franchise.  Same projection as
+	// SearchAnimeCacheForDandanplay for consistent downstream mapping.
+	//
+	// Returns pgx.ErrNoRows when the AniList entry isn't cached locally —
+	// the handler then falls through to the bgm_id / fuzzy legs.
+	GetAnimeByAnilistIDForDandanplay(ctx context.Context, anilistID int32) (GetAnimeByAnilistIDForDandanplayRow, error)
 	// Bulk read for /search post-upsert re-read so enriched fields
 	// (title_chinese, bangumi_*) flow into the response even when the upsert
 	// only carried AniList-side data.  Returns the same 16-column shape as
@@ -531,6 +542,12 @@ type Querier interface {
 	// caller-built keyword pattern.  Field selection mirrors the projection
 	// Express exposed via .lean() — every column the 3-phase /match path
 	// + /search route needs.
+	//
+	// ORDER BY anilist_id is for DETERMINISM ONLY, not relevance: without it
+	// the LIMIT truncates an arbitrary heap-order slice, so which rows of a
+	// multi-season franchise even reach the caller could drift with vacuum.
+	// Relevance ranking happens in Go (rankCacheRows) because it needs the
+	// season/part gate, which SQL can't express cheaply.
 	SearchAnimeCacheForDandanplay(ctx context.Context, titleChinese *string) ([]SearchAnimeCacheForDandanplayRow, error)
 	// forgot-password sets the token + 1h expiry.  Caller generates the
 	// token via crypto/rand (32 random bytes hex-encoded — matches

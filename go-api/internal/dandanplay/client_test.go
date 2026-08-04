@@ -305,3 +305,63 @@ func newFastLimiter() *rate.Limiter {
 // silence the unused import warning when json is only referenced via
 // json.RawMessage in TestFetchComments_NullCommentsBecomesArray
 var _ = json.RawMessage{}
+
+// TestFetchEpisodesParsesCrossLinkIDs pins the parse of the two id
+// cross-links dandanplay ships in the bangumi detail payload.  These
+// give /match an EXACT anime_cache lookup, replacing a title search
+// that could not tell 無職転生Ⅱ from 無職転生Ⅲ.
+//
+// The payload below is the real shape of
+// GET /api/v2/bangumi/18727 (無職転生Ⅲ), trimmed to the parsed fields.
+func TestFetchEpisodesParsesCrossLinkIDs(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"bangumi":{
+			"animeId":18727,
+			"bangumiId":"18727",
+			"animeTitle":"无职转生Ⅲ ～到了异世界就拿出真本事～",
+			"imageUrl":"x.jpg",
+			"bangumiUrl":"https://bangumi.tv/subject/501963",
+			"onlineDatabases":[
+				{"name":"Bangumi.tv","url":"https://bangumi.tv/subject/501963"},
+				{"name":"MyAnimeList","url":"https://myanimelist.net/anime/59193"},
+				{"name":"AniDB","url":"https://anidb.net/anime/18727"},
+				{"name":"AniList","url":"https://anilist.co/anime/178789"}
+			],
+			"episodes":[{"episodeId":1,"episodeTitle":"E1","episodeNumber":"1"}]}}`))
+	})
+
+	got, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 18727)
+	if err != nil || got == nil {
+		t.Fatalf("fetch: err=%v got=%v", err, got)
+	}
+	if got.AniListID != 178789 {
+		t.Errorf("AniListID = %d, want 178789", got.AniListID)
+	}
+	if got.BgmID != 501963 {
+		t.Errorf("BgmID = %d, want 501963", got.BgmID)
+	}
+	// `bangumiId` repeats dandanplay's own animeId as a string — it is
+	// NOT the bgm.tv subject and must never be mistaken for one.
+	if got.BgmID == int32(got.DandanAnimeID) {
+		t.Errorf("BgmID must not be dandanplay's animeId (%d)", got.DandanAnimeID)
+	}
+}
+
+// TestFetchEpisodesToleratesMissingCrossLinks — older or brand-new
+// entries publish no cross-links.  Both ids stay 0 and /match falls
+// through to the fuzzy leg rather than looking up anilist_id 0.
+func TestFetchEpisodesToleratesMissingCrossLinks(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"bangumi":{"animeId":9,"animeTitle":"S","imageUrl":"","bangumiUrl":"","onlineDatabases":[{"name":"MyAnimeList","url":"https://myanimelist.net/anime/1"}],"episodes":[]}}`))
+	})
+
+	got, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 9)
+	if err != nil || got == nil {
+		t.Fatalf("fetch: err=%v got=%v", err, got)
+	}
+	if got.AniListID != 0 || got.BgmID != 0 {
+		t.Errorf("AniListID=%d BgmID=%d, want 0/0", got.AniListID, got.BgmID)
+	}
+}

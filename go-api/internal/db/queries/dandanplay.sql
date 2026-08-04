@@ -17,6 +17,12 @@
 -- caller-built keyword pattern.  Field selection mirrors the projection
 -- Express exposed via .lean() — every column the 3-phase /match path
 -- + /search route needs.
+--
+-- ORDER BY anilist_id is for DETERMINISM ONLY, not relevance: without it
+-- the LIMIT truncates an arbitrary heap-order slice, so which rows of a
+-- multi-season franchise even reach the caller could drift with vacuum.
+-- Relevance ranking happens in Go (rankCacheRows) because it needs the
+-- season/part gate, which SQL can't express cheaply.
 SELECT
     anilist_id,
     title_romaji,
@@ -43,6 +49,7 @@ WHERE
     OR title_native ILIKE $1
     OR title_romaji ILIKE $1
     OR title_english ILIKE $1
+ORDER BY anilist_id
 LIMIT 10;
 
 -- name: GetAnimeByBgmID :one
@@ -75,4 +82,39 @@ SELECT
     duration
 FROM anime_cache
 WHERE bgm_id = $1
+LIMIT 1;
+
+-- name: GetAnimeByAnilistIDForDandanplay :one
+-- Exact siteAnime resolution for the Phase 1 hit path.  dandanplay's
+-- /api/v2/bangumi/:animeId response carries the entry's AniList URL in
+-- `onlineDatabases`, which the client parses into EpisodeData.AniListID.
+-- anilist_id is anime_cache's PRIMARY KEY, so this is the strongest
+-- lookup we have — it replaces a fuzzy title search that could not tell
+-- season 2 from season 3 of the same franchise.  Same projection as
+-- SearchAnimeCacheForDandanplay for consistent downstream mapping.
+--
+-- Returns pgx.ErrNoRows when the AniList entry isn't cached locally —
+-- the handler then falls through to the bgm_id / fuzzy legs.
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    cover_image_url,
+    cover_image_color,
+    poster_accent,
+    episodes,
+    status,
+    season,
+    season_year,
+    format,
+    average_score,
+    bangumi_score,
+    bangumi_votes,
+    bgm_id,
+    source,
+    duration
+FROM anime_cache
+WHERE anilist_id = $1
 LIMIT 1;

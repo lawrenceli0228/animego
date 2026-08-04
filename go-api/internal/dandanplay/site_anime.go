@@ -116,29 +116,79 @@ func (h *Handlers) searchAnimeCache(ctx context.Context, keyword string) ([]dbge
 	return rows, nil
 }
 
-// findSiteAnime is the 3-level fallback Express ran after Phase 1 to
-// enrich the response with a local AnimeCache row.  Never returns an
-// error — all failures degrade to (nil, nil) so the /match call keeps
-// progressing.  Bangumi leg is cap-timed via context.WithTimeout so a
-// slow bgm.tv cannot stall the orchestration.
+// resolveSiteAnime picks the anime_cache row describing the entry a
+// Phase 1 hit landed on.  Ordered strongest-identity first:
+//
+//  1. epData.AniListID → anime_cache PRIMARY KEY.  Exact.
+//  2. epData.BgmID → the bgm.tv subject, unique in anime_cache.  Exact.
+//  3. findSiteAnime — fuzzy title search, only when dandanplay published
+//     neither cross-link (rare; mostly brand-new or obscure entries).
+//
+// Legs 1 and 2 cost no extra upstream request: both ids are parsed out
+// of the /api/v2/bangumi payload the caller already fetched for the
+// episode list.  They exist because the fuzzy leg structurally cannot
+// tell one season of a franchise from another — see seasonmatch.go.
+func (h *Handlers) resolveSiteAnime(ctx context.Context, epData *EpisodeData, userKeyword string) *dbgen.SearchAnimeCacheForDandanplayRow {
+	if epData == nil {
+		return nil
+	}
+	if epData.AniListID != 0 {
+		row, err := h.DB.GetAnimeByAnilistIDForDandanplay(ctx, epData.AniListID)
+		if err == nil {
+			return rowFromAnilistRow(row)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.WarnContext(ctx, "dandanplay resolveSiteAnime anilist lookup error",
+				"err", err, "anilistId", epData.AniListID)
+		}
+	}
+	if epData.BgmID != 0 {
+		bgmID := epData.BgmID
+		row, err := h.DB.GetAnimeByBgmID(ctx, &bgmID)
+		if err == nil {
+			return rowFromBgmRow(row)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.WarnContext(ctx, "dandanplay resolveSiteAnime bgm lookup error",
+				"err", err, "bgmId", bgmID)
+		}
+	}
+	return h.findSiteAnime(ctx, epData.Title, userKeyword)
+}
+
+// findSiteAnime is the fuzzy fallback: search anime_cache by title, then
+// choose among the hits.  Never returns an error — all failures degrade
+// to nil so the /match call keeps progressing.  The Bangumi leg is
+// cap-timed via context.WithTimeout so a slow bgm.tv cannot stall the
+// orchestration.
 //
 // Order:
 //  1. searchAnimeCache(title) — dandanplay-provided title.
 //  2. searchAnimeCache(userKeyword) — only when keyword != title.
 //  3. bangumi.Search(title) → first hit's id → GetAnimeByBgmID.
 //
+// Both search legs are adjudicated by pickCacheRow against `title` — the
+// dandanplay AnimeTitle, which is the only string here guaranteed to
+// carry the entry's season marker.  The user keyword widens what the
+// ILIKE *finds* (a filename yields "無職転生", never the full title) but
+// must not decide what we *accept*, or a season-3 drop resolves to
+// whichever season of the franchise the index happened to return first.
+// That split — loose recall, strict precision — is the whole fix.
+//
+// pickCacheRow returning nil is expected and fine: siteAnime is
+// best-effort enrichment, and an unenriched card beats a wrong one.
+//
 // The Bangumi call inherits the parent context so cancellation
 // propagates correctly when /match's overall 20s cap fires.
 func (h *Handlers) findSiteAnime(ctx context.Context, title, userKeyword string) *dbgen.SearchAnimeCacheForDandanplayRow {
-	// Level 1: title (the dandanplay-side AnimeTitle, usually JA).
+	// Level 1: title (the dandanplay-side AnimeTitle, usually JA/ZH).
 	if title != "" {
 		rows, err := h.searchAnimeCache(ctx, title)
 		if err != nil {
 			slog.WarnContext(ctx, "dandanplay findSiteAnime title search error",
 				"err", err, "title", title)
-		} else if len(rows) > 0 {
-			row := rows[0]
-			return &row
+		} else if row := pickCacheRow(rows, title); row != nil {
+			return row
 		}
 	}
 	// Level 2: user-supplied keyword.  Skip if identical to title so
@@ -148,9 +198,17 @@ func (h *Handlers) findSiteAnime(ctx context.Context, title, userKeyword string)
 		if err != nil {
 			slog.WarnContext(ctx, "dandanplay findSiteAnime keyword search error",
 				"err", err, "keyword", userKeyword)
-		} else if len(rows) > 0 {
-			row := rows[0]
-			return &row
+		} else {
+			// Adjudicate against the authoritative title when we have
+			// one; only fall back to judging by the keyword itself when
+			// dandanplay gave us no title at all.
+			judge := title
+			if judge == "" {
+				judge = userKeyword
+			}
+			if row := pickCacheRow(rows, judge); row != nil {
+				return row
+			}
 		}
 	}
 	// Level 3: Bangumi search → bgmId → anime_cache lookup.  Anything
@@ -217,6 +275,35 @@ func (h *Handlers) bangumiFallback(ctx context.Context, title, userKeyword strin
 	// Re-shape GetAnimeByBgmIDRow → SearchAnimeCacheForDandanplayRow
 	// so the caller's projection helper has one input type to handle.
 	return rowFromBgmRow(row)
+}
+
+// rowFromAnilistRow maps the GetAnimeByAnilistIDForDandanplayRow
+// projection into the SearchAnimeCacheForDandanplayRow shape — same
+// columns, different sqlc-generated struct.  Mirrors rowFromBgmRow so
+// pickSiteAnime keeps a single input type.
+func rowFromAnilistRow(in dbgen.GetAnimeByAnilistIDForDandanplayRow) *dbgen.SearchAnimeCacheForDandanplayRow {
+	out := dbgen.SearchAnimeCacheForDandanplayRow{
+		AnilistID:       in.AnilistID,
+		TitleRomaji:     in.TitleRomaji,
+		TitleEnglish:    in.TitleEnglish,
+		TitleNative:     in.TitleNative,
+		TitleChinese:    in.TitleChinese,
+		CoverImageUrl:   in.CoverImageUrl,
+		CoverImageColor: in.CoverImageColor,
+		PosterAccent:    in.PosterAccent,
+		Episodes:        in.Episodes,
+		Status:          in.Status,
+		Season:          in.Season,
+		SeasonYear:      in.SeasonYear,
+		Format:          in.Format,
+		AverageScore:    in.AverageScore,
+		BangumiScore:    in.BangumiScore,
+		BangumiVotes:    in.BangumiVotes,
+		BgmID:           in.BgmID,
+		Source:          in.Source,
+		Duration:        in.Duration,
+	}
+	return &out
 }
 
 // rowFromBgmRow maps the GetAnimeByBgmIDRow projection into the

@@ -7,6 +7,7 @@
 // same series within one session skips the network round-trip.
 
 import { useEffect, useState } from "react";
+import { pickBestHit } from "@/lib/seasonMatch";
 // P6 TODO: tighten when useLibrary gets typed exports
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SeriesRecord = any;
@@ -60,23 +61,6 @@ export interface SiteAnimeMapped {
 }
 
 const _cache = new Map<string, SiteAnimeMapped | null>();
-
-function scoreMatch(hit: SearchHit, target: string): number {
-  const t = target.toLowerCase();
-  const candidates = [
-    hit.titleChinese,
-    hit.titleNative,
-    hit.titleRomaji,
-    hit.title,
-  ]
-    .filter(Boolean)
-    .map((s) => (s as string).toLowerCase());
-  if (candidates.includes(t)) return 100;
-  for (const c of candidates) {
-    if (c.includes(t) || t.includes(c)) return 50;
-  }
-  return 0;
-}
 
 async function searchAnime(keyword: string): Promise<SearchResponse | null> {
   const url = `/api/dandanplay/search?keyword=${encodeURIComponent(keyword)}`;
@@ -132,20 +116,18 @@ export function useSiteAnimeForSeries({
         const hits = (data?.results ?? []).filter(
           (r) => r.source === "animeCache",
         );
-        if (!hits.length) {
+        // No blind hits[0] fallback. The search is a title ILIKE, so for
+        // a franchise it returns every season and the first row is
+        // arbitrary — taking it put season 2's score and details link on
+        // a season 3 card. pickBestHit requires the season/part ordinals
+        // to agree and returns null when none does; an un-enriched card
+        // beats a confidently wrong one.
+        const best = pickBestHit(hits, keyword);
+        if (!best) {
           _cache.set(series.id, null);
           setSiteAnime(null);
           setLoading(false);
           return;
-        }
-        let best = hits[0];
-        let bestScore = scoreMatch(best, keyword);
-        for (const h of hits.slice(1)) {
-          const s = scoreMatch(h, keyword);
-          if (s > bestScore) {
-            best = h;
-            bestScore = s;
-          }
         }
         const mapped: SiteAnimeMapped = {
           anilistId: best.anilistId,
