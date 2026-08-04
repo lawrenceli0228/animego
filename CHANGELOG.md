@@ -2,6 +2,22 @@
 
 ---
 
+## [3.4.3] - 2026-08-05
+
+### 修复 — 库溢出菜单等 5 处直接显示 i18n 键名
+
+用户截图:溢出菜单里那一项渲染成了 `library.overflow.rescan` 而不是中文。
+
+根因是**两套词典无声漂移**:客户端组件走 `useLang()`,它背后是 `locales/*-spa.js`;而 `zh.ts`/`en.ts` 只有服务端组件读。两者之间没有任何关联,只往 `zh.ts` 加键在 SSR 侧看着好好的,到浏览器就露键名。3.4.0 的 watch-folder 那批工作往 `zh.ts`/`en.ts` 加了 5 个键、`-spa` 一个都没加。`t()` 命中失败时返回键名本身(见 `lib/i18n.ts`),既不报错也不打 warning,所以一路混过了评审和 CI。
+
+- **补齐 5 个键**(zh + en 两份 `-spa`):`library.overflow.rescan` / `rescanBusy`、`library.scanToast.kicker` / `title`、`library.persistHint`。文案沿用 `zh.ts` 里已经定好的(「重新扫描文件夹」「扫描中…」「自动扫描」「发现 {{count}} 个新剧集」)。
+- **加防漂移闸门** `locales/spaDictCoverage.test.ts` — 扫描所有用了 `useLang()` 的文件里的 `t("…")` 调用,断言每个键在两份 `-spa` 词典里都能解析,失败时直接打印 `文件:行号 键名`。带 `defaultValue` 的调用豁免(那是显式的"可以缺"契约,如 `player.dropRelease`);另有一条「扫到的调用点 > 50」的自检,防止正则或路径改动让断言变成空跑。实测把 `rescan` 删掉能精确报出 `LibraryShell.tsx:1124`。
+- 顺带查清 `zh.ts` 相对 `-spa` 共缺 87 个键,但其余 82 个都只被服务端组件使用(meta/seasonPage/landing/admin 等),不受影响 —— 闸门按**实际调用点**而非键集合求交,不会误报这些。
+
+`bun test` 326/326。
+
+---
+
 ## [3.4.2] - 2026-08-04
 
 ### 修复 — 播放页/库卡片挂错季度的评分与「查看详情」链接
