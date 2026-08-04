@@ -13,7 +13,9 @@
 - **关键修复:reuse 导入现在会刷新 `series.updatedAt`** — `persistFileRefsOnly` 只写 episodes/fileRefs,而 useLibrary 的 liveQuery 只监听 series 表 → 老番出新集从来不会浮进 NewAdditionsRow(注释写了设计意图但代码路径缺失)。补 `seriesRepo.touchSeries()` 在 reuse 分支回写,新集现在会自动浮到「新加入」行。
 - **UI** — 静默扫描以 mini pill 呈现(不弹全屏导入抽屉);完成后 toast「发现 N 个新剧集」;溢出菜单新增「重新扫描文件夹」(手势路径,denied root 先走授权,并清空失败跳过集强制重试);UnavailableSeriesSection 下新增持久授权引导(授权弹窗选「每次访问时都允许」或安装 PWA,重启浏览器后免点击)。
 - **测试** — 新增 29 个单测:rescanService 分支全覆盖(9)、控制器守卫链/排序/隔离/抢占(16)、importPipeline reuse 分支 IRON 回归 + touchSeries(4,经真实 runImport + fake Dexie 表面);e2e seeded 用例加「自动扫描不得弹全屏 scrim」断言,现有两条 spec 一行未改。`bun test` 280/280;生产构建编译 + TS 检查通过。
-- 已知边界:FSA 为 Chromium-only(与现状一致);重启后能否静默扫描取决于用户授权选项(引导文案即为此);player 页扫描、管线加固(缓存裸 verdict 崩溃修复 + 全已知簇守卫)与 FileSystemObserver 实时监听排在 PR-2 / PR-3。
+- **(PR-2)管线加固** — 修掉一个存量崩溃:matchCache 里缓存的裸 `{kind:'new'}`(无 animeId,即"本地标题导入 + dandan 未命中"的产物)被复用时没有 seriesRecord 可持久化,`upsertCluster` 校验直接抛错、整簇计失败——每次重导入本地标题系列都触发;现按缓存未命中处理、重新匹配。新增**重导入守卫**:簇内每个文件都已有归属(同内容哈希 → 同 fileRef id → 各自挂在同一系列的剧集上)时不再铸新系列、翻转为 reuse——堵住"缓存过期 + dandan 不可达 → 重复卡片"和移动/改名场景;文件跨两个系列、或命中 ambiguous 行时守卫保守跳过。派生 reuse 无 animeId 不写缓存(避免再造裸条目)。5 个新单测。
+- **(PR-2)player 页 tab-return 扫描** — `useAutoRescan` 增加 `enabled` / `triggers` / `shouldDefer` 选项(shouldDefer 进控制器守卫链,可单测);PlayerShell 在 library 模式挂 hook:仅 visibilitychange 触发(挂载扫描是 /library 的职责)、`playbackPhase === "playing"` 时让位(哈希 worker 不与解码抢 CPU)、扫到新集后调 `seriesDetail.refresh()`(它是一次性加载非 liveQuery)让 EpisodeNav 立即出现新集——"看完第 6 集,下完第 7 集切回播放页点下一集"的续看场景就此闭环。
+- 已知边界:FSA 为 Chromium-only(与现状一致);重启后能否静默扫描取决于用户授权选项(引导文案即为此);FileSystemObserver 实时监听排在 PR-3。
 
 ---
 
