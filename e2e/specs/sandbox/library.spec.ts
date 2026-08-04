@@ -4,9 +4,16 @@ import { seedLibrary, clearLibrary } from "../../fixtures/dexie-seed";
 
 test.describe("/library — sandbox journeys", () => {
   test.beforeEach(async ({ page }) => {
-    const navbar = page.locator('nav[aria-label="主导航"], nav[aria-label="Main navigation"]');
     await page.goto("/");
-    await expect(navbar).toContainText("e2e-sandbox");
+    // Logged-in sanity check. The navbar no longer renders the username as
+    // text — since the auth-islanding rework the logged-in chrome collapses
+    // into an avatar dropdown (username only in the img alt / menu body), and
+    // auth resolves via a client-side /api/auth/me probe after hydration. So
+    // assert the seed user's avatar instead of navbar text, with a timeout
+    // generous enough for the probe.
+    await expect(page.locator('img[alt="e2e-sandbox"]').first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("seeded library renders at least one series card", async ({ page }) => {
