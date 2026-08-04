@@ -304,6 +304,10 @@ async function processCluster(p) {
         p.db ?? null,
         ulidSeed,
       );
+      // persistFileRefsOnly never writes db.series, but useLibrary's liveQuery
+      // only tracks that table — bump updatedAt so the new episode surfaces
+      // in NewAdditionsRow (sorted by updatedAt) instead of landing silently.
+      await seriesRepo.touchSeries(verdict.seriesId);
       trackFolders(verdict.seriesId);
     }
     // Cache the verdict

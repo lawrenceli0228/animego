@@ -92,5 +92,21 @@ export function makeSeriesRepo(db) {
     });
   }
 
-  return { findAll, findById, upsertCluster };
+  /**
+   * Refresh a series' updatedAt without touching any other field.
+   *
+   * The reuse import branch (persistFileRefsOnly) writes only episodes +
+   * fileRefs; useLibrary's liveQuery tracks db.series, so without this bump a
+   * new episode joining an existing series never re-emits — NewAdditionsRow
+   * (sorted by updatedAt) would silently miss new downloads.
+   *
+   * @param {string} id
+   * @param {number} [now]
+   * @returns {Promise<void>}
+   */
+  async function touchSeries(id, now = Date.now()) {
+    await db.series.update(id, { updatedAt: now });
+  }
+
+  return { findAll, findById, upsertCluster, touchSeries };
 }
