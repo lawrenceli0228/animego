@@ -109,6 +109,19 @@ describe("createRescanController guards", () => {
     expect(calls.complete).toHaveLength(0);
   });
 
+  test("host veto (shouldDefer) blocks the scan before any work", async () => {
+    let defer = true;
+    const { controller, calls } = harness({
+      shouldDefer: () => defer,
+      listRoots: async () => [root("lib1", 1)],
+    });
+    const vetoed = await controller.maybeScan({ trigger: "visibility" });
+    expect(vetoed.outcome).toBe("host-deferred");
+    expect(calls.listRoots).toBe(0);
+    defer = false;
+    expect((await controller.maybeScan({ trigger: "visibility" })).outcome).toBe("scanned");
+  });
+
   test("manual import in flight blocks the scan", async () => {
     const { controller, calls } = harness({ getImportStatus: () => "running" });
     const result = await controller.maybeScan({ trigger: "visibility" });

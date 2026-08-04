@@ -168,6 +168,15 @@ async function processCluster(p) {
     cachedVerdict = await cacheRepo.get(rep.hash16M);
   }
 
+  // A cached bare {kind:'new'} (no animeId — a local-title import whose
+  // dandan lookup found nothing) carries no seriesRecord. Adopting it as the
+  // verdict crashes buildPersistPayload → upsertCluster on series:undefined
+  // and the whole cluster counts as failed on every re-import. Treat it as a
+  // cache miss and re-match instead.
+  if (cachedVerdict?.kind === 'new' && cachedVerdict.animeId === undefined) {
+    cachedVerdict = null;
+  }
+
   /** @type {MatchVerdict} */
   let verdict;
 
@@ -279,6 +288,23 @@ async function processCluster(p) {
     }
   }
 
+  // Re-import guard: when EVERY file in the cluster is already homed in the
+  // library (same content ⇒ same content-hash fileRef id, each attached to an
+  // episode of ONE series), never mint a new series — flip to reuse of that
+  // series. Covers moved/renamed unchanged files and the "matchCache expired
+  // + dandan unreachable" tail, both of which previously duplicated the card.
+  if (verdict.kind === 'new' && p.db) {
+    const home = await deriveExistingHome(cluster, p.db);
+    if (home) {
+      verdict = {
+        kind: 'reuse',
+        seriesId: home.seriesId,
+        seasonId: home.seasonId,
+        animeId: home.animeId,
+      };
+    }
+  }
+
   // Persist based on verdict kind
   if (verdict.kind === 'reuse' || verdict.kind === 'new') {
     if (verdict.kind === 'new') {
@@ -310,8 +336,10 @@ async function processCluster(p) {
       await seriesRepo.touchSeries(verdict.seriesId);
       trackFolders(verdict.seriesId);
     }
-    // Cache the verdict
-    if (rep?.hash16M) {
+    // Cache the verdict. A reuse without an animeId (the re-import guard's
+    // derived home) would serialize to a bare {kind:'new'} entry — useless
+    // since the bare-cache normalization above treats it as a miss — so skip.
+    if (rep?.hash16M && !(verdict.kind === 'reuse' && verdict.animeId === undefined)) {
       const cachePayload = buildCachePayload(verdict);
       await cacheRepo.put(rep.hash16M, cachePayload);
     }
@@ -330,6 +358,38 @@ async function processCluster(p) {
     summary.failed++;
     emit({ kind: 'clusterDone', clusterKey, verdict: 'failed' });
   }
+}
+
+/**
+ * Resolve the existing "home" (seriesId/seasonId) for a cluster whose every
+ * file is already imported. Returns null — guard does not apply — when any
+ * file is unknown, any known fileRef is ambiguous (episodeId null), or the
+ * files span more than one series (never guess across series).
+ *
+ * animeId comes back undefined when the home was derived structurally rather
+ * than via a dandan match; callers must not cache such verdicts.
+ *
+ * @param {import('@/lib/library/types').MatchCluster} cluster
+ * @param {import('dexie').Dexie} db
+ * @returns {Promise<{seriesId: string, seasonId: string|null, animeId: undefined}|null>}
+ */
+async function deriveExistingHome(cluster, db) {
+  let seriesId = null;
+  let seasonId = null;
+  for (const item of cluster.items) {
+    const ref = await db.fileRefs.get(fileRefId(item));
+    if (!ref?.episodeId) return null;
+    const ep = await db.episodes.get(ref.episodeId);
+    if (!ep?.seriesId) return null;
+    if (seriesId === null) {
+      seriesId = ep.seriesId;
+      seasonId = ep.seasonId ?? null;
+    } else if (ep.seriesId !== seriesId) {
+      return null;
+    }
+  }
+  if (!seriesId) return null;
+  return { seriesId, seasonId, animeId: undefined };
 }
 
 /**
