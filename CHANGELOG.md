@@ -15,7 +15,8 @@
 - **测试** — 新增 29 个单测:rescanService 分支全覆盖(9)、控制器守卫链/排序/隔离/抢占(16)、importPipeline reuse 分支 IRON 回归 + touchSeries(4,经真实 runImport + fake Dexie 表面);e2e seeded 用例加「自动扫描不得弹全屏 scrim」断言,现有两条 spec 一行未改。`bun test` 280/280;生产构建编译 + TS 检查通过。
 - **(PR-2)管线加固** — 修掉一个存量崩溃:matchCache 里缓存的裸 `{kind:'new'}`(无 animeId,即"本地标题导入 + dandan 未命中"的产物)被复用时没有 seriesRecord 可持久化,`upsertCluster` 校验直接抛错、整簇计失败——每次重导入本地标题系列都触发;现按缓存未命中处理、重新匹配。新增**重导入守卫**:簇内每个文件都已有归属(同内容哈希 → 同 fileRef id → 各自挂在同一系列的剧集上)时不再铸新系列、翻转为 reuse——堵住"缓存过期 + dandan 不可达 → 重复卡片"和移动/改名场景;文件跨两个系列、或命中 ambiguous 行时守卫保守跳过。派生 reuse 无 animeId 不写缓存(避免再造裸条目)。5 个新单测。
 - **(PR-2)player 页 tab-return 扫描** — `useAutoRescan` 增加 `enabled` / `triggers` / `shouldDefer` 选项(shouldDefer 进控制器守卫链,可单测);PlayerShell 在 library 模式挂 hook:仅 visibilitychange 触发(挂载扫描是 /library 的职责)、`playbackPhase === "playing"` 时让位(哈希 worker 不与解码抢 CPU)、扫到新集后调 `seriesDetail.refresh()`(它是一次性加载非 liveQuery)让 EpisodeNav 立即出现新集——"看完第 6 集,下完第 7 集切回播放页点下一集"的续看场景就此闭环。
-- 已知边界:FSA 为 Chromium-only(与现状一致);重启后能否静默扫描取决于用户授权选项(引导文案即为此);FileSystemObserver 实时监听排在 PR-3。
+- **(PR-3)FileSystemObserver 实时监听** — `folderWatcher.js` 薄适配(规格未入 whatwg/fs,所有触点防御式包裹、调用方只依赖模块自有接口):特性检测(Chrome/Edge 133+ 桌面默认启用,Firefox/Safari/Android 与 Playwright 自带 Chromium 均无 → 自动降级 no-op)、`observe({recursive:true})`、事件一律当"提示"——落地动作永远是同一个 diff 扫描;appeared/modified/moved/disappeared → 10s debounce;`unknown`(官方语义"丢过事件,请轮询")→ 立即扫;`errored` → 转入可用性重探。控制器新增 `watch` 触发档位(10s 细节流)与**静默期推迟重试**:扫描发现"还在写盘被推迟"的文件时定一次 65s 后的单发重试,页面开着时刚下完的文件也能在守卫窗口过后自动进库(此前会一直等到下次切换标签页)。hook 按 handlesStatus 对每个 ready root 起观察、卸载时 disconnect + dispose。12 个新单测(watcher 8 + 控制器 4)。
+- 已知边界:FSA 为 Chromium-only(与现状一致);重启后能否静默扫描取决于用户授权选项(引导文案即为此);实时监听仅在页面存活期生效,挂载对账扫描始终是兜底真相。
 
 ---
 
