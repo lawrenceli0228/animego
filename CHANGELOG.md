@@ -2,6 +2,21 @@
 
 ---
 
+## [3.4.0] - 2026-08-04
+
+### 功能 — 播放库 watch-folder 自动更新(一期):下载丢进文件夹,回到网站就能看
+
+此前 `/library` 没有任何重扫路径:新下载的剧集必须重新点「+ 添加文件夹」、重挑同一个目录、全库每个文件重读 16MB 做哈希才进得了库(还每次多铸一条 fileHandles 记录)。本次给库补上「对账式增量扫描」—— 打开 /library 或切回标签页时,用已持久化的目录 handle 静默重枚举、与已导入文件 diff、只把新文件喂进现有导入管线,成本 O(新文件)。方案经 6-agent 调研 + 反驳验证 + /plan-eng-review 全流程评审(8 项决策,详见 workflow 设计文档)。
+
+- **增量 diff 扫描(`rescanService`)** — 全库 `(relPath,size)` 基线(历史多 libraryId 脏数据天然免疫,重复 root 第二次枚举 0 新增);**60s 静默期守卫在哈希阶段之前**挡还在写盘的种子文件(BT 乱序写,前 16MB 不完整会产生脏 hash);同 relPath 但 size 变化 → 按新文件导入 + 旧 fileRef 行打 `supersededAt` 标记(不删行,Episode.primaryFileId 引用保持有效,播放按 relPath 解析天然拿到新内容)。
+- **纯控制器 + 薄 hook(`rescanController` / `useAutoRescan`)** — 全部决策逻辑(守卫链、60s 节流、roots 按 lastSeenAt 降序 + isSameEntry 内联去重、per-root 故障隔离、会话级失败跳过集防「持续失败簇每轮重哈希 + 重打 dandanplay」的重试风暴、手动导入 cancel + 5s 有界等待抢占)在纯函数模块里,bun test 全覆盖;hook 只做 mount / visibilitychange 两个触发点的接线。权限契约:自动路径只读、**绝不** `requestPermission`;granted 静默跑,prompt 落回现有 reauthorize 手势;扫描失败的 root 走 `refreshHandles()` 进现有可用性 UI,不进 console(e2e 零报错断言不破)。
+- **关键修复:reuse 导入现在会刷新 `series.updatedAt`** — `persistFileRefsOnly` 只写 episodes/fileRefs,而 useLibrary 的 liveQuery 只监听 series 表 → 老番出新集从来不会浮进 NewAdditionsRow(注释写了设计意图但代码路径缺失)。补 `seriesRepo.touchSeries()` 在 reuse 分支回写,新集现在会自动浮到「新加入」行。
+- **UI** — 静默扫描以 mini pill 呈现(不弹全屏导入抽屉);完成后 toast「发现 N 个新剧集」;溢出菜单新增「重新扫描文件夹」(手势路径,denied root 先走授权,并清空失败跳过集强制重试);UnavailableSeriesSection 下新增持久授权引导(授权弹窗选「每次访问时都允许」或安装 PWA,重启浏览器后免点击)。
+- **测试** — 新增 29 个单测:rescanService 分支全覆盖(9)、控制器守卫链/排序/隔离/抢占(16)、importPipeline reuse 分支 IRON 回归 + touchSeries(4,经真实 runImport + fake Dexie 表面);e2e seeded 用例加「自动扫描不得弹全屏 scrim」断言,现有两条 spec 一行未改。`bun test` 280/280;生产构建编译 + TS 检查通过。
+- 已知边界:FSA 为 Chromium-only(与现状一致);重启后能否静默扫描取决于用户授权选项(引导文案即为此);player 页扫描、管线加固(缓存裸 verdict 崩溃修复 + 全已知簇守卫)与 FileSystemObserver 实时监听排在 PR-2 / PR-3。
+
+---
+
 ## [3.3.0] - 2026-06-19
 
 ### 开源 — 项目改用 AGPL-3.0 许可 + 社区贡献治理骨架
