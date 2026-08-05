@@ -11,8 +11,10 @@
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
+import { genreLabel } from "@/lib/contentLabels";
 import { formatScore, pickTitle, stripHtml, truncate } from "@/lib/formatters";
 import type { Dict, Lang } from "@/lib/i18n";
+import { useLang } from "@/lib/lang-client";
 import type { SeasonalAnime } from "@/lib/types";
 
 const INTERVAL_MS = 5000;
@@ -213,6 +215,11 @@ const dotBtnStyle: CSSProperties = {
 };
 
 export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProps) {
+  // Genre chips resolve against the reader's language, not the `lang` prop:
+  // that prop comes from getLang(), pinned to "zh" for ISR, so translating
+  // against it would show Chinese genres to English readers where the raw
+  // AniList value used to render. See the note in AnimeCard.
+  const { lang: viewerLang } = useLang();
   const [current, setCurrent] = useState(0);
   const [paused, setPaused] = useState(false);
 
@@ -323,7 +330,7 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
                   <div style={genresRowStyle}>
                     {anime.genres.slice(0, 4).map((g) => (
                       <span key={g} style={genreChipStyle}>
-                        {g}
+                        {genreLabel(g, viewerLang)}
                       </span>
                     ))}
                   </div>

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import FadeImage from "@/components/ui/FadeImage";
+import RankingMeta from "@/components/home/RankingMeta";
 import { formatScore, pickTitle } from "@/lib/formatters";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { YearlyTopItem } from "@/lib/types";
@@ -136,7 +137,10 @@ export default function SeasonRankings({
 
       <div style={gridStyle} className="season-rankings-grid">
         {items.map((anime, i) => {
-          const genres = (anime.genres ?? []).slice(0, 2).join(" · ");
+          // Genres stay raw here and are translated inside RankingMeta, a
+          // client leaf: `lang` is server-pinned to "zh" (ISR), so localising
+          // it here would force Chinese on English readers.
+          const genres = (anime.genres ?? []).slice(0, 2);
           const epsCount = anime.episodes ?? 0;
           const epsSuffix =
             epsCount > 0 ? ` · ${epsCount} ${dict.detail.epUnit}` : "";
@@ -159,10 +163,11 @@ export default function SeasonRankings({
               )}
               <div style={infoStyle}>
                 <div style={nameStyle}>{pickTitle(anime, lang)}</div>
-                <div style={metaStyle}>
-                  {genres}
-                  {epsSuffix}
-                </div>
+                <RankingMeta
+                  genres={genres}
+                  epsSuffix={epsSuffix}
+                  style={metaStyle}
+                />
               </div>
               {score > 0 && (
                 <span style={scoreStyle}>

@@ -146,7 +146,7 @@ export default async function UserProfilePage({ params }: PageProps) {
         }
       >
         <div style={{ paddingTop: 8, paddingBottom: 60 }}>
-          <WatchingSection watching={profile.watching} lang={lang} />
+          <WatchingSection watching={profile.watching} />
         </div>
       </PublicProfileHero>
     </main>

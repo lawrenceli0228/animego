@@ -3,8 +3,10 @@
 import Link from "next/link";
 import type { CSSProperties, MouseEvent } from "react";
 import { useRef } from "react";
+import { formatLabel, genreLabel } from "@/lib/contentLabels";
 import { formatScore, pickTitle } from "@/lib/formatters";
 import type { Lang } from "@/lib/i18n";
+import { useLang } from "@/lib/lang-client";
 import type { LandingPoster } from "@/lib/types";
 import FadeImage from "@/components/ui/FadeImage";
 
@@ -176,6 +178,15 @@ export default function AnimeCard({
   priority = false,
 }: AnimeCardProps) {
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  // Content enums (format badge, genre chips) deliberately do NOT use the
+  // `lang` prop. That prop comes from getLang(), which is pinned to "zh" so
+  // pages stay ISR-cacheable, so translating against it would show Chinese
+  // genres to English readers — a regression, since these chips rendered the
+  // raw AniList value before. useLang() is SSR-seeded zh and reconciled from
+  // the `lang` cookie after mount: the same source SearchFilters and
+  // SeasonalFilterChips read, so a card badge can never disagree with the
+  // filter chip sitting directly above it in the /search and /seasonal grids.
+  const { lang: viewerLang } = useLang();
   const href = `/anime/${anime.anilistId}`;
   const title = pickTitle(anime, lang);
 
@@ -217,7 +228,7 @@ export default function AnimeCard({
       {rank ? (
         <span style={rankBadgeStyle}>#{rank}</span>
       ) : anime.format ? (
-        <span style={formatBadgeStyle}>{anime.format}</span>
+        <span style={formatBadgeStyle}>{formatLabel(anime.format, viewerLang)}</span>
       ) : null}
 
       {anime.averageScore != null && anime.averageScore > 0 ? (
@@ -234,9 +245,11 @@ export default function AnimeCard({
 
       <div style={gradientStyle}>
         <div ref={overlayRef} style={overlayStyle}>
+          {/* key stays the raw AniList enum (stable identity); only the
+              rendered text is localised. */}
           {(anime.genres ?? []).slice(0, 2).map((g) => (
             <span key={g} style={genreChipStyle}>
-              {g}
+              {genreLabel(g, viewerLang)}
             </span>
           ))}
         </div>

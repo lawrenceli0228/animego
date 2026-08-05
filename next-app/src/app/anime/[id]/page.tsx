@@ -21,8 +21,10 @@ import DetailActions from "@/components/anime/DetailActions";
 import FadeImage from "@/components/ui/FadeImage";
 import EpisodesGrid from "@/components/anime/EpisodesGrid";
 import HeroAccent from "@/components/anime/HeroAccent";
+import { FormatBadge, GenreChips } from "@/components/anime/LocalizedChips";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import { apiGet, ApiError } from "@/lib/api";
+import { pickRelatedTitle, staffRoleLabel } from "@/lib/contentLabels";
 import {
   formatFuzzyDate,
   formatScore,
@@ -53,6 +55,31 @@ export const revalidate = 60;
 // dynamicParams=true keeps every other id ISR-on-demand (rendered + cached on
 // first request) instead of 404. Without this the whole route stays dynamic.
 export const dynamicParams = true;
+
+// --- Where content labels are (and are not) language-aware on this route ---
+//
+// `lang` throughout this file comes from getLang(), which is pinned to "zh" on
+// the server so the route can stay ISR + edge-cached — one cached HTML shared
+// by every visitor. So every zh/en branch fed by that `lang` resolves zh, for
+// English readers included: pickTitle, pickStaffName, pickCharacterName,
+// RELATION_LABEL, CHARACTER_ROLE_LABEL, statusLabel, seasonLabel — and now
+// staffRoleLabel and pickRelatedTitle. That is the page's pre-existing
+// behaviour, not something the content-label work introduced; the two new
+// call sites join surfaces that were already zh-only.
+//
+// Two exceptions render through client leaves (LocalizedChips) and so follow
+// the real cookie language after mount: the genre row and the format badge.
+// They are where an English reader loses most — a raw "TV_SHORT" enum, and a
+// chip row that is otherwise plain readable English — and they are cheap: two
+// hydration roots for the whole page rather than one per item. The trade is a
+// zh→en repaint at those two spots for en visitors on cached HTML.
+//
+// Do not extend that treatment item-by-item to staff roles or relation /
+// recommendation titles. Those are dozens of nodes each, and the title or
+// label immediately beside them (pickTitle, RELATION_LABEL) stays zh no matter
+// what, so the repaint would buy an inconsistent half-translation at real
+// hydration cost. Making them language-aware requires unpinning getLang, which
+// costs the edge cache — a separate decision, not a chip-level one.
 
 // Prerender a small, hot set of detail pages from the trending endpoint —
 // same path + unwrapped TrendingItem[] shape the landing page's safeTrending
@@ -506,7 +533,13 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
               </span>
             ) : null}
             {detail.format && (
-              <span style={S.badge("rgba(10,132,255,0.12)", "#0a84ff")}>{detail.format}</span>
+              // Client leaf so this follows the cookie language rather than
+              // the server-pinned zh — see the route note at the top of this
+              // file for why only this and the genre row get that treatment.
+              <FormatBadge
+                format={detail.format}
+                style={S.badge("rgba(10,132,255,0.12)", "#0a84ff")}
+              />
             )}
             {detail.status && (
               <span style={S.badge("rgba(90,200,250,0.10)", "#5ac8fa")}>
@@ -552,16 +585,15 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
             </div>
           )}
 
-          {/* Genres */}
-          {detail.genres.length > 0 && (
-            <div style={S.genreRow}>
-              {detail.genres.map((g) => (
-                <span key={g} style={S.genreTag}>
-                  {g}
-                </span>
-              ))}
-            </div>
-          )}
+          {/* Genres — client leaf for the same reason as FormatBadge above.
+              One instance for the whole row, not one per chip. Only the chip
+              text is localised: buildJsonLd still emits detail.genres raw, so
+              schema.org keeps the English AniList vocabulary. */}
+          <GenreChips
+            genres={detail.genres}
+            style={S.genreRow}
+            chipStyle={S.genreTag}
+          />
 
           {/* Description with 展开更多 / 收起 toggle */}
           {descFull && (
@@ -593,11 +625,16 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
               {heroRelations.map((r) => {
                 const relLabel =
                   RELATION_LABEL[r.relationType]?.[lang] ?? r.relationType;
-                // Legacy AnimeDetailHero.jsx uses r.title (romaji from
-                // AniList) regardless of UI language. Wire field is
-                // `title` not `titleRomaji` — see DetailRelation type.
+                // Was `r.title || r.titleChinese` — legacy AnimeDetailHero.jsx
+                // pinned romaji, so a Chinese title sitting right there in the
+                // payload was never shown (prod: 48.7% of relation rows carry
+                // one). pickRelatedTitle prefers it under zh. `lang` is
+                // server-pinned zh here, so this reads Chinese-first for every
+                // visitor — same as pickTitle two screens up; see the route
+                // note at the top of this file. Wire field is `title` not
+                // `titleRomaji` — see DetailRelation type.
                 const relTitle =
-                  r.title || r.titleChinese || `Anime #${r.anilistId}`;
+                  pickRelatedTitle(r, lang) || `Anime #${r.anilistId}`;
                 return (
                   <Link
                     key={`${r.relationType}-${r.anilistId}`}
@@ -678,9 +715,11 @@ function RelationsSection({
         {sorted.map((rel) => {
           const label =
             RELATION_LABEL[rel.relationType]?.[lang] ?? rel.relationType;
-          // Cards mirror the inline hero chips: romaji wins so the text
-          // matches the legacy SPA. Wire field is `title` not `titleRomaji`.
-          const relTitle = rel.title || rel.titleChinese || "";
+          // Cards mirror the inline hero chips — same helper, same
+          // server-pinned zh, so likewise Chinese-first for everyone. Both
+          // sites previously hardcoded romaji-wins and suppressed titleChinese
+          // outright. Wire field is `title` not `titleRomaji`.
+          const relTitle = pickRelatedTitle(rel, lang);
           return (
             <Link
               key={`${rel.anilistId}-${rel.relationType}`}
@@ -1016,7 +1055,13 @@ function StaffSectionView({ staff, lang, dict }: { staff: DetailStaff[]; lang: L
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {s.role}
+                  {/* Server-rendered, unlike the hero genre/format chips: this
+                      grid runs to dozens of rows, and the name beside each role
+                      is already Japanese for every visitor (pickStaffName under
+                      the pinned zh), so a client leaf per row would repaint one
+                      column of a block that stays non-English either way. See
+                      the route note at the top of this file. */}
+                  {staffRoleLabel(s.role, lang)}
                 </div>
               )}
             </div>
@@ -1061,8 +1106,11 @@ function RecommendationsSection({
       >
         {items.map((r) => {
           // Wire field is `title` (romaji), not `titleRomaji`. Legacy
-          // RecommendationSection.jsx renders r.title regardless of lang.
-          const title = r.title || r.titleChinese || `Anime #${r.anilistId}`;
+          // RecommendationSection.jsx pinned r.title, throwing away the Chinese
+          // title on 79.1% of prod recommendation rows — the highest-yield
+          // suppression on the page, which is why it is worth flipping even
+          // though `lang` here is server-pinned zh for every visitor.
+          const title = pickRelatedTitle(r, lang) || `Anime #${r.anilistId}`;
           return (
             <Link
               key={r.anilistId}
