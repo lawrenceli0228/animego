@@ -4,6 +4,8 @@
 // feels consistent across surfaces.
 
 import type { CSSProperties } from "react";
+import { estimateChipWidth } from "@/lib/chipWidth";
+import { FILTER_GENRES, genreLabel } from "@/lib/contentLabels";
 
 const containerStyle: CSSProperties = {
   paddingTop: 40,
@@ -70,10 +72,13 @@ const cardSkeletonStyle: CSSProperties = {
   aspectRatio: "3/4",
 };
 
-// Approximate chip widths so the skeleton row visually mirrors the
-// real GENRES row (Action, Adventure, Mahou Shoujo, etc. differ in
-// pixel width). Keeps cumulative layout shift on swap minimal.
-const CHIP_WIDTHS = [56, 72, 64, 56, 56, 64, 60, 96, 64, 56, 64, 96, 64, 60, 96, 60, 88, 68];
+// Chip widths are derived from the labels SearchFilters actually paints, so
+// the skeleton row wraps on the same line count as the real one. These were
+// hardcoded to the English names until the genre chips were localised — the
+// Chinese row is ~33% narrower, which cost a whole wrapped line of layout
+// shift on swap. Mirrors SearchFilters' chipStyle: 12px text, 10px padding,
+// 1px border.
+const CHIP_WIDTHS = FILTER_GENRES.map((g) => estimateChipWidth(genreLabel(g, "zh")));
 
 export default function SearchLoading() {
   return (

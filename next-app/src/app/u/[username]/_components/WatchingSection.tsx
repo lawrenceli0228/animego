@@ -4,11 +4,11 @@ import { useState } from "react";
 import Link from "next/link";
 import type { WatchingEntry } from "./types";
 import { useLang } from "@/lib/lang-client";
+import { pickTitle } from "@/lib/formatters";
 import type { Lang } from "@/lib/i18n";
 
 interface WatchingSectionProps {
   watching: WatchingEntry[];
-  lang: Lang;
 }
 
 const STATUS_ORDER = ["watching", "completed", "plan_to_watch", "dropped"] as const;
@@ -18,9 +18,26 @@ const PAGE_SIZE = 12;
 
 // Minimal anime card for profile pages — simpler than the landing AnimeCard
 // (no hover details overlay), just cover + title on click.
-function ProfileAnimeCard({ anime }: { anime: WatchingEntry }) {
+//
+// The title ladder used to be a hardcoded `titleChinese ?? titleRomaji ?? …`,
+// i.e. Chinese-first regardless of language. That is the mirror image of the
+// bug the zh work is fixing: it force-fed Chinese titles to English readers
+// on every profile page. Delegating to the shared pickTitle() makes the
+// preference bidirectional — zh gets Chinese first, en gets English first —
+// and keeps this card on the same ladder as every other title render site.
+// `lang` is the *client* language (see the parent's useLang note): the RSC
+// `lang` prop is always "zh" under ISR islanding, so it cannot be used here.
+function ProfileAnimeCard({ anime, lang }: { anime: WatchingEntry; lang: Lang }) {
+  // pickTitle's en branch is deliberately narrow (english || romaji) and returns
+  // "" rather than reaching for a Chinese or Japanese title. Correct for prose,
+  // wrong for a poster card: title_romaji is nullable, so a row carrying only a
+  // native/Chinese title would render a caption-less card with alt="" — which
+  // screen readers announce as decorative. A title in an unexpected script is
+  // still recoverable; an anonymous card is not. The tail only fires when
+  // pickTitle finds nothing, so every entry that rendered before renders the
+  // same bytes now.
   const title =
-    anime.titleChinese ?? anime.titleRomaji ?? anime.titleEnglish ?? anime.titleNative ?? "";
+    pickTitle(anime, lang) || anime.titleNative || anime.titleChinese || "";
 
   return (
     <Link
@@ -79,8 +96,13 @@ function ProfileAnimeCard({ anime }: { anime: WatchingEntry }) {
   );
 }
 
-export default function WatchingSection({ watching, lang: _lang }: WatchingSectionProps) {
-  const { t } = useLang();
+export default function WatchingSection({ watching }: WatchingSectionProps) {
+  // No `lang` prop by design: getLang() is pinned to "zh" on the server under
+  // ISR islanding, so an RSC-supplied language would always say "zh" and this
+  // component would keep force-feeding Chinese titles to English readers —
+  // exactly the bug this file used to have. useLang() SSR-seeds zh then
+  // reconciles from the cookie on mount, so it is the only honest source here.
+  const { t, lang } = useLang();
   const [expanded, setExpanded] = useState<Partial<Record<StatusKey, boolean>>>({});
 
   if (watching.length === 0) {
@@ -151,7 +173,7 @@ export default function WatchingSection({ watching, lang: _lang }: WatchingSecti
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
               {shown.map((anime) => (
-                <ProfileAnimeCard key={anime.anilistId} anime={anime} />
+                <ProfileAnimeCard key={anime.anilistId} anime={anime} lang={lang} />
               ))}
             </div>
             {hasMore && (

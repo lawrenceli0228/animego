@@ -4,30 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent } from "react";
 import type { Dict } from "@/lib/i18n";
+import { FILTER_GENRES, genreLabel } from "@/lib/contentLabels";
+import { useLang } from "@/lib/lang-client";
 
-// Single source of truth for genre chips. Mirrors the legacy
-// client/src/utils/constants.js GENRES array byte-for-byte so /search
-// behaves identically across the Vite SPA and the Next 16 RSC port.
-const GENRES = [
-  "Action",
-  "Adventure",
-  "Comedy",
-  "Drama",
-  "Ecchi",
-  "Fantasy",
-  "Horror",
-  "Mahou Shoujo",
-  "Mecha",
-  "Music",
-  "Mystery",
-  "Psychological",
-  "Romance",
-  "Sci-Fi",
-  "Slice of Life",
-  "Sports",
-  "Supernatural",
-  "Thriller",
-] as const;
+// Genre chips come from @/lib/contentLabels (FILTER_GENRES). This file used
+// to keep its own copy of the list — transcribed from the legacy
+// client/src/utils/constants.js — and SeasonalFilterChips kept a second one;
+// the shared constant is the same 18 values, so /search still behaves
+// identically to the Vite SPA while both surfaces can no longer drift apart.
 
 // Debounce window for the search input. Matches the legacy SearchBar
 // (client/src/components/search/SearchBar.jsx:11) at 400ms so the
@@ -127,6 +111,11 @@ export default function SearchFilters({
   dict,
 }: SearchFiltersProps) {
   const router = useRouter();
+  // `dict` is server-resolved and therefore always zh (getLang is pinned for
+  // ISR). Chip labels need the reader's real language, so they come from
+  // useLang(): SSR-seeded zh, reconciled to the `lang` cookie after mount —
+  // which is what keeps the chips reading "Action" for English visitors.
+  const { lang } = useLang();
   const [q, setQ] = useState(initialQ);
   const [genre, setGenre] = useState(initialGenre);
 
@@ -200,17 +189,19 @@ export default function SearchFilters({
         </button>
       </form>
       <div style={chipRowStyle} role="group" aria-label="genre filter">
-        {GENRES.map((g) => {
+        {FILTER_GENRES.map((g) => {
           const active = genre === g;
           return (
             <button
               key={g}
               type="button"
+              // onGenreClick receives the raw enum: only the label is
+              // translated, ?genre= stays English so links keep resolving.
               onClick={() => onGenreClick(g)}
               style={chipStyle(active)}
               aria-pressed={active}
             >
-              {g}
+              {genreLabel(g, lang)}
             </button>
           );
         })}

@@ -3,11 +3,11 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { Suspense } from "react";
 import SeasonNav from "@/components/seasonal/SeasonNav";
-import SeasonalFilterChips, { GENRES } from "@/components/seasonal/SeasonalFilterChips";
-import type { Genre } from "@/components/seasonal/SeasonalFilterChips";
+import SeasonalFilterChips from "@/components/seasonal/SeasonalFilterChips";
 import AnimeCard from "@/components/anime/AnimeCard";
 import SeasonalShowMore from "@/components/seasonal/SeasonalShowMore";
 import { apiGetPaged } from "@/lib/api";
+import { FILTER_GENRES, type FilterGenre } from "@/lib/contentLabels";
 import { getDict, getDictByLang, getLang } from "@/lib/i18n";
 import { pickTitle } from "@/lib/formatters";
 import type { SeasonalAnime } from "@/lib/types";
@@ -68,7 +68,9 @@ function applyFilters(
   lang: "zh" | "en",
 ): SeasonalAnime[] {
   let list = items;
-  if (genre && GENRES.includes(genre as Genre)) {
+  // `genre` is the raw AniList enum in the query string (the chips only
+  // translate their label), so the whitelist check stays an English compare.
+  if (genre && FILTER_GENRES.includes(genre as FilterGenre)) {
     list = list.filter((a) => a.genres?.includes(genre));
   }
   if (format && FORMATS.includes(format as Format)) {
@@ -190,7 +192,9 @@ export default async function SeasonalPage({ params, searchParams }: PageProps) 
       <SeasonNav season={parsed.season} year={parsed.year} dict={dict} lang={lang} />
 
       <Suspense>
-        <SeasonalFilterChips lang={lang} filteredCount={filtered.length} />
+        {/* No `lang` prop: the chips resolve the real language client-side via
+            useLang(), because getLang() here always returns "zh". */}
+        <SeasonalFilterChips filteredCount={filtered.length} />
       </Suspense>
 
       {displayed.length === 0 ? (

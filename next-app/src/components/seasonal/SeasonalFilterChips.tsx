@@ -2,23 +2,18 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties } from "react";
-import type { Lang } from "@/lib/i18n";
+import { FILTER_GENRES, formatLabel, genreLabel, statusLabel } from "@/lib/contentLabels";
+import { useLang } from "@/lib/lang-client";
 
+// Formats offered as filters — 6 of AniList's 7. MUSIC is not offered here and
+// was also missing from the old local label map, so the gap was latent rather
+// than live; formatLabel covers all 7, so adding MUSIC to this row later is a
+// pure product decision and can no longer leak the raw enum into the UI.
+// Kept local (not in contentLabels) because it is this row's filter set, not a
+// shared vocabulary — page.tsx validates ?format= against its own copy.
 const FORMATS = ["TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA"] as const;
-type Format = (typeof FORMATS)[number];
 
 const STATUSES = ["RELEASING", "FINISHED", "NOT_YET_RELEASED"] as const;
-type Status = (typeof STATUSES)[number];
-
-const FORMAT_LABELS: Record<Lang, Record<Format, string>> = {
-  zh: { TV: "TV", TV_SHORT: "TV短篇", MOVIE: "剧场版", SPECIAL: "特别篇", OVA: "OVA", ONA: "ONA" },
-  en: { TV: "TV", TV_SHORT: "Short", MOVIE: "Movie", SPECIAL: "Special", OVA: "OVA", ONA: "ONA" },
-};
-
-const STATUS_LABELS: Record<Lang, Record<Status, string>> = {
-  zh: { RELEASING: "连载中", FINISHED: "已完结", NOT_YET_RELEASED: "未开播" },
-  en: { RELEASING: "Airing", FINISHED: "Finished", NOT_YET_RELEASED: "Upcoming" },
-};
 
 type SortKey = "score" | "title" | "format";
 
@@ -27,13 +22,6 @@ const SORT_OPTIONS: Array<{ value: SortKey; zh: string; en: string }> = [
   { value: "title", zh: "标题", en: "Title" },
   { value: "format", zh: "格式", en: "Format" },
 ];
-
-export const GENRES = [
-  "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
-  "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological",
-  "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller",
-] as const;
-export type Genre = (typeof GENRES)[number];
 
 const wrapStyle: CSSProperties = {
   display: "flex",
@@ -129,13 +117,18 @@ function genreChipStyle(active: boolean): CSSProperties {
 }
 
 interface SeasonalFilterChipsProps {
-  lang: Lang;
   filteredCount: number;
 }
 
-export default function SeasonalFilterChips({ lang, filteredCount }: SeasonalFilterChipsProps) {
+export default function SeasonalFilterChips({ filteredCount }: SeasonalFilterChipsProps) {
   const router = useRouter();
   const params = useSearchParams();
+  // The language comes from useLang(), NOT from a server-passed prop: getLang()
+  // is pinned to "zh" server-side (ISR islanding), so a prop would hand every
+  // visitor zh and translate the chips for English readers too. useLang() seeds
+  // zh for SSR and reconciles to the `lang` cookie after mount, which is what
+  // keeps genre chips reading "Action" rather than "动作" in English.
+  const { lang } = useLang();
 
   const genre = params.get("genre") ?? "";
   const format = params.get("format") ?? "";
@@ -165,16 +158,19 @@ export default function SeasonalFilterChips({ lang, filteredCount }: SeasonalFil
   return (
     <div style={wrapStyle}>
       <div style={genreRowStyle}>
-        {GENRES.map((g) => {
+        {FILTER_GENRES.map((g) => {
           const active = genre === g;
           return (
             <button
               key={g}
               type="button"
               style={genreChipStyle(active)}
+              // The URL value stays the raw AniList enum — only the visible
+              // text is translated, so shared links and the server-side
+              // filter in page.tsx keep working unchanged.
               onClick={() => push({ genre: active ? "" : g })}
             >
-              {g}
+              {genreLabel(g, lang)}
             </button>
           );
         })}
@@ -191,7 +187,7 @@ export default function SeasonalFilterChips({ lang, filteredCount }: SeasonalFil
                 style={chipStyle(active)}
                 onClick={() => push({ format: active ? "" : f })}
               >
-                {FORMAT_LABELS[lang][f]}
+                {formatLabel(f, lang)}
               </button>
             );
           })}
@@ -207,7 +203,7 @@ export default function SeasonalFilterChips({ lang, filteredCount }: SeasonalFil
                 style={chipStyle(active)}
                 onClick={() => push({ status: active ? "" : s })}
               >
-                {STATUS_LABELS[lang][s]}
+                {statusLabel(s, lang)}
               </button>
             );
           })}
