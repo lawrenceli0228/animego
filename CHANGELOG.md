@@ -4,8 +4,6 @@
 
 ## [3.5.1] - 2026-08-06
 
-> 版本号假定 #64（3.5.0 词典层）先合并；若合并顺序调换，此块改为 3.4.4。
-
 ### 修复 — /seasonal 的分类筛选点了等于清空列表（静默失效两个月）
 
 在 `/seasonal` 点任何一个分类 chip 都是「0 部 / 暂无番剧」，而不筛选时有 98 部。prod 与本地行为一致，`?genre=Action` 稳定返回 0 张卡片。
@@ -23,6 +21,27 @@
 - 顺带更正三处已经过时的「16 列」注释，并补上一条冷启动语义：从未富化过的季度（AniList 现拉）子表还是空的，`genres` 会是空数组、筛选匹配不到；站点实际会列出的都是已富化季度，首次请求就带 genres。
 
 已在 prod 数据上直接验证该 SQL 返回正确分类数组。`go build` 与 `go test` 通过（两个 testcontainer 用例需 Docker daemon，本地未启动，由 CI 覆盖）。
+||||||| 8849f62
+## [3.5.0] - 2026-08-06
+
+### 新增 — 内容枚举汉化（词典层）
+
+中文用户此前在站内看到的 genre、format、staff 职位全是 AniList 的英文枚举；而关系条目与推荐位明明拿到了中文标题，渲染时却被 `x.title || x.titleChinese` 一句写死成罗马字。本次把这些"标签类"内容一次性汉化。
+
+**为什么不进 `locales/`** — 这些是数据枚举映射，不是 UI 文案。四套词典（`zh.ts`/`en.ts`/`zh-spa.js`/`en-spa.js`）有漂移前科（3.4.3 刚为此加了 `spaDictCoverage.test.ts` 闸门）。新建的 `lib/contentLabels.ts` 是**服务端与客户端共用的单一普通模块**，结构上不可能漂移，也不进那道闸门的管辖范围。所有 helper 对 `en` 恒等返回原文，让"英文不退化"由类型和实现机械保证，而不是靠人工评审。
+
+- **genre 19 词全覆盖** — 接入详情页标签行、卡片 hover、首页轮播、完结佳作、年度榜、`/search` 与 `/seasonal` 两处筛选器。附完备性测试：AniList 日后新增 genre 会直接让 CI 失败，而不是静默渲染英文。顺带修掉 `/search` 页 "Action 类型的动画" 这种中英夹杂标题。
+- **两份硬编码 GENRES 合一** — `SearchFilters.tsx` 与 `SeasonalFilterChips.tsx` 各存了一份 18 项数组（前者注释自陈是从 legacy SPA 的 `constants.js` 逐字节抄来）。现在共用 `FILTER_GENRES`。它刻意是 `GENRE_LABEL`(19 项) 的子集——`Hentai` 是目录里的真实值、详情页必须能渲染，但不作为浏览筛选项。
+- **format 补上缺失的 `MUSIC`** — 原映射表只有 6 个值，prod 有 7 个，导致 1,207 部（占 7%）的徽章 fallback 成裸枚举。另外 `MOVIE`/`SPECIAL` 等在 en 下从 `SCREAMING_SNAKE` 变成 `Movie`/`Special`，与 `/seasonal` 筛选器一贯的标签对齐——改动前同屏会出现筛选 chip 写 "Movie"、正下方卡片徽章写 "MOVIE" 的不一致。
+- **staff 职位可译了** — 这项原本判断是"自由文本、没救"：prod 有 4,794 个不同 role 值。但剥掉 `(eps 3, 7)` `(ED2)` `(12 episodes)` 这类限定后缀后只剩 1,405 个，**55 词表即覆盖全部 104,412 条 staff 记录的 91.8%**。译文保留原限定后缀（`Episode Director (eps 3, 7)` → `演出 (eps 3, 7)`），未命中的原样返回。有意义的括号如 `ADR Director (English)` 不剥离，否则会把不同职位并成一个。
+- **解除关系/推荐的中文压制** — 三处 `x.title || x.titleChinese` 换成 `pickRelatedTitle`。实测 prod：推荐位 50,990 条里 **40,354 条（79.1%）** 的目标番有中文标题，关系条目 30,849 条里 15,020 条（48.7%）有——一直白白压着不用。顺带修掉 `title` 为纯空白时是 truthy、会渲染出空 chip 的老毛病。
+- **`WatchingSection` 反向修** — 它此前不分语言恒取 `titleChinese` 优先，对英文用户是强喂中文。改为按语言走 `pickTitle`。这条是"英文体验不退化"的双向兑现。
+
+**客户端叶子的取舍** — `getLang()` 服务端恒返 `zh`（ISR islanding 决策），所以 RSC 里就地汉化会让英文用户永久看到中文。详情页最显眼、文字最密集的两处（genre 行、format 徽章）下沉到 `LocalizedChips.tsx` 客户端叶子走 `useLang()`；`SeasonRankings` 是纯 RSC，同理抽了 `RankingMeta.tsx`。**但刻意没有把这个待遇逐条扩展到 staff 职位和关系标题**——那是每页几十个节点，而紧挨着它们的 `pickTitle`/`RELATION_LABEL` 无论如何都是中文，重绘只会买到一个半吊子翻译，却付出真实的 hydration 代价。要真正解决得解开 `getLang` 的钉，那是拿边缘缓存换，属另一个决策。此取舍已写进 `page.tsx` 的文件级注释，防止后来人逐项扩散。
+
+**顺带修掉一个没预料到的布局跳变** — 两个 `loading.tsx` 的筛选器骨架屏硬编码了按英文标签量出来的像素宽度（`"Mahou Shoujo"` → 96px）。中文标签整行窄约 33%（18 个 genre：1462px → 966px），足以在约 1200px 容器上少掉一行——骨架预留两行、真实内容一行，切换时跳一下。新增 `lib/chipWidth.ts` 从标签本身推导宽度，日后改文案不会再悄悄把这个位移带回来。
+
+`bun test` 372/372（新增 46 条）。`tsc --noEmit` 与 `eslint` 在改动文件上均干净。
 
 ---
 

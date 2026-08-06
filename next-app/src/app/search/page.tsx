@@ -16,6 +16,7 @@ import type { CSSProperties } from "react";
 import AnimeCard, { type AnimeCardData } from "@/components/anime/AnimeCard";
 import SearchFilters from "@/components/search/SearchFilters";
 import { ApiError, getApiBase } from "@/lib/api";
+import { genreLabel } from "@/lib/contentLabels";
 import { getDict, getLang, type Dict, type Lang } from "@/lib/i18n";
 
 // searchParams forces a dynamic render -- the page output depends on
@@ -125,7 +126,11 @@ function buildHeading(q: string, genre: string, dict: Dict, lang: Lang): string 
       : `Search results for "${q}"`;
   }
   if (genre) {
-    return lang === "zh" ? `${genre} 类型的动画` : `${genre} anime`;
+    // zh used to render the raw enum ("Action 类型的动画"). genreLabel is the
+    // identity for en, so the English heading is unchanged; the zh heading
+    // drops the space because Chinese does not separate the two words.
+    const label = genreLabel(genre, lang);
+    return lang === "zh" ? `${label}类型的动画` : `${label} anime`;
   }
   return dict.search.title;
 }
@@ -144,13 +149,16 @@ export async function generateMetadata({
 
   const title = q || genre ? heading : dict.search.title;
   const hasQuery = Boolean(q || genre);
+  // Only the genre term is translated here; the surrounding copy is untouched.
+  // genreLabel is the identity for en, so the English description is unchanged.
+  const subject = q || genreLabel(genre, lang);
 
   return {
     title,
     description: hasQuery
       ? lang === "zh"
-        ? `AnimeGoClub 搜索结果: ${q || genre}`
-        : `AnimeGoClub search results for ${q || genre}`
+        ? `AnimeGoClub 搜索结果: ${subject}`
+        : `AnimeGoClub search results for ${subject}`
       : dict.search.prompt,
     robots: hasQuery
       ? { index: false, follow: true }

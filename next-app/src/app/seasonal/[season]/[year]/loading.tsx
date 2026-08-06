@@ -8,13 +8,37 @@
 // Pure CSS animation — no motion lib — this file must never slow paint.
 
 import type { CSSProperties } from "react";
+import { estimateChipWidth } from "@/lib/chipWidth";
+import {
+  FILTER_GENRES,
+  formatLabel,
+  genreLabel,
+  statusLabel,
+} from "@/lib/contentLabels";
 
 const PLACEHOLDER_CARDS = 18;
-// Per-chip widths cycle so the pill cloud looks like real genre labels of
-// varying length instead of a uniform block. 18 genres + 6 formats + 3
-// statuses + 1 sort select ≈ the real SeasonalFilterChips footprint.
-const GENRE_CHIP_WIDTHS = [56, 72, 60, 84, 64, 76, 52, 88, 68, 60, 80, 64, 72, 56, 84, 60, 76, 68];
-const FILTER_CHIP_WIDTHS = [48, 64, 72, 56, 60, 52, 70, 58, 66];
+
+// Chip widths are derived from the labels SeasonalFilterChips actually paints
+// rather than hardcoded, so the pill cloud wraps on the same line count as the
+// real row. They were transcribed from the English names until the chips were
+// localised; the Chinese genre row is ~33% narrower, enough to reserve one
+// wrapped line the real content does not use and jump the grid on swap.
+// The two rows use different pill geometry, so they are measured separately:
+// genre chips are 10px padding + 1px border, format/status chips 14px + none.
+const SKELETON_FORMATS = ["TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA"];
+const SKELETON_STATUSES = ["RELEASING", "FINISHED", "NOT_YET_RELEASED"];
+
+const GENRE_CHIP_WIDTHS = FILTER_GENRES.map((g) =>
+  estimateChipWidth(genreLabel(g, "zh")),
+);
+const FILTER_CHIP_WIDTHS = [
+  ...SKELETON_FORMATS.map((f) =>
+    estimateChipWidth(formatLabel(f, "zh"), { paddingX: 14, border: 0 }),
+  ),
+  ...SKELETON_STATUSES.map((s) =>
+    estimateChipWidth(statusLabel(s, "zh"), { paddingX: 14, border: 0 }),
+  ),
+];
 
 const containerStyle: CSSProperties = {
   paddingTop: 40,
