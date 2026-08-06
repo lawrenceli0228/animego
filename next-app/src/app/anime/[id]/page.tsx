@@ -29,11 +29,14 @@ import {
   formatFuzzyDate,
   formatScore,
   pickCharacterName,
+  pickDescription,
   pickStaffName,
   pickTitle,
   pickVoiceActorName,
   stripHtml,
   truncate,
+  truncateVisual,
+  visualWidth,
 } from "@/lib/formatters";
 import { getDict, getLang } from "@/lib/i18n";
 import type { Dict, Lang } from "@/lib/i18n";
@@ -433,7 +436,14 @@ const HERO_SHOWN_RELATIONS = new Set([
   "SPIN_OFF",
 ]);
 
-const DESC_TRUNCATE_THRESHOLD = 300;
+// Collapsed-description budget, in "latin character" units — CJK counts two.
+// Measuring width rather than characters keeps the collapsed block the same
+// apparent size in both scripts. With a plain character count the Chinese
+// summaries all sat under the threshold (55-289 chars) while their English
+// counterparts ran well over it (235-1100), so the read-more control appeared
+// only for English readers and Chinese readers got the whole synopsis dumped
+// into the hero.
+const DESC_TRUNCATE_WIDTH = 300;
 
 function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: Dict }) {
   const title = pickTitle(detail, lang);
@@ -441,9 +451,51 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   // state. The client-side toggle in DescriptionExpand swaps between
   // them so the rendered HTML always contains both (crawlers see the
   // full text inside the rendered <p>).
-  const descFull = stripHtml(detail.description || "");
-  const descTruncated = truncate(descFull, DESC_TRUNCATE_THRESHOLD);
-  const descNeedsToggle = descFull.length > DESC_TRUNCATE_THRESHOLD;
+  //
+  // zh readers get description_cn — Bangumi's community-written Chinese
+  // synopsis — when the column is populated, falling back to AniList's
+  // English description otherwise. Until the enrichment backfill runs, the
+  // column is NULL for every row and this resolves to exactly what
+  // `detail.description` resolved to before.
+  //
+  // `lang` is NOT the visitor's preference here. getLang() is pinned to "zh"
+  // for every server render (ISR + one CF-cached HTML for all visitors, see
+  // the note on the default export), and this body copy is baked server-side,
+  // so the lang-client provider never swaps it. pickDescription's `en` branch
+  // is a real contract for any future caller, but on THIS route it does not
+  // fire: once the column fills, a visitor with lang=en reads the Chinese
+  // synopsis. That is the same trade this page already makes for titles and
+  // relation titles (pickTitle / pickRelatedTitle, see the route note up top)
+  // — zh-canonical page, zh body. Revisit before the backfill if en readers
+  // are to keep an English body; it needs a client swap (both texts in the
+  // HTML) or a per-language cache key, neither of which belongs in this PR.
+  //
+  // ── SEO BOUNDARY — read before "fixing" the two other description reads ──
+  // This is the *body copy* only. generateMetadata's `description` (the
+  // meta/og/twitter tag, ~line 205) and buildJsonLd's `description` (~line
+  // 283) still read detail.description on purpose, so the indexed text does
+  // not change under Google while the visible page does. Swapping the
+  // indexed description is its own phase: bucketed rollout plus GSC
+  // observation, because a catalog-wide description rewrite is exactly the
+  // kind of change that moves rankings in either direction with no way to
+  // attribute it after the fact. Do not "make them consistent" here.
+  const desc = pickDescription(detail, lang);
+  const descFull = stripHtml(desc.text);
+  const descTruncated = truncateVisual(descFull, DESC_TRUNCATE_WIDTH);
+  const descNeedsToggle = visualWidth(descFull) > DESC_TRUNCATE_WIDTH;
+  // Attribution + snippet exclusion apply only to text we transcribed from
+  // Bangumi. 'llm' / 'manual' sources do not exist yet and will each need
+  // their own call on both (a machine translation credits differently; our
+  // own editorial text has no reason to be held out of snippets).
+  //
+  // Both flags hang off the SAME condition — the provenance of the text —
+  // and neither is gated on bgmId. bgmId only decides whether the credit is
+  // a link: a row that lost its binding after the summary was written would
+  // otherwise silently drop the credit while still republishing the text.
+  const isBangumiSummary = desc.source === "bangumi";
+  const bgmSummaryHref = detail.bgmId
+    ? `https://bgm.tv/subject/${detail.bgmId}`
+    : undefined;
   const heroRelations = (detail.relations ?? []).filter((r) =>
     HERO_SHOWN_RELATIONS.has(r.relationType),
   );
@@ -604,6 +656,11 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
                 needsToggle={descNeedsToggle}
                 expandLabel={dict.detail.readMore}
                 collapseLabel={dict.detail.collapse}
+                nosnippet={isBangumiSummary}
+                sourceLabel={
+                  isBangumiSummary ? dict.detail.summaryFromBangumi : undefined
+                }
+                sourceHref={isBangumiSummary ? bgmSummaryHref : undefined}
               />
             </div>
           )}

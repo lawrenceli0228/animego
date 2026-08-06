@@ -319,6 +319,12 @@ func (noopV12DB) UpsertEpisodeTitle(_ context.Context, _ int32, _ int32, _ *stri
 	return nil
 }
 
+// UpdateDescriptionCn satisfies V2Writer + V3Writer.  Registration tests
+// never invoke this method.
+func (noopV12DB) UpdateDescriptionCn(_ context.Context, _ *string, _ int32, _ *int32) error {
+	return nil
+}
+
 // UpsertAnimeCache satisfies WarmSeasonDB.  Registration tests never
 // invoke this method.
 func (noopV12DB) UpsertAnimeCache(_ context.Context, _ dbgen.UpsertAnimeCacheParams) error {

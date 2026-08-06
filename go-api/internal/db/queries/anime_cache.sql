@@ -427,6 +427,8 @@ SELECT
     poster_accent_contrast_on_black,
     banner_image_url,
     description,
+    description_cn,
+    description_cn_source,
     episodes,
     status,
     season,
@@ -631,3 +633,46 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (anime_id, episode) DO UPDATE
   SET name_cn = EXCLUDED.name_cn,
       name    = EXCLUDED.name;
+
+-- name: UpdateDescriptionCn :exec
+-- Store a Chinese description harvested from Bangumi's Subject.Summary.
+--
+-- The trust gate lives in this WHERE clause rather than in Go so the check
+-- and the write are one statement: a row whose bgm_id is a fuzzy guess can
+-- never have a summary written against it, with no window between deciding
+-- and writing.
+--
+-- Why the gate is not simply `bgm_match_source = 'id_map'`: that column
+-- records how a binding was *made*, and rows bound before 0011 landed carry
+-- NULL even when they are correct. What actually matters is whether an
+-- independent authority agrees with the binding we hold, so the gate asks
+-- exactly that — does bgm_id_map (refreshed weekly from the vendored
+-- AniList->Bangumi map) list this same pair? A 2026-06 audit found the 7,183
+-- rows with an authoritative answer agreed 100%, while the known mis-bindings
+-- all sit in the no-map tail, which this excludes.
+--
+-- Stakes: a wrong title is a wrong word, a wrong summary is a whole page
+-- describing the wrong show — and it would land in the meta description and
+-- JSON-LD too.
+--
+-- 'manual' is never overwritten: it is the admin override, and an automated
+-- sweep must not undo a human correction.
+UPDATE anime_cache ac
+SET description_cn        = sqlc.arg(description_cn),
+    description_cn_source = 'bangumi',
+    updated_at            = now()
+WHERE ac.anilist_id = sqlc.arg(anilist_id)
+  -- Pin the write to the binding the job actually fetched. Without this the
+  -- statement only says "this anime", so a rebind landing mid-job would file
+  -- the old subject's synopsis against the new one. The window is small but
+  -- the failure is a whole page describing a different show.
+  AND ac.bgm_id = sqlc.arg(bgm_id)
+  AND coalesce(ac.description_cn_source, '') <> 'manual'
+  AND (
+      ac.bgm_match_source = 'manual'
+      OR EXISTS (
+          SELECT 1 FROM bgm_id_map m
+          WHERE m.anilist_id = ac.anilist_id
+            AND m.bgm_id = ac.bgm_id
+      )
+  );

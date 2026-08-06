@@ -24,6 +24,57 @@ export function pickTitle(obj: TitleBearing, lang: Lang): string {
   return obj.titleEnglish || obj.titleRomaji || "";
 }
 
+type DescriptionBearing = {
+  description?: string | null;
+  /**
+   * Chinese synopsis (anime_cache.description_cn, migration 0014). Optional
+   * here because this helper is deliberately structural: the detail payload
+   * carries both fields (AnimeDetail declares them non-optional), every other
+   * endpoint carries neither, and both shapes must be accepted. Optionality is
+   * about the *callers*, not about the detail wire contract.
+   */
+  descriptionCn?: string | null;
+  /** 'bangumi' | 'llm' | 'manual' — see anime_cache.description_cn_source. */
+  descriptionCnSource?: string | null;
+};
+
+export interface DescriptionPick {
+  /** Text to render. "" when nothing is available, never null. */
+  text: string;
+  /**
+   * Provenance of `text`: the description_cn_source value when the Chinese
+   * column was used, or null when this is AniList's `description` (the
+   * fallback, and the only thing en ever gets).
+   */
+  source: string | null;
+}
+
+/**
+ * Pick the description body copy for a given language preference.
+ *
+ * - `zh`: descriptionCn > description
+ * - `en`: description, always — an English reader is never shown the
+ *   Chinese synopsis, no matter how good it is.
+ *
+ * Same ladder shape as pickTitle, but it returns provenance alongside the
+ * text instead of a bare string. Callers need to know *which* rung they
+ * landed on — the Bangumi text is transcribed from a third party, so it
+ * carries an attribution line and a `data-nosnippet` boundary that the
+ * AniList fallback does not. Recomputing that condition at the call site
+ * would let the two drift, and the failure mode is silent: attribution
+ * pointing at text we did not source from Bangumi.
+ *
+ * Rows where description_cn is NULL — every row until the enrichment
+ * backfill runs — return exactly what a plain `detail.description` read
+ * returned before this channel existed.
+ */
+export function pickDescription(obj: DescriptionBearing, lang: Lang): DescriptionPick {
+  if (lang === "zh" && obj.descriptionCn) {
+    return { text: obj.descriptionCn, source: obj.descriptionCnSource ?? null };
+  }
+  return { text: obj.description || "", source: null };
+}
+
 /**
  * Format a 0-100 AniList score as a 0-10 string ("85" -> "8.5").
  * Returns "N/A" when the score is null / undefined / 0.
@@ -104,6 +155,51 @@ export function stripHtml(html: string | null | undefined): string {
 export function truncate(str: string | null | undefined, len = 150): string {
   if (!str) return "";
   return str.length > len ? str.slice(0, len) + "..." : str;
+}
+
+/**
+ * Width of a string in "latin character" units, counting CJK as two.
+ *
+ * A character count is the wrong unit for deciding when prose is long enough
+ * to need a read-more control, because the two languages disagree about what
+ * a character is worth. 300 Latin characters is two or three sentences; 300
+ * Han characters is several paragraphs' worth of content rendered in glyphs
+ * that are twice as wide. Measured against the summaries we harvest, every
+ * Chinese one lands between 55 and 289 characters while its English
+ * counterpart runs 235 to 1100 — so a shared character threshold puts the
+ * entire Chinese corpus below the cut and the English one above it.
+ *
+ * Measuring the text rather than switching on the UI language matters: a
+ * Chinese reader whose title has no Chinese summary falls back to the English
+ * one, and that text must still be judged by English rules.
+ */
+export function visualWidth(str: string | null | undefined): number {
+  if (!str) return 0;
+  let width = 0;
+  for (const ch of str) {
+    // CJK ideographs, kana, and fullwidth forms render at ~1em; the Latin
+    // range at ~0.5em.
+    width += /[⺀-鿿＀-￯]/.test(ch) ? 2 : 1;
+  }
+  return width;
+}
+
+/**
+ * Truncate on visual width rather than character count, so the cut lands at
+ * the same apparent length regardless of script. Appends "..." when cut.
+ */
+export function truncateVisual(str: string | null | undefined, maxWidth: number): string {
+  if (!str) return "";
+  if (visualWidth(str) <= maxWidth) return str;
+  let width = 0;
+  let out = "";
+  for (const ch of str) {
+    const w = /[⺀-鿿＀-￯]/.test(ch) ? 2 : 1;
+    if (width + w > maxWidth) break;
+    width += w;
+    out += ch;
+  }
+  return out + "...";
 }
 
 /**

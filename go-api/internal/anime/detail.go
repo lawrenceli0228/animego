@@ -73,6 +73,20 @@ const refetchTimeout = 15 * time.Second
 //
 // All nullable cache columns use pointer types; empty slices serialise as
 // `[]` (not `null`) because the service initialises them before encode.
+//
+// DescriptionCn / DescriptionCnSource carry the Chinese synopsis channel
+// (migration 0014).  DescriptionCn is Bangumi's community-written
+// Subject.Summary today; DescriptionCnSource ('bangumi' | 'llm' |
+// 'manual') exists so a later machine-translation layer can be told apart
+// from — and retracted without touching — the human-written text.  Both
+// are nil for every row until the enrichment backfill populates them, and
+// the client falls back to Description whenever they are, so a client that
+// never reads these two fields renders exactly what it rendered before.
+// Purely additive: Description keeps its meaning and its position.
+//
+// Detail endpoint only.  The list endpoints (seasonal / trending / search)
+// deliberately do NOT carry these — a full synopsis per card would roughly
+// double those payloads for text no card renders.
 type AnimeDetail struct {
 	AnilistID                   int32                  `json:"anilistId"`
 	TitleRomaji                 *string                `json:"titleRomaji"`
@@ -86,6 +100,8 @@ type AnimeDetail struct {
 	PosterAccentContrastOnBlack *float64               `json:"posterAccentContrastOnBlack"`
 	BannerImageUrl              *string                `json:"bannerImageUrl"`
 	Description                 *string                `json:"description"`
+	DescriptionCn               *string                `json:"descriptionCn"`
+	DescriptionCnSource         *string                `json:"descriptionCnSource"`
 	Episodes                    *int32                 `json:"episodes"`
 	Status                      *string                `json:"status"`
 	Season                      *string                `json:"season"`
@@ -100,8 +116,8 @@ type AnimeDetail struct {
 	Relations                   []DetailRelation       `json:"relations"`
 	Characters                  []DetailCharacter      `json:"characters"`
 	Staff                       []DetailStaff          `json:"staff"`
-	Recommendations             []DetailRecommendation  `json:"recommendations"`
-	EpisodeTitles               []DetailEpisodeTitle    `json:"episodeTitles"`
+	Recommendations             []DetailRecommendation `json:"recommendations"`
+	EpisodeTitles               []DetailEpisodeTitle   `json:"episodeTitles"`
 	BgmID                       *int32                 `json:"bgmId"`
 	BangumiScore                *float64               `json:"bangumiScore"`
 	BangumiVotes                *int32                 `json:"bangumiVotes"`
@@ -492,12 +508,12 @@ func (s *DetailService) fetchChildren(ctx context.Context, anilistID int32) (
 // the AniList row has gone stale.  Matches Express anilist.service.js
 // lines 365-370:
 //
-//	- cached_at older than staleCacheTTL  (24h in Express, 1h here — see
-//	                                       const docstring above)
-//	- Studios array empty (Mongo "undefined" → Postgres "no rows")
-//	- Characters array empty
-//	- First character row has nil role
-//	- First relation row has nil cover_image_url
+//   - cached_at older than staleCacheTTL  (24h in Express, 1h here — see
+//     const docstring above)
+//   - Studios array empty (Mongo "undefined" → Postgres "no rows")
+//   - Characters array empty
+//   - First character row has nil role
+//   - First relation row has nil cover_image_url
 //
 // All five conditions are independent — any one trips the re-fetch.
 // The order is cheapest-first: cached_at age is a single time.Since,
@@ -906,6 +922,8 @@ func assembleDetail(
 		PosterAccentContrastOnBlack: main.PosterAccentContrastOnBlack,
 		BannerImageUrl:              main.BannerImageUrl,
 		Description:                 main.Description,
+		DescriptionCn:               main.DescriptionCn,
+		DescriptionCnSource:         main.DescriptionCnSource,
 		Episodes:                    main.Episodes,
 		Status:                      main.Status,
 		Season:                      main.Season,

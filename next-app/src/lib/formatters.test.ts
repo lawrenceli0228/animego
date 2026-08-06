@@ -1,14 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   formatFuzzyDate,
   formatScore,
   pickCharacterName,
+  pickDescription,
   pickStaffName,
   pickTitle,
   pickVoiceActorName,
   stripHtml,
   truncate,
+  truncateVisual,
+  visualWidth,
 } from "./formatters";
+import type { AnimeDetail } from "./types";
 
 describe("formatFuzzyDate", () => {
   test("returns YYYY-MM-DD when all three fields present", () => {
@@ -183,6 +189,158 @@ describe("pickStaffName", () => {
   });
 });
 
+describe("pickDescription", () => {
+  const EN = "A high school student finds a notebook that kills.";
+  const CN = "高三生夜神月意外捡到一本名《DEATH NOTE》的笔记本。";
+
+  test("prefers descriptionCn for zh and reports its provenance", () => {
+    expect(
+      pickDescription(
+        { description: EN, descriptionCn: CN, descriptionCnSource: "bangumi" },
+        "zh",
+      ),
+    ).toEqual({ text: CN, source: "bangumi" });
+  });
+
+  test("reports a null source for zh when descriptionCnSource is absent", () => {
+    // Provenance is advisory — a Chinese body with no recorded source is
+    // still rendered, it just carries no attribution.
+    expect(pickDescription({ description: EN, descriptionCn: CN }, "zh")).toEqual({
+      text: CN,
+      source: null,
+    });
+  });
+
+  test("falls back to English description for zh when descriptionCn is null", () => {
+    // The zero-behaviour-change case: right after migration 0014 every row
+    // has description_cn = NULL, so zh readers must still see exactly the
+    // English text they saw before, with no provenance attached.
+    expect(pickDescription({ description: EN, descriptionCn: null }, "zh")).toEqual({
+      text: EN,
+      source: null,
+    });
+  });
+
+  test("falls back to English description for zh when descriptionCn is undefined", () => {
+    // Payloads from every endpoint other than the detail one omit the field.
+    expect(pickDescription({ description: EN }, "zh")).toEqual({
+      text: EN,
+      source: null,
+    });
+  });
+
+  test("falls back to English description for zh when descriptionCn is an empty string", () => {
+    expect(pickDescription({ description: EN, descriptionCn: "" }, "zh")).toEqual({
+      text: EN,
+      source: null,
+    });
+  });
+
+  test("never carries a source through the fallback, even if one is set", () => {
+    // A stale descriptionCnSource with no descriptionCn must not label the
+    // English body as Bangumi-sourced.
+    expect(
+      pickDescription(
+        { description: EN, descriptionCn: null, descriptionCnSource: "bangumi" },
+        "zh",
+      ),
+    ).toEqual({ text: EN, source: null });
+  });
+
+  test("always takes description for en, even when descriptionCn is present", () => {
+    // en readers must never be served the Chinese synopsis — this is the
+    // property that keeps the channel invisible outside zh.
+    //
+    // Caveat worth knowing before trusting this at the page level: the detail
+    // route never reaches this branch today, because getLang() is pinned to
+    // "zh" for every server render (i18n.test.ts, "getLang (ISR-islanded)").
+    // So this is a live contract for future callers and a dead one for
+    // /anime/[id] — once description_cn fills, an en visitor to that route
+    // reads the Chinese body, the same trade pickTitle already makes there.
+    // If i18n.test.ts ever goes red because getLang learned to read the
+    // cookie, that decision has to be revisited here too.
+    expect(
+      pickDescription(
+        { description: EN, descriptionCn: CN, descriptionCnSource: "bangumi" },
+        "en",
+      ),
+    ).toEqual({ text: EN, source: null });
+  });
+
+  test("returns an empty text for en when only descriptionCn exists", () => {
+    // en does not borrow from the Chinese slot as a fallback.
+    expect(pickDescription({ description: null, descriptionCn: CN }, "en")).toEqual({
+      text: "",
+      source: null,
+    });
+  });
+
+  test("returns an empty text, never null, when both fields are empty", () => {
+    expect(pickDescription({ description: null, descriptionCn: null }, "zh")).toEqual({
+      text: "",
+      source: null,
+    });
+    expect(pickDescription({ description: null, descriptionCn: null }, "en")).toEqual({
+      text: "",
+      source: null,
+    });
+    expect(pickDescription({}, "zh")).toEqual({ text: "", source: null });
+    expect(pickDescription({}, "en")).toEqual({ text: "", source: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// descriptionCn wire contract
+//
+// pickDescription takes DescriptionBearing, whose fields are all optional, so
+// `pickDescription(detail, lang)` in the detail page compiles whether or not
+// AnimeDetail — and, upstream of it, the Go JSON — actually carries the
+// Chinese slot. Every test above would still pass if the field never arrived:
+// the object literals in this file supply it themselves.
+//
+// That makes a wire break silent in exactly the way `library.overflow.rescan`
+// was silent (see locales/spaDictCoverage.test.ts): no exception, no warning,
+// just zh readers pinned to the English description forever on the one page
+// nobody diffs. So the contract gets pinned end to end the same way that one
+// is — by reading the sources and asserting the names line up.
+//
+// `bunx tsc --noEmit` is not part of CI (unit-tests.yml runs `bun test`
+// only), which is why the TS half is asserted at runtime here instead of
+// being left to the type-level alias below.
+// ---------------------------------------------------------------------------
+
+/**
+ * Compile-time half of the same contract: fails `tsc` the moment AnimeDetail
+ * loses either field. Exported so it reads as deliberate rather than dead.
+ */
+type Assignable<T extends U, U> = T;
+export type DescriptionCnWireContract = Assignable<
+  AnimeDetail,
+  { descriptionCn: string | null; descriptionCnSource: string | null }
+>;
+
+describe("descriptionCn wire contract", () => {
+  const REPO = join(import.meta.dir, "..", "..", "..");
+
+  test("go-api serialises both fields under the names pickDescription reads", () => {
+    // The detail struct is the only producer — the list endpoints omit these
+    // two on purpose (a full synopsis per card would roughly double those
+    // payloads), so this is deliberately scoped to detail.go.
+    const detailGo = readFileSync(join(REPO, "go-api/internal/anime/detail.go"), "utf8");
+
+    expect(detailGo).toContain('json:"descriptionCn"');
+    expect(detailGo).toContain('json:"descriptionCnSource"');
+  });
+
+  test("AnimeDetail declares both fields", () => {
+    // Guards the type-level alias above, which CI never evaluates.
+    const types = readFileSync(join(import.meta.dir, "types.ts"), "utf8");
+
+    expect(types).toContain("descriptionCn: string | null;");
+    expect(types).toContain("descriptionCnSource: string | null;");
+  });
+});
+
 describe("formatFuzzyDate (zh locale)", () => {
   test("formats YYYY年MM月DD日 for zh with full date", () => {
     expect(formatFuzzyDate({ year: 2021, month: 12, day: 5 }, "zh")).toBe(
@@ -211,5 +369,94 @@ describe("formatFuzzyDate (zh locale)", () => {
     // When the string does not match the YYYY[-MM[-DD]] pattern the helper
     // returns the original string unchanged rather than null.
     expect(formatFuzzyDate("not-a-date")).toBe("not-a-date");
+  });
+});
+
+// The collapsed-description budget is measured in visual width rather than
+// characters because a character means something different in each script.
+// These cases encode the real corpus this was derived from: harvested Chinese
+// summaries run 55-289 characters while their English counterparts run
+// 235-1100, so a shared character threshold put every Chinese summary below
+// the cut and every English one above it — the read-more control only ever
+// appeared for English readers.
+describe("visualWidth", () => {
+  test("counts latin characters as one unit each", () => {
+    expect(visualWidth("abcde")).toBe(5);
+  });
+
+  test("counts CJK ideographs as two units each", () => {
+    // 6 Han characters -> 12, matching their ~2x rendered width.
+    expect(visualWidth("葬送的芙莉莲")).toBe(12);
+  });
+
+  test("counts kana and fullwidth punctuation as CJK", () => {
+    expect(visualWidth("フリーレン")).toBe(10);
+    expect(visualWidth("！？")).toBe(4);
+  });
+
+  test("measures mixed scripts additively", () => {
+    // "攻壳机动队" (5 Han = 10) + " GHOST" (6 latin = 6).
+    expect(visualWidth("攻壳机动队 GHOST")).toBe(16);
+  });
+
+  test("treats null, undefined and empty as zero", () => {
+    expect(visualWidth(null)).toBe(0);
+    expect(visualWidth(undefined)).toBe(0);
+    expect(visualWidth("")).toBe(0);
+  });
+
+  test("a real Chinese summary outweighs its character count", () => {
+    // 未截断的中文简介：字符数看着不多，占的版面却是两倍。
+    const zh = "魔法使芙莉莲和勇者辛美尔等人一起，历经十年的冒险之后击败了魔王，为世界带来了和平。";
+    expect(zh.length).toBeLessThan(60);
+    expect(visualWidth(zh)).toBeGreaterThan(80);
+  });
+});
+
+describe("truncateVisual", () => {
+  test("returns the string untouched when it fits", () => {
+    expect(truncateVisual("short", 300)).toBe("short");
+    expect(truncateVisual("葬送的芙莉莲", 300)).toBe("葬送的芙莉莲");
+  });
+
+  test("cuts latin text at the same point a character count would", () => {
+    // Latin counts one per character, so width and length agree here — this
+    // is what keeps the English rendering byte-identical to the old helper.
+    const s = "a".repeat(400);
+    expect(truncateVisual(s, 300)).toBe("a".repeat(300) + "...");
+  });
+
+  test("cuts CJK text at half the character count", () => {
+    const s = "字".repeat(400);
+    // 300 units of budget buys 150 双宽 characters.
+    expect(truncateVisual(s, 300)).toBe("字".repeat(150) + "...");
+  });
+
+  test("never splits a character to use up an odd remaining unit", () => {
+    // Budget 5 fits two CJK characters (4 units); the fifth unit is left
+    // unused rather than emitting half a glyph.
+    expect(truncateVisual("一二三四", 5)).toBe("一二...");
+  });
+
+  test("handles mixed scripts without overshooting the budget", () => {
+    const out = truncateVisual("攻壳机动队 GHOST IN THE SHELL", 16);
+    expect(visualWidth(out.replace(/\.\.\.$/, ""))).toBeLessThanOrEqual(16);
+    expect(out.endsWith("...")).toBe(true);
+  });
+
+  test("treats null and undefined as empty", () => {
+    expect(truncateVisual(null, 300)).toBe("");
+    expect(truncateVisual(undefined, 300)).toBe("");
+  });
+
+  test("the toggle decision matches the truncation decision", () => {
+    // A string that fits must never be truncated, and one that is truncated
+    // must report as needing the toggle — otherwise the control appears
+    // above untruncated text or is missing above an elided one.
+    for (const s of ["短", "葬送的芙莉莲".repeat(30), "a".repeat(299), "a".repeat(301)]) {
+      const needsToggle = visualWidth(s) > 300;
+      const truncated = truncateVisual(s, 300);
+      expect(truncated !== s).toBe(needsToggle);
+    }
   });
 });

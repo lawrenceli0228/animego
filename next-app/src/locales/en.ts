@@ -54,6 +54,10 @@ const en = {
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
+    // Parity key. An English reader never sees the Chinese synopsis
+    // (pickDescription pins `en` to AniList's description), so this only
+    // surfaces if a future phase shows the Bangumi text to en as well.
+    summaryFromBangumi: 'Summary from Bangumi',
     linkCopied: 'Link copied!',
     linkCopyFailed: 'Copy failed — please copy the link manually',
     openPlayer: '▶ Play with Danmaku',

@@ -101,6 +101,20 @@ export interface AnimeDetail {
   posterAccentContrastOnBlack: number | null;
   bannerImageUrl: string | null;
   description: string | null;
+  // Chinese synopsis channel (anime_cache.description_cn, migration 0014).
+  // Detail endpoint only — the list endpoints deliberately omit both, so
+  // TrendingItem and friends must NOT grow them. Null on every row until the
+  // enrichment backfill runs; pickDescription falls back to `description`
+  // whenever they are, which is why adding them changes nothing rendered.
+  //
+  // Declared here rather than left implicit because pickDescription's
+  // parameter type makes both fields optional: the call in the detail page
+  // type-checks whether or not this interface carries them, so without these
+  // two lines a go-api rename would silently pin zh readers to English with
+  // nothing red anywhere. See the wire-contract test in lib/formatters.test.ts.
+  descriptionCn: string | null;
+  /** 'bangumi' | 'llm' | 'manual' — see anime_cache.description_cn_source. */
+  descriptionCnSource: string | null;
   episodes: number | null;
   status: string | null;
   season: string | null;

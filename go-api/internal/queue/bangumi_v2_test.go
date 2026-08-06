@@ -114,19 +114,30 @@ type v2EpTitleCall struct {
 	name    *string
 }
 
+// v2DescCnCall snapshots one UpdateDescriptionCn invocation.
+type v2DescCnCall struct {
+	anilistID     int32
+	descriptionCn *string
+	// bgmID pins the write to the binding the job fetched; the SQL uses it
+	// so a rebind mid-job cannot file this synopsis against another show.
+	bgmID *int32
+}
+
 // fakeV2DB is a programmable V2DB.  Hooks let each test inject an
 // error for the retry/non-retry paths; call snapshots let assertions
 // inspect what got written without smuggling globals.
 type fakeV2DB struct {
 	mu sync.Mutex
 
-	updateV2Fn   func(ctx context.Context, c v2UpdateCall) error
-	updateCharFn func(ctx context.Context, c v2CharCall) error
-	upsertEpFn   func(ctx context.Context, c v2EpTitleCall) error
+	updateV2Fn     func(ctx context.Context, c v2UpdateCall) error
+	updateCharFn   func(ctx context.Context, c v2CharCall) error
+	upsertEpFn     func(ctx context.Context, c v2EpTitleCall) error
+	updateDescCnFn func(ctx context.Context, c v2DescCnCall) error
 
-	updateV2Calls   []v2UpdateCall
-	updateCharCalls []v2CharCall
-	upsertEpCalls   []v2EpTitleCall
+	updateV2Calls     []v2UpdateCall
+	updateCharCalls   []v2CharCall
+	upsertEpCalls     []v2EpTitleCall
+	updateDescCnCalls []v2DescCnCall
 }
 
 func (f *fakeV2DB) UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error {
@@ -174,6 +185,28 @@ func (f *fakeV2DB) UpsertEpisodeTitle(ctx context.Context, animeID int32, episod
 		return nil
 	}
 	return fn(ctx, call)
+}
+
+// UpdateDescriptionCn records the Chinese-description write.  Note the
+// sqlc-generated argument order: (ctx, descriptionCn, anilistID).
+func (f *fakeV2DB) UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error {
+	call := v2DescCnCall{anilistID: anilistID, descriptionCn: descriptionCn, bgmID: bgmID}
+	f.mu.Lock()
+	f.updateDescCnCalls = append(f.updateDescCnCalls, call)
+	fn := f.updateDescCnFn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, call)
+}
+
+func (f *fakeV2DB) snapshotDescCnCalls() []v2DescCnCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]v2DescCnCall, len(f.updateDescCnCalls))
+	copy(dup, f.updateDescCnCalls)
+	return dup
 }
 
 func (f *fakeV2DB) snapshotEpTitleCalls() []v2EpTitleCall {
@@ -817,8 +850,8 @@ func TestNormalizeEpisodeTitles_FiltersAndNulls(t *testing.T) {
 	got := normalizeEpisodeTitles([]bangumi.Episode{
 		{Sort: 1, Type: 0, Name: "Asteroid Blues", NameCN: "小行星浪人"},
 		{Sort: 2, Type: 0, Name: "Stray Dog Strut", NameCN: ""}, // empty CN → nil
-		{Sort: 0, Type: 0, Name: "drop: sort 0"},                 // sort<=0 dropped
-		{Sort: 1, Type: 1, Name: "drop: SP"},                     // type!=0 dropped
+		{Sort: 0, Type: 0, Name: "drop: sort 0"},                // sort<=0 dropped
+		{Sort: 1, Type: 1, Name: "drop: SP"},                    // type!=0 dropped
 	})
 	if len(got) != 2 {
 		t.Fatalf("want 2 main episodes, got %d: %+v", len(got), got)
@@ -885,4 +918,212 @@ func TestBangumiV2_EpisodesNotFound_DoesNotFail(t *testing.T) {
 	if n := len(d.snapshotEpTitleCalls()); n != 0 {
 		t.Fatalf("no episode writes expected on not-found, got %d", n)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// description_cn — the Chinese-synopsis channel
+//
+// Shared with bangumi_v3_test.go (same package): both workers hold a Subject
+// at the point they call persistDescriptionCn, so both get the same fixtures.
+// ---------------------------------------------------------------------------
+
+// testSummaryChinese is a usable Chinese synopsis — comfortably past the
+// 40-rune floor, zero kana.
+const testSummaryChinese = "漩涡鸣人是木叶隐村的忍者，体内封印着九尾妖狐。他自幼遭到村民疏远，却怀抱着成为火影、让所有人认可自己的梦想，与同伴一同踏上修行与战斗的旅程。"
+
+// testSummaryJapanese is the untranslated original — the shape roughly 37%
+// of prod summaries take, because the Chinese one has not been written yet.
+// Kana dominate its CJK content, so CleanSummary rejects it and the page
+// keeps falling back to the English description.
+const testSummaryJapanese = "うずまきナルトは、木ノ葉隠れの里に住むはみだし者の忍者である。体内に九尾の妖狐を封印されているため里の人々から疎まれてきたが、火影になることを夢見て、仲間とともに修行と戦いの日々を送っていく。"
+
+// TestBangumiV2_ChineseSummary_WritesDescriptionCn — a usable Chinese
+// summary is cleaned and handed to UpdateDescriptionCn, and doing so costs
+// no additional upstream request.
+func TestBangumiV2_ChineseSummary_WritesDescriptionCn(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			s := makeSubject(id, "火影忍者", 8.7, 5000)
+			s.Summary = testSummaryChinese
+			return s, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	require.NoError(t, runV2(t, b, db, 1234, 9999))
+
+	calls := db.snapshotDescCnCalls()
+	require.Len(t, calls, 1, "usable Chinese summary → exactly one UpdateDescriptionCn")
+	assert.Equal(t, int32(1234), calls[0].anilistID)
+	require.NotNil(t, calls[0].descriptionCn)
+	assert.Equal(t, testSummaryChinese, *calls[0].descriptionCn)
+
+	// The write is pinned to the binding this job fetched.  The SQL matches
+	// on bgm_id as well as anilist_id, so a rebind landing mid-job cannot
+	// file this synopsis against a different show; drop the argument and
+	// that guard silently stops applying.
+	require.NotNil(t, calls[0].bgmID, "bgmID must be sent so the SQL can pin the binding")
+	assert.Equal(t, int32(9999), *calls[0].bgmID)
+
+	// The premise of the whole channel: Summary arrives inside the Subject
+	// body the worker already fetched for score / votes / name_cn.  If this
+	// ever needs a second fetch, the design has been broken.
+	assert.Equal(t, 1, b.subjectCalls, "description_cn must cost zero extra Subject fetches")
+}
+
+// TestBangumiV2_SummaryWithDivider_StoresChineseHalfOnly — shape 2 from
+// bangumi/summary.go: Chinese prose, "[简介原文]" divider, Japanese original.
+// Only the Chinese half may be stored.
+func TestBangumiV2_SummaryWithDivider_StoresChineseHalfOnly(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			s := makeSubject(id, "火影忍者", 8.7, 5000)
+			s.Summary = testSummaryChinese + "\n\n[简介原文]\n" + testSummaryJapanese
+			return s, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	require.NoError(t, runV2(t, b, db, 1234, 9999))
+
+	calls := db.snapshotDescCnCalls()
+	require.Len(t, calls, 1)
+	require.NotNil(t, calls[0].descriptionCn)
+	assert.Equal(t, testSummaryChinese, *calls[0].descriptionCn,
+		"everything from the divider on must be dropped")
+}
+
+// TestBangumiV2_UnusableSummary_SkipsDescriptionCn — the NORMAL rejection
+// path.  Japanese-only / empty / too-short summaries write nothing at all
+// and the job still succeeds; the primary V2 columns are untouched by the
+// decision either way.
+func TestBangumiV2_UnusableSummary_SkipsDescriptionCn(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		summary string
+	}{
+		{"japanese original", testSummaryJapanese},
+		{"empty", ""},
+		{"too short placeholder", "待补充"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			b := &fakeBangumiV2{
+				subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+					s := makeSubject(id, "火影忍者", 8.7, 5000)
+					s.Summary = tc.summary
+					return s, nil
+				},
+			}
+			db := &fakeV2DB{}
+
+			require.NoError(t, runV2(t, b, db, 1234, 9999),
+				"an unusable summary is a normal outcome, never a job failure")
+			assert.Empty(t, db.snapshotDescCnCalls(),
+				"rejected summary must never reach the DB")
+			assert.Len(t, db.snapshotV2Calls(), 1,
+				"score / votes / title_chinese still written as before")
+		})
+	}
+}
+
+// TestBangumiV2_DescriptionCnWriteError_DoesNotFailJob — description_cn is
+// a bonus on top of V2's real job, so a failed write is logged and
+// swallowed rather than re-running writes that already committed.
+func TestBangumiV2_DescriptionCnWriteError_DoesNotFailJob(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			s := makeSubject(id, "火影忍者", 8.7, 5000)
+			s.Summary = testSummaryChinese
+			return s, nil
+		},
+	}
+	db := &fakeV2DB{
+		updateDescCnFn: func(_ context.Context, _ v2DescCnCall) error {
+			return errors.New("description_cn write blew up")
+		},
+	}
+
+	require.NoError(t, runV2(t, b, db, 1234, 9999),
+		"a description_cn write failure must not fail the job")
+	assert.Len(t, db.snapshotV2Calls(), 1, "the primary V2 write still stands")
+}
+
+// TestBangumiV2_DescriptionCnWrittenBeforeCharFailureRetry pins the position
+// of the description write: it happens right after the subject write, ahead
+// of per-character enrichment.
+//
+// It matters because a wedged character path returns an error, and river
+// gives a job a finite number of attempts.  A row whose character UPDATEs
+// fail permanently would, if the description write sat after the threshold
+// check, exhaust its attempts and end up with score + title committed but no
+// synopsis — even though the synopsis was in hand and depends on nothing the
+// character loop produces.
+func TestBangumiV2_DescriptionCnWrittenBeforeCharFailureRetry(t *testing.T) {
+	t.Parallel()
+
+	chars := make([]bangumi.Character, 4)
+	for i := range chars {
+		chars[i] = bangumi.Character{Name: fmt.Sprintf("Char%d", i)}
+	}
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			s := makeSubject(id, "火影忍者", 8.7, 5000)
+			s.Summary = testSummaryChinese
+			return s, nil
+		},
+		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
+			return chars, nil
+		},
+	}
+	db := &fakeV2DB{
+		updateCharFn: func(_ context.Context, _ v2CharCall) error {
+			return errors.New("db wedged")
+		},
+	}
+
+	err := runV2(t, b, db, 1234, 9999)
+	require.Error(t, err, "all chars failed → the job itself still retries")
+
+	calls := db.snapshotDescCnCalls()
+	require.Len(t, calls, 1, "description_cn must be written before the char loop can abort the job")
+	require.NotNil(t, calls[0].descriptionCn)
+	assert.Equal(t, testSummaryChinese, *calls[0].descriptionCn)
+}
+
+// TestBangumiV2_SubjectUpdateError_SkipsDescriptionCn — the mirror case: when
+// the primary V2 write fails the worker returns immediately, so no
+// description lands on a row whose score / title write did not.  Avoids a
+// second doomed round trip against an already-failing DB.
+func TestBangumiV2_SubjectUpdateError_SkipsDescriptionCn(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			s := makeSubject(id, "火影忍者", 8.7, 5000)
+			s.Summary = testSummaryChinese
+			return s, nil
+		},
+	}
+	db := &fakeV2DB{
+		updateV2Fn: func(_ context.Context, _ v2UpdateCall) error {
+			return errors.New("write conflict")
+		},
+	}
+
+	require.Error(t, runV2(t, b, db, 1234, 9999))
+	assert.Empty(t, db.snapshotDescCnCalls(),
+		"primary write failed → don't attempt the optional one")
 }

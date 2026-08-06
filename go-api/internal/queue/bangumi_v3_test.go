@@ -65,14 +65,25 @@ type v3UpdateCall struct {
 	titleChinese *string
 }
 
+// v3DescCnCall snapshots one UpdateDescriptionCn invocation.
+type v3DescCnCall struct {
+	anilistID     int32
+	descriptionCn *string
+	// bgmID pins the write to the binding the job fetched; the SQL uses it
+	// so a rebind mid-job cannot file this synopsis against another show.
+	bgmID *int32
+}
+
 // fakeV3DB is a programmable V3DB.  updateFn lets tests inject an
 // error; call snapshots let assertions inspect what got written.
 type fakeV3DB struct {
 	mu sync.Mutex
 
-	updateFn func(ctx context.Context, c v3UpdateCall) error
+	updateFn       func(ctx context.Context, c v3UpdateCall) error
+	updateDescCnFn func(ctx context.Context, c v3DescCnCall) error
 
-	updateCalls []v3UpdateCall
+	updateCalls       []v3UpdateCall
+	updateDescCnCalls []v3DescCnCall
 }
 
 func (f *fakeV3DB) UpdateBangumiV3(ctx context.Context, anilistID int32, titleChinese *string) error {
@@ -88,6 +99,28 @@ func (f *fakeV3DB) UpdateBangumiV3(ctx context.Context, anilistID int32, titleCh
 		return nil
 	}
 	return fn(ctx, call)
+}
+
+// UpdateDescriptionCn records the Chinese-description write.  Note the
+// sqlc-generated argument order: (ctx, descriptionCn, anilistID).
+func (f *fakeV3DB) UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error {
+	call := v3DescCnCall{anilistID: anilistID, descriptionCn: descriptionCn, bgmID: bgmID}
+	f.mu.Lock()
+	f.updateDescCnCalls = append(f.updateDescCnCalls, call)
+	fn := f.updateDescCnFn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, call)
+}
+
+func (f *fakeV3DB) snapshotDescCnCalls() []v3DescCnCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]v3DescCnCall, len(f.updateDescCnCalls))
+	copy(dup, f.updateDescCnCalls)
+	return dup
 }
 
 func (f *fakeV3DB) snapshotCalls() []v3UpdateCall {
@@ -407,3 +440,94 @@ func TestNewBangumiV3Worker_NilDeps_DoesNotPanic(t *testing.T) {
 
 // dbgen.Querier must satisfy V3DB so main.go can pass *Queries directly.
 var _ V3DB = (dbgen.Querier)(nil)
+
+// ---------------------------------------------------------------------------
+// description_cn — the Chinese-synopsis channel
+//
+// V3 gets its own shot at the summary because it re-fetches the Subject
+// anyway; a synopsis missing at V2 time may have been written since.
+// Fixtures (testSummaryChinese / testSummaryJapanese) live in
+// bangumi_v2_test.go — same package.
+// ---------------------------------------------------------------------------
+
+// TestBangumiV3_ChineseSummary_WritesDescriptionCn — usable Chinese summary
+// is cleaned and stored, at no extra upstream cost (the summary rides in
+// the same Subject body V3 already fetched for name_cn).
+func TestBangumiV3_ChineseSummary_WritesDescriptionCn(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV3{
+		subjectFn: func(_ context.Context, bgmID int) (*bangumi.Subject, error) {
+			return &bangumi.Subject{ID: bgmID, NameCN: "火影忍者", Summary: testSummaryChinese}, nil
+		},
+	}
+	db := &fakeV3DB{}
+
+	require.NoError(t, runV3(t, b, db, 1234, 9999))
+
+	calls := db.snapshotDescCnCalls()
+	require.Len(t, calls, 1, "usable Chinese summary → exactly one UpdateDescriptionCn")
+	assert.Equal(t, int32(1234), calls[0].anilistID)
+	require.NotNil(t, calls[0].descriptionCn)
+	assert.Equal(t, testSummaryChinese, *calls[0].descriptionCn)
+
+	assert.Equal(t, 1, b.subjectCalls, "description_cn must cost zero extra Subject fetches")
+}
+
+// TestBangumiV3_JapaneseSummary_SkipsDescriptionCn — the normal rejection
+// path: nothing written, job still completes, version bump untouched.
+func TestBangumiV3_JapaneseSummary_SkipsDescriptionCn(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV3{
+		subjectFn: func(_ context.Context, bgmID int) (*bangumi.Subject, error) {
+			return &bangumi.Subject{ID: bgmID, NameCN: "火影忍者", Summary: testSummaryJapanese}, nil
+		},
+	}
+	db := &fakeV3DB{}
+
+	require.NoError(t, runV3(t, b, db, 1234, 9999),
+		"an unusable summary is a normal outcome, never a job failure")
+	assert.Empty(t, db.snapshotDescCnCalls(),
+		"Japanese original must never be stored as the Chinese description")
+	assert.Len(t, db.snapshotCalls(), 1, "title_chinese + version bump still written")
+}
+
+// TestBangumiV3_SubjectNotFound_NoDescriptionCn — no Subject means no
+// summary to consider; the terminal version bump still happens.
+func TestBangumiV3_SubjectNotFound_NoDescriptionCn(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV3{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			return nil, bangumi.ErrNotFound
+		},
+	}
+	db := &fakeV3DB{}
+
+	require.NoError(t, runV3(t, b, db, 1234, 9999))
+	assert.Empty(t, db.snapshotDescCnCalls(), "nil subject → no description write")
+	assert.Len(t, db.snapshotCalls(), 1, "404 is still a terminal completion")
+}
+
+// TestBangumiV3_DescriptionCnWriteError_DoesNotFailJob — description_cn is
+// a bonus on top of V3's real job (title_chinese + version bump), so a
+// failed write must not re-run writes that already committed.
+func TestBangumiV3_DescriptionCnWriteError_DoesNotFailJob(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV3{
+		subjectFn: func(_ context.Context, bgmID int) (*bangumi.Subject, error) {
+			return &bangumi.Subject{ID: bgmID, NameCN: "火影忍者", Summary: testSummaryChinese}, nil
+		},
+	}
+	db := &fakeV3DB{
+		updateDescCnFn: func(_ context.Context, _ v3DescCnCall) error {
+			return errors.New("description_cn write blew up")
+		},
+	}
+
+	require.NoError(t, runV3(t, b, db, 1234, 9999),
+		"a description_cn write failure must not fail the job")
+	assert.Len(t, db.snapshotCalls(), 1, "the primary V3 write still stands")
+}
