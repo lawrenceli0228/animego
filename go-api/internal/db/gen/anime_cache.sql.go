@@ -780,7 +780,13 @@ SELECT
     season_year,
     status,
     format,
-    description
+    description,
+    ARRAY(
+        SELECT g.genre
+        FROM anime_genres g
+        WHERE g.anime_id = anime_cache.anilist_id
+        ORDER BY g.genre
+    )::text[] AS genres
 FROM anime_cache
 WHERE
     season = $1
@@ -812,12 +818,21 @@ type GetSeasonalAnimeRow struct {
 	Status          *string  `json:"status"`
 	Format          *string  `json:"format"`
 	Description     *string  `json:"description"`
+	Genres          []string `json:"genres"`
 }
 
 // Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
 // and replaces the warmed-cache branch of anime.controller.js:113-127 +
 // the cached fallback in anilist.service.js getSeasonalAnime ②③.
 // Hentai filter is preserved verbatim — Express skipped via $nin.
+//
+// `genres` is aggregated per row because the /seasonal page filters on it
+// client-side.  The old Express endpoint surfaced genres from the Mongo
+// enrichment cache; when the Go cutover landed this column was not carried
+// over, so `SeasonalAnime.genres` arrived undefined and every genre chip
+// silently matched nothing (lib/types.ts called this exact failure out as a
+// risk of the cutover).  The subquery costs nothing extra in practice: the
+// Hentai exclusion below already forces the same anime_genres lookup.
 func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error) {
 	rows, err := q.db.Query(ctx, getSeasonalAnime,
 		season,
@@ -850,6 +865,7 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 			&i.Status,
 			&i.Format,
 			&i.Description,
+			&i.Genres,
 		); err != nil {
 			return nil, err
 		}

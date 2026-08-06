@@ -6,17 +6,24 @@
 // bangumi_*) flow into the response.
 //
 // Note: child tables (genres / studios / characters / staff / relations
-// / recommendations) are NOT upserted here because /seasonal response
-// shape only carries the main 16-column payload — same as the warmed-
-// cache path.  The user's eventual /:anilistId detail request triggers
-// the full child upsert via detail.go's refetch path.
+// / recommendations) are NOT upserted here — the user's eventual
+// /:anilistId detail request triggers the full child upsert via
+// detail.go's refetch path.  The response does however *read* genres
+// back out of anime_genres (see GetSeasonalAnime), because the seasonal
+// page filters on them client-side.
+//
+// Consequence worth knowing: on the cold-start path a season that has
+// never been enriched returns rows with an empty `genres` array, so the
+// genre chips match nothing until detail views (or the enrichment
+// workers) have populated the child table.  Warmed seasons — every one
+// the site actually lists — carry genres on the first request.
 //
 // Express equivalent: server/services/anilist.service.js:238-330
 // getSeasonalAnime + server/controllers/anime.controller.js:113-127
 // getSeasonal.  The Bangumi enrichment trigger (Express
-// enqueueEnrichment) is deferred — /seasonal returns 16 columns only,
-// so the post-upsert re-read carries title_chinese already if prior
-// enrichment ran; no need to dispatch from here.
+// enqueueEnrichment) is deferred — /seasonal carries only the main row
+// plus that genre aggregate, so the post-upsert re-read already has
+// title_chinese if prior enrichment ran; no need to dispatch from here.
 package anime
 
 import (
@@ -330,10 +337,11 @@ func (s *SeasonalService) coldStart(
 
 	// Re-read via GetSeasonalAnime (same query, same params) so
 	// enriched fields populated by prior Bangumi runs flow into the
-	// response.  Avoids row-type juggling between
-	// GetSeasonalAnimeRow and GetAnimeByAnilistIDsRow — both have the
-	// same 16-column shape, but using the seasonal query keeps the
-	// response struct field type identical between warm + cold paths.
+	// response.  Avoids row-type juggling between GetSeasonalAnimeRow
+	// and GetAnimeByAnilistIDsRow, and keeps the response struct
+	// identical between the warm and cold paths — which matters more
+	// than it used to, since only GetSeasonalAnime carries the
+	// aggregated `genres` column the season filter reads.
 	yearI32 := int32(year)
 	offset := int32((page - 1) * perPage)
 	limit := int32(perPage)
