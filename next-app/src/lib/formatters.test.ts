@@ -11,6 +11,8 @@ import {
   pickVoiceActorName,
   stripHtml,
   truncate,
+  truncateVisual,
+  visualWidth,
 } from "./formatters";
 import type { AnimeDetail } from "./types";
 
@@ -367,5 +369,94 @@ describe("formatFuzzyDate (zh locale)", () => {
     // When the string does not match the YYYY[-MM[-DD]] pattern the helper
     // returns the original string unchanged rather than null.
     expect(formatFuzzyDate("not-a-date")).toBe("not-a-date");
+  });
+});
+
+// The collapsed-description budget is measured in visual width rather than
+// characters because a character means something different in each script.
+// These cases encode the real corpus this was derived from: harvested Chinese
+// summaries run 55-289 characters while their English counterparts run
+// 235-1100, so a shared character threshold put every Chinese summary below
+// the cut and every English one above it — the read-more control only ever
+// appeared for English readers.
+describe("visualWidth", () => {
+  test("counts latin characters as one unit each", () => {
+    expect(visualWidth("abcde")).toBe(5);
+  });
+
+  test("counts CJK ideographs as two units each", () => {
+    // 6 Han characters -> 12, matching their ~2x rendered width.
+    expect(visualWidth("葬送的芙莉莲")).toBe(12);
+  });
+
+  test("counts kana and fullwidth punctuation as CJK", () => {
+    expect(visualWidth("フリーレン")).toBe(10);
+    expect(visualWidth("！？")).toBe(4);
+  });
+
+  test("measures mixed scripts additively", () => {
+    // "攻壳机动队" (5 Han = 10) + " GHOST" (6 latin = 6).
+    expect(visualWidth("攻壳机动队 GHOST")).toBe(16);
+  });
+
+  test("treats null, undefined and empty as zero", () => {
+    expect(visualWidth(null)).toBe(0);
+    expect(visualWidth(undefined)).toBe(0);
+    expect(visualWidth("")).toBe(0);
+  });
+
+  test("a real Chinese summary outweighs its character count", () => {
+    // 未截断的中文简介：字符数看着不多，占的版面却是两倍。
+    const zh = "魔法使芙莉莲和勇者辛美尔等人一起，历经十年的冒险之后击败了魔王，为世界带来了和平。";
+    expect(zh.length).toBeLessThan(60);
+    expect(visualWidth(zh)).toBeGreaterThan(80);
+  });
+});
+
+describe("truncateVisual", () => {
+  test("returns the string untouched when it fits", () => {
+    expect(truncateVisual("short", 300)).toBe("short");
+    expect(truncateVisual("葬送的芙莉莲", 300)).toBe("葬送的芙莉莲");
+  });
+
+  test("cuts latin text at the same point a character count would", () => {
+    // Latin counts one per character, so width and length agree here — this
+    // is what keeps the English rendering byte-identical to the old helper.
+    const s = "a".repeat(400);
+    expect(truncateVisual(s, 300)).toBe("a".repeat(300) + "...");
+  });
+
+  test("cuts CJK text at half the character count", () => {
+    const s = "字".repeat(400);
+    // 300 units of budget buys 150 双宽 characters.
+    expect(truncateVisual(s, 300)).toBe("字".repeat(150) + "...");
+  });
+
+  test("never splits a character to use up an odd remaining unit", () => {
+    // Budget 5 fits two CJK characters (4 units); the fifth unit is left
+    // unused rather than emitting half a glyph.
+    expect(truncateVisual("一二三四", 5)).toBe("一二...");
+  });
+
+  test("handles mixed scripts without overshooting the budget", () => {
+    const out = truncateVisual("攻壳机动队 GHOST IN THE SHELL", 16);
+    expect(visualWidth(out.replace(/\.\.\.$/, ""))).toBeLessThanOrEqual(16);
+    expect(out.endsWith("...")).toBe(true);
+  });
+
+  test("treats null and undefined as empty", () => {
+    expect(truncateVisual(null, 300)).toBe("");
+    expect(truncateVisual(undefined, 300)).toBe("");
+  });
+
+  test("the toggle decision matches the truncation decision", () => {
+    // A string that fits must never be truncated, and one that is truncated
+    // must report as needing the toggle — otherwise the control appears
+    // above untruncated text or is missing above an elided one.
+    for (const s of ["短", "葬送的芙莉莲".repeat(30), "a".repeat(299), "a".repeat(301)]) {
+      const needsToggle = visualWidth(s) > 300;
+      const truncated = truncateVisual(s, 300);
+      expect(truncated !== s).toBe(needsToggle);
+    }
   });
 });

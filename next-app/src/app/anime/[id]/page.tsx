@@ -35,6 +35,8 @@ import {
   pickVoiceActorName,
   stripHtml,
   truncate,
+  truncateVisual,
+  visualWidth,
 } from "@/lib/formatters";
 import { getDict, getLang } from "@/lib/i18n";
 import type { Dict, Lang } from "@/lib/i18n";
@@ -434,7 +436,14 @@ const HERO_SHOWN_RELATIONS = new Set([
   "SPIN_OFF",
 ]);
 
-const DESC_TRUNCATE_THRESHOLD = 300;
+// Collapsed-description budget, in "latin character" units — CJK counts two.
+// Measuring width rather than characters keeps the collapsed block the same
+// apparent size in both scripts. With a plain character count the Chinese
+// summaries all sat under the threshold (55-289 chars) while their English
+// counterparts ran well over it (235-1100), so the read-more control appeared
+// only for English readers and Chinese readers got the whole synopsis dumped
+// into the hero.
+const DESC_TRUNCATE_WIDTH = 300;
 
 function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: Dict }) {
   const title = pickTitle(detail, lang);
@@ -472,8 +481,8 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   // attribute it after the fact. Do not "make them consistent" here.
   const desc = pickDescription(detail, lang);
   const descFull = stripHtml(desc.text);
-  const descTruncated = truncate(descFull, DESC_TRUNCATE_THRESHOLD);
-  const descNeedsToggle = descFull.length > DESC_TRUNCATE_THRESHOLD;
+  const descTruncated = truncateVisual(descFull, DESC_TRUNCATE_WIDTH);
+  const descNeedsToggle = visualWidth(descFull) > DESC_TRUNCATE_WIDTH;
   // Attribution + snippet exclusion apply only to text we transcribed from
   // Bangumi. 'llm' / 'manual' sources do not exist yet and will each need
   // their own call on both (a machine translation credits differently; our

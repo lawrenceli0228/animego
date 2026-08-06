@@ -158,6 +158,51 @@ export function truncate(str: string | null | undefined, len = 150): string {
 }
 
 /**
+ * Width of a string in "latin character" units, counting CJK as two.
+ *
+ * A character count is the wrong unit for deciding when prose is long enough
+ * to need a read-more control, because the two languages disagree about what
+ * a character is worth. 300 Latin characters is two or three sentences; 300
+ * Han characters is several paragraphs' worth of content rendered in glyphs
+ * that are twice as wide. Measured against the summaries we harvest, every
+ * Chinese one lands between 55 and 289 characters while its English
+ * counterpart runs 235 to 1100 — so a shared character threshold puts the
+ * entire Chinese corpus below the cut and the English one above it.
+ *
+ * Measuring the text rather than switching on the UI language matters: a
+ * Chinese reader whose title has no Chinese summary falls back to the English
+ * one, and that text must still be judged by English rules.
+ */
+export function visualWidth(str: string | null | undefined): number {
+  if (!str) return 0;
+  let width = 0;
+  for (const ch of str) {
+    // CJK ideographs, kana, and fullwidth forms render at ~1em; the Latin
+    // range at ~0.5em.
+    width += /[⺀-鿿＀-￯]/.test(ch) ? 2 : 1;
+  }
+  return width;
+}
+
+/**
+ * Truncate on visual width rather than character count, so the cut lands at
+ * the same apparent length regardless of script. Appends "..." when cut.
+ */
+export function truncateVisual(str: string | null | undefined, maxWidth: number): string {
+  if (!str) return "";
+  if (visualWidth(str) <= maxWidth) return str;
+  let width = 0;
+  let out = "";
+  for (const ch of str) {
+    const w = /[⺀-鿿＀-￯]/.test(ch) ? 2 : 1;
+    if (width + w > maxWidth) break;
+    width += w;
+    out += ch;
+  }
+  return out + "...";
+}
+
+/**
  * AniList "fuzzy date" shape — year/month/day can each be null when the
  * source only knew part of the date (a season window, an unannounced day,
  * etc.). The Mongo cache mirrors AniList's shape verbatim, so callers

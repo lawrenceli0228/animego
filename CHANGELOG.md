@@ -20,7 +20,10 @@
 - **前端** — `pickDescription(detail, lang)` 沿用 `pickTitle` 的模式，zh 优先中文、en 恒取英文。命中中文时正文下方渲染「简介来自 Bangumi」署名并回链条目，整段包 `data-nosnippet` 让这段转载文本不参与搜索摘要竞争。
 - **SEO 面一行未动** — `generateMetadata`、JSON-LD、og/twitter/canonical/hreflang、缓存配置全部保持原样，仍用英文 description。让中文简介进 SERP 需要分桶灰度加 GSC 观察，是独立阶段的事，代码里加了注释标明这条边界。
 
-`go build` / `go vet` / `go test` 通过，`bun test` 383/383（新增 11 条），`tsc` 非测试文件零错误。migration 已在 prod 真实 schema 上用事务包裹 dry-run 验证语法后回滚，零残留。
+- **「展开更多」的截断阈值改按视觉宽度算** — 原来的 `300` 是字符数，而这个单位对两种语言含义完全不同：300 个英文字符是两三句话，300 个汉字是好几段，且汉字全角、视觉宽度是拉丁字符的两倍。实测这批简介，中文全部落在 55–289 字之间而对应英文是 235–1100 字符，于是**整个中文语料都在阈值以下、按钮只对英文读者出现过**。现在按「拉丁计 1、CJK 计 2」的视觉宽度判断，阈值仍是 300：英文行为逐字节不变，中文在 150 字处触发。
+  刻意没有用「按 `lang` 分两个阈值」这个更省事的写法——中文读者遇到没有中文简介的番会回落英文原文，那段文本必须仍按英文规则判断，所以判据只能看文本本身，不能看界面语言。
+
+`go build` / `go vet` / `go test` 通过，`bun test` 396/396（新增 24 条），`tsc` 非测试文件零错误。migration 已在 prod 真实 schema 上用事务包裹 dry-run 验证语法后回滚，零残留。
 
 **已知边界（下一阶段）**：admin 的 re-enrich 入口只覆盖 `bangumi_version` 0/1/2，而存量绝大多数行已经是 version=3，**目前没有任何代码路径能把它们重新入队**。所以上线后 `description_cn` 只随新番和新绑定缓慢增长，17k 存量不动。0014 已经建好配套的部分索引 `idx_anime_cache_description_cn_missing`，回填 sweep 与周期 top-up job 留给下一阶段。
 
