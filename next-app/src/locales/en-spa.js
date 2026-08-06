@@ -796,6 +796,34 @@ const en = {
     enrichmentDistTitle: 'Enrichment version distribution',
     missingCn: 'Missing CN {{n}}',
     v3FullEnrich: 'v3 complete',
+    // EnrichmentBar — Chinese synopsis backfill (a perpetual sweep, so
+    // this block reads as coverage, not as completion).
+    backfill: {
+      title: 'Chinese synopsis',
+      pending: 'Pending',
+      // Not labelled a flat "(JA)": the attempt stamp covers four decided
+      // outcomes and only one is the language gate (the others: no summary
+      // upstream, a 404 from a stale binding, a swallowed UPDATE error).
+      // None of those produce retryable jobs, so the queue row stays green
+      // and this counter is the only place they surface — a label that
+      // reads "Japanese-only" trains the operator to dismiss them.
+      rejected: 'Rejected (mostly JA)',
+      // "Not eligible" = total anime − eligible: rows whose bgm binding
+      // is not trustworthy enough to copy from. By design, not a failure.
+      // On screen so "69.2%" cannot be read as "69.2% of the catalogue".
+      ineligible: 'Not eligible',
+      queueLabel: 'Backfill queue',
+      queued: 'queued',
+      retrying: 'retrying',
+      discarded: 'discarded',
+      lastScan: 'Last scan',
+      lastWrite: 'Last write',
+      never: 'never',
+      ageJustNow: 'just now',
+      ageMinutes: '{{n}}m ago',
+      ageHours: '{{n}}h ago',
+      ageDays: '{{n}}d ago',
+    },
     // EnrichmentRow — filter labels (used in FILTERS array)
     filterLabelAll: 'All',
     filterLabelNeedsReview: 'Needs Review',

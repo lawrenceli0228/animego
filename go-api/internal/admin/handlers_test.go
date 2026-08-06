@@ -301,8 +301,12 @@ func TestGetStats_QueueStatusError_EmitsZeroAnd200(t *testing.T) {
 
 	body := rec.Body.String()
 	// Queue object present and shaped — but the counter we returned
-	// in the error payload is discarded, so phase1 must be 0.
-	assert.Contains(t, body, `"queue":{"phase1":0,"phase4":0,"v3":0,"v3Progress":null}`)
+	// in the error payload is discarded, so phase1 must be 0.  The
+	// descriptionBackfill sub-object is part of the zero shape: both
+	// heartbeats serialise as null (never scanned / never wrote), which
+	// is a state the dashboard renders, not an error.
+	assert.Contains(t, body, `"queue":{"phase1":0,"phase4":0,"v3":0,"v3Progress":null,`+
+		`"descriptionBackfill":{"queued":0,"retrying":0,"discarded":0,"lastScanAt":null,"lastWriteAt":null}}`)
 }
 
 func TestGetStats_QueueStatusNil_EmitsZero(t *testing.T) {
@@ -313,7 +317,8 @@ func TestGetStats_QueueStatusNil_EmitsZero(t *testing.T) {
 	h.GetStats(rec, httptest.NewRequest(http.MethodGet, "/api/admin/stats", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `"queue":{"phase1":0,"phase4":0,"v3":0,"v3Progress":null}`)
+	assert.Contains(t, rec.Body.String(), `"queue":{"phase1":0,"phase4":0,"v3":0,"v3Progress":null,`+
+		`"descriptionBackfill":{"queued":0,"retrying":0,"discarded":0,"lastScanAt":null,"lastWriteAt":null}}`)
 }
 
 func TestGetStats_DBError_500(t *testing.T) {
@@ -330,12 +335,173 @@ func TestGetStats_DBError_500(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"SERVER_ERROR"`)
 }
 
+// TestGetStats_DescriptionCnCoverage is the hard constraint of the whole
+// backfill panel in test form: every number it reports must be reproducible
+// by hand with the SQL in admin.sql.  The fixture below is built so each of
+// the four counters lands on a DIFFERENT value — a fixture where they
+// coincide would pass even if the handler wired the columns up in the wrong
+// order.
+//
+// Note what it takes to be eligible.  Setting bgm_id alone is NOT enough:
+// description_cn_eligible (migration 0016) also requires an independent
+// confirmation of the binding — a matching bgm_id_map row, or
+// bgm_match_source = 'manual'.  Seeding only bgm_id gives an eligible count
+// of 0, and every assertion below would "pass" while verifying nothing.
+// Both confirmation routes are exercised here for that reason.
+//
+// Reproduce by hand against this fixture:
+//
+//	SELECT count(*) FROM description_cn_eligible;                          -- 4
+//	SELECT count(*) FROM description_cn_eligible
+//	  WHERE description_cn IS NOT NULL;                                    -- 1
+//	SELECT count(*) FROM description_cn_eligible
+//	  WHERE description_cn IS NULL AND description_cn_attempted_at IS NOT NULL;   -- 2
+//	SELECT count(*) FROM description_cn_eligible
+//	  WHERE description_cn IS NULL AND (description_cn_attempted_at IS NULL
+//	     OR description_cn_attempted_at < now() - interval '30 days');     -- 2
+func TestGetStats_DescriptionCnCoverage(t *testing.T) {
+	h, pool := makeHandlers(t)
+	ctx := context.Background()
+
+	// 6 rows total.  ids 1-4 are eligible, 5-6 are not.
+	//
+	//  1  id_map-confirmed, has description_cn         -> done
+	//  2  manual match source, attempted 1 day ago,    -> rejected only
+	//     still empty (inside the cooldown)
+	//  3  id_map-confirmed, attempted 60 days ago,     -> rejected AND pending
+	//     still empty (past the cooldown)                 (the overlap case)
+	//  4  id_map-confirmed, never attempted            -> pending only
+	//  5  bgm_id set but NOTHING confirms it           -> not eligible at all
+	//  6  no bgm_id                                    -> not eligible at all
+	for _, s := range []struct {
+		anilistID, bgmID int32
+		matchSource      *string
+		inIDMap          bool
+		descCn           *string
+		attemptedDaysAgo *int
+	}{
+		{anilistID: 1, bgmID: 101, inIDMap: true, descCn: ptr("中文简介")},
+		{anilistID: 2, bgmID: 102, matchSource: ptr("manual"), attemptedDaysAgo: ptr(1)},
+		{anilistID: 3, bgmID: 103, inIDMap: true, attemptedDaysAgo: ptr(60)},
+		{anilistID: 4, bgmID: 104, inIDMap: true},
+		{anilistID: 5, bgmID: 105},
+		{anilistID: 6},
+	} {
+		var bgm *int32
+		if s.bgmID != 0 {
+			b := s.bgmID
+			bgm = &b
+		}
+		var attempted *time.Time
+		if s.attemptedDaysAgo != nil {
+			at := time.Now().UTC().AddDate(0, 0, -*s.attemptedDaysAgo)
+			attempted = &at
+		}
+		_, err := pool.Exec(ctx, `
+			INSERT INTO anime_cache (
+				anilist_id, title_romaji, bgm_id, bangumi_version,
+				bgm_match_source, description_cn, description_cn_attempted_at, cached_at
+			) VALUES ($1, $2, $3, 2, $4, $5, $6, now())`,
+			s.anilistID, "T", bgm, s.matchSource, s.descCn, attempted,
+		)
+		require.NoError(t, err, "seed anime_cache %d", s.anilistID)
+
+		if s.inIDMap {
+			_, err := pool.Exec(ctx, `
+				INSERT INTO bgm_id_map (anilist_id, bgm_id, source)
+				VALUES ($1, $2, 'test')`,
+				s.anilistID, s.bgmID,
+			)
+			require.NoError(t, err, "seed bgm_id_map %d", s.anilistID)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	h.GetStats(rec, httptest.NewRequest(http.MethodGet, "/api/admin/stats", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got struct {
+		Data statsData `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+
+	assert.Equal(t, int64(4), got.Data.DescriptionCn.Eligible, "row 5 (unconfirmed binding) and row 6 (no bgm_id) must be excluded")
+	assert.Equal(t, int64(1), got.Data.DescriptionCn.Done)
+	assert.Equal(t, int64(2), got.Data.DescriptionCn.Rejected, "rows 2 and 3: attempted, still empty")
+	assert.Equal(t, int64(2), got.Data.DescriptionCn.Pending, "rows 3 (cooldown expired) and 4 (never tried)")
+
+	// The overlap is load-bearing, not an accident — row 3 is counted by both
+	// Rejected and Pending, so the two must not sum to the empty-row total.
+	// A future "simplification" that made them disjoint would silently change
+	// what the panel means; this assertion is here to fail loudly if it does.
+	assert.Greater(t,
+		got.Data.DescriptionCn.Rejected+got.Data.DescriptionCn.Pending,
+		got.Data.DescriptionCn.Eligible-got.Data.DescriptionCn.Done,
+		"rejected and pending must overlap; they are two slices of the same rows")
+}
+
+// ptr is a generic address-of helper for the table-driven fixture above.
+func ptr[T any](v T) *T { return &v }
+
+// TestGetStats_DescriptionCnError_SoftFails pins the asymmetry between the
+// two stats queries.  GetAdminStats reads base tables and is load-bearing —
+// if it fails there is nothing to render and 500 is honest.
+// GetDescriptionCnStats reads description_cn_eligible, a VIEW, and is the
+// only part of this payload that can break on its own (migration not applied
+// on a rolled-forward container, a `migrate down`, a timeout on the widest
+// scan).  The backfill block is the least critical thing on the page and must
+// never be able to blank users / anime / enrichment / queue along with itself.
+//
+// Verified upstream that a missing view really does kill the whole statement:
+// dropping it makes the SELECT fail at plan time with
+// `relation "description_cn_eligible" does not exist`, which is why these are
+// two round-trips rather than four more columns on one row.
+func TestGetStats_DescriptionCnError_SoftFails(t *testing.T) {
+	h, pool := makeHandlers(t)
+
+	seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, animeSeed{AnilistID: 1, TitleRomaji: "A", BangumiVersion: 0})
+
+	h.Queries = descCnFailingQuerier{adminQuerier: h.Queries}
+
+	rec := httptest.NewRecorder()
+	h.GetStats(rec, httptest.NewRequest(http.MethodGet, "/api/admin/stats", nil))
+
+	// Still 200, and the unrelated counters are real values, not zeros.
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got struct {
+		Data statsData `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, int64(1), got.Data.Users, "unrelated counters must survive a descriptionCn failure")
+	assert.Equal(t, int64(1), got.Data.Anime)
+
+	// descriptionCn degrades to zeros, and the key is still present so the
+	// frontend's required-object contract holds.
+	assert.Equal(t, DescriptionCnStats{}, got.Data.DescriptionCn)
+	assert.Contains(t, rec.Body.String(), `"descriptionCn":{"eligible":0,"done":0,"rejected":0,"pending":0}`)
+}
+
+// descCnFailingQuerier delegates everything to a real querier except the
+// description_cn coverage read, which always errors.  Embedding rather than
+// reimplementing keeps the other counts genuine, which is the whole point of
+// the assertion above.
+type descCnFailingQuerier struct{ adminQuerier }
+
+func (descCnFailingQuerier) GetDescriptionCnStats(_ context.Context) (dbgen.GetDescriptionCnStatsRow, error) {
+	return dbgen.GetDescriptionCnStatsRow{}, errors.New("simulated description_cn view failure")
+}
+
 // failingQuerier returns an error from every method.  Used by the
 // stats DB-error path.
 type failingQuerier struct{}
 
 func (failingQuerier) GetAdminStats(_ context.Context) (dbgen.GetAdminStatsRow, error) {
 	return dbgen.GetAdminStatsRow{}, errors.New("simulated stats query failure")
+}
+
+func (failingQuerier) GetDescriptionCnStats(_ context.Context) (dbgen.GetDescriptionCnStatsRow, error) {
+	return dbgen.GetDescriptionCnStatsRow{}, errors.New("simulated description_cn stats query failure")
 }
 
 func (failingQuerier) GetAdminUserSubFollowCounts(_ context.Context, _ []uuid.UUID) ([]dbgen.GetAdminUserSubFollowCountsRow, error) {

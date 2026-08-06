@@ -668,13 +668,9 @@ WHERE ac.anilist_id = sqlc.arg(anilist_id)
   -- the failure is a whole page describing a different show.
   AND ac.bgm_id = sqlc.arg(bgm_id)
   AND coalesce(ac.description_cn_source, '') <> 'manual'
-  AND (
-      ac.bgm_match_source = 'manual'
-      OR EXISTS (
-          SELECT 1 FROM bgm_id_map m
-          WHERE m.anilist_id = ac.anilist_id
-            AND m.bgm_id = ac.bgm_id
-      )
+  AND EXISTS (
+      SELECT 1 FROM description_cn_eligible e
+      WHERE e.anilist_id = ac.anilist_id
   );
 
 -- name: ListDescriptionCnCandidates :many
@@ -699,20 +695,11 @@ WHERE ac.anilist_id = sqlc.arg(anilist_id)
 -- written over time, so a subject that is Japanese-only today may carry Chinese
 -- prose next quarter, and re-reaching it is how that gets picked up.
 SELECT ac.anilist_id, ac.bgm_id
-FROM anime_cache ac
+FROM description_cn_eligible ac
 WHERE ac.description_cn IS NULL
-  AND ac.bgm_id IS NOT NULL
   AND (
       ac.description_cn_attempted_at IS NULL
       OR ac.description_cn_attempted_at < now() - sqlc.arg(retry_after)::interval
-  )
-  AND (
-      ac.bgm_match_source = 'manual'
-      OR EXISTS (
-          SELECT 1 FROM bgm_id_map m
-          WHERE m.anilist_id = ac.anilist_id
-            AND m.bgm_id = ac.bgm_id
-      )
   )
 ORDER BY ac.description_cn_attempted_at NULLS FIRST, ac.anilist_id
 LIMIT sqlc.arg(row_limit);

@@ -45,6 +45,54 @@ type statsEnrichment struct {
 	SrcFuzzyLow  int64 `json:"srcFuzzyLow"`
 }
 
+// DescriptionCnStats is the coverage side of the Chinese-description
+// backfill — how much of the catalogue can have a Chinese synopsis, and
+// how much of it does.  BackfillQueue is the other half (is the sweep
+// running); this one is what it has achieved.
+//
+// Deliberately a coverage model, not processed/total:  the sweep never
+// terminates, so a progress bar would either sit at a fake 100% or reset
+// on every pass.  done/eligible is a number that stays true.
+//
+// Every field is counted off the description_cn_eligible view (migration
+// 0016) — the same definition of "trusted binding" the sweep picks work
+// with — so each one is reproducible by hand:
+//
+//	Eligible  count(*) — rows whose Bangumi binding an independent source
+//	          confirms, i.e. rows a synopsis may legally be copied onto.
+//	          NOT the size of anime_cache; the untrusted remainder can
+//	          never be backfilled and counting it would understate us.
+//	Done      of those, description_cn IS NOT NULL.
+//	Rejected  no description_cn but description_cn_attempted_at is set —
+//	          "we reached a decision about this row and got no text".
+//	          Read the name narrowly:  the worker stamps that column on
+//	          FOUR different decided outcomes, not just the language gate —
+//	          Bangumi had no summary at all, the summary failed
+//	          bangumi.CleanSummary's Chinese check, the subject 404'd
+//	          (stale binding), or the UPDATE errored and was swallowed.
+//	          Only transient fetch errors escape the stamp, because those
+//	          return an error and go to river's retry path.
+//	          A large steady Rejected is normal (Japanese-only summaries).
+//	          A CLIMBING one is not automatically benign:  a mass 404 or a
+//	          broken writer produces zero retryable jobs — the worker
+//	          returns nil for both — so BackfillQueue stays green and this
+//	          counter is the only place that breakage surfaces.
+//	Pending   no description_cn and either never attempted or past the
+//	          cooldown — the whole live backlog.  Not capped at the
+//	          per-pass batch size, so this is "how far behind are we",
+//	          not "what runs next hour".
+//
+// Rejected and Pending overlap by design (a row decided against longer ago
+// than the cooldown is in both) and must never be summed:  they answer
+// "how much has upstream already refused us" and "how much is still live",
+// which are different questions about the same rows.
+type DescriptionCnStats struct {
+	Eligible int64 `json:"eligible"`
+	Done     int64 `json:"done"`
+	Rejected int64 `json:"rejected"`
+	Pending  int64 `json:"pending"`
+}
+
 // QueueSnapshot is the byte-exact queue object inside /api/admin/stats'
 // response.  Mirrors server/services/bangumi.service.js
 // getQueueStatus() (lines 408-421):  phase1, phase4, v3, v3Progress.
@@ -61,6 +109,51 @@ type QueueSnapshot struct {
 	Phase4     int64            `json:"phase4"`
 	V3         int64            `json:"v3"`
 	V3Progress *V3BatchProgress `json:"v3Progress"`
+
+	// DescriptionBackfill is the Chinese-description sweep's queue
+	// health.  Unlike phase1/phase4/v3 (one "outstanding work" number
+	// per kind) this is split by river state — see BackfillQueue.
+	DescriptionBackfill BackfillQueue `json:"descriptionBackfill"`
+}
+
+// BackfillQueue is the queue health of the perpetual Chinese-description
+// sweep (river kinds description_backfill + description_backfill_scan).
+//
+// Why three counters instead of one depth number:  the sweep never
+// "finishes", so a single depth tells you nothing about whether it is
+// healthy.  river's states mean genuinely different things here —
+//
+//	Queued    available+running+pending+scheduled — real backlog.
+//	Retrying  retryable — jobs that FAILED and are waiting to retry.
+//	          Folding this into Queued is exactly what makes a bgm.tv
+//	          outage look perfectly healthy:  the depth stays non-zero
+//	          and nobody can tell a backlog from a retry storm.
+//	Discarded retries exhausted — work we have permanently given up on.
+//
+// Retrying climbing while Queued stalls = upstream breakage.
+// Discarded climbing = data we will never backfill without a manual
+// re-enqueue.  Both are invisible in a single-number gauge.
+//
+// The two timestamps are the two halves of "is it alive" — a single
+// heartbeat cannot distinguish "idle because there is nothing to do"
+// from "dead".  Both are nilable and nil is a state, not an error:
+//
+//	LastScanAt   max(finalized_at) of a COMPLETED description_backfill_scan.
+//	             The real liveness signal — the periodic scan finalises
+//	             every hour whether or not it found candidates.  river
+//	             prunes completed jobs after a retention window
+//	             (24h by default), so nil means "no successful scan for
+//	             at least 24h", which is an alert, not a bug.
+//	LastWriteAt  max(anime_cache.description_cn_attempted_at) — when the
+//	             sweep last actually touched a row.  This one legitimately
+//	             freezes once the backlog is drained, so it must never be
+//	             read as liveness on its own.
+type BackfillQueue struct {
+	Queued      int64      `json:"queued"`
+	Retrying    int64      `json:"retrying"`
+	Discarded   int64      `json:"discarded"`
+	LastScanAt  *time.Time `json:"lastScanAt"`
+	LastWriteAt *time.Time `json:"lastWriteAt"`
 }
 
 // V3BatchProgress is the optional sub-object inside QueueSnapshot.
@@ -84,6 +177,11 @@ type V3BatchProgress struct {
 // hiccup).  When that happens the handler logs the error and emits
 // a zero-value QueueSnapshot (which serialises to
 // {"phase1":0,"phase4":0,"v3":0,"v3Progress":null}).
+// descriptionCn is appended after the Express-era fields rather than
+// slotted next to enrichment so the historical prefix keeps its exact
+// order — the field-order assertions in handlers_test.go check the
+// original seven against each other, and a new tail field cannot
+// disturb them.
 type statsData struct {
 	Users         int64           `json:"users"`
 	Anime         int64           `json:"anime"`
@@ -92,6 +190,8 @@ type statsData struct {
 	Flagged       int64           `json:"flagged"`
 	Subscriptions int64           `json:"subscriptions"`
 	Follows       int64           `json:"follows"`
+
+	DescriptionCn DescriptionCnStats `json:"descriptionCn"`
 }
 
 // enrichmentItem is one row in /api/admin/enrichment's data array.

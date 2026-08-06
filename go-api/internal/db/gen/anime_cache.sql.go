@@ -1368,20 +1368,11 @@ func (q *Queries) InsertAnimeStudio(ctx context.Context, animeID int32, studio s
 
 const listDescriptionCnCandidates = `-- name: ListDescriptionCnCandidates :many
 SELECT ac.anilist_id, ac.bgm_id
-FROM anime_cache ac
+FROM description_cn_eligible ac
 WHERE ac.description_cn IS NULL
-  AND ac.bgm_id IS NOT NULL
   AND (
       ac.description_cn_attempted_at IS NULL
       OR ac.description_cn_attempted_at < now() - $1::interval
-  )
-  AND (
-      ac.bgm_match_source = 'manual'
-      OR EXISTS (
-          SELECT 1 FROM bgm_id_map m
-          WHERE m.anilist_id = ac.anilist_id
-            AND m.bgm_id = ac.bgm_id
-      )
   )
 ORDER BY ac.description_cn_attempted_at NULLS FIRST, ac.anilist_id
 LIMIT $2
@@ -1652,13 +1643,9 @@ WHERE ac.anilist_id = $2
   -- the failure is a whole page describing a different show.
   AND ac.bgm_id = $3
   AND coalesce(ac.description_cn_source, '') <> 'manual'
-  AND (
-      ac.bgm_match_source = 'manual'
-      OR EXISTS (
-          SELECT 1 FROM bgm_id_map m
-          WHERE m.anilist_id = ac.anilist_id
-            AND m.bgm_id = ac.bgm_id
-      )
+  AND EXISTS (
+      SELECT 1 FROM description_cn_eligible e
+      WHERE e.anilist_id = ac.anilist_id
   )
 `
 

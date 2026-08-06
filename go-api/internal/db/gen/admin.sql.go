@@ -358,6 +358,101 @@ func (q *Queries) GetAnimeCacheRowForReset(ctx context.Context, anilistID int32)
 	return i, err
 }
 
+const getDescriptionCnStats = `-- name: GetDescriptionCnStats :one
+SELECT
+    (SELECT count(*) FROM description_cn_eligible)::bigint                                            AS desc_cn_eligible,
+    (SELECT count(*) FROM description_cn_eligible WHERE description_cn IS NOT NULL)::bigint           AS desc_cn_done,
+    -- "Attempted and still empty".  NOT purely the language gate, despite
+    -- being the metric an operator will read as such — DescriptionBackfillWorker
+    -- stamps description_cn_attempted_at on every DECIDED outcome, and there
+    -- are four of those:  Bangumi has no summary at all, the summary failed
+    -- bangumi.CleanSummary's Chinese check, the subject 404'd (ErrNotFound —
+    -- a stale binding), or the UPDATE itself errored and was swallowed.  Only
+    -- transient fetch failures escape the stamp, because those return an error
+    -- and go to river's retry path instead.
+    --
+    -- This matters for reading a spike:  a mass 404 or a broken writer produces
+    -- NO retryable jobs (the worker returns nil in both cases), so the queue
+    -- block stays green and this counter is the only place the breakage shows.
+    -- Rejected climbing while done is flat is a signal to check the logs, not
+    -- something to wave away as "Bangumi is Japanese-only".
+    (SELECT count(*) FROM description_cn_eligible
+      WHERE description_cn IS NULL
+        AND description_cn_attempted_at IS NOT NULL)::bigint                                          AS desc_cn_rejected,
+    -- The '30 days' literal MUST stay equal to descriptionBackfillRetryDays in
+    -- internal/queue/description_backfill.go — that constant is what actually
+    -- bounds ListDescriptionCnCandidates.  sqlc cannot read a Go const, so this
+    -- is a hand-kept mirror:  if the two diverge, the dashboard's "pending"
+    -- counts a different set of rows than the sweep will pick up, and the panel
+    -- either shows work that never gets scheduled (literal too small) or hides
+    -- work that is already queued (literal too large).  Change one, change both.
+    --
+    -- Note this is the whole live backlog, deliberately NOT capped at
+    -- descriptionBackfillScanBatchSize:  the batch size throttles one pass, it
+    -- does not define how much is outstanding.  Capping here would make the
+    -- backlog look permanently 300-deep no matter how far behind it really is.
+    (SELECT count(*) FROM description_cn_eligible
+      WHERE description_cn IS NULL
+        AND (
+            description_cn_attempted_at IS NULL
+            OR description_cn_attempted_at < now() - interval '30 days'
+        ))::bigint                                                                                    AS desc_cn_pending
+`
+
+type GetDescriptionCnStatsRow struct {
+	DescCnEligible int64 `json:"descCnEligible"`
+	DescCnDone     int64 `json:"descCnDone"`
+	DescCnRejected int64 `json:"descCnRejected"`
+	DescCnPending  int64 `json:"descCnPending"`
+}
+
+// Chinese-description backfill coverage (P3) — the four numbers behind the
+// /admin 中文简介回填 block.
+//
+// WHY THIS IS A SEPARATE QUERY AND NOT FOUR MORE COLUMNS ON GetAdminStats:
+// every count below reads description_cn_eligible, a VIEW created by
+// migration 0016.  Folded into GetAdminStats, any problem with that view —
+// migration not yet applied on a rolled-forward container, a `migrate down`,
+// a statement timeout on the widest scan in the payload — takes the ENTIRE
+// stats response down with it, and the admin page loses users, anime,
+// enrichment, queue and flags along with the backfill block it was never
+// asked about.  Verified, not theorised:  dropping the view makes the fused
+// SELECT fail outright with `relation "description_cn_eligible" does not
+// exist`, because a missing relation is a planning error and no amount of
+// per-column care survives it.  Split out, the handler soft-fails this one
+// call (see read.go) and everything else still renders.  The least critical
+// panel on the page must not be able to blank the page.
+//
+// All four read the view, never anime_cache directly.  That view is the
+// single definition of "this row's Bangumi binding is trustworthy enough to
+// copy a synopsis from", and the sweep's candidate query
+// (ListDescriptionCnCandidates) plus the writer's guard (UpdateDescriptionCn)
+// both read it too.  Re-deriving the predicate here would let the dashboard
+// drift away from what the sweep actually does — and a wrong number that
+// still looks authoritative is worse than no number.
+//
+// The model is coverage, not batch progress:  the sweep is perpetual, so
+// there is no "total to process" that ever reaches 100%.  done/eligible is
+// the honest headline.
+//
+// desc_cn_rejected and desc_cn_pending deliberately OVERLAP:  a row decided
+// against longer ago than the cooldown is both "we tried and got nothing" and
+// "the sweep will reach it again".  They answer different questions (how much
+// has upstream already refused us / how much work is live) and must not be
+// summed.  eligible = done + (rows with no CN), and that second term is what
+// rejected and pending each slice differently.
+func (q *Queries) GetDescriptionCnStats(ctx context.Context) (GetDescriptionCnStatsRow, error) {
+	row := q.db.QueryRow(ctx, getDescriptionCnStats)
+	var i GetDescriptionCnStatsRow
+	err := row.Scan(
+		&i.DescCnEligible,
+		&i.DescCnDone,
+		&i.DescCnRejected,
+		&i.DescCnPending,
+	)
+	return i, err
+}
+
 const listAnimeForReEnrichByVersion = `-- name: ListAnimeForReEnrichByVersion :many
 SELECT
     anilist_id,

@@ -244,6 +244,42 @@ type Querier interface {
 	// Cache hit returns dandanplay's title (anime_title may be NULL = looked up,
 	// none found) plus when it was checked, so the caller can skip stale rows.
 	GetDdpTitle(ctx context.Context, bgmID int32) (GetDdpTitleRow, error)
+	// Chinese-description backfill coverage (P3) — the four numbers behind the
+	// /admin 中文简介回填 block.
+	//
+	// WHY THIS IS A SEPARATE QUERY AND NOT FOUR MORE COLUMNS ON GetAdminStats:
+	// every count below reads description_cn_eligible, a VIEW created by
+	// migration 0016.  Folded into GetAdminStats, any problem with that view —
+	// migration not yet applied on a rolled-forward container, a `migrate down`,
+	// a statement timeout on the widest scan in the payload — takes the ENTIRE
+	// stats response down with it, and the admin page loses users, anime,
+	// enrichment, queue and flags along with the backfill block it was never
+	// asked about.  Verified, not theorised:  dropping the view makes the fused
+	// SELECT fail outright with `relation "description_cn_eligible" does not
+	// exist`, because a missing relation is a planning error and no amount of
+	// per-column care survives it.  Split out, the handler soft-fails this one
+	// call (see read.go) and everything else still renders.  The least critical
+	// panel on the page must not be able to blank the page.
+	//
+	// All four read the view, never anime_cache directly.  That view is the
+	// single definition of "this row's Bangumi binding is trustworthy enough to
+	// copy a synopsis from", and the sweep's candidate query
+	// (ListDescriptionCnCandidates) plus the writer's guard (UpdateDescriptionCn)
+	// both read it too.  Re-deriving the predicate here would let the dashboard
+	// drift away from what the sweep actually does — and a wrong number that
+	// still looks authoritative is worse than no number.
+	//
+	// The model is coverage, not batch progress:  the sweep is perpetual, so
+	// there is no "total to process" that ever reaches 100%.  done/eligible is
+	// the honest headline.
+	//
+	// desc_cn_rejected and desc_cn_pending deliberately OVERLAP:  a row decided
+	// against longer ago than the cooldown is both "we tried and got nothing" and
+	// "the sweep will reach it again".  They answer different questions (how much
+	// has upstream already refused us / how much work is live) and must not be
+	// summed.  eligible = done + (rows with no CN), and that second term is what
+	// rejected and pending each slice differently.
+	GetDescriptionCnStats(ctx context.Context) (GetDescriptionCnStatsRow, error)
 	// Returns the liveEndsAt timestamp for this episode if a live window
 	// exists, else pgx.ErrNoRows (handler maps → null in the envelope).
 	GetEpisodeWindow(ctx context.Context, anilistID int32, episode int32) (EpisodeWindow, error)

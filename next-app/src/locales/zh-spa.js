@@ -846,6 +846,31 @@ const zh = {
     enrichmentDistTitle: '富化版本分布',
     missingCn: '缺中文 {{n}}',
     v3FullEnrich: 'v3 完整富化',
+    // EnrichmentBar — 中文简介回填区块（永续 sweep，看的是覆盖率不是完成度）
+    backfill: {
+      title: '中文简介',
+      pending: '待处理',
+      // 不写死「日文」：打过尝试戳的四种结局里只有一种是语言闸门
+      // (还有 上游没简介 / 条目 404 绑定过期 / UPDATE 出错被吞)。
+      // 这三种都不产生 retryable，队列区照样是绿的，这个数字是唯一
+      // 暴露点——标成「(日文)」会让运维一眼把真故障当正常忽略掉。
+      rejected: '已拒(多为日文)',
+      // 「无资格」= 全站番剧数 − 有资格数，即 bgm 绑定不够可信、
+      // 按设计就不该被回填的那部分，不是失败。放出来是为了让
+      // 「69.2%」不会被误读成「全站 69.2% 有中文简介」。
+      ineligible: '无资格',
+      queueLabel: '回填队列',
+      queued: '排队',
+      retrying: '重试中',
+      discarded: '已放弃',
+      lastScan: '上次扫描',
+      lastWrite: '上次写入',
+      never: '从未',
+      ageJustNow: '刚刚',
+      ageMinutes: '{{n}} 分钟前',
+      ageHours: '{{n}} 小时前',
+      ageDays: '{{n}} 天前',
+    },
     // EnrichmentRow — filter labels (used in FILTERS array)
     filterLabelAll: '全部',
     filterLabelNeedsReview: '待复核',
