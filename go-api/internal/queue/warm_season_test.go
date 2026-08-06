@@ -107,9 +107,9 @@ func (f *fakeWarmDB) upsertCount() int {
 // IDs were chained.  The other Enqueuer methods are no-ops since
 // WarmSeasonWorker only triggers V1.
 type fakeWarmEnqueuer struct {
-	mu       sync.Mutex
-	v1Fn     func(ctx context.Context, ids []int32) error
-	v1Calls  [][]int32
+	mu      sync.Mutex
+	v1Fn    func(ctx context.Context, ids []int32) error
+	v1Calls [][]int32
 }
 
 func (f *fakeWarmEnqueuer) EnqueueV1Many(ctx context.Context, ids []int32) error {
@@ -231,9 +231,9 @@ func TestNextSeason_ChainAndRollover(t *testing.T) {
 		{"WINTER", 2026, "SPRING", 2026},
 		{"SPRING", 2026, "SUMMER", 2026},
 		{"SUMMER", 2026, "FALL", 2026},
-		{"FALL", 2025, "WINTER", 2026},       // year rollover
-		{"FALL", 2026, "WINTER", 2027},       // another rollover
-		{"unknown", 2026, "unknown", 2026},   // defensive passthrough
+		{"FALL", 2025, "WINTER", 2026},     // year rollover
+		{"FALL", 2026, "WINTER", 2027},     // another rollover
+		{"unknown", 2026, "unknown", 2026}, // defensive passthrough
 	}
 
 	for _, tc := range cases {

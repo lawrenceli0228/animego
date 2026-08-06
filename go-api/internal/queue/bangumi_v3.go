@@ -34,9 +34,11 @@
 //     per its policy (default 3 attempts, exp backoff).
 //   - DB write error → return wrapped error so river retries.
 //
-// SCOPE: V3 writes ONLY title_chinese + bangumi_version.  It does NOT
-// chain another worker — V3 is terminal.  All character / score /
-// vote enrichment was V2's responsibility.
+// SCOPE: V3 writes title_chinese + bangumi_version, plus description_cn
+// off the Subject it already fetched (free — same response body; see
+// persistDescriptionCn in bangumi_v2.go).  It does NOT chain another
+// worker — V3 is terminal.  All character / score / vote enrichment was
+// V2's responsibility.
 package queue
 
 import (
@@ -57,11 +59,14 @@ import (
 // a worker slot free if upstream is wedged.
 const v3WorkTimeout = 15 * time.Second
 
-// V3Writer is the sqlc subset BangumiV3Worker writes.  Single method:
-// UpdateBangumiV3 sets title_chinese (nullable) and bumps
-// bangumi_version=3 on anime_cache.
+// V3Writer is the sqlc subset BangumiV3Worker writes.  Two methods:
+//   - UpdateBangumiV3 sets title_chinese (nullable) and bumps
+//     bangumi_version=3 on anime_cache.
+//   - UpdateDescriptionCn stores the Chinese synopsis carried by the
+//     same Subject payload (see persistDescriptionCn in bangumi_v2.go).
 type V3Writer interface {
 	UpdateBangumiV3(ctx context.Context, anilistID int32, titleChinese *string) error
+	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
 }
 
 // V3DB combines the read + write surfaces this worker needs.  V3 has
@@ -136,6 +141,13 @@ func (w *BangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3Args
 		return fmt.Errorf("bangumi_v3 update %d (bgmId=%d): %w", anilistID, bgmID, err)
 	}
 
+	// 3b. Chinese description, harvested from the SAME Subject payload
+	//     step 2 read name_cn out of — no extra fetch.  V3 gets a shot at
+	//     it as well as V2 because V3 re-fetches the Subject anyway, and a
+	//     summary absent at V2 time may have been written since.
+	//     Best-effort; see persistDescriptionCn in bangumi_v2.go.
+	descCnSent := persistDescriptionCn(ctx, w.db, "bangumi_v3", subj, anilistID, bgmID)
+
 	// 4. Record batch progress.  V3BatchRecordProcessed is called on
 	//    every completed job (success + soft-404), mirroring Express's
 	//    v3BatchProcessed++ on every dispatch iteration.  healed=true
@@ -154,6 +166,7 @@ func (w *BangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3Args
 	slog.InfoContext(ctx, "bangumi_v3 done",
 		"anilistId", anilistID,
 		"bgmId", bgmID,
-		"hasChinese", titleChinese != nil)
+		"hasChinese", titleChinese != nil,
+		"descriptionCnSent", descCnSent)
 	return nil
 }

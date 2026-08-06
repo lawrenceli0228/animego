@@ -29,12 +29,53 @@ const buttonStyle: CSSProperties = {
   padding: 0,
 };
 
+// Attribution sits a full step below the body copy in the hierarchy: it is
+// a credit, not content. Underlined because colour alone would not read as
+// a link at this weight.
+const sourceStyle: CSSProperties = {
+  color: "rgba(235,235,245,0.35)",
+  fontSize: 12,
+  lineHeight: 1.6,
+  margin: "10px 0 0",
+};
+
+const sourceLinkStyle: CSSProperties = {
+  color: "inherit",
+  textDecoration: "underline",
+  textUnderlineOffset: 2,
+};
+
 interface DescriptionExpandProps {
   truncated: string;
   full: string;
   needsToggle: boolean;
   expandLabel: string;
   collapseLabel: string;
+  /**
+   * Marks the rendered text as transcribed from a third party, excluding it
+   * from search snippets. We republish Bangumi's community-written synopsis
+   * verbatim; letting it compete for the snippet on our URL would put
+   * someone else's paragraph under our result. `data-nosnippet` scopes the
+   * exclusion to this block — the rest of the page still snippets normally.
+   *
+   * Off by default, so the AniList description keeps behaving exactly as it
+   * always has.
+   */
+  nosnippet?: boolean;
+  /**
+   * Credit line text, e.g. "简介来自 Bangumi". Drives the credit on its own:
+   * the attribution must not depend on a second field, because the reason we
+   * print it (the text is someone else's) is exactly the reason `nosnippet`
+   * is set. Tying the two to different conditions is how a page ends up
+   * republishing a third party's paragraph with no credit at all.
+   */
+  sourceLabel?: string;
+  /**
+   * Where the credit points, e.g. https://bgm.tv/subject/123. Optional: with
+   * no href the credit still renders, just as plain text. A missing subject
+   * id is a reason to drop the link, never a reason to drop the attribution.
+   */
+  sourceHref?: string;
 }
 
 export default function DescriptionExpand({
@@ -43,10 +84,17 @@ export default function DescriptionExpand({
   needsToggle,
   expandLabel,
   collapseLabel,
+  nosnippet = false,
+  sourceLabel,
+  sourceHref,
 }: DescriptionExpandProps) {
   const [expanded, setExpanded] = useState(false);
+  // Spread rather than `data-nosnippet={cond ? "" : undefined}` so the
+  // attribute is absent — not empty — from the markup when off, keeping the
+  // AniList-description output byte-identical to the pre-channel render.
+  const snippetAttr = nosnippet ? { "data-nosnippet": "" } : {};
   return (
-    <div>
+    <div {...snippetAttr}>
       <p style={textStyle}>{expanded ? full : truncated}</p>
       {needsToggle ? (
         <button
@@ -57,6 +105,22 @@ export default function DescriptionExpand({
         >
           {expanded ? collapseLabel : expandLabel}
         </button>
+      ) : null}
+      {sourceLabel ? (
+        <p style={sourceStyle}>
+          {sourceHref ? (
+            <a
+              href={sourceHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={sourceLinkStyle}
+            >
+              {sourceLabel}
+            </a>
+          ) : (
+            sourceLabel
+          )}
+        </p>
       ) : null}
     </div>
   );

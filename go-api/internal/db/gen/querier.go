@@ -614,6 +614,29 @@ type Querier interface {
 	// entries whose title_chinese is still NULL.  Tiny operation —
 	// bumps bangumi_version=3 either way (success or null).
 	UpdateBangumiV3(ctx context.Context, anilistID int32, titleChinese *string) error
+	// Store a Chinese description harvested from Bangumi's Subject.Summary.
+	//
+	// The trust gate lives in this WHERE clause rather than in Go so the check
+	// and the write are one statement: a row whose bgm_id is a fuzzy guess can
+	// never have a summary written against it, with no window between deciding
+	// and writing.
+	//
+	// Why the gate is not simply `bgm_match_source = 'id_map'`: that column
+	// records how a binding was *made*, and rows bound before 0011 landed carry
+	// NULL even when they are correct. What actually matters is whether an
+	// independent authority agrees with the binding we hold, so the gate asks
+	// exactly that — does bgm_id_map (refreshed weekly from the vendored
+	// AniList->Bangumi map) list this same pair? A 2026-06 audit found the 7,183
+	// rows with an authoritative answer agreed 100%, while the known mis-bindings
+	// all sit in the no-map tail, which this excludes.
+	//
+	// Stakes: a wrong title is a wrong word, a wrong summary is a whole page
+	// describing the wrong show — and it would land in the meta description and
+	// JSON-LD too.
+	//
+	// 'manual' is never overwritten: it is the admin override, and an automated
+	// sweep must not undo a human correction.
+	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
 	// PATCH /api/subscriptions/:anilistId — selective update.
 	// COALESCE pattern keeps unchanged columns untouched.  `last_watched_at`
 	// only bumps when current_episode is explicitly set, matching Express

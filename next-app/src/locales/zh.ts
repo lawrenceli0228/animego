@@ -106,6 +106,9 @@ const zh = {
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',
+    // Credit under the synopsis when the rendered text is Bangumi's
+    // community-written summary rather than AniList's description.
+    summaryFromBangumi: '简介来自 Bangumi',
     linkCopied: '链接已复制',
     linkCopyFailed: '复制失败，请手动复制链接',
     openPlayer: '▶ 弹幕播放',

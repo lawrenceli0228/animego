@@ -367,6 +367,8 @@ SELECT
     poster_accent_contrast_on_black,
     banner_image_url,
     description,
+    description_cn,
+    description_cn_source,
     episodes,
     status,
     season,
@@ -398,6 +400,8 @@ type GetAnimeMainByIDRow struct {
 	PosterAccentContrastOnBlack *float64           `json:"posterAccentContrastOnBlack"`
 	BannerImageUrl              *string            `json:"bannerImageUrl"`
 	Description                 *string            `json:"description"`
+	DescriptionCn               *string            `json:"descriptionCn"`
+	DescriptionCnSource         *string            `json:"descriptionCnSource"`
 	Episodes                    *int32             `json:"episodes"`
 	Status                      *string            `json:"status"`
 	Season                      *string            `json:"season"`
@@ -435,6 +439,8 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.PosterAccentContrastOnBlack,
 		&i.BannerImageUrl,
 		&i.Description,
+		&i.DescriptionCn,
+		&i.DescriptionCnSource,
 		&i.Episodes,
 		&i.Status,
 		&i.Season,
@@ -1544,6 +1550,55 @@ WHERE anilist_id = $1
 // bumps bangumi_version=3 either way (success or null).
 func (q *Queries) UpdateBangumiV3(ctx context.Context, anilistID int32, titleChinese *string) error {
 	_, err := q.db.Exec(ctx, updateBangumiV3, anilistID, titleChinese)
+	return err
+}
+
+const updateDescriptionCn = `-- name: UpdateDescriptionCn :exec
+UPDATE anime_cache ac
+SET description_cn        = $1,
+    description_cn_source = 'bangumi',
+    updated_at            = now()
+WHERE ac.anilist_id = $2
+  -- Pin the write to the binding the job actually fetched. Without this the
+  -- statement only says "this anime", so a rebind landing mid-job would file
+  -- the old subject's synopsis against the new one. The window is small but
+  -- the failure is a whole page describing a different show.
+  AND ac.bgm_id = $3
+  AND coalesce(ac.description_cn_source, '') <> 'manual'
+  AND (
+      ac.bgm_match_source = 'manual'
+      OR EXISTS (
+          SELECT 1 FROM bgm_id_map m
+          WHERE m.anilist_id = ac.anilist_id
+            AND m.bgm_id = ac.bgm_id
+      )
+  )
+`
+
+// Store a Chinese description harvested from Bangumi's Subject.Summary.
+//
+// The trust gate lives in this WHERE clause rather than in Go so the check
+// and the write are one statement: a row whose bgm_id is a fuzzy guess can
+// never have a summary written against it, with no window between deciding
+// and writing.
+//
+// Why the gate is not simply `bgm_match_source = 'id_map'`: that column
+// records how a binding was *made*, and rows bound before 0011 landed carry
+// NULL even when they are correct. What actually matters is whether an
+// independent authority agrees with the binding we hold, so the gate asks
+// exactly that — does bgm_id_map (refreshed weekly from the vendored
+// AniList->Bangumi map) list this same pair? A 2026-06 audit found the 7,183
+// rows with an authoritative answer agreed 100%, while the known mis-bindings
+// all sit in the no-map tail, which this excludes.
+//
+// Stakes: a wrong title is a wrong word, a wrong summary is a whole page
+// describing the wrong show — and it would land in the meta description and
+// JSON-LD too.
+//
+// 'manual' is never overwritten: it is the admin override, and an automated
+// sweep must not undo a human correction.
+func (q *Queries) UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error {
+	_, err := q.db.Exec(ctx, updateDescriptionCn, descriptionCn, anilistID, bgmID)
 	return err
 }
 

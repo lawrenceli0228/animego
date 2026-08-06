@@ -24,6 +24,57 @@ export function pickTitle(obj: TitleBearing, lang: Lang): string {
   return obj.titleEnglish || obj.titleRomaji || "";
 }
 
+type DescriptionBearing = {
+  description?: string | null;
+  /**
+   * Chinese synopsis (anime_cache.description_cn, migration 0014). Optional
+   * here because this helper is deliberately structural: the detail payload
+   * carries both fields (AnimeDetail declares them non-optional), every other
+   * endpoint carries neither, and both shapes must be accepted. Optionality is
+   * about the *callers*, not about the detail wire contract.
+   */
+  descriptionCn?: string | null;
+  /** 'bangumi' | 'llm' | 'manual' — see anime_cache.description_cn_source. */
+  descriptionCnSource?: string | null;
+};
+
+export interface DescriptionPick {
+  /** Text to render. "" when nothing is available, never null. */
+  text: string;
+  /**
+   * Provenance of `text`: the description_cn_source value when the Chinese
+   * column was used, or null when this is AniList's `description` (the
+   * fallback, and the only thing en ever gets).
+   */
+  source: string | null;
+}
+
+/**
+ * Pick the description body copy for a given language preference.
+ *
+ * - `zh`: descriptionCn > description
+ * - `en`: description, always — an English reader is never shown the
+ *   Chinese synopsis, no matter how good it is.
+ *
+ * Same ladder shape as pickTitle, but it returns provenance alongside the
+ * text instead of a bare string. Callers need to know *which* rung they
+ * landed on — the Bangumi text is transcribed from a third party, so it
+ * carries an attribution line and a `data-nosnippet` boundary that the
+ * AniList fallback does not. Recomputing that condition at the call site
+ * would let the two drift, and the failure mode is silent: attribution
+ * pointing at text we did not source from Bangumi.
+ *
+ * Rows where description_cn is NULL — every row until the enrichment
+ * backfill runs — return exactly what a plain `detail.description` read
+ * returned before this channel existed.
+ */
+export function pickDescription(obj: DescriptionBearing, lang: Lang): DescriptionPick {
+  if (lang === "zh" && obj.descriptionCn) {
+    return { text: obj.descriptionCn, source: obj.descriptionCnSource ?? null };
+  }
+  return { text: obj.description || "", source: null };
+}
+
 /**
  * Format a 0-100 AniList score as a 0-10 string ("85" -> "8.5").
  * Returns "N/A" when the score is null / undefined / 0.

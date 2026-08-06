@@ -12,6 +12,13 @@
 //  3. For each Bangumi Character, UpdateAnimeCharacterCN matched by
 //     name_en → name_cn + voice_actor_cn + voice_actor_image_url.
 //     Rows that don't match a Bangumi character stay AniList-only.
+//  4. UpdateDescriptionCn with the Subject's own Summary, once it
+//     passes bangumi.CleanSummary.  Free — the summary arrived in the
+//     step-1 response body.  See persistDescriptionCn.  Listed last but
+//     RUNS right after step 2's write, before per-character enrichment:
+//     it depends on nothing the character loop produces, so a hard
+//     character failure (which retries the whole job) must not be able
+//     to strand the description behind it.
 //
 // Retry policy:
 //   - Subject ErrNotFound (Bangumi has no record for this bgmId)
@@ -98,15 +105,19 @@ type BangumiV2Client interface {
 	BangumiEpisodesFetcher
 }
 
-// V2Writer is the sqlc subset V2Worker writes.  Two methods:
+// V2Writer is the sqlc subset V2Worker writes.  Four methods:
 //   - UpdateBangumiV2 sets score/votes (and COALESCE-protected
 //     title_chinese) on anime_cache.
 //   - UpdateAnimeCharacterCN updates one row of anime_characters
 //     matched by (anime_id, name_en).
+//   - UpsertEpisodeTitle fills per-episode names.
+//   - UpdateDescriptionCn stores the Chinese synopsis carried by the
+//     same Subject payload (see persistDescriptionCn).
 type V2Writer interface {
 	UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error
 	UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCN *string, voiceActorCN *string, voiceActorImageURL *string) error
 	UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCN *string, name *string) error
+	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
 }
 
 // V2DB combines the read + write surfaces this worker needs.  V2 has
@@ -257,6 +268,11 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		return fmt.Errorf("bangumi_v2 update %d (bgmId=%d): %w", anilistID, bgmID, err)
 	}
 
+	// 1b) Chinese description, harvested from the SAME Subject payload
+	//     we just read score / votes / name_cn out of — no extra fetch.
+	//     Best-effort; see persistDescriptionCn for the full rationale.
+	descCnSent := persistDescriptionCn(ctx, w.db, "bangumi_v2", subject, anilistID, bgmID)
+
 	// 2) Per-character enrichment.  Track failure count so a wedged
 	//    DB connection doesn't silently degrade enrichment quality —
 	//    if more than half error, we ask river to retry the whole job
@@ -381,9 +397,90 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		"bgmId", bgmID,
 		"hasScore", bangumiScore != nil,
 		"hasChinese", titleChinese != nil,
+		"descriptionCnSent", descCnSent,
 		"chars", totalChars-charFailures,
 		"epTitles", epTitlesWritten)
 	return nil
+}
+
+// descriptionCnWriter is the one-method surface persistDescriptionCn
+// needs.  Both V2Writer and V3Writer list it, so either worker's db value
+// satisfies it — the same "declare the small interface once, consume it
+// from both workers" move bangumi_v3.go already makes with
+// BangumiSubjector.
+type descriptionCnWriter interface {
+	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
+}
+
+// persistDescriptionCn stores the Chinese synopsis carried by a Subject the
+// caller has ALREADY fetched.  Shared by V2 and V3 because both hold a
+// Subject at the point they call it.
+//
+// # Why this costs zero extra upstream requests
+//
+// Summary rides along inside the very same /v0/subjects/{bgmId} response
+// body the caller decoded to get Rating and NameCN.  bangumi.Subject has
+// parsed the field all along (client.go) and every caller simply discarded
+// it; this stops discarding it.  No second endpoint, no second round trip,
+// no extra pressure on Bangumi's rate limit, and no new upstream failure
+// mode — if the Subject fetch succeeded, the summary is already in hand.
+//
+// # Why ok == false is a normal path, not an error
+//
+// A 150-subject prod sample (see bangumi/summary.go) found ~37% of summaries
+// are the untranslated Japanese original — the Chinese one simply has not
+// been written by the community yet — plus a few empty or placeholder ones.
+// CleanSummary returning false on those IS the feature: the row keeps
+// whatever it had and the page goes on falling back to the English
+// description, which beats swapping one unreadable language for another.
+// Logged at debug precisely because it fires on roughly four of every ten
+// enriched rows; at warn it would drown the log in non-events.
+//
+// # Why a write failure is never fatal
+//
+// The Chinese description is a bonus on top of what V2/V3 actually exist to
+// do — score, votes, Chinese title.  Failing the job here would re-run (and
+// possibly re-fail) the primary writes that already committed, to recover an
+// optional column.  So: warn and carry on, the same best-effort shape the
+// per-character and episode-title writes already use.
+//
+// The trust gate — bgm_id_map must independently agree with our bgm_id, and
+// a 'manual' value is never clobbered — lives in the UpdateDescriptionCn
+// WHERE clause, so there is deliberately no binding check here.  A row that
+// fails the gate updates zero rows and returns nil: expected, not an error.
+//
+// The bool reports only that a cleaned value was handed to the DB without
+// error; it is NOT a claim that a row changed, since the SQL gate may still
+// have matched nothing.  Callers use it for logging only — and log it as
+// descriptionCnSent rather than hasDescriptionCn precisely because roughly a
+// third of rows have no bgm_id_map entry and will silently update zero rows.
+// Coverage has to be counted in the DB (description_cn IS NOT NULL), never
+// from these log lines.
+func persistDescriptionCn(ctx context.Context, db descriptionCnWriter, phase string, subj *bangumi.Subject, anilistID int32, bgmID int) bool {
+	// Nothing to work with — a 404'd subject or one Bangumi has no
+	// synopsis for at all.  Not worth a log line.
+	if subj == nil || subj.Summary == "" {
+		return false
+	}
+
+	cleaned, ok := bangumi.CleanSummary(subj.Summary)
+	if !ok {
+		slog.DebugContext(ctx, phase+" description_cn skipped",
+			"anilistId", anilistID,
+			"bgmId", bgmID,
+			"reason", "summary not usable Chinese")
+		return false
+	}
+
+	bgm := int32(bgmID)
+	if err := db.UpdateDescriptionCn(ctx, &cleaned, anilistID, &bgm); err != nil {
+		slog.WarnContext(ctx, phase+" description_cn write error",
+			"anilistId", anilistID,
+			"bgmId", bgmID,
+			"err", err)
+		return false
+	}
+	return true
 }
 
 // epTitle is a normalized episode-title row ready for UpsertEpisodeTitle.
