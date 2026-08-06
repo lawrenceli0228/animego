@@ -135,6 +135,50 @@ func TestLateBoundEnqueuer_WarmSeasonUnbound_NoOp(t *testing.T) {
 		WarmSeasonArgs{Season: "SPRING", Year: 2026}))
 }
 
+// TestNoopEnqueuer_DescriptionBackfillNoError asserts the P3 method is
+// as inert as the rest of NoopEnqueuer.  Every Enqueuer test double in
+// the repo now carries this method, so the no-op contract is what those
+// doubles are implicitly promising.
+func TestNoopEnqueuer_DescriptionBackfillNoError(t *testing.T) {
+	t.Parallel()
+
+	n := NoopEnqueuer{}
+
+	require.NoError(t, n.EnqueueDescriptionBackfillMany(context.Background(), nil))
+	require.NoError(t, n.EnqueueDescriptionBackfillMany(context.Background(), []DescriptionBackfillArgs{}))
+	require.NoError(t, n.EnqueueDescriptionBackfillMany(context.Background(),
+		[]DescriptionBackfillArgs{{AnilistID: 1, BgmID: 100}}))
+}
+
+// TestRealEnqueuer_DescriptionBackfillEmptyList_NoCall — same guard as
+// the V2/V3 paths.  This one matters more than it looks: the method
+// dereferences e.client to call InsertMany, and the scan worker calls it
+// on every pass including the steady-state passes that find nothing, so
+// the empty-slice short-circuit is on the hot path forever once the
+// backlog drains.
+func TestRealEnqueuer_DescriptionBackfillEmptyList_NoCall(t *testing.T) {
+	t.Parallel()
+
+	e := NewEnqueuer(nil)
+
+	require.NoError(t, e.EnqueueDescriptionBackfillMany(context.Background(), nil))
+	require.NoError(t, e.EnqueueDescriptionBackfillMany(context.Background(), []DescriptionBackfillArgs{}))
+}
+
+// TestLateBoundEnqueuer_DescriptionBackfillUnbound_NoOp asserts the
+// unbound path no-ops rather than panicking.  Production can't reach it
+// — river's periodic scheduler only fires after Start, which is after
+// Bind — but the contract has to match V1/V2/V3 so a bare
+// &LateBoundEnqueuer{} stays a valid test fixture.
+func TestLateBoundEnqueuer_DescriptionBackfillUnbound_NoOp(t *testing.T) {
+	t.Parallel()
+
+	l := &LateBoundEnqueuer{}
+	require.NoError(t, l.EnqueueDescriptionBackfillMany(context.Background(), nil))
+	require.NoError(t, l.EnqueueDescriptionBackfillMany(context.Background(),
+		[]DescriptionBackfillArgs{{AnilistID: 1, BgmID: 100}}))
+}
+
 // TestEnqueuer_InterfaceSatisfaction is a runtime sanity check — the
 // var blocks at the bottom of enqueue.go give us compile-time
 // guarantees, but an extra runtime guard documents the intent for

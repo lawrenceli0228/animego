@@ -133,6 +133,15 @@ func (s *spyEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args queue.WarmS
 	return s.wsErr
 }
 
+// EnqueueDescriptionBackfillMany is a no-op stub and deliberately NOT
+// recorded.  The admin re-enrich endpoints must never seed the
+// description sweep — that is the periodic description_backfill_scan
+// worker's job — so there is nothing worth asserting on here; the method
+// exists only because queue.Enqueuer grew it in P3.
+func (s *spyEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []queue.DescriptionBackfillArgs) error {
+	return nil
+}
+
 type fakeQueueController struct {
 	mu sync.Mutex
 

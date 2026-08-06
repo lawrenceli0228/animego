@@ -24,6 +24,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -42,10 +43,22 @@ import (
 // didn't supply a Chinese title; services do NOT call EnqueueV3Many
 // directly.  All three methods live on the same interface so each
 // worker can hold a single dependency rather than three narrow ones.
+//
+// EnqueueDescriptionBackfillMany sits outside that chain entirely:
+// it is fed by the periodic description_backfill_scan worker sweeping
+// rows that already exist, not by any stage of the V1→V2→V3
+// lifecycle.  It joins this interface for the same reason the others
+// share it — one dependency per worker beats a second narrow one.
 type Enqueuer interface {
 	EnqueueV1Many(ctx context.Context, anilistIDs []int32) error
 	EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) error
 	EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error
+	// EnqueueDescriptionBackfillMany seeds the Chinese-description
+	// sweep.  Unlike the V1→V2→V3 chain this is NOT chained from a
+	// worker in the enrichment lifecycle — the periodic scan worker
+	// (description_backfill_scan) is its only production caller, and
+	// it feeds rows the sweep query already vetted.
+	EnqueueDescriptionBackfillMany(ctx context.Context, jobs []DescriptionBackfillArgs) error
 	// EnqueueWarmSeasonNow inserts a single WarmSeasonArgs job for
 	// immediate dispatch.  Used at boot time to seed the initial
 	// current + next season pair; the 24h periodic schedule (configured
@@ -135,6 +148,44 @@ func (e *RealEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) 
 	return nil
 }
 
+// EnqueueDescriptionBackfillMany inserts one description-backfill job
+// per {anilistId, bgmId} pair.  Empty slice → noop.  Same InsertMany
+// shape and error wrapping as EnqueueV2Many / EnqueueV3Many.
+//
+// Duplicates are EXPECTED here, unlike on the V2/V3 chains.  The scan
+// re-runs on a fixed interval while the previous batch may still be
+// draining, so it will hand us rows that are already queued;
+// DescriptionBackfillArgs.InsertOpts carries UniqueOpts{ByArgs:true}
+// and river's InsertMany resolves those conflicts gracefully (the
+// duplicate is skipped, not errored — InsertManyFast is the variant
+// that can't, which is why this uses InsertMany).  The debug log
+// reports the skipped count so an operator can confirm the dedupe is
+// doing its job rather than inferring it from a flat queue depth.
+func (e *RealEnqueuer) EnqueueDescriptionBackfillMany(ctx context.Context, jobs []DescriptionBackfillArgs) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	params := make([]river.InsertManyParams, len(jobs))
+	for i, j := range jobs {
+		params[i] = river.InsertManyParams{Args: j}
+	}
+	res, err := e.client.InsertMany(ctx, params)
+	if err != nil {
+		return fmt.Errorf("queue.EnqueueDescriptionBackfillMany (n=%d): %w", len(jobs), err)
+	}
+	skipped := 0
+	for _, r := range res {
+		if r.UniqueSkippedAsDuplicate {
+			skipped++
+		}
+	}
+	slog.DebugContext(ctx, "queue.description_backfill enqueued",
+		"n", len(jobs),
+		"inserted", len(jobs)-skipped,
+		"skippedDuplicate", skipped)
+	return nil
+}
+
 // EnqueueWarmSeasonNow inserts a single WarmSeasonArgs job for
 // immediate dispatch.  Used by main.go at boot time (current +
 // next season pair) — periodic re-fire is configured separately
@@ -163,6 +214,11 @@ func (NoopEnqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) err
 
 // EnqueueV3Many returns nil regardless of input.
 func (NoopEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
+	return nil
+}
+
+// EnqueueDescriptionBackfillMany returns nil regardless of input.
+func (NoopEnqueuer) EnqueueDescriptionBackfillMany(ctx context.Context, jobs []DescriptionBackfillArgs) error {
 	return nil
 }
 
@@ -234,6 +290,21 @@ func (l *LateBoundEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3A
 		return nil
 	}
 	return e.EnqueueV3Many(ctx, jobs)
+}
+
+// EnqueueDescriptionBackfillMany delegates to the bound RealEnqueuer,
+// or no-ops when unbound.  The description-backfill scan only fires
+// from river's periodic scheduler, which cannot run before Bind, so
+// the unbound branch is unreachable in production — it exists so unit
+// tests can construct a bare LateBoundEnqueuer.
+func (l *LateBoundEnqueuer) EnqueueDescriptionBackfillMany(ctx context.Context, jobs []DescriptionBackfillArgs) error {
+	l.mu.RLock()
+	e := l.inner
+	l.mu.RUnlock()
+	if e == nil {
+		return nil
+	}
+	return e.EnqueueDescriptionBackfillMany(ctx, jobs)
 }
 
 // EnqueueWarmSeasonNow delegates to the bound RealEnqueuer, or no-ops

@@ -106,6 +106,13 @@ func (f *fakeV1Enqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonArg
 	return nil
 }
 
+// EnqueueDescriptionBackfillMany — the description sweep is fed by its own
+// periodic scan worker, never from the V1→V2→V3 chain.  No-op to satisfy
+// the Enqueuer interface.
+func (f *fakeV1Enqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []DescriptionBackfillArgs) error {
+	return nil
+}
+
 func (f *fakeV1Enqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) error {
 	dup := make([]BangumiV2Args, len(jobs))
 	copy(dup, jobs)

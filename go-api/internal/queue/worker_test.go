@@ -7,7 +7,7 @@
 //  1. Each Args type returns the correct Kind.
 //  2. Workers() registers only the V2 stub (V1 + V3 have real
 //     workers — tests live in bangumi_v1_test.go / bangumi_v3_test.go).
-//  3. WorkersWithBangumi registers all 5 real workers.
+//  3. WorkersWithBangumi registers all 7 real workers.
 //  4. Boot rejects a nil pool with ErrMissingPool.
 //  5. Boot applies sensible defaults when Config is zero-valued.
 package queue
@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/assert"
@@ -90,18 +91,24 @@ func TestWorkers_RegistersStubs(t *testing.T) {
 	assert.Contains(t, err.Error(), "bangumi_v2")
 }
 
-// TestWorkersWithBangumi_RegistersAll5 verifies the production wiring
-// constructor binds V1 + V2 + V3 + WarmSeason + OrphanScan (all real)
-// — all five Kinds occupied.  Uses noopBangumi + noopAniList +
-// noopV12DB — we never invoke Work here, only inspect what's been
-// registered.
-func TestWorkersWithBangumi_RegistersAll5(t *testing.T) {
+// TestWorkersWithBangumi_RegistersAll7 verifies the production wiring
+// constructor binds V1 + V2 + V3 + WarmSeason + OrphanScan +
+// DescriptionBackfillScan + DescriptionBackfill (all real) — all seven
+// Kinds occupied.  Uses noopBangumi + noopAniList + noopV12DB — we never
+// invoke Work here, only inspect what's been registered.
+//
+// The two description-backfill slots matter more than the count: a
+// worker that is constructed but never registered leaves its jobs
+// sitting in the queue forever, and the sweep's symptom for that is
+// indistinguishable from "the backlog is just slow" — no error, no log,
+// just a queue that never drains.
+func TestWorkersWithBangumi_RegistersAll7(t *testing.T) {
 	t.Parallel()
 
 	w := WorkersWithBangumi(noopBangumi{}, noopAniList{}, noopV12DB{}, NoopEnqueuer{})
 	require.NotNil(t, w, "WorkersWithBangumi must return a non-nil bundle")
 
-	// All 5 slots should be taken: re-registration returns
+	// All 7 slots should be taken: re-registration returns
 	// "already registered".
 	err := river.AddWorkerSafely(w, NewBangumiV1Worker(noopBangumi{}, noopV12DB{}, NoopEnqueuer{}))
 	require.Error(t, err, "v1 slot should already be occupied")
@@ -122,6 +129,18 @@ func TestWorkersWithBangumi_RegistersAll5(t *testing.T) {
 	err = river.AddWorkerSafely(w, NewOrphanScanWorker(noopV12DB{}, NoopEnqueuer{}))
 	require.Error(t, err, "orphan_scan slot should already be occupied")
 	assert.Contains(t, err.Error(), "orphan_scan")
+
+	// description_backfill_scan is asserted BEFORE description_backfill
+	// deliberately: the scan is the only producer of the per-row jobs, so
+	// registering one without the other is a silent half-wiring — jobs
+	// enqueued with no worker, or a worker with nothing to feed it.
+	err = river.AddWorkerSafely(w, NewDescriptionBackfillScanWorker(noopV12DB{}, NoopEnqueuer{}))
+	require.Error(t, err, "description_backfill_scan slot should already be occupied")
+	assert.Contains(t, err.Error(), "description_backfill_scan")
+
+	err = river.AddWorkerSafely(w, NewDescriptionBackfillWorker(noopBangumi{}, noopV12DB{}))
+	require.Error(t, err, "description_backfill slot should already be occupied")
+	assert.Contains(t, err.Error(), "description_backfill")
 }
 
 // TestWorkersWithBangumi_NilEnqueuerOK asserts the constructor
@@ -342,6 +361,17 @@ func (noopV12DB) GetTitleChineseByAnilistIDs(_ context.Context, _ []int32) ([]db
 func (noopV12DB) ListUnenrichedAnilistIDs(_ context.Context, _ int32, _ int32) ([]int32, error) {
 	return []int32{}, nil
 }
+
+// ListDescriptionCnCandidates satisfies DescriptionBackfillReader.
+// Registration tests never invoke this method; returning an empty slice
+// keeps any accidental dispatch a no-op rather than a nil-deref.
+func (noopV12DB) ListDescriptionCnCandidates(_ context.Context, _ pgtype.Interval, _ int32) ([]dbgen.ListDescriptionCnCandidatesRow, error) {
+	return []dbgen.ListDescriptionCnCandidatesRow{}, nil
+}
+
+// MarkDescriptionCnAttempted satisfies DescriptionBackfillWriter. Registration
+// tests never dispatch work, so recording nothing is fine.
+func (noopV12DB) MarkDescriptionCnAttempted(_ context.Context, _ int32) error { return nil }
 
 // noopAniList satisfies AniListSeasonalFetcher.  Returns an empty page
 // (HasNextPage=false) so any registration-level smoke that does happen

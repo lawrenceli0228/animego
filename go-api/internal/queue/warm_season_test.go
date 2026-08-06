@@ -137,6 +137,10 @@ func (f *fakeWarmEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonA
 	return nil
 }
 
+func (f *fakeWarmEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []DescriptionBackfillArgs) error {
+	return nil
+}
+
 func (f *fakeWarmEnqueuer) snapshotV1Calls() [][]int32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()

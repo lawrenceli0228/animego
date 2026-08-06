@@ -244,6 +244,42 @@ type Querier interface {
 	// Cache hit returns dandanplay's title (anime_title may be NULL = looked up,
 	// none found) plus when it was checked, so the caller can skip stale rows.
 	GetDdpTitle(ctx context.Context, bgmID int32) (GetDdpTitleRow, error)
+	// Chinese-description backfill coverage (P3) — the four numbers behind the
+	// /admin 中文简介回填 block.
+	//
+	// WHY THIS IS A SEPARATE QUERY AND NOT FOUR MORE COLUMNS ON GetAdminStats:
+	// every count below reads description_cn_eligible, a VIEW created by
+	// migration 0016.  Folded into GetAdminStats, any problem with that view —
+	// migration not yet applied on a rolled-forward container, a `migrate down`,
+	// a statement timeout on the widest scan in the payload — takes the ENTIRE
+	// stats response down with it, and the admin page loses users, anime,
+	// enrichment, queue and flags along with the backfill block it was never
+	// asked about.  Verified, not theorised:  dropping the view makes the fused
+	// SELECT fail outright with `relation "description_cn_eligible" does not
+	// exist`, because a missing relation is a planning error and no amount of
+	// per-column care survives it.  Split out, the handler soft-fails this one
+	// call (see read.go) and everything else still renders.  The least critical
+	// panel on the page must not be able to blank the page.
+	//
+	// All four read the view, never anime_cache directly.  That view is the
+	// single definition of "this row's Bangumi binding is trustworthy enough to
+	// copy a synopsis from", and the sweep's candidate query
+	// (ListDescriptionCnCandidates) plus the writer's guard (UpdateDescriptionCn)
+	// both read it too.  Re-deriving the predicate here would let the dashboard
+	// drift away from what the sweep actually does — and a wrong number that
+	// still looks authoritative is worse than no number.
+	//
+	// The model is coverage, not batch progress:  the sweep is perpetual, so
+	// there is no "total to process" that ever reaches 100%.  done/eligible is
+	// the honest headline.
+	//
+	// desc_cn_rejected and desc_cn_pending deliberately OVERLAP:  a row decided
+	// against longer ago than the cooldown is both "we tried and got nothing" and
+	// "the sweep will reach it again".  They answer different questions (how much
+	// has upstream already refused us / how much work is live) and must not be
+	// summed.  eligible = done + (rows with no CN), and that second term is what
+	// rejected and pending each slice differently.
+	GetDescriptionCnStats(ctx context.Context) (GetDescriptionCnStatsRow, error)
 	// Returns the liveEndsAt timestamp for this episode if a live window
 	// exists, else pgx.ErrNoRows (handler maps → null in the envelope).
 	GetEpisodeWindow(ctx context.Context, anilistID int32, episode int32) (EpisodeWindow, error)
@@ -396,6 +432,27 @@ type Querier interface {
 	// order is what the player expects so the bullet-screen overlay can
 	// replay danmakus in send order.
 	ListDanmakuRecent(ctx context.Context, anilistID int32, episode int32) ([]ListDanmakuRecentRow, error)
+	// Rows still missing a Chinese description that could actually receive one.
+	//
+	// The trust gate is repeated here rather than left to UpdateDescriptionCn
+	// alone. Both need it, but for different reasons: the writer needs it for
+	// correctness, and this reader needs it so the sweep does not spend an
+	// upstream Bangumi request on a row whose write is guaranteed to affect zero
+	// rows. On the current catalogue that is ~3,200 rows — bindings we hold but
+	// no independent source confirms — which would otherwise be fetched on every
+	// pass forever, since nothing about them ever changes.
+	//
+	// Ordering by attempt time, not by id, is what lets the sweep finish. A row
+	// whose summary the language gate rejects stays description_cn IS NULL, so
+	// under ORDER BY anilist_id it would hold its place at the front of every
+	// batch and the sweep would converge to p·B/(1−p) lifetime writes — about 450
+	// rows out of ~9,100. Attempt time puts a processed row behind everything not
+	// yet tried, whether or not it produced text. See migration 0015.
+	//
+	// The cooldown then doubles as a retry: Bangumi summaries are community
+	// written over time, so a subject that is Japanese-only today may carry Chinese
+	// prose next quarter, and re-reaching it is how that gets picked up.
+	ListDescriptionCnCandidates(ctx context.Context, retryAfter pgtype.Interval, rowLimit int32) ([]ListDescriptionCnCandidatesRow, error)
 	// For re-enrich v=2:  rows that have a bgm_id can be V3-healed.
 	// Returns the queue-payload fields directly.
 	ListEnrichedV2WithBgm(ctx context.Context) ([]ListEnrichedV2WithBgmRow, error)
@@ -507,6 +564,17 @@ type Querier interface {
 	// scan (version=0) and re-enrich stop re-processing this row. Guarded
 	// on bangumi_version=0 so we never clobber a row another worker advanced.
 	MarkBangumiV1NotFound(ctx context.Context, anilistID int32) error
+	// Stamp a row as tried, regardless of whether it yielded usable Chinese.
+	//
+	// Called for every outcome the upstream actually answered — text stored,
+	// summary rejected by the language gate, subject absent from Bangumi — but NOT
+	// for network failures, which river should retry rather than have the sweep
+	// treat as a decided outcome.
+	//
+	// This is the counterpart to the ordering in ListDescriptionCnCandidates: the
+	// stamp is what moves a row to the back of the queue and lets the sweep reach
+	// the rest of the backlog.
+	MarkDescriptionCnAttempted(ctx context.Context, anilistID int32) error
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error

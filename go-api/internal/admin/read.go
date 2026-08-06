@@ -33,6 +33,12 @@ import (
 //     populated" guarantee from the in-memory implementation).
 //   - QueueStatus is nil (NewHandlers caller didn't wire it) →
 //     same fallback as the error case.
+//   - GetDescriptionCnStats fails → log + emit zero-value
+//     DescriptionCnStats.  Same stance as QueueStatus and for the same
+//     reason: that query is the only thing on this endpoint that depends
+//     on a view rather than a base table, so it is the only part that can
+//     break on its own, and the backfill block is the least critical
+//     thing on the page.  It must not be able to blank the rest of it.
 func (h *Handlers) GetStats(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
@@ -41,6 +47,26 @@ func (h *Handlers) GetStats(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "admin stats query failed"))
 		return
+	}
+
+	// Chinese-description coverage — non-fatal, see the doc comment above.
+	// Zero values render as "0 / 0" in the panel rather than as a distinct
+	// "unavailable" state; that ambiguity is accepted because the wire
+	// contract types descriptionCn as a required object, and a page that
+	// renders a suspicious zero beats a page that renders nothing at all.
+	// The warning below is the unambiguous signal.
+	var descCn DescriptionCnStats
+	if drow, derr := h.Queries.GetDescriptionCnStats(ctx); derr != nil {
+		slog.WarnContext(ctx, "admin stats: description_cn coverage query failed; emitting zero counters",
+			"err", derr.Error(),
+		)
+	} else {
+		descCn = DescriptionCnStats{
+			Eligible: drow.DescCnEligible,
+			Done:     drow.DescCnDone,
+			Rejected: drow.DescCnRejected,
+			Pending:  drow.DescCnPending,
+		}
 	}
 
 	// Queue snapshot is non-fatal — log on error / nil-fn and substitute
@@ -79,6 +105,13 @@ func (h *Handlers) GetStats(w http.ResponseWriter, r *http.Request) {
 		Flagged:       row.Flagged,
 		Subscriptions: row.TotalSubs,
 		Follows:       row.TotalFollows,
+		// Straight pass-through of the four view-derived counts — no
+		// arithmetic here on purpose.  Deriving e.g. a percentage or a
+		// "remaining" figure in Go would put a second definition of the
+		// numbers next to the SQL one, and the whole value of this panel
+		// is that an operator can reproduce every figure with the query
+		// in admin.sql.  The frontend formats; the database decides.
+		DescriptionCn: descCn,
 	}
 
 	httpx.Data(w, http.StatusOK, payload)

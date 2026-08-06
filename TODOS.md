@@ -28,3 +28,18 @@
 - **Cons:** 现在加是无收益 schema 变更,白承迁移风险。
 - **Context:** ⚠️ 届时注意:Dexie 的 `version(N).stores({fileRefs})` 是整表替换不是合并——必须重声明**完整**索引串:`'id, episodeId, hash16M, matchStatus, [libraryId+matchStatus], *libraryIds, [libraryId+relPath]'`(2026-08 评审验证时确认,db.js 当前无裸 libraryId 索引)。
 - **Depends on / blocked by:** 触发条件:库规模上万行,或"文件消失处置"产品决策落地为清理功能。
+
+## backfill 队列的暂停 / 恢复控制
+
+**What** — 给 `/admin` 的「中文简介」区块加一对暂停/恢复按钮，作用于 `description_backfill` 队列。
+
+**Why** — 首次回填要连续跑约 31 小时。这期间如果 bgm.tv 出问题、或者发现写入有误想紧急刹车，目前唯一的手段是 SSH 上 prod 改数据库、或者重启容器——而重启会把在线富化一起停掉。独立队列的价值有一半就在「能单独停」，现在这半个价值还没接出来。
+
+**Context** — P3 已经把 sweep 放进了独立队列（`internal/queue/control.go` 的 `DescriptionBackfillQueueName`），river 的 `QueuePause` 机制也已经在生产跑（V3 heal-CN 在用）。所以这件事是接线不是造轮子：
+- 后端：`queue.PauseV3` / `ResumeV3` 旁边加一对同形函数，改队列名即可
+- 前端：照抄 `_actions/enrichment-queue.ts` 里的 `pauseHealCn` / `resumeHealCn`
+- 位置：`EnrichmentBar` 的「中文简介」区块已经留好了地方
+
+**Depends on / blocked by** — 无。dashboard 只读部分（本次 PR）落地后即可做。
+
+**为什么这次没做** — 它属于运维能力，不属于「看见进度」这个需求。分开做两边都更干净。

@@ -126,10 +126,17 @@ func main() {
 	enqueuer := &queue.LateBoundEnqueuer{}
 
 	// River queue boot: real V1+V2+V3 (Bangumi enrichment trilogy) +
-	// real WarmSeason worker.  WorkersWithBangumiAndNormalizer takes
-	// the AniList client (for warm_season's Seasonal calls) + an
-	// injected normalizer (anime.NormalizeMainRow — avoids the
-	// queue→anime import cycle).  Boot returns the client unstarted.
+	// real WarmSeason worker + the description-backfill sweep.
+	// WorkersWithBangumiAndNormalizer takes the AniList client (for
+	// warm_season's Seasonal calls) + an injected normalizer
+	// (anime.NormalizeMainRow — avoids the queue→anime import cycle).
+	// Boot returns the client unstarted.
+	//
+	// bangumiClient is passed by value-of-pointer to every worker,
+	// including the backfill one — deliberately.  Its rate limiter is
+	// an in-process token bucket, so the backfill only stays inside the
+	// bgm.tv budget while it draws from this same instance.  A standalone
+	// backfill CLI would open a second bucket and double the real rate.
 	riverClient, err := queue.Boot(pool, queue.Config{
 		Workers: queue.WorkersWithBangumiAndNormalizer(
 			bangumiClient,
@@ -138,19 +145,34 @@ func main() {
 			enqueuer,
 			anime.NormalizeMainRow,
 		),
-		// Queues: default for V1+V2+warm_season, bangumi_v3 for V3 only.
-		// The dedicated V3 queue is what makes the admin /heal-cn/pause
-		// endpoint isolate the heal-CN workload — pausing the default
-		// queue would also freeze enrichment and seasonal warming.
-		// MaxWorkers=1 on both queues matches the conservative serial
-		// throttle the V1/V2/V3 workers use to respect Bangumi's
-		// 800ms-per-request budget (only one worker per queue).
+		// Queues: default for V1+V2+warm_season+orphan_scan, bangumi_v3
+		// for V3 only, description_backfill for the Chinese-description
+		// sweep.  The dedicated V3 queue is what makes the admin
+		// /heal-cn/pause endpoint isolate the heal-CN workload — pausing
+		// the default queue would also freeze enrichment and seasonal
+		// warming.  MaxWorkers=1 across the board matches the
+		// conservative serial throttle the workers use to respect
+		// Bangumi's 800ms-per-request budget (only one worker per queue).
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault:       {MaxWorkers: 1},
 			queue.BangumiV3QueueName: {MaxWorkers: 1},
+			// Chinese-description backfill: MaxWorkers MUST stay 1.
+			// This is a long-running sweep over ~17k existing rows, and
+			// its only cost is Bangumi API time — which is metered by a
+			// token bucket on the single shared *bangumi.Client above.
+			// Extra workers would therefore not drain the backlog any
+			// faster; they would just queue up on the same bucket while
+			// stealing dispatch slots from on-demand enrichment.  The
+			// separate queue is for isolation and pausability, not for
+			// parallelism.
+			queue.DescriptionBackfillQueueName: {MaxWorkers: 1},
 		},
-		PeriodicJobs: []*river.PeriodicJob{queue.PeriodicWarmSeasonJob(), queue.PeriodicOrphanScanJob()},
-		Logger:       slog.Default(),
+		PeriodicJobs: []*river.PeriodicJob{
+			queue.PeriodicWarmSeasonJob(),
+			queue.PeriodicOrphanScanJob(),
+			queue.PeriodicDescriptionBackfillScanJob(),
+		},
+		Logger: slog.Default(),
 	})
 	if err != nil {
 		slog.Error("river queue boot failed", "err", err)
@@ -170,7 +192,7 @@ func main() {
 			slog.Warn("river queue stop", "err", err)
 		}
 	}()
-	slog.Info("river queue ready", "workers", "v1+v2+v3+warm_season+orphan_scan")
+	slog.Info("river queue ready", "workers", "v1+v2+v3+warm_season+orphan_scan+description_backfill")
 
 	// Boot-time warm: enqueue current + next season immediately so the
 	// dispatch loop has something to chew on as soon as it starts.
@@ -324,33 +346,152 @@ func main() {
 		// via in-memory Map sizes in bangumi.service.js; river persists
 		// the state in river_job, so a one-shot aggregate replaces the
 		// counter bookkeeping the in-memory model needed.  Soft-fail —
-		// if the query errors we still return the paused flag.
+		// if the query errors the other snapshot fields still render.
+		//
+		// T3 widened this from `GROUP BY kind` to `GROUP BY kind, state`.
+		// Phase1/Phase4/V3 keep their exact previous meaning:  ONE number
+		// per kind that sums every live state, i.e. "how much work is
+		// outstanding".  The description backfill is bucketed by state
+		// instead, and that split is the whole point of this change:
+		//
+		//   retryable does NOT mean "queued".  It means "this job already
+		//   FAILED and is sitting in backoff waiting for another try".
+		//   Folded into the queued number, a bgm.tv outage looks perfectly
+		//   healthy — the depth stays comfortably non-zero and nothing on
+		//   the dashboard can tell a real backlog apart from a retry storm.
+		//   Split out, `retrying` climbing while `queued` stalls reads
+		//   immediately as upstream breakage, and `discarded` climbing
+		//   reads as rows we have permanently given up on.
+		//
+		// 'discarded' is deliberately added to the state filter — it was
+		// NOT in the historical whitelist.  It must never reach the
+		// Phase1/Phase4/V3 sums (those are outstanding-work gauges and a
+		// discarded job is finished, badly, not outstanding), so the loop
+		// below drops every terminal state before touching them.
+		//
+		// Reproduce by hand:
+		//   SELECT kind, state, count(*) FROM river_job
+		//   WHERE state IN ('available','running','pending','retryable',
+		//                   'scheduled','discarded')
+		//   GROUP BY kind, state ORDER BY kind, state;
 		rows, err := pool.Query(ctx, `
-			SELECT kind, count(*)::bigint
+			SELECT kind, state::text, count(*)::bigint
 			FROM river_job
-			WHERE state IN ('available','running','pending','retryable','scheduled')
-			GROUP BY kind
+			WHERE state IN ('available','running','pending','retryable','scheduled','discarded')
+			GROUP BY kind, state
 		`)
 		if err != nil {
 			slog.WarnContext(ctx, "admin: queue depth query failed", "err", err)
-			return snap, nil
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var kind string
-			var cnt int64
-			if err := rows.Scan(&kind, &cnt); err != nil {
-				continue
+		} else {
+			// Accumulate into a scratch value, publish into snap only once
+			// the whole result set has been read without error.  A mid-stream
+			// failure (connection dropped, decode error) makes rows.Next()
+			// return false exactly like a clean end-of-results, so writing
+			// straight into snap would leave a TRUNCATED aggregate on the
+			// dashboard — and truncation only ever shows LESS work than there
+			// is, i.e. it reads as "healthy".  This whole panel exists so a
+			// failure cannot look like health; half a row set is a failure.
+			var depths queueDepths
+			for rows.Next() {
+				var kind, state string
+				var cnt int64
+				// A Scan error is fatal to the pgx Rows — it stores the error
+				// and closes, so Next() returns false on the following
+				// iteration and rows.Err() below reports it.  Breaking here
+				// rather than continuing just makes that explicit.
+				if err := rows.Scan(&kind, &state, &cnt); err != nil {
+					break
+				}
+				depths.add(kind, state, cnt)
 			}
-			switch kind {
-			case "bangumi_v1":
-				snap.Phase1 = cnt
-			case "bangumi_v2":
-				snap.Phase4 = cnt
-			case "bangumi_v3":
-				snap.V3 = cnt
+			// Close before Err: pgx populates rows.err during Close (it is
+			// where the result reader's own error surfaces), and Close is
+			// idempotent — Next() already called it on clean exhaustion.
+			// Closing here rather than deferring also hands the pooled
+			// connection back before the two heartbeat round-trips below.
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				slog.WarnContext(ctx, "admin: queue depth query truncated; emitting zero counters", "err", err)
+			} else {
+				depths.publish(&snap)
 			}
 		}
+
+		// T4 — the two halves of "is the description sweep alive".
+		//
+		// One heartbeat is not enough:  a sweep with an empty backlog and a
+		// sweep whose worker died both write nothing, so "last write" alone
+		// cannot tell them apart.  Hence a liveness signal (did the scan
+		// run?) plus an activity signal (did it change anything?).
+		//
+		// Each query soft-fails independently:  a failure logs a warning,
+		// leaves its own field nil, and does not touch the other field or
+		// the queue depths above.
+
+		// LastScanAt — the real "is it still running" signal.  The periodic
+		// description_backfill_scan finalises every hour whether or not it
+		// finds candidates, so this advances even when there is no work.
+		//
+		// NOTE ON RETENTION:  river prunes completed jobs after a retention
+		// window (24h by default), so an empty result does NOT mean "never
+		// ran" in the historical sense — it means "no scan has completed in
+		// at least the retention window".  That is precisely the state worth
+		// alerting on, and it is not an error.  nil is a value here.
+		//
+		// Reproduce by hand:
+		//   SELECT max(finalized_at) FROM river_job
+		//   WHERE kind = 'description_backfill_scan' AND state = 'completed';
+		{
+			var lastScan *time.Time
+			if err := pool.QueryRow(ctx, `
+				SELECT max(finalized_at)
+				FROM river_job
+				WHERE kind = 'description_backfill_scan'
+				  AND state = 'completed'
+			`).Scan(&lastScan); err != nil {
+				slog.WarnContext(ctx, "admin: description backfill last-scan query failed", "err", err)
+			} else {
+				snap.DescriptionBackfill.LastScanAt = lastScan
+			}
+		}
+
+		// LastWriteAt — "did it recently do any actual work".  Every
+		// attempted row gets description_cn_attempted_at stamped, hit or
+		// miss (DescriptionBackfillWorker.markAttempted, both branches),
+		// and the sweep is the ONLY caller of MarkDescriptionCnAttempted —
+		// live V2/V3 enrichment writes description_cn without stamping.
+		// So this is the sweep's own write heartbeat and cannot be kept
+		// artificially fresh by unrelated enrichment traffic.
+		//
+		// It legitimately FREEZES once the backlog is drained — a stale
+		// value here with a fresh LastScanAt means "nothing left to do",
+		// which is healthy.  Never read this one as liveness on its own;
+		// pair it with descriptionCn.pending (see lib/backfillStatus.ts).
+		//
+		// COST:  this is a seq scan, not an index probe.  The 0015 index
+		// (idx_anime_cache_description_cn_pending) is PARTIAL —
+		// `WHERE description_cn IS NULL AND bgm_id IS NOT NULL` — so an
+		// unqualified max() cannot use it, and adding that predicate to
+		// match would be wrong, not merely narrower: it would exclude every
+		// row the sweep SUCCEEDED on, leaving a "last write" that only ever
+		// moves on rejections.  A sweep writing nothing but hits would show
+		// a frozen heartbeat.  ~17k wide rows is a few tens of ms from
+		// shared buffers; if that stops being acceptable the fix is a plain
+		// btree on description_cn_attempted_at, not a narrower query.
+		//
+		// Reproduce by hand:
+		//   SELECT max(description_cn_attempted_at) FROM anime_cache;
+		{
+			var lastWrite *time.Time
+			if err := pool.QueryRow(ctx, `
+				SELECT max(description_cn_attempted_at) FROM anime_cache
+			`).Scan(&lastWrite); err != nil {
+				slog.WarnContext(ctx, "admin: description backfill last-write query failed", "err", err)
+			} else {
+				snap.DescriptionBackfill.LastWriteAt = lastWrite
+			}
+		}
+
 		return snap, nil
 	}
 	adminReadHandlers := admin.NewHandlers(pool, q, queueStatusFn, nil)
@@ -586,6 +727,88 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("server stopped")
+}
+
+// queueDepths accumulates the `GROUP BY kind, state` aggregate over
+// river_job that backs the /api/admin/stats `queue` object.
+//
+// Package-level (rather than six locals inside queueStatusFn's closure)
+// for one reason: the bucketing rules below are the part of the admin
+// panel that must not lie, and a closure inside main() cannot be tested.
+// See main_test.go — every case there is a way the old single-number
+// gauge would have reported a broken sweep as a healthy one.
+type queueDepths struct {
+	phase1, phase4, v3                int64
+	bfQueued, bfRetrying, bfDiscarded int64
+}
+
+// add folds one aggregate row into the accumulator.
+//
+// Two different models live here on purpose:
+//
+//	description_backfill — split by river state.  `retryable` does NOT
+//	mean queued; it means the job already FAILED and is in backoff.
+//	Folded into the queued number a bgm.tv outage looks perfectly
+//	healthy, because the depth stays non-zero and nothing distinguishes
+//	a real backlog from a retry storm.  `discarded` means retries are
+//	exhausted — rows nobody will pick up again without a manual
+//	re-enqueue, which a depth gauge can never surface.
+//
+//	bangumi_v1/v2/v3 — one "outstanding work" number per kind, exactly
+//	as before this change.  Terminal states are dropped by name rather
+//	than left to the SQL WHERE clause, because that clause is what just
+//	changed: 'discarded' had to be added to it for the split above, and
+//	without this guard it would have quietly inflated the legacy gauges
+//	with dead work.  All three terminal states are listed, not just the
+//	one currently selected, so widening the filter again stays safe.
+//
+// Unknown kinds (description_backfill_scan, warm_season, orphan_scan)
+// are counted nowhere — deliberate: the scan job's health is reported by
+// the LastScanAt heartbeat, not by a depth number.
+func (d *queueDepths) add(kind, state string, cnt int64) {
+	if kind == "description_backfill" {
+		// `default` rather than an explicit available/running/pending/
+		// scheduled list, on purpose.  If somebody widens the WHERE clause
+		// with a new LIVE state, default folds it into queued (over-reports
+		// work — loud, someone investigates); an explicit list would
+		// silently drop it (under-reports — reads as healthy, nobody
+		// looks).  When in doubt this panel errs toward looking worse.
+		switch state {
+		case "retryable":
+			d.bfRetrying += cnt
+		case "discarded":
+			d.bfDiscarded += cnt
+		default: // available / running / pending / scheduled
+			d.bfQueued += cnt
+		}
+		return
+	}
+	switch state {
+	case "discarded", "cancelled", "completed":
+		return
+	}
+	switch kind {
+	case "bangumi_v1":
+		d.phase1 += cnt
+	case "bangumi_v2":
+		d.phase4 += cnt
+	case "bangumi_v3":
+		d.v3 += cnt
+	}
+}
+
+// publish copies the accumulated depths onto the snapshot.
+//
+// Separate from add so the caller can withhold a partially-read result
+// set: an aggregate truncated by a mid-stream error under-reports, and
+// under-reporting is precisely the failure that reads as health.
+func (d *queueDepths) publish(snap *admin.QueueSnapshot) {
+	snap.Phase1 = d.phase1
+	snap.Phase4 = d.phase4
+	snap.V3 = d.v3
+	snap.DescriptionBackfill.Queued = d.bfQueued
+	snap.DescriptionBackfill.Retrying = d.bfRetrying
+	snap.DescriptionBackfill.Discarded = d.bfDiscarded
 }
 
 // healthHandler reports liveness + DB reachability via the httpx envelope.

@@ -58,15 +58,24 @@ type QueueStatusFn func(ctx context.Context) (QueueSnapshot, error)
 // tests can substitute a fakeAdminQuerier without depending on the
 // full dbgen.Querier surface.
 //
-// Only two methods are needed for P2.3.2:
+// Only two methods were needed for P2.3.2:
 //   - GetAdminStats for the stats endpoint.
 //   - GetAdminUserSubFollowCounts for the listUsers batch counts step.
+//
+// P3 added a third:
+//   - GetDescriptionCnStats for the Chinese-description coverage block.
+//     Kept as its own method rather than more columns on GetAdminStats
+//     so the handler can soft-fail it independently — it is the only
+//     read here that goes through a view (description_cn_eligible,
+//     migration 0016) instead of a base table, so it is the only one
+//     that can fail while the rest of the payload is perfectly fine.
 //
 // Write endpoints in later phases will add to this surface (or the
 // caller will pass the full dbgen.Querier — the interface widens
 // without breaking existing callers).
 type adminQuerier interface {
 	GetAdminStats(ctx context.Context) (dbgen.GetAdminStatsRow, error)
+	GetDescriptionCnStats(ctx context.Context) (dbgen.GetDescriptionCnStatsRow, error)
 	GetAdminUserSubFollowCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]dbgen.GetAdminUserSubFollowCountsRow, error)
 }
 

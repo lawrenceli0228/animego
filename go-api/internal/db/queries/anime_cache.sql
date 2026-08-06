@@ -668,11 +668,53 @@ WHERE ac.anilist_id = sqlc.arg(anilist_id)
   -- the failure is a whole page describing a different show.
   AND ac.bgm_id = sqlc.arg(bgm_id)
   AND coalesce(ac.description_cn_source, '') <> 'manual'
-  AND (
-      ac.bgm_match_source = 'manual'
-      OR EXISTS (
-          SELECT 1 FROM bgm_id_map m
-          WHERE m.anilist_id = ac.anilist_id
-            AND m.bgm_id = ac.bgm_id
-      )
+  AND EXISTS (
+      SELECT 1 FROM description_cn_eligible e
+      WHERE e.anilist_id = ac.anilist_id
   );
+
+-- name: ListDescriptionCnCandidates :many
+-- Rows still missing a Chinese description that could actually receive one.
+--
+-- The trust gate is repeated here rather than left to UpdateDescriptionCn
+-- alone. Both need it, but for different reasons: the writer needs it for
+-- correctness, and this reader needs it so the sweep does not spend an
+-- upstream Bangumi request on a row whose write is guaranteed to affect zero
+-- rows. On the current catalogue that is ~3,200 rows — bindings we hold but
+-- no independent source confirms — which would otherwise be fetched on every
+-- pass forever, since nothing about them ever changes.
+--
+-- Ordering by attempt time, not by id, is what lets the sweep finish. A row
+-- whose summary the language gate rejects stays description_cn IS NULL, so
+-- under ORDER BY anilist_id it would hold its place at the front of every
+-- batch and the sweep would converge to p·B/(1−p) lifetime writes — about 450
+-- rows out of ~9,100. Attempt time puts a processed row behind everything not
+-- yet tried, whether or not it produced text. See migration 0015.
+--
+-- The cooldown then doubles as a retry: Bangumi summaries are community
+-- written over time, so a subject that is Japanese-only today may carry Chinese
+-- prose next quarter, and re-reaching it is how that gets picked up.
+SELECT ac.anilist_id, ac.bgm_id
+FROM description_cn_eligible ac
+WHERE ac.description_cn IS NULL
+  AND (
+      ac.description_cn_attempted_at IS NULL
+      OR ac.description_cn_attempted_at < now() - sqlc.arg(retry_after)::interval
+  )
+ORDER BY ac.description_cn_attempted_at NULLS FIRST, ac.anilist_id
+LIMIT sqlc.arg(row_limit);
+
+-- name: MarkDescriptionCnAttempted :exec
+-- Stamp a row as tried, regardless of whether it yielded usable Chinese.
+--
+-- Called for every outcome the upstream actually answered — text stored,
+-- summary rejected by the language gate, subject absent from Bangumi — but NOT
+-- for network failures, which river should retry rather than have the sweep
+-- treat as a decided outcome.
+--
+-- This is the counterpart to the ordering in ListDescriptionCnCandidates: the
+-- stamp is what moves a row to the back of the queue and lets the sweep reach
+-- the rest of the backlog.
+UPDATE anime_cache
+SET description_cn_attempted_at = now()
+WHERE anilist_id = $1;

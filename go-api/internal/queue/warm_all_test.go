@@ -42,6 +42,9 @@ func (f *warmAllEnqueuer) EnqueueV2Many(_ context.Context, _ []BangumiV2Args) er
 func (f *warmAllEnqueuer) EnqueueV3Many(_ context.Context, _ []BangumiV3Args) error {
 	return nil
 }
+func (f *warmAllEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []DescriptionBackfillArgs) error {
+	return nil
+}
 
 func (f *warmAllEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args WarmSeasonArgs) error {
 	f.mu.Lock()
@@ -296,6 +299,9 @@ func (c *cancellingEnqueuer) EnqueueV2Many(_ context.Context, _ []BangumiV2Args)
 	return nil
 }
 func (c *cancellingEnqueuer) EnqueueV3Many(_ context.Context, _ []BangumiV3Args) error {
+	return nil
+}
+func (c *cancellingEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []DescriptionBackfillArgs) error {
 	return nil
 }
 func (c *cancellingEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonArgs) error {
