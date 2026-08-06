@@ -45,6 +45,20 @@ import (
 // wiring phase can flip on without touching call sites.
 const BangumiV3QueueName = "bangumi_v3"
 
+// DescriptionBackfillQueueName isolates the Chinese-description sweep from
+// live enrichment.
+//
+// The sweep has thousands of rows to get through and no deadline, while V1/V2
+// run in response to somebody loading a page. Sharing a queue would let the
+// backlog sit in front of that work. Separate queues also make the sweep
+// independently pausable, which matters because it is the one job here that
+// can be safely stopped for a week without anybody noticing.
+//
+// Note this does NOT double the upstream request rate: the Bangumi rate
+// limiter is a token bucket on the shared *bangumi.Client, so all queues draw
+// from the same allowance and simply divide it.
+const DescriptionBackfillQueueName = "description_backfill"
+
 // Stats is the response shape for Status — the admin endpoint
 // marshals this to JSON.  Mirrors the relevant subset of Express
 // getQueueStatus() (which also reported in-memory queue depths from

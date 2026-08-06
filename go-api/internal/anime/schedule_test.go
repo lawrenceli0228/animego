@@ -105,6 +105,14 @@ func (e *scheduleFakeEnqueuer) EnqueueV3Many(_ context.Context, _ []queue.Bangum
 	return nil
 }
 
+// EnqueueDescriptionBackfillMany is a no-op stub.  /schedule never
+// dispatches description-backfill jobs — those come only from the
+// periodic description_backfill_scan worker.  Stub is needed only to
+// satisfy the queue.Enqueuer interface that grew the method in P3.
+func (e *scheduleFakeEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []queue.DescriptionBackfillArgs) error {
+	return nil
+}
+
 // EnqueueWarmSeasonNow is a no-op stub.  /schedule never dispatches
 // warm-season jobs — those are seeded by main.go at boot time.  Stub
 // is needed only to satisfy the queue.Enqueuer interface that grew

@@ -126,10 +126,17 @@ func main() {
 	enqueuer := &queue.LateBoundEnqueuer{}
 
 	// River queue boot: real V1+V2+V3 (Bangumi enrichment trilogy) +
-	// real WarmSeason worker.  WorkersWithBangumiAndNormalizer takes
-	// the AniList client (for warm_season's Seasonal calls) + an
-	// injected normalizer (anime.NormalizeMainRow — avoids the
-	// queue→anime import cycle).  Boot returns the client unstarted.
+	// real WarmSeason worker + the description-backfill sweep.
+	// WorkersWithBangumiAndNormalizer takes the AniList client (for
+	// warm_season's Seasonal calls) + an injected normalizer
+	// (anime.NormalizeMainRow — avoids the queue→anime import cycle).
+	// Boot returns the client unstarted.
+	//
+	// bangumiClient is passed by value-of-pointer to every worker,
+	// including the backfill one — deliberately.  Its rate limiter is
+	// an in-process token bucket, so the backfill only stays inside the
+	// bgm.tv budget while it draws from this same instance.  A standalone
+	// backfill CLI would open a second bucket and double the real rate.
 	riverClient, err := queue.Boot(pool, queue.Config{
 		Workers: queue.WorkersWithBangumiAndNormalizer(
 			bangumiClient,
@@ -138,19 +145,34 @@ func main() {
 			enqueuer,
 			anime.NormalizeMainRow,
 		),
-		// Queues: default for V1+V2+warm_season, bangumi_v3 for V3 only.
-		// The dedicated V3 queue is what makes the admin /heal-cn/pause
-		// endpoint isolate the heal-CN workload — pausing the default
-		// queue would also freeze enrichment and seasonal warming.
-		// MaxWorkers=1 on both queues matches the conservative serial
-		// throttle the V1/V2/V3 workers use to respect Bangumi's
-		// 800ms-per-request budget (only one worker per queue).
+		// Queues: default for V1+V2+warm_season+orphan_scan, bangumi_v3
+		// for V3 only, description_backfill for the Chinese-description
+		// sweep.  The dedicated V3 queue is what makes the admin
+		// /heal-cn/pause endpoint isolate the heal-CN workload — pausing
+		// the default queue would also freeze enrichment and seasonal
+		// warming.  MaxWorkers=1 across the board matches the
+		// conservative serial throttle the workers use to respect
+		// Bangumi's 800ms-per-request budget (only one worker per queue).
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault:       {MaxWorkers: 1},
 			queue.BangumiV3QueueName: {MaxWorkers: 1},
+			// Chinese-description backfill: MaxWorkers MUST stay 1.
+			// This is a long-running sweep over ~17k existing rows, and
+			// its only cost is Bangumi API time — which is metered by a
+			// token bucket on the single shared *bangumi.Client above.
+			// Extra workers would therefore not drain the backlog any
+			// faster; they would just queue up on the same bucket while
+			// stealing dispatch slots from on-demand enrichment.  The
+			// separate queue is for isolation and pausability, not for
+			// parallelism.
+			queue.DescriptionBackfillQueueName: {MaxWorkers: 1},
 		},
-		PeriodicJobs: []*river.PeriodicJob{queue.PeriodicWarmSeasonJob(), queue.PeriodicOrphanScanJob()},
-		Logger:       slog.Default(),
+		PeriodicJobs: []*river.PeriodicJob{
+			queue.PeriodicWarmSeasonJob(),
+			queue.PeriodicOrphanScanJob(),
+			queue.PeriodicDescriptionBackfillScanJob(),
+		},
+		Logger: slog.Default(),
 	})
 	if err != nil {
 		slog.Error("river queue boot failed", "err", err)
@@ -170,7 +192,7 @@ func main() {
 			slog.Warn("river queue stop", "err", err)
 		}
 	}()
-	slog.Info("river queue ready", "workers", "v1+v2+v3+warm_season+orphan_scan")
+	slog.Info("river queue ready", "workers", "v1+v2+v3+warm_season+orphan_scan+description_backfill")
 
 	// Boot-time warm: enqueue current + next season immediately so the
 	// dispatch loop has something to chew on as soon as it starts.

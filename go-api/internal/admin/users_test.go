@@ -115,6 +115,13 @@ func (fakeEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ queue.WarmSeasonAr
 	return nil
 }
 
+// EnqueueDescriptionBackfillMany satisfies the method queue.Enqueuer
+// grew in P3.  Like the rest of this fake it is never exercised by the
+// user-CRUD endpoints.
+func (fakeEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []queue.DescriptionBackfillArgs) error {
+	return nil
+}
+
 // fixtureCreateRow builds a dbgen.AdminCreateUserRow with the supplied
 // inputs.  Used by happy-path tests that need a stable RETURNING row.
 func fixtureCreateRow(t *testing.T, username, email string) dbgen.AdminCreateUserRow {

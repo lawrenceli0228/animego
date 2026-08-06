@@ -83,22 +83,32 @@ type BangumiV12Client interface {
 }
 
 // V12DB merges the sqlc subsets V1 + V2 + V3 + WarmSeason + OrphanScan
-// workers need.  dbgen.Querier satisfies it; tests can supply a single
-// fake that covers all surfaces without having to split.  The name keeps
-// "V12" for historical reasons even though V3, WarmSeason, and OrphanScan
-// are now members — renaming would churn callers for no observable benefit
-// (this type doesn't leak into the API).
+// + DescriptionBackfill workers need.  dbgen.Querier satisfies it; tests
+// can supply a single fake that covers all surfaces without having to
+// split.  The name keeps "V12" for historical reasons even though V3,
+// WarmSeason, OrphanScan, and the description sweep are now members —
+// renaming would churn callers for no observable benefit (this type
+// doesn't leak into the API).
 type V12DB interface {
 	V1DB
 	V2DB
 	V3DB
 	WarmSeasonDB
 	OrphanReader
+	// DescriptionBackfillReader is the sweep's candidate query.
+	// DescriptionBackfillWriter is listed separately because only part of
+	// it overlaps V2Writer: UpdateDescriptionCn is shared (V2/V3 harvest
+	// the description from the same Subject payload they read score and
+	// name_cn out of), but MarkDescriptionCnAttempted belongs to the sweep
+	// alone — the online workers have no reason to record an attempt.
+	DescriptionBackfillReader
+	DescriptionBackfillWriter
 }
 
-// WorkersWithBangumi returns a *river.Workers bundle with all four
-// REAL workers (V1 + V2 + V3 + WarmSeason) wired against the provided
-// bangumi + anilist clients + DB + enqueuer.
+// WorkersWithBangumi returns a *river.Workers bundle with every REAL
+// worker (V1 + V2 + V3 + WarmSeason + OrphanScan + the two
+// description-backfill workers) wired against the provided bangumi +
+// anilist clients + DB + enqueuer.
 //
 // This 4-arg form wires the WarmSeasonWorker with a stub MainRowNormalizer
 // (id-only) — it exists for the smoke-test path where the AniList stub
@@ -109,9 +119,11 @@ type V12DB interface {
 // enq is consumed by V1Worker (chains V2 after a Bangumi search hit),
 // V2Worker (chains V3 after a V2 update with no Chinese title), AND
 // WarmSeasonWorker (chains V1 for bangumi_version=0 rows after the
-// seasonal upsert).  Pass NoopEnqueuer{} (or nil — each worker
-// substitutes Noop when nil) in tests that don't want the chains.
-// V3 is terminal — does not consume the enqueuer.
+// seasonal upsert), AND DescriptionBackfillScanWorker (enqueues one
+// backfill job per candidate row it finds).  Pass NoopEnqueuer{} (or
+// nil — each worker substitutes Noop when nil) in tests that don't
+// want the chains.  V3 and DescriptionBackfillWorker are terminal —
+// they do not consume the enqueuer.
 //
 // Tests that only need the dispatch loop (without injecting a
 // bangumi mock) can still use Workers() — that bundle now contains
@@ -148,6 +160,20 @@ func WorkersWithBangumiAndNormalizer(
 	river.AddWorker(w, NewBangumiV3Worker(bangumiClient, db))
 	river.AddWorker(w, NewWarmSeasonWorkerWithNormalizer(anilistClient, db, enq, normalize))
 	river.AddWorker(w, NewOrphanScanWorker(db, enq))
+	// Chinese-description sweep — a scan worker that finds rows still
+	// missing description_cn and one worker that fills them in.  Both
+	// ride the dedicated DescriptionBackfillQueueName queue (see their
+	// InsertOpts), so registering them here does NOT let the backlog
+	// compete with V1/V2 for default-queue slots.
+	//
+	// The sweep worker takes the same bangumi client every other worker
+	// holds, on purpose: the Bangumi throttle is a token bucket living
+	// on that *bangumi.Client instance, so sharing it is what keeps a
+	// 17k-row backfill inside the same request budget as live
+	// enrichment.  A second client — or a separate CLI process — would
+	// silently double the real rate against bgm.tv.
+	river.AddWorker(w, NewDescriptionBackfillScanWorker(db, enq))
+	river.AddWorker(w, NewDescriptionBackfillWorker(bangumiClient, db))
 	return w
 }
 

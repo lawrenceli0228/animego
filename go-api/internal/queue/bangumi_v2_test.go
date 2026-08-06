@@ -280,6 +280,13 @@ func (f *fakeV2Enqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonArg
 	return nil
 }
 
+// EnqueueDescriptionBackfillMany — V2 harvests description_cn inline from
+// the Subject payload it already holds, so it never enqueues sweep jobs.
+// No-op to satisfy the Enqueuer interface.
+func (f *fakeV2Enqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []DescriptionBackfillArgs) error {
+	return nil
+}
+
 func (f *fakeV2Enqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
 	dup := make([]BangumiV3Args, len(jobs))
 	copy(dup, jobs)

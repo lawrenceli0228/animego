@@ -396,6 +396,27 @@ type Querier interface {
 	// order is what the player expects so the bullet-screen overlay can
 	// replay danmakus in send order.
 	ListDanmakuRecent(ctx context.Context, anilistID int32, episode int32) ([]ListDanmakuRecentRow, error)
+	// Rows still missing a Chinese description that could actually receive one.
+	//
+	// The trust gate is repeated here rather than left to UpdateDescriptionCn
+	// alone. Both need it, but for different reasons: the writer needs it for
+	// correctness, and this reader needs it so the sweep does not spend an
+	// upstream Bangumi request on a row whose write is guaranteed to affect zero
+	// rows. On the current catalogue that is ~3,200 rows — bindings we hold but
+	// no independent source confirms — which would otherwise be fetched on every
+	// pass forever, since nothing about them ever changes.
+	//
+	// Ordering by attempt time, not by id, is what lets the sweep finish. A row
+	// whose summary the language gate rejects stays description_cn IS NULL, so
+	// under ORDER BY anilist_id it would hold its place at the front of every
+	// batch and the sweep would converge to p·B/(1−p) lifetime writes — about 450
+	// rows out of ~9,100. Attempt time puts a processed row behind everything not
+	// yet tried, whether or not it produced text. See migration 0015.
+	//
+	// The cooldown then doubles as a retry: Bangumi summaries are community
+	// written over time, so a subject that is Japanese-only today may carry Chinese
+	// prose next quarter, and re-reaching it is how that gets picked up.
+	ListDescriptionCnCandidates(ctx context.Context, retryAfter pgtype.Interval, rowLimit int32) ([]ListDescriptionCnCandidatesRow, error)
 	// For re-enrich v=2:  rows that have a bgm_id can be V3-healed.
 	// Returns the queue-payload fields directly.
 	ListEnrichedV2WithBgm(ctx context.Context) ([]ListEnrichedV2WithBgmRow, error)
@@ -507,6 +528,17 @@ type Querier interface {
 	// scan (version=0) and re-enrich stop re-processing this row. Guarded
 	// on bangumi_version=0 so we never clobber a row another worker advanced.
 	MarkBangumiV1NotFound(ctx context.Context, anilistID int32) error
+	// Stamp a row as tried, regardless of whether it yielded usable Chinese.
+	//
+	// Called for every outcome the upstream actually answered — text stored,
+	// summary rejected by the language gate, subject absent from Bangumi — but NOT
+	// for network failures, which river should retry rather than have the sweep
+	// treat as a decided outcome.
+	//
+	// This is the counterpart to the ordering in ListDescriptionCnCandidates: the
+	// stamp is what moves a row to the back of the queue and lets the sweep reach
+	// the rest of the backlog.
+	MarkDescriptionCnAttempted(ctx context.Context, anilistID int32) error
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error

@@ -54,6 +54,14 @@ func (c *channelEnqueuer) EnqueueV3Many(_ context.Context, _ []queue.BangumiV3Ar
 	return nil
 }
 
+// EnqueueDescriptionBackfillMany is a no-op stub.  WarmAll never seeds
+// the description sweep — only the periodic description_backfill_scan
+// worker does.  Present solely to satisfy queue.Enqueuer, which grew
+// the method in P3.
+func (c *channelEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []queue.DescriptionBackfillArgs) error {
+	return nil
+}
+
 func (c *channelEnqueuer) EnqueueWarmSeasonNow(_ context.Context, args queue.WarmSeasonArgs) error {
 	c.mu.Lock()
 	idx := len(c.called)

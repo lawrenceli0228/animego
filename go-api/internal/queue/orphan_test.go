@@ -92,6 +92,13 @@ func (f *fakeEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonArgs)
 	return nil
 }
 
+// EnqueueDescriptionBackfillMany is a no-op stub — the orphan scan only
+// dispatches V1 jobs; the description sweep has its own scan worker.
+// Satisfies the Enqueuer interface contract added in P3.
+func (f *fakeEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []DescriptionBackfillArgs) error {
+	return nil
+}
+
 func (f *fakeEnqueuer) snapshotCalls() [][]int32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
