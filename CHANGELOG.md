@@ -2,6 +2,26 @@
 
 ---
 
+## [3.5.1] - 2026-08-06
+
+### 修复 — /seasonal 的分类筛选点了等于清空列表（静默失效两个月）
+
+在 `/seasonal` 点任何一个分类 chip 都是「0 部 / 暂无番剧」，而不筛选时有 98 部。prod 与本地行为一致，`?genre=Action` 稳定返回 0 张卡片。
+
+根因不在前端：**Go 的 `/seasonal` 端点从来没返回过 `genres` 字段**。前端 `applyFilters` 里 `a.genres?.includes(genre)` 拿到的永远是 `undefined`，可选链一路 falsy，于是筛选把整个列表滤空。
+
+这正是 `lib/types.ts:79-85` 两个月前写下的预言：
+
+> Go API 的 `/seasonal` 只返回 16 列主表，不 join genres 子表。老的 Express 端点会从 Mongo 富化缓存里带出 genres，seasonal 页的筛选依赖它。**Go 切换完成后，要么 seasonal handler 加个 genre join，要么这个字段保持可选、筛选静默失效。**
+
+老栈已于 2026-06-01 退役（`8ba923b`），落到的正是后一种。可选链让它没有报错、没有 500、没有任何日志——只是安静地永远返回空列表。
+
+- `GetSeasonalAnime` 加一列 `genres` 聚合子查询。**没有额外查询代价**：同一条 SQL 的 Hentai 排除条件本来就在查 `anime_genres`。
+- wire 由 sqlc 自动生成 `Genres []string \`json:"genres"\``，前端 `SeasonalAnime.genres` 已声明为可选、filter 逻辑一行没改，字段一到位就自愈。
+- 顺带更正三处已经过时的「16 列」注释，并补上一条冷启动语义：从未富化过的季度（AniList 现拉）子表还是空的，`genres` 会是空数组、筛选匹配不到；站点实际会列出的都是已富化季度，首次请求就带 genres。
+
+已在 prod 数据上直接验证该 SQL 返回正确分类数组。`go build` 与 `go test` 通过（两个 testcontainer 用例需 Docker daemon，本地未启动，由 CI 覆盖）。
+||||||| 8849f62
 ## [3.5.0] - 2026-08-06
 
 ### 新增 — 内容枚举汉化（词典层）

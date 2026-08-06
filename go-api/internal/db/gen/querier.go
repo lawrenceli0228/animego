@@ -262,6 +262,14 @@ type Querier interface {
 	// and replaces the warmed-cache branch of anime.controller.js:113-127 +
 	// the cached fallback in anilist.service.js getSeasonalAnime ②③.
 	// Hentai filter is preserved verbatim — Express skipped via $nin.
+	//
+	// `genres` is aggregated per row because the /seasonal page filters on it
+	// client-side.  The old Express endpoint surfaced genres from the Mongo
+	// enrichment cache; when the Go cutover landed this column was not carried
+	// over, so `SeasonalAnime.genres` arrived undefined and every genre chip
+	// silently matched nothing (lib/types.ts called this exact failure out as a
+	// risk of the cutover).  The subquery costs nothing extra in practice: the
+	// Hentai exclusion below already forces the same anime_genres lookup.
 	GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error)
 	// /api/subscriptions/:anilistId — single subscription read.
 	// pgx.ErrNoRows → 404 "Subscription not found".
