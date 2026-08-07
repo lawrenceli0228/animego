@@ -96,11 +96,12 @@ import (
 // right shape for work that has no deadline and shares a rate limit with
 // requests a user is waiting on.
 //
-// Against the ~9,100 rows currently waiting, 300/hour reads like ~31 passes to
-// walk the catalogue once.  It is not: see KNOWN LIMITATION in the file
-// header.  Until the candidate query can exclude rows it has already tried,
-// this constant caps total coverage at p*B/(1-p) ≈ 450 rows no matter how long
-// the sweep runs, and raising it is not the fix.
+// Against the ~9,100 rows waiting at first deploy, 300/hour is ~31 passes to
+// walk the catalogue once, and that reading is now accurate: attempt stamping
+// (migration 0015, and "Why the sweep can finish" above) retires a row whatever
+// the outcome, so a pass advances a full 300 rather than only the ones that
+// converted.  ~31 hours also lands well inside descriptionBackfillRetryDays, so
+// the first walk finishes before any row is due for a re-check.
 const descriptionBackfillScanBatchSize int32 = 300
 
 // descriptionBackfillWorkTimeout bounds one subject fetch plus one UPDATE.
