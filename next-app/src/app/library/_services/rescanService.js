@@ -21,6 +21,22 @@ import { enumerate as enumerateTree } from "@/lib/library/enumerator.js";
 export const QUIET_PERIOD_MS = 60_000;
 
 /**
+ * How far into the future an mtime may sit and still count as "being written".
+ * Future mtimes have two real-world sources: (a) network mounts (SMB/NAS)
+ * whose server clock runs a minute or two fast — an in-progress write there
+ * carries a slightly-future mtime and must keep quiet-period protection; (b)
+ * finished files that preserved a bogus timestamp (metadata written by the
+ * download tool or a copy). Without this bound a future mtime makes
+ * `now - mtime` negative — forever below QUIET_PERIOD_MS — so the file is
+ * deferred on every scan and never enters the library. Beyond the skew we
+ * assume (b) and import immediately; the pathological case (far-future clock
+ * on a file still being written, hashed too early) self-heals: its size
+ * changes once the write completes, and the superseded path re-imports the
+ * relPath.
+ */
+export const FUTURE_SKEW_MS = 120_000;
+
+/**
  * @param {string} relPath
  * @param {number} size
  * @returns {string}
@@ -69,6 +85,9 @@ export async function buildBaseline(db) {
  *   - video, key unseen, same relPath known w/
  *     different size                               → newVideos + supersededCandidates
  *   - video, inside quiet period                   → deferredCount (retry next scan)
+ *   - video, mtime more than FUTURE_SKEW_MS in
+ *     the future                                   → newVideos (bad stored timestamp,
+ *     not a live write — see FUTURE_SKEW_MS)
  *   - video, key already in baseline               → skipped
  *   - subtitle                                     → subtitles (sidecars never gate
  *     newness; playback resolves subs from the folder at play time, so a
@@ -112,7 +131,8 @@ export async function diffScanRoot({ handle, baseline, now, enumerate }) {
     if (baseline.keys.has(baselineKey(entry.relPath, size))) continue;
 
     const mtime = entry.file?.lastModified ?? 0;
-    if (mtime > 0 && now - mtime < QUIET_PERIOD_MS) {
+    const age = now - mtime; // negative when the mtime sits in the future
+    if (mtime > 0 && age < QUIET_PERIOD_MS && age > -FUTURE_SKEW_MS) {
       deferredCount++;
       continue;
     }

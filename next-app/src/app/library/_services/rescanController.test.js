@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   createRescanController,
+  MAX_IMPORT_ATTEMPTS,
   MIN_SCAN_INTERVAL_MS,
+  PERIODIC_FALLBACK_MS,
   WATCH_MIN_INTERVAL_MS,
 } from "./rescanController.js";
 import { baselineKey } from "./rescanService.js";
@@ -280,29 +282,73 @@ describe("import flow", () => {
     expect(calls.complete[0].newCount).toBe(1);
   });
 
-  test("failed import lands in the session skip set; auto skips, manual clears (D7)", async () => {
-    const entry = video("bad/01.mkv", 50);
-    const { controller, calls, advance } = harness({
+  /**
+   * Harness where one key always fails: the diff reports it as new on every
+   * scan and the post-import verify baseline never contains it.
+   */
+  function failingKeyHarness() {
+    return harness({
       listRoots: async () => [root("lib1", 1)],
-      // Baseline never contains the key → the post-import verify marks it failed.
-      diffScanRoot: async () => ({ ...emptyDiff(), newVideos: [entry] }),
+      diffScanRoot: async () => ({
+        ...emptyDiff(),
+        newVideos: [video("bad/01.mkv", 50)],
+      }),
     });
+  }
 
-    // 1st auto scan: attempts the import, verify fails → key enters failedKeys.
+  test("one failed import is retried on the next scan, not yet given up (D7)", async () => {
+    const { controller, calls, advance } = failingKeyHarness();
+
+    // 1st auto scan: attempts the import, verify fails → strike one of three.
     const first = await controller.maybeScan({ trigger: "mount" });
     expect(first.newCount).toBe(0);
     expect(calls.imports).toHaveLength(1);
-    expect(controller.getState().failedKeyCount).toBe(1);
+    // failedCount / failedKeyCount mean "given up at the attempt cap", not
+    // "has ever failed" — a single strike still gets its self-heal window.
+    expect(first.failedCount).toBe(0);
+    expect(controller.getState().failedKeyCount).toBe(0);
 
-    // 2nd auto scan (past the throttle): failed key is filtered — no repeat
-    // 16MB hash / dandanplay call storm.
+    // 2nd auto scan (past the throttle): the key is retried, not skipped.
     advance(MIN_SCAN_INTERVAL_MS + 1000);
     await controller.maybeScan({ trigger: "visibility" });
-    expect(calls.imports).toHaveLength(1);
-
-    // Manual rescan clears the skip set and force-retries.
-    await controller.maybeScan({ trigger: "manual" });
     expect(calls.imports).toHaveLength(2);
+  });
+
+  test("a key failing MAX_IMPORT_ATTEMPTS times is dropped: no further hash/dandanplay rounds (D7)", async () => {
+    const { controller, calls, advance } = failingKeyHarness();
+
+    let last;
+    for (let i = 0; i < MAX_IMPORT_ATTEMPTS; i++) {
+      last = await controller.maybeScan({ trigger: "visibility" });
+      advance(MIN_SCAN_INTERVAL_MS + 1000);
+    }
+    expect(calls.imports).toHaveLength(MAX_IMPORT_ATTEMPTS);
+    // Exactly at the cap the key flips into the given-up bucket.
+    expect(last.failedCount).toBe(1);
+    expect(controller.getState().failedKeyCount).toBe(1);
+
+    // Next scan still runs, but the exhausted key never re-enters the
+    // pipeline — the repeat 16MB hash / dandanplay storm stops here.
+    const next = await controller.maybeScan({ trigger: "visibility" });
+    expect(next.outcome).toBe("scanned");
+    expect(calls.imports).toHaveLength(MAX_IMPORT_ATTEMPTS);
+  });
+
+  test("manual rescan clears exhausted keys and force-retries them (D7)", async () => {
+    const { controller, calls, advance } = failingKeyHarness();
+
+    for (let i = 0; i < MAX_IMPORT_ATTEMPTS; i++) {
+      await controller.maybeScan({ trigger: "visibility" });
+      advance(MIN_SCAN_INTERVAL_MS + 1000);
+    }
+    expect(calls.imports).toHaveLength(MAX_IMPORT_ATTEMPTS);
+    expect(controller.getState().failedKeyCount).toBe(1);
+
+    const manual = await controller.maybeScan({ trigger: "manual" });
+    expect(calls.imports).toHaveLength(MAX_IMPORT_ATTEMPTS + 1);
+    // clear() wiped the counters, so the fresh failure is strike one again.
+    expect(manual.failedCount).toBe(0);
+    expect(controller.getState().failedKeyCount).toBe(0);
   });
 
   test("deferred (quiet-period) files are reported but not imported", async () => {
@@ -340,6 +386,52 @@ describe("watch trigger and deferred retry", () => {
     expect((await controller.maybeScan({ trigger: "watch" })).outcome).toBe("throttled");
     advance(2000);
     expect((await controller.maybeScan({ trigger: "watch" })).outcome).toBe("scanned");
+  });
+
+  test("'periodic' fallback trigger rides the watch tier, not the 60s throttle", async () => {
+    // Sanity: periodic ticks are self-spaced far beyond even the coarse
+    // interval — the tight tier only matters when they interleave with
+    // other triggers' scans.
+    expect(PERIODIC_FALLBACK_MS).toBeGreaterThan(MIN_SCAN_INTERVAL_MS);
+    const { controller, advance } = timedHarness();
+    expect((await controller.maybeScan({ trigger: "periodic" })).outcome).toBe("scanned");
+    advance(WATCH_MIN_INTERVAL_MS - 1000);
+    expect((await controller.maybeScan({ trigger: "periodic" })).outcome).toBe("throttled");
+    advance(6000); // 15s since the last scan: past 10s, well under 60s
+    expect((await controller.maybeScan({ trigger: "periodic" })).outcome).toBe("scanned");
+  });
+
+  test("'deferred-retry' bounced by the host veto re-arms instead of dying", async () => {
+    const { controller, timers } = timedHarness({ shouldDefer: () => true });
+    const result = await controller.maybeScan({ trigger: "deferred-retry" });
+    expect(result.outcome).toBe("host-deferred");
+    expect(controller.getState().retryArmed).toBe(true);
+    expect(timers).toHaveLength(1);
+  });
+
+  test("'watch' bounced by a running manual import re-arms", async () => {
+    const { controller } = timedHarness({ getImportStatus: () => "running" });
+    const result = await controller.maybeScan({ trigger: "watch" });
+    expect(result.outcome).toBe("import-busy");
+    expect(controller.getState().retryArmed).toBe(true);
+  });
+
+  test("'watch' bounced by the throttle re-arms", async () => {
+    const { controller, advance } = timedHarness();
+    await controller.maybeScan({ trigger: "mount" });
+    advance(WATCH_MIN_INTERVAL_MS - 1000);
+    const result = await controller.maybeScan({ trigger: "watch" });
+    expect(result.outcome).toBe("throttled");
+    expect(controller.getState().retryArmed).toBe(true);
+  });
+
+  test("'mount' bounced by the throttle does NOT re-arm (natural follow-ups exist)", async () => {
+    const { controller, advance } = timedHarness();
+    await controller.maybeScan({ trigger: "mount" });
+    advance(1000);
+    const result = await controller.maybeScan({ trigger: "mount" });
+    expect(result.outcome).toBe("throttled");
+    expect(controller.getState().retryArmed).toBe(false);
   });
 
   test("quiet-period deferral arms exactly one retry, which rescans", async () => {

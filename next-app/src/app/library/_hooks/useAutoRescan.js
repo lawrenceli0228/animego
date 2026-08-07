@@ -3,10 +3,15 @@
 // Thin React wiring for the watch-folder reconciliation scan. ALL decision
 // logic (guard chain, throttle, ordering, failure policy) lives in the pure
 // controller (_services/rescanController.js) where bun:test can reach it —
-// this hook only owns the two DOM-bound triggers:
+// this hook only owns the DOM-bound triggers:
 //
 //   1. mount    — once, after useFileHandles finishes its read-only probe
 //   2. visible  — document visibilitychange back to 'visible'
+//   3. watch    — FileSystemObserver live events (Chrome/Edge 133+); when
+//                 the API is absent this DEGRADES to a periodic fallback
+//                 tick (PERIODIC_FALLBACK_MS, page-visible only) instead of
+//                 silently doing nothing — "sitting on the tab waiting for
+//                 a download" was otherwise only ever served by tab-return
 //
 // Permission contract: never calls requestPermission (no gesture here). The
 // controller re-probes every root on every scan, so a grant auto-revoked
@@ -17,7 +22,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { isFsaSupported } from "@/lib/library/handles/fsaFeatureCheck.js";
 import { probeRootStatus } from "@/lib/library/handles/probeRoot.js";
 import { makeFileHandleStore } from "@/lib/library/handles/fileHandleStore.js";
-import { createRescanController } from "../_services/rescanController.js";
+import {
+  createRescanController,
+  PERIODIC_FALLBACK_MS,
+} from "../_services/rescanController.js";
 import { createFolderWatcher } from "../_services/folderWatcher.js";
 import {
   buildBaseline,
@@ -67,6 +75,11 @@ export function useAutoRescan({
   const wantWatch = triggers.watch !== false;
   const [scanning, setScanning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  // Bumped by rearmWatch() so the watch effect re-runs and re-observes ALL
+  // ready roots. Without it a root added via "+ add folder" after mount is
+  // never observed — the effect is keyed on handlesStatus, which stays
+  // 'ready' across the addition.
+  const [watchEpoch, setWatchEpoch] = useState(0);
 
   // The controller is created once; latest React values flow in via refs so
   // its injected deps never go stale.
@@ -160,7 +173,19 @@ export function useAutoRescan({
       onRootError: () =>
         void Promise.resolve(latest.current.refreshHandles?.()).catch(() => {}),
     });
-    if (!watcher.supported) return;
+    if (!watcher.supported) {
+      // No FileSystemObserver (anything but Chrome/Edge 133+ desktop):
+      // fall back to a slow reconciliation tick so a file that finishes
+      // downloading while the user sits on this page still shows up within
+      // PERIODIC_FALLBACK_MS — previously only a tab-return would find it.
+      // Hidden tabs skip the scan (visibilitychange already fires one on
+      // return); everything else — throttle, dedupe, import-busy — is the
+      // controller's guard chain, same as every other trigger.
+      const timer = setInterval(() => {
+        if (document.visibilityState === "visible") void scan("periodic");
+      }, PERIODIC_FALLBACK_MS);
+      return () => clearInterval(timer);
+    }
 
     let cancelled = false;
     (async () => {
@@ -181,7 +206,7 @@ export function useAutoRescan({
       cancelled = true;
       watcher.disconnect();
     };
-  }, [enabled, wantWatch, handlesStatus, db, scan]);
+  }, [enabled, wantWatch, handlesStatus, watchEpoch, db, scan]);
 
   // The controller owns a deferred-retry timer; kill it with the host.
   useEffect(() => {
@@ -193,12 +218,20 @@ export function useAutoRescan({
   /** Gesture-path rescan from the overflow menu; bypasses the throttle. */
   const manualRescan = useCallback(() => scan("manual"), [scan]);
 
+  /**
+   * Re-arm folder observation after the root set changes (e.g. a
+   * successful "+ add folder"). Tears down and re-observes every 'ready'
+   * root via the watch effect; a no-op in fallback (no-observer) mode
+   * beyond restarting the periodic timer.
+   */
+  const rearmWatch = useCallback(() => setWatchEpoch((n) => n + 1), []);
+
   /** D2 preemption:手动导入前 cancel 在飞扫描并等其退出(有界)。 */
   const yieldToManual = useCallback(async () => {
     if (controllerRef.current) await controllerRef.current.yieldToManual();
   }, []);
 
-  return { scanning, lastResult, manualRescan, yieldToManual };
+  return { scanning, lastResult, manualRescan, yieldToManual, rearmWatch };
 }
 
 export default useAutoRescan;

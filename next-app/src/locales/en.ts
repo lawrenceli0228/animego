@@ -593,6 +593,10 @@ const en = {
       kicker: 'AUTO SCAN',
       title: '{{count}} new episodes found',
     },
+    watch: {
+      noObserverHint:
+        "This browser can't watch folders live — while this page is open, new files are checked for every 2 minutes.",
+    },
     persistHint:
       'Tip: choose "Allow on every visit" when re-authorizing, or install this site as an app — new downloads will then flow in automatically after a browser restart, no extra click needed.',
     access: {
