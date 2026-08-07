@@ -11,15 +11,26 @@
 // The manual menu path may reauthorize under a user gesture BEFORE calling
 // maybeScan — the controller itself must stay gesture-free.
 //
-//   trigger (mount / visibility / manual)
-//     │ guards: FSA ∧ !running ∧ import idle ∧ throttle
-//     ▼
-//   roots (lastSeenAt DESC, isSameEntry dedupe)
-//     │ per root: probe → diffScanRoot → filter failedKeys
-//     ▼
-//   markSuperseded → processFiles → runImport(root's persisted libraryId)
-//     ▼
-//   verify vs fresh baseline → newCount / failedKeys → onScanComplete
+//   trigger sources
+//     mount ──────────────────────────────┐
+//     visibility (tab return) ────────────┤
+//     manual (menu; clears failedKeys) ───┤
+//     watch (observer, 10s tier) ─────────┼─► guards: FSA ∧ !running ∧ import idle ∧ throttle
+//     deferred-retry (65s timer) ─────────┤      │
+//     periodic (120s, hook arms it only ──┘      ▼
+//       when observer unsupported)         roots (lastSeenAt DESC, isSameEntry dedupe)
+//                                                │ per root: probe → diffScanRoot
+//                                                │   → filter failedKeys (< 3 attempts)
+//                                                ▼
+//                                          markSuperseded → processFiles
+//                                                → runImport(root's persisted libraryId)
+//                                                ▼
+//                                          verify vs fresh baseline → attempts++ on miss
+//                                                → onScanComplete
+//
+//   bounce (watch/deferred-retry only): host-deferred / busy / import-busy /
+//     throttled → re-arm the 65s timer so the chain outlives the bounce
+//   quiet-period deferrals found → arm the 65s timer
 
 import { baselineKey, QUIET_PERIOD_MS } from "./rescanService.js";
 
@@ -29,9 +40,19 @@ export const MIN_SCAN_INTERVAL_MS = 60_000;
 /**
  * Tighter gap for event-driven triggers ('watch' from FileSystemObserver and
  * the internal 'deferred-retry') — these fire only when something actually
- * changed, so the coarse 60s throttle would defeat their purpose.
+ * changed, so the coarse 60s throttle would defeat their purpose. The
+ * 'periodic' fallback rides this tier too: its ticks are already self-spaced
+ * at PERIODIC_FALLBACK_MS, so the coarse throttle would add nothing.
  */
 export const WATCH_MIN_INTERVAL_MS = 10_000;
+
+/**
+ * Fallback cadence for browsers without FileSystemObserver: useAutoRescan
+ * arms an interval at this rate while the page is visible, and each tick
+ * calls maybeScan({trigger: "periodic"}). Nothing event-driven fires there,
+ * so this is what keeps a long-lived tab converging on disk state.
+ */
+export const PERIODIC_FALLBACK_MS = 120_000;
 
 /**
  * When a scan defers still-in-quiet-period files, retry once after the guard
@@ -47,6 +68,16 @@ export const DEFERRED_RETRY_DELAY_MS = QUIET_PERIOD_MS + 5_000;
  * runImport re-snapshots priorSeasons on entry).
  */
 export const YIELD_TIMEOUT_MS = 5_000;
+
+/**
+ * Per-session ceiling on verified import failures for a single entry key.
+ * A failed cluster leaves no row behind, so every retry re-reads the 16MB
+ * hash prefix and re-hits dandanplay from scratch. Three attempts give a
+ * transient failure (network blip, briefly-busy volume) two self-heal
+ * windows, while pinning the waste for a permanently bad file at two extra
+ * attempts per session. A manual rescan resets the counters.
+ */
+export const MAX_IMPORT_ATTEMPTS = 3;
 
 /**
  * @param {{
@@ -80,12 +111,20 @@ export function createRescanController(deps) {
   let lastResult = null;
   let retryTimer = null;
   let disposed = false;
-  /** Session-scoped skip set for import-failed entries (D7). */
-  const failedKeys = new Set();
+  /**
+   * Session-scoped attempt counts for import-failed entries (D7): entry key →
+   * verified-failure count. Keys at or past MAX_IMPORT_ATTEMPTS are skipped
+   * until a manual rescan clears the map. failedCount / failedKeyCount report
+   * only those given-up keys — the UI reads the number as "abandoned", not
+   * "has ever failed".
+   */
+  const failedKeys = new Map();
 
   /**
    * Arm a single pending retry for quiet-period-deferred files. One at a
-   * time — a retry that still defers re-arms itself via its own result.
+   * time — a retry that still defers re-arms itself via its own result, and
+   * a watch/deferred-retry trigger bounced off a guard re-arms on the way
+   * out (see maybeScan) so the chain survives its consumed timer.
    */
   function armDeferredRetry() {
     if (retryTimer !== null || disposed) return;
@@ -97,6 +136,15 @@ export function createRescanController(deps) {
 
   const entryKey = (entry) =>
     baselineKey(entry.relPath, entry.file?.size ?? 0);
+
+  /** Number of keys that exhausted MAX_IMPORT_ATTEMPTS (the given-up set). */
+  function exhaustedKeyCount() {
+    let n = 0;
+    for (const attempts of failedKeys.values()) {
+      if (attempts >= MAX_IMPORT_ATTEMPTS) n++;
+    }
+    return n;
+  }
 
   async function isDuplicateOf(scannedHandles, handle) {
     for (const seen of scannedHandles) {
@@ -146,7 +194,9 @@ export function createRescanController(deps) {
         });
         deferredCount += diff.deferredCount;
 
-        const fresh = diff.newVideos.filter((v) => !failedKeys.has(entryKey(v)));
+        const fresh = diff.newVideos.filter(
+          (v) => (failedKeys.get(entryKey(v)) ?? 0) < MAX_IMPORT_ATTEMPTS,
+        );
         if (!fresh.length) continue;
         if (cancelRequested) break;
 
@@ -175,13 +225,14 @@ export function createRescanController(deps) {
     }
 
     // Verify which attempted entries actually landed: anything still missing
-    // from a fresh baseline failed inside the pipeline → session skip set.
+    // from a fresh baseline failed inside the pipeline → one more strike on
+    // its attempt counter.
     let newCount = 0;
     if (attemptedKeys.length) {
       const after = await deps.buildBaseline();
       for (const key of attemptedKeys) {
         if (after.keys.has(key)) newCount++;
-        else failedKeys.add(key);
+        else failedKeys.set(key, (failedKeys.get(key) ?? 0) + 1);
       }
     }
 
@@ -199,7 +250,7 @@ export function createRescanController(deps) {
       newCount,
       deferredCount,
       skippedRoots,
-      failedCount: failedKeys.size,
+      failedCount: exhaustedKeyCount(),
     };
     if (deferredCount > 0 && trigger !== "manual") armDeferredRetry();
     lastResult = result;
@@ -215,22 +266,42 @@ export function createRescanController(deps) {
    * Run one guarded scan. Never throws; never prompts; silently no-ops when
    * any guard fails (the e2e sandbox — zero roots, no FSA — relies on this).
    *
-   * @param {{ trigger: 'mount'|'visibility'|'manual' }} p
+   * Bounce recovery: a watch or deferred-retry trigger that a guard turns
+   * away re-arms the retry timer before returning. Both are one-shot — the
+   * deferred-retry timer is already consumed when it fires, and a watch
+   * event for a file that just finished writing has no follow-up event
+   * coming — so without the re-arm a single bounce kills the chain
+   * silently. 'unsupported' never re-arms (missing FSA is permanent);
+   * mount/visibility/manual/periodic bounces don't either, since each has a
+   * natural next trigger.
+   *
+   * @param {{ trigger: 'mount'|'visibility'|'manual'|'watch'|'deferred-retry'|'periodic' }} p
    */
   async function maybeScan({ trigger }) {
+    const rearmsOnBounce = trigger === "watch" || trigger === "deferred-retry";
     if (!deps.isFsaSupported()) return { outcome: "unsupported", trigger };
     // Host veto (optional dep): e.g. the player page defers while a video is
     // actively playing so hash workers never compete with decode.
-    if (deps.shouldDefer?.()) return { outcome: "host-deferred", trigger };
-    if (running) return { outcome: "busy", trigger };
+    if (deps.shouldDefer?.()) {
+      if (rearmsOnBounce) armDeferredRetry();
+      return { outcome: "host-deferred", trigger };
+    }
+    if (running) {
+      if (rearmsOnBounce) armDeferredRetry();
+      return { outcome: "busy", trigger };
+    }
     if (deps.getImportStatus() === "running") {
+      if (rearmsOnBounce) armDeferredRetry();
       return { outcome: "import-busy", trigger };
     }
     const minInterval =
-      trigger === "watch" || trigger === "deferred-retry"
+      trigger === "watch" ||
+      trigger === "deferred-retry" ||
+      trigger === "periodic"
         ? WATCH_MIN_INTERVAL_MS
         : MIN_SCAN_INTERVAL_MS;
     if (trigger !== "manual" && deps.now() - lastScanAt < minInterval) {
+      if (rearmsOnBounce) armDeferredRetry();
       return { outcome: "throttled", trigger };
     }
 
@@ -269,7 +340,7 @@ export function createRescanController(deps) {
       running,
       lastScanAt,
       lastResult,
-      failedKeyCount: failedKeys.size,
+      failedKeyCount: exhaustedKeyCount(),
       retryArmed: retryTimer !== null,
     };
   }

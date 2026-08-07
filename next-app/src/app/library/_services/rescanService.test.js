@@ -3,6 +3,7 @@ import {
   baselineKey,
   buildBaseline,
   diffScanRoot,
+  FUTURE_SKEW_MS,
   QUIET_PERIOD_MS,
 } from "./rescanService.js";
 
@@ -122,6 +123,57 @@ describe("diffScanRoot", () => {
     });
     expect(result.newVideos).toHaveLength(0);
     expect(result.deferredCount).toBe(1);
+  });
+
+  test("mtime slightly in the future (NAS clock skew) is still deferred", async () => {
+    const skewed = fakeFile({ lastModified: NOW + FUTURE_SKEW_MS / 2 }); // 60s ahead
+    const baseline = await buildBaseline(fakeDb([]));
+    const result = await diffScanRoot({
+      handle: {},
+      baseline,
+      now: NOW,
+      enumerate: fakeEnumerate([
+        { file: skewed, relPath: "x/01.mkv", depth: 1, kind: "video" },
+      ]),
+    });
+    expect(result.newVideos).toHaveLength(0);
+    expect(result.deferredCount).toBe(1);
+  });
+
+  test("mtime far in the future (bad stored timestamp) imports immediately", async () => {
+    const stamped = fakeFile({ lastModified: NOW + FUTURE_SKEW_MS + 60_000 }); // 180s ahead
+    const baseline = await buildBaseline(fakeDb([]));
+    const result = await diffScanRoot({
+      handle: {},
+      baseline,
+      now: NOW,
+      enumerate: fakeEnumerate([
+        { file: stamped, relPath: "x/01.mkv", depth: 1, kind: "video" },
+      ]),
+    });
+    expect(result.newVideos).toHaveLength(1);
+    expect(result.newVideos[0].relPath).toBe("x/01.mkv");
+    expect(result.deferredCount).toBe(0);
+  });
+
+  test("far-future mtime still runs the superseded path for a same-relPath replacement", async () => {
+    const stamped = fakeFile({ size: 999, lastModified: NOW + FUTURE_SKEW_MS + 60_000 });
+    const baseline = await buildBaseline(
+      fakeDb([{ id: "old-row", relPath: "x/01.mkv", size: 100 }]),
+    );
+    const result = await diffScanRoot({
+      handle: {},
+      baseline,
+      now: NOW,
+      enumerate: fakeEnumerate([
+        { file: stamped, relPath: "x/01.mkv", depth: 1, kind: "video" },
+      ]),
+    });
+    expect(result.newVideos).toHaveLength(1);
+    expect(result.deferredCount).toBe(0);
+    expect(result.supersededCandidates).toEqual([
+      { relPath: "x/01.mkv", ids: ["old-row"] },
+    ]);
   });
 
   test("subtitles never gate newness but are returned for sidecar matching", async () => {

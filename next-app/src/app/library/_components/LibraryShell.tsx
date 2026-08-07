@@ -36,6 +36,7 @@ import { db } from "@/lib/library/db/db.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { isFsaSupported } from "@/lib/library/handles/fsaFeatureCheck.js";
+import { isFolderWatchSupported } from "../_services/folderWatcher.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { enumerateAll } from "@/lib/library/enumerator.js";
@@ -276,6 +277,11 @@ export function LibraryShell() {
   const { t } = useLang();
   const router = useRouter();
   const fsaSupported = isFsaSupported();
+  // Live folder watching needs FileSystemObserver (Chrome/Edge 133+). When
+  // it's absent the hook falls back to a periodic reconciliation scan — the
+  // hint below tells the user which regime they're in, so the silent
+  // degradation stops reading as "the feature is broken".
+  const watchSupported = isFolderWatchSupported();
 
   const dandan = useMemo(() => createDandanClient(), []);
   const { series, loading } = useLibrary({ db }) as {
@@ -315,6 +321,7 @@ export function LibraryShell() {
     scanning: rescanBusy,
     manualRescan,
     yieldToManual,
+    rearmWatch,
   } = useAutoRescan({
     db,
     handlesStatus: status,
@@ -492,7 +499,11 @@ export function LibraryShell() {
     // parity by widening to `any` at the boundary.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await runImport({ items: items as any, libraryId: record.libraryId });
-  }, [fsaSupported, pickFolder, processFiles, runImport, yieldToManual]);
+    // The watch effect observed the roots that existed at mount; this new
+    // root is invisible to it until re-armed. Without this, files dropped
+    // into a folder added mid-session are only found by tab-return scans.
+    rearmWatch();
+  }, [fsaSupported, pickFolder, processFiles, runImport, yieldToManual, rearmWatch]);
 
   const handlePickSeries = useCallback((id: string) => {
     // Open the in-page episode picker. The user picks an exact episode there
@@ -1272,6 +1283,19 @@ export function LibraryShell() {
               }}
             >
               {t("library.persistHint")}
+            </p>
+          )}
+          {fsaSupported && !watchSupported && (
+            <p
+              data-testid="library-no-observer-hint"
+              style={{
+                margin: "8px 0 0",
+                fontSize: 12,
+                lineHeight: 1.7,
+                color: "rgba(235,235,245,0.45)",
+              }}
+            >
+              {t("library.watch.noObserverHint")}
             </p>
           )}
           <UnclassifiedSection

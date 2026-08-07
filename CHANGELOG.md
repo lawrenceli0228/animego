@@ -2,6 +2,28 @@
 
 ---
 
+## [3.7.3] - 2026-08-08
+
+### 修复 — 库自动扫描「时灵时不灵」：五个互不相同的搁浅缝一次关掉
+
+用户报告新片加入模块有时候会失效。逐行排查 rescanController / rescanService / useAutoRescan / folderWatcher 后证实五个缝，每个都产生"有时候没反应"，且触发条件互不相同——叠在一起就是"时灵时不灵"的体感。经 /plan-eng-review 完整对峙（D1-D7 七个决策，含一次对 0804-D7 的正式修订），修法如下：
+
+**周期兜底替代补丁**（D2）：最大的洞是"人坐在页面上等下载完，永远等不到"——能在页面静止时发现新文件的只有 Chrome/Edge 133+ 才有的 FileSystemObserver，其余浏览器静默降级成"只靠切标签页"。原计划给被节流吃掉的 visibility 触发做补偿定时器，评审时推翻：**observer 缺席且页面可见时每 120 秒轻量 diff 扫一次**（`PERIODIC_FALLBACK_MS`），走 maybeScan 现成守卫链，反而砍掉了专用补偿器——无聊轮询换聪明补丁，覆盖更全代码更少。
+
+**重试链弹回续期**（D5）：deferred-retry 闹钟开火撞上守卫（正在导入/正在播放/忙/刚扫过）时被消耗且无人续期，链条静默死亡；observer 环境里文件写完那刻的 watch 触发被弹回同理——写完了不会再有事件，搁浅到下次切标签页。现在 watch/deferred-retry 被四种守卫弹回都重新武装同一个 65 秒闹钟，直到真正扫成一次。
+
+**黑名单限次**（D3，修订 0804-D7）：一次瞬态导入失败（IDB 抖动、哈希线程崩）曾把该文件整个会话永久拉黑，UI 零痕迹。改为每键最多 3 次尝试：瞬态错误有两次自愈窗口，永久坏文件的浪费钉死在每会话 2 次额外的 16MB 哈希+dandanplay 匹配——防重试风暴属性与原设计等价。`failedCount` 语义统一为"到限被放弃的键数"。
+
+**静默期容差带**（D4）：`now - mtime < 60s` 推迟的算式对未来时间戳永远为真——NAS 时区飘移或坏时间戳的文件每次扫描都被推迟，永久进不了库。改为三段带：超前 2 分钟以内当"正在写"继续保护（SMB 服务器时钟快一两分钟的活写场景），超前更多视为坏时间戳成品立即导入；病理场景有 size-变化 superseded 重导自愈兜底。
+
+**观察面补全 + 降级可见**（D1/⑤）：「+ 添加文件夹」后新根目录从未被实时监听（watch effect 只在挂载时武装）——新增 `rearmWatch()`，加文件夹成功后重新观察全部根。observer 缺席时文件夹区域出现一行提示"此浏览器不支持文件夹实时监听，页面打开期间每 2 分钟自动检查一次新文件"——本次排查的起因就是静默降级没有任何提示，用户把设计行为误判为故障。
+
+实现为三车道并行（两个 subagent 扛控制器与扫描服务，主线接 hook/UI/词典）。测试：控制器 +7 例新增 +1 例 IRON 回归改写（28/28），扫描服务 +3 例（12/12），全量 bun test 487/487（main 基线 477），词典四份齐上 spaDictCoverage 闸门绿，tsc/eslint 零新增。**OPFS 沙箱 e2e 本地实跑 3/3 绿**（全栈：dev postgres 迁移到 0016 + go-api 容器 + next dev + Playwright，autorescan 正向链路含真 FileSystemDirectoryHandle 枚举→diff→哈希→卡片浮现）。控制器头部陈旧的 ASCII 触发流程图（缺 watch/deferred-retry 两个既有触发源）随本次更新为六源完整矩阵。
+
+设计文档与评审记录：`~/.gstack/projects/lawrenceli0228-animego/lawrence_li-main-design-20260808-autorescan-fixes.md`（含 HTML 版）。剩余人工项：真 Chrome 133+ 环境验 rearmWatch 与弹回续期（e2e 的 Chromium 无 FileSystemObserver，自动化到不了）。
+
+---
+
 ## [3.7.2] - 2026-08-07
 
 ### 修复 — AniList 熔断器从未生效：限流风暴里每个请求白烧满 5 秒
