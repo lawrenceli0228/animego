@@ -170,7 +170,9 @@ func (s *ScheduleService) Handler() http.HandlerFunc {
 				return
 			}
 			if errors.Is(err, anilist.ErrRateLimited) {
-				httpx.Fail(w, httpx.WrapError(err, http.StatusBadGateway, httpx.CodeServerError, "AniList rate limited"))
+				// 503, not 502 — transient breaker-window condition;
+				// see the same mapping in detail.go / search.go.
+				httpx.Fail(w, httpx.WrapError(err, http.StatusServiceUnavailable, httpx.CodeServerError, "AniList rate limited"))
 				return
 			}
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "schedule fetch failed"))

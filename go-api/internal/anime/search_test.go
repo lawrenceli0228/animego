@@ -474,7 +474,7 @@ func TestSearch_AniListUpstreamError_502(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"SERVER_ERROR"`)
 }
 
-func TestSearch_AniListRateLimited_502(t *testing.T) {
+func TestSearch_AniListRateLimited_503(t *testing.T) {
 	t.Parallel()
 
 	fs := &fakeSearcher{
@@ -488,7 +488,9 @@ func TestSearch_AniListRateLimited_502(t *testing.T) {
 	rec := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
 
-	require.Equal(t, http.StatusBadGateway, rec.Code)
+	// 503 (not 502): rate-limiting is transient and clears after the
+	// breaker cooldown — distinct from a hard upstream failure.
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
 func TestSearch_DBReadError_500(t *testing.T) {
