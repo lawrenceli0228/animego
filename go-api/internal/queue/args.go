@@ -83,6 +83,8 @@ var (
 	_ river.JobArgs = (*WarmSeasonArgs)(nil)
 	_ river.JobArgs = (*DescriptionBackfillArgs)(nil)
 	_ river.JobArgs = (*DescriptionBackfillScanArgs)(nil)
+	_ river.JobArgs = (*DescriptionLlmBackfillArgs)(nil)
+	_ river.JobArgs = (*DescriptionLlmBackfillScanArgs)(nil)
 )
 
 // DescriptionBackfillArgs harvests one row's Chinese description from the
@@ -112,6 +114,45 @@ func (DescriptionBackfillArgs) InsertOpts() river.InsertOpts {
 		Queue:      DescriptionBackfillQueueName,
 		UniqueOpts: river.UniqueOpts{ByArgs: true},
 	}
+}
+
+// DescriptionLlmBackfillArgs translates one row's English synopsis into
+// Chinese via the LLM fallback tier.
+//
+// Deliberately carries ONLY the anilist_id: the source text is re-read at
+// work time (GetDescriptionForLlmTranslate) so the payload stays small,
+// ByArgs dedupe stays cheap, and the worker sees the CURRENT row state —
+// including a description_cn that the Bangumi channel landed between scan
+// and work, in which case it stands down instead of spending tokens.
+type DescriptionLlmBackfillArgs struct {
+	AnilistID int `json:"anilistId"`
+}
+
+// Kind returns the river job kind for the LLM translation worker.
+func (DescriptionLlmBackfillArgs) Kind() string { return "description_llm_backfill" }
+
+// InsertOpts pins the job to the LLM queue and deduplicates by payload —
+// same reasoning as DescriptionBackfillArgs: the scan re-fires hourly while
+// a batch may still be draining.
+func (DescriptionLlmBackfillArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:      DescriptionLlmQueueName,
+		UniqueOpts: river.UniqueOpts{ByArgs: true},
+	}
+}
+
+// DescriptionLlmBackfillScanArgs is the periodic trigger for the LLM sweep.
+// No fields — the worker reads its work list from the database.  Rides the
+// LLM queue so pausing that queue stops the sweep being fed as well as
+// drained, mirroring DescriptionBackfillScanArgs.
+type DescriptionLlmBackfillScanArgs struct{}
+
+// Kind returns the river job kind for the periodic LLM backfill scan.
+func (DescriptionLlmBackfillScanArgs) Kind() string { return "description_llm_backfill_scan" }
+
+// InsertOpts pins the scan to the LLM queue. See the type comment.
+func (DescriptionLlmBackfillScanArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: DescriptionLlmQueueName}
 }
 
 // DescriptionBackfillScanArgs is the periodic trigger that finds rows still

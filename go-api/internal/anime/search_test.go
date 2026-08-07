@@ -184,6 +184,10 @@ func (e *searchFakeEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _
 	return nil
 }
 
+func (e *searchFakeEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []queue.DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 // EnqueueWarmSeasonNow is a no-op stub.  /search never dispatches
 // warm-season jobs — those are seeded by main.go at boot time and
 // re-fired by river's PeriodicJobs.  Stub is needed only to satisfy

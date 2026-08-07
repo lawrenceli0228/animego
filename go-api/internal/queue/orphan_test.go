@@ -99,6 +99,10 @@ func (f *fakeEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []Des
 	return nil
 }
 
+func (f *fakeEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 func (f *fakeEnqueuer) snapshotCalls() [][]int32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()

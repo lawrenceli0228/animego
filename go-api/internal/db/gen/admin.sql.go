@@ -391,8 +391,12 @@ SELECT
     -- descriptionBackfillScanBatchSize:  the batch size throttles one pass, it
     -- does not define how much is outstanding.  Capping here would make the
     -- backlog look permanently 300-deep no matter how far behind it really is.
+    -- The description_cn_source = 'llm' arm mirrors the same widening in
+    -- ListDescriptionCnCandidates (machine-translated rows return to the
+    -- Bangumi sweep's 30-day re-check so human prose can replace them).
+    -- Change one, change both.
     (SELECT count(*) FROM description_cn_eligible
-      WHERE description_cn IS NULL
+      WHERE (description_cn IS NULL OR description_cn_source = 'llm')
         AND (
             description_cn_attempted_at IS NULL
             OR description_cn_attempted_at < now() - interval '30 days'

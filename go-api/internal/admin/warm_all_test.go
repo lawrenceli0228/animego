@@ -62,6 +62,10 @@ func (c *channelEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []
 	return nil
 }
 
+func (c *channelEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []queue.DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 func (c *channelEnqueuer) EnqueueWarmSeasonNow(_ context.Context, args queue.WarmSeasonArgs) error {
 	c.mu.Lock()
 	idx := len(c.called)

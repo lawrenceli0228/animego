@@ -59,6 +59,17 @@ const BangumiV3QueueName = "bangumi_v3"
 // from the same allowance and simply divide it.
 const DescriptionBackfillQueueName = "description_backfill"
 
+// DescriptionLlmQueueName isolates the LLM translation fallback from both
+// live enrichment AND the Bangumi description sweep.
+//
+// Its resource is different in kind: the Bangumi queues are metered by the
+// shared 800ms token bucket, while this one spends DeepSeek API tokens
+// (money) and network round-trips of a few seconds each.  A separate queue
+// makes it independently pausable — the one lever an operator wants if
+// translation quality or spend ever needs a second look — and lets it run
+// more than one worker without touching the Bangumi budget at all.
+const DescriptionLlmQueueName = "description_llm"
+
 // Stats is the response shape for Status — the admin endpoint
 // marshals this to JSON.  Mirrors the relevant subset of Express
 // getQueueStatus() (which also reported in-memory queue depths from

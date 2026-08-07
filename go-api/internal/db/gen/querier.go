@@ -280,6 +280,12 @@ type Querier interface {
 	// summed.  eligible = done + (rows with no CN), and that second term is what
 	// rejected and pending each slice differently.
 	GetDescriptionCnStats(ctx context.Context) (GetDescriptionCnStatsRow, error)
+	// The per-row worker's re-read.  Job args deliberately carry only the
+	// anilist_id (payload dedupe stays cheap, river rows stay small), so the
+	// worker fetches the source text at work time — and re-checks description_cn,
+	// because the Bangumi channel may have landed a real summary between scan and
+	// work.  In that race the LLM worker must stand down, not spend tokens.
+	GetDescriptionForLlmTranslate(ctx context.Context, anilistID int32) (GetDescriptionForLlmTranslateRow, error)
 	// Returns the liveEndsAt timestamp for this episode if a live window
 	// exists, else pgx.ErrNoRows (handler maps → null in the envelope).
 	GetEpisodeWindow(ctx context.Context, anilistID int32, episode int32) (EpisodeWindow, error)
@@ -452,7 +458,27 @@ type Querier interface {
 	// The cooldown then doubles as a retry: Bangumi summaries are community
 	// written over time, so a subject that is Japanese-only today may carry Chinese
 	// prose next quarter, and re-reaching it is how that gets picked up.
+	// The description_cn_source = 'llm' arm hands machine-translated rows back
+	// to this sweep on its normal 30-day cadence: Bangumi summaries are written
+	// by its community over time, and the covenant is manual > bangumi > llm —
+	// a human-written synopsis appearing upstream must eventually replace the
+	// machine translation.  UpdateDescriptionCn already permits that overwrite
+	// (its guard only protects 'manual'); this arm is what gets the row fetched
+	// again at all.  Mirror-kept in admin.sql's desc_cn_pending — change one,
+	// change both.
 	ListDescriptionCnCandidates(ctx context.Context, retryAfter pgtype.Interval, rowLimit int32) ([]ListDescriptionCnCandidatesRow, error)
+	// Rows for the LLM translation fallback: an English source text exists, no
+	// Chinese landed yet, and the Bangumi channel is done with the row — either
+	// it already tried (attempt stamp set; the subject had no usable Chinese) or
+	// the row can never enter that channel at all (binding fails the
+	// description_cn_eligible trust gate, or there is no bgm_id).  The LLM tier
+	// is strictly Bangumi's leftovers; it never races the primary channel.
+	//
+	// Ordering by the LLM attempt stamp gives this sweep the same finish
+	// guarantee as the Bangumi one (migration 0015 arithmetic): a row whose
+	// translation failed validation goes to the back instead of holding the
+	// front of every batch.
+	ListDescriptionCnLlmCandidates(ctx context.Context, retryAfter pgtype.Interval, rowLimit int32) ([]int32, error)
 	// For re-enrich v=2:  rows that have a bgm_id can be V3-healed.
 	// Returns the queue-payload fields directly.
 	ListEnrichedV2WithBgm(ctx context.Context) ([]ListEnrichedV2WithBgmRow, error)
@@ -575,6 +601,13 @@ type Querier interface {
 	// stamp is what moves a row to the back of the queue and lets the sweep reach
 	// the rest of the backlog.
 	MarkDescriptionCnAttempted(ctx context.Context, anilistID int32) error
+	// Stamp a row as tried by the LLM sweep, regardless of outcome — stored,
+	// rejected by validation, or skipped because bangumi won the race.  NOT
+	// called on transport errors, which river should retry rather than have the
+	// sweep treat as decided.  Counterpart to the ordering in
+	// ListDescriptionCnLlmCandidates, exactly as migration 0015 is to the
+	// Bangumi sweep.
+	MarkDescriptionCnLlmAttempted(ctx context.Context, anilistID int32) error
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error
@@ -705,6 +738,11 @@ type Querier interface {
 	// 'manual' is never overwritten: it is the admin override, and an automated
 	// sweep must not undo a human correction.
 	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
+	// Store a machine translation.  The guard is description_cn IS NULL — the
+	// LLM tier writes into empty space only and can never overwrite bangumi,
+	// manual, or even an earlier llm value.  The reverse covenant (bangumi
+	// replacing llm) lives in ListDescriptionCnCandidates + UpdateDescriptionCn.
+	UpdateDescriptionCnLlm(ctx context.Context, descriptionCn *string, anilistID int32) error
 	// PATCH /api/subscriptions/:anilistId — selective update.
 	// COALESCE pattern keeps unchanged columns untouched.  `last_watched_at`
 	// only bumps when current_episode is explicitly set, matching Express

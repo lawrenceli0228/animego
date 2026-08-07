@@ -128,6 +128,10 @@ type fakeBackfillEnqueuer struct {
 	otherCalls int
 }
 
+func (f *fakeBackfillEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 func (f *fakeBackfillEnqueuer) EnqueueDescriptionBackfillMany(ctx context.Context, jobs []DescriptionBackfillArgs) error {
 	dup := make([]DescriptionBackfillArgs, len(jobs))
 	copy(dup, jobs)

@@ -113,6 +113,10 @@ func (e *scheduleFakeEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context,
 	return nil
 }
 
+func (e *scheduleFakeEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []queue.DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 // EnqueueWarmSeasonNow is a no-op stub.  /schedule never dispatches
 // warm-season jobs — those are seeded by main.go at boot time.  Stub
 // is needed only to satisfy the queue.Enqueuer interface that grew

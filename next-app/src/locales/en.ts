@@ -58,6 +58,7 @@ const en = {
     // (pickDescription pins `en` to AniList's description), so this only
     // surfaces if a future phase shows the Bangumi text to en as well.
     summaryFromBangumi: 'Summary from Bangumi',
+    summaryFromLlm: 'Summary machine-translated from the English original',
     linkCopied: 'Link copied!',
     linkCopyFailed: 'Copy failed — please copy the link manually',
     openPlayer: '▶ Play with Danmaku',
