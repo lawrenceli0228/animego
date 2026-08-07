@@ -573,6 +573,14 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 		if errors.As(err, &upErr) && upErr.Status == http.StatusNotFound {
 			return nil, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, "番剧不存在")
 		}
+		// Rate-limited is 503, not 502: the condition is transient and
+		// self-heals after the breaker cooldown, and the distinct status
+		// lets nginx/CF logs separate "AniList is throttling us" storms
+		// from genuine upstream failures.  This is the status a cold id
+		// (no cached row to degrade to) surfaces during a crawl storm.
+		if errors.Is(err, anilist.ErrRateLimited) {
+			return nil, httpx.WrapError(err, http.StatusServiceUnavailable, httpx.CodeServerError, "AniList rate limited")
+		}
 		return nil, httpx.WrapError(err, http.StatusBadGateway, httpx.CodeServerError, "AniList upstream error")
 	}
 	// resp.Media.ID == 0 means AniList responded with `Media: null`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1106,6 +1107,36 @@ func TestDetail_NotInCache_AniListNil_404(t *testing.T) {
 	body := rec.Body.String()
 	require.Contains(t, body, `"NOT_FOUND"`)
 	require.Contains(t, body, "番剧不存在")
+}
+
+// TestDetail_NotInCache_AniListRateLimited_503 verifies the crawl-storm
+// path: a cold id (no cached row to degrade to) whose AniList re-fetch is
+// rate-limited maps to 503, not 502 — the condition is transient and the
+// distinct status separates throttling storms from hard upstream failures
+// in nginx/CF logs.  The sentinel arrives wrapped (the client returns
+// fmt.Errorf chains around ErrRateLimited), so this also pins the
+// errors.Is matching through the wrap.
+func TestDetail_NotInCache_AniListRateLimited_503(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+		},
+	}
+	al := &fakeAniListDetailer{
+		detailFn: func(_ context.Context, _ anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+			return nil, fmt.Errorf("anilist: retry-after 60s exceeds request deadline: %w", anilist.ErrRateLimited)
+		},
+	}
+	svc := newDetailServiceWithAniList(t, db, al)
+
+	rec := serveDetail(t, svc, "/api/anime/12345")
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	body := rec.Body.String()
+	require.Contains(t, body, `"SERVER_ERROR"`)
+	require.Contains(t, body, "AniList rate limited")
 }
 
 // -----------------------------------------------------------------------------

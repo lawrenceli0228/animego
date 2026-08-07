@@ -412,6 +412,79 @@ func TestClient_Breaker_ClosesAfterCooldown(t *testing.T) {
 	assert.Equal(t, int32(8), callCount.Load(), "after cooldown: probes upstream again")
 }
 
+// TestClient_429_BackoffExceedsDeadline_TripsBreaker covers the prod
+// failure mode of 2026-08: AniList 429s with Retry-After: 60 while the
+// caller runs under a 5s handler deadline.  The backoff can never fit,
+// so the client must NOT sleep (burning the caller's remaining budget)
+// and MUST trip the breaker so followers fail fast — the old code did
+// neither, which is why the breaker never engaged during real rate-limit
+// storms.
+func TestClient_429_BackoffExceedsDeadline_TripsBreaker(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	sleepHook, recorded := newNoopSleep()
+	c := NewClient(WithEndpoint(srv.URL), WithSleep(sleepHook), WithHTTPClient(freshConnClient()))
+	c.limiter = rate.NewLimiter(rate.Inf, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := c.Search(ctx, SearchVars{Page: 1, PerPage: 20})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRateLimited, "unfittable backoff must surface the rate-limit sentinel")
+	assert.Equal(t, int32(1), callCount.Load(), "no retry can fit the deadline → exactly 1 attempt")
+	assert.Empty(t, *recorded, "must not sleep when the backoff cannot complete in time")
+
+	// The 429 must have tripped the breaker: a fresh request (with a
+	// healthy context) short-circuits without touching AniList.
+	_, err = c.Detail(context.Background(), DetailVars{ID: 1})
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.Equal(t, int32(1), callCount.Load(), "open breaker must not touch AniList")
+}
+
+// TestClient_429_SleepAborted_TripsBreaker: when the backoff sleep itself
+// is cut short by the caller's context, the 429 still happened — the
+// circuit must open so the next caller fails fast instead of repeating
+// the doomed probe.
+func TestClient_429_SleepAborted_TripsBreaker(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	// No ctx deadline (so the pre-sleep fit check passes) — the abort
+	// happens inside the sleep, as with a cancellation racing the backoff.
+	abortSleep := func(_ context.Context, _ time.Duration) error {
+		return context.DeadlineExceeded
+	}
+	c := NewClient(WithEndpoint(srv.URL), WithSleep(abortSleep), WithHTTPClient(freshConnClient()))
+	c.limiter = rate.NewLimiter(rate.Inf, 0)
+
+	_, err := c.Search(context.Background(), SearchVars{Page: 1, PerPage: 20})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRateLimited, "aborted backoff must still surface the rate-limit sentinel")
+	assert.ErrorIs(t, err, context.DeadlineExceeded, "the abort cause stays in the chain for logs")
+	assert.Equal(t, int32(1), callCount.Load())
+
+	_, err = c.Detail(context.Background(), DetailVars{ID: 1})
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.Equal(t, int32(1), callCount.Load(), "open breaker must not touch AniList")
+}
+
 // ---------------------------------------------------------------------------
 // Non-2xx / GraphQL error wrapping
 // ---------------------------------------------------------------------------

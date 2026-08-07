@@ -371,6 +371,14 @@ func (c *Client) do(ctx context.Context, query string, vars any, dest any) error
 			return fmt.Errorf("anilist: rate limit wait: %w", err)
 		}
 
+		// Re-check the breaker after the wait: a concurrent request may
+		// have tripped it while this one was queued on the limiter.
+		// Without this, a storm of queued callers each fires one more
+		// probe at an upstream that just told us to back off.
+		if c.breakerOpen() {
+			return ErrRateLimited
+		}
+
 		// 2) Build + send the HTTP request.  A fresh bytes.Reader per
 		//    attempt is required because the previous attempt drained
 		//    the body during the HTTP transport.
@@ -397,8 +405,26 @@ func (c *Client) do(ctx context.Context, query string, vars any, dest any) error
 				return ErrRateLimited
 			}
 			retryAfter := parseRetryAfter(res.Header.Get("Retry-After"))
+
+			// A backoff that cannot complete inside the caller's
+			// deadline can never lead to a successful retry — sleeping
+			// would only burn the caller's remaining budget and then
+			// fail anyway.  The 429 is real either way, so open the
+			// circuit and surface the sentinel immediately instead.
+			// (Before this check, every request during a rate-limit
+			// storm slept its full deadline and returned a plain
+			// "retry sleep" error — a path that never tripped the
+			// breaker, so the fail-fast design never engaged.)
+			if deadline, ok := ctx.Deadline(); ok && retryAfter > time.Until(deadline) {
+				c.tripBreaker()
+				return fmt.Errorf("anilist: retry-after %s exceeds request deadline: %w", retryAfter, ErrRateLimited)
+			}
 			if err := c.sleep(ctx, retryAfter); err != nil {
-				return fmt.Errorf("anilist: retry sleep: %w", err)
+				// Sleep aborted (ctx cancelled or deadline hit
+				// mid-backoff).  Same reasoning as above: the 429
+				// happened, so the circuit opens.
+				c.tripBreaker()
+				return fmt.Errorf("anilist: retry sleep: %w: %w", err, ErrRateLimited)
 			}
 			continue
 		}

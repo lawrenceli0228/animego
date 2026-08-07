@@ -16,10 +16,21 @@ const SITE = "https://animegoclub.com";
  *
  * SEO-relevant routes ('/', '/anime/{id}', '/seasonal/{season}/{year}',
  * '/search') are not listed and therefore allowed by default.
+ *
+ * meta-externalagent is Meta's AI-training crawler (NOT facebookexternalhit,
+ * which renders link previews and stays allowed). It was the single largest
+ * crawler of cold /anime/{id} pages during the 2026-08 AniList rate-limit
+ * storm (267 of ~1,000 5xx in 17h) and brings no search or referral value,
+ * so it is barred site-wide. It documents robots.txt compliance, so this
+ * is effective, unlike the residential-proxy scrapers we can't name.
  */
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
+      {
+        userAgent: "meta-externalagent",
+        disallow: "/",
+      },
       {
         userAgent: "*",
         allow: "/",

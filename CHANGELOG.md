@@ -2,6 +2,24 @@
 
 ---
 
+## [3.7.2] - 2026-08-07
+
+### 修复 — AniList 熔断器从未生效：限流风暴里每个请求白烧满 5 秒
+
+从 Sentry 两条报错查下去，挖出的真问题比报错本身大。生产 24 小时里 go-api 记了 865 次 `AniList upstream error`，cause 全是 `anilist: retry sleep: context deadline exceeded`，每条 `duration_ms=5000`；同一窗口 nginx 上 `/anime/{id}` 的 5xx 有 1043 次。打过来的几乎全是爬虫：meta-externalagent（Meta 的 AI 训练爬虫）267 次，剩下 751 次来自一个住宅代理池——**每个 IP 恰好只出现一次**、桌面 Chrome UA 轮着换。
+
+根因在 `anilist/client.go` 的 429 分支：只有「重试次数耗尽」那条路会 `tripBreaker()`，而生产实际永远走的是另一条——AniList 叫我们退避 60 秒，请求预算只剩不到 5 秒，`sleep(ctx)` 把剩余预算睡光后报错返回，**不触发熔断**。于是精心设计的 30 秒熔断从上线起一次都没开过：风暴期间每个冷详情页请求都排队烧满 5 秒再 502，而不是微秒级快速失败。
+
+修三处：退避时长塞不进请求剩余预算时**不睡了**，立即熔断并返回 `ErrRateLimited`；睡眠中途被打断同样熔断（429 是真发生了的）；限流器排队醒来后复查熔断器，风暴中排队的请求不再逐个去捅一个正叫我们减速的上游。
+
+顺手把三个 handler（detail 冷路径 / search / schedule）的限流错误从 502 统一改成 503——它是熔断窗口内的瞬态条件，和真上游故障在 nginx/CF 日志里应当一眼可分。
+
+同一次调查的另两笔：`/seasonal` 是全站唯一没有 error.tsx 的核心路由，RSC 一炸就整页白屏（Sentry NEXTJS-2 的 15 次崩溃全在 `/seasonal/summer/2026`，用户连刷两三次后放弃；08-06 部署后零复发但旧日志已随容器重建丢失，无法验尸定罪）——补上边界，错误只换页面段、导航留着、`reset()` 可重试，边界内显式 `Sentry.captureException`（error.tsx 会把错误在全局 handler 之前吞掉）。robots.txt 全站禁掉 meta-externalagent：它是链接预览爬虫 facebookexternalhit 的邻居但不是它，只做 AI 训练采集，带不来任何搜索或引流价值，而且它文档承诺遵守 robots.txt——对住宅代理池那种无名氏这招没用，对它有用。
+
+测试：anilist client 新增 2 例（退避超预算→1 次 HTTP、零睡眠、熔断开；睡眠被打断→哨兵与 ctx 错误同链、熔断开），detail 新增冷未命中限流→503 一例（顺带钉死 `errors.Is` 穿透包装链），search 的限流用例随映射改为 503。`go test -race` anilist/anime 两包通过。
+
+---
+
 ## [3.7.1] - 2026-08-06
 
 ### 新增 — /admin 能看见中文简介回填的进度与状态

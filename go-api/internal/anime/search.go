@@ -300,19 +300,20 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 //                                  SERVER_ERROR (Express returns 500;
 //                                  502 is more accurate and frontend
 //                                  treats both as "AniList unreachable").
-//   - anilist.ErrRateLimited     → 502 SERVER_ERROR — AniList per-IP
-//                                  budget exhausted.  Could be a 429 to
-//                                  surface "slow down" to the client,
-//                                  but the client did nothing wrong;
-//                                  the upstream did.  502 matches
-//                                  /:anilistId detail-fetch in Express.
+//   - anilist.ErrRateLimited     → 503 SERVER_ERROR — AniList per-IP
+//                                  budget exhausted / breaker open.
+//                                  503 (not 502) because the condition
+//                                  is transient and clears after the
+//                                  breaker cooldown; the distinct
+//                                  status separates throttling storms
+//                                  from hard upstream failures in logs.
 //   - any other error            → 500 SERVER_ERROR.
 func (s *SearchService) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		httpx.Fail(w, httpx.WrapError(err, http.StatusGatewayTimeout, httpx.CodeServerError, "AniList timeout"))
 	case errors.Is(err, anilist.ErrRateLimited):
-		httpx.Fail(w, httpx.WrapError(err, http.StatusBadGateway, httpx.CodeServerError, "AniList rate limited"))
+		httpx.Fail(w, httpx.WrapError(err, http.StatusServiceUnavailable, httpx.CodeServerError, "AniList rate limited"))
 	default:
 		var upstream *anilist.ErrUpstream
 		if errors.As(err, &upstream) {
