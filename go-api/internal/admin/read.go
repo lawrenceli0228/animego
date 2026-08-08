@@ -69,6 +69,24 @@ func (h *Handlers) GetStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// LLM tier coverage — its own soft-failing call for the same reason
+	// as descCn above, and independent of it: the two tiers must be able
+	// to fail separately, or a broken view takes out both blocks and the
+	// operator cannot tell which sweep is in trouble.
+	var descCnLlm DescriptionCnLlmStats
+	if lrow, lerr := h.Queries.GetDescriptionCnLlmStats(ctx); lerr != nil {
+		slog.WarnContext(ctx, "admin stats: description_cn llm coverage query failed; emitting zero counters",
+			"err", lerr.Error(),
+		)
+	} else {
+		descCnLlm = DescriptionCnLlmStats{
+			Remit:    lrow.LlmRemit,
+			Done:     lrow.LlmDone,
+			Rejected: lrow.LlmRejected,
+			Pending:  lrow.LlmPending,
+		}
+	}
+
 	// Queue snapshot is non-fatal — log on error / nil-fn and substitute
 	// zero-value QueueSnapshot.  Express's in-memory getQueueStatus
 	// cannot fail, so emitting all-zeros keeps the response shape
@@ -111,7 +129,8 @@ func (h *Handlers) GetStats(w http.ResponseWriter, r *http.Request) {
 		// numbers next to the SQL one, and the whole value of this panel
 		// is that an operator can reproduce every figure with the query
 		// in admin.sql.  The frontend formats; the database decides.
-		DescriptionCn: descCn,
+		DescriptionCn:    descCn,
+		DescriptionCnLlm: descCnLlm,
 	}
 
 	httpx.Data(w, http.StatusOK, payload)

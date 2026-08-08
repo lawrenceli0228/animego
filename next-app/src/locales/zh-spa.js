@@ -875,6 +875,19 @@ const zh = {
       ageHours: '{{n}} 小时前',
       ageDays: '{{n}} 天前',
     },
+    // 机翻兜底层 —— Bangumi 通道捡不走的行(上游无中文 / 绑定不够可信)
+    // 由 DeepSeek 把英文原文翻成中文。刻意与上面的「中文简介」分开显示:
+    // 两层的分母是几乎不相交的两组行,并排放会诱导人去加它们。
+    llm: {
+      title: '机翻兜底',
+      // 「职责内」而非「有资格」: 这一层的分母是"Bangumi 已放弃 + 永远够不着"
+      // 的那批行,不是全站,也不是上面那个 eligible。
+      remit: '职责内',
+      // 已拒 = 译文没过校验闸(汉字密度/长度)或原文剥完是空。传输失败不在此列
+      // (那些会重试)。这个数涨而"已译"不涨 = 模型在吐不合格文本,要看日志。
+      rejected: '已拒(未过校验)',
+      queueLabel: '翻译队列',
+    },
     // EnrichmentRow — filter labels (used in FILTERS array)
     filterLabelAll: '全部',
     filterLabelNeedsReview: '待复核',

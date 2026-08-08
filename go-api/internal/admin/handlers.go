@@ -70,12 +70,20 @@ type QueueStatusFn func(ctx context.Context) (QueueSnapshot, error)
 //     migration 0016) instead of a base table, so it is the only one
 //     that can fail while the rest of the payload is perfectly fine.
 //
+// And a fourth alongside it:
+//   - GetDescriptionCnLlmStats for the machine-translation tier.  Split
+//     from the Bangumi block for the same soft-fail reason AND because
+//     the two tiers must be able to break independently: fused, a bad
+//     view would blank both and the operator could not tell which sweep
+//     is in trouble.
+//
 // Write endpoints in later phases will add to this surface (or the
 // caller will pass the full dbgen.Querier — the interface widens
 // without breaking existing callers).
 type adminQuerier interface {
 	GetAdminStats(ctx context.Context) (dbgen.GetAdminStatsRow, error)
 	GetDescriptionCnStats(ctx context.Context) (dbgen.GetDescriptionCnStatsRow, error)
+	GetDescriptionCnLlmStats(ctx context.Context) (dbgen.GetDescriptionCnLlmStatsRow, error)
 	GetAdminUserSubFollowCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]dbgen.GetAdminUserSubFollowCountsRow, error)
 }
 

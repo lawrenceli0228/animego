@@ -828,6 +828,24 @@ const en = {
       ageHours: '{{n}}h ago',
       ageDays: '{{n}}d ago',
     },
+    // Machine-translation fallback — rows the Bangumi channel can never
+    // serve (no usable Chinese upstream, or a binding too weak to copy
+    // from) get their English synopsis translated by DeepSeek. Rendered as
+    // its own block on purpose: the two tiers count nearly disjoint sets
+    // of rows, and side-by-side totals would invite adding them up.
+    llm: {
+      title: 'Machine translation',
+      // "In remit", not "eligible": this denominator is the rows Bangumi
+      // has given up on or can never reach — neither the catalogue nor
+      // the eligible count above.
+      remit: 'In remit',
+      // Rejected = output failed the validation gate (Han density /
+      // length) or the source stripped to nothing. Transport failures are
+      // NOT here — those retry. Climbing while "translated" is flat means
+      // the model is returning unusable text; check the logs.
+      rejected: 'Rejected (failed check)',
+      queueLabel: 'Translation queue',
+    },
     // EnrichmentRow — filter labels (used in FILTERS array)
     filterLabelAll: 'All',
     filterLabelNeedsReview: 'Needs Review',

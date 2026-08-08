@@ -82,6 +82,52 @@ export interface BackfillQueue {
   lastWriteAt: string | null;
 }
 
+/**
+ * LLM translation tier coverage — the fallback that serves rows the
+ * Bangumi channel never can (its subject carries no usable Chinese, or the
+ * binding is not trustworthy enough to copy from in the first place).
+ *
+ * Deliberately NOT merged into DescriptionCnStats: the two tiers do not
+ * share a denominator, and putting them in one object invites summing
+ * numbers that count nearly disjoint sets of rows.
+ */
+export interface DescriptionCnLlmStats {
+  /**
+   * The rows this tier could ever write: English source text exists, the
+   * row is still empty or already machine-translated, and the Bangumi
+   * channel is done with it or can never reach it.
+   *
+   * NOT the catalogue, and NOT `DescriptionCnStats.eligible` — a row is in
+   * exactly one tier's remit at a time, and a row Bangumi later fills with
+   * human prose leaves this denominator on its own.
+   */
+  remit: number;
+  /**
+   * `description_cn_source = 'llm'`. Can legitimately go DOWN: machine
+   * translations return to the Bangumi sweep's 30-day recheck, so human
+   * prose replacing one is the covenant working, not data loss.
+   */
+  done: number;
+  /**
+   * In remit, still empty, LLM attempt stamped — the validation gate (Han
+   * density / length) refused the model's output, or the source text
+   * stripped to nothing.
+   *
+   * Climbing while `done` is flat means the model is returning text that
+   * fails validation: check the logs rather than assuming it is normal
+   * attrition. Transport failures never land here — those retry.
+   */
+  rejected: number;
+  /**
+   * In remit, still empty, never attempted or past the 30-day cooldown.
+   * The live backlog, and the discriminator for this tier's write
+   * heartbeat exactly as in the Bangumi block.
+   *
+   * Overlaps `rejected` by design; never sum them.
+   */
+  pending: number;
+}
+
 export interface AdminStats {
   users: number;
   anime: number;
@@ -104,8 +150,17 @@ export interface AdminStats {
     v3: number;
     v3Progress?: { processed: number; total: number; paused?: boolean };
     descriptionBackfill: BackfillQueue;
+    /**
+     * The LLM tier's queue, same three-state shape. Separate from
+     * `descriptionBackfill` because the two sweeps fail for unrelated
+     * reasons — one is throttled by bgm.tv, the other by a paid API that
+     * can rate-limit, run out of credit, or retire a model. Fused, "out
+     * of credit" would be indistinguishable from "bgm.tv is slow".
+     */
+    descriptionLlm: BackfillQueue;
   };
   descriptionCn: DescriptionCnStats;
+  descriptionCnLlm: DescriptionCnLlmStats;
   flagged: number;
   subscriptions: number;
   follows: number;
