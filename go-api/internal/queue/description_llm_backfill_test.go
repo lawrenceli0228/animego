@@ -9,6 +9,11 @@
 //     channel outranks this one).
 //   - stamp discipline: transport errors must NOT stamp (river retries),
 //     decided outcomes MUST (the sweep's finish guarantee rests on it).
+//     TranslatorError_RetriedNotStamped and EmptyCompletion_StampedNotRetried
+//     are a matched pair and belong together: the difference between "no
+//     answer arrived" and "an empty answer arrived" is the whole 2026-08
+//     incident, so changing one without the other means the boundary has
+//     stopped being tested.
 //   - validation fails closed: an English refusal or a runaway completion
 //     must never reach UpdateDescriptionCnLlm.
 package queue
@@ -230,6 +235,96 @@ func TestLlmWorker_TranslatorError_RetriedNotStamped(t *testing.T) {
 	assert.Empty(t, db.stamped, "transient upstream failure must not stamp — river retries")
 }
 
+// permanentTestErr implements the same Permanent() behaviour
+// *deepseek.ErrUpstream carries for 401/402/403, without importing the
+// client — which is the entire point of matching on a local interface
+// rather than a concrete type.  If someone "simplifies" the worker to
+// errors.As against *deepseek.ErrUpstream, the queue package gains an
+// import it deliberately does not have, and this double stops compiling
+// as a stand-in.
+type permanentTestErr struct{ perm bool }
+
+func (e *permanentTestErr) Error() string   { return "upstream: 402 insufficient balance" }
+func (e *permanentTestErr) Permanent() bool { return e.perm }
+
+// TestLlmWorker_PermanentError_LoudButStillRetried pins the deliberate
+// asymmetry: an account-level failure changes the LOG LEVEL and nothing
+// else.  It must keep returning an error (so river backs off rather than
+// hammering a dead key 600 times an hour) and must keep NOT stamping (so
+// 11,600 untried rows are not buried under a 30-day cooldown recording a
+// verdict that was never reached).
+//
+// Both halves are load-bearing in opposite directions — a future change
+// that "handles" the permanent case by stamping it, or by returning nil,
+// breaks exactly one of the two assertions below.
+func TestLlmWorker_PermanentError_LoudButStillRetried(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeLlmWriter{row: dbgen.GetDescriptionForLlmTranslateRow{
+		Description: ptr("English synopsis."),
+	}}
+	tr := &fakeTranslator{err: &permanentTestErr{perm: true}}
+	w := NewDescriptionLlmWorker(tr, db)
+
+	require.Error(t, w.Work(context.Background(), llmJob(12)),
+		"an account-level failure is still an error: the row is undecided")
+	assert.Nil(t, db.wroteText)
+	assert.Empty(t, db.stamped,
+		"a dead key says nothing about this row — stamping it would record a verdict never reached")
+}
+
+// TestLlmWorker_NonPermanentError_Unchanged guards the other side of the
+// errors.As branch: a wrapped error whose Permanent() is false must take
+// the ordinary path, unchanged.  Without this, a branch that always
+// matched would look correct in the test above.
+func TestLlmWorker_NonPermanentError_Unchanged(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeLlmWriter{row: dbgen.GetDescriptionForLlmTranslateRow{
+		Description: ptr("English synopsis."),
+	}}
+	tr := &fakeTranslator{err: &permanentTestErr{perm: false}}
+	w := NewDescriptionLlmWorker(tr, db)
+
+	require.Error(t, w.Work(context.Background(), llmJob(13)))
+	assert.Empty(t, db.stamped)
+}
+
+// TestLlmWorker_EmptyCompletion_StampedNotRetried is the regression test for
+// the 2026-08 reasoning-token incident.
+//
+// deepseek-v4-flash reasons before it answers, and max_tokens caps reasoning
+// plus answer together.  A chain of thought that eats the whole budget yields
+// 200 OK, finish_reason "length", content "" — a request that SUCCEEDED and
+// produced no translation.  The client used to report that as an error, so
+// Work returned before markAttempted, the row's attempt stamp stayed NULL,
+// and `ORDER BY ... NULLS FIRST` re-served the same rows at the head of every
+// batch until river's 25 attempts (attempt⁴ backoff, ~20 days) discarded them
+// and the next scan put them straight back.  997 failed calls, 74 wedged
+// jobs, ~2M output tokens, nothing translated.
+//
+// The fix lives in the client (empty content is now ("", nil)); this asserts
+// the worker end of the contract — the empty string must reach
+// validateTranslation, be judged a decided outcome, and get stamped.  The
+// stamp is the loop-breaker, so assert it explicitly rather than settling for
+// "Work returned nil".
+func TestLlmWorker_EmptyCompletion_StampedNotRetried(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeLlmWriter{row: dbgen.GetDescriptionForLlmTranslateRow{
+		Description: ptr("English synopsis long enough to translate."),
+	}}
+	tr := &fakeTranslator{out: "", err: nil}
+	w := NewDescriptionLlmWorker(tr, db)
+
+	require.NoError(t, w.Work(context.Background(), llmJob(19)),
+		"an empty completion is a decided outcome, not a fault for river to retry")
+	assert.Equal(t, 1, tr.calls)
+	assert.Nil(t, db.wroteText, "empty content must never reach description_cn")
+	assert.Equal(t, []int32{19}, db.stamped,
+		"the stamp is what stops NULLS FIRST re-serving this row every pass")
+}
+
 func TestLlmWorker_RefusalRejected_StampedNotWritten(t *testing.T) {
 	t.Parallel()
 
@@ -288,6 +383,61 @@ func TestStripDescriptionHTML(t *testing.T) {
 	assert.Equal(t, out, strings.TrimSpace(out))
 }
 
+// TestStripDescriptionHTML_SourceTagAnywhere covers the shape that made the
+// attribution survive into 240 of the rows still queued: AniList appends a
+// "Note: ..." paragraph AFTER the credit, so an end-anchored pattern never
+// reached it and the tag went to the model.
+//
+// The last case is the reason the pattern demands a colon after "source".
+// Unanchored without it, an ordinary parenthetical would be silently
+// deleted from a synopsis — a quieter bug than the one being fixed.
+func TestStripDescriptionHTML_SourceTagAnywhere(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		in     string
+		absent string
+		kept   string
+	}{
+		{
+			name:   "credit followed by a Note paragraph",
+			in:     "Body text.<br><br>(Source: Bushiroad)<br><br>Note: episode 1 was pre-screened.",
+			absent: "Bushiroad",
+			kept:   "Note: episode 1 was pre-screened.",
+		},
+		{
+			name:   "two credits, both go",
+			in:     "Body.\n(Source: ANN)\n(Source: MAL Rewrite)",
+			absent: "Source:",
+			kept:   "Body.",
+		},
+		{
+			name:   "bracketed writer credit",
+			in:     "Body.\n[Written by MAL Rewrite]\n\nNote: delayed.",
+			absent: "Written by",
+			kept:   "Note: delayed.",
+		},
+		{
+			name:   "ordinary parenthetical survives",
+			in:     "He must find the (source of his power) before dawn.",
+			absent: "",
+			kept:   "(source of his power)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := stripDescriptionHTML(tc.in)
+			if tc.absent != "" {
+				assert.NotContains(t, out, tc.absent, "catalogue credit must not reach the model")
+			}
+			assert.Contains(t, out, tc.kept, "synopsis prose must survive")
+		})
+	}
+}
+
 func TestValidateTranslation(t *testing.T) {
 	t.Parallel()
 
@@ -301,6 +451,14 @@ func TestValidateTranslation(t *testing.T) {
 		{"valid Chinese", llmTestTranslation, true},
 		{"English refusal", "I'm sorry, but I can't help with that request.", false},
 		{"empty", "   ", false},
+		// The exact shape a budget-exhausted reasoning completion arrives in:
+		// a successful call whose content is the zero value.  Distinct from
+		// the whitespace case above — that one exercises TrimSpace, this one
+		// is the incident.
+		{"empty string from a successful completion", "", false},
+		// …and the same outcome dressed as markup, which only strips to
+		// nothing after anyTag runs.
+		{"markup that strips to nothing", "<p></p>", false},
 		{"untranslated echo", src, false},
 		{"markup-only wrapper stripped but valid", "<p>" + llmTestTranslation + "</p>", true},
 		{"runaway length", strings.Repeat("异世界冒险之旅永不停歇。", 60), false},
