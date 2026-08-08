@@ -2,6 +2,24 @@
 
 ---
 
+## [3.8.0] - 2026-08-08
+
+### 新增 — 中文简介的 LLM 兜底层：Bangumi 捡不走的，DeepSeek 当轮捡
+
+Bangumi 简介通道第一轮扫完后的现实：全库 29% 有中文简介，**当季新番 1/100**。剩下的 11,600 条有英文原文的行分两类——4,108 条试过但 bgm 条目没有可用中文，约 7,500 条因绑定过不了交叉验证门槛（或压根没有 bgm_id）永远进不了那个通道。这一版给它们建唯一的通道：`description_llm_backfill` 常驻清道夫，把英文简介翻成中文落库。全量回填的账算过：约 100 万输入 token + 250 万输出，**deepseek-v4-flash 约 1 美元**，翻一次存一辈子，线上永远是纯数据库读。
+
+**接管规则在 SQL 里钉死，永不与主通道抢**：候选查询只选「Bangumi 已盖章试过」或「不在 eligible 视图里」的行；写入守卫是 `description_cn IS NULL`——机翻永远只填空白，覆盖不了 bangumi/manual/更早的自己。**反向覆盖是特意打通的**：`ListDescriptionCnCandidates` 加了 `source='llm'` 臂，机翻行回到 Bangumi 扫描的 30 天重查周期，哪天社区写了真人简介就换掉机翻（manual > bangumi > llm 单向语义，管理面板的 pending 镜像同步拓宽——change one, change both）。
+
+**管线复用 0015 的全部骨架**：migration 0017 加独立的 `description_cn_llm_attempted_at` 盖章列（与 Bangumi 通道的章分开，两个扫描器互不挤兑对方的队列）+ 同款 NULLS FIRST 部分索引，收尾保证的算术原样成立。新 river 队列 `description_llm` 独立可暂停，MaxWorkers=4——这是全站唯一真能并行的队列（预算是 DeepSeek 往返秒数不是共享令牌桶），600 行/小时批量约 20 小时走完存量。job 载荷只带 anilist_id，工作时重读源文并复查 `description_cn`——**Bangumi 在 scan 与 work 之间抢先落地时，worker 让位不花 token**（有单测钉死）。
+
+**质量与红线**：发送前 Go 侧剥 HTML/实体/尾部 "(Source: ...)"（省 token 也防模型回吐标签）；回包过验证闸——汉字 ≥10 且占比 ≥25%（英文拒答与未翻译回声全灭）、长度 ≤4×源文+200（防跑飞）——不过闸就盖章不落库，30 天后带着更好的模型重试。**SERP 边界**：metadata/JSON-LD 继续只读英文原文；详情页正文渲染机翻时出「简介由 AI 翻译自英文原文」标注行并进 nosnippet（与 Bangumi 转写文本同一豁免通道），Google 摘要永远见不到机翻。系统提示词是常量——DeepSeek 前缀缓存价是 miss 的 1/50，一万一千次请求里省的就是大头。
+
+**部署开关**：`DEEPSEEK_API_KEY` 环境变量。没有 key 时 worker 照常注册（残留 job 永不会遇到未知 kind）、扫描器以 disabled 姿态每小时打一行 info——**可以先部署后配 key**，key 落进 `.env.production` 重启即自动开扫。DeepSeek 官方已预告近期涨价，趁现价把存量走完。
+
+测试：deepseek client 3 例（httptest：鉴权/载荷/非 2xx ErrUpstream/空 choices）；worker 13 例（扫描映射/禁用不读库/Bangumi 抢先不花 token/瞬态不盖章 river 重试/拒答不落库/剥离与验证闸全分支）；12 个既有 Enqueuer 测试替身补齐新接口方法。**本地全量 27 包 go test 首次全绿**（Docker 起着，testcontainer 四包一并实跑），bun 487/487，tsc/eslint 零新增。
+
+---
+
 ## [3.7.3] - 2026-08-08
 
 ### 修复 — 库自动扫描「时灵时不灵」：五个互不相同的搁浅缝一次关掉

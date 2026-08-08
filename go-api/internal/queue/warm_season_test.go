@@ -141,6 +141,10 @@ func (f *fakeWarmEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ [
 	return nil
 }
 
+func (f *fakeWarmEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 func (f *fakeWarmEnqueuer) snapshotV1Calls() [][]int32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -733,6 +733,29 @@ func (q *Queries) GetCompletedGems(ctx context.Context, limit int32) ([]GetCompl
 	return items, nil
 }
 
+const getDescriptionForLlmTranslate = `-- name: GetDescriptionForLlmTranslate :one
+SELECT ac.description, ac.description_cn
+FROM anime_cache ac
+WHERE ac.anilist_id = $1
+`
+
+type GetDescriptionForLlmTranslateRow struct {
+	Description   *string `json:"description"`
+	DescriptionCn *string `json:"descriptionCn"`
+}
+
+// The per-row worker's re-read.  Job args deliberately carry only the
+// anilist_id (payload dedupe stays cheap, river rows stay small), so the
+// worker fetches the source text at work time — and re-checks description_cn,
+// because the Bangumi channel may have landed a real summary between scan and
+// work.  In that race the LLM worker must stand down, not spend tokens.
+func (q *Queries) GetDescriptionForLlmTranslate(ctx context.Context, anilistID int32) (GetDescriptionForLlmTranslateRow, error) {
+	row := q.db.QueryRow(ctx, getDescriptionForLlmTranslate, anilistID)
+	var i GetDescriptionForLlmTranslateRow
+	err := row.Scan(&i.Description, &i.DescriptionCn)
+	return i, err
+}
+
 const getRelationEnrichmentByIDs = `-- name: GetRelationEnrichmentByIDs :many
 SELECT anilist_id, title_chinese, cover_image_url
 FROM anime_cache
@@ -1369,7 +1392,7 @@ func (q *Queries) InsertAnimeStudio(ctx context.Context, animeID int32, studio s
 const listDescriptionCnCandidates = `-- name: ListDescriptionCnCandidates :many
 SELECT ac.anilist_id, ac.bgm_id
 FROM description_cn_eligible ac
-WHERE ac.description_cn IS NULL
+WHERE (ac.description_cn IS NULL OR ac.description_cn_source = 'llm')
   AND (
       ac.description_cn_attempted_at IS NULL
       OR ac.description_cn_attempted_at < now() - $1::interval
@@ -1403,6 +1426,14 @@ type ListDescriptionCnCandidatesRow struct {
 // The cooldown then doubles as a retry: Bangumi summaries are community
 // written over time, so a subject that is Japanese-only today may carry Chinese
 // prose next quarter, and re-reaching it is how that gets picked up.
+// The description_cn_source = 'llm' arm hands machine-translated rows back
+// to this sweep on its normal 30-day cadence: Bangumi summaries are written
+// by its community over time, and the covenant is manual > bangumi > llm —
+// a human-written synopsis appearing upstream must eventually replace the
+// machine translation.  UpdateDescriptionCn already permits that overwrite
+// (its guard only protects 'manual'); this arm is what gets the row fetched
+// again at all.  Mirror-kept in admin.sql's desc_cn_pending — change one,
+// change both.
 func (q *Queries) ListDescriptionCnCandidates(ctx context.Context, retryAfter pgtype.Interval, rowLimit int32) ([]ListDescriptionCnCandidatesRow, error) {
 	rows, err := q.db.Query(ctx, listDescriptionCnCandidates, retryAfter, rowLimit)
 	if err != nil {
@@ -1416,6 +1447,57 @@ func (q *Queries) ListDescriptionCnCandidates(ctx context.Context, retryAfter pg
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDescriptionCnLlmCandidates = `-- name: ListDescriptionCnLlmCandidates :many
+SELECT ac.anilist_id
+FROM anime_cache ac
+WHERE ac.description IS NOT NULL AND ac.description <> ''
+  AND ac.description_cn IS NULL
+  AND (
+      ac.description_cn_llm_attempted_at IS NULL
+      OR ac.description_cn_llm_attempted_at < now() - $1::interval
+  )
+  AND (
+      ac.description_cn_attempted_at IS NOT NULL
+      OR NOT EXISTS (
+          SELECT 1 FROM description_cn_eligible e
+          WHERE e.anilist_id = ac.anilist_id
+      )
+  )
+ORDER BY ac.description_cn_llm_attempted_at NULLS FIRST, ac.anilist_id
+LIMIT $2
+`
+
+// Rows for the LLM translation fallback: an English source text exists, no
+// Chinese landed yet, and the Bangumi channel is done with the row — either
+// it already tried (attempt stamp set; the subject had no usable Chinese) or
+// the row can never enter that channel at all (binding fails the
+// description_cn_eligible trust gate, or there is no bgm_id).  The LLM tier
+// is strictly Bangumi's leftovers; it never races the primary channel.
+//
+// Ordering by the LLM attempt stamp gives this sweep the same finish
+// guarantee as the Bangumi one (migration 0015 arithmetic): a row whose
+// translation failed validation goes to the back instead of holding the
+// front of every batch.
+func (q *Queries) ListDescriptionCnLlmCandidates(ctx context.Context, retryAfter pgtype.Interval, rowLimit int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listDescriptionCnLlmCandidates, retryAfter, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var anilist_id int32
+		if err := rows.Scan(&anilist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, anilist_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1525,6 +1607,23 @@ WHERE anilist_id = $1
 // the rest of the backlog.
 func (q *Queries) MarkDescriptionCnAttempted(ctx context.Context, anilistID int32) error {
 	_, err := q.db.Exec(ctx, markDescriptionCnAttempted, anilistID)
+	return err
+}
+
+const markDescriptionCnLlmAttempted = `-- name: MarkDescriptionCnLlmAttempted :exec
+UPDATE anime_cache
+SET description_cn_llm_attempted_at = now()
+WHERE anilist_id = $1
+`
+
+// Stamp a row as tried by the LLM sweep, regardless of outcome — stored,
+// rejected by validation, or skipped because bangumi won the race.  NOT
+// called on transport errors, which river should retry rather than have the
+// sweep treat as decided.  Counterpart to the ordering in
+// ListDescriptionCnLlmCandidates, exactly as migration 0015 is to the
+// Bangumi sweep.
+func (q *Queries) MarkDescriptionCnLlmAttempted(ctx context.Context, anilistID int32) error {
+	_, err := q.db.Exec(ctx, markDescriptionCnLlmAttempted, anilistID)
 	return err
 }
 
@@ -1673,6 +1772,24 @@ WHERE ac.anilist_id = $2
 // sweep must not undo a human correction.
 func (q *Queries) UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error {
 	_, err := q.db.Exec(ctx, updateDescriptionCn, descriptionCn, anilistID, bgmID)
+	return err
+}
+
+const updateDescriptionCnLlm = `-- name: UpdateDescriptionCnLlm :exec
+UPDATE anime_cache
+SET description_cn        = $1,
+    description_cn_source = 'llm',
+    updated_at            = now()
+WHERE anilist_id = $2
+  AND description_cn IS NULL
+`
+
+// Store a machine translation.  The guard is description_cn IS NULL — the
+// LLM tier writes into empty space only and can never overwrite bangumi,
+// manual, or even an earlier llm value.  The reverse covenant (bangumi
+// replacing llm) lives in ListDescriptionCnCandidates + UpdateDescriptionCn.
+func (q *Queries) UpdateDescriptionCnLlm(ctx context.Context, descriptionCn *string, anilistID int32) error {
+	_, err := q.db.Exec(ctx, updateDescriptionCnLlm, descriptionCn, anilistID)
 	return err
 }
 

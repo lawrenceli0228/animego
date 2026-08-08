@@ -142,6 +142,10 @@ func (s *spyEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []queu
 	return nil
 }
 
+func (s *spyEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []queue.DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 type fakeQueueController struct {
 	mu sync.Mutex
 

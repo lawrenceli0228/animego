@@ -287,6 +287,10 @@ func (f *fakeV2Enqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []D
 	return nil
 }
 
+func (f *fakeV2Enqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 func (f *fakeV2Enqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) error {
 	dup := make([]BangumiV3Args, len(jobs))
 	copy(dup, jobs)

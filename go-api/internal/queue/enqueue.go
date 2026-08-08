@@ -59,6 +59,11 @@ type Enqueuer interface {
 	// (description_backfill_scan) is its only production caller, and
 	// it feeds rows the sweep query already vetted.
 	EnqueueDescriptionBackfillMany(ctx context.Context, jobs []DescriptionBackfillArgs) error
+	// EnqueueDescriptionLlmBackfillMany seeds the LLM translation
+	// fallback sweep.  Same shape and stance as the Bangumi sweep's
+	// method above: fed only by its periodic scan worker, rows already
+	// vetted by the candidate query.
+	EnqueueDescriptionLlmBackfillMany(ctx context.Context, jobs []DescriptionLlmBackfillArgs) error
 	// EnqueueWarmSeasonNow inserts a single WarmSeasonArgs job for
 	// immediate dispatch.  Used at boot time to seed the initial
 	// current + next season pair; the 24h periodic schedule (configured
@@ -186,6 +191,35 @@ func (e *RealEnqueuer) EnqueueDescriptionBackfillMany(ctx context.Context, jobs 
 	return nil
 }
 
+// EnqueueDescriptionLlmBackfillMany batch-inserts LLM translation jobs.
+// Same InsertMany-not-InsertManyFast reasoning as the Bangumi sweep's
+// method directly above: ByArgs dedupe conflicts must be skipped, not
+// errored.
+func (e *RealEnqueuer) EnqueueDescriptionLlmBackfillMany(ctx context.Context, jobs []DescriptionLlmBackfillArgs) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	params := make([]river.InsertManyParams, len(jobs))
+	for i, j := range jobs {
+		params[i] = river.InsertManyParams{Args: j}
+	}
+	res, err := e.client.InsertMany(ctx, params)
+	if err != nil {
+		return fmt.Errorf("queue.EnqueueDescriptionLlmBackfillMany (n=%d): %w", len(jobs), err)
+	}
+	skipped := 0
+	for _, r := range res {
+		if r.UniqueSkippedAsDuplicate {
+			skipped++
+		}
+	}
+	slog.DebugContext(ctx, "queue.description_llm enqueued",
+		"n", len(jobs),
+		"inserted", len(jobs)-skipped,
+		"skippedDuplicate", skipped)
+	return nil
+}
+
 // EnqueueWarmSeasonNow inserts a single WarmSeasonArgs job for
 // immediate dispatch.  Used by main.go at boot time (current +
 // next season pair) — periodic re-fire is configured separately
@@ -219,6 +253,11 @@ func (NoopEnqueuer) EnqueueV3Many(ctx context.Context, jobs []BangumiV3Args) err
 
 // EnqueueDescriptionBackfillMany returns nil regardless of input.
 func (NoopEnqueuer) EnqueueDescriptionBackfillMany(ctx context.Context, jobs []DescriptionBackfillArgs) error {
+	return nil
+}
+
+// EnqueueDescriptionLlmBackfillMany returns nil regardless of input.
+func (NoopEnqueuer) EnqueueDescriptionLlmBackfillMany(ctx context.Context, jobs []DescriptionLlmBackfillArgs) error {
 	return nil
 }
 
@@ -305,6 +344,18 @@ func (l *LateBoundEnqueuer) EnqueueDescriptionBackfillMany(ctx context.Context, 
 		return nil
 	}
 	return e.EnqueueDescriptionBackfillMany(ctx, jobs)
+}
+
+// EnqueueDescriptionLlmBackfillMany delegates to the bound RealEnqueuer,
+// or no-ops when unbound — same stance as every other method here.
+func (l *LateBoundEnqueuer) EnqueueDescriptionLlmBackfillMany(ctx context.Context, jobs []DescriptionLlmBackfillArgs) error {
+	l.mu.RLock()
+	e := l.inner
+	l.mu.RUnlock()
+	if e == nil {
+		return nil
+	}
+	return e.EnqueueDescriptionLlmBackfillMany(ctx, jobs)
 }
 
 // EnqueueWarmSeasonNow delegates to the bound RealEnqueuer, or no-ops

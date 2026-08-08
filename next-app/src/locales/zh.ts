@@ -109,6 +109,7 @@ const zh = {
     // Credit under the synopsis when the rendered text is Bangumi's
     // community-written summary rather than AniList's description.
     summaryFromBangumi: '简介来自 Bangumi',
+    summaryFromLlm: '简介由 AI 翻译自英文原文',
     linkCopied: '链接已复制',
     linkCopyFailed: '复制失败，请手动复制链接',
     openPlayer: '▶ 弹幕播放',

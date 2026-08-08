@@ -41,6 +41,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/bgmidmap"
 	"github.com/lawrenceli0228/animego/go-api/internal/comments"
+	"github.com/lawrenceli0228/animego/go-api/internal/deepseek"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
 	"github.com/lawrenceli0228/animego/go-api/internal/danmaku"
@@ -119,6 +120,19 @@ func main() {
 	// the V1 enrichment worker (and V2/V3 in P2.1.6 / P2.1.7).
 	bangumiClient := bangumi.NewClient()
 
+	// DeepSeek client — the LLM translation fallback for description_cn
+	// (description_llm_backfill sweep).  Keyed off DEEPSEEK_API_KEY: with
+	// no key the workers still register (so leftover jobs can never meet
+	// an unknown kind) but the scan runs disabled and the sweep is inert.
+	// The interface stays nil rather than holding a keyless client so the
+	// disabled posture is decided in exactly one place.
+	var llmTranslator queue.DescriptionTranslator
+	if key := os.Getenv("DEEPSEEK_API_KEY"); key != "" {
+		llmTranslator = deepseek.NewClient(key)
+	} else {
+		slog.Info("description_llm sweep disabled: DEEPSEEK_API_KEY not set")
+	}
+
 	// Enqueuer must exist BEFORE workers are built (V1 worker captures
 	// it to chain V2 jobs) but its underlying river client is the
 	// OUTPUT of Boot below.  LateBoundEnqueuer breaks the cycle: it
@@ -137,14 +151,21 @@ func main() {
 	// an in-process token bucket, so the backfill only stays inside the
 	// bgm.tv budget while it draws from this same instance.  A standalone
 	// backfill CLI would open a second bucket and double the real rate.
+	workers := queue.WorkersWithBangumiAndNormalizer(
+		bangumiClient,
+		anilistClient,
+		q,
+		enqueuer,
+		anime.NormalizeMainRow,
+	)
+	// LLM translation sweep registers separately so the bundle builder's
+	// signature (and its test doubles) stay untouched.  With a nil
+	// translator this registers a disabled scan + a defensive no-op row
+	// worker — see AddDescriptionLlmWorkers.
+	queue.AddDescriptionLlmWorkers(workers, llmTranslator, q, enqueuer)
+
 	riverClient, err := queue.Boot(pool, queue.Config{
-		Workers: queue.WorkersWithBangumiAndNormalizer(
-			bangumiClient,
-			anilistClient,
-			q,
-			enqueuer,
-			anime.NormalizeMainRow,
-		),
+		Workers: workers,
 		// Queues: default for V1+V2+warm_season+orphan_scan, bangumi_v3
 		// for V3 only, description_backfill for the Chinese-description
 		// sweep.  The dedicated V3 queue is what makes the admin
@@ -166,11 +187,18 @@ func main() {
 			// separate queue is for isolation and pausability, not for
 			// parallelism.
 			queue.DescriptionBackfillQueueName: {MaxWorkers: 1},
+			// LLM translation sweep: 4 workers is the one queue here
+			// that genuinely parallelises — its budget is DeepSeek
+			// round-trips (seconds each, no shared token bucket), and
+			// 4-way keeps a 600-row batch under ~15 minutes without
+			// hammering the API.
+			queue.DescriptionLlmQueueName: {MaxWorkers: 4},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),
 			queue.PeriodicOrphanScanJob(),
 			queue.PeriodicDescriptionBackfillScanJob(),
+			queue.PeriodicDescriptionLlmBackfillScanJob(),
 		},
 		Logger: slog.Default(),
 	})

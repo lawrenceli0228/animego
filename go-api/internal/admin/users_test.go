@@ -122,6 +122,10 @@ func (fakeEnqueuer) EnqueueDescriptionBackfillMany(_ context.Context, _ []queue.
 	return nil
 }
 
+func (fakeEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []queue.DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
 // fixtureCreateRow builds a dbgen.AdminCreateUserRow with the supplied
 // inputs.  Used by happy-path tests that need a stable RETURNING row.
 func fixtureCreateRow(t *testing.T, username, email string) dbgen.AdminCreateUserRow {

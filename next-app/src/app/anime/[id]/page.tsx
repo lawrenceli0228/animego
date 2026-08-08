@@ -483,16 +483,24 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   const descFull = stripHtml(desc.text);
   const descTruncated = truncateVisual(descFull, DESC_TRUNCATE_WIDTH);
   const descNeedsToggle = visualWidth(descFull) > DESC_TRUNCATE_WIDTH;
-  // Attribution + snippet exclusion apply only to text we transcribed from
-  // Bangumi. 'llm' / 'manual' sources do not exist yet and will each need
-  // their own call on both (a machine translation credits differently; our
-  // own editorial text has no reason to be held out of snippets).
+  // Attribution + snippet exclusion hang off the provenance of the text.
   //
-  // Both flags hang off the SAME condition — the provenance of the text —
-  // and neither is gated on bgmId. bgmId only decides whether the credit is
-  // a link: a row that lost its binding after the summary was written would
-  // otherwise silently drop the credit while still republishing the text.
+  //   - 'bangumi': credit (linked when the binding survives) + nosnippet —
+  //     text we transcribed from bgm.tv.
+  //   - 'llm': an "AI-translated" note + nosnippet. The note is honesty
+  //     (readers judge machine translation differently) and nosnippet keeps
+  //     machine text out of Google's snippets entirely — the same SERP
+  //     boundary that keeps generateMetadata / JSON-LD on the English
+  //     original applies one layer down here.
+  //   - 'manual' still does not exist; our own editorial text will have no
+  //     reason to be held out of snippets when it does.
+  //
+  // Neither flag is gated on bgmId. bgmId only decides whether the bangumi
+  // credit is a link: a row that lost its binding after the summary was
+  // written would otherwise silently drop the credit while still
+  // republishing the text.
   const isBangumiSummary = desc.source === "bangumi";
+  const isLlmSummary = desc.source === "llm";
   const bgmSummaryHref = detail.bgmId
     ? `https://bgm.tv/subject/${detail.bgmId}`
     : undefined;
@@ -656,9 +664,13 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
                 needsToggle={descNeedsToggle}
                 expandLabel={dict.detail.readMore}
                 collapseLabel={dict.detail.collapse}
-                nosnippet={isBangumiSummary}
+                nosnippet={isBangumiSummary || isLlmSummary}
                 sourceLabel={
-                  isBangumiSummary ? dict.detail.summaryFromBangumi : undefined
+                  isBangumiSummary
+                    ? dict.detail.summaryFromBangumi
+                    : isLlmSummary
+                      ? dict.detail.summaryFromLlm
+                      : undefined
                 }
                 sourceHref={isBangumiSummary ? bgmSummaryHref : undefined}
               />
