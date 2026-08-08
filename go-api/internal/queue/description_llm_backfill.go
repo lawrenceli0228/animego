@@ -35,13 +35,36 @@
 // on descriptionCnSource.  Nothing in this file can enforce that; it is
 // recorded here because this file is where the text enters the system.
 //
-// # Cost
+// # Cost — the old estimate was wrong
 //
-// The whole backlog (~11,600 rows, ~4M chars of English) is roughly one
-// million input tokens and ~2.5M output tokens — about one US dollar at
-// deepseek-v4-flash prices.  The constants below therefore optimise for
-// operational calm, not for spend: the money is gone the first walk either
-// way, and after that the sweep is a trickle.
+// This header used to promise the whole backlog (~11,600 rows, ~4M chars of
+// English) cost "about one US dollar": ~1M input tokens plus ~2.5M output
+// tokens, the output side derived from how long the Chinese translations
+// come out.
+//
+// That arithmetic silently assumed a non-reasoning model.  deepseek-v4-flash
+// emits a chain of thought BEFORE the answer and the provider bills those
+// reasoning tokens as output, so the visible translation — the only thing
+// the estimate counted — is the minority of what is charged.  The 2026-08
+// incident that produced this note measured single synopses whose reasoning
+// chain ran to 3,943 tokens on its own, against translations of a few
+// hundred; ordinary rows still land in the high hundreds to low thousands.
+// The real output volume is therefore a multiple of the old figure, and the
+// multiple is not stable enough to write down: it moves with the source
+// text, the model version, and the max_tokens budget.
+//
+// So this file cannot tell you the price.  Read the DeepSeek billing
+// dashboard after a full walk and treat every token count above as a stale
+// sample rather than a forecast.  Only the old note's conclusion survives,
+// and it still holds: the constants below optimise for operational calm,
+// because the spend is dominated by the first walk either way and the sweep
+// is a trickle afterwards.
+//
+// The same incident showed the failure mode is not "somewhat over budget"
+// but "burn with nothing to show for it" — roughly 2M output tokens went to
+// completions that came back empty, the reasoning chain having eaten the
+// whole budget before the translation started.  See the empty-completion
+// outcome on Work below for why that no longer wedges the sweep.
 package queue
 
 import (
@@ -66,15 +89,32 @@ import (
 // into jobs.
 //
 // Unlike the Bangumi sweep there is no shared token bucket to protect — the
-// constraint is wall-clock inside the hourly interval.  600 rows at ~2-4s
-// per completion across descriptionLlmMaxWorkers workers drains in well
-// under 15 minutes, comfortably clear of the next pass, and walks the
-// ~11,600-row backlog in about 20 hours.
+// constraint is wall-clock inside the hourly interval.  600 rows an hour
+// across the LLM queue's 4 workers (the MaxWorkers entry for
+// DescriptionLlmQueueName in cmd/server/main.go) walks the ~11,600-row
+// backlog in about 20 hours.
+//
+// The old headroom claim behind that number — "~2-4s per completion, drains
+// in well under 15 minutes" — is retired.  A reasoning model generates its
+// entire chain of thought before the first character of the translation, so
+// a completion is materially slower and the true drain time is no longer
+// measured.  Overrunning the hour is survivable rather than compounding:
+// DescriptionLlmBackfillArgs dedupes ByArgs, so the next scan re-submits the
+// rows still queued and river skips them.  If the queue is visibly backed
+// up, lower this number — do not raise it on the assumption the retired
+// figure still holds.
 const descriptionLlmScanBatchSize int32 = 600
 
 // descriptionLlmWorkTimeout bounds one row: a DB re-read, one completion,
 // one UPDATE.  The deepseek client's own 60s HTTP timeout sits inside this,
 // so this fires only when the DB side wedges too.
+//
+// The 60s inner bound was sized for a plain translation and has become the
+// live constraint now that the model reasons first: a long chain of thought
+// spends real wall-clock before any output token.  A trip is safe (transport
+// error → no stamp → river retries) but pure waste, so if the logs fill with
+// client timeouts, raise the client bound and this one together — this must
+// stay comfortably above it or the job dies before the client can report.
 const descriptionLlmWorkTimeout = 90 * time.Second
 
 // descriptionLlmScanInterval matches the Bangumi sweep's hourly cadence for
@@ -83,10 +123,13 @@ const descriptionLlmWorkTimeout = 90 * time.Second
 const descriptionLlmScanInterval = time.Hour
 
 // descriptionLlmRetryDays is the cooldown before a decided row is looked at
-// again.  A row lands here when validation rejected the model's output or
-// the source text stripped to nothing — both worth a re-try eventually
-// (models and prompts improve; descriptions get edited upstream) but not
-// worth spending tokens on next hour.  30 days matches the Bangumi sweep.
+// again.  A row lands here when validation rejected the model's output, when
+// the completion came back empty (the reasoning chain outran the token
+// budget), or when the source text stripped to nothing — all worth a re-try
+// eventually (models and prompts improve; budgets get raised; descriptions
+// get edited upstream) but not worth spending tokens on next hour.  This
+// cooldown IS the retry channel for those rows; river's attempt ladder
+// deliberately is not.  30 days matches the Bangumi sweep.
 const descriptionLlmRetryDays = 30
 
 // descriptionLlmSystemPrompt is the fixed instruction prefix.  Constant so
@@ -113,6 +156,37 @@ func descriptionLlmRetryAfter() pgtype.Interval {
 // here (use-site) so the queue package does not import the deepseek package.
 type DescriptionTranslator interface {
 	Chat(ctx context.Context, system, user string) (string, error)
+}
+
+// permanentError is the behaviour — not the type — that marks an upstream
+// failure as one no amount of retrying can fix.  *deepseek.ErrUpstream
+// implements it for 401 / 402 / 403 (dead key, unfunded account, entitlement
+// revoked).
+//
+// Declared as a local interface, and matched with errors.As against a
+// pointer to it, so the queue package still does NOT import deepseek — the
+// same decoupling DescriptionTranslator exists to preserve.  Importing the
+// client just to read one status code would trade a real architectural
+// boundary for a log line.
+//
+// What this deliberately does NOT do: change behaviour.  A permanent error
+// still returns, still goes unstamped, still rides river's retry ladder —
+// because 401/402/403 are facts about the ACCOUNT, not about the row, and
+// every row-level reaction is a lie.  Stamping would record "tried, nothing
+// came back" for 11,600 rows that were never tried and bury them under a
+// 30-day cooldown; returning nil without a stamp would strip the backoff and
+// turn a silent bug into 600 billable failures an hour.
+//
+// The real defect was never the retry policy, it was visibility: 25 attempts
+// on an attempt⁴ ladder is ~20 days, so an expired card produced no signal
+// anyone would see in time.  This raises that one arm to ERROR with the
+// status and body attached, which is where the cause is actually written.
+// If an alert on it ever fires and goes unread, the correct escalation is
+// pausing DescriptionLlmQueueName — the scan job rides that same queue
+// (args.go InsertOpts), so a pause cuts the feed and the drain in one move,
+// and resuming is a human decision because "did we pay" is a human fact.
+type permanentError interface {
+	Permanent() bool
 }
 
 // DescriptionLlmReader is the sqlc subset the scan worker reads.
@@ -214,6 +288,28 @@ func NewDescriptionLlmWorker(llm DescriptionTranslator, db DescriptionLlmWriter)
 //     translate).
 //   - completion transport/API error — wrapped and returned so river
 //     retries.  NOT stamped: a 429 or timeout says nothing about the row.
+//     This is the boundary against the next case: an error means no answer
+//     ever arrived, so the row is undecided.
+//     401/402/403 take this same ladder ON PURPOSE — they are facts about
+//     the account, not the row, so no row-level verdict is honest — but
+//     they first get an ERROR line naming the status, because 25 attempts
+//     of attempt⁴ backoff is ~20 days and an expired card used to produce
+//     no signal anyone would see in time.  See permanentError.
+//   - completion succeeded but returned an empty string — a DECIDED
+//     outcome, not a fault.  It falls through to validateTranslation, fails
+//     the non-empty check, and lands in the next arm (stamp + warn + nil).
+//     That routing is the whole point: a reasoning model that spends its
+//     max_tokens budget on the chain of thought answers 200 OK with
+//     finish_reason "length" and content "" — the request worked, the row
+//     simply has no translation.  Before 2026-08 the client reported that as
+//     an error, so Work returned at the arm above and NEVER reached
+//     markAttempted: description_cn_llm_attempted_at stayed NULL, the
+//     candidate query's `NULLS FIRST` handed the same rows back at the head
+//     of every batch, and river spread 25 doomed attempts over ~20 days
+//     before discarding them — whereupon the next scan re-enqueued the row.
+//     997 failed calls, 74 wedged jobs, ~2M output tokens, zero rows
+//     translated.  The stamp is what breaks the loop; the 30-day cooldown is
+//     the retry, river is not.
 //   - output fails validation — stamp + warn + nil.  Decided for now; the
 //     30-day cooldown doubles as a retry with a better model/prompt.
 //   - write failure — warn and fall through to the stamp, mirroring
@@ -255,6 +351,15 @@ func (w *DescriptionLlmWorker) Work(ctx context.Context, job *river.Job[Descript
 
 	out, err := w.llm.Chat(ctx, descriptionLlmSystemPrompt, src)
 	if err != nil {
+		// Account-level failures get an ERROR line before taking the same
+		// retry path as everything else.  See permanentError for why the
+		// behaviour is deliberately unchanged and only the volume differs.
+		var perm permanentError
+		if errors.As(err, &perm) && perm.Permanent() {
+			slog.ErrorContext(ctx, "description_llm upstream rejected the account; sweep will stall",
+				"anilistId", anilistID,
+				"err", err)
+		}
 		return fmt.Errorf("description_llm translate %d: %w", anilistID, err)
 	}
 
@@ -334,7 +439,19 @@ var (
 	// sourceTail matches a trailing "(Source: …)" / "[Written by …]"
 	// attribution line — catalogue metadata, not synopsis, and the prompt
 	// tells the model to drop it; stripping it here saves the tokens too.
-	sourceTail = regexp.MustCompile(`(?is)[\(\[]\s*(source|written by)\b[^\)\]]*[\)\]]\s*$`)
+	// Deliberately NOT anchored to the end.  It was, and 240 of the rows
+	// still waiting carry the attribution mid-text — AniList appends a
+	// "Note: ..." paragraph (air-date corrections, cancellations) after it,
+	// which pushed the tag out of reach of a `$`-anchored pattern and sent
+	// it to the model.  With the chain of thought disabled the model no
+	// longer silently drops such a line, so stripping it here is what keeps
+	// it out of the translation.
+	//
+	// The colon after "source" is load-bearing: unanchored and without it,
+	// an ordinary sentence like "(source of his power)" would match and be
+	// deleted from the synopsis.  "written by" needs no colon — it is only
+	// ever the credit form.
+	sourceTail = regexp.MustCompile(`(?is)[\(\[]\s*(?:source\s*:|written by\b)[^\)\]]*[\)\]]`)
 	// blankRuns collapses 3+ newlines to a paragraph break.
 	blankRuns = regexp.MustCompile(`\n{3,}`)
 )
@@ -362,7 +479,12 @@ func stripDescriptionHTML(s string) string {
 //
 // Checks, in order:
 //   - non-empty after trimming (and after stripping any markup the model
-//     ignored instructions about)
+//     ignored instructions about).  Load-bearing, not belt-and-braces: since
+//     2026-08 this is also where a SUCCESSFUL completion carrying no content
+//     lands — a reasoning model whose chain of thought consumed the whole
+//     max_tokens budget.  Routing it here is what stamps the row and stops
+//     the sweep re-serving it forever; do not remove the check as
+//     unreachable.
 //   - actually Chinese: ≥10 Han runes AND Han runes ≥25% of all runes.
 //     English refusals ("I'm sorry, I can't…") and untranslated echoes have
 //     near-zero Han density; legitimate translations of even the shortest
