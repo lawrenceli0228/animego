@@ -55,8 +55,16 @@ function stats(queue: QueueOverride = {}): AdminStats {
         ...EMPTY_BACKFILL,
         ...(queue.descriptionBackfill ?? {}),
       },
+      // pickInterval deliberately ignores this queue (the LLM sweep has
+      // its own hourly cadence and no bearing on the panel's poll rate),
+      // but the payload shape requires it.
+      descriptionLlm: {
+        ...EMPTY_BACKFILL,
+        ...(queue.descriptionLlm ?? {}),
+      },
     },
     descriptionCn: { eligible: 13, done: 9, rejected: 4, pending: 0 },
+    descriptionCnLlm: { remit: 40, done: 24, rejected: 6, pending: 10 },
     flagged: 0,
     subscriptions: 0,
     follows: 0,

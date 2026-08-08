@@ -93,6 +93,36 @@ type DescriptionCnStats struct {
 	Pending  int64 `json:"pending"`
 }
 
+// DescriptionCnLlmStats is the coverage side of the LLM translation tier —
+// the fallback that serves rows the Bangumi channel never can.
+//
+// Deliberately a SEPARATE object from DescriptionCnStats rather than four
+// more fields on it, because the two tiers do not share a denominator and
+// merging them would invite exactly the wrong arithmetic:
+//
+//	Remit     the rows this tier could ever write — an English source text
+//	          exists, the row is empty or already machine-translated, and
+//	          the Bangumi channel is done with it or can never reach it.
+//	          NOT the catalogue, and NOT DescriptionCnStats.Eligible: the
+//	          two sets are nearly disjoint by construction.
+//	Done      description_cn_source = 'llm'.  Machine-translated rows still
+//	          return to the Bangumi sweep's 30-day recheck, so this number
+//	          can legitimately go DOWN when human prose replaces a
+//	          translation — that is the covenant working, not data loss.
+//	Rejected  in remit, still empty, LLM attempt stamped — the validation
+//	          gate (Han density / length) refused the model's output, or
+//	          the source stripped to nothing.
+//	Pending   in remit, still empty, never attempted or past the 30-day
+//	          cooldown.  This is the live backlog the sweep will pick up.
+//
+// Rejected and Pending overlap by design, same as the Bangumi tier's.
+type DescriptionCnLlmStats struct {
+	Remit    int64 `json:"remit"`
+	Done     int64 `json:"done"`
+	Rejected int64 `json:"rejected"`
+	Pending  int64 `json:"pending"`
+}
+
 // QueueSnapshot is the byte-exact queue object inside /api/admin/stats'
 // response.  Mirrors server/services/bangumi.service.js
 // getQueueStatus() (lines 408-421):  phase1, phase4, v3, v3Progress.
@@ -114,6 +144,15 @@ type QueueSnapshot struct {
 	// health.  Unlike phase1/phase4/v3 (one "outstanding work" number
 	// per kind) this is split by river state — see BackfillQueue.
 	DescriptionBackfill BackfillQueue `json:"descriptionBackfill"`
+
+	// DescriptionLlm is the LLM translation tier's queue health, in the
+	// same three-state shape and for the same reason.  Separate from
+	// DescriptionBackfill because the two sweeps fail independently and
+	// for unrelated causes — one is throttled by bgm.tv's token bucket,
+	// the other by a paid API that can rate-limit, run out of credit, or
+	// retire a model.  A single fused counter would make "DeepSeek is
+	// out of credit" indistinguishable from "bgm.tv is slow".
+	DescriptionLlm BackfillQueue `json:"descriptionLlm"`
 }
 
 // BackfillQueue is the queue health of the perpetual Chinese-description
@@ -192,6 +231,11 @@ type statsData struct {
 	Follows       int64           `json:"follows"`
 
 	DescriptionCn DescriptionCnStats `json:"descriptionCn"`
+
+	// DescriptionCnLlm is the machine-translation fallback's coverage.
+	// Its own object because the two tiers have different denominators —
+	// see DescriptionCnLlmStats.
+	DescriptionCnLlm DescriptionCnLlmStats `json:"descriptionCnLlm"`
 }
 
 // enrichmentItem is one row in /api/admin/enrichment's data array.

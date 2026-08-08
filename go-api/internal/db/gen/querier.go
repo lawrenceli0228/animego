@@ -244,6 +244,41 @@ type Querier interface {
 	// Cache hit returns dandanplay's title (anime_title may be NULL = looked up,
 	// none found) plus when it was checked, so the caller can skip stale rows.
 	GetDdpTitle(ctx context.Context, bgmID int32) (GetDdpTitleRow, error)
+	// LLM translation tier coverage — the four numbers behind the /admin
+	// 机翻兜底 block.
+	//
+	// A THIRD separate query, for the same reason GetDescriptionCnStats is the
+	// second: it reads description_cn_eligible (via NOT EXISTS) and must be able
+	// to fail without taking the rest of the admin page — or the Bangumi block —
+	// down with it.  Three soft-failing calls beat one fused SELECT whose
+	// weakest dependency decides whether the operator sees anything at all.
+	//
+	// THE DENOMINATOR IS NOT THE CATALOGUE.  The LLM tier's remit is strictly
+	// Bangumi's leftovers, so `llm_remit` counts exactly the rows this sweep
+	// could ever write:  an English source text exists, the row is either still
+	// empty or already machine-translated, and the Bangumi channel is done with
+	// it (attempt-stamped) or can never touch it (outside the trust view).  A
+	// row Bangumi later fills with human prose leaves the remit on its own,
+	// which is correct — it stops being this tier's business.
+	//
+	// Each arm below mirrors ListDescriptionCnLlmCandidates in
+	// internal/db/queries/anime_cache.sql.  The '30 days' literal MUST stay
+	// equal to descriptionLlmRetryDays in internal/queue/description_llm_backfill.go
+	// — sqlc cannot read a Go const, so this is a hand-kept mirror exactly like
+	// the Bangumi block's.  Change one, change both.
+	//
+	// llm_rejected and llm_pending OVERLAP by design, same as the Bangumi
+	// block:  a row whose translation failed validation longer ago than the
+	// cooldown is both "we tried and got nothing usable" and "the sweep will
+	// reach it again".  They answer different questions and must not be summed.
+	//
+	// Reading a spike:  DescriptionLlmWorker stamps on every DECIDED outcome
+	// (validation rejected the output, the source stripped to nothing, or
+	// Bangumi won the race between scan and work) but NOT on transport errors,
+	// which return and go to river's retry path.  So llm_rejected climbing while
+	// llm_done is flat means the model is returning text that fails the Han-density
+	// or length gate — check the logs, do not wave it away.
+	GetDescriptionCnLlmStats(ctx context.Context) (GetDescriptionCnLlmStatsRow, error)
 	// Chinese-description backfill coverage (P3) — the four numbers behind the
 	// /admin 中文简介回填 block.
 	//

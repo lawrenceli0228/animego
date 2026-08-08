@@ -50,8 +50,17 @@ function statsFor(over: Partial<AdminStats> = {}): AdminStats {
         lastScanAt: ago(37 * MIN),
         lastWriteAt: ago(100 * MIN),
       },
+      // The LLM tier defaults to healthy so assertions aimed at the
+      // Bangumi block above are not polluted by a second block's alarms
+      // — several of them assert on the whole rendered page.
+      descriptionLlm: {
+        queued: 0, retrying: 0, discarded: 0,
+        lastScanAt: ago(12 * MIN),
+        lastWriteAt: ago(20 * MIN),
+      },
     },
     descriptionCn: { eligible: 13, done: 9, rejected: 4, pending: 0 },
+    descriptionCnLlm: { remit: 40, done: 24, rejected: 6, pending: 10 },
     flagged: 0, subscriptions: 0, follows: 0,
     ...over,
   };

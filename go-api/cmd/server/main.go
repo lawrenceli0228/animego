@@ -520,6 +520,42 @@ func main() {
 			}
 		}
 
+		// The same two heartbeats for the LLM tier.  They cannot be derived
+		// from the Bangumi pair: the two sweeps have separate schedules,
+		// separate attempt stamps and separate failure causes, so a fresh
+		// Bangumi heartbeat says nothing about whether DeepSeek is
+		// answering.  Both soft-fail independently, like every probe above.
+		{
+			var lastScan *time.Time
+			if err := pool.QueryRow(ctx, `
+				SELECT max(finalized_at)
+				FROM river_job
+				WHERE kind = 'description_llm_backfill_scan'
+				  AND state = 'completed'
+			`).Scan(&lastScan); err != nil {
+				slog.WarnContext(ctx, "admin: description llm last-scan query failed", "err", err)
+			} else {
+				snap.DescriptionLlm.LastScanAt = lastScan
+			}
+		}
+
+		// LastWriteAt for the LLM tier reads its OWN stamp column, which
+		// DescriptionLlmWorker is the only writer of — so, exactly like the
+		// Bangumi heartbeat above, it cannot be kept artificially fresh by
+		// unrelated traffic, and it legitimately freezes once the backlog
+		// drains.  Pair it with descriptionCnLlm.pending before calling it
+		// dead (lib/backfillStatus.ts does this for both tiers).
+		{
+			var lastWrite *time.Time
+			if err := pool.QueryRow(ctx, `
+				SELECT max(description_cn_llm_attempted_at) FROM anime_cache
+			`).Scan(&lastWrite); err != nil {
+				slog.WarnContext(ctx, "admin: description llm last-write query failed", "err", err)
+			} else {
+				snap.DescriptionLlm.LastWriteAt = lastWrite
+			}
+		}
+
 		return snap, nil
 	}
 	adminReadHandlers := admin.NewHandlers(pool, q, queueStatusFn, nil)
@@ -766,8 +802,9 @@ func main() {
 // See main_test.go — every case there is a way the old single-number
 // gauge would have reported a broken sweep as a healthy one.
 type queueDepths struct {
-	phase1, phase4, v3                int64
-	bfQueued, bfRetrying, bfDiscarded int64
+	phase1, phase4, v3                   int64
+	bfQueued, bfRetrying, bfDiscarded    int64
+	llmQueued, llmRetrying, llmDiscarded int64
 }
 
 // add folds one aggregate row into the accumulator.
@@ -794,6 +831,22 @@ type queueDepths struct {
 // are counted nowhere — deliberate: the scan job's health is reported by
 // the LastScanAt heartbeat, not by a depth number.
 func (d *queueDepths) add(kind, state string, cnt int64) {
+	if kind == "description_llm_backfill" {
+		// Same three-way split and the same default-folds-forward stance
+		// as the Bangumi sweep below.  Retrying matters MORE here: a
+		// DeepSeek 429, an expired key or an exhausted balance all land
+		// as retryable, and this counter is the only place that shows up
+		// before the credit runs out entirely.
+		switch state {
+		case "retryable":
+			d.llmRetrying += cnt
+		case "discarded":
+			d.llmDiscarded += cnt
+		default: // available / running / pending / scheduled
+			d.llmQueued += cnt
+		}
+		return
+	}
 	if kind == "description_backfill" {
 		// `default` rather than an explicit available/running/pending/
 		// scheduled list, on purpose.  If somebody widens the WHERE clause
@@ -837,6 +890,9 @@ func (d *queueDepths) publish(snap *admin.QueueSnapshot) {
 	snap.DescriptionBackfill.Queued = d.bfQueued
 	snap.DescriptionBackfill.Retrying = d.bfRetrying
 	snap.DescriptionBackfill.Discarded = d.bfDiscarded
+	snap.DescriptionLlm.Queued = d.llmQueued
+	snap.DescriptionLlm.Retrying = d.llmRetrying
+	snap.DescriptionLlm.Discarded = d.llmDiscarded
 }
 
 // healthHandler reports liveness + DB reachability via the httpx envelope.

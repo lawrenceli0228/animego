@@ -306,7 +306,8 @@ func TestGetStats_QueueStatusError_EmitsZeroAnd200(t *testing.T) {
 	// heartbeats serialise as null (never scanned / never wrote), which
 	// is a state the dashboard renders, not an error.
 	assert.Contains(t, body, `"queue":{"phase1":0,"phase4":0,"v3":0,"v3Progress":null,`+
-		`"descriptionBackfill":{"queued":0,"retrying":0,"discarded":0,"lastScanAt":null,"lastWriteAt":null}}`)
+		`"descriptionBackfill":{"queued":0,"retrying":0,"discarded":0,"lastScanAt":null,"lastWriteAt":null},`+
+		`"descriptionLlm":{"queued":0,"retrying":0,"discarded":0,"lastScanAt":null,"lastWriteAt":null}}`)
 }
 
 func TestGetStats_QueueStatusNil_EmitsZero(t *testing.T) {
@@ -318,7 +319,8 @@ func TestGetStats_QueueStatusNil_EmitsZero(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"queue":{"phase1":0,"phase4":0,"v3":0,"v3Progress":null,`+
-		`"descriptionBackfill":{"queued":0,"retrying":0,"discarded":0,"lastScanAt":null,"lastWriteAt":null}}`)
+		`"descriptionBackfill":{"queued":0,"retrying":0,"discarded":0,"lastScanAt":null,"lastWriteAt":null},`+
+		`"descriptionLlm":{"queued":0,"retrying":0,"discarded":0,"lastScanAt":null,"lastWriteAt":null}}`)
 }
 
 func TestGetStats_DBError_500(t *testing.T) {
@@ -458,9 +460,16 @@ func ptr[T any](v T) *T { return &v }
 // two round-trips rather than four more columns on one row.
 func TestGetStats_DescriptionCnError_SoftFails(t *testing.T) {
 	h, pool := makeHandlers(t)
+	ctx := context.Background()
 
 	seedUser(t, pool, "alice", "alice@example.com")
-	seedAnime(t, pool, animeSeed{AnilistID: 1, TitleRomaji: "A", BangumiVersion: 0})
+	// Raw insert rather than seedAnime: this row needs `description` set
+	// (seedAnime has no such field) so it falls inside the LLM tier's
+	// remit and the sibling query's survival is observable below.
+	_, err := pool.Exec(ctx, `
+		INSERT INTO anime_cache (anilist_id, title_romaji, bangumi_version, description, cached_at)
+		VALUES (1, 'A', 0, 'English synopsis.', now())`)
+	require.NoError(t, err)
 
 	h.Queries = descCnFailingQuerier{adminQuerier: h.Queries}
 
@@ -480,6 +489,145 @@ func TestGetStats_DescriptionCnError_SoftFails(t *testing.T) {
 	// frontend's required-object contract holds.
 	assert.Equal(t, DescriptionCnStats{}, got.Data.DescriptionCn)
 	assert.Contains(t, rec.Body.String(), `"descriptionCn":{"eligible":0,"done":0,"rejected":0,"pending":0}`)
+
+	// The LLM tier is a SEPARATE round-trip and must survive its sibling's
+	// failure — that independence is the whole reason it is a third query.
+	// A fused read would blank both blocks and leave the operator unable to
+	// tell which sweep is in trouble.  The seeded row has an English
+	// description and no bgm binding, so it lands squarely in the LLM
+	// remit: a non-zero here proves the second query really ran.
+	assert.Equal(t, int64(1), got.Data.DescriptionCnLlm.Remit,
+		"llm coverage must not be collapsed by a bangumi-tier failure")
+}
+
+// TestGetStats_DescriptionCnLlmError_SoftFails is the mirror of the test
+// above, in the other direction: the machine-translation block failing must
+// leave the Bangumi block — and everything else — intact.
+func TestGetStats_DescriptionCnLlmError_SoftFails(t *testing.T) {
+	h, pool := makeHandlers(t)
+	ctx := context.Background()
+
+	seedUser(t, pool, "bob", "bob@example.com")
+	// A row with a cross-validated binding, so descriptionCn.eligible is
+	// non-zero and the Bangumi block's survival is observable.
+	bgm := int32(202)
+	seedAnime(t, pool, animeSeed{AnilistID: 2, TitleRomaji: "B", BangumiVersion: 2, BgmID: &bgm})
+	_, err := pool.Exec(ctx, `
+		INSERT INTO bgm_id_map (anilist_id, bgm_id, source) VALUES (2, 202, 'test')`)
+	require.NoError(t, err)
+
+	h.Queries = llmFailingQuerier{adminQuerier: h.Queries}
+
+	rec := httptest.NewRecorder()
+	h.GetStats(rec, httptest.NewRequest(http.MethodGet, "/api/admin/stats", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got struct {
+		Data statsData `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, int64(1), got.Data.Users, "unrelated counters must survive an llm failure")
+	assert.Equal(t, DescriptionCnLlmStats{}, got.Data.DescriptionCnLlm)
+	assert.Contains(t, rec.Body.String(), `"descriptionCnLlm":{"remit":0,"done":0,"rejected":0,"pending":0}`)
+	// And the Bangumi block is still a real read.
+	assert.Equal(t, int64(1), got.Data.DescriptionCn.Eligible,
+		"bangumi coverage must not be collapsed by an llm-tier failure")
+}
+
+// TestGetStats_DescriptionCnLlmCounts pins the LLM tier's four counters
+// against a fixture that exercises every arm of the remit predicate.  The
+// point of the fixture is the REMIT itself: this tier serves Bangumi's
+// leftovers, so a row is in scope only when it has English source text AND
+// the Bangumi channel is finished with it (attempt-stamped) or could never
+// touch it (outside description_cn_eligible).
+func TestGetStats_DescriptionCnLlmCounts(t *testing.T) {
+	h, pool := makeHandlers(t)
+	ctx := context.Background()
+
+	for _, s := range []struct {
+		anilistID       int32
+		bgmID           int32
+		inIDMap         bool
+		description     *string
+		descCn          *string
+		descCnSource    *string
+		bgmAttemptedAgo *int
+		llmAttemptedAgo *int
+	}{
+		// 1: translated by the LLM tier — in remit, counted done.
+		{anilistID: 1, description: ptr("English synopsis."), descCn: ptr("中文"), descCnSource: ptr("llm"), llmAttemptedAgo: ptr(1)},
+		// 2: no bgm binding at all → outside the trust view → in remit,
+		//    never attempted → pending.
+		{anilistID: 2, description: ptr("English synopsis.")},
+		// 3: trusted binding, Bangumi tried and got nothing → in remit;
+		//    LLM tried and its output failed validation → rejected, and
+		//    still inside the 30-day cooldown so NOT pending.
+		{anilistID: 3, bgmID: 103, inIDMap: true, description: ptr("English synopsis."),
+			bgmAttemptedAgo: ptr(2), llmAttemptedAgo: ptr(2)},
+		// 4: trusted binding the Bangumi sweep has NOT tried yet → still
+		//    the primary channel's business → OUT of remit entirely.
+		{anilistID: 4, bgmID: 104, inIDMap: true, description: ptr("English synopsis.")},
+		// 5: Bangumi already wrote a real summary → out of remit (the LLM
+		//    tier can never overwrite it).
+		{anilistID: 5, bgmID: 105, inIDMap: true, description: ptr("English synopsis."),
+			descCn: ptr("社区写的中文简介"), descCnSource: ptr("bangumi"), bgmAttemptedAgo: ptr(3)},
+		// 6: no English source text → nothing to translate → out of remit.
+		{anilistID: 6, bgmAttemptedAgo: ptr(4)},
+	} {
+		var bgm *int32
+		if s.bgmID != 0 {
+			b := s.bgmID
+			bgm = &b
+		}
+		daysAgo := func(d *int) *time.Time {
+			if d == nil {
+				return nil
+			}
+			at := time.Now().UTC().AddDate(0, 0, -*d)
+			return &at
+		}
+		_, err := pool.Exec(ctx, `
+			INSERT INTO anime_cache (
+				anilist_id, title_romaji, bgm_id, bangumi_version, description,
+				description_cn, description_cn_source,
+				description_cn_attempted_at, description_cn_llm_attempted_at, cached_at
+			) VALUES ($1, 'T', $2, 2, $3, $4, $5, $6, $7, now())`,
+			s.anilistID, bgm, s.description, s.descCn, s.descCnSource,
+			daysAgo(s.bgmAttemptedAgo), daysAgo(s.llmAttemptedAgo),
+		)
+		require.NoError(t, err, "seed anime_cache %d", s.anilistID)
+
+		if s.inIDMap {
+			_, err := pool.Exec(ctx, `
+				INSERT INTO bgm_id_map (anilist_id, bgm_id, source) VALUES ($1, $2, 'test')`,
+				s.anilistID, s.bgmID)
+			require.NoError(t, err, "seed bgm_id_map %d", s.anilistID)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	h.GetStats(rec, httptest.NewRequest(http.MethodGet, "/api/admin/stats", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got struct {
+		Data statsData `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+
+	llm := got.Data.DescriptionCnLlm
+	assert.Equal(t, int64(3), llm.Remit,
+		"rows 1,2,3 only: 4 is still bangumi's, 5 already has human prose, 6 has no source text")
+	assert.Equal(t, int64(1), llm.Done, "row 1")
+	assert.Equal(t, int64(1), llm.Rejected, "row 3: attempted, still empty")
+	assert.Equal(t, int64(1), llm.Pending, "row 2 only — row 3 is inside its cooldown")
+}
+
+// llmFailingQuerier is descCnFailingQuerier's counterpart: everything real
+// except the machine-translation coverage read.
+type llmFailingQuerier struct{ adminQuerier }
+
+func (llmFailingQuerier) GetDescriptionCnLlmStats(_ context.Context) (dbgen.GetDescriptionCnLlmStatsRow, error) {
+	return dbgen.GetDescriptionCnLlmStatsRow{}, errors.New("simulated description_cn llm view failure")
 }
 
 // descCnFailingQuerier delegates everything to a real querier except the
@@ -502,6 +650,10 @@ func (failingQuerier) GetAdminStats(_ context.Context) (dbgen.GetAdminStatsRow, 
 
 func (failingQuerier) GetDescriptionCnStats(_ context.Context) (dbgen.GetDescriptionCnStatsRow, error) {
 	return dbgen.GetDescriptionCnStatsRow{}, errors.New("simulated description_cn stats query failure")
+}
+
+func (failingQuerier) GetDescriptionCnLlmStats(_ context.Context) (dbgen.GetDescriptionCnLlmStatsRow, error) {
+	return dbgen.GetDescriptionCnLlmStatsRow{}, errors.New("simulated description_cn llm stats query failure")
 }
 
 func (failingQuerier) GetAdminUserSubFollowCounts(_ context.Context, _ []uuid.UUID) ([]dbgen.GetAdminUserSubFollowCountsRow, error) {

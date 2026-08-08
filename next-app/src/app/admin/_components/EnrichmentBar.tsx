@@ -11,7 +11,12 @@
 // the next navigation, while in-page polling drives this bar's UI.
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import type { AdminStats, BackfillQueue, DescriptionCnStats } from "../_types";
+import type {
+  AdminStats,
+  BackfillQueue,
+  DescriptionCnLlmStats,
+  DescriptionCnStats,
+} from "../_types";
 import { EnrichmentActionError } from "../_actions/_shared";
 import {
   healCn,
@@ -51,6 +56,12 @@ const NO_BACKFILL_QUEUE: BackfillQueue = {
   discarded: 0,
   lastScanAt: null,
   lastWriteAt: null,
+};
+const NO_DESCRIPTION_CN_LLM: DescriptionCnLlmStats = {
+  remit: 0,
+  done: 0,
+  rejected: 0,
+  pending: 0,
 };
 
 /**
@@ -289,6 +300,23 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
     cn.pending,
   );
 
+  // Machine-translation tier. Same four helpers, same two heartbeats —
+  // the block is structurally identical to the Bangumi one above so an
+  // operator reads them the same way. What differs is the denominator:
+  // `remit` is Bangumi's leftovers, NOT the eligible view and NOT the
+  // catalogue, so the two coverage percentages answer different
+  // questions and must never be added or compared.
+  const llm = stats.descriptionCnLlm ?? NO_DESCRIPTION_CN_LLM;
+  const llmQueue = stats.queue.descriptionLlm ?? NO_BACKFILL_QUEUE;
+  const llmPct = coveragePct(llm.done, llm.remit);
+  const llmQueueHealth = backfillHealth(llmQueue);
+  const llmScanState = heartbeatState(llmQueue.lastScanAt, now);
+  const llmWriteState = writeHeartbeatState(
+    llmQueue.lastWriteAt,
+    now,
+    llm.pending,
+  );
+
   return (
     <div style={styles.card}>
       <style>{stripeKeyframes}</style>
@@ -477,6 +505,87 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
         </div>
       </section>
 
+      {/*
+        Machine-translation tier — a sibling section, not a row inside the
+        one above, because its denominator is a different set of rows.
+        Stacked rather than side-by-side so the two coverage bars are never
+        read as two halves of one total.
+      */}
+      <section style={styles.cnSection} aria-labelledby="backfill-llm-heading">
+        <div style={styles.heading}>
+          <span id="backfill-llm-heading">{t("admin.llm.title")}</span>
+          <span style={styles.headingMeta}>
+            {fmt(llm.done)} / {fmt(llm.remit)} ({formatCoveragePct(llmPct)}%)
+          </span>
+        </div>
+
+        <div
+          style={styles.bar}
+          role="img"
+          aria-label={`${t("admin.llm.title")}: ${llm.done}/${llm.remit} (${formatCoveragePct(llmPct)}%)`}
+        >
+          <div style={{ ...styles.segLlm, width: `${llmPct}%` }} />
+        </div>
+
+        <div style={styles.cnFacts}>
+          <span>
+            {t("admin.backfill.pending")}{" "}
+            <strong style={styles.factNum}>{fmt(llm.pending)}</strong>
+          </span>
+          <span>
+            {t("admin.llm.rejected")}{" "}
+            <strong style={styles.factNum}>{fmt(llm.rejected)}</strong>
+          </span>
+          <span>
+            {t("admin.llm.remit")}{" "}
+            <strong style={styles.factNum}>{fmt(llm.remit)}</strong>
+          </span>
+        </div>
+
+        <div style={llmQueueHealth.warn ? styles.cnFactsWarn : styles.cnFacts}>
+          <span>
+            {t("admin.llm.queueLabel")}{" "}
+            <strong style={styles.factNum}>{fmt(llmQueue.queued)}</strong>{" "}
+            {t("admin.backfill.queued")}
+          </span>
+          {/*
+            Retrying matters more here than in the Bangumi block: a rate
+            limit, an expired key and an exhausted balance all land as
+            retryable, and this is where they surface before the sweep
+            goes quiet.
+          */}
+          {llmQueue.retrying > 0 ? (
+            <span style={styles.alarm}>
+              <strong style={styles.factNum}>{fmt(llmQueue.retrying)}</strong>{" "}
+              {t("admin.backfill.retrying")} ⚠
+            </span>
+          ) : null}
+          {llmQueue.discarded > 0 ? (
+            <span style={styles.alarm}>
+              <strong style={styles.factNum}>{fmt(llmQueue.discarded)}</strong>{" "}
+              {t("admin.backfill.discarded")} ⚠
+            </span>
+          ) : null}
+        </div>
+
+        <div style={styles.cnFacts}>
+          <span
+            suppressHydrationWarning
+            style={llmScanState.warn ? styles.alarm : undefined}
+          >
+            {t("admin.backfill.lastScan")}{" "}
+            {formatAge(t, llmQueue.lastScanAt, now)} {glyph(llmScanState)}
+          </span>
+          <span
+            suppressHydrationWarning
+            style={llmWriteState.warn ? styles.alarm : undefined}
+          >
+            {t("admin.backfill.lastWrite")}{" "}
+            {formatAge(t, llmQueue.lastWriteAt, now)} {glyph(llmWriteState)}
+          </span>
+        </div>
+      </section>
+
       {error ? (
         <div role="alert" style={styles.error}>
           {error}
@@ -502,6 +611,9 @@ const COLOR_V0 = "#ff453a";
 // Distinct from the four version colours — the CN-synopsis bar measures a
 // different thing and must not read as another slice of the same scale.
 const COLOR_CN = "#bf5af2";
+// Teal against the Bangumi block's purple: adjacent bars that mean
+// different things must not read as two shades of one metric.
+const COLOR_LLM = "#2dd4bf";
 
 // Labels are resolved at render time via t() — see legendItems() in the component.
 const LEGEND_COLORS = [COLOR_V3, COLOR_V2, COLOR_V1, COLOR_V0] as const;
@@ -577,6 +689,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderTop: "1px solid #1f1f2a",
   },
   segCn: { ...segBase, background: COLOR_CN },
+  segLlm: { ...segBase, background: COLOR_LLM },
   cnFacts: {
     display: "flex",
     flexWrap: "wrap",

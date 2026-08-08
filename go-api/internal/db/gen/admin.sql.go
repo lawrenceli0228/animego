@@ -358,6 +358,97 @@ func (q *Queries) GetAnimeCacheRowForReset(ctx context.Context, anilistID int32)
 	return i, err
 }
 
+const getDescriptionCnLlmStats = `-- name: GetDescriptionCnLlmStats :one
+SELECT
+    (SELECT count(*) FROM anime_cache ac
+      WHERE ac.description IS NOT NULL AND ac.description <> ''
+        AND (ac.description_cn IS NULL OR ac.description_cn_source = 'llm')
+        AND (
+            ac.description_cn_attempted_at IS NOT NULL
+            OR NOT EXISTS (
+                SELECT 1 FROM description_cn_eligible e WHERE e.anilist_id = ac.anilist_id
+            )
+        ))::bigint                                                                                    AS llm_remit,
+    (SELECT count(*) FROM anime_cache
+      WHERE description_cn_source = 'llm')::bigint                                                    AS llm_done,
+    (SELECT count(*) FROM anime_cache ac
+      WHERE ac.description IS NOT NULL AND ac.description <> ''
+        AND ac.description_cn IS NULL
+        AND ac.description_cn_llm_attempted_at IS NOT NULL
+        AND (
+            ac.description_cn_attempted_at IS NOT NULL
+            OR NOT EXISTS (
+                SELECT 1 FROM description_cn_eligible e WHERE e.anilist_id = ac.anilist_id
+            )
+        ))::bigint                                                                                    AS llm_rejected,
+    (SELECT count(*) FROM anime_cache ac
+      WHERE ac.description IS NOT NULL AND ac.description <> ''
+        AND ac.description_cn IS NULL
+        AND (
+            ac.description_cn_llm_attempted_at IS NULL
+            OR ac.description_cn_llm_attempted_at < now() - interval '30 days'
+        )
+        AND (
+            ac.description_cn_attempted_at IS NOT NULL
+            OR NOT EXISTS (
+                SELECT 1 FROM description_cn_eligible e WHERE e.anilist_id = ac.anilist_id
+            )
+        ))::bigint                                                                                    AS llm_pending
+`
+
+type GetDescriptionCnLlmStatsRow struct {
+	LlmRemit    int64 `json:"llmRemit"`
+	LlmDone     int64 `json:"llmDone"`
+	LlmRejected int64 `json:"llmRejected"`
+	LlmPending  int64 `json:"llmPending"`
+}
+
+// LLM translation tier coverage — the four numbers behind the /admin
+// 机翻兜底 block.
+//
+// A THIRD separate query, for the same reason GetDescriptionCnStats is the
+// second: it reads description_cn_eligible (via NOT EXISTS) and must be able
+// to fail without taking the rest of the admin page — or the Bangumi block —
+// down with it.  Three soft-failing calls beat one fused SELECT whose
+// weakest dependency decides whether the operator sees anything at all.
+//
+// THE DENOMINATOR IS NOT THE CATALOGUE.  The LLM tier's remit is strictly
+// Bangumi's leftovers, so `llm_remit` counts exactly the rows this sweep
+// could ever write:  an English source text exists, the row is either still
+// empty or already machine-translated, and the Bangumi channel is done with
+// it (attempt-stamped) or can never touch it (outside the trust view).  A
+// row Bangumi later fills with human prose leaves the remit on its own,
+// which is correct — it stops being this tier's business.
+//
+// Each arm below mirrors ListDescriptionCnLlmCandidates in
+// internal/db/queries/anime_cache.sql.  The '30 days' literal MUST stay
+// equal to descriptionLlmRetryDays in internal/queue/description_llm_backfill.go
+// — sqlc cannot read a Go const, so this is a hand-kept mirror exactly like
+// the Bangumi block's.  Change one, change both.
+//
+// llm_rejected and llm_pending OVERLAP by design, same as the Bangumi
+// block:  a row whose translation failed validation longer ago than the
+// cooldown is both "we tried and got nothing usable" and "the sweep will
+// reach it again".  They answer different questions and must not be summed.
+//
+// Reading a spike:  DescriptionLlmWorker stamps on every DECIDED outcome
+// (validation rejected the output, the source stripped to nothing, or
+// Bangumi won the race between scan and work) but NOT on transport errors,
+// which return and go to river's retry path.  So llm_rejected climbing while
+// llm_done is flat means the model is returning text that fails the Han-density
+// or length gate — check the logs, do not wave it away.
+func (q *Queries) GetDescriptionCnLlmStats(ctx context.Context) (GetDescriptionCnLlmStatsRow, error) {
+	row := q.db.QueryRow(ctx, getDescriptionCnLlmStats)
+	var i GetDescriptionCnLlmStatsRow
+	err := row.Scan(
+		&i.LlmRemit,
+		&i.LlmDone,
+		&i.LlmRejected,
+		&i.LlmPending,
+	)
+	return i, err
+}
+
 const getDescriptionCnStats = `-- name: GetDescriptionCnStats :one
 SELECT
     (SELECT count(*) FROM description_cn_eligible)::bigint                                            AS desc_cn_eligible,
