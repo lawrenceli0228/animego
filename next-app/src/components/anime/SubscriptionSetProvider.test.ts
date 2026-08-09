@@ -10,7 +10,7 @@ import {
   nextSubscriptionSet,
   subscribeToSignedOut,
   subscribedIdsFromList,
-} from "./SubscriptionSetProvider";
+} from "./subscriptionSetState";
 
 // No RTL in this repo, so the provider's interesting behaviour is factored
 // into pure reducers and tested here directly: envelope → Set, bus event →

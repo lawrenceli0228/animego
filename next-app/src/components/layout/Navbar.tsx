@@ -12,7 +12,7 @@ import {
 import { hasAuthHint } from "@/lib/clientAuth";
 import { authChrome } from "@/lib/authChrome";
 import { authFetch } from "@/lib/authFetch";
-import { broadcastSignedOut } from "@/components/anime/SubscriptionSetProvider";
+import { broadcastSignedOut } from "@/components/anime/subscriptionSetState";
 import AvatarMenu from "./AvatarMenu";
 
 export interface NavUser {

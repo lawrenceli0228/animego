@@ -20,7 +20,7 @@
 // server component has to become a client component to use this.
 
 import { useEffect, useState, type ReactNode } from "react";
-import { subscribeToSignedOut } from "./SubscriptionSetProvider";
+import { subscribeToSignedOut } from "./subscriptionSetState";
 
 interface SignedOutGateProps {
   /** The authenticated body. Shown until a sign-out lands. */
