@@ -2,6 +2,22 @@
 
 ---
 
+## [3.9.1] - 2026-08-09
+
+### 修复 — 合并后的卡片只显示了一半集数
+
+`SeriesDetailSheet` 用 `.where("seriesId").equals(series.id)` 取集数。而 `performMerge` 是**软合并**——它从不移动 episode 行，只把 source id 追加到 target 的 `mergedFrom`。于是合并出来的卡片读的是目标自己的行，被合并进来的那一半**从未被查询**。合并一次就能触发。
+
+`progress` 那一行是同样的形状，问题更隐蔽：就算集数出现了，观看进度也拿不回来——看起来像观看记录被删了，而不是查询写错了。
+
+隔壁的 `useSeriesDetail` 一直正确处理了 `mergedFrom`，但没有任何东西通过它渲染。两套并行实现，屏幕上跑的恰好是忘了这件事的那套。
+
+两条路径现在统一走 `resolveMergedSeriesIds`，且是**传递闭包**而非一跳：A 合进 B、再把 B 合进 C 之后，`C.mergedFrom = [B]` 而 `B.mergedFrom = [A]`，单层读取会丢掉 A 名下的一切——而 `useLibrary` 把出现在任意 `mergedFrom` 里的 id 都从网格过滤掉。**文件在磁盘上、已索引、界面上哪里都进不去。** 带环保护：`userOverride` 是用户可写、跨版本存活的状态，这里死循环会让详情面板挂起且控制台什么都没有。
+
+**关于测试**：第一版 15 个测试全在 `resolveMergedSeriesIds` 这个纯函数上，而它从来没坏过——测试护着一个没病的东西，真正的病灶零覆盖。查询逻辑因此被抽到 `loadMergedSeriesRows`，其假 Dexie **记录调用方式**且 `equals` 直接抛异常：只返回正确数据的桩挡不住这个回归，因为坏版本用 `.equals` 照样能从桩里拿到东西。24 个测试覆盖两个模块，含 progress 那一半、链式合并、从 source 反向上溯、以及没有 `userOverride` 表的老库。
+
+---
+
 ## [3.9.0] - 2026-08-09
 
 ### 新增 — 把「订阅」从终点改回起点
