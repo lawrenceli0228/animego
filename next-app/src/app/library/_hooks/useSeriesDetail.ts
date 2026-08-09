@@ -5,7 +5,6 @@
 // Files via FSA only on demand (returned `getFile(episodeId)`).
 
 import { useState, useEffect, useCallback } from "react";
-import { resolveMergedSeriesIds } from "../_services/resolveMergedIds";
 import type Dexie from "dexie";
 
 // Types are JSDoc only on the JS side — mirror them in TS-friendly form.
@@ -141,22 +140,16 @@ export function useSeriesDetail(
 
         // performMerge is a SOFT merge — read across mergedFrom so the
         // merged card shows every contributing episode.
-        //
-        // The whole table, not a point lookup on this series: `mergedFrom` is
-        // one hop, and merges chain. A→B then B→C leaves C pointing at B and B
-        // pointing at A, so reading C's row alone loses every episode indexed
-        // under A — while useLibrary hides A from the grid for being merged.
-        // The files stay on disk and become reachable from nowhere.
-        // resolveMergedSeriesIds walks the chain (and guards against cycles).
-        // The table holds one row per series the user has touched, so this
-        // scan is cheaper than the N lookups a recursive walk would need.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const userOverrideTable = (db as any).userOverride;
-        const overrides = userOverrideTable
-          ? await userOverrideTable.toArray()
-          : [];
+        const override = userOverrideTable
+          ? await userOverrideTable.get(seriesId)
+          : null;
         if (cancelled) return;
-        const allSeriesIds = resolveMergedSeriesIds(overrides, seriesId);
+        const mergedSeriesIds: string[] = Array.isArray(override?.mergedFrom)
+          ? override.mergedFrom
+          : [];
+        const allSeriesIds = [seriesId, ...mergedSeriesIds];
 
         // 2. Fetch episodes for this series + every merged source.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
