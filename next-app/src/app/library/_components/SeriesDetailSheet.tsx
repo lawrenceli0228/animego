@@ -20,6 +20,7 @@ import { useLang } from "@/lib/lang-client";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — JSDoc-only JS module
 import { db } from "@/lib/library/db/db.js";
+import { loadMergedSeriesRows } from "../_services/loadSeriesRows";
 // P6 TODO: tighten when useLibrary gets typed exports; for now widen to any
 // eslint-disable-next-line -eslint/no-explicit-any
 type SeriesRecord = any;
@@ -499,18 +500,17 @@ export function SeriesDetailSheet({
     let cancelled = false;
     (async () => {
       try {
-        const [eps, progRows] = (await Promise.all([
+        // Reads across `mergedFrom`, not just this series — performMerge is a
+        // SOFT merge, so a merged card's episodes are still filed under the
+        // source ids. The query lives in loadMergedSeriesRows so the part that
+        // was broken (`.equals(series.id)`, which dropped every merged-in
+        // episode) is covered by tests; a component effect is not reachable
+        // from bun:test in this repo.
+        const { episodes: eps, progress: progRows } = (await loadMergedSeriesRows(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (db as any).episodes
-            .where("seriesId")
-            .equals(series.id)
-            .toArray(),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (db as any).progress
-            .where("seriesId")
-            .equals(series.id)
-            .toArray(),
-        ])) as [EpisodeRow[], ProgressRow[]];
+          db as any,
+          series.id,
+        )) as { episodes: EpisodeRow[]; progress: ProgressRow[] };
         if (cancelled) return;
         const map = new Map<string, ProgressRow>();
         for (const p of progRows) map.set(p.episodeId, p);

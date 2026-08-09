@@ -3,7 +3,7 @@ import {
   detailTarget,
   loginTarget,
   quickSubscribeMode,
-} from "./QuickSubscribeToggle";
+} from "./quickSubscribeState";
 
 // The button's decisions — "what does this press mean?" and "where does it
 // send the visitor?" — are pure, so they get tested here. The rendering itself
