@@ -24,7 +24,9 @@ import {
   type CSSProperties,
 } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import toast from "react-hot-toast";
+import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { authChrome } from "@/lib/authChrome";
@@ -392,6 +394,13 @@ export default function EpisodeComments({
   dict,
   lang,
 }: EpisodeCommentsProps) {
+  // Detail page path for the login link's ?from=. usePathname is safe on
+  // this surface — /anime/* is prerendered (ISR) and Navbar already calls
+  // it in the root layout there. useSearchParams would NOT be: it forces
+  // a page-level Suspense boundary (Next 16 contract, see
+  // app/player/page.tsx), and the detail page's query carries no comment
+  // intent worth that.
+  const pathname = usePathname();
   const [comments, setComments] = useState<CommentDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -595,8 +604,11 @@ export default function EpisodeComments({
           }}
         >
           {dict.comment.loginPrompt}
+          {/* ?from= this detail page: the prompt exists because the user
+              wants to say something about THIS episode, and a bare
+              "/login" spent that intent on a trip to the home feed. */}
           <Link
-            href="/login"
+            href={authHrefWithFrom("/login", pathname)}
             prefetch={false}
             style={{ color: "#0a84ff", fontWeight: 600, textDecoration: "none" }}
           >

@@ -35,6 +35,12 @@ const en = {
   home: {
     scheduleLabel: 'SCHEDULE', thisWeek: 'This Week',
     continueLabel: 'Continue Watching', watchingTitle: 'Currently Watching',
+    // Zero-subscription state for ContinueWatching. The section renders
+    // this instead of disappearing, so a first-time visitor still learns
+    // where the + on a poster sends things.
+    watchingEmptyTitle: "You're not tracking anything yet",
+    watchingEmptyBody: 'Tap + on any poster to add it here',
+    watchingEmptyCta: 'Browse this season',
     today: 'Today', noUpdates: 'No episodes today',
     trendingLabel: 'TRENDING', trendingTitle: 'Most Watched',
     rankingsLabel: 'TOP RATED', rankingsTitle: `${new Date().getFullYear()} Annual Rankings`,
@@ -44,6 +50,14 @@ const en = {
   anime: {
     watchers: 'watching', watchersMore: '+',
     loadError: 'Failed to load', noAnime: 'No anime found',
+  },
+  // The quick-subscribe + overlaid on poster cards across the home,
+  // search and seasonal grids. quickAddLogin replaces the label for
+  // signed-out visitors so the button never offers a write it can't do.
+  card: {
+    quickAdd: 'Track', quickAdded: 'Tracking',
+    quickAddFail: 'Something went wrong. Try again.',
+    quickAddLogin: 'Log in to track',
   },
   // Anime detail
   detail: {
@@ -77,6 +91,18 @@ const en = {
     remove: 'Remove', rate: 'Rate',
     loginToWatch: 'Login to Track',
     epUnit: 'Ep',
+    // Toast copy for a subscribe/unsubscribe round trip. toastViewList is
+    // the toast's action link, not a standalone button label.
+    toastAdded: 'Added to Watching',
+    toastRemoved: 'Removed from your list',
+    toastFailed: 'Something went wrong. Try again.',
+    toastViewList: 'View my list',
+    // toastUndo lives here, not borrowed from library.undoToast: that block
+    // belongs to the local-file library's merge/undo flow and would take this
+    // string with it if that feature is ever renamed or retired. t() answers a
+    // miss with the key itself — silently — so the card toast would then read
+    // 'library.undoToast.undoLabel' to a user.
+    toastUndo: 'Undo',
   },
   // Search
   search: {
@@ -131,6 +157,8 @@ const en = {
     hasAccount: 'Already have an account? ', loginLink: 'Login',
     success: 'Account created, welcome!', fail: 'Registration failed',
     pwdTooShort: 'Password must be at least 6 characters',
+    confirmPassword: 'Confirm password', pwdMismatch: 'The two passwords do not match',
+    showPassword: 'Show password', hidePassword: 'Hide password',
   },
   // Profile
   profile: {

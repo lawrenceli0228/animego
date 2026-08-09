@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n";
 import { ApiError } from "@/lib/api";
+import { authHrefWithFrom } from "@/components/auth/authFromLink";
 
 interface FollowButtonProps {
   username: string;
@@ -23,6 +24,12 @@ export default function FollowButton({
   lang: _serverLang,
 }: FollowButtonProps) {
   const router = useRouter();
+  // Read above the `isSelf` early return — hooks can't sit behind it.
+  // usePathname only, never useSearchParams: /u/[username] carries no
+  // meaningful query, and reading search params from a Client Component
+  // demands a page-level Suspense boundary under the Next 16 contract
+  // (see app/player/page.tsx) that this button has no business adding.
+  const pathname = usePathname();
   const { t } = useLang();
 
   const [isFollowing, setIsFollowing] = useState<boolean | null>(initialIsFollowing);
@@ -32,9 +39,12 @@ export default function FollowButton({
   if (isSelf) return null;
 
   const handleClick = async () => {
-    // Not logged in → redirect to login (mirrors legacy: !user → navigate('/login'))
+    // Not logged in → redirect to login (mirrors legacy: !user → navigate('/login')),
+    // but carrying this profile in ?from= so login lands the user back here.
+    // The bare "/login" dropped them on the home feed, one search away from
+    // the person they had just decided to follow.
     if (isFollowing === null) {
-      router.push("/login");
+      router.push(authHrefWithFrom("/login", pathname));
       return;
     }
 

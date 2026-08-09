@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import SeasonNav from "@/components/seasonal/SeasonNav";
 import SeasonalFilterChips from "@/components/seasonal/SeasonalFilterChips";
 import AnimeCard from "@/components/anime/AnimeCard";
+import { SubscriptionSetProvider } from "@/components/anime/SubscriptionSetProvider";
 import SeasonalShowMore from "@/components/seasonal/SeasonalShowMore";
 import { apiGetPaged } from "@/lib/api";
 import { FILTER_GENRES, type FilterGenre } from "@/lib/contentLabels";
@@ -200,11 +201,18 @@ export default async function SeasonalPage({ params, searchParams }: PageProps) 
       {displayed.length === 0 ? (
         <div style={emptyStyle}>{emptyLabel}</div>
       ) : (
-        <div className="anime-grid-5col">
-          {displayed.map((a, i) => (
-            <AnimeCard key={a.anilistId} anime={a} lang={lang} prefetch={false} priority={i === 0} />
-          ))}
-        </div>
+        // Client provider around server-rendered children: the cards stay RSC
+        // output and travel through the boundary as an already-rendered
+        // `children` node, so this page does NOT become a Client Component.
+        // Scope is the grid only — one subscription-set fetch shared by every
+        // quick-add button, instead of one probe per card.
+        <SubscriptionSetProvider>
+          <div className="anime-grid-5col">
+            {displayed.map((a, i) => (
+              <AnimeCard key={a.anilistId} anime={a} lang={lang} prefetch={false} priority={i === 0} />
+            ))}
+          </div>
+        </SubscriptionSetProvider>
       )}
 
       {hasMore && (

@@ -25,11 +25,24 @@
 //   [status <select>]  [− N + / total 集]  [★ score]  [移除]
 //
 // State writes go through authFetch directly (no TanStack Query). On
-// any 5xx/network failure we revert the optimistic local state and
-// toast.error('!'); on 200 we toast.success('✓'). Toaster is not yet
-// mounted in next-app/src/app/layout.tsx (P6 follow-up) but several
-// existing components already call `toast.*` — landing the toaster
-// will retro-light all of them at once.
+// any 5xx/network failure we revert the optimistic local state and toast
+// the failure; on 200 we toast what actually happened. The Toaster lives
+// in next-app/src/app/layout.tsx, above every route.
+//
+// Toast copy used to be one glyph — '✓' for every success, '!' for every
+// failure — which told the user nothing about which of the four writes
+// landed and, worse, never mentioned that the thing they just subscribed
+// to is collected somewhere. Subscribing morphs this button in place and
+// nothing else on the page moves, so without the copy the action reads as
+// a toggle rather than as adding to a list, and 234 of 255 subscribers
+// never added a second show. The first subscribe on a device therefore
+// carries a link to /profile (see takeListHint).
+//
+// Why useLang() here when every other string arrives on `labels`: toast
+// copy is transient client-side feedback, and widening `labels` for it
+// would mean editing DetailActions + page.tsx to thread four more strings
+// through two components that never render them. The *-spa dictionaries
+// back t(), and src/locales/spaDictCoverage.test.ts holds the keys.
 //
 // Why no react-query: parent (DetailActions / page.tsx) doesn't wrap
 // us in a QueryClientProvider, and adding one just for this surface
@@ -37,11 +50,14 @@
 // optimistic-update pattern the legacy hooks gave us.
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
+import { useLang } from "@/lib/lang-client";
 import { broadcastSubscription } from "@/lib/subscriptionBus";
+import { hintStore, takeListHint, LIST_HINT_TOAST_MS } from "./subscriptionToast";
 
 interface Labels {
   login: string;
@@ -84,6 +100,25 @@ const STATUS_VALUES: readonly SubStatus[] = [
 // a one-off keyframe there for this component is overreach.
 const FADE_UP_CSS =
   "@keyframes subBtnFadeUp{from{opacity:0;transform:translate(-50%,4px)}to{opacity:1;transform:translate(-50%,0)}}";
+
+// LIST_HINT_TOAST_MS is imported from ./subscriptionToast, not re-declared:
+// the detail page and the card grid draw the same one-shot hint from the same
+// store, so a value that drifts between them would show the same user two
+// different windows for the same message and no test would catch it.
+
+const toastBodyStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "baseline",
+  flexWrap: "wrap",
+  gap: 10,
+};
+
+const toastLinkStyle: CSSProperties = {
+  color: "#0a84ff",
+  fontWeight: 600,
+  textDecoration: "none",
+  whiteSpace: "nowrap",
+};
 
 const wrapStyle: CSSProperties = {
   display: "flex",
@@ -279,6 +314,7 @@ export default function SubscriptionButton({
   labels,
 }: SubscriptionButtonProps) {
   const router = useRouter();
+  const { t } = useLang();
   // Page is statically prerendered / ISR (no server cookie read), so the
   // initial render can't know login state — start in "loading" (a neutral
   // placeholder that matches the SSR HTML, no hydration mismatch). The
@@ -385,6 +421,37 @@ export default function SubscriptionButton({
   };
 
   // ------------------------------------------------------------------
+  // Toasts — one per outcome, so the four writes stop looking identical.
+  // ------------------------------------------------------------------
+
+  const toastFailed = () => toast.error(t("sub.toastFailed"));
+
+  /** A brand-new subscription row was created (not a status/ep edit). */
+  const toastAdded = () => {
+    if (!takeListHint(hintStore())) {
+      toast.success(t("sub.toastAdded"));
+      return;
+    }
+    // First one on this device: say where it went. Dismiss on click so the
+    // toast doesn't outlive the navigation it just triggered.
+    toast.success(
+      (instance) => (
+        <span style={toastBodyStyle}>
+          {t("sub.toastAdded")}
+          <Link
+            href="/profile"
+            style={toastLinkStyle}
+            onClick={() => toast.dismiss(instance.id)}
+          >
+            {t("sub.toastViewList")}
+          </Link>
+        </span>
+      ),
+      { duration: LIST_HINT_TOAST_MS },
+    );
+  };
+
+  // ------------------------------------------------------------------
   // Mutations — each one writes optimistically, reverts on failure.
   // ------------------------------------------------------------------
 
@@ -457,6 +524,7 @@ export default function SubscriptionButton({
     if (!STATUS_VALUES.includes(next as SubStatus)) return;
     const nextStatus = next as SubStatus;
     const prev = sub;
+    const isCreate = !sub;
     setBusy(true);
     try {
       let updated: SubscriptionDoc | null;
@@ -471,11 +539,15 @@ export default function SubscriptionButton({
         setSub(updated);
         setState("subscribed");
         broadcastSubscription({ anilistId, sub: updated });
-        toast.success("✓");
+        // Moving between buckets is not the same event as joining the list:
+        // echo the bucket the show landed in (the <select> already reads that
+        // way, but the toast is what confirms the write reached the server).
+        if (isCreate) toastAdded();
+        else toast.success(statusLabels[updated.status]);
       } else {
         // Revert.
         setSub(prev);
-        toast.error("!");
+        toastFailed();
       }
     } finally {
       setBusy(false);
@@ -500,6 +572,7 @@ export default function SubscriptionButton({
         : undefined;
 
     const prev = sub;
+    const isCreate = !sub;
     setBusy(true);
     try {
       // Optimistic.
@@ -530,10 +603,15 @@ export default function SubscriptionButton({
         setSub(updated);
         setState("subscribed");
         broadcastSubscription({ anilistId, sub: updated });
+        // Counter bumps stay toast-free on purpose (a toast per ± click is
+        // noise — the number itself is the feedback), but a ± that had to
+        // create the row IS a first subscribe and deserves the same
+        // confirmation the add button gives.
+        if (isCreate) toastAdded();
         if (autoComplete) showStatusHint("completed");
       } else {
         setSub(prev);
-        toast.error("!");
+        toastFailed();
       }
     } finally {
       setBusy(false);
@@ -553,9 +631,11 @@ export default function SubscriptionButton({
         setSub(updated);
         setScoreOpen(false);
         broadcastSubscription({ anilistId, sub: updated });
+        // No success toast: the score button repaints with the new number
+        // right where the click landed, so a toast would only cover it.
       } else {
         setSub(prev);
-        toast.error("!");
+        toastFailed();
       }
     } finally {
       setBusy(false);
@@ -579,10 +659,10 @@ export default function SubscriptionButton({
         setSub(null);
         setState("available");
         broadcastSubscription({ anilistId, sub: null });
-        toast.success("✓");
+        toast.success(t("sub.toastRemoved"));
       } else {
         setSub(prev);
-        toast.error("!");
+        toastFailed();
       }
     } finally {
       setBusy(false);

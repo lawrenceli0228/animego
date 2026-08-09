@@ -10,25 +10,38 @@
 /* Steam-style square avatar tile; the chosen anime art themes it. */
 .agc-avatar {
   position: relative;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  /* Sits inside the bar, vertically centred by the flex row — 44px in a 56px
+     bar leaves 6px of air top and bottom. A light hairline (not the dark ring
+     an overhanging tile needed) so it reads as part of the chrome. */
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   background: linear-gradient(140deg, #0a84ff, #0050c8);
   color: #fff;
   font-family: var(--font-display), sans-serif;
   font-weight: 800;
-  font-size: 15px;
+  font-size: 17px;
   cursor: pointer;
   overflow: hidden;
   display: grid;
   place-items: center;
   padding: 0;
   text-transform: uppercase;
-  transition: box-shadow 200ms ease, transform 150ms ease;
+  transition:
+    box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .agc-avatar:hover {
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.3);
+  /* Scale only, no vertical travel: the tile is centred in a 56px bar with
+     6px of clearance, and lifting it would break the alignment with 登录/注册
+     and the language button sitting on the same baseline. transform and
+     box-shadow are both composited, so the sticky bar never re-lays-out. */
+  transform: scale(1.08);
+  box-shadow:
+    0 0 0 3px rgba(10, 132, 255, 0.45),
+    0 4px 14px rgba(0, 0, 0, 0.5);
 }
 .agc-avatar:active {
   transform: scale(0.95);
@@ -165,4 +178,16 @@
   height: 1px;
   background: rgba(255, 255, 255, 0.08);
   margin: 6px 4px;
+}
+
+/* Reduced motion: keep the ring (it is the affordance) but drop the travel.
+   The tile still grows a hair so hover is not silent, which is the minimum a
+   pointer target owes the user. */
+@media (prefers-reduced-motion: reduce) {
+  .agc-avatar {
+    transition: box-shadow 220ms ease;
+  }
+  .agc-avatar:hover {
+    transform: scale(1.02);
+  }
 }

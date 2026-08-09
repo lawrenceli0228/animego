@@ -5,16 +5,16 @@ import { getLang } from "@/lib/i18n";
 // Static legal page — hourly revalidate so copy edits land without a deploy.
 export const revalidate = 3600;
 
-const CONTACT = "copyright@animegoclub.com";
-const UPDATED = "2026年6月5日";
+const CONTACT = "animegoanime@animegoclub.com";
+const UPDATED = "2026年8月9日";
 
 export async function generateMetadata(): Promise<Metadata> {
   const lang = await getLang();
   const title = lang === "zh" ? "隐私政策" : "Privacy Policy";
   const description =
     lang === "zh"
-      ? "AnimeGoClub 隐私政策：我们收集哪些数据、如何使用、Cookie、第三方处理者与你的权利。"
-      : "AnimeGoClub Privacy Policy: what we collect, how we use it, cookies, processors and your rights.";
+      ? "AnimeGoClub 隐私政策：我们收集哪些数据、如何使用、Cookie 与本地存储、第三方服务与你的权利。"
+      : "AnimeGoClub Privacy Policy: what we collect, how we use it, cookies and local storage, third-party services and your rights.";
   return {
     title,
     description,
@@ -52,10 +52,15 @@ export default function PrivacyPage() {
 
       <h2 style={x.h2}>二、Cookie 与本地存储</h2>
       <p style={x.p}>
-        我们使用必要的 Cookie 维持登录状态：<strong style={x.strong}>session</strong> 与{" "}
-        <strong style={x.strong}>refreshToken</strong> 为仅服务器可读（httpOnly）的登录凭证；
-        <strong style={x.strong}>auth_hint</strong> 为非敏感标记，仅供前端判断是否已登录。
-        我们<strong style={x.strong}>不使用第三方广告追踪 Cookie</strong>。
+        为维持登录状态、记住界面偏好（如语言），以及支持你主动使用的本地功能，
+        本站会在你的浏览器中存储少量必要数据。这些数据仅用于上述目的。
+      </p>
+      <p style={x.p}>
+        我们<strong style={x.strong}>不使用任何第三方广告 Cookie，也不进行跨站追踪</strong>。
+      </p>
+      <p style={x.p}>
+        你可以随时通过浏览器设置清除这些数据。清除后，你需要重新登录，
+        本地功能中未上传的内容也会一并移除。
       </p>
 
       <h2 style={x.h2}>三、我们如何使用信息</h2>
@@ -66,14 +71,13 @@ export default function PrivacyPage() {
       </ul>
       <p style={x.p}>我们不出售你的个人信息。</p>
 
-      <h2 style={x.h2}>四、第三方处理者与数据来源</h2>
+      <h2 style={x.h2}>四、第三方服务与数据来源</h2>
+      <p style={x.p}>
+        为保障服务的稳定、安全与可用，我们委托少量第三方服务商提供内容分发、安全防护与故障诊断等支持。
+        它们在为本站提供服务的过程中可能接触到必要的技术信息，且仅可按约定用途处理。
+        我们不会为此向其提供超出必要范围的数据，也不会将你的个人信息用于任何广告用途。
+      </p>
       <ul style={x.ul}>
-        <li style={x.li}>
-          <strong style={x.strong}>Cloudflare</strong>：作为 CDN 与安全防护，会处理访问流量与 IP。
-        </li>
-        <li style={x.li}>
-          <strong style={x.strong}>Sentry</strong>：用于错误监控，可能接收少量技术性错误数据。
-        </li>
         <li style={x.li}>
           番剧元数据（标题、封面、简介、评分、声优等）来自{" "}
           <a style={x.a} href="https://anilist.co" target="_blank" rel="noreferrer">AniList</a>、{" "}

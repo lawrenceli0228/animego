@@ -5,6 +5,7 @@ import { useState, type CSSProperties, type FormEvent } from "react";
 import type { Dict } from "@/lib/i18n";
 import { translateErrorMessage } from "@/lib/authForm";
 import { authFormStyles } from "@/lib/authFormStyles";
+import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import { submitLogin } from "../_lib/loginFlow";
 import { redirectAfterAuth } from "@/lib/authRedirect";
 
@@ -142,9 +143,22 @@ export default function LoginForm({ from, dict }: LoginFormProps) {
           </button>
         </form>
 
+        {/*
+          The login→register hop has to carry `from` forward. It used to
+          link to a bare "/register", so sanitizeFromParam(undefined) on
+          the other side resolved to "/" — every user who arrived at a
+          gated page, decided to sign up, and clicked here lost the page
+          that sent them and landed on the home feed instead. `from` is
+          already server-sanitized (page.tsx); authHrefWithFrom does the
+          encoding and drops the param for "/" and self-loops.
+        */}
         <p style={styles.footer}>
           {t.noAccount}{" "}
-          <Link href="/register" prefetch={false} style={styles.footerLink}>
+          <Link
+            href={authHrefWithFrom("/register", from)}
+            prefetch={false}
+            style={styles.footerLink}
+          >
             {t.registerLink}
           </Link>
         </p>

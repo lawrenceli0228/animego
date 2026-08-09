@@ -64,6 +64,64 @@ export const authFormStyles = {
     transition: "border-color 0.2s, box-shadow 0.2s",
     boxSizing: "border-box",
   }),
+  // A password input plus its reveal button. The wrapper owns the bottom
+  // margin that `input` normally carries, so the button can be positioned
+  // against the input's box without the margin pushing it out of alignment.
+  passwordWrap: {
+    position: "relative",
+    marginBottom: 16,
+  } as CSSProperties,
+  // Same box as `input`, minus its margin (the wrapper has it) and with room
+  // on the right so a long password never slides under the reveal button.
+  passwordInput: (focused: boolean, invalid: boolean): CSSProperties => ({
+    width: "100%",
+    padding: "12px 52px 12px 16px",
+    borderRadius: 8,
+    background: "#2c2c2e",
+    border: `1px solid ${
+      invalid ? "#ff453a" : focused ? "#0a84ff" : "#38383a"
+    }`,
+    boxShadow: focused
+      ? `0 0 0 3px ${invalid ? "rgba(255,69,58,0.25)" : "rgba(10,132,255,0.25)"}`
+      : "none",
+    color: "#ffffff",
+    fontSize: 14,
+    outline: "none",
+    transition: "border-color 0.2s, box-shadow 0.2s",
+    boxSizing: "border-box",
+  }),
+  // 44px is the touch-target floor, and the auth forms are the one place a
+  // phone user cannot afford a miss — a fat-fingered reveal that lands on the
+  // input instead just moves the caret, but a miss the other way types a
+  // character into a field they cannot see.
+  reveal: (active: boolean, hovered: boolean): CSSProperties => ({
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 44,
+    height: 44,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+    border: "none",
+    background: "transparent",
+    // Three steps, not two: dim at rest so it never competes with the input's
+    // own text, brighter on hover, and brightest while the password is
+    // actually showing — the one state a user must be able to notice from the
+    // corner of their eye before they walk away from the screen.
+    color: active
+      ? "#0a84ff"
+      : hovered
+        ? "rgba(235,235,245,0.92)"
+        : "rgba(235,235,245,0.45)",
+    cursor: "pointer",
+    lineHeight: 1,
+    borderRadius: 8,
+    transition: "color 0.15s",
+    // Pull the focus ring inside the input's rounded corner.
+    outlineOffset: -3,
+  }),
   error: {
     color: "#ff453a",
     fontSize: 13,

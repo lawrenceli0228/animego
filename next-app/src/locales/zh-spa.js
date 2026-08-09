@@ -70,6 +70,12 @@ const zh = {
   home: {
     scheduleLabel: '放送日历', thisWeek: '本周更新',
     continueLabel: '继续追番', watchingTitle: '我的在追',
+    // Zero-subscription state for ContinueWatching. The section renders
+    // this instead of disappearing, so a first-time visitor still learns
+    // where the + on a poster sends things.
+    watchingEmptyTitle: '还没有在追的番剧',
+    watchingEmptyBody: '在任意番剧封面上点 + 就能加到这里',
+    watchingEmptyCta: '去看本季新番',
     today: '今天', noUpdates: '今日暂无更新',
     trendingLabel: '本季热追', trendingTitle: '大家都在追',
     rankingsLabel: '年度高分', rankingsTitle: `${new Date().getFullYear()} 年度榜`,
@@ -79,6 +85,14 @@ const zh = {
   anime: {
     watchers: '人在追', watchersMore: '还有',
     loadError: '加载失败', noAnime: '暂无番剧',
+  },
+  // The quick-subscribe + overlaid on poster cards across the home,
+  // search and seasonal grids. quickAddLogin replaces the label for
+  // signed-out visitors so the button never offers a write it can't do.
+  card: {
+    quickAdd: '追番', quickAdded: '已追',
+    quickAddFail: '操作失败，请重试',
+    quickAddLogin: '登录后追番',
   },
   // Anime detail
   detail: {
@@ -102,6 +116,18 @@ const zh = {
     remove: '移除', rate: '评分',
     loginToWatch: '登录后追番',
     epUnit: '集',
+    // Toast copy for a subscribe/unsubscribe round trip. toastViewList is
+    // the toast's action link, not a standalone button label.
+    toastAdded: '已加入「在看」',
+    toastRemoved: '已移出追番列表',
+    toastFailed: '操作失败，请重试',
+    toastViewList: '查看我的追番',
+    // toastUndo lives here, not borrowed from library.undoToast: that block
+    // belongs to the local-file library's merge/undo flow and would take this
+    // string with it if that feature is ever renamed or retired. t() answers a
+    // miss with the key itself — silently — so the card toast would then read
+    // 'library.undoToast.undoLabel' to a user.
+    toastUndo: '撤销',
   },
   // Search
   search: {
@@ -145,6 +171,8 @@ const zh = {
     hasAccount: '已有账号？', loginLink: '立即登录',
     success: '注册成功，欢迎加入！', fail: '注册失败',
     pwdTooShort: '密码至少 6 位',
+    confirmPassword: '确认密码', pwdMismatch: '两次输入的密码不一致',
+    showPassword: '显示密码', hidePassword: '隐藏密码',
   },
   // Profile
   profile: {

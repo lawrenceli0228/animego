@@ -1,13 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { useLang } from "@/lib/lang-client";
+import {
+  authHrefWithFrom,
+  type AuthSurface,
+} from "@/components/auth/authFromLink";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { authChrome } from "@/lib/authChrome";
 import { authFetch } from "@/lib/authFetch";
+import { broadcastSignedOut } from "@/components/anime/SubscriptionSetProvider";
 import AvatarMenu from "./AvatarMenu";
 
 export interface NavUser {
@@ -58,10 +63,21 @@ const s = {
     color: "#ffffff",
     textDecoration: "none",
   } as CSSProperties,
+  // The link strip is the ONLY shrinkable region in the bar. A flex item
+  // defaults to `min-width: auto` (= min-content), so before this the strip
+  // refused to shrink and shoved the login/register/avatar chrome past the
+  // right edge — where globals.css `overflow-x: hidden` clipped it, making it
+  // unreachable rather than merely ugly (375px: ~567px of min-content in
+  // 327px of room). minWidth:0 lets it give way; overflowX makes the surplus
+  // links scrollable instead of lost.
   links: {
     display: "flex",
     gap: 4,
     flex: 1,
+    minWidth: 0,
+    overflowX: "auto",
+    scrollbarWidth: "none",
+    overscrollBehaviorX: "contain",
   } as CSSProperties,
   link: (active: boolean): CSSProperties => ({
     padding: "6px 14px",
@@ -73,11 +89,14 @@ const s = {
     transition: "all 0.2s",
     textDecoration: "none",
   }),
+  // flexShrink:0 — this column holds the only path to login and to the account
+  // menu, so it wins every width fight against the link strip above.
   right: {
     display: "flex",
     alignItems: "center",
     gap: 10,
     marginLeft: "auto",
+    flexShrink: 0,
   } as CSSProperties,
   btnOutline: {
     padding: "6px 16px",
@@ -120,20 +139,121 @@ const s = {
     color: "rgba(235,235,245,0.75)",
     padding: "0 4px",
   } as CSSProperties,
-  // Neutral stand-in for the avatar while the auth probe is in flight — matches
-  // the .agc-avatar tile footprint (36x36, radius 8) so the swap to the real
-  // avatar causes no layout shift.
+  // Neutral stand-in for the avatar while the auth probe is in flight. Must
+  // track .agc-avatar's footprint EXACTLY (size + radius) or the probe
+  // resolving jolts the whole right-hand group. Kept in sync by hand because
+  // the tile's own rules live in avatar-menu.css (media queries and :hover
+  // cannot be expressed inline).
   avatarSkeleton: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     background: "rgba(255,255,255,0.08)",
   } as CSSProperties,
 };
 
+// Everything inline styles cannot express: media queries, the WebKit
+// scrollbar pseudo-element, and descendant selectors. `!important` is not
+// decoration here — the elements below carry inline `style` objects, which
+// otherwise outrank any stylesheet rule (same trick as /search's grid).
+//
+// Scope of the mobile pass is deliberately narrow: tighten the gutters and
+// let the link strip scroll. No hamburger, no drawer — the goal is only that
+// 登录 / 注册 / avatar stop falling outside the viewport at 375px.
+const NAV_CSS = `
+.agc-nav-links::-webkit-scrollbar { display: none; }
+.agc-nav-links > * { flex: 0 0 auto; white-space: nowrap; }
+@media (max-width: 768px) {
+  .agc-nav { padding: 0 12px !important; }
+  .agc-nav-inner { gap: 12px !important; }
+  .agc-nav-logo { font-size: 17px !important; }
+  .agc-nav-links > * { padding-left: 10px !important; padding-right: 10px !important; }
+  /* Keep the hover underline inside the tightened padding box. */
+  .agc-nav-links .nav-link::after { left: 10px; right: 10px; }
+}
+@media (max-width: 480px) {
+  .agc-nav-logo { font-size: 16px !important; }
+  .agc-nav-cta { padding: 6px 10px !important; font-size: 13px !important; }
+}
+`;
+
+// Same payload shape proxy.ts:216 and authFetch:71 already produce —
+// pathname + search, never an absolute URL, because sanitizeFromParam only
+// accepts a same-origin path. authHrefWithFrom owns the rest of the rule
+// (root, self-loop and off-origin values degrade to the bare surface); this
+// bar used to carry its own looser copy of it, and two hand-mirrored copies
+// of one security allowlist is exactly one too many.
+function navAuthHref(
+  target: AuthSurface,
+  pathname: string,
+  search: string,
+): string {
+  return authHrefWithFrom(target, search ? `${pathname}?${search}` : pathname);
+}
+
+interface AuthCtaProps {
+  loginHref: string;
+  registerHref: string;
+}
+
+// Presentational half of the logged-out chrome, split out so the identical
+// markup can render on both sides of the Suspense boundary below.
+function AuthCtaView({ loginHref, registerHref }: AuthCtaProps) {
+  const { lang, t, toggle } = useLang();
+  return (
+    <>
+      <button
+        type="button"
+        style={s.langBtn}
+        onClick={toggle}
+        aria-label={lang === "zh" ? "Switch to English" : "切换到中文"}
+      >
+        {lang === "zh" ? "EN" : "中"}
+      </button>
+      <Link href={loginHref} prefetch={false} className="agc-nav-cta" style={s.btnOutline}>
+        {t("nav.login")}
+      </Link>
+      <Link href={registerHref} prefetch={false} className="agc-nav-cta" style={s.btnFill}>
+        {t("nav.register")}
+      </Link>
+    </>
+  );
+}
+
+// useSearchParams() lives HERE, behind its own <Suspense>, and not in Navbar:
+// Navbar renders from the root layout and /anime/* is prerendered (ISR), and
+// an unwrapped useSearchParams() anywhere in a prerendered tree fails the
+// production build with "Missing Suspense boundary with useSearchParams".
+// The fallback is the same two buttons minus the ?from= round-trip, so the
+// prerendered HTML is complete and the client swap is invisible.
+function AuthCtaWithFrom() {
+  const pathname = usePathname() ?? "/";
+  const search = useSearchParams()?.toString() ?? "";
+  return (
+    <AuthCtaView
+      loginHref={navAuthHref("/login", pathname, search)}
+      registerHref={navAuthHref("/register", pathname, search)}
+    />
+  );
+}
+
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
+}
+
+interface NavLink {
+  href: string;
+  label: string;
+  key: string;
+  /**
+   * Render the label as an inert, `visibility: hidden` span instead of a link.
+   * Used for the auth-only entry in every state except "authed": it reserves
+   * the exact width the real link will occupy, so the strip is the same shape
+   * from the first painted frame onward, without ever exposing a logged-in-only
+   * affordance to a visitor who has not resolved a session.
+   */
+  placeholder?: boolean;
 }
 
 export default function Navbar({ season, year }: NavbarProps) {
@@ -142,7 +262,9 @@ export default function Navbar({ season, year }: NavbarProps) {
   // resolves lang server-side (that forced dynamic). useLang() reads the
   // `lang` cookie on the client + reacts to the toggle, so the chrome
   // switches to en for en visitors without a server round-trip.
-  const { lang, t, toggle } = useLang();
+  // `toggle` is no longer destructured here — the language button moved into
+  // AuthCtaView (logged-out) / AvatarMenu (logged-in).
+  const { lang, t } = useLang();
 
   // Islanded auth state: the layout no longer fetches /api/auth/me server-side
   // (that no-store call forced every page dynamic). Fetch it here, on mount,
@@ -208,72 +330,159 @@ export default function Navbar({ season, year }: NavbarProps) {
     }
     // go-api also clears the auth_hint cookie; reflect logged-out state now.
     setUser(null);
+    // ...and tell every mounted SubscriptionSetProvider to drop the set it
+    // cached for the account that just left. Logging out deliberately does NOT
+    // navigate — you stay on the page you were reading — so nothing else in the
+    // tree has any reason to re-render. Without this signal the previous user's
+    // ✓ badges stay painted across the whole grid, underneath a bar that
+    // already reads 登录 / 注册, until some unrelated route change wipes them.
+    // On a shared machine that is the next person standing in front of a
+    // stranger's complete watchlist on a page that claims nobody is signed in.
+    //
+    // Deliberately not a full-page window.location.replace(): that would turn
+    // logout into a navigation and undo the stay-put design. The event is the
+    // narrow fix — evict the one piece of per-user state that outlives it.
+    broadcastSignedOut();
     setLoggingOut(false);
   }
-
-  const links: Array<{ href: string; label: string; key: string }> = [
-    { href: "/", label: t("nav.home"), key: "home" },
-    { href: seasonHref, label: t("nav.season"), key: "season" },
-    { href: "/search", label: t("nav.search"), key: "search" },
-    { href: "/library", label: t("nav.library"), key: "library" },
-    { href: "/welcome", label: t("nav.about"), key: "about" },
-  ];
 
   // "authed" → avatar · "probing" → neutral skeleton (never the login CTA mid-
   // probe) · "anonymous" → login/register. See lib/authChrome.
   const chrome = authChrome(Boolean(user), probing);
 
+  // 我的追番 (/profile) takes over the slot 我的库 (/library) vacated, so the
+  // link count is unchanged — the bar is already over budget at 375px.
+  //
+  // Why the swap: /profile is the one surface whose value grows with every
+  // subscription, and it lived ONLY behind the unlabelled 36×36 avatar
+  // dropdown, so a user who had just subscribed to their first show had no
+  // visible route back to their list. /library, meanwhile, is the local-file
+  // player — it needs File System Access plus a granted folder, is auth-gated
+  // by proxy.ts anyway, and is pure confusion as a top-level entry for a
+  // first-time visitor. It moves into AvatarMenu.
+  //
+  // The entry is in the array in EVERY auth state and only its rendering
+  // changes: "authed" gets the real <Link>, "probing" and "anonymous" get an
+  // inert same-width span. Two independent reasons, and they pull in opposite
+  // directions, which is why neither "always link" nor "conditionally present"
+  // works:
+  //
+  //   1. Layout. `chrome` is "anonymous" in the prerendered HTML and flips to
+  //      "probing" one frame after hydration for every visitor carrying
+  //      auth_hint. An entry that only appeared at that flip shoved 关于 right
+  //      by a full link width on every page load and every navigation — worst
+  //      on /anime/*, which paints instantly off the CF edge cache, so the
+  //      jump lands well after the user has started reading the bar.
+  //   2. Auth. Only "authed" may get a live /profile link: the route sits
+  //      behind the proxy.ts gate, so an anonymous click earns nothing but a
+  //      bounce to /login, and showing a logged-in-only affordance mid-probe
+  //      is the same 2026-06-05 phantom-logout mistake the avatar skeleton
+  //      exists to avoid, just applied to a link instead of a button.
+  //
+  // Reserved for "probing" ONLY — never for anonymous.
+  //
+  // An earlier revision reserved the width in both states, on the theory that a
+  // bar which never moves beats a bar that settles once. Rendered, that is a
+  // visible gap sitting between 搜索 and 关于 on every anonymous page view: the
+  // strip reads as broken markup rather than as a stable layout, and anonymous
+  // is the majority of traffic (SEO lands people logged out, and most never
+  // return to log in at all). It traded a permanent defect for the majority
+  // against a one-frame settle for the minority.
+  //
+  // Probing is the only state where reserving pays for itself: it is entered
+  // solely when the auth_hint cookie is present, so a real link is already on
+  // its way and the box will be filled within one round trip. Anonymous
+  // visitors have nothing coming, so they get no box.
+  const links: NavLink[] = [
+    { href: "/", label: t("nav.home"), key: "home" },
+    { href: seasonHref, label: t("nav.season"), key: "season" },
+    { href: "/search", label: t("nav.search"), key: "search" },
+    ...(chrome === "anonymous"
+      ? []
+      : [
+          {
+            href: "/profile",
+            label: t("nav.myList"),
+            key: "mylist",
+            placeholder: chrome !== "authed",
+          },
+        ]),
+    { href: "/welcome", label: t("nav.about"), key: "about" },
+  ];
+
   return (
-    <nav style={s.nav} aria-label={lang === "zh" ? "主导航" : "Main navigation"}>
-      <div style={s.inner}>
-        <Link href="/" style={s.logo} prefetch={false}>
+    <nav
+      className="agc-nav"
+      style={s.nav}
+      aria-label={lang === "zh" ? "主导航" : "Main navigation"}
+    >
+      <style>{NAV_CSS}</style>
+      <div className="agc-nav-inner" style={s.inner}>
+        <Link href="/" className="agc-nav-logo" style={s.logo} prefetch={false}>
           AnimeGoClub
         </Link>
-        <div style={s.links}>
-          {links.map((l) => (
-            <Link
-              key={l.key}
-              href={l.href}
-              prefetch={false}
-              className="nav-link"
-              style={s.link(isActive(pathname, l.href))}
-              aria-current={isActive(pathname, l.href) ? "page" : undefined}
-            >
-              {l.label}
-            </Link>
-          ))}
+        <div className="agc-nav-links" style={s.links}>
+          {links.map((l) => {
+            const active = isActive(pathname, l.href);
+            // Inert width reservation. `visibility: hidden` is what does the
+            // work: the box keeps its size but the subtree leaves the
+            // accessibility tree, the tab order, find-in-page and text
+            // selection — a screen reader, a keyboard and Ctrl+F all agree it
+            // is not there. aria-hidden restates it for anything that reads
+            // the tree without honouring the computed style. It is styled with
+            // the SAME active flag as the real link, so the reserved box is
+            // the width of the link that will replace it (600-weight when
+            // active, 500 otherwise) rather than merely close to it.
+            //
+            // Anonymous and probing visitors emit byte-identical markup here,
+            // so the placeholder's presence says nothing about whether anyone
+            // is signed in — it is not a hidden copy of a logged-in nav, it is
+            // a spacer that happens to be shaped like one.
+            return l.placeholder ? (
+              <span
+                key={l.key}
+                aria-hidden="true"
+                style={{ ...s.link(active), visibility: "hidden" }}
+              >
+                {l.label}
+              </span>
+            ) : (
+              <Link
+                key={l.key}
+                href={l.href}
+                prefetch={false}
+                className="nav-link"
+                style={s.link(active)}
+                aria-current={active ? "page" : undefined}
+              >
+                {l.label}
+              </Link>
+            );
+          })}
         </div>
-        <div style={s.right}>
+        <div className="agc-nav-right" style={s.right}>
           {chrome === "probing" ? (
             // auth_hint says a session likely exists but /api/auth/me hasn't
             // resolved — show a neutral avatar placeholder, never the login CTA,
             // so a logged-in visitor doesn't flash "login" before their avatar.
             <div style={s.avatarSkeleton} aria-hidden />
           ) : user ? (
-            // Logged-in chrome (Hi / 我的追番 / language / 登出) collapses into
-            // the avatar dropdown, which also hosts 卡片个性化.
+            // Logged-in chrome (Hi / 我的追番 / 我的库 / 设置 / language / 登出)
+            // collapses into the avatar dropdown. 我的追番 is duplicated in the
+            // nav strip above on purpose: the dropdown is a 36×36 unlabelled
+            // affordance, and a newly-subscribed user needs a route back to
+            // their list that they can actually see.
             <AvatarMenu
               user={user}
               onLogout={handleLogout}
               loggingOut={loggingOut}
             />
           ) : (
-            <>
-              <button
-                type="button"
-                style={s.langBtn}
-                onClick={toggle}
-                aria-label={lang === "zh" ? "Switch to English" : "切换到中文"}
-              >
-                {lang === "zh" ? "EN" : "中"}
-              </button>
-              <Link href="/login" prefetch={false} style={s.btnOutline}>
-                {t("nav.login")}
-              </Link>
-              <Link href="/register" prefetch={false} style={s.btnFill}>
-                {t("nav.register")}
-              </Link>
-            </>
+            <Suspense
+              fallback={<AuthCtaView loginHref="/login" registerHref="/register" />}
+            >
+              <AuthCtaWithFrom />
+            </Suspense>
           )}
         </div>
       </div>
