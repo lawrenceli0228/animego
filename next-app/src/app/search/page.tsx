@@ -14,6 +14,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import AnimeCard, { type AnimeCardData } from "@/components/anime/AnimeCard";
+import { SubscriptionSetProvider } from "@/components/anime/SubscriptionSetProvider";
 import SearchFilters from "@/components/search/SearchFilters";
 import { ApiError, getApiBase } from "@/lib/api";
 import { genreLabel } from "@/lib/contentLabels";
@@ -304,31 +305,39 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         <div style={promptStyle}>{dict.anime.noAnime}</div>
       ) : (
         <>
-          <div className="search-anime-grid" style={gridStyle}>
-            {animeList.map((a) => {
-              // SearchRow lacks `genres` -- AnimeCard treats it as
-              // optional and degrades gracefully (no chip overlay).
-              const cardData: AnimeCardData = {
-                anilistId: a.anilistId,
-                titleChinese: a.titleChinese,
-                titleRomaji: a.titleRomaji,
-                titleEnglish: a.titleEnglish,
-                titleNative: a.titleNative,
-                coverImageUrl: a.coverImageUrl,
-                posterAccent: a.posterAccent,
-                averageScore: a.averageScore,
-                format: a.format,
-              };
-              return (
-                <AnimeCard
-                  key={a.anilistId}
-                  anime={cardData}
-                  lang={lang}
-                  prefetch={false}
-                />
-              );
-            })}
-          </div>
+          {/* Client provider around server-rendered children — the cards stay
+              RSC output, passed through the boundary as an already-rendered
+              `children` node, so this page remains a Server Component. Only
+              the grid is wrapped: the pagination below needs nothing from the
+              subscription set, and one provider per grid means one
+              subscription-set fetch instead of one probe per card. */}
+          <SubscriptionSetProvider>
+            <div className="search-anime-grid" style={gridStyle}>
+              {animeList.map((a) => {
+                // SearchRow lacks `genres` -- AnimeCard treats it as
+                // optional and degrades gracefully (no chip overlay).
+                const cardData: AnimeCardData = {
+                  anilistId: a.anilistId,
+                  titleChinese: a.titleChinese,
+                  titleRomaji: a.titleRomaji,
+                  titleEnglish: a.titleEnglish,
+                  titleNative: a.titleNative,
+                  coverImageUrl: a.coverImageUrl,
+                  posterAccent: a.posterAccent,
+                  averageScore: a.averageScore,
+                  format: a.format,
+                };
+                return (
+                  <AnimeCard
+                    key={a.anilistId}
+                    anime={cardData}
+                    lang={lang}
+                    prefetch={false}
+                  />
+                );
+              })}
+            </div>
+          </SubscriptionSetProvider>
 
           {totalPages > 1 ? (
             <nav

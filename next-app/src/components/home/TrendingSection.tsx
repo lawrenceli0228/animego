@@ -1,4 +1,5 @@
 import AnimeCard from "@/components/anime/AnimeCard";
+import { SubscriptionSetProvider } from "@/components/anime/SubscriptionSetProvider";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { TrendingItem } from "@/lib/types";
 
@@ -52,18 +53,31 @@ export default function TrendingSection({
         <h2 style={titleStyle}>{dict.home.trendingTitle}</h2>
       </div>
 
-      <div style={gridStyle}>
-        {items.map((item, i) => (
-          <AnimeCard
-            key={item.anilistId}
-            anime={item}
-            lang={lang}
-            rank={i + 1}
-            watcherCount={item.watcherCount}
-            prefetch={false}
-          />
-        ))}
-      </div>
+      {/* SubscriptionSetProvider is a Client Component, but this file stays a
+          Server Component: the grid below is rendered on the server and handed
+          down as `children`, which RSC passes through a client boundary as an
+          already-rendered node. THIS IS NOT ISLANDING THE HOME PAGE — the
+          2026-06-05 revert was about converting server-rendered sections into
+          client components, which double-fetched auth and collided with the
+          refresh-token rotation. Nothing here becomes "use client".
+
+          The provider wraps the grid rather than the section so exactly one
+          subscription-set fetch backs every quick-add button in it, instead of
+          one probe per card. */}
+      <SubscriptionSetProvider>
+        <div style={gridStyle}>
+          {items.map((item, i) => (
+            <AnimeCard
+              key={item.anilistId}
+              anime={item}
+              lang={lang}
+              rank={i + 1}
+              watcherCount={item.watcherCount}
+              prefetch={false}
+            />
+          ))}
+        </div>
+      </SubscriptionSetProvider>
     </section>
   );
 }

@@ -4,13 +4,30 @@ import { pickTitle } from "@/lib/formatters";
 import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { WatchingItem } from "@/lib/types";
+import { currentSeasonHref, resolveWatchingView } from "./continueWatchingState";
+import WatchingEmptySwap from "./WatchingEmptySwap";
+import SignedOutGate from "./SignedOutGate";
 
 // RSC ContinueWatching. Server-side tries
-// `/api/subscriptions?status=watching`. 401 → render the logged-out
-// CTA stub. Authed-with-zero-rows → hide the section entirely (matches
-// legacy ContinueWatching.jsx: `if (!user || !list?.length) return null`
-// becomes "show stub when no auth, hide when authed-but-empty" — a
-// homepage with the CTA still makes sense for new visitors).
+// `/api/subscriptions?status=watching` and renders one of three bodies:
+//   - anonymous (401/network)  → blurred stub + login CTA
+//   - authed, zero rows        → same blurred stub + "add something" CTA
+//   - authed, rows             → the real grid
+//
+// The zero-row case used to `return null` (a straight port of legacy
+// ContinueWatching.jsx's `if (!user || !list?.length) return null`), which
+// made registering *subtract* from the homepage: the anonymous visitor saw a
+// section explaining what tracking is, and the account they just created saw
+// nothing at all. Same-shaped stub with different copy keeps the section a
+// constant, so the only thing signing up changes is which call to action it
+// carries.
+//
+// The zero-row body is additionally wrapped in WatchingEmptySwap, the one
+// client boundary in this file: its copy is the only thing on the page a
+// visitor can falsify without navigating (press + in the trending grid above
+// and "you're not tracking anything" is instantly wrong). The swap stays a
+// leaf — this component remains a Server Component and both bodies are
+// rendered here, on the server.
 //
 // Cookie forwarding via lib/api.ts buildHeaders() — same path the
 // ActivityFeed sibling uses. Both rely on P8.1 cookie dual-track
@@ -77,6 +94,24 @@ const overlayStyle = {
   background:
     "radial-gradient(ellipse at center, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.25) 70%, transparent 100%)",
   padding: "24px 16px",
+} as const;
+
+// Title + body sit closer to each other than either does to the CTA, so they
+// read as one block instead of three evenly-spaced lines.
+const overlayTextStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  alignItems: "center",
+  gap: 6,
+} as const;
+
+const overlayTitleStyle = {
+  fontFamily: "'Sora',sans-serif",
+  color: "#ffffff",
+  fontSize: 17,
+  fontWeight: 600,
+  maxWidth: 360,
+  lineHeight: 1.35,
 } as const;
 
 const overlayCopyStyle = {
@@ -194,13 +229,27 @@ function badgeText(item: WatchingItem, dict: Dict, lang: Lang): string {
   return lang === "zh" ? "在追" : "Watching";
 }
 
-function LoggedOutStub({ dict, lang }: ContinueWatchingProps) {
-  const copy =
-    lang === "zh"
-      ? "登录后追番进度会出现在这里"
-      : "Login to track your watching progress";
-  const cta = dict.nav.login;
-  const ctaAria = lang === "zh" ? "登录 AnimeGoClub" : "Login to AnimeGoClub";
+/**
+ * Blurred placeholder cards behind a centred pitch + one CTA. Shared by both
+ * empty states so the anonymous and the zero-subscription homepage differ in
+ * copy only — the section never changes shape under the user.
+ */
+function StubSection({
+  dict,
+  title,
+  body,
+  ctaHref,
+  ctaLabel,
+  ctaAria,
+}: {
+  dict: Dict;
+  /** Omitted by the logged-out stub, which is a single line of copy. */
+  title?: string;
+  body: string;
+  ctaHref: string;
+  ctaLabel: string;
+  ctaAria?: string;
+}) {
   return (
     <section style={sectionStyle} aria-label={dict.home.watchingTitle}>
       <div style={headerStyle}>
@@ -214,13 +263,70 @@ function LoggedOutStub({ dict, lang }: ContinueWatchingProps) {
           ))}
         </div>
         <div style={overlayStyle}>
-          <p style={overlayCopyStyle}>{copy}</p>
-          <Link href="/login" aria-label={ctaAria} style={ctaStyle}>
-            {cta}
+          <div style={overlayTextStyle}>
+            {title ? <p style={overlayTitleStyle}>{title}</p> : null}
+            <p style={overlayCopyStyle}>{body}</p>
+          </div>
+          <Link href={ctaHref} aria-label={ctaAria} style={ctaStyle}>
+            {ctaLabel}
           </Link>
         </div>
       </div>
     </section>
+  );
+}
+
+function LoggedOutStub({ dict, lang }: ContinueWatchingProps) {
+  const copy =
+    lang === "zh"
+      ? "登录后追番进度会出现在这里"
+      : "Login to track your watching progress";
+  return (
+    <StubSection
+      dict={dict}
+      body={copy}
+      ctaHref="/login"
+      ctaLabel={dict.nav.login}
+      ctaAria={lang === "zh" ? "登录 AnimeGoClub" : "Login to AnimeGoClub"}
+    />
+  );
+}
+
+/**
+ * Logged in, nothing tracked yet. The CTA has to be *this season* rather than
+ * the homepage the user is already standing on — the failure it fixes is "I
+ * signed up and now what", so it must hand over a place to press +.
+ */
+function ZeroSubscriptionStub({ dict }: { dict: Dict }) {
+  return (
+    <StubSection
+      dict={dict}
+      title={dict.home.watchingEmptyTitle}
+      body={dict.home.watchingEmptyBody}
+      ctaHref={currentSeasonHref()}
+      ctaLabel={dict.home.watchingEmptyCta}
+    />
+  );
+}
+
+/**
+ * What the empty stub becomes the instant a + lands elsewhere on the page.
+ *
+ * Same shape, three swapped strings — the section must not resize under the
+ * user for a copy change. The body line survives verbatim because it is an
+ * instruction ("tap + on any poster") and stays true after the first add; the
+ * only sentence that turns into a lie is the title, so only the title (and
+ * the CTA, which now has somewhere better to point) changes.
+ */
+function JustAddedStub({ dict }: { dict: Dict }) {
+  return (
+    <StubSection
+      dict={dict}
+      title={dict.sub.toastAdded}
+      body={dict.home.watchingEmptyBody}
+      ctaHref="/profile"
+      ctaLabel={dict.sub.toastViewList}
+    />
   );
 }
 
@@ -294,11 +400,33 @@ export default async function ContinueWatching({
     }
   }
 
-  if (loggedOut) {
-    return <LoggedOutStub dict={dict} lang={lang} />;
+  switch (resolveWatchingView(loggedOut, items.length)) {
+    case "logged-out":
+      return <LoggedOutStub dict={dict} lang={lang} />;
+    case "empty":
+      // The one view that can be contradicted by something the visitor does
+      // on this very screen — see WatchingEmptySwap. Both bodies are rendered
+      // here on the server; the client only picks between them.
+      //
+      // SignedOutGate wraps it for the same reason it wraps the grid below:
+      // logout does not navigate, so without it this block would keep telling
+      // a signed-out visitor what to do with an account they no longer hold.
+      return (
+        <SignedOutGate signedOut={<LoggedOutStub dict={dict} lang={lang} />}>
+          <WatchingEmptySwap filled={<JustAddedStub dict={dict} />}>
+            <ZeroSubscriptionStub dict={dict} />
+          </WatchingEmptySwap>
+        </SignedOutGate>
+      );
+    default:
+      // The grid is the biggest account-specific surface on the home page —
+      // covers, titles and per-series episode progress. Logout leaves the
+      // page in place, so it needs an explicit teardown or a shared machine
+      // shows the previous user's watch list under a "Log in" navbar.
+      return (
+        <SignedOutGate signedOut={<LoggedOutStub dict={dict} lang={lang} />}>
+          <WatchingGrid items={items} dict={dict} lang={lang} />
+        </SignedOutGate>
+      );
   }
-  // Authed but nothing in this bucket — hide the section entirely.
-  // Matches legacy ContinueWatching.jsx: `if (!list?.length) return null`.
-  if (items.length === 0) return null;
-  return <WatchingGrid items={items} dict={dict} lang={lang} />;
 }

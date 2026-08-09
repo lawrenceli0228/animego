@@ -105,6 +105,26 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
             {t("nav.myList")}
           </Link>
 
+          {/* 我的库 demoted here from the top-level nav. It is the local-file
+              player: needs File System Access plus a folder the user has
+              granted, and is auth-gated by proxy.ts either way — so it was
+              spending a scarce nav slot on something a first-time visitor
+              cannot use, while 我的追番 (above) had no visible entry at all.
+              Swapping the two keeps the nav at five links; the 375px bar has
+              no room for a sixth. */}
+          <Link
+            href="/library"
+            prefetch={false}
+            className="agc-menu-item"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            {t("nav.library")}
+          </Link>
+
           <Link
             href="/settings"
             prefetch={false}

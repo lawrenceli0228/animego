@@ -5,8 +5,8 @@ import { getLang } from "@/lib/i18n";
 
 export const revalidate = 3600;
 
-const CONTACT = "copyright@animegoclub.com";
-const UPDATED = "2026年6月5日";
+const CONTACT = "animegoanime@animegoclub.com";
+const UPDATED = "2026年8月9日";
 
 export async function generateMetadata(): Promise<Metadata> {
   const lang = await getLang();

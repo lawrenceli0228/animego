@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { apiGet, ApiError } from "@/lib/api";
 import { getLang } from "@/lib/i18n";
 import { pickTitle } from "@/lib/formatters";
+import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import SettingsClient from "./_components/SettingsClient";
 import type { SubscriptionListItem } from "../profile/_components/types";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
@@ -55,7 +56,11 @@ const SEASON_ZH: Record<string, string> = {
 
 export default async function SettingsPage() {
   const [lang, me, subs] = await Promise.all([getLang(), fetchMe(), fetchSubs()]);
-  if (!me?.username) redirect("/login?next=/settings");
+  // `from`, not `next`: /login reads ?from= (sanitizeFromParam) and has
+  // never looked at ?next=. The old param was therefore inert — every
+  // session-expired hit on /settings silently became a trip to the home
+  // page after re-auth.
+  if (!me?.username) redirect(authHrefWithFrom("/login", "/settings"));
 
   // backdrop options (cover + banner) + completed count + top season
   const seen = new Set<number>();
