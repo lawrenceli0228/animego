@@ -103,3 +103,6 @@ backup-*.json
 /go-api/server
 /go-api/migrate-mongo
 /go-api/parity-check
+
+# 内部待办：含留存指标与未修补缺口，仓库是公开的
+TODO.md
