@@ -20,6 +20,7 @@ interface MeResp {
     createdAt?: string | null;
     avatarUrl?: string | null;
     backdropAnilistId?: number | null;
+    isPublic?: boolean;
   } | null;
 }
 
@@ -104,7 +105,7 @@ export default async function SettingsPage() {
         backdropOptions={backdropOptions.slice(0, 80)}
         watchedCount={watchedCount}
         topSeason={topSeason}
-        lang={lang}
+        isPublic={me.isPublic ?? true}
       />
     </main>
   );

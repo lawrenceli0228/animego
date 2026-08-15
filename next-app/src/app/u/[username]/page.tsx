@@ -22,6 +22,7 @@ import FollowButton from "./_components/FollowButton";
 import WatchingSection from "./_components/WatchingSection";
 import ShareButtonIsland from "./_components/ShareButtonIsland";
 import PublicProfileHero from "./_components/PublicProfileHero";
+import PrivateProfileState from "./_components/PrivateProfileState";
 import type { UserProfileData } from "./_components/types";
 
 export const dynamic = "force-dynamic";
@@ -115,6 +116,8 @@ export default async function UserProfilePage({ params }: PageProps) {
   const initialIsFollowing: boolean | null = isLoggedIn
     ? (profile.isFollowing ?? false)
     : null;
+  const isPrivate = profile.isPrivate === true || profile.isPublic === false;
+  const watching = Array.isArray(profile.watching) ? profile.watching : [];
 
   return (
     <main>
@@ -126,7 +129,7 @@ export default async function UserProfilePage({ params }: PageProps) {
         backdropAnilistId={profile.backdropAnilistId}
         followerCount={profile.followerCount}
         followingCount={profile.followingCount}
-        watching={profile.watching}
+        watching={watching}
         lang={lang}
         actions={
           <>
@@ -146,7 +149,7 @@ export default async function UserProfilePage({ params }: PageProps) {
         }
       >
         <div style={{ paddingTop: 8, paddingBottom: 60 }}>
-          <WatchingSection watching={profile.watching} />
+          {isPrivate ? <PrivateProfileState /> : <WatchingSection watching={watching} />}
         </div>
       </PublicProfileHero>
     </main>

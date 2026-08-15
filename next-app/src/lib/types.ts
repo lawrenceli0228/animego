@@ -262,6 +262,9 @@ export interface WatchingItem {
 // the timeAgo render.
 
 export interface FeedItem {
+  /** Stable id/kind on the append-only event feed; absent on legacy rows. */
+  id?: string;
+  kind?: string;
   username: string;
   anilistId: number;
   title: string;
@@ -269,7 +272,12 @@ export interface FeedItem {
   coverImageUrl: string | null;
   episode: number;
   status: string;
-  lastWatchedAt: string;
+  lastWatchedAt?: string;
+  /** Event timestamp and discussion fields on the extended feed contract. */
+  createdAt?: string;
+  commentId?: string | null;
+  content?: string | null;
+  excerpt?: string | null;
 }
 
 export interface FeedResponse {

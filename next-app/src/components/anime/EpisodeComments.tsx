@@ -32,7 +32,8 @@ import { hasAuthHint } from "@/lib/clientAuth";
 import { authChrome } from "@/lib/authChrome";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import FallbackImg from "@/components/ui/FallbackImg";
-import type { Dict, Lang } from "@/lib/i18n";
+import { useLang } from "@/lib/lang-client";
+import { deletedCommentCount } from "./episodeDiscussionState";
 
 interface CommentDoc {
   id: string;
@@ -46,6 +47,8 @@ interface CommentDoc {
   parentId: string | null;
   replyToUsername: string | null;
   createdAt: string;
+  reactionCount?: number;
+  viewerReacted?: boolean;
 }
 
 type CommentNode = CommentDoc & { children: CommentNode[] };
@@ -64,8 +67,8 @@ interface ReplyTarget {
 interface EpisodeCommentsProps {
   anilistId: number;
   episode: number;
-  dict: Dict;
-  lang: Lang;
+  highlightCommentId?: string | null;
+  onCommentDelta?: (episode: number, delta: number) => void;
 }
 
 const MAX_LEN = 500;
@@ -75,7 +78,6 @@ interface CommentInputProps {
   onSubmit: (text: string, onDone: () => void) => void;
   isPending: boolean;
   placeholder: string;
-  dict: Dict;
   autoFocus?: boolean;
   onCancel?: () => void;
 }
@@ -84,10 +86,10 @@ function CommentInput({
   onSubmit,
   isPending,
   placeholder,
-  dict,
   autoFocus,
   onCancel,
 }: CommentInputProps) {
+  const { t } = useLang();
   const [text, setText] = useState("");
 
   const handlePost = () => {
@@ -156,7 +158,7 @@ function CommentInput({
                 fontSize: 12,
               }}
             >
-              {dict.comment.cancel}
+              {t("comment.cancel")}
             </button>
           )}
           <button
@@ -176,7 +178,7 @@ function CommentInput({
               transition: "opacity 0.2s",
             }}
           >
-            {isPending ? dict.comment.posting : dict.comment.post}
+            {isPending ? t("comment.posting") : t("comment.post")}
           </button>
         </div>
       </div>
@@ -190,10 +192,11 @@ interface CommentItemProps {
   user: CurrentUser | null;
   onReply: (c: CommentDoc) => void;
   onDelete: (id: string) => void;
+  onReact: (comment: CommentDoc) => void;
+  reactionBusyIds: ReadonlySet<string>;
   confirmId: string | null;
   setConfirmId: (id: string | null) => void;
-  dict: Dict;
-  lang: Lang;
+  highlightedId?: string | null;
   depth?: number;
 }
 
@@ -202,16 +205,32 @@ function CommentItem({
   user,
   onReply,
   onDelete,
+  onReact,
+  reactionBusyIds,
   confirmId,
   setConfirmId,
-  dict,
-  lang,
+  highlightedId,
   depth = 0,
 }: CommentItemProps) {
+  const { t } = useLang();
   const isOwn = !!user && user.id === c.userId;
+  const highlighted = highlightedId === c.id;
+  const reactionBusy = reactionBusyIds.has(c.id);
 
   return (
-    <div style={{ marginLeft: depth > 0 ? 24 : 0 }}>
+    <div
+      id={`comment-${c.id}`}
+      tabIndex={-1}
+      style={{
+        marginLeft: depth > 0 ? 24 : 0,
+        padding: highlighted ? "8px 10px" : 0,
+        marginRight: highlighted ? -10 : 0,
+        borderRadius: 10,
+        background: highlighted ? "rgba(10,132,255,0.12)" : "transparent",
+        outline: "none",
+        transition: "background 300ms",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -220,7 +239,10 @@ function CommentItem({
           paddingTop: depth > 0 ? 10 : 0,
         }}
       >
-        <div
+        <Link
+          href={`/u/${encodeURIComponent(c.username)}`}
+          prefetch={false}
+          aria-label={c.username}
           style={{
             width: depth > 0 ? 26 : 32,
             height: depth > 0 ? 26 : 32,
@@ -235,6 +257,7 @@ function CommentItem({
             color: "#fff",
             textTransform: "uppercase",
             overflow: "hidden",
+            textDecoration: "none",
           }}
         >
           <FallbackImg
@@ -243,7 +266,7 @@ function CommentItem({
             alt={c.username}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
-        </div>
+        </Link>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
@@ -254,9 +277,18 @@ function CommentItem({
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#0a84ff" }}>
+            <Link
+              href={`/u/${encodeURIComponent(c.username)}`}
+              prefetch={false}
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#0a84ff",
+                textDecoration: "none",
+              }}
+            >
               {c.username}
-            </span>
+            </Link>
             {c.replyToUsername && (
               <span style={{ fontSize: 11, color: "rgba(235,235,245,0.30)" }}>
                 → {c.replyToUsername}
@@ -279,6 +311,24 @@ function CommentItem({
             {c.content}
           </p>
           <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+            <button
+              type="button"
+              onClick={() => onReact(c)}
+              disabled={reactionBusy}
+              aria-pressed={Boolean(c.viewerReacted)}
+              aria-label={t("comment.like")}
+              style={{
+                background: "none",
+                border: "none",
+                color: c.viewerReacted ? "#ff375f" : "rgba(235,235,245,0.30)",
+                cursor: reactionBusy ? "default" : "pointer",
+                fontSize: 11,
+                padding: 0,
+                opacity: reactionBusy ? 0.5 : 1,
+              }}
+            >
+              {c.viewerReacted ? "♥" : "♡"} {c.reactionCount ?? 0}
+            </button>
             {user && (
               <button
                 type="button"
@@ -292,7 +342,7 @@ function CommentItem({
                   padding: 0,
                 }}
               >
-                {lang === "zh" ? "回复" : "Reply"}
+                {t("comment.reply")}
               </button>
             )}
             {isOwn &&
@@ -314,7 +364,7 @@ function CommentItem({
                       fontWeight: 600,
                     }}
                   >
-                    {dict.comment.deleteConfirm}
+                    {t("comment.deleteConfirm")}
                   </button>
                   <button
                     type="button"
@@ -328,7 +378,7 @@ function CommentItem({
                       padding: 0,
                     }}
                   >
-                    {dict.comment.cancel}
+                    {t("comment.cancel")}
                   </button>
                 </div>
               ) : (
@@ -344,7 +394,7 @@ function CommentItem({
                     padding: 0,
                   }}
                 >
-                  {dict.comment.delete}
+                  {t("comment.delete")}
                 </button>
               ))}
           </div>
@@ -365,10 +415,11 @@ function CommentItem({
               user={user}
               onReply={onReply}
               onDelete={onDelete}
+              onReact={onReact}
+              reactionBusyIds={reactionBusyIds}
               confirmId={confirmId}
               setConfirmId={setConfirmId}
-              dict={dict}
-              lang={lang}
+              highlightedId={highlightedId}
               depth={depth + 1}
             />
           ))}
@@ -391,9 +442,10 @@ const sectionLabel: CSSProperties = {
 export default function EpisodeComments({
   anilistId,
   episode,
-  dict,
-  lang,
+  highlightCommentId,
+  onCommentDelta,
 }: EpisodeCommentsProps) {
+  const { lang, t } = useLang();
   // Detail page path for the login link's ?from=. usePathname is safe on
   // this surface — /anime/* is prerendered (ISR) and Navbar already calls
   // it in the root layout there. useSearchParams would NOT be: it forces
@@ -411,6 +463,9 @@ export default function EpisodeComments({
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [posting, setPosting] = useState(false);
+  const [reactionBusy, setReactionBusy] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   // One-time auth probe, gated on the auth_hint cookie so an anonymous panel
   // open fires zero auth requests. While the probe is in flight `probing` is
@@ -453,7 +508,8 @@ export default function EpisodeComments({
         return;
       }
       const json = (await res.json()) as { data?: CommentDoc[] };
-      setComments(Array.isArray(json.data) ? json.data : []);
+      const next = Array.isArray(json.data) ? json.data : [];
+      setComments(next);
     } catch {
       setComments([]);
     } finally {
@@ -463,10 +519,20 @@ export default function EpisodeComments({
 
   // (Re)load comments on mount and whenever the selected episode changes.
   useEffect(() => {
-    setReplyTarget(null);
-    setConfirmId(null);
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
+
+  // Notification links land on a hash rather than a query param so this ISR
+  // page stays free of useSearchParams/Suspense. Wait for the thread fetch,
+  // then move both viewport and keyboard focus to the exact comment.
+  useEffect(() => {
+    if (loading || !highlightCommentId) return;
+    const element = document.getElementById(`comment-${highlightCommentId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    element.focus({ preventScroll: true });
+  }, [loading, comments, highlightCommentId]);
 
   // Build the 2-level tree: roots (parentId=null, newest first) with
   // nested children keyed by parentId. A reply-to-a-reply still resolves
@@ -499,17 +565,18 @@ export default function EpisodeComments({
         });
         if (res.ok) {
           onDone();
+          onCommentDelta?.(episode, 1);
           await load();
         } else {
-          toast.error(lang === "zh" ? "发表失败，请重试" : "Couldn't post, try again");
+          toast.error(t("comment.postFailed"));
         }
       } catch {
-        toast.error(lang === "zh" ? "网络错误，请重试" : "Network error, try again");
+        toast.error(t("comment.networkFailed"));
       } finally {
         setPosting(false);
       }
     },
-    [anilistId, episode, load, lang],
+    [anilistId, episode, load, onCommentDelta, t],
   );
 
   const handlePost = (text: string, onDone: () => void) => {
@@ -534,15 +601,92 @@ export default function EpisodeComments({
 
   const handleDelete = useCallback(
     async (id: string) => {
+      const removedCount = Math.max(1, deletedCommentCount(comments, id));
       try {
         const res = await authFetch(`/api/comments/${id}`, { method: "DELETE" });
-        if (res.ok) await load();
-        else toast.error(lang === "zh" ? "删除失败，请重试" : "Couldn't delete, try again");
+        if (res.ok) {
+          onCommentDelta?.(episode, -removedCount);
+          await load();
+        }
+        else toast.error(t("comment.deleteFailed"));
       } catch {
-        toast.error(lang === "zh" ? "网络错误，请重试" : "Network error, try again");
+        toast.error(t("comment.networkFailed"));
       }
     },
-    [load, lang],
+    [comments, episode, load, onCommentDelta, t],
+  );
+
+  const handleReaction = useCallback(
+    async (comment: CommentDoc) => {
+      if (!user) {
+        window.location.assign(authHrefWithFrom("/login", pathname));
+        return;
+      }
+      if (reactionBusy.has(comment.id)) return;
+      const wasReacted = Boolean(comment.viewerReacted);
+      const oldCount = comment.reactionCount ?? 0;
+      const optimisticCount = Math.max(0, oldCount + (wasReacted ? -1 : 1));
+      setReactionBusy((before) => new Set(before).add(comment.id));
+      setComments((before) =>
+        before.map((row) =>
+          row.id === comment.id
+            ? {
+                ...row,
+                viewerReacted: !wasReacted,
+                reactionCount: optimisticCount,
+              }
+            : row,
+        ),
+      );
+      try {
+        const res = await authFetch(`/api/comments/${comment.id}/reaction`, {
+          method: wasReacted ? "DELETE" : "PUT",
+          headers: { "Content-Type": "application/json" },
+        });
+        if (!res.ok) throw new Error("reaction failed");
+        const json = (await res.json().catch(() => null)) as {
+          data?: {
+            reactionCount?: number;
+            viewerReacted?: boolean;
+            count?: number;
+            reacted?: boolean;
+          };
+        } | null;
+        const serverCount = json?.data?.reactionCount ?? json?.data?.count;
+        const serverReacted = json?.data?.viewerReacted ?? json?.data?.reacted;
+        if (typeof serverCount === "number" || typeof serverReacted === "boolean") {
+          setComments((before) =>
+            before.map((row) =>
+              row.id === comment.id
+                ? {
+                    ...row,
+                    reactionCount:
+                      typeof serverCount === "number" ? serverCount : optimisticCount,
+                    viewerReacted:
+                      typeof serverReacted === "boolean" ? serverReacted : !wasReacted,
+                  }
+                : row,
+            ),
+          );
+        }
+      } catch {
+        setComments((before) =>
+          before.map((row) =>
+            row.id === comment.id
+              ? { ...row, viewerReacted: wasReacted, reactionCount: oldCount }
+              : row,
+          ),
+        );
+        toast.error(t("comment.reactionFailed"));
+      } finally {
+        setReactionBusy((before) => {
+          const next = new Set(before);
+          next.delete(comment.id);
+          return next;
+        });
+      }
+    },
+    [pathname, reactionBusy, t, user],
   );
 
   // "authed" → comment box · "probing" → neutral placeholder (never the login
@@ -552,7 +696,7 @@ export default function EpisodeComments({
   return (
     <div style={{ padding: "20px 24px 24px" }}>
       <p style={sectionLabel}>
-        {dict.comment.title} · {dict.detail.ep} {episode}
+        {t("comment.title")} · {t("detail.ep")} {episode}
         {comments.length > 0 && (
           <span
             style={{
@@ -587,8 +731,7 @@ export default function EpisodeComments({
           <CommentInput
             onSubmit={handlePost}
             isPending={posting && !replyTarget}
-            placeholder={dict.comment.placeholder}
-            dict={dict}
+            placeholder={t("comment.placeholder")}
           />
         </div>
       ) : (
@@ -603,7 +746,7 @@ export default function EpisodeComments({
             fontSize: 13,
           }}
         >
-          {dict.comment.loginPrompt}
+          {t("comment.loginPrompt")}
           {/* ?from= this detail page: the prompt exists because the user
               wants to say something about THIS episode, and a bare
               "/login" spent that intent on a trip to the home feed. */}
@@ -612,9 +755,9 @@ export default function EpisodeComments({
             prefetch={false}
             style={{ color: "#0a84ff", fontWeight: 600, textDecoration: "none" }}
           >
-            {dict.comment.loginLink}
+            {t("comment.loginLink")}
           </Link>
-          {dict.comment.loginSuffix}
+          {t("comment.loginSuffix")}
         </div>
       )}
 
@@ -647,7 +790,6 @@ export default function EpisodeComments({
                 ? `回复 ${replyTarget.username}...`
                 : `Reply to ${replyTarget.username}...`
             }
-            dict={dict}
             autoFocus
             onCancel={() => setReplyTarget(null)}
           />
@@ -674,7 +816,7 @@ export default function EpisodeComments({
             padding: "16px 0",
           }}
         >
-          {dict.comment.noComments}
+          {t("comment.noComments")}
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -685,10 +827,11 @@ export default function EpisodeComments({
               user={user}
               onReply={startReply}
               onDelete={handleDelete}
+              onReact={handleReaction}
+              reactionBusyIds={reactionBusy}
               confirmId={confirmId}
               setConfirmId={setConfirmId}
-              dict={dict}
-              lang={lang}
+              highlightedId={highlightCommentId}
             />
           ))}
         </div>

@@ -268,7 +268,7 @@ export default async function HomePage() {
           lang={lang}
           limit={COMPLETED_GEMS_LIMIT}
         />
-        <ActivityFeed dict={dict} lang={lang} />
+        <ActivityFeed />
         <SeasonRankings items={yearlyTop} dict={dict} lang={lang} />
       </div>
     </main>

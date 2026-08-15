@@ -16,6 +16,9 @@ export interface UserProfileData {
   followingCount: number;
   /** null when the requesting user is anonymous */
   isFollowing: boolean | null;
+  /** Private profiles keep their identity visible but withhold watch data. */
+  isPrivate?: boolean;
+  isPublic?: boolean;
   watching: WatchingEntry[];
 }
 

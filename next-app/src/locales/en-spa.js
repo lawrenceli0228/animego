@@ -129,6 +129,8 @@ const en = {
     label: 'MY LIST', titleSuffix: "'s Watchlist",
     noAnime: 'No anime in',
     noAnimeSuffix: '',
+    privateTitle: 'This profile is private',
+    privateBody: 'This user has not shared their watchlist or community activity.',
   },
   // Torrent modal
   torrent: {
@@ -150,6 +152,8 @@ const en = {
     emptyList: 'No anime tracked yet',
     noActivity: 'No activity yet — follow someone to see their updates',
     feedError: 'Failed to load activity feed',
+    feedLogin: 'Login to see what the people you follow are watching',
+    browseAnime: 'Search anime →',
     loadMore: 'Load more',
     followedToast: 'Followed',
     unfollowedToast: 'Unfollowed',
@@ -212,6 +216,24 @@ const en = {
     deleteConfirm: 'Delete this comment?',
     tooLong: 'Comment cannot exceed 500 characters',
     cancel: 'Cancel',
+    reply: 'Reply', like: 'Like',
+    previewTitle: 'Latest episode discussion',
+    postFailed: "Couldn't post, try again",
+    deleteFailed: "Couldn't delete, try again",
+    networkFailed: 'Network error, try again',
+    reactionFailed: "Couldn't update reaction, try again",
+  },
+  notification: {
+    title: 'Notifications', unread: 'unread', readAll: 'Mark all read',
+    empty: 'No notifications yet', loadError: 'Could not load notifications', retry: 'Retry',
+  },
+  settings: {
+    communityTitle: 'Community & Privacy',
+    communitySubtitle: 'Control who can see your watchlist and activity',
+    publicProfile: 'Public community profile',
+    publicProfileOn: 'Anyone can view your watchlist and public activity.',
+    publicProfileOff: 'Only you can view your watchlist and activity.',
+    savePrivacy: 'Save privacy', saving: 'Saving…', saved: 'Saved',
   },
   // Player
   player: {

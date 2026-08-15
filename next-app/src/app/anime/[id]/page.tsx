@@ -1461,8 +1461,6 @@ export default async function AnimeDetailPage({ params }: PageProps) {
             anilistId={detail.anilistId}
             episodes={detail.episodes}
             episodeTitles={detail.episodeTitles ?? []}
-            lang={lang}
-            dict={dict}
           />
           <RecommendationsSection
             recommendations={detail.recommendations}

@@ -179,6 +179,8 @@ const zh = {
     label: '我的列表', titleSuffix: '的追番',
     noAnime: '还没有',
     noAnimeSuffix: '的番剧',
+    privateTitle: '这个主页已设为私密',
+    privateBody: '该用户暂未公开追番记录与社区动态。',
   },
   // Torrent modal
   torrent: {
@@ -200,6 +202,8 @@ const zh = {
     emptyList: '该用户还没有追番记录',
     noActivity: '暂无动态，关注其他用户可见',
     feedError: '动态加载失败',
+    feedLogin: '登录后查看关注的人在追什么',
+    browseAnime: '去搜索番剧 →',
     loadMore: '加载更多',
     followedToast: '已关注',
     unfollowedToast: '已取消关注',
@@ -262,6 +266,24 @@ const zh = {
     deleteConfirm: '确认删除？',
     tooLong: '评论不能超过500字',
     cancel: '取消',
+    reply: '回复', like: '赞',
+    previewTitle: '本集最近讨论',
+    postFailed: '发表失败，请重试',
+    deleteFailed: '删除失败，请重试',
+    networkFailed: '网络错误，请重试',
+    reactionFailed: '操作失败，请重试',
+  },
+  notification: {
+    title: '通知', unread: '未读', readAll: '全部已读',
+    empty: '还没有通知', loadError: '通知加载失败', retry: '重试',
+  },
+  settings: {
+    communityTitle: '社区与隐私',
+    communitySubtitle: '控制其他用户能看到的追番与活动信息',
+    publicProfile: '公开我的社区主页',
+    publicProfileOn: '任何人都可以查看你的追番列表与公开活动。',
+    publicProfileOff: '只有你自己可以查看追番列表与活动。',
+    savePrivacy: '保存隐私设置', saving: '保存中…', saved: '已保存',
   },
   // Player
   player: {

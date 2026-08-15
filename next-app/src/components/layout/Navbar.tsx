@@ -14,6 +14,7 @@ import { authChrome } from "@/lib/authChrome";
 import { authFetch } from "@/lib/authFetch";
 import { broadcastSignedOut } from "@/components/anime/subscriptionSetState";
 import AvatarMenu from "./AvatarMenu";
+import NotificationBell from "@/components/notifications/NotificationBell";
 
 export interface NavUser {
   username: string;
@@ -472,11 +473,14 @@ export default function Navbar({ season, year }: NavbarProps) {
             // nav strip above on purpose: the dropdown is a 36×36 unlabelled
             // affordance, and a newly-subscribed user needs a route back to
             // their list that they can actually see.
-            <AvatarMenu
-              user={user}
-              onLogout={handleLogout}
-              loggingOut={loggingOut}
-            />
+            <>
+              <NotificationBell />
+              <AvatarMenu
+                user={user}
+                onLogout={handleLogout}
+                loggingOut={loggingOut}
+              />
+            </>
           ) : (
             <Suspense
               fallback={<AuthCtaView loginHref="/login" registerHref="/register" />}

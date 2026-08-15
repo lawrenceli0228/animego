@@ -14,7 +14,15 @@
 // First load: probe /api/subscriptions/:anilistId once via authFetch
 // with skipRedirectOnFailure to avoid pushing anonymous users to /login.
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import Link from "next/link";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
 import {
@@ -23,15 +31,24 @@ import {
   type SubStatus,
 } from "@/lib/subscriptionBus";
 import type { DetailEpisodeTitle } from "@/lib/types";
-import type { Dict, Lang } from "@/lib/i18n";
+import { useLang } from "@/lib/lang-client";
 import EpisodeComments from "@/components/anime/EpisodeComments";
+import FallbackImg from "@/components/ui/FallbackImg";
+import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import {
+  DISCUSSION_NAVIGATION_EVENT,
+  applyDiscussionDelta,
+  discussionHash,
+  discussionTargetFromHref,
+  parseDiscussionHash,
+  parseEpisodeDiscussionSummary,
+  type EpisodeDiscussionSummary,
+} from "./episodeDiscussionState";
 
 interface EpisodesGridProps {
   anilistId: number;
   episodes: number | null;
   episodeTitles: DetailEpisodeTitle[];
-  lang: Lang;
-  dict: Dict;
 }
 
 const VALID_STATUSES: ReadonlyArray<SubStatus> = [
@@ -73,14 +90,66 @@ export default function EpisodesGrid({
   anilistId,
   episodes,
   episodeTitles,
-  lang,
-  dict,
 }: EpisodesGridProps) {
+  const { lang, t } = useLang();
   const [sub, setSub] = useState<SubscriptionDoc | null>(null);
   // Which episode's expand panel is open. null = all collapsed. Matches
   // legacy EpisodeList click-to-expand: click a cell to open its comment
   // panel below, click again to collapse.
   const [openEp, setOpenEp] = useState<number | null>(null);
+  const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
+  const [discussion, setDiscussion] = useState<EpisodeDiscussionSummary[]>([]);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // One public summary request makes discussion visible on every episode tile
+  // without issuing N per-episode comment requests.
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch(`/api/comments/summary/${anilistId}?preview=2`, {
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) return;
+        setDiscussion(parseEpisodeDiscussionSummary(await res.json()));
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setDiscussion([]);
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [anilistId]);
+
+  // Notification/feed links use a fragment so the ISR detail route never has
+  // to read search params. Listen for same-page hash navigation as well as the
+  // initial landing.
+  useEffect(() => {
+    const applyTarget = (target: ReturnType<typeof parseDiscussionHash>) => {
+      if (!target || !episodes || target.episode > episodes) return;
+      setOpenEp(target.episode);
+      setHighlightCommentId(target.commentId);
+    };
+    const syncHash = () => applyTarget(parseDiscussionHash(window.location.hash));
+    const syncNavigation = (event: Event) => {
+      const href = (event as CustomEvent<{ href?: unknown }>).detail?.href;
+      if (typeof href !== "string") return;
+      applyTarget(discussionTargetFromHref(href, window.location.pathname));
+    };
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    window.addEventListener(DISCUSSION_NAVIGATION_EVENT, syncNavigation);
+    return () => {
+      window.removeEventListener("hashchange", syncHash);
+      window.removeEventListener(DISCUSSION_NAVIGATION_EVENT, syncNavigation);
+    };
+  }, [episodes]);
+
+  useEffect(() => {
+    if (openEp === null || highlightCommentId) return;
+    panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [openEp, highlightCommentId]);
 
   // Mount-time probe — gate on the client `auth_hint` cookie so logged-out
   // visitors skip the fetch entirely and the grid stays neutral (ISSUE-001;
@@ -125,6 +194,15 @@ export default function EpisodesGrid({
     return m;
   }, [episodeTitles]);
 
+  const discussionByEpisode = useMemo(
+    () => new Map(discussion.map((row) => [row.episode, row])),
+    [discussion],
+  );
+
+  const handleCommentDelta = useCallback((episode: number, delta: number) => {
+    setDiscussion((before) => applyDiscussionDelta(before, episode, delta));
+  }, []);
+
   if (!episodes || episodes <= 0) return null;
 
   const total = episodes;
@@ -144,7 +222,7 @@ export default function EpisodesGrid({
 
   return (
     <section style={{ marginTop: 40, marginBottom: 60 }}>
-      <h2 style={sectionLabelStyle}>{dict.detail.episodes}</h2>
+      <h2 style={sectionLabelStyle}>{t("detail.episodes")}</h2>
       <div
         style={{
           display: "grid",
@@ -169,6 +247,7 @@ export default function EpisodesGrid({
             cell.n === currentEp &&
             currentEp < total;
           const isOpen = openEp === cell.n;
+          const commentCount = discussionByEpisode.get(cell.n)?.count ?? 0;
 
           let bg = "rgba(255,255,255,0.04)";
           let border = "#38383a";
@@ -190,19 +269,21 @@ export default function EpisodesGrid({
           }
 
           return (
-            <div
+            <button
               key={cell.n}
-              role="button"
-              tabIndex={0}
+              type="button"
               aria-expanded={isOpen}
-              onClick={() =>
-                setOpenEp((prev) => (prev === cell.n ? null : cell.n))
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setOpenEp((prev) => (prev === cell.n ? null : cell.n));
-                }
+              aria-label={`${t("detail.ep")} ${cell.n}${commentCount ? ` · ${commentCount} ${t("comment.title")}` : ""}`}
+              onClick={() => {
+                const closing = openEp === cell.n;
+                setOpenEp(closing ? null : cell.n);
+                setHighlightCommentId(null);
+                const nextHash = closing ? "" : discussionHash(cell.n);
+                window.history.replaceState(
+                  null,
+                  "",
+                  `${window.location.pathname}${window.location.search}${nextHash}`,
+                );
               }}
               style={{
                 background: bg,
@@ -213,8 +294,26 @@ export default function EpisodesGrid({
                 minWidth: 0,
                 cursor: "pointer",
                 transition: "background 200ms, border-color 200ms",
+                position: "relative",
+                color: "inherit",
+                fontFamily: "inherit",
               }}
             >
+              {commentCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    top: 5,
+                    right: 7,
+                    fontSize: 9,
+                    color: "rgba(235,235,245,0.55)",
+                    fontWeight: 700,
+                  }}
+                >
+                  💬 {commentCount}
+                </span>
+              )}
               <div
                 style={{
                   fontSize: 10,
@@ -225,7 +324,7 @@ export default function EpisodesGrid({
                   letterSpacing: "0.5px",
                 }}
               >
-                {dict.detail.ep}
+                {t("detail.ep")}
               </div>
               <div
                 style={{
@@ -275,15 +374,76 @@ export default function EpisodesGrid({
                   {cell.title}
                 </div>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
+      {(() => {
+        const previewEpisode = openEp ?? (currentEp > 0 ? currentEp : null);
+        const summary = previewEpisode
+          ? discussionByEpisode.get(previewEpisode)
+          : undefined;
+        if (!previewEpisode || !summary?.latest.length) return null;
+        return (
+          <div
+            style={{
+              marginTop: 14,
+              padding: "12px 14px",
+              borderRadius: 10,
+              border: "1px solid rgba(84,84,88,0.55)",
+              background: "rgba(255,255,255,0.025)",
+            }}
+          >
+            <div style={{ fontSize: 11, color: "rgba(235,235,245,0.42)", marginBottom: 8 }}>
+              {t("comment.previewTitle")} · {t("detail.ep")} {previewEpisode}
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {summary.latest.map((item) => (
+                <div key={item.id} style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+                  <Link
+                    href={`/u/${encodeURIComponent(item.username)}`}
+                    prefetch={false}
+                    style={{ width: 24, height: 24, borderRadius: "50%", overflow: "hidden", flexShrink: 0 }}
+                  >
+                    <FallbackImg
+                      src={item.avatarUrl ?? item.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
+                      fallback={DEFAULT_CARD_IMAGE}
+                      alt={item.username}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenEp(previewEpisode);
+                      setHighlightCommentId(item.id);
+                      window.history.replaceState(
+                        null,
+                        "",
+                        `${window.location.pathname}${window.location.search}${discussionHash(previewEpisode, item.id)}`,
+                      );
+                    }}
+                    style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: "pointer", minWidth: 0 }}
+                  >
+                    <b style={{ display: "block", color: "#0a84ff", fontSize: 11, marginBottom: 2 }}>
+                      {item.username}
+                    </b>
+                    <span style={{ color: "rgba(235,235,245,0.62)", fontSize: 12, lineHeight: 1.45 }}>
+                      {item.content}
+                    </span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       {/* Legacy parity: click-to-expand panel under the grid, one episode
           at a time. (DanmakuSection — the legacy panel's live-danmaku half
           — is still deferred; it needs the ws-server socket hooks.) */}
       {openEp !== null && (
         <div
+          ref={panelRef}
           style={{
             marginTop: 16,
             borderRadius: 12,
@@ -293,10 +453,11 @@ export default function EpisodesGrid({
           }}
         >
           <EpisodeComments
+            key={openEp}
             anilistId={anilistId}
             episode={openEp}
-            dict={dict}
-            lang={lang}
+            highlightCommentId={highlightCommentId}
+            onCommentDelta={handleCommentDelta}
           />
         </div>
       )}
