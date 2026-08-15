@@ -167,6 +167,16 @@ SET backdrop_anilist_id = $2,
     updated_at          = now()
 WHERE id = $1;
 
+-- name: SetUserPublic :exec
+-- PATCH /api/auth/me — control whether another user may see the account's
+-- watching list and whether this user's activity is eligible for social feeds.
+-- The profile header remains resolvable so existing profile links do not turn
+-- into misleading 404s; the social handler redacts the watching list instead.
+UPDATE users
+SET is_public = $2,
+    updated_at = now()
+WHERE id = $1;
+
 -- name: UpdateUserPassword :exec
 -- Dormant: there is no self-serve change-password endpoint (password
 -- changes go through the email reset flow). Kept so the column write is

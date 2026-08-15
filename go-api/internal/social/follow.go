@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
@@ -62,8 +63,16 @@ func (h *Handlers) Follow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.UpsertFollow(ctx, claims.UserID, followee.ID); err != nil {
-		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "follow insert failed"))
+	var writeErr error
+	if activityDB, ok := h.Queries.(interface {
+		UpsertFollowWithActivity(context.Context, uuid.UUID, uuid.UUID) (bool, error)
+	}); ok {
+		_, writeErr = activityDB.UpsertFollowWithActivity(ctx, claims.UserID, followee.ID)
+	} else {
+		writeErr = h.Queries.UpsertFollow(ctx, claims.UserID, followee.ID)
+	}
+	if writeErr != nil {
+		httpx.Fail(w, httpx.WrapError(writeErr, http.StatusInternalServerError, httpx.CodeServerError, "follow insert failed"))
 		return
 	}
 

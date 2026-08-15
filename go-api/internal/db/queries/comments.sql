@@ -31,7 +31,19 @@ SELECT
     c.created_at,
     c.updated_at,
     u.avatar_url,
-    bc.cover_image_url AS backdrop_cover_url
+    bc.cover_image_url AS backdrop_cover_url,
+    (SELECT count(*)::bigint
+     FROM comment_reactions reactions
+     WHERE reactions.comment_id = c.id) AS reaction_count,
+    (CASE
+        WHEN sqlc.narg('viewer_user_id')::uuid IS NULL THEN false
+        ELSE EXISTS (
+            SELECT 1
+            FROM comment_reactions viewer_reaction
+            WHERE viewer_reaction.comment_id = c.id
+              AND viewer_reaction.user_id = sqlc.narg('viewer_user_id')::uuid
+        )
+    END)::boolean AS viewer_reacted
 FROM episode_comments c
 LEFT JOIN users u ON u.id = c.user_id
 LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
@@ -39,6 +51,54 @@ WHERE c.anilist_id = $1
   AND c.episode = $2
 ORDER BY c.created_at ASC
 LIMIT 500;
+
+-- name: ListEpisodeCommentSummaries :many
+-- Comment counts plus the newest N previews per episode for an anime's episode
+-- grid.  The window count avoids a second round-trip.  preview_limit is
+-- deliberately caller-controlled so desktop/mobile can choose a small payload.
+WITH counts AS (
+    SELECT episode, count(*)::bigint AS comment_count
+    FROM episode_comments
+    WHERE anilist_id = sqlc.arg('anilist_id')::integer
+    GROUP BY episode
+), ranked AS (
+    SELECT
+        c.id,
+        c.episode,
+        c.user_id,
+        c.username,
+        c.content,
+        c.parent_id,
+        c.reply_to_username,
+        c.created_at,
+        u.avatar_url,
+        backdrop.cover_image_url AS backdrop_cover_url,
+        row_number() OVER (
+            PARTITION BY c.episode
+            ORDER BY c.created_at DESC, c.id DESC
+        ) AS preview_rank
+    FROM episode_comments c
+    LEFT JOIN users u ON u.id = c.user_id
+    LEFT JOIN anime_cache backdrop ON backdrop.anilist_id = u.backdrop_anilist_id
+    WHERE c.anilist_id = sqlc.arg('anilist_id')::integer
+      AND c.parent_id IS NULL
+)
+SELECT
+    ranked.id,
+    ranked.episode,
+    ranked.user_id,
+    ranked.username,
+    ranked.content,
+    ranked.parent_id,
+    ranked.reply_to_username,
+    ranked.created_at,
+    ranked.avatar_url,
+    ranked.backdrop_cover_url,
+    counts.comment_count
+FROM ranked
+JOIN counts USING (episode)
+WHERE preview_rank <= sqlc.arg('preview_limit')::integer
+ORDER BY ranked.episode ASC, ranked.created_at DESC, ranked.id DESC;
 
 -- name: CreateComment :one
 -- POST /api/comments/:anilistId/:episode.  Caller has already
@@ -66,6 +126,71 @@ RETURNING
     reply_to_username,
     created_at,
     updated_at;
+
+-- name: CreateCommentWithActivity :one
+-- Atomic community write: create the comment, append its feed event, and (for
+-- a non-self reply) enqueue one deduped notification.  The parent validation
+-- query remains useful for returning a friendly 400 before this is called.
+WITH inserted_comment AS (
+    INSERT INTO episode_comments (
+        anilist_id,
+        episode,
+        user_id,
+        username,
+        content,
+        parent_id,
+        reply_to_username
+    ) VALUES (
+        sqlc.arg('anilist_id')::integer,
+        sqlc.arg('episode')::integer,
+        sqlc.arg('user_id')::uuid,
+        sqlc.arg('username')::text,
+        sqlc.arg('content')::text,
+        sqlc.narg('parent_id')::uuid,
+        sqlc.narg('reply_to_username')::text
+    )
+    RETURNING *
+), inserted_activity AS (
+    INSERT INTO activity_events (
+        user_id, event_type, anilist_id, episode, comment_id
+    )
+    SELECT user_id, 'comment', anilist_id, episode, id
+    FROM inserted_comment
+    RETURNING id
+), inserted_notification AS (
+    INSERT INTO notifications (
+        user_id,
+        actor_id,
+        notification_type,
+        comment_id,
+        activity_event_id,
+        dedupe_key
+    )
+    SELECT
+        parent.user_id,
+        comment.user_id,
+        'reply',
+        comment.id,
+        activity.id,
+        'reply:' || comment.id::text
+    FROM inserted_comment comment
+    JOIN episode_comments parent ON parent.id = comment.parent_id
+    CROSS JOIN inserted_activity activity
+    WHERE parent.user_id <> comment.user_id
+    ON CONFLICT (user_id, dedupe_key) DO NOTHING
+)
+SELECT
+    id,
+    anilist_id,
+    episode,
+    user_id,
+    username,
+    content,
+    parent_id,
+    reply_to_username,
+    created_at,
+    updated_at
+FROM inserted_comment;
 
 -- name: GetCommentParentForValidation :one
 -- Pre-INSERT check: confirms the supplied parent_id exists AND points

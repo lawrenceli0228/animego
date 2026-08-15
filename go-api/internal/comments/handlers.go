@@ -50,11 +50,15 @@ const queryTimeout = 5 * time.Second
 // GetCommentParentForValidation) for POST, plus the read/delete pair
 // (GetCommentByID + DeleteComment) for DELETE.
 type CommentsDB interface {
-	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]dbgen.ListEpisodeCommentsRow, error)
+	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentsRow, error)
 	CreateComment(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error)
 	GetCommentParentForValidation(ctx context.Context, iD uuid.UUID, anilistID int32, episode int32) (uuid.UUID, error)
 	GetCommentByID(ctx context.Context, id uuid.UUID) (dbgen.GetCommentByIDRow, error)
 	DeleteComment(ctx context.Context, id uuid.UUID) error
+}
+
+type commentActivityDB interface {
+	CreateCommentWithActivity(ctx context.Context, arg dbgen.CreateCommentWithActivityParams) (dbgen.CreateCommentWithActivityRow, error)
 }
 
 // Handlers carries the deps shared by every comment handler.  Construct
@@ -122,7 +126,11 @@ func (h *Handlers) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.Queries.ListEpisodeComments(ctx, anilistID, episode)
+	var viewerUserID *uuid.UUID
+	if claims, ok := jwtx.ClaimsFrom(r.Context()); ok && claims != nil {
+		viewerUserID = &claims.UserID
+	}
+	rows, err := h.Queries.ListEpisodeComments(ctx, anilistID, episode, viewerUserID)
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "list comments failed"))
 		return
@@ -214,15 +222,31 @@ func (h *Handlers) AddComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	row, err := h.Queries.CreateComment(ctx, dbgen.CreateCommentParams{
-		AnilistID:       anilistID,
-		Episode:         episode,
-		UserID:          claims.UserID,
-		Username:        claims.Username,
-		Content:         trimmed,
-		ParentID:        req.ParentID,
-		ReplyToUsername: req.ReplyToUsername,
-	})
+	var row any
+	var err error
+	if activityDB, ok := h.Queries.(commentActivityDB); ok {
+		row, err = activityDB.CreateCommentWithActivity(ctx, dbgen.CreateCommentWithActivityParams{
+			AnilistID:       anilistID,
+			Episode:         episode,
+			UserID:          claims.UserID,
+			Username:        claims.Username,
+			Content:         trimmed,
+			ParentID:        req.ParentID,
+			ReplyToUsername: req.ReplyToUsername,
+		})
+	} else {
+		// Test doubles and older embedders can keep the legacy interface; the
+		// production sqlc Queries value always takes the atomic activity path.
+		row, err = h.Queries.CreateComment(ctx, dbgen.CreateCommentParams{
+			AnilistID:       anilistID,
+			Episode:         episode,
+			UserID:          claims.UserID,
+			Username:        claims.Username,
+			Content:         trimmed,
+			ParentID:        req.ParentID,
+			ReplyToUsername: req.ReplyToUsername,
+		})
+	}
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "create comment failed"))
 		return

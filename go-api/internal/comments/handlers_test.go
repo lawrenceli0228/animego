@@ -222,6 +222,37 @@ func TestListComments_HappyPath(t *testing.T) {
 	// Top-level has parentId = null.
 	assert.Nil(t, env.Data[0]["parentId"])
 	assert.Nil(t, env.Data[0]["replyToUsername"])
+	assert.Equal(t, float64(0), env.Data[0]["reactionCount"])
+	assert.Equal(t, false, env.Data[0]["viewerReacted"])
+}
+
+func TestListComments_IncludesReactionStateForAuthenticatedViewer(t *testing.T) {
+	h, pool := makeHandlers(t)
+	seedAnime(t, pool, 1)
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+	commentID := seedComment(t, pool, 1, 1, alice, "alice", "liked comment")
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO comment_reactions (comment_id, user_id, reaction)
+		VALUES ($1, $2, 'like'), ($1, $3, 'like')`, commentID, alice, bob)
+	require.NoError(t, err)
+
+	req := reqWithEpisode(http.MethodGet, "/api/comments/1/1", "", "1", "1")
+	req = withAuth(t, req, bob, "bob")
+	rec := httptest.NewRecorder()
+	h.ListComments(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var env struct {
+		Data []struct {
+			ReactionCount int64 `json:"reactionCount"`
+			ViewerReacted bool  `json:"viewerReacted"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	require.Len(t, env.Data, 1)
+	assert.Equal(t, int64(2), env.Data[0].ReactionCount)
+	assert.True(t, env.Data[0].ViewerReacted)
 }
 
 func TestListComments_EmptyArray(t *testing.T) {
@@ -234,6 +265,43 @@ func TestListComments_EmptyArray(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, `{"data":[]}`, rec.Body.String(), "empty should emit []")
+}
+
+func TestListCommentSummaries_CountsRepliesButPreviewsTopLevelOnly(t *testing.T) {
+	h, pool := makeHandlers(t)
+	seedAnime(t, pool, 1)
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+	parent := seedComment(t, pool, 1, 1, alice, "alice", "first root")
+	seedComment(t, pool, 1, 1, bob, "bob", "newest root")
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO episode_comments (anilist_id, episode, user_id, username, content, parent_id)
+		VALUES (1, 1, $1, 'bob', 'newest reply', $2)`, bob, parent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/comments/summary/1?preview=2", nil)
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("anilistId", "1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+	rec := httptest.NewRecorder()
+	h.ListCommentSummaries(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var env struct {
+		Data []struct {
+			Episode int32 `json:"episode"`
+			Count   int64 `json:"count"`
+			Latest  []struct {
+				Content string `json:"content"`
+			} `json:"latest"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	require.Len(t, env.Data, 1)
+	assert.Equal(t, int64(3), env.Data[0].Count, "reply participates in full count")
+	require.Len(t, env.Data[0].Latest, 2)
+	assert.Equal(t, "newest root", env.Data[0].Latest[0].Content)
+	assert.Equal(t, "first root", env.Data[0].Latest[1].Content)
 }
 
 func TestListComments_InvalidAnilistID(t *testing.T) {
@@ -333,6 +401,54 @@ func TestAddComment_Reply_201(t *testing.T) {
 	require.Contains(t, bodyStr, `"username":"bob"`)
 	require.Contains(t, bodyStr, fmt.Sprintf(`"parentId":%q`, parent.String()))
 	require.Contains(t, bodyStr, `"replyToUsername":"alice"`)
+
+	var events, notifications int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM activity_events WHERE user_id=$1 AND event_type='comment'`, bob).Scan(&events))
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM notifications WHERE user_id=$1 AND actor_id=$2 AND notification_type='reply'`, alice, bob).Scan(&notifications))
+	assert.Equal(t, 1, events)
+	assert.Equal(t, 1, notifications)
+}
+
+func TestCommentReaction_IdempotentAndNotifiesOnce(t *testing.T) {
+	h, pool := makeHandlers(t)
+	seedAnime(t, pool, 1)
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+	commentID := seedComment(t, pool, 1, 1, alice, "alice", "worth liking")
+
+	put := func() *httptest.ResponseRecorder {
+		req := reqWithID(http.MethodPut, "/api/comments/"+commentID.String()+"/reaction", commentID.String())
+		req = withAuth(t, req, bob, "bob")
+		rc := chi.NewRouteContext()
+		rc.URLParams.Add("id", commentID.String())
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+		rec := httptest.NewRecorder()
+		h.PutCommentReaction(rec, req)
+		return rec
+	}
+
+	first := put()
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	assert.Equal(t, `{"data":{"reacted":true,"count":1}}`, first.Body.String())
+	second := put()
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	assert.Equal(t, `{"data":{"reacted":true,"count":1}}`, second.Body.String())
+
+	var reactions, notifications int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM comment_reactions WHERE comment_id=$1`, commentID).Scan(&reactions))
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM notifications WHERE user_id=$1 AND notification_type='reaction'`, alice).Scan(&notifications))
+	assert.Equal(t, 1, reactions)
+	assert.Equal(t, 1, notifications)
+
+	req := reqWithID(http.MethodDelete, "/api/comments/"+commentID.String()+"/reaction", commentID.String())
+	req = withAuth(t, req, bob, "bob")
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("id", commentID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+	rec := httptest.NewRecorder()
+	h.DeleteCommentReaction(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, `{"data":{"reacted":false,"count":0}}`, rec.Body.String())
 }
 
 func TestAddComment_TrimsLeadingTrailingWhitespace(t *testing.T) {
@@ -700,18 +816,18 @@ func TestNewHandlers_NilQueriesPanics(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 type fakeDB struct {
-	listFn      func(ctx context.Context, anilistID, episode int32) ([]dbgen.ListEpisodeCommentsRow, error)
-	createFn    func(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error)
-	parentFn    func(ctx context.Context, id uuid.UUID, anilistID, episode int32) (uuid.UUID, error)
-	getByIDFn   func(ctx context.Context, id uuid.UUID) (dbgen.GetCommentByIDRow, error)
-	deleteFn    func(ctx context.Context, id uuid.UUID) error
+	listFn    func(ctx context.Context, anilistID, episode int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentsRow, error)
+	createFn  func(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error)
+	parentFn  func(ctx context.Context, id uuid.UUID, anilistID, episode int32) (uuid.UUID, error)
+	getByIDFn func(ctx context.Context, id uuid.UUID) (dbgen.GetCommentByIDRow, error)
+	deleteFn  func(ctx context.Context, id uuid.UUID) error
 }
 
-func (f *fakeDB) ListEpisodeComments(ctx context.Context, anilistID, episode int32) ([]dbgen.ListEpisodeCommentsRow, error) {
+func (f *fakeDB) ListEpisodeComments(ctx context.Context, anilistID, episode int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentsRow, error) {
 	if f.listFn == nil {
 		panic("fakeDB.ListEpisodeComments not set")
 	}
-	return f.listFn(ctx, anilistID, episode)
+	return f.listFn(ctx, anilistID, episode, viewerUserID)
 }
 
 func (f *fakeDB) CreateComment(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error) {
@@ -818,7 +934,7 @@ func TestDeleteComment_DeleteFails_500(t *testing.T) {
 func TestListComments_ReturnsEmptyOnNilFromDB(t *testing.T) {
 	// Defensive coverage for the "rows == nil" branch in ListComments.
 	db := &fakeDB{
-		listFn: func(_ context.Context, _, _ int32) ([]dbgen.ListEpisodeCommentsRow, error) {
+		listFn: func(_ context.Context, _, _ int32, _ *uuid.UUID) ([]dbgen.ListEpisodeCommentsRow, error) {
 			return nil, nil
 		},
 	}

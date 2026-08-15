@@ -41,16 +41,17 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/bgmidmap"
 	"github.com/lawrenceli0228/animego/go-api/internal/comments"
-	"github.com/lawrenceli0228/animego/go-api/internal/deepseek"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
 	"github.com/lawrenceli0228/animego/go-api/internal/danmaku"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/deepseek"
 	"github.com/lawrenceli0228/animego/go-api/internal/email"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/notifications"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
 	"github.com/lawrenceli0228/animego/go-api/internal/subscriptions"
@@ -575,6 +576,7 @@ func main() {
 	// is the only auth-gated write; danmaku writes go through socket.io
 	// (P2.8), so only the read endpoint lives here.
 	commentsHandlers := comments.NewHandlers(pool, q)
+	notificationHandlers := notifications.NewHandlers(q)
 	danmakuHandlers := danmaku.NewHandlers(pool, q)
 
 	// P2.6 — dandanplay 3-phase match.  Independent rate limiter
@@ -711,10 +713,21 @@ func main() {
 	// later `{id}` registration silently.  Mount DELETE at the parent
 	// scope so the two route shapes live in separate trees.
 	r.Route("/api/comments", func(r chi.Router) {
-		r.Get("/{anilistId}/{episode}", commentsHandlers.ListComments)
+		r.Get("/summary/{anilistId}", commentsHandlers.ListCommentSummaries)
+		r.With(jwtx.OptionalAuth(signer)).Get("/{anilistId}/{episode}", commentsHandlers.ListComments)
 		r.With(jwtx.RequireAuth(signer)).Post("/{anilistId}/{episode}", commentsHandlers.AddComment)
 	})
 	r.With(jwtx.RequireAuth(signer)).Delete("/api/comments/{id}", commentsHandlers.DeleteComment)
+	r.With(jwtx.RequireAuth(signer)).Put("/api/comments/{id}/reaction", commentsHandlers.PutCommentReaction)
+	r.With(jwtx.RequireAuth(signer)).Delete("/api/comments/{id}/reaction", commentsHandlers.DeleteCommentReaction)
+
+	r.Route("/api/notifications", func(r chi.Router) {
+		r.Use(jwtx.RequireAuth(signer))
+		r.Get("/", notificationHandlers.List)
+		r.Get("/unread-count", notificationHandlers.UnreadCount)
+		r.Post("/read-all", notificationHandlers.MarkAllRead)
+		r.Patch("/{id}/read", notificationHandlers.MarkRead)
+	})
 
 	// P2.5 — historical danmaku list (1 endpoint).  Public read.
 	// Writes go through socket.io (P2.8, ws-server).

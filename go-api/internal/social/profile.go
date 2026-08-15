@@ -69,6 +69,8 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 		id := claims.UserID
 		requesterID = &id
 	}
+	isOwner := requesterID != nil && *requesterID == user.ID
+	isPrivate := !user.IsPublic && !isOwner
 
 	var (
 		counts        dbgen.GetProfileCountsRow
@@ -84,14 +86,16 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 		counts = row
 		return nil
 	})
-	g.Go(func() error {
-		rows, err := h.Queries.ListProfileWatching(gctx, user.ID)
-		if err != nil {
-			return err
-		}
-		watchingRows = rows
-		return nil
-	})
+	if !isPrivate {
+		g.Go(func() error {
+			rows, err := h.Queries.ListProfileWatching(gctx, user.ID)
+			if err != nil {
+				return err
+			}
+			watchingRows = rows
+			return nil
+		})
+	}
 	if requesterID != nil {
 		// Capture by value — once requesterID is non-nil it doesn't
 		// change for the duration of the request.
@@ -126,6 +130,7 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 		FollowerCount:     counts.FollowerCount,
 		FollowingCount:    counts.FollowingCount,
 		IsFollowing:       isFollowing,
+		IsPrivate:         isPrivate,
 		Watching:          mapWatching(watchingRows),
 	})
 }

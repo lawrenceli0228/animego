@@ -9,6 +9,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ActivityEvent struct {
+	ID           uuid.UUID          `json:"id"`
+	UserID       uuid.UUID          `json:"userId"`
+	EventType    string             `json:"eventType"`
+	AnilistID    *int32             `json:"anilistId"`
+	Episode      *int32             `json:"episode"`
+	CommentID    *uuid.UUID         `json:"commentId"`
+	TargetUserID *uuid.UUID         `json:"targetUserId"`
+	CreatedAt    pgtype.Timestamptz `json:"createdAt"`
+}
+
+type CommentReaction struct {
+	CommentID uuid.UUID          `json:"commentId"`
+	UserID    uuid.UUID          `json:"userId"`
+	Reaction  string             `json:"reaction"`
+	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+}
+
 type EpisodeComment struct {
 	ID              uuid.UUID          `json:"id"`
 	AnilistID       int32              `json:"anilistId"`
@@ -26,6 +45,18 @@ type EpisodeWindow struct {
 	AnilistID  int32              `json:"anilistId"`
 	Episode    int32              `json:"episode"`
 	LiveEndsAt pgtype.Timestamptz `json:"liveEndsAt"`
+}
+
+type Notification struct {
+	ID               uuid.UUID          `json:"id"`
+	UserID           uuid.UUID          `json:"userId"`
+	ActorID          uuid.UUID          `json:"actorId"`
+	NotificationType string             `json:"notificationType"`
+	CommentID        *uuid.UUID         `json:"commentId"`
+	ActivityEventID  *uuid.UUID         `json:"activityEventId"`
+	DedupeKey        string             `json:"dedupeKey"`
+	ReadAt           pgtype.Timestamptz `json:"readAt"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
 }
 
 type Subscription struct {

@@ -52,6 +52,10 @@ var allTables = []string{
 	"subscriptions",
 	"follows",
 	"episode_comments",
+	// Community loop tables (migration 0018).
+	"activity_events",
+	"notifications",
+	"comment_reactions",
 	"danmakus",
 	"episode_windows",
 	// Enrichment match-accuracy tables (migration 0011).

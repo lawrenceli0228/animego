@@ -222,7 +222,7 @@ func TestUnfollow_DeleteDBError_500(t *testing.T) {
 	uid := uuid.New()
 	db := &fakeDB{
 		getUserIDByUsernameFn: func(_ context.Context, _ string) (dbgen.GetUserIDByUsernameRow, error) {
-			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice"}, nil
+			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice", IsPublic: true}, nil
 		},
 		deleteFollowFn: func(_ context.Context, _, _ uuid.UUID) (int64, error) {
 			return 0, errors.New("disk full")
@@ -310,7 +310,7 @@ func TestListFollowers_CountDBError_500(t *testing.T) {
 	uid := uuid.New()
 	db := &fakeDB{
 		getUserIDByUsernameFn: func(_ context.Context, _ string) (dbgen.GetUserIDByUsernameRow, error) {
-			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice"}, nil
+			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice", IsPublic: true}, nil
 		},
 		listFollowersFn: func(_ context.Context, _ uuid.UUID, _, _ int32) ([]dbgen.ListFollowersRow, error) {
 			return []dbgen.ListFollowersRow{}, nil
@@ -330,7 +330,7 @@ func TestListFollowing_CountDBError_500(t *testing.T) {
 	uid := uuid.New()
 	db := &fakeDB{
 		getUserIDByUsernameFn: func(_ context.Context, _ string) (dbgen.GetUserIDByUsernameRow, error) {
-			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice"}, nil
+			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice", IsPublic: true}, nil
 		},
 		listFollowingFn: func(_ context.Context, _ uuid.UUID, _, _ int32) ([]dbgen.ListFollowingRow, error) {
 			return []dbgen.ListFollowingRow{}, nil
@@ -350,7 +350,7 @@ func TestGetProfile_ProfileCountsError_500(t *testing.T) {
 	uid := uuid.New()
 	db := &fakeDB{
 		getUserIDByUsernameFn: func(_ context.Context, _ string) (dbgen.GetUserIDByUsernameRow, error) {
-			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice"}, nil
+			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice", IsPublic: true}, nil
 		},
 		getProfileCountsFn: func(_ context.Context, _ uuid.UUID) (dbgen.GetProfileCountsRow, error) {
 			return dbgen.GetProfileCountsRow{}, errors.New("counts failed")
@@ -370,7 +370,7 @@ func TestGetProfile_WatchingError_500(t *testing.T) {
 	uid := uuid.New()
 	db := &fakeDB{
 		getUserIDByUsernameFn: func(_ context.Context, _ string) (dbgen.GetUserIDByUsernameRow, error) {
-			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice"}, nil
+			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice", IsPublic: true}, nil
 		},
 		getProfileCountsFn: func(_ context.Context, _ uuid.UUID) (dbgen.GetProfileCountsRow, error) {
 			return dbgen.GetProfileCountsRow{}, nil
@@ -390,7 +390,7 @@ func TestGetProfile_FollowExistsError_500(t *testing.T) {
 	uid := uuid.New()
 	db := &fakeDB{
 		getUserIDByUsernameFn: func(_ context.Context, _ string) (dbgen.GetUserIDByUsernameRow, error) {
-			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice"}, nil
+			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice", IsPublic: true}, nil
 		},
 		getProfileCountsFn: func(_ context.Context, _ uuid.UUID) (dbgen.GetProfileCountsRow, error) {
 			return dbgen.GetProfileCountsRow{}, nil

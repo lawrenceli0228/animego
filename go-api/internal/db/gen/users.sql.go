@@ -332,6 +332,22 @@ func (q *Queries) SetUserBackdrop(ctx context.Context, iD uuid.UUID, backdropAni
 	return err
 }
 
+const setUserPublic = `-- name: SetUserPublic :exec
+UPDATE users
+SET is_public = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+// PATCH /api/auth/me — control whether another user may see the account's
+// watching list and whether this user's activity is eligible for social feeds.
+// The profile header remains resolvable so existing profile links do not turn
+// into misleading 404s; the social handler redacts the watching list instead.
+func (q *Queries) SetUserPublic(ctx context.Context, iD uuid.UUID, isPublic bool) error {
+	_, err := q.db.Exec(ctx, setUserPublic, iD, isPublic)
+	return err
+}
+
 const updateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users
 SET password   = $2,

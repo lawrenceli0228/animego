@@ -123,6 +123,14 @@ func seedSubscription(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID, anilis
 		userID, anilistID, status, currentEp, lastWatchedAt,
 	)
 	require.NoError(t, err, "seedSubscription")
+	if lastWatchedAt != nil {
+		_, err = pool.Exec(ctx, `
+			INSERT INTO activity_events (user_id, event_type, anilist_id, episode, created_at)
+			VALUES ($1, 'watch_progress', $2, $3, $4)`,
+			userID, anilistID, currentEp, *lastWatchedAt,
+		)
+		require.NoError(t, err, "seedActivity")
+	}
 }
 
 // seedFollow inserts one follow edge.  follower → followee.
@@ -301,6 +309,39 @@ func TestGetProfile_EmptyWatchingEmitsArray(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"watching":[]`, "empty watching should marshal to []; got %s", rec.Body.String())
+}
+
+func TestGetProfile_PrivateRedactsWatchingForOthersButNotOwner(t *testing.T) {
+	h, pool := makeHandlers(t)
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+	seedAnime(t, pool, 1, "Anime One", "动画一", "https://img/1.jpg")
+	seedSubscription(t, pool, alice, 1, 3, "watching", nil)
+	_, err := pool.Exec(context.Background(), `UPDATE users SET is_public=false WHERE id=$1`, alice)
+	require.NoError(t, err)
+
+	otherReq := reqWithUsername(http.MethodGet, "/api/users/alice", "", "alice")
+	otherReq = withOptionalAuth(t, otherReq, bob, "bob")
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("username", "alice")
+	otherReq = otherReq.WithContext(context.WithValue(otherReq.Context(), chi.RouteCtxKey, rc))
+	otherRec := httptest.NewRecorder()
+	h.GetProfile(otherRec, otherReq)
+	require.Equal(t, http.StatusOK, otherRec.Code, otherRec.Body.String())
+	require.Contains(t, otherRec.Body.String(), `"isPrivate":true`)
+	require.Contains(t, otherRec.Body.String(), `"watching":[]`)
+	require.NotContains(t, otherRec.Body.String(), `"Anime One"`)
+
+	ownerReq := reqWithUsername(http.MethodGet, "/api/users/alice", "", "alice")
+	ownerReq = withOptionalAuth(t, ownerReq, alice, "alice")
+	rc = chi.NewRouteContext()
+	rc.URLParams.Add("username", "alice")
+	ownerReq = ownerReq.WithContext(context.WithValue(ownerReq.Context(), chi.RouteCtxKey, rc))
+	ownerRec := httptest.NewRecorder()
+	h.GetProfile(ownerRec, ownerReq)
+	require.Equal(t, http.StatusOK, ownerRec.Code, ownerRec.Body.String())
+	require.Contains(t, ownerRec.Body.String(), `"isPrivate":false`)
+	require.Contains(t, ownerRec.Body.String(), `"Anime One"`)
 }
 
 func TestGetProfile_DBPoolClosed_500(t *testing.T) {
@@ -689,4 +730,3 @@ func TestMapWatching_FieldRenames(t *testing.T) {
 	assert.Contains(t, s, `"subscriptionStatus":"watching"`, "renamed field key present")
 	assert.Contains(t, s, `"status":"FINISHED"`, "anime status key present")
 }
-

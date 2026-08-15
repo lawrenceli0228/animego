@@ -325,7 +325,21 @@ func (h *Handlers) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 		AnilistID:      anilistID,
 	}
 
-	sub, err := h.Queries.UpdateSubscription(ctx, params)
+	var sub any
+	if activityDB, ok := h.Queries.(interface {
+		UpdateSubscriptionWithActivity(context.Context, dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
+	}); ok {
+		sub, err = activityDB.UpdateSubscriptionWithActivity(ctx, dbgen.UpdateSubscriptionWithActivityParams{
+			Status:         params.Status,
+			CurrentEpisode: params.CurrentEpisode,
+			ScoreSet:       params.ScoreSet,
+			Score:          params.Score,
+			UserID:         params.UserID,
+			AnilistID:      params.AnilistID,
+		})
+	} else {
+		sub, err = h.Queries.UpdateSubscription(ctx, params)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgSubscriptionNotFound))

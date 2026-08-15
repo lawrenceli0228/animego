@@ -76,6 +76,121 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (E
 	return i, err
 }
 
+const createCommentWithActivity = `-- name: CreateCommentWithActivity :one
+WITH inserted_comment AS (
+    INSERT INTO episode_comments (
+        anilist_id,
+        episode,
+        user_id,
+        username,
+        content,
+        parent_id,
+        reply_to_username
+    ) VALUES (
+        $1::integer,
+        $2::integer,
+        $3::uuid,
+        $4::text,
+        $5::text,
+        $6::uuid,
+        $7::text
+    )
+    RETURNING id, anilist_id, episode, user_id, username, content, parent_id, reply_to_username, created_at, updated_at
+), inserted_activity AS (
+    INSERT INTO activity_events (
+        user_id, event_type, anilist_id, episode, comment_id
+    )
+    SELECT user_id, 'comment', anilist_id, episode, id
+    FROM inserted_comment
+    RETURNING id
+), inserted_notification AS (
+    INSERT INTO notifications (
+        user_id,
+        actor_id,
+        notification_type,
+        comment_id,
+        activity_event_id,
+        dedupe_key
+    )
+    SELECT
+        parent.user_id,
+        comment.user_id,
+        'reply',
+        comment.id,
+        activity.id,
+        'reply:' || comment.id::text
+    FROM inserted_comment comment
+    JOIN episode_comments parent ON parent.id = comment.parent_id
+    CROSS JOIN inserted_activity activity
+    WHERE parent.user_id <> comment.user_id
+    ON CONFLICT (user_id, dedupe_key) DO NOTHING
+)
+SELECT
+    id,
+    anilist_id,
+    episode,
+    user_id,
+    username,
+    content,
+    parent_id,
+    reply_to_username,
+    created_at,
+    updated_at
+FROM inserted_comment
+`
+
+type CreateCommentWithActivityParams struct {
+	AnilistID       int32      `json:"anilistId"`
+	Episode         int32      `json:"episode"`
+	UserID          uuid.UUID  `json:"userId"`
+	Username        string     `json:"username"`
+	Content         string     `json:"content"`
+	ParentID        *uuid.UUID `json:"parentId"`
+	ReplyToUsername *string    `json:"replyToUsername"`
+}
+
+type CreateCommentWithActivityRow struct {
+	ID              uuid.UUID          `json:"id"`
+	AnilistID       int32              `json:"anilistId"`
+	Episode         int32              `json:"episode"`
+	UserID          uuid.UUID          `json:"userId"`
+	Username        string             `json:"username"`
+	Content         string             `json:"content"`
+	ParentID        *uuid.UUID         `json:"parentId"`
+	ReplyToUsername *string            `json:"replyToUsername"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+}
+
+// Atomic community write: create the comment, append its feed event, and (for
+// a non-self reply) enqueue one deduped notification.  The parent validation
+// query remains useful for returning a friendly 400 before this is called.
+func (q *Queries) CreateCommentWithActivity(ctx context.Context, arg CreateCommentWithActivityParams) (CreateCommentWithActivityRow, error) {
+	row := q.db.QueryRow(ctx, createCommentWithActivity,
+		arg.AnilistID,
+		arg.Episode,
+		arg.UserID,
+		arg.Username,
+		arg.Content,
+		arg.ParentID,
+		arg.ReplyToUsername,
+	)
+	var i CreateCommentWithActivityRow
+	err := row.Scan(
+		&i.ID,
+		&i.AnilistID,
+		&i.Episode,
+		&i.UserID,
+		&i.Username,
+		&i.Content,
+		&i.ParentID,
+		&i.ReplyToUsername,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteComment = `-- name: DeleteComment :exec
 DELETE FROM episode_comments
 WHERE id = $1
@@ -131,6 +246,101 @@ func (q *Queries) GetCommentParentForValidation(ctx context.Context, iD uuid.UUI
 	return id, err
 }
 
+const listEpisodeCommentSummaries = `-- name: ListEpisodeCommentSummaries :many
+WITH counts AS (
+    SELECT episode, count(*)::bigint AS comment_count
+    FROM episode_comments
+    WHERE anilist_id = $2::integer
+    GROUP BY episode
+), ranked AS (
+    SELECT
+        c.id,
+        c.episode,
+        c.user_id,
+        c.username,
+        c.content,
+        c.parent_id,
+        c.reply_to_username,
+        c.created_at,
+        u.avatar_url,
+        backdrop.cover_image_url AS backdrop_cover_url,
+        row_number() OVER (
+            PARTITION BY c.episode
+            ORDER BY c.created_at DESC, c.id DESC
+        ) AS preview_rank
+    FROM episode_comments c
+    LEFT JOIN users u ON u.id = c.user_id
+    LEFT JOIN anime_cache backdrop ON backdrop.anilist_id = u.backdrop_anilist_id
+    WHERE c.anilist_id = $2::integer
+      AND c.parent_id IS NULL
+)
+SELECT
+    ranked.id,
+    ranked.episode,
+    ranked.user_id,
+    ranked.username,
+    ranked.content,
+    ranked.parent_id,
+    ranked.reply_to_username,
+    ranked.created_at,
+    ranked.avatar_url,
+    ranked.backdrop_cover_url,
+    counts.comment_count
+FROM ranked
+JOIN counts USING (episode)
+WHERE preview_rank <= $1::integer
+ORDER BY ranked.episode ASC, ranked.created_at DESC, ranked.id DESC
+`
+
+type ListEpisodeCommentSummariesRow struct {
+	ID               uuid.UUID          `json:"id"`
+	Episode          int32              `json:"episode"`
+	UserID           uuid.UUID          `json:"userId"`
+	Username         string             `json:"username"`
+	Content          string             `json:"content"`
+	ParentID         *uuid.UUID         `json:"parentId"`
+	ReplyToUsername  *string            `json:"replyToUsername"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	AvatarUrl        *string            `json:"avatarUrl"`
+	BackdropCoverUrl *string            `json:"backdropCoverUrl"`
+	CommentCount     int64              `json:"commentCount"`
+}
+
+// Comment counts plus the newest N previews per episode for an anime's episode
+// grid.  The window count avoids a second round-trip.  preview_limit is
+// deliberately caller-controlled so desktop/mobile can choose a small payload.
+func (q *Queries) ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32) ([]ListEpisodeCommentSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeCommentSummaries, previewLimit, anilistID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEpisodeCommentSummariesRow{}
+	for rows.Next() {
+		var i ListEpisodeCommentSummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Episode,
+			&i.UserID,
+			&i.Username,
+			&i.Content,
+			&i.ParentID,
+			&i.ReplyToUsername,
+			&i.CreatedAt,
+			&i.AvatarUrl,
+			&i.BackdropCoverUrl,
+			&i.CommentCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEpisodeComments = `-- name: ListEpisodeComments :many
 
 SELECT
@@ -145,7 +355,19 @@ SELECT
     c.created_at,
     c.updated_at,
     u.avatar_url,
-    bc.cover_image_url AS backdrop_cover_url
+    bc.cover_image_url AS backdrop_cover_url,
+    (SELECT count(*)::bigint
+     FROM comment_reactions reactions
+     WHERE reactions.comment_id = c.id) AS reaction_count,
+    (CASE
+        WHEN $3::uuid IS NULL THEN false
+        ELSE EXISTS (
+            SELECT 1
+            FROM comment_reactions viewer_reaction
+            WHERE viewer_reaction.comment_id = c.id
+              AND viewer_reaction.user_id = $3::uuid
+        )
+    END)::boolean AS viewer_reacted
 FROM episode_comments c
 LEFT JOIN users u ON u.id = c.user_id
 LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
@@ -168,6 +390,8 @@ type ListEpisodeCommentsRow struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updatedAt"`
 	AvatarUrl        *string            `json:"avatarUrl"`
 	BackdropCoverUrl *string            `json:"backdropCoverUrl"`
+	ReactionCount    int64              `json:"reactionCount"`
+	ViewerReacted    bool               `json:"viewerReacted"`
 }
 
 // Queries against episode_comments (P2.5).
@@ -190,8 +414,8 @@ type ListEpisodeCommentsRow struct {
 // /api/comments/:anilistId/:episode — flat tree, oldest first.  Hard
 // LIMIT 500 caps abuse (Express has no limit; we add one because
 // pulling 50k rows on a popular episode would blow the response).
-func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]ListEpisodeCommentsRow, error) {
-	rows, err := q.db.Query(ctx, listEpisodeComments, anilistID, episode)
+func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, episode int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentsRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeComments, anilistID, episode, viewerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +436,8 @@ func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, epis
 			&i.UpdatedAt,
 			&i.AvatarUrl,
 			&i.BackdropCoverUrl,
+			&i.ReactionCount,
+			&i.ViewerReacted,
 		); err != nil {
 			return nil, err
 		}
