@@ -737,6 +737,11 @@ func main() {
 	r.With(jwtx.RequireAuth(signer)).Put("/api/comments/{id}/reaction", commentsHandlers.PutCommentReaction)
 	r.With(jwtx.RequireAuth(signer)).Delete("/api/comments/{id}/reaction", commentsHandlers.DeleteCommentReaction)
 
+	r.Route("/api/community", func(r chi.Router) {
+		r.With(jwtx.OptionalAuth(signer)).Get("/discussions/trending", commentsHandlers.ListTrendingDiscussions)
+		r.With(jwtx.OptionalAuth(signer)).Post("/engagement", commentsHandlers.TrackCommunityEngagement)
+	})
+
 	r.Route("/api/notifications", func(r chi.Router) {
 		r.Use(jwtx.RequireAuth(signer))
 		r.Get("/", notificationHandlers.List)
@@ -777,6 +782,7 @@ func main() {
 		r.Get("/users", adminReadHandlers.ListUsers)
 		r.Get("/reports", safetyHandlers.ListReports)
 		r.Patch("/reports/{id}", safetyHandlers.UpdateReport)
+		r.Get("/community-metrics", commentsHandlers.CommunityMetrics)
 
 		// Enrichment writes — static paths first to keep chi happy.
 		r.Post("/enrichment/re-enrich", adminEnrichmentHandlers.ReEnrich)

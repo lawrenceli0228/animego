@@ -59,6 +59,8 @@ var allTables = []string{
 	// Community safety tables (migration 0019).
 	"user_blocks",
 	"reports",
+	// Community discovery aggregate (migration 0020).
+	"community_engagement_daily",
 	"danmakus",
 	"episode_windows",
 	// Enrichment match-accuracy tables (migration 0011).

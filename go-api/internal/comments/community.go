@@ -2,6 +2,7 @@ package comments
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -19,12 +20,25 @@ import (
 const (
 	defaultSummaryPreview = 2
 	maxSummaryPreview     = 5
+	defaultTrendingLimit  = 6
+	maxTrendingLimit      = 12
+	defaultWindowHours    = 7 * 24
+	minWindowHours        = 24
+	maxWindowHours        = 30 * 24
+	defaultMetricsDays    = 7
+	maxMetricsDays        = 90
 )
 
 type commentCommunityDB interface {
 	ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentSummariesRow, error)
 	UpsertCommentReactionWithNotification(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.UpsertCommentReactionWithNotificationRow, error)
 	DeleteCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.DeleteCommentReactionRow, error)
+}
+
+type communityDiscoveryDB interface {
+	ListTrendingDiscussions(ctx context.Context, pageLimit int32, windowHours int32, viewerUserID *uuid.UUID) ([]dbgen.ListTrendingDiscussionsRow, error)
+	TrackCommunityEngagement(ctx context.Context, eventType string, source string, anilistID int32, episode int32, authenticated bool) (int64, error)
+	GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (dbgen.GetCommunityEngagementSummaryRow, error)
 }
 
 type commentSummaryPreview struct {
@@ -110,6 +124,177 @@ func (h *Handlers) ListCommentSummaries(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 	httpx.Data(w, http.StatusOK, items)
+}
+
+type trendingDiscussionLatest struct {
+	ID        uuid.UUID          `json:"id"`
+	Username  string             `json:"username"`
+	AvatarURL *string            `json:"avatarUrl"`
+	Content   string             `json:"content"`
+	IsSpoiler bool               `json:"isSpoiler"`
+	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+}
+
+type trendingDiscussionItem struct {
+	AnilistID        int32                    `json:"anilistId"`
+	Episode          int32                    `json:"episode"`
+	TitleRomaji      *string                  `json:"titleRomaji"`
+	TitleEnglish     *string                  `json:"titleEnglish"`
+	TitleNative      *string                  `json:"titleNative"`
+	TitleChinese     *string                  `json:"titleChinese"`
+	CoverImageURL    *string                  `json:"coverImageUrl"`
+	PosterAccent     *string                  `json:"posterAccent"`
+	CommentCount     int64                    `json:"commentCount"`
+	ParticipantCount int64                    `json:"participantCount"`
+	ReactionCount    int64                    `json:"reactionCount"`
+	Latest           trendingDiscussionLatest `json:"latest"`
+}
+
+// ListTrendingDiscussions implements GET /api/community/discussions/trending.
+// It exposes a compact, spoiler-safe discovery list ranked by participation,
+// volume, reactions, and recency.  OptionalAuth keeps block policy consistent
+// with the episode grid without making the public homepage require a session.
+func (h *Handlers) ListTrendingDiscussions(w http.ResponseWriter, r *http.Request) {
+	limit := clampIntQuery(r, "limit", defaultTrendingLimit, 1, maxTrendingLimit)
+	windowHours := clampIntQuery(r, "windowHours", defaultWindowHours, minWindowHours, maxWindowHours)
+
+	db, ok := h.Queries.(communityDiscoveryDB)
+	if !ok {
+		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "community discovery unavailable"))
+		return
+	}
+	var viewerUserID *uuid.UUID
+	if claims, ok := jwtx.ClaimsFrom(r.Context()); ok && claims != nil {
+		viewerUserID = &claims.UserID
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+	rows, err := db.ListTrendingDiscussions(ctx, int32(limit), int32(windowHours), viewerUserID)
+	if err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "trending discussions query failed"))
+		return
+	}
+	items := make([]trendingDiscussionItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, trendingDiscussionItem{
+			AnilistID:        row.AnilistID,
+			Episode:          row.Episode,
+			TitleRomaji:      row.TitleRomaji,
+			TitleEnglish:     row.TitleEnglish,
+			TitleNative:      row.TitleNative,
+			TitleChinese:     row.TitleChinese,
+			CoverImageURL:    row.CoverImageUrl,
+			PosterAccent:     row.PosterAccent,
+			CommentCount:     row.CommentCount,
+			ParticipantCount: row.ParticipantCount,
+			ReactionCount:    row.ReactionCount,
+			Latest: trendingDiscussionLatest{
+				ID:        row.LatestCommentID,
+				Username:  row.LatestUsername,
+				AvatarURL: row.LatestAvatarUrl,
+				Content:   row.LatestContent,
+				IsSpoiler: row.LatestIsSpoiler,
+				CreatedAt: row.LatestCreatedAt,
+			},
+		})
+	}
+	httpx.Data(w, http.StatusOK, items)
+}
+
+type communityEngagementRequest struct {
+	EventType string `json:"eventType"`
+	Source    string `json:"source"`
+	AnilistID int32  `json:"anilistId"`
+	Episode   int32  `json:"episode"`
+}
+
+// TrackCommunityEngagement implements POST /api/community/engagement.  It
+// increments a daily aggregate only; no per-user or anonymous browsing record
+// is retained.  Authentication is captured as a boolean segment, never an ID.
+func (h *Handlers) TrackCommunityEngagement(w http.ResponseWriter, r *http.Request) {
+	var req communityEngagementRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !validCommunityEngagement(req) {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, "Invalid community engagement event"))
+		return
+	}
+	db, ok := h.Queries.(communityDiscoveryDB)
+	if !ok {
+		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "community discovery unavailable"))
+		return
+	}
+	_, authenticated := jwtx.ClaimsFrom(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+	if _, err := db.TrackCommunityEngagement(ctx, req.EventType, req.Source, req.AnilistID, req.Episode, authenticated); err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "community engagement write failed"))
+		return
+	}
+	httpx.Data(w, http.StatusAccepted, map[string]bool{"tracked": true})
+}
+
+type communityMetricsResponse struct {
+	Days        int     `json:"days"`
+	Impressions int64   `json:"impressions"`
+	Opens       int64   `json:"opens"`
+	OpenRate    float64 `json:"openRate"`
+}
+
+// CommunityMetrics implements the admin-only GET
+// /api/admin/community-metrics.  Auth/admin checks stay in router middleware.
+func (h *Handlers) CommunityMetrics(w http.ResponseWriter, r *http.Request) {
+	days := clampIntQuery(r, "days", defaultMetricsDays, 1, maxMetricsDays)
+	db, ok := h.Queries.(communityDiscoveryDB)
+	if !ok {
+		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "community discovery unavailable"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+	row, err := db.GetCommunityEngagementSummary(ctx, int32(days))
+	if err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "community metrics query failed"))
+		return
+	}
+	openRate := 0.0
+	if row.ImpressionCount > 0 {
+		openRate = float64(row.OpenCount) / float64(row.ImpressionCount)
+	}
+	httpx.Data(w, http.StatusOK, communityMetricsResponse{
+		Days:        days,
+		Impressions: row.ImpressionCount,
+		Opens:       row.OpenCount,
+		OpenRate:    openRate,
+	})
+}
+
+func clampIntQuery(r *http.Request, key string, fallback, minValue, maxValue int) int {
+	value := fallback
+	if raw := r.URL.Query().Get(key); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			value = parsed
+		}
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func validCommunityEngagement(req communityEngagementRequest) bool {
+	if req.Source != "home" && req.Source != "seasonal" {
+		return false
+	}
+	switch req.EventType {
+	case "hot_discussions_impression":
+		return req.AnilistID == 0 && req.Episode == 0
+	case "discussion_open":
+		return req.AnilistID > 0 && req.Episode > 0
+	default:
+		return false
+	}
 }
 
 type commentReactionResponse struct {

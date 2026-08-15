@@ -216,3 +216,49 @@ SELECT EXISTS (
     WHERE comment_id = $1
       AND user_id = $2
 ) AS reacted;
+
+-- name: TrackCommunityEngagement :one
+-- Aggregate-only counters keep product telemetry useful without retaining a
+-- per-user browsing history.  The handler owns the event/target allowlist;
+-- matching CHECK constraints make that contract durable at the database edge.
+INSERT INTO community_engagement_daily (
+    event_date,
+    event_type,
+    source,
+    anilist_id,
+    episode,
+    authenticated,
+    event_count,
+    updated_at
+) VALUES (
+    current_date,
+    sqlc.arg('event_type')::text,
+    sqlc.arg('source')::text,
+    sqlc.arg('anilist_id')::integer,
+    sqlc.arg('episode')::integer,
+    sqlc.arg('authenticated')::boolean,
+    1,
+    now()
+)
+ON CONFLICT (
+    event_date,
+    event_type,
+    source,
+    anilist_id,
+    episode,
+    authenticated
+) DO UPDATE
+SET event_count = community_engagement_daily.event_count + 1,
+    updated_at = now()
+RETURNING event_count;
+
+-- name: GetCommunityEngagementSummary :one
+SELECT
+    COALESCE(sum(event_count) FILTER (
+        WHERE event_type = 'hot_discussions_impression'
+    ), 0)::bigint AS impression_count,
+    COALESCE(sum(event_count) FILTER (
+        WHERE event_type = 'discussion_open'
+    ), 0)::bigint AS open_count
+FROM community_engagement_daily
+WHERE event_date >= current_date - (sqlc.arg('day_count')::integer - 1);

@@ -508,3 +508,153 @@ func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, epis
 	}
 	return items, nil
 }
+
+const listTrendingDiscussions = `-- name: ListTrendingDiscussions :many
+WITH visible_comments AS (
+    SELECT c.id, c.anilist_id, c.episode, c.user_id, c.username, c.content, c.parent_id, c.reply_to_username, c.created_at, c.updated_at, c.is_spoiler
+    FROM episode_comments c
+    WHERE c.created_at >= now() - ($2::integer * interval '1 hour')
+      AND (
+          $3::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = $3::uuid
+                     AND block.blocked_id = c.user_id)
+                 OR (block.blocker_id = c.user_id
+                     AND block.blocked_id = $3::uuid)
+          )
+      )
+), discussion_stats AS (
+    SELECT
+        anilist_id,
+        episode,
+        count(*)::bigint AS comment_count,
+        count(DISTINCT user_id)::bigint AS participant_count,
+        max(created_at) AS last_comment_at
+    FROM visible_comments
+    GROUP BY anilist_id, episode
+), reaction_stats AS (
+    SELECT
+        comment.anilist_id,
+        comment.episode,
+        count(reaction.*)::bigint AS reaction_count
+    FROM visible_comments comment
+    JOIN comment_reactions reaction ON reaction.comment_id = comment.id
+    GROUP BY comment.anilist_id, comment.episode
+), latest_comments AS (
+    SELECT
+        comment.id, comment.anilist_id, comment.episode, comment.user_id, comment.username, comment.content, comment.parent_id, comment.reply_to_username, comment.created_at, comment.updated_at, comment.is_spoiler,
+        row_number() OVER (
+            PARTITION BY comment.anilist_id, comment.episode
+            ORDER BY comment.created_at DESC, comment.id DESC
+        ) AS latest_rank
+    FROM visible_comments comment
+)
+SELECT
+    stats.anilist_id,
+    stats.episode,
+    anime.title_romaji,
+    anime.title_english,
+    anime.title_native,
+    anime.title_chinese,
+    anime.cover_image_url,
+    anime.poster_accent,
+    stats.comment_count,
+    stats.participant_count,
+    COALESCE(reactions.reaction_count, 0)::bigint AS reaction_count,
+    latest.id AS latest_comment_id,
+    latest.username AS latest_username,
+    user_profile.avatar_url AS latest_avatar_url,
+    CASE WHEN latest.is_spoiler THEN '' ELSE latest.content END::text AS latest_content,
+    latest.is_spoiler AS latest_is_spoiler,
+    latest.created_at AS latest_created_at
+FROM discussion_stats stats
+JOIN latest_comments latest
+  ON latest.anilist_id = stats.anilist_id
+ AND latest.episode = stats.episode
+ AND latest.latest_rank = 1
+JOIN anime_cache anime ON anime.anilist_id = stats.anilist_id
+LEFT JOIN users user_profile ON user_profile.id = latest.user_id
+LEFT JOIN reaction_stats reactions
+  ON reactions.anilist_id = stats.anilist_id
+ AND reactions.episode = stats.episode
+ORDER BY (
+    (
+        stats.participant_count * 4
+        + stats.comment_count * 2
+        + COALESCE(reactions.reaction_count, 0)
+    )::double precision
+    / power(
+        1 + greatest(extract(epoch FROM (now() - stats.last_comment_at)) / 86400, 0),
+        1.15
+    )
+) DESC,
+stats.last_comment_at DESC,
+stats.anilist_id ASC,
+stats.episode ASC
+LIMIT $1::integer
+`
+
+type ListTrendingDiscussionsRow struct {
+	AnilistID        int32              `json:"anilistId"`
+	Episode          int32              `json:"episode"`
+	TitleRomaji      *string            `json:"titleRomaji"`
+	TitleEnglish     *string            `json:"titleEnglish"`
+	TitleNative      *string            `json:"titleNative"`
+	TitleChinese     *string            `json:"titleChinese"`
+	CoverImageUrl    *string            `json:"coverImageUrl"`
+	PosterAccent     *string            `json:"posterAccent"`
+	CommentCount     int64              `json:"commentCount"`
+	ParticipantCount int64              `json:"participantCount"`
+	ReactionCount    int64              `json:"reactionCount"`
+	LatestCommentID  uuid.UUID          `json:"latestCommentId"`
+	LatestUsername   string             `json:"latestUsername"`
+	LatestAvatarUrl  *string            `json:"latestAvatarUrl"`
+	LatestContent    string             `json:"latestContent"`
+	LatestIsSpoiler  bool               `json:"latestIsSpoiler"`
+	LatestCreatedAt  pgtype.Timestamptz `json:"latestCreatedAt"`
+}
+
+// Explainable discovery ranking for the homepage.  Participation matters more
+// than raw volume, reactions add a smaller signal, and a smooth age divisor
+// lets a fresh smaller conversation outrank an old thread without making the
+// ordering jump at a hard date boundary.  Authenticated viewers do not see
+// threads authored only by someone they blocked or were blocked by.
+func (q *Queries) ListTrendingDiscussions(ctx context.Context, pageLimit int32, windowHours int32, viewerUserID *uuid.UUID) ([]ListTrendingDiscussionsRow, error) {
+	rows, err := q.db.Query(ctx, listTrendingDiscussions, pageLimit, windowHours, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTrendingDiscussionsRow{}
+	for rows.Next() {
+		var i ListTrendingDiscussionsRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.Episode,
+			&i.TitleRomaji,
+			&i.TitleEnglish,
+			&i.TitleNative,
+			&i.TitleChinese,
+			&i.CoverImageUrl,
+			&i.PosterAccent,
+			&i.CommentCount,
+			&i.ParticipantCount,
+			&i.ReactionCount,
+			&i.LatestCommentID,
+			&i.LatestUsername,
+			&i.LatestAvatarUrl,
+			&i.LatestContent,
+			&i.LatestIsSpoiler,
+			&i.LatestCreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

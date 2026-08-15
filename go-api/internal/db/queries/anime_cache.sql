@@ -106,7 +106,11 @@ SELECT
         FROM anime_genres g
         WHERE g.anime_id = anime_cache.anilist_id
         ORDER BY g.genre
-    )::text[] AS genres
+    )::text[] AS genres,
+    (SELECT count(*)::bigint
+     FROM episode_comments discussion
+     WHERE discussion.anilist_id = anime_cache.anilist_id
+    ) AS discussion_count
 FROM anime_cache
 WHERE
     season = $1

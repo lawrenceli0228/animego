@@ -136,6 +136,97 @@ JOIN counts USING (episode)
 WHERE preview_rank <= sqlc.arg('preview_limit')::integer
 ORDER BY ranked.episode ASC, ranked.created_at DESC, ranked.id DESC;
 
+-- name: ListTrendingDiscussions :many
+-- Explainable discovery ranking for the homepage.  Participation matters more
+-- than raw volume, reactions add a smaller signal, and a smooth age divisor
+-- lets a fresh smaller conversation outrank an old thread without making the
+-- ordering jump at a hard date boundary.  Authenticated viewers do not see
+-- threads authored only by someone they blocked or were blocked by.
+WITH visible_comments AS (
+    SELECT c.*
+    FROM episode_comments c
+    WHERE c.created_at >= now() - (sqlc.arg('window_hours')::integer * interval '1 hour')
+      AND (
+          sqlc.narg('viewer_user_id')::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = sqlc.narg('viewer_user_id')::uuid
+                     AND block.blocked_id = c.user_id)
+                 OR (block.blocker_id = c.user_id
+                     AND block.blocked_id = sqlc.narg('viewer_user_id')::uuid)
+          )
+      )
+), discussion_stats AS (
+    SELECT
+        anilist_id,
+        episode,
+        count(*)::bigint AS comment_count,
+        count(DISTINCT user_id)::bigint AS participant_count,
+        max(created_at) AS last_comment_at
+    FROM visible_comments
+    GROUP BY anilist_id, episode
+), reaction_stats AS (
+    SELECT
+        comment.anilist_id,
+        comment.episode,
+        count(reaction.*)::bigint AS reaction_count
+    FROM visible_comments comment
+    JOIN comment_reactions reaction ON reaction.comment_id = comment.id
+    GROUP BY comment.anilist_id, comment.episode
+), latest_comments AS (
+    SELECT
+        comment.*,
+        row_number() OVER (
+            PARTITION BY comment.anilist_id, comment.episode
+            ORDER BY comment.created_at DESC, comment.id DESC
+        ) AS latest_rank
+    FROM visible_comments comment
+)
+SELECT
+    stats.anilist_id,
+    stats.episode,
+    anime.title_romaji,
+    anime.title_english,
+    anime.title_native,
+    anime.title_chinese,
+    anime.cover_image_url,
+    anime.poster_accent,
+    stats.comment_count,
+    stats.participant_count,
+    COALESCE(reactions.reaction_count, 0)::bigint AS reaction_count,
+    latest.id AS latest_comment_id,
+    latest.username AS latest_username,
+    user_profile.avatar_url AS latest_avatar_url,
+    CASE WHEN latest.is_spoiler THEN '' ELSE latest.content END::text AS latest_content,
+    latest.is_spoiler AS latest_is_spoiler,
+    latest.created_at AS latest_created_at
+FROM discussion_stats stats
+JOIN latest_comments latest
+  ON latest.anilist_id = stats.anilist_id
+ AND latest.episode = stats.episode
+ AND latest.latest_rank = 1
+JOIN anime_cache anime ON anime.anilist_id = stats.anilist_id
+LEFT JOIN users user_profile ON user_profile.id = latest.user_id
+LEFT JOIN reaction_stats reactions
+  ON reactions.anilist_id = stats.anilist_id
+ AND reactions.episode = stats.episode
+ORDER BY (
+    (
+        stats.participant_count * 4
+        + stats.comment_count * 2
+        + COALESCE(reactions.reaction_count, 0)
+    )::double precision
+    / power(
+        1 + greatest(extract(epoch FROM (now() - stats.last_comment_at)) / 86400, 0),
+        1.15
+    )
+) DESC,
+stats.last_comment_at DESC,
+stats.anilist_id ASC,
+stats.episode ASC
+LIMIT sqlc.arg('page_limit')::integer;
+
 -- name: CreateComment :one
 -- POST /api/comments/:anilistId/:episode.  Caller has already
 -- validated content length + parent existence.  parent_id may be NULL

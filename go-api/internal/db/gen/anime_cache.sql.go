@@ -815,7 +815,11 @@ SELECT
         FROM anime_genres g
         WHERE g.anime_id = anime_cache.anilist_id
         ORDER BY g.genre
-    )::text[] AS genres
+    )::text[] AS genres,
+    (SELECT count(*)::bigint
+     FROM episode_comments discussion
+     WHERE discussion.anilist_id = anime_cache.anilist_id
+    ) AS discussion_count
 FROM anime_cache
 WHERE
     season = $1
@@ -848,6 +852,7 @@ type GetSeasonalAnimeRow struct {
 	Format          *string  `json:"format"`
 	Description     *string  `json:"description"`
 	Genres          []string `json:"genres"`
+	DiscussionCount int64    `json:"discussionCount"`
 }
 
 // Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
@@ -895,6 +900,7 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 			&i.Format,
 			&i.Description,
 			&i.Genres,
+			&i.DiscussionCount,
 		); err != nil {
 			return nil, err
 		}
