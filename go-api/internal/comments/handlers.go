@@ -40,29 +40,33 @@ import (
 // a stalled Postgres surfaces consistently across surfaces.
 const queryTimeout = 5 * time.Second
 
-// CommentsDB is the sqlc subset the comment handlers consume.  Defined
-// at the use-site per "accept interfaces, return structs" so tests can
-// substitute a fake without dragging the full dbgen.Querier surface
-// into the test setup.
+// CommentsDB is the sqlc subset every handler in this package consumes —
+// the core comment CRUD plus the community reaction/discovery reads and
+// the block lookup.  Defined at the use-site per "accept interfaces,
+// return structs" so tests can substitute a fake without dragging the
+// full dbgen.Querier surface into the test setup.
 //
-// Five methods cover all three endpoints — the ListEpisodeComments read
-// for GET, plus the read/write pair (CreateComment +
-// GetCommentParentForValidation) for POST, plus the read/delete pair
-// (GetCommentByID + DeleteComment) for DELETE.
+// Everything lives on this one interface on purpose.  These methods used
+// to be reached through optional interfaces obtained by type assertion,
+// which meant a Queries value that quietly stopped satisfying them
+// degraded at runtime instead of failing to compile — for the block and
+// activity queries that degradation was silent loss of block enforcement
+// and of the activity-feed write.  Declaring them here makes the compiler
+// the enforcement mechanism: an implementation that drops a method cannot
+// be passed to NewHandlers at all.
 type CommentsDB interface {
 	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentsRow, error)
-	CreateComment(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error)
+	CreateCommentWithActivity(ctx context.Context, arg dbgen.CreateCommentWithActivityParams) (dbgen.CreateCommentWithActivityRow, error)
 	GetCommentParentForValidation(ctx context.Context, iD uuid.UUID, anilistID int32, episode int32) (uuid.UUID, error)
 	GetCommentByID(ctx context.Context, id uuid.UUID) (dbgen.GetCommentByIDRow, error)
 	DeleteComment(ctx context.Context, id uuid.UUID) error
-}
-
-type commentActivityDB interface {
-	CreateCommentWithActivity(ctx context.Context, arg dbgen.CreateCommentWithActivityParams) (dbgen.CreateCommentWithActivityRow, error)
-}
-
-type commentBlockDB interface {
 	UserBlockExists(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error)
+	ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentSummariesRow, error)
+	UpsertCommentReactionWithNotification(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.UpsertCommentReactionWithNotificationRow, error)
+	DeleteCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.DeleteCommentReactionRow, error)
+	ListTrendingDiscussions(ctx context.Context, pageLimit int32, windowHours int32, viewerUserID *uuid.UUID) ([]dbgen.ListTrendingDiscussionsRow, error)
+	TrackCommunityEngagement(ctx context.Context, eventType string, source string, anilistID int32, episode int32, authenticated bool) (int64, error)
+	GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (dbgen.GetCommunityEngagementSummaryRow, error)
 }
 
 // Handlers carries the deps shared by every comment handler.  Construct
@@ -168,9 +172,12 @@ func (h *Handlers) ListComments(w http.ResponseWriter, r *http.Request) {
 //  4. Content rune count <= 500 (400 VALIDATION_ERROR `Content too long`).
 //  5. ParentID, if provided, must exist on the same (anilistId, episode)
 //     thread (400 VALIDATION_ERROR `Parent comment not found`).
+//  6. ParentID, if provided, must not cross a block in either direction
+//     (403 FORBIDDEN `Interaction unavailable`) — no Express equivalent.
 //
-// Then CreateComment writes the row and we return 201 CREATED with the
-// full Postgres row wrapped in `{ data: <row> }`.
+// Then CreateCommentWithActivity writes the row, its activity-feed event,
+// and any reply notification in one statement, and we return 201 CREATED
+// with the full Postgres row wrapped in `{ data: <row> }`.
 func (h *Handlers) AddComment(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
@@ -225,51 +232,34 @@ func (h *Handlers) AddComment(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "parent lookup failed"))
 			return
 		}
-		if blockDB, ok := h.Queries.(commentBlockDB); ok {
-			parent, parentErr := h.Queries.GetCommentByID(ctx, *req.ParentID)
-			if parentErr != nil {
-				httpx.Fail(w, httpx.WrapError(parentErr, http.StatusInternalServerError, httpx.CodeServerError, "parent author lookup failed"))
-				return
-			}
-			blocked, blockErr := blockDB.UserBlockExists(ctx, claims.UserID, parent.UserID)
-			if blockErr != nil {
-				httpx.Fail(w, httpx.WrapError(blockErr, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
-				return
-			}
-			if blocked {
-				httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
-				return
-			}
+		// UserBlockExists is symmetric, so this one lookup rejects the reply
+		// whether the parent's author blocked the replier or vice versa.
+		parent, parentErr := h.Queries.GetCommentByID(ctx, *req.ParentID)
+		if parentErr != nil {
+			httpx.Fail(w, httpx.WrapError(parentErr, http.StatusInternalServerError, httpx.CodeServerError, "parent author lookup failed"))
+			return
+		}
+		blocked, blockErr := h.Queries.UserBlockExists(ctx, claims.UserID, parent.UserID)
+		if blockErr != nil {
+			httpx.Fail(w, httpx.WrapError(blockErr, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
+			return
+		}
+		if blocked {
+			httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
+			return
 		}
 	}
 
-	var row any
-	var err error
-	if activityDB, ok := h.Queries.(commentActivityDB); ok {
-		row, err = activityDB.CreateCommentWithActivity(ctx, dbgen.CreateCommentWithActivityParams{
-			AnilistID:       anilistID,
-			Episode:         episode,
-			UserID:          claims.UserID,
-			Username:        claims.Username,
-			Content:         trimmed,
-			IsSpoiler:       req.IsSpoiler,
-			ParentID:        req.ParentID,
-			ReplyToUsername: req.ReplyToUsername,
-		})
-	} else {
-		// Test doubles and older embedders can keep the legacy interface; the
-		// production sqlc Queries value always takes the atomic activity path.
-		row, err = h.Queries.CreateComment(ctx, dbgen.CreateCommentParams{
-			AnilistID:       anilistID,
-			Episode:         episode,
-			UserID:          claims.UserID,
-			Username:        claims.Username,
-			Content:         trimmed,
-			IsSpoiler:       req.IsSpoiler,
-			ParentID:        req.ParentID,
-			ReplyToUsername: req.ReplyToUsername,
-		})
-	}
+	row, err := h.Queries.CreateCommentWithActivity(ctx, dbgen.CreateCommentWithActivityParams{
+		AnilistID:       anilistID,
+		Episode:         episode,
+		UserID:          claims.UserID,
+		Username:        claims.Username,
+		Content:         trimmed,
+		IsSpoiler:       req.IsSpoiler,
+		ParentID:        req.ParentID,
+		ReplyToUsername: req.ReplyToUsername,
+	})
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "create comment failed"))
 		return

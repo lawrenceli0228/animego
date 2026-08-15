@@ -45,7 +45,7 @@ const (
 // substitute a fake without dragging the full dbgen.Querier surface
 // into the test setup.
 //
-// Eleven methods cover all five endpoints — the lookup helper
+// Fifteen methods cover all six endpoints — the lookup helper
 // GetUserIDByUsername is shared by every handler that takes a username
 // path param, plus the per-endpoint reads / writes below.
 type SocialDB interface {
@@ -56,8 +56,19 @@ type SocialDB interface {
 	ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]dbgen.ListProfileWatchingRow, error)
 	FollowExists(ctx context.Context, followerID, followeeID uuid.UUID) (bool, error)
 
-	// Follow CRUD
-	UpsertFollow(ctx context.Context, followerID, followeeID uuid.UUID) error
+	// Safety.  These are hard requirements rather than an optional
+	// capability reached by type assertion: a failed assertion would
+	// have skipped block enforcement silently at runtime, with no error
+	// and no failing test.  Declaring them here makes the compiler —
+	// not luck — guarantee every SocialDB can enforce blocks.
+	UserBlockExists(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error)
+	UserBlockedTarget(ctx context.Context, blockerID, blockedID uuid.UUID) (bool, error)
+
+	// Follow CRUD.  UpsertFollowWithActivity writes the follow edge and
+	// its activity_events row in one statement, so a follow either
+	// reaches the feed or fails outright — there is no plain-upsert
+	// fallback that could silently drop the activity.
+	UpsertFollowWithActivity(ctx context.Context, followerID, followeeID uuid.UUID) (bool, error)
 	DeleteFollow(ctx context.Context, followerID, followeeID uuid.UUID) (int64, error)
 
 	// Followers / following
@@ -70,11 +81,6 @@ type SocialDB interface {
 	ListFeedFolloweeIDs(ctx context.Context, followerID uuid.UUID) ([]uuid.UUID, error)
 	ListFeedActivities(ctx context.Context, followeeIDs []uuid.UUID, limit, offset int32) ([]dbgen.ListFeedActivitiesRow, error)
 	CountFeedActivities(ctx context.Context, followeeIDs []uuid.UUID) (int64, error)
-}
-
-type socialSafetyDB interface {
-	UserBlockExists(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error)
-	UserBlockedTarget(ctx context.Context, blockerID, blockedID uuid.UUID) (bool, error)
 }
 
 // Handlers carries the deps shared by every social handler.  Construct

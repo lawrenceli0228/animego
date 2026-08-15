@@ -27,6 +27,12 @@ const (
 	maxPageSize       = 50
 	maxDetailsRunes   = 500
 	maxResolutionNote = 1000
+
+	// maxPageOffset caps the SQL OFFSET these list endpoints will ask
+	// Postgres for.  Nothing real lives past a million blocks or reports,
+	// so anything beyond this is a crawler or a probe — and the cap is
+	// what keeps pageOffset's int32 conversion safe.
+	maxPageOffset = 1_000_000
 )
 
 var validReasons = map[string]struct{}{
@@ -146,7 +152,7 @@ func (h *Handlers) ListBlocks(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-	rows, err := h.db.ListUserBlocks(ctx, claims.UserID, int32(limit+1), int32((page-1)*limit))
+	rows, err := h.db.ListUserBlocks(ctx, claims.UserID, int32(limit+1), pageOffset(page, limit))
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "list blocks failed"))
 		return
@@ -300,7 +306,7 @@ func (h *Handlers) ListReports(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-	rows, err := h.db.ListReports(ctx, status, int32((page-1)*limit), int32(limit+1))
+	rows, err := h.db.ListReports(ctx, status, pageOffset(page, limit), int32(limit+1))
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "list reports failed"))
 		return
@@ -396,6 +402,29 @@ func positiveInt(raw string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// pageOffset turns a 1-based page number into a SQL OFFSET, clamped to
+// maxPageOffset.
+//
+// positiveInt only clamps the lower bound, so ?page= arrives unbounded and
+// (page-1)*limit runs past int32.  Go truncates rather than saturating on
+// the conversion, so the offset wraps: ?page=1000000000&limit=50 lands on
+// -1539607602, Postgres rejects `OFFSET -N`, and the endpoint 500s.  Values
+// that wrap back to a positive number are quieter but no better — they
+// serve an arbitrary page.  Clamping degrades a nonsense page number into
+// an ordinary empty result page instead.
+//
+// The bound is checked by division rather than by computing the product
+// first — the product is exactly the thing that overflows.
+func pageOffset(page, limit int) int32 {
+	if page < 2 || limit < 1 {
+		return 0
+	}
+	if page-1 > maxPageOffset/limit {
+		return maxPageOffset
+	}
+	return int32((page - 1) * limit)
 }
 
 func trimOptional(value *string, maxRunes int) (*string, bool) {

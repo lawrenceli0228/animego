@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -224,6 +225,35 @@ func TestAdminListAndUpdateReports(t *testing.T) {
 	rec = httptest.NewRecorder()
 	NewHandlers(db).UpdateReport(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+func TestPageOffsetClampsInsteadOfOverflowing(t *testing.T) {
+	for name, tc := range map[string]struct {
+		page, limit int
+		want        int32
+	}{
+		"first page":     {page: 1, limit: 20, want: 0},
+		"second page":    {page: 2, limit: 20, want: 20},
+		"tenth page":     {page: 10, limit: 50, want: 450},
+		"page below one": {page: 0, limit: 20, want: 0},
+		"zero limit":     {page: 9, limit: 0, want: 0},
+		"beyond cap":     {page: 1_000_000, limit: 50, want: maxPageOffset},
+		// (page-1)*limit truncates to a positive-but-wrong int32 here...
+		"wraps int32 positive": {page: 200_000_000, limit: 50, want: maxPageOffset},
+		// ...and to a negative one here, which is what Postgres rejects.
+		"wraps int32 negative": {page: 1_000_000_000, limit: 50, want: maxPageOffset},
+		"smallest wrap":        {page: 42_949_674, limit: 50, want: maxPageOffset},
+		// The largest ?page= strconv.Atoi will hand back — the product
+		// (page-1)*limit overflows the machine int, so pageOffset must
+		// never compute it.
+		"overflows the product": {page: math.MaxInt, limit: maxPageSize, want: maxPageOffset},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := pageOffset(tc.page, tc.limit)
+			assert.Equal(t, tc.want, got)
+			assert.GreaterOrEqual(t, got, int32(0), "a negative OFFSET makes Postgres error out")
+		})
+	}
 }
 
 func TestHandlersRequireClaims(t *testing.T) {

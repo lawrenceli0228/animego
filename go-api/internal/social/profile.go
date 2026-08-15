@@ -111,21 +111,22 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 		if !isOwner {
-			if safetyDB, ok := h.Queries.(socialSafetyDB); ok {
-				g.Go(func() error {
-					blocked, err := safetyDB.UserBlockExists(gctx, rid, user.ID)
-					if err != nil {
-						return err
-					}
-					blockedByViewer, err := safetyDB.UserBlockedTarget(gctx, rid, user.ID)
-					if err != nil {
-						return err
-					}
-					isBlockedDB = blocked
-					blockedByViewerDB = blockedByViewer
-					return nil
-				})
-			}
+			// Two reads, not one: UserBlockExists is symmetric (drives
+			// redaction below) while UserBlockedTarget is directional
+			// (drives the "you blocked this user" UI affordance).
+			g.Go(func() error {
+				blocked, err := h.Queries.UserBlockExists(gctx, rid, user.ID)
+				if err != nil {
+					return err
+				}
+				blockedByViewer, err := h.Queries.UserBlockedTarget(gctx, rid, user.ID)
+				if err != nil {
+					return err
+				}
+				isBlockedDB = blocked
+				blockedByViewerDB = blockedByViewer
+				return nil
+			})
 		}
 	}
 	if err := g.Wait(); err != nil {

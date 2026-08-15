@@ -10,6 +10,13 @@ package social
 // and pass it directly to a Handlers{Pool: real, Queries: stub} value
 // — Pool is still real because the constructor enforces non-nil, but
 // the handlers under test never touch Pool directly.
+//
+// The two block-check slots are the exception: they default to "not
+// blocked" instead of panicking.  Every auth'd profile read and every
+// follow now runs them, so panic-on-unset would force unrelated
+// error-path scenarios to wire safety stubs they don't care about.
+// Real block enforcement is covered by the PG-backed tests in
+// handlers_test.go, which exercise the actual SQL.
 
 import (
 	"bytes"
@@ -29,19 +36,21 @@ import (
 )
 
 type fakeDB struct {
-	getUserIDByUsernameFn func(ctx context.Context, username string) (dbgen.GetUserIDByUsernameRow, error)
-	getProfileCountsFn    func(ctx context.Context, userID uuid.UUID) (dbgen.GetProfileCountsRow, error)
-	listProfileWatchingFn func(ctx context.Context, userID uuid.UUID) ([]dbgen.ListProfileWatchingRow, error)
-	followExistsFn        func(ctx context.Context, follower, followee uuid.UUID) (bool, error)
-	upsertFollowFn        func(ctx context.Context, follower, followee uuid.UUID) error
-	deleteFollowFn        func(ctx context.Context, follower, followee uuid.UUID) (int64, error)
-	listFollowersFn       func(ctx context.Context, followeeID uuid.UUID, limit, offset int32) ([]dbgen.ListFollowersRow, error)
-	countFollowersFn      func(ctx context.Context, followeeID uuid.UUID) (int64, error)
-	listFollowingFn       func(ctx context.Context, followerID uuid.UUID, limit, offset int32) ([]dbgen.ListFollowingRow, error)
-	countFollowingFn      func(ctx context.Context, followerID uuid.UUID) (int64, error)
-	listFeedFolloweeIDsFn func(ctx context.Context, followerID uuid.UUID) ([]uuid.UUID, error)
-	listFeedActivitiesFn  func(ctx context.Context, ids []uuid.UUID, limit, offset int32) ([]dbgen.ListFeedActivitiesRow, error)
-	countFeedActivitiesFn func(ctx context.Context, ids []uuid.UUID) (int64, error)
+	getUserIDByUsernameFn      func(ctx context.Context, username string) (dbgen.GetUserIDByUsernameRow, error)
+	getProfileCountsFn         func(ctx context.Context, userID uuid.UUID) (dbgen.GetProfileCountsRow, error)
+	listProfileWatchingFn      func(ctx context.Context, userID uuid.UUID) ([]dbgen.ListProfileWatchingRow, error)
+	followExistsFn             func(ctx context.Context, follower, followee uuid.UUID) (bool, error)
+	userBlockExistsFn          func(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error)
+	userBlockedTargetFn        func(ctx context.Context, blocker, blocked uuid.UUID) (bool, error)
+	upsertFollowWithActivityFn func(ctx context.Context, follower, followee uuid.UUID) (bool, error)
+	deleteFollowFn             func(ctx context.Context, follower, followee uuid.UUID) (int64, error)
+	listFollowersFn            func(ctx context.Context, followeeID uuid.UUID, limit, offset int32) ([]dbgen.ListFollowersRow, error)
+	countFollowersFn           func(ctx context.Context, followeeID uuid.UUID) (int64, error)
+	listFollowingFn            func(ctx context.Context, followerID uuid.UUID, limit, offset int32) ([]dbgen.ListFollowingRow, error)
+	countFollowingFn           func(ctx context.Context, followerID uuid.UUID) (int64, error)
+	listFeedFolloweeIDsFn      func(ctx context.Context, followerID uuid.UUID) ([]uuid.UUID, error)
+	listFeedActivitiesFn       func(ctx context.Context, ids []uuid.UUID, limit, offset int32) ([]dbgen.ListFeedActivitiesRow, error)
+	countFeedActivitiesFn      func(ctx context.Context, ids []uuid.UUID) (int64, error)
 }
 
 func (f *fakeDB) GetUserIDByUsername(ctx context.Context, username string) (dbgen.GetUserIDByUsernameRow, error) {
@@ -72,11 +81,25 @@ func (f *fakeDB) FollowExists(ctx context.Context, follower, followee uuid.UUID)
 	return f.followExistsFn(ctx, follower, followee)
 }
 
-func (f *fakeDB) UpsertFollow(ctx context.Context, follower, followee uuid.UUID) error {
-	if f.upsertFollowFn == nil {
-		panic("fakeDB.UpsertFollow not set")
+func (f *fakeDB) UserBlockExists(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error) {
+	if f.userBlockExistsFn == nil {
+		return false, nil
 	}
-	return f.upsertFollowFn(ctx, follower, followee)
+	return f.userBlockExistsFn(ctx, userID, otherUserID)
+}
+
+func (f *fakeDB) UserBlockedTarget(ctx context.Context, blocker, blocked uuid.UUID) (bool, error) {
+	if f.userBlockedTargetFn == nil {
+		return false, nil
+	}
+	return f.userBlockedTargetFn(ctx, blocker, blocked)
+}
+
+func (f *fakeDB) UpsertFollowWithActivity(ctx context.Context, follower, followee uuid.UUID) (bool, error) {
+	if f.upsertFollowWithActivityFn == nil {
+		panic("fakeDB.UpsertFollowWithActivity not set")
+	}
+	return f.upsertFollowWithActivityFn(ctx, follower, followee)
 }
 
 func (f *fakeDB) DeleteFollow(ctx context.Context, follower, followee uuid.UUID) (int64, error) {
@@ -158,8 +181,8 @@ func TestFollow_UpsertDBError_500(t *testing.T) {
 				CreatedAt: pgtype.Timestamptz{},
 			}, nil
 		},
-		upsertFollowFn: func(_ context.Context, _, _ uuid.UUID) error {
-			return errors.New("boom")
+		upsertFollowWithActivityFn: func(_ context.Context, _, _ uuid.UUID) (bool, error) {
+			return false, errors.New("boom")
 		},
 	}
 	h := stubHandlers(t, db)
@@ -167,6 +190,36 @@ func TestFollow_UpsertDBError_500(t *testing.T) {
 	follower := uuid.New()
 	req := reqWithUsername(http.MethodPost, "/api/users/alice/follow", "", "alice")
 	req = withAuth(t, req, follower, "bob")
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("username", "alice")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+
+	rec := httptest.NewRecorder()
+	h.Follow(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"code":"SERVER_ERROR"`)
+}
+
+// TestFollow_BlockLookupDBError_500 covers the fail-closed half of the
+// block guard: when UserBlockExists errors we 500 rather than falling
+// through to the write.
+func TestFollow_BlockLookupDBError_500(t *testing.T) {
+	uid := uuid.New()
+	db := &fakeDB{
+		getUserIDByUsernameFn: func(_ context.Context, _ string) (dbgen.GetUserIDByUsernameRow, error) {
+			return dbgen.GetUserIDByUsernameRow{ID: uid, Username: "alice", IsPublic: true}, nil
+		},
+		userBlockExistsFn: func(_ context.Context, _, _ uuid.UUID) (bool, error) {
+			return false, errors.New("block lookup exploded")
+		},
+		// Deliberately unset: reaching the write slot panics, which is
+		// the failure this test is guarding against.
+	}
+	h := stubHandlers(t, db)
+
+	req := reqWithUsername(http.MethodPost, "/api/users/alice/follow", "", "alice")
+	req = withAuth(t, req, uuid.New(), "bob")
 	rc := chi.NewRouteContext()
 	rc.URLParams.Add("username", "alice")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))

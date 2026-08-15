@@ -145,6 +145,20 @@ func seedFollow(t *testing.T, pool *pgxpool.Pool, follower, followee uuid.UUID) 
 	require.NoError(t, err, "seedFollow")
 }
 
+// seedBlock inserts one block edge.  blocker → blocked.  There is no
+// mirror row: UserBlockExists reads user_blocks symmetrically, so a
+// single row closes interaction in both directions.
+func seedBlock(t *testing.T, pool *pgxpool.Pool, blocker, blocked uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO user_blocks (blocker_id, blocked_id)
+		VALUES ($1, $2)`,
+		blocker, blocked,
+	)
+	require.NoError(t, err, "seedBlock")
+}
+
 // withAuth wraps r with a valid JWT-populated context for userID +
 // username.  Tests that need auth call this on their pre-built request.
 func withAuth(t *testing.T, r *http.Request, userID uuid.UUID, username string) *http.Request {
@@ -344,6 +358,86 @@ func TestGetProfile_PrivateRedactsWatchingForOthersButNotOwner(t *testing.T) {
 	require.Contains(t, ownerRec.Body.String(), `"Anime One"`)
 }
 
+// TestGetProfile_Blocked_RedactsEitherDirection pins the symmetric half
+// of the block policy: whichever side owns the user_blocks row, the
+// viewer sees a redacted profile.  blockedByViewer is the directional
+// half (it drives the "unblock" affordance) and must still tell the two
+// cases apart.  Fixtures deliberately give alice both a watching entry
+// and a bob→alice follow edge so an un-redacted response would be
+// visibly different.
+func TestGetProfile_Blocked_RedactsEitherDirection(t *testing.T) {
+	cases := []struct {
+		name                string
+		viewerBlocksTarget  bool
+		wantBlockedByViewer string
+	}{
+		{name: "viewer blocked target", viewerBlocksTarget: true, wantBlockedByViewer: `"blockedByViewer":true`},
+		{name: "target blocked viewer", viewerBlocksTarget: false, wantBlockedByViewer: `"blockedByViewer":false`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, pool := makeHandlers(t)
+			alice := seedUser(t, pool, "alice", "alice@example.com")
+			bob := seedUser(t, pool, "bob", "bob@example.com")
+			seedAnime(t, pool, 1, "Anime One", "动画一", "https://img/1.jpg")
+			seedSubscription(t, pool, alice, 1, 3, "watching", nil)
+			seedFollow(t, pool, bob, alice)
+
+			if tc.viewerBlocksTarget {
+				seedBlock(t, pool, bob, alice)
+			} else {
+				seedBlock(t, pool, alice, bob)
+			}
+
+			req := reqWithUsername(http.MethodGet, "/api/users/alice", "", "alice")
+			req = withOptionalAuth(t, req, bob, "bob")
+			rc := chi.NewRouteContext()
+			rc.URLParams.Add("username", "alice")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+
+			rec := httptest.NewRecorder()
+			h.GetProfile(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+			body := rec.Body.String()
+			require.Contains(t, body, `"isBlocked":true`, "body=%s", body)
+			require.Contains(t, body, `"isPrivate":true`, "body=%s", body)
+			require.Contains(t, body, `"watching":[]`, "body=%s", body)
+			require.Contains(t, body, `"isFollowing":false`, "blocked view must not confirm the follow edge; body=%s", body)
+			require.Contains(t, body, tc.wantBlockedByViewer, "body=%s", body)
+			require.NotContains(t, body, "Anime One", "watching list leaked through a block; body=%s", body)
+		})
+	}
+}
+
+// TestGetProfile_NotBlocked_ReportsFalse is the negative control for the
+// test above — same fixtures minus the user_blocks row.
+func TestGetProfile_NotBlocked_ReportsFalse(t *testing.T) {
+	h, pool := makeHandlers(t)
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+	seedAnime(t, pool, 1, "Anime One", "动画一", "https://img/1.jpg")
+	seedSubscription(t, pool, alice, 1, 3, "watching", nil)
+	seedFollow(t, pool, bob, alice)
+
+	req := reqWithUsername(http.MethodGet, "/api/users/alice", "", "alice")
+	req = withOptionalAuth(t, req, bob, "bob")
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("username", "alice")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+
+	rec := httptest.NewRecorder()
+	h.GetProfile(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	body := rec.Body.String()
+	require.Contains(t, body, `"isBlocked":false`, "body=%s", body)
+	require.Contains(t, body, `"blockedByViewer":false`, "body=%s", body)
+	require.Contains(t, body, `"isPrivate":false`, "body=%s", body)
+	require.Contains(t, body, `"isFollowing":true`, "body=%s", body)
+	require.Contains(t, body, `"titleRomaji":"Anime One"`, "body=%s", body)
+}
+
 func TestGetProfile_DBPoolClosed_500(t *testing.T) {
 	h, pool := makeHandlers(t)
 	seedUser(t, pool, "alice", "alice@example.com")
@@ -427,6 +521,79 @@ func TestFollow_SelfFollow_400(t *testing.T) {
 	h.Follow(rec, req)
 
 	assertErrorEnvelope(t, rec, http.StatusBadRequest, "INVALID_ACTION", "Cannot follow yourself")
+}
+
+// TestFollow_Blocked_403 pins that a block stops the follow before the
+// write, in either direction.  The message is intentionally generic —
+// it must not reveal which side owns the block — and no follows row may
+// be created.
+func TestFollow_Blocked_403(t *testing.T) {
+	cases := []struct {
+		name             string
+		followerBlocks   bool
+		wantEnvelopeCode string
+	}{
+		{name: "follower blocked followee", followerBlocks: true, wantEnvelopeCode: "FORBIDDEN"},
+		{name: "followee blocked follower", followerBlocks: false, wantEnvelopeCode: "FORBIDDEN"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, pool := makeHandlers(t)
+			alice := seedUser(t, pool, "alice", "alice@example.com")
+			bob := seedUser(t, pool, "bob", "bob@example.com")
+			if tc.followerBlocks {
+				seedBlock(t, pool, bob, alice)
+			} else {
+				seedBlock(t, pool, alice, bob)
+			}
+
+			req := reqWithUsername(http.MethodPost, "/api/users/alice/follow", "", "alice")
+			req = withAuth(t, req, bob, "bob")
+			rc := chi.NewRouteContext()
+			rc.URLParams.Add("username", "alice")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+
+			rec := httptest.NewRecorder()
+			h.Follow(rec, req)
+
+			assertErrorEnvelope(t, rec, http.StatusForbidden, tc.wantEnvelopeCode, "Interaction unavailable")
+
+			var count int
+			require.NoError(t, pool.QueryRow(context.Background(),
+				`SELECT count(*) FROM follows WHERE follower_id=$1 AND followee_id=$2`,
+				bob, alice,
+			).Scan(&count))
+			assert.Equal(t, 0, count, "blocked follow must not create a follows row")
+		})
+	}
+}
+
+// TestFollow_EmitsActivityEvent guards the write path itself: Follow
+// goes through UpsertFollowWithActivity unconditionally, so a successful
+// follow must always land its activity_events row.  A regression back to
+// a plain follows INSERT would leave this row missing.
+func TestFollow_EmitsActivityEvent(t *testing.T) {
+	h, pool := makeHandlers(t)
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+
+	req := reqWithUsername(http.MethodPost, "/api/users/alice/follow", "", "alice")
+	req = withAuth(t, req, bob, "bob")
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("username", "alice")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+
+	rec := httptest.NewRecorder()
+	h.Follow(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+
+	var count int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM activity_events
+		 WHERE user_id=$1 AND target_user_id=$2 AND event_type='follow'`,
+		bob, alice,
+	).Scan(&count))
+	assert.Equal(t, 1, count, "follow should publish exactly one activity event")
 }
 
 func TestFollow_UserNotFound_404(t *testing.T) {

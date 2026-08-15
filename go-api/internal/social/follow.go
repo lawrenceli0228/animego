@@ -7,10 +7,10 @@ package social
 //
 // Replaces server/controllers/follow.controller.js follow + unfollow.
 // Express used Mongoose findOneAndUpdate(upsert:true) / findOneAndDelete;
-// here we go through dbgen.UpsertFollow (ON CONFLICT DO NOTHING) and
-// dbgen.DeleteFollow (Postgres execrows) for the same idempotent
-// semantics — re-following or un-following an already-not-followed
-// account is a no-op success, not an error.
+// here we go through dbgen.UpsertFollowWithActivity (ON CONFLICT DO
+// NOTHING) and dbgen.DeleteFollow (Postgres execrows) for the same
+// idempotent semantics — re-following or un-following an
+// already-not-followed account is a no-op success, not an error.
 
 import (
 	"context"
@@ -18,7 +18,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
@@ -33,10 +32,14 @@ import (
 //  2. GetUserIDByUsername — pgx.ErrNoRows → 404 NOT_FOUND.
 //  3. Self-follow guard — followee.ID == claims.UserID → 400
 //     INVALID_ACTION "Cannot follow yourself".
-//  4. UpsertFollow — ON CONFLICT DO NOTHING means re-following is a
-//     201 no-op success (Express's findOneAndUpdate({upsert:true}) does
-//     the same).
-//  5. 201 CREATED with { data: { following: true } }.
+//  4. Block guard — a block in either direction → 403 FORBIDDEN
+//     "Interaction unavailable".
+//  5. UpsertFollowWithActivity — ON CONFLICT DO NOTHING means
+//     re-following is a 201 no-op success (Express's
+//     findOneAndUpdate({upsert:true}) does the same).  The bool return
+//     (row actually inserted) is ignored: the response is the same
+//     either way.
+//  6. 201 CREATED with { data: { following: true } }.
 func (h *Handlers) Follow(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
@@ -62,28 +65,23 @@ func (h *Handlers) Follow(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeInvalidAction, msgCannotFollowSelf))
 		return
 	}
-	if safetyDB, ok := h.Queries.(socialSafetyDB); ok {
-		blocked, err := safetyDB.UserBlockExists(ctx, claims.UserID, followee.ID)
-		if err != nil {
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
-			return
-		}
-		if blocked {
-			httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
-			return
-		}
+	// UserBlockExists is symmetric (see internal/db/queries/safety.sql):
+	// one row closes interaction in both directions, so this single call
+	// covers "I blocked them" and "they blocked me" alike.  The error
+	// message stays deliberately vague so it can't be used to probe who
+	// blocked whom.
+	blocked, err := h.Queries.UserBlockExists(ctx, claims.UserID, followee.ID)
+	if err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
+		return
+	}
+	if blocked {
+		httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
+		return
 	}
 
-	var writeErr error
-	if activityDB, ok := h.Queries.(interface {
-		UpsertFollowWithActivity(context.Context, uuid.UUID, uuid.UUID) (bool, error)
-	}); ok {
-		_, writeErr = activityDB.UpsertFollowWithActivity(ctx, claims.UserID, followee.ID)
-	} else {
-		writeErr = h.Queries.UpsertFollow(ctx, claims.UserID, followee.ID)
-	}
-	if writeErr != nil {
-		httpx.Fail(w, httpx.WrapError(writeErr, http.StatusInternalServerError, httpx.CodeServerError, "follow insert failed"))
+	if _, err := h.Queries.UpsertFollowWithActivity(ctx, claims.UserID, followee.ID); err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "follow insert failed"))
 		return
 	}
 

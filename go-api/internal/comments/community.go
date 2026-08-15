@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 )
@@ -28,18 +27,6 @@ const (
 	defaultMetricsDays    = 7
 	maxMetricsDays        = 90
 )
-
-type commentCommunityDB interface {
-	ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentSummariesRow, error)
-	UpsertCommentReactionWithNotification(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.UpsertCommentReactionWithNotificationRow, error)
-	DeleteCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.DeleteCommentReactionRow, error)
-}
-
-type communityDiscoveryDB interface {
-	ListTrendingDiscussions(ctx context.Context, pageLimit int32, windowHours int32, viewerUserID *uuid.UUID) ([]dbgen.ListTrendingDiscussionsRow, error)
-	TrackCommunityEngagement(ctx context.Context, eventType string, source string, anilistID int32, episode int32, authenticated bool) (int64, error)
-	GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (dbgen.GetCommunityEngagementSummaryRow, error)
-}
 
 type commentSummaryPreview struct {
 	ID               uuid.UUID          `json:"id"`
@@ -82,18 +69,13 @@ func (h *Handlers) ListCommentSummaries(w http.ResponseWriter, r *http.Request) 
 		preview = maxSummaryPreview
 	}
 
-	db, ok := h.Queries.(commentCommunityDB)
-	if !ok {
-		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "community queries unavailable"))
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 	var viewerUserID *uuid.UUID
 	if claims, ok := jwtx.ClaimsFrom(r.Context()); ok && claims != nil {
 		viewerUserID = &claims.UserID
 	}
-	rows, err := db.ListEpisodeCommentSummaries(ctx, int32(preview), int32(anilistID), viewerUserID)
+	rows, err := h.Queries.ListEpisodeCommentSummaries(ctx, int32(preview), int32(anilistID), viewerUserID)
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "comment summary query failed"))
 		return
@@ -158,18 +140,13 @@ func (h *Handlers) ListTrendingDiscussions(w http.ResponseWriter, r *http.Reques
 	limit := clampIntQuery(r, "limit", defaultTrendingLimit, 1, maxTrendingLimit)
 	windowHours := clampIntQuery(r, "windowHours", defaultWindowHours, minWindowHours, maxWindowHours)
 
-	db, ok := h.Queries.(communityDiscoveryDB)
-	if !ok {
-		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "community discovery unavailable"))
-		return
-	}
 	var viewerUserID *uuid.UUID
 	if claims, ok := jwtx.ClaimsFrom(r.Context()); ok && claims != nil {
 		viewerUserID = &claims.UserID
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-	rows, err := db.ListTrendingDiscussions(ctx, int32(limit), int32(windowHours), viewerUserID)
+	rows, err := h.Queries.ListTrendingDiscussions(ctx, int32(limit), int32(windowHours), viewerUserID)
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "trending discussions query failed"))
 		return
@@ -217,15 +194,10 @@ func (h *Handlers) TrackCommunityEngagement(w http.ResponseWriter, r *http.Reque
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, "Invalid community engagement event"))
 		return
 	}
-	db, ok := h.Queries.(communityDiscoveryDB)
-	if !ok {
-		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "community discovery unavailable"))
-		return
-	}
 	_, authenticated := jwtx.ClaimsFrom(r.Context())
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-	if _, err := db.TrackCommunityEngagement(ctx, req.EventType, req.Source, req.AnilistID, req.Episode, authenticated); err != nil {
+	if _, err := h.Queries.TrackCommunityEngagement(ctx, req.EventType, req.Source, req.AnilistID, req.Episode, authenticated); err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "community engagement write failed"))
 		return
 	}
@@ -243,14 +215,9 @@ type communityMetricsResponse struct {
 // /api/admin/community-metrics.  Auth/admin checks stay in router middleware.
 func (h *Handlers) CommunityMetrics(w http.ResponseWriter, r *http.Request) {
 	days := clampIntQuery(r, "days", defaultMetricsDays, 1, maxMetricsDays)
-	db, ok := h.Queries.(communityDiscoveryDB)
-	if !ok {
-		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "community discovery unavailable"))
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-	row, err := db.GetCommunityEngagementSummary(ctx, int32(days))
+	row, err := h.Queries.GetCommunityEngagementSummary(ctx, int32(days))
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "community metrics query failed"))
 		return
@@ -321,12 +288,6 @@ func (h *Handlers) setCommentReaction(w http.ResponseWriter, r *http.Request, re
 		httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, httpx.CodeUnauthorized, msgLoginAgain))
 		return
 	}
-	db, ok := h.Queries.(commentCommunityDB)
-	if !ok {
-		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "community queries unavailable"))
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 	comment, err := h.Queries.GetCommentByID(ctx, commentID)
@@ -338,28 +299,28 @@ func (h *Handlers) setCommentReaction(w http.ResponseWriter, r *http.Request, re
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "comment lookup failed"))
 		return
 	}
-	if blockDB, ok := h.Queries.(commentBlockDB); ok {
-		blocked, err := blockDB.UserBlockExists(ctx, claims.UserID, comment.UserID)
-		if err != nil {
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
-			return
-		}
-		if blocked {
-			httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
-			return
-		}
+	// UserBlockExists is symmetric, so this one lookup rejects the reaction
+	// whether the comment's author blocked the reactor or vice versa.
+	blocked, err := h.Queries.UserBlockExists(ctx, claims.UserID, comment.UserID)
+	if err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
+		return
+	}
+	if blocked {
+		httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
+		return
 	}
 
 	var response commentReactionResponse
 	if reacted {
-		row, err := db.UpsertCommentReactionWithNotification(ctx, commentID, claims.UserID)
+		row, err := h.Queries.UpsertCommentReactionWithNotification(ctx, commentID, claims.UserID)
 		if err != nil {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "comment reaction failed"))
 			return
 		}
 		response = commentReactionResponse{Reacted: row.Reacted, Count: row.ReactionCount}
 	} else {
-		row, err := db.DeleteCommentReaction(ctx, commentID, claims.UserID)
+		row, err := h.Queries.DeleteCommentReaction(ctx, commentID, claims.UserID)
 		if err != nil {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "delete comment reaction failed"))
 			return

@@ -12,6 +12,8 @@ package comments
 //                    empty content / whitespace-only / overflow / bad parent /
 //                    cross-episode parent abuse / DB error / malformed JSON.
 //   - DeleteComment: happy / bad uuid / missing auth / 404 / 403 / DB error.
+//   - Block enforcement: reply + reaction rejected in both block directions,
+//     with an unblocked control and a block-lookup-failure 500.
 //   - parseEpisodePath helper / message constants exercised via the handler
 //     tests so coverage stays ≥85%.
 
@@ -115,6 +117,18 @@ func seedComment(t *testing.T, pool *pgxpool.Pool, anilistID, episode int32, use
 	).Scan(&id)
 	require.NoError(t, err, "seedComment")
 	return id
+}
+
+// seedBlock inserts a block row directly.  Only the blocker owns the row —
+// UserBlockExists reads it symmetrically, so which of the two users is the
+// blocker is exactly what the direction-sensitive tests below vary.
+func seedBlock(t *testing.T, pool *pgxpool.Pool, blockerID, blockedID uuid.UUID) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)`,
+		blockerID, blockedID,
+	)
+	require.NoError(t, err, "seedBlock")
 }
 
 // withAuth wraps r with a valid JWT-populated context for userID +
@@ -788,6 +802,163 @@ func TestDeleteComment_DBLookupError_500(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// Block enforcement
+//
+// Both interaction endpoints route through Queries.UserBlockExists, which the
+// SQL defines symmetrically: either party's block closes the interaction.  Each
+// case below is run in both directions so a regression that narrows the lookup
+// to the blocker's own rows fails here.  Every case also asserts the write did
+// not land, since a 403 with the row still written would be the worse bug.
+// -----------------------------------------------------------------------------
+
+// postReply issues an authenticated reply to parent as (userID, username).
+func postReply(t *testing.T, h *Handlers, parent uuid.UUID, userID uuid.UUID, username string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(`{"content":"reply","parentId":%q}`, parent.String())
+	req := reqWithEpisode(http.MethodPost, "/api/comments/1/1", body, "1", "1")
+	req = withAuth(t, req, userID, username)
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("anilistId", "1")
+	rc.URLParams.Add("episode", "1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+
+	rec := httptest.NewRecorder()
+	h.AddComment(rec, req)
+	return rec
+}
+
+// putReaction issues an authenticated PUT reaction on commentID as
+// (userID, username).
+func putReaction(t *testing.T, h *Handlers, commentID uuid.UUID, userID uuid.UUID, username string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := reqWithID(http.MethodPut, "/api/comments/"+commentID.String()+"/reaction", commentID.String())
+	req = withAuth(t, req, userID, username)
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("id", commentID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rc))
+
+	rec := httptest.NewRecorder()
+	h.PutCommentReaction(rec, req)
+	return rec
+}
+
+func countReplies(t *testing.T, pool *pgxpool.Pool, parent uuid.UUID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM episode_comments WHERE parent_id=$1`, parent).Scan(&n))
+	return n
+}
+
+func countReactions(t *testing.T, pool *pgxpool.Pool, commentID uuid.UUID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM comment_reactions WHERE comment_id=$1`, commentID).Scan(&n))
+	return n
+}
+
+// TestAddComment_ReplyBlocked_403 covers both block directions on the reply
+// path: the thread author blocking the replier, and the replier blocking the
+// thread author.
+func TestAddComment_ReplyBlocked_403(t *testing.T) {
+	cases := []struct {
+		name         string
+		blockerIsBob bool
+	}{
+		{name: "author blocked replier", blockerIsBob: false},
+		{name: "replier blocked author", blockerIsBob: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, pool := makeHandlers(t)
+			seedAnime(t, pool, 1)
+			alice := seedUser(t, pool, "alice", "alice@example.com")
+			bob := seedUser(t, pool, "bob", "bob@example.com")
+			parent := seedComment(t, pool, 1, 1, alice, "alice", "alice's thread")
+			if tc.blockerIsBob {
+				seedBlock(t, pool, bob, alice)
+			} else {
+				seedBlock(t, pool, alice, bob)
+			}
+
+			rec := postReply(t, h, parent, bob, "bob")
+
+			assertErrorEnvelope(t, rec, http.StatusForbidden, "FORBIDDEN", "Interaction unavailable")
+			assert.Zero(t, countReplies(t, pool, parent), "blocked reply must not be written")
+		})
+	}
+}
+
+// TestAddComment_ReplyAllowedWithoutBlock_201 is the control for the two cases
+// above — same fixture minus the block row — so a handler that rejected every
+// reply could not pass the block tests by accident.
+func TestAddComment_ReplyAllowedWithoutBlock_201(t *testing.T) {
+	h, pool := makeHandlers(t)
+	seedAnime(t, pool, 1)
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+	parent := seedComment(t, pool, 1, 1, alice, "alice", "alice's thread")
+
+	rec := postReply(t, h, parent, bob, "bob")
+
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, 1, countReplies(t, pool, parent))
+}
+
+// TestCommentReaction_Blocked_403 covers both block directions on the reaction
+// path.
+func TestCommentReaction_Blocked_403(t *testing.T) {
+	cases := []struct {
+		name         string
+		blockerIsBob bool
+	}{
+		{name: "author blocked reactor", blockerIsBob: false},
+		{name: "reactor blocked author", blockerIsBob: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, pool := makeHandlers(t)
+			seedAnime(t, pool, 1)
+			alice := seedUser(t, pool, "alice", "alice@example.com")
+			bob := seedUser(t, pool, "bob", "bob@example.com")
+			commentID := seedComment(t, pool, 1, 1, alice, "alice", "worth liking")
+			if tc.blockerIsBob {
+				seedBlock(t, pool, bob, alice)
+			} else {
+				seedBlock(t, pool, alice, bob)
+			}
+
+			rec := putReaction(t, h, commentID, bob, "bob")
+
+			assertErrorEnvelope(t, rec, http.StatusForbidden, "FORBIDDEN", "Interaction unavailable")
+			assert.Zero(t, countReactions(t, pool, commentID), "blocked reaction must not be written")
+		})
+	}
+}
+
+// TestCommentReaction_BlockLookupError_500 pins the failure mode the fake can
+// reach but Postgres cannot: the block query itself erroring must surface as a
+// 500, never as an allowed interaction.
+func TestCommentReaction_BlockLookupError_500(t *testing.T) {
+	author := uuid.New()
+	db := &fakeDB{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (dbgen.GetCommentByIDRow, error) {
+			return dbgen.GetCommentByIDRow{ID: id, UserID: author}, nil
+		},
+		blockFn: func(_ context.Context, _, _ uuid.UUID) (bool, error) {
+			return false, errors.New("connection refused")
+		},
+	}
+	h := stubHandlers(t, db)
+
+	rec := putReaction(t, h, uuid.New(), uuid.New(), "bob")
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"code":"SERVER_ERROR"`)
+}
+
+// -----------------------------------------------------------------------------
 // Constructor + helpers
 // -----------------------------------------------------------------------------
 
@@ -817,10 +988,11 @@ func TestNewHandlers_NilQueriesPanics(t *testing.T) {
 
 type fakeDB struct {
 	listFn    func(ctx context.Context, anilistID, episode int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentsRow, error)
-	createFn  func(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error)
+	createFn  func(ctx context.Context, arg dbgen.CreateCommentWithActivityParams) (dbgen.CreateCommentWithActivityRow, error)
 	parentFn  func(ctx context.Context, id uuid.UUID, anilistID, episode int32) (uuid.UUID, error)
 	getByIDFn func(ctx context.Context, id uuid.UUID) (dbgen.GetCommentByIDRow, error)
 	deleteFn  func(ctx context.Context, id uuid.UUID) error
+	blockFn   func(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error)
 }
 
 func (f *fakeDB) ListEpisodeComments(ctx context.Context, anilistID, episode int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentsRow, error) {
@@ -830,9 +1002,9 @@ func (f *fakeDB) ListEpisodeComments(ctx context.Context, anilistID, episode int
 	return f.listFn(ctx, anilistID, episode, viewerUserID)
 }
 
-func (f *fakeDB) CreateComment(ctx context.Context, arg dbgen.CreateCommentParams) (dbgen.EpisodeComment, error) {
+func (f *fakeDB) CreateCommentWithActivity(ctx context.Context, arg dbgen.CreateCommentWithActivityParams) (dbgen.CreateCommentWithActivityRow, error) {
 	if f.createFn == nil {
-		panic("fakeDB.CreateComment not set")
+		panic("fakeDB.CreateCommentWithActivity not set")
 	}
 	return f.createFn(ctx, arg)
 }
@@ -858,6 +1030,43 @@ func (f *fakeDB) DeleteComment(ctx context.Context, id uuid.UUID) error {
 	return f.deleteFn(ctx, id)
 }
 
+func (f *fakeDB) UserBlockExists(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error) {
+	if f.blockFn == nil {
+		panic("fakeDB.UserBlockExists not set")
+	}
+	return f.blockFn(ctx, userID, otherUserID)
+}
+
+// The community read/write surface below only exists to satisfy CommentsDB.
+// fakeDB is here to drive DB-error branches of the three core comment
+// endpoints; every community endpoint is covered against real Postgres, so a
+// fake-backed test reaching one of these is a wiring mistake worth a panic
+// rather than a silently plausible zero value.
+
+func (f *fakeDB) ListEpisodeCommentSummaries(context.Context, int32, int32, *uuid.UUID) ([]dbgen.ListEpisodeCommentSummariesRow, error) {
+	panic("fakeDB.ListEpisodeCommentSummaries: use the PG-backed harness")
+}
+
+func (f *fakeDB) UpsertCommentReactionWithNotification(context.Context, uuid.UUID, uuid.UUID) (dbgen.UpsertCommentReactionWithNotificationRow, error) {
+	panic("fakeDB.UpsertCommentReactionWithNotification: use the PG-backed harness")
+}
+
+func (f *fakeDB) DeleteCommentReaction(context.Context, uuid.UUID, uuid.UUID) (dbgen.DeleteCommentReactionRow, error) {
+	panic("fakeDB.DeleteCommentReaction: use the PG-backed harness")
+}
+
+func (f *fakeDB) ListTrendingDiscussions(context.Context, int32, int32, *uuid.UUID) ([]dbgen.ListTrendingDiscussionsRow, error) {
+	panic("fakeDB.ListTrendingDiscussions: use the PG-backed harness")
+}
+
+func (f *fakeDB) TrackCommunityEngagement(context.Context, string, string, int32, int32, bool) (int64, error) {
+	panic("fakeDB.TrackCommunityEngagement: use the PG-backed harness")
+}
+
+func (f *fakeDB) GetCommunityEngagementSummary(context.Context, int32) (dbgen.GetCommunityEngagementSummaryRow, error) {
+	panic("fakeDB.GetCommunityEngagementSummary: use the PG-backed harness")
+}
+
 func stubHandlers(t *testing.T, db CommentsDB) *Handlers {
 	t.Helper()
 	pool := testutil.NewWebPool(t, context.Background(), pgURI)
@@ -866,8 +1075,8 @@ func stubHandlers(t *testing.T, db CommentsDB) *Handlers {
 
 func TestAddComment_CreateDBError_500(t *testing.T) {
 	db := &fakeDB{
-		createFn: func(_ context.Context, _ dbgen.CreateCommentParams) (dbgen.EpisodeComment, error) {
-			return dbgen.EpisodeComment{}, errors.New("disk full")
+		createFn: func(_ context.Context, _ dbgen.CreateCommentWithActivityParams) (dbgen.CreateCommentWithActivityRow, error) {
+			return dbgen.CreateCommentWithActivityRow{}, errors.New("disk full")
 		},
 	}
 	h := stubHandlers(t, db)

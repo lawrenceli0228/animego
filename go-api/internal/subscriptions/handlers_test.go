@@ -74,7 +74,7 @@ type fakeSubsDB struct {
 	listFn   func(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error)
 	getFn    func(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.Subscription, error)
 	upsertFn func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
-	updateFn func(ctx context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error)
+	updateFn func(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
 	deleteFn func(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 
 	listCalls   int32
@@ -108,10 +108,10 @@ func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, a
 	return f.upsertFn(ctx, userID, anilistID, status)
 }
 
-func (f *fakeSubsDB) UpdateSubscription(ctx context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+func (f *fakeSubsDB) UpdateSubscriptionWithActivity(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 	atomic.AddInt32(&f.updateCalls, 1)
 	if f.updateFn == nil {
-		panic("fakeSubsDB.UpdateSubscription not set")
+		panic("fakeSubsDB.UpdateSubscriptionWithActivity not set")
 	}
 	return f.updateFn(ctx, arg)
 }
@@ -664,13 +664,13 @@ func TestUpdate_HappyPath_AllFields_200(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	score := int32(8)
-	want := dbgen.Subscription{
+	want := dbgen.UpdateSubscriptionWithActivityRow{
 		UserID: userID, AnilistID: 42, Status: "completed",
 		CurrentEpisode: 12, Score: &score,
 	}
 
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 			require.NotNil(t, arg.Status)
 			assert.Equal(t, "completed", *arg.Status)
 			require.NotNil(t, arg.CurrentEpisode)
@@ -690,15 +690,26 @@ func TestUpdate_HappyPath_AllFields_200(t *testing.T) {
 	h.UpdateSubscription(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, int32(1), atomic.LoadInt32(&db.updateCalls),
+		"PATCH must always go through the activity-writing query")
+
+	// Pin the wire shape: the handler marshals the row the activity query
+	// returns, so a change to that query's RETURNING list has to show up
+	// here rather than silently reshaping the PATCH response.
+	var got struct {
+		Data dbgen.UpdateSubscriptionWithActivityRow `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, want, got.Data)
 }
 
 func TestUpdate_EmptyBodyReturnsRowUnchanged(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
-	want := dbgen.Subscription{UserID: userID, AnilistID: 42, Status: "watching"}
+	want := dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42, Status: "watching"}
 
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 			assert.Nil(t, arg.Status)
 			assert.Nil(t, arg.CurrentEpisode)
 			assert.False(t, arg.ScoreSet)
@@ -721,10 +732,10 @@ func TestUpdate_ScoreNullClears(t *testing.T) {
 	// `{"score":null}` → ScoreSet=true, Score=nil — clears the column.
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 			assert.True(t, arg.ScoreSet, "ScoreSet must be true for explicit null")
 			assert.Nil(t, arg.Score, "Score must be nil for explicit null")
-			return dbgen.Subscription{UserID: userID, AnilistID: 42}, nil
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42}, nil
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -741,9 +752,9 @@ func TestUpdate_ScoreAbsentLeavesUnchanged(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 			assert.False(t, arg.ScoreSet)
-			return dbgen.Subscription{UserID: userID, AnilistID: 42}, nil
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42}, nil
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -760,10 +771,10 @@ func TestUpdate_ScoreClampedToTen(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 			require.NotNil(t, arg.Score)
 			assert.Equal(t, int32(10), *arg.Score, "out-of-range score must clamp to 10")
-			return dbgen.Subscription{UserID: userID, AnilistID: 42, Score: arg.Score}, nil
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42, Score: arg.Score}, nil
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -779,10 +790,10 @@ func TestUpdate_ScoreClampedToOne(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 			require.NotNil(t, arg.Score)
 			assert.Equal(t, int32(1), *arg.Score, "below-range score must clamp to 1")
-			return dbgen.Subscription{UserID: userID, AnilistID: 42, Score: arg.Score}, nil
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42, Score: arg.Score}, nil
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -847,9 +858,9 @@ func TestUpdate_EmptyBodyContentLengthZero_200(t *testing.T) {
 	// to mirror that.
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 			assert.False(t, arg.ScoreSet, "ScoreSet must be false for empty body")
-			return dbgen.Subscription{UserID: userID, AnilistID: 42}, nil
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42}, nil
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -867,9 +878,9 @@ func TestUpdate_ExplicitNullBody_200(t *testing.T) {
 	// `null` body decodes to a nil map — handled as empty patch.
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
 			assert.False(t, arg.ScoreSet, "ScoreSet must be false for null body")
-			return dbgen.Subscription{UserID: userID, AnilistID: 42}, nil
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42}, nil
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -885,8 +896,8 @@ func TestUpdate_NotFound_404(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, _ dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
-			return dbgen.Subscription{}, pgx.ErrNoRows
+		updateFn: func(_ context.Context, _ dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			return dbgen.UpdateSubscriptionWithActivityRow{}, pgx.ErrNoRows
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -903,8 +914,8 @@ func TestUpdate_DBError_500(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		updateFn: func(_ context.Context, _ dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error) {
-			return dbgen.Subscription{}, errors.New("kaboom")
+		updateFn: func(_ context.Context, _ dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			return dbgen.UpdateSubscriptionWithActivityRow{}, errors.New("kaboom")
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -1049,4 +1060,3 @@ func TestNewHandlers_NilValidatorSubstitutesDefault(t *testing.T) {
 	h := NewHandlers(nil, &fakeSubsDB{}, &fakeEnsureCachedDB{}, &fakeAnilist{}, nil)
 	require.NotNil(t, h.Validate, "Validate must be defaulted when nil passed")
 }
-
