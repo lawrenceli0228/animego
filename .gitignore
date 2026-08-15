@@ -24,6 +24,7 @@ bun.lockb
 # Internal docs — kept local only (含 deploy runbook + 设计 + 迁移笔记，
 # 可能含 IP/port/路径/账号等 operational 细节，公开仓库一律不入)
 docs/
+animego-vps-备份.md
 
 # Build output
 client/dist/

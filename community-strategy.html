@@ -1,0 +1,1328 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="AnimeGo 用户粘性与社区建设战略方案" />
+  <title>AnimeGo 社区增长战略</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #000;
+      --card: #161618;
+      --card-2: #1c1c1f;
+      --elevated: #262629;
+      --line: rgba(255, 255, 255, 0.11);
+      --line-strong: rgba(255, 255, 255, 0.2);
+      --text: #fff;
+      --muted: rgba(235, 235, 245, 0.64);
+      --faint: rgba(235, 235, 245, 0.38);
+      --blue: #0a84ff;
+      --blue-soft: rgba(10, 132, 255, 0.13);
+      --teal: #5ac8fa;
+      --teal-soft: rgba(90, 200, 250, 0.11);
+      --green: #30d158;
+      --green-soft: rgba(48, 209, 88, 0.11);
+      --orange: #ff9f0a;
+      --orange-soft: rgba(255, 159, 10, 0.11);
+      --red: #ff453a;
+      --red-soft: rgba(255, 69, 58, 0.1);
+      --purple: #bf5af2;
+      --max: 1180px;
+      --radius: 18px;
+      --display: "SF Pro Display", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --body: "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--bg);
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 80% -10%, rgba(10, 132, 255, 0.22), transparent 28rem),
+        radial-gradient(circle at 5% 28%, rgba(191, 90, 242, 0.09), transparent 24rem),
+        var(--bg);
+      font-family: var(--body);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.78);
+      backdrop-filter: saturate(150%) blur(20px);
+    }
+
+    .topbar-inner {
+      max-width: var(--max);
+      height: 58px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 26px;
+    }
+
+    .brand {
+      flex: 0 0 auto;
+      font-family: var(--display);
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .brand span { color: var(--blue); }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar { display: none; }
+
+    .nav a {
+      flex: 0 0 auto;
+      padding: 6px 10px;
+      color: var(--muted);
+      border-radius: 8px;
+      font-size: 13px;
+      text-decoration: none;
+      transition: 160ms ease;
+    }
+
+    .nav a:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    main {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 24px 96px;
+    }
+
+    .hero {
+      min-height: 640px;
+      display: grid;
+      place-items: center;
+      padding: 92px 0 72px;
+      text-align: center;
+    }
+
+    .hero-inner { max-width: 940px; }
+
+    .eyebrow {
+      margin: 0 0 16px;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      margin-bottom: 22px;
+      font-family: var(--display);
+      font-size: clamp(42px, 7vw, 78px);
+      line-height: 1.04;
+      letter-spacing: -0.055em;
+    }
+
+    .hero-copy {
+      max-width: 760px;
+      margin: 0 auto 30px;
+      color: var(--muted);
+      font-size: clamp(16px, 2vw, 20px);
+    }
+
+    .hero-copy strong { color: #fff; }
+
+    .hero-tags {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 9px;
+    }
+
+    .tag {
+      padding: 7px 12px;
+      color: rgba(255, 255, 255, 0.78);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.045);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .tag.primary {
+      color: #dcedff;
+      border-color: rgba(10, 132, 255, 0.4);
+      background: var(--blue-soft);
+    }
+
+    section {
+      scroll-margin-top: 78px;
+      margin-top: 96px;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 0.72fr) minmax(300px, 1fr);
+      gap: 42px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    .section-index {
+      display: inline-block;
+      margin-bottom: 9px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin-bottom: 0;
+      font-family: var(--display);
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: 1.12;
+      letter-spacing: -0.04em;
+    }
+
+    .section-copy {
+      margin-bottom: 2px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .thesis {
+      position: relative;
+      overflow: hidden;
+      padding: clamp(28px, 5vw, 56px);
+      border: 1px solid rgba(10, 132, 255, 0.34);
+      border-radius: 24px;
+      background:
+        linear-gradient(130deg, rgba(10, 132, 255, 0.16), rgba(90, 200, 250, 0.05) 52%, rgba(0, 0, 0, 0)),
+        var(--card);
+    }
+
+    .thesis::after {
+      content: "";
+      position: absolute;
+      right: -100px;
+      bottom: -140px;
+      width: 360px;
+      height: 360px;
+      border-radius: 50%;
+      background: rgba(10, 132, 255, 0.13);
+      filter: blur(80px);
+      pointer-events: none;
+    }
+
+    .thesis-label {
+      margin-bottom: 18px;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    .thesis blockquote {
+      position: relative;
+      z-index: 1;
+      max-width: 900px;
+      margin: 0;
+      font-family: var(--display);
+      font-size: clamp(27px, 4vw, 46px);
+      font-weight: 780;
+      line-height: 1.28;
+      letter-spacing: -0.035em;
+    }
+
+    .formula {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .formula-card,
+    .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent), var(--card);
+    }
+
+    .formula-card { padding: 22px; }
+
+    .formula-card .symbol {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 18px;
+      border-radius: 10px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-weight: 900;
+    }
+
+    .formula-card h3 {
+      margin-bottom: 7px;
+      font-size: 16px;
+    }
+
+    .formula-card p {
+      margin-bottom: 0;
+      color: var(--faint);
+      font-size: 13px;
+    }
+
+    .diagnosis-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .diagnosis {
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .diagnosis .num {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      color: var(--faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .diagnosis h3 {
+      margin-bottom: 6px;
+      font-size: 16px;
+    }
+
+    .diagnosis p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .breakpoint {
+      margin-top: 14px;
+      padding: 25px 28px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 18px;
+      align-items: center;
+      border: 1px solid rgba(255, 69, 58, 0.26);
+      border-radius: var(--radius);
+      background: var(--red-soft);
+    }
+
+    .breakpoint .mark {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--red);
+      background: rgba(255, 69, 58, 0.13);
+      font-size: 22px;
+      font-weight: 900;
+    }
+
+    .breakpoint strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 15px;
+    }
+
+    .breakpoint p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .episode-core {
+      padding: clamp(24px, 5vw, 52px);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background:
+        radial-gradient(circle at 50% 48%, rgba(10, 132, 255, 0.15), transparent 15rem),
+        var(--card);
+    }
+
+    .core-map {
+      min-height: 360px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-rows: auto auto auto;
+      gap: 18px;
+      align-items: center;
+    }
+
+    .core-node {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.035);
+      text-align: center;
+    }
+
+    .core-node b {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+
+    .core-node span {
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .core-node.main {
+      grid-column: 2;
+      grid-row: 2;
+      padding: 28px 16px;
+      border-color: rgba(10, 132, 255, 0.5);
+      background: var(--blue-soft);
+      box-shadow: 0 0 60px rgba(10, 132, 255, 0.12);
+    }
+
+    .core-node.main b {
+      color: #fff;
+      font-family: var(--display);
+      font-size: 24px;
+    }
+
+    .core-node:nth-child(1) { grid-column: 2; grid-row: 1; }
+    .core-node:nth-child(2) { grid-column: 1; grid-row: 2; }
+    .core-node:nth-child(4) { grid-column: 3; grid-row: 2; }
+    .core-node:nth-child(5) { grid-column: 2; grid-row: 3; }
+
+    .core-caption {
+      max-width: 740px;
+      margin: 22px auto 0;
+      color: var(--muted);
+      text-align: center;
+      font-size: 14px;
+    }
+
+    .loops {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .loop {
+      min-height: 250px;
+      padding: 26px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .loop::after {
+      content: attr(data-no);
+      position: absolute;
+      right: 14px;
+      bottom: -34px;
+      color: rgba(255, 255, 255, 0.035);
+      font-family: var(--display);
+      font-size: 138px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .loop h3 {
+      margin-bottom: 12px;
+      font-size: 20px;
+    }
+
+    .loop p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .flow {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 20px;
+    }
+
+    .flow span {
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: rgba(255, 255, 255, 0.76);
+      background: rgba(255, 255, 255, 0.035);
+      font-size: 12px;
+    }
+
+    .flow i {
+      align-self: center;
+      color: var(--blue);
+      font-style: normal;
+      font-size: 12px;
+    }
+
+    .roadmap {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .phase {
+      position: relative;
+      padding: 28px;
+      border-top: 3px solid var(--blue);
+    }
+
+    .phase:nth-child(2) { border-top-color: var(--teal); }
+    .phase:nth-child(3) { border-top-color: var(--purple); }
+
+    .phase-time {
+      display: block;
+      margin-bottom: 12px;
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .phase:nth-child(2) .phase-time { color: var(--teal); }
+    .phase:nth-child(3) .phase-time { color: #d98cff; }
+
+    .phase h3 {
+      margin-bottom: 16px;
+      font-family: var(--display);
+      font-size: 22px;
+    }
+
+    .clean-list {
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .clean-list li {
+      position: relative;
+      padding: 10px 0 10px 19px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .clean-list li::before {
+      content: "";
+      position: absolute;
+      left: 1px;
+      top: 18px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--blue);
+    }
+
+    .phase:nth-child(2) li::before { background: var(--teal); }
+    .phase:nth-child(3) li::before { background: var(--purple); }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .panel { padding: 28px; }
+
+    .panel h3 {
+      margin-bottom: 16px;
+      font-family: var(--display);
+      font-size: 22px;
+    }
+
+    .panel-intro {
+      margin-bottom: 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .metric-hero {
+      padding: clamp(28px, 5vw, 54px);
+      border: 1px solid rgba(48, 209, 88, 0.3);
+      border-radius: 24px;
+      background: linear-gradient(140deg, var(--green-soft), transparent 70%), var(--card);
+      text-align: center;
+    }
+
+    .metric-hero .metric-label {
+      color: var(--green);
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .metric-hero strong {
+      display: block;
+      max-width: 850px;
+      margin: 15px auto 0;
+      font-family: var(--display);
+      font-size: clamp(24px, 4vw, 42px);
+      line-height: 1.3;
+      letter-spacing: -0.035em;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .metric-card { padding: 22px; }
+
+    .metric-card b {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .metric-card p {
+      margin-bottom: 0;
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .architecture {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .arch-row {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      border-top: 1px solid var(--line);
+    }
+
+    .arch-row:first-child { border-top: 0; }
+
+    .arch-key,
+    .arch-value { padding: 18px 22px; }
+
+    .arch-key {
+      color: var(--teal);
+      background: rgba(90, 200, 250, 0.055);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .arch-value {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .arch-value code {
+      color: #fff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .stream-verdict {
+      display: grid;
+      grid-template-columns: minmax(0, 0.72fr) minmax(320px, 1.28fr);
+      gap: 32px;
+      align-items: center;
+      padding: clamp(28px, 5vw, 52px);
+      border: 1px solid rgba(90, 200, 250, 0.36);
+      border-radius: 24px;
+      background:
+        linear-gradient(135deg, rgba(90, 200, 250, 0.13), transparent 62%),
+        var(--card);
+    }
+
+    .verdict-mark {
+      width: 82px;
+      height: 82px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(90, 200, 250, 0.35);
+      border-radius: 24px;
+      color: var(--teal);
+      background: var(--teal-soft);
+      font-family: var(--display);
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+    }
+
+    .stream-verdict h3 {
+      margin-bottom: 10px;
+      font-family: var(--display);
+      font-size: clamp(24px, 3vw, 34px);
+      line-height: 1.25;
+      letter-spacing: -0.035em;
+    }
+
+    .stream-verdict p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .source-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .source-card {
+      min-height: 270px;
+      padding: 24px;
+    }
+
+    .source-status {
+      display: inline-block;
+      margin-bottom: 18px;
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .source-card.go { border-color: rgba(48, 209, 88, 0.27); }
+    .source-card.conditional { border-color: rgba(255, 159, 10, 0.27); }
+    .source-card.stop { border-color: rgba(255, 69, 58, 0.27); }
+    .source-card.go .source-status { color: var(--green); }
+    .source-card.conditional .source-status { color: var(--orange); }
+    .source-card.stop .source-status { color: var(--red); }
+
+    .source-card h3 {
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+
+    .source-card p {
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .source-card small {
+      display: block;
+      color: var(--faint);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .connector-boundary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.02);
+      counter-reset: connector;
+    }
+
+    .connector-step {
+      counter-increment: connector;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .connector-step::before {
+      content: counter(connector, decimal-leading-zero);
+      display: block;
+      margin-bottom: 14px;
+      color: var(--teal);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .connector-step b {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+
+    .connector-step span {
+      color: var(--faint);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .stream-sequence {
+      margin-top: 14px;
+      padding: 24px 26px;
+      border: 1px solid rgba(10, 132, 255, 0.28);
+      border-radius: var(--radius);
+      background: var(--blue-soft);
+    }
+
+    .stream-sequence strong {
+      display: block;
+      margin-bottom: 10px;
+      color: #fff;
+      font-size: 15px;
+    }
+
+    .stream-sequence p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .priority-table {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .priority-col { padding: 28px; }
+    .priority-col + .priority-col { border-left: 1px solid var(--line); }
+
+    .priority-col h3 {
+      margin-bottom: 18px;
+      font-size: 17px;
+    }
+
+    .priority-col.now h3 { color: var(--green); }
+    .priority-col.later h3 { color: var(--orange); }
+    .priority-col.now { background: var(--green-soft); }
+    .priority-col.later { background: var(--orange-soft); }
+
+    .final-call {
+      padding: clamp(28px, 5vw, 54px);
+      border: 1px solid rgba(10, 132, 255, 0.34);
+      border-radius: 24px;
+      background: linear-gradient(145deg, var(--blue-soft), transparent 72%), var(--card);
+    }
+
+    .final-call h2 { margin-bottom: 28px; }
+
+    .top-three {
+      display: grid;
+      gap: 10px;
+      counter-reset: mustdo;
+    }
+
+    .mustdo {
+      counter-increment: mustdo;
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(0, 0, 0, 0.22);
+    }
+
+    .mustdo::before {
+      content: counter(mustdo, decimal-leading-zero);
+      color: var(--blue);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .mustdo b { font-size: 15px; }
+
+    .mustdo span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    footer {
+      margin-top: 72px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      text-align: center;
+      font-size: 12px;
+    }
+
+    @media (max-width: 860px) {
+      .hero { min-height: auto; padding-top: 74px; }
+      .section-head { grid-template-columns: 1fr; gap: 15px; }
+      .formula, .roadmap, .metrics-grid, .source-grid { grid-template-columns: 1fr; }
+      .diagnosis-grid, .loops, .two-col { grid-template-columns: 1fr; }
+      .stream-verdict { grid-template-columns: 1fr; }
+      .connector-boundary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .phase { min-height: auto; }
+    }
+
+    @media (max-width: 620px) {
+      .topbar-inner { padding: 0 16px; gap: 14px; }
+      .brand { font-size: 14px; }
+      .nav a { padding-inline: 8px; }
+      main { padding-inline: 16px; }
+      section { margin-top: 72px; }
+      h1 { font-size: clamp(38px, 13vw, 58px); }
+      .hero-copy { font-size: 15px; }
+      .core-map { min-height: auto; grid-template-columns: 1fr; grid-template-rows: auto; }
+      .core-node,
+      .core-node.main,
+      .core-node:nth-child(1),
+      .core-node:nth-child(2),
+      .core-node:nth-child(4),
+      .core-node:nth-child(5) { grid-column: 1; grid-row: auto; }
+      .core-node.main { order: -1; }
+      .breakpoint { grid-template-columns: 1fr; }
+      .priority-table { grid-template-columns: 1fr; }
+      .priority-col + .priority-col { border-left: 0; border-top: 1px solid var(--line); }
+      .arch-row { grid-template-columns: 1fr; }
+      .arch-key { padding-bottom: 7px; }
+      .arch-value { padding-top: 7px; }
+      .connector-boundary { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      :root { color-scheme: light; }
+      body { background: #fff; color: #111; }
+      .topbar { display: none; }
+      main { max-width: none; padding: 0 12mm; }
+      .hero { min-height: 0; padding: 22mm 0 16mm; }
+      section { margin-top: 16mm; break-inside: avoid; }
+      .card, .thesis, .episode-core, .metric-hero, .final-call, .architecture, .priority-table {
+        background: #fff !important;
+        border-color: #cfcfcf !important;
+        color: #111;
+        box-shadow: none;
+      }
+      .section-copy, .hero-copy, .diagnosis p, .loop p, .panel-intro,
+      .clean-list li, .metric-card p, .arch-value, .breakpoint p, .core-caption {
+        color: #444;
+      }
+      .formula-card p, .core-node span { color: #666; }
+      footer { color: #666; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">AnimeGo<span>Club</span></div>
+      <nav class="nav" aria-label="报告导航">
+        <a href="#strategy">战略</a>
+        <a href="#diagnosis">诊断</a>
+        <a href="#community-unit">社区单元</a>
+        <a href="#loops">增长闭环</a>
+        <a href="#roadmap">路线图</a>
+        <a href="#metrics">指标</a>
+        <a href="#priority">优先级</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <header class="hero">
+      <div class="hero-inner">
+        <p class="eyebrow">AnimeGo Community Strategy · 2026</p>
+        <h1>让每一次观看，<br />都成为关系的开始</h1>
+        <p class="hero-copy">
+          AnimeGo 不需要复制一个泛动漫论坛。更有价值的方向，是把<strong>观看、表达、回应、关系和身份</strong>连成一个持续生长的社区闭环。
+        </p>
+        <div class="hero-tags" aria-label="方案关键词">
+          <span class="tag primary">以单集为最小社区</span>
+          <span class="tag">观看自然产生内容</span>
+          <span class="tag">通知完成回访</span>
+          <span class="tag">身份资产长期沉淀</span>
+          <span class="tag">本阶段聚焦用户粘性</span>
+          <span class="tag">90 天渐进式推进</span>
+        </div>
+      </div>
+    </header>
+
+    <section id="strategy">
+      <div class="section-head">
+        <div>
+          <span class="section-index">01 · Strategic thesis</span>
+          <h2>核心战略</h2>
+        </div>
+        <p class="section-copy">
+          粘性不来自功能堆叠，而来自用户每次回来都能继续获得价值，同时让自己此前的记录、表达和关系变得更有意义。
+        </p>
+      </div>
+
+      <div class="thesis">
+        <div class="thesis-label">产品定位</div>
+        <blockquote>以“看完一集”为起点，把追番记录、即时感受、同好交流与个人动漫档案连成一体。</blockquote>
+      </div>
+
+      <div class="formula" aria-label="用户粘性四个组成部分">
+        <article class="formula-card">
+          <div class="symbol">01</div>
+          <h3>工具价值</h3>
+          <p>追番、发现、本地播放、弹幕和进度管理，让用户有稳定的使用理由。</p>
+        </article>
+        <article class="formula-card">
+          <div class="symbol">02</div>
+          <h3>内容新鲜度</h3>
+          <p>新番每周更新、单集话题和赛季事件，形成固定的回访节奏。</p>
+        </article>
+        <article class="formula-card">
+          <div class="symbol">03</div>
+          <h3>社交反馈</h3>
+          <p>赞、回复、关注和通知，让每次表达都可能产生下一次访问。</p>
+        </article>
+        <article class="formula-card">
+          <div class="symbol">04</div>
+          <h3>身份资产</h3>
+          <p>观看日记、评分、片单和主页不断积累，形成迁移成本与归属感。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="diagnosis">
+      <div class="section-head">
+        <div>
+          <span class="section-index">02 · Current diagnosis</span>
+          <h2>当前真正的断点</h2>
+        </div>
+        <p class="section-copy">
+          AnimeGo 已经有追番、评论、关注、动态和公开主页，问题不是“没有社区功能”，而是这些功能还没有互相驱动。
+        </p>
+      </div>
+
+      <div class="diagnosis-grid">
+        <article class="diagnosis card">
+          <span class="num">01</span>
+          <div><h3>评论入口太深</h3><p>用户必须先进入详情页，再点击某一集才看见讨论。有内容也很难被感知。</p></div>
+        </article>
+        <article class="diagnosis card">
+          <span class="num">02</span>
+          <div><h3>动态只是状态展示</h3><p>“某人看到第几集”缺少观点、反应和上下文，无法自然触发互动。</p></div>
+        </article>
+        <article class="diagnosis card">
+          <span class="num">03</span>
+          <div><h3>关注关系没有冷启动</h3><p>空动态要求用户先关注别人，却没有解释应该关注谁、为什么值得关注。</p></div>
+        </article>
+        <article class="diagnosis card">
+          <span class="num">04</span>
+          <div><h3>缺少回访通知</h3><p>回复和新关注没有稳定的通知入口，互动发生后很容易永远中断。</p></div>
+        </article>
+        <article class="diagnosis card">
+          <span class="num">05</span>
+          <div><h3>状态覆盖了历史</h3><p>订阅表只保存最新进度，无法支撑真实的观看日记、活动历史与内容级 Feed。</p></div>
+        </article>
+        <article class="diagnosis card">
+          <span class="num">06</span>
+          <div><h3>个人身份表达不足</h3><p>会员卡和统计已有辨识度，但缺少最爱作品、简介、口味标签和置顶内容。</p></div>
+        </article>
+        <article class="diagnosis card">
+          <span class="num">07</span>
+          <div><h3>本地观看没有进入闭环</h3><p>最强的真实观看信号停留在本地进度中，没有在用户授权下转化为记录或讨论。</p></div>
+        </article>
+        <article class="diagnosis card">
+          <span class="num">08</span>
+          <div><h3>隐私和剧透能力滞后</h3><p>扩大分发前需要补齐可见性、剧透折叠、举报、拉黑和静音等基础治理。</p></div>
+        </article>
+      </div>
+
+      <div class="breakpoint">
+        <div class="mark">!</div>
+        <div>
+          <strong>核心断点</strong>
+          <p>用户做了行为，但行为没有长成内容；产生了内容，但内容没有触发关系；形成了关系，却没有通知把人带回来。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="community-unit">
+      <div class="section-head">
+        <div>
+          <span class="section-index">03 · Community unit</span>
+          <h2>以“单集”作为最小社区</h2>
+        </div>
+        <p class="section-copy">
+          同一时间看完同一集的人，天然拥有共同语境和最高表达欲。连续数周反复相遇，关系才会逐渐形成。
+        </p>
+      </div>
+
+      <div class="episode-core">
+        <div class="core-map" aria-label="围绕单集形成的五个社区能力">
+          <div class="core-node"><b>轻量表达</b><span>神回 · 不错 · 一般 · 失望</span></div>
+          <div class="core-node"><b>共同身份</b><span>我们正在追同一部作品</span></div>
+          <div class="core-node main"><b>某部番 · 第 N 集</b><span>社区最小单位</span></div>
+          <div class="core-node"><b>重复相遇</b><span>相似观点逐步形成关系</span></div>
+          <div class="core-node"><b>天然防剧透</b><span>按观看进度解锁内容</span></div>
+        </div>
+        <p class="core-caption">
+          不先建设空旷的“大广场”，而是在用户表达欲最强、上下文最一致的时刻建立密度。
+        </p>
+      </div>
+    </section>
+
+    <section id="loops">
+      <div class="section-head">
+        <div>
+          <span class="section-index">04 · Growth loops</span>
+          <h2>四个增长闭环</h2>
+        </div>
+        <p class="section-copy">
+          每个闭环都应该从用户本来就会做的动作出发，减少额外负担，并让一次行为产生多份长期价值。
+        </p>
+      </div>
+
+      <div class="loops">
+        <article class="loop card" data-no="1">
+          <h3>观看闭环</h3>
+          <p>播放达到约 80% 后，克制地邀请用户记录进度、选择一个反应，并可选留下一句话。</p>
+          <div class="flow"><span>观看</span><i>→</i><span>记录</span><i>→</i><span>反应</span><i>→</i><span>本集讨论</span></div>
+        </article>
+        <article class="loop card" data-no="2">
+          <h3>反馈闭环</h3>
+          <p>回复、点赞和关注必须进入统一通知，并准确跳回对应番剧、集数和评论。</p>
+          <div class="flow"><span>表达</span><i>→</i><span>获得回应</span><i>→</i><span>通知</span><i>→</i><span>回访</span></div>
+        </article>
+        <article class="loop card" data-no="3">
+          <h3>关系闭环</h3>
+          <p>通过共同追番、评分相近和反复互动推荐用户，并清楚解释每一次推荐的理由。</p>
+          <div class="flow"><span>同集观点</span><i>→</i><span>主页</span><i>→</i><span>口味重合</span><i>→</i><span>关注</span></div>
+        </article>
+        <article class="loop card" data-no="4">
+          <h3>身份闭环</h3>
+          <p>观看日记、最爱作品、片单、统计和赛季报告持续丰富主页，产生分享价值与迁移成本。</p>
+          <div class="flow"><span>积累</span><i>→</i><span>个性主页</span><i>→</i><span>分享</span><i>→</i><span>新用户</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head">
+        <div>
+          <span class="section-index">05 · 90-day roadmap</span>
+          <h2>三阶段路线图</h2>
+        </div>
+        <p class="section-copy">
+          第一阶段先修复回应与安全，第二阶段让观看产生内容，第三阶段才扩展身份和赛季文化。
+        </p>
+      </div>
+
+      <div class="roadmap">
+        <article class="phase card">
+          <span class="phase-time">Day 0–30</span>
+          <h3>让回应能够回来</h3>
+          <ul class="clean-list">
+            <li>剧集格显示评论数与最近讨论</li>
+            <li>回复、新关注、评论获赞通知</li>
+            <li>通知精确跳转至具体评论</li>
+            <li>剧透折叠、举报、拉黑、静音</li>
+            <li>观看状态和活动可见性设置</li>
+            <li>建立完整社区漏斗埋点</li>
+          </ul>
+        </article>
+
+        <article class="phase card">
+          <span class="phase-time">Day 31–60</span>
+          <h3>让观看变成内容</h3>
+          <ul class="clean-list">
+            <li>追加式活动事件记录</li>
+            <li>看完后的快捷反应与一句话</li>
+            <li>动态支持点赞、回复与关注</li>
+            <li>动态定位到具体番剧与集数</li>
+            <li>补充同番讨论和推荐关注</li>
+            <li>用口味重合解释推荐理由</li>
+            <li>根据通知回流率迭代讨论与动态体验</li>
+          </ul>
+        </article>
+
+        <article class="phase card">
+          <span class="phase-time">Day 61–90</span>
+          <h3>形成身份与赛季文化</h3>
+          <ul class="clean-list">
+            <li>观看日记与最近感想</li>
+            <li>四部最爱、简介与口味标签</li>
+            <li>置顶评论、评价或片单</li>
+            <li>本季神回与隐藏佳作共创榜</li>
+            <li>赛季报告与年度分享卡</li>
+            <li>核心贡献者和版主体系</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="operations">
+      <div class="section-head">
+        <div>
+          <span class="section-index">06 · Operations & safety</span>
+          <h2>运营和治理必须一起开始</h2>
+        </div>
+        <p class="section-copy">
+          代码只能提供场地。早期社区是否有温度，取决于内容密度、回应速度和用户对规则的信任。
+        </p>
+      </div>
+
+      <div class="two-col">
+        <article class="panel card">
+          <h3>社区冷启动</h3>
+          <p class="panel-intro">先经营少数活跃空间，不追求覆盖所有作品。</p>
+          <ul class="clean-list">
+            <li>选择当季 5–10 部高讨论潜力作品</li>
+            <li>招募约 20–50 名种子用户</li>
+            <li>官方账号每周发起固定问题和投票</li>
+            <li>尽量让第一条认真发言在 24 小时内获得回应</li>
+            <li>从优质评论者中培养策展人与版主</li>
+          </ul>
+        </article>
+        <article class="panel card">
+          <h3>安全与信任</h3>
+          <p class="panel-intro">剧透和隐私不是后补功能，而是扩大内容分发的前提。</p>
+          <ul class="clean-list">
+            <li>按用户观看进度折叠未来集数内容</li>
+            <li>通知与搜索摘要不泄露剧透正文</li>
+            <li>本地观看记录默认私密、主动同步</li>
+            <li>提供举报、拉黑、静音和限流</li>
+            <li>保留审核记录和版主操作日志</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="metrics">
+      <div class="section-head">
+        <div>
+          <span class="section-index">07 · Measurement</span>
+          <h2>衡量真实社区健康</h2>
+        </div>
+        <p class="section-copy">
+          评论总数和 DAU 容易被短期活动放大；真正有价值的是用户是否完成闭环，以及社区是否及时给予反馈。
+        </p>
+      </div>
+
+      <div class="metric-hero">
+        <span class="metric-label">North Star Metric</span>
+        <strong>每周完成至少一次“观看或记录 → 互动 → 获得回应”闭环的用户数</strong>
+      </div>
+
+      <div class="metrics-grid">
+        <article class="metric-card card"><b>激活</b><p>首次追番记录率、首次查看讨论率、首次互动所需时间。</p></article>
+        <article class="metric-card card"><b>内容</b><p>看完后表达率、贡献者比例、讨论内容被消费的比例。</p></article>
+        <article class="metric-card card"><b>反馈</b><p>24 小时获回应率、首次回应时间、通知回访率。</p></article>
+        <article class="metric-card card"><b>关系</b><p>关注转化率、推荐关注接受率、空动态用户比例。</p></article>
+        <article class="metric-card card"><b>留存</b><p>激活与未激活用户的 D7、W4 留存差异。</p></article>
+        <article class="metric-card card"><b>护栏</b><p>剧透投诉率、举报率、拉黑率、通知退订率。</p></article>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="section-head">
+        <div>
+          <span class="section-index">08 · Product architecture</span>
+          <h2>建议的数据基础</h2>
+        </div>
+        <p class="section-copy">
+          订阅表继续描述“用户现在的状态”，新增的事件与互动表描述“发生过什么”，两类数据不要混在一起。
+        </p>
+      </div>
+
+      <div class="architecture">
+        <div class="arch-row"><div class="arch-key">activity_events</div><div class="arch-value">追加记录观看、完成、评分、评论与关注事件；包含 <code>visibility</code> 和幂等键。</div></div>
+        <div class="arch-row"><div class="arch-key">reactions</div><div class="arch-value">统一承载快捷心情与点赞；用户对同一目标保持唯一反应。</div></div>
+        <div class="arch-row"><div class="arch-key">notifications</div><div class="arch-value">收件人、触发者、对象、类型、已读时间；精确定位原始上下文。</div></div>
+        <div class="arch-row"><div class="arch-key">user_blocks</div><div class="arch-value">阻断互动、动态分发和通知，是用户安全边界。</div></div>
+        <div class="arch-row"><div class="arch-key">reports</div><div class="arch-value">目标类型、原因、处理状态、审核日志，支持清晰的治理流程。</div></div>
+        <div class="arch-row"><div class="arch-key">privacy_settings</div><div class="arch-value">分别控制追番列表、观看活动和主页内容的公开范围。</div></div>
+      </div>
+    </section>
+
+    <section id="priority">
+      <div class="section-head">
+        <div>
+          <span class="section-index">09 · Priority choices</span>
+          <h2>现在做什么，暂时不做什么</h2>
+        </div>
+        <p class="section-copy">
+          先修复最短的价值链，再扩张功能边界。功能数量不是社区密度。
+        </p>
+      </div>
+
+      <div class="priority-table">
+        <div class="priority-col now">
+          <h3>优先建设</h3>
+          <ul class="clean-list">
+            <li>分集评论预览和快捷反应</li>
+            <li>回复、关注与获赞通知</li>
+            <li>真实活动事件流</li>
+            <li>同番与口味相似用户发现</li>
+            <li>隐私、剧透和基础治理</li>
+            <li>观看日记与身份主页</li>
+            <li>围绕通知回流持续优化社区闭环</li>
+          </ul>
+        </div>
+        <div class="priority-col later">
+          <h3>暂缓建设</h3>
+          <ul class="clean-list">
+            <li>泛主题论坛与无限分区</li>
+            <li>大型实时聊天室和语音房</li>
+            <li>签到、积分、等级驱动的浅层游戏化</li>
+            <li>没有反馈闭环支撑的复杂长评系统</li>
+            <li>高频、无差别的追番更新推送</li>
+            <li>排在社区闭环之前的 AI 聊天</li>
+            <li>在线播放与播放源插件（本阶段不做）</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-call">
+      <span class="section-index">The first three moves</span>
+      <h2>如果只能先做三件事</h2>
+      <div class="top-three">
+        <div class="mustdo"><div><b>让分集讨论可见，并加入快捷反应</b><span>先降低表达门槛，提高内容的可发现性。</span></div></div>
+        <div class="mustdo"><div><b>上线回复、关注与获赞通知</b><span>让一次互动第一次拥有明确的回访路径。</span></div></div>
+        <div class="mustdo"><div><b>建立活动事件流并重做动态冷启动</b><span>从“最新状态列表”升级为能承载观点、关系和历史的社区 Feed。</span></div></div>
+      </div>
+    </section>
+
+    <footer>
+      AnimeGo Community Strategy · 目标不是更多功能，而是让观看自然产生内容、关系和归属感。
+    </footer>
+  </main>
+</body>
+</html>
