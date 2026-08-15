@@ -17,6 +17,7 @@
 package social
 
 import (
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -47,6 +48,9 @@ type profileResponse struct {
 	FollowerCount     int64              `json:"followerCount"`
 	FollowingCount    int64              `json:"followingCount"`
 	IsFollowing       *bool              `json:"isFollowing"`
+	IsBlocked         bool               `json:"isBlocked"`
+	BlockedByViewer   bool               `json:"blockedByViewer"`
+	IsPrivate         bool               `json:"isPrivate"`
 	Watching          []watchingItem     `json:"watching"`
 }
 
@@ -63,19 +67,19 @@ type profileResponse struct {
 // the anime row may also have an anime.status column, so the
 // subscription's status is renamed in the response to avoid collision.
 type watchingItem struct {
-	AnilistID          int32   `json:"anilistId"`
-	TitleRomaji        *string `json:"titleRomaji"`
-	TitleEnglish       *string `json:"titleEnglish"`
-	TitleNative        *string `json:"titleNative"`
-	TitleChinese       *string `json:"titleChinese"`
-	CoverImageUrl      *string `json:"coverImageUrl"`
-	BannerImageUrl     *string `json:"bannerImageUrl"`
-	CoverImageColor    *string `json:"coverImageColor"`
-	PosterAccent       *string `json:"posterAccent"`
-	Episodes           *int32  `json:"episodes"`
-	Season             *string `json:"season"`
-	SeasonYear         *int32  `json:"seasonYear"`
-	Format             *string `json:"format"`
+	AnilistID       int32   `json:"anilistId"`
+	TitleRomaji     *string `json:"titleRomaji"`
+	TitleEnglish    *string `json:"titleEnglish"`
+	TitleNative     *string `json:"titleNative"`
+	TitleChinese    *string `json:"titleChinese"`
+	CoverImageUrl   *string `json:"coverImageUrl"`
+	BannerImageUrl  *string `json:"bannerImageUrl"`
+	CoverImageColor *string `json:"coverImageColor"`
+	PosterAccent    *string `json:"posterAccent"`
+	Episodes        *int32  `json:"episodes"`
+	Season          *string `json:"season"`
+	SeasonYear      *int32  `json:"seasonYear"`
+	Format          *string `json:"format"`
 	// Anime's own status field (FINISHED / RELEASING / ...).  Kept
 	// separate from subscriptionStatus to match Express's spread of
 	// `...(animeMap[s.anilistId])` which preserves the anime.status
@@ -121,14 +125,23 @@ type followListItem struct {
 // Title is non-pointer because the handler always assigns it (either
 // the real TitleRomaji or the `Anime #N` fallback).
 type feedItem struct {
-	Username      string             `json:"username"`
-	AnilistID     int32              `json:"anilistId"`
-	Title         string             `json:"title"`
-	TitleChinese  *string            `json:"titleChinese"`
-	CoverImageUrl *string            `json:"coverImageUrl"`
-	Episode       int32              `json:"episode"`
-	Status        string             `json:"status"`
-	LastWatchedAt pgtype.Timestamptz `json:"lastWatchedAt"`
+	ID             uuid.UUID          `json:"id"`
+	Kind           string             `json:"kind"`
+	Username       string             `json:"username"`
+	AvatarURL      *string            `json:"avatarUrl"`
+	AnilistID      int32              `json:"anilistId"`
+	Title          string             `json:"title"`
+	TitleChinese   *string            `json:"titleChinese"`
+	CoverImageUrl  *string            `json:"coverImageUrl"`
+	Episode        int32              `json:"episode"`
+	Status         string             `json:"status"`
+	LastWatchedAt  pgtype.Timestamptz `json:"lastWatchedAt"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	CommentID      *uuid.UUID         `json:"commentId"`
+	Content        *string            `json:"content"`
+	Excerpt        *string            `json:"excerpt"`
+	TargetUsername *string            `json:"targetUsername"`
+	IsSpoiler      bool               `json:"isSpoiler"`
 }
 
 // feedResponse is the top-level envelope for GET /api/feed.

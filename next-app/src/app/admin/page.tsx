@@ -5,6 +5,7 @@ import { EnrichmentBar } from "./_components/EnrichmentBar";
 import { EnrichmentSection } from "./_components/EnrichmentSection";
 import { StatCard } from "./_components/StatCard";
 import { UsersSection } from "./_components/UsersSection";
+import ReportsSection, { type AdminReportsData } from "./_components/ReportsSection";
 import type {
   AdminStats,
   AdminUser,
@@ -31,6 +32,13 @@ const EMPTY_PAGE: PagedResponse<unknown> = {
   page: 1,
 };
 
+interface CommunityMetrics {
+  days: number;
+  impressions: number;
+  opens: number;
+  openRate: number;
+}
+
 async function safeGet<T>(promise: Promise<T>, fallback: T): Promise<T> {
   try {
     return await promise;
@@ -40,10 +48,14 @@ async function safeGet<T>(promise: Promise<T>, fallback: T): Promise<T> {
 }
 
 export default async function AdminPage() {
-  const [dict, stats, enrichment, users] = await Promise.all([
+  const [dict, stats, communityMetrics, enrichment, users, pendingReports, reviewingReports] = await Promise.all([
     getDict(),
     safeGet<AdminStats | null>(
       apiGet<AdminStats>("/api/admin/stats", { cache: "no-store" }),
+      null,
+    ),
+    safeGet<CommunityMetrics | null>(
+      apiGet<CommunityMetrics>("/api/admin/community-metrics?days=7", { cache: "no-store" }),
       null,
     ),
     safeGet<PagedResponse<EnrichmentRowData>>(
@@ -57,20 +69,44 @@ export default async function AdminPage() {
       apiGetPaged<AdminUser>("/api/admin/users?page=1", { cache: "no-store" }),
       EMPTY_PAGE as PagedResponse<AdminUser>,
     ),
+    safeGet<AdminReportsData>(
+      apiGet<AdminReportsData>("/api/admin/reports?status=pending&limit=50", { cache: "no-store" }),
+      { items: [], hasMore: false, nextPage: null },
+    ),
+    safeGet<AdminReportsData>(
+      apiGet<AdminReportsData>("/api/admin/reports?status=reviewing&limit=50", { cache: "no-store" }),
+      { items: [], hasMore: false, nextPage: null },
+    ),
   ]);
+
+  const reports: AdminReportsData = {
+    items: [...reviewingReports.items, ...pendingReports.items],
+    hasMore: reviewingReports.hasMore || pendingReports.hasMore,
+    nextPage: null,
+  };
 
   return (
     <div style={styles.page}>
-      <Overview stats={stats} dict={dict} />
+      <Overview stats={stats} communityMetrics={communityMetrics} dict={dict} />
       <hr style={styles.divider} />
       <EnrichmentSection initial={enrichment} />
       <hr style={styles.divider} />
       <UsersSection initial={users} />
+      <hr style={styles.divider} />
+      <ReportsSection initial={reports} />
     </div>
   );
 }
 
-function Overview({ stats, dict }: { stats: AdminStats | null; dict: Dict }) {
+function Overview({
+  stats,
+  communityMetrics,
+  dict,
+}: {
+  stats: AdminStats | null;
+  communityMetrics: CommunityMetrics | null;
+  dict: Dict;
+}) {
   if (!stats) {
     return (
       <section
@@ -128,6 +164,24 @@ function Overview({ stats, dict }: { stats: AdminStats | null; dict: Dict }) {
           value={queueTotal}
           hint={`phase1 ${stats.queue.phase1} · phase4 ${stats.queue.phase4} · v3 ${stats.queue.v3}`}
         />
+        {communityMetrics && (
+          <>
+            <StatCard
+              label={dict.admin.statDiscussionImpressions}
+              value={communityMetrics.impressions}
+              hint={dict.admin.communityMetricsHint
+                .replace("{{days}}", String(communityMetrics.days))
+                .replace("{{opens}}", String(communityMetrics.opens))}
+            />
+            <StatCard
+              label={dict.admin.statDiscussionOpenRate}
+              value={`${(communityMetrics.openRate * 100).toFixed(1)}%`}
+              hint={dict.admin.communityMetricsRatio
+                .replace("{{opens}}", String(communityMetrics.opens))
+                .replace("{{impressions}}", String(communityMetrics.impressions))}
+            />
+          </>
+        )}
       </div>
       <div style={styles.barWrap}>
         <h3 style={styles.subTitle}>{dict.admin.dataEnrichment}</h3>

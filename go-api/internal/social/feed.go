@@ -129,14 +129,23 @@ func mapFeedRows(rows []dbgen.ListFeedActivitiesRow) []feedItem {
 	for i, row := range rows {
 		title := fallbackTitle(row.TitleRomaji, row.AnilistID)
 		out[i] = feedItem{
-			Username:      row.Username,
-			AnilistID:     row.AnilistID,
-			Title:         title,
-			TitleChinese:  row.TitleChinese,
-			CoverImageUrl: row.CoverImageUrl,
-			Episode:       row.CurrentEpisode,
-			Status:        row.Status,
-			LastWatchedAt: row.LastWatchedAt,
+			ID:             row.ActivityID,
+			Kind:           row.EventType,
+			Username:       row.Username,
+			AvatarURL:      row.AvatarUrl,
+			AnilistID:      row.AnilistID,
+			Title:          title,
+			TitleChinese:   row.TitleChinese,
+			CoverImageUrl:  row.CoverImageUrl,
+			Episode:        row.CurrentEpisode,
+			Status:         row.Status,
+			LastWatchedAt:  row.LastWatchedAt,
+			CreatedAt:      row.CreatedAt,
+			CommentID:      row.CommentID,
+			Content:        row.CommentContent,
+			Excerpt:        row.CommentContent,
+			TargetUsername: row.TargetUsername,
+			IsSpoiler:      row.CommentIsSpoiler,
 		}
 	}
 	return out
@@ -144,13 +153,16 @@ func mapFeedRows(rows []dbgen.ListFeedActivitiesRow) []feedItem {
 
 // fallbackTitle returns the AniList Romaji title when present, or
 // `Anime #<id>` when the anime_cache LEFT JOIN produced NULL.  Matches
-// Express's `animeMap[s.anilistId]?.titleRomaji || `Anime #${s.anilistId}``.
+// Express's `animeMap[s.anilistId]?.titleRomaji || `Anime #${s.anilistId}“.
 //
 // Empty string is treated the same as nil — Express's `||` falls back
 // on falsy values, which include "" alongside null/undefined.
 func fallbackTitle(romaji *string, anilistID int32) string {
 	if romaji != nil && *romaji != "" {
 		return *romaji
+	}
+	if anilistID <= 0 {
+		return ""
 	}
 	return "Anime #" + strconv.FormatInt(int64(anilistID), 10)
 }

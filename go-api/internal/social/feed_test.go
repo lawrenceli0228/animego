@@ -236,7 +236,7 @@ func TestFallbackTitle_Cases(t *testing.T) {
 		{"nil pointer", nil, 42, "Anime #42"},
 		{"empty string", &empty, 99, "Anime #99"},
 		{"real title", &romaji, 1, "Real Title"},
-		{"zero id", nil, 0, "Anime #0"},
+		{"zero id", nil, 0, ""},
 	}
 	for _, tc := range cases {
 		tc := tc

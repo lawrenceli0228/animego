@@ -44,8 +44,14 @@ type Querier interface {
 	// score/votes so the bad data disappears immediately; bangumi_version=0
 	// re-queues them via the orphan scan / a follow-up V1 enqueue.
 	BackfillResetRows(ctx context.Context, dollar_1 []int32) error
+	// Community safety data access introduced by migration 0019.
+	// Blocking is one atomic boundary: create the directional block and sever all
+	// social/notification edges between the two users. Repeating the request is
+	// idempotent and still cleans up any stale edges.
+	BlockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (BlockUserRow, error)
 	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
 	CountBgmIdMap(ctx context.Context) (int64, error)
+	CountCommentReactions(ctx context.Context, commentID uuid.UUID) (int64, error)
 	// Total for pagination — same filter as ListFeedActivities sans paging.
 	CountFeedActivities(ctx context.Context, dollar_1 []uuid.UUID) (int64, error)
 	// Total follower count for the pagination envelope.
@@ -55,15 +61,27 @@ type Querier interface {
 	// pagination meta in /api/anime/seasonal so the frontend can render
 	// "X of Y" without a separate count call.
 	CountSeasonal(ctx context.Context, season *string, seasonYear *int32) (int64, error)
+	CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error)
 	// Total active watchers for /api/anime/:anilistId/watchers (the `total`
 	// meta field in the envelope).
 	CountWatchers(ctx context.Context, anilistID int32) (int64, error)
+	// Durable event, notification, and comment-reaction primitives introduced by
+	// migration 0018.  Multi-write user actions live in writable CTEs so callers
+	// cannot accidentally commit the primary write without its event/notification.
+	CreateActivityEvent(ctx context.Context, arg CreateActivityEventParams) (ActivityEvent, error)
 	// POST /api/comments/:anilistId/:episode.  Caller has already
 	// validated content length + parent existence.  parent_id may be NULL
 	// (top-level comment) or a uuid pointer.  reply_to_username is a
 	// denormalised string used by the frontend to render "@username"
 	// prefix; nullable.
 	CreateComment(ctx context.Context, arg CreateCommentParams) (EpisodeComment, error)
+	// Atomic community write: create the comment, append its feed event, and (for
+	// a non-self reply) enqueue one deduped notification.  The parent validation
+	// query remains useful for returning a friendly 400 before this is called.
+	CreateCommentWithActivity(ctx context.Context, arg CreateCommentWithActivityParams) (CreateCommentWithActivityRow, error)
+	// A repeated report while the first is pending returns that canonical report.
+	// Once moderation moves it out of pending the reporter may file a new report.
+	CreatePendingReport(ctx context.Context, arg CreatePendingReportParams) (CreatePendingReportRow, error)
 	// Queries against the users table.  Auth flow (register / login / refresh
 	// / logout / me) drives the read+write contract.  Password reset adds
 	// token-keyed reads + multi-column update.
@@ -107,6 +125,8 @@ type Querier interface {
 	// children — Express deleteOne() left them dangling, which is a bug
 	// the Postgres FK definition fixes for free.
 	DeleteComment(ctx context.Context, id uuid.UUID) error
+	DeleteCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (DeleteCommentReactionRow, error)
+	DeleteCommentReactionOnly(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (int64, error)
 	// DELETE /api/users/:username/follow.  Returns affected row count;
 	// the handler always returns 200 { following: false } regardless of
 	// whether a row was deleted (matches Express's findOneAndDelete which
@@ -218,6 +238,7 @@ type Querier interface {
 	// reply abuse (someone passing a random comment id from a different
 	// episode).  ErrNoRows → handler 400 "Parent comment not found".
 	GetCommentParentForValidation(ctx context.Context, iD uuid.UUID, anilistID int32, episode int32) (uuid.UUID, error)
+	GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (GetCommunityEngagementSummaryRow, error)
 	// Queries against anime_cache and its child tables.
 	//
 	// Each :one / :many / :exec annotation tells sqlc which result shape to
@@ -418,6 +439,7 @@ type Querier interface {
 	// /api/anime/yearly-top, replacing anime.controller.js:93-110.
 	// Express limit is 20 hard, slice down to query limit in handler.
 	GetYearlyTop(ctx context.Context, seasonYear *int32, limit int32) ([]GetYearlyTopRow, error)
+	HasCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (bool, error)
 	// Write a Chinese title sourced from dandanplay onto a trusted row.  Guarded
 	// on title_chinese IS NULL so a concurrent enrichment that already filled CN
 	// is never clobbered.
@@ -440,6 +462,9 @@ type Querier interface {
 	// physical column order (added by migration 0013 via ALTER); pgx CopyFrom
 	// binds positionally, so the generated column list must mirror that order.
 	InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error)
+	// A repeated delivery attempt returns the canonical existing row without
+	// resetting read state.  Natural keys are chosen by the caller per event.
+	InsertNotificationDedupe(ctx context.Context, arg InsertNotificationDedupeParams) (InsertNotificationDedupeRow, error)
 	// Batch reader for re-enrich.  Returns the fields the queue payload
 	// needs.  Filtering by version covers v0/v1/v2 — handler dispatches each
 	// via the appropriate enqueue function.
@@ -522,6 +547,10 @@ type Querier interface {
 	// updateMany.  This query is the SELECT half; PromoteAnimeToV3 is the
 	// UPDATE half.
 	ListEnrichedV2WithoutBgm(ctx context.Context) ([]int32, error)
+	// Comment counts plus the newest N previews per episode for an anime's episode
+	// grid.  The window count avoids a second round-trip.  preview_limit is
+	// deliberately caller-controlled so desktop/mobile can choose a small payload.
+	ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentSummariesRow, error)
 	// Queries against episode_comments (P2.5).
 	//
 	// Express's controller returns a flat list sorted by created_at ASC
@@ -541,12 +570,10 @@ type Querier interface {
 	// /api/comments/:anilistId/:episode — flat tree, oldest first.  Hard
 	// LIMIT 500 caps abuse (Express has no limit; we add one because
 	// pulling 50k rows on a popular episode would blow the response).
-	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]ListEpisodeCommentsRow, error)
-	// Step 2 of /api/feed: most-recent watching activities of the supplied
-	// followee_ids.  Filters out rows where last_watched_at IS NULL
-	// (subscriptions that never had an episode marked).  JOINs users for
-	// the username + anime_cache for the card columns.  Ordered by the
-	// watch event time DESC so the feed reads chronologically.
+	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentsRow, error)
+	// Step 2 of /api/feed: append-only activities of the supplied followees.
+	// Follow events are stored for future community surfaces but excluded from
+	// this first feed contract, whose cards always link to an anime episode.
 	ListFeedActivities(ctx context.Context, column1 []uuid.UUID, limit int32, offset int32) ([]ListFeedActivitiesRow, error)
 	// ==================== Feed ====================
 	// Step 1 of /api/feed: load the followees the caller follows.
@@ -576,15 +603,25 @@ type Querier interface {
 	// precisely because the bgm_id is map-confirmed — we never heal a fuzzy or
 	// uncertain bind (whose dandanplay title could belong to the wrong subject).
 	ListIdMapRowsMissingCn(ctx context.Context) ([]ListIdMapRowsMissingCnRow, error)
+	ListNotifications(ctx context.Context, userID uuid.UUID, pageLimit int32) ([]ListNotificationsRow, error)
 	// The "watching" list shown on the public profile.  200-row cap matches
 	// Express; the join is the same shape as the subscriptions list query
 	// but only returns the cardview projection.
 	ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]ListProfileWatchingRow, error)
+	// Passing NULL report_status returns the entire moderation queue.
+	ListReports(ctx context.Context, reportStatus *string, pageOffset int32, pageLimit int32) ([]ListReportsRow, error)
+	// Explainable discovery ranking for the homepage.  Participation matters more
+	// than raw volume, reactions add a smaller signal, and a smooth age divisor
+	// lets a fresh smaller conversation outrank an old thread without making the
+	// ordering jump at a hard date boundary.  Authenticated viewers do not see
+	// threads authored only by someone they blocked or were blocked by.
+	ListTrendingDiscussions(ctx context.Context, pageLimit int32, windowHours int32, viewerUserID *uuid.UUID) ([]ListTrendingDiscussionsRow, error)
 	// Boot-time orphan scan: returns anilist_ids of rows where
 	// bangumi_version=0 (never enriched).  Paginated via limit/offset so
 	// the caller can batch-enqueue without loading the whole table into
 	// memory.  Ordered by anilist_id ASC for deterministic batching.
 	ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error)
+	ListUserBlocks(ctx context.Context, blockerID uuid.UUID, limit int32, offset int32) ([]ListUserBlocksRow, error)
 	// Queries against the subscriptions table (P2.4).
 	//
 	// The subscriptions table has a (user_id, anilist_id) composite PK + FKs
@@ -614,6 +651,7 @@ type Querier interface {
 	// source='id_map' and skips fuzzy matching entirely.  pgx.ErrNoRows means
 	// "not in the map" → caller falls through to the search + scorer path.
 	LookupBgmIdMap(ctx context.Context, anilistID int32) (int32, error)
+	MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) (int64, error)
 	// Phase-1 scorer found candidates but none confident enough to bind.  We
 	// REFUSE to guess: no bgm_id is written.  Park the row terminal
 	// (bangumi_version=2) so the auto-pipeline stops re-processing it, flag it
@@ -643,6 +681,7 @@ type Querier interface {
 	// ListDescriptionCnLlmCandidates, exactly as migration 0015 is to the
 	// Bangumi sweep.
 	MarkDescriptionCnLlmAttempted(ctx context.Context, anilistID int32) error
+	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error
@@ -701,6 +740,15 @@ type Querier interface {
 	SetUserAvatar(ctx context.Context, iD uuid.UUID, avatarUrl *string) error
 	// PATCH /api/auth/me — set ($2 = anilist id) or clear ($2 = NULL) the backdrop.
 	SetUserBackdrop(ctx context.Context, iD uuid.UUID, backdropAnilistID *int32) error
+	// PATCH /api/auth/me — control whether another user may see the account's
+	// watching list and whether this user's activity is eligible for social feeds.
+	// The profile header remains resolvable so existing profile links do not turn
+	// into misleading 404s; the social handler redacts the watching list instead.
+	SetUserPublic(ctx context.Context, iD uuid.UUID, isPublic bool) error
+	// Aggregate-only counters keep product telemetry useful without retaining a
+	// per-user browsing history.  The handler owns the event/target allowlist;
+	// matching CHECK constraints make that contract durable at the database edge.
+	TrackCommunityEngagement(ctx context.Context, eventType string, source string, anilistID int32, episode int32, authenticated bool) (int64, error)
 	// bgm_id_map.sql — queries for the vendored AniList->Bangumi id map.
 	// The map is generated by cmd/bgmmap (Fribb x BangumiExtLinker joined on
 	// MAL id), embedded via internal/bgmidmap, and seeded at boot.
@@ -708,6 +756,7 @@ type Querier interface {
 	// entry doesn't leave a stale row behind.  Runs in the same tx as the COPY
 	// so the table is never observably empty to concurrent readers.
 	TruncateBgmIdMap(ctx context.Context) error
+	UnblockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (int64, error)
 	// Phase 2 character enrichment: match by anime_id + (name_en OR name_ja).
 	// Bangumi character.name is typically Japanese (e.g. "天使ヶ原恵") while
 	// AniList stores it under name_ja; some AniList entries have English/
@@ -778,6 +827,7 @@ type Querier interface {
 	// manual, or even an earlier llm value.  The reverse covenant (bangumi
 	// replacing llm) lives in ListDescriptionCnCandidates + UpdateDescriptionCn.
 	UpdateDescriptionCnLlm(ctx context.Context, descriptionCn *string, anilistID int32) error
+	UpdateReport(ctx context.Context, reportStatus string, resolutionNote *string, reviewedBy uuid.UUID, reportID uuid.UUID) (Report, error)
 	// PATCH /api/subscriptions/:anilistId — selective update.
 	// COALESCE pattern keeps unchanged columns untouched.  `last_watched_at`
 	// only bumps when current_episode is explicitly set, matching Express
@@ -786,6 +836,10 @@ type Querier interface {
 	// application layer, not here — the DB constraint enforces it but
 	// silently rejecting clamps would surprise the caller.
 	UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) (Subscription, error)
+	// Lock the previous value, apply the selective update, and append a watch event
+	// only when the caller supplied a genuinely different episode.  This prevents
+	// retries/status-only patches from manufacturing duplicate feed entries.
+	UpdateSubscriptionWithActivity(ctx context.Context, arg UpdateSubscriptionWithActivityParams) (UpdateSubscriptionWithActivityRow, error)
 	// Dormant: there is no self-serve change-password endpoint (password
 	// changes go through the email reset flow). Kept so the column write is
 	// available if a verified flow ever needs it.
@@ -814,6 +868,10 @@ type Querier interface {
 	// them in a separate transaction if needed.  /search + /schedule never
 	// mutate child tables; only /:anilistId detail-fetch does.
 	UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCacheParams) error
+	UpsertCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID, reaction string) (CommentReaction, error)
+	// The notification is intentionally insert-only on conflict: retrying a like
+	// must not turn an already-read notification back into an unread one.
+	UpsertCommentReactionWithNotification(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (UpsertCommentReactionWithNotificationRow, error)
 	// Persist a dandanplay lookup result (title, or NULL for a confirmed miss)
 	// keyed by bgm_id.
 	UpsertDdpTitle(ctx context.Context, bgmID int32, animeTitle *string) error
@@ -827,12 +885,22 @@ type Querier interface {
 	// is idempotent (Express used findOneAndUpdate with upsert; same effect).
 	// The handler validates follower != followee before calling.
 	UpsertFollow(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) error
+	// Only a newly-created relationship emits an activity and notification.
+	// Re-follow after an unfollow refreshes the existing dedupe-key notification;
+	// an idempotent retry never reaches either downstream CTE.
+	UpsertFollowWithActivity(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (bool, error)
 	// POST /api/subscriptions — create-or-update on (user_id, anilist_id).
 	// Caller MUST have ensured anime_cache row exists (else the FK kicks).
 	// ON CONFLICT only writes status — Express also only patches `status`
 	// in the upsert payload, leaving current_episode/score untouched on
 	// re-add.  RETURNING gives the canonical post-write state.
 	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (Subscription, error)
+	// Product policy is symmetric: either user's block closes interaction in both
+	// directions even though only the initiator owns the row.
+	UserBlockExists(ctx context.Context, userID uuid.UUID, otherUserID uuid.UUID) (bool, error)
+	// Directional companion for profile/UI state: true only when the first user
+	// owns the block row against the second user.
+	UserBlockedTarget(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

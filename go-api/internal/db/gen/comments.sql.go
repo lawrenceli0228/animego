@@ -19,9 +19,10 @@ INSERT INTO episode_comments (
     user_id,
     username,
     content,
+    is_spoiler,
     parent_id,
     reply_to_username
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING
     id,
     anilist_id,
@@ -32,7 +33,8 @@ RETURNING
     parent_id,
     reply_to_username,
     created_at,
-    updated_at
+    updated_at,
+    is_spoiler
 `
 
 type CreateCommentParams struct {
@@ -41,6 +43,7 @@ type CreateCommentParams struct {
 	UserID          uuid.UUID  `json:"userId"`
 	Username        string     `json:"username"`
 	Content         string     `json:"content"`
+	IsSpoiler       bool       `json:"isSpoiler"`
 	ParentID        *uuid.UUID `json:"parentId"`
 	ReplyToUsername *string    `json:"replyToUsername"`
 }
@@ -57,6 +60,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (E
 		arg.UserID,
 		arg.Username,
 		arg.Content,
+		arg.IsSpoiler,
 		arg.ParentID,
 		arg.ReplyToUsername,
 	)
@@ -68,6 +72,137 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (E
 		&i.UserID,
 		&i.Username,
 		&i.Content,
+		&i.ParentID,
+		&i.ReplyToUsername,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IsSpoiler,
+	)
+	return i, err
+}
+
+const createCommentWithActivity = `-- name: CreateCommentWithActivity :one
+WITH inserted_comment AS (
+    INSERT INTO episode_comments (
+        anilist_id,
+        episode,
+        user_id,
+        username,
+        content,
+        is_spoiler,
+        parent_id,
+        reply_to_username
+    ) VALUES (
+        $1::integer,
+        $2::integer,
+        $3::uuid,
+        $4::text,
+        $5::text,
+        $6::boolean,
+        $7::uuid,
+        $8::text
+    )
+    RETURNING id, anilist_id, episode, user_id, username, content, parent_id, reply_to_username, created_at, updated_at, is_spoiler
+), inserted_activity AS (
+    INSERT INTO activity_events (
+        user_id, event_type, anilist_id, episode, comment_id
+    )
+    SELECT user_id, 'comment', anilist_id, episode, id
+    FROM inserted_comment
+    RETURNING id
+), inserted_notification AS (
+    INSERT INTO notifications (
+        user_id,
+        actor_id,
+        notification_type,
+        comment_id,
+        activity_event_id,
+        dedupe_key
+    )
+    SELECT
+        parent.user_id,
+        comment.user_id,
+        'reply',
+        comment.id,
+        activity.id,
+        'reply:' || comment.id::text
+    FROM inserted_comment comment
+    JOIN episode_comments parent ON parent.id = comment.parent_id
+    CROSS JOIN inserted_activity activity
+    WHERE parent.user_id <> comment.user_id
+      AND NOT EXISTS (
+          SELECT 1
+          FROM user_blocks block
+          WHERE (block.blocker_id = parent.user_id
+                 AND block.blocked_id = comment.user_id)
+             OR (block.blocker_id = comment.user_id
+                 AND block.blocked_id = parent.user_id)
+      )
+    ON CONFLICT (user_id, dedupe_key) DO NOTHING
+)
+SELECT
+    id,
+    anilist_id,
+    episode,
+    user_id,
+    username,
+    content,
+    is_spoiler,
+    parent_id,
+    reply_to_username,
+    created_at,
+    updated_at
+FROM inserted_comment
+`
+
+type CreateCommentWithActivityParams struct {
+	AnilistID       int32      `json:"anilistId"`
+	Episode         int32      `json:"episode"`
+	UserID          uuid.UUID  `json:"userId"`
+	Username        string     `json:"username"`
+	Content         string     `json:"content"`
+	IsSpoiler       bool       `json:"isSpoiler"`
+	ParentID        *uuid.UUID `json:"parentId"`
+	ReplyToUsername *string    `json:"replyToUsername"`
+}
+
+type CreateCommentWithActivityRow struct {
+	ID              uuid.UUID          `json:"id"`
+	AnilistID       int32              `json:"anilistId"`
+	Episode         int32              `json:"episode"`
+	UserID          uuid.UUID          `json:"userId"`
+	Username        string             `json:"username"`
+	Content         string             `json:"content"`
+	IsSpoiler       bool               `json:"isSpoiler"`
+	ParentID        *uuid.UUID         `json:"parentId"`
+	ReplyToUsername *string            `json:"replyToUsername"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+}
+
+// Atomic community write: create the comment, append its feed event, and (for
+// a non-self reply) enqueue one deduped notification.  The parent validation
+// query remains useful for returning a friendly 400 before this is called.
+func (q *Queries) CreateCommentWithActivity(ctx context.Context, arg CreateCommentWithActivityParams) (CreateCommentWithActivityRow, error) {
+	row := q.db.QueryRow(ctx, createCommentWithActivity,
+		arg.AnilistID,
+		arg.Episode,
+		arg.UserID,
+		arg.Username,
+		arg.Content,
+		arg.IsSpoiler,
+		arg.ParentID,
+		arg.ReplyToUsername,
+	)
+	var i CreateCommentWithActivityRow
+	err := row.Scan(
+		&i.ID,
+		&i.AnilistID,
+		&i.Episode,
+		&i.UserID,
+		&i.Username,
+		&i.Content,
+		&i.IsSpoiler,
 		&i.ParentID,
 		&i.ReplyToUsername,
 		&i.CreatedAt,
@@ -131,6 +266,127 @@ func (q *Queries) GetCommentParentForValidation(ctx context.Context, iD uuid.UUI
 	return id, err
 }
 
+const listEpisodeCommentSummaries = `-- name: ListEpisodeCommentSummaries :many
+WITH counts AS (
+    SELECT episode, count(*)::bigint AS comment_count
+    FROM episode_comments comment
+    WHERE comment.anilist_id = $2::integer
+      AND (
+          $3::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = $3::uuid
+                     AND block.blocked_id = comment.user_id)
+                 OR (block.blocker_id = comment.user_id
+                     AND block.blocked_id = $3::uuid)
+          )
+      )
+    GROUP BY comment.episode
+), ranked AS (
+    SELECT
+        c.id,
+        c.episode,
+        c.user_id,
+        c.username,
+        CASE WHEN c.is_spoiler THEN '' ELSE c.content END::text AS content,
+        c.is_spoiler,
+        c.parent_id,
+        c.reply_to_username,
+        c.created_at,
+        u.avatar_url,
+        backdrop.cover_image_url AS backdrop_cover_url,
+        row_number() OVER (
+            PARTITION BY c.episode
+            ORDER BY c.created_at DESC, c.id DESC
+        ) AS preview_rank
+    FROM episode_comments c
+    LEFT JOIN users u ON u.id = c.user_id
+    LEFT JOIN anime_cache backdrop ON backdrop.anilist_id = u.backdrop_anilist_id
+    WHERE c.anilist_id = $2::integer
+      AND c.parent_id IS NULL
+      AND (
+          $3::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = $3::uuid
+                     AND block.blocked_id = c.user_id)
+                 OR (block.blocker_id = c.user_id
+                     AND block.blocked_id = $3::uuid)
+          )
+      )
+)
+SELECT
+    ranked.id,
+    ranked.episode,
+    ranked.user_id,
+    ranked.username,
+    ranked.content,
+    ranked.is_spoiler,
+    ranked.parent_id,
+    ranked.reply_to_username,
+    ranked.created_at,
+    ranked.avatar_url,
+    ranked.backdrop_cover_url,
+    counts.comment_count
+FROM ranked
+JOIN counts USING (episode)
+WHERE preview_rank <= $1::integer
+ORDER BY ranked.episode ASC, ranked.created_at DESC, ranked.id DESC
+`
+
+type ListEpisodeCommentSummariesRow struct {
+	ID               uuid.UUID          `json:"id"`
+	Episode          int32              `json:"episode"`
+	UserID           uuid.UUID          `json:"userId"`
+	Username         string             `json:"username"`
+	Content          string             `json:"content"`
+	IsSpoiler        bool               `json:"isSpoiler"`
+	ParentID         *uuid.UUID         `json:"parentId"`
+	ReplyToUsername  *string            `json:"replyToUsername"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	AvatarUrl        *string            `json:"avatarUrl"`
+	BackdropCoverUrl *string            `json:"backdropCoverUrl"`
+	CommentCount     int64              `json:"commentCount"`
+}
+
+// Comment counts plus the newest N previews per episode for an anime's episode
+// grid.  The window count avoids a second round-trip.  preview_limit is
+// deliberately caller-controlled so desktop/mobile can choose a small payload.
+func (q *Queries) ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeCommentSummaries, previewLimit, anilistID, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEpisodeCommentSummariesRow{}
+	for rows.Next() {
+		var i ListEpisodeCommentSummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Episode,
+			&i.UserID,
+			&i.Username,
+			&i.Content,
+			&i.IsSpoiler,
+			&i.ParentID,
+			&i.ReplyToUsername,
+			&i.CreatedAt,
+			&i.AvatarUrl,
+			&i.BackdropCoverUrl,
+			&i.CommentCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEpisodeComments = `-- name: ListEpisodeComments :many
 
 SELECT
@@ -140,17 +396,41 @@ SELECT
     c.user_id,
     c.username,
     c.content,
+    c.is_spoiler,
     c.parent_id,
     c.reply_to_username,
     c.created_at,
     c.updated_at,
     u.avatar_url,
-    bc.cover_image_url AS backdrop_cover_url
+    bc.cover_image_url AS backdrop_cover_url,
+    (SELECT count(*)::bigint
+     FROM comment_reactions reactions
+     WHERE reactions.comment_id = c.id) AS reaction_count,
+    (CASE
+        WHEN $3::uuid IS NULL THEN false
+        ELSE EXISTS (
+            SELECT 1
+            FROM comment_reactions viewer_reaction
+            WHERE viewer_reaction.comment_id = c.id
+              AND viewer_reaction.user_id = $3::uuid
+        )
+    END)::boolean AS viewer_reacted
 FROM episode_comments c
 LEFT JOIN users u ON u.id = c.user_id
 LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE c.anilist_id = $1
   AND c.episode = $2
+  AND (
+      $3::uuid IS NULL
+      OR NOT EXISTS (
+          SELECT 1
+          FROM user_blocks block
+          WHERE (block.blocker_id = $3::uuid
+                 AND block.blocked_id = c.user_id)
+             OR (block.blocker_id = c.user_id
+                 AND block.blocked_id = $3::uuid)
+      )
+  )
 ORDER BY c.created_at ASC
 LIMIT 500
 `
@@ -162,12 +442,15 @@ type ListEpisodeCommentsRow struct {
 	UserID           uuid.UUID          `json:"userId"`
 	Username         string             `json:"username"`
 	Content          string             `json:"content"`
+	IsSpoiler        bool               `json:"isSpoiler"`
 	ParentID         *uuid.UUID         `json:"parentId"`
 	ReplyToUsername  *string            `json:"replyToUsername"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt        pgtype.Timestamptz `json:"updatedAt"`
 	AvatarUrl        *string            `json:"avatarUrl"`
 	BackdropCoverUrl *string            `json:"backdropCoverUrl"`
+	ReactionCount    int64              `json:"reactionCount"`
+	ViewerReacted    bool               `json:"viewerReacted"`
 }
 
 // Queries against episode_comments (P2.5).
@@ -190,8 +473,8 @@ type ListEpisodeCommentsRow struct {
 // /api/comments/:anilistId/:episode — flat tree, oldest first.  Hard
 // LIMIT 500 caps abuse (Express has no limit; we add one because
 // pulling 50k rows on a popular episode would blow the response).
-func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, episode int32) ([]ListEpisodeCommentsRow, error) {
-	rows, err := q.db.Query(ctx, listEpisodeComments, anilistID, episode)
+func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, episode int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentsRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeComments, anilistID, episode, viewerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -206,12 +489,165 @@ func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, epis
 			&i.UserID,
 			&i.Username,
 			&i.Content,
+			&i.IsSpoiler,
 			&i.ParentID,
 			&i.ReplyToUsername,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AvatarUrl,
 			&i.BackdropCoverUrl,
+			&i.ReactionCount,
+			&i.ViewerReacted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTrendingDiscussions = `-- name: ListTrendingDiscussions :many
+WITH visible_comments AS (
+    SELECT c.id, c.anilist_id, c.episode, c.user_id, c.username, c.content, c.parent_id, c.reply_to_username, c.created_at, c.updated_at, c.is_spoiler
+    FROM episode_comments c
+    WHERE c.created_at >= now() - ($2::integer * interval '1 hour')
+      AND (
+          $3::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = $3::uuid
+                     AND block.blocked_id = c.user_id)
+                 OR (block.blocker_id = c.user_id
+                     AND block.blocked_id = $3::uuid)
+          )
+      )
+), discussion_stats AS (
+    SELECT
+        anilist_id,
+        episode,
+        count(*)::bigint AS comment_count,
+        count(DISTINCT user_id)::bigint AS participant_count,
+        max(created_at) AS last_comment_at
+    FROM visible_comments
+    GROUP BY anilist_id, episode
+), reaction_stats AS (
+    SELECT
+        comment.anilist_id,
+        comment.episode,
+        count(reaction.*)::bigint AS reaction_count
+    FROM visible_comments comment
+    JOIN comment_reactions reaction ON reaction.comment_id = comment.id
+    GROUP BY comment.anilist_id, comment.episode
+), latest_comments AS (
+    SELECT
+        comment.id, comment.anilist_id, comment.episode, comment.user_id, comment.username, comment.content, comment.parent_id, comment.reply_to_username, comment.created_at, comment.updated_at, comment.is_spoiler,
+        row_number() OVER (
+            PARTITION BY comment.anilist_id, comment.episode
+            ORDER BY comment.created_at DESC, comment.id DESC
+        ) AS latest_rank
+    FROM visible_comments comment
+)
+SELECT
+    stats.anilist_id,
+    stats.episode,
+    anime.title_romaji,
+    anime.title_english,
+    anime.title_native,
+    anime.title_chinese,
+    anime.cover_image_url,
+    anime.poster_accent,
+    stats.comment_count,
+    stats.participant_count,
+    COALESCE(reactions.reaction_count, 0)::bigint AS reaction_count,
+    latest.id AS latest_comment_id,
+    latest.username AS latest_username,
+    user_profile.avatar_url AS latest_avatar_url,
+    CASE WHEN latest.is_spoiler THEN '' ELSE latest.content END::text AS latest_content,
+    latest.is_spoiler AS latest_is_spoiler,
+    latest.created_at AS latest_created_at
+FROM discussion_stats stats
+JOIN latest_comments latest
+  ON latest.anilist_id = stats.anilist_id
+ AND latest.episode = stats.episode
+ AND latest.latest_rank = 1
+JOIN anime_cache anime ON anime.anilist_id = stats.anilist_id
+LEFT JOIN users user_profile ON user_profile.id = latest.user_id
+LEFT JOIN reaction_stats reactions
+  ON reactions.anilist_id = stats.anilist_id
+ AND reactions.episode = stats.episode
+ORDER BY (
+    (
+        stats.participant_count * 4
+        + stats.comment_count * 2
+        + COALESCE(reactions.reaction_count, 0)
+    )::double precision
+    / power(
+        1 + greatest(extract(epoch FROM (now() - stats.last_comment_at)) / 86400, 0),
+        1.15
+    )
+) DESC,
+stats.last_comment_at DESC,
+stats.anilist_id ASC,
+stats.episode ASC
+LIMIT $1::integer
+`
+
+type ListTrendingDiscussionsRow struct {
+	AnilistID        int32              `json:"anilistId"`
+	Episode          int32              `json:"episode"`
+	TitleRomaji      *string            `json:"titleRomaji"`
+	TitleEnglish     *string            `json:"titleEnglish"`
+	TitleNative      *string            `json:"titleNative"`
+	TitleChinese     *string            `json:"titleChinese"`
+	CoverImageUrl    *string            `json:"coverImageUrl"`
+	PosterAccent     *string            `json:"posterAccent"`
+	CommentCount     int64              `json:"commentCount"`
+	ParticipantCount int64              `json:"participantCount"`
+	ReactionCount    int64              `json:"reactionCount"`
+	LatestCommentID  uuid.UUID          `json:"latestCommentId"`
+	LatestUsername   string             `json:"latestUsername"`
+	LatestAvatarUrl  *string            `json:"latestAvatarUrl"`
+	LatestContent    string             `json:"latestContent"`
+	LatestIsSpoiler  bool               `json:"latestIsSpoiler"`
+	LatestCreatedAt  pgtype.Timestamptz `json:"latestCreatedAt"`
+}
+
+// Explainable discovery ranking for the homepage.  Participation matters more
+// than raw volume, reactions add a smaller signal, and a smooth age divisor
+// lets a fresh smaller conversation outrank an old thread without making the
+// ordering jump at a hard date boundary.  Authenticated viewers do not see
+// threads authored only by someone they blocked or were blocked by.
+func (q *Queries) ListTrendingDiscussions(ctx context.Context, pageLimit int32, windowHours int32, viewerUserID *uuid.UUID) ([]ListTrendingDiscussionsRow, error) {
+	rows, err := q.db.Query(ctx, listTrendingDiscussions, pageLimit, windowHours, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTrendingDiscussionsRow{}
+	for rows.Next() {
+		var i ListTrendingDiscussionsRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.Episode,
+			&i.TitleRomaji,
+			&i.TitleEnglish,
+			&i.TitleNative,
+			&i.TitleChinese,
+			&i.CoverImageUrl,
+			&i.PosterAccent,
+			&i.CommentCount,
+			&i.ParticipantCount,
+			&i.ReactionCount,
+			&i.LatestCommentID,
+			&i.LatestUsername,
+			&i.LatestAvatarUrl,
+			&i.LatestContent,
+			&i.LatestIsSpoiler,
+			&i.LatestCreatedAt,
 		); err != nil {
 			return nil, err
 		}

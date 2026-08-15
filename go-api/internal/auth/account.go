@@ -41,6 +41,7 @@ type updateMeReq struct {
 	Username          *string `json:"username"`
 	AvatarURL         *string `json:"avatarUrl"`
 	BackdropAnilistID *int32  `json:"backdropAnilistId"`
+	IsPublic          *bool   `json:"isPublic"`
 }
 
 // UpdateMe implements PATCH /api/auth/me.
@@ -130,6 +131,13 @@ func (h *Handlers) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := h.db.SetUserBackdrop(ctx, claims.UserID, backdrop); err != nil {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "update backdrop failed"))
+			return
+		}
+	}
+
+	if req.IsPublic != nil {
+		if err := h.db.SetUserPublic(ctx, claims.UserID, *req.IsPublic); err != nil {
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "update privacy failed"))
 			return
 		}
 	}

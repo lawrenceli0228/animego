@@ -247,6 +247,106 @@ func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscription
 	return i, err
 }
 
+const updateSubscriptionWithActivity = `-- name: UpdateSubscriptionWithActivity :one
+WITH previous AS (
+    SELECT current_episode
+    FROM subscriptions
+    WHERE user_id = $1::uuid
+      AND anilist_id = $2::integer
+    FOR UPDATE
+), updated AS (
+    UPDATE subscriptions subscription
+    SET
+        status = COALESCE($3, subscription.status),
+        current_episode = COALESCE(
+            $4::integer,
+            subscription.current_episode
+        ),
+        score = CASE
+                    WHEN $5::boolean
+                        THEN $6::integer
+                    ELSE subscription.score
+                END,
+        last_watched_at = CASE
+                              WHEN $4::integer IS NOT NULL
+                                  THEN now()
+                              ELSE subscription.last_watched_at
+                          END,
+        updated_at = now()
+    FROM previous
+    WHERE subscription.user_id = $1::uuid
+      AND subscription.anilist_id = $2::integer
+    RETURNING subscription.user_id, subscription.anilist_id, subscription.status, subscription.current_episode, subscription.score, subscription.last_watched_at, subscription.created_at, subscription.updated_at, previous.current_episode AS previous_episode
+), inserted_activity AS (
+    INSERT INTO activity_events (user_id, event_type, anilist_id, episode)
+    SELECT
+        user_id,
+        'watch_progress',
+        anilist_id,
+        current_episode
+    FROM updated
+    WHERE $4::integer IS NOT NULL
+      AND current_episode IS DISTINCT FROM previous_episode
+    RETURNING id
+)
+SELECT
+    user_id,
+    anilist_id,
+    status,
+    current_episode,
+    score,
+    last_watched_at,
+    created_at,
+    updated_at
+FROM updated
+`
+
+type UpdateSubscriptionWithActivityParams struct {
+	UserID         uuid.UUID `json:"userId"`
+	AnilistID      int32     `json:"anilistId"`
+	Status         *string   `json:"status"`
+	CurrentEpisode *int32    `json:"currentEpisode"`
+	ScoreSet       bool      `json:"scoreSet"`
+	Score          *int32    `json:"score"`
+}
+
+type UpdateSubscriptionWithActivityRow struct {
+	UserID         uuid.UUID          `json:"userId"`
+	AnilistID      int32              `json:"anilistId"`
+	Status         string             `json:"status"`
+	CurrentEpisode int32              `json:"currentEpisode"`
+	Score          *int32             `json:"score"`
+	LastWatchedAt  pgtype.Timestamptz `json:"lastWatchedAt"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
+}
+
+// Lock the previous value, apply the selective update, and append a watch event
+// only when the caller supplied a genuinely different episode.  This prevents
+// retries/status-only patches from manufacturing duplicate feed entries.
+func (q *Queries) UpdateSubscriptionWithActivity(ctx context.Context, arg UpdateSubscriptionWithActivityParams) (UpdateSubscriptionWithActivityRow, error) {
+	row := q.db.QueryRow(ctx, updateSubscriptionWithActivity,
+		arg.UserID,
+		arg.AnilistID,
+		arg.Status,
+		arg.CurrentEpisode,
+		arg.ScoreSet,
+		arg.Score,
+	)
+	var i UpdateSubscriptionWithActivityRow
+	err := row.Scan(
+		&i.UserID,
+		&i.AnilistID,
+		&i.Status,
+		&i.CurrentEpisode,
+		&i.Score,
+		&i.LastWatchedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertSubscription = `-- name: UpsertSubscription :one
 INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
 VALUES ($1, $2, $3, now())

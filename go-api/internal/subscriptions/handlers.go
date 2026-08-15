@@ -55,7 +55,14 @@ type SubscriptionsDB interface {
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error)
 	GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.Subscription, error)
 	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
-	UpdateSubscription(ctx context.Context, arg dbgen.UpdateSubscriptionParams) (dbgen.Subscription, error)
+	// UpdateSubscriptionWithActivity is the only PATCH path.  Its CTE
+	// writes the subscription row AND appends the watch_progress
+	// activity event in one statement, so the feed can never drift from
+	// the progress it is supposed to describe.  The plain
+	// UpdateSubscription query still exists in dbgen but is deliberately
+	// not part of this interface — an implementation that silently
+	// skipped the activity write would empty the feed with no error.
+	UpdateSubscriptionWithActivity(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 }
 
@@ -284,11 +291,11 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 //  3. Parse body via parseUpdateBody so we can distinguish
 //     `{"score":null}` (clear) from `{}` (no change).
 //  4. Validate the parsed struct.
-//  5. Build UpdateSubscriptionParams with the ScoreSet flag set IFF the
-//     "score" key was present in the body.
-//  6. Run UpdateSubscription; pgx.ErrNoRows → 404 (matches Express's
-//     findOneAndUpdate returning null).
-//  7. 200 with the post-update Subscription row.
+//  5. Build UpdateSubscriptionWithActivityParams with the ScoreSet flag
+//     set IFF the "score" key was present in the body.
+//  6. Run UpdateSubscriptionWithActivity; pgx.ErrNoRows → 404 (matches
+//     Express's findOneAndUpdate returning null).
+//  7. 200 with the post-update subscription row.
 //
 // Express's empty-body behaviour: returns the existing row unchanged.
 // Our SQL's COALESCE pattern handles this naturally — every field stays
@@ -316,16 +323,18 @@ func (h *Handlers) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	params := dbgen.UpdateSubscriptionParams{
+	// Concrete row type, not `any`: the response shape of PATCH is part of
+	// the FE contract, so it has to be something the compiler can check.
+	// Widening the CTE's RETURNING list should break here, not silently
+	// reshape the JSON.
+	sub, err := h.Queries.UpdateSubscriptionWithActivity(ctx, dbgen.UpdateSubscriptionWithActivityParams{
 		Status:         req.Status,
 		CurrentEpisode: req.CurrentEpisode,
 		ScoreSet:       req.scorePresent,
 		Score:          clampScore(req.Score),
 		UserID:         claims.UserID,
 		AnilistID:      anilistID,
-	}
-
-	sub, err := h.Queries.UpdateSubscription(ctx, params)
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgSubscriptionNotFound))

@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authFetch } from "@/lib/authFetch";
-import type { Lang } from "@/lib/i18n";
+import { useLang } from "@/lib/lang-client";
 import MemberPass from "@/components/profile/MemberPass";
 import PhotoCropModal from "@/components/profile/PhotoCropModal";
 import { downscaleImage } from "@/components/profile/imageDownscale";
@@ -13,6 +13,8 @@ import type { BackdropOption } from "@/components/profile/backdropTypes";
 import { DEFAULT_CARD_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
 import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
+import { settingsErrorMessage } from "./settingsState";
+import BlockedUsersList from "./BlockedUsersList";
 import "./settings.css";
 
 interface SettingsClientProps {
@@ -24,7 +26,7 @@ interface SettingsClientProps {
   backdropOptions: BackdropOption[];
   watchedCount: number;
   topSeason: string | null;
-  lang: Lang;
+  isPublic: boolean;
 }
 
 type Status = { kind: "idle" | "saving" | "ok" | "err"; msg?: string };
@@ -34,7 +36,10 @@ interface PatchResult {
   error?: string;
 }
 
-async function patchMe(body: Record<string, unknown>): Promise<PatchResult> {
+async function patchMe(
+  body: Record<string, unknown>,
+  zh: boolean,
+): Promise<PatchResult> {
   try {
     const r = await authFetch("/api/auth/me", {
       method: "PATCH",
@@ -43,10 +48,13 @@ async function patchMe(body: Record<string, unknown>): Promise<PatchResult> {
       skipRedirectOnFailure: true,
     });
     if (r.ok) return { ok: true };
-    const e = await r.json().catch(() => null);
-    return { ok: false, error: e?.error ?? e?.message ?? "保存失败" };
+    const errorBody: unknown = await r.json().catch(() => null);
+    return {
+      ok: false,
+      error: settingsErrorMessage(errorBody, zh ? "保存失败" : "Save failed"),
+    };
   } catch {
-    return { ok: false, error: "网络错误" };
+    return { ok: false, error: zh ? "网络错误" : "Network error" };
   }
 }
 
@@ -59,9 +67,10 @@ export default function SettingsClient({
   backdropOptions,
   watchedCount,
   topSeason,
-  lang,
+  isPublic,
 }: SettingsClientProps) {
   const router = useRouter();
+  const { lang, t } = useLang();
   const zh = lang === "zh";
   const memberNo = makeMemberNo(userId);
   const since = sinceLabel(createdAt);
@@ -73,6 +82,8 @@ export default function SettingsClient({
   const [backdropId, setBackdropId] = useState<number | null>(backdropAnilistId);
   const [cropOpen, setCropOpen] = useState(false);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [publicProfile, setPublicProfile] = useState(isPublic);
+  const [privacyStatus, setPrivacyStatus] = useState<Status>({ kind: "idle" });
   const fileRef = useRef<HTMLInputElement>(null);
 
   const chosen =
@@ -97,7 +108,7 @@ export default function SettingsClient({
       return;
     }
     setNameStatus({ kind: "saving" });
-    const res = await patchMe({ username: v });
+    const res = await patchMe({ username: v }, zh);
     if (res.ok) {
       setNameStatus({ kind: "ok", msg: zh ? "已保存" : "Saved" });
       router.refresh();
@@ -148,7 +159,7 @@ export default function SettingsClient({
     if (backdropChanged) body.backdropAnilistId = backdropId ?? 0;
     if (Object.keys(body).length === 0) return;
     setPassStatus({ kind: "saving" });
-    const res = await patchMe(body);
+    const res = await patchMe(body, zh);
     if (res.ok) {
       setPassStatus({ kind: "ok", msg: zh ? "已保存" : "Saved" });
       router.refresh();
@@ -156,6 +167,19 @@ export default function SettingsClient({
       setPassStatus({ kind: "err", msg: res.error });
     }
   }, [photoChanged, backdropChanged, photoUrl, backdropId, zh, router]);
+
+  const savePrivacy = useCallback(async () => {
+    if (publicProfile === isPublic) return;
+    setPrivacyStatus({ kind: "saving" });
+    const res = await patchMe({ isPublic: publicProfile }, zh);
+    if (res.ok) {
+      setPrivacyStatus({ kind: "ok", msg: t("settings.saved") });
+      router.refresh();
+    } else {
+      setPublicProfile(isPublic);
+      setPrivacyStatus({ kind: "err", msg: res.error });
+    }
+  }, [isPublic, publicProfile, router, t, zh]);
 
   const msgEl = (s: Status) =>
     s.kind === "ok" || s.kind === "err" ? (
@@ -256,14 +280,17 @@ export default function SettingsClient({
                     : "No anime with a wide banner in your list yet"}
                 </p>
               ) : (
-                <div className="set-grid-thumbs" role="listbox">
+                <div
+                  className="set-grid-thumbs"
+                  role="listbox"
+                  aria-label={zh ? "主页背景番剧" : "Profile backdrop anime"}
+                >
                   {bannerOptions.map((o) => (
                     <button
                       key={o.anilistId}
                       type="button"
                       className="set-cell"
                       role="option"
-                      aria-pressed={o.anilistId === backdropId}
                       aria-selected={o.anilistId === backdropId}
                       title={o.title}
                       onClick={() => pickBackdrop(o.anilistId)}
@@ -327,6 +354,56 @@ export default function SettingsClient({
               </button>
               {msgEl(nameStatus)}
             </div>
+          </section>
+
+          {/* security: password changes go through the email reset flow */}
+          <section className="set-card">
+            <h2>{t("settings.communityTitle")}</h2>
+            <p className="sub">{t("settings.communitySubtitle")}</p>
+            <label
+              htmlFor="set-public-profile"
+              style={{
+                display: "flex",
+                gap: 14,
+                alignItems: "flex-start",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                id="set-public-profile"
+                type="checkbox"
+                checked={publicProfile}
+                onChange={(event) => {
+                  setPublicProfile(event.target.checked);
+                  setPrivacyStatus({ kind: "idle" });
+                }}
+                style={{ width: 18, height: 18, marginTop: 2, accentColor: "#0a84ff" }}
+              />
+              <span>
+                <b style={{ display: "block", color: "#fff", fontSize: 13.5, marginBottom: 4 }}>
+                  {t("settings.publicProfile")}
+                </b>
+                <span style={{ display: "block", color: "rgba(235,235,245,0.48)", fontSize: 12.5, lineHeight: 1.55 }}>
+                  {publicProfile
+                    ? t("settings.publicProfileOn")
+                    : t("settings.publicProfileOff")}
+                </span>
+              </span>
+            </label>
+            <div className="set-actions" style={{ marginTop: 18 }}>
+              <button
+                type="button"
+                className="set-btn"
+                disabled={privacyStatus.kind === "saving" || publicProfile === isPublic}
+                onClick={() => void savePrivacy()}
+              >
+                {privacyStatus.kind === "saving"
+                  ? t("settings.saving")
+                  : t("settings.savePrivacy")}
+              </button>
+              {msgEl(privacyStatus)}
+            </div>
+            <BlockedUsersList />
           </section>
 
           {/* security: password changes go through the email reset flow */}

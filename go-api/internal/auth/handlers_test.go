@@ -49,10 +49,10 @@ type fakeAuthDB struct {
 
 	// RotateRefreshToken captures the (id, newToken) call so tests can assert
 	// that the rotation happened (or didn't happen on a grace hit).
-	rotateRefreshTokenFn        func(ctx context.Context, id uuid.UUID, refreshToken *string) error
-	rotateRefreshCalledWith     *string
-	rotateRefreshCalledID       uuid.UUID
-	rotateRefreshCallCount      int
+	rotateRefreshTokenFn    func(ctx context.Context, id uuid.UUID, refreshToken *string) error
+	rotateRefreshCalledWith *string
+	rotateRefreshCalledID   uuid.UUID
+	rotateRefreshCallCount  int
 
 	// Password-reset trio (P2.2.1).  Each Fn is optional — unset Fn
 	// panics on invocation so a test that forgets to wire one fails
@@ -71,6 +71,11 @@ type fakeAuthDB struct {
 	resetPasswordCalledID       uuid.UUID
 	resetPasswordCalledPassword string
 	resetPasswordCallCount      int
+
+	setUserPublicFn        func(ctx context.Context, id uuid.UUID, isPublic bool) error
+	setUserPublicCalledID  uuid.UUID
+	setUserPublicCalledVal bool
+	setUserPublicCallCount int
 }
 
 func (f *fakeAuthDB) CreateUser(ctx context.Context, username, email, password string) (dbgen.User, error) {
@@ -182,6 +187,15 @@ func (f *fakeAuthDB) SetUserAvatar(ctx context.Context, id uuid.UUID, avatarUrl 
 }
 func (f *fakeAuthDB) SetUserBackdrop(ctx context.Context, id uuid.UUID, backdropAnilistID *int32) error {
 	return nil
+}
+func (f *fakeAuthDB) SetUserPublic(ctx context.Context, id uuid.UUID, isPublic bool) error {
+	f.setUserPublicCalledID = id
+	f.setUserPublicCalledVal = isPublic
+	f.setUserPublicCallCount++
+	if f.setUserPublicFn == nil {
+		return nil
+	}
+	return f.setUserPublicFn(ctx, id, isPublic)
 }
 func (f *fakeAuthDB) UpdateUserPassword(ctx context.Context, id uuid.UUID, password string) error {
 	return nil
@@ -2077,5 +2091,36 @@ func TestLogout_NullsBothTokenColumns(t *testing.T) {
 	// RotateRefreshToken must NOT have been called.
 	if db.rotateRefreshCallCount != 0 {
 		t.Errorf("RotateRefreshToken called %d times on logout, want 0", db.rotateRefreshCallCount)
+	}
+}
+
+func TestUpdateMe_UpdatesPrivacyFlag(t *testing.T) {
+	t.Parallel()
+
+	user := fixtureUser(t)
+	user.IsPublic = false
+	db := &fakeAuthDB{
+		getUserByID: func(_ context.Context, id uuid.UUID) (dbgen.User, error) {
+			if id != user.ID {
+				t.Fatalf("GetUserByID id = %s, want %s", id, user.ID)
+			}
+			return user, nil
+		},
+	}
+	h := NewHandlers(db, newTestSigner(t), nil, "http://localhost:3000", 15*time.Minute, 7*24*time.Hour, false)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/auth/me", bytes.NewBufferString(`{"isPublic":false}`))
+	req = req.WithContext(injectClaims(req.Context(), user.ID, user.Username, user.Role))
+	rec := httptest.NewRecorder()
+	h.UpdateMe(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if db.setUserPublicCallCount != 1 || db.setUserPublicCalledID != user.ID || db.setUserPublicCalledVal {
+		t.Fatalf("SetUserPublic calls=%d id=%s value=%v", db.setUserPublicCallCount, db.setUserPublicCalledID, db.setUserPublicCalledVal)
+	}
+	if !strings.Contains(rec.Body.String(), `"isPublic":false`) {
+		t.Fatalf("response does not reflect privacy setting: %s", rec.Body.String())
 	}
 }

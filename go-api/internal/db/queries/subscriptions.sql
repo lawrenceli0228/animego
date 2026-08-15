@@ -87,6 +87,62 @@ RETURNING
     created_at,
     updated_at;
 
+-- name: UpdateSubscriptionWithActivity :one
+-- Lock the previous value, apply the selective update, and append a watch event
+-- only when the caller supplied a genuinely different episode.  This prevents
+-- retries/status-only patches from manufacturing duplicate feed entries.
+WITH previous AS (
+    SELECT current_episode
+    FROM subscriptions
+    WHERE user_id = sqlc.arg('user_id')::uuid
+      AND anilist_id = sqlc.arg('anilist_id')::integer
+    FOR UPDATE
+), updated AS (
+    UPDATE subscriptions subscription
+    SET
+        status = COALESCE(sqlc.narg('status'), subscription.status),
+        current_episode = COALESCE(
+            sqlc.narg('current_episode')::integer,
+            subscription.current_episode
+        ),
+        score = CASE
+                    WHEN sqlc.arg('score_set')::boolean
+                        THEN sqlc.narg('score')::integer
+                    ELSE subscription.score
+                END,
+        last_watched_at = CASE
+                              WHEN sqlc.narg('current_episode')::integer IS NOT NULL
+                                  THEN now()
+                              ELSE subscription.last_watched_at
+                          END,
+        updated_at = now()
+    FROM previous
+    WHERE subscription.user_id = sqlc.arg('user_id')::uuid
+      AND subscription.anilist_id = sqlc.arg('anilist_id')::integer
+    RETURNING subscription.*, previous.current_episode AS previous_episode
+), inserted_activity AS (
+    INSERT INTO activity_events (user_id, event_type, anilist_id, episode)
+    SELECT
+        user_id,
+        'watch_progress',
+        anilist_id,
+        current_episode
+    FROM updated
+    WHERE sqlc.narg('current_episode')::integer IS NOT NULL
+      AND current_episode IS DISTINCT FROM previous_episode
+    RETURNING id
+)
+SELECT
+    user_id,
+    anilist_id,
+    status,
+    current_episode,
+    score,
+    last_watched_at,
+    created_at,
+    updated_at
+FROM updated;
+
 -- name: UpdateSubscription :one
 -- PATCH /api/subscriptions/:anilistId — selective update.
 -- COALESCE pattern keeps unchanged columns untouched.  `last_watched_at`

@@ -9,8 +9,8 @@ package subscriptions
 //   - status filter pass-through to SQL (and the empty-match fallback)
 //   - per-user isolation via the (user_id, anilist_id) PK
 //   - UPSERT idempotence on ON CONFLICT
-//   - the CASE expression in UpdateSubscription (last_watched_at only
-//     bumps when current_episode is set)
+//   - the CASE expression in UpdateSubscriptionWithActivity
+//     (last_watched_at only bumps when current_episode is set)
 //   - DELETE actually removes the row
 //
 // Per-test isolation comes from testutil.TruncateAll on pgHandlers.

@@ -14,9 +14,11 @@ import (
 
 const countFeedActivities = `-- name: CountFeedActivities :one
 SELECT count(*) AS total
-FROM subscriptions
-WHERE user_id = ANY($1::uuid[])
-  AND last_watched_at IS NOT NULL
+FROM activity_events event
+JOIN users u ON u.id = event.user_id
+WHERE event.user_id = ANY($1::uuid[])
+  AND u.is_public = true
+  AND event.event_type IN ('watch_progress', 'comment')
 `
 
 // Total for pagination — same filter as ListFeedActivities sans paging.
@@ -117,7 +119,7 @@ func (q *Queries) GetProfileCounts(ctx context.Context, userID uuid.UUID) (GetPr
 
 const getUserIDByUsername = `-- name: GetUserIDByUsername :one
 
-SELECT id, username, created_at, avatar_url, backdrop_anilist_id
+SELECT id, username, created_at, avatar_url, backdrop_anilist_id, is_public
 FROM users
 WHERE username = $1
 `
@@ -128,6 +130,7 @@ type GetUserIDByUsernameRow struct {
 	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
 	AvatarUrl         *string            `json:"avatarUrl"`
 	BackdropAnilistID *int32             `json:"backdropAnilistId"`
+	IsPublic          bool               `json:"isPublic"`
 }
 
 // Queries for the social surface (P2.4) — follows + public profile + feed.
@@ -156,45 +159,75 @@ func (q *Queries) GetUserIDByUsername(ctx context.Context, username string) (Get
 		&i.CreatedAt,
 		&i.AvatarUrl,
 		&i.BackdropAnilistID,
+		&i.IsPublic,
 	)
 	return i, err
 }
 
 const listFeedActivities = `-- name: ListFeedActivities :many
 SELECT
-    s.anilist_id,
-    s.status,
-    s.current_episode,
-    s.last_watched_at,
+    event.id AS activity_id,
+    event.event_type,
+    event.user_id,
+    COALESCE(event.anilist_id, 0)::integer AS anilist_id,
+    COALESCE(event.episode, 0)::integer AS current_episode,
+    event.comment_id,
+    event.target_user_id,
+    event.created_at,
+    COALESCE(subscription.status, '')::text AS status,
+    event.created_at AS last_watched_at,
     u.username,
+    u.avatar_url,
     a.title_romaji,
     a.title_chinese,
-    a.cover_image_url
-FROM subscriptions s
-JOIN users u ON u.id = s.user_id
-LEFT JOIN anime_cache a ON a.anilist_id = s.anilist_id
-WHERE s.user_id = ANY($1::uuid[])
-  AND s.last_watched_at IS NOT NULL
-ORDER BY s.last_watched_at DESC
+    a.cover_image_url,
+    visible_comment.content AS comment_content,
+    COALESCE(comment.is_spoiler, false)::boolean AS comment_is_spoiler,
+    target.username AS target_username,
+    target.avatar_url AS target_avatar_url
+FROM activity_events event
+JOIN users u ON u.id = event.user_id
+LEFT JOIN subscriptions subscription
+  ON subscription.user_id = event.user_id
+ AND subscription.anilist_id = event.anilist_id
+LEFT JOIN anime_cache a ON a.anilist_id = event.anilist_id
+LEFT JOIN episode_comments comment ON comment.id = event.comment_id
+LEFT JOIN episode_comments visible_comment
+  ON visible_comment.id = event.comment_id
+ AND visible_comment.is_spoiler = false
+LEFT JOIN users target ON target.id = event.target_user_id
+WHERE event.user_id = ANY($1::uuid[])
+  AND u.is_public = true
+  AND event.event_type IN ('watch_progress', 'comment')
+ORDER BY event.created_at DESC, event.id DESC
 LIMIT $2 OFFSET $3
 `
 
 type ListFeedActivitiesRow struct {
-	AnilistID      int32              `json:"anilistId"`
-	Status         string             `json:"status"`
-	CurrentEpisode int32              `json:"currentEpisode"`
-	LastWatchedAt  pgtype.Timestamptz `json:"lastWatchedAt"`
-	Username       string             `json:"username"`
-	TitleRomaji    *string            `json:"titleRomaji"`
-	TitleChinese   *string            `json:"titleChinese"`
-	CoverImageUrl  *string            `json:"coverImageUrl"`
+	ActivityID       uuid.UUID          `json:"activityId"`
+	EventType        string             `json:"eventType"`
+	UserID           uuid.UUID          `json:"userId"`
+	AnilistID        int32              `json:"anilistId"`
+	CurrentEpisode   int32              `json:"currentEpisode"`
+	CommentID        *uuid.UUID         `json:"commentId"`
+	TargetUserID     *uuid.UUID         `json:"targetUserId"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	Status           string             `json:"status"`
+	LastWatchedAt    pgtype.Timestamptz `json:"lastWatchedAt"`
+	Username         string             `json:"username"`
+	AvatarUrl        *string            `json:"avatarUrl"`
+	TitleRomaji      *string            `json:"titleRomaji"`
+	TitleChinese     *string            `json:"titleChinese"`
+	CoverImageUrl    *string            `json:"coverImageUrl"`
+	CommentContent   *string            `json:"commentContent"`
+	CommentIsSpoiler bool               `json:"commentIsSpoiler"`
+	TargetUsername   *string            `json:"targetUsername"`
+	TargetAvatarUrl  *string            `json:"targetAvatarUrl"`
 }
 
-// Step 2 of /api/feed: most-recent watching activities of the supplied
-// followee_ids.  Filters out rows where last_watched_at IS NULL
-// (subscriptions that never had an episode marked).  JOINs users for
-// the username + anime_cache for the card columns.  Ordered by the
-// watch event time DESC so the feed reads chronologically.
+// Step 2 of /api/feed: append-only activities of the supplied followees.
+// Follow events are stored for future community surfaces but excluded from
+// this first feed contract, whose cards always link to an anime episode.
 func (q *Queries) ListFeedActivities(ctx context.Context, column1 []uuid.UUID, limit int32, offset int32) ([]ListFeedActivitiesRow, error) {
 	rows, err := q.db.Query(ctx, listFeedActivities, column1, limit, offset)
 	if err != nil {
@@ -205,14 +238,25 @@ func (q *Queries) ListFeedActivities(ctx context.Context, column1 []uuid.UUID, l
 	for rows.Next() {
 		var i ListFeedActivitiesRow
 		if err := rows.Scan(
+			&i.ActivityID,
+			&i.EventType,
+			&i.UserID,
 			&i.AnilistID,
-			&i.Status,
 			&i.CurrentEpisode,
+			&i.CommentID,
+			&i.TargetUserID,
+			&i.CreatedAt,
+			&i.Status,
 			&i.LastWatchedAt,
 			&i.Username,
+			&i.AvatarUrl,
 			&i.TitleRomaji,
 			&i.TitleChinese,
 			&i.CoverImageUrl,
+			&i.CommentContent,
+			&i.CommentIsSpoiler,
+			&i.TargetUsername,
+			&i.TargetAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -227,9 +271,17 @@ func (q *Queries) ListFeedActivities(ctx context.Context, column1 []uuid.UUID, l
 const listFeedFolloweeIDs = `-- name: ListFeedFolloweeIDs :many
 
 SELECT followee_id
-FROM follows
-WHERE follower_id = $1
-ORDER BY created_at DESC
+FROM follows follow
+WHERE follow.follower_id = $1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM user_blocks block
+      WHERE (block.blocker_id = follow.follower_id
+             AND block.blocked_id = follow.followee_id)
+         OR (block.blocker_id = follow.followee_id
+             AND block.blocked_id = follow.follower_id)
+  )
+ORDER BY follow.created_at DESC
 LIMIT 500
 `
 
@@ -453,7 +505,13 @@ func (q *Queries) ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]
 const upsertFollow = `-- name: UpsertFollow :exec
 
 INSERT INTO follows (follower_id, followee_id)
-VALUES ($1, $2)
+SELECT $1, $2
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM user_blocks block
+    WHERE (block.blocker_id = $1 AND block.blocked_id = $2)
+       OR (block.blocker_id = $2 AND block.blocked_id = $1)
+)
 ON CONFLICT (follower_id, followee_id) DO NOTHING
 `
 
@@ -464,4 +522,59 @@ ON CONFLICT (follower_id, followee_id) DO NOTHING
 func (q *Queries) UpsertFollow(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, upsertFollow, followerID, followeeID)
 	return err
+}
+
+const upsertFollowWithActivity = `-- name: UpsertFollowWithActivity :one
+WITH inserted_follow AS (
+    INSERT INTO follows (follower_id, followee_id)
+    SELECT
+        $1::uuid,
+        $2::uuid
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM user_blocks block
+        WHERE (block.blocker_id = $1::uuid
+               AND block.blocked_id = $2::uuid)
+           OR (block.blocker_id = $2::uuid
+               AND block.blocked_id = $1::uuid)
+    )
+    ON CONFLICT (follower_id, followee_id) DO NOTHING
+    RETURNING follower_id, followee_id
+), inserted_activity AS (
+    INSERT INTO activity_events (user_id, event_type, target_user_id)
+    SELECT follower_id, 'follow', followee_id
+    FROM inserted_follow
+    RETURNING id, user_id, target_user_id
+), inserted_notification AS (
+    INSERT INTO notifications (
+        user_id,
+        actor_id,
+        notification_type,
+        activity_event_id,
+        dedupe_key
+    )
+    SELECT
+        target_user_id,
+        user_id,
+        'follow',
+        id,
+        'follow:' || user_id::text
+    FROM inserted_activity
+    ON CONFLICT (user_id, dedupe_key) DO UPDATE
+    SET actor_id = EXCLUDED.actor_id,
+        activity_event_id = EXCLUDED.activity_event_id,
+        read_at = NULL,
+        created_at = now()
+)
+SELECT EXISTS (SELECT 1 FROM inserted_follow)::boolean AS inserted
+`
+
+// Only a newly-created relationship emits an activity and notification.
+// Re-follow after an unfollow refreshes the existing dedupe-key notification;
+// an idempotent retry never reaches either downstream CTE.
+func (q *Queries) UpsertFollowWithActivity(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, upsertFollowWithActivity, followerID, followeeID)
+	var inserted bool
+	err := row.Scan(&inserted)
+	return inserted, err
 }

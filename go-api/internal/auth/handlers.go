@@ -139,6 +139,7 @@ type AuthDB interface {
 	UpdateUsername(ctx context.Context, id uuid.UUID, username string) (dbgen.User, error)
 	SetUserAvatar(ctx context.Context, id uuid.UUID, avatarUrl *string) error
 	SetUserBackdrop(ctx context.Context, id uuid.UUID, backdropAnilistID *int32) error
+	SetUserPublic(ctx context.Context, id uuid.UUID, isPublic bool) error
 	UpdateUserPassword(ctx context.Context, id uuid.UUID, password string) error
 
 	// GetAnimeImages resolves the chosen backdrop anime → banner + cover so
