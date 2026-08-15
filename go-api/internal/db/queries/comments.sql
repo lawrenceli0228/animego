@@ -26,6 +26,7 @@ SELECT
     c.user_id,
     c.username,
     c.content,
+    c.is_spoiler,
     c.parent_id,
     c.reply_to_username,
     c.created_at,
@@ -49,6 +50,17 @@ LEFT JOIN users u ON u.id = c.user_id
 LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE c.anilist_id = $1
   AND c.episode = $2
+  AND (
+      sqlc.narg('viewer_user_id')::uuid IS NULL
+      OR NOT EXISTS (
+          SELECT 1
+          FROM user_blocks block
+          WHERE (block.blocker_id = sqlc.narg('viewer_user_id')::uuid
+                 AND block.blocked_id = c.user_id)
+             OR (block.blocker_id = c.user_id
+                 AND block.blocked_id = sqlc.narg('viewer_user_id')::uuid)
+      )
+  )
 ORDER BY c.created_at ASC
 LIMIT 500;
 
@@ -58,16 +70,28 @@ LIMIT 500;
 -- deliberately caller-controlled so desktop/mobile can choose a small payload.
 WITH counts AS (
     SELECT episode, count(*)::bigint AS comment_count
-    FROM episode_comments
-    WHERE anilist_id = sqlc.arg('anilist_id')::integer
-    GROUP BY episode
+    FROM episode_comments comment
+    WHERE comment.anilist_id = sqlc.arg('anilist_id')::integer
+      AND (
+          sqlc.narg('viewer_user_id')::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = sqlc.narg('viewer_user_id')::uuid
+                     AND block.blocked_id = comment.user_id)
+                 OR (block.blocker_id = comment.user_id
+                     AND block.blocked_id = sqlc.narg('viewer_user_id')::uuid)
+          )
+      )
+    GROUP BY comment.episode
 ), ranked AS (
     SELECT
         c.id,
         c.episode,
         c.user_id,
         c.username,
-        c.content,
+        CASE WHEN c.is_spoiler THEN '' ELSE c.content END::text AS content,
+        c.is_spoiler,
         c.parent_id,
         c.reply_to_username,
         c.created_at,
@@ -82,6 +106,17 @@ WITH counts AS (
     LEFT JOIN anime_cache backdrop ON backdrop.anilist_id = u.backdrop_anilist_id
     WHERE c.anilist_id = sqlc.arg('anilist_id')::integer
       AND c.parent_id IS NULL
+      AND (
+          sqlc.narg('viewer_user_id')::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = sqlc.narg('viewer_user_id')::uuid
+                     AND block.blocked_id = c.user_id)
+                 OR (block.blocker_id = c.user_id
+                     AND block.blocked_id = sqlc.narg('viewer_user_id')::uuid)
+          )
+      )
 )
 SELECT
     ranked.id,
@@ -89,6 +124,7 @@ SELECT
     ranked.user_id,
     ranked.username,
     ranked.content,
+    ranked.is_spoiler,
     ranked.parent_id,
     ranked.reply_to_username,
     ranked.created_at,
@@ -112,9 +148,10 @@ INSERT INTO episode_comments (
     user_id,
     username,
     content,
+    is_spoiler,
     parent_id,
     reply_to_username
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING
     id,
     anilist_id,
@@ -125,7 +162,8 @@ RETURNING
     parent_id,
     reply_to_username,
     created_at,
-    updated_at;
+    updated_at,
+    is_spoiler;
 
 -- name: CreateCommentWithActivity :one
 -- Atomic community write: create the comment, append its feed event, and (for
@@ -138,6 +176,7 @@ WITH inserted_comment AS (
         user_id,
         username,
         content,
+        is_spoiler,
         parent_id,
         reply_to_username
     ) VALUES (
@@ -146,6 +185,7 @@ WITH inserted_comment AS (
         sqlc.arg('user_id')::uuid,
         sqlc.arg('username')::text,
         sqlc.arg('content')::text,
+        sqlc.arg('is_spoiler')::boolean,
         sqlc.narg('parent_id')::uuid,
         sqlc.narg('reply_to_username')::text
     )
@@ -177,6 +217,14 @@ WITH inserted_comment AS (
     JOIN episode_comments parent ON parent.id = comment.parent_id
     CROSS JOIN inserted_activity activity
     WHERE parent.user_id <> comment.user_id
+      AND NOT EXISTS (
+          SELECT 1
+          FROM user_blocks block
+          WHERE (block.blocker_id = parent.user_id
+                 AND block.blocked_id = comment.user_id)
+             OR (block.blocker_id = comment.user_id
+                 AND block.blocked_id = parent.user_id)
+      )
     ON CONFLICT (user_id, dedupe_key) DO NOTHING
 )
 SELECT
@@ -186,6 +234,7 @@ SELECT
     user_id,
     username,
     content,
+    is_spoiler,
     parent_id,
     reply_to_username,
     created_at,

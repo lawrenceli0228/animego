@@ -22,7 +22,7 @@ const (
 )
 
 type commentCommunityDB interface {
-	ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32) ([]dbgen.ListEpisodeCommentSummariesRow, error)
+	ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32, viewerUserID *uuid.UUID) ([]dbgen.ListEpisodeCommentSummariesRow, error)
 	UpsertCommentReactionWithNotification(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.UpsertCommentReactionWithNotificationRow, error)
 	DeleteCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (dbgen.DeleteCommentReactionRow, error)
 }
@@ -34,6 +34,7 @@ type commentSummaryPreview struct {
 	AvatarURL        *string            `json:"avatarUrl"`
 	BackdropCoverURL *string            `json:"backdropCoverUrl"`
 	Content          string             `json:"content"`
+	IsSpoiler        bool               `json:"isSpoiler"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
 }
 
@@ -74,7 +75,11 @@ func (h *Handlers) ListCommentSummaries(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-	rows, err := db.ListEpisodeCommentSummaries(ctx, int32(preview), int32(anilistID))
+	var viewerUserID *uuid.UUID
+	if claims, ok := jwtx.ClaimsFrom(r.Context()); ok && claims != nil {
+		viewerUserID = &claims.UserID
+	}
+	rows, err := db.ListEpisodeCommentSummaries(ctx, int32(preview), int32(anilistID), viewerUserID)
 	if err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "comment summary query failed"))
 		return
@@ -100,6 +105,7 @@ func (h *Handlers) ListCommentSummaries(w http.ResponseWriter, r *http.Request) 
 			AvatarURL:        row.AvatarUrl,
 			BackdropCoverURL: row.BackdropCoverUrl,
 			Content:          row.Content,
+			IsSpoiler:        row.IsSpoiler,
 			CreatedAt:        row.CreatedAt,
 		})
 	}
@@ -138,13 +144,25 @@ func (h *Handlers) setCommentReaction(w http.ResponseWriter, r *http.Request, re
 
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-	if _, err := h.Queries.GetCommentByID(ctx, commentID); err != nil {
+	comment, err := h.Queries.GetCommentByID(ctx, commentID)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgCommentNotFound))
 			return
 		}
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "comment lookup failed"))
 		return
+	}
+	if blockDB, ok := h.Queries.(commentBlockDB); ok {
+		blocked, err := blockDB.UserBlockExists(ctx, claims.UserID, comment.UserID)
+		if err != nil {
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
+			return
+		}
+		if blocked {
+			httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
+			return
+		}
 	}
 
 	var response commentReactionResponse

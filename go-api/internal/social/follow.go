@@ -62,6 +62,17 @@ func (h *Handlers) Follow(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeInvalidAction, msgCannotFollowSelf))
 		return
 	}
+	if safetyDB, ok := h.Queries.(socialSafetyDB); ok {
+		blocked, err := safetyDB.UserBlockExists(ctx, claims.UserID, followee.ID)
+		if err != nil {
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
+			return
+		}
+		if blocked {
+			httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
+			return
+		}
+	}
 
 	var writeErr error
 	if activityDB, ok := h.Queries.(interface {

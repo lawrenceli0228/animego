@@ -27,9 +27,17 @@ func (q *Queries) CountCommentReactions(ctx context.Context, commentID uuid.UUID
 
 const countUnreadNotifications = `-- name: CountUnreadNotifications :one
 SELECT count(*)::bigint AS unread_count
-FROM notifications
-WHERE user_id = $1
-  AND read_at IS NULL
+FROM notifications notification
+WHERE notification.user_id = $1
+  AND notification.read_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM user_blocks block
+      WHERE (block.blocker_id = notification.user_id
+             AND block.blocked_id = notification.actor_id)
+         OR (block.blocker_id = notification.actor_id
+             AND block.blocked_id = notification.user_id)
+  )
 `
 
 func (q *Queries) CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error) {
@@ -244,15 +252,25 @@ SELECT
     actor.avatar_url AS actor_avatar_url,
     c.anilist_id,
     c.episode,
-    c.content AS comment_content,
+    visible_comment.content AS comment_content,
+    COALESCE(c.is_spoiler, false)::boolean AS comment_is_spoiler,
     a.title_romaji,
     a.title_chinese,
     a.cover_image_url
 FROM notifications n
 JOIN users actor ON actor.id = n.actor_id
 LEFT JOIN episode_comments c ON c.id = n.comment_id
+LEFT JOIN episode_comments visible_comment
+    ON visible_comment.id = n.comment_id
+   AND visible_comment.is_spoiler = false
 LEFT JOIN anime_cache a ON a.anilist_id = c.anilist_id
 WHERE n.user_id = $1::uuid
+  AND NOT EXISTS (
+      SELECT 1
+      FROM user_blocks block
+      WHERE (block.blocker_id = n.user_id AND block.blocked_id = n.actor_id)
+         OR (block.blocker_id = n.actor_id AND block.blocked_id = n.user_id)
+  )
 ORDER BY n.created_at DESC, n.id DESC
 LIMIT $2::integer
 `
@@ -270,6 +288,7 @@ type ListNotificationsRow struct {
 	AnilistID        *int32             `json:"anilistId"`
 	Episode          *int32             `json:"episode"`
 	CommentContent   *string            `json:"commentContent"`
+	CommentIsSpoiler bool               `json:"commentIsSpoiler"`
 	TitleRomaji      *string            `json:"titleRomaji"`
 	TitleChinese     *string            `json:"titleChinese"`
 	CoverImageUrl    *string            `json:"coverImageUrl"`
@@ -297,6 +316,7 @@ func (q *Queries) ListNotifications(ctx context.Context, userID uuid.UUID, pageL
 			&i.AnilistID,
 			&i.Episode,
 			&i.CommentContent,
+			&i.CommentIsSpoiler,
 			&i.TitleRomaji,
 			&i.TitleChinese,
 			&i.CoverImageUrl,
@@ -410,6 +430,14 @@ WITH target_comment AS (
     FROM target_comment target
     JOIN upserted ON upserted.comment_id = target.id
     WHERE target.user_id <> $2::uuid
+      AND NOT EXISTS (
+          SELECT 1
+          FROM user_blocks block
+          WHERE (block.blocker_id = target.user_id
+                 AND block.blocked_id = $2::uuid)
+             OR (block.blocker_id = $2::uuid
+                 AND block.blocked_id = target.user_id)
+      )
     ON CONFLICT (user_id, dedupe_key) DO NOTHING
 )
 SELECT

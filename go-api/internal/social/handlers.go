@@ -72,6 +72,11 @@ type SocialDB interface {
 	CountFeedActivities(ctx context.Context, followeeIDs []uuid.UUID) (int64, error)
 }
 
+type socialSafetyDB interface {
+	UserBlockExists(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error)
+	UserBlockedTarget(ctx context.Context, blockerID, blockedID uuid.UUID) (bool, error)
+}
+
 // Handlers carries the deps shared by every social handler.  Construct
 // once at startup via NewHandlers and register each method on the chi
 // router behind the appropriate auth middleware (OptionalAuth for the

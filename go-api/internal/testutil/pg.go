@@ -56,6 +56,9 @@ var allTables = []string{
 	"activity_events",
 	"notifications",
 	"comment_reactions",
+	// Community safety tables (migration 0019).
+	"user_blocks",
+	"reports",
 	"danmakus",
 	"episode_windows",
 	// Enrichment match-accuracy tables (migration 0011).

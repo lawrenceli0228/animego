@@ -44,6 +44,11 @@ type Querier interface {
 	// score/votes so the bad data disappears immediately; bangumi_version=0
 	// re-queues them via the orphan scan / a follow-up V1 enqueue.
 	BackfillResetRows(ctx context.Context, dollar_1 []int32) error
+	// Community safety data access introduced by migration 0019.
+	// Blocking is one atomic boundary: create the directional block and sever all
+	// social/notification edges between the two users. Repeating the request is
+	// idempotent and still cleans up any stale edges.
+	BlockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (BlockUserRow, error)
 	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
 	CountBgmIdMap(ctx context.Context) (int64, error)
 	CountCommentReactions(ctx context.Context, commentID uuid.UUID) (int64, error)
@@ -74,6 +79,9 @@ type Querier interface {
 	// a non-self reply) enqueue one deduped notification.  The parent validation
 	// query remains useful for returning a friendly 400 before this is called.
 	CreateCommentWithActivity(ctx context.Context, arg CreateCommentWithActivityParams) (CreateCommentWithActivityRow, error)
+	// A repeated report while the first is pending returns that canonical report.
+	// Once moderation moves it out of pending the reporter may file a new report.
+	CreatePendingReport(ctx context.Context, arg CreatePendingReportParams) (CreatePendingReportRow, error)
 	// Queries against the users table.  Auth flow (register / login / refresh
 	// / logout / me) drives the read+write contract.  Password reset adds
 	// token-keyed reads + multi-column update.
@@ -541,7 +549,7 @@ type Querier interface {
 	// Comment counts plus the newest N previews per episode for an anime's episode
 	// grid.  The window count avoids a second round-trip.  preview_limit is
 	// deliberately caller-controlled so desktop/mobile can choose a small payload.
-	ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32) ([]ListEpisodeCommentSummariesRow, error)
+	ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentSummariesRow, error)
 	// Queries against episode_comments (P2.5).
 	//
 	// Express's controller returns a flat list sorted by created_at ASC
@@ -599,11 +607,14 @@ type Querier interface {
 	// Express; the join is the same shape as the subscriptions list query
 	// but only returns the cardview projection.
 	ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]ListProfileWatchingRow, error)
+	// Passing NULL report_status returns the entire moderation queue.
+	ListReports(ctx context.Context, reportStatus *string, pageOffset int32, pageLimit int32) ([]ListReportsRow, error)
 	// Boot-time orphan scan: returns anilist_ids of rows where
 	// bangumi_version=0 (never enriched).  Paginated via limit/offset so
 	// the caller can batch-enqueue without loading the whole table into
 	// memory.  Ordered by anilist_id ASC for deterministic batching.
 	ListUnenrichedAnilistIDs(ctx context.Context, limit int32, offset int32) ([]int32, error)
+	ListUserBlocks(ctx context.Context, blockerID uuid.UUID, limit int32, offset int32) ([]ListUserBlocksRow, error)
 	// Queries against the subscriptions table (P2.4).
 	//
 	// The subscriptions table has a (user_id, anilist_id) composite PK + FKs
@@ -734,6 +745,7 @@ type Querier interface {
 	// entry doesn't leave a stale row behind.  Runs in the same tx as the COPY
 	// so the table is never observably empty to concurrent readers.
 	TruncateBgmIdMap(ctx context.Context) error
+	UnblockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (int64, error)
 	// Phase 2 character enrichment: match by anime_id + (name_en OR name_ja).
 	// Bangumi character.name is typically Japanese (e.g. "天使ヶ原恵") while
 	// AniList stores it under name_ja; some AniList entries have English/
@@ -804,6 +816,7 @@ type Querier interface {
 	// manual, or even an earlier llm value.  The reverse covenant (bangumi
 	// replacing llm) lives in ListDescriptionCnCandidates + UpdateDescriptionCn.
 	UpdateDescriptionCnLlm(ctx context.Context, descriptionCn *string, anilistID int32) error
+	UpdateReport(ctx context.Context, reportStatus string, resolutionNote *string, reviewedBy uuid.UUID, reportID uuid.UUID) (Report, error)
 	// PATCH /api/subscriptions/:anilistId — selective update.
 	// COALESCE pattern keeps unchanged columns untouched.  `last_watched_at`
 	// only bumps when current_episode is explicitly set, matching Express
@@ -871,6 +884,12 @@ type Querier interface {
 	// in the upsert payload, leaving current_episode/score untouched on
 	// re-add.  RETURNING gives the canonical post-write state.
 	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (Subscription, error)
+	// Product policy is symmetric: either user's block closes interaction in both
+	// directions even though only the initiator owns the row.
+	UserBlockExists(ctx context.Context, userID uuid.UUID, otherUserID uuid.UUID) (bool, error)
+	// Directional companion for profile/UI state: true only when the first user
+	// owns the block row against the second user.
+	UserBlockedTarget(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

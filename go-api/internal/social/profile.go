@@ -73,9 +73,11 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 	isPrivate := !user.IsPublic && !isOwner
 
 	var (
-		counts        dbgen.GetProfileCountsRow
-		watchingRows  []dbgen.ListProfileWatchingRow
-		isFollowingDB bool
+		counts            dbgen.GetProfileCountsRow
+		watchingRows      []dbgen.ListProfileWatchingRow
+		isFollowingDB     bool
+		isBlockedDB       bool
+		blockedByViewerDB bool
 	)
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -108,6 +110,23 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 			isFollowingDB = got
 			return nil
 		})
+		if !isOwner {
+			if safetyDB, ok := h.Queries.(socialSafetyDB); ok {
+				g.Go(func() error {
+					blocked, err := safetyDB.UserBlockExists(gctx, rid, user.ID)
+					if err != nil {
+						return err
+					}
+					blockedByViewer, err := safetyDB.UserBlockedTarget(gctx, rid, user.ID)
+					if err != nil {
+						return err
+					}
+					isBlockedDB = blocked
+					blockedByViewerDB = blockedByViewer
+					return nil
+				})
+			}
+		}
 	}
 	if err := g.Wait(); err != nil {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "profile query failed"))
@@ -120,6 +139,12 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 		v := isFollowingDB
 		isFollowing = &v
 	}
+	if isBlockedDB {
+		watchingRows = nil
+		isFollowingValue := false
+		isFollowing = &isFollowingValue
+		isPrivate = true
+	}
 
 	httpx.Data(w, http.StatusOK, profileResponse{
 		ID:                user.ID.String(),
@@ -130,6 +155,8 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 		FollowerCount:     counts.FollowerCount,
 		FollowingCount:    counts.FollowingCount,
 		IsFollowing:       isFollowing,
+		IsBlocked:         isBlockedDB,
+		BlockedByViewer:   blockedByViewerDB,
 		IsPrivate:         isPrivate,
 		Watching:          mapWatching(watchingRows),
 	})

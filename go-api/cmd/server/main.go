@@ -53,6 +53,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 	"github.com/lawrenceli0228/animego/go-api/internal/notifications"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
+	"github.com/lawrenceli0228/animego/go-api/internal/safety"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
 	"github.com/lawrenceli0228/animego/go-api/internal/subscriptions"
 	"github.com/lawrenceli0228/animego/go-api/internal/torrents"
@@ -339,6 +340,18 @@ func main() {
 	}
 	authRateLimit := auth.NewRateLimiter(authRateLimitMax, 15*time.Minute)
 	defer authRateLimit.Stop()
+	// Refresh traffic gets its own, larger bucket. Several open tabs may all
+	// discover an expired access token at once; sharing the 10-attempt
+	// credential bucket let those harmless refreshes lock the user out of the
+	// login form for 15 minutes.
+	refreshRateLimitMax := 120
+	if v := os.Getenv("AUTH_REFRESH_RATELIMIT_MAX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			refreshRateLimitMax = n
+		}
+	}
+	refreshRateLimit := auth.NewRateLimiter(refreshRateLimitMax, 15*time.Minute)
+	defer refreshRateLimit.Stop()
 
 	// Admin handler bundles — P2.3.
 	//   read:        /api/admin/{stats,enrichment,users}
@@ -577,6 +590,7 @@ func main() {
 	// (P2.8), so only the read endpoint lives here.
 	commentsHandlers := comments.NewHandlers(pool, q)
 	notificationHandlers := notifications.NewHandlers(q)
+	safetyHandlers := safety.NewHandlers(q)
 	danmakuHandlers := danmaku.NewHandlers(pool, q)
 
 	// P2.6 — dandanplay 3-phase match.  Independent rate limiter
@@ -656,7 +670,7 @@ func main() {
 	r.Route("/api/auth", func(r chi.Router) {
 		r.With(authRateLimit.Middleware()).Post("/register", authHandlers.Register)
 		r.With(authRateLimit.Middleware()).Post("/login", authHandlers.Login)
-		r.With(authRateLimit.Middleware()).Post("/refresh", authHandlers.Refresh)
+		r.With(refreshRateLimit.Middleware()).Post("/refresh", authHandlers.Refresh)
 		r.With(authRateLimit.Middleware()).Post("/forgot-password", authHandlers.ForgotPassword)
 		r.With(authRateLimit.Middleware()).Post("/reset-password/{token}", authHandlers.ResetPassword)
 		r.With(jwtx.RequireAuth(signer)).Post("/logout", authHandlers.Logout)
@@ -694,6 +708,8 @@ func main() {
 		r.With(jwtx.OptionalAuth(signer)).Get("/{username}", socialHandlers.GetProfile)
 		r.With(jwtx.RequireAuth(signer)).Post("/{username}/follow", socialHandlers.Follow)
 		r.With(jwtx.RequireAuth(signer)).Delete("/{username}/follow", socialHandlers.Unfollow)
+		r.With(jwtx.RequireAuth(signer)).Put("/{username}/block", safetyHandlers.Block)
+		r.With(jwtx.RequireAuth(signer)).Delete("/{username}/block", safetyHandlers.Unblock)
 		r.Get("/{username}/followers", socialHandlers.ListFollowers)
 		r.Get("/{username}/following", socialHandlers.ListFollowing)
 	})
@@ -713,7 +729,7 @@ func main() {
 	// later `{id}` registration silently.  Mount DELETE at the parent
 	// scope so the two route shapes live in separate trees.
 	r.Route("/api/comments", func(r chi.Router) {
-		r.Get("/summary/{anilistId}", commentsHandlers.ListCommentSummaries)
+		r.With(jwtx.OptionalAuth(signer)).Get("/summary/{anilistId}", commentsHandlers.ListCommentSummaries)
 		r.With(jwtx.OptionalAuth(signer)).Get("/{anilistId}/{episode}", commentsHandlers.ListComments)
 		r.With(jwtx.RequireAuth(signer)).Post("/{anilistId}/{episode}", commentsHandlers.AddComment)
 	})
@@ -728,6 +744,9 @@ func main() {
 		r.Post("/read-all", notificationHandlers.MarkAllRead)
 		r.Patch("/{id}/read", notificationHandlers.MarkRead)
 	})
+
+	r.With(jwtx.RequireAuth(signer)).Get("/api/blocks", safetyHandlers.ListBlocks)
+	r.With(jwtx.RequireAuth(signer)).Post("/api/reports", safetyHandlers.CreateReport)
 
 	// P2.5 — historical danmaku list (1 endpoint).  Public read.
 	// Writes go through socket.io (P2.8, ws-server).
@@ -756,6 +775,8 @@ func main() {
 		r.Get("/stats", adminReadHandlers.GetStats)
 		r.Get("/enrichment", adminReadHandlers.ListEnrichment)
 		r.Get("/users", adminReadHandlers.ListUsers)
+		r.Get("/reports", safetyHandlers.ListReports)
+		r.Patch("/reports/{id}", safetyHandlers.UpdateReport)
 
 		// Enrichment writes — static paths first to keep chi happy.
 		r.Post("/enrichment/re-enrich", adminEnrichmentHandlers.ReEnrich)

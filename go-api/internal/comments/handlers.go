@@ -61,6 +61,10 @@ type commentActivityDB interface {
 	CreateCommentWithActivity(ctx context.Context, arg dbgen.CreateCommentWithActivityParams) (dbgen.CreateCommentWithActivityRow, error)
 }
 
+type commentBlockDB interface {
+	UserBlockExists(ctx context.Context, userID, otherUserID uuid.UUID) (bool, error)
+}
+
 // Handlers carries the deps shared by every comment handler.  Construct
 // once at startup via NewHandlers and register each method on the chi
 // router behind the appropriate auth middleware (public for ListComments,
@@ -103,6 +107,7 @@ func NewHandlers(pool *pgxpool.Pool, queries CommentsDB) *Handlers {
 // with no CHECK).
 type addCommentReq struct {
 	Content         string     `json:"content"`
+	IsSpoiler       bool       `json:"isSpoiler"`
 	ParentID        *uuid.UUID `json:"parentId"`
 	ReplyToUsername *string    `json:"replyToUsername"`
 }
@@ -220,6 +225,22 @@ func (h *Handlers) AddComment(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "parent lookup failed"))
 			return
 		}
+		if blockDB, ok := h.Queries.(commentBlockDB); ok {
+			parent, parentErr := h.Queries.GetCommentByID(ctx, *req.ParentID)
+			if parentErr != nil {
+				httpx.Fail(w, httpx.WrapError(parentErr, http.StatusInternalServerError, httpx.CodeServerError, "parent author lookup failed"))
+				return
+			}
+			blocked, blockErr := blockDB.UserBlockExists(ctx, claims.UserID, parent.UserID)
+			if blockErr != nil {
+				httpx.Fail(w, httpx.WrapError(blockErr, http.StatusInternalServerError, httpx.CodeServerError, "block lookup failed"))
+				return
+			}
+			if blocked {
+				httpx.Fail(w, httpx.NewError(http.StatusForbidden, httpx.CodeForbidden, "Interaction unavailable"))
+				return
+			}
+		}
 	}
 
 	var row any
@@ -231,6 +252,7 @@ func (h *Handlers) AddComment(w http.ResponseWriter, r *http.Request) {
 			UserID:          claims.UserID,
 			Username:        claims.Username,
 			Content:         trimmed,
+			IsSpoiler:       req.IsSpoiler,
 			ParentID:        req.ParentID,
 			ReplyToUsername: req.ReplyToUsername,
 		})
@@ -243,6 +265,7 @@ func (h *Handlers) AddComment(w http.ResponseWriter, r *http.Request) {
 			UserID:          claims.UserID,
 			Username:        claims.Username,
 			Content:         trimmed,
+			IsSpoiler:       req.IsSpoiler,
 			ParentID:        req.ParentID,
 			ReplyToUsername: req.ReplyToUsername,
 		})

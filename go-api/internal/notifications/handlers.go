@@ -89,6 +89,7 @@ type itemResponse struct {
 	Episode   *int32             `json:"episode"`
 	CommentID *uuid.UUID         `json:"commentId"`
 	Excerpt   *string            `json:"excerpt"`
+	IsSpoiler bool               `json:"isSpoiler"`
 	CreatedAt pgtype.Timestamptz `json:"createdAt"`
 	ReadAt    pgtype.Timestamptz `json:"readAt"`
 }
@@ -145,6 +146,7 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 			Episode:   row.Episode,
 			CommentID: row.CommentID,
 			Excerpt:   row.CommentContent,
+			IsSpoiler: row.CommentIsSpoiler,
 			CreatedAt: row.CreatedAt,
 			ReadAt:    row.ReadAt,
 		}

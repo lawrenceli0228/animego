@@ -145,6 +145,7 @@ func mapFeedRows(rows []dbgen.ListFeedActivitiesRow) []feedItem {
 			Content:        row.CommentContent,
 			Excerpt:        row.CommentContent,
 			TargetUsername: row.TargetUsername,
+			IsSpoiler:      row.CommentIsSpoiler,
 		}
 	}
 	return out

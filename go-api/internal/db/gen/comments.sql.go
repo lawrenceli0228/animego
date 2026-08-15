@@ -19,9 +19,10 @@ INSERT INTO episode_comments (
     user_id,
     username,
     content,
+    is_spoiler,
     parent_id,
     reply_to_username
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING
     id,
     anilist_id,
@@ -32,7 +33,8 @@ RETURNING
     parent_id,
     reply_to_username,
     created_at,
-    updated_at
+    updated_at,
+    is_spoiler
 `
 
 type CreateCommentParams struct {
@@ -41,6 +43,7 @@ type CreateCommentParams struct {
 	UserID          uuid.UUID  `json:"userId"`
 	Username        string     `json:"username"`
 	Content         string     `json:"content"`
+	IsSpoiler       bool       `json:"isSpoiler"`
 	ParentID        *uuid.UUID `json:"parentId"`
 	ReplyToUsername *string    `json:"replyToUsername"`
 }
@@ -57,6 +60,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (E
 		arg.UserID,
 		arg.Username,
 		arg.Content,
+		arg.IsSpoiler,
 		arg.ParentID,
 		arg.ReplyToUsername,
 	)
@@ -72,6 +76,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (E
 		&i.ReplyToUsername,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsSpoiler,
 	)
 	return i, err
 }
@@ -84,6 +89,7 @@ WITH inserted_comment AS (
         user_id,
         username,
         content,
+        is_spoiler,
         parent_id,
         reply_to_username
     ) VALUES (
@@ -92,10 +98,11 @@ WITH inserted_comment AS (
         $3::uuid,
         $4::text,
         $5::text,
-        $6::uuid,
-        $7::text
+        $6::boolean,
+        $7::uuid,
+        $8::text
     )
-    RETURNING id, anilist_id, episode, user_id, username, content, parent_id, reply_to_username, created_at, updated_at
+    RETURNING id, anilist_id, episode, user_id, username, content, parent_id, reply_to_username, created_at, updated_at, is_spoiler
 ), inserted_activity AS (
     INSERT INTO activity_events (
         user_id, event_type, anilist_id, episode, comment_id
@@ -123,6 +130,14 @@ WITH inserted_comment AS (
     JOIN episode_comments parent ON parent.id = comment.parent_id
     CROSS JOIN inserted_activity activity
     WHERE parent.user_id <> comment.user_id
+      AND NOT EXISTS (
+          SELECT 1
+          FROM user_blocks block
+          WHERE (block.blocker_id = parent.user_id
+                 AND block.blocked_id = comment.user_id)
+             OR (block.blocker_id = comment.user_id
+                 AND block.blocked_id = parent.user_id)
+      )
     ON CONFLICT (user_id, dedupe_key) DO NOTHING
 )
 SELECT
@@ -132,6 +147,7 @@ SELECT
     user_id,
     username,
     content,
+    is_spoiler,
     parent_id,
     reply_to_username,
     created_at,
@@ -145,6 +161,7 @@ type CreateCommentWithActivityParams struct {
 	UserID          uuid.UUID  `json:"userId"`
 	Username        string     `json:"username"`
 	Content         string     `json:"content"`
+	IsSpoiler       bool       `json:"isSpoiler"`
 	ParentID        *uuid.UUID `json:"parentId"`
 	ReplyToUsername *string    `json:"replyToUsername"`
 }
@@ -156,6 +173,7 @@ type CreateCommentWithActivityRow struct {
 	UserID          uuid.UUID          `json:"userId"`
 	Username        string             `json:"username"`
 	Content         string             `json:"content"`
+	IsSpoiler       bool               `json:"isSpoiler"`
 	ParentID        *uuid.UUID         `json:"parentId"`
 	ReplyToUsername *string            `json:"replyToUsername"`
 	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
@@ -172,6 +190,7 @@ func (q *Queries) CreateCommentWithActivity(ctx context.Context, arg CreateComme
 		arg.UserID,
 		arg.Username,
 		arg.Content,
+		arg.IsSpoiler,
 		arg.ParentID,
 		arg.ReplyToUsername,
 	)
@@ -183,6 +202,7 @@ func (q *Queries) CreateCommentWithActivity(ctx context.Context, arg CreateComme
 		&i.UserID,
 		&i.Username,
 		&i.Content,
+		&i.IsSpoiler,
 		&i.ParentID,
 		&i.ReplyToUsername,
 		&i.CreatedAt,
@@ -249,16 +269,28 @@ func (q *Queries) GetCommentParentForValidation(ctx context.Context, iD uuid.UUI
 const listEpisodeCommentSummaries = `-- name: ListEpisodeCommentSummaries :many
 WITH counts AS (
     SELECT episode, count(*)::bigint AS comment_count
-    FROM episode_comments
-    WHERE anilist_id = $2::integer
-    GROUP BY episode
+    FROM episode_comments comment
+    WHERE comment.anilist_id = $2::integer
+      AND (
+          $3::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = $3::uuid
+                     AND block.blocked_id = comment.user_id)
+                 OR (block.blocker_id = comment.user_id
+                     AND block.blocked_id = $3::uuid)
+          )
+      )
+    GROUP BY comment.episode
 ), ranked AS (
     SELECT
         c.id,
         c.episode,
         c.user_id,
         c.username,
-        c.content,
+        CASE WHEN c.is_spoiler THEN '' ELSE c.content END::text AS content,
+        c.is_spoiler,
         c.parent_id,
         c.reply_to_username,
         c.created_at,
@@ -273,6 +305,17 @@ WITH counts AS (
     LEFT JOIN anime_cache backdrop ON backdrop.anilist_id = u.backdrop_anilist_id
     WHERE c.anilist_id = $2::integer
       AND c.parent_id IS NULL
+      AND (
+          $3::uuid IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM user_blocks block
+              WHERE (block.blocker_id = $3::uuid
+                     AND block.blocked_id = c.user_id)
+                 OR (block.blocker_id = c.user_id
+                     AND block.blocked_id = $3::uuid)
+          )
+      )
 )
 SELECT
     ranked.id,
@@ -280,6 +323,7 @@ SELECT
     ranked.user_id,
     ranked.username,
     ranked.content,
+    ranked.is_spoiler,
     ranked.parent_id,
     ranked.reply_to_username,
     ranked.created_at,
@@ -298,6 +342,7 @@ type ListEpisodeCommentSummariesRow struct {
 	UserID           uuid.UUID          `json:"userId"`
 	Username         string             `json:"username"`
 	Content          string             `json:"content"`
+	IsSpoiler        bool               `json:"isSpoiler"`
 	ParentID         *uuid.UUID         `json:"parentId"`
 	ReplyToUsername  *string            `json:"replyToUsername"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
@@ -309,8 +354,8 @@ type ListEpisodeCommentSummariesRow struct {
 // Comment counts plus the newest N previews per episode for an anime's episode
 // grid.  The window count avoids a second round-trip.  preview_limit is
 // deliberately caller-controlled so desktop/mobile can choose a small payload.
-func (q *Queries) ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32) ([]ListEpisodeCommentSummariesRow, error) {
-	rows, err := q.db.Query(ctx, listEpisodeCommentSummaries, previewLimit, anilistID)
+func (q *Queries) ListEpisodeCommentSummaries(ctx context.Context, previewLimit int32, anilistID int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeCommentSummaries, previewLimit, anilistID, viewerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +369,7 @@ func (q *Queries) ListEpisodeCommentSummaries(ctx context.Context, previewLimit 
 			&i.UserID,
 			&i.Username,
 			&i.Content,
+			&i.IsSpoiler,
 			&i.ParentID,
 			&i.ReplyToUsername,
 			&i.CreatedAt,
@@ -350,6 +396,7 @@ SELECT
     c.user_id,
     c.username,
     c.content,
+    c.is_spoiler,
     c.parent_id,
     c.reply_to_username,
     c.created_at,
@@ -373,6 +420,17 @@ LEFT JOIN users u ON u.id = c.user_id
 LEFT JOIN anime_cache bc ON bc.anilist_id = u.backdrop_anilist_id
 WHERE c.anilist_id = $1
   AND c.episode = $2
+  AND (
+      $3::uuid IS NULL
+      OR NOT EXISTS (
+          SELECT 1
+          FROM user_blocks block
+          WHERE (block.blocker_id = $3::uuid
+                 AND block.blocked_id = c.user_id)
+             OR (block.blocker_id = c.user_id
+                 AND block.blocked_id = $3::uuid)
+      )
+  )
 ORDER BY c.created_at ASC
 LIMIT 500
 `
@@ -384,6 +442,7 @@ type ListEpisodeCommentsRow struct {
 	UserID           uuid.UUID          `json:"userId"`
 	Username         string             `json:"username"`
 	Content          string             `json:"content"`
+	IsSpoiler        bool               `json:"isSpoiler"`
 	ParentID         *uuid.UUID         `json:"parentId"`
 	ReplyToUsername  *string            `json:"replyToUsername"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
@@ -430,6 +489,7 @@ func (q *Queries) ListEpisodeComments(ctx context.Context, anilistID int32, epis
 			&i.UserID,
 			&i.Username,
 			&i.Content,
+			&i.IsSpoiler,
 			&i.ParentID,
 			&i.ReplyToUsername,
 			&i.CreatedAt,

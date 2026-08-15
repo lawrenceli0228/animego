@@ -39,6 +39,7 @@ type EpisodeComment struct {
 	ReplyToUsername *string            `json:"replyToUsername"`
 	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+	IsSpoiler       bool               `json:"isSpoiler"`
 }
 
 type EpisodeWindow struct {
@@ -57,6 +58,23 @@ type Notification struct {
 	DedupeKey        string             `json:"dedupeKey"`
 	ReadAt           pgtype.Timestamptz `json:"readAt"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+}
+
+type Report struct {
+	ID              uuid.UUID          `json:"id"`
+	ReporterID      uuid.UUID          `json:"reporterId"`
+	TargetType      string             `json:"targetType"`
+	TargetCommentID *uuid.UUID         `json:"targetCommentId"`
+	TargetUserID    *uuid.UUID         `json:"targetUserId"`
+	TargetSnapshot  []byte             `json:"targetSnapshot"`
+	Reason          string             `json:"reason"`
+	Details         *string            `json:"details"`
+	Status          string             `json:"status"`
+	ResolutionNote  *string            `json:"resolutionNote"`
+	ReviewedBy      *uuid.UUID         `json:"reviewedBy"`
+	ReviewedAt      pgtype.Timestamptz `json:"reviewedAt"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type Subscription struct {

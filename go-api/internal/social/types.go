@@ -48,6 +48,8 @@ type profileResponse struct {
 	FollowerCount     int64              `json:"followerCount"`
 	FollowingCount    int64              `json:"followingCount"`
 	IsFollowing       *bool              `json:"isFollowing"`
+	IsBlocked         bool               `json:"isBlocked"`
+	BlockedByViewer   bool               `json:"blockedByViewer"`
 	IsPrivate         bool               `json:"isPrivate"`
 	Watching          []watchingItem     `json:"watching"`
 }
@@ -139,6 +141,7 @@ type feedItem struct {
 	Content        *string            `json:"content"`
 	Excerpt        *string            `json:"excerpt"`
 	TargetUsername *string            `json:"targetUsername"`
+	IsSpoiler      bool               `json:"isSpoiler"`
 }
 
 // feedResponse is the top-level envelope for GET /api/feed.

@@ -27,7 +27,13 @@ WHERE username = $1;
 -- is idempotent (Express used findOneAndUpdate with upsert; same effect).
 -- The handler validates follower != followee before calling.
 INSERT INTO follows (follower_id, followee_id)
-VALUES ($1, $2)
+SELECT $1, $2
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM user_blocks block
+    WHERE (block.blocker_id = $1 AND block.blocked_id = $2)
+       OR (block.blocker_id = $2 AND block.blocked_id = $1)
+)
 ON CONFLICT (follower_id, followee_id) DO NOTHING;
 
 -- name: UpsertFollowWithActivity :one
@@ -36,9 +42,16 @@ ON CONFLICT (follower_id, followee_id) DO NOTHING;
 -- an idempotent retry never reaches either downstream CTE.
 WITH inserted_follow AS (
     INSERT INTO follows (follower_id, followee_id)
-    VALUES (
+    SELECT
         sqlc.arg('follower_id')::uuid,
         sqlc.arg('followee_id')::uuid
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM user_blocks block
+        WHERE (block.blocker_id = sqlc.arg('follower_id')::uuid
+               AND block.blocked_id = sqlc.arg('followee_id')::uuid)
+           OR (block.blocker_id = sqlc.arg('followee_id')::uuid
+               AND block.blocked_id = sqlc.arg('follower_id')::uuid)
     )
     ON CONFLICT (follower_id, followee_id) DO NOTHING
     RETURNING follower_id, followee_id
@@ -183,9 +196,17 @@ LIMIT 200;
 -- beyond that and the feed degrades (older activities drop off the
 -- bottom; rare in practice for a watch-list site).
 SELECT followee_id
-FROM follows
-WHERE follower_id = $1
-ORDER BY created_at DESC
+FROM follows follow
+WHERE follow.follower_id = $1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM user_blocks block
+      WHERE (block.blocker_id = follow.follower_id
+             AND block.blocked_id = follow.followee_id)
+         OR (block.blocker_id = follow.followee_id
+             AND block.blocked_id = follow.follower_id)
+  )
+ORDER BY follow.created_at DESC
 LIMIT 500;
 
 -- name: ListFeedActivities :many
@@ -208,7 +229,8 @@ SELECT
     a.title_romaji,
     a.title_chinese,
     a.cover_image_url,
-    comment.content AS comment_content,
+    visible_comment.content AS comment_content,
+    COALESCE(comment.is_spoiler, false)::boolean AS comment_is_spoiler,
     target.username AS target_username,
     target.avatar_url AS target_avatar_url
 FROM activity_events event
@@ -218,6 +240,9 @@ LEFT JOIN subscriptions subscription
  AND subscription.anilist_id = event.anilist_id
 LEFT JOIN anime_cache a ON a.anilist_id = event.anilist_id
 LEFT JOIN episode_comments comment ON comment.id = event.comment_id
+LEFT JOIN episode_comments visible_comment
+  ON visible_comment.id = event.comment_id
+ AND visible_comment.is_spoiler = false
 LEFT JOIN users target ON target.id = event.target_user_id
 WHERE event.user_id = ANY($1::uuid[])
   AND u.is_public = true

@@ -181,7 +181,8 @@ SELECT
     a.title_romaji,
     a.title_chinese,
     a.cover_image_url,
-    comment.content AS comment_content,
+    visible_comment.content AS comment_content,
+    COALESCE(comment.is_spoiler, false)::boolean AS comment_is_spoiler,
     target.username AS target_username,
     target.avatar_url AS target_avatar_url
 FROM activity_events event
@@ -191,6 +192,9 @@ LEFT JOIN subscriptions subscription
  AND subscription.anilist_id = event.anilist_id
 LEFT JOIN anime_cache a ON a.anilist_id = event.anilist_id
 LEFT JOIN episode_comments comment ON comment.id = event.comment_id
+LEFT JOIN episode_comments visible_comment
+  ON visible_comment.id = event.comment_id
+ AND visible_comment.is_spoiler = false
 LEFT JOIN users target ON target.id = event.target_user_id
 WHERE event.user_id = ANY($1::uuid[])
   AND u.is_public = true
@@ -200,24 +204,25 @@ LIMIT $2 OFFSET $3
 `
 
 type ListFeedActivitiesRow struct {
-	ActivityID      uuid.UUID          `json:"activityId"`
-	EventType       string             `json:"eventType"`
-	UserID          uuid.UUID          `json:"userId"`
-	AnilistID       int32              `json:"anilistId"`
-	CurrentEpisode  int32              `json:"currentEpisode"`
-	CommentID       *uuid.UUID         `json:"commentId"`
-	TargetUserID    *uuid.UUID         `json:"targetUserId"`
-	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
-	Status          string             `json:"status"`
-	LastWatchedAt   pgtype.Timestamptz `json:"lastWatchedAt"`
-	Username        string             `json:"username"`
-	AvatarUrl       *string            `json:"avatarUrl"`
-	TitleRomaji     *string            `json:"titleRomaji"`
-	TitleChinese    *string            `json:"titleChinese"`
-	CoverImageUrl   *string            `json:"coverImageUrl"`
-	CommentContent  *string            `json:"commentContent"`
-	TargetUsername  *string            `json:"targetUsername"`
-	TargetAvatarUrl *string            `json:"targetAvatarUrl"`
+	ActivityID       uuid.UUID          `json:"activityId"`
+	EventType        string             `json:"eventType"`
+	UserID           uuid.UUID          `json:"userId"`
+	AnilistID        int32              `json:"anilistId"`
+	CurrentEpisode   int32              `json:"currentEpisode"`
+	CommentID        *uuid.UUID         `json:"commentId"`
+	TargetUserID     *uuid.UUID         `json:"targetUserId"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	Status           string             `json:"status"`
+	LastWatchedAt    pgtype.Timestamptz `json:"lastWatchedAt"`
+	Username         string             `json:"username"`
+	AvatarUrl        *string            `json:"avatarUrl"`
+	TitleRomaji      *string            `json:"titleRomaji"`
+	TitleChinese     *string            `json:"titleChinese"`
+	CoverImageUrl    *string            `json:"coverImageUrl"`
+	CommentContent   *string            `json:"commentContent"`
+	CommentIsSpoiler bool               `json:"commentIsSpoiler"`
+	TargetUsername   *string            `json:"targetUsername"`
+	TargetAvatarUrl  *string            `json:"targetAvatarUrl"`
 }
 
 // Step 2 of /api/feed: append-only activities of the supplied followees.
@@ -249,6 +254,7 @@ func (q *Queries) ListFeedActivities(ctx context.Context, column1 []uuid.UUID, l
 			&i.TitleChinese,
 			&i.CoverImageUrl,
 			&i.CommentContent,
+			&i.CommentIsSpoiler,
 			&i.TargetUsername,
 			&i.TargetAvatarUrl,
 		); err != nil {
@@ -265,9 +271,17 @@ func (q *Queries) ListFeedActivities(ctx context.Context, column1 []uuid.UUID, l
 const listFeedFolloweeIDs = `-- name: ListFeedFolloweeIDs :many
 
 SELECT followee_id
-FROM follows
-WHERE follower_id = $1
-ORDER BY created_at DESC
+FROM follows follow
+WHERE follow.follower_id = $1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM user_blocks block
+      WHERE (block.blocker_id = follow.follower_id
+             AND block.blocked_id = follow.followee_id)
+         OR (block.blocker_id = follow.followee_id
+             AND block.blocked_id = follow.follower_id)
+  )
+ORDER BY follow.created_at DESC
 LIMIT 500
 `
 
@@ -491,7 +505,13 @@ func (q *Queries) ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]
 const upsertFollow = `-- name: UpsertFollow :exec
 
 INSERT INTO follows (follower_id, followee_id)
-VALUES ($1, $2)
+SELECT $1, $2
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM user_blocks block
+    WHERE (block.blocker_id = $1 AND block.blocked_id = $2)
+       OR (block.blocker_id = $2 AND block.blocked_id = $1)
+)
 ON CONFLICT (follower_id, followee_id) DO NOTHING
 `
 
@@ -507,9 +527,16 @@ func (q *Queries) UpsertFollow(ctx context.Context, followerID uuid.UUID, follow
 const upsertFollowWithActivity = `-- name: UpsertFollowWithActivity :one
 WITH inserted_follow AS (
     INSERT INTO follows (follower_id, followee_id)
-    VALUES (
+    SELECT
         $1::uuid,
         $2::uuid
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM user_blocks block
+        WHERE (block.blocker_id = $1::uuid
+               AND block.blocked_id = $2::uuid)
+           OR (block.blocker_id = $2::uuid
+               AND block.blocked_id = $1::uuid)
     )
     ON CONFLICT (follower_id, followee_id) DO NOTHING
     RETURNING follower_id, followee_id
