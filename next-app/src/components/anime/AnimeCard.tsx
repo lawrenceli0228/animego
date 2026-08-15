@@ -27,6 +27,7 @@ export interface AnimeCardData {
   averageScore?: number | null;
   format?: string | null;
   genres?: string[];
+  discussionCount?: number;
 }
 
 interface AnimeCardProps {
@@ -163,6 +164,21 @@ const watcherBadgeStyle: CSSProperties = {
   fontWeight: 700,
   padding: "3px 7px",
   borderRadius: 5,
+};
+
+const discussionBadgeStyle: CSSProperties = {
+  position: "absolute",
+  top: 35,
+  left: 8,
+  background: "rgba(0,0,0,0.78)",
+  backdropFilter: "blur(8px)",
+  WebkitBackdropFilter: "blur(8px)",
+  color: "#64d2ff",
+  fontSize: 10,
+  fontWeight: 750,
+  padding: "3px 7px",
+  borderRadius: 999,
+  fontFamily: "'JetBrains Mono', monospace",
 };
 
 const gradientStyle: CSSProperties = {
@@ -335,6 +351,19 @@ export default function AnimeCard({
         {watcherCount && watcherCount > 0 ? (
           <span style={watcherBadgeStyle} aria-hidden>
             {watcherCount} {lang === "zh" ? "人" : "watching"}
+          </span>
+        ) : null}
+
+        {anime.discussionCount != null && anime.discussionCount > 0 ? (
+          <span
+            style={discussionBadgeStyle}
+            aria-label={
+              viewerLang === "zh"
+                ? `${anime.discussionCount} 条讨论`
+                : `${anime.discussionCount} discussions`
+            }
+          >
+            💬 {anime.discussionCount > 999 ? "999+" : anime.discussionCount}
           </span>
         ) : null}
 

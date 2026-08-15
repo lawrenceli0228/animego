@@ -8,6 +8,7 @@ import WeeklySchedule, {
 } from "@/components/anime/WeeklySchedule";
 import CompletedGems from "@/components/home/CompletedGems";
 import ActivityFeed from "@/components/social/ActivityFeed";
+import HotDiscussions from "@/components/community/HotDiscussions";
 import SeasonRankings from "@/components/home/SeasonRankings";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
@@ -16,6 +17,7 @@ import type {
   TrendingItem,
   YearlyTopItem,
   ApiPagedEnvelope,
+  HotDiscussion,
 } from "@/lib/types";
 
 // Phase 8.0: HomePage replaces the LandingPage at /. The marketing
@@ -85,6 +87,18 @@ async function safeTrending(): Promise<TrendingItem[]> {
     });
   } catch (err) {
     console.warn("[HomePage] trending fetch failed:", err);
+    return [];
+  }
+}
+
+async function safeHotDiscussions(): Promise<HotDiscussion[]> {
+  try {
+    return await apiGet<HotDiscussion[]>(
+      "/api/community/discussions/trending?limit=6&windowHours=168",
+      { cache: "no-store" },
+    );
+  } catch (err) {
+    console.warn("[HomePage] hot discussions fetch failed:", err);
     return [];
   }
 }
@@ -228,12 +242,13 @@ export default async function HomePage() {
   const season = getCurrentSeason();
   const year = new Date().getFullYear();
 
-  const [dict, lang, seasonal, trending, gems, schedule, yearlyTop] =
+  const [dict, lang, seasonal, trending, hotDiscussions, gems, schedule, yearlyTop] =
     await Promise.all([
       getDict(),
       getLang(),
       safeSeasonal(season, year),
       safeTrending(),
+      safeHotDiscussions(),
       safeCompletedGems(),
       safeSchedule(),
       safeYearlyTop(year),
@@ -259,6 +274,7 @@ export default async function HomePage() {
         className="container"
         style={{ paddingTop: 8, paddingBottom: 60 }}
       >
+        <HotDiscussions items={hotDiscussions} />
         <TrendingSection items={trending} dict={dict} lang={lang} />
         <ContinueWatching dict={dict} lang={lang} />
         <WeeklySchedule schedule={schedule} dict={dict} lang={lang} />

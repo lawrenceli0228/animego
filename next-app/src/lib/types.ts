@@ -74,6 +74,8 @@ export interface SeasonalAnime {
   seasonYear: number | null;
   status: string | null;
   format: string | null;
+  /** Total episode discussion rows; optional during mixed-version deploys. */
+  discussionCount?: number;
   // Optional because the Go API's /seasonal endpoint plan returns only
   // the 16-column main row (see go-api/internal/anime/seasonal.go
   // header) — child tables like genres are not joined. The legacy
@@ -83,6 +85,30 @@ export interface SeasonalAnime {
   // (P8.5/P9) lands, either the seasonal handler grows a genre join or
   // this field stays optional and the filter quietly no-ops.
   genres?: string[] | null;
+}
+
+// ─── Community discovery (/api/community/discussions/trending) ───
+
+export interface HotDiscussion {
+  anilistId: number;
+  episode: number;
+  titleRomaji: string | null;
+  titleEnglish: string | null;
+  titleNative: string | null;
+  titleChinese: string | null;
+  coverImageUrl: string | null;
+  posterAccent: string | null;
+  commentCount: number;
+  participantCount: number;
+  reactionCount: number;
+  latest: {
+    id: string;
+    username: string;
+    avatarUrl: string | null;
+    content: string;
+    isSpoiler: boolean;
+    createdAt: string;
+  };
 }
 
 // ─── AnimeDetail (/api/anime/:id) ──────────────────────────────────

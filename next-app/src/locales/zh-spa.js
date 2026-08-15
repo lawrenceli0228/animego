@@ -226,6 +226,20 @@ const zh = {
     action_plan_to_watch: '想看',
     action_dropped: '弃坑了',
   },
+  communityDiscovery: {
+    welcomePinned: '置顶',
+    welcomeEyebrow: '社区公告',
+    welcomeTitle: '欢迎来到 AnimeGoClub 社区',
+    welcomeBody: '这里不只有追番记录。打开每一集的讨论，留下当下的感受；有人回复时，我们会把你带回原来的那段对话。',
+    welcomeAuthor: '@The Creator',
+    label: '社区热度',
+    title: '正在热议',
+    subtitle: '按参与人数、评论与最近活跃综合排序，不做无限信息流。',
+    participants: '人参与',
+    spoiler: '⚠ 剧透内容已折叠',
+    empty: '还没有形成热议。打开任意番剧的分集讨论，成为第一位发言的人。',
+    start: '去发现番剧 →',
+  },
   // Danmaku
   danmaku: {
     label: '弹幕', live: 'LIVE', send: '发送',

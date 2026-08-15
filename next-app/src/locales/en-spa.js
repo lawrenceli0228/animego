@@ -171,6 +171,20 @@ const en = {
     action_plan_to_watch: 'wants to watch',
     action_dropped: 'dropped',
   },
+  communityDiscovery: {
+    welcomePinned: 'PINNED',
+    welcomeEyebrow: 'COMMUNITY NOTICE',
+    welcomeTitle: 'Welcome to the AnimeGoClub community',
+    welcomeBody: 'This is more than a watchlist. Open an episode discussion and capture the moment; when someone replies, we bring you back to the conversation.',
+    welcomeAuthor: '@The Creator',
+    label: 'Community pulse',
+    title: 'Active discussions',
+    subtitle: 'Ranked by participation, conversation and recency — without an infinite feed.',
+    participants: 'participants',
+    spoiler: '⚠ Spoiler hidden',
+    empty: 'No active discussion yet. Open any episode thread and be the first to start one.',
+    start: 'Discover anime →',
+  },
   // Danmaku
   danmaku: {
     label: 'DANMAKU', live: 'LIVE', send: 'Send',

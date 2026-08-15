@@ -716,6 +716,10 @@ const zh = {
     statSubs: '追番记录',
     statFollows: '关注关系',
     statFlagged: '待审查',
+    statDiscussionImpressions: '热议曝光',
+    statDiscussionOpenRate: '热议点击率',
+    communityMetricsHint: '近 {{days}} 天 · {{opens}} 次打开',
+    communityMetricsRatio: '{{opens}} 次首次打开 / {{impressions}} 次曝光',
     // Search
     searchPlaceholder: '搜索标题或 AniList ID...',
     searchBtn: '搜索',
