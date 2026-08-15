@@ -21,6 +21,7 @@ import {
 import "./notification-bell.css";
 
 const EMPTY_PAGE: NotificationPage = { items: [], unreadCount: 0 };
+const NOTIFICATION_PANEL_ID = "notification-panel";
 
 function relativeTime(iso: string, lang: "zh" | "en"): string {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -124,16 +125,27 @@ export default function NotificationBell() {
     };
   }, [loadPage, open]);
 
-  const readOne = (item: CommunityNotification) => {
+  const readOne = async (item: CommunityNotification) => {
     if (item.readAt) return;
+    const before = page;
+    const beforeCount = unreadCount;
     const now = new Date().toISOString();
     setPage((before) => markNotificationRead(before, item.id, now));
     setUnreadCount((before) => Math.max(0, before - 1));
-    void authFetch(`/api/notifications/${item.id}/read`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      skipRedirectOnFailure: true,
-    });
+    try {
+      const response = await authFetch(`/api/notifications/${item.id}/read`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        skipRedirectOnFailure: true,
+      });
+      if (!response.ok) throw new Error("mark read failed");
+    } catch {
+      // A discussion notification can navigate only within the current anime
+      // pathname. In that case the pathname effect does not re-fetch the
+      // badge, so restore the exact pre-click state on a failed mutation.
+      setPage(before);
+      setUnreadCount(beforeCount);
+    }
   };
 
   const readAll = async () => {
@@ -161,8 +173,8 @@ export default function NotificationBell() {
       <button
         type="button"
         className="agc-notification-bell"
-        aria-haspopup="dialog"
         aria-expanded={open}
+        aria-controls={NOTIFICATION_PANEL_ID}
         aria-label={
           unreadCount > 0
             ? `${t("notification.title")} · ${unreadCount} ${t("notification.unread")}`
@@ -181,7 +193,12 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="agc-notification-popover" role="dialog" aria-label={t("notification.title")}>
+        <div
+          id={NOTIFICATION_PANEL_ID}
+          className="agc-notification-popover"
+          role="region"
+          aria-label={t("notification.title")}
+        >
           <div className="agc-notification-head">
             <strong>{t("notification.title")}</strong>
             {unreadCount > 0 && (
@@ -207,9 +224,11 @@ export default function NotificationBell() {
                   href={notificationTarget(item)}
                   prefetch={false}
                   className={`agc-notification-item${item.readAt ? "" : " unread"}`}
-                  onClick={() => {
+                  onNavigate={() => {
                     dispatchDiscussionNavigation(notificationTarget(item));
-                    readOne(item);
+                  }}
+                  onClick={() => {
+                    void readOne(item);
                     setOpen(false);
                   }}
                 >
@@ -222,7 +241,11 @@ export default function NotificationBell() {
                   </span>
                   <span className="agc-notification-copy">
                     <span>{notificationCopy(item, lang)}</span>
-                    {item.excerpt && <small>“{item.excerpt}”</small>}
+                    {item.isSpoiler ? (
+                      <small>{t("comment.spoilerPreview")}</small>
+                    ) : item.excerpt ? (
+                      <small>“{item.excerpt}”</small>
+                    ) : null}
                     <time dateTime={item.createdAt}>{relativeTime(item.createdAt, lang)}</time>
                   </span>
                   {!item.readAt && <i aria-label={t("notification.unread")} />}

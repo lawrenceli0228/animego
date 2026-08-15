@@ -44,6 +44,11 @@ const zh = {
     'Subscription not found': '未找到订阅',
     'Deleted': '已删除',
     'Cannot follow yourself': '不能关注自己',
+    'Cannot block yourself': '不能拉黑自己',
+    'Cannot unblock yourself': '不能对自己执行解除拉黑',
+    'Interaction unavailable': '当前无法与该用户互动',
+    'Cannot report yourself': '不能举报自己',
+    'Cannot report your own content': '不能举报自己的内容',
     // Comments / danmaku (P2.5)
     'Content is required': '评论内容不能为空',
     'Content too long': '评论内容过长',
@@ -181,6 +186,8 @@ const zh = {
     noAnimeSuffix: '的番剧',
     privateTitle: '这个主页已设为私密',
     privateBody: '该用户暂未公开追番记录与社区动态。',
+    blockedTitle: '你们之间的互动已受限',
+    blockedBody: '评论、动态、通知和关注关系已互相隐藏。解除你发起的拉黑后可恢复查看。',
   },
   // Torrent modal
   torrent: {
@@ -272,6 +279,21 @@ const zh = {
     deleteFailed: '删除失败，请重试',
     networkFailed: '网络错误，请重试',
     reactionFailed: '操作失败，请重试',
+    markSpoiler: '含剧透',
+    spoilerHidden: '⚠ 剧透内容 · 点击查看',
+    spoilerPreview: '⚠ 剧透内容已折叠',
+  },
+  safety: {
+    report: '举报', reportTitle: '举报内容',
+    reportPrivacy: '举报将进入站内审核队列，不会公开你的身份。',
+    reason: '原因', details: '补充说明（可选）',
+    detailsPlaceholder: '请描述具体问题，最多 500 字',
+    submitReport: '提交举报', submitting: '提交中…',
+    reported: '举报已提交', reportFailed: '举报失败，请稍后重试',
+    block: '拉黑', unblock: '解除拉黑', confirmBlock: '再次点击确认拉黑',
+    blockConfirm: '拉黑后会互相取消关注，并隐藏双方的评论、动态和通知。确认继续？',
+    blocked: '已拉黑该用户', unblocked: '已解除拉黑',
+    blockedByUser: '对方已限制互动', blockFailed: '操作失败，请稍后重试',
   },
   notification: {
     title: '通知', unread: '未读', readAll: '全部已读',
@@ -284,6 +306,7 @@ const zh = {
     publicProfileOn: '任何人都可以查看你的追番列表与公开活动。',
     publicProfileOff: '只有你自己可以查看追番列表与活动。',
     savePrivacy: '保存隐私设置', saving: '保存中…', saved: '已保存',
+    blockedUsers: '已拉黑用户', noBlockedUsers: '暂无拉黑用户',
   },
   // Player
   player: {
@@ -848,6 +871,10 @@ const zh = {
     healFailed: '批量自愈触发失败',
     loadError: '加载失败',
     navLabel: '管理后台',
+    reportsTitle: '社区举报队列', reportsEmpty: '当前没有待处理举报',
+    reportsUpdateFailed: '举报状态更新失败', reportSpoiler: '剧透',
+    reportDetails: '举报说明', reportedBy: '举报人',
+    reportReview: '开始审核', reportDismiss: '驳回', reportResolve: '处理完成',
     // User management
     usersTitle: '用户管理',
     userSearchPlaceholder: '搜索用户名或邮箱...',

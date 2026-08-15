@@ -36,6 +36,9 @@ function timeAgo(iso: string, lang: "zh" | "en", nowMs: number): string {
 }
 
 function pickTitle(item: FeedItem, lang: "zh" | "en"): string {
+  if (item.kind?.toLowerCase() === "follow") {
+    return item.targetUsername || (lang === "zh" ? "一位用户" : "a user");
+  }
   return lang === "zh"
     ? item.titleChinese || item.title
     : item.title || item.titleChinese || `Anime #${item.anilistId}`;
@@ -43,6 +46,9 @@ function pickTitle(item: FeedItem, lang: "zh" | "en"): string {
 
 function actionCopy(item: FeedItem, lang: "zh" | "en"): string {
   const kind = item.kind?.toLowerCase() ?? "";
+  if (kind === "follow") {
+    return lang === "zh" ? "关注了" : "followed";
+  }
   if (kind.includes("comment")) {
     return lang === "zh"
       ? `讨论了第 ${item.episode} 集`
@@ -107,26 +113,27 @@ export default function ActivityFeedView({ items, state, nowMs }: ActivityFeedVi
             const target = feedItemTarget(item);
             return (
               <article key={feedItemKey(item)} style={rowStyle}>
-                <Link href={target} prefetch={false} onClick={() => dispatchDiscussionNavigation(target)} style={{ width: 36, height: 52, flexShrink: 0, borderRadius: 4, overflow: "hidden", background: "#2c2c2e" }}>
+                <Link href={target} prefetch={false} onNavigate={() => dispatchDiscussionNavigation(target)} aria-hidden="true" tabIndex={-1} style={{ width: 36, height: 52, flexShrink: 0, borderRadius: 4, overflow: "hidden", background: "#2c2c2e", display: "grid", placeItems: "center", color: "rgba(235,235,245,.55)", textDecoration: "none", fontWeight: 700 }}>
                   {item.coverImageUrl && (
-                    <FadeImage src={item.coverImageUrl} alt={title} width={36} height={52} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <FadeImage src={item.coverImageUrl} alt="" width={36} height={52} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   )}
+                  {!item.coverImageUrl && title.slice(0, 1).toUpperCase()}
                 </Link>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <Link href={target} prefetch={false} onClick={() => dispatchDiscussionNavigation(target)} style={{ display: "block", color: "#fff", textDecoration: "none", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <Link href={target} prefetch={false} onNavigate={() => dispatchDiscussionNavigation(target)} style={{ display: "block", color: "#fff", textDecoration: "none", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {title}
                   </Link>
                   <div style={{ marginTop: 3, color: "rgba(235,235,245,.5)", fontSize: 11 }}>
                     <Link href={feedActorTarget(item)} prefetch={false} style={{ color: "#0a84ff", textDecoration: "none", fontWeight: 600 }}>
                       {item.username}
                     </Link>{" "}
-                    <Link href={target} prefetch={false} onClick={() => dispatchDiscussionNavigation(target)} style={{ color: "inherit", textDecoration: "none" }}>
+                    <Link href={target} prefetch={false} onNavigate={() => dispatchDiscussionNavigation(target)} style={{ color: "inherit", textDecoration: "none" }}>
                       {actionCopy(item, lang)}
                     </Link>
                   </div>
-                  {(item.excerpt || item.content) && (
+                  {(item.isSpoiler || item.excerpt || item.content) && (
                     <p style={{ margin: "5px 0 0", color: "rgba(235,235,245,.42)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {item.excerpt || item.content}
+                      {item.isSpoiler ? t("comment.spoilerPreview") : item.excerpt || item.content}
                     </p>
                   )}
                 </div>

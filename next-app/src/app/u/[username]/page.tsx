@@ -23,6 +23,7 @@ import WatchingSection from "./_components/WatchingSection";
 import ShareButtonIsland from "./_components/ShareButtonIsland";
 import PublicProfileHero from "./_components/PublicProfileHero";
 import PrivateProfileState from "./_components/PrivateProfileState";
+import ProfileSafetyActions from "./_components/ProfileSafetyActions";
 import type { UserProfileData } from "./_components/types";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +118,7 @@ export default async function UserProfilePage({ params }: PageProps) {
     ? (profile.isFollowing ?? false)
     : null;
   const isPrivate = profile.isPrivate === true || profile.isPublic === false;
+  const isBlocked = profile.isBlocked === true;
   const watching = Array.isArray(profile.watching) ? profile.watching : [];
 
   return (
@@ -142,14 +144,21 @@ export default async function UserProfilePage({ params }: PageProps) {
             <FollowButton
               username={username}
               initialIsFollowing={initialIsFollowing}
-              isSelf={isSelf}
+              isSelf={isSelf || isBlocked}
               lang={lang}
+            />
+            <ProfileSafetyActions
+              username={username}
+              authenticated={isLoggedIn}
+              isSelf={isSelf}
+              isBlocked={isBlocked}
+              blockedByViewer={profile.blockedByViewer === true}
             />
           </>
         }
       >
         <div style={{ paddingTop: 8, paddingBottom: 60 }}>
-          {isPrivate ? <PrivateProfileState /> : <WatchingSection watching={watching} />}
+          {isPrivate ? <PrivateProfileState blocked={isBlocked} /> : <WatchingSection watching={watching} />}
         </div>
       </PublicProfileHero>
     </main>

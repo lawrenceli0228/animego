@@ -14,6 +14,7 @@ import { DEFAULT_CARD_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
 import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { settingsErrorMessage } from "./settingsState";
+import BlockedUsersList from "./BlockedUsersList";
 import "./settings.css";
 
 interface SettingsClientProps {
@@ -35,7 +36,10 @@ interface PatchResult {
   error?: string;
 }
 
-async function patchMe(body: Record<string, unknown>): Promise<PatchResult> {
+async function patchMe(
+  body: Record<string, unknown>,
+  zh: boolean,
+): Promise<PatchResult> {
   try {
     const r = await authFetch("/api/auth/me", {
       method: "PATCH",
@@ -45,9 +49,12 @@ async function patchMe(body: Record<string, unknown>): Promise<PatchResult> {
     });
     if (r.ok) return { ok: true };
     const errorBody: unknown = await r.json().catch(() => null);
-    return { ok: false, error: settingsErrorMessage(errorBody) };
+    return {
+      ok: false,
+      error: settingsErrorMessage(errorBody, zh ? "保存失败" : "Save failed"),
+    };
   } catch {
-    return { ok: false, error: "网络错误" };
+    return { ok: false, error: zh ? "网络错误" : "Network error" };
   }
 }
 
@@ -101,7 +108,7 @@ export default function SettingsClient({
       return;
     }
     setNameStatus({ kind: "saving" });
-    const res = await patchMe({ username: v });
+    const res = await patchMe({ username: v }, zh);
     if (res.ok) {
       setNameStatus({ kind: "ok", msg: zh ? "已保存" : "Saved" });
       router.refresh();
@@ -152,7 +159,7 @@ export default function SettingsClient({
     if (backdropChanged) body.backdropAnilistId = backdropId ?? 0;
     if (Object.keys(body).length === 0) return;
     setPassStatus({ kind: "saving" });
-    const res = await patchMe(body);
+    const res = await patchMe(body, zh);
     if (res.ok) {
       setPassStatus({ kind: "ok", msg: zh ? "已保存" : "Saved" });
       router.refresh();
@@ -164,7 +171,7 @@ export default function SettingsClient({
   const savePrivacy = useCallback(async () => {
     if (publicProfile === isPublic) return;
     setPrivacyStatus({ kind: "saving" });
-    const res = await patchMe({ isPublic: publicProfile });
+    const res = await patchMe({ isPublic: publicProfile }, zh);
     if (res.ok) {
       setPrivacyStatus({ kind: "ok", msg: t("settings.saved") });
       router.refresh();
@@ -172,7 +179,7 @@ export default function SettingsClient({
       setPublicProfile(isPublic);
       setPrivacyStatus({ kind: "err", msg: res.error });
     }
-  }, [isPublic, publicProfile, router, t]);
+  }, [isPublic, publicProfile, router, t, zh]);
 
   const msgEl = (s: Status) =>
     s.kind === "ok" || s.kind === "err" ? (
@@ -273,7 +280,11 @@ export default function SettingsClient({
                     : "No anime with a wide banner in your list yet"}
                 </p>
               ) : (
-                <div className="set-grid-thumbs" role="listbox">
+                <div
+                  className="set-grid-thumbs"
+                  role="listbox"
+                  aria-label={zh ? "主页背景番剧" : "Profile backdrop anime"}
+                >
                   {bannerOptions.map((o) => (
                     <button
                       key={o.anilistId}
@@ -392,6 +403,7 @@ export default function SettingsClient({
               </button>
               {msgEl(privacyStatus)}
             </div>
+            <BlockedUsersList />
           </section>
 
           {/* security: password changes go through the email reset flow */}

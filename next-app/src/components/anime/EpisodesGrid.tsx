@@ -273,6 +273,7 @@ export default function EpisodesGrid({
               key={cell.n}
               type="button"
               aria-expanded={isOpen}
+              aria-controls={`episode-discussion-${cell.n}`}
               aria-label={`${t("detail.ep")} ${cell.n}${commentCount ? ` · ${commentCount} ${t("comment.title")}` : ""}`}
               onClick={() => {
                 const closing = openEp === cell.n;
@@ -429,7 +430,7 @@ export default function EpisodesGrid({
                       {item.username}
                     </b>
                     <span style={{ color: "rgba(235,235,245,0.62)", fontSize: 12, lineHeight: 1.45 }}>
-                      {item.content}
+                      {item.isSpoiler ? t("comment.spoilerPreview") : item.content}
                     </span>
                   </button>
                 </div>
@@ -443,7 +444,10 @@ export default function EpisodesGrid({
           — is still deferred; it needs the ws-server socket hooks.) */}
       {openEp !== null && (
         <div
+          id={`episode-discussion-${openEp}`}
           ref={panelRef}
+          role="region"
+          aria-label={`${t("comment.title")} · ${t("detail.ep")} ${openEp}`}
           style={{
             marginTop: 16,
             borderRadius: 12,

@@ -16,6 +16,7 @@ export interface CommunityNotification {
   episode: number | null;
   commentId: string | null;
   excerpt: string | null;
+  isSpoiler: boolean;
   createdAt: string;
   readAt: string | null;
 }
@@ -77,6 +78,7 @@ function notification(value: unknown): CommunityNotification | null {
         : null,
     commentId: string(row?.commentId),
     excerpt: string(row?.excerpt),
+    isSpoiler: row?.isSpoiler === true,
     createdAt,
     readAt: string(row?.readAt),
   };

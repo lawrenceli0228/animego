@@ -16,6 +16,10 @@ export interface UserProfileData {
   followingCount: number;
   /** null when the requesting user is anonymous */
   isFollowing: boolean | null;
+  /** Either direction has blocked the relationship. */
+  isBlocked?: boolean;
+  /** The signed-in viewer owns the block and may remove it. */
+  blockedByViewer?: boolean;
   /** Private profiles keep their identity visible but withhold watch data. */
   isPrivate?: boolean;
   isPublic?: boolean;

@@ -131,6 +131,8 @@ const en = {
     noAnimeSuffix: '',
     privateTitle: 'This profile is private',
     privateBody: 'This user has not shared their watchlist or community activity.',
+    blockedTitle: 'Interaction is restricted',
+    blockedBody: 'Comments, activity, notifications and follows are hidden between these accounts.',
   },
   // Torrent modal
   torrent: {
@@ -222,6 +224,21 @@ const en = {
     deleteFailed: "Couldn't delete, try again",
     networkFailed: 'Network error, try again',
     reactionFailed: "Couldn't update reaction, try again",
+    markSpoiler: 'Contains spoilers',
+    spoilerHidden: '⚠ Spoiler · Reveal content',
+    spoilerPreview: '⚠ Spoiler hidden',
+  },
+  safety: {
+    report: 'Report', reportTitle: 'Report content',
+    reportPrivacy: 'Reports enter the private moderation queue. Your identity is not shown publicly.',
+    reason: 'Reason', details: 'Details (optional)',
+    detailsPlaceholder: 'Describe the issue in up to 500 characters',
+    submitReport: 'Submit report', submitting: 'Submitting…',
+    reported: 'Report submitted', reportFailed: 'Could not submit report',
+    block: 'Block', unblock: 'Unblock', confirmBlock: 'Click again to block',
+    blockConfirm: 'Blocking removes mutual follows and hides comments, activity and notifications between you. Continue?',
+    blocked: 'User blocked', unblocked: 'User unblocked',
+    blockedByUser: 'Interaction restricted', blockFailed: 'Could not update block',
   },
   notification: {
     title: 'Notifications', unread: 'unread', readAll: 'Mark all read',
@@ -234,6 +251,7 @@ const en = {
     publicProfileOn: 'Anyone can view your watchlist and public activity.',
     publicProfileOff: 'Only you can view your watchlist and activity.',
     savePrivacy: 'Save privacy', saving: 'Saving…', saved: 'Saved',
+    blockedUsers: 'Blocked users', noBlockedUsers: 'No blocked users',
   },
   // Player
   player: {
@@ -798,6 +816,10 @@ const en = {
     healFailed: 'Batch heal trigger failed',
     loadError: 'Failed to load',
     navLabel: 'Admin',
+    reportsTitle: 'Community reports', reportsEmpty: 'No pending reports',
+    reportsUpdateFailed: 'Could not update report', reportSpoiler: 'Spoiler',
+    reportDetails: 'Report details', reportedBy: 'Reported by',
+    reportReview: 'Review', reportDismiss: 'Dismiss', reportResolve: 'Resolve',
     // User management
     usersTitle: 'User Management',
     userSearchPlaceholder: 'Search username or email...',

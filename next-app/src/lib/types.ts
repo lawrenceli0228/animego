@@ -278,6 +278,9 @@ export interface FeedItem {
   commentId?: string | null;
   content?: string | null;
   excerpt?: string | null;
+  isSpoiler?: boolean;
+  /** Follow-event subject; absent for anime/watch/comment events. */
+  targetUsername?: string | null;
 }
 
 export interface FeedResponse {

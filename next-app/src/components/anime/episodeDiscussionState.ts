@@ -5,6 +5,7 @@ export interface DiscussionPreview {
   avatarUrl: string | null;
   backdropCoverUrl: string | null;
   content: string;
+  isSpoiler: boolean;
   createdAt: string;
 }
 
@@ -39,16 +40,18 @@ function preview(value: unknown): DiscussionPreview | null {
   const id = nullableString(row.id);
   const userId = nullableString(row.userId);
   const username = nullableString(row.username);
+  const isSpoiler = row.isSpoiler === true;
   const content = nullableString(row.content);
   const createdAt = nullableString(row.createdAt);
-  if (!id || !userId || !username || !content || !createdAt) return null;
+  if (!id || !userId || !username || (!content && !isSpoiler) || !createdAt) return null;
   return {
     id,
     userId,
     username,
     avatarUrl: nullableString(row.avatarUrl),
     backdropCoverUrl: nullableString(row.backdropCoverUrl),
-    content,
+    content: content ?? "",
+    isSpoiler,
     createdAt,
   };
 }

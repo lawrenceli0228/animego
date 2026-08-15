@@ -2,8 +2,10 @@
 
 import { useLang } from "@/lib/lang-client";
 
-export default function PrivateProfileState() {
+export default function PrivateProfileState({ blocked = false }: { blocked?: boolean }) {
   const { t } = useLang();
+  const title = t(blocked ? "profile.blockedTitle" : "profile.privateTitle");
+  const body = t(blocked ? "profile.blockedBody" : "profile.privateBody");
   return (
     <section
       style={{
@@ -15,14 +17,14 @@ export default function PrivateProfileState() {
         background: "rgba(28,28,30,0.72)",
         textAlign: "center",
       }}
-      aria-label={t("profile.privateTitle")}
+      aria-label={title}
     >
       <div aria-hidden="true" style={{ fontSize: 30, marginBottom: 12 }}>◉</div>
       <h2 style={{ margin: "0 0 8px", color: "#fff", fontSize: 18 }}>
-        {t("profile.privateTitle")}
+        {title}
       </h2>
       <p style={{ margin: 0, color: "rgba(235,235,245,0.48)", fontSize: 13, lineHeight: 1.6 }}>
-        {t("profile.privateBody")}
+        {body}
       </p>
     </section>
   );

@@ -26,4 +26,16 @@ describe("feed compatibility helpers", () => {
     expect(feedItemTime(event)).toBe("new");
     expect(feedItemTarget(event)).toBe("/anime/1#episode-3-comment-c1");
   });
+
+  test("follow events target the followed user's profile, never anime zero", () => {
+    const event = {
+      ...legacy,
+      id: "e2",
+      kind: "follow",
+      anilistId: 0,
+      episode: 0,
+      targetUsername: "B C",
+    };
+    expect(feedItemTarget(event)).toBe("/u/B%20C");
+  });
 });

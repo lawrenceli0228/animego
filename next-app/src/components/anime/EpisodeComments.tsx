@@ -34,6 +34,7 @@ import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { useLang } from "@/lib/lang-client";
 import { deletedCommentCount } from "./episodeDiscussionState";
+import ReportDialog from "@/components/safety/ReportDialog";
 
 interface CommentDoc {
   id: string;
@@ -44,6 +45,7 @@ interface CommentDoc {
   avatarUrl?: string | null;
   backdropCoverUrl?: string | null;
   content: string;
+  isSpoiler?: boolean;
   parentId: string | null;
   replyToUsername: string | null;
   createdAt: string;
@@ -75,7 +77,7 @@ const MAX_LEN = 500;
 
 // ─── CommentInput ────────────────────────────────────────────────────
 interface CommentInputProps {
-  onSubmit: (text: string, onDone: () => void) => void;
+  onSubmit: (text: string, isSpoiler: boolean, onDone: () => void) => void;
   isPending: boolean;
   placeholder: string;
   autoFocus?: boolean;
@@ -91,11 +93,15 @@ function CommentInput({
 }: CommentInputProps) {
   const { t } = useLang();
   const [text, setText] = useState("");
+  const [isSpoiler, setIsSpoiler] = useState(false);
 
   const handlePost = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    onSubmit(trimmed, () => setText(""));
+    onSubmit(trimmed, isSpoiler, () => {
+      setText("");
+      setIsSpoiler(false);
+    });
   };
 
   const disabled = isPending || !text.trim();
@@ -143,7 +149,25 @@ function CommentInput({
         >
           {text.length}/{MAX_LEN}
         </span>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              color: "rgba(235,235,245,0.48)",
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={isSpoiler}
+              onChange={(event) => setIsSpoiler(event.target.checked)}
+              style={{ accentColor: "#ff9f0a" }}
+            />
+            {t("comment.markSpoiler")}
+          </label>
           {onCancel && (
             <button
               type="button"
@@ -216,6 +240,7 @@ function CommentItem({
   const isOwn = !!user && user.id === c.userId;
   const highlighted = highlightedId === c.id;
   const reactionBusy = reactionBusyIds.has(c.id);
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
 
   return (
     <div
@@ -298,18 +323,38 @@ function CommentItem({
               {new Date(c.createdAt).toLocaleDateString()}
             </span>
           </div>
-          <p
-            style={{
-              fontSize: 13,
-              color: "rgba(235,235,245,0.60)",
-              lineHeight: 1.6,
-              margin: 0,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
-            {c.content}
-          </p>
+          {c.isSpoiler && !spoilerRevealed ? (
+            <button
+              type="button"
+              onClick={() => setSpoilerRevealed(true)}
+              style={{
+                width: "100%",
+                border: "1px solid rgba(255,159,10,0.26)",
+                borderRadius: 8,
+                background: "rgba(255,159,10,0.08)",
+                color: "#ffb340",
+                padding: "9px 12px",
+                textAlign: "left",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              {t("comment.spoilerHidden")}
+            </button>
+          ) : (
+            <p
+              style={{
+                fontSize: 13,
+                color: "rgba(235,235,245,0.60)",
+                lineHeight: 1.6,
+                margin: 0,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {c.content}
+            </p>
+          )}
           <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
             <button
               type="button"
@@ -344,6 +389,13 @@ function CommentItem({
               >
                 {t("comment.reply")}
               </button>
+            )}
+            {!isOwn && (
+              <ReportDialog
+                targetType="comment"
+                targetId={c.id}
+                authenticated={Boolean(user)}
+              />
             )}
             {isOwn &&
               (confirmId === c.id ? (
@@ -553,7 +605,7 @@ export default function EpisodeComments({
 
   const post = useCallback(
     async (
-      body: { content: string; parentId?: string; replyToUsername?: string },
+      body: { content: string; isSpoiler?: boolean; parentId?: string; replyToUsername?: string },
       onDone: () => void,
     ) => {
       setPosting(true);
@@ -579,15 +631,15 @@ export default function EpisodeComments({
     [anilistId, episode, load, onCommentDelta, t],
   );
 
-  const handlePost = (text: string, onDone: () => void) => {
-    void post({ content: text }, onDone);
+  const handlePost = (text: string, isSpoiler: boolean, onDone: () => void) => {
+    void post({ content: text, isSpoiler }, onDone);
   };
 
-  const handleReply = (text: string, onDone: () => void) => {
+  const handleReply = (text: string, isSpoiler: boolean, onDone: () => void) => {
     if (!replyTarget) return;
     const topParentId = replyTarget.parentId || replyTarget.id;
     void post(
-      { content: text, parentId: topParentId, replyToUsername: replyTarget.username },
+      { content: text, isSpoiler, parentId: topParentId, replyToUsername: replyTarget.username },
       () => {
         onDone();
         setReplyTarget(null);
@@ -705,7 +757,7 @@ export default function EpisodeComments({
               marginLeft: 8,
             }}
           >
-            {comments.length}
+            · {comments.length} {lang === "zh" ? "条" : "comments"}
           </span>
         )}
       </p>

@@ -300,10 +300,10 @@
   transform: translateY(-2px);
   border-color: rgba(255, 255, 255, 0.5);
 }
-.set-cell[aria-pressed="true"] {
+.set-cell[aria-selected="true"] {
   border-color: var(--accent, #0a84ff);
 }
-.set-cell[aria-pressed="true"]::after {
+.set-cell[aria-selected="true"]::after {
   content: "✓";
   position: absolute;
   inset: 0;

@@ -17,6 +17,7 @@ const reply: CommunityNotification = {
   episode: 8,
   commentId: "c-1",
   excerpt: "same",
+  isSpoiler: false,
   createdAt: "2026-08-15T00:00:00Z",
   readAt: null,
 };

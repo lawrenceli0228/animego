@@ -29,6 +29,24 @@ describe("parseEpisodeDiscussionSummary", () => {
     expect(parseEpisodeDiscussionSummary({ data: [null, { episode: -1, count: 2 }] })).toEqual([]);
     expect(parseEpisodeDiscussionSummary({ data: [{ episode: 1, count: 2, latest: [{ id: "bad" }] }] })[0].latest).toEqual([]);
   });
+
+  test("keeps a spoiler preview without exposing its content", () => {
+    const rows = parseEpisodeDiscussionSummary({
+      data: [{
+        episode: 1,
+        count: 1,
+        latest: [{
+          id: "c1",
+          userId: "u1",
+          username: "A",
+          content: "",
+          isSpoiler: true,
+          createdAt: "2026-01-01",
+        }],
+      }],
+    });
+    expect(rows[0].latest[0]).toMatchObject({ content: "", isSpoiler: true });
+  });
 });
 
 describe("discussion hashes", () => {
