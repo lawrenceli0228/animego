@@ -62,6 +62,93 @@ func (q *Queries) GetSubscription(ctx context.Context, userID uuid.UUID, anilist
 	return i, err
 }
 
+const insertSubscriptionIfAbsent = `-- name: InsertSubscriptionIfAbsent :one
+WITH inserted AS (
+    INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
+    VALUES (
+        $1::uuid,
+        $2::integer,
+        $3::text,
+        now()
+    )
+    ON CONFLICT (user_id, anilist_id) DO NOTHING
+    RETURNING
+        user_id,
+        anilist_id,
+        status,
+        current_episode,
+        score,
+        last_watched_at,
+        created_at,
+        updated_at
+)
+SELECT
+    user_id,
+    anilist_id,
+    status,
+    current_episode,
+    score,
+    last_watched_at,
+    created_at,
+    updated_at
+FROM inserted
+UNION ALL
+SELECT
+    existing.user_id,
+    existing.anilist_id,
+    existing.status,
+    existing.current_episode,
+    existing.score,
+    existing.last_watched_at,
+    existing.created_at,
+    existing.updated_at
+FROM subscriptions existing
+WHERE existing.user_id = $1::uuid
+  AND existing.anilist_id = $2::integer
+  AND NOT EXISTS (SELECT 1 FROM inserted)
+LIMIT 1
+`
+
+type InsertSubscriptionIfAbsentRow struct {
+	UserID         uuid.UUID          `json:"userId"`
+	AnilistID      int32              `json:"anilistId"`
+	Status         string             `json:"status"`
+	CurrentEpisode int32              `json:"currentEpisode"`
+	Score          *int32             `json:"score"`
+	LastWatchedAt  pgtype.Timestamptz `json:"lastWatchedAt"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
+}
+
+// POST /api/subscriptions with `"ifAbsent": true` — the click-to-track path.
+//
+// UpsertSubscription above is wrong for this caller: its
+// ON CONFLICT DO UPDATE SET status resurrects a title the user deliberately
+// marked dropped/completed back into `watching` the moment anything touches
+// it.  §4 decision 3: creation is idempotent and `status` is human-only.
+//
+// ON CONFLICT DO NOTHING returns zero rows on conflict, so the UNION ALL arm
+// reads the pre-existing row back and returns it untouched.  The NOT EXISTS
+// guard keeps the two arms mutually exclusive (same idiom as
+// InsertNotificationIfAbsent in community.sql and InsertReport in safety.sql).
+//
+// Caller MUST have ensured the anime_cache row exists (else the FK kicks).
+func (q *Queries) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (InsertSubscriptionIfAbsentRow, error) {
+	row := q.db.QueryRow(ctx, insertSubscriptionIfAbsent, userID, anilistID, status)
+	var i InsertSubscriptionIfAbsentRow
+	err := row.Scan(
+		&i.UserID,
+		&i.AnilistID,
+		&i.Status,
+		&i.CurrentEpisode,
+		&i.Score,
+		&i.LastWatchedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listUserSubscriptions = `-- name: ListUserSubscriptions :many
 
 SELECT
@@ -126,7 +213,9 @@ type ListUserSubscriptionsRow struct {
 //	GET    /api/subscriptions               → ListUserSubscriptions
 //	GET    /api/subscriptions/:anilistId    → GetSubscription
 //	POST   /api/subscriptions               → UpsertSubscription
-//	PATCH  /api/subscriptions/:anilistId    → UpdateSubscription
+//	                                          InsertSubscriptionIfAbsent
+//	                                          (when the body sets ifAbsent)
+//	PATCH  /api/subscriptions/:anilistId    → UpdateSubscriptionWithActivity
 //	DELETE /api/subscriptions/:anilistId    → DeleteSubscription
 //
 // Express joined Subscription + AnimeCache in application code; here we
@@ -258,21 +347,51 @@ WITH previous AS (
     UPDATE subscriptions subscription
     SET
         status = COALESCE($3, subscription.status),
-        current_episode = COALESCE(
-            $4::integer,
-            subscription.current_episode
-        ),
+        current_episode = CASE
+                              WHEN $4::boolean
+                                  THEN GREATEST(
+                                           subscription.current_episode,
+                                           COALESCE(
+                                               $5::integer,
+                                               subscription.current_episode
+                                           )
+                                       )
+                              ELSE COALESCE(
+                                       $5::integer,
+                                       subscription.current_episode
+                                   )
+                          END,
         score = CASE
-                    WHEN $5::boolean
-                        THEN $6::integer
+                    WHEN $6::boolean
+                        THEN $7::integer
                     ELSE subscription.score
                 END,
         last_watched_at = CASE
-                              WHEN $4::integer IS NOT NULL
+                              WHEN $5::integer IS NULL
+                                  THEN subscription.last_watched_at
+                              WHEN NOT $4::boolean
+                                  THEN now()
+                              WHEN GREATEST(
+                                       subscription.current_episode,
+                                       $5::integer
+                                   ) IS DISTINCT FROM subscription.current_episode
                                   THEN now()
                               ELSE subscription.last_watched_at
                           END,
-        updated_at = now()
+        updated_at = CASE
+                         WHEN $4::boolean
+                              AND $3 IS NULL
+                              AND NOT $6::boolean
+                              AND GREATEST(
+                                      subscription.current_episode,
+                                      COALESCE(
+                                          $5::integer,
+                                          subscription.current_episode
+                                      )
+                                  ) IS NOT DISTINCT FROM subscription.current_episode
+                             THEN subscription.updated_at
+                         ELSE now()
+                     END
     FROM previous
     WHERE subscription.user_id = $1::uuid
       AND subscription.anilist_id = $2::integer
@@ -285,7 +404,7 @@ WITH previous AS (
         anilist_id,
         current_episode
     FROM updated
-    WHERE $4::integer IS NOT NULL
+    WHERE $5::integer IS NOT NULL
       AND current_episode IS DISTINCT FROM previous_episode
     RETURNING id
 )
@@ -305,6 +424,7 @@ type UpdateSubscriptionWithActivityParams struct {
 	UserID         uuid.UUID `json:"userId"`
 	AnilistID      int32     `json:"anilistId"`
 	Status         *string   `json:"status"`
+	Monotonic      bool      `json:"monotonic"`
 	CurrentEpisode *int32    `json:"currentEpisode"`
 	ScoreSet       bool      `json:"scoreSet"`
 	Score          *int32    `json:"score"`
@@ -324,11 +444,48 @@ type UpdateSubscriptionWithActivityRow struct {
 // Lock the previous value, apply the selective update, and append a watch event
 // only when the caller supplied a genuinely different episode.  This prevents
 // retries/status-only patches from manufacturing duplicate feed entries.
+//
+// `monotonic` picks the write semantics by call site:
+//
+//	monotonic = TRUE   player / library reconciliation.  current_episode can
+//	                   only move forward (GREATEST), so a stale tab replaying
+//	                   an old high-water mark can never claw progress back.
+//	                   Client-side comparison is not enough — its baseline is
+//	                   a cached copy (see §4 decision 8; Mihon #1793).
+//	monotonic = FALSE  the detail page's ± buttons.  A human MUST be able to
+//	                   correct the count downward (§4 decision 4).
+//
+// Both timestamps get a matching suppression under monotonic, for two
+// DIFFERENT reasons.  Keeping them straight matters, because only one of them
+// is load-bearing for anything a user can see today:
+//
+//	last_watched_at  Semantic honesty.  The column means "when an episode was
+//	                 actually watched", so a stale replay that GREATEST folds
+//	                 into a no-op must not touch it.  No consumer reads it for
+//	                 ordering right now — this is about the field not lying to
+//	                 whoever reads it next.  Mirrors the IS DISTINCT FROM guard
+//	                 inserted_activity already applies.
+//
+//	updated_at       This is the one the home page sees.  ListUserSubscriptions
+//	                 above is ORDER BY s.updated_at DESC, and ContinueWatching
+//	                 renders that order verbatim, so bumping updated_at on a
+//	                 no-op push would jump an untouched show to the front of
+//	                 the user's list.  ⚠️ If you ever change that ORDER BY,
+//	                 this CASE is why it was safe to suppress here.
+//
+// updated_at's guard has to check two more fields than last_watched_at's: a
+// monotonic PATCH may legally also carry status or score (the reconciler never
+// sends those, but the endpoint accepts them), and those ARE real edits that
+// must bump the row.  Only a push that changes literally nothing is preserved.
+//
+// Under monotonic = FALSE both rules stand exactly as they shipped — the
+// leading conjunct short-circuits, so the ± buttons see no change at all.
 func (q *Queries) UpdateSubscriptionWithActivity(ctx context.Context, arg UpdateSubscriptionWithActivityParams) (UpdateSubscriptionWithActivityRow, error) {
 	row := q.db.QueryRow(ctx, updateSubscriptionWithActivity,
 		arg.UserID,
 		arg.AnilistID,
 		arg.Status,
+		arg.Monotonic,
 		arg.CurrentEpisode,
 		arg.ScoreSet,
 		arg.Score,

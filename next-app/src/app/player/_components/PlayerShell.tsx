@@ -54,6 +54,11 @@ import {
   isWatchableKind,
 } from "@/lib/library/buildLibraryMatchResult.js";
 import { flattenDropFiles } from "@/lib/dropFiles";
+import {
+  onSyncFailure,
+  reconcileSeries,
+  type WatchSyncDb,
+} from "@/lib/library/watchSync";
 
 // Library-owned hooks reused here (P6.4 ports — already in tree)
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -62,6 +67,10 @@ import { useFileHandles } from "@/app/library/_hooks/useFileHandles";
 import { useImport } from "@/app/library/_hooks/useImport";
 import { useAutoRescan } from "@/app/library/_hooks/useAutoRescan";
 import { createDandanClient } from "@/app/library/_services/dandanClient";
+import {
+  makeBindingResolver,
+  type BindingResolverDb,
+} from "@/app/library/_services/resolveSeriesBinding";
 import { useSeriesDetail } from "@/app/library/_hooks/useSeriesDetail";
 import { useVideoFiles } from "@/app/library/_hooks/useVideoFiles";
 
@@ -72,6 +81,7 @@ import { useDandanMatch } from "../_hooks/useDandanMatch";
 // drop to zero once those land.
 import { useDandanComments } from "../_hooks/useDandanComments";
 import { usePlaybackSession } from "../_hooks/usePlaybackSession";
+import { useWatchProgress } from "../_hooks/useWatchProgress";
 
 // Library-owned component reused here
 import { LibraryAccessEmpty } from "@/app/library/_components/LibraryAccessEmpty";
@@ -643,6 +653,78 @@ function PlayerShellInner() {
     [setLastTime],
   );
 
+  // ─── T7/T8: Dexie watch progress + reconciliation ──────────────────────────
+  //
+  // Only the library entry path carries `_episodeId` / `_seriesId`, so a file
+  // dragged straight onto /player falls through to the localStorage branch in
+  // VideoPlayer untouched (§3.2 / decision 7).
+  const watchSyncDb = db as unknown as WatchSyncDb;
+
+  const handleWriteError = useCallback(() => {
+    // CG1: a Dexie write that fails must not be silent. Quota exhaustion and
+    // Safari private browsing both land here, and without this the user
+    // finishes an episode that never ticks off and never reaches the home page.
+    toast.error(t("player.progressWriteFailed"), { duration: 8000 });
+  }, [t]);
+
+  const handleEpisodeCompleted = useCallback(
+    ({ seriesId }: { seriesId: string }) => {
+      // Trigger 1 of three (decision 14): push the moment the local write
+      // lands, because the common shape of "finished an episode" is closing
+      // the tab, not walking back to /library.
+      void reconcileSeries(watchSyncDb, seriesId).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[player] watch sync failed:", err);
+      });
+    },
+    [watchSyncDb],
+  );
+
+  const { handleTick } = useWatchProgress({
+    db,
+    seriesId: playingFile?._seriesId ?? null,
+    episodeId: playingFile?._episodeId ?? null,
+    onWriteError: handleWriteError,
+    onCompleted: handleEpisodeCompleted,
+  });
+
+  // On-demand binding resolution, call site 2 of 2. The library's resume row
+  // and new-additions row navigate straight here without passing through the
+  // card click, so this is the only place those users can pick up an id.
+  const resolveBinding = useMemo(
+    () => makeBindingResolver(db as unknown as BindingResolverDb),
+    [],
+  );
+
+  // Trigger 3: reconcile on entering the player, once per series. Catches the
+  // episode that completed in a previous session while the network was down.
+  const reconciledSeriesRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!locationSeriesId) return;
+    if (seriesDetail.status !== "ready") return;
+    if (reconciledSeriesRef.current === locationSeriesId) return;
+    reconciledSeriesRef.current = locationSeriesId;
+    void reconcileSeries(watchSyncDb, locationSeriesId, {
+      resolveBinding,
+    }).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn("[player] watch sync failed:", err);
+    });
+  }, [locationSeriesId, seriesDetail.status, watchSyncDb, resolveBinding]);
+
+  // CG2's visible half. The reconciler stops pushing a series after three
+  // deterministic refusals; without this the user would simply never see their
+  // progress move and have nothing to act on. Fires at most once per series
+  // per session, because a blocked series is never pushed again.
+  useEffect(
+    () =>
+      onSyncFailure((failure) => {
+        if (!failure.blocked) return;
+        toast.error(t("player.syncBlocked"), { duration: 8000 });
+      }),
+    [t],
+  );
+
   // P2: resume toast — fires once per play() that actually resumes (>0).
   const lastResumeToastForFile = useRef<string | null>(null);
   useEffect(() => {
@@ -803,11 +885,23 @@ function PlayerShellInner() {
         relativePath: fileRef.relPath,
         episode: ep.number,
         parsedKind: ep.kind || "main",
+        // The two ids that make this playback trackable. Present here and
+        // nowhere else — the drop-zone path has no episode row to point at,
+        // which is exactly the storage split in §3.2.
+        _episodeId: ep.id,
+        _seriesId: ep.seriesId || locationSeriesId || undefined,
       };
 
       startPlayback(fileItem, episodeMap);
     },
-    [seriesDetail, startPlayback, t, fileHandles.status, matchResult],
+    [
+      seriesDetail,
+      startPlayback,
+      t,
+      fileHandles.status,
+      matchResult,
+      locationSeriesId,
+    ],
   );
 
   // Library mode empty-state derivations.
@@ -1260,6 +1354,7 @@ function PlayerShellInner() {
               danmakuCount={danmakuCount}
               resumeAt={resumeAt}
               onProgressTick={handleProgressTick}
+              onWatchTick={handleTick}
             />
             {danmakuCount === 0 && (
               <div style={s.danmakuInfo}>{t("player.noDanmaku")}</div>

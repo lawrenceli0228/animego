@@ -31,10 +31,17 @@ import (
 // User-facing messages.  Emitted in English; FE zh.js maps each string
 // to a localized translation keyed on the English text.
 const (
-	msgInvalidAnimeID        = "Invalid anime ID"
-	msgInvalidStatus         = "Invalid status"
-	msgInvalidEpisode        = "Episode must be a non-negative integer"
-	msgInvalidRequestBody    = "Invalid request body"
+	msgInvalidAnimeID     = "Invalid anime ID"
+	msgInvalidStatus      = "Invalid status"
+	msgInvalidEpisode     = "Episode must be a non-negative integer"
+	msgInvalidRequestBody = "Invalid request body"
+	// msgEpisodeExceedsTotal rejects a currentEpisode past the
+	// authoritative anime_cache.episodes count.  Deliberately a 400 and
+	// NOT a silent clamp (§4 decision 4): a client pushing episode 13 of
+	// a 12-episode show is mis-bound to the wrong title, and clamping to
+	// 12 would bury that as plausible-looking progress.  Only enforced
+	// when episodes IS NOT NULL — a still-airing show has no known bound.
+	msgEpisodeExceedsTotal   = "Episode exceeds the total episode count"
 	msgSubscriptionNotFound  = "Subscription not found"
 	msgAnimeNotFound         = "Anime not found"
 	msgDeletedSuccessMessage = "Deleted"

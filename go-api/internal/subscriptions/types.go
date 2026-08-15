@@ -36,9 +36,19 @@ import (
 // We use go-playground/validator/v10 tags but the per-field error
 // messages are mapped manually in validate.go so they exactly match
 // the Express messages the frontend i18n layer expects.
+//
+// IfAbsent opts into the idempotent creation path (§4 decision 3): when
+// true the handler runs InsertSubscriptionIfAbsent, which leaves an
+// existing row — including a `dropped` or `completed` status the user set
+// by hand — exactly as it found it.  Absent or false keeps the historical
+// UpsertSubscription behaviour byte-for-byte, so the "Subscribe" button
+// and every existing caller are unaffected.  A plain bool is enough
+// because there is no tri-state here: absent and false mean the same
+// thing, unlike updateSubscriptionReq.Score.
 type createSubscriptionReq struct {
 	AnilistID int32  `json:"anilistId" validate:"required,gte=1"`
 	Status    string `json:"status"    validate:"required,oneof=watching completed plan_to_watch dropped"`
+	IfAbsent  bool   `json:"ifAbsent,omitempty"`
 }
 
 // updateSubscriptionReq is the PATCH /api/subscriptions/:anilistId body
@@ -50,10 +60,24 @@ type createSubscriptionReq struct {
 // JSON-tagged; the handler populates it after detecting key presence
 // in a raw map[string]json.RawMessage pre-pass before binding the
 // typed struct.  See parseUpdateBody in handlers.go.
+//
+// Monotonic selects the write semantics in
+// UpdateSubscriptionWithActivity (§4 decisions 4 + 8):
+//
+//	true   automated progress sync (player / library reconciliation).
+//	       current_episode only moves forward; a stale replay is folded
+//	       into a no-op instead of clawing progress back.
+//	false  the detail page's ± buttons — a human correcting the count
+//	       downward MUST be able to.
+//
+// Absent, null, and false all mean false, so every caller that predates
+// this field keeps its exact behaviour.  Unlike Score there is no
+// meaningful third state, so a plain bool beats a *bool here.
 type updateSubscriptionReq struct {
 	Status         *string `json:"status,omitempty"         validate:"omitempty,oneof=watching completed plan_to_watch dropped"`
 	CurrentEpisode *int32  `json:"currentEpisode,omitempty" validate:"omitempty,gte=0"`
 	Score          *int32  `json:"score,omitempty"`
+	Monotonic      bool    `json:"monotonic,omitempty"`
 	scorePresent   bool    `json:"-"`
 }
 

@@ -89,6 +89,8 @@
  * @property {number}  [bangumiId]
  * @property {string}  [posterUrl]
  * @property {number}  [totalEpisodes]
+ * @property {number}  [anilistId]           - v6 新增:AniList 的 id,本地剧集与服务端订阅之间唯一的持久化关联键。**与 `Season.animeId`(dandanplay)不是同一个 id 空间**,两者互不可替。只经 `animeBinding.ts` 读写(自动匹配不得覆盖人工绑定);建了索引,反向查询(anilistId → 本地 series)靠它
+ * @property {number}  [lastSyncedEpisode]   - v6 新增:已成功推给服务端的正篇集号高水位。本地高水位 > 它才需要推,推成功后回写。不建索引(只按主键 seriesId 读)。缺省(undefined)= 从未同步过,不是 0
  * @property {number}  confidence      - 0..1,<0.7 需用户确认
  * @property {number}  createdAt
  * @property {number}  updatedAt

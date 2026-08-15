@@ -241,8 +241,10 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
   );
 
   // Fetch siteAnime for rich AniList metadata.
-  const { data: siteAnime, loading: siteAnimeLoading } =
-    useSiteAnimeForSeries({ series });
+  const { data: siteAnime, loading: siteAnimeLoading } = useSiteAnimeForSeries({
+    series,
+    db,
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const enrichedMatchResult: any = useMemo(() => {
     if (!libraryMatchResult) return null;
@@ -497,7 +499,8 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
 
   const handleRematchConfirm = useCallback(
     async (payload: {
-      animeId: number;
+      dandanAnimeId?: number;
+      anilistId?: number;
       titleZh?: string;
       titleEn?: string;
       posterUrl?: string;
@@ -508,7 +511,8 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
         await rematchSeries({
           db,
           seriesId,
-          animeId: payload.animeId,
+          dandanAnimeId: payload.dandanAnimeId,
+          anilistId: payload.anilistId,
           titleZh: payload.titleZh,
           titleEn: payload.titleEn,
           posterUrl: payload.posterUrl,

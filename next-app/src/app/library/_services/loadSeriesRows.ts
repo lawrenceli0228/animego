@@ -41,6 +41,21 @@ export interface SeriesRowsDb<E, P> {
 export interface SeriesRowsResult<E, P> {
   /** Every contributing series id, root first. Returned for assertions/logging. */
   seriesIds: string[];
+  /**
+   * The card's own series id — the one the caller asked for, and the only one
+   * that owns a binding.
+   *
+   * A merged card draws episodes from several series rows, but only one of them
+   * can carry `anilistId` / `lastSyncedEpisode` (v6): the root. Anything
+   * computing a watch high-water mark across this card therefore aggregates
+   * over `episodes` + `progress` (all contributors) but syncs against the root.
+   * Split those two and you get progress from a merged-in source pushed to
+   * whatever the source happened to be bound to — a different show.
+   *
+   * It is `seriesIds[0]` by construction; named here so callers stop having to
+   * know that, and empty only when `seriesId` was.
+   */
+  rootSeriesId: string;
   episodes: E[];
   progress: P[];
 }
@@ -49,7 +64,9 @@ export async function loadMergedSeriesRows<E, P>(
   db: SeriesRowsDb<E, P>,
   seriesId: string,
 ): Promise<SeriesRowsResult<E, P>> {
-  if (!seriesId) return { seriesIds: [], episodes: [], progress: [] };
+  if (!seriesId) {
+    return { seriesIds: [], rootSeriesId: "", episodes: [], progress: [] };
+  }
 
   const overrides = db.userOverride ? await db.userOverride.toArray() : [];
   const seriesIds = resolveMergedSeriesIds(overrides, seriesId);
@@ -62,5 +79,5 @@ export async function loadMergedSeriesRows<E, P>(
     db.progress.where("seriesId").anyOf(seriesIds).toArray(),
   ]);
 
-  return { seriesIds, episodes, progress };
+  return { seriesIds, rootSeriesId: seriesId, episodes, progress };
 }

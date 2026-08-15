@@ -304,6 +304,11 @@ const zh = {
     tooLong: '评论不能超过500字',
     cancel: '取消',
   },
+  // 这里故意没有 settings 命名空间。所有 settings.* 的消费者都是客户端组件
+  // （SettingsClient / BlockedUsersList / PlaybackSettings），键归 *-spa.js
+  // 那两份，由 spaDictCoverage.test.ts 把关。规则是：键放在真正读它的那份词典里 ——
+  // 客户端 t() 走 spa 对，服务端 dict.* 走这份。在这里放个局部镜像
+  // （13 个键只搬 6 个）看起来像权威其实是死的，比完全不放更容易误导人。
   // Player
   player: {
     pageTitle: '播放器',

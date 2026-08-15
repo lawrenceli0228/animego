@@ -55,6 +55,18 @@ type SubscriptionsDB interface {
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error)
 	GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.Subscription, error)
 	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
+	// InsertSubscriptionIfAbsent backs POST bodies carrying
+	// `"ifAbsent": true`.  It differs from UpsertSubscription in exactly
+	// one way that matters: on conflict it returns the existing row
+	// untouched instead of overwriting `status`.  Click-to-track fires on
+	// paths the user did not explicitly ask to re-subscribe on, so an
+	// upsert there would silently resurrect dropped/completed titles.
+	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error)
+	// GetAnimeEpisodeCount reads the authoritative total-episode count
+	// used as the upper bound on PATCH.  Nil result = still airing /
+	// unknown length = no bound to enforce.  Kept out of the PATCH CTE on
+	// purpose — see the query comment in anime_cache.sql.
+	GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error)
 	// UpdateSubscriptionWithActivity is the only PATCH path.  Its CTE
 	// writes the subscription row AND appends the watch_progress
 	// activity event in one statement, so the feed can never drift from
@@ -230,9 +242,19 @@ func (h *Handlers) GetSubscriptionByAnilistID(w http.ResponseWriter, r *http.Req
 //  3. anime.EnsureCached on the anilistId — fills the cache from
 //     AniList if it's missing so the subscriptions FK passes.
 //     ErrAnilistNotFound → 404 "Anime not found".
-//  4. UpsertSubscription.  Returns the canonical post-write Subscription
-//     row.  FK violation race (23503) → 404 "Anime not found".
+//  4. Write.  `"ifAbsent": true` routes to InsertSubscriptionIfAbsent
+//     (existing row returned untouched — status is human-only, §4
+//     decision 3); anything else keeps the historical
+//     UpsertSubscription.  Both return the canonical post-write
+//     Subscription row.  FK violation race (23503) → 404 "Anime not
+//     found".
 //  5. 201 with `{ data: <Subscription> }`.
+//
+// Both branches answer 201, including the ifAbsent case where nothing was
+// inserted.  200-on-existing would be more RESTful but would force every
+// call site to branch on the status code for no behavioural gain — the
+// body is the same shape either way, and the caller that cares about
+// "did this already exist" can compare createdAt.
 func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requireClaims(w, r)
 	if !ok {
@@ -266,7 +288,19 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub, err := h.Queries.UpsertSubscription(ctx, claims.UserID, req.AnilistID, req.Status)
+	var sub dbgen.Subscription
+	var err error
+	if req.IfAbsent {
+		// InsertSubscriptionIfAbsentRow is field-for-field identical to
+		// dbgen.Subscription, so the conversion is free and keeps one
+		// response type across both branches.  If sqlc ever reshapes the
+		// row, this stops compiling rather than reshaping the JSON.
+		var row dbgen.InsertSubscriptionIfAbsentRow
+		row, err = h.Queries.InsertSubscriptionIfAbsent(ctx, claims.UserID, req.AnilistID, req.Status)
+		sub = dbgen.Subscription(row)
+	} else {
+		sub, err = h.Queries.UpsertSubscription(ctx, claims.UserID, req.AnilistID, req.Status)
+	}
 	if err != nil {
 		// FK race: anime_cache row vanished between EnsureCached's
 		// upsert and our INSERT.  Map to 404 — from the caller's
@@ -291,11 +325,15 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 //  3. Parse body via parseUpdateBody so we can distinguish
 //     `{"score":null}` (clear) from `{}` (no change).
 //  4. Validate the parsed struct.
-//  5. Build UpdateSubscriptionWithActivityParams with the ScoreSet flag
-//     set IFF the "score" key was present in the body.
-//  6. Run UpdateSubscriptionWithActivity; pgx.ErrNoRows → 404 (matches
+//  5. Upper-bound guard: when currentEpisode is supplied, reject
+//     anything past anime_cache.episodes with 400 (see
+//     checkEpisodeUpperBound).
+//  6. Build UpdateSubscriptionWithActivityParams with the ScoreSet flag
+//     set IFF the "score" key was present in the body, and Monotonic
+//     from the body (default false).
+//  7. Run UpdateSubscriptionWithActivity; pgx.ErrNoRows → 404 (matches
 //     Express's findOneAndUpdate returning null).
-//  7. 200 with the post-update subscription row.
+//  8. 200 with the post-update subscription row.
 //
 // Express's empty-body behaviour: returns the existing row unchanged.
 // Our SQL's COALESCE pattern handles this naturally — every field stays
@@ -323,6 +361,10 @@ func (h *Handlers) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.checkEpisodeUpperBound(ctx, w, anilistID, req.CurrentEpisode) {
+		return
+	}
+
 	// Concrete row type, not `any`: the response shape of PATCH is part of
 	// the FE contract, so it has to be something the compiler can check.
 	// Widening the CTE's RETURNING list should break here, not silently
@@ -330,6 +372,7 @@ func (h *Handlers) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 	sub, err := h.Queries.UpdateSubscriptionWithActivity(ctx, dbgen.UpdateSubscriptionWithActivityParams{
 		Status:         req.Status,
 		CurrentEpisode: req.CurrentEpisode,
+		Monotonic:      req.Monotonic,
 		ScoreSet:       req.scorePresent,
 		Score:          clampScore(req.Score),
 		UserID:         claims.UserID,
@@ -345,6 +388,46 @@ func (h *Handlers) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.Data(w, http.StatusOK, sub)
+}
+
+// checkEpisodeUpperBound rejects a currentEpisode past the authoritative
+// anime_cache.episodes count, writing a 400 envelope and returning false.
+// Returns true (proceed) when there is nothing to check.
+//
+// It costs one extra round-trip, but only on the progress-writing path —
+// status-only and score-only patches skip it entirely.  Three deliberate
+// pass-through cases:
+//
+//	currentEpisode absent   nothing to bound.
+//	episodes IS NULL        still airing / unknown length.  §4 decision 4
+//	                        says no bound, not "bound at 0".
+//	pgx.ErrNoRows           the title isn't cached, so the FK on
+//	                        subscriptions means there is no row to update
+//	                        either — let the PATCH answer its own 404
+//	                        rather than inventing a 400 here.
+//
+// Rejecting rather than clamping is the point: an episode past the end is
+// evidence the client bound the wrong title, and a clamp would store that
+// as plausible-looking progress.  The TOCTOU window against the enrichment
+// worker (the only writer of anime_cache.episodes) is accepted — losing
+// that race costs one spurious 400 the client retries past.
+func (h *Handlers) checkEpisodeUpperBound(ctx context.Context, w http.ResponseWriter, anilistID int32, currentEpisode *int32) bool {
+	if currentEpisode == nil {
+		return true
+	}
+	total, err := h.Queries.GetAnimeEpisodeCount(ctx, anilistID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return true
+		}
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "episode count lookup failed"))
+		return false
+	}
+	if total != nil && *currentEpisode > *total {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, msgEpisodeExceedsTotal))
+		return false
+	}
+	return true
 }
 
 // DeleteSubscription implements DELETE /api/subscriptions/:anilistId.
@@ -439,6 +522,17 @@ func parseUpdateBody(r *http.Request) (updateSubscriptionReq, error) {
 			req.Score = &n
 		}
 		// score=null leaves req.Score nil but scorePresent=true.
+	}
+	// No presence flag for monotonic: absent, null, and false are all the
+	// same instruction ("apply the caller's value verbatim"), so the zero
+	// value already encodes it.  That is what keeps the detail page's ±
+	// buttons — which never send the key — behaving exactly as before.
+	if v, ok := raw["monotonic"]; ok && len(v) > 0 && string(v) != "null" {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return updateSubscriptionReq{}, err
+		}
+		req.Monotonic = b
 	}
 	return req, nil
 }

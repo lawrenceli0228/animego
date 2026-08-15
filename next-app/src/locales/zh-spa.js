@@ -321,6 +321,13 @@ const zh = {
     publicProfileOff: '只有你自己可以查看追番列表与活动。',
     savePrivacy: '保存隐私设置', saving: '保存中…', saved: '已保存',
     blockedUsers: '已拉黑用户', noBlockedUsers: '暂无拉黑用户',
+    // 播放：只存在这台设备的 localStorage 里，切换即生效，没有保存按钮。
+    playbackTitle: '播放',
+    playbackSubtitle: '只影响这台设备上的播放器',
+    autoMarkDone: '看到片尾就自动标记看过',
+    autoMarkDoneOn: '一集播到接近结尾时自动打勾，并把追番进度往前推一集。',
+    autoMarkDoneOff: '不会自动打勾，看过哪一集由你自己在库里标记。',
+    autoMarkDoneSaveFailed: '这台设备存不下设置（无痕模式或存储已满），开关没能保存。',
   },
   // Player
   player: {
@@ -351,6 +358,9 @@ const zh = {
     backToList: '返回列表',
     error: '出错了',
     errorGeneric: '弹幕服务暂时不可用，请稍后重试',
+    // 本地进度写不进去(配额满 / 无痕模式):这一集不会打勾也不会同步,必须说出来。
+    progressWriteFailed: '看过记录存不进本地库(存储已满或无痕模式),这一集没有打勾。',
+    syncBlocked: '追番进度同步失败,已暂停重试 — 这部番的匹配可能绑错了。',
     decodeError: '浏览器无法解码该文件的音视频流（多为 HE-AAC / 罕见 codec）。建议改用其他压制版本，或用 ffmpeg 重 mux 后再播放。',
     fileUnreadable: '文件读取失败：请尝试重新授权库目录或重新导入此文件。',
     retry: '重试',
@@ -560,6 +570,13 @@ const zh = {
     reauthorize: '重新授权',
     noSeries: '尚无系列 — 添加文件夹以开始。',
     fileMissing: '文件丢失或未授权访问',
+    // 本地库打不开 / 升级被别的标签页挡住。渲染点 = LibraryDbAlert.tsx。
+    // 另一份同义副本在 `lib/library/db/dbOpenErrors.js`(开发者 / Sentry 文本),
+    // 故意不去重 —— 那个模块是数据层,不能 import t()。改这里就一起改那边。
+    dbBlocked: '本地库升级被其他标签页占用：请关闭其他 AnimeGo 标签页后刷新重试。你的文件和记录都还在。',
+    dbOpenFailed: '本地库暂时打不开：请刷新页面重试。你的文件和记录都还在，没有被删除。',
+    // 追番进度推送连续被拒后的一次性提示。
+    syncBlocked: '追番进度同步失败,已暂停重试 — 这部番的匹配可能绑错了。',
     refreshMeta: '刷新元数据',
     refreshMetaProgress: '刷新元数据 ({{done}}/{{total}})',
     refreshMetaDone: '已更新 {{changed}} / {{total}} 个系列',
@@ -630,6 +647,9 @@ const zh = {
       moreActions: '操作菜单',
       offline: '硬盘未连接',
       partial: '部分文件不可用',
+      // 只在「本地有进度、但没同步出去」的卡片上出现,说明为什么首页数字没动。
+      syncUnbound: '未关联 AniList,进度不会同步 — 用「重新匹配」选一部番',
+      syncBlocked: '进度同步被服务器拒绝,已暂停 — 匹配可能绑错了番',
       lock: '锁定匹配',
       unlock: '解锁匹配',
       mergeTo: '合并到…',

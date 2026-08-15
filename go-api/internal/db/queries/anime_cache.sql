@@ -793,3 +793,21 @@ WHERE anilist_id = $1;
 UPDATE anime_cache
 SET description_cn_attempted_at = now()
 WHERE anilist_id = $1;
+
+-- name: GetAnimeEpisodeCount :one
+-- Authoritative total-episode count for one title, used by
+-- PATCH /api/subscriptions/:anilistId as the upper bound on currentEpisode.
+--
+-- Deliberately a standalone read rather than a guard folded into
+-- UpdateSubscriptionWithActivity's CTE: inside the CTE an out-of-range
+-- episode degrades to "0 rows updated", which is indistinguishable from
+-- "no such subscription" — one pgx.ErrNoRows for two conditions the API
+-- has to answer differently (400 vs 404).
+--
+-- NULL episodes means "airing / unknown length"; the caller must treat that
+-- as "no bound" and let the write through rather than rejecting it.
+-- pgx.ErrNoRows means the title isn't cached at all, in which case the FK on
+-- subscriptions guarantees there is no subscription to update either.
+SELECT episodes
+FROM anime_cache
+WHERE anilist_id = $1;

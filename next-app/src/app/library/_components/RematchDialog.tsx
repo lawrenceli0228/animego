@@ -34,8 +34,23 @@ interface SeriesLike {
   titleJa?: string;
 }
 
+/**
+ * Two ids, two universes. Naming them apart is the whole point of this type.
+ *
+ *   dandanAnimeId — dandanplay's per-season anime id. Lands on `Season.animeId`
+ *                   and drives danmaku + episode listings.
+ *   anilistId     — AniList's id. Lands on `Series.anilistId` and drives
+ *                   subscriptions and watch-progress sync.
+ *
+ * `/api/dandanplay/search` returns two disjoint row shapes and they do NOT
+ * overlap: `source: "animeCache"` rows carry `anilistId` and never
+ * `dandanAnimeId`; `source: "dandanplay"` rows carry `dandanAnimeId` and never
+ * `anilistId`. Either may be absent — the picker offers both sections — so both
+ * fields are optional and `normalize` rejects a hit that has neither.
+ */
 export interface RematchPayload {
-  animeId: number;
+  dandanAnimeId?: number;
+  anilistId?: number;
   titleZh?: string;
   titleEn?: string;
   posterUrl?: string;
@@ -55,16 +70,34 @@ function pickTitle(series: SeriesLike | undefined | null): string {
   );
 }
 
+/** Positive integer or nothing. Search JSON is untrusted input. */
+function toPositiveInt(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
 /**
- * Normalize a raw dandanplay search hit to the rematch payload that the
- * service layer expects. Falls back to anilistId when dandanAnimeId is
- * missing (some search response shapes only carry one).
+ * Normalize a raw search hit into the rematch payload.
+ *
+ * This used to read `Number(it.dandanAnimeId ?? it.anilistId ?? NaN)` and hand
+ * the result over as `animeId`. Since animeCache rows never carry
+ * `dandanAnimeId`, every pick from the (richer, first-listed) cache section fell
+ * through to `anilistId` — and an AniList id was then written into
+ * `Season.animeId` and `userOverride.overrideSeasonAnimeId`, both of which are
+ * dandanplay id space. The import pipeline looks up seasons by dandanplay id
+ * (`findReusableSeason`), so the poisoned row could never match again: a
+ * duplicate card on the next import, plus danmaku pointed at whatever
+ * dandanplay anime happens to share that number.
+ *
+ * Now each id is carried in its own field and neither substitutes for the
+ * other.
  */
 function normalize(item: unknown): RematchPayload | null {
   if (!item || typeof item !== "object") return null;
   const it = item as Record<string, unknown>;
-  const animeId = Number(it.dandanAnimeId ?? it.anilistId ?? NaN);
-  if (!Number.isInteger(animeId) || animeId <= 0) return null;
+  const dandanAnimeId = toPositiveInt(it.dandanAnimeId);
+  const anilistId = toPositiveInt(it.anilistId);
+  if (dandanAnimeId === undefined && anilistId === undefined) return null;
   let type: RematchPayload["type"] = "tv";
   if (typeof it.format === "string") {
     const f = it.format.toLowerCase();
@@ -73,7 +106,8 @@ function normalize(item: unknown): RematchPayload | null {
     else if (f.includes("web")) type = "web";
   }
   return {
-    animeId,
+    dandanAnimeId,
+    anilistId,
     titleZh: (it.titleChinese as string) || undefined,
     titleEn: (it.title as string) || undefined,
     posterUrl:
@@ -86,8 +120,9 @@ function normalize(item: unknown): RematchPayload | null {
  * RematchDialog — pick a different dandanplay anime for an existing series.
  *
  * Wraps the existing ManualSearch picker in a modal shell. The picked item is
- * normalized into the shape rematchSeries() expects (animeId + display fields)
- * before being handed to onConfirm. Backdrop click + Escape + Cancel all close.
+ * normalized into the shape rematchSeries() expects (both ids, kept apart, plus
+ * display fields) before being handed to onConfirm. Backdrop click + Escape +
+ * Cancel all close.
  */
 export function RematchDialog({
   open,

@@ -261,6 +261,32 @@ func (q *Queries) GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]
 	return items, nil
 }
 
+const getAnimeEpisodeCount = `-- name: GetAnimeEpisodeCount :one
+SELECT episodes
+FROM anime_cache
+WHERE anilist_id = $1
+`
+
+// Authoritative total-episode count for one title, used by
+// PATCH /api/subscriptions/:anilistId as the upper bound on currentEpisode.
+//
+// Deliberately a standalone read rather than a guard folded into
+// UpdateSubscriptionWithActivity's CTE: inside the CTE an out-of-range
+// episode degrades to "0 rows updated", which is indistinguishable from
+// "no such subscription" — one pgx.ErrNoRows for two conditions the API
+// has to answer differently (400 vs 404).
+//
+// NULL episodes means "airing / unknown length"; the caller must treat that
+// as "no bound" and let the write through rather than rejecting it.
+// pgx.ErrNoRows means the title isn't cached at all, in which case the FK on
+// subscriptions guarantees there is no subscription to update either.
+func (q *Queries) GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error) {
+	row := q.db.QueryRow(ctx, getAnimeEpisodeCount, anilistID)
+	var episodes *int32
+	err := row.Scan(&episodes)
+	return episodes, err
+}
+
 const getAnimeEpisodeTitlesByID = `-- name: GetAnimeEpisodeTitlesByID :many
 SELECT episode, name, name_cn
 FROM anime_episode_titles
