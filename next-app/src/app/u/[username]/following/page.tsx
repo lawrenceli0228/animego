@@ -114,8 +114,10 @@ export default async function FollowingPage({ params, searchParams }: PageProps)
   // the back-link and the pagination URLs. Permanent — that form of the
   // URL should leave the index. See _lib/canonicalHandle.
   const handle = await canonicalHandle(username);
-  if (handle === null) notFound();
-  if (handle !== username) {
+  // null = could not establish it (unknown user, or the lookup failed). Do
+  // not redirect on a guess — the list fetch below still 404s when the user
+  // genuinely does not exist.
+  if (handle !== null && handle !== username) {
     permanentRedirect(`/u/${encodeURIComponent(handle)}/following`);
   }
 
