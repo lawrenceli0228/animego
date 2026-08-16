@@ -20,6 +20,14 @@ import "./settings.css";
 
 interface SettingsClientProps {
   username: string;
+  /**
+   * True when `username` above is a masked handle rather than a name its
+   * owner chose — see go-api/internal/pii. Supplied by the API rather than
+   * re-derived here on purpose: a second copy of the detection rule would
+   * eventually disagree with the Go one, and the failure mode is telling
+   * someone their name is fine while the server hides it.
+   */
+  usernameHidden: boolean;
   userId: string | null;
   createdAt: string | null;
   avatarUrl: string | null;
@@ -61,6 +69,7 @@ async function patchMe(
 
 export default function SettingsClient({
   username,
+  usernameHidden,
   userId,
   createdAt,
   avatarUrl,
@@ -77,6 +86,13 @@ export default function SettingsClient({
   const since = sinceLabel(createdAt);
 
   const [name, setName] = useState(username);
+
+  // The server decides whether the name is hidden; we never re-derive it.
+  // Gated on the field still holding the handle, so the warning clears the
+  // moment they type a replacement rather than lingering until the save
+  // round-trips.
+  const usernameIsHidden = usernameHidden && name.trim() === username;
+
   const [nameStatus, setNameStatus] = useState<Status>({ kind: "idle" });
   const [photoUrl, setPhotoUrl] = useState<string | null>(avatarUrl);
   const [passStatus, setPassStatus] = useState<Status>({ kind: "idle" });
@@ -342,8 +358,26 @@ export default function SettingsClient({
                 value={name}
                 maxLength={50}
                 onChange={(e) => setName(e.target.value)}
+                aria-describedby={usernameIsHidden ? "set-username-hidden" : undefined}
               />
             </div>
+            {usernameIsHidden && (
+              // Each run of copy is a single string expression rather than JSX
+              // text. JSX turns a newline + indent into a space, which is
+              // correct for English and wrong for Chinese — that is what put
+              // stray gaps mid-sentence here before.
+              <div id="set-username-hidden" className="set-warn" role="status">
+                <p className="set-warn-title">
+                  {zh ? "用户名已隐藏" : "Username hidden"}
+                </p>
+                <p className="set-warn-body">
+                  {zh
+                    ? "你注册时填的名字看起来是邮箱或手机号，所以没有公开显示。现在你和别人看到的都是："
+                    : "The name you registered with looks like an email address or a phone number, so it is not shown. You and everyone else now see:"}
+                </p>
+                <code className="set-warn-code">{username}</code>
+              </div>
+            )}
             <div className="set-actions">
               <button
                 type="button"

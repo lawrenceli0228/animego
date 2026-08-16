@@ -17,6 +17,8 @@ interface MeResp {
   user?: {
     id?: string | null;
     username: string;
+    /** True when `username` is a masked handle rather than a chosen name. */
+    usernameHidden?: boolean;
     createdAt?: string | null;
     avatarUrl?: string | null;
     backdropAnilistId?: number | null;
@@ -98,6 +100,7 @@ export default async function SettingsPage() {
     <main>
       <SettingsClient
         username={me.username}
+        usernameHidden={me.usernameHidden ?? false}
         userId={me.id ?? null}
         createdAt={me.createdAt ?? null}
         avatarUrl={me.avatarUrl ?? null}
