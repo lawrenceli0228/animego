@@ -14,7 +14,7 @@
 // primary content — the page is fully rendered on first paint.
 
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { apiGet, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
 import { decodeUsername } from "@/lib/username";
@@ -108,6 +108,19 @@ export default async function UserProfilePage({ params }: PageProps) {
   ]);
 
   if (!profile) notFound();
+
+  // The API answers to both the stored username and the masked handle, but
+  // only the handle may appear on screen or in a URL. When a contact-shaped
+  // username is what reached us, this route was rendering it into the title,
+  // the canonical and the body — the one surface the serialization masking in
+  // go-api/internal/pii could not reach, because it renders the path param
+  // rather than the response.
+  //
+  // Permanent, not temporary: the address form of this URL should leave the
+  // index rather than be kept alive as an alternate.
+  if (profile.username !== username) {
+    permanentRedirect(`/u/${encodeURIComponent(profile.username)}`);
+  }
 
   const isSelf = me?.username === username;
   const isLoggedIn = me !== null;
