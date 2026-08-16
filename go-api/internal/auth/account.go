@@ -23,6 +23,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/avatars"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 const (
@@ -65,6 +66,13 @@ func (h *Handlers) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSpace(*req.Username)
 		if len(name) < minUsernameLen || len(name) > maxUsernameLen {
 			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, codeValidation, msgUsernameLen))
+			return
+		}
+		// Same rule as registration — otherwise the settings page is a
+		// back door that puts a contact detail back on the public
+		// surfaces internal/pii exists to keep it off.
+		if pii.LooksLikeContact(name) {
+			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, codeValidation, msgUsernameLooksLikeContact))
 			return
 		}
 		if _, err := h.db.UpdateUsername(ctx, claims.UserID, name); err != nil {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import FadeImage from "@/components/ui/FadeImage";
 import { pickTitle } from "@/lib/formatters";
 import { useLang } from "@/lib/lang-client";
+import { isMaskedUsername } from "@/lib/publicUsername";
 import type { HotDiscussion } from "@/lib/types";
 import {
   communityDiscussionTarget,
@@ -128,7 +129,16 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
                       : styles.preview
                   }
                 >
-                  <b>@{item.latest.username}</b> {preview}
+                  <b
+                    title={
+                      isMaskedUsername(item.latest.username)
+                        ? t("communityDiscovery.maskedUser")
+                        : undefined
+                    }
+                  >
+                    @{item.latest.username}
+                  </b>{" "}
+                  {preview}
                 </span>
               </span>
 

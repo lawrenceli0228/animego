@@ -36,6 +36,7 @@ import (
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 // GetProfile implements GET /api/users/:username — public profile +
@@ -50,7 +51,7 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	username := chi.URLParam(r, "username")
-	user, err := h.Queries.GetUserIDByUsername(ctx, username)
+	user, err := h.resolveUserHandle(ctx, username)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
@@ -149,7 +150,7 @@ func (h *Handlers) GetProfile(w http.ResponseWriter, r *http.Request) {
 
 	httpx.Data(w, http.StatusOK, profileResponse{
 		ID:                user.ID.String(),
-		Username:          user.Username,
+		Username:          pii.PublicUsername(user.Username),
 		CreatedAt:         user.CreatedAt,
 		AvatarURL:         user.AvatarUrl,
 		BackdropAnilistID: user.BackdropAnilistID,

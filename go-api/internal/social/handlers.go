@@ -8,14 +8,18 @@ package social
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 // queryTimeout bounds every DB round-trip in this package.  Matches
@@ -50,6 +54,12 @@ const (
 // path param, plus the per-endpoint reads / writes below.
 type SocialDB interface {
 	GetUserIDByUsername(ctx context.Context, username string) (dbgen.GetUserIDByUsernameRow, error)
+
+	// GetUserIDByPublicSlug resolves the masked handle that internal/pii
+	// hands out for contact-shaped usernames.  Required, not optional: a
+	// type assertion that failed would have silently 404'd exactly the
+	// users the masking protects, with no error and no failing test.
+	GetUserIDByPublicSlug(ctx context.Context, slug string) (dbgen.GetUserIDByPublicSlugRow, error)
 
 	// Profile
 	GetProfileCounts(ctx context.Context, userID uuid.UUID) (dbgen.GetProfileCountsRow, error)
@@ -139,3 +149,33 @@ func parsePage(r *http.Request) int {
 // intPtr returns &n.  Convenience for assigning hasMore-derived
 // NextPage values into the response envelope.
 func intPtr(n int) *int { return &n }
+
+// resolveUserHandle turns a /u/{handle} path param into a user row.
+//
+// The handle is normally the username itself.  For users whose username is
+// contact-shaped, internal/pii replaces it with an opaque slug on every
+// public response — so the slug is the only handle a link can carry, and it
+// has to resolve here or those profiles 404 for everyone, including their
+// existing followers.
+//
+// Order matters: the exact-username lookup runs first and uses the unique
+// index.  The slug lookup is a sequential scan, so it only runs when the
+// handle actually has the slug prefix AND the indexed lookup missed.  A real
+// username that happens to start with "user-" therefore still wins.
+func (h *Handlers) resolveUserHandle(ctx context.Context, handle string) (dbgen.GetUserIDByUsernameRow, error) {
+	user, err := h.Queries.GetUserIDByUsername(ctx, handle)
+	if err == nil {
+		return user, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) || !strings.HasPrefix(handle, pii.SlugPrefix) {
+		return user, err
+	}
+
+	row, slugErr := h.Queries.GetUserIDByPublicSlug(ctx, handle)
+	if slugErr != nil {
+		// Report the original miss, so the caller's ErrNoRows → 404
+		// mapping stays intact whichever lookup came up empty.
+		return user, err
+	}
+	return dbgen.GetUserIDByUsernameRow(row), nil
+}

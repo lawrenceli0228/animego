@@ -33,6 +33,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/email"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 // queryTimeout bounds every handler's database round-trip.  Five
@@ -104,6 +105,13 @@ const (
 	msgUsernameRequired  = "Username must be 3-50 characters"
 	msgEmailRequired     = "Invalid email format"
 	msgValidationGeneric = "Invalid request"
+
+	// The username is a public display name and the /u/{username} routing
+	// key; the email is only ever a way to recover the account.  Letting
+	// one be the other published contact details into anonymous endpoints
+	// and, through the watchers list, into the CDN-cached /anime/{id}
+	// page.  See internal/pii.
+	msgUsernameLooksLikeContact = "Username cannot be an email address or a phone number — it is shown publicly"
 )
 
 // AuthDB is the sqlc subset that auth handlers consume.  Defined here
@@ -225,6 +233,17 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.validator.Struct(&req); err != nil {
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, codeValidation, validationMessage(err)))
+		return
+	}
+
+	// The username is public (display name + /u/{username} route) while the
+	// email exists only to recover the account.  Nothing used to stop the
+	// two from being the same string, and users did exactly that, which put
+	// live addresses and phone numbers into anonymous endpoints.  Rejecting
+	// at registration stops new ones; internal/pii masks the existing rows
+	// on the way out.
+	if pii.LooksLikeContact(req.Username) {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, codeValidation, msgUsernameLooksLikeContact))
 		return
 	}
 

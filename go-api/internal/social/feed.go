@@ -33,6 +33,7 @@ import (
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 // GetFeed implements GET /api/feed?page=1 — chronological feed of
@@ -131,7 +132,7 @@ func mapFeedRows(rows []dbgen.ListFeedActivitiesRow) []feedItem {
 		out[i] = feedItem{
 			ID:             row.ActivityID,
 			Kind:           row.EventType,
-			Username:       row.Username,
+			Username:       pii.PublicUsername(row.Username),
 			AvatarURL:      row.AvatarUrl,
 			AnilistID:      row.AnilistID,
 			Title:          title,
@@ -144,7 +145,7 @@ func mapFeedRows(rows []dbgen.ListFeedActivitiesRow) []feedItem {
 			CommentID:      row.CommentID,
 			Content:        row.CommentContent,
 			Excerpt:        row.CommentContent,
-			TargetUsername: row.TargetUsername,
+			TargetUsername: pii.PublicUsernamePtr(row.TargetUsername),
 			IsSpoiler:      row.CommentIsSpoiler,
 		}
 	}

@@ -23,6 +23,7 @@ import (
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 // ListFollowers implements GET /api/users/:username/followers?page=1.
@@ -32,7 +33,7 @@ func (h *Handlers) ListFollowers(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	username := chi.URLParam(r, "username")
-	user, err := h.Queries.GetUserIDByUsername(ctx, username)
+	user, err := h.resolveUserHandle(ctx, username)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
@@ -73,7 +74,7 @@ func (h *Handlers) ListFollowers(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]followListItem, len(rows))
 	for i, row := range rows {
-		items[i] = followListItem{Username: row.Username, AvatarURL: row.AvatarUrl, BackdropCoverURL: row.BackdropCoverUrl}
+		items[i] = followListItem{Username: pii.PublicUsername(row.Username), AvatarURL: row.AvatarUrl, BackdropCoverURL: row.BackdropCoverUrl}
 	}
 	writeFollowListEnvelope(w, items, total, page)
 }
@@ -86,7 +87,7 @@ func (h *Handlers) ListFollowing(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	username := chi.URLParam(r, "username")
-	user, err := h.Queries.GetUserIDByUsername(ctx, username)
+	user, err := h.resolveUserHandle(ctx, username)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
@@ -127,7 +128,7 @@ func (h *Handlers) ListFollowing(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]followListItem, len(rows))
 	for i, row := range rows {
-		items[i] = followListItem{Username: row.Username, AvatarURL: row.AvatarUrl, BackdropCoverURL: row.BackdropCoverUrl}
+		items[i] = followListItem{Username: pii.PublicUsername(row.Username), AvatarURL: row.AvatarUrl, BackdropCoverURL: row.BackdropCoverUrl}
 	}
 	writeFollowListEnvelope(w, items, total, page)
 }

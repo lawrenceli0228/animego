@@ -51,7 +51,7 @@ func (h *Handlers) Follow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	username := chi.URLParam(r, "username")
-	followee, err := h.Queries.GetUserIDByUsername(ctx, username)
+	followee, err := h.resolveUserHandle(ctx, username)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))
@@ -109,7 +109,7 @@ func (h *Handlers) Unfollow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	username := chi.URLParam(r, "username")
-	followee, err := h.Queries.GetUserIDByUsername(ctx, username)
+	followee, err := h.resolveUserHandle(ctx, username)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgUserNotFound))

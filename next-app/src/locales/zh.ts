@@ -101,6 +101,9 @@ const zh = {
   // Anime watchers
   anime: {
     watchers: '人在追', watchersMore: '还有',
+    // Shown when the API returned a masked handle instead of a chosen
+    // name — see lib/publicUsername.ts and go-api/internal/pii.
+    maskedUser: '这位用户还没有设置公开显示名',
     loadError: '加载失败', noAnime: '暂无番剧',
   },
   // The quick-subscribe + overlaid on poster cards across the home,

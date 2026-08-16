@@ -227,6 +227,7 @@ const zh = {
     action_dropped: '弃坑了',
   },
   communityDiscovery: {
+    maskedUser: '这位用户还没有设置公开显示名',
     welcomePinned: '置顶',
     welcomeEyebrow: '社区公告',
     welcomeTitle: '欢迎来到 AnimeGoClub 社区',

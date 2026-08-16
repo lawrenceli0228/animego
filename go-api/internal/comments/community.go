@@ -14,6 +14,7 @@ import (
 
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 const (
@@ -97,7 +98,7 @@ func (h *Handlers) ListCommentSummaries(w http.ResponseWriter, r *http.Request) 
 		items[i].Latest = append(items[i].Latest, commentSummaryPreview{
 			ID:               row.ID,
 			UserID:           row.UserID,
-			Username:         row.Username,
+			Username:         pii.PublicUsername(row.Username),
 			AvatarURL:        row.AvatarUrl,
 			BackdropCoverURL: row.BackdropCoverUrl,
 			Content:          row.Content,
@@ -167,7 +168,7 @@ func (h *Handlers) ListTrendingDiscussions(w http.ResponseWriter, r *http.Reques
 			ReactionCount:    row.ReactionCount,
 			Latest: trendingDiscussionLatest{
 				ID:        row.LatestCommentID,
-				Username:  row.LatestUsername,
+				Username:  pii.PublicUsername(row.LatestUsername),
 				AvatarURL: row.LatestAvatarUrl,
 				Content:   row.LatestContent,
 				IsSpoiler: row.LatestIsSpoiler,

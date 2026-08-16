@@ -20,6 +20,29 @@ SELECT id, username, created_at, avatar_url, backdrop_anilist_id, is_public
 FROM users
 WHERE username = $1;
 
+-- name: GetUserIDByPublicSlug :one
+-- Companion lookup for users whose username is masked on public surfaces.
+--
+-- internal/pii replaces a contact-shaped username with 'user-' || the first
+-- ten hex characters of its MD5, so that is the only handle those users have
+-- in a public response — and therefore the only thing a /u/ link can carry.
+-- Without this query their profile would 404 for everyone, including the
+-- people already following them.
+--
+-- md5() is a core Postgres function (no pgcrypto), and internal/pii hashes
+-- the raw username bytes with no case folding precisely so this expression
+-- matches it.  internal/pii's TestSlug_MatchesPostgresMd5Contract pins the
+-- Go half of that contract.
+--
+-- This cannot use the users_username_key index — it is a sequential scan
+-- over a table in the low thousands.  That is why it is a separate query
+-- rather than an OR branch on the one above: the common path stays indexed,
+-- and only a slug lookup pays the scan.
+SELECT id, username, created_at, avatar_url, backdrop_anilist_id, is_public
+FROM users
+WHERE 'user-' || left(md5(username), 10) = $1
+LIMIT 1;
+
 -- ==================== Follow CRUD ====================
 
 -- name: UpsertFollow :exec

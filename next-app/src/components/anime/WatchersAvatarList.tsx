@@ -17,6 +17,7 @@ import Link from "next/link";
 import { ApiError, apiGetEnvelope } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import { isMaskedUsername } from "@/lib/publicUsername";
 import FallbackImg from "@/components/ui/FallbackImg";
 import type { WatcherItem, WatchersResponse } from "@/lib/types";
 
@@ -106,6 +107,10 @@ export default async function WatchersAvatarList({
   const animeDict = dict.anime as unknown as Record<string, string>;
   const watchersLabel = animeDict.watchers ?? "watching";
   const moreLabel = animeDict.watchersMore ?? "+";
+  // Users whose username looked like a contact detail come back from the API
+  // as an opaque handle. Explain the placeholder on hover rather than letting
+  // it read as a broken name — see lib/publicUsername.ts.
+  const maskedLabel = animeDict.maskedUser ?? "This user hasn't set a public display name yet";
 
   return (
     <div style={rowStyle}>
@@ -113,12 +118,16 @@ export default async function WatchersAvatarList({
         {watchers.map((w, i) => {
           const overlap = i < watchers.length - 1 ? { marginRight: -8 } : {};
           const stack = { zIndex: watchers.length - i };
+          const masked = isMaskedUsername(w.username);
+          // The handle still identifies the row and still routes, so it stays
+          // the visible label; the hover text is what explains it.
+          const hoverText = masked ? `${w.username} — ${maskedLabel}` : w.username;
           return (
             <Link
               key={w.username}
-              href={`/u/${w.username}`}
-              title={w.username}
-              aria-label={w.username}
+              href={`/u/${encodeURIComponent(w.username)}`}
+              title={hoverText}
+              aria-label={hoverText}
               prefetch={false}
               style={{
                 ...avatarStyle,
