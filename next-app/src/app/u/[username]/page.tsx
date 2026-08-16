@@ -18,6 +18,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import { apiGet, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
 import { decodeUsername } from "@/lib/username";
+import { canonicalHandle, encodePathSegment } from "./_lib/canonicalHandle";
 import FollowButton from "./_components/FollowButton";
 import WatchingSection from "./_components/WatchingSection";
 import ShareButtonIsland from "./_components/ShareButtonIsland";
@@ -50,7 +51,10 @@ async function fetchMe(): Promise<{ username: string } | null> {
 
 async function fetchProfile(username: string): Promise<UserProfileData | null> {
   try {
-    return await apiGet<UserProfileData>(`/api/users/${encodeURIComponent(username)}`, {
+    // encodePathSegment, not encodeURIComponent: the latter over-encodes '@'
+    // and the Go router matches the literal, so a contact-shaped handle would
+    // 404 here and the redirect below would never be reached.
+    return await apiGet<UserProfileData>(`/api/users/${encodePathSegment(username)}`, {
       cache: "no-store",
     });
   } catch (err) {
@@ -63,12 +67,46 @@ async function fetchProfile(username: string): Promise<UserProfileData | null> {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { username: usernameSlug } = await params;
-  const username = decodeUsername(usernameSlug);
-  const [lang, dict] = await Promise.all([getLang(), getDict()]);
-  // dict.profile.titleSuffix = "'s Watchlist" / "的追番"
+  const requested = decodeUsername(usernameSlug);
+
+  // This function — not the page body — is where a contact-shaped handle was
+  // reaching the response. It never consulted the API, so the raw param went
+  // straight into the title, the description, the canonical, and the og /
+  // twitter tags. The page component could not prevent it: metadata is built
+  // independently, and for these handles the profile fetch 404s anyway, so
+  // the body was already the not-found state while the head still carried the
+  // address.
+  //
+  // Resolve first. Unknown handles fall back to a neutral title rather than
+  // echoing whatever string was in the URL — that echo is the whole leak.
+  const [lang, dict, resolved] = await Promise.all([
+    getLang(),
+    getDict(),
+    canonicalHandle(requested),
+  ]);
+  const username = resolved ?? "";
   const suffix = dict.profile.titleSuffix;
-  const title = `${username} ${suffix}`;
-  const canonical = `/u/${encodeURIComponent(username)}`;
+  const title = username ? `${username} ${suffix}` : "AnimeGoClub";
+  const canonical = username ? `/u/${encodeURIComponent(username)}` : undefined;
+
+  if (!username) {
+    // No such user. Say nothing identifying, and do not offer a canonical
+    // for a URL that resolves to a not-found page.
+    return { title: { absolute: "AnimeGoClub" }, robots: { index: false, follow: false } };
+  }
+
+  // The visitor asked for this profile by a handle that is not the one it
+  // should be addressed by — in practice, the stored contact-shaped username
+  // rather than the masked handle. The page component redirects, but that
+  // redirect cannot set a status code: the root loading.tsx puts every route
+  // behind a Suspense boundary, so the shell has already flushed by the time
+  // the component runs and Next falls back to a client-side navigation.
+  //
+  // So the status stays 200 for a crawler, and without this the URL would be
+  // indexable — with clean content, but with the address in the URL itself.
+  // noindex keeps it out, and the canonical below still points at the handle
+  // form so any existing index entry consolidates there.
+  const addressedByAlias = username !== requested;
 
   return {
     title: { absolute: `${title} · AnimeGoClub` },
@@ -76,6 +114,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       lang === "zh"
         ? `${username} 的追番列表和社交主页 — AnimeGoClub`
         : `${username}'s watchlist and social profile on AnimeGoClub`,
+    ...(addressedByAlias ? { robots: { index: false, follow: false } } : {}),
     alternates: {
       canonical,
       languages: {

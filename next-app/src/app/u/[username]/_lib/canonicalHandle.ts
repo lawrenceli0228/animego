@@ -19,23 +19,43 @@ interface ProfileHandle {
 }
 
 /**
- * The handle this profile should be addressed by.
+ * The handle this profile should be addressed by, or `null` when it could not
+ * be established — no such user, or the lookup failed.
  *
- * Returns `null` when there is no such user — callers map that to
- * `notFound()`, matching what the list endpoints already do on 404.
+ * The two failure modes collapse into one return value on purpose. Echoing
+ * the input back on an error would be the safe default for a redirect
+ * decision but the wrong one for a title: a flaky request would put the
+ * address straight back into the head, which is the leak this exists to
+ * close. Callers pick their own behaviour for `null`, and both choices are
+ * safe:
+ *
+ *   - metadata falls back to a neutral title, naming nobody
+ *   - the list routes simply do not redirect, and their own fetch still
+ *     404s if the user genuinely does not exist
  */
 export async function canonicalHandle(handle: string): Promise<string | null> {
   try {
     const data = await apiGet<ProfileHandle>(
-      `/api/users/${encodeURIComponent(handle)}`,
+      `/api/users/${encodePathSegment(handle)}`,
       { cache: "no-store" },
     );
     return data?.username ?? null;
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
-    // Any other failure (500, network) must not decide the URL. Returning
-    // the input leaves the page to render as before rather than bouncing
-    // the visitor somewhere on the strength of a failed request.
-    return handle;
+    return null;
   }
+}
+
+/**
+ * `encodeURIComponent` for a path segment, minus the over-encoding of `@`.
+ *
+ * RFC 3986 allows `@` unescaped in a path segment, but encodeURIComponent
+ * percent-encodes it anyway, and the Go router matches the literal — so
+ * `/api/users/x%40y.com` 404s while `/api/users/x@y.com` resolves. Without
+ * this, the exact handles that need resolving (the contact-shaped ones) are
+ * the only ones that never resolve, and the caller silently falls back to
+ * "unknown user".
+ */
+export function encodePathSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(/%40/g, "@");
 }
