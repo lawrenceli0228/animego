@@ -7,11 +7,12 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import type { CSSProperties } from "react";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
 import { decodeUsername } from "@/lib/username";
+import { canonicalHandle } from "../_lib/canonicalHandle";
 import FollowListRow from "../_components/FollowListRow";
 import type { FollowListItem } from "../_components/types";
 
@@ -108,6 +109,16 @@ const emptyStyle: CSSProperties = {
 export default async function FollowingPage({ params, searchParams }: PageProps) {
   const { username: usernameSlug } = await params;
   const username = decodeUsername(usernameSlug);
+  // Redirect before rendering: every href on this page is built from the
+  // param, so a raw contact-shaped handle would end up in the canonical,
+  // the back-link and the pagination URLs. Permanent — that form of the
+  // URL should leave the index. See _lib/canonicalHandle.
+  const handle = await canonicalHandle(username);
+  if (handle === null) notFound();
+  if (handle !== username) {
+    permanentRedirect(`/u/${encodeURIComponent(handle)}/following`);
+  }
+
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
 
