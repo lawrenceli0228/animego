@@ -5,6 +5,10 @@ import dynamic from "next/dynamic";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import { useLang } from "@/lib/lang-client";
+import {
+  normalizeRematchHit,
+  type RematchPayload,
+} from "../_services/rematchPayload";
 
 // ManualSearch is owned by the P6.6 Player port (subagent C in the next
 // fan-out). It doesn't exist in next-app yet; this dynamic import resolves
@@ -34,28 +38,11 @@ interface SeriesLike {
   titleJa?: string;
 }
 
-/**
- * Two ids, two universes. Naming them apart is the whole point of this type.
- *
- *   dandanAnimeId — dandanplay's per-season anime id. Lands on `Season.animeId`
- *                   and drives danmaku + episode listings.
- *   anilistId     — AniList's id. Lands on `Series.anilistId` and drives
- *                   subscriptions and watch-progress sync.
- *
- * `/api/dandanplay/search` returns two disjoint row shapes and they do NOT
- * overlap: `source: "animeCache"` rows carry `anilistId` and never
- * `dandanAnimeId`; `source: "dandanplay"` rows carry `dandanAnimeId` and never
- * `anilistId`. Either may be absent — the picker offers both sections — so both
- * fields are optional and `normalize` rejects a hit that has neither.
- */
-export interface RematchPayload {
-  dandanAnimeId?: number;
-  anilistId?: number;
-  titleZh?: string;
-  titleEn?: string;
-  posterUrl?: string;
-  type: "tv" | "movie" | "ova" | "web";
-}
+// The payload shape, the untrusted-int parse and the normalize rule live in
+// _services/rematchPayload.ts so they can be tested without React. Do not
+// re-inline them: that rule is what keeps an AniList id out of dandanplay id
+// space, and it went unpinned by any test for as long as it lived here.
+export type { RematchPayload };
 
 interface RematchDialogProps {
   open: boolean;
@@ -68,52 +55,6 @@ function pickTitle(series: SeriesLike | undefined | null): string {
   return (
     series?.titleEn || series?.titleZh || series?.titleJa || series?.id || ""
   );
-}
-
-/** Positive integer or nothing. Search JSON is untrusted input. */
-function toPositiveInt(value: unknown): number | undefined {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isInteger(n) && n > 0 ? n : undefined;
-}
-
-/**
- * Normalize a raw search hit into the rematch payload.
- *
- * This used to read `Number(it.dandanAnimeId ?? it.anilistId ?? NaN)` and hand
- * the result over as `animeId`. Since animeCache rows never carry
- * `dandanAnimeId`, every pick from the (richer, first-listed) cache section fell
- * through to `anilistId` — and an AniList id was then written into
- * `Season.animeId` and `userOverride.overrideSeasonAnimeId`, both of which are
- * dandanplay id space. The import pipeline looks up seasons by dandanplay id
- * (`findReusableSeason`), so the poisoned row could never match again: a
- * duplicate card on the next import, plus danmaku pointed at whatever
- * dandanplay anime happens to share that number.
- *
- * Now each id is carried in its own field and neither substitutes for the
- * other.
- */
-function normalize(item: unknown): RematchPayload | null {
-  if (!item || typeof item !== "object") return null;
-  const it = item as Record<string, unknown>;
-  const dandanAnimeId = toPositiveInt(it.dandanAnimeId);
-  const anilistId = toPositiveInt(it.anilistId);
-  if (dandanAnimeId === undefined && anilistId === undefined) return null;
-  let type: RematchPayload["type"] = "tv";
-  if (typeof it.format === "string") {
-    const f = it.format.toLowerCase();
-    if (f.includes("movie")) type = "movie";
-    else if (f.includes("ova")) type = "ova";
-    else if (f.includes("web")) type = "web";
-  }
-  return {
-    dandanAnimeId,
-    anilistId,
-    titleZh: (it.titleChinese as string) || undefined,
-    titleEn: (it.title as string) || undefined,
-    posterUrl:
-      (it.coverImageUrl as string) || (it.imageUrl as string) || undefined,
-    type,
-  };
 }
 
 /**
@@ -146,7 +87,7 @@ export function RematchDialog({
   const sourceTitle = pickTitle(sourceSeries);
 
   function handleSelect(item: unknown) {
-    const payload = normalize(item);
+    const payload = normalizeRematchHit(item);
     if (payload) onConfirm(payload);
   }
 
