@@ -29,6 +29,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 	"github.com/lawrenceli0228/animego/go-api/internal/torrents"
 )
 
@@ -319,9 +320,21 @@ func Watchers(q dbgen.Querier) http.HandlerFunc {
 		// Map rows → []watcherItem so the JSON shape carries an object per
 		// element ({username, avatarUrl}). avatarUrl drives the watcher
 		// avatar thumbnails; nil renders the initial fallback.
+		//
+		// pii.PublicUsername is load-bearing here, more than anywhere else
+		// in the codebase: this endpoint takes no auth at all, and the
+		// frontend renders each username four times per watcher (the
+		// /u/{username} href, title, aria-label and img alt) into
+		// /anime/{id} — a route that is ISR-prerendered, Cloudflare
+		// edge-cached and indexed.  A contact-shaped username here ends up
+		// in a CDN-cached search result.
 		items := make([]watcherItem, 0, len(watchers))
 		for _, row := range watchers {
-			items = append(items, watcherItem{Username: row.Username, AvatarURL: row.AvatarUrl, BackdropCoverURL: row.BackdropCoverUrl})
+			items = append(items, watcherItem{
+				Username:         pii.PublicUsername(row.Username),
+				AvatarURL:        row.AvatarUrl,
+				BackdropCoverURL: row.BackdropCoverUrl,
+			})
 		}
 
 		// Express:  res.json({data, total}) — flat sibling keys, not

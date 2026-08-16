@@ -37,6 +37,7 @@ import (
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 // queryTimeout bounds every DB round-trip in this package.  Matches
@@ -212,7 +213,7 @@ func mapDanmakuRows(rows []dbgen.ListDanmakuRecentRow) []danmakuItem {
 		row := rows[i]
 		out = append(out, danmakuItem{
 			ID:        row.ID,
-			Username:  row.Username,
+			Username:  pii.PublicUsername(row.Username),
 			Content:   row.Content,
 			CreatedAt: row.CreatedAt.Time,
 		})

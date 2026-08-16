@@ -302,6 +302,56 @@
   color: #ff453a;
 }
 
+/* Shown under the username field when the server is masking the name because
+   it looks like an email address or a phone number. Amber rather than red:
+   nothing is broken and no action is forced — the account works either way,
+   the name is just not on display. */
+.set-warn {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 214, 10, 0.26);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(255, 214, 10, 0.06);
+}
+.set-warn-title {
+  margin: 0;
+  color: #ffd60a;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.set-warn-body {
+  /* CJK has no inter-word spaces to absorb slack, so it needs more leading
+     than the latin copy elsewhere on this page to stay readable. */
+  margin: 6px 0 0;
+  color: rgba(235, 235, 245, 0.78);
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+/* The handle is opaque, unbreakable and the thing the reader is looking for.
+   Own line, not inline: mid-sentence it forced an awkward wrap and buried
+   the one string that matters. */
+.set-warn-code {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px 0 0;
+  padding: 5px 10px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+/* The 4px on .set-actions is right when the button follows a bare input.
+   Behind a bordered callout it reads as if the button belongs to the box,
+   so give it room here only — scoped rather than raising the global value. */
+.set-warn + .set-actions {
+  margin-top: 16px;
+}
+
 /* photo row */
 .set-photo {
   display: flex;

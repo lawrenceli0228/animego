@@ -28,6 +28,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
@@ -37,6 +38,7 @@ import (
 
 type fakeDB struct {
 	getUserIDByUsernameFn      func(ctx context.Context, username string) (dbgen.GetUserIDByUsernameRow, error)
+	getUserIDByPublicSlugFn    func(ctx context.Context, slug string) (dbgen.GetUserIDByPublicSlugRow, error)
 	getProfileCountsFn         func(ctx context.Context, userID uuid.UUID) (dbgen.GetProfileCountsRow, error)
 	listProfileWatchingFn      func(ctx context.Context, userID uuid.UUID) ([]dbgen.ListProfileWatchingRow, error)
 	followExistsFn             func(ctx context.Context, follower, followee uuid.UUID) (bool, error)
@@ -58,6 +60,17 @@ func (f *fakeDB) GetUserIDByUsername(ctx context.Context, username string) (dbge
 		panic("fakeDB.GetUserIDByUsername not set")
 	}
 	return f.getUserIDByUsernameFn(ctx, username)
+}
+
+// GetUserIDByPublicSlug defaults to "no such slug" rather than panicking:
+// almost every social test resolves a plain username and never reaches the
+// slug fallback, and a panic default would have forced all of them to stub a
+// method they do not exercise.
+func (f *fakeDB) GetUserIDByPublicSlug(ctx context.Context, slug string) (dbgen.GetUserIDByPublicSlugRow, error) {
+	if f.getUserIDByPublicSlugFn == nil {
+		return dbgen.GetUserIDByPublicSlugRow{}, pgx.ErrNoRows
+	}
+	return f.getUserIDByPublicSlugFn(ctx, slug)
 }
 
 func (f *fakeDB) GetProfileCounts(ctx context.Context, userID uuid.UUID) (dbgen.GetProfileCountsRow, error) {

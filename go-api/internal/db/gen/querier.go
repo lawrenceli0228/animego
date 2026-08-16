@@ -428,6 +428,24 @@ type Querier interface {
 	// Uniqueness check during register (we also rely on the unique index,
 	// but a pre-check gives a friendlier 400 vs a 500-looking pg error).
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	// Companion lookup for users whose username is masked on public surfaces.
+	//
+	// internal/pii replaces a contact-shaped username with 'user-' || the first
+	// ten hex characters of its MD5, so that is the only handle those users have
+	// in a public response — and therefore the only thing a /u/ link can carry.
+	// Without this query their profile would 404 for everyone, including the
+	// people already following them.
+	//
+	// md5() is a core Postgres function (no pgcrypto), and internal/pii hashes
+	// the raw username bytes with no case folding precisely so this expression
+	// matches it.  internal/pii's TestSlug_MatchesPostgresMd5Contract pins the
+	// Go half of that contract.
+	//
+	// This cannot use the users_username_key index — it is a sequential scan
+	// over a table in the low thousands.  That is why it is a separate query
+	// rather than an OR branch on the one above: the common path stays indexed,
+	// and only a slug lookup pays the scan.
+	GetUserIDByPublicSlug(ctx context.Context, username string) (GetUserIDByPublicSlugRow, error)
 	// Queries for the social surface (P2.4) — follows + public profile + feed.
 	//
 	// Backs five endpoints:

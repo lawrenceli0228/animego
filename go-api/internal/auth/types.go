@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 // RegisterReq is the POST /api/auth/register body shape.  Validation
@@ -78,8 +79,25 @@ type ResetPasswordReq struct {
 // resetPasswordToken, resetPasswordExpires.  See ToSafeUser comment for
 // the trust boundary.
 type SafeUser struct {
-	ID                uuid.UUID `json:"id"`
-	Username          string    `json:"username"`
+	ID       uuid.UUID `json:"id"`
+	Username string    `json:"username"`
+
+	// UsernameHidden is true when the stored username was contact-shaped and
+	// internal/pii replaced it, so Username above is an opaque handle rather
+	// than a name its owner chose.
+	//
+	// Username itself carries the SAME value for everyone, the owner
+	// included — there is deliberately no second field holding the raw
+	// string.  One name means one thing on screen, and the owner has no use
+	// for the original: sessions are keyed on email (see LoginReq), so the
+	// username is purely a display name.
+	//
+	// The flag exists so the settings page can explain the handle without
+	// re-implementing the detection rule in TypeScript.  A second copy of
+	// that rule would eventually disagree with the Go one, and the failure
+	// mode is telling someone their name is fine while the server hides it.
+	UsernameHidden bool `json:"usernameHidden"`
+
 	Email             string    `json:"email"`
 	Role              *string   `json:"role"`
 	IsPublic          bool      `json:"isPublic"`
@@ -102,8 +120,11 @@ type SafeUser struct {
 // explicitly added here.
 func ToSafeUser(u dbgen.User) SafeUser {
 	return SafeUser{
-		ID:                u.ID,
-		Username:          u.Username,
+		ID: u.ID,
+		// Masked for everyone, the owner included — see the Username and
+		// UsernameHidden field comments for why there is no raw-value twin.
+		Username:          pii.PublicUsername(u.Username),
+		UsernameHidden:    pii.LooksLikeContact(u.Username),
 		Email:             u.Email,
 		Role:              u.Role,
 		IsPublic:          u.IsPublic,

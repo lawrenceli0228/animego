@@ -49,6 +49,9 @@ const en = {
   // Anime watchers
   anime: {
     watchers: 'watching', watchersMore: '+',
+    // Shown when the API returned a masked handle instead of a chosen
+    // name — see lib/publicUsername.ts and go-api/internal/pii.
+    maskedUser: "This user hasn't set a public display name yet",
     loadError: 'Failed to load', noAnime: 'No anime found',
   },
   // The quick-subscribe + overlaid on poster cards across the home,

@@ -28,11 +28,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 // queryTimeout bounds every DB round-trip in this package.  Matches the
@@ -145,17 +147,64 @@ func (h *Handlers) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ListEpisodeComments returns []EpisodeComment which already has
-	// the right camelCase JSON tags (id, anilistId, episode, userId,
-	// username, content, parentId, replyToUsername, createdAt, updatedAt).
-	// sqlc init's empty slice as `[]EpisodeComment{}` already, but we
-	// defensively ensure a non-nil slice so the envelope emits `"data":[]`
-	// not `"data":null` on the unlikely off-chance ListEpisodeComments
-	// returns nil.
-	if rows == nil {
-		rows = []dbgen.ListEpisodeCommentsRow{}
+	// The sqlc row already carries the right camelCase JSON tags, so this
+	// used to serialize `rows` directly.  It no longer can: `username` and
+	// `replyToUsername` are user-chosen and some users registered with an
+	// email address or a phone number, and this endpoint answers anonymous
+	// callers.  Mapping through publicComment is what keeps a contact
+	// detail out of the response — see internal/pii.
+	//
+	// The mapper also guarantees a non-nil slice so the envelope emits
+	// `"data":[]` rather than `"data":null`.
+	httpx.Data(w, http.StatusOK, toPublicComments(rows))
+}
+
+// publicComment mirrors dbgen.ListEpisodeCommentsRow field-for-field.  It
+// exists only so the two username fields can pass through pii.PublicUsername
+// on their way out; every other field is copied verbatim, and the JSON tags
+// are identical so the wire shape is unchanged.
+type publicComment struct {
+	ID               uuid.UUID          `json:"id"`
+	AnilistID        int32              `json:"anilistId"`
+	Episode          int32              `json:"episode"`
+	UserID           uuid.UUID          `json:"userId"`
+	Username         string             `json:"username"`
+	Content          string             `json:"content"`
+	IsSpoiler        bool               `json:"isSpoiler"`
+	ParentID         *uuid.UUID         `json:"parentId"`
+	ReplyToUsername  *string            `json:"replyToUsername"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt        pgtype.Timestamptz `json:"updatedAt"`
+	AvatarUrl        *string            `json:"avatarUrl"`
+	BackdropCoverUrl *string            `json:"backdropCoverUrl"`
+	ReactionCount    int64              `json:"reactionCount"`
+	ViewerReacted    bool               `json:"viewerReacted"`
+}
+
+// toPublicComments masks both username fields on every row.  Returns an
+// empty (non-nil) slice for nil input.
+func toPublicComments(rows []dbgen.ListEpisodeCommentsRow) []publicComment {
+	out := make([]publicComment, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, publicComment{
+			ID:               row.ID,
+			AnilistID:        row.AnilistID,
+			Episode:          row.Episode,
+			UserID:           row.UserID,
+			Username:         pii.PublicUsername(row.Username),
+			Content:          row.Content,
+			IsSpoiler:        row.IsSpoiler,
+			ParentID:         row.ParentID,
+			ReplyToUsername:  pii.PublicUsernamePtr(row.ReplyToUsername),
+			CreatedAt:        row.CreatedAt,
+			UpdatedAt:        row.UpdatedAt,
+			AvatarUrl:        row.AvatarUrl,
+			BackdropCoverUrl: row.BackdropCoverUrl,
+			ReactionCount:    row.ReactionCount,
+			ViewerReacted:    row.ViewerReacted,
+		})
 	}
-	httpx.Data(w, http.StatusOK, rows)
+	return out
 }
 
 // AddComment implements POST /api/comments/:anilistId/:episode.

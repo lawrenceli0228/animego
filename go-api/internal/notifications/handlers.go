@@ -17,6 +17,7 @@ import (
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
+	"github.com/lawrenceli0228/animego/go-api/internal/pii"
 )
 
 const (
@@ -142,7 +143,7 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 		item := itemResponse{
 			ID:        row.ID,
 			Type:      notificationType(row.NotificationType),
-			Actor:     actorResponse{Username: row.ActorUsername, AvatarURL: row.ActorAvatarUrl},
+			Actor:     actorResponse{Username: pii.PublicUsername(row.ActorUsername), AvatarURL: row.ActorAvatarUrl},
 			Episode:   row.Episode,
 			CommentID: row.CommentID,
 			Excerpt:   row.CommentContent,

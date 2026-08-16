@@ -172,6 +172,7 @@ const en = {
     action_dropped: 'dropped',
   },
   communityDiscovery: {
+    maskedUser: "This user hasn't set a public display name yet",
     welcomePinned: 'PINNED',
     welcomeEyebrow: 'COMMUNITY NOTICE',
     welcomeTitle: 'Welcome to the AnimeGoClub community',

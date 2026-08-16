@@ -213,4 +213,3 @@ func writeRateLimited(w http.ResponseWriter) {
 		slog.Warn("auth: write 429 envelope", "err", err)
 	}
 }
-

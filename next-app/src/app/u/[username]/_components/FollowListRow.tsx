@@ -5,6 +5,7 @@ import type { FollowListItem } from "./types";
 import FollowButton from "./FollowButton";
 import type { Lang } from "@/lib/i18n";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import { isMaskedUsername } from "@/lib/publicUsername";
 import FallbackImg from "@/components/ui/FallbackImg";
 
 interface FollowListRowProps {
@@ -75,7 +76,18 @@ export default function FollowListRow({
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         </div>
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}>
+        <span
+          style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}
+          // Contact-shaped usernames come back masked; explain the opaque
+          // handle on hover instead of letting it read as a broken name.
+          title={
+            isMaskedUsername(user.username)
+              ? lang === "zh"
+                ? "这位用户还没有设置公开显示名"
+                : "This user hasn't set a public display name yet"
+              : undefined
+          }
+        >
           {user.username}
         </span>
       </Link>
