@@ -15,6 +15,7 @@ import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { settingsErrorMessage } from "./settingsState";
 import BlockedUsersList from "./BlockedUsersList";
+import PlaybackSettings from "./PlaybackSettings";
 import "./settings.css";
 
 interface SettingsClientProps {
@@ -356,19 +357,14 @@ export default function SettingsClient({
             </div>
           </section>
 
-          {/* security: password changes go through the email reset flow */}
+          {/* playback: device-local prefs, no server round trip, no Save */}
+          <PlaybackSettings />
+
+          {/* community & privacy */}
           <section className="set-card">
             <h2>{t("settings.communityTitle")}</h2>
             <p className="sub">{t("settings.communitySubtitle")}</p>
-            <label
-              htmlFor="set-public-profile"
-              style={{
-                display: "flex",
-                gap: 14,
-                alignItems: "flex-start",
-                cursor: "pointer",
-              }}
-            >
+            <label className="set-toggle" htmlFor="set-public-profile">
               <input
                 id="set-public-profile"
                 type="checkbox"
@@ -377,13 +373,10 @@ export default function SettingsClient({
                   setPublicProfile(event.target.checked);
                   setPrivacyStatus({ kind: "idle" });
                 }}
-                style={{ width: 18, height: 18, marginTop: 2, accentColor: "#0a84ff" }}
               />
               <span>
-                <b style={{ display: "block", color: "#fff", fontSize: 13.5, marginBottom: 4 }}>
-                  {t("settings.publicProfile")}
-                </b>
-                <span style={{ display: "block", color: "rgba(235,235,245,0.48)", fontSize: 12.5, lineHeight: 1.55 }}>
+                <b>{t("settings.publicProfile")}</b>
+                <span className="set-toggle-desc">
                   {publicProfile
                     ? t("settings.publicProfileOn")
                     : t("settings.publicProfileOff")}

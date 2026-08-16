@@ -23,6 +23,7 @@ import { motion as Motion, useReducedMotion } from "motion/react";
 import { VideoPlayer } from "./VideoPlayer";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
+import type { WatchTick } from "../_hooks/watchProgressPolicy";
 
 const HUE = PLAYER_HUE.stream;
 const HUE_LIVE = PLAYER_HUE.live;
@@ -121,6 +122,8 @@ export interface PlayerHudFrameProps {
   quality?: string;
   resumeAt?: number | null;
   onProgressTick?: (sec: number) => void;
+  /** Forwarded verbatim — the frame is chrome and holds no playback state. */
+  onWatchTick?: (tick: WatchTick) => void;
 }
 
 export function PlayerHudFrame({
@@ -137,6 +140,7 @@ export function PlayerHudFrame({
   quality = "AUTO",
   resumeAt = null,
   onProgressTick,
+  onWatchTick,
 }: PlayerHudFrameProps) {
   const statusText = `STREAM // ${danmakuCount} COMMENTS // ${quality}`;
   const typed = useTypeOn(statusText);
@@ -170,6 +174,7 @@ export function PlayerHudFrame({
           progressKey={progressKey}
           resumeAt={resumeAt}
           onProgressTick={onProgressTick}
+          onWatchTick={onWatchTick}
         />
         <Motion.span
           style={s.callsign}

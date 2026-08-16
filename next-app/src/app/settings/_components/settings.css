@@ -189,6 +189,56 @@
   border-color: var(--accent, #0a84ff);
 }
 
+/* Checkbox row — one class for every switch on the page (privacy, playback)
+   so two cards cannot drift into two different-looking controls. The negative
+   margin cancels the hit-area padding, keeping the text on the card's edge.
+   A native checkbox is deliberate: tab order, space to toggle, and the
+   label-click target all come for free. */
+.set-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 10px;
+  margin: -10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+.set-toggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.set-toggle:active {
+  background: rgba(255, 255, 255, 0.07);
+}
+.set-toggle input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--accent, #0a84ff);
+}
+.set-toggle input:focus-visible {
+  outline: 2px solid var(--accent, #0a84ff);
+  outline-offset: 3px;
+}
+.set-toggle b {
+  display: block;
+  color: #fff;
+  font-size: 13.5px;
+  margin-bottom: 4px;
+}
+.set-toggle-desc {
+  display: block;
+  color: rgba(235, 235, 245, 0.48);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+@media (prefers-reduced-motion: reduce) {
+  .set-toggle {
+    transition: none;
+  }
+}
+
 .set-actions {
   display: flex;
   align-items: center;

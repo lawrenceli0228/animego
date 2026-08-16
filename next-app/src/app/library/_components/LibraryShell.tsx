@@ -52,6 +52,19 @@ import { migrateLegacyProgress } from "@/lib/library/db/migrateLegacyProgress.js
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { ulid } from "@/lib/library/ulid.js";
+import {
+  makeBindingResolver,
+  type BindingResolverDb,
+} from "../_services/resolveSeriesBinding";
+import {
+  onSyncFailure,
+  reconcileLibrary,
+  startTracking,
+  type TrackingDb,
+  type WatchSyncOverride,
+  type WatchSyncProgress,
+  type WatchSyncSeries,
+} from "@/lib/library/watchSync";
 
 // Hooks owned by this subagent / unowned support hooks
 import { useLibrary } from "../_hooks/useLibrary";
@@ -104,6 +117,7 @@ import { ImportMiniPill } from "./ImportMiniPill";
 import { BulkActionToolbar } from "./BulkActionToolbar";
 import { HudOverflowMenu } from "./HudOverflowMenu";
 import { FsaUnsupportedBanner } from "./FsaUnsupportedBanner";
+import { LibraryDbAlert } from "./LibraryDbAlert";
 import { MergeDialog } from "./MergeDialog";
 import { SplitDialog } from "./SplitDialog";
 import { RematchDialog } from "./RematchDialog";
@@ -341,7 +355,12 @@ export function LibraryShell() {
     clear,
   } = useUserOverride({ db });
   const { entries: unclassifiedEntries } = useUnclassified({ db });
-  const { map: progressMap } = useSeriesProgressMap({ db });
+  const { map: progressMap, rows: progressRows } = useSeriesProgressMap({
+    db,
+  }) as {
+    map: Map<string, { watchedCount: number; completedCount: number; lastPlayedAt: number }>;
+    rows: WatchSyncProgress[];
+  };
   const watchRhythm = useWatchRhythm({ db });
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -505,11 +524,95 @@ export function LibraryShell() {
     rearmWatch();
   }, [fsaSupported, pickFolder, processFiles, runImport, yieldToManual, rearmWatch]);
 
-  const handlePickSeries = useCallback((id: string) => {
-    // Open the in-page episode picker. The user picks an exact episode there
-    // and `handlePickEpisode` routes to /player with the resume target.
-    setDetailSeriesId(id);
-  }, []);
+  // ─── T8/T9: watch-progress sync ───────────────────────────────────────────
+  const watchSyncDb = db as unknown as TrackingDb;
+  // On-demand binding resolution, call site 1 of 2. A freshly imported series
+  // has no anilistId — the automatic resolver only ever ran on
+  // /library/[seriesId], which the grid never opens — so without this a card
+  // click has no id to subscribe with and T9 silently does nothing.
+  const resolveBinding = useMemo(
+    () => makeBindingResolver(db as unknown as BindingResolverDb),
+    [],
+  );
+
+  // CG2's visible half. `onSyncFailure` fires once per deterministic refusal
+  // and a blocked series is never pushed again, so this both drives the card
+  // note and produces exactly one toast per broken series per session.
+  const [syncFailedIds, setSyncFailedIds] = useState<Set<string>>(new Set());
+  useEffect(
+    () =>
+      onSyncFailure((failure) => {
+        if (!failure.blocked) return;
+        setSyncFailedIds((prev) => {
+          if (prev.has(failure.seriesId)) return prev;
+          const next = new Set(prev);
+          next.add(failure.seriesId);
+          return next;
+        });
+        toast.error(t("library.syncBlocked"), { duration: 8000 });
+      }),
+    [t],
+  );
+
+  // Trigger 2 of three (decision 14): reconcile on entering /library, once per
+  // mount. Costs zero extra progress reads (the rows come straight off
+  // useSeriesProgressMap's liveQuery), zero extra series reads (useLibrary
+  // already has them) and exactly one db.episodes read — needed because
+  // nothing on this page loads episodes, and `kind` is what keeps an NCOP out
+  // of the high-water mark.
+  const libraryReconciledRef = useRef(false);
+  useEffect(() => {
+    if (libraryReconciledRef.current) return;
+    if (loading || progressRows.length === 0) return;
+    libraryReconciledRef.current = true;
+    void reconcileLibrary(watchSyncDb, {
+      progress: progressRows,
+      series: series as WatchSyncSeries[],
+      overrides: [...overrides.values()] as WatchSyncOverride[],
+    }).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn("[library] watch sync failed:", err);
+    });
+  }, [loading, progressRows, series, overrides, watchSyncDb]);
+
+  const handlePickSeries = useCallback(
+    (id: string) => {
+      // T9 / decision 3 — "import it, click it, it starts being tracked".
+      // Fire-and-forget, and it MUST stay that way: resolving a binding is a
+      // title search, and the episode picker has to open at click speed. The
+      // resolve and the POST run behind the sheet that is already on screen.
+      void startTracking(watchSyncDb, id, { resolveBinding }).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[library] start tracking failed:", err);
+      });
+      // Open the in-page episode picker. The user picks an exact episode there
+      // and `handlePickEpisode` routes to /player with the resume target.
+      setDetailSeriesId(id);
+    },
+    [watchSyncDb, resolveBinding],
+  );
+
+  /**
+   * Why a card is not contributing to the home page's progress, when it
+   * plausibly should be.
+   *
+   * Scoped to cards with local progress on purpose: "not linked to AniList" is
+   * true of most of a fresh library and useless noise there, but on a series
+   * the user has actually watched it is the whole explanation for why the
+   * count on the home page never moved.
+   */
+  const syncStateBySeries = useMemo(() => {
+    const out = new Map<string, "unbound" | "blocked">();
+    for (const sr of series) {
+      if (syncFailedIds.has(sr.id)) {
+        out.set(sr.id, "blocked");
+        continue;
+      }
+      const watched = progressMap.get(sr.id)?.watchedCount ?? 0;
+      if (watched > 0 && !sr.anilistId) out.set(sr.id, "unbound");
+    }
+    return out;
+  }, [series, progressMap, syncFailedIds]);
 
   // P6 navigation: URL query params per P6-DESIGN §3.1.
   // Legacy used useNavigate('/player', { state: {...} }); we encode in the
@@ -799,7 +902,8 @@ export function LibraryShell() {
 
   const handleRematchConfirm = useCallback(
     async (payload: {
-      animeId: number;
+      dandanAnimeId?: number;
+      anilistId?: number;
       titleZh?: string;
       titleEn?: string;
       posterUrl?: string;
@@ -810,7 +914,8 @@ export function LibraryShell() {
         await rematchSeries({
           db,
           seriesId: rematchSourceId,
-          animeId: payload.animeId,
+          dandanAnimeId: payload.dandanAnimeId,
+          anilistId: payload.anilistId,
           titleZh: payload.titleZh,
           titleEn: payload.titleEn,
           posterUrl: payload.posterUrl,
@@ -1022,6 +1127,7 @@ export function LibraryShell() {
   return (
     <div style={s.page}>
       <style>{PRIVACY_PULSE_CSS}</style>
+      <LibraryDbAlert />
       {showBanner && <FsaUnsupportedBanner />}
 
       {selection.selectionMode ? (
@@ -1254,6 +1360,7 @@ export function LibraryShell() {
               onToggleSelect={(id: string) => selection.toggle(id)}
               onLongPress={(id: string) => selection.toggle(id)}
               availabilityBySeries={availabilityBySeries}
+              syncStateBySeries={syncStateBySeries}
             />
           )}
           <UnavailableSeriesSection

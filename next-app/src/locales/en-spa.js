@@ -266,6 +266,14 @@ const en = {
     publicProfileOff: 'Only you can view your watchlist and activity.',
     savePrivacy: 'Save privacy', saving: 'Saving…', saved: 'Saved',
     blockedUsers: 'Blocked users', noBlockedUsers: 'No blocked users',
+    // Playback: lives in this device's localStorage, applies the moment it is
+    // toggled, so there is no Save button.
+    playbackTitle: 'Playback',
+    playbackSubtitle: 'Applies to the player on this device only',
+    autoMarkDone: 'Mark an episode watched when it reaches the end',
+    autoMarkDoneOn: 'Once an episode plays out to near the end it is ticked off, and your watch progress moves up by one.',
+    autoMarkDoneOff: 'Nothing is ticked automatically — you mark episodes watched yourself in your library.',
+    autoMarkDoneSaveFailed: 'This device could not store the setting (private browsing or full storage), so the switch did not save.',
   },
   // Player
   player: {
@@ -296,6 +304,8 @@ const en = {
     backToList: 'Back to list',
     error: 'Something went wrong',
     errorGeneric: 'Danmaku service unavailable. Please try again later.',
+    progressWriteFailed: 'Could not save your progress to the local library (storage full or private browsing) — this episode was not ticked off.',
+    syncBlocked: 'Watch progress could not be synced and retries are paused — this series may be matched to the wrong title.',
     decodeError: 'The browser cannot decode this file (often HE-AAC or an uncommon codec). Try a different release, or remux with ffmpeg.',
     fileUnreadable: 'File read failed — try reauthorizing the library folder or re-importing this file.',
     retry: 'Retry',
@@ -505,6 +515,12 @@ const en = {
     reauthorize: 'Reauthorize',
     noSeries: 'No series yet — add a folder to get started.',
     fileMissing: 'File not found or permission denied',
+    // Rendered by LibraryDbAlert.tsx. A second, deliberately un-deduped copy
+    // lives in lib/library/db/dbOpenErrors.js as developer / Sentry text — that
+    // module is the data layer and must not import t(). Change both together.
+    dbBlocked: 'Another AnimeGo tab is holding the local library open. Close the other tabs and reload. Your files and history are intact.',
+    dbOpenFailed: 'The local library will not open right now. Reload the page to try again. Your files and history have not been deleted.',
+    syncBlocked: 'Watch progress could not be synced and retries are paused — this series may be matched to the wrong title.',
     refreshMeta: 'Refresh metadata',
     refreshMetaProgress: 'Refreshing metadata ({{done}}/{{total}})',
     refreshMetaDone: 'Updated {{changed}} of {{total}} series',
@@ -575,6 +591,8 @@ const en = {
       moreActions: 'Actions menu',
       offline: 'Drive disconnected',
       partial: 'Some files unavailable',
+      syncUnbound: 'Not linked to AniList — progress stays local. Use Rematch to pick a title.',
+      syncBlocked: 'Progress sync refused and paused — may be matched to the wrong title.',
       lock: 'Lock match',
       unlock: 'Unlock match',
       mergeTo: 'Merge into…',

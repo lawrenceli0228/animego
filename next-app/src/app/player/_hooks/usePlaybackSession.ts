@@ -30,6 +30,18 @@ export interface PlaybackFileItem extends PlaybackFileItemLike {
   fileId: string;
   episode: number | null;
   parsedKind?: string | null;
+  /**
+   * Dexie `Episode.id` (a ULID) — set ONLY when playback started from the
+   * library. Its presence is the source split of design doc §3.2: with it,
+   * progress is authoritative and syncs; without it (a file dragged onto
+   * /player) the localStorage path keeps position only.
+   *
+   * Not the same thing as `fileId`, which is a `FileRef.id`, nor as the
+   * dandanplay `Episode.episodeId`.
+   */
+  _episodeId?: string;
+  /** Dexie `Series.id` owning `_episodeId`. Same library-only lifetime. */
+  _seriesId?: string;
 }
 
 export type EpisodeMap = Record<

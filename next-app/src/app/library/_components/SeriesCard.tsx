@@ -89,6 +89,9 @@ type OverrideAction =
 
 type SeriesAvailability = "ok" | "partial" | "offline" | "unknown";
 
+/** See SeriesGrid — why a watched series is not reaching the server. */
+type SeriesSyncState = "unbound" | "blocked";
+
 const HUE = PLAYER_HUE.local;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_TOL = 10;
@@ -321,6 +324,16 @@ const s = {
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "0.05em",
   } as React.CSSProperties,
+  // Amber, not red: nothing is broken locally — the episodes are ticked off and
+  // the file is on disk. Only the push to the server is not happening.
+  syncNote: {
+    ...mono,
+    fontSize: 10,
+    lineHeight: 1.5,
+    marginTop: 4,
+    color: "oklch(74% 0.14 70)",
+    letterSpacing: "0.04em",
+  } as React.CSSProperties,
   progressOverlay: {
     position: "absolute",
     left: 10,
@@ -440,6 +453,12 @@ interface SeriesCardProps {
   onToggleSelect?: (e?: MouseEvent) => void;
   onLongPress?: () => void;
   availability?: SeriesAvailability;
+  /**
+   * Rendered as a one-line note under the metadata when this series has local
+   * progress that is NOT reaching the server. Absent means "nothing to say" —
+   * an unwatched card never explains itself.
+   */
+  syncState?: SeriesSyncState;
   compact?: boolean;
 }
 
@@ -478,6 +497,7 @@ function SeriesCard({
   onToggleSelect,
   onLongPress,
   availability,
+  syncState,
   compact = false,
 }: SeriesCardProps) {
   const { t } = useLang();
@@ -711,6 +731,17 @@ function SeriesCard({
             {durationLabel && (
               <span style={s.duration} data-testid="duration-label">
                 {durationLabel}
+              </span>
+            )}
+            {syncState && (
+              <span
+                style={s.syncNote}
+                data-testid="sync-note"
+                data-sync-state={syncState}
+              >
+                {syncState === "unbound"
+                  ? t("library.card.syncUnbound")
+                  : t("library.card.syncBlocked")}
               </span>
             )}
           </div>

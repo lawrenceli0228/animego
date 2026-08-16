@@ -71,17 +71,26 @@ func TestMain(m *testing.M) {
 type fakeSubsDB struct {
 	mu sync.Mutex
 
-	listFn   func(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error)
-	getFn    func(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.Subscription, error)
-	upsertFn func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
-	updateFn func(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
-	deleteFn func(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	listFn     func(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error)
+	getFn      func(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.Subscription, error)
+	upsertFn   func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
+	ifAbsentFn func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error)
+	// episodeCountFn defaults to "no bound" (nil, nil) rather than
+	// panicking like its siblings: every PATCH carrying currentEpisode
+	// now calls it, and the ~20 pre-existing tests that exercise unrelated
+	// PATCH behaviour have no opinion on the episode ceiling.  Tests that
+	// DO care set it explicitly.
+	episodeCountFn func(ctx context.Context, anilistID int32) (*int32, error)
+	updateFn       func(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
+	deleteFn       func(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 
-	listCalls   int32
-	getCalls    int32
-	upsertCalls int32
-	updateCalls int32
-	deleteCalls int32
+	listCalls         int32
+	getCalls          int32
+	upsertCalls       int32
+	ifAbsentCalls     int32
+	episodeCountCalls int32
+	updateCalls       int32
+	deleteCalls       int32
 }
 
 func (f *fakeSubsDB) ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error) {
@@ -106,6 +115,22 @@ func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, a
 		panic("fakeSubsDB.UpsertSubscription not set")
 	}
 	return f.upsertFn(ctx, userID, anilistID, status)
+}
+
+func (f *fakeSubsDB) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error) {
+	atomic.AddInt32(&f.ifAbsentCalls, 1)
+	if f.ifAbsentFn == nil {
+		panic("fakeSubsDB.InsertSubscriptionIfAbsent not set")
+	}
+	return f.ifAbsentFn(ctx, userID, anilistID, status)
+}
+
+func (f *fakeSubsDB) GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error) {
+	atomic.AddInt32(&f.episodeCountCalls, 1)
+	if f.episodeCountFn == nil {
+		return nil, nil // no bound recorded — mirrors a still-airing show
+	}
+	return f.episodeCountFn(ctx, anilistID)
 }
 
 func (f *fakeSubsDB) UpdateSubscriptionWithActivity(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
@@ -657,6 +682,112 @@ func TestCreate_MissingAuth_401(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// CreateSubscription — ifAbsent routing (§4 decision 3)
+//
+// The routing itself is what these pin down; that DO NOTHING really leaves
+// an existing status alone is SQL semantics and lives in pg_test.go.
+// -----------------------------------------------------------------------------
+
+func TestCreate_IfAbsentTrue_UsesIdempotentInsert(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	// The pre-existing row the user had marked `dropped` by hand.
+	existing := dbgen.InsertSubscriptionIfAbsentRow{
+		UserID: userID, AnilistID: 42, Status: "dropped", CurrentEpisode: 7,
+	}
+	db := &fakeSubsDB{
+		ifAbsentFn: func(_ context.Context, _ uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error) {
+			assert.Equal(t, int32(42), anilistID)
+			assert.Equal(t, "watching", status, "the requested status is still sent — the SQL decides whether it lands")
+			return existing, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPost, "/api/subscriptions",
+		`{"anilistId":42,"status":"watching","ifAbsent":true}`, "", ctx)
+	rec := httptest.NewRecorder()
+	h.CreateSubscription(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, int32(1), atomic.LoadInt32(&db.ifAbsentCalls))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&db.upsertCalls),
+		"ifAbsent must NOT fall through to the status-clobbering upsert")
+
+	var got struct {
+		Data dbgen.Subscription `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, "dropped", got.Data.Status, "the existing row is echoed back verbatim")
+	assert.Equal(t, int32(7), got.Data.CurrentEpisode)
+}
+
+func TestCreate_IfAbsentAbsent_UsesUpsert(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		upsertFn: func(_ context.Context, _ uuid.UUID, _ int32, status string) (dbgen.Subscription, error) {
+			return dbgen.Subscription{UserID: userID, AnilistID: 42, Status: status}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPost, "/api/subscriptions",
+		`{"anilistId":42,"status":"watching"}`, "", ctx)
+	rec := httptest.NewRecorder()
+	h.CreateSubscription(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, int32(1), atomic.LoadInt32(&db.upsertCalls),
+		"omitting ifAbsent must keep the historical upsert path")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&db.ifAbsentCalls))
+}
+
+func TestCreate_IfAbsentFalse_UsesUpsert(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		upsertFn: func(_ context.Context, _ uuid.UUID, _ int32, status string) (dbgen.Subscription, error) {
+			return dbgen.Subscription{UserID: userID, AnilistID: 42, Status: status}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPost, "/api/subscriptions",
+		`{"anilistId":42,"status":"watching","ifAbsent":false}`, "", ctx)
+	rec := httptest.NewRecorder()
+	h.CreateSubscription(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, int32(1), atomic.LoadInt32(&db.upsertCalls))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&db.ifAbsentCalls))
+}
+
+func TestCreate_IfAbsent_FKViolation_404(t *testing.T) {
+	t.Parallel()
+	// The anime_cache row vanishing mid-flight has to map to 404 on the
+	// new branch too, not leak a 500.
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		ifAbsentFn: func(_ context.Context, _ uuid.UUID, _ int32, _ string) (dbgen.InsertSubscriptionIfAbsentRow, error) {
+			return dbgen.InsertSubscriptionIfAbsentRow{}, &pgconn.PgError{Code: pgForeignKeyViolation}
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPost, "/api/subscriptions",
+		`{"anilistId":42,"status":"watching","ifAbsent":true}`, "", ctx)
+	rec := httptest.NewRecorder()
+	h.CreateSubscription(rec, req)
+
+	assertError(t, rec, http.StatusNotFound, "NOT_FOUND", "Anime not found")
+}
+
+// -----------------------------------------------------------------------------
 // UpdateSubscription
 // -----------------------------------------------------------------------------
 
@@ -945,6 +1076,225 @@ func TestUpdate_MissingAuth_401(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.UpdateSubscription(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+// -----------------------------------------------------------------------------
+// UpdateSubscription — monotonic flag plumbing (§4 decisions 4 + 8)
+//
+// These pin the request→params wiring only.  Whether GREATEST actually
+// refuses to move backwards is SQL, and lives in pg_test.go.
+// -----------------------------------------------------------------------------
+
+func TestUpdate_MonotonicDefaultsFalse(t *testing.T) {
+	t.Parallel()
+	// The detail page's ± buttons never send the key.  Their behaviour has
+	// to be bit-identical to what shipped before monotonic existed, which
+	// means the default has to be false, not "unset".
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			assert.False(t, arg.Monotonic, "absent monotonic must default to false")
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42", `{"currentEpisode":3}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestUpdate_MonotonicTrue_PassedThrough(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			assert.True(t, arg.Monotonic)
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42, CurrentEpisode: 9}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42",
+		`{"currentEpisode":9,"monotonic":true}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestUpdate_MonotonicExplicitFalse_PassedThrough(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			assert.False(t, arg.Monotonic)
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42",
+		`{"currentEpisode":1,"monotonic":false}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestUpdate_MonotonicWrongType_400(t *testing.T) {
+	t.Parallel()
+	// `"monotonic":"yes"` must surface as 400, not be silently coerced —
+	// a string that quietly reads as false would disable the guard on the
+	// exact path that needs it.
+	h := makeHandlersWithFakes(&fakeSubsDB{}, nil, nil)
+	userID := uuid.New()
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42",
+		`{"currentEpisode":1,"monotonic":"yes"}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// -----------------------------------------------------------------------------
+// UpdateSubscription — episode upper bound (§4 decision 4)
+// -----------------------------------------------------------------------------
+
+func TestUpdate_EpisodeAboveTotal_400(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	total := int32(12)
+	db := &fakeSubsDB{
+		episodeCountFn: func(_ context.Context, anilistID int32) (*int32, error) {
+			assert.Equal(t, int32(42), anilistID)
+			return &total, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42",
+		`{"currentEpisode":13,"monotonic":true}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+
+	assertError(t, rec, http.StatusBadRequest, "VALIDATION_ERROR", "Episode exceeds the total episode count")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&db.updateCalls),
+		"an out-of-range episode must never reach the write — clamping is explicitly not the behaviour")
+}
+
+func TestUpdate_EpisodeEqualsTotal_200(t *testing.T) {
+	t.Parallel()
+	// The boundary is inclusive: finishing the last episode is the single
+	// most common write this guard sees.
+	userID := uuid.New()
+	total := int32(12)
+	db := &fakeSubsDB{
+		episodeCountFn: func(_ context.Context, _ int32) (*int32, error) { return &total, nil },
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			require.NotNil(t, arg.CurrentEpisode)
+			assert.Equal(t, int32(12), *arg.CurrentEpisode)
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42, CurrentEpisode: 12}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42",
+		`{"currentEpisode":12,"monotonic":true}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestUpdate_EpisodesNullMeansNoBound_200(t *testing.T) {
+	t.Parallel()
+	// A still-airing show has episodes IS NULL.  Treating that as a bound
+	// of zero would reject every single progress write for currently
+	// airing titles — i.e. the entire point of the feature.
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		episodeCountFn: func(_ context.Context, _ int32) (*int32, error) { return nil, nil },
+		updateFn: func(_ context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			require.NotNil(t, arg.CurrentEpisode)
+			assert.Equal(t, int32(999), *arg.CurrentEpisode)
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42, CurrentEpisode: 999}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42",
+		`{"currentEpisode":999,"monotonic":true}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestUpdate_NoEpisodeInBody_SkipsBoundLookup(t *testing.T) {
+	t.Parallel()
+	// Status-only and score-only patches must not pay for the extra
+	// round-trip.
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		updateFn: func(_ context.Context, _ dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			return dbgen.UpdateSubscriptionWithActivityRow{UserID: userID, AnilistID: 42}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42", `{"status":"completed"}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, int32(0), atomic.LoadInt32(&db.episodeCountCalls),
+		"no currentEpisode → no bound to check → no query")
+}
+
+func TestUpdate_BoundLookupNoRows_FallsThroughTo404(t *testing.T) {
+	t.Parallel()
+	// An uncached title can't have a subscription either (FK), so the
+	// PATCH's own 404 is the right answer — the guard must not invent a
+	// 400 that hides it.
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		episodeCountFn: func(_ context.Context, _ int32) (*int32, error) { return nil, pgx.ErrNoRows },
+		updateFn: func(_ context.Context, _ dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error) {
+			return dbgen.UpdateSubscriptionWithActivityRow{}, pgx.ErrNoRows
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42",
+		`{"currentEpisode":3,"monotonic":true}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+
+	assertError(t, rec, http.StatusNotFound, "NOT_FOUND", "Subscription not found")
+}
+
+func TestUpdate_BoundLookupDBError_500(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		episodeCountFn: func(_ context.Context, _ int32) (*int32, error) { return nil, errors.New("boom") },
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodPatch, "/api/subscriptions/42", `{"currentEpisode":3}`, "42", ctx)
+	rec := httptest.NewRecorder()
+	h.UpdateSubscription(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&db.updateCalls),
+		"a failed bound lookup must not write blind")
 }
 
 // -----------------------------------------------------------------------------

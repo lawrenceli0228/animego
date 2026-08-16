@@ -7,6 +7,10 @@ import { applyHeatmapPath } from "@/lib/heatmapPath";
 import { convertAssToVtt, convertSrtToVtt } from "@/lib/subtitleConvert";
 import { mountJassub, destroyJassub } from "./jassubOverlay";
 import { useLang } from "@/lib/lang-client";
+import type {
+  WatchTick,
+  WatchTickReason,
+} from "../_hooks/watchProgressPolicy";
 
 // Inline-style object — matches the SeriesCard pattern used elsewhere in
 // the next-app port. Page chrome (background/colors) is owned by the
@@ -206,6 +210,16 @@ export interface VideoPlayerProps {
   progressKey?: string | null;
   resumeAt?: number | null;
   onProgressTick?: (t: number) => void;
+  /**
+   * Raw playback state for the Dexie progress writer (library entry path).
+   *
+   * Deliberately unthrottled and deliberately dumber than `onProgressTick`:
+   * this component is the only place `art.duration` and `art.playing` are
+   * readable, and the consumer needs both to decide anything. Throttling,
+   * completion and the write itself all live in `useWatchProgress` —
+   * VideoPlayer just reports.
+   */
+  onWatchTick?: (tick: WatchTick) => void;
 }
 
 export function VideoPlayer({
@@ -219,6 +233,7 @@ export function VideoPlayer({
   progressKey,
   resumeAt = null,
   onProgressTick,
+  onWatchTick,
 }: VideoPlayerProps) {
   const { t } = useLang();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -245,6 +260,7 @@ export function VideoPlayer({
   // P2 in-memory resume — used only when progressKey is absent (unmatched files).
   const resumeAtRef = useRef(resumeAt);
   const onProgressTickRef = useRef(onProgressTick);
+  const onWatchTickRef = useRef(onWatchTick);
   const onPlaybackErrorRef = useRef(onPlaybackError);
 
   // Keep refs in sync so async init / event handlers always see the latest values.
@@ -261,6 +277,9 @@ export function VideoPlayer({
     onProgressTickRef.current = onProgressTick;
   }, [onProgressTick]);
   useEffect(() => {
+    onWatchTickRef.current = onWatchTick;
+  }, [onWatchTick]);
+  useEffect(() => {
     onPlaybackErrorRef.current = onPlaybackError;
   }, [onPlaybackError]);
 
@@ -273,6 +292,10 @@ export function VideoPlayer({
     let cancelled = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let art: any = null;
+    // Assigned once the player exists; called from cleanup. The document /
+    // window flush listeners are registered inside the async init, so the
+    // synchronous teardown below needs a handle on them.
+    let detachFlushListeners: (() => void) | null = null;
 
     const initialSize = subtitleSizeRef.current;
     const initialOffset = subtitleOffsetRef.current;
@@ -466,6 +489,50 @@ export function VideoPlayer({
         }
       });
 
+      // ─── Dexie watch-progress feed (library entry path) ───
+      // Reports raw state; `useWatchProgress` owns the 30s throttle, the
+      // completion rule and the write. Wrapped because a consumer throwing
+      // inside an ArtPlayer callback would take the player's event loop with
+      // it — and this is a progress bookkeeping feed, not playback.
+      const emitWatchTick = (reason: WatchTickReason) => {
+        const cb = onWatchTickRef.current;
+        if (!cb || !art) return;
+        try {
+          cb({
+            positionSec: art.currentTime,
+            durationSec: art.duration,
+            // The "is it actually playing" guard Animeko has: a paused player
+            // sitting past the threshold must not mark the episode watched.
+            isPlaying: Boolean(art.playing),
+            reason,
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("[VideoPlayer] watch tick handler threw:", err);
+        }
+      };
+
+      // The three forced flush points (§3.1.1). They are what makes a 30-second
+      // throttle safe: the position lands the moment the user stops or leaves,
+      // so the stored resume point is more accurate than a fixed interval, not
+      // less.
+      art.on("video:pause", () => emitWatchTick("pause"));
+      art.on("video:ended", () => emitWatchTick("ended"));
+      const onVisibilityChange = () => {
+        // Only on the way out. `visible` fires on tab-return, where there is
+        // nothing new to persist.
+        if (document.visibilityState === "hidden") emitWatchTick("visibility");
+      };
+      const onBeforeUnload = () => emitWatchTick("unload");
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      window.addEventListener("beforeunload", onBeforeUnload);
+      detachFlushListeners = () => {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+        window.removeEventListener("beforeunload", onBeforeUnload);
+        // Episode switch / unmount is itself a flush point.
+        emitWatchTick("teardown");
+      };
+
       if (onEnded) art.on("video:ended", onEnded);
 
       // Surface MediaElement errors with structured detail + stop the retry
@@ -561,6 +628,11 @@ export function VideoPlayer({
         }
       });
       art.on("video:timeupdate", () => {
+        // Before the 5-second gate below: the Dexie path runs its own (much
+        // longer) throttle, but it also has to notice the completion threshold
+        // being crossed, and that check has to see every tick.
+        emitWatchTick("timeupdate");
+
         const now = Date.now();
         if (now - lastSaveAt < SAVE_INTERVAL_MS) return;
         lastSaveAt = now;
@@ -624,6 +696,10 @@ export function VideoPlayer({
 
     return () => {
       cancelled = true;
+      // Runs before destroy() so the final `teardown` tick still reads a live
+      // currentTime / duration off the instance.
+      detachFlushListeners?.();
+      detachFlushListeners = null;
       const inst = artRef.current || art;
       // Tear down jassub before artplayer so its ResizeObserver / RVFC
       // hooks don't fire against a destroyed video element.

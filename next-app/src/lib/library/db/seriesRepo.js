@@ -68,6 +68,19 @@ export function makeSeriesRepo(db) {
    * Dexie transaction across all four tables. Idempotent — re-upserting with the
    * same ids performs a last-write-wins merge on updatedAt.
    *
+   * ⚠️ `db.series.put(series)` REPLACES the whole row, it does not merge fields.
+   * Any field the caller's payload does not carry is erased. Since v6 that
+   * includes `anilistId` and `lastSyncedEpisode` — dropping those would silently
+   * unbind the series from its AniList subscription and reset the sync high
+   * water mark, which reads downstream as "my progress stopped syncing".
+   *
+   * Safe today because the only caller (`importPipeline.js:338`) reaches this
+   * exclusively on a `kind: 'new'` verdict, i.e. a freshly minted ulid that
+   * cannot already carry those fields — the reuse branch goes through
+   * `persistFileRefsOnly` + `touchSeries` instead. If a future path ever wants
+   * to upsert an EXISTING series here, merge the stored row first or use
+   * `db.series.update(id, patch)`.
+   *
    * @param {ClusterPayload} payload
    * @returns {Promise<void>}
    */

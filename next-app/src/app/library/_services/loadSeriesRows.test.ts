@@ -137,6 +137,9 @@ describe("loadMergedSeriesRows", () => {
     const out = await loadMergedSeriesRows<Ep, Prog>(db as never, "C");
     expect(out.seriesIds).toEqual(["C", "B", "A"]);
     expect(out.episodes).toHaveLength(3);
+    // v6: episodes aggregate across every contributor, but only the root owns
+    // the AniList binding — sync must push against C, never B or A.
+    expect(out.rootSeriesId).toBe("C");
   });
 
   test("returns only the series' own rows when nothing was merged", async () => {
@@ -178,7 +181,12 @@ describe("loadMergedSeriesRows", () => {
   test("short-circuits on an empty series id without touching the db", async () => {
     const { db, calls } = fakeDb({ overrides: [] });
     const out = await loadMergedSeriesRows<Ep, Prog>(db as never, "");
-    expect(out).toEqual({ seriesIds: [], episodes: [], progress: [] });
+    expect(out).toEqual({
+      seriesIds: [],
+      rootSeriesId: "",
+      episodes: [],
+      progress: [],
+    });
     expect(calls).toHaveLength(0);
   });
 });

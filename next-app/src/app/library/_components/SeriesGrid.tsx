@@ -43,6 +43,13 @@ type OverrideAction =
 
 type SeriesAvailability = "ok" | "partial" | "offline" | "unknown";
 
+/**
+ * Why a watched series is not reaching the server.
+ *   unbound  no `Series.anilistId`, so there is nothing to subscribe to
+ *   blocked  the push was refused deterministically MAX_PUSH_ATTEMPTS times
+ */
+type SeriesSyncState = "unbound" | "blocked";
+
 // §5.4 — 4-col target at desktop. minmax 280 lands at 4 cols inside the
 // 1400-wide page wrapper (inner ≈1352 after padding); auto-fill steps down
 // to 3 below ~1100 and 2 below ~720, matching the design's breakpoints.
@@ -119,6 +126,8 @@ interface SeriesGridProps {
   onToggleSelect?: (seriesId: string, e?: MouseEvent) => void;
   onLongPress?: (seriesId: string) => void;
   availabilityBySeries?: Map<string, SeriesAvailability>;
+  /** Only holds the series that have something to explain; absent = healthy. */
+  syncStateBySeries?: Map<string, SeriesSyncState>;
 }
 
 /**
@@ -139,6 +148,7 @@ function SeriesGrid({
   onToggleSelect,
   onLongPress,
   availabilityBySeries,
+  syncStateBySeries,
 }: SeriesGridProps) {
   const reduced = useReducedMotion();
   return (
@@ -184,6 +194,7 @@ function SeriesGrid({
               }
               onLongPress={onLongPress ? () => onLongPress(sr.id) : undefined}
               availability={availabilityBySeries?.get(sr.id)}
+              syncState={syncStateBySeries?.get(sr.id)}
             />
           </motion.div>
         );

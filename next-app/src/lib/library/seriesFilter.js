@@ -1,6 +1,21 @@
 // @ts-nocheck
+//
+// v6 note — these filters read LOCAL progress only, never `series.anilistId` or
+// `series.lastSyncedEpisode`.
+//
+// It is tempting to reach for `lastSyncedEpisode` once it exists: it is a
+// number on the Series row that looks like "how far they got". It is not. It
+// means "how far the SERVER has been told", so it lags whenever a push fails or
+// the user is offline, and it stays at its old value for a series the user
+// never bound to AniList at all. Filtering on it would make the chips disagree
+// with the checkmarks on the very same card — the local progress is the truth
+// here, and the sync layer is downstream of it, not the other way around.
+//
+// The new v6 fields are additive, so nothing below needs to change to keep
+// working; this note exists so it stays that way on purpose.
+
 /** @typedef {import('./types').Series} Series */
-/** @typedef {import('../../hooks/useSeriesProgressMap').SeriesProgressInfo} SeriesProgressInfo */
+/** @typedef {import('../../app/library/_hooks/useSeriesProgressMap').SeriesProgressInfo} SeriesProgressInfo */
 /** @typedef {'recent'|'new'|'inProgress'|'done'|'almostDone'|'stalled'|'fresh'|null} LibraryFilter */
 
 const DAY_MS = 24 * 60 * 60 * 1000;

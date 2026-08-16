@@ -204,6 +204,20 @@ type Querier interface {
 	// name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
 	// until enrichment runs.
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error)
+	// Authoritative total-episode count for one title, used by
+	// PATCH /api/subscriptions/:anilistId as the upper bound on currentEpisode.
+	//
+	// Deliberately a standalone read rather than a guard folded into
+	// UpdateSubscriptionWithActivity's CTE: inside the CTE an out-of-range
+	// episode degrades to "0 rows updated", which is indistinguishable from
+	// "no such subscription" — one pgx.ErrNoRows for two conditions the API
+	// has to answer differently (400 vs 404).
+	//
+	// NULL episodes means "airing / unknown length"; the caller must treat that
+	// as "no bound" and let the write through rather than rejecting it.
+	// pgx.ErrNoRows means the title isn't cached at all, in which case the FK on
+	// subscriptions guarantees there is no subscription to update either.
+	GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error)
 	// Backs AnimeDetail.episodeTitles in /:anilistId.  Matches Express's
 	// episodeTitles array shape: {episode, name, nameCn}.  Ordered by
 	// episode ASC so the response is stable across re-fetches.
@@ -465,6 +479,20 @@ type Querier interface {
 	// A repeated delivery attempt returns the canonical existing row without
 	// resetting read state.  Natural keys are chosen by the caller per event.
 	InsertNotificationDedupe(ctx context.Context, arg InsertNotificationDedupeParams) (InsertNotificationDedupeRow, error)
+	// POST /api/subscriptions with `"ifAbsent": true` — the click-to-track path.
+	//
+	// UpsertSubscription above is wrong for this caller: its
+	// ON CONFLICT DO UPDATE SET status resurrects a title the user deliberately
+	// marked dropped/completed back into `watching` the moment anything touches
+	// it.  §4 decision 3: creation is idempotent and `status` is human-only.
+	//
+	// ON CONFLICT DO NOTHING returns zero rows on conflict, so the UNION ALL arm
+	// reads the pre-existing row back and returns it untouched.  The NOT EXISTS
+	// guard keeps the two arms mutually exclusive (same idiom as
+	// InsertNotificationIfAbsent in community.sql and InsertReport in safety.sql).
+	//
+	// Caller MUST have ensured the anime_cache row exists (else the FK kicks).
+	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (InsertSubscriptionIfAbsentRow, error)
 	// Batch reader for re-enrich.  Returns the fields the queue payload
 	// needs.  Filtering by version covers v0/v1/v2 — handler dispatches each
 	// via the appropriate enqueue function.
@@ -631,7 +659,9 @@ type Querier interface {
 	//   GET    /api/subscriptions               → ListUserSubscriptions
 	//   GET    /api/subscriptions/:anilistId    → GetSubscription
 	//   POST   /api/subscriptions               → UpsertSubscription
-	//   PATCH  /api/subscriptions/:anilistId    → UpdateSubscription
+	//                                             InsertSubscriptionIfAbsent
+	//                                             (when the body sets ifAbsent)
+	//   PATCH  /api/subscriptions/:anilistId    → UpdateSubscriptionWithActivity
 	//   DELETE /api/subscriptions/:anilistId    → DeleteSubscription
 	//
 	// Express joined Subscription + AnimeCache in application code; here we
@@ -839,6 +869,42 @@ type Querier interface {
 	// Lock the previous value, apply the selective update, and append a watch event
 	// only when the caller supplied a genuinely different episode.  This prevents
 	// retries/status-only patches from manufacturing duplicate feed entries.
+	//
+	// `monotonic` picks the write semantics by call site:
+	//
+	//   monotonic = TRUE   player / library reconciliation.  current_episode can
+	//                      only move forward (GREATEST), so a stale tab replaying
+	//                      an old high-water mark can never claw progress back.
+	//                      Client-side comparison is not enough — its baseline is
+	//                      a cached copy (see §4 decision 8; Mihon #1793).
+	//   monotonic = FALSE  the detail page's ± buttons.  A human MUST be able to
+	//                      correct the count downward (§4 decision 4).
+	//
+	// Both timestamps get a matching suppression under monotonic, for two
+	// DIFFERENT reasons.  Keeping them straight matters, because only one of them
+	// is load-bearing for anything a user can see today:
+	//
+	//   last_watched_at  Semantic honesty.  The column means "when an episode was
+	//                    actually watched", so a stale replay that GREATEST folds
+	//                    into a no-op must not touch it.  No consumer reads it for
+	//                    ordering right now — this is about the field not lying to
+	//                    whoever reads it next.  Mirrors the IS DISTINCT FROM guard
+	//                    inserted_activity already applies.
+	//
+	//   updated_at       This is the one the home page sees.  ListUserSubscriptions
+	//                    above is ORDER BY s.updated_at DESC, and ContinueWatching
+	//                    renders that order verbatim, so bumping updated_at on a
+	//                    no-op push would jump an untouched show to the front of
+	//                    the user's list.  ⚠️ If you ever change that ORDER BY,
+	//                    this CASE is why it was safe to suppress here.
+	//
+	// updated_at's guard has to check two more fields than last_watched_at's: a
+	// monotonic PATCH may legally also carry status or score (the reconciler never
+	// sends those, but the endpoint accepts them), and those ARE real edits that
+	// must bump the row.  Only a push that changes literally nothing is preserved.
+	//
+	// Under monotonic = FALSE both rules stand exactly as they shipped — the
+	// leading conjunct short-circuits, so the ± buttons see no change at all.
 	UpdateSubscriptionWithActivity(ctx context.Context, arg UpdateSubscriptionWithActivityParams) (UpdateSubscriptionWithActivityRow, error)
 	// Dormant: there is no self-serve change-password endpoint (password
 	// changes go through the email reset flow). Kept so the column write is

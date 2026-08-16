@@ -5,6 +5,10 @@ import dynamic from "next/dynamic";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import { useLang } from "@/lib/lang-client";
+import {
+  normalizeRematchHit,
+  type RematchPayload,
+} from "../_services/rematchPayload";
 
 // ManualSearch is owned by the P6.6 Player port (subagent C in the next
 // fan-out). It doesn't exist in next-app yet; this dynamic import resolves
@@ -34,13 +38,11 @@ interface SeriesLike {
   titleJa?: string;
 }
 
-export interface RematchPayload {
-  animeId: number;
-  titleZh?: string;
-  titleEn?: string;
-  posterUrl?: string;
-  type: "tv" | "movie" | "ova" | "web";
-}
+// The payload shape, the untrusted-int parse and the normalize rule live in
+// _services/rematchPayload.ts so they can be tested without React. Do not
+// re-inline them: that rule is what keeps an AniList id out of dandanplay id
+// space, and it went unpinned by any test for as long as it lived here.
+export type { RematchPayload };
 
 interface RematchDialogProps {
   open: boolean;
@@ -56,38 +58,12 @@ function pickTitle(series: SeriesLike | undefined | null): string {
 }
 
 /**
- * Normalize a raw dandanplay search hit to the rematch payload that the
- * service layer expects. Falls back to anilistId when dandanAnimeId is
- * missing (some search response shapes only carry one).
- */
-function normalize(item: unknown): RematchPayload | null {
-  if (!item || typeof item !== "object") return null;
-  const it = item as Record<string, unknown>;
-  const animeId = Number(it.dandanAnimeId ?? it.anilistId ?? NaN);
-  if (!Number.isInteger(animeId) || animeId <= 0) return null;
-  let type: RematchPayload["type"] = "tv";
-  if (typeof it.format === "string") {
-    const f = it.format.toLowerCase();
-    if (f.includes("movie")) type = "movie";
-    else if (f.includes("ova")) type = "ova";
-    else if (f.includes("web")) type = "web";
-  }
-  return {
-    animeId,
-    titleZh: (it.titleChinese as string) || undefined,
-    titleEn: (it.title as string) || undefined,
-    posterUrl:
-      (it.coverImageUrl as string) || (it.imageUrl as string) || undefined,
-    type,
-  };
-}
-
-/**
  * RematchDialog — pick a different dandanplay anime for an existing series.
  *
  * Wraps the existing ManualSearch picker in a modal shell. The picked item is
- * normalized into the shape rematchSeries() expects (animeId + display fields)
- * before being handed to onConfirm. Backdrop click + Escape + Cancel all close.
+ * normalized into the shape rematchSeries() expects (both ids, kept apart, plus
+ * display fields) before being handed to onConfirm. Backdrop click + Escape +
+ * Cancel all close.
  */
 export function RematchDialog({
   open,
@@ -111,7 +87,7 @@ export function RematchDialog({
   const sourceTitle = pickTitle(sourceSeries);
 
   function handleSelect(item: unknown) {
-    const payload = normalize(item);
+    const payload = normalizeRematchHit(item);
     if (payload) onConfirm(payload);
   }
 

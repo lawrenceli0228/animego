@@ -253,6 +253,12 @@ const en = {
     tooLong: 'Comment cannot exceed 500 characters',
     cancel: 'Cancel',
   },
+  // No `settings` namespace here on purpose. Every settings.* consumer is a
+  // client component (SettingsClient, BlockedUsersList, PlaybackSettings), so
+  // those keys live in the *-spa.js pair, where spaDictCoverage.test.ts
+  // enforces them. A key belongs in the dictionary its consumer actually
+  // reads: client `t()` → the spa pair, server `dict.*` → this file. A partial
+  // mirror here would look authoritative while being dead.
   // Player
   player: {
     pageTitle: 'Player',
