@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mockFetch } from "@/lib/test-utils/fetchMock";
 import { dandanToArtplayer } from "./useDandanComments";
 
 // Pure-function tests live here. The React hook itself is exercised by the
@@ -76,11 +77,11 @@ describe("loadComments contract (FLAT {count, comments})", () => {
         { p: "1,1,16777215,b", m: "second" },
       ],
     };
-    globalThis.fetch = (async () =>
+    globalThis.fetch = mockFetch(async () =>
       new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" },
-      })) as typeof fetch;
+      }));
 
     const res = await fetch("/api/dandanplay/comments/192420006");
     const data = (await res.json()) as {
@@ -101,8 +102,8 @@ describe("loadComments contract (FLAT {count, comments})", () => {
   });
 
   test("401 leaves comments empty without throwing", async () => {
-    globalThis.fetch = (async () =>
-      new Response("", { status: 401 })) as typeof fetch;
+    globalThis.fetch = mockFetch(async () =>
+      new Response("", { status: 401 }));
     const res = await fetch("/api/dandanplay/comments/1");
     expect(res.status).toBe(401);
     // hook short-circuits to setCount(0) / setDanmakuList([])

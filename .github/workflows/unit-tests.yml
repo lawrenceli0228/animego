@@ -8,6 +8,8 @@ name: Unit Tests
 #                 dandanplay/bgmidmap) spin their own container and run for real.
 #   - next-app  : `bun test` (bun:test) — proxy gate, server actions, lib utils.
 #   - ws-server : `jest` — socket auth, danmaku handler, connection lifecycle.
+#   - next-app-build : `next build` + `tsc --noEmit` + lint ratchet + an
+#                 assertion that /anime/[id] is still statically prerendered.
 #
 # This is the safety net that keeps the suites GREEN. E2E (live prod) and
 # Lighthouse live in sibling workflows; this one is the fast unit gate.
@@ -77,6 +79,52 @@ jobs:
       - name: Test
         working-directory: next-app
         run: bun test
+
+  # Nothing in CI compiled the frontend until now: a branch that imported a
+  # module that does not exist could pass all five checks, and one did — the
+  # break was found by hand with `git ls-tree`, after merge.
+  #
+  # Step order is deliberate and build comes first, even though a type error
+  # then costs a full build to surface. Next 16 generates typed-route
+  # definitions into `.next/types/`, which `tsconfig.json` pulls in via its
+  # `include`. Typechecking before the build would silently skip them and
+  # report green on a broken route reference.
+  next-app-build:
+    name: next-app (build + types + lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned to match the sibling job — see its comment.
+          bun-version: "1.3.11"
+
+      - name: Install
+        working-directory: next-app
+        run: bun install --frozen-lockfile
+
+      # No Go API is reachable from a runner, and that is fine: every
+      # `generateStaticParams` catches its fetch failure and returns [], so the
+      # build prerenders zero pages and still exits 0. It compiles every route,
+      # which is the point. Do not "fix" this by standing up a backend —
+      # the zero-page path is what the ISR assertion below is written against.
+      - name: Build
+        working-directory: next-app
+        run: bun run build
+
+      - name: Typecheck
+        working-directory: next-app
+        run: bunx tsc --noEmit
+
+      - name: Lint (ratchet)
+        run: node scripts/ci/eslint-ratchet.mjs
+
+      - name: Assert /anime/[id] is still prerendered
+        run: node scripts/ci/assert-isr.mjs
 
   ws-server:
     name: ws-server (jest)
