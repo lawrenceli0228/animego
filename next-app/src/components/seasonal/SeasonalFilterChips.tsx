@@ -126,11 +126,11 @@ interface SeasonalFilterChipsProps {
 export default function SeasonalFilterChips({ filteredCount }: SeasonalFilterChipsProps) {
   const router = useRouter();
   const params = useSearchParams();
-  // The language comes from useLang(), NOT from a server-passed prop: getLang()
-  // is pinned to "zh" server-side (ISR islanding), so a prop would hand every
-  // visitor zh and translate the chips for English readers too. useLang() seeds
-  // zh for SSR and reconciles to the `lang` cookie after mount, which is what
-  // keeps genre chips reading "Action" rather than "动作" in English.
+  // The language comes from useLang(), NOT from a server-passed prop. The
+  // prop would carry the URL's locale, which says zh on a bare path even for
+  // a reader whose preference is English. useLang() seeds from the route
+  // locale for SSR and reconciles to the `lang` cookie after mount, which is
+  // what keeps genre chips reading "Action" rather than "动作" for them.
   const { lang } = useLang();
 
   const genre = params.get("genre") ?? "";

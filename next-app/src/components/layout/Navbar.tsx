@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
@@ -15,6 +15,7 @@ import { authFetch } from "@/lib/authFetch";
 import { broadcastSignedOut } from "@/components/anime/subscriptionSetState";
 import AvatarMenu from "./AvatarMenu";
 import NotificationBell from "@/components/notifications/NotificationBell";
+import { splitLocale } from "@/lib/i18n/locale";
 
 export interface NavUser {
   username: string;
@@ -238,9 +239,15 @@ function AuthCtaWithFrom() {
   );
 }
 
+// Compares the un-prefixed path, because the nav hrefs are written without
+// a locale. Matching the raw pathname meant "/en/search" never equalled
+// "/search", so the active highlight and aria-current were dead across the
+// whole English tree — a nav that never marks where you are, and no
+// current-page announcement for a screen reader.
 function isActive(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/";
-  return pathname === href || pathname.startsWith(href + "/");
+  const { path } = splitLocale(pathname);
+  if (href === "/") return path === "/";
+  return path === href || path.startsWith(href + "/");
 }
 
 interface NavLink {

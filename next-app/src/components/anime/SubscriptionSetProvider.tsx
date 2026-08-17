@@ -25,7 +25,7 @@
 // what SubscriptionButton broadcasts, and we broadcast our own writes so a
 // detail page opened later in the same session paints the right state.
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import {
   createContext,
   useCallback,

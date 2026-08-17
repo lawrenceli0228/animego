@@ -13,7 +13,7 @@
  * panics on Unicode box-drawing characters (see P4.1.0 commit message).
  */
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import {
   useState,
   useRef,

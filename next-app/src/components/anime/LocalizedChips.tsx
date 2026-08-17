@@ -4,11 +4,19 @@
 // the /anime/[id] detail page: the genre chip row and the format badge.
 //
 // Why client at all, on a page that is otherwise a pure RSC?
-// getLang() on the server returns "zh" unconditionally (ISR islanding — see
-// the comment in @/lib/i18n), so anything localised *in place* on that page
-// renders Chinese for every visitor, English readers included. Reading the
-// real language through useLang() (SSR-seeded zh, reconciled from the `lang`
-// cookie after mount) is what lets these two surfaces stay English for en.
+//
+// Originally because getLang() returned "zh" unconditionally, so anything
+// localised in place on that page rendered Chinese for every visitor. That is
+// no longer true — the server resolves the language from the `[lang]` route
+// segment now — but these two stay client-side for a second reason that
+// outlived the first: useLang() follows the `lang` COOKIE, so a visitor whose
+// preference is English still reads English chips on the bare (Chinese) URL
+// they most likely arrived at from search. The prop would say "zh" there.
+//
+// That makes these a deliberate divergence from the rest of the page rather
+// than a workaround. See the note beside SeasonalFilterChips in
+// app/[lang]/seasonal/[season]/[year]/page.tsx — reconciling URL locale
+// against cookie preference is one decision for the whole site.
 //
 // Genre text under en is byte-identical to before — genreLabel is the identity
 // for en. The format badge is not: en now reads "Short"/"Movie"/"Special"

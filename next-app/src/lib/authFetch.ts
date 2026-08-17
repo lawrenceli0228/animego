@@ -21,6 +21,8 @@
 // is retried once with the new cookie attached. If refresh fails,
 // the browser is sent to /login?from=<current-path>.
 
+import { authHrefWithFrom } from "@/components/auth/authFromLink";
+
 export interface AuthFetchOptions extends RequestInit {
   /**
    * If true, skip the redirect-to-/login on the second 401 and let
@@ -68,8 +70,12 @@ async function refreshSession(): Promise<boolean> {
 
 function redirectToLogin(): void {
   if (typeof window === "undefined") return;
+  // Through authHrefWithFrom rather than interpolating: it derives the
+  // locale from `from`, so a session that expires on /en/library sends the
+  // reader to /en/login instead of dropping them into Simplified Chinese at
+  // the one moment they are least able to work out what happened.
   const from = window.location.pathname + window.location.search;
-  window.location.href = `/login?from=${encodeURIComponent(from)}`;
+  window.location.href = authHrefWithFrom("/login", from);
 }
 
 /**

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useLocaleRouter } from "@/components/ui/LocaleLink";
 import type { CSSProperties, FormEvent } from "react";
 import type { Dict } from "@/lib/i18n";
 import { FILTER_GENRES, genreLabel } from "@/lib/contentLabels";
@@ -110,11 +110,12 @@ export default function SearchFilters({
   initialGenre,
   dict,
 }: SearchFiltersProps) {
-  const router = useRouter();
-  // `dict` is server-resolved and therefore always zh (getLang is pinned for
-  // ISR). Chip labels need the reader's real language, so they come from
-  // useLang(): SSR-seeded zh, reconciled to the `lang` cookie after mount —
-  // which is what keeps the chips reading "Action" for English visitors.
+  const router = useLocaleRouter();
+  // `dict` is resolved from the URL's locale, so it says zh on a bare path.
+  // Chip labels follow the reader's stated preference instead, via useLang():
+  // SSR-seeded from the route locale, reconciled to the `lang` cookie after
+  // mount — which keeps the chips reading "Action" for English visitors who
+  // arrived at a Chinese URL.
   const { lang } = useLang();
   const [q, setQ] = useState(initialQ);
   const [genre, setGenre] = useState(initialGenre);

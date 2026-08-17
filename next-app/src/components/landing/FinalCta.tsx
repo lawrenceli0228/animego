@@ -12,7 +12,7 @@
  */
 
 import type { CSSProperties } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import { motion as Motion, useReducedMotion } from "motion/react";
 import { mono, HUD_VIEWPORT } from "./shared/hud-tokens";
 import { SectionNum, CornerBrackets } from "./shared/hud";

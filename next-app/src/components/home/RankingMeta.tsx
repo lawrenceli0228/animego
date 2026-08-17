@@ -4,10 +4,10 @@
 //
 // SeasonRankings is a pure RSC and stays that way — its rows are static and
 // its hover is CSS-only, so converting the whole grid to a client component
-// to translate two genre words would be a bad trade. But its `lang` prop
-// comes from getLang(), which is pinned to "zh" so pages stay ISR-cacheable;
-// localising in place would therefore render Chinese genres for English
-// readers, where the raw AniList value used to render.
+// to translate two genre words would be a bad trade. But its `lang` prop is
+// the URL's locale, which on a bare (Chinese) path says "zh" even for a
+// reader whose stated preference is English — so localising in place there
+// would render Chinese genres for them.
 //
 // So the genre tokens — and only they — move into this leaf, which reads the
 // real language via useLang() (SSR-seeded zh, reconciled from the `lang`

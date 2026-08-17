@@ -15,7 +15,7 @@
 // working; this note exists so it stays that way on purpose.
 
 /** @typedef {import('./types').Series} Series */
-/** @typedef {import('../../app/library/_hooks/useSeriesProgressMap').SeriesProgressInfo} SeriesProgressInfo */
+/** @typedef {import('../../app/[lang]/library/_hooks/useSeriesProgressMap').SeriesProgressInfo} SeriesProgressInfo */
 /** @typedef {'recent'|'new'|'inProgress'|'done'|'almostDone'|'stalled'|'fresh'|null} LibraryFilter */
 
 const DAY_MS = 24 * 60 * 60 * 1000;

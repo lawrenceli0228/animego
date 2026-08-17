@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useLocaleRouter } from "@/components/ui/LocaleLink";
 import toast from "react-hot-toast";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import { authFetch } from "@/lib/authFetch";
@@ -50,7 +51,7 @@ export default function ReportDialog({
 }: ReportDialogProps) {
   const { lang, t } = useLang();
   const pathname = usePathname();
-  const router = useRouter();
+  const router = useLocaleRouter();
   const titleId = useId();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<(typeof REASONS)[number]>("spam");

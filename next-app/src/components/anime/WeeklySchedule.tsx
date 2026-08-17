@@ -14,7 +14,7 @@
 //
 // ASCII comments only - Unicode in source can panic Turbopack.
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import { pickTitle } from "@/lib/formatters";

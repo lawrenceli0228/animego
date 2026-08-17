@@ -8,7 +8,7 @@
 // (We keep the same <img> approach as AnimeCard to avoid wiring
 // next/image remotePatterns for s4.anilist.co.)
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import type { CSSProperties, KeyboardEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { genreLabel } from "@/lib/contentLabels";
@@ -215,10 +215,8 @@ const dotBtnStyle: CSSProperties = {
 };
 
 export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProps) {
-  // Genre chips resolve against the reader's language, not the `lang` prop:
-  // that prop comes from getLang(), pinned to "zh" for ISR, so translating
-  // against it would show Chinese genres to English readers where the raw
-  // AniList value used to render. See the note in AnimeCard.
+  // Genre chips resolve against the reader's cookie preference, not the
+  // `lang` prop (which is the URL's locale). See the note in AnimeCard.
   const { lang: viewerLang } = useLang();
   const [current, setCurrent] = useState(0);
   const [paused, setPaused] = useState(false);

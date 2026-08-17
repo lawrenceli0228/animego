@@ -5,8 +5,10 @@
 //
 //     <link rel="alternate" hreflang="en-US" href="https://animegoclub.com/?lang=en">
 //
-// while `getLang()` (lib/i18n.ts) returns "zh" unconditionally and the server
-// never reads `?lang=en`. That URL served byte-identical Chinese HTML. The
+// while `getLang()` returned "zh" unconditionally and the server never read
+// `?lang=en`. That URL served byte-identical Chinese HTML. (getLang is gone;
+// the server takes its language from the `[lang]` route segment now, and
+// `?lang=en` was never a real address.) The
 // bug was diagnosed and fixed in d91c753 — in `/anime/[id]` only. The other
 // eight files kept making the false claim for the next two and a half months,
 // because nothing connected them.
@@ -74,6 +76,24 @@ export function buildAlternates(
   languages["x-default"] = localizePath(path, DEFAULT_LOCALE);
 
   return { canonical, languages };
+}
+
+/**
+ * `alternates` for a page that exists in the default locale only.
+ *
+ * /privacy, /terms and /copyright are hardcoded Chinese JSX with no English
+ * body. Once LOCALES gained a second entry, the ordinary builder started
+ * advertising an English version of them — which is precisely the bug this
+ * module was written to remove, rebuilt from the other direction. Under this
+ * one there is no language map at all, so the page makes no claim, and the
+ * canonical still points at the URL the reader is on.
+ *
+ * Reach for this only when the CONTENT is untranslated. A page whose
+ * translation is merely incomplete should still join the group; hreflang
+ * describes which URL serves which language, not how good the copy is.
+ */
+export function buildAlternatesUntranslated(path: string, locale: Locale = DEFAULT_LOCALE): Alternates {
+  return { canonical: localizePath(path, locale) };
 }
 
 /**

@@ -13,9 +13,10 @@
 // is a /u/:username link (not yet ported to next-app, but the legacy
 // route handles the redirect for now).
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import { ApiError, apiGetEnvelope } from "@/lib/api";
-import { getDict, getLang } from "@/lib/i18n";
+import { getDictByLang } from "@/lib/i18n";
+import { type Lang } from "@/lib/i18n/lang";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import { isMaskedUsername } from "@/lib/publicUsername";
 import FallbackImg from "@/components/ui/FallbackImg";
@@ -23,6 +24,15 @@ import type { WatcherItem, WatchersResponse } from "@/lib/types";
 
 interface WatchersAvatarListProps {
   anilistId: number;
+  /**
+   * The rendering language, from the caller's `[lang]` route param.
+   *
+   * A prop rather than a lookup: this is a Server Component under
+   * src/components/, so it sits outside the route tree and has no params of
+   * its own to read. It previously called getLang(), which answered "zh" for
+   * every render regardless of the URL.
+   */
+  lang: Lang;
 }
 
 const AVATAR_LIMIT = 8;
@@ -79,6 +89,7 @@ const moreStyle = {
 
 export default async function WatchersAvatarList({
   anilistId,
+  lang,
 }: WatchersAvatarListProps) {
   let watchers: WatcherItem[] = [];
   let total = 0;
@@ -100,7 +111,7 @@ export default async function WatchersAvatarList({
 
   if (total === 0 || watchers.length === 0) return null;
 
-  const [dict, lang] = await Promise.all([getDict(), getLang()]);
+  const dict = getDictByLang(lang);
   const more = Math.max(0, total - watchers.length);
   // dict typing leaks `anime` since en.ts omits some optional fields;
   // narrow to a record so the lookup compiles in both langs.

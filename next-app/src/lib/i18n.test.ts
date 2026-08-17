@@ -3,9 +3,10 @@ import { describe, expect, test, mock, afterAll, beforeEach } from "bun:test";
 // Mutable state that each test can configure before importing i18n.
 let mockLangCookie: string | undefined = undefined;
 let mockAcceptLanguage = "";
-// Tracks whether the server-only Dynamic APIs were touched. getLang() is now
-// ISR-islanded — it must NEVER read cookies()/headers() (that forced every
-// page dynamic), so these must stay false through any getLang/getDict call.
+// Tracks whether the server-only Dynamic APIs were touched. Nothing in this
+// module may read cookies()/headers(): either one forces every page that
+// imports it dynamic, which is what killed ISR on /anime/[id] once already.
+// These must stay false through any accessor call.
 let cookiesCalled = false;
 let headersCalled = false;
 
@@ -32,9 +33,8 @@ mock.module("next/headers", () => ({
   },
 }));
 
-const { getLang, getDict, getDictByLang, tFromDict } = await import(
-  "./i18n"
-);
+const i18n = await import("./i18n");
+const { getDict, getDictByLang, tFromDict } = i18n;
 
 afterAll(() => {
   mock.restore();
@@ -47,43 +47,57 @@ beforeEach(() => {
   headersCalled = false;
 });
 
-describe("getLang (ISR-islanded — always zh, never reads cookies/headers)", () => {
-  test("returns zh regardless of the lang cookie", async () => {
-    mockLangCookie = "en";
-    expect(await getLang()).toBe("zh");
+describe("getLang is gone and must stay gone", () => {
+  // It returned the constant "zh". Harmless while the site served one locale
+  // at one set of URLs; once the routes moved under app/[lang]/ it meant
+  // /en/anything rendered Chinese, on every call site at once, with nothing
+  // failing. The language is a property of the request path now, so only the
+  // router can supply it — lib/i18n/route.ts resolveLocale().
+  //
+  // Asserted rather than merely deleted because the failure mode is a
+  // reintroduction: the next component that finds itself without route params
+  // has an obvious, wrong, compiling answer available to it.
+  test("the module exports no language-guessing accessor", () => {
+    expect("getLang" in i18n).toBe(false);
   });
+});
 
-  test("returns zh regardless of Accept-Language", async () => {
-    mockAcceptLanguage = "en-US,en;q=0.9";
-    expect(await getLang()).toBe("zh");
-  });
-
-  test("returns zh with no cookie and no header", async () => {
-    expect(await getLang()).toBe("zh");
-  });
-
-  test("does NOT read cookies() or headers() — the whole ISR point", async () => {
+describe("the module never reads Dynamic APIs", () => {
+  // The ISR invariant, guarded at the module rather than at one function:
+  // a cookies() or headers() read anywhere in here forces every importing
+  // page dynamic, and /anime/[id] going dynamic silently empties the
+  // Cloudflare edge cache that serves the site's whole SEO surface.
+  test("getDict touches neither cookies() nor headers()", async () => {
     mockLangCookie = "en";
     mockAcceptLanguage = "en-US";
-    await getLang();
+    await getDict();
+    expect(cookiesCalled).toBe(false);
+    expect(headersCalled).toBe(false);
+  });
+
+  test("getDictByLang touches neither cookies() nor headers()", () => {
+    mockLangCookie = "en";
+    mockAcceptLanguage = "en-US";
+    getDictByLang("en");
     expect(cookiesCalled).toBe(false);
     expect(headersCalled).toBe(false);
   });
 });
 
 describe("getDict", () => {
-  test("returns zh dict when lang is zh", async () => {
-    mockLangCookie = "zh";
+  test("returns the default (zh) dict", async () => {
     const dict = await getDict();
     // Spot-check a zh-only key to confirm we got the right dict
     expect(dict.common.loading).toBe("加载中...");
   });
 
-  test("returns a dict object when lang is en", async () => {
+  test("ignores the lang cookie — it resolves nothing per-request", async () => {
+    // The point of the assertion: getDict is a DEFAULT, not a resolution.
+    // A caller that wants the request's language must go through
+    // resolveLocale(params), which reads the route segment.
     mockLangCookie = "en";
     const dict = await getDict();
-    expect(typeof dict).toBe("object");
-    expect(dict).not.toBeNull();
+    expect(dict.common.loading).toBe("加载中...");
   });
 });
 

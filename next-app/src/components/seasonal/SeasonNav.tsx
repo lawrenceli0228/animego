@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import type { CSSProperties } from "react";
 import type { Dict, Lang } from "@/lib/i18n";
 

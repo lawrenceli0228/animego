@@ -160,3 +160,22 @@ describe("translateErrorMessage", () => {
     expect(translateErrorMessage("toString", dict)).toBe("翻译版");
   });
 });
+
+describe("sanitizeFromParam — locale awareness", () => {
+  // Mirrors components/auth/authFromLink.ts. A rule enforced on one end
+  // only means one side silently emits a value the other throws away.
+  test("keeps a prefixed path", () => {
+    expect(sanitizeFromParam("/en/library")).toBe("/en/library");
+    expect(sanitizeFromParam("/en/anime/21?tab=staff")).toBe("/en/anime/21?tab=staff");
+  });
+
+  test("rejects a prefixed self-loop", () => {
+    expect(sanitizeFromParam("/en/login")).toBe("/");
+    expect(sanitizeFromParam("/en/register")).toBe("/");
+    expect(sanitizeFromParam("/en/login?from=%2Fen")).toBe("/");
+  });
+
+  test("a route that merely starts with the surface name survives", () => {
+    expect(sanitizeFromParam("/en/loginfoo")).toBe("/en/loginfoo");
+  });
+});

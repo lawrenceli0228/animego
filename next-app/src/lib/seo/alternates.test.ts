@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildAlternates, absoluteUrl, SITE_ORIGIN } from "./alternates";
+import { buildAlternates, buildAlternatesUntranslated, absoluteUrl, SITE_ORIGIN } from "./alternates";
 import { LOCALES, DEFAULT_LOCALE, isLocale, localizePath, type Locale } from "@/lib/i18n/locale";
 
 // The multi-locale set this file tests against. Only zh-Hans is published
@@ -23,16 +23,24 @@ const FUTURE = ["zh-Hans", "zh-Hant", "en"] as const;
 const futureAlternates = (path: string, locale: (typeof FUTURE)[number]) =>
   buildAlternates(path, locale as Locale, FUTURE as unknown as readonly Locale[]);
 
-describe("buildAlternates — today, with one published locale", () => {
-  test("emits a canonical and no language map", () => {
-    // A lone self-referential hreflang says nothing the canonical has not
-    // already said. The site previously emitted a two-entry map in which the
-    // second entry was a lie, which is how this helper came to exist.
-    expect(buildAlternates("/faq")).toEqual({ canonical: "/faq" });
+describe("buildAlternates — the published locales", () => {
+  test("the default locale keeps the bare path and names both locales", () => {
+    expect(buildAlternates("/faq")).toEqual({
+      canonical: "/faq",
+      languages: { "zh-Hans": "/faq", en: "/en/faq", "x-default": "/faq" },
+    });
   });
 
   test("leaves the root path as /", () => {
     expect(buildAlternates("/").canonical).toBe("/");
+  });
+
+  test("a page with no translation makes no claim", () => {
+    // /privacy, /terms and /copyright are hardcoded Chinese with no English
+    // body. Advertising an /en/ alternate for them would rebuild the exact
+    // bug this module removed, from the other direction.
+    expect(buildAlternatesUntranslated("/privacy")).toEqual({ canonical: "/privacy" });
+    expect(buildAlternatesUntranslated("/privacy", "en")).toEqual({ canonical: "/en/privacy" });
   });
 
   test("never mentions ?lang=en", () => {
@@ -125,9 +133,10 @@ describe("locale vocabulary", () => {
 
   test("isLocale accepts published locales and rejects everything else", () => {
     for (const locale of LOCALES) expect(isLocale(locale)).toBe(true);
-    // "zh" and "en" are the UI dictionary keys, not locale ids — a third
-    // vocabulary sneaking in here is how the two drift apart.
-    for (const notALocale of ["zh", "en", "zh-CN", "en-US", "fr", "", "ZH-HANS", "zh-Hans/"]) {
+    // "zh" is a UI dictionary key, not a locale id — the two vocabularies
+    // overlap on "en" and nowhere else, and conflating them is how they
+    // drift apart. "zh-Hant" is deliberately absent until its content exists.
+    for (const notALocale of ["zh", "zh-Hant", "zh-CN", "en-US", "fr", "", "ZH-HANS", "zh-Hans/"]) {
       expect(isLocale(notALocale)).toBe(false);
     }
   });

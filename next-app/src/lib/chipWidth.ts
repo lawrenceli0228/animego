@@ -9,10 +9,21 @@
 // the widths from the labels themselves keeps the skeleton honest and means a
 // future label edit can no longer silently re-introduce the shift.
 //
-// Skeletons are always measured against ZH: loading.tsx is replaced before
-// hydration, and every server render is zh (getLang is pinned — see i18n.ts),
-// so the swap the user actually sees is skeleton -> Chinese chips. English
-// readers only get their labels after useLang() reconciles, well past paint.
+// Skeletons are measured against ZH, and that is now an assumption rather
+// than a fact. It held while every server render was Chinese (getLang() was
+// pinned, since deleted): the swap the user saw was always skeleton ->
+// Chinese chips, with English labels arriving only after useLang() reconciled
+// from the cookie, well past paint.
+//
+// Since the route tree moved under app/[lang]/ the chips are SSR'd in the
+// URL's language, so on /en/… the first paint is English labels against a
+// zh-measured skeleton — the ~33% width gap this module exists to close,
+// reopened in the other direction. It is not fixable from inside a
+// loading.tsx: like not-found.tsx, Next hands it no params, so it cannot
+// learn its own locale. Fixing it properly means either measuring both and
+// reserving the wider, or moving the skeleton behind something that has the
+// route param. Left as-is because /en is not a published, indexed tree yet;
+// revisit before it is.
 
 /** CJK ideographs + fullwidth punctuation render at ~1em; Latin at ~0.58em. */
 const CJK = /[　-〿㐀-䶿一-鿿＀-￯]/;
