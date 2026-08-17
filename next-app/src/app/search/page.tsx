@@ -19,6 +19,7 @@ import SearchFilters from "@/components/search/SearchFilters";
 import { ApiError, getApiBase } from "@/lib/api";
 import { genreLabel } from "@/lib/contentLabels";
 import { getDict, getLang, type Dict, type Lang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 
 // searchParams forces a dynamic render -- the page output depends on
 // per-request query, so static prerender is impossible by construction.
@@ -164,6 +165,14 @@ export async function generateMetadata({
     robots: hasQuery
       ? { index: false, follow: true }
       : { index: true, follow: true },
+    // Always the bare path, including on the noindex query variants. This
+    // route had no canonical at all, while robots.ts declares it crawlable
+    // and the homepage JSON-LD points a SearchAction at
+    // /search?q={search_term_string} — so the one URL shape Google is
+    // actively told about was both unindexable and unconsolidated. Pointing
+    // every permutation at /search collapses them onto the indexable entry
+    // instead of leaving them to accumulate as orphans.
+    alternates: buildAlternates("/search"),
   };
 }
 

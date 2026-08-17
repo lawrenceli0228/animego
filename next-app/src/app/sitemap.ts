@@ -1,10 +1,7 @@
 import type { MetadataRoute } from "next";
 import { apiGet } from "@/lib/api";
+import { SITE_ORIGIN as SITE } from "@/lib/seo/alternates";
 import type { YearlyTopItem } from "@/lib/types";
-
-// Public canonical origin. Sitemap URLs must be absolute and match the host
-// search engines see, otherwise crawlers reject or de-duplicate them.
-const SITE = "https://animegoclub.com";
 
 // Number of anime detail pages to enumerate. Google's per-sitemap cap is
 // 50,000 URLs; 100 covers the SEO-relevant head without re-fetching the

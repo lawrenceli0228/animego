@@ -11,6 +11,7 @@ import { apiGetPaged } from "@/lib/api";
 import { FILTER_GENRES, type FilterGenre } from "@/lib/contentLabels";
 import { getDict, getDictByLang, getLang } from "@/lib/i18n";
 import { pickTitle } from "@/lib/formatters";
+import { buildAlternates } from "@/lib/seo/alternates";
 import type { SeasonalAnime } from "@/lib/types";
 
 export const revalidate = 300;
@@ -112,13 +113,7 @@ export async function generateMetadata({ params }: { params: PageProps["params"]
   return {
     title: { absolute: title },
     description,
-    alternates: {
-      canonical,
-      languages: {
-        "zh-CN": canonical,
-        "en-US": `${canonical}?lang=en`,
-      },
-    },
+    alternates: buildAlternates(canonical),
     openGraph: {
       title,
       description,

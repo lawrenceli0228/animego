@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import LegalDoc, { legalStyles as x } from "@/components/legal/LegalDoc";
 import { getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 
 export const revalidate = 3600;
 
@@ -17,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title,
     description,
-    alternates: { canonical: "/copyright", languages: { "zh-CN": "/copyright" } },
+    alternates: buildAlternates("/copyright"),
     openGraph: { title, description, url: "/copyright", type: "website" },
   };
 }

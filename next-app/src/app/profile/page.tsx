@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { apiGet, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 import ProfileClient from "./_components/ProfileClient";
 import type { SubscriptionListItem } from "./_components/types";
 
@@ -88,9 +89,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { absolute: title },
     description,
     robots: { index: false, follow: false },
-    alternates: {
-      canonical: "/profile",
-    },
+    alternates: buildAlternates("/profile"),
   };
 }
 

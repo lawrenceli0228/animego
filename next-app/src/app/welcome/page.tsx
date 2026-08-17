@@ -12,6 +12,7 @@ import FinalCta from "@/components/landing/FinalCta";
 import { apiGet, ApiError } from "@/lib/api";
 import { getRepoStats } from "@/lib/github";
 import { getDict, getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 import type { AnimeDetail, TrendingItem } from "@/lib/types";
 
 const FEATURE_POSTER_IDS = {
@@ -144,13 +145,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description,
     openGraph,
     twitter,
-    alternates: {
-      canonical: "/welcome",
-      languages: {
-        "zh-CN": "/welcome",
-        "en-US": "/welcome?lang=en",
-      },
-    },
+    alternates: buildAlternates("/welcome"),
   };
 }
 

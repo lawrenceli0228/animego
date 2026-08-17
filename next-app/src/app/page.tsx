@@ -12,6 +12,7 @@ import HotDiscussions from "@/components/community/HotDiscussions";
 import SeasonRankings from "@/components/home/SeasonRankings";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
+import { buildAlternates, absoluteUrl, SITE_ORIGIN } from "@/lib/seo/alternates";
 import type {
   SeasonalAnime,
   TrendingItem,
@@ -181,28 +182,28 @@ const HOME_JSON_LD = {
   "@graph": [
     {
       "@type": "Organization",
-      "@id": "https://animegoclub.com/#organization",
+      "@id": `${SITE_ORIGIN}/#organization`,
       name: "AnimeGoClub",
       alternateName: "AnimeGo",
-      url: "https://animegoclub.com",
-      logo: "https://animegoclub.com/favicon-192.png",
+      url: SITE_ORIGIN,
+      logo: absoluteUrl("/favicon-192.png"),
       description:
         "番剧追番与动漫发现平台 — 每季新番、评分、声优、弹幕评论与追番管理。",
       sameAs: ["https://github.com/lawrenceli0228/animego"],
     },
     {
       "@type": "WebSite",
-      "@id": "https://animegoclub.com/#website",
-      url: "https://animegoclub.com",
+      "@id": `${SITE_ORIGIN}/#website`,
+      url: SITE_ORIGIN,
       name: "AnimeGoClub",
       alternateName: "AnimeGo",
       inLanguage: "zh-CN",
-      publisher: { "@id": "https://animegoclub.com/#organization" },
+      publisher: { "@id": `${SITE_ORIGIN}/#organization` },
       potentialAction: {
         "@type": "SearchAction",
         target: {
           "@type": "EntryPoint",
-          urlTemplate: "https://animegoclub.com/search?q={search_term_string}",
+          urlTemplate: `${absoluteUrl("/search")}?q={search_term_string}`,
         },
         "query-input": "required name=search_term_string",
       },
@@ -218,10 +219,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: { absolute: dict.meta.homeTitle },
     description: dict.meta.homeDescription,
-    alternates: {
-      canonical: "/",
-      languages: { "zh-CN": "/", "en-US": "/?lang=en" },
-    },
+    alternates: buildAlternates("/"),
     openGraph: {
       title: dict.meta.homeTitle,
       description: dict.meta.homeDescription,

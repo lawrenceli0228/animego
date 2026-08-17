@@ -4,6 +4,7 @@ import WeeklySchedule, {
 } from "@/components/anime/WeeklySchedule";
 import { apiGet } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 import type { CSSProperties } from "react";
 
 // Rolling 7-day schedule changes continuously as episodes air and
@@ -38,13 +39,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title,
     description,
-    alternates: {
-      canonical: "/calendar",
-      languages: {
-        "zh-CN": "/calendar",
-        "en-US": "/calendar?lang=en",
-      },
-    },
+    alternates: buildAlternates("/calendar"),
     openGraph: {
       title,
       description,

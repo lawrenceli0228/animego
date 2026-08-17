@@ -5,6 +5,7 @@ import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { getDict, getDictByLang, getLang } from "@/lib/i18n";
 import { LanguageProvider } from "@/lib/lang-client";
+import { SITE_ORIGIN } from "@/lib/seo/alternates";
 import "./globals.css";
 
 const sora = Sora({
@@ -39,14 +40,12 @@ const jetbrainsMono = JetBrains_Mono({
 export async function generateMetadata(): Promise<Metadata> {
   const lang = await getLang();
   const dict = getDictByLang(lang);
-  // proxy.ts injects x-pathname on every request so this RSC can build a
-  // self-referential canonical + hreflang per route (#41).
-  // ISR islanding: no x-pathname header read (would force dynamic). SEO
-  // pages set their own self-canonical in their generateMetadata from
-  // route params; pages without one self-canonicalise at the URL.
-  const pathname: string | null = null;
   return {
-    metadataBase: new URL("https://animegoclub.com"),
+    // Resolves every relative canonical and og URL on the site, including
+    // the ones lib/seo/alternates.ts returns. Same constant, so a canonical
+    // is genuinely self-referential rather than pointing at an origin we do
+    // not serve.
+    metadataBase: new URL(SITE_ORIGIN),
     title: {
       template: "%s . AnimeGoClub",
       default: dict.meta.titleDefault,
@@ -77,23 +76,16 @@ export async function generateMetadata(): Promise<Metadata> {
       site: "@animegoclub",
       images: ["/og-default.png"],
     },
-    // Self-referential canonical + hreflang per route (#41). Each page
-    // canonicalises to ITSELF via x-pathname — NOT the homepage (the bug the
-    // old blanket canonical:"/" caused). Pages that set their own alternates
-    // (home/welcome/seasonal/anime/faq/calendar/...) override this. If
-    // x-pathname is absent, omit alternates and let Google self-canonicalise
-    // — never re-introduce a "/"-pointing default.
-    ...(pathname
-      ? {
-          alternates: {
-            canonical: pathname,
-            languages: {
-              "zh-CN": pathname,
-              "en-US": `${pathname}?lang=en`,
-            },
-          },
-        }
-      : {}),
+    // No alternates here on purpose. This used to read a proxy-injected
+    // x-pathname header to build a per-route canonical, but ISR islanding
+    // removed the read — the header is still set, and `pathname` was left
+    // pinned to null, so the block below it was a permanently false branch
+    // that nonetheless read as a working blueprint. Its content was also the
+    // wrong blueprint: a `?lang=en` alternate the server does not honour.
+    //
+    // Each route sets its own via lib/seo/alternates.ts, from route params
+    // it already has. A page with none self-canonicalises at its URL, which
+    // is correct; never re-introduce a blanket "/"-pointing default here.
   };
 }
 

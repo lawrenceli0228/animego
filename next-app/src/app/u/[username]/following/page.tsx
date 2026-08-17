@@ -11,6 +11,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import type { CSSProperties } from "react";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 import { decodeUsername } from "@/lib/username";
 import { canonicalHandle } from "../_lib/canonicalHandle";
 import FollowListRow from "../_components/FollowListRow";
@@ -49,13 +50,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       lang === "zh"
         ? `查看 ${username} 关注的用户 — AnimeGoClub`
         : `Users that ${username} follows on AnimeGoClub`,
-    alternates: {
-      canonical,
-      languages: {
-        "zh-CN": canonical,
-        "en-US": `${canonical}?lang=en`,
-      },
-    },
+    alternates: buildAlternates(canonical),
   };
 }
 

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { apiGet, ApiError } from "@/lib/api";
 import { getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 import { pickTitle } from "@/lib/formatters";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import SettingsClient from "./_components/SettingsClient";
@@ -47,7 +48,7 @@ async function fetchSubs(): Promise<SubscriptionListItem[]> {
 export const metadata: Metadata = {
   title: { absolute: "用户设置 — AnimeGoClub" },
   robots: { index: false, follow: false },
-  alternates: { canonical: "/settings" },
+  alternates: buildAlternates("/settings"),
 };
 
 const SEASON_ZH: Record<string, string> = {

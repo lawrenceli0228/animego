@@ -17,6 +17,7 @@ import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { apiGet, ApiError } from "@/lib/api";
 import { getDict, getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 import { decodeUsername } from "@/lib/username";
 import { canonicalHandle, encodePathSegment } from "./_lib/canonicalHandle";
 import FollowButton from "./_components/FollowButton";
@@ -85,15 +86,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     canonicalHandle(requested),
   ]);
   const username = resolved ?? "";
-  const suffix = dict.profile.titleSuffix;
-  const title = username ? `${username} ${suffix}` : "AnimeGoClub";
-  const canonical = username ? `/u/${encodeURIComponent(username)}` : undefined;
 
   if (!username) {
     // No such user. Say nothing identifying, and do not offer a canonical
     // for a URL that resolves to a not-found page.
     return { title: { absolute: "AnimeGoClub" }, robots: { index: false, follow: false } };
   }
+
+  // After the guard, so `canonical` is a string rather than a
+  // `string | undefined` that the old language map interpolated into
+  // "undefined?lang=en" on the branch that could not be reached.
+  const title = `${username} ${dict.profile.titleSuffix}`;
+  const canonical = `/u/${encodeURIComponent(username)}`;
 
   // The visitor asked for this profile by a handle that is not the one it
   // should be addressed by — in practice, the stored contact-shaped username
@@ -115,13 +119,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         ? `${username} 的追番列表和社交主页 — AnimeGoClub`
         : `${username}'s watchlist and social profile on AnimeGoClub`,
     ...(addressedByAlias ? { robots: { index: false, follow: false } } : {}),
-    alternates: {
-      canonical,
-      languages: {
-        "zh-CN": canonical,
-        "en-US": `${canonical}?lang=en`,
-      },
-    },
+    alternates: buildAlternates(canonical),
     openGraph: {
       title,
       siteName: "AnimeGoClub",

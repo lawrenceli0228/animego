@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import FaqSection from "@/components/landing/FaqSection";
 import { getDict, getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 import type { CSSProperties } from "react";
 
 // FAQ is static content — revalidate every hour so any future dict
@@ -20,13 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title,
     description,
-    alternates: {
-      canonical: "/faq",
-      languages: {
-        "zh-CN": "/faq",
-        "en-US": "/faq?lang=en",
-      },
-    },
+    alternates: buildAlternates("/faq"),
     openGraph: {
       title,
       description,

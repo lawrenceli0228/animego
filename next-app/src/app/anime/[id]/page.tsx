@@ -39,6 +39,7 @@ import {
   visualWidth,
 } from "@/lib/formatters";
 import { getDict, getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 import type { Dict, Lang } from "@/lib/i18n";
 import type {
   AnimeDetail,
@@ -234,14 +235,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     description,
     openGraph,
     twitter,
-    // hreflang intentionally omitted: the site is zh-canonical only. An
-    // `en-US` alternate at `?lang=en` was a false signal — getLang() is
-    // hardcoded `zh`, so that URL serves byte-identical Chinese HTML (verified
-    // on prod). Re-add a real languages map only when localized URLs exist
-    // (the deferred URL-i18n initiative), not before.
-    alternates: {
-      canonical,
-    },
+    // This route deleted its false `?lang=en` alternate in d91c753 and was
+    // the only one that did; the helper now enforces the same answer
+    // everywhere, and grows a real languages map when localized URLs exist.
+    alternates: buildAlternates(canonical),
   };
 }
 

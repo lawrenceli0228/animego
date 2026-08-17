@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import LegalDoc, { legalStyles as x } from "@/components/legal/LegalDoc";
 import { getLang } from "@/lib/i18n";
+import { buildAlternates } from "@/lib/seo/alternates";
 
 // Static legal page — hourly revalidate so copy edits land without a deploy.
 export const revalidate = 3600;
@@ -18,7 +19,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title,
     description,
-    alternates: { canonical: "/privacy", languages: { "zh-CN": "/privacy" } },
+    alternates: buildAlternates("/privacy"),
     openGraph: { title, description, url: "/privacy", type: "website" },
   };
 }
