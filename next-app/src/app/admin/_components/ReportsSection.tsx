@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { authFetch } from "@/lib/authFetch";
 import { useLang } from "@/lib/lang-client";
+import { BCP47_TAG } from "@/lib/i18n/lang";
 
 export interface AdminReport {
   id: string;
@@ -81,7 +82,7 @@ export default function ReportsSection({ initial }: { initial: AdminReportsData 
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                   <b style={{ color: "#eee", fontSize: 13 }}>@{username}</b>
                   <span style={{ color: "#777789", fontSize: 11 }}>
-                    {report.reason} · {new Date(report.createdAt).toLocaleString(lang === "zh" ? "zh-CN" : "en-US")}
+                    {report.reason} · {new Date(report.createdAt).toLocaleString(BCP47_TAG[lang])}
                   </span>
                 </div>
                 {content && (

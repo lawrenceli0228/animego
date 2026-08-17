@@ -12,6 +12,7 @@ import {
   sinceLabel,
 } from "@/components/profile/memberIdentity";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
+import { seasonYearLabel } from "@/lib/contentLabels";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -24,16 +25,11 @@ const STATUS_OPTIONS: { value: SubscriptionStatus; color: string }[] = [
 
 type SortValue = "updatedAt" | "score" | "title";
 
-const SORT_OPTIONS: { value: SortValue; zh: string; en: string }[] = [
-  { value: "updatedAt", zh: "最近更新", en: "Recently Updated" },
-  { value: "score", zh: "我的评分", en: "My Score" },
-  { value: "title", zh: "标题", en: "Title" },
+const SORT_OPTIONS: { value: SortValue; label: Record<Lang, string> }[] = [
+  { value: "updatedAt", label: { zh: "最近更新", en: "Recently Updated" } },
+  { value: "score", label: { zh: "我的评分", en: "My Score" } },
+  { value: "title", label: { zh: "标题", en: "Title" } },
 ];
-
-const SEASON_LABELS: Record<Lang, Record<string, string>> = {
-  zh: { WINTER: "冬季", SPRING: "春季", SUMMER: "夏季", FALL: "秋季" },
-  en: { WINTER: "Winter", SPRING: "Spring", SUMMER: "Summer", FALL: "Fall" },
-};
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -379,7 +375,7 @@ export default function ProfileClient({
     let topSeason: string | null = null;
     if (topSeasonEntry) {
       const [year, season] = topSeasonEntry[0].split("-");
-      topSeason = `${year} ${SEASON_LABELS[lang][season] ?? ""}`.trim();
+      topSeason = seasonYearLabel(season, year, lang);
     }
     return {
       segments: live.map((o) => ({ value: counts[o.value], color: o.color })),
@@ -512,7 +508,7 @@ export default function ProfileClient({
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
-              {lang === "zh" ? o.zh : o.en}
+              {o.label[lang]}
             </option>
           ))}
         </select>

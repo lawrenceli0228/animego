@@ -299,6 +299,13 @@ function BentoCard({ feat, index, lang, reduced, posters, features, memberCardAr
 
 interface FeaturesBentoProps {
   dict: Dict;
+  /**
+   * Must be the language `dict` was resolved from. Passed as a sibling of
+   * `dict` from the server so the two cannot disagree; do NOT swap this for
+   * `useLang()`, which reads the client cookie after hydration and would drift
+   * from the server-rendered dictionary.
+   */
+  lang: Lang;
   posters: PosterSlotMap;
   /** Random in-season anime cover used as the f8 Member Pass card face. */
   memberCardArt?: string | null;
@@ -306,11 +313,8 @@ interface FeaturesBentoProps {
   memberCardBanner?: string | null;
 }
 
-export default function FeaturesBento({ dict, posters, memberCardArt = null, memberCardBanner = null }: FeaturesBentoProps) {
+export default function FeaturesBento({ dict, lang, posters, memberCardArt = null, memberCardBanner = null }: FeaturesBentoProps) {
   const features = dict.landing.features;
-  // Detect lang via stable Chinese sentinel in identity.airing (zh: '放送中', en: 'Airing').
-  // landing/* code path-locks lang via dict identity; no cookies/headers on the client side.
-  const lang: Lang = dict.landing.identity.airing === "放送中" ? "zh" : "en";
   const reduced = useReducedMotion();
 
   return (

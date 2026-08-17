@@ -27,9 +27,14 @@ import {
 // them fine because tsconfig allows JS module resolution.
 import zh from "@/locales/zh-spa.js";
 import en from "@/locales/en-spa.js";
+// From @/lib/i18n/lang, NOT @/lib/i18n: the latter imports both *server*
+// dictionaries (67KB of .ts) and would drag them into every client chunk
+// that touches useLang(). lang.ts imports nothing, so it is safe on both
+// sides — that is the entire reason it exists as a separate module.
+// `Lang` comes in as a type-only binding so it is erased outright.
+import { DEFAULT_LANG, LANGS, toLang, type Lang } from "@/lib/i18n/lang";
 
 type Dict = Record<string, unknown>;
-export type Lang = "zh" | "en";
 
 const DICTS: Record<Lang, Dict> = { zh, en };
 
@@ -112,7 +117,7 @@ export function LanguageProvider({
 
   const toggle = useCallback(() => {
     // writeLangCookie dispatches langchange → sync() re-reads the cookie.
-    writeLangCookie(lang === "zh" ? "en" : "zh");
+    writeLangCookie(nextLang(lang));
   }, [lang]);
 
   const t = useCallback(
@@ -128,10 +133,60 @@ export function LanguageProvider({
   );
 }
 
-/** Read the `lang` cookie on the client; zh during SSR (no document). */
+/**
+ * Advance to the next language in LANGS, wrapping at the end.
+ *
+ * The single control in the chrome is a *cycle* button, so this has to stay
+ * total over LANGS rather than a two-state flip: `lang === "zh" ? "en" : "zh"`
+ * would strand a third language permanently — reachable only by hand-editing
+ * the cookie, and one click away from being lost again. A language absent
+ * from LANGS (a stale cookie value that toLang already rejected) restarts the
+ * cycle at LANGS[0].
+ *
+ * For a jump-to-language menu rather than a cycle, call `writeLangCookie`
+ * directly: it is exported, and it already dispatches the langchange event
+ * that keeps the provider and the ssr:false islands in step. There is
+ * deliberately no second `setLang` wrapper around it.
+ *
+ * Exported only so lang-client.test.ts can reach it. It is pure — no
+ * `document`, no React — which is the point: the suite must not have to stub a
+ * DOM global to test it (bun shares one process across files, so a stray
+ * `globalThis.document` changes how unrelated suites behave).
+ */
+export function nextLang(current: Lang): Lang {
+  const at = LANGS.indexOf(current);
+  return at === -1 ? LANGS[0] : LANGS[(at + 1) % LANGS.length];
+}
+
+/**
+ * Read one cookie out of a `document.cookie` jar by name.
+ *
+ * Deliberately not a regex over the whole jar. The version this replaced was
+ * `/(?:^|;\s*)lang=en\b/` — a test for one specific value that answered a
+ * yes/no question the caller then turned into "en or zh". Any third language
+ * written to the cookie read back as Chinese, silently, forever.
+ *
+ * No decodeURIComponent: language tags are `[a-zA-Z-]` and writeLangCookie
+ * never percent-encodes, so decoding would only add a throw path on a
+ * malformed jar. A value we did not write simply fails toLang and falls back.
+ *
+ * Takes the jar as an argument rather than reading `document.cookie` itself
+ * so it stays testable without a DOM stub — see nextLang.
+ */
+export function readCookie(jar: string, name: string): string | null {
+  for (const part of jar.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() !== name) continue;
+    return part.slice(eq + 1).trim();
+  }
+  return null;
+}
+
+/** Read the `lang` cookie on the client; DEFAULT_LANG during SSR (no document). */
 function cookieLang(): Lang {
-  if (typeof document === "undefined") return "zh";
-  return /(?:^|;\s*)lang=en\b/.test(document.cookie) ? "en" : "zh";
+  if (typeof document === "undefined") return DEFAULT_LANG;
+  return toLang(readCookie(document.cookie, "lang"));
 }
 
 /**
@@ -157,7 +212,7 @@ export const useLang = (): LangContextValue => {
   if (ctx) return ctx;
   return {
     lang: fallbackLang,
-    toggle: () => writeLangCookie(fallbackLang === "zh" ? "en" : "zh"),
+    toggle: () => writeLangCookie(nextLang(fallbackLang)),
     t: (key, opts) => resolve(DICTS[fallbackLang], key, opts),
   };
 };

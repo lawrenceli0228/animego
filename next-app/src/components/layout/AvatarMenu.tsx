@@ -42,7 +42,6 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
     };
   }, [open]);
 
-  const zh = lang === "zh";
   const photo = user.avatarUrl ?? null;
   const cover = user.backdropCoverUrl ?? null;
   // Banner falls back to cover then the default, so the mini-card is never an
@@ -64,7 +63,7 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
         className="agc-avatar"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={zh ? "账户菜单" : "Account menu"}
+        aria-label={lang === "zh" ? "账户菜单" : "Account menu"}
         onClick={() => setOpen((v) => !v)}
       >
         {avatar()}
@@ -136,7 +135,7 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-            {zh ? "用户设置" : "Settings"}
+            {lang === "zh" ? "用户设置" : "Settings"}
           </Link>
 
           {user.role === "admin" && (
@@ -164,8 +163,13 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
               <circle cx="12" cy="12" r="10" />
               <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
             </svg>
-            {zh ? "语言" : "Language"}
-            <span className="spacer">{zh ? "中 / EN" : "EN / 中"}</span>
+            {lang === "zh" ? "语言" : "Language"}
+            {/*
+              This readout hardcodes a two-language cycle. `toggle` walks LANGS,
+              so once a third language lands the label stops describing what the
+              button does and has to become a real language menu, not a swap.
+            */}
+            <span className="spacer">{lang === "zh" ? "中 / EN" : "EN / 中"}</span>
           </button>
 
           <div className="agc-menu-sep" />

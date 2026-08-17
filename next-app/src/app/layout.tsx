@@ -5,6 +5,7 @@ import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { getDict, getDictByLang, getLang } from "@/lib/i18n";
 import { LanguageProvider } from "@/lib/lang-client";
+import { HTML_LANG, OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { SITE_ORIGIN } from "@/lib/seo/alternates";
 import "./globals.css";
 
@@ -64,8 +65,8 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       siteName: "AnimeGoClub",
       type: "website",
-      locale: lang === "en" ? "en_US" : "zh_CN",
-      alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
+      locale: OG_LOCALE[lang],
+      alternateLocale: alternateOgLocales(lang),
       // Site-wide default share card (1200×630, reused from the legacy
       // site's og-default.png). Pages with their own image (e.g. anime
       // detail) override this via their own openGraph.images.
@@ -115,7 +116,7 @@ export default async function RootLayout({
 
   return (
     <html
-      lang={lang === "en" ? "en" : "zh-CN"}
+      lang={HTML_LANG[lang]}
       className={`${sora.variable} ${dmSans.variable} ${jetbrainsMono.variable}`}
     >
       <body

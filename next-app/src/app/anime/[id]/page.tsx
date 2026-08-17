@@ -24,7 +24,7 @@ import HeroAccent from "@/components/anime/HeroAccent";
 import { FormatBadge, GenreChips } from "@/components/anime/LocalizedChips";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import { apiGet, ApiError } from "@/lib/api";
-import { pickRelatedTitle, staffRoleLabel } from "@/lib/contentLabels";
+import { pickRelatedTitle, relationLabel, sourceLabel, staffRoleLabel } from "@/lib/contentLabels";
 import {
   formatFuzzyDate,
   formatScore,
@@ -40,6 +40,7 @@ import {
 } from "@/lib/formatters";
 import { getDict, getLang } from "@/lib/i18n";
 import { buildAlternates } from "@/lib/seo/alternates";
+import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import type { Dict, Lang } from "@/lib/i18n";
 import type {
   AnimeDetail,
@@ -125,30 +126,6 @@ async function loadDetail(id: number): Promise<AnimeDetail | null> {
 
 // --- Status / source / season labels ---
 
-const SOURCE_LABEL: Record<string, { zh: string; en: string }> = {
-  ORIGINAL: { zh: "原创", en: "Original" },
-  MANGA: { zh: "漫改", en: "Manga" },
-  LIGHT_NOVEL: { zh: "轻小说改", en: "Light Novel" },
-  VISUAL_NOVEL: { zh: "视觉小说改", en: "Visual Novel" },
-  VIDEO_GAME: { zh: "游戏改", en: "Video Game" },
-  NOVEL: { zh: "小说改", en: "Novel" },
-  WEB_NOVEL: { zh: "网文改", en: "Web Novel" },
-  GAME: { zh: "游戏改", en: "Game" },
-};
-
-const RELATION_LABEL: Record<string, { zh: string; en: string }> = {
-  PREQUEL: { zh: "前传", en: "Prequel" },
-  SEQUEL: { zh: "续集", en: "Sequel" },
-  SIDE_STORY: { zh: "番外", en: "Side Story" },
-  PARENT: { zh: "本篇", en: "Parent" },
-  CHARACTER: { zh: "角色出演", en: "Character" },
-  SUMMARY: { zh: "总集篇", en: "Summary" },
-  ALTERNATIVE: { zh: "替代版", en: "Alternative" },
-  SPIN_OFF: { zh: "衍生作品", en: "Spin-Off" },
-  ADAPTATION: { zh: "改编", en: "Adaptation" },
-  OTHER: { zh: "其他", en: "Other" },
-};
-
 const RELATION_ORDER = [
   "PREQUEL",
   "SEQUEL",
@@ -207,7 +184,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const title = pickTitle(detail, lang);
   const titleFull = `${title} · AnimeGoClub`;
   const description = truncate(stripHtml(detail.description || ""), 160);
-  const locale = lang === "en" ? "en_US" : "zh_CN";
+  const locale = OG_LOCALE[lang];
   const heroImage = detail.bannerImageUrl || detail.coverImageUrl || null;
   const canonical = `/anime/${anilistId}`;
 
@@ -216,7 +193,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     description,
     siteName: "AnimeGoClub",
     locale,
-    alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
+    alternateLocale: alternateOgLocales(lang),
     type: "video.tv_show",
     url: canonical,
   };
@@ -504,7 +481,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   const heroRelations = (detail.relations ?? []).filter((r) =>
     HERO_SHOWN_RELATIONS.has(r.relationType),
   );
-  const sourceLabel = detail.source ? SOURCE_LABEL[detail.source]?.[lang] ?? null : null;
+  const sourceText = sourceLabel(detail.source, lang);
   const durationLabel = detail.duration
     ? lang === "zh"
       ? `${detail.duration}分/集`
@@ -627,16 +604,16 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
           </div>
 
           {/* Meta row */}
-          {(detail.studios.length > 0 || sourceLabel || durationLabel || startDateLabel) && (
+          {(detail.studios.length > 0 || sourceText || durationLabel || startDateLabel) && (
             <div style={S.metaRow}>
               {detail.studios.length > 0 && (
                 <span style={S.metaStudio}>{detail.studios.join(" · ")}</span>
               )}
               {detail.studios.length > 0 &&
-                (sourceLabel || durationLabel || startDateLabel) && (
+                (sourceText || durationLabel || startDateLabel) && (
                   <span style={S.metaDot}>{"·"}</span>
                 )}
-              {sourceLabel && <span style={S.metaDetail}>{sourceLabel}</span>}
+              {sourceText && <span style={S.metaDetail}>{sourceText}</span>}
               {durationLabel && <span style={S.metaDetail}>{durationLabel}</span>}
               {startDateLabel && <span style={S.metaDetail}>{startDateLabel}</span>}
             </div>
@@ -690,7 +667,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
             >
               {heroRelations.map((r) => {
                 const relLabel =
-                  RELATION_LABEL[r.relationType]?.[lang] ?? r.relationType;
+                  relationLabel(r.relationType, lang);
                 // Was `r.title || r.titleChinese` — legacy AnimeDetailHero.jsx
                 // pinned romaji, so a Chinese title sitting right there in the
                 // payload was never shown (prod: 48.7% of relation rows carry
@@ -780,7 +757,7 @@ function RelationsSection({
       >
         {sorted.map((rel) => {
           const label =
-            RELATION_LABEL[rel.relationType]?.[lang] ?? rel.relationType;
+            relationLabel(rel.relationType, lang);
           // Cards mirror the inline hero chips — same helper, same
           // server-pinned zh, so likewise Chinese-first for everyone. Both
           // sites previously hardcoded romaji-wins and suppressed titleChinese

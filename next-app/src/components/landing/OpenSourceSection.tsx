@@ -28,7 +28,7 @@ import { motion as Motion, useReducedMotion } from "motion/react";
 import { mono, HUD_VIEWPORT, useCountUp } from "./shared/hud-tokens";
 import { SectionNum, SectionHeader, ChapterBar } from "./shared/hud";
 import FadeImage from "@/components/ui/FadeImage";
-import type { Dict } from "@/lib/i18n";
+import type { Dict, Lang } from "@/lib/i18n";
 import type { RepoStats } from "@/lib/github";
 import type { LandingPoster, AnimeDetail } from "@/lib/types";
 
@@ -388,9 +388,9 @@ const s = {
   } as CSSProperties,
 };
 
-function pickTitle(poster: LandingPoster | null, isZh: boolean): string {
-  if (!poster) return isZh ? "葬送的芙莉莲" : "Frieren";
-  if (isZh) {
+function pickTitle(poster: LandingPoster | null, lang: Lang): string {
+  if (!poster) return lang === "zh" ? "葬送的芙莉莲" : "Frieren";
+  if (lang === "zh") {
     return (
       poster.titleChinese ||
       poster.titleNative ||
@@ -415,25 +415,32 @@ function pickImage(poster: LandingPoster | null): string {
 
 interface OpenSourceSectionProps {
   dict: Dict;
+  /**
+   * Must be the language `dict` was resolved from. Passed as a sibling of
+   * `dict` from the server so the two cannot disagree; do NOT swap this for
+   * `useLang()`, which reads the client cookie after hydration and would drift
+   * from the server-rendered dictionary.
+   */
+  lang: Lang;
   stats: RepoStats;
   poster: LandingPoster | null;
 }
 
 export default function OpenSourceSection({
   dict,
+  lang,
   stats,
   poster,
 }: OpenSourceSectionProps) {
   const reduced = useReducedMotion();
   const os = dict.landing.openSource;
   const dm = dict.landing.danmaku; // merged-in danmaku showcase copy
-  const isZh = dict.landing.finalCta.period === "。";
-  const title = pickTitle(poster, isZh);
+  const title = pickTitle(poster, lang);
   const imgSrc = pickImage(poster);
 
-  const ways = [os.way1, os.way2, os.way3, os.way4, os.way5, os.way6].join(
-    isZh ? " · " : " · ",
-  );
+  // Separator was a per-language ternary whose two branches were byte-identical
+  // (" · " both sides), so it never varied by language.
+  const ways = [os.way1, os.way2, os.way3, os.way4, os.way5, os.way6].join(" · ");
 
   // Star count: count-up to the live value; null -> static dash, but the CTA
   // still links to GitHub (it is a Star button regardless of the number).

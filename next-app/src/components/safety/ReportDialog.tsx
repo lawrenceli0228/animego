@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import { authFetch } from "@/lib/authFetch";
 import { useLang } from "@/lib/lang-client";
+import type { Lang } from "@/lib/i18n/lang";
 
 type ReportTargetType = "comment" | "user";
 
@@ -26,7 +27,12 @@ const REASONS = [
   "other",
 ] as const;
 
-const LABELS: Record<(typeof REASONS)[number], { zh: string; en: string }> = {
+// Inner map is keyed by Lang, not by loose zh/en fields, because the read site
+// is an unguarded double index (`LABELS[value][lang]`). Under a language the
+// inner object lacks, that expression renders an empty <option> — a reporter
+// picking a blank reason — with no crash or warning. Typing it as Record<Lang,…>
+// turns that into a compile error at the table instead.
+const LABELS: Record<(typeof REASONS)[number], Record<Lang, string>> = {
   spam: { zh: "垃圾广告", en: "Spam" },
   harassment: { zh: "骚扰或人身攻击", en: "Harassment" },
   hate_speech: { zh: "仇恨言论", en: "Hate speech" },

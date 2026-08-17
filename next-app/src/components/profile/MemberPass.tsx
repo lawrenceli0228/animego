@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useHoloTilt } from "./useHoloTilt";
 import { barcodeBars } from "./memberIdentity";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import type { Lang } from "@/lib/i18n/lang";
 import "./member-pass.css";
 
 // MemberPass — AnimeGoClub 会员通行证. Presentational holo card: given the
@@ -30,7 +31,7 @@ interface MemberPassProps {
   photoUrl?: string | null;
   /** Membership status chip, defaults to 在籍 · 有效 / Active. */
   statusText?: string;
-  lang: "zh" | "en";
+  lang: Lang;
   /** Defer the card art (loading="lazy"). Default eager — the card is the LCP
    *  hero on profile/settings pages. The landing /welcome card opts in because
    *  it sits far below the fold (Lighthouse offscreen-images). */

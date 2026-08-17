@@ -12,6 +12,7 @@ import { FILTER_GENRES, type FilterGenre } from "@/lib/contentLabels";
 import { getDict, getDictByLang, getLang } from "@/lib/i18n";
 import { pickTitle } from "@/lib/formatters";
 import { buildAlternates } from "@/lib/seo/alternates";
+import { OG_LOCALE, alternateOgLocales, type Lang } from "@/lib/i18n/lang";
 import type { SeasonalAnime } from "@/lib/types";
 
 export const revalidate = 300;
@@ -20,11 +21,24 @@ const VALID_SEASONS = new Set(["spring", "summer", "fall", "winter"]);
 
 type SeasonKey = "spring" | "summer" | "fall" | "winter";
 
-const SEASON_ZH: Record<SeasonKey, string> = {
+const SEASON_CHAR: Record<SeasonKey, string> = {
   spring: "春",
   summer: "夏",
   fall: "秋",
   winter: "冬",
+};
+
+// A sentence template per language, not a label table: the two read
+// differently enough ("2026年 春季新番" against "Spring 2026 Anime") that
+// there is no shared skeleton to fill in. A third language writes its own
+// line here, and tsc asks for it.
+//
+// Not lib/contentLabels.ts SEASON_LABEL, which is a different vocabulary —
+// that one is keyed by AniList's "SPRING" and reads "春季"; this is the URL
+// segment "spring" and the single character the heading wants.
+const SEASON_HEADING: Record<Lang, (season: SeasonKey, year: number) => string> = {
+  zh: (season, year) => `${year}年 ${SEASON_CHAR[season]}季新番`,
+  en: (season, year) => `${season.charAt(0).toUpperCase()}${season.slice(1)} ${year} Anime`,
 };
 
 const SEASONAL_PAGE_SIZE = 200;
@@ -48,12 +62,8 @@ function parseSeasonYear(season: string, year: string): { season: SeasonKey; yea
   return { season: season as SeasonKey, year: yearNum };
 }
 
-function headingFor(season: SeasonKey, year: number, lang: "zh" | "en"): string {
-  if (lang === "zh") {
-    return `${year}年 ${SEASON_ZH[season]}季新番`;
-  }
-  const capitalized = season.charAt(0).toUpperCase() + season.slice(1);
-  return `${capitalized} ${year} Anime`;
+function headingFor(season: SeasonKey, year: number, lang: Lang): string {
+  return SEASON_HEADING[lang](season, year);
 }
 
 function getString(v: string | string[] | undefined): string {
@@ -67,7 +77,7 @@ function applyFilters(
   format: string,
   status: string,
   sortBy: string,
-  lang: "zh" | "en",
+  lang: Lang,
 ): SeasonalAnime[] {
   let list = items;
   // `genre` is the raw AniList enum in the query string (the chips only
@@ -118,8 +128,8 @@ export async function generateMetadata({ params }: { params: PageProps["params"]
       title,
       description,
       siteName: "AnimeGoClub",
-      locale: lang === "en" ? "en_US" : "zh_CN",
-      alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
+      locale: OG_LOCALE[lang],
+      alternateLocale: alternateOgLocales(lang),
       type: "website",
       url: canonical,
     },

@@ -13,6 +13,7 @@ import { apiGet, ApiError } from "@/lib/api";
 import { getRepoStats } from "@/lib/github";
 import { getDict, getLang } from "@/lib/i18n";
 import { buildAlternates } from "@/lib/seo/alternates";
+import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import type { AnimeDetail, TrendingItem } from "@/lib/types";
 
 const FEATURE_POSTER_IDS = {
@@ -115,7 +116,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
   const title = dict.landing.docTitle;
   const description = dict.landing.hero.sub;
-  const locale = lang === "en" ? "en_US" : "zh_CN";
+  const locale = OG_LOCALE[lang];
 
   // Next 16 metadata merging is shallow across segments: setting `openGraph`
   // or `alternates` here REPLACES the layout's version wholesale. So we
@@ -126,7 +127,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description,
     siteName: "AnimeGoClub",
     locale,
-    alternateLocale: lang === "en" ? ["zh_CN"] : ["en_US"],
+    alternateLocale: alternateOgLocales(lang),
     type: "website",
     url: "/",
   };
@@ -150,9 +151,15 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function LandingPage() {
-  const [dict, trending, frierenDetail, apothDetail, losingDetail, repoStats] =
+  // `lang` is fetched beside `dict` and handed to the landing sections as a
+  // sibling prop. Those sections used to infer their language by comparing
+  // dictionary content against a Chinese sentinel ('。', '放送中'), which a
+  // third language matches none of and so silently resolved to zh or en.
+  // Sourcing both from the server here makes dict/lang disagreement impossible.
+  const [dict, lang, trending, frierenDetail, apothDetail, losingDetail, repoStats] =
     await Promise.all([
       getDict(),
+      getLang(),
       safeTrending(),
       safeDetail(FEATURE_POSTER_IDS.frieren),
       safeDetail(FEATURE_POSTER_IDS.apoth),
@@ -198,24 +205,26 @@ export default async function LandingPage() {
 
   return (
     <main>
-      <HeroSection dict={dict} poster={hero} />
+      <HeroSection dict={dict} lang={lang} poster={hero} />
       <StatsRow dict={dict} />
       <DataSourcesTribute dict={dict} />
       <FeaturesBento
         dict={dict}
+        lang={lang}
         posters={featurePosters}
         memberCardArt={memberCardArt}
         memberCardBanner={memberCardBanner}
       />
-      <PosterIdentityShowcase dict={dict} posters={showcase} />
+      <PosterIdentityShowcase dict={dict} lang={lang} posters={showcase} />
       <OpenSourceSection
         dict={dict}
+        lang={lang}
         stats={repoStats}
         poster={danmakuBg ?? featurePosters.apoth ?? hero}
       />
       <DifferentiatorSection dict={dict} />
       <FaqSection dict={dict} />
-      <FinalCta dict={dict} />
+      <FinalCta dict={dict} lang={lang} />
     </main>
   );
 }

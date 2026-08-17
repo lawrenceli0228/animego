@@ -4,6 +4,7 @@ import { useState, type CSSProperties } from "react";
 import { useReducedMotion } from "motion/react";
 import { useLang } from "@/lib/lang-client";
 import { formatScore } from "@/lib/formatters";
+import { sourceLabel } from "@/lib/contentLabels";
 import FadeImage from "@/components/ui/FadeImage";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
@@ -12,17 +13,6 @@ const HUE = PLAYER_HUE.stream;
 
 const scoreColor = (v: number) =>
   v >= 75 ? "#30d158" : v >= 50 ? "#ff9f0a" : "#ff453a";
-
-const SOURCE_LABEL: Record<string, { zh: string; en: string }> = {
-  ORIGINAL: { zh: "原创", en: "Original" },
-  MANGA: { zh: "漫改", en: "Manga" },
-  LIGHT_NOVEL: { zh: "轻小说改", en: "Light Novel" },
-  VISUAL_NOVEL: { zh: "视觉小说改", en: "Visual Novel" },
-  VIDEO_GAME: { zh: "游戏改", en: "Video Game" },
-  NOVEL: { zh: "小说改", en: "Novel" },
-  WEB_NOVEL: { zh: "网文改", en: "Web Novel" },
-  GAME: { zh: "游戏改", en: "Game" },
-};
 
 // OKLCH per-episode hue rotation: 210, 220, 230, ... cycles through the spectrum.
 const epHue = (ep: number | null | undefined) =>
@@ -428,9 +418,7 @@ function EpisodeFileList({
       } as Record<string, string>)[sa.status] || sa.status
     : null;
 
-  const sourceLabel = sa?.source
-    ? (SOURCE_LABEL[sa.source]?.[lang] ?? null)
-    : null;
+  const sourceText = sourceLabel(sa?.source, lang);
   const durationLabel = sa?.duration
     ? lang === "zh"
       ? `${sa.duration}分/集`
@@ -528,7 +516,7 @@ function EpisodeFileList({
 
               {/* Studios + meta */}
               {((sa.studios && sa.studios.length > 0) ||
-                sourceLabel ||
+                sourceText ||
                 durationLabel) && (
                 <div style={s.metaRow}>
                   {sa.studios && sa.studios.length > 0 && (
@@ -536,11 +524,11 @@ function EpisodeFileList({
                   )}
                   {sa.studios &&
                     sa.studios.length > 0 &&
-                    (sourceLabel || durationLabel) && (
+                    (sourceText || durationLabel) && (
                       <span style={s.metaDot}>·</span>
                     )}
-                  {sourceLabel && (
-                    <span style={s.metaDetail}>{sourceLabel}</span>
+                  {sourceText && (
+                    <span style={s.metaDetail}>{sourceText}</span>
                   )}
                   {durationLabel && (
                     <span style={s.metaDetail}>{durationLabel}</span>

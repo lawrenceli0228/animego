@@ -9,6 +9,7 @@ import { DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
 import { cssUrl } from "@/lib/cssUrl";
 import "@/components/profile/cinematic.css";
 import type { WatchingEntry } from "./types";
+import { seasonYearLabel } from "@/lib/contentLabels";
 
 // PublicProfileHero — cinematic member-pass head for the public /u/[username]
 // page. Reads the owner's DB-persisted photo + backdrop so visitors see the
@@ -24,10 +25,6 @@ const STATUS_COLORS: Record<string, string> = {
 const STATUS_LABELS: Record<Lang, Record<string, string>> = {
   zh: { watching: "在看", completed: "看完", plan_to_watch: "想看", dropped: "抛弃" },
   en: { watching: "Watching", completed: "Completed", plan_to_watch: "Plan", dropped: "Dropped" },
-};
-const SEASON_LABELS: Record<Lang, Record<string, string>> = {
-  zh: { WINTER: "冬季", SPRING: "春季", SUMMER: "夏季", FALL: "秋季" },
-  en: { WINTER: "Winter", SPRING: "Spring", SUMMER: "Summer", FALL: "Fall" },
 };
 
 interface PublicProfileHeroProps {
@@ -85,7 +82,6 @@ export default function PublicProfileHero({
   lang,
   children,
 }: PublicProfileHeroProps) {
-  const zh = lang === "zh";
 
   const counts: Record<string, number> = { watching: 0, completed: 0, plan_to_watch: 0, dropped: 0 };
   const seasonCounts: Record<string, number> = {};
@@ -103,7 +99,7 @@ export default function PublicProfileHero({
   let topSeason: string | null = null;
   if (topEntry) {
     const [year, season] = topEntry[0].split("-");
-    topSeason = zh ? `${year} ${SEASON_LABELS.zh[season] ?? ""}`.trim() : `${SEASON_LABELS.en[season] ?? ""} ${year}`.trim();
+    topSeason = seasonYearLabel(season, year, lang);
   }
 
   // A chosen backdrop that isn't in the (capped) watching list falls through to
@@ -124,7 +120,7 @@ export default function PublicProfileHero({
       <div className="agc-cine-grain" aria-hidden="true" />
 
       <div className="agc-cine-content container">
-        <section className="agc-hero" aria-label={zh ? "会员身份" : "Member identity"}>
+        <section className="agc-hero" aria-label={lang === "zh" ? "会员身份" : "Member identity"}>
           <MemberPass
             username={username}
             memberNo={memberNo}
@@ -142,10 +138,10 @@ export default function PublicProfileHero({
 
             <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
               <Link href={`/u/${encodeURIComponent(username)}/followers`} style={{ color: "rgba(235,235,245,0.7)", fontSize: 14, textDecoration: "none" }}>
-                <strong style={{ color: "#fff", fontWeight: 700 }}>{followerCount}</strong> {zh ? "粉丝" : "Followers"}
+                <strong style={{ color: "#fff", fontWeight: 700 }}>{followerCount}</strong> {lang === "zh" ? "粉丝" : "Followers"}
               </Link>
               <Link href={`/u/${encodeURIComponent(username)}/following`} style={{ color: "rgba(235,235,245,0.7)", fontSize: 14, textDecoration: "none" }}>
-                <strong style={{ color: "#fff", fontWeight: 700 }}>{followingCount}</strong> {zh ? "关注" : "Following"}
+                <strong style={{ color: "#fff", fontWeight: 700 }}>{followingCount}</strong> {lang === "zh" ? "关注" : "Following"}
               </Link>
             </div>
 
@@ -155,12 +151,12 @@ export default function PublicProfileHero({
                 <div className="agc-read-sep" />
                 <div className="agc-read">
                   <b>{counts.completed}</b>
-                  <span>{zh ? "看过 · 部" : "Watched"}</span>
+                  <span>{lang === "zh" ? "看过 · 部" : "Watched"}</span>
                 </div>
                 {topSeason && (
                   <div className="agc-read season">
                     <b>{topSeason}</b>
-                    <span>{zh ? "最活跃赛季" : "Top Season"}</span>
+                    <span>{lang === "zh" ? "最活跃赛季" : "Top Season"}</span>
                   </div>
                 )}
               </div>

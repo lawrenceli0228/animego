@@ -25,7 +25,7 @@ import { motion as Motion, useReducedMotion } from "motion/react";
 import { mono } from "./shared/hud-tokens";
 import { SectionNum, CornerBrackets } from "./shared/hud";
 import FadeImage from "@/components/ui/FadeImage";
-import type { Dict } from "@/lib/i18n";
+import type { Dict, Lang } from "@/lib/i18n";
 import type { LandingPoster } from "@/lib/types";
 
 const SECTION_HUE = 330;
@@ -47,8 +47,6 @@ const danmaku: DanmakuLine[] = [
   { text: "op 又来了泪目", y: 52, delay: 1.8 },
   { text: "这分镜不得不服", y: 70, delay: 2.7 },
 ];
-
-type Lang = "zh" | "en";
 
 // Pick the best poster title for the active locale. Mirrors the legacy
 // client/src/utils/formatters.js pickTitle() priority chain.
@@ -482,15 +480,19 @@ function Showcase({ poster, lang, hero }: ShowcaseProps) {
 
 interface HeroSectionProps {
   dict: Dict;
+  /**
+   * Must be the language `dict` was resolved from. Passed as a sibling of
+   * `dict` from the server so the two cannot disagree; do NOT swap this for
+   * `useLang()`, which reads the client cookie after hydration and would drift
+   * from the server-rendered dictionary.
+   */
+  lang: Lang;
   poster: LandingPoster | null;
 }
 
-export default function HeroSection({ dict, poster }: HeroSectionProps) {
+export default function HeroSection({ dict, lang, poster }: HeroSectionProps) {
   const reduced = useReducedMotion() ?? false;
   const hero = dict.landing.hero;
-  // Locale gate: zh uses U+3002 (full-width stop), en uses ASCII '.'.
-  // Drives font sizing + word separator below. Cheap + structural.
-  const lang: Lang = hero.period === "." ? "en" : "zh";
   const base = 0.25;
   const step = lang === "en" ? 0.08 : 0.06;
 

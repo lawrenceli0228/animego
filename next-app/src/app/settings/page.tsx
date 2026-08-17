@@ -8,6 +8,7 @@ import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import SettingsClient from "./_components/SettingsClient";
 import type { SubscriptionListItem } from "../profile/_components/types";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
+import { seasonYearLabel } from "@/lib/contentLabels";
 
 // Auth-gated standard settings page: account (username), security (password),
 // and member-pass personalization (photo + backdrop). SSR-fetches the user +
@@ -51,13 +52,6 @@ export const metadata: Metadata = {
   alternates: buildAlternates("/settings"),
 };
 
-const SEASON_ZH: Record<string, string> = {
-  WINTER: "冬季",
-  SPRING: "春季",
-  SUMMER: "夏季",
-  FALL: "秋季",
-};
-
 export default async function SettingsPage() {
   const [lang, me, subs] = await Promise.all([getLang(), fetchMe(), fetchSubs()]);
   // `from`, not `next`: /login reads ?from= (sanitizeFromParam) and has
@@ -91,10 +85,7 @@ export default async function SettingsPage() {
   let topSeason: string | null = null;
   if (topEntry) {
     const [year, season] = topEntry[0].split("-");
-    topSeason =
-      lang === "zh"
-        ? `${year} ${SEASON_ZH[season] ?? ""}`.trim()
-        : `${season} ${year}`;
+    topSeason = seasonYearLabel(season, year, lang);
   }
 
   return (

@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties } from "react";
 import { FILTER_GENRES, formatLabel, genreLabel, statusLabel } from "@/lib/contentLabels";
 import { useLang } from "@/lib/lang-client";
+import type { Lang } from "@/lib/i18n/lang";
 
 // Formats offered as filters — 6 of AniList's 7. MUSIC is not offered here and
 // was also missing from the old local label map, so the gap was latent rather
@@ -17,10 +18,12 @@ const STATUSES = ["RELEASING", "FINISHED", "NOT_YET_RELEASED"] as const;
 
 type SortKey = "score" | "title" | "format";
 
-const SORT_OPTIONS: Array<{ value: SortKey; zh: string; en: string }> = [
-  { value: "score", zh: "评分", en: "Score" },
-  { value: "title", zh: "标题", en: "Title" },
-  { value: "format", zh: "格式", en: "Format" },
+// `label` is keyed by Lang rather than held as loose zh/en fields so a new
+// language is a compile error here instead of a silent fall-through to English.
+const SORT_OPTIONS: Array<{ value: SortKey; label: Record<Lang, string> }> = [
+  { value: "score", label: { zh: "评分", en: "Score" } },
+  { value: "title", label: { zh: "标题", en: "Title" } },
+  { value: "format", label: { zh: "格式", en: "Format" } },
 ];
 
 const wrapStyle: CSSProperties = {
@@ -219,7 +222,7 @@ export default function SeasonalFilterChips({ filteredCount }: SeasonalFilterChi
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
-              {lang === "zh" ? o.zh : o.en}
+              {o.label[lang]}
             </option>
           ))}
         </select>

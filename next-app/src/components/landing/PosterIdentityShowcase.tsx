@@ -248,13 +248,18 @@ const s = {
 
 interface PosterIdentityShowcaseProps {
   dict: Dict;
+  /**
+   * Must be the language `dict` was resolved from. Passed as a sibling of
+   * `dict` from the server so the two cannot disagree; do NOT swap this for
+   * `useLang()`, which reads the client cookie after hydration and would drift
+   * from the server-rendered dictionary.
+   */
+  lang: Lang;
   posters: TrendingItem[];
 }
 
-export default function PosterIdentityShowcase({ dict, posters }: PosterIdentityShowcaseProps) {
+export default function PosterIdentityShowcase({ dict, lang, posters }: PosterIdentityShowcaseProps) {
   const identity = dict.landing.identity;
-  // Stable Chinese sentinel: identity.airing is '放送中' (zh) vs 'Airing' (en).
-  const lang: Lang = identity.airing === "放送中" ? "zh" : "en";
   const airing = identity.airing;
   const epSuffix = identity.episodesSuffix;
   const frames: Frame[] = posters.length >= 3

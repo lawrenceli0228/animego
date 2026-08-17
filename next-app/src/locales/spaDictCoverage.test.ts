@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import zhSpa from "./zh-spa.js";
 import enSpa from "./en-spa.js";
+import { LANGS, type Lang } from "../lib/i18n/lang";
 
 // Client components translate through useLang(), which is backed by the
 // *-spa.js dictionaries — NOT by zh.ts / en.ts, which only server
@@ -18,6 +19,24 @@ import enSpa from "./en-spa.js";
 // thing standing between a missing key and production.
 
 const SRC = join(import.meta.dir, "..");
+
+/**
+ * The client-side dictionary for each language, mirroring the DICTS map in
+ * lib/lang-client.tsx — the runtime this suite exists to check.
+ *
+ * Typed `Record<Lang, …>` and iterated via LANGS rather than written as a
+ * `[["zh", zhSpa], ["en", enSpa]]` tuple, because that tuple was the one place
+ * in the repo where the client locale set was enumerated by hand. A third
+ * `*-spa.js` added without editing it would have been covered by nothing: the
+ * suite would still pass, still report two green tests, and the new
+ * dictionary's missing keys would ship as literal `library.overflow.rescan`
+ * strings — exactly the failure this file was written for. Now the map is a
+ * compile error until the new dictionary is imported and registered.
+ *
+ * Not imported from lang-client.tsx directly: that module is a React client
+ * component, and this suite is deliberately DOM-free (see testImportHygiene).
+ */
+const SPA_DICTS: Record<Lang, unknown> = { zh: zhSpa, en: enSpa };
 
 // A key is exempt when its call site passes an explicit defaultValue —
 // that is a deliberate "may be absent" contract, e.g. player.dropRelease.
@@ -80,12 +99,20 @@ describe("*-spa dictionaries cover every client t() key", () => {
     expect(calls.length).toBeGreaterThan(50);
   });
 
-  for (const [lang, dict] of [
-    ["zh", zhSpa],
-    ["en", enSpa],
-  ] as const) {
+  test("every language in LANGS has a registered dictionary", () => {
+    // Guards the guard, second half: SPA_DICTS is typed, but tsc cannot stop
+    // someone from satisfying a new key with `undefined` or `{}` to get the
+    // build green. flatten() would then yield zero keys and the per-language
+    // test below would report every call site as missing — loud, but only if
+    // the entry exists at all.
+    for (const lang of LANGS) {
+      expect(flatten(SPA_DICTS[lang]).length).toBeGreaterThan(50);
+    }
+  });
+
+  for (const lang of LANGS) {
     test(`${lang}-spa.js resolves them all`, () => {
-      const known = new Set(flatten(dict));
+      const known = new Set(flatten(SPA_DICTS[lang]));
       const missing = calls
         .filter((c) => !known.has(c.key))
         .map((c) => `${c.file}:${c.line}  ${c.key}`);

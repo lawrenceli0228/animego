@@ -12,7 +12,26 @@ import {
   staffRoleLabel,
   statusLabel,
 } from "./contentLabels";
-import type { Lang } from "./i18n";
+import { LANGS, type Lang } from "./i18n/lang";
+
+/**
+ * Languages that deliberately render AniList's own English strings for genre
+ * and staff role, cross-checked against the module's own `null` declarations
+ * below.
+ *
+ * Hand-maintained on purpose. Every table in contentLabels.ts is
+ * `Record<Lang, …>`, so a third language cannot COMPILE without stating an
+ * answer — but `en: null` and `"zh-Hant": null` cost the same keystrokes, and
+ * the second one is almost certainly wrong (a Traditional reader wants the zh
+ * table converted, not English). This list makes "I read AniList raw" a thing
+ * someone has to write down twice, in two files, one of which is a test.
+ */
+const IDENTITY_LANGS: readonly Lang[] = ["en"];
+
+/** The complement: languages that must carry a full label table. */
+const TRANSLATED_LANGS: readonly Lang[] = LANGS.filter(
+  (l) => !IDENTITY_LANGS.includes(l),
+);
 
 /**
  * The genre vocabulary observed in prod `anime_genres` on 2026-08-06
@@ -48,39 +67,65 @@ const PROD_GENRES = [
 /** Matches any CJK ideograph — used to prove no zh label leaks into en. */
 const CJK = /[㐀-䶿一-鿿]/;
 
+describe("every language declares how it labels content enums", () => {
+  // The gate that makes a third language a decision instead of a default.
+  // tsc forces a new Lang to appear in all four tables; these two tests force
+  // the *value* it was given to be one someone signed off on.
+  test("only the vetted languages fall back to AniList's raw English", () => {
+    const declared = LANGS.filter(
+      (l) => GENRE_LABEL[l] === null || STAFF_ROLE_LABEL[l] === null,
+    );
+    expect([...declared].sort()).toEqual([...IDENTITY_LANGS].sort());
+  });
+
+  test("format and status are translated for every language — neither is ever raw", () => {
+    // These two enums have no identity language at all: SPECIAL / HIATUS are
+    // database enums, not prose, and shipping "NOT_YET_RELEASED" into a chip
+    // is a bug in any language including English.
+    for (const lang of LANGS) {
+      expect(FORMAT_LABEL[lang]).not.toBeNull();
+      expect(STATUS_LABEL[lang]).not.toBeNull();
+    }
+  });
+});
+
 describe("GENRE_LABEL coverage", () => {
-  test("every genre present in prod has a Chinese label", () => {
-    const missing = PROD_GENRES.filter((g) => !(g in GENRE_LABEL));
-    expect(missing).toEqual([]);
-  });
+  for (const lang of TRANSLATED_LANGS) {
+    test(`every genre present in prod has a ${lang} label`, () => {
+      const missing = PROD_GENRES.filter((g) => !(g in GENRE_LABEL[lang]));
+      expect(missing).toEqual([]);
+    });
 
-  test("no label is empty, blank, or an echo of the English key", () => {
-    for (const genre of PROD_GENRES) {
-      const zh = GENRE_LABEL[genre];
-      expect(zh).toBeTruthy();
-      expect(zh.trim()).not.toBe("");
-      expect(zh).not.toBe(genre);
-    }
-  });
+    test(`no ${lang} label is empty, blank, or an echo of the English key`, () => {
+      for (const genre of PROD_GENRES) {
+        const label = GENRE_LABEL[lang][genre];
+        expect(label).toBeTruthy();
+        expect(label.trim()).not.toBe("");
+        expect(label).not.toBe(genre);
+      }
+    });
 
-  test("the map holds exactly the prod vocabulary — no dead or invented keys", () => {
-    expect(Object.keys(GENRE_LABEL).sort()).toEqual([...PROD_GENRES].sort());
-  });
+    test(`the ${lang} map holds exactly the prod vocabulary — no dead or invented keys`, () => {
+      expect(Object.keys(GENRE_LABEL[lang]).sort()).toEqual([...PROD_GENRES].sort());
+    });
 
-  test("genreLabel resolves every prod genre to its Chinese label in zh", () => {
-    for (const genre of PROD_GENRES) {
-      expect(genreLabel(genre, "zh")).toBe(GENRE_LABEL[genre]);
-    }
-  });
+    test(`genreLabel resolves every prod genre to its ${lang} label`, () => {
+      for (const genre of PROD_GENRES) {
+        expect(genreLabel(genre, lang)).toBe(GENRE_LABEL[lang][genre]);
+      }
+    });
+  }
 
   test("genreLabel passes an unknown genre through untranslated rather than blanking it", () => {
-    expect(genreLabel("Isekai", "zh")).toBe("Isekai");
+    for (const lang of LANGS) {
+      expect(genreLabel("Isekai", lang)).toBe("Isekai");
+    }
   });
 });
 
 describe("FILTER_GENRES", () => {
-  test("is a subset of GENRE_LABEL, so every chip can render Chinese", () => {
-    const unlabelled = FILTER_GENRES.filter((g) => !(g in GENRE_LABEL));
+  test("is a subset of GENRE_LABEL.zh, so every chip can render Chinese", () => {
+    const unlabelled = FILTER_GENRES.filter((g) => !(g in GENRE_LABEL.zh));
     expect(unlabelled).toEqual([]);
   });
 
@@ -88,15 +133,15 @@ describe("FILTER_GENRES", () => {
     // Hentai must stay OUT of the filter chips but IN the label map, because
     // detail pages still have to render the genre when a title carries it.
     expect(FILTER_GENRES).not.toContain("Hentai");
-    expect(GENRE_LABEL).toHaveProperty("Hentai");
+    expect(GENRE_LABEL.zh).toHaveProperty("Hentai");
   });
 
-  test("is exactly GENRE_LABEL minus Hentai (18 of 19)", () => {
+  test("is exactly GENRE_LABEL.zh minus Hentai (18 of 19)", () => {
     expect(FILTER_GENRES).toHaveLength(18);
     // Widened to string[]: FILTER_GENRES is a literal-union tuple, and toEqual
     // infers its expected type from the received side.
     const actual: string[] = [...FILTER_GENRES];
-    const expected = Object.keys(GENRE_LABEL)
+    const expected = Object.keys(GENRE_LABEL.zh)
       .filter((g) => g !== "Hentai")
       .sort();
     expect(actual.sort()).toEqual(expected);
@@ -113,7 +158,13 @@ describe("English must not regress", () => {
   // were raw AniList strings, so en is the strict identity. format and status
   // were already localised through hardcoded maps in SeasonalFilterChips.tsx,
   // so their baseline is those exact labels — re-typed below so that editing
-  // FORMAT_LABEL_EN / STATUS_LABEL_EN cannot quietly move the English UI.
+  // FORMAT_LABEL.en / STATUS_LABEL.en cannot quietly move the English UI.
+  //
+  // The identity assertions now run over IDENTITY_LANGS rather than a literal
+  // "en", so a language that declares itself an identity language inherits the
+  // same guarantee automatically. The frozen-string assertions stay pinned to
+  // "en": those are a record of what the English UI shipped, and there is no
+  // such record for any other language.
 
   /** Verbatim from the pre-refactor SeasonalFilterChips FORMAT_LABELS.en. */
   const FROZEN_EN_FORMAT: Record<string, string> = {
@@ -139,20 +190,26 @@ describe("English must not regress", () => {
   };
 
   test("genreLabel is the identity for every known genre", () => {
-    for (const genre of Object.keys(GENRE_LABEL)) {
-      expect(genreLabel(genre, "en")).toBe(genre);
+    for (const lang of IDENTITY_LANGS) {
+      for (const genre of Object.keys(GENRE_LABEL.zh)) {
+        expect(genreLabel(genre, lang)).toBe(genre);
+      }
     }
   });
 
   test("genreLabel is the identity for unknown genres too", () => {
-    for (const genre of ["Isekai", "", "  ", "Sci-Fi ", "不存在"]) {
-      expect(genreLabel(genre, "en")).toBe(genre);
+    for (const lang of IDENTITY_LANGS) {
+      for (const genre of ["Isekai", "", "  ", "Sci-Fi ", "不存在"]) {
+        expect(genreLabel(genre, lang)).toBe(genre);
+      }
     }
   });
 
   test("staffRoleLabel is the identity for every known role", () => {
-    for (const role of Object.keys(STAFF_ROLE_LABEL)) {
-      expect(staffRoleLabel(role, "en")).toBe(role);
+    for (const lang of IDENTITY_LANGS) {
+      for (const role of Object.keys(STAFF_ROLE_LABEL.zh)) {
+        expect(staffRoleLabel(role, lang)).toBe(role);
+      }
     }
   });
 
@@ -160,9 +217,12 @@ describe("English must not regress", () => {
     const roles = [
       "Episode Director (eps 3, 7)",
       "Theme Song Performance (ED)",
-      // Numbered song qualifiers exercise the qualifier regex hardest. en must
-      // stay the identity no matter how that regex is tuned — staffRoleLabel
-      // returns before touching it, and this pins that ordering down.
+      // Numbered song qualifiers exercise the qualifier regex hardest. An
+      // identity language must stay the identity no matter how that regex is
+      // tuned: staffRoleLabel does run the regex now (it dropped the early
+      // `lang !== "zh"` return), so the guarantee rests on the language having
+      // no table at all rather than on statement order. Same assertion, but it
+      // is now load-bearing for a reason it was not before.
       "Theme Song Performance (ED2)",
       "Theme Song Performance (OP1)",
       "Key Animation (12 episodes)",
@@ -170,8 +230,10 @@ describe("English must not regress", () => {
       "Setting Manager",
       "",
     ];
-    for (const role of roles) {
-      expect(staffRoleLabel(role, "en")).toBe(role);
+    for (const lang of IDENTITY_LANGS) {
+      for (const role of roles) {
+        expect(staffRoleLabel(role, lang)).toBe(role);
+      }
     }
   });
 
@@ -192,23 +254,25 @@ describe("English must not regress", () => {
     expect(statusLabel("PAUSED", "en")).toBe("PAUSED");
   });
 
-  test("no helper can leak a Chinese label into en output", () => {
+  test("no helper can leak a Chinese label into an identity language's output", () => {
     const probes: Array<[string, (v: string, l: Lang) => string]> = [
-      ...Object.keys(GENRE_LABEL).map(
+      ...Object.keys(GENRE_LABEL.zh).map(
         (k) => [k, genreLabel] as [string, typeof genreLabel],
       ),
-      ...Object.keys(FORMAT_LABEL).map(
+      ...Object.keys(FORMAT_LABEL.zh).map(
         (k) => [k, formatLabel] as [string, typeof formatLabel],
       ),
-      ...Object.keys(STATUS_LABEL).map(
+      ...Object.keys(STATUS_LABEL.zh).map(
         (k) => [k, statusLabel] as [string, typeof statusLabel],
       ),
-      ...Object.keys(STAFF_ROLE_LABEL).map(
+      ...Object.keys(STAFF_ROLE_LABEL.zh).map(
         (k) => [k, staffRoleLabel] as [string, typeof staffRoleLabel],
       ),
     ];
-    for (const [value, fn] of probes) {
-      expect(fn(value, "en")).not.toMatch(CJK);
+    for (const lang of IDENTITY_LANGS) {
+      for (const [value, fn] of probes) {
+        expect(fn(value, lang)).not.toMatch(CJK);
+      }
     }
   });
 });
@@ -234,7 +298,17 @@ describe("formatLabel", () => {
   });
 
   test("the zh map holds exactly those seven keys", () => {
-    expect(Object.keys(FORMAT_LABEL).sort()).toEqual(cases.map(([f]) => f).sort());
+    expect(Object.keys(FORMAT_LABEL.zh).sort()).toEqual(cases.map(([f]) => f).sort());
+  });
+
+  test("every language covers all seven formats — no raw enum in any UI", () => {
+    // FORMAT_LABEL has no identity language, so a partially-filled table for a
+    // new language is a real user-visible bug (a "SPECIAL" chip in a
+    // translated row) that tsc cannot see: the tables are Record<string, …>.
+    for (const lang of LANGS) {
+      const missing = cases.map(([f]) => f).filter((f) => !(f in FORMAT_LABEL[lang]));
+      expect(missing).toEqual([]);
+    }
   });
 
   test("TV / OVA / ONA are intentionally identical in both languages", () => {
@@ -258,10 +332,23 @@ describe("statusLabel", () => {
     expect(statusLabel("HIATUS", "zh")).toBe("休载中");
   });
 
+  const ANILIST_STATUSES = [
+    "CANCELLED",
+    "FINISHED",
+    "HIATUS",
+    "NOT_YET_RELEASED",
+    "RELEASING",
+  ];
+
   test("the map holds exactly the five AniList statuses", () => {
-    expect(Object.keys(STATUS_LABEL).sort()).toEqual(
-      ["CANCELLED", "FINISHED", "HIATUS", "NOT_YET_RELEASED", "RELEASING"].sort(),
-    );
+    expect(Object.keys(STATUS_LABEL.zh).sort()).toEqual([...ANILIST_STATUSES].sort());
+  });
+
+  test("every language covers all five statuses — see the FORMAT_LABEL sibling", () => {
+    for (const lang of LANGS) {
+      const missing = ANILIST_STATUSES.filter((s) => !(s in STATUS_LABEL[lang]));
+      expect(missing).toEqual([]);
+    }
   });
 
   test("passes an unknown status through in zh", () => {
@@ -386,7 +473,7 @@ describe("pickRelatedTitle", () => {
   });
 
   test("returns an empty string when both titles are missing", () => {
-    for (const lang of ["zh", "en"] as const) {
+    for (const lang of LANGS) {
       expect(pickRelatedTitle({}, lang)).toBe("");
       expect(pickRelatedTitle({ title: null, titleChinese: null }, lang)).toBe("");
       expect(pickRelatedTitle({ title: "", titleChinese: "" }, lang)).toBe("");
