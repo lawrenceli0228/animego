@@ -1,22 +1,22 @@
-// P10 sandbox — auth journey end-to-end.
+// Sandbox — auth journey end-to-end.
 //
-// Three flows against the live sandbox stack (Express + Mongo + Next-app
-// + nginx on https://localhost). Every spec uses a fresh user; no shared
-// state between tests so order doesn't matter.
+// Three flows against the sandbox stack (next-app + go-api + Postgres).
+// Every spec uses a fresh user; no shared state between tests so order
+// doesn't matter.
 //
 // Why this lives in specs/sandbox/ (not the top-level specs/): the
 // chromium-prod project explicitly ignores sandbox/** so these writes
 // never hit the live VPS. See e2e/playwright.config.ts.
 
 import { test, expect } from "@playwright/test";
-import { collectConsoleErrors } from "../_helpers";
 import {
-  closeMongo,
-  insertUser,
-} from "../../fixtures/mongo";
+  collectConsoleErrors,
+  expectSignedIn,
+  expectSignedOut,
+  logoutViaNavbar,
+} from "../_helpers";
 import { makeUser } from "../../fixtures/users";
 import { closePg, getResetTokenFromPg, insertPgUser } from "../../fixtures/pg";
-import { getResetTokenForEmail } from "../../fixtures/mongo";
 
 // Start every test with a clean cookie jar so the already-authed
 // bypass on /login + /register doesn't redirect us off the form.
@@ -27,7 +27,6 @@ test.use({ storageState: { cookies: [], origins: [] } });
 // admin's freshly-inserted user mid-login). Stragglers from killed
 // runs are tolerable in the sandbox DB.
 test.afterAll(async () => {
-  await closeMongo();
   await closePg();
 });
 
@@ -41,29 +40,30 @@ test.describe("auth journey", () => {
     await page.locator("#register-username").fill(user.username);
     await page.locator("#register-email").fill(user.email);
     await page.locator("#register-password").fill(user.password);
+    // The confirm field is not optional: RegisterForm runs
+    // validateRegisterFields(password, confirmPassword) BEFORE it calls the
+    // API, so leaving it blank means the form never submits and the spec
+    // sits on /register until it times out. It was added after this spec
+    // was written, and nothing in CI ran the spec to notice.
+    await page.locator("#register-confirmPassword").fill(user.password);
     await page.locator('button[type="submit"]').click();
 
     // Successful register replaces the route to `from` (default "/").
-    // Wait for the navbar's logged-in CTAs to surface so we know the
-    // session cookie has been committed and the layout's /api/auth/me
-    // fetch resolved.
+    // Wait for the navbar's logged-in chrome to surface so we know the
+    // session cookie has been committed and the /api/auth/me probe
+    // resolved.
     await expect(page).toHaveURL(/\/$/);
-    const navbar = page.locator('nav[aria-label="主导航"], nav[aria-label="Main navigation"]');
-    await expect(navbar.getByRole("button", { name: /登出|Logout/ })).toBeVisible();
+    await expectSignedIn(page, user.username);
 
-    // ── Logout (navbar button — see Navbar.tsx:222-229)
+    // ── Logout, through the avatar dropdown (see _helpers).
     //
-    // The button fires POST /api/auth/logout then router.refresh().
-    // Wait for the anonymous CTAs to come back before asserting we're
-    // signed out — otherwise we race with the RSC re-render.
-    await navbar.getByRole("button", { name: /登出|Logout/ }).click();
-    // router.refresh() round-trip (clear cookie + re-run layout's
-    // fetchCurrentUser + reconcile) can take ~10s on a cold prod build.
-    // The langToggle lock bug (shared useTransition) is fixed; this is
-    // legitimate RSC latency, not a regression.
-    await expect(navbar.locator('a[href="/login"]')).toBeVisible({
-      timeout: 15_000,
-    });
+    // The menuitem fires POST /api/auth/logout then router.refresh(); the
+    // round-trip (clear cookie + re-run the layout's fetchCurrentUser +
+    // reconcile) is what expectSignedOut waits out. Asserting the
+    // anonymous CTAs rather than the absence of the avatar avoids racing
+    // the re-render.
+    await logoutViaNavbar(page);
+    await expectSignedOut(page);
 
     // ── Login with the just-registered credentials
     await page.goto("/login");
@@ -73,7 +73,7 @@ test.describe("auth journey", () => {
 
     // Same authenticated-landing signal as the register branch.
     await expect(page).toHaveURL(/\/$/);
-    await expect(navbar.getByRole("button", { name: /登出|Logout/ })).toBeVisible();
+    await expectSignedIn(page, user.username);
 
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });
@@ -81,7 +81,18 @@ test.describe("auth journey", () => {
   test("login with wrong password surfaces inline error", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     const user = makeUser();
-    await insertUser(user);
+    // Insert into Postgres, which is what go-api authenticates against.
+    // This used to be a Mongo insert, i.e. the account did not exist as
+    // far as the API was concerned, and the test passed only because
+    // "email not found" and "password mismatch" return the SAME 401
+    // INVALID_CREDENTIALS by design (auth/handlers.go:302-307, anti-
+    // enumeration). Seeding for real moves the assertion onto the branch
+    // it claims to cover — the bcrypt comparison at handlers.go:336.
+    await insertPgUser({
+      username: user.username,
+      email: user.email,
+      passwordHash: user.passwordHash,
+    });
 
     await page.goto("/login");
     await page.locator("#login-email").fill(user.email);
@@ -110,9 +121,6 @@ test.describe("auth journey", () => {
   }) => {
     const errors = collectConsoleErrors(page);
     const user = makeUser();
-    // Insert into Mongo (legacy) and Postgres (Go API) so both stacks
-    // can find the user during the forgot-password flow.
-    await insertUser(user);
     await insertPgUser({
       username: user.username,
       email: user.email,
@@ -131,14 +139,20 @@ test.describe("auth journey", () => {
       page.getByText(/Reset link sent|重置链接已发送/),
     ).toBeVisible();
 
-    // ── Read token from whichever DB the active API wrote to.
-    // Go API (P8.5 dress rehearsal) writes to Postgres; Express writes to Mongo.
-    // Try Postgres first; fall back to Mongo so this spec stays green on
-    // both the dress-rehearsal stack and the Express baseline.
-    let reset = await getResetTokenFromPg(user.email);
-    if (!reset) {
-      reset = await getResetTokenForEmail(user.email);
-    }
+    // ── Read the token straight out of Postgres.
+    //
+    // There is no delivery channel to read it from: go-api only emails
+    // the link, and the sandbox pins GMAIL_USER empty (docker-compose.ci
+    // .yml) so email.NoopSender swallows the send. That is safe here
+    // because ForgotPassword persists the token BEFORE it attempts the
+    // send and treats a send failure as best-effort (handlers.go:642-665).
+    //
+    // This used to fall back to a Mongo read when Postgres came back
+    // empty, from the window where Express and go-api both served /api.
+    // Express is retired; a null now means go-api genuinely failed to
+    // write the token, and the assertion below should say so rather than
+    // consult a database nothing writes to.
+    const reset = await getResetTokenFromPg(user.email);
     expect(reset).not.toBeNull();
     const token = reset!.token;
 
@@ -158,8 +172,7 @@ test.describe("auth journey", () => {
     await page.locator("#login-password").fill(newPassword);
     await page.locator('button[type="submit"]').click();
 
-    const navbar = page.locator('nav[aria-label="主导航"], nav[aria-label="Main navigation"]');
-    await expect(navbar.getByRole("button", { name: /登出|Logout/ })).toBeVisible();
+    await expectSignedIn(page, user.username);
 
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });

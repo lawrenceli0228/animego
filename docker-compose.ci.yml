@@ -1,56 +1,64 @@
-# CI-only docker-compose override.
+# CI-only docker compose override — the sandbox E2E backend.
 #
-# Why this file exists:
-#   1. docker-compose.yml binds `mongodb` to the internal `animego`
-#      network only — no host port mapping. Correct for prod, but
-#      blocks e2e sandbox fixtures that connect via
-#      mongodb://localhost:27017 from the GitHub Actions runner.
-#   2. `ws-server` is in a known restart loop in prod (DATABASE_URL
-#      missing until P9 brings up Postgres). In CI, `docker compose
-#      up --wait` would hang on its failing healthcheck until the
-#      --wait-timeout fires. v2 sandbox specs don't exercise
-#      /socket.io/, so we neuter ws-server here: replace its command
-#      with a sleep, disable its healthcheck. Container stays alive
-#      so nginx's `depends_on` is satisfied; danmaku is unreachable
-#      but no v2 test cares.
+# Merged by .github/workflows/e2e-sandbox.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml \
+#     --env-file .env.production up -d --wait postgres go-api
 #
-# Merge in CI:
-#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
+# Do NOT use this on the prod VPS. docker-compose.yml is canonical; this
+# file only ever loosens what prod deliberately keeps tight.
 #
-# Do NOT use this on the prod VPS. The base file is canonical.
+# SCOPE: postgres + go-api ONLY. next-app runs on the host under
+# `next dev` (see the workflow for why), nginx and ws-server never start.
+# This file used to carry overrides for `app` and `mongodb` — services
+# that were retired from docker-compose.yml at the P9 cutover. Nothing
+# noticed for months because no workflow ever merged the two files, and
+# `docker compose config` had been failing outright with
+# `service "app" has neither an image nor a build context specified`.
+# So: no override here for a service CI does not start. An override
+# nobody runs is an override nobody maintains.
 services:
-  mongodb:
-    ports:
-      - "27017:27017"
-
   postgres:
+    # The sandbox fixtures run on the HOST, outside the compose network.
+    # e2e/fixtures/pg.ts seeds users / anime_cache / subscriptions over
+    # localhost:5432, and the base file publishes no port at all.
     ports:
       - "5432:5432"
 
-  app:
-    # Crank /login + /register rate limit in sandbox — e2e specs hammer
-    # the form during register/login/forgot-password journeys and would
-    # otherwise hit the prod default (10/15min) after a few runs.
-    environment:
-      AUTH_RATELIMIT_MAX: "1000"
-
-  # next-app GO_API_INTERNAL_URL remains at default (http://app:5001)
-  # for prod safety. The P8.5 dress rehearsal flips it temporarily; this
-  # revert keeps the working tree in the safe baseline state.
-
   go-api:
-    # Extend session cookie TTL so storageState saved by globalSetup
-    # doesn't expire mid-run. 2h >> worst-case Playwright run time.
-    # Disable auth + global rate limits so parallel e2e specs don't 429.
+    # `next dev` rewrites /api/:path* to http://localhost:8080
+    # (next-app/next.config.ts:25 — dev only; under NODE_ENV=production
+    # it returns [] because nginx owns that hop). That rewrite runs in
+    # the Next server process on the host, so :8080 has to be published.
+    ports:
+      - "8080:8080"
     environment:
+      # storageState is minted once in globalSetup and reused by every
+      # sandbox worker. The prod default (15m) can expire mid-suite and
+      # produce "logged out" failures that look like auth regressions.
       JWT_EXPIRES_IN: 2h
+
+      # Auth limiter is 10 attempts / 15 min per IP by default
+      # (cmd/server/main.go:335). auth.spec.ts alone does register +
+      # logout + login + two more logins, and retries replay all of it.
       AUTH_RATELIMIT_MAX: "1000"
+
+      # 0 disables the global /api/* limiter (cmd/server/main.go:618).
+      # This is the 2026-06-05 detail-page incident in miniature: go-api
+      # meters per IP, but behind SSR every read arrives from ONE client
+      # address, so the bucket is shared by all traffic rather than by
+      # user. In prod that collapsed /anime/{id} into 429 → 500 and the
+      # fix was to move rate limiting to the Cloudflare edge. Here the
+      # single address is the runner, shared by three parallel Playwright
+      # workers plus every RSC fetch they trigger — leave the limiter on
+      # and tests fail for a reason unrelated to the code under test.
       API_RATELIMIT_BURST: "0"
 
-  ws-server:
-    # P8.5 dress rehearsal: ws-server runs for real against Postgres.
-    # Override DATABASE_URL so it resolves to the postgres container, not
-    # localhost (which is what .env.production carries and is wrong inside
-    # the Docker network).
-    environment:
-      DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable
+      # .env.production carries real Gmail credentials on the VPS. CI
+      # generates a throwaway env file with these unset, but pin them
+      # empty so a locally-run sandbox suite can never send real mail to
+      # the `@animego.test` fixture addresses either. Empty creds select
+      # email.NoopSender (cmd/server/main.go:321); ForgotPassword still
+      # writes the reset token to Postgres before it attempts the send
+      # (auth/handlers.go:642), which is the only part the spec reads.
+      GMAIL_USER: ""
+      GMAIL_APP_PASSWORD: ""

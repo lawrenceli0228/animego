@@ -1,120 +1,73 @@
 import { chromium, type FullConfig } from "@playwright/test";
-import { MongoClient, ObjectId } from "mongodb";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { cleanupAllTestUsers, closeMongo } from "./fixtures/mongo";
-import { closePg, ensureSeedUserInPostgres } from "./fixtures/pg";
+import {
+  cleanupTestUsersInPostgres,
+  closePg,
+  ensureSeedUserInPostgres,
+} from "./fixtures/pg";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const MONGO_URL = process.env.MONGO_URL ?? "mongodb://localhost:27017";
-const MONGO_DB = process.env.MONGO_DB ?? "animego";
-const BASE_URL =
-  process.env.E2E_SANDBOX_BASE_URL ?? "https://localhost";
+// Keep this default in step with playwright.config.ts's chromium-sandbox
+// baseURL — they point at the same server and drifting them means the
+// login here succeeds against one host while the specs run against another.
+const BASE_URL = process.env.E2E_SANDBOX_BASE_URL ?? "http://localhost:3000";
 const STORAGE_STATE_PATH = path.join(__dirname, ".auth", "user.json");
 
 export const SEED_USER_EMAIL = "e2e+sandbox@animegoclub.com";
 export const SEED_USER_PASSWORD = "e2e-test-pass-123";
-const SEED_USER_HASH =
-  "$2b$10$0tYXiDYWWnzh8uXwMxNNquwlmvu1W65wOfaD5awi3cEuX.HlvBn8K";
 const SEED_USER_USERNAME = "e2e-sandbox";
 
-export const SEED_USER_ID = new ObjectId("e2e00000000000000000cafe");
-export const SEED_SUB_IDS = [
-  new ObjectId("e2e00000000000000000b001"),
-  new ObjectId("e2e00000000000000000b002"),
-  new ObjectId("e2e00000000000000000b003"),
-];
-
-async function seed(): Promise<void> {
-  const client = new MongoClient(MONGO_URL, {
-    serverSelectionTimeoutMS: 5_000,
-    connectTimeoutMS: 5_000,
-  });
-  await client.connect();
-  const db = client.db(MONGO_DB);
-
-  const users = db.collection("users");
-  const subscriptions = db.collection("subscriptions");
-
-  await users.deleteOne({ _id: SEED_USER_ID });
-  await subscriptions.deleteMany({ userId: SEED_USER_ID });
-
-  const now = new Date();
-  await users.insertOne({
-    _id: SEED_USER_ID,
-    username: SEED_USER_USERNAME,
-    email: SEED_USER_EMAIL,
-    password: SEED_USER_HASH,
-    role: null,
-    refreshToken: null,
-    resetPasswordToken: null,
-    resetPasswordExpires: null,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  await subscriptions.insertMany([
-    {
-      _id: SEED_SUB_IDS[0],
-      userId: SEED_USER_ID,
-      anilistId: 21,
-      status: "watching",
-      currentEpisode: 3,
-      score: null,
-      lastWatchedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      _id: SEED_SUB_IDS[1],
-      userId: SEED_USER_ID,
-      anilistId: 11061,
-      status: "completed",
-      currentEpisode: 26,
-      score: 9,
-      lastWatchedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      _id: SEED_SUB_IDS[2],
-      userId: SEED_USER_ID,
-      anilistId: 1535,
-      status: "plan_to_watch",
-      currentEpisode: 0,
-      score: null,
-      lastWatchedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    },
-  ]);
-
-  await client.close();
-}
+// ─── Why there is no Mongo seed here any more ───────────────────────────
+//
+// This function used to open a MongoClient and insert the seed user plus
+// three subscriptions before the Postgres seed below. Every one of those
+// writes was landing in a database no running process reads:
+//
+//   - docker-compose.yml has no `mongodb` service. The P9 cutover left
+//     next-app / ws-server / postgres / go-api / nginx and nothing else.
+//   - go-api's only mention of Mongo is test/integration/migrate_test.go,
+//     the one-shot Mongo→Postgres migration tool's own test. No runtime
+//     path imports the driver.
+//   - The login this file performs goes through go-api, and
+//     auth/handlers.go:326 resolves the account with
+//     `h.db.GetUserByEmail` — sqlc over pgx. Postgres is authoritative
+//     for credentials, full stop.
+//
+// The cost was not just a wasted insert: the seed was the FIRST thing
+// globalSetup did, so a sandbox run died at connect() before reaching any
+// spec unless somebody remembered to hand-start `docker-compose.dev.yml
+// mongo`. Requiring a retired database to be running is what kept this
+// suite off CI. `cleanupTestUsersInPostgres` is the straight port of the
+// old `cleanupAllTestUsers` prefix sweep, so the "wipe stragglers before
+// seeding" guarantee the specs rely on is preserved, not dropped.
+//
+// The three seeded subscriptions (anilistId 21 / 11061 / 1535) were NOT
+// ported: no spec reads them. The specs that touch subscriptions
+// (library-watch-sync) seed their own ids through fixtures/pg.ts, which
+// is what makes them safe to run fullyParallel against one shared user.
 
 export default async function globalSetup(_config: FullConfig): Promise<void> {
-  // Sandbox-only setup: seed Mongo + Postgres, then browser-login to mint the
+  // Sandbox-only setup: seed Postgres, then browser-login to mint the
   // storageState the chromium-sandbox project reuses. The read-only
   // chromium-prod project (and any `playwright test --project=chromium-prod`,
-  // e.g. .github/workflows/e2e.yml) needs none of it — and would trip over the
-  // retired Mongo / an absent POSTGRES_PASSWORD. Opt IN via E2E_SANDBOX so
-  // prod-style runs are a no-op by default.
+  // e.g. .github/workflows/e2e.yml) needs none of it — and would trip over
+  // an absent POSTGRES_PASSWORD. Opt IN via E2E_SANDBOX so prod-style runs
+  // are a no-op by default.
   if (!process.env.E2E_SANDBOX) return;
 
   fs.mkdirSync(path.dirname(STORAGE_STATE_PATH), { recursive: true });
 
   // Wipe stragglers from prior runs BEFORE seeding, so per-spec cleanup
   // can be dropped (it races with parallel workers).
-  await cleanupAllTestUsers();
-  await closeMongo();
+  const wiped = await cleanupTestUsersInPostgres();
+  if (wiped > 0) {
+    console.log(`[globalSetup] removed ${wiped} leftover e2e-test-* user(s)`);
+  }
 
-  await seed();
-
-  // P8.5: ensure the seed user also exists in Postgres so the browser
-  // login goes through the Go API (which reads Postgres) and the
-  // storageState carries a valid session cookie.
+  // The seed user backs the storageState every sandbox spec inherits.
   await ensureSeedUserInPostgres(SEED_USER_USERNAME, SEED_USER_EMAIL);
   await closePg();
 

@@ -1,18 +1,24 @@
-// P8.5 dress rehearsal — Postgres fixture helpers.
+// Postgres fixture helpers — the sandbox suite's only database surface.
 //
-// When nginx routes /api/ to go-api, auth state lives in Postgres, not
-// Mongo. This module provides the minimal helpers the e2e sandbox suite
-// needs to:
-//   1. Seed the e2e-sandbox user in Postgres (globalSetup).
-//   2. Read the reset-password token from Postgres (forgot-password spec).
+// Postgres is authoritative for everything these specs touch: go-api
+// resolves credentials with sqlc-over-pgx (auth/handlers.go), and the
+// Mongo the suite used to double-write to was retired from the stack at
+// the P9 cutover. This module provides the helpers the suite needs to:
+//   1. Wipe stragglers + seed the e2e-sandbox user (globalSetup).
+//   2. Insert per-spec users (auth, admin specs).
+//   3. Read the reset-password token (forgot-password spec).
+//   4. Seed and read anime_cache / subscriptions (library-watch-sync).
 //
-// DATABASE_URL defaults to the CI-overlay-exposed port (5432 mapped to
-// localhost). Override with POSTGRES_URL env for other environments.
+// Connects to localhost:5432, which docker-compose.ci.yml publishes —
+// the base compose file publishes no database port (prod-correct; these
+// fixtures run on the host, outside the compose network). Override the
+// whole connection string with POSTGRES_URL for other environments.
 //
 // Connection is lazy-singleton; callers should await closePg() in
 // afterAll / after globalSetup to let Playwright exit cleanly.
 
 import postgres from "postgres";
+import { TEST_PASSWORD_HASH } from "./users";
 
 // POSTGRES_URL is the override; otherwise compose from POSTGRES_PASSWORD.
 // We do NOT inline a fallback password — a real prod password as a
@@ -51,10 +57,11 @@ export async function closePg(): Promise<void> {
   }
 }
 
-// Pre-computed bcrypt hash of `e2e-test-pass-123` at cost factor 10.
-// Must match TEST_PASSWORD_HASH in mongo.ts.
-const SEED_PASSWORD_HASH =
-  "$2b$10$0tYXiDYWWnzh8uXwMxNNquwlmvu1W65wOfaD5awi3cEuX.HlvBn8K";
+// Bcrypt hash of `e2e-test-pass-123` (cost 10). Imported rather than
+// re-declared: this file and fixtures/users.ts held byte-identical copies
+// before, and a hash that silently drifts from the plaintext the specs
+// type into the login form fails as "wrong password" with no hint why.
+const SEED_PASSWORD_HASH = TEST_PASSWORD_HASH;
 
 /**
  * Ensure the static sandbox seed user exists in Postgres.
@@ -143,6 +150,29 @@ export async function insertPgUser(user: {
 export async function deletePgUserByEmail(email: string): Promise<void> {
   const sql = getSql();
   await sql`DELETE FROM users WHERE email = ${email.toLowerCase()}`;
+}
+
+/**
+ * Wipe every user whose email carries the `e2e-test-` prefix. Returns the
+ * delete count so globalSetup can log it.
+ *
+ * Called ONCE from globalSetup, before any worker starts — per-spec
+ * cleanup races the parallel workers (admin.spec's freshly-inserted
+ * account would be deleted mid-login by auth.spec's teardown).
+ *
+ * The prefix is the whole safety mechanism, so it is matched on the
+ * left-anchored form only: `fixtures/users.ts` mints every address as
+ * `e2e-test-<uuid>@animego.test`, and the persistent sandbox seed user is
+ * `e2e+sandbox@animegoclub.com`, which this deliberately does NOT match.
+ * Every FK onto `users(id)` is ON DELETE CASCADE (migrations 0001, 0018,
+ * 0019), so the row's subscriptions/comments/follows go with it.
+ */
+export async function cleanupTestUsersInPostgres(): Promise<number> {
+  const sql = getSql();
+  const rows = await sql`
+    DELETE FROM users WHERE email LIKE 'e2e-test-%' RETURNING id
+  `;
+  return rows.count ?? 0;
 }
 
 // ─── watch-progress sync fixtures ───────────────────────────────────────────

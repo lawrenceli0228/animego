@@ -3,6 +3,12 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "//": "Never invoke a bare `playwright test`: with no --project it runs BOTH suites, pointing the sandbox specs at live prod. test:sandbox bakes in E2E_SANDBOX=1 because globalSetup no-ops without it, which is exactly how the previous sandbox workflow shipped broken.",
+    "test:prod": "playwright test --project=chromium-prod",
+    "test:sandbox": "E2E_SANDBOX=1 playwright test --project=chromium-sandbox",
+    "install:browsers": "playwright install --with-deps chromium"
+  },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@types/bun": "latest"
@@ -11,7 +17,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "mongodb": "^7.2.0",
     "postgres": "^3.4.9"
   }
 }
