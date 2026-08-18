@@ -23,7 +23,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import { usePathname } from "next/navigation";
 import toast from "react-hot-toast";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";

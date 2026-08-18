@@ -14,7 +14,7 @@
 // First load: probe /api/subscriptions/:anilistId once via authFetch
 // with skipRedirectOnFailure to avoid pushing anonymous users to /login.
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import {
   useCallback,
   useEffect,

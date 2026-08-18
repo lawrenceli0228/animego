@@ -1,6 +1,5 @@
 import type { MetadataRoute } from "next";
-
-const SITE = "https://animegoclub.com";
+import { SITE_ORIGIN as SITE } from "@/lib/seo/alternates";
 
 /**
  * robots.txt generator.

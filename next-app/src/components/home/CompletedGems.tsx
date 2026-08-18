@@ -11,7 +11,7 @@
 // list in place — same UX as the legacy React Query
 // queryClient.invalidateQueries(['completedGems']) call.
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import { useCallback, useState, type CSSProperties } from "react";
 import FadeImage from "@/components/ui/FadeImage";
 import { genreLabel } from "@/lib/contentLabels";
@@ -161,10 +161,8 @@ export default function CompletedGems({
   lang,
   limit = 10,
 }: CompletedGemsProps) {
-  // Genre text resolves against the reader's language, not the `lang` prop:
-  // that prop comes from getLang(), pinned to "zh" for ISR, so translating
-  // against it would show Chinese genres to English readers where the raw
-  // AniList value used to render. See the note in AnimeCard.
+  // Genre text resolves against the reader's cookie preference, not the
+  // `lang` prop (which is the URL's locale). See the note in AnimeCard.
   const { lang: viewerLang } = useLang();
   const [items, setItems] = useState<GemItem[]>(initialItems as GemItem[]);
   const [busy, setBusy] = useState(false);

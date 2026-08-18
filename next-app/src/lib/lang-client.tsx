@@ -1,56 +1,44 @@
 "use client";
 
-// Client-side i18n provider, unified with the RSC i18n in @/lib/i18n.
-// Single source of truth = the `lang` cookie. The server reads it
-// (getLang) and renders RSC in that language; RootLayout passes the same
-// resolved lang into this provider as a *controlled* prop, so the ported
-// Library + Player client components (hundreds of `t('foo.bar')` call
-// sites) stay in lockstep with the rest of the site. Toggling writes the
-// cookie and router.refresh()es — the server re-resolves and streams a
-// new `lang` prop down, switching server + client together.
+// Client-side i18n provider, paired with the RSC i18n in @/lib/i18n.
+//
+// The server no longer has a say in what this resolves to. RootLayout seeds
+// the provider with the language of the URL's `[lang]` segment, which is what
+// the SSR pass renders; after hydration the effect below replaces it with the
+// `lang` COOKIE and keeps it there. So every client component on the site
+// follows the visitor's stated preference, while the server-rendered content
+// around them follows the address — and on a bare (Chinese) URL those two
+// disagree for an English reader. That gap is deliberate and unreconciled;
+// see the note beside SeasonalFilterChips in
+// app/[lang]/seasonal/[season]/[year]/page.tsx.
+//
+// The provider is what keeps the ported Library + Player client components
+// (hundreds of `t('foo.bar')` call sites) in lockstep with each other.
 //
 // Previously this kept its own localStorage + useState copy that never
 // synced with the cookie: Library had no provider at all (fell through to
 // the zh FALLBACK) and Player was stuck at its localStorage value. That
 // split was the "language switch doesn't stick across pages" bug.
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { usePathname } from "next/navigation";
+import { createContext, useCallback, useContext, type ReactNode } from "react";
 // locales/*-spa.js are unchecked JS dicts copied from the legacy SPA.
 // Keeping them in .js form avoids a 638-line type rewrite; tsc resolves
 // them fine because tsconfig allows JS module resolution.
 import zh from "@/locales/zh-spa.js";
 import en from "@/locales/en-spa.js";
+// From @/lib/i18n/lang, NOT @/lib/i18n: the latter imports both *server*
+// dictionaries (67KB of .ts) and would drag them into every client chunk
+// that touches useLang(). lang.ts imports nothing, so it is safe on both
+// sides — that is the entire reason it exists as a separate module.
+// `Lang` comes in as a type-only binding so it is erased outright.
+import { type Lang } from "@/lib/i18n/lang";
+import { LOCALE_LANG, localizePath, nextLocale, splitLocale } from "@/lib/i18n/locale";
 
 type Dict = Record<string, unknown>;
-export type Lang = "zh" | "en";
 
 const DICTS: Record<Lang, Dict> = { zh, en };
 
-const LANG_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
-const LANG_CHANGE_EVENT = "animego:langchange";
-
-/**
- * Persist the language choice in the `lang` cookie — the single place the
- * server (getLang) reads from. Root path + lax same-site so every route
- * sees the switch on the next request. Shared by this provider's toggle
- * and the Navbar button so the cookie attributes never drift.
- */
-export function writeLangCookie(lang: Lang): void {
-  document.cookie = `lang=${lang}; max-age=${LANG_COOKIE_MAX_AGE}; path=/; samesite=lax`;
-  // Notify provider-less islands (the ssr:false Library/Player chunks — see
-  // useLang) to re-read the cookie so they switch in lockstep with the
-  // Navbar toggle even though they can't see the RootLayout provider.
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event(LANG_CHANGE_EVENT));
-  }
-}
 
 interface LangContextValue {
   lang: Lang;
@@ -89,75 +77,94 @@ function resolve(
  * useLang() consumer re-renders in lockstep.
  */
 export function LanguageProvider({
-  lang: seed,
+  lang,
   children,
 }: {
   lang: Lang;
   children: ReactNode;
 }) {
-  // ISR islanding: the server renders the canonical default (`seed` = "zh")
-  // and no longer reads the `lang` cookie at render (that forced every page
-  // dynamic). Resolve the real language on the CLIENT from the cookie after
-  // hydration, and stay reactive to the Navbar toggle via the langchange
-  // event — the same source the ssr:false island fallback (useLang) reads,
-  // so server content + chrome + islands all switch in lockstep.
-  const [lang, setLang] = useState<Lang>(seed);
-
-  useEffect(() => {
-    const sync = () => setLang(cookieLang());
-    sync(); // reconcile after mount (SSR seeded zh; cookie may be en)
-    window.addEventListener(LANG_CHANGE_EVENT, sync);
-    return () => window.removeEventListener(LANG_CHANGE_EVENT, sync);
-  }, []);
-
-  const toggle = useCallback(() => {
-    // writeLangCookie dispatches langchange → sync() re-reads the cookie.
-    writeLangCookie(lang === "zh" ? "en" : "zh");
-  }, [lang]);
-
-  const t = useCallback(
-    (key: string, opts?: { defaultValue?: string }) =>
-      resolve(DICTS[lang], key, opts),
-    [lang],
-  );
-
+  // `lang` is used as given. There is no reconciliation step and no local
+  // state: the route segment already decided, the server rendered that
+  // decision, and anything that disagreed with it here would be a repaint
+  // contradicting the page's own <html lang> and canonical.
   return (
-    <LanguageContext.Provider value={{ lang, toggle, t }}>
+    <LanguageContext.Provider value={{ lang, toggle: useLocaleToggle(), t: useT(lang) }}>
       {children}
     </LanguageContext.Provider>
   );
 }
 
-/** Read the `lang` cookie on the client; zh during SSR (no document). */
-function cookieLang(): Lang {
-  if (typeof document === "undefined") return "zh";
-  return /(?:^|;\s*)lang=en\b/.test(document.cookie) ? "en" : "zh";
+function useT(lang: Lang) {
+  return useCallback(
+    (key: string, opts?: { defaultValue?: string }) => resolve(DICTS[lang], key, opts),
+    [lang],
+  );
 }
 
 /**
- * Returns the RootLayout provider's context when present. When it is NOT —
- * inside an `ssr: false` dynamic island (library/player), whose async chunk
- * resolves a *separate* LanguageContext instance and so can't see the
- * provider — fall back to the `lang` cookie (the same source the server
- * reads) instead of hardcoding zh, staying reactive to Navbar toggles via
- * the langchange event. Hooks run unconditionally (rules-of-hooks).
+ * Switching language is a navigation, because the language lives in the URL.
+ *
+ * Reads the locale from the path rather than from the language: the path is
+ * what is about to change, and deriving the target from the thing being
+ * changed is one fewer place for the two vocabularies to disagree. Which is
+ * also why this takes no arguments — there is nothing about the current
+ * language it needs that the URL does not already say.
+ *
+ * The query string rides along — switching language on /search?q=frieren
+ * should keep the search.
+ */
+function useLocaleToggle() {
+  const pathname = usePathname();
+
+  return useCallback(() => {
+    const { locale, path } = splitLocale(pathname ?? "/");
+    // The query is read from the document at click time rather than through
+    // useSearchParams(). That hook forces a client-side bailout in any
+    // component not wrapped in a Suspense boundary, and this provider sits in
+    // the ROOT layout — using it here took every route in the app with it,
+    // including /anime/[id], whose prerendering is the only reason the
+    // Cloudflare edge cache has anything to hold. The build catches it, but
+    // only as "Error occurred prerendering page", which does not name the
+    // cause.
+    //
+    // A click handler never runs during render or on the server, so there is
+    // nothing a hook would buy here anyway.
+    if (typeof window === "undefined") return;
+    // A full navigation rather than router.push. Two reasons, and the second
+    // is the one that bit:
+    //
+    //   - The locale lives in the ROOT layout's own segment, so switching it
+    //     replaces the entire server tree anyway. There is no partial render
+    //     to preserve.
+    //   - useRouter() throws "invariant expected app router to be mounted"
+    //     with no router context, and useLang() — which calls this — is used
+    //     by 73 components, several of which are exercised by bare
+    //     renderToString tests. Requiring a router here made fourteen admin
+    //     rendering tests fail for a reason that had nothing to do with what
+    //     they assert.
+    window.location.assign(localizePath(path, nextLocale(locale)) + window.location.search);
+  }, [pathname]);
+}
+
+/**
+ * The provider's context when it is reachable, and an equivalent derived
+ * from the URL when it is not.
+ *
+ * It is not reachable inside the `ssr: false` Library and Player islands:
+ * their async chunk resolves a separate LanguageContext instance, so
+ * useContext returns null no matter what the layout rendered. That fallback
+ * used to read the `lang` cookie. It reads the path instead, which is the
+ * same source the provider itself is fed from, so the two cannot disagree —
+ * and it keeps working after the cookie was removed.
+ *
+ * Hooks run unconditionally either way (rules of hooks).
  */
 export const useLang = (): LangContextValue => {
   const ctx = useContext(LanguageContext);
-  const [fallbackLang, setFallbackLang] = useState<Lang>(cookieLang);
+  const pathname = usePathname();
+  const fallbackLang = LOCALE_LANG[splitLocale(pathname ?? "/").locale];
+  const toggle = useLocaleToggle();
+  const t = useT(fallbackLang);
 
-  useEffect(() => {
-    if (ctx) return; // provider present — fallback unused
-    const sync = () => setFallbackLang(cookieLang());
-    sync(); // reconcile after mount (SSR seeded zh; cookie may be en)
-    window.addEventListener(LANG_CHANGE_EVENT, sync);
-    return () => window.removeEventListener(LANG_CHANGE_EVENT, sync);
-  }, [ctx]);
-
-  if (ctx) return ctx;
-  return {
-    lang: fallbackLang,
-    toggle: () => writeLangCookie(fallbackLang === "zh" ? "en" : "zh"),
-    t: (key, opts) => resolve(DICTS[fallbackLang], key, opts),
-  };
+  return ctx ?? { lang: fallbackLang, toggle, t };
 };

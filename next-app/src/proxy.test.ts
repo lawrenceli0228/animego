@@ -1,4 +1,5 @@
-import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { mockFetch } from "@/lib/test-utils/fetchMock";
 import jwt from "jsonwebtoken";
 import { NextRequest } from "next/server";
 import { proxy } from "./proxy";
@@ -13,9 +14,9 @@ beforeEach(() => {
   // Default: fetch should not fire unless a test opts in.
   // If refresh branch fires unexpectedly, the test will blow up rather than
   // silently succeed — which is the right behaviour for deterministic tests.
-  globalThis.fetch = async () => {
+  globalThis.fetch = mockFetch(async () => {
     throw new Error("unexpected fetch in proxy test — mock fetch explicitly");
-  };
+  });
 });
 
 afterEach(() => {
@@ -181,7 +182,7 @@ describe("proxy session-refresh step (needsRefresh + refreshToken present)", () 
   test("when session is missing and refreshToken is present, calls go-api refresh and forwards cookies", async () => {
     const newSession = freshSession();
     const newRefreshToken = "new-refresh-token-value";
-    globalThis.fetch = mock(async () =>
+    globalThis.fetch = mockFetch(async () =>
       new Response(null, {
         status: 200,
         headers: {
@@ -191,7 +192,7 @@ describe("proxy session-refresh step (needsRefresh + refreshToken present)", () 
           ].join(", "),
         },
       }),
-    ) as typeof fetch;
+    );
 
     const res = await proxy(
       buildRequest("/", { refreshToken: "old-refresh-token" }),
@@ -205,14 +206,14 @@ describe("proxy session-refresh step (needsRefresh + refreshToken present)", () 
 
   test("when refresh succeeds the refreshed session is used for gate check (admin passes)", async () => {
     const adminSession = freshSession("admin");
-    globalThis.fetch = mock(async () =>
+    globalThis.fetch = mockFetch(async () =>
       new Response(null, {
         status: 200,
         headers: {
           "set-cookie": `session=${adminSession}; Path=/; HttpOnly`,
         },
       }),
-    ) as typeof fetch;
+    );
 
     const res = await proxy(
       buildRequest("/admin/enrichment", { refreshToken: "old-rt" }),
@@ -223,9 +224,9 @@ describe("proxy session-refresh step (needsRefresh + refreshToken present)", () 
   });
 
   test("when refresh returns non-ok, falls through to gate which bounces gated route", async () => {
-    globalThis.fetch = mock(async () =>
+    globalThis.fetch = mockFetch(async () =>
       new Response("Unauthorized", { status: 401 }),
-    ) as typeof fetch;
+    );
 
     const res = await proxy(
       buildRequest("/admin/enrichment", { refreshToken: "expired-rt" }),
@@ -236,9 +237,9 @@ describe("proxy session-refresh step (needsRefresh + refreshToken present)", () 
   });
 
   test("when fetch throws (transient network error), falls through and gate bounces gated route", async () => {
-    globalThis.fetch = mock(async () => {
+    globalThis.fetch = mockFetch(async () => {
       throw new Error("network error");
-    }) as typeof fetch;
+    });
 
     const res = await proxy(
       buildRequest("/library", { refreshToken: "some-rt" }),
@@ -248,9 +249,9 @@ describe("proxy session-refresh step (needsRefresh + refreshToken present)", () 
   });
 
   test("non-gated route passes through even after failed refresh (renders as logged-out)", async () => {
-    globalThis.fetch = mock(async () =>
+    globalThis.fetch = mockFetch(async () =>
       new Response("Unauthorized", { status: 401 }),
-    ) as typeof fetch;
+    );
 
     const res = await proxy(
       buildRequest("/", { refreshToken: "expired-rt" }),
@@ -267,14 +268,14 @@ describe("proxy session-refresh step (needsRefresh + refreshToken present)", () 
     });
     const newSession = freshSession("user");
 
-    globalThis.fetch = mock(async () =>
+    globalThis.fetch = mockFetch(async () =>
       new Response(null, {
         status: 200,
         headers: {
           "set-cookie": `session=${newSession}; Path=/; HttpOnly`,
         },
       }),
-    ) as typeof fetch;
+    );
 
     const res = await proxy(
       buildRequest("/", {

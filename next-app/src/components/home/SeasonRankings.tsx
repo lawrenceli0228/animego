@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import type { CSSProperties } from "react";
 import FadeImage from "@/components/ui/FadeImage";
 import RankingMeta from "@/components/home/RankingMeta";

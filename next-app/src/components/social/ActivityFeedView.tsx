@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { useLang } from "@/lib/lang-client";
+import type { Lang } from "@/lib/i18n/lang";
 import type { FeedItem } from "@/lib/types";
 import { dispatchDiscussionNavigation } from "@/components/anime/episodeDiscussionState";
 import {
@@ -18,7 +19,7 @@ interface ActivityFeedViewProps {
   nowMs: number;
 }
 
-function timeAgo(iso: string, lang: "zh" | "en", nowMs: number): string {
+function timeAgo(iso: string, lang: Lang, nowMs: number): string {
   const parsed = new Date(iso).getTime();
   if (!Number.isFinite(parsed)) return "";
   const diff = Math.max(0, Math.floor((nowMs - parsed) / 1000));
@@ -35,7 +36,7 @@ function timeAgo(iso: string, lang: "zh" | "en", nowMs: number): string {
   return lang === "zh" ? `${days} 天前` : `${days}d ago`;
 }
 
-function pickTitle(item: FeedItem, lang: "zh" | "en"): string {
+function pickTitle(item: FeedItem, lang: Lang): string {
   if (item.kind?.toLowerCase() === "follow") {
     return item.targetUsername || (lang === "zh" ? "一位用户" : "a user");
   }
@@ -44,7 +45,7 @@ function pickTitle(item: FeedItem, lang: "zh" | "en"): string {
     : item.title || item.titleChinese || `Anime #${item.anilistId}`;
 }
 
-function actionCopy(item: FeedItem, lang: "zh" | "en"): string {
+function actionCopy(item: FeedItem, lang: Lang): string {
   const kind = item.kind?.toLowerCase() ?? "";
   if (kind === "follow") {
     return lang === "zh" ? "关注了" : "followed";

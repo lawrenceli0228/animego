@@ -10,7 +10,7 @@
 // 里根本 import 不进来 —— 所以能测的部分必须先被抽出来,这也正是抽出
 // dbOpenErrors.js 的原因。
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import {
   LIBRARY_DB_BLOCKED_MESSAGE,
   LIBRARY_DB_OPEN_FAILED_MESSAGE,

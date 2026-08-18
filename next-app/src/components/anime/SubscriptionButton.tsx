@@ -50,14 +50,16 @@
 // optimistic-update pattern the legacy hooks gave us.
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/components/ui/LocaleLink";
+import { useLocaleRouter } from "@/components/ui/LocaleLink";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { useLang } from "@/lib/lang-client";
 import { broadcastSubscription } from "@/lib/subscriptionBus";
 import { hintStore, takeListHint, LIST_HINT_TOAST_MS } from "./subscriptionToast";
+import { authHrefWithFrom } from "@/components/auth/authFromLink";
+import { localizeHref, useLocale } from "@/components/ui/LocaleLink";
 
 interface Labels {
   login: string;
@@ -313,8 +315,9 @@ export default function SubscriptionButton({
   episodes,
   labels,
 }: SubscriptionButtonProps) {
-  const router = useRouter();
+  const router = useLocaleRouter();
   const { t } = useLang();
+  const locale = useLocale();
   // Page is statically prerendered / ISR (no server cookie read), so the
   // initial render can't know login state — start in "loading" (a neutral
   // placeholder that matches the SSR HTML, no hydration mismatch). The
@@ -678,7 +681,12 @@ export default function SubscriptionButton({
   }
 
   if (state === "anonymous") {
-    const target = `/login?from=${encodeURIComponent(`/anime/${anilistId}`)}`;
+    // `from` names THIS anime rather than the current page — the button
+    // also renders on card grids, and after signing in the reader should
+    // land on the show they tried to subscribe to. That is why it is built
+    // by hand instead of from usePathname, and why it needs the locale
+    // applied explicitly: nothing else in the chain can see it.
+    const target = authHrefWithFrom("/login", localizeHref(`/anime/${anilistId}`, locale));
     return (
       <button
         type="button"

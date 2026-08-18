@@ -1,5 +1,22 @@
 import type { Lang } from "./i18n";
 
+// Every pick* helper here answers the same question — "for this language,
+// which of these fields do I try, and in what order?" — so each one keeps its
+// answer in a `Record<Lang, …>` above it rather than in an `if (lang ===
+// "zh")`. The conditional form silently hands the English ladder to every
+// language that is not Chinese, which fails for a third Chinese variant in the
+// most expensive way available: it looks translated, because the chrome around
+// it is, so nobody files a bug.
+
+/** First rung of `ladder` whose field holds a non-empty string, else "". */
+function firstNonEmpty<T>(obj: T, ladder: readonly (keyof T)[]): string {
+  for (const field of ladder) {
+    const value = obj[field];
+    if (typeof value === "string" && value) return value;
+  }
+  return "";
+}
+
 type TitleBearing = {
   titleChinese?: string | null;
   titleRomaji?: string | null;
@@ -7,21 +24,22 @@ type TitleBearing = {
   titleNative?: string | null;
 };
 
+const TITLE_LADDER: Record<Lang, readonly (keyof TitleBearing)[]> = {
+  zh: ["titleChinese", "titleNative", "titleRomaji", "titleEnglish"],
+  en: ["titleEnglish", "titleRomaji"],
+};
+
 /**
  * Pick the best display title for a given language preference.
  *
- * - `zh`: titleChinese > titleNative > titleRomaji > titleEnglish
- * - `en`: titleEnglish > titleRomaji
- *
- * Returns "" if every field is missing. Mirrors the legacy
- * client/src/utils/formatters.js implementation exactly so behavior
- * matches Phase 4 LandingPage components that already use the same pick.
+ * Returns "" if every field on the language's ladder is missing — note that
+ * en deliberately stops after two rungs and will NOT fall through to
+ * titleNative, so an entry with only a Japanese title renders blank for an
+ * English reader. That is the legacy client/src/utils/formatters.js behaviour,
+ * preserved verbatim so Phase 4 LandingPage components keep matching.
  */
 export function pickTitle(obj: TitleBearing, lang: Lang): string {
-  if (lang === "zh") {
-    return obj.titleChinese || obj.titleNative || obj.titleRomaji || obj.titleEnglish || "";
-  }
-  return obj.titleEnglish || obj.titleRomaji || "";
+  return firstNonEmpty(obj, TITLE_LADDER[lang]);
 }
 
 type DescriptionBearing = {
@@ -50,11 +68,24 @@ export interface DescriptionPick {
 }
 
 /**
+ * Whether a language may render `description_cn`, the Chinese synopsis.
+ *
+ * A hard editorial rule, not a fallback: an English reader is never shown the
+ * Chinese synopsis no matter how good it is, and no matter how empty the
+ * English one is. Stated per language because the answer is genuinely a
+ * judgement call for each new audience — a zh-Hant reader almost certainly
+ * should get it (converted), and `lang === "zh"` would have said no.
+ */
+const READS_CHINESE_SYNOPSIS: Record<Lang, boolean> = {
+  zh: true,
+  en: false,
+};
+
+/**
  * Pick the description body copy for a given language preference.
  *
- * - `zh`: descriptionCn > description
- * - `en`: description, always — an English reader is never shown the
- *   Chinese synopsis, no matter how good it is.
+ * - languages in READS_CHINESE_SYNOPSIS: descriptionCn > description
+ * - the rest: description, always.
  *
  * Same ladder shape as pickTitle, but it returns provenance alongside the
  * text instead of a bare string. Callers need to know *which* rung they
@@ -69,7 +100,7 @@ export interface DescriptionPick {
  * returned before this channel existed.
  */
 export function pickDescription(obj: DescriptionBearing, lang: Lang): DescriptionPick {
-  if (lang === "zh" && obj.descriptionCn) {
+  if (READS_CHINESE_SYNOPSIS[lang] && obj.descriptionCn) {
     return { text: obj.descriptionCn, source: obj.descriptionCnSource ?? null };
   }
   return { text: obj.description || "", source: null };
@@ -95,11 +126,19 @@ type VoiceActorNameBearing = {
   voiceActorCn?: string | null;
 };
 
+const CHARACTER_NAME_LADDER: Record<Lang, readonly (keyof CharacterNameBearing)[]> = {
+  zh: ["nameCn", "nameJa", "nameEn"],
+  en: ["nameEn", "nameJa", "nameCn"],
+};
+
+/** Same ladder as CHARACTER_NAME_LADDER, over the voice actor field names. */
+const VOICE_ACTOR_NAME_LADDER: Record<Lang, readonly (keyof VoiceActorNameBearing)[]> = {
+  zh: ["voiceActorCn", "voiceActorJa", "voiceActorEn"],
+  en: ["voiceActorEn", "voiceActorJa", "voiceActorCn"],
+};
+
 /**
  * Pick a character display name per language preference.
- *
- * - `zh`: nameCn > nameJa > nameEn
- * - `en`: nameEn > nameJa > nameCn
  *
  * Returns "" when every field is empty. nameCn may be unreliable
  * (Bangumi enrichment historically wrote Japanese into the Cn slot
@@ -109,18 +148,12 @@ type VoiceActorNameBearing = {
  * pick up bangumiVersion = 2+ writes with the correct field.
  */
 export function pickCharacterName(c: CharacterNameBearing, lang: Lang): string {
-  if (lang === "zh") {
-    return c.nameCn || c.nameJa || c.nameEn || "";
-  }
-  return c.nameEn || c.nameJa || c.nameCn || "";
+  return firstNonEmpty(c, CHARACTER_NAME_LADDER[lang]);
 }
 
 /** Same ladder as pickCharacterName, applied to voice actor fields. */
 export function pickVoiceActorName(c: VoiceActorNameBearing, lang: Lang): string {
-  if (lang === "zh") {
-    return c.voiceActorCn || c.voiceActorJa || c.voiceActorEn || "";
-  }
-  return c.voiceActorEn || c.voiceActorJa || c.voiceActorCn || "";
+  return firstNonEmpty(c, VOICE_ACTOR_NAME_LADDER[lang]);
 }
 
 type StaffNameBearing = {
@@ -129,20 +162,26 @@ type StaffNameBearing = {
 };
 
 /**
- * Pick a staff display name. zh prefers JP (matches the legacy
- * StaffSection.jsx which intentionally favoured Japanese for Chinese
- * users because staff Chinese translations are mostly absent in
- * Bangumi). en prefers EN. Falls back across the available fields.
+ * zh prefers JP — matches the legacy StaffSection.jsx, which intentionally
+ * favoured Japanese for Chinese users because staff Chinese translations are
+ * mostly absent in Bangumi. That preference is about the *audience*, not about
+ * the script, so it is the one ladder here a new Chinese variant should copy
+ * from zh rather than reason about from scratch.
+ */
+const STAFF_NAME_LADDER: Record<Lang, readonly (keyof StaffNameBearing)[]> = {
+  zh: ["nameJa", "nameEn"],
+  en: ["nameEn", "nameJa"],
+};
+
+/**
+ * Pick a staff display name, falling back across the available fields.
  *
  * The wire shape from /api/anime/:id is `{nameEn, nameJa, role,
  * imageUrl}` — there is no top-level `name` field; an earlier render
  * mistakenly read `s.name` and rendered "—" for every staff row.
  */
 export function pickStaffName(s: StaffNameBearing, lang: Lang): string {
-  if (lang === "zh") {
-    return s.nameJa || s.nameEn || "";
-  }
-  return s.nameEn || s.nameJa || "";
+  return firstNonEmpty(s, STAFF_NAME_LADDER[lang]);
 }
 
 /** Strip HTML tags and entity references from a string. */
@@ -226,6 +265,40 @@ function isFuzzyDate(value: unknown): value is FuzzyDate {
   );
 }
 
+/** Render a year-bearing fuzzy date. `month`/`day` may still be null. */
+type DateRenderer = (fd: FuzzyDate) => string;
+
+const ISO_DATE: DateRenderer = (fd) => {
+  const yyyy = String(fd.year);
+  if (fd.month == null) return yyyy;
+  const mm = String(fd.month).padStart(2, "0");
+  if (fd.day == null) return `${yyyy}-${mm}`;
+  return `${yyyy}-${mm}-${String(fd.day).padStart(2, "0")}`;
+};
+
+const DATE_RENDERER: Record<Lang, DateRenderer> = {
+  zh: (fd) =>
+    `${fd.year}年${fd.month ? `${fd.month}月` : ""}${fd.day ? `${fd.day}日` : ""}`,
+  // ISO-style, for parity with the pre-i18n behaviour.
+  en: ISO_DATE,
+};
+
+/**
+ * The language `formatFuzzyDate` uses when a caller omits one.
+ *
+ * NOT DEFAULT_LANG, and this must not be "fixed" to match it. The only caller
+ * that omits the argument is the JSON-LD builder in app/anime/[id]/page.tsx,
+ * which writes schema.org `startDate` — a field Google parses as ISO-8601.
+ * Defaulting to the site default ("zh") would emit "2021年12月5日" into
+ * structured data and invalidate the rich result on every detail page, with
+ * no visible symptom in the rendered HTML.
+ *
+ * A third language therefore does not touch this constant: it adds its own
+ * entry to DATE_RENDERER above (which tsc will demand) and leaves the machine
+ * -readable default pinned to the renderer that emits ISO.
+ */
+const MACHINE_READABLE_DATE_LANG: Lang = "en";
+
 /**
  * Render an AniList fuzzy date as YYYY[-MM[-DD]]. Returns null when the
  * date is missing entirely or has no year (a month/day without a year is
@@ -234,7 +307,7 @@ function isFuzzyDate(value: unknown): value is FuzzyDate {
  */
 export function formatFuzzyDate(
   date: FuzzyDate | string | null | undefined,
-  lang: Lang = "en",
+  lang: Lang = MACHINE_READABLE_DATE_LANG,
 ): string | null {
   if (date == null) return null;
 
@@ -257,17 +330,5 @@ export function formatFuzzyDate(
 
   if (fd.year == null) return null;
 
-  if (lang === "zh") {
-    const y = `${fd.year}年`;
-    const m = fd.month ? `${fd.month}月` : "";
-    const d = fd.day ? `${fd.day}日` : "";
-    return `${y}${m}${d}`;
-  }
-  // en: ISO-style stays for parity with previous behavior.
-  const yyyy = String(fd.year);
-  if (fd.month == null) return yyyy;
-  const mm = String(fd.month).padStart(2, "0");
-  if (fd.day == null) return `${yyyy}-${mm}`;
-  const dd = String(fd.day).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return DATE_RENDERER[lang](fd);
 }

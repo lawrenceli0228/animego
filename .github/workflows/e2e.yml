@@ -10,9 +10,10 @@ name: E2E (Playwright)
 #   - All v1 specs are READ-ONLY (no writes, no auth, no library, no
 #     player, no admin). Pointing at live prod is safe and exercises
 #     the actual SSR / ISR / CDN path users hit.
-#   - Future v2 (auth, library, player) will need a sandbox stack; at
-#     that point add a separate workflow that boots docker-compose with
-#     test fixtures rather than touching prod data.
+#   - The v2 write-path specs (auth, library, player) DO need a sandbox
+#     stack. That workflow now exists: .github/workflows/e2e-sandbox.yml
+#     boots Postgres + go-api from docker compose and runs `next dev` on
+#     the runner, so nothing there touches prod data.
 on:
   pull_request:
     branches: [main, feat/go-backend]
@@ -51,10 +52,10 @@ jobs:
         env:
           E2E_BASE_URL: https://animegoclub.com
           CI: "true"
-        # --project=chromium-prod skips the chromium-sandbox project
-        # (which needs the docker compose stack — separate workflow at
-        # .github/workflows/e2e-sandbox.yml).
-        run: bunx playwright test --project=chromium-prod
+        # --project=chromium-prod skips the chromium-sandbox project,
+        # which boots Postgres + go-api + `next dev` and writes to them.
+        # That one runs in .github/workflows/e2e-sandbox.yml.
+        run: bun run test:prod
 
       - name: Upload report on failure
         if: failure()

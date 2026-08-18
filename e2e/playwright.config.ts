@@ -21,26 +21,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 })();
 
 /**
- * P10 — Playwright E2E config.
+ * Playwright E2E config.
  *
- * Two test projects:
+ * Two test projects, with very different blast radii. Run them through
+ * the package scripts (`bun run test:prod` / `bun run test:sandbox`) —
+ * a bare `playwright test` runs BOTH, which points the write-path specs
+ * at live prod.
  *
- *   chromium-prod    — v1 read-only specs against live prod by default
+ *   chromium-prod    — read-only specs against live prod by default
  *                      (specs/*.spec.ts at top level). Used by
  *                      .github/workflows/e2e.yml.
- *   chromium-sandbox — v2 write-path specs against a docker compose
- *                      stack (specs/sandbox/**\/*.spec.ts). Used by
- *                      .github/workflows/e2e-sandbox.yml. baseURL
- *                      defaults to https://localhost (the nginx self-
- *                      signed-cert container in docker compose).
+ *   chromium-sandbox — write-path specs against a locally-booted stack
+ *                      (specs/sandbox/**\/*.spec.ts). Used by
+ *                      .github/workflows/e2e-sandbox.yml. Requires
+ *                      E2E_SANDBOX=1 — globalSetup no-ops without it and
+ *                      the run then fails on a missing storageState.
+ *
+ * The sandbox baseURL defaults to http://localhost:3000, i.e. `next dev`
+ * on the host, NOT the nginx container it used to point at. Two reasons
+ * nginx is out of the loop: it needs nginx/selfsigned.{crt,key}, which
+ * are not in a checkout, and the prod next-app image serves no /api
+ * rewrite (next.config.ts:26 returns [] under NODE_ENV=production —
+ * nginx does that hop in prod), so browser-side /api calls 404 against
+ * it. `next dev` supplies the rewrite. `ignoreHTTPSErrors` stays for
+ * anyone pointing E2E_SANDBOX_BASE_URL back at a TLS front end.
  *
  * Override per project at runtime:
- *   E2E_BASE_URL=... bunx playwright test --project=chromium-prod
- *   E2E_SANDBOX_BASE_URL=... bunx playwright test --project=chromium-sandbox
- *   MONGO_URL=mongodb://localhost:27017 ... (sandbox fixture inserts)
- *
- * Self-signed certs from the local nginx are accepted via
- * `ignoreHTTPSErrors`.
+ *   E2E_BASE_URL=... bun run test:prod
+ *   E2E_SANDBOX_BASE_URL=... bun run test:sandbox
+ *   POSTGRES_PASSWORD=... (sandbox fixture inserts; see fixtures/pg.ts)
  */
 
 const isCI = !!process.env.CI;
@@ -81,7 +90,7 @@ export default defineConfig({
       testMatch: "sandbox/**/*.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
-        baseURL: process.env.E2E_SANDBOX_BASE_URL || "https://localhost",
+        baseURL: process.env.E2E_SANDBOX_BASE_URL || "http://localhost:3000",
         storageState: "./.auth/user.json",
       },
     },

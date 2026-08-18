@@ -126,8 +126,14 @@ interface TorrentModalProps {
   anime: AnimeSummary;
   labels: TorrentLabels;
   onClose: () => void;
-  /** Language used to localise internal source labels (e.g. "花园" → "Garden"). Defaults to "en". */
-  lang?: Lang;
+  /**
+   * Language used to localise internal source labels (e.g. "花园" → "Garden").
+   * Required: this used to be optional with an `"en"` default, but the sole
+   * caller (DetailActions) always passes it, so the default was unreachable
+   * cover that would have silently rendered English for a language that simply
+   * forgot to thread `lang` through.
+   */
+  lang: Lang;
 }
 
 interface TitleOption {
@@ -234,7 +240,7 @@ function sourceColor(source: string): string {
   return "rgba(235,235,245,0.30)";
 }
 
-function sourceLabel(source: string, lang: Lang = "en"): string {
+function sourceLabel(source: string, lang: Lang): string {
   if (source === "garden" || source === "dmhy") return lang === "zh" ? "花园" : "Garden";
   return source;
 }
@@ -459,7 +465,7 @@ export default function TorrentModal({
   anime,
   labels,
   onClose,
-  lang = "en",
+  lang,
 }: TorrentModalProps) {
   const defaultQ = anime.titleRomaji || anime.titleEnglish || "";
 

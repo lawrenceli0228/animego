@@ -19,6 +19,8 @@
 // query param. Keep the two in sync; src/lib/authForm.ts is the source
 // of truth for the rule itself.
 
+import { DEFAULT_LOCALE, localizePath, splitLocale } from "@/lib/i18n/locale";
+
 /** The two auth surfaces that accept a ?from= round-trip. */
 export type AuthSurface = "/login" | "/register";
 
@@ -53,24 +55,37 @@ export function authHrefWithFrom(
   surface: AuthSurface,
   from: string | null | undefined,
 ): string {
-  if (!isRoundTrippable(from)) return surface;
+  // The locale comes from `from`, which is a real path the caller already
+  // holds — usePathname(), window.location.pathname, or proxy.ts's
+  // pathname+search. Deriving it here means the eleven call sites do not
+  // each have to remember, and the surface can never end up in a different
+  // locale than the page it promises to return to.
+  const locale = typeof from === "string" ? splitLocale(from).locale : DEFAULT_LOCALE;
+  const localizedSurface = localizePath(surface, locale);
+  if (!isRoundTrippable(from)) return localizedSurface;
   // encodeURIComponent, not raw interpolation: a path legitimately
   // contains "/" and can contain "?", "&" and "#" (proxy.ts hands over
   // pathname+search), all of which would otherwise be parsed as query
   // structure by the receiving page instead of as part of the value.
-  return `${surface}?from=${encodeURIComponent(from)}`;
+  return `${localizedSurface}?from=${encodeURIComponent(from)}`;
 }
 
 function isRoundTrippable(value: string | null | undefined): value is string {
   if (typeof value !== "string") return false;
   if (!SAME_ORIGIN_PATH.test(value)) return false;
+  // Compare the path WITHOUT its locale prefix. "/en/login" is the same
+  // self-loop as "/login" and has to be rejected the same way; matching the
+  // raw value would have let an English visitor be sent back to the form
+  // they just cleared, on a surface where the whole point of `from` is that
+  // it remembers what they were doing.
+  const { path } = splitLocale(value);
   // Boundary-aware: "/loginfoo" is a real, unrelated route and stays
   // eligible — only the surface itself, or the surface plus its query /
   // hash, is a self-loop. Matches sanitizeFromParam exactly.
   return !AUTH_SURFACES.some(
     (surface) =>
-      value === surface ||
-      value.startsWith(`${surface}?`) ||
-      value.startsWith(`${surface}#`),
+      path === surface ||
+      path.startsWith(`${surface}?`) ||
+      path.startsWith(`${surface}#`),
   );
 }

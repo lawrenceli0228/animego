@@ -12,11 +12,11 @@
  */
 
 import type { CSSProperties } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import { motion as Motion, useReducedMotion } from "motion/react";
 import { mono, HUD_VIEWPORT } from "./shared/hud-tokens";
 import { SectionNum, CornerBrackets } from "./shared/hud";
-import type { Dict } from "@/lib/i18n";
+import type { Dict, Lang } from "@/lib/i18n";
 
 const CTA_HUE = 40;
 
@@ -154,15 +154,18 @@ const s = {
 
 interface FinalCtaProps {
   dict: Dict;
+  /**
+   * Must be the language `dict` was resolved from. Passed as a sibling of
+   * `dict` from the server so the two cannot disagree; do NOT swap this for
+   * `useLang()`, which reads the client cookie after hydration and would drift
+   * from the server-rendered dictionary.
+   */
+  lang: Lang;
 }
 
-export default function FinalCta({ dict }: FinalCtaProps) {
+export default function FinalCta({ dict, lang }: FinalCtaProps) {
   const reduced = useReducedMotion();
   const finalCta = dict.landing.finalCta;
-  // Cheap lang inference: zh dict uses the full-width period; en uses ASCII.
-  // Legacy code adjusted the period sizing only on `en` because '.' is tiny
-  // relative to a full-width '。'.
-  const isEn = finalCta.period === ".";
 
   const titleReveal = reduced
     ? {}
@@ -224,10 +227,16 @@ export default function FinalCta({ dict }: FinalCtaProps) {
                     })}
               >
                 {finalCta.titleLine2}
+                {/*
+                  Only `en` gets the size bump: its ASCII '.' is tiny next to
+                  the full-width '。' every CJK dictionary uses. A new language
+                  correctly falls through to no bump unless it also ends
+                  sentences in ASCII punctuation.
+                */}
                 <span style={{
                   ...s.period,
-                  fontSize: isEn ? "1.3em" : undefined,
-                  marginLeft: isEn ? "0.05em" : undefined,
+                  fontSize: lang === "en" ? "1.3em" : undefined,
+                  marginLeft: lang === "en" ? "0.05em" : undefined,
                 }}>{finalCta.period}</span>
               </Motion.span>
             </h2>

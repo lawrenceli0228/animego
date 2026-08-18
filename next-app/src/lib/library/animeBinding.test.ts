@@ -7,7 +7,7 @@
 // exercised against a hand-rolled table double — which also proves the module
 // only depends on the four table methods it declares.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import {
   decideBindingWrite,
   isBindingLocked,

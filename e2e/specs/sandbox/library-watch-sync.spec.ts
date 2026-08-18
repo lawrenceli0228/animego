@@ -59,47 +59,34 @@ import { SEED_USER_EMAIL } from "../../globalSetup";
 // own judgement that the risk lives in the wiring, not in the predicate.
 //
 // ══════════════════════════════════════════════════════════════════════════
-// NOTHING IN CI RUNS THIS FILE
+// HOW TO RUN THIS FILE
 // ══════════════════════════════════════════════════════════════════════════
 //
-// `.github/workflows/e2e.yml` runs `--project=chromium-prod`, which excludes
-// `specs/sandbox/**`. `playwright.config.ts` points at an `e2e-sandbox.yml`
-// workflow that does not exist in this repo. So this file only ever runs when
-// somebody runs it. The recipe below is the one these three were written and
-// verified against — backend in Docker, frontend on `next dev`, per
+// CI runs it: `.github/workflows/e2e-sandbox.yml` on every PR to main. That
+// workflow is the executable version of the recipe below and is the copy to
+// trust if the two ever disagree. (This was not always so — the sandbox
+// suite had no workflow at all until then, which is how it accumulated a
+// dependency on a database that had been retired from the stack.)
+//
+// Locally, backend in Docker, frontend on `next dev`, per
 // `local_fullstack_verify_recipe`:
 //
 //   # 1. go-api needs :8080 on the host (next dev's /api rewrite targets it)
-//   #    and pg.ts needs :5432; neither is published by the prod compose file.
-//   cat > /tmp/animego-e2e-override.yml <<'YML'
-//   services:
-//     go-api:
-//       ports: ["8080:8080"]
-//       environment:
-//         JWT_EXPIRES_IN: 2h
-//         AUTH_RATELIMIT_MAX: "1000"
-//         API_RATELIMIT_BURST: "0"
-//     postgres:
-//       ports: ["5432:5432"]
-//   YML
-//   CO="docker compose --env-file .env.production -f docker-compose.yml -f /tmp/animego-e2e-override.yml"
-//   $CO build go-api && $CO up -d postgres go-api
+//   #    and pg.ts needs :5432; neither is published by the prod compose
+//   #    file. docker-compose.ci.yml publishes both.
+//   CO="docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.ci.yml"
+//   $CO build go-api && $CO up -d --wait postgres go-api
 //   $CO --profile migrate run --rm migrate
 //
-//   # 2. globalSetup still seeds Mongo before it browser-logs-in. Mongo is
-//   #    retired in prod but the fixture is not, so it has to be up or the
-//   #    whole run dies in globalSetup.
-//   docker compose -f docker-compose.dev.yml up -d mongo
-//
-//   # 3. Frontend on dev, not the prod image: the image is built from whatever
+//   # 2. Frontend on dev, not the prod image: the image is built from whatever
 //   #    was committed, and `next.config.ts` returns no /api rewrites under
 //   #    NODE_ENV=production (nginx does that job there).
 //   cd next-app && set -a && source <(grep '^JWT_SECRET=' ../.env.production) \
 //     && export GO_API_INTERNAL_URL=http://localhost:8080 && set +a && bun run dev
 //
-//   # 4. E2E_SANDBOX=1 is what opts globalSetup in at all.
-//   cd e2e && E2E_SANDBOX=1 E2E_SANDBOX_BASE_URL=http://localhost:3000 \
-//     bunx playwright test --project=chromium-sandbox specs/sandbox/library-watch-sync.spec.ts
+//   # 3. E2E_SANDBOX=1 is what opts globalSetup in at all — `test:sandbox`
+//   #    bakes it in so it cannot be forgotten.
+//   cd e2e && bun run test:sandbox specs/sandbox/library-watch-sync.spec.ts
 
 // AniList ids are the isolation boundary. The sandbox project is
 // `fullyParallel` over ONE shared seed user, so two specs touching the same id

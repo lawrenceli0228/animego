@@ -1,4 +1,5 @@
-import { describe, expect, mock, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { mockFetch } from "./test-utils/fetchMock";
 import { apiGet, apiMutate, buildHeaders } from "./api";
 
 const originalFetch = globalThis.fetch;
@@ -46,14 +47,14 @@ describe("buildHeaders (anon vs authed)", () => {
 
 describe("auth option threads through to the outgoing request", () => {
   test("apiGet with { auth: false } sends no Cookie header on the wire", async () => {
-    const spy = mock(
+    const spy = mockFetch(
       async () =>
         new Response(JSON.stringify({ data: { ok: true } }), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
     );
-    globalThis.fetch = spy as unknown as typeof fetch;
+    globalThis.fetch = spy;
     await apiGet("/api/anime/154587", { revalidate: 60, auth: false });
     const init = spy.mock.calls[0][1] as { headers?: Record<string, string> };
     expect(init.headers).toEqual({ Accept: "application/json" });
@@ -61,14 +62,14 @@ describe("auth option threads through to the outgoing request", () => {
   });
 
   test("apiMutate with { auth: false } and a body still omits Cookie but keeps Content-Type", async () => {
-    const spy = mock(
+    const spy = mockFetch(
       async () =>
         new Response(JSON.stringify({ data: {} }), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
     );
-    globalThis.fetch = spy as unknown as typeof fetch;
+    globalThis.fetch = spy;
     await apiMutate("/x", "POST", { body: { k: "v" }, auth: false });
     const init = spy.mock.calls[0][1] as { headers?: Record<string, string> };
     expect(init.headers?.["Content-Type"]).toBe("application/json");

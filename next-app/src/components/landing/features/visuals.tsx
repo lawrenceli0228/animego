@@ -964,7 +964,6 @@ interface MemberPassVisualProps {
 const BACKDROP_HUES = [20, 200, 320, 95];
 
 export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPassVisualProps) {
-  const zh = lang === "zh";
   const backdrop = banner ?? art; // wide banner preferred for the profile header
   return (
     <div style={{ marginTop: 20, display: "flex", gap: "clamp(24px, 3vw, 44px)", flexWrap: "wrap", alignItems: "center" }}>
@@ -977,7 +976,7 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
           memberNo="AGC-000142"
           since="SINCE 2026"
           watchedCount={42}
-          topSeason={zh ? "2026 春季" : "2026 Spring"}
+          topSeason={lang === "zh" ? "2026 春季" : "2026 Spring"}
           artUrl={art}
           photoUrl={null}
           lang={lang}
@@ -1101,7 +1100,7 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
               {fStr(features, "f8PreviewWatched")}
             </span>
             <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
-            <span>2026 {zh ? "春季" : "Spring"}</span>
+            <span>2026 {lang === "zh" ? "春季" : "Spring"}</span>
             <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
             <span style={{ color: `oklch(80% 0.10 ${hue})` }}>#AGC-000142</span>
           </div>

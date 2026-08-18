@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import { ApiError, apiGet } from "@/lib/api";
 import { pickTitle } from "@/lib/formatters";
 import FadeImage from "@/components/ui/FadeImage";

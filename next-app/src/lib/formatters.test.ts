@@ -251,14 +251,11 @@ describe("pickDescription", () => {
     // en readers must never be served the Chinese synopsis — this is the
     // property that keeps the channel invisible outside zh.
     //
-    // Caveat worth knowing before trusting this at the page level: the detail
-    // route never reaches this branch today, because getLang() is pinned to
-    // "zh" for every server render (i18n.test.ts, "getLang (ISR-islanded)").
-    // So this is a live contract for future callers and a dead one for
-    // /anime/[id] — once description_cn fills, an en visitor to that route
-    // reads the Chinese body, the same trade pickTitle already makes there.
-    // If i18n.test.ts ever goes red because getLang learned to read the
-    // cookie, that decision has to be revisited here too.
+    // This branch used to be unreachable from /anime/[id]: getLang() returned
+    // "zh" for every server render, so no URL could produce an en detail page.
+    // Since the route tree moved under app/[lang]/ it is live — /en/anime/21
+    // resolves lang="en" from the path and lands here. A bare /anime/21 is
+    // still zh, which is why this reads as a contract rather than a change.
     expect(
       pickDescription(
         { description: EN, descriptionCn: CN, descriptionCnSource: "bangumi" },

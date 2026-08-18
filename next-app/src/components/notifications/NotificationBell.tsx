@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authFetch } from "@/lib/authFetch";
 import { useLang } from "@/lib/lang-client";
+import type { Lang } from "@/lib/i18n/lang";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import { dispatchDiscussionNavigation } from "@/components/anime/episodeDiscussionState";
@@ -23,7 +24,7 @@ import "./notification-bell.css";
 const EMPTY_PAGE: NotificationPage = { items: [], unreadCount: 0 };
 const NOTIFICATION_PANEL_ID = "notification-panel";
 
-function relativeTime(iso: string, lang: "zh" | "en"): string {
+function relativeTime(iso: string, lang: Lang): string {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
   if (seconds < 60) return lang === "zh" ? "刚刚" : "just now";
   if (seconds < 3600) {
@@ -40,7 +41,7 @@ function relativeTime(iso: string, lang: "zh" | "en"): string {
 
 function notificationCopy(
   item: CommunityNotification,
-  lang: "zh" | "en",
+  lang: Lang,
 ): string {
   if (item.type === "follow") {
     return lang === "zh"

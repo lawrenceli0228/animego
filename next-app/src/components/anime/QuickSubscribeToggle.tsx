@@ -37,8 +37,8 @@
 // takes its own clicks natively — no preventDefault/stopPropagation games,
 // and no <button> nested inside an <a>.
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/components/ui/LocaleLink";
+import { useLocaleRouter } from "@/components/ui/LocaleLink";
 import { useRef, useState, type CSSProperties } from "react";
 import toast, { type Toast } from "react-hot-toast";
 import { useLang } from "@/lib/lang-client";
@@ -189,7 +189,7 @@ export default function QuickSubscribeToggle({
   anilistId,
   title,
 }: QuickSubscribeToggleProps): React.ReactElement | null {
-  const router = useRouter();
+  const router = useLocaleRouter();
   const { t } = useLang();
   const subs = useSubscriptionSet();
   const [busy, setBusy] = useState(false);

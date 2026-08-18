@@ -1,0 +1,292 @@
+name: E2E Sandbox (Playwright + docker compose)
+
+# The write-path suite — everything under e2e/specs/sandbox/**: auth
+# journeys, /library, /player, and the local-library ↔ server watch
+# progress sync. Unlike .github/workflows/e2e.yml, which points the
+# read-only specs at live prod, this one boots the PR's OWN code and
+# writes to a database that is destroyed with the job.
+#
+# ─── Why this file was worth writing ────────────────────────────────────
+#
+# There used to be an e2e-sandbox.yml. It was deleted in 6a28ca0, and it
+# could never have worked: it never set E2E_SANDBOX, and e2e/globalSetup.ts
+# returns immediately without it, so no storageState was ever minted and
+# every sandbox spec would have failed on a missing ./.auth/user.json. It
+# also required an ENV_PRODUCTION repository secret and merged a
+# docker-compose.ci.yml that overrode two services (`app`, `mongodb`)
+# which no longer exist — `docker compose config` had been failing outright
+# with "service app has neither an image nor a build context specified".
+#
+# So for the whole life of the sandbox suite, nothing in CI ran it. This
+# workflow fixes the three things that kept it broken: E2E_SANDBOX is set,
+# no secret is required, and the compose overlay describes only services
+# that exist.
+#
+# ─── Shape of the stack ─────────────────────────────────────────────────
+#
+#   postgres + go-api   docker compose (base + the CI overlay)
+#   next-app            `next dev` on the runner itself, NOT the image
+#   nginx, ws-server    not started
+#
+# next-app runs from source rather than the prod image for one hard
+# reason: `next.config.ts:26` returns no /api rewrites under
+# NODE_ENV=production, because in prod nginx owns that hop. Build the
+# image and browser-side /api/* calls hit Next and 404. `next dev` keeps
+# the rewrite to http://localhost:8080, which is why the CI overlay
+# publishes go-api's port. Running from source is also the point of the
+# exercise — the image would only prove that a Dockerfile builds.
+#
+# nginx is skipped because it bind-mounts nginx/selfsigned.{crt,key},
+# which are not in a checkout, and nothing in the sandbox suite tests
+# nginx routing. ws-server is skipped because no sandbox spec opens a
+# socket — player.spec.ts explicitly filters socket.io/websocket console
+# noise out of its assertions.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# One run per branch in flight; a newer push supersedes an in-flight run.
+# This suite is the most expensive one in the repo — never run two.
+concurrency:
+  group: e2e-sandbox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-sandbox:
+    name: Playwright against a PR-local stack
+    runs-on: ubuntu-latest
+    # Measured shape of a cold run: ~3 min building the Postgres image
+    # (pg_cron is compiled from source), ~3 min building go-api, ~2 min of
+    # bun/playwright installs, ~2 min for `next dev` to boot and compile
+    # the warmed routes, then the suite itself. 14 specs over 3 workers on
+    # a dev-mode server, with `retries: 1` on CI able to replay the slow
+    # ones, lands around 8 min. 30 leaves headroom for a cold Docker layer
+    # cache without letting a hung container burn a full hour.
+    timeout-minutes: 30
+    env:
+      # Both compose files, once. The --env-file flag is still passed
+      # explicitly on every call rather than via COMPOSE_ENV_FILES: a
+      # bare `docker compose` reads no env file at all and interpolates
+      # ${POSTGRES_PASSWORD} to the empty string, which surfaces three
+      # layers down as go-api dying on a 28P01 auth failure. That footgun
+      # has already cost this project one prod outage; it stays visible.
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned (not `latest`) so a Bun release can't silently flip the
+          # gate. Same pin as unit-tests.yml.
+          bun-version: "1.3.11"
+
+      - name: Mint throwaway credentials
+        # This job requires NO repository secret, by design. Everything
+        # .env.production supplies that the sandbox actually needs is a
+        # shared secret between two containers that both die with the job,
+        # so it can be generated here. That is what makes this workflow
+        # runnable from a fork PR and keeps it from rotting behind a
+        # secret nobody remembers rotating (the deleted version needed an
+        # ENV_PRODUCTION secret and that is part of why it was deleted).
+        #
+        # JWT_SECRET has to be identical in go-api (which signs) and in
+        # `next dev` (proxy.ts:149 and the /library + /admin layouts
+        # verify), so it is exported to the job env as well as written to
+        # the file. Everything else go-api reads from .env.production is
+        # optional: unset ANILIST_TOKEN / DANDANPLAY_* just means
+        # unauthenticated upstream calls, and the CI overlay pins the
+        # Gmail credentials empty so forgot-password uses NoopSender.
+        run: |
+          set -euo pipefail
+          POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+          JWT_SECRET="$(openssl rand -hex 32)"
+          JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
+          # Public repo: keep the generated values out of the job log even
+          # though they are worthless outside this runner.
+          echo "::add-mask::$POSTGRES_PASSWORD"
+          echo "::add-mask::$JWT_SECRET"
+          echo "::add-mask::$JWT_REFRESH_SECRET"
+          cat > .env.production <<EOF
+          POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+          JWT_SECRET=$JWT_SECRET
+          JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET
+          EOF
+          chmod 600 .env.production
+          {
+            echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD"
+            echo "JWT_SECRET=$JWT_SECRET"
+          } >> "$GITHUB_ENV"
+
+      - name: Build images (postgres, go-api)
+        # Scoped to the two services this job runs. A bare `build` would
+        # also build next-app, which takes minutes and produces an image
+        # nothing here starts.
+        run: docker compose --env-file .env.production build postgres go-api
+
+      - name: Start Postgres
+        run: docker compose --env-file .env.production up -d --wait --wait-timeout 120 postgres
+
+      - name: Apply migrations
+        # MUST land before go-api starts. go-api boots a River queue that
+        # crash-loops against an empty schema (no river_job table), and
+        # there is no other schema-apply path — go-api/cmd/migrate is an
+        # empty directory and the migrations are not embedded in the
+        # server binary. The `migrate` service is behind a compose profile
+        # precisely so it never runs implicitly.
+        run: docker compose --env-file .env.production --profile migrate run --rm migrate
+
+      - name: Start go-api
+        run: docker compose --env-file .env.production up -d --wait --wait-timeout 120 go-api
+
+      - name: Install next-app deps
+        working-directory: next-app
+        run: bun install --frozen-lockfile
+
+      - name: Start next dev
+        working-directory: next-app
+        env:
+          # RSC server-side fetches go straight to go-api. In compose this
+          # is http://go-api:8080 over the Docker network; here the Next
+          # process is on the host, so it takes the published port.
+          GO_API_INTERNAL_URL: http://localhost:8080
+        run: |
+          bun run dev > /tmp/next-dev.log 2>&1 &
+          echo $! > /tmp/next-dev.pid
+
+      - name: Wait for next dev and warm the routes
+        # Two separate jobs in one step.
+        #
+        # Waiting: /api/healthz is next-app's own route handler (the only
+        # one it has), so it answers without touching go-api and is a true
+        # "the Next server process is listening" probe. Everything else
+        # under /api/* falls through the dev rewrite to go-api.
+        #
+        # Warming: `next dev` compiles each route on first request, and a
+        # cold compile can outrun Playwright's 30s navigationTimeout — a
+        # timeout that would read as a product bug, not a dev-server
+        # artifact. Paying that cost here, serially, keeps it out of the
+        # specs.
+        #
+        # The retry-on-5xx is not defensive padding, it is a measured
+        # behaviour: Turbopack prints "Ready" and answers /api/healthz
+        # before the module graph has settled, and a burst of page requests
+        # in that window comes back 500 with NOTHING logged. Seconds later
+        # the identical URLs return 200. Warming without the retry would
+        # therefore pass while leaving the app half-cold, and Playwright
+        # would inherit the tail of that window as a flake nobody could
+        # reproduce. A route that never stops 5xx is a real failure and
+        # fails the job here, where the log is still readable.
+        #
+        # Non-5xx codes are accepted as "compiled": /library, /player and
+        # /admin answer 307 to an anonymous warm-up request, which is the
+        # correct behaviour and still proves the route built.
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/api/healthz > /dev/null; then
+              echo "next dev is listening after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "next dev did not come up in 60s"
+              cat /tmp/next-dev.log
+              exit 1
+            fi
+            sleep 1
+          done
+          for route in / /login /register /forgot-password /reset-password/warmup \
+                       /welcome /library /player /admin; do
+            code=000
+            for attempt in $(seq 1 10); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 "http://localhost:3000${route}")
+              case "$code" in
+                5*|000) sleep 3 ;;
+                *) break ;;
+              esac
+            done
+            echo "warmed ${route} -> ${code} (attempt ${attempt})"
+            case "$code" in
+              5*|000)
+                echo "::error::${route} never stopped returning ${code}"
+                cat /tmp/next-dev.log
+                exit 1
+                ;;
+            esac
+          done
+
+      - name: Install e2e deps
+        working-directory: e2e
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: e2e
+        run: bun run install:browsers
+
+      - name: Run sandbox suite
+        working-directory: e2e
+        env:
+          # The three things the suite cannot infer.
+          #   E2E_SANDBOX          — opts globalSetup in AT ALL. Without it
+          #                          globalSetup returns at line 1 and every
+          #                          spec dies on a missing storageState.
+          #                          `bun run test:sandbox` sets it too; it
+          #                          is repeated here so the requirement is
+          #                          visible at the call site rather than
+          #                          buried in a package script.
+          #   E2E_SANDBOX_BASE_URL — the host-side `next dev` server.
+          #   POSTGRES_PASSWORD    — e2e/fixtures/pg.ts refuses to guess a
+          #                          password (a hard-coded fallback in a
+          #                          public repo is a leak waiting to
+          #                          happen), so it must be handed one.
+          E2E_SANDBOX: "1"
+          E2E_SANDBOX_BASE_URL: http://localhost:3000
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          CI: "true"
+        # KNOWN RESIDUAL FLAKE — do not "fix" it by widening the console
+        # noise filter in e2e/specs/_helpers.ts.
+        #
+        # library-autorescan.spec.ts asserts an empty console, and running
+        # against `next dev` means React's DEVELOPMENT build is doing the
+        # logging. Under three parallel workers on a cold server it can emit
+        #   "Can't perform a React state update on a component that hasn't
+        #    mounted yet…"
+        # from the watch-folder rescan path. Observed once in five full local
+        # runs; `retries: 1` (CI-only, playwright.config.ts) absorbed it, and
+        # four runs were clean. The prod React build would not print it at
+        # all, so suppressing it would trade a visible flake for a permanently
+        # blind assertion. If it turns into a regular failure, that is signal
+        # about the rescan effect, not about this workflow.
+        run: bun run test:sandbox
+
+      - name: Dump service logs on failure
+        if: failure()
+        # The report artifact shows what Playwright saw from the browser.
+        # These are the two other windows on the same failure, and they are
+        # gone the moment the runner is reclaimed. `docker compose logs`
+        # after a container is recreated shows nothing, which is how a
+        # previous prod post-mortem lost its evidence — grab them here.
+        run: |
+          echo "───── next dev ─────"
+          tail -200 /tmp/next-dev.log || true
+          echo "───── containers ─────"
+          docker compose --env-file .env.production logs --tail=200 || true
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-sandbox
+          path: e2e/playwright-report/
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        # -v is safe and wanted here: the volumes belong to this job's
+        # compose project on an ephemeral runner, and a fresh database is
+        # what makes the next run reproducible.
+        run: |
+          kill "$(cat /tmp/next-dev.pid)" 2>/dev/null || true
+          docker compose --env-file .env.production down -v || true

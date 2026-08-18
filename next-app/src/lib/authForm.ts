@@ -21,6 +21,8 @@
 // TypeScript's control-flow narrowing in the consuming component, so
 // both branches carry the same keys.
 
+import { splitLocale } from "@/lib/i18n/locale";
+
 export interface SubmitResult {
   ok: boolean;
   status: number;
@@ -56,17 +58,33 @@ export function extractServerMessage(body: unknown): string | null {
 // a stale tab POSTing the page back to itself doesn't loop.
 const SELF_LOOP_TARGETS = ["/login", "/register"] as const;
 
-export function sanitizeFromParam(raw: string | string[] | undefined): string {
-  const FALLBACK = "/";
+/**
+ * @param fallback Where to send the reader when `raw` is absent or
+ *   unusable. Defaults to the site root, but a localized surface must pass
+ *   its own locale's root — otherwise an English visitor who arrives at
+ *   /en/login directly (no `from` to carry) signs in successfully and lands
+ *   on the Simplified Chinese home page, which reads as the sign-in having
+ *   done something other than what they asked for.
+ */
+export function sanitizeFromParam(
+  raw: string | string[] | undefined,
+  fallback: string = "/",
+): string {
+  const FALLBACK = fallback;
   if (raw === undefined) return FALLBACK;
   const value = Array.isArray(raw) ? raw[0] : raw;
   if (typeof value !== "string") return FALLBACK;
   if (!/^\/[A-Za-z0-9]/.test(value)) return FALLBACK;
+  // Locale-blind comparison: "/en/login" is the same self-loop as "/login".
+  // The generation side (components/auth/authFromLink.ts) strips the prefix
+  // the same way, and the two have to agree — a rule enforced on one end
+  // only means one of them silently emits a value the other throws away.
+  const { path } = splitLocale(value);
   for (const target of SELF_LOOP_TARGETS) {
     if (
-      value === target ||
-      value.startsWith(`${target}?`) ||
-      value.startsWith(`${target}#`)
+      path === target ||
+      path.startsWith(`${target}?`) ||
+      path.startsWith(`${target}#`)
     ) {
       return FALLBACK;
     }

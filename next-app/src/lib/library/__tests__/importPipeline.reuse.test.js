@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { runImport } from "@/app/library/_services/importPipeline.js";
+import { runImport } from "@/app/[lang]/library/_services/importPipeline.js";
 import { fileRefId } from "../recordFactory.js";
 
 // IRON regression suite for the reuse branch of the import pipeline.

@@ -14,7 +14,7 @@
 //
 // ASCII comments only - Unicode in source can panic Turbopack.
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import { pickTitle } from "@/lib/formatters";
@@ -59,24 +59,27 @@ export interface WeeklyScheduleProps {
   lang: Lang;
 }
 
-const DAY_ZH: Record<number, string> = {
-  0: "周日",
-  1: "周一",
-  2: "周二",
-  3: "周三",
-  4: "周四",
-  5: "周五",
-  6: "周六",
-};
-
-const DAY_EN: Record<number, string> = {
-  0: "Sun",
-  1: "Mon",
-  2: "Tue",
-  3: "Wed",
-  4: "Thu",
-  5: "Fri",
-  6: "Sat",
+// Keyed by Lang so a new language fails to compile here rather than silently
+// falling back to one of the existing two. Inner key is Date#getDay(), 0=Sunday.
+const DAY_LABELS: Record<Lang, Record<number, string>> = {
+  zh: {
+    0: "周日",
+    1: "周一",
+    2: "周二",
+    3: "周三",
+    4: "周四",
+    5: "周五",
+    6: "周六",
+  },
+  en: {
+    0: "Sun",
+    1: "Mon",
+    2: "Tue",
+    3: "Wed",
+    4: "Thu",
+    5: "Fri",
+    6: "Sat",
+  },
 };
 
 // localToday is locked to Asia/Shanghai because it picks which tab is
@@ -276,7 +279,7 @@ export default function WeeklySchedule({
   const activeDay = days.includes(active) ? active : days[0];
   const items = groups[activeDay] ?? [];
 
-  const dayMap = lang === "zh" ? DAY_ZH : DAY_EN;
+  const dayMap = DAY_LABELS[lang];
 
   function formatDayLabel(dateStr: string): string {
     if (dateStr === today) return dict.home.today;

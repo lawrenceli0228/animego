@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/LocaleLink";
 import type { CSSProperties, MouseEvent } from "react";
 import { useRef } from "react";
 import { formatLabel, genreLabel } from "@/lib/contentLabels";
@@ -260,10 +260,11 @@ export default function AnimeCard({
 }: AnimeCardProps) {
   const overlayRef = useRef<HTMLDivElement | null>(null);
   // Content enums (format badge, genre chips) deliberately do NOT use the
-  // `lang` prop. That prop comes from getLang(), which is pinned to "zh" so
-  // pages stay ISR-cacheable, so translating against it would show Chinese
-  // genres to English readers — a regression, since these chips rendered the
-  // raw AniList value before. useLang() is SSR-seeded zh and reconciled from
+  // `lang` prop. That prop is the URL's locale; useLang() is the visitor's
+  // cookie preference, and on a bare (Chinese) URL — where most search
+  // traffic lands — those disagree. Following the cookie keeps these chips
+  // English for an English reader instead of the "zh" the prop would give.
+  // useLang() is SSR-seeded from the route locale and reconciled from
   // the `lang` cookie after mount: the same source SearchFilters and
   // SeasonalFilterChips read, so a card badge can never disagree with the
   // filter chip sitting directly above it in the /search and /seasonal grids.
