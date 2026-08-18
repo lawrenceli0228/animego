@@ -1,11 +1,25 @@
 "use client";
 // @ts-nocheck
 import { useState, useEffect, useCallback, useRef } from 'react';
+import * as Sentry from '@sentry/nextjs';
 import { isFsaSupported } from '@/lib/library/handles/fsaFeatureCheck.js';
 import { ensurePermission } from '@/lib/library/handles/permissionGate.js';
 import { makeFileHandleStore } from '@/lib/library/handles/fileHandleStore.js';
 import { probeRootStatus } from '@/lib/library/handles/probeRoot.js';
 import { pickLargestSameExt } from '@/lib/library/enumerator.js';
+
+/**
+ * The picker rejects with AbortError when the user dismisses it. Every browser
+ * that implements showDirectoryPicker uses that name, so this is a decision
+ * signal rather than a fault and must never reach Sentry — it would be by far
+ * the most common "error" the library surface produces.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isAbortError(err) {
+  return Boolean(err) && typeof err === 'object' && err.name === 'AbortError';
+}
 
 /** @typedef {import('@/lib/library/types').HandleRecord} HandleRecord */
 /** @typedef {import('@/lib/library/handles/probeRoot.js').RootStatus} RootStatus */
@@ -110,7 +124,16 @@ export function useFileHandles({ db }) {
       const record = await store.saveRoot(handle, libraryId);
       await refresh();
       return record;
-    } catch {
+    } catch (err) {
+      // Dismissing the picker rejects with AbortError. That is a decision,
+      // not a fault, and reporting it would bury the real failures under it.
+      //
+      // Everything else gets reported. This was a bare `catch` returning
+      // null, which meant a browser that could not write to IndexedDB at all
+      // — a locked or read-only profile, a full disk — presented as a folder
+      // picker that simply did nothing when you chose a folder, with no trace
+      // in Sentry and nothing for the user to act on.
+      if (!isAbortError(err)) Sentry.captureException(err);
       return null;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

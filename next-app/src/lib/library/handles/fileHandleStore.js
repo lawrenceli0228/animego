@@ -15,6 +15,24 @@ import { ulid } from '../ulid.js';
 const _handleCache = new Map();
 
 /**
+ * True when a rejected `put` failed because the value could not be cloned.
+ *
+ * Checks `inner` as well as the error itself: Dexie wraps the underlying
+ * DOMException, and which of the two carries the name depends on where the
+ * failure surfaced. Missing the wrapped form would send a genuine clone
+ * failure down the rethrow path and break the stub fallback the test doubles
+ * depend on.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isCloneError(err) {
+  if (!err || typeof err !== 'object') return false;
+  const e = /** @type {{ name?: unknown, inner?: { name?: unknown } }} */ (err);
+  return e.name === 'DataCloneError' || e.inner?.name === 'DataCloneError';
+}
+
+/**
  * Create a fileHandle store repo bound to the given Dexie instance.
  *
  * @param {import('dexie').Dexie} db
@@ -42,8 +60,24 @@ export function makeFileHandleStore(db) {
       const row = { ...base, handle };
       await db.fileHandles.put(row);
       return /** @type {HandleRecord} */ ({ ...row });
-    } catch {
-      // DataCloneError: store a serializable stub
+    } catch (err) {
+      // ONLY a clone failure earns the stub, and this used to be a bare
+      // `catch` that assumed every failure was one.
+      //
+      // The stub is a lossy fallback: the record that reaches IDB has no real
+      // handle in it, and the live one survives purely in the module-level
+      // _handleCache, which dies with the page. So when a `put` failed for any
+      // other reason — a locked or read-only browser profile raising
+      // NoModificationAllowedError, a full disk, a closing database — the old
+      // code would quietly write a stub instead. If that second write happened
+      // to succeed, the user's watch folder came back empty on their next
+      // visit with nothing logged anywhere, which is one of the shapes the
+      // "watch folder sometimes stops working" reports took.
+      //
+      // Anything that is not a clone failure is a real storage failure and has
+      // to reach the caller.
+      if (!isCloneError(err)) throw err;
+
       const row = { ...base, handle: { __stub: true, name: handle.name } };
       await db.fileHandles.put(row);
       return /** @type {HandleRecord} */ ({ ...row, handle });
