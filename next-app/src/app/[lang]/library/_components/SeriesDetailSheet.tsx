@@ -21,6 +21,7 @@ import { useLang } from "@/lib/lang-client";
 // @ts-ignore — JSDoc-only JS module
 import { db } from "@/lib/library/db/db.js";
 import { loadMergedSeriesRows } from "../_services/loadSeriesRows";
+import { resolveEpisodeGridLength } from "../_services/seriesGroups";
 // P6 TODO: tighten when useLibrary gets typed exports; for now widen to any
 // eslint-disable-next-line -eslint/no-explicit-any
 type SeriesRecord = any;
@@ -471,7 +472,13 @@ function safePoster(url: string | undefined): string | null {
 }
 
 interface SeriesDetailSheetProps {
-  series: SeriesRecord & { totalEpisodes?: number };
+  series: SeriesRecord;
+  /**
+   * Episodes on this whole card, across every series soft-merged into it.
+   * `<= 0` / omitted means unknown, and the sheet then leans entirely on what
+   * it can see on disk. See `_services/seriesGroups.ts`.
+   */
+  groupTotal?: number;
   onClose: () => void;
   onPickEpisode: (seriesId: string, episodeNumber: number) => void;
   onPlaySeries?: (seriesId: string) => void;
@@ -479,6 +486,7 @@ interface SeriesDetailSheetProps {
 
 export function SeriesDetailSheet({
   series,
+  groupTotal,
   onClose,
   onPickEpisode,
   onPlaySeries,
@@ -560,15 +568,14 @@ export function SeriesDetailSheet({
     return ep ? { episode: ep, progress: best } : null;
   }, [progressById, episodes]);
 
-  const total = useMemo(() => {
-    const fromSeries =
-      typeof series.totalEpisodes === "number" && series.totalEpisodes > 0
-        ? series.totalEpisodes
-        : 0;
-    let maxNum = 0;
-    for (const ep of episodes) if (ep.number > maxNum) maxNum = ep.number;
-    return Math.max(fromSeries, maxNum, episodes.length, 1);
-  }, [series.totalEpisodes, episodes]);
+  // The length of the episode-chip grid below — see resolveEpisodeGridLength
+  // for why the declared total is a FLOOR and never a ceiling (regression R1 /
+  // issue #75). The rule lives in a pure module because a component effect is
+  // out of reach for bun:test here, which is exactly how #75 shipped.
+  const total = useMemo(
+    () => resolveEpisodeGridLength(groupTotal, episodes),
+    [groupTotal, episodes],
+  );
 
   const completedCount = useMemo(() => {
     let n = 0;

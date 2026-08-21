@@ -504,6 +504,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
       titleZh?: string;
       titleEn?: string;
       posterUrl?: string;
+      totalEpisodes?: number;
       type?: "tv" | "movie" | "ova" | "web";
     }) => {
       if (!seriesId) return;
@@ -516,6 +517,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
           titleZh: payload.titleZh,
           titleEn: payload.titleEn,
           posterUrl: payload.posterUrl,
+          totalEpisodes: payload.totalEpisodes,
           type: payload.type,
           ulid,
         });

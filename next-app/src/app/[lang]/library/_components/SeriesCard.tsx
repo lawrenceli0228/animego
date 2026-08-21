@@ -440,6 +440,15 @@ const s = {
 
 interface SeriesCardProps {
   series: Series;
+  /**
+   * Episodes on this whole card, when the caller knows better than the series
+   * row does — SeriesGrid passes the merge-group total, because a merged card's
+   * count is not the root row's `totalEpisodes`.
+   *
+   * Omitted (rows that render one series and nothing else) falls back to
+   * `series.totalEpisodes`. `<= 0` is unknown either way and hides the chip.
+   */
+  episodeTotal?: number;
   lastPlayedEp?: number;
   progressPct?: number;
   progressLabel?: string;
@@ -485,6 +494,7 @@ interface SeriesCardProps {
  */
 function SeriesCard({
   series,
+  episodeTotal,
   progressPct,
   progressLabel,
   isNew = false,
@@ -501,6 +511,13 @@ function SeriesCard({
   compact = false,
 }: SeriesCardProps) {
   const { t } = useLang();
+  // The card's own total, if the caller supplied one, else the series row's.
+  // Normalized to `null` for unknown so the chip has one thing to test.
+  const epTotal =
+    (typeof episodeTotal === "number" && episodeTotal > 0 ? episodeTotal : null) ??
+    (typeof series.totalEpisodes === "number" && series.totalEpisodes > 0
+      ? series.totalEpisodes
+      : null);
   const title = series.titleEn || series.titleZh || series.titleJa || series.id;
   const initial = title.charAt(0).toUpperCase();
   // Whitelist https only — IDB-stored values may be attacker-influenced via
@@ -710,19 +727,19 @@ function SeriesCard({
                 </span>
               )}
             </div>
-            {(series.type || series.totalEpisodes != null) && (
+            {(series.type || epTotal != null) && (
               <div style={s.metaRow}>
                 {series.type && (
                   <span style={s.metaType}>
                     {String(series.type).toUpperCase()}
                   </span>
                 )}
-                {series.type && series.totalEpisodes != null && (
+                {series.type && epTotal != null && (
                   <span style={s.metaDot}>·</span>
                 )}
-                {series.totalEpisodes != null && (
+                {epTotal != null && (
                   <>
-                    <span style={s.epCount}>{series.totalEpisodes}</span>
+                    <span style={s.epCount}>{epTotal}</span>
                     <span style={s.metaEpUnit}>{t("library.card.epUnit")}</span>
                   </>
                 )}

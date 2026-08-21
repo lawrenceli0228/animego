@@ -39,6 +39,7 @@ import {
 import {
   animeCacheHits,
   persistAutoBinding,
+  persistEpisodeTotal,
   pickBindingHit,
   searchAnime,
   seriesSearchKeyword,
@@ -176,6 +177,10 @@ export function useSiteAnimeForSeries({
         // that clears this very cache, so the other order deletes the entry it
         // just wrote and every mount pays for the round-trip again.
         await persistAutoBinding(bindingDb, series.id, best.anilistId);
+        // This hook re-searches even when the series is already bound (that is
+        // what it is for), so unlike `resolveSeriesBinding`'s fast path it does
+        // reach a fresh `episodes` on every mount of /library/[seriesId].
+        await persistEpisodeTotal(bindingDb, series.id, best.episodes);
         _cache.set(series.id, mapped);
         if (cancelled) return;
         setSiteAnime(mapped);
