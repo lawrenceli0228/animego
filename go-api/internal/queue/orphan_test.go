@@ -92,6 +92,13 @@ func (f *fakeEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeasonArgs)
 	return nil
 }
 
+// EnqueueHantBackfillNow is a no-op stub: nothing in this test
+// touches the zh-Hant sweep, and reporting "inserted" would be a lie
+// no assertion here is watching for.
+func (f *fakeEnqueuer) EnqueueHantBackfillNow(_ context.Context) (bool, error) {
+	return false, nil
+}
+
 // EnqueueDescriptionBackfillMany is a no-op stub — the orphan scan only
 // dispatches V1 jobs; the description sweep has its own scan worker.
 // Satisfies the Enqueuer interface contract added in P3.

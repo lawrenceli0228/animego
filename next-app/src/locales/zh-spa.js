@@ -1042,6 +1042,38 @@ const zh = {
       rejected: '已拒(未过校验)',
       queueLabel: '翻译队列',
     },
+    // 繁体中文漂移 —— HantDriftSection。
+    //
+    // 这块看的不是「缺内容」，是「内容在骗人」：富化 worker 一直在写简体列，
+    // title_hant / description_hant 只有回填跑的时候才动，掉队了也不会自愈。
+    // 而渲染阶梯是往下掉不是留空的，所以掉队的那几行不会显示成空白 ——
+    // 会把简体正文端给一个点了繁体 URL 的读者。「落后 2」= 两部番在骗人。
+    hant: {
+      title: '繁体中文漂移',
+      // lede 不是装饰。没有它，「落后 2」会被读成「2 行缺文本」——恰好是
+      // 唯一一种让这个数字看起来无害的读法。
+      lede: '富化只写简体列，繁体列要等回填才动。落后的行不会留空——繁体读者读到的是简体正文。',
+      titlesRow: '标题',
+      descsRow: '简介',
+      titleBehind: '标题落后',
+      descBehind: '简介落后',
+      // 提示语就是 SQL 谓词的白话版，好让人能自己复核这个数。
+      titleBehindHint: '有简体标题，没有繁体',
+      descBehindHint: '有简体简介，没有繁体',
+      // 零需要一句话说出来。两个没人解释的灰色 0 一样容易被读成
+      // 「这块坏了」，那是同一个误读的反方向。
+      inSync: '没有落后的行——每条简体都有对应的繁体。',
+      serpEligible: '人工来源标题',
+      machineConverted: '机器转换',
+      // 这两个数之间的差是整块面板上唯一一个「看着像 bug 其实不是」的地方，
+      // 所以写死在屏幕上，不靠人去问。
+      serpHint: '只有这些能进 <title> 和 JSON-LD；其余是机器转换的，不进搜索结果。',
+      lastRun: '上次回填',
+      runningNow: '回填进行中',
+      runNow: '立即回填',
+      enqueued: '已排入回填队列。',
+      loadError: '繁体漂移数据读取失败',
+    },
     // EnrichmentRow — filter labels (used in FILTERS array)
     filterLabelAll: '全部',
     filterLabelNeedsReview: '待复核',

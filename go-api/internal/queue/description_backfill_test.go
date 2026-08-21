@@ -165,6 +165,13 @@ func (f *fakeBackfillEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSea
 	return nil
 }
 
+// EnqueueHantBackfillNow is a no-op stub: nothing in this test
+// touches the zh-Hant sweep, and reporting "inserted" would be a lie
+// no assertion here is watching for.
+func (f *fakeBackfillEnqueuer) EnqueueHantBackfillNow(_ context.Context) (bool, error) {
+	return false, nil
+}
+
 func (f *fakeBackfillEnqueuer) bumpOther() {
 	f.mu.Lock()
 	f.otherCalls++

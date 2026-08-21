@@ -109,3 +109,12 @@ backup-*.json
 
 # 内部待办：含留存指标与未修补缺口，仓库是公开的
 TODO.md
+
+# Compiled CLI binaries. `go build ./cmd/x` inside its own directory leaves the
+# artifact next to the source, and a 13.6 MB hantbackfill binary reached main
+# that way in #91 — `git add -A` does not distinguish. Ignoring the names
+# rather than a glob so a real source file is never silently excluded.
+go-api/cmd/hantbackfill/hantbackfill
+go-api/cmd/bgmbackfill/bgmbackfill
+go-api/cmd/bgmmap/bgmmap
+go-api/cmd/server/server

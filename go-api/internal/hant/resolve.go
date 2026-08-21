@@ -1,4 +1,4 @@
-package main
+package hant
 
 // The precedence ladder, and the provenance hash.
 //
@@ -25,16 +25,16 @@ import (
 // anime_cache.title_hant_source, and the first three are what migration
 // 0022's title_hant_seo whitelist admits to search results.
 const (
-	srcManual    = "manual"
-	srcWikipedia = "wikipedia"
-	srcAnilist   = "anilist"
-	srcOpenCC    = "opencc"
+	SrcManual    = "manual"
+	SrcWikipedia = "wikipedia"
+	SrcAnilist   = "anilist"
+	SrcOpenCC    = "opencc"
 )
 
-// animeRow is the slice of anime_cache this tool reads and writes.  It is
+// Row is the slice of anime_cache this tool reads and writes.  It is
 // a plain struct rather than the sqlc row so the ladder can be tested
 // without a database.
-type animeRow struct {
+type Row struct {
 	AnilistID     int32
 	TitleNative   *string
 	TitleChinese  *string
@@ -49,7 +49,7 @@ type animeRow struct {
 	DescHantHash   *string
 }
 
-// sourceHash is the digest stored in *_hant_source_hash: the SHA-256 of
+// SourceHash is the digest stored in *_hant_source_hash: the SHA-256 of
 // the exact input string that produced the value, lowercase hex.
 //
 // It exists because provenance goes stale silently.  A title_hant machine
@@ -62,14 +62,14 @@ type animeRow struct {
 // The input differs by tier: the dataset value for the dataset tiers,
 // title_chinese for the opencc tier, and nothing at all for manual, whose
 // input is a human and cannot be hashed.
-func sourceHash(input string) string {
+func SourceHash(input string) string {
 	sum := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(sum[:])
 }
 
-// decision is one column's proposed value.  Source == "" means no tier
+// Decision is one column's proposed value.  Source == "" means no tier
 // produced anything and the column is left alone.
-type decision struct {
+type Decision struct {
 	Source string
 	Value  string
 	Input  string
@@ -81,16 +81,16 @@ type decision struct {
 
 	// Pick carries the anilist tier's gate outcome so the report can
 	// count rejections by rule even when a higher tier won.
-	Pick anilistPick
+	Pick AnilistPick
 
 	// PickAttempted is true when the anilist dataset had a record for
 	// this id, i.e. when Pick is meaningful.
 	PickAttempted bool
 }
 
-// resolver holds everything the ladder needs.  Read-only after
+// Resolver holds everything the ladder needs.  Read-only after
 // construction.
-type resolver struct {
+type Resolver struct {
 	cgroup  *cgroupSet
 	anilist *anilistSet
 	gate    *gate
@@ -103,8 +103,8 @@ type resolver struct {
 // report's per-rule rejection counts are a property of the dataset, not
 // of which rows happened to miss the overlay -- and because the list of
 // Simplified-rejected titles is only useful if it is complete.
-func (r *resolver) resolveTitle(row animeRow) decision {
-	var d decision
+func (r *Resolver) resolveTitle(row Row) Decision {
+	var d Decision
 
 	if pick, ok := r.anilist.pick(row.AnilistID, r.gate); ok {
 		d.Pick = pick
@@ -112,11 +112,11 @@ func (r *resolver) resolveTitle(row animeRow) decision {
 	}
 
 	if hit, ok := r.cgroup.lookup(row.TitleNative, row.TitleChinese); ok {
-		if reason, _ := r.gate.check(hit.Value); reason == reasonNone {
-			d.Source = srcWikipedia
+		if reason, _ := r.gate.check(hit.Value); reason == ReasonNone {
+			d.Source = SrcWikipedia
 			d.Value = hit.Value
 			d.Input = hit.Value
-			d.Hash = sourceHash(hit.Value)
+			d.Hash = SourceHash(hit.Value)
 			d.Via = hit.Via
 			return d
 		}
@@ -127,19 +127,19 @@ func (r *resolver) resolveTitle(row animeRow) decision {
 	}
 
 	if d.PickAttempted && d.Pick.Value != "" {
-		d.Source = srcAnilist
+		d.Source = SrcAnilist
 		d.Value = d.Pick.Value
 		d.Input = d.Pick.Value
-		d.Hash = sourceHash(d.Pick.Value)
+		d.Hash = SourceHash(d.Pick.Value)
 		return d
 	}
 
 	if row.TitleChinese != nil && *row.TitleChinese != "" {
 		converted := r.conv.Convert(*row.TitleChinese)
-		d.Source = srcOpenCC
+		d.Source = SrcOpenCC
 		d.Value = converted
 		d.Input = *row.TitleChinese
-		d.Hash = sourceHash(*row.TitleChinese)
+		d.Hash = SourceHash(*row.TitleChinese)
 		return d
 	}
 
@@ -158,15 +158,15 @@ func (r *resolver) resolveTitle(row animeRow) decision {
 // next-app/src/app/[lang]/anime/[id]/page.tsx).  An 85%-accurate synopsis
 // under a Traditional locale is a readable synopsis.  An 85%-accurate
 // title in a search result is what Google learns the page is about.
-func (r *resolver) resolveDescription(row animeRow) decision {
+func (r *Resolver) resolveDescription(row Row) Decision {
 	if row.DescriptionCN == nil || *row.DescriptionCN == "" {
-		return decision{}
+		return Decision{}
 	}
-	return decision{
-		Source: srcOpenCC,
+	return Decision{
+		Source: SrcOpenCC,
 		Value:  r.conv.Convert(*row.DescriptionCN),
 		Input:  *row.DescriptionCN,
-		Hash:   sourceHash(*row.DescriptionCN),
+		Hash:   SourceHash(*row.DescriptionCN),
 	}
 }
 
@@ -179,73 +179,73 @@ func (r *resolver) resolveDescription(row animeRow) decision {
 // again in the UPDATE's WHERE clause.  The SQL guard is the one that
 // actually holds -- it survives a bug in this file.
 func isManual(source *string) bool {
-	return source != nil && *source == srcManual
+	return source != nil && *source == SrcManual
 }
 
 // ─── staleness ───────────────────────────────────────────────────────────────
 
-// staleKind classifies a stored row against what its claimed source
+// StaleKind classifies a stored row against what its claimed source
 // would produce today.
-type staleKind string
+type StaleKind string
 
 const (
-	staleNone staleKind = ""
-	// staleHash: the stored hash does not match the digest of the input
+	StaleNone StaleKind = ""
+	// StaleHash: the stored hash does not match the digest of the input
 	// its source claims to derive from.  This is the case migration 0022
 	// was written for -- title_chinese moved and title_hant did not.
-	staleHash staleKind = "hash_mismatch"
-	// staleMissingHash: a value with a source but no hash.  Nothing this
+	StaleHash StaleKind = "hash_mismatch"
+	// StaleMissingHash: a value with a source but no hash.  Nothing this
 	// tool writes looks like that; it means an older writer or a hand
 	// edit that used a source other than 'manual'.
-	staleMissingHash staleKind = "missing_hash"
-	// staleGone: the source can no longer produce any input at all -- the
+	StaleMissingHash StaleKind = "missing_hash"
+	// StaleGone: the source can no longer produce any input at all -- the
 	// dataset dropped the id, or title_chinese was nulled out.
-	staleGone staleKind = "input_gone"
+	StaleGone StaleKind = "input_gone"
 )
 
 // checkStale re-derives the input for a stored value and compares hashes.
 // It never rewrites anything; --apply is what rewrites, and it does so by
 // re-running the ladder rather than by trusting this classification.
-func (r *resolver) checkStale(row animeRow, value, source, hash *string) staleKind {
+func (r *Resolver) checkStale(row Row, value, source, hash *string) StaleKind {
 	if value == nil || source == nil {
-		return staleNone
+		return StaleNone
 	}
-	if *source == srcManual {
+	if *source == SrcManual {
 		// A human wrote it; there is no input to compare against and the
 		// NULL hash is correct rather than missing.
-		return staleNone
+		return StaleNone
 	}
 
 	input, ok := r.currentInput(row, *source)
 	if !ok {
-		return staleGone
+		return StaleGone
 	}
 	if hash == nil || *hash == "" {
-		return staleMissingHash
+		return StaleMissingHash
 	}
-	if *hash != sourceHash(input) {
-		return staleHash
+	if *hash != SourceHash(input) {
+		return StaleHash
 	}
-	return staleNone
+	return StaleNone
 }
 
 // currentInput returns the string the given source would consume for this
 // row today.
-func (r *resolver) currentInput(row animeRow, source string) (string, bool) {
+func (r *Resolver) currentInput(row Row, source string) (string, bool) {
 	switch source {
-	case srcWikipedia:
+	case SrcWikipedia:
 		hit, ok := r.cgroup.lookup(row.TitleNative, row.TitleChinese)
 		if !ok {
 			return "", false
 		}
 		return hit.Value, true
-	case srcAnilist:
+	case SrcAnilist:
 		pick, ok := r.anilist.pick(row.AnilistID, r.gate)
 		if !ok || pick.Value == "" {
 			return "", false
 		}
 		return pick.Value, true
-	case srcOpenCC:
+	case SrcOpenCC:
 		if row.TitleChinese == nil || *row.TitleChinese == "" {
 			return "", false
 		}
@@ -256,21 +256,21 @@ func (r *resolver) currentInput(row animeRow, source string) (string, bool) {
 
 // checkDescriptionStale is the description column's equivalent.  Only the
 // opencc tier exists, so the input is always description_cn.
-func (r *resolver) checkDescriptionStale(row animeRow) staleKind {
+func (r *Resolver) checkDescriptionStale(row Row) StaleKind {
 	if row.DescHant == nil || row.DescHantSource == nil {
-		return staleNone
+		return StaleNone
 	}
-	if *row.DescHantSource == srcManual {
-		return staleNone
+	if *row.DescHantSource == SrcManual {
+		return StaleNone
 	}
 	if row.DescriptionCN == nil || *row.DescriptionCN == "" {
-		return staleGone
+		return StaleGone
 	}
 	if row.DescHantHash == nil || *row.DescHantHash == "" {
-		return staleMissingHash
+		return StaleMissingHash
 	}
-	if *row.DescHantHash != sourceHash(*row.DescriptionCN) {
-		return staleHash
+	if *row.DescHantHash != SourceHash(*row.DescriptionCN) {
+		return StaleHash
 	}
-	return staleNone
+	return StaleNone
 }

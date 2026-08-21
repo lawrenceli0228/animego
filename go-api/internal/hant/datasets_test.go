@@ -1,4 +1,4 @@
-package main
+package hant
 
 import (
 	"reflect"
@@ -184,7 +184,7 @@ func TestAnilistPickFallsThroughToSynonyms(t *testing.T) {
 
 	t.Run("clean title wins outright", func(t *testing.T) {
 		got, ok := set.pick(1, g)
-		if !ok || got.Value != "星際牛仔" || got.FromSynonym || got.TitleReason != reasonNone {
+		if !ok || got.Value != "星際牛仔" || got.FromSynonym || got.TitleReason != ReasonNone {
 			t.Fatalf("got %+v ok=%v", got, ok)
 		}
 	})
@@ -194,8 +194,8 @@ func TestAnilistPickFallsThroughToSynonyms(t *testing.T) {
 		if got.Value != "海賊王" {
 			t.Fatalf("Value = %q, want 海賊王 (upstream's first synonym, not 航海王)", got.Value)
 		}
-		if !got.FromSynonym || got.TitleReason != reasonNoHan {
-			t.Fatalf("got %+v, want FromSynonym with reason %q", got, reasonNoHan)
+		if !got.FromSynonym || got.TitleReason != ReasonNoHan {
+			t.Fatalf("got %+v, want FromSynonym with reason %q", got, ReasonNoHan)
 		}
 	})
 
@@ -211,8 +211,8 @@ func TestAnilistPickFallsThroughToSynonyms(t *testing.T) {
 		if !ok {
 			t.Fatal("the record exists, so pick must report it")
 		}
-		if got.Value != "" || got.TitleReason != reasonNoHan {
-			t.Fatalf("got %+v, want an empty value with reason %q", got, reasonNoHan)
+		if got.Value != "" || got.TitleReason != ReasonNoHan {
+			t.Fatalf("got %+v, want an empty value with reason %q", got, ReasonNoHan)
 		}
 	})
 
@@ -221,13 +221,13 @@ func TestAnilistPickFallsThroughToSynonyms(t *testing.T) {
 		// an alternative name from the same curator whatever dropped the
 		// primary — this rescues 13 further rows in the vendored file.
 		got, _ := set.pick(97, g)
-		if got.Value != "夜晚來臨" || got.TitleReason != reasonKana {
-			t.Fatalf("got %+v, want the synonym with reason %q", got, reasonKana)
+		if got.Value != "夜晚來臨" || got.TitleReason != ReasonKana {
+			t.Fatalf("got %+v, want the synonym with reason %q", got, ReasonKana)
 		}
 
 		got, _ = set.pick(98, g)
-		if got.TitleReason != reasonSimplified {
-			t.Fatalf("reason = %q, want %q", got.TitleReason, reasonSimplified)
+		if got.TitleReason != ReasonSimplified {
+			t.Fatalf("reason = %q, want %q", got.TitleReason, ReasonSimplified)
 		}
 		if string(got.TitleSimplified) != "学" {
 			t.Fatalf("TitleSimplified = %q, want 学 — the report needs these to queue hand fixes",

@@ -70,6 +70,21 @@ const DescriptionBackfillQueueName = "description_backfill"
 // more than one worker without touching the Bangumi budget at all.
 const DescriptionLlmQueueName = "description_llm"
 
+// HantBackfillQueueName isolates the zh-Hant sweep from live enrichment.
+//
+// Same isolation argument as the description sweep, different resource:
+// this job spends no upstream budget at all (both datasets and the
+// conversion table are vendored files), it spends Postgres.  One pass
+// reads every row in anime_cache including description_cn and can issue
+// two dozen 500-row UPDATEs.  On the default queue that would sit in
+// front of the V1/V2 jobs a page load is waiting on.
+//
+// A separate queue also makes it independently pausable, which is the
+// lever an operator wants if a bad dataset ever gets vendored: pause the
+// queue, and the in-flight sweep stops at a batch boundary without
+// touching enrichment.
+const HantBackfillQueueName = "hant_backfill"
+
 // Stats is the response shape for Status — the admin endpoint
 // marshals this to JSON.  Mirrors the relevant subset of Express
 // getQueueStatus() (which also reported in-memory queue depths from

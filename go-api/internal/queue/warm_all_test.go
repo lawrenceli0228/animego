@@ -75,6 +75,13 @@ func (f *warmAllEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args WarmSea
 	return nil
 }
 
+// EnqueueHantBackfillNow is a no-op stub: nothing in this test
+// touches the zh-Hant sweep, and reporting "inserted" would be a lie
+// no assertion here is watching for.
+func (f *warmAllEnqueuer) EnqueueHantBackfillNow(_ context.Context) (bool, error) {
+	return false, nil
+}
+
 func (f *warmAllEnqueuer) snapshot() []WarmSeasonArgs {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -320,6 +327,13 @@ func (c *cancellingEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ WarmSeaso
 	}
 	c.mu.Unlock()
 	return nil
+}
+
+// EnqueueHantBackfillNow is a no-op stub: nothing in this test
+// touches the zh-Hant sweep, and reporting "inserted" would be a lie
+// no assertion here is watching for.
+func (c *cancellingEnqueuer) EnqueueHantBackfillNow(_ context.Context) (bool, error) {
+	return false, nil
 }
 
 // TestEnqueueWarmAllSeasons_ContextCancellation — cancel the context

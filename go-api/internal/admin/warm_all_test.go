@@ -83,6 +83,13 @@ func (c *channelEnqueuer) EnqueueWarmSeasonNow(_ context.Context, args queue.War
 	return nil
 }
 
+// EnqueueHantBackfillNow is a no-op stub: nothing in this test
+// touches the zh-Hant sweep, and reporting "inserted" would be a lie
+// no assertion here is watching for.
+func (c *channelEnqueuer) EnqueueHantBackfillNow(_ context.Context) (bool, error) {
+	return false, nil
+}
+
 func (c *channelEnqueuer) snapshot() []queue.WarmSeasonArgs {
 	c.mu.Lock()
 	defer c.mu.Unlock()

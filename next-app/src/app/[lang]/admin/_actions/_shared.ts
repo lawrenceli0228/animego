@@ -25,6 +25,20 @@ export interface ReEnrichResult {
   version: 0 | 1 | 2;
 }
 
+/**
+ * `POST /api/admin/hant/backfill` (HantDriftSection).
+ *
+ * `enqueued` is a boolean, not a row count: the job sweeps whatever is behind
+ * at the moment it wakes, so there is no batch size to report at enqueue time.
+ * `message` is go-api's own sentence about what it did — surfaced verbatim so
+ * a refusal ("already running") reaches the operator instead of being
+ * flattened into a generic success.
+ */
+export interface HantBackfillResult {
+  enqueued: boolean;
+  message: string;
+}
+
 // ─── User CRUD result envelopes ──────────────────────────────────────
 
 export interface AdminUserMinimal {

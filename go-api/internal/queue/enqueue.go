@@ -69,6 +69,18 @@ type Enqueuer interface {
 	// current + next season pair; the 24h periodic schedule (configured
 	// via queue.Config.PeriodicJobs) handles steady-state re-warm.
 	EnqueueWarmSeasonNow(ctx context.Context, args WarmSeasonArgs) error
+	// EnqueueHantBackfillNow inserts the zh-Hant sweep for immediate
+	// dispatch.  Its only production caller is the admin button
+	// (POST /api/admin/hant/backfill); the 90-day periodic schedule
+	// inserts the same job through river's own scheduler.
+	//
+	// Returns whether a job was actually inserted, because "no" is the
+	// normal answer rather than an error: HantBackfillArgs is unique
+	// across every non-terminal state, so pressing the button while a
+	// sweep is queued or running collapses into the one already there.
+	// A caller that reported "enqueued" either way would let an operator
+	// believe a second pass had been scheduled.
+	EnqueueHantBackfillNow(ctx context.Context) (inserted bool, err error)
 }
 
 // RealEnqueuer wraps a river client and batches V1 inserts via
@@ -231,6 +243,25 @@ func (e *RealEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args WarmSeason
 	return nil
 }
 
+// EnqueueHantBackfillNow inserts the zh-Hant sweep and reports whether
+// river actually took it.
+//
+// Insert, not InsertMany: there is exactly one job, and Insert is the
+// variant that returns the UniqueSkippedAsDuplicate flag the admin
+// endpoint needs to tell "scheduled" from "already in flight".
+func (e *RealEnqueuer) EnqueueHantBackfillNow(ctx context.Context) (bool, error) {
+	res, err := e.client.Insert(ctx, HantBackfillArgs{}, nil)
+	if err != nil {
+		return false, fmt.Errorf("queue.EnqueueHantBackfillNow: %w", err)
+	}
+	inserted := !res.UniqueSkippedAsDuplicate
+	slog.InfoContext(ctx, "queue.hant_backfill enqueued",
+		"inserted", inserted,
+		"jobId", res.Job.ID,
+		"state", res.Job.State)
+	return inserted, nil
+}
+
 // NoopEnqueuer satisfies Enqueuer without doing anything.  Use as a
 // safe default when callers haven't wired river yet (e.g. server is
 // in unit-test mode, or a boot stage runs before river.Start).
@@ -264,6 +295,13 @@ func (NoopEnqueuer) EnqueueDescriptionLlmBackfillMany(ctx context.Context, jobs 
 // EnqueueWarmSeasonNow returns nil regardless of input.
 func (NoopEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args WarmSeasonArgs) error {
 	return nil
+}
+
+// EnqueueHantBackfillNow reports that nothing was inserted, because
+// nothing was.  Claiming true here would make an admin endpoint wired to
+// a Noop tell an operator a sweep had been scheduled.
+func (NoopEnqueuer) EnqueueHantBackfillNow(ctx context.Context) (bool, error) {
+	return false, nil
 }
 
 // LateBoundEnqueuer is an Enqueuer whose underlying river-backed
@@ -370,6 +408,24 @@ func (l *LateBoundEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args WarmS
 		return nil
 	}
 	return e.EnqueueWarmSeasonNow(ctx, args)
+}
+
+// EnqueueHantBackfillNow delegates to the bound RealEnqueuer, or reports
+// "not inserted" when unbound.
+//
+// Unlike the sweeps above, this one has a caller that can be reached
+// before Bind in principle — the admin route is registered on the same
+// router — so the unbound branch has to be honest rather than
+// convenient: an operator pressing the button against an unbound
+// enqueuer is told nothing was scheduled, which is true.
+func (l *LateBoundEnqueuer) EnqueueHantBackfillNow(ctx context.Context) (bool, error) {
+	l.mu.RLock()
+	e := l.inner
+	l.mu.RUnlock()
+	if e == nil {
+		return false, nil
+	}
+	return e.EnqueueHantBackfillNow(ctx)
 }
 
 // Compile-time guards: all implementations must satisfy Enqueuer.

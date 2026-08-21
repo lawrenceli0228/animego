@@ -1,4 +1,4 @@
-package main
+package hant
 
 // Loaders for the two vendored human-translation datasets, plus the join
 // key normalisation CGroup needs.
@@ -62,8 +62,8 @@ func loadAnilistSet(path string) (*anilistSet, error) {
 	return set, nil
 }
 
-// anilistPick is the outcome of asking the dataset for one anime's title.
-type anilistPick struct {
+// AnilistPick is the outcome of asking the dataset for one anime's title.
+type AnilistPick struct {
 	// Value is the accepted string, empty when nothing passed.
 	Value string
 	// FromSynonym is true when Title was rejected and a synonym stood in.
@@ -71,9 +71,9 @@ type anilistPick struct {
 	// TitleReason is why the primary Title was rejected, if it was.  It is
 	// what the per-rule rejection counts are built from, so it always
 	// describes Title and never a synonym.
-	TitleReason rejectReason
+	TitleReason RejectReason
 	// TitleSimplified holds the offending runes when TitleReason is
-	// reasonSimplified.  The report emits these so the ~3% of rows that
+	// ReasonSimplified.  The report emits these so the ~3% of rows that
 	// lose a SERP-eligible title this way can be promoted by hand as
 	// source='manual'.
 	TitleSimplified []rune
@@ -87,20 +87,20 @@ type anilistPick struct {
 // the 1,833 Latin titles have a CJK synonym), but a synonym is an
 // alternative name from the same curator regardless of which rule
 // dropped the primary, and 13 further rows are rescued by allowing it.
-func (s *anilistSet) pick(id int32, g *gate) (anilistPick, bool) {
+func (s *anilistSet) pick(id int32, g *gate) (AnilistPick, bool) {
 	rec, ok := s.byID[id]
 	if !ok {
-		return anilistPick{}, false
+		return AnilistPick{}, false
 	}
 
 	reason, simp := g.check(rec.Title)
-	if reason == reasonNone {
-		return anilistPick{Value: rec.Title}, true
+	if reason == ReasonNone {
+		return AnilistPick{Value: rec.Title}, true
 	}
 
-	out := anilistPick{TitleReason: reason, TitleSimplified: simp}
+	out := AnilistPick{TitleReason: reason, TitleSimplified: simp}
 	for _, syn := range rec.Synonyms {
-		if r, _ := g.check(syn); r == reasonNone {
+		if r, _ := g.check(syn); r == ReasonNone {
 			out.Value = syn
 			out.FromSynonym = true
 			return out, true

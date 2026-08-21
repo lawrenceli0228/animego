@@ -115,6 +115,13 @@ func (fakeEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ queue.WarmSeasonAr
 	return nil
 }
 
+// EnqueueHantBackfillNow is a no-op stub: nothing in this test
+// touches the zh-Hant sweep, and reporting "inserted" would be a lie
+// no assertion here is watching for.
+func (fakeEnqueuer) EnqueueHantBackfillNow(_ context.Context) (bool, error) {
+	return false, nil
+}
+
 // EnqueueDescriptionBackfillMany satisfies the method queue.Enqueuer
 // grew in P3.  Like the rest of this fake it is never exercised by the
 // user-CRUD endpoints.

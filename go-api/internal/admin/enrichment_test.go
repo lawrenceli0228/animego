@@ -133,6 +133,13 @@ func (s *spyEnqueuer) EnqueueWarmSeasonNow(ctx context.Context, args queue.WarmS
 	return s.wsErr
 }
 
+// EnqueueHantBackfillNow is a no-op stub: nothing in this test
+// touches the zh-Hant sweep, and reporting "inserted" would be a lie
+// no assertion here is watching for.
+func (s *spyEnqueuer) EnqueueHantBackfillNow(_ context.Context) (bool, error) {
+	return false, nil
+}
+
 // EnqueueDescriptionBackfillMany is a no-op stub and deliberately NOT
 // recorded.  The admin re-enrich endpoints must never seed the
 // description sweep — that is the periodic description_backfill_scan

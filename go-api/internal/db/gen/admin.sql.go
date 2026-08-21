@@ -548,6 +548,114 @@ func (q *Queries) GetDescriptionCnStats(ctx context.Context) (GetDescriptionCnSt
 	return i, err
 }
 
+const getHantBackfillJobStatus = `-- name: GetHantBackfillJobStatus :one
+SELECT
+    -- The ::timestamptz cast is load-bearing, not decoration: without it
+    -- sqlc cannot infer a type through the scalar subquery and generates
+    -- ` + "`" + `interface{}` + "`" + `, which scans into an untyped value the handler would
+    -- have to type-assert at runtime.
+    (SELECT max(finalized_at) FROM river_job
+      WHERE kind = 'hant_backfill'
+        AND state = 'completed')::timestamptz                       AS last_run_at,
+    (SELECT EXISTS (SELECT 1 FROM river_job
+                     WHERE kind = 'hant_backfill'
+                       AND state IN ('available', 'pending', 'running',
+                                     'retryable', 'scheduled')))::boolean AS running
+`
+
+type GetHantBackfillJobStatusRow struct {
+	LastRunAt pgtype.Timestamptz `json:"lastRunAt"`
+	Running   bool               `json:"running"`
+}
+
+// Whether a zh-Hant sweep is in flight, and when the last one finished.
+//
+// Read out of river_job rather than a table of our own.  River already
+// decides what "in flight" means -- it is what the periodic scheduler and
+// the unique index both consult -- and a second source of truth would let
+// the admin page say "running" while river said "idle", or the reverse
+// after a crash that never got to update our column.
+//
+// 'hant_backfill' MUST stay equal to HantBackfillArgs.Kind() in
+// internal/queue/args.go.  sqlc cannot read a Go const, so this is a
+// hand-kept mirror exactly like the '30 days' literals above.  Change one,
+// change both.
+//
+// The state list is the non-terminal set, and MUST stay equal to
+// hantBackfillUniqueStates in internal/queue/args.go for the same reason:
+// the endpoint reports "running" for exactly the states in which a second
+// enqueue is collapsed into the first, so a row that says "running" is
+// also a row that explains why the button did nothing.  'cancelled' and
+// 'discarded' are terminal and deliberately absent -- a discarded sweep is
+// finished, badly, not in flight.
+//
+// last_run_at is the last SUCCESS.  A sweep that exhausted its retries
+// also carries a finalized_at, and reporting that as the last run would
+// tell an operator the drift had been cleared when it had not.
+func (q *Queries) GetHantBackfillJobStatus(ctx context.Context) (GetHantBackfillJobStatusRow, error) {
+	row := q.db.QueryRow(ctx, getHantBackfillJobStatus)
+	var i GetHantBackfillJobStatusRow
+	err := row.Scan(&i.LastRunAt, &i.Running)
+	return i, err
+}
+
+const getHantStats = `-- name: GetHantStats :one
+SELECT
+    count(*)::bigint                                                                        AS total,
+    count(*) FILTER (WHERE title_hant IS NOT NULL)::bigint                                  AS title_hant,
+    count(*) FILTER (WHERE description_hant IS NOT NULL)::bigint                            AS desc_hant,
+    count(*) FILTER (WHERE title_hant_seo IS NOT NULL)::bigint                              AS serp_eligible,
+    count(*) FILTER (WHERE title_chinese  IS NOT NULL AND title_hant       IS NULL)::bigint AS title_behind,
+    count(*) FILTER (WHERE description_cn IS NOT NULL AND description_hant IS NULL)::bigint AS desc_behind
+FROM anime_cache
+`
+
+type GetHantStatsRow struct {
+	Total        int64 `json:"total"`
+	TitleHant    int64 `json:"titleHant"`
+	DescHant     int64 `json:"descHant"`
+	SerpEligible int64 `json:"serpEligible"`
+	TitleBehind  int64 `json:"titleBehind"`
+	DescBehind   int64 `json:"descBehind"`
+}
+
+// zh-Hant coverage and drift — the numbers behind GET /api/admin/hant/stats.
+//
+// Its own query rather than more columns on GetAdminStats, for the same
+// soft-fail reason GetDescriptionCnStats is separate: the admin page must
+// not lose users, anime and enrichment because one panel's columns are
+// missing on a container that rolled forward past migration 0022.
+//
+// title_behind and desc_behind are the point of the whole endpoint.  Both
+// source columns keep growing as the enrichment workers fill them, and
+// nothing converts the new arrivals until this sweep runs, so these two
+// numbers are how a human decides whether to press the button.  They are
+// deliberately NOT the complement of title_hant / description_hant: a row
+// with no title_chinese at all is not behind, it is out of reach, and
+// counting it as work to do would leave the panel permanently non-zero.
+//
+// serp_eligible reads title_hant_seo (migration 0022's generated column,
+// whitelist of wikipedia/anilist/manual) rather than re-deriving the
+// whitelist here.  Re-deriving it would let the dashboard disagree with
+// what the renderer actually puts in <title>.
+//
+// Unfiltered aggregates over ~17.5k rows with no index, which migration
+// 0022 called out as expected: there is no predicate to accelerate and an
+// index on this table would cost more than the scan it saves.
+func (q *Queries) GetHantStats(ctx context.Context) (GetHantStatsRow, error) {
+	row := q.db.QueryRow(ctx, getHantStats)
+	var i GetHantStatsRow
+	err := row.Scan(
+		&i.Total,
+		&i.TitleHant,
+		&i.DescHant,
+		&i.SerpEligible,
+		&i.TitleBehind,
+		&i.DescBehind,
+	)
+	return i, err
+}
+
 const listAnimeForReEnrichByVersion = `-- name: ListAnimeForReEnrichByVersion :many
 SELECT
     anilist_id,
