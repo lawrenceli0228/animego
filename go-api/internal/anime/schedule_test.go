@@ -125,6 +125,13 @@ func (e *scheduleFakeEnqueuer) EnqueueWarmSeasonNow(_ context.Context, _ queue.W
 	return nil
 }
 
+// EnqueueHantBackfillNow is a no-op stub: nothing in this test
+// touches the zh-Hant sweep, and reporting "inserted" would be a lie
+// no assertion here is watching for.
+func (e *scheduleFakeEnqueuer) EnqueueHantBackfillNow(_ context.Context) (bool, error) {
+	return false, nil
+}
+
 func (e *scheduleFakeEnqueuer) snapshotCalls() [][]int32 {
 	e.mu.Lock()
 	defer e.mu.Unlock()

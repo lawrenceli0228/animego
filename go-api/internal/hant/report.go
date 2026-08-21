@@ -1,4 +1,4 @@
-package main
+package hant
 
 // The report: what the ladder would do, why it declined what it declined,
 // and the queue of things a human has to decide.
@@ -16,11 +16,11 @@ import (
 
 // ─── report ──────────────────────────────────────────────────────────────────
 
-// simplifiedRejection is one dataset title dropped by the Simplified
+// SimplifiedRejection is one dataset title dropped by the Simplified
 // rule.  The whole list goes into the report, not a sample: it is the
 // work queue for promoting these titles by hand to source='manual', and a
 // sampled queue is not a queue.
-type simplifiedRejection struct {
+type SimplifiedRejection struct {
 	AnilistID int32  `json:"anilist_id"`
 	Title     string `json:"title"`
 	BadChars  string `json:"bad_chars"`
@@ -28,7 +28,7 @@ type simplifiedRejection struct {
 	Applied   string `json:"applied_source,omitempty"`
 }
 
-type columnReport struct {
+type ColumnReport struct {
 	StoredSources   map[string]int `json:"stored_sources"`
 	ProposedSources map[string]int `json:"proposed_sources"`
 	WouldChange     int            `json:"would_change"`
@@ -36,7 +36,7 @@ type columnReport struct {
 	Stale           map[string]int `json:"stale"`
 }
 
-type gateReport struct {
+type GateReport struct {
 	AnilistRecordsMatched int            `json:"anilist_records_matched"`
 	TitleAccepted         int            `json:"anilist_title_accepted"`
 	TitleRejected         map[string]int `json:"anilist_title_rejected_by_rule"`
@@ -47,14 +47,14 @@ type gateReport struct {
 	CgroupKeysDropped     []string       `json:"cgroup_keys_dropped_ambiguous"`
 }
 
-type report struct {
+type Report struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	TotalRows   int       `json:"total_rows"`
 	RestaleOnly bool      `json:"restale_only"`
 
-	Title       columnReport `json:"title_hant"`
-	Description columnReport `json:"description_hant"`
-	Gate        gateReport   `json:"gate"`
+	Title       ColumnReport `json:"title_hant"`
+	Description ColumnReport `json:"description_hant"`
+	Gate        GateReport   `json:"gate"`
 
 	// SimplifiedRejectionChars counts the rejections by offending
 	// character, most frequent first.  It exists because the raw list
@@ -68,33 +68,33 @@ type report struct {
 	// promotion queue should be able to see in one line that half of it
 	// is one orthographic disagreement repeated, not half-Simplified
 	// titles.
-	SimplifiedRejectionChars []charCount `json:"simplified_rejection_chars"`
+	SimplifiedRejectionChars []CharCount `json:"simplified_rejection_chars"`
 
-	SimplifiedRejections []simplifiedRejection `json:"simplified_rejections"`
+	SimplifiedRejections []SimplifiedRejection `json:"simplified_rejections"`
 }
 
-// charCount is one row of the offending-character histogram.
-type charCount struct {
+// CharCount is one row of the offending-character histogram.
+type CharCount struct {
 	Chars string `json:"chars"`
 	Count int    `json:"count"`
 }
 
-func newColumnReport() columnReport {
-	return columnReport{
+func newColumnReport() ColumnReport {
+	return ColumnReport{
 		StoredSources:   map[string]int{},
 		ProposedSources: map[string]int{},
 		Stale:           map[string]int{},
 	}
 }
 
-func buildReport(r *resolver, results []rowResult, restaleOnly bool) report {
-	rep := report{
+func BuildReport(r *Resolver, results []RowResult, restaleOnly bool) Report {
+	rep := Report{
 		GeneratedAt: time.Now().UTC(),
 		TotalRows:   len(results),
 		RestaleOnly: restaleOnly,
 		Title:       newColumnReport(),
 		Description: newColumnReport(),
-		Gate: gateReport{
+		Gate: GateReport{
 			TitleRejected:     map[string]int{},
 			RescuedBySynonym:  map[string]int{},
 			CgroupHitsVia:     map[string]int{},
@@ -106,18 +106,18 @@ func buildReport(r *resolver, results []rowResult, restaleOnly bool) report {
 	seenSimplified := make(map[int32]struct{})
 
 	for _, res := range results {
-		tally(&rep.Title, res.row.TitleHantSource, res.title, res.titleManual, res.titleChanged, res.titleStale)
-		tally(&rep.Description, res.row.DescHantSource, res.desc, res.descManual, res.descChanged, res.descStale)
+		tally(&rep.Title, res.Row.TitleHantSource, res.Title, res.TitleManual, res.TitleChanged, res.TitleStale)
+		tally(&rep.Description, res.Row.DescHantSource, res.Desc, res.DescManual, res.DescChanged, res.DescStale)
 
-		if res.title.Via != "" {
-			rep.Gate.CgroupHitsVia[res.title.Via]++
+		if res.Title.Via != "" {
+			rep.Gate.CgroupHitsVia[res.Title.Via]++
 		}
-		if !res.title.PickAttempted {
+		if !res.Title.PickAttempted {
 			continue
 		}
 		rep.Gate.AnilistRecordsMatched++
-		pick := res.title.Pick
-		if pick.TitleReason == reasonNone {
+		pick := res.Title.Pick
+		if pick.TitleReason == ReasonNone {
 			rep.Gate.TitleAccepted++
 		} else {
 			rep.Gate.TitleRejected[string(pick.TitleReason)]++
@@ -128,20 +128,20 @@ func buildReport(r *resolver, results []rowResult, restaleOnly bool) report {
 			}
 		}
 
-		if pick.TitleReason != reasonSimplified {
+		if pick.TitleReason != ReasonSimplified {
 			continue
 		}
-		if _, dup := seenSimplified[res.row.AnilistID]; dup {
+		if _, dup := seenSimplified[res.Row.AnilistID]; dup {
 			continue
 		}
-		seenSimplified[res.row.AnilistID] = struct{}{}
-		rec := r.anilist.byID[res.row.AnilistID]
-		rep.SimplifiedRejections = append(rep.SimplifiedRejections, simplifiedRejection{
-			AnilistID: res.row.AnilistID,
+		seenSimplified[res.Row.AnilistID] = struct{}{}
+		rec := r.anilist.byID[res.Row.AnilistID]
+		rep.SimplifiedRejections = append(rep.SimplifiedRejections, SimplifiedRejection{
+			AnilistID: res.Row.AnilistID,
 			Title:     rec.Title,
 			BadChars:  string(pick.TitleSimplified),
 			Rescued:   pick.Value,
-			Applied:   res.title.Source,
+			Applied:   res.Title.Source,
 		})
 	}
 
@@ -154,7 +154,7 @@ func buildReport(r *resolver, results []rowResult, restaleOnly bool) report {
 		byChars[r.BadChars]++
 	}
 	for chars, n := range byChars {
-		rep.SimplifiedRejectionChars = append(rep.SimplifiedRejectionChars, charCount{Chars: chars, Count: n})
+		rep.SimplifiedRejectionChars = append(rep.SimplifiedRejectionChars, CharCount{Chars: chars, Count: n})
 	}
 	sort.Slice(rep.SimplifiedRejectionChars, func(i, j int) bool {
 		a, b := rep.SimplifiedRejectionChars[i], rep.SimplifiedRejectionChars[j]
@@ -166,18 +166,18 @@ func buildReport(r *resolver, results []rowResult, restaleOnly bool) report {
 	return rep
 }
 
-func tally(c *columnReport, storedSource *string, d decision, manual, changed bool, stale staleKind) {
+func tally(c *ColumnReport, storedSource *string, d Decision, manual, changed bool, stale StaleKind) {
 	if storedSource == nil {
 		c.StoredSources["none"]++
 	} else {
 		c.StoredSources[*storedSource]++
 	}
-	if stale != staleNone {
+	if stale != StaleNone {
 		c.Stale[string(stale)]++
 	}
 	if manual {
 		c.ManualUntouched++
-		c.ProposedSources[srcManual]++
+		c.ProposedSources[SrcManual]++
 		return
 	}
 	if d.Source == "" {
@@ -192,10 +192,10 @@ func tally(c *columnReport, storedSource *string, d decision, manual, changed bo
 
 // sourceOrder is the print order for the tier tables — the precedence
 // ladder itself, so a reader sees the trunk and the tail in the order the
-// resolver tried them.
-var sourceOrder = []string{srcManual, srcWikipedia, srcAnilist, srcOpenCC, "none"}
+// Resolver tried them.
+var sourceOrder = []string{SrcManual, SrcWikipedia, SrcAnilist, SrcOpenCC, "none"}
 
-// printSummary renders the report an operator reads before deciding
+// PrintSummary renders the report an operator reads before deciding
 // whether to run --apply.
 //
 // It takes the writer so the rendering is assertable, and it takes the
@@ -203,7 +203,7 @@ var sourceOrder = []string{srcManual, srcWikipedia, srcAnilist, srcOpenCC, "none
 // the flag is already recorded in rep.RestaleOnly and passing it twice
 // only creates a way for the printed banner to disagree with the JSON
 // written beside it.
-func printSummary(w io.Writer, rep report) {
+func PrintSummary(w io.Writer, rep Report) {
 	fmt.Fprintf(w, "\nRows scanned: %d\n", rep.TotalRows)
 	if rep.RestaleOnly {
 		fmt.Fprintf(w, "Mode: --restale (only rows with a stale source hash are writable)\n")
@@ -214,7 +214,7 @@ func printSummary(w io.Writer, rep report) {
 
 	fmt.Fprintf(w, "\nQUALITY GATE (anilist-chinese, over the %d non-manual rows with a dataset record)\n", rep.Gate.AnilistRecordsMatched)
 	fmt.Fprintf(w, "  %-28s %8d\n", "title accepted", rep.Gate.TitleAccepted)
-	for _, rule := range []rejectReason{reasonKana, reasonNoHan, reasonSimplified, reasonEmpty} {
+	for _, rule := range []RejectReason{ReasonKana, ReasonNoHan, ReasonSimplified, ReasonEmpty} {
 		n := rep.Gate.TitleRejected[string(rule)]
 		if n == 0 {
 			continue
@@ -248,7 +248,7 @@ func printSummary(w io.Writer, rep report) {
 // it is not showing, because a histogram that scrolls off is not read.
 const maxRejectionChars = 8
 
-func printColumn(w io.Writer, name string, total int, c columnReport) {
+func printColumn(w io.Writer, name string, total int, c ColumnReport) {
 	fmt.Fprintf(w, "\n%s\n", name)
 	fmt.Fprintf(w, "  %-12s %8s %8s   %8s %8s\n", "SOURCE", "STORED", "PCT", "PROPOSED", "PCT")
 	fmt.Fprintf(w, "  %-12s %8s %8s   %8s %8s\n", "───────────", "────────", "───────", "────────", "───────")
@@ -261,7 +261,7 @@ func printColumn(w io.Writer, name string, total int, c columnReport) {
 	}
 	fmt.Fprintf(w, "  %-12s %8s %8s   %8d\n", "would change", "", "", c.WouldChange)
 	if len(c.Stale) > 0 {
-		for _, k := range []staleKind{staleHash, staleMissingHash, staleGone} {
+		for _, k := range []StaleKind{StaleHash, StaleMissingHash, StaleGone} {
 			if n := c.Stale[string(k)]; n > 0 {
 				fmt.Fprintf(w, "  %-12s %8s %8s   %8d  (%s)\n", "stale", "", "", n, k)
 			}

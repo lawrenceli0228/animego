@@ -166,6 +166,48 @@ export interface AdminStats {
   follows: number;
 }
 
+/**
+ * Traditional-Chinese drift, from `GET /api/admin/hant/stats`.
+ *
+ * The two `*Behind` counters are the point of the payload; everything else is
+ * the context that makes a zero legible as "nothing to do" rather than
+ * "broken". They are NOT a "missing text" count: the render ladder falls back
+ * to the Simplified column instead of blanking, so a row that is behind serves
+ * Simplified prose under a Traditional URL — the exact failure the locale
+ * project exists to prevent, one anime at a time.
+ *
+ * Kept as its own interface rather than folded into AdminStats: it comes off a
+ * separate endpoint with its own trigger, and merging them would put a
+ * quarterly job's counters behind the 337ms stats query on every poll.
+ */
+export interface HantDriftStats {
+  /** Rows in anime_cache — the denominator for both coverage figures. */
+  total: number;
+  /** Rows carrying a Traditional title, any tier, conversions included. */
+  titleHant: number;
+  /** Rows carrying a Traditional synopsis. */
+  descHant: number;
+  /**
+   * Rows whose Traditional title came from a human source and may therefore
+   * appear in `<title>` / JSON-LD. A generated column in the database excludes
+   * the machine-converted ones, so this is always <= `titleHant`; the gap is
+   * meaningful, not an error.
+   */
+  serpEligible: number;
+  /** `title_chinese IS NOT NULL AND title_hant IS NULL`. */
+  titleBehind: number;
+  /** `description_cn IS NOT NULL AND description_hant IS NULL`. */
+  descBehind: number;
+  /**
+   * When the backfill last finished. Null means it has never run — which on a
+   * fresh deployment is true and unremarkable, so it is reported rather than
+   * alarmed on. The counters above are the thing to read.
+   */
+  lastRunAt: string | null;
+  /** A backfill is in flight right now. Gates the trigger button. */
+  running: boolean;
+}
+
 export type EnrichmentFlag = "needs-review" | "manually-corrected" | null;
 
 export interface EnrichmentRow {

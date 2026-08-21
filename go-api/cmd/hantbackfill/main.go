@@ -49,14 +49,18 @@
 //
 // --out FILE: report JSON path (default hant-report.json).
 //
-// Why a standalone CLI and not a river sweep
-// ------------------------------------------
-// description_backfill.go rejected a CLI because its work spends a shared
-// rate-limit budget that a second process would blow.  Nothing here
-// touches the network: both datasets and the conversion table are
-// vendored files.  The only shared resource is Postgres, and the writes
-// are idempotent, so a CLI is the right shape — an operator can run it,
-// read the report, and decide.
+// What lives here and what lives in internal/hant
+// -----------------------------------------------
+// The datasets, the quality gate, the OpenCC port, the precedence ladder,
+// the report and the batch-write core are in internal/hant, because the
+// river worker (internal/queue/hant_backfill.go) runs the same ladder on
+// a 90-day schedule and an admin button.  Two copies of the gate would be
+// two definitions of what may reach a Traditional column.
+//
+// What stays here is what only an operator at a shell needs: the flags,
+// the read-only assertion, and the pre-write backup file.  The worker
+// writes no backup — see the note in hant_backfill.go for why that is
+// safe there and not here.
 package main
 
 import (
@@ -70,7 +74,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sort"
 	"syscall"
 	"time"
@@ -78,24 +81,17 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/hant"
 )
 
-const (
-	applyBatchSize = 500
-
-	anilistFile = "anilist-chinese.json"
-	cgroupFile  = "cgroup-hk.json"
-	openccFile  = "opencc-s2twp.txt"
-
-	defaultReportFile = "hant-report.json"
-)
+const defaultReportFile = "hant-report.json"
 
 func main() {
 	reportMode := flag.Bool("report", false, "assert read-only: refuse to run if --apply is also set")
 	applyMode := flag.Bool("apply", false, "WRITES: fill title_hant / description_hant")
 	restaleMode := flag.Bool("restale", false, "narrow to rows whose stored source hash no longer matches its input")
 	limit := flag.Int("limit", 0, "stop after N rows (0=all)")
-	dataDir := flag.String("data", filepath.Join("data", "hant"), "vendored dataset directory")
+	dataDir := flag.String("data", hant.DefaultDataDir, "vendored dataset directory")
 	outFile := flag.String("out", defaultReportFile, "path for the JSON report")
 	flag.Parse()
 
@@ -125,17 +121,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	res, err := newResolverFromDir(*dataDir)
+	res, err := hant.NewResolverFromDir(*dataDir)
 	if err != nil {
 		slog.Error("load vendored datasets failed", "err", err, "dir", *dataDir)
 		os.Exit(1)
 	}
+	stats := res.LoadStats()
 	slog.Info("datasets loaded",
 		"dir", *dataDir,
-		"anilist_records", len(res.anilist.byID),
-		"cgroup_keys", len(res.cgroup.byKey),
-		"cgroup_keys_dropped_ambiguous", len(res.cgroup.Dropped),
-		"simplified_runes", len(res.gate.simplified),
+		"anilist_records", stats.AnilistRecords,
+		"cgroup_keys", stats.CgroupKeys,
+		"cgroup_keys_dropped_ambiguous", stats.CgroupDropped,
+		"simplified_runes", stats.SimplifiedRunes,
 	)
 
 	cfg, err := config.Load()
@@ -153,41 +150,11 @@ func main() {
 	defer pool.Close()
 	q := dbgen.New(pool)
 
-	slog.Info("fetching anime_cache rows")
-	dbRows, err := q.ListAnimeForHantBackfill(ctx)
+	results, err := runReport(ctx, os.Stdout, res, q, *limit, *restaleMode, reportFile)
 	if err != nil {
-		slog.Error("ListAnimeForHantBackfill failed", "err", err)
+		slog.Error("report failed", "err", err)
 		os.Exit(1)
 	}
-	rows := make([]animeRow, 0, len(dbRows))
-	for _, r := range dbRows {
-		if *limit > 0 && len(rows) >= *limit {
-			break
-		}
-		rows = append(rows, animeRow{
-			AnilistID:       r.AnilistID,
-			TitleNative:     r.TitleNative,
-			TitleChinese:    r.TitleChinese,
-			DescriptionCN:   r.DescriptionCn,
-			TitleHant:       r.TitleHant,
-			TitleHantSource: r.TitleHantSource,
-			TitleHantHash:   r.TitleHantSourceHash,
-			DescHant:        r.DescriptionHant,
-			DescHantSource:  r.DescriptionHantSource,
-			DescHantHash:    r.DescriptionHantSourceHash,
-		})
-	}
-	slog.Info("rows fetched", "total", len(rows))
-
-	results := classifyAll(res, rows)
-	rep := buildReport(res, results, *restaleMode)
-	printSummary(os.Stdout, rep)
-
-	if err := writeJSON(reportFile, rep); err != nil {
-		slog.Error("write report failed", "err", err, "path", reportFile)
-		os.Exit(1)
-	}
-	slog.Info("report written", "path", reportFile)
 
 	if mode.Writes {
 		if err := runApply(ctx, os.Stdout, q, results, *restaleMode); err != nil {
@@ -195,6 +162,61 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// ─── report ──────────────────────────────────────────────────────────────────
+
+// rowLister is the whole-table read.  Narrow so the report half of the
+// tool can be driven without a pool: everything below is a pure function
+// of (datasets, rows) plus one file write, and none of it should need
+// Postgres to be provable.
+type rowLister interface {
+	ListAnimeForHantBackfill(ctx context.Context) ([]dbgen.ListAnimeForHantBackfillRow, error)
+}
+
+// runReport fetches every row, runs the ladder over it, prints the
+// summary and writes the JSON.
+//
+// It returns the classification rather than recomputing it, because
+// --apply must write exactly what the operator was shown.  Classifying
+// twice would open a window in which the two disagree — the datasets are
+// read-only, but anime_cache is not, and a second read mid-run would
+// produce a report describing rows other than the ones written.
+//
+// The report is written on every run, --apply or not.  Its
+// simplified_rejections list is the queue a human promotes titles to
+// source='manual' from, so a run that wrote rows without leaving that
+// record behind would be the expensive half without the useful half.
+func runReport(
+	ctx context.Context,
+	out io.Writer,
+	res *hant.Resolver,
+	q rowLister,
+	limit int,
+	restaleOnly bool,
+	reportFile string,
+) ([]hant.RowResult, error) {
+	slog.Info("fetching anime_cache rows")
+	dbRows, err := q.ListAnimeForHantBackfill(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ListAnimeForHantBackfill: %w", err)
+	}
+	rows := hant.RowsFromDB(dbRows, limit)
+	slog.Info("rows fetched", "total", len(rows))
+
+	results := hant.ClassifyAll(res, rows)
+	rep := hant.BuildReport(res, results, restaleOnly)
+	hant.PrintSummary(out, rep)
+
+	// Written before runApply is reached, not after: the report is what an
+	// operator reads to decide whether the apply was right, and a run that
+	// wrote 12k rows and then failed to write its report would leave no
+	// record of what it did.
+	if err := writeJSON(reportFile, rep); err != nil {
+		return nil, fmt.Errorf("write report to %s: %w", reportFile, err)
+	}
+	slog.Info("report written", "path", reportFile)
+	return results, nil
 }
 
 // ─── mode resolution ─────────────────────────────────────────────────────────
@@ -261,105 +283,6 @@ func reportPath(out string, outExplicit bool, limit int) string {
 	return fmt.Sprintf("hant-report-limit-%d.json", limit)
 }
 
-// newResolverFromDir loads the three vendored files and derives the gate.
-func newResolverFromDir(dir string) (*resolver, error) {
-	conv, err := LoadConverter(filepath.Join(dir, openccFile))
-	if err != nil {
-		return nil, err
-	}
-	g, err := newGate(conv)
-	if err != nil {
-		return nil, err
-	}
-	as, err := loadAnilistSet(filepath.Join(dir, anilistFile))
-	if err != nil {
-		return nil, err
-	}
-	cs, err := loadCgroupSet(filepath.Join(dir, cgroupFile))
-	if err != nil {
-		return nil, err
-	}
-	return &resolver{cgroup: cs, anilist: as, gate: g, conv: conv}, nil
-}
-
-// ─── classification ──────────────────────────────────────────────────────────
-
-// rowResult is one row's full outcome: what the ladder proposes, what is
-// stored, and whether the two differ.
-type rowResult struct {
-	row animeRow
-
-	titleManual bool
-	descManual  bool
-
-	title decision
-	desc  decision
-
-	titleChanged bool
-	descChanged  bool
-
-	titleStale staleKind
-	descStale  staleKind
-}
-
-func classifyAll(r *resolver, rows []animeRow) []rowResult {
-	out := make([]rowResult, 0, len(rows))
-	for i, row := range rows {
-		if i > 0 && i%2000 == 0 {
-			slog.Info("classification progress", "processed", i, "total", len(rows))
-		}
-
-		res := rowResult{
-			row:         row,
-			titleManual: isManual(row.TitleHantSource),
-			descManual:  isManual(row.DescHantSource),
-			titleStale:  r.checkStale(row, row.TitleHant, row.TitleHantSource, row.TitleHantHash),
-			descStale:   r.checkDescriptionStale(row),
-		}
-
-		if !res.titleManual {
-			res.title = r.resolveTitle(row)
-			res.titleChanged = differs(res.title, row.TitleHant, row.TitleHantSource, row.TitleHantHash)
-		}
-		if !res.descManual {
-			res.desc = r.resolveDescription(row)
-			res.descChanged = differs(res.desc, row.DescHant, row.DescHantSource, row.DescHantHash)
-		}
-		out = append(out, res)
-	}
-	slog.Info("classification complete", "total", len(rows))
-	return out
-}
-
-// differs reports whether a proposed decision would change the stored
-// triple.  A decision with no source proposes nothing and therefore never
-// changes anything — the ladder reaching none of its tiers is not a
-// reason to blank a column someone else filled.
-func differs(d decision, value, source, hash *string) bool {
-	if d.Source == "" {
-		return false
-	}
-	return !eq(value, d.Value) || !eq(source, d.Source) || !eq(hash, d.Hash)
-}
-
-func eq(stored *string, want string) bool {
-	return stored != nil && *stored == want
-}
-
-// writable returns the rows this run would actually write, honouring
-// --restale.
-func writable(results []rowResult, restaleOnly bool) (titles, descs []rowResult) {
-	for _, r := range results {
-		if !r.titleManual && r.titleChanged && (!restaleOnly || r.titleStale != staleNone) {
-			titles = append(titles, r)
-		}
-		if !r.descManual && r.descChanged && (!restaleOnly || r.descStale != staleNone) {
-			descs = append(descs, r)
-		}
-	}
-	return titles, descs
-}
-
 // ─── apply ───────────────────────────────────────────────────────────────────
 
 // backupRow is one pre-write snapshot.  Written before anything is
@@ -376,18 +299,8 @@ type backupRow struct {
 	DescriptionHantSourceHash *string `json:"description_hant_source_hash"`
 }
 
-// hantWriter is the slice of *dbgen.Queries that runApply uses.  Narrow
-// on purpose: the generated Querier carries a hundred-odd methods, and an
-// interface that wide cannot be faked in a test without a pool, which
-// would leave the whole apply path -- backup-before-write, the alignment
-// guard, the offered-vs-written gap -- provable only by reading it.
-type hantWriter interface {
-	ApplyHantTitleBatch(ctx context.Context, anilistIds []int32, titles []string, sources []string, hashes []string) (int64, error)
-	ApplyHantDescriptionBatch(ctx context.Context, anilistIds []int32, descriptions []string, sources []string, hashes []string) (int64, error)
-}
-
-func runApply(ctx context.Context, out io.Writer, q hantWriter, results []rowResult, restaleOnly bool) error {
-	titles, descs := writable(results, restaleOnly)
+func runApply(ctx context.Context, out io.Writer, q hant.Writer, results []hant.RowResult, restaleOnly bool) error {
+	titles, descs := hant.Writable(results, restaleOnly)
 	if len(titles) == 0 && len(descs) == 0 {
 		fmt.Fprintf(out, "\nApply complete: nothing to write.\n\n")
 		return nil
@@ -397,20 +310,20 @@ func runApply(ctx context.Context, out io.Writer, q hantWriter, results []rowRes
 	// first UPDATE runs.
 	seen := make(map[int32]struct{}, len(titles)+len(descs))
 	var backup []backupRow
-	for _, group := range [][]rowResult{titles, descs} {
+	for _, group := range [][]hant.RowResult{titles, descs} {
 		for _, r := range group {
-			if _, dup := seen[r.row.AnilistID]; dup {
+			if _, dup := seen[r.Row.AnilistID]; dup {
 				continue
 			}
-			seen[r.row.AnilistID] = struct{}{}
+			seen[r.Row.AnilistID] = struct{}{}
 			backup = append(backup, backupRow{
-				AnilistID:                 r.row.AnilistID,
-				TitleHant:                 r.row.TitleHant,
-				TitleHantSource:           r.row.TitleHantSource,
-				TitleHantSourceHash:       r.row.TitleHantHash,
-				DescriptionHant:           r.row.DescHant,
-				DescriptionHantSource:     r.row.DescHantSource,
-				DescriptionHantSourceHash: r.row.DescHantHash,
+				AnilistID:                 r.Row.AnilistID,
+				TitleHant:                 r.Row.TitleHant,
+				TitleHantSource:           r.Row.TitleHantSource,
+				TitleHantSourceHash:       r.Row.TitleHantHash,
+				DescriptionHant:           r.Row.DescHant,
+				DescriptionHantSource:     r.Row.DescHantSource,
+				DescriptionHantSourceHash: r.Row.DescHantHash,
 			})
 		}
 	}
@@ -429,18 +342,12 @@ func runApply(ctx context.Context, out io.Writer, q hantWriter, results []rowRes
 	// used to leave the operator hunting for the undo file in slog output.
 	fmt.Fprintf(out, "\nBackup:  %s  (%d rows)\n", backupPath, len(backup))
 
-	titlesWritten, err := applyBatches(ctx, len(titles), func(start, end int) (int64, error) {
-		ids, vals, srcs, hashes := columns(titles[start:end], func(r rowResult) decision { return r.title })
-		return writeBatch(ctx, ids, vals, srcs, hashes, q.ApplyHantTitleBatch)
-	})
+	titlesWritten, err := hant.ApplyTitles(ctx, q, titles)
 	if err != nil {
 		return fmt.Errorf("title_hant: %w", err)
 	}
 
-	descsWritten, err := applyBatches(ctx, len(descs), func(start, end int) (int64, error) {
-		ids, vals, srcs, hashes := columns(descs[start:end], func(r rowResult) decision { return r.desc })
-		return writeBatch(ctx, ids, vals, srcs, hashes, q.ApplyHantDescriptionBatch)
-	})
+	descsWritten, err := hant.ApplyDescriptions(ctx, q, descs)
 	if err != nil {
 		return fmt.Errorf("description_hant: %w", err)
 	}
@@ -467,83 +374,6 @@ func printWritten(w io.Writer, column string, written int64, offered int) {
 	}
 	fmt.Fprintf(w, "  %-17s %d rows written (%d offered; %d skipped by the manual guard or gone)\n",
 		column, written, offered, offered-int(written))
-}
-
-// columns pivots a slice of rowResult into the four parallel arrays the
-// batch statements take.
-func columns(rows []rowResult, pick func(rowResult) decision) (ids []int32, values, sources, hashes []string) {
-	ids = make([]int32, 0, len(rows))
-	values = make([]string, 0, len(rows))
-	sources = make([]string, 0, len(rows))
-	hashes = make([]string, 0, len(rows))
-	for _, r := range rows {
-		d := pick(r)
-		ids = append(ids, r.row.AnilistID)
-		values = append(values, d.Value)
-		sources = append(sources, d.Source)
-		hashes = append(hashes, d.Hash)
-	}
-	return ids, values, sources, hashes
-}
-
-// checkAligned refuses to send arrays of unequal length to an unnest join.
-//
-// Postgres evaluates several set-returning functions in one SELECT list
-// in lockstep and pads the shorter ones with NULL instead of raising, so
-// four ids and three hashes writes a NULL hash onto the last row and
-// reports success.  columns() builds all four in a single pass and cannot
-// produce a mismatch, which is exactly why the check is here rather than
-// trusted to stay true -- it costs four comparisons per batch and turns a
-// silent corruption into a refusal.
-func checkAligned(ids []int32, values, sources, hashes []string) error {
-	n := len(ids)
-	if len(values) == n && len(sources) == n && len(hashes) == n {
-		return nil
-	}
-	return fmt.Errorf(
-		"refusing to write: unnest arrays are not the same length (ids=%d values=%d sources=%d hashes=%d); "+
-			"Postgres would pad the short ones with NULL rather than fail",
-		n, len(values), len(sources), len(hashes))
-}
-
-// batchWriter is the shape of both generated :execrows statements.
-type batchWriter func(ctx context.Context, ids []int32, values, sources, hashes []string) (int64, error)
-
-// writeBatch is checkAligned and the statement, in that order.
-//
-// The order is the whole point, so it lives in one named function rather
-// than being spelled out at each of the two call sites: a guard that runs
-// after the UPDATE, or that a later edit drops from one of the two
-// closures, protects nothing.  Written this way the ordering is a thing a
-// test can hold, with a fake statement that records whether it was
-// reached.
-func writeBatch(ctx context.Context, ids []int32, values, sources, hashes []string, write batchWriter) (int64, error) {
-	if err := checkAligned(ids, values, sources, hashes); err != nil {
-		return 0, err
-	}
-	return write(ctx, ids, values, sources, hashes)
-}
-
-// applyBatches runs fn over [0,n) in applyBatchSize chunks and sums the
-// rows each one actually updated.
-func applyBatches(ctx context.Context, n int, fn func(start, end int) (int64, error)) (int64, error) {
-	var written int64
-	for start := 0; start < n; start += applyBatchSize {
-		// Checked before the batch, not after: cancellation should stop
-		// the next write, and a check that only runs after the last one
-		// can never prevent anything.
-		if err := ctx.Err(); err != nil {
-			return written, fmt.Errorf("interrupted after %d rows: %w", written, err)
-		}
-		end := min(start+applyBatchSize, n)
-		rows, err := fn(start, end)
-		if err != nil {
-			return written, fmt.Errorf("batch [%d:%d]: %w", start, end, err)
-		}
-		written += rows
-		slog.Info("batch written", "start", start, "end", end, "rows_updated", rows)
-	}
-	return written, nil
 }
 
 // backupStamp is the timestamp in the backup filename.  One-second

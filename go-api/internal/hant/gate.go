@@ -1,4 +1,4 @@
-package main
+package hant
 
 // The quality gate.
 //
@@ -19,17 +19,17 @@ import (
 	"unicode"
 )
 
-// rejectReason names the rule that dropped a candidate.  It is also the
+// RejectReason names the rule that dropped a candidate.  It is also the
 // key the JSON report groups rejections under, so the strings are part of
 // the report's interface.
-type rejectReason string
+type RejectReason string
 
 const (
-	reasonNone       rejectReason = ""
-	reasonKana       rejectReason = "kana"
-	reasonNoHan      rejectReason = "no_han"
-	reasonSimplified rejectReason = "simplified"
-	reasonEmpty      rejectReason = "empty"
+	ReasonNone       RejectReason = ""
+	ReasonKana       RejectReason = "kana"
+	ReasonNoHan      RejectReason = "no_han"
+	ReasonSimplified RejectReason = "simplified"
+	ReasonEmpty      RejectReason = "empty"
 )
 
 // gate decides whether a dataset string may be written to a *_hant
@@ -156,18 +156,18 @@ func (g *gate) simplifiedRunes(s string) []rune {
 // Han character, so the third rule would have nothing to say about it.
 // Reporting the *first* matching rule is what makes the report's
 // per-rule counts add up to the rejection total.
-func (g *gate) check(s string) (rejectReason, []rune) {
+func (g *gate) check(s string) (RejectReason, []rune) {
 	if s == "" {
-		return reasonEmpty, nil
+		return ReasonEmpty, nil
 	}
 	if hasKana(s) {
-		return reasonKana, nil
+		return ReasonKana, nil
 	}
 	if !hasHan(s) {
-		return reasonNoHan, nil
+		return ReasonNoHan, nil
 	}
 	if bad := g.simplifiedRunes(s); len(bad) > 0 {
-		return reasonSimplified, bad
+		return ReasonSimplified, bad
 	}
-	return reasonNone, nil
+	return ReasonNone, nil
 }

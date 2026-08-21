@@ -5,6 +5,11 @@ package main
 // after the fact -- the code is correct now, and these exist so it stays
 // that way.
 //
+// The ladder, the gate and the batch-write core moved to internal/hant
+// when the river worker started sharing them, and their tests moved with
+// them.  What is left here is what only the CLI has: the read-only
+// assertion, the report path, and the pre-apply backup file.
+//
 // Nothing here touches Postgres.  The two batch statements reach the
 // database through a two-method interface, so the apply path is exercised
 // with a fake that records what it was handed; the assertions that need a
@@ -24,6 +29,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lawrenceli0228/animego/go-api/internal/hant"
 )
 
 // ─── fakes ───────────────────────────────────────────────────────────────────
@@ -74,124 +81,31 @@ func (f *fakeStatements) record(into *[]batchArgs, ids []int32, values, sources,
 func (f *fakeStatements) calls() int { return len(f.titleBatches) + len(f.descBatches) }
 
 // changedTitleRow is a row the ladder wants to write a title onto.
-func changedTitleRow(id int32, value string) rowResult {
-	return rowResult{
-		row:          animeRow{AnilistID: id, TitleChinese: ptr(value)},
-		title:        decision{Source: srcAnilist, Value: value, Input: value, Hash: sourceHash(value)},
-		titleChanged: true,
+func changedTitleRow(id int32, value string) hant.RowResult {
+	return hant.RowResult{
+		Row:          hant.Row{AnilistID: id, TitleChinese: ptr(value)},
+		Title:        hant.Decision{Source: hant.SrcAnilist, Value: value, Input: value, Hash: hant.SourceHash(value)},
+		TitleChanged: true,
 	}
 }
 
 // changedDescRow is the description column's equivalent.
-func changedDescRow(id int32, value string) rowResult {
-	return rowResult{
-		row:         animeRow{AnilistID: id, DescriptionCN: ptr(value)},
-		desc:        decision{Source: srcOpenCC, Value: value, Input: value, Hash: sourceHash(value)},
-		descChanged: true,
+func changedDescRow(id int32, value string) hant.RowResult {
+	return hant.RowResult{
+		Row:         hant.Row{AnilistID: id, DescriptionCN: ptr(value)},
+		Desc:        hant.Decision{Source: hant.SrcOpenCC, Value: value, Input: value, Hash: hant.SourceHash(value)},
+		DescChanged: true,
 	}
 }
 
 // applyInTempDir runs runApply with the working directory somewhere
 // disposable, because the backup lands on a relative path.
-func applyInTempDir(t *testing.T, ctx context.Context, q hantWriter, results []rowResult, restaleOnly bool) (string, error) {
+func applyInTempDir(t *testing.T, ctx context.Context, q hant.Writer, results []hant.RowResult, restaleOnly bool) (string, error) {
 	t.Helper()
 	t.Chdir(t.TempDir())
 	var out bytes.Buffer
 	err := runApply(ctx, &out, q, results, restaleOnly)
 	return out.String(), err
-}
-
-// ─── 1. batch array alignment ────────────────────────────────────────────────
-
-// Prevents: a ragged batch reaching Postgres.
-//
-// Several unnest()s in one SELECT list are evaluated in lockstep and the
-// short ones are padded with NULL rather than raising, so four ids and
-// three hashes writes a NULL hash onto the fourth row and comes back
-// reporting four rows updated.  The run looks clean and the column is
-// corrupt.  checkAligned only helps if it runs first, so what is asserted
-// here is the ordering: the statement must not be reached at all.
-func TestWriteBatchRefusesRaggedArraysBeforeTheStatementRuns(t *testing.T) {
-	ids := []int32{1, 2, 3, 4}
-	four := []string{"a", "b", "c", "d"}
-	three := []string{"a", "b", "c"}
-	five := []string{"a", "b", "c", "d", "e"}
-
-	cases := []struct {
-		name                    string
-		values, sources, hashes []string
-		wantIn                  []string
-	}{
-		// The case the guard was written for, verbatim from its comment.
-		{"three hashes for four ids", four, four, three, []string{"ids=4", "hashes=3"}},
-		{"short values", three, four, four, []string{"ids=4", "values=3"}},
-		{"short sources", four, three, four, []string{"ids=4", "sources=3"}},
-		// Over-long is just as bad: the extra element is dropped silently.
-		{"long values", five, four, four, []string{"ids=4", "values=5"}},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			reached := false
-			written, err := writeBatch(context.Background(), ids, tc.values, tc.sources, tc.hashes,
-				func(context.Context, []int32, []string, []string, []string) (int64, error) {
-					reached = true
-					return int64(len(ids)), nil
-				})
-
-			if reached {
-				t.Fatal("the statement ran on a ragged batch — Postgres pads with NULL and reports success, so the guard has to stop it before the call, not after")
-			}
-			if err == nil {
-				t.Fatal("a ragged batch must be refused")
-			}
-			if written != 0 {
-				t.Fatalf("written = %d on a refusal, want 0 — a refused batch changed nothing", written)
-			}
-			// The operator has to be able to see which array was short.
-			for _, want := range tc.wantIn {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error %q does not name %q; the message is the only clue to which array was wrong", err, want)
-				}
-			}
-		})
-	}
-}
-
-// Prevents: a guard that refuses everything, or that quietly reshapes the
-// arrays on the way past.  An aligned batch must arrive at the statement
-// byte-for-byte as it was built.
-func TestWriteBatchForwardsAlignedArraysUntouched(t *testing.T) {
-	ids := []int32{16498, 1}
-	values := []string{"進擊的巨人", "星際牛仔"}
-	sources := []string{srcWikipedia, srcAnilist}
-	hashes := []string{sourceHash("進擊的巨人"), sourceHash("星際牛仔")}
-
-	var got batchArgs
-	written, err := writeBatch(context.Background(), ids, values, sources, hashes,
-		func(_ context.Context, i []int32, v, s, h []string) (int64, error) {
-			got = batchArgs{ids: i, values: v, sources: s, hashes: h}
-			return 2, nil
-		})
-	if err != nil {
-		t.Fatalf("aligned batch refused: %v", err)
-	}
-	if written != 2 {
-		t.Fatalf("written = %d, want the statement's own count (2)", written)
-	}
-	want := batchArgs{ids: ids, values: values, sources: sources, hashes: hashes}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("statement received %+v, want %+v", got, want)
-	}
-}
-
-// An empty batch is aligned.  applyBatches never produces one, but a
-// guard that treated len 0 as a mismatch would turn "nothing to write"
-// into a failed run.
-func TestWriteBatchAcceptsAnEmptyBatch(t *testing.T) {
-	if err := checkAligned(nil, nil, nil, nil); err != nil {
-		t.Fatalf("empty batch refused: %v", err)
-	}
 }
 
 // ─── 2. --report / --apply mutual exclusion ──────────────────────────────────
@@ -360,7 +274,7 @@ func TestRunApplyReportsTheDatabasesCountNotTheBatchSize(t *testing.T) {
 		// report was taken, so the UPDATE's guard skipped them.
 		rowsFor: func(offered int) int64 { return int64(offered) - 2 },
 	}
-	results := []rowResult{
+	results := []hant.RowResult{
 		changedTitleRow(1, "星際牛仔"),
 		changedTitleRow(2, "進擊的巨人"),
 		changedTitleRow(3, "鬼滅之刃"),
@@ -490,10 +404,10 @@ func TestWriteJSONRoundTripsTheBackup(t *testing.T) {
 	path := filepath.Join(dir, "backup-20260821T000000Z.json")
 
 	want := []backupRow{
-		{AnilistID: 1, TitleHant: ptr("星際牛仔"), TitleHantSource: ptr(srcAnilist), TitleHantSourceHash: ptr(sourceHash("星際牛仔"))},
+		{AnilistID: 1, TitleHant: ptr("星際牛仔"), TitleHantSource: ptr(hant.SrcAnilist), TitleHantSourceHash: ptr(hant.SourceHash("星際牛仔"))},
 		// A row with nothing stored yet: the undo is "put the NULLs back".
 		{AnilistID: 2},
-		{AnilistID: 3, DescriptionHant: ptr("刀劍神域 & <朋友>"), DescriptionHantSource: ptr(srcOpenCC)},
+		{AnilistID: 3, DescriptionHant: ptr("刀劍神域 & <朋友>"), DescriptionHantSource: ptr(hant.SrcOpenCC)},
 	}
 	if err := writeJSON(path, want); err != nil {
 		t.Fatalf("writeJSON: %v", err)
@@ -551,7 +465,7 @@ func TestRunApplyStopsWhenTheBackupCannotBeWritten(t *testing.T) {
 	}
 
 	q := &fakeStatements{}
-	err := runApply(context.Background(), io.Discard, q, []rowResult{changedTitleRow(1, "星際牛仔")}, false)
+	err := runApply(context.Background(), io.Discard, q, []hant.RowResult{changedTitleRow(1, "星際牛仔")}, false)
 
 	if err == nil {
 		t.Fatal("runApply reported success with no backup on disk")
@@ -595,7 +509,7 @@ func TestRunApplyWritesTheBackupBeforeTheFirstUpdate(t *testing.T) {
 		}
 	}}
 
-	results := []rowResult{changedTitleRow(2, "進擊的巨人"), changedTitleRow(1, "星際牛仔")}
+	results := []hant.RowResult{changedTitleRow(2, "進擊的巨人"), changedTitleRow(1, "星際牛仔")}
 	var out bytes.Buffer
 	if err := runApply(context.Background(), &out, q, results, false); err != nil {
 		t.Fatalf("runApply: %v", err)
@@ -611,10 +525,10 @@ func TestBackupIsDedupedAndOrdered(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	both := changedTitleRow(7, "心之谷")
-	both.desc = decision{Source: srcOpenCC, Value: "簡介", Hash: sourceHash("简介")}
-	both.descChanged = true
+	both.Desc = hant.Decision{Source: hant.SrcOpenCC, Value: "簡介", Hash: hant.SourceHash("简介")}
+	both.DescChanged = true
 
-	results := []rowResult{changedTitleRow(9, "星際牛仔"), both, changedDescRow(3, "簡介二")}
+	results := []hant.RowResult{changedTitleRow(9, "星際牛仔"), both, changedDescRow(3, "簡介二")}
 	if err := runApply(context.Background(), io.Discard, &fakeStatements{}, results, false); err != nil {
 		t.Fatalf("runApply: %v", err)
 	}
@@ -650,9 +564,9 @@ func TestRunApplyWithNothingToWriteTouchesNothing(t *testing.T) {
 	q := &fakeStatements{}
 	var out bytes.Buffer
 	// A manual row and an unchanged row: neither is writable.
-	results := []rowResult{
-		{row: animeRow{AnilistID: 1}, titleManual: true},
-		{row: animeRow{AnilistID: 2}},
+	results := []hant.RowResult{
+		{Row: hant.Row{AnilistID: 1}, TitleManual: true},
+		{Row: hant.Row{AnilistID: 2}},
 	}
 	if err := runApply(context.Background(), &out, q, results, false); err != nil {
 		t.Fatalf("runApply: %v", err)
@@ -684,7 +598,7 @@ func TestWriteBackupJSONNeverOverwritesAnExistingBackup(t *testing.T) {
 	const stamp = "20260821T031500Z"
 
 	// The first run's undo file, already on disk.
-	first := []backupRow{{AnilistID: 1, TitleHant: ptr("星際牛仔"), TitleHantSource: ptr(srcAnilist)}}
+	first := []backupRow{{AnilistID: 1, TitleHant: ptr("星際牛仔"), TitleHantSource: ptr(hant.SrcAnilist)}}
 	firstPath, err := writeBackupJSON(stamp, first)
 	if err != nil {
 		t.Fatalf("writeBackupJSON: %v", err)
@@ -854,7 +768,7 @@ func TestRunApplyKeepsAnEarlierRunsUndoFile(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runApply(context.Background(), &out, &fakeStatements{}, []rowResult{changedTitleRow(1, "星際牛仔")}, false); err != nil {
+	if err := runApply(context.Background(), &out, &fakeStatements{}, []hant.RowResult{changedTitleRow(1, "星際牛仔")}, false); err != nil {
 		t.Fatalf("runApply: %v", err)
 	}
 
@@ -896,7 +810,7 @@ func TestRunApplyPrintsTheBackupPathOnAFailedRun(t *testing.T) {
 
 	q := &fakeStatements{err: errors.New("deadlock detected")}
 	var out bytes.Buffer
-	if err := runApply(context.Background(), &out, q, []rowResult{changedTitleRow(1, "星際牛仔")}, false); err == nil {
+	if err := runApply(context.Background(), &out, q, []hant.RowResult{changedTitleRow(1, "星際牛仔")}, false); err == nil {
 		t.Fatal("a failed statement reported success")
 	}
 
@@ -969,64 +883,6 @@ func TestReportPathKeepsALimitedRunOffTheDefaultPath(t *testing.T) {
 
 // ─── 5. SIGINT ───────────────────────────────────────────────────────────────
 
-// Prevents: the cancellation check drifting to the bottom of the loop.
-//
-// resolve_test.go already covers cancelling partway through a run.  What
-// it cannot see is the position of the check: a check at the end of the
-// body also stops "after one batch", and would still let the first batch
-// run against a context that was already dead.  --apply against
-// production rewrites ~12k rows, and an operator who cancels before it
-// starts means none of them.
-func TestApplyBatchesStartsNothingOnAnAlreadyCancelledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	calls := 0
-	written, err := applyBatches(ctx, applyBatchSize*3, func(start, end int) (int64, error) {
-		calls++
-		return int64(end - start), nil
-	})
-
-	if calls != 0 {
-		t.Fatalf("ran %d batches on a cancelled context, want 0 — the check has to be at the top of the loop", calls)
-	}
-	if written != 0 {
-		t.Fatalf("written = %d, want 0", written)
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want it to wrap context.Canceled so a caller can tell a cancellation from a failure", err)
-	}
-}
-
-// The error has to carry both the cause and how far the run got, because
-// the answer to "what state is the table in now?" is that number.
-func TestApplyBatchesReportsHowFarItGotWhenCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	calls := 0
-	written, err := applyBatches(ctx, applyBatchSize*4, func(start, end int) (int64, error) {
-		calls++
-		if calls == 2 {
-			cancel() // Ctrl-C during the second batch
-		}
-		return int64(end - start), nil
-	})
-
-	if calls != 2 {
-		t.Fatalf("ran %d batches, want the two that had already started", calls)
-	}
-	if want := int64(applyBatchSize * 2); written != want {
-		t.Fatalf("written = %d, want %d — the completed batches still happened", written, want)
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want context.Canceled wrapped", err)
-	}
-	if !strings.Contains(err.Error(), fmt.Sprint(applyBatchSize*2)) {
-		t.Errorf("error %q does not say how many rows were already written", err)
-	}
-}
-
 // And through runApply: a cancelled apply must fail, must not print the
 // completion summary, and must stop issuing statements.  A partial run
 // that prints "Apply complete" is worse than one that crashes.
@@ -1038,8 +894,8 @@ func TestRunApplyStopsAtABatchBoundaryOnCancel(t *testing.T) {
 
 	// Two full title batches plus a description batch: cancelling inside
 	// the first must leave the rest unissued.
-	var results []rowResult
-	for i := range applyBatchSize + 1 {
+	var results []hant.RowResult
+	for i := range hant.ApplyBatchSize + 1 {
 		results = append(results, changedTitleRow(int32(i+1), "星際牛仔"))
 	}
 	results = append(results, changedDescRow(99999, "簡介"))
@@ -1074,9 +930,9 @@ func TestRunApplyStopsAtABatchBoundaryOnCancel(t *testing.T) {
 // of batches.  This pins the slicing that makes that true: no row written
 // twice, none skipped, and the last short batch carrying the remainder.
 func TestRunApplySlicesRowsIntoWholeBatches(t *testing.T) {
-	const n = applyBatchSize + 3
+	const n = hant.ApplyBatchSize + 3
 
-	var results []rowResult
+	var results []hant.RowResult
 	for i := range n {
 		results = append(results, changedTitleRow(int32(i+1), fmt.Sprintf("標題%d", i)))
 	}
@@ -1108,37 +964,6 @@ func TestRunApplySlicesRowsIntoWholeBatches(t *testing.T) {
 
 // ─── failures mid-apply ──────────────────────────────────────────────────────
 
-// A statement that fails has to stop the run and say which batch and how
-// many rows were already committed, because that number is the answer to
-// "what state is the table in now?".  Swallowing it would leave a
-// half-written column reported as a success.
-func TestApplyBatchesStopsAndLocatesAFailedStatement(t *testing.T) {
-	boom := errors.New("deadlock detected")
-
-	calls := 0
-	written, err := applyBatches(context.Background(), applyBatchSize*4, func(start, end int) (int64, error) {
-		calls++
-		if calls == 3 {
-			return 0, boom
-		}
-		return int64(end - start), nil
-	})
-
-	if calls != 3 {
-		t.Fatalf("ran %d batches, want 3 — the run must stop at the failure, not carry on", calls)
-	}
-	if want := int64(applyBatchSize * 2); written != want {
-		t.Fatalf("written = %d, want %d — the two committed batches are still committed", written, want)
-	}
-	if !errors.Is(err, boom) {
-		t.Fatalf("err = %v, want the statement's own error wrapped", err)
-	}
-	// The range is what tells an operator which ids to look at.
-	if !strings.Contains(err.Error(), fmt.Sprintf("[%d:%d]", applyBatchSize*2, applyBatchSize*3)) {
-		t.Errorf("error %q does not locate the failed batch", err)
-	}
-}
-
 // The two columns are written by two separate statements, so a failure
 // has to name which one.  "apply failed: deadlock" sends an operator to
 // the wrong column.
@@ -1147,13 +972,13 @@ func TestRunApplyNamesTheColumnThatFailed(t *testing.T) {
 
 	cases := []struct {
 		name     string
-		results  []rowResult
+		results  []hant.RowResult
 		wantIn   string
 		wantNoIn string
 	}{
 		{
 			name:     "the title statement failed",
-			results:  []rowResult{changedTitleRow(1, "星際牛仔")},
+			results:  []hant.RowResult{changedTitleRow(1, "星際牛仔")},
 			wantIn:   "title_hant",
 			wantNoIn: "description_hant",
 		},
@@ -1161,7 +986,7 @@ func TestRunApplyNamesTheColumnThatFailed(t *testing.T) {
 			// Only a description write, so the title loop runs zero
 			// batches and the failure can only come from the second.
 			name:    "the description statement failed",
-			results: []rowResult{changedDescRow(1, "簡介")},
+			results: []hant.RowResult{changedDescRow(1, "簡介")},
 			wantIn:  "description_hant",
 		},
 	}
@@ -1182,49 +1007,6 @@ func TestRunApplyNamesTheColumnThatFailed(t *testing.T) {
 			}
 			if tc.wantNoIn != "" && strings.Contains(err.Error(), tc.wantNoIn) {
 				t.Errorf("error %q blames %s as well; only one statement ran", err, tc.wantNoIn)
-			}
-		})
-	}
-}
-
-// ─── dataset loading ─────────────────────────────────────────────────────────
-
-// newResolverFromDir is the first thing main() does, and its failure is
-// the one an operator hits most: --data defaults to a relative path, so
-// running the tool from anywhere but go-api/ finds nothing.  Whichever
-// file is missing has to be named, or the message is just "no such file".
-func TestNewResolverFromDirNamesTheMissingFile(t *testing.T) {
-	// Each case supplies the files listed and expects the loader to stop
-	// on the first one it still cannot find, in ladder order.
-	cases := []struct {
-		name    string
-		present []string
-		wantIn  string
-	}{
-		{"nothing at all", nil, openccFile},
-		{"conversion table only", []string{openccFile}, anilistFile},
-		{"missing the Hong Kong overlay", []string{openccFile, anilistFile}, cgroupFile},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			for _, name := range tc.present {
-				blob, err := os.ReadFile(filepath.Join(dataDir(t), name))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(dir, name), blob, 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			_, err := newResolverFromDir(dir)
-			if err == nil {
-				t.Fatalf("loaded a resolver from a directory holding only %v", tc.present)
-			}
-			if !strings.Contains(err.Error(), tc.wantIn) {
-				t.Errorf("error %q does not name the missing %s", err, tc.wantIn)
 			}
 		})
 	}

@@ -12,6 +12,7 @@ package queue
 
 import (
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 )
 
 // BangumiV1Args — phase 1: search Bangumi by title, write back the
@@ -85,7 +86,72 @@ var (
 	_ river.JobArgs = (*DescriptionBackfillScanArgs)(nil)
 	_ river.JobArgs = (*DescriptionLlmBackfillArgs)(nil)
 	_ river.JobArgs = (*DescriptionLlmBackfillScanArgs)(nil)
+	_ river.JobArgs = (*HantBackfillArgs)(nil)
 )
+
+// HantBackfillArgs re-runs the zh-Hant precedence ladder over the whole
+// of anime_cache and writes back whatever it disagrees with.
+//
+// No fields.  The work list is the entire table -- the ladder has to
+// account for every tier including the rows that reach none of them, and
+// --restale has to recompute a digest per row to know whether it drifted,
+// so there is no candidate predicate that could narrow it (see
+// ListAnimeForHantBackfill).  A payload would only give the dedupe
+// something to disagree about.
+type HantBackfillArgs struct{}
+
+// Kind returns the river job kind for the zh-Hant sweep.
+//
+// MUST stay equal to the 'hant_backfill' literal in GetHantBackfillJobStatus
+// (internal/db/queries/admin.sql).  sqlc cannot read a Go const, so that
+// query is a hand-kept mirror of this string; rename here without renaming
+// there and the admin endpoint reports "never run, not running" forever
+// while the sweep runs perfectly well.
+func (HantBackfillArgs) Kind() string { return "hant_backfill" }
+
+// hantBackfillUniqueStates is the set of states in which an existing job
+// suppresses a new one: every non-terminal state, and nothing else.
+//
+// Spelled out rather than left to river's default because the default
+// INCLUDES `completed`, and river keeps completed rows for 24h.  With the
+// default, an operator who watched a sweep finish and then pressed the
+// admin button again -- because the report showed rows the run could not
+// take, or because they had just fixed a dataset -- would get a cheerful
+// "enqueued" and no job, for a full day, with nothing anywhere saying why.
+//
+// available/pending/running/scheduled are required by river
+// (UniqueOpts.validate); retryable is added on purpose: a job in backoff
+// after a failed attempt is still this sweep in flight, and letting a
+// second one in beside it would put two whole-table passes on the same
+// queue.
+var hantBackfillUniqueStates = []rivertype.JobState{
+	rivertype.JobStateAvailable,
+	rivertype.JobStatePending,
+	rivertype.JobStateRetryable,
+	rivertype.JobStateRunning,
+	rivertype.JobStateScheduled,
+}
+
+// InsertOpts pins the sweep to its own queue and collapses a second
+// enqueue into the one already in flight.
+//
+// The queue matters because one pass reads all ~17.5k rows and can write
+// ~12k of them; on the default queue that would sit in front of the V1/V2
+// enrichment a page load is waiting on.
+//
+// ByArgs with an empty struct means "one hant_backfill at a time", which
+// is the whole intent: the periodic schedule and the admin button feed the
+// same job, and two concurrent whole-table passes would race each other's
+// UPDATEs for no gain.
+func (HantBackfillArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: HantBackfillQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: hantBackfillUniqueStates,
+		},
+	}
+}
 
 // DescriptionBackfillArgs harvests one row's Chinese description from the
 // Bangumi subject it is already bound to.

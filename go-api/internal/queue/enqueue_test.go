@@ -191,3 +191,33 @@ func TestEnqueuer_InterfaceSatisfaction(t *testing.T) {
 	var _ Enqueuer = NoopEnqueuer{}
 	var _ Enqueuer = (*LateBoundEnqueuer)(nil)
 }
+
+// TestNoopEnqueuer_HantBackfillReportsNotInserted pins the ONE thing that
+// makes this method different from every other inert path above: it has to
+// answer false, not true.
+//
+// The others return only an error, so "did nothing" and "did something"
+// are indistinguishable by design.  This one feeds the admin endpoint's
+// `enqueued` flag, which an operator reads as "a sweep is now scheduled".
+// A Noop that answered true would make a mis-wired deployment look exactly
+// like a working button.
+func TestNoopEnqueuer_HantBackfillReportsNotInserted(t *testing.T) {
+	t.Parallel()
+
+	inserted, err := NoopEnqueuer{}.EnqueueHantBackfillNow(context.Background())
+	require.NoError(t, err)
+	require.False(t, inserted, "a no-op enqueuer must not claim it scheduled a sweep")
+}
+
+// TestLateBoundEnqueuer_HantBackfillUnbound_ReportsNotInserted is the same
+// contract on the unbound path.  Unlike the sweeps fed only by river's
+// periodic scheduler — which cannot fire before Bind — this method's caller
+// is an HTTP route registered on the same router, so the unbound branch has
+// to be honest rather than convenient.
+func TestLateBoundEnqueuer_HantBackfillUnbound_ReportsNotInserted(t *testing.T) {
+	t.Parallel()
+
+	inserted, err := (&LateBoundEnqueuer{}).EnqueueHantBackfillNow(context.Background())
+	require.NoError(t, err)
+	require.False(t, inserted, "an unbound enqueuer must not claim it scheduled a sweep")
+}

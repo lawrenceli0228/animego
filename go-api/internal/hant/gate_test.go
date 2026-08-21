@@ -1,4 +1,4 @@
-package main
+package hant
 
 import "testing"
 
@@ -27,15 +27,15 @@ func TestGateRejectsKana(t *testing.T) {
 			if !hasKana(s) {
 				t.Fatalf("hasKana(%q) = false, want true", s)
 			}
-			if reason, _ := g.check(s); reason != reasonKana {
-				t.Fatalf("check(%q) = %q, want %q", s, reason, reasonKana)
+			if reason, _ := g.check(s); reason != ReasonKana {
+				t.Fatalf("check(%q) = %q, want %q", s, reason, ReasonKana)
 			}
 		})
 	}
 
 	// Kana is checked before anything else precisely because a kana
 	// string is Japanese whether or not it also has Han characters.
-	if reason, _ := g.check("黒の断章"); reason != reasonKana {
+	if reason, _ := g.check("黒の断章"); reason != ReasonKana {
 		t.Fatalf("a string that is both kana and Simplified must report kana, got %q", reason)
 	}
 }
@@ -53,7 +53,7 @@ func TestGateAcceptsChineseWithoutKana(t *testing.T) {
 			if hasKana(s) {
 				t.Fatalf("hasKana(%q) = true, want false", s)
 			}
-			if reason, _ := g.check(s); reason != reasonNone {
+			if reason, _ := g.check(s); reason != ReasonNone {
 				t.Fatalf("check(%q) = %q, want accepted", s, reason)
 			}
 		})
@@ -79,8 +79,8 @@ func TestGateRejectsLatinOnly(t *testing.T) {
 			if hasHan(s) {
 				t.Fatalf("hasHan(%q) = true, want false", s)
 			}
-			if reason, _ := g.check(s); reason != reasonNoHan {
-				t.Fatalf("check(%q) = %q, want %q", s, reason, reasonNoHan)
+			if reason, _ := g.check(s); reason != ReasonNoHan {
+				t.Fatalf("check(%q) = %q, want %q", s, reason, ReasonNoHan)
 			}
 		})
 	}
@@ -89,7 +89,7 @@ func TestGateRejectsLatinOnly(t *testing.T) {
 	if !hasHan("槍神Trigun") {
 		t.Fatal("hasHan(槍神Trigun) = false; a mixed title must count as Han")
 	}
-	if reason, _ := g.check("槍神Trigun"); reason != reasonNone {
+	if reason, _ := g.check("槍神Trigun"); reason != ReasonNone {
 		t.Fatalf("check(槍神Trigun) = %q, want accepted", reason)
 	}
 }
@@ -116,8 +116,8 @@ func TestGateRejectsSimplified(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.title, func(t *testing.T) {
 			reason, bad := g.check(tc.title)
-			if reason != reasonSimplified {
-				t.Fatalf("check(%q) = %q, want %q", tc.title, reason, reasonSimplified)
+			if reason != ReasonSimplified {
+				t.Fatalf("check(%q) = %q, want %q", tc.title, reason, ReasonSimplified)
 			}
 			if got := string(bad); got != tc.bad {
 				t.Fatalf("check(%q) offending runes = %q, want %q", tc.title, got, tc.bad)
@@ -166,7 +166,7 @@ func TestGateAcceptsCharactersValidInBothScripts(t *testing.T) {
 			if bad := g.simplifiedRunes(s); len(bad) > 0 {
 				t.Fatalf("simplifiedRunes(%q) = %q, want none — these characters exist in Traditional too", s, string(bad))
 			}
-			if reason, _ := g.check(s); reason != reasonNone {
+			if reason, _ := g.check(s); reason != ReasonNone {
 				t.Fatalf("check(%q) = %q, want accepted", s, reason)
 			}
 		})
@@ -199,8 +199,8 @@ func TestSimplifiedSetIsDerivedFromTheTable(t *testing.T) {
 }
 
 func TestGateRejectsEmpty(t *testing.T) {
-	if reason, _ := testGate(t).check(""); reason != reasonEmpty {
-		t.Fatalf("check(\"\") = %q, want %q", reason, reasonEmpty)
+	if reason, _ := testGate(t).check(""); reason != ReasonEmpty {
+		t.Fatalf("check(\"\") = %q, want %q", reason, ReasonEmpty)
 	}
 }
 

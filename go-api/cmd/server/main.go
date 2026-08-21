@@ -165,6 +165,13 @@ func main() {
 	// translator this registers a disabled scan + a defensive no-op row
 	// worker — see AddDescriptionLlmWorkers.
 	queue.AddDescriptionLlmWorkers(workers, llmTranslator, q, enqueuer)
+	// zh-Hant sweep.  Registers separately for the same reason: it shares
+	// none of the bundle builder's dependencies and needs one nothing else
+	// does — the vendored dataset directory, which the image bakes at
+	// /usr/local/share/animego/hant and a checkout has at data/hant.
+	// Empty string here means "read HANT_DATA_DIR, default data/hant";
+	// docker-compose sets it for the container.
+	queue.AddHantBackfillWorker(workers, q, "")
 
 	riverClient, err := queue.Boot(pool, queue.Config{
 		Workers: workers,
@@ -195,12 +202,25 @@ func main() {
 			// 4-way keeps a 600-row batch under ~15 minutes without
 			// hammering the API.
 			queue.DescriptionLlmQueueName: {MaxWorkers: 4},
+			// zh-Hant sweep: MaxWorkers MUST stay 1.  One job is the
+			// whole table, so a second worker has nothing to do except
+			// run a duplicate pass — and HantBackfillArgs is unique
+			// across every non-terminal state precisely to stop that.
+			// The separate queue is so a pass that reads all ~17.5k rows
+			// and issues two dozen 500-row UPDATEs cannot sit in front
+			// of the V1/V2 enrichment a page load is waiting on.
+			queue.HantBackfillQueueName: {MaxWorkers: 1},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),
 			queue.PeriodicOrphanScanJob(),
 			queue.PeriodicDescriptionBackfillScanJob(),
 			queue.PeriodicDescriptionLlmBackfillScanJob(),
+			// 90 days, and deliberately NOT RunOnStart — see the note on
+			// PeriodicHantBackfillJob for why this one reads the opposite
+			// way round from the two sweeps above it, and for what that
+			// costs on a service that deploys more often than quarterly.
+			queue.PeriodicHantBackfillJob(),
 		},
 		Logger: slog.Default(),
 	})
@@ -575,6 +595,7 @@ func main() {
 	adminReadHandlers := admin.NewHandlers(pool, q, queueStatusFn, nil)
 	adminUserHandlers := admin.NewUserHandlers(q, enqueuer)
 	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
+	adminHantHandlers := admin.NewHantHandlers(q, enqueuer)
 
 	// P2.4 — subscriptions + social.  Subscriptions handler depends on
 	// anime.EnsureCached for the FK pre-fill (POST /api/subscriptions
@@ -792,6 +813,12 @@ func main() {
 		r.Patch("/enrichment/{anilistId}", adminEnrichmentHandlers.UpdateEnrichment)
 		r.Post("/enrichment/{anilistId}/reset", adminEnrichmentHandlers.ResetEnrichment)
 		r.Post("/enrichment/{anilistId}/flag", adminEnrichmentHandlers.FlagEnrichment)
+
+		// zh-Hant drift monitor: the two counters that say how far the
+		// Traditional columns have fallen behind their sources, and the
+		// button that catches them up.
+		r.Get("/hant/stats", adminHantHandlers.GetHantStats)
+		r.Post("/hant/backfill", adminHantHandlers.BackfillHant)
 
 		// Warm-all (fire-and-forget) + user CRUD.
 		r.Post("/warm-all", adminUserHandlers.WarmAll)

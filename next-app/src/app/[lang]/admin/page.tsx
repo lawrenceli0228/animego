@@ -3,6 +3,7 @@ import { resolveLocale } from "@/lib/i18n/route";
 import type { Dict } from "@/lib/i18n";
 import { EnrichmentBar } from "./_components/EnrichmentBar";
 import { EnrichmentSection } from "./_components/EnrichmentSection";
+import { HantDriftSection } from "./_components/HantDriftSection";
 import { StatCard } from "./_components/StatCard";
 import { UsersSection } from "./_components/UsersSection";
 import ReportsSection, { type AdminReportsData } from "./_components/ReportsSection";
@@ -10,6 +11,7 @@ import type {
   AdminStats,
   AdminUser,
   EnrichmentRow as EnrichmentRowData,
+  HantDriftStats,
   PagedResponse,
 } from "./_types";
 
@@ -48,10 +50,17 @@ async function safeGet<T>(promise: Promise<T>, fallback: T): Promise<T> {
 }
 
 export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) {
-  const [{ dict }, stats, communityMetrics, enrichment, users, pendingReports, reviewingReports] = await Promise.all([
+  const [{ dict }, stats, hantDrift, communityMetrics, enrichment, users, pendingReports, reviewingReports] = await Promise.all([
     resolveLocale(params),
     safeGet<AdminStats | null>(
       apiGet<AdminStats>("/api/admin/stats", { cache: "no-store" }),
+      null,
+    ),
+    // Null on failure rather than zeroes: a zero in this payload is the
+    // all-clear, so a fetch error rendered as zeroes would be the panel
+    // asserting the exact thing it exists to disprove.
+    safeGet<HantDriftStats | null>(
+      apiGet<HantDriftStats>("/api/admin/hant/stats", { cache: "no-store" }),
       null,
     ),
     safeGet<CommunityMetrics | null>(
@@ -88,6 +97,11 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
   return (
     <div style={styles.page}>
       <Overview stats={stats} communityMetrics={communityMetrics} dict={dict} />
+      <hr style={styles.divider} />
+      {/* Sits between the coverage story above and the row-level table below:
+          it is the same kind of reading as EnrichmentBar's synopsis tiers (a
+          column that falls behind and does not self-heal), one locale over. */}
+      <HantDriftSection initial={hantDrift} />
       <hr style={styles.divider} />
       <EnrichmentSection initial={enrichment} />
       <hr style={styles.divider} />

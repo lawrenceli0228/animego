@@ -1,4 +1,4 @@
-package main
+package hant
 
 // OpenCC s2twp, implemented against the vendored conversion table in
 // data/hant/opencc-s2twp.txt.

@@ -991,6 +991,42 @@ const en = {
       rejected: 'Rejected (failed check)',
       queueLabel: 'Translation queue',
     },
+    // Traditional-Chinese drift — HantDriftSection.
+    //
+    // Not a "missing content" block: a "content is lying" block. The
+    // enrichment workers keep writing the Simplified columns; title_hant /
+    // description_hant only move when the backfill runs, and never self-heal.
+    // The render ladder falls back rather than blanking, so a row left behind
+    // does not show a Traditional reader an empty synopsis — it shows them the
+    // Simplified one, under a Traditional URL.
+    hant: {
+      title: 'Traditional Chinese drift',
+      // The lede is not decoration. Without it "2 behind" reads as "2 rows
+      // are missing text", the one reading that makes the number look
+      // harmless.
+      lede: 'Enrichment only writes the Simplified columns; the Traditional ones move when the backfill runs. A row left behind is not blank — a Traditional reader is served the Simplified text.',
+      titlesRow: 'Titles',
+      descsRow: 'Synopses',
+      titleBehind: 'Titles behind',
+      descBehind: 'Synopses behind',
+      // The hints are the SQL predicate in words, so the number can be
+      // re-derived by hand.
+      titleBehindHint: 'Simplified title present, Traditional missing',
+      descBehindHint: 'Simplified synopsis present, Traditional missing',
+      // A zero needs saying out loud: two unexplained grey zeroes read just
+      // as easily as "this panel is broken".
+      inSync: 'Nothing behind — every Simplified row has its Traditional counterpart.',
+      serpEligible: 'Human-sourced titles',
+      machineConverted: 'Machine-converted',
+      // The gap between those two is the only thing on this panel that looks
+      // like a bug and is not, so it is spelled out rather than left to ask.
+      serpHint: 'Only these may appear in <title> and JSON-LD; the rest are machine-converted and stay out of search results.',
+      lastRun: 'Last backfill',
+      runningNow: 'Backfill running',
+      runNow: 'Run backfill now',
+      enqueued: 'Queued.',
+      loadError: 'Could not load the Traditional drift figures',
+    },
     // EnrichmentRow — filter labels (used in FILTERS array)
     filterLabelAll: 'All',
     filterLabelNeedsReview: 'Needs Review',
