@@ -85,8 +85,13 @@ function overrideRows(input: GroupOverrideInput): readonly GroupOverrideRow[] {
   return input instanceof Map ? [...input.values()] : (input as readonly GroupOverrideRow[]);
 }
 
-/** Positive integer or nothing. `<= 0` means "unknown" everywhere downstream. */
-function positiveTotal(value: unknown): number | undefined {
+/**
+ * Positive integer or nothing. `<= 0` means "unknown" everywhere downstream.
+ *
+ * Exported so `episodeGridModel.ts` can spell "is this total usable" the same
+ * way rather than keeping a second copy of the rule that could drift from it.
+ */
+export function positiveTotal(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.floor(value)
     : undefined;
@@ -227,24 +232,33 @@ export interface GroupEpisodeRow {
 }
 
 /**
- * How many episode chips the detail sheet must render.
+ * How many episode chips the detail sheet must render when nothing declares a
+ * total — `buildGridCells`' fallback, and its only caller.
  *
  * ─── MANDATORY REGRESSION R1 ────────────────────────────────────────────────
  *
- * The sheet renders `Array.from({ length: n })` and looks each number up in a
- * map keyed by episode number, so this value is not a label — it is the only
- * thing deciding whether a file the user has on disk is reachable in the UI at
- * all. Issue #75 was this bug arriving from the query side (a merged card read
- * only the root's episodes); trusting a declared total here would re-create it
- * from the arithmetic side, on the very same cards.
+ * A grid length is not a label: for as long as the sheet rendered
+ * `Array.from({ length: n })` and looked each number up in a map, this value
+ * was the only thing deciding whether a file the user has on disk was
+ * reachable in the UI at all. Issue #75 was that bug arriving from the query
+ * side (a merged card read only the root's episodes); trusting a declared
+ * total as a ceiling would re-create it from the arithmetic side, on the very
+ * same cards.
  *
- * `declared` is therefore a floor, never a ceiling. It legitimately comes in
- * BELOW what is indexed:
+ * `declared` is therefore a floor, never a ceiling here. It legitimately comes
+ * in BELOW what is indexed:
  *
  *   - a card holding specials or an OVA numbered past the season's length
  *   - a merge whose member could not be identified by `Season.animeId`, which
  *     `buildGroupTotals` deliberately under-counts
  *   - a season-length total on a card that was merged with a second cour
+ *
+ * `buildGridCells` now keeps that guarantee a different way — every episode
+ * that wins no slot goes to a visible unclassified lane — which is why it
+ * passes `declared` as `undefined` and uses this purely as "how long is a grid
+ * with nothing to size it but the files themselves". The floor behaviour is
+ * left intact rather than simplified away: it is the fallback's ceiling too,
+ * and weakening it is exactly how R1 comes back.
  *
  * The `1` keeps a card with nothing indexed and no total from collapsing to an
  * empty grid.

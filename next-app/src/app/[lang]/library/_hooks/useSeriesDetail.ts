@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { resolveMergedSeriesIds } from "../_services/resolveMergedIds";
+import { buildGroupTotals } from "../_services/seriesGroups";
 import type Dexie from "dexie";
 
 // Types are JSDoc only on the JS side — mirror them in TS-friendly form.
@@ -87,6 +88,19 @@ export interface UseSeriesDetailResult {
   series: SeriesRecord | null;
   episodes: EpisodeRecord[];
   fileRefByEpisode: Map<string, FileRefRecord>;
+  /**
+   * Episodes this whole card claims, folded across the merge group.
+   * `undefined` means unknown — an unbound series, or one whose count never
+   * resolved.
+   *
+   * Not `series.totalEpisodes`: that is one member's own count, and a card can
+   * be several soft-merged members. It is computed by `buildGroupTotals`, the
+   * same function the library grid folds with, because the number that sizes
+   * the detail sheet's grid and the number the player normalises episode
+   * numbers against have to be the same one. Read them from different places
+   * and the sheet can label a chip "01" that opens a player headed "EP13".
+   */
+  groupTotal: number | undefined;
   getFile: (episodeId: string) => Promise<File | null>;
   refresh: () => void;
 }
@@ -105,6 +119,7 @@ export function useSeriesDetail(
   const [fileRefByEpisode, setFileRefByEpisode] = useState<
     Map<string, FileRefRecord>
   >(new Map());
+  const [groupTotal, setGroupTotal] = useState<number | undefined>(undefined);
   const [tick, setTick] = useState(0);
 
   const refresh = useCallback(() => {
@@ -117,9 +132,12 @@ export function useSeriesDetail(
       setSeries(null);
       setEpisodes([]);
       setFileRefByEpisode(new Map());
+      setGroupTotal(undefined);
       return;
     }
 
+    // Narrowed here, captured by the nested async loader below.
+    const rootSeriesId: string = seriesId;
     let cancelled = false;
     setStatus("loading");
 
@@ -136,6 +154,7 @@ export function useSeriesDetail(
           setSeries(null);
           setEpisodes([]);
           setFileRefByEpisode(new Map());
+          setGroupTotal(undefined);
           return;
         }
 
@@ -191,11 +210,25 @@ export function useSeriesDetail(
           }
         }
 
+        // 4. The card's declared length, folded across the merge group the
+        // same way the library grid folds it. Only the members' rows are
+        // fetched, but the WHOLE override list is passed: buildGroupTotals
+        // walks the merge chain itself, and a truncated list would resolve a
+        // shorter group than the sheet did.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const anyDb = db as any;
+        const [memberSeries, memberSeasons] = await Promise.all([
+          anyDb.series.where("id").anyOf(allSeriesIds).toArray(),
+          anyDb.seasons.where("seriesId").anyOf(allSeriesIds).toArray(),
+        ]);
         if (cancelled) return;
 
         setSeries(seriesRecord);
         setEpisodes(epRecords);
         setFileRefByEpisode(refMap);
+        setGroupTotal(
+          buildGroupTotals(memberSeries, memberSeasons, overrides).get(rootSeriesId),
+        );
         setStatus("ready");
       } catch {
         if (!cancelled) {
@@ -230,5 +263,13 @@ export function useSeriesDetail(
     [fileRefByEpisode, fileHandles],
   );
 
-  return { status, series, episodes, fileRefByEpisode, getFile, refresh };
+  return {
+    status,
+    series,
+    episodes,
+    fileRefByEpisode,
+    groupTotal,
+    getFile,
+    refresh,
+  };
 }

@@ -21,7 +21,8 @@ import { useLang } from "@/lib/lang-client";
 // @ts-ignore — JSDoc-only JS module
 import { db } from "@/lib/library/db/db.js";
 import { loadMergedSeriesRows } from "../_services/loadSeriesRows";
-import { resolveEpisodeGridLength } from "../_services/seriesGroups";
+import { buildGridCells, type GridEpisodeRow } from "../_services/episodeGridModel";
+import { EPISODE_CHIP_CSS, EpisodeGrid } from "./EpisodeGrid";
 // P6 TODO: tighten when useLibrary gets typed exports; for now widen to any
 // eslint-disable-next-line -eslint/no-explicit-any
 type SeriesRecord = any;
@@ -300,121 +301,6 @@ const s = {
       opacity: 0,
     };
   },
-  episodes: {
-    padding: "20px 32px 28px",
-  } as CSSProperties,
-  episodeHeader: {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  } as CSSProperties,
-  episodeKicker: {
-    ...mono,
-    fontSize: 10,
-    letterSpacing: "0.16em",
-    color: "rgba(235,235,245,0.45)",
-    textTransform: "uppercase",
-  } as CSSProperties,
-  episodeStats: {
-    ...mono,
-    fontSize: 10,
-    letterSpacing: "0.10em",
-    color: "rgba(235,235,245,0.30)",
-    textTransform: "uppercase",
-  } as CSSProperties,
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))",
-    gap: 8,
-  } as CSSProperties,
-  chip: {
-    ...mono,
-    position: "relative",
-    aspectRatio: "1.1",
-    borderRadius: 4,
-    border: `1px solid oklch(46% 0.06 ${HUE} / 0.30)`,
-    background: `oklch(14% 0.04 ${HUE} / 0.50)`,
-    color: "rgba(235,235,245,0.65)",
-    fontSize: 14,
-    fontWeight: 500,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    padding: 0,
-    fontFamily: "inherit",
-    fontVariantNumeric: "tabular-nums",
-    letterSpacing: "0.02em",
-    transition:
-      "transform 180ms cubic-bezier(0.16,1,0.3,1), border-color 180ms ease-out, color 180ms ease-out, box-shadow 180ms ease-out",
-  } as CSSProperties,
-  chipDisabled: {
-    cursor: "not-allowed",
-    opacity: 0.35,
-    background: `oklch(8% 0.02 ${HUE} / 0.40)`,
-  } as CSSProperties,
-  chipCompleted: {
-    border: "1px solid #30d158",
-    color: "#30d158",
-    background: "oklch(60% 0.18 145 / 0.10)",
-  } as CSSProperties,
-  chipInProgress: {
-    border: `1px solid ${PROGRESS_FILL}`,
-    color: "#fff",
-  } as CSSProperties,
-  chipLastWatched: {
-    border: `1px solid oklch(72% 0.16 ${HUE})`,
-    color: "#fff",
-    boxShadow: `0 0 0 1px oklch(72% 0.16 ${HUE} / 0.85), 0 0 16px oklch(72% 0.16 ${HUE} / 0.45)`,
-  } as CSSProperties,
-  chipNum: {
-    fontFamily: "inherit",
-    fontSize: 14,
-    fontWeight: 500,
-  } as CSSProperties,
-  chipCheck: {
-    position: "absolute",
-    top: 4,
-    right: 4,
-    fontSize: 10,
-    color: "#30d158",
-  } as CSSProperties,
-  chipResumeRing: {
-    position: "absolute",
-    top: 4,
-    right: 4,
-    width: 6,
-    height: 6,
-    borderRadius: "50%",
-    background: `oklch(72% 0.16 ${HUE})`,
-    boxShadow: `0 0 8px oklch(72% 0.16 ${HUE})`,
-  } as CSSProperties,
-  chipProgress: {
-    position: "absolute",
-    left: 4,
-    right: 4,
-    bottom: 4,
-    height: 2,
-    borderRadius: 999,
-    background: "rgba(255,255,255,0.15)",
-    overflow: "hidden",
-  } as CSSProperties,
-  chipProgressFill: (pct: number): CSSProperties => ({
-    height: "100%",
-    width: `${Math.max(0, Math.min(1, pct)) * 100}%`,
-    background: PROGRESS_FILL,
-  }),
-  empty: {
-    ...mono,
-    padding: "48px 16px",
-    textAlign: "center",
-    color: "rgba(235,235,245,0.45)",
-    fontSize: 11,
-    letterSpacing: "0.10em",
-    textTransform: "uppercase",
-  } as CSSProperties,
 };
 
 const HOVER_KEYFRAMES = `
@@ -424,16 +310,7 @@ const HOVER_KEYFRAMES = `
   80%  { opacity: 1; }
   100% { transform: translateX(20px); opacity: 0; }
 }
-[data-episode-chip="true"]:hover:not([disabled]) {
-  transform: translateY(-2px) scale(1.04);
-  border-color: oklch(72% 0.16 210 / 0.85);
-  color: #fff;
-  box-shadow: 0 6px 16px oklch(2% 0 0 / 0.45), 0 0 0 1px oklch(72% 0.16 210 / 0.40);
-}
-[data-episode-chip="true"]:focus-visible {
-  outline: 2px solid oklch(72% 0.16 210 / 0.85);
-  outline-offset: 2px;
-}
+${EPISODE_CHIP_CSS}
 [data-cta-primary="true"]:hover {
   transform: translateY(-1px);
   background: oklch(62% 0.17 210 / 0.32);
@@ -450,8 +327,6 @@ const HOVER_KEYFRAMES = `
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-episode-chip="true"] { transition: border-color 180ms ease-out, color 180ms ease-out; }
-  [data-episode-chip="true"]:hover:not([disabled]) { transform: none !important; box-shadow: none !important; }
   [data-cta-primary="true"]:hover, [data-cta-danmaku="true"]:hover { transform: none !important; }
   @keyframes seriesDetailDanmakuStreak { 0%, 100% { opacity: 0.7; transform: none; } }
 }
@@ -527,7 +402,6 @@ export function SeriesDetailSheet({
         setLoaded(true);
       } catch (err) {
         if (!cancelled) {
-          // eslint-disable-next-line no-console
           console.warn("[SeriesDetailSheet] load failed:", err);
           setLoaded(true);
         }
@@ -549,13 +423,14 @@ export function SeriesDetailSheet({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const episodeByNumber = useMemo(() => {
-    const m = new Map<number, EpisodeRow>();
-    for (const ep of episodes) {
-      if (!m.has(ep.number) || ep.kind === "main") m.set(ep.number, ep);
-    }
-    return m;
-  }, [episodes]);
+  // The whole grid, as data: which chip each file lands in, and what number
+  // that chip shows. Both rules live in a pure module because a component
+  // effect is out of reach for bun:test here — which is exactly how issue #75
+  // shipped — and because the player has to reach the SAME answer.
+  const grid = useMemo(
+    () => buildGridCells(episodes, groupTotal),
+    [episodes, groupTotal],
+  );
 
   const lastResume = useMemo(() => {
     let best: ProgressRow | null = null;
@@ -568,14 +443,12 @@ export function SeriesDetailSheet({
     return ep ? { episode: ep, progress: best } : null;
   }, [progressById, episodes]);
 
-  // The length of the episode-chip grid below — see resolveEpisodeGridLength
-  // for why the declared total is a FLOOR and never a ceiling (regression R1 /
-  // issue #75). The rule lives in a pure module because a component effect is
-  // out of reach for bun:test here, which is exactly how #75 shipped.
-  const total = useMemo(
-    () => resolveEpisodeGridLength(groupTotal, episodes),
-    [groupTotal, episodes],
-  );
+  // The denominator for the header's counters, which is NOT the grid length.
+  // `gridLength` is the season's own length once a total is known, and a card
+  // can hold more episodes than its season declares — a merged card, or a
+  // special numbered past the end. Dividing by the season alone would print
+  // "26/24 watched".
+  const total = Math.max(grid.gridLength, grid.episodeCount);
 
   const completedCount = useMemo(() => {
     let n = 0;
@@ -595,15 +468,25 @@ export function SeriesDetailSheet({
         : null;
   const posterUrl = safePoster(series.posterUrl);
 
-  function handleChipClick(num: number, ep: EpisodeRow | undefined) {
-    if (!ep) return;
-    onPickEpisode(series.id, num);
+  // The hand-off to /player stays in the STORED number space, not the
+  // displayed one. `?resumeEpisode=` is matched against `Episode.number` at
+  // the other end, and every id-space lookup downstream of it — the dandanplay
+  // `episodeMap`, keyed by the number parsed out of the filename — is too.
+  // Only the label moves.
+  function handlePick(ep: GridEpisodeRow) {
+    if (typeof ep.number !== "number") return;
+    onPickEpisode(series.id, ep.number);
   }
 
   function handleResume() {
     if (!lastResume) return;
     onPickEpisode(series.id, lastResume.episode.number);
   }
+
+  /** What the resume CTA calls that episode — the chip's number, not the file's. */
+  const resumeDisplayNumber = lastResume
+    ? (grid.displayNumbers.get(lastResume.episode.id) ?? lastResume.episode.number)
+    : null;
 
   return (
     <AnimatePresence>
@@ -709,7 +592,10 @@ export function SeriesDetailSheet({
                       onClick={handleResume}
                       data-testid="series-detail-resume"
                     >
-                      {t("library.detail.resumeBtn").replace("{{ep}}", String(lastResume.episode.number))}
+                      {t("library.detail.resumeBtn").replace(
+                        "{{ep}}",
+                        String(resumeDisplayNumber),
+                      )}
                     </button>
                   )}
                   {onPlaySeries && (
@@ -738,109 +624,14 @@ export function SeriesDetailSheet({
           </div>
 
           {/* EPISODE GRID */}
-          <div style={s.episodes}>
-            <div style={s.episodeHeader}>
-              <span style={s.episodeKicker}>// EPISODES //</span>
-              {loaded && total > 0 && (
-                <span style={s.episodeStats}>
-                  {t("library.detail.indexedStats")
-                    .replace("{{indexed}}", String(episodes.length))
-                    .replace("{{total}}", String(total))}
-                </span>
-              )}
-            </div>
-
-            {!loaded ? (
-              <div style={s.empty}>// LOADING //</div>
-            ) : total === 0 ? (
-              <div style={s.empty}>// NO EPISODES //</div>
-            ) : (
-              <motion.div
-                style={s.grid}
-                initial={reduced ? false : "hidden"}
-                animate={reduced ? undefined : "show"}
-                variants={{
-                  hidden: {},
-                  show: { transition: { staggerChildren: 0.02 } },
-                }}
-              >
-                {Array.from({ length: total }).map((_, i) => {
-                  const num = i + 1;
-                  const ep = episodeByNumber.get(num);
-                  const prog = ep ? progressById.get(ep.id) : undefined;
-                  const completed = prog?.completed === true;
-                  const inProgress =
-                    !!prog && !completed && (prog.positionSec || 0) > 0;
-                  const isLast =
-                    lastResume?.episode?.number === num && !completed;
-                  const pct =
-                    inProgress && prog?.durationSec
-                      ? (prog.positionSec || 0) /
-                        Math.max(1, prog.durationSec)
-                      : 0;
-
-                  const chipStyle: CSSProperties = {
-                    ...s.chip,
-                    ...(completed ? s.chipCompleted : null),
-                    ...(inProgress ? s.chipInProgress : null),
-                    ...(isLast ? s.chipLastWatched : null),
-                    ...(!ep ? s.chipDisabled : null),
-                  };
-
-                  return (
-                    <motion.button
-                      key={num}
-                      type="button"
-                      data-episode-chip="true"
-                      data-episode-number={num}
-                      data-testid={`episode-chip-${num}`}
-                      data-state={
-                        completed
-                          ? "completed"
-                          : inProgress
-                            ? "in-progress"
-                            : ep
-                              ? "unseen"
-                              : "missing"
-                      }
-                      style={chipStyle}
-                      disabled={!ep}
-                      onClick={() => handleChipClick(num, ep)}
-                      variants={{
-                        hidden: { opacity: 0, y: 6 },
-                        show: {
-                          opacity: ep ? 1 : 0.45,
-                          y: 0,
-                          transition: {
-                            duration: 0.22,
-                            ease: [0.16, 1, 0.3, 1],
-                          },
-                        },
-                      }}
-                      title={ep ? `EP ${num}` : t("library.detail.epMissing").replace("{{num}}", String(num))}
-                    >
-                      <span style={s.chipNum}>
-                        {String(num).padStart(2, "0")}
-                      </span>
-                      {completed && (
-                        <span style={s.chipCheck} aria-hidden>
-                          ✓
-                        </span>
-                      )}
-                      {isLast && !completed && (
-                        <span style={s.chipResumeRing} aria-hidden />
-                      )}
-                      {inProgress && (
-                        <div style={s.chipProgress}>
-                          <div style={s.chipProgressFill(pct)} />
-                        </div>
-                      )}
-                    </motion.button>
-                  );
-                })}
-              </motion.div>
-            )}
-          </div>
+          <EpisodeGrid
+            model={grid}
+            progressByEpisodeId={progressById}
+            resumeEpisodeId={lastResume?.episode.id ?? null}
+            loaded={loaded}
+            reduced={!!reduced}
+            onPick={handlePick}
+          />
         </motion.div>
       </motion.div>
     </AnimatePresence>

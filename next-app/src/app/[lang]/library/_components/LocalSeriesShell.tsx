@@ -36,7 +36,10 @@ import { makeOpsLogRepo } from "@/lib/library/db/opsLogRepo.js";
 import { ulid } from "@/lib/library/ulid.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
-import { buildLibraryMatchResult } from "@/lib/library/buildLibraryMatchResult.js";
+import {
+  buildLibraryMatchResult,
+  isWatchableKind,
+} from "@/lib/library/buildLibraryMatchResult.js";
 
 // Hooks owned by this subagent / unowned support hooks
 import { useSeriesDetail } from "../_hooks/useSeriesDetail";
@@ -51,6 +54,7 @@ import { performMerge, undoMerge } from "../_services/mergeOps";
 import { splitSeries } from "../_services/splitSeries";
 import { rematchSeries } from "../_services/rematchSeries";
 import { deleteSeriesCascade } from "../_services/deleteSeries";
+import { buildEpisodeNavNumbers } from "../_services/episodeGridModel";
 
 // Components owned by this subagent
 import { OpsLogDrawer } from "./OpsLogDrawer";
@@ -229,7 +233,18 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
     db,
     fileHandles,
   });
-  const { status, series, episodes, fileRefByEpisode, refresh } = seriesDetail;
+  const { status, series, episodes, fileRefByEpisode, groupTotal, refresh } =
+    seriesDetail;
+
+  // T9: the numbers the rows below SHOW. A fansub group numbering a sequel
+  // continuously ships season two as 13-24; the library's detail sheet labels
+  // those 1-12, and this page has to say the same thing about the same file.
+  // Stored numbers are untouched — `episodeMap`, the danmaku picker and the
+  // `?resumeEpisode=` hand-off below all still run on them.
+  const episodeNav = useMemo(
+    () => buildEpisodeNavNumbers(episodes, groupTotal, isWatchableKind),
+    [episodes, groupTotal],
+  );
 
   // P6 type widen: useSeriesDetail returns SeriesRecord (loose),
   // buildLibraryMatchResult wants the canonical Series. Runtime
@@ -297,7 +312,10 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
       if (!folders.has(dir)) folders.set(dir, []);
       folders.get(dir)!.push({
         epId: ep.id,
-        epNumber: ep.number,
+        // The displayed number, so this tree agrees with the rows above it
+        // and with the library's detail sheet. Sorting on it is the same
+        // order either way: the shift is one constant across the whole run.
+        epNumber: episodeNav.displayByRaw.get(ep.number) ?? ep.number,
         fileName,
         watched: !!progressByEp.get(ep.id)?.completed,
       });
@@ -308,7 +326,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
     for (const [, files] of entries)
       files.sort((a, b) => a.epNumber - b.epNumber);
     return entries;
-  }, [episodes, fileRefByEpisode, progressByEp]);
+  }, [episodes, fileRefByEpisode, progressByEp, episodeNav]);
 
   const handleBack = useCallback(() => {
     router.push("/library");
@@ -639,6 +657,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
           onSetDanmaku={(epNum: number) => setPickerEp(epNum)}
           clearLabel={t("library.localSeries.backToLibrary")}
           siteAnimeLoading={siteAnimeLoading}
+          displayEpisodes={episodeNav.displayByRaw}
         />
       </div>
 
@@ -696,7 +715,13 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
             ? libraryMatchResult.episodeMap?.[pickerEp]?.dandanEpisodeId
             : null
         }
-        episodeNumber={pickerEp}
+        // Label only. The picker's own logic runs on `pickerEp`, the stored
+        // number `episodeMap` just above is keyed by.
+        episodeNumber={
+          pickerEp != null
+            ? (episodeNav.displayByRaw.get(pickerEp) ?? pickerEp)
+            : null
+        }
         defaultKeyword={
           libraryMatchResult.anime.titleRomaji ||
           libraryMatchResult.anime.titleChinese ||

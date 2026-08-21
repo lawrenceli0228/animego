@@ -877,7 +877,10 @@ const zhHant = {
       danmakuPlayTitle: '走 dandanplay 匹配,載入線上彈幕後播放',
       danmakuPlayBtn: '彈幕播放',
       indexedStats: '{{indexed}} / {{total}} 已索引',
-      epMissing: 'EP {{num}} · 缺失',
+      inferredTotal: '集數依本地檔案推算',
+      notDownloaded: 'EP {{num}} · 未下載',
+      unclassified: '未歸類',
+      unclassifiedHint: '集號不在本季範圍內 — 單獨列出以免被藏起來',
     },
     // ImportMiniPill
     miniPill: {

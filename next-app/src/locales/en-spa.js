@@ -821,7 +821,10 @@ const en = {
       danmakuPlayTitle: 'Match via dandanplay and play with live danmaku',
       danmakuPlayBtn: 'Play with danmaku',
       indexedStats: '{{indexed}} / {{total}} indexed',
-      epMissing: 'EP {{num}} · missing',
+      inferredTotal: 'Episode count inferred from local files',
+      notDownloaded: 'EP {{num}} · not downloaded',
+      unclassified: 'Unclassified',
+      unclassifiedHint: 'Numbered outside this season — listed here so nothing is hidden',
     },
     // ImportMiniPill
     miniPill: {
