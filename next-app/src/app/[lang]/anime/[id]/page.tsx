@@ -527,8 +527,19 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   //     machine text out of Google's snippets entirely — the same SERP
   //     boundary that keeps generateMetadata / JSON-LD on the English
   //     original applies one layer down here.
+  //   - 'opencc': a Simplified-to-Traditional conversion of one of the above.
+  //     It arrived with zh-Hant and was briefly the one machine-made source
+  //     that carried neither a note nor nosnippet, because both flags named
+  //     their sources individually — so the identical prose was disclosed on
+  //     /anime/:id and undisclosed on /zh-Hant/anime/:id.
   //   - 'manual' still does not exist; our own editorial text will have no
   //     reason to be held out of snippets when it does.
+  //
+  // nosnippet is therefore computed from "is there any provenance at all"
+  // rather than from a list of sources. A tier added later is held out of
+  // snippets until someone decides otherwise, which is the direction this
+  // should fail in — the same reason title_hant_seo names the sources it
+  // admits instead of the one it excludes.
   //
   // Neither flag is gated on bgmId. bgmId only decides whether the bangumi
   // credit is a link: a row that lost its binding after the summary was
@@ -536,6 +547,13 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   // republishing the text.
   const isBangumiSummary = desc.source === "bangumi";
   const isLlmSummary = desc.source === "llm";
+  const isConvertedSummary = desc.source === "opencc";
+  // A conversion inherits the honesty debt of what it converted. The
+  // Simplified text under a zh-Hant page is very often the LLM translation,
+  // and "converted to Traditional" alone would quietly drop the far more
+  // important half of that sentence.
+  const convertedFromLlm = isConvertedSummary && detail.descriptionCnSource === "llm";
+  const summaryIsDerived = desc.source !== null && desc.source !== undefined;
   const bgmSummaryHref = detail.bgmId
     ? `https://bgm.tv/subject/${detail.bgmId}`
     : undefined;
@@ -692,13 +710,17 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
                 needsToggle={descNeedsToggle}
                 expandLabel={dict.detail.readMore}
                 collapseLabel={dict.detail.collapse}
-                nosnippet={isBangumiSummary || isLlmSummary}
+                nosnippet={summaryIsDerived}
                 sourceLabel={
                   isBangumiSummary
                     ? dict.detail.summaryFromBangumi
                     : isLlmSummary
                       ? dict.detail.summaryFromLlm
-                      : undefined
+                      : convertedFromLlm
+                        ? dict.detail.summaryConvertedFromLlm
+                        : isConvertedSummary
+                          ? dict.detail.summaryConverted
+                          : undefined
                 }
                 sourceHref={isBangumiSummary ? bgmSummaryHref : undefined}
               />

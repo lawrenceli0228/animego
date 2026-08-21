@@ -130,6 +130,11 @@ const zh = {
     // community-written summary rather than AniList's description.
     summaryFromBangumi: '简介来自 Bangumi',
     summaryFromLlm: '简介由 AI 翻译自英文原文',
+    // Only reachable on the Traditional tree today, but every dictionary
+    // carries them: a key that exists in one dictionary and not another
+    // renders as its own key path, silently.
+    summaryConverted: '简介由简体中文转换',
+    summaryConvertedFromLlm: '简介由 AI 翻译自英文原文，再转换为繁体',
     linkCopied: '链接已复制',
     linkCopyFailed: '复制失败，请手动复制链接',
     openPlayer: '▶ 弹幕播放',

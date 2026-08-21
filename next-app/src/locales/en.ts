@@ -79,6 +79,8 @@ const en = {
     // surfaces if a future phase shows the Bangumi text to en as well.
     summaryFromBangumi: 'Summary from Bangumi',
     summaryFromLlm: 'Summary machine-translated from the English original',
+    summaryConverted: 'Summary converted from Simplified Chinese',
+    summaryConvertedFromLlm: 'Summary machine-translated, then converted to Traditional Chinese',
     linkCopied: 'Link copied!',
     linkCopyFailed: 'Copy failed — please copy the link manually',
     openPlayer: '▶ Play with Danmaku',
