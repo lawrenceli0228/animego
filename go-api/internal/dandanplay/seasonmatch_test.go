@@ -7,68 +7,69 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/titlematch"
 )
 
-// ─── extractSeasonMarker ───────────────────────────────────────────────────
+// ─── titlematch.ExtractMarker ──────────────────────────────────────────────
 
 func TestExtractSeasonMarker(t *testing.T) {
 	tests := []struct {
 		name  string
 		title string
-		want  seasonMarker
+		want  titlematch.Marker
 	}{
 		// The franchise that produced the live bug.  Every notation the
 		// four title columns of anime_cache actually carry for it.
-		{"cjk ordinal season", "无职转生 第二季 ～到了异世界就拿出真本事～", seasonMarker{season: 2}},
-		{"cjk ordinal season three", "无职转生 第三季 ～到了异世界就拿出真本事～", seasonMarker{season: 3}},
-		{"fullwidth roman II", "無職転生Ⅱ ～異世界行ったら本気だす～", seasonMarker{season: 2}},
-		{"fullwidth roman III", "無職転生Ⅲ ～異世界行ったら本気だす～", seasonMarker{season: 3}},
-		{"ascii roman in romaji", "Mushoku Tensei III: Isekai Ittara Honki Dasu", seasonMarker{season: 3}},
-		{"no marker is season zero", "無職転生 ～異世界行ったら本気だす～", seasonMarker{}},
+		{"cjk ordinal season", "无职转生 第二季 ～到了异世界就拿出真本事～", titlematch.Marker{Season: 2}},
+		{"cjk ordinal season three", "无职转生 第三季 ～到了异世界就拿出真本事～", titlematch.Marker{Season: 3}},
+		{"fullwidth roman II", "無職転生Ⅱ ～異世界行ったら本気だす～", titlematch.Marker{Season: 2}},
+		{"fullwidth roman III", "無職転生Ⅲ ～異世界行ったら本気だす～", titlematch.Marker{Season: 3}},
+		{"ascii roman in romaji", "Mushoku Tensei III: Isekai Ittara Honki Dasu", titlematch.Marker{Season: 3}},
+		{"no marker is season zero", "無職転生 ～異世界行ったら本気だす～", titlematch.Marker{}},
 
 		// Part markers are a SEPARATE axis from season — a cour split
 		// does not advance the season number.
-		{"cjk part", "无职转生～到了异世界就拿出真本事～ 第2部分", seasonMarker{part: 2}},
-		{"japanese cour", "無職転生 ～異世界行ったら本気だす～ 第2クール", seasonMarker{part: 2}},
-		{"english part", "Mushoku Tensei: Isekai Ittara Honki Dasu Part 2", seasonMarker{part: 2}},
-		{"season and part together", "無職転生Ⅱ ～異世界行ったら本気だす～ 第2クール", seasonMarker{season: 2, part: 2}},
-		{"cjk season and part together", "无职转生 第二季 ～到了异世界就拿出真本事～ 第2部分", seasonMarker{season: 2, part: 2}},
+		{"cjk part", "无职转生～到了异世界就拿出真本事～ 第2部分", titlematch.Marker{Part: 2}},
+		{"japanese cour", "無職転生 ～異世界行ったら本気だす～ 第2クール", titlematch.Marker{Part: 2}},
+		{"english part", "Mushoku Tensei: Isekai Ittara Honki Dasu Part 2", titlematch.Marker{Part: 2}},
+		{"season and part together", "無職転生Ⅱ ～異世界行ったら本気だす～ 第2クール", titlematch.Marker{Season: 2, Part: 2}},
+		{"cjk season and part together", "无职转生 第二季 ～到了异世界就拿出真本事～ 第2部分", titlematch.Marker{Season: 2, Part: 2}},
 
 		// Other notations seen across the cache.
-		{"english season n", "Overlord Season 3", seasonMarker{season: 3}},
-		{"english ordinal season", "Attack on Titan 2nd Season", seasonMarker{season: 2}},
-		{"japanese 第N期", "アオアシ 第2期", seasonMarker{season: 2}},
-		{"arabic cjk season", "某作品 第2季", seasonMarker{season: 2}},
-		{"cour keyword", "Some Show Cour 2", seasonMarker{part: 2}},
+		{"english season n", "Overlord Season 3", titlematch.Marker{Season: 3}},
+		{"english ordinal season", "Attack on Titan 2nd Season", titlematch.Marker{Season: 2}},
+		{"japanese 第N期", "アオアシ 第2期", titlematch.Marker{Season: 2}},
+		{"arabic cjk season", "某作品 第2季", titlematch.Marker{Season: 2}},
+		{"cour keyword", "Some Show Cour 2", titlematch.Marker{Part: 2}},
 
 		// Guards against false positives.
-		{"x is not a numeral", "Hunter x Hunter", seasonMarker{}},
-		{"bare v is not a numeral", "Gundam V", seasonMarker{}},
-		{"roman inside a word is ignored", "Familia Myth II", seasonMarker{season: 2}},
-		{"empty", "", seasonMarker{}},
+		{"x is not a numeral", "Hunter x Hunter", titlematch.Marker{}},
+		{"bare v is not a numeral", "Gundam V", titlematch.Marker{}},
+		{"roman inside a word is ignored", "Familia Myth II", titlematch.Marker{Season: 2}},
+		{"empty", "", titlematch.Marker{}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, extractSeasonMarker(tc.title))
+			assert.Equal(t, tc.want, titlematch.ExtractMarker(tc.title))
 		})
 	}
 }
 
 func TestSeasonMarkerNormalizedTreatsUnstatedAsOne(t *testing.T) {
 	// "無職転生" and "無職転生 第1期" are the same entry; "無職転生Ⅲ" is not.
-	assert.Equal(t, seasonMarker{season: 1, part: 1}, seasonMarker{}.normalized())
-	assert.Equal(t, seasonMarker{season: 1, part: 1}, seasonMarker{season: 1}.normalized())
-	assert.NotEqual(t, seasonMarker{season: 3}.normalized(), seasonMarker{}.normalized())
+	assert.Equal(t, titlematch.Marker{Season: 1, Part: 1}, titlematch.Marker{}.Normalized())
+	assert.Equal(t, titlematch.Marker{Season: 1, Part: 1}, titlematch.Marker{Season: 1}.Normalized())
+	assert.NotEqual(t, titlematch.Marker{Season: 3}.Normalized(), titlematch.Marker{}.Normalized())
 }
 
 func TestSeasonMarkerMergeKeepsHighestStated(t *testing.T) {
 	// An English title that drops the "Ⅲ" must not erase the season the
 	// native title states.
-	got := seasonMarker{season: 3}.merge(seasonMarker{})
-	assert.Equal(t, seasonMarker{season: 3}, got)
-	got = seasonMarker{}.merge(seasonMarker{season: 2, part: 2})
-	assert.Equal(t, seasonMarker{season: 2, part: 2}, got)
+	got := titlematch.Marker{Season: 3}.Merge(titlematch.Marker{})
+	assert.Equal(t, titlematch.Marker{Season: 3}, got)
+	got = titlematch.Marker{}.Merge(titlematch.Marker{Season: 2, Part: 2})
+	assert.Equal(t, titlematch.Marker{Season: 2, Part: 2}, got)
 }
 
 // ─── fixtures ──────────────────────────────────────────────────────────────

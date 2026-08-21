@@ -11,23 +11,9 @@ package dandanplay
 import (
 	"regexp"
 	"strconv"
-	"strings"
-)
 
-// stripChars is the exact set of code points
-// server/controllers/dandanplay.controller.js:normalizeTitle erases.
-// JS regex: /[\s\[\]【】()《》「」『』,.\-_~!@#$%^&*+=|\\/:;?'"]/g
-//
-// Listed verbatim here so the cutover audit can grep both sides.
-// `\s` translates to unicode whitespace (handled by unicode.IsSpace).
-var stripChars = map[rune]struct{}{
-	'[': {}, ']': {}, '【': {}, '】': {},
-	'(': {}, ')': {}, '《': {}, '》': {}, '「': {}, '」': {}, '『': {}, '』': {},
-	',': {}, '.': {}, '-': {}, '_': {}, '~': {},
-	'!': {}, '@': {}, '#': {}, '$': {}, '%': {}, '^': {}, '&': {}, '*': {},
-	'+': {}, '=': {}, '|': {}, '\\': {}, '/': {}, ':': {}, ';': {}, '?': {},
-	'\'': {}, '"': {},
-}
+	"github.com/lawrenceli0228/animego/go-api/internal/titlematch"
+)
 
 // NormalizeTitle lower-cases the input and strips bracket / punctuation
 // / whitespace runs.  Used by the loose-match accept gate in Phase 1
@@ -35,31 +21,12 @@ var stripChars = map[rune]struct{}{
 // title overlap is obviously the right anime (new-season fansub
 // releases that haven't been hash-indexed yet).
 //
-// JS source (verbatim):
-//
-//	function normalizeTitle(s) {
-//	  return String(s || '')
-//	    .toLowerCase()
-//	    .replace(/[\s\[\]【】()《》「」『』,.\-_~!@#$%^&*+=|\\/:;?'"]/g, '');
-//	}
+// The implementation — and the verbatim JS source it mirrors — moved to
+// titlematch.LooseNormalize so that the containment half of the siteAnime
+// gate could sit next to the similarity half without an import cycle.  This
+// remains the dandanplay-facing name; behaviour is unchanged.
 func NormalizeTitle(s string) string {
-	if s == "" {
-		return ""
-	}
-	lower := strings.ToLower(s)
-	var b strings.Builder
-	b.Grow(len(lower))
-	for _, r := range lower {
-		// Whitespace catch-all (matches \s in JS regex).
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' || r == '\v' || r == ' ' {
-			continue
-		}
-		if _, drop := stripChars[r]; drop {
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return titlematch.LooseNormalize(s)
 }
 
 // TitleLooselyMatchesKeyword returns true when either normalised string
@@ -67,21 +34,9 @@ func NormalizeTitle(s string) string {
 // inputs return false (avoids the empty-string is-substring-of-anything
 // trap).
 //
-// JS source:
-//
-//	function titleLooselyMatchesKeyword(animeTitle, keyword) {
-//	  const a = normalizeTitle(animeTitle);
-//	  const k = normalizeTitle(keyword);
-//	  if (!a || !k) return false;
-//	  return a.includes(k) || k.includes(a);
-//	}
+// Implemented by titlematch.LooselyMatchesKeyword; see NormalizeTitle above.
 func TitleLooselyMatchesKeyword(animeTitle, keyword string) bool {
-	a := NormalizeTitle(animeTitle)
-	k := NormalizeTitle(keyword)
-	if a == "" || k == "" {
-		return false
-	}
-	return strings.Contains(a, k) || strings.Contains(k, a)
+	return titlematch.LooselyMatchesKeyword(animeTitle, keyword)
 }
 
 // ParseEpField returns the integer parse of a raw episode field if and
