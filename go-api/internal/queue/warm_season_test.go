@@ -62,15 +62,41 @@ func (f *fakeAniListSeasonal) callCount() int {
 	return len(f.calls)
 }
 
-// fakeWarmDB is a programmable WarmSeasonDB.  Both UpsertAnimeCache and
-// GetTitleChineseByAnilistIDs callers record into the same struct so a
-// single test can assert on both surfaces without juggling pointers.
+// fakeWarmDB is a programmable WarmSeasonDB.  UpsertAnimeCache,
+// GetTitleChineseByAnilistIDs and the episodes_bgm candidate query all record
+// into the same struct so a single test can assert on every surface without
+// juggling pointers.
 type fakeWarmDB struct {
 	mu              sync.Mutex
 	upsertFn        func(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
 	getChineseFn    func(ctx context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error)
+	epCandidatesFn  func(ctx context.Context, arg dbgen.ListEpisodesBgmCandidatesParams) ([]dbgen.ListEpisodesBgmCandidatesRow, error)
 	upsertCalls     []dbgen.UpsertAnimeCacheParams
 	getChineseCalls [][]int32
+	epCandidateArgs []dbgen.ListEpisodesBgmCandidatesParams
+}
+
+// ListEpisodesBgmCandidates records the params the warm worker narrowed the
+// sweep's candidate query with.  Recording the whole params struct — not just
+// the ids — is deliberate: the seed reusing the sweep's cooldowns rather than
+// inventing its own is the property that stops it becoming a route around them.
+func (f *fakeWarmDB) ListEpisodesBgmCandidates(ctx context.Context, arg dbgen.ListEpisodesBgmCandidatesParams) ([]dbgen.ListEpisodesBgmCandidatesRow, error) {
+	f.mu.Lock()
+	f.epCandidateArgs = append(f.epCandidateArgs, arg)
+	fn := f.epCandidatesFn
+	f.mu.Unlock()
+	if fn == nil {
+		return []dbgen.ListEpisodesBgmCandidatesRow{}, nil
+	}
+	return fn(ctx, arg)
+}
+
+func (f *fakeWarmDB) snapshotEpCandidateArgs() []dbgen.ListEpisodesBgmCandidatesParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]dbgen.ListEpisodesBgmCandidatesParams, len(f.epCandidateArgs))
+	copy(dup, f.epCandidateArgs)
+	return dup
 }
 
 func (f *fakeWarmDB) UpsertAnimeCache(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error {
@@ -103,13 +129,40 @@ func (f *fakeWarmDB) upsertCount() int {
 	return len(f.upsertCalls)
 }
 
-// fakeWarmEnqueuer records EnqueueV1Many calls so tests can assert which
-// IDs were chained.  The other Enqueuer methods are no-ops since
-// WarmSeasonWorker only triggers V1.
+// fakeWarmEnqueuer records EnqueueV1Many and EnqueueEpisodesBgmMany calls so
+// tests can assert which IDs were chained.  The remaining Enqueuer methods are
+// no-ops since WarmSeasonWorker triggers only those two.
 type fakeWarmEnqueuer struct {
-	mu      sync.Mutex
-	v1Fn    func(ctx context.Context, ids []int32) error
-	v1Calls [][]int32
+	mu        sync.Mutex
+	v1Fn      func(ctx context.Context, ids []int32) error
+	v1Calls   [][]int32
+	epFn      func(ctx context.Context, jobs []EpisodesBgmArgs) error
+	epBatches [][]EpisodesBgmArgs
+}
+
+// EnqueueEpisodesBgmMany satisfies EpisodesBgmEnqueuer, which the warm worker
+// reaches by type assertion off the general Enqueuer.  A double WITHOUT this
+// method is a valid Enqueuer and simply gets no seed — so every assertion that
+// the seed fired has to run against a double that has it.
+func (f *fakeWarmEnqueuer) EnqueueEpisodesBgmMany(ctx context.Context, jobs []EpisodesBgmArgs) error {
+	dup := make([]EpisodesBgmArgs, len(jobs))
+	copy(dup, jobs)
+	f.mu.Lock()
+	f.epBatches = append(f.epBatches, dup)
+	fn := f.epFn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, jobs)
+}
+
+func (f *fakeWarmEnqueuer) snapshotEpBatches() [][]EpisodesBgmArgs {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([][]EpisodesBgmArgs, len(f.epBatches))
+	copy(dup, f.epBatches)
+	return dup
 }
 
 func (f *fakeWarmEnqueuer) EnqueueV1Many(ctx context.Context, ids []int32) error {
@@ -623,4 +676,167 @@ func TestPeriodicWarmSeasonJob_NotNil(t *testing.T) {
 
 	pj := PeriodicWarmSeasonJob()
 	require.NotNil(t, pj, "factory must return a non-nil PeriodicJob")
+}
+
+// ---------------------------------------------------------------------------
+// The inferred-episode-count seed
+// ---------------------------------------------------------------------------
+
+// The warm worker is the ONE call site hooked as an event producer for the
+// episode-count sweep, out of five that upsert anime_cache from AniList.  This
+// pins that it fires, and that it narrows the sweep's own candidate query to
+// the ids this warm touched rather than re-deriving candidacy from the AniList
+// payload in hand.
+func TestWarmSeason_SeedsEpisodesBgmForRowsItRefreshed(t *testing.T) {
+	t.Parallel()
+
+	ali := &fakeAniListSeasonal{
+		seasonalFn: func(_ context.Context, _ anilist.SeasonalVars) (*anilist.SeasonalAnimeResponse, error) {
+			return makeMediaPage([]int{10, 20, 30}, false), nil
+		},
+	}
+	// Only 20 is a candidate: 10 already has an AniList episode count, 30 has
+	// no binding yet.  The query decides that, not the worker.
+	db := &fakeWarmDB{
+		epCandidatesFn: func(_ context.Context, _ dbgen.ListEpisodesBgmCandidatesParams) ([]dbgen.ListEpisodesBgmCandidatesRow, error) {
+			return []dbgen.ListEpisodesBgmCandidatesRow{
+				{AnilistID: 20, BgmID: ptr(int32(222))},
+			}, nil
+		},
+	}
+	enq := &fakeWarmEnqueuer{}
+
+	w := NewWarmSeasonWorker(ali, db, enq)
+	require.NoError(t, w.Work(context.Background(), makeWorkJob("WINTER", 2026)))
+
+	args := db.snapshotEpCandidateArgs()
+	require.Len(t, args, 1, "exactly one candidate lookup per warm")
+	assert.ElementsMatch(t, []int32{10, 20, 30}, args[0].AnilistIds,
+		"the seed must narrow to the ids this warm upserted, not sweep the catalogue")
+
+	batches := enq.snapshotEpBatches()
+	require.Len(t, batches, 1)
+	assert.Equal(t, []EpisodesBgmArgs{{AnilistID: 20, BgmID: 222}}, batches[0])
+}
+
+// The seed reuses the sweep's cooldowns rather than inventing its own.  That is
+// what stops it becoming a route AROUND them — a daily warm that ignored the
+// rejected/undecided cooldowns would re-fetch every refused binding in the
+// current season every single day.
+func TestWarmSeason_SeedReusesTheSweepsCooldowns(t *testing.T) {
+	t.Parallel()
+
+	ali := &fakeAniListSeasonal{
+		seasonalFn: func(_ context.Context, _ anilist.SeasonalVars) (*anilist.SeasonalAnimeResponse, error) {
+			return makeMediaPage([]int{1}, false), nil
+		},
+	}
+	db := &fakeWarmDB{}
+
+	w := NewWarmSeasonWorker(ali, db, &fakeWarmEnqueuer{})
+	require.NoError(t, w.Work(context.Background(), makeWorkJob("WINTER", 2026)))
+
+	args := db.snapshotEpCandidateArgs()
+	require.Len(t, args, 1)
+	assert.Equal(t, episodesBgmCandidateParams([]int32{1}, 1), args[0],
+		"the seed and the hourly sweep must build their params from one definition")
+}
+
+// A warm that upserted nothing must not issue the lookup at all — an empty id
+// array would read as "the whole catalogue" in the candidate query, which is
+// the opposite of what a zero-row warm should trigger.
+func TestWarmSeason_EmptySeasonSkipsTheSeedEntirely(t *testing.T) {
+	t.Parallel()
+
+	ali := &fakeAniListSeasonal{
+		seasonalFn: func(_ context.Context, _ anilist.SeasonalVars) (*anilist.SeasonalAnimeResponse, error) {
+			return makeMediaPage(nil, false), nil
+		},
+	}
+	db := &fakeWarmDB{}
+	enq := &fakeWarmEnqueuer{}
+
+	w := NewWarmSeasonWorker(ali, db, enq)
+	require.NoError(t, w.Work(context.Background(), makeWorkJob("WINTER", 2026)))
+
+	assert.Empty(t, db.snapshotEpCandidateArgs(),
+		"an empty AnilistIds array means 'the whole catalogue' to the query — never send one")
+	assert.Empty(t, enq.snapshotEpBatches())
+}
+
+// Seeding is an optimisation on top of an hourly sweep that covers the same
+// rows, so neither a lookup failure nor an enqueue failure may fail the warm —
+// the season data has already landed.
+func TestWarmSeason_SeedFailuresAreNonFatal(t *testing.T) {
+	t.Parallel()
+
+	newAli := func() *fakeAniListSeasonal {
+		return &fakeAniListSeasonal{
+			seasonalFn: func(_ context.Context, _ anilist.SeasonalVars) (*anilist.SeasonalAnimeResponse, error) {
+				return makeMediaPage([]int{1}, false), nil
+			},
+		}
+	}
+
+	t.Run("candidate lookup fails", func(t *testing.T) {
+		t.Parallel()
+		db := &fakeWarmDB{
+			epCandidatesFn: func(_ context.Context, _ dbgen.ListEpisodesBgmCandidatesParams) ([]dbgen.ListEpisodesBgmCandidatesRow, error) {
+				return nil, errors.New("pool exhausted")
+			},
+		}
+		w := NewWarmSeasonWorker(newAli(), db, &fakeWarmEnqueuer{})
+		assert.NoError(t, w.Work(context.Background(), makeWorkJob("WINTER", 2026)))
+	})
+
+	t.Run("enqueue fails", func(t *testing.T) {
+		t.Parallel()
+		db := &fakeWarmDB{
+			epCandidatesFn: func(_ context.Context, _ dbgen.ListEpisodesBgmCandidatesParams) ([]dbgen.ListEpisodesBgmCandidatesRow, error) {
+				return []dbgen.ListEpisodesBgmCandidatesRow{{AnilistID: 1, BgmID: ptr(int32(11))}}, nil
+			},
+		}
+		enq := &fakeWarmEnqueuer{
+			epFn: func(_ context.Context, _ []EpisodesBgmArgs) error { return errors.New("river down") },
+		}
+		w := NewWarmSeasonWorker(newAli(), db, enq)
+		assert.NoError(t, w.Work(context.Background(), makeWorkJob("WINTER", 2026)))
+	})
+}
+
+// The seed must not become a second, unguarded producer.  The per-row worker
+// enqueues nothing and never writes anime_cache.episodes, so nothing it does
+// can put a row back into the candidate set — the only way a seeded row returns
+// is the 24h warm schedule, and ByArgs dedupe collapses that against anything
+// still queued.  This pins the half of that the queue package owns: one warm,
+// one lookup, one batch.
+func TestWarmSeason_SeedFiresOncePerWarm(t *testing.T) {
+	t.Parallel()
+
+	ali := &fakeAniListSeasonal{}
+	ali.seasonalFn = func(_ context.Context, v anilist.SeasonalVars) (*anilist.SeasonalAnimeResponse, error) {
+		if v.Page == 1 {
+			return makeMediaPage([]int{1, 2}, true), nil
+		}
+		return makeMediaPage([]int{3, 4}, false), nil
+	}
+	db := &fakeWarmDB{
+		epCandidatesFn: func(_ context.Context, arg dbgen.ListEpisodesBgmCandidatesParams) ([]dbgen.ListEpisodesBgmCandidatesRow, error) {
+			rows := make([]dbgen.ListEpisodesBgmCandidatesRow, 0, len(arg.AnilistIds))
+			for _, id := range arg.AnilistIds {
+				rows = append(rows, dbgen.ListEpisodesBgmCandidatesRow{AnilistID: id, BgmID: ptr(id * 10)})
+			}
+			return rows, nil
+		},
+	}
+	enq := &fakeWarmEnqueuer{}
+
+	w := NewWarmSeasonWorker(ali, db, enq)
+	require.NoError(t, w.Work(context.Background(), makeWorkJob("WINTER", 2026)))
+
+	assert.Len(t, db.snapshotEpCandidateArgs(), 1,
+		"the seed runs once after the page loop, not once per page")
+	batches := enq.snapshotEpBatches()
+	require.Len(t, batches, 1)
+	assert.Len(t, batches[0], 4, "all four upserted ids reach the one batch")
 }

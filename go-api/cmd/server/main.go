@@ -172,6 +172,12 @@ func main() {
 	// Empty string here means "read HANT_DATA_DIR, default data/hant";
 	// docker-compose sets it for the container.
 	queue.AddHantBackfillWorker(workers, q, "")
+	// Inferred-episode-count sweep.  Registers separately for the same
+	// reason as the two above — it needs none of V12DB and V12DB needs
+	// none of it — and takes the SAME bangumiClient every other worker
+	// holds so its two-requests-per-row draw from the one token bucket
+	// rather than opening a second one beside it.
+	queue.AddEpisodesBgmWorkers(workers, bangumiClient, q, enqueuer)
 
 	riverClient, err := queue.Boot(pool, queue.Config{
 		Workers: workers,
@@ -210,12 +216,25 @@ func main() {
 			// and issues two dozen 500-row UPDATEs cannot sit in front
 			// of the V1/V2 enrichment a page load is waiting on.
 			queue.HantBackfillQueueName: {MaxWorkers: 1},
+			// Inferred episode counts: MaxWorkers MUST stay 1, for the
+			// same reason as the description backfill.  Its cost is two
+			// Bangumi requests per row, metered by the token bucket on
+			// the single shared *bangumi.Client above, so extra workers
+			// would not drain the backlog faster — they would queue on
+			// the same bucket while stealing dispatch slots from
+			// on-demand enrichment.  The separate queue is for isolation
+			// and pausability, not parallelism.
+			queue.EpisodesBgmQueueName: {MaxWorkers: 1},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),
 			queue.PeriodicOrphanScanJob(),
 			queue.PeriodicDescriptionBackfillScanJob(),
 			queue.PeriodicDescriptionLlmBackfillScanJob(),
+			// Hourly, RunOnStart — river's OSS scheduler recomputes the
+			// next run as now+period on every Start, so a deploy would
+			// otherwise push the sweep a full hour out every time.
+			queue.PeriodicEpisodesBgmScanJob(),
 			// 90 days, and deliberately NOT RunOnStart — see the note on
 			// PeriodicHantBackfillJob for why this one reads the opposite
 			// way round from the two sweeps above it, and for what that

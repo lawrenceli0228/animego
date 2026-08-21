@@ -85,6 +85,21 @@ const DescriptionLlmQueueName = "description_llm"
 // touching enrichment.
 const HantBackfillQueueName = "hant_backfill"
 
+// EpisodesBgmQueueName isolates the inferred-episode-count sweep from live
+// enrichment.
+//
+// Same isolation argument as the description sweep, and the same resource:
+// this job spends the shared Bangumi token bucket, two requests per row
+// (subject for the identity gate, episode list for the count).  On the default
+// queue a batch of those would sit in front of the V1/V2 jobs a page load is
+// waiting on.
+//
+// The independent pause lever matters more here than for the other sweeps.
+// This is the one worker whose output can reach a public, indexed page through
+// a binding it did not itself create, so "stop it now, look at the data, decide
+// later" has to be one call and not a deploy.
+const EpisodesBgmQueueName = "episodes_bgm"
+
 // Stats is the response shape for Status — the admin endpoint
 // marshals this to JSON.  Mirrors the relevant subset of Express
 // getQueueStatus() (which also reported in-memory queue depths from

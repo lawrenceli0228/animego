@@ -87,7 +87,59 @@ var (
 	_ river.JobArgs = (*DescriptionLlmBackfillArgs)(nil)
 	_ river.JobArgs = (*DescriptionLlmBackfillScanArgs)(nil)
 	_ river.JobArgs = (*HantBackfillArgs)(nil)
+	_ river.JobArgs = (*EpisodesBgmArgs)(nil)
+	_ river.JobArgs = (*EpisodesBgmScanArgs)(nil)
 )
+
+// EpisodesBgmArgs derives one row's episode count from the Bangumi subject it
+// is bound to.
+//
+// Separate from BangumiV2Args even though both read the same episode endpoint,
+// because V2 rewrites bangumi_score, bangumi_votes, title_chinese and
+// description_cn on every run and may chain V3.  This job exists to fill one
+// integer on rows that finished enrichment long ago; putting them back through
+// the whole pipeline to collect it would risk far more than it gains.
+//
+// BgmID rides along so the worker can detect a re-binding that landed between
+// the scan and the work — it compares the payload against the CURRENT column
+// and discards the run if they differ.  The payload is never the authority.
+type EpisodesBgmArgs struct {
+	AnilistID int `json:"anilistId"`
+	BgmID     int `json:"bgmId"`
+}
+
+// Kind returns the river job kind for the per-row episode-count worker.
+func (EpisodesBgmArgs) Kind() string { return "episodes_bgm" }
+
+// InsertOpts pins the job to its own queue and deduplicates by payload.
+//
+// ByArgs matters because two independent producers feed this job — the hourly
+// scan and the seasonal warm — and either can hand over a row the other has
+// already queued.  Without it a slow upstream would let the duplication
+// compound every hour.
+func (EpisodesBgmArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:      EpisodesBgmQueueName,
+		UniqueOpts: river.UniqueOpts{ByArgs: true},
+	}
+}
+
+// EpisodesBgmScanArgs is the periodic trigger that finds rows with no episode
+// count and enqueues one job per row.  No fields — the worker reads its work
+// list from the database.
+//
+// Rides the episodes_bgm queue rather than the default one so that pausing the
+// sweep stops it being fed as well as stops it draining; otherwise a paused
+// sweep would keep accumulating queued rows.
+type EpisodesBgmScanArgs struct{}
+
+// Kind returns the river job kind for the periodic episode-count scan.
+func (EpisodesBgmScanArgs) Kind() string { return "episodes_bgm_scan" }
+
+// InsertOpts pins the scan to the episodes_bgm queue. See the type comment.
+func (EpisodesBgmScanArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: EpisodesBgmQueueName}
+}
 
 // HantBackfillArgs re-runs the zh-Hant precedence ladder over the whole
 // of anime_cache and writes back whatever it disagrees with.

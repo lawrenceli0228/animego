@@ -174,6 +174,32 @@ type Querier interface {
 	// 'needs-review' / 'manually-corrected' / NULL.  CHECK constraint on the
 	// column enforces the allow-list at DB level; handler also pre-validates
 	// so the 400 message is friendly.
+	//
+	// This statement deliberately does NOT clear the row's derived Bangumi data.
+	// Repudiating a binding is ResetAnimeEnrichment's job, and changing one is
+	// UpdateAnimeEnrichmentSelective's; flagging is triage, and triage must not
+	// destroy anything.
+	//
+	// The tempting version clears episodes_bgm* and deletes every
+	// anime_episode_titles row on any flag write, on the theory that an
+	// unnecessary clear only costs one Bangumi round-trip on the next sweep.  That
+	// theory is false for almost every row it would touch.  The sweep's candidate
+	// set is `episodes IS NULL` — a small minority of the catalogue.  For every
+	// other row nothing ever re-derives the titles, so the real cost of an
+	// unnecessary clear is a permanently empty episode list on a public, indexed
+	// page, repairable only by an admin noticing and running a re-enrich.
+	//
+	// The flag values make it worse, not better.  'needs-review' is written by
+	// MarkBangumiNeedsReview as well as by humans, 'manually-corrected' arrives as
+	// a side effect of every PATCH, and NULL is what dismissing a flag writes — so
+	// clearing on all three means dismissing a false alarm blanks an episode list,
+	// and a title-only correction blanks one too.
+	//
+	// Nor would clearing make a suspected mis-binding correct.  The row keeps the
+	// bgm_id that produced the bad titles; deleting them leaves the page empty
+	// rather than right, and the human still has to reset or re-bind.  Reset
+	// already deletes the title rows in its transaction, which is where the
+	// "throw away what this binding produced" behaviour belongs.
 	FlagAnimeEnrichment(ctx context.Context, anilistID int32, adminFlag *string) (FlagAnimeEnrichmentRow, error)
 	// Is requester following the profile owner?  Used by the public
 	// profile endpoint to compute isFollowing — null when caller is
@@ -428,6 +454,28 @@ type Querier interface {
 	// Returns the liveEndsAt timestamp for this episode if a live window
 	// exists, else pgx.ErrNoRows (handler maps → null in the envelope).
 	GetEpisodeWindow(ctx context.Context, anilistID int32, episode int32) (EpisodeWindow, error)
+	// The identity gate's inputs, re-read at work time.
+	//
+	// bgm_id comes back so the worker can compare it against the id its job
+	// payload carries.  That comparison is not paranoia: the payload was written
+	// when the scan ran, an admin PATCH or reset can land in between, and a job
+	// that trusted its own arguments would fetch one subject and file the result
+	// against a different binding.
+	//
+	// title_native and title_romaji are the AniList-side titles, and they are the
+	// ONLY titles a similarity comparison may use.  title_chinese is deliberately
+	// absent from this projection: on a mis-bound row it has already been
+	// overwritten with the wrong show's Chinese name by earlier enrichment, so
+	// comparing it against the same subject's name_cn passes every time -- it
+	// validates the error with the error.  Leaving the column out of the query is
+	// a cheaper guarantee than a comment asking a future reader not to use it.
+	//
+	// id_map_agrees asks whether the vendored AniList->Bangumi map lists THIS
+	// pair, not merely whether it has a row for this anilist_id.  A map entry
+	// naming a different bgm_id is evidence against the binding, so it must not
+	// read as authoritative confirmation of it.  Same test as the
+	// description_cn_eligible view (migration 0016).
+	GetEpisodesBgmGateInputs(ctx context.Context, anilistID int32) (GetEpisodesBgmGateInputsRow, error)
 	// Whether a zh-Hant sweep is in flight, and when the last one finished.
 	//
 	// Read out of river_job rather than a table of our own.  River already
@@ -759,6 +807,46 @@ type Querier interface {
 	// LIMIT 500 caps abuse (Express has no limit; we add one because
 	// pulling 50k rows on a popular episode would blow the response).
 	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentsRow, error)
+	// Rows whose episode count is unknown to AniList and whose Bangumi binding
+	// might be able to supply one.
+	//
+	// `episodes IS NULL` is the anchor, and it is the only conjunct migration
+	// 0023's partial index carries.  It is also the one condition this sweep can
+	// never satisfy on its own: the worker writes episodes_bgm and NEVER
+	// anime_cache.episodes, so a row leaves the candidate set only when an
+	// AniList sync finally learns a real total.
+	//
+	// THE COOLDOWN ARMS ARE THE POINT.  The predicate originally specified for
+	// this sweep --
+	//
+	//   episodes IS NULL
+	//   AND (episodes_bgm IS NULL
+	//        OR (status = 'RELEASING' AND episodes_bgm_at < now() - interval '20 hours'))
+	//
+	// -- never terminates.  A row the identity gate rejects, and a row whose
+	// upstream returns no episodes, both produce no count, so `episodes_bgm IS
+	// NULL` stays true and they hold the front of every later batch forever.
+	// Migration 0015 documents that exact stall already happening once on this
+	// table, and 0023 added episodes_bgm_attempted_at / _outcome to stop the
+	// repeat.  So candidacy is decided by the ATTEMPT stamp plus the recorded
+	// outcome, and the ordering is 0015's.
+	//
+	// Every value the 0023 CHECK admits has an arm below.  A value with no arm
+	// matches nothing and freezes that row permanently -- which is the failure
+	// these columns exist to prevent -- so 'error' gets an arm even though
+	// nothing writes it today (transport failures are deliberately left
+	// unstamped for river to retry; see MarkEpisodesBgmAttempted).
+	//
+	// Rows at 'ok' or 'empty' whose status is not RELEASING match no arm at all,
+	// and that is deliberate rather than an omission: a finished show's episode
+	// count is settled, and re-asking upstream forever would spend the shared
+	// Bangumi budget to re-learn the same number.
+	//
+	// anilist_ids is an OPTIONAL narrowing.  An EMPTY array means "the whole
+	// catalogue" (the hourly sweep); a non-empty one restricts to those ids (the
+	// warm-season seed).  One query rather than two so the seed can never enqueue
+	// work the sweep itself would not take, and so the two can never drift apart.
+	ListEpisodesBgmCandidates(ctx context.Context, arg ListEpisodesBgmCandidatesParams) ([]ListEpisodesBgmCandidatesRow, error)
 	// Step 2 of /api/feed: append-only activities of the supplied followees.
 	// Follow events are stored for future community surfaces but excluded from
 	// this first feed contract, whose cards always link to an anime episode.
@@ -871,6 +959,26 @@ type Querier interface {
 	// ListDescriptionCnLlmCandidates, exactly as migration 0015 is to the
 	// Bangumi sweep.
 	MarkDescriptionCnLlmAttempted(ctx context.Context, anilistID int32) error
+	// Record a decided NON-'ok' outcome so the sweep can move past this row.
+	//
+	// Called for every outcome upstream actually answered -- the gate refused the
+	// binding, the gate could not tell, the episode list came back empty -- but
+	// NOT for transport failures, which river should retry rather than have the
+	// sweep treat as decided.  Counterpart to the ordering in
+	// ListEpisodesBgmCandidates, exactly as MarkDescriptionCnAttempted is to the
+	// Chinese-description sweep.
+	//
+	// 'rejected' additionally clears any count already on the row, because that
+	// outcome is a positive statement that the value's provenance is repudiated.
+	// 'undecided', 'empty' and 'error' leave it alone: they are absence of
+	// evidence, not evidence of a wrong binding, and nulling a good count on a
+	// transiently empty upstream response would be a regression the next pass
+	// could not distinguish from never having had one.
+	//
+	// updated_at is deliberately NOT bumped -- this is bookkeeping, not a data
+	// change, and MarkDescriptionCnAttempted takes the same stance.  It matters
+	// here because an airing row can be stamped every day for months.
+	MarkEpisodesBgmAttempted(ctx context.Context, outcome string, reason *string, anilistID int32, bgmID *int32) (int64, error)
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
@@ -888,6 +996,13 @@ type Querier interface {
 	// doc.characters undefined).  In PG those are separate tables — handler
 	// runs the corresponding DELETE inside the same transaction so the
 	// re-enqueue produces a fresh enrichment cycle.
+	//
+	// The five episodes_bgm* columns (migration 0023) go with the bgm_id that
+	// produced them.  A reset nulls bgm_id, so leaving an inferred count behind
+	// would strand a number whose only provenance was the binding just thrown
+	// away — and leave the sweep unable to notice, since 'ok' on a finished show
+	// is a frozen state.  Clearing them puts the row back at
+	// episodes_bgm_attempted_at IS NULL, i.e. at the front of the next sweep.
 	ResetAnimeEnrichment(ctx context.Context, anilistID int32) error
 	// reset-password write: sets new bcrypt hash, clears both reset-token
 	// columns, AND nulls refresh_token (invalidates all existing sessions).
@@ -966,6 +1081,25 @@ type Querier interface {
 	//
 	// admin_flag is always set to 'manually-corrected' as a side effect
 	// (Express:  updates.adminFlag = 'manually-corrected').
+	//
+	// When — and ONLY when — this PATCH moves bgm_id, everything derived from the
+	// old binding is repudiated in the same statement: the five episodes_bgm*
+	// columns and every episode-title row.  See FlagAnimeEnrichment for why the
+	// title DELETE is unconditional over the table rather than selective (no
+	// provenance column exists, and none is needed: every row in it comes from
+	// /subject/{bgm_id}/ep) and why ON CONFLICT DO UPDATE cannot repair a
+	// too-long list on its own.
+	//
+	// The condition is narrower here than on the flag endpoint on purpose: this
+	// statement knows exactly what changed, and a PATCH that only rewrites
+	// title_chinese has said nothing about the binding, so its derived values are
+	// still validly derived.  `rebound` reads the pre-UPDATE bgm_id because every
+	// CTE in a statement sees the same snapshot.
+	//
+	// Nulling episodes_bgm_attempted_at rather than recording a rejection is what
+	// puts the row back at the FRONT of ListEpisodesBgmCandidates, so an admin who
+	// fixes a binding sees the count and titles re-derived on the next sweep
+	// rather than in ninety days.
 	UpdateAnimeEnrichmentSelective(ctx context.Context, titleChinese *string, bgmID *int32, bangumiScore *float64, anilistID int32) (UpdateAnimeEnrichmentSelectiveRow, error)
 	// Phase 1 result write — set bgm_id + title_chinese (the latter only
 	// when the Bangumi search produced an exact native match with a
@@ -1017,6 +1151,21 @@ type Querier interface {
 	// manual, or even an earlier llm value.  The reverse covenant (bangumi
 	// replacing llm) lives in ListDescriptionCnCandidates + UpdateDescriptionCn.
 	UpdateDescriptionCnLlm(ctx context.Context, descriptionCn *string, anilistID int32) error
+	// Store an inferred episode count, and stamp the attempt in the same
+	// statement so the two can never disagree.
+	//
+	// The bgm_id in the WHERE clause pins the write to the binding the job
+	// actually fetched -- the same move UpdateDescriptionCn makes, for the same
+	// reason.  The Go-side re-read closes most of the rebind window; this closes
+	// the rest, and turns the race into an observable zero-row result instead of
+	// a wrong number.
+	//
+	// episodes (AniList's authoritative count) is NEVER written here.  An AniList
+	// sync UPSERT sets `episodes = EXCLUDED.episodes`, so a value written there
+	// would be cleared on the next warm anyway -- and, more to the point, a
+	// downstream consumer emits `episodes` into schema.org JSON-LD, where an
+	// inferred number must never appear.
+	UpdateEpisodesBgm(ctx context.Context, episodesBgm *int32, anilistID int32, bgmID *int32) (int64, error)
 	UpdateReport(ctx context.Context, reportStatus string, resolutionNote *string, reviewedBy uuid.UUID, reportID uuid.UUID) (Report, error)
 	// PATCH /api/subscriptions/:anilistId — selective update.
 	// COALESCE pattern keeps unchanged columns untouched.  `last_watched_at`

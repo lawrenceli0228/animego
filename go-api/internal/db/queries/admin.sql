@@ -215,6 +215,13 @@ WHERE anilist_id = $1;
 -- doc.characters undefined).  In PG those are separate tables — handler
 -- runs the corresponding DELETE inside the same transaction so the
 -- re-enqueue produces a fresh enrichment cycle.
+--
+-- The five episodes_bgm* columns (migration 0023) go with the bgm_id that
+-- produced them.  A reset nulls bgm_id, so leaving an inferred count behind
+-- would strand a number whose only provenance was the binding just thrown
+-- away — and leave the sweep unable to notice, since 'ok' on a finished show
+-- is a frozen state.  Clearing them puts the row back at
+-- episodes_bgm_attempted_at IS NULL, i.e. at the front of the next sweep.
 UPDATE anime_cache
 SET
     bangumi_version = 0,
@@ -224,6 +231,11 @@ SET
     bangumi_votes   = NULL,
     admin_flag      = NULL,
     bgm_match_source = NULL,
+    episodes_bgm              = NULL,
+    episodes_bgm_at           = NULL,
+    episodes_bgm_attempted_at = NULL,
+    episodes_bgm_outcome      = NULL,
+    episodes_bgm_reason       = NULL,
     updated_at      = now()
 WHERE anilist_id = $1;
 
@@ -232,6 +244,32 @@ WHERE anilist_id = $1;
 -- 'needs-review' / 'manually-corrected' / NULL.  CHECK constraint on the
 -- column enforces the allow-list at DB level; handler also pre-validates
 -- so the 400 message is friendly.
+--
+-- This statement deliberately does NOT clear the row's derived Bangumi data.
+-- Repudiating a binding is ResetAnimeEnrichment's job, and changing one is
+-- UpdateAnimeEnrichmentSelective's; flagging is triage, and triage must not
+-- destroy anything.
+--
+-- The tempting version clears episodes_bgm* and deletes every
+-- anime_episode_titles row on any flag write, on the theory that an
+-- unnecessary clear only costs one Bangumi round-trip on the next sweep.  That
+-- theory is false for almost every row it would touch.  The sweep's candidate
+-- set is `episodes IS NULL` — a small minority of the catalogue.  For every
+-- other row nothing ever re-derives the titles, so the real cost of an
+-- unnecessary clear is a permanently empty episode list on a public, indexed
+-- page, repairable only by an admin noticing and running a re-enrich.
+--
+-- The flag values make it worse, not better.  'needs-review' is written by
+-- MarkBangumiNeedsReview as well as by humans, 'manually-corrected' arrives as
+-- a side effect of every PATCH, and NULL is what dismissing a flag writes — so
+-- clearing on all three means dismissing a false alarm blanks an episode list,
+-- and a title-only correction blanks one too.
+--
+-- Nor would clearing make a suspected mis-binding correct.  The row keeps the
+-- bgm_id that produced the bad titles; deleting them leaves the page empty
+-- rather than right, and the human still has to reset or re-bind.  Reset
+-- already deletes the title rows in its transaction, which is where the
+-- "throw away what this binding produced" behaviour belongs.
 UPDATE anime_cache
 SET admin_flag = $2,
     updated_at = now()
@@ -252,12 +290,51 @@ RETURNING
 --
 -- admin_flag is always set to 'manually-corrected' as a side effect
 -- (Express:  updates.adminFlag = 'manually-corrected').
+--
+-- When — and ONLY when — this PATCH moves bgm_id, everything derived from the
+-- old binding is repudiated in the same statement: the five episodes_bgm*
+-- columns and every episode-title row.  See FlagAnimeEnrichment for why the
+-- title DELETE is unconditional over the table rather than selective (no
+-- provenance column exists, and none is needed: every row in it comes from
+-- /subject/{bgm_id}/ep) and why ON CONFLICT DO UPDATE cannot repair a
+-- too-long list on its own.
+--
+-- The condition is narrower here than on the flag endpoint on purpose: this
+-- statement knows exactly what changed, and a PATCH that only rewrites
+-- title_chinese has said nothing about the binding, so its derived values are
+-- still validly derived.  `rebound` reads the pre-UPDATE bgm_id because every
+-- CTE in a statement sees the same snapshot.
+--
+-- Nulling episodes_bgm_attempted_at rather than recording a rejection is what
+-- puts the row back at the FRONT of ListEpisodesBgmCandidates, so an admin who
+-- fixes a binding sees the count and titles re-derived on the next sweep
+-- rather than in ninety days.
+WITH rebound AS (
+    SELECT (COALESCE(sqlc.narg('bgm_id')::integer, ac.bgm_id) IS DISTINCT FROM ac.bgm_id) AS yes
+    FROM anime_cache ac
+    WHERE ac.anilist_id = sqlc.arg('anilist_id')::integer
+),
+cleared_titles AS (
+    DELETE FROM anime_episode_titles
+    WHERE anime_id = sqlc.arg('anilist_id')::integer
+      AND (SELECT yes FROM rebound)
+)
 UPDATE anime_cache
 SET
     title_chinese = COALESCE(sqlc.narg('title_chinese'), title_chinese),
     bgm_id        = COALESCE(sqlc.narg('bgm_id')::integer, bgm_id),
     bangumi_score = COALESCE(sqlc.narg('bangumi_score')::numeric(4,2), bangumi_score),
     admin_flag    = 'manually-corrected',
+    episodes_bgm              = CASE WHEN (SELECT yes FROM rebound)
+                                     THEN NULL ELSE episodes_bgm END,
+    episodes_bgm_at           = CASE WHEN (SELECT yes FROM rebound)
+                                     THEN NULL ELSE episodes_bgm_at END,
+    episodes_bgm_attempted_at = CASE WHEN (SELECT yes FROM rebound)
+                                     THEN NULL ELSE episodes_bgm_attempted_at END,
+    episodes_bgm_outcome      = CASE WHEN (SELECT yes FROM rebound)
+                                     THEN NULL ELSE episodes_bgm_outcome END,
+    episodes_bgm_reason       = CASE WHEN (SELECT yes FROM rebound)
+                                     THEN NULL ELSE episodes_bgm_reason END,
     updated_at    = now()
 WHERE anilist_id = sqlc.arg('anilist_id')::integer
 RETURNING
