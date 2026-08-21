@@ -39,6 +39,13 @@ ARG NEXT_PUBLIC_SENTRY_DSN=
 ARG SENTRY_AUTH_TOKEN=
 ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 ENV SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN
+
+# The commit this image was built from. next.config.ts turns it into
+# NEXT_PUBLIC_BUILD_ID, which is how a tab opened before a deploy learns it
+# is stale. Empty is fine and falls back to a timestamp -- the only thing
+# lost is that rebuilding the same commit then reads as a new deployment.
+ARG GIT_SHA=
+ENV GIT_SHA=$GIT_SHA
 # P6.6 pin: --webpack. Next 16's turbopack default deadlocks on the
 # Library + Player port surface (23k LOC + 4.5 MB jassub WASM + worker
 # URLs in usePlaybackSession). Webpack mode compiles in ~15 s. Drop

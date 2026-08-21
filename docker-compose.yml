@@ -17,6 +17,8 @@ services:
       args:
         NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
         SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
+        # Set by deploy.sh from `git rev-parse HEAD`; empty elsewhere.
+        GIT_SHA: ${GIT_SHA:-}
     restart: unless-stopped
     env_file: .env.production
     environment:

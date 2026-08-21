@@ -1,6 +1,15 @@
 const zh = {
   // Common
   common: { loading: '加载中...' },
+  // Shown when this tab is older than the running deployment — see
+  // components/layout/StaleTabNotice.tsx. Client dictionaries only: the
+  // notice cannot exist server-side, because the whole point is that the
+  // server is newer than the page asking.
+  app: {
+    updateAvailable: '网站已更新',
+    reload: '刷新',
+    dismissUpdate: '暂不刷新',
+  },
   // Backend error.message → 中文 (lookup by exact English string)
   // Backend is the source of truth for English wording; if it changes,
   // these keys must be updated to match.

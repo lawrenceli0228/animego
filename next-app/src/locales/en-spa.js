@@ -1,6 +1,11 @@
 const en = {
   // Common
   common: { loading: 'Loading...' },
+  app: {
+    updateAvailable: 'A new version is available',
+    reload: 'Reload',
+    dismissUpdate: 'Not now',
+  },
   // Backend already emits English error.message strings; passthrough is
   // handled by the t(`errors.${msg}`, { defaultValue: msg }) call site.
   // This empty block keeps en/zh structurally symmetric for audits.

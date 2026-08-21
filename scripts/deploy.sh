@@ -62,6 +62,18 @@ echo "==> Applying DB migrations..."
 $COMPOSE --profile migrate run --rm migrate
 
 echo "==> Building Docker images..."
+# GIT_SHA becomes NEXT_PUBLIC_BUILD_ID inside the next-app image, which is how
+# a browser tab opened before this deploy discovers it is running code the
+# server no longer serves (StaleTabNotice). Exported rather than passed inline
+# so compose picks it up as the build arg declared in docker-compose.yml.
+#
+# It falls back to a timestamp inside next.config.ts when unset, so a build
+# outside this script still gets a distinct id -- the only thing the SHA buys
+# is that redeploying the same commit does not read as a new version and ask
+# every reader to refresh for nothing.
+GIT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
+export GIT_SHA
+echo "    build id: ${GIT_SHA:-<timestamp fallback>}"
 $COMPOSE build
 
 echo "==> Bringing services up..."
