@@ -36,7 +36,6 @@ import {
   formatScore,
   pickCharacterName,
   pickDescription,
-  pickEpisodeTitle,
   pickSeoTitle,
   pickStaffName,
   pickTitle,
@@ -55,7 +54,6 @@ import type { Lang } from "@/lib/i18n/lang";
 import type {
   AnimeDetail,
   DetailCharacter,
-  DetailEpisodeTitle,
   DetailRecommendation,
   DetailRelation,
   DetailStaff,
@@ -1299,112 +1297,6 @@ function RecommendationsSection({
             </Link>
           );
         })}
-      </div>
-    </section>
-  );
-}
-
-// --- Episodes section ---
-//
-// Static SEO surface: a grid of numbered cells, one per episode index from
-// 1 to `episodes`. Each cell shows the episode number plus a title when
-// the matching `episodeTitles` entry has one. No clickability — player
-// integration lives behind auth on a client route (Phase 6+).
-//
-// Many shows have `episodes > 0` but an empty `episodeTitles` array
-// (Bangumi enrichment ran and found nothing). We still render numbered
-// cells in that case; just the number alone is fine — no placeholder dash.
-
-function EpisodesSection({
-  episodes,
-  episodeTitles,
-  lang,
-  dict,
-}: {
-  episodes: number | null;
-  episodeTitles: DetailEpisodeTitle[];
-  lang: Lang;
-  dict: Dict;
-}) {
-  if (!episodes || episodes <= 0) return null;
-
-  // Index titles by episode number for O(1) lookup. The wire array is
-  // typically small (<= 100) and sparse, so a Map is overkill but cheap.
-  const titleByEpisode = new Map<number, DetailEpisodeTitle>();
-  for (const t of episodeTitles) {
-    if (typeof t.episode === "number") titleByEpisode.set(t.episode, t);
-  }
-
-  const cells: { n: number; title: string }[] = [];
-  for (let n = 1; n <= episodes; n += 1) {
-    const t = titleByEpisode.get(n);
-    cells.push({ n, title: pickEpisodeTitle(t, lang) });
-  }
-
-  return (
-    <section style={{ marginTop: 40, marginBottom: 60 }}>
-      <h2 style={S.sectionLabel as CSSProperties}>{dict.detail.episodes}</h2>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(88px, 1fr))",
-          gap: 10,
-        }}
-      >
-        {cells.map((cell) => (
-          <div
-            key={cell.n}
-            style={{
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid #38383a",
-              borderRadius: 10,
-              padding: "10px 8px 8px",
-              textAlign: "center",
-              minWidth: 0,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 10,
-                color: "rgba(235,235,245,0.30)",
-                marginBottom: 3,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-              }}
-            >
-              {dict.detail.ep}
-            </div>
-            <div
-              style={{
-                fontSize: 20,
-                fontWeight: 800,
-                color: "rgba(235,235,245,0.60)",
-                lineHeight: 1,
-                marginBottom: cell.title ? 5 : 0,
-                fontFamily: "'Sora', sans-serif",
-              }}
-            >
-              {cell.n}
-            </div>
-            {cell.title && (
-              <div
-                title={cell.title}
-                style={{
-                  fontSize: 9,
-                  color: "rgba(235,235,245,0.35)",
-                  marginTop: 2,
-                  lineHeight: 1.2,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {cell.title}
-              </div>
-            )}
-          </div>
-        ))}
       </div>
     </section>
   );
