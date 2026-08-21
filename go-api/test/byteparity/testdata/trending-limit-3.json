@@ -6,5 +6,5 @@
   "expected_body_path": "trending-limit-3.body",
   "captured_from": "go-api@stage=P2.1.9 commit-pending",
   "captured_at": "2026-05-22T10:32:04Z",
-  "notes": "Trending top-3 from local pg. 1h cache + ORDER BY subscriber count desc + anilist_id tiebreak makes this stable on a static DB. Replace with Express prod capture when P8.5 shadow comparison kicks in."
+  "notes": "Trending top-3 from local pg. 1h cache + ORDER BY subscriber count desc + anilist_id tiebreak makes this stable on a static DB. Replace with Express prod capture when P8.5 shadow comparison kicks in. AMENDED 2026-08-20 for migration 0022: title_hant / title_hant_source / title_hant_seo joined GetTrendingWithCounts, so trendingItem grew three keys between titleChinese and coverImageUrl. This body was NOT re-captured from a running server -- the three keys were inserted textually at the position Go's encoder emits them (verified against a marshal of trendingItem) and every other byte is the original capture. All three are null because nothing has backfilled the columns yet; re-capture once the hant backfill has run, or this fixture will keep asserting null for rows that by then have values."
 }

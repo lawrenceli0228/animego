@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "@/components/ui/LocaleLink";
 import LegalDoc, { legalStyles as x } from "@/components/legal/LegalDoc";
 import { resolveLocale } from "@/lib/i18n/route";
-import { buildAlternatesUntranslated } from "@/lib/seo/alternates";
+import { buildAlternatesUntranslated, untranslatedRobots } from "@/lib/seo/alternates";
 
 export const revalidate = 3600;
 
@@ -12,16 +12,16 @@ const UPDATED = "2026年8月9日";
 export async function generateMetadata({
   params,
 }: PageProps<"/[lang]/terms">): Promise<Metadata> {
-  const { locale, lang } = await resolveLocale(params);
-  const title = lang === "zh" ? "服务条款" : "Terms of Service";
-  const description =
-    lang === "zh"
-      ? "AnimeGoClub 服务条款：账号、用户内容、可接受使用、第三方内容与链接、免责与责任限制。"
-      : "AnimeGoClub Terms of Service: accounts, user content, acceptable use, third-party links, disclaimers.";
+  const { locale, dict } = await resolveLocale(params);
+  const title = dict.legal.termsTitle;
+  const description = dict.legal.termsDescription;
   return {
     title,
     description,
     alternates: buildAlternatesUntranslated("/terms", locale),
+    // Body is Simplified-only JSX; the prefixed copies are the same
+    // document under a different URL. See untranslatedRobots.
+    robots: untranslatedRobots(locale),
     openGraph: { title, description, url: "/terms", type: "website" },
   };
 }

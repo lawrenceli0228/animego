@@ -11,6 +11,96 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyHantDescriptionBatch = `-- name: ApplyHantDescriptionBatch :execrows
+UPDATE anime_cache AS a
+SET description_hant             = v.description_hant,
+    description_hant_source      = v.description_hant_source,
+    description_hant_source_hash = v.description_hant_source_hash
+FROM (
+    SELECT
+        unnest($1::int[])   AS anilist_id,
+        unnest($2::text[]) AS description_hant,
+        unnest($3::text[])      AS description_hant_source,
+        unnest($4::text[])       AS description_hant_source_hash
+) AS v
+WHERE a.anilist_id = v.anilist_id
+  AND (a.description_hant_source IS NULL OR a.description_hant_source <> 'manual')
+`
+
+// description_hant equivalent of ApplyHantTitleBatch.  Separate statement
+// rather than six more columns on that one because the two fill
+// independently — a row can have a Traditional title from a dataset and
+// no Chinese synopsis to convert, or the reverse — and merging them would
+// force NULL elements into the arrays, which text[] cannot carry through
+// sqlc without an empty-string sentinel.
+func (q *Queries) ApplyHantDescriptionBatch(ctx context.Context, anilistIds []int32, descriptions []string, sources []string, hashes []string) (int64, error) {
+	result, err := q.db.Exec(ctx, applyHantDescriptionBatch,
+		anilistIds,
+		descriptions,
+		sources,
+		hashes,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const applyHantTitleBatch = `-- name: ApplyHantTitleBatch :execrows
+UPDATE anime_cache AS a
+SET title_hant             = v.title_hant,
+    title_hant_source      = v.title_hant_source,
+    title_hant_source_hash = v.title_hant_source_hash
+FROM (
+    SELECT
+        unnest($1::int[])  AS anilist_id,
+        unnest($2::text[])      AS title_hant,
+        unnest($3::text[])     AS title_hant_source,
+        unnest($4::text[])      AS title_hant_source_hash
+) AS v
+WHERE a.anilist_id = v.anilist_id
+  AND (a.title_hant_source IS NULL OR a.title_hant_source <> 'manual')
+`
+
+// Bulk title_hant write for cmd/hantbackfill --apply, 500 rows a call.
+//
+// Parallel arrays rather than one array of composites because sqlc maps
+// text[] cleanly and a composite type would need a migration.  The three
+// value arrays never carry NULL: a row only appears here when a tier
+// produced something, so the caller has a value, a source and a hash for
+// every id it passes.
+//
+// CALLER CONTRACT: all four arrays must be the same length.  Postgres
+// evaluates several set-returning functions in one SELECT list in
+// lockstep and pads the shorter ones with NULL rather than raising, so a
+// caller that passes 4 ids and 3 hashes gets a silent NULL hash on the
+// last row instead of an error.  cmd/hantbackfill enforces the lengths
+// in Go before calling (see applyBatches); anything else that reaches
+// this query must do the same.
+//
+// :execrows so the caller can report how many rows actually changed.
+// The manual guard below means that number can legitimately be lower
+// than the number of ids passed -- a row hand-promoted to 'manual'
+// between the report and the apply is skipped -- and reporting the
+// input count as though it were the write count would hide exactly that.
+//
+// The manual guard is the load-bearing line.  cmd/hantbackfill already
+// refuses to propose anything for a manual row, but that check lives in
+// Go and a future caller of this query will not have read it.  Expressed
+// here, "manual is never overwritten" survives a bug in the tool.
+func (q *Queries) ApplyHantTitleBatch(ctx context.Context, anilistIds []int32, titles []string, sources []string, hashes []string) (int64, error) {
+	result, err := q.db.Exec(ctx, applyHantTitleBatch,
+		anilistIds,
+		titles,
+		sources,
+		hashes,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countSeasonal = `-- name: CountSeasonal :one
 SELECT count(*)::bigint AS total
 FROM anime_cache
@@ -122,6 +212,9 @@ SELECT
     title_english,
     title_native,
     title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
     cover_image_url,
     cover_image_color,
     poster_accent,
@@ -144,6 +237,9 @@ type GetAnimeByAnilistIDsRow struct {
 	TitleEnglish    *string  `json:"titleEnglish"`
 	TitleNative     *string  `json:"titleNative"`
 	TitleChinese    *string  `json:"titleChinese"`
+	TitleHant       *string  `json:"titleHant"`
+	TitleHantSource *string  `json:"titleHantSource"`
+	TitleHantSeo    *string  `json:"titleHantSeo"`
 	CoverImageUrl   *string  `json:"coverImageUrl"`
 	CoverImageColor *string  `json:"coverImageColor"`
 	PosterAccent    *string  `json:"posterAccent"`
@@ -159,9 +255,14 @@ type GetAnimeByAnilistIDsRow struct {
 
 // Bulk read for /search post-upsert re-read so enriched fields
 // (title_chinese, bangumi_*) flow into the response even when the upsert
-// only carried AniList-side data.  Returns the same 16-column shape as
+// only carried AniList-side data.  Returns the same shape as
 // /completed-gems / /yearly-top so handlers can reuse the response
 // struct treatment.
+//
+// title_hant / title_hant_source / title_hant_seo (migration 0022) ride
+// along on all three so a zh-Hant reader sees a Traditional card title.
+// title_hant_seo is the machine-conversion-free projection; SEO code
+// reads that one and no other.
 func (q *Queries) GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetAnimeByAnilistIDsRow, error) {
 	rows, err := q.db.Query(ctx, getAnimeByAnilistIDs, dollar_1)
 	if err != nil {
@@ -177,6 +278,9 @@ func (q *Queries) GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([
 			&i.TitleEnglish,
 			&i.TitleNative,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 			&i.CoverImageColor,
 			&i.PosterAccent,
@@ -386,6 +490,9 @@ SELECT
     title_english,
     title_native,
     title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
     cover_image_url,
     cover_image_color,
     poster_accent,
@@ -395,6 +502,8 @@ SELECT
     description,
     description_cn,
     description_cn_source,
+    description_hant,
+    description_hant_source,
     episodes,
     status,
     season,
@@ -419,6 +528,9 @@ type GetAnimeMainByIDRow struct {
 	TitleEnglish                *string            `json:"titleEnglish"`
 	TitleNative                 *string            `json:"titleNative"`
 	TitleChinese                *string            `json:"titleChinese"`
+	TitleHant                   *string            `json:"titleHant"`
+	TitleHantSource             *string            `json:"titleHantSource"`
+	TitleHantSeo                *string            `json:"titleHantSeo"`
 	CoverImageUrl               *string            `json:"coverImageUrl"`
 	CoverImageColor             *string            `json:"coverImageColor"`
 	PosterAccent                *string            `json:"posterAccent"`
@@ -428,6 +540,8 @@ type GetAnimeMainByIDRow struct {
 	Description                 *string            `json:"description"`
 	DescriptionCn               *string            `json:"descriptionCn"`
 	DescriptionCnSource         *string            `json:"descriptionCnSource"`
+	DescriptionHant             *string            `json:"descriptionHant"`
+	DescriptionHantSource       *string            `json:"descriptionHantSource"`
 	Episodes                    *int32             `json:"episodes"`
 	Status                      *string            `json:"status"`
 	Season                      *string            `json:"season"`
@@ -445,10 +559,15 @@ type GetAnimeMainByIDRow struct {
 }
 
 // Full main-row read for /:anilistId detail.  Returns every column
-// the response payload needs (vs the trimmed 16-column shape
+// the response payload needs (vs the trimmed listing shape
 // /completed-gems / /yearly-top use).  Child arrays come from the
 // 6 GetAnime*ByID queries below; service layer assembles them into
 // one nested response.
+//
+// description_hant / description_hant_source (migration 0022) appear
+// here and nowhere else, exactly like description_cn above them: a full
+// synopsis per card would roughly double the list payloads for text no
+// card renders.
 func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error) {
 	row := q.db.QueryRow(ctx, getAnimeMainByID, anilistID)
 	var i GetAnimeMainByIDRow
@@ -458,6 +577,9 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.TitleEnglish,
 		&i.TitleNative,
 		&i.TitleChinese,
+		&i.TitleHant,
+		&i.TitleHantSource,
+		&i.TitleHantSeo,
 		&i.CoverImageUrl,
 		&i.CoverImageColor,
 		&i.PosterAccent,
@@ -467,6 +589,8 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.Description,
 		&i.DescriptionCn,
 		&i.DescriptionCnSource,
+		&i.DescriptionHant,
+		&i.DescriptionHantSource,
 		&i.Episodes,
 		&i.Status,
 		&i.Season,
@@ -667,6 +791,9 @@ SELECT
     title_english,
     title_native,
     title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
     cover_image_url,
     cover_image_color,
     poster_accent,
@@ -693,6 +820,9 @@ type GetCompletedGemsRow struct {
 	TitleEnglish    *string  `json:"titleEnglish"`
 	TitleNative     *string  `json:"titleNative"`
 	TitleChinese    *string  `json:"titleChinese"`
+	TitleHant       *string  `json:"titleHant"`
+	TitleHantSource *string  `json:"titleHantSource"`
+	TitleHantSeo    *string  `json:"titleHantSeo"`
 	CoverImageUrl   *string  `json:"coverImageUrl"`
 	CoverImageColor *string  `json:"coverImageColor"`
 	PosterAccent    *string  `json:"posterAccent"`
@@ -737,6 +867,9 @@ func (q *Queries) GetCompletedGems(ctx context.Context, limit int32) ([]GetCompl
 			&i.TitleEnglish,
 			&i.TitleNative,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 			&i.CoverImageColor,
 			&i.PosterAccent,
@@ -783,20 +916,33 @@ func (q *Queries) GetDescriptionForLlmTranslate(ctx context.Context, anilistID i
 }
 
 const getRelationEnrichmentByIDs = `-- name: GetRelationEnrichmentByIDs :many
-SELECT anilist_id, title_chinese, cover_image_url
+SELECT
+    anilist_id,
+    title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
+    cover_image_url
 FROM anime_cache
 WHERE anilist_id = ANY($1::int[])
 `
 
 type GetRelationEnrichmentByIDsRow struct {
-	AnilistID     int32   `json:"anilistId"`
-	TitleChinese  *string `json:"titleChinese"`
-	CoverImageUrl *string `json:"coverImageUrl"`
+	AnilistID       int32   `json:"anilistId"`
+	TitleChinese    *string `json:"titleChinese"`
+	TitleHant       *string `json:"titleHant"`
+	TitleHantSource *string `json:"titleHantSource"`
+	TitleHantSeo    *string `json:"titleHantSeo"`
+	CoverImageUrl   *string `json:"coverImageUrl"`
 }
 
 // /:anilistId detail enriches relations[].titleChinese + .coverImageUrl
 // from anime_cache when the relation row itself has stale values.
 // Mirrors server/controllers/detail.controller.js:14-28.
+//
+// The hant trio rides along for the same reason title_chinese does: a
+// relation card renders a title, and on /zh-Hant it should render the
+// Traditional one.
 func (q *Queries) GetRelationEnrichmentByIDs(ctx context.Context, dollar_1 []int32) ([]GetRelationEnrichmentByIDsRow, error) {
 	rows, err := q.db.Query(ctx, getRelationEnrichmentByIDs, dollar_1)
 	if err != nil {
@@ -806,7 +952,14 @@ func (q *Queries) GetRelationEnrichmentByIDs(ctx context.Context, dollar_1 []int
 	items := []GetRelationEnrichmentByIDsRow{}
 	for rows.Next() {
 		var i GetRelationEnrichmentByIDsRow
-		if err := rows.Scan(&i.AnilistID, &i.TitleChinese, &i.CoverImageUrl); err != nil {
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
+			&i.CoverImageUrl,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -824,6 +977,9 @@ SELECT
     title_english,
     title_native,
     title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
     cover_image_url,
     banner_image_url,
     cover_image_color,
@@ -865,6 +1021,9 @@ type GetSeasonalAnimeRow struct {
 	TitleEnglish    *string  `json:"titleEnglish"`
 	TitleNative     *string  `json:"titleNative"`
 	TitleChinese    *string  `json:"titleChinese"`
+	TitleHant       *string  `json:"titleHant"`
+	TitleHantSource *string  `json:"titleHantSource"`
+	TitleHantSeo    *string  `json:"titleHantSeo"`
 	CoverImageUrl   *string  `json:"coverImageUrl"`
 	BannerImageUrl  *string  `json:"bannerImageUrl"`
 	CoverImageColor *string  `json:"coverImageColor"`
@@ -913,6 +1072,9 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 			&i.TitleEnglish,
 			&i.TitleNative,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 			&i.BannerImageUrl,
 			&i.CoverImageColor,
@@ -939,20 +1101,36 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 }
 
 const getTitleChineseByAnilistIDs = `-- name: GetTitleChineseByAnilistIDs :many
-SELECT anilist_id, title_chinese, bangumi_version
+SELECT
+    anilist_id,
+    title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
+    bangumi_version
 FROM anime_cache
 WHERE anilist_id = ANY($1::int[])
 `
 
 type GetTitleChineseByAnilistIDsRow struct {
-	AnilistID      int32   `json:"anilistId"`
-	TitleChinese   *string `json:"titleChinese"`
-	BangumiVersion int32   `json:"bangumiVersion"`
+	AnilistID       int32   `json:"anilistId"`
+	TitleChinese    *string `json:"titleChinese"`
+	TitleHant       *string `json:"titleHant"`
+	TitleHantSource *string `json:"titleHantSource"`
+	TitleHantSeo    *string `json:"titleHantSeo"`
+	BangumiVersion  int32   `json:"bangumiVersion"`
 }
 
-// Lightweight enrichment lookup for /schedule — only the 3 fields the
+// Lightweight enrichment lookup for /schedule — only the fields the
 // schedule items need.  bangumi_version is included so the caller can
 // decide whether to enqueue v1 enrichment for unenriched entries.
+//
+// The hant trio (migration 0022) rides along because /schedule renders a
+// title, and it was the last displayed-title surface without a
+// Traditional one — every other list DTO already carries these three.
+// The name is now a slight lie; it is kept because the query is also the
+// warm-season worker's bangumi_version probe (queue/warm_season.go:259)
+// and renaming it would churn three test fakes for no behaviour change.
 func (q *Queries) GetTitleChineseByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetTitleChineseByAnilistIDsRow, error) {
 	rows, err := q.db.Query(ctx, getTitleChineseByAnilistIDs, dollar_1)
 	if err != nil {
@@ -962,7 +1140,14 @@ func (q *Queries) GetTitleChineseByAnilistIDs(ctx context.Context, dollar_1 []in
 	items := []GetTitleChineseByAnilistIDsRow{}
 	for rows.Next() {
 		var i GetTitleChineseByAnilistIDsRow
-		if err := rows.Scan(&i.AnilistID, &i.TitleChinese, &i.BangumiVersion); err != nil {
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
+			&i.BangumiVersion,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1022,6 +1207,9 @@ SELECT
     a.title_english,
     a.title_native,
     a.title_chinese,
+    a.title_hant,
+    a.title_hant_source,
+    a.title_hant_seo,
     a.cover_image_url,
     a.cover_image_color,
     a.poster_accent,
@@ -1053,6 +1241,9 @@ type GetTrendingWithCountsRow struct {
 	TitleEnglish    *string  `json:"titleEnglish"`
 	TitleNative     *string  `json:"titleNative"`
 	TitleChinese    *string  `json:"titleChinese"`
+	TitleHant       *string  `json:"titleHant"`
+	TitleHantSource *string  `json:"titleHantSource"`
+	TitleHantSeo    *string  `json:"titleHantSeo"`
 	CoverImageUrl   *string  `json:"coverImageUrl"`
 	CoverImageColor *string  `json:"coverImageColor"`
 	PosterAccent    *string  `json:"posterAccent"`
@@ -1091,6 +1282,9 @@ func (q *Queries) GetTrendingWithCounts(ctx context.Context, limit int32) ([]Get
 			&i.TitleEnglish,
 			&i.TitleNative,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 			&i.CoverImageColor,
 			&i.PosterAccent,
@@ -1159,6 +1353,9 @@ SELECT
     title_english,
     title_native,
     title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
     cover_image_url,
     cover_image_color,
     poster_accent,
@@ -1185,6 +1382,9 @@ type GetYearlyTopRow struct {
 	TitleEnglish    *string  `json:"titleEnglish"`
 	TitleNative     *string  `json:"titleNative"`
 	TitleChinese    *string  `json:"titleChinese"`
+	TitleHant       *string  `json:"titleHant"`
+	TitleHantSource *string  `json:"titleHantSource"`
+	TitleHantSeo    *string  `json:"titleHantSeo"`
 	CoverImageUrl   *string  `json:"coverImageUrl"`
 	CoverImageColor *string  `json:"coverImageColor"`
 	PosterAccent    *string  `json:"posterAccent"`
@@ -1216,6 +1416,9 @@ func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int
 			&i.TitleEnglish,
 			&i.TitleNative,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 			&i.CoverImageColor,
 			&i.PosterAccent,
@@ -1419,6 +1622,78 @@ INSERT INTO anime_studios (anime_id, studio) VALUES ($1, $2) ON CONFLICT DO NOTH
 func (q *Queries) InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error {
 	_, err := q.db.Exec(ctx, insertAnimeStudio, animeID, studio)
 	return err
+}
+
+const listAnimeForHantBackfill = `-- name: ListAnimeForHantBackfill :many
+SELECT
+    anilist_id,
+    title_native,
+    title_chinese,
+    description_cn,
+    title_hant,
+    title_hant_source,
+    title_hant_source_hash,
+    description_hant,
+    description_hant_source,
+    description_hant_source_hash
+FROM anime_cache
+ORDER BY anilist_id
+`
+
+type ListAnimeForHantBackfillRow struct {
+	AnilistID                 int32   `json:"anilistId"`
+	TitleNative               *string `json:"titleNative"`
+	TitleChinese              *string `json:"titleChinese"`
+	DescriptionCn             *string `json:"descriptionCn"`
+	TitleHant                 *string `json:"titleHant"`
+	TitleHantSource           *string `json:"titleHantSource"`
+	TitleHantSourceHash       *string `json:"titleHantSourceHash"`
+	DescriptionHant           *string `json:"descriptionHant"`
+	DescriptionHantSource     *string `json:"descriptionHantSource"`
+	DescriptionHantSourceHash *string `json:"descriptionHantSourceHash"`
+}
+
+// Whole-table read for cmd/hantbackfill.  Every row, every run.
+//
+// No WHERE clause and no candidate filter, which is a decision rather
+// than an omission: the tool's report has to account for all four tiers
+// plus the rows that reach none of them, and --restale has to recompute
+// a digest per row to know whether it is stale, so no predicate could
+// narrow the scan anyway.  That is the same reasoning that kept an index
+// out of migration 0022.
+//
+// description_cn is here because it is the opencc tier's only input.  It
+// makes this the widest read in the file; it is also a one-shot CLI that
+// runs from an operator's shell, not a request path.
+func (q *Queries) ListAnimeForHantBackfill(ctx context.Context) ([]ListAnimeForHantBackfillRow, error) {
+	rows, err := q.db.Query(ctx, listAnimeForHantBackfill)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAnimeForHantBackfillRow{}
+	for rows.Next() {
+		var i ListAnimeForHantBackfillRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleNative,
+			&i.TitleChinese,
+			&i.DescriptionCn,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSourceHash,
+			&i.DescriptionHant,
+			&i.DescriptionHantSource,
+			&i.DescriptionHantSourceHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDescriptionCnCandidates = `-- name: ListDescriptionCnCandidates :many

@@ -78,6 +78,27 @@ export const GENRE_LABEL: EnumLabels = {
   },
   // AniList genre strings ARE the English UI labels.
   en: null,
+  "zh-Hant": {
+    Action: "動作",
+    Adventure: "冒險",
+    Comedy: "喜劇",
+    Drama: "劇情",
+    Ecchi: "福利",
+    Fantasy: "奇幻",
+    Hentai: "成人",
+    Horror: "恐怖",
+    "Mahou Shoujo": "魔法少女",
+    Mecha: "機戰",
+    Music: "音樂",
+    Mystery: "懸疑",
+    Psychological: "心理",
+    Romance: "戀愛",
+    "Sci-Fi": "科幻",
+    "Slice of Life": "日常",
+    Sports: "運動",
+    Supernatural: "超自然",
+    Thriller: "驚悚",
+  },
 };
 
 /**
@@ -147,6 +168,15 @@ export const FORMAT_LABEL: EnumLabels = {
     ONA: "ONA",
     MUSIC: "Music",
   },
+  "zh-Hant": {
+    TV: "TV",
+    TV_SHORT: "TV 短篇",
+    MOVIE: "劇場版",
+    SPECIAL: "特別篇",
+    OVA: "OVA",
+    ONA: "ONA",
+    MUSIC: "音樂 MV",
+  },
 };
 
 export function formatLabel(format: string, lang: Lang): string {
@@ -170,6 +200,13 @@ export const STATUS_LABEL: EnumLabels = {
     NOT_YET_RELEASED: "Upcoming",
     CANCELLED: "Cancelled",
     HIATUS: "Hiatus",
+  },
+  "zh-Hant": {
+    RELEASING: "連載中",
+    FINISHED: "已完結",
+    NOT_YET_RELEASED: "未開播",
+    CANCELLED: "已取消",
+    HIATUS: "休載中",
   },
 };
 
@@ -211,6 +248,16 @@ export const SOURCE_LABEL: EnumLabels = {
     WEB_NOVEL: "Web Novel",
     GAME: "Game",
   },
+  "zh-Hant": {
+    ORIGINAL: "原創",
+    MANGA: "漫改",
+    LIGHT_NOVEL: "輕小說改",
+    VISUAL_NOVEL: "視覺小說改",
+    VIDEO_GAME: "遊戲改",
+    NOVEL: "小說改",
+    WEB_NOVEL: "網文改",
+    GAME: "遊戲改",
+  },
 };
 
 /**
@@ -226,12 +273,48 @@ export function sourceLabel(source: string | null | undefined, lang: Lang): stri
   return SOURCE_LABEL[lang]?.[source] ?? null;
 }
 
+// --- Duration --------------------------------------------------------------
+
+/**
+ * Per-episode runtime, e.g. "24分/集" or "24 min/ep".
+ *
+ * Chinese abbreviates the unit onto the number with no space; English needs
+ * both the space and the longer abbreviation. Two call sites — the detail
+ * page's meta row and the player's episode list — wrote this as
+ * `lang === "zh" ? … : …` independently, which meant a third language got the
+ * English form in both places with nothing to see in review.
+ */
+const DURATION_FORMAT: Record<Lang, (minutes: number | string) => string> = {
+  zh: (minutes) => `${minutes}分/集`,
+  en: (minutes) => `${minutes} min/ep`,
+  "zh-Hant": (minutes) => `${minutes}分/集`,
+};
+
+/**
+ * Returns null for a missing or zero duration, so callers can skip the row.
+ *
+ * Takes `string | number` because the two payloads disagree: AnimeDetail
+ * types duration as a number, the player's site-anime lookup can hand back
+ * the raw string the API sent. Both call sites interpolated it directly
+ * before, so both are accepted rather than coerced.
+ */
+export function durationLabel(
+  minutes: number | string | null | undefined,
+  lang: Lang,
+): string | null {
+  return minutes ? DURATION_FORMAT[lang](minutes) : null;
+}
+
 // --- Season ----------------------------------------------------------------
 
 /** Also a real en table — the raw values are "WINTER", not "Winter". */
 export const SEASON_LABEL: EnumLabels = {
   zh: { WINTER: "冬季", SPRING: "春季", SUMMER: "夏季", FALL: "秋季" },
   en: { WINTER: "Winter", SPRING: "Spring", SUMMER: "Summer", FALL: "Fall" },
+  // Identical glyphs to zh — all four season names are already Traditional.
+  // Written out rather than aliased to GENRE_LABEL.zh so a later edit to one
+  // table cannot silently move the other.
+  "zh-Hant": { WINTER: "冬季", SPRING: "春季", SUMMER: "夏季", FALL: "秋季" },
 };
 
 export function seasonLabel(season: string, lang: Lang): string {
@@ -254,9 +337,26 @@ export function seasonLabel(season: string, lang: Lang): string {
  * third was half of one. Unifying fixes the raw-enum leak outright and moves
  * /profile's English readout to season-first, matching the other two.
  */
+/**
+ * Which of the two orderings each language uses.
+ *
+ * Was `lang === "zh" ? year-first : season-first`, which is the silent
+ * failure this module's header warns about one enum up: it reads as "Chinese
+ * is year-first" but MEANS "everything that is not Simplified Chinese is
+ * season-first", so zh-Hant would have rendered "春季 2024" — English word
+ * order with Chinese glyphs — with nothing failing anywhere.
+ */
+const SEASON_YEAR_ORDER: Record<Lang, "year-first" | "season-first"> = {
+  zh: "year-first",
+  en: "season-first",
+  "zh-Hant": "year-first",
+};
+
 export function seasonYearLabel(season: string, year: string | number, lang: Lang): string {
   const label = seasonLabel(season, lang);
-  return lang === "zh" ? `${year} ${label}`.trim() : `${label} ${year}`.trim();
+  return SEASON_YEAR_ORDER[lang] === "year-first"
+    ? `${year} ${label}`.trim()
+    : `${label} ${year}`.trim();
 }
 
 // --- Relation type ---------------------------------------------------------
@@ -291,6 +391,18 @@ export const RELATION_LABEL: EnumLabels = {
     SPIN_OFF: "Spin-Off",
     ADAPTATION: "Adaptation",
     OTHER: "Other",
+  },
+  "zh-Hant": {
+    PREQUEL: "前傳",
+    SEQUEL: "續集",
+    SIDE_STORY: "番外",
+    PARENT: "本篇",
+    CHARACTER: "角色出演",
+    SUMMARY: "總集篇",
+    ALTERNATIVE: "替代版",
+    SPIN_OFF: "衍生作品",
+    ADAPTATION: "改編",
+    OTHER: "其他",
   },
 };
 
@@ -385,6 +497,69 @@ export const STAFF_ROLE_LABEL: EnumLabels = {
   },
   // AniList staff roles are already English free text.
   en: null,
+  // Converted from the zh table with OpenCC s2twp, then hand-corrected.
+  // s2twp renders 脚本 as 指令碼 — the computing sense of "script", which is
+  // the right Taiwanese word for a shell script and the wrong one for a
+  // screenwriting credit. It is 腳本 here. (Same class of miss as 参数 ->
+  // 引数: the phrase table is tuned for software vocabulary and these are
+  // film-industry terms that happen to collide with it.)
+  "zh-Hant": {
+    Director: "監督",
+    "Character Design": "人物設定",
+    "Original Creator": "原作",
+    "Art Director": "美術監督",
+    Music: "音樂",
+    "Series Composition": "系列構成",
+    "Theme Song Performance": "主題曲演唱",
+    Script: "腳本",
+    "Original Character Design": "原作人物設定",
+    "Sound Director": "音響監督",
+    "Key Animation": "原畫",
+    "Director of Photography": "攝影監督",
+    "Color Design": "色彩設計",
+    Editing: "剪輯",
+    Storyboard: "分鏡",
+    "Animation Director": "作畫監督",
+    "Original Story": "原案",
+    "Episode Director": "演出",
+    "Prop Design": "道具設定",
+    "Art Design": "美術設定",
+    "Mechanical Design": "機械設定",
+    "Assistant Director": "助理監督",
+    Producer: "製片人",
+    "Chief Animation Director": "總作畫監督",
+    Animation: "動畫製作",
+    "Sound Effects": "音效",
+    "Sub Character Design": "副人物設定",
+    "Music Performance": "音樂演奏",
+    "Chief Director": "總監督",
+    "Music Composition": "作曲",
+    "Music Lyrics": "作詞",
+    "Title Logo Design": "標題設計",
+    Planning: "企劃",
+    "Music Arrangement": "編曲",
+    "CG Director": "CG 監督",
+    "Theme Song Lyrics": "主題曲作詞",
+    "In-Between Animation": "動畫中割",
+    "Background Art": "背景美術",
+    "Theme Song Composition": "主題曲作曲",
+    "Animation Producer": "動畫製片人",
+    Supervisor: "監修",
+    "Main Animator": "主動畫師",
+    "Theme Song Arrangement": "主題曲編曲",
+    "Design Works": "設計",
+    Assistance: "協力",
+    "Original Plan": "原案",
+    "Insert Song Performance": "插入曲演唱",
+    Photography: "攝影",
+    "Executive Producer": "執行製片人",
+    Screenplay: "劇本",
+    "ADR Director (English)": "英語配音監督",
+    "Original Work Assistance": "原作協力",
+    "Design Assistance": "設計協力",
+    "Music Vocal Performance": "歌唱",
+    "Unit Director": "單元監督",
+  },
 };
 
 /**
@@ -413,6 +588,12 @@ export function staffRoleLabel(role: string, lang: Lang): string {
 interface RelatedEntry {
   title?: string | null;
   titleChinese?: string | null;
+  /**
+   * Traditional title (migration 0022). Optional for the same structural
+   * reason as the rest of this shape: DetailRelation carries it,
+   * DetailRecommendation does not, and both are passed to pickRelatedTitle.
+   */
+  titleHant?: string | null;
 }
 
 /**
@@ -427,6 +608,11 @@ interface RelatedEntry {
 const RELATED_TITLE_LADDER: Record<Lang, readonly (keyof RelatedEntry)[]> = {
   zh: ["titleChinese", "title"],
   en: ["title", "titleChinese"],
+  // Traditional first, then the Simplified title, then romaji. A Simplified
+  // title is a far better answer for a Traditional reader than romaji is, so
+  // titleChinese sits above `title` rather than being skipped — the rungs are
+  // ordered by how well each serves the reader, not by script purity.
+  "zh-Hant": ["titleHant", "titleChinese", "title"],
 };
 
 export function pickRelatedTitle(entry: RelatedEntry, lang: Lang): string {

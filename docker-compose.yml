@@ -229,6 +229,45 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ─── zh-Hant title backfill (one-shot ops tool) ───────────────────────
+  # Fills anime_cache.title_hant / description_hant from the vendored
+  # datasets in go-api/data/hant (baked into the image at
+  # /usr/local/share/animego/hant). Same shape as `backfill` above: tools
+  # profile, root so it can write the report and backup into ./backfill-out,
+  # and the operator reads the report before applying anything.
+  #
+  # Nothing here touches the network, so unlike the enrichment workers there
+  # is no rate-limit budget to blow by running it alongside a live go-api.
+  #
+  #   mkdir -p backfill-out
+  #   docker compose --env-file .env.production --profile tools run --rm hantbackfill --report
+  #   docker compose --env-file .env.production --profile tools run --rm hantbackfill --apply
+  #   # later, to find rows whose source hash no longer matches its input:
+  #   docker compose --env-file .env.production --profile tools run --rm hantbackfill --restale
+  hantbackfill:
+    build:
+      context: ./go-api
+    profiles: ["tools"]
+    user: "0:0"
+    working_dir: /out
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable
+    volumes:
+      - ./backfill-out:/out
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - animego
+    entrypoint: ["hantbackfill", "--data", "/usr/local/share/animego/hant"]
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   nginx:
     image: nginx:alpine
     restart: unless-stopped

@@ -126,6 +126,14 @@ describe("the locale/language bridge", () => {
     // They will one day — zh-Hant is its own language — but while the map is
     // one-to-one, localeForLang has a single correct answer. If this fails,
     // localeForLang has become ambiguous and its callers need a real choice.
+    //
+    // Still one-to-one now that zh-Hant is published: it brought its own Lang
+    // with it rather than borrowing zh's. That is the whole reason widening
+    // LANGS had to come first — during the build zh-Hant was a fully
+    // implemented language with no URL at all, and the only value that
+    // typechecked in LOCALE_LANG if you did it the other way round was
+    // `"zh-Hant": "zh"`, which serves Simplified text under a Traditional URL
+    // and errs nowhere.
     const langs = LOCALES.map((locale) => LOCALE_LANG[locale]);
     expect(new Set(langs).size).toBe(langs.length);
   });
@@ -145,8 +153,19 @@ describe("vocabulary", () => {
   });
 
   test("isLocale rejects near-misses", () => {
-    for (const value of ["zh", "zh-Hant", "zh-CN", "en-US", "fr", "", "ZH-HANS", "/en"]) {
+    // "zh-Hant" was in this list for the whole build and has been moved out,
+    // which is what its previous comment asked whoever published it to do.
+    // The list stays because it is still the only thing that fails when
+    // someone widens LOCALES: doing so produces ZERO tsc errors while
+    // publishing an entire prefix tree into the sitemap and hreflang set.
+    // A fourth locale should sit here first, and leave when its URLs resolve
+    // and its content exists.
+    //
+    // "zh" and "zh-Hant" are different vocabularies and the pair below is the
+    // point: "zh-Hant" is both a Lang and a Locale, "zh" is only ever a Lang.
+    for (const value of ["zh", "zh-CN", "zh-hant", "en-US", "fr", "", "ZH-HANS", "/en"]) {
       expect(isLocale(value)).toBe(false);
     }
+    expect(isLocale("zh-Hant")).toBe(true);
   });
 });

@@ -25,6 +25,12 @@ import { LANGS, type Lang } from "./i18n/lang";
  * the second one is almost certainly wrong (a Traditional reader wants the zh
  * table converted, not English). This list makes "I read AniList raw" a thing
  * someone has to write down twice, in two files, one of which is a test.
+ *
+ * zh-Hant has now landed and is deliberately NOT here: all seven tables in
+ * contentLabels.ts carry a real Traditional row, so it is a TRANSLATED_LANG
+ * and every coverage assertion below runs against it. Adding it to this list
+ * would be the cheap way to make those assertions go away, which is the
+ * decision this file exists to make expensive.
  */
 const IDENTITY_LANGS: readonly Lang[] = ["en"];
 

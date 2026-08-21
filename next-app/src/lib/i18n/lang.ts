@@ -20,8 +20,19 @@
  * `Record<Lang, …>` lookup table in the codebase into a compile error until
  * it gains the new key — which is the whole purpose. There are around thirty
  * such tables; finding them by hand is not a plan.
+ *
+ * zh-Hant is IN this list and deliberately absent from LOCALES (./locale.ts).
+ * That gap is the whole sequencing: a Lang is a dictionary the UI can render,
+ * a Locale is an address the site publishes. The Traditional dictionaries,
+ * label tables and title ladders are all complete and reachable — every
+ * `Record<Lang, …>` in the repo has a real zh-Hant row — but no URL resolves
+ * to them, so nothing is in the sitemap, no hreflang advertises them and
+ * Google is never shown a page. Adding "zh-Hant" to LOCALES is the separate,
+ * later step that publishes all of it at once. Widening LOCALES produces zero
+ * tsc errors, so there is no compiler between that edit and a live tree —
+ * which is why it is not this list's job.
  */
-export const LANGS = ["zh", "en"] as const;
+export const LANGS = ["zh", "en", "zh-Hant"] as const;
 
 export type Lang = (typeof LANGS)[number];
 
@@ -60,18 +71,39 @@ export function toLang(value: string | null | undefined): Lang {
 export const BCP47_TAG: Record<Lang, string> = {
   zh: "zh-CN",
   en: "en-US",
+  "zh-Hant": "zh-Hant",
 };
 
-/** The `lang` attribute on `<html>`. */
+/**
+ * The `lang` attribute on `<html>`.
+ *
+ * zh-Hant is a SCRIPT subtag, deliberately not "zh-TW". One Traditional tree
+ * serves Taiwan, Hong Kong and Macau; claiming zh-TW would tell a Hong Kong
+ * reader's browser — and Google — that this page is for somewhere else, and
+ * there is no second tree to send them to instead.
+ */
 export const HTML_LANG: Record<Lang, string> = {
   zh: "zh-CN",
   en: "en",
+  "zh-Hant": "zh-Hant",
 };
 
-/** OpenGraph `og:locale`, which uses an underscore rather than a hyphen. */
+/**
+ * OpenGraph `og:locale`, which uses an underscore rather than a hyphen.
+ *
+ * Note the asymmetry with HTML_LANG: this one IS a region tag. Facebook's
+ * og:locale vocabulary is a closed list of language_TERRITORY pairs with no
+ * script variants in it — there is no `zh_Hant` to emit, and an unrecognised
+ * value is dropped rather than honoured. `zh_TW` is the closest real member,
+ * so a Hong Kong reader's share card is labelled Taiwan. That is a defect in
+ * Facebook's list, accepted here because the alternative is no og:locale at
+ * all, and it is exactly the kind of fact these three maps exist to keep
+ * separate — see the note above them.
+ */
 export const OG_LOCALE: Record<Lang, string> = {
   zh: "zh_CN",
   en: "en_US",
+  "zh-Hant": "zh_TW",
 };
 
 /**

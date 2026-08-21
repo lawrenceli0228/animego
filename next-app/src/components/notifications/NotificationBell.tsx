@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { authFetch } from "@/lib/authFetch";
 import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n/lang";
+import { pickRelatedTitle } from "@/lib/contentLabels";
+import { formatRelativeTime } from "@/lib/formatters";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import { dispatchDiscussionNavigation } from "@/components/anime/episodeDiscussionState";
@@ -24,42 +26,73 @@ import "./notification-bell.css";
 const EMPTY_PAGE: NotificationPage = { items: [], unreadCount: 0 };
 const NOTIFICATION_PANEL_ID = "notification-panel";
 
+/**
+ * The panel's clock, read at render time.
+ *
+ * A thin wrapper rather than `formatRelativeTime(…, Date.now())` written into
+ * the JSX: react-hooks/purity rejects an impure call in a component body, and
+ * this panel genuinely wants "now" at paint (it is a dropdown that opens on
+ * demand, not a server-rendered list, so there is no hydration mismatch to
+ * avoid). formatRelativeTime takes the clock as a parameter because its other
+ * caller — the SSR'd activity feed — has to pin one; this one does not.
+ */
 function relativeTime(iso: string, lang: Lang): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (seconds < 60) return lang === "zh" ? "刚刚" : "just now";
-  if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60);
-    return lang === "zh" ? `${minutes} 分钟前` : `${minutes}m ago`;
-  }
-  if (seconds < 86400) {
-    const hours = Math.floor(seconds / 3600);
-    return lang === "zh" ? `${hours} 小时前` : `${hours}h ago`;
-  }
-  const days = Math.floor(seconds / 86400);
-  return lang === "zh" ? `${days} 天前` : `${days}d ago`;
+  return formatRelativeTime(iso, lang, Date.now());
 }
+
+// The three sentences this panel can render, per language.
+//
+// They used to be three `lang === "zh" ? … : …` ternaries fed by a fourth one
+// that picked the anime title. All four kept compiling once a third language
+// existed and all four resolved to English for it — so the panel would have
+// rendered an English sentence under a Traditional heading, in a dropdown
+// nobody re-reads once it works.
+const COPY: Record<
+  Lang,
+  {
+    unknownAnime: string;
+    followed: (actor: string) => string;
+    liked: (actor: string, title: string) => string;
+    replied: (actor: string, title: string) => string;
+  }
+> = {
+  zh: {
+    unknownAnime: "番剧",
+    followed: (actor) => `${actor} 关注了你`,
+    liked: (actor, title) => `${actor} 赞了你在《${title}》的评论`,
+    replied: (actor, title) => `${actor} 回复了你在《${title}》的评论`,
+  },
+  en: {
+    unknownAnime: "an anime",
+    followed: (actor) => `${actor} followed you`,
+    // English drops the 《》 brackets, so the title is interpolated bare —
+    // which is why these are functions of the title rather than a template
+    // the caller fills in.
+    liked: (actor, title) => `${actor} liked your comment on ${title}`,
+    replied: (actor, title) => `${actor} replied to your comment on ${title}`,
+  },
+  "zh-Hant": {
+    unknownAnime: "番劇",
+    followed: (actor) => `${actor} 關注了你`,
+    liked: (actor, title) => `${actor} 讚了你在《${title}》的評論`,
+    replied: (actor, title) => `${actor} 回覆了你在《${title}》的評論`,
+  },
+};
 
 function notificationCopy(
   item: CommunityNotification,
   lang: Lang,
 ): string {
-  if (item.type === "follow") {
-    return lang === "zh"
-      ? `${item.actor.username} 关注了你`
-      : `${item.actor.username} followed you`;
-  }
+  const copy = COPY[lang];
+  if (item.type === "follow") return copy.followed(item.actor.username);
+  // pickRelatedTitle rather than a local ladder: same helper the relation
+  // rows and the activity feed use, so all three agree on which title a
+  // language prefers. Resolves identically to the old chain for zh and en.
   const title =
-    lang === "zh"
-      ? item.anime?.titleChinese || item.anime?.title
-      : item.anime?.title || item.anime?.titleChinese;
-  if (item.type === "comment_reaction") {
-    return lang === "zh"
-      ? `${item.actor.username} 赞了你在《${title ?? "番剧"}》的评论`
-      : `${item.actor.username} liked your comment on ${title ?? "an anime"}`;
-  }
-  return lang === "zh"
-    ? `${item.actor.username} 回复了你在《${title ?? "番剧"}》的评论`
-    : `${item.actor.username} replied to your comment on ${title ?? "an anime"}`;
+    (item.anime ? pickRelatedTitle(item.anime, lang) : "") || copy.unknownAnime;
+  return item.type === "comment_reaction"
+    ? copy.liked(item.actor.username, title)
+    : copy.replied(item.actor.username, title);
 }
 
 export default function NotificationBell() {

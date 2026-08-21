@@ -39,6 +39,40 @@ type Querier interface {
 	// overrides it.  Both empty means the handler returns 400 before we
 	// reach this query.
 	AdminUpdateUser(ctx context.Context, username *string, email *string, userID uuid.UUID) (AdminUpdateUserRow, error)
+	// description_hant equivalent of ApplyHantTitleBatch.  Separate statement
+	// rather than six more columns on that one because the two fill
+	// independently — a row can have a Traditional title from a dataset and
+	// no Chinese synopsis to convert, or the reverse — and merging them would
+	// force NULL elements into the arrays, which text[] cannot carry through
+	// sqlc without an empty-string sentinel.
+	ApplyHantDescriptionBatch(ctx context.Context, anilistIds []int32, descriptions []string, sources []string, hashes []string) (int64, error)
+	// Bulk title_hant write for cmd/hantbackfill --apply, 500 rows a call.
+	//
+	// Parallel arrays rather than one array of composites because sqlc maps
+	// text[] cleanly and a composite type would need a migration.  The three
+	// value arrays never carry NULL: a row only appears here when a tier
+	// produced something, so the caller has a value, a source and a hash for
+	// every id it passes.
+	//
+	// CALLER CONTRACT: all four arrays must be the same length.  Postgres
+	// evaluates several set-returning functions in one SELECT list in
+	// lockstep and pads the shorter ones with NULL rather than raising, so a
+	// caller that passes 4 ids and 3 hashes gets a silent NULL hash on the
+	// last row instead of an error.  cmd/hantbackfill enforces the lengths
+	// in Go before calling (see applyBatches); anything else that reaches
+	// this query must do the same.
+	//
+	// :execrows so the caller can report how many rows actually changed.
+	// The manual guard below means that number can legitimately be lower
+	// than the number of ids passed -- a row hand-promoted to 'manual'
+	// between the report and the apply is skipped -- and reporting the
+	// input count as though it were the write count would hide exactly that.
+	//
+	// The manual guard is the load-bearing line.  cmd/hantbackfill already
+	// refuses to propose anything for a manual row, but that check lives in
+	// Go and a future caller of this query will not have read it.  Expressed
+	// here, "manual is never overwritten" survives a bug in the tool.
+	ApplyHantTitleBatch(ctx context.Context, anilistIds []int32, titles []string, sources []string, hashes []string) (int64, error)
 	// Apply step: reset a batch of flagged rows so the fixed pipeline re-enriches
 	// them from scratch.  Nulls the (possibly wrong) bgm_id + title_chinese +
 	// score/votes so the bad data disappears immediately; bangumi_version=0
@@ -182,9 +216,14 @@ type Querier interface {
 	GetAnimeByAnilistIDForDandanplay(ctx context.Context, anilistID int32) (GetAnimeByAnilistIDForDandanplayRow, error)
 	// Bulk read for /search post-upsert re-read so enriched fields
 	// (title_chinese, bangumi_*) flow into the response even when the upsert
-	// only carried AniList-side data.  Returns the same 16-column shape as
+	// only carried AniList-side data.  Returns the same shape as
 	// /completed-gems / /yearly-top so handlers can reuse the response
 	// struct treatment.
+	//
+	// title_hant / title_hant_source / title_hant_seo (migration 0022) ride
+	// along on all three so a zh-Hant reader sees a Traditional card title.
+	// title_hant_seo is the machine-conversion-free projection; SEO code
+	// reads that one and no other.
 	GetAnimeByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetAnimeByAnilistIDsRow, error)
 	// findSiteAnime last-resort lookup:  Bangumi search yields a bgmId, this
 	// query resolves it to a local anime_cache row so the /match handler
@@ -234,10 +273,15 @@ type Querier interface {
 	// pgx.ErrNoRows when the anime isn't cached → handler leaves the fields nil.
 	GetAnimeImages(ctx context.Context, anilistID int32) (GetAnimeImagesRow, error)
 	// Full main-row read for /:anilistId detail.  Returns every column
-	// the response payload needs (vs the trimmed 16-column shape
+	// the response payload needs (vs the trimmed listing shape
 	// /completed-gems / /yearly-top use).  Child arrays come from the
 	// 6 GetAnime*ByID queries below; service layer assembles them into
 	// one nested response.
+	//
+	// description_hant / description_hant_source (migration 0022) appear
+	// here and nowhere else, exactly like description_cn above them: a full
+	// synopsis per card would roughly double the list payloads for text no
+	// card renders.
 	GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error)
 	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]GetAnimeRecommendationsByIDRow, error)
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
@@ -369,6 +413,10 @@ type Querier interface {
 	// /:anilistId detail enriches relations[].titleChinese + .coverImageUrl
 	// from anime_cache when the relation row itself has stale values.
 	// Mirrors server/controllers/detail.controller.js:14-28.
+	//
+	// The hant trio rides along for the same reason title_chinese does: a
+	// relation card renders a title, and on /zh-Hant it should render the
+	// Traditional one.
 	GetRelationEnrichmentByIDs(ctx context.Context, dollar_1 []int32) ([]GetRelationEnrichmentByIDsRow, error)
 	// Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
 	// and replaces the warmed-cache branch of anime.controller.js:113-127 +
@@ -386,9 +434,16 @@ type Querier interface {
 	// /api/subscriptions/:anilistId — single subscription read.
 	// pgx.ErrNoRows → 404 "Subscription not found".
 	GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (Subscription, error)
-	// Lightweight enrichment lookup for /schedule — only the 3 fields the
+	// Lightweight enrichment lookup for /schedule — only the fields the
 	// schedule items need.  bangumi_version is included so the caller can
 	// decide whether to enqueue v1 enrichment for unenriched entries.
+	//
+	// The hant trio (migration 0022) rides along because /schedule renders a
+	// title, and it was the last displayed-title surface without a
+	// Traditional one — every other list DTO already carries these three.
+	// The name is now a slight lie; it is kept because the query is also the
+	// warm-season worker's bangumi_version probe (queue/warm_season.go:259)
+	// and renaming it would churn three test fakes for no behaviour change.
 	GetTitleChineseByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetTitleChineseByAnilistIDsRow, error)
 	// Resolves the inputs the magnet aggregator needs to search by AniList id
 	// instead of a raw keyword.  Backs the /api/anime/torrents?anilistId=N path:
@@ -511,6 +566,19 @@ type Querier interface {
 	//
 	// Caller MUST have ensured the anime_cache row exists (else the FK kicks).
 	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (InsertSubscriptionIfAbsentRow, error)
+	// Whole-table read for cmd/hantbackfill.  Every row, every run.
+	//
+	// No WHERE clause and no candidate filter, which is a decision rather
+	// than an omission: the tool's report has to account for all four tiers
+	// plus the rows that reach none of them, and --restale has to recompute
+	// a digest per row to know whether it is stale, so no predicate could
+	// narrow the scan anyway.  That is the same reasoning that kept an index
+	// out of migration 0022.
+	//
+	// description_cn is here because it is the opencc tier's only input.  It
+	// makes this the widest read in the file; it is also a one-shot CLI that
+	// runs from an operator's shell, not a request path.
+	ListAnimeForHantBackfill(ctx context.Context) ([]ListAnimeForHantBackfillRow, error)
 	// Batch reader for re-enrich.  Returns the fields the queue payload
 	// needs.  Filtering by version covers v0/v1/v2 — handler dispatches each
 	// via the appropriate enqueue function.

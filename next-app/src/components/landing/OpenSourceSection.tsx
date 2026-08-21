@@ -29,6 +29,7 @@ import { mono, HUD_VIEWPORT, useCountUp } from "./shared/hud-tokens";
 import { SectionNum, SectionHeader, ChapterBar } from "./shared/hud";
 import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
+import { pickTitle } from "@/lib/formatters";
 import type { RepoStats } from "@/lib/github";
 import type { LandingPoster, AnimeDetail } from "@/lib/types";
 
@@ -388,18 +389,22 @@ const s = {
   } as CSSProperties,
 };
 
-function pickTitle(poster: LandingPoster | null, lang: Lang): string {
-  if (!poster) return lang === "zh" ? "葬送的芙莉莲" : "Frieren";
-  if (lang === "zh") {
-    return (
-      poster.titleChinese ||
-      poster.titleNative ||
-      poster.titleRomaji ||
-      poster.titleEnglish ||
-      "葬送的芙莉莲"
-    );
-  }
-  return poster.titleEnglish || poster.titleRomaji || "Frieren";
+// The hardcoded last resort when the live poster fetch fails AND the shared
+// ladder comes back empty. Keyed by Lang rather than written as a
+// `lang === "zh" ? ... : ...` pair, which is what it was: that form gave the
+// English fallback to every language that was not Simplified Chinese, so a
+// Traditional reader saw "Frieren" sitting inside a Chinese sentence.
+const FALLBACK_TITLE: Record<Lang, string> = {
+  zh: "葬送的芙莉莲",
+  en: "Frieren",
+  "zh-Hant": "葬送的芙莉蓮",
+};
+
+// Delegates the ladder to lib/formatters — this was a private copy of it, and
+// its zh / en chains matched the shared table exactly, so nothing moves for
+// either existing language. See the sibling note in HeroSection.
+function pickPosterTitle(poster: LandingPoster | null, lang: Lang): string {
+  return (poster ? pickTitle(poster, lang) : "") || FALLBACK_TITLE[lang];
 }
 
 // Bundled fallback so the frame never renders as an empty box when the live
@@ -435,7 +440,7 @@ export default function OpenSourceSection({
   const reduced = useReducedMotion();
   const os = dict.landing.openSource;
   const dm = dict.landing.danmaku; // merged-in danmaku showcase copy
-  const title = pickTitle(poster, lang);
+  const title = pickPosterTitle(poster, lang);
   const imgSrc = pickImage(poster);
 
   // Separator was a per-language ternary whose two branches were byte-identical

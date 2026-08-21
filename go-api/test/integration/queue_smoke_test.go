@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,6 +74,16 @@ func (noHitBangumi) Characters(_ context.Context, _ int) ([]bangumi.Character, e
 	return nil, bangumi.ErrNotFound
 }
 
+// Episodes joined BangumiV2Client via BangumiEpisodesFetcher after this stub
+// was written, and the stub was never updated -- which stopped the whole
+// `integration` package from compiling.  Nothing noticed because these tests
+// are behind a build tag and no CI job passes `-tags=integration`, so the
+// suite has been silently dead rather than failing.  Same no-hit shape as its
+// three siblings above.
+func (noHitBangumi) Episodes(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
+	return nil, bangumi.ErrNotFound
+}
+
 // noRowV12DB is a stub V12DB used alongside noHitBangumi.  ErrNoRows
 // on the V1 read short-circuits V1.Work() before Search is even
 // called.  UpdateBangumiV2 / UpdateAnimeCharacterCN are unreachable
@@ -88,7 +99,34 @@ func (noRowV12DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.Ge
 	return dbgen.GetAnimeForBangumiSearchRow{}, pgx.ErrNoRows
 }
 
-func (noRowV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string) error {
+// LookupBgmIdMap satisfies queue.V1Reader.  pgx.ErrNoRows is the "this anime
+// has no curated bgm.tv binding" answer, which sends V1 down the search path
+// -- and the search stub returns ErrNotFound, so the worker still terminates.
+func (noRowV12DB) LookupBgmIdMap(_ context.Context, _ int32) (int32, error) {
+	return 0, pgx.ErrNoRows
+}
+
+// The bgmMatchSource parameter arrived with migration 0011's match-accuracy
+// work and this stub was never updated to match, so it had been failing to
+// satisfy V1Writer since then.
+func (noRowV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string, _ *string) error {
+	return nil
+}
+
+// MarkBangumiV1NotFound and MarkBangumiNeedsReview satisfy queue.V1Writer.
+// Both are terminal decisions V1.Work() records before returning nil; no-ops
+// keep the smoke test's completion path from failing on row-not-found.
+func (noRowV12DB) MarkBangumiV1NotFound(_ context.Context, _ int32) error {
+	return nil
+}
+
+func (noRowV12DB) MarkBangumiNeedsReview(_ context.Context, _ int32) error {
+	return nil
+}
+
+// UpsertEpisodeTitle satisfies queue.V2Writer.  Unreachable here because
+// V2.Work() bails on the Subject ErrNotFound before it fetches episodes.
+func (noRowV12DB) UpsertEpisodeTitle(_ context.Context, _ int32, _ int32, _ *string, _ *string) error {
 	return nil
 }
 
@@ -117,6 +155,38 @@ func (noRowV12DB) UpsertAnimeCache(_ context.Context, _ dbgen.UpsertAnimeCachePa
 // "filter version=0" branch cleanly.
 func (noRowV12DB) GetTitleChineseByAnilistIDs(_ context.Context, _ []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error) {
 	return []dbgen.GetTitleChineseByAnilistIDsRow{}, nil
+}
+
+// The four below joined V12DB after this stub was written and were never
+// added, which is what stopped the `integration` package compiling.  See the
+// note on noHitBangumi.Episodes: the package is behind a build tag that no CI
+// job passes, so the suite went quiet rather than red.
+//
+// ListUnenrichedAnilistIDs satisfies queue.OrphanReader.  An empty slice ends
+// the orphan scan's paging loop on its first iteration, so the worker reaches
+// its terminal state without enqueueing anything.
+func (noRowV12DB) ListUnenrichedAnilistIDs(_ context.Context, _ int32, _ int32) ([]int32, error) {
+	return []int32{}, nil
+}
+
+// ListDescriptionCnCandidates satisfies queue.DescriptionBackfillReader.
+// Empty means the sweep finds no work and completes, which is what these
+// smoke tests want -- a real candidate would drag the stub Bangumi client
+// into the picture and make the test about the sweep instead of the queue.
+func (noRowV12DB) ListDescriptionCnCandidates(_ context.Context, _ pgtype.Interval, _ int32) ([]dbgen.ListDescriptionCnCandidatesRow, error) {
+	return []dbgen.ListDescriptionCnCandidatesRow{}, nil
+}
+
+// UpdateDescriptionCn and MarkDescriptionCnAttempted satisfy
+// queue.DescriptionBackfillWriter.  Unreachable while the candidate list is
+// empty; no-ops rather than panics so that if a future test does seed a
+// candidate, it fails on an assertion rather than on scaffolding.
+func (noRowV12DB) UpdateDescriptionCn(_ context.Context, _ *string, _ int32, _ *int32) error {
+	return nil
+}
+
+func (noRowV12DB) MarkDescriptionCnAttempted(_ context.Context, _ int32) error {
+	return nil
 }
 
 // emptyAniList is a stub AniListSeasonalFetcher used by the queue
@@ -164,6 +234,21 @@ func bootQueueForTest(t *testing.T, ctx context.Context) *river.Client[pgx.Tx] {
 
 	c, err := queue.Boot(pool, queue.Config{
 		Workers: queue.WorkersWithBangumi(noHitBangumi{}, emptyAniList{}, noRowV12DB{}, queue.NoopEnqueuer{}),
+		// bangumi_v3 must be declared or its jobs are inserted and never
+		// fetched -- river only polls the queues named here, and BangumiV3Args
+		// carries InsertOpts routing it off the default queue. This helper was
+		// written before V3 got its own queue and was never updated, so
+		// TestQueue_AllThreeKindsDispatch has been timing out at 2/3 kinds.
+		// It went unnoticed because the whole package stopped compiling and no
+		// CI job passes -tags=integration.
+		//
+		// The description_backfill and description_llm queues are deliberately
+		// NOT declared: no test here inserts those jobs, and an undeclared
+		// queue is inert rather than an error.
+		Queues: map[string]river.QueueConfig{
+			river.QueueDefault:       {MaxWorkers: 1},
+			queue.BangumiV3QueueName: {MaxWorkers: 1},
+		},
 	})
 	require.NoError(t, err, "queue.Boot")
 	require.NotNil(t, c, "queue.Boot must return a client")

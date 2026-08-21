@@ -87,12 +87,38 @@ const refetchTimeout = 15 * time.Second
 // Detail endpoint only.  The list endpoints (seasonal / trending / search)
 // deliberately do NOT carry these — a full synopsis per card would roughly
 // double those payloads for text no card renders.
+//
+// TitleHant / TitleHantSource / TitleHantSeo carry the Traditional Chinese
+// title channel (migration 0022), and they are three fields rather than one
+// on purpose.  TitleHant is whatever the best available tier produced;
+// TitleHantSource ('wikipedia' | 'anilist' | 'opencc' | 'manual') says which
+// tier that was; TitleHantSeo is the same string with the machine-converted
+// ('opencc') tier projected out by the database.
+//
+// The split exists because a call site cannot tell by looking whether the
+// value it holds was machine made.  Anything that reaches a search engine —
+// <title>, og:title, JSON-LD name — MUST read TitleHantSeo and nothing else:
+// s2twp conversion measures 85.3% sentence accuracy and its misses correlate
+// with popularity, so the errors land on exactly the titles people search
+// for.  TitleHantSeo being nil is a correct answer; the renderer falls back
+// down the title ladder as it already does for TitleChinese.
+//
+// DescriptionHant / DescriptionHantSource are the synopsis analogue, and
+// their source vocabulary is narrower ('opencc' | 'manual') because no
+// dataset carries a Traditional synopsis to import.
+//
+// All five are nil for every row until the backfill runs, and every one of
+// them falls back to its Simplified counterpart, so a client that never
+// reads them renders exactly what it rendered before.  Purely additive.
 type AnimeDetail struct {
 	AnilistID                   int32                  `json:"anilistId"`
 	TitleRomaji                 *string                `json:"titleRomaji"`
 	TitleEnglish                *string                `json:"titleEnglish"`
 	TitleNative                 *string                `json:"titleNative"`
 	TitleChinese                *string                `json:"titleChinese"`
+	TitleHant                   *string                `json:"titleHant"`
+	TitleHantSource             *string                `json:"titleHantSource"`
+	TitleHantSeo                *string                `json:"titleHantSeo"`
 	CoverImageUrl               *string                `json:"coverImageUrl"`
 	CoverImageColor             *string                `json:"coverImageColor"`
 	PosterAccent                *string                `json:"posterAccent"`
@@ -102,6 +128,8 @@ type AnimeDetail struct {
 	Description                 *string                `json:"description"`
 	DescriptionCn               *string                `json:"descriptionCn"`
 	DescriptionCnSource         *string                `json:"descriptionCnSource"`
+	DescriptionHant             *string                `json:"descriptionHant"`
+	DescriptionHantSource       *string                `json:"descriptionHantSource"`
 	Episodes                    *int32                 `json:"episodes"`
 	Status                      *string                `json:"status"`
 	Season                      *string                `json:"season"`
@@ -135,11 +163,20 @@ type AnimeDetail struct {
 // the enrichment map.  coverImageUrl in anime_relations CAN be non-null
 // (AniList's relation edges sometimes carry their own cover); we keep
 // that value when present and only fall back to enrichment when nil.
+//
+// titleHant / titleHantSource / titleHantSeo have the same provenance as
+// titleChinese here — anime_relations has no column for them either, so
+// they come wholly from the enrichment map and are nil whenever the
+// enrichment lookup misses or fails.  See AnimeDetail for why the SEO
+// projection is a separate field.
 type DetailRelation struct {
 	AnilistID                   int32    `json:"anilistId"`
 	RelationType                *string  `json:"relationType"`
 	Title                       *string  `json:"title"`
 	TitleChinese                *string  `json:"titleChinese"`
+	TitleHant                   *string  `json:"titleHant"`
+	TitleHantSource             *string  `json:"titleHantSource"`
+	TitleHantSeo                *string  `json:"titleHantSeo"`
 	CoverImageUrl               *string  `json:"coverImageUrl"`
 	CoverImageColor             *string  `json:"coverImageColor"`
 	PosterAccent                *string  `json:"posterAccent"`
@@ -750,8 +787,9 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 
 // convertRelationsToDetailRelations is the fallback path when the
 // relations enrichment query fails post-refetch.  Returns DetailRelation
-// values without the titleChinese / coverImageUrl backfill so the client
-// still sees the relation rows, just without the cross-table enrichment.
+// values without the titleChinese / titleHant* / coverImageUrl backfill so
+// the client still sees the relation rows, just without the cross-table
+// enrichment.
 func convertRelationsToDetailRelations(rels []dbgen.GetAnimeRelationsByIDRow) []DetailRelation {
 	if len(rels) == 0 {
 		return []DetailRelation{}
@@ -819,10 +857,15 @@ func (s *DetailService) enrichRelations(ctx context.Context, rels []dbgen.GetAni
 
 		// titleChinese: relation table has no title_chinese column,
 		// so the Express ?? chain simplifies to the enrichment value
-		// (or nil when no enrichment row exists).
-		var titleCn *string
+		// (or nil when no enrichment row exists).  The hant trio has
+		// no relation-table column either, so it follows the same
+		// rule: enrichment value or nil, never a partial mix.
+		var titleCn, titleHant, titleHantSource, titleHantSeo *string
 		if ok {
 			titleCn = cached.TitleChinese
+			titleHant = cached.TitleHant
+			titleHantSource = cached.TitleHantSource
+			titleHantSeo = cached.TitleHantSeo
 		}
 
 		out = append(out, DetailRelation{
@@ -830,6 +873,9 @@ func (s *DetailService) enrichRelations(ctx context.Context, rels []dbgen.GetAni
 			RelationType:                r.RelationType,
 			Title:                       r.Title,
 			TitleChinese:                titleCn,
+			TitleHant:                   titleHant,
+			TitleHantSource:             titleHantSource,
+			TitleHantSeo:                titleHantSeo,
 			CoverImageUrl:               cover,
 			CoverImageColor:             r.CoverImageColor,
 			PosterAccent:                r.PosterAccent,
@@ -923,6 +969,9 @@ func assembleDetail(
 		TitleEnglish:                main.TitleEnglish,
 		TitleNative:                 main.TitleNative,
 		TitleChinese:                main.TitleChinese,
+		TitleHant:                   main.TitleHant,
+		TitleHantSource:             main.TitleHantSource,
+		TitleHantSeo:                main.TitleHantSeo,
 		CoverImageUrl:               main.CoverImageUrl,
 		CoverImageColor:             main.CoverImageColor,
 		PosterAccent:                main.PosterAccent,
@@ -932,6 +981,8 @@ func assembleDetail(
 		Description:                 main.Description,
 		DescriptionCn:               main.DescriptionCn,
 		DescriptionCnSource:         main.DescriptionCnSource,
+		DescriptionHant:             main.DescriptionHant,
+		DescriptionHantSource:       main.DescriptionHantSource,
 		Episodes:                    main.Episodes,
 		Status:                      main.Status,
 		Season:                      main.Season,

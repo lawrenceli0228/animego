@@ -26,6 +26,7 @@ import { mono } from "./shared/hud-tokens";
 import { SectionNum, CornerBrackets } from "./shared/hud";
 import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
+import { pickTitle } from "@/lib/formatters";
 import type { LandingPoster } from "@/lib/types";
 
 const SECTION_HUE = 330;
@@ -48,20 +49,16 @@ const danmaku: DanmakuLine[] = [
   { text: "这分镜不得不服", y: 70, delay: 2.7 },
 ];
 
-// Pick the best poster title for the active locale. Mirrors the legacy
-// client/src/utils/formatters.js pickTitle() priority chain.
-function pickTitle(poster: LandingPoster | null, lang: Lang): string {
-  if (!poster) return "";
-  if (lang === "zh") {
-    return (
-      poster.titleChinese ||
-      poster.titleNative ||
-      poster.titleRomaji ||
-      poster.titleEnglish ||
-      ""
-    );
-  }
-  return poster.titleEnglish || poster.titleRomaji || "";
+// Pick the best poster title for the active locale.
+//
+// Delegates to lib/formatters. This used to be a private copy of the same
+// ladder written as `lang === "zh" ? ... : ...`, which meant it kept compiling
+// when a third language was added and handed that language the English rung -
+// invisible in review, because the chrome around the title IS translated.
+// The copy's zh and en chains were identical to the shared table's, so this is
+// a behaviour-preserving swap for both existing languages.
+function pickPosterTitle(poster: LandingPoster | null, lang: Lang): string {
+  return poster ? pickTitle(poster, lang) : "";
 }
 
 const s = {
@@ -419,7 +416,7 @@ function Showcase({ poster, lang, hero }: ShowcaseProps) {
   const onLeave = () => setCursor((c) => ({ ...c, on: false }));
 
   const hue: number | string = poster?.posterAccent ?? SECTION_HUE;
-  const title = pickTitle(poster, lang) || "—"; // em dash placeholder
+  const title = pickPosterTitle(poster, lang) || "—"; // em dash placeholder
   const score =
     poster?.averageScore != null ? (poster.averageScore / 10).toFixed(1) : null;
   const epUnit = hero.episodeUnit;

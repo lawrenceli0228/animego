@@ -76,10 +76,13 @@ type actorResponse struct {
 }
 
 type animeResponse struct {
-	AnilistID     int32   `json:"anilistId"`
-	Title         string  `json:"title"`
-	TitleChinese  *string `json:"titleChinese"`
-	CoverImageURL *string `json:"coverImageUrl"`
+	AnilistID       int32   `json:"anilistId"`
+	Title           string  `json:"title"`
+	TitleChinese    *string `json:"titleChinese"`
+	TitleHant       *string `json:"titleHant"`
+	TitleHantSource *string `json:"titleHantSource"`
+	TitleHantSeo    *string `json:"titleHantSeo"`
+	CoverImageURL   *string `json:"coverImageUrl"`
 }
 
 type itemResponse struct {
@@ -157,10 +160,13 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 				title = *row.TitleRomaji
 			}
 			item.Anime = &animeResponse{
-				AnilistID:     *row.AnilistID,
-				Title:         title,
-				TitleChinese:  row.TitleChinese,
-				CoverImageURL: row.CoverImageUrl,
+				AnilistID:       *row.AnilistID,
+				Title:           title,
+				TitleChinese:    row.TitleChinese,
+				TitleHant:       row.TitleHant,
+				TitleHantSource: row.TitleHantSource,
+				TitleHantSeo:    row.TitleHantSeo,
+				CoverImageURL:   row.CoverImageUrl,
 			}
 		}
 		items = append(items, item)

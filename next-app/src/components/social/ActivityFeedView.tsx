@@ -4,6 +4,8 @@ import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n/lang";
+import { pickRelatedTitle } from "@/lib/contentLabels";
+import { formatRelativeTime } from "@/lib/formatters";
 import type { FeedItem } from "@/lib/types";
 import { dispatchDiscussionNavigation } from "@/components/anime/episodeDiscussionState";
 import {
@@ -19,48 +21,62 @@ interface ActivityFeedViewProps {
   nowMs: number;
 }
 
-function timeAgo(iso: string, lang: Lang, nowMs: number): string {
-  const parsed = new Date(iso).getTime();
-  if (!Number.isFinite(parsed)) return "";
-  const diff = Math.max(0, Math.floor((nowMs - parsed) / 1000));
-  if (diff < 60) return lang === "zh" ? "刚刚" : "just now";
-  if (diff < 3600) {
-    const minutes = Math.floor(diff / 60);
-    return lang === "zh" ? `${minutes} 分钟前` : `${minutes}m ago`;
+// Every string this file renders is keyed by Lang rather than chosen with
+// `lang === "zh" ? … : …`. The ternary form compiles forever and hands a
+// third language the English arm, and a feed row is the worst place for that:
+// the anime title beside it IS translated, so the row looks right.
+const COPY: Record<
+  Lang,
+  {
+    anonymousActor: string;
+    followed: string;
+    commented: (episode: number) => string;
+    completed: string;
+    watched: (episode: number) => string;
   }
-  if (diff < 86400) {
-    const hours = Math.floor(diff / 3600);
-    return lang === "zh" ? `${hours} 小时前` : `${hours}h ago`;
-  }
-  const days = Math.floor(diff / 86400);
-  return lang === "zh" ? `${days} 天前` : `${days}d ago`;
-}
+> = {
+  zh: {
+    anonymousActor: "一位用户",
+    followed: "关注了",
+    commented: (episode) => `讨论了第 ${episode} 集`,
+    completed: "看完了这部番",
+    watched: (episode) => `看到第 ${episode} 集`,
+  },
+  en: {
+    anonymousActor: "a user",
+    followed: "followed",
+    commented: (episode) => `commented on episode ${episode}`,
+    completed: "completed this anime",
+    watched: (episode) => `watched episode ${episode}`,
+  },
+  "zh-Hant": {
+    anonymousActor: "一位使用者",
+    followed: "關注了",
+    commented: (episode) => `討論了第 ${episode} 集`,
+    completed: "看完了這部番",
+    watched: (episode) => `看到第 ${episode} 集`,
+  },
+};
 
-function pickTitle(item: FeedItem, lang: Lang): string {
+function pickFeedTitle(item: FeedItem, lang: Lang): string {
   if (item.kind?.toLowerCase() === "follow") {
-    return item.targetUsername || (lang === "zh" ? "一位用户" : "a user");
+    return item.targetUsername || COPY[lang].anonymousActor;
   }
-  return lang === "zh"
-    ? item.titleChinese || item.title
-    : item.title || item.titleChinese || `Anime #${item.anilistId}`;
+  // pickRelatedTitle owns the per-language title ladder — the same one the
+  // relation and recommendation rows use — so the feed cannot drift from it.
+  // zh and en resolve exactly as the previous chains did; the only change is
+  // that a row with no title at all now falls through to "Anime #123" in zh
+  // too, where it used to render an empty string.
+  return pickRelatedTitle(item, lang) || `Anime #${item.anilistId}`;
 }
 
 function actionCopy(item: FeedItem, lang: Lang): string {
   const kind = item.kind?.toLowerCase() ?? "";
-  if (kind === "follow") {
-    return lang === "zh" ? "关注了" : "followed";
-  }
-  if (kind.includes("comment")) {
-    return lang === "zh"
-      ? `讨论了第 ${item.episode} 集`
-      : `commented on episode ${item.episode}`;
-  }
-  if (item.status === "completed" || kind === "completed") {
-    return lang === "zh" ? "看完了这部番" : "completed this anime";
-  }
-  return lang === "zh"
-    ? `看到第 ${item.episode} 集`
-    : `watched episode ${item.episode}`;
+  const copy = COPY[lang];
+  if (kind === "follow") return copy.followed;
+  if (kind.includes("comment")) return copy.commented(item.episode);
+  if (item.status === "completed" || kind === "completed") return copy.completed;
+  return copy.watched(item.episode);
 }
 
 const rowStyle = {
@@ -109,7 +125,7 @@ export default function ActivityFeedView({ items, state, nowMs }: ActivityFeedVi
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {items.map((item) => {
-            const title = pickTitle(item, lang);
+            const title = pickFeedTitle(item, lang);
             const timestamp = feedItemTime(item);
             const target = feedItemTarget(item);
             return (
@@ -138,7 +154,7 @@ export default function ActivityFeedView({ items, state, nowMs }: ActivityFeedVi
                     </p>
                   )}
                 </div>
-                {timestamp && <time dateTime={timestamp} style={{ color: "rgba(235,235,245,.32)", fontSize: 10, flexShrink: 0 }}>{timeAgo(timestamp, lang, nowMs)}</time>}
+                {timestamp && <time dateTime={timestamp} style={{ color: "rgba(235,235,245,.32)", fontSize: 10, flexShrink: 0 }}>{formatRelativeTime(timestamp, lang, nowMs)}</time>}
               </article>
             );
           })}

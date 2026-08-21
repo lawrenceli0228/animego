@@ -23,12 +23,36 @@ const STATUS_OPTIONS: { value: SubscriptionStatus; color: string }[] = [
   { value: "dropped", color: "#ff453a" },
 ];
 
+// Three labels that stay local rather than moving into the dictionary: the
+// first two are glued to a number inside a fixed-width row, and the third is
+// the possessive stand-in for a missing username. Chinese writes "看到第 3 集"
+// where English writes "Ep 3" — a shape difference, not a wording one, which
+// is why these are functions rather than strings with a placeholder.
+const MY_SCORE_LABEL: Record<Lang, string> = {
+  zh: "我",
+  en: "Me",
+  "zh-Hant": "我",
+};
+
+const EPISODE_PROGRESS: Record<Lang, (episode: number) => string> = {
+  zh: (episode) => `看到第 ${episode} 集`,
+  en: (episode) => `Ep ${episode}`,
+  "zh-Hant": (episode) => `看到第 ${episode} 集`,
+};
+
+/** Shown in place of a username the API did not send. */
+const OWN_NAME: Record<Lang, string> = {
+  zh: "我",
+  en: "My",
+  "zh-Hant": "我",
+};
+
 type SortValue = "updatedAt" | "score" | "title";
 
 const SORT_OPTIONS: { value: SortValue; label: Record<Lang, string> }[] = [
-  { value: "updatedAt", label: { zh: "最近更新", en: "Recently Updated" } },
-  { value: "score", label: { zh: "我的评分", en: "My Score" } },
-  { value: "title", label: { zh: "标题", en: "Title" } },
+  { value: "updatedAt", label: { zh: "最近更新", en: "Recently Updated", "zh-Hant": "最近更新" } },
+  { value: "score", label: { zh: "我的评分", en: "My Score", "zh-Hant": "我的評分" } },
+  { value: "title", label: { zh: "标题", en: "Title", "zh-Hant": "標題" } },
 ];
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
@@ -192,14 +216,12 @@ function AnimeCard({ item, lang }: AnimeCardProps) {
                 fontFamily: "'JetBrains Mono', monospace",
               }}
             >
-              {lang === "zh" ? "我" : "Me"}: {item.score}/10
+              {MY_SCORE_LABEL[lang]}: {item.score}/10
             </span>
           )}
           {item.currentEpisode > 0 && (
             <span style={{ fontSize: 11, color: "rgba(235,235,245,0.40)" }}>
-              {lang === "zh"
-                ? `看到第 ${item.currentEpisode} 集`
-                : `Ep ${item.currentEpisode}`}
+              {EPISODE_PROGRESS[lang](item.currentEpisode)}
               {item.episodes != null ? ` / ${item.episodes}` : ""}
             </span>
           )}
@@ -391,7 +413,7 @@ export default function ProfileClient({
     };
   }, [allSubs, lang, dict]);
 
-  const displayName = username ?? (lang === "zh" ? "我" : "My");
+  const displayName = username ?? OWN_NAME[lang];
 
   return (
     <ProfileHero
@@ -413,7 +435,7 @@ export default function ProfileClient({
       <div style={{ paddingTop: 8, paddingBottom: 60 }}>
         {/* Status tabs */}
       <nav
-        aria-label={lang === "zh" ? "追番状态" : "Watch status"}
+        aria-label={dict.profile.statusTabsAria}
         style={{
           display: "flex",
           gap: 4,
@@ -477,8 +499,8 @@ export default function ProfileClient({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={lang === "zh" ? "搜索我的列表..." : "Search my list..."}
-          aria-label={lang === "zh" ? "搜索追番列表" : "Search watchlist"}
+          placeholder={dict.profile.searchPlaceholder}
+          aria-label={dict.profile.searchAria}
           style={{
             padding: "8px 14px",
             borderRadius: 8,
@@ -494,7 +516,7 @@ export default function ProfileClient({
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as SortValue)}
-          aria-label={lang === "zh" ? "排序方式" : "Sort by"}
+          aria-label={dict.profile.sortAria}
           style={{
             padding: "8px 14px",
             borderRadius: 8,
@@ -528,7 +550,7 @@ export default function ProfileClient({
           }}
         >
           {search ? (
-            lang === "zh" ? "无匹配结果" : "No matches"
+            dict.profile.noMatches
           ) : (
             <>
               {dict.profile.noAnime} 「{statusLabels[activeStatus]}」{" "}

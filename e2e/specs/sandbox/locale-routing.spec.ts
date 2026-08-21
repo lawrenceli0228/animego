@@ -73,10 +73,67 @@ test.describe("the English tree", () => {
   });
 });
 
+test.describe("the Traditional Chinese tree", () => {
+  // zh-Hant is the locale most likely to fail invisibly, because a wrong
+  // answer here is still Chinese. An English string under /en is obvious in a
+  // screenshot; a Simplified string under /zh-Hant is not, and the readers who
+  // would notice are the ones least likely to be reviewing the diff.
+  test("/zh-Hant/faq responds 200", async ({ page }) => {
+    expect(await status(page, "/zh-Hant/faq")).toBe(200);
+  });
+
+  test("html lang follows the URL", async ({ page }) => {
+    await page.goto("/zh-Hant/faq");
+    expect(await page.locator("html").getAttribute("lang")).toBe("zh-Hant");
+  });
+
+  test("the body is Traditional, not Simplified", async ({ page }) => {
+    // The character pairs below are the highest-frequency ones in this UI and
+    // are script-exclusive: 這/这, 個/个, 開/开, 關/关, 點/点. Counting beats
+    // asserting one known string, which a copy edit would break for the wrong
+    // reason.
+    await page.goto("/zh-Hant/faq");
+    await expect(page.locator("h1")).toBeVisible();
+    // textContent, not innerText. This page keeps its answers in collapsed
+    // <details>, and innerText returns only what is painted — 477 characters
+    // against textContent's 59,757. An innerText assertion here passes or
+    // fails on how many questions happen to be open, which is not what is
+    // being tested.
+    const text = (await page.locator("body").textContent()) || "";
+    const simplified = (text.match(/[这个开关点说时长发网页样验后问]/g) ?? []).length;
+    const traditional = (text.match(/[這個開關點說時長發網頁樣驗後問]/g) ?? []).length;
+    expect(traditional).toBeGreaterThan(20);
+    expect(simplified).toBe(0);
+  });
+
+  test("/zh-Hant/anime/21 renders and self-canonicalises under its prefix", async ({ page }) => {
+    await page.goto("/zh-Hant/anime/21");
+    await expect(page.locator("h1")).toBeVisible();
+    const canonical = await page.locator('link[rel="canonical"]').getAttribute("href");
+    expect(canonical).toMatch(/\/zh-Hant\/anime\/21$/);
+  });
+
+  test("the locale prefix is case-sensitive", async ({ page }) => {
+    // /zh-hant/ resolving would be a second address for the same document.
+    expect(await status(page, "/zh-hant/faq")).toBe(404);
+  });
+});
+
 test.describe("hreflang is reciprocal on real HTML", () => {
   // Google ignores the entire group when two pages fail to point at each
   // other, and nothing in a build or a screenshot shows it.
-  test("both locales of /faq list each other and agree", async ({ page }) => {
+  //
+  // Kept as a literal list rather than imported from the app: a spec that
+  // derives its expectations from the code under test cannot catch the code
+  // being wrong. Adding a locale should require editing this line.
+  const PUBLISHED = ["zh-Hans", "en", "zh-Hant"] as const;
+  const PATH_OF: Record<(typeof PUBLISHED)[number], string> = {
+    "zh-Hans": "/faq",
+    en: "/en/faq",
+    "zh-Hant": "/zh-Hant/faq",
+  };
+
+  test("every locale of /faq lists every other, and they agree", async ({ page }) => {
     const read = async (path: string) => {
       await page.goto(path);
       const links = page.locator('link[rel="alternate"][hreflang]');
@@ -92,27 +149,89 @@ test.describe("hreflang is reciprocal on real HTML", () => {
       };
     };
 
-    const zh = await read("/faq");
-    const en = await read("/en/faq");
+    const sides: Record<string, Awaited<ReturnType<typeof read>>> = {};
+    for (const locale of PUBLISHED) sides[locale] = await read(PATH_OF[locale]);
 
-    for (const side of [zh, en]) {
-      expect(Object.keys(side.alternates).sort()).toEqual(["en", "x-default", "zh-Hans"]);
+    const expected = [...PUBLISHED, "x-default"].sort();
+    for (const locale of PUBLISHED) {
+      expect(Object.keys(sides[locale].alternates).sort()).toEqual(expected);
     }
-    // Closure: the URL each side advertises for the other is the URL that
-    // other side calls its own canonical.
-    expect(zh.alternates["en"]).toBe(en.canonical);
-    expect(en.alternates["zh-Hans"]).toBe(zh.canonical);
-    // x-default points at the un-prefixed tree from both sides.
-    expect(zh.alternates["x-default"]).toBe(zh.canonical);
-    expect(en.alternates["x-default"]).toBe(zh.canonical);
+
+    // Closure over every ordered pair, not just the round trip: the URL `a`
+    // advertises for `b` must be the URL `b` calls its own canonical. With
+    // three locales there are six directed edges and a partial fix can
+    // satisfy two of them.
+    for (const a of PUBLISHED) {
+      for (const b of PUBLISHED) {
+        expect(sides[a].alternates[b]).toBe(sides[b].canonical);
+      }
+    }
+
+    // x-default points at the un-prefixed tree from every side.
+    for (const locale of PUBLISHED) {
+      expect(sides[locale].alternates["x-default"]).toBe(sides["zh-Hans"].canonical);
+    }
   });
 
-  test("the untranslated legal pages claim no English version", async ({ page }) => {
+  test("the untranslated legal pages claim no translation", async ({ page }) => {
     // /privacy is hardcoded Chinese. Advertising an English alternate for it
     // is the bug this whole project started from, and would be trivially
     // easy to reintroduce by dropping the untranslated opt-out.
     await page.goto("/privacy");
     await expect(page.locator('link[rel="alternate"][hreflang]')).toHaveCount(0);
+  });
+
+  test("only the bare copy of an untranslated page is indexable", async ({ page }) => {
+    // Making no hreflang claim keeps these out of the reciprocal group but
+    // not out of the index. They are prerendered and linked from every
+    // footer, so without an explicit noindex each legal page has one
+    // indexable URL per locale carrying the identical Simplified body —
+    // including one under /zh-Hant/, which is the exact class of mistake this
+    // whole migration exists to prevent.
+    const robots = async (path: string) => {
+      await page.goto(path);
+      return page.locator('meta[name="robots"]').getAttribute("content");
+    };
+    for (const doc of ["/privacy", "/terms", "/copyright"]) {
+      expect(await robots(doc)).toContain("index");
+      expect(await robots(doc)).not.toContain("noindex");
+      for (const prefix of ["/en", "/zh-Hant"]) {
+        expect(await robots(`${prefix}${doc}`)).toContain("noindex");
+      }
+    }
+  });
+});
+
+test.describe("the language menu", () => {
+  // The control that replaced a two-state EN/中 toggle. The toggle was not
+  // merely incomplete at three locales, it was actively misleading: a reader
+  // on a Traditional page was invited to "switch to Chinese".
+  test("offers every locale, in its own script, with the current one marked", async ({ page }) => {
+    await page.goto("/zh-Hant/faq");
+    await page.getByRole("button", { name: /language|語言|语言/i }).first().click();
+
+    const options = page.getByRole("menuitem");
+    await expect(options).toHaveCount(3);
+    // Endonyms, not translations: a reader looking for Traditional Chinese is
+    // looking for these exact characters, whatever page they are on.
+    for (const label of ["简体中文", "繁體中文", "English"]) {
+      await expect(page.getByRole("menuitem", { name: label })).toBeVisible();
+    }
+    await expect(page.getByRole("menuitem", { name: "繁體中文" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
+  test("switching locale keeps the page and its query string", async ({ page }) => {
+    // The failure this catches is a switcher that sends everyone to the home
+    // page, which is both a worse experience and a signal Google reads as the
+    // alternate not really being an alternate.
+    await page.goto("/zh-Hant/search?q=frieren");
+    await page.getByRole("button", { name: /language|語言|语言/i }).first().click();
+    await page.getByRole("menuitem", { name: "English" }).click();
+    await page.waitForURL(/\/en\/search/);
+    expect(page.url()).toContain("q=frieren");
   });
 });
 
@@ -155,7 +274,7 @@ test.describe("legacy ?lang= URLs", () => {
 });
 
 test.describe("non-page routes are untouched by the locale step", () => {
-  test("sitemap.xml is served, and lists both locales", async ({ page }) => {
+  test("sitemap.xml is served, and lists every locale", async ({ page }) => {
     const res = await page.request.get("/sitemap.xml");
     expect(res.status()).toBe(200);
     const body = await res.text();
@@ -163,6 +282,12 @@ test.describe("non-page routes are untouched by the locale step", () => {
     // If the locale step ever rewrote this route it would 404 outright, so
     // the status above is the real guard; this checks the expansion landed.
     expect(body).toContain("/en/faq");
+    expect(body).toContain("/zh-Hant/faq");
+    // …and that the untranslated pages did NOT get expanded. A sitemap that
+    // submits /zh-Hant/privacy asks Google to index a Simplified body under a
+    // Traditional URL, which is what the noindex above is cleaning up after.
+    expect(body).not.toContain("/zh-Hant/privacy");
+    expect(body).not.toContain("/en/privacy");
   });
 
   test("robots.txt is served", async ({ page }) => {

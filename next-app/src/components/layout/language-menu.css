@@ -1,0 +1,160 @@
+/*
+ * language-menu.css — the language control in both places it appears:
+ * a trigger + popup in the logged-out navbar, and a flat option group inside
+ * the account dropdown.
+ *
+ * Deliberately borrows avatar-menu.css's surface (same blur, same radius,
+ * same hover wash) rather than inventing a second popup language — the two
+ * sit two pixels apart in the same bar and any difference reads as a bug.
+ */
+
+.agc-lang-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Matches the 36px box the old lang button had, so the bar baseline holds. */
+.agc-lang-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  min-width: 40px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(84, 84, 88, 0.65);
+  background: none;
+  color: rgba(235, 235, 245, 0.6);
+  font-family: var(--font-sans), sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+.agc-lang-trigger svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.75;
+}
+.agc-lang-trigger:hover,
+.agc-lang-trigger[aria-expanded="true"] {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.06);
+}
+/* Focus is a ring, not a colour change: the hover state already uses colour,
+   and a keyboard user needs the two to be distinguishable. */
+.agc-lang-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.65);
+}
+
+.agc-lang-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 200;
+  min-width: 168px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(18, 18, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 24px 64px -20px rgba(0, 0, 0, 0.9);
+}
+
+.agc-lang-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.agc-lang-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(235, 235, 245, 0.85);
+  font-family: var(--font-sans), sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+.agc-lang-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.agc-lang-option:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.75);
+}
+/* The current locale. Three signals, none of them colour alone: a check
+   glyph, a heavier weight, and a tinted wash. Colour-only would be invisible
+   to a reader who cannot separate the accent from the body text — and this
+   menu's whole job is telling someone which language they are already in. */
+.agc-lang-option.is-current {
+  color: #fff;
+  font-weight: 700;
+  background: rgba(10, 132, 255, 0.16);
+}
+.agc-lang-option.is-current:hover {
+  background: rgba(10, 132, 255, 0.24);
+}
+/* Reserved even when empty so the labels line up whichever row is current. */
+.agc-lang-check {
+  width: 14px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #0a84ff;
+}
+.agc-lang-option.is-current .agc-lang-check {
+  color: #4da3ff;
+}
+
+/* Inline variant: the group as it appears inside the account dropdown. */
+.agc-lang-inline {
+  padding-top: 2px;
+}
+.agc-lang-inline-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 9px 10px 4px;
+  color: rgba(235, 235, 245, 0.45);
+  font-family: var(--font-sans), sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.agc-lang-inline-label svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+/* Indented under the group heading so the rows read as its children rather
+   than as three more top-level menu items. */
+.agc-lang-inline .agc-lang-option {
+  padding-left: 36px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agc-lang-trigger,
+  .agc-lang-option {
+    transition: none;
+  }
+}

@@ -10,6 +10,8 @@ const en = {
     home: 'Home', season: 'Season', search: 'Search',
     login: 'Login', register: 'Sign Up', logout: 'Logout',
     myList: 'My List', hi: 'Hi', library: 'Library', about: 'About',
+    // Language menu: the group heading + the account menu's own label.
+    language: 'Language', accountMenu: 'Account menu', mainNavigation: 'Main navigation',
   },
   // Season labels
   season: {
@@ -260,6 +262,39 @@ const en = {
     empty: 'No notifications yet', loadError: 'Could not load notifications', retry: 'Retry',
   },
   settings: {
+    // Page chrome + member pass card. These were 28 inline
+    // `lang === "zh" ? … : …` ternaries in SettingsClient.tsx, which compiled
+    // clean and handed every third language the English branch.
+    kicker: 'Settings',
+    pageTitle: 'Account & Pass',
+    navPreview: 'Nav avatar preview · live',
+    livePreview: 'Live preview',
+    passTitle: 'Member Pass',
+    passSubtitle: 'Card photo and profile backdrop',
+    currentCardAlt: 'Current',
+    changePhoto: 'Change',
+    uploadPhoto: 'Upload photo',
+    removePhoto: 'Remove',
+    backdropLabel: 'Backdrop anime (wide banner)',
+    backdropEmpty: 'No anime with a wide banner in your list yet',
+    backdropListAria: 'Profile backdrop anime',
+    savePass: 'Save pass',
+    accountTitle: 'Account',
+    accountSubtitle: 'Member {{id}} · permanent',
+    usernameLabel: 'Username',
+    usernameTooShort: 'Min 3 chars',
+    usernameHiddenTitle: 'Username hidden',
+    usernameHiddenBody: 'The name you registered with looks like an email address or a phone number, so it is not shown. You and everyone else now see:',
+    saveUsername: 'Save',
+    // The security card is deliberately bilingual in every language: whoever
+    // needs to reset a password should find the instruction whatever they read.
+    // The Simplified half is kept Simplified here — an English reader has no
+    // script preference, and this is the string that shipped.
+    securityTitle: 'Security',
+    securitySubtitle: 'Change password · 修改密码',
+    passwordResetHint: 'For account security, change your password via the “Forgot password” link on the login page (reset by email).',
+    passwordResetHintAlt: '修改密码请在登录界面点击「忘记密码」。',
+    goToLogin: 'Go to login · 前往登录页',
     communityTitle: 'Community & Privacy',
     communitySubtitle: 'Control who can see your watchlist and activity',
     publicProfile: 'Public community profile',

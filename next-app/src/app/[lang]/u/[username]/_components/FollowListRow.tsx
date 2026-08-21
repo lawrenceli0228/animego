@@ -8,6 +8,16 @@ import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import { isMaskedUsername } from "@/lib/publicUsername";
 import FallbackImg from "@/components/ui/FallbackImg";
 
+// Same sentence as dict.anime.maskedUser, kept as a local Record rather than
+// read from the dictionary: this is a Client Component, and getDictByLang()
+// would drag both 67KB server dictionaries into its chunk (see the note on
+// the imports in lib/lang-client.tsx). Keep the two in step by hand.
+const MASKED_HINT: Record<Lang, string> = {
+  zh: "这位用户还没有设置公开显示名",
+  en: "This user hasn't set a public display name yet",
+  "zh-Hant": "這位使用者還沒有設定公開顯示名",
+};
+
 interface FollowListRowProps {
   user: FollowListItem;
   /** Whether the app-user (viewer) is following this row's user; null = anon */
@@ -81,11 +91,7 @@ export default function FollowListRow({
           // Contact-shaped usernames come back masked; explain the opaque
           // handle on hover instead of letting it read as a broken name.
           title={
-            isMaskedUsername(user.username)
-              ? lang === "zh"
-                ? "这位用户还没有设置公开显示名"
-                : "This user hasn't set a public display name yet"
-              : undefined
+            isMaskedUsername(user.username) ? MASKED_HINT[lang] : undefined
           }
         >
           {user.username}

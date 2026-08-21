@@ -126,21 +126,42 @@ async function fetchSearch(
   return body as SearchResponse;
 }
 
+// The three strings on this page that wrap a runtime value. Local Records of
+// functions rather than dictionary keys with a placeholder, because the value
+// sits in a different place in each language — Chinese puts the genre BEFORE
+// its noun and quotes the query with its own punctuation, English puts both
+// after a preposition. A single template with {{q}} in it cannot say that.
+const QUERY_HEADING: Record<Lang, (q: string) => string> = {
+  zh: (q) => `搜索"${q}"的动画结果`,
+  en: (q) => `Search results for "${q}"`,
+  "zh-Hant": (q) => `搜尋"${q}"的動畫結果`,
+};
+
+const GENRE_HEADING: Record<Lang, (label: string) => string> = {
+  zh: (label) => `${label}类型的动画`,
+  en: (label) => `${label} anime`,
+  "zh-Hant": (label) => `${label}類型的動畫`,
+};
+
+const META_DESCRIPTION: Record<Lang, (subject: string) => string> = {
+  zh: (subject) => `AnimeGoClub 搜索结果: ${subject}`,
+  en: (subject) => `AnimeGoClub search results for ${subject}`,
+  "zh-Hant": (subject) => `AnimeGoClub 搜尋結果: ${subject}`,
+};
+
 // Render headings that mirror legacy SearchPage.jsx:25-29 so SSR text
 // matches the SPA exactly. Crawler bots and accessibility tools key
 // off this <h1>, so keep it in sync with the active query.
 function buildHeading(q: string, genre: string, dict: Dict, lang: Lang): string {
   if (q) {
-    return lang === "zh"
-      ? `搜索"${q}"的动画结果`
-      : `Search results for "${q}"`;
+    return QUERY_HEADING[lang](q);
   }
   if (genre) {
     // zh used to render the raw enum ("Action 类型的动画"). genreLabel is the
     // identity for en, so the English heading is unchanged; the zh heading
     // drops the space because Chinese does not separate the two words.
     const label = genreLabel(genre, lang);
-    return lang === "zh" ? `${label}类型的动画` : `${label} anime`;
+    return GENRE_HEADING[lang](label);
   }
   return dict.search.title;
 }
@@ -166,11 +187,7 @@ export async function generateMetadata({
 
   return {
     title,
-    description: hasQuery
-      ? lang === "zh"
-        ? `AnimeGoClub 搜索结果: ${subject}`
-        : `AnimeGoClub search results for ${subject}`
-      : dict.search.prompt,
+    description: hasQuery ? META_DESCRIPTION[lang](subject) : dict.search.prompt,
     robots: hasQuery
       ? { index: false, follow: true }
       : { index: true, follow: true },
@@ -368,11 +385,11 @@ export default async function SearchPage({ params, searchParams }: SearchPagePro
                   prefetch={false}
                   style={pageButtonStyle(false)}
                 >
-                  {lang === "zh" ? "上一页" : "Prev"}
+                  {dict.search.prev}
                 </Link>
               ) : (
                 <span style={pageButtonStyle(true)} aria-disabled>
-                  {lang === "zh" ? "上一页" : "Prev"}
+                  {dict.search.prev}
                 </span>
               )}
               <span style={pageInfoStyle}>
@@ -388,11 +405,11 @@ export default async function SearchPage({ params, searchParams }: SearchPagePro
                   prefetch={false}
                   style={pageButtonStyle(false)}
                 >
-                  {lang === "zh" ? "下一页" : "Next"}
+                  {dict.search.next}
                 </Link>
               ) : (
                 <span style={pageButtonStyle(true)} aria-disabled>
-                  {lang === "zh" ? "下一页" : "Next"}
+                  {dict.search.next}
                 </span>
               )}
             </nav>

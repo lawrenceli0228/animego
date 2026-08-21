@@ -37,21 +37,25 @@ import { type Lang } from "@/lib/i18n/lang";
 const TITLE: Record<Lang, string> = {
   zh: "找不到这一页",
   en: "Page not found",
+  "zh-Hant": "找不到這一頁",
 };
 
 const DESC: Record<Lang, string> = {
   zh: "链接可能错了，或者番剧从我们这边失踪了。回首页或者用搜索看看?",
   en: "The link may be wrong, or this anime has slipped off our shelves. Try the homepage or search.",
+  "zh-Hant": "連結可能錯了，或者番劇從我們這邊失蹤了。回首頁或者用搜尋看看?",
 };
 
 const BACK_HOME: Record<Lang, string> = {
   zh: "回首页",
   en: "Back home",
+  "zh-Hant": "回首頁",
 };
 
 const GO_SEASONAL: Record<Lang, string> = {
   zh: "看当季新番",
   en: "Browse seasonal",
+  "zh-Hant": "看當季新番",
 };
 
 const s = {

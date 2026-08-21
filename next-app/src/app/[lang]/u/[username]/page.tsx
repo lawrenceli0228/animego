@@ -17,6 +17,7 @@ import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { apiGet, ApiError } from "@/lib/api";
 import { resolveLocale } from "@/lib/i18n/route";
+import type { Lang } from "@/lib/i18n/lang";
 import { buildAlternates } from "@/lib/seo/alternates";
 import { decodeUsername } from "@/lib/username";
 import { canonicalHandle, encodePathSegment } from "./_lib/canonicalHandle";
@@ -63,6 +64,15 @@ async function fetchProfile(username: string): Promise<UserProfileData | null> {
 }
 
 // ─── generateMetadata ──────────────────────────────────────────────────────
+
+// The profile description wraps a username; the possessive is a suffix in
+// English and a particle in Chinese, so this is a Record of functions rather
+// than a dictionary key with a placeholder.
+const META_DESCRIPTION: Record<Lang, (username: string) => string> = {
+  zh: (username) => `${username} 的追番列表和社交主页 — AnimeGoClub`,
+  en: (username) => `${username}'s watchlist and social profile on AnimeGoClub`,
+  "zh-Hant": (username) => `${username} 的追番列表和社交主頁 — AnimeGoClub`,
+};
 
 export async function generateMetadata({
   params,
@@ -113,10 +123,7 @@ export async function generateMetadata({
 
   return {
     title: { absolute: `${title} · AnimeGoClub` },
-    description:
-      lang === "zh"
-        ? `${username} 的追番列表和社交主页 — AnimeGoClub`
-        : `${username}'s watchlist and social profile on AnimeGoClub`,
+    description: META_DESCRIPTION[lang](username),
     ...(addressedByAlias ? { robots: { index: false, follow: false } } : {}),
     alternates: buildAlternates(canonical, locale),
     openGraph: {

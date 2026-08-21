@@ -34,14 +34,14 @@ const REASONS = [
 // picking a blank reason — with no crash or warning. Typing it as Record<Lang,…>
 // turns that into a compile error at the table instead.
 const LABELS: Record<(typeof REASONS)[number], Record<Lang, string>> = {
-  spam: { zh: "垃圾广告", en: "Spam" },
-  harassment: { zh: "骚扰或人身攻击", en: "Harassment" },
-  hate_speech: { zh: "仇恨言论", en: "Hate speech" },
-  sexual_content: { zh: "色情内容", en: "Sexual content" },
-  violence: { zh: "暴力内容", en: "Violence" },
-  spoiler: { zh: "未标注剧透", en: "Unmarked spoiler" },
-  misinformation: { zh: "误导信息", en: "Misinformation" },
-  other: { zh: "其他", en: "Other" },
+  spam: { zh: "垃圾广告", en: "Spam", "zh-Hant": "垃圾廣告" },
+  harassment: { zh: "骚扰或人身攻击", en: "Harassment", "zh-Hant": "騷擾或人身攻擊" },
+  hate_speech: { zh: "仇恨言论", en: "Hate speech", "zh-Hant": "仇恨言論" },
+  sexual_content: { zh: "色情内容", en: "Sexual content", "zh-Hant": "色情內容" },
+  violence: { zh: "暴力内容", en: "Violence", "zh-Hant": "暴力內容" },
+  spoiler: { zh: "未标注剧透", en: "Unmarked spoiler", "zh-Hant": "未標註劇透" },
+  misinformation: { zh: "误导信息", en: "Misinformation", "zh-Hant": "誤導資訊" },
+  other: { zh: "其他", en: "Other", "zh-Hant": "其他" },
 };
 
 export default function ReportDialog({

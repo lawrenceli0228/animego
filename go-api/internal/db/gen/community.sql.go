@@ -280,6 +280,9 @@ SELECT
     COALESCE(c.is_spoiler, false)::boolean AS comment_is_spoiler,
     a.title_romaji,
     a.title_chinese,
+    a.title_hant,
+    a.title_hant_source,
+    a.title_hant_seo,
     a.cover_image_url
 FROM notifications n
 JOIN users actor ON actor.id = n.actor_id
@@ -315,6 +318,9 @@ type ListNotificationsRow struct {
 	CommentIsSpoiler bool               `json:"commentIsSpoiler"`
 	TitleRomaji      *string            `json:"titleRomaji"`
 	TitleChinese     *string            `json:"titleChinese"`
+	TitleHant        *string            `json:"titleHant"`
+	TitleHantSource  *string            `json:"titleHantSource"`
+	TitleHantSeo     *string            `json:"titleHantSeo"`
 	CoverImageUrl    *string            `json:"coverImageUrl"`
 }
 
@@ -343,6 +349,9 @@ func (q *Queries) ListNotifications(ctx context.Context, userID uuid.UUID, pageL
 			&i.CommentIsSpoiler,
 			&i.TitleRomaji,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 		); err != nil {
 			return nil, err

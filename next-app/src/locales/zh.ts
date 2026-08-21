@@ -97,6 +97,9 @@ const zh = {
     trendingLabel: '本季热追', trendingTitle: '大家都在追',
     rankingsLabel: '年度高分', rankingsTitle: `${new Date().getFullYear()} 年度榜`,
     gemsLabel: '完结佳作', gemsTitle: '经典好番推荐', gemsRefresh: '换一批',
+    // Signed-out ContinueWatching stub: the pitch and the CTA's accessible name.
+    watchingSignedOutBody: '登录后追番进度会出现在这里',
+    watchingSignedOutCtaAria: '登录 AnimeGoClub',
   },
   // Anime watchers
   anime: {
@@ -163,6 +166,8 @@ const zh = {
     title: '搜索番剧',
     placeholder: '搜索番剧名称...',
     prompt: '输入关键词或选择类型开始搜索',
+    prev: '上一页',
+    next: '下一页',
   },
   // Season page
   seasonPage: {
@@ -178,6 +183,33 @@ const zh = {
     paginationAria: '分页',
     prevPage: '上一页',
     nextPage: '下一页',
+  },
+  // Calendar page (/calendar)
+  calendarPage: {
+    metaTitle: '今日新番放送日历',
+    heading: '今日新番放送日历',
+    description: '本周新番放送时间表，按周一至周日分组，覆盖连载中的 TV 动画与 ONA。每日更新。',
+  },
+  // FAQ page (/faq)
+  faqPage: {
+    metaTitle: '常见问题',
+    heading: 'AnimeGoClub 常见问题',
+    description: '关于 AnimeGoClub 是否免费、与 Bangumi/AniList/MAL 的区别、弹幕来源、OVA/ONA/剧场版的差异等。',
+  },
+  // Legal pages — METADATA ONLY.
+  //
+  // The documents themselves are Simplified Chinese in every locale, on
+  // purpose: see the note above the default export in app/[lang]/privacy.
+  // Translating a privacy commitment or a takedown procedure is a legal
+  // review, not a string task. All three use buildAlternatesUntranslated(),
+  // so no hreflang advertises a translated version that does not exist.
+  legal: {
+    termsTitle: '服务条款',
+    termsDescription: 'AnimeGoClub 服务条款：账号、用户内容、可接受使用、第三方内容与链接、免责与责任限制。',
+    privacyTitle: '隐私政策',
+    privacyDescription: 'AnimeGoClub 隐私政策：我们收集哪些数据、如何使用、Cookie 与本地存储、第三方服务与你的权利。',
+    copyrightTitle: '版权与侵权处理',
+    copyrightDescription: 'AnimeGoClub 版权声明与侵权通知（takedown）流程：本站不托管影音文件，权利人如何提交移除请求。',
   },
   // Login
   login: {
@@ -219,6 +251,13 @@ const zh = {
     label: '我的列表', titleSuffix: '的追番',
     noAnime: '还没有',
     noAnimeSuffix: '的番剧',
+    // The list toolbar. Ternaries in ProfileClient before this — a page that
+    // is otherwise fully translated does not want English aria-labels.
+    statusTabsAria: '追番状态',
+    searchPlaceholder: '搜索我的列表...',
+    searchAria: '搜索追番列表',
+    sortAria: '排序方式',
+    noMatches: '无匹配结果',
   },
   // Torrent modal
   torrent: {
@@ -257,6 +296,10 @@ const zh = {
     action_completed: '看完了',
     action_plan_to_watch: '想看',
     action_dropped: '弃坑了',
+    // Follower / following list chrome.
+    breadcrumbAria: '面包屑',
+    prevPage: '← 上一页',
+    nextPage: '下一页 →',
   },
   // Danmaku
   danmaku: {

@@ -240,8 +240,30 @@ function sourceColor(source: string): string {
   return "rgba(235,235,245,0.30)";
 }
 
+/**
+ * The name of the "Chinese" title pill, per language.
+ *
+ * The pill's VALUE is `titleChinese` — a Simplified string — in every
+ * language, because that is the field the trackers index and searching for a
+ * Traditional variant of it returns nothing. Only the label is localised, and
+ * it says "中文" rather than "簡體中文" for the same reason: a Traditional
+ * reader is being offered the Chinese search term, not a rendering preference.
+ */
+const CHINESE_PILL_LABEL: Record<Lang, string> = {
+  zh: "中文",
+  en: "Chinese",
+  "zh-Hant": "中文",
+};
+
+/** dmhy / animes.garden, whose display name is a word rather than a brand. */
+const GARDEN_LABEL: Record<Lang, string> = {
+  zh: "花园",
+  en: "Garden",
+  "zh-Hant": "花園",
+};
+
 function sourceLabel(source: string, lang: Lang): string {
-  if (source === "garden" || source === "dmhy") return lang === "zh" ? "花园" : "Garden";
+  if (source === "garden" || source === "dmhy") return GARDEN_LABEL[lang];
   return source;
 }
 
@@ -568,7 +590,9 @@ export default function TorrentModal({
   // ─── Title variant pills (dedup by value) ──────────────────────
   const titleOptions: TitleOption[] = useMemo(() => {
     const raw: (TitleOption | null)[] = [
-      anime.titleChinese ? { label: lang === "zh" ? "中文" : "Chinese", value: anime.titleChinese } : null,
+      anime.titleChinese
+        ? { label: CHINESE_PILL_LABEL[lang], value: anime.titleChinese }
+        : null,
       anime.titleRomaji ? { label: "Romaji", value: anime.titleRomaji } : null,
       anime.titleEnglish && anime.titleEnglish !== anime.titleRomaji
         ? { label: "English", value: anime.titleEnglish }

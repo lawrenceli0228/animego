@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { apiGet, ApiError } from "@/lib/api";
 import { resolveLocale } from "@/lib/i18n/route";
+import type { Dict, Lang } from "@/lib/i18n";
 import { buildAlternates } from "@/lib/seo/alternates";
 import ProfileClient from "./_components/ProfileClient";
 import type { SubscriptionListItem } from "./_components/types";
@@ -76,16 +77,33 @@ async function safeSubscriptions(
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
 
+// A local Record rather than dictionary keys because the description is
+// DERIVED — the Chinese one composes two other dictionary values, so a flat
+// key would be a third copy of the site description that drifts from
+// meta.description the first time that is edited. The English branch has no
+// such composition, which is exactly why `lang === "zh" ? … : …` could not
+// express this without handing every future language the English sentence.
+const PAGE_META: Record<Lang, { title: string; description: (dict: Dict) => string }> = {
+  zh: {
+    title: "我的追番 — AnimeGoClub",
+    description: (dict) => `${dict.profile.label} — ${dict.meta.description}`,
+  },
+  en: {
+    title: "My Watchlist — AnimeGoClub",
+    description: () => "Your personal watchlist on AnimeGoClub.",
+  },
+  "zh-Hant": {
+    title: "我的追番 — AnimeGoClub",
+    description: (dict) => `${dict.profile.label} — ${dict.meta.description}`,
+  },
+};
+
 export async function generateMetadata({
   params,
 }: PageProps<"/[lang]/profile">): Promise<Metadata> {
   const { locale, dict, lang } = await resolveLocale(params);
-  const title =
-    lang === "zh" ? "我的追番 — AnimeGoClub" : "My Watchlist — AnimeGoClub";
-  const description =
-    lang === "zh"
-      ? `${dict.profile.label} — ${dict.meta.description}`
-      : `Your personal watchlist on AnimeGoClub.`;
+  const title = PAGE_META[lang].title;
+  const description = PAGE_META[lang].description(dict);
 
   return {
     title: { absolute: title },

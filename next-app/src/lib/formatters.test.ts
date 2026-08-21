@@ -6,6 +6,7 @@ import {
   formatScore,
   pickCharacterName,
   pickDescription,
+  pickSeoTitle,
   pickStaffName,
   pickTitle,
   pickVoiceActorName,
@@ -66,6 +67,76 @@ describe("pickTitle", () => {
 
   test("returns empty string when all titles missing", () => {
     expect(pickTitle({}, "zh")).toBe("");
+  });
+});
+
+// The SERP boundary, at its last mile.
+//
+// The database half is enforced by a generated column and covered by
+// test/integration/hant_seo_boundary_test.go. This half is the rule that the
+// code reading it must ask for the right field, and the failure it guards
+// against is a one-word edit: someone "tidying" generateMetadata back to
+// pickTitle. That edit compiles, renders, and passes every other test, and its
+// only symptom is Google learning a machine-invented name for the page.
+describe("pickSeoTitle", () => {
+  // A row the backfill filled by conversion: the display field carries the
+  // converted text, the SEO field is NULL because Postgres made it NULL.
+  const converted = {
+    titleChinese: "葬送的芙莉莲",
+    titleHant: "葬送的芙莉蓮",
+    titleHantSeo: null,
+    titleNative: "葬送のフリーレン",
+  };
+
+  // A row a human or dataset supplied: both fields carry it.
+  const human = {
+    titleChinese: "鬼灭之刃",
+    titleHant: "鬼滅之刃",
+    titleHantSeo: "鬼滅之刃",
+    titleNative: "鬼滅の刃",
+  };
+
+  test("publishes a human-sourced Traditional title", () => {
+    expect(pickSeoTitle(human, "zh-Hant")).toBe("鬼滅之刃");
+  });
+
+  test("withholds a machine-converted one and falls to Simplified", () => {
+    expect(pickSeoTitle(converted, "zh-Hant")).toBe("葬送的芙莉莲");
+    // The visible title still shows the conversion — the two helpers are
+    // supposed to disagree here, and that disagreement is the whole design.
+    expect(pickTitle(converted, "zh-Hant")).toBe("葬送的芙莉蓮");
+  });
+
+  test("never reaches for titleHant, even when titleHantSeo is absent", () => {
+    // An older go-api, or a response assembled before migration 0022, sends
+    // no titleHantSeo. What must NOT happen is quietly reading the display
+    // field as a substitute.
+    //
+    // Declared through a variable rather than passed as a literal on purpose:
+    // SeoTitleBearing Omits titleHant, so a literal carrying it is an excess
+    // property and will not compile. Real callers hand over an AnimeDetail,
+    // which carries both fields and is not subject to that check — so this is
+    // the shape the guarantee actually has to hold for.
+    const fromOlderApi = { titleHant: "偷渡的標題", titleChinese: "备用" };
+    expect(pickSeoTitle(fromOlderApi, "zh-Hant")).toBe("备用");
+  });
+
+  test("falls through to Japanese before English, like zh does", () => {
+    expect(pickSeoTitle({ titleHantSeo: null, titleNative: "葬送のフリーレン", titleEnglish: "Frieren" }, "zh-Hant"))
+      .toBe("葬送のフリーレン");
+  });
+
+  test("is identical to pickTitle for zh and en", () => {
+    // Those two languages have no converted tier, so a divergence here would
+    // be a bug rather than a feature.
+    for (const lang of ["zh", "en"] as const) {
+      expect(pickSeoTitle(human, lang)).toBe(pickTitle(human, lang));
+      expect(pickSeoTitle(converted, lang)).toBe(pickTitle(converted, lang));
+    }
+  });
+
+  test("returns empty string when every rung is missing", () => {
+    expect(pickSeoTitle({}, "zh-Hant")).toBe("");
   });
 });
 
@@ -335,6 +406,43 @@ describe("descriptionCn wire contract", () => {
 
     expect(types).toContain("descriptionCn: string | null;");
     expect(types).toContain("descriptionCnSource: string | null;");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// titleHant wire contract
+//
+// The title fields had no guard at all — descriptionCn got one because
+// pickDescription's parameter type made the field optional, but a title is
+// read positionally off `detail.titleChinese` all over the tree, so a rename
+// upstream would surface as "the Traditional title silently stopped
+// arriving" rather than as a type error.
+//
+// titleHantSeo is pinned separately from titleHant on purpose, and it is the
+// more important of the two. It is the only field allowed into <title>,
+// og:title and JSON-LD name, because the database projects the machine
+// converted ('opencc') tier out of it — 85.3% sentence accuracy, with the
+// misses correlating with popularity. If go-api ever stops emitting it, the
+// SEO code silently falls back to a field that CAN carry a machine
+// conversion, and Google learns the wrong name for the page. That is the
+// failure this assertion exists to make loud.
+// ---------------------------------------------------------------------------
+
+describe("titleHant wire contract", () => {
+  const REPO = join(import.meta.dir, "..", "..", "..");
+
+  test("go-api serialises the hant title fields under the names the client reads", () => {
+    const detailGo = readFileSync(join(REPO, "go-api/internal/anime/detail.go"), "utf8");
+
+    expect(detailGo).toContain('json:"titleHant"');
+    expect(detailGo).toContain('json:"titleHantSeo"');
+  });
+
+  test("AnimeDetail declares both fields", () => {
+    const types = readFileSync(join(import.meta.dir, "types.ts"), "utf8");
+
+    expect(types).toContain("titleHant?: string | null;");
+    expect(types).toContain("titleHantSeo?: string | null;");
   });
 });
 

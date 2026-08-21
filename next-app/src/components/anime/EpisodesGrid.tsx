@@ -31,6 +31,7 @@ import {
   type SubStatus,
 } from "@/lib/subscriptionBus";
 import type { DetailEpisodeTitle } from "@/lib/types";
+import { pickEpisodeTitle } from "@/lib/formatters";
 import { useLang } from "@/lib/lang-client";
 import EpisodeComments from "@/components/anime/EpisodeComments";
 import FallbackImg from "@/components/ui/FallbackImg";
@@ -211,13 +212,9 @@ export default function EpisodesGrid({
 
   const cells: { n: number; title: string }[] = [];
   for (let n = 1; n <= total; n += 1) {
-    const t = titleByEpisode.get(n);
-    const title = t
-      ? lang === "zh"
-        ? t.nameCn || t.name || ""
-        : t.name || t.nameCn || ""
-      : "";
-    cells.push({ n, title });
+    // Shared with the server-rendered grid in app/[lang]/anime/[id]/page.tsx —
+    // the two used to hold byte-identical copies of this ladder.
+    cells.push({ n, title: pickEpisodeTitle(titleByEpisode.get(n), lang) });
   }
 
   return (

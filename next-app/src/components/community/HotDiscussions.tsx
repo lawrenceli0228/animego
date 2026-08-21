@@ -5,6 +5,7 @@ import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { pickTitle } from "@/lib/formatters";
 import { useLang } from "@/lib/lang-client";
+import type { Lang } from "@/lib/i18n/lang";
 import { isMaskedUsername } from "@/lib/publicUsername";
 import type { HotDiscussion } from "@/lib/types";
 import {
@@ -13,6 +14,16 @@ import {
   trackHotDiscussionsImpressionOnce,
 } from "@/lib/communityEngagement";
 import styles from "./HotDiscussions.module.css";
+
+// Chinese brackets the number ("第 3 集"), English puts it after the noun.
+// A local Record of functions rather than a t() key with a placeholder,
+// because the two shapes are different sentences, not one sentence with a
+// hole in it.
+const EPISODE_KICKER: Record<Lang, (episode: number) => string> = {
+  zh: (episode) => `第 ${episode} 集`,
+  en: (episode) => `Episode ${episode}`,
+  "zh-Hant": (episode) => `第 ${episode} 集`,
+};
 
 export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
   const { lang, t } = useLang();
@@ -114,7 +125,7 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
 
               <span className={styles.copy}>
                 <span className={styles.kicker}>
-                  {lang === "zh" ? `第 ${item.episode} 集` : `Episode ${item.episode}`}
+                  {EPISODE_KICKER[lang](item.episode)}
                 </span>
                 <strong>{title}</strong>
                 <span className={styles.stats}>

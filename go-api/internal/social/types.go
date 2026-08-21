@@ -72,6 +72,9 @@ type watchingItem struct {
 	TitleEnglish    *string `json:"titleEnglish"`
 	TitleNative     *string `json:"titleNative"`
 	TitleChinese    *string `json:"titleChinese"`
+	TitleHant       *string `json:"titleHant"`
+	TitleHantSource *string `json:"titleHantSource"`
+	TitleHantSeo    *string `json:"titleHantSeo"`
 	CoverImageUrl   *string `json:"coverImageUrl"`
 	BannerImageUrl  *string `json:"bannerImageUrl"`
 	CoverImageColor *string `json:"coverImageColor"`
@@ -125,23 +128,26 @@ type followListItem struct {
 // Title is non-pointer because the handler always assigns it (either
 // the real TitleRomaji or the `Anime #N` fallback).
 type feedItem struct {
-	ID             uuid.UUID          `json:"id"`
-	Kind           string             `json:"kind"`
-	Username       string             `json:"username"`
-	AvatarURL      *string            `json:"avatarUrl"`
-	AnilistID      int32              `json:"anilistId"`
-	Title          string             `json:"title"`
-	TitleChinese   *string            `json:"titleChinese"`
-	CoverImageUrl  *string            `json:"coverImageUrl"`
-	Episode        int32              `json:"episode"`
-	Status         string             `json:"status"`
-	LastWatchedAt  pgtype.Timestamptz `json:"lastWatchedAt"`
-	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
-	CommentID      *uuid.UUID         `json:"commentId"`
-	Content        *string            `json:"content"`
-	Excerpt        *string            `json:"excerpt"`
-	TargetUsername *string            `json:"targetUsername"`
-	IsSpoiler      bool               `json:"isSpoiler"`
+	ID              uuid.UUID          `json:"id"`
+	Kind            string             `json:"kind"`
+	Username        string             `json:"username"`
+	AvatarURL       *string            `json:"avatarUrl"`
+	AnilistID       int32              `json:"anilistId"`
+	Title           string             `json:"title"`
+	TitleChinese    *string            `json:"titleChinese"`
+	TitleHant       *string            `json:"titleHant"`
+	TitleHantSource *string            `json:"titleHantSource"`
+	TitleHantSeo    *string            `json:"titleHantSeo"`
+	CoverImageUrl   *string            `json:"coverImageUrl"`
+	Episode         int32              `json:"episode"`
+	Status          string             `json:"status"`
+	LastWatchedAt   pgtype.Timestamptz `json:"lastWatchedAt"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	CommentID       *uuid.UUID         `json:"commentId"`
+	Content         *string            `json:"content"`
+	Excerpt         *string            `json:"excerpt"`
+	TargetUsername  *string            `json:"targetUsername"`
+	IsSpoiler       bool               `json:"isSpoiler"`
 }
 
 // feedResponse is the top-level envelope for GET /api/feed.

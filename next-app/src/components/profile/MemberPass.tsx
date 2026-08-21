@@ -5,12 +5,35 @@ import { useHoloTilt } from "./useHoloTilt";
 import { barcodeBars } from "./memberIdentity";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import type { Lang } from "@/lib/i18n/lang";
+import { TOP_SEASON_LABEL, WATCHED_LABEL } from "./passLabels";
 import "./member-pass.css";
 
 // MemberPass — AnimeGoClub 会员通行证. Presentational holo card: given the
 // member's identity + a cover/photo, it renders the full-bleed pass with the
 // pointer-driven rainbow foil + glare (engine in useHoloTilt). No rarity
 // tiers. The crop modal + localStorage live in the parent (CinematicProfile).
+
+// The card's screen-reader copy and its one tooltip. Local Records rather
+// than dictionary keys: two of the three interpolate the member's name or
+// number, and this component takes `lang` as a prop — it is rendered on
+// /welcome outside any LanguageProvider, so there is no t() to reach.
+const CARD_ARIA: Record<Lang, (username: string, memberNo: string) => string> = {
+  zh: (u, n) => `${u} 的 AnimeGoClub 会员通行证，编号 ${n}`,
+  en: (u, n) => `${u}'s AnimeGoClub member pass, no. ${n}`,
+  "zh-Hant": (u, n) => `${u} 的 AnimeGoClub 會員通行證，編號 ${n}`,
+};
+
+const BARCODE_ARIA: Record<Lang, (memberNo: string) => string> = {
+  zh: (n) => `会员编号 ${n} 条形码`,
+  en: (n) => `Member ${n} barcode`,
+  "zh-Hant": (n) => `會員編號 ${n} 條形碼`,
+};
+
+const VERIFIED_TITLE: Record<Lang, string> = {
+  zh: "认证会员",
+  en: "Verified member",
+  "zh-Hant": "認證會員",
+};
 
 interface MemberPassProps {
   /** Display name on the nameplate. */
@@ -85,8 +108,8 @@ export default function MemberPass({
 
   const bars = barcodeBars(memberNo, 26);
   const status = statusText ?? "Active";
-  const watchedLabel = lang === "zh" ? "看过 · 部" : "Watched";
-  const seasonLabel = lang === "zh" ? "最活跃赛季" : "Top Season";
+  const watchedLabel = WATCHED_LABEL[lang];
+  const seasonLabel = TOP_SEASON_LABEL[lang];
 
   return (
     <div className="agcpass-bay">
@@ -95,11 +118,7 @@ export default function MemberPass({
         className="agcpass-card"
         role="img"
         tabIndex={0}
-        aria-label={
-          lang === "zh"
-            ? `${username} 的 AnimeGoClub 会员通行证，编号 ${memberNo}`
-            : `${username}'s AnimeGoClub member pass, no. ${memberNo}`
-        }
+        aria-label={CARD_ARIA[lang](username, memberNo)}
       >
         <div className="agcpass-shadow" aria-hidden="true" />
         <div className="agcpass-face">
@@ -130,7 +149,7 @@ export default function MemberPass({
                 <span
                   className="agcpass-vf"
                   aria-hidden="true"
-                  title={lang === "zh" ? "认证会员" : "Verified member"}
+                  title={VERIFIED_TITLE[lang]}
                 >
                   <svg viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 1l2.6 1.9 3.2-.2 1 3 2.6 1.8-1 3 1 3-2.6 1.8-1 3-3.2-.2L12 23l-2.6-1.9-3.2.2-1-3L2.6 16.7l1-3-1-3 2.6-1.8 1-3 3.2.2z" />
@@ -191,11 +210,7 @@ export default function MemberPass({
                 <div
                   className="agcpass-barcode"
                   role="img"
-                  aria-label={
-                    lang === "zh"
-                      ? `会员编号 ${memberNo} 条形码`
-                      : `Member ${memberNo} barcode`
-                  }
+                  aria-label={BARCODE_ARIA[lang](memberNo)}
                 >
                   <span className="agcpass-bars" aria-hidden="true">
                     {bars.map((bar, i) => (

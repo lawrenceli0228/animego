@@ -46,6 +46,27 @@ interface AnimeCardProps {
   priority?: boolean;
 }
 
+// Two badge labels. Both are a bare counter word glued to a number, which is
+// exactly the kind of string that belongs next to the badge it sizes rather
+// than in the dictionary.
+//
+// Note the two are read with DIFFERENT languages, and that is deliberate: the
+// watcher unit follows the `lang` prop (the URL's locale, matching the count
+// the server rendered), the discussion aria-label follows useLang() (the
+// visitor's preference, matching the genre chips beside it). See the note at
+// the viewerLang declaration below.
+const WATCHER_UNIT: Record<Lang, string> = {
+  zh: "人",
+  en: "watching",
+  "zh-Hant": "人",
+};
+
+const DISCUSSION_ARIA: Record<Lang, (count: number) => string> = {
+  zh: (count) => `${count} 条讨论`,
+  en: (count) => `${count} discussions`,
+  "zh-Hant": (count) => `${count} 條討論`,
+};
+
 function scoreColor(s: number): string {
   if (s >= 75) return "#30d158";
   if (s >= 50) return "#ff9f0a";
@@ -351,18 +372,14 @@ export default function AnimeCard({
 
         {watcherCount && watcherCount > 0 ? (
           <span style={watcherBadgeStyle} aria-hidden>
-            {watcherCount} {lang === "zh" ? "人" : "watching"}
+            {watcherCount} {WATCHER_UNIT[lang]}
           </span>
         ) : null}
 
         {anime.discussionCount != null && anime.discussionCount > 0 ? (
           <span
             style={discussionBadgeStyle}
-            aria-label={
-              viewerLang === "zh"
-                ? `${anime.discussionCount} 条讨论`
-                : `${anime.discussionCount} discussions`
-            }
+            aria-label={DISCUSSION_ARIA[viewerLang](anime.discussionCount)}
           >
             💬 {anime.discussionCount > 999 ? "999+" : anime.discussionCount}
           </span>
