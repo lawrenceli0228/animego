@@ -48,6 +48,12 @@ function highestEpisode(
   return highest;
 }
 
+/** A count that is only usable if it is a real, positive number. */
+function usableCount(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
+  return Math.floor(value);
+}
+
 /**
  * How many cells the grid should draw, and how far the number can be trusted.
  *
@@ -64,14 +70,30 @@ function highestEpisode(
  *
  *   authoritative  the count came from the catalogue. Draw it, and publish
  *                  it — the detail page's badge prints this number.
- *   inferred       no count, but episode titles exist, so at least this many
- *                  episodes do. Draw the grid; do NOT print the number as a
- *                  total, because it is a floor rather than a fact.
+ *   inferred       the catalogue has no count, but something else does.
+ *                  Draw the grid; do NOT print the number as a total, and
+ *                  never let it reach structured data.
  *   pending        nothing to size a grid from. The caller renders the "count
  *                  not known yet" copy — never `null`.
+ *
+ * `episodesBgm` is AnimeDetail's second count — inferred by a sweep from an
+ * external episode source (migration 0023) for exactly the rows AniList
+ * leaves NULL. It lands in `inferred` rather than `authoritative` because
+ * that is what it is, and because the discriminant is the only thing telling
+ * a call site which of the two it holds. Routing it through the
+ * `authoritative` arm for convenience would reproduce, inside this union, the
+ * merge the schema deliberately refuses to do in SQL.
+ *
+ * The two inferred sources are combined with `max`, not by precedence. Each
+ * is a lower bound on its own: `episodesBgm` is a claimed total that can be
+ * stale mid-season, and the titles floor is however many episodes we hold
+ * names for. Taking the larger keeps the invariant `highestEpisode` exists to
+ * protect — a grid must never be sized so small it cuts off an episode whose
+ * title is right there in the payload.
  */
 export function resolveEpisodeSkeleton(
   episodes: number | null,
+  episodesBgm: number | null,
   episodeTitles: ReadonlyArray<Pick<DetailEpisodeTitle, "episode">>,
 ): EpisodeSkeleton {
   // Unchanged from the guard this replaces, and it has to stay that way:
@@ -79,8 +101,8 @@ export function resolveEpisodeSkeleton(
   if (typeof episodes === "number" && episodes > 0) {
     return { kind: "authoritative", total: episodes };
   }
-  const highest = highestEpisode(episodeTitles ?? []);
-  return highest > 0
-    ? { kind: "inferred", total: highest }
+  const inferred = Math.max(usableCount(episodesBgm), highestEpisode(episodeTitles ?? []));
+  return inferred > 0
+    ? { kind: "inferred", total: inferred }
     : { kind: "pending" };
 }

@@ -505,6 +505,7 @@ SELECT
     description_hant,
     description_hant_source,
     episodes,
+    episodes_bgm,
     status,
     season,
     season_year,
@@ -543,6 +544,7 @@ type GetAnimeMainByIDRow struct {
 	DescriptionHant             *string            `json:"descriptionHant"`
 	DescriptionHantSource       *string            `json:"descriptionHantSource"`
 	Episodes                    *int32             `json:"episodes"`
+	EpisodesBgm                 *int32             `json:"episodesBgm"`
 	Status                      *string            `json:"status"`
 	Season                      *string            `json:"season"`
 	SeasonYear                  *int32             `json:"seasonYear"`
@@ -568,6 +570,16 @@ type GetAnimeMainByIDRow struct {
 // here and nowhere else, exactly like description_cn above them: a full
 // synopsis per card would roughly double the list payloads for text no
 // card renders.
+//
+// episodes and episodes_bgm are two columns here for the same reason they
+// are two columns in GetEpisodeCountsByAnilistIDs below: episodes is
+// AniList's authoritative total, episodes_bgm (migration 0023) is inferred
+// from an external episode source, and nothing may coalesce them on the way
+// out of the database.  This projection feeds the detail page, which is the
+// consumer that emits numberOfEpisodes into schema.org JSON-LD -- so a
+// COALESCE here is the exact mechanism by which a guess would become a
+// factual claim to a search engine about the work.  The page picks; the
+// database does not pick for it.
 func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error) {
 	row := q.db.QueryRow(ctx, getAnimeMainByID, anilistID)
 	var i GetAnimeMainByIDRow
@@ -592,6 +604,7 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.DescriptionHant,
 		&i.DescriptionHantSource,
 		&i.Episodes,
+		&i.EpisodesBgm,
 		&i.Status,
 		&i.Season,
 		&i.SeasonYear,

@@ -110,6 +110,21 @@ const refetchTimeout = 15 * time.Second
 // All five are nil for every row until the backfill runs, and every one of
 // them falls back to its Simplified counterpart, so a client that never
 // reads them renders exactly what it rendered before.  Purely additive.
+//
+// Episodes / EpisodesBgm are two fields for the same reason the batch
+// endpoint's episodeCountItem carries two (see handlers.go), and this is the
+// struct that made that boundary worth drawing.  Episodes is AniList's
+// authoritative total; EpisodesBgm (migration 0023) is inferred from an
+// external episode source and is nil until the sweep reaches the row.
+//
+// They are never merged here — not into Episodes, not into a third
+// convenience field.  The client that reads this struct renders the count in
+// two places that are not the same kind of statement: a badge and an episode
+// grid, which are text on a page, and schema.org numberOfEpisodes, which is
+// an entity claim a search engine treats as fact about the work.  Only
+// Episodes may reach the second.  A coalesce at this layer would leave every
+// call site downstream looking identical, and the one that must not take the
+// inferred value would have no way left to refuse it.
 type AnimeDetail struct {
 	AnilistID                   int32                  `json:"anilistId"`
 	TitleRomaji                 *string                `json:"titleRomaji"`
@@ -131,6 +146,7 @@ type AnimeDetail struct {
 	DescriptionHant             *string                `json:"descriptionHant"`
 	DescriptionHantSource       *string                `json:"descriptionHantSource"`
 	Episodes                    *int32                 `json:"episodes"`
+	EpisodesBgm                 *int32                 `json:"episodesBgm"`
 	Status                      *string                `json:"status"`
 	Season                      *string                `json:"season"`
 	SeasonYear                  *int32                 `json:"seasonYear"`
@@ -984,6 +1000,7 @@ func assembleDetail(
 		DescriptionHant:             main.DescriptionHant,
 		DescriptionHantSource:       main.DescriptionHantSource,
 		Episodes:                    main.Episodes,
+		EpisodesBgm:                 main.EpisodesBgm,
 		Status:                      main.Status,
 		Season:                      main.Season,
 		SeasonYear:                  main.SeasonYear,

@@ -194,6 +194,19 @@ export interface AnimeDetail {
   /** 'opencc' | 'manual' — see anime_cache.description_hant_source. */
   descriptionHantSource?: string | null;
   episodes: number | null;
+  // Inferred total from an external episode source (anime_cache.episodes_bgm,
+  // migration 0023). Detail endpoint plus the batch /api/anime/episodes read;
+  // null until the sweep reaches the row.
+  //
+  // Deliberately a SECOND field rather than a fallback folded into `episodes`.
+  // `episodes` is AniList's authoritative count and is the only one allowed to
+  // reach schema.org numberOfEpisodes — an inferred count there is a factual
+  // claim to a search engine about the work, which is a different kind of
+  // statement from a number rendered on the page. Visible text (the count
+  // badge, the episode grid) may fall back to this one; structured data may
+  // not. Merging them would make every call site downstream look identical
+  // and leave the one that must refuse the guess no way to tell.
+  episodesBgm?: number | null;
   status: string | null;
   season: string | null;
   seasonYear: number | null;

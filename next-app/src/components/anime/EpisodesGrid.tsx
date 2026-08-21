@@ -50,6 +50,13 @@ import { resolveEpisodeSkeleton } from "./episodeGridSkeleton";
 interface EpisodesGridProps {
   anilistId: number;
   episodes: number | null;
+  /**
+   * The inferred total (AnimeDetail.episodesBgm). Separate from `episodes` all
+   * the way down for the reason spelled out in episodeGridSkeleton.ts: this
+   * grid may draw from it, and schema.org may not, so nothing upstream is
+   * allowed to hand these two down as one merged number.
+   */
+  episodesBgm: number | null;
   episodeTitles: DetailEpisodeTitle[];
 }
 
@@ -116,6 +123,7 @@ const pendingHintStyle: CSSProperties = {
 export default function EpisodesGrid({
   anilistId,
   episodes,
+  episodesBgm,
   episodeTitles,
 }: EpisodesGridProps) {
   const { lang, t } = useLang();
@@ -133,8 +141,8 @@ export default function EpisodesGrid({
   // catalogue count is not the same claim as "no episodes", and this section
   // used to make the second one by vanishing.
   const skeleton = useMemo(
-    () => resolveEpisodeSkeleton(episodes, episodeTitles),
-    [episodes, episodeTitles],
+    () => resolveEpisodeSkeleton(episodes, episodesBgm, episodeTitles),
+    [episodes, episodesBgm, episodeTitles],
   );
   // Kept as a primitive so the effects below can depend on it without
   // re-running every time the parent hands down a fresh array.
