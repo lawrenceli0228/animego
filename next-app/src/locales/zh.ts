@@ -123,6 +123,13 @@ const zh = {
     notYetReleased: '未开播', cancelled: '已取消',
     epUnit: '集', readMore: '展开更多', collapse: '收起',
     episodes: '集数列表', noEpisodes: '集数信息待更新',
+    // 集数未知时的降级文案 —— 详情页徽章和 EpisodesGrid 共用第一条。
+    // 说的是「还不知道」，不是「没有」：番剧在放送期间上游常常没有确认的
+    // 总集数，而这一节从前是直接消失的，读者只会理解成这部番没有集数。
+    // 注意不要改用上面的 noEpisodes：那条已经没有调用点，英文值
+    // 'Episode info not available' 恰好是这里要避免的说法。
+    episodeCountPending: '本季集数待定',
+    episodeCountPendingHint: '总集数确认后，这里会列出每一集。',
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',

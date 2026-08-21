@@ -112,6 +112,10 @@ const zhHant = {
     notYetReleased: '未開播', cancelled: '已取消',
     epUnit: '集', readMore: '展開更多', collapse: '收起',
     episodes: '集數列表', noEpisodes: '集數資訊待更新',
+    // EpisodesGrid 在集數未知時渲染的降級文案，與 locales/zh-Hant.ts 同名鍵
+    // 同值。手寫，沒有跑過轉換器。說的是「還不知道」，不是「沒有」。
+    episodeCountPending: '本季集數待定',
+    episodeCountPendingHint: '總集數確認後，這裡會列出每一集。',
     ep: '第', epOf: '/',
     viewDetails: '檢視詳情',
     viewOnBgm: '在 Bangumi 檢視',

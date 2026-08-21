@@ -57,6 +57,11 @@ const en = {
     notYetReleased: 'Not Yet Released', cancelled: 'Cancelled',
     epUnit: 'Eps', readMore: 'Read more', collapse: 'Collapse',
     episodes: 'Episodes', noEpisodes: 'Episode info not available',
+    // Degraded copy EpisodesGrid renders when the episode count is unknown;
+    // same keys and same values as locales/en.ts. Says "not known yet",
+    // never "none".
+    episodeCountPending: 'Episode count pending',
+    episodeCountPendingHint: 'Every episode will be listed here once the total is confirmed.',
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',

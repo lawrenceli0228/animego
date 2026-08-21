@@ -71,6 +71,15 @@ const en = {
     notYetReleased: 'Not Yet Released', cancelled: 'Cancelled',
     epUnit: 'Eps', readMore: 'Read more', collapse: 'Collapse',
     episodes: 'Episodes', noEpisodes: 'Episode info not available',
+    // Degraded copy for an unknown episode count — the badge on the detail
+    // page and EpisodesGrid share the first line. It says "not known yet",
+    // not "none": upstream has no confirmed total while a show is airing,
+    // and this section used to disappear entirely, which reads as "this
+    // show has no episodes". Do not reach for `noEpisodes` above instead —
+    // it has no call site left, and "not available" is the exact reading
+    // these two keys exist to avoid.
+    episodeCountPending: 'Episode count pending',
+    episodeCountPendingHint: 'Every episode will be listed here once the total is confirmed.',
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',

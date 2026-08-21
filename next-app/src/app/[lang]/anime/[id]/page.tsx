@@ -20,6 +20,7 @@ import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
 import FadeImage from "@/components/ui/FadeImage";
 import EpisodesGrid from "@/components/anime/EpisodesGrid";
+import { resolveEpisodeSkeleton } from "@/components/anime/episodeGridSkeleton";
 import HeroAccent from "@/components/anime/HeroAccent";
 import { FormatBadge, GenreChips } from "@/components/anime/LocalizedChips";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
@@ -564,6 +565,17 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   const score = detail.averageScore;
   const accent = detail.posterAccent || null;
   const startDateLabel = formatFuzzyDate(detail.startDate, lang);
+  // Shared with EpisodesGrid below the fold, so the badge and the grid can
+  // never disagree about whether this show's episode count is known.
+  //
+  // Only the `authoritative` case prints a number. `inferred` is a floor
+  // derived from however many episode titles we happen to hold, and printing
+  // a floor next to the studio and the season would present it as the total —
+  // on a page Google indexes, in the same badge row that carries the score.
+  // buildJsonLd applies the same rule from the same field (numberOfEpisodes
+  // is set only when detail.episodes is truthy) and is deliberately left
+  // alone: an inferred count must not reach schema.org either.
+  const episodeSkeleton = resolveEpisodeSkeleton(detail.episodes, detail.episodeTitles ?? []);
 
   return (
     <div>
@@ -650,11 +662,15 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
                 {statusLabel(dict, detail.status)}
               </span>
             )}
-            {detail.episodes ? (
+            {episodeSkeleton.kind === "authoritative" ? (
               <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.60)")}>
-                {detail.episodes} {dict.detail.epUnit}
+                {episodeSkeleton.total} {dict.detail.epUnit}
               </span>
-            ) : null}
+            ) : (
+              <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.42)")}>
+                {dict.detail.episodeCountPending}
+              </span>
+            )}
             {seasonLab && detail.seasonYear ? (
               <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.60)")}>
                 {seasonLab} {detail.seasonYear}

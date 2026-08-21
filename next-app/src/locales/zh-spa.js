@@ -116,6 +116,10 @@ const zh = {
     notYetReleased: '未开播', cancelled: '已取消',
     epUnit: '集', readMore: '展开更多', collapse: '收起',
     episodes: '集数列表', noEpisodes: '集数信息待更新',
+    // EpisodesGrid 在集数未知时渲染的降级文案，与 locales/zh.ts 同名键同值。
+    // 说的是「还不知道」，不是「没有」。
+    episodeCountPending: '本季集数待定',
+    episodeCountPendingHint: '总集数确认后，这里会列出每一集。',
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',

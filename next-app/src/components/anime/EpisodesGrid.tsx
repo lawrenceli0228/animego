@@ -45,6 +45,7 @@ import {
   parseEpisodeDiscussionSummary,
   type EpisodeDiscussionSummary,
 } from "./episodeDiscussionState";
+import { resolveEpisodeSkeleton } from "./episodeGridSkeleton";
 
 interface EpisodesGridProps {
   anilistId: number;
@@ -87,6 +88,31 @@ const sectionLabelStyle: CSSProperties = {
   marginBottom: 16,
 };
 
+// The "we don't know the count yet" panel. Dashed rather than solid on
+// purpose: it reads as a slot waiting to be filled, which is the whole claim
+// being made, where the solid border used elsewhere in this section reads as
+// finished content.
+const pendingPanelStyle: CSSProperties = {
+  border: "1px dashed #48484a",
+  borderRadius: 12,
+  padding: "18px 16px",
+  background: "rgba(255,255,255,0.02)",
+};
+
+const pendingTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "rgba(235,235,245,0.72)",
+  fontSize: 14,
+  fontWeight: 600,
+};
+
+const pendingHintStyle: CSSProperties = {
+  margin: "6px 0 0",
+  color: "rgba(235,235,245,0.42)",
+  fontSize: 12,
+  lineHeight: 1.5,
+};
+
 export default function EpisodesGrid({
   anilistId,
   episodes,
@@ -101,6 +127,18 @@ export default function EpisodesGrid({
   const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
   const [discussion, setDiscussion] = useState<EpisodeDiscussionSummary[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // How many cells this grid is entitled to draw, and on whose authority.
+  // See episodeGridSkeleton.ts — the short version is that a missing
+  // catalogue count is not the same claim as "no episodes", and this section
+  // used to make the second one by vanishing.
+  const skeleton = useMemo(
+    () => resolveEpisodeSkeleton(episodes, episodeTitles),
+    [episodes, episodeTitles],
+  );
+  // Kept as a primitive so the effects below can depend on it without
+  // re-running every time the parent hands down a fresh array.
+  const total = skeleton.kind === "pending" ? 0 : skeleton.total;
 
   // One public summary request makes discussion visible on every episode tile
   // without issuing N per-episode comment requests.
@@ -127,8 +165,12 @@ export default function EpisodesGrid({
   // to read search params. Listen for same-page hash navigation as well as the
   // initial landing.
   useEffect(() => {
+    // Bounded by the drawn grid rather than by the catalogue count: a deep
+    // link has to land on a cell that exists, and once the grid can be sized
+    // from episode titles alone those cells exist without a count. `total` is
+    // 0 in the pending state, so nothing resolves — same as before.
     const applyTarget = (target: ReturnType<typeof parseDiscussionHash>) => {
-      if (!target || !episodes || target.episode > episodes) return;
+      if (!target || target.episode > total) return;
       setOpenEp(target.episode);
       setHighlightCommentId(target.commentId);
     };
@@ -145,7 +187,7 @@ export default function EpisodesGrid({
       window.removeEventListener("hashchange", syncHash);
       window.removeEventListener(DISCUSSION_NAVIGATION_EVENT, syncNavigation);
     };
-  }, [episodes]);
+  }, [total]);
 
   useEffect(() => {
     if (openEp === null || highlightCommentId) return;
@@ -204,9 +246,21 @@ export default function EpisodesGrid({
     setDiscussion((before) => applyDiscussionDelta(before, episode, delta));
   }, []);
 
-  if (!episodes || episodes <= 0) return null;
+  // Was `return null`, which deleted the whole section whenever the catalogue
+  // had no episode count — and an absent section does not read as "unknown",
+  // it reads as "none". Say what is actually true instead.
+  if (skeleton.kind === "pending") {
+    return (
+      <section style={{ marginTop: 40, marginBottom: 60 }}>
+        <h2 style={sectionLabelStyle}>{t("detail.episodes")}</h2>
+        <div style={pendingPanelStyle}>
+          <p style={pendingTitleStyle}>{t("detail.episodeCountPending")}</p>
+          <p style={pendingHintStyle}>{t("detail.episodeCountPendingHint")}</p>
+        </div>
+      </section>
+    );
+  }
 
-  const total = episodes;
   const currentEp = sub?.currentEpisode ?? 0;
   const isCompleted = sub?.status === "completed";
 

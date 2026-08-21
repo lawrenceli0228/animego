@@ -145,6 +145,11 @@ const zhHant = {
     notYetReleased: '未開播', cancelled: '已取消',
     epUnit: '集', readMore: '展開更多', collapse: '收起',
     episodes: '集數列表', noEpisodes: '集數資訊待更新',
+    // 集數未知時的降級文案。手寫，沒有跑過轉換器：這兩句只有「數」一個字
+    // 跟簡體本不同，交給 s2twp 只會多冒風險。說的是「還不知道」，不是
+    // 「沒有」。
+    episodeCountPending: '本季集數待定',
+    episodeCountPendingHint: '總集數確認後，這裡會列出每一集。',
     ep: '第', epOf: '/',
     viewDetails: '檢視詳情',
     viewOnBgm: '在 Bangumi 檢視',
