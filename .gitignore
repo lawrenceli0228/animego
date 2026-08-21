@@ -98,9 +98,11 @@ nginx/selfsigned.key
 # image, never committed.
 backfill-out/
 report.json
+hant-report.json
 backup-*.json
 /go-api/bgmbackfill
 /go-api/bgmmap
+/go-api/hantbackfill
 /go-api/server
 /go-api/migrate-mongo
 /go-api/parity-check

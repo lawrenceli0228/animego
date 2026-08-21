@@ -81,6 +81,7 @@ export default function NotFound() {
   const searchLabel: Record<Lang, string> = {
     zh: getDictByLang("zh").nav.search,
     en: getDictByLang("en").nav.search,
+    "zh-Hant": getDictByLang("zh-Hant").nav.search,
   };
 
   return (

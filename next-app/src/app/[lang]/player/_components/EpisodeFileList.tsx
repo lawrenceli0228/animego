@@ -4,7 +4,7 @@ import { useState, type CSSProperties } from "react";
 import { useReducedMotion } from "motion/react";
 import { useLang } from "@/lib/lang-client";
 import { formatScore } from "@/lib/formatters";
-import { sourceLabel } from "@/lib/contentLabels";
+import { durationLabel, sourceLabel } from "@/lib/contentLabels";
 import FadeImage from "@/components/ui/FadeImage";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
@@ -421,11 +421,7 @@ function EpisodeFileList({
     : null;
 
   const sourceText = sourceLabel(sa?.source, lang);
-  const durationLabel = sa?.duration
-    ? lang === "zh"
-      ? `${sa.duration}分/集`
-      : `${sa.duration} min/ep`
-    : null;
+  const durationText = durationLabel(sa?.duration, lang);
 
   const avgScore =
     typeof sa?.averageScore === "string"
@@ -519,21 +515,21 @@ function EpisodeFileList({
               {/* Studios + meta */}
               {((sa.studios && sa.studios.length > 0) ||
                 sourceText ||
-                durationLabel) && (
+                durationText) && (
                 <div style={s.metaRow}>
                   {sa.studios && sa.studios.length > 0 && (
                     <span style={s.metaStudio}>{sa.studios.join(" · ")}</span>
                   )}
                   {sa.studios &&
                     sa.studios.length > 0 &&
-                    (sourceText || durationLabel) && (
+                    (sourceText || durationText) && (
                       <span style={s.metaDot}>·</span>
                     )}
                   {sourceText && (
                     <span style={s.metaDetail}>{sourceText}</span>
                   )}
-                  {durationLabel && (
-                    <span style={s.metaDetail}>{durationLabel}</span>
+                  {durationText && (
+                    <span style={s.metaDetail}>{durationText}</span>
                   )}
                 </div>
               )}

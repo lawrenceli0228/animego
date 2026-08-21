@@ -65,6 +65,8 @@ const zh = {
     home: '首页', season: '季度', search: '搜索',
     login: '登录', register: '注册', logout: '登出',
     myList: '我的追番', hi: 'Hi', library: '我的库', about: '关于',
+    // Language menu: the group heading + the account menu's own label.
+    language: '语言', accountMenu: '账户菜单', mainNavigation: '主导航',
   },
   // Season labels
   season: {
@@ -315,6 +317,37 @@ const zh = {
     empty: '还没有通知', loadError: '通知加载失败', retry: '重试',
   },
   settings: {
+    // Page chrome + member pass card. These were 28 inline
+    // `lang === "zh" ? … : …` ternaries in SettingsClient.tsx, which compiled
+    // clean and handed every third language the English branch.
+    kicker: '用户设置',
+    pageTitle: '账号与通行证',
+    navPreview: '导航头像预览 · 改背景实时可见',
+    livePreview: '实时预览',
+    passTitle: '会员通行证',
+    passSubtitle: '设置卡面照片与主页背景',
+    currentCardAlt: '当前卡面',
+    changePhoto: '更换照片',
+    uploadPhoto: '上传照片做卡面',
+    removePhoto: '移除',
+    backdropLabel: '主页背景番剧（用宽幅 banner）',
+    backdropEmpty: '列表里还没有带宽幅 banner 的番剧',
+    backdropListAria: '主页背景番剧',
+    savePass: '保存通行证',
+    accountTitle: '账号',
+    accountSubtitle: '专属编号 {{id}} · 不可更改',
+    usernameLabel: '用户名',
+    usernameTooShort: '用户名至少 3 个字符',
+    usernameHiddenTitle: '用户名已隐藏',
+    usernameHiddenBody: '你注册时填的名字看起来是邮箱或手机号，所以没有公开显示。现在你和别人看到的都是：',
+    saveUsername: '保存用户名',
+    // The security card is deliberately bilingual in every language: whoever
+    // needs to reset a password should find the instruction whatever they read.
+    securityTitle: '安全',
+    securitySubtitle: '修改密码 · Change password',
+    passwordResetHint: '为了账号安全，修改密码请在登录界面点击「忘记密码」，通过邮箱重置。',
+    passwordResetHintAlt: 'To change your password, click “Forgot password” on the login page.',
+    goToLogin: '前往登录页 · Go to login',
     communityTitle: '社区与隐私',
     communitySubtitle: '控制其他用户能看到的追番与活动信息',
     publicProfile: '公开我的社区主页',

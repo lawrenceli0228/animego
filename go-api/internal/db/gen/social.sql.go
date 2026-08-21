@@ -227,6 +227,9 @@ SELECT
     u.avatar_url,
     a.title_romaji,
     a.title_chinese,
+    a.title_hant,
+    a.title_hant_source,
+    a.title_hant_seo,
     a.cover_image_url,
     visible_comment.content AS comment_content,
     COALESCE(comment.is_spoiler, false)::boolean AS comment_is_spoiler,
@@ -265,6 +268,9 @@ type ListFeedActivitiesRow struct {
 	AvatarUrl        *string            `json:"avatarUrl"`
 	TitleRomaji      *string            `json:"titleRomaji"`
 	TitleChinese     *string            `json:"titleChinese"`
+	TitleHant        *string            `json:"titleHant"`
+	TitleHantSource  *string            `json:"titleHantSource"`
+	TitleHantSeo     *string            `json:"titleHantSeo"`
 	CoverImageUrl    *string            `json:"coverImageUrl"`
 	CommentContent   *string            `json:"commentContent"`
 	CommentIsSpoiler bool               `json:"commentIsSpoiler"`
@@ -299,6 +305,9 @@ func (q *Queries) ListFeedActivities(ctx context.Context, column1 []uuid.UUID, l
 			&i.AvatarUrl,
 			&i.TitleRomaji,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 			&i.CommentContent,
 			&i.CommentIsSpoiler,
@@ -472,6 +481,9 @@ SELECT
     a.title_english,
     a.title_native,
     a.title_chinese,
+    a.title_hant,
+    a.title_hant_source,
+    a.title_hant_seo,
     a.cover_image_url,
     a.banner_image_url,
     a.cover_image_color,
@@ -497,6 +509,9 @@ type ListProfileWatchingRow struct {
 	TitleEnglish    *string            `json:"titleEnglish"`
 	TitleNative     *string            `json:"titleNative"`
 	TitleChinese    *string            `json:"titleChinese"`
+	TitleHant       *string            `json:"titleHant"`
+	TitleHantSource *string            `json:"titleHantSource"`
+	TitleHantSeo    *string            `json:"titleHantSeo"`
 	CoverImageUrl   *string            `json:"coverImageUrl"`
 	BannerImageUrl  *string            `json:"bannerImageUrl"`
 	CoverImageColor *string            `json:"coverImageColor"`
@@ -529,6 +544,9 @@ func (q *Queries) ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]
 			&i.TitleEnglish,
 			&i.TitleNative,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 			&i.BannerImageUrl,
 			&i.CoverImageColor,

@@ -14,6 +14,7 @@ import { authChrome } from "@/lib/authChrome";
 import { authFetch } from "@/lib/authFetch";
 import { broadcastSignedOut } from "@/components/anime/subscriptionSetState";
 import AvatarMenu from "./AvatarMenu";
+import { LanguageMenu } from "./LanguageMenu";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import { splitLocale } from "@/lib/i18n/locale";
 
@@ -123,19 +124,6 @@ const s = {
     cursor: "pointer",
     textDecoration: "none",
   } as CSSProperties,
-  langBtn: {
-    minHeight: 36,
-    minWidth: 40,
-    padding: "0 10px",
-    borderRadius: 8,
-    border: "1px solid rgba(84,84,88,0.65)",
-    color: "rgba(235,235,245,0.60)",
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-    background: "none",
-    transition: "all 0.2s",
-  } as CSSProperties,
   username: {
     fontSize: 13,
     color: "rgba(235,235,245,0.75)",
@@ -201,17 +189,14 @@ interface AuthCtaProps {
 // Presentational half of the logged-out chrome, split out so the identical
 // markup can render on both sides of the Suspense boundary below.
 function AuthCtaView({ loginHref, registerHref }: AuthCtaProps) {
-  const { lang, t, toggle } = useLang();
+  const { t } = useLang();
   return (
     <>
-      <button
-        type="button"
-        style={s.langBtn}
-        onClick={toggle}
-        aria-label={lang === "zh" ? "Switch to English" : "切换到中文"}
-      >
-        {lang === "zh" ? "EN" : "中"}
-      </button>
+      {/* Was a two-state flip labelled "Switch to English" / "切换到中文",
+          sitting on top of nextLocale() — which is an N-way cycle. The label
+          described the button only while there were exactly two locales.
+          LanguageMenu derives its options from LOCALES instead. */}
+      <LanguageMenu />
       <Link href={loginHref} prefetch={false} className="agc-nav-cta" style={s.btnOutline}>
         {t("nav.login")}
       </Link>
@@ -267,12 +252,14 @@ interface NavLink {
 export default function Navbar({ season, year }: NavbarProps) {
   const pathname = usePathname() ?? "/";
   // Client i18n: the layout renders the canonical default (zh) and no longer
-  // resolves lang server-side (that forced dynamic). useLang() reads the
-  // `lang` cookie on the client + reacts to the toggle, so the chrome
-  // switches to en for en visitors without a server round-trip.
-  // `toggle` is no longer destructured here — the language button moved into
-  // AuthCtaView (logged-out) / AvatarMenu (logged-in).
-  const { lang, t } = useLang();
+  // resolves lang server-side (that forced dynamic). useLang() is seeded from
+  // the route locale and follows the reader after hydration, so the chrome
+  // switches without a server round-trip.
+  //
+  // Neither `lang` nor `switchTo` is destructured here any more: every string
+  // in this bar now comes from t(), and the language control itself moved into
+  // LanguageMenu (logged-out) / AvatarMenu (logged-in).
+  const { t } = useLang();
 
   // Islanded auth state: the layout no longer fetches /api/auth/me server-side
   // (that no-store call forced every page dynamic). Fetch it here, on mount,
@@ -422,7 +409,7 @@ export default function Navbar({ season, year }: NavbarProps) {
     <nav
       className="agc-nav"
       style={s.nav}
-      aria-label={lang === "zh" ? "主导航" : "Main navigation"}
+      aria-label={t("nav.mainNavigation")}
     >
       <style>{NAV_CSS}</style>
       <div className="agc-nav-inner" style={s.inner}>

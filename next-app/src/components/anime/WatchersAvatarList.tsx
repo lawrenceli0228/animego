@@ -35,6 +35,16 @@ interface WatchersAvatarListProps {
   lang: Lang;
 }
 
+// The "+N more" tail after the avatar row. Chinese uses full-width brackets
+// and its own counter word and needs no leading space; English needs the
+// leading space and the trailing word. Different punctuation, different
+// spacing — a Record of functions, not one template with a hole in it.
+const OVERFLOW_SUFFIX: Record<Lang, (moreLabel: string, more: number) => string> = {
+  zh: (moreLabel, more) => `（${moreLabel} ${more} 人）`,
+  en: (moreLabel, more) => ` (${moreLabel}${more} more)`,
+  "zh-Hant": (moreLabel, more) => `（${moreLabel} ${more} 人）`,
+};
+
 const AVATAR_LIMIT = 8;
 const COLORS = [
   "#0a84ff",
@@ -163,7 +173,7 @@ export default async function WatchersAvatarList({
         {`${total} ${watchersLabel}`}
         {more > 0 && (
           <span style={moreStyle}>
-            {lang === "zh" ? `（${moreLabel} ${more} 人）` : ` (${moreLabel}${more} more)`}
+            {OVERFLOW_SUFFIX[lang](moreLabel, more)}
           </span>
         )}
       </span>

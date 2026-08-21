@@ -53,6 +53,7 @@ interface PatchResult {
 const PATCH_FALLBACK: Record<Lang, { save: string; network: string }> = {
   zh: { save: "保存失败", network: "网络错误" },
   en: { save: "Save failed", network: "Network error" },
+  "zh-Hant": { save: "儲存失敗", network: "網路錯誤" },
 };
 
 async function patchMe(
@@ -126,7 +127,7 @@ export default function SettingsClient({
   const saveName = useCallback(async () => {
     const v = name.trim();
     if (v.length < 3) {
-      setNameStatus({ kind: "err", msg: lang === "zh" ? "用户名至少 3 个字符" : "Min 3 chars" });
+      setNameStatus({ kind: "err", msg: t("settings.usernameTooShort") });
       return;
     }
     if (v === username) {
@@ -136,12 +137,12 @@ export default function SettingsClient({
     setNameStatus({ kind: "saving" });
     const res = await patchMe({ username: v }, lang);
     if (res.ok) {
-      setNameStatus({ kind: "ok", msg: lang === "zh" ? "已保存" : "Saved" });
+      setNameStatus({ kind: "ok", msg: t("settings.saved") });
       router.refresh();
     } else {
       setNameStatus({ kind: "err", msg: res.error });
     }
-  }, [name, username, lang, router]);
+  }, [name, username, lang, router, t]);
 
   // ── photo ──
   const onFile = useCallback((file: File | undefined) => {
@@ -187,12 +188,12 @@ export default function SettingsClient({
     setPassStatus({ kind: "saving" });
     const res = await patchMe(body, lang);
     if (res.ok) {
-      setPassStatus({ kind: "ok", msg: lang === "zh" ? "已保存" : "Saved" });
+      setPassStatus({ kind: "ok", msg: t("settings.saved") });
       router.refresh();
     } else {
       setPassStatus({ kind: "err", msg: res.error });
     }
-  }, [photoChanged, backdropChanged, photoUrl, backdropId, lang, router]);
+  }, [photoChanged, backdropChanged, photoUrl, backdropId, lang, router, t]);
 
   const savePrivacy = useCallback(async () => {
     if (publicProfile === isPublic) return;
@@ -218,8 +219,8 @@ export default function SettingsClient({
     <div className="set-page">
       <div className="set-head">
         <div className="set-head-titles">
-          <p className="set-kicker">{lang === "zh" ? "用户设置" : "Settings"}</p>
-          <h1 className="set-title">{lang === "zh" ? "账号与通行证" : "Account & Pass"}</h1>
+          <p className="set-kicker">{t("settings.kicker")}</p>
+          <h1 className="set-title">{t("settings.pageTitle")}</h1>
         </div>
         {/* live nav mini-card preview: picking a backdrop shows its banner here */}
         <div className="set-minicard">
@@ -235,7 +236,7 @@ export default function SettingsClient({
           </div>
           <div className="info">
             <b>{name || username}</b>
-            <span>{lang === "zh" ? "导航头像预览 · 改背景实时可见" : "Nav avatar preview · live"}</span>
+            <span>{t("settings.navPreview")}</span>
           </div>
         </div>
       </div>
@@ -254,14 +255,14 @@ export default function SettingsClient({
             lang={lang}
           />
           <span className="set-id">{idDisplay}</span>
-          <span className="hint">{lang === "zh" ? "实时预览" : "Live preview"}</span>
+          <span className="hint">{t("settings.livePreview")}</span>
         </aside>
 
         <div className="set-cols">
           {/* pass: photo + backdrop */}
           <section className="set-card">
-            <h2>{lang === "zh" ? "会员通行证" : "Member Pass"}</h2>
-            <p className="sub">{lang === "zh" ? "设置卡面照片与主页背景" : "Card photo and profile backdrop"}</p>
+            <h2>{t("settings.passTitle")}</h2>
+            <p className="sub">{t("settings.passSubtitle")}</p>
 
             <input
               ref={fileRef}
@@ -276,7 +277,7 @@ export default function SettingsClient({
             <div className="set-photo">
               {photoUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img className="set-thumb" src={photoUrl} alt={lang === "zh" ? "当前卡面" : "Current"} />
+                <img className="set-thumb" src={photoUrl} alt={t("settings.currentCardAlt")} />
               )}
               <div className="set-actions">
                 <button type="button" className="set-btn" onClick={() => fileRef.current?.click()}>
@@ -285,11 +286,11 @@ export default function SettingsClient({
                     <path d="M17 8l-5-5-5 5" />
                     <path d="M12 3v13" />
                   </svg>
-                  {photoUrl ? (lang === "zh" ? "更换照片" : "Change") : lang === "zh" ? "上传照片做卡面" : "Upload photo"}
+                  {photoUrl ? t("settings.changePhoto") : t("settings.uploadPhoto")}
                 </button>
                 {photoUrl && (
                   <button type="button" className="set-btn danger" onClick={removePhoto}>
-                    {lang === "zh" ? "移除" : "Remove"}
+                    {t("settings.removePhoto")}
                   </button>
                 )}
               </div>
@@ -297,19 +298,17 @@ export default function SettingsClient({
 
             <div style={{ marginTop: 18 }}>
               <label style={{ fontSize: 12.5, fontWeight: 600, color: "rgba(235,235,245,0.7)" }}>
-                {lang === "zh" ? "主页背景番剧（用宽幅 banner）" : "Backdrop anime (wide banner)"}
+                {t("settings.backdropLabel")}
               </label>
               {bannerOptions.length === 0 ? (
                 <p className="hint" style={{ marginTop: 8 }}>
-                  {lang === "zh"
-                    ? "列表里还没有带宽幅 banner 的番剧"
-                    : "No anime with a wide banner in your list yet"}
+                  {t("settings.backdropEmpty")}
                 </p>
               ) : (
                 <div
                   className="set-grid-thumbs"
                   role="listbox"
-                  aria-label={lang === "zh" ? "主页背景番剧" : "Profile backdrop anime"}
+                  aria-label={t("settings.backdropListAria")}
                 >
                   {bannerOptions.map((o) => (
                     <button
@@ -344,12 +343,8 @@ export default function SettingsClient({
                 onClick={savePass}
               >
                 {passStatus.kind === "saving"
-                  ? lang === "zh"
-                    ? "保存中…"
-                    : "Saving…"
-                  : lang === "zh"
-                    ? "保存通行证"
-                    : "Save pass"}
+                  ? t("settings.saving")
+                  : t("settings.savePass")}
               </button>
               {msgEl(passStatus)}
             </div>
@@ -357,10 +352,10 @@ export default function SettingsClient({
 
           {/* account: username */}
           <section className="set-card">
-            <h2>{lang === "zh" ? "账号" : "Account"}</h2>
-            <p className="sub">{lang === "zh" ? `专属编号 ${idDisplay} · 不可更改` : `Member ${idDisplay} · permanent`}</p>
+            <h2>{t("settings.accountTitle")}</h2>
+            <p className="sub">{t("settings.accountSubtitle").replace("{{id}}", idDisplay)}</p>
             <div className="set-field">
-              <label htmlFor="set-username">{lang === "zh" ? "用户名" : "Username"}</label>
+              <label htmlFor="set-username">{t("settings.usernameLabel")}</label>
               <input
                 id="set-username"
                 className="set-input"
@@ -377,12 +372,10 @@ export default function SettingsClient({
               // stray gaps mid-sentence here before.
               <div id="set-username-hidden" className="set-warn" role="status">
                 <p className="set-warn-title">
-                  {lang === "zh" ? "用户名已隐藏" : "Username hidden"}
+                  {t("settings.usernameHiddenTitle")}
                 </p>
                 <p className="set-warn-body">
-                  {lang === "zh"
-                    ? "你注册时填的名字看起来是邮箱或手机号，所以没有公开显示。现在你和别人看到的都是："
-                    : "The name you registered with looks like an email address or a phone number, so it is not shown. You and everyone else now see:"}
+                  {t("settings.usernameHiddenBody")}
                 </p>
                 <code className="set-warn-code">{username}</code>
               </div>
@@ -394,7 +387,7 @@ export default function SettingsClient({
                 disabled={nameStatus.kind === "saving" || name.trim() === username}
                 onClick={saveName}
               >
-                {nameStatus.kind === "saving" ? (lang === "zh" ? "保存中…" : "Saving…") : lang === "zh" ? "保存用户名" : "Save"}
+                {nameStatus.kind === "saving" ? t("settings.saving") : t("settings.saveUsername")}
               </button>
               {msgEl(nameStatus)}
             </div>
@@ -444,8 +437,8 @@ export default function SettingsClient({
 
           {/* security: password changes go through the email reset flow */}
           <section className="set-card">
-            <h2>{lang === "zh" ? "安全" : "Security"}</h2>
-            <p className="sub">{lang === "zh" ? "修改密码 · Change password" : "Change password · 修改密码"}</p>
+            <h2>{t("settings.securityTitle")}</h2>
+            <p className="sub">{t("settings.securitySubtitle")}</p>
             <p
               style={{
                 fontSize: 13.5,
@@ -454,9 +447,7 @@ export default function SettingsClient({
                 margin: 0,
               }}
             >
-              {lang === "zh"
-                ? "为了账号安全，修改密码请在登录界面点击「忘记密码」，通过邮箱重置。"
-                : "For account security, change your password via the “Forgot password” link on the login page (reset by email)."}
+              {t("settings.passwordResetHint")}
             </p>
             <p
               style={{
@@ -466,13 +457,11 @@ export default function SettingsClient({
                 margin: "6px 0 0",
               }}
             >
-              {lang === "zh"
-                ? "To change your password, click “Forgot password” on the login page."
-                : "修改密码请在登录界面点击「忘记密码」。"}
+              {t("settings.passwordResetHintAlt")}
             </p>
             <div className="set-actions" style={{ marginTop: 16 }}>
               <Link href="/login" className="set-btn ghost" style={{ textDecoration: "none" }}>
-                {lang === "zh" ? "前往登录页 · Go to login" : "Go to login · 前往登录页"}
+                {t("settings.goToLogin")}
               </Link>
             </div>
           </section>

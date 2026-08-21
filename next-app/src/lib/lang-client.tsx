@@ -27,22 +27,37 @@ import { createContext, useCallback, useContext, type ReactNode } from "react";
 // them fine because tsconfig allows JS module resolution.
 import zh from "@/locales/zh-spa.js";
 import en from "@/locales/en-spa.js";
+import zhHant from "@/locales/zh-Hant-spa.js";
 // From @/lib/i18n/lang, NOT @/lib/i18n: the latter imports both *server*
 // dictionaries (67KB of .ts) and would drag them into every client chunk
 // that touches useLang(). lang.ts imports nothing, so it is safe on both
 // sides — that is the entire reason it exists as a separate module.
 // `Lang` comes in as a type-only binding so it is erased outright.
 import { type Lang } from "@/lib/i18n/lang";
-import { LOCALE_LANG, localizePath, nextLocale, splitLocale } from "@/lib/i18n/locale";
+import {
+  LOCALE_LANG,
+  localizePath,
+  splitLocale,
+  type Locale,
+} from "@/lib/i18n/locale";
 
 type Dict = Record<string, unknown>;
 
-const DICTS: Record<Lang, Dict> = { zh, en };
+const DICTS: Record<Lang, Dict> = { zh, en, "zh-Hant": zhHant };
 
 
 interface LangContextValue {
   lang: Lang;
-  toggle: () => void;
+  /**
+   * Navigate to `locale`, keeping the current path and query.
+   *
+   * Takes the target rather than advancing a cycle. The cycle it replaced
+   * (`toggle`) was fine at two locales and became a lie at three: it invited a
+   * reader on a Traditional page to "switch to Chinese" while they were
+   * already reading Chinese. The control is a menu now — see
+   * components/layout/LanguageMenu.tsx — and a menu names its destination.
+   */
+  switchTo: (locale: Locale) => void;
   t: (key: string, opts?: { defaultValue?: string }) => string;
 }
 
@@ -88,7 +103,7 @@ export function LanguageProvider({
   // decision, and anything that disagreed with it here would be a repaint
   // contradicting the page's own <html lang> and canonical.
   return (
-    <LanguageContext.Provider value={{ lang, toggle: useLocaleToggle(), t: useT(lang) }}>
+    <LanguageContext.Provider value={{ lang, switchTo: useLocaleSwitch(), t: useT(lang) }}>
       {children}
     </LanguageContext.Provider>
   );
@@ -104,20 +119,18 @@ function useT(lang: Lang) {
 /**
  * Switching language is a navigation, because the language lives in the URL.
  *
- * Reads the locale from the path rather than from the language: the path is
- * what is about to change, and deriving the target from the thing being
- * changed is one fewer place for the two vocabularies to disagree. Which is
- * also why this takes no arguments — there is nothing about the current
- * language it needs that the URL does not already say.
+ * Reads the PATH, not the language: the path is what is about to change, and
+ * deriving the rewrite from the thing being changed is one fewer place for the
+ * two vocabularies to disagree.
  *
  * The query string rides along — switching language on /search?q=frieren
  * should keep the search.
  */
-function useLocaleToggle() {
+function useLocaleSwitch() {
   const pathname = usePathname();
 
-  return useCallback(() => {
-    const { locale, path } = splitLocale(pathname ?? "/");
+  return useCallback((target: Locale) => {
+    const { path } = splitLocale(pathname ?? "/");
     // The query is read from the document at click time rather than through
     // useSearchParams(). That hook forces a client-side bailout in any
     // component not wrapped in a Suspense boundary, and this provider sits in
@@ -142,7 +155,7 @@ function useLocaleToggle() {
     //     renderToString tests. Requiring a router here made fourteen admin
     //     rendering tests fail for a reason that had nothing to do with what
     //     they assert.
-    window.location.assign(localizePath(path, nextLocale(locale)) + window.location.search);
+    window.location.assign(localizePath(path, target) + window.location.search);
   }, [pathname]);
 }
 
@@ -163,8 +176,8 @@ export const useLang = (): LangContextValue => {
   const ctx = useContext(LanguageContext);
   const pathname = usePathname();
   const fallbackLang = LOCALE_LANG[splitLocale(pathname ?? "/").locale];
-  const toggle = useLocaleToggle();
+  const switchTo = useLocaleSwitch();
   const t = useT(fallbackLang);
 
-  return ctx ?? { lang: fallbackLang, toggle, t };
+  return ctx ?? { lang: fallbackLang, switchTo, t };
 };

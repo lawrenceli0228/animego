@@ -12,6 +12,18 @@ export interface SubscriptionListItem {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  // Traditional Chinese title channel (migration 0022). Repeated here rather
+  // than inherited because this file declares its own anime shape — a field
+  // go-api sends but this interface omits is one the shared pickTitle()
+  // ladder cannot see, so zh-Hant would fall straight past its first rung.
+  //
+  // Optional (not `| null`) because they are absent from any response served
+  // by a go-api older than 0022. See the channel note in lib/types.ts: only
+  // titleHantSeo may reach a <title>, og:title or JSON-LD name.
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note in lib/types.ts. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   /** Wide landscape banner (AniList bannerImage); used for the cinematic backdrop. */
   bannerImageUrl: string | null;

@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import zhSpa from "./zh-spa.js";
 import enSpa from "./en-spa.js";
+import zhHantSpa from "./zh-Hant-spa.js";
 import { LANGS, type Lang } from "../lib/i18n/lang";
 
 // Client components translate through useLang(), which is backed by the
@@ -36,7 +37,11 @@ const SRC = join(import.meta.dir, "..");
  * Not imported from lang-client.tsx directly: that module is a React client
  * component, and this suite is deliberately DOM-free (see testImportHygiene).
  */
-const SPA_DICTS: Record<Lang, unknown> = { zh: zhSpa, en: enSpa };
+const SPA_DICTS: Record<Lang, unknown> = {
+  zh: zhSpa,
+  en: enSpa,
+  "zh-Hant": zhHantSpa,
+};
 
 // A key is exempt when its call site passes an explicit defaultValue —
 // that is a deliberate "may be absent" contract, e.g. player.dropRelease.

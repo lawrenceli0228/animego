@@ -22,6 +22,15 @@ const btnStyle: CSSProperties = {
   transition: "all 0.2s",
 };
 
+// Keyed by Lang so a new language is a compile error rather than a silent
+// fall-through to English. Local rather than a dictionary key: this component
+// takes `lang` and not `dict`, and the string is one button's label.
+const SHOW_MORE: Record<Lang, string> = {
+  zh: "显示更多",
+  en: "Show More",
+  "zh-Hant": "顯示更多",
+};
+
 interface SeasonalShowMoreProps {
   lang: Lang;
   currentCount: number;
@@ -31,7 +40,7 @@ interface SeasonalShowMoreProps {
 export default function SeasonalShowMore({ lang, currentCount, step }: SeasonalShowMoreProps) {
   const router = useRouter();
   const params = useSearchParams();
-  const label = lang === "zh" ? "显示更多" : "Show More";
+  const label = SHOW_MORE[lang];
 
   function handleClick() {
     const next = new URLSearchParams(params.toString());

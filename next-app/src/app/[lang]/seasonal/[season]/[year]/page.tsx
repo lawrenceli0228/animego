@@ -39,6 +39,10 @@ const SEASON_CHAR: Record<SeasonKey, string> = {
 const SEASON_HEADING: Record<Lang, (season: SeasonKey, year: number) => string> = {
   zh: (season, year) => `${year}年 ${SEASON_CHAR[season]}季新番`,
   en: (season, year) => `${season.charAt(0).toUpperCase()}${season.slice(1)} ${year} Anime`,
+  // Same sentence as zh: 年/季/新番 and all four season characters are
+  // script-identical, so only the template's own glyphs would have differed
+  // and none of them do. SEASON_CHAR is shared rather than duplicated.
+  "zh-Hant": (season, year) => `${year}年 ${SEASON_CHAR[season]}季新番`,
 };
 
 const SEASONAL_PAGE_SIZE = 200;

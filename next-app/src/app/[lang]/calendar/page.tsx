@@ -28,16 +28,9 @@ async function safeSchedule(): Promise<ScheduleResponse> {
 export async function generateMetadata({
   params,
 }: PageProps<"/[lang]/calendar">): Promise<Metadata> {
-  const { locale, dict, lang } = await resolveLocale(params);
-  const title =
-    lang === "zh" ? "今日新番放送日历" : "Airing Calendar";
-  const description =
-    lang === "zh"
-      ? "本周新番放送时间表，按周一至周日分组，覆盖连载中的 TV 动画与 ONA。每日更新。"
-      : "Weekly anime airing schedule grouped by day. Updated daily.";
-  // Suppress TS unused warning — dict is fetched for structural symmetry
-  // with other pages; description is derived from lang directly above.
-  void dict;
+  const { locale, dict } = await resolveLocale(params);
+  const title = dict.calendarPage.metaTitle;
+  const description = dict.calendarPage.description;
   return {
     title,
     description,
@@ -81,12 +74,8 @@ export default async function CalendarPage({
     safeSchedule(),
   ]);
 
-  const heading =
-    lang === "zh" ? "今日新番放送日历" : "Today's Airing Calendar";
-  const sub =
-    lang === "zh"
-      ? "本周新番放送时间表，按周一至周日分组，覆盖连载中的 TV 动画与 ONA。每日更新。"
-      : "Weekly anime airing schedule grouped by day. Updated daily.";
+  const heading = dict.calendarPage.heading;
+  const sub = dict.calendarPage.description;
 
   return (
     <main>

@@ -39,8 +39,16 @@ function fStr(features: FeaturesDict, key: string): string {
 
 interface PosterRosterEntry {
   slot: keyof PosterSlotMap;
-  title: string;
-  titleEn: string;
+  /**
+   * The caption under each mock poster, keyed by Lang.
+   *
+   * Was a `title` / `titleEn` pair read as `lang === "en" ? titleEn : title`,
+   * which is the same defect in the other polarity: it put Simplified glyphs
+   * under a Traditional URL, on the section whose whole subject is how the
+   * site treats cover art. The same three titles already exist in Traditional
+   * in the dictionary (landing.features.f5Row1-3) — these now match them.
+   */
+  title: Record<Lang, string>;
   hue: number;
   rotate: number;
   z: number;
@@ -49,9 +57,21 @@ interface PosterRosterEntry {
 }
 
 const POSTER_ROSTER: PosterRosterEntry[] = [
-  { slot: "frieren", title: "葬送的芙莉莲", titleEn: "Frieren",     hue: 330, rotate: -4, z: 1, x: 0,   y: 16 },
-  { slot: "apoth",   title: "药屋少女的呢喃", titleEn: "Apothecary", hue: 20,  rotate: 0,  z: 3, x: 92,  y: 0  },
-  { slot: "losing",  title: "败犬女主太多了", titleEn: "Losing",     hue: 340, rotate: 3,  z: 2, x: 184, y: 24 },
+  {
+    slot: "frieren",
+    title: { zh: "葬送的芙莉莲", en: "Frieren", "zh-Hant": "葬送的芙莉蓮" },
+    hue: 330, rotate: -4, z: 1, x: 0, y: 16,
+  },
+  {
+    slot: "apoth",
+    title: { zh: "药屋少女的呢喃", en: "Apothecary", "zh-Hant": "藥屋少女的呢喃" },
+    hue: 20, rotate: 0, z: 3, x: 92, y: 0,
+  },
+  {
+    slot: "losing",
+    title: { zh: "败犬女主太多了", en: "Losing", "zh-Hant": "敗犬女主太多了" },
+    hue: 340, rotate: 3, z: 2, x: 184, y: 24,
+  },
 ];
 
 interface PosterVisualProps {
@@ -95,7 +115,7 @@ export function PosterVisual({ hue, lang, posters, features }: PosterVisualProps
             {cover ? (
               <FadeImage
                 src={cover}
-                alt={p.title}
+                alt={p.title[lang]}
                 style={{
                   position: "absolute", inset: 0,
                   width: "100%", height: "100%", objectFit: "cover",
@@ -124,7 +144,7 @@ export function PosterVisual({ hue, lang, posters, features }: PosterVisualProps
               position: "absolute", left: 6, right: 6, bottom: 6,
               fontFamily: "'Sora', sans-serif", fontSize: 9, fontWeight: 700,
               color: "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.85)", letterSpacing: "-0.01em",
-            }}>{lang === "en" ? p.titleEn : p.title}</div>
+            }}>{p.title[lang]}</div>
           </div>
           );
         })}
@@ -946,6 +966,16 @@ export function DropVisual({ hue, features }: DropVisualProps) {
   );
 }
 
+// The sample season on the f8 member-pass mock. Not dict.season.SPRING —
+// that one carries a 🌸 emoji, and this is a fake record line on a card
+// preview, not a real season label. Keyed by Lang so a new language is a
+// compile error rather than an English word inside a Chinese mock.
+const SPRING: Record<Lang, string> = {
+  zh: "春季",
+  en: "Spring",
+  "zh-Hant": "春季",
+};
+
 // --- f8 Member Pass ----------------------------------------------------
 
 interface MemberPassVisualProps {
@@ -976,7 +1006,7 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
           memberNo="AGC-000142"
           since="SINCE 2026"
           watchedCount={42}
-          topSeason={lang === "zh" ? "2026 春季" : "2026 Spring"}
+          topSeason={`2026 ${SPRING[lang]}`}
           artUrl={art}
           photoUrl={null}
           lang={lang}
@@ -1100,7 +1130,7 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
               {fStr(features, "f8PreviewWatched")}
             </span>
             <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
-            <span>2026 {lang === "zh" ? "春季" : "Spring"}</span>
+            <span>2026 {SPRING[lang]}</span>
             <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
             <span style={{ color: `oklch(80% 0.10 ${hue})` }}>#AGC-000142</span>
           </div>

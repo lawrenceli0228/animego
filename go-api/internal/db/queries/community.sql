@@ -68,6 +68,9 @@ SELECT
     COALESCE(c.is_spoiler, false)::boolean AS comment_is_spoiler,
     a.title_romaji,
     a.title_chinese,
+    a.title_hant,
+    a.title_hant_source,
+    a.title_hant_seo,
     a.cover_image_url
 FROM notifications n
 JOIN users actor ON actor.id = n.actor_id

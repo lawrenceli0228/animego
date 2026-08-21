@@ -25,6 +25,34 @@ export interface ApiErrorBody {
   };
 }
 
+// ─── Traditional Chinese title channel (migration 0022) ────────────
+//
+// Every endpoint that returns a displayed title now carries three hant
+// fields, and the third one is the whole point:
+//
+//   titleHant        the Traditional title, from the best available tier
+//   titleHantSource  'wikipedia' | 'anilist' | 'opencc' | 'manual'
+//   titleHantSeo     the same string with the 'opencc' tier projected out
+//                    by the database (a GENERATED column, not a filter
+//                    this code applies)
+//
+// **Anything that reaches a search engine — <title>, og:title, JSON-LD
+// name, canonical link text — must read `titleHantSeo` and nothing
+// else.** `titleHant` may be a machine conversion (s2twp), which
+// measures 85.3% sentence accuracy and whose misses correlate with
+// popularity, so its errors land on exactly the titles people search
+// for. A wrong title in a SERP is what Google learns the page is about,
+// and that is the least reversible mistake available here.
+//
+// `titleHantSeo` being null is a correct answer, not a missing value —
+// fall back down the existing title ladder as you already do for
+// `titleChinese`.
+//
+// All three are optional here rather than `| null` because they are
+// absent from any response served by a go-api older than this commit,
+// and every consumer already falls back. Null on every row until the
+// backfill runs.
+
 // ─── Trending (/api/anime/trending) ────────────────────────────────
 
 export interface TrendingItem {
@@ -35,6 +63,10 @@ export interface TrendingItem {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note above. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   coverImageColor: string | null;
   posterAccent: string | null;
@@ -65,6 +97,10 @@ export interface SeasonalAnime {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note above. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   coverImageColor: string | null;
   posterAccent: string | null;
@@ -96,6 +132,10 @@ export interface HotDiscussion {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note above. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   posterAccent: string | null;
   commentCount: number;
@@ -120,6 +160,10 @@ export interface AnimeDetail {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note above. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   coverImageColor: string | null;
   posterAccent: string | null;
@@ -141,6 +185,14 @@ export interface AnimeDetail {
   descriptionCn: string | null;
   /** 'bangumi' | 'llm' | 'manual' — see anime_cache.description_cn_source. */
   descriptionCnSource: string | null;
+  // Traditional Chinese synopsis (anime_cache.description_hant, migration
+  // 0022). Detail endpoint only, exactly like descriptionCn above — the
+  // list endpoints must NOT grow it. Narrower source vocabulary than the
+  // title channel because no dataset ships a Traditional synopsis to
+  // import: it is either a conversion or a human wrote it.
+  descriptionHant?: string | null;
+  /** 'opencc' | 'manual' — see anime_cache.description_hant_source. */
+  descriptionHantSource?: string | null;
   episodes: number | null;
   status: string | null;
   season: string | null;
@@ -185,6 +237,10 @@ export interface DetailRelation {
   // relation children. Legacy AnimeDetailHero.jsx reads r.title directly.
   title: string | null;
   titleChinese: string | null;
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note above. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   format: string | null;
 }
@@ -278,6 +334,10 @@ export interface WatchingItem {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note above. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   lastWatchedAt: string | null;
 }
@@ -295,6 +355,10 @@ export interface FeedItem {
   anilistId: number;
   title: string;
   titleChinese: string | null;
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note above. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   episode: number;
   status: string;

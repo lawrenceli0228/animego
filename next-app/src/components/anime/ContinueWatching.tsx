@@ -38,6 +38,15 @@ interface ContinueWatchingProps {
   lang: Lang;
 }
 
+// The fallback badge when an entry has no episode numbers to show at all —
+// a bare status word sized to a corner chip, so it stays beside badgeText()
+// rather than moving into the dictionary.
+const TRACKING_BADGE: Record<Lang, string> = {
+  zh: "在追",
+  en: "Watching",
+  "zh-Hant": "在追",
+};
+
 const PLACEHOLDER_COUNT = 4;
 
 const sectionStyle = { marginTop: 40 } as const;
@@ -226,7 +235,7 @@ function badgeText(item: WatchingItem, dict: Dict, lang: Lang): string {
   if (item.episodes && item.episodes > 0) {
     return `${item.episodes} ${epUnit}`;
   }
-  return lang === "zh" ? "在追" : "Watching";
+  return TRACKING_BADGE[lang];
 }
 
 /**
@@ -276,18 +285,14 @@ function StubSection({
   );
 }
 
-function LoggedOutStub({ dict, lang }: ContinueWatchingProps) {
-  const copy =
-    lang === "zh"
-      ? "登录后追番进度会出现在这里"
-      : "Login to track your watching progress";
+function LoggedOutStub({ dict }: ContinueWatchingProps) {
   return (
     <StubSection
       dict={dict}
-      body={copy}
+      body={dict.home.watchingSignedOutBody}
       ctaHref="/login"
       ctaLabel={dict.nav.login}
-      ctaAria={lang === "zh" ? "登录 AnimeGoClub" : "Login to AnimeGoClub"}
+      ctaAria={dict.home.watchingSignedOutCtaAria}
     />
   );
 }

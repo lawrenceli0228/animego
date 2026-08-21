@@ -45,6 +45,9 @@ const en = {
     trendingLabel: 'TRENDING', trendingTitle: 'Most Watched',
     rankingsLabel: 'TOP RATED', rankingsTitle: `${new Date().getFullYear()} Annual Rankings`,
     gemsLabel: 'CLASSICS', gemsTitle: 'Completed Gems', gemsRefresh: 'Refresh',
+    // Signed-out ContinueWatching stub: the pitch and the CTA's accessible name.
+    watchingSignedOutBody: 'Login to track your watching progress',
+    watchingSignedOutCtaAria: 'Login to AnimeGoClub',
   },
   // Anime watchers
   anime: {
@@ -112,6 +115,8 @@ const en = {
     title: 'Search Anime',
     placeholder: 'Search anime title...',
     prompt: 'Enter a keyword or select a genre to search',
+    prev: 'Prev',
+    next: 'Next',
   },
   // Season page
   seasonPage: {
@@ -127,6 +132,33 @@ const en = {
     paginationAria: 'Pagination',
     prevPage: 'Prev',
     nextPage: 'Next',
+  },
+  // Calendar page (/calendar)
+  calendarPage: {
+    metaTitle: 'Airing Calendar',
+    heading: "Today's Airing Calendar",
+    description: 'Weekly anime airing schedule grouped by day. Updated daily.',
+  },
+  // FAQ page (/faq)
+  faqPage: {
+    metaTitle: 'Frequently Asked Questions',
+    heading: 'Frequently Asked Questions',
+    description: 'About AnimeGoClub: is it free, how it differs from Bangumi/AniList/MAL, danmaku sources, OVA/ONA/movie differences.',
+  },
+  // Legal pages — METADATA ONLY.
+  //
+  // The documents themselves are Simplified Chinese in every locale, on
+  // purpose: see the note above the default export in app/[lang]/privacy.
+  // Translating a privacy commitment or a takedown procedure is a legal
+  // review, not a string task. All three use buildAlternatesUntranslated(),
+  // so no hreflang advertises a translated version that does not exist.
+  legal: {
+    termsTitle: 'Terms of Service',
+    termsDescription: 'AnimeGoClub Terms of Service: accounts, user content, acceptable use, third-party links, disclaimers.',
+    privacyTitle: 'Privacy Policy',
+    privacyDescription: 'AnimeGoClub Privacy Policy: what we collect, how we use it, cookies and local storage, third-party services and your rights.',
+    copyrightTitle: 'Copyright & Takedown',
+    copyrightDescription: 'AnimeGoClub copyright notice and takedown process. We host no media files; how rights holders submit removal requests.',
   },
   // Login
   login: {
@@ -168,6 +200,13 @@ const en = {
     label: 'MY LIST', titleSuffix: "'s Watchlist",
     noAnime: 'No anime in',
     noAnimeSuffix: '',
+    // The list toolbar. Ternaries in ProfileClient before this — a page that
+    // is otherwise fully translated does not want English aria-labels.
+    statusTabsAria: 'Watch status',
+    searchPlaceholder: 'Search my list...',
+    searchAria: 'Search watchlist',
+    sortAria: 'Sort by',
+    noMatches: 'No matches',
   },
   // Torrent modal
   torrent: {
@@ -206,6 +245,10 @@ const en = {
     action_completed: 'completed',
     action_plan_to_watch: 'wants to watch',
     action_dropped: 'dropped',
+    // Follower / following list chrome.
+    breadcrumbAria: 'Breadcrumb',
+    prevPage: '← Prev',
+    nextPage: 'Next →',
   },
   // Danmaku
   danmaku: {

@@ -4,6 +4,11 @@ import type { ReactNode } from "react";
 import Link from "@/components/ui/LocaleLink";
 import type { Lang } from "@/lib/i18n";
 import MemberPass from "@/components/profile/MemberPass";
+import {
+  HERO_ARIA,
+  TOP_SEASON_LABEL,
+  WATCHED_LABEL,
+} from "@/components/profile/passLabels";
 import { memberNo as makeMemberNo, sinceLabel } from "@/components/profile/memberIdentity";
 import { DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
 import { cssUrl } from "@/lib/cssUrl";
@@ -22,9 +27,26 @@ const STATUS_COLORS: Record<string, string> = {
   plan_to_watch: "#5ac8fa",
   dropped: "#ff453a",
 };
+// The two follower counters. Local Records rather than dict.social.followers
+// — this component takes `lang`, not `dict`; its dictionary-owned strings
+// (follow/share) are rendered by the page and handed in via `actions`. Keep
+// the wording in step with social.followers / social.following by hand.
+const FOLLOWERS_LABEL: Record<Lang, string> = {
+  zh: "粉丝",
+  en: "Followers",
+  "zh-Hant": "粉絲",
+};
+
+const FOLLOWING_LABEL: Record<Lang, string> = {
+  zh: "关注",
+  en: "Following",
+  "zh-Hant": "關注",
+};
+
 const STATUS_LABELS: Record<Lang, Record<string, string>> = {
   zh: { watching: "在看", completed: "看完", plan_to_watch: "想看", dropped: "抛弃" },
   en: { watching: "Watching", completed: "Completed", plan_to_watch: "Plan", dropped: "Dropped" },
+  "zh-Hant": { watching: "在看", completed: "看完", plan_to_watch: "想看", dropped: "拋棄" },
 };
 
 interface PublicProfileHeroProps {
@@ -120,7 +142,7 @@ export default function PublicProfileHero({
       <div className="agc-cine-grain" aria-hidden="true" />
 
       <div className="agc-cine-content container">
-        <section className="agc-hero" aria-label={lang === "zh" ? "会员身份" : "Member identity"}>
+        <section className="agc-hero" aria-label={HERO_ARIA[lang]}>
           <MemberPass
             username={username}
             memberNo={memberNo}
@@ -138,10 +160,10 @@ export default function PublicProfileHero({
 
             <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
               <Link href={`/u/${encodeURIComponent(username)}/followers`} style={{ color: "rgba(235,235,245,0.7)", fontSize: 14, textDecoration: "none" }}>
-                <strong style={{ color: "#fff", fontWeight: 700 }}>{followerCount}</strong> {lang === "zh" ? "粉丝" : "Followers"}
+                <strong style={{ color: "#fff", fontWeight: 700 }}>{followerCount}</strong> {FOLLOWERS_LABEL[lang]}
               </Link>
               <Link href={`/u/${encodeURIComponent(username)}/following`} style={{ color: "rgba(235,235,245,0.7)", fontSize: 14, textDecoration: "none" }}>
-                <strong style={{ color: "#fff", fontWeight: 700 }}>{followingCount}</strong> {lang === "zh" ? "关注" : "Following"}
+                <strong style={{ color: "#fff", fontWeight: 700 }}>{followingCount}</strong> {FOLLOWING_LABEL[lang]}
               </Link>
             </div>
 
@@ -151,12 +173,12 @@ export default function PublicProfileHero({
                 <div className="agc-read-sep" />
                 <div className="agc-read">
                   <b>{counts.completed}</b>
-                  <span>{lang === "zh" ? "看过 · 部" : "Watched"}</span>
+                  <span>{WATCHED_LABEL[lang]}</span>
                 </div>
                 {topSeason && (
                   <div className="agc-read season">
                     <b>{topSeason}</b>
-                    <span>{lang === "zh" ? "最活跃赛季" : "Top Season"}</span>
+                    <span>{TOP_SEASON_LABEL[lang]}</span>
                   </div>
                 )}
               </div>

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import LegalDoc, { legalStyles as x } from "@/components/legal/LegalDoc";
 import { resolveLocale } from "@/lib/i18n/route";
-import { buildAlternatesUntranslated } from "@/lib/seo/alternates";
+import { buildAlternatesUntranslated, untranslatedRobots } from "@/lib/seo/alternates";
 
 // Static legal page — hourly revalidate so copy edits land without a deploy.
 export const revalidate = 3600;
@@ -12,16 +12,16 @@ const UPDATED = "2026年8月9日";
 export async function generateMetadata({
   params,
 }: PageProps<"/[lang]/privacy">): Promise<Metadata> {
-  const { locale, lang } = await resolveLocale(params);
-  const title = lang === "zh" ? "隐私政策" : "Privacy Policy";
-  const description =
-    lang === "zh"
-      ? "AnimeGoClub 隐私政策：我们收集哪些数据、如何使用、Cookie 与本地存储、第三方服务与你的权利。"
-      : "AnimeGoClub Privacy Policy: what we collect, how we use it, cookies and local storage, third-party services and your rights.";
+  const { locale, dict } = await resolveLocale(params);
+  const title = dict.legal.privacyTitle;
+  const description = dict.legal.privacyDescription;
   return {
     title,
     description,
     alternates: buildAlternatesUntranslated("/privacy", locale),
+    // Body is Simplified-only JSX; the prefixed copies are the same
+    // document under a different URL. See untranslatedRobots.
+    robots: untranslatedRobots(locale),
     openGraph: { title, description, url: "/privacy", type: "website" },
   };
 }

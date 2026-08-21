@@ -22,11 +22,28 @@ type TitleBearing = {
   titleRomaji?: string | null;
   titleEnglish?: string | null;
   titleNative?: string | null;
+  /**
+   * Traditional Chinese title (migration 0022). Optional because this helper
+   * is structural — see the note on DescriptionBearing.descriptionCn — and
+   * because it is absent from any response served by a go-api older than that
+   * migration. See the hant channel header in lib/types.ts: this is the
+   * DISPLAY field. Anything that reaches a search engine must read
+   * `titleHantSeo`, which is a different field and not on this ladder.
+   */
+  titleHant?: string | null;
 };
 
 const TITLE_LADDER: Record<Lang, readonly (keyof TitleBearing)[]> = {
   zh: ["titleChinese", "titleNative", "titleRomaji", "titleEnglish"],
   en: ["titleEnglish", "titleRomaji"],
+  // Traditional first, then the SIMPLIFIED title, and only then Japanese.
+  // titleHant is null on most rows until the backfill runs, and a Simplified
+  // title is readable to a Traditional reader in a way romaji and Japanese are
+  // not — so the second rung is where nearly all of the value is today.
+  // Otherwise identical to zh, including the titleNative rung: a Traditional
+  // reader wants the Japanese original ahead of an English localisation for
+  // the same reason a Simplified one does.
+  "zh-Hant": ["titleHant", "titleChinese", "titleNative", "titleRomaji", "titleEnglish"],
 };
 
 /**
@@ -42,6 +59,46 @@ export function pickTitle(obj: TitleBearing, lang: Lang): string {
   return firstNonEmpty(obj, TITLE_LADDER[lang]);
 }
 
+/**
+ * Same as TitleBearing but reading the SERP-safe Traditional field.
+ *
+ * `titleHantSeo` is a generated column (migration 0022) that is NULL whenever
+ * `title_hant_source = 'opencc'`. It is a separate field rather than a flag on
+ * the same one so that a caller cannot get a machine-converted title by
+ * forgetting a check — the value simply is not there.
+ */
+type SeoTitleBearing = Omit<TitleBearing, "titleHant"> & {
+  titleHantSeo?: string | null;
+};
+
+const SEO_TITLE_LADDER: Record<Lang, readonly (keyof SeoTitleBearing)[]> = {
+  // Identical to TITLE_LADDER for the two languages whose titles never came
+  // out of a converter. Written out rather than aliased so that widening Lang
+  // forces a decision here too.
+  zh: ["titleChinese", "titleNative", "titleRomaji", "titleEnglish"],
+  en: ["titleEnglish", "titleRomaji"],
+  "zh-Hant": ["titleHantSeo", "titleChinese", "titleNative", "titleRomaji", "titleEnglish"],
+};
+
+/**
+ * Pick the title for a surface a search engine reads: `<title>`, `og:title`,
+ * `twitter:title`, JSON-LD `name`.
+ *
+ * Differs from pickTitle only for zh-Hant, and only on rows whose Traditional
+ * title was machine converted. Those fall through to the Simplified title,
+ * which is a real name for the show and one Google already associates with it
+ * — unlike a converted name, which is wrong for a measured 15.4% of modern TV
+ * anime, with the errors concentrated on popular titles.
+ *
+ * The visible `<h1>` deliberately keeps using pickTitle. A converted title is
+ * perfectly readable Traditional Chinese and is the better thing to show a
+ * reader; what is being protected here is narrower — the identity Google
+ * learns for the page, which is the least reversible thing on it.
+ */
+export function pickSeoTitle(obj: SeoTitleBearing, lang: Lang): string {
+  return firstNonEmpty(obj, SEO_TITLE_LADDER[lang]);
+}
+
 type DescriptionBearing = {
   description?: string | null;
   /**
@@ -54,6 +111,13 @@ type DescriptionBearing = {
   descriptionCn?: string | null;
   /** 'bangumi' | 'llm' | 'manual' — see anime_cache.description_cn_source. */
   descriptionCnSource?: string | null;
+  /**
+   * Traditional Chinese synopsis (anime_cache.description_hant, migration
+   * 0022). Optional for the same structural reason as descriptionCn above.
+   */
+  descriptionHant?: string | null;
+  /** 'opencc' | 'manual' — see anime_cache.description_hant_source. */
+  descriptionHantSource?: string | null;
 };
 
 export interface DescriptionPick {
@@ -79,6 +143,35 @@ export interface DescriptionPick {
 const READS_CHINESE_SYNOPSIS: Record<Lang, boolean> = {
   zh: true,
   en: false,
+  // Yes — and this is the case the comment above was written for. A
+  // Traditional reader gets descriptionHant when it exists and descriptionCn
+  // when it does not; Simplified prose is legible to them, an English
+  // synopsis is a different language.
+  "zh-Hant": true,
+};
+
+/**
+ * Where each language looks for its Chinese synopsis, in order.
+ *
+ * Only consulted for languages that READS_CHINESE_SYNOPSIS admits. Each rung
+ * names the text field and the column that records its provenance, because
+ * the two must move together — `text` from one rung and `source` from another
+ * is the attribution bug pickDescription exists to prevent.
+ */
+const CHINESE_SYNOPSIS_LADDER: Record<
+  Lang,
+  readonly { text: keyof DescriptionBearing; source: keyof DescriptionBearing }[]
+> = {
+  zh: [{ text: "descriptionCn", source: "descriptionCnSource" }],
+  en: [],
+  "zh-Hant": [
+    { text: "descriptionHant", source: "descriptionHantSource" },
+    // Falls back to the Simplified synopsis rather than to AniList's English.
+    // description_hant is null on every row until the conversion backfill
+    // runs, so without this rung zh-Hant would read English prose on the
+    // entire catalogue — while still claiming to be a Chinese page.
+    { text: "descriptionCn", source: "descriptionCnSource" },
+  ],
 };
 
 /**
@@ -100,8 +193,11 @@ const READS_CHINESE_SYNOPSIS: Record<Lang, boolean> = {
  * returned before this channel existed.
  */
 export function pickDescription(obj: DescriptionBearing, lang: Lang): DescriptionPick {
-  if (READS_CHINESE_SYNOPSIS[lang] && obj.descriptionCn) {
-    return { text: obj.descriptionCn, source: obj.descriptionCnSource ?? null };
+  if (READS_CHINESE_SYNOPSIS[lang]) {
+    for (const rung of CHINESE_SYNOPSIS_LADDER[lang]) {
+      const text = obj[rung.text];
+      if (text) return { text, source: obj[rung.source] ?? null };
+    }
   }
   return { text: obj.description || "", source: null };
 }
@@ -126,15 +222,32 @@ type VoiceActorNameBearing = {
   voiceActorCn?: string | null;
 };
 
+// ─── The three name ladders: zh-Hant is a deliberate copy of zh ────────────
+//
+// There is no Traditional name data. Neither Bangumi nor AniList ships a
+// Traditional character, voice-actor or staff name, and migration 0022 added
+// a hant channel for TITLES only — nothing on anime_characters or anime_staff.
+// So the choice here is not "Traditional or Simplified", it is "Simplified or
+// English", and a Simplified 阿尼亞·福傑 serves a Traditional reader far better
+// than "Anya Forger" does: the glyphs differ, the name is still read.
+//
+// This is a KNOWN GAP, not an oversight. When a Traditional name channel
+// exists these three tables each grow a rung ahead of the Cn one, exactly as
+// TITLE_LADDER already has. Until then, copying zh is the correct answer and
+// converting these strings at render time is not — machine-converting a
+// person's name is how you get 髮 in a surname.
+
 const CHARACTER_NAME_LADDER: Record<Lang, readonly (keyof CharacterNameBearing)[]> = {
   zh: ["nameCn", "nameJa", "nameEn"],
   en: ["nameEn", "nameJa", "nameCn"],
+  "zh-Hant": ["nameCn", "nameJa", "nameEn"],
 };
 
 /** Same ladder as CHARACTER_NAME_LADDER, over the voice actor field names. */
 const VOICE_ACTOR_NAME_LADDER: Record<Lang, readonly (keyof VoiceActorNameBearing)[]> = {
   zh: ["voiceActorCn", "voiceActorJa", "voiceActorEn"],
   en: ["voiceActorEn", "voiceActorJa", "voiceActorCn"],
+  "zh-Hant": ["voiceActorCn", "voiceActorJa", "voiceActorEn"],
 };
 
 /**
@@ -171,6 +284,10 @@ type StaffNameBearing = {
 const STAFF_NAME_LADDER: Record<Lang, readonly (keyof StaffNameBearing)[]> = {
   zh: ["nameJa", "nameEn"],
   en: ["nameEn", "nameJa"],
+  // Copied from zh per the note above this block — and the comment on zh
+  // makes it the one ladder where copying is not just the least-bad option:
+  // the Japanese-first preference is about the audience, not the script.
+  "zh-Hant": ["nameJa", "nameEn"],
 };
 
 /**
@@ -182,6 +299,44 @@ const STAFF_NAME_LADDER: Record<Lang, readonly (keyof StaffNameBearing)[]> = {
  */
 export function pickStaffName(s: StaffNameBearing, lang: Lang): string {
   return firstNonEmpty(s, STAFF_NAME_LADDER[lang]);
+}
+
+type EpisodeTitleBearing = {
+  /** Bangumi's Chinese episode title. */
+  nameCn?: string | null;
+  /** The original (usually Japanese) episode title. */
+  name?: string | null;
+};
+
+/**
+ * Which episode-title field each language reaches for first.
+ *
+ * There is no Traditional episode-title channel — migration 0022 added hant
+ * columns for the anime title and synopsis only — so zh-Hant reads nameCn,
+ * same as zh, for the same reason the character-name ladders do. Known gap;
+ * it grows a rung when the data exists.
+ */
+const EPISODE_TITLE_LADDER: Record<Lang, readonly (keyof EpisodeTitleBearing)[]> = {
+  zh: ["nameCn", "name"],
+  en: ["name", "nameCn"],
+  "zh-Hant": ["nameCn", "name"],
+};
+
+/**
+ * Pick an episode's display title, "" when the row carries neither field.
+ *
+ * Written twice before this — once in the detail page's EpisodeGrid and once
+ * in components/anime/EpisodesGrid, as the same `lang === "zh" ? nameCn ||
+ * name : name || nameCn` expression. Two copies of a language ternary is two
+ * independent chances to miss one, and the grids sit on the same page: fixing
+ * one and not the other produces a page whose episode titles change script
+ * halfway down.
+ */
+export function pickEpisodeTitle(
+  t: EpisodeTitleBearing | undefined,
+  lang: Lang,
+): string {
+  return t ? firstNonEmpty(t, EPISODE_TITLE_LADDER[lang]) : "";
 }
 
 /** Strip HTML tags and entity references from a string. */
@@ -241,6 +396,73 @@ export function truncateVisual(str: string | null | undefined, maxWidth: number)
   return out + "...";
 }
 
+// ─── "3 分钟前" ────────────────────────────────────────────────────────────
+
+/** The four buckets `formatRelativeTime` can land in, per language. */
+interface RelativeTimeCopy {
+  justNow: string;
+  minutes: (n: number) => string;
+  hours: (n: number) => string;
+  days: (n: number) => string;
+}
+
+/**
+ * Lives here, keyed by Lang, rather than at the two call sites.
+ *
+ * It was written twice — ActivityFeedView.timeAgo and
+ * NotificationBell.relativeTime — as byte-equivalent chains of `lang === "zh"
+ * ? … : …`. Two copies of a ternary is two places a third language routes to
+ * English, and the notification panel is a surface where that is especially
+ * hard to notice: the timestamp is 10px grey text beside copy that IS
+ * translated, so the row reads as fine at a glance.
+ */
+const RELATIVE_TIME: Record<Lang, RelativeTimeCopy> = {
+  zh: {
+    justNow: "刚刚",
+    minutes: (n) => `${n} 分钟前`,
+    hours: (n) => `${n} 小时前`,
+    days: (n) => `${n} 天前`,
+  },
+  en: {
+    justNow: "just now",
+    minutes: (n) => `${n}m ago`,
+    hours: (n) => `${n}h ago`,
+    days: (n) => `${n}d ago`,
+  },
+  "zh-Hant": {
+    justNow: "剛剛",
+    minutes: (n) => `${n} 分鐘前`,
+    hours: (n) => `${n} 小時前`,
+    days: (n) => `${n} 天前`,
+  },
+};
+
+const MINUTE_S = 60;
+const HOUR_S = 3600;
+const DAY_S = 86400;
+
+/**
+ * "3 分钟前" / "3m ago" for an ISO timestamp.
+ *
+ * `nowMs` is a parameter rather than a `Date.now()` call so a server-rendered
+ * row and its hydration agree — ActivityFeedView already threaded a pinned
+ * clock through for exactly that reason and this preserves it.
+ *
+ * Returns "" for an unparseable timestamp. NotificationBell previously had no
+ * such guard and would render "NaN 天前"; ActivityFeedView did. Taking the
+ * careful one is the only behavioural difference between the two originals.
+ */
+export function formatRelativeTime(iso: string, lang: Lang, nowMs: number): string {
+  const parsed = new Date(iso).getTime();
+  if (!Number.isFinite(parsed)) return "";
+  const copy = RELATIVE_TIME[lang];
+  const elapsed = Math.max(0, Math.floor((nowMs - parsed) / 1000));
+  if (elapsed < MINUTE_S) return copy.justNow;
+  if (elapsed < HOUR_S) return copy.minutes(Math.floor(elapsed / MINUTE_S));
+  if (elapsed < DAY_S) return copy.hours(Math.floor(elapsed / HOUR_S));
+  return copy.days(Math.floor(elapsed / DAY_S));
+}
+
 /**
  * AniList "fuzzy date" shape — year/month/day can each be null when the
  * source only knew part of the date (a season window, an unannounced day,
@@ -281,6 +503,11 @@ const DATE_RENDERER: Record<Lang, DateRenderer> = {
     `${fd.year}年${fd.month ? `${fd.month}月` : ""}${fd.day ? `${fd.day}日` : ""}`,
   // ISO-style, for parity with the pre-i18n behaviour.
   en: ISO_DATE,
+  // Same shape as zh. 年 / 月 / 日 are identical in both scripts, so this is
+  // a copy rather than a conversion — but it is written out rather than
+  // aliased to the zh renderer so the two can diverge without surgery.
+  "zh-Hant": (fd) =>
+    `${fd.year}年${fd.month ? `${fd.month}月` : ""}${fd.day ? `${fd.day}日` : ""}`,
 };
 
 /**

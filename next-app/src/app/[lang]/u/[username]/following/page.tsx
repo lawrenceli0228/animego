@@ -11,6 +11,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import type { CSSProperties } from "react";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
 import { resolveLocale } from "@/lib/i18n/route";
+import type { Lang } from "@/lib/i18n/lang";
 import { buildAlternates } from "@/lib/seo/alternates";
 import { decodeUsername } from "@/lib/username";
 import { canonicalHandle } from "../_lib/canonicalHandle";
@@ -35,6 +36,13 @@ async function fetchMe(): Promise<{ username: string } | null> {
   }
 }
 
+// See the note on the same constant in ../followers/page.tsx.
+const META_DESCRIPTION: Record<Lang, (username: string) => string> = {
+  zh: (username) => `查看 ${username} 关注的用户 — AnimeGoClub`,
+  en: (username) => `Users that ${username} follows on AnimeGoClub`,
+  "zh-Hant": (username) => `檢視 ${username} 關注的使用者 — AnimeGoClub`,
+};
+
 export async function generateMetadata({
   params,
 }: FollowingPageProps): Promise<Metadata> {
@@ -45,10 +53,7 @@ export async function generateMetadata({
   const canonical = `/u/${encodeURIComponent(username)}/following`;
   return {
     title: { absolute: `${title} · AnimeGoClub` },
-    description:
-      lang === "zh"
-        ? `查看 ${username} 关注的用户 — AnimeGoClub`
-        : `Users that ${username} follows on AnimeGoClub`,
+    description: META_DESCRIPTION[lang](username),
     alternates: buildAlternates(canonical, locale),
   };
 }
@@ -145,7 +150,7 @@ export default async function FollowingPage({ params, searchParams }: FollowingP
   return (
     <main className="container" style={containerStyle}>
       {/* Breadcrumb */}
-      <nav aria-label={lang === "zh" ? "面包屑" : "Breadcrumb"} style={breadcrumbStyle}>
+      <nav aria-label={dict.social.breadcrumbAria} style={breadcrumbStyle}>
         <Link href={`/u/${encodeURIComponent(username)}`} style={backLinkStyle}>
           ← {username}
         </Link>
@@ -204,7 +209,7 @@ export default async function FollowingPage({ params, searchParams }: FollowingP
                 textDecoration: "none",
               }}
             >
-              {lang === "zh" ? "← 上一页" : "← Prev"}
+              {dict.social.prevPage}
             </Link>
           )}
           {hasMore && nextPage !== null && (
@@ -221,7 +226,7 @@ export default async function FollowingPage({ params, searchParams }: FollowingP
                 textDecoration: "none",
               }}
             >
-              {lang === "zh" ? "下一页 →" : "Next →"}
+              {dict.social.nextPage}
             </Link>
           )}
         </div>

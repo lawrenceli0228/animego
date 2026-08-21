@@ -26,11 +26,22 @@ import { type Lang } from "./lang";
  *
  * Do not add a locale before its URLs resolve and its content exists. An
  * hreflang pointing at a 404 is worse than no hreflang: Google drops the
- * whole reciprocal group. zh-Hant is deliberately absent until the
- * Traditional Chinese content pipeline lands — shipping the prefix first
- * would publish an English-content page under a Chinese locale.
+ * whole reciprocal group.
+ *
+ * zh-Hant was held out of this list through the entire build for that reason,
+ * and the order mattered more than it looks. Widening LOCALES is SILENT —
+ * measured on this branch: adding it produced zero tsc errors and a green
+ * build while the sitemap and hreflang immediately advertised a full
+ * /zh-Hant/* tree serving Simplified bodies. It was `LANGS` in lang.ts that
+ * produced the real worklist (44 errors across 16 files). So the sequence was:
+ * widen LANGS, land the dictionaries and the chrome, then this line last.
+ *
+ * It is here now because all three are true:
+ *   - both dictionaries exist and are complete (locales/zh-Hant*.{ts,js})
+ *   - no `lang === "zh"` branch is left routing zh-Hant to English copy
+ *   - the content pipeline landed: migration 0022 plus the hantbackfill CLI
  */
-export const LOCALES = ["zh-Hans", "en"] as const;
+export const LOCALES = ["zh-Hans", "en", "zh-Hant"] as const;
 
 export type Locale = (typeof LOCALES)[number];
 
@@ -48,14 +59,42 @@ export const DEFAULT_LOCALE: Locale = "zh-Hans";
 /**
  * Which dictionary each locale reads.
  *
- * Traditional Chinese will map to its own `Lang` once the dictionary exists.
- * Until then it is not in LOCALES at all, which is why this map has no
- * "fall back to zh" case: every locale that can appear in a URL has a
- * dictionary of its own, and tsc enforces that.
+ * One-to-one, and it has to stay that way: this map has no "fall back to zh"
+ * case, because every locale that can appear in a URL has a dictionary of its
+ * own and tsc enforces that.
+ *
+ * Note this map is a completeness gate, not a correctness one. When zh-Hant
+ * was added to LOCALES ahead of LANGS during a spike, `"zh-Hant": "zh"` was
+ * the only value that typechecked — and it is wrong in the worst way, since
+ * it serves Simplified text under a Traditional URL without erring.
  */
 export const LOCALE_LANG: Record<Locale, Lang> = {
   "zh-Hans": "zh",
   en: "en",
+  "zh-Hant": "zh-Hant",
+};
+
+/**
+ * How each locale names ITSELF, for the language menu.
+ *
+ * Endonyms, not translations: a reader looking for Traditional Chinese is
+ * looking for the characters 繁體中文, and a menu that renders "Traditional
+ * Chinese" to an English reader and "繁体中文" to a Simplified one is a menu
+ * that is unreadable to exactly the person who needs it. So this table is NOT
+ * keyed by the reader's language — every entry is the same in every locale,
+ * which is why it lives here rather than in the dictionaries.
+ *
+ * `short` is the compact form for the navbar trigger, which sits in a 56px
+ * bar that already overflows at 375px; `endonym` is the menu row.
+ *
+ * Exhaustive over Locale, so adding a locale to LOCALES is a compile error
+ * here until it has named itself — which is the point. Nothing else about the
+ * menu needs touching: it maps over LOCALES.
+ */
+export const LOCALE_LABEL: Record<Locale, { endonym: string; short: string }> = {
+  "zh-Hans": { endonym: "简体中文", short: "简" },
+  en: { endonym: "English", short: "EN" },
+  "zh-Hant": { endonym: "繁體中文", short: "繁" },
 };
 
 export function isLocale(value: string): value is Locale {
@@ -65,14 +104,11 @@ export function isLocale(value: string): value is Locale {
 /**
  * The next locale in LOCALES, wrapping at the end.
  *
- * The chrome's language control is a single cycle button, so this has to
- * stay total over LOCALES rather than being a two-state flip. `a === x ? y :
- * x` would strand a third locale permanently — reachable only by typing its
- * URL, and one click away from being lost again.
- *
- * A cycle stops being the right control at three or more; that is a menu.
- * The button is fine at two and the migration plan already has the menu on
- * its list.
+ * No longer what the chrome renders — the cycle button became a menu
+ * (components/layout/LanguageMenu.tsx), which is what a set of three or more
+ * wants. Kept because it is still the right answer for a keyboard-free
+ * programmatic "advance one" and because it is total over LOCALES, which
+ * `a === x ? y : x` never was.
  */
 export function nextLocale(current: Locale): Locale {
   const at = LOCALES.indexOf(current);

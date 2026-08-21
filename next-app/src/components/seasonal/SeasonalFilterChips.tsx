@@ -21,10 +21,32 @@ type SortKey = "score" | "title" | "format";
 // `label` is keyed by Lang rather than held as loose zh/en fields so a new
 // language is a compile error here instead of a silent fall-through to English.
 const SORT_OPTIONS: Array<{ value: SortKey; label: Record<Lang, string> }> = [
-  { value: "score", label: { zh: "评分", en: "Score" } },
-  { value: "title", label: { zh: "标题", en: "Title" } },
-  { value: "format", label: { zh: "格式", en: "Format" } },
+  { value: "score", label: { zh: "评分", en: "Score", "zh-Hant": "評分" } },
+  { value: "title", label: { zh: "标题", en: "Title", "zh-Hant": "標題" } },
+  { value: "format", label: { zh: "格式", en: "Format", "zh-Hant": "格式" } },
 ];
+
+// The row's own three labels, keyed the same way as SORT_OPTIONS above and
+// for the same reason. countLabel is a bare unit that sits after a number —
+// "24 部" in Chinese, "24 anime" in English — so it belongs beside the row
+// that renders it rather than in the dictionary.
+const CLEAR_FILTERS: Record<Lang, string> = {
+  zh: "清除筛选",
+  en: "Clear Filters",
+  "zh-Hant": "清除篩選",
+};
+
+const COUNT_UNIT: Record<Lang, string> = {
+  zh: "部",
+  en: "anime",
+  "zh-Hant": "部",
+};
+
+const SORT_ARIA: Record<Lang, string> = {
+  zh: "排序",
+  en: "Sort",
+  "zh-Hant": "排序",
+};
 
 const wrapStyle: CSSProperties = {
   display: "flex",
@@ -155,8 +177,8 @@ export default function SeasonalFilterChips({ filteredCount }: SeasonalFilterChi
   }
 
   const hasFilters = Boolean(genre || format || status);
-  const clearLabel = lang === "zh" ? "清除筛选" : "Clear Filters";
-  const countLabel = lang === "zh" ? "部" : "anime";
+  const clearLabel = CLEAR_FILTERS[lang];
+  const countLabel = COUNT_UNIT[lang];
 
   return (
     <div style={wrapStyle}>
@@ -218,7 +240,7 @@ export default function SeasonalFilterChips({ filteredCount }: SeasonalFilterChi
           value={sortBy}
           onChange={(e) => push({ sort: e.target.value })}
           style={selectStyle}
-          aria-label={lang === "zh" ? "排序" : "Sort"}
+          aria-label={SORT_ARIA[lang]}
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>

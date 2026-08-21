@@ -125,6 +125,9 @@ type trendingDiscussionItem struct {
 	TitleEnglish     *string                  `json:"titleEnglish"`
 	TitleNative      *string                  `json:"titleNative"`
 	TitleChinese     *string                  `json:"titleChinese"`
+	TitleHant        *string                  `json:"titleHant"`
+	TitleHantSource  *string                  `json:"titleHantSource"`
+	TitleHantSeo     *string                  `json:"titleHantSeo"`
 	CoverImageURL    *string                  `json:"coverImageUrl"`
 	PosterAccent     *string                  `json:"posterAccent"`
 	CommentCount     int64                    `json:"commentCount"`
@@ -161,6 +164,9 @@ func (h *Handlers) ListTrendingDiscussions(w http.ResponseWriter, r *http.Reques
 			TitleEnglish:     row.TitleEnglish,
 			TitleNative:      row.TitleNative,
 			TitleChinese:     row.TitleChinese,
+			TitleHant:        row.TitleHant,
+			TitleHantSource:  row.TitleHantSource,
+			TitleHantSeo:     row.TitleHantSeo,
 			CoverImageURL:    row.CoverImageUrl,
 			PosterAccent:     row.PosterAccent,
 			CommentCount:     row.CommentCount,

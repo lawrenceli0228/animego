@@ -85,6 +85,15 @@ type ScheduleService struct {
 //
 // Pointer types follow the same "nullable on the wire" rules normalize.go
 // uses — *string for cover/colour/title fields, *int for averageScore.
+//
+// titleHant / titleHantSource / titleHantSeo (migration 0022) sit
+// straight after titleChinese, which is both where the other DTOs put
+// them and where the Express field order would have put a fourth title.
+// /schedule was the last displayed-title surface without a Traditional
+// title: it renders a card per airing, so on /zh-Hant it was rendering
+// Simplified text under a Traditional URL.  See anime.AnimeDetail for
+// why the SEO-safe projection travels as its own field instead of being
+// derived from titleHantSource at the call site.
 type ScheduleItem struct {
 	ScheduleID                  int      `json:"scheduleId"`
 	AiringAt                    int64    `json:"airingAt"`
@@ -94,6 +103,9 @@ type ScheduleItem struct {
 	TitleEnglish                *string  `json:"titleEnglish"`
 	TitleNative                 *string  `json:"titleNative"`
 	TitleChinese                *string  `json:"titleChinese"`
+	TitleHant                   *string  `json:"titleHant"`
+	TitleHantSource             *string  `json:"titleHantSource"`
+	TitleHantSeo                *string  `json:"titleHantSeo"`
 	CoverImageUrl               *string  `json:"coverImageUrl"`
 	CoverImageColor             *string  `json:"coverImageColor"`
 	PosterAccent                string   `json:"posterAccent"`
@@ -239,11 +251,11 @@ func (s *ScheduleService) fetchSchedule(ctx context.Context) (*ScheduleResponse,
 		groups[key] = append(groups[key], toScheduleItem(item))
 	}
 
-	// titleChinese lookup: collect unique anilist IDs across all
-	// groups (dedupe via map) and resolve titleChinese in a single
-	// SQL query.  Failure degrades gracefully — we log the error and
-	// continue with titleChinese fields left as nil rather than
-	// failing the whole request.
+	// Chinese-title lookup: collect unique anilist IDs across all
+	// groups (dedupe via map) and resolve the Simplified and
+	// Traditional titles in a single SQL query.  Failure degrades
+	// gracefully — we log the error and continue with those fields
+	// left as nil rather than failing the whole request.
 	if len(groups) > 0 {
 		ids := uniqueAnilistIDs(groups)
 		if len(ids) > 0 {
@@ -254,14 +266,20 @@ func (s *ScheduleService) fetchSchedule(ctx context.Context) (*ScheduleResponse,
 					"ids_count", len(ids),
 				)
 			} else {
-				titleByID := make(map[int32]*string, len(rows))
+				// Index the whole row rather than one column: the hant
+				// trio has to arrive together, because titleHantSeo is
+				// only meaningful next to the source that produced it.
+				rowByID := make(map[int32]dbgen.GetTitleChineseByAnilistIDsRow, len(rows))
 				for _, r := range rows {
-					titleByID[r.AnilistID] = r.TitleChinese
+					rowByID[r.AnilistID] = r
 				}
 				for key, items := range groups {
 					for i := range items {
-						if tc, ok := titleByID[int32(items[i].AnilistID)]; ok {
-							items[i].TitleChinese = tc
+						if r, ok := rowByID[int32(items[i].AnilistID)]; ok {
+							items[i].TitleChinese = r.TitleChinese
+							items[i].TitleHant = r.TitleHant
+							items[i].TitleHantSource = r.TitleHantSource
+							items[i].TitleHantSeo = r.TitleHantSeo
 						}
 					}
 					groups[key] = items
@@ -387,6 +405,9 @@ func toScheduleItem(s anilist.AiringSchedule) ScheduleItem {
 		TitleEnglish:                english,
 		TitleNative:                 native,
 		TitleChinese:                nil, // populated below from DB lookup
+		TitleHant:                   nil, // ditto — AniList has no Chinese at all
+		TitleHantSource:             nil,
+		TitleHantSeo:                nil,
 		CoverImageUrl:               coverURL,
 		CoverImageColor:             coverColor,
 		PosterAccent:                accent.Accent,

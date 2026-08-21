@@ -224,6 +224,9 @@ func Trending(q dbgen.Querier, c *cache.Cache[[]trendingItem]) http.HandlerFunc 
 					TitleEnglish:    r.TitleEnglish,
 					TitleNative:     r.TitleNative,
 					TitleChinese:    r.TitleChinese,
+					TitleHant:       r.TitleHant,
+					TitleHantSource: r.TitleHantSource,
+					TitleHantSeo:    r.TitleHantSeo,
 					CoverImageUrl:   r.CoverImageUrl,
 					CoverImageColor: r.CoverImageColor,
 					PosterAccent:    r.PosterAccent,
@@ -537,6 +540,11 @@ type seasonalResponse struct {
 // order: rank, watcherCount, then the anime fields in dbgen's column
 // order.  Express emits rank + watcherCount before the spread
 // (...animeMap[r._id].toObject()), so we replicate that here.
+//
+// titleHant / titleHantSource / titleHantSeo mirror the anime_cache
+// columns added in migration 0022 — see anime.AnimeDetail for why the
+// SEO-safe projection is carried as its own field rather than derived at
+// the call site.
 type trendingItem struct {
 	Rank            int      `json:"rank"`
 	WatcherCount    int64    `json:"watcherCount"`
@@ -545,6 +553,9 @@ type trendingItem struct {
 	TitleEnglish    *string  `json:"titleEnglish"`
 	TitleNative     *string  `json:"titleNative"`
 	TitleChinese    *string  `json:"titleChinese"`
+	TitleHant       *string  `json:"titleHant"`
+	TitleHantSource *string  `json:"titleHantSource"`
+	TitleHantSeo    *string  `json:"titleHantSeo"`
 	CoverImageUrl   *string  `json:"coverImageUrl"`
 	CoverImageColor *string  `json:"coverImageColor"`
 	PosterAccent    *string  `json:"posterAccent"`

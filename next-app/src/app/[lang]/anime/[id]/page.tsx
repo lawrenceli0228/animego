@@ -24,12 +24,20 @@ import HeroAccent from "@/components/anime/HeroAccent";
 import { FormatBadge, GenreChips } from "@/components/anime/LocalizedChips";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import { apiGet, ApiError } from "@/lib/api";
-import { pickRelatedTitle, relationLabel, sourceLabel, staffRoleLabel } from "@/lib/contentLabels";
+import {
+  durationLabel,
+  pickRelatedTitle,
+  relationLabel,
+  sourceLabel,
+  staffRoleLabel,
+} from "@/lib/contentLabels";
 import {
   formatFuzzyDate,
   formatScore,
   pickCharacterName,
   pickDescription,
+  pickEpisodeTitle,
+  pickSeoTitle,
   pickStaffName,
   pickTitle,
   pickVoiceActorName,
@@ -162,6 +170,27 @@ const RELATION_ORDER = [
 const CHARACTER_ROLE_LABEL: Record<Lang, Record<string, string>> = {
   zh: { MAIN: "主角", SUPPORTING: "配角", BACKGROUND: "客串" },
   en: { MAIN: "Main", SUPPORTING: "Supporting", BACKGROUND: "Background" },
+  // All three are script-identical — no conversion needed, only a row.
+  "zh-Hant": { MAIN: "主角", SUPPORTING: "配角", BACKGROUND: "客串" },
+};
+
+/**
+ * Whether the H1 gets the Japanese (or romaji) original beneath it.
+ *
+ * Not a script question — a redundancy one. A Chinese H1 is a translation, so
+ * the original is extra information worth showing; the English H1 already IS
+ * titleEnglish or titleRomaji, so a romaji subtitle under it would repeat the
+ * line above. zh-Hant is in the first group.
+ *
+ * Written as `lang === "zh" && …` before, which silently put every language
+ * that was not Simplified into the second group — so a Traditional reader
+ * lost the Japanese subtitle entirely, on every detail page, with nothing to
+ * see in review because the H1 above it was correct.
+ */
+const SHOWS_ORIGINAL_SUBTITLE: Record<Lang, boolean> = {
+  zh: true,
+  en: false,
+  "zh-Hant": true,
 };
 
 function scoreColor(s: number): string {
@@ -206,7 +235,12 @@ export async function generateMetadata({
     return { title: { absolute: "AnimeGoClub" } };
   }
 
-  const title = pickTitle(detail, lang);
+  // pickSeoTitle, not pickTitle. Everything this function returns is read by a
+  // machine — <title>, og:title, twitter:title — and for zh-Hant that means
+  // reading titleHantSeo, which the database leaves NULL on any row whose
+  // Traditional title came out of a converter. The visible <h1> further down
+  // still uses pickTitle; see the note on pickSeoTitle for why the two differ.
+  const title = pickSeoTitle(detail, lang);
   const titleFull = `${title} · AnimeGoClub`;
   const description = truncate(stripHtml(detail.description || ""), 160);
   const ogLocale = OG_LOCALE[lang];
@@ -278,7 +312,10 @@ function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
   const ld: JsonLdTVSeries = {
     "@context": "https://schema.org",
     "@type": "TVSeries",
-    name: pickTitle(detail, lang),
+    // JSON-LD `name` is the most explicit "this page is about a thing called
+    // X" signal on the page, so it takes the SERP-safe field for the same
+    // reason <title> does.
+    name: pickSeoTitle(detail, lang),
   };
   if (alts.length) ld.alternateName = alts;
   if (detail.coverImageUrl) ld.image = detail.coverImageUrl;
@@ -506,11 +543,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
     HERO_SHOWN_RELATIONS.has(r.relationType),
   );
   const sourceText = sourceLabel(detail.source, lang);
-  const durationLabel = detail.duration
-    ? lang === "zh"
-      ? `${detail.duration}分/集`
-      : `${detail.duration} min/ep`
-    : null;
+  const durationText = durationLabel(detail.duration, lang);
   const seasonLab = seasonLabel(dict, detail.season);
   const score = detail.averageScore;
   const accent = detail.posterAccent || null;
@@ -567,11 +600,8 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
         {/* Meta */}
         <div style={{ flex: 1, minWidth: 280, paddingTop: detail.bannerImageUrl ? 60 : 0 }}>
           <h1 style={S.title}>{title}</h1>
-          {lang === "zh" && detail.titleNative && (
-            <p style={S.subtitle}>{detail.titleNative}</p>
-          )}
-          {lang === "zh" && !detail.titleNative && detail.titleRomaji && (
-            <p style={S.subtitle}>{detail.titleRomaji}</p>
+          {SHOWS_ORIGINAL_SUBTITLE[lang] && (detail.titleNative || detail.titleRomaji) && (
+            <p style={S.subtitle}>{detail.titleNative || detail.titleRomaji}</p>
           )}
 
           {/* Badges */}
@@ -628,17 +658,17 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
           </div>
 
           {/* Meta row */}
-          {(detail.studios.length > 0 || sourceText || durationLabel || startDateLabel) && (
+          {(detail.studios.length > 0 || sourceText || durationText || startDateLabel) && (
             <div style={S.metaRow}>
               {detail.studios.length > 0 && (
                 <span style={S.metaStudio}>{detail.studios.join(" · ")}</span>
               )}
               {detail.studios.length > 0 &&
-                (sourceText || durationLabel || startDateLabel) && (
+                (sourceText || durationText || startDateLabel) && (
                   <span style={S.metaDot}>{"·"}</span>
                 )}
               {sourceText && <span style={S.metaDetail}>{sourceText}</span>}
-              {durationLabel && <span style={S.metaDetail}>{durationLabel}</span>}
+              {durationText && <span style={S.metaDetail}>{durationText}</span>}
               {startDateLabel && <span style={S.metaDetail}>{startDateLabel}</span>}
             </div>
           )}
@@ -1286,8 +1316,7 @@ function EpisodesSection({
   const cells: { n: number; title: string }[] = [];
   for (let n = 1; n <= episodes; n += 1) {
     const t = titleByEpisode.get(n);
-    const title = t ? (lang === "zh" ? t.nameCn || t.name || "" : t.name || t.nameCn || "") : "";
-    cells.push({ n, title });
+    cells.push({ n, title: pickEpisodeTitle(t, lang) });
   }
 
   return (

@@ -11,15 +11,9 @@ export const revalidate = 3600;
 export async function generateMetadata({
   params,
 }: PageProps<"/[lang]/faq">): Promise<Metadata> {
-  const { locale, lang } = await resolveLocale(params);
-  const title =
-    lang === "zh"
-      ? "常见问题"
-      : "Frequently Asked Questions";
-  const description =
-    lang === "zh"
-      ? "关于 AnimeGoClub 是否免费、与 Bangumi/AniList/MAL 的区别、弹幕来源、OVA/ONA/剧场版的差异等。"
-      : "About AnimeGoClub: is it free, how it differs from Bangumi/AniList/MAL, danmaku sources, OVA/ONA/movie differences.";
+  const { locale, dict } = await resolveLocale(params);
+  const title = dict.faqPage.metaTitle;
+  const description = dict.faqPage.description;
   return {
     title,
     description,
@@ -57,7 +51,7 @@ const subStyle: CSSProperties = {
 };
 
 export default async function FaqPage({ params }: PageProps<"/[lang]/faq">) {
-  const { dict, lang } = await resolveLocale(params);
+  const { dict } = await resolveLocale(params);
 
   // FAQPage structured data, built from the SAME dict.landing.faq Q&A that
   // FaqSection renders visibly below — Google requires the JSON-LD FAQ to
@@ -77,12 +71,8 @@ export default async function FaqPage({ params }: PageProps<"/[lang]/faq">) {
       })),
   };
 
-  const heading =
-    lang === "zh" ? "AnimeGoClub 常见问题" : "Frequently Asked Questions";
-  const sub =
-    lang === "zh"
-      ? "关于 AnimeGoClub 是否免费、与 Bangumi/AniList/MAL 的区别、弹幕来源、OVA/ONA/剧场版的差异等。"
-      : "About AnimeGoClub: is it free, how it differs from Bangumi/AniList/MAL, danmaku sources, OVA/ONA/movie differences.";
+  const heading = dict.faqPage.heading;
+  const sub = dict.faqPage.description;
 
   return (
     <main>

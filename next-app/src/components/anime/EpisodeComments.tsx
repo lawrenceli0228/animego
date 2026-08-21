@@ -33,6 +33,7 @@ import { authChrome } from "@/lib/authChrome";
 import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { useLang } from "@/lib/lang-client";
+import type { Lang } from "@/lib/i18n/lang";
 import { deletedCommentCount } from "./episodeDiscussionState";
 import ReportDialog from "@/components/safety/ReportDialog";
 
@@ -72,6 +73,27 @@ interface EpisodeCommentsProps {
   highlightCommentId?: string | null;
   onCommentDelta?: (episode: number, delta: number) => void;
 }
+
+// Comment-count unit + the two reply affordances. Local Records rather than
+// t() keys: two of the three wrap a username, and Chinese glues the counter
+// word straight onto the number where English needs a space and a plural.
+const COMMENT_UNIT: Record<Lang, string> = {
+  zh: "条",
+  en: "comments",
+  "zh-Hant": "條",
+};
+
+const REPLYING_TO: Record<Lang, (username: string) => string> = {
+  zh: (username) => `回复 @${username}`,
+  en: (username) => `Replying to @${username}`,
+  "zh-Hant": (username) => `回覆 @${username}`,
+};
+
+const REPLY_PLACEHOLDER: Record<Lang, (username: string) => string> = {
+  zh: (username) => `回复 ${username}...`,
+  en: (username) => `Reply to ${username}...`,
+  "zh-Hant": (username) => `回覆 ${username}...`,
+};
 
 const MAX_LEN = 500;
 
@@ -757,7 +779,7 @@ export default function EpisodeComments({
               marginLeft: 8,
             }}
           >
-            · {comments.length} {lang === "zh" ? "条" : "comments"}
+            · {comments.length} {COMMENT_UNIT[lang]}
           </span>
         )}
       </p>
@@ -830,18 +852,12 @@ export default function EpisodeComments({
               margin: "0 0 8px",
             }}
           >
-            {lang === "zh"
-              ? `回复 @${replyTarget.username}`
-              : `Replying to @${replyTarget.username}`}
+            {REPLYING_TO[lang](replyTarget.username)}
           </p>
           <CommentInput
             onSubmit={handleReply}
             isPending={posting && !!replyTarget}
-            placeholder={
-              lang === "zh"
-                ? `回复 ${replyTarget.username}...`
-                : `Reply to ${replyTarget.username}...`
-            }
+            placeholder={REPLY_PLACEHOLDER[lang](replyTarget.username)}
             autoFocus
             onCancel={() => setReplyTarget(null)}
           />

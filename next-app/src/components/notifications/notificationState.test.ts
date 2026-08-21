@@ -13,7 +13,20 @@ const reply: CommunityNotification = {
   id: "n1",
   type: "comment_reply",
   actor: { username: "葬送", avatarUrl: null },
-  anime: { anilistId: 154587, title: "Frieren", titleChinese: "葬送的芙莉莲", coverImageUrl: null },
+  // Carries the full hant channel so the round-trip below proves the parser
+  // preserves all three fields rather than dropping them on the floor — the
+  // failure mode when a wire field is added to go-api and not to the local
+  // shape here is silence, not a type error, because `record()` hands back
+  // `Record<string, unknown>`.
+  anime: {
+    anilistId: 154587,
+    title: "Frieren",
+    titleChinese: "葬送的芙莉莲",
+    titleHant: "葬送的芙莉蓮",
+    titleHantSource: "wikipedia",
+    titleHantSeo: "葬送的芙莉蓮",
+    coverImageUrl: null,
+  },
   episode: 8,
   commentId: "c-1",
   excerpt: "same",

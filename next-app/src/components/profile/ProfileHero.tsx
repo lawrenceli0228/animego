@@ -2,6 +2,7 @@
 
 import type { Lang } from "@/lib/i18n";
 import MemberPass from "./MemberPass";
+import { HERO_ARIA, TOP_SEASON_LABEL, WATCHED_LABEL } from "./passLabels";
 import type { BackdropOption } from "./backdropTypes";
 import { DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
 import { cssUrl } from "@/lib/cssUrl";
@@ -12,6 +13,23 @@ import "./cinematic.css";
 // personalisation choices (photo + backdrop) are edited on /settings and
 // persisted to the DB; they arrive here as server-sourced props (avatarUrl +
 // backdropAnilistId) so the page reflects them on load and after a save.
+
+// Identity chrome for the hero. Local Records rather than dictionary keys:
+// this component takes `lang` as a prop and is not guaranteed a
+// LanguageProvider, and the suffix below is a fragment glued onto a name
+// rather than a sentence — its leading space is load-bearing in Chinese and
+// absent in English.
+const KICKER: Record<Lang, string> = {
+  zh: "我的会员通行证",
+  en: "My Member Pass",
+  "zh-Hant": "我的會員通行證",
+};
+
+const NAME_SUFFIX: Record<Lang, string> = {
+  zh: " 的追番",
+  en: "'s list",
+  "zh-Hant": " 的追番",
+};
 
 interface DonutSegment {
   value: number;
@@ -144,7 +162,7 @@ export default function ProfileHero({
       <div className="agc-cine-grain" aria-hidden="true" />
 
       <div className="agc-cine-content container">
-        <section className="agc-hero" aria-label={lang === "zh" ? "会员身份" : "Member identity"}>
+        <section className="agc-hero" aria-label={HERO_ARIA[lang]}>
           <MemberPass
             username={username}
             memberNo={memberNo}
@@ -158,11 +176,11 @@ export default function ProfileHero({
 
           <div className="agc-hero-ident">
             <p className="agc-hero-kicker">
-              {lang === "zh" ? "我的会员通行证" : "My Member Pass"}
+              {KICKER[lang]}
             </p>
             <h1 className="agc-hero-name">
               {username}
-              <span className="suffix">{lang === "zh" ? " 的追番" : "'s list"}</span>
+              <span className="suffix">{NAME_SUFFIX[lang]}</span>
             </h1>
 
             <div className="agc-hero-reads">
@@ -170,12 +188,12 @@ export default function ProfileHero({
               <div className="agc-read-sep" />
               <div className="agc-read">
                 <b>{watchedCount}</b>
-                <span>{lang === "zh" ? "看过 · 部" : "Watched"}</span>
+                <span>{WATCHED_LABEL[lang]}</span>
               </div>
               {topSeason && (
                 <div className="agc-read season">
                   <b>{topSeason}</b>
-                  <span>{lang === "zh" ? "最活跃赛季" : "Top Season"}</span>
+                  <span>{TOP_SEASON_LABEL[lang]}</span>
                 </div>
               )}
             </div>

@@ -97,6 +97,32 @@ export function buildAlternatesUntranslated(path: string, locale: Locale = DEFAU
 }
 
 /**
+ * `robots` for the prefixed copies of an untranslated page.
+ *
+ * Making no hreflang claim keeps these pages out of the reciprocal group. It
+ * does not keep them out of the index — they are prerendered, linked from the
+ * footer of every localized page, and were serving `index, follow`. So each
+ * legal page had one indexable URL per locale, all with the same body:
+ * /privacy in Simplified, /en/privacy in Simplified, and — once zh-Hant
+ * published — /zh-Hant/privacy in Simplified too, under a Traditional prefix.
+ * Three near-identical documents competing on the same query is the ordinary
+ * way a site dilutes its own page.
+ *
+ * The default-locale copy stays indexable and is the only one in the sitemap.
+ * `follow: true` on the rest because they are real pages a reader can reach;
+ * the links out of them should still carry weight.
+ *
+ * This is a stopgap with an obvious exit: translate the bodies and delete the
+ * call. Machine-converting them was the tempting shortcut and the wrong one —
+ * these three documents are the site's statements about copyright liability
+ * and personal data, and a converter that renders 版權聲明 as 版權宣告 has no
+ * business anywhere near them.
+ */
+export function untranslatedRobots(locale: Locale): { index: boolean; follow: boolean } {
+  return { index: locale === DEFAULT_LOCALE, follow: true };
+}
+
+/**
  * An absolute URL for `path`, for the places that cannot use a relative one
  * — JSON-LD `@id` and `url` fields, the sitemap, robots.txt. `metadataBase`
  * does not reach into those.

@@ -30,6 +30,20 @@ export interface ScheduleItem {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  // Traditional Chinese title channel (migration 0022). Optional rather than
+  // `| null` for the same reason as everywhere in lib/types.ts: a go-api older
+  // than that commit omits them entirely, and pickTitle's ladder already falls
+  // through. See the hant-channel note at the top of lib/types.ts.
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /**
+   * SERP-safe projection: null whenever titleHant is a machine conversion.
+   * Nothing on this component reaches a search engine — the schedule renders
+   * card link text, not a <title> or JSON-LD name — so pickTitle() reads
+   * titleHant here. Any future metadata built from a ScheduleItem must read
+   * this field instead.
+   */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   coverImageColor: string | null;
   posterAccent: string | null;
@@ -79,6 +93,18 @@ const DAY_LABELS: Record<Lang, Record<number, string>> = {
     4: "Thu",
     5: "Fri",
     6: "Sat",
+  },
+  // 周 -> 週 is a real word choice, not just a glyph: both characters exist
+  // in Traditional, and 週 is what Taiwanese and Hong Kong writing uses for a
+  // day of the week.
+  "zh-Hant": {
+    0: "週日",
+    1: "週一",
+    2: "週二",
+    3: "週三",
+    4: "週四",
+    5: "週五",
+    6: "週六",
   },
 };
 

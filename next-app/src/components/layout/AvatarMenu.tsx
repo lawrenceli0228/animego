@@ -7,6 +7,7 @@ import { DEFAULT_CARD_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
 import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
 import type { NavUser } from "./Navbar";
+import { LanguageMenuInline } from "./LanguageMenu";
 import "./avatar-menu.css";
 
 // AvatarMenu — the logged-in navbar chrome collapsed into a circular avatar.
@@ -20,7 +21,7 @@ interface AvatarMenuProps {
 }
 
 export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuProps) {
-  const { lang, t, toggle } = useLang();
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -63,7 +64,7 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
         className="agc-avatar"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={lang === "zh" ? "账户菜单" : "Account menu"}
+        aria-label={t("nav.accountMenu")}
         onClick={() => setOpen((v) => !v)}
       >
         {avatar()}
@@ -135,7 +136,7 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-            {lang === "zh" ? "用户设置" : "Settings"}
+            {t("settings.kicker")}
           </Link>
 
           {user.role === "admin" && (
@@ -153,24 +154,11 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
             </Link>
           )}
 
-          <button
-            type="button"
-            className="agc-menu-item"
-            role="menuitem"
-            onClick={toggle}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
-            </svg>
-            {lang === "zh" ? "语言" : "Language"}
-            {/*
-              This readout hardcodes a two-language cycle. `toggle` walks LANGS,
-              so once a third language lands the label stops describing what the
-              button does and has to become a real language menu, not a swap.
-            */}
-            <span className="spacer">{lang === "zh" ? "中 / EN" : "EN / 中"}</span>
-          </button>
+          {/* Was one row reading "语言   中 / EN" — a hardcoded two-language
+              readout over an N-way cycle, which stopped describing what the
+              button did the moment a third locale existed. Now a group of
+              options derived from LOCALES, each named in its own language. */}
+          <LanguageMenuInline onPicked={() => setOpen(false)} />
 
           <div className="agc-menu-sep" />
 

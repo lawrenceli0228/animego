@@ -1,5 +1,6 @@
 import zh from "@/locales/zh";
 import en from "@/locales/en";
+import zhHant from "@/locales/zh-Hant";
 
 // Re-exported so the ~30 modules that already say `from "@/lib/i18n"` keep
 // working. New code should import from "@/lib/i18n/lang" directly — this
@@ -18,7 +19,14 @@ export type Dict = typeof zh;
 // so its structural type narrows zh's. Cast through unknown to keep
 // `Dict = typeof zh` (the richer shape) while accepting both dicts at
 // runtime; landing/* code only reads `dict.landing.*` which exists in both.
-const DICTS: Record<LangType, Dict> = { zh, en: en as unknown as Dict };
+//
+// zh-Hant gets NO cast, on purpose. The cast above is a licence to be
+// incomplete, granted to en for a specific documented reason. zh-Hant is a
+// complete dictionary — the same 733 leaf keys as zh — so it can satisfy
+// `Dict` structurally, and it must be made to prove that on every build. If
+// this line ever needs a cast to compile, the dictionary has lost a key and
+// the right fix is to put the key back, not to widen the type.
+const DICTS: Record<LangType, Dict> = { zh, en: en as unknown as Dict, "zh-Hant": zhHant };
 
 // There is deliberately no getLang() here any more.
 //

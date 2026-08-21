@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import LegalDoc, { legalStyles as x } from "@/components/legal/LegalDoc";
 import { resolveLocale } from "@/lib/i18n/route";
-import { buildAlternatesUntranslated } from "@/lib/seo/alternates";
+import { buildAlternatesUntranslated, untranslatedRobots } from "@/lib/seo/alternates";
 
 export const revalidate = 3600;
 
@@ -11,16 +11,16 @@ const UPDATED = "2026年8月9日";
 export async function generateMetadata({
   params,
 }: PageProps<"/[lang]/copyright">): Promise<Metadata> {
-  const { locale, lang } = await resolveLocale(params);
-  const title = lang === "zh" ? "版权与侵权处理" : "Copyright & Takedown";
-  const description =
-    lang === "zh"
-      ? "AnimeGoClub 版权声明与侵权通知（takedown）流程：本站不托管影音文件，权利人如何提交移除请求。"
-      : "AnimeGoClub copyright notice and takedown process. We host no media files; how rights holders submit removal requests.";
+  const { locale, dict } = await resolveLocale(params);
+  const title = dict.legal.copyrightTitle;
+  const description = dict.legal.copyrightDescription;
   return {
     title,
     description,
     alternates: buildAlternatesUntranslated("/copyright", locale),
+    // Body is Simplified-only JSX; the prefixed copies are the same
+    // document under a different URL. See untranslatedRobots.
+    robots: untranslatedRobots(locale),
     openGraph: { title, description, url: "/copyright", type: "website" },
   };
 }

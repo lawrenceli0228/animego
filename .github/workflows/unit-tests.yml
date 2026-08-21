@@ -58,6 +58,29 @@ jobs:
         working-directory: go-api
         run: go test ./... -count=1
 
+      # `go test ./...` above does not compile files behind a build tag, so
+      # everything under test/integration was invisible to CI. It rotted
+      # accordingly: by 2026-08-21 the package had not compiled since
+      # migration 0011 added bgm_match_source in June, because the V12DB test
+      # double was never updated for that signature or for the four methods
+      # the description sweep added afterwards. A whole suite -- the migration
+      # tests, the pg_cron TTL test, the queue dispatch smoke tests -- was
+      # silently absent from every PR for two months.
+      #
+      # vet is a separate step from test on purpose. It fails on a compile
+      # break in about a second and names the file, whereas the test run only
+      # reports it after paying ~40s of container startup.
+      - name: Vet integration tests (compile gate)
+        working-directory: go-api
+        run: go vet -tags=integration ./test/integration/...
+
+      # Spins Postgres 16 (the custom pg_cron image built above) and Mongo 7
+      # via testcontainers. TestMain starts each once and shares them across
+      # the package, so this costs container startup, not per-test startup.
+      - name: Integration tests (testcontainers)
+        working-directory: go-api
+        run: go test -tags=integration -count=1 -timeout=600s ./test/integration/...
+
   next-app:
     name: next-app (bun test)
     runs-on: ubuntu-latest

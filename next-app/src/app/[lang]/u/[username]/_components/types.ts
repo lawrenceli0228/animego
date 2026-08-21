@@ -32,6 +32,20 @@ export interface WatchingEntry {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  // Traditional Chinese title channel (migration 0022). Added here because
+  // this file declares its own anime shape rather than importing
+  // lib/types.ts, so a go-api field that is not repeated here is invisible to
+  // every consumer — ProfileAnimeCard calls the shared pickTitle(), whose
+  // zh-Hant ladder reads titleHant first and would silently find `undefined`
+  // on a structural type that never declared it.
+  //
+  // Optional (not `| null`) because they are absent from any response served
+  // by a go-api older than 0022. See the channel note in lib/types.ts: only
+  // titleHantSeo may reach a <title>, og:title or JSON-LD name.
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /** SERP-safe projection — see the hant channel note in lib/types.ts. */
+  titleHantSeo?: string | null;
   coverImageUrl: string | null;
   /** Wide landscape banner; used to resolve the cinematic backdrop. */
   bannerImageUrl: string | null;

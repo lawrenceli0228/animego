@@ -19,6 +19,7 @@ import { mono } from "./shared/hud-tokens";
 import { SectionNum, SectionHeader } from "./shared/hud";
 import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
+import { pickTitle } from "@/lib/formatters";
 import type { TrendingItem } from "@/lib/types";
 
 interface PaletteStop {
@@ -50,13 +51,11 @@ const PALETTE_STOPS: PaletteStop[] = [
   { l: 90, c: 0.08 },
 ];
 
-// Inline pickTitle (parity with legacy utils/formatters.js). zh-first project audience.
-function pickTitle(obj: TrendingItem, lang: Lang): string {
-  if (lang === "zh") {
-    return obj.titleChinese || obj.titleNative || obj.titleRomaji || obj.titleEnglish || "";
-  }
-  return obj.titleEnglish || obj.titleRomaji || "";
-}
+// pickTitle now comes from lib/formatters. It was inlined here as
+// `lang === "zh" ? <zh chain> : <en chain>`, which is a form that cannot fail
+// to compile when a language is added and silently routes the new one to the
+// English chain. The two chains were byte-equivalent to the shared table's, so
+// zh and en render exactly what they rendered before.
 
 // posterAccent on the API is a hex string (e.g. "#9b3d6a") whose hue we need
 // numerically for OKLCH math. Fall back to a chapter-stable hue when missing

@@ -558,6 +558,9 @@ SELECT
     anime.title_english,
     anime.title_native,
     anime.title_chinese,
+    anime.title_hant,
+    anime.title_hant_source,
+    anime.title_hant_seo,
     anime.cover_image_url,
     anime.poster_accent,
     stats.comment_count,
@@ -603,6 +606,9 @@ type ListTrendingDiscussionsRow struct {
 	TitleEnglish     *string            `json:"titleEnglish"`
 	TitleNative      *string            `json:"titleNative"`
 	TitleChinese     *string            `json:"titleChinese"`
+	TitleHant        *string            `json:"titleHant"`
+	TitleHantSource  *string            `json:"titleHantSource"`
+	TitleHantSeo     *string            `json:"titleHantSeo"`
 	CoverImageUrl    *string            `json:"coverImageUrl"`
 	PosterAccent     *string            `json:"posterAccent"`
 	CommentCount     int64              `json:"commentCount"`
@@ -637,6 +643,9 @@ func (q *Queries) ListTrendingDiscussions(ctx context.Context, pageLimit int32, 
 			&i.TitleEnglish,
 			&i.TitleNative,
 			&i.TitleChinese,
+			&i.TitleHant,
+			&i.TitleHantSource,
+			&i.TitleHantSeo,
 			&i.CoverImageUrl,
 			&i.PosterAccent,
 			&i.CommentCount,

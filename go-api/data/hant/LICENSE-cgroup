@@ -1,0 +1,66 @@
+Applies to: cgroup-hk.json in this directory.
+
+Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+
+
+ATTRIBUTION
+-----------
+
+Title:     Module:CGroup/Anime
+Author:    Wikipedia contributors (中文維基百科)
+Source:    https://zh.wikipedia.org/wiki/Module:CGroup/Anime
+Revision:  oldid 93691696, revised 2026-07-29T11:54:00Z
+Permalink: https://zh.wikipedia.org/w/index.php?title=Module:CGroup/Anime&oldid=93691696
+Licence:   CC BY-SA 4.0
+           deed:  https://creativecommons.org/licenses/by-sa/4.0/
+           legal: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+Per the Wikimedia Foundation Terms of Use, text on zh.wikipedia.org is
+available under CC BY-SA 4.0. The permalink above resolves to the exact
+revision this file was built from; the page history behind it is the full list
+of authors, which is how CC BY-SA 4.0 § 3(a)(1)(A) attribution is satisfied for
+a collaboratively authored wiki page.
+
+
+CHANGES MADE
+------------
+
+cgroup-hk.json is ADAPTED MATERIAL, not a verbatim copy. The Lua source was
+parsed and restructured:
+
+  * each Item() call became one JSON record;
+  * the zh-hk value was promoted to a `zh_hk` field, and every other string in
+    the entry (the Japanese original, the conversion source words, and the
+    zh / zh-hans / zh-hant / zh-cn / zh-tw / zh-mo / zh-sg / zh-my values) was
+    collected into a sorted `keys` array;
+  * entries carrying no zh-hk value were dropped, as were the 術語 (terminology)
+    and 人名 (personal name) sections, which are not work titles;
+  * MediaWiki conversion markup (e.g. `}--{-|…`) was discarded.
+
+No value text was translated, corrected, or otherwise rewritten.
+
+
+SHARE-ALIKE
+-----------
+
+Because cgroup-hk.json is Adapted Material, it is itself licensed under
+CC BY-SA 4.0 — NOT under the AGPL-3.0 that covers the rest of this repository.
+Anyone redistributing this file, or a further adaptation of it, must do so
+under CC BY-SA 4.0 or a licence CC has designated as compatible, and must carry
+the attribution above.
+
+Attribution is also required wherever the values are DISPLAYED, not only where
+the file is redistributed. Any surface that renders a Hong Kong title sourced
+from this dataset needs a visible credit to Wikipedia's Module:CGroup/Anime
+with a link to the source and to the CC BY-SA 4.0 deed.
+
+
+DISCLAIMER
+----------
+
+Unless otherwise separately undertaken by the Licensor, to the extent possible,
+the Licensor offers the Licensed Material as-is and as-available, and makes no
+representations or warranties of any kind concerning the Licensed Material,
+whether express, implied, statutory, or other. To the extent possible, in no
+event will the Licensor be liable to You on any legal theory for any damages
+arising out of this Public Licence or use of the Licensed Material.

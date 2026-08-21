@@ -17,6 +17,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import type { CSSProperties } from "react";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
 import { resolveLocale } from "@/lib/i18n/route";
+import type { Lang } from "@/lib/i18n/lang";
 import { buildAlternates } from "@/lib/seo/alternates";
 import { decodeUsername } from "@/lib/username";
 import { canonicalHandle } from "../_lib/canonicalHandle";
@@ -41,6 +42,16 @@ async function fetchMe(): Promise<{ username: string } | null> {
   }
 }
 
+// The page description wraps a username, and the sentence is built around it
+// differently in each language — Chinese leads with the verb, English leads
+// with the noun. A local Record of functions rather than a dictionary key
+// with a placeholder, for the same reason as on /search.
+const META_DESCRIPTION: Record<Lang, (username: string) => string> = {
+  zh: (username) => `查看 ${username} 的粉丝列表 — AnimeGoClub`,
+  en: (username) => `People who follow ${username} on AnimeGoClub`,
+  "zh-Hant": (username) => `檢視 ${username} 的粉絲列表 — AnimeGoClub`,
+};
+
 export async function generateMetadata({
   params,
 }: FollowersPageProps): Promise<Metadata> {
@@ -51,10 +62,7 @@ export async function generateMetadata({
   const canonical = `/u/${encodeURIComponent(username)}/followers`;
   return {
     title: { absolute: `${title} · AnimeGoClub` },
-    description:
-      lang === "zh"
-        ? `查看 ${username} 的粉丝列表 — AnimeGoClub`
-        : `People who follow ${username} on AnimeGoClub`,
+    description: META_DESCRIPTION[lang](username),
     alternates: buildAlternates(canonical, locale),
   };
 }
@@ -156,7 +164,7 @@ export default async function FollowersPage({ params, searchParams }: FollowersP
   return (
     <main className="container" style={containerStyle}>
       {/* Breadcrumb */}
-      <nav aria-label={lang === "zh" ? "面包屑" : "Breadcrumb"} style={breadcrumbStyle}>
+      <nav aria-label={dict.social.breadcrumbAria} style={breadcrumbStyle}>
         <Link href={`/u/${encodeURIComponent(username)}`} style={backLinkStyle}>
           ← {username}
         </Link>
@@ -215,7 +223,7 @@ export default async function FollowersPage({ params, searchParams }: FollowersP
                 textDecoration: "none",
               }}
             >
-              {lang === "zh" ? "← 上一页" : "← Prev"}
+              {dict.social.prevPage}
             </Link>
           )}
           {hasMore && nextPage !== null && (
@@ -232,7 +240,7 @@ export default async function FollowersPage({ params, searchParams }: FollowersP
                 textDecoration: "none",
               }}
             >
-              {lang === "zh" ? "下一页 →" : "Next →"}
+              {dict.social.nextPage}
             </Link>
           )}
         </div>

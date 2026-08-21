@@ -7,10 +7,20 @@ export interface CommunityNotification {
   id: string;
   type: NotificationType;
   actor: { username: string; avatarUrl: string | null };
+  // Declares its own anime shape rather than importing lib/types.ts, because
+  // this is the parsed/validated result of `notification()` below and not the
+  // raw wire row — `title` is non-null here and nullable on the wire. That
+  // means the hant channel go-api added in migration 0022 has to be repeated
+  // here by hand; see the channel note in lib/types.ts for what the three
+  // fields mean and why titleHantSeo is the only one a <title> may read.
   anime: {
     anilistId: number;
     title: string;
     titleChinese: string | null;
+    titleHant: string | null;
+    titleHantSource: string | null;
+    /** SERP-safe projection — see the hant channel note in lib/types.ts. */
+    titleHantSeo: string | null;
     coverImageUrl: string | null;
   } | null;
   episode: number | null;
@@ -69,6 +79,9 @@ function notification(value: unknown): CommunityNotification | null {
             anilistId,
             title: string(anime?.title) ?? `Anime #${anilistId}`,
             titleChinese: string(anime?.titleChinese),
+            titleHant: string(anime?.titleHant),
+            titleHantSource: string(anime?.titleHantSource),
+            titleHantSeo: string(anime?.titleHantSeo),
             coverImageUrl: string(anime?.coverImageUrl),
           }
         : null,
