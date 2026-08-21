@@ -152,6 +152,8 @@ const zhHant = {
     // community-written summary rather than AniList's description.
     summaryFromBangumi: '簡介來自 Bangumi',
     summaryFromLlm: '簡介由 AI 翻譯自英文原文',
+    summaryConverted: '簡介由簡體中文轉換',
+    summaryConvertedFromLlm: '簡介由 AI 翻譯自英文原文，再轉換為繁體',
     linkCopied: '連結已複製',
     linkCopyFailed: '複製失敗，請手動複製連結',
     openPlayer: '▶ 彈幕播放',

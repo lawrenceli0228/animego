@@ -1,0 +1,181 @@
+/*
+ * locale-hint.css — the one-time "this page exists in your language" offer.
+ *
+ * Fixed rather than in flow, and that is the load-bearing property here. The
+ * navbar is position: sticky, so anything inserted above it in the document
+ * pushes the entire page down the moment hydration finishes — a layout shift
+ * on a first-time visitor's first view, which is precisely the view Core Web
+ * Vitals scores. Floating costs nothing and moves nothing.
+ */
+
+.agc-locale-hint {
+  position: fixed;
+  /* Below the sticky navbar rather than over it. Covering the navigation to
+     offer a translation would take away the control the reader is most
+     likely to want if they disagree with the offer. */
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 180;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 24px);
+  /* Nothing here should ever swallow a click meant for the page underneath. */
+  pointer-events: none;
+  animation: agc-locale-hint-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.agc-locale-hint-card {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 9px 9px 14px;
+  border-radius: 999px;
+  background: rgba(18, 18, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 24px 64px -20px rgba(0, 0, 0, 0.9);
+}
+
+.agc-locale-hint-globe {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: rgba(235, 235, 245, 0.55);
+}
+
+.agc-locale-hint-text {
+  font-size: 14px;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+}
+
+.agc-locale-hint-accept,
+.agc-locale-hint-close {
+  flex: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.agc-locale-hint-accept {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #101014;
+  background: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+}
+
+.agc-locale-hint-accept:hover {
+  background: #fff;
+}
+
+.agc-locale-hint-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(235, 235, 245, 0.55);
+}
+
+.agc-locale-hint-close svg {
+  width: 15px;
+  height: 15px;
+}
+
+.agc-locale-hint-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.agc-locale-hint-accept:focus-visible,
+.agc-locale-hint-close:focus-visible {
+  outline: 2px solid rgba(120, 170, 255, 0.9);
+  outline-offset: 2px;
+}
+
+.agc-locale-hint-endonym {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: rgba(235, 235, 245, 0.42);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+
+@keyframes agc-locale-hint-in {
+  from {
+    opacity: 0;
+    /* translateX is repeated because transform replaces, not composes — the
+       centring above would be dropped mid-animation without it. */
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@media (max-width: 560px) {
+  .agc-locale-hint {
+    top: 60px;
+    width: calc(100vw - 24px);
+  }
+
+  .agc-locale-hint-card {
+    width: 100%;
+  }
+
+  .agc-locale-hint-text {
+    /* The question is the one thing that may wrap on a narrow screen; the
+       two controls keep their size so they stay tappable. */
+    white-space: normal;
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agc-locale-hint {
+    animation: none;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  .agc-locale-hint-card {
+    background: rgba(255, 255, 255, 0.94);
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 24px 64px -22px rgba(0, 0, 0, 0.35);
+  }
+
+  .agc-locale-hint-text {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  .agc-locale-hint-globe,
+  .agc-locale-hint-close {
+    color: rgba(60, 60, 67, 0.6);
+  }
+
+  .agc-locale-hint-accept {
+    color: #fff;
+    background: rgba(20, 20, 24, 0.92);
+  }
+
+  .agc-locale-hint-accept:hover {
+    background: #000;
+  }
+
+  .agc-locale-hint-endonym {
+    color: rgba(60, 60, 67, 0.55);
+    text-shadow: none;
+  }
+}

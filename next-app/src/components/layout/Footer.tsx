@@ -1,4 +1,5 @@
 import Link from "@/components/ui/LocaleLink";
+import { LanguageMenu } from "@/components/layout/LanguageMenu";
 import type { CSSProperties } from "react";
 import type { Dict } from "@/lib/i18n";
 
@@ -192,6 +193,11 @@ export default function Footer({ dict, season, year }: FooterProps) {
           <span style={s.copyright}>
             {dict.footer.copyright.replace("{year}", yearStr)}
           </span>
+          {/* Says which language version you are reading, and opens the same
+              menu the navbar does. This is the whole of apple.com's locale
+              affordance — they carry no banner, no modal and no geo
+              detection, just a footer control naming the current version. */}
+          <LanguageMenu variant="named" />
           <span style={s.credits}>
             {dict.footer.dataCredits}
             <a

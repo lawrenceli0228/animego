@@ -158,3 +158,43 @@
     transition: none;
   }
 }
+
+/* ─── the footer variant ──────────────────────────────────────────────────
+   apple.com's pattern: one control that states which version you are on,
+   spelled out, with no banner and no geo detection anywhere on the page.
+   Naming the version is the affordance — a reader who cannot tell which one
+   they are reading has no reason to go looking for a switcher. */
+
+.agc-lang-trigger--named {
+  gap: 7px;
+  padding: 6px 11px;
+  font-size: 13px;
+  /* The navbar trigger is a glyph and can afford to be quiet. This one is a
+     sentence about the page, so it sits at the same weight as the copyright
+     line beside it rather than competing with it. */
+  color: rgba(235, 235, 245, 0.6);
+}
+
+.agc-lang-trigger--named:hover,
+.agc-lang-trigger--named[aria-expanded="true"] {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Opens upward: it is the last row of the document, and a popup below it
+   would render off-screen and scroll the page on open. */
+.agc-lang-wrap--up .agc-lang-pop {
+  top: auto;
+  bottom: calc(100% + 10px);
+  right: auto;
+  left: 0;
+}
+
+@media (max-width: 640px) {
+  /* The footer bottom row wraps at this width, so the control can end up
+     against the right edge; anchoring the popup to the trigger's left keeps
+     it on screen either way. */
+  .agc-lang-wrap--up .agc-lang-pop {
+    left: 0;
+    right: auto;
+  }
+}

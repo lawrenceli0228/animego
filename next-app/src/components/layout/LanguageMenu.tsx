@@ -187,9 +187,23 @@ export function LanguageMenuInline({ onPicked }: { onPicked?: () => void }) {
 
 /**
  * A trigger plus its own popup, for the logged-out navbar where there is no
- * account menu to live inside.
+ * account menu to live inside, and for the footer.
+ *
+ * `variant` is the difference between the two placements:
+ *
+ *   compact — the navbar. A globe and the two-character short label, because
+ *             the bar already overflows at 375px.
+ *   named   — the footer. The locale's full endonym, and the popup opens
+ *             upward because there is nothing below it.
+ *
+ * The named variant is the pattern apple.com uses, checked rather than
+ * recalled: neither apple.com nor apple.com/tw carries a language banner, a
+ * modal, or any geo-detection UI. What they have is one footer control that
+ * states the version you are on -- "United States", "台灣" -- and opens a
+ * chooser. Naming the current version is the whole affordance: a reader who
+ * cannot tell which one they are on has no reason to look for the control.
  */
-export function LanguageMenu() {
+export function LanguageMenu({ variant = "compact" }: { variant?: "compact" | "named" }) {
   const { t, switchTo } = useLang();
   const current = useCurrentLocale();
   const [open, setOpen] = useState(false);
@@ -230,21 +244,35 @@ export function LanguageMenu() {
   }, [open, current, focusAt]);
 
   return (
-    <div className="agc-lang-wrap" ref={wrapRef}>
+    <div
+      className={`agc-lang-wrap${variant === "named" ? " agc-lang-wrap--up" : ""}`}
+      ref={wrapRef}
+    >
       <button
         type="button"
         ref={triggerRef}
-        className="agc-lang-trigger"
+        className={`agc-lang-trigger${variant === "named" ? " agc-lang-trigger--named" : ""}`}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={t("nav.language")}
+        // The compact trigger reads as a bare glyph, so it needs the label
+        // spoken. The named one already says which version you are on, and
+        // an aria-label would replace that text rather than add to it.
+        aria-label={variant === "compact" ? t("nav.language") : undefined}
         onClick={() => setOpen((v) => !v)}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
           <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
         </svg>
-        <span aria-hidden="true">{LOCALE_LABEL[current].short}</span>
+        {variant === "named" ? (
+          // Not aria-hidden, unlike the short label: this text IS the
+          // information. And not a dictionary key -- 繁體中文 has to read
+          // 繁體中文 to an English reader too, which is why LOCALE_LABEL is
+          // keyed by locale rather than by the reader's language.
+          <span>{LOCALE_LABEL[current].endonym}</span>
+        ) : (
+          <span aria-hidden="true">{LOCALE_LABEL[current].short}</span>
+        )}
       </button>
 
       {open && (
