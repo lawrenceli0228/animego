@@ -14,7 +14,11 @@
 ## 2. library 逻辑层测试债回填
 
 - **What:** 给 `enumerator.js` / `fileHandleStore.js` / `useFileHandles.js` / `importPipeline.js` 全链路补单测。PR-1 只补被改到的部分(reuse 分支回归 + touchSeries + useImport 默认行为)。
-- **Why:** 2026-08 评审实测:整个 library 逻辑层只有 `buildLibraryMatchResult.test.js` 一个测试文件;代码里预留的 DI seam(`useImport` 的 `{db, dandan, hashPool}`)从未被使用;全局规则要求 80% 覆盖率。
+- **Why:** 代码里预留的 DI seam(`useImport` 的 `{db, dandan, hashPool}`)从未被使用;全局规则要求 80% 覆盖率。
+  > 事实更正(2026-08-22 评审):本条原写「整个 library 逻辑层只有 `buildLibraryMatchResult.test.js`
+  > 一个测试文件」——已不成立。`_services/` 下现有 7 个测试文件(`rescanController`/`rematchPayload`/
+  > `loadSeriesRows`/`rescanService`/`folderWatcher`/`resolveSeriesBinding`/`resolveMergedIds`)。
+  > 仍缺的是 `enumerator.js` / `fileHandleStore.js` / `useFileHandles.js` / `importPipeline.js` 这条链。
 - **Pros:** PR-2(改管线核心)/PR-3(observer)都有安全网;PR-1 会建好 fake DirectoryHandle(async-iterator 夹具)和 fake repo 层,回填时直接复用,边际成本低。
 - **Cons:** 纯测试 PR,管线分支多(matchCache 命中/过期、reuse/new/ambiguous、跨文件夹 merge),工作量不小。
 - **Context:** 测试跑法是 `bun test` 纯逻辑测试(无 RTL/jest/fake-indexeddb);仓库惯例是逻辑抽纯函数单测(authForm/registerFlow 模式)。importPipeline 可经 fake repos 测 processCluster,不需要真 Dexie。
@@ -43,3 +47,25 @@
 **Depends on / blocked by** — 无。dashboard 只读部分（本次 PR）落地后即可做。
 
 **为什么这次没做** — 它属于运维能力，不属于「看见进度」这个需求。分开做两边都更干净。
+
+## anime-relations:字幕组连番号的精确重定向表
+
+- **What:** 接入 [`erengy/anime-relations`](https://github.com/erengy/anime-relations),把字幕组连续编号的
+  续季集号精确重定向到该季的 1..N,补上启发式归一覆盖不到的场景。
+- **Why:** 本地库的显示层归一(`normalizeEpisodeNumbers`)是个保守推断——只在「本地最小集号
+  已越过本季集数」且「构成连续段」时才平移。文件没下全、一季拆两个 cour、跨季混在同一
+  文件夹这三种它会主动不动手,结果仍是网格前半截是死格子。
+- **Pros:** 规则表是 **public domain**(比 `go-api/data/hant/` 那份 CC BY-SA 还干净,不存在
+  AGPL 污染顾虑);2026-08 仍在维护;**规则里第三个 id 直接就是 AniList id**,正好是
+  `anime_cache` 的主键,不需要中间跳转;约 1,000 条规则,压缩后几十 KB。
+- **Cons:** 引入一个需要定期同步的外部数据集——和 `refresh-bgm-map` 同一个形状,而那个
+  workflow 曾静默失败一个月无人察觉(见 issue #61/#62 的修复)。同步失败必须有告警,
+  否则规则表会悄悄过期。
+- **Context:** 规则语法 `MAL|Kitsu|AniList:范围 -> MAL|Kitsu|AniList:范围`,`!` 后缀表示
+  同时生成一条自指规则,`~` 重复源 id,`?` 未知。两种接入方式:(a) 数据烤进构建产物,
+  照 `go-api/data/hant/` 的模式——独立目录 + 独立 license 文件;(b) go-api 加一个
+  `/api/anime/relations` 端点定期拉取并按 anilistId 索引,省客户端体积但多一次往返。
+  备选数据集 `eliasbenb/PlexAniBridge-Mappings`(MIT,每日自动生成,AniList 主键)覆盖更全,
+  但它解决的是 TVDB 季结构对齐而不是字幕组连番号,对这个场景是间接的,**不作首选**。
+- **Depends on / blocked by:** 触发条件 = 显示层归一上线一个月后,统计仍有可观比例的
+  卡片集号不对。在那之前不要动——先拿覆盖率数字。
