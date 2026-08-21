@@ -400,6 +400,31 @@ type Querier interface {
 	// because the Bangumi channel may have landed a real summary between scan and
 	// work.  In that race the LLM worker must stand down, not spend tokens.
 	GetDescriptionForLlmTranslate(ctx context.Context, anilistID int32) (GetDescriptionForLlmTranslateRow, error)
+	// Batch episode-count read for GET /api/anime/episodes, which the
+	// browser-side library calls once to backfill a per-series total for
+	// series it has ALREADY bound.  The binding path short-circuits on an
+	// existing binding and returns no episode data, so without a batch read
+	// there is no route by which an already-bound series ever learns its
+	// length.
+	//
+	// Three columns and no more: this is a hot, wide-fan-in read (up to 200
+	// ids per call) whose only job is to answer "how many episodes".  The
+	// title trio that rides along on the other ANY($1::int[]) reads in this
+	// file is deliberately absent — the caller already has the titles.
+	//
+	// episodes and episodes_bgm are returned as two separate columns and are
+	// NOT coalesced here, or anywhere downstream.  episodes is AniList's
+	// authoritative value; episodes_bgm (migration 0023) is inferred from an
+	// external source.  A downstream consumer emits numberOfEpisodes into
+	// schema.org JSON-LD and only the authoritative value may appear there, so
+	// a COALESCE in this query would launder an inferred count into structured
+	// data.  Callers pick; the database does not pick for them.
+	//
+	// Ids with no anime_cache row simply do not come back.  The handler
+	// returns the short list rather than padding it with nulls — an absent id
+	// and an id whose counts are both NULL are different facts and the caller
+	// can already tell them apart.
+	GetEpisodeCountsByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetEpisodeCountsByAnilistIDsRow, error)
 	// Returns the liveEndsAt timestamp for this episode if a live window
 	// exists, else pgx.ErrNoRows (handler maps → null in the envelope).
 	GetEpisodeWindow(ctx context.Context, anilistID int32, episode int32) (EpisodeWindow, error)

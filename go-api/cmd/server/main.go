@@ -699,6 +699,13 @@ func main() {
 		r.With(jwtx.RequireAuth(signer)).Patch("/me", authHandlers.UpdateMe)
 	})
 
+	// Routing note: every literal segment below shares the subtree with
+	// the `/{anilistId}` wildcard on the last line.  chi's radix tree
+	// resolves static segments before parametric ones regardless of
+	// registration order, so `/episodes` reaches anime.Episodes and not
+	// the detail handler with anilistId="episodes".  That is a property
+	// of the router rather than of this ordering, and
+	// TestEpisodes_RouteDoesNotCollideWithDetail pins it.
 	r.Route("/api/anime", func(r chi.Router) {
 		r.Get("/completed-gems", anime.CompletedGems(q))
 		r.Get("/seasonal", seasonalSvc.Handler())
@@ -707,6 +714,7 @@ func main() {
 		r.Get("/torrents", anime.Torrents(torrentsAgg, q))
 		r.Get("/search", searchSvc.Handler())
 		r.Get("/schedule", scheduleSvc.Handler())
+		r.Get("/episodes", anime.Episodes(q))
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})

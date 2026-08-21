@@ -953,3 +953,35 @@ WHERE anilist_id = $1;
 SELECT episodes
 FROM anime_cache
 WHERE anilist_id = $1;
+
+-- name: GetEpisodeCountsByAnilistIDs :many
+-- Batch episode-count read for GET /api/anime/episodes, which the
+-- browser-side library calls once to backfill a per-series total for
+-- series it has ALREADY bound.  The binding path short-circuits on an
+-- existing binding and returns no episode data, so without a batch read
+-- there is no route by which an already-bound series ever learns its
+-- length.
+--
+-- Three columns and no more: this is a hot, wide-fan-in read (up to 200
+-- ids per call) whose only job is to answer "how many episodes".  The
+-- title trio that rides along on the other ANY($1::int[]) reads in this
+-- file is deliberately absent — the caller already has the titles.
+--
+-- episodes and episodes_bgm are returned as two separate columns and are
+-- NOT coalesced here, or anywhere downstream.  episodes is AniList's
+-- authoritative value; episodes_bgm (migration 0023) is inferred from an
+-- external source.  A downstream consumer emits numberOfEpisodes into
+-- schema.org JSON-LD and only the authoritative value may appear there, so
+-- a COALESCE in this query would launder an inferred count into structured
+-- data.  Callers pick; the database does not pick for them.
+--
+-- Ids with no anime_cache row simply do not come back.  The handler
+-- returns the short list rather than padding it with nulls — an absent id
+-- and an id whose counts are both NULL are different facts and the caller
+-- can already tell them apart.
+SELECT
+    anilist_id,
+    episodes,
+    episodes_bgm
+FROM anime_cache
+WHERE anilist_id = ANY($1::int[]);

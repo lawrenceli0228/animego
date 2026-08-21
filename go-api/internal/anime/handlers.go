@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -350,6 +351,186 @@ func Watchers(q dbgen.Querier) http.HandlerFunc {
 	}
 }
 
+// maxEpisodeIDs caps how many AniList ids one /api/anime/episodes call may
+// ask about.
+//
+// 200 is set by the request line, not by the database.  The ids travel in
+// the query string, and nginx's default large_client_header_buffers gives a
+// request line 8 KiB; 200 seven-digit ids plus separators is ~1.6 KiB, so
+// the cap keeps a full-size call at roughly a fifth of the ceiling instead
+// of letting a slightly larger library turn into an opaque 414 at the proxy
+// before go-api ever sees it.  Postgres is nowhere near the binding
+// constraint — 200 int4s is a trivial array parameter against a primary-key
+// lookup.
+//
+// It is also comfortably above what a single library holds, so the common
+// case is one round trip.  A caller holding more than that splits the list
+// and calls twice: the endpoint is stateless, so two calls cost what one
+// does.
+const maxEpisodeIDs = 200
+
+// episodeCountsCacheControl is the response cache policy for
+// /api/anime/episodes.
+//
+// public because there is no per-user variation in the response at all —
+// the endpoint takes no auth and returns catalog facts keyed only by
+// AniList id, so an edge or browser cache entry is safe to share.
+//
+// The two numbers are doing different jobs.  max-age=300 is the window in
+// which a reopened tab pays nothing; the counts behind it move at the pace
+// of a season ending or the episode backfill sweep landing a row, so five
+// minutes of staleness is invisible.  stale-while-revalidate=3600 is the
+// one that matters for this caller: the library backfill runs at render
+// time, and serving the previous answer immediately while revalidating in
+// the background is exactly the behaviour wanted — the list paints from
+// cache and heals itself on the next pass.
+//
+// Set on the 200 path only.  A cached 400 would pin a client's own
+// malformed request in front of it.
+const episodeCountsCacheControl = "public, max-age=300, stale-while-revalidate=3600"
+
+// EpisodeCountsDB is the slice of dbgen.Querier the Episodes handler needs.
+// Declared at the use site (small interface, same as TorrentsDB) so handler
+// tests can supply a one-method fake without the full Querier surface.
+type EpisodeCountsDB interface {
+	GetEpisodeCountsByAnilistIDs(ctx context.Context, anilistIDs []int32) ([]dbgen.GetEpisodeCountsByAnilistIDsRow, error)
+}
+
+// Episodes implements GET /api/anime/episodes — a batch total-episode-count
+// read for a list of AniList ids.
+//
+// Why it exists: the browser-side library shows a per-series episode total,
+// and it can only get one for series it binds during that session.  The
+// binding path short-circuits when a series is already bound and hands back
+// no episode data, so every series a user bound before this shipped would
+// stay blank forever.  This endpoint is the one-shot batch read that closes
+// that gap — the library asks about everything it already has and fills in
+// the counts.
+//
+// Public GET, no auth.  It needs no rate-limit wiring of its own: the
+// global limiter already exempts public catalog reads under /api/anime/
+// other than the two external fan-outs (httpmw.isPublicReadExempt), and
+// this is a bounded primary-key lookup, which is the cheap side of that
+// line.
+//
+// Query parameters:
+//
+//	ids  required; comma-separated AniList ids, at most maxEpisodeIDs
+//
+// Validation is strict, because the only caller is our own frontend and a
+// silent partial answer is harder to notice than a 400:
+//
+//   - missing or empty ids            → 400
+//   - more than maxEpisodeIDs entries → 400
+//   - any entry that is not a positive integer inside int32 → 400
+//
+// The int32 range check is load-bearing rather than pedantic.  strconv.Atoi
+// parses into a 64-bit int on every platform this runs on, so a plain
+// int32() conversion would wrap 4294967297 to 1 and cheerfully answer with
+// a different anime's episode count.
+//
+// Ids with no cached row are absent from the response — not null entries,
+// not an error.  A caller that asked about 40 series and got 38 back knows
+// which two are uncached by set difference, and 200-with-fewer-rows is the
+// honest status for "some of what you named does not exist here".
+//
+// Response envelope:
+//
+//	{"data":[{"anilistId":1,"episodes":26,"episodesBgm":null}, ...]}
+//
+// episodes and episodesBgm are two fields and stay two fields.  episodes is
+// AniList's authoritative count; episodesBgm (migration 0023) is inferred
+// from an external source.  A consumer downstream emits numberOfEpisodes
+// into schema.org JSON-LD and only the authoritative value is allowed to
+// appear there — so this handler must never coalesce them, and must never
+// grow a third convenience field that does the coalescing on the caller's
+// behalf.  Choosing between them is the caller's decision precisely because
+// only the caller knows whether the value is about to become a factual
+// claim to a search engine.
+func Episodes(db EpisodeCountsDB) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
+		defer cancel()
+
+		ids, err := parseAnilistIDList(req.URL.Query().Get("ids"), maxEpisodeIDs)
+		if err != nil {
+			httpx.Fail(w, httpx.NewError(
+				http.StatusBadRequest,
+				httpx.CodeValidationError,
+				err.Error(),
+			))
+			return
+		}
+
+		rows, queryErr := db.GetEpisodeCountsByAnilistIDs(ctx, ids)
+		if queryErr != nil {
+			httpx.Fail(w, httpx.WrapError(queryErr, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
+			return
+		}
+
+		items := make([]episodeCountItem, 0, len(rows))
+		for _, r := range rows {
+			items = append(items, episodeCountItem{
+				AnilistID:   r.AnilistID,
+				Episodes:    r.Episodes,
+				EpisodesBgm: r.EpisodesBgm,
+			})
+		}
+
+		w.Header().Set("Cache-Control", episodeCountsCacheControl)
+		httpx.Data(w, http.StatusOK, items)
+	}
+}
+
+// parseAnilistIDList splits a comma-separated id list into deduplicated
+// int32s, or returns the client-facing reason it could not.
+//
+// The entry count is checked against max BEFORE anything is parsed, so an
+// absurd list costs one strings.Count rather than a full scan-and-allocate.
+//
+// Surrounding whitespace on an entry is tolerated; an empty entry is not.
+// That makes a trailing comma a 400, which is deliberate — every entry is
+// generated by a join in our own client, so an empty one means the client
+// built the list wrong and should hear about it rather than have the server
+// quietly drop a series from the answer.
+//
+// The rejection message names the offending position and never echoes the
+// offending text.  Reflecting an attacker-supplied string into a response
+// body buys nothing here (the client already knows what it sent) and the
+// index is the more useful half of the answer anyway.
+//
+// De-duplication happens after the cap so a caller cannot smuggle a huge
+// list past it by repeating one id.  It is worth doing at all only because
+// ANY() returns one row per matching row, not per array element: without
+// it, a duplicated id would silently make the response shorter than the
+// request, which is the signal reserved for "not cached here".
+func parseAnilistIDList(raw string, max int) ([]int32, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, errors.New("ids is required")
+	}
+	if n := strings.Count(raw, ",") + 1; n > max {
+		return nil, fmt.Errorf("too many ids: %d (max %d)", n, max)
+	}
+
+	parts := strings.Split(raw, ",")
+	ids := make([]int32, 0, len(parts))
+	seen := make(map[int32]struct{}, len(parts))
+	for i, p := range parts {
+		n, err := strconv.ParseInt(strings.TrimSpace(p), 10, 32)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("ids[%d] is not a positive 32-bit integer", i)
+		}
+		id := int32(n)
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 // maxTorrentVariants caps how many title variants the anilistId path expands
 // into.  An anime has at most four cached titles (romaji / native / english /
 // chinese); even after de-duplication four is the ceiling, but the cap is
@@ -567,6 +748,30 @@ type trendingItem struct {
 	Status          *string  `json:"status"`
 	Format          *string  `json:"format"`
 	Description     *string  `json:"description"`
+}
+
+// episodeCountItem is one row in /api/anime/episodes' data array.
+//
+// Hand-declared rather than passing dbgen's row struct straight out, so the
+// wire contract is pinned here instead of tracking whatever the SELECT list
+// happens to contain — the same reason trendingItem and watcherItem exist.
+//
+// The shape is the regression guard for R3.  Exactly three fields, and the
+// two counts stay separate:
+//
+//	episodes     AniList's authoritative total; the only value permitted to
+//	             reach schema.org numberOfEpisodes downstream
+//	episodesBgm  inferred from an external source (migration 0023); fine for
+//	             UI, never for structured data
+//
+// Do not add a coalescing field here, however convenient.  A single
+// `totalEpisodes` would erase the distinction at exactly the layer where
+// the consumer that cares about it reads, and no call site further down
+// would be able to tell an authoritative count from a guess.
+type episodeCountItem struct {
+	AnilistID   int32  `json:"anilistId"`
+	Episodes    *int32 `json:"episodes"`
+	EpisodesBgm *int32 `json:"episodesBgm"`
 }
 
 // watcherItem is one element of /api/anime/:anilistId/watchers' data
