@@ -7,7 +7,31 @@ const withBundleAnalyzer = bundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
 });
 
+// An identifier for this build, inlined into both the client bundle and the
+// server bundle by the `env` option below.
+//
+// The comparison it enables is between two builds, not two processes: a tab
+// opened before a deploy holds the old value in its own JavaScript, asks
+// /version.json (served by the new deployment) for the current one, and finds
+// them different. See components/layout/StaleTabNotice.tsx.
+//
+// Next inlines `env` values at BUILD time on both sides, which is the whole
+// reason this works — if the server read it at runtime instead, `next start`
+// would re-evaluate this file, produce a third value, and every visitor would
+// be told to refresh forever. There is a test that pins that behaviour
+// (lib/buildId.test.ts) because getting it wrong is invisible in development,
+// where client and server are the same process.
+//
+// GIT_SHA when the deploy provides one, so two rebuilds of the same commit are
+// the same build; the timestamp otherwise, so a local build still differs from
+// the last one.
+const BUILD_ID = process.env.GIT_SHA?.trim() || `t${Date.now()}`;
+
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_BUILD_ID: BUILD_ID,
+  },
+
   // Standalone output bundles a minimal Node server + only the deps the
   // tree actually uses. Reduces the Docker image from ~600MB (full
   // node_modules) to ~120MB. Required for the multi-stage Dockerfile.

@@ -4,6 +4,7 @@ import { Toaster } from "react-hot-toast";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { LocaleHint } from "@/components/layout/LocaleHint";
+import { StaleTabNotice } from "@/components/layout/StaleTabNotice";
 import { LanguageProvider } from "@/lib/lang-client";
 import { HTML_LANG, OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { localeParams, resolveLocale, type LangParams } from "@/lib/i18n/route";
@@ -135,10 +136,14 @@ export default async function RootLayout({
       >
         <LanguageProvider lang={lang}>
           <Navbar season={season} year={year} />
-          {/* Renders nothing on the server and nothing at all for most
-              visitors — see LocaleHint for why it floats rather than sitting
-              above the navbar in flow. */}
+          {/* The two things on this site that appear without being asked
+              for. They are siblings here and not stacked: LocaleHint is
+              fixed to the top of the viewport and StaleTabNotice to the
+              bottom, so a first-time visitor during a deploy can be shown
+              both without one covering the other. Neither renders anything
+              on the server. */}
           <LocaleHint />
+          <StaleTabNotice />
           <Toaster
             position="top-center"
             toastOptions={{

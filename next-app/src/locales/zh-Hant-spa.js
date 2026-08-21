@@ -1,6 +1,11 @@
 const zhHant = {
   // Common
   common: { loading: '載入中...' },
+  app: {
+    updateAvailable: '網站已更新',
+    reload: '重新整理',
+    dismissUpdate: '暫不重新整理',
+  },
   // Backend error.message → 中文 (lookup by exact English string)
   // Backend is the source of truth for English wording; if it changes,
   // these keys must be updated to match.
