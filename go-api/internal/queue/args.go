@@ -117,10 +117,61 @@ func (EpisodesBgmArgs) Kind() string { return "episodes_bgm" }
 // scan and the seasonal warm — and either can hand over a row the other has
 // already queued.  Without it a slow upstream would let the duplication
 // compound every hour.
+//
+// ByState is spelled out for the same reason hantBackfillUniqueStates spells
+// it out, but the consequence on a PER-ROW job is worse.  River's default
+// unique states INCLUDE `completed`, and river keeps completed rows for 24h,
+// so the default would mean a row processed once cannot be processed again for
+// a day no matter what happens to it in between: the insert is collapsed into
+// the finished job and the scan still reports it as submitted.
+//
+// That would break two things this worker promises.
+//
+// The RELEASING re-check: the candidate predicate re-offers an airing row
+// after 20h, deliberately under a day so the cadence cannot drift later on
+// each pass.  A 24h suppression window overrides it and reinstates exactly the
+// drift the 20h was chosen to avoid.
+//
+// The repair path, which matters more: reset, flag and a bgm_id change all
+// null episodes_bgm_attempted_at specifically to put the row at the front of
+// the next sweep.  With `completed` in the unique set that does nothing for up
+// to a day — so the single mechanism for clearing a repudiated binding's
+// derived data silently no-ops, in the one situation where waiting is least
+// acceptable, because the wrong show's episode titles are sitting on an
+// indexed page while it waits.
+//
+// Observed, not theorised: a locally rejected row whose state was cleared by
+// hand was re-offered by the scan, logged as submitted, and never ran.
+//
+// This deliberately differs from DescriptionBackfillArgs, which pins ByState
+// to nil ON PURPOSE — see TestDescriptionBackfillArgs_UniqueStateIncludesCompleted.
+// That sweep's candidate predicate keeps re-offering rows it can never write,
+// and river's `completed` suppression is what makes the resulting stall silent
+// and free instead of a per-hour spin.  This sweep does not need that backstop
+// because the cooldowns live in the predicate itself: a rejected row is not
+// re-offered for 90 days and an airing row not for 20 hours, so the hourly
+// scan only ever hands over rows whose wait has genuinely elapsed.  Dropping
+// `completed` here therefore costs nothing and buys back both the re-check and
+// the repair path; dropping it there would be a real regression.
+//
+// available/pending/running/scheduled are required by river
+// (UniqueOpts.validate); retryable is included because a job in backoff is
+// still this row in flight.
+var episodesBgmUniqueStates = []rivertype.JobState{
+	rivertype.JobStateAvailable,
+	rivertype.JobStatePending,
+	rivertype.JobStateRetryable,
+	rivertype.JobStateRunning,
+	rivertype.JobStateScheduled,
+}
+
 func (EpisodesBgmArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:      EpisodesBgmQueueName,
-		UniqueOpts: river.UniqueOpts{ByArgs: true},
+		Queue: EpisodesBgmQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: episodesBgmUniqueStates,
+		},
 	}
 }
 

@@ -298,3 +298,46 @@ func TestLooselyMatchesKeywordCannotSmuggleAWrongSeason(t *testing.T) {
 		"無職転生Ⅱ ～異世界行ったら本気だす～",
 		"無職転生Ⅲ ～異世界行ったら本気だす～"))
 }
+
+// Katakana season markers, added after a live false rejection.
+//
+// The failure this prevents is not "a season number was missed" — it is a
+// CORRECT binding being refused. AniList carries a native and a romaji title
+// for one entry and MarkerFor folds them, so the romaji "Season 2" put a
+// season on the AniList side that the Japanese side could not see. The gate
+// then compared 2 against unstated-normalised-to-1 and rejected the row, which
+// under the rejected cooldown means the show goes without an episode count for
+// 90 days.
+//
+// anilist 213097 / bgm 659686 is the observed case, and the thing that makes
+// it unambiguous is that both sides are the byte-identical string.
+func TestExtractMarker_KatakanaSeason(t *testing.T) {
+	cases := []struct {
+		title string
+		want  int
+	}{
+		{"トミカとトム シーズン2", 2},
+		{"トミカとトム シーズン３", 3},     // full-width digit, folded by NFKC
+		{"ｼｰｽﾞﾝ2 something", 2}, // half-width katakana, folded by NFKC
+		{"シーズン 2", 2},           // spaced
+		{"トミカとトム", 0},           // no marker at all stays unstated
+	}
+	for _, c := range cases {
+		if got := ExtractMarker(c.title).Season; got != c.want {
+			t.Errorf("ExtractMarker(%q).Season = %d, want %d", c.title, got, c.want)
+		}
+	}
+}
+
+// The regression proper: two titles of one entry must agree, so the entry is
+// accepted — while a genuine season mismatch is still caught.
+func TestSameEntry_KatakanaVsRomajiSeason(t *testing.T) {
+	aniList := MarkerFor("トミカとトム シーズン2", "TOMICA & TOM Season 2")
+	bangumi := ExtractMarker("トミカとトム シーズン2")
+	if !aniList.SameEntry(bangumi) {
+		t.Fatalf("a correct binding was refused: anilist=%+v bangumi=%+v", aniList, bangumi)
+	}
+	if MarkerFor("トミカとトム シーズン2").SameEntry(ExtractMarker("トミカとトム")) {
+		t.Error("season 2 must not match an unstated (season 1) title")
+	}
+}

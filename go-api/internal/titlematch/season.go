@@ -64,6 +64,22 @@ var (
 	cjkSeasonRe = regexp.MustCompile(`第\s*([0-9]+|[一二三四五六七八九十])\s*[季期]`)
 	// season 2 / season2
 	enSeasonRe = regexp.MustCompile(`season\s*([0-9]+)`)
+	// シーズン2 / シーズン２ — katakana "season".
+	//
+	// Not optional politeness. Bangumi routinely titles a Japanese sequel this
+	// way while AniList's romaji for the same entry reads "Season 2", and
+	// MarkerFor folds an entry's titles together — so without this pattern the
+	// romaji side reports season 2, the Japanese side reports unstated (which
+	// normalises to 1), the two disagree, and a CORRECT binding is refused.
+	//
+	// Observed on live data rather than reasoned about: anilist 213097 bound to
+	// bgm 659686, where both titles are the byte-identical string
+	// "トミカとトム シーズン2". Two equal strings must never disagree about
+	// their season.
+	//
+	// NFKC has already folded full-width digits and half-width katakana by the
+	// time this runs, so シーズン２ and ｼｰｽﾞﾝ2 both arrive in this form.
+	jaSeasonRe = regexp.MustCompile(`シーズン\s*([0-9]+)`)
 	// 2nd season / 3rd season
 	enOrdinalSeasonRe = regexp.MustCompile(`([0-9]+)(?:st|nd|rd|th)\s*season`)
 	// Bare roman numeral run as a season suffix.  NFKC has already folded
@@ -142,7 +158,7 @@ func ExtractMarker(title string) Marker {
 	// digit inside "第2クール" cannot be re-read as "第2季".
 	seasonSrc := cjkPartRe.ReplaceAllString(s, " ")
 	seasonSrc = enPartRe.ReplaceAllString(seasonSrc, " ")
-	season := firstOrdinal(seasonSrc, cjkSeasonRe, enSeasonRe, enOrdinalSeasonRe, romanSeasonRe)
+	season := firstOrdinal(seasonSrc, cjkSeasonRe, jaSeasonRe, enSeasonRe, enOrdinalSeasonRe, romanSeasonRe)
 
 	return Marker{Season: season, Part: part}
 }

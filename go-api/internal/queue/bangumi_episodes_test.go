@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1167,4 +1168,54 @@ func (enqueuerWithoutEpisodesBgm) EnqueueWarmSeasonNow(context.Context, WarmSeas
 }
 func (enqueuerWithoutEpisodesBgm) EnqueueHantBackfillNow(context.Context) (bool, error) {
 	return false, nil
+}
+
+// TestEpisodesBgmArgs_UniqueStateExcludesCompleted pins the opposite property
+// to TestDescriptionBackfillArgs_UniqueStateIncludesCompleted, and the contrast
+// is the point: two sweeps on the same queue infrastructure want opposite
+// answers, so neither can be copied from the other.
+//
+// River's default unique state set includes JobStateCompleted and river keeps
+// completed rows for 24h. On a per-row job that means a row processed once
+// cannot be processed again for a day, whatever happens to it meanwhile — the
+// insert is collapsed into the finished job while the scan still reports it as
+// submitted. That breaks the 20h airing re-check (a 24h window overrides it)
+// and, worse, the repair path: reset / flag / rebind all null
+// episodes_bgm_attempted_at precisely to put the row at the front of the next
+// sweep, and with `completed` present that does nothing for up to a day, while
+// the repudiated binding's episode titles stay on an indexed page.
+//
+// Safe here — unlike in the description sweep — because this predicate carries
+// its own cooldowns, so the hourly scan cannot spin on rows that are not due.
+func TestEpisodesBgmArgs_UniqueStateExcludesCompleted(t *testing.T) {
+	t.Parallel()
+
+	opts := EpisodesBgmArgs{AnilistID: 1, BgmID: 2}.InsertOpts()
+
+	require.True(t, opts.UniqueOpts.ByArgs,
+		"two producers feed this job; without ByArgs they duplicate every hour")
+	require.NotEmpty(t, opts.UniqueOpts.ByState,
+		"leaving ByState unset applies river's default, which includes completed")
+
+	for _, s := range opts.UniqueOpts.ByState {
+		require.NotEqual(t, rivertype.JobStateCompleted, s,
+			"completed must never suppress a re-insert: it disables both the 20h "+
+				"airing re-check and the reset/rebind repair path")
+		require.NotEqual(t, rivertype.JobStateDiscarded, s,
+			"a discarded row has given up and must be reachable again")
+		require.NotEqual(t, rivertype.JobStateCancelled, s,
+			"a cancelled row must be reachable again")
+	}
+
+	// The non-terminal set must still be complete, or two passes over the same
+	// row could run beside each other.
+	for _, want := range []rivertype.JobState{
+		rivertype.JobStateAvailable,
+		rivertype.JobStatePending,
+		rivertype.JobStateRetryable,
+		rivertype.JobStateRunning,
+		rivertype.JobStateScheduled,
+	} {
+		require.Contains(t, opts.UniqueOpts.ByState, want)
+	}
 }
