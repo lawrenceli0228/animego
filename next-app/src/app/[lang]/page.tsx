@@ -83,7 +83,11 @@ async function safeSeasonal(
 
 async function safeTrending(): Promise<TrendingItem[]> {
   try {
-    return await apiGet<TrendingItem[]>("/api/anime/trending?limit=10", {
+    // 14, not 10. The grid is `repeat(auto-fill, minmax(160px, 1fr))`, so the
+    // extra four fill the row that ten already left ragged at most widths. The
+    // server needs nothing: Trending caches maxLimit (20) rows and slices to
+    // the per-request limit after the cache lookup, so this stays one fetch.
+    return await apiGet<TrendingItem[]>("/api/anime/trending?limit=14", {
       revalidate: 60,
     });
   } catch (err) {

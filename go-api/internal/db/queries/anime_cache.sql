@@ -110,6 +110,20 @@ SELECT
     status,
     format,
     description,
+    -- The Chinese synopsis channels, carried for the same reason title_hant is
+    -- carried: this endpoint returns every variant and the Next layer picks one
+    -- with pickDescription(). Without them the homepage hero — which reads the
+    -- top 5 of this list — printed an English synopsis under a Chinese title,
+    -- on a site whose whole acquisition channel is Chinese search.
+    --
+    -- The two *_source columns come along even though nothing renders them yet.
+    -- pickDescription() answers a missing source field with null rather than an
+    -- error, so omitting them would leave a future source badge silently blank
+    -- instead of obviously broken — and they are ten bytes each.
+    description_cn,
+    description_cn_source,
+    description_hant,
+    description_hant_source,
     ARRAY(
         SELECT g.genre
         FROM anime_genres g
