@@ -45,6 +45,18 @@ SELECT
     a.cover_image_color,
     a.poster_accent,
     a.episodes,
+    -- Inferred total (migration 0023).  Carried alongside `episodes`, never
+    -- coalesced into it: the continue-watching card needs SOME denominator to
+    -- draw a fraction and a progress bar, and for an airing show AniList
+    -- routinely has none -- which is exactly the population this row is most
+    -- likely to be about.  Without it the card falls back to printing the
+    -- current episode alone, so "7" reads as a total when it is a position.
+    --
+    -- Two separate columns for the same reason as everywhere else: an inferred
+    -- count may inform what a person sees and must never inform what a machine
+    -- is told.  Nothing on this path reaches structured data today, and this
+    -- shape is what keeps that true if something later does.
+    a.episodes_bgm,
     a.season,
     a.season_year,
     a.format,

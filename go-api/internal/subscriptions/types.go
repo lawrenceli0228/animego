@@ -114,10 +114,14 @@ type listItem struct {
 	CoverImageColor *string `json:"coverImageColor"`
 	PosterAccent    *string `json:"posterAccent"`
 	Episodes        *int32  `json:"episodes"`
-	Season          *string `json:"season"`
-	SeasonYear      *int32  `json:"seasonYear"`
-	Format          *string `json:"format"`
-	AnimeStatus     *string `json:"animeStatus"`
+	// Inferred episode total (anime_cache.episodes_bgm, migration 0023).
+	// Separate from Episodes and never merged into it — the card may draw a
+	// fraction and a bar from a guess, but only Episodes is a fact.
+	EpisodesBgm *int32  `json:"episodesBgm"`
+	Season      *string `json:"season"`
+	SeasonYear  *int32  `json:"seasonYear"`
+	Format      *string `json:"format"`
+	AnimeStatus *string `json:"animeStatus"`
 
 	// Subscription fields.  SubscriptionID is `null` for byte-compat
 	// with the legacy Mongo-shaped FE — see package doc above.
@@ -148,6 +152,7 @@ func toListItem(row dbgen.ListUserSubscriptionsRow) listItem {
 		CoverImageColor: row.CoverImageColor,
 		PosterAccent:    row.PosterAccent,
 		Episodes:        row.Episodes,
+		EpisodesBgm:     row.EpisodesBgm,
 		Season:          row.Season,
 		SeasonYear:      row.SeasonYear,
 		Format:          row.Format,

@@ -343,6 +343,10 @@ export interface WatchingItem {
   status: string;
   currentEpisode: number;
   episodes: number | null;
+  // Inferred total (anime_cache.episodes_bgm). Optional because a go-api
+  // older than this commit does not send it. Use it only as a denominator
+  // of last resort — see resolveWatchingTotal in ContinueWatching.
+  episodesBgm?: number | null;
   titleRomaji: string | null;
   titleEnglish: string | null;
   titleNative: string | null;
