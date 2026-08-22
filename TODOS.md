@@ -69,3 +69,37 @@
   但它解决的是 TVDB 季结构对齐而不是字幕组连番号,对这个场景是间接的,**不作首选**。
 - **Depends on / blocked by:** 触发条件 = 显示层归一上线一个月后,统计仍有可观比例的
   卡片集号不对。在那之前不要动——先拿覆盖率数字。
+
+## 导入抽屉:整个哈希阶段只显示一个静止的「准备中…」
+
+- **What:** 拆掉 `useImport.js` 哈希阶段的 `Promise.all` 屏障,改成边算边吐行(下游本来就有
+  `running` 状态);并在枚举结束时就把文件总数交给进度条,不必等哈希做完。
+- **Why:** 现在第一行要等**所有**文件都哈希完才出现,而抽屉的空状态条件就是 `rows.length === 0`,
+  所以整个哈希阶段界面是一个静止的「准备中…」,进度显示 `0 / —` ——**分母其实枚举完就知道了**。
+  用户无法区分「在算」和「卡死」,唯一的判断办法是去看后端日志确认还没进匹配阶段。
+  实测有人因此以为导入挂了。这是纯 UI/编排问题,管线本身是对的。
+- **Pros:** 首行出现时间从「全部哈希完」降到「第一个文件哈希完」;进度条真的会动;
+  不需要改哈希本身,也不需要动匹配逻辑。
+- **Cons:** 边吐边算意味着行的顺序不再是枚举顺序,分组渲染要能接受乱序插入;
+  失败重试的语义要重新想一遍(现在是屏障之后统一处理)。
+- **Context:** 屏障在 `next-app/src/app/[lang]/library/_hooks/useImport.js` 的
+  `await Promise.all(items.map(...pool.hash(item.file)))`;空状态在
+  `_components/ImportDrawer.tsx` 的 `rows.length === 0` 分支。
+  哈希池并发被 `lib/library/hashPool.js` 的 `MAX_POOL_SIZE = 4` 卡死,跟机器核数无关,
+  所以耗时大致是 `文件数 ÷ 4 × (读前 16MB + MD5)`,走 File System Access API + Worker。
+  **注意 `MAX_POOL_SIZE` 是刻意的上限,不要顺手调大** —— 先确认它当初为什么被压到 4。
+- **Depends on / blocked by:** 无。与集数显示那条线无关,可独立做。
+
+## go-api 的 Dockerfile 健康检查打的是一个不存在的路由
+
+- **What:** `go-api/Dockerfile` 的 `HEALTHCHECK` 打 `/healthz`,但服务只注册了 `/health`
+  (`cmd/server/main.go`)。改 Dockerfile 里的路径即可。
+- **Why:** 那条 HEALTHCHECK **从来没成功过**,一直在 404。compose 起的容器之所以显示 healthy,
+  是因为 `docker-compose.yml` 用 `/health` 覆盖了它。裸 `docker run` 这个镜像会永远 unhealthy,
+  任何依赖镜像自带健康状态的编排(k8s、swarm、别人 pull 下来跑)都会拿到错误答案。
+  副作用是每 2 秒往日志里写一条 404,把真实请求淹掉——排查时很误导。
+- **Pros:** 一行改动;顺带让日志干净。
+- **Cons:** 无。唯一要小心的是别反过来把路由改成 `/healthz` —— compose、
+  部署脚本和文档都已经用 `/health`,改路由要同步改一圈,改 Dockerfile 只动一处。
+- **Context:** 2026-08-22 本地起全栈时发现。`grep -rn 'healthz' go-api/` 能看到全部引用。
+- **Depends on / blocked by:** 无。
