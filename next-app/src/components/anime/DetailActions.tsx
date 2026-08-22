@@ -8,8 +8,8 @@
 //   2. ShareButton         — Web Share API / clipboard fallback
 //   3. MagnetButton        — opens TorrentModal (always; torrent search is
 //      title-based, needs no episode count)
-//   4. PlayButton          — opens /player in a new tab (always; the player
-//      selects episodes itself)
+//   4. PlayButton          — explains the local-file flow, then hands off to
+//      torrent search or /library
 //   5. TorrentModal        — rendered when state.torrentOpen is true
 //
 // Labels arrive flat from page.tsx and we shape them per child here so
@@ -128,7 +128,12 @@ export default function DetailActions({
           onOpen={() => setTorrentOpen(true)}
           label={labels.torrents}
         />
-        <PlayButton ariaLabel={labels.playAria}>{labels.play}</PlayButton>
+        <PlayButton
+          ariaLabel={labels.playAria}
+          onOpenDownloads={() => setTorrentOpen(true)}
+        >
+          {labels.play}
+        </PlayButton>
       </div>
       {torrentOpen && (
         <TorrentModal

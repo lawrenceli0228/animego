@@ -6,8 +6,8 @@ import { useLang } from "@/lib/lang-client";
 
 // PlayerShell is the entire Player surface — artplayer + jassub +
 // danmaku + episode list — all of which is 100 % browser-DOM. ssr:
-// false skips the SSR pass entirely. proxy.ts (P6.1) and the
-// layout.tsx auth gate run before this.
+// false skips the SSR pass entirely. Bare /player is a public local-file
+// trial; proxy.ts still gates library hand-offs carrying ?seriesId=.
 //
 // PlayerShell itself reads useSearchParams() inside, which needs a
 // Suspense boundary at the page level when used in Client Components

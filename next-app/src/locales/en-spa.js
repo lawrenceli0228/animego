@@ -83,8 +83,8 @@ const en = {
     viewOnBgm: 'View on Bangumi',
     linkCopied: 'Link copied!',
     linkCopyFailed: 'Copy failed — please copy the link manually',
-    openPlayer: '▶ Play with Danmaku',
-    openPlayerAria: 'Open the danmaku player in a new tab, drop local video files to watch',
+    openPlayer: '▶ Local Danmaku Player',
+    openPlayerAria: 'View the download, local library and danmaku playback steps',
   },
   // Subscription
   sub: {
@@ -170,6 +170,26 @@ const en = {
     noResults: 'No results found',
     loading: 'Searching...', placeholder: 'Search...',
     groupAll: 'All', epAll: 'All',
+    titleHintTitle: 'Nothing found? Try another title',
+    titleHintBody: 'Release groups name things differently. Press a title below to search under that name instead — it often turns up what the first one missed.',
+  },
+  playerGuide: {
+    eyebrow: 'LOCAL DANMAKU PLAYER',
+    title: 'Download it, keep it in one folder, then play',
+    body: 'AnimeGoClub does not stream video. You provide the file; the browser matches the episode, loads danmaku and tracks progress.',
+    chrome: 'Desktop Chrome recommended',
+    downloadTitle: 'Start the download',
+    downloadBody: 'Open Torrents and save the episode with your download client.',
+    folderTitle: 'Use one default folder',
+    folderBody: 'Keep your downloader pointed at one directory. The first time, choose that same directory in My Library.',
+    refreshTitle: 'My Library finds new episodes',
+    refreshBody: 'Keep the library open, or return after the download finishes, and the list checks for updates automatically.',
+    noticeTitle: 'Files stay on your device.',
+    noticeBody: 'The site cannot scan while closed; desktop Chrome has the best live folder support.',
+    downloadCta: 'Go to downloads',
+    trialCta: 'Try as guest',
+    libraryCta: 'Open My Library',
+    close: 'Close player instructions',
   },
   // Social
   social: {
@@ -212,6 +232,17 @@ const en = {
     spoiler: '⚠ Spoiler hidden',
     empty: 'No active discussion yet. Open any episode thread and be the first to start one.',
     start: 'Discover anime →',
+    libraryGuidePinned: 'START HERE',
+    libraryGuideEyebrow: 'MY LIBRARY · LOCAL PLAYBACK',
+    libraryGuideTitle: 'Downloaded episodes play straight from your library',
+    libraryGuideBody: 'Local files land on the right show by themselves, play with danmaku, and keep your watch progress in step.',
+    libraryGuideStepDownload: 'Download episodes with whatever tool you already use.',
+    libraryGuideStepFolder: 'Open My Library and grant it that folder.',
+    libraryGuideStepRefresh: 'New episodes turn up on their own — press play, danmaku matches itself.',
+    libraryGuideChrome: 'Desktop Chrome recommended',
+    libraryGuideChromeNote: 'Better folder access, automatic detection and local playback',
+    libraryGuideCta: 'Open My Library',
+    libraryGuideTrial: 'Try the player as guest',
   },
   // Danmaku
   danmaku: {
@@ -338,6 +369,9 @@ const en = {
   },
   // Player
   player: {
+    guestTrialTitle: 'LOCAL PLAYER TRIAL · NO LOGIN',
+    guestTrialBody: 'Choose a local video to try matching and danmaku. Files never upload; automatic library updates and watch sync require an account.',
+    guestTrialCta: 'Sign in for My Library',
     dropLabel: 'Select video folder',
     dropTitle: 'Drag anime folder here or click to select',
     dropReplace: 'Drop to replace current session',
@@ -575,6 +609,7 @@ const en = {
     localBadge: 'LOCAL',
     reauthorize: 'Reauthorize',
     noSeries: 'No series yet — add a folder to get started.',
+    downloadFolderHint: "Tip: choose your downloader's default save folder. Future completed downloads will be discovered automatically.",
     fileMissing: 'File not found or permission denied',
     // Rendered by LibraryDbAlert.tsx. A second, deliberately un-deduped copy
     // lives in lib/library/db/dbOpenErrors.js as developer / Sentry text — that

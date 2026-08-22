@@ -50,6 +50,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, ApiError } from "@/lib/api";
 import FadeImage from "@/components/ui/FadeImage";
+import Link from "@/components/ui/LocaleLink";
+import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n";
 import {
   buildTorrentRequest,
@@ -489,6 +491,7 @@ export default function TorrentModal({
   onClose,
   lang,
 }: TorrentModalProps) {
+  const { t } = useLang();
   const defaultQ = anime.titleRomaji || anime.titleEnglish || "";
 
   // `query` is the search-box text. `manualQ` is the active manual override:
@@ -519,6 +522,9 @@ export default function TorrentModal({
 
     // Manual search with an empty box → nothing to query.
     if (skip) {
+      // Fetch lifecycle state is intentionally reset when the active request
+      // becomes empty; there is no external callback to move this into.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTorrents([]);
       setIsLoading(false);
       return;
@@ -608,6 +614,7 @@ export default function TorrentModal({
     anime.titleRomaji,
     anime.titleEnglish,
     anime.titleNative,
+    lang,
   ]);
 
   // Manual keyword search (search box Enter / button, or a title pill).
@@ -759,6 +766,55 @@ export default function TorrentModal({
             </button>
           </div>
 
+          {/* Points at the pills below it, so it only exists when they do.
+            *
+            * This slot used to hold download-folder advice with a link out to
+            * the library — useful, but not here: someone with this modal open
+            * is trying to find a release, and the thing most likely to be
+            * standing between them and one is that the release group spells
+            * the show differently than we do. The pills already fix that; they
+            * just never said so. Gated on the same `titleOptions.length > 1`
+            * as the pills, because a hint that says "press a title below" is
+            * worse than no hint when there is only one. */}
+          {titleOptions.length > 1 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 9,
+                padding: "9px 11px",
+                border: "1px solid rgba(100,210,255,0.24)",
+                borderRadius: 9,
+                background: "rgba(10,132,255,0.08)",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  flexShrink: 0,
+                  color: "#64d2ff",
+                  fontSize: 15,
+                  lineHeight: 1.3,
+                }}
+              >
+                ↓
+              </span>
+              <p
+                style={{
+                  margin: 0,
+                  color: "rgba(235,235,245,0.58)",
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong style={{ color: "#9bd8ff", marginRight: 6 }}>
+                  {t("torrent.titleHintTitle")}
+                </strong>
+                {t("torrent.titleHintBody")}
+              </p>
+            </div>
+          )}
+
           {/* Title variant pills */}
           {titleOptions.length > 1 && (
             <div
@@ -768,43 +824,63 @@ export default function TorrentModal({
                 flexWrap: "wrap",
               }}
             >
-              {titleOptions.map((opt) => (
-                <button
-                  type="button"
-                  key={opt.label}
-                  onClick={() => applyTitle(opt.value)}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(10,132,255,0.6)";
-                    e.currentTarget.style.color = "#0a84ff";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(84,84,88,0.65)";
-                    e.currentTarget.style.color = "rgba(235,235,245,0.50)";
-                  }}
-                  style={{
-                    padding: "3px 10px",
-                    borderRadius: 20,
-                    border: "1px solid rgba(84,84,88,0.65)",
-                    background: "transparent",
-                    color: "rgba(235,235,245,0.50)",
-                    fontSize: 11,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  <span
+              {titleOptions.map((opt) => {
+                // These pills had no selected state at all — every one rendered
+                // the same outline, and the blue that looked like a selection
+                // was only the hover. So the row could not answer the one
+                // question it exists to answer: which title are these results
+                // for. The predicate is `manualQ`, not the search-box text,
+                // because typing freely should deselect all of them; and it is
+                // null on open, which correctly shows nothing selected while
+                // the server is still expanding every variant at once.
+                //
+                // Filled-blue-vs-grey rather than a new treatment: the episode
+                // pills directly below are the same kind of control and this is
+                // already how they say "selected".
+                const isActive = manualQ !== null && manualQ === opt.value;
+                return (
+                  <button
+                    type="button"
+                    key={opt.label}
+                    aria-pressed={isActive}
+                    onClick={() => applyTitle(opt.value)}
+                    onMouseEnter={(e) => {
+                      if (isActive) return;
+                      e.currentTarget.style.background = "rgba(255,255,255,0.12)";
+                      e.currentTarget.style.color = "rgba(235,235,245,0.85)";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (isActive) return;
+                      e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+                      e.currentTarget.style.color = "rgba(235,235,245,0.50)";
+                    }}
                     style={{
-                      color: "rgba(235,235,245,0.35)",
-                      marginRight: 4,
+                      padding: "3px 10px",
+                      borderRadius: 20,
+                      border: "none",
+                      background: isActive ? "#0a84ff" : "rgba(255,255,255,0.06)",
+                      color: isActive ? "#fff" : "rgba(235,235,245,0.50)",
+                      fontSize: 11,
+                      fontWeight: isActive ? 600 : 500,
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    {opt.label}
-                  </span>
-                  {opt.value.length > 18 ? opt.value.slice(0, 18) + "…" : opt.value}
-                </button>
-              ))}
+                    <span
+                      style={{
+                        color: isActive
+                          ? "rgba(255,255,255,0.62)"
+                          : "rgba(235,235,245,0.35)",
+                        marginRight: 4,
+                      }}
+                    >
+                      {opt.label}
+                    </span>
+                    {opt.value.length > 18 ? opt.value.slice(0, 18) + "…" : opt.value}
+                  </button>
+                );
+              })}
             </div>
           )}
 

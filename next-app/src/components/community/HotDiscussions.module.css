@@ -40,6 +40,232 @@
   gap: 12px;
 }
 
+/* Blue and only blue.
+ *
+ * The card this replaced ran five colour families in 336px: a blue border and
+ * wash, teal for the eyebrow, the step numbers and a watermark, green for the
+ * Chrome panel, the four-colour Chrome mark, and the section's own orange
+ * label immediately above it. None of them meant anything — they were just
+ * what each piece happened to be built with. One accent, used for the frame,
+ * the wash, the step numbers and the button, is what makes the strip read as
+ * one object instead of four stacked ones. */
+.libraryGuide {
+  position: relative;
+  grid-column: 1 / -1;
+  display: grid;
+  /* The reserved column is wider than the image's opaque part, not narrower.
+   * The art bleeds to the right edge at up to 560px; its left 46% is masked
+   * away, so the first painted pixel lands around 250px in. Reserving up to
+   * 380px leaves roughly 100px between the last character and anything
+   * visible — the distance is the point of the column, the image just happens
+   * to be drawn across it. */
+  grid-template-columns: minmax(0, 1fr) clamp(180px, 26vw, 380px);
+  grid-template-areas:
+    "lead    art"
+    "steps   art"
+    "actions art";
+  align-content: center;
+  padding: 18px 22px;
+  overflow: hidden;
+  border: 1px solid rgba(10, 132, 255, 0.3);
+  border-radius: 14px;
+  background:
+    linear-gradient(100deg, rgba(10, 132, 255, 0.11), transparent 44%),
+    #080b10;
+}
+
+/* A wash under the art rather than a panel around it.
+ *
+ * A panel is another box on a strip whose whole point is having none. This
+ * sits behind the image, so a picture with transparent or pale edges still
+ * has something to end in, and the right side of the strip keeps its weight
+ * on the frame where the art has not loaded yet. */
+.libraryGuide::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  width: 320px;
+  background: radial-gradient(62% 74% at 78% 62%, rgba(10, 132, 255, 0.16), transparent 74%);
+  pointer-events: none;
+}
+
+.guideLead {
+  position: relative;
+  z-index: 1;
+  grid-area: lead;
+}
+
+.guideEyebrow {
+  margin: 0 0 6px;
+  color: rgba(155, 216, 255, 0.72);
+  font: 700 10px/1.2 "JetBrains Mono", monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.guideLead h3 {
+  margin: 0;
+  color: #fff;
+  font: 750 clamp(17px, 2vw, 22px)/1.3 "Sora", sans-serif;
+}
+
+.guideBody {
+  max-width: 620px;
+  margin: 6px 0 0;
+  color: rgba(235, 235, 245, 0.6);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.guideArt {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  width: clamp(300px, 42%, 560px);
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+
+  /* The source is a tall portrait and the slot is a 560x195 letterbox, so cover
+   * crops hard. With this geometry the visible band runs from roughly 22% to
+   * 46% of the frame — high enough to clear the top of the foreground girl's
+   * hair, low enough to still hold every face. Centre it and you get sky;
+   * anything past ~32% and the heads start losing their crowns. */
+  object-fit: cover;
+  object-position: center 29%;
+
+  /* Dissolved into the strip on the left, not butted against it. A hard
+   * vertical edge here would put a second rectangle inside a component whose
+   * point is that it has none, and it is the mask — not the reserved grid
+   * column — that guarantees nothing is painted where the copy ends. */
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.55) 34%, #000 62%);
+  mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.55) 34%, #000 62%);
+}
+
+.guideSteps {
+  position: relative;
+  z-index: 1;
+  grid-area: steps;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guideSteps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(235, 235, 245, 0.66);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* The connector carries the "then". Without it these are three facts; with it
+ * they are one procedure, and the reader knows the order matters before
+ * reading a word. */
+.guideSteps li + li::before {
+  content: "";
+  width: clamp(14px, 2.4vw, 38px);
+  height: 1px;
+  flex: 0 0 auto;
+  margin: 0 14px;
+  background: linear-gradient(90deg, rgba(10, 132, 255, 0.55), rgba(10, 132, 255, 0.12));
+}
+
+.guideSteps li > span {
+  flex-shrink: 0;
+  color: #4da3ff;
+  font: 750 10px/1 "JetBrains Mono", monospace;
+  letter-spacing: 0.5px;
+}
+
+/* The browser requirement, beside the button it is a requirement for.
+ *
+ * It used to be a bordered panel with a green accent, a 44px Chrome logo and
+ * an all-caps label — a headline for a caveat. The correction overshot into a
+ * 10.5px grey line nobody reads. This is the middle: the browser name in white
+ * at the weight of a label, the reason after it in ordinary body grey, and an
+ * accent rule on the left so the eye catches it on the way to the button. No
+ * logo — a four-colour mark drawn in CSS at 14px is a smudge, and the word
+ * "Chrome" identifies Chrome perfectly well. */
+.guideNote {
+  min-width: 0;
+  margin: 0 0 0 6px;
+  padding-left: 11px;
+  border-left: 2px solid rgba(10, 132, 255, 0.55);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.guideNote > span {
+  color: rgba(235, 235, 245, 0.62);
+  font-weight: 400;
+}
+
+.guideNote > span::before {
+  content: " · ";
+  color: rgba(235, 235, 245, 0.38);
+}
+
+.guideActions {
+  position: relative;
+  z-index: 1;
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.guideActions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 38px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.guideActions a:focus-visible {
+  outline: 2px solid #64d2ff;
+  outline-offset: 2px;
+}
+
+.guidePrimary {
+  padding: 0 15px;
+  background: #0a84ff;
+  color: #fff;
+}
+
+.guidePrimary:hover {
+  background: #409cff;
+  transform: translateY(-1px);
+}
+
+.guideSecondary {
+  padding: 0 4px;
+  color: #4da3ff;
+}
+
+.guideSecondary:hover {
+  color: #fff;
+}
+
 .empty {
   grid-column: 1 / -1;
   display: flex;
@@ -170,6 +396,24 @@
   font-size: 15px;
 }
 
+/* Where the horizontal run stops fitting.
+ *
+ * The three steps plus two connectors need roughly 750px of content width, and
+ * below about 1080 the flex row wraps — which is the worst of both forms: a
+ * connector is a rule pointing right, and after a wrap the next item is below.
+ * Stack before that happens rather than after. */
+@media (max-width: 1080px) {
+  .guideSteps {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+  }
+
+  .guideSteps li + li::before {
+    display: none;
+  }
+}
+
 @media (max-width: 760px) {
   .header {
     align-items: start;
@@ -185,6 +429,26 @@
     grid-template-columns: 1fr;
   }
 
+  .libraryGuide {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "lead"
+      "steps"
+      "actions";
+    padding: 18px;
+  }
+
+  /* The art stops reserving a column and becomes the strip's own backdrop:
+   * below 760 there is no width to put a picture beside text, so it goes
+   * behind all of it, faded far enough down that 11px copy still reads. */
+  .guideArt {
+    width: 100%;
+    opacity: 0.16;
+    object-position: center 34%;
+    -webkit-mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.35) 78%, transparent 100%);
+    mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.35) 78%, transparent 100%);
+  }
+
   .empty {
     align-items: flex-start;
     flex-direction: column;
@@ -192,6 +456,33 @@
 }
 
 @media (max-width: 430px) {
+  .libraryGuide::after {
+    display: none;
+  }
+
+  .guideActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .guideSecondary {
+    min-height: 34px !important;
+  }
+
+  /* Once the buttons stack full-width the note is a row of its own, so it
+   * loses the indent that separated it from the button beside it. */
+  .guideNote {
+    margin-left: 0;
+  }
+
+  /* Fainter still at phone width. The strip is 331px tall here and the copy
+   * runs the full width of it, so every line of text has picture behind it —
+   * the backdrop has to stay under the threshold where it competes with 11px
+   * type rather than merely sitting beneath it. */
+  .guideArt {
+    opacity: 0.11;
+  }
+
   .card {
     grid-template-columns: 68px minmax(0, 1fr);
     gap: 11px;
@@ -206,7 +497,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card {
+  .card,
+  .guideActions a {
     transition: none;
   }
 }

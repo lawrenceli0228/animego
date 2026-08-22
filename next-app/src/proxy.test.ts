@@ -119,7 +119,7 @@ describe("proxy /admin gate", () => {
   });
 });
 
-describe("proxy /library + /player gate (P6 — auth required, no role check)", () => {
+describe("proxy /library gate + public /player trial", () => {
   test("/library no session → /login redirect with from preserved", async () => {
     const res = await proxy(buildRequest("/library"));
     expect(res.status).toBe(307);
@@ -128,7 +128,13 @@ describe("proxy /library + /player gate (P6 — auth required, no role check)", 
     expect(loc.searchParams.get("from")).toBe("/library");
   });
 
-  test("/player no session → /login redirect with from preserved", async () => {
+  test("bare /player is public for the local-file trial", async () => {
+    const res = await proxy(buildRequest("/player"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  test("/player library mode still redirects with from preserved", async () => {
     const res = await proxy(buildRequest("/player?seriesId=abc&fileId=42"));
     expect(res.status).toBe(307);
     const loc = new URL(res.headers.get("location")!);
@@ -148,9 +154,11 @@ describe("proxy /library + /player gate (P6 — auth required, no role check)", 
     expect(res.headers.get("location")).toBeNull();
   });
 
-  test("/player passes through with no role claim (just a logged-in user)", async () => {
+  test("signed-in /player library mode passes with no role claim", async () => {
     const token = jwt.sign({ userId: "u1", username: "alice" }, SECRET);
-    const res = await proxy(buildRequest("/player", { session: token }));
+    const res = await proxy(
+      buildRequest("/player?seriesId=abc", { session: token }),
+    );
     expect(res.status).toBe(200);
   });
 

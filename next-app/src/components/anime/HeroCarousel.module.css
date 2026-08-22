@@ -1,0 +1,657 @@
+.root {
+  --desktop-media-height: min(21.0526vw, 400px);
+
+  /* How far the copy climbs onto the artwork.
+   *
+   * It used to start exactly where the art stopped — at ≥1600 literally
+   * `top: var(--desktop-media-height)` — so the two abutted and never
+   * overlapped. That is a picture with a caption under it, and no edge
+   * treatment fixes it, because the problem is not the edge: it is that there
+   * are two zones. The copy now sits on the lower third of the art, which is
+   * the only arrangement that makes them one composition. */
+  --hero-copy-lift: clamp(92px, 9.2vw, 170px);
+  --desktop-copy-top: calc(var(--desktop-media-height) - var(--hero-copy-lift));
+
+  /* The page's own left edge, reproduced.
+   *
+   * Everything below this component lives in `.container` — max-width 1400,
+   * 24px padding, centred — so its text starts 284px in at 1920. The hero used
+   * `clamp(24px, 5vw, 76px)`, which put its title 208px to the left of every
+   * other heading on the page. The artwork stays full-bleed on purpose; the
+   * words in it should start where the page's words start.
+   *
+   * The percentage resolves against .root, which spans the full width, so this
+   * is the same arithmetic .container does — without importing it. */
+  --hero-gutter: max(24px, calc((100% - 1400px) / 2 + 24px));
+  /* Fallback for a title whose cover produced no accent. The system accent
+   * rather than a near-miss blue: an off-palette default is how a design
+   * system quietly grows a second brand colour. */
+  --hero-accent: #0a84ff;
+  --hero-accent-rgb: 10, 132, 255;
+  position: relative;
+  isolation: isolate;
+
+  /* Driven by the art rather than by the viewport. The old
+   * `clamp(500px, 100vh - 160px, 560px)` left 150-plus pixels of black between
+   * the copy and the rail on wide screens, which is what forced the copy down
+   * to the art's edge in the first place. */
+  height: clamp(430px, calc(var(--desktop-copy-top) + 300px), 640px);
+  overflow: hidden;
+  outline: none;
+  background: #07090c;
+}
+
+.root:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--hero-accent);
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 720ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.slideActive {
+  z-index: 1;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.artwork {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: var(--desktop-media-height);
+  overflow: hidden;
+  background: #0b0d11;
+
+}
+
+/* Darken toward the copy, do not fade toward it.
+ *
+ * A mask was the first attempt and it was wrong for a reason worth keeping:
+ * fading a bright banner to transparent over black produces a wide grey ramp,
+ * so a white block became a grey haze — a translucent layer floating on the
+ * page instead of part of it. A scrim paints the art down to the exact colour
+ * the page already is, so the bottom of the image and the top of the copy are
+ * literally the same pixel value and there is nothing to see a join in.
+ *
+ * It also has to be a scrim rather than a mask because the copy sits on top of
+ * this: text needs something opaque behind it, not a hole. */
+.artwork::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(7, 9, 12, 0) 18%,
+    rgba(7, 9, 12, 0.4) 48%,
+    rgba(7, 9, 12, 0.88) 78%,
+    #07090c 96%
+  );
+}
+
+.art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+
+  /* brightness(0.55), not the 1.03 this used to carry. The page is near-black
+   * and the banner is whatever the studio drew — BLEACH's is a white
+   * explosion. Brightening it put a white block on a black page, which reads
+   * as two documents no matter how the boundary is treated. Bringing the art
+   * into the page's luminance range is what makes it belong to it. */
+  filter: saturate(1.06) contrast(1.04) brightness(0.55);
+  transform: scale(0.998);
+  transform-origin: center;
+  transition:
+    transform 6s cubic-bezier(0.2, 0.75, 0.3, 1),
+    filter 400ms ease;
+}
+
+.slideActive .art {
+  transform: scale(1);
+}
+
+.placeholder {
+  background: #111318;
+}
+
+.copy {
+  position: absolute;
+  top: var(--desktop-copy-top);
+  right: var(--hero-gutter);
+  bottom: 72px;
+  left: var(--hero-gutter);
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(300px, 0.72fr);
+  grid-template-areas:
+    "eyebrow description"
+    "title description"
+    "meta actions";
+  column-gap: clamp(36px, 6vw, 90px);
+
+  /* Start, not center. Centring meant the copy floated in whatever black was
+   * left below the art, so how far it climbed onto the image depended on the
+   * viewport: a clean overlap at 1840 and a title sitting 35px clear of the
+   * artwork at 768. Anchored to --desktop-copy-top the overlap is exactly
+   * --hero-copy-lift at every width, which is the whole point of having the
+   * variable. */
+  align-content: start;
+}
+
+.eyebrow {
+  grid-area: eyebrow;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 11px;
+  font-weight: 780;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 28px;
+  height: 2px;
+  flex: 0 0 auto;
+  background: var(--hero-accent);
+}
+
+.title {
+  grid-area: title;
+  max-width: 760px;
+  margin: 0;
+  color: #f7f8fb;
+  font-family: var(--font-display);
+  font-size: clamp(32px, 4vw, 56px);
+  font-weight: 820;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.metaRow {
+  grid-area: meta;
+  margin-top: 15px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.metaChip {
+  height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.description {
+  grid-area: description;
+  max-width: 480px;
+  align-self: end;
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 14px;
+  line-height: 1.72;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.actions {
+  grid-area: actions;
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+}
+
+.primaryAction,
+.secondaryAction {
+  min-height: 45px;
+  padding: 0 19px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 2px;
+  font-size: 13px;
+  font-weight: 740;
+  text-decoration: none;
+  transition:
+    transform 160ms ease,
+    background 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+}
+
+/* The one element in this component that does NOT take the poster's colour.
+ *
+ * --hero-accent changes every time the carousel advances, and this is the
+ * primary call to action. Letting it follow the poster means the site's one
+ * learned signal — blue is what you can press — gets overwritten every few
+ * seconds on the first button a visitor ever sees. It also loses the contrast
+ * guarantee: a poster accent is whatever colour happened to dominate the art,
+ * and some of them cannot carry legible text.
+ *
+ * The poster colour still does everything else in here: the eyebrow rule, the
+ * progress bar, the focus ring on the slide, the secondary button's hover
+ * wash. The slide keeps its identity; the button keeps its meaning. */
+.primaryAction {
+  background: var(--accent, #0a84ff);
+  color: #ffffff;
+}
+
+.primaryAction:hover {
+  background: #409cff;
+  transform: translateY(-2px);
+}
+
+.primaryAction:active {
+  background: #0070d6;
+}
+
+.secondaryAction {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #f7f8fb;
+}
+
+.secondaryAction:hover {
+  border-color: rgba(var(--hero-accent-rgb), 0.46);
+  background: rgba(var(--hero-accent-rgb), 0.14);
+  transform: translateY(-2px);
+}
+
+.arrow {
+  position: absolute;
+  top: 25%;
+  z-index: 6;
+  width: 45px;
+  height: 45px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 50%;
+  background: rgba(15, 17, 20, 0.78);
+  color: #fff;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+  opacity: 0;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    background 180ms ease;
+}
+
+.root:hover .arrow,
+.root:focus-within .arrow {
+  opacity: 1;
+}
+
+.arrow:hover {
+  background: rgba(var(--hero-accent-rgb), 0.24);
+}
+
+.previous {
+  left: 16px;
+  transform: translateX(-5px);
+}
+
+.next {
+  right: 16px;
+  transform: translateX(5px);
+}
+
+.root:hover .previous,
+.root:focus-within .previous,
+.root:hover .next,
+.root:focus-within .next {
+  transform: translateX(0);
+}
+
+.rail {
+  position: absolute;
+  right: var(--hero-gutter);
+  bottom: 16px;
+  left: var(--hero-gutter);
+  z-index: 7;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+}
+
+.railList {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.railItem {
+  position: relative;
+  min-width: 0;
+  height: 38px;
+  padding: 8px 9px 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  text-align: left;
+  opacity: 0.6;
+  transition:
+    opacity 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.railItem:hover {
+  opacity: 0.9;
+}
+
+.railItemActive {
+  border-color: rgba(var(--hero-accent-rgb), 0.7);
+  opacity: 1;
+}
+
+.railNumber {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.railTitle {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.railProgress {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  bottom: auto;
+  left: 0;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 0;
+}
+
+.railProgress::after {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--hero-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.railItemActive .railProgress::after {
+  animation: railFill 5s linear forwards;
+}
+
+.railItemActive .railProgress {
+  opacity: 1;
+}
+
+.root[data-paused="true"] .railItemActive .railProgress::after {
+  animation-play-state: paused;
+}
+
+.pauseButton {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+}
+
+.pauseButton:hover {
+  border-color: var(--hero-accent);
+  color: #fff;
+}
+
+.pauseButton svg {
+  width: 15px;
+  height: 15px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes railFill {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (min-width: 1600px) {
+  /* The height and copy-top overrides that used to live here are gone: both
+   * are now the same art-driven formula at every desktop width, and the
+   * `top: var(--desktop-media-height)` this block carried was the exact line
+   * that pinned the copy to the artwork's edge. */
+  .arrow {
+    top: min(10.5263vw, 200px);
+  }
+}
+
+@media (max-width: 900px) {
+  .copy {
+    width: min(570px, calc(100% - 48px));
+  }
+
+  .railList {
+    overflow-x: auto;
+    grid-template-columns: repeat(5, 150px);
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, #000 88%, transparent);
+  }
+
+  .railList::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .root {
+    --desktop-media-height: 0px;
+    height: 760px;
+    min-height: 760px;
+  }
+
+  .artwork {
+    top: 18px;
+    right: 16px;
+    left: auto;
+    width: min(58vw, 230px);
+    height: auto;
+    aspect-ratio: 46 / 65;
+    overflow: visible;
+    background: transparent;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.16),
+      14px 14px 0 rgba(var(--hero-accent-rgb), 0.12);
+
+  }
+
+  /* No scrim here — the darkening treatment is desktop-only.
+   *
+   * Up there the art is full-bleed and the copy sits on it, so it has to be
+   * pushed down into the page's luminance range to hold text. Down here it is
+   * a framed poster card with a hairline ring and an offset accent shadow,
+   * floated over the background with the copy well below it. It is meant to
+   * read as an object, and an object that has been dimmed by half reads as
+   * disabled. */
+  .artwork::after {
+    display: none;
+  }
+
+  .art {
+    object-fit: contain;
+    filter: saturate(1.06) contrast(1.02) brightness(1.04);
+    transform-origin: center top;
+  }
+
+  .copy {
+    top: 365px;
+    right: 18px;
+    bottom: 112px;
+    left: 18px;
+    width: calc(100% - 36px);
+    display: block;
+  }
+
+  .eyebrow {
+    margin-bottom: 12px;
+    font-size: 9px;
+  }
+
+  .title {
+    max-width: 100%;
+    font-size: clamp(32px, 9.6vw, 42px);
+    line-height: 1.02;
+  }
+
+  .metaRow {
+    margin-top: 16px;
+  }
+
+  .description {
+    margin-top: 13px;
+    font-size: 13px;
+    line-height: 1.62;
+  }
+
+  .actions {
+    margin-top: 19px;
+  }
+
+  .primaryAction {
+    min-height: 43px;
+    padding: 0 15px;
+  }
+
+  /* The guest trial is desktop-only, so the door to it is too.
+   *
+   * /player needs the File System Access API, which no mobile browser ships.
+   * A phone visitor who took this route reached a page that said "use a
+   * computer" and stopped there: no reason, no way back, nothing to do. That
+   * is a worse outcome than never seeing the button, because they spent a tap
+   * to learn the site was broken for them.
+   *
+   * Hidden rather than disabled: a disabled control still asks to be
+   * understood. If mobile ever gets a story here, this rule is the one place
+   * to undo. */
+  .secondaryAction {
+    display: none;
+  }
+
+  .arrow {
+    display: none;
+  }
+
+  .rail {
+    right: 16px;
+    bottom: 14px;
+    left: 18px;
+    gap: 9px;
+  }
+
+  .railList {
+    min-width: 0;
+    overflow-x: auto;
+    gap: 7px;
+    grid-template-columns: repeat(5, 128px);
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, #000 88%, transparent);
+  }
+
+  .railList::-webkit-scrollbar {
+    display: none;
+  }
+
+  .railItem {
+    min-width: 128px;
+    height: 42px;
+    flex: 0 0 128px;
+  }
+
+  .pauseButton {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide,
+  .art,
+  .primaryAction,
+  .secondaryAction,
+  .arrow,
+  .railItem {
+    transition-duration: 0.01ms;
+  }
+
+  .railItemActive .railProgress::after {
+    animation: none;
+    transform: scaleX(1);
+  }
+}

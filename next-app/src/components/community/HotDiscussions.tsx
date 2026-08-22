@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { pickTitle } from "@/lib/formatters";
@@ -43,6 +44,86 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
       </header>
 
       <div id="hot-discussion-list" className={styles.grid}>
+        {/* A band, not a card.
+          *
+          * This is the only explanation of the hardest-to-discover thing the
+          * site does, so it earns being seen — but it was 1352×336 sitting on
+          * top of a 140px discussion card, which made the biggest object in a
+          * section called "正在热议" a download tutorial. It is now a strip:
+          * the one shape on this page that is neither a card nor a poster, so
+          * it reads as "instructions" before a word of it is read.
+          *
+          * What went: three step boxes (a numbered list does not need three
+          * borders to be a numbered list), the bordered Chrome panel (a
+          * one-line caveat was wearing a headline, a logo and a green accent),
+          * two decorative labels, and a "LOCAL // DANMAKU" watermark that the
+          * illustration panel painted over and sliced mid-word. */}
+        <article className={styles.libraryGuide}>
+          <div className={styles.guideLead}>
+            <p className={styles.guideEyebrow}>
+              {t("communityDiscovery.libraryGuidePinned")} ·{" "}
+              {t("communityDiscovery.libraryGuideEyebrow")}
+            </p>
+            <h3>{t("communityDiscovery.libraryGuideTitle")}</h3>
+            <p className={styles.guideBody}>
+              {t("communityDiscovery.libraryGuideBody")}
+            </p>
+          </div>
+
+          {/* The rule between items is the sequence. Three equal boxes said
+            * "three things"; a connected run says "then, then". */}
+          <ol className={styles.guideSteps}>
+            <li>
+              <span aria-hidden>01</span>
+              {t("communityDiscovery.libraryGuideStepDownload")}
+            </li>
+            <li>
+              <span aria-hidden>02</span>
+              {t("communityDiscovery.libraryGuideStepFolder")}
+            </li>
+            <li>
+              <span aria-hidden>03</span>
+              {t("communityDiscovery.libraryGuideStepRefresh")}
+            </li>
+          </ol>
+
+          <div className={styles.guideActions}>
+            <Link href="/library" prefetch={false} className={styles.guidePrimary}>
+              {t("communityDiscovery.libraryGuideCta")}
+              <span aria-hidden>→</span>
+            </Link>
+            <Link href="/player" prefetch={false} className={styles.guideSecondary}>
+              {t("communityDiscovery.libraryGuideTrial")}
+            </Link>
+            {/* A precondition, not a footnote.
+              * Demoting it to 10.5px grey with a 14px hand-drawn Chrome mark
+              * went too far in the other direction: nobody reads it, and a
+              * four-colour logo at that size is a smudge rather than a brand.
+              * Someone on Safari who misses this line presses the button and
+              * finds out the hard way, so it sits beside the button, at a size
+              * that can be read, with the browser name carrying the weight. */}
+            <p className={styles.guideNote}>
+              {t("communityDiscovery.libraryGuideChrome")}
+              <span>{t("communityDiscovery.libraryGuideChromeNote")}</span>
+            </p>
+          </div>
+
+          {/* Decorative, and behind the text on purpose.
+            * It is `z-index: 0` against the content's 1, so even if a future
+            * image is wider than the column reserved for it the words stay on
+            * top. The left edge is masked to transparent, so the copy's safe
+            * zone is not just the reserved column — the image is literally not
+            * painted where the text ends. */}
+          <Image
+            className={styles.guideArt}
+            src="/community-guide.jpg"
+            alt=""
+            width={978}
+            height={1400}
+            sizes="(max-width: 760px) 100vw, 560px"
+          />
+        </article>
+
         <Link
           href="/welcome"
           prefetch={false}

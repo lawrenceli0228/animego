@@ -25,9 +25,21 @@ const PARSE_PULSE_CSS = `@keyframes parsePulse{0%,100%{opacity:0.55}50%{opacity:
 const s = {
   wrapper: {
     position: "relative",
+    // `width: 100%` is load-bearing, not decoration. As a flex item this box
+    // has `margin: … auto` on the cross axis, and a flex item with an auto
+    // cross-axis margin does not stretch — it falls back to fit-content. That
+    // is why the drop target rendered at 459px inside a 720px column while the
+    // banner above it rendered at 598px: three different widths on one screen,
+    // none of them the one that was designed. An explicit width settles it in
+    // both contexts — flex item here, plain block in the library fallback.
+    width: "100%",
     maxWidth: 720,
     margin: "64px auto",
-    padding: "0 24px",
+    // No horizontal padding. It was here to keep the target off the window
+    // edge back when this was the only thing on the page; every context that
+    // renders it now sits inside a container that already has a gutter, so all
+    // it did was inset the dashed frame 24px from the banner directly above it
+    // — two boxes in one column with edges that nearly, but don't, line up.
   } as CSSProperties,
   zone: (dragging: boolean): CSSProperties => ({
     position: "relative",
