@@ -43,7 +43,20 @@
   height: var(--desktop-media-height);
   overflow: hidden;
   background: #0b0d11;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+
+  /* Dissolve the bottom edge instead of drawing it.
+   *
+   * The art ends at --desktop-media-height and the copy begins two pixels
+   * later, so the two never overlap: the viewport was a picture stacked on a
+   * text block rather than one composition. A 1px white hairline used to sit
+   * on this seam, which underlined the very join the layout needed to hide.
+   *
+   * The mask fades the last third of the art into the black the copy sits on,
+   * so the eye reads one field with an image at the top of it. The existing
+   * side masks are `to right` and live in the narrow breakpoints; this is the
+   * vertical one, and it is the one the desktop composition was missing. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
 }
 
 .art {
@@ -128,7 +141,6 @@
   gap: 8px;
 }
 
-.scoreChip,
 .metaChip {
   height: 30px;
   padding: 0 10px;
@@ -142,12 +154,6 @@
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
-}
-
-.scoreChip {
-  border-color: rgba(var(--hero-accent-rgb), 0.3);
-  background: rgba(var(--hero-accent-rgb), 0.12);
-  color: #f7f8fb;
 }
 
 .description {
@@ -230,55 +236,6 @@
   border-color: rgba(var(--hero-accent-rgb), 0.46);
   background: rgba(var(--hero-accent-rgb), 0.14);
   transform: translateY(-2px);
-}
-
-.status {
-  position: absolute;
-  top: clamp(22px, 4vw, 42px);
-  right: clamp(22px, 3vw, 46px);
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.slideCount {
-  height: 34px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid #1a1d22;
-  border-radius: 2px;
-  background: #111318;
-  color: rgba(255, 255, 255, 0.62);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 760;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.slideCount strong {
-  color: #fff;
-  font-size: 13px;
-}
-
-.sideLabel {
-  position: absolute;
-  top: 50%;
-  right: 10px;
-  z-index: 5;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.34);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.17em;
-  line-height: 1;
-  text-transform: uppercase;
-  writing-mode: vertical-rl;
-  transform: translateY(-4%);
 }
 
 .arrow {
@@ -525,6 +482,16 @@
     box-shadow:
       0 0 0 1px rgba(255, 255, 255, 0.16),
       14px 14px 0 rgba(var(--hero-accent-rgb), 0.12);
+
+    /* No fade here — the mask is a desktop-only fix.
+     *
+     * Up there the art is full-bleed and butts against the copy, so its bottom
+     * edge is a seam worth dissolving. Down here it is a framed poster card
+     * with a deliberate hairline ring and an offset accent shadow, floated over
+     * the background with the copy well below it. There is no seam, and the
+     * mask would eat the very edges the card is made of. */
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
   .art {
@@ -585,25 +552,6 @@
    * to undo. */
   .secondaryAction {
     display: none;
-  }
-
-  .status {
-    top: 18px;
-    right: auto;
-    left: 18px;
-  }
-
-  .sideLabel {
-    top: 76px;
-    right: auto;
-    left: 20px;
-    width: 92px;
-    color: rgba(255, 255, 255, 0.38);
-    font-size: 9px;
-    letter-spacing: 0.18em;
-    line-height: 1.8;
-    writing-mode: horizontal-tb;
-    transform: none;
   }
 
   .arrow {

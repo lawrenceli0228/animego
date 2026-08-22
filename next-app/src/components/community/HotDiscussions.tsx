@@ -44,79 +44,74 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
       </header>
 
       <div id="hot-discussion-list" className={styles.grid}>
+        {/* A band, not a card.
+          *
+          * This is the only explanation of the hardest-to-discover thing the
+          * site does, so it earns being seen — but it was 1352×336 sitting on
+          * top of a 140px discussion card, which made the biggest object in a
+          * section called "正在热议" a download tutorial. It is now a strip:
+          * the one shape on this page that is neither a card nor a poster, so
+          * it reads as "instructions" before a word of it is read.
+          *
+          * What went: three step boxes (a numbered list does not need three
+          * borders to be a numbered list), the bordered Chrome panel (a
+          * one-line caveat was wearing a headline, a logo and a green accent),
+          * two decorative labels, and a "LOCAL // DANMAKU" watermark that the
+          * illustration panel painted over and sliced mid-word. */}
         <article className={styles.libraryGuide}>
-          <div className={styles.guideLayout}>
-            <div className={styles.guideContent}>
-              <div className={styles.guideIntro}>
-                <div>
-                  <p className={styles.guideEyebrow}>
-                    {t("communityDiscovery.libraryGuidePinned")} ·{" "}
-                    {t("communityDiscovery.libraryGuideEyebrow")}
-                  </p>
-                  <h3>{t("communityDiscovery.libraryGuideTitle")}</h3>
-                  <p className={styles.guideBody}>
-                    {t("communityDiscovery.libraryGuideBody")}
-                  </p>
-                </div>
-              </div>
-
-              <div className={styles.chromePanel}>
-                <span className={styles.chromeMark} aria-hidden />
-                <span className={styles.chromeCopy}>
-                  <small>RECOMMENDED BROWSER</small>
-                  <strong>{t("communityDiscovery.libraryGuideChrome")}</strong>
-                  <span>{t("communityDiscovery.libraryGuideChromeNote")}</span>
-                </span>
-              </div>
-
-              <ol className={styles.guideSteps}>
-                <li>
-                  <span aria-hidden>01</span>
-                  {t("communityDiscovery.libraryGuideStepDownload")}
-                </li>
-                <li>
-                  <span aria-hidden>02</span>
-                  {t("communityDiscovery.libraryGuideStepFolder")}
-                </li>
-                <li>
-                  <span aria-hidden>03</span>
-                  {t("communityDiscovery.libraryGuideStepRefresh")}
-                </li>
-              </ol>
-
-              <div className={styles.guideActions}>
-                <Link
-                  href="/library"
-                  prefetch={false}
-                  className={styles.guidePrimary}
-                >
-                  {t("communityDiscovery.libraryGuideCta")}
-                  <span aria-hidden>→</span>
-                </Link>
-                <Link
-                  href="/player"
-                  prefetch={false}
-                  className={styles.guideSecondary}
-                >
-                  {t("communityDiscovery.libraryGuideTrial")}
-                </Link>
-              </div>
-            </div>
-
-            <div className={styles.guideVisual}>
-              <span className={styles.visualLabel} aria-hidden>
-                LOCAL PLAYER / 01
-              </span>
-              <Image
-                className={styles.guideMascot}
-                src="/mascot-wink.png"
-                alt=""
-                width={720}
-                height={1080}
-                sizes="(max-width: 760px) 180px, 240px"
-              />
-            </div>
+          <div className={styles.guideLead}>
+            <p className={styles.guideEyebrow}>
+              {t("communityDiscovery.libraryGuidePinned")} ·{" "}
+              {t("communityDiscovery.libraryGuideEyebrow")}
+            </p>
+            <h3>{t("communityDiscovery.libraryGuideTitle")}</h3>
+            <p className={styles.guideBody}>
+              {t("communityDiscovery.libraryGuideBody")}
+            </p>
           </div>
+
+          {/* The rule between items is the sequence. Three equal boxes said
+            * "three things"; a connected run says "then, then". */}
+          <ol className={styles.guideSteps}>
+            <li>
+              <span aria-hidden>01</span>
+              {t("communityDiscovery.libraryGuideStepDownload")}
+            </li>
+            <li>
+              <span aria-hidden>02</span>
+              {t("communityDiscovery.libraryGuideStepFolder")}
+            </li>
+            <li>
+              <span aria-hidden>03</span>
+              {t("communityDiscovery.libraryGuideStepRefresh")}
+            </li>
+          </ol>
+
+          <div className={styles.guideActions}>
+            <Link href="/library" prefetch={false} className={styles.guidePrimary}>
+              {t("communityDiscovery.libraryGuideCta")}
+              <span aria-hidden>→</span>
+            </Link>
+            <Link href="/player" prefetch={false} className={styles.guideSecondary}>
+              {t("communityDiscovery.libraryGuideTrial")}
+            </Link>
+            <p className={styles.guideFootnote}>
+              <span className={styles.chromeMark} aria-hidden />
+              <span>
+                {t("communityDiscovery.libraryGuideChrome")} ·{" "}
+                {t("communityDiscovery.libraryGuideChromeNote")}
+              </span>
+            </p>
+          </div>
+
+          <Image
+            className={styles.guideMascot}
+            src="/mascot-wink.png"
+            alt=""
+            width={720}
+            height={1080}
+            sizes="(max-width: 760px) 104px, 132px"
+          />
         </article>
 
         <Link

@@ -40,121 +40,138 @@
   gap: 12px;
 }
 
+/* Blue and only blue.
+ *
+ * The card this replaced ran five colour families in 336px: a blue border and
+ * wash, teal for the eyebrow, the step numbers and a watermark, green for the
+ * Chrome panel, the four-colour Chrome mark, and the section's own orange
+ * label immediately above it. None of them meant anything — they were just
+ * what each piece happened to be built with. One accent, used for the frame,
+ * the wash, the step numbers and the button, is what makes the strip read as
+ * one object instead of four stacked ones. */
 .libraryGuide {
   position: relative;
   grid-column: 1 / -1;
-  border: 1px solid rgba(10, 132, 255, 0.38);
-  border-radius: 15px;
-  background: #080b10;
-  overflow: hidden;
-}
-
-.libraryGuide::after {
-  content: "LOCAL // DANMAKU";
-  position: absolute;
-  right: 18px;
-  bottom: 12px;
-  color: rgba(100, 210, 255, 0.08);
-  font: 800 clamp(20px, 4vw, 42px)/1 "JetBrains Mono", monospace;
-  letter-spacing: -2px;
-  pointer-events: none;
-}
-
-.guideLayout {
   display: grid;
-  grid-template-columns: minmax(0, 1.75fr) minmax(280px, 0.65fr);
-  grid-template-areas: "content visual";
-  min-height: 292px;
-}
-
-.guideContent {
-  grid-area: content;
-  padding: 24px;
+  grid-template-columns: minmax(0, 1fr) 148px;
+  grid-template-areas:
+    "lead    art"
+    "steps   art"
+    "actions art";
+  align-content: center;
+  padding: 18px 22px;
+  overflow: hidden;
+  border: 1px solid rgba(10, 132, 255, 0.3);
+  border-radius: 14px;
   background:
-    linear-gradient(90deg, rgba(10, 132, 255, 0.12), transparent 42%),
+    linear-gradient(100deg, rgba(10, 132, 255, 0.11), transparent 44%),
     #080b10;
 }
 
-.guideIntro {
+/* Atmosphere behind the mascot, replacing the bordered panel she used to sit
+ * in. A panel is another box on a strip whose whole point is having none; a
+ * glow puts her in the same field as the text and still separates her from
+ * it. */
+.libraryGuide::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  background: radial-gradient(58% 68% at 74% 76%, rgba(10, 132, 255, 0.17), transparent 72%);
+  pointer-events: none;
+}
+
+.guideLead {
   position: relative;
   z-index: 1;
+  grid-area: lead;
 }
 
 .guideEyebrow {
-  margin: 0 0 7px;
-  color: #64d2ff;
+  margin: 0 0 6px;
+  color: rgba(155, 216, 255, 0.72);
   font: 700 10px/1.2 "JetBrains Mono", monospace;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
 
-.guideIntro h3 {
+.guideLead h3 {
   margin: 0;
   color: #fff;
-  font: 750 clamp(18px, 2.5vw, 24px)/1.25 "Sora", sans-serif;
+  font: 750 clamp(17px, 2vw, 22px)/1.3 "Sora", sans-serif;
 }
 
 .guideBody {
-  max-width: 700px;
-  margin: 8px 0 0;
-  color: rgba(235, 235, 245, 0.68);
-  font-size: 13px;
-  line-height: 1.65;
-}
-
-.guideVisual {
-  position: relative;
-  grid-area: visual;
-  min-width: 0;
-  min-height: 292px;
-  overflow: hidden;
-  border-left: 1px solid rgba(100, 210, 255, 0.2);
-  background:
-    radial-gradient(circle at 62% 18%, rgba(100, 210, 255, 0.24), transparent 35%),
-    linear-gradient(145deg, #101b2a, #07101d 62%, #05080d);
-}
-
-.visualLabel {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 2;
-  color: rgba(155, 216, 255, 0.65);
-  font: 750 9px/1 "JetBrains Mono", monospace;
-  letter-spacing: 1.2px;
+  max-width: 620px;
+  margin: 6px 0 0;
+  color: rgba(235, 235, 245, 0.6);
+  font-size: 12.5px;
+  line-height: 1.55;
 }
 
 .guideMascot {
   position: absolute;
-  top: -28px;
-  right: -12px;
-  width: 240px;
+  right: 10px;
+  bottom: -12px;
+  z-index: 1;
+  width: 132px;
   height: auto;
   pointer-events: none;
   user-select: none;
+
+  /* Same dissolve as the hero art: she is taller than the strip, so her lower
+   * edge is a crop. Fading it means the strip ends in a shape rather than in a
+   * cut through her hands. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 76%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 76%, transparent 100%);
 }
 
-.chromePanel {
+.guideSteps {
   position: relative;
-  z-index: 3;
-  width: 100%;
-  max-width: 100%;
-  min-height: 66px;
-  margin-top: 16px;
-  padding: 9px 14px 9px 10px;
+  z-index: 1;
+  grid-area: steps;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guideSteps li {
   display: flex;
   align-items: center;
-  gap: 12px;
-  border: 1px solid rgba(114, 223, 143, 0.32);
-  border-left: 3px solid #72df8f;
-  border-radius: 10px;
-  background: #0b1119;
+  gap: 8px;
+  color: rgba(235, 235, 245, 0.66);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* The connector carries the "then". Without it these are three facts; with it
+ * they are one procedure, and the reader knows the order matters before
+ * reading a word. */
+.guideSteps li + li::before {
+  content: "";
+  width: clamp(14px, 2.4vw, 38px);
+  height: 1px;
+  flex: 0 0 auto;
+  margin: 0 14px;
+  background: linear-gradient(90deg, rgba(10, 132, 255, 0.55), rgba(10, 132, 255, 0.12));
+}
+
+.guideSteps li > span {
+  flex-shrink: 0;
+  color: #4da3ff;
+  font: 750 10px/1 "JetBrains Mono", monospace;
+  letter-spacing: 0.5px;
 }
 
 .chromeMark {
   position: relative;
-  width: 44px;
-  height: 44px;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
   border-radius: 50%;
   background: conic-gradient(from -28deg, #ea4335 0 33.333%, #fbbc04 0 66.666%, #34a853 0);
@@ -168,79 +185,44 @@
 }
 
 .chromeMark::before {
-  inset: 8px;
+  inset: 2.5px;
   background: #f7f8fb;
 }
 
 .chromeMark::after {
-  inset: 12px;
-  border: 2px solid #8ab4f8;
+  inset: 4px;
+  border: 1px solid #8ab4f8;
   background: #4285f4;
 }
 
-.chromeCopy {
+/* The browser requirement is a caveat, not a headline. It had its own bordered
+ * panel, a green accent, a 44px logo and an all-caps label to say one thing:
+ * this works best in desktop Chrome. At footnote scale beside the button it
+ * says exactly that, at the moment the button is being considered. */
+.guideFootnote {
   min-width: 0;
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(140px, auto) minmax(0, 1fr);
-  align-items: end;
-  gap: 3px 18px;
-}
-
-.chromeCopy small {
-  grid-column: 1 / -1;
-  color: #72df8f;
-  font: 750 8px/1.2 "JetBrains Mono", monospace;
-  letter-spacing: 1px;
-}
-
-.chromeCopy strong {
-  color: #fff;
-  font: 760 13px/1.25 "Sora", sans-serif;
-}
-
-.chromeCopy span {
-  align-self: center;
-  color: rgba(235, 235, 245, 0.56);
-  font-size: 10px;
-  line-height: 1.35;
-}
-
-.guideSteps {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin: 18px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.guideSteps li {
+  margin: 0 0 0 4px;
   display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  min-height: 54px;
-  padding: 11px 12px;
-  border: 1px solid rgba(84, 84, 88, 0.48);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  color: rgba(235, 235, 245, 0.72);
-  font-size: 11px;
-  line-height: 1.5;
+  align-items: center;
+  gap: 7px;
+  color: rgba(235, 235, 245, 0.44);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
-.guideSteps li > span {
-  flex-shrink: 0;
-  color: #64d2ff;
-  font: 750 10px/1.5 "JetBrains Mono", monospace;
+/* The text needs its own element to be shrinkable: a bare text node in a flex
+ * container becomes an anonymous item with min-width:auto, so it refuses to
+ * wrap and runs off the strip on narrow screens. */
+.guideFootnote > span {
+  min-width: 0;
 }
 
 .guideActions {
   position: relative;
   z-index: 1;
+  grid-area: actions;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-top: 16px;
@@ -271,13 +253,13 @@
 }
 
 .guidePrimary:hover {
-  background: #3395ff;
+  background: #409cff;
   transform: translateY(-1px);
 }
 
 .guideSecondary {
   padding: 0 4px;
-  color: #9bd8ff;
+  color: #4da3ff;
 }
 
 .guideSecondary:hover {
@@ -414,6 +396,24 @@
   font-size: 15px;
 }
 
+/* Where the horizontal run stops fitting.
+ *
+ * The three steps plus two connectors need roughly 750px of content width, and
+ * below about 1080 the flex row wraps — which is the worst of both forms: a
+ * connector is a rule pointing right, and after a wrap the next item is below.
+ * Stack before that happens rather than after. */
+@media (max-width: 1080px) {
+  .guideSteps {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+  }
+
+  .guideSteps li + li::before {
+    display: none;
+  }
+}
+
 @media (max-width: 760px) {
   .header {
     align-items: start;
@@ -430,38 +430,27 @@
   }
 
   .libraryGuide {
-    padding: 0;
-  }
-
-  .guideLayout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      "visual"
-      "content";
-  }
-
-  .guideContent {
+      "lead"
+      "steps"
+      "actions";
     padding: 18px;
   }
 
-  .guideVisual {
-    min-height: 220px;
-    border-bottom: 1px solid rgba(100, 210, 255, 0.2);
-    border-left: 0;
-  }
-
+  /* She keeps her corner but stops reserving a column: below 760 the text has
+   * no width to spare, and the steps wrap under her rather than beside her. */
   .guideMascot {
-    top: -40px;
-    right: 6px;
-    width: 190px;
+    right: -6px;
+    bottom: -10px;
+    width: 104px;
+    opacity: 0.5;
   }
 
-  .guideIntro {
-    display: block;
-  }
-
-  .guideSteps {
-    grid-template-columns: 1fr;
+  .guideLead,
+  .guideSteps,
+  .guideActions {
+    padding-right: 92px;
   }
 
   .empty {
@@ -484,28 +473,29 @@
     min-height: 34px !important;
   }
 
-  .guideVisual {
-    min-height: 230px;
-  }
-
-  .guideMascot {
-    right: -8px;
-    width: 180px;
-  }
-
-  .chromePanel {
-    width: 100%;
-  }
-
-  .chromeCopy {
-    display: flex;
-    flex-direction: column;
+  /* The footnote stops being a footnote once the buttons stack full-width:
+   * left-align it under them rather than centring it like a third button. */
+  .guideFootnote {
+    margin-left: 0;
     align-items: flex-start;
-    gap: 3px;
   }
 
-  .chromeCopy span {
-    max-width: 210px;
+  .guideFootnote .chromeMark {
+    margin-top: 2px;
+  }
+
+  /* She goes. On a 358px strip she has to sit behind the copy to fit, and a
+   * half-transparent character under a sentence reads as a rendering fault
+   * rather than as decoration. The strip is short enough here that it does not
+   * need her to hold the right edge. */
+  .guideMascot {
+    display: none;
+  }
+
+  .guideLead,
+  .guideSteps,
+  .guideActions {
+    padding-right: 0;
   }
 
   .card {

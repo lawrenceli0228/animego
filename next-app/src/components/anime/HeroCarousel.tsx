@@ -2,7 +2,7 @@
 
 import Link from "@/components/ui/LocaleLink";
 import { genreLabel } from "@/lib/contentLabels";
-import { formatScore, pickTitle, stripHtml, truncate } from "@/lib/formatters";
+import { pickTitle, stripHtml, truncate } from "@/lib/formatters";
 import type { Dict, Lang } from "@/lib/i18n";
 import { useLang } from "@/lib/lang-client";
 import type { SeasonalAnime } from "@/lib/types";
@@ -200,14 +200,13 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
 
               <h2 className={styles.title}>{title}</h2>
 
+              {/* Genre only. The score and the format code were here too, and
+                * both answer a question nobody is asking yet: this is the
+                * moment someone decides whether they care about the show at
+                * all, and "8.2" and "TV" do not help with that while a genre
+                * does. They are one click away on the detail page, where the
+                * question they answer is the one being asked. */}
               <div className={styles.metaRow}>
-                {anime.averageScore != null && anime.averageScore > 0 ? (
-                  <span className={styles.scoreChip}>
-                    <span aria-hidden>★</span>
-                    {formatScore(anime.averageScore)}
-                  </span>
-                ) : null}
-                {anime.format ? <span className={styles.metaChip}>{anime.format}</span> : null}
                 {anime.genres?.slice(0, 2).map((genre) => (
                   <span key={genre} className={styles.metaChip}>
                     {genreLabel(genre, viewerLang)}
@@ -241,15 +240,18 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
         * component was built, which is our concern rather than theirs — and it
         * sat in the most expensive pixels on the site to say it. The pause
         * control below carries the only part of that state anyone can act on. */}
-      <div className={styles.status} aria-hidden>
-        <span className={styles.slideCount}>
-          <strong>{String(currentIndex + 1).padStart(2, "0")}</strong> / {String(len).padStart(2, "0")}
-        </span>
-      </div>
-
-      <p className={styles.sideLabel} aria-hidden>
-        AnimeGoClub · Seasonal Pickup
-      </p>
+      {/* The "03 / 05" counter and the rotated "AnimeGoClub · Seasonal Pickup"
+        * label both used to sit here. Both were saying something already said
+        * better a few pixels away.
+        *
+        * The rail along the bottom names every title in the rotation and marks
+        * the one you are on, so it strictly contains what the counter said. And
+        * the eyebrow reads "2026 夏季 · SEASONAL FOCUS" in the reading
+        * direction, while the side label said the same thing turned ninety
+        * degrees, where it could be seen but not read.
+        *
+        * Neither removal costs information. They cost twelve competing elements
+        * in one viewport becoming nine. */}
 
       <button
         type="button"
