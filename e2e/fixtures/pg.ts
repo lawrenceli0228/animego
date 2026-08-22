@@ -238,6 +238,85 @@ export async function resetSubscriptions(
   `;
 }
 
+export interface SeedAnimeDetail extends SeedAnimeCache {
+  /**
+   * The count migration 0023's sweep infers from an external episode source.
+   * Held apart from `episodes` all the way to the wire on purpose — only the
+   * authoritative one may reach JSON-LD — and the detail page's episode
+   * section is `pending` only when BOTH are absent, so a spec about the
+   * pending state has to pin this too rather than let a leftover row decide.
+   */
+  episodesBgm?: number | null;
+  /** AniList status string, e.g. `"RELEASING"`. */
+  status?: string | null;
+}
+
+/**
+ * Seed one anime the DETAIL page can render without going to AniList.
+ *
+ * `ensureAnimeCached` alone is not enough for `/anime/{id}`. `isStale`
+ * (go-api/internal/anime/detail.go) trips on an empty studio list, an empty
+ * character list, or a first character with no role — independently of
+ * `cached_at` — and a stale row makes the handler fetch AniList live. In CI
+ * that is a real network call on every run; worse, a successful one OVERWRITES
+ * the seeded row, so a spec asserting on `episodes IS NULL` would be asserting
+ * against whatever AniList happens to say. One studio and one character with a
+ * role are the cheapest way to make the row look complete and keep the read
+ * entirely inside Postgres.
+ *
+ * The child rows are deleted first rather than upserted: they have surrogate
+ * uuid keys, so a re-run would otherwise stack duplicates.
+ */
+export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
+  const sql = getSql();
+  await sql`
+    INSERT INTO anime_cache (
+      anilist_id, title_romaji, title_chinese, episodes, episodes_bgm,
+      status, cached_at
+    )
+    VALUES (
+      ${anime.anilistId},
+      ${anime.titleRomaji ?? `E2E Anime ${anime.anilistId}`},
+      ${anime.titleChinese ?? `E2E 番剧 ${anime.anilistId}`},
+      ${anime.episodes ?? null},
+      ${anime.episodesBgm ?? null},
+      ${anime.status ?? null},
+      now()
+    )
+    ON CONFLICT (anilist_id) DO UPDATE SET
+      title_romaji  = EXCLUDED.title_romaji,
+      title_chinese = EXCLUDED.title_chinese,
+      episodes      = EXCLUDED.episodes,
+      episodes_bgm  = EXCLUDED.episodes_bgm,
+      status        = EXCLUDED.status,
+      cached_at     = now(),
+      updated_at    = now()
+  `;
+  await sql`DELETE FROM anime_studios WHERE anime_id = ${anime.anilistId}`;
+  await sql`DELETE FROM anime_characters WHERE anime_id = ${anime.anilistId}`;
+  await sql`
+    INSERT INTO anime_studios (anime_id, studio)
+    VALUES (${anime.anilistId}, 'E2E Animation Works')
+  `;
+  await sql`
+    INSERT INTO anime_characters (anime_id, display_order, name_en, role)
+    VALUES (${anime.anilistId}, 0, 'E2E Protagonist', 'MAIN')
+  `;
+}
+
+/**
+ * Drop a seeded anime and everything hanging off it.
+ *
+ * Every child table in migration 0001 references `anime_cache(anilist_id)` with
+ * ON DELETE CASCADE — studios, characters, episode titles, subscriptions — so
+ * one delete is the whole teardown. Safe to call for an id that was never
+ * seeded.
+ */
+export async function removeAnimeFixture(anilistId: number): Promise<void> {
+  const sql = getSql();
+  await sql`DELETE FROM anime_cache WHERE anilist_id = ${anilistId}`;
+}
+
 export interface SubscriptionRow {
   status: string;
   currentEpisode: number;
@@ -295,4 +374,24 @@ export async function seedSubscription(
       status          = EXCLUDED.status,
       current_episode = EXCLUDED.current_episode
   `;
+  // Seed the per-episode marks this progress implies (migration 0024).
+  //
+  // Not decoration. `current_episode` is a derived value now — every write path
+  // recomputes it as COALESCE(MAX(episode), 0) over episode_watches — so a row
+  // carrying progress with no marks behind it is a state no user can reach, and
+  // the next PATCH re-derives it to 0. A spec that seeded 5 and then asserted on
+  // progress would be asserting against a row the application could not produce,
+  // and would start failing for a reason that has nothing to do with what it
+  // tests. This mirrors what migration 0024's backfill does for real rows.
+  if (currentEpisode > 0) {
+    await sql`
+      INSERT INTO episode_watches (user_id, anilist_id, episode)
+      SELECT
+        (SELECT id FROM users WHERE email = ${email.toLowerCase()}),
+        ${anilistId},
+        g.episode
+      FROM generate_series(1, ${currentEpisode}) AS g(episode)
+      ON CONFLICT (user_id, anilist_id, episode) DO NOTHING
+    `;
+  }
 }

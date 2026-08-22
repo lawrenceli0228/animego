@@ -88,9 +88,33 @@
  * @property {'tv'|'movie'|'ova'|'web'} type
  * @property {number}  [bangumiId]
  * @property {string}  [posterUrl]
- * @property {number}  [totalEpisodes]
+ * @property {number}  [totalEpisodes]       - 这一部（**单个 Series 行**）的总集数。写入方只有四处:
+ *   `resolveSeriesBinding`(自动绑定命中时)、`useSiteAnimeForSeries`、`refreshSeriesMetadata`、
+ *   `rematchSeries`,外加 `_services/episodeCountBackfill.ts` 的一次性批量回填
+ *   (`GET /api/anime/episodes`)——已绑定的老库走不到前四处,只有回填能补上。
+ *   **永远不写 0**:所有读取方都把 `<= 0` 当作「未知」,存个 0 只是换一种写法说同一件事,
+ *   却多付一次写入和一次 liveQuery 重渲染。
+ *   **卡片上要显示的数字不是这个字段**——一张卡可能是若干 Series 软合并而成,
+ *   分母得由 `_services/seriesGroups.ts` 的 `buildGroupTotals` 按 `Season.animeId` 折叠后给出。
  * @property {number}  [anilistId]           - v6 新增:AniList 的 id,本地剧集与服务端订阅之间唯一的持久化关联键。**与 `Season.animeId`(dandanplay)不是同一个 id 空间**,两者互不可替。只经 `animeBinding.ts` 读写(自动匹配不得覆盖人工绑定);建了索引,反向查询(anilistId → 本地 series)靠它
- * @property {number}  [lastSyncedEpisode]   - v6 新增:已成功推给服务端的正篇集号高水位。本地高水位 > 它才需要推,推成功后回写。不建索引(只按主键 seriesId 读)。缺省(undefined)= 从未同步过,不是 0
+ * @property {number[]} [lastSyncedEpisodes]  - The episodes this device has pushed to the subscription identified by
+ *   `lastSyncedSubscribedAt`, ascending. THE sync memory: `watchSync.ts` pushes `local \ this` and nothing else, so an
+ *   episode listed here is never offered again — which is what keeps a mark the reader deliberately removed on the
+ *   website from being put back. Read only through `readSyncedEpisodes`, and grown only by union (never replaced with
+ *   the local set: local episodes can disappear on a rescan, and the marks they produced did not).
+ *   **Present-and-empty ≠ absent.** `[]` means "pushed nothing to THIS row" and is what `revalidateSyncMemory` writes
+ *   when the subscription was replaced; absent means the row predates this field. Not indexed
+ * @property {number}  [lastSyncedEpisode]   - v6 新增:`max(lastSyncedEpisodes)`,没有则 0。**派生值,不是权威值** ——
+ *   与服务端 `subscriptions.current_episode` 对 `episode_watches` 的关系完全一致,同一次 `db.series.update` 里一起写,
+ *   任何时候都不单独更新。留着有两个作用:①旧版本代码(另一个标签页、回滚)读它仍是真数字 ②`lastSyncedEpisodes`
+ *   缺席时它就是迁移输入 —— 旧版推的是 `current_episode = N`,而 migration 0024 的 backfill 把这样的行补成
+ *   `episode_watches` 的 1..N,所以 `readSyncedEpisodes` 把裸的 N 读成 `{1..N}`。缺省(undefined)= 从未同步过,不是 0。
+ *   注意它是一句**关于服务端某一行**的断言,不是「本地看到第几集」——配套的 `lastSyncedSubscribedAt` 才说清是哪一行
+ * @property {number}  [lastSyncedSubscribedAt] - `subscriptions.created_at`(epoch ms)of the row the sync memory
+ *   was pushed to — the subscription's identity, and the only thing that tells a deleted-and-re-created row apart
+ *   from a reader unchecking an episode. Both events lower the server's `current_episode`; only the first moves
+ *   `created_at`, and only the first may be re-pushed. Written and read exclusively by `watchSync.ts`
+ *   (`judgeSyncMemory`). Not indexed. Absent = never observed, which is NOT the same as unchanged
  * @property {number}  confidence      - 0..1,<0.7 需用户确认
  * @property {number}  createdAt
  * @property {number}  updatedAt
@@ -103,8 +127,11 @@
  * @property {string}  id              - ulid
  * @property {string}  seriesId
  * @property {number}  number          - S1 / S2
- * @property {number}  animeId         - dandanplay 每季独立 animeId
- * @property {number}  [totalEpisodes]
+ * @property {number}  animeId         - dandanplay 每季独立 animeId。**合并卡片的判别键**:
+ *   自动去重(`dedupeSeriesByAnimeId`)合的是「同一季被记了两遍」,手动 MergeDialog 合的
+ *   往往是两个不同的季,而 `mergedFrom` 只记录「合过」不记录「合的哪一种」。软合并不会搬走
+ *   Season 行,所以每个成员都还留着自己的 animeId —— 那就是唯一能把两种情况分开的东西。
+ * @property {number}  [totalEpisodes] - 仍然没有任何生产代码写它。总集数走 `Series.totalEpisodes`。
  * @property {number}  updatedAt
  */
 

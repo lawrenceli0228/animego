@@ -151,6 +151,52 @@ export function pickBindingHit(
 }
 
 /**
+ * Best-effort persist of the episode total that rode along on a search hit.
+ *
+ * `Series.totalEpisodes` is declared in `types.js` and read in six places — the
+ * card chip, the grid's progress bar and its "3/12" label, the HUD counter, the
+ * detail sheet and every ratio-based filter chip — and until this call site
+ * existed not one line of production code ever wrote it. All six were therefore
+ * dead: `<= 0` means "unknown" to each of them, so they silently rendered
+ * nothing at all.
+ *
+ * Never writes 0. An absent total and a zero total are the same fact to every
+ * reader, and only one of them costs a write plus a liveQuery re-render.
+ *
+ * Deliberately does NOT bump `updatedAt`, for the same reason `writeBinding`
+ * does not: the "new additions" row sorts on it, and learning how long a show
+ * is is not the user adding anything.
+ *
+ * Best effort — a failed write must not cost the caller the binding or the
+ * metadata it just fetched successfully. The batch backfill picks up whatever
+ * this misses.
+ */
+export async function persistEpisodeTotal(
+  db: BindingDb,
+  seriesId: string,
+  episodes: number | undefined,
+): Promise<void> {
+  if (!seriesId) return;
+  const total =
+    typeof episodes === "number" && Number.isInteger(episodes) && episodes > 0
+      ? episodes
+      : undefined;
+  if (total === undefined) return;
+  try {
+    const row = (await db.series.get(seriesId)) as
+      | { totalEpisodes?: number }
+      | undefined;
+    if (!row || row.totalEpisodes === total) return;
+    await db.series.update(seriesId, { totalEpisodes: total });
+  } catch (err) {
+    console.warn(
+      "[resolveSeriesBinding] episode total write failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+/**
  * Best-effort persist of an automatic match. Failing to store the binding must
  * not cost the caller the metadata that was just fetched successfully — the
  * next attempt re-derives and retries.
@@ -284,6 +330,12 @@ export async function resolveSeriesBinding(
   }
 
   await persistAutoBinding(db, seriesId, anilistId);
+  // The hit carries `episodes` and this is the only moment we hold it. Note the
+  // ceiling on how much this can ever fix on its own: the `bound && !force`
+  // branch above returns before any search runs, so for a library whose series
+  // are already bound this line is unreachable and the batch backfill
+  // (`episodeCountBackfill.ts`) is what actually fills them in.
+  await persistEpisodeTotal(db, seriesId, best.episodes);
   return {
     anilistId,
     outcome: bound ? "existing" : "resolved",

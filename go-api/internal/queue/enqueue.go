@@ -64,6 +64,15 @@ type Enqueuer interface {
 	// method above: fed only by its periodic scan worker, rows already
 	// vetted by the candidate query.
 	EnqueueDescriptionLlmBackfillMany(ctx context.Context, jobs []DescriptionLlmBackfillArgs) error
+	//
+	// NOTE: EnqueueEpisodesBgmMany is deliberately NOT a member here.  It
+	// is declared as the one-method EpisodesBgmEnqueuer in
+	// bangumi_episodes.go and carried on the same three implementations
+	// as everything above.  Widening this interface would oblige every
+	// test double of it — in three packages, several of which have
+	// nothing to do with enrichment — to grow a stub for a capability
+	// they never exercise.  See episodesBgmEnqueuerFrom for how the warm
+	// worker reaches it and what happens when a double lacks it.
 	// EnqueueWarmSeasonNow inserts a single WarmSeasonArgs job for
 	// immediate dispatch.  Used at boot time to seed the initial
 	// current + next season pair; the 24h periodic schedule (configured
@@ -232,6 +241,37 @@ func (e *RealEnqueuer) EnqueueDescriptionLlmBackfillMany(ctx context.Context, jo
 	return nil
 }
 
+// EnqueueEpisodesBgmMany batch-inserts episode-count jobs.  Same
+// InsertMany-not-InsertManyFast reasoning as the two sweeps above:
+// ByArgs dedupe conflicts must be skipped, not errored.  Duplicates are
+// expected here for one extra reason — two producers feed this job, so a
+// row the hourly scan queued can be handed over again by the next
+// seasonal warm before the first copy has drained.
+func (e *RealEnqueuer) EnqueueEpisodesBgmMany(ctx context.Context, jobs []EpisodesBgmArgs) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	params := make([]river.InsertManyParams, len(jobs))
+	for i, j := range jobs {
+		params[i] = river.InsertManyParams{Args: j}
+	}
+	res, err := e.client.InsertMany(ctx, params)
+	if err != nil {
+		return fmt.Errorf("queue.EnqueueEpisodesBgmMany (n=%d): %w", len(jobs), err)
+	}
+	skipped := 0
+	for _, r := range res {
+		if r.UniqueSkippedAsDuplicate {
+			skipped++
+		}
+	}
+	slog.DebugContext(ctx, "queue.episodes_bgm enqueued",
+		"n", len(jobs),
+		"inserted", len(jobs)-skipped,
+		"skippedDuplicate", skipped)
+	return nil
+}
+
 // EnqueueWarmSeasonNow inserts a single WarmSeasonArgs job for
 // immediate dispatch.  Used by main.go at boot time (current +
 // next season pair) — periodic re-fire is configured separately
@@ -289,6 +329,11 @@ func (NoopEnqueuer) EnqueueDescriptionBackfillMany(ctx context.Context, jobs []D
 
 // EnqueueDescriptionLlmBackfillMany returns nil regardless of input.
 func (NoopEnqueuer) EnqueueDescriptionLlmBackfillMany(ctx context.Context, jobs []DescriptionLlmBackfillArgs) error {
+	return nil
+}
+
+// EnqueueEpisodesBgmMany returns nil regardless of input.
+func (NoopEnqueuer) EnqueueEpisodesBgmMany(ctx context.Context, jobs []EpisodesBgmArgs) error {
 	return nil
 }
 
@@ -396,6 +441,22 @@ func (l *LateBoundEnqueuer) EnqueueDescriptionLlmBackfillMany(ctx context.Contex
 	return e.EnqueueDescriptionLlmBackfillMany(ctx, jobs)
 }
 
+// EnqueueEpisodesBgmMany delegates to the bound RealEnqueuer, or no-ops
+// when unbound — same stance as every other method here.  The unbound
+// branch IS reachable for this one: the warm-season worker calls it, and
+// main.go enqueues the boot warm pair immediately after Bind, so a
+// pathological ordering would find it unbound.  Losing that seed costs
+// nothing — the hourly scan covers the same rows.
+func (l *LateBoundEnqueuer) EnqueueEpisodesBgmMany(ctx context.Context, jobs []EpisodesBgmArgs) error {
+	l.mu.RLock()
+	e := l.inner
+	l.mu.RUnlock()
+	if e == nil {
+		return nil
+	}
+	return e.EnqueueEpisodesBgmMany(ctx, jobs)
+}
+
 // EnqueueWarmSeasonNow delegates to the bound RealEnqueuer, or no-ops
 // when unbound.  Main.go uses this at boot time to seed the initial
 // current + next season warm; binding happens immediately after Boot
@@ -429,8 +490,18 @@ func (l *LateBoundEnqueuer) EnqueueHantBackfillNow(ctx context.Context) (bool, e
 }
 
 // Compile-time guards: all implementations must satisfy Enqueuer.
+//
+// The EpisodesBgmEnqueuer guards are the load-bearing half of the decision to
+// keep that method off the Enqueuer interface.  The warm worker reaches it by
+// type assertion, which would silently degrade to "no seed" if a production
+// implementation ever lost the method — these three lines make that a compile
+// error instead.  Only test doubles can miss it, which is the whole point.
 var (
 	_ Enqueuer = (*RealEnqueuer)(nil)
 	_ Enqueuer = NoopEnqueuer{}
 	_ Enqueuer = (*LateBoundEnqueuer)(nil)
+
+	_ EpisodesBgmEnqueuer = (*RealEnqueuer)(nil)
+	_ EpisodesBgmEnqueuer = NoopEnqueuer{}
+	_ EpisodesBgmEnqueuer = (*LateBoundEnqueuer)(nil)
 )

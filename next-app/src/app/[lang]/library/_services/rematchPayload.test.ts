@@ -186,6 +186,30 @@ describe("normalizeRematchHit — derived fields", () => {
   });
 });
 
+describe("normalizeRematchHit — the episode count rides along", () => {
+  // Unlike the two ids, `episodes` is present on BOTH row shapes, so a rematch
+  // learns a total no matter which section the user picked from. This is one of
+  // the four write sites for `Series.totalEpisodes`, a field that until now no
+  // production code wrote at all.
+  test("carries the count from an animeCache row", () => {
+    expect(normalizeRematchHit({ ...CACHE_HIT, episodes: 1122 })?.totalEpisodes).toBe(
+      1122,
+    );
+  });
+
+  test("carries the count from a dandanplay row", () => {
+    expect(normalizeRematchHit({ ...DANDAN_HIT, episodes: 26 })?.totalEpisodes).toBe(26);
+  });
+
+  test("a null / zero / missing count stays undefined, never 0", () => {
+    // `<= 0` is how every reader of totalEpisodes spells "unknown", so writing a
+    // zero would replace "we do not know" with an answer that is wrong.
+    expect(normalizeRematchHit({ ...CACHE_HIT, episodes: null })?.totalEpisodes).toBeUndefined();
+    expect(normalizeRematchHit({ ...CACHE_HIT, episodes: 0 })?.totalEpisodes).toBeUndefined();
+    expect(normalizeRematchHit(CACHE_HIT)?.totalEpisodes).toBeUndefined();
+  });
+});
+
 describe("toPositiveInt", () => {
   test.each([
     [21, 21],

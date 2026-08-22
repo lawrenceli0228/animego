@@ -170,6 +170,24 @@ const STORE_DEFS: ReadonlyArray<StoreDef> = [
   },
 ];
 
+/**
+ * A `fileRefs` row to write alongside an episode.
+ *
+ * Only worth seeding when something has to resolve the file itself — the
+ * player's `getFile(episodeId)` walks `Episode.primaryFileId → FileRef →
+ * FileSystemDirectoryHandle`, and a missing FileRef stops it at the first hop.
+ * Cards render without one (see the `fileRefs` note in the file header), so
+ * every spec that only needs a card should keep leaving it out.
+ */
+export interface SeedFileRefSpec {
+  /** Must match a `fileHandles` row's `libraryId` — see `seedOpfsLibraryRoot`. */
+  libraryId: string;
+  /** Path relative to the library root, e.g. `"Season2/ep13.mp4"`. */
+  relPath: string;
+  size?: number;
+  mtime?: number;
+}
+
 /** A `progress` row to write alongside an episode. */
 export interface SeedProgressSpec {
   /** Drives `resolveHighWater` + every `completedCount` read in the UI. */
@@ -192,6 +210,26 @@ export interface SeedEpisodeSpec {
   title?: string;
   /** Omit for "never played". */
   progress?: SeedProgressSpec;
+  /** Omit unless a caller has to resolve the actual file. */
+  fileRef?: SeedFileRefSpec;
+}
+
+/**
+ * A `seasons` row.
+ *
+ * The one field that matters is `animeId`: `buildGroupTotals` folds a merged
+ * card's members by their season identity before summing, and a member it
+ * cannot identify is deliberately treated as a duplicate of one already
+ * counted. So a merged card seeded WITHOUT season rows reports no group total
+ * at all, and the detail sheet falls back to sizing its grid from the files.
+ * Both are real states; seed seasons when the spec is about the branch that
+ * trusts a declared total.
+ */
+export interface SeedSeasonSpec {
+  /** S1 / S2. Only used to pick a member's primary season deterministically. */
+  number: number;
+  /** dandanplay's per-season id. Distinct ids are what make two members sum. */
+  animeId: number;
 }
 
 export interface SeedSeriesSpec {
@@ -211,6 +249,19 @@ export interface SeedSeriesSpec {
   /** Last value successfully pushed. Omit for "never synced". */
   lastSyncedEpisode?: number;
   episodes?: readonly SeedEpisodeSpec[];
+  /** `seasons` rows for this series. See `SeedSeasonSpec`. */
+  seasons?: readonly SeedSeasonSpec[];
+  /**
+   * Series ids soft-merged INTO this one — written as this series'
+   * `userOverride.mergedFrom`, which is the only record a merge leaves.
+   *
+   * `performMerge` never moves an episode row, so the merged-in sources keep
+   * their own `series` / `episodes` / `progress` rows and must still be seeded
+   * normally. `useLibrary` then hides them from the grid, which is what makes
+   * one card out of several rows — and what made issue #75 able to hide half a
+   * card's episodes without hiding the card.
+   */
+  mergedFrom?: readonly string[];
 }
 
 export interface SeedLibraryOptions {
@@ -334,6 +385,9 @@ export async function seedLibrary(
       const seriesRows: Array<Record<string, unknown>> = [];
       const episodeRows: Array<Record<string, unknown>> = [];
       const progressRows: Array<Record<string, unknown>> = [];
+      const seasonRows: Array<Record<string, unknown>> = [];
+      const fileRefRows: Array<Record<string, unknown>> = [];
+      const overrideRows: Array<Record<string, unknown>> = [];
 
       seriesSpecs.forEach((spec, i) => {
         const seriesId = spec.id as string;
@@ -357,6 +411,24 @@ export async function seedLibrary(
         }
         seriesRows.push(row);
 
+        if (spec.mergedFrom && spec.mergedFrom.length > 0) {
+          overrideRows.push({
+            seriesId,
+            mergedFrom: [...spec.mergedFrom],
+            updatedAt: now,
+          });
+        }
+
+        (spec.seasons ?? []).forEach((season, si) => {
+          seasonRows.push({
+            id: `${seriesId}-season-${season.number}`,
+            seriesId,
+            number: season.number,
+            animeId: season.animeId,
+            updatedAt: now - si,
+          });
+        });
+
         for (const ep of spec.episodes ?? []) {
           const kind = ep.kind ?? "main";
           const epId = `${seriesId}-ep-${kind}-${ep.number}`;
@@ -366,14 +438,29 @@ export async function seedLibrary(
             number: ep.number,
             kind,
             title: ep.title ?? "",
-            // Deliberately points at no fileRefs row — see the file header:
-            // an unmatched primaryFileId keeps the card out of the
-            // 'offline'/'partial' filter instead of hiding it.
+            // Points at a fileRefs row only when the spec asked for one — see
+            // the file header: an unmatched primaryFileId keeps the card out
+            // of the 'offline'/'partial' filter instead of hiding it.
             primaryFileId: `${epId}-file`,
             alternateFileIds: [],
             version: 1,
             updatedAt: now,
           });
+          if (ep.fileRef) {
+            fileRefRows.push({
+              id: `${epId}-file`,
+              libraryId: ep.fileRef.libraryId,
+              libraryIds: [ep.fileRef.libraryId],
+              episodeId: epId,
+              relPath: ep.fileRef.relPath,
+              size: ep.fileRef.size ?? 1024,
+              mtime: ep.fileRef.mtime ?? now,
+              // 'manual' rather than 'matched': nothing here went through
+              // dandanplay, and claiming otherwise would misrepresent the
+              // fixture to any surface that branches on match provenance.
+              matchStatus: "manual",
+            });
+          }
           if (!ep.progress) continue;
           progressRows.push({
             episodeId: epId,
@@ -387,10 +474,16 @@ export async function seedLibrary(
       });
 
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(["series", "episodes", "progress"], "readwrite");
+        const tx = db.transaction(
+          ["series", "episodes", "progress", "seasons", "fileRefs", "userOverride"],
+          "readwrite",
+        );
         for (const rec of seriesRows) tx.objectStore("series").put(rec);
         for (const rec of episodeRows) tx.objectStore("episodes").put(rec);
         for (const rec of progressRows) tx.objectStore("progress").put(rec);
+        for (const rec of seasonRows) tx.objectStore("seasons").put(rec);
+        for (const rec of fileRefRows) tx.objectStore("fileRefs").put(rec);
+        for (const rec of overrideRows) tx.objectStore("userOverride").put(rec);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error);
@@ -522,6 +615,93 @@ export async function readDbSchema(page: Page): Promise<{
     db.close();
     return { version, stores };
   }, { dbName: DB_NAME });
+}
+
+export interface SeedOpfsRootOptions {
+  /** Directory name under OPFS. Must be unique per spec — OPFS is per-origin. */
+  dirName: string;
+  /** `FileRef.libraryId` the seeded `fileRefs` rows point at. */
+  libraryId: string;
+  /** File name inside `dirName`; must match the `relPath` of the FileRef. */
+  fileName: string;
+  /** File bytes. Read a real fixture off disk and pass `[...buffer]`. */
+  bytes: readonly number[];
+}
+
+/**
+ * Register a REAL directory handle as a persisted library root.
+ *
+ * The FSA directory picker cannot be driven by Playwright and a hand-built
+ * fake handle dies on `structuredClone` (methods are stripped), so OPFS is the
+ * only way to get a genuine `FileSystemDirectoryHandle` into the `fileHandles`
+ * store — the same escape hatch `library-autorescan.spec.ts` documents. With
+ * one seeded, `useFileHandles.selectFileByName` resolves an actual `File` and
+ * the player can reach its playing state without a user gesture.
+ *
+ * ─── why this is safe to call while /library is open ────────────────────────
+ *
+ * Two independent reasons, and both are load-bearing:
+ *
+ *   1. The write goes through raw IndexedDB, which Dexie's `liveQuery` does
+ *      not observe, so nothing in the mounted page reacts to it.
+ *   2. `enumerator.js` skips any video under `MIN_VIDEO_SIZE` (1 MiB). The
+ *      144-byte fixture in `e2e/fixtures/black1s.mp4` is far below that, so
+ *      even if a watch-folder rescan does fire — the periodic fallback tick,
+ *      a tab-return — it enumerates this directory and imports nothing.
+ *
+ * Without (2) this helper would quietly mint a second series card mid-spec.
+ */
+export async function seedOpfsLibraryRoot(
+  page: Page,
+  opts: SeedOpfsRootOptions,
+): Promise<void> {
+  await page.evaluate(
+    async ({
+      dbName,
+      dirName,
+      libraryId,
+      fileName,
+      bytes,
+    }: { dbName: string } & SeedOpfsRootOptions) => {
+      const opfs = await navigator.storage.getDirectory();
+      await opfs.removeEntry(dirName, { recursive: true }).catch(() => {});
+      const dir = await opfs.getDirectoryHandle(dirName, { create: true });
+      const fileHandle = await dir.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(new Uint8Array(bytes));
+      await writable.close();
+
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open(dbName);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("fileHandles", "readwrite");
+        tx.objectStore("fileHandles").put({
+          id: `fh-${libraryId}`,
+          libraryId,
+          name: dirName,
+          addedAt: Date.now(),
+          lastSeenAt: Date.now(),
+          handle: dir,
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+      db.close();
+    },
+    { dbName: DB_NAME, ...opts, bytes: [...opts.bytes] },
+  );
+}
+
+/** Best-effort OPFS teardown. OPFS outlives `indexedDB.deleteDatabase`. */
+export async function removeOpfsDir(page: Page, dirName: string): Promise<void> {
+  await page.evaluate(async (name: string) => {
+    const opfs = await navigator.storage.getDirectory();
+    await opfs.removeEntry(name, { recursive: true }).catch(() => {});
+  }, dirName);
 }
 
 /**

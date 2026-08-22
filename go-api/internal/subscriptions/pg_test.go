@@ -11,8 +11,10 @@ package subscriptions
 //   - UPSERT idempotence on ON CONFLICT
 //   - the CASE expression in UpdateSubscriptionWithActivity
 //     (last_watched_at only bumps when current_episode is set)
-//   - the monotonic guard: GREATEST refusing a backwards push, and the
-//     matching last_watched_at / activity_events suppression
+//   - the derived-progress invariant: current_episode is
+//     COALESCE(MAX(episode), 0) over episode_watches on every path, so a
+//     replay cannot claw progress back, and the matching last_watched_at /
+//     updated_at / activity_events suppression
 //   - the currentEpisode upper bound against anime_cache.episodes,
 //     including the NULL "still airing" pass-through
 //   - InsertSubscriptionIfAbsent's ON CONFLICT DO NOTHING + UNION ALL
@@ -109,6 +111,15 @@ func seedSubscription(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID, anilis
 // `episode` with a last_watched_at an hour in the past, so a test can tell
 // "the timestamp was left alone" from "the timestamp was rewritten to a
 // value that happens to look similar".
+//
+// It seeds the per-episode marks 1..episode alongside the integer, because
+// since migration 0024 current_episode is COALESCE(MAX(episode), 0) over
+// episode_watches and a row carrying progress with an empty set is a state
+// the system cannot reach: the backfill filled every pre-existing row, and
+// every writer since then writes both. Seeding the integer alone would set
+// up a fixture that no user could ever have, and every test built on it
+// would be asserting against fiction. 1..episode is exactly what the
+// backfill produces for such a row.
 func seedWatchedSubscription(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID, anilistID int32, status string, episode int32) {
 	t.Helper()
 	ctx := context.Background()
@@ -118,6 +129,14 @@ func seedWatchedSubscription(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID,
 		userID, anilistID, status, episode,
 	)
 	require.NoError(t, err, "seedWatchedSubscription")
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO episode_watches (user_id, anilist_id, episode)
+		SELECT $1, $2, g.episode FROM generate_series(1, $3) AS g(episode)
+		WHERE $3 > 0`,
+		userID, anilistID, episode,
+	)
+	require.NoError(t, err, "seedWatchedSubscription: marks")
 }
 
 // setAnimeEpisodes stamps the authoritative total-episode count on a cached
@@ -374,8 +393,8 @@ func TestPG_Update_StatusOnlyDoesNotTouchLastWatched(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// monotonic guard — real SQL, because GREATEST + the last_watched_at CASE
-// are the whole feature and a fake cannot fail them (§4 decisions 4 + 8)
+// progress writes — real SQL, because the derived recompute and the two
+// timestamp CASEs are the whole feature and a fake cannot fail them
 // -----------------------------------------------------------------------------
 
 func TestPG_Update_MonotonicRejectsBackwardsPush(t *testing.T) {
@@ -395,7 +414,8 @@ func TestPG_Update_MonotonicRejectsBackwardsPush(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
 	ep, afterLWT := readProgress(t, pool, user, 1)
-	assert.Equal(t, int32(5), ep, "GREATEST must refuse to move progress backwards")
+	assert.Equal(t, int32(5), ep,
+		"a replay cannot claw progress back: episode 3 is already in the set, so the maximum holds")
 	require.NotNil(t, afterLWT)
 	assert.True(t, beforeLWT.Equal(*afterLWT),
 		"a no-op push must not bump last_watched_at — it would reshuffle 'continue watching' for nothing")
@@ -520,7 +540,16 @@ func TestPG_Update_MonotonicNoOpWithStatusStillBumps(t *testing.T) {
 		"a real status edit must bump updated_at even though the episode did not move")
 }
 
-func TestPG_Update_NonMonotonicCanCorrectDownwards(t *testing.T) {
+// Lowering progress is no longer something a PATCH can do — by any caller,
+// with or without the flag.  current_episode is COALESCE(MAX(episode), 0)
+// over the set, so writing a smaller number just records that episode; the
+// maximum is unmoved because nothing was removed.
+//
+// This is the intended contract, not a lost capability.  A human correcting
+// the record downward unmarks the episodes they did not watch, and the
+// recompute follows — which is what the sibling test below shows, and what
+// DELETE /api/subscriptions/:anilistId/episodes/:episode is for.
+func TestPG_Update_NonMonotonicNoLongerLowersProgress(t *testing.T) {
 	h, pool := pgHandlers(t)
 	defer pool.Close()
 
@@ -531,16 +560,35 @@ func TestPG_Update_NonMonotonicCanCorrectDownwards(t *testing.T) {
 	_, beforeLWT := readProgress(t, pool, user, 1)
 	require.NotNil(t, beforeLWT)
 
-	// The detail page's − button: no monotonic key at all, exactly what
-	// ships today.
+	// No monotonic key at all — the flag is not what holds the line.
 	rec := patchSubscription(t, h, user, 1, `{"currentEpisode":3}`)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
 	ep, afterLWT := readProgress(t, pool, user, 1)
-	assert.Equal(t, int32(3), ep, "a human correcting the count downwards MUST still work")
+	assert.Equal(t, int32(5), ep,
+		"episode 3 was already in the set, so the maximum is still 5 — a PATCH cannot lower it")
 	require.NotNil(t, afterLWT)
-	assert.True(t, afterLWT.After(*beforeLWT),
-		"non-monotonic keeps the old rule: any explicit currentEpisode bumps last_watched_at")
+	assert.True(t, beforeLWT.Equal(*afterLWT),
+		"nothing new was recorded, so no episode was watched and last_watched_at holds")
+}
+
+// The supported way to lower it: unmark, and let the recompute fall.
+func TestPG_UnmarkIsHowProgressComesDown(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	seedWatchedSubscription(t, pool, user, 1, "watching", 5)
+	ctx := withUserClaims(t, context.Background(), user, "alice")
+
+	// The user did not actually watch 4 or 5.
+	for _, ep := range []string{"5", "4"} {
+		require.Equal(t, http.StatusOK, unmarkEpisode(t, h, ctx, "1", ep).Code)
+	}
+
+	ep, _ := readProgress(t, pool, user, 1)
+	assert.Equal(t, int32(3), ep, "removing the top two marks drops the derived value to 3")
 }
 
 // -----------------------------------------------------------------------------

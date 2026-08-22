@@ -16,10 +16,12 @@ import type { Metadata } from "next";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
+import { buildJsonLd } from "@/components/anime/animeJsonLd";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
 import FadeImage from "@/components/ui/FadeImage";
 import EpisodesGrid from "@/components/anime/EpisodesGrid";
+import { resolveEpisodeSkeleton } from "@/components/anime/episodeGridSkeleton";
 import HeroAccent from "@/components/anime/HeroAccent";
 import { FormatBadge, GenreChips } from "@/components/anime/LocalizedChips";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
@@ -36,7 +38,6 @@ import {
   formatScore,
   pickCharacterName,
   pickDescription,
-  pickEpisodeTitle,
   pickSeoTitle,
   pickStaffName,
   pickTitle,
@@ -55,7 +56,6 @@ import type { Lang } from "@/lib/i18n/lang";
 import type {
   AnimeDetail,
   DetailCharacter,
-  DetailEpisodeTitle,
   DetailRecommendation,
   DetailRelation,
   DetailStaff,
@@ -279,77 +279,11 @@ export async function generateMetadata({
 }
 
 // --- JSON-LD TVSeries schema (Phase 5 acceptance) ---
-
-interface JsonLdAggregateRating {
-  "@type": "AggregateRating";
-  ratingValue: number;
-  // Google rejects AggregateRating without a count (ratingCount/reviewCount).
-  // Only Bangumi gives us a real vote count, so the rating is sourced from
-  // Bangumi (score + votes), matching the visible "★ x.x (n)" badge on-page.
-  ratingCount: number;
-  bestRating: number;
-  worstRating: number;
-}
-
-interface JsonLdTVSeries {
-  "@context": "https://schema.org";
-  "@type": "TVSeries";
-  name: string;
-  alternateName?: string[];
-  image?: string;
-  description?: string;
-  numberOfEpisodes?: number;
-  startDate?: string;
-  genre?: string[];
-  aggregateRating?: JsonLdAggregateRating;
-  productionCompany?: { "@type": "Organization"; name: string }[];
-}
-
-function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
-  const alts = [detail.titleRomaji, detail.titleEnglish, detail.titleNative].filter(
-    (s): s is string => Boolean(s),
-  );
-  const ld: JsonLdTVSeries = {
-    "@context": "https://schema.org",
-    "@type": "TVSeries",
-    // JSON-LD `name` is the most explicit "this page is about a thing called
-    // X" signal on the page, so it takes the SERP-safe field for the same
-    // reason <title> does.
-    name: pickSeoTitle(detail, lang),
-  };
-  if (alts.length) ld.alternateName = alts;
-  if (detail.coverImageUrl) ld.image = detail.coverImageUrl;
-  const desc = stripHtml(detail.description || "");
-  if (desc) ld.description = desc;
-  if (detail.episodes) ld.numberOfEpisodes = detail.episodes;
-  const formattedStartDate = formatFuzzyDate(detail.startDate);
-  if (formattedStartDate) ld.startDate = formattedStartDate;
-  if (detail.genres?.length) ld.genre = detail.genres;
-  // Bangumi rating carries a real vote count (Subject.Rating.Count), which
-  // Google requires for a valid AggregateRating. AniList's averageScore has
-  // no count, so an AniList-sourced rating is always rejected — omit it.
-  if (
-    detail.bangumiScore &&
-    detail.bangumiScore > 0 &&
-    detail.bangumiVotes &&
-    detail.bangumiVotes > 0
-  ) {
-    ld.aggregateRating = {
-      "@type": "AggregateRating",
-      ratingValue: detail.bangumiScore,
-      ratingCount: detail.bangumiVotes,
-      bestRating: 10,
-      worstRating: 1,
-    };
-  }
-  if (detail.studios?.length) {
-    ld.productionCompany = detail.studios.map((name) => ({
-      "@type": "Organization",
-      name,
-    }));
-  }
-  return ld;
-}
+//
+// Lives in @/components/anime/animeJsonLd so a test can execute it: nothing
+// can import this page (it reaches react-hot-toast, which touches `document`
+// at module scope), and the numberOfEpisodes rule in there is worth a real
+// assertion rather than a grep. See that file's header.
 
 // --- Style tokens (kept inline; matches legacy hero spec) ---
 
@@ -566,6 +500,29 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   const score = detail.averageScore;
   const accent = detail.posterAccent || null;
   const startDateLabel = formatFuzzyDate(detail.startDate, lang);
+  // Shared with EpisodesGrid below the fold, so the badge and the grid can
+  // never disagree about whether this show's episode count is known.
+  //
+  // Both counts go in, and they go in through separate parameters. `episodes`
+  // is AniList's authoritative total; `episodesBgm` is the sweep's inference
+  // for the rows AniList leaves NULL. Passing the second one in as the first
+  // would size the grid correctly and then label the result `authoritative`,
+  // which is the same merge the schema refuses to do in SQL, just relocated
+  // into a discriminant.
+  //
+  // Only the `authoritative` case prints a number in the badge. `inferred` is
+  // a lower bound — a possibly-stale external total, or however many episode
+  // titles we happen to hold — and printing one next to the studio and the
+  // season would present it as the total, on a page Google indexes, in the
+  // same badge row that carries the score. buildJsonLd draws the harder line
+  // one layer up: numberOfEpisodes reads detail.episodes and nothing else, so
+  // an inferred count can size this grid but can never become a claim about
+  // the work. See animeJsonLd.ts.
+  const episodeSkeleton = resolveEpisodeSkeleton(
+    detail.episodes,
+    detail.episodesBgm ?? null,
+    detail.episodeTitles ?? [],
+  );
 
   return (
     <div>
@@ -652,11 +609,15 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
                 {statusLabel(dict, detail.status)}
               </span>
             )}
-            {detail.episodes ? (
+            {episodeSkeleton.kind === "authoritative" ? (
               <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.60)")}>
-                {detail.episodes} {dict.detail.epUnit}
+                {episodeSkeleton.total} {dict.detail.epUnit}
               </span>
-            ) : null}
+            ) : (
+              <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.42)")}>
+                {dict.detail.episodeCountPending}
+              </span>
+            )}
             {seasonLab && detail.seasonYear ? (
               <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.60)")}>
                 {seasonLab} {detail.seasonYear}
@@ -1304,112 +1265,6 @@ function RecommendationsSection({
   );
 }
 
-// --- Episodes section ---
-//
-// Static SEO surface: a grid of numbered cells, one per episode index from
-// 1 to `episodes`. Each cell shows the episode number plus a title when
-// the matching `episodeTitles` entry has one. No clickability — player
-// integration lives behind auth on a client route (Phase 6+).
-//
-// Many shows have `episodes > 0` but an empty `episodeTitles` array
-// (Bangumi enrichment ran and found nothing). We still render numbered
-// cells in that case; just the number alone is fine — no placeholder dash.
-
-function EpisodesSection({
-  episodes,
-  episodeTitles,
-  lang,
-  dict,
-}: {
-  episodes: number | null;
-  episodeTitles: DetailEpisodeTitle[];
-  lang: Lang;
-  dict: Dict;
-}) {
-  if (!episodes || episodes <= 0) return null;
-
-  // Index titles by episode number for O(1) lookup. The wire array is
-  // typically small (<= 100) and sparse, so a Map is overkill but cheap.
-  const titleByEpisode = new Map<number, DetailEpisodeTitle>();
-  for (const t of episodeTitles) {
-    if (typeof t.episode === "number") titleByEpisode.set(t.episode, t);
-  }
-
-  const cells: { n: number; title: string }[] = [];
-  for (let n = 1; n <= episodes; n += 1) {
-    const t = titleByEpisode.get(n);
-    cells.push({ n, title: pickEpisodeTitle(t, lang) });
-  }
-
-  return (
-    <section style={{ marginTop: 40, marginBottom: 60 }}>
-      <h2 style={S.sectionLabel as CSSProperties}>{dict.detail.episodes}</h2>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(88px, 1fr))",
-          gap: 10,
-        }}
-      >
-        {cells.map((cell) => (
-          <div
-            key={cell.n}
-            style={{
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid #38383a",
-              borderRadius: 10,
-              padding: "10px 8px 8px",
-              textAlign: "center",
-              minWidth: 0,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 10,
-                color: "rgba(235,235,245,0.30)",
-                marginBottom: 3,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-              }}
-            >
-              {dict.detail.ep}
-            </div>
-            <div
-              style={{
-                fontSize: 20,
-                fontWeight: 800,
-                color: "rgba(235,235,245,0.60)",
-                lineHeight: 1,
-                marginBottom: cell.title ? 5 : 0,
-                fontFamily: "'Sora', sans-serif",
-              }}
-            >
-              {cell.n}
-            </div>
-            {cell.title && (
-              <div
-                title={cell.title}
-                style={{
-                  fontSize: 9,
-                  color: "rgba(235,235,245,0.35)",
-                  marginTop: 2,
-                  lineHeight: 1.2,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {cell.title}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 // --- Page entry ---
 
 export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) {
@@ -1476,7 +1331,6 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
               subLogin: dict.sub.loginToWatch,
               subLoginAria: dict.sub.loginToWatch,
               subRate: dict.sub.rate,
-              subEpUnit: dict.sub.epUnit,
               subWatching: dict.sub.watching,
               subCompleted: dict.sub.completed,
               subPlanToWatch: dict.sub.planToWatch,
@@ -1508,6 +1362,7 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
           <EpisodesGrid
             anilistId={detail.anilistId}
             episodes={detail.episodes}
+            episodesBgm={detail.episodesBgm ?? null}
             episodeTitles={detail.episodeTitles ?? []}
           />
           <RecommendationsSection

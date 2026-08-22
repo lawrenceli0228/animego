@@ -393,6 +393,15 @@ export interface EpisodeFileListProps {
   onSetDanmaku: (episode: number | null) => void;
   clearLabel?: string;
   siteAnimeLoading?: boolean;
+  /**
+   * Stored episode number to the number to SHOW, for a series whose files are
+   * numbered continuously from a previous season (13-24 for a second cour).
+   * Labels only — `episode` itself stays stored, because `episodeMap` and
+   * every play/danmaku hand-off below are keyed by it.
+   *
+   * Absent on the drop-zone path, which has no series to normalise against.
+   */
+  displayEpisodes?: ReadonlyMap<number, number>;
 }
 
 function EpisodeFileList({
@@ -406,9 +415,13 @@ function EpisodeFileList({
   onSetDanmaku,
   clearLabel,
   siteAnimeLoading,
+  displayEpisodes,
 }: EpisodeFileListProps) {
   const { t, lang } = useLang();
   const locale = useLocale();
+
+  const shown = (episode: number | null): number | null =>
+    episode == null ? null : (displayEpisodes?.get(episode) ?? episode);
 
   const sa = siteAnime;
   const statusLabel = sa?.status
@@ -579,7 +592,7 @@ function EpisodeFileList({
         <EpisodeRow
           key={f.fileId || f.fileName}
           index={i}
-          episode={f.episode}
+          episode={shown(f.episode)}
           fileName={f.fileName}
           episodeTitle={
             f.episode != null
@@ -600,7 +613,7 @@ function EpisodeFileList({
             <EpisodeRow
               key={f.fileId || f.fileName}
               index={i}
-              episode={f.episode}
+              episode={shown(f.episode)}
               fileName={f.fileName}
               episodeTitle={
                 f.episode != null

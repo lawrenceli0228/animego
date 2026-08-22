@@ -362,6 +362,13 @@ func (noopV12DB) ListUnenrichedAnilistIDs(_ context.Context, _ int32, _ int32) (
 	return []int32{}, nil
 }
 
+// ListEpisodesBgmCandidates satisfies WarmSeasonDB (the warm worker uses it to
+// seed the episode-count sweep for rows it just refreshed) and
+// EpisodesBgmReader.  Registration tests never invoke this method.
+func (noopV12DB) ListEpisodesBgmCandidates(_ context.Context, _ dbgen.ListEpisodesBgmCandidatesParams) ([]dbgen.ListEpisodesBgmCandidatesRow, error) {
+	return []dbgen.ListEpisodesBgmCandidatesRow{}, nil
+}
+
 // ListDescriptionCnCandidates satisfies DescriptionBackfillReader.
 // Registration tests never invoke this method; returning an empty slice
 // keeps any accidental dispatch a no-op rather than a nil-deref.

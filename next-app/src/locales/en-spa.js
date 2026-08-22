@@ -57,6 +57,27 @@ const en = {
     notYetReleased: 'Not Yet Released', cancelled: 'Cancelled',
     epUnit: 'Eps', readMore: 'Read more', collapse: 'Collapse',
     episodes: 'Episodes', noEpisodes: 'Episode info not available',
+    // Degraded copy EpisodesGrid renders when the episode count is unknown;
+    // same keys and same values as locales/en.ts. Says "not known yet",
+    // never "none".
+    episodeCountPending: 'Episode count pending',
+    episodeCountPendingHint: 'Every episode will be listed here once the total is confirmed.',
+    // Per-episode tracking copy, same keys and values as locales/en.ts.
+    // EpisodesGrid is a client component and t() reads only this file —
+    // adding to en.ts alone renders the raw key path in the page.
+    markWatched: 'Mark episode {{ep}} as watched',
+    unmarkWatched: 'Unmark episode {{ep}} as watched',
+    watchedSignIn: 'Sign in to record episode {{ep}}',
+    watchedFailed: "Episode {{ep}} wasn't recorded — please try again",
+    watchedSignedOut: 'Your session expired. Sign in again to record episodes.',
+    watchedProgress: '{{done}} / {{total}} watched',
+    watchedHint: 'Tap an episode to record that you watched it.',
+    watchedCompletedHint: 'This show is marked Completed, so every episode counts as watched. Un-marking any episode moves it back to Watching and shows the per-episode record instead.',
+    furthestMarked: 'furthest marked',
+    autoCompleted: 'Every episode recorded — moved to Completed',
+    autoResumed: 'Moved back to Watching',
+    autoStatusFailed: 'Episode {{ep}} was recorded, but the status could not be updated automatically',
+    episodeDiscussion: 'Discussion for episode {{ep}}',
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
@@ -72,7 +93,6 @@ const en = {
     planToWatch: 'Plan to Watch', dropped: 'Dropped',
     remove: 'Remove', rate: 'Rate',
     loginToWatch: 'Login to Track',
-    epUnit: 'Ep',
     // Toast copy for a subscribe/unsubscribe round trip. toastViewList is
     // the toast's action link, not a standalone button label.
     toastAdded: 'Added to Watching',
@@ -816,7 +836,10 @@ const en = {
       danmakuPlayTitle: 'Match via dandanplay and play with live danmaku',
       danmakuPlayBtn: 'Play with danmaku',
       indexedStats: '{{indexed}} / {{total}} indexed',
-      epMissing: 'EP {{num}} · missing',
+      inferredTotal: 'Episode count inferred from local files',
+      notDownloaded: 'EP {{num}} · not downloaded',
+      unclassified: 'Unclassified',
+      unclassifiedHint: 'Numbered outside this season — listed here so nothing is hidden',
     },
     // ImportMiniPill
     miniPill: {

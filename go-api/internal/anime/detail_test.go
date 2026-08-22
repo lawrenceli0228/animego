@@ -537,6 +537,124 @@ func TestDetail_EmptyChildren_NotNullArrays(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// R3 — the detail payload carries two episode counts and never merges them.
+//
+// `episodes` is AniList's authoritative total.  `episodes_bgm` (migration
+// 0023) is inferred by a sweep from an external episode source, for exactly
+// the rows AniList leaves NULL.  Both reach the client as separate fields
+// because the client renders them in two places that are not the same kind of
+// statement: an on-page badge and episode grid, which may fall back to the
+// inferred count, and schema.org numberOfEpisodes, which may not.
+//
+// This is the same boundary GET /api/anime/episodes draws (episodes_test.go),
+// on the endpoint whose consumer is the one that emits the structured data.
+// If this handler ever fills a missing `episodes` from `episodes_bgm`, or
+// grows a third coalescing field, the client is left holding one number with
+// no way to tell which it is.
+// -----------------------------------------------------------------------------
+
+// TestDetail_CarriesBothEpisodeCounts covers the ordinary case where the two
+// sources disagree.  Neither value is reconciled, rounded to the other, or
+// dropped — the client is handed both and picks per surface.
+func TestDetail_CarriesBothEpisodeCounts(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   8801,
+				Episodes:    i32(12),
+				EpisodesBgm: i32(13),
+			}, nil
+		},
+	}
+	svc := newDetailService(t, db)
+
+	rec := serveDetail(t, svc, "/api/anime/8801")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"episodes":12`)
+	assert.Contains(t, body, `"episodesBgm":13`)
+}
+
+// TestDetail_NullAuthoritativeCountIsNotBackfilledFromBgm is the row the
+// regression is actually about: currently airing, AniList has no total, the
+// sweep inferred one.  `episodes` must stay null.  Downstream, that null is
+// what keeps numberOfEpisodes out of the page's JSON-LD entirely — a
+// backfill here would turn a guess into a factual claim to a search engine,
+// and would do it for every airing title at once.
+func TestDetail_NullAuthoritativeCountIsNotBackfilledFromBgm(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   8802,
+				Episodes:    nil,
+				EpisodesBgm: i32(24),
+			}, nil
+		},
+	}
+	svc := newDetailService(t, db)
+
+	rec := serveDetail(t, svc, "/api/anime/8802")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	// Asserted on the raw JSON rather than through a decode: a *int32 landing
+	// as nil is also what a missing key looks like, and "the field vanished"
+	// is a different bug from "the field is null".
+	assert.Contains(t, body, `"episodes":null`,
+		"episodes is the authoritative field and AniList has no value for it")
+	assert.Contains(t, body, `"episodesBgm":24`)
+}
+
+// TestDetail_EpisodeCountsAreTwoDistinctKeys pins the shape rather than the
+// values.  A merged field is the failure mode that would otherwise pass every
+// assertion above — `episodes` and `episodesBgm` could both still be correct
+// while a third, convenient `totalEpisodes` sits beside them and becomes the
+// one every new call site reads.
+func TestDetail_EpisodeCountsAreTwoDistinctKeys(t *testing.T) {
+	t.Parallel()
+
+	db := &detailFakeDB{
+		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
+			return dbgen.GetAnimeMainByIDRow{
+				AnilistID:   8803,
+				Episodes:    nil,
+				EpisodesBgm: i32(24),
+			}, nil
+		},
+	}
+	svc := newDetailService(t, db)
+
+	rec := serveDetail(t, svc, "/api/anime/8803")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Unwrap the {"data": …} envelope before pinning the row's own key set.
+	var envelope struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	payload := envelope.Data
+	require.NotEmpty(t, payload, "the detail row must decode, or the key assertions below are vacuous")
+
+	episodeKeys := make([]string, 0, 3)
+	for k := range payload {
+		if strings.Contains(strings.ToLower(k), "episode") {
+			episodeKeys = append(episodeKeys, k)
+		}
+	}
+	assert.ElementsMatch(t,
+		[]string{"episodes", "episodesBgm", "episodeTitles"}, episodeKeys,
+		"two counts and the title list: nothing here may merge the counts")
+
+	assert.JSONEq(t, `null`, string(payload["episodes"]))
+	assert.JSONEq(t, `24`, string(payload["episodesBgm"]))
+}
+
+// -----------------------------------------------------------------------------
 // Relations enrichment tests.
 // -----------------------------------------------------------------------------
 

@@ -1,15 +1,23 @@
-// Reconciles the local per-episode tick list against the server's single
-// integer `subscription.current_episode`.
+// Reconciles the local per-episode tick list against the server's per-episode
+// watched set (`episode_watches`, migration 0024) and the integer it derives,
+// `subscription.current_episode`.
 //
 // THE MODEL (design doc §4 decision 5): state is the truth, not a queue.
-// Every push is derived from two numbers that both live in Dexie —
-// `resolveHighWater(progress, episodes)` and `series.lastSyncedEpisode` — so
-// replaying reconciliation any number of times is safe and an interrupted run
-// leaves nothing to clean up. There is no outbox, no retry counter persisted
-// anywhere, and there must not be one: Taiga's `history.xml` queue and
-// Animeko's server-first mark-as-watched are both strictly worse (Taiga retries
-// forever and never reads its own `retry_count`; Animeko drops offline marks on
-// the floor). Do not add a queue here.
+// Every push is derived from two SETS that both live in Dexie —
+// `resolveWatchedEpisodes(progress, episodes)` and `series.lastSyncedEpisodes`
+// — so replaying reconciliation any number of times is safe and an interrupted
+// run leaves nothing to clean up. There is no outbox, no retry counter
+// persisted anywhere, and there must not be one: Taiga's `history.xml` queue
+// and Animeko's server-first mark-as-watched are both strictly worse (Taiga
+// retries forever and never reads its own `retry_count`; Animeko drops offline
+// marks on the floor). Do not add a queue here.
+//
+// Those two were single numbers until this change, and the difference is the
+// whole point. A high-water mark can only say "the reader got to 9"; it cannot
+// say "the reader watched 3, 5, 7, 8 and 9 and nothing else". Pushing the
+// maximum left everything below it unmarked server-side, so one reader saw
+// "5/14" on their library sheet and "1/14" on the same show's episode grid —
+// the same fact, counted from two stores, disagreeing.
 //
 // THREE TRIGGERS (§3.1 / decision 14), all calling into this module:
 //   the moment a `completed` row is written  → reconcileSeries(root of that series)
@@ -45,6 +53,45 @@
 // in, and the next trigger pushes the same derived value (§8.1 "401 过期→重登
 // 后补推").
 //
+// ─── What the sync memory is actually a claim ABOUT ─────────────────────────
+//
+// It is not "the episodes this user has watched". It is "the server accepted
+// these episodes", and the server it accepted them FROM is a specific
+// `subscriptions` row. Delete that row and the claim is void — migration 0024
+// hangs `episode_watches` off a composite FK to (user_id, anilist_id), so
+// unsubscribing takes every mark with it and re-subscribing starts a NEW row
+// at zero. Local memory still said "synced to 5", `highWater` was still 5, and
+// `5 <= 5` short-circuited before any request went out: the reconciler could
+// not discover the reset because it never asked.
+//
+// So the memory carries the row's identity alongside the number.
+// `subscriptions.created_at` is exactly that identity — it moves if and only
+// if the row was deleted and re-inserted (`UpsertSubscription`'s ON CONFLICT
+// touches `status` and `updated_at`, never `created_at`) — and it arrives on
+// every row of `GET /api/subscriptions`, one request for the whole account.
+//
+// COMPARING THE NUMBER INSTEAD WOULD BE WRONG, and this is the part worth
+// slowing down for. Since 0024 a PATCH does not overwrite `current_episode`;
+// it INSERTs one `episode_watches` row and the column is re-derived as
+// COALESCE(MAX(episode), 0) over the set. Two different events therefore make
+// the server's number fall below ours:
+//
+//   the subscription was replaced   → re-push, that is this bug
+//   the reader unmarked episode N   → do NOT re-push, they meant it
+//
+// A rule of "server is lower, so push" cannot tell them apart, and unmarking
+// the top episode is the single most likely unmark there is. Identity can:
+// unmarking leaves `created_at` alone. That asymmetry is the whole fix.
+//
+// AND THE SAME ASYMMETRY IS WHAT PROTECTS EVERY OTHER EPISODE, once the memory
+// is a set rather than a maximum. The reconciler pushes `local \ pushed` and
+// nothing else, so an episode this device has already pushed is never sent
+// again — whatever the server currently holds, and without ever asking. Unmark
+// episode 5 on the website and the reconciler leaves it alone, not because it
+// noticed the unmark but because it has no new information about 5. The only
+// thing that re-offers an already-pushed episode is the identity check above
+// deciding the row it was pushed to no longer exists.
+//
 // No Dexie import and no `db` singleton import at module scope: `db.js` throws
 // when loaded outside a browser, and every decision below has to stay reachable
 // from a plain `bun test`.
@@ -52,7 +99,7 @@
 import { hasAuthHint } from "@/lib/clientAuth";
 import { authFetch } from "@/lib/authFetch";
 import { readBinding } from "./animeBinding";
-import { resolveHighWater } from "./watchHighWater";
+import { resolveWatchedEpisodes } from "./watchHighWater";
 
 // ─── Row shapes (structural, so tests can hand in plain objects) ────────────
 
@@ -60,7 +107,34 @@ import { resolveHighWater } from "./watchHighWater";
 export interface WatchSyncSeries {
   readonly id?: string;
   readonly anilistId?: number | null;
+  /**
+   * Every episode this device has pushed to the subscription identified by
+   * `lastSyncedSubscribedAt`. THE authoritative sync memory; `readSyncedEpisodes`
+   * is the only correct way to read it.
+   *
+   * Present-and-empty is a fact ("I have pushed nothing to THIS row") and is
+   * not the same as absent, which means "written by a build that only kept a
+   * maximum" — see `readSyncedEpisodes` for what that build's number is taken
+   * to mean.
+   */
+  readonly lastSyncedEpisodes?: readonly number[] | null;
+  /**
+   * `max(lastSyncedEpisodes)`, or 0.
+   *
+   * DERIVED, not authoritative — the same relationship
+   * `subscriptions.current_episode` has to `episode_watches` on the server,
+   * mirrored here for the same reason: one stored fact, one number summarising
+   * it, never two sources that can disagree. It is written on every push so a
+   * build that predates the set (another tab, a rollback) still reads a true
+   * number, and it is the migration input when the set is absent.
+   */
   readonly lastSyncedEpisode?: number | null;
+  /**
+   * `subscriptions.created_at` of the row the memory was pushed to, as epoch
+   * ms. Absent means "never observed", which is NOT the same as "unchanged" —
+   * see `judgeSyncMemory`.
+   */
+  readonly lastSyncedSubscribedAt?: number | null;
 }
 
 /** The `Progress` fields this module reads. */
@@ -175,7 +249,8 @@ export type PushSkipReason =
 export interface PushPlanned {
   readonly push: true;
   readonly anilistId: number;
-  readonly currentEpisode: number;
+  /** The DELTA — episodes this device has not pushed yet, ascending. */
+  readonly episodes: readonly number[];
 }
 export interface PushSkipped {
   readonly push: false;
@@ -206,18 +281,112 @@ function toSyncedEpisode(value: unknown): number {
 }
 
 /**
- * The whole push policy, as one pure function.
+ * The set of episodes this device has already pushed for one series.
  *
- * Note what is NOT here: an upper bound. Decision 4 puts that on the server,
- * which holds the authoritative `anime_cache.episodes`; the client's
- * `Series.totalEpisodes` is optional and often wrong, so bounding against it
- * would silently drop legitimate progress.
+ * ─── The migration, and it is the whole of it ───────────────────────────────
+ *
+ * Rows written before this change carry a maximum and no set, and the number
+ * they carry is read as `{1 .. N}`.
+ *
+ * That is not a guess about what the old code SENT — it sent one number. It is
+ * a statement about what the server therefore HOLDS, and it is exact: the old
+ * push wrote `current_episode = N`, and migration 0024's backfill turned every
+ * such row into episode_watches rows `1 .. N` (`generate_series(1,
+ * LEAST(current_episode, 5000))` — the migration's own comment calls this
+ * "asserting what the row has been claiming all along"). The memory is a claim
+ * about the server's state, so the migration that produced that state is
+ * exactly the right thing to read the old number through.
+ *
+ * WHAT AN UPGRADING READER EXPERIENCES: nothing. Their first pass on the new
+ * build finds `local \ {1..N}` empty for every series whose local episodes all
+ * sit at or below the mark they already synced, so it issues no writes at all
+ * — one account-wide GET for the whole library, exactly as before. From then
+ * on the memory is a real set, built from real pushes, and every episode they
+ * finish syncs individually.
+ *
+ * The alternative readings were both worse, in opposite directions:
+ *
+ *   `{}`   treat the old number as nothing. Every reader's whole library is
+ *          re-pushed on the first mount after the upgrade, and — worse — every
+ *          episode they had deliberately unchecked comes back, because an
+ *          empty memory has no way to know they ever pushed it.
+ *   `{N}`  treat it as literally the one number sent. Nearly as loud (one bulk
+ *          write per series, missing one episode each) and it resurrects
+ *          unmarks below N for the same reason.
+ *
+ * The residue of `{1..N}` is the mirror image: an episode below the old mark
+ * that the server genuinely lacks is never offered again. For that to happen
+ * the row must have been pushed AFTER 0024 and before this change — a window
+ * that exists only on a machine that ran this branch, since 0024 has never
+ * shipped. A reader cannot be in it. And it is not a trap even so: replacing
+ * the subscription clears the memory, and the reader's next episode syncs
+ * normally regardless.
+ *
+ * Presence beats content: a stored empty array means "pushed nothing to THIS
+ * row" and must not fall through to the number beside it, or clearing the
+ * memory on a replaced subscription would immediately un-clear itself.
+ */
+export function readSyncedEpisodes(row: WatchSyncSeries | null | undefined): Set<number> {
+  const stored = row?.lastSyncedEpisodes;
+  if (Array.isArray(stored)) {
+    const out = new Set<number>();
+    for (const n of stored) {
+      if (typeof n === "number" && Number.isInteger(n) && n > 0) out.add(n);
+    }
+    return out;
+  }
+
+  const highWater = toSyncedEpisode(row?.lastSyncedEpisode);
+  const out = new Set<number>();
+  for (let n = 1; n <= highWater; n += 1) out.add(n);
+  return out;
+}
+
+/**
+ * An instant, from either an epoch-ms number (what we store) or an RFC 3339
+ * string (what go-api sends). `null` means "no usable instant", which every
+ * reader below treats as "unknown", never as "the epoch".
+ */
+function toTimestamp(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || !value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * The whole push policy, as one pure function: push the difference between
+ * what the library knows and what this device has already sent.
+ *
+ * `already-synced` now means "the difference is empty", which subsumes the old
+ * "the server is at or past our maximum" and is strictly stronger — a set can
+ * be behind at episode 5 while agreeing at episode 9, and the old comparison
+ * could not see that at all.
+ *
+ * Note what is NOT here: an upper bound, and no cap on the delta either.
+ *
+ * Decision 4 puts the bound on the server, which holds the authoritative
+ * `anime_cache.episodes`; the client's `Series.totalEpisodes` is optional and
+ * often wrong, so bounding against it would silently drop legitimate progress.
+ * Filtering an out-of-range episode out here would be worse than pointless: a
+ * local episode numbered 6000 is evidence of a bad binding or a bad filename
+ * parse, and the server's 400 is how that becomes visible (and how the attempt
+ * ceiling eventually stops it). Dropping it quietly would leave a broken
+ * series looking healthy forever.
+ *
+ * The delta is likewise sent whole. It cannot exceed the server's array cap
+ * without more than five thousand completed main episodes in one merged
+ * group, which is a mis-merge rather than a library — and a mis-merge is
+ * exactly the thing the resulting 400 and the attempt ceiling exist to
+ * surface, not to paper over with chunking nobody could ever exercise.
  */
 export function decidePush(input: {
   readonly isRoot: boolean;
   readonly anilistId: unknown;
-  readonly lastSyncedEpisode: unknown;
-  readonly highWater: number | null;
+  /** What this device has already pushed — see `readSyncedEpisodes`. */
+  readonly synced: ReadonlySet<number>;
+  /** Locally-completed main episodes, ascending. */
+  readonly watched: readonly number[];
   readonly attempts: number;
 }): PushPlan {
   // First, because a merged-in source can carry a stale binding of its own and
@@ -227,17 +396,138 @@ export function decidePush(input: {
   const anilistId = toAnilistId(input.anilistId);
   if (anilistId === null) return { push: false, reason: "unbound" };
 
-  const { highWater } = input;
-  if (highWater === null || !Number.isFinite(highWater)) {
-    return { push: false, reason: "nothing-watched" };
-  }
-  if (highWater <= toSyncedEpisode(input.lastSyncedEpisode)) {
-    return { push: false, reason: "already-synced" };
-  }
+  const watched = input.watched ?? [];
+  if (watched.length === 0) return { push: false, reason: "nothing-watched" };
+
+  const episodes = watched.filter((n) => !input.synced.has(n));
+  if (episodes.length === 0) return { push: false, reason: "already-synced" };
+
   if (input.attempts >= MAX_PUSH_ATTEMPTS) {
     return { push: false, reason: "blocked" };
   }
-  return { push: true, anilistId, currentEpisode: highWater };
+  return { push: true, anilistId, episodes };
+}
+
+// ─── Is the memory still about the row it was written for? ──────────────────
+
+/**
+ * One subscription as the server currently holds it.
+ *
+ * Deliberately three fields out of the ~24 `GET /api/subscriptions` returns:
+ * this module has no business knowing about cover art, and a narrow shape
+ * keeps the parser's tolerance honest.
+ */
+export interface ServerSubscription {
+  readonly anilistId: number;
+  /** `COALESCE(MAX(episode), 0)` over the server's watched set. */
+  readonly currentEpisode: number;
+  /** `subscriptions.created_at` as epoch ms — the row's identity. */
+  readonly subscribedAt: number | null;
+}
+
+/**
+ * Reduce a `GET /api/subscriptions` body into the fields this module reads.
+ *
+ * Tolerant in the same way and for the same reason as
+ * `subscriptionSetState.subscribedIdsFromList`: the endpoint answers
+ * `{data:[…]}`, but a bare array, a null envelope and a row with a junk
+ * `anilistId` must each cost that one row rather than the whole snapshot. A
+ * row that survives with `subscribedAt: null` still tells us nothing about
+ * identity, and `judgeSyncMemory` treats it as unknown rather than as changed.
+ */
+export function parseServerSubscriptions(body: unknown): ServerSubscription[] {
+  const rows = Array.isArray(body)
+    ? body
+    : body && typeof body === "object" && Array.isArray((body as { data?: unknown }).data)
+      ? (body as { data: unknown[] }).data
+      : [];
+
+  const out: ServerSubscription[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const anilistId = toAnilistId((row as { anilistId?: unknown }).anilistId);
+    if (anilistId === null) continue;
+    out.push({
+      anilistId,
+      currentEpisode: toSyncedEpisode((row as { currentEpisode?: unknown }).currentEpisode),
+      subscribedAt: toTimestamp((row as { subscribedAt?: unknown }).subscribedAt),
+    });
+  }
+  return out;
+}
+
+/**
+ * `intact`   the memory describes the live row; keep short-circuiting.
+ * `replaced` the row it described is gone; the memory must be cleared.
+ * `unknown`  nothing to compare against; record what we saw, decide nothing.
+ */
+export type MemoryVerdict = "intact" | "replaced" | "unknown";
+
+/**
+ * Does `lastSyncedEpisode` still describe the subscription in front of us?
+ *
+ * Every branch that is not `replaced` errs toward leaving the memory alone,
+ * because the cost of the two mistakes is not symmetric. Failing to clear a
+ * stale memory delays a push until the reader watches one more episode.
+ * Clearing a live one re-PATCHes a high-water mark — which, since 0024, INSERTs
+ * an `episode_watches` row and can therefore put back an episode the reader
+ * deliberately unchecked. Only an outright identity change is allowed to push.
+ *
+ * The `currentEpisode` guard is not redundant with the identity check, and it
+ * is stricter than "is the server behind us" for a reason spelled out at the
+ * branch itself.
+ */
+export function judgeSyncMemory(input: {
+  readonly lastSyncedEpisode?: unknown;
+  readonly lastSyncedEpisodes?: readonly number[] | null;
+  readonly lastSyncedSubscribedAt: unknown;
+  readonly server: ServerSubscription | null | undefined;
+}): MemoryVerdict {
+  // Nothing was ever synced, so there is no claim to falsify. This also keeps
+  // a never-synced series from acquiring an identity it has no use for.
+  //
+  // Asked of the SET rather than the number, via the one reader that knows
+  // what an absent set means — a legacy row carrying a maximum has synced
+  // something, and must be judged like any other.
+  const memory = readSyncedEpisodes({
+    lastSyncedEpisode: toSyncedEpisode(input.lastSyncedEpisode),
+    lastSyncedEpisodes: input.lastSyncedEpisodes,
+  });
+  if (memory.size === 0) return "intact";
+
+  const { server } = input;
+  // Absent from the snapshot means the reader unsubscribed and has NOT come
+  // back. Clearing the memory here would push, the push would 404, and
+  // `pushAndRecord`'s 404 recovery would create the very subscription they
+  // just deleted. Leave it: there is nothing to heal until a row exists again.
+  if (!server || server.subscribedAt === null) return "unknown";
+
+  const recorded = toTimestamp(input.lastSyncedSubscribedAt);
+  // Synced by a build that did not record identities yet. The observed value
+  // becomes the baseline; the NEXT replacement is the one we can prove.
+  if (recorded === null) return "unknown";
+
+  if (recorded === server.subscribedAt) return "intact";
+
+  // The identity is unfamiliar, so this is not the row the memory was written
+  // for. Only an EMPTY row may be re-pushed, and "behind us" is not the test.
+  //
+  // A re-created subscription always starts at exactly zero — `episode_watches`
+  // cascaded away with the row it hung off, and `current_episode` is MAX over
+  // that set. So anything above zero means somebody already wrote to the NEW
+  // row, and two histories produce the identical reading:
+  //
+  //   another device pushed 3 of our 5 and has not caught up yet
+  //   the new row reached 5 and the reader then unchecked back down to 3
+  //
+  // Nothing observable separates them, and the second must not be overwritten.
+  // So an unfamiliar row carrying any progress is `unknown`: adopt the
+  // identity, push nothing, and let the high-water mark move progress the
+  // ordinary way once the reader watches something. Same asymmetry as above —
+  // a delayed push costs a reader nothing, a re-marked episode costs them the
+  // one thing they explicitly asked for.
+  if (server.currentEpisode !== 0) return "unknown";
+  return "replaced";
 }
 
 export type FailureKind = "deterministic" | "transient" | "auth";
@@ -308,6 +598,29 @@ const _failureListeners = new Set<FailureListener>();
 /** Every series id we have already tried to auto-create a subscription for. */
 const _trackAttempted = new Set<string>();
 
+/**
+ * The account's subscriptions as of THIS reconcile pass, plus the request
+ * currently reading them and whether that read already failed.
+ *
+ * In memory for the same reason the attempt counter above is: a Dexie table
+ * would mean a migration, a second source of truth, and a stale row to
+ * explain. It is a cache of somebody else's state.
+ *
+ * SCOPED TO ONE PASS, not to the session, and the difference is the whole
+ * reported bug. "Unsubscribe on the detail page, then re-subscribe" is
+ * something a reader does in one sitting without ever reloading the tab; a
+ * session-long cache would still be holding the pre-unsubscribe answer when
+ * they walked back to /library, and the progress would not come back until
+ * they happened to reload. One pass is the longest a snapshot can be trusted.
+ *
+ * Within a pass both flags are load-bearing: `_snapshot` keeps a library of
+ * three hundred series to one request, and `_snapshotUnreadable` keeps an
+ * offline one to one request rather than three hundred failures.
+ */
+let _snapshot: Map<number, ServerSubscription> | null = null;
+let _snapshotPending: Promise<Map<number, ServerSubscription> | null> | null = null;
+let _snapshotUnreadable = false;
+
 /** Current failure state for one series, or null when it is healthy. */
 export function getSyncFailure(seriesId: string): SyncFailure | null {
   return _failures.get(seriesId) ?? null;
@@ -347,6 +660,9 @@ function emitFailure(failure: SyncFailure): void {
 export function resetWatchSyncState(): void {
   _failures.clear();
   _trackAttempted.clear();
+  _snapshot = null;
+  _snapshotPending = null;
+  _snapshotUnreadable = false;
 }
 
 function recordFailure(
@@ -392,10 +708,25 @@ export function isPushErr(res: PushResponse): res is PushErr {
 }
 
 export interface SubscriptionSyncApi {
-  /** PATCH the watch progress. MUST send `monotonic: true`. */
-  patchProgress(anilistId: number, currentEpisode: number): Promise<PushResponse>;
+  /**
+   * PUT a SET of episodes as watched, in ONE request.
+   *
+   * The server unions; it never replaces. That is what makes this safe to
+   * call from a device that only knows part of the picture — the marks
+   * another device made are not this one's to delete.
+   */
+  markEpisodes(anilistId: number, episodes: readonly number[]): Promise<PushResponse>;
   /** POST an idempotent `watching` subscription. MUST send `ifAbsent: true`. */
   createIfAbsent(anilistId: number): Promise<PushResponse>;
+  /**
+   * Every subscription this account holds, in ONE request.
+   *
+   * `null` means "could not read" — offline, 401, 5xx — and is not the same
+   * as an empty array. An empty array is a signed-in reader with nothing
+   * subscribed, which is a fact; `null` is the absence of one, and nothing
+   * downstream may act on it.
+   */
+  listSubscriptions(): Promise<ServerSubscription[] | null>;
   /** Cheap "is anyone logged in" probe, so anonymous visits skip the 401. */
   isSignedIn(): boolean;
 }
@@ -411,7 +742,7 @@ async function readErrorMessage(res: Response): Promise<string> {
 
 async function send(
   path: string,
-  method: "POST" | "PATCH",
+  method: "POST" | "PUT",
   body: unknown,
 ): Promise<PushResponse> {
   try {
@@ -438,14 +769,18 @@ async function send(
 
 /** The production transport. Swapped out wholesale in tests. */
 export const defaultSyncApi: SubscriptionSyncApi = {
-  patchProgress(anilistId, currentEpisode) {
-    return send(`/api/subscriptions/${anilistId}`, "PATCH", {
-      currentEpisode,
-      // Decision 8: the no-rollback guard lives in the server's GREATEST, and
-      // this flag is what selects it. Without it a stale tab pushing episode 5
-      // would claw a phone's episode 12 back down (mihon#1793).
-      monotonic: true,
-    });
+  markEpisodes(anilistId, episodes) {
+    // ONE request for the whole set, which is the reason this route exists:
+    // a first sync of a two-cour series is fifty episodes, and fifty requests
+    // behind one /library mount would be answered by a per-IP rate limiter
+    // rather than by the database.
+    //
+    // No `monotonic` flag, and none is needed. Decision 8's no-rollback
+    // guarantee used to depend on every caller remembering to send it; since
+    // 0024 the value is `MAX` over a set this write can only add to, so a
+    // stale tab pushing episode 5 cannot claw a phone's episode 12 back down
+    // (mihon#1793) whatever it sends.
+    return send(`/api/subscriptions/${anilistId}/episodes`, "PUT", { episodes });
   },
   createIfAbsent(anilistId) {
     return send("/api/subscriptions", "POST", {
@@ -455,6 +790,18 @@ export const defaultSyncApi: SubscriptionSyncApi = {
       // silently resurrects a subscription the user set to dropped/completed.
       ifAbsent: true,
     });
+  },
+  async listSubscriptions() {
+    try {
+      // `skipRedirectOnFailure` for the same reason `send` uses it: this runs
+      // from a background reconciler and a 401 here is data, not a reason to
+      // yank the reader out of a playing episode.
+      const res = await authFetch("/api/subscriptions", { skipRedirectOnFailure: true });
+      if (!res.ok) return null;
+      return parseServerSubscriptions((await res.json()) as unknown);
+    } catch {
+      return null;
+    }
   },
   isSignedIn: hasAuthHint,
 };
@@ -507,6 +854,16 @@ export interface SyncResult {
   /** The ROOT series id — the only one that owns a binding. */
   readonly seriesId: string;
   readonly outcome: SyncOutcome;
+  /**
+   * The episodes this pass offered the server, ascending — the delta, not the
+   * library's whole set. Empty for every non-pushing outcome.
+   */
+  readonly episodes: readonly number[];
+  /**
+   * `max(episodes)`, or null. The number a message to the reader would use,
+   * kept beside the set for the same reason the server keeps
+   * `current_episode` beside `episode_watches`.
+   */
   readonly episode: number | null;
   readonly anilistId: number | null;
 }
@@ -566,46 +923,216 @@ async function ensureSubscription(
 }
 
 /**
- * Push one series' high-water mark, then persist it.
+ * The account's subscriptions: exactly one read per reconcile pass, success or
+ * failure, however many series that pass walks.
  *
- * `lastSyncedEpisode` is written only after the server accepts, which is the
- * whole no-queue design: a failure leaves the two numbers apart, and the next
- * trigger recomputes the identical push from state.
+ * A failure does not latch beyond the pass, for the reason `ensureSubscription`
+ * gives about transient refusals: one offline moment must not disable a repair
+ * path. It does latch WITHIN the pass, or an offline `reconcileLibrary` over
+ * three hundred series would issue three hundred sequential failing requests —
+ * the same shape as the mount-time search burst `reconcileLibrary` refuses to
+ * become.
+ */
+async function loadSubscriptionSnapshot(
+  api: SubscriptionSyncApi,
+): Promise<Map<number, ServerSubscription> | null> {
+  if (_snapshot) return _snapshot;
+  if (_snapshotUnreadable) return null;
+
+  const inFlight = _snapshotPending ?? (_snapshotPending = fetchSubscriptionSnapshot(api));
+  const result = await inFlight;
+  // `_snapshotPending` means "a read is in flight" and nothing more. Retiring
+  // it on settle is what lets the next pass ask again instead of awaiting the
+  // last pass's already-resolved answer. Guarded so an overlapping pass that
+  // started its own read does not have its slot cleared by this one.
+  if (_snapshotPending === inFlight) _snapshotPending = null;
+  if (result === null) _snapshotUnreadable = true;
+  return result;
+}
+
+/**
+ * Open a reconcile pass: forget the previous pass's answer.
+ *
+ * `_snapshotPending` is deliberately NOT cleared. An overlapping pass — a
+ * completed episode landing while the player's entry reconcile is still
+ * running — should share the read that is already on the wire rather than
+ * start a second one; it is milliseconds old, not a pass old.
+ */
+function beginReconcilePass(): void {
+  _snapshot = null;
+  _snapshotUnreadable = false;
+}
+
+async function fetchSubscriptionSnapshot(
+  api: SubscriptionSyncApi,
+): Promise<Map<number, ServerSubscription> | null> {
+  let rows: ServerSubscription[] | null = null;
+  try {
+    rows = await api.listSubscriptions();
+  } catch {
+    // A transport that throws rather than answering is the offline case, and
+    // it must read as "no snapshot", never as "you have no subscriptions".
+    return null;
+  }
+  if (rows === null) return null;
+  const byAnilistId = new Map<number, ServerSubscription>();
+  for (const row of rows) byAnilistId.set(row.anilistId, row);
+  _snapshot = byAnilistId;
+  return byAnilistId;
+}
+
+/**
+ * Give a plan that stopped at `already-synced` one chance to be wrong.
+ *
+ * Returns `true` when the memory turned out to describe a subscription that no
+ * longer exists, in which case it has been cleared and the caller must re-plan.
+ *
+ * The Dexie writes are both caches of the server's state, so a failed write
+ * costs one more revalidation next pass and nothing else — it cannot lose a
+ * reader's progress, and it cannot leave the two fields describing different
+ * rows, because the clearing write sets them together or not at all.
+ */
+async function revalidateSyncMemory(
+  db: WatchSyncDb,
+  rootId: string,
+  anilistId: number,
+  seriesRow: WatchSyncSeries | undefined,
+  api: SubscriptionSyncApi,
+): Promise<boolean> {
+  // Before the network, not after: an anonymous visitor has no subscriptions
+  // to compare against and must not be made to ask.
+  if (!api.isSignedIn()) return false;
+
+  const snapshot = await loadSubscriptionSnapshot(api);
+  if (!snapshot) return false;
+
+  const server = snapshot.get(anilistId) ?? null;
+  const verdict = judgeSyncMemory({
+    lastSyncedEpisode: seriesRow?.lastSyncedEpisode,
+    lastSyncedEpisodes: seriesRow?.lastSyncedEpisodes,
+    lastSyncedSubscribedAt: seriesRow?.lastSyncedSubscribedAt,
+    server,
+  });
+  if (verdict === "intact") return false;
+
+  if (verdict === "unknown") {
+    // Adopt the identity we just saw so the next replacement is provable.
+    // Nothing else changes — this is bookkeeping, not a decision.
+    if (server?.subscribedAt != null) {
+      await writeSeries(db, rootId, { lastSyncedSubscribedAt: server.subscribedAt });
+    }
+    return false;
+  }
+
+  // Every field in ONE write, so a reload can never find the memory
+  // describing one subscription and the identity describing another.
+  // `replaced` implies judgeSyncMemory saw a snapshot row carrying a usable
+  // identity, so the second value is the new row's; the `?? null` is there
+  // for the reader, not for a case that can occur.
+  //
+  // This is where the whole memory is cleared, and it is the ONLY place —
+  // which is what makes "a re-subscribe re-pushes everything, an unmark
+  // re-pushes nothing" one rule rather than two. The set generalises the
+  // number it replaced; it did not add a second thing to invalidate.
+  await writeSeries(db, rootId, {
+    // An EMPTY ARRAY, not a missing field: `readSyncedEpisodes` reads a
+    // present-but-empty set as "pushed nothing to THIS row" and an absent one
+    // as a legacy maximum to expand. Deleting the field here would hand the
+    // cleared memory straight back to the migration path.
+    lastSyncedEpisodes: [],
+    // The derived mirror, kept in step in the same write for the same reason
+    // the server recomputes current_episode inside its own statement.
+    lastSyncedEpisode: 0,
+    lastSyncedSubscribedAt: server?.subscribedAt ?? null,
+  });
+  return true;
+}
+
+/** `db.series.update`, minus the right to fail the whole reconcile. */
+async function writeSeries(
+  db: WatchSyncDb,
+  rootId: string,
+  changes: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await db.series.update(rootId, changes);
+  } catch (err) {
+    console.warn("[watchSync] series sync memory write failed:", err);
+  }
+}
+
+/**
+ * Push one series' unsent episodes, then remember them.
+ *
+ * The memory is written only after the server accepts, which is the whole
+ * no-queue design: a failure leaves the two sets apart, and the next trigger
+ * recomputes the identical delta from state.
+ *
+ * It is written as the UNION of what was remembered and what was just sent,
+ * not as a copy of the local set. The two differ whenever the local set
+ * shrinks — a rescan that loses a file, a split that moves episodes onto
+ * another series — and a memory that shrank with it would re-offer those
+ * episodes the moment they came back, putting a reader's deliberate unmark
+ * straight back on their screen. The memory only ever grows, and only
+ * `revalidateSyncMemory` empties it.
  */
 async function pushAndRecord(
   db: WatchSyncDb,
   rootId: string,
   plan: PushPlanned,
+  synced: ReadonlySet<number>,
   api: SubscriptionSyncApi,
   now: () => number,
 ): Promise<SyncResult> {
-  const base = { seriesId: rootId, episode: plan.currentEpisode, anilistId: plan.anilistId };
+  const episodes = [...plan.episodes];
+  const base = {
+    seriesId: rootId,
+    // The maximum of what was sent, which is what the server's
+    // current_episode will be at or above once it lands.
+    episode: episodes[episodes.length - 1] ?? null,
+    episodes,
+    anilistId: plan.anilistId,
+  };
 
-  let res = await api.patchProgress(plan.anilistId, plan.currentEpisode);
+  let res = await api.markEpisodes(plan.anilistId, episodes);
 
-  // A 404 from PATCH means one thing: this user has no subscription row for
-  // this title. That is the state "click to start tracking" (T9) exists to
-  // leave behind, and someone who just finished an episode has unambiguously
-  // started watching — so create it once and retry, rather than burning the
-  // attempt ceiling on a condition we can fix. `ifAbsent` keeps a hand-set
+  // A 404 means one thing: this user has no subscription row for this title.
+  // That is the state "click to start tracking" (T9) exists to leave behind,
+  // and someone who just finished an episode has unambiguously started
+  // watching — so create it once and retry, rather than burning the attempt
+  // ceiling on a condition we can fix. `ifAbsent` keeps a hand-set
   // dropped/completed status intact, so this can never resurrect a status.
   if (isPushErr(res) && res.status === 404) {
     const ensured = await ensureSubscription(rootId, plan.anilistId, api);
     if (ensured === "created") {
-      res = await api.patchProgress(plan.anilistId, plan.currentEpisode);
+      res = await api.markEpisodes(plan.anilistId, episodes);
     }
   }
 
   if (!isPushErr(res)) {
     clearFailure(rootId);
+    const remembered = [...new Set([...synced, ...episodes])].sort((a, b) => a - b);
     try {
-      await db.series.update(rootId, { lastSyncedEpisode: plan.currentEpisode });
+      await db.series.update(rootId, {
+        lastSyncedEpisodes: remembered,
+        // Derived in the same write, never separately — see
+        // `WatchSyncSeries.lastSyncedEpisode`.
+        lastSyncedEpisode: remembered[remembered.length - 1] ?? 0,
+      });
     } catch (err) {
-      // The server already has the value. Failing to remember that costs one
-      // redundant (and, thanks to `monotonic`, completely inert) PATCH next
-      // time — not a reason to report the push as failed.
-      // eslint-disable-next-line no-console
-      console.warn("[watchSync] lastSyncedEpisode write failed:", err);
+      // The server already has the episodes, so failing to remember them is
+      // not a reason to report the push as failed. It costs one redundant
+      // request next time, and that request is harmless because every episode
+      // in it is already in the server's set (ON CONFLICT DO NOTHING).
+      //
+      // Harmless BECAUSE it is already there — not because the write does
+      // nothing. Re-sending an episode the reader has since unchecked would
+      // put it back, and the only thing standing between this module and that
+      // is the memory this line failed to write. So the next pass re-offering
+      // the same delta is the price, and it is the right price: it is
+      // bounded, it is idempotent while nothing has changed, and it beats
+      // treating a Dexie hiccup as lost progress.
+      console.warn("[watchSync] sync memory write failed:", err);
     }
     return { ...base, outcome: "pushed" };
   }
@@ -616,7 +1143,50 @@ async function pushAndRecord(
 }
 
 function skipped(rootId: string, reason: PushSkipReason, anilistId: number | null): SyncResult {
-  return { seriesId: rootId, outcome: reason, episode: null, anilistId };
+  return { seriesId: rootId, outcome: reason, episodes: [], episode: null, anilistId };
+}
+
+/**
+ * `decidePush`, plus the one question it cannot answer out of local state: is
+ * `lastSyncedEpisode` still a claim about a subscription that exists?
+ *
+ * ONLY `already-synced` is re-examined, and that is the whole scope of the
+ * revalidation. Every other skip reason is a fact about local data — not the
+ * root, not bound, nothing watched, out of attempts — and no server state
+ * changes any of them. `already-synced` is the only verdict that rests on a
+ * remembered claim about somebody else's row.
+ *
+ * The re-plan goes back through `decidePush` rather than pushing directly, so
+ * a healed series is still subject to the attempt ceiling. A binding that
+ * points at the wrong show does not get a fresh retry budget for having been
+ * unsubscribed.
+ */
+async function planPush(
+  db: WatchSyncDb,
+  rootId: string,
+  anilistId: number,
+  seriesRow: WatchSyncSeries | undefined,
+  input: { readonly watched: readonly number[]; readonly attempts: number },
+  api: SubscriptionSyncApi,
+): Promise<{ readonly plan: PushPlan; readonly synced: ReadonlySet<number> }> {
+  const base = {
+    isRoot: true,
+    anilistId,
+    watched: input.watched,
+    attempts: input.attempts,
+  };
+  const synced = readSyncedEpisodes(seriesRow);
+  const plan = decidePush({ ...base, synced });
+  if (isPushPlanned(plan)) return { plan, synced };
+  if (plan.reason !== "already-synced") return { plan, synced };
+
+  const replaced = await revalidateSyncMemory(db, rootId, anilistId, seriesRow, api);
+  if (!replaced) return { plan, synced };
+  // The memory was cleared against a row that no longer exists, so the delta
+  // is now the whole local set — which is exactly right for a subscription the
+  // reader deleted and re-created.
+  const empty: ReadonlySet<number> = new Set<number>();
+  return { plan: decidePush({ ...base, synced: empty }), synced: empty };
 }
 
 /**
@@ -633,6 +1203,7 @@ export async function reconcileSeries(
   const api = opts.api ?? defaultSyncApi;
   const now = opts.now ?? Date.now;
   if (!seriesId) return skipped("", "unbound", null);
+  beginReconcilePass();
 
   const overrides = db.userOverride ? await db.userOverride.toArray() : [];
   const rootId = findRootSeriesId(overrides, seriesId);
@@ -644,34 +1215,45 @@ export async function reconcileSeries(
     (opts.resolveBinding ? toAnilistId(await opts.resolveBinding(rootId)) : null);
   if (anilistId === null) return skipped(rootId, "unbound", null);
 
-  const plan = decidePush({
-    // `rootId` came out of findRootSeriesId, so this is true by construction.
-    // Stated rather than implied: a caller handing a merged-in source id
-    // straight to the pusher is exactly the bug this whole path prevents.
-    isRoot: true,
+  // `isRoot: true` inside planPush is true by construction — `rootId` came out
+  // of findRootSeriesId. Stated rather than implied: a caller handing a
+  // merged-in source id straight to the pusher is exactly the bug this whole
+  // path prevents.
+  const { plan, synced } = await planPush(
+    db,
+    rootId,
     anilistId,
-    lastSyncedEpisode: seriesRow?.lastSyncedEpisode,
-    highWater: await readHighWater(db, groupIds),
-    attempts: getSyncFailure(rootId)?.attempts ?? 0,
-  });
+    seriesRow,
+    {
+      watched: await readWatchedEpisodes(db, groupIds),
+      attempts: getSyncFailure(rootId)?.attempts ?? 0,
+    },
+    api,
+  );
 
   if (!isPushPlanned(plan)) return skipped(rootId, plan.reason, anilistId);
   if (!api.isSignedIn()) {
-    return { seriesId: rootId, outcome: "signed-out", episode: plan.currentEpisode, anilistId: plan.anilistId };
+    return {
+      seriesId: rootId,
+      outcome: "signed-out",
+      episodes: plan.episodes,
+      episode: plan.episodes[plan.episodes.length - 1] ?? null,
+      anilistId: plan.anilistId,
+    };
   }
-  return pushAndRecord(db, rootId, plan, api, now);
+  return pushAndRecord(db, rootId, plan, synced, api, now);
 }
 
-async function readHighWater(
+async function readWatchedEpisodes(
   db: WatchSyncDb,
   groupIds: readonly string[],
-): Promise<number | null> {
-  if (!groupIds.length) return null;
+): Promise<number[]> {
+  if (!groupIds.length) return [];
   const [episodes, progress] = await Promise.all([
     db.episodes.where("seriesId").anyOf(groupIds).toArray(),
     db.progress.where("seriesId").anyOf(groupIds).toArray(),
   ]);
-  return resolveHighWater(progress, episodes);
+  return resolveWatchedEpisodes(progress, episodes);
 }
 
 export interface LibraryReconcileInput {
@@ -713,6 +1295,7 @@ export async function reconcileLibrary(
 ): Promise<SyncResult[]> {
   const api = opts.api ?? defaultSyncApi;
   const now = opts.now ?? Date.now;
+  beginReconcilePass();
 
   // root id → the completed progress rows anywhere in its merged group.
   const completedByRoot = new Map<string, WatchSyncProgress[]>();
@@ -735,7 +1318,9 @@ export async function reconcileLibrary(
   // their episodes, and `decidePush` needs nothing but numbers already in hand.
   // The high-water mark is not known yet, so pass a placeholder that cannot
   // short-circuit — the real value is checked in the second pass below.
-  const candidates: string[] = [];
+  // Carries the resolved `anilistId` rather than re-deriving it below, so the
+  // second pass cannot need a cast to assert what this pass already proved.
+  const candidates: { rootId: string; anilistId: number }[] = [];
   const results: SyncResult[] = [];
   for (const rootId of completedByRoot.keys()) {
     const row = seriesById.get(rootId);
@@ -748,12 +1333,12 @@ export async function reconcileLibrary(
       results.push(skipped(rootId, "blocked", anilistId));
       continue;
     }
-    candidates.push(rootId);
+    candidates.push({ rootId, anilistId });
   }
   if (candidates.length === 0) return results;
 
   const groupIds = new Set<string>();
-  for (const rootId of candidates) {
+  for (const { rootId } of candidates) {
     for (const id of resolveGroupSeriesIds(input.overrides, rootId)) groupIds.add(id);
   }
   const episodes = await db.episodes
@@ -770,34 +1355,49 @@ export async function reconcileLibrary(
     else episodesByGroupMember.set(key, [ep]);
   }
 
-  for (const rootId of candidates) {
+  for (const { rootId, anilistId } of candidates) {
     const row = seriesById.get(rootId);
     const groupEpisodes = resolveGroupSeriesIds(input.overrides, rootId).flatMap(
       (id) => episodesByGroupMember.get(id) ?? [],
     );
-    const plan = decidePush({
-      isRoot: true,
-      anilistId: row?.anilistId,
-      lastSyncedEpisode: row?.lastSyncedEpisode,
-      highWater: resolveHighWater(completedByRoot.get(rootId) ?? [], groupEpisodes),
-      attempts: getSyncFailure(rootId)?.attempts ?? 0,
-    });
+    // Revalidation inside costs at most ONE request for this entire loop: the
+    // snapshot is account-wide and cached for the pass (see `_snapshot` — the
+    // lifetime is ONE pass, deliberately, not the session), so three
+    // hundred series asks once, not three hundred times. The memory that
+    // decides whether to push at all is local, so the set generalisation adds
+    // no read here either — per series, this loop still touches the network
+    // only when it has something to write.
+    const { plan, synced } = await planPush(
+      db,
+      rootId,
+      anilistId,
+      row,
+      {
+        watched: resolveWatchedEpisodes(completedByRoot.get(rootId) ?? [], groupEpisodes),
+        attempts: getSyncFailure(rootId)?.attempts ?? 0,
+      },
+      api,
+    );
     if (!isPushPlanned(plan)) {
-      results.push(skipped(rootId, plan.reason, toAnilistId(row?.anilistId)));
+      results.push(skipped(rootId, plan.reason, anilistId));
       continue;
     }
     if (!api.isSignedIn()) {
       results.push({
         seriesId: rootId,
         outcome: "signed-out",
-        episode: plan.currentEpisode,
+        episodes: plan.episodes,
+        episode: plan.episodes[plan.episodes.length - 1] ?? null,
         anilistId: plan.anilistId,
       });
       continue;
     }
     // Sequential on purpose: a library-wide reconcile after a binge could
-    // otherwise fire a dozen simultaneous PATCHes at a per-IP rate limiter.
-    results.push(await pushAndRecord(db, rootId, plan, api, now));
+    // otherwise fire a dozen simultaneous writes at a per-IP rate limiter.
+    // One request per series that has something to say, and none from the
+    // rest — the set does not change that shape, it only makes the one
+    // request carry everything instead of just its maximum.
+    results.push(await pushAndRecord(db, rootId, plan, synced, api, now));
   }
   return results;
 }

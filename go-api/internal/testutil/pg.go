@@ -52,6 +52,10 @@ var allTables = []string{
 	"subscriptions",
 	"follows",
 	"episode_comments",
+	// Per-episode watch marks (migration 0024).  CASCADE from subscriptions
+	// would reach it anyway via the shared users/anime_cache parents, but
+	// listing it keeps this the readable inventory it claims to be.
+	"episode_watches",
 	// Community loop tables (migration 0018).
 	"activity_events",
 	"notifications",

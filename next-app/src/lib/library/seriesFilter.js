@@ -24,38 +24,63 @@ const ALMOST_DONE_RATIO = 0.8;
 const FRESH_RATIO = 0.1;
 
 /**
+ * Normalize whatever the caller passed as a total into "known" or "unknown".
+ *
+ * `<= 0` — and anything that is not a finite number — is unknown. Four of the
+ * six filters below refuse to answer without a total, so this is the single
+ * place that decision is spelled out.
+ *
+ * @param {unknown} groupTotal
+ * @returns {number} the usable total, or 0 for unknown
+ */
+function usableTotal(groupTotal) {
+  return typeof groupTotal === 'number' &&
+    Number.isFinite(groupTotal) &&
+    groupTotal > 0
+    ? groupTotal
+    : 0;
+}
+
+/**
  * Decide whether a series matches the active filter, ignoring text query.
  * Extracted so the chip-count memo can reuse the same logic without re-running
  * the sort/slice path.
  *
+ * `groupTotal` is passed IN rather than read off `s.totalEpisodes`, because a
+ * card can be a merge of several series and the number these ratios need is the
+ * whole card's, not the root row's. `buildGroupTotals` owns that arithmetic —
+ * including the part where two members that are the same season must not be
+ * summed. `progressMap` must be folded over the same groups for the same
+ * reason; a group denominator over a per-series numerator reads as less
+ * watched than the card actually is.
+ *
  * @param {Series} s
- * @param {Map<string, SeriesProgressInfo>} progressMap
+ * @param {Map<string, SeriesProgressInfo>} progressMap group-folded
  * @param {Exclude<LibraryFilter, null>} filter
+ * @param {number} [groupTotal] episodes on this whole card; <= 0 / omitted = unknown
  * @returns {boolean}
  */
-export function matchesFilter(s, progressMap, filter) {
+export function matchesFilter(s, progressMap, filter, groupTotal) {
   if (filter === 'new') return true;
   const info = progressMap.get(s.id);
+  const total = usableTotal(groupTotal);
 
   if (filter === 'recent') {
     return (info?.lastPlayedAt ?? 0) > 0;
   }
   if (filter === 'inProgress') {
     if (!info || info.watchedCount <= 0) return false;
-    const total = typeof s.totalEpisodes === 'number' ? s.totalEpisodes : 0;
     if (total <= 0) return true;
     return info.completedCount < total;
   }
   if (filter === 'done') {
     if (!info) return false;
-    const total = typeof s.totalEpisodes === 'number' ? s.totalEpisodes : 0;
     if (total <= 0) return false;
     return info.completedCount >= total;
   }
   if (filter === 'almostDone') {
     // ≥80% watched but not yet complete — "one push away from done".
     if (!info) return false;
-    const total = typeof s.totalEpisodes === 'number' ? s.totalEpisodes : 0;
     if (total <= 0) return false;
     const ratio = info.watchedCount / total;
     return ratio >= ALMOST_DONE_RATIO && info.completedCount < total;
@@ -65,7 +90,6 @@ export function matchesFilter(s, progressMap, filter) {
     // common surprise here is "stalled" looks empty until they go stale —
     // intentional: not every paused show is stuck.
     if (!info || info.watchedCount <= 0) return false;
-    const total = typeof s.totalEpisodes === 'number' ? s.totalEpisodes : 0;
     if (total <= 0) return false;
     const ratio = info.watchedCount / total;
     if (ratio < FRESH_RATIO || ratio >= ALMOST_DONE_RATIO) return false;
@@ -76,7 +100,6 @@ export function matchesFilter(s, progressMap, filter) {
   if (filter === 'fresh') {
     // Started but barely — <10% watched, under "刚开始" threshold.
     if (!info || info.watchedCount <= 0) return false;
-    const total = typeof s.totalEpisodes === 'number' ? s.totalEpisodes : 0;
     if (total <= 0) return true;
     return info.watchedCount / total < FRESH_RATIO;
   }
@@ -113,12 +136,14 @@ function searchHaystack(s) {
  * applied after the filter narrows the set. Empty/whitespace query is no-op.
  *
  * @param {Series[]} series
- * @param {Map<string, SeriesProgressInfo>} progressMap
+ * @param {Map<string, SeriesProgressInfo>} progressMap group-folded
  * @param {LibraryFilter} filter
  * @param {string} [query] — optional text search across titles
+ * @param {Map<string, number>} [groupTotals] seriesId → episodes on that whole
+ *   card. Absent entry = unknown, which is also what omitting the map means.
  * @returns {Series[]}
  */
-export function applySeriesFilter(series, progressMap, filter, query) {
+export function applySeriesFilter(series, progressMap, filter, query, groupTotals) {
   /** @type {Series[]} */
   let out;
   if (filter === null || filter === undefined) {
@@ -134,7 +159,9 @@ export function applySeriesFilter(series, progressMap, filter, query) {
         return bi - ai;
       });
   } else {
-    out = series.filter((s) => matchesFilter(s, progressMap, filter));
+    out = series.filter((s) =>
+      matchesFilter(s, progressMap, filter, groupTotals?.get(s.id)),
+    );
   }
 
   const q = typeof query === 'string' ? query.trim().toLowerCase() : '';
@@ -147,10 +174,11 @@ export function applySeriesFilter(series, progressMap, filter, query) {
  * pass — call inside a useMemo keyed on series + progressMap.
  *
  * @param {Series[]} series
- * @param {Map<string, SeriesProgressInfo>} progressMap
+ * @param {Map<string, SeriesProgressInfo>} progressMap group-folded
+ * @param {Map<string, number>} [groupTotals] seriesId → episodes on that card
  * @returns {Record<Exclude<LibraryFilter, null>, number>}
  */
-export function computeFilterCounts(series, progressMap) {
+export function computeFilterCounts(series, progressMap, groupTotals) {
   /** @type {Record<Exclude<LibraryFilter, null>, number>} */
   const counts = {
     recent: 0,
@@ -162,12 +190,13 @@ export function computeFilterCounts(series, progressMap) {
     fresh: 0,
   };
   for (const s of series) {
-    if (matchesFilter(s, progressMap, 'recent')) counts.recent++;
-    if (matchesFilter(s, progressMap, 'inProgress')) counts.inProgress++;
-    if (matchesFilter(s, progressMap, 'done')) counts.done++;
-    if (matchesFilter(s, progressMap, 'almostDone')) counts.almostDone++;
-    if (matchesFilter(s, progressMap, 'stalled')) counts.stalled++;
-    if (matchesFilter(s, progressMap, 'fresh')) counts.fresh++;
+    const total = groupTotals?.get(s.id);
+    if (matchesFilter(s, progressMap, 'recent', total)) counts.recent++;
+    if (matchesFilter(s, progressMap, 'inProgress', total)) counts.inProgress++;
+    if (matchesFilter(s, progressMap, 'done', total)) counts.done++;
+    if (matchesFilter(s, progressMap, 'almostDone', total)) counts.almostDone++;
+    if (matchesFilter(s, progressMap, 'stalled', total)) counts.stalled++;
+    if (matchesFilter(s, progressMap, 'fresh', total)) counts.fresh++;
   }
   return counts;
 }

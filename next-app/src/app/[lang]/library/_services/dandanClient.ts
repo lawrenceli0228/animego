@@ -28,6 +28,18 @@ export interface DandanEnrichment {
   titleZh?: string;
   titleEn?: string;
   posterUrl?: string;
+  /**
+   * AniList's episode count for the matched entry, when the response carried
+   * one. Lands on `Series.totalEpisodes`.
+   *
+   * Only the authoritative `episodes` is available here: the /match envelope
+   * projects `siteAnime` (all three phases) and `anime` (phase 2 only) out of
+   * the anime_cache row and neither projection includes `episodes_bgm`. The
+   * inferred count exists solely on `GET /api/anime/episodes`, so the
+   * "episodes → episodesBgm" fallback only has anything to fall back to in
+   * `episodeCountBackfill.ts`.
+   */
+  totalEpisodes?: number;
 }
 
 export interface DandanMatchResult {
@@ -139,6 +151,12 @@ function mergeAnimeFields(
     animeId: a.animeId as number | undefined,
     bgmId: (a.bgmId as number) || (s.bgmId as number),
     anilistId: (a.anilistId as number) || (s.anilistId as number),
+    // siteAnime first, against the `anime`-first rule the other fields follow.
+    // Phase 1's `anime` projection is two fields (titleNative + coverImageUrl)
+    // and has no episode count at all, so siteAnime is the only source that
+    // exists in every phase that produces one. In phase 2 both are projected
+    // from the same anime_cache row, so the order costs nothing there.
+    episodes: (s.episodes as number) || (a.episodes as number),
   };
 }
 
@@ -151,11 +169,17 @@ function pickEnrichment(merged: {
   titleRomaji?: string;
   titleNative?: string;
   coverImageUrl?: string;
+  episodes?: number;
 }): DandanEnrichment | undefined {
   const out: DandanEnrichment = {};
   if (merged.titleChinese) out.titleZh = merged.titleChinese;
   if (merged.titleRomaji) out.titleEn = merged.titleRomaji;
   else if (merged.titleNative) out.titleEn = merged.titleNative;
   if (merged.coverImageUrl) out.posterUrl = merged.coverImageUrl;
+  // Positive integers only. A 0 or a null from the cache means "unknown", and
+  // every reader of `Series.totalEpisodes` already spells unknown as `<= 0`.
+  if (Number.isInteger(merged.episodes) && (merged.episodes as number) > 0) {
+    out.totalEpisodes = merged.episodes;
+  }
   return Object.keys(out).length ? out : undefined;
 }

@@ -71,6 +71,38 @@ const en = {
     notYetReleased: 'Not Yet Released', cancelled: 'Cancelled',
     epUnit: 'Eps', readMore: 'Read more', collapse: 'Collapse',
     episodes: 'Episodes', noEpisodes: 'Episode info not available',
+    // Degraded copy for an unknown episode count — the badge on the detail
+    // page and EpisodesGrid share the first line. It says "not known yet",
+    // not "none": upstream has no confirmed total while a show is airing,
+    // and this section used to disappear entirely, which reads as "this
+    // show has no episodes". Do not reach for `noEpisodes` above instead —
+    // it has no call site left, and "not available" is the exact reading
+    // these two keys exist to avoid.
+    episodeCountPending: 'Episode count pending',
+    episodeCountPendingHint: 'Every episode will be listed here once the total is confirmed.',
+    // Per-episode tracking. The grid renders from the stored watched SET now
+    // instead of inferring one from `currentEpisode` — watching only episode 5
+    // used to put a green check on 1-4 as well, which was four claims nobody
+    // had made. EpisodesGrid is a client component and reads these through
+    // t() / the *-spa.js dictionaries; the server dictionaries carry them too
+    // because a key missing from any one of the six renders as its own path,
+    // silently.
+    markWatched: 'Mark episode {{ep}} as watched',
+    unmarkWatched: 'Unmark episode {{ep}} as watched',
+    watchedSignIn: 'Sign in to record episode {{ep}}',
+    watchedFailed: "Episode {{ep}} wasn't recorded — please try again",
+    watchedSignedOut: 'Your session expired. Sign in again to record episodes.',
+    watchedProgress: '{{done}} / {{total}} watched',
+    watchedHint: 'Tap an episode to record that you watched it.',
+    watchedCompletedHint: 'This show is marked Completed, so every episode counts as watched. Un-marking any episode moves it back to Watching and shows the per-episode record instead.',
+    // "Furthest marked" is a fact about the set (its max), not an inference
+    // about its neighbours. Worded to avoid "up to here" or "in progress",
+    // either of which would imply something about the episodes around it.
+    furthestMarked: 'furthest marked',
+    autoCompleted: 'Every episode recorded — moved to Completed',
+    autoResumed: 'Moved back to Watching',
+    autoStatusFailed: 'Episode {{ep}} was recorded, but the status could not be updated automatically',
+    episodeDiscussion: 'Discussion for episode {{ep}}',
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
@@ -98,7 +130,6 @@ const en = {
     planToWatch: 'Plan to Watch', dropped: 'Dropped',
     remove: 'Remove', rate: 'Rate',
     loginToWatch: 'Login to Track',
-    epUnit: 'Ep',
     // Toast copy for a subscribe/unsubscribe round trip. toastViewList is
     // the toast's action link, not a standalone button label.
     toastAdded: 'Added to Watching',

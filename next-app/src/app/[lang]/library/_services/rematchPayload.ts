@@ -25,6 +25,13 @@ export interface RematchPayload {
   titleZh?: string;
   titleEn?: string;
   posterUrl?: string;
+  /**
+   * The picked hit's episode count, when it had one. Both halves of the picker
+   * carry it — `animeCache` rows as a nullable int, `dandanplay` rows as a
+   * plain int — so unlike the two ids this field is NOT tied to which section
+   * the user picked from.
+   */
+  totalEpisodes?: number;
   type: "tv" | "movie" | "ova" | "web";
 }
 
@@ -71,6 +78,9 @@ export function normalizeRematchHit(item: unknown): RematchPayload | null {
     titleEn: (it.title as string) || undefined,
     posterUrl:
       (it.coverImageUrl as string) || (it.imageUrl as string) || undefined,
+    // Reuses toPositiveInt, so a null (uncached) or a 0 (unknown length) both
+    // become `undefined` rather than a stored zero that reads as an answer.
+    totalEpisodes: toPositiveInt(it.episodes),
     type,
   };
 }

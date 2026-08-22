@@ -80,13 +80,16 @@ type AniListSeasonalFetcher interface {
 	Seasonal(ctx context.Context, v anilist.SeasonalVars) (*anilist.SeasonalAnimeResponse, error)
 }
 
-// WarmSeasonDB is the sqlc subset WarmSeasonWorker uses.  Two methods:
-// UpsertAnimeCache (main-row upsert) and GetTitleChineseByAnilistIDs
+// WarmSeasonDB is the sqlc subset WarmSeasonWorker uses.  Three methods:
+// UpsertAnimeCache (main-row upsert), GetTitleChineseByAnilistIDs
 // (post-upsert bangumi_version filter to decide which IDs need V1
-// enrichment).  dbgen.Querier satisfies it.
+// enrichment), and EpisodesBgmReader's candidate query (post-upsert filter
+// for the inferred-episode-count sweep — see seedEpisodesBgm).
+// dbgen.Querier satisfies it.
 type WarmSeasonDB interface {
 	UpsertAnimeCache(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
 	GetTitleChineseByAnilistIDs(ctx context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error)
+	EpisodesBgmReader
 }
 
 // MainRowNormalizer converts one anilist.Media into the sqlc
@@ -279,14 +282,77 @@ func (w *WarmSeasonWorker) Work(ctx context.Context, job *river.Job[WarmSeasonAr
 		}
 	}
 
+	// Inferred-episode-count trigger.  This is the one place in the codebase
+	// that produces the population that sweep exists for: a seasonal slate is
+	// mostly RELEASING titles, and AniList leaves `episodes` NULL for those
+	// until the run is announced or finished.
+	//
+	// Five call sites upsert anime_cache from AniList (this one, seasonal,
+	// search, detail, ensure_cached) and only this one is hooked.  It is the
+	// one that runs as a queue worker — so enqueuing needs no new plumbing —
+	// and the one whose rows are systematically episode-count-less rather than
+	// incidentally so.  The hourly scan provably covers whatever the other four
+	// create: they write through the same UPSERT, so their rows land in
+	// `episodes IS NULL` with `episodes_bgm_attempted_at IS NULL`, which is the
+	// front of the very next sweep.
+	seeded := w.seedEpisodesBgm(ctx, upsertedIDs)
+
 	slog.InfoContext(ctx, "warm_season done",
 		"season", season, "year", year,
 		"pages", pages,
 		"upserted", upsertOK,
 		"upsertFailed", upsertFail,
 		"enqueued", enqueued,
+		"episodesBgmSeeded", seeded,
 	)
 	return nil
+}
+
+// seedEpisodesBgm enqueues episode-count jobs for the rows this warm just
+// refreshed that still have no total.
+//
+// It re-uses the SWEEP'S OWN candidate query, narrowed to these ids, rather
+// than deciding candidacy from the AniList payload in hand.  Three things fall
+// out of that, and all three are the point:
+//
+//   - It cannot enqueue work the sweep would refuse.  The cooldowns, the
+//     outcome arms and the `bgm_id IS NOT NULL` filter are applied to the seed
+//     exactly as they are to the hourly pass, from one definition, so the two
+//     cannot drift and the seed cannot become a route around a cooldown.
+//   - It cannot self-loop.  The per-row worker never writes anime_cache.episodes
+//     and never enqueues anything, so nothing it does can put a row back into
+//     the candidate set; the seed only re-fires on the 24h warm schedule, and
+//     UniqueOpts{ByArgs} collapses a repeat against anything still queued.
+//   - It supplies the bgm_id, which the AniList payload does not have.  Rows
+//     warmed for the FIRST time have no binding yet and are correctly skipped
+//     here — they reach the sweep after V1/V2 bind them, which is why this hook
+//     accelerates already-bound airing titles rather than seeding new ones.
+//
+// Failure is non-fatal, matching the V1 chain directly above: the row data has
+// already landed, and a missed seed costs at most an hour.
+func (w *WarmSeasonWorker) seedEpisodesBgm(ctx context.Context, ids []int32) int {
+	if len(ids) == 0 {
+		return 0
+	}
+	rows, err := w.db.ListEpisodesBgmCandidates(ctx, episodesBgmCandidateParams(ids, int32(len(ids))))
+	if err != nil {
+		slog.WarnContext(ctx, "warm_season episodes_bgm lookup failed", "err", err)
+		return 0
+	}
+	jobs, skippedNoBgmID := episodesBgmJobsFromRows(rows)
+	if skippedNoBgmID > 0 {
+		slog.WarnContext(ctx, "warm_season episodes_bgm rows without bgmId",
+			"skippedNoBgmId", skippedNoBgmID)
+	}
+	if len(jobs) == 0 {
+		return 0
+	}
+	if err := episodesBgmEnqueuerFrom(w.enq).EnqueueEpisodesBgmMany(ctx, jobs); err != nil {
+		slog.WarnContext(ctx, "warm_season episodes_bgm enqueue failed",
+			"count", len(jobs), "err", err)
+		return 0
+	}
+	return len(jobs)
 }
 
 // CurrentSeason returns the season + year for the given moment.  Pure

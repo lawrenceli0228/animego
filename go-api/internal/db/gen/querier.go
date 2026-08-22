@@ -174,6 +174,32 @@ type Querier interface {
 	// 'needs-review' / 'manually-corrected' / NULL.  CHECK constraint on the
 	// column enforces the allow-list at DB level; handler also pre-validates
 	// so the 400 message is friendly.
+	//
+	// This statement deliberately does NOT clear the row's derived Bangumi data.
+	// Repudiating a binding is ResetAnimeEnrichment's job, and changing one is
+	// UpdateAnimeEnrichmentSelective's; flagging is triage, and triage must not
+	// destroy anything.
+	//
+	// The tempting version clears episodes_bgm* and deletes every
+	// anime_episode_titles row on any flag write, on the theory that an
+	// unnecessary clear only costs one Bangumi round-trip on the next sweep.  That
+	// theory is false for almost every row it would touch.  The sweep's candidate
+	// set is `episodes IS NULL` — a small minority of the catalogue.  For every
+	// other row nothing ever re-derives the titles, so the real cost of an
+	// unnecessary clear is a permanently empty episode list on a public, indexed
+	// page, repairable only by an admin noticing and running a re-enrich.
+	//
+	// The flag values make it worse, not better.  'needs-review' is written by
+	// MarkBangumiNeedsReview as well as by humans, 'manually-corrected' arrives as
+	// a side effect of every PATCH, and NULL is what dismissing a flag writes — so
+	// clearing on all three means dismissing a false alarm blanks an episode list,
+	// and a title-only correction blanks one too.
+	//
+	// Nor would clearing make a suspected mis-binding correct.  The row keeps the
+	// bgm_id that produced the bad titles; deleting them leaves the page empty
+	// rather than right, and the human still has to reset or re-bind.  Reset
+	// already deletes the title rows in its transaction, which is where the
+	// "throw away what this binding produced" behaviour belongs.
 	FlagAnimeEnrichment(ctx context.Context, anilistID int32, adminFlag *string) (FlagAnimeEnrichmentRow, error)
 	// Is requester following the profile owner?  Used by the public
 	// profile endpoint to compute isFollowing — null when caller is
@@ -282,6 +308,16 @@ type Querier interface {
 	// here and nowhere else, exactly like description_cn above them: a full
 	// synopsis per card would roughly double the list payloads for text no
 	// card renders.
+	//
+	// episodes and episodes_bgm are two columns here for the same reason they
+	// are two columns in GetEpisodeCountsByAnilistIDs below: episodes is
+	// AniList's authoritative total, episodes_bgm (migration 0023) is inferred
+	// from an external episode source, and nothing may coalesce them on the way
+	// out of the database.  This projection feeds the detail page, which is the
+	// consumer that emits numberOfEpisodes into schema.org JSON-LD -- so a
+	// COALESCE here is the exact mechanism by which a guess would become a
+	// factual claim to a search engine about the work.  The page picks; the
+	// database does not pick for it.
 	GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error)
 	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]GetAnimeRecommendationsByIDRow, error)
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
@@ -400,9 +436,56 @@ type Querier interface {
 	// because the Bangumi channel may have landed a real summary between scan and
 	// work.  In that race the LLM worker must stand down, not spend tokens.
 	GetDescriptionForLlmTranslate(ctx context.Context, anilistID int32) (GetDescriptionForLlmTranslateRow, error)
+	// Batch episode-count read for GET /api/anime/episodes, which the
+	// browser-side library calls once to backfill a per-series total for
+	// series it has ALREADY bound.  The binding path short-circuits on an
+	// existing binding and returns no episode data, so without a batch read
+	// there is no route by which an already-bound series ever learns its
+	// length.
+	//
+	// Three columns and no more: this is a hot, wide-fan-in read (up to 200
+	// ids per call) whose only job is to answer "how many episodes".  The
+	// title trio that rides along on the other ANY($1::int[]) reads in this
+	// file is deliberately absent — the caller already has the titles.
+	//
+	// episodes and episodes_bgm are returned as two separate columns and are
+	// NOT coalesced here, or anywhere downstream.  episodes is AniList's
+	// authoritative value; episodes_bgm (migration 0023) is inferred from an
+	// external source.  A downstream consumer emits numberOfEpisodes into
+	// schema.org JSON-LD and only the authoritative value may appear there, so
+	// a COALESCE in this query would launder an inferred count into structured
+	// data.  Callers pick; the database does not pick for them.
+	//
+	// Ids with no anime_cache row simply do not come back.  The handler
+	// returns the short list rather than padding it with nulls — an absent id
+	// and an id whose counts are both NULL are different facts and the caller
+	// can already tell them apart.
+	GetEpisodeCountsByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetEpisodeCountsByAnilistIDsRow, error)
 	// Returns the liveEndsAt timestamp for this episode if a live window
 	// exists, else pgx.ErrNoRows (handler maps → null in the envelope).
 	GetEpisodeWindow(ctx context.Context, anilistID int32, episode int32) (EpisodeWindow, error)
+	// The identity gate's inputs, re-read at work time.
+	//
+	// bgm_id comes back so the worker can compare it against the id its job
+	// payload carries.  That comparison is not paranoia: the payload was written
+	// when the scan ran, an admin PATCH or reset can land in between, and a job
+	// that trusted its own arguments would fetch one subject and file the result
+	// against a different binding.
+	//
+	// title_native and title_romaji are the AniList-side titles, and they are the
+	// ONLY titles a similarity comparison may use.  title_chinese is deliberately
+	// absent from this projection: on a mis-bound row it has already been
+	// overwritten with the wrong show's Chinese name by earlier enrichment, so
+	// comparing it against the same subject's name_cn passes every time -- it
+	// validates the error with the error.  Leaving the column out of the query is
+	// a cheaper guarantee than a comment asking a future reader not to use it.
+	//
+	// id_map_agrees asks whether the vendored AniList->Bangumi map lists THIS
+	// pair, not merely whether it has a row for this anilist_id.  A map entry
+	// naming a different bgm_id is evidence against the binding, so it must not
+	// read as authoritative confirmation of it.  Same test as the
+	// description_cn_eligible view (migration 0016).
+	GetEpisodesBgmGateInputs(ctx context.Context, anilistID int32) (GetEpisodesBgmGateInputsRow, error)
 	// Whether a zh-Hant sweep is in flight, and when the last one finished.
 	//
 	// Read out of river_job rather than a table of our own.  River already
@@ -482,7 +565,24 @@ type Querier interface {
 	GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error)
 	// /api/subscriptions/:anilistId — single subscription read.
 	// pgx.ErrNoRows → 404 "Subscription not found".
-	GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (Subscription, error)
+	//
+	// watched_episodes is the per-episode set (migration 0024), read in the
+	// SAME statement as current_episode rather than in a second round-trip.
+	// The two are one fact stated twice — current_episode is
+	// COALESCE(MAX(episode), 0) over exactly this array — and a client that
+	// receives them disagreeing draws a grid whose last checkmark contradicts
+	// the progress number printed beside it.  Two queries against the pool can
+	// straddle a concurrent mark and do exactly that; one statement cannot.
+	//
+	// COALESCE to '{}' rather than letting array_agg's NULL through: a
+	// subscriber with no marks has an empty set, not an unknown one, and the
+	// endpoint is contracted to emit [] and never null.
+	//
+	// Only the single-row read carries the array.  ListUserSubscriptions
+	// deliberately does not: the card it feeds renders the derived integer and
+	// nothing else, so attaching a set to every row in the list would be
+	// bandwidth spent on a value no consumer reads.
+	GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (GetSubscriptionRow, error)
 	// Lightweight enrichment lookup for /schedule — only the fields the
 	// schedule items need.  bangumi_version is included so the caller can
 	// decide whether to enqueue v1 enrichment for unenriched entries.
@@ -734,6 +834,46 @@ type Querier interface {
 	// LIMIT 500 caps abuse (Express has no limit; we add one because
 	// pulling 50k rows on a popular episode would blow the response).
 	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentsRow, error)
+	// Rows whose episode count is unknown to AniList and whose Bangumi binding
+	// might be able to supply one.
+	//
+	// `episodes IS NULL` is the anchor, and it is the only conjunct migration
+	// 0023's partial index carries.  It is also the one condition this sweep can
+	// never satisfy on its own: the worker writes episodes_bgm and NEVER
+	// anime_cache.episodes, so a row leaves the candidate set only when an
+	// AniList sync finally learns a real total.
+	//
+	// THE COOLDOWN ARMS ARE THE POINT.  The predicate originally specified for
+	// this sweep --
+	//
+	//   episodes IS NULL
+	//   AND (episodes_bgm IS NULL
+	//        OR (status = 'RELEASING' AND episodes_bgm_at < now() - interval '20 hours'))
+	//
+	// -- never terminates.  A row the identity gate rejects, and a row whose
+	// upstream returns no episodes, both produce no count, so `episodes_bgm IS
+	// NULL` stays true and they hold the front of every later batch forever.
+	// Migration 0015 documents that exact stall already happening once on this
+	// table, and 0023 added episodes_bgm_attempted_at / _outcome to stop the
+	// repeat.  So candidacy is decided by the ATTEMPT stamp plus the recorded
+	// outcome, and the ordering is 0015's.
+	//
+	// Every value the 0023 CHECK admits has an arm below.  A value with no arm
+	// matches nothing and freezes that row permanently -- which is the failure
+	// these columns exist to prevent -- so 'error' gets an arm even though
+	// nothing writes it today (transport failures are deliberately left
+	// unstamped for river to retry; see MarkEpisodesBgmAttempted).
+	//
+	// Rows at 'ok' or 'empty' whose status is not RELEASING match no arm at all,
+	// and that is deliberate rather than an omission: a finished show's episode
+	// count is settled, and re-asking upstream forever would spend the shared
+	// Bangumi budget to re-learn the same number.
+	//
+	// anilist_ids is an OPTIONAL narrowing.  An EMPTY array means "the whole
+	// catalogue" (the hourly sweep); a non-empty one restricts to those ids (the
+	// warm-season seed).  One query rather than two so the seed can never enqueue
+	// work the sweep itself would not take, and so the two can never drift apart.
+	ListEpisodesBgmCandidates(ctx context.Context, arg ListEpisodesBgmCandidatesParams) ([]ListEpisodesBgmCandidatesRow, error)
 	// Step 2 of /api/feed: append-only activities of the supplied followees.
 	// Follow events are stored for future community surfaces but excluded from
 	// this first feed contract, whose cards always link to an anime episode.
@@ -810,6 +950,20 @@ type Querier interface {
 	// LEFT JOIN preserves rows even if anime_cache was cleared (unlikely
 	// given ON DELETE CASCADE, but defensive).
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]ListUserSubscriptionsRow, error)
+	// The watched set for one (user, anime), ascending.
+	//
+	// No HTTP handler calls this: GetSubscription and both writes already
+	// return the set from inside their own statement, which is the point of
+	// how they are written.  It exists as the plain read of the table for
+	// callers that want the set on its own — today that is the package's
+	// tests, which use it to check what a write STORED rather than trusting
+	// what the same write RETURNED.
+	//
+	// WHERE user_id = $1 AND anilist_id = $2 ORDER BY episode is the primary
+	// key's leading columns in the primary key's order, so this is a range
+	// scan over the PK index that comes back already sorted — which is why
+	// migration 0024 adds no secondary index.
+	ListWatchedEpisodes(ctx context.Context, userID uuid.UUID, anilistID int32) ([]int32, error)
 	// Authoritative AniList->Bangumi binding from the vendored id map
 	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
 	// consults this BEFORE any Bangumi search; a hit binds the subject with
@@ -846,6 +1000,149 @@ type Querier interface {
 	// ListDescriptionCnLlmCandidates, exactly as migration 0015 is to the
 	// Bangumi sweep.
 	MarkDescriptionCnLlmAttempted(ctx context.Context, anilistID int32) error
+	// -----------------------------------------------------------------------------
+	// Per-episode watch marks (migration 0024)
+	// -----------------------------------------------------------------------------
+	//
+	// Two writers, one shape.  Both are a SINGLE statement, and that is the
+	// whole design constraint rather than a stylistic preference: the watch row
+	// and the derived subscriptions.current_episode are the same fact recorded
+	// twice, so any arrangement in which one can commit without the other —
+	// including a perfectly ordinary handler-side transaction with an error
+	// path between the two calls — can leave the integer and the set
+	// disagreeing.  Inside one statement they cannot.
+	//
+	// THESE ARE THE ONLY WAY PROGRESS COMES DOWN
+	// ==========================================
+	//
+	// current_episode is COALESCE(MAX(episode), 0) over this table on every
+	// path, so no PATCH can lower it — writing a smaller number just records
+	// that episode, and the maximum is unmoved because nothing was removed.
+	// Removing something is what these two statements do, and unmarking is
+	// therefore the only operation in the system that can make the number fall.
+	//
+	// That is the correct place for it.  A person unchecking a box is saying
+	// "I did not watch that", which is a statement about the set; the number
+	// follows because it is derived from the set.  The old arrangement had a
+	// `monotonic` flag choosing between "may go down" and "may not", which put
+	// the guarantee in the hands of every caller remembering to set it.  Now
+	// the guarantee is structural: a replay adds, and adding cannot lower a
+	// maximum.
+	//
+	// Do NOT reintroduce a comparison here to stop the value falling.  There is
+	// no stale-replay risk on this path — a replayed DELETE removes an episode
+	// the user already asked to remove — and a guard would make the grid a
+	// read-only decoration, since unmarking would then be unable to correct the
+	// over-count it exists to correct.
+	//
+	// Neither writer appends an activity_events row.  Marking one episode is
+	// not a feed-worthy event and a per-checkbox feed entry would bury the
+	// watch_progress events that are; UpdateSubscriptionWithActivity remains
+	// the only producer of that event type.
+	// PUT /api/subscriptions/:anilistId/episodes/:episode — idempotent.
+	//
+	// `target` is the authorization and existence gate in one: everything
+	// downstream reads its (user_id, anilist_id) from a subscription row that
+	// was proven to belong to the caller, so a request naming somebody else's
+	// anime writes nothing and the statement returns zero rows.  Marking an
+	// episode of an anime with no subscription is the same zero-row case — the
+	// handler answers 404 rather than inventing a subscription, because
+	// creating one would mean choosing a `status` the user never picked (§4
+	// decision 3 makes status human-only) and would also require the
+	// anime_cache row to exist, which is an AniList round-trip nobody expects
+	// behind a checkbox click.
+	//
+	// FOR UPDATE serializes against UpdateSubscriptionWithActivity, which
+	// takes the same lock on the same row in the same order — so a ± press and
+	// a checkbox click cannot interleave halfway.
+	//
+	// The UNION in `watched` is not optional.  Every CTE in a statement sees
+	// the snapshot taken before the statement ran, so the plain SELECT over
+	// episode_watches cannot see the row `inserted` just wrote; without the
+	// UNION, marking a new highest episode would compute a current_episode one
+	// episode short of the set it is supposed to summarise.  ON CONFLICT DO
+	// NOTHING makes `inserted` empty on a repeat mark, and the UNION is then a
+	// no-op — which is exactly what idempotent has to mean here.
+	//
+	// current_episode is rewritten unconditionally (a recompute to the same
+	// value is free, and it repairs a row whose derived value has drifted),
+	// but the two timestamps only move when the set actually changed.
+	// last_watched_at means "an episode was watched" and a repeat mark watched
+	// nothing; updated_at is what ListUserSubscriptions orders on, so bumping
+	// it on a no-op would jump an untouched show to the front of the user's
+	// continue-watching row.  Same reasoning, same two reasons, as the
+	// suppression in UpdateSubscriptionWithActivity.
+	MarkEpisodeWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (MarkEpisodeWatchedRow, error)
+	// Record a decided NON-'ok' outcome so the sweep can move past this row.
+	//
+	// Called for every outcome upstream actually answered -- the gate refused the
+	// binding, the gate could not tell, the episode list came back empty -- but
+	// NOT for transport failures, which river should retry rather than have the
+	// sweep treat as decided.  Counterpart to the ordering in
+	// ListEpisodesBgmCandidates, exactly as MarkDescriptionCnAttempted is to the
+	// Chinese-description sweep.
+	//
+	// 'rejected' additionally clears any count already on the row, because that
+	// outcome is a positive statement that the value's provenance is repudiated.
+	// 'undecided', 'empty' and 'error' leave it alone: they are absence of
+	// evidence, not evidence of a wrong binding, and nulling a good count on a
+	// transiently empty upstream response would be a regression the next pass
+	// could not distinguish from never having had one.
+	//
+	// updated_at is deliberately NOT bumped -- this is bookkeeping, not a data
+	// change, and MarkDescriptionCnAttempted takes the same stance.  It matters
+	// here because an airing row can be stamped every day for months.
+	MarkEpisodesBgmAttempted(ctx context.Context, outcome string, reason *string, anilistID int32, bgmID *int32) (int64, error)
+	// PUT /api/subscriptions/:anilistId/episodes — mark a SET, idempotently.
+	//
+	// Same statement as MarkEpisodeWatched with `unnest` in place of the single
+	// literal, and it exists for one reason: the library reconciler pushes the
+	// episodes a reader's local library knows about, and a first sync of a
+	// two-cour series is fifty of them.  Fifty round trips behind one page mount,
+	// against a per-IP rate limiter, is not a thing to ship — so the set travels
+	// in one statement, and therefore in one lock, one recompute and one feed
+	// event.
+	//
+	// IT UNIONS.  IT NEVER REPLACES.
+	// =============================
+	//
+	// The caller sends the episodes IT knows about, which is not the same thing
+	// as the episodes that exist.  A reader with two devices, or one device and
+	// the website's grid, has marks this caller has never heard of; a replace
+	// would delete them and there would be no record that it had.  INSERT ...
+	// ON CONFLICT DO NOTHING is the whole guarantee: the set can only grow here.
+	// Removing a mark is UnmarkEpisodeWatched, one episode at a time, because
+	// removal is always a deliberate act and never a side effect of a sync.
+	//
+	// Duplicates in the array are fine and are not an error.  ON CONFLICT DO
+	// NOTHING resolves a duplicate against the row the same statement just
+	// speculatively inserted, exactly as it resolves one against a row that was
+	// already there.  (DO UPDATE would raise "cannot affect row a second time";
+	// DO NOTHING does not.)  So the handler validates members for VALIDITY and
+	// says nothing about tidiness.
+	//
+	// Out-of-range members are rejected by the handler and never arrive, so —
+	// unlike UpdateSubscriptionWithActivity, which filters them with a BETWEEN —
+	// there is nothing to filter here.  The difference is deliberate: a PATCH
+	// carrying a bad episode may still be a legitimate status or score edit and
+	// must not 500, whereas this endpoint's entire body IS the episode list, so a
+	// bad member makes the whole request meaningless and it is answered 400.
+	//
+	// The activity event is the one part that does NOT mirror MarkEpisodeWatched,
+	// and the reason is in the note above those two: a per-checkbox feed entry
+	// would bury the watch_progress events worth reading.  This is not a
+	// checkbox.  It is the same "the reader got further" event PATCH has always
+	// written, arriving by a different door, so it writes at most ONE event and
+	// only when current_episode actually advanced — the identical condition
+	// UpdateSubscriptionWithActivity uses.  Without it, moving the reconciler off
+	// PATCH would empty the feed with no error, which is precisely the failure
+	// the SubscriptionsDB comment warns about for the plain UpdateSubscription.
+	//
+	// Both timestamps follow MarkEpisodeWatched's rule, for MarkEpisodeWatched's
+	// reasons: they move only when the set actually changed, so a replayed push
+	// neither claims a viewing that did not happen nor reorders the home page's
+	// continue-watching row.
+	MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (MarkEpisodesWatchedRow, error)
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
@@ -863,6 +1160,13 @@ type Querier interface {
 	// doc.characters undefined).  In PG those are separate tables — handler
 	// runs the corresponding DELETE inside the same transaction so the
 	// re-enqueue produces a fresh enrichment cycle.
+	//
+	// The five episodes_bgm* columns (migration 0023) go with the bgm_id that
+	// produced them.  A reset nulls bgm_id, so leaving an inferred count behind
+	// would strand a number whose only provenance was the binding just thrown
+	// away — and leave the sweep unable to notice, since 'ok' on a finished show
+	// is a frozen state.  Clearing them puts the row back at
+	// episodes_bgm_attempted_at IS NULL, i.e. at the front of the next sweep.
 	ResetAnimeEnrichment(ctx context.Context, anilistID int32) error
 	// reset-password write: sets new bcrypt hash, clears both reset-token
 	// columns, AND nulls refresh_token (invalidates all existing sessions).
@@ -922,6 +1226,26 @@ type Querier interface {
 	// so the table is never observably empty to concurrent readers.
 	TruncateBgmIdMap(ctx context.Context) error
 	UnblockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (int64, error)
+	// DELETE /api/subscriptions/:anilistId/episodes/:episode — idempotent.
+	//
+	// Mirror of MarkEpisodeWatched, including the `target` gate and its FOR
+	// UPDATE.  Unmarking an episode that was never marked is not an error: the
+	// caller asked for a state and got it, and 404-ing on it would make the UI
+	// have to know the current set before it can act on it.
+	//
+	// EXCEPT plays the role UNION plays above and for the same snapshot
+	// reason: the SELECT over episode_watches still sees the row `deleted`
+	// removed, so subtracting it is what makes the recompute describe the set
+	// as it will be rather than as it was.  Removing the highest mark is the
+	// case that matters — that is when current_episode has to fall, including
+	// all the way to 0 when the last mark goes.
+	//
+	// last_watched_at is NOT touched here, under any condition.  Un-checking a
+	// box is a correction, not a viewing: the column means "when an episode was
+	// actually watched", and no episode was.  updated_at does move, because
+	// the row genuinely changed and the list order should reflect a deliberate
+	// edit — but only when something was actually deleted.
+	UnmarkEpisodeWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (UnmarkEpisodeWatchedRow, error)
 	// Phase 2 character enrichment: match by anime_id + (name_en OR name_ja).
 	// Bangumi character.name is typically Japanese (e.g. "天使ヶ原恵") while
 	// AniList stores it under name_ja; some AniList entries have English/
@@ -941,6 +1265,25 @@ type Querier interface {
 	//
 	// admin_flag is always set to 'manually-corrected' as a side effect
 	// (Express:  updates.adminFlag = 'manually-corrected').
+	//
+	// When — and ONLY when — this PATCH moves bgm_id, everything derived from the
+	// old binding is repudiated in the same statement: the five episodes_bgm*
+	// columns and every episode-title row.  See FlagAnimeEnrichment for why the
+	// title DELETE is unconditional over the table rather than selective (no
+	// provenance column exists, and none is needed: every row in it comes from
+	// /subject/{bgm_id}/ep) and why ON CONFLICT DO UPDATE cannot repair a
+	// too-long list on its own.
+	//
+	// The condition is narrower here than on the flag endpoint on purpose: this
+	// statement knows exactly what changed, and a PATCH that only rewrites
+	// title_chinese has said nothing about the binding, so its derived values are
+	// still validly derived.  `rebound` reads the pre-UPDATE bgm_id because every
+	// CTE in a statement sees the same snapshot.
+	//
+	// Nulling episodes_bgm_attempted_at rather than recording a rejection is what
+	// puts the row back at the FRONT of ListEpisodesBgmCandidates, so an admin who
+	// fixes a binding sees the count and titles re-derived on the next sweep
+	// rather than in ninety days.
 	UpdateAnimeEnrichmentSelective(ctx context.Context, titleChinese *string, bgmID *int32, bangumiScore *float64, anilistID int32) (UpdateAnimeEnrichmentSelectiveRow, error)
 	// Phase 1 result write — set bgm_id + title_chinese (the latter only
 	// when the Bangumi search produced an exact native match with a
@@ -992,6 +1335,21 @@ type Querier interface {
 	// manual, or even an earlier llm value.  The reverse covenant (bangumi
 	// replacing llm) lives in ListDescriptionCnCandidates + UpdateDescriptionCn.
 	UpdateDescriptionCnLlm(ctx context.Context, descriptionCn *string, anilistID int32) error
+	// Store an inferred episode count, and stamp the attempt in the same
+	// statement so the two can never disagree.
+	//
+	// The bgm_id in the WHERE clause pins the write to the binding the job
+	// actually fetched -- the same move UpdateDescriptionCn makes, for the same
+	// reason.  The Go-side re-read closes most of the rebind window; this closes
+	// the rest, and turns the race into an observable zero-row result instead of
+	// a wrong number.
+	//
+	// episodes (AniList's authoritative count) is NEVER written here.  An AniList
+	// sync UPSERT sets `episodes = EXCLUDED.episodes`, so a value written there
+	// would be cleared on the next warm anyway -- and, more to the point, a
+	// downstream consumer emits `episodes` into schema.org JSON-LD, where an
+	// inferred number must never appear.
+	UpdateEpisodesBgm(ctx context.Context, episodesBgm *int32, anilistID int32, bgmID *int32) (int64, error)
 	UpdateReport(ctx context.Context, reportStatus string, resolutionNote *string, reviewedBy uuid.UUID, reportID uuid.UUID) (Report, error)
 	// PATCH /api/subscriptions/:anilistId — selective update.
 	// COALESCE pattern keeps unchanged columns untouched.  `last_watched_at`
@@ -1005,41 +1363,103 @@ type Querier interface {
 	// only when the caller supplied a genuinely different episode.  This prevents
 	// retries/status-only patches from manufacturing duplicate feed entries.
 	//
-	// `monotonic` picks the write semantics by call site:
+	// current_episode IS NOT WRITTEN BY THIS STATEMENT'S CALLER
+	// ========================================================
 	//
-	//   monotonic = TRUE   player / library reconciliation.  current_episode can
-	//                      only move forward (GREATEST), so a stale tab replaying
-	//                      an old high-water mark can never claw progress back.
-	//                      Client-side comparison is not enough — its baseline is
-	//                      a cached copy (see §4 decision 8; Mihon #1793).
-	//   monotonic = FALSE  the detail page's ± buttons.  A human MUST be able to
-	//                      correct the count downward (§4 decision 4).
+	// Since migration 0024 the watched set is the stored fact and
+	// current_episode is COALESCE(MAX(episode), 0) over it — on EVERY path,
+	// with no exceptions.  So this statement does not accept a new
+	// current_episode; it accepts an episode to RECORD, writes that one row,
+	// and then reads the derived value back out of the set.
 	//
-	// Both timestamps get a matching suppression under monotonic, for two
-	// DIFFERENT reasons.  Keeping them straight matters, because only one of them
-	// is load-bearing for anything a user can see today:
+	// The monotonic guarantee falls out of the data instead of being enforced
+	// by a comparison, and it is a stronger guarantee for it:
 	//
-	//   last_watched_at  Semantic honesty.  The column means "when an episode was
-	//                    actually watched", so a stale replay that GREATEST folds
-	//                    into a no-op must not touch it.  No consumer reads it for
-	//                    ordering right now — this is about the field not lying to
-	//                    whoever reads it next.  Mirrors the IS DISTINCT FROM guard
-	//                    inserted_activity already applies.
+	//   push 12 while at 7   → insert 12 → MAX is 12.  Progress advances.
+	//   replay 3 while at 12 → insert 3  → MAX is still 12, because 12 is
+	//                          still in the set.  Progress holds.
 	//
-	//   updated_at       This is the one the home page sees.  ListUserSubscriptions
-	//                    above is ORDER BY s.updated_at DESC, and ContinueWatching
-	//                    renders that order verbatim, so bumping updated_at on a
-	//                    no-op push would jump an untouched show to the front of
+	// Nothing was removed, so nothing can go backwards.  That beats the old
+	// GREATEST, which held only as long as every caller remembered to set the
+	// flag — a caller who forgot could claw a phone's episode 12 back to 5
+	// (§4 decision 8; Mihon #1793).  Now they cannot, flag or no flag.
+	//
+	// CONSEQUENCES, INTENDED
+	// ----------------------
+	//
+	//   * A non-monotonic PATCH can no longer LOWER current_episode.  Sending
+	//     a smaller number just records that episode; the maximum is unmoved.
+	//     This is not a regression to route around: the value is derived now,
+	//     so a caller writing it directly is asserting something the data does
+	//     not support.  Lowering is UNMARKING, and it has its own endpoint —
+	//     DELETE /api/subscriptions/:anilistId/episodes/:episode — which
+	//     removes the row and lets the recompute fall.  See
+	//     UnmarkEpisodeWatched.
+	//
+	//   * currentEpisode = 0 no longer means "reset to unwatched".  Zero is not
+	//     an episode, so it inserts nothing and the set is unchanged, so the
+	//     derived value is unchanged.  A true reset is deleting the marks.
+	//     Nothing in the application sends 0 today (checked: the only
+	//     currentEpisode writer is the library reconciler at
+	//     watchSync.ts:441, which sends a real high-water episode; every other
+	//     mention is a read with a `?? 0` default or a `> 0` display guard).
+	//
+	//   * An episode outside 1..5000 records nothing and therefore moves
+	//     nothing.  BETWEEN filters rather than rejects on purpose: an
+	//     out-of-range value must not turn an otherwise valid PATCH into a
+	//     constraint violation the caller sees as a 500.  Because the value is
+	//     derived, this can no longer leave progress and the set disagreeing
+	//     the way a direct write would — the row simply does not change.
+	//
+	// WHAT `monotonic` STILL DOES
+	// ---------------------------
+	//
+	// It no longer selects the progress semantics — there is only one now.  Its
+	// single remaining reader is the updated_at suppression below.  The flag is
+	// kept in the request body rather than removed in the same change that
+	// demoted it, so that the reconciler keeps working untouched and the
+	// removal can be judged on its own.
+	//
+	// ONE EPISODE, NEVER 1..N
+	// -----------------------
+	//
+	// The inserted row is the episode the caller is RECORDING, and only that
+	// one.  Writing 1..N here would re-create exactly the inference this whole
+	// feature exists to delete: a player that finishes episode 12 observed
+	// episode 12 and says nothing about 1-11.  A user who then clicks 1, 2 and
+	// 3 ends up with {1,2,3,12} and current_episode still 12.
+	//
+	// No guard on "did anything change".  ON CONFLICT DO NOTHING already makes
+	// a repeat a no-op, and leaving it unguarded is what lets a replay REPAIR a
+	// set missing a row it should have had.
+	//
+	// THE TWO TIMESTAMPS
+	// ------------------
+	//
+	//   last_watched_at  Semantic honesty.  The column means "an episode was
+	//                    watched", so it moves exactly when a new mark landed —
+	//                    EXISTS (SELECT 1 FROM inserted_watch) — and not when a
+	//                    replay re-asserts something already recorded.  This is
+	//                    the same rule MarkEpisodeWatched uses, deliberately:
+	//                    one table, one meaning, one condition.
+	//
+	//   updated_at       This is the one the home page sees.
+	//                    ListUserSubscriptions above is ORDER BY
+	//                    s.updated_at DESC and ContinueWatching renders that
+	//                    order verbatim, so bumping it on a push that changed
+	//                    nothing would jump an untouched show to the front of
 	//                    the user's list.  ⚠️ If you ever change that ORDER BY,
 	//                    this CASE is why it was safe to suppress here.
 	//
-	// updated_at's guard has to check two more fields than last_watched_at's: a
-	// monotonic PATCH may legally also carry status or score (the reconciler never
-	// sends those, but the endpoint accepts them), and those ARE real edits that
-	// must bump the row.  Only a push that changes literally nothing is preserved.
+	// updated_at's guard checks two more fields than last_watched_at's: a
+	// monotonic PATCH may legally also carry status or score (the reconciler
+	// never sends those, but the endpoint accepts them), and those ARE real
+	// edits that must bump the row.  Only a push that changes literally nothing
+	// is preserved.  Note the asymmetry this produces on a repair — a replay
+	// that fills in a missing mark moves last_watched_at but not updated_at.
+	// That is intended: repairing history is not the same event as watching
+	// something, and it must not reorder the list.
 	//
-	// Under monotonic = FALSE both rules stand exactly as they shipped — the
-	// leading conjunct short-circuits, so the ± buttons see no change at all.
 	UpdateSubscriptionWithActivity(ctx context.Context, arg UpdateSubscriptionWithActivityParams) (UpdateSubscriptionWithActivityRow, error)
 	// Dormant: there is no self-serve change-password endpoint (password
 	// changes go through the email reset flow). Kept so the column write is

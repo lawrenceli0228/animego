@@ -172,6 +172,12 @@ func main() {
 	// Empty string here means "read HANT_DATA_DIR, default data/hant";
 	// docker-compose sets it for the container.
 	queue.AddHantBackfillWorker(workers, q, "")
+	// Inferred-episode-count sweep.  Registers separately for the same
+	// reason as the two above — it needs none of V12DB and V12DB needs
+	// none of it — and takes the SAME bangumiClient every other worker
+	// holds so its two-requests-per-row draw from the one token bucket
+	// rather than opening a second one beside it.
+	queue.AddEpisodesBgmWorkers(workers, bangumiClient, q, enqueuer)
 
 	riverClient, err := queue.Boot(pool, queue.Config{
 		Workers: workers,
@@ -210,12 +216,25 @@ func main() {
 			// and issues two dozen 500-row UPDATEs cannot sit in front
 			// of the V1/V2 enrichment a page load is waiting on.
 			queue.HantBackfillQueueName: {MaxWorkers: 1},
+			// Inferred episode counts: MaxWorkers MUST stay 1, for the
+			// same reason as the description backfill.  Its cost is two
+			// Bangumi requests per row, metered by the token bucket on
+			// the single shared *bangumi.Client above, so extra workers
+			// would not drain the backlog faster — they would queue on
+			// the same bucket while stealing dispatch slots from
+			// on-demand enrichment.  The separate queue is for isolation
+			// and pausability, not parallelism.
+			queue.EpisodesBgmQueueName: {MaxWorkers: 1},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),
 			queue.PeriodicOrphanScanJob(),
 			queue.PeriodicDescriptionBackfillScanJob(),
 			queue.PeriodicDescriptionLlmBackfillScanJob(),
+			// Hourly, RunOnStart — river's OSS scheduler recomputes the
+			// next run as now+period on every Start, so a deploy would
+			// otherwise push the sweep a full hour out every time.
+			queue.PeriodicEpisodesBgmScanJob(),
 			// 90 days, and deliberately NOT RunOnStart — see the note on
 			// PeriodicHantBackfillJob for why this one reads the opposite
 			// way round from the two sweeps above it, and for what that
@@ -699,6 +718,13 @@ func main() {
 		r.With(jwtx.RequireAuth(signer)).Patch("/me", authHandlers.UpdateMe)
 	})
 
+	// Routing note: every literal segment below shares the subtree with
+	// the `/{anilistId}` wildcard on the last line.  chi's radix tree
+	// resolves static segments before parametric ones regardless of
+	// registration order, so `/episodes` reaches anime.Episodes and not
+	// the detail handler with anilistId="episodes".  That is a property
+	// of the router rather than of this ordering, and
+	// TestEpisodes_RouteDoesNotCollideWithDetail pins it.
 	r.Route("/api/anime", func(r chi.Router) {
 		r.Get("/completed-gems", anime.CompletedGems(q))
 		r.Get("/seasonal", seasonalSvc.Handler())
@@ -707,11 +733,24 @@ func main() {
 		r.Get("/torrents", anime.Torrents(torrentsAgg, q))
 		r.Get("/search", searchSvc.Handler())
 		r.Get("/schedule", scheduleSvc.Handler())
+		r.Get("/episodes", anime.Episodes(q))
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
 
-	// P2.4 — subscriptions: 5 endpoints, every route RequireAuth.
+	// P2.4 — subscriptions: 8 endpoints, every route RequireAuth.
+	//
+	// The last three are the per-episode watch marks (migration 0024).  They
+	// live inside this block, behind the same r.Use, on purpose: they are
+	// user-scoped writes to a sub-resource of a subscription, and the user
+	// id they write with comes from the JWT claims RequireAuth puts on the
+	// request context — never from the path or the body.  Registering them
+	// anywhere else would put that guarantee one refactor away from being
+	// optional.
+	//
+	// PUT /{anilistId}/episodes (the set) and PUT
+	// /{anilistId}/episodes/{episode} (one) differ by segment count, so chi
+	// separates them structurally rather than by pattern precedence.
 	r.Route("/api/subscriptions", func(r chi.Router) {
 		r.Use(jwtx.RequireAuth(signer))
 		r.Get("/", subscriptionsHandlers.ListSubscriptions)
@@ -719,6 +758,9 @@ func main() {
 		r.Get("/{anilistId}", subscriptionsHandlers.GetSubscriptionByAnilistID)
 		r.Patch("/{anilistId}", subscriptionsHandlers.UpdateSubscription)
 		r.Delete("/{anilistId}", subscriptionsHandlers.DeleteSubscription)
+		r.Put("/{anilistId}/episodes", subscriptionsHandlers.MarkEpisodesWatched)
+		r.Put("/{anilistId}/episodes/{episode}", subscriptionsHandlers.MarkEpisodeWatched)
+		r.Delete("/{anilistId}/episodes/{episode}", subscriptionsHandlers.UnmarkEpisodeWatched)
 	})
 
 	// P2.4 — users public profile + follows.  GET /:username uses

@@ -58,6 +58,12 @@ const zh = {
     'Invalid anime ID': '无效的番剧 ID',
     'Invalid status': '无效的状态',
     'Episode must be a non-negative integer': '集数必须为非负整数',
+    // 逐集追番的 :episode 路径参数越界时 go-api 返回这一条
+    // (subscriptions/validate.go msgInvalidEpisodeNumber)。
+    'Invalid episode number': '无效的集数',
+    // 批量推送整集集合时 body 本身不成立(缺 episodes / 空数组 / 超长)
+    // (subscriptions/validate.go msgInvalidEpisodeList)。单个成员越界仍走上面那条。
+    'Invalid episode list': '无效的集数列表',
     'Subscription not found': '未找到订阅',
     'Deleted': '已删除',
     'Cannot follow yourself': '不能关注自己',
@@ -123,6 +129,32 @@ const zh = {
     notYetReleased: '未开播', cancelled: '已取消',
     epUnit: '集', readMore: '展开更多', collapse: '收起',
     episodes: '集数列表', noEpisodes: '集数信息待更新',
+    // 集数未知时的降级文案 —— 详情页徽章和 EpisodesGrid 共用第一条。
+    // 说的是「还不知道」，不是「没有」：番剧在放送期间上游常常没有确认的
+    // 总集数，而这一节从前是直接消失的，读者只会理解成这部番没有集数。
+    // 注意不要改用上面的 noEpisodes：那条已经没有调用点，英文值
+    // 'Episode info not available' 恰好是这里要避免的说法。
+    episodeCountPending: '本季集数待定',
+    episodeCountPendingHint: '总集数确认后，这里会列出每一集。',
+    // 逐集追番。方格从「已看集合」渲染，不再从 currentEpisode 推断 ——
+    // 从前看了第 5 集，第 1-4 集也会被打上绿色对勾，那是四条没人说过的话。
+    // 这些键在 EpisodesGrid（客户端组件）里通过 t() 取值，走的是
+    // *-spa.js；服务端字典同步保留，是因为漏掉任何一份都会静默渲染键名。
+    markWatched: '标记第 {{ep}} 集为已看',
+    unmarkWatched: '取消第 {{ep}} 集的已看标记',
+    watchedSignIn: '登录后记录第 {{ep}} 集',
+    watchedFailed: '第 {{ep}} 集没记上，请再试一次',
+    watchedSignedOut: '登录状态已过期，重新登录后再记录',
+    watchedProgress: '已看 {{done}} / {{total}} 集',
+    watchedHint: '点一下方格，记录你真正看过的那一集。',
+    watchedCompletedHint: '这部已标记「看完」，所有集数都算已看。取消其中任意一集，会把状态改回「在看」，并改为按逐集记录显示。',
+    // 「记录到的最远一集」——是关于集合本身的事实（max），不是对相邻几集
+    // 的推断。措辞刻意不用「在看到这里」，那会暗示后面几集的状态。
+    furthestMarked: '标记到的最后一集',
+    autoCompleted: '全部集数已记录，状态自动改为「看完」',
+    autoResumed: '状态已改回「在看」',
+    autoStatusFailed: '第 {{ep}} 集已记录，但追番状态没能自动更新',
+    episodeDiscussion: '第 {{ep}} 集的讨论',
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',
@@ -152,7 +184,6 @@ const zh = {
     planToWatch: '想看', dropped: '放弃',
     remove: '移除', rate: '评分',
     loginToWatch: '登录后追番',
-    epUnit: '集',
     // Toast copy for a subscribe/unsubscribe round trip. toastViewList is
     // the toast's action link, not a standalone button label.
     toastAdded: '已加入「在看」',

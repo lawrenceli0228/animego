@@ -13,6 +13,7 @@ interface SeriesRow {
   titleEn?: string;
   titleJa?: string;
   posterUrl?: string;
+  totalEpisodes?: number;
   type?: "tv" | "movie" | "ova" | "web";
   updatedAt?: number;
 }
@@ -99,6 +100,17 @@ function diffEnrichment(
   if (enrichment.posterUrl && enrichment.posterUrl !== series.posterUrl) {
     patch.posterUrl = enrichment.posterUrl;
     fields.push("posterUrl");
+  }
+  // Guarded on `> 0`, not on truthiness alone, so a 0 from the cache can never
+  // be written: `<= 0` is how every reader spells "unknown", and storing one
+  // would be a write that changes nothing anybody can see.
+  if (
+    typeof enrichment.totalEpisodes === "number" &&
+    enrichment.totalEpisodes > 0 &&
+    enrichment.totalEpisodes !== series.totalEpisodes
+  ) {
+    patch.totalEpisodes = enrichment.totalEpisodes;
+    fields.push("totalEpisodes");
   }
   return fields.length ? { patch, fields } : null;
 }

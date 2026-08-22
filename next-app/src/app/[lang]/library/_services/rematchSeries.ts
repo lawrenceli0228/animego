@@ -43,6 +43,12 @@ interface RematchSeriesInput {
   titleEn?: string;
   titleJa?: string;
   posterUrl?: string;
+  /**
+   * The picked hit's episode count. Written only when it is a positive
+   * integer — `<= 0` is how every reader of `Series.totalEpisodes` spells
+   * "unknown", so a zero would replace a real answer with a fake one.
+   */
+  totalEpisodes?: number;
   type?: "tv" | "movie" | "ova" | "web";
   ulid: () => string;
   now?: () => number;
@@ -65,6 +71,7 @@ export async function rematchSeries(input: RematchSeriesInput): Promise<void> {
     titleEn,
     titleJa,
     posterUrl,
+    totalEpisodes,
     type,
     ulid,
     now = () => Date.now(),
@@ -133,6 +140,13 @@ export async function rematchSeries(input: RematchSeriesInput): Promise<void> {
       if (titleEn !== undefined) seriesPatch.titleEn = titleEn;
       if (titleJa !== undefined) seriesPatch.titleJa = titleJa;
       if (posterUrl !== undefined) seriesPatch.posterUrl = posterUrl;
+      if (
+        typeof totalEpisodes === "number" &&
+        Number.isInteger(totalEpisodes) &&
+        totalEpisodes > 0
+      ) {
+        seriesPatch.totalEpisodes = totalEpisodes;
+      }
       if (type !== undefined) seriesPatch.type = type;
       await tables.series.update(seriesId, seriesPatch);
 

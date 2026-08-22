@@ -72,7 +72,7 @@ type fakeSubsDB struct {
 	mu sync.Mutex
 
 	listFn     func(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error)
-	getFn      func(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.Subscription, error)
+	getFn      func(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.GetSubscriptionRow, error)
 	upsertFn   func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
 	ifAbsentFn func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error)
 	// episodeCountFn defaults to "no bound" (nil, nil) rather than
@@ -83,6 +83,9 @@ type fakeSubsDB struct {
 	episodeCountFn func(ctx context.Context, anilistID int32) (*int32, error)
 	updateFn       func(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
 	deleteFn       func(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
+	markFn         func(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.MarkEpisodeWatchedRow, error)
+	unmarkFn       func(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.UnmarkEpisodeWatchedRow, error)
+	markManyFn     func(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error)
 
 	listCalls         int32
 	getCalls          int32
@@ -91,6 +94,9 @@ type fakeSubsDB struct {
 	episodeCountCalls int32
 	updateCalls       int32
 	deleteCalls       int32
+	markCalls         int32
+	unmarkCalls       int32
+	markManyCalls     int32
 }
 
 func (f *fakeSubsDB) ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error) {
@@ -101,12 +107,36 @@ func (f *fakeSubsDB) ListUserSubscriptions(ctx context.Context, userID uuid.UUID
 	return f.listFn(ctx, userID, statusFilter)
 }
 
-func (f *fakeSubsDB) GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.Subscription, error) {
+func (f *fakeSubsDB) GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.GetSubscriptionRow, error) {
 	atomic.AddInt32(&f.getCalls, 1)
 	if f.getFn == nil {
 		panic("fakeSubsDB.GetSubscription not set")
 	}
 	return f.getFn(ctx, userID, anilistID)
+}
+
+func (f *fakeSubsDB) MarkEpisodeWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.MarkEpisodeWatchedRow, error) {
+	atomic.AddInt32(&f.markCalls, 1)
+	if f.markFn == nil {
+		panic("fakeSubsDB.MarkEpisodeWatched not set")
+	}
+	return f.markFn(ctx, userID, anilistID, episode)
+}
+
+func (f *fakeSubsDB) UnmarkEpisodeWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.UnmarkEpisodeWatchedRow, error) {
+	atomic.AddInt32(&f.unmarkCalls, 1)
+	if f.unmarkFn == nil {
+		panic("fakeSubsDB.UnmarkEpisodeWatched not set")
+	}
+	return f.unmarkFn(ctx, userID, anilistID, episode)
+}
+
+func (f *fakeSubsDB) MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+	atomic.AddInt32(&f.markManyCalls, 1)
+	if f.markManyFn == nil {
+		panic("fakeSubsDB.MarkEpisodesWatched not set")
+	}
+	return f.markManyFn(ctx, userID, anilistID, episodes)
 }
 
 func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error) {
@@ -421,10 +451,11 @@ func TestGetByAnilistID_HappyPath(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		getFn: func(_ context.Context, _ uuid.UUID, anilistID int32) (dbgen.Subscription, error) {
+		getFn: func(_ context.Context, _ uuid.UUID, anilistID int32) (dbgen.GetSubscriptionRow, error) {
 			assert.Equal(t, int32(42), anilistID)
-			return dbgen.Subscription{
-				UserID: userID, AnilistID: 42, Status: "watching", CurrentEpisode: 1,
+			return dbgen.GetSubscriptionRow{
+				UserID: userID, AnilistID: 42, Status: "watching", CurrentEpisode: 5,
+				WatchedEpisodes: []int32{1, 2, 5},
 			}, nil
 		},
 	}
@@ -437,9 +468,34 @@ func TestGetByAnilistID_HappyPath(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
-	var sub dbgen.Subscription
+	var sub dbgen.GetSubscriptionRow
 	decodeData(t, rec.Body.Bytes(), &sub)
 	assert.Equal(t, int32(42), sub.AnilistID)
+	assert.Equal(t, []int32{1, 2, 5}, sub.WatchedEpisodes,
+		"the set is a set, not a prefix — 3 and 4 were never watched")
+}
+
+// A subscriber with no marks must serialize watchedEpisodes as [], never
+// null: the grid iterates it directly.
+func TestGetByAnilistID_EmptyWatchedSetSerializesAsArray(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	db := &fakeSubsDB{
+		getFn: func(_ context.Context, _ uuid.UUID, _ int32) (dbgen.GetSubscriptionRow, error) {
+			// nil, i.e. the worst case a driver could hand back.
+			return dbgen.GetSubscriptionRow{UserID: userID, AnilistID: 42, Status: "watching"}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+
+	ctx := withUserClaims(t, context.Background(), userID, "alice")
+	req := newReq(t, http.MethodGet, "/api/subscriptions/42", "", "42", ctx)
+	rec := httptest.NewRecorder()
+	h.GetSubscriptionByAnilistID(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"watchedEpisodes":[]`)
+	assert.NotContains(t, rec.Body.String(), `"watchedEpisodes":null`)
 }
 
 // Not subscribed returns 200 with null data (not 404). The detail page probes
@@ -449,8 +505,8 @@ func TestGetByAnilistID_NotSubscribed_200Null(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		getFn: func(_ context.Context, _ uuid.UUID, _ int32) (dbgen.Subscription, error) {
-			return dbgen.Subscription{}, pgx.ErrNoRows
+		getFn: func(_ context.Context, _ uuid.UUID, _ int32) (dbgen.GetSubscriptionRow, error) {
+			return dbgen.GetSubscriptionRow{}, pgx.ErrNoRows
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)
@@ -499,8 +555,8 @@ func TestGetByAnilistID_DBError_500(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		getFn: func(_ context.Context, _ uuid.UUID, _ int32) (dbgen.Subscription, error) {
-			return dbgen.Subscription{}, errors.New("db gone")
+		getFn: func(_ context.Context, _ uuid.UUID, _ int32) (dbgen.GetSubscriptionRow, error) {
+			return dbgen.GetSubscriptionRow{}, errors.New("db gone")
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)

@@ -57,6 +57,17 @@ import {
   type BindingResolverDb,
 } from "../_services/resolveSeriesBinding";
 import {
+  buildGroupTotals,
+  foldGroupProgress,
+  sumGroupTotals,
+  type GroupSeasonRow,
+} from "../_services/seriesGroups";
+import {
+  backfillEpisodeCounts,
+  type BackfillSeriesRow,
+  type EpisodeCountDb,
+} from "../_services/episodeCountBackfill";
+import {
   onSyncFailure,
   reconcileLibrary,
   startTracking,
@@ -298,8 +309,10 @@ export function LibraryShell() {
   const watchSupported = isFolderWatchSupported();
 
   const dandan = useMemo(() => createDandanClient(), []);
-  const { series, loading } = useLibrary({ db }) as {
+  const { series, allSeries, seasons, loading } = useLibrary({ db }) as {
     series: SeriesRecord[];
+    allSeries: SeriesRecord[];
+    seasons: GroupSeasonRow[];
     loading: boolean;
   };
   const { entries: resumeEntries } = useResume({ db });
@@ -384,9 +397,35 @@ export function LibraryShell() {
   const consumedSummaryRef = useRef<ImportSummary | null>(null);
   const selection = useSeriesSelection();
 
+  // ─── the two numbers on a card, both folded over merge groups ─────────────
+  //
+  // Computed once here and passed down, rather than each consumer reaching for
+  // `series.totalEpisodes` / `progressMap.get(id)` itself: a card can be a
+  // merge of several series rows, and neither number is that root row's. Both
+  // have to move together — a group denominator over a per-series numerator
+  // would make every merged card read as LESS watched than it does today.
+  //
+  // `allSeries`, not `series`: the members supplying a merged card's totals and
+  // progress are precisely the rows `useLibrary` hides from the grid.
+  const groupTotals = useMemo(
+    () => buildGroupTotals(allSeries, seasons, overrides),
+    [allSeries, seasons, overrides],
+  );
+  const groupProgressMap = useMemo(
+    () => foldGroupProgress(progressMap, allSeries, overrides),
+    [progressMap, allSeries, overrides],
+  );
+
   const visibleSeries = useMemo(
-    () => applySeriesFilter(series, progressMap, activeFilter, searchQuery),
-    [series, progressMap, activeFilter, searchQuery],
+    () =>
+      applySeriesFilter(
+        series,
+        groupProgressMap,
+        activeFilter,
+        searchQuery,
+        groupTotals,
+      ),
+    [series, groupProgressMap, activeFilter, searchQuery, groupTotals],
   ) as SeriesRecord[];
 
   // Main grid only shows accessible series. offline / partial drop into
@@ -410,8 +449,8 @@ export function LibraryShell() {
   );
 
   const filterCounts = useMemo(
-    () => computeFilterCounts(series, progressMap),
-    [series, progressMap],
+    () => computeFilterCounts(series, groupProgressMap, groupTotals),
+    [series, groupProgressMap, groupTotals],
   );
 
   const mergeSource = useMemo(
@@ -575,6 +614,33 @@ export function LibraryShell() {
     });
   }, [loading, progressRows, series, overrides, watchSyncDb]);
 
+  // One-shot batch fill of `Series.totalEpisodes` for series that are already
+  // bound. Without it this whole feature is a no-op for every existing library:
+  // `resolveSeriesBinding` returns on its first line for an already-bound
+  // series and never reaches a search hit to read an episode count off.
+  //
+  // Runs on the series list rather than once per mount, so newly imported rows
+  // get picked up too. Re-runs are cheap by construction — a series with a
+  // total is no longer a candidate, and an id the endpoint did not answer for
+  // is remembered inside the service — and the ref keeps two passes from
+  // overlapping when liveQuery re-emits mid-flight (our own writes do that).
+  const episodeBackfillBusyRef = useRef(false);
+  useEffect(() => {
+    if (loading || allSeries.length === 0) return;
+    if (episodeBackfillBusyRef.current) return;
+    episodeBackfillBusyRef.current = true;
+    void backfillEpisodeCounts({
+      db: db as unknown as EpisodeCountDb,
+      series: allSeries as BackfillSeriesRow[],
+    })
+      .catch((err: unknown) => {
+        console.warn("[library] episode-count backfill failed:", err);
+      })
+      .finally(() => {
+        episodeBackfillBusyRef.current = false;
+      });
+  }, [loading, allSeries]);
+
   const handlePickSeries = useCallback(
     (id: string) => {
       // T9 / decision 3 — "import it, click it, it starts being tracked".
@@ -608,11 +674,14 @@ export function LibraryShell() {
         out.set(sr.id, "blocked");
         continue;
       }
-      const watched = progressMap.get(sr.id)?.watchedCount ?? 0;
+      // Group-folded: a card whose watched episodes all came from a merged-in
+      // source has a watchedCount of 0 in the raw map, and would then never
+      // explain why its progress is not reaching the server.
+      const watched = groupProgressMap.get(sr.id)?.watchedCount ?? 0;
       if (watched > 0 && !sr.anilistId) out.set(sr.id, "unbound");
     }
     return out;
-  }, [series, progressMap, syncFailedIds]);
+  }, [series, groupProgressMap, syncFailedIds]);
 
   // P6 navigation: URL query params per P6-DESIGN §3.1.
   // Legacy used useNavigate('/player', { state: {...} }); we encode in the
@@ -830,15 +899,10 @@ export function LibraryShell() {
     celebrationConsumedRef.current = importSummary;
     setCelebrationStats({
       seriesCount: series.length,
-      episodeCount: series.reduce(
-        (sum, sr) =>
-          sum +
-          (typeof sr.totalEpisodes === "number" ? sr.totalEpisodes : 0),
-        0,
-      ),
+      episodeCount: sumGroupTotals(series, groupTotals),
     });
     setCelebrationKey(Date.now());
-  }, [importSummary, series]);
+  }, [importSummary, series, groupTotals]);
 
   // §5.6 auto-merge toast.
   useEffect(() => {
@@ -907,6 +971,7 @@ export function LibraryShell() {
       titleZh?: string;
       titleEn?: string;
       posterUrl?: string;
+      totalEpisodes?: number;
       type?: "tv" | "movie" | "ova" | "web";
     }) => {
       if (!rematchSourceId) return;
@@ -919,6 +984,7 @@ export function LibraryShell() {
           titleZh: payload.titleZh,
           titleEn: payload.titleEn,
           posterUrl: payload.posterUrl,
+          totalEpisodes: payload.totalEpisodes,
           type: payload.type,
           ulid,
         });
@@ -1113,15 +1179,11 @@ export function LibraryShell() {
 
   const showEmptyState = !loading && series.length === 0;
   const showBanner = !fsaSupported;
+  // Over the visible cards only — a merged-in source has no card of its own,
+  // and its episodes are already inside its root's group total.
   const totalEpisodes = useMemo(
-    () =>
-      series.reduce(
-        (sum, sr) =>
-          sum +
-          (typeof sr.totalEpisodes === "number" ? sr.totalEpisodes : 0),
-        0,
-      ),
-    [series],
+    () => sumGroupTotals(series, groupTotals),
+    [series, groupTotals],
   );
 
   return (
@@ -1353,7 +1415,8 @@ export function LibraryShell() {
               series={mainGridSeries}
               onPickSeries={handlePickSeries}
               overrides={overrides}
-              progressMap={progressMap}
+              progressMap={groupProgressMap}
+              groupTotals={groupTotals}
               onOverrideAction={handleOverrideAction}
               selectionMode={selection.selectionMode}
               selectedIds={new Set(selection.ids)}
@@ -1482,6 +1545,7 @@ export function LibraryShell() {
           return (
             <SeriesDetailSheet
               series={target}
+              groupTotal={groupTotals.get(target.id)}
               onClose={() => setDetailSeriesId(null)}
               onPickEpisode={handlePickEpisode}
               onPlaySeries={handlePlaySeries}

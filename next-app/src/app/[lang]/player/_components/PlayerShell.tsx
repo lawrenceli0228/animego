@@ -74,6 +74,10 @@ import {
 } from "@/app/[lang]/library/_services/resolveSeriesBinding";
 import { useSeriesDetail } from "@/app/[lang]/library/_hooks/useSeriesDetail";
 import { useVideoFiles } from "@/app/[lang]/library/_hooks/useVideoFiles";
+import {
+  buildEpisodeNavNumbers,
+  normalizeEpisodeNumbers,
+} from "@/app/[lang]/library/_services/episodeGridModel";
 
 // Player-surface hooks
 import { useDandanMatch } from "../_hooks/useDandanMatch";
@@ -756,7 +760,12 @@ function PlayerShellInner() {
     resetMatch();
   }, [stopPlayback, clearFiles, resetMatch]);
 
-  // P3: library mode — sorted episode numbers used by EpisodeNav prev/next.
+  // P3: library mode — sorted episode numbers used for prev/next ordering.
+  //
+  // STORED numbers, deliberately. Everything downstream of this compares
+  // against `Episode.number` or indexes `matchResult.episodeMap`, which is
+  // keyed by the number parsed out of the filename. The display numbers below
+  // are a separate, labels-only space.
   const libraryEpisodeNumbers = useMemo<number[]>(() => {
     if (!locationSeriesId || seriesDetail.status !== "ready") return [];
     const seen = new Set<number>();
@@ -767,6 +776,35 @@ function PlayerShellInner() {
     }
     return [...seen].sort((a, b) => a - b);
   }, [locationSeriesId, seriesDetail]);
+
+  // ─── T9: the numbers this surface SHOWS ────────────────────────────────────
+  //
+  // A fansub group numbering a sequel continuously ships season two as
+  // episodes 13-24, and the library's detail sheet now labels those chips
+  // 1-12. If that normalisation stopped at the sheet, clicking chip "01" would
+  // open a player headed "EP13" — a self-contradiction worse than the
+  // off-by-a-season grid it fixes. So both surfaces read the same rule, from
+  // the same module, against the same `groupTotal` (see useSeriesDetail).
+  //
+  // Only labels move. The URL's `?resumeEpisode=`, the auto-resume lookup,
+  // prev/next, autoplay and `episodeMap` all stay in the stored space; a click
+  // on the strip is translated back before it is used.
+  const episodeDisplayNumbers = useMemo(
+    () => normalizeEpisodeNumbers(seriesDetail.episodes, seriesDetail.groupTotal),
+    [seriesDetail.episodes, seriesDetail.groupTotal],
+  );
+
+  const episodeNav = useMemo(
+    () =>
+      buildEpisodeNavNumbers(
+        locationSeriesId && seriesDetail.status === "ready"
+          ? seriesDetail.episodes
+          : [],
+        seriesDetail.groupTotal,
+        isWatchableKind,
+      ),
+    [locationSeriesId, seriesDetail.status, seriesDetail.episodes, seriesDetail.groupTotal],
+  );
 
   // Library auto-match — when seriesDetail becomes ready, fire startMatch().
   const libraryMatchedRef = useRef<string | null>(null);
@@ -984,6 +1022,27 @@ function PlayerShellInner() {
     },
     [locationSeriesId, seriesDetail, handleLibraryEpisodePlay],
   );
+
+  // T9: the strip renders display numbers, so a click has to be translated
+  // back before anything downstream sees it. Identity when nothing shifted.
+  const handleLibraryEpisodeSelectByDisplay = useCallback(
+    (displayNum: number) => {
+      handleLibraryEpisodeSwitchByNumber(
+        episodeNav.rawByDisplay.get(displayNum) ?? displayNum,
+      );
+    },
+    [episodeNav, handleLibraryEpisodeSwitchByNumber],
+  );
+
+  // What THIS surface calls the episode it is playing. Resolved by episode id
+  // rather than by number: inside a merged card two rows can share a number,
+  // and after a shift two can share a display number.
+  const playingDisplayEp = useMemo(() => {
+    if (playingEp == null) return playingEp;
+    const episodeId = playingFile?._episodeId;
+    if (!episodeId) return playingEp;
+    return episodeDisplayNumbers.get(episodeId) ?? playingEp;
+  }, [playingEp, playingFile, episodeDisplayNumbers]);
 
   // P3: auto-play state.resumeEpisode when seriesDetail becomes ready.
   const [autoResumeAttempted, setAutoResumeAttempted] = useState(false);
@@ -1287,6 +1346,9 @@ function PlayerShellInner() {
               }
               onSetDanmaku={setPickerEp}
               clearLabel={locationSeriesId ? t("player.backToLibrary") : undefined}
+              displayEpisodes={
+                locationSeriesId ? episodeNav.displayByRaw : undefined
+              }
             />
           </div>
         )}
@@ -1315,7 +1377,7 @@ function PlayerShellInner() {
                 EPISODE / 集
               </div>
               <div style={s.epTitle}>
-                EP{String(playingEp).padStart(2, "0")}
+                EP{String(playingDisplayEp).padStart(2, "0")}
                 {matchResult?.anime?.titleChinese &&
                   ` · ${matchResult.anime.titleChinese}`}
               </div>
@@ -1360,14 +1422,20 @@ function PlayerShellInner() {
             {danmakuCount === 0 && (
               <div style={s.danmakuInfo}>{t("player.noDanmaku")}</div>
             )}
+            {/* Display numbers on the library path, so the strip and the
+                header above agree with the chip the user clicked in the
+                library. The drop-zone path has no series to normalise
+                against and stays on the numbers parsed from the filenames. */}
             <EpisodeNav
               episodes={
-                locationSeriesId ? libraryEpisodeNumbers : episodes
+                locationSeriesId ? episodeNav.numbers : episodes
               }
-              currentEpisode={playingEp}
+              currentEpisode={
+                locationSeriesId ? playingDisplayEp : playingEp
+              }
               onSelect={
                 locationSeriesId
-                  ? handleLibraryEpisodeSwitchByNumber
+                  ? handleLibraryEpisodeSelectByDisplay
                   : handleEpisodeSwitch
               }
             />
@@ -1391,7 +1459,13 @@ function PlayerShellInner() {
             ? matchResult?.episodeMap?.[pickerEp]?.dandanEpisodeId
             : null
         }
-        episodeNumber={pickerEp}
+        // Label only. The picker's own logic runs on `pickerEp`, the stored
+        // number `episodeMap` just above is keyed by.
+        episodeNumber={
+          pickerEp != null
+            ? (episodeNav.displayByRaw.get(pickerEp) ?? pickerEp)
+            : null
+        }
         defaultKeyword={
           keyword ||
           seriesDetail.series?.titleZh ||

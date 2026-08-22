@@ -80,20 +80,24 @@ const itemVariants = {
 const NEW_WINDOW_MS = 1000 * 60 * 60 * 24 * 3; // 3 days — "刚加入" budget
 
 /**
- * Compute progressPct from completed-episode count over a series' total.
- * Returns undefined when no progress info is available, when totalEpisodes is
+ * Compute progressPct from completed-episode count over the CARD's total.
+ *
+ * `groupTotal`, not `series.totalEpisodes`: a card can be a merge of several
+ * series and the bar has to be drawn against everything on it. See
+ * `_services/seriesGroups.ts` for why that is not simply the sum of the
+ * members.
+ *
+ * Returns undefined when no progress info is available, when the total is
  * unknown, or when nothing has been watched yet — those cards skip the bar.
  */
 function computePct(
-  series: Series,
+  groupTotal: number | undefined,
   info: SeriesProgressInfo | undefined,
 ): number | undefined {
   if (!info) return undefined;
-  if (typeof series.totalEpisodes !== "number" || series.totalEpisodes <= 0) {
-    return undefined;
-  }
+  if (typeof groupTotal !== "number" || groupTotal <= 0) return undefined;
   if (info.completedCount <= 0) return undefined;
-  return Math.min(1, info.completedCount / series.totalEpisodes);
+  return Math.min(1, info.completedCount / groupTotal);
 }
 
 /**
@@ -103,23 +107,30 @@ function computePct(
  *  - undefined when there's nothing meaningful to show
  */
 function computeLabel(
-  series: Series,
+  groupTotal: number | undefined,
   info: SeriesProgressInfo | undefined,
 ): string | undefined {
-  if (typeof series.totalEpisodes !== "number" || series.totalEpisodes <= 0) {
-    return undefined;
-  }
-  const total = series.totalEpisodes;
+  if (typeof groupTotal !== "number" || groupTotal <= 0) return undefined;
   const done = info?.completedCount ?? 0;
   if (done <= 0) return undefined;
-  return done >= total ? `${done}/${total} ✓` : `${done}/${total}`;
+  return done >= groupTotal ? `${done}/${groupTotal} ✓` : `${done}/${groupTotal}`;
 }
 
 interface SeriesGridProps {
   series: Series[];
   onPickSeries: (id: string) => void;
   overrides?: Map<string, UserOverride>;
+  /**
+   * Folded over merge groups, not raw per-series. A soft merge leaves the
+   * source's progress rows filed under the source id, so the raw map hands a
+   * merged card only the root's share of its own progress.
+   */
   progressMap?: Map<string, SeriesProgressInfo>;
+  /**
+   * seriesId → episodes on that whole card. Absent entry means "unknown", and
+   * an unknown total is what suppresses the bar and the "3/12" label.
+   */
+  groupTotals?: Map<string, number>;
   onOverrideAction?: (seriesId: string, action: OverrideAction) => void;
   selectionMode?: boolean;
   selectedIds?: Set<string>;
@@ -142,6 +153,7 @@ function SeriesGrid({
   onPickSeries,
   overrides,
   progressMap,
+  groupTotals,
   onOverrideAction,
   selectionMode = false,
   selectedIds,
@@ -161,8 +173,9 @@ function SeriesGrid({
     >
       {series.map((sr) => {
         const info = progressMap?.get(sr.id);
-        const pct = computePct(sr, info);
-        const label = computeLabel(sr, info);
+        const groupTotal = groupTotals?.get(sr.id);
+        const pct = computePct(groupTotal, info);
+        const label = computeLabel(groupTotal, info);
         const isNew =
           (info?.completedCount ?? 0) === 0 &&
           typeof sr.createdAt === "number" &&
@@ -179,6 +192,7 @@ function SeriesGrid({
               series={sr}
               onClick={() => onPickSeries(sr.id)}
               override={overrides?.get(sr.id)}
+              episodeTotal={groupTotal}
               progressPct={pct}
               progressLabel={label}
               isNew={isNew}

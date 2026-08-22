@@ -4,6 +4,21 @@ import { useSyncExternalStore, useCallback, useState, useRef } from 'react';
 import { liveQuery } from 'dexie';
 
 /** @typedef {import('@/lib/library/types').Series} Series */
+/** @typedef {import('@/lib/library/types').Season} Season */
+
+/**
+ * @typedef {Object} LibrarySnapshot
+ * @property {Series[]} series    - grid-visible rows (merged-in sources removed)
+ * @property {Series[]} allSeries - every row, merged-in sources included
+ * @property {Season[]} seasons   - every season row
+ */
+
+/** Stable identity — `useSyncExternalStore` re-renders forever on a fresh one. */
+const EMPTY_SNAPSHOT = /** @type {LibrarySnapshot} */ ({
+  series: [],
+  allSeries: [],
+  seasons: [],
+});
 
 /**
  * React hook that subscribes to the series table via Dexie liveQuery.
@@ -13,9 +28,22 @@ import { liveQuery } from 'dexie';
  * row, so undo can restore the prior override snapshot in one write); the
  * filter here is what makes the merged source disappear from the grid.
  *
+ * `allSeries` and `seasons` ride along on the SAME liveQuery rather than
+ * getting subscriptions of their own. Both exist for `buildGroupTotals`:
+ *
+ *   allSeries — a merged card's total is assembled from its members' own
+ *               `totalEpisodes`, and every member is by definition one of the
+ *               rows `series` filters out. Computing group totals from the
+ *               visible list alone can only ever see the root's own number.
+ *   seasons   — `Season.animeId` is the only thing that distinguishes "the same
+ *               season recorded twice" (auto-dedupe, must not sum) from "two
+ *               different seasons" (manual merge, must sum).
+ *
  * @param {{ db: import('dexie').Dexie }} options
  * @returns {{
  *   series: Series[],
+ *   allSeries: Series[],
+ *   seasons: Season[],
  *   loading: boolean,
  *   refetch(): void,
  * }}
@@ -23,7 +51,7 @@ import { liveQuery } from 'dexie';
 function useLibrary({ db }) {
   const [rev, setRev] = useState(0);
 
-  /** @type {React.MutableRefObject<Series[] | null>} */
+  /** @type {React.MutableRefObject<LibrarySnapshot | null>} */
   const snapshotRef = useRef(null);
   /** Track which (db, rev) the current snapshot belongs to so we don't serve stale data after refetch. */
   const snapshotKeyRef = useRef(/** @type {{ db: any, rev: number } | null} */(null));
@@ -35,9 +63,10 @@ function useLibrary({ db }) {
       snapshotKeyRef.current = { db, rev };
 
       const sub = liveQuery(async () => {
-        const [allSeries, overrides] = await Promise.all([
+        const [allSeries, overrides, seasons] = await Promise.all([
           db.series.orderBy('updatedAt').reverse().toArray(),
           db.userOverride ? db.userOverride.toArray() : Promise.resolve([]),
+          db.seasons ? db.seasons.toArray() : Promise.resolve([]),
         ]);
         const merged = new Set();
         for (const o of overrides) {
@@ -45,16 +74,17 @@ function useLibrary({ db }) {
             for (const id of o.mergedFrom) merged.add(id);
           }
         }
-        return merged.size === 0
+        const series = merged.size === 0
           ? allSeries
           : allSeries.filter((s) => !merged.has(s.id));
+        return { series, allSeries, seasons };
       }).subscribe({
         next: (v) => {
-          snapshotRef.current = /** @type {Series[]} */ (v);
+          snapshotRef.current = /** @type {LibrarySnapshot} */ (v);
           onChange();
         },
         error: () => {
-          snapshotRef.current = [];
+          snapshotRef.current = EMPTY_SNAPSHOT;
           onChange();
         },
       });
@@ -72,18 +102,24 @@ function useLibrary({ db }) {
     return snapshotRef.current;
   }, [db, rev]);
 
-  const getServerSnapshot = useCallback(() => /** @type {Series[]} */ ([]), []);
+  const getServerSnapshot = useCallback(() => EMPTY_SNAPSHOT, []);
 
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const loading = snapshot === null;
-  const series = snapshot ?? [];
+  const resolved = snapshot ?? EMPTY_SNAPSHOT;
 
   const refetch = useCallback(() => {
     setRev((r) => r + 1);
   }, []);
 
-  return { series, loading, refetch };
+  return {
+    series: resolved.series,
+    allSeries: resolved.allSeries,
+    seasons: resolved.seasons,
+    loading,
+    refetch,
+  };
 }
 
 export { useLibrary };

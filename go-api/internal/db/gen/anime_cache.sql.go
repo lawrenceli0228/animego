@@ -505,6 +505,7 @@ SELECT
     description_hant,
     description_hant_source,
     episodes,
+    episodes_bgm,
     status,
     season,
     season_year,
@@ -543,6 +544,7 @@ type GetAnimeMainByIDRow struct {
 	DescriptionHant             *string            `json:"descriptionHant"`
 	DescriptionHantSource       *string            `json:"descriptionHantSource"`
 	Episodes                    *int32             `json:"episodes"`
+	EpisodesBgm                 *int32             `json:"episodesBgm"`
 	Status                      *string            `json:"status"`
 	Season                      *string            `json:"season"`
 	SeasonYear                  *int32             `json:"seasonYear"`
@@ -568,6 +570,16 @@ type GetAnimeMainByIDRow struct {
 // here and nowhere else, exactly like description_cn above them: a full
 // synopsis per card would roughly double the list payloads for text no
 // card renders.
+//
+// episodes and episodes_bgm are two columns here for the same reason they
+// are two columns in GetEpisodeCountsByAnilistIDs below: episodes is
+// AniList's authoritative total, episodes_bgm (migration 0023) is inferred
+// from an external episode source, and nothing may coalesce them on the way
+// out of the database.  This projection feeds the detail page, which is the
+// consumer that emits numberOfEpisodes into schema.org JSON-LD -- so a
+// COALESCE here is the exact mechanism by which a guess would become a
+// factual claim to a search engine about the work.  The page picks; the
+// database does not pick for it.
 func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error) {
 	row := q.db.QueryRow(ctx, getAnimeMainByID, anilistID)
 	var i GetAnimeMainByIDRow
@@ -592,6 +604,7 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.DescriptionHant,
 		&i.DescriptionHantSource,
 		&i.Episodes,
+		&i.EpisodesBgm,
 		&i.Status,
 		&i.Season,
 		&i.SeasonYear,
@@ -912,6 +925,122 @@ func (q *Queries) GetDescriptionForLlmTranslate(ctx context.Context, anilistID i
 	row := q.db.QueryRow(ctx, getDescriptionForLlmTranslate, anilistID)
 	var i GetDescriptionForLlmTranslateRow
 	err := row.Scan(&i.Description, &i.DescriptionCn)
+	return i, err
+}
+
+const getEpisodeCountsByAnilistIDs = `-- name: GetEpisodeCountsByAnilistIDs :many
+SELECT
+    anilist_id,
+    episodes,
+    episodes_bgm
+FROM anime_cache
+WHERE anilist_id = ANY($1::int[])
+`
+
+type GetEpisodeCountsByAnilistIDsRow struct {
+	AnilistID   int32  `json:"anilistId"`
+	Episodes    *int32 `json:"episodes"`
+	EpisodesBgm *int32 `json:"episodesBgm"`
+}
+
+// Batch episode-count read for GET /api/anime/episodes, which the
+// browser-side library calls once to backfill a per-series total for
+// series it has ALREADY bound.  The binding path short-circuits on an
+// existing binding and returns no episode data, so without a batch read
+// there is no route by which an already-bound series ever learns its
+// length.
+//
+// Three columns and no more: this is a hot, wide-fan-in read (up to 200
+// ids per call) whose only job is to answer "how many episodes".  The
+// title trio that rides along on the other ANY($1::int[]) reads in this
+// file is deliberately absent — the caller already has the titles.
+//
+// episodes and episodes_bgm are returned as two separate columns and are
+// NOT coalesced here, or anywhere downstream.  episodes is AniList's
+// authoritative value; episodes_bgm (migration 0023) is inferred from an
+// external source.  A downstream consumer emits numberOfEpisodes into
+// schema.org JSON-LD and only the authoritative value may appear there, so
+// a COALESCE in this query would launder an inferred count into structured
+// data.  Callers pick; the database does not pick for them.
+//
+// Ids with no anime_cache row simply do not come back.  The handler
+// returns the short list rather than padding it with nulls — an absent id
+// and an id whose counts are both NULL are different facts and the caller
+// can already tell them apart.
+func (q *Queries) GetEpisodeCountsByAnilistIDs(ctx context.Context, dollar_1 []int32) ([]GetEpisodeCountsByAnilistIDsRow, error) {
+	rows, err := q.db.Query(ctx, getEpisodeCountsByAnilistIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetEpisodeCountsByAnilistIDsRow{}
+	for rows.Next() {
+		var i GetEpisodeCountsByAnilistIDsRow
+		if err := rows.Scan(&i.AnilistID, &i.Episodes, &i.EpisodesBgm); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getEpisodesBgmGateInputs = `-- name: GetEpisodesBgmGateInputs :one
+SELECT
+    ac.bgm_id,
+    ac.bgm_match_source,
+    ac.title_native,
+    ac.title_romaji,
+    EXISTS (
+        SELECT 1 FROM bgm_id_map m
+        WHERE m.anilist_id = ac.anilist_id
+          AND m.bgm_id = ac.bgm_id
+    ) AS id_map_agrees
+FROM anime_cache ac
+WHERE ac.anilist_id = $1
+`
+
+type GetEpisodesBgmGateInputsRow struct {
+	BgmID          *int32  `json:"bgmId"`
+	BgmMatchSource *string `json:"bgmMatchSource"`
+	TitleNative    *string `json:"titleNative"`
+	TitleRomaji    *string `json:"titleRomaji"`
+	IDMapAgrees    bool    `json:"idMapAgrees"`
+}
+
+// The identity gate's inputs, re-read at work time.
+//
+// bgm_id comes back so the worker can compare it against the id its job
+// payload carries.  That comparison is not paranoia: the payload was written
+// when the scan ran, an admin PATCH or reset can land in between, and a job
+// that trusted its own arguments would fetch one subject and file the result
+// against a different binding.
+//
+// title_native and title_romaji are the AniList-side titles, and they are the
+// ONLY titles a similarity comparison may use.  title_chinese is deliberately
+// absent from this projection: on a mis-bound row it has already been
+// overwritten with the wrong show's Chinese name by earlier enrichment, so
+// comparing it against the same subject's name_cn passes every time -- it
+// validates the error with the error.  Leaving the column out of the query is
+// a cheaper guarantee than a comment asking a future reader not to use it.
+//
+// id_map_agrees asks whether the vendored AniList->Bangumi map lists THIS
+// pair, not merely whether it has a row for this anilist_id.  A map entry
+// naming a different bgm_id is evidence against the binding, so it must not
+// read as authoritative confirmation of it.  Same test as the
+// description_cn_eligible view (migration 0016).
+func (q *Queries) GetEpisodesBgmGateInputs(ctx context.Context, anilistID int32) (GetEpisodesBgmGateInputsRow, error) {
+	row := q.db.QueryRow(ctx, getEpisodesBgmGateInputs, anilistID)
+	var i GetEpisodesBgmGateInputsRow
+	err := row.Scan(
+		&i.BgmID,
+		&i.BgmMatchSource,
+		&i.TitleNative,
+		&i.TitleRomaji,
+		&i.IDMapAgrees,
+	)
 	return i, err
 }
 
@@ -1812,6 +1941,126 @@ func (q *Queries) ListDescriptionCnLlmCandidates(ctx context.Context, retryAfter
 	return items, nil
 }
 
+const listEpisodesBgmCandidates = `-- name: ListEpisodesBgmCandidates :many
+SELECT
+    ac.anilist_id,
+    ac.bgm_id
+FROM anime_cache ac
+WHERE ac.episodes IS NULL
+  AND ac.bgm_id IS NOT NULL
+  AND (
+      cardinality($1::int[]) = 0
+      OR ac.anilist_id = ANY($1::int[])
+  )
+  AND (
+      -- Never tried.
+      ac.episodes_bgm_attempted_at IS NULL
+      -- Still airing and upstream last gave a real answer: whatever was
+      -- derived is provisional by construction, so re-ask about once a day.
+      OR (ac.status = 'RELEASING'
+          AND ac.episodes_bgm_outcome IN ('ok', 'empty')
+          AND ac.episodes_bgm_attempted_at < now() - $2::interval)
+      -- The gate could not tell.  Only better data changes that, and the
+      -- data in question (the id map, an admin correction) moves on its own
+      -- schedule.
+      OR (ac.episodes_bgm_outcome = 'undecided'
+          AND ac.episodes_bgm_attempted_at < now() - $3::interval)
+      -- The gate refused the binding.  Only a RE-BINDING changes that, and
+      -- every re-binding path clears these columns outright (admin.sql
+      -- ResetAnimeEnrichment / FlagAnimeEnrichment /
+      -- UpdateAnimeEnrichmentSelective), which puts the row back at
+      -- attempted_at IS NULL and at the front of the queue.  So this arm is
+      -- the slow backstop, not the repair mechanism.
+      OR (ac.episodes_bgm_outcome = 'rejected'
+          AND ac.episodes_bgm_attempted_at < now() - $4::interval)
+      -- Safety arm; see the note above about covering every CHECK value.
+      OR (ac.episodes_bgm_outcome = 'error'
+          AND ac.episodes_bgm_attempted_at < now() - $5::interval)
+  )
+ORDER BY ac.episodes_bgm_attempted_at NULLS FIRST, ac.anilist_id
+LIMIT $6
+`
+
+type ListEpisodesBgmCandidatesParams struct {
+	AnilistIds     []int32         `json:"anilistIds"`
+	AiringRecheck  pgtype.Interval `json:"airingRecheck"`
+	UndecidedRetry pgtype.Interval `json:"undecidedRetry"`
+	RejectedRetry  pgtype.Interval `json:"rejectedRetry"`
+	ErrorRetry     pgtype.Interval `json:"errorRetry"`
+	RowLimit       int32           `json:"rowLimit"`
+}
+
+type ListEpisodesBgmCandidatesRow struct {
+	AnilistID int32  `json:"anilistId"`
+	BgmID     *int32 `json:"bgmId"`
+}
+
+// Rows whose episode count is unknown to AniList and whose Bangumi binding
+// might be able to supply one.
+//
+// `episodes IS NULL` is the anchor, and it is the only conjunct migration
+// 0023's partial index carries.  It is also the one condition this sweep can
+// never satisfy on its own: the worker writes episodes_bgm and NEVER
+// anime_cache.episodes, so a row leaves the candidate set only when an
+// AniList sync finally learns a real total.
+//
+// THE COOLDOWN ARMS ARE THE POINT.  The predicate originally specified for
+// this sweep --
+//
+//	episodes IS NULL
+//	AND (episodes_bgm IS NULL
+//	     OR (status = 'RELEASING' AND episodes_bgm_at < now() - interval '20 hours'))
+//
+// -- never terminates.  A row the identity gate rejects, and a row whose
+// upstream returns no episodes, both produce no count, so `episodes_bgm IS
+// NULL` stays true and they hold the front of every later batch forever.
+// Migration 0015 documents that exact stall already happening once on this
+// table, and 0023 added episodes_bgm_attempted_at / _outcome to stop the
+// repeat.  So candidacy is decided by the ATTEMPT stamp plus the recorded
+// outcome, and the ordering is 0015's.
+//
+// Every value the 0023 CHECK admits has an arm below.  A value with no arm
+// matches nothing and freezes that row permanently -- which is the failure
+// these columns exist to prevent -- so 'error' gets an arm even though
+// nothing writes it today (transport failures are deliberately left
+// unstamped for river to retry; see MarkEpisodesBgmAttempted).
+//
+// Rows at 'ok' or 'empty' whose status is not RELEASING match no arm at all,
+// and that is deliberate rather than an omission: a finished show's episode
+// count is settled, and re-asking upstream forever would spend the shared
+// Bangumi budget to re-learn the same number.
+//
+// anilist_ids is an OPTIONAL narrowing.  An EMPTY array means "the whole
+// catalogue" (the hourly sweep); a non-empty one restricts to those ids (the
+// warm-season seed).  One query rather than two so the seed can never enqueue
+// work the sweep itself would not take, and so the two can never drift apart.
+func (q *Queries) ListEpisodesBgmCandidates(ctx context.Context, arg ListEpisodesBgmCandidatesParams) ([]ListEpisodesBgmCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodesBgmCandidates,
+		arg.AnilistIds,
+		arg.AiringRecheck,
+		arg.UndecidedRetry,
+		arg.RejectedRetry,
+		arg.ErrorRetry,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEpisodesBgmCandidatesRow{}
+	for rows.Next() {
+		var i ListEpisodesBgmCandidatesRow
+		if err := rows.Scan(&i.AnilistID, &i.BgmID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnenrichedAnilistIDs = `-- name: ListUnenrichedAnilistIDs :many
 SELECT anilist_id
 FROM anime_cache
@@ -1932,6 +2181,51 @@ WHERE anilist_id = $1
 func (q *Queries) MarkDescriptionCnLlmAttempted(ctx context.Context, anilistID int32) error {
 	_, err := q.db.Exec(ctx, markDescriptionCnLlmAttempted, anilistID)
 	return err
+}
+
+const markEpisodesBgmAttempted = `-- name: MarkEpisodesBgmAttempted :execrows
+UPDATE anime_cache
+SET episodes_bgm              = CASE WHEN $1::text = 'rejected'
+                                     THEN NULL ELSE episodes_bgm END,
+    episodes_bgm_at           = CASE WHEN $1::text = 'rejected'
+                                     THEN NULL ELSE episodes_bgm_at END,
+    episodes_bgm_attempted_at = now(),
+    episodes_bgm_outcome      = $1::text,
+    episodes_bgm_reason       = $2
+WHERE anilist_id = $3
+  AND bgm_id     = $4
+`
+
+// Record a decided NON-'ok' outcome so the sweep can move past this row.
+//
+// Called for every outcome upstream actually answered -- the gate refused the
+// binding, the gate could not tell, the episode list came back empty -- but
+// NOT for transport failures, which river should retry rather than have the
+// sweep treat as decided.  Counterpart to the ordering in
+// ListEpisodesBgmCandidates, exactly as MarkDescriptionCnAttempted is to the
+// Chinese-description sweep.
+//
+// 'rejected' additionally clears any count already on the row, because that
+// outcome is a positive statement that the value's provenance is repudiated.
+// 'undecided', 'empty' and 'error' leave it alone: they are absence of
+// evidence, not evidence of a wrong binding, and nulling a good count on a
+// transiently empty upstream response would be a regression the next pass
+// could not distinguish from never having had one.
+//
+// updated_at is deliberately NOT bumped -- this is bookkeeping, not a data
+// change, and MarkDescriptionCnAttempted takes the same stance.  It matters
+// here because an airing row can be stamped every day for months.
+func (q *Queries) MarkEpisodesBgmAttempted(ctx context.Context, outcome string, reason *string, anilistID int32, bgmID *int32) (int64, error) {
+	result, err := q.db.Exec(ctx, markEpisodesBgmAttempted,
+		outcome,
+		reason,
+		anilistID,
+		bgmID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateAnimeCharacterCN = `-- name: UpdateAnimeCharacterCN :exec
@@ -2098,6 +2392,40 @@ WHERE anilist_id = $2
 func (q *Queries) UpdateDescriptionCnLlm(ctx context.Context, descriptionCn *string, anilistID int32) error {
 	_, err := q.db.Exec(ctx, updateDescriptionCnLlm, descriptionCn, anilistID)
 	return err
+}
+
+const updateEpisodesBgm = `-- name: UpdateEpisodesBgm :execrows
+UPDATE anime_cache
+SET episodes_bgm              = $1,
+    episodes_bgm_at           = now(),
+    episodes_bgm_attempted_at = now(),
+    episodes_bgm_outcome      = 'ok',
+    episodes_bgm_reason       = NULL,
+    updated_at                = now()
+WHERE anilist_id = $2
+  AND bgm_id     = $3
+`
+
+// Store an inferred episode count, and stamp the attempt in the same
+// statement so the two can never disagree.
+//
+// The bgm_id in the WHERE clause pins the write to the binding the job
+// actually fetched -- the same move UpdateDescriptionCn makes, for the same
+// reason.  The Go-side re-read closes most of the rebind window; this closes
+// the rest, and turns the race into an observable zero-row result instead of
+// a wrong number.
+//
+// episodes (AniList's authoritative count) is NEVER written here.  An AniList
+// sync UPSERT sets `episodes = EXCLUDED.episodes`, so a value written there
+// would be cleared on the next warm anyway -- and, more to the point, a
+// downstream consumer emits `episodes` into schema.org JSON-LD, where an
+// inferred number must never appear.
+func (q *Queries) UpdateEpisodesBgm(ctx context.Context, episodesBgm *int32, anilistID int32, bgmID *int32) (int64, error) {
+	result, err := q.db.Exec(ctx, updateEpisodesBgm, episodesBgm, anilistID, bgmID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertAnimeCache = `-- name: UpsertAnimeCache :exec

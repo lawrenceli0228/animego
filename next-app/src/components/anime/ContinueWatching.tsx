@@ -224,17 +224,38 @@ function progressFillStyle(currentEpisode: number, episodes: number | null) {
   } as const;
 }
 
+/**
+ * The denominator this card can draw with, authoritative or not.
+ *
+ * AniList leaves `episodes` null for much of what is currently airing, which
+ * is exactly the population a "continue watching" row is most likely to be
+ * about. With only the authoritative count the card silently degraded: no
+ * fraction, no bar, and a badge reading `7 集` where 7 was the episode the
+ * reader had reached, not how many exist — a position rendered as a total.
+ *
+ * `episodesBgm` is inferred, so it is fit for a fraction and a bar and unfit
+ * for anything a machine reads. Nothing on this path reaches structured data;
+ * keeping the fallback here rather than merging the two fields upstream is
+ * what keeps that decision reversible.
+ */
+export function resolveWatchingTotal(item: WatchingItem): number | null {
+  if (typeof item.episodes === "number" && item.episodes > 0) {
+    return item.episodes;
+  }
+  if (typeof item.episodesBgm === "number" && item.episodesBgm > 0) {
+    return item.episodesBgm;
+  }
+  return null;
+}
+
 function badgeText(item: WatchingItem, dict: Dict, lang: Lang): string {
   const epUnit = dict.detail.epUnit;
+  const total = resolveWatchingTotal(item);
   if (item.currentEpisode > 0) {
-    if (item.episodes && item.episodes > 0) {
-      return `${item.currentEpisode}/${item.episodes} ${epUnit}`;
-    }
+    if (total) return `${item.currentEpisode}/${total} ${epUnit}`;
     return `${item.currentEpisode} ${epUnit}`;
   }
-  if (item.episodes && item.episodes > 0) {
-    return `${item.episodes} ${epUnit}`;
-  }
+  if (total) return `${total} ${epUnit}`;
   return TRACKING_BADGE[lang];
 }
 
@@ -370,10 +391,13 @@ function WatchingGrid({
               <div style={epBadgeStyle}>{badgeText(item, dict, lang)}</div>
               <div style={cardOverlayStyle}>
                 <div style={cardTitleStyle}>{pickTitle(item, lang)}</div>
-                {item.episodes && item.episodes > 0 ? (
+                {resolveWatchingTotal(item) ? (
                   <div style={progressTrackStyle}>
                     <div
-                      style={progressFillStyle(item.currentEpisode, item.episodes)}
+                      style={progressFillStyle(
+                        item.currentEpisode,
+                        resolveWatchingTotal(item),
+                      )}
                     />
                   </div>
                 ) : null}

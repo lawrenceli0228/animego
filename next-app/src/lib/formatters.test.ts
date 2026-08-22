@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { buildJsonLd } from "@/components/anime/animeJsonLd";
+import { resolveEpisodeSkeleton } from "@/components/anime/episodeGridSkeleton";
 import {
   formatFuzzyDate,
   formatScore,
@@ -443,6 +445,157 @@ describe("titleHant wire contract", () => {
 
     expect(types).toContain("titleHant?: string | null;");
     expect(types).toContain("titleHantSeo?: string | null;");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// episodesBgm wire contract, and R3.
+//
+// AniList leaves `episodes` NULL for a large slice of the catalogue — most of
+// what is currently airing. Migration 0023 added a second column,
+// `episodes_bgm`, that a sweep fills from an external episode source, and the
+// detail endpoint now returns both as two separate fields.
+//
+// Two fields rather than one fallback, because the two consumers on the detail
+// route are not making the same kind of statement:
+//
+//   the badge and the episode grid   text on a page, which a reader sees in
+//                                    context and which the page can qualify
+//   schema.org numberOfEpisodes      a machine-readable claim about the work,
+//                                    addressed to a search engine that treats
+//                                    it as fact and may surface it away from
+//                                    the page entirely
+//
+// The first may fall back to the inferred count. The second may not. That is
+// R3, and it survives only as long as the two values stay distinguishable all
+// the way down — SQL projection, Go DTO, TypeScript type, call site. A merge
+// at any layer leaves every call site below it looking identical, and the one
+// that has to refuse the guess loses the means to.
+//
+// The behavioural half runs against the real builder. buildJsonLd lives in
+// @/components/anime/animeJsonLd rather than in page.tsx precisely so it can:
+// nothing can import that page (`page.tsx -> DetailActions -> Subscription-
+// Button -> react-hot-toast`, which touches `document` at module scope — see
+// testImportHygiene.test.ts).
+// ---------------------------------------------------------------------------
+
+/**
+ * Compile-time half: `AnimeDetail["episodesBgm"]` stops resolving the moment
+ * the field is dropped from the type, and the alias stops compiling if it ever
+ * becomes something other than a count.
+ */
+export type EpisodesBgmWireContract = Assignable<
+  NonNullable<AnimeDetail["episodesBgm"]>,
+  number
+>;
+
+/**
+ * A detail row carrying only what buildJsonLd reads. Cast rather than spelled
+ * out in full: the subject here is the builder's behaviour, and AnimeDetail's
+ * completeness is the alias above's job.
+ */
+function detailRow(over: Partial<AnimeDetail>): AnimeDetail {
+  return {
+    anilistId: 1,
+    titleRomaji: "Sousou no Frieren",
+    titleEnglish: null,
+    titleNative: null,
+    titleChinese: null,
+    coverImageUrl: null,
+    description: null,
+    episodes: null,
+    episodesBgm: null,
+    startDate: null,
+    genres: [],
+    studios: [],
+    bangumiScore: null,
+    bangumiVotes: null,
+    ...over,
+  } as AnimeDetail;
+}
+
+describe("episodesBgm wire contract", () => {
+  const REPO = join(import.meta.dir, "..", "..", "..");
+
+  test("the detail query projects both counts, and coalesces neither", () => {
+    const sql = readFileSync(
+      join(REPO, "go-api/internal/db/queries/anime_cache.sql"),
+      "utf8",
+    );
+    const start = sql.indexOf("-- name: GetAnimeMainByID :one");
+    expect(start).toBeGreaterThan(-1);
+    const next = sql.indexOf("-- name: ", start + 1);
+    const query = sql.slice(start, next === -1 ? undefined : next);
+
+    expect(query).toContain("    episodes,");
+    expect(query).toContain("    episodes_bgm,");
+    // A COALESCE in the projection is the one edit that would defeat every
+    // guard below it, because everything downstream would still typecheck.
+    expect(query).not.toContain("COALESCE(episodes");
+    expect(query).not.toContain("coalesce(episodes");
+  });
+
+  test("go-api serialises the two counts under separate names", () => {
+    const detailGo = readFileSync(join(REPO, "go-api/internal/anime/detail.go"), "utf8");
+
+    expect(detailGo).toContain('json:"episodes"');
+    expect(detailGo).toContain('json:"episodesBgm"');
+  });
+
+  test("AnimeDetail declares both fields", () => {
+    // Guards the type-level alias above, which CI never evaluates.
+    const types = readFileSync(join(import.meta.dir, "types.ts"), "utf8");
+
+    expect(types).toContain("episodes: number | null;");
+    expect(types).toContain("episodesBgm?: number | null;");
+  });
+});
+
+describe("R3 — only the authoritative count reaches schema.org", () => {
+  test("an inferred count produces no numberOfEpisodes at all", () => {
+    // The load-bearing assertion. Currently airing: AniList has no total, the
+    // sweep inferred 24. An absent numberOfEpisodes says nothing about the
+    // work; a guessed one says something false, and says it to a machine.
+    const ld = buildJsonLd(detailRow({ episodes: null, episodesBgm: 24 }), "zh");
+
+    expect(ld).not.toHaveProperty("numberOfEpisodes");
+    expect(JSON.stringify(ld)).not.toContain("numberOfEpisodes");
+  });
+
+  test("the same row still gives the badge and the grid a number to draw", () => {
+    // The point of keeping two fields, stated as one comparison: one input
+    // row, two consumers, two different answers. If a later change merges the
+    // fields, this pair collapses into agreement and the assertion above is
+    // the one that breaks.
+    const row = detailRow({ episodes: null, episodesBgm: 24 });
+
+    expect(resolveEpisodeSkeleton(row.episodes, row.episodesBgm ?? null, [])).toEqual({
+      kind: "inferred",
+      total: 24,
+    });
+    expect(buildJsonLd(row, "zh")).not.toHaveProperty("numberOfEpisodes");
+  });
+
+  test("both counts present publishes the authoritative one, not the inferred", () => {
+    // The sources disagree, which they do whenever a season is mid-flight.
+    // AniList's 12 is the claim; the sweep's 13 must not reach schema.org
+    // even though it is the larger and more recent number.
+    const ld = buildJsonLd(detailRow({ episodes: 12, episodesBgm: 13 }), "zh");
+
+    expect(ld.numberOfEpisodes).toBe(12);
+  });
+
+  test("an authoritative count alone is published as before", () => {
+    // Regression guard: the ordinary finished-show path is untouched.
+    expect(buildJsonLd(detailRow({ episodes: 26 }), "zh").numberOfEpisodes).toBe(26);
+    expect(buildJsonLd(detailRow({ episodes: 26 }), "en").numberOfEpisodes).toBe(26);
+  });
+
+  test("neither count present omits the property rather than emitting zero", () => {
+    // `numberOfEpisodes: 0` would be a claim that the show has no episodes.
+    const ld = buildJsonLd(detailRow({ episodes: null, episodesBgm: null }), "zh");
+
+    expect(ld).not.toHaveProperty("numberOfEpisodes");
   });
 });
 
