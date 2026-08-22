@@ -1093,6 +1093,56 @@ type Querier interface {
 	// change, and MarkDescriptionCnAttempted takes the same stance.  It matters
 	// here because an airing row can be stamped every day for months.
 	MarkEpisodesBgmAttempted(ctx context.Context, outcome string, reason *string, anilistID int32, bgmID *int32) (int64, error)
+	// PUT /api/subscriptions/:anilistId/episodes — mark a SET, idempotently.
+	//
+	// Same statement as MarkEpisodeWatched with `unnest` in place of the single
+	// literal, and it exists for one reason: the library reconciler pushes the
+	// episodes a reader's local library knows about, and a first sync of a
+	// two-cour series is fifty of them.  Fifty round trips behind one page mount,
+	// against a per-IP rate limiter, is not a thing to ship — so the set travels
+	// in one statement, and therefore in one lock, one recompute and one feed
+	// event.
+	//
+	// IT UNIONS.  IT NEVER REPLACES.
+	// =============================
+	//
+	// The caller sends the episodes IT knows about, which is not the same thing
+	// as the episodes that exist.  A reader with two devices, or one device and
+	// the website's grid, has marks this caller has never heard of; a replace
+	// would delete them and there would be no record that it had.  INSERT ...
+	// ON CONFLICT DO NOTHING is the whole guarantee: the set can only grow here.
+	// Removing a mark is UnmarkEpisodeWatched, one episode at a time, because
+	// removal is always a deliberate act and never a side effect of a sync.
+	//
+	// Duplicates in the array are fine and are not an error.  ON CONFLICT DO
+	// NOTHING resolves a duplicate against the row the same statement just
+	// speculatively inserted, exactly as it resolves one against a row that was
+	// already there.  (DO UPDATE would raise "cannot affect row a second time";
+	// DO NOTHING does not.)  So the handler validates members for VALIDITY and
+	// says nothing about tidiness.
+	//
+	// Out-of-range members are rejected by the handler and never arrive, so —
+	// unlike UpdateSubscriptionWithActivity, which filters them with a BETWEEN —
+	// there is nothing to filter here.  The difference is deliberate: a PATCH
+	// carrying a bad episode may still be a legitimate status or score edit and
+	// must not 500, whereas this endpoint's entire body IS the episode list, so a
+	// bad member makes the whole request meaningless and it is answered 400.
+	//
+	// The activity event is the one part that does NOT mirror MarkEpisodeWatched,
+	// and the reason is in the note above those two: a per-checkbox feed entry
+	// would bury the watch_progress events worth reading.  This is not a
+	// checkbox.  It is the same "the reader got further" event PATCH has always
+	// written, arriving by a different door, so it writes at most ONE event and
+	// only when current_episode actually advanced — the identical condition
+	// UpdateSubscriptionWithActivity uses.  Without it, moving the reconciler off
+	// PATCH would empty the feed with no error, which is precisely the failure
+	// the SubscriptionsDB comment warns about for the plain UpdateSubscription.
+	//
+	// Both timestamps follow MarkEpisodeWatched's rule, for MarkEpisodeWatched's
+	// reasons: they move only when the set actually changed, so a replayed push
+	// neither claims a viewing that did not happen nor reorders the home page's
+	// continue-watching row.
+	MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (MarkEpisodesWatchedRow, error)
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error)
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.

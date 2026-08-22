@@ -51,7 +51,17 @@ const (
 	// Deliberately says nothing about WHICH bound was missed and echoes
 	// none of the input: the same string answers "0", "-1", "999999",
 	// "abc" and an id that would wrap on a careless cast.
-	msgInvalidEpisodeNumber  = "Invalid episode number"
+	msgInvalidEpisodeNumber = "Invalid episode number"
+	// msgInvalidEpisodeList rejects the SHAPE of the bulk mark body —
+	// unreadable JSON, a missing or empty array, or one longer than
+	// maxEpisodesPerRequest.  A bad MEMBER inside an otherwise well-formed
+	// array is answered with msgInvalidEpisodeNumber instead, because it
+	// broke the same rule the single-episode route states and telling the
+	// caller two different things about one rule helps nobody.
+	//
+	// Same discipline as its neighbour: it names no bound and echoes no
+	// input.
+	msgInvalidEpisodeList    = "Invalid episode list"
 	msgSubscriptionNotFound  = "Subscription not found"
 	msgAnimeNotFound         = "Anime not found"
 	msgDeletedSuccessMessage = "Deleted"

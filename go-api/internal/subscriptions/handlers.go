@@ -1,7 +1,9 @@
-// Package subscriptions — handlers.go implements the five /api/subscriptions
-// HTTP handlers ported from server/controllers/subscription.controller.js.
+// Package subscriptions — handlers.go implements the /api/subscriptions
+// HTTP handlers: the five ported from
+// server/controllers/subscription.controller.js, plus the three per-episode
+// watch-mark routes migration 0024 made possible.
 //
-// All five run behind jwtx.RequireAuth in production (every route in
+// All of them run behind jwtx.RequireAuth in production (every route in
 // routes/subscription.routes.js is wrapped in `router.use(authenticateToken)`).
 // Defense-in-depth: each handler also pulls claims via jwtx.ClaimsFrom
 // and 401s if missing, so a routing misconfiguration surfaces clearly
@@ -21,6 +23,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -58,6 +61,23 @@ const pgForeignKeyViolation = "23503"
 // stated in two places, and the handler must never be the looser of them.
 const maxEpisodeNumber = 5000
 
+// maxEpisodesPerRequest caps the array PUT
+// /api/subscriptions/{anilistId}/episodes will consider.
+//
+// It is derived, not chosen.  Every member must be a distinct-or-repeated
+// value in 1..maxEpisodeNumber, so an array longer than maxEpisodeNumber
+// cannot say anything an array of that length could not already say — it
+// can only repeat.  That makes this the TIGHTEST cap that can never reject
+// a request a caller had a reason to send, which is the property a cap
+// wants: one that can refuse legitimate work is a bug waiting for the
+// first long-runner.
+//
+// What it buys is a bound on the work one request can ask for: at most
+// five thousand rows offered to one INSERT, which is the same blast radius
+// migration 0024's CHECK already accepts for a range write.  It moves with
+// maxEpisodeNumber by construction rather than by anyone remembering to.
+const maxEpisodesPerRequest = maxEpisodeNumber
+
 // SubscriptionsDB is the sqlc subset this package consumes.  Declared
 // at the use-site per "accept interfaces, return structs" so tests can
 // substitute a fake without standing up the full dbgen.Querier surface.
@@ -76,6 +96,11 @@ type SubscriptionsDB interface {
 	// that anime.
 	MarkEpisodeWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.MarkEpisodeWatchedRow, error)
 	UnmarkEpisodeWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.UnmarkEpisodeWatchedRow, error)
+	// MarkEpisodesWatched is MarkEpisodeWatched over a set, and it UNIONS:
+	// the marks another device made are not this caller's to delete, so the
+	// statement can only add.  Same single-statement discipline, same
+	// zero-rows-means-no-subscription contract.
+	MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error)
 	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
 	// InsertSubscriptionIfAbsent backs POST bodies carrying
 	// `"ifAbsent": true`.  It differs from UpsertSubscription in exactly
@@ -335,6 +360,129 @@ func (h *Handlers) MarkEpisodeWatched(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "mark episode watched failed"))
+		return
+	}
+
+	httpx.Data(w, http.StatusOK, episodeWatchResp{
+		AnilistID:       anilistID,
+		WatchedEpisodes: nonNilEpisodes(row.WatchedEpisodes),
+		CurrentEpisode:  row.CurrentEpisode,
+	})
+}
+
+// parseEpisodeList decodes and validates the bulk mark body, writing a 400
+// envelope and returning ok=false on any failure.
+//
+// ALL OR NOTHING, and that is the contract rather than an implementation
+// detail.  A body naming ten episodes of which one is out of range writes
+// none of them: a partial write the caller cannot see is worse than a 400,
+// because the caller's whole reason for batching is that it intends to
+// learn from one answer what happened to the set.  The loop therefore
+// returns on the first bad member instead of collecting the good ones.
+//
+// Each member goes through the same strconv.ParseInt(.., 10, 32) that
+// parseEpisode uses on the path param, so 0, -1, 5001, 1.5 and 4294967297
+// are refused here for exactly the reasons they are refused there — see
+// parseEpisode's comment for why the explicit bit size matters.  A member
+// that is not a JSON integer at all (a string, a bool, null, an object) is
+// the same refusal: ParseInt reads the raw token and none of those parse.
+//
+// Duplicates are NOT rejected.  A repeated episode is redundant, not
+// invalid, and the statement's ON CONFLICT DO NOTHING already collapses it;
+// refusing it would make the caller responsible for de-duplicating a set it
+// is allowed to describe however it likes.
+func parseEpisodeList(w http.ResponseWriter, r *http.Request) ([]int32, bool) {
+	var req markEpisodesReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Episodes == nil {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, msgInvalidEpisodeList))
+		return nil, false
+	}
+	raw := *req.Episodes
+	if len(raw) == 0 || len(raw) > maxEpisodesPerRequest {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, msgInvalidEpisodeList))
+		return nil, false
+	}
+
+	episodes := make([]int32, 0, len(raw))
+	for _, token := range raw {
+		// TrimSpace so that pretty-printed JSON is not a rejection: any
+		// padding here is the encoder's formatting, not the caller naming a
+		// different episode.  (The path-param route deliberately refuses
+		// " 3" — there the whitespace IS the input.)
+		v, err := strconv.ParseInt(strings.TrimSpace(string(token)), 10, 32)
+		if err != nil || v < 1 || v > maxEpisodeNumber {
+			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, msgInvalidEpisodeNumber))
+			return nil, false
+		}
+		episodes = append(episodes, int32(v))
+	}
+	return episodes, true
+}
+
+// MarkEpisodesWatched implements PUT
+// /api/subscriptions/{anilistId}/episodes — the bulk sibling of the
+// single-episode PUT one segment deeper.
+//
+// It exists because the library reconciler pushes a SET.  Marking N
+// episodes one request at a time would make a first sync of a two-cour
+// series fifty requests behind one page mount, at a per-IP rate limiter
+// that would rightly start refusing them.
+//
+// Flow, and every step is the single-episode route's step:
+//  1. Auth claims check.  The user id comes from the verified JWT and from
+//     nowhere else — no path, query or BODY field can name a user, and the
+//     statement's first CTE selects the caller's own subscription row.
+//  2. Parse :anilistId, then the body, both all-or-nothing.
+//  3. Upper-bound guard against anime_cache.episodes, on the MAXIMUM
+//     member.  This route is where §4 decision 4 earns its keep: the
+//     reconciler's episodes come from a LOCAL binding, and a binding that
+//     points at the wrong show — or at one cour of a split season — is the
+//     population the bound exists to catch.  Checking the maximum is
+//     sufficient because it dominates every other member; and it is the
+//     same check, and the same 400, that PATCH has always answered, which
+//     is what keeps the client's attempt ceiling meaningful after the
+//     reconciler stops sending PATCH.
+//  4. Run the single-statement union.  pgx.ErrNoRows means the caller has
+//     no subscription for that anime — 404, nothing written.
+//  5. 200 with the full post-write set, same body as both per-episode
+//     routes, so a client reconciles its grid from one response.
+//
+// Idempotent: re-sending a set that is already stored returns 200 with the
+// unchanged set and leaves both timestamps alone.
+func (h *Handlers) MarkEpisodesWatched(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	anilistID, ok := parseAnilistID(w, r)
+	if !ok {
+		return
+	}
+	episodes, ok := parseEpisodeList(w, r)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+
+	highest := episodes[0]
+	for _, e := range episodes[1:] {
+		if e > highest {
+			highest = e
+		}
+	}
+	if !h.checkEpisodeUpperBound(ctx, w, anilistID, &highest) {
+		return
+	}
+
+	row, err := h.Queries.MarkEpisodesWatched(ctx, claims.UserID, anilistID, episodes)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgSubscriptionNotFound))
+			return
+		}
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "mark episodes watched failed"))
 		return
 	}
 

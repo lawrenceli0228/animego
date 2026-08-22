@@ -61,6 +61,9 @@ const zh = {
     // 逐集追番的 :episode 路径参数越界时 go-api 返回这一条
     // (subscriptions/validate.go msgInvalidEpisodeNumber)。
     'Invalid episode number': '无效的集数',
+    // 批量推送整集集合时 body 本身不成立(缺 episodes / 空数组 / 超长)
+    // (subscriptions/validate.go msgInvalidEpisodeList)。单个成员越界仍走上面那条。
+    'Invalid episode list': '无效的集数列表',
     'Subscription not found': '未找到订阅',
     'Deleted': '已删除',
     'Cannot follow yourself': '不能关注自己',

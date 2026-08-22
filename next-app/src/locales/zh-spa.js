@@ -51,6 +51,7 @@ const zh = {
     'Invalid status': '无效的状态',
     'Episode must be a non-negative integer': '集数必须为非负整数',
     'Invalid episode number': '无效的集数',
+    'Invalid episode list': '无效的集数列表',
     'Subscription not found': '未找到订阅',
     'Deleted': '已删除',
     'Cannot follow yourself': '不能关注自己',

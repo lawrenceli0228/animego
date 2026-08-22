@@ -1,5 +1,13 @@
-// Collapses a series' per-episode progress rows into the single integer
-// high-water mark the server tracks as `subscription.current_episode`.
+// Collapses a series' per-episode progress rows into what the server stores:
+// the SET of main episodes the reader has finished, and — derived from it —
+// the single integer `subscription.current_episode`.
+//
+// The set is the primary answer and the integer is `max(set)`, which is the
+// same relationship migration 0024 established server-side
+// (`current_episode = COALESCE(MAX(episode), 0)` over `episode_watches`).
+// Deriving one from the other here, rather than computing them independently,
+// is what keeps the client incapable of describing a state the server cannot
+// hold.
 //
 // Two rules carry all the weight:
 //
@@ -52,19 +60,28 @@ function indexById(episodes: EpisodeLookup): ReadonlyMap<string, HighWaterEpisod
 }
 
 /**
- * Highest main-episode number the user has finished in this series.
+ * Every main-episode number the user has finished in this series, ascending
+ * and without duplicates.
  *
- * Returns `null` — never `0` — when nothing qualifies, so the caller can tell
- * "watched nothing yet" apart from a real episode 0. Input order is irrelevant,
- * and progress rows pointing at episodes that no longer exist are skipped
- * rather than throwing.
+ * Duplicates are real, not theoretical: a merged card draws progress from
+ * several `Series` rows, and two of them can hold the same episode number
+ * from different releases. The server would collapse them anyway
+ * (`episode_watches`' primary key is (user, anime, episode)), so collapsing
+ * them here keeps the request describing the same set the row will hold.
+ *
+ * Ascending order is not cosmetic either — it is what makes the last element
+ * the high-water mark, and what makes two sets comparable by eye in a test
+ * failure.
+ *
+ * Input order is irrelevant, and progress rows pointing at episodes that no
+ * longer exist are skipped rather than throwing.
  */
-export function resolveHighWater(
+export function resolveWatchedEpisodes(
   progress: readonly HighWaterProgress[],
   episodes: EpisodeLookup,
-): number | null {
+): number[] {
   const byId = indexById(episodes);
-  let highest: number | null = null;
+  const numbers = new Set<number>();
 
   for (const row of progress) {
     if (row?.completed !== true) continue;
@@ -73,12 +90,42 @@ export function resolveHighWater(
     // A progress row can outlive its episode (rescan, split, merge).
     if (!episode) continue;
     if (episode.kind !== MAIN_KIND) continue;
-    // A NaN number would poison the comparison into never matching, and an
-    // Infinity would win it forever. Neither belongs in a PATCH body.
+    // A NaN would poison every comparison into never matching, and an
+    // Infinity would win them all forever. Neither is an episode the server
+    // can store, so neither belongs in a request body.
     if (!Number.isFinite(episode.number)) continue;
 
-    if (highest === null || episode.number > highest) highest = episode.number;
+    numbers.add(episode.number);
   }
 
-  return highest;
+  return [...numbers].sort((a, b) => a - b);
+}
+
+/**
+ * Highest main-episode number the user has finished in this series.
+ *
+ * Returns `null` — never `0` — when nothing qualifies, so the caller can tell
+ * "watched nothing yet" apart from a real episode 0.
+ *
+ * Derived from `resolveWatchedEpisodes` rather than computed alongside it:
+ * two independent passes over the same rows is two chances to disagree about
+ * which episodes count, and this number's entire meaning is "the maximum of
+ * that set".
+ *
+ * NO PRODUCTION CALLER SINCE THE RECONCILER STARTED PUSHING SETS, and that is
+ * deliberate rather than an oversight — so nobody has to decide again. It is
+ * the client-side statement of the invariant the whole feature rests on
+ * (`subscriptions.current_episode == COALESCE(MAX(episode), 0)` over
+ * `episode_watches`), it is four lines, and the test that pins it equal to the
+ * set's last element is what would catch the two drifting apart if a caller
+ * ever wants the number again. Same reasoning, and the same shape, as
+ * `ListWatchedEpisodes` in `go-api/internal/db/queries/subscriptions.sql`,
+ * which no handler calls either.
+ */
+export function resolveHighWater(
+  progress: readonly HighWaterProgress[],
+  episodes: EpisodeLookup,
+): number | null {
+  const watched = resolveWatchedEpisodes(progress, episodes);
+  return watched.length ? watched[watched.length - 1] : null;
 }

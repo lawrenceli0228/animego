@@ -85,6 +85,7 @@ type fakeSubsDB struct {
 	deleteFn       func(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 	markFn         func(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.MarkEpisodeWatchedRow, error)
 	unmarkFn       func(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.UnmarkEpisodeWatchedRow, error)
+	markManyFn     func(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error)
 
 	listCalls         int32
 	getCalls          int32
@@ -95,6 +96,7 @@ type fakeSubsDB struct {
 	deleteCalls       int32
 	markCalls         int32
 	unmarkCalls       int32
+	markManyCalls     int32
 }
 
 func (f *fakeSubsDB) ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error) {
@@ -127,6 +129,14 @@ func (f *fakeSubsDB) UnmarkEpisodeWatched(ctx context.Context, userID uuid.UUID,
 		panic("fakeSubsDB.UnmarkEpisodeWatched not set")
 	}
 	return f.unmarkFn(ctx, userID, anilistID, episode)
+}
+
+func (f *fakeSubsDB) MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+	atomic.AddInt32(&f.markManyCalls, 1)
+	if f.markManyFn == nil {
+		panic("fakeSubsDB.MarkEpisodesWatched not set")
+	}
+	return f.markManyFn(ctx, userID, anilistID, episodes)
 }
 
 func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error) {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   resolveHighWater,
+  resolveWatchedEpisodes,
   type HighWaterEpisode,
   type HighWaterProgress,
 } from "./watchHighWater";
@@ -204,5 +205,74 @@ describe("resolveHighWater", () => {
 
     // Assert
     expect(highWater).toBe(2);
+  });
+});
+
+describe("resolveWatchedEpisodes", () => {
+  test("returns the finished MAIN episodes, ascending, and nothing else", () => {
+    // Arrange — the set the server stores, not the position it derives. The
+    // gaps are the point: 2 was never finished, and neither the special nor
+    // the creditless opening is an episode of the show.
+    const episodes = [
+      episode("e1", 1),
+      episode("e2", 2),
+      episode("e3", 3),
+      episode("sp12", 12, "sp"),
+      episode("ncop1", 1, "ncop"),
+    ];
+    const progress = [done("e3"), done("e1"), partial("e2"), done("sp12"), done("ncop1")];
+
+    // Act
+    const watched = resolveWatchedEpisodes(progress, episodes);
+
+    // Assert
+    expect(watched).toEqual([1, 3]);
+  });
+
+  test("collapses the same episode number arriving from two merged sources", () => {
+    // A merged card draws progress from several Series rows, and two releases
+    // of the same show both have an episode 1. The server's key is
+    // (user, anime, episode), so the request has to describe the set the row
+    // will hold rather than the rows it was built from.
+    const episodes = [episode("a1", 1), episode("b1", 1), episode("b2", 2)];
+
+    expect(resolveWatchedEpisodes([done("a1"), done("b1"), done("b2")], episodes)).toEqual([1, 2]);
+  });
+
+  test("returns an empty array — not null — when nothing qualifies", () => {
+    // The caller filters this against its sync memory, and `[].filter` is the
+    // answer it wants. `resolveHighWater` keeps the null because a POSITION
+    // has to distinguish "never watched" from episode 0; a SET does not.
+    expect(resolveWatchedEpisodes([], [episode("e1", 1)])).toEqual([]);
+    expect(resolveWatchedEpisodes([partial("e1")], [episode("e1", 1)])).toEqual([]);
+  });
+
+  test("skips progress rows whose episode is gone, and non-finite numbers", () => {
+    const episodes = [episode("e2", 2), episode("bad", Number.NaN)];
+
+    expect(
+      resolveWatchedEpisodes([done("e2"), done("bad"), done("vanished")], episodes),
+    ).toEqual([2]);
+  });
+
+  test("the high-water mark IS the last element, on every input", () => {
+    // Pinned because they are now one function and a caller may reasonably
+    // use either: if resolveHighWater ever stops being max(set), a push and
+    // the number reported for it would describe different things.
+    const episodes = [episode("e1", 1), episode("e5", 5), episode("e9", 9), episode("sp3", 3, "sp")];
+    const cases: HighWaterProgress[][] = [
+      [],
+      [done("e1")],
+      [done("e9"), done("e1")],
+      [done("sp3")],
+      [done("e5"), done("e9"), partial("e1")],
+    ];
+
+    for (const progress of cases) {
+      const watched = resolveWatchedEpisodes(progress, episodes);
+      expect(resolveHighWater(progress, episodes)).toBe(
+        watched.length ? watched[watched.length - 1] : null,
+      );
+    }
   });
 });

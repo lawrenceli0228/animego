@@ -738,14 +738,19 @@ func main() {
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
 
-	// P2.4 — subscriptions: 7 endpoints, every route RequireAuth.
+	// P2.4 — subscriptions: 8 endpoints, every route RequireAuth.
 	//
-	// The last two are the per-episode watch marks (migration 0024).  They
+	// The last three are the per-episode watch marks (migration 0024).  They
 	// live inside this block, behind the same r.Use, on purpose: they are
 	// user-scoped writes to a sub-resource of a subscription, and the user
 	// id they write with comes from the JWT claims RequireAuth puts on the
-	// request context — never from the path.  Registering them anywhere
-	// else would put that guarantee one refactor away from being optional.
+	// request context — never from the path or the body.  Registering them
+	// anywhere else would put that guarantee one refactor away from being
+	// optional.
+	//
+	// PUT /{anilistId}/episodes (the set) and PUT
+	// /{anilistId}/episodes/{episode} (one) differ by segment count, so chi
+	// separates them structurally rather than by pattern precedence.
 	r.Route("/api/subscriptions", func(r chi.Router) {
 		r.Use(jwtx.RequireAuth(signer))
 		r.Get("/", subscriptionsHandlers.ListSubscriptions)
@@ -753,6 +758,7 @@ func main() {
 		r.Get("/{anilistId}", subscriptionsHandlers.GetSubscriptionByAnilistID)
 		r.Patch("/{anilistId}", subscriptionsHandlers.UpdateSubscription)
 		r.Delete("/{anilistId}", subscriptionsHandlers.DeleteSubscription)
+		r.Put("/{anilistId}/episodes", subscriptionsHandlers.MarkEpisodesWatched)
 		r.Put("/{anilistId}/episodes/{episode}", subscriptionsHandlers.MarkEpisodeWatched)
 		r.Delete("/{anilistId}/episodes/{episode}", subscriptionsHandlers.UnmarkEpisodeWatched)
 	})

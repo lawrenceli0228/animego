@@ -31,6 +31,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +87,41 @@ func unmarkEpisode(t *testing.T, h *Handlers, ctx context.Context, anilistID, ep
 	rec := httptest.NewRecorder()
 	h.UnmarkEpisodeWatched(rec, newEpisodeReq(t, http.MethodDelete, anilistID, episode, ctx))
 	return rec
+}
+
+// newEpisodeListReq builds a PUT against the bulk route, which takes ONE
+// path param and carries its episodes in the body.  The body is a raw
+// string so the invalid-input tables can hand over JSON that no Go slice
+// type could hold.
+func newEpisodeListReq(t *testing.T, anilistID, body string, parentCtx context.Context) *http.Request {
+	t.Helper()
+	target := fmt.Sprintf("/api/subscriptions/%s/episodes", url.PathEscape(anilistID))
+	req := httptest.NewRequest(http.MethodPut, target, strings.NewReader(body))
+	ctx := parentCtx
+	if ctx == nil {
+		ctx = req.Context()
+	}
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("anilistId", anilistID)
+	return req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rc))
+}
+
+// markEpisodes runs one bulk write against the handler.
+func markEpisodes(t *testing.T, h *Handlers, ctx context.Context, anilistID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.MarkEpisodesWatched(rec, newEpisodeListReq(t, anilistID, body, ctx))
+	return rec
+}
+
+// episodeListBody renders a well-formed bulk body, so the behavioural tests
+// read as the sets they are about rather than as JSON.
+func episodeListBody(episodes ...int32) string {
+	parts := make([]string, len(episodes))
+	for i, e := range episodes {
+		parts[i] = strconv.Itoa(int(e))
+	}
+	return `{"episodes":[` + strings.Join(parts, ",") + `]}`
 }
 
 // decodeEpisodeWatch reads the {"data":{...}} envelope both writes return.
@@ -249,6 +286,282 @@ func TestEpisodeWatch_InvalidEpisode_400_NeverReachesDB(t *testing.T) {
 	}
 }
 
+// -----------------------------------------------------------------------------
+// the bulk route's boundary — PUT /{anilistId}/episodes
+// -----------------------------------------------------------------------------
+
+func TestMarkEpisodes_MissingAuth_401(t *testing.T) {
+	t.Parallel()
+	// No function pointers: reaching the database without claims panics.
+	h := makeHandlersWithFakes(&fakeSubsDB{}, nil, nil)
+	rec := markEpisodes(t, h, nil, "42", episodeListBody(3, 5))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code, "body=%s", rec.Body.String())
+}
+
+// The IDOR boundary again, and on this route it needs restating rather than
+// inheriting: the bulk write is the first one that takes a request BODY, so
+// "a user id can only come from the JWT" now has one more channel to be
+// wrong through.  It is not read, so it cannot matter — and this test is
+// what makes that a checked fact rather than a reading of the handler.
+func TestMarkEpisodes_UserIDComesFromClaimsOnly(t *testing.T) {
+	t.Parallel()
+
+	caller := uuid.New()
+	victim := uuid.New()
+
+	var seen uuid.UUID
+	db := &fakeSubsDB{
+		markManyFn: func(_ context.Context, userID uuid.UUID, _ int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+			seen = userID
+			return dbgen.MarkEpisodesWatchedRow{WatchedEpisodes: episodes, CurrentEpisode: episodes[len(episodes)-1]}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+	ctx := withUserClaims(t, context.Background(), caller, "alice")
+
+	body := fmt.Sprintf(`{"episodes":[3,5],"userId":"%s","user_id":"%s"}`, victim, victim)
+	target := fmt.Sprintf("/api/subscriptions/42/episodes?userId=%s", victim)
+
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("anilistId", "42")
+	rc.URLParams.Add("userId", victim.String()) // a param this route does not have
+	req := httptest.NewRequest(http.MethodPut, target, strings.NewReader(body)).
+		WithContext(context.WithValue(ctx, chi.RouteCtxKey, rc))
+
+	rec := httptest.NewRecorder()
+	h.MarkEpisodesWatched(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	assert.Equal(t, caller, seen,
+		"the bulk write must scope to the JWT subject; a user id readable from path, query OR BODY is an IDOR")
+	assert.NotEqual(t, victim, seen)
+}
+
+// The body's SHAPE, as distinct from its contents.  Everything here is a
+// caller with nothing to write, and each is answered 400 rather than a
+// successful-looking no-op that hides the bug.
+func TestMarkEpisodes_InvalidBody_400_NeverReachesDB(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, body string }{
+		{"empty body", ""},
+		{"malformed json", `{"episodes":[3,`},
+		{"null body", `null`},
+		{"key absent", `{}`},
+		{"explicit null", `{"episodes":null}`},
+		{"empty array", `{"episodes":[]}`},
+		{"not an array", `{"episodes":3}`},
+		{"one past the cap", episodeListBody(capExceedingList()...)},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := &fakeSubsDB{}
+			h := makeHandlersWithFakes(db, nil, nil)
+			ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+			assertError(t, markEpisodes(t, h, ctx, "42", tc.body),
+				http.StatusBadRequest, "VALIDATION_ERROR", "Invalid episode list")
+			assert.Zero(t, db.markManyCalls, "a rejected body must not reach the database")
+		})
+	}
+}
+
+// capExceedingList builds the shortest array the cap refuses.
+func capExceedingList() []int32 {
+	out := make([]int32, maxEpisodesPerRequest+1)
+	for i := range out {
+		// Every member is individually valid, so the ONLY thing wrong with
+		// this request is its length — otherwise the test would pass for
+		// the wrong reason.
+		out[i] = int32(i%maxEpisodeNumber) + 1
+	}
+	return out
+}
+
+// One bad member refuses the WHOLE request.  This is the property the
+// batching depends on: the caller learns from one answer what happened to
+// the set, so a partial write it cannot see is worse than a 400.
+func TestMarkEpisodes_OneBadMemberRejectsTheWholeCall(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, body string }{
+		{"zero", `{"episodes":[3,0,5]}`},
+		{"negative", `{"episodes":[3,-1,5]}`},
+		{"above check bound", `{"episodes":[3,5001,5]}`},
+		{"far above check bound", `{"episodes":[3,2147483647,5]}`},
+		{"fractional", `{"episodes":[3,1.5,5]}`},
+		// 2^32 + 1.  int32(int(4294967297)) is 1, so a parser that cast
+		// instead of range-checking would mark episode 1 — a different
+		// episode than the one named, silently, inside a bulk write.
+		{"wraps int32 if cast", `{"episodes":[3,4294967297,5]}`},
+		{"bad member is last", `{"episodes":[3,5,0]}`},
+		{"bad member is first", `{"episodes":[0,3,5]}`},
+		// Not-a-number members answer the SAME message as out-of-range
+		// ones.  json.Number would have split these: "3" silently accepted
+		// as episode 3, "abc" refused as a malformed body — one rule, two
+		// answers, depending on whether the garbage looked numeric.
+		{"quoted number", `{"episodes":[3,"5"]}`},
+		{"non-numeric string", `{"episodes":[3,"abc"]}`},
+		{"null member", `{"episodes":[3,null]}`},
+		{"boolean member", `{"episodes":[3,true]}`},
+		{"object member", `{"episodes":[3,{"episode":5}]}`},
+		{"nested array", `{"episodes":[3,[5]]}`},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := &fakeSubsDB{}
+			h := makeHandlersWithFakes(db, nil, nil)
+			ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+			// Same message the single-episode route answers, because it is
+			// the same rule.
+			assertError(t, markEpisodes(t, h, ctx, "42", tc.body),
+				http.StatusBadRequest, "VALIDATION_ERROR", "Invalid episode number")
+			assert.Zero(t, db.markManyCalls,
+				"the valid members must not be written either — all or nothing")
+		})
+	}
+}
+
+// The cap is derived from the CHECK bound rather than picked, so an array
+// exactly as long as the range of legal episodes is legal.  Pinned so a cap
+// tightened to a round number fails here instead of refusing a real
+// long-runner's first sync.
+func TestMarkEpisodes_CapIsTheTightestThatRefusesNothingLegitimate(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, maxEpisodeNumber, maxEpisodesPerRequest,
+		"a shorter cap can refuse a request a caller had a reason to send")
+
+	full := make([]int32, maxEpisodesPerRequest)
+	for i := range full {
+		full[i] = int32(i) + 1
+	}
+	var got []int32
+	db := &fakeSubsDB{
+		markManyFn: func(_ context.Context, _ uuid.UUID, _ int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+			got = episodes
+			return dbgen.MarkEpisodesWatchedRow{WatchedEpisodes: episodes, CurrentEpisode: maxEpisodeNumber}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+	ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+	rec := markEpisodes(t, h, ctx, "42", episodeListBody(full...))
+	require.Equal(t, http.StatusOK, rec.Code, "an array of every legal episode must be accepted")
+	assert.Len(t, got, maxEpisodesPerRequest)
+}
+
+// A repeated episode is redundant, not invalid: the statement collapses it
+// and the caller is not made responsible for de-duplicating a set it may
+// describe however it likes.
+func TestMarkEpisodes_DuplicatesArePassedThroughUntouched(t *testing.T) {
+	t.Parallel()
+	var got []int32
+	db := &fakeSubsDB{
+		markManyFn: func(_ context.Context, _ uuid.UUID, _ int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+			got = episodes
+			return dbgen.MarkEpisodesWatchedRow{WatchedEpisodes: []int32{3, 5}, CurrentEpisode: 5}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+	ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+	rec := markEpisodes(t, h, ctx, "42", `{"episodes":[3,5,3,5,3]}`)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, []int32{3, 5, 3, 5, 3}, got)
+}
+
+func TestMarkEpisodes_InvalidAnilistID_400_NeverReachesDB(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"0", "-5", "abc", "4294967297"} {
+		raw := raw
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			db := &fakeSubsDB{}
+			h := makeHandlersWithFakes(db, nil, nil)
+			ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+			assertError(t, markEpisodes(t, h, ctx, raw, episodeListBody(3, 5)),
+				http.StatusBadRequest, "BAD_REQUEST", "Invalid anime ID")
+			assert.Zero(t, db.markManyCalls, "rejected anime id must not reach the database")
+		})
+	}
+}
+
+func TestMarkEpisodes_NoSubscription_404_NothingWritten(t *testing.T) {
+	t.Parallel()
+	db := &fakeSubsDB{
+		markManyFn: func(_ context.Context, _ uuid.UUID, _ int32, _ []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+			return dbgen.MarkEpisodesWatchedRow{}, pgx.ErrNoRows
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+	ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+	assertError(t, markEpisodes(t, h, ctx, "42", episodeListBody(3, 5)),
+		http.StatusNotFound, "NOT_FOUND", "Subscription not found")
+}
+
+// §4 decision 4, on the route that needs it most.  The reconciler's
+// episodes come from a LOCAL binding; a binding pointing at the wrong show
+// is exactly what the ceiling catches, and it must keep catching it now
+// that the reconciler no longer sends PATCH.  The MAXIMUM member is
+// checked, because it dominates every other one.
+func TestMarkEpisodes_AboveTotalEpisodeCount_400_NeverReachesDB(t *testing.T) {
+	t.Parallel()
+	total := int32(12)
+	db := &fakeSubsDB{
+		episodeCountFn: func(_ context.Context, _ int32) (*int32, error) { return &total, nil },
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+	ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+	// 13 is buried in the middle, and the bound is still found.
+	assertError(t, markEpisodes(t, h, ctx, "42", episodeListBody(1, 13, 2)),
+		http.StatusBadRequest, "VALIDATION_ERROR", "Episode exceeds the total episode count")
+	assert.Zero(t, db.markManyCalls, "a mis-bound push must write none of its episodes")
+}
+
+func TestMarkEpisodes_UpToTheTotalEpisodeCount_200(t *testing.T) {
+	t.Parallel()
+	total := int32(12)
+	db := &fakeSubsDB{
+		episodeCountFn: func(_ context.Context, _ int32) (*int32, error) { return &total, nil },
+		markManyFn: func(_ context.Context, _ uuid.UUID, _ int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+			return dbgen.MarkEpisodesWatchedRow{WatchedEpisodes: episodes, CurrentEpisode: 12}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+	ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+	// "Finished" is episode == total, not total - 1; the PATCH bound has
+	// always accepted it and this one must agree.
+	rec := markEpisodes(t, h, ctx, "42", episodeListBody(11, 12))
+	assert.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+}
+
+// The wire contract, pinned literally — the client replaces its whole grid
+// from this body, and it is the same body the two per-episode routes emit.
+func TestMarkEpisodes_ResponseShape(t *testing.T) {
+	t.Parallel()
+	db := &fakeSubsDB{
+		markManyFn: func(_ context.Context, _ uuid.UUID, _ int32, _ []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+			// nil rather than []int32{} — the worst a driver could hand back.
+			return dbgen.MarkEpisodesWatchedRow{WatchedEpisodes: nil, CurrentEpisode: 0}, nil
+		},
+	}
+	h := makeHandlersWithFakes(db, nil, nil)
+	ctx := withUserClaims(t, context.Background(), uuid.New(), "alice")
+
+	rec := markEpisodes(t, h, ctx, "42", episodeListBody(3))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.JSONEq(t, `{"data":{"anilistId":42,"watchedEpisodes":[],"currentEpisode":0}}`, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"watchedEpisodes":[]`,
+		"empty set must serialize as [], never null")
+}
+
 func TestEpisodeWatch_InvalidAnilistID_400_NeverReachesDB(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ name, raw string }{
@@ -349,11 +662,16 @@ func TestEpisodeRoutes_DoNotCollideWithTheSubscriptionRoutes(t *testing.T) {
 	t.Parallel()
 
 	var markedAnilist, markedEpisode int32
+	var markedSet []int32
 	var deletedSubscription bool
 	db := &fakeSubsDB{
 		markFn: func(_ context.Context, _ uuid.UUID, anilistID, episode int32) (dbgen.MarkEpisodeWatchedRow, error) {
 			markedAnilist, markedEpisode = anilistID, episode
 			return dbgen.MarkEpisodeWatchedRow{WatchedEpisodes: []int32{episode}, CurrentEpisode: episode}, nil
+		},
+		markManyFn: func(_ context.Context, _ uuid.UUID, _ int32, episodes []int32) (dbgen.MarkEpisodesWatchedRow, error) {
+			markedSet = episodes
+			return dbgen.MarkEpisodesWatchedRow{WatchedEpisodes: episodes, CurrentEpisode: episodes[len(episodes)-1]}, nil
 		},
 		unmarkFn: func(_ context.Context, _ uuid.UUID, _, episode int32) (dbgen.UnmarkEpisodeWatchedRow, error) {
 			markedEpisode = episode
@@ -376,6 +694,7 @@ func TestEpisodeRoutes_DoNotCollideWithTheSubscriptionRoutes(t *testing.T) {
 		r.Get("/{anilistId}", h.GetSubscriptionByAnilistID)
 		r.Patch("/{anilistId}", h.UpdateSubscription)
 		r.Delete("/{anilistId}", h.DeleteSubscription)
+		r.Put("/{anilistId}/episodes", h.MarkEpisodesWatched)
 		r.Put("/{anilistId}/episodes/{episode}", h.MarkEpisodeWatched)
 		r.Delete("/{anilistId}/episodes/{episode}", h.UnmarkEpisodeWatched)
 	})
@@ -387,6 +706,16 @@ func TestEpisodeRoutes_DoNotCollideWithTheSubscriptionRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	assert.Equal(t, int32(42), markedAnilist, "both path params must bind, in the right order")
 	assert.Equal(t, int32(7), markedEpisode)
+	assert.Nil(t, markedSet, "the two-segment PUT must not reach the bulk handler")
+
+	// The bulk PUT is one segment shallower, and `episodes` must not be
+	// swallowed as an {episode} value by the deeper route.
+	recBulk := httptest.NewRecorder()
+	r.ServeHTTP(recBulk, httptest.NewRequest(http.MethodPut, "/api/subscriptions/42/episodes",
+		strings.NewReader(episodeListBody(3, 5, 7))).WithContext(ctx))
+	require.Equal(t, http.StatusOK, recBulk.Code, "body=%s", recBulk.Body.String())
+	assert.Equal(t, []int32{3, 5, 7}, markedSet, "PUT on the one-segment path must mark the set")
+	assert.Equal(t, int32(7), markedEpisode, "and must not have reached the single-episode handler")
 
 	// The one-segment DELETE must still reach the subscription handler and
 	// not be swallowed by the two-segment one.
@@ -928,6 +1257,166 @@ func TestPG_Progress_AboveRecordableRange_RecordsAndMovesNothing(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// the bulk write's behaviour — real SQL, because the union IS the statement
+// -----------------------------------------------------------------------------
+
+// The gap this endpoint exists to close, end to end at the SQL layer: the
+// library knows five episodes, the server knows one, and after one request
+// the server knows all five.  Before this route, the reconciler could only
+// push the MAXIMUM, so everything below it stayed unmarked and the same
+// reader saw "5/14" in one place and "1/14" in another.
+func TestPG_MarkEpisodes_MarksEveryEpisodeInTheSet(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	seedSubscription(t, pool, user, 1, "watching")
+	ctx := withUserClaims(t, context.Background(), user, "alice")
+
+	// The server holding only the high-water mark: exactly what a PATCH
+	// from the old reconciler left behind.
+	require.Equal(t, http.StatusOK, markEpisode(t, h, ctx, "1", "9").Code)
+	require.Equal(t, []int32{9}, readWatchedSet(t, pool, user, 1))
+
+	rec := markEpisodes(t, h, ctx, "1", episodeListBody(3, 5, 7, 8, 9))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	assert.Equal(t, []int32{3, 5, 7, 8, 9}, readWatchedSet(t, pool, user, 1))
+	stored, _ := readProgress(t, pool, user, 1)
+	assert.Equal(t, int32(9), stored, "the maximum did not move, and did not have to")
+	assert.Equal(t, episodeWatchResp{
+		AnilistID:       1,
+		WatchedEpisodes: []int32{3, 5, 7, 8, 9},
+		CurrentEpisode:  9,
+	}, decodeEpisodeWatch(t, rec), "the response is the post-write set, not an echo of the request")
+}
+
+// UNION, NEVER REPLACE.  Another device's marks are not this caller's to
+// delete, and a replace would delete them with no record that it had.
+func TestPG_MarkEpisodes_UnionsWithMarksItNeverHeardOf(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	seedSubscription(t, pool, user, 1, "watching")
+	ctx := withUserClaims(t, context.Background(), user, "alice")
+
+	// Marks from somewhere else — a second device, or the website's grid.
+	for _, ep := range []string{"1", "2", "12"} {
+		require.Equal(t, http.StatusOK, markEpisode(t, h, ctx, "1", ep).Code)
+	}
+
+	// A push that knows nothing about 1, 2 or 12.
+	rec := markEpisodes(t, h, ctx, "1", episodeListBody(3, 5))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	assert.Equal(t, []int32{1, 2, 3, 5, 12}, readWatchedSet(t, pool, user, 1),
+		"the foreign marks must survive; a replace would have left {3,5}")
+	stored, _ := readProgress(t, pool, user, 1)
+	assert.Equal(t, int32(12), stored,
+		"and the derived value must still describe the whole set, not the pushed part of it")
+}
+
+// No subscription, no marks — the database rule and the handler rule
+// agreeing.  Nothing is written and nothing is invented.
+func TestPG_MarkEpisodes_NoSubscription_404_WritesNothing(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲") // cached, but never subscribed to
+	ctx := withUserClaims(t, context.Background(), user, "alice")
+
+	assertError(t, markEpisodes(t, h, ctx, "1", episodeListBody(3, 5)),
+		http.StatusNotFound, "NOT_FOUND", "Subscription not found")
+
+	var rows int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM episode_watches WHERE user_id = $1`, user).Scan(&rows))
+	assert.Zero(t, rows, "a 404 must leave the table untouched")
+}
+
+// A push naming somebody else's subscription writes nothing, because the
+// statement reads its keys from a row proven to belong to the caller.
+func TestPG_MarkEpisodes_CannotWriteAnotherUsersSubscription(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	alice := seedUser(t, pool, "alice", "alice@example.com")
+	bob := seedUser(t, pool, "bob", "bob@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	seedSubscription(t, pool, bob, 1, "watching")
+
+	// Alice is signed in and has no subscription to anime 1; Bob does.
+	aliceCtx := withUserClaims(t, context.Background(), alice, "alice")
+	assertError(t, markEpisodes(t, h, aliceCtx, "1", episodeListBody(3, 5)),
+		http.StatusNotFound, "NOT_FOUND", "Subscription not found")
+
+	assert.Empty(t, readWatchedSet(t, pool, bob, 1), "Bob's set must be untouched")
+	stored, _ := readProgress(t, pool, bob, 1)
+	assert.Zero(t, stored)
+}
+
+// Idempotent, and idempotent in the strong sense: a replayed push does not
+// claim a viewing that did not happen (last_watched_at) and does not
+// reorder the home page's continue-watching row (updated_at).
+func TestPG_MarkEpisodes_ReplayChangesNothing(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	seedSubscription(t, pool, user, 1, "watching")
+	ctx := withUserClaims(t, context.Background(), user, "alice")
+
+	require.Equal(t, http.StatusOK, markEpisodes(t, h, ctx, "1", episodeListBody(3, 5, 9)).Code)
+	before := readUpdatedAt(t, pool, user, 1)
+	_, watchedBefore := readProgress(t, pool, user, 1)
+
+	require.Equal(t, http.StatusOK, markEpisodes(t, h, ctx, "1", episodeListBody(3, 5, 9)).Code)
+
+	assert.Equal(t, []int32{3, 5, 9}, readWatchedSet(t, pool, user, 1))
+	assert.Equal(t, before, readUpdatedAt(t, pool, user, 1),
+		"a replay must not jump an untouched show to the front of the list")
+	_, watchedAfter := readProgress(t, pool, user, 1)
+	assert.Equal(t, watchedBefore, watchedAfter,
+		"and must not claim an episode was watched again")
+}
+
+// The feed.  A bulk push is not a checkbox — it is the same "the reader got
+// further" event PATCH has always written — so it writes ONE event when
+// current_episode advances and none when it does not.  Without this, moving
+// the reconciler off PATCH would empty the activity feed with no error.
+func TestPG_MarkEpisodes_WritesOneWatchEventPerAdvance(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	seedSubscription(t, pool, user, 1, "watching")
+	ctx := withUserClaims(t, context.Background(), user, "alice")
+
+	require.Equal(t, http.StatusOK, markEpisodes(t, h, ctx, "1", episodeListBody(3, 5, 9)).Code)
+	assert.Equal(t, 1, countWatchEvents(t, pool, user),
+		"five episodes in one push is one event, not five")
+
+	require.Equal(t, http.StatusOK, markEpisodes(t, h, ctx, "1", episodeListBody(3, 5, 9)).Code)
+	assert.Equal(t, 1, countWatchEvents(t, pool, user), "a replay is not an event")
+
+	// Filling a gap BELOW the maximum repairs history; it does not advance
+	// progress, so it is not feed-worthy either.
+	require.Equal(t, http.StatusOK, markEpisodes(t, h, ctx, "1", episodeListBody(1, 2)).Code)
+	assert.Equal(t, []int32{1, 2, 3, 5, 9}, readWatchedSet(t, pool, user, 1))
+	assert.Equal(t, 1, countWatchEvents(t, pool, user),
+		"repairing history is not the same event as watching something")
+
+	require.Equal(t, http.StatusOK, markEpisodes(t, h, ctx, "1", episodeListBody(10)).Code)
+	assert.Equal(t, 2, countWatchEvents(t, pool, user), "an advance is")
+}
+
+// -----------------------------------------------------------------------------
 // THE contract, in one test
 // -----------------------------------------------------------------------------
 
@@ -959,6 +1448,9 @@ func TestPG_DerivedProgressInvariant_HoldsAfterEveryWritePath(t *testing.T) {
 	unmark := func(ep string) func() int {
 		return func() int { return unmarkEpisode(t, h, ctx, "1", ep).Code }
 	}
+	markMany := func(eps ...int32) func() int {
+		return func() int { return markEpisodes(t, h, ctx, "1", episodeListBody(eps...)).Code }
+	}
 
 	steps := []struct {
 		name    string
@@ -976,22 +1468,43 @@ func TestPG_DerivedProgressInvariant_HoldsAfterEveryWritePath(t *testing.T) {
 			[]int32{1, 3, 5, 12}, 12},
 		{"mark episode 1 again", mark("1"),
 			[]int32{1, 3, 5, 12}, 12},
+		// The bulk write, threaded through the same walk rather than tested
+		// beside it: it has to hold the invariant in COMBINATION with the
+		// other paths, not only from a clean row.
+		{"bulk push filling gaps below the maximum", markMany(2, 4, 6),
+			[]int32{1, 2, 3, 4, 5, 6, 12}, 12},
+		{"bulk push that is entirely a replay", markMany(2, 4, 6),
+			[]int32{1, 2, 3, 4, 5, 6, 12}, 12},
+		{"bulk push straddling the maximum", markMany(11, 13),
+			[]int32{1, 2, 3, 4, 5, 6, 11, 12, 13}, 13},
+		{"unmark 13 — the maximum a bulk push set falls again", unmark("13"),
+			[]int32{1, 2, 3, 4, 5, 6, 11, 12}, 12},
+		{"bulk push of duplicates only", markMany(4, 4, 4),
+			[]int32{1, 2, 3, 4, 5, 6, 11, 12}, 12},
 		{"unmark 3 — not the maximum", unmark("3"),
-			[]int32{1, 5, 12}, 12},
+			[]int32{1, 2, 4, 5, 6, 11, 12}, 12},
 		{"unmark 12 — the maximum falls", unmark("12"),
-			[]int32{1, 5}, 5},
+			[]int32{1, 2, 4, 5, 6, 11}, 11},
 		{"unmark 9 — never marked", unmark("9"),
-			[]int32{1, 5}, 5},
+			[]int32{1, 2, 4, 5, 6, 11}, 11},
 		{"status-only PATCH", patch(`{"status":"completed"}`),
-			[]int32{1, 5}, 5},
+			[]int32{1, 2, 4, 5, 6, 11}, 11},
 		{"currentEpisode 0 is not a reset", patch(`{"currentEpisode":0}`),
-			[]int32{1, 5}, 5},
-		{"unmark 5", unmark("5"),
-			[]int32{1}, 1},
-		{"unmark 1 — the last mark goes", unmark("1"),
-			[]int32{}, 0},
-		{"monotonic push after emptying", patch(`{"currentEpisode":2,"monotonic":true}`),
-			[]int32{2}, 2},
+			[]int32{1, 2, 4, 5, 6, 11}, 11},
+		{"unmark down to one mark", unmark("11"),
+			[]int32{1, 2, 4, 5, 6}, 6},
+		{"unmark the rest", func() int {
+			for _, ep := range []string{"1", "2", "4", "5", "6"} {
+				if code := unmarkEpisode(t, h, ctx, "1", ep).Code; code != http.StatusOK {
+					return code
+				}
+			}
+			return http.StatusOK
+		}, []int32{}, 0},
+		{"bulk push after emptying", markMany(2, 7),
+			[]int32{2, 7}, 7},
+		{"monotonic push after a bulk push", patch(`{"currentEpisode":3,"monotonic":true}`),
+			[]int32{2, 3, 7}, 7},
 	}
 
 	for i, s := range steps {

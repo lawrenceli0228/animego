@@ -47,6 +47,7 @@ const zhHant = {
     'Invalid status': '無效的狀態',
     'Episode must be a non-negative integer': '集數必須為非負整數',
     'Invalid episode number': '無效的集數',
+    'Invalid episode list': '無效的集數列表',
     'Subscription not found': '未找到訂閱',
     'Deleted': '已刪除',
     'Cannot follow yourself': '不能關注自己',

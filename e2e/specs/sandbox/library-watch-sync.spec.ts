@@ -300,7 +300,7 @@ test.describe("/library ↔ server watch progress", () => {
             // Started but not finished — must not count.
             { number: 4, progress: { completed: false, positionSec: 300 } },
             // The decision-10 trap. Numbered ABOVE the main high-water mark on
-            // purpose: if `resolveHighWater` ever stops filtering on `kind`,
+            // purpose: if `resolveWatchedEpisodes` ever stops filtering on `kind`,
             // the server jumps to 9 and this test says so out loud. (The
             // realistic `NCOP01 → number 1` shape, which hides inside a max(),
             // is covered in watchHighWater.test.ts.)
@@ -401,7 +401,7 @@ test.describe("/library ↔ server watch progress", () => {
 
     // Node is still online even though the browser context is not, so this
     // reads the real server state: untouched, and — the part that matters —
-    // `lastSyncedEpisode` was NOT advanced on a push that never happened.
+    // the sync memory was NOT advanced by a push that never happened.
     expect(
       await readSubscription(SEED_USER_EMAIL, ANI_OFFLINE),
       "an offline session must not move the server",
@@ -410,8 +410,8 @@ test.describe("/library ↔ server watch progress", () => {
     // ── back on the ground ───────────────────────────────────────────────
     await context.setOffline(false);
     // No repair UI, no retry button, no drained queue: the user simply opens
-    // the library again and the difference between the high-water mark and
-    // `lastSyncedEpisode` is the entire instruction.
+    // the library again and the difference between the locally-completed
+    // episodes and `lastSyncedEpisodes` is the entire instruction.
     await page.goto("/library");
     await expect(page.getByTestId("series-grid")).toBeVisible({ timeout: 30_000 });
     await expectSubscription(ANI_OFFLINE, { status: "watching", currentEpisode: 3 });

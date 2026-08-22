@@ -552,6 +552,113 @@ SELECT
     r.current_episode
 FROM recomputed r;
 
+-- name: MarkEpisodesWatched :one
+-- PUT /api/subscriptions/:anilistId/episodes — mark a SET, idempotently.
+--
+-- Same statement as MarkEpisodeWatched with `unnest` in place of the single
+-- literal, and it exists for one reason: the library reconciler pushes the
+-- episodes a reader's local library knows about, and a first sync of a
+-- two-cour series is fifty of them.  Fifty round trips behind one page mount,
+-- against a per-IP rate limiter, is not a thing to ship — so the set travels
+-- in one statement, and therefore in one lock, one recompute and one feed
+-- event.
+--
+-- IT UNIONS.  IT NEVER REPLACES.
+-- =============================
+--
+-- The caller sends the episodes IT knows about, which is not the same thing
+-- as the episodes that exist.  A reader with two devices, or one device and
+-- the website's grid, has marks this caller has never heard of; a replace
+-- would delete them and there would be no record that it had.  INSERT ...
+-- ON CONFLICT DO NOTHING is the whole guarantee: the set can only grow here.
+-- Removing a mark is UnmarkEpisodeWatched, one episode at a time, because
+-- removal is always a deliberate act and never a side effect of a sync.
+--
+-- Duplicates in the array are fine and are not an error.  ON CONFLICT DO
+-- NOTHING resolves a duplicate against the row the same statement just
+-- speculatively inserted, exactly as it resolves one against a row that was
+-- already there.  (DO UPDATE would raise "cannot affect row a second time";
+-- DO NOTHING does not.)  So the handler validates members for VALIDITY and
+-- says nothing about tidiness.
+--
+-- Out-of-range members are rejected by the handler and never arrive, so —
+-- unlike UpdateSubscriptionWithActivity, which filters them with a BETWEEN —
+-- there is nothing to filter here.  The difference is deliberate: a PATCH
+-- carrying a bad episode may still be a legitimate status or score edit and
+-- must not 500, whereas this endpoint's entire body IS the episode list, so a
+-- bad member makes the whole request meaningless and it is answered 400.
+--
+-- The activity event is the one part that does NOT mirror MarkEpisodeWatched,
+-- and the reason is in the note above those two: a per-checkbox feed entry
+-- would bury the watch_progress events worth reading.  This is not a
+-- checkbox.  It is the same "the reader got further" event PATCH has always
+-- written, arriving by a different door, so it writes at most ONE event and
+-- only when current_episode actually advanced — the identical condition
+-- UpdateSubscriptionWithActivity uses.  Without it, moving the reconciler off
+-- PATCH would empty the feed with no error, which is precisely the failure
+-- the SubscriptionsDB comment warns about for the plain UpdateSubscription.
+--
+-- Both timestamps follow MarkEpisodeWatched's rule, for MarkEpisodeWatched's
+-- reasons: they move only when the set actually changed, so a replayed push
+-- neither claims a viewing that did not happen nor reorders the home page's
+-- continue-watching row.
+WITH target AS (
+    SELECT s.user_id, s.anilist_id, s.current_episode AS previous_episode
+    FROM subscriptions s
+    WHERE s.user_id = sqlc.arg('user_id')::uuid
+      AND s.anilist_id = sqlc.arg('anilist_id')::integer
+    FOR UPDATE
+), inserted AS (
+    -- Reads its keys from `target`, so a caller with no subscription writes
+    -- nothing and the statement returns no rows (handler: 404).  The
+    -- composite FK says the same thing at the storage layer.
+    INSERT INTO episode_watches (user_id, anilist_id, episode)
+    SELECT t.user_id, t.anilist_id, e.episode
+    FROM target t
+    CROSS JOIN unnest(sqlc.arg('episodes')::integer[]) AS e(episode)
+    ON CONFLICT (user_id, anilist_id, episode) DO NOTHING
+    RETURNING episode
+), watched AS (
+    -- The UNION is not optional, for the snapshot reason spelled out on
+    -- MarkEpisodeWatched: the plain SELECT cannot see rows this statement
+    -- just wrote, so without it a push that records a new highest episode
+    -- would derive a current_episode short of the set it summarises.
+    SELECT ew.episode
+    FROM episode_watches ew
+    WHERE ew.user_id = sqlc.arg('user_id')::uuid
+      AND ew.anilist_id = sqlc.arg('anilist_id')::integer
+    UNION
+    SELECT i.episode FROM inserted i
+), recomputed AS (
+    UPDATE subscriptions s
+    SET current_episode = (SELECT COALESCE(MAX(w.episode), 0) FROM watched w),
+        last_watched_at = CASE
+                              WHEN EXISTS (SELECT 1 FROM inserted) THEN now()
+                              ELSE s.last_watched_at
+                          END,
+        updated_at      = CASE
+                              WHEN EXISTS (SELECT 1 FROM inserted) THEN now()
+                              ELSE s.updated_at
+                          END
+    FROM target t
+    WHERE s.user_id = t.user_id
+      AND s.anilist_id = t.anilist_id
+    RETURNING s.user_id, s.anilist_id, s.current_episode, t.previous_episode
+), inserted_activity AS (
+    INSERT INTO activity_events (user_id, event_type, anilist_id, episode)
+    SELECT r.user_id, 'watch_progress', r.anilist_id, r.current_episode
+    FROM recomputed r
+    WHERE r.current_episode IS DISTINCT FROM r.previous_episode
+    RETURNING id
+)
+SELECT
+    COALESCE(
+        (SELECT array_agg(w.episode ORDER BY w.episode) FROM watched w),
+        '{}'
+    )::integer[] AS watched_episodes,
+    r.current_episode
+FROM recomputed r;
+
 -- name: UnmarkEpisodeWatched :one
 -- DELETE /api/subscriptions/:anilistId/episodes/:episode — idempotent.
 --

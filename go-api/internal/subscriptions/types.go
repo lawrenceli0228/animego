@@ -4,11 +4,14 @@
 //
 // Endpoints (all behind jwtx.RequireAuth in production wiring):
 //
-//	GET    /api/subscriptions               → ListSubscriptions
-//	GET    /api/subscriptions/:anilistId    → GetSubscription
-//	POST   /api/subscriptions               → CreateSubscription
-//	PATCH  /api/subscriptions/:anilistId    → UpdateSubscription
-//	DELETE /api/subscriptions/:anilistId    → DeleteSubscription
+//	GET    /api/subscriptions                            → ListSubscriptions
+//	GET    /api/subscriptions/:anilistId                 → GetSubscription
+//	POST   /api/subscriptions                            → CreateSubscription
+//	PATCH  /api/subscriptions/:anilistId                 → UpdateSubscription
+//	DELETE /api/subscriptions/:anilistId                 → DeleteSubscription
+//	PUT    /api/subscriptions/:anilistId/episodes        → MarkEpisodesWatched
+//	PUT    /api/subscriptions/:anilistId/episodes/:ep    → MarkEpisodeWatched
+//	DELETE /api/subscriptions/:anilistId/episodes/:ep    → UnmarkEpisodeWatched
 //
 // Responses follow the canonical httpx envelope (English messages —
 // the frontend i18n layer maps each English string to a localized
@@ -20,6 +23,8 @@
 package subscriptions
 
 import (
+	"encoding/json"
+
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
@@ -84,6 +89,41 @@ type updateSubscriptionReq struct {
 	Score          *int32  `json:"score,omitempty"`
 	Monotonic      bool    `json:"monotonic,omitempty"`
 	scorePresent   bool    `json:"-"`
+}
+
+// markEpisodesReq is the PUT /api/subscriptions/:anilistId/episodes body:
+//
+//	{"episodes": [3, 5, 7, 8, 9]}
+//
+// The pointer distinguishes an absent key from an explicit empty array.
+// Both are refused, and they are refused for the caller's benefit: `{}` is
+// a caller that forgot the field, `{"episodes":[]}` is one that computed an
+// empty delta and sent it anyway.  Neither has anything to write, and
+// answering 200 to either would hide the bug behind a successful-looking
+// no-op.
+//
+// []json.RawMessage, not []int32, and that is the load-bearing choice.
+// Binding straight to int32 hands the bounds check to encoding/json, which
+// refuses 4294967297 with its own stock English and cannot distinguish it
+// from a malformed body.  Keeping each member as its raw token lets every
+// one of them go through strconv.ParseInt(.., 10, 32) — the exact call
+// parseEpisode makes for the single-episode route, including its ErrRange
+// answer to a value that would wrap on a careless cast — so the two routes
+// enforce one rule rather than two rules that happen to agree today.
+//
+// json.Number was the obvious alternative and is subtly wrong here: it
+// accepts a QUOTED number, so `{"episodes":["3"]}` would be silently read
+// as episode 3 while `{"episodes":["abc"]}` failed as a malformed body.
+// One rule answered two ways depending on whether the garbage happened to
+// look numeric.  A raw token is uninterpreted until validateEpisodeList
+// interprets it, so a member is a JSON integer in range or it is refused,
+// with one message.
+//
+// No `validate` tags for the same reason: every rule here is about the
+// contents of the slice, and go-playground's dive would emit stock messages
+// for a field the frontend dictionary has never seen.
+type markEpisodesReq struct {
+	Episodes *[]json.RawMessage `json:"episodes"`
 }
 
 // listItem is the merged subscription + anime_cache projection returned
@@ -172,13 +212,14 @@ func toListItem(row dbgen.ListUserSubscriptionsRow) listItem {
 	}
 }
 
-// episodeWatchResp is the success body for BOTH per-episode writes:
+// episodeWatchResp is the success body for ALL THREE watch-mark writes:
 //
+//	PUT    /api/subscriptions/:anilistId/episodes
 //	PUT    /api/subscriptions/:anilistId/episodes/:episode
 //	DELETE /api/subscriptions/:anilistId/episodes/:episode
 //
-// One type for both because the client's job after either call is the
-// same: replace its whole idea of this anime's progress with what came
+// One type for all of them because the client's job after any of them is
+// the same: replace its whole idea of this anime's progress with what came
 // back.  Returning the full post-write set (rather than an acknowledgement
 // of the single episode that changed) is what lets a grid of thirty
 // checkboxes reconcile from one response, with no follow-up read and no
