@@ -41,7 +41,17 @@ const (
 	// a 12-episode show is mis-bound to the wrong title, and clamping to
 	// 12 would bury that as plausible-looking progress.  Only enforced
 	// when episodes IS NOT NULL — a still-airing show has no known bound.
-	msgEpisodeExceedsTotal   = "Episode exceeds the total episode count"
+	msgEpisodeExceedsTotal = "Episode exceeds the total episode count"
+	// msgInvalidEpisodeNumber rejects the :episode path param on the
+	// per-episode watch routes.  Distinct from msgInvalidEpisode above,
+	// which describes currentEpisode's "non-negative" rule — a per-episode
+	// mark has no episode 0, so the two bounds are genuinely different and
+	// sharing one string would tell the user the wrong rule.
+	//
+	// Deliberately says nothing about WHICH bound was missed and echoes
+	// none of the input: the same string answers "0", "-1", "999999",
+	// "abc" and an id that would wrap on a careless cast.
+	msgInvalidEpisodeNumber  = "Invalid episode number"
 	msgSubscriptionNotFound  = "Subscription not found"
 	msgAnimeNotFound         = "Anime not found"
 	msgDeletedSuccessMessage = "Deleted"

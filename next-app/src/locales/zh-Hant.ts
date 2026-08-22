@@ -80,6 +80,7 @@ const zhHant = {
     'Invalid anime ID': '無效的番劇 ID',
     'Invalid status': '無效的狀態',
     'Episode must be a non-negative integer': '集數必須為非負整數',
+    'Invalid episode number': '無效的集數',
     'Subscription not found': '未找到訂閱',
     'Deleted': '已刪除',
     'Cannot follow yourself': '不能關注自己',
@@ -150,6 +151,21 @@ const zhHant = {
     // 「沒有」。
     episodeCountPending: '本季集數待定',
     episodeCountPendingHint: '總集數確認後，這裡會列出每一集。',
+    // 逐集追番。全部手寫，沒有跑過 OpenCC：s2twp 會把 UI 用語換掉
+    // （發佈→釋出、審核→稽核），hantVocabulary.test.ts 正是擋這個的。
+    markWatched: '標記第 {{ep}} 集為已看',
+    unmarkWatched: '取消第 {{ep}} 集的已看標記',
+    watchedSignIn: '登入後記錄第 {{ep}} 集',
+    watchedFailed: '第 {{ep}} 集沒記上，請再試一次',
+    watchedSignedOut: '登入狀態已過期，重新登入後再記錄',
+    watchedProgress: '已看 {{done}} / {{total}} 集',
+    watchedHint: '點一下方格，記錄你真正看過的那一集。',
+    watchedCompletedHint: '這部已標記「看完」，所有集數都算已看。取消其中任意一集，會把狀態改回「在看」，並改為按逐集記錄顯示。',
+    furthestMarked: '標記到的最後一集',
+    autoCompleted: '全部集數已記錄，狀態自動改為「看完」',
+    autoResumed: '狀態已改回「在看」',
+    autoStatusFailed: '第 {{ep}} 集已記錄，但追番狀態沒能自動更新',
+    episodeDiscussion: '第 {{ep}} 集的討論',
     ep: '第', epOf: '/',
     viewDetails: '檢視詳情',
     viewOnBgm: '在 Bangumi 檢視',
@@ -176,7 +192,6 @@ const zhHant = {
     planToWatch: '想看', dropped: '放棄',
     remove: '移除', rate: '評分',
     loginToWatch: '登入後追番',
-    epUnit: '集',
     // Toast copy for a subscribe/unsubscribe round trip. toastViewList is
     // the toast's action link, not a standalone button label.
     toastAdded: '已加入「在看」',

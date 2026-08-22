@@ -48,12 +48,34 @@ const queryTimeout = 5 * time.Second
 // behaves the same way as the "AniList has no media" case.
 const pgForeignKeyViolation = "23503"
 
+// maxEpisodeNumber mirrors the CHECK on episode_watches.episode
+// (migration 0024).  Enforced here so an out-of-range episode is answered
+// with a 400 the client can read, instead of reaching the constraint and
+// surfacing as a 500 — and so a single request can never ask the database
+// to consider an arbitrary episode number.
+//
+// If the CHECK ever moves, move this with it.  The two are one bound
+// stated in two places, and the handler must never be the looser of them.
+const maxEpisodeNumber = 5000
+
 // SubscriptionsDB is the sqlc subset this package consumes.  Declared
 // at the use-site per "accept interfaces, return structs" so tests can
 // substitute a fake without standing up the full dbgen.Querier surface.
 type SubscriptionsDB interface {
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error)
-	GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.Subscription, error)
+	// GetSubscription returns the subscription row AND the per-episode
+	// watched set in one statement (migration 0024).  The two are one fact
+	// stated twice, so they are read together — see the query comment.
+	GetSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.GetSubscriptionRow, error)
+	// MarkEpisodeWatched / UnmarkEpisodeWatched are the two per-episode
+	// writes.  Each is a single statement that writes the watch row and
+	// recomputes subscriptions.current_episode together, so the derived
+	// integer can never disagree with the set it summarises.  Both return
+	// the full post-write set so the client reconciles without a refetch,
+	// and both return pgx.ErrNoRows when the caller has no subscription for
+	// that anime.
+	MarkEpisodeWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.MarkEpisodeWatchedRow, error)
+	UnmarkEpisodeWatched(ctx context.Context, userID uuid.UUID, anilistID int32, episode int32) (dbgen.UnmarkEpisodeWatchedRow, error)
 	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
 	// InsertSubscriptionIfAbsent backs POST bodies carrying
 	// `"ifAbsent": true`.  It differs from UpsertSubscription in exactly
@@ -68,12 +90,15 @@ type SubscriptionsDB interface {
 	// purpose — see the query comment in anime_cache.sql.
 	GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error)
 	// UpdateSubscriptionWithActivity is the only PATCH path.  Its CTE
-	// writes the subscription row AND appends the watch_progress
-	// activity event in one statement, so the feed can never drift from
-	// the progress it is supposed to describe.  The plain
-	// UpdateSubscription query still exists in dbgen but is deliberately
-	// not part of this interface — an implementation that silently
-	// skipped the activity write would empty the feed with no error.
+	// writes the watch row for the episode being recorded, re-derives
+	// current_episode from the resulting set, AND appends the
+	// watch_progress activity event, all in one statement — so neither the
+	// derived integer nor the feed can drift from the progress they are
+	// supposed to describe.  The plain UpdateSubscription query still
+	// exists in dbgen but is deliberately not part of this interface: it
+	// writes current_episode directly, which would break the invariant,
+	// and it skips the activity write, which would empty the feed with no
+	// error.
 	UpdateSubscriptionWithActivity(ctx context.Context, arg dbgen.UpdateSubscriptionWithActivityParams) (dbgen.UpdateSubscriptionWithActivityRow, error)
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 }
@@ -154,6 +179,33 @@ func parseAnilistID(w http.ResponseWriter, r *http.Request) (int32, bool) {
 	return int32(v), true
 }
 
+// parseEpisode extracts the :episode path param and validates it against
+// the same bounds episode_watches.episode carries: 1 <= episode <=
+// maxEpisodeNumber.  Writes a 400 BAD_REQUEST envelope and returns
+// ok=false on any failure, so a rejected episode never reaches the
+// database — the CHECK constraint stays a backstop rather than the error
+// path.
+//
+// ParseInt with bitSize 32 rather than Atoi-then-cast, and the difference
+// is not cosmetic: Atoi parses into a platform int, so on a 64-bit build
+// "4294967297" parses happily and int32(4294967297) silently wraps to 1.
+// That is not a rejected request, it is a request that addresses a
+// different row than the one it named.  ParseInt with an explicit bit size
+// returns ErrRange instead, and the same reasoning applies to
+// parseAnilistID above.
+//
+// The message deliberately says nothing about which bound was missed and
+// echoes none of the input back.
+func parseEpisode(w http.ResponseWriter, r *http.Request) (int32, bool) {
+	raw := chi.URLParam(r, "episode")
+	v, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || v < 1 || v > maxEpisodeNumber {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, msgInvalidEpisodeNumber))
+		return 0, false
+	}
+	return int32(v), true
+}
+
 // ListSubscriptions implements GET /api/subscriptions.
 //
 // Query: optional ?status=watching|completed|plan_to_watch|dropped.
@@ -201,8 +253,10 @@ func (h *Handlers) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 //     detail page probes this on every view; a 404 would surface as a failed
 //     request in the browser console. The frontend reads data:null as
 //     "available / not subscribed".
-//  4. 200 with the raw Subscription row (sqlc auto-generates camelCase
-//     JSON tags so the wire shape matches Express's findOne result).
+//  4. 200 with the raw row (sqlc auto-generates camelCase JSON tags so the
+//     wire shape matches Express's findOne result), plus watchedEpisodes —
+//     the per-episode set, read in the same statement as currentEpisode so
+//     the grid and the progress number can never contradict each other.
 func (h *Handlers) GetSubscriptionByAnilistID(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requireClaims(w, r)
 	if !ok {
@@ -230,7 +284,114 @@ func (h *Handlers) GetSubscriptionByAnilistID(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// The SQL already COALESCEs an empty set to '{}', but the contract is
+	// that watchedEpisodes is an array and never null, and that promise
+	// should not depend on how a driver decodes a zero-length array.
+	sub.WatchedEpisodes = nonNilEpisodes(sub.WatchedEpisodes)
+
 	httpx.Data(w, http.StatusOK, sub)
+}
+
+// MarkEpisodeWatched implements PUT
+// /api/subscriptions/{anilistId}/episodes/{episode}.
+//
+// Flow:
+//  1. Auth claims check.  The user id used by the write comes from the
+//     verified JWT claims and from nowhere else — there is no path, query
+//     or body parameter that can name a user.  That is the whole IDOR
+//     story for this endpoint: the statement's first CTE selects the
+//     caller's own subscription row, and everything downstream reads its
+//     keys from that row.
+//  2. Parse :anilistId and :episode, both as bounded positive int32.
+//  3. Run the single-statement write.  pgx.ErrNoRows means the caller has
+//     no subscription for that anime — 404, same envelope PATCH and DELETE
+//     already answer for the same condition.  Nothing was written.
+//  4. 200 with the full post-write set so the client reconciles its grid
+//     without a follow-up read.
+//
+// Idempotent: marking an episode that is already marked returns 200 with
+// the unchanged set, and leaves the subscription's timestamps alone.
+func (h *Handlers) MarkEpisodeWatched(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	anilistID, ok := parseAnilistID(w, r)
+	if !ok {
+		return
+	}
+	episode, ok := parseEpisode(w, r)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+
+	row, err := h.Queries.MarkEpisodeWatched(ctx, claims.UserID, anilistID, episode)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgSubscriptionNotFound))
+			return
+		}
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "mark episode watched failed"))
+		return
+	}
+
+	httpx.Data(w, http.StatusOK, episodeWatchResp{
+		AnilistID:       anilistID,
+		WatchedEpisodes: nonNilEpisodes(row.WatchedEpisodes),
+		CurrentEpisode:  row.CurrentEpisode,
+	})
+}
+
+// UnmarkEpisodeWatched implements DELETE
+// /api/subscriptions/{anilistId}/episodes/{episode}.
+//
+// Same flow, same auth boundary, same response shape as
+// MarkEpisodeWatched.  Two differences worth naming:
+//
+//   - Unmarking an episode that was never marked is a 200, not a 404.  The
+//     caller asked for a state and got it; requiring it to know the
+//     current set before it may act on it would make every click a
+//     read-then-write.
+//   - This is the ONLY write in the whole system that can move
+//     current_episode DOWN, and that is deliberate.  The value is derived
+//     from the set, so it falls exactly when the set's maximum falls, and
+//     removing a mark is the only thing that does that.  A PATCH cannot
+//     lower it whatever it sends.  See the query comment.
+func (h *Handlers) UnmarkEpisodeWatched(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	anilistID, ok := parseAnilistID(w, r)
+	if !ok {
+		return
+	}
+	episode, ok := parseEpisode(w, r)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+
+	row, err := h.Queries.UnmarkEpisodeWatched(ctx, claims.UserID, anilistID, episode)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, msgSubscriptionNotFound))
+			return
+		}
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "unmark episode watched failed"))
+		return
+	}
+
+	httpx.Data(w, http.StatusOK, episodeWatchResp{
+		AnilistID:       anilistID,
+		WatchedEpisodes: nonNilEpisodes(row.WatchedEpisodes),
+		CurrentEpisode:  row.CurrentEpisode,
+	})
 }
 
 // CreateSubscription implements POST /api/subscriptions.
@@ -338,6 +499,20 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 // Express's empty-body behaviour: returns the existing row unchanged.
 // Our SQL's COALESCE pattern handles this naturally — every field stays
 // untouched when its parameter is nil and ScoreSet=false.
+//
+// What `currentEpisode` means here changed with migration 0024, and the
+// name did not.  It is now the episode to RECORD, not a new value for the
+// column: the statement writes one watch row and re-derives
+// current_episode as COALESCE(MAX(episode), 0) over the set.  Three
+// consequences worth knowing at the call site — all of them intended, all
+// of them explained in the query comment:
+//
+//   - A smaller number cannot lower progress.  Lowering is unmarking, via
+//     UnmarkEpisodeWatched.
+//   - currentEpisode = 0 is not a reset.  Zero is not an episode, so it
+//     records nothing and therefore moves nothing.
+//   - An episode outside 1..maxEpisodeNumber records nothing and moves
+//     nothing, rather than 500-ing on the CHECK.
 func (h *Handlers) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requireClaims(w, r)
 	if !ok {

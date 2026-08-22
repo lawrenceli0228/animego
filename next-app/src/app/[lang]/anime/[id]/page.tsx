@@ -1331,7 +1331,6 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
               subLogin: dict.sub.loginToWatch,
               subLoginAria: dict.sub.loginToWatch,
               subRate: dict.sub.rate,
-              subEpUnit: dict.sub.epUnit,
               subWatching: dict.sub.watching,
               subCompleted: dict.sub.completed,
               subPlanToWatch: dict.sub.planToWatch,

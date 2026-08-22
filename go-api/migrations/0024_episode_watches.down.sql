@@ -1,0 +1,24 @@
+-- Mirror of the up migration.  The PK index and the CHECK constraint go
+-- with the table, so DROP TABLE is the whole reversal -- an explicit
+-- DROP CONSTRAINT would fail on a partially-applied migration, which is
+-- the state a down migration is most likely to meet.  Same reasoning as
+-- 0022 and 0023.
+--
+-- Rolling this back destroys every per-episode mark and is NOT symmetric
+-- with the up migration:
+--
+--   * The rows the backfill created are re-derivable.  They were computed
+--     from subscriptions.current_episode, which this migration does not
+--     touch, so re-applying 0024 reconstructs them exactly.
+--
+--   * Every mark a user made afterwards is not.  Checking episode 5
+--     without 1-4, or un-checking an episode the old rule had inferred,
+--     exists nowhere else -- and current_episode, being MAX over the set,
+--     cannot reconstruct it.  Rolling back collapses those readers back to
+--     the inferred grid the table exists to replace.
+--
+-- Nothing here rewrites subscriptions.current_episode.  It kept its own
+-- column throughout precisely so that a rollback leaves every existing
+-- consumer working on the value it was already reading.
+
+DROP TABLE IF EXISTS episode_watches;

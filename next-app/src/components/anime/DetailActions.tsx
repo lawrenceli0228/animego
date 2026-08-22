@@ -2,7 +2,9 @@
 
 // Action row that sits between Hero and the data sections on
 // /anime/[id]. Hosts the five legacy interactions:
-//   1. SubscriptionButton (v2 panel: status select + ep ± + score + remove)
+//   1. SubscriptionButton (status select + score + remove). The episode
+//      counter that used to live here moved into the episode grid itself,
+//      which now records watched episodes one by one — see EpisodesGrid.tsx.
 //   2. ShareButton         — Web Share API / clipboard fallback
 //   3. MagnetButton        — opens TorrentModal (always; torrent search is
 //      title-based, needs no episode count)
@@ -42,7 +44,6 @@ interface DetailActionsProps {
     subLogin: string;
     subLoginAria: string;
     subRate: string;
-    subEpUnit: string;
     subWatching: string;
     subCompleted: string;
     subPlanToWatch: string;
@@ -98,14 +99,12 @@ export default function DetailActions({
       <div style={rowStyle}>
         <SubscriptionButton
           anilistId={anilistId}
-          episodes={episodes}
           labels={{
             add: labels.subAdd,
             remove: labels.subRemove,
             login: labels.subLogin,
             loginAria: labels.subLoginAria,
             rate: labels.subRate,
-            epUnit: labels.subEpUnit,
             watching: labels.subWatching,
             completed: labels.subCompleted,
             planToWatch: labels.subPlanToWatch,

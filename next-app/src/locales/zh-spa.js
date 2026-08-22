@@ -50,6 +50,7 @@ const zh = {
     'Invalid anime ID': '无效的番剧 ID',
     'Invalid status': '无效的状态',
     'Episode must be a non-negative integer': '集数必须为非负整数',
+    'Invalid episode number': '无效的集数',
     'Subscription not found': '未找到订阅',
     'Deleted': '已删除',
     'Cannot follow yourself': '不能关注自己',
@@ -120,6 +121,21 @@ const zh = {
     // 说的是「还不知道」，不是「没有」。
     episodeCountPending: '本季集数待定',
     episodeCountPendingHint: '总集数确认后，这里会列出每一集。',
+    // 逐集追番的文案，与 locales/zh.ts 同名键同值。EpisodesGrid 是客户端
+    // 组件，t() 只读这一份 —— 只加到 zh.ts 会让页面直接渲染键名。
+    markWatched: '标记第 {{ep}} 集为已看',
+    unmarkWatched: '取消第 {{ep}} 集的已看标记',
+    watchedSignIn: '登录后记录第 {{ep}} 集',
+    watchedFailed: '第 {{ep}} 集没记上，请再试一次',
+    watchedSignedOut: '登录状态已过期，重新登录后再记录',
+    watchedProgress: '已看 {{done}} / {{total}} 集',
+    watchedHint: '点一下方格，记录你真正看过的那一集。',
+    watchedCompletedHint: '这部已标记「看完」，所有集数都算已看。取消其中任意一集，会把状态改回「在看」，并改为按逐集记录显示。',
+    furthestMarked: '标记到的最后一集',
+    autoCompleted: '全部集数已记录，状态自动改为「看完」',
+    autoResumed: '状态已改回「在看」',
+    autoStatusFailed: '第 {{ep}} 集已记录，但追番状态没能自动更新',
+    episodeDiscussion: '第 {{ep}} 集的讨论',
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',
@@ -135,7 +151,6 @@ const zh = {
     planToWatch: '想看', dropped: '放弃',
     remove: '移除', rate: '评分',
     loginToWatch: '登录后追番',
-    epUnit: '集',
     // Toast copy for a subscribe/unsubscribe round trip. toastViewList is
     // the toast's action link, not a standalone button label.
     toastAdded: '已加入「在看」',

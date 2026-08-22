@@ -6,7 +6,6 @@
 //   - add            : "+ 添加到列表"        (sub.addToList) — placeholder option in <select>
 //   - remove         : "移除"                (sub.remove)
 //   - rate           : "评分"                (sub.rate) — shown on score button when no score set
-//   - epUnit         : "集"                  (sub.epUnit) — suffix after "/ N"
 //   - watching       : "在看"                (sub.watching)
 //   - completed      : "看完"                (sub.completed)
 //   - planToWatch    : "想看"                (sub.planToWatch)
@@ -21,8 +20,16 @@
 //   - 404 → user logged in but no sub yet        → render "+ 追番" outline button
 //   - 401 → anonymous                            → render "登录后追番" link
 //
-// v2 panel (legacy parity) shows when state='subscribed':
-//   [status <select>]  [− N + / total 集]  [★ score]  [移除]
+// Panel shown when state='subscribed':
+//   [status <select>]  [★ score]  [移除]
+//
+// The `− N + / total 集` stepper used to sit between the select and the score.
+// It was the only way to move `currentEpisode`, and `currentEpisode` was the
+// only thing the episode grid had to colour cells from — which is why the grid
+// had to GUESS which episodes those were. Episodes are tracked per episode now
+// and the grid writes them directly (EpisodesGrid.tsx); `currentEpisode` is
+// derived server-side from the set, so a second control that sets it by hand
+// would be a second, disagreeing source of truth for the same fact.
 //
 // State writes go through authFetch directly (no TanStack Query). On
 // any 5xx/network failure we revert the optimistic local state and toast
@@ -56,7 +63,7 @@ import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { useLang } from "@/lib/lang-client";
-import { broadcastSubscription } from "@/lib/subscriptionBus";
+import { broadcastSubscription, subscribeToBus } from "@/lib/subscriptionBus";
 import { hintStore, takeListHint, LIST_HINT_TOAST_MS } from "./subscriptionToast";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import { localizeHref, useLocale } from "@/components/ui/LocaleLink";
@@ -67,7 +74,6 @@ interface Labels {
   add: string;
   remove: string;
   rate: string;
-  epUnit: string;
   watching: string;
   completed: string;
   planToWatch: string;
@@ -76,7 +82,6 @@ interface Labels {
 
 interface SubscriptionButtonProps {
   anilistId: number;
-  episodes: number | null;
   labels: Labels;
 }
 
@@ -96,12 +101,6 @@ const STATUS_VALUES: readonly SubStatus[] = [
   "plan_to_watch",
   "dropped",
 ] as const;
-
-// fadeUp keyframe (matches legacy client/src/index.css). We inject
-// inline because globals.css is owned by another surface and adding
-// a one-off keyframe there for this component is overreach.
-const FADE_UP_CSS =
-  "@keyframes subBtnFadeUp{from{opacity:0;transform:translate(-50%,4px)}to{opacity:1;transform:translate(-50%,0)}}";
 
 // LIST_HINT_TOAST_MS is imported from ./subscriptionToast, not re-declared:
 // the detail page and the card grid draw the same one-shot hint from the same
@@ -142,46 +141,6 @@ const selectStyle: CSSProperties = {
   cursor: "pointer",
   outline: "none",
   minWidth: 150,
-};
-
-const epWrapStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  background: "#2c2c2e",
-  border: "1px solid #38383a",
-  borderRadius: 8,
-  padding: "4px 8px",
-};
-
-const epBtnStyle: CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 6,
-  background: "rgba(10,132,255,0.12)",
-  color: "#0a84ff",
-  fontSize: 16,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: "pointer",
-  border: "none",
-  transition: "background 0.2s",
-};
-
-const epNumStyle: CSSProperties = {
-  minWidth: 32,
-  textAlign: "center",
-  fontSize: 14,
-  fontWeight: 600,
-  color: "#ffffff",
-  fontVariantNumeric: "tabular-nums",
-};
-
-const epUnitStyle: CSSProperties = {
-  fontSize: 12,
-  color: "rgba(235,235,245,0.30)",
-  marginLeft: 4,
 };
 
 const removeBtnStyle: CSSProperties = {
@@ -286,33 +245,8 @@ function scoreNumBtnStyle(
   };
 }
 
-function statusHintStyle(kind: SubStatus): CSSProperties {
-  const isCompleted = kind === "completed";
-  return {
-    position: "absolute",
-    bottom: "calc(100% + 6px)",
-    left: "50%",
-    transform: "translateX(-50%)",
-    background: isCompleted
-      ? "rgba(48,209,88,0.15)"
-      : "rgba(10,132,255,0.15)",
-    border: `1px solid ${
-      isCompleted ? "rgba(48,209,88,0.4)" : "rgba(10,132,255,0.4)"
-    }`,
-    borderRadius: 8,
-    padding: "4px 12px",
-    whiteSpace: "nowrap",
-    fontSize: 12,
-    fontWeight: 600,
-    color: isCompleted ? "#30d158" : "#0a84ff",
-    animation: "subBtnFadeUp 0.3s ease both",
-    pointerEvents: "none",
-  };
-}
-
 export default function SubscriptionButton({
   anilistId,
-  episodes,
   labels,
 }: SubscriptionButtonProps) {
   const router = useLocaleRouter();
@@ -327,7 +261,6 @@ export default function SubscriptionButton({
   const [sub, setSub] = useState<SubscriptionDoc | null>(null);
   const [busy, setBusy] = useState(false);
   const [scoreOpen, setScoreOpen] = useState(false);
-  const [statusHint, setStatusHint] = useState<SubStatus | null>(null);
   const scoreRef = useRef<HTMLDivElement | null>(null);
 
   const statusLabels: Record<SubStatus, string> = {
@@ -401,6 +334,29 @@ export default function SubscriptionButton({
     };
   }, [anilistId]);
 
+  // Listen as well as broadcast. This panel used to be the only thing on the
+  // page that WROTE a subscription, so a one-way bus was enough. The episode
+  // grid writes now — marking the last episode moves the status to `completed`
+  // and un-marking one walks it back — and without this the select would go on
+  // reading `在看` under a subscription the server had already completed. The
+  // stalest control on the page would be the one that owns the field.
+  //
+  // No echo loop: our own broadcasts hand back the identical object we just
+  // stored, and setState bails on Object.is.
+  useEffect(() => {
+    return subscribeToBus((detail) => {
+      if (detail.anilistId !== anilistId) return;
+      setSub(detail.sub);
+      setState((current) =>
+        current === "anonymous"
+          ? current
+          : detail.sub
+            ? "subscribed"
+            : "available",
+      );
+    });
+  }, [anilistId]);
+
   // Outside-click close for score popup (matches legacy mousedown
   // listener pattern).
   useEffect(() => {
@@ -418,13 +374,8 @@ export default function SubscriptionButton({
     return () => document.removeEventListener("mousedown", handler);
   }, [scoreOpen]);
 
-  const showStatusHint = (kind: SubStatus) => {
-    setStatusHint(kind);
-    window.setTimeout(() => setStatusHint(null), 2500);
-  };
-
   // ------------------------------------------------------------------
-  // Toasts — one per outcome, so the four writes stop looking identical.
+  // Toasts — one per outcome, so the writes stop looking identical.
   // ------------------------------------------------------------------
 
   const toastFailed = () => toast.error(t("sub.toastFailed"));
@@ -557,70 +508,6 @@ export default function SubscriptionButton({
     }
   };
 
-  const handleEp = async (rawEp: number) => {
-    if (busy) return;
-    const maxEp = episodes && episodes > 0 ? episodes : 9999;
-    const val = Math.max(0, Math.min(rawEp, maxEp));
-    const currentStatus = sub?.status;
-    const autoComplete = !!episodes && episodes > 0 && val >= episodes;
-    const autoResume =
-      !!episodes &&
-      episodes > 0 &&
-      val < episodes &&
-      currentStatus === "completed";
-    const newStatus: SubStatus | undefined = autoComplete
-      ? "completed"
-      : autoResume
-        ? "watching"
-        : undefined;
-
-    const prev = sub;
-    const isCreate = !sub;
-    setBusy(true);
-    try {
-      // Optimistic.
-      const optimistic: SubscriptionDoc = sub
-        ? {
-            ...sub,
-            currentEpisode: val,
-            status: newStatus ?? sub.status,
-          }
-        : {
-            status: newStatus ?? "watching",
-            currentEpisode: val,
-            score: null,
-          };
-      setSub(optimistic);
-
-      const updated = sub
-        ? await patchSub({
-            currentEpisode: val,
-            ...(newStatus ? { status: newStatus } : {}),
-          })
-        : await createSub({
-            status: newStatus ?? "watching",
-            currentEpisode: val,
-          });
-
-      if (updated) {
-        setSub(updated);
-        setState("subscribed");
-        broadcastSubscription({ anilistId, sub: updated });
-        // Counter bumps stay toast-free on purpose (a toast per ± click is
-        // noise — the number itself is the feedback), but a ± that had to
-        // create the row IS a first subscribe and deserves the same
-        // confirmation the add button gives.
-        if (isCreate) toastAdded();
-        if (autoComplete) showStatusHint("completed");
-      } else {
-        setSub(prev);
-        toastFailed();
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleScore = async (n: number) => {
     if (busy || !sub) return;
     const newScore = n === sub.score ? null : n;
@@ -713,20 +600,15 @@ export default function SubscriptionButton({
   }
 
   // state === "subscribed"
-  const currentEp = sub?.currentEpisode ?? 0;
   const currentStatus = sub?.status ?? "watching";
   const currentScore = sub?.score ?? null;
-  const epMax = episodes && episodes > 0 ? episodes : null;
 
   return (
     <div style={wrapStyle}>
-      <style>{FADE_UP_CSS}</style>
-
-      {/* No `disabled={busy}` on the select — every +/− click flips
-          busy briefly, which would re-paint the browser-default disabled
-          styling and make the dropdown flicker on every counter click.
-          handleStatus has its own `if (busy) return` to drop conflicting
-          status writes mid-mutation. */}
+      {/* No `disabled={busy}` on the select — a write elsewhere in this panel
+          flips busy briefly, which would re-paint the browser-default disabled
+          styling and make the dropdown flicker. handleStatus has its own
+          `if (busy) return` to drop conflicting status writes mid-mutation. */}
       <select
         style={selectStyle}
         value={currentStatus}
@@ -742,38 +624,6 @@ export default function SubscriptionButton({
           </option>
         ))}
       </select>
-
-      <div style={{ position: "relative" }}>
-        {statusHint && (
-          <div style={statusHintStyle(statusHint)}>
-            {statusLabels[statusHint]} ✓
-          </div>
-        )}
-        <div style={epWrapStyle}>
-          <button
-            type="button"
-            style={epBtnStyle}
-            disabled={busy}
-            onClick={() => handleEp(currentEp - 1)}
-            aria-label="-1"
-          >
-            −
-          </button>
-          <span style={epNumStyle}>{currentEp}</span>
-          <button
-            type="button"
-            style={epBtnStyle}
-            disabled={busy}
-            onClick={() => handleEp(currentEp + 1)}
-            aria-label="+1"
-          >
-            +
-          </button>
-          <span style={epUnitStyle}>
-            {epMax ? `/ ${epMax} ${labels.epUnit}` : labels.epUnit}
-          </span>
-        </div>
-      </div>
 
       <div ref={scoreRef} style={{ position: "relative" }}>
         <button

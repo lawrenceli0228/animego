@@ -374,4 +374,24 @@ export async function seedSubscription(
       status          = EXCLUDED.status,
       current_episode = EXCLUDED.current_episode
   `;
+  // Seed the per-episode marks this progress implies (migration 0024).
+  //
+  // Not decoration. `current_episode` is a derived value now — every write path
+  // recomputes it as COALESCE(MAX(episode), 0) over episode_watches — so a row
+  // carrying progress with no marks behind it is a state no user can reach, and
+  // the next PATCH re-derives it to 0. A spec that seeded 5 and then asserted on
+  // progress would be asserting against a row the application could not produce,
+  // and would start failing for a reason that has nothing to do with what it
+  // tests. This mirrors what migration 0024's backfill does for real rows.
+  if (currentEpisode > 0) {
+    await sql`
+      INSERT INTO episode_watches (user_id, anilist_id, episode)
+      SELECT
+        (SELECT id FROM users WHERE email = ${email.toLowerCase()}),
+        ${anilistId},
+        g.episode
+      FROM generate_series(1, ${currentEpisode}) AS g(episode)
+      ON CONFLICT (user_id, anilist_id, episode) DO NOTHING
+    `;
+  }
 }

@@ -61,17 +61,22 @@ type createSubscriptionReq struct {
 // in a raw map[string]json.RawMessage pre-pass before binding the
 // typed struct.  See parseUpdateBody in handlers.go.
 //
-// Monotonic selects the write semantics in
-// UpdateSubscriptionWithActivity (§4 decisions 4 + 8):
+// Monotonic no longer selects the progress semantics.  Since migration
+// 0024 current_episode is COALESCE(MAX(episode), 0) over episode_watches
+// on every path, so no PATCH can lower it whatever this flag says: the
+// forward-only guarantee is structural now, not a branch a caller opts
+// into (and therefore not one a caller can forget).
 //
-//	true   automated progress sync (player / library reconciliation).
-//	       current_episode only moves forward; a stale replay is folded
-//	       into a no-op instead of clawing progress back.
-//	false  the detail page's ± buttons — a human correcting the count
-//	       downward MUST be able to.
+// Its single remaining reader is the updated_at suppression in
+// UpdateSubscriptionWithActivity: a monotonic push that changes nothing
+// leaves updated_at alone, so a replay does not jump an untouched show to
+// the front of the home page's continue-watching row.
 //
-// Absent, null, and false all mean false, so every caller that predates
-// this field keeps its exact behaviour.  Unlike Score there is no
+// It is kept in the request body rather than removed in the same change
+// that demoted it, so the library reconciler (the only sender) keeps
+// working untouched and the removal can be judged on its own.
+//
+// Absent, null, and false all mean false.  Unlike Score there is no
 // meaningful third state, so a plain bool beats a *bool here.
 type updateSubscriptionReq struct {
 	Status         *string `json:"status,omitempty"         validate:"omitempty,oneof=watching completed plan_to_watch dropped"`
@@ -165,6 +170,48 @@ func toListItem(row dbgen.ListUserSubscriptionsRow) listItem {
 		LastWatchedAt:  row.LastWatchedAt,
 		SubscribedAt:   row.SubscribedAt,
 	}
+}
+
+// episodeWatchResp is the success body for BOTH per-episode writes:
+//
+//	PUT    /api/subscriptions/:anilistId/episodes/:episode
+//	DELETE /api/subscriptions/:anilistId/episodes/:episode
+//
+// One type for both because the client's job after either call is the
+// same: replace its whole idea of this anime's progress with what came
+// back.  Returning the full post-write set (rather than an acknowledgement
+// of the single episode that changed) is what lets a grid of thirty
+// checkboxes reconcile from one response, with no follow-up read and no
+// client-side guess at what the server did.
+//
+// AnilistID is echoed so a response arriving out of order — the user
+// clicked three boxes on two different titles — can be matched to the
+// title it describes rather than assumed to be about whatever is on
+// screen.  It is the parsed path value, not anything the body supplied.
+//
+// WatchedEpisodes is always an array, never null; see nonNilEpisodes.
+// CurrentEpisode is the value the statement actually stored, read back
+// from the UPDATE's RETURNING rather than recomputed here, so the number
+// the client draws is the number the row holds.
+type episodeWatchResp struct {
+	AnilistID       int32   `json:"anilistId"`
+	WatchedEpisodes []int32 `json:"watchedEpisodes"`
+	CurrentEpisode  int32   `json:"currentEpisode"`
+}
+
+// nonNilEpisodes converts a nil slice to an empty one so the JSON emits
+// `[]` rather than `null`.
+//
+// The SQL already COALESCEs an empty aggregate to '{}', so this should
+// never fire — but "watchedEpisodes is an array" is a contract the client
+// iterates over directly, and a contract that holds only because of how a
+// driver happens to decode a zero-length array is one bad upgrade away
+// from a TypeError in the grid.  Cheap enough to just guarantee.
+func nonNilEpisodes(in []int32) []int32 {
+	if in == nil {
+		return []int32{}
+	}
+	return in
 }
 
 // deleteResp is the success body for DELETE /api/subscriptions/:anilistId.
