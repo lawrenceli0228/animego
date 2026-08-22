@@ -189,6 +189,19 @@ func (noRowV12DB) MarkDescriptionCnAttempted(_ context.Context, _ int32) error {
 	return nil
 }
 
+// ListEpisodesBgmCandidates satisfies queue.EpisodesBgmReader.  Empty for the
+// same reason the description sweep's candidate list is: a real candidate
+// would pull the stub Bangumi client into the picture and make these tests
+// about the sweep rather than about the queue reaching a terminal state.
+//
+// This method is why the integration package stopped compiling on the branch
+// that added the episode-count worker, and it is worth noting that the failure
+// surfaced here rather than in `go test ./...` — this package is behind a build
+// tag, so only the -tags=integration vet step in unit-tests.yml sees it.
+func (noRowV12DB) ListEpisodesBgmCandidates(_ context.Context, _ dbgen.ListEpisodesBgmCandidatesParams) ([]dbgen.ListEpisodesBgmCandidatesRow, error) {
+	return []dbgen.ListEpisodesBgmCandidatesRow{}, nil
+}
+
 // emptyAniList is a stub AniListSeasonalFetcher used by the queue
 // smoke tests.  Seasonal() returns an empty page with HasNextPage=false
 // so the warm-season worker's page loop exits after one fetch — clean
