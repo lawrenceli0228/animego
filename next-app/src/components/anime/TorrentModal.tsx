@@ -766,19 +766,28 @@ export default function TorrentModal({
             </button>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 14,
-              padding: "9px 11px",
-              border: "1px solid rgba(100,210,255,0.24)",
-              borderRadius: 9,
-              background: "rgba(10,132,255,0.08)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+          {/* Points at the pills below it, so it only exists when they do.
+            *
+            * This slot used to hold download-folder advice with a link out to
+            * the library — useful, but not here: someone with this modal open
+            * is trying to find a release, and the thing most likely to be
+            * standing between them and one is that the release group spells
+            * the show differently than we do. The pills already fix that; they
+            * just never said so. Gated on the same `titleOptions.length > 1`
+            * as the pills, because a hint that says "press a title below" is
+            * worse than no hint when there is only one. */}
+          {titleOptions.length > 1 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 9,
+                padding: "9px 11px",
+                border: "1px solid rgba(100,210,255,0.24)",
+                borderRadius: 9,
+                background: "rgba(10,132,255,0.08)",
+              }}
+            >
               <span
                 aria-hidden
                 style={{
@@ -788,7 +797,7 @@ export default function TorrentModal({
                   lineHeight: 1.3,
                 }}
               >
-                ⇩
+                ↓
               </span>
               <p
                 style={{
@@ -799,27 +808,12 @@ export default function TorrentModal({
                 }}
               >
                 <strong style={{ color: "#9bd8ff", marginRight: 6 }}>
-                  {t("torrent.folderGuideTitle")}
+                  {t("torrent.titleHintTitle")}
                 </strong>
-                {t("torrent.folderGuideBody")}
+                {t("torrent.titleHintBody")}
               </p>
             </div>
-            <Link
-              href="/library"
-              prefetch={false}
-              onClick={onClose}
-              style={{
-                flexShrink: 0,
-                color: "#64d2ff",
-                fontSize: 11,
-                fontWeight: 700,
-                textDecoration: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {t("torrent.folderGuideCta")} →
-            </Link>
-          </div>
+          )}
 
           {/* Title variant pills */}
           {titleOptions.length > 1 && (

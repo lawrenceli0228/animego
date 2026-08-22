@@ -108,13 +108,19 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
             </p>
           </div>
 
+          {/* Decorative, and behind the text on purpose.
+            * It is `z-index: 0` against the content's 1, so even if a future
+            * image is wider than the column reserved for it the words stay on
+            * top. The left edge is masked to transparent, so the copy's safe
+            * zone is not just the reserved column — the image is literally not
+            * painted where the text ends. */}
           <Image
-            className={styles.guideMascot}
-            src="/mascot-wink.png"
+            className={styles.guideArt}
+            src="/community-guide.jpg"
             alt=""
-            width={720}
-            height={1080}
-            sizes="(max-width: 760px) 104px, 132px"
+            width={978}
+            height={1400}
+            sizes="(max-width: 760px) 100vw, 560px"
           />
         </article>
 

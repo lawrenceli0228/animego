@@ -53,7 +53,13 @@
   position: relative;
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 148px;
+  /* The reserved column is wider than the image's opaque part, not narrower.
+   * The art bleeds to the right edge at up to 560px; its left 46% is masked
+   * away, so the first painted pixel lands around 250px in. Reserving up to
+   * 380px leaves roughly 100px between the last character and anything
+   * visible — the distance is the point of the column, the image just happens
+   * to be drawn across it. */
+  grid-template-columns: minmax(0, 1fr) clamp(180px, 26vw, 380px);
   grid-template-areas:
     "lead    art"
     "steps   art"
@@ -68,18 +74,21 @@
     #080b10;
 }
 
-/* Atmosphere behind the mascot, replacing the bordered panel she used to sit
- * in. A panel is another box on a strip whose whole point is having none; a
- * glow puts her in the same field as the text and still separates her from
- * it. */
+/* A wash under the art rather than a panel around it.
+ *
+ * A panel is another box on a strip whose whole point is having none. This
+ * sits behind the image, so a picture with transparent or pale edges still
+ * has something to end in, and the right side of the strip keeps its weight
+ * on the frame where the art has not loaded yet. */
 .libraryGuide::after {
   content: "";
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 280px;
-  background: radial-gradient(58% 68% at 74% 76%, rgba(10, 132, 255, 0.17), transparent 72%);
+  z-index: 0;
+  width: 320px;
+  background: radial-gradient(62% 74% at 78% 62%, rgba(10, 132, 255, 0.16), transparent 74%);
   pointer-events: none;
 }
 
@@ -111,21 +120,31 @@
   line-height: 1.55;
 }
 
-.guideMascot {
+.guideArt {
   position: absolute;
-  right: 10px;
-  bottom: -12px;
-  z-index: 1;
-  width: 132px;
-  height: auto;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  width: clamp(300px, 42%, 560px);
+  height: 100%;
   pointer-events: none;
   user-select: none;
 
-  /* Same dissolve as the hero art: she is taller than the strip, so her lower
-   * edge is a crop. Fading it means the strip ends in a shape rather than in a
-   * cut through her hands. */
-  -webkit-mask-image: linear-gradient(to bottom, #000 76%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 76%, transparent 100%);
+  /* The source is a tall portrait and the slot is a 560x195 letterbox, so cover
+   * crops hard. With this geometry the visible band runs from roughly 22% to
+   * 46% of the frame — high enough to clear the top of the foreground girl's
+   * hair, low enough to still hold every face. Centre it and you get sky;
+   * anything past ~32% and the heads start losing their crowns. */
+  object-fit: cover;
+  object-position: center 29%;
+
+  /* Dissolved into the strip on the left, not butted against it. A hard
+   * vertical edge here would put a second rectangle inside a component whose
+   * point is that it has none, and it is the mask — not the reserved grid
+   * column — that guarantees nothing is painted where the copy ends. */
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.55) 34%, #000 62%);
+  mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.55) 34%, #000 62%);
 }
 
 .guideSteps {
@@ -419,19 +438,15 @@
     padding: 18px;
   }
 
-  /* She keeps her corner but stops reserving a column: below 760 the text has
-   * no width to spare, and the steps wrap under her rather than beside her. */
-  .guideMascot {
-    right: -6px;
-    bottom: -10px;
-    width: 104px;
-    opacity: 0.5;
-  }
-
-  .guideLead,
-  .guideSteps,
-  .guideActions {
-    padding-right: 92px;
+  /* The art stops reserving a column and becomes the strip's own backdrop:
+   * below 760 there is no width to put a picture beside text, so it goes
+   * behind all of it, faded far enough down that 11px copy still reads. */
+  .guideArt {
+    width: 100%;
+    opacity: 0.16;
+    object-position: center 34%;
+    -webkit-mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.35) 78%, transparent 100%);
+    mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.35) 78%, transparent 100%);
   }
 
   .empty {
@@ -460,18 +475,12 @@
     margin-left: 0;
   }
 
-  /* She goes. On a 358px strip she has to sit behind the copy to fit, and a
-   * half-transparent character under a sentence reads as a rendering fault
-   * rather than as decoration. The strip is short enough here that it does not
-   * need her to hold the right edge. */
-  .guideMascot {
-    display: none;
-  }
-
-  .guideLead,
-  .guideSteps,
-  .guideActions {
-    padding-right: 0;
+  /* Fainter still at phone width. The strip is 331px tall here and the copy
+   * runs the full width of it, so every line of text has picture behind it —
+   * the backdrop has to stay under the threshold where it competes with 11px
+   * type rather than merely sitting beneath it. */
+  .guideArt {
+    opacity: 0.11;
   }
 
   .card {
