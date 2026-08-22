@@ -2,7 +2,7 @@
 
 import Link from "@/components/ui/LocaleLink";
 import { genreLabel } from "@/lib/contentLabels";
-import { pickTitle, stripHtml, truncate } from "@/lib/formatters";
+import { pickDescription, pickTitle, stripHtml, truncate } from "@/lib/formatters";
 import type { Dict, Lang } from "@/lib/i18n";
 import { useLang } from "@/lib/lang-client";
 import type { SeasonalAnime } from "@/lib/types";
@@ -12,9 +12,18 @@ import styles from "./HeroCarousel.module.css";
 
 const INTERVAL_MS = 5000;
 
+// The seasonal endpoint returns more than SeasonalAnime declares — banner,
+// description and the genre array have always arrived here undeclared, and the
+// Chinese synopsis channels join them now. Declared beside `description`
+// rather than on SeasonalAnime because that is where the untyped-but-present
+// fields already live; moving the whole set up is a separate job.
 type CarouselAnime = SeasonalAnime & {
   bannerImageUrl?: string | null;
   description?: string | null;
+  descriptionCn?: string | null;
+  descriptionCnSource?: string | null;
+  descriptionHant?: string | null;
+  descriptionHantSource?: string | null;
   genres?: string[];
 };
 
@@ -180,9 +189,14 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
         const desktopArt = anime.bannerImageUrl || anime.coverImageUrl || "";
         const mobileArt = anime.coverImageUrl || desktopArt;
         const title = pickTitle(anime, lang);
-        const description = anime.description
-          ? truncate(stripHtml(anime.description), 130)
-          : null;
+        // Same ladder the detail page uses. This read `anime.description`
+        // directly, which is the AniList English synopsis — so the hero printed
+        // English prose under a Chinese title, on the one surface every visitor
+        // sees first. pickDescription falls back to exactly that string when no
+        // Chinese synopsis exists, so nothing goes blank; it just stops being
+        // the only option.
+        const synopsis = pickDescription(anime, lang).text;
+        const description = synopsis ? truncate(stripHtml(synopsis), 130) : null;
 
         return (
           <article

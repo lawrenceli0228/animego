@@ -1121,6 +1121,20 @@ SELECT
     status,
     format,
     description,
+    -- The Chinese synopsis channels, carried for the same reason title_hant is
+    -- carried: this endpoint returns every variant and the Next layer picks one
+    -- with pickDescription(). Without them the homepage hero — which reads the
+    -- top 5 of this list — printed an English synopsis under a Chinese title,
+    -- on a site whose whole acquisition channel is Chinese search.
+    --
+    -- The two *_source columns come along even though nothing renders them yet.
+    -- pickDescription() answers a missing source field with null rather than an
+    -- error, so omitting them would leave a future source badge silently blank
+    -- instead of obviously broken — and they are ten bytes each.
+    description_cn,
+    description_cn_source,
+    description_hant,
+    description_hant_source,
     ARRAY(
         SELECT g.genre
         FROM anime_genres g
@@ -1145,28 +1159,32 @@ LIMIT $3 OFFSET $4
 `
 
 type GetSeasonalAnimeRow struct {
-	AnilistID       int32    `json:"anilistId"`
-	TitleRomaji     *string  `json:"titleRomaji"`
-	TitleEnglish    *string  `json:"titleEnglish"`
-	TitleNative     *string  `json:"titleNative"`
-	TitleChinese    *string  `json:"titleChinese"`
-	TitleHant       *string  `json:"titleHant"`
-	TitleHantSource *string  `json:"titleHantSource"`
-	TitleHantSeo    *string  `json:"titleHantSeo"`
-	CoverImageUrl   *string  `json:"coverImageUrl"`
-	BannerImageUrl  *string  `json:"bannerImageUrl"`
-	CoverImageColor *string  `json:"coverImageColor"`
-	PosterAccent    *string  `json:"posterAccent"`
-	AverageScore    *float64 `json:"averageScore"`
-	BangumiScore    *float64 `json:"bangumiScore"`
-	Episodes        *int32   `json:"episodes"`
-	Season          *string  `json:"season"`
-	SeasonYear      *int32   `json:"seasonYear"`
-	Status          *string  `json:"status"`
-	Format          *string  `json:"format"`
-	Description     *string  `json:"description"`
-	Genres          []string `json:"genres"`
-	DiscussionCount int64    `json:"discussionCount"`
+	AnilistID             int32    `json:"anilistId"`
+	TitleRomaji           *string  `json:"titleRomaji"`
+	TitleEnglish          *string  `json:"titleEnglish"`
+	TitleNative           *string  `json:"titleNative"`
+	TitleChinese          *string  `json:"titleChinese"`
+	TitleHant             *string  `json:"titleHant"`
+	TitleHantSource       *string  `json:"titleHantSource"`
+	TitleHantSeo          *string  `json:"titleHantSeo"`
+	CoverImageUrl         *string  `json:"coverImageUrl"`
+	BannerImageUrl        *string  `json:"bannerImageUrl"`
+	CoverImageColor       *string  `json:"coverImageColor"`
+	PosterAccent          *string  `json:"posterAccent"`
+	AverageScore          *float64 `json:"averageScore"`
+	BangumiScore          *float64 `json:"bangumiScore"`
+	Episodes              *int32   `json:"episodes"`
+	Season                *string  `json:"season"`
+	SeasonYear            *int32   `json:"seasonYear"`
+	Status                *string  `json:"status"`
+	Format                *string  `json:"format"`
+	Description           *string  `json:"description"`
+	DescriptionCn         *string  `json:"descriptionCn"`
+	DescriptionCnSource   *string  `json:"descriptionCnSource"`
+	DescriptionHant       *string  `json:"descriptionHant"`
+	DescriptionHantSource *string  `json:"descriptionHantSource"`
+	Genres                []string `json:"genres"`
+	DiscussionCount       int64    `json:"discussionCount"`
 }
 
 // Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
@@ -1216,6 +1234,10 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 			&i.Status,
 			&i.Format,
 			&i.Description,
+			&i.DescriptionCn,
+			&i.DescriptionCnSource,
+			&i.DescriptionHant,
+			&i.DescriptionHantSource,
 			&i.Genres,
 			&i.DiscussionCount,
 		); err != nil {
