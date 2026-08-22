@@ -100,11 +100,28 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
     };
   }, [currentIndex, isPaused, len, next]);
 
+  // Centre the active item in the rail's own scroller — and nothing else.
+  //
+  // This was `activeRailRef.current.scrollIntoView({block: "nearest", inline:
+  // "center"})`, which walks EVERY scrollable ancestor, the document included.
+  // The intent was only ever the rail's horizontal overflow (it scrolls at
+  // ≤900px; above that the five items are a grid that fits). What it actually
+  // did was scroll the page: a reader who had scrolled past the hero got yanked
+  // back to it on the next rotation, every five seconds. `block: "nearest"` is
+  // a no-op when the element is already visible, which is exactly why this
+  // survived review — it is invisible until someone scrolls away and waits.
+  //
+  // Setting scrollLeft on the container cannot move anything but the container.
   useEffect(() => {
-    activeRailRef.current?.scrollIntoView({
+    const item = activeRailRef.current;
+    const list = item?.parentElement;
+    if (!item || !list) return;
+    if (list.scrollWidth <= list.clientWidth) return;
+
+    const centred = item.offsetLeft - (list.clientWidth - item.clientWidth) / 2;
+    list.scrollTo({
+      left: Math.max(0, Math.min(centred, list.scrollWidth - list.clientWidth)),
       behavior: prefersReducedMotion ? "auto" : "smooth",
-      block: "nearest",
-      inline: "center",
     });
   }, [currentIndex, prefersReducedMotion]);
 
