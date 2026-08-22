@@ -138,8 +138,8 @@ const zhHant = {
     viewOnBgm: '在 Bangumi 檢視',
     linkCopied: '連結已複製',
     linkCopyFailed: '複製失敗，請手動複製連結',
-    openPlayer: '▶ 彈幕播放',
-    openPlayerAria: '在新標籤頁開啟彈幕播放器，拖入本地影片觀看',
+    openPlayer: '▶ 本地彈幕播放',
+    openPlayerAria: '檢視下載、本地媒體庫與彈幕播放步驟',
   },
   // Subscription
   sub: {
@@ -225,6 +225,27 @@ const zhHant = {
     noResults: '暫無搜尋結果',
     loading: '搜尋中...', placeholder: '搜尋詞...',
     groupAll: '全部', epAll: '全集',
+    folderGuideTitle: '下載到固定資料夾',
+    folderGuideBody: '讓下載工具始終儲存到同一目錄，再在「我的庫」選擇此目錄；下載完成後列表會自動更新。',
+    folderGuideCta: '設定我的庫',
+  },
+  playerGuide: {
+    eyebrow: '本地彈幕播放器',
+    title: '下載好，放進固定資料夾，就能播放',
+    body: 'AnimeGoClub 不提供線上影片。你下載影片，我們在瀏覽器裡匹配劇集、載入彈幕並記錄進度。',
+    chrome: '推薦桌面 Chrome',
+    downloadTitle: '點選下載',
+    downloadBody: '開啟磁力資源，用你的下載工具儲存番劇。',
+    folderTitle: '使用同一個預設資料夾',
+    folderBody: '讓下載工具固定儲存到一個目錄；首次在「我的庫」選擇此相同目錄。',
+    refreshTitle: '我的庫自動發現新劇集',
+    refreshBody: '保持媒體庫開啟，或下載完成後返回頁面，列表會自動檢查更新。',
+    noticeTitle: '檔案只留在你的裝置上。',
+    noticeBody: '網頁關閉時不會在背景掃描；桌面 Chrome 的目錄監聽體驗最好。',
+    downloadCta: '去下載',
+    trialCta: '遊客直接試用',
+    libraryCta: '開啟我的庫',
+    close: '關閉播放器使用說明',
   },
   // Social
   social: {
@@ -267,6 +288,17 @@ const zhHant = {
     spoiler: '⚠ 劇透內容已摺疊',
     empty: '還沒有形成熱議。開啟任意番劇的分集討論，成為第一位發言的人。',
     start: '去發現番劇 →',
+    libraryGuidePinned: '新手必看',
+    libraryGuideEyebrow: '播放器使用說明',
+    libraryGuideTitle: '下載到固定資料夾，我的庫會自動更新',
+    libraryGuideBody: '不需要反覆拖檔案：把下載工具的預設儲存目錄固定下來，再讓「我的庫」記住同一個目錄。',
+    libraryGuideStepDownload: '在番劇詳情點「磁力資源」，開始下載。',
+    libraryGuideStepFolder: '首次用桌面 Chrome 開啟我的庫，選擇下載目錄。',
+    libraryGuideStepRefresh: '下載完成後保持或返回我的庫，自動發現新劇集。',
+    libraryGuideChrome: '推薦桌面 Chrome',
+    libraryGuideChromeNote: '目錄授權、自動偵測與本地播放體驗更完整',
+    libraryGuideCta: '開啟我的庫',
+    libraryGuideTrial: '遊客試用播放器',
   },
   // Danmaku
   danmaku: {
@@ -392,6 +424,9 @@ const zhHant = {
   },
   // Player
   player: {
+    guestTrialTitle: '本地播放器試用 · 無需登入',
+    guestTrialBody: '選擇本地影片即可體驗自動匹配和彈幕。檔案不會上傳；自動入庫和追番同步需登入。',
+    guestTrialCta: '登入後使用我的庫',
     dropLabel: '選擇影片資料夾',
     dropTitle: '拖入番劇資料夾 或 點選選擇',
     dropReplace: '鬆開以替換當前內容',
@@ -630,6 +665,7 @@ const zhHant = {
     localBadge: '本地',
     reauthorize: '重新授權',
     noSeries: '尚無系列 — 新增資料夾以開始。',
+    downloadFolderHint: '建議選擇下載工具的預設儲存目錄；以後下載完成，媒體庫會自動發現新劇集。',
     fileMissing: '檔案丟失或未授權訪問',
     // 本地库打不开 / 升级被别的标签页挡住。渲染点 = LibraryDbAlert.tsx。
     // 另一份同义副本在 `lib/library/db/dbOpenErrors.js`(开发者 / Sentry 文本),

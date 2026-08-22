@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { pickTitle } from "@/lib/formatters";
@@ -43,6 +44,81 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
       </header>
 
       <div id="hot-discussion-list" className={styles.grid}>
+        <article className={styles.libraryGuide}>
+          <div className={styles.guideLayout}>
+            <div className={styles.guideContent}>
+              <div className={styles.guideIntro}>
+                <div>
+                  <p className={styles.guideEyebrow}>
+                    {t("communityDiscovery.libraryGuidePinned")} ·{" "}
+                    {t("communityDiscovery.libraryGuideEyebrow")}
+                  </p>
+                  <h3>{t("communityDiscovery.libraryGuideTitle")}</h3>
+                  <p className={styles.guideBody}>
+                    {t("communityDiscovery.libraryGuideBody")}
+                  </p>
+                </div>
+              </div>
+
+              <div className={styles.chromePanel}>
+                <span className={styles.chromeMark} aria-hidden />
+                <span className={styles.chromeCopy}>
+                  <small>RECOMMENDED BROWSER</small>
+                  <strong>{t("communityDiscovery.libraryGuideChrome")}</strong>
+                  <span>{t("communityDiscovery.libraryGuideChromeNote")}</span>
+                </span>
+              </div>
+
+              <ol className={styles.guideSteps}>
+                <li>
+                  <span aria-hidden>01</span>
+                  {t("communityDiscovery.libraryGuideStepDownload")}
+                </li>
+                <li>
+                  <span aria-hidden>02</span>
+                  {t("communityDiscovery.libraryGuideStepFolder")}
+                </li>
+                <li>
+                  <span aria-hidden>03</span>
+                  {t("communityDiscovery.libraryGuideStepRefresh")}
+                </li>
+              </ol>
+
+              <div className={styles.guideActions}>
+                <Link
+                  href="/library"
+                  prefetch={false}
+                  className={styles.guidePrimary}
+                >
+                  {t("communityDiscovery.libraryGuideCta")}
+                  <span aria-hidden>→</span>
+                </Link>
+                <Link
+                  href="/player"
+                  prefetch={false}
+                  className={styles.guideSecondary}
+                >
+                  {t("communityDiscovery.libraryGuideTrial")}
+                </Link>
+              </div>
+            </div>
+
+            <div className={styles.guideVisual}>
+              <span className={styles.visualLabel} aria-hidden>
+                LOCAL PLAYER / 01
+              </span>
+              <Image
+                className={styles.guideMascot}
+                src="/mascot-wink.png"
+                alt=""
+                width={720}
+                height={1080}
+                sizes="(max-width: 760px) 180px, 240px"
+              />
+            </div>
+          </div>
+        </article>
+
         <Link
           href="/welcome"
           prefetch={false}

@@ -40,6 +40,250 @@
   gap: 12px;
 }
 
+.libraryGuide {
+  position: relative;
+  grid-column: 1 / -1;
+  border: 1px solid rgba(10, 132, 255, 0.38);
+  border-radius: 15px;
+  background: #080b10;
+  overflow: hidden;
+}
+
+.libraryGuide::after {
+  content: "LOCAL // DANMAKU";
+  position: absolute;
+  right: 18px;
+  bottom: 12px;
+  color: rgba(100, 210, 255, 0.08);
+  font: 800 clamp(20px, 4vw, 42px)/1 "JetBrains Mono", monospace;
+  letter-spacing: -2px;
+  pointer-events: none;
+}
+
+.guideLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(280px, 0.65fr);
+  grid-template-areas: "content visual";
+  min-height: 292px;
+}
+
+.guideContent {
+  grid-area: content;
+  padding: 24px;
+  background:
+    linear-gradient(90deg, rgba(10, 132, 255, 0.12), transparent 42%),
+    #080b10;
+}
+
+.guideIntro {
+  position: relative;
+  z-index: 1;
+}
+
+.guideEyebrow {
+  margin: 0 0 7px;
+  color: #64d2ff;
+  font: 700 10px/1.2 "JetBrains Mono", monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.guideIntro h3 {
+  margin: 0;
+  color: #fff;
+  font: 750 clamp(18px, 2.5vw, 24px)/1.25 "Sora", sans-serif;
+}
+
+.guideBody {
+  max-width: 700px;
+  margin: 8px 0 0;
+  color: rgba(235, 235, 245, 0.68);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.guideVisual {
+  position: relative;
+  grid-area: visual;
+  min-width: 0;
+  min-height: 292px;
+  overflow: hidden;
+  border-left: 1px solid rgba(100, 210, 255, 0.2);
+  background:
+    radial-gradient(circle at 62% 18%, rgba(100, 210, 255, 0.24), transparent 35%),
+    linear-gradient(145deg, #101b2a, #07101d 62%, #05080d);
+}
+
+.visualLabel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+  color: rgba(155, 216, 255, 0.65);
+  font: 750 9px/1 "JetBrains Mono", monospace;
+  letter-spacing: 1.2px;
+}
+
+.guideMascot {
+  position: absolute;
+  top: -28px;
+  right: -12px;
+  width: 240px;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.chromePanel {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  max-width: 100%;
+  min-height: 66px;
+  margin-top: 16px;
+  padding: 9px 14px 9px 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(114, 223, 143, 0.32);
+  border-left: 3px solid #72df8f;
+  border-radius: 10px;
+  background: #0b1119;
+}
+
+.chromeMark {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: conic-gradient(from -28deg, #ea4335 0 33.333%, #fbbc04 0 66.666%, #34a853 0);
+}
+
+.chromeMark::before,
+.chromeMark::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+}
+
+.chromeMark::before {
+  inset: 8px;
+  background: #f7f8fb;
+}
+
+.chromeMark::after {
+  inset: 12px;
+  border: 2px solid #8ab4f8;
+  background: #4285f4;
+}
+
+.chromeCopy {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(140px, auto) minmax(0, 1fr);
+  align-items: end;
+  gap: 3px 18px;
+}
+
+.chromeCopy small {
+  grid-column: 1 / -1;
+  color: #72df8f;
+  font: 750 8px/1.2 "JetBrains Mono", monospace;
+  letter-spacing: 1px;
+}
+
+.chromeCopy strong {
+  color: #fff;
+  font: 760 13px/1.25 "Sora", sans-serif;
+}
+
+.chromeCopy span {
+  align-self: center;
+  color: rgba(235, 235, 245, 0.56);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.guideSteps {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guideSteps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-height: 54px;
+  padding: 11px 12px;
+  border: 1px solid rgba(84, 84, 88, 0.48);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  color: rgba(235, 235, 245, 0.72);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.guideSteps li > span {
+  flex-shrink: 0;
+  color: #64d2ff;
+  font: 750 10px/1.5 "JetBrains Mono", monospace;
+}
+
+.guideActions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.guideActions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 38px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.guideActions a:focus-visible {
+  outline: 2px solid #64d2ff;
+  outline-offset: 2px;
+}
+
+.guidePrimary {
+  padding: 0 15px;
+  background: #0a84ff;
+  color: #fff;
+}
+
+.guidePrimary:hover {
+  background: #3395ff;
+  transform: translateY(-1px);
+}
+
+.guideSecondary {
+  padding: 0 4px;
+  color: #9bd8ff;
+}
+
+.guideSecondary:hover {
+  color: #fff;
+}
+
 .empty {
   grid-column: 1 / -1;
   display: flex;
@@ -185,6 +429,41 @@
     grid-template-columns: 1fr;
   }
 
+  .libraryGuide {
+    padding: 0;
+  }
+
+  .guideLayout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "visual"
+      "content";
+  }
+
+  .guideContent {
+    padding: 18px;
+  }
+
+  .guideVisual {
+    min-height: 220px;
+    border-bottom: 1px solid rgba(100, 210, 255, 0.2);
+    border-left: 0;
+  }
+
+  .guideMascot {
+    top: -40px;
+    right: 6px;
+    width: 190px;
+  }
+
+  .guideIntro {
+    display: block;
+  }
+
+  .guideSteps {
+    grid-template-columns: 1fr;
+  }
+
   .empty {
     align-items: flex-start;
     flex-direction: column;
@@ -192,6 +471,43 @@
 }
 
 @media (max-width: 430px) {
+  .libraryGuide::after {
+    display: none;
+  }
+
+  .guideActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .guideSecondary {
+    min-height: 34px !important;
+  }
+
+  .guideVisual {
+    min-height: 230px;
+  }
+
+  .guideMascot {
+    right: -8px;
+    width: 180px;
+  }
+
+  .chromePanel {
+    width: 100%;
+  }
+
+  .chromeCopy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+
+  .chromeCopy span {
+    max-width: 210px;
+  }
+
   .card {
     grid-template-columns: 68px minmax(0, 1fr);
     gap: 11px;
@@ -206,7 +522,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card {
+  .card,
+  .guideActions a {
     transition: none;
   }
 }

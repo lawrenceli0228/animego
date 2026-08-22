@@ -27,7 +27,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useSearchParams } from "next/navigation";
-import { useLocaleRouter } from "@/components/ui/LocaleLink";
+import Link, { useLocaleRouter } from "@/components/ui/LocaleLink";
 import toast from "react-hot-toast";
 
 import { useLang } from "@/lib/lang-client";
@@ -111,6 +111,28 @@ const fadeUp: CSSProperties = {
   animation: "fadeUp 300ms cubic-bezier(0.4,0,0.2,1) both",
 };
 
+/**
+ * The guest trial's resting state, centred in the height it already owns.
+ *
+ * This page used to sit behind the auth gate, so its idle state was a
+ * half-second flash between a signed-in reader arriving and their video
+ * loading. It is now the landing surface for the trial, which means a first
+ * visitor stares at it — and left top-aligned it drew a small band of content
+ * with roughly half the viewport of black beneath, which reads as a page that
+ * failed to finish loading rather than a page waiting for a folder.
+ *
+ * The container already reserves the full height; only the content needed to
+ * be told to use it.
+ */
+const idleStage: CSSProperties = {
+  ...fadeUp,
+  minHeight: "calc(100vh - 160px)",
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "center",
+  gap: 20,
+};
+
 const HUE = PLAYER_HUE.stream;
 const HUE_DANMAKU = PLAYER_HUE.ingest;
 
@@ -148,6 +170,47 @@ const s = {
     fontWeight: 600,
     fontSize: 20,
     color: "#ffffff",
+  } as CSSProperties,
+  trialBanner: {
+    maxWidth: 720,
+    margin: "28px auto -42px",
+    padding: "13px 16px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 20,
+    border: `1px solid oklch(62% 0.17 ${HUE_DANMAKU} / 0.32)`,
+    borderRadius: 4,
+    background: `oklch(14% 0.04 ${HUE_DANMAKU} / 0.42)`,
+  } as CSSProperties,
+  trialEyebrow: {
+    ...mono,
+    marginBottom: 4,
+    color: `oklch(78% 0.15 ${HUE_DANMAKU})`,
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+  } as CSSProperties,
+  trialBody: {
+    margin: 0,
+    color: "rgba(235,235,245,0.55)",
+    fontSize: 11,
+    lineHeight: 1.55,
+  } as CSSProperties,
+  trialCta: {
+    flexShrink: 0,
+    padding: "7px 10px",
+    border: `1px solid oklch(62% 0.17 ${HUE_DANMAKU} / 0.42)`,
+    borderRadius: 3,
+    color: `oklch(78% 0.15 ${HUE_DANMAKU})`,
+    fontFamily: "'JetBrains Mono',monospace",
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textDecoration: "none",
+    whiteSpace: "nowrap",
   } as CSSProperties,
   playHeader: {
     position: "relative",
@@ -395,6 +458,9 @@ function PlayerShellInner() {
   // fileHandles.status. Reset on seriesId / refresh.
   const [denialDetected, setDenialDetected] = useState(false);
   useEffect(() => {
+    // The denial belongs to the prior library id; a route-param change is the
+    // reset boundary for this local error latch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDenialDetected(false);
   }, [locationSeriesId]);
 
@@ -473,11 +539,7 @@ function PlayerShellInner() {
 
   const [pickerEp, setPickerEp] = useState<number | null>(null);
   const [isMobileView, setIsMobileView] = useState<boolean>(isMobile);
-  const [devMode, setDevMode] = useState(false);
-
-  useEffect(() => {
-    setDevMode(isDevModeEnabled());
-  }, []);
+  const [devMode] = useState(isDevModeEnabled);
 
   useEffect(() => {
     const onResize = () => setIsMobileView(isMobile());
@@ -678,7 +740,6 @@ function PlayerShellInner() {
       // lands, because the common shape of "finished an episode" is closing
       // the tab, not walking back to /library.
       void reconcileSeries(watchSyncDb, seriesId).catch((err) => {
-        // eslint-disable-next-line no-console
         console.warn("[player] watch sync failed:", err);
       });
     },
@@ -712,7 +773,6 @@ function PlayerShellInner() {
     void reconcileSeries(watchSyncDb, locationSeriesId, {
       resolveBinding,
     }).catch((err) => {
-      // eslint-disable-next-line no-console
       console.warn("[player] watch sync failed:", err);
     });
   }, [locationSeriesId, seriesDetail.status, watchSyncDb, resolveBinding]);
@@ -1061,6 +1121,9 @@ function PlayerShellInner() {
         (e: any) =>
           e.number === locationResumeEpisode && isWatchableKind(e.kind),
       );
+    // This effect consumes the URL's one-shot resume intent. The latch must
+    // flip before the async file lookup to prevent duplicate playback starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAutoResumeAttempted(true);
     if (!ep) return;
     handleLibraryEpisodePlay(ep.id);
@@ -1149,7 +1212,6 @@ function PlayerShellInner() {
             });
             seriesDetail.refresh();
           } catch (err) {
-            // eslint-disable-next-line no-console
             console.warn("[player] failed to persist danmaku update:", err);
           }
         }
@@ -1257,7 +1319,16 @@ function PlayerShellInner() {
 
       {/* IDLE — only shown when NOT in library mode */}
       {uiPhase === "idle" && !locationSeriesId && (
-        <div style={fadeUp}>
+        <div style={idleStage}>
+          <aside style={s.trialBanner}>
+            <div>
+              <div style={s.trialEyebrow}>{t("player.guestTrialTitle")}</div>
+              <p style={s.trialBody}>{t("player.guestTrialBody")}</p>
+            </div>
+            <Link href="/library" prefetch={false} style={s.trialCta}>
+              {t("player.guestTrialCta")} →
+            </Link>
+          </aside>
           <DropZone onFiles={handleFiles} />
         </div>
       )}

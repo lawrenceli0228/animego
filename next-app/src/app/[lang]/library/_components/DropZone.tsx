@@ -326,6 +326,11 @@ export function DropZone({
             <span style={s.ctaPlusEmpty}>＋</span>
             {t("library.drop.cta")}
           </button>
+          {isFsaSupported ? (
+            <p style={s.downloadFolderHint}>
+              {t("library.downloadFolderHint")}
+            </p>
+          ) : null}
           <div style={s.formatRow} aria-hidden>
             <code style={s.formatChip}>.mkv</code>
             <code style={s.formatChip}>.mp4</code>
@@ -643,6 +648,15 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 500,
     opacity: 0.75,
+  },
+  downloadFolderHint: {
+    maxWidth: "48ch",
+    margin: "-4px 0 0",
+    color: "rgba(100,210,255,0.72)",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    lineHeight: 1.55,
+    letterSpacing: "0.02em",
   },
   formatRow: {
     ...mono,

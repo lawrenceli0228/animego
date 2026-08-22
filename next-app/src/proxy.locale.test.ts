@@ -175,6 +175,22 @@ describe("the auth gate is locale-aware", () => {
     expect(res.status).toBe(307);
   });
 
+  test("the prefixed bare player remains a public trial", async () => {
+    const res = await proxy(request("/en/player"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  test("a prefixed player library hand-off is still gated", async () => {
+    const res = await proxy(request("/en/player?seriesId=abc"));
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/en/login");
+    expect(location.searchParams.get("from")).toBe(
+      "/en/player?seriesId=abc",
+    );
+  });
+
   test("the login bounce keeps the visitor in their locale", async () => {
     const location = new URL((await proxy(request("/en/library"))).headers.get("location")!);
     expect(location.pathname).toBe("/en/login");

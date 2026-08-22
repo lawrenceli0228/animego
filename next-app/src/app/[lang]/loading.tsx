@@ -5,7 +5,6 @@
 const heroStyle = {
   position: "relative" as const,
   width: "100%",
-  height: "clamp(420px, 55vh, 600px)",
   overflow: "hidden",
   background: "#0a0a0a",
 };
@@ -59,9 +58,15 @@ export default function HomeLoading() {
         @media (prefers-reduced-motion: reduce) {
           [data-home-pulse] { animation: none !important; opacity: 0.35; }
         }
+        .home-hero-skeleton {
+          height: clamp(500px, calc(100vh - 160px), 560px);
+        }
+        @media (max-width: 680px) {
+          .home-hero-skeleton { height: 760px; }
+        }
       `}</style>
 
-      <div style={heroStyle}>
+      <div className="home-hero-skeleton" style={heroStyle}>
         <div
           className="container"
           style={{

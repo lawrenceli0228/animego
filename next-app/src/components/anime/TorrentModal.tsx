@@ -50,6 +50,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, ApiError } from "@/lib/api";
 import FadeImage from "@/components/ui/FadeImage";
+import Link from "@/components/ui/LocaleLink";
+import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n";
 import {
   buildTorrentRequest,
@@ -489,6 +491,7 @@ export default function TorrentModal({
   onClose,
   lang,
 }: TorrentModalProps) {
+  const { t } = useLang();
   const defaultQ = anime.titleRomaji || anime.titleEnglish || "";
 
   // `query` is the search-box text. `manualQ` is the active manual override:
@@ -519,6 +522,9 @@ export default function TorrentModal({
 
     // Manual search with an empty box → nothing to query.
     if (skip) {
+      // Fetch lifecycle state is intentionally reset when the active request
+      // becomes empty; there is no external callback to move this into.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTorrents([]);
       setIsLoading(false);
       return;
@@ -608,6 +614,7 @@ export default function TorrentModal({
     anime.titleRomaji,
     anime.titleEnglish,
     anime.titleNative,
+    lang,
   ]);
 
   // Manual keyword search (search box Enter / button, or a title pill).
@@ -757,6 +764,61 @@ export default function TorrentModal({
             >
               ✕
             </button>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 14,
+              padding: "9px 11px",
+              border: "1px solid rgba(100,210,255,0.24)",
+              borderRadius: 9,
+              background: "rgba(10,132,255,0.08)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+              <span
+                aria-hidden
+                style={{
+                  flexShrink: 0,
+                  color: "#64d2ff",
+                  fontSize: 15,
+                  lineHeight: 1.3,
+                }}
+              >
+                ⇩
+              </span>
+              <p
+                style={{
+                  margin: 0,
+                  color: "rgba(235,235,245,0.58)",
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong style={{ color: "#9bd8ff", marginRight: 6 }}>
+                  {t("torrent.folderGuideTitle")}
+                </strong>
+                {t("torrent.folderGuideBody")}
+              </p>
+            </div>
+            <Link
+              href="/library"
+              prefetch={false}
+              onClick={onClose}
+              style={{
+                flexShrink: 0,
+                color: "#64d2ff",
+                fontSize: 11,
+                fontWeight: 700,
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {t("torrent.folderGuideCta")} →
+            </Link>
           </div>
 
           {/* Title variant pills */}

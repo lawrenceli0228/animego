@@ -1,34 +1,21 @@
 "use client";
 
-// Hero carousel for the legacy HomePage port (Phase 8.0).
-// Ported from client/src/components/anime/HeroCarousel.jsx.
-//
-// LCP: the first slide image is rendered as a raw <img> with
-// loading=eager + fetchPriority=high; the remaining slides lazy-load.
-// (We keep the same <img> approach as AnimeCard to avoid wiring
-// next/image remotePatterns for s4.anilist.co.)
-
 import Link from "@/components/ui/LocaleLink";
-import type { CSSProperties, KeyboardEvent } from "react";
-import { useCallback, useEffect, useState } from "react";
 import { genreLabel } from "@/lib/contentLabels";
 import { formatScore, pickTitle, stripHtml, truncate } from "@/lib/formatters";
 import type { Dict, Lang } from "@/lib/i18n";
 import { useLang } from "@/lib/lang-client";
 import type { SeasonalAnime } from "@/lib/types";
+import type { CSSProperties, FocusEvent, KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import styles from "./HeroCarousel.module.css";
 
 const INTERVAL_MS = 5000;
 
-// SeasonalAnime is the spec'd prop type, but the legacy carousel also
-// reads enriched fields (banner, description, genres, accent rgb) when
-// the homepage hydrates 3 known IDs with full detail. Read those via an
-// extended shape so the component degrades gracefully when only the
-// lean SeasonalAnime fields are present.
 type CarouselAnime = SeasonalAnime & {
   bannerImageUrl?: string | null;
   description?: string | null;
   genres?: string[];
-  posterAccentRgb?: string | null;
 };
 
 export interface HeroCarouselProps {
@@ -37,9 +24,8 @@ export interface HeroCarouselProps {
   lang: Lang;
 }
 
-// Season key -> dict lookup. SeasonalAnime.season is the AniList enum
-// string (WINTER/SPRING/SUMMER/FALL) which matches dict.season keys.
 type SeasonKey = "WINTER" | "SPRING" | "SUMMER" | "FALL";
+
 function seasonLabel(dict: Dict, season: string | null | undefined): string {
   if (!season) return "";
   const key = season.toUpperCase() as SeasonKey;
@@ -49,374 +35,282 @@ function seasonLabel(dict: Dict, season: string | null | undefined): string {
   return season;
 }
 
-const rootStyle: CSSProperties = {
-  position: "relative",
-  height: "clamp(420px, 55vh, 600px)",
-  overflow: "hidden",
-};
+function hexToRgb(value: string | null | undefined): string {
+  const hex = value?.trim().replace(/^#/, "");
+  if (!hex || !/^[0-9a-f]{3}([0-9a-f]{3})?$/i.test(hex)) return "96, 165, 250";
+  const normalized = hex.length === 3 ? [...hex].map((part) => part + part).join("") : hex;
+  return [0, 2, 4]
+    .map((offset) => Number.parseInt(normalized.slice(offset, offset + 2), 16))
+    .join(", ");
+}
 
-const slideBaseStyle: CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  transition: "opacity 0.9s ease",
-};
-
-const bgImgStyle: CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  width: "100%",
-  height: "100%",
-  objectFit: "cover",
-  objectPosition: "center top",
-  transition: "transform 6s ease",
-};
-
-const leftFadeStyle: CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  background:
-    "linear-gradient(to right, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.70) 55%, rgba(0,0,0,0.10) 100%)",
-};
-
-const bottomFadeStyle: CSSProperties = {
-  position: "absolute",
-  bottom: 0,
-  left: 0,
-  right: 0,
-  height: "40%",
-  background: "linear-gradient(to top, #000000, transparent)",
-};
-
-const containerStyle: CSSProperties = {
-  position: "relative",
-  height: "100%",
-  display: "flex",
-  alignItems: "center",
-};
-
-const copyWrapStyle: CSSProperties = { maxWidth: 560 };
-
-const eyebrowStyle: CSSProperties = {
-  fontSize: 12,
-  fontWeight: 700,
-  letterSpacing: "2px",
-  textTransform: "uppercase",
-  color: "#0a84ff",
-  marginBottom: 12,
-};
-
-const titleStyle: CSSProperties = {
-  fontSize: "clamp(24px, 3.5vw, 46px)",
-  fontFamily: "'Sora', sans-serif",
-  fontWeight: 800,
-  lineHeight: 1.15,
-  marginBottom: 16,
-  color: "#ffffff",
-  textShadow: "0 2px 20px rgba(0,0,0,0.6)",
-};
-
-const genresRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-  marginBottom: 14,
-};
-
-const genreChipStyle: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 500,
-  padding: "3px 10px",
-  borderRadius: 9999,
-  background: "rgba(120,120,128,0.12)",
-  color: "rgba(235,235,245,0.60)",
-};
-
-const descStyle: CSSProperties = {
-  fontSize: 14,
-  color: "rgba(235,235,245,0.60)",
-  lineHeight: 1.7,
-  marginBottom: 20,
-};
-
-const ctaRowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 16,
-};
-
-const scoreWrapStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-};
-
-const starStyle: CSSProperties = { fontSize: 20, color: "#ff9f0a" };
-
-const scoreNumStyle: CSSProperties = {
-  fontSize: 22,
-  fontWeight: 800,
-  color: "#ffffff",
-  fontFamily: "'JetBrains Mono', monospace",
-};
-
-const ctaLinkBaseStyle: CSSProperties = {
-  padding: "10px 28px",
-  borderRadius: 8,
-  background: "#0a84ff",
-  color: "#fff",
-  fontWeight: 500,
-  fontSize: 14,
-  fontFamily: "'DM Sans', sans-serif",
-  textDecoration: "none",
-  transition: "background 0.15s",
-};
-
-const arrowBtnBaseStyle: CSSProperties = {
-  position: "absolute",
-  top: "50%",
-  transform: "translateY(-50%)",
-  width: 44,
-  height: 44,
-  borderRadius: "50%",
-  border: "none",
-  cursor: "pointer",
-  background: "rgba(255,255,255,0.1)",
-  backdropFilter: "blur(8px)",
-  WebkitBackdropFilter: "blur(8px)",
-  color: "#ffffff",
-  fontSize: 22,
-  fontWeight: 700,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  transition: "background 0.2s",
-  zIndex: 10,
-};
-
-const dotsRowStyle: CSSProperties = {
-  position: "absolute",
-  bottom: 24,
-  left: "50%",
-  transform: "translateX(-50%)",
-  display: "flex",
-  gap: 8,
-  zIndex: 10,
-};
-
-const dotBtnStyle: CSSProperties = {
-  height: 44,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  border: "none",
-  cursor: "pointer",
-  background: "transparent",
-  padding: "0 4px",
+type HeroVariables = CSSProperties & {
+  "--hero-accent": string;
+  "--hero-accent-rgb": string;
 };
 
 export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProps) {
-  // Genre chips resolve against the reader's cookie preference, not the
-  // `lang` prop (which is the URL's locale). See the note in AnimeCard.
-  const { lang: viewerLang } = useLang();
+  const { lang: viewerLang, t } = useLang();
   const [current, setCurrent] = useState(0);
-  const [paused, setPaused] = useState(false);
+  const [manuallyPaused, setManuallyPaused] = useState(false);
+  const [temporarilyPaused, setTemporarilyPaused] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const remainingRef = useRef(INTERVAL_MS);
+  const activeRailRef = useRef<HTMLButtonElement | null>(null);
 
   const len = animeList.length;
+  const currentIndex = current < len ? current : 0;
+  const isPaused = manuallyPaused || temporarilyPaused || prefersReducedMotion;
 
-  const next = useCallback(() => {
-    if (len === 0) return;
-    setCurrent((c) => (c + 1) % len);
-  }, [len]);
+  const show = useCallback(
+    (index: number) => {
+      if (len === 0) return;
+      remainingRef.current = INTERVAL_MS;
+      setCurrent((index + len) % len);
+    },
+    [len],
+  );
 
-  const prev = useCallback(() => {
-    if (len === 0) return;
-    setCurrent((c) => (c - 1 + len) % len);
-  }, [len]);
+  const next = useCallback(() => show(currentIndex + 1), [currentIndex, show]);
+  const previous = useCallback(() => show(currentIndex - 1), [currentIndex, show]);
 
-  // Auto-rotate: every INTERVAL_MS unless paused (hover) or <2 slides.
   useEffect(() => {
-    if (paused || len < 2) return;
-    const id = setInterval(next, INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [paused, next, len]);
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setPrefersReducedMotion(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
 
-  // Arrow-key nav for keyboard users.
+  useEffect(() => {
+    remainingRef.current = INTERVAL_MS;
+  }, [currentIndex, len]);
+
+  useEffect(() => {
+    if (isPaused || len < 2) return;
+
+    const remaining = remainingRef.current;
+    const startedAt = window.performance.now();
+    const timer = window.setTimeout(next, remaining);
+
+    return () => {
+      window.clearTimeout(timer);
+      const elapsed = window.performance.now() - startedAt;
+      remainingRef.current = Math.max(0, remaining - elapsed);
+    };
+  }, [currentIndex, isPaused, len, next]);
+
+  useEffect(() => {
+    activeRailRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [currentIndex, prefersReducedMotion]);
+
   const onKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        prev();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        previous();
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
         next();
       }
     },
-    [next, prev],
+    [next, previous],
   );
+
+  const onBlurCapture = useCallback((event: FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) setTemporarilyPaused(false);
+  }, []);
 
   if (len === 0) return null;
 
+  const activeAnime = animeList[currentIndex] ?? animeList[0];
+  // Drives atmosphere only — the eyebrow rule, the progress bar, hover washes.
+  // The primary button deliberately does not read this; see .primaryAction in
+  // the stylesheet for why. Falls back to the system accent so a cover with no
+  // extracted colour still looks like this site rather than a near-miss blue.
+  const activeAccent = activeAnime.posterAccent || "#0a84ff";
+  const activeTitle = pickTitle(activeAnime, lang);
+  const heroVariables: HeroVariables = {
+    "--hero-accent": activeAccent,
+    "--hero-accent-rgb": hexToRgb(activeAccent),
+  };
+
   return (
-    <div
-      style={rootStyle}
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
+    <section
+      className={styles.root}
+      style={heroVariables}
+      data-paused={isPaused}
+      onMouseEnter={() => setTemporarilyPaused(true)}
+      onMouseLeave={() => setTemporarilyPaused(false)}
+      onFocusCapture={() => setTemporarilyPaused(true)}
+      onBlurCapture={onBlurCapture}
       onKeyDown={onKeyDown}
       tabIndex={0}
       role="region"
+      aria-roledescription="carousel"
       aria-label="Featured anime carousel"
     >
-      {animeList.map((anime, i) => {
-        const isActive = i === current;
-        // Banner load window: only the active slide + its two neighbors mount
-        // their <img>. The outgoing (prev) slide stays mounted to fade OUT; the
-        // incoming (next) slide is preloaded so the crossfade is instant. The
-        // rest render a neutral placeholder until they rotate into the window.
-        // Opacity:0 does NOT make an <img> off-screen, so loading="lazy" alone
-        // never deferred them — gating the render keeps ~2 hidden banners off
-        // the initial critical path.
+      {animeList.map((anime, index) => {
+        const isActive = index === currentIndex;
         const inWindow =
-          i === current ||
-          i === (current + 1) % len ||
-          i === (current - 1 + len) % len;
-        const bg = anime.bannerImageUrl || anime.coverImageUrl || "";
+          index === currentIndex ||
+          index === (currentIndex + 1) % len ||
+          index === (currentIndex - 1 + len) % len;
+        const desktopArt = anime.bannerImageUrl || anime.coverImageUrl || "";
+        const mobileArt = anime.coverImageUrl || desktopArt;
         const title = pickTitle(anime, lang);
-        const slideStyle: CSSProperties = {
-          ...slideBaseStyle,
-          opacity: isActive ? 1 : 0,
-          pointerEvents: isActive ? "auto" : "none",
-        };
-        const imgDynamicStyle: CSSProperties = {
-          ...bgImgStyle,
-          transform: isActive ? "scale(1.03)" : "scale(1)",
-        };
+        const description = anime.description
+          ? truncate(stripHtml(anime.description), 130)
+          : null;
 
         return (
-          <div key={anime.anilistId} style={slideStyle} aria-hidden={!isActive} inert={!isActive}>
-            {bg && inWindow ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={bg}
-                alt=""
-                aria-hidden
-                // First slide is the LCP candidate -> eager + high priority.
-                // The other in-window slides render now so they're decoded
-                // before they become active (the crossfade needs them ready).
-                loading={i === 0 ? "eager" : "lazy"}
-                fetchPriority={i === 0 ? "high" : "auto"}
-                decoding={i === 0 ? "sync" : "async"}
-                style={imgDynamicStyle}
-              />
+          <article
+            key={anime.anilistId}
+            className={`${styles.slide} ${isActive ? styles.slideActive : ""}`}
+            aria-hidden={!isActive}
+            inert={!isActive}
+          >
+            {desktopArt && inWindow ? (
+              <picture className={styles.artwork}>
+                {mobileArt ? <source media="(max-width: 680px)" srcSet={mobileArt} /> : null}
+                <img
+                  className={styles.art}
+                  src={desktopArt}
+                  alt=""
+                  aria-hidden
+                  loading={index === 0 ? "eager" : "lazy"}
+                  fetchPriority={index === 0 ? "high" : "auto"}
+                  decoding={index === 0 ? "sync" : "async"}
+                />
+              </picture>
             ) : (
-              <div style={{ ...imgDynamicStyle, background: "#1c1c1e" }} aria-hidden />
+              <div className={`${styles.artwork} ${styles.placeholder}`} aria-hidden />
             )}
-            <div style={leftFadeStyle} />
-            <div style={bottomFadeStyle} />
 
-            <div className="container" style={containerStyle}>
-              <div style={copyWrapStyle}>
-                {anime.season && anime.seasonYear ? (
-                  <p style={eyebrowStyle}>
-                    {seasonLabel(dict, anime.season)} {anime.seasonYear}
-                  </p>
+            <div className={styles.copy}>
+              {anime.season && anime.seasonYear ? (
+                <p className={styles.eyebrow}>
+                  {anime.seasonYear} {seasonLabel(dict, anime.season)} · Seasonal focus
+                </p>
+              ) : null}
+
+              <h2 className={styles.title}>{title}</h2>
+
+              <div className={styles.metaRow}>
+                {anime.averageScore != null && anime.averageScore > 0 ? (
+                  <span className={styles.scoreChip}>
+                    <span aria-hidden>★</span>
+                    {formatScore(anime.averageScore)}
+                  </span>
                 ) : null}
-                {/* h2: the page-level <h1> is the brand heading on the
-                    homepage (app/page.tsx); the hero anime title is a
-                    featured sub-heading. */}
-                <h2 style={titleStyle}>{title}</h2>
-                {anime.genres && anime.genres.length > 0 ? (
-                  <div style={genresRowStyle}>
-                    {anime.genres.slice(0, 4).map((g) => (
-                      <span key={g} style={genreChipStyle}>
-                        {genreLabel(g, viewerLang)}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                {anime.description ? (
-                  <p style={descStyle}>{truncate(stripHtml(anime.description), 130)}</p>
-                ) : null}
-                <div style={ctaRowStyle}>
-                  {anime.averageScore != null && anime.averageScore > 0 ? (
-                    <div style={scoreWrapStyle}>
-                      <span style={starStyle}>★</span>
-                      <span style={scoreNumStyle}>{formatScore(anime.averageScore)}</span>
-                    </div>
-                  ) : null}
-                  <Link
-                    href={`/anime/${anime.anilistId}`}
-                    prefetch={false}
-                    style={ctaLinkBaseStyle}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "#409cff";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "#0a84ff";
-                    }}
-                  >
-                    {dict.detail.viewDetails}
-                  </Link>
-                </div>
+                {anime.format ? <span className={styles.metaChip}>{anime.format}</span> : null}
+                {anime.genres?.slice(0, 2).map((genre) => (
+                  <span key={genre} className={styles.metaChip}>
+                    {genreLabel(genre, viewerLang)}
+                  </span>
+                ))}
+              </div>
+
+              {description ? <p className={styles.description}>{description}</p> : null}
+
+              <div className={styles.actions}>
+                <Link
+                  href={`/anime/${anime.anilistId}`}
+                  prefetch={false}
+                  className={styles.primaryAction}
+                >
+                  {dict.detail.viewDetails}
+                  <span aria-hidden>→</span>
+                </Link>
+                <Link href="/player" prefetch={false} className={styles.secondaryAction}>
+                  <span aria-hidden>▶</span>
+                  {t("playerGuide.trialCta")}
+                </Link>
               </div>
             </div>
-          </div>
+          </article>
         );
       })}
 
+      {/* Position, not mechanism. "01 / 05" tells a reader how much is here and
+        * where they are in it. The rotation interval told them how the
+        * component was built, which is our concern rather than theirs — and it
+        * sat in the most expensive pixels on the site to say it. The pause
+        * control below carries the only part of that state anyone can act on. */}
+      <div className={styles.status} aria-hidden>
+        <span className={styles.slideCount}>
+          <strong>{String(currentIndex + 1).padStart(2, "0")}</strong> / {String(len).padStart(2, "0")}
+        </span>
+      </div>
+
+      <p className={styles.sideLabel} aria-hidden>
+        AnimeGoClub · Seasonal Pickup
+      </p>
+
       <button
         type="button"
-        onClick={prev}
+        className={`${styles.arrow} ${styles.previous}`}
+        onClick={previous}
         aria-label="Previous slide"
-        style={{ ...arrowBtnBaseStyle, left: 24 }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "rgba(10,132,255,0.5)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "rgba(255,255,255,0.1)";
-        }}
       >
-        {"‹"}
+        ‹
       </button>
       <button
         type="button"
+        className={`${styles.arrow} ${styles.next}`}
         onClick={next}
         aria-label="Next slide"
-        style={{ ...arrowBtnBaseStyle, right: 24 }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "rgba(10,132,255,0.5)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "rgba(255,255,255,0.1)";
-        }}
       >
-        {"›"}
+        ›
       </button>
 
-      <div style={dotsRowStyle}>
-        {animeList.map((_, i) => {
-          const isActive = i === current;
-          const pillStyle: CSSProperties = {
-            display: "block",
-            height: 6,
-            borderRadius: 3,
-            width: isActive ? 28 : 6,
-            background: isActive ? "#0a84ff" : "rgba(255,255,255,0.35)",
-            transition: "all 0.35s ease",
-          };
-          return (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setCurrent(i)}
-              aria-label={`Slide ${i + 1}`}
-              aria-current={isActive}
-              style={dotBtnStyle}
-            >
-              <span style={pillStyle} />
-            </button>
-          );
-        })}
+      <div className={styles.rail}>
+        <div className={styles.railList} role="tablist" aria-label="Featured anime">
+          {animeList.map((anime, index) => {
+            const isActive = index === currentIndex;
+            return (
+              <button
+                key={anime.anilistId}
+                ref={isActive ? activeRailRef : undefined}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-label={`Slide ${index + 1}: ${pickTitle(anime, lang)}`}
+                className={`${styles.railItem} ${isActive ? styles.railItemActive : ""}`}
+                onClick={() => show(index)}
+              >
+                <span className={styles.railNumber}>{String(index + 1).padStart(2, "0")}</span>
+                <span className={styles.railTitle}>{pickTitle(anime, lang)}</span>
+                <span className={styles.railProgress} aria-hidden />
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          className={styles.pauseButton}
+          onClick={() => setManuallyPaused((value) => !value)}
+          aria-label={manuallyPaused ? "Resume auto rotation" : "Pause auto rotation"}
+          aria-pressed={manuallyPaused}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            {manuallyPaused ? (
+              <path d="m8 5 11 7-11 7V5Z" />
+            ) : (
+              <path d="M7 5h3v14H7V5Zm7 0h3v14h-3V5Z" />
+            )}
+          </svg>
+        </button>
       </div>
-    </div>
+
+      <p className={styles.srOnly} aria-live="polite">
+        {currentIndex + 1} / {len}: {activeTitle}
+      </p>
+    </section>
   );
 }

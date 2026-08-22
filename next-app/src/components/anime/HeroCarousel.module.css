@@ -1,0 +1,659 @@
+.root {
+  --desktop-media-height: min(21.0526vw, 400px);
+  --desktop-copy-top: clamp(238px, 21.2vw, 320px);
+  /* Fallback for a title whose cover produced no accent. The system accent
+   * rather than a near-miss blue: an off-palette default is how a design
+   * system quietly grows a second brand colour. */
+  --hero-accent: #0a84ff;
+  --hero-accent-rgb: 10, 132, 255;
+  position: relative;
+  isolation: isolate;
+  height: clamp(500px, calc(100vh - 160px), 560px);
+  min-height: 500px;
+  overflow: hidden;
+  outline: none;
+  background: #07090c;
+}
+
+.root:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--hero-accent);
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 720ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.slideActive {
+  z-index: 1;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.artwork {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: var(--desktop-media-height);
+  overflow: hidden;
+  background: #0b0d11;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  filter: saturate(1.04) contrast(1.02) brightness(1.03);
+  transform: scale(0.998);
+  transform-origin: center;
+  transition:
+    transform 6s cubic-bezier(0.2, 0.75, 0.3, 1),
+    filter 400ms ease;
+}
+
+.slideActive .art {
+  transform: scale(1);
+}
+
+.placeholder {
+  background: #111318;
+}
+
+.copy {
+  position: absolute;
+  top: var(--desktop-copy-top);
+  right: clamp(24px, 3vw, 46px);
+  bottom: 72px;
+  left: clamp(24px, 5vw, 76px);
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(300px, 0.72fr);
+  grid-template-areas:
+    "eyebrow description"
+    "title description"
+    "meta actions";
+  column-gap: clamp(36px, 6vw, 90px);
+  align-content: center;
+}
+
+.eyebrow {
+  grid-area: eyebrow;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 11px;
+  font-weight: 780;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 28px;
+  height: 2px;
+  flex: 0 0 auto;
+  background: var(--hero-accent);
+}
+
+.title {
+  grid-area: title;
+  max-width: 760px;
+  margin: 0;
+  color: #f7f8fb;
+  font-family: var(--font-display);
+  font-size: clamp(32px, 4vw, 56px);
+  font-weight: 820;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.metaRow {
+  grid-area: meta;
+  margin-top: 15px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.scoreChip,
+.metaChip {
+  height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scoreChip {
+  border-color: rgba(var(--hero-accent-rgb), 0.3);
+  background: rgba(var(--hero-accent-rgb), 0.12);
+  color: #f7f8fb;
+}
+
+.description {
+  grid-area: description;
+  max-width: 480px;
+  align-self: end;
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 14px;
+  line-height: 1.72;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.actions {
+  grid-area: actions;
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+}
+
+.primaryAction,
+.secondaryAction {
+  min-height: 45px;
+  padding: 0 19px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 2px;
+  font-size: 13px;
+  font-weight: 740;
+  text-decoration: none;
+  transition:
+    transform 160ms ease,
+    background 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+}
+
+/* The one element in this component that does NOT take the poster's colour.
+ *
+ * --hero-accent changes every time the carousel advances, and this is the
+ * primary call to action. Letting it follow the poster means the site's one
+ * learned signal — blue is what you can press — gets overwritten every few
+ * seconds on the first button a visitor ever sees. It also loses the contrast
+ * guarantee: a poster accent is whatever colour happened to dominate the art,
+ * and some of them cannot carry legible text.
+ *
+ * The poster colour still does everything else in here: the eyebrow rule, the
+ * progress bar, the focus ring on the slide, the secondary button's hover
+ * wash. The slide keeps its identity; the button keeps its meaning. */
+.primaryAction {
+  background: var(--accent, #0a84ff);
+  color: #ffffff;
+}
+
+.primaryAction:hover {
+  background: #409cff;
+  transform: translateY(-2px);
+}
+
+.primaryAction:active {
+  background: #0070d6;
+}
+
+.secondaryAction {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #f7f8fb;
+}
+
+.secondaryAction:hover {
+  border-color: rgba(var(--hero-accent-rgb), 0.46);
+  background: rgba(var(--hero-accent-rgb), 0.14);
+  transform: translateY(-2px);
+}
+
+.status {
+  position: absolute;
+  top: clamp(22px, 4vw, 42px);
+  right: clamp(22px, 3vw, 46px);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.slideCount {
+  height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #1a1d22;
+  border-radius: 2px;
+  background: #111318;
+  color: rgba(255, 255, 255, 0.62);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.slideCount strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.sideLabel {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  z-index: 5;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.34);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.17em;
+  line-height: 1;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  transform: translateY(-4%);
+}
+
+.arrow {
+  position: absolute;
+  top: 25%;
+  z-index: 6;
+  width: 45px;
+  height: 45px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 50%;
+  background: rgba(15, 17, 20, 0.78);
+  color: #fff;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+  opacity: 0;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    background 180ms ease;
+}
+
+.root:hover .arrow,
+.root:focus-within .arrow {
+  opacity: 1;
+}
+
+.arrow:hover {
+  background: rgba(var(--hero-accent-rgb), 0.24);
+}
+
+.previous {
+  left: 16px;
+  transform: translateX(-5px);
+}
+
+.next {
+  right: 16px;
+  transform: translateX(5px);
+}
+
+.root:hover .previous,
+.root:focus-within .previous,
+.root:hover .next,
+.root:focus-within .next {
+  transform: translateX(0);
+}
+
+.rail {
+  position: absolute;
+  right: clamp(24px, 3vw, 46px);
+  bottom: 16px;
+  left: clamp(24px, 5vw, 76px);
+  z-index: 7;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+}
+
+.railList {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.railItem {
+  position: relative;
+  min-width: 0;
+  height: 38px;
+  padding: 8px 9px 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  text-align: left;
+  opacity: 0.6;
+  transition:
+    opacity 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.railItem:hover {
+  opacity: 0.9;
+}
+
+.railItemActive {
+  border-color: rgba(var(--hero-accent-rgb), 0.7);
+  opacity: 1;
+}
+
+.railNumber {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.railTitle {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.railProgress {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  bottom: auto;
+  left: 0;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 0;
+}
+
+.railProgress::after {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--hero-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.railItemActive .railProgress::after {
+  animation: railFill 5s linear forwards;
+}
+
+.railItemActive .railProgress {
+  opacity: 1;
+}
+
+.root[data-paused="true"] .railItemActive .railProgress::after {
+  animation-play-state: paused;
+}
+
+.pauseButton {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+}
+
+.pauseButton:hover {
+  border-color: var(--hero-accent);
+  color: #fff;
+}
+
+.pauseButton svg {
+  width: 15px;
+  height: 15px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes railFill {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (min-width: 1600px) {
+  .root {
+    height: calc(var(--desktop-media-height) + 270px);
+    min-height: calc(var(--desktop-media-height) + 270px);
+  }
+
+  .copy {
+    top: var(--desktop-media-height);
+  }
+
+  .arrow {
+    top: min(10.5263vw, 200px);
+  }
+}
+
+@media (max-width: 900px) {
+  .copy {
+    width: min(570px, calc(100% - 48px));
+  }
+
+  .railList {
+    overflow-x: auto;
+    grid-template-columns: repeat(5, 150px);
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, #000 88%, transparent);
+  }
+
+  .railList::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .root {
+    --desktop-media-height: 0px;
+    height: 760px;
+    min-height: 760px;
+  }
+
+  .artwork {
+    top: 18px;
+    right: 16px;
+    left: auto;
+    width: min(58vw, 230px);
+    height: auto;
+    aspect-ratio: 46 / 65;
+    overflow: visible;
+    background: transparent;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.16),
+      14px 14px 0 rgba(var(--hero-accent-rgb), 0.12);
+  }
+
+  .art {
+    object-fit: contain;
+    filter: saturate(1.06) contrast(1.02) brightness(1.04);
+    transform-origin: center top;
+  }
+
+  .copy {
+    top: 365px;
+    right: 18px;
+    bottom: 112px;
+    left: 18px;
+    width: calc(100% - 36px);
+    display: block;
+  }
+
+  .eyebrow {
+    margin-bottom: 12px;
+    font-size: 9px;
+  }
+
+  .title {
+    max-width: 100%;
+    font-size: clamp(32px, 9.6vw, 42px);
+    line-height: 1.02;
+  }
+
+  .metaRow {
+    margin-top: 16px;
+  }
+
+  .description {
+    margin-top: 13px;
+    font-size: 13px;
+    line-height: 1.62;
+  }
+
+  .actions {
+    margin-top: 19px;
+  }
+
+  .primaryAction {
+    min-height: 43px;
+    padding: 0 15px;
+  }
+
+  /* The guest trial is desktop-only, so the door to it is too.
+   *
+   * /player needs the File System Access API, which no mobile browser ships.
+   * A phone visitor who took this route reached a page that said "use a
+   * computer" and stopped there: no reason, no way back, nothing to do. That
+   * is a worse outcome than never seeing the button, because they spent a tap
+   * to learn the site was broken for them.
+   *
+   * Hidden rather than disabled: a disabled control still asks to be
+   * understood. If mobile ever gets a story here, this rule is the one place
+   * to undo. */
+  .secondaryAction {
+    display: none;
+  }
+
+  .status {
+    top: 18px;
+    right: auto;
+    left: 18px;
+  }
+
+  .sideLabel {
+    top: 76px;
+    right: auto;
+    left: 20px;
+    width: 92px;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    line-height: 1.8;
+    writing-mode: horizontal-tb;
+    transform: none;
+  }
+
+  .arrow {
+    display: none;
+  }
+
+  .rail {
+    right: 16px;
+    bottom: 14px;
+    left: 18px;
+    gap: 9px;
+  }
+
+  .railList {
+    min-width: 0;
+    overflow-x: auto;
+    gap: 7px;
+    grid-template-columns: repeat(5, 128px);
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, #000 88%, transparent);
+  }
+
+  .railList::-webkit-scrollbar {
+    display: none;
+  }
+
+  .railItem {
+    min-width: 128px;
+    height: 42px;
+    flex: 0 0 128px;
+  }
+
+  .pauseButton {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide,
+  .art,
+  .primaryAction,
+  .secondaryAction,
+  .arrow,
+  .railItem {
+    transition-duration: 0.01ms;
+  }
+
+  .railItemActive .railProgress::after {
+    animation: none;
+    transform: scaleX(1);
+  }
+}

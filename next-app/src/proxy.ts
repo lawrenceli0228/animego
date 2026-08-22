@@ -25,13 +25,12 @@ import {
 //      browser (Set-Cookie). Without this, a logged-in user looks logged
 //      out after 15 min on any navigation / language toggle.
 //
-//   2. AUTH GATE (/admin, /library, /player, /profile) — verify the (now
+//   2. AUTH GATE (/admin, /library, library-mode /player, /profile) — verify the (now
 //      possibly refreshed) session against JWT_SECRET and redirect to
 //      /login?from=<path> if absent/expired/tampered. /admin additionally
-//      requires role "admin". Library + Player ride the same gate because
-//      Dexie + File System Access + jassub live behind auth in the legacy
-//      SPA, and the P6 reauth E2E needs a server-side redirect. /profile
-//      (P11) is the user's own subscription list — auth-only.
+//      requires role "admin". Bare /player is a public local-file trial;
+//      /player?seriesId=... stays gated because it opens a user's persisted
+//      library. /profile (P11) is the user's own subscription list — auth-only.
 //
 // Runtime: Next 16 renamed the deprecated `middleware` convention to this
 // `proxy.ts`. Proxy runs on the Node.js runtime (the `runtime` config is
@@ -68,11 +67,11 @@ export const config = {
 // the bug this signature exists to prevent: "/en/library" starts with
 // neither "/library" nor anything else in the list, so an English visitor
 // would have walked straight past the gate.
-function isGated(path: string): boolean {
+function isGated(path: string, searchParams: URLSearchParams): boolean {
   return (
     path.startsWith("/admin") ||
     path.startsWith("/library") ||
-    path.startsWith("/player") ||
+    (path.startsWith("/player") && searchParams.has("seriesId")) ||
     path.startsWith("/profile") ||
     path.startsWith("/settings")
   );
@@ -221,7 +220,7 @@ export async function proxy(req: NextRequest) {
   }
 
   // --- 2. Auth gate (only gated routes) ---
-  if (localize && isGated(path)) {
+  if (localize && isGated(path, req.nextUrl.searchParams)) {
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       // Misconfig: fail closed.
