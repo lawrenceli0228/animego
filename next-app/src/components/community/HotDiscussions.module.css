@@ -168,53 +168,34 @@
   letter-spacing: 0.5px;
 }
 
-.chromeMark {
-  position: relative;
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: conic-gradient(from -28deg, #ea4335 0 33.333%, #fbbc04 0 66.666%, #34a853 0);
-}
-
-.chromeMark::before,
-.chromeMark::after {
-  content: "";
-  position: absolute;
-  border-radius: 50%;
-}
-
-.chromeMark::before {
-  inset: 2.5px;
-  background: #f7f8fb;
-}
-
-.chromeMark::after {
-  inset: 4px;
-  border: 1px solid #8ab4f8;
-  background: #4285f4;
-}
-
-/* The browser requirement is a caveat, not a headline. It had its own bordered
- * panel, a green accent, a 44px logo and an all-caps label to say one thing:
- * this works best in desktop Chrome. At footnote scale beside the button it
- * says exactly that, at the moment the button is being considered. */
-.guideFootnote {
+/* The browser requirement, beside the button it is a requirement for.
+ *
+ * It used to be a bordered panel with a green accent, a 44px Chrome logo and
+ * an all-caps label — a headline for a caveat. The correction overshot into a
+ * 10.5px grey line nobody reads. This is the middle: the browser name in white
+ * at the weight of a label, the reason after it in ordinary body grey, and an
+ * accent rule on the left so the eye catches it on the way to the button. No
+ * logo — a four-colour mark drawn in CSS at 14px is a smudge, and the word
+ * "Chrome" identifies Chrome perfectly well. */
+.guideNote {
   min-width: 0;
-  margin: 0 0 0 4px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: rgba(235, 235, 245, 0.44);
-  font-size: 10.5px;
-  line-height: 1.4;
+  margin: 0 0 0 6px;
+  padding-left: 11px;
+  border-left: 2px solid rgba(10, 132, 255, 0.55);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
-/* The text needs its own element to be shrinkable: a bare text node in a flex
- * container becomes an anonymous item with min-width:auto, so it refuses to
- * wrap and runs off the strip on narrow screens. */
-.guideFootnote > span {
-  min-width: 0;
+.guideNote > span {
+  color: rgba(235, 235, 245, 0.62);
+  font-weight: 400;
+}
+
+.guideNote > span::before {
+  content: " · ";
+  color: rgba(235, 235, 245, 0.38);
 }
 
 .guideActions {
@@ -473,15 +454,10 @@
     min-height: 34px !important;
   }
 
-  /* The footnote stops being a footnote once the buttons stack full-width:
-   * left-align it under them rather than centring it like a third button. */
-  .guideFootnote {
+  /* Once the buttons stack full-width the note is a row of its own, so it
+   * loses the indent that separated it from the button beside it. */
+  .guideNote {
     margin-left: 0;
-    align-items: flex-start;
-  }
-
-  .guideFootnote .chromeMark {
-    margin-top: 2px;
   }
 
   /* She goes. On a 358px strip she has to sit behind the copy to fit, and a

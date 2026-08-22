@@ -130,7 +130,15 @@ const idleStage: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   justifyContent: "center",
-  gap: 20,
+
+  // One column, one width. The trial banner and the drop target are the whole
+  // page here, and they were arriving at 598px and 459px respectively — each
+  // shrink-wrapped to its own content because both carry auto cross-axis
+  // margins. Two centred boxes of different widths read as a layout that has
+  // not decided anything. 720 is the drop target's designed width; the banner
+  // now shares it, so the two edges line up.
+  width: "min(720px, 100%)",
+  margin: "0 auto",
 };
 
 const HUE = PLAYER_HUE.stream;
@@ -172,8 +180,12 @@ const s = {
     color: "#ffffff",
   } as CSSProperties,
   trialBanner: {
+    width: "100%",
     maxWidth: 720,
-    margin: "28px auto -42px",
+    // Was `28px auto -42px`: the negative bottom cancelled the drop target's
+    // 64px top when the two were bare siblings. They share a stage now, so the
+    // gap is just that 64px and the auto sides are the stage's job.
+    margin: 0,
     padding: "13px 16px",
     display: "flex",
     alignItems: "center",
@@ -1333,9 +1345,12 @@ function PlayerShellInner() {
         </div>
       )}
 
-      {/* IDLE fallback when in library mode but not yet ready */}
+      {/* IDLE fallback when in library mode but not yet ready.
+        * Same stage as the trial idle above, minus the banner: arriving from
+        * the library is not a reason to see the drop target pinned to the top
+        * of the window with half a screen of black under it. */}
       {locationSeriesId && seriesDetail.status === "idle" && (
-        <div style={fadeUp}>
+        <div style={idleStage}>
           <DropZone onFiles={handleFiles} />
         </div>
       )}

@@ -830,43 +830,63 @@ export default function TorrentModal({
                 flexWrap: "wrap",
               }}
             >
-              {titleOptions.map((opt) => (
-                <button
-                  type="button"
-                  key={opt.label}
-                  onClick={() => applyTitle(opt.value)}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(10,132,255,0.6)";
-                    e.currentTarget.style.color = "#0a84ff";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(84,84,88,0.65)";
-                    e.currentTarget.style.color = "rgba(235,235,245,0.50)";
-                  }}
-                  style={{
-                    padding: "3px 10px",
-                    borderRadius: 20,
-                    border: "1px solid rgba(84,84,88,0.65)",
-                    background: "transparent",
-                    color: "rgba(235,235,245,0.50)",
-                    fontSize: 11,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  <span
+              {titleOptions.map((opt) => {
+                // These pills had no selected state at all — every one rendered
+                // the same outline, and the blue that looked like a selection
+                // was only the hover. So the row could not answer the one
+                // question it exists to answer: which title are these results
+                // for. The predicate is `manualQ`, not the search-box text,
+                // because typing freely should deselect all of them; and it is
+                // null on open, which correctly shows nothing selected while
+                // the server is still expanding every variant at once.
+                //
+                // Filled-blue-vs-grey rather than a new treatment: the episode
+                // pills directly below are the same kind of control and this is
+                // already how they say "selected".
+                const isActive = manualQ !== null && manualQ === opt.value;
+                return (
+                  <button
+                    type="button"
+                    key={opt.label}
+                    aria-pressed={isActive}
+                    onClick={() => applyTitle(opt.value)}
+                    onMouseEnter={(e) => {
+                      if (isActive) return;
+                      e.currentTarget.style.background = "rgba(255,255,255,0.12)";
+                      e.currentTarget.style.color = "rgba(235,235,245,0.85)";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (isActive) return;
+                      e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+                      e.currentTarget.style.color = "rgba(235,235,245,0.50)";
+                    }}
                     style={{
-                      color: "rgba(235,235,245,0.35)",
-                      marginRight: 4,
+                      padding: "3px 10px",
+                      borderRadius: 20,
+                      border: "none",
+                      background: isActive ? "#0a84ff" : "rgba(255,255,255,0.06)",
+                      color: isActive ? "#fff" : "rgba(235,235,245,0.50)",
+                      fontSize: 11,
+                      fontWeight: isActive ? 600 : 500,
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    {opt.label}
-                  </span>
-                  {opt.value.length > 18 ? opt.value.slice(0, 18) + "…" : opt.value}
-                </button>
-              ))}
+                    <span
+                      style={{
+                        color: isActive
+                          ? "rgba(255,255,255,0.62)"
+                          : "rgba(235,235,245,0.35)",
+                        marginRight: 4,
+                      }}
+                    >
+                      {opt.label}
+                    </span>
+                    {opt.value.length > 18 ? opt.value.slice(0, 18) + "…" : opt.value}
+                  </button>
+                );
+              })}
             </div>
           )}
 

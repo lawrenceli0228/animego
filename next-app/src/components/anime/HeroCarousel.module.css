@@ -1,6 +1,28 @@
 .root {
   --desktop-media-height: min(21.0526vw, 400px);
-  --desktop-copy-top: clamp(238px, 21.2vw, 320px);
+
+  /* How far the copy climbs onto the artwork.
+   *
+   * It used to start exactly where the art stopped — at ≥1600 literally
+   * `top: var(--desktop-media-height)` — so the two abutted and never
+   * overlapped. That is a picture with a caption under it, and no edge
+   * treatment fixes it, because the problem is not the edge: it is that there
+   * are two zones. The copy now sits on the lower third of the art, which is
+   * the only arrangement that makes them one composition. */
+  --hero-copy-lift: clamp(92px, 9.2vw, 170px);
+  --desktop-copy-top: calc(var(--desktop-media-height) - var(--hero-copy-lift));
+
+  /* The page's own left edge, reproduced.
+   *
+   * Everything below this component lives in `.container` — max-width 1400,
+   * 24px padding, centred — so its text starts 284px in at 1920. The hero used
+   * `clamp(24px, 5vw, 76px)`, which put its title 208px to the left of every
+   * other heading on the page. The artwork stays full-bleed on purpose; the
+   * words in it should start where the page's words start.
+   *
+   * The percentage resolves against .root, which spans the full width, so this
+   * is the same arithmetic .container does — without importing it. */
+  --hero-gutter: max(24px, calc((100% - 1400px) / 2 + 24px));
   /* Fallback for a title whose cover produced no accent. The system accent
    * rather than a near-miss blue: an off-palette default is how a design
    * system quietly grows a second brand colour. */
@@ -8,8 +30,12 @@
   --hero-accent-rgb: 10, 132, 255;
   position: relative;
   isolation: isolate;
-  height: clamp(500px, calc(100vh - 160px), 560px);
-  min-height: 500px;
+
+  /* Driven by the art rather than by the viewport. The old
+   * `clamp(500px, 100vh - 160px, 560px)` left 150-plus pixels of black between
+   * the copy and the rail on wide screens, which is what forced the copy down
+   * to the art's edge in the first place. */
+  height: clamp(430px, calc(var(--desktop-copy-top) + 300px), 640px);
   overflow: hidden;
   outline: none;
   background: #07090c;
@@ -44,19 +70,32 @@
   overflow: hidden;
   background: #0b0d11;
 
-  /* Dissolve the bottom edge instead of drawing it.
-   *
-   * The art ends at --desktop-media-height and the copy begins two pixels
-   * later, so the two never overlap: the viewport was a picture stacked on a
-   * text block rather than one composition. A 1px white hairline used to sit
-   * on this seam, which underlined the very join the layout needed to hide.
-   *
-   * The mask fades the last third of the art into the black the copy sits on,
-   * so the eye reads one field with an image at the top of it. The existing
-   * side masks are `to right` and live in the narrow breakpoints; this is the
-   * vertical one, and it is the one the desktop composition was missing. */
-  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+}
+
+/* Darken toward the copy, do not fade toward it.
+ *
+ * A mask was the first attempt and it was wrong for a reason worth keeping:
+ * fading a bright banner to transparent over black produces a wide grey ramp,
+ * so a white block became a grey haze — a translucent layer floating on the
+ * page instead of part of it. A scrim paints the art down to the exact colour
+ * the page already is, so the bottom of the image and the top of the copy are
+ * literally the same pixel value and there is nothing to see a join in.
+ *
+ * It also has to be a scrim rather than a mask because the copy sits on top of
+ * this: text needs something opaque behind it, not a hole. */
+.artwork::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(7, 9, 12, 0) 18%,
+    rgba(7, 9, 12, 0.4) 48%,
+    rgba(7, 9, 12, 0.88) 78%,
+    #07090c 96%
+  );
 }
 
 .art {
@@ -65,7 +104,13 @@
   height: 100%;
   object-fit: contain;
   object-position: center;
-  filter: saturate(1.04) contrast(1.02) brightness(1.03);
+
+  /* brightness(0.55), not the 1.03 this used to carry. The page is near-black
+   * and the banner is whatever the studio drew — BLEACH's is a white
+   * explosion. Brightening it put a white block on a black page, which reads
+   * as two documents no matter how the boundary is treated. Bringing the art
+   * into the page's luminance range is what makes it belong to it. */
+  filter: saturate(1.06) contrast(1.04) brightness(0.55);
   transform: scale(0.998);
   transform-origin: center;
   transition:
@@ -84,9 +129,9 @@
 .copy {
   position: absolute;
   top: var(--desktop-copy-top);
-  right: clamp(24px, 3vw, 46px);
+  right: var(--hero-gutter);
   bottom: 72px;
-  left: clamp(24px, 5vw, 76px);
+  left: var(--hero-gutter);
   z-index: 3;
   display: grid;
   grid-template-columns: minmax(0, 1.12fr) minmax(300px, 0.72fr);
@@ -95,7 +140,14 @@
     "title description"
     "meta actions";
   column-gap: clamp(36px, 6vw, 90px);
-  align-content: center;
+
+  /* Start, not center. Centring meant the copy floated in whatever black was
+   * left below the art, so how far it climbed onto the image depended on the
+   * viewport: a clean overlap at 1840 and a title sitting 35px clear of the
+   * artwork at 768. Anchored to --desktop-copy-top the overlap is exactly
+   * --hero-copy-lift at every width, which is the whole point of having the
+   * variable. */
+  align-content: start;
 }
 
 .eyebrow {
@@ -288,9 +340,9 @@
 
 .rail {
   position: absolute;
-  right: clamp(24px, 3vw, 46px);
+  right: var(--hero-gutter);
   bottom: 16px;
-  left: clamp(24px, 5vw, 76px);
+  left: var(--hero-gutter);
   z-index: 7;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -432,15 +484,10 @@
 }
 
 @media (min-width: 1600px) {
-  .root {
-    height: calc(var(--desktop-media-height) + 270px);
-    min-height: calc(var(--desktop-media-height) + 270px);
-  }
-
-  .copy {
-    top: var(--desktop-media-height);
-  }
-
+  /* The height and copy-top overrides that used to live here are gone: both
+   * are now the same art-driven formula at every desktop width, and the
+   * `top: var(--desktop-media-height)` this block carried was the exact line
+   * that pinned the copy to the artwork's edge. */
   .arrow {
     top: min(10.5263vw, 200px);
   }
@@ -483,15 +530,18 @@
       0 0 0 1px rgba(255, 255, 255, 0.16),
       14px 14px 0 rgba(var(--hero-accent-rgb), 0.12);
 
-    /* No fade here — the mask is a desktop-only fix.
-     *
-     * Up there the art is full-bleed and butts against the copy, so its bottom
-     * edge is a seam worth dissolving. Down here it is a framed poster card
-     * with a deliberate hairline ring and an offset accent shadow, floated over
-     * the background with the copy well below it. There is no seam, and the
-     * mask would eat the very edges the card is made of. */
-    -webkit-mask-image: none;
-    mask-image: none;
+  }
+
+  /* No scrim here — the darkening treatment is desktop-only.
+   *
+   * Up there the art is full-bleed and the copy sits on it, so it has to be
+   * pushed down into the page's luminance range to hold text. Down here it is
+   * a framed poster card with a hairline ring and an offset accent shadow,
+   * floated over the background with the copy well below it. It is meant to
+   * read as an object, and an object that has been dimmed by half reads as
+   * disabled. */
+  .artwork::after {
+    display: none;
   }
 
   .art {

@@ -95,12 +95,16 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
             <Link href="/player" prefetch={false} className={styles.guideSecondary}>
               {t("communityDiscovery.libraryGuideTrial")}
             </Link>
-            <p className={styles.guideFootnote}>
-              <span className={styles.chromeMark} aria-hidden />
-              <span>
-                {t("communityDiscovery.libraryGuideChrome")} ·{" "}
-                {t("communityDiscovery.libraryGuideChromeNote")}
-              </span>
+            {/* A precondition, not a footnote.
+              * Demoting it to 10.5px grey with a 14px hand-drawn Chrome mark
+              * went too far in the other direction: nobody reads it, and a
+              * four-colour logo at that size is a smudge rather than a brand.
+              * Someone on Safari who misses this line presses the button and
+              * finds out the hard way, so it sits beside the button, at a size
+              * that can be read, with the browser name carrying the weight. */}
+            <p className={styles.guideNote}>
+              {t("communityDiscovery.libraryGuideChrome")}
+              <span>{t("communityDiscovery.libraryGuideChromeNote")}</span>
             </p>
           </div>
 
