@@ -12,6 +12,16 @@
 //
 // `priority`: above-the-fold / LCP image — render at full opacity
 // immediately (no fade) and load eagerly so its paint isn't delayed.
+//
+// Non-priority images deliberately do NOT get fetchPriority="low". They used
+// to, and it was actively harmful: `low` is not "after the priority ones", it
+// is a hard demotion that applies even once the image is in the viewport. On
+// a grid page (/seasonal, /library) the LCP element IS the first card, and no
+// card is marked priority there — so the site was demoting its own LCP. The
+// `loading="lazy"` below already keeps off-screen covers out of the way, which
+// is the part we actually wanted; leaving fetchPriority unset lets the browser
+// promote whatever it discovers in the viewport. Pass it explicitly at a call
+// site if some image genuinely deserves the demotion.
 
 import { useState } from "react";
 import type { ImgHTMLAttributes, SyntheticEvent } from "react";
@@ -37,7 +47,7 @@ export default function FadeImage({
     <img
       {...rest}
       loading={loading ?? (priority ? "eager" : "lazy")}
-      fetchPriority={fetchPriority ?? (priority ? "high" : "low")}
+      fetchPriority={fetchPriority ?? (priority ? "high" : undefined)}
       decoding={decoding ?? (priority ? "sync" : "async")}
       ref={(el) => {
         if (el && el.complete && el.naturalWidth > 0 && !loaded) setLoaded(true);
