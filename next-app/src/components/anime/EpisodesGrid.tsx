@@ -55,7 +55,7 @@ import { pickEpisodeTitle } from "@/lib/formatters";
 import { useLang } from "@/lib/lang-client";
 import EpisodeComments from "@/components/anime/EpisodeComments";
 import FallbackImg from "@/components/ui/FallbackImg";
-import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import { DEFAULT_AVATAR_IMAGE } from "@/lib/cardDefaults";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import {
   localizeHref,
@@ -956,8 +956,8 @@ export default function EpisodesGrid({
                   style={{ width: 24, height: 24, borderRadius: "50%", overflow: "hidden", flexShrink: 0 }}
                 >
                   <FallbackImg
-                    src={item.avatarUrl ?? item.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
-                    fallback={DEFAULT_CARD_IMAGE}
+                    src={item.avatarUrl ?? item.backdropCoverUrl ?? DEFAULT_AVATAR_IMAGE}
+                    fallback={DEFAULT_AVATAR_IMAGE}
                     alt={item.username}
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   />

@@ -4,7 +4,7 @@ import Link from "@/components/ui/LocaleLink";
 import type { FollowListItem } from "./types";
 import FollowButton from "./FollowButton";
 import type { Lang } from "@/lib/i18n";
-import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import { DEFAULT_AVATAR_IMAGE } from "@/lib/cardDefaults";
 import { isMaskedUsername } from "@/lib/publicUsername";
 import FallbackImg from "@/components/ui/FallbackImg";
 
@@ -80,8 +80,8 @@ export default function FollowListRow({
           }}
         >
           <FallbackImg
-            src={user.avatarUrl ?? user.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
-            fallback={DEFAULT_CARD_IMAGE}
+            src={user.avatarUrl ?? user.backdropCoverUrl ?? DEFAULT_AVATAR_IMAGE}
+            fallback={DEFAULT_AVATAR_IMAGE}
             alt={user.username}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />

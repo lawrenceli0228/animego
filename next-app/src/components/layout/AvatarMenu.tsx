@@ -3,7 +3,7 @@
 import Link from "@/components/ui/LocaleLink";
 import { useEffect, useRef, useState } from "react";
 import { useLang } from "@/lib/lang-client";
-import { DEFAULT_CARD_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
+import { DEFAULT_AVATAR_IMAGE, DEFAULT_BACKDROP_IMAGE } from "@/lib/cardDefaults";
 import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
 import type { NavUser } from "./Navbar";
@@ -51,10 +51,10 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
   // Square tile: the photo, else the chosen anime's cover, else the default
   // card. The cover is an AniList URL that can rotate/404, so FallbackImg
   // swaps to the default on error.
-  const avatarSrc = photo ?? cover ?? DEFAULT_CARD_IMAGE;
+  const avatarSrc = photo ?? cover ?? DEFAULT_AVATAR_IMAGE;
 
   const avatar = () => (
-    <FallbackImg src={avatarSrc} fallback={DEFAULT_CARD_IMAGE} alt={user.username} />
+    <FallbackImg src={avatarSrc} fallback={DEFAULT_AVATAR_IMAGE} alt={user.username} />
   );
 
   return (
