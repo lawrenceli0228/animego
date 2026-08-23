@@ -243,6 +243,20 @@ export interface SeedSeriesSpec {
    * is why the default below falls back to `titleZh` instead of a generic name.
    */
   titleEn?: string;
+  /**
+   * Cover URL, as the dandanplay match writes it. Defaults to "" — which is a
+   * blind spot worth naming: with no poster, `SeriesCard`'s `safePoster` guard
+   * resolves to null and the card renders its monogram fallback, so the page
+   * makes NO image request at all. Every library spec was therefore green
+   * through the 3.13.0 next/image migration that left /library rendering 26
+   * empty cards and 115 console 400s.
+   *
+   * Seed a real URL to exercise the image path. Use a NON-AniList host: the
+   * whole point is that these covers come from wherever the match returned,
+   * and `remotePatterns` only allows s4.anilist.co, so a call site that
+   * forgets `unoptimized` 400s here and silently renders nothing.
+   */
+  posterUrl?: string;
   totalEpisodes?: number;
   /** The v6 binding. Omit to seed a series watch sync must skip as unbound. */
   anilistId?: number;
@@ -396,7 +410,7 @@ export async function seedLibrary(
           titleZh: spec.titleZh ?? `E2E 测试系列 ${i + 1}`,
           titleEn: spec.titleEn ?? spec.titleZh ?? `E2E Test Series ${i + 1}`,
           type: "tv",
-          posterUrl: "",
+          posterUrl: spec.posterUrl ?? "",
           totalEpisodes: spec.totalEpisodes ?? 12,
           confidence: 1.0,
           createdAt: now - i * 1000,

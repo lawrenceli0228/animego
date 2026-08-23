@@ -651,7 +651,15 @@ function SeriesCard({
 
         <div style={s.posterWrap}>
           {safePoster ? (
-            <FadeImage src={safePoster} alt={title} width={280} height={420} unoptimized style={s.poster} />
+            <FadeImage
+              src={safePoster}
+              alt={title}
+              width={280}
+              height={420}
+              unoptimized
+              data-testid="series-poster"
+              style={s.poster}
+            />
           ) : (
             <div style={s.monogram} data-testid="monogram" aria-hidden>
               {initial}
