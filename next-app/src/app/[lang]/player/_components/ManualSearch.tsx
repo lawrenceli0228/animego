@@ -202,6 +202,7 @@ function ResultRow({ item, onSelect, t }: ResultRowProps) {
         alt=""
         width={60}
         height={80}
+        unoptimized
       />
       <div style={s.info as CSSProperties}>
         <div style={s.title as CSSProperties}>
