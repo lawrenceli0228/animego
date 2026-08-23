@@ -1103,11 +1103,15 @@ export default function TorrentModal({
           >
             {anime.coverImageUrl && (
               // 106×152 modal thumbnail. FadeImage gives it the same
-              // load-fade as every other cover on the site (AniList CDN
-              // arbitrary host, so plain <img> not next/image).
+              // load-fade as every other cover on the site. (This used to note
+              // that the AniList CDN was an "arbitrary host" and so had to
+              // stay a plain <img>; s4.anilist.co is now in remotePatterns,
+              // so it goes through the optimizer like everything else.)
               <FadeImage
                 src={anime.coverImageUrl}
                 alt={anime.titleRomaji ?? heroTitle ?? ""}
+                width={106}
+                height={152}
                 style={{
                   width: 106,
                   height: 152,

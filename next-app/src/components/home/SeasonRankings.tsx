@@ -158,6 +158,8 @@ export default function SeasonRankings({
                 <FadeImage
                   src={anime.coverImageUrl}
                   alt={anime.titleRomaji ?? ""}
+                  width={42}
+                  height={56}
                   style={coverStyle}
                 />
               )}

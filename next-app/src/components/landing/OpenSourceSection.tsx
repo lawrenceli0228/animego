@@ -498,7 +498,23 @@ export default function OpenSourceSection({
 
         {/* Focal: the real player + danmaku frame, OSS payload overlaid. */}
         <div className="os-frame" style={s.frame}>
-          {imgSrc ? <FadeImage src={imgSrc} alt="" style={s.frameImg} /> : null}
+          {/* The one place on the site where `sizes` earns the srcset it costs.
+            * This frame renders 1350px wide on desktop and full-bleed on
+            * mobile, so the 1x/2x pair derived from a single `width` would
+            * either starve the desktop or ship a desktop-sized banner to a
+            * phone. It is also a single image, so the longer srcset is a few
+            * hundred bytes, not the hundreds of KB it would be across the
+            * homepage's 207 covers. */}
+          {imgSrc ? (
+            <FadeImage
+              src={imgSrc}
+              alt=""
+              width={1350}
+              height={759}
+              sizes="(max-width: 900px) 100vw, 1350px"
+              style={s.frameImg}
+            />
+          ) : null}
           <div style={s.scrim} aria-hidden />
 
           <div style={s.topChrome} aria-hidden>

@@ -163,6 +163,11 @@ const cardInnerStyle = {
 
 const cardImgStyle = {
   width: "100%",
+  // `height: auto` is load-bearing since these went through next/image:
+  // the width/height ATTRIBUTES it emits are presentational hints, i.e. real
+  // CSS declarations, and an explicit height beats `aspect-ratio`. Without
+  // this the box grows to the attribute value instead of the ratio.
+  height: "auto",
   aspectRatio: "3/4",
   objectFit: "cover" as const,
   display: "block",
@@ -383,6 +388,8 @@ function WatchingGrid({
                 <FadeImage
                   src={item.coverImageUrl}
                   alt={pickTitle(item, lang)}
+                  width={180}
+                  height={240}
                   style={cardImgStyle}
                 />
               ) : (

@@ -174,6 +174,11 @@ const s = {
   } as React.CSSProperties,
   poster: {
     width: "100%",
+    // `height: auto` is load-bearing since these went through next/image:
+    // the width/height ATTRIBUTES it emits are presentational hints, i.e. real
+    // CSS declarations, and an explicit height beats `aspect-ratio`. Without
+    // this the box grows to the attribute value instead of the ratio.
+    height: "auto",
     aspectRatio: "2/3",
     objectFit: "cover",
     display: "block",
@@ -646,7 +651,7 @@ function SeriesCard({
 
         <div style={s.posterWrap}>
           {safePoster ? (
-            <FadeImage src={safePoster} alt={title} style={s.poster} />
+            <FadeImage src={safePoster} alt={title} width={280} height={420} style={s.poster} />
           ) : (
             <div style={s.monogram} data-testid="monogram" aria-hidden>
               {initial}

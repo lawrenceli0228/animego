@@ -321,7 +321,7 @@ export default function PosterIdentityShowcase({ dict, lang, posters }: PosterId
               <div style={s.coverWrap}>
                 <div style={s.cover(f.hue)}>
                   {f.coverImageUrl ? (
-                    <FadeImage src={f.coverImageUrl} alt={f.title} style={s.coverImg} />
+                    <FadeImage src={f.coverImageUrl} alt={f.title} width={384} height={512} style={s.coverImg} />
                   ) : null}
                   <div style={s.coverTint(f.hue)} aria-hidden />
                 </div>

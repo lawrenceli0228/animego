@@ -90,6 +90,94 @@ const nextConfig: NextConfig = {
     ];
   },
 
+  // Image Optimization. Until this commit there was no `images` key at all, so
+  // the whole section ran on Next 16 defaults -- which meant `remotePatterns:
+  // []`, i.e. every AniList URL fed to next/image answered 400, which is why
+  // the codebase had exactly one next/image call site and it was a local file.
+  //
+  // ## Why AVIF and not just WebP
+  //
+  // Measured on this repo's own material (flat cel-shaded covers), at equal
+  // byte size, AVIF's banding is 1/3.8 of WebP's and 1/9.4 of JPEG's. The
+  // cause is chroma subsampling, not the codec's entropy coder: sharp emits
+  // AVIF at 4:4:4 by default while WebP and JPEG default to 4:2:0, halving
+  // chroma resolution -- exactly what blurs the coloured line art anime is
+  // made of. WebP's apparent size advantage in a naive comparison is bought
+  // with that chroma. Order matters here: the first entry the browser's Accept
+  // header matches wins, so AVIF leads and WebP is the fallback.
+  //
+  // ## qualities: why 85 and not the default 75
+  //
+  // THIS IS THE ONE THAT FAILS SILENTLY. Next does not pass `quality` through
+  // to the AVIF encoder; it passes `quality - 20`:
+  //
+  //   image-optimizer.js: transformer.avif({ quality: Math.max(quality - 20, 1), effort: 3 })
+  //
+  // So the default quality={75} produces AVIF q55, which on this material is
+  // below the knee -- gradients (sky, skin) start to band. quality={85} lands
+  // on AVIF q65, which measures SSIM 0.986-0.988 against the source. Since
+  // Next 16 `qualities` is an allowlist, 85 has to be named here or the call
+  // sites asking for it get silently clamped. 75 stays in the list because
+  // that is what a call site that passes nothing gets.
+  //
+  // ## The container is 512 MB and has no volume (docker-compose.yml)
+  //
+  // Both of the next two keys exist because of that, and neither default is
+  // safe here:
+  //
+  //  - maximumResponseBody defaults to 50 MB, and the source image is read
+  //    fully into memory before sharp touches it. The largest thing we
+  //    actually reference is a ~708 KB cover, so 8 MB is already generous;
+  //    50 MB x a few concurrent requests is how this container gets OOM-killed.
+  //  - maximumDiskCacheSize defaults to "50% of free disk measured at startup",
+  //    which inside a container reads the HOST disk. The cache is also thrown
+  //    away on every deploy (writable layer, no volume), so an unbounded one
+  //    buys nothing and can crowd the host.
+  //
+  // ## Edge caching is NOT free here -- see docs/ section 12.6
+  //
+  // The optimizer sets `Vary: Accept` unconditionally on every /_next/image
+  // response, and Cloudflare's default for a Vary'd response is to skip the
+  // cache and report BYPASS. A plain "cache /_next/image*" rule therefore does
+  // nothing. It needs the Cache Rules `vary` setting (Cloudflare shipped it
+  // 2026-07-02, API-only, works on the free plan) with `accept` normalized
+  // over image/avif + image/webp. Without that rule every variant of every
+  // image is an origin request.
+  images: {
+    // AniList's media CDN, and nothing else. Covers, banners, character and
+    // voice-actor portraits all live under /file/anilistcdn/. `search: ""`
+    // forbids a query string -- omitting it implies `**`, which would let a
+    // crafted query turn the optimizer into a proxy for arbitrary AniList
+    // responses.
+    //
+    // Deliberately NOT listed: user avatars. They are served from go-api's
+    // volume at /api/avatars/*, and Next resolves a same-origin path through
+    // `fetchInternalImage`, a mocked request handled inside the next-app
+    // process -- which has no /api route in production (rewrites() returns []
+    // there; nginx is what routes /api to go-api). Optimizing an avatar would
+    // 404 into FallbackImg's onError and silently show the default card. They
+    // stay on plain <img>.
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "s4.anilist.co",
+        pathname: "/file/anilistcdn/**",
+        search: "",
+      },
+    ],
+
+    formats: ["image/avif", "image/webp"],
+    qualities: [75, 85],
+
+    // AniList serves its own covers with a ~31 day max-age; matching it means
+    // a variant is re-encoded about as often as the upstream file changes.
+    // The effective TTL is max(this, upstream Cache-Control) either way.
+    minimumCacheTTL: 2678400, // 31 days
+
+    maximumResponseBody: 8_000_000,
+    maximumDiskCacheSize: 500_000_000,
+  },
+
   // Cache the jassub subtitle-engine static binaries (WASM / worker / font) hard.
   // They live in public/jassub/ (built by `build:jassub` at prebuild) at stable,
   // non-content-hashed paths, so Next serves them with the public/ default

@@ -13,6 +13,7 @@
 //     within the request; no double load on the Go API.
 
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
@@ -562,11 +563,17 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
         }}
       >
         {detail.bannerImageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={detail.bannerImageUrl}
             alt=""
             aria-hidden
+            // AniList banners are 1900x400. `sizes="100vw"` is honest -- the
+            // box is full-bleed at every width -- and it is affordable here
+            // because the page renders exactly one of these.
+            width={1900}
+            height={400}
+            quality={85}
+            sizes="100vw"
             loading="eager"
             fetchPriority="high"
             decoding="sync"
