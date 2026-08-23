@@ -62,7 +62,12 @@ die_on_error() {
 ZONES=$(cf "$API/zones?name=$ZONE_NAME")
 die_on_error "$ZONES" "查询 zone"
 ZONE_ID=$(jq -r '.result[0].id // empty' <<<"$ZONES")
-[ -n "$ZONE_ID" ] || { echo "✗ 找不到 zone $ZONE_NAME（token 权限是否包含 Zone:Read？）" >&2; exit 1; }
+# Braces are not optional where a variable is followed by a non-ASCII byte:
+# bash reads the first byte of the multi-byte character as part of the
+# identifier, producing a name that was never assigned. Under `set -u` that is
+# a hard exit, and the error names a variable that does not appear in the
+# source, which is a confusing five minutes.
+[ -n "$ZONE_ID" ] || { echo "✗ 找不到 zone ${ZONE_NAME}（token 权限是否包含 Zone:Read？）" >&2; exit 1; }
 echo "zone $ZONE_NAME → $ZONE_ID"
 
 # ── verify mode: probe the live edge, nothing else ────────────────────────
@@ -94,7 +99,7 @@ EXISTING=$(cf "$PHASE" || true)
 if [ "$(jq -r '.success' <<<"$EXISTING")" = "true" ]; then
   RULESET_ID=$(jq -r '.result.id' <<<"$EXISTING")
   CURRENT_RULES=$(jq '.result.rules // []' <<<"$EXISTING")
-  echo "已有 ruleset $RULESET_ID，$(jq 'length' <<<"$CURRENT_RULES") 条规则："
+  echo "已有 ruleset ${RULESET_ID}，$(jq 'length' <<<"$CURRENT_RULES") 条规则："
   jq -r '.[] | "  · \(.description // .expression)"' <<<"$CURRENT_RULES"
 else
   RULESET_ID=""
