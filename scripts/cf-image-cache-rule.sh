@@ -75,6 +75,21 @@ if [ "$MODE" = "--verify" ]; then
   URL="https://$ZONE_NAME/_next/image?url=$(python3 -c "
 import urllib.parse
 print(urllib.parse.quote('https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx182317-zzpOnAECrM2o.png', safe=''))")&w=384&q=85"
+  # This rule cannot be verified until the code that produces /_next/image
+  # responses is live. Before that deploy the route answers 400 ("url parameter
+  # is not allowed", from an empty remotePatterns), a 400 is not cacheable, and
+  # the probe below reports BYPASS -- which looks exactly like the rule having
+  # failed. Check the status first and say which of the two it is.
+  PROBE_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -H "Accept: image/avif,image/webp,*/*" "$URL")
+  if [ "$PROBE_STATUS" = "400" ]; then
+    echo
+    echo "⚠ /_next/image 当前返回 400 —— 优化器还没上线（remotePatterns 仍为空）。"
+    echo "  这条 CF 规则本身可能没问题，但在部署之前无法验证：400 不可缓存，"
+    echo "  探测只会得到 BYPASS。先合并并部署 PR，再回来跑 --verify。"
+    echo "  线上版本：$(curl -sS "https://$ZONE_NAME/version.json" 2>/dev/null || echo '(取不到)')"
+    exit 0
+  fi
+
   echo
   echo "同一个 URL、两种 Accept、各打两次。要看到的是："
   echo "  · 第二次 cf-cache-status 是 HIT（不是 BYPASS / DYNAMIC）"
