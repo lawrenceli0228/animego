@@ -40,6 +40,22 @@
 // LCP. `loading="lazy"` (next/image's default) already keeps off-screen covers
 // out of the way, which is the part we actually wanted.
 //
+// ## `unoptimized` is REQUIRED when the host is not ours to enumerate
+//
+// next.config.ts allows exactly one remote host, s4.anilist.co. Anything else
+// -- a dandanplay match's imageUrl, a bgm mirror, whatever a future enrichment
+// path writes into IndexedDB -- answers 400 from the optimizer, and this
+// component has no onError, so the image simply does not appear. It shipped
+// that way once: /library rendered 26 empty cards and 115 console 400s, and
+// nothing in the build, the type check or the lint said a word.
+//
+// So: if the src can be any host, pass `unoptimized`. That is the library and
+// player surfaces (SeriesCard, SeriesDetailSheet, UnavailableSeriesSection,
+// ManualSearch, DanmakuPicker, EpisodeFileList). It is also the safer default
+// there -- those URLs come out of IndexedDB, which SeriesCard's own guard
+// notes may be attacker-influenced, and they should not become fetches issued
+// by our own server.
+//
 // ## What we do NOT use: next/image's `preload` prop
 //
 // `priority` is deprecated in Next 16 in favour of `preload`, but the docs

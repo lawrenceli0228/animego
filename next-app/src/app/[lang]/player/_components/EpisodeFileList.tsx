@@ -455,7 +455,7 @@ function EpisodeFileList({
       {/* Anime info header */}
       <div style={s.animeInfo}>
         {anime.coverImageUrl && (
-          <FadeImage style={s.cover} src={anime.coverImageUrl} alt="" width={162} height={216} />
+          <FadeImage style={s.cover} src={anime.coverImageUrl} alt="" width={162} height={216} unoptimized />
         )}
         <div style={s.info}>
           <div style={s.title}>{anime.titleNative || anime.titleRomaji}</div>

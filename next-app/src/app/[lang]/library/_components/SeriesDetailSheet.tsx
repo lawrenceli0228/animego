@@ -528,7 +528,7 @@ export function SeriesDetailSheet({
           <div style={s.hero}>
             <div style={s.posterWrap}>
               {posterUrl ? (
-                <FadeImage src={posterUrl} alt="" width={280} height={420} style={s.poster} />
+                <FadeImage src={posterUrl} alt="" width={280} height={420} unoptimized style={s.poster} />
               ) : (
                 <div style={s.monogram} aria-hidden>
                   {(title.charAt(0) || "?").toUpperCase()}

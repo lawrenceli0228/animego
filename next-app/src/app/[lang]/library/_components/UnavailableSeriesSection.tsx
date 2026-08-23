@@ -337,7 +337,7 @@ export function UnavailableSeriesSection({
                 style={s.row}
               >
                 {poster ? (
-                  <FadeImage src={poster} alt="" width={40} height={60} style={s.poster} />
+                  <FadeImage src={poster} alt="" width={40} height={60} unoptimized style={s.poster} />
                 ) : (
                   <div style={s.monogram} aria-hidden>
                     {initial}

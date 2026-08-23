@@ -375,6 +375,7 @@ function AnimeRow({ item, onPick }: AnimeRowProps) {
           alt=""
           width={45}
           height={60}
+          unoptimized
         />
       )}
       <div style={s.animeInfo as CSSProperties}>
