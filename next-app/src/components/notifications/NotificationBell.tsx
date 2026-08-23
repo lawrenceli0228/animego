@@ -9,7 +9,7 @@ import type { Lang } from "@/lib/i18n/lang";
 import { pickRelatedTitle } from "@/lib/contentLabels";
 import { formatRelativeTime } from "@/lib/formatters";
 import FallbackImg from "@/components/ui/FallbackImg";
-import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import { DEFAULT_AVATAR_IMAGE } from "@/lib/cardDefaults";
 import { dispatchDiscussionNavigation } from "@/components/anime/episodeDiscussionState";
 import {
   markAllNotificationsRead,
@@ -268,8 +268,8 @@ export default function NotificationBell() {
                 >
                   <span className="agc-notification-avatar">
                     <FallbackImg
-                      src={item.actor.avatarUrl ?? DEFAULT_CARD_IMAGE}
-                      fallback={DEFAULT_CARD_IMAGE}
+                      src={item.actor.avatarUrl ?? DEFAULT_AVATAR_IMAGE}
+                      fallback={DEFAULT_AVATAR_IMAGE}
                       alt=""
                     />
                   </span>

@@ -89,6 +89,8 @@ export function PosterVisual({ hue, lang, posters, features }: PosterVisualProps
           src="/mascot-wink.png"
           alt=""
           aria-hidden="true"
+          width={320}
+          height={480}
           className="f1-mascot"
         />
         {POSTER_ROSTER.map((p, i) => {
@@ -116,6 +118,8 @@ export function PosterVisual({ hue, lang, posters, features }: PosterVisualProps
               <FadeImage
                 src={cover}
                 alt={p.title[lang]}
+                width={150}
+                height={200}
                 style={{
                   position: "absolute", inset: 0,
                   width: "100%", height: "100%", objectFit: "cover",

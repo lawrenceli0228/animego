@@ -217,6 +217,11 @@ const cardStyle: CSSProperties = {
 
 const coverStyle: CSSProperties = {
   width: "100%",
+  // `height: auto` is load-bearing since these went through next/image:
+  // the width/height ATTRIBUTES it emits are presentational hints, i.e. real
+  // CSS declarations, and an explicit height beats `aspect-ratio`. Without
+  // this the box grows to the attribute value instead of the ratio.
+  height: "auto",
   aspectRatio: "3/4",
   objectFit: "cover",
   display: "block",
@@ -365,6 +370,8 @@ export default function WeeklySchedule({
                   <FadeImage
                     src={item.coverImageUrl}
                     alt={title}
+                    width={180}
+                    height={240}
                     style={coverStyle}
                   />
                 ) : (

@@ -13,6 +13,7 @@
 //     within the request; no double load on the Go API.
 
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
@@ -526,17 +527,67 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
 
   return (
     <div>
-      {/* Banner */}
+      {/* Banner — a real <img>, not a CSS background.
+        *
+        * This is the LCP element of the page Google indexes, and as
+        * `background: url(...)` the preload scanner could not see it: that
+        * scanner only reads tag attributes off the raw HTML byte stream, so a
+        * URL that only exists inside a style declaration is not discoverable
+        * until the CSSOM is built and the box is laid out. Measured in prod at
+        * 198 KB with no preload of any kind, while the one image preload the
+        * page did emit pointed at the 210x300 cover below it.
+        *
+        * Switching to <img loading="eager" fetchPriority="high"> fixes both
+        * halves at once: the scanner finds it in the first pass, and React 19
+        * hoists a matching <link rel="preload" as="image"> for it (that is
+        * where the cover's existing preload comes from — there is no explicit
+        * preload call anywhere in this repo).
+        *
+        * Pixel-identical to the old rule: `center/cover` is exactly
+        * `object-fit: cover` + `object-position: center`, and inset-0 on a
+        * `position: relative` parent reproduces the painting box a background
+        * had. The overlay stays after it in DOM order so it still stacks on
+        * top. Decorative, so alt="" and hidden from the a11y tree — the title
+        * is rendered as text a few lines below.
+        *
+        * No width/height attributes on purpose: the element is absolutely
+        * positioned into a fixed-height box, so there is no layout to reserve
+        * and the intrinsic ratio would only be a lie if AniList ever changes
+        * banner dimensions. */}
       <div
         style={{
           position: "relative",
           height: detail.bannerImageUrl ? 400 : 120,
-          background: detail.bannerImageUrl
-            ? `url(${detail.bannerImageUrl}) center/cover`
-            : "#000000",
+          background: "#000000",
           overflow: "hidden",
         }}
       >
+        {detail.bannerImageUrl ? (
+          <Image
+            src={detail.bannerImageUrl}
+            alt=""
+            aria-hidden
+            // AniList banners are 1900x400. `sizes="100vw"` is honest -- the
+            // box is full-bleed at every width -- and it is affordable here
+            // because the page renders exactly one of these.
+            width={1900}
+            height={400}
+            quality={85}
+            sizes="100vw"
+            loading="eager"
+            fetchPriority="high"
+            decoding="sync"
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              display: "block",
+            }}
+          />
+        ) : null}
         <div style={S.bannerOverlay} />
       </div>
 

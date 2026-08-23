@@ -29,6 +29,11 @@ const s = {
   } as CSSProperties,
   cover: {
     width: 160,
+    // `height: auto` is load-bearing since these went through next/image:
+    // the width/height ATTRIBUTES it emits are presentational hints, i.e. real
+    // CSS declarations, and an explicit height beats `aspect-ratio`. Without
+    // this the box grows to the attribute value instead of the ratio.
+    height: "auto",
     aspectRatio: "3/4",
     borderRadius: 12,
     objectFit: "cover",
@@ -450,7 +455,7 @@ function EpisodeFileList({
       {/* Anime info header */}
       <div style={s.animeInfo}>
         {anime.coverImageUrl && (
-          <FadeImage style={s.cover} src={anime.coverImageUrl} alt="" />
+          <FadeImage style={s.cover} src={anime.coverImageUrl} alt="" width={162} height={216} />
         )}
         <div style={s.info}>
           <div style={s.title}>{anime.titleNative || anime.titleRomaji}</div>

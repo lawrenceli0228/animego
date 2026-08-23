@@ -166,6 +166,11 @@ const s: Record<string, CSSProperties | ((flag: boolean) => CSSProperties)> = {
   }),
   animeCover: {
     width: 44,
+    // `height: auto` is load-bearing since these went through next/image:
+    // the width/height ATTRIBUTES it emits are presentational hints, i.e. real
+    // CSS declarations, and an explicit height beats `aspect-ratio`. Without
+    // this the box grows to the attribute value instead of the ratio.
+    height: "auto",
     aspectRatio: "3/4",
     borderRadius: 2,
     objectFit: "cover",
@@ -368,6 +373,8 @@ function AnimeRow({ item, onPick }: AnimeRowProps) {
           style={s.animeCover as CSSProperties}
           src={item.coverImageUrl || item.imageUrl}
           alt=""
+          width={45}
+          height={60}
         />
       )}
       <div style={s.animeInfo as CSSProperties}>

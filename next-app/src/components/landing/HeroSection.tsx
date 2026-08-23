@@ -430,11 +430,14 @@ function Showcase({ poster, lang, hero }: ShowcaseProps) {
       onMouseLeave={onLeave}
     >
       {poster?.coverImageUrl ? (
-        // Legacy parity: eager + high-priority (single hero / LCP image).
-        // Next/Image is unnecessary here (single hero, already high-priority).
+        // Single hero / LCP image: eager + high priority, and no fade, so the
+        // metric is not measuring our own transition. 459x612 is the measured
+        // render (458x611 at 1440) rounded to an exact 3:4.
         <FadeImage
           src={poster.coverImageUrl}
           alt={title}
+          width={459}
+          height={612}
           style={s.posterImg}
           priority
         />

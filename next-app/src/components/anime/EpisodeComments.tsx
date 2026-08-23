@@ -30,7 +30,7 @@ import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { authChrome } from "@/lib/authChrome";
-import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
+import { DEFAULT_AVATAR_IMAGE } from "@/lib/cardDefaults";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n/lang";
@@ -308,8 +308,8 @@ function CommentItem({
           }}
         >
           <FallbackImg
-            src={c.avatarUrl ?? c.backdropCoverUrl ?? DEFAULT_CARD_IMAGE}
-            fallback={DEFAULT_CARD_IMAGE}
+            src={c.avatarUrl ?? c.backdropCoverUrl ?? DEFAULT_AVATAR_IMAGE}
+            fallback={DEFAULT_AVATAR_IMAGE}
             alt={c.username}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />

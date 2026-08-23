@@ -1,5 +1,6 @@
 "use client";
 
+import { getImageProps } from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { genreLabel } from "@/lib/contentLabels";
 import { pickDescription, pickTitle, stripHtml, truncate } from "@/lib/formatters";
@@ -206,11 +207,45 @@ export default function HeroCarousel({ animeList, dict, lang }: HeroCarouselProp
             inert={!isActive}
           >
             {desktopArt && inWindow ? (
+              // Art direction, so this cannot be a plain <Image>: below 680px
+              // the slide switches to the portrait cover, above it uses the
+              // landscape banner. getImageProps is the supported way to keep a
+              // real <picture> while still going through the optimizer -- it
+              // hands back the srcSet each source would have had.
+              //
+              // Worth the extra shape: measured on prod these four banners were
+              // the single largest thing on the homepage, 694 KB of untouched
+              // JPEG, one of them 304 KB, and slide 0 is the homepage LCP.
+              //
+              // `sizes` is justified here where it is not on the covers: there
+              // are four of these, not 207, and the rendered width genuinely
+              // swings from 1440 to 217 across the breakpoint.
               <picture className={styles.artwork}>
-                {mobileArt ? <source media="(max-width: 680px)" srcSet={mobileArt} /> : null}
+                {mobileArt ? (
+                  <source
+                    media="(max-width: 680px)"
+                    srcSet={
+                      getImageProps({
+                        src: mobileArt,
+                        alt: "",
+                        width: 460,
+                        height: 650,
+                        quality: 85,
+                        sizes: "60vw",
+                      }).props.srcSet
+                    }
+                  />
+                ) : null}
                 <img
+                  {...getImageProps({
+                    src: desktopArt,
+                    alt: "",
+                    width: 1900,
+                    height: 400,
+                    quality: 85,
+                    sizes: "100vw",
+                  }).props}
                   className={styles.art}
-                  src={desktopArt}
                   alt=""
                   aria-hidden
                   loading={index === 0 ? "eager" : "lazy"}
