@@ -2,6 +2,31 @@
 
 ---
 
+## [3.14.1] - 2026-08-25
+
+### 修复 — 侧车 `.srt` 转出来了，却没送到播放器
+
+3.13.2 让侧车字幕转成 WebVTT 之后，`.ass` 正常显示而 `.srt` 仍然一条都没有。线上插桩三次全同：文件读了、`convertSrtToVtt` 跑了、74 字节的 `text/vtt` blob 造出来了，而 `<track>` 的 `src` 是空的。**转换是对的，交接掉了。**
+
+`VideoPlayer` 里接 VTT 的 effect 读 `artRef.current`，依赖却只有 `[subtitleUrl]`：
+
+```ts
+if (!art || !subtitleUrl) return;
+}, [subtitleUrl]);
+```
+
+ref 从 null 变成实例**不会**重跑 effect，而 `subtitleUrl` 之后不再变 —— 所以侧车字幕只要早于 artplayer 建成一步，这次早退就是永久早退，整个 VTT 层静默消失。`.ass` 文件更大、转换更慢，落地够晚所以赢了这个竞态；`.srt` 更小更快，输了。旁边的 jassub effect 依赖里本来就带 `playerReady`，从来没这问题。现在这条也带上。
+
+### 测试 — 补 e2e，并且写明它盖不住什么
+
+新增 `e2e/specs/sandbox/subtitle-sidecar.spec.ts`（`.srt` / `.ass` / `.vtt` 三例）：断言 cue 数 > 0、track 文档以 `WEBVTT` 开头、`{\an8}` 没有活下来。这条守的是 3.13.2 那个洞（侧车原样交出去 → 浏览器整篇拒绝 → 零字幕），**不是**上面那个竞态。
+
+不是没想到，是量过了：本地生产构建带修复与不带修复各跑一遍，**三例全绿，两次一样**。localhost 解析侧车太快，artplayer 永远已经就位，这个竞态在本地不复现。判据只在生产延迟下成立。spec 头注释里写着这件事，免得后来人把绿灯当成有覆盖。
+
+配套加了 `e2e/fixtures/probe4s.webm`（真 VP8 片段）。原来的 `black1s.mp4` 是 144 字节的空壳，`loadedmetadata` 永不触发，浏览器因此**推迟加载 `<track>`** —— 拿它当底，任何字幕断言都恒读 0，跟代码对不对无关。
+
+---
+
 ## [3.14.0] - 2026-08-25
 
 ### 修复 — 库里看过的番，首页「正在追」终于跟着动
