@@ -159,6 +159,22 @@ test.describe("/library — binding sweep", () => {
 
     expect(await readSubscription(SEED_USER_EMAIL, ANILIST_ID)).toBeNull();
 
+    // Count, do not intercept. The re-arm clears a latch that guards an effect
+    // whose dependency list includes `series` — and the sweep's own writes
+    // change `series`. Get that wrong and the reconcile re-runs on every
+    // liveQuery emission, which from the outside looks like a push storm.
+    //
+    // This is the only automated check on that: the re-arm lives in a React
+    // effect, and this repo's render tests use `renderToStaticMarkup`, which
+    // never runs effects at all. The guard is also structurally redundant with
+    // the sweep's own once-per-mount latch — but redundant is not tested.
+    let episodePushes = 0;
+    page.on("request", (req) => {
+      if (req.method() === "PUT" && /\/api\/subscriptions\/\d+\/episodes/.test(req.url())) {
+        episodePushes += 1;
+      }
+    });
+
     await page.goto("/library");
     await expect(page.getByTestId("series-grid")).toBeVisible({ timeout: 10_000 });
 
@@ -173,6 +189,16 @@ test.describe("/library — binding sweep", () => {
         },
       )
       .toBe(2);
+
+    // Settle, then bound it. Two is the honest ceiling for one series: the
+    // first PUT 404s because no subscription exists yet, `ensureSubscription`
+    // creates one, and the push is retried. A third would mean the reconcile
+    // ran again for no reason; a loop would be far past this.
+    await page.waitForTimeout(3_000);
+    expect(
+      episodePushes,
+      `re-arm should fire once — saw ${episodePushes} episode pushes`,
+    ).toBeLessThanOrEqual(2);
   });
 
   test("a series that is already bound costs no search at all", async ({ page }) => {
