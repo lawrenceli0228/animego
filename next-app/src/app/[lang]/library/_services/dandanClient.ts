@@ -28,6 +28,16 @@
 // localhost:8080. (The Express hop this line used to name retired with the
 // rest of that stack on 2026-06-01.)
 
+import {
+  NO_DANDAN_ANIME_ID,
+  toAnilistId,
+  toBgmSubjectId,
+  toDandanAnimeId,
+  toPositiveInt,
+  type AnilistId,
+  type DandanAnimeId,
+} from "./animeIds";
+
 export interface DandanEnrichment {
   titleZh?: string;
   titleEn?: string;
@@ -48,8 +58,30 @@ export interface DandanEnrichment {
 
 export interface DandanMatchResult {
   isMatched: boolean;
-  animes: Array<{ animeId: number; animeTitle: string }>;
+  /**
+   * `animeId` is dandanplay id space, and `NO_DANDAN_ANIME_ID` when the
+   * envelope proved nothing. The union is the point: there is no third state
+   * where the number is present but from somewhere else.
+   */
+  animes: Array<{ animeId: DandanAnimeId | 0; animeTitle: string }>;
   enrichment?: DandanEnrichment;
+  /**
+   * The matched entry's AniList id, when the envelope carried one.
+   *
+   * A THIRD fact, deliberately a sibling of `enrichment` rather than a member
+   * of it. Enrichment is display metadata (title, poster, episode count) and is
+   * applied whether or not anything identified the content; this is identity,
+   * and it lands on `Series.anilistId` through `animeBinding.ts`. Folding it
+   * into the blob would re-tie two facts that the import pipeline just finished
+   * separating — and would make the binding hinge on whether a poster happened
+   * to be present.
+   *
+   * Sourced from `siteAnime.anilistId`, which go-api emits in BOTH phases that
+   * produce a siteAnime at all (`match.go:213` phase 1, `:275` phase 2;
+   * `site_anime.go:56` declares the field). Phase 3 emits `siteAnime: null`,
+   * so this is absent there.
+   */
+  anilistId?: AnilistId;
 }
 
 export interface DandanClient {
@@ -117,36 +149,35 @@ export function createDandanClient(): DandanClient {
         // episodes, phase 3 is a literal `{}`), so both preceding terms are
         // permanently undefined and every matched import wrote a bgm.tv
         // subject id into a dandanplay field. Same bug class the manual
-        // rematch path already fixed — `rematchPayload.ts` documents the cost.
+        // rematch path already fixed — the shared rule now lives in
+        // `animeIds.ts` so there is one statement of it rather than two.
         //
-        // Nothing downstream can detect or repair the substitution: the two
-        // spaces collide numerically (806 is a live id in both and resolves to
-        // two unrelated shows), so no range check separates them.
-        //
-        // 0 is strictly safer than a wrong id, because the pipeline's guards
-        // are gated on FALSINESS, not on validity. `importPipeline.js:319`
-        // re-enables the folder-home and title-home heuristics when
-        // `seasonRecord.animeId` is falsy; a plausible-but-foreign id disables
-        // them silently, then fails `findReusableSeason` (:214) on the next
-        // import and mints a duplicate card for content already in the
-        // library. Empty degrades into the structural fallbacks. Wrong does
-        // not degrade at all — it just reads as answered.
+        // Both terms below are `DandanAnimeId | undefined`, so extending the
+        // chain with `merged.bgmId` or `merged.anilistId` no longer compiles:
+        // the brands do not unify with the annotation on this binding.
         //
         // Phase 1 does hold the real value (`combined.AnimeID`, match.go:186 —
         // fetched, used, then dropped). Emitting it is a go-api change; until
-        // then this is 0 and the guards do the work.
-        const animeId = Number(merged.dandanAnimeId ?? merged.animeId ?? 0);
+        // then this is `NO_DANDAN_ANIME_ID` and the pipeline's falsiness guards
+        // do the work.
+        const animeId: DandanAnimeId | 0 =
+          merged.dandanAnimeId ?? merged.animeId ?? NO_DANDAN_ANIME_ID;
         const animeTitle =
           merged.titleChinese ||
           merged.titleNative ||
           merged.titleRomaji ||
           fileName;
         const enrichment = pickEnrichment(merged);
-        return {
+        // Annotated, not `as`-cast. The old cast silenced exactly the class of
+        // mistake this file exists to prevent — a cast between two branded
+        // numbers is not an error, an assignment is.
+        const matchResult: DandanMatchResult = {
           isMatched: true,
           animes: [{ animeId, animeTitle }],
           ...(enrichment ? { enrichment } : {}),
-        } as DandanMatchResult;
+          ...(merged.anilistId ? { anilistId: merged.anilistId } : {}),
+        };
+        return matchResult;
       } catch (err) {
         // Don't fully swallow — callers tolerate null, but surfacing the cause
         // in the console makes diagnostic mismatches (proxy down, wrong path,
@@ -178,14 +209,19 @@ function mergeAnimeFields(
     titleRomaji: (a.titleRomaji as string) || (s.titleRomaji as string),
     titleNative: (a.titleNative as string) || (s.titleNative as string),
     coverImageUrl: (a.coverImageUrl as string) || (s.coverImageUrl as string),
-    dandanAnimeId: a.dandanAnimeId as number | undefined,
-    animeId: a.animeId as number | undefined,
+    // Every id goes through its own space's normalizer. That is both the
+    // untrusted-JSON guard (a null / 0 / "" becomes undefined rather than a
+    // stored zero) and the thing that gives each field a brand the compiler
+    // will refuse to unify with its neighbours.
+    dandanAnimeId: toDandanAnimeId(a.dandanAnimeId),
+    animeId: toDandanAnimeId(a.animeId),
     // bgm.tv and AniList ids. Neither is a substitute for `dandanAnimeId` —
-    // see the id-space note in `match()` above. They are carried for
-    // identification (the phase-2 envelope is the only place an import ever
-    // sees an anilistId), never for `Season.animeId`.
-    bgmId: (a.bgmId as number) || (s.bgmId as number),
-    anilistId: (a.anilistId as number) || (s.anilistId as number),
+    // see the id-space note in `match()` above. `bgmId` is read by nothing and
+    // is kept here deliberately: it is the value that poisoned `Season.animeId`
+    // in the field, and leaving it typed is what makes a relapse a compile
+    // error instead of a silent write nobody can undo.
+    bgmId: toBgmSubjectId(a.bgmId) ?? toBgmSubjectId(s.bgmId),
+    anilistId: toAnilistId(a.anilistId) ?? toAnilistId(s.anilistId),
     // siteAnime first, against the `anime`-first rule the other fields follow.
     // Phase 1's `anime` projection is two fields (titleNative + coverImageUrl)
     // and has no episode count at all, so siteAnime is the only source that
@@ -213,8 +249,9 @@ function pickEnrichment(merged: {
   if (merged.coverImageUrl) out.posterUrl = merged.coverImageUrl;
   // Positive integers only. A 0 or a null from the cache means "unknown", and
   // every reader of `Series.totalEpisodes` already spells unknown as `<= 0`.
-  if (Number.isInteger(merged.episodes) && (merged.episodes as number) > 0) {
-    out.totalEpisodes = merged.episodes;
-  }
+  // Same `toPositiveInt` the rematch path uses on the same field — this was an
+  // open-coded copy of it.
+  const totalEpisodes = toPositiveInt(merged.episodes);
+  if (totalEpisodes !== undefined) out.totalEpisodes = totalEpisodes;
   return Object.keys(out).length ? out : undefined;
 }

@@ -121,6 +121,14 @@
 
 import { hasAuthHint } from "@/lib/clientAuth";
 import { authFetch } from "@/lib/authFetch";
+// The episode-write response shape already has a parser, written for the
+// detail page's grid, and it is the one that draws the distinction this module
+// needs: `stated` separates "the server told us its set" from "the body did not
+// carry one". A second copy here would be a second thing to keep in step with
+// `episodeWatchResp`, and the two would drift the first time that struct gained
+// a field. The module is pure — no React, no DOM — so it stays reachable from a
+// plain `bun test`, which is the only import rule this file has.
+import { parseWatchedSnapshot } from "@/components/anime/watchedEpisodeState";
 import { readBinding } from "./animeBinding";
 import { resolveWatchedEpisodes } from "./watchHighWater";
 
@@ -784,6 +792,26 @@ function clearFailure(seriesId: string): void {
 export interface PushOk {
   readonly ok: true;
   readonly status: number;
+  /**
+   * The FULL post-write watched set the server says it now holds for this
+   * anime, ascending — or `null` when the response did not state one.
+   *
+   * `MarkEpisodesWatched` re-derives `current_episode` as `COALESCE(MAX(episode),
+   * 0)` over `episode_watches` inside the same statement and returns both, so
+   * this is what actually landed rather than what we hoped would. The bytes
+   * cross the wire either way; throwing them away bought nothing.
+   *
+   * `null`, not `[]`, for a body that said nothing — an older server, a proxy
+   * that stripped it, a 204. The difference matters: `[]` is the server
+   * claiming it holds nothing, which after a successful mark is a real
+   * anomaly, while `null` is the absence of a claim and must stay silent. Same
+   * `stated`-vs-empty distinction the detail page's grid draws before it
+   * repaints a reader's checkmarks.
+   *
+   * Optional because `createIfAbsent` goes through the same transport and
+   * answers with a subscription row, which carries no set at all.
+   */
+  readonly stored?: readonly number[] | null;
 }
 export interface PushErr {
   readonly ok: false;
@@ -795,6 +823,51 @@ export type PushResponse = PushOk | PushErr;
 /** See `isPushPlanned` — same `strict: false` narrowing caveat. */
 export function isPushErr(res: PushResponse): res is PushErr {
   return res.ok === false;
+}
+
+/**
+ * The watched set a `2xx` body states, or `null` when it states none.
+ *
+ * Split from the `Response` it came out of so the tolerance is testable
+ * without a fake `fetch`: everything below the JSON parse is a pure decision
+ * about a shape somebody else controls.
+ */
+export function storedEpisodesFromBody(body: unknown): readonly number[] | null {
+  const snapshot = parseWatchedSnapshot(body);
+  return snapshot.stated ? snapshot.watchedEpisodes : null;
+}
+
+/**
+ * Which of the episodes we just sent the server did NOT report back as stored.
+ *
+ * CONTAINMENT, NOT EQUALITY, and that is the whole subtlety. The statement
+ * `INSERT … ON CONFLICT DO NOTHING`s into `episode_watches` and then returns
+ * the union of everything in the row, so the answer is a SUPERSET of the delta
+ * whenever another device — a phone, the detail page's grid — has marked
+ * something this one has never heard of. That is the normal case, not a fault:
+ * an equality check would fire on every reader who owns two devices.
+ *
+ * Duplicates in the request are a non-issue for the same reason. `parseEpisodeList`
+ * accepts them and `ON CONFLICT DO NOTHING` collapses them, so a body naming
+ * `[3, 3, 4]` stores two rows for three members — a count comparison would
+ * accuse a request that was answered perfectly. Membership does not care, and
+ * building the answer through a `Set` means a later rewrite cannot quietly turn
+ * this back into a count.
+ *
+ * `null`/`undefined` — no set was stated — is not evidence of anything and
+ * answers empty.
+ */
+export function findUnstoredEpisodes(
+  sent: readonly number[],
+  stored: readonly number[] | null | undefined,
+): number[] {
+  if (!stored) return [];
+  const held = new Set(stored);
+  const missing = new Set<number>();
+  for (const episode of sent ?? []) {
+    if (!held.has(episode)) missing.add(episode);
+  }
+  return [...missing].sort((a, b) => a - b);
 }
 
 export interface SubscriptionSyncApi {
@@ -830,6 +903,22 @@ async function readErrorMessage(res: Response): Promise<string> {
   }
 }
 
+/**
+ * The stored set off a successful response, or `null` if it did not carry one.
+ *
+ * A body that will not parse is `null` and NOT a failure: the write already
+ * returned 2xx, and an unreadable body says nothing about whether the episodes
+ * landed. Degrading here is what keeps an older server, a 204, or a proxy that
+ * strips bodies behaving exactly as they did before this check existed.
+ */
+async function readStoredEpisodes(res: Response): Promise<readonly number[] | null> {
+  try {
+    return storedEpisodesFromBody((await res.json()) as unknown);
+  } catch {
+    return null;
+  }
+}
+
 async function send(
   path: string,
   method: "POST" | "PUT",
@@ -846,7 +935,7 @@ async function send(
       body: JSON.stringify(body),
       skipRedirectOnFailure: true,
     });
-    if (res.ok) return { ok: true, status: res.status };
+    if (res.ok) return { ok: true, status: res.status, stored: await readStoredEpisodes(res) };
     return { ok: false, status: res.status, message: await readErrorMessage(res) };
   } catch (err) {
     return {
@@ -1159,6 +1248,58 @@ async function writeSeries(
 }
 
 /**
+ * The invariant, checked against the answer we were already being sent:
+ * WHAT THE SERVER STORED CONTAINS EVERYTHING WE JUST SENT.
+ *
+ * ─── The severity, and why it is this one ───────────────────────────────────
+ *
+ * A `console.warn` and nothing else. Not `recordFailure`, not a changed
+ * outcome, not a withheld memory write — each of those was considered and each
+ * is worse than the fault it would be reporting.
+ *
+ *   NOT `recordFailure`. It runs the status through `classifyPushFailure`, and
+ *   there is no status to run: this is a 200. Forcing one in would either be
+ *   classified `transient` — in which case `applyFailure` returns the previous
+ *   entry and the whole thing is silent, i.e. no trace at all — or forced to
+ *   `deterministic`, which spends one of `MAX_PUSH_ATTEMPTS` and, since
+ *   `REPORT_AT_ATTEMPT` is 1, puts "this series is not syncing" in front of the
+ *   reader on the very first mismatch. Both readings are wrong for the same
+ *   reason: THE PUSH SUCCEEDED. The likeliest cause of a mismatch is not lost
+ *   progress but a changed response shape — a version skew, a proxy, a field
+ *   rename — and blocking a series that is in fact syncing perfectly, or
+ *   telling its owner it is broken, costs strictly more than the mismatch does.
+ *
+ *   NOT a non-`pushed` outcome. `rejected`/`deferred` mean "the server does not
+ *   have these episodes", and callers re-plan on them. Saying that about a
+ *   write that returned 200 invites exactly the unbounded retry the header
+ *   forbids.
+ *
+ *   NOT withholding the memory write. That would re-derive the identical delta
+ *   on all three triggers forever — same unbounded loop — and, worse, would
+ *   re-offer episodes the reader has since deliberately unchecked, which is the
+ *   one thing the memory exists to prevent.
+ *
+ * So: the module's existing developer channel (`writeSeries` and the memory
+ * write below already use it), zero effect on control flow, and it carries both
+ * sets so whoever reads it can tell "the server stopped stating its set the way
+ * it used to" from "episode 7 genuinely did not land".
+ */
+function reportUnstoredEpisodes(
+  rootId: string,
+  anilistId: number,
+  sent: readonly number[],
+  stored: readonly number[] | null | undefined,
+): void {
+  const missing = findUnstoredEpisodes(sent, stored);
+  if (missing.length === 0) return;
+  console.warn(
+    `[watchSync] server accepted the push for series ${rootId} (anilist ${anilistId}) ` +
+      `but did not report ${missing.join(", ")} as stored`,
+    { sent: [...new Set(sent)].sort((a, b) => a - b), stored: [...(stored ?? [])] },
+  );
+}
+
+/**
  * Push one series' unsent episodes, then remember them.
  *
  * The memory is written only after the server accepts, which is the whole
@@ -1210,6 +1351,14 @@ async function pushAndRecord(
 
   if (!isPushErr(res)) {
     clearFailure(rootId);
+    reportUnstoredEpisodes(rootId, plan.anilistId, episodes, res.stored);
+    // From what was SENT, never from what came back. `res.stored` is the whole
+    // row — including episodes another device marked — and this field is not a
+    // record of the row, it is a record of what THIS device pushed to it (see
+    // `WatchSyncSeries.lastSyncedEpisodes`). Folding the server's set in would
+    // make the memory claim credit for marks it never sent, and the next reader
+    // of `local \ pushed` would silently stop offering them. The check above
+    // adds an assertion; it does not add a source of truth.
     const remembered = [...new Set([...synced, ...episodes])].sort((a, b) => a - b);
     try {
       await db.series.update(rootId, {

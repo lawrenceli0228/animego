@@ -22,6 +22,11 @@ import {
   fileRefId,
 } from '@/lib/library/recordFactory.js';
 import { normalizeTokens } from '@/lib/library/normalize.js';
+// The one door in and out of `Series.anilistId`. Imported rather than
+// re-implemented: the guarantee that an automatic write can never stomp a
+// binding the user set by hand lives in that module, and an import is about as
+// automatic as a write gets.
+import { writeBinding } from '@/lib/library/animeBinding';
 
 /**
  * @typedef {Object} DandanEnrichment
@@ -192,6 +197,27 @@ async function processCluster(p) {
   /** @type {MatchVerdict} */
   let verdict;
 
+  /**
+   * The AniList id this cluster's dandanplay match carried, if any.
+   *
+   * A THIRD fact, independent of the other two the match produces: the
+   * dandanplay animeId decides whether a Season row exists, the enrichment blob
+   * decides the card's title and poster, and this decides whether the series is
+   * bound for watch-progress sync. None of the three implies another, and this
+   * one is deliberately not folded into `enrichment` for that reason.
+   *
+   * Hoisted out of the match branch below because the write cannot happen
+   * there: `seriesRepo.upsertCluster` REPLACES the series row wholesale (see
+   * its doc comment), so a binding written before it would be erased.
+   *
+   * Stays `undefined` on every path that did not call dandanplay — the
+   * matchCache hit above being the big one, since the cache has never stored an
+   * anilistId. That is the honest reach of this: a first-ever, cache-cold
+   * import.
+   * @type {number|undefined}
+   */
+  let matchedAnilistId;
+
   // Parser-detected season number for THIS cluster (from `[4th]` / `S2` /
   // `第N季` in the filenames). Threads through both the REUSE find and the
   // Season record creation so dandanplay returning a single animeId for
@@ -247,6 +273,11 @@ async function processCluster(p) {
     if (verdict.kind === 'new') {
       // Call dandanplay to resolve animeId, season, and enrichment metadata
       const dandanResult = await callDandan(dandan, rep);
+
+      // Captured before any branching, because the AniList id is worth having
+      // in every outcome below that still ends up minting a series — including
+      // the id-less one, where it is the ONLY identity the import learns.
+      matchedAnilistId = dandanResult.anilistId;
 
       if (dandanResult.isAmbiguous) {
         verdict = {
@@ -354,6 +385,21 @@ async function processCluster(p) {
     if (verdict.kind === 'new') {
       const records = buildPersistPayload(verdict, cluster, libraryId, 'matched');
       await seriesRepo.upsertCluster(records);
+      // Bind AFTER the upsert, and only on a 'new' verdict.
+      //
+      // After, because `upsertCluster` does `db.series.put(series)`, which
+      // replaces the whole row — a field set on the record beforehand survives
+      // only until the next writer forgets, and this is the field whose loss
+      // reads to a user as "my progress stopped syncing".
+      //
+      // Only on 'new', because that is the one verdict where THIS import
+      // created the row. Every other outcome points at a series that already
+      // existed and may already carry a binding the reader chose: 'reuse' (via
+      // season reuse, the userOverride swap, or a structural home) and the
+      // matchCache hit all land on someone else's row. `writeBinding` would
+      // refuse to stomp a locked one anyway — the gate here is about not
+      // claiming a reach this code does not have.
+      await bindImportedSeries(p.db, verdict.seriesRecord?.id, matchedAnilistId);
       // Push the freshly persisted season onto priorSeasons so later clusters
       // in the SAME batch can dedupe against it. Without this, three folders
       // of the same anime imported together would create three series each
@@ -591,9 +637,13 @@ async function deriveExistingHome(cluster, db) {
  * caller patches these onto the Series record so library cards show the real
  * title and cover instead of the anitomy-derived fansub group fallback.
  *
+ * `anilistId` rides alongside rather than inside `enrichment`: it is identity,
+ * not display metadata, and the two must not become co-dependent again (see
+ * `applyEnrichment`, which exists because they were).
+ *
  * @param {any} dandan
  * @param {EpisodeItem|null} rep
- * @returns {Promise<{ isAmbiguous: boolean, animeId?: number, candidates?: any[], enrichment?: DandanEnrichment }>}
+ * @returns {Promise<{ isAmbiguous: boolean, animeId?: number, anilistId?: number, candidates?: any[], enrichment?: DandanEnrichment }>}
  */
 async function callDandan(dandan, rep) {
   if (!rep) return { isAmbiguous: false };
@@ -607,12 +657,16 @@ async function callDandan(dandan, rep) {
 
   const animes = result.animes ?? [];
   const enrichment = result.enrichment;
+  const anilistId = result.anilistId;
 
   if (result.isMatched && animes.length === 1) {
-    return { isAmbiguous: false, animeId: animes[0].animeId, enrichment };
+    return { isAmbiguous: false, animeId: animes[0].animeId, anilistId, enrichment };
   }
 
   if (!result.isMatched && animes.length > 1) {
+    // Ambiguous writes no Series row at all, so there is nothing to bind and
+    // deliberately no `anilistId` here — carrying one would advertise a reach
+    // this branch does not have.
     const candidates = animes.map(a => ({
       animeId: a.animeId,
       animeTitle: a.animeTitle,
@@ -622,10 +676,55 @@ async function callDandan(dandan, rep) {
   }
 
   if (animes.length >= 1) {
-    return { isAmbiguous: false, animeId: animes[0].animeId, enrichment };
+    return { isAmbiguous: false, animeId: animes[0].animeId, anilistId, enrichment };
   }
 
-  return { isAmbiguous: false };
+  // Matched nothing nameable, but the envelope may still have identified the
+  // series. A verdict with no id and no enrichment still persists a card, and
+  // binding it is the difference between a card that syncs and one that waits
+  // for the mount-time sweep to notice it.
+  return { isAmbiguous: false, anilistId };
+}
+
+/**
+ * Bind a series this import just created to its AniList id.
+ *
+ * WHY IT GOES THROUGH `writeBinding` RATHER THAN THE RECORD
+ *
+ * Setting `seriesRecord.anilistId` before the `put` would be cheaper by one
+ * write and is arguably defensible for a brand-new row — no prior binding, no
+ * possible lock. It is not done, because the value of `animeBinding.ts` is that
+ * it is the ONLY door: a second writer that is safe today is a second writer
+ * somebody has to re-audit the day this code learns to touch an existing row.
+ * The chokepoint's guarantee is worth one extra `db.series.update`.
+ *
+ * The cost is one additional liveQuery emission per newly-matched cluster, on
+ * a path that already does a network round trip and a transaction per cluster.
+ *
+ * NEVER THROWS. `runImport` counts a throwing cluster as `failed`, so an
+ * unavailable `userOverride` table or a rejected write would turn a perfectly
+ * good import — files, episodes and all — into a failure the user sees. The
+ * binding is recoverable (the mount-time sweep in `bindUnboundSeries.ts` picks
+ * up anything still unbound); the import is not.
+ *
+ * A falsy `anilistId` is skipped here and refused again inside `writeBinding`
+ * (`decideBindingWrite` → `invalid-id`). `Series.anilistId` is never written 0.
+ *
+ * @param {import('@/lib/library/animeBinding').BindingDb|null|undefined} db
+ * @param {string|undefined} seriesId
+ * @param {number|undefined} anilistId
+ * @returns {Promise<void>}
+ */
+async function bindImportedSeries(db, seriesId, anilistId) {
+  if (!db || !seriesId || !anilistId) return;
+  try {
+    await writeBinding(db, seriesId, anilistId, 'auto');
+  } catch (err) {
+    console.warn(
+      '[importPipeline] binding write failed:',
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
 
 /**

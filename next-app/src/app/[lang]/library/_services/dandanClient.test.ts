@@ -220,6 +220,138 @@ describe("match — enrichment is independent of the id", () => {
   });
 });
 
+describe("match — the AniList id is a THIRD fact, carried beside the other two", () => {
+  // `siteAnime.anilistId` arrives on every matched import that produced a
+  // siteAnime at all, and used to be read and dropped. It is what
+  // `Series.anilistId` is written from, which is what watch-progress sync and
+  // subscriptions hang off — so throwing it away meant every imported series
+  // stayed unbound until somebody clicked it.
+  //
+  // It rides as a sibling of `enrichment`, not inside it. Enrichment is
+  // display metadata and is applied whether or not anything identified the
+  // content; this is identity. The import pipeline just finished separating
+  // those two facts (`applyEnrichment`) and this must not re-fuse them.
+
+  test("a phase 2 hit carries the AniList id", async () => {
+    // Arrange
+    globalThis.fetch = jsonResponse(PHASE2);
+
+    // Act
+    const result = await createDandanClient().match(HASH, FILE);
+
+    // Assert
+    expect(result?.anilistId).toBe(21);
+  });
+
+  test("a phase 1 hit carries it too — `anime` has none, `siteAnime` does", async () => {
+    // Arrange — phase 1's `anime` projection is titleNative + coverImageUrl.
+    // The id is only reachable because siteAnime is emitted in BOTH phases
+    // (match.go:213 phase 1, :275 phase 2).
+    globalThis.fetch = jsonResponse(PHASE1);
+
+    // Act
+    const result = await createDandanClient().match(HASH, FILE);
+
+    // Assert
+    expect(result?.anilistId).toBe(21);
+  });
+
+  test("a phase 3 hit has no siteAnime, so no AniList id and no crash", async () => {
+    // Arrange — phase 3 emits `siteAnime: null` (match.go:300).
+    globalThis.fetch = jsonResponse(PHASE3);
+
+    // Act
+    const result = await createDandanClient().match(HASH, FILE);
+
+    // Assert — absent, not 0. A 0 would be refused by `writeBinding` anyway,
+    // but the shape has to say "we did not learn this" at the source.
+    expect(result?.isMatched).toBe(true);
+    expect(result?.anilistId).toBeUndefined();
+  });
+
+  test("it is NOT folded into the enrichment blob", async () => {
+    // Arrange
+    globalThis.fetch = jsonResponse(PHASE2);
+
+    // Act
+    const result = await createDandanClient().match(HASH, FILE);
+
+    // Assert — three independent facts: the season id, the display metadata,
+    // and the binding. Putting the id inside `enrichment` would make the
+    // binding hinge on whether a poster happened to be present.
+    expect(result?.enrichment).not.toHaveProperty("anilistId");
+  });
+
+  test("carrying the AniList id does not conjure a dandanplay one", async () => {
+    // Arrange — the whole regression in one assertion: both ids present in the
+    // response, each staying in its own field.
+    globalThis.fetch = jsonResponse(PHASE2);
+
+    // Act
+    const result = await createDandanClient().match(HASH, FILE);
+
+    // Assert
+    expect(result?.anilistId).toBe(21);
+    expect(result?.animes[0]?.animeId).toBe(0);
+  });
+
+  test("a bgm.tv subject id is not an AniList id either", async () => {
+    // Arrange — bgmId 806 sits in the same envelope. It is the value that
+    // poisoned `Season.animeId` in the field; it must not now leak into the
+    // other direction and poison `Series.anilistId`.
+    globalThis.fetch = jsonResponse({
+      ...PHASE1,
+      siteAnime: { ...SITE_ANIME, anilistId: 0 },
+    });
+
+    // Act
+    const result = await createDandanClient().match(HASH, FILE);
+
+    // Assert
+    expect(result?.anilistId).not.toBe(806);
+    expect(result?.anilistId).toBeUndefined();
+  });
+
+  test.each([
+    ["zero", 0],
+    ["negative", -1],
+    ["fractional", 1.5],
+    ["null", null],
+    ["a non-numeric string", "abc"],
+  ])("an AniList id that is %s is absent, never written", async (_label, bad) => {
+    // Arrange — `Series.anilistId` must never hold a non-positive value, and
+    // the cheapest place to guarantee that is where the JSON is read.
+    globalThis.fetch = jsonResponse({
+      ...PHASE2,
+      anime: { ...PHASE2.anime, anilistId: bad },
+      siteAnime: { ...SITE_ANIME, anilistId: bad },
+    });
+
+    // Act
+    const result = await createDandanClient().match(HASH, FILE);
+
+    // Assert
+    expect(result?.anilistId).toBeUndefined();
+  });
+
+  test("the envelope's own `anime.anilistId` wins, and siteAnime backs it up", async () => {
+    // Arrange — phase 2 projects the same anime_cache row twice. When only one
+    // of the two carries a usable id, the other must still be reachable;
+    // neither may fall through to a different id SPACE.
+    globalThis.fetch = jsonResponse({
+      ...PHASE2,
+      anime: { ...PHASE2.anime, anilistId: null },
+    });
+
+    // Act
+    const result = await createDandanClient().match(HASH, FILE);
+
+    // Assert — 21 from siteAnime, and still no dandanplay id invented.
+    expect(result?.anilistId).toBe(21);
+    expect(result?.animes[0]?.animeId).toBe(0);
+  });
+});
+
 describe("match — refusals", () => {
   test("a miss envelope returns null rather than a zero-id match", async () => {
     // Arrange — `{matched:false}` is the total-miss shape (missResponse).

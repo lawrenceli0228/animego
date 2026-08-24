@@ -5,6 +5,7 @@ import {
   classifyPushFailure,
   decidePush,
   findRootSeriesId,
+  findUnstoredEpisodes,
   getSyncFailure,
   judgeSyncMemory,
   listSyncFailures,
@@ -18,6 +19,7 @@ import {
   resetWatchSyncState,
   resolveGroupSeriesIds,
   startTracking,
+  storedEpisodesFromBody,
   type PushResponse,
   type ServerSubscription,
   type SubscriptionSyncApi,
@@ -1435,7 +1437,13 @@ function serverHolding(anilistId: number, initial: number[], subscribedAt: numbe
     async markEpisodes(id, episodes) {
       api.calls.push({ kind: "mark", anilistId: id, episodes: [...episodes] });
       for (const n of episodes) watched.add(n);
-      return { ok: true, status: 200 };
+      // The FULL post-write set, which is the other half of the contract this
+      // fake exists to model: MarkEpisodesWatched answers with the union it
+      // just computed, not with an acknowledgement of the delta. Stating it
+      // here means every test below now also proves the containment check does
+      // not fire on a server that behaves — no assertion changed, one more
+      // thing pinned.
+      return { ok: true, status: 200, stored: [...watched].sort((a, b) => a - b) };
     },
     async createIfAbsent(id) {
       api.calls.push({ kind: "create", anilistId: id });
@@ -1681,6 +1689,234 @@ describe("the episodes below the high-water mark", () => {
 
     expect(result).toMatchObject({ episodes: [1, 2] });
     expect(server.watched()).toEqual([1, 2]);
+  });
+});
+
+// ─── T10: the answer the server was already sending ─────────────────────────
+
+/**
+ * Run `fn` with `console.warn` captured.
+ *
+ * Restored in a `finally` so a failing assertion inside cannot leave the rest
+ * of the suite mute — bun shares one process across files, and a leaked stub
+ * would silence a diagnostic somebody else's test is asserting on.
+ */
+async function withCapturedWarnings<T>(
+  fn: () => Promise<T>,
+): Promise<{ value: T; warnings: unknown[][] }> {
+  const warnings: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+  try {
+    return { value: await fn(), warnings };
+  } finally {
+    console.warn = original;
+  }
+}
+
+describe("what the server stored, checked against what we sent", () => {
+  /** Memory {1,2} (legacy maximum), library {1,2,3} — so the delta is [3]. */
+  function oneSeries(over: Partial<WatchSyncSeries> = {}) {
+    return fakeDb({
+      series: [{ id: "S1", anilistId: 154587, lastSyncedEpisode: 2, ...over }],
+      episodes: [main("e1", "S1", 1), main("e2", "S1", 2), main("e3", "S1", 3)],
+      progress: [done("e1", "S1"), done("e2", "S1"), done("e3", "S1")],
+      overrides: [],
+    });
+  }
+
+  // ─── the invariant, in isolation ──────────────────────────────────────────
+
+  test("a SUPERSET is the normal case — another device's marks come back too", () => {
+    // The statement unions and then returns the whole row. A reader with a
+    // phone has marks this device never sent, so a wider answer is what a
+    // healthy server looks like; equality would fire on every one of them.
+    expect(findUnstoredEpisodes([3], [1, 2, 3, 7, 8])).toEqual([]);
+  });
+
+  test("an exact echo is accepted", () => {
+    expect(findUnstoredEpisodes([1, 2, 3], [1, 2, 3])).toEqual([]);
+  });
+
+  test("duplicates in the request cannot false-positive", () => {
+    // parseEpisodeList accepts duplicates and ON CONFLICT DO NOTHING collapses
+    // them, so three members legitimately become two stored rows. A count
+    // comparison would accuse a request that was answered perfectly.
+    expect(findUnstoredEpisodes([3, 3, 4], [3, 4])).toEqual([]);
+  });
+
+  test("names every episode the server did not report, deduped and ascending", () => {
+    expect(findUnstoredEpisodes([9, 2, 2, 5], [5])).toEqual([2, 9]);
+  });
+
+  test("no set stated is not evidence of anything", () => {
+    expect(findUnstoredEpisodes([1, 2], null)).toEqual([]);
+    expect(findUnstoredEpisodes([1, 2], undefined)).toEqual([]);
+  });
+
+  test("a stated-but-empty set IS a mismatch, unlike an absent one", () => {
+    // A 200 from MarkEpisodesWatched can never hold nothing: the statement
+    // inserted at least one row before it aggregated. `[]` is therefore a real
+    // anomaly, and the whole point of `stated` is that it does not read the
+    // same as a body that carried no set at all.
+    expect(findUnstoredEpisodes([3], [])).toEqual([3]);
+  });
+
+  // ─── reading the body ─────────────────────────────────────────────────────
+
+  test("reads the { data: … } envelope go-api actually sends", () => {
+    expect(
+      storedEpisodesFromBody({
+        data: { anilistId: 154587, watchedEpisodes: [3, 1, 2], currentEpisode: 3 },
+      }),
+    ).toEqual([1, 2, 3]);
+  });
+
+  test("a body that states no set reads as null, never as an empty one", () => {
+    // Every shape here is "an older server, or a proxy that stripped it" —
+    // none of them is the server claiming it holds nothing.
+    expect(storedEpisodesFromBody(null)).toBeNull();
+    expect(storedEpisodesFromBody({})).toBeNull();
+    expect(storedEpisodesFromBody({ data: null })).toBeNull();
+    expect(storedEpisodesFromBody("nonsense")).toBeNull();
+    expect(storedEpisodesFromBody({ data: { watchedEpisodes: "3,4,5" } })).toBeNull();
+    expect(storedEpisodesFromBody({ data: { currentEpisode: 3 } })).toBeNull();
+  });
+
+  test("an explicitly empty set survives as a fact", () => {
+    expect(storedEpisodesFromBody({ data: { watchedEpisodes: [] } })).toEqual([]);
+  });
+
+  // ─── end to end ───────────────────────────────────────────────────────────
+
+  test("a superset comes back and nothing is said about it", async () => {
+    // Arrange — we send [3]; the row already holds 7 and 8 from a phone.
+    const db = oneSeries();
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [1, 2, 3, 7, 8] } });
+
+    // Act
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    // Assert
+    expect(result.outcome).toBe("pushed");
+    expect(warnings).toEqual([]);
+  });
+
+  test("lastSyncedEpisodes is written from what was SENT, not from what came back", async () => {
+    // The memory is a record of what THIS device pushed to THIS row, not a
+    // copy of the row. Folding 7 and 8 in would claim credit for another
+    // device's marks, and `local \ pushed` would then silently stop offering
+    // them if this device ever acquired those files.
+    const db = oneSeries();
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [1, 2, 3, 7, 8] } });
+
+    await reconcileSeries(db, "S1", { api });
+
+    expect(db.updates).toEqual([
+      { id: "S1", lastSyncedEpisodes: [1, 2, 3], lastSyncedEpisode: 3 },
+    ]);
+  });
+
+  test("a missing episode is named, and costs neither the budget nor the series", async () => {
+    // Arrange — nothing synced yet, so the delta is the whole local set; the
+    // server answers 200 but reports only 1 and 3.
+    const db = oneSeries({ lastSyncedEpisode: 0 });
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [1, 3] } });
+    const reported: SyncFailure[] = [];
+    const off = onSyncFailure((f) => reported.push(f));
+
+    // Act
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+    off();
+
+    // Assert — the trace is loud and names the episode…
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0][0])).toContain("did not report 2 as stored");
+    expect(warnings[0][1]).toEqual({ sent: [1, 2, 3], stored: [1, 3] });
+
+    // …and changes nothing else. The push returned 200: the outcome stays
+    // `pushed` so no caller re-plans, the attempt counter is untouched so the
+    // series keeps its full retry budget, `blocked` cannot be true because no
+    // failure entry exists at all, and the reader is told nothing — a response
+    // that changed shape is not a reason to accuse their library.
+    expect(result.outcome).toBe("pushed");
+    expect(getSyncFailure("S1")).toBeNull();
+    expect(listSyncFailures()).toEqual([]);
+    expect(reported).toEqual([]);
+  });
+
+  test("a mismatch does not turn the push into a retry loop", async () => {
+    // The memory is written anyway, so the next trigger recomputes an empty
+    // delta and sends nothing. Withholding it would re-offer the identical set
+    // on all three triggers forever — the unbounded loop the module exists to
+    // not have.
+    const db = oneSeries({ lastSyncedEpisode: 0 });
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [1, 3] } });
+
+    await withCapturedWarnings(() => reconcileSeries(db, "S1", { api }));
+    const second = await withCapturedWarnings(() => reconcileSeries(db, "S1", { api }));
+
+    expect(second.value.outcome).toBe("already-synced");
+    expect(second.warnings).toEqual([]);
+    expect(api.calls).toHaveLength(1);
+  });
+
+  test("a body that carried no set degrades to the behaviour that predates the check", async () => {
+    // `{ ok: true, status: 200 }` with no `stored` is exactly what every
+    // response looked like before this change, and what an older server or a
+    // body-stripping proxy still looks like.
+    const db = oneSeries();
+    const api = fakeApi({ mark: { ok: true, status: 200 } });
+
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    expect(result.outcome).toBe("pushed");
+    expect(warnings).toEqual([]);
+    expect(db.updates).toEqual([
+      { id: "S1", lastSyncedEpisodes: [1, 2, 3], lastSyncedEpisode: 3 },
+    ]);
+  });
+
+  test("an unparseable body reads as null and is equally silent", async () => {
+    const db = oneSeries();
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: null } });
+
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    expect(result.outcome).toBe("pushed");
+    expect(warnings).toEqual([]);
+  });
+
+  test("the set that comes back after a 404 recovery is the one checked", async () => {
+    // The first mark 404s, the subscription is created, the second mark is the
+    // one that landed — so it is the second response's set the invariant is
+    // about. A check wired to the first would read a body that never existed.
+    const db = oneSeries({ lastSyncedEpisode: 0 });
+    const api = fakeApi({
+      mark: [
+        { ok: false, status: 404, message: "Subscription not found" },
+        { ok: true, status: 200, stored: [1, 3] },
+      ],
+    });
+
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    expect(result.outcome).toBe("pushed");
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0][0])).toContain("did not report 2 as stored");
+    expect(getSyncFailure("S1")).toBeNull();
   });
 });
 

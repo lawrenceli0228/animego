@@ -40,6 +40,29 @@
 
 **连带修好一个耦合**：`applyEnrichment` 里，Season 记录（身份）和标题/封面（元数据）本来共用同一个真值判断。id 变空之后元数据会跟着一起被跳过，新导入的番就留着解析出来的原始名。两者现在分开了：没有可用 id 就不写 Season 行（写成 0 更糟 —— `dedupeSeries` 按 `typeof animeId !== 'number'` 判，0 会当成真 id 把所有无 id 的番折叠成一张卡），但富化照常应用。
 
+### 变更 — 两个 id 空间现在混不了，混了编译不过
+
+同一个 bug 在这个仓库出现过两次（手动 rematch 一次、自动导入一次），两次分别修，**没有共用代码** —— 那正是会漂回去的形状。现在抽成 `animeIds.ts`：`DandanAnimeId` / `AnilistId` / `BgmSubjectId` 三个品牌类型，每个一个归一化函数。
+
+把两个历史 bug 原样种回去，编译器直接拦：
+
+```
+dandanClient.ts: Type 'DandanAnimeId | 0 | BgmSubjectId' is not assignable to type '0 | DandanAnimeId'.
+      Type '"bgm"' is not assignable to type '"dandanplay"'.
+rematchPayload.ts: Type 'DandanAnimeId | AnilistId' is not assignable to type 'DandanAnimeId'.
+      Type '"anilist"' is not assignable to type '"dandanplay"'.
+```
+
+两个细节是承重的：**`match()` 里那个 `as DandanMatchResult` 断言被删掉了** —— 品牌数字之间的**断言不报错、赋值才报错**，那个 cast 一直在拆掉这道闸门；以及 **`merged.bgmId` 故意留着**并加了类型 —— 它没有任何读取方，但它正是当初污染 `Season.animeId` 的那个数，留着当绊线。
+
+残留的洞照实说：软品牌会被 `Number(...)` 抹掉，所以洗一道再赋值仍然编译得过。那一半是靠行为测试守的（喂真实信封进去，断言外来 id 永远不落地），不是靠类型。
+
+### 变更 — 导入时就绑定，以及两处补上的审计痕迹
+
+- **导入时绑定**：`siteAnime.anilistId` 在两个产出 siteAnime 的 phase 里都有，`mergeAnimeFields` 早就取了，`pickEnrichment` 把它丢了。现在它作为**第三个事实**独立传递（不折进 enrichment —— 折进去会让绑定取决于「刚好有没有封面」），经 `writeBinding` 落地。**覆盖面照实说**：只覆盖「首次导入 + 缓存冷 + 有 siteAnime + 没落到已有 series」这一种，`reuse`、缓存命中、结构性归位、ambiguous 全都绕过它。
+- **`rematchSeries` 补写 opsLog**：`'rematch'` 这个 kind 从 v4 起就在白名单里，**从来没有任何东西写过**。payload 记两个 id 空间各自的 from/to，`from` 在**事务内、写入之前**捕获（晚一拍读，每行都会变成 `from === to`）；未触碰的空间记 `null` 而不是 `{from: null}`，因为后者等于断言「那一季没有 id」，而真相是「我们没看」。
+- **接住服务端回传的写后集合**：`PUT .../episodes` 一直返回完整的写后集合，客户端把 body 丢了 —— 字节已经过线，白扔。现在断言**包含**（服务端是 UNION 不是替换，用相等会天天误报）。不匹配只 `console.warn`：这是 200，走 `recordFailure` 要么完全没痕迹、要么烧掉重试预算并在第一次就弹「这部番没在同步」冤枉一个健康的 series。
+
 ### 明确不做的
 
 - **集号重映射**。实测样本里 1/26。`episode_watches` 只增，唯一删除路径是逐集取消或退订级联 —— 服务端改写一旦写错就不可逆、不可检测、无运维工具清理；而它比对的总集数是富化任务写的活动目标，现有注释接受竞态的理由正是「最多多一个 400，客户端会重试过去」。加了改写之后那变成永久错写。改成让它在第一次失败时就可见，配现有的手动重新匹配。

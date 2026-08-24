@@ -332,6 +332,26 @@ describe("bindUnboundSeries", () => {
     expect((ops.entries[0].payload as Record<string, unknown>).anilistId).toBe(111);
   });
 
+  test("★ the summary uses the key the drawer actually reads", async () => {
+    // `OpsLogDrawer.summaryLineFor` reads `summary.targetTitle` for a rematch
+    // row and falls back to the unnamed copy without it. A row keyed `title`
+    // is not a type error, is not a test failure anywhere else, and renders
+    // every automatic binding as a bare "重新匹配" — which is exactly the kind
+    // of silent mismatch a schema-free `Record<string, unknown>` invites.
+    const db = fakeDb([{ id: "a", titleZh: "间谍过家家" }]);
+    const ops = fakeOpsLog();
+    await bindUnboundSeries({
+      db,
+      series: db.rows,
+      opsLog: ops,
+      search: matchingSearch(() => 111),
+      delayMs: 0,
+    });
+
+    const summary = ops.entries[0].summary as Record<string, unknown>;
+    expect(summary.targetTitle).toBe("间谍过家家");
+  });
+
   test("a broken ops log does not cost the binding that already landed", async () => {
     const db = fakeDb([{ id: "a", titleZh: "间谍过家家" }]);
     const summary = await bindUnboundSeries({

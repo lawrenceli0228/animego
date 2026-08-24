@@ -326,7 +326,12 @@ async function recordBinding(
         anilistId,
         keyword: seriesSearchKeyword(row),
       },
-      summary: { anilistId, title: seriesSearchKeyword(row) },
+      // `targetTitle`, not `title`. `OpsLogDrawer.summaryLineFor` reads exactly
+      // that key for a rematch row and falls back to the unnamed copy without
+      // it — so a plain `title` renders every automatic binding as a bare
+      // "重新匹配" with nothing to say which show it landed on. The dictionary
+      // owns the sentence; this row owns only the value it interpolates.
+      summary: { targetTitle: seriesSearchKeyword(row), anilistId },
     });
   } catch (err) {
     console.warn(
