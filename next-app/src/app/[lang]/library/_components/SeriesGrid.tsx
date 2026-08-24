@@ -46,7 +46,13 @@ type SeriesAvailability = "ok" | "partial" | "offline" | "unknown";
 /**
  * Why a watched series is not reaching the server.
  *   unbound  no `Series.anilistId`, so there is nothing to subscribe to
- *   blocked  the push was refused deterministically MAX_PUSH_ATTEMPTS times
+ *   blocked  the push was refused deterministically — surfaced on the FIRST
+ *            refusal, not after the retry ceiling. The two thresholds are
+ *            separate on purpose: `REPORT_AT_ATTEMPT` decides when the reader
+ *            is told, `MAX_PUSH_ATTEMPTS` decides when we stop retrying. The
+ *            name here is kept because it is what the reader is shown — the
+ *            series is blocked from reaching the server, whatever the budget
+ *            still allows.
  */
 type SeriesSyncState = "unbound" | "blocked";
 

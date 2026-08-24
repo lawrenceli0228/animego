@@ -24,7 +24,7 @@
 //   entering /library                        → reconcileLibrary(rows already in memory)
 //   entering the player with a library series → reconcileSeries(that series)
 //
-// ─── CG2: the attempt ceiling ───────────────────────────────────────────────
+// ─── CG2: telling the reader, and stopping the retries ──────────────────────
 //
 // §9 CG2: a PATCH that keeps failing deterministically never advances
 // `lastSyncedEpisode`, so all three triggers retry it forever with no backoff
@@ -35,8 +35,31 @@
 //   400  "Episode exceeds the total episode count" — the local binding points
 //        at the wrong show, or at one season of a multi-cour split.
 //
-// So: at most MAX_PUSH_ATTEMPTS deterministic failures per series, counted in
-// memory, plus a queryable failure state the UI renders.
+// That is TWO problems — a reader staring at progress that never moves, and a
+// request loop with no exit — and they get two independent thresholds here,
+// because the right number for each is different:
+//
+//   REPORT_AT_ATTEMPT (1)   the FIRST deterministic refusal is announced.
+//   MAX_PUSH_ATTEMPTS (3)   after the third, the series stops being pushed.
+//
+// THEY USED TO BE ONE NUMBER, AND THAT WAS A BUG. `blocked` — reaching the
+// retry ceiling — was also what the UI listened for, so the reader was only
+// told on the third deterministic failure *of a single session*. The counter
+// lives in a module-level Map (deliberately; see below) and therefore resets
+// on every page load, so a normal viewing rhythm — watch an episode, close the
+// tab, come back tomorrow — accrues one or two failures per session and never
+// reaches three. Measured, not hypothetical: a reader's series failed every
+// push with a deterministic 400 and they were never shown anything.
+//
+// Lowering the ceiling to 1 would have fixed the silence by breaking the
+// retries. Reporting is free and wants to happen at once; retrying costs
+// requests and wants a budget, because some 4xx clear on a re-plan —
+// `pushAndRecord`'s 404 recovery is exactly that, and `ensureSubscription`
+// can fail transiently inside it. So: two thresholds, and the reporting one
+// does not depend on the counter surviving anything, since the first failure
+// of every session qualifies. The reader hears about a broken series once per
+// session for as long as it stays broken, which is the correct cadence for a
+// fault that a reload cannot fix.
 //
 // The counter is deliberately NOT persisted and there is no v7 migration for
 // it. Both failure causes survive a reload — a wrong binding is still wrong,
@@ -47,11 +70,11 @@
 // cost of a Dexie table would be a migration, a second source of truth for
 // "is this series broken", and a stale row to explain to the next reader.
 //
-// Transient failures (offline, 5xx, rate limiting) are NOT counted. Those are
-// exactly the conditions decision 5 exists to ride out. 401 is not counted
-// either and is not a failure at all: the session expired, the user logs back
-// in, and the next trigger pushes the same derived value (§8.1 "401 过期→重登
-// 后补推").
+// Transient failures (offline, 5xx, rate limiting) are neither counted nor
+// reported. Those are exactly the conditions decision 5 exists to ride out.
+// 401 is neither, and is not a failure at all: the session expired, the user
+// logs back in, and the next trigger pushes the same derived value (§8.1
+// "401 过期→重登后补推").
 //
 // ─── What the sync memory is actually a claim ABOUT ─────────────────────────
 //
@@ -160,8 +183,29 @@ export interface WatchSyncOverride {
 
 // ─── Pure decisions ─────────────────────────────────────────────────────────
 
-/** Deterministic failures tolerated per series, per session. */
+/**
+ * Deterministic pushes attempted per series, per session, before the series
+ * stops being pushed at all.
+ *
+ * A RETRY CEILING AND NOTHING ELSE. It is not the point at which the reader is
+ * told — that is `REPORT_AT_ATTEMPT`, and conflating the two is the bug the
+ * header describes. Raising or lowering this number changes how many requests
+ * a broken series is worth; it must not change what the reader sees.
+ */
 export const MAX_PUSH_ATTEMPTS = 3;
+
+/**
+ * Which deterministic failure is the one the reader hears about.
+ *
+ * One, because a deterministic failure is by definition reproducible: the
+ * second and third attempts carry no information the first did not, and
+ * waiting for them means waiting for a session long enough to contain three —
+ * which a reader who watches one episode a night never has.
+ *
+ * Must stay `<= MAX_PUSH_ATTEMPTS`, or the attempt that reports would never be
+ * reached and CG2 would be silent again.
+ */
+export const REPORT_AT_ATTEMPT = 1;
 
 /**
  * Walk UP the merge graph: which series' card does `seriesId` render on?
@@ -370,15 +414,15 @@ function toTimestamp(value: unknown): number | null {
  * often wrong, so bounding against it would silently drop legitimate progress.
  * Filtering an out-of-range episode out here would be worse than pointless: a
  * local episode numbered 6000 is evidence of a bad binding or a bad filename
- * parse, and the server's 400 is how that becomes visible (and how the attempt
- * ceiling eventually stops it). Dropping it quietly would leave a broken
- * series looking healthy forever.
+ * parse, and the server's 400 is how that becomes visible — reported on the
+ * first refusal, then retried up to the attempt ceiling and dropped. Filtering
+ * it quietly would leave a broken series looking healthy forever.
  *
  * The delta is likewise sent whole. It cannot exceed the server's array cap
  * without more than five thousand completed main episodes in one merged
  * group, which is a mis-merge rather than a library — and a mis-merge is
- * exactly the thing the resulting 400 and the attempt ceiling exist to
- * surface, not to paper over with chunking nobody could ever exercise.
+ * exactly the thing the resulting 400, the report and the attempt ceiling
+ * exist to surface, not to paper over with chunking nobody could exercise.
  */
 export function decidePush(input: {
   readonly isRoot: boolean;
@@ -535,10 +579,17 @@ export type FailureKind = "deterministic" | "transient" | "auth";
 /**
  * Does this failure mean "stop trying" or "try again later"?
  *
- * Only a deterministic 4xx accrues. 401 is its own bucket because the fix is a
- * login, not a retry budget, and 408/425/429 are 4xx by number but transient by
- * meaning — go-api answers 429 from its rate limiter, and burning the ceiling
- * on that would disable sync for a user who did nothing wrong.
+ * Only a deterministic 4xx accrues, and this is the ONE gate in front of both
+ * thresholds — a kind that is not `deterministic` neither counts toward the
+ * ceiling nor reports, because `applyFailure` returns before either is
+ * computed. That matters more now that reporting happens on attempt 1: a
+ * mis-classified transient would not merely shorten a budget, it would put an
+ * error in front of a reader whose only problem was a flaky connection.
+ *
+ * 401 is its own bucket because the fix is a login, not a retry budget, and
+ * 408/425/429 are 4xx by number but transient by meaning — go-api answers 429
+ * from its rate limiter, and spending either threshold on that would accuse a
+ * user who did nothing wrong.
  */
 export function classifyPushFailure(
   status: number | null | undefined,
@@ -552,8 +603,31 @@ export function classifyPushFailure(
 
 export interface SyncFailure {
   readonly seriesId: string;
+  /** Deterministic refusals since this series was last healthy. */
   readonly attempts: number;
-  /** Attempt ceiling reached — nothing else will be pushed this session. */
+  /**
+   * THE SIGNAL THE UI ACTS ON: this refusal is the one the reader should be
+   * told about, and no later refusal of the same run will be.
+   *
+   * True on attempt `REPORT_AT_ATTEMPT` and false on every other, so it is a
+   * one-shot per series per run of failures — which is what lets a listener
+   * toast unconditionally without any bookkeeping of its own. `recordFailure`
+   * emits on exactly this flag, so a listener never even sees a `false` one;
+   * the field is still stated rather than implied, because a consumer reading
+   * `getSyncFailure` has no emission to infer it from.
+   *
+   * Deliberately NOT `blocked`. See the header: a reader whose sessions are
+   * one episode long never reaches the ceiling, so gating the UI on it meant
+   * gating it on nothing.
+   */
+  readonly reportable: boolean;
+  /**
+   * Retry ceiling reached — nothing else will be pushed this session.
+   *
+   * A statement about requests, not about the reader. By the time this turns
+   * true they have already been told (see `reportable`); this is what
+   * `decidePush` and `reconcileLibrary` read to stop asking the server.
+   */
   readonly blocked: boolean;
   readonly status: number | null;
   readonly message: string;
@@ -565,7 +639,8 @@ export interface SyncFailure {
  * `null` to store nothing.
  *
  * Transient and auth failures return the previous entry untouched — including
- * `null` — so a week offline cannot exhaust the budget.
+ * `null` — so a week offline can neither exhaust the budget nor raise a
+ * report.
  */
 export function applyFailure(input: {
   readonly prev: SyncFailure | null | undefined;
@@ -582,6 +657,11 @@ export function applyFailure(input: {
   return {
     seriesId: input.seriesId,
     attempts,
+    // `===`, not `>=`: the flag has to be false again on attempts 2 and 3 or
+    // the emitter would fire on each of them. A run that is cleared by a
+    // success starts over at 1 and is reported again, which is right — it is
+    // a new fault, not the same one repeating.
+    reportable: attempts === REPORT_AT_ATTEMPT,
     blocked: attempts >= MAX_PUSH_ATTEMPTS,
     status: input.status,
     message: input.message,
@@ -634,10 +714,16 @@ export function listSyncFailures(): SyncFailure[] {
 /**
  * Subscribe to failure-state changes so the UI can say something.
  *
- * Fires on every deterministic failure, including the one that trips
- * `blocked`. Since a blocked series is never pushed again, the listener sees
- * `blocked: true` exactly once per series per session — which is what makes a
- * one-shot toast possible without any extra bookkeeping at the call site.
+ * Fires on the FIRST deterministic failure of a series and on no other: every
+ * event carries `reportable: true`, and a series already reported stays quiet
+ * until a success clears it. So a listener can toast unconditionally, exactly
+ * once per broken series per session, with no bookkeeping at the call site.
+ *
+ * It fired on every deterministic failure until this change, and the UI gated
+ * on `blocked` to get its one-shot. That threshold is unreachable in a normal
+ * session — see the header — so the one shot was never fired at all. The
+ * de-duplication belongs here, where the previous attempt is known, rather
+ * than in each consumer.
  */
 export function onSyncFailure(listener: FailureListener): () => void {
   _failureListeners.add(listener);
@@ -682,7 +768,11 @@ function recordFailure(
   });
   if (!next) return;
   _failures.set(seriesId, next);
-  emitFailure(next);
+  // Attempts past the first still update the stored entry — `attempts`,
+  // `blocked`, the latest status and message all move — but say nothing. The
+  // reader was told on attempt 1 and a repeat of a deterministic refusal is
+  // not news; re-emitting would put the same toast on screen three times.
+  if (next.reportable) emitFailure(next);
 }
 
 function clearFailure(seriesId: string): void {
@@ -884,10 +974,17 @@ export interface SyncOptions {
    * the user: the library card click (`startTracking`) and entering the player
    * (`reconcileSeries`, trigger 3). Do NOT pass it from the completion trigger
    * — by then the player entry has already resolved the same series — and
-   * `reconcileLibrary` does not accept it at all, because a mount-time sweep of
-   * a few hundred unbound series would become a few hundred simultaneous
-   * searches for a page the user only wanted to look at. Unbound series are
-   * skipped there and the card note explains why.
+   * `reconcileLibrary` does not accept it at all, because threading a resolver
+   * through a pass that walks the whole library is how one mount becomes a few
+   * hundred simultaneous searches. Unbound series are skipped there.
+   *
+   * That is a restriction on THIS seam, not a statement that unbound series go
+   * unresolved. They are resolved on mount now, by
+   * `app/library/_services/bindUnboundSeries.ts`, which calls
+   * `resolveSeriesBinding` directly and carries the bound this option has no way
+   * to express: capped per mount, one search at a time, spaced, abortable. The
+   * sweep runs BESIDE `reconcileLibrary` rather than inside it, which is exactly
+   * what lets this parameter stay as narrow as it is.
    */
   readonly resolveBinding?: (seriesId: string) => Promise<number | null>;
 }
@@ -1099,9 +1196,11 @@ async function pushAndRecord(
   // A 404 means one thing: this user has no subscription row for this title.
   // That is the state "click to start tracking" (T9) exists to leave behind,
   // and someone who just finished an episode has unambiguously started
-  // watching — so create it once and retry, rather than burning the attempt
-  // ceiling on a condition we can fix. `ifAbsent` keeps a hand-set
-  // dropped/completed status intact, so this can never resurrect a status.
+  // watching — so create it once and retry, rather than recording a failure
+  // for a condition we can fix. Recording one now costs more than an attempt:
+  // since reporting moved to the first refusal, it would also tell the reader
+  // their sync is broken a moment before it repairs itself. `ifAbsent` keeps a
+  // hand-set dropped/completed status intact, so this can never resurrect one.
   if (isPushErr(res) && res.status === 404) {
     const ensured = await ensureSubscription(rootId, plan.anilistId, api);
     if (ensured === "created") {
@@ -1284,9 +1383,17 @@ export interface LibraryReconcileInput {
  *
  * Deliberately takes no `resolveBinding`, unlike the single-series paths. A
  * mature library can hold hundreds of unbound series, and resolving one means a
- * title search; doing that on mount would turn opening /library into a burst of
- * hundreds of simultaneous search requests. On-demand resolution stays where it
- * is bounded and the user asked for it — the card click and the player entry.
+ * title search; threading a resolver through a pass that walks all of them would
+ * turn opening /library into a burst of hundreds of simultaneous search
+ * requests. An unbound series is skipped here and reported as `"unbound"`.
+ *
+ * Skipped by this function is no longer skipped by the system, though.
+ * `library/_services/bindUnboundSeries.ts` sweeps the unbound ones on mount —
+ * capped, sequential, spaced, abortable — calling `resolveSeriesBinding`
+ * directly instead of through the seam above. It runs BESIDE this function, and
+ * `LibraryShell` re-arms this function once the sweep reports it bound
+ * something, so a series bound at second three of a mount is pushed in that same
+ * mount rather than waiting for the reader's next visit.
  */
 export async function reconcileLibrary(
   db: WatchSyncDb,

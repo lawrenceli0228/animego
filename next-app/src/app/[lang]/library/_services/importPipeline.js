@@ -274,6 +274,24 @@ async function processCluster(p) {
             seasonNumber: clusterSeason,
           });
         }
+      } else if (dandanResult.enrichment) {
+        // Matched, but the response carried no dandanplay id.
+        //
+        // This is the ordinary case now, not an edge one: `/api/dandanplay/match`
+        // does not emit a dandanplay animeId in any of its phases, so the
+        // client can only report one when a cached verdict supplies it. What it
+        // DOES return is the title and poster, and those are worth having on
+        // their own — without them a fresh card is titled after whatever the
+        // filename parser scraped out of the folder.
+        //
+        // No Season row is written here. Identity is what a Season row is for,
+        // and we do not have it; `applyEnrichment` enforces that.
+        verdict = applyEnrichment(verdict, {
+          animeId: undefined,
+          enrichment: dandanResult.enrichment,
+          ulidSeed,
+          seasonNumber: clusterSeason,
+        });
       }
     }
   }
@@ -626,15 +644,39 @@ async function callDandan(dandan, rep) {
  */
 function applyEnrichment(verdict, { animeId, enrichment, ulidSeed, seasonNumber }) {
   if (!verdict.seriesRecord) return verdict;
-  const seasonRecord = buildSeasonRecord(
-    verdict.seriesRecord.id,
-    animeId,
-    {
-      ulidSeed: ulidSeed !== undefined ? ulidSeed + 1 : undefined,
-      ...(seasonNumber != null ? { number: seasonNumber } : {}),
-    },
-  );
-  if (!enrichment) return { ...verdict, seasonRecord };
+
+  // IDENTITY AND METADATA ARE TWO DIFFERENT FACTS, and this function used to
+  // treat them as one.
+  //
+  // A Season row IS the dandanplay identity — `Season.animeId` is its whole
+  // reason to exist. Without a usable id there is nothing to identify, and
+  // writing the row anyway at 0 is actively dangerous: `dedupeSeries.ts` keys
+  // on `typeof season.animeId !== 'number'`, so a stored 0 passes as a real id
+  // and folds every id-less series onto a single card.
+  //
+  // Enrichment is not identity. It is the title and poster that keep a card
+  // from being named after whatever the filename parser scraped out of the
+  // folder — frequently the fansub group. Withholding it for lack of an id is
+  // a user-visible regression with no upside, and it is one this file used to
+  // have by accident: both lived inside the caller's `else if (animeId)`
+  // branch, so when the automatic path stopped producing an id (see
+  // `dandanClient.ts`, where a fallback that substituted a bgm.tv subject id
+  // was removed), the titles silently went with it.
+  const usableAnimeId =
+    typeof animeId === 'number' && Number.isInteger(animeId) && animeId > 0;
+  const seasonRecord = usableAnimeId
+    ? buildSeasonRecord(
+        verdict.seriesRecord.id,
+        animeId,
+        {
+          ulidSeed: ulidSeed !== undefined ? ulidSeed + 1 : undefined,
+          ...(seasonNumber != null ? { number: seasonNumber } : {}),
+        },
+      )
+    : undefined;
+  if (!enrichment) {
+    return seasonRecord ? { ...verdict, seasonRecord } : verdict;
+  }
 
   /** @type {import('@/lib/library/types').Series} */
   const seriesRecord = {
@@ -644,7 +686,9 @@ function applyEnrichment(verdict, { animeId, enrichment, ulidSeed, seasonNumber 
     ...(enrichment.posterUrl ? { posterUrl: enrichment.posterUrl } : {}),
     updatedAt: Date.now(),
   };
-  return { ...verdict, seriesRecord, seasonRecord };
+  return seasonRecord
+    ? { ...verdict, seriesRecord, seasonRecord }
+    : { ...verdict, seriesRecord };
 }
 
 /**
@@ -681,6 +725,14 @@ function buildCachePayload(verdict) {
       ? { kind: 'new', animeId: verdict.seasonRecord.animeId, enrichment }
       : { kind: 'new', animeId: verdict.seasonRecord.animeId };
   }
+  // No Season row means no dandanplay id, and an entry without one is nulled
+  // out on read (see the guard above `findReusableSeason`) because adopting it
+  // as a verdict would crash on a missing seriesRecord. So there is deliberately
+  // nothing to attach here: the enrichment this import just applied WILL be
+  // re-fetched on a re-import of the same files. That costs one dandanplay call
+  // per id-less cluster and is left alone on purpose — carrying it would mean
+  // teaching the read path to use half a cached entry, which is a different
+  // change with its own failure modes.
   return { kind: 'new' };
 }
 

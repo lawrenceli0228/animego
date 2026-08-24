@@ -1,10 +1,12 @@
 // The one door in and out of `Series.anilistId`.
 //
-// Why a module for two field writes: there are three writers (title-search
-// auto-match, the rematch dialog, and — once the reconciler lands — the sync
-// path itself) and two readers. Decision 11 of the plan calls it: three writers
-// and two readers with no chokepoint will drift. The specific drift that costs
-// users data is auto-match quietly stomping a binding the user set by hand.
+// Why a module for two field writes: there are three writers (the title-search
+// auto-match behind `useSiteAnimeForSeries`, the rematch dialog, and the
+// mount-time sweep in `library/_services/bindUnboundSeries.ts`) and two readers.
+// Decision 11 of the plan calls it: three writers and two readers with no
+// chokepoint will drift. The specific drift that costs users data is auto-match
+// quietly stomping a binding the user set by hand — and the sweep is the writer
+// that would do it wholesale, since it writes without anyone having clicked.
 //
 // The precedent is Taiga (`anime_util.cpp:220-241`): a manual link is written
 // as a user synonym that ranks AHEAD of the official titles from then on. Same
@@ -15,7 +17,10 @@
 //   Series.anilistId  → AniList. Subscriptions, watch progress, the site's own
 //                       /anime/{id} pages.
 //   Season.animeId    → dandanplay. Danmaku and episode listings. Owned by
-//                       rematchSeries, not by this module.
+//                       rematchSeries, not by this module — and rematch is not
+//                       merely the owner, it is the only writer that reliably
+//                       holds a real one. The automatic import path resolves no
+//                       dandanplay id at all (`types.js`, `Season.animeId`).
 //
 // No Dexie import at module scope and no `db` singleton import: the db module
 // throws when it is loaded outside a browser, and the decision logic below has

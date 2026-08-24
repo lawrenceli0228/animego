@@ -13,7 +13,9 @@
  */
 export function makeSeasonRepo(db) {
   /**
-   * Return all seasons with the given dandanplay animeId.
+   * Return all seasons carrying the given dandanplay animeId — which is only
+   * the ones that ever resolved one. The automatic import path does not, so a
+   * series nobody has rematched is not reachable through here at all.
    * @param {number} animeId
    * @returns {Promise<Season[]>}
    */

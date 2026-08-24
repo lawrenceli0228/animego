@@ -2,7 +2,10 @@
 
 // Ported from client/src/services/dedupeSeries.js. Find Series records that
 // share a Season.animeId and merge the duplicates via performMerge. The
-// oldest Series (lowest createdAt) wins as the merge target.
+// oldest Series (lowest createdAt) wins as the merge target. Note the reach
+// this pass actually has: only series whose Season rows carry an `animeId` are
+// groupable at all, and the automatic import path no longer produces one, so a
+// never-rematched series has nothing to be grouped by and never gets here.
 
 import type Dexie from "dexie";
 import { performMerge, type OpsLogRow } from "./mergeOps";

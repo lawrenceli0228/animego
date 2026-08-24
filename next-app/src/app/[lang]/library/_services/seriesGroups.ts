@@ -20,10 +20,18 @@
 //                          right answer.
 //
 // `mergedFrom` records that a merge happened, never which kind. The
-// discriminator that survives is `Season.animeId`: dandanplay issues one per
-// season, and because the merge is soft every member keeps its own Season rows.
-// So the group's members are folded by their season identity first, and only
-// the distinct identities are summed.
+// discriminator that survives is `Season.animeId`, WHEN A MEMBER ACTUALLY HAS
+// ONE: dandanplay issues one per season, and because the merge is soft every
+// member keeps its own Season rows. So the group's members are folded by their
+// season identity first, and only the distinct identities are summed.
+//
+// The qualifier is load-bearing, not a hedge. The automatic import path obtains
+// no dandanplay id at all — `/api/dandanplay/match` returns none in any phase,
+// so `applyEnrichment` writes no Season row rather than a fabricated one — which
+// leaves a manual rematch as the only reliable source of a season identity.
+// `primaryAnimeIdBySeries` below already reads that absence as "cannot identify
+// this member", which is why the size-1 exception described next is doing real
+// work rather than covering an edge case.
 //
 // ─── the safe direction is DOWN ─────────────────────────────────────────────
 //
@@ -53,7 +61,12 @@ export interface GroupSeasonRow {
   readonly seriesId?: string;
   /** S1 / S2 — used only to pick a member's primary season deterministically. */
   readonly number?: number;
-  /** dandanplay's per-season id. The identity this module folds on. */
+  /**
+   * dandanplay's per-season id — the identity this module folds on, for the
+   * members that have one. Frequently they do not: the automatic import path
+   * resolves no dandanplay id, so a series nobody has rematched carries no
+   * season identity and `primaryAnimeIdBySeries` simply leaves it out.
+   */
   readonly animeId?: number | null;
 }
 

@@ -14,6 +14,7 @@ import {
   readSyncedEpisodes,
   reconcileLibrary,
   reconcileSeries,
+  REPORT_AT_ATTEMPT,
   resetWatchSyncState,
   resolveGroupSeriesIds,
   startTracking,
@@ -543,13 +544,46 @@ describe("applyFailure", () => {
     expect(state).toMatchObject({ attempts: MAX_PUSH_ATTEMPTS, blocked: true });
   });
 
+  test("REPORTS ON THE FIRST FAILURE, NOT THE THIRD — the whole of T7", () => {
+    // The two thresholds are independent. `blocked` is still the third
+    // attempt; `reportable` is the first, because that is the only one a
+    // reader whose session is one episode long ever reaches.
+    let state = applyFailure({ ...args, kind: "deterministic" });
+    expect(state).toMatchObject({ attempts: REPORT_AT_ATTEMPT, reportable: true, blocked: false });
+
+    state = applyFailure({ ...args, prev: state, kind: "deterministic" });
+    expect(state).toMatchObject({ attempts: 2, reportable: false, blocked: false });
+
+    state = applyFailure({ ...args, prev: state, kind: "deterministic" });
+    expect(state).toMatchObject({ attempts: 3, reportable: false, blocked: true });
+  });
+
+  test("the two thresholds are ordered so the reporting one is reachable", () => {
+    // A ceiling below the reporting attempt would mean the series stops being
+    // pushed before anyone is told — CG2 silent again, by configuration.
+    expect(REPORT_AT_ATTEMPT).toBeLessThanOrEqual(MAX_PUSH_ATTEMPTS);
+    expect(REPORT_AT_ATTEMPT).toBeGreaterThan(0);
+  });
+
+  test("a run cleared by a success is reported again when it breaks anew", () => {
+    // `clearFailure` drops the entry, so the next deterministic failure comes
+    // in with `prev: null`. That is a NEW fault, not the old one repeating.
+    const first = applyFailure({ ...args, kind: "deterministic" });
+    expect(first?.reportable).toBe(true);
+
+    const afterHealing = applyFailure({ ...args, prev: null, kind: "deterministic" });
+    expect(afterHealing).toMatchObject({ attempts: 1, reportable: true });
+  });
+
   test("leaves the budget untouched for transient failures", () => {
     const seeded = applyFailure({ ...args, kind: "deterministic" });
     const after = applyFailure({ ...args, prev: seeded, kind: "transient" });
     expect(after?.attempts).toBe(1);
+    // And carries no fresh report: it is the previous entry, verbatim.
+    expect(after).toBe(seeded);
   });
 
-  test("a week offline never exhausts the budget", () => {
+  test("a week offline never exhausts the budget and never raises a report", () => {
     let state: SyncFailure | null = null;
     for (let i = 0; i < 100; i += 1) {
       state = applyFailure({ ...args, prev: state, kind: "transient", status: null });
@@ -557,7 +591,7 @@ describe("applyFailure", () => {
     expect(state).toBeNull();
   });
 
-  test("an expired session never exhausts the budget either", () => {
+  test("an expired session never exhausts the budget or reports either", () => {
     let state: SyncFailure | null = null;
     for (let i = 0; i < 10; i += 1) {
       state = applyFailure({ ...args, prev: state, kind: "auth", status: 401 });
@@ -779,7 +813,7 @@ describe("reconcileSeries", () => {
 
 // ─── CG2 end to end ─────────────────────────────────────────────────────────
 
-describe("CG2 — a deterministic failure stops after MAX_PUSH_ATTEMPTS", () => {
+describe("CG2 — reported on the first failure, stopped after MAX_PUSH_ATTEMPTS", () => {
   function badBinding() {
     return fakeDb({
       series: [{ id: "S1", anilistId: 154587, lastSyncedEpisode: 0 }],
@@ -815,23 +849,52 @@ describe("CG2 — a deterministic failure stops after MAX_PUSH_ATTEMPTS", () => 
     expect(api.calls.filter((c) => c.kind === "mark")).toHaveLength(MAX_PUSH_ATTEMPTS);
   });
 
-  test("the failure is queryable and announced exactly once as blocked", async () => {
+  test("THE FIRST DETERMINISTIC FAILURE IS ANNOUNCED — T7's whole point", async () => {
+    // Arrange — the reported bug: a series failing every push with a 400, and
+    // a reader who never saw anything because the announcement waited for a
+    // third failure inside one session that their viewing rhythm never had.
+    const db = badBinding();
+    const api = fakeApi({ mark: { ok: false, status: 400, message: "Episode exceeds the total episode count" } });
+    const seen: SyncFailure[] = [];
+    const off = onSyncFailure((f) => seen.push(f));
+
+    // Act — ONE trigger. This is a whole session for a reader who watches an
+    // episode and closes the tab.
+    await reconcileSeries(db, "S1", { api });
+    off();
+
+    // Assert — they are told, on the first refusal, while the series is still
+    // being retried.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      seriesId: "S1",
+      attempts: REPORT_AT_ATTEMPT,
+      reportable: true,
+      blocked: false,
+      status: 400,
+      message: "Episode exceeds the total episode count",
+    });
+  });
+
+  test("the second and third failures do not re-announce the same series", async () => {
     // Arrange
     const db = badBinding();
     const api = fakeApi({ mark: { ok: false, status: 400, message: "Episode exceeds the total episode count" } });
     const seen: SyncFailure[] = [];
     const off = onSyncFailure((f) => seen.push(f));
 
-    // Act
+    // Act — every trigger firing over and over inside one session.
     for (let i = 0; i < 5; i += 1) await reconcileSeries(db, "S1", { api });
     off();
 
-    // Assert — one event per real attempt, and exactly one of them blocked.
-    expect(seen).toHaveLength(MAX_PUSH_ATTEMPTS);
-    expect(seen.filter((f) => f.blocked)).toHaveLength(1);
+    // Assert — still exactly one event, so the UI shows one toast rather than
+    // three. The stored state kept moving underneath it.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ attempts: 1, reportable: true });
     expect(getSyncFailure("S1")).toMatchObject({
       seriesId: "S1",
       attempts: MAX_PUSH_ATTEMPTS,
+      reportable: false,
       blocked: true,
       status: 400,
       message: "Episode exceeds the total episode count",
@@ -839,14 +902,88 @@ describe("CG2 — a deterministic failure stops after MAX_PUSH_ATTEMPTS", () => 
     expect(listSyncFailures()).toHaveLength(1);
   });
 
-  test("being offline for a hundred triggers never blocks the series", async () => {
+  test("a series healed then broken again is announced again", async () => {
+    // Arrange — a report is per RUN of failures, not per session: a success
+    // clears the entry, so a later fault is news and must be said out loud.
+    const progress = [done("e1", "S1")];
+    const db = fakeDb({
+      series: [{ id: "S1", anilistId: 154587, lastSyncedEpisode: 0 }],
+      episodes: [main("e1", "S1", 1), main("e2", "S1", 2)],
+      progress,
+      overrides: [],
+    });
+    const seen: SyncFailure[] = [];
+    const off = onSyncFailure((f) => seen.push(f));
+
+    // Act — episode 1 is refused…
+    await reconcileSeries(db, "S1", {
+      api: fakeApi({ mark: { ok: false, status: 400, message: "nope" } }),
+    });
+    // …then accepted, which clears the failure…
+    expect((await reconcileSeries(db, "S1", { api: fakeApi() })).outcome).toBe("pushed");
+    expect(getSyncFailure("S1")).toBeNull();
+    // …then the reader finishes episode 2 and that push is refused.
+    progress.push(done("e2", "S1"));
+    await reconcileSeries(db, "S1", {
+      api: fakeApi({ mark: { ok: false, status: 400, message: "nope again" } }),
+    });
+    off();
+
+    // Assert
+    expect(seen).toHaveLength(2);
+    expect(seen.map((f) => f.message)).toEqual(["nope", "nope again"]);
+    expect(seen.every((f) => f.reportable && f.attempts === REPORT_AT_ATTEMPT)).toBe(true);
+  });
+
+  test("being offline for a hundred triggers never blocks OR announces", async () => {
     const db = badBinding();
     const api = fakeApi({ mark: { ok: false, status: null, message: "fetch failed" } });
+    const seen: SyncFailure[] = [];
+    const off = onSyncFailure((f) => seen.push(f));
 
     for (let i = 0; i < 100; i += 1) await reconcileSeries(db, "S1", { api });
+    off();
 
     expect(getSyncFailure("S1")).toBeNull();
+    expect(seen).toEqual([]);
     expect(api.calls).toHaveLength(100);
+  });
+
+  test("a rate-limited or 5xx reader is never told their sync is broken", async () => {
+    // 429 and 503 are 4xx/5xx by number and transient by meaning. Now that the
+    // FIRST failure reports, a mis-classification here would put an error in
+    // front of a reader whose only problem was a busy server.
+    for (const status of [408, 425, 429, 500, 502, 503]) {
+      resetWatchSyncState();
+      const db = badBinding();
+      const api = fakeApi({ mark: { ok: false, status, message: `HTTP ${status}` } });
+      const seen: SyncFailure[] = [];
+      const off = onSyncFailure((f) => seen.push(f));
+
+      for (let i = 0; i < 4; i += 1) await reconcileSeries(db, "S1", { api });
+      off();
+
+      expect(seen).toEqual([]);
+      expect(getSyncFailure("S1")).toBeNull();
+      // …and the budget was never spent, so it is still being retried.
+      expect(api.calls).toHaveLength(4);
+    }
+  });
+
+  test("an expired session is never announced either", async () => {
+    // 401 is not a failure at all — the fix is a login, not a message about a
+    // broken series.
+    const db = badBinding();
+    const api = fakeApi({ mark: { ok: false, status: 401, message: "Please log in again" } });
+    const seen: SyncFailure[] = [];
+    const off = onSyncFailure((f) => seen.push(f));
+
+    for (let i = 0; i < 10; i += 1) await reconcileSeries(db, "S1", { api });
+    off();
+
+    expect(seen).toEqual([]);
+    expect(getSyncFailure("S1")).toBeNull();
+    expect(api.calls).toHaveLength(10);
   });
 
   test("a 401 defers instead of failing, so a re-login pushes the same value", async () => {
