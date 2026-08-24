@@ -121,16 +121,31 @@
  */
 
 /**
- * 季(dandanplay animeId 按季切分,animeId 是 Season 的权威外键)。
+ * 季(按 dandanplay animeId 切分)。
+ *
+ * 这段注释以前写的是「animeId 是 Season 的权威外键」,读起来像个保证,于是有人拿库里的
+ * 26 个 animeId 当 dandanplay id 直接去查(dandanplay 按 animeId 的接口是
+ * `/api/v2/bangumi/{animeId}`),26 个全 404。不是接口坏了,是存进去的**根本不是 dandanplay
+ * 的 id**。所以现在它是可选的,下面说清楚什么时候才有值、值又是谁写的。
  *
  * @typedef {Object} Season
  * @property {string}  id              - ulid
  * @property {string}  seriesId
  * @property {number}  number          - S1 / S2
- * @property {number}  animeId         - dandanplay 每季独立 animeId。**合并卡片的判别键**:
- *   自动去重(`dedupeSeriesByAnimeId`)合的是「同一季被记了两遍」,手动 MergeDialog 合的
- *   往往是两个不同的季,而 `mergedFrom` 只记录「合过」不记录「合的哪一种」。软合并不会搬走
- *   Season 行,所以每个成员都还留着自己的 animeId —— 那就是唯一能把两种情况分开的东西。
+ * @property {number}  [animeId]       - dandanplay 每季独立 animeId。**可选,而且自动导入路径从来没有
+ *   真拿到过**:`/api/dandanplay/match` 三个 phase 都不返回 dandanplay animeId(phase 1 只有
+ *   titleNative + coverImageUrl,phase 2 是 anilistId + 标题 + episodes,phase 3 是空对象)。
+ *   曾经有一段时间 `dandanClient.ts` 拿 bgm.tv 的 subject id 顶替,写进来的是**另一个 id 空间的数字**
+ *   —— 两个空间数值重叠且各自都能解析,下游没有任何办法察觉或修复,上面那 26 个 404 就是它。
+ *   那个兜底已经删掉,`_services/importPipeline.js` 的 `applyEnrichment` 现在宁可**一行 Season
+ *   都不写**也不写一个假 id(标题和海报照旧写进 Series —— 身份和元数据是两回事)。
+ *   唯一可靠的写入方是人工重新匹配(`_services/rematchSeries.ts`),它的输入来自
+ *   `/api/dandanplay/search`,那个接口的 dandanplay 行确实带真的 `dandanAnimeId`。
+ *   **有值的时候**它是**合并卡片的判别键**:自动去重(`dedupeSeriesByAnimeId`)合的是「同一季被记了
+ *   两遍」,手动 MergeDialog 合的往往是两个不同的季,而 `mergedFrom` 只记录「合过」不记录「合的哪
+ *   一种」。软合并不会搬走 Season 行,所以每个成员都还留着自己的 animeId —— 那就是唯一能把两种情况
+ *   分开的东西。没值的时候读取方(`_services/seriesGroups.ts`、`_services/dedupeSeries.ts`)一律当
+ *   「这个成员认不出来」处理,别拿 0 当 id 补上去。
  * @property {number}  [totalEpisodes] - 仍然没有任何生产代码写它。总集数走 `Series.totalEpisodes`。
  * @property {number}  updatedAt
  */

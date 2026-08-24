@@ -26,14 +26,26 @@
 // not drift — which hit wins, and what a manual binding means — are literally
 // one function.
 //
-// WHY ONLY TWO CALLERS MAY USE THIS (and the reconciler may not)
+// WHO MAY CALL THIS, AND WHAT THE BOUND HAS TO BE
 //
-// A resolve is a title search against `/api/dandanplay/search`. Single, bounded
-// and user-initiated is fine: one card click, one player entry. Sweeping a
-// library on mount is not — a few hundred unbound series would become a few
-// hundred simultaneous searches for a page the user only wanted to look at.
-// `reconcileLibrary` therefore skips unbound series and lets the card note
-// explain itself. The same rule is restated in `watchSync.ts`.
+// A resolve is a title search against `/api/dandanplay/search`, so the cost is
+// counted in requests. What is refused is an UNCAPPED sweep: a mature library
+// holds hundreds of unbound series, and resolving every one of them the moment
+// a page mounts would be hundreds of simultaneous searches for a library the
+// reader only wanted to look at.
+//
+// That cost used to be written up here as a caller allowlist — one card click,
+// one player entry, and the reconciler may not — which is the right premise and
+// the wrong conclusion. Refusing the sweep did not make it cheap; it made a card
+// nobody ever clicked resolve nothing, ever, and so sync nothing, ever. Bounding
+// the sweep was the fix.
+//
+// `bindUnboundSeries.ts` is that bound, and it calls this function directly from
+// library mount with no click behind it: capped per mount, one search at a time,
+// spaced, abortable, and relying on the `_unresolved` latch below so the loop
+// terminates. `reconcileLibrary` still accepts no resolver of its own — the
+// sweep runs beside it rather than inside it — and `watchSync.ts` restates that
+// half of the rule at its own injection point.
 
 import { pickBestHit } from "@/lib/seasonMatch";
 import {

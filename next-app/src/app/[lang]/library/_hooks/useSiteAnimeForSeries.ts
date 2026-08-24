@@ -73,9 +73,10 @@ const _cache = new Map<string, SiteAnimeMapped | null>();
 
 // The cache stays here — it holds whole metadata objects, which is none of
 // animeBinding's business — but it does not get to decide when it is stale.
-// A rebind anywhere (this hook, the rematch dialog, later the reconciler)
-// drops the entry, so the next mount re-resolves against the new id instead of
-// serving a session-old answer for a binding that just changed.
+// A rebind anywhere (this hook, the rematch dialog, the mount-time sweep in
+// `_services/bindUnboundSeries.ts`) drops the entry, so the next mount
+// re-resolves against the new id instead of serving a session-old answer for a
+// binding that just changed.
 onBindingChanged((seriesId) => {
   _cache.delete(seriesId);
 });

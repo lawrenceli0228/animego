@@ -34,6 +34,9 @@ import { useLang } from "@/lib/lang-client";
 // @ts-ignore — JS module with JSDoc types
 import { db } from "@/lib/library/db/db.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — JS module with JSDoc types
+import { makeOpsLogRepo } from "@/lib/library/db/opsLogRepo.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { isFsaSupported } from "@/lib/library/handles/fsaFeatureCheck.js";
 import { isFolderWatchSupported } from "../_services/folderWatcher.js";
@@ -67,6 +70,10 @@ import {
   type BackfillSeriesRow,
   type EpisodeCountDb,
 } from "../_services/episodeCountBackfill";
+import {
+  bindUnboundSeries,
+  type SweepSeriesRow,
+} from "../_services/bindUnboundSeries";
 import {
   onSyncFailure,
   reconcileLibrary,
@@ -574,14 +581,23 @@ export function LibraryShell() {
     [],
   );
 
-  // CG2's visible half. `onSyncFailure` fires once per deterministic refusal
-  // and a blocked series is never pushed again, so this both drives the card
-  // note and produces exactly one toast per broken series per session.
+  // CG2's visible half — the FIRST deterministic refusal, not the third.
+  //
+  // This used to gate on `failure.blocked`, i.e. the retry ceiling. The
+  // ceiling is counted in a module-level Map that resets on every page load,
+  // so reaching it needs three refusals inside one uninterrupted session —
+  // and an ordinary viewing rhythm (one episode, close the tab, come back
+  // tomorrow) accrues one or two and never gets there. A series could fail
+  // every push for months and never say a word. Measured, not hypothetical.
+  //
+  // `reportable` is true on the first refusal only, and the emitter fires once
+  // per run of failures, so this stays exactly one toast per broken series
+  // without needing to know anything about the retry budget.
   const [syncFailedIds, setSyncFailedIds] = useState<Set<string>>(new Set());
   useEffect(
     () =>
       onSyncFailure((failure) => {
-        if (!failure.blocked) return;
+        if (!failure.reportable) return;
         setSyncFailedIds((prev) => {
           if (prev.has(failure.seriesId)) return prev;
           const next = new Set(prev);
@@ -600,6 +616,11 @@ export function LibraryShell() {
   // nothing on this page loads episodes, and `kind` is what keeps an NCOP out
   // of the high-water mark.
   const libraryReconciledRef = useRef(false);
+  // Bumped exactly once, by the binding sweep below, to re-open the latch.
+  // It has to be state and not a ref: clearing a ref changes nothing the
+  // effect depends on, so the effect would never run again and the series the
+  // sweep just bound would wait until the reader's NEXT visit to sync.
+  const [reconcileEpoch, setReconcileEpoch] = useState(0);
   useEffect(() => {
     if (libraryReconciledRef.current) return;
     if (loading || progressRows.length === 0) return;
@@ -612,7 +633,54 @@ export function LibraryShell() {
       // eslint-disable-next-line no-console
       console.warn("[library] watch sync failed:", err);
     });
-  }, [loading, progressRows, series, overrides, watchSyncDb]);
+  }, [loading, progressRows, series, overrides, watchSyncDb, reconcileEpoch]);
+
+  // Binding sweep: resolve `Series.anilistId` for series nobody has clicked.
+  //
+  // The reconcile above skips unbound series, and until this existed the only
+  // things that could bind one were three user actions — so an unvisited card
+  // never synced, ever. See `bindUnboundSeries.ts` for why the sweep is safe to
+  // run on mount and why it terminates.
+  //
+  // Two details here are load-bearing:
+  //
+  //   · No cleanup on this effect. `series` is a dep and it changes on every
+  //     liveQuery emission, INCLUDING the sweep's own writes — so a cleanup
+  //     that aborted would kill the sweep the moment it bound its first
+  //     series. Abort belongs on unmount only, which is the separate effect.
+  //
+  //   · Re-arming the reconcile is not optional. It latches for the life of
+  //     the mount, so without this the sweep binds N series and not one of
+  //     them is pushed until the reader comes back — from their seat, opening
+  //     the library would appear to do nothing at all.
+  const bindSweepRef = useRef(false);
+  const reconcileRearmedRef = useRef(false);
+  const sweepAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => sweepAbortRef.current?.abort(), []);
+  useEffect(() => {
+    if (bindSweepRef.current) return;
+    if (loading || series.length === 0) return;
+    bindSweepRef.current = true;
+    const controller = new AbortController();
+    sweepAbortRef.current = controller;
+    void bindUnboundSeries({
+      db: db as unknown as BindingResolverDb,
+      series: series as SweepSeriesRow[],
+      opsLog: makeOpsLogRepo(db),
+      signal: controller.signal,
+    })
+      .then((summary) => {
+        if (!summary.changed) return;
+        if (reconcileRearmedRef.current) return;
+        reconcileRearmedRef.current = true;
+        libraryReconciledRef.current = false;
+        setReconcileEpoch((n) => n + 1);
+      })
+      .catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn("[library] binding sweep failed:", err);
+      });
+  }, [loading, series]);
 
   // One-shot batch fill of `Series.totalEpisodes` for series that are already
   // bound. Without it this whole feature is a no-op for every existing library:

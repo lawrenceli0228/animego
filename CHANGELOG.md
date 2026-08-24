@@ -2,6 +2,72 @@
 
 ---
 
+## [3.14.0] - 2026-08-25
+
+### 修复 — 库里看过的番，首页「正在追」终于跟着动
+
+追番进度同步这条管线本身是好的：103 个单元测试、三个触发点齐全、服务端读写路径都验证过。问题是**它的入口条件在真实库上基本不成立**。
+
+对一个 26 部番的真实库逐条比对本地 Dexie、站点订阅和站点已看集合：
+
+```
+❌ 未绑定（Series.anilistId 为空）      19   73%   ← 从来没进过推送流程
+🔴 集号超界（本地 13,14 vs 站点 12 集）   1    4%
+—  已绑定但本地无已看集数                5   19%
+✅ 已同步                                1    4%
+```
+
+**73% 的卡片没有 `anilistId`。** `reconcileLibrary` 对未绑定的 series 直接 skip，所以它们从未被推送过，也从未产生过任何错误信号。
+
+**不是匹配算法的问题。** 把那 19 个标题喂给生产环境的匹配器（直接 import `seasonMatch.ts`，不做重新实现）对真实搜索端点跑一遍：18 个命中，几乎全是 score=100 的折叠标题完全相等。唯一失败的那个，标题被解析成了字幕组名。**解析从来没被调用过而已。**
+
+原因写在 `resolveSeriesBinding.ts` 自己的注释里：绑定只在点卡片、进单番页、进播放器这三个用户动作上发生，因为「几百个未绑定 series 会变成几百个并发搜索」。这个论证是对的，结论选错了 —— 不该是「不做」，该是**「有界地做」**。
+
+**改动**
+
+- **有界扫描**（`bindUnboundSeries.ts`）：进库时对未绑定的 series 顺序解析，每次挂载封顶 40 个、间隔 350ms、失败锁存。形状照抄已经跑了很久的 `episodeCountBackfill.ts` —— 候选集从行本身推导，绑上的自动退出，所以它自己的写入触发的 liveQuery 不会变成死循环。
+- **扫描完 re-arm 对账**：`reconcileLibrary` 由 `libraryReconciledRef` 锁死整个挂载期。不显式重开一次，这次新绑的番一部都不会同步 —— 用户开库看到的是「什么都没发生」。
+- **失败第一时间可见**：上报阈值从「第 3 次确定性失败」改成第 1 次。原来的阈值挂在一个刷新即清零的模块级 Map 上，要在同一个不间断会话里连撞 3 次才弹提示；正常的观看节奏（看一集、关页、隔天再看）每次只累积 1–2 次，**永远够不到**。重试上限仍是 3，两个阈值现在是分开的：`REPORT_AT_ATTEMPT` 决定何时告诉用户，`MAX_PUSH_ATTEMPTS` 决定何时停止重试。
+- **自动绑定留痕**：每条写一行 `opsLog`（`kind: 'rematch'`），详情页的「最近操作」可见。**故意不给撤销按钮** —— `opsLog` 的 kind 白名单里虽然有 `rematch`，但唯一实现的撤销是 `undoMerge`，它对其它 kind 直接抛异常。给一个按下去会抛的按钮比不给更糟。
+
+### 修复 — `Season.animeId` 装的一直不是 dandanplay 的 id
+
+`/api/dandanplay/match` **三个 phase 一个都不返回 dandanplay animeId**（phase1 只有 titleNative + coverImageUrl，phase2 只有 anilistId 和标题，phase3 是字面 `{}`），尽管 phase1 手里就攥着正确的值。所以客户端那条 `merged.dandanAnimeId ?? merged.animeId ?? merged.bgmId ?? 0` 的前两项永远不满足，`?? merged.bgmId` 不是罕见兜底而是唯一会触发的分支。
+
+实测那 26 个值打 `/api/dandanplay/episodes/{id}` **全部 404** —— 它们是 bgm.tv 的 subject id。而两个 id 空间会撞，且两种问法都返回 200：`806` 当 dandanplay id 是《以柔克刚》，当 bgm id 是《铁臂阿童木》。数值范围也分不开（dandanplay 跨 806–36740，bgm 跨 1269–638497）。
+
+**只删兜底，让新写入留空**，服务端暂不补发字段。因为空值（falsy）会重新激活 `importPipeline.js` 的结构性归位守卫，而「另一个空间的有效值」恰好会关掉它 —— 配上 `matchCache` 的 7 天 TTL，周更番第 8 天重扫就会长出第二张卡片。存量数据的翻译和服务端补发是另一件事。
+
+**连带修好一个耦合**：`applyEnrichment` 里，Season 记录（身份）和标题/封面（元数据）本来共用同一个真值判断。id 变空之后元数据会跟着一起被跳过，新导入的番就留着解析出来的原始名。两者现在分开了：没有可用 id 就不写 Season 行（写成 0 更糟 —— `dedupeSeries` 按 `typeof animeId !== 'number'` 判，0 会当成真 id 把所有无 id 的番折叠成一张卡），但富化照常应用。
+
+### 变更 — 两个 id 空间现在混不了，混了编译不过
+
+同一个 bug 在这个仓库出现过两次（手动 rematch 一次、自动导入一次），两次分别修，**没有共用代码** —— 那正是会漂回去的形状。现在抽成 `animeIds.ts`：`DandanAnimeId` / `AnilistId` / `BgmSubjectId` 三个品牌类型，每个一个归一化函数。
+
+把两个历史 bug 原样种回去，编译器直接拦：
+
+```
+dandanClient.ts: Type 'DandanAnimeId | 0 | BgmSubjectId' is not assignable to type '0 | DandanAnimeId'.
+      Type '"bgm"' is not assignable to type '"dandanplay"'.
+rematchPayload.ts: Type 'DandanAnimeId | AnilistId' is not assignable to type 'DandanAnimeId'.
+      Type '"anilist"' is not assignable to type '"dandanplay"'.
+```
+
+两个细节是承重的：**`match()` 里那个 `as DandanMatchResult` 断言被删掉了** —— 品牌数字之间的**断言不报错、赋值才报错**，那个 cast 一直在拆掉这道闸门；以及 **`merged.bgmId` 故意留着**并加了类型 —— 它没有任何读取方，但它正是当初污染 `Season.animeId` 的那个数，留着当绊线。
+
+残留的洞照实说：软品牌会被 `Number(...)` 抹掉，所以洗一道再赋值仍然编译得过。那一半是靠行为测试守的（喂真实信封进去，断言外来 id 永远不落地），不是靠类型。
+
+### 变更 — 导入时就绑定，以及两处补上的审计痕迹
+
+- **导入时绑定**：`siteAnime.anilistId` 在两个产出 siteAnime 的 phase 里都有，`mergeAnimeFields` 早就取了，`pickEnrichment` 把它丢了。现在它作为**第三个事实**独立传递（不折进 enrichment —— 折进去会让绑定取决于「刚好有没有封面」），经 `writeBinding` 落地。**覆盖面照实说**：只覆盖「首次导入 + 缓存冷 + 有 siteAnime + 没落到已有 series」这一种，`reuse`、缓存命中、结构性归位、ambiguous 全都绕过它。
+- **`rematchSeries` 补写 opsLog**：`'rematch'` 这个 kind 从 v4 起就在白名单里，**从来没有任何东西写过**。payload 记两个 id 空间各自的 from/to，`from` 在**事务内、写入之前**捕获（晚一拍读，每行都会变成 `from === to`）；未触碰的空间记 `null` 而不是 `{from: null}`，因为后者等于断言「那一季没有 id」，而真相是「我们没看」。
+- **接住服务端回传的写后集合**：`PUT .../episodes` 一直返回完整的写后集合，客户端把 body 丢了 —— 字节已经过线，白扔。现在断言**包含**（服务端是 UNION 不是替换，用相等会天天误报）。不匹配只 `console.warn`：这是 200，走 `recordFailure` 要么完全没痕迹、要么烧掉重试预算并在第一次就弹「这部番没在同步」冤枉一个健康的 series。
+
+### 明确不做的
+
+- **集号重映射**。实测样本里 1/26。`episode_watches` 只增，唯一删除路径是逐集取消或退订级联 —— 服务端改写一旦写错就不可逆、不可检测、无运维工具清理；而它比对的总集数是富化任务写的活动目标，现有注释接受竞态的理由正是「最多多一个 400，客户端会重试过去」。加了改写之后那变成永久错写。改成让它在第一次失败时就可见，配现有的手动重新匹配。
+- **服务端 → 本地的反向进度同步**。站点上标记的已看不回流到本地库。另一个特性。
+
 ## [3.13.2] - 2026-08-25
 
 ### 修复 — 字幕里露出 `{\an8}`

@@ -5,6 +5,7 @@ import {
   classifyPushFailure,
   decidePush,
   findRootSeriesId,
+  findUnstoredEpisodes,
   getSyncFailure,
   judgeSyncMemory,
   listSyncFailures,
@@ -14,9 +15,11 @@ import {
   readSyncedEpisodes,
   reconcileLibrary,
   reconcileSeries,
+  REPORT_AT_ATTEMPT,
   resetWatchSyncState,
   resolveGroupSeriesIds,
   startTracking,
+  storedEpisodesFromBody,
   type PushResponse,
   type ServerSubscription,
   type SubscriptionSyncApi,
@@ -543,13 +546,46 @@ describe("applyFailure", () => {
     expect(state).toMatchObject({ attempts: MAX_PUSH_ATTEMPTS, blocked: true });
   });
 
+  test("REPORTS ON THE FIRST FAILURE, NOT THE THIRD — the whole of T7", () => {
+    // The two thresholds are independent. `blocked` is still the third
+    // attempt; `reportable` is the first, because that is the only one a
+    // reader whose session is one episode long ever reaches.
+    let state = applyFailure({ ...args, kind: "deterministic" });
+    expect(state).toMatchObject({ attempts: REPORT_AT_ATTEMPT, reportable: true, blocked: false });
+
+    state = applyFailure({ ...args, prev: state, kind: "deterministic" });
+    expect(state).toMatchObject({ attempts: 2, reportable: false, blocked: false });
+
+    state = applyFailure({ ...args, prev: state, kind: "deterministic" });
+    expect(state).toMatchObject({ attempts: 3, reportable: false, blocked: true });
+  });
+
+  test("the two thresholds are ordered so the reporting one is reachable", () => {
+    // A ceiling below the reporting attempt would mean the series stops being
+    // pushed before anyone is told — CG2 silent again, by configuration.
+    expect(REPORT_AT_ATTEMPT).toBeLessThanOrEqual(MAX_PUSH_ATTEMPTS);
+    expect(REPORT_AT_ATTEMPT).toBeGreaterThan(0);
+  });
+
+  test("a run cleared by a success is reported again when it breaks anew", () => {
+    // `clearFailure` drops the entry, so the next deterministic failure comes
+    // in with `prev: null`. That is a NEW fault, not the old one repeating.
+    const first = applyFailure({ ...args, kind: "deterministic" });
+    expect(first?.reportable).toBe(true);
+
+    const afterHealing = applyFailure({ ...args, prev: null, kind: "deterministic" });
+    expect(afterHealing).toMatchObject({ attempts: 1, reportable: true });
+  });
+
   test("leaves the budget untouched for transient failures", () => {
     const seeded = applyFailure({ ...args, kind: "deterministic" });
     const after = applyFailure({ ...args, prev: seeded, kind: "transient" });
     expect(after?.attempts).toBe(1);
+    // And carries no fresh report: it is the previous entry, verbatim.
+    expect(after).toBe(seeded);
   });
 
-  test("a week offline never exhausts the budget", () => {
+  test("a week offline never exhausts the budget and never raises a report", () => {
     let state: SyncFailure | null = null;
     for (let i = 0; i < 100; i += 1) {
       state = applyFailure({ ...args, prev: state, kind: "transient", status: null });
@@ -557,7 +593,7 @@ describe("applyFailure", () => {
     expect(state).toBeNull();
   });
 
-  test("an expired session never exhausts the budget either", () => {
+  test("an expired session never exhausts the budget or reports either", () => {
     let state: SyncFailure | null = null;
     for (let i = 0; i < 10; i += 1) {
       state = applyFailure({ ...args, prev: state, kind: "auth", status: 401 });
@@ -779,7 +815,7 @@ describe("reconcileSeries", () => {
 
 // ─── CG2 end to end ─────────────────────────────────────────────────────────
 
-describe("CG2 — a deterministic failure stops after MAX_PUSH_ATTEMPTS", () => {
+describe("CG2 — reported on the first failure, stopped after MAX_PUSH_ATTEMPTS", () => {
   function badBinding() {
     return fakeDb({
       series: [{ id: "S1", anilistId: 154587, lastSyncedEpisode: 0 }],
@@ -815,23 +851,52 @@ describe("CG2 — a deterministic failure stops after MAX_PUSH_ATTEMPTS", () => 
     expect(api.calls.filter((c) => c.kind === "mark")).toHaveLength(MAX_PUSH_ATTEMPTS);
   });
 
-  test("the failure is queryable and announced exactly once as blocked", async () => {
+  test("THE FIRST DETERMINISTIC FAILURE IS ANNOUNCED — T7's whole point", async () => {
+    // Arrange — the reported bug: a series failing every push with a 400, and
+    // a reader who never saw anything because the announcement waited for a
+    // third failure inside one session that their viewing rhythm never had.
+    const db = badBinding();
+    const api = fakeApi({ mark: { ok: false, status: 400, message: "Episode exceeds the total episode count" } });
+    const seen: SyncFailure[] = [];
+    const off = onSyncFailure((f) => seen.push(f));
+
+    // Act — ONE trigger. This is a whole session for a reader who watches an
+    // episode and closes the tab.
+    await reconcileSeries(db, "S1", { api });
+    off();
+
+    // Assert — they are told, on the first refusal, while the series is still
+    // being retried.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      seriesId: "S1",
+      attempts: REPORT_AT_ATTEMPT,
+      reportable: true,
+      blocked: false,
+      status: 400,
+      message: "Episode exceeds the total episode count",
+    });
+  });
+
+  test("the second and third failures do not re-announce the same series", async () => {
     // Arrange
     const db = badBinding();
     const api = fakeApi({ mark: { ok: false, status: 400, message: "Episode exceeds the total episode count" } });
     const seen: SyncFailure[] = [];
     const off = onSyncFailure((f) => seen.push(f));
 
-    // Act
+    // Act — every trigger firing over and over inside one session.
     for (let i = 0; i < 5; i += 1) await reconcileSeries(db, "S1", { api });
     off();
 
-    // Assert — one event per real attempt, and exactly one of them blocked.
-    expect(seen).toHaveLength(MAX_PUSH_ATTEMPTS);
-    expect(seen.filter((f) => f.blocked)).toHaveLength(1);
+    // Assert — still exactly one event, so the UI shows one toast rather than
+    // three. The stored state kept moving underneath it.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ attempts: 1, reportable: true });
     expect(getSyncFailure("S1")).toMatchObject({
       seriesId: "S1",
       attempts: MAX_PUSH_ATTEMPTS,
+      reportable: false,
       blocked: true,
       status: 400,
       message: "Episode exceeds the total episode count",
@@ -839,14 +904,88 @@ describe("CG2 — a deterministic failure stops after MAX_PUSH_ATTEMPTS", () => 
     expect(listSyncFailures()).toHaveLength(1);
   });
 
-  test("being offline for a hundred triggers never blocks the series", async () => {
+  test("a series healed then broken again is announced again", async () => {
+    // Arrange — a report is per RUN of failures, not per session: a success
+    // clears the entry, so a later fault is news and must be said out loud.
+    const progress = [done("e1", "S1")];
+    const db = fakeDb({
+      series: [{ id: "S1", anilistId: 154587, lastSyncedEpisode: 0 }],
+      episodes: [main("e1", "S1", 1), main("e2", "S1", 2)],
+      progress,
+      overrides: [],
+    });
+    const seen: SyncFailure[] = [];
+    const off = onSyncFailure((f) => seen.push(f));
+
+    // Act — episode 1 is refused…
+    await reconcileSeries(db, "S1", {
+      api: fakeApi({ mark: { ok: false, status: 400, message: "nope" } }),
+    });
+    // …then accepted, which clears the failure…
+    expect((await reconcileSeries(db, "S1", { api: fakeApi() })).outcome).toBe("pushed");
+    expect(getSyncFailure("S1")).toBeNull();
+    // …then the reader finishes episode 2 and that push is refused.
+    progress.push(done("e2", "S1"));
+    await reconcileSeries(db, "S1", {
+      api: fakeApi({ mark: { ok: false, status: 400, message: "nope again" } }),
+    });
+    off();
+
+    // Assert
+    expect(seen).toHaveLength(2);
+    expect(seen.map((f) => f.message)).toEqual(["nope", "nope again"]);
+    expect(seen.every((f) => f.reportable && f.attempts === REPORT_AT_ATTEMPT)).toBe(true);
+  });
+
+  test("being offline for a hundred triggers never blocks OR announces", async () => {
     const db = badBinding();
     const api = fakeApi({ mark: { ok: false, status: null, message: "fetch failed" } });
+    const seen: SyncFailure[] = [];
+    const off = onSyncFailure((f) => seen.push(f));
 
     for (let i = 0; i < 100; i += 1) await reconcileSeries(db, "S1", { api });
+    off();
 
     expect(getSyncFailure("S1")).toBeNull();
+    expect(seen).toEqual([]);
     expect(api.calls).toHaveLength(100);
+  });
+
+  test("a rate-limited or 5xx reader is never told their sync is broken", async () => {
+    // 429 and 503 are 4xx/5xx by number and transient by meaning. Now that the
+    // FIRST failure reports, a mis-classification here would put an error in
+    // front of a reader whose only problem was a busy server.
+    for (const status of [408, 425, 429, 500, 502, 503]) {
+      resetWatchSyncState();
+      const db = badBinding();
+      const api = fakeApi({ mark: { ok: false, status, message: `HTTP ${status}` } });
+      const seen: SyncFailure[] = [];
+      const off = onSyncFailure((f) => seen.push(f));
+
+      for (let i = 0; i < 4; i += 1) await reconcileSeries(db, "S1", { api });
+      off();
+
+      expect(seen).toEqual([]);
+      expect(getSyncFailure("S1")).toBeNull();
+      // …and the budget was never spent, so it is still being retried.
+      expect(api.calls).toHaveLength(4);
+    }
+  });
+
+  test("an expired session is never announced either", async () => {
+    // 401 is not a failure at all — the fix is a login, not a message about a
+    // broken series.
+    const db = badBinding();
+    const api = fakeApi({ mark: { ok: false, status: 401, message: "Please log in again" } });
+    const seen: SyncFailure[] = [];
+    const off = onSyncFailure((f) => seen.push(f));
+
+    for (let i = 0; i < 10; i += 1) await reconcileSeries(db, "S1", { api });
+    off();
+
+    expect(seen).toEqual([]);
+    expect(getSyncFailure("S1")).toBeNull();
+    expect(api.calls).toHaveLength(10);
   });
 
   test("a 401 defers instead of failing, so a re-login pushes the same value", async () => {
@@ -1298,7 +1437,13 @@ function serverHolding(anilistId: number, initial: number[], subscribedAt: numbe
     async markEpisodes(id, episodes) {
       api.calls.push({ kind: "mark", anilistId: id, episodes: [...episodes] });
       for (const n of episodes) watched.add(n);
-      return { ok: true, status: 200 };
+      // The FULL post-write set, which is the other half of the contract this
+      // fake exists to model: MarkEpisodesWatched answers with the union it
+      // just computed, not with an acknowledgement of the delta. Stating it
+      // here means every test below now also proves the containment check does
+      // not fire on a server that behaves — no assertion changed, one more
+      // thing pinned.
+      return { ok: true, status: 200, stored: [...watched].sort((a, b) => a - b) };
     },
     async createIfAbsent(id) {
       api.calls.push({ kind: "create", anilistId: id });
@@ -1544,6 +1689,234 @@ describe("the episodes below the high-water mark", () => {
 
     expect(result).toMatchObject({ episodes: [1, 2] });
     expect(server.watched()).toEqual([1, 2]);
+  });
+});
+
+// ─── T10: the answer the server was already sending ─────────────────────────
+
+/**
+ * Run `fn` with `console.warn` captured.
+ *
+ * Restored in a `finally` so a failing assertion inside cannot leave the rest
+ * of the suite mute — bun shares one process across files, and a leaked stub
+ * would silence a diagnostic somebody else's test is asserting on.
+ */
+async function withCapturedWarnings<T>(
+  fn: () => Promise<T>,
+): Promise<{ value: T; warnings: unknown[][] }> {
+  const warnings: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+  try {
+    return { value: await fn(), warnings };
+  } finally {
+    console.warn = original;
+  }
+}
+
+describe("what the server stored, checked against what we sent", () => {
+  /** Memory {1,2} (legacy maximum), library {1,2,3} — so the delta is [3]. */
+  function oneSeries(over: Partial<WatchSyncSeries> = {}) {
+    return fakeDb({
+      series: [{ id: "S1", anilistId: 154587, lastSyncedEpisode: 2, ...over }],
+      episodes: [main("e1", "S1", 1), main("e2", "S1", 2), main("e3", "S1", 3)],
+      progress: [done("e1", "S1"), done("e2", "S1"), done("e3", "S1")],
+      overrides: [],
+    });
+  }
+
+  // ─── the invariant, in isolation ──────────────────────────────────────────
+
+  test("a SUPERSET is the normal case — another device's marks come back too", () => {
+    // The statement unions and then returns the whole row. A reader with a
+    // phone has marks this device never sent, so a wider answer is what a
+    // healthy server looks like; equality would fire on every one of them.
+    expect(findUnstoredEpisodes([3], [1, 2, 3, 7, 8])).toEqual([]);
+  });
+
+  test("an exact echo is accepted", () => {
+    expect(findUnstoredEpisodes([1, 2, 3], [1, 2, 3])).toEqual([]);
+  });
+
+  test("duplicates in the request cannot false-positive", () => {
+    // parseEpisodeList accepts duplicates and ON CONFLICT DO NOTHING collapses
+    // them, so three members legitimately become two stored rows. A count
+    // comparison would accuse a request that was answered perfectly.
+    expect(findUnstoredEpisodes([3, 3, 4], [3, 4])).toEqual([]);
+  });
+
+  test("names every episode the server did not report, deduped and ascending", () => {
+    expect(findUnstoredEpisodes([9, 2, 2, 5], [5])).toEqual([2, 9]);
+  });
+
+  test("no set stated is not evidence of anything", () => {
+    expect(findUnstoredEpisodes([1, 2], null)).toEqual([]);
+    expect(findUnstoredEpisodes([1, 2], undefined)).toEqual([]);
+  });
+
+  test("a stated-but-empty set IS a mismatch, unlike an absent one", () => {
+    // A 200 from MarkEpisodesWatched can never hold nothing: the statement
+    // inserted at least one row before it aggregated. `[]` is therefore a real
+    // anomaly, and the whole point of `stated` is that it does not read the
+    // same as a body that carried no set at all.
+    expect(findUnstoredEpisodes([3], [])).toEqual([3]);
+  });
+
+  // ─── reading the body ─────────────────────────────────────────────────────
+
+  test("reads the { data: … } envelope go-api actually sends", () => {
+    expect(
+      storedEpisodesFromBody({
+        data: { anilistId: 154587, watchedEpisodes: [3, 1, 2], currentEpisode: 3 },
+      }),
+    ).toEqual([1, 2, 3]);
+  });
+
+  test("a body that states no set reads as null, never as an empty one", () => {
+    // Every shape here is "an older server, or a proxy that stripped it" —
+    // none of them is the server claiming it holds nothing.
+    expect(storedEpisodesFromBody(null)).toBeNull();
+    expect(storedEpisodesFromBody({})).toBeNull();
+    expect(storedEpisodesFromBody({ data: null })).toBeNull();
+    expect(storedEpisodesFromBody("nonsense")).toBeNull();
+    expect(storedEpisodesFromBody({ data: { watchedEpisodes: "3,4,5" } })).toBeNull();
+    expect(storedEpisodesFromBody({ data: { currentEpisode: 3 } })).toBeNull();
+  });
+
+  test("an explicitly empty set survives as a fact", () => {
+    expect(storedEpisodesFromBody({ data: { watchedEpisodes: [] } })).toEqual([]);
+  });
+
+  // ─── end to end ───────────────────────────────────────────────────────────
+
+  test("a superset comes back and nothing is said about it", async () => {
+    // Arrange — we send [3]; the row already holds 7 and 8 from a phone.
+    const db = oneSeries();
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [1, 2, 3, 7, 8] } });
+
+    // Act
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    // Assert
+    expect(result.outcome).toBe("pushed");
+    expect(warnings).toEqual([]);
+  });
+
+  test("lastSyncedEpisodes is written from what was SENT, not from what came back", async () => {
+    // The memory is a record of what THIS device pushed to THIS row, not a
+    // copy of the row. Folding 7 and 8 in would claim credit for another
+    // device's marks, and `local \ pushed` would then silently stop offering
+    // them if this device ever acquired those files.
+    const db = oneSeries();
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [1, 2, 3, 7, 8] } });
+
+    await reconcileSeries(db, "S1", { api });
+
+    expect(db.updates).toEqual([
+      { id: "S1", lastSyncedEpisodes: [1, 2, 3], lastSyncedEpisode: 3 },
+    ]);
+  });
+
+  test("a missing episode is named, and costs neither the budget nor the series", async () => {
+    // Arrange — nothing synced yet, so the delta is the whole local set; the
+    // server answers 200 but reports only 1 and 3.
+    const db = oneSeries({ lastSyncedEpisode: 0 });
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [1, 3] } });
+    const reported: SyncFailure[] = [];
+    const off = onSyncFailure((f) => reported.push(f));
+
+    // Act
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+    off();
+
+    // Assert — the trace is loud and names the episode…
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0][0])).toContain("did not report 2 as stored");
+    expect(warnings[0][1]).toEqual({ sent: [1, 2, 3], stored: [1, 3] });
+
+    // …and changes nothing else. The push returned 200: the outcome stays
+    // `pushed` so no caller re-plans, the attempt counter is untouched so the
+    // series keeps its full retry budget, `blocked` cannot be true because no
+    // failure entry exists at all, and the reader is told nothing — a response
+    // that changed shape is not a reason to accuse their library.
+    expect(result.outcome).toBe("pushed");
+    expect(getSyncFailure("S1")).toBeNull();
+    expect(listSyncFailures()).toEqual([]);
+    expect(reported).toEqual([]);
+  });
+
+  test("a mismatch does not turn the push into a retry loop", async () => {
+    // The memory is written anyway, so the next trigger recomputes an empty
+    // delta and sends nothing. Withholding it would re-offer the identical set
+    // on all three triggers forever — the unbounded loop the module exists to
+    // not have.
+    const db = oneSeries({ lastSyncedEpisode: 0 });
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [1, 3] } });
+
+    await withCapturedWarnings(() => reconcileSeries(db, "S1", { api }));
+    const second = await withCapturedWarnings(() => reconcileSeries(db, "S1", { api }));
+
+    expect(second.value.outcome).toBe("already-synced");
+    expect(second.warnings).toEqual([]);
+    expect(api.calls).toHaveLength(1);
+  });
+
+  test("a body that carried no set degrades to the behaviour that predates the check", async () => {
+    // `{ ok: true, status: 200 }` with no `stored` is exactly what every
+    // response looked like before this change, and what an older server or a
+    // body-stripping proxy still looks like.
+    const db = oneSeries();
+    const api = fakeApi({ mark: { ok: true, status: 200 } });
+
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    expect(result.outcome).toBe("pushed");
+    expect(warnings).toEqual([]);
+    expect(db.updates).toEqual([
+      { id: "S1", lastSyncedEpisodes: [1, 2, 3], lastSyncedEpisode: 3 },
+    ]);
+  });
+
+  test("an unparseable body reads as null and is equally silent", async () => {
+    const db = oneSeries();
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: null } });
+
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    expect(result.outcome).toBe("pushed");
+    expect(warnings).toEqual([]);
+  });
+
+  test("the set that comes back after a 404 recovery is the one checked", async () => {
+    // The first mark 404s, the subscription is created, the second mark is the
+    // one that landed — so it is the second response's set the invariant is
+    // about. A check wired to the first would read a body that never existed.
+    const db = oneSeries({ lastSyncedEpisode: 0 });
+    const api = fakeApi({
+      mark: [
+        { ok: false, status: 404, message: "Subscription not found" },
+        { ok: true, status: 200, stored: [1, 3] },
+      ],
+    });
+
+    const { value: result, warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    expect(result.outcome).toBe("pushed");
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0][0])).toContain("did not report 2 as stored");
+    expect(getSyncFailure("S1")).toBeNull();
   });
 });
 

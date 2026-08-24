@@ -5,8 +5,29 @@ import { fileURLToPath } from "node:url";
 import {
   cleanupTestUsersInPostgres,
   closePg,
+  ensureAnimeCached,
   ensureSeedUserInPostgres,
 } from "./fixtures/pg";
+
+/**
+ * The AniList id the routing specs use as "a detail page".
+ *
+ * `locale-routing.spec.ts` asserts `/anime/21`, `/en/anime/21` and
+ * `/zh-Hant/anime/21` all render and self-canonicalise, and nothing seeded it —
+ * so a cold `/anime/21` fell through to a LIVE, UNAUTHENTICATED AniList fetch.
+ * The workflow says as much in its own comment: leaving `ANILIST_TOKEN` unset
+ * "just means unauthenticated upstream calls".
+ *
+ * That put a rate-limited third party in the critical path of a merge gate.
+ * When it refused, the page rendered not-found and every `/anime/21` assertion
+ * in the run failed together — intermittently, and more often as the suite grew
+ * and ran more of it concurrently.
+ *
+ * One cached row removes the dependency. The specs only ever assert status,
+ * `h1` presence and the canonical URL, so the row's contents do not matter —
+ * its existence does.
+ */
+const ROUTING_FIXTURE_ANILIST_ID = 21;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +90,15 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
 
   // The seed user backs the storageState every sandbox spec inherits.
   await ensureSeedUserInPostgres(SEED_USER_USERNAME, SEED_USER_EMAIL);
+  // Seeded here rather than in the spec that reads it: `locale-routing` never
+  // writes to Postgres at all, and a per-spec fixture would race the other
+  // workers under `fullyParallel`. Global setup runs once, before any of them.
+  await ensureAnimeCached({
+    anilistId: ROUTING_FIXTURE_ANILIST_ID,
+    titleRomaji: "E2E Routing Fixture",
+    titleChinese: "E2E 路由固定装置",
+    episodes: 12,
+  });
   await closePg();
 
   const browser = await chromium.launch();

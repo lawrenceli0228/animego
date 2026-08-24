@@ -4,10 +4,27 @@
 // This module exists because of a bug that was firing on every pick from the
 // richer half of the picker, so the extraction is not cosmetic: the rule below
 // is the one thing standing between the user and a poisoned local library.
+//
+// The rule itself is no longer stated here. It lives in `animeIds.ts`, shared
+// with `dandanClient.ts` — the automatic path, which had the identical bug and
+// used to carry its own private copy of the fix.
+
+import {
+  toAnilistId,
+  toDandanAnimeId,
+  toPositiveInt,
+  type AnilistId,
+  type DandanAnimeId,
+} from "./animeIds";
+
+// Re-exported rather than redefined: this used to be the module's own helper,
+// and it is part of its tested surface. There is one implementation now.
+export { toPositiveInt };
 
 /**
  * The two ids a rematch can carry. They live in **different id spaces** and
- * neither may ever substitute for the other:
+ * neither may ever substitute for the other — see `animeIds.ts`, whose brands
+ * make the substitution a compile error rather than a convention:
  *
  *   dandanAnimeId — dandanplay's per-season anime id. Lands on `Season.animeId`
  *                   and drives danmaku + episode listings.
@@ -20,8 +37,8 @@
  * both fields are optional — but a hit with neither is not a usable pick.
  */
 export interface RematchPayload {
-  dandanAnimeId?: number;
-  anilistId?: number;
+  dandanAnimeId?: DandanAnimeId;
+  anilistId?: AnilistId;
   titleZh?: string;
   titleEn?: string;
   posterUrl?: string;
@@ -33,12 +50,6 @@ export interface RematchPayload {
    */
   totalEpisodes?: number;
   type: "tv" | "movie" | "ova" | "web";
-}
-
-/** Positive integer or nothing. Search JSON is untrusted input. */
-export function toPositiveInt(value: unknown): number | undefined {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 /**
@@ -54,15 +65,17 @@ export function toPositiveInt(value: unknown): number | undefined {
  * never match again: a duplicate card on the next import, plus danmaku pointed
  * at whatever dandanplay anime happens to share that number.
  *
- * Each id now travels in its own field. A hit carrying only one of them is
- * valid and the other stays `undefined`; downstream skips the write it cannot
- * make rather than substituting.
+ * Each id now travels in its own field, narrowed by the normalizer for its own
+ * space. A hit carrying only one of them is valid and the other stays
+ * `undefined`; downstream skips the write it cannot make rather than
+ * substituting. Reintroducing a `??` between the two lines below is a type
+ * error — the fields are branded and the brands do not unify.
  */
 export function normalizeRematchHit(item: unknown): RematchPayload | null {
   if (!item || typeof item !== "object") return null;
   const it = item as Record<string, unknown>;
-  const dandanAnimeId = toPositiveInt(it.dandanAnimeId);
-  const anilistId = toPositiveInt(it.anilistId);
+  const dandanAnimeId = toDandanAnimeId(it.dandanAnimeId);
+  const anilistId = toAnilistId(it.anilistId);
   if (dandanAnimeId === undefined && anilistId === undefined) return null;
   let type: RematchPayload["type"] = "tv";
   if (typeof it.format === "string") {

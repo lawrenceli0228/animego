@@ -789,14 +789,16 @@ function PlayerShellInner() {
     });
   }, [locationSeriesId, seriesDetail.status, watchSyncDb, resolveBinding]);
 
-  // CG2's visible half. The reconciler stops pushing a series after three
-  // deterministic refusals; without this the user would simply never see their
-  // progress move and have nothing to act on. Fires at most once per series
-  // per session, because a blocked series is never pushed again.
+  // CG2's visible half — the FIRST deterministic refusal.
+  //
+  // Gating on `blocked` (the retry ceiling) meant waiting for three refusals
+  // inside one uninterrupted session, which a normal viewing rhythm never
+  // reaches. `reportable` is true on the first one and the emitter fires once
+  // per run of failures, so this is still at most one toast per broken series.
   useEffect(
     () =>
       onSyncFailure((failure) => {
-        if (!failure.blocked) return;
+        if (!failure.reportable) return;
         toast.error(t("player.syncBlocked"), { duration: 8000 });
       }),
     [t],

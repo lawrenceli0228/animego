@@ -37,7 +37,10 @@ const EMPTY_SNAPSHOT = /** @type {LibrarySnapshot} */ ({
  *               visible list alone can only ever see the root's own number.
  *   seasons   — `Season.animeId` is the only thing that distinguishes "the same
  *               season recorded twice" (auto-dedupe, must not sum) from "two
- *               different seasons" (manual merge, must sum).
+ *               different seasons" (manual merge, must sum). It is also absent
+ *               far more often than it used to be — the automatic import path
+ *               resolves no dandanplay id — and `_services/seriesGroups.ts`
+ *               spells out what a member with no identity costs.
  *
  * @param {{ db: import('dexie').Dexie }} options
  * @returns {{
