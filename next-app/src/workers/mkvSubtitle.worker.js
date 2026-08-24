@@ -17,6 +17,17 @@
 import { inflate as pakoInflate } from "pako";
 self.pako = { inflate: pakoInflate };
 
+// The VTT builders live in src/lib/subtitleConvert so they can be unit
+// tested. What stays here is EBML parsing, which needs real Matroska bytes
+// to exercise; what left is pure string work that was only ever verifiable
+// by playing a file — and that is how an SRT track shipped for months
+// rendering `{\an8}` as literal on-screen text while the ASS track next to
+// it did not.
+import {
+  buildVttFromMkvAssEvents,
+  buildVttFromMkvSrtEvents,
+} from "../lib/subtitleConvert";
+
 self.onmessage = async (e) => {
   try {
     const buffer = await e.data.file.arrayBuffer();
@@ -103,35 +114,6 @@ function fmtASS(ms) {
   const s = Math.floor((ms % 60000) / 1000);
   const cs = Math.floor((ms % 1000) / 10);
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
-}
-
-function fmtVTT(ms) {
-  if (ms < 0) ms = 0;
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  const ms2 = Math.floor(ms % 1000);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms2).padStart(3, '0')}`;
-}
-
-/** Build VTT from parsed events, stripping ASS override tags */
-function buildVttFromEvents(sortedEvents) {
-  let vtt = 'WEBVTT\n\n';
-  for (let i = 0; i < sortedEvents.length; i++) {
-    const ev = sortedEvents[i];
-    // MKV ASS block: ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text
-    // Extract the Text field (after 8th comma)
-    let text = ev.text;
-    let commas = 0;
-    for (let j = 0; j < text.length; j++) {
-      if (text[j] === ',') { commas++; if (commas === 8) { text = text.substring(j + 1); break; } }
-    }
-    // Strip ASS override tags like {\an8}, {\b1}, {\c&H...&}
-    text = text.replace(/\{[^}]*\}/g, '').replace(/\\N/g, '\n').replace(/\\n/g, '\n').trim();
-    if (!text) continue;
-    vtt += `${fmtVTT(ev.time)} --> ${fmtVTT(ev.time + ev.dur)}\n${text}\n\n`;
-  }
-  return vtt;
 }
 
 function extract(dv) {
@@ -329,19 +311,22 @@ function extract(dv) {
       }
     }
     // Also build a VTT fallback (plain text, no ASS styling) for Artplayer native subtitle
-    const vtt = buildVttFromEvents(sorted);
+    const vtt = buildVttFromMkvAssEvents(sorted);
     return { type: 'ass', content: ass, vtt };
   }
 
   // Fallback: SRT → VTT
+  //
+  // `type: 'vtt'` here is not a formality — it closes the jassub gate in
+  // VideoPlayer (`subtitleType !== 'ass'` tears jassub down), so whatever
+  // this branch produces is what the reader sees, uncorrected. It also tells
+  // artplayer the blob needs no conversion, which skips artplayer's own SRT
+  // reader. Both of those are correct; they just mean the text has to be
+  // clean before it leaves here.
   const srtTrack = subTracks.find(t => t.codecId === 'S_TEXT/UTF8');
   if (srtTrack) {
-    let vtt = 'WEBVTT\n\n';
     const sorted = events.filter(e => e.trackNum === srtTrack.num).sort((a, b) => a.time - b.time);
-    for (const ev of sorted) {
-      vtt += `${fmtVTT(ev.time)} --> ${fmtVTT(ev.time + ev.dur)}\n${ev.text}\n\n`;
-    }
-    return { type: 'vtt', content: vtt };
+    return { type: 'vtt', content: buildVttFromMkvSrtEvents(sorted) };
   }
 
   return null;
