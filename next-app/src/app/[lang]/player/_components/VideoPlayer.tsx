@@ -743,6 +743,22 @@ export function VideoPlayer({
   // Re-apply the current font size so episode switches don't reset it.
   // Always switch (even when ASS is active) so the VTT layer is ready as
   // a resilient fallback if jassub fails to mount.
+  //
+  // `playerReady` is in the deps because `artRef.current` is a ref, and a ref
+  // going from null to an instance does NOT re-run an effect. Subtitles for a
+  // sidecar file resolve asynchronously (read the file → convert → blob), so
+  // `subtitleUrl` can land in the window before line 674 assigns artRef —
+  // and since `subtitleUrl` never changes again for that episode, the early
+  // return above was permanent. The whole VTT layer silently went missing.
+  //
+  // Measured on production, not reasoned about: a sidecar .srt produced its
+  // `text/vtt` blob every time and the <track> src stayed empty, while the
+  // .ass beside it wired up fine — a bigger file down a slower converter,
+  // landing late enough to win the race. The jassub effect below never had
+  // this problem because it already gates on `playerReady`.
+  //
+  // Re-running once more when the flag flips is harmless: switching to the
+  // same url just re-attaches the same track.
   useEffect(() => {
     const art = artRef.current;
     if (!art || !subtitleUrl) return;
@@ -755,7 +771,7 @@ export function VideoPlayer({
         bottom: `${subtitleOffsetRef.current}px`,
       },
     });
-  }, [subtitleUrl]);
+  }, [subtitleUrl, playerReady]);
 
   // jassub lifecycle: mount when ASS content is available, tear down on
   // change/unmount. Gates on playerReady so artRef.current.video is
