@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   resolveSubtitle,
-  type MkvExtractionTask,
+  type SubtitleTask,
   type PlaybackFileItemLike,
 } from "../_services/resolveSubtitle";
 
@@ -14,9 +14,14 @@ import {
  * Read-only on MatchingMachine: episodeMap is passed as a play() arg, never mutated.
  *
  * Invariants (see docs/designs/playerPage-state-machine.md §五):
- *   1. mkv blob URL revoked on next play / back / unmount
- *   6. pending mkv extraction canceled before next play / on back / unmount,
- *      and a stale task's late resolve is ignored.
+ *   1. subtitle blob URL revoked on next play / back / unmount
+ *   6. pending subtitle resolution canceled before next play / on back /
+ *      unmount, and a stale task's late resolve is ignored.
+ *
+ * Both invariants used to say "mkv", because MKV extraction was the only
+ * thing that resolved asynchronously. Reading and converting a sidecar
+ * .srt/.ass is async too now — same task shape, same guards, same blob
+ * ownership — so the names no longer name one source. See resolveSubtitle.
  *
  * P2 session-resume surface:
  *   lastTimeRef — volatile Map<fileId, seconds>; cleared only on unmount.
@@ -91,8 +96,8 @@ export function usePlaybackSession({
   const [subtitleContent, setSubtitleContent] = useState<string | null>(null);
   const [resumeAt, setResumeAt] = useState<number | null>(null);
 
-  const mkvBlobUrlRef = useRef<string | null>(null);
-  const subtitleTaskRef = useRef<MkvExtractionTask | null>(null);
+  const subtitleBlobUrlRef = useRef<string | null>(null);
+  const subtitleTaskRef = useRef<SubtitleTask | null>(null);
   const lastTimeRef = useRef<Map<string, number>>(new Map());
 
   const cancelSubtitleTask = useCallback(() => {
@@ -102,20 +107,20 @@ export function usePlaybackSession({
     }
   }, []);
 
-  const cleanupMkvBlob = useCallback(() => {
-    if (mkvBlobUrlRef.current) {
-      URL.revokeObjectURL(mkvBlobUrlRef.current);
-      mkvBlobUrlRef.current = null;
+  const cleanupSubtitleBlob = useCallback(() => {
+    if (subtitleBlobUrlRef.current) {
+      URL.revokeObjectURL(subtitleBlobUrlRef.current);
+      subtitleBlobUrlRef.current = null;
     }
   }, []);
 
   useEffect(
     () => () => {
       cancelSubtitleTask();
-      cleanupMkvBlob();
+      cleanupSubtitleBlob();
       lastTimeRef.current.clear();
     },
-    [cancelSubtitleTask, cleanupMkvBlob],
+    [cancelSubtitleTask, cleanupSubtitleBlob],
   );
 
   const getLastTime = useCallback((episodeId: string) => {
@@ -134,7 +139,7 @@ export function usePlaybackSession({
   const play = useCallback(
     (fileItem: PlaybackFileItem, episodeMap?: EpisodeMap) => {
       cancelSubtitleTask();
-      cleanupMkvBlob();
+      cleanupSubtitleBlob();
 
       // Pre-flight readability probe: read the first 16 bytes so any FSA-handle
       // failure surfaces here as a tagged warning instead of downstream as the
@@ -164,23 +169,30 @@ export function usePlaybackSession({
         });
 
       // P6 verify: gesture-bound.
-      // For MKVs, kick the local-fonts permission prompt from the user-gesture
-      // context of this play() call. jassub's CJK fallback runs deep in an
-      // async chain (worker extract → jassub mount → loadCjkFallback) where
-      // Chrome has already lost transient activation, so calling
-      // queryLocalFonts() there silently fails. Triggering here means the
-      // prompt actually shows on first MKV play; subsequent plays inherit the
+      // Kick the local-fonts permission prompt from the user-gesture context
+      // of this play() call. jassub's CJK fallback runs deep in an async chain
+      // (read/extract → jassub mount → loadCjkFallback) where Chrome has
+      // already lost transient activation, so calling queryLocalFonts() there
+      // silently fails. Triggering here means the prompt actually shows on the
+      // first play that will use libass; subsequent plays inherit the
       // granted/denied state. Fire-and-forget — denial falls back to
       // LiberationSans (CJK as tofu), no error.
+      //
+      // The condition is "will jassub mount", not "is this an MKV". It was the
+      // latter while MKV was the only path that produced raw ASS for libass;
+      // a sidecar .ass now does too, and gating on the container would have
+      // left exactly those files rendering CJK as tofu with nothing to
+      // explain why.
       const win =
         typeof window !== "undefined"
           ? (window as Window & QueryLocalFontsWindow)
           : null;
-      if (
-        win &&
-        /\.mkv$/i.test(fileItem.fileName) &&
-        typeof win.queryLocalFonts === "function"
-      ) {
+      const sidecarFormat = (fileItem.subtitle?.type || "").toLowerCase();
+      const mayUseLibass =
+        /\.mkv$/i.test(fileItem.fileName) ||
+        sidecarFormat === "ass" ||
+        sidecarFormat === "ssa";
+      if (win && mayUseLibass && typeof win.queryLocalFonts === "function") {
         try {
           win.queryLocalFonts().catch(() => {});
         } catch {
@@ -212,7 +224,7 @@ export function usePlaybackSession({
       setSubtitleType(null);
       setSubtitleContent(null);
 
-      if (sub.kind !== "mkv") return;
+      if (sub.kind !== "async") return;
 
       subtitleTaskRef.current = sub.task;
       sub.task.promise.then((result) => {
@@ -224,8 +236,8 @@ export function usePlaybackSession({
         subtitleTaskRef.current = null;
         if (!result) return;
         if (result.isBlob) {
-          cleanupMkvBlob();
-          mkvBlobUrlRef.current = result.url;
+          cleanupSubtitleBlob();
+          subtitleBlobUrlRef.current = result.url;
         }
         setSubtitleUrl(result.url);
         setSubtitleType(result.type);
@@ -238,13 +250,13 @@ export function usePlaybackSession({
       loadComments,
       clearComments,
       cancelSubtitleTask,
-      cleanupMkvBlob,
+      cleanupSubtitleBlob,
     ],
   );
 
   const back = useCallback(() => {
     cancelSubtitleTask();
-    cleanupMkvBlob();
+    cleanupSubtitleBlob();
     setPlayingFile(null);
     setPlayingEp(null);
     setVideoUrl(null);
@@ -254,7 +266,7 @@ export function usePlaybackSession({
     setResumeAt(null);
     clearComments();
     // lastTimeRef is intentionally NOT cleared — resume survives back→play within session.
-  }, [cancelSubtitleTask, cleanupMkvBlob, clearComments]);
+  }, [cancelSubtitleTask, cleanupSubtitleBlob, clearComments]);
 
   return {
     phase: playingFile ? "playing" : "none",

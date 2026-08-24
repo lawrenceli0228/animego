@@ -1,21 +1,93 @@
 // @ts-nocheck
 //
 // Subtitle format converters — produce WebVTT output that artplayer's
-// built-in renderer can consume. Used by the user-pick subtitle flow when
-// the local file is not already VTT.
+// built-in renderer can consume.
+//
+// TWO CONSUMERS, AND THAT IS WHY THE RULE LIVES HERE
+//
+//   VideoPlayer  — the manual "load subtitle file" pick (.srt / .ass / .ssa)
+//   mkvSubtitle.worker — the VTT it builds from an MKV's embedded track
+//
+// Both have to answer the same question: what does a plaintext renderer do
+// with ASS override tags? The answer was previously written four times and
+// only two of them said "strip". See `stripAssOverrideTags`.
 //
 // Limitations:
 //   - ASS → VTT is plain-text only. ASS inline tags ({\an8}, {\b1}, \fad,
 //     karaoke \k) are stripped — artplayer's VTT engine has no way to
 //     express ASS typesetting / animations. Full-fidelity rendering needs
-//     libass-wasm (jassub), tracked separately.
-//   - SRT → VTT is a near-trivial timestamp comma→period swap.
+//     libass-wasm (jassub), which mounts over this layer when the source is
+//     ASS *and* we have its raw content.
+//   - SRT → VTT is a timestamp comma→period swap, plus the same tag strip:
+//     a great many SRT files in the wild are ASS conversions that kept their
+//     override tags.
 //
 // P6.6 port note: ts-nocheck'd because the legacy module already uses
-// pragmatic JSDoc + raw string parsing without TS types. Pure functions;
-// shared by VideoPlayer (subtitle file pick flow).
+// pragmatic JSDoc + raw string parsing without TS types. Pure functions —
+// no DOM, no imports — which is also what lets the worker import them.
 
 const ASS_TIME_RE = /(\d+):(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)/;
+
+/**
+ * ASS override blocks — `{\an8}`, `{\b1}`, `{\c&H00FF00&}`, `{\fad(200,200)}`.
+ *
+ * `[^}\r\n]` and NOT `[^}]` is load-bearing. This regex is applied to whole
+ * documents, not just to one cue's text, and ASS override blocks never span
+ * lines. With the permissive class, an unclosed `{` in one cue and a stray
+ * `}` several cues later would match across everything between them and
+ * swallow the intervening timestamps — turning a cosmetic tag leak into a
+ * subtitle file that no longer parses.
+ */
+const ASS_OVERRIDE_BLOCK_RE = /\{[^}\r\n]*\}/g;
+
+/**
+ * The one rule: what a PLAINTEXT renderer should do with ASS markup.
+ *
+ * Strips override blocks, turns ASS's `\N` (hard break) and `\n` (soft break)
+ * into real newlines, and `\h` (hard space) into a space. Deliberately does
+ * NOT trim — callers that operate per-cue do that themselves, and a trim
+ * applied to a whole document would eat its structure.
+ *
+ * HTML-ish inline tags that SRT genuinely supports (`<i>`, `<b>`, `<font>`)
+ * are left alone: WebVTT understands them, and stripping them would lose
+ * emphasis the author meant to keep.
+ *
+ * Worth knowing: artplayer 5.4's own SRT reader already does this
+ * (`.replace(/\{[\s\S]*?\}/g,"")`), but only on the path where it is handed
+ * an SRT and told so. Everything here hands it a Blob labelled `type: "vtt"`,
+ * which skips artplayer's converters entirely — so this is the only place the
+ * strip can happen.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function stripAssOverrideTags(text) {
+  return (text || '')
+    .replace(ASS_OVERRIDE_BLOCK_RE, '')
+    .replace(/\\[Nn]/g, '\n')
+    .replace(/\\h/g, ' ');
+}
+
+/**
+ * VTT timestamp `HH:MM:SS.mmm` from milliseconds.
+ *
+ * Lives here rather than in the worker because both MKV builders below need
+ * it and they moved out of the worker to become testable.
+ *
+ * @param {number} ms
+ * @returns {string}
+ */
+export function msToVttTime(ms) {
+  const clamped = ms > 0 ? ms : 0;
+  const h = Math.floor(clamped / 3600000);
+  const m = Math.floor((clamped % 3600000) / 60000);
+  const s = Math.floor((clamped % 60000) / 1000);
+  const milli = Math.floor(clamped % 1000);
+  return (
+    `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:` +
+    `${String(s).padStart(2, '0')}.${String(milli).padStart(3, '0')}`
+  );
+}
 
 /**
  * ASS time `H:MM:SS.cs` → VTT time `HH:MM:SS.mmm`. Returns a safe default
@@ -43,13 +115,7 @@ function assTimeToVtt(t) {
  * @param {string} text
  */
 function stripAssTags(text) {
-  let out = (text || '');
-  // Remove {...} blocks (override tags). Greedy-not-greedy doesn't matter
-  // because braces in ASS are never legitimately nested.
-  out = out.replace(/\{[^}]*\}/g, '');
-  out = out.replace(/\\[Nn]/g, '\n');
-  out = out.replace(/\\h/g, ' ');
-  return out.trim();
+  return stripAssOverrideTags(text).trim();
 }
 
 /**
@@ -150,5 +216,71 @@ export function convertSrtToVtt(srtText) {
     /(\d{2}:\d{2}:\d{2}),(\d{3})/g,
     '$1.$2',
   );
-  return `WEBVTT\n\n${swapped}`;
+  // Applied to the whole document rather than per cue, which is safe only
+  // because `ASS_OVERRIDE_BLOCK_RE` cannot cross a newline — see its comment.
+  // An SRT carrying `{\an8}` is not exotic: it is what most ASS→SRT
+  // converters emit, and it is the shape that put the literal tag on screen.
+  return `WEBVTT\n\n${stripAssOverrideTags(swapped)}`;
+}
+
+/**
+ * Build VTT cues from an MKV **ASS/SSA** track's blocks.
+ *
+ * Moved out of `mkvSubtitle.worker.js`: the worker's job is EBML parsing,
+ * which needs real Matroska bytes to exercise, and keeping the text handling
+ * in there meant this rule could only be verified by playing a file. Pure
+ * function, so it is checkable from `bun test`.
+ *
+ * Each event's `text` is a raw MKV ASS block:
+ *   ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+ * so the Text field starts after the 8th comma.
+ *
+ * @param {{ time: number, dur: number, text: string }[]} events sorted by time
+ * @returns {string}
+ */
+export function buildVttFromMkvAssEvents(events) {
+  let vtt = 'WEBVTT\n\n';
+  for (const ev of events || []) {
+    let text = ev?.text || '';
+    let commas = 0;
+    for (let j = 0; j < text.length; j += 1) {
+      if (text[j] === ',') {
+        commas += 1;
+        if (commas === 8) {
+          text = text.substring(j + 1);
+          break;
+        }
+      }
+    }
+    text = stripAssOverrideTags(text).trim();
+    if (!text) continue;
+    vtt += `${msToVttTime(ev.time)} --> ${msToVttTime(ev.time + ev.dur)}\n${text}\n\n`;
+  }
+  return vtt;
+}
+
+/**
+ * Build VTT cues from an MKV **SRT** (`S_TEXT/UTF8`) track's blocks.
+ *
+ * Unlike the ASS blocks above, an `S_TEXT/UTF8` block payload IS the cue
+ * text — there is no ReadOrder prefix to skip.
+ *
+ * This is where the reported bug lived. The ASS builder stripped override
+ * tags and this one did not, so an MKV whose only subtitle track is SRT
+ * rendered `{\an8}` as literal text — and because that branch reports its
+ * output as already-VTT, jassub never mounts to correct it and artplayer's
+ * own SRT reader never runs either. Same rule as its sibling, now literally
+ * the same function.
+ *
+ * @param {{ time: number, dur: number, text: string }[]} events sorted by time
+ * @returns {string}
+ */
+export function buildVttFromMkvSrtEvents(events) {
+  let vtt = 'WEBVTT\n\n';
+  for (const ev of events || []) {
+    const text = stripAssOverrideTags(ev?.text || '').trim();
+    if (!text) continue;
+    vtt += `${msToVttTime(ev.time)} --> ${msToVttTime(ev.time + ev.dur)}\n${text}\n\n`;
+  }
+  return vtt;
 }
