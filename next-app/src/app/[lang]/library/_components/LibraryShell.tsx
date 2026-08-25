@@ -113,7 +113,7 @@ import { performMerge, undoMerge } from "../_services/mergeOps";
 import { splitSeries } from "../_services/splitSeries";
 import { rematchSeries } from "../_services/rematchSeries";
 import { deleteSeriesCascade } from "../_services/deleteSeries";
-import { dedupeSeriesByAnimeId } from "../_services/dedupeSeries";
+import { dedupeSeriesByIdentity } from "../_services/dedupeSeries";
 import { refreshAllSeriesMetadata } from "../_services/refreshSeriesMetadata";
 
 // Components — owned by this subagent
@@ -661,9 +661,9 @@ export function LibraryShell() {
   //     the library would appear to do nothing at all.
   const bindSweepRef = useRef(false);
   const reconcileRearmedRef = useRef(false);
-  // Two independent sweeps write Series rows on mount — the binding sweep and
-  // the episode-offset backfill — and BOTH have to land before reconciliation
-  // is worth re-running. Letting each re-arm on its own finish doubled the
+  // Three independent sweeps write Series rows on mount — the binding sweep,
+  // the episode-offset backfill and the duplicate merge — and ALL of them have
+  // to land before reconciliation is worth re-running. Letting each re-arm on its own finish doubled the
   // reconciles: #105's own spec caught it going from 2 pushes to 4, because a
   // second reconcile starting while the first one's push is still in flight
   // computes the same delta before the memory that would suppress it exists.
@@ -672,7 +672,7 @@ export function LibraryShell() {
   // written. Failures count as done — a sweep that threw is never going to
   // arrive, and letting it hold the gate shut would strand the other sweep's
   // writes until the next visit, which is the bug this whole mechanism is for.
-  const SWEEP_COUNT = 2;
+  const SWEEP_COUNT = 3;
   const sweepsSettledRef = useRef(0);
   const sweepWroteRef = useRef(false);
   const noteSweepSettled = useCallback((wrote: boolean) => {
@@ -777,6 +777,56 @@ export function LibraryShell() {
       .finally(() => {
         offsetBackfillBusyRef.current = false;
       });
+  }, [loading, allSeries, noteSweepSettled]);
+
+  // Merge cards that are the same title recorded twice.
+  //
+  // Automatic rather than only the toolbar button, because a reader looking at
+  // two identical cards has no reason to guess that a menu item is what joins
+  // them — and because the key this now groups on (`Series.anilistId`) is
+  // filled by the binding sweep above, so the duplicates only become
+  // recognisable as part of the same mount that could act on them.
+  //
+  // Safe to automate for exactly two reasons, and neither is incidental:
+  //
+  //   - `wasDeliberatelySplit` stops it re-joining a pair the reader took
+  //     apart. Without that guard an automatic pass would undo a manual one on
+  //     every visit, with no way for them to make it stop.
+  //   - the merge is SOFT and recorded: no Season, Episode or Progress row
+  //     moves, `performMerge` appends an opsLog entry, and the same undo toast
+  //     the manual button raises is raised here.
+  //
+  // It runs LAST of the three sweeps in effect order so the bindings the first
+  // one writes are visible to it on the same mount. That is ordering by
+  // declaration, not a guarantee — a series bound this mount but merged next
+  // one is a cosmetic delay, not a correctness problem, and coupling the two
+  // sweeps to make it certain would cost more than it buys.
+  const dedupeSweepRef = useRef(false);
+  useEffect(() => {
+    if (loading || allSeries.length === 0) return;
+    if (dedupeSweepRef.current) return;
+    dedupeSweepRef.current = true;
+    void dedupeSeriesByIdentity({ db })
+      .then((result) => {
+        noteSweepSettled(result.merged > 0);
+        if (result.merged === 0 || result.opIds.length === 0) return;
+        setUndoToast({
+          opIds: result.opIds,
+          title: t("library.undoToast.dedupeBulkTitle").replace(
+            "{{count}}",
+            String(result.merged),
+          ),
+          meta: t("library.undoToast.dedupeBulkMeta").replace(
+            "{{groups}}",
+            String(result.groups),
+          ),
+        });
+      })
+      .catch((err: unknown) => {
+        noteSweepSettled(false);
+        console.warn("[library] duplicate merge sweep failed:", err);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, allSeries, noteSweepSettled]);
 
   const handlePickSeries = useCallback(
@@ -1220,7 +1270,7 @@ export function LibraryShell() {
     if (dedupeBusy) return;
     setDedupeBusy(true);
     try {
-      const result = await dedupeSeriesByAnimeId({ db });
+      const result = await dedupeSeriesByIdentity({ db });
       if (result.groups === 0) {
         toast.success(t("library.toast.dedupeNone"));
       } else if (result.merged === 0) {
