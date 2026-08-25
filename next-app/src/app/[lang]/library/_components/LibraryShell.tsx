@@ -727,6 +727,7 @@ export function LibraryShell() {
   // have its total and not its offset, or the reverse, and one combined pass
   // would keep re-asking for whichever half was already answered.
   const offsetBackfillBusyRef = useRef(false);
+  const offsetRearmedRef = useRef(false);
   useEffect(() => {
     if (loading || allSeries.length === 0) return;
     if (offsetBackfillBusyRef.current) return;
@@ -735,6 +736,28 @@ export function LibraryShell() {
       db: db as unknown as EpisodeOffsetDb,
       series: allSeries as OffsetBackfillSeriesRow[],
     })
+      .then((summary) => {
+        // Re-arm reconciliation, for the same reason the binding sweep above
+        // does — and this is the step whose absence kept the 400 coming after
+        // the offset shipped.
+        //
+        // `reconcileLibrary` is latched by `libraryReconciledRef` for the
+        // whole mount, and it runs BEFORE this sweep finishes. So on the one
+        // visit that matters — the first after the fix — it pushes the
+        // untranslated number, gets its 400, and is then latched out of ever
+        // retrying with the offset this sweep just wrote. The reader sees the
+        // failure they reported, on the visit that was supposed to fix it,
+        // and only a second visit would work.
+        //
+        // Guarded so a liveQuery re-emit cannot turn one re-arm into a loop:
+        // the sweep's own writes change `allSeries`, which re-runs this
+        // effect.
+        if (!summary.written) return;
+        if (offsetRearmedRef.current) return;
+        offsetRearmedRef.current = true;
+        libraryReconciledRef.current = false;
+        setReconcileEpoch((n) => n + 1);
+      })
       .catch((err: unknown) => {
         console.warn("[library] episode-offset backfill failed:", err);
       })
