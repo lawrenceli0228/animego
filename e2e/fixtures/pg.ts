@@ -196,25 +196,61 @@ export interface SeedAnimeCache {
    *     this is a positive number (`ContinueWatching.tsx` badgeText).
    */
   episodes?: number | null;
+  /**
+   * AniList `format`. Load-bearing for the episode-offset walk, which sums
+   * only TV ancestors — a chain whose members are seeded without it counts
+   * nothing and reports an offset of 0 with full confidence.
+   */
+  format?: string | null;
 }
 
 /** Insert (or refresh) one `anime_cache` row. Idempotent. */
 export async function ensureAnimeCached(anime: SeedAnimeCache): Promise<void> {
   const sql = getSql();
   await sql`
-    INSERT INTO anime_cache (anilist_id, title_romaji, title_chinese, episodes, cached_at)
+    INSERT INTO anime_cache (anilist_id, title_romaji, title_chinese, episodes, format, cached_at)
     VALUES (
       ${anime.anilistId},
       ${anime.titleRomaji ?? `E2E Anime ${anime.anilistId}`},
       ${anime.titleChinese ?? `E2E 番剧 ${anime.anilistId}`},
       ${anime.episodes ?? null},
+      ${anime.format ?? "TV"},
       now()
     )
     ON CONFLICT (anilist_id) DO UPDATE SET
       title_romaji  = EXCLUDED.title_romaji,
       title_chinese = EXCLUDED.title_chinese,
       episodes      = EXCLUDED.episodes,
+      format        = EXCLUDED.format,
       updated_at    = now()
+  `;
+}
+
+/**
+ * Point one anime at its prequel, the way the AniList detail sync does.
+ *
+ * `anime_relations.anime_id` carries the FK onto anime_cache; the target
+ * `anilist_id` does not, which is what lets a season name a prequel this cache
+ * has never fetched. Both rows must exist before calling this for the owner
+ * side of that FK to hold.
+ *
+ * Not idempotent by conflict — the table has a uuid PK and admits the same
+ * pair twice on purpose (one anime can be a SEQUEL and an ALTERNATIVE of the
+ * same parent), so the delete comes first. Seeding it twice would otherwise
+ * read as the ambiguity case and report the offset as unknown.
+ */
+export async function seedPrequelRelation(
+  animeId: number,
+  prequelAnilistId: number,
+): Promise<void> {
+  const sql = getSql();
+  await sql`
+    DELETE FROM anime_relations
+    WHERE anime_id = ${animeId} AND relation_type = 'PREQUEL'
+  `;
+  await sql`
+    INSERT INTO anime_relations (anime_id, anilist_id, relation_type)
+    VALUES (${animeId}, ${prequelAnilistId}, 'PREQUEL')
   `;
 }
 
