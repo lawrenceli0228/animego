@@ -707,7 +707,7 @@ export function LibraryShell() {
         // eslint-disable-next-line no-console
         console.warn("[library] binding sweep failed:", err);
       });
-  }, [loading, series]);
+  }, [loading, series, noteSweepSettled]);
 
   // One-shot batch fill of `Series.totalEpisodes` for series that are already
   // bound. Without it this whole feature is a no-op for every existing library:
@@ -777,7 +777,7 @@ export function LibraryShell() {
       .finally(() => {
         offsetBackfillBusyRef.current = false;
       });
-  }, [loading, allSeries]);
+  }, [loading, allSeries, noteSweepSettled]);
 
   const handlePickSeries = useCallback(
     (id: string) => {
