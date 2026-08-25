@@ -131,6 +131,7 @@ import { authFetch } from "@/lib/authFetch";
 import { parseWatchedSnapshot } from "@/components/anime/watchedEpisodeState";
 import { readBinding } from "./animeBinding";
 import { resolveWatchedEpisodes } from "./watchHighWater";
+import { readEpisodeOffset, toSiteEpisodes } from "./episodeOffset";
 
 // ─── Row shapes (structural, so tests can hand in plain objects) ────────────
 
@@ -166,6 +167,23 @@ export interface WatchSyncSeries {
    * see `judgeSyncMemory`.
    */
   readonly lastSyncedSubscribedAt?: number | null;
+  /**
+   * How many episodes precede this season in its franchise's continuous
+   * numbering, written by `persistEpisodeOffset`.
+   *
+   * Absent and 0 are opposite instructions, not two spellings of empty — see
+   * `types.js` and `lib/library/episodeOffset`. Read it through
+   * `readEpisodeOffset`, never with `?? 0`.
+   */
+  readonly episodeOffset?: number | null;
+  /**
+   * `Series.totalEpisodes` — how long this season is on the site.
+   *
+   * Read here only as the upper bound an offset is validated against: an
+   * offset that would push an episode past the end of its own season is not
+   * describing these files and must not be applied.
+   */
+  readonly totalEpisodes?: number | null;
 }
 
 /** The `Progress` fields this module reads. */
@@ -301,8 +319,26 @@ export type PushSkipReason =
 export interface PushPlanned {
   readonly push: true;
   readonly anilistId: number;
-  /** The DELTA — episodes this device has not pushed yet, ascending. */
+  /**
+   * The DELTA — episodes this device has not pushed yet, ascending, in LOCAL
+   * numbers (the ones on disk).
+   *
+   * This is the array the sync memory records, and it has to stay local for
+   * `lastSyncedEpisodes` to keep meaning what it says. The two spaces are
+   * carried separately rather than converted at the call site because a call
+   * site that has to remember which is which eventually forgets.
+   */
   readonly episodes: readonly number[];
+  /**
+   * The same delta in the SITE's numbering — what actually goes on the wire.
+   *
+   * Identical to `episodes` whenever no offset applies, which is the common
+   * case. It differs when a release group numbered continuously across
+   * seasons: a finale stored as 38 is episode 10 of a 10-episode second
+   * season, and 38 is what `subscriptions/validate.go` was rejecting with a
+   * 400 on every attempt.
+   */
+  readonly siteEpisodes: readonly number[];
 }
 export interface PushSkipped {
   readonly push: false;
@@ -440,6 +476,16 @@ export function decidePush(input: {
   /** Locally-completed main episodes, ascending. */
   readonly watched: readonly number[];
   readonly attempts: number;
+  /**
+   * How many episodes precede this season in its franchise's continuous
+   * numbering, when the server could work it out. `Series.episodeOffset`.
+   *
+   * Must arrive as `undefined` when unmeasured and NOT as 0 — 0 is the real
+   * answer "nothing precedes this season". See `lib/library/episodeOffset`.
+   */
+  readonly episodeOffset?: number;
+  /** `Series.totalEpisodes` — the upper bound an offset is checked against. */
+  readonly totalEpisodes?: number;
 }): PushPlan {
   // First, because a merged-in source can carry a stale binding of its own and
   // pushing it would write another show's progress.
@@ -457,7 +503,24 @@ export function decidePush(input: {
   if (input.attempts >= MAX_PUSH_ATTEMPTS) {
     return { push: false, reason: "blocked" };
   }
-  return { push: true, anilistId, episodes };
+
+  // Translated against the WHOLE local set, not against the delta.
+  //
+  // The delta is whatever this device has not pushed yet — one episode on a
+  // normal evening — and an offset validated against one number is validated
+  // against almost nothing: a lone 38 fits an offset of 28 and equally fits
+  // 37. The grid decides using every episode on the card, so deciding here on
+  // a subset would let the two disagree about the same file, which is the one
+  // outcome `episodeOffset.ts` exists to prevent.
+  //
+  // `?? episodes` is the "no offset applies" answer, and it is the same
+  // answer the grid gives by rendering the stored number.
+  const site =
+    toSiteEpisodes(watched, input.totalEpisodes, input.episodeOffset) === null
+      ? episodes
+      : episodes.map((n) => n - (input.episodeOffset as number));
+
+  return { push: true, anilistId, episodes, siteEpisodes: site };
 }
 
 // ─── Is the memory still about the row it was written for? ──────────────────
@@ -1322,17 +1385,30 @@ async function pushAndRecord(
   api: SubscriptionSyncApi,
   now: () => number,
 ): Promise<SyncResult> {
-  const episodes = [...plan.episodes];
+  // Two arrays, two spaces, and which is which decides correctness:
+  //
+  //   sent       the SITE's numbering — the wire, and the containment check
+  //              against what the server says it stored.
+  //   remembered LOCAL numbers — `lastSyncedEpisodes` is "what THIS device
+  //              pushed", expressed in the numbers this device holds, and the
+  //              whole delta computation reads it back that way.
+  //
+  // Recording the site numbers here would make the memory disagree with the
+  // local set on every offset series, so `local \ pushed` would re-offer the
+  // same episodes forever.
+  const sent = [...plan.siteEpisodes];
+  const localEpisodes = [...plan.episodes];
   const base = {
     seriesId: rootId,
     // The maximum of what was sent, which is what the server's
-    // current_episode will be at or above once it lands.
-    episode: episodes[episodes.length - 1] ?? null,
-    episodes,
+    // current_episode will be at or above once it lands — so it is stated in
+    // the server's numbering, like the field it mirrors.
+    episode: sent[sent.length - 1] ?? null,
+    episodes: sent,
     anilistId: plan.anilistId,
   };
 
-  let res = await api.markEpisodes(plan.anilistId, episodes);
+  let res = await api.markEpisodes(plan.anilistId, sent);
 
   // A 404 means one thing: this user has no subscription row for this title.
   // That is the state "click to start tracking" (T9) exists to leave behind,
@@ -1345,13 +1421,17 @@ async function pushAndRecord(
   if (isPushErr(res) && res.status === 404) {
     const ensured = await ensureSubscription(rootId, plan.anilistId, api);
     if (ensured === "created") {
-      res = await api.markEpisodes(plan.anilistId, episodes);
+      res = await api.markEpisodes(plan.anilistId, sent);
     }
   }
 
   if (!isPushErr(res)) {
     clearFailure(rootId);
-    reportUnstoredEpisodes(rootId, plan.anilistId, episodes, res.stored);
+    // Both sides of this comparison are the SITE's numbering: `sent` is
+    // what went on the wire and `res.stored` is the server echoing its own
+    // set back. Handing it the local array would report every offset
+    // series as unstored on a push that succeeded perfectly.
+    reportUnstoredEpisodes(rootId, plan.anilistId, sent, res.stored);
     // From what was SENT, never from what came back. `res.stored` is the whole
     // row — including episodes another device marked — and this field is not a
     // record of the row, it is a record of what THIS device pushed to it (see
@@ -1359,7 +1439,7 @@ async function pushAndRecord(
     // make the memory claim credit for marks it never sent, and the next reader
     // of `local \ pushed` would silently stop offering them. The check above
     // adds an assertion; it does not add a source of truth.
-    const remembered = [...new Set([...synced, ...episodes])].sort((a, b) => a - b);
+    const remembered = [...new Set([...synced, ...localEpisodes])].sort((a, b) => a - b);
     try {
       await db.series.update(rootId, {
         lastSyncedEpisodes: remembered,
@@ -1422,6 +1502,11 @@ async function planPush(
     anilistId,
     watched: input.watched,
     attempts: input.attempts,
+    // Read off the ROOT's row, matching where the delta and the memory come
+    // from. A soft merge leaves each member its own Season rows, but the push
+    // is the root's and so is everything it is compared against.
+    episodeOffset: readEpisodeOffset(seriesRow?.episodeOffset),
+    totalEpisodes: readEpisodeOffset(seriesRow?.totalEpisodes),
   };
   const synced = readSyncedEpisodes(seriesRow);
   const plan = decidePush({ ...base, synced });

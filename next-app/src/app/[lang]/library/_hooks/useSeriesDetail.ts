@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { resolveMergedSeriesIds } from "../_services/resolveMergedIds";
 import { buildGroupTotals } from "../_services/seriesGroups";
+import { readEpisodeOffset } from "@/lib/library/episodeOffset";
 import type Dexie from "dexie";
 
 // Types are JSDoc only on the JS side — mirror them in TS-friendly form.
@@ -101,6 +102,17 @@ export interface UseSeriesDetailResult {
    * and the sheet can label a chip "01" that opens a player headed "EP13".
    */
   groupTotal: number | undefined;
+  /**
+   * How many episodes precede this season in its franchise's continuous
+   * numbering, when the server could work it out — `Series.episodeOffset` on
+   * the merge-group ROOT, which is the row every other total here is folded
+   * onto.
+   *
+   * `undefined` means unmeasured and is NOT interchangeable with 0: 0 says
+   * "nothing precedes this season" and stops the grid inferring a shift,
+   * undefined leaves it inferring one. See `lib/library/episodeOffset`.
+   */
+  episodeOffset: number | undefined;
   getFile: (episodeId: string) => Promise<File | null>;
   refresh: () => void;
 }
@@ -120,6 +132,7 @@ export function useSeriesDetail(
     Map<string, FileRefRecord>
   >(new Map());
   const [groupTotal, setGroupTotal] = useState<number | undefined>(undefined);
+  const [episodeOffset, setEpisodeOffset] = useState<number | undefined>(undefined);
   const [tick, setTick] = useState(0);
 
   const refresh = useCallback(() => {
@@ -133,6 +146,7 @@ export function useSeriesDetail(
       setEpisodes([]);
       setFileRefByEpisode(new Map());
       setGroupTotal(undefined);
+      setEpisodeOffset(undefined);
       return;
     }
 
@@ -155,6 +169,8 @@ export function useSeriesDetail(
           setEpisodes([]);
           setFileRefByEpisode(new Map());
           setGroupTotal(undefined);
+          setEpisodeOffset(undefined);
+      setEpisodeOffset(undefined);
           return;
         }
 
@@ -229,6 +245,16 @@ export function useSeriesDetail(
         setGroupTotal(
           buildGroupTotals(memberSeries, memberSeasons, overrides).get(rootSeriesId),
         );
+        // The ROOT's offset, matching where the total above comes from. A soft
+        // merge leaves each member its own rows, so reading any other member
+        // would describe a different season.
+        setEpisodeOffset(
+          readEpisodeOffset(
+            (memberSeries as { id?: string; episodeOffset?: unknown }[]).find(
+              (row) => row?.id === rootSeriesId,
+            )?.episodeOffset,
+          ),
+        );
         setStatus("ready");
       } catch {
         if (!cancelled) {
@@ -269,6 +295,7 @@ export function useSeriesDetail(
     episodes,
     fileRefByEpisode,
     groupTotal,
+    episodeOffset,
     getFile,
     refresh,
   };

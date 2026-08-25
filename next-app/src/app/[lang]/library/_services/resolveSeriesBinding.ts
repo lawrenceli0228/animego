@@ -209,6 +209,83 @@ export async function persistEpisodeTotal(
 }
 
 /**
+ * How many episodes precede this season in its franchise's continuous
+ * numbering, or `undefined` when the server could not work it out.
+ *
+ * `undefined` and `0` are different answers and the caller must keep them
+ * apart: 0 means "nothing precedes this season", which is a fact the display
+ * layer acts on, while undefined means "we do not know", which sends it back
+ * to inferring. The endpoint returns them as separate fields precisely so a
+ * single `?? 0` cannot merge them, and this function preserves that.
+ *
+ * Never throws. A season whose offset cannot be fetched renders exactly as it
+ * does today; failing the binding over it would be a much larger loss.
+ */
+export async function fetchEpisodeOffset(
+  anilistId: number | undefined,
+): Promise<number | undefined> {
+  if (typeof anilistId !== "number" || !Number.isInteger(anilistId) || anilistId <= 0) {
+    return undefined;
+  }
+  try {
+    const res = await fetch(`/api/anime/${anilistId}/episode-offset`, {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return undefined;
+    const body = await res.json();
+    const data = body?.data ?? body;
+    if (!data || data.known !== true) return undefined;
+    const offset = data.offset;
+    return typeof offset === "number" && Number.isInteger(offset) && offset >= 0
+      ? offset
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Best-effort persist of the absolute episode offset.
+ *
+ * Unlike `persistEpisodeTotal` above, this one DOES write 0. There a zero and
+ * an absent value mean the same thing to every reader; here they are opposite
+ * instructions — 0 tells the grid to stop inferring a shift, absent tells it
+ * to keep inferring one. Skipping the zero write would silently downgrade
+ * every standalone series to guesswork.
+ *
+ * Deliberately does NOT bump `updatedAt`, for the same reason the two writers
+ * above do not: the "new additions" row sorts on it, and learning where a
+ * season sits in its franchise is not the user adding anything.
+ */
+export async function persistEpisodeOffset(
+  db: BindingDb,
+  seriesId: string,
+  offset: number | undefined,
+): Promise<void> {
+  if (!seriesId) return;
+  if (
+    typeof offset !== "number" ||
+    !Number.isInteger(offset) ||
+    offset < 0
+  ) {
+    return;
+  }
+  try {
+    const row = (await db.series.get(seriesId)) as
+      | { episodeOffset?: number }
+      | undefined;
+    if (!row || row.episodeOffset === offset) return;
+    await db.series.update(seriesId, { episodeOffset: offset });
+  } catch (err) {
+    console.warn(
+      "[resolveSeriesBinding] episode offset write failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+/**
  * Best-effort persist of an automatic match. Failing to store the binding must
  * not cost the caller the metadata that was just fetched successfully — the
  * next attempt re-derives and retries.
@@ -348,6 +425,16 @@ export async function resolveSeriesBinding(
   // are already bound this line is unreachable and the batch backfill
   // (`episodeCountBackfill.ts`) is what actually fills them in.
   await persistEpisodeTotal(db, seriesId, best.episodes);
+  // One extra request per newly-resolved series, on the path that already
+  // made one. It rides here rather than in `useSiteAnimeForSeries` because
+  // that hook mounts on the single-series page only, and the surface that
+  // needs the offset most — the detail sheet's episode grid — is reachable
+  // without ever visiting it.
+  //
+  // Same ceiling as the line above, and for the same reason: an
+  // already-bound library never reaches here. Whatever this misses stays on
+  // the inference until the series is re-resolved.
+  await persistEpisodeOffset(db, seriesId, await fetchEpisodeOffset(anilistId));
   return {
     anilistId,
     outcome: bound ? "existing" : "resolved",

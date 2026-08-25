@@ -735,6 +735,12 @@ func main() {
 		r.Get("/schedule", scheduleSvc.Handler())
 		r.Get("/episodes", anime.Episodes(q))
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))
+		// How many episodes precede this season in its franchise's
+		// continuous numbering.  Registered before the bare /{anilistId} for
+		// the same reason /watchers is: chi resolves the more specific
+		// pattern first, and a two-segment route added after the catch-all
+		// would never be reached.
+		r.Get("/{anilistId}/episode-offset", anime.EpisodeOffset(q))
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
 
