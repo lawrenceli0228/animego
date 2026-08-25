@@ -72,6 +72,11 @@ import {
   type EpisodeCountDb,
 } from "../_services/episodeCountBackfill";
 import {
+  backfillEpisodeOffsets,
+  type EpisodeOffsetDb,
+  type OffsetBackfillSeriesRow,
+} from "../_services/episodeOffsetBackfill";
+import {
   bindUnboundSeries,
   type SweepSeriesRow,
 } from "../_services/bindUnboundSeries";
@@ -707,6 +712,34 @@ export function LibraryShell() {
       })
       .finally(() => {
         episodeBackfillBusyRef.current = false;
+      });
+  }, [loading, allSeries]);
+
+  // The same sweep for `episodeOffset`, and a separate one on purpose.
+  //
+  // `resolveSeriesBinding` fetches an offset only when it RESOLVES a binding,
+  // and it returns early for a series that is already bound — so without this
+  // the whole cross-season fix would reach nobody who already had the affected
+  // series, which is everybody who could notice it. Same ceiling
+  // `backfillEpisodeCounts` above exists to lift.
+  //
+  // Not folded into that sweep because the candidate sets differ: a series can
+  // have its total and not its offset, or the reverse, and one combined pass
+  // would keep re-asking for whichever half was already answered.
+  const offsetBackfillBusyRef = useRef(false);
+  useEffect(() => {
+    if (loading || allSeries.length === 0) return;
+    if (offsetBackfillBusyRef.current) return;
+    offsetBackfillBusyRef.current = true;
+    void backfillEpisodeOffsets({
+      db: db as unknown as EpisodeOffsetDb,
+      series: allSeries as OffsetBackfillSeriesRow[],
+    })
+      .catch((err: unknown) => {
+        console.warn("[library] episode-offset backfill failed:", err);
+      })
+      .finally(() => {
+        offsetBackfillBusyRef.current = false;
       });
   }, [loading, allSeries]);
 

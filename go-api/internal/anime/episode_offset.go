@@ -101,3 +101,62 @@ func EpisodeOffset(q dbgen.Querier) http.HandlerFunc {
 		httpx.Data(w, http.StatusOK, out)
 	}
 }
+
+// episodeOffsetItem is one row of the batch answer. `known` carries the same
+// meaning it does on the single-id endpoint, and for the same reason.
+type episodeOffsetItem struct {
+	AnilistID int32 `json:"anilistId"`
+	Known     bool  `json:"known"`
+	Offset    int32 `json:"offset"`
+}
+
+// EpisodeOffsets serves offsets for many anime at once.
+//
+// It exists because the library's one-shot backfill cannot use the per-id
+// endpoint: a 200-series library would make 200 requests against a 1 req/s
+// per-IP bucket. `/api/anime/episodes` already solved that for episode
+// counts, so this mirrors it — same id parsing, same cap, same cache policy,
+// same `{data: [...]}` envelope — rather than inventing a second shape for
+// the same problem.
+//
+// An id that is not in the cache produces NO ITEM rather than an item saying
+// unknown. Absent and known:false mean the same thing to the caller, and the
+// episode-count sweep already treats a missing row that way.
+func EpisodeOffsets(q dbgen.Querier) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
+		defer cancel()
+
+		ids, err := parseAnilistIDList(req.URL.Query().Get("ids"), maxEpisodeIDs)
+		if err != nil {
+			httpx.Fail(w, httpx.NewError(
+				http.StatusBadRequest,
+				httpx.CodeValidationError,
+				err.Error(),
+			))
+			return
+		}
+
+		rows, queryErr := q.GetAbsoluteEpisodeOffsets(ctx, ids)
+		if queryErr != nil {
+			httpx.Fail(w, httpx.WrapError(queryErr, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
+			return
+		}
+
+		items := make([]episodeOffsetItem, 0, len(rows))
+		for _, r := range rows {
+			known := r.Known != nil && *r.Known
+			item := episodeOffsetItem{AnilistID: r.AnilistID, Known: known}
+			if known {
+				item.Offset = r.AbsoluteOffset
+			}
+			items = append(items, item)
+		}
+
+		// The same policy the episode counts use. An offset is a fact about a
+		// franchise's shape, which changes even less often than an episode
+		// count does.
+		w.Header().Set("Cache-Control", episodeCountsCacheControl)
+		httpx.Data(w, http.StatusOK, items)
+	}
+}

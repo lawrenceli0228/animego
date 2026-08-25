@@ -183,6 +183,43 @@ func TestAbsoluteEpisodeOffset(t *testing.T) {
 		})
 	}
 
+	t.Run("★ the batch form attributes every chain to the id that asked", func(t *testing.T) {
+		// The batch query carries an extra `root` column down the recursion and
+		// picks one row per root with DISTINCT ON. Getting that wrong does not
+		// error — it hands one season's offset to another season, which is the
+		// precise failure this whole feature exists to stop. Asking for the
+		// three seasons of one franchise at once is the case where a mixed-up
+		// attribution would look most plausible.
+		rows, err := q.GetAbsoluteEpisodeOffsets(ctx, []int32{209939, 154587, 182255, 300002})
+		require.NoError(t, err)
+
+		got := map[int32][2]int{}
+		for _, r := range rows {
+			require.NotNil(t, r.Known, "known must never be SQL NULL for id %d", r.AnilistID)
+			known := 0
+			if *r.Known {
+				known = 1
+			}
+			got[r.AnilistID] = [2]int{known, int(r.AbsoluteOffset)}
+		}
+
+		assert.Equal(t, [2]int{1, 0}, got[154587], "season one has nothing before it")
+		assert.Equal(t, [2]int{1, 28}, got[182255], "season two follows a 28-episode season one")
+		assert.Equal(t, [2]int{1, 38}, got[209939], "season three follows 28+10")
+		assert.Equal(t, [2]int{0, 0}, got[300002], "an uncached prequel is unknown, and unknown carries no offset")
+		assert.Len(t, rows, 4, "one row per requested id that exists, never one per chain link")
+	})
+
+	t.Run("★ the batch form omits ids that are not cached at all", func(t *testing.T) {
+		// Absent rather than a row saying unknown. The client has to treat the
+		// two the same way, and a test that never saw the absent case would let
+		// a sweep re-ask for those ids on every pass.
+		rows, err := q.GetAbsoluteEpisodeOffsets(ctx, []int32{154587, 424242})
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, int32(154587), rows[0].AnilistID)
+	})
+
 	t.Run("an anilist id absent from the cache returns no row", func(t *testing.T) {
 		// Not an error condition to hide: the caller has to treat "no row"
 		// exactly like known=false, and a test that never exercised it would
