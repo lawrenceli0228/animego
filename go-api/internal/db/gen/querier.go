@@ -254,6 +254,28 @@ type Querier interface {
 	// proxy for "is part of the continuous numbering", which is one more reason
 	// the caller validates rather than trusts.
 	GetAbsoluteEpisodeOffset(ctx context.Context, anilistID int32) (GetAbsoluteEpisodeOffsetRow, error)
+	// The batch form of GetAbsoluteEpisodeOffset, for the library's one-shot
+	// backfill over series that were bound before offsets existed.
+	//
+	// It exists because the per-id endpoint cannot serve that sweep. A library of
+	// 200 series would make 200 requests against a 1 req/s per-IP bucket, which
+	// is the shape `/api/anime/episodes` already avoids for episode counts — so
+	// this mirrors it rather than inventing a second answer.
+	//
+	// The walk is identical to the single-id version; see its comment for why the
+	// chain is read from `anime_relations`, what each `known=false` means, and why
+	// the caller must still validate the offset against the files on disk. The
+	// only structural difference is `root`: the anchor id is carried down the
+	// recursion so the deepest row of each chain can be attributed back to the id
+	// that asked for it.
+	//
+	// An id absent from anime_cache produces no row at all rather than a row
+	// saying unknown. The caller has to treat "missing from the response" and
+	// "known:false" the same way, which is exactly what it already does for the
+	// episode-count sweep.
+	// DISTINCT ON keeps the first row per root, and the ORDER BY makes that the
+	// deepest one — the end of that chain, which is where completeness is decided.
+	GetAbsoluteEpisodeOffsets(ctx context.Context, ids []int32) ([]GetAbsoluteEpisodeOffsetsRow, error)
 	// Queries for /api/admin/* (P2.3).
 	//
 	// Most admin reads are single-row aggregates or list-by-version batches.

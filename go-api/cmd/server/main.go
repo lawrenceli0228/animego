@@ -734,6 +734,10 @@ func main() {
 		r.Get("/search", searchSvc.Handler())
 		r.Get("/schedule", scheduleSvc.Handler())
 		r.Get("/episodes", anime.Episodes(q))
+		// Batch form of /{anilistId}/episode-offset, for the library backfill.
+		// A fixed segment, so it must be registered outside the /{anilistId}
+		// group to avoid being read as an id.
+		r.Get("/episode-offsets", anime.EpisodeOffsets(q))
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))
 		// How many episodes precede this season in its franchise's
 		// continuous numbering.  Registered before the bare /{anilistId} for

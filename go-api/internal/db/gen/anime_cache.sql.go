@@ -324,6 +324,94 @@ func (q *Queries) GetAbsoluteEpisodeOffset(ctx context.Context, anilistID int32)
 	return i, err
 }
 
+const getAbsoluteEpisodeOffsets = `-- name: GetAbsoluteEpisodeOffsets :many
+WITH RECURSIVE preq AS (
+    SELECT anime_id,
+           min(anilist_id) AS prequel_id,
+           count(*)        AS n
+    FROM anime_relations
+    WHERE relation_type = 'PREQUEL'
+    GROUP BY anime_id
+),
+chain AS (
+    SELECT
+        a.anilist_id AS root,
+        a.anilist_id AS cur,
+        0::integer   AS acc,
+        TRUE         AS counted_all,
+        1            AS depth
+    FROM anime_cache a
+    WHERE a.anilist_id = ANY($1::int[])
+
+    UNION ALL
+
+    SELECT
+        c.root,
+        p.anilist_id,
+        c.acc + CASE WHEN p.format = 'TV' THEN coalesce(p.episodes, 0) ELSE 0 END,
+        c.counted_all AND (p.format <> 'TV' OR p.episodes IS NOT NULL),
+        c.depth + 1
+    FROM chain c
+    JOIN preq r        ON r.anime_id   = c.cur AND r.n = 1
+    JOIN anime_cache p ON p.anilist_id = r.prequel_id
+    WHERE c.depth < 10
+)
+SELECT DISTINCT ON (d.root)
+    d.root AS anilist_id,
+    (d.counted_all
+     AND NOT EXISTS (SELECT 1 FROM preq r WHERE r.anime_id = d.cur)) AS known,
+    d.acc::int AS absolute_offset
+FROM chain d
+ORDER BY d.root, d.depth DESC
+`
+
+type GetAbsoluteEpisodeOffsetsRow struct {
+	AnilistID      int32 `json:"anilistId"`
+	Known          *bool `json:"known"`
+	AbsoluteOffset int32 `json:"absoluteOffset"`
+}
+
+// The batch form of GetAbsoluteEpisodeOffset, for the library's one-shot
+// backfill over series that were bound before offsets existed.
+//
+// It exists because the per-id endpoint cannot serve that sweep. A library of
+// 200 series would make 200 requests against a 1 req/s per-IP bucket, which
+// is the shape `/api/anime/episodes` already avoids for episode counts — so
+// this mirrors it rather than inventing a second answer.
+//
+// The walk is identical to the single-id version; see its comment for why the
+// chain is read from `anime_relations`, what each `known=false` means, and why
+// the caller must still validate the offset against the files on disk. The
+// only structural difference is `root`: the anchor id is carried down the
+// recursion so the deepest row of each chain can be attributed back to the id
+// that asked for it.
+//
+// An id absent from anime_cache produces no row at all rather than a row
+// saying unknown. The caller has to treat "missing from the response" and
+// "known:false" the same way, which is exactly what it already does for the
+// episode-count sweep.
+// DISTINCT ON keeps the first row per root, and the ORDER BY makes that the
+// deepest one — the end of that chain, which is where completeness is decided.
+func (q *Queries) GetAbsoluteEpisodeOffsets(ctx context.Context, ids []int32) ([]GetAbsoluteEpisodeOffsetsRow, error) {
+	rows, err := q.db.Query(ctx, getAbsoluteEpisodeOffsets, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAbsoluteEpisodeOffsetsRow{}
+	for rows.Next() {
+		var i GetAbsoluteEpisodeOffsetsRow
+		if err := rows.Scan(&i.AnilistID, &i.Known, &i.AbsoluteOffset); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAnimeByAnilistIDs = `-- name: GetAnimeByAnilistIDs :many
 SELECT
     anilist_id,
