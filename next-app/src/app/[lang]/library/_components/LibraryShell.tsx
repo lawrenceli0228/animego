@@ -661,6 +661,30 @@ export function LibraryShell() {
   //     the library would appear to do nothing at all.
   const bindSweepRef = useRef(false);
   const reconcileRearmedRef = useRef(false);
+  // Two independent sweeps write Series rows on mount — the binding sweep and
+  // the episode-offset backfill — and BOTH have to land before reconciliation
+  // is worth re-running. Letting each re-arm on its own finish doubled the
+  // reconciles: #105's own spec caught it going from 2 pushes to 4, because a
+  // second reconcile starting while the first one's push is still in flight
+  // computes the same delta before the memory that would suppress it exists.
+  //
+  // So: count them out, re-arm ONCE, and only if something was actually
+  // written. Failures count as done — a sweep that threw is never going to
+  // arrive, and letting it hold the gate shut would strand the other sweep's
+  // writes until the next visit, which is the bug this whole mechanism is for.
+  const SWEEP_COUNT = 2;
+  const sweepsSettledRef = useRef(0);
+  const sweepWroteRef = useRef(false);
+  const noteSweepSettled = useCallback((wrote: boolean) => {
+    if (wrote) sweepWroteRef.current = true;
+    sweepsSettledRef.current += 1;
+    if (sweepsSettledRef.current < SWEEP_COUNT) return;
+    if (!sweepWroteRef.current) return;
+    if (reconcileRearmedRef.current) return;
+    reconcileRearmedRef.current = true;
+    libraryReconciledRef.current = false;
+    setReconcileEpoch((n) => n + 1);
+  }, []);
   const sweepAbortRef = useRef<AbortController | null>(null);
   useEffect(() => () => sweepAbortRef.current?.abort(), []);
   useEffect(() => {
@@ -676,13 +700,10 @@ export function LibraryShell() {
       signal: controller.signal,
     })
       .then((summary) => {
-        if (!summary.changed) return;
-        if (reconcileRearmedRef.current) return;
-        reconcileRearmedRef.current = true;
-        libraryReconciledRef.current = false;
-        setReconcileEpoch((n) => n + 1);
+        noteSweepSettled(Boolean(summary.changed));
       })
       .catch((err: unknown) => {
+        noteSweepSettled(false);
         // eslint-disable-next-line no-console
         console.warn("[library] binding sweep failed:", err);
       });
@@ -727,7 +748,6 @@ export function LibraryShell() {
   // have its total and not its offset, or the reverse, and one combined pass
   // would keep re-asking for whichever half was already answered.
   const offsetBackfillBusyRef = useRef(false);
-  const offsetRearmedRef = useRef(false);
   useEffect(() => {
     if (loading || allSeries.length === 0) return;
     if (offsetBackfillBusyRef.current) return;
@@ -737,28 +757,21 @@ export function LibraryShell() {
       series: allSeries as OffsetBackfillSeriesRow[],
     })
       .then((summary) => {
-        // Re-arm reconciliation, for the same reason the binding sweep above
-        // does — and this is the step whose absence kept the 400 coming after
-        // the offset shipped.
-        //
+        // Reconciliation has to re-run once this lands, and this is the step
+        // whose absence kept the 400 coming after the offset shipped:
         // `reconcileLibrary` is latched by `libraryReconciledRef` for the
-        // whole mount, and it runs BEFORE this sweep finishes. So on the one
-        // visit that matters — the first after the fix — it pushes the
-        // untranslated number, gets its 400, and is then latched out of ever
-        // retrying with the offset this sweep just wrote. The reader sees the
-        // failure they reported, on the visit that was supposed to fix it,
-        // and only a second visit would work.
+        // whole mount and fires BEFORE this sweep finishes, so the one visit
+        // that matters pushed the untranslated number, took its 400, and was
+        // latched out of ever retrying with the offset this sweep had just
+        // written.
         //
-        // Guarded so a liveQuery re-emit cannot turn one re-arm into a loop:
-        // the sweep's own writes change `allSeries`, which re-runs this
-        // effect.
-        if (!summary.written) return;
-        if (offsetRearmedRef.current) return;
-        offsetRearmedRef.current = true;
-        libraryReconciledRef.current = false;
-        setReconcileEpoch((n) => n + 1);
+        // Through the coordinator, not directly. Re-arming here on its own
+        // made this the SECOND re-arm of the mount and doubled the pushes —
+        // caught by #105's spec, not by this one.
+        noteSweepSettled(summary.written > 0);
       })
       .catch((err: unknown) => {
+        noteSweepSettled(false);
         console.warn("[library] episode-offset backfill failed:", err);
       })
       .finally(() => {
