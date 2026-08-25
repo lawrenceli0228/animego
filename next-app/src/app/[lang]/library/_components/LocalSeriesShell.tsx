@@ -233,7 +233,7 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
     db,
     fileHandles,
   });
-  const { status, series, episodes, fileRefByEpisode, groupTotal, refresh } =
+  const { status, series, episodes, fileRefByEpisode, groupTotal, episodeOffset, refresh } =
     seriesDetail;
 
   // T9: the numbers the rows below SHOW. A fansub group numbering a sequel
@@ -242,8 +242,8 @@ export function LocalSeriesShell({ seriesId }: LocalSeriesShellProps) {
   // Stored numbers are untouched — `episodeMap`, the danmaku picker and the
   // `?resumeEpisode=` hand-off below all still run on them.
   const episodeNav = useMemo(
-    () => buildEpisodeNavNumbers(episodes, groupTotal, isWatchableKind),
-    [episodes, groupTotal],
+    () => buildEpisodeNavNumbers(episodes, groupTotal, isWatchableKind, episodeOffset),
+    [episodes, groupTotal, episodeOffset],
   );
 
   // P6 type widen: useSeriesDetail returns SeriesRecord (loose),

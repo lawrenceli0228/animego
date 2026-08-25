@@ -354,6 +354,12 @@ interface SeriesDetailSheetProps {
    * it can see on disk. See `_services/seriesGroups.ts`.
    */
   groupTotal?: number;
+  /**
+   * How many episodes precede this season in its franchise's continuous
+   * numbering, when known. Absent means unmeasured, which is NOT the same as
+   * 0 — see `lib/library/episodeOffset`.
+   */
+  episodeOffset?: number;
   onClose: () => void;
   onPickEpisode: (seriesId: string, episodeNumber: number) => void;
   onPlaySeries?: (seriesId: string) => void;
@@ -362,6 +368,7 @@ interface SeriesDetailSheetProps {
 export function SeriesDetailSheet({
   series,
   groupTotal,
+  episodeOffset,
   onClose,
   onPickEpisode,
   onPlaySeries,
@@ -428,8 +435,8 @@ export function SeriesDetailSheet({
   // effect is out of reach for bun:test here — which is exactly how issue #75
   // shipped — and because the player has to reach the SAME answer.
   const grid = useMemo(
-    () => buildGridCells(episodes, groupTotal),
-    [episodes, groupTotal],
+    () => buildGridCells(episodes, groupTotal, episodeOffset),
+    [episodes, groupTotal, episodeOffset],
   );
 
   const lastResume = useMemo(() => {

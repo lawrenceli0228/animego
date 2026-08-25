@@ -175,6 +175,88 @@ describe("normalizeEpisodeNumbers — merged cards", () => {
   });
 });
 
+describe("normalizeEpisodeNumbers — a measured offset outranks the inference", () => {
+  // The reported bug, with the real numbers. Frieren's second season runs 10
+  // episodes and its first ran 28, so a group numbering continuously calls
+  // the finale 38. `lowest - 1` reads that lone file as the season opener and
+  // renders the finale in slot 1 — and the watch push sends 38 into a range
+  // check that stops at 10, so the season's progress never syncs at all.
+  test("★ a lone finale lands on the finale, not on episode 1", () => {
+    const rows = [ep("frieren-38", 38)];
+    expect(normalizeEpisodeNumbers(rows, 10).get("frieren-38")).toBe(1);
+    expect(normalizeEpisodeNumbers(rows, 10, 28).get("frieren-38")).toBe(10);
+  });
+
+  test("★ a trailing run keeps its position", () => {
+    // Wrong in the same way and less obviously so: three files at the end of
+    // the season get pulled to its front.
+    const rows = run("tail-", 36, 38);
+    const guessed = normalizeEpisodeNumbers(rows, 10);
+    expect([guessed.get("tail-36"), guessed.get("tail-38")]).toEqual([1, 3]);
+
+    const measured = normalizeEpisodeNumbers(rows, 10, 28);
+    expect([measured.get("tail-36"), measured.get("tail-38")]).toEqual([8, 10]);
+  });
+
+  test("a full season maps the same either way — the case the inference got right", () => {
+    const rows = run("full-", 29, 38);
+    for (const map of [
+      normalizeEpisodeNumbers(rows, 10),
+      normalizeEpisodeNumbers(rows, 10, 28),
+    ]) {
+      expect(map.get("full-29")).toBe(1);
+      expect(map.get("full-38")).toBe(10);
+    }
+  });
+
+  test("offset 0 means nothing precedes the season, and nothing moves", () => {
+    const rows = run("s1-", 1, 12);
+    const map = normalizeEpisodeNumbers(rows, 12, 0);
+    expect(map.get("s1-1")).toBe(1);
+    expect(map.get("s1-12")).toBe(12);
+  });
+
+  test("★ a known offset that does not fit is discarded, NOT fallen back from", () => {
+    // Files already numbered 1-10 for a season whose offset is 28. Applying
+    // the offset would produce -27; falling through to `lowest - 1` would be
+    // a no-op here, but the same fall-through moves a 13-24 run that is
+    // genuinely season-relative. Identity is the only safe answer once a
+    // measurement exists and the files disagree with it.
+    const rows = run("rel-", 1, 10);
+    const map = normalizeEpisodeNumbers(rows, 10, 28);
+    expect(map.get("rel-1")).toBe(1);
+    expect(map.get("rel-10")).toBe(10);
+  });
+
+  test("★ a known offset suppresses the inference even when the inference would fire", () => {
+    // 13-24 against a 12-episode season is the inference's own headline case
+    // (`lowest > total`), and it would shift to 1-12. But the franchise says
+    // 30 episodes precede this season, so these files are not absolutely
+    // numbered in the way the inference assumes — and a measurement that
+    // disagrees is a reason to stop, not to guess.
+    const rows = run("mixed-", 13, 24);
+    expect(normalizeEpisodeNumbers(rows, 12).get("mixed-13")).toBe(1);
+    expect(normalizeEpisodeNumbers(rows, 12, 30).get("mixed-13")).toBe(13);
+  });
+
+  test("a non-integer or negative offset is ignored, not coerced", () => {
+    const rows = [ep("odd-38", 38)];
+    for (const bad of [-1, 1.5, Number.NaN]) {
+      expect(normalizeEpisodeNumbers(rows, 10, bad).get("odd-38")).toBe(1);
+    }
+  });
+
+  test("null and undefined both mean unmeasured, and neither means zero", () => {
+    // The distinction the endpoint's `known` flag exists to preserve. If
+    // unknown arrived here as 0 it would take the measured branch, find that
+    // 38 does not fit [1,10], and freeze the file at 38 — a different wrong
+    // answer, arrived at confidently.
+    const rows = [ep("unk-38", 38)];
+    expect(normalizeEpisodeNumbers(rows, 10, null).get("unk-38")).toBe(1);
+    expect(normalizeEpisodeNumbers(rows, 10, undefined).get("unk-38")).toBe(1);
+  });
+});
+
 // ─── buildGridCells ─────────────────────────────────────────────────────────
 
 /**

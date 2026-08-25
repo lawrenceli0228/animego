@@ -17,6 +17,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useLocaleRouter } from "@/components/ui/LocaleLink";
+import { readEpisodeOffset } from "@/lib/library/episodeOffset";
 import toast from "react-hot-toast";
 import { motion, useReducedMotion } from "motion/react";
 
@@ -1614,6 +1615,13 @@ export function LibraryShell() {
             <SeriesDetailSheet
               series={target}
               groupTotal={groupTotals.get(target.id)}
+              // Off the same row `groupTotal` is folded onto. Read through the
+              // helper so an absent value stays absent: `?? 0` here would tell
+              // the grid "nothing precedes this season" about every series
+              // whose offset was never measured.
+              episodeOffset={readEpisodeOffset(
+                (target as { episodeOffset?: unknown }).episodeOffset,
+              )}
               onClose={() => setDetailSeriesId(null)}
               onPickEpisode={handlePickEpisode}
               onPlaySeries={handlePlaySeries}

@@ -209,6 +209,8 @@ describe("decidePush", () => {
       push: true,
       anilistId: 154587,
       episodes: [4, 5],
+      // No offset measured, so the two spaces are the same numbers.
+      siteEpisodes: [4, 5],
     });
   });
 
@@ -218,7 +220,12 @@ describe("decidePush", () => {
     // difference sees four episodes the server has never been told about.
     expect(
       decidePush({ ...base, synced: new Set([9]), watched: [3, 5, 7, 8, 9] }),
-    ).toEqual({ push: true, anilistId: 154587, episodes: [3, 5, 7, 8] });
+    ).toEqual({
+      push: true,
+      anilistId: 154587,
+      episodes: [3, 5, 7, 8],
+      siteEpisodes: [3, 5, 7, 8],
+    });
   });
 
   test("offers the delta in ascending order, whatever order the library kept", () => {
@@ -277,6 +284,153 @@ describe("decidePush", () => {
       push: true,
       anilistId: 154587,
       episodes: [1, 2, 3, 4, 5],
+      siteEpisodes: [1, 2, 3, 4, 5],
+    });
+  });
+
+  // ─── the two episode-number spaces ──────────────────────────────────────
+  //
+  // Release groups number continuously across seasons. A file holding the
+  // finale of a 10-episode second season whose predecessor ran 28 is called
+  // 38 on disk, and 38 is what this module used to send — into a range check
+  // that stops at 10. Every push for that season 400'd, so its progress had
+  // never synced at all, and nothing said so.
+
+  test("★ a continuously-numbered finale is sent as the season's own episode", () => {
+    const plan = decidePush({
+      ...base,
+      synced: new Set<number>(),
+      watched: [38],
+      totalEpisodes: 10,
+      episodeOffset: 28,
+    });
+    expect(plan).toEqual({
+      push: true,
+      anilistId: 154587,
+      // What the memory records — the number on disk, unchanged.
+      episodes: [38],
+      // What goes on the wire. 38 - 28 = the season's episode 10.
+      siteEpisodes: [10],
+    });
+  });
+
+  test("★ a mixed library refuses the offset the delta alone would have accepted", () => {
+    // The case that makes the previous test's claim mean something. Two files
+    // are already season-relative and one is not; the delta is only the
+    // absolute one.
+    //
+    //   delta alone  [38]        -> 38-28 = 10, inside [1,10], looks fine
+    //   whole set    [1,2,38]    -> 1-28 = -27, outside the season entirely
+    //
+    // Validating the delta would translate 38 and leave 1 and 2 as they are,
+    // putting two numbering spaces in one subscription — and the grid, which
+    // decides on the whole card, would still render 38 as 38. Nothing would
+    // fail; the two would just quietly disagree.
+    const plan = decidePush({
+      ...base,
+      synced: new Set([1, 2]),
+      watched: [1, 2, 38],
+      totalEpisodes: 10,
+      episodeOffset: 28,
+    });
+    expect(plan).toEqual({
+      push: true,
+      anilistId: 154587,
+      episodes: [38],
+      siteEpisodes: [38],
+    });
+  });
+
+  test("★ the offset is validated against every watched episode, not just the delta", () => {
+    // The subtle one. On a normal evening the delta is a single episode, and
+    // one number validates almost nothing: a lone 38 fits an offset of 28 and
+    // fits 37 just as well. The grid decides using the whole card, so
+    // deciding here on the delta alone would let the two disagree about the
+    // same file — the display showing episode 10 while the push sends 38.
+    //
+    // Here 29..38 is the full season and only 28 maps it into [1,10]. The
+    // delta is just 38.
+    const plan = decidePush({
+      ...base,
+      synced: new Set([29, 30, 31, 32, 33, 34, 35, 36, 37]),
+      watched: [29, 30, 31, 32, 33, 34, 35, 36, 37, 38],
+      totalEpisodes: 10,
+      episodeOffset: 28,
+    });
+    expect(plan).toEqual({
+      push: true,
+      anilistId: 154587,
+      episodes: [38],
+      siteEpisodes: [10],
+    });
+  });
+
+  test("★ an offset that does not describe the files is not applied", () => {
+    // Files already numbered 1-10 for a season whose franchise says 28
+    // precede it. Applying the offset would send -18. The measurement is
+    // discarded and the stored numbers go as they are — the same answer the
+    // grid gives by rendering them unchanged.
+    const plan = decidePush({
+      ...base,
+      synced: new Set<number>(),
+      watched: [1, 2, 3],
+      totalEpisodes: 10,
+      episodeOffset: 28,
+    });
+    expect(plan).toEqual({
+      push: true,
+      anilistId: 154587,
+      episodes: [1, 2, 3],
+      siteEpisodes: [1, 2, 3],
+    });
+  });
+
+  test("an unmeasured offset changes nothing, and 0 is not unmeasured", () => {
+    const unmeasured = decidePush({
+      ...base,
+      synced: new Set<number>(),
+      watched: [38],
+      totalEpisodes: 10,
+    });
+    expect(unmeasured).toEqual({
+      push: true,
+      anilistId: 154587,
+      episodes: [38],
+      siteEpisodes: [38],
+    });
+
+    // 0 means "nothing precedes this season", which is a real answer and
+    // still shifts nothing. It must not be reachable by coercing undefined.
+    const zero = decidePush({
+      ...base,
+      synced: new Set<number>(),
+      watched: [7],
+      totalEpisodes: 10,
+      episodeOffset: 0,
+    });
+    expect(zero).toEqual({
+      push: true,
+      anilistId: 154587,
+      episodes: [7],
+      siteEpisodes: [7],
+    });
+  });
+
+  test("an offset with no known season length is not applied", () => {
+    // The upper bound is half the validation. Without `totalEpisodes` there
+    // is nothing to check the translated numbers against, and the grid does
+    // not normalize without a total either.
+    const plan = decidePush({
+      ...base,
+      synced: new Set<number>(),
+      watched: [38],
+      episodeOffset: 28,
+    });
+    expect(plan).toEqual({
+      push: true,
+      anilistId: 154587,
+      episodes: [38],
+      siteEpisodes: [38],
     });
   });
 
@@ -640,6 +794,63 @@ describe("reconcileSeries", () => {
     expect(db.updates).toEqual([
       { id: "S1", lastSyncedEpisodes: [1, 2, 3], lastSyncedEpisode: 3 },
     ]);
+  });
+
+  test("★ the wire carries the season's numbers, the memory keeps the disk's", async () => {
+    // The reported series, end to end. One file, the finale of a 10-episode
+    // second season, stored as 38 because the group numbered continuously
+    // past a 28-episode first season.
+    //
+    // Two assertions and they must disagree with each other. The push has to
+    // say 10 or `subscriptions/validate.go` rejects it — that 400 is why this
+    // season had never synced. The memory has to say 38, because the delta is
+    // recomputed as `local \ remembered` and a memory in the server's numbers
+    // would never subtract from a local set in the disk's: episode 38 would
+    // be re-offered on every trigger, forever.
+    const db = fakeDb({
+      series: [
+        { id: "S1", anilistId: 182255, episodeOffset: 28, totalEpisodes: 10 },
+      ],
+      episodes: [main("e38", "S1", 38)],
+      progress: [done("e38", "S1")],
+      overrides: [],
+    });
+    const api = fakeApi();
+
+    await reconcileSeries(db, "S1", { api });
+
+    expect(api.calls).toEqual([
+      { kind: "mark", anilistId: 182255, episodes: [10] },
+    ]);
+    expect(db.updates).toEqual([
+      { id: "S1", lastSyncedEpisodes: [38], lastSyncedEpisode: 38 },
+    ]);
+  });
+
+  test("★ a series with a translated push does not re-offer it next time", async () => {
+    // The other half of the same rule: with the memory in local numbers, the
+    // second pass subtracts cleanly and sends nothing.
+    const db = fakeDb({
+      series: [
+        {
+          id: "S1",
+          anilistId: 182255,
+          episodeOffset: 28,
+          totalEpisodes: 10,
+          lastSyncedEpisodes: [38],
+          lastSyncedEpisode: 38,
+        },
+      ],
+      episodes: [main("e38", "S1", 38)],
+      progress: [done("e38", "S1")],
+      overrides: [],
+    });
+    const api = fakeApi();
+
+    const result = await reconcileSeries(db, "S1", { api });
+
+    expect(result.outcome).toBe("already-synced");
+    expect(api.calls).toEqual([]);
   });
 
   test("re-running immediately is a no-op — state is the truth, not a queue", async () => {
@@ -1728,6 +1939,30 @@ describe("what the server stored, checked against what we sent", () => {
   }
 
   // ─── the invariant, in isolation ──────────────────────────────────────────
+
+  test("★ a translated push is checked in the server's numbers, not the disk's", async () => {
+    // Both sides of this comparison have to be the same space. The server
+    // echoes back what IT stored — the season's numbering — so comparing it
+    // against the numbers on disk would report every offset series as
+    // unstored on a push that landed perfectly, and the warning exists
+    // precisely to be trustworthy when something really is missing.
+    const db = fakeDb({
+      series: [
+        { id: "S1", anilistId: 182255, episodeOffset: 28, totalEpisodes: 10 },
+      ],
+      episodes: [main("e38", "S1", 38)],
+      progress: [done("e38", "S1")],
+      overrides: [],
+    });
+    // The server stores what it was sent: episode 10.
+    const api = fakeApi({ mark: { ok: true, status: 200, stored: [10] } });
+
+    const { warnings } = await withCapturedWarnings(() =>
+      reconcileSeries(db, "S1", { api }),
+    );
+
+    expect(warnings).toEqual([]);
+  });
 
   test("a SUPERSET is the normal case — another device's marks come back too", () => {
     // The statement unions and then returns the whole row. A reader with a

@@ -205,6 +205,55 @@ type Querier interface {
 	// profile endpoint to compute isFollowing — null when caller is
 	// anonymous (handler skips this query for anon callers).
 	FollowExists(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (bool, error)
+	// How many episodes precede this season in its franchise's continuous
+	// numbering — the number a release group has already counted past before it
+	// names this season's first episode.
+	//
+	// A season with no prequel returns known=true, offset 0.  A chain we cannot
+	// fully account for returns known=false, and the difference is the whole
+	// point: 0 means "nothing precedes this", unknown means "we do not know",
+	// and a consumer that treats the second as the first renumbers files against
+	// a fabricated origin.
+	//
+	// No new column carries this.  `anime_relations` has stored PREQUEL edges
+	// since 0001 -- populated from the `relations` block the AniList detail
+	// query already asks for -- so the walk reads data that is in the database
+	// and flowing, rather than a denormalised copy with its own backfill and its
+	// own way of going stale.
+	//
+	// ─── the coverage gap, stated rather than hidden ────────────────────────
+	//
+	// 13,378 of 17,560 cached anime have relation rows; the remainder have none.
+	// For those, "this season has no prequel" and "this row's detail was never
+	// fetched" are the same observation, and this query reports the first.  That
+	// is why the caller MUST validate: a candidate offset is only safe once it
+	// maps every local episode into [1, episode_count], and one that fails must
+	// be discarded.  Deriving here and validating there is deliberate -- this
+	// query knows the franchise, only the caller knows what is on disk.
+	//
+	// ─── known=false is returned for four truncations ───────────────────────
+	//
+	//   * the deepest row names a prequel that is not in this cache.
+	//     anime_cache holds what has been fetched, not what exists, so this is
+	//     ordinary rather than exceptional.
+	//   * the deepest row has TWO prequels.  That is ambiguity, not addition:
+	//     following either would produce a confident number off by a whole
+	//     season, so `preq.n = 1` stops the walk instead.
+	//   * the depth bound was reached.  Nothing in AniList's data forbids a
+	//     PREQUEL cycle, and a recursive CTE that meets one does not terminate.
+	//     Ten is far past any real franchise and cheap on the primary key.
+	//   * a TV ancestor exists but carries no episode count.  Airing and
+	//     recently-added rows routinely have `episodes` NULL, and summing
+	//     coalesce(...,0) there would silently under-count the offset — the
+	//     failure mode that produces a plausible wrong answer instead of no
+	//     answer.
+	//
+	// Only TV ancestors are summed.  A movie or OVA in the chain does not
+	// consume episode numbers, so it is walked THROUGH but not counted, and its
+	// own NULL episode count is not treated as a gap.  `format` is a coarse
+	// proxy for "is part of the continuous numbering", which is one more reason
+	// the caller validates rather than trusts.
+	GetAbsoluteEpisodeOffset(ctx context.Context, anilistID int32) (GetAbsoluteEpisodeOffsetRow, error)
 	// Queries for /api/admin/* (P2.3).
 	//
 	// Most admin reads are single-row aggregates or list-by-version batches.

@@ -1179,3 +1179,109 @@ SET episodes_bgm              = CASE WHEN sqlc.arg(outcome)::text = 'rejected'
     episodes_bgm_reason       = sqlc.narg(reason)
 WHERE anilist_id = sqlc.arg(anilist_id)
   AND bgm_id     = sqlc.arg(bgm_id);
+
+-- name: GetAbsoluteEpisodeOffset :one
+-- How many episodes precede this season in its franchise's continuous
+-- numbering — the number a release group has already counted past before it
+-- names this season's first episode.
+--
+-- A season with no prequel returns known=true, offset 0.  A chain we cannot
+-- fully account for returns known=false, and the difference is the whole
+-- point: 0 means "nothing precedes this", unknown means "we do not know",
+-- and a consumer that treats the second as the first renumbers files against
+-- a fabricated origin.
+--
+-- No new column carries this.  `anime_relations` has stored PREQUEL edges
+-- since 0001 -- populated from the `relations` block the AniList detail
+-- query already asks for -- so the walk reads data that is in the database
+-- and flowing, rather than a denormalised copy with its own backfill and its
+-- own way of going stale.
+--
+-- ─── the coverage gap, stated rather than hidden ────────────────────────
+--
+-- 13,378 of 17,560 cached anime have relation rows; the remainder have none.
+-- For those, "this season has no prequel" and "this row's detail was never
+-- fetched" are the same observation, and this query reports the first.  That
+-- is why the caller MUST validate: a candidate offset is only safe once it
+-- maps every local episode into [1, episode_count], and one that fails must
+-- be discarded.  Deriving here and validating there is deliberate -- this
+-- query knows the franchise, only the caller knows what is on disk.
+--
+-- ─── known=false is returned for four truncations ───────────────────────
+--
+--   * the deepest row names a prequel that is not in this cache.
+--     anime_cache holds what has been fetched, not what exists, so this is
+--     ordinary rather than exceptional.
+--   * the deepest row has TWO prequels.  That is ambiguity, not addition:
+--     following either would produce a confident number off by a whole
+--     season, so `preq.n = 1` stops the walk instead.
+--   * the depth bound was reached.  Nothing in AniList's data forbids a
+--     PREQUEL cycle, and a recursive CTE that meets one does not terminate.
+--     Ten is far past any real franchise and cheap on the primary key.
+--   * a TV ancestor exists but carries no episode count.  Airing and
+--     recently-added rows routinely have `episodes` NULL, and summing
+--     coalesce(...,0) there would silently under-count the offset — the
+--     failure mode that produces a plausible wrong answer instead of no
+--     answer.
+--
+-- Only TV ancestors are summed.  A movie or OVA in the chain does not
+-- consume episode numbers, so it is walked THROUGH but not counted, and its
+-- own NULL episode count is not treated as a gap.  `format` is a coarse
+-- proxy for "is part of the continuous numbering", which is one more reason
+-- the caller validates rather than trusts.
+WITH RECURSIVE preq AS (
+    -- One prequel per anime, plus how many there were. A season with two
+    -- PREQUEL edges is ambiguous rather than additive — picking either one
+    -- would produce a confident number off by an entire season — so `n` is
+    -- carried and the walk stops on it.
+    --
+    -- Aggregating the whole PREQUEL slice on every call is deliberate: a
+    -- recursive term cannot run a correlated subquery, so the mapping has to
+    -- exist before the walk starts. The slice is ~4k rows against a 17.5k
+    -- catalogue and the walk that consumes it is two or three hops.
+    SELECT anime_id,
+           min(anilist_id) AS prequel_id,
+           count(*)        AS n
+    FROM anime_relations
+    WHERE relation_type = 'PREQUEL'
+    GROUP BY anime_id
+),
+chain AS (
+    SELECT
+        a.anilist_id,
+        0::integer AS acc,
+        TRUE       AS counted_all,
+        1          AS depth
+    FROM anime_cache a
+    WHERE a.anilist_id = sqlc.arg(anilist_id)::int
+
+    UNION ALL
+
+    SELECT
+        p.anilist_id,
+        c.acc + CASE WHEN p.format = 'TV' THEN coalesce(p.episodes, 0) ELSE 0 END,
+        c.counted_all AND (p.format <> 'TV' OR p.episodes IS NOT NULL),
+        c.depth + 1
+    FROM chain c
+    JOIN preq r        ON r.anime_id   = c.anilist_id AND r.n = 1
+    JOIN anime_cache p ON p.anilist_id = r.prequel_id
+    WHERE c.depth < 10
+)
+SELECT
+    -- Two columns rather than one nullable integer, and not for sqlc's
+    -- convenience.  "0 episodes precede this" and "we could not work out
+    -- what precedes this" are different answers that a nullable int invites
+    -- a caller to collapse with one coalesce — and collapsing them renumbers
+    -- files against an origin nobody established.  A bool the caller has to
+    -- read first cannot be coalesced away.
+    --
+    -- The deepest row still having a `preq` entry is the single test for
+    -- every way the walk can end early, and it needs no depth term of its
+    -- own: an uncached ancestor, an ambiguous pair of prequels, and the
+    -- depth cap all leave a row whose prequel was never followed.
+    (d.counted_all
+     AND NOT EXISTS (SELECT 1 FROM preq r WHERE r.anime_id = d.anilist_id)) AS known,
+    d.acc::int AS absolute_offset
+FROM chain d
+ORDER BY d.depth DESC
+LIMIT 1;

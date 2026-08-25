@@ -25,6 +25,7 @@
 // ids to display numbers and never writes anything.
 
 import { positiveTotal, resolveEpisodeGridLength } from "./seriesGroups";
+import { offsetApplies, readEpisodeOffset } from "@/lib/library/episodeOffset";
 
 /** The `Episode` fields the grid reads. See `lib/library/types.js`. */
 export interface GridEpisodeRow {
@@ -94,6 +95,7 @@ function isMain(row: GridEpisodeRow | null | undefined): boolean {
 export function normalizeEpisodeNumbers(
   episodes: readonly GridEpisodeRow[] | null | undefined,
   groupTotal: number | null | undefined,
+  absoluteOffset?: number | null,
 ): Map<string, number> {
   const rows = episodes ?? [];
   const out = new Map<string, number>();
@@ -115,6 +117,50 @@ export function normalizeEpisodeNumbers(
   const highest = numbers[numbers.length - 1];
   const span = highest - lowest + 1;
 
+  // ─── a measured offset outranks the inference, both ways ─────────────────
+  //
+  // `absoluteOffset` is how many episodes precede this season in its
+  // franchise's continuous numbering, derived from PREQUEL edges by
+  // GET /api/anime/{id}/episode-offset. Pass it only when the server said
+  // `known` — an unknown offset must arrive here as undefined and NOT as 0,
+  // because 0 is a real answer ("nothing precedes this season") that this
+  // branch acts on.
+  //
+  // It is checked against the files before it is applied. The server knows
+  // the franchise; only this side knows what is on disk, and `format` is a
+  // coarse proxy for "counts toward the numbering" — so an offset that does
+  // not map every episode into [1, total] is discarded rather than trusted.
+  //
+  // A known offset that does not fit returns identity and does NOT fall
+  // through to the inference below. That is the point of measuring: files
+  // numbered 1-12 for a season whose offset is 24 are already
+  // season-relative, and re-deriving a shift for them from their own lowest
+  // value is how a correct set of numbers gets moved.
+  //
+  // `offsetApplies` is imported rather than restated: `watchSync` has to make
+  // the identical decision about the identical files before it pushes them,
+  // and two copies of a rule this quiet drift without anything failing — the
+  // grid would render episode 10 while the push sent 38.
+  const measured = readEpisodeOffset(absoluteOffset);
+  if (measured !== undefined) {
+    if (offsetApplies(numbers, total, measured)) {
+      for (const row of mains) {
+        out.set(row.id, (episodeNumberOf(row) as number) - measured);
+      }
+    }
+    return out;
+  }
+
+  // ─── otherwise, infer — with the gap this leaves stated ──────────────────
+  //
+  // `shift = lowest - 1` assumes the lowest file on the card IS the season's
+  // first episode. That holds for someone who downloaded the season from the
+  // start and fails for someone holding only its tail: a lone finale
+  // numbered 38 against a 10-episode season lands in slot 1, which is the
+  // bug that produced the offset endpoint above. The inference is kept for
+  // the ~quarter of the catalogue with no relation rows, where it is still
+  // better than nothing for the common full-season case, and it is reached
+  // ONLY when no offset was measured.
   if (lowest <= total) return out; // (3)
   if (numbers.length !== span) return out; // (4) — deduped, so length === span means contiguous
   if (span > total) return out; // (5)
@@ -166,6 +212,7 @@ export function buildEpisodeNavNumbers(
   episodes: readonly GridEpisodeRow[] | null | undefined,
   groupTotal: number | null | undefined,
   isPlayable: (kind: string | null | undefined) => boolean = () => true,
+  absoluteOffset?: number | null,
 ): EpisodeNavModel {
   const rows = (episodes ?? []).filter(
     (row): row is GridEpisodeRow =>
@@ -175,7 +222,7 @@ export function buildEpisodeNavNumbers(
       episodeNumberOf(row) !== undefined &&
       isPlayable(row.kind),
   );
-  const displayNumbers = normalizeEpisodeNumbers(episodes, groupTotal);
+  const displayNumbers = normalizeEpisodeNumbers(episodes, groupTotal, absoluteOffset);
 
   const owner = new Map<number, GridEpisodeRow>();
   for (const row of rows) {
@@ -266,11 +313,12 @@ function beats(candidate: GridEpisodeRow, incumbent: GridEpisodeRow): boolean {
 export function buildGridCells(
   episodes: readonly GridEpisodeRow[] | null | undefined,
   groupTotal: number | null | undefined,
+  absoluteOffset?: number | null,
 ): EpisodeGridModel {
   const rows = (episodes ?? []).filter(
     (row): row is GridEpisodeRow => !!row && typeof row.id === "string" && !!row.id,
   );
-  const displayNumbers = normalizeEpisodeNumbers(rows, groupTotal);
+  const displayNumbers = normalizeEpisodeNumbers(rows, groupTotal, absoluteOffset);
 
   const total = positiveTotal(groupTotal);
   const inferred = total === undefined;

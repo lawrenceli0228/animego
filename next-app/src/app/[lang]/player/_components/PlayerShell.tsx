@@ -864,8 +864,13 @@ function PlayerShellInner() {
   // prev/next, autoplay and `episodeMap` all stay in the stored space; a click
   // on the strip is translated back before it is used.
   const episodeDisplayNumbers = useMemo(
-    () => normalizeEpisodeNumbers(seriesDetail.episodes, seriesDetail.groupTotal),
-    [seriesDetail.episodes, seriesDetail.groupTotal],
+    () =>
+      normalizeEpisodeNumbers(
+        seriesDetail.episodes,
+        seriesDetail.groupTotal,
+        seriesDetail.episodeOffset,
+      ),
+    [seriesDetail.episodes, seriesDetail.groupTotal, seriesDetail.episodeOffset],
   );
 
   const episodeNav = useMemo(
@@ -876,6 +881,7 @@ function PlayerShellInner() {
           : [],
         seriesDetail.groupTotal,
         isWatchableKind,
+        seriesDetail.episodeOffset,
       ),
     [locationSeriesId, seriesDetail.status, seriesDetail.episodes, seriesDetail.groupTotal],
   );

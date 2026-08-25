@@ -92,6 +92,14 @@
  *   `resolveSeriesBinding`(自动绑定命中时)、`useSiteAnimeForSeries`、`refreshSeriesMetadata`、
  *   `rematchSeries`,外加 `_services/episodeCountBackfill.ts` 的一次性批量回填
  *   (`GET /api/anime/episodes`)——已绑定的老库走不到前四处,只有回填能补上。
+ * @property {number}  [episodeOffset]       - 本季之前有多少集(跨季连续编号的起点)。
+ *   来自 `GET /api/anime/{id}/episode-offset`,由服务端沿 PREQUEL 边递归求和得出。
+ *   ★**缺失和 0 是相反的指令,不是同一个「没有」**:`0` = 已确认前面没有任何一季,读取方
+ *   (`episodeGridModel.normalizeEpisodeNumbers`)据此**停止**推断位移;缺失 = 没查出来,读取方
+ *   继续用「本地最小集号 − 1」推断。所以写入方 `persistEpisodeOffset` **会写 0**,而
+ *   `persistEpisodeTotal` 不写 0 —— 两者规则相反是故意的,别统一。
+ *   任何 `episodeOffset ?? 0` 都会把「不知道」变成「已确认没有」,那正是它被拆成
+ *   `{known, offset}` 两个字段传过来的原因。
  *   **永远不写 0**:所有读取方都把 `<= 0` 当作「未知」,存个 0 只是换一种写法说同一件事,
  *   却多付一次写入和一次 liveQuery 重渲染。
  *   **卡片上要显示的数字不是这个字段**——一张卡可能是若干 Series 软合并而成,
