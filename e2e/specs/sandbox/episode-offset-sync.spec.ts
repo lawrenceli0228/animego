@@ -146,15 +146,42 @@ test.describe("/library — cross-season episode numbering", () => {
       )
       .toBe(SITE_FINALE);
 
-    // Bound after settling. Two is the honest ceiling for one series: the
-    // first PUT 404s with no subscription, `ensureSubscription` creates one,
-    // and the push retries. A third would mean the reconcile ran again for
-    // nothing.
+    // Three is the honest ceiling HERE, and the extra one over the binding
+    // sweep's bound is not slack — it is the doomed attempt this fix cannot
+    // prevent, only correct:
+    //
+    //   1. reconcile fires on mount, before the offset sweep finishes.
+    //      No subscription exists yet, so the PUT 404s.
+    //   2. `ensureSubscription` creates one and retries — with 38, which the
+    //      server's range check rejects. This is the 400 the reader sees in
+    //      their console on the first visit, and it is unavoidable without
+    //      making all syncing wait behind the sweeps.
+    //   3. the sweep lands, the coordinator re-arms once, and the reconcile
+    //      pushes 10. This one succeeds.
+    //
+    // A fourth would mean the re-arm fired more than once — which is exactly
+    // what the binding sweep's own spec caught when the two sweeps re-armed
+    // independently.
     await page.waitForTimeout(3_000);
     expect(
       episodePushes,
-      `expected at most two pushes, saw ${episodePushes}`,
-    ).toBeLessThanOrEqual(2);
+      `expected at most three pushes, saw ${episodePushes}`,
+    ).toBeLessThanOrEqual(3);
+
+    // Convergence, which matters more than the ceiling: a second visit has
+    // nothing to say. The offset is stored so the sweep finds no candidate,
+    // and the memory covers episode 38 so the delta is empty. A push here
+    // would mean the memory was written in the server's numbering and can
+    // never subtract from a local set — the failure `lastSyncedEpisodes`
+    // keeping local numbers exists to prevent.
+    const before = episodePushes;
+    await page.goto("/library");
+    await expect(page.getByTestId("series-grid")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(3_000);
+    expect(
+      episodePushes - before,
+      "a second visit should push nothing at all",
+    ).toBe(0);
   });
 
   test("a season with nothing before it is not shifted", async ({ page }) => {
