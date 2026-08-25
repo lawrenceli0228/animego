@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { clearLibrary, readSeriesRow, seedLibrary } from "../../fixtures/dexie-seed";
 
 // Duplicate cards for the same title, merged on library mount.
@@ -27,9 +27,37 @@ import { clearLibrary, readSeriesRow, seedLibrary } from "../../fixtures/dexie-s
 // action undoing a manual one, on every visit, with no way for the reader to
 // make it stop, is worse than not automating at all.
 
+/**
+ * Did these two rows end up merged, in EITHER direction?
+ *
+ * Direction-agnostic on purpose. The target is the older row by `createdAt`,
+ * and `seedLibrary` assigns those itself — the first series in the list gets
+ * the LATER timestamp, so a fixture named for its own intent gets the
+ * direction backwards. That is not a detail worth encoding here: which of two
+ * duplicates survives is pinned by the unit tests, which set `createdAt`
+ * directly. What this file is for is whether the merge happens on mount at
+ * all.
+ *
+ * Checking one side only is how the split test passed while proving nothing:
+ * the merge it was supposed to forbid would have been recorded on the row it
+ * never looked at.
+ */
+async function mergedEitherWay(page: Page, a: string, b: string): Promise<boolean> {
+  const [rowA, rowB] = await Promise.all([
+    readSeriesRow(page, a, "userOverride"),
+    readSeriesRow(page, b, "userOverride"),
+  ]);
+  const inA = (rowA?.mergedFrom as string[] | undefined) ?? [];
+  const inB = (rowB?.mergedFrom as string[] | undefined) ?? [];
+  return inA.includes(b) || inB.includes(a);
+}
+
 const ANILIST_ID = 9200201;
-const OLDER = "e2e-dedupe-older";
-const NEWER = "e2e-dedupe-newer";
+// Named for their place in the fixture, NOT for age: `seedLibrary` assigns
+// `createdAt` itself and gives the first entry the later timestamp, so a name
+// like "older" would be a lie the reader has to discover from a failure.
+const CARD_A = "e2e-dedupe-a";
+const CARD_B = "e2e-dedupe-b";
 
 test.describe("/library — duplicate cards", () => {
   test("★ two rows bound to the same title become one card on mount", async ({
@@ -39,8 +67,8 @@ test.describe("/library — duplicate cards", () => {
     await clearLibrary(page);
     await seedLibrary(page, {
       series: [
-        { id: OLDER, titleZh: "重复卡片 A", anilistId: ANILIST_ID, episodes: [{ number: 1 }] },
-        { id: NEWER, titleZh: "重复卡片 B", anilistId: ANILIST_ID, episodes: [{ number: 2 }] },
+        { id: CARD_A, titleZh: "重复卡片 A", anilistId: ANILIST_ID, episodes: [{ number: 1 }] },
+        { id: CARD_B, titleZh: "重复卡片 B", anilistId: ANILIST_ID, episodes: [{ number: 2 }] },
       ],
     });
 
@@ -84,19 +112,13 @@ test.describe("/library — duplicate cards", () => {
     // count is what makes this test independent of how the grid chooses to
     // hide a merged-away row.
     await expect
-      .poll(
-        async () => {
-          const row = await readSeriesRow(page, OLDER, "userOverride");
-          return (row?.mergedFrom as string[] | undefined) ?? null;
-        },
-        {
-          timeout: 20_000,
-          message:
-            "the two cards never merged — either the identity key is not being " +
-            `resolved, or the sweep does not run on mount. seeded=${JSON.stringify(seeded)}`,
-        },
-      )
-      .toContain(NEWER);
+      .poll(() => mergedEitherWay(page, CARD_A, CARD_B), {
+        timeout: 20_000,
+        message:
+          "the two cards never merged — either the identity key is not being " +
+          `resolved, or the sweep does not run on mount. seeded=${JSON.stringify(seeded)}`,
+      })
+      .toBe(true);
   });
 
   test("★ a pair the reader split apart is NOT re-merged", async ({ page }) => {
@@ -104,13 +126,13 @@ test.describe("/library — duplicate cards", () => {
     await clearLibrary(page);
     await seedLibrary(page, {
       series: [
-        { id: OLDER, titleZh: "拆开过 A", anilistId: ANILIST_ID, episodes: [{ number: 1 }] },
+        { id: CARD_A, titleZh: "拆开过 A", anilistId: ANILIST_ID, episodes: [{ number: 1 }] },
         {
-          id: NEWER,
+          id: CARD_B,
           titleZh: "拆开过 B",
           anilistId: ANILIST_ID,
           // Exactly what splitSeries records, on the new row only.
-          splitFrom: OLDER,
+          splitFrom: CARD_A,
           episodes: [{ number: 2 }],
         },
       ],
@@ -124,10 +146,9 @@ test.describe("/library — duplicate cards", () => {
     // passes instantly and proves nothing.
     await page.waitForTimeout(8_000);
 
-    const row = await readSeriesRow(page, OLDER, "userOverride");
     expect(
-      (row?.mergedFrom as string[] | undefined) ?? [],
+      await mergedEitherWay(page, CARD_A, CARD_B),
       "an automatic merge undid a deliberate split",
-    ).not.toContain(NEWER);
+    ).toBe(false);
   });
 });
