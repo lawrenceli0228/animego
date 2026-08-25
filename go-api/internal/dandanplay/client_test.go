@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -88,6 +89,257 @@ func TestMatchCombined_4xxIsMiss(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("got = %+v, want nil for 4xx", got)
+	}
+}
+
+// ─── MatchCombined's cache ──────────────────────────────────────────────────
+//
+// This method used to be the only caller-facing one with no cache, and
+// it is the one the import path calls once per cluster (plus once per
+// unmapped episode) — so it was also the one holding the process-wide
+// 800ms bucket that every user of the process shares.
+//
+// The two properties worth pinning hardest are not "does a hit get
+// reused":
+//
+//  1. A MISS MUST BE CACHED TOO. The browser re-asks the identical
+//     question on every library mount, every tab-return and every
+//     rescan — its own cache stores the negative and then refuses to
+//     honour it — so an uncacheable miss is a permanent tax, paid at
+//     800ms a piece, by every user at once.
+//  2. AN ERROR MUST NOT BE. A cached failure turns a transient outage
+//     into a ten-minute one that no reader can clear.
+
+const matchHitBody = `{"isMatched":true,"matches":[{"animeId":42,"animeTitle":"Foo","episodeId":7,"episodeTitle":"Ep 1"}]}`
+
+// serveMatch is the happy-path handler; tests that only care about call
+// counts do not need to vary the payload.
+func serveMatch(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(matchHitBody))
+}
+
+func TestMatchCombined_CacheHit(t *testing.T) {
+	c, calls := newTestClient(t, serveMatch)
+
+	first, err := c.MatchCombined(context.Background(), "foo.mkv", "deadbeef", 12345)
+	if err != nil || first == nil {
+		t.Fatalf("first: err=%v result=%v", err, first)
+	}
+	c.matchCh.Wait()
+
+	second, err := c.MatchCombined(context.Background(), "foo.mkv", "deadbeef", 12345)
+	if err != nil || second == nil {
+		t.Fatalf("second: err=%v result=%v", err, second)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("HTTP call count = %d, want 1 (second call should hit cache)", calls.Load())
+	}
+	if *second != *first {
+		t.Errorf("cached value = %+v, want %+v", *second, *first)
+	}
+	// A caller must not be able to corrupt the cached entry through the
+	// pointer it was handed.
+	//
+	// This passes today for a structural reason rather than for
+	// anything MatchCombined does: cache.Get returns matchCacheEntry by
+	// value, so every caller already gets its own copy. It is here as a
+	// tripwire for the change that would end that quietly — storing
+	// *matchCacheEntry, or handing out a pointer captured before the
+	// copy. It does not discriminate today's line, and it is not
+	// supposed to.
+	first.AnimeTitle = "clobbered"
+	third, err := c.MatchCombined(context.Background(), "foo.mkv", "deadbeef", 12345)
+	if err != nil || third == nil || third.AnimeTitle != "Foo" {
+		t.Errorf("after mutating an earlier result, cache returned %+v", third)
+	}
+}
+
+func TestMatchCombined_MissIsCachedToo(t *testing.T) {
+	// 2xx with an empty matches array — dandanplay answering "I do not
+	// know this file", which is the answer for every not-yet-indexed
+	// new-season release.
+	c, calls := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"isMatched":false,"matches":[]}`))
+	})
+
+	got, err := c.MatchCombined(context.Background(), "unknown.mkv", "beef", 99)
+	if err != nil || got != nil {
+		t.Fatalf("first: err=%v result=%+v, want (nil, nil)", err, got)
+	}
+	c.matchCh.Wait()
+
+	got, err = c.MatchCombined(context.Background(), "unknown.mkv", "beef", 99)
+	if err != nil || got != nil {
+		t.Fatalf("second: err=%v result=%+v, want (nil, nil)", err, got)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("HTTP call count = %d, want 1 — a miss must be cached, not just a hit", calls.Load())
+	}
+}
+
+func TestMatchCombined_4xxMissIsCachedToo(t *testing.T) {
+	// The other half of the same branch: `do` reports 4xx as (false,
+	// nil), so this arrives as `!ok` rather than as an empty slice.
+	c, calls := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	})
+
+	if _, err := c.MatchCombined(context.Background(), "bad.mkv", "", 0); err != nil {
+		t.Fatalf("4xx should be a miss, not an error: %v", err)
+	}
+	c.matchCh.Wait()
+	if _, err := c.MatchCombined(context.Background(), "bad.mkv", "", 0); err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("HTTP call count = %d, want 1", calls.Load())
+	}
+}
+
+func TestMatchCombined_UpstreamErrorIsNotCached(t *testing.T) {
+	var failing atomic.Bool
+	failing.Store(true)
+	c, calls := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		if failing.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		serveMatch(w, nil)
+	})
+
+	// A deadline, not a cancel: the upstream must actually be REACHED
+	// and must actually fail. Pre-empting the request before it leaves
+	// would prove nothing about what happens to a real 5xx. The
+	// deadline just cuts the 4-attempt backoff chain short so this
+	// costs milliseconds instead of seconds.
+	//
+	// This one keeps the production limiter, unlike the key tests
+	// below: what the deadline lands in the middle of is the point, and
+	// a 1ms limiter would let all four attempts finish first and turn
+	// this into a plain retry-exhaustion test.
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if _, err := c.MatchCombined(ctx, "flaky.mkv", "cafe", 5); err == nil {
+		t.Fatal("a 5xx that outlives its context should surface an error")
+	}
+	reached := calls.Load()
+	if reached == 0 {
+		t.Fatal("the upstream was never called, so this did not test a 5xx at all")
+	}
+	c.matchCh.Wait()
+
+	failing.Store(false)
+	got, err := c.MatchCombined(context.Background(), "flaky.mkv", "cafe", 5)
+	if err != nil {
+		t.Fatalf("after recovery: %v", err)
+	}
+	if got == nil {
+		t.Fatal("the failure was cached as a miss — a transient outage would " +
+			"become a ten-minute one no reader could clear")
+	}
+	if calls.Load() <= reached {
+		t.Error("the retry never reached the network; the error was served from cache")
+	}
+}
+
+func TestMatchCombined_KeyMirrorsTheRequestBodyNotTheArguments(t *testing.T) {
+	// MatchCombined drops fileSize from the wire body when it is not
+	// positive, so 0 and -1 are the SAME upstream question and must not
+	// occupy two entries. This is not hypothetical: the library import
+	// sends `rep.file?.size ?? 0` and the player sends
+	// `f._fileRef?.size ?? 0`.
+	c, calls := newTestClient(t, serveMatch)
+	// Every call below is a deliberate cache MISS, so each one really
+	// goes upstream. The production limiter would add 800ms apiece and
+	// prove nothing — same swap the retry tests make.
+	c.limiter = newFastLimiter()
+
+	if _, err := c.MatchCombined(context.Background(), "a.mkv", "h", 0); err != nil {
+		t.Fatal(err)
+	}
+	c.matchCh.Wait()
+	if _, err := c.MatchCombined(context.Background(), "a.mkv", "h", -1); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("call count = %d, want 1 — size 0 and -1 both omit the field", calls.Load())
+	}
+
+	// A real size IS a different question, though: dandanplay uses it,
+	// and folding it in with the sizeless form would serve one answer
+	// for both.
+	if _, err := c.MatchCombined(context.Background(), "a.mkv", "h", 4096); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Errorf("call count = %d, want 2 — a real size is part of the key", calls.Load())
+	}
+
+	// So is the filename. dandanplay parses it when the hash is not in
+	// its index, which is exactly the case Phase 1's loose-match gate
+	// exists to salvage.
+	c.matchCh.Wait()
+	if _, err := c.MatchCombined(context.Background(), "b.mkv", "h", 4096); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 3 {
+		t.Errorf("call count = %d, want 3 — the filename is part of the key", calls.Load())
+	}
+}
+
+func TestMatchCombined_KeyCannotBeForgedThroughFileHash(t *testing.T) {
+	// `/match` decodes its body straight off the wire, so nothing makes
+	// fileHash the 32 hex characters it is supposed to be. Under a plain
+	// join these two would produce the identical key "a:1:b:2:c", and
+	// whoever asked first would answer for the other.
+	c, calls := newTestClient(t, serveMatch)
+	c.limiter = newFastLimiter()
+
+	if _, err := c.MatchCombined(context.Background(), "b:2:c", "a", 1); err != nil {
+		t.Fatal(err)
+	}
+	c.matchCh.Wait()
+	if _, err := c.MatchCombined(context.Background(), "c", "a:1:b", 2); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Errorf("call count = %d, want 2 — a crafted fileHash forged another entry's key", calls.Load())
+	}
+}
+
+func TestMatchCache_IsSizedInEntriesNotBytes(t *testing.T) {
+	// MaxCost only means "entry cap" because this cache is built with
+	// IgnoreInternalCost. Without it ristretto charges 56 bytes of its
+	// own per-entry overhead on top of our cost=1, and the cache
+	// silently holds ~3.5k entries instead of the 2e5 its sizing
+	// comment claims — SetWithTTL returns true, Wait returns, Get
+	// misses, and nothing anywhere says so. The only symptom would be
+	// files going back to the network that should have been cached,
+	// which is the entire thing this cache exists to stop.
+	//
+	// Written straight into the cache rather than driven through
+	// MatchCombined on purpose: what is under test is the admission
+	// policy, and twenty thousand HTTP round-trips would only make it
+	// slower to observe the same thing.
+	c, _ := newTestClient(t, serveMatch)
+
+	const n = 20_000 // a tenth of the cap, and ~6x what an unflagged cache holds
+	for i := 0; i < n; i++ {
+		c.matchCh.SetWithTTL(strconv.Itoa(i), matchCacheEntry{found: true}, time.Minute)
+	}
+	c.matchCh.Wait()
+
+	present := 0
+	for i := 0; i < n; i++ {
+		if _, ok := c.matchCh.Get(strconv.Itoa(i)); ok {
+			present++
+		}
+	}
+	if present < n*9/10 {
+		t.Errorf("only %d/%d entries survived admission — the match cache is not "+
+			"sized in entries; check IgnoreInternalCost at its cache.New call", present, n)
 	}
 }
 
