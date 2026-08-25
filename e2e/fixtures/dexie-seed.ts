@@ -276,6 +276,16 @@ export interface SeedSeriesSpec {
    * card's episodes without hiding the card.
    */
   mergedFrom?: readonly string[];
+  /**
+   * The series this one was SPLIT OUT OF — written as this series'
+   * `userOverride.splitFrom`, exactly as `splitSeries` records it.
+   *
+   * One-directional on purpose, because that is how the real thing stores it:
+   * only the new row knows its lineage. Anything deciding whether a pair may
+   * be re-merged has to look both ways round, and a fixture that recorded it
+   * on both rows would hide a guard that only checked one.
+   */
+  splitFrom?: string;
 }
 
 export interface SeedLibraryOptions {
@@ -425,6 +435,14 @@ export async function seedLibrary(
         }
         seriesRows.push(row);
 
+        if (typeof spec.splitFrom === "string" && spec.splitFrom) {
+          overrideRows.push({
+            seriesId,
+            splitFrom: spec.splitFrom,
+            updatedAt: now,
+          });
+        }
+
         if (spec.mergedFrom && spec.mergedFrom.length > 0) {
           overrideRows.push({
             seriesId,
@@ -573,30 +591,36 @@ export async function writeProgress(
 }
 
 /**
- * Read one `series` row back out. Used to assert on `lastSyncedEpisode`, the
- * client half of the no-queue reconciliation contract (design doc decision 5).
+ * Read one row back out, keyed by series id.
+ *
+ * Defaults to `series` — the original use, asserting on `lastSyncedEpisode`,
+ * the client half of the no-queue reconciliation contract (design doc decision
+ * 5). `userOverride` is the other store keyed the same way, and it is where
+ * the only record of a soft merge lives: `performMerge` moves no Season,
+ * Episode or Progress row, so `mergedFrom` on the target is the whole trace.
  */
 export async function readSeriesRow(
   page: Page,
   seriesId: string,
+  store: "series" | "userOverride" = "series",
 ): Promise<Record<string, unknown> | null> {
   return page.evaluate(
-    async ({ dbName, id }: { dbName: string; id: string }) => {
+    async ({ dbName, id, storeName }: { dbName: string; id: string; storeName: string }) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
         const req = indexedDB.open(dbName);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       });
       const row = await new Promise<Record<string, unknown> | null>((resolve) => {
-        const tx = db.transaction("series", "readonly");
-        const get = tx.objectStore("series").get(id);
+        const tx = db.transaction(storeName, "readonly");
+        const get = tx.objectStore(storeName).get(id);
         get.onsuccess = () => resolve((get.result as Record<string, unknown>) ?? null);
         get.onerror = () => resolve(null);
       });
       db.close();
       return row;
     },
-    { dbName: DB_NAME, id: seriesId },
+    { dbName: DB_NAME, id: seriesId, storeName: store },
   );
 }
 
