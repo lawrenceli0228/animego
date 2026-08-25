@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -434,6 +435,87 @@ func TestMatch_Phase2_RealPG(t *testing.T) {
 	var studios []string
 	require.NoError(t, json.Unmarshal(site["studios"], &studios))
 	assert.Contains(t, studios, "A-1 Pictures")
+}
+
+// ─── /api/dandanplay/match — the match cache, through the real handler ────
+
+func TestMatch_RepeatedRequestAsksDandanplayNothing(t *testing.T) {
+	// The reader-visible reason the cache exists.
+	//
+	// The browser re-sends this identical request on every library
+	// mount, every tab-return and every rescan — its own cache stores
+	// the negative verdict and then nulls it on read, so it never
+	// stops asking. Each ask used to take a token from a process-wide
+	// 800ms bucket shared by every user of the server.
+	//
+	// Driven through h.Match rather than the client directly, because
+	// what has to hold is that a request the handler fans out across
+	// its phases reaches dandanplay once and then not at all — not
+	// that one method memoises.
+	var matchCalls atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/match" {
+			matchCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"isMatched":false,"matches":[]}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+
+	h, _ := makeHandlersWithBackend(t, backend)
+
+	// Exactly the shape the library import sends: no keyword — so
+	// Phase 2 cannot run at all — and a files[0] that repeats the
+	// top-level file, which is what lets Phase 3 re-ask Phase 1's
+	// question.
+	const name = "[ANi] Unknown Show - 01 [1080P][Baha][WEB-DL].mp4"
+	const hash = "0123456789abcdef0123456789abcdef"
+	body := MatchRequest{
+		FileName: name,
+		FileHash: hash,
+		FileSize: 705536408,
+		Episodes: []int{1},
+		Files: []MatchFileInfo{
+			{FileName: name, FileHash: hash, FileSize: 705536408, Episode: 1},
+		},
+	}
+
+	out := unmarshalMatch(t, postMatch(t, h, body))
+	var matched bool
+	require.NoError(t, json.Unmarshal(out["matched"], &matched))
+	require.False(t, matched, "fixture is a file dandanplay does not know")
+
+	first := matchCalls.Load()
+	t.Logf("first request reached dandanplay %d time(s)", first)
+	// ONE, on the very first import — not two.
+	//
+	// Phase 1 asks, misses, and returns; Phase 2 cannot run without a
+	// keyword; Phase 3 then asks the same (fileName, hash, size) again.
+	// Without the Wait() that follows the cache write, this measured 2
+	// on 5 of 5 runs — ristretto's writes are asynchronous, and the two
+	// asks are microseconds apart, so the second one always beat the
+	// background drain. Draining costs nothing next to the 800ms token
+	// and the round-trip that just happened, and it halves what a first
+	// import spends upstream.
+	require.Equal(t, int32(1), first,
+		"Phase 3 re-asked Phase 1's question — the write did not land before the read")
+
+	client, ok := h.Client.(*Client)
+	require.True(t, ok, "this test needs the real client, not a fake")
+	client.matchCh.Wait()
+
+	// The rescan. This is the guarantee, and it has no race in it:
+	// enough time has passed for the write to be visible, so a repeat
+	// must cost nothing upstream.
+	out = unmarshalMatch(t, postMatch(t, h, body))
+	require.NoError(t, json.Unmarshal(out["matched"], &matched))
+	require.False(t, matched, "a cached miss must still answer matched:false")
+
+	assert.Equal(t, first, matchCalls.Load(),
+		"a repeat of an identical request reached dandanplay again — "+
+			"the miss was not cached, and every library mount pays 800ms per file forever")
 }
 
 // ─── buildKeywordPattern / searchAnimeCache unit ──────────────────────────

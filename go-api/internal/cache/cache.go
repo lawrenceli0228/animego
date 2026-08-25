@@ -39,8 +39,16 @@ const (
 	defaultBufferItems int64 = 64
 )
 
-// itemCost is the cost we charge for every entry. We don't size by bytes;
-// MaxCost is effectively a max-entry-count when cost is always 1.
+// itemCost is the cost we charge for every entry. We don't size by bytes.
+//
+// This does NOT on its own make MaxCost a max-entry-count. Ristretto adds
+// its own per-entry overhead — `i.Cost += itemSize`, where itemSize is
+// unsafe.Sizeof(storeItem[any]{}) = 56 bytes — before asking the admission
+// policy, unless IgnoreInternalCost is set. So a cache configured with
+// cost=1 and MaxCost=N and nothing else actually holds about N/57 entries,
+// and the ones past that are silently REJECTED at admission: the Set
+// reports success, Wait() returns, and Get still misses. Set
+// Config.IgnoreInternalCost when you want MaxCost to mean entries.
 const itemCost int64 = 1
 
 // Config controls the underlying ristretto.Cache.
@@ -48,7 +56,7 @@ const itemCost int64 = 1
 // Any field left at its zero value is replaced with a sensible default at
 // New time:
 //   - NumCounters = 1e7  (10M frequency counters, ~10MB)
-//   - MaxCost     = 1e8  (with itemCost=1 => 100M entries cap)
+//   - MaxCost     = 1e8  (see itemCost — ~1.75M entries, not 100M)
 //   - BufferItems = 64   (ristretto's recommended channel size)
 //   - DefaultTTL  = 0    (no TTL; caller should override per cache)
 //
@@ -59,6 +67,17 @@ type Config struct {
 	MaxCost     int64
 	BufferItems int64
 	DefaultTTL  time.Duration
+
+	// IgnoreInternalCost drops ristretto's 56-byte per-entry overhead
+	// from the admission cost, which is what makes MaxCost mean "entry
+	// cap" for a cost=1 cache. See itemCost for why it does not mean
+	// that by default.
+	//
+	// Left false so this stays a no-op for every existing caller: turning
+	// it on RAISES a cache's real ceiling by ~57x, which is the right
+	// answer when the cap was chosen as an entry count and the wrong one
+	// when it was chosen as a memory bound.
+	IgnoreInternalCost bool
 }
 
 // Cache[V] is a typed TTL cache. V can be any type — for reference types
@@ -79,9 +98,10 @@ func New[V any](c Config) (*Cache[V], error) {
 	cfg := applyDefaults(c)
 
 	inner, err := ristretto.NewCache(&ristretto.Config[string, V]{
-		NumCounters: cfg.NumCounters,
-		MaxCost:     cfg.MaxCost,
-		BufferItems: cfg.BufferItems,
+		NumCounters:        cfg.NumCounters,
+		MaxCost:            cfg.MaxCost,
+		BufferItems:        cfg.BufferItems,
+		IgnoreInternalCost: cfg.IgnoreInternalCost,
 	})
 	if err != nil {
 		return nil, err

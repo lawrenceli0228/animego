@@ -13,6 +13,12 @@
 //     fetch.  Keeps the two lookup paths from accidentally sharing
 //     state (the dandanplay API returns the same shape but the lookup
 //     ids do not overlap).
+//   - 24h match cache (10 min for a miss) keyed on the /api/v2/match
+//     request body.  MatchCombined is the ONLY caller-facing method
+//     that used to reach the network unconditionally, and it is called
+//     once per import cluster plus once per unmapped episode — so it
+//     was also the method holding the 800ms bucket.  See MatchCombined
+//     for why the cache sits here and not around the /match handler.
 //   - 8-second per-request HTTP timeout.  Total /match orchestration
 //     timeout (20s) is enforced at the handler layer.
 //
@@ -57,6 +63,29 @@ const (
 
 	commentTTL = 30 * time.Minute
 	episodeTTL = 24 * time.Hour
+
+	// matchHitTTL matches episodeTTL deliberately.  A hit is
+	// content-addressed — the file's 16MiB hash is what dandanplay
+	// resolved — and it is the SAME upstream whose episode lists
+	// already ride a 24h ceiling.  Caching the answer for less time
+	// than the episode list it feeds would buy nothing.
+	matchHitTTL = 24 * time.Hour
+
+	// matchMissTTL is deliberately two orders of magnitude shorter,
+	// because a miss and a hit are not the same kind of fact.
+	//
+	// A miss usually means "dandanplay has not indexed this hash YET"
+	// — Phase 1's whole loose-match gate exists for exactly that case,
+	// new-season fansub releases.  Freezing a miss for 24h would turn
+	// "not indexed yet" into "not indexed today", and the reader has
+	// no way to force a recheck.
+	//
+	// Ten minutes is picked against the client's own retry cadence:
+	// the rescan throttle is 60s, the periodic fallback 120s and the
+	// deferred retry 65s, so this absorbs the repeat storm within a
+	// session while still letting a newly-indexed file be found in the
+	// same sitting.
+	matchMissTTL = 10 * time.Minute
 )
 
 // Retry policy constants.
@@ -77,6 +106,7 @@ type Client struct {
 	limiter    *rate.Limiter
 	commentsCh *cache.Cache[CommentsResponse]
 	episodesCh *cache.Cache[EpisodeData]
+	matchCh    *cache.Cache[matchCacheEntry]
 }
 
 // Option configures a Client at construction.
@@ -144,6 +174,32 @@ func NewClient(opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("dandanplay: episodes cache: %w", err)
 	}
 	c.episodesCh = episodesCh
+
+	// Sized tighter than the other two on purpose.  Those key on a
+	// bounded id space (episode ids, anime ids); this one keys on
+	// arbitrary user filenames, so its key space has no ceiling and
+	// MaxCost is the only thing bounding memory.  2e5 entries at
+	// roughly 250 bytes of key+value is ~50MB worst case, against a
+	// working set of a few hundred files per active importer.
+	//
+	// IgnoreInternalCost is what makes that arithmetic true.  Without
+	// it ristretto adds 56 bytes of its own overhead to every entry's
+	// admission cost, so a cost=1 cache with MaxCost 2e5 holds ~3.5k
+	// entries and silently REJECTS the rest — Set succeeds, Wait
+	// returns, Get still misses.  Nothing reports it; the only symptom
+	// is calls going back to the network for files that should have
+	// been cached.  The two caches above run without it and are far
+	// enough inside their real ceilings not to care.
+	matchCh, err := cache.New[matchCacheEntry](cache.Config{
+		NumCounters:        1e6,
+		MaxCost:            2e5,
+		IgnoreInternalCost: true,
+		DefaultTTL:         matchHitTTL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("dandanplay: match cache: %w", err)
+	}
+	c.matchCh = matchCh
 	return c, nil
 }
 
@@ -155,6 +211,9 @@ func (c *Client) Close() {
 	}
 	if c.episodesCh != nil {
 		c.episodesCh.Close()
+	}
+	if c.matchCh != nil {
+		c.matchCh.Close()
 	}
 }
 
@@ -415,11 +474,114 @@ type matchEnvelope struct {
 	} `json:"matches"`
 }
 
+// matchCacheEntry wraps a nil-able MatchResult so a MISS can be stored
+// as a value.
+//
+// The `found` flag is load-bearing and is NOT the same as cache.Get's
+// own ok.  Get's ok answers "was this key ever stored"; found answers
+// "did dandanplay know this file".  Collapsing the two would make a
+// cached miss indistinguishable from a cold key, and the miss — the
+// case that costs the most, because the client re-asks forever — would
+// be the one thing that never got cached.
+//
+// The result is held BY VALUE, which is what keeps a caller from
+// reaching into the shared entry: cache.Get returns V by value, so the
+// pointer handed back below points into a copy nobody else holds.  If
+// this ever becomes cache.Cache[*matchCacheEntry], that stops being
+// true silently — hence the clobber assertion in client_test.go.
+type matchCacheEntry struct {
+	result MatchResult
+	found  bool
+}
+
+// value returns the cached result, or nil for a cached miss —
+// MatchCombined's own return contract.
+func (e matchCacheEntry) value() *MatchResult {
+	if !e.found {
+		return nil
+	}
+	return &e.result
+}
+
+// matchCacheKey builds the key from the request body that is about to go
+// on the wire, NOT from MatchCombined's arguments.  The body is the
+// normalised form — hash and size are dropped when empty / non-positive
+// — so keying off it means two argument sets that produce one upstream
+// request can never produce two entries.  This matters: the library
+// import sends `rep.file?.size ?? 0` and the player sends
+// `f._fileRef?.size ?? 0`, so the same file legitimately arrives with
+// and without a size.
+//
+// The hash is LENGTH-PREFIXED rather than just placed first, because
+// both variable-length fields are attacker-controlled: `/match` takes
+// a JSON body straight off the wire, so nothing forces fileHash to be
+// the 32 hex characters it is supposed to be.  Joining plainly would
+// let one caller forge another's key —
+//
+//	{hash:"a",     size:1, name:"b:2:c"}  ─┐ both "a:1:b:2:c"
+//	{hash:"a:1:b", size:2, name:"c"}      ─┘
+//
+// — and seed an entry a legitimate importer would then read as the
+// answer for their own file.  With the length in front, the hash is
+// self-delimiting, FileSize is decimal and cannot contain a separator,
+// and FileName takes the remainder, so the encoding is injective and
+// FileName stays free to contain anything.
+func matchCacheKey(req matchRequest) string {
+	return strconv.Itoa(len(req.FileHash)) + ":" + req.FileHash +
+		":" + strconv.FormatInt(req.FileSize, 10) +
+		":" + req.FileName
+}
+
 // MatchCombined is service.js matchCombined — POST /api/v2/match with
 // fileName + optional hash/size.  Returns nil on miss / 4xx; non-nil
 // MatchResult on any 2xx response with at least one match, even when
 // isMatched=false (the orchestrator's loose-match accept gate decides
 // whether to use it).
+//
+// ─── why the cache is HERE and not around the /match handler ─────────
+//
+// The obvious place to cache is the whole `/api/dandanplay/match`
+// response, and it would be wrong.  That envelope carries `siteAnime`
+// and the Phase 2 `anime` block, both read fresh from anime_cache on
+// every call — which is what makes an admin's binding correction take
+// effect on the very next request.  A response cache would put a TTL in
+// front of a surface that has none today, and worse: Phase 2 re-ranks
+// its candidates per call, so a stale entry could keep returning the
+// WRONG series after the database had already been fixed.
+//
+// This method is the part that is actually expensive.  It is the only
+// caller-facing method with no cache, it is the one every phase reaches
+// (Phase 1 directly, all three via matchUnmappedFiles once per unmapped
+// episode), and it is therefore the one holding the process-wide 800ms
+// token bucket that every user shares.  Caching it leaves every
+// Postgres-derived field exactly as fresh as it is today.
+//
+// Two consequences worth knowing:
+//
+//   - A FIRST import gets faster too, not just a re-import — but only
+//     because of the Wait() after each write.  Phase 1 and Phase 3 ask
+//     the same (fileName, hash, size) microseconds apart within one
+//     request, and ristretto's writes are asynchronous: measured
+//     without the Wait, the second ask beat the background drain on 5
+//     of 5 runs and went to the network anyway.  Draining costs
+//     microseconds and only ever happens on a path that just spent an
+//     800ms token plus a round-trip, so it is free in context and it
+//     halves what an unmatched file costs on its first import.
+//   - Errors are never cached.  Only a definite answer from dandanplay
+//     is — a hit, or a 2xx/4xx that definitively knows nothing.  A
+//     network failure or an exhausted retry chain must stay retryable.
+//
+// Deliberately NOT singleflighted.  It would only help simultaneous
+// identical keys, which needs two importers on the same fansub release
+// in the same instant; against that it couples every waiter to the
+// leader's context, so one reader navigating away would fail the rest.
+//
+// One invariant the Wait() depends on: ristretto's Wait takes no
+// context, so unlike limiter.Wait and the backoff select it cannot be
+// cancelled.  That is safe only because every caller of this method is
+// synchronous inside a handler, and Close happens after Shutdown has
+// drained them.  Spawning MatchCombined into a detached goroutine —
+// the obvious next step once most calls are hits — would break that.
 func (c *Client) MatchCombined(ctx context.Context, fileName, fileHash string, fileSize int64) (*MatchResult, error) {
 	body := matchRequest{FileName: fileName}
 	if fileHash != "" {
@@ -428,22 +590,34 @@ func (c *Client) MatchCombined(ctx context.Context, fileName, fileHash string, f
 	if fileSize > 0 {
 		body.FileSize = fileSize
 	}
+	cacheKey := matchCacheKey(body)
+	if hit, ok := c.matchCh.Get(cacheKey); ok {
+		return hit.value(), nil
+	}
 	var env matchEnvelope
 	ok, err := c.do(ctx, http.MethodPost, "/api/v2/match", body, &env)
 	if err != nil {
+		// Not cached: a transport failure or a spent retry chain says
+		// nothing about the file, and the next caller must be free to
+		// ask again.
 		return nil, err
 	}
 	if !ok || len(env.Matches) == 0 {
+		c.matchCh.SetWithTTL(cacheKey, matchCacheEntry{}, matchMissTTL)
+		c.matchCh.Wait()
 		return nil, nil
 	}
 	best := env.Matches[0]
-	return &MatchResult{
+	out := MatchResult{
 		IsMatched:    env.IsMatched,
 		AnimeID:      best.AnimeID,
 		AnimeTitle:   best.AnimeTitle,
 		EpisodeID:    best.EpisodeID,
 		EpisodeTitle: best.EpisodeTitle,
-	}, nil
+	}
+	c.matchCh.Set(cacheKey, matchCacheEntry{result: out, found: true})
+	c.matchCh.Wait()
+	return &out, nil
 }
 
 // ─── /api/v2/bangumi/* episode lookups ──────────────────────────────────────

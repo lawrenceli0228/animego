@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -253,4 +254,68 @@ func TestClose(t *testing.T) {
 
 	// Idempotent Close.
 	assert.NotPanics(t, func() { c.Close() })
+}
+
+// ─── MaxCost does not mean "entries" unless you ask it to ──────────────────
+
+// fillDistinct writes n unique keys, drains, and reports how many are
+// still retrievable. Set → Wait → Get is the strongest read-after-write
+// contract this wrapper offers, so anything missing afterwards was
+// refused by the admission policy, not merely not-yet-visible.
+func fillDistinct[V any](t *testing.T, c *Cache[V], n int, val V) int {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		c.SetWithTTL(strconv.Itoa(i), val, time.Minute)
+	}
+	c.Wait()
+	present := 0
+	for i := 0; i < n; i++ {
+		if _, ok := c.Get(strconv.Itoa(i)); ok {
+			present++
+		}
+	}
+	return present
+}
+
+func TestMaxCostCountsRistrettoOverheadUnlessIgnored(t *testing.T) {
+	// The trap this pins: itemCost is 1, so MaxCost reads like an entry
+	// cap — and is not one. Ristretto adds sizeof(storeItem[any]) = 56
+	// bytes to every entry before the admission policy sees it, so the
+	// real ceiling is MaxCost/57.
+	//
+	// It fails SILENTLY, which is what makes it worth a test rather
+	// than a comment: SetWithTTL returns true, Wait() returns, and Get
+	// still misses. A cache sized by this arithmetic does not report
+	// that it is 57x smaller than intended — it just keeps sending
+	// callers back to whatever it was supposed to be saving them from.
+	const maxCost = 1000
+	const writes = 900 // comfortably under maxCost, far over maxCost/57
+
+	t.Run("default: MaxCost is a byte budget including overhead", func(t *testing.T) {
+		c, err := New[string](Config{NumCounters: 1e4, MaxCost: maxCost})
+		require.NoError(t, err)
+		t.Cleanup(c.Close)
+
+		present := fillDistinct(t, c, writes, "v")
+		t.Logf("%d/%d survived admission with MaxCost=%d", present, writes, maxCost)
+		assert.Less(t, present, writes/2,
+			"MaxCost still behaved like an entry cap — either ristretto stopped "+
+				"charging its internal cost, or itemCost changed; re-read the "+
+				"sizing comments on every cache.New call site before trusting them")
+	})
+
+	t.Run("IgnoreInternalCost: MaxCost is an entry cap", func(t *testing.T) {
+		c, err := New[string](Config{
+			NumCounters:        1e4,
+			MaxCost:            maxCost,
+			IgnoreInternalCost: true,
+		})
+		require.NoError(t, err)
+		t.Cleanup(c.Close)
+
+		present := fillDistinct(t, c, writes, "v")
+		t.Logf("%d/%d survived admission with MaxCost=%d", present, writes, maxCost)
+		assert.Equal(t, writes, present,
+			"entries were rejected below the configured entry cap")
+	})
 }
