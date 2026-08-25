@@ -47,6 +47,38 @@ test.describe("/library — duplicate cards", () => {
     await page.goto("/library");
     await expect(page.getByTestId("series-grid")).toBeVisible({ timeout: 10_000 });
 
+    // Prove the premise before asserting the conclusion. If the seed did not
+    // write `anilistId`, nothing downstream could group these two and the
+    // real failure would be reported as "the sweep did not run".
+    const seeded = await page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((ok, no) => {
+        const r = indexedDB.open("animego-library");
+        r.onsuccess = () => ok(r.result);
+        r.onerror = () => no(r.error);
+      });
+      const all = (store: string) =>
+        new Promise<unknown[]>((ok) => {
+          const q = db.transaction(store, "readonly").objectStore(store).getAll();
+          q.onsuccess = () => ok(q.result as unknown[]);
+          q.onerror = () => ok([]);
+        });
+      const [series, overrides] = await Promise.all([all("series"), all("userOverride")]);
+      db.close();
+      return {
+        stores: Array.from(db.objectStoreNames),
+        series: (series as Array<Record<string, unknown>>).map((r) => ({
+          id: r.id,
+          anilistId: r.anilistId,
+          createdAt: r.createdAt,
+        })),
+        overrides,
+      };
+    });
+    expect(
+      seeded.series.map((r) => r.anilistId),
+      `seeded rows lack the grouping key: ${JSON.stringify(seeded)}`,
+    ).toEqual([ANILIST_ID, ANILIST_ID]);
+
     // The merge is SOFT: no row moves, and the only record it leaves is
     // `mergedFrom` on the target. Asserting the record rather than the card
     // count is what makes this test independent of how the grid chooses to
@@ -61,7 +93,7 @@ test.describe("/library — duplicate cards", () => {
           timeout: 20_000,
           message:
             "the two cards never merged — either the identity key is not being " +
-            "resolved, or the sweep does not run on mount",
+            `resolved, or the sweep does not run on mount. seeded=${JSON.stringify(seeded)}`,
         },
       )
       .toContain(NEWER);
