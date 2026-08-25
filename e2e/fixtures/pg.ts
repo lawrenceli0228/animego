@@ -338,6 +338,28 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
     INSERT INTO anime_characters (anime_id, display_order, name_en, role)
     VALUES (${anime.anilistId}, 0, 'E2E Protagonist', 'MAIN')
   `;
+
+  // Verify the postcondition this function's whole name is a promise about.
+  //
+  // The failure it guards is silent and expensive: a row that exists but
+  // reads as stale renders as a 404 when AniList is unreachable, and the
+  // spec that trips over it reports "expected 200, received 404" — a
+  // sentence with no fixture in it. Chasing that from the other end costs a
+  // CI round trip per hypothesis. It is what happened when `locale-routing`
+  // was "fixed" with `ensureAnimeCached`, whose row satisfies none of this.
+  const [seeded] = await sql`
+    SELECT (SELECT count(*) FROM anime_studios WHERE anime_id = ${anime.anilistId}) AS studios,
+           (SELECT count(*) FROM anime_characters
+             WHERE anime_id = ${anime.anilistId} AND role IS NOT NULL) AS characters
+  `;
+  if (Number(seeded?.studios ?? 0) === 0 || Number(seeded?.characters ?? 0) === 0) {
+    throw new Error(
+      `ensureAnimeDetail(${anime.anilistId}): seeded row is still stale ` +
+        `(studios=${seeded?.studios}, characters-with-role=${seeded?.characters}). ` +
+        `isStale trips on either being empty, so /anime/${anime.anilistId} would ` +
+        `go to AniList and 404 whenever that call fails.`,
+    );
+  }
 }
 
 /**

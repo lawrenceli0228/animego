@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   cleanupTestUsersInPostgres,
   closePg,
-  ensureAnimeCached,
+  ensureAnimeDetail,
   ensureSeedUserInPostgres,
 } from "./fixtures/pg";
 
@@ -23,9 +23,18 @@ import {
  * in the run failed together — intermittently, and more often as the suite grew
  * and ran more of it concurrently.
  *
- * One cached row removes the dependency. The specs only ever assert status,
- * `h1` presence and the canonical URL, so the row's contents do not matter —
- * its existence does.
+ * Removing the dependency takes `ensureAnimeDetail`, NOT `ensureAnimeCached`.
+ * That distinction is the whole fix and it is not obvious: a row from
+ * `ensureAnimeCached` exists but has no studios and no characters, and
+ * `isStale` (go-api/internal/anime/detail.go) trips on either of those
+ * independently of `cached_at`. A stale row sends the handler to AniList
+ * anyway, so seeding it that way changes nothing that matters here — which is
+ * exactly what happened when this fixture was first added, and why the
+ * assertions kept failing after it.
+ *
+ * The specs only ever assert status, `h1` presence and the canonical URL, so
+ * the row's CONTENTS do not matter. What matters is that it looks complete
+ * enough that nothing goes upstream to complete it.
  */
 const ROUTING_FIXTURE_ANILIST_ID = 21;
 
@@ -93,7 +102,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   // Seeded here rather than in the spec that reads it: `locale-routing` never
   // writes to Postgres at all, and a per-spec fixture would race the other
   // workers under `fullyParallel`. Global setup runs once, before any of them.
-  await ensureAnimeCached({
+  await ensureAnimeDetail({
     anilistId: ROUTING_FIXTURE_ANILIST_ID,
     titleRomaji: "E2E Routing Fixture",
     titleChinese: "E2E 路由固定装置",

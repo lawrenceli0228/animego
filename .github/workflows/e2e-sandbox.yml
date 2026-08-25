@@ -197,8 +197,21 @@ jobs:
             fi
             sleep 1
           done
+          # /anime/0 is here to compile the `[lang]/anime/[id]` segment, which
+          # nothing else in this list reaches. Turbopack compiles a segment on
+          # its first request, so without this the first /anime/<id> in the
+          # whole suite pays for it — inside a spec's own timeout, under three
+          # workers' load.
+          #
+          # The id is 0 rather than the routing fixture's 21 ON PURPOSE. Both
+          # `generateMetadata` and the page bail on `anilistId <= 0` BEFORE
+          # calling loadDetail, so 0 compiles the route and makes no API call
+          # at all. Warming a real id here would be actively harmful: this step
+          # runs before globalSetup seeds anything, so the miss would be a
+          # genuine 404 — and `loadDetail` fetches with `revalidate: 60`, so
+          # Next would serve that 404 back for a minute after the row existed.
           for route in / /login /register /forgot-password /reset-password/warmup \
-                       /welcome /library /player /admin; do
+                       /welcome /library /player /admin /anime/0; do
             code=000
             for attempt in $(seq 1 10); do
               code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 "http://localhost:3000${route}")
@@ -268,11 +281,18 @@ jobs:
         # gone the moment the runner is reclaimed. `docker compose logs`
         # after a container is recreated shows nothing, which is how a
         # previous prod post-mortem lost its evidence — grab them here.
+        # The tails are 4000, not 200, because 200 could not reach the
+        # failure. go-api emits a steady stream of background enrichment
+        # logs, so by the time this step runs the last 200 lines are all
+        # from after the suite finished — the requests that actually failed
+        # have scrolled off. A post-mortem that has to be repeated because
+        # the evidence step captured the wrong window costs more than the
+        # log lines do.
         run: |
           echo "───── next dev ─────"
-          tail -200 /tmp/next-dev.log || true
+          tail -4000 /tmp/next-dev.log || true
           echo "───── containers ─────"
-          docker compose --env-file .env.production logs --tail=200 || true
+          docker compose --env-file .env.production logs --tail=4000 || true
 
       - name: Upload Playwright report on failure
         if: failure()
