@@ -43,7 +43,7 @@ func TestNewSMTPSender_HappyPath(t *testing.T) {
 	require.NotNil(t, s)
 	assert.Equal(t, "smtp.gmail.com:587", s.host)
 	assert.Equal(t, "u@example.com", s.user)
-	assert.Equal(t, "abcd1234efgh5678", s.appPassword)
+	assert.Equal(t, "abcd1234efgh5678", s.password)
 	assert.Equal(t, "AnimeGo <u@example.com>", s.fromHeader)
 	assert.NotNil(t, s.sendFn, "sendFn should default to smtp.SendMail")
 }
@@ -56,7 +56,7 @@ func TestNewSMTPSender_AppPasswordWhitespace_Stripped(t *testing.T) {
 	// "abcd efgh ijkl mnop" or "abcdefghijklmnop" works.
 	s, err := NewSMTPSender("u@example.com", "abcd efgh ijkl mnop")
 	require.NoError(t, err)
-	assert.Equal(t, "abcdefghijklmnop", s.appPassword)
+	assert.Equal(t, "abcdefghijklmnop", s.password)
 }
 
 func TestNoopSender_SendPasswordReset_NoError(t *testing.T) {
@@ -244,4 +244,121 @@ func TestSenderInterface_Implementations(t *testing.T) {
 
 	var _ Sender = (*SMTPSender)(nil)
 	var _ Sender = NoopSender{}
+}
+
+// ─── NewRelaySender ─────────────────────────────────────────────────────────
+//
+// The relay path exists so mail can go out AS an address at a domain we
+// control, which is the only arrangement where SPF, DKIM and DMARC can all
+// align on it. Gmail cannot do that — it signs with gmail.com whatever the
+// From header says.
+//
+// The property worth pinning hardest is the one that is invisible on Gmail:
+// the ENVELOPE sender and the AUTH username are different things. Gmail
+// collapses them onto the account address, so reusing `user` for the envelope
+// looks correct right up until the relay's username is not an address at all
+// — Resend's is the literal string "resend". The failure is not a bad
+// alignment score, it is a rejected message, and nothing in this package
+// would report it: `SendPasswordReset`'s error is swallowed by the auth
+// handler on purpose, so the reader still sees 200.
+
+func TestNewRelaySender_RequiresEveryField(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, host, user, pass, from string }{
+		{"no host", "", "u", "p", "a@b.com"},
+		{"no user", "smtp.example.com:587", "", "p", "a@b.com"},
+		{"no password", "smtp.example.com:587", "u", "", "a@b.com"},
+		{"no from", "smtp.example.com:587", "u", "p", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := NewRelaySender(tc.host, tc.user, tc.pass, tc.from)
+			assert.Nil(t, s)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestNewRelaySender_HostMustCarryAPort(t *testing.T) {
+	t.Parallel()
+
+	// A bare hostname is the likeliest typo. Caught here rather than
+	// inside PlainAuth, where the error names neither the variable nor
+	// the value.
+	s, err := NewRelaySender("smtp.example.com", "u", "p", "a@b.com")
+	assert.Nil(t, s)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SMTP_HOST")
+}
+
+func TestNewRelaySender_FromMustBeAnAddress(t *testing.T) {
+	t.Parallel()
+
+	// It lands in `MAIL FROM` verbatim; a non-address is rejected by the
+	// relay with a message that says nothing about our configuration.
+	s, err := NewRelaySender("smtp.example.com:587", "u", "p", "AnimeGo")
+	assert.Nil(t, s)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MAIL_FROM")
+}
+
+func TestNewRelaySender_PasswordIsNotWhitespaceStripped(t *testing.T) {
+	t.Parallel()
+
+	// The strip on the Gmail path exists for its four-group App Password
+	// display form. A relay credential is an opaque API key, and stripping
+	// one would corrupt it silently — the send would fail on auth with no
+	// hint that we had rewritten the secret.
+	s, err := NewRelaySender("smtp.example.com:587", "u", "re_ab cd", "a@b.com")
+	require.NoError(t, err)
+	assert.Equal(t, "re_ab cd", s.password)
+}
+
+func TestRelaySender_EnvelopeAndHeaderUseMailFromNotTheAuthUser(t *testing.T) {
+	t.Parallel()
+
+	// The whole point. `user` here is Resend's actual submission username:
+	// not an address, and useless as an envelope sender.
+	s, err := NewRelaySender(
+		"smtp.resend.com:587", "resend", "re_secret", "animegoanime@animegoclub.com")
+	require.NoError(t, err)
+
+	fs := &fakeSend{}
+	s.sendFn = fs.Send
+
+	require.NoError(t, s.SendPasswordReset(
+		context.Background(), "reader@qq.com", "https://animegoclub.com/reset-password/tok"))
+	require.True(t, fs.called)
+
+	assert.Equal(t, "smtp.resend.com:587", fs.addr)
+	assert.Equal(t, "animegoanime@animegoclub.com", fs.from,
+		"envelope sender must be MAIL_FROM — SPF is evaluated against it, and "+
+			"the AUTH username is not an address")
+	assert.NotEqual(t, "resend", fs.from,
+		"the AUTH username leaked into MAIL FROM")
+
+	msg := string(fs.msg)
+	assert.Contains(t, msg, "From: AnimeGo <animegoanime@animegoclub.com>\r\n",
+		"the From header is what DMARC alignment is judged on")
+	assert.NotContains(t, msg, "From: AnimeGo <resend>")
+	assert.Contains(t, msg, "To: reader@qq.com\r\n")
+}
+
+func TestRelaySender_AuthIsScopedToTheRelayHostNotGmail(t *testing.T) {
+	t.Parallel()
+
+	// PlainAuth refuses to hand credentials to a server whose name does
+	// not match the one it was constructed with, so a hard-coded
+	// "smtp.gmail.com" here would make every relay send fail closed. That
+	// is the good failure mode, but only because it fails — a test that
+	// asserted on nothing would let a wrong-host build ship and look fine
+	// until the first reset request.
+	s, err := NewRelaySender("smtp.resend.com:587", "resend", "re_secret", "a@animegoclub.com")
+	require.NoError(t, err)
+	assert.Equal(t, "smtp.resend.com", s.serverName)
+
+	g, err := NewSMTPSender("u@gmail.com", "app-password")
+	require.NoError(t, err)
+	assert.Equal(t, "smtp.gmail.com", g.serverName, "the Gmail path must be unchanged")
+	assert.Equal(t, "u@gmail.com", g.envelopeFrom)
 }
