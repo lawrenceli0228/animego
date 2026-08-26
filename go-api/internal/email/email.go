@@ -1,16 +1,43 @@
-// Package email — transactional Gmail SMTP sender for password-reset
-// email.  Uses Go stdlib net/smtp with smtp.PlainAuth against
-// smtp.gmail.com:587 (STARTTLS upgrade is handled automatically by
-// net/smtp.SendMail when the server advertises STARTTLS).
+// Package email — transactional SMTP sender for password-reset email.
+// Uses Go stdlib net/smtp with smtp.PlainAuth (STARTTLS upgrade is
+// handled automatically by net/smtp.SendMail when the server
+// advertises it).
 //
 // The Sender interface is the small consumer-facing contract:
 // production wires SMTPSender; tests pass a stub or NoopSender.
 // Handler code never imports net/smtp directly.
 //
+// TWO CONSTRUCTORS, AND WHY
+//
+//   - NewSMTPSender(user, appPassword) — Gmail.  Sends as the Gmail
+//     account itself.  This is the historical path and stays the
+//     fallback so an unconfigured deploy keeps working.
+//   - NewRelaySender(host, user, password, from) — any submission
+//     relay.  Needed because sending as an address at our OWN domain
+//     is the only way SPF, DKIM and DMARC can all align on it, and
+//     Gmail cannot do that: it signs with gmail.com no matter what
+//     From header we set.
+//
+// ─── envelope sender vs From header ────────────────────────────────
+//
+// These are different fields and different checks read them, which is
+// invisible on Gmail because there they happen to be the same string:
+//
+//   - The ENVELOPE sender (SMTP `MAIL FROM`) is what the receiver
+//     runs SPF against.
+//   - The `From:` HEADER is what the reader sees, and what DMARC
+//     requires SPF or DKIM to be ALIGNED with.
+//
+// A relay's AUTH username is frequently not an address at all —
+// Resend's is the literal string "resend" — so using it as the
+// envelope sender the way the Gmail path does would put garbage in
+// `MAIL FROM` and get the message rejected before any of this
+// matters.  They are separate fields on SMTPSender for that reason.
+//
 // Configuration semantics match Express service/email.service.js:
-// when GMAIL_USER or GMAIL_APP_PASSWORD is empty, the sender silently
-// no-ops (logs a warn, returns nil).  Login flows still work; only
-// forgot-password's email delivery is skipped.
+// when nothing is configured the sender silently no-ops (logs a warn,
+// returns nil).  Login flows still work; only forgot-password's email
+// delivery is skipped.
 package email
 
 import (
@@ -19,6 +46,7 @@ import (
 	"fmt"
 	"log/slog"
 	"mime"
+	"net"
 	"net/smtp"
 	"strings"
 )
@@ -50,17 +78,25 @@ const resetSubject = "【AnimeGo】重置你的密码"
 // path always uses smtp.SendMail.
 type sendMailFunc func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
 
-// SMTPSender holds the Gmail SMTP credentials + the From header used
-// for all outgoing reset emails.
+// SMTPSender holds submission credentials + the two sender identities
+// used for all outgoing reset emails.
 //
 // sendFn is test-only — defaults to smtp.SendMail in production via
-// NewSMTPSender.  Tests override it to verify the message bytes
+// either constructor.  Tests override it to verify the message bytes
 // without making a real network call.
 type SMTPSender struct {
-	host        string // smtp.gmail.com:587
-	user        string // sender Gmail address
-	appPassword string // Gmail App Password (NOT account password)
-	fromHeader  string // "AnimeGo <user@gmail.com>"
+	host       string // "smtp.gmail.com:587" — host:port
+	serverName string // "smtp.gmail.com" — bare host, PlainAuth's identity check
+	user       string // AUTH username; NOT necessarily an address
+	password   string // Gmail App Password, or the relay's API key
+
+	// envelopeFrom is SMTP `MAIL FROM` — the address SPF is evaluated
+	// against.  Must be a real address the relay is allowed to send
+	// for, which is why it cannot just reuse `user`.
+	envelopeFrom string
+	// fromHeader is the `From:` header — what the reader sees and what
+	// DMARC alignment is judged on.  "AnimeGo <addr>".
+	fromHeader string
 
 	sendFn sendMailFunc
 }
@@ -80,11 +116,58 @@ func NewSMTPSender(user, appPassword string) (*SMTPSender, error) {
 	}
 	cleaned := stripAllWhitespace(appPassword)
 	return &SMTPSender{
-		host:        gmailSMTPHost,
-		user:        user,
-		appPassword: cleaned,
-		fromHeader:  fmt.Sprintf("AnimeGo <%s>", user),
-		sendFn:      smtp.SendMail,
+		host:       gmailSMTPHost,
+		serverName: gmailSMTPServer,
+		user:       user,
+		password:   cleaned,
+		// On Gmail all three collapse to the account address, which is
+		// exactly why the distinction between them is easy to miss
+		// until a relay makes them differ.
+		envelopeFrom: user,
+		fromHeader:   fmt.Sprintf("AnimeGo <%s>", user),
+		sendFn:       smtp.SendMail,
+	}, nil
+}
+
+// NewRelaySender constructs a sender against an arbitrary SMTP
+// submission relay, sending as `from` — an address at a domain we
+// control.
+//
+// This is the constructor that makes DMARC alignment possible.
+// Gmail can put any string in a From header, but it signs with
+// gmail.com and its envelope sender is a gmail.com address, so a
+// message claiming to be from our domain aligns on neither SPF nor
+// DKIM. Receivers that care — and the ones our readers actually use
+// care a great deal — read that as an unauthenticated claim.
+//
+// `host` is host:port. `user`/`password` are the relay's submission
+// credentials, which are NOT required to look like an address.
+func NewRelaySender(host, user, password, from string) (*SMTPSender, error) {
+	if host == "" || user == "" || password == "" || from == "" {
+		return nil, fmt.Errorf(
+			"email: SMTP_HOST, SMTP_USER, SMTP_PASSWORD and MAIL_FROM are all required")
+	}
+	serverName, _, err := net.SplitHostPort(host)
+	if err != nil {
+		// A bare hostname with no port is the likeliest typo, and it
+		// would otherwise fail much later inside PlainAuth with a
+		// message that names neither the variable nor the value.
+		return nil, fmt.Errorf("email: SMTP_HOST must be host:port, got %q: %w", host, err)
+	}
+	if !strings.Contains(from, "@") {
+		return nil, fmt.Errorf("email: MAIL_FROM must be an email address, got %q", from)
+	}
+	return &SMTPSender{
+		host:       host,
+		serverName: serverName,
+		user:       user,
+		// Not whitespace-stripped, unlike a Gmail App Password: that
+		// strip exists for Gmail's four-group display form. An API key
+		// is opaque and stripping it could silently corrupt one.
+		password:     password,
+		envelopeFrom: from,
+		fromHeader:   fmt.Sprintf("AnimeGo <%s>", from),
+		sendFn:       smtp.SendMail,
 	}, nil
 }
 
@@ -112,8 +195,11 @@ func (s *SMTPSender) SendPasswordReset(ctx context.Context, to, resetURL string)
 	body := BuildResetEmailHTML(resetURL)
 	msg := buildRFC822Message(s.fromHeader, to, resetSubject, body)
 
-	auth := smtp.PlainAuth("", s.user, s.appPassword, gmailSMTPServer)
-	if err := s.sendFn(s.host, auth, s.user, []string{to}, msg); err != nil {
+	// envelopeFrom, not user: on a relay whose AUTH username is not an
+	// address, passing user here puts garbage in `MAIL FROM` and the
+	// message is rejected before SPF is even consulted.
+	auth := smtp.PlainAuth("", s.user, s.password, s.serverName)
+	if err := s.sendFn(s.host, auth, s.envelopeFrom, []string{to}, msg); err != nil {
 		return fmt.Errorf("email: SendMail: %w", err)
 	}
 	return nil

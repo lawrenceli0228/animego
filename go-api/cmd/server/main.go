@@ -353,16 +353,33 @@ func main() {
 	}
 	isProd := os.Getenv("GO_ENV") == "production"
 
-	// Gmail SMTP sender — when GMAIL_USER/GMAIL_APP_PASSWORD are
-	// unset (dev without email), NoopSender lets forgot-password
-	// still return 200 (privacy/enumeration parity) while logging
-	// the skipped send.  Same semantic as Express.
+	// Transactional email, in order of preference.  When none is
+	// configured (dev without email), NoopSender lets forgot-password
+	// still return 200 (privacy/enumeration parity) while logging the
+	// skipped send.  Same semantic as Express.
+	//
+	// The relay is tried first because it is the only path that can
+	// send as an address at our own domain, which is what lets SPF,
+	// DKIM and DMARC align.  Gmail stays as the fallback so a host
+	// that has not been given relay credentials yet keeps sending
+	// instead of going quietly dark — the failure this ordering exists
+	// to avoid is a half-finished migration in which nobody notices
+	// mail stopped, because the handler returns 200 either way.
 	var emailSender email.Sender = email.NoopSender{}
-	if smtp, err := email.NewSMTPSender(cfg.GmailUser, cfg.GmailAppPassword); err == nil {
-		emailSender = smtp
-		slog.Info("email: Gmail SMTP configured", "user", cfg.GmailUser)
-	} else {
-		slog.Warn("email: Gmail SMTP not configured, password-reset emails will be skipped")
+	switch relay, relayErr := email.NewRelaySender(
+		cfg.SMTPHost, cfg.SMTPUser, cfg.SMTPPassword, cfg.MailFrom,
+	); {
+	case relayErr == nil:
+		emailSender = relay
+		slog.Info("email: SMTP relay configured", "host", cfg.SMTPHost, "from", cfg.MailFrom)
+	default:
+		if gmail, gmailErr := email.NewSMTPSender(cfg.GmailUser, cfg.GmailAppPassword); gmailErr == nil {
+			emailSender = gmail
+			slog.Warn("email: falling back to Gmail — mail will NOT align with our domain",
+				"user", cfg.GmailUser, "relayErr", relayErr)
+		} else {
+			slog.Warn("email: no sender configured, password-reset emails will be skipped")
+		}
 	}
 
 	authHandlers := auth.NewHandlers(q, signer, emailSender, cfg.ClientOrigin, cfg.JWTExpiresIn, cfg.JWTRefreshExpiresIn, isProd)

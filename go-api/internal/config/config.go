@@ -44,10 +44,26 @@ type Config struct {
 	// days.  Same cookie maxAge is set when the token is issued.
 	JWTRefreshExpiresIn time.Duration
 
-	// GmailUser + GmailAppPassword — credentials for transactional
-	// email (password reset).  Both empty → email sending is skipped
-	// (forgot-password still returns 200 to avoid enumeration), matches
-	// Express's behavior when env vars are unset.
+	// SMTPHost/User/Password + MailFrom — the PREFERRED transactional
+	// email path: an arbitrary submission relay sending as an address
+	// at a domain we control, so SPF, DKIM and DMARC can all align on
+	// it.  SMTPHost is host:port.  SMTPUser is the relay's AUTH
+	// username and is NOT required to be an address — MailFrom is the
+	// address that goes in `MAIL FROM` and `From:`.
+	SMTPHost     string
+	SMTPUser     string
+	SMTPPassword string
+	MailFrom     string
+
+	// GmailUser + GmailAppPassword — the FALLBACK, used only when the
+	// SMTP_* set above is incomplete.  Kept so a deploy that has not
+	// been given relay credentials yet keeps sending rather than going
+	// silently dark.  Mail sent this way is from gmail.com and cannot
+	// align with our own domain, which is the reason it is no longer
+	// first choice.
+	//
+	// All of it empty → sending is skipped entirely (forgot-password
+	// still returns 200 to avoid enumeration), matching Express.
 	GmailUser        string
 	GmailAppPassword string
 
@@ -85,6 +101,10 @@ func Load() (*Config, error) {
 		JWTRefreshSecret:    os.Getenv("JWT_REFRESH_SECRET"),
 		JWTExpiresIn:        accessTTL,
 		JWTRefreshExpiresIn: refreshTTL,
+		SMTPHost:            os.Getenv("SMTP_HOST"),
+		SMTPUser:            os.Getenv("SMTP_USER"),
+		SMTPPassword:        os.Getenv("SMTP_PASSWORD"),
+		MailFrom:            os.Getenv("MAIL_FROM"),
 		GmailUser:           os.Getenv("GMAIL_USER"),
 		GmailAppPassword:    os.Getenv("GMAIL_APP_PASSWORD"),
 		ClientOrigin:        getEnv("CLIENT_ORIGIN", "http://localhost:3000"),
