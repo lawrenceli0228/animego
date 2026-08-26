@@ -21,8 +21,16 @@
 
 set -euo pipefail
 
-VPS_HOST="${VPS_HOST:-45.145.228.171}"
-VPS_PORT="${VPS_PORT:-57777}"
+# No defaults for the host or the port, on purpose. This repo is public, and
+# the origin address is not decoration: the box only accepts 80/443 from
+# Cloudflare's ranges, and that rule is worth more when the address behind it
+# is not trivially greppable. A convenience default here would hand it over in
+# exchange for saving one export.
+#
+# Put them in your shell profile or an ssh_config Host alias instead:
+#   export VPS_HOST=… VPS_PORT=…
+VPS_HOST="${VPS_HOST:?需要 VPS_HOST(不写死在这里 —— 仓库是公开的)}"
+VPS_PORT="${VPS_PORT:?需要 VPS_PORT}"
 APP_DIR="${APP_DIR:-/opt/animego}"
 MAIL_FROM="${MAIL_FROM:-animegoanime@animegoclub.com}"
 ENV_FILE="$APP_DIR/.env.production"
