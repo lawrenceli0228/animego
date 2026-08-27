@@ -93,6 +93,23 @@
 | `--error`   | `#ff453a` | 错误、删除确认      |
 | `--info`    | `#5ac8fa` | 同 `--teal`         |
 
+### Per-Anime Poster Accent（"不要蓝色以外的 accent" 的唯一例外）
+| Token                 | Value                    | Usage                    |
+|-----------------------|--------------------------|--------------------------|
+| `--poster-accent`     | 运行时从封面取样          | 封面光晕、hero 关系 chip |
+| `--poster-accent-rgb` | 同上，逗号分隔的通道值    | 需要自定 alpha 时        |
+
+这不是设计系统挑的颜色，是**每部番自己的颜色**（`anime_cache.poster_accent`，
+由封面图取样得到），所以 "不要引入蓝色以外的 accent 色" 那条对它不适用 ——
+那条规则约束的是品牌色。
+
+作用范围严格限定在 hero 光晕和 hero 内的关系 chip。**不要**拿它做按钮、
+链接或焦点环 —— 可点击 = `--accent`，这条没有例外，否则"蓝色代表可操作"
+这个信号就废了。
+
+globals.css 里那个紫色字面量只是取样值到达之前的占位；用它的光晕在
+`[data-accent-ready="true"]` 之前是透明的，所以它不会被画出来。
+
 ### Dark Mode
 单一暗色主题，不提供亮色模式。背景已基于 Apple True Black，在 OLED 屏幕上极省电。
 
@@ -277,10 +294,40 @@
 - Padding: 4px 8px, Radius: 9999px, Font: 11px weight 500
 
 **Score Badge**
-- Background: `rgba(255,159,10,0.12)`
-- Text: `--warning` (`#ff9f0a`)
 - Font: JetBrains Mono, 13px, weight 500
 - Radius: 6px
+- Padding: 4px 12px
+- **三档配色，背景与文字成对**：
+
+| 分数 | 文字 | 背景 | Token |
+|------|------|------|-------|
+| ≥ 75 | `#30d158` (`--success`) | `rgba(48,209,88,0.12)` | `--score-high-fg` / `--score-high-bg` |
+| 50–74 | `#ff9f0a` (`--warning`) | `rgba(255,159,10,0.12)` | `--score-mid-fg` / `--score-mid-bg` |
+| < 50 | `#ff453a` (`--error`) | `rgba(255,69,58,0.12)` | `--score-low-fg` / `--score-low-bg` |
+
+> **规则：** 背景和文字**必须同源**。唯一允许决定用哪一档的地方是
+> `components/anime/scoreStyle.ts`，它一次返回一对。
+>
+> 这条规则是从一个线上缺陷倒推出来的：本节原先规定 score badge 恒为琥珀色，
+> 没有分档；而详情页早已在按阈值算文字颜色，背景却硬编码成琥珀。
+> 结果 ★9 和 ★8.3 在线上渲染成**绿字配琥珀底**，★6 和 ★5.7 才是对的。
+> 规范和实现分别只错了一半，两边都看不出问题 —— 所以修的方式是让二者
+> 无法再分开取值，而不是把已经成立的信息维度删掉。
+
+**Score Badge — 封面上变体（`--score-scrim-bg`）**
+- Background: `rgba(0,0,0,0.75)` + `backdrop-filter: blur(8px)`
+- Text: 同上三档 fg
+- Use: 番剧卡片右上角（badge 压在封面图上）
+
+12% 的淡色底在封面上没有对比度保证 —— 动漫封面本来就极艳丽，
+背后可能是任何颜色。所以压在图上的 badge 用不透明遮罩，只让**文字**带分档。
+用 `scoreScrimStyle()`，不要把 `scoreBadgeStyle()` 拿去压图。
+
+**Rating Bands（评分语义）**
+
+阈值 75 / 50 是全站统一的评分语义，番剧卡片也用同一套：
+≥75 好评、50–74 中评、<50 差评。改阈值要同时改 `scoreStyle.ts` 和本表，
+`scoreStyle.test.ts` 会同时钉住两者。
 
 ## Depth & Elevation
 
@@ -400,3 +447,7 @@
 | 2026-03-27 | 副色选 iOS Teal `#5ac8fa`              | 与 iOS Blue 同属 Apple 色系，保持系统感；严格限定为只读/信息场景      |
 | 2026-03-27 | 文字改用 Apple Label System（rgba）    | 比固定灰色更自然地适配不同背景层，层次感更丰富                        |
 | 2026-03-27 | 初版设计系统建立                       | 由 /design-consultation 基于竞品调研（AniList、MAL）生成              |
+| 2026-08-27 | 31 个 token 全部落进 `globals.css`，并由 `globals.test.ts` 钉住 | 此前只落了 10 个且其中 6 个漂移；实测全 `src/` 里 `--accent` 9 处引用、`--bg` / `--text` 各 1 处、**其余调色板 0 处** —— 设计系统只存在于文档里。修正漂移值零风险：那 6 个没有任何 `var()` 引用 |
+| 2026-08-27 | Score Badge 从"恒琥珀"改为三档，且背景文字成对 | 规范和实现各错一半：规范没有分档，实现按阈值算文字却硬编码琥珀背景 → 线上 ★9 是绿字琥珀底。选择修订规范匹配已成立的做法（番剧卡片也在用阈值），而不是删掉信息维度 |
+| 2026-08-27 | `--poster-accent` 明确为"不要蓝色以外 accent"的例外 | 它是每部番自己的封面取样色，不是品牌色；但严格限定在 hero 光晕，不得用于可点击元素 |
+| 2026-08-27 | `--text-quaternary` 保持 0.18 并标注为仅限禁用态 | ~2.5:1 低于 WCAG AA，但禁用控件本就豁免（1.4.3）；标注防止它被当成"更淡的正文色"使用 |

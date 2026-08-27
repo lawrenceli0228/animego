@@ -30,17 +30,21 @@
 // server-rendered and therefore zh — see the route note at the top of
 // app/anime/[id]/page.tsx for why the line is drawn here.
 
-import type { CSSProperties } from "react";
 import { formatLabel, genreLabel } from "@/lib/contentLabels";
 import { useLang } from "@/lib/lang-client";
+
+// These take class names, not style objects. The caller (the detail page)
+// used to hand over inline CSSProperties, which meant its chips could never
+// grow a hover or a focus state — an inline declaration beats any stylesheet
+// rule, so the CSS would have been written and then silently ignored.
 
 interface GenreChipsProps {
   /** Raw AniList genre enums, e.g. ["Action", "Slice of Life"]. */
   genres: readonly string[];
-  /** Style for the wrapping row (the RSC passes its inline token object). */
-  style?: CSSProperties;
-  /** Style applied to every chip. */
-  chipStyle?: CSSProperties;
+  /** Class for the wrapping row. */
+  className?: string;
+  /** Class applied to every chip. */
+  chipClassName?: string;
 }
 
 /**
@@ -48,13 +52,13 @@ interface GenreChipsProps {
  * is localised; the underlying enum value is untouched, so nothing here
  * changes the values used in /search?genre= links elsewhere.
  */
-export function GenreChips({ genres, style, chipStyle }: GenreChipsProps) {
+export function GenreChips({ genres, className, chipClassName }: GenreChipsProps) {
   const { lang } = useLang();
   if (!genres.length) return null;
   return (
-    <div style={style}>
+    <div className={className}>
       {genres.map((g) => (
-        <span key={g} style={chipStyle}>
+        <span key={g} className={chipClassName}>
           {genreLabel(g, lang)}
         </span>
       ))}
@@ -65,12 +69,12 @@ export function GenreChips({ genres, style, chipStyle }: GenreChipsProps) {
 interface FormatBadgeProps {
   /** Raw AniList format enum, e.g. "TV_SHORT". */
   format: string;
-  style?: CSSProperties;
+  className?: string;
 }
 
 /** Hero format badge — "TV_SHORT" → "TV 短篇" (zh) / "Short" (en). */
-export function FormatBadge({ format, style }: FormatBadgeProps) {
+export function FormatBadge({ format, className }: FormatBadgeProps) {
   const { lang } = useLang();
   if (!format) return null;
-  return <span style={style}>{formatLabel(format, lang)}</span>;
+  return <span className={className}>{formatLabel(format, lang)}</span>;
 }

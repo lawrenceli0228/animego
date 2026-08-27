@@ -1,22 +1,124 @@
-
+/* Design tokens — the vocabulary DESIGN.md defines.
+ *
+ * This block is generated from DESIGN.md by hand and pinned to it by
+ * globals.test.ts. Read that file before changing a value here; a token that
+ * disagrees with the spec is worse than a missing one, because the spec is
+ * what the next component gets built against.
+ *
+ * Until this commit the block held 10 of the 31 tokens the spec defines, and
+ * six of the ten had drifted. The whole spacing scale, the whole radius
+ * scale, every semantic colour and both fill colours were simply absent —
+ * so every component that needed them hardcoded a literal instead, and the
+ * design system existed only as a document. Measured before the fix: across
+ * all of src/, `--accent` had 9 references, `--bg` and `--text` one each,
+ * and the entire rest of the palette had zero.
+ *
+ * That is also why correcting the six drifted values is safe rather than a
+ * visual change: none of the six had a single `var()` reference anywhere in
+ * the tree. They were dead declarations describing a palette nothing read.
+ */
 :root {
-  --bg: #000;
-  --bg-card: #0a0a0a;
-  --bg-elevated: #141414;
-  --text: #fff;
-  --text-secondary: rgba(235, 235, 245, 0.85);
-  --text-tertiary: rgba(235, 235, 245, 0.60);
-  --text-quaternary: rgba(235, 235, 245, 0.30);
-  --separator: rgba(84, 84, 88, 0.30);
-  --accent: #0a84ff;
+  /* ── Backgrounds — Apple True Black system ──────────────────────────
+   * Three layers, and the elevation between them is carried by the colour
+   * difference rather than by shadow. --bg-card and --bg-elevated had
+   * drifted to #0a0a0a / #141414, which collapses that difference to almost
+   * nothing on an OLED panel. */
+  --bg: #000000;
+  --bg-card: #1c1c1e;
+  --bg-elevated: #2c2c2e;
+  --bg-fill: rgba(120, 120, 128, 0.12);
+  --separator: rgba(84, 84, 88, 0.65);
+  --separator-opaque: #38383a;
 
+  /* ── Accent — iOS Blue, the only interactive colour ─────────────────
+   * Reserved for things you can act on: buttons, links, focus rings,
+   * progress. Decorative blue is a spec violation, not a style choice. */
+  --accent: #0a84ff;
+  --accent-hover: #409cff;
+  --accent-active: #0070d6;
+  --accent-dim: rgba(10, 132, 255, 0.12);
+
+  /* ── Secondary — iOS Teal, strictly read-only ───────────────────────
+   * Information surfaces only: labels, magnet metadata, code highlights.
+   * Never a clickable element — that is what makes --accent legible as
+   * "this does something". */
+  --teal: #5ac8fa;
+  --teal-dim: rgba(90, 200, 250, 0.10);
+
+  /* ── Text — Apple label system ──────────────────────────────────────
+   * rgba rather than fixed greys so each level composites correctly over
+   * all three background layers. */
+  --text: #ffffff;
+  --text-secondary: rgba(235, 235, 245, 0.60);
+  --text-tertiary: rgba(235, 235, 245, 0.30);
+  /* ~2.5:1 on --bg, which is below WCAG AA for text. It is the disabled /
+   * inactive token, and disabled controls are exempt (WCAG 1.4.3 excludes
+   * inactive components). Do not reach for it to make content "quieter" —
+   * that use is not exempt. --text-tertiary is the floor for readable copy. */
+  --text-quaternary: rgba(235, 235, 245, 0.18);
+
+  /* ── Semantic — Apple system colours ────────────────────────────────
+   * Meaning, not decoration. --info is deliberately the same value as
+   * --teal: informational IS the read-only case, and giving it a second
+   * name that could drift from the first would be the bug. */
+  --success: #30d158;
+  --warning: #ff9f0a;
+  --error: #ff453a;
+  --info: #5ac8fa;
+
+  /* ── Score badge — three bands, background and foreground paired ─────
+   * Each band ships as a pair because the badge needs both and the two
+   * must move together. Splitting them is what produced the live defect
+   * this replaces: the foreground came from a threshold function and the
+   * background was hardcoded amber, so a 90-rated anime rendered green
+   * text on an amber pill. See components/anime/scoreStyle.ts, which is
+   * the only thing allowed to choose between them. */
+  --score-high-fg: #30d158;
+  --score-high-bg: rgba(48, 209, 88, 0.12);
+  --score-mid-fg: #ff9f0a;
+  --score-mid-bg: rgba(255, 159, 10, 0.12);
+  --score-low-fg: #ff453a;
+  --score-low-bg: rgba(255, 69, 58, 0.12);
+  /* The over-artwork variant. A 12% band tint has no contrast guarantee
+   * against a cover that could be any colour, and anime covers are
+   * deliberately saturated, so a badge sitting on one gets an opaque scrim
+   * and lets only the text carry the band. */
+  --score-scrim-bg: rgba(0, 0, 0, 0.75);
+
+  /* ── Typography ─────────────────────────────────────────────────────── */
   --font-display: "Sora", system-ui, sans-serif;
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
+  /* ── Spacing — 8px base ─────────────────────────────────────────────
+   * The whole scale was missing, so every component picked its own
+   * numbers. Present here so the next one does not have to. */
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 16px;
+  --sp-lg: 24px;
+  --sp-xl: 32px;
+  --sp-2xl: 48px;
+  --sp-3xl: 64px;
+
+  /* ── Radius ─────────────────────────────────────────────────────────
+   * --radius-xl is for large sheets and modals only; DESIGN.md bars a
+   * radius above 16px on cards and above 12px on cover art. */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* ── Motion ─────────────────────────────────────────────────────────── */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* Per-anime poster accent (overridden by HeroAccent wrapper on the detail page) */
+  /* Per-anime poster accent (overridden by HeroAccent wrapper on the detail
+   * page). Exempt from the "no accent but blue" rule on purpose: this one is
+   * sampled from the cover artwork at runtime, so it is not a brand colour
+   * the design system gets to choose. The violet below is only the value
+   * held before the sampled colour arrives, and the halo that uses it stays
+   * transparent until [data-accent-ready="true"] — so it is never painted. */
   --poster-accent: #8b5cf6;
   --poster-accent-rgb: 139, 92, 246;
   --duration-halo-in: 260ms;

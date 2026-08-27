@@ -1,0 +1,154 @@
+/* The one button surface, at the spec.
+ *
+ * The commit before this one moved three copies of this into one file
+ * without changing them. This one changes them, and nothing else, so the
+ * diff is exactly the list of corrections:
+ *
+ *   44px touch target      was 40px. DESIGN.md > Touch Targets, which is
+ *                          Apple HIG's floor. 40px is a control people miss
+ *                          on a phone, and phones are most of this site's
+ *                          traffic.
+ *
+ *   one blue focus ring    the outline variant drew a GREY ring
+ *                          (rgba(120,120,128,0.28)) while the primary drew
+ *                          the blue one. A focus ring that differs by
+ *                          component is a ring people stop reading as
+ *                          "this is where you are".
+ *
+ *   :focus-visible         was :focus on the outline variant, reproducing
+ *                          the onFocus/onBlur state it replaced — which
+ *                          fired on mouse clicks, so every click left a
+ *                          ring behind. :focus-visible is the browser's own
+ *                          answer to "was this keyboard or pointer", and it
+ *                          is the reason moving off inline styles was worth
+ *                          doing.
+ *
+ *   active + disabled      neither existed on any of the three. A button
+ *                          with no active state does not feel pressed, and
+ *                          a disabled one that still looks pressable is a
+ *                          control that appears broken rather than off.
+ *
+ * Colours come from tokens now rather than repeated literals — every value
+ * here already matched a token exactly, so this is a rename, not a
+ * re-colour. globals.test.ts pins the tokens to DESIGN.md.
+ */
+
+.base {
+  /* 44px, and min-height rather than height: the button still grows for two
+   * lines of CJK, it just cannot shrink below the touch floor. */
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 150ms,
+    border-color 150ms,
+    color 150ms,
+    transform 120ms,
+    box-shadow 150ms;
+}
+
+/* One ring, every variant, exactly as DESIGN.md specifies it once.
+ *
+ * `outline: none` is paired with a box-shadow ring that is always drawn, so
+ * this never removes the indicator — but a shadow is invisible in forced-
+ * colors mode, where the UA's own outline is the only thing a user has. The
+ * transparent outline keeps a real one for that mode to colour in. */
+.base:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* Note that the pressed state is declared per variant below, not here. A
+ * `.base:active` rule ties with `.primary:hover` on specificity and loses on
+ * source order, so pressing a button while the pointer is on it — which is
+ * every mouse press — would keep the hover lift and never show the press. */
+
+/* Off, not broken. DESIGN.md > Buttons: opacity 0.35, pointer-events none.
+ * `:disabled` on a real <button> already blocks the click; this is about it
+ * not inviting one. */
+.base:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Primary — the blue CTA ─────────────────────────────────────────────── */
+
+.primary {
+  composes: base;
+  border: 0;
+  background: var(--accent);
+  color: var(--text);
+  /* 650 as extracted. DM Sans is loaded at 300..600, so this resolves to the
+   * same rendered weight as the 600 on .base — kept rather than unified
+   * because "renders the same" is an inference and this commit's job is the
+   * three corrections named above, not tidying. DESIGN.md actually specifies
+   * 14px/500 with 10px 20px padding for buttons; that delta is deliberately
+   * still open, and is a visual change that wants its own review. */
+  font-weight: 650;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+.primary:active:not(:disabled) {
+  background: var(--accent-active);
+  box-shadow: none;
+  /* Cancels the hover lift, so the button goes down under the finger. */
+  transform: translateY(0);
+}
+
+/* ── Outline — secondary actions (share, downloads) ─────────────────────── */
+
+.outline {
+  composes: base;
+  border: 1px solid var(--separator);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.outline:hover:not(:disabled) {
+  border-color: rgba(120, 120, 128, 0.9);
+  background: var(--bg-fill);
+  color: rgba(255, 255, 255, 0.92);
+  transform: translateY(-1px);
+}
+
+.outline:active:not(:disabled) {
+  background: rgba(120, 120, 128, 0.2);
+  transform: translateY(0);
+}
+
+/* ── Confirm — a transient success surface, not a control ───────────────── */
+
+/* Renders disabled, so it inherits the 0.35 opacity above — which is wrong
+ * for this one: it is a message, not a switched-off control, and it has
+ * about two seconds to be read. Full opacity, default cursor. */
+.confirm {
+  composes: base;
+  border: 1px solid rgba(48, 209, 88, 0.45);
+  background: rgba(48, 209, 88, 0.12);
+  color: var(--success);
+}
+
+.confirm:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .base {
+    transition: none;
+  }
+
+  .primary:hover,
+  .outline:hover {
+    transform: none;
+  }
+}

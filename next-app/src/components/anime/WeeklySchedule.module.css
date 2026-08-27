@@ -1,0 +1,78 @@
+/* The weekday tabs.
+ *
+ * These were an inline `tabStyle(active, isToday)` object, and the reason
+ * they had no hover and no focus ring is not that nobody wrote the CSS — it
+ * is that the object ended with `outline: "none"`. An inline declaration
+ * beats every stylesheet rule, so any focus style added elsewhere would have
+ * been authored, reviewed, merged, and silently ignored. Removing that line
+ * had to come first; everything below only works because it is gone.
+ *
+ * State comes from ARIA attributes rather than from extra class names. The
+ * selected tab already has to carry `aria-selected` for the tablist pattern
+ * to mean anything, so styling off it keeps one source of truth: a tab
+ * cannot look selected while telling a screen reader it is not.
+ */
+
+.tabs {
+  display: flex;
+  gap: var(--sp-sm);
+  overflow-x: auto;
+  padding-bottom: var(--sp-sm);
+  margin-bottom: var(--sp-lg);
+  scrollbar-width: none;
+}
+
+.tab {
+  padding: 6px 18px;
+  min-height: 44px;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  background: var(--bg-fill);
+  color: var(--text-secondary);
+  transition:
+    background 150ms,
+    color 150ms;
+}
+
+/* Today, when it is not the tab you are on: a hint, not a selection. */
+.tab[data-today="true"] {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* The one you are on. Last so it wins over the today hint — the two are
+ * both true on the common first render, and "selected" is the stronger
+ * statement. */
+.tab[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--text);
+}
+
+.tab:hover:not([aria-selected="true"]) {
+  background: rgba(120, 120, 128, 0.2);
+  color: var(--text);
+}
+
+/* The same ring as everywhere else — see components/ui/focusRing.test.ts,
+ * which fails on any other colour. */
+.tab:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.tabCount {
+  margin-left: var(--sp-xs);
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
+}

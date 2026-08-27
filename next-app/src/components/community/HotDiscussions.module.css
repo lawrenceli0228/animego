@@ -241,9 +241,13 @@
   transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
 }
 
+/* Was teal, which this system reserves for things you read rather than
+ * things you press — and these are links. One ring, app-wide; see
+ * globals.test.ts, which now fails on any other colour. */
 .guideActions a:focus-visible {
-  outline: 2px solid #64d2ff;
+  outline: 2px solid transparent;
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 .guidePrimary {
@@ -314,9 +318,13 @@
   background: linear-gradient(135deg, rgba(255, 159, 10, 0.13), rgba(255, 255, 255, 0.05));
 }
 
+/* Was amber — the card's own hover accent, reused as its focus ring. That
+ * reads as decoration rather than position, and amber is --warning, which
+ * means something else entirely. */
 .card:focus-visible {
-  outline: 2px solid #ff9f0a;
+  outline: 2px solid transparent;
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 .welcomeCard {
