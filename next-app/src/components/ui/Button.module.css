@@ -1,0 +1,102 @@
+/* The button surface, extracted verbatim.
+ *
+ * This file is deliberately a faithful copy of what ShareButton,
+ * MagnetButton and PlayButton's trigger already looked like, including the
+ * parts that are wrong. Fixing them in the same change as moving them would
+ * make it impossible to tell a regression from an intended correction — the
+ * corrections land in the commit after this one, where the diff shows only
+ * them.
+ *
+ * Known-wrong and preserved for now:
+ *   · 40px min-height, where DESIGN.md's touch target is 44px
+ *   · a grey focus ring on the outline variant, where the spec has one blue
+ *     ring for the whole app
+ *   · :focus rather than :focus-visible, so the ring also appears on a mouse
+ *     click (this is what the React onFocus/onBlur state it replaces did)
+ */
+
+.base {
+  min-height: 40px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background 150ms,
+    border-color 150ms,
+    color 150ms,
+    transform 120ms,
+    box-shadow 150ms;
+}
+
+/* ── Primary — the blue CTA ─────────────────────────────────────────────── */
+
+.primary {
+  composes: base;
+  border: 0;
+  background: #0a84ff;
+  color: #fff;
+  /* 650 rather than the 600 the outline variant uses. Carried over as-is;
+   * DM Sans has no 650, so this resolves to the same rendered weight as 600
+   * in practice, which is why nobody noticed the two disagreeing. */
+  font-weight: 650;
+}
+
+.primary:hover {
+  background: #409cff;
+  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+/* 0.40, not a rounder-looking 0.45: the focus ring is specified once in
+ * DESIGN.md and every focusable element in the app draws the same one. A ring
+ * that differs by component is a ring people stop trusting to mean the same
+ * thing. */
+.primary:focus-visible {
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── Outline — secondary actions (share, downloads) ─────────────────────── */
+
+.outline {
+  composes: base;
+  border: 1px solid rgba(84, 84, 88, 0.65);
+  background: transparent;
+  color: rgba(235, 235, 245, 0.6);
+}
+
+.outline:hover {
+  border-color: rgba(120, 120, 128, 0.9);
+  background: rgba(120, 120, 128, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  transform: translateY(-1px);
+}
+
+/* :focus, not :focus-visible — reproducing the onFocus/onBlur state this
+ * replaces, which fired on mouse clicks too. Corrected in the next commit. */
+.outline:focus {
+  box-shadow: 0 0 0 3px rgba(120, 120, 128, 0.28);
+}
+
+/* ── Confirm — a transient success surface, not a control ───────────────── */
+
+.confirm {
+  composes: base;
+  border: 1px solid rgba(48, 209, 88, 0.45);
+  background: rgba(48, 209, 88, 0.12);
+  color: #30d158;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .base {
+    transition: none;
+  }
+
+  .primary:hover,
+  .outline:hover {
+    transform: none;
+  }
+}

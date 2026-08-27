@@ -1,30 +1,6 @@
-.trigger {
-  min-height: 40px;
-  padding: 10px 18px;
-  border: 0;
-  border-radius: 8px;
-  background: #0a84ff;
-  color: #fff;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 650;
-  outline: none;
-  transition: background 150ms ease, transform 120ms ease, box-shadow 150ms ease;
-}
-
-.trigger:hover {
-  background: #409cff;
-  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.35);
-  transform: translateY(-1px);
-}
-
-/* 0.40, not a rounder-looking 0.45: the focus ring is specified once in
- * DESIGN.md and every focusable element in the app draws the same one. A ring
- * that differs by component is a ring people stop trusting to mean the same
- * thing. */
-.trigger:focus-visible {
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
-}
+/* `.trigger` moved to components/ui/Button as the `primary` variant. It was
+ * the third copy of the same button surface — ShareButton and MagnetButton
+ * held the other two, as inline style objects. */
 
 .backdrop {
   position: fixed;
@@ -282,8 +258,3 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .trigger {
-    transition: none;
-  }
-}
