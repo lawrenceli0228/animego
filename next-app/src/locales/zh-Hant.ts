@@ -804,6 +804,7 @@ const zhHant = {
     pageTitle: '管理後台',
     enrichmentTitle: '富化管理',
     navOverview: '總覽',
+    navActivity: '使用者活躍度',
     navEnrichment: '資料富化',
     navUsers: '使用者管理',
     overviewHeading: '總覽',

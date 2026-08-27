@@ -790,6 +790,7 @@ const zh = {
     pageTitle: '管理后台',
     enrichmentTitle: '富化管理',
     navOverview: '总览',
+    navActivity: '用户活跃度',
     navEnrichment: '数据富化',
     navUsers: '用户管理',
     overviewHeading: '总览',

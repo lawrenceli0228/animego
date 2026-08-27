@@ -1,6 +1,7 @@
 import { apiGet, apiGetPaged } from "@/lib/api";
 import { resolveLocale } from "@/lib/i18n/route";
 import type { Dict } from "@/lib/i18n";
+import { ActivitySection } from "./_components/ActivitySection";
 import { EnrichmentBar } from "./_components/EnrichmentBar";
 import { EnrichmentSection } from "./_components/EnrichmentSection";
 import { HantDriftSection } from "./_components/HantDriftSection";
@@ -8,6 +9,7 @@ import { StatCard } from "./_components/StatCard";
 import { UsersSection } from "./_components/UsersSection";
 import ReportsSection, { type AdminReportsData } from "./_components/ReportsSection";
 import type {
+  AdminActivity,
   AdminStats,
   AdminUser,
   EnrichmentRow as EnrichmentRowData,
@@ -50,10 +52,17 @@ async function safeGet<T>(promise: Promise<T>, fallback: T): Promise<T> {
 }
 
 export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) {
-  const [{ dict }, stats, hantDrift, communityMetrics, enrichment, users, pendingReports, reviewingReports] = await Promise.all([
+  const [{ dict }, stats, activity, hantDrift, communityMetrics, enrichment, users, pendingReports, reviewingReports] = await Promise.all([
     resolveLocale(params),
     safeGet<AdminStats | null>(
       apiGet<AdminStats>("/api/admin/stats", { cache: "no-store" }),
+      null,
+    ),
+    // Null on failure, for the same reason as the drift block below: a zero
+    // on the activity panel says "nobody used the site today", which is the
+    // one reading a fetch error must not be able to produce.
+    safeGet<AdminActivity | null>(
+      apiGet<AdminActivity>("/api/admin/activity?days=30", { cache: "no-store" }),
       null,
     ),
     // Null on failure rather than zeroes: a zero in this payload is the
@@ -97,6 +106,12 @@ export default async function AdminPage({ params }: PageProps<"/[lang]/admin">) 
   return (
     <div style={styles.page}>
       <Overview stats={stats} communityMetrics={communityMetrics} dict={dict} />
+      <hr style={styles.divider} />
+      {/* Directly under the overview because it answers the question the
+          overview's own "注册用户 802" invites and cannot answer: how many of
+          them are still here. Everything below this line is about the
+          catalogue rather than the audience. */}
+      <ActivitySection initial={activity} />
       <hr style={styles.divider} />
       {/* Sits between the coverage story above and the row-level table below:
           it is the same kind of reading as EnrichmentBar's synopsis tiers (a

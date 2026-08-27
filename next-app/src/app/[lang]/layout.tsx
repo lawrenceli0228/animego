@@ -5,6 +5,7 @@ import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { LocaleHint } from "@/components/layout/LocaleHint";
 import { StaleTabNotice } from "@/components/layout/StaleTabNotice";
+import { ActivityBeacon } from "@/components/layout/ActivityBeacon";
 import { LanguageProvider } from "@/lib/lang-client";
 import { HTML_LANG, OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { localeParams, resolveLocale, type LangParams } from "@/lib/i18n/route";
@@ -173,6 +174,11 @@ export default async function RootLayout({
               on the server. */}
           <LocaleHint />
           <StaleTabNotice />
+          {/* Renders nothing. Reports one page view per navigation so the
+              admin activity panel can count arrivals the server never sees —
+              a soft navigation between two cached routes issues no request
+              at all. Sends a coarse surface label, never the path. */}
+          <ActivityBeacon />
           <Toaster
             position="top-center"
             toastOptions={{

@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/activity"
 	"github.com/lawrenceli0228/animego/go-api/internal/admin"
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
@@ -632,6 +633,22 @@ func main() {
 	adminUserHandlers := admin.NewUserHandlers(q, enqueuer)
 	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
 	adminHantHandlers := admin.NewHantHandlers(q, enqueuer)
+	adminActivityHandlers := admin.NewActivityHandlers(q, slog.Default())
+
+	// Presence recording (migration 0025).  The recorder buffers in memory and
+	// flushes on a ticker; Start launches that loop and the deferred Close
+	// drains it, so an orderly shutdown loses nothing.
+	//
+	// The defer is registered here rather than next to srv.Shutdown because
+	// every os.Exit path between here and there would skip a late one — and
+	// the whole value of Close is that it runs.
+	activityRecorder := activity.NewRecorder(pool, slog.Default(), activity.DefaultFlushInterval)
+	activityRecorder.Start()
+	defer activityRecorder.Close()
+	activityHandlers := activity.NewHandlers(activityRecorder)
+	// A login is the one presence event the recorder's middleware structurally
+	// cannot see: nobody holds a valid token at the moment they are logging in.
+	authHandlers.SetLoginObserver(activityRecorder)
 
 	// P2.4 — subscriptions + social.  Subscriptions handler depends on
 	// anime.EnsureCached for the FK pre-fill (POST /api/subscriptions
@@ -702,6 +719,19 @@ func main() {
 	r.Use(httpmw.MaxBodyBytes(httpmw.DefaultMaxBodyBytes))
 	// G4 wiring (see comment above).
 	r.Use(apiRateLimit.Middleware())
+	// P11 — presence recording.  Mounted ONCE at the top of the router
+	// rather than inside each authenticated route group, so it cannot be
+	// forgotten by a route added later and cannot be bypassed by one that
+	// skips auth middleware entirely.  That costs a second HMAC verification
+	// of the access token per authenticated request — see the note on
+	// activity.Middleware for why the context route is not available to a
+	// top-level middleware.  It never writes to the response, never blocks on
+	// the database, and never fails a request.
+	//
+	// Registered after the rate limiter on purpose: a throttled request never
+	// reached a handler, and counting it as presence would let a burst of
+	// rejected calls inflate the request counters.
+	r.Use(activity.Middleware(signer, activityRecorder))
 
 	// G3 — chi defaults emit plain-text "404 page not found" / "405
 	// Method Not Allowed" for unmatched routes.  Frontend retry logic
@@ -835,6 +865,15 @@ func main() {
 		r.With(jwtx.OptionalAuth(signer)).Post("/engagement", commentsHandlers.TrackCommunityEngagement)
 	})
 
+	// P11 — the client-reported half of the activity record: page arrivals
+	// (which a soft navigation between cached routes never generates an API
+	// call for) and video starts (which are not the same event as arriving at
+	// a player).  OptionalAuth because most of this site's readers are
+	// logged out and a page-visit figure that ignored them would understate
+	// the site by an order of magnitude.  See internal/activity/handlers.go
+	// for exactly how far a public counter endpoint may be trusted.
+	r.With(jwtx.OptionalAuth(signer)).Post("/api/activity/beacon", activityHandlers.Track)
+
 	r.Route("/api/notifications", func(r chi.Router) {
 		r.Use(jwtx.RequireAuth(signer))
 		r.Get("/", notificationHandlers.List)
@@ -876,6 +915,11 @@ func main() {
 		r.Get("/reports", safetyHandlers.ListReports)
 		r.Patch("/reports/{id}", safetyHandlers.UpdateReport)
 		r.Get("/community-metrics", commentsHandlers.CommunityMetrics)
+		// The user-activity panel: DAU/WAU/MAU, the daily trend, retention
+		// cohorts and the surface breakdown.  Distinct from
+		// /community-metrics, which is one rail's impressions and is
+		// aggregate-only by construction.
+		r.Get("/activity", adminActivityHandlers.GetActivity)
 
 		// Enrichment writes — static paths first to keep chi happy.
 		r.Post("/enrichment/re-enrich", adminEnrichmentHandlers.ReEnrich)

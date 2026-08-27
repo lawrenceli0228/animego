@@ -253,4 +253,139 @@ export interface AdminUser {
   createdAt: string;
   subscriptions: number;
   followers: number;
+  /**
+   * Newest recorded presence, or null when nothing has ever been recorded.
+   *
+   * Null is a statement about our records, not about the person: for an
+   * account created before instrumentation began it means "no interaction
+   * happened to leave a trace", not "never came back". Render it as an em
+   * dash, never as a date.
+   */
+  lastSeenAt: string | null;
+  /**
+   * Distinct days this account has been recorded on. Before the
+   * instrumentation date these are interaction days (what the historical
+   * reconstruction could see) and after it, visit days — a floor on old
+   * accounts and a measurement on new ones.
+   */
+  activeDays: number;
+  /**
+   * Successful password logins. NOT a session count, and near zero is the
+   * healthy state: the refresh token lives seven days, so a daily reader logs
+   * in about monthly. A high value next to a low `activeDays` is the
+   * interesting shape — it usually means sessions are failing to persist.
+   */
+  logins: number;
+}
+
+/**
+ * One bar of the activity trend.
+ *
+ * `instrumented` is decided server-side and travels with the point rather than
+ * being recomputed in the browser from `instrumentedSince` — a client-side
+ * comparison would have to parse a date string and could get the boundary day
+ * or the timezone subtly wrong, and would do it silently.
+ */
+export interface AdminActivityDay {
+  date: string;
+  activeUsers: number;
+  newUsers: number;
+  logins: number;
+  /**
+   * Authenticated API calls, INCLUDING server-rendering fan-out and client
+   * polling. A volume signal, not an engagement one.
+   */
+  requests: number;
+  pageViews: number;
+  playbacks: number;
+  instrumented: boolean;
+}
+
+/**
+ * One retention horizon. `cohort` always travels with `returned`, and neither
+ * is ever rendered without the other: at this scale a horizon can have a
+ * single-digit cohort, and "33%" of three people is not a percentage anybody
+ * should act on.
+ */
+export interface AdminRetentionBucket {
+  cohort: number;
+  returned: number;
+  rate: number;
+}
+
+/**
+ * The three horizons.
+ *
+ * `d1` and `d7` are DAY-EXACT — active on precisely signup+1 and signup+7 —
+ * which is the definition every analytics product in this market uses. Their
+ * cohorts differ from each other and from `ever`'s on purpose: an account that
+ * registered this morning has not failed to return tomorrow, so it is excluded
+ * from the day-1 denominator until tomorrow exists. `d1.cohort > d7.cohort` is
+ * normal.
+ *
+ * `ever` is the companion worth reading first: any activity on any day after
+ * signup, no eligibility gate. It is what makes a 0/3 day-7 figure legible as
+ * sparsity rather than as catastrophe.
+ */
+export interface AdminRetention {
+  windowDays: number;
+  d1: AdminRetentionBucket;
+  d7: AdminRetentionBucket;
+  ever: AdminRetentionBucket;
+}
+
+/**
+ * Traffic by coarse area, split by whether the visitor held a session.
+ *
+ * The anonymous column is the majority of this site and is invisible to every
+ * other number on the panel, all of which are keyed on a user id.
+ */
+export interface AdminSurfaceRow {
+  surface: string;
+  authenticated: number;
+  anonymous: number;
+  total: number;
+}
+
+/**
+ * GET /api/admin/activity.
+ *
+ * FOUR RELIABILITY TIERS LIVE IN THIS ONE OBJECT, and the UI has to keep them
+ * apart:
+ *
+ *   dau/wau/mau, retention   server-side, derived from a signed access token.
+ *                            Unforgeable. These are the numbers to decide on.
+ *   daily.activeUsers        same source; a floor before `instrumentedSince`.
+ *   pageViews / playbacks /
+ *   surfaces                 reported by a public client beacon. Directional
+ *                            only — anyone can move them.
+ *   anything before
+ *   instrumentedSince        reconstructed from what other tables happened to
+ *                            witness: interaction days, a strict subset of
+ *                            visits.
+ */
+export interface AdminActivity {
+  days: number;
+  /** Which midnight the day buckets are cut on. Reported so a reader does not have to go to the schema. */
+  timezone: string;
+  /**
+   * The first day per-request recording produced data. Null means recording
+   * has not started — a container that has run the migrations but not served
+   * traffic — and must render as "not instrumented", not as a date.
+   */
+  instrumentedSince: string | null;
+  dau: number;
+  wau: number;
+  mau: number;
+  /** DAU/MAU: of the people who used the site this month, what share used it today. */
+  stickiness: number;
+  daily: AdminActivityDay[];
+  /**
+   * Null when the query failed, never zeroes. A zero here is a claim ("nobody
+   * returned"), so a failed fetch rendered as zeroes would be the panel
+   * asserting the exact thing it exists to measure.
+   */
+  retention: AdminRetention | null;
+  /** Null when the query failed; `[]` when nothing has been recorded yet. */
+  surfaces: AdminSurfaceRow[] | null;
 }

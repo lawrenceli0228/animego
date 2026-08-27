@@ -139,6 +139,13 @@ export function UsersSection({ initial }: UsersSectionProps) {
               <th style={styles.th}>{t("admin.colEmail")}</th>
               <th style={styles.th}>{t("admin.colRole")}</th>
               <th style={styles.th}>{t("admin.colJoined")}</th>
+              {/* The three activity columns sit between "joined" and the
+                  social counts on purpose: joined and last-seen are the pair
+                  an operator reads together, and putting anything between
+                  them makes the comparison a scan instead of a glance. */}
+              <th style={styles.th}>{t("admin.colLastSeen")}</th>
+              <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colActiveDays")}</th>
+              <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colLogins")}</th>
               <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colSubs")}</th>
               <th style={{ ...styles.th, textAlign: "right" }}>{t("admin.colFollowers")}</th>
               <th style={styles.th}>{t("admin.colActions")}</th>
@@ -147,7 +154,7 @@ export function UsersSection({ initial }: UsersSectionProps) {
           <tbody>
             {data.data.length === 0 ? (
               <tr>
-                <td style={styles.empty} colSpan={7}>
+                <td style={styles.empty} colSpan={10}>
                   {t("admin.noMatchingUsers")}
                 </td>
               </tr>

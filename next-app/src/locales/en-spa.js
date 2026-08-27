@@ -1050,6 +1050,87 @@ const en = {
       queueLabel: 'Translation queue',
     },
     // Traditional-Chinese drift — HantDriftSection.
+    // The three activity columns on the user table. lastSeenNever is the dash
+    // cell's tooltip, spelled out because "never recorded" and "never came
+    // back" are different claims — for an account created before
+    // instrumentation began, the blank is about our records, not the person.
+    colLastSeen: 'Last seen',
+    colActiveDays: 'Active days',
+    colLogins: 'Logins',
+    lastSeenNever: 'Nothing has ever been recorded for this account. That is a statement about our records, not about the person.',
+    // Answers the question the overview's own "802 users" invites and cannot
+    // answer: how many of them are still here.
+    //
+    // Four reliability tiers, and they must not blur together:
+    //   DAU/WAU/MAU, retention  server-side, from a signed token. Unforgeable
+    //                           — decide on these.
+    //   the daily bars          same source, but only a floor for days before
+    //                           instrumentation began.
+    //   page views / playbacks /
+    //   surfaces                reported by a public beacon anyone can call.
+    //                           Directional only.
+    //   anything before the seam
+    //                           reconstructed from traces other tables happen
+    //                           to hold: interaction days, a strict and small
+    //                           subset of real visits.
+    activity: {
+      title: 'User activity',
+      loadError: 'Could not load activity data',
+      // The lede is not decoration. Without it "DAU 41" reads as a complete
+      // measurement of the site, when every number keyed on a user id is blind
+      // to the logged-out majority.
+      lede: 'Every per-user number here covers signed-in visits only. Most of this site\'s traffic arrives logged out from search, and shows up only in the surface breakdown below.',
+      windowLabel: 'Time window',
+      windowDays: '{{n}} days',
+      loading: 'Loading',
+      dau: 'DAU',
+      dauHint: 'People here today',
+      wau: 'WAU',
+      wauHint: 'Rolling 7 days, today included',
+      mau: 'MAU',
+      mauHint: 'Rolling 30 days, today included',
+      stickiness: 'Stickiness DAU/MAU',
+      stickinessHint: 'Of the people who used the site this month, the share who used it today',
+      trendTitle: 'Daily trend',
+      legendActive: 'Active users',
+      legendReconstructed: 'Reconstructed (pre-instrumentation)',
+      legendSignups: 'New signups',
+      chartAlt: 'Daily active users over the last {{n}} days, peaking at {{max}}.',
+      logins: 'Logins',
+      pageViews: 'Page views',
+      playbacks: 'Playbacks',
+      reconstructedDay: 'Reconstructed day — counts only users who left an interaction behind',
+      // Said out loud rather than left to a legend swatch. A reader who does
+      // not know the seam exists will read the step at the boundary as growth,
+      // and that is the most misleading thing this panel can show.
+      seamNote: 'Per-request recording started {{date}}. The {{n}} days before it are reconstructed from comments, follows and subscriptions — interaction days, a floor on real visits. The two halves are not comparable.',
+      notInstrumented: 'Per-request recording has not produced data yet. Every bar here is reconstructed from historical traces and is only a lower bound.',
+      retentionTitle: 'New-user retention',
+      retentionUnavailable: 'Could not load retention',
+      retentionWindow: 'Signups in the last {{n}} days',
+      // Spelled out because the three denominators genuinely differ and the
+      // difference looks like a bug. Somebody who registered this morning has
+      // not failed to return tomorrow.
+      retentionNote: 'The three denominators differ on purpose: an account less than a day old is excluded from day-1, less than seven days old from day-7. Otherwise every burst of signups would drag retention down.',
+      retentionD1: 'Day 1',
+      retentionD1Hint: 'Active on signup + 1 exactly — not "within 7 days"',
+      retentionD7: 'Day 7',
+      retentionD7Hint: 'Active on signup + 7 exactly',
+      retentionEver: 'Ever returned',
+      retentionEverHint: 'Active on any day after signup. Largest sample — read this one first',
+      noCohort: 'No cohort',
+      surfacesTitle: 'Traffic by surface',
+      // The only card on this panel fed by an endpoint a stranger can call.
+      // Saying so is what stops its numbers being quoted next to DAU as though
+      // they carried the same weight.
+      surfacesNote: 'Browser-reported, anonymous visitors included, and the endpoint is public — read the shape, not the digits. DAU and retention do not read this table.',
+      surfacesUnavailable: 'Could not load the surface breakdown',
+      surfacesEmpty: 'Nothing reported in this window yet.',
+      colSurface: 'Surface',
+      colAnonymous: 'Logged out',
+      colAuthenticated: 'Signed in',
+      colTotal: 'Total',
+    },
     //
     // Not a "missing content" block: a "content is lying" block. The
     // enrichment workers keep writing the Simplified columns; title_hant /

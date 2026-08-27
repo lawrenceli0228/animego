@@ -49,12 +49,15 @@ export default async function AdminLayout({ children, params }: LayoutProps<"/[l
         <div style={styles.headerInner}>
           <h1 style={styles.title}>{dict.admin.title}</h1>
           {/* Monolithic single-page admin — anchor scrolls instead of
-              Link navigations. Three sections live on /admin: #overview
-              (stats grid + EnrichmentBar), #enrichment (data review
-              table), #users (CRUD). */}
+              Link navigations. Four sections live on /admin: #overview
+              (stats grid + EnrichmentBar), #activity (DAU/WAU/MAU, trend,
+              retention), #enrichment (data review table), #users (CRUD). */}
           <nav style={styles.nav} aria-label="Admin navigation">
             <a href="#overview" style={styles.navLink}>
               {dict.admin.navOverview}
+            </a>
+            <a href="#activity" style={styles.navLink}>
+              {dict.admin.navActivity}
             </a>
             <a href="#enrichment" style={styles.navLink}>
               {dict.admin.navEnrichment}

@@ -737,6 +737,7 @@ const en = {
     pageTitle: 'Admin Dashboard',
     enrichmentTitle: 'Enrichment Management',
     navOverview: 'Overview',
+    navActivity: 'User activity',
     navEnrichment: 'Enrichment',
     navUsers: 'Users',
     overviewHeading: 'Overview',

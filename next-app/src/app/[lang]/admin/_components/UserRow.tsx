@@ -279,6 +279,22 @@ export function UserRow({ user }: UserRowProps) {
           <RoleBadge role={user.role} />
         </td>
         <td style={styles.td}>{formatDate(user.createdAt)}</td>
+        <td style={styles.td}>
+          {user.lastSeenAt ? (
+            formatDate(user.lastSeenAt)
+          ) : (
+            // An em dash, never a date. Null means nothing was ever recorded
+            // for this account — which for one created before instrumentation
+            // began is a statement about our records, not about the person.
+            // Substituting the signup date would assert something we do not
+            // know, and an epoch would print 1970 and read as a real visit.
+            <span style={styles.dim} title={t("admin.lastSeenNever")}>
+              —
+            </span>
+          )}
+        </td>
+        <td style={{ ...styles.td, ...styles.numCell }}>{user.activeDays}</td>
+        <td style={{ ...styles.td, ...styles.numCell }}>{user.logins}</td>
         <td style={{ ...styles.td, ...styles.numCell }}>{user.subscriptions}</td>
         <td style={{ ...styles.td, ...styles.numCell }}>{user.followers}</td>
         <td style={styles.td}>
@@ -373,7 +389,7 @@ export function UserRow({ user }: UserRowProps) {
       </tr>
       {error && (
         <tr style={styles.errorRow}>
-          <td colSpan={7} style={styles.errorCell}>
+          <td colSpan={10} style={styles.errorCell}>
             {error}
           </td>
         </tr>
