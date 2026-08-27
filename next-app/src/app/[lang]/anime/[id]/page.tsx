@@ -16,7 +16,6 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
-import type { CSSProperties } from "react";
 import { buildJsonLd } from "@/components/anime/animeJsonLd";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
@@ -27,6 +26,7 @@ import HeroAccent from "@/components/anime/HeroAccent";
 import { FormatBadge, GenreChips } from "@/components/anime/LocalizedChips";
 import { scoreBadgeStyle } from "@/components/anime/scoreStyle";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
+import s from "./page.module.css";
 import { apiGet, ApiError } from "@/lib/api";
 import {
   durationLabel,
@@ -287,114 +287,20 @@ export async function generateMetadata({
 // at module scope), and the numberOfEpisodes rule in there is worth a real
 // assertion rather than a grep. See that file's header.
 
-// --- Style tokens (kept inline; matches legacy hero spec) ---
-
-const S = {
-  bannerOverlay: {
-    position: "absolute" as const,
-    inset: 0,
-    background:
-      "linear-gradient(to bottom, transparent 0%, transparent 40%, rgba(0,0,0,0.30) 65%, rgba(0,0,0,0.95) 100%)",
-  },
-  cover: {
-    width: 210,
-    height: 300,
-    objectFit: "cover" as const,
-    borderRadius: 12,
-    border: "1px solid rgba(84,84,88,0.65)",
-    background: "#1c1c1e",
-    display: "block",
-  },
-  title: {
-    fontFamily: "'Sora', sans-serif",
-    fontSize: "clamp(22px, 4vw, 36px)",
-    color: "#ffffff",
-    marginBottom: 4,
-    lineHeight: 1.2,
-  },
-  subtitle: {
-    color: "rgba(235,235,245,0.60)",
-    fontSize: 15,
-    marginBottom: 16,
-  },
-  badgeRow: { display: "flex" as const, flexWrap: "wrap" as const, gap: 10, marginBottom: 16 },
-  badge: (bg: string, color: string): CSSProperties => ({
-    padding: "4px 12px",
-    borderRadius: 9999,
-    background: bg,
-    color,
-    fontSize: 13,
-  }),
-  // Layout only. The two colour properties come from scoreBadgeStyle(score)
-  // and are spread in at the call site — deliberately not accepted as
-  // parameters here, because a `scoreBadge(color)` signature is exactly what
-  // let the foreground vary while this background stayed amber.
-  scoreBadge: {
-    padding: "4px 12px",
-    borderRadius: 9999,
-    fontWeight: 700 as const,
-    fontSize: 13,
-    fontFamily: "'JetBrains Mono', monospace",
-  },
-  bgmScoreBadge: {
-    padding: "4px 12px",
-    borderRadius: 9999,
-    background: "rgba(255,69,58,0.10)",
-    color: "#ff453a",
-    fontWeight: 700 as const,
-    fontSize: 13,
-    display: "inline-flex" as const,
-    alignItems: "center" as const,
-    gap: 5,
-    fontFamily: "'JetBrains Mono', monospace",
-  },
-  bgmLabel: { fontSize: 10, opacity: 0.7, fontFamily: "'DM Sans', sans-serif" },
-  bgmVotes: { fontSize: 11, opacity: 0.6, fontWeight: 400 },
-  bgmLink: {
-    padding: "4px 12px",
-    borderRadius: 9999,
-    background: "rgba(255,69,58,0.10)",
-    color: "#ff453a",
-    fontSize: 13,
-    textDecoration: "none",
-    display: "inline-flex" as const,
-    alignItems: "center" as const,
-    gap: 4,
-    fontWeight: 500 as const,
-  },
-  metaRow: {
-    display: "flex" as const,
-    flexWrap: "wrap" as const,
-    gap: "4px 12px",
-    marginBottom: 16,
-    alignItems: "center" as const,
-  },
-  metaStudio: { color: "rgba(235,235,245,0.75)", fontSize: 13 },
-  metaDot: { color: "rgba(84,84,88,0.65)", fontSize: 13 },
-  metaDetail: { color: "rgba(235,235,245,0.50)", fontSize: 12 },
-  genreRow: { display: "flex" as const, flexWrap: "wrap" as const, gap: 6, marginBottom: 20 },
-  genreTag: {
-    padding: "4px 10px",
-    borderRadius: 9999,
-    background: "rgba(120,120,128,0.12)",
-    color: "rgba(235,235,245,0.60)",
-    fontSize: 12,
-    fontWeight: 500 as const,
-  },
-  descText: {
-    color: "rgba(235,235,245,0.75)",
-    fontSize: 14,
-    lineHeight: 1.8,
-  },
-  sectionLabel: {
-    color: "#0a84ff",
-    fontSize: 13,
-    fontWeight: 600 as const,
-    letterSpacing: "2px",
-    textTransform: "uppercase" as const,
-    marginBottom: 16,
-  },
-} satisfies Record<string, CSSProperties | ((...args: never[]) => CSSProperties)>;
+// --- Styles ---
+//
+// In page.module.css, not in an object here. The hero was 19 inline
+// CSSProperties literals, and inline styles have two properties that made
+// that a dead end: they cannot express a hover, a focus ring or a media
+// query, and they beat every stylesheet rule, so CSS written against these
+// elements would have been silently inert.
+//
+// The geometry in particular had to move. Four values — banner height, how
+// far the content is pulled up into it, the poster width, and the title's
+// top offset — are one design, and they were four separate ternaries on
+// `detail.bannerImageUrl` spread over 70 lines of JSX. They are now one
+// custom-property set per state and this file only declares which state it
+// is in, via data-banner. See the header of page.module.css.
 
 // --- Hero (banner + cover + meta block) ---
 
@@ -529,7 +435,11 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
   );
 
   return (
-    <div>
+    // data-banner is the whole conditional. Every geometry value that used to
+    // be a `detail.bannerImageUrl ? a : b` in the JSX below now hangs off this
+    // one attribute in page.module.css, so the four of them cannot be changed
+    // apart from each other.
+    <div className={s.hero} data-banner={detail.bannerImageUrl ? "true" : "false"}>
       {/* Banner — a real <img>, not a CSS background.
         *
         * This is the LCP element of the page Google indexes, and as
@@ -557,14 +467,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
         * positioned into a fixed-height box, so there is no layout to reserve
         * and the intrinsic ratio would only be a lie if AniList ever changes
         * banner dimensions. */}
-      <div
-        style={{
-          position: "relative",
-          height: detail.bannerImageUrl ? 400 : 120,
-          background: "#000000",
-          overflow: "hidden",
-        }}
-      >
+      <div className={s.banner}>
         {detail.bannerImageUrl ? (
           <Image
             src={detail.bannerImageUrl}
@@ -580,36 +483,19 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
             loading="eager"
             fetchPriority="high"
             decoding="sync"
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              objectPosition: "center",
-              display: "block",
-            }}
+            className={s.bannerImage}
           />
         ) : null}
-        <div style={S.bannerOverlay} />
+        <div className={s.bannerOverlay} />
       </div>
 
       {/* Content */}
-      <div
-        className="container"
-        style={{
-          display: "flex",
-          gap: 32,
-          marginTop: detail.bannerImageUrl ? -80 : 24,
-          position: "relative",
-          zIndex: 1,
-          paddingBottom: 40,
-          flexWrap: "wrap",
-        }}
-      >
+      <div className={`container ${s.content}`}>
         {/* Cover — `hero-cover` class lets HeroAccent's halo CSS attach.
-            Halo color comes from --poster-accent on the HeroAccent wrapper. */}
-        <div style={{ flexShrink: 0 }}>
+            Halo color comes from --poster-accent on the HeroAccent wrapper.
+            The width/height attributes still carry the intrinsic ratio (they
+            are what reserves the box before decode); the module sizes it. */}
+        <div className={s.coverSlot}>
           {detail.coverImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <FadeImage
@@ -618,34 +504,33 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
               width={210}
               height={300}
               priority
-              className="hero-cover"
-              style={S.cover}
+              className={`hero-cover ${s.cover}`}
             />
           ) : (
-            <div style={{ ...S.cover, background: "#2c2c2e" }} aria-hidden />
+            <div className={s.coverPlaceholder} aria-hidden />
           )}
         </div>
 
         {/* Meta */}
-        <div style={{ flex: 1, minWidth: 280, paddingTop: detail.bannerImageUrl ? 60 : 0 }}>
-          <h1 style={S.title}>{title}</h1>
+        <div className={s.meta}>
+          <h1 className={s.title}>{title}</h1>
           {SHOWS_ORIGINAL_SUBTITLE[lang] && (detail.titleNative || detail.titleRomaji) && (
-            <p style={S.subtitle}>{detail.titleNative || detail.titleRomaji}</p>
+            <p className={s.subtitle}>{detail.titleNative || detail.titleRomaji}</p>
           )}
 
           {/* Badges */}
-          <div style={S.badgeRow}>
+          <div className={s.badgeRow}>
             {score && score > 0 ? (
-              <span style={{ ...S.scoreBadge, ...scoreBadgeStyle(score) }}>
+              <span className={s.scoreBadge} style={scoreBadgeStyle(score)}>
                 {"★"} {formatScore(score)}
               </span>
             ) : null}
             {detail.bangumiScore && detail.bangumiScore > 0 ? (
-              <span style={S.bgmScoreBadge}>
-                <span style={S.bgmLabel}>BGM</span>
+              <span className={s.bgmScoreBadge}>
+                <span className={s.bgmLabel}>BGM</span>
                 {"★"} {detail.bangumiScore.toFixed(1)}
                 {detail.bangumiVotes && detail.bangumiVotes > 0 ? (
-                  <span style={S.bgmVotes}>({detail.bangumiVotes.toLocaleString()})</span>
+                  <span className={s.bgmVotes}>({detail.bangumiVotes.toLocaleString()})</span>
                 ) : null}
               </span>
             ) : null}
@@ -653,27 +538,23 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
               // Client leaf so this follows the cookie language rather than
               // the server-pinned zh — see the route note at the top of this
               // file for why only this and the genre row get that treatment.
-              <FormatBadge
-                format={detail.format}
-                style={S.badge("rgba(10,132,255,0.12)", "#0a84ff")}
-              />
+              <FormatBadge format={detail.format} className={s.badgeAccent} />
             )}
             {detail.status && (
-              <span style={S.badge("rgba(90,200,250,0.10)", "#5ac8fa")}>
-                {statusLabel(dict, detail.status)}
-              </span>
+              <span className={s.badgeInfo}>{statusLabel(dict, detail.status)}</span>
             )}
             {episodeSkeleton.kind === "authoritative" ? (
-              <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.60)")}>
+              <span className={s.badgeNeutral}>
                 {episodeSkeleton.total} {dict.detail.epUnit}
               </span>
             ) : (
-              <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.42)")}>
-                {dict.detail.episodeCountPending}
-              </span>
+              // Muted rather than neutral: this is the "we do not have an
+              // authoritative count" case, and it should not read with the
+              // same confidence as a real number sitting next to it.
+              <span className={s.badgeMuted}>{dict.detail.episodeCountPending}</span>
             )}
             {seasonLab && detail.seasonYear ? (
-              <span style={S.badge("rgba(120,120,128,0.12)", "rgba(235,235,245,0.60)")}>
+              <span className={s.badgeNeutral}>
                 {seasonLab} {detail.seasonYear}
               </span>
             ) : null}
@@ -682,9 +563,9 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
                 href={`https://bgm.tv/subject/${detail.bgmId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={S.bgmLink}
+                className={s.bgmLink}
               >
-                <span style={{ fontSize: 10, opacity: 0.8 }}>{"▶"}</span>
+                <span className={s.bgmArrow}>{"▶"}</span>
                 {dict.detail.viewOnBgm}
               </a>
             ) : null}
@@ -692,17 +573,17 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
 
           {/* Meta row */}
           {(detail.studios.length > 0 || sourceText || durationText || startDateLabel) && (
-            <div style={S.metaRow}>
+            <div className={s.metaRow}>
               {detail.studios.length > 0 && (
-                <span style={S.metaStudio}>{detail.studios.join(" · ")}</span>
+                <span className={s.metaStudio}>{detail.studios.join(" · ")}</span>
               )}
               {detail.studios.length > 0 &&
                 (sourceText || durationText || startDateLabel) && (
-                  <span style={S.metaDot}>{"·"}</span>
+                  <span className={s.metaDot}>{"·"}</span>
                 )}
-              {sourceText && <span style={S.metaDetail}>{sourceText}</span>}
-              {durationText && <span style={S.metaDetail}>{durationText}</span>}
-              {startDateLabel && <span style={S.metaDetail}>{startDateLabel}</span>}
+              {sourceText && <span className={s.metaDetail}>{sourceText}</span>}
+              {durationText && <span className={s.metaDetail}>{durationText}</span>}
+              {startDateLabel && <span className={s.metaDetail}>{startDateLabel}</span>}
             </div>
           )}
 
@@ -712,13 +593,13 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
               schema.org keeps the English AniList vocabulary. */}
           <GenreChips
             genres={detail.genres}
-            style={S.genreRow}
-            chipStyle={S.genreTag}
+            className={s.genreRow}
+            chipClassName={s.genreTag}
           />
 
           {/* Description with 展开更多 / 收起 toggle */}
           {descFull && (
-            <div style={{ marginBottom: heroRelations.length > 0 ? 20 : 0 }}>
+            <div className={heroRelations.length > 0 ? s.descBlock : s.descBlockLast}>
               <DescriptionExpand
                 truncated={descTruncated}
                 full={descFull}
@@ -748,14 +629,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
               instead of forcing the user to scroll to the relations
               section. The full RelationsSection still renders below. */}
           {heroRelations.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                marginTop: 12,
-              }}
-            >
+            <div className={s.relationRow}>
               {heroRelations.map((r) => {
                 const relLabel =
                   relationLabel(r.relationType, lang);
@@ -788,14 +662,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
                       textDecoration: "none",
                     }}
                   >
-                    <span
-                      style={{
-                        color: "rgba(235,235,245,0.35)",
-                        fontSize: 11,
-                      }}
-                    >
-                      {relLabel}
-                    </span>
+                    <span className={s.relationLabel}>{relLabel}</span>
                     {relTitle}
                   </Link>
                 );
@@ -960,7 +827,7 @@ function CharactersSection({
 
   return (
     <section style={{ marginTop: 40 }}>
-      <h2 style={S.sectionLabel as CSSProperties}>{label}</h2>
+      <h2 className={s.sectionLabel}>{label}</h2>
       <div
         style={{
           display: "grid",
@@ -1126,7 +993,7 @@ function StaffSectionView({ staff, lang, dict }: { staff: DetailStaff[]; lang: L
 
   return (
     <section style={{ marginTop: 40 }}>
-      <h2 style={S.sectionLabel as CSSProperties}>{label}</h2>
+      <h2 className={s.sectionLabel}>{label}</h2>
       <div
         style={{
           display: "grid",
@@ -1227,7 +1094,7 @@ function RecommendationsSection({
 
   return (
     <section style={{ marginTop: 40, marginBottom: 60 }}>
-      <h2 style={S.sectionLabel as CSSProperties}>{label}</h2>
+      <h2 className={s.sectionLabel}>{label}</h2>
       <div
         style={{
           display: "flex",
