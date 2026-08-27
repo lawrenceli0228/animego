@@ -63,6 +63,7 @@ type fakeQuerier struct {
 	getWatchersFn           func(ctx context.Context, id int32, limit int32) ([]dbgen.GetWatchersRow, error)
 	countWatchersFn         func(ctx context.Context, id int32) (int64, error)
 	getTorrentQueryInputsFn func(ctx context.Context, anilistID int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error)
+	listSitemapShardFn      func(ctx context.Context, shardCount, shardIndex int32) ([]dbgen.ListSitemapShardRow, error)
 }
 
 func (f *fakeQuerier) GetCompletedGems(ctx context.Context, limit int32) ([]dbgen.GetCompletedGemsRow, error) {
@@ -112,6 +113,13 @@ func (f *fakeQuerier) CountWatchers(ctx context.Context, id int32) (int64, error
 		return 0, errors.New("fakeQuerier: CountWatchers not set")
 	}
 	return f.countWatchersFn(ctx, id)
+}
+
+func (f *fakeQuerier) ListSitemapShard(ctx context.Context, shardCount, shardIndex int32) ([]dbgen.ListSitemapShardRow, error) {
+	if f.listSitemapShardFn == nil {
+		return nil, errors.New("fakeQuerier: ListSitemapShard not set")
+	}
+	return f.listSitemapShardFn(ctx, shardCount, shardIndex)
 }
 
 func (f *fakeQuerier) GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistID int32) (dbgen.GetTorrentQueryInputsByAnilistIDRow, error) {
