@@ -29,17 +29,34 @@ const REAL_ANIME = 21;
 /** Nothing will ever have this id. */
 const MISSING_ANIME = 999_999_999;
 
-/** Every robots directive the page emits, lowercased, in document order. */
+/**
+ * Every robots directive in the SERVER-RENDERED html.
+ *
+ * `page.request.get` runs no JavaScript, so this is the document a crawler is
+ * handed — the same reason episode-display.spec.ts reads it this way. Reading
+ * the live DOM instead measures the wrong thing twice over: a crawler never
+ * hydrates, and these routes stream, so during hydration the tag can briefly
+ * appear twice. CI caught exactly that (`["noindex","noindex"]`, green on
+ * retry) on the first version of this file.
+ */
 async function robotsTags(page: import("@playwright/test").Page, path: string) {
-  const res = await page.goto(path);
+  const res = await page.request.get(path);
+  const html = await res.text();
   return {
-    status: res?.status() ?? 0,
-    tags: await page
-      .locator('meta[name="robots"]')
-      .evaluateAll((els) =>
-        els.map((e) => (e.getAttribute("content") ?? "").toLowerCase().trim()),
-      ),
+    status: res.status(),
+    tags: [...html.matchAll(/<meta[^>]+name="robots"[^>]*>/gi)]
+      .map((m) => /content="([^"]*)"/i.exec(m[0])?.[1] ?? "")
+      .map((c) => c.toLowerCase().trim())
+      .filter(Boolean),
   };
+}
+
+/** Whether a set of directives disagrees with itself about indexability. */
+function contradicts(tags: string[]): boolean {
+  const saysNo = tags.some((t) => t.includes("noindex"));
+  // "index" alone, not the "index" inside "noindex".
+  const saysYes = tags.some((t) => /(^|[\s,])index\b/.test(t));
+  return saysNo && saysYes;
 }
 
 test.describe("no page contradicts itself", () => {
@@ -60,9 +77,14 @@ test.describe("no page contradicts itself", () => {
   ];
 
   for (const path of ROUTES) {
-    test(`${path} emits at most one robots directive`, async ({ page }) => {
+    test(`${path} does not disagree with itself about indexing`, async ({ page }) => {
+      // Not "emits at most one tag" — that was the first version of this
+      // assertion and it was testing the wrong property. Two identical
+      // `noindex` tags are redundant, not contradictory; what breaks a page
+      // is `index` and `noindex` in the same document, which is what the
+      // root layout's blanket directive produced on every 404.
       const { tags } = await robotsTags(page, path);
-      expect(tags.length, `robots tags on ${path}: ${JSON.stringify(tags)}`).toBeLessThanOrEqual(1);
+      expect(contradicts(tags), `robots tags on ${path}: ${JSON.stringify(tags)}`).toBe(false);
     });
   }
 });
@@ -94,12 +116,18 @@ test.describe("off-index surfaces", () => {
 });
 
 test.describe("a missing anime", () => {
-  test("says noindex, and says only that", async ({ page }) => {
+  test("says noindex, and nothing that argues with it", async ({ page }) => {
     // The one signal keeping 17,603-per-locale worth of potential soft 404s
     // out of the index. It used to arrive alongside an `index, follow` it had
     // to out-rank.
+    //
+    // Asserted as "every directive is a noindex" rather than "the array is
+    // exactly ['noindex']": the count is a rendering detail of a streamed
+    // response, and pinning it made this test fail on a duplicate that
+    // changed nothing about what a crawler concludes.
     const { tags } = await robotsTags(page, `/anime/${MISSING_ANIME}`);
-    expect(tags).toEqual(["noindex"]);
+    expect(tags.length).toBeGreaterThan(0);
+    for (const tag of tags) expect(tag).toContain("noindex");
   });
 
   test("renders the not-found page, not a half-empty detail page", async ({ page }) => {
