@@ -9,31 +9,32 @@
 // registered once and never came back — not because the query was hard but
 // because nothing recorded it.
 //
-// THE ONE THING THIS COMPONENT MUST NOT DO is let its four reliability tiers
-// blur into one another. In descending order of trust:
+// THE ONE THING THIS COMPONENT MUST NOT DO is let its two reliability tiers
+// blur into one another:
 //
-//   1. DAU / WAU / MAU and retention — server-side, derived from a signed
-//      access token. Unforgeable. Decide on these.
-//   2. The daily active-users bars — same source, but a floor rather than a
-//      measurement for any day before `instrumentedSince`.
-//   3. Page views, playbacks, and the surface table — reported by a public
-//      beacon that anyone can call. Directional only.
-//   4. Anything left of `instrumentedSince` — reconstructed by migration 0026
-//      from whatever other tables happened to witness. Interaction days, a
-//      strict and small subset of real visits.
+//   1. Everything after `instrumentedSince` — server-side, derived from a
+//      signed access token on a real request. Unforgeable, and nothing a
+//      browser sends can move it. Decide on these.
+//   2. Everything before it — reconstructed by migration 0026 from whatever
+//      other tables happened to witness. Interaction days, a strict and small
+//      subset of real visits.
 //
-// So tier 4 gets its own bar treatment (hatched, half-opacity, in the legend),
-// tier 3 sits in its own card with its own sentence, and tiers 1–2 get the
-// StatCards. Blended into one line with no divider, the tier-4→tier-2
-// changeover looks like the product suddenly took off — and six months from
-// now, having forgotten, we would read it that way.
+// So tier 2 gets its own bar treatment (hatched, half-opacity, named in the
+// legend) AND a sentence under the chart. Blended into one line with no
+// divider, the tier-2→tier-1 changeover looks like the product suddenly took
+// off — and six months from now, having forgotten, we would read it that way.
+//
+// What this panel cannot show at all is logged-out readers, who are most of
+// this site's traffic. Every number here is keyed on a user id. The lede says
+// so out loud rather than leaving "DAU 41" to be read as a measurement of the
+// whole site.
 //
 // Shape follows HantDriftSection: same section header, same StatCard grid,
 // same card wells, same client-side refetch. This file picks words and
 // colours; every judgement it makes is in @/lib/activityChart, unit-tested
 // without a DOM.
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   axisTickIndices,
   barHeightPct,
@@ -43,12 +44,7 @@ import {
   shortDate,
 } from "@/lib/activityChart";
 import { useLang } from "@/lib/lang-client";
-import type {
-  AdminActivity,
-  AdminActivityDay,
-  AdminRetentionBucket,
-  AdminSurfaceRow,
-} from "../_types";
+import type { AdminActivity, AdminActivityDay, AdminRetentionBucket } from "../_types";
 import { StatCard } from "./StatCard";
 
 /**
@@ -107,37 +103,44 @@ export function ActivitySection({ initial }: ActivitySectionProps) {
   const [days, setDays] = useState<number>(initial?.days ?? 30);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The window the currently-held payload was fetched for. Compared against
+  // `days` to decide whether a fetch is needed at all, so the server-rendered
+  // payload does not trigger an immediate refetch of the same thing.
+  const loadedDays = data?.days;
 
-  const load = useCallback(
-    (next: number) => {
-      // Nothing to do when the server already delivered this window.
-      if (data && data.days === next && !error) return;
-      setLoading(true);
-      const ac = new AbortController();
-      void fetchActivity(next, ac.signal)
-        .then((result) => {
-          if (result) {
-            setData(result);
-            setError(null);
-          } else {
-            setError(t("admin.activity.loadError"));
-          }
-        })
-        .catch(() => {
-          // An abort is a window change, not a failure; leave the message
-          // alone so switching quickly does not flash an error.
-        })
-        .finally(() => setLoading(false));
-      return () => ac.abort();
-    },
-    [data, error, t],
-  );
-
+  // Standard fetch-effect shape: everything lives inside the effect and the
+  // only dependency is the thing that should actually cause a refetch.
+  //
+  // The previous version hoisted this into a memoised callback whose deps
+  // included `error` — which the fetch itself writes. One failure changed
+  // `error`, which changed that callback's identity, which re-ran the effect and
+  // fired a second request. It stopped at two only because React bails out of a
+  // re-render when setState is handed the identical string; one word of drift in
+  // the message and it would have been a retry loop against an endpoint that had
+  // just told us it was in trouble.
   useEffect(() => {
-    if (data?.days === days) return;
-    const cleanup = load(days);
-    return cleanup;
-  }, [days, data?.days, load]);
+    if (loadedDays === days) return;
+    const ac = new AbortController();
+    setLoading(true);
+    void fetchActivity(days, ac.signal)
+      .then((result) => {
+        if (ac.signal.aborted) return;
+        if (result) {
+          setData(result);
+          setError(null);
+        } else {
+          setError(t("admin.activity.loadError"));
+        }
+      })
+      .catch(() => {
+        // An abort is a window change, not a failure; leave the message alone
+        // so switching quickly does not flash an error.
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [days, loadedDays, t]);
 
   if (!data) {
     // Matches Overview's handling of a failed stats fetch: name the section,
@@ -235,7 +238,6 @@ export function ActivitySection({ initial }: ActivitySectionProps) {
       </div>
 
       <RetentionCard retention={data.retention} t={t} />
-      <SurfaceCard surfaces={data.surfaces} t={t} />
     </section>
   );
 }
@@ -337,8 +339,7 @@ function barTitle(p: AdminActivityDay, t: (key: string) => string): string {
     `${t("admin.activity.dau")}: ${p.activeUsers}`,
     `${t("admin.activity.legendSignups")}: ${p.newUsers}`,
     `${t("admin.activity.logins")}: ${p.logins}`,
-    `${t("admin.activity.pageViews")}: ${p.pageViews}`,
-    `${t("admin.activity.playbacks")}: ${p.playbacks}`,
+    `${t("admin.activity.requests")}: ${p.requests}`,
   ];
   if (!p.instrumented) lines.push(t("admin.activity.reconstructedDay"));
   return lines.join("\n");
@@ -439,81 +440,6 @@ function RetentionCell({
         {bucket.returned} / {bucket.cohort}
       </div>
       <div style={styles.retentionHint}>{hint}</div>
-    </div>
-  );
-}
-
-function SurfaceCard({
-  surfaces,
-  t,
-}: {
-  surfaces: AdminSurfaceRow[] | null;
-  t: (key: string) => string;
-}) {
-  if (!surfaces) {
-    return (
-      <div style={styles.card}>
-        <div style={styles.cardHead}>
-          <span>{t("admin.activity.surfacesTitle")}</span>
-        </div>
-        <div style={styles.errorBox}>{t("admin.activity.surfacesUnavailable")}</div>
-      </div>
-    );
-  }
-
-  const max = seriesMax(surfaces.map((s) => s.total));
-
-  return (
-    <div style={styles.card}>
-      <div style={styles.cardHead}>
-        <span>{t("admin.activity.surfacesTitle")}</span>
-      </div>
-      {/*
-        This card is the only one on the panel fed by an endpoint a stranger
-        can call. Saying so here is what stops its numbers being quoted next to
-        DAU as though they carried the same weight.
-      */}
-      <p style={styles.factNote}>{t("admin.activity.surfacesNote")}</p>
-      {surfaces.length === 0 ? (
-        <p style={styles.emptyNote}>{t("admin.activity.surfacesEmpty")}</p>
-      ) : (
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>{t("admin.activity.colSurface")}</th>
-              <th style={{ ...styles.th, ...styles.thNum }}>{t("admin.activity.colAnonymous")}</th>
-              <th style={{ ...styles.th, ...styles.thNum }}>
-                {t("admin.activity.colAuthenticated")}
-              </th>
-              <th style={{ ...styles.th, ...styles.thNum }}>{t("admin.activity.colTotal")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {surfaces.map((s) => (
-              <tr key={s.surface}>
-                <td style={styles.td}>
-                  <div style={styles.surfaceName}>{s.surface}</div>
-                  <div style={styles.surfaceBarTrack}>
-                    <div
-                      style={{
-                        ...styles.surfaceBarFill,
-                        width: `${barHeightPct(s.total, max)}%`,
-                      }}
-                    />
-                  </div>
-                </td>
-                <td style={{ ...styles.td, ...styles.tdNum }}>{s.anonymous.toLocaleString()}</td>
-                <td style={{ ...styles.td, ...styles.tdNum }}>
-                  {s.authenticated.toLocaleString()}
-                </td>
-                <td style={{ ...styles.td, ...styles.tdNum, ...styles.tdStrong }}>
-                  {s.total.toLocaleString()}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
     </div>
   );
 }

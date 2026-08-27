@@ -12,7 +12,7 @@ import type { AdminActivity } from "../_types";
 // This file asserts the wiring, and specifically the four things this panel
 // gets wrong if nobody pins them:
 //
-//   1. the four reliability tiers stay visually and textually distinct;
+//   1. the two reliability tiers stay visually and textually distinct;
 //   2. a failed sub-query renders as "unavailable", never as a zero — a zero
 //      here is a claim ("nobody returned"), so a fetch error rendered as one
 //      would be the panel asserting the thing it exists to measure;
@@ -36,8 +36,6 @@ function day(
     newUsers: 0,
     logins: 0,
     requests: 0,
-    pageViews: 0,
-    playbacks: 0,
     instrumented,
     ...over,
   };
@@ -57,7 +55,7 @@ function activityFor(over: Partial<AdminActivity> = {}): AdminActivity {
       day("2026-08-23", 11, false),
       day("2026-08-24", 8, false),
       day("2026-08-25", 12, false),
-      day("2026-08-26", 96, true, { newUsers: 3, logins: 5, pageViews: 512, playbacks: 40 }),
+      day("2026-08-26", 96, true, { newUsers: 3, logins: 5, requests: 512 }),
       day("2026-08-27", 88, true, { newUsers: 1 }),
       day("2026-08-28", 41, true),
     ],
@@ -67,10 +65,6 @@ function activityFor(over: Partial<AdminActivity> = {}): AdminActivity {
       d7: { cohort: 4, returned: 1, rate: 0.25 },
       ever: { cohort: 17, returned: 5, rate: 5 / 17 },
     },
-    surfaces: [
-      { surface: "anime", authenticated: 100, anonymous: 900, total: 1000 },
-      { surface: "home", authenticated: 40, anonymous: 60, total: 100 },
-    ],
     ...over,
   };
 }
@@ -181,36 +175,12 @@ describe("a failed sub-query is never rendered as a zero", () => {
     expect(html).not.toContain("三个分母不同是有意的");
   });
 
-  test("null surfaces says unavailable; an empty array says nothing reported", () => {
-    expect(text(activityFor({ surfaces: null }))).toContain("板块分布读取失败");
-    // The two are different facts and must not render the same way.
-    const empty = text(activityFor({ surfaces: [] }));
-    expect(empty).toContain("还没有上报数据");
-    expect(empty).not.toContain("板块分布读取失败");
-  });
-
   test("a null payload names the section and refuses to invent zeroes", () => {
     const html = text(null);
     expect(html).toContain("用户活跃度");
     expect(html).toContain("活跃度数据读取失败");
     // No fabricated headline numbers.
     expect(html).not.toContain("日活 DAU");
-  });
-});
-
-describe("the surface table keeps the two populations apart", () => {
-  test("anonymous and signed-in are separate columns, not a sum", () => {
-    const html = text(activityFor());
-    expect(html).toContain("未登录");
-    expect(html).toContain("已登录");
-    expect(html).toContain("900");
-    expect(html).toContain("100");
-  });
-
-  test("the card says its numbers come from a public endpoint", () => {
-    // This is the only block fed by something a stranger can call, and the
-    // sentence is what stops it being quoted next to DAU.
-    expect(text(activityFor())).toContain("谁都能调这个接口");
   });
 });
 

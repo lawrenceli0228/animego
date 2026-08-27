@@ -16,8 +16,5 @@
 
 SELECT cron.unschedule('user-activity-daily-prune');
 
-DROP INDEX IF EXISTS idx_activity_surface_daily_date;
-DROP TABLE IF EXISTS activity_surface_daily;
-
 DROP INDEX IF EXISTS idx_user_activity_daily_user;
 DROP TABLE IF EXISTS user_activity_daily;

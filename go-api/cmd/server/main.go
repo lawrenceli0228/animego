@@ -636,16 +636,16 @@ func main() {
 	adminActivityHandlers := admin.NewActivityHandlers(q, slog.Default())
 
 	// Presence recording (migration 0025).  The recorder buffers in memory and
-	// flushes on a ticker; Start launches that loop and the deferred Close
-	// drains it, so an orderly shutdown loses nothing.
+	// flushes on a ticker; nothing it does touches the database on a request
+	// path.
 	//
-	// The defer is registered here rather than next to srv.Shutdown because
-	// every os.Exit path between here and there would skip a late one — and
-	// the whole value of Close is that it runs.
+	// Close is NOT deferred.  It is called explicitly on every shutdown path
+	// below, because the graceful-shutdown block ends in os.Exit on failure and
+	// a deferred call would be skipped exactly when the process is dying — i.e.
+	// exactly when draining is the only thing standing between the last minute
+	// of counters and the floor.
 	activityRecorder := activity.NewRecorder(pool, slog.Default(), activity.DefaultFlushInterval)
 	activityRecorder.Start()
-	defer activityRecorder.Close()
-	activityHandlers := activity.NewHandlers(activityRecorder)
 	// A login is the one presence event the recorder's middleware structurally
 	// cannot see: nobody holds a valid token at the moment they are logging in.
 	authHandlers.SetLoginObserver(activityRecorder)
@@ -865,15 +865,6 @@ func main() {
 		r.With(jwtx.OptionalAuth(signer)).Post("/engagement", commentsHandlers.TrackCommunityEngagement)
 	})
 
-	// P11 — the client-reported half of the activity record: page arrivals
-	// (which a soft navigation between cached routes never generates an API
-	// call for) and video starts (which are not the same event as arriving at
-	// a player).  OptionalAuth because most of this site's readers are
-	// logged out and a page-visit figure that ignored them would understate
-	// the site by an order of magnitude.  See internal/activity/handlers.go
-	// for exactly how far a public counter endpoint may be trusted.
-	r.With(jwtx.OptionalAuth(signer)).Post("/api/activity/beacon", activityHandlers.Track)
-
 	r.Route("/api/notifications", func(r chi.Router) {
 		r.Use(jwtx.RequireAuth(signer))
 		r.Get("/", notificationHandlers.List)
@@ -969,8 +960,21 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("graceful shutdown failed", "err", err)
+	shutdownErr := srv.Shutdown(ctx)
+
+	// Drain the activity buffer AFTER Shutdown, so hits from the requests
+	// Shutdown was waiting on are included — and on BOTH paths, because the
+	// error branch exits the process and would skip anything deferred.
+	//
+	// The sum of these two has to fit inside the container's stop grace or the
+	// kernel SIGKILLs us mid-drain: 15s here plus the recorder's 3s drain
+	// budget is why docker-compose.yml gives go-api stop_grace_period: 30s.
+	// Docker's default is 10s, under which the pre-existing 15s shutdown was
+	// never reachable either.
+	activityRecorder.Close()
+
+	if shutdownErr != nil {
+		slog.Error("graceful shutdown failed", "err", shutdownErr)
 		os.Exit(1)
 	}
 	slog.Info("server stopped")

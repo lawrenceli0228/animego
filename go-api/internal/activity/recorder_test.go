@@ -16,10 +16,9 @@ import (
 // fakeExecer captures flush calls instead of running SQL.  The recorder never
 // reads the CommandTag, so returning the zero value is faithful.
 type fakeExecer struct {
-	mu           sync.Mutex
-	calls        []fakeCall
-	surfaceCalls []surfaceCall
-	err          error
+	mu    sync.Mutex
+	calls []fakeCall
+	err   error
 }
 
 type fakeCall struct {
@@ -27,44 +26,21 @@ type fakeCall struct {
 	FirstSeen []time.Time
 	LastSeen  []time.Time
 	Requests  []int64
-	PageViews []int64
-	Playbacks []int64
 	Logins    []int64
 }
 
-// surfaceCall is the aggregate half of a flush.
-type surfaceCall struct {
-	BucketAts []time.Time
-	Surfaces  []string
-	Authed    []bool
-	Counts    []int64
-}
-
-// Exec sorts the two statements apart by their first argument's type, which is
-// the only thing that distinguishes them without matching on SQL text.
 func (f *fakeExecer) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return pgconn.CommandTag{}, f.err
 	}
-	if ids, ok := args[0].([]uuid.UUID); ok {
-		f.calls = append(f.calls, fakeCall{
-			UserIDs:   ids,
-			FirstSeen: args[1].([]time.Time),
-			LastSeen:  args[2].([]time.Time),
-			Requests:  args[3].([]int64),
-			PageViews: args[4].([]int64),
-			Playbacks: args[5].([]int64),
-			Logins:    args[6].([]int64),
-		})
-		return pgconn.CommandTag{}, nil
-	}
-	f.surfaceCalls = append(f.surfaceCalls, surfaceCall{
-		BucketAts: args[0].([]time.Time),
-		Surfaces:  args[1].([]string),
-		Authed:    args[2].([]bool),
-		Counts:    args[3].([]int64),
+	f.calls = append(f.calls, fakeCall{
+		UserIDs:   args[0].([]uuid.UUID),
+		FirstSeen: args[1].([]time.Time),
+		LastSeen:  args[2].([]time.Time),
+		Requests:  args[3].([]int64),
+		Logins:    args[4].([]int64),
 	})
 	return pgconn.CommandTag{}, nil
 }
@@ -74,14 +50,6 @@ func (f *fakeExecer) snapshot() []fakeCall {
 	defer f.mu.Unlock()
 	out := make([]fakeCall, len(f.calls))
 	copy(out, f.calls)
-	return out
-}
-
-func (f *fakeExecer) surfaceSnapshot() []surfaceCall {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]surfaceCall, len(f.surfaceCalls))
-	copy(out, f.surfaceCalls)
 	return out
 }
 
@@ -190,8 +158,8 @@ func TestRecorder_SplitsAcrossMidnight(t *testing.T) {
 }
 
 // TestRecorder_CountersAreIndependent guards against a copy-paste in add's
-// four closures — the kind of bug that puts logins in the page-view column and
-// is invisible until somebody compares two dashboards.
+// closures — the kind of bug that files requests under logins and is invisible
+// until somebody compares two numbers that should not match.
 func TestRecorder_CountersAreIndependent(t *testing.T) {
 	exec := &fakeExecer{}
 	rec := quietRecorder(t, exec)
@@ -199,18 +167,14 @@ func TestRecorder_CountersAreIndependent(t *testing.T) {
 	user := uuid.New()
 	at := time.Date(2026, 8, 27, 9, 0, 0, 0, reportingZone)
 	rec.Touch(user, at)
-	rec.PageView(user, at)
-	rec.PageView(user, at)
-	rec.Playback(user, at)
-	rec.Playback(user, at)
-	rec.Playback(user, at)
+	rec.Touch(user, at)
+	rec.Touch(user, at)
 	rec.Login(user, at)
 	rec.Flush(context.Background())
 
 	got := exec.snapshot()[0]
-	if got.Requests[0] != 1 || got.PageViews[0] != 2 || got.Playbacks[0] != 3 || got.Logins[0] != 1 {
-		t.Fatalf("counters crossed: requests=%d pageViews=%d playbacks=%d logins=%d; want 1/2/3/1",
-			got.Requests[0], got.PageViews[0], got.Playbacks[0], got.Logins[0])
+	if got.Requests[0] != 3 || got.Logins[0] != 1 {
+		t.Fatalf("counters crossed: requests=%d logins=%d; want 3/1", got.Requests[0], got.Logins[0])
 	}
 }
 
@@ -279,106 +243,63 @@ func TestRecorder_CloseDrains(t *testing.T) {
 	rec.Close()
 }
 
-// TestRecorder_SurfaceCountsCollapseToOneRowPerBucket is the contention fix.
-//
-// activity_surface_daily holds twenty rows for a whole day, so a per-beacon
-// write would put the site's entire logged-out page-view volume behind one row
-// lock.  Ten thousand anonymous anime views must arrive as ONE row carrying
-// 10000, not as ten thousand statements.
-func TestRecorder_SurfaceCountsCollapseToOneRowPerBucket(t *testing.T) {
-	exec := &fakeExecer{}
-	rec := quietRecorder(t, exec)
-
-	at := time.Date(2026, 8, 27, 14, 0, 0, 0, reportingZone)
-	for range 10_000 {
-		rec.Surface(SurfaceAnime, false, at)
-	}
-	rec.Surface(SurfaceAnime, true, at)
-	rec.Surface(SurfaceHome, false, at)
-	rec.Flush(context.Background())
-
-	calls := exec.surfaceSnapshot()
-	if len(calls) != 1 {
-		t.Fatalf("expected one aggregate statement, got %d", len(calls))
-	}
-	got := calls[0]
-	if len(got.Surfaces) != 3 {
-		t.Fatalf("expected three buckets (anime/anon, anime/authed, home/anon), got %d", len(got.Surfaces))
-	}
-	for i := range got.Surfaces {
-		if got.Surfaces[i] == SurfaceAnime && !got.Authed[i] {
-			if got.Counts[i] != 10_000 {
-				t.Fatalf("anonymous anime count = %d, want 10000", got.Counts[i])
-			}
-			return
-		}
-	}
-	t.Fatal("the anonymous anime bucket is missing from the flush")
-}
-
-// TestRecorder_SurfaceBucketsSplitAcrossMidnight: the aggregate buffer carries
-// the day in its key for the same reason the user buffer does.  Deriving the
-// date from now() at flush time would file a 23:59 visit under the following
-// day whenever a flush crossed midnight.
-func TestRecorder_SurfaceBucketsSplitAcrossMidnight(t *testing.T) {
-	exec := &fakeExecer{}
-	rec := quietRecorder(t, exec)
-
-	rec.Surface(SurfaceHome, false, time.Date(2026, 8, 27, 23, 59, 0, 0, reportingZone))
-	rec.Surface(SurfaceHome, false, time.Date(2026, 8, 28, 0, 1, 0, 0, reportingZone))
-	rec.Flush(context.Background())
-
-	got := exec.surfaceSnapshot()[0]
-	if len(got.BucketAts) != 2 {
-		t.Fatalf("expected two day buckets for one surface, got %d", len(got.BucketAts))
-	}
-	seen := map[string]bool{}
-	for _, at := range got.BucketAts {
-		seen[at.Format("2006-01-02")] = true
-	}
-	if !seen["2026-08-27"] || !seen["2026-08-28"] {
-		t.Fatalf("buckets landed on the wrong days: %v", seen)
-	}
-}
-
-// TestRecorder_FlushIsIndependentPerTable: the two statements are not in one
-// transaction, so an empty user buffer must not suppress the aggregate write
-// (and vice versa).  Fusing them would mean a quiet hour with only anonymous
-// traffic recorded nothing at all.
-func TestRecorder_FlushIsIndependentPerTable(t *testing.T) {
-	exec := &fakeExecer{}
-	rec := quietRecorder(t, exec)
-
-	rec.Surface(SurfaceSearch, false, time.Now())
-	rec.Flush(context.Background())
-
-	if n := len(exec.snapshot()); n != 0 {
-		t.Fatalf("no users were touched; expected no user statement, got %d", n)
-	}
-	if n := len(exec.surfaceSnapshot()); n != 1 {
-		t.Fatalf("expected the aggregate statement to run on its own, got %d", n)
-	}
-}
-
-// TestRecorder_NilReceiverIsSafe is what lets main.go wire the middleware, the
-// beacon handler and the login hook unconditionally.  Without it, each of
-// those four call sites needs its own nil check, which is four places to
-// forget instead of one.
+// TestRecorder_NilReceiverIsSafe is what lets main.go wire the middleware and
+// the login hook unconditionally.  Without it, each of those call sites needs
+// its own nil check, which is several places to forget instead of one.
 func TestRecorder_NilReceiverIsSafe(t *testing.T) {
 	var rec *Recorder
 	rec.Start()
 	rec.Touch(uuid.New(), time.Now())
-	rec.PageView(uuid.New(), time.Now())
-	rec.Playback(uuid.New(), time.Now())
 	rec.Login(uuid.New(), time.Now())
-	rec.Surface(SurfaceHome, false, time.Now())
 	rec.Flush(context.Background())
 	rec.Close()
 }
 
-// TestRecorder_IgnoresNilUUID: a zero uuid means "no user", and writing one
-// would violate the foreign key on user_activity_daily.user_id — turning every
-// subsequent flush in the same batch into a lost statement.
+// TestRecorder_StartIsIdempotent.
+//
+// Each flush loop closes the same `done` channel on exit, so a second loop
+// panics on the second close — and it panics at SHUTDOWN, in production, a
+// long way from whatever line called Start twice.  The doc comment used to say
+// calling it twice was "harmless but pointless"; it was neither.
+func TestRecorder_StartIsIdempotent(t *testing.T) {
+	rec := quietRecorder(t, &fakeExecer{})
+	rec.Start()
+	rec.Start()
+	rec.Start()
+	rec.Close() // would panic on a duplicated close(done)
+}
+
+// TestRecorder_CloseWithoutStartDoesNotHang.
+//
+// Close waits on `done`, which only the flush loop closes.  A Recorder that
+// was constructed but never started has no loop, so a naive Close would block
+// the whole shutdown sequence forever — a hang, not a crash, which is the
+// harder one to diagnose from a container that will not stop.
+func TestRecorder_CloseWithoutStartDoesNotHang(t *testing.T) {
+	exec := &fakeExecer{}
+	rec := quietRecorder(t, exec)
+	rec.Touch(uuid.New(), time.Now())
+
+	done := make(chan struct{})
+	go func() {
+		rec.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close blocked on a Recorder that was never started")
+	}
+
+	if calls := exec.snapshot(); len(calls) != 1 {
+		t.Fatalf("Close must still drain what was buffered; got %d flushes", len(calls))
+	}
+}
+
+// TestRecorder_IgnoresNilUUID: a zero uuid means "no user".  The flush
+// statement's WHERE EXISTS guard would skip it harmlessly, but keeping it out
+// of the buffer entirely means it never occupies a slot against
+// maxBufferedUsers either.
 func TestRecorder_IgnoresNilUUID(t *testing.T) {
 	exec := &fakeExecer{}
 	rec := quietRecorder(t, exec)
@@ -418,5 +339,43 @@ func TestRecorder_ConcurrentTouchesAreCounted(t *testing.T) {
 	got := exec.snapshot()[0]
 	if want := int64(goroutines * each); got.Requests[0] != want {
 		t.Fatalf("requests = %d, want %d — a lost update means the lock is not covering the increment", got.Requests[0], want)
+	}
+}
+
+// TestRecorder_OverflowKicksTheLoopOnceNotPerRequest.
+//
+// The buffer cap is only ever reached during a sustained database outage --
+// which is exactly when the previous shape was worst: it spawned a fresh
+// `go r.Flush(...)` from the REQUEST path for every hit past the cap, each one
+// taking a pool connection and racing the others to UPSERT overlapping row
+// sets in map-iteration order.  A goroutine storm, arriving while the database
+// is already unwell.
+//
+// The kick channel is buffered to 1 and sent to non-blockingly, so a thousand
+// overflow hits produce at most one pending early flush and zero goroutines.
+func TestRecorder_OverflowKicksTheLoopOnceNotPerRequest(t *testing.T) {
+	rec := quietRecorder(t, &fakeExecer{})
+	at := time.Date(2026, 8, 27, 9, 0, 0, 0, reportingZone)
+
+	// Fill past the cap without a loop running, so nothing drains the kick.
+	rec.mu.Lock()
+	for range maxBufferedUsers {
+		rec.buf[bufferKey{UserID: uuid.New(), Day: Day(at)}] = &bufferEntry{FirstSeen: at, LastSeen: at}
+	}
+	rec.mu.Unlock()
+
+	for range 1000 {
+		rec.Touch(uuid.New(), at)
+	}
+
+	if got := len(rec.kick); got != 1 {
+		t.Fatalf("pending early flushes = %d, want exactly 1 — the kick must coalesce", got)
+	}
+	// And the cap really is a cap: none of those 1000 new users got in.
+	rec.mu.Lock()
+	size := len(rec.buf)
+	rec.mu.Unlock()
+	if size != maxBufferedUsers {
+		t.Fatalf("buffer grew past the cap to %d", size)
 	}
 }

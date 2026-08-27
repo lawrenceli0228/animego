@@ -296,8 +296,6 @@ export interface AdminActivityDay {
    * polling. A volume signal, not an engagement one.
    */
   requests: number;
-  pageViews: number;
-  playbacks: number;
   instrumented: boolean;
 }
 
@@ -335,34 +333,20 @@ export interface AdminRetention {
 }
 
 /**
- * Traffic by coarse area, split by whether the visitor held a session.
- *
- * The anonymous column is the majority of this site and is invisible to every
- * other number on the panel, all of which are keyed on a user id.
- */
-export interface AdminSurfaceRow {
-  surface: string;
-  authenticated: number;
-  anonymous: number;
-  total: number;
-}
-
-/**
  * GET /api/admin/activity.
  *
- * FOUR RELIABILITY TIERS LIVE IN THIS ONE OBJECT, and the UI has to keep them
+ * TWO RELIABILITY TIERS LIVE IN THIS ONE OBJECT, and the UI has to keep them
  * apart:
  *
- *   dau/wau/mau, retention   server-side, derived from a signed access token.
- *                            Unforgeable. These are the numbers to decide on.
- *   daily.activeUsers        same source; a floor before `instrumentedSince`.
- *   pageViews / playbacks /
- *   surfaces                 reported by a public client beacon. Directional
- *                            only — anyone can move them.
- *   anything before
- *   instrumentedSince        reconstructed from what other tables happened to
- *                            witness: interaction days, a strict subset of
- *                            visits.
+ *   after `instrumentedSince`    server-side, derived from a signed access
+ *                                token on a real request. Unforgeable, and
+ *                                nothing a browser sends can move it.
+ *   before `instrumentedSince`   reconstructed from what other tables happened
+ *                                to witness: interaction days, a strict and
+ *                                small subset of visits.
+ *
+ * Neither tier covers logged-out readers at all — every row behind this object
+ * is keyed on a user id, and most of this site's traffic is not.
  */
 export interface AdminActivity {
   days: number;
@@ -386,6 +370,4 @@ export interface AdminActivity {
    * asserting the exact thing it exists to measure.
    */
   retention: AdminRetention | null;
-  /** Null when the query failed; `[]` when nothing has been recorded yet. */
-  surfaces: AdminSurfaceRow[] | null;
 }

@@ -16,8 +16,6 @@ function point(date: string, activeUsers: number, instrumented = true): Activity
     newUsers: 0,
     logins: 0,
     requests: 0,
-    pageViews: 0,
-    playbacks: 0,
     instrumented,
   };
 }

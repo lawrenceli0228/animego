@@ -14,8 +14,6 @@ export interface ActivityDayPoint {
   newUsers: number;
   logins: number;
   requests: number;
-  pageViews: number;
-  playbacks: number;
   /**
    * False for days whose numbers came from the historical reconstruction
    * rather than from per-request recording. The flag is computed server-side
@@ -122,16 +120,4 @@ export function instrumentationSplit(points: readonly ActivityDayPoint[]): {
     if (!p.instrumented) reconstructed += 1;
   }
   return { reconstructed, instrumented: points.length - reconstructed };
-}
-
-/**
- * A surface's share of total traffic, as a percentage of the largest surface.
- *
- * Relative to the LARGEST rather than to the sum, because the bars are a
- * ranking aid next to the numbers, not a part-to-whole claim. Shares of a sum
- * would need to add to 100 to be honest, and the table is already truncated to
- * the surfaces that have data.
- */
-export function surfaceBarPct(total: number, max: number): number {
-  return barHeightPct(total, max);
 }

@@ -2,34 +2,24 @@ package activity
 
 // recorder.go -- the buffer between "a request happened" and "a row moved".
 //
-// NOTHING IN THIS FEATURE TOUCHES THE DATABASE ON A REQUEST PATH.  Every
-// entry point -- the middleware, the beacon, the login hook -- ends in a map
-// write under a mutex and returns.  Postgres is written once per flush
-// interval, from a background goroutine, in two statements.  That is the whole
-// design constraint and the rest of this comment is why it had to be.
+// NOTHING IN THIS FEATURE TOUCHES THE DATABASE ON A REQUEST PATH.  The two
+// entry points -- the middleware and the login hook -- end in a map write
+// under a mutex and return.  Postgres is written once per flush interval,
+// from a background goroutine, in one statement.  That is the whole design
+// constraint and the rest of this comment is why it had to be.
 //
-// THE USER COUNTERS.  The naive version writes one UPSERT per authenticated
-// request.  At this site's scale that is not a throughput problem -- it is a
-// churn problem.  Every UPSERT against user_activity_daily targets the SAME
-// row for the same person for the whole day, so a reader who spends an evening
-// on the site rewrites one row hundreds of times, each rewrite leaving a dead
-// tuple behind for autovacuum.  A row written eight hundred times a day and
-// read twice is a table that bloats for no reader's benefit.
+// The naive version writes one UPSERT per authenticated request.  At this
+// site's scale that is not a throughput problem -- it is a churn problem.
+// Every UPSERT against user_activity_daily targets the SAME row for the same
+// person for the whole day, so a reader who spends an evening on the site
+// rewrites one row hundreds of times, each rewrite leaving a dead tuple behind
+// for autovacuum.  A row written eight hundred times a day and read twice is a
+// table that bloats for no reader's benefit.
 //
-// THE SURFACE COUNTERS ARE WORSE, AND THIS IS THE ONE THAT WOULD ACTUALLY
-// HURT.  activity_surface_daily is keyed on (date, surface, authenticated) --
-// twenty rows a day, total.  Every anonymous visit to any anime page in the
-// catalogue increments the SAME row.  Written per beacon, that is one row lock
-// serialising the site's entire logged-out page-view volume, on a
-// search-traffic-led catalogue whose logged-out volume is the majority.  Under
-// a crawl it degrades from "a small extra write" to a contention point that
-// slows the pages it is measuring.  Buffered, twenty rows are touched once a
-// minute no matter how much traffic arrives, and the beacon endpoint does no
-// database work at all.
-//
-// So both buffers accumulate in memory keyed by their target row and are
-// flushed on a ticker as one statement each.  The counters are identical
-// either way, because a flush adds a delta rather than overwriting a total.
+// So hits accumulate in memory keyed by (user, day) and are flushed on a
+// ticker as one statement covering every user seen in the interval.  The
+// counters are identical either way, because a flush adds a delta rather than
+// overwriting a total.
 //
 // WHAT THE BUFFER COSTS, STATED PLAINLY.
 //
@@ -40,7 +30,9 @@ package activity
 // for anything a user can see or that money depends on, which is why this
 // package writes nothing of that kind.
 //
-// Close drains synchronously, so an orderly shutdown loses nothing.
+// Close drains synchronously, and main.go calls it on BOTH shutdown paths
+// (not via defer) inside a stop_grace_period wide enough to finish -- see the
+// note on drainTimeout.
 
 import (
 	"context"
@@ -76,9 +68,20 @@ const (
 	// is about having a defined ceiling rather than an unexamined one.
 	maxBufferedUsers = 10_000
 
-	// flushTimeout bounds one flush statement.  Matches the 5s query budget
-	// used across internal/admin and internal/auth.
+	// flushTimeout bounds one flush statement on the normal ticker path.
+	// Matches the 5s query budget used across internal/admin and internal/auth.
 	flushTimeout = 5 * time.Second
+
+	// drainTimeout bounds the FINAL flush, and it is deliberately shorter.
+	//
+	// Docker's default stop grace is 10s and docker-compose.yml now gives
+	// go-api 30s, but the drain runs after srv.Shutdown has already spent part
+	// of that window waiting for in-flight requests.  A drain that could take
+	// the full 5s stacks on top of a shutdown that may take 15s, and the sum
+	// has to stay under the grace period or the kernel SIGKILLs the process
+	// mid-flush -- which loses the exact minute Close exists to save.  3s is
+	// more than enough for a single-statement upsert of a few hundred rows.
+	drainTimeout = 3 * time.Second
 )
 
 // recordUserActivitySQL is the flush statement.
@@ -95,14 +98,28 @@ const (
 // counted itself.  There is no allow-list to keep because there is no
 // interpolation.
 //
-// The three behaviours worth naming, all in the ON CONFLICT clause:
+// FOUR BEHAVIOURS WORTH NAMING:
+//
+//   - `WHERE EXISTS (SELECT 1 FROM users …)` is not belt-and-braces, it is
+//     load-bearing.  user_id carries a foreign key to users, and an access
+//     token stays valid for fifteen minutes after an admin deletes the account
+//     it belongs to.  Every request that token makes enqueues a uuid with no
+//     row behind it.  Without this guard the whole flush -- one statement,
+//     every user in the interval -- fails on 23503 and gets dropped, so ONE
+//     deleted account silently zeroes EVERYBODY's counters, once a minute,
+//     until the token expires.  The only trace is a foreign-key line in the
+//     log and a dent in the DAU chart nobody can explain.  Skipping the row
+//     costs one primary-key probe per user per flush and makes the failure
+//     structurally impossible rather than merely handled.
 //
 //   - counters ADD.  A flush is an increment, not a snapshot, so the second
 //     flush of a day accumulates onto the first instead of replacing it.
+//
 //   - the window WIDENS via LEAST/GREATEST, so a late flush (a retry, or the
 //     shutdown drain landing after a newer tick) cannot drag last_seen_at
 //     backwards.  This is also what makes migration 0025's
 //     last_seen_at >= first_seen_at CHECK true by construction.
+//
 //   - activity_date is CAST FROM first_seen_at rather than sent by Go.  The
 //     buffer already keys on the same +08 day, so first and last agree; doing
 //     the cast in SQL keeps the database the single authority on what date a
@@ -110,7 +127,7 @@ const (
 const recordUserActivitySQL = `
 INSERT INTO user_activity_daily AS uad (
     user_id, activity_date, first_seen_at, last_seen_at,
-    request_count, page_view_count, playback_count, login_count
+    request_count, login_count
 )
 SELECT
     batch.user_id,
@@ -118,46 +135,17 @@ SELECT
     batch.first_seen_at,
     batch.last_seen_at,
     batch.request_count,
-    batch.page_view_count,
-    batch.playback_count,
     batch.login_count
 FROM unnest($1::uuid[], $2::timestamptz[], $3::timestamptz[],
-            $4::bigint[], $5::bigint[], $6::bigint[], $7::bigint[])
+            $4::bigint[], $5::bigint[])
      AS batch (user_id, first_seen_at, last_seen_at,
-               request_count, page_view_count, playback_count, login_count)
+               request_count, login_count)
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = batch.user_id)
 ON CONFLICT (activity_date, user_id) DO UPDATE
-SET first_seen_at   = LEAST(uad.first_seen_at, EXCLUDED.first_seen_at),
-    last_seen_at    = GREATEST(uad.last_seen_at, EXCLUDED.last_seen_at),
-    request_count   = uad.request_count   + EXCLUDED.request_count,
-    page_view_count = uad.page_view_count + EXCLUDED.page_view_count,
-    playback_count  = uad.playback_count  + EXCLUDED.playback_count,
-    login_count     = uad.login_count     + EXCLUDED.login_count`
-
-// recordSurfaceSQL is the aggregate half of the flush, and it is here rather
-// than in the sqlc query file for the same reason as the statement above: it
-// unnests three parallel arrays, which sqlc cannot analyse.
-//
-// The stored date is derived from the passed timestamp, not from now(), so a
-// flush that crosses local midnight files each buffered bucket on the day it
-// actually belongs to instead of on the day the flush happened to run.
-//
-// The surface strings come from NormalizeSurface, so every value is one of the
-// ten the CHECK constraint accepts -- the caller's text never reaches here.
-const recordSurfaceSQL = `
-INSERT INTO activity_surface_daily AS asd (
-    activity_date, surface, authenticated, event_count, updated_at
-)
-SELECT
-    (batch.bucket_at AT TIME ZONE 'Asia/Shanghai')::date,
-    batch.surface,
-    batch.authenticated,
-    batch.event_count,
-    now()
-FROM unnest($1::timestamptz[], $2::text[], $3::boolean[], $4::bigint[])
-     AS batch (bucket_at, surface, authenticated, event_count)
-ON CONFLICT (activity_date, surface, authenticated) DO UPDATE
-SET event_count = asd.event_count + EXCLUDED.event_count,
-    updated_at  = now()`
+SET first_seen_at = LEAST(uad.first_seen_at, EXCLUDED.first_seen_at),
+    last_seen_at  = GREATEST(uad.last_seen_at, EXCLUDED.last_seen_at),
+    request_count = uad.request_count + EXCLUDED.request_count,
+    login_count   = uad.login_count   + EXCLUDED.login_count`
 
 // execer is the pgxpool surface the recorder needs -- one method, satisfied by
 // *pgxpool.Pool as-is.  Declared here, where it is consumed, so tests can
@@ -185,20 +173,7 @@ type bufferEntry struct {
 	FirstSeen time.Time
 	LastSeen  time.Time
 	Requests  int64
-	PageViews int64
-	Playbacks int64
 	Logins    int64
-}
-
-// surfaceKey identifies one row of activity_surface_daily.
-//
-// Needs no cap of its own, unlike the user buffer: the key space is (days
-// buffered) x (10 surfaces) x 2, so a flush interval can hold at most twenty
-// entries and a total outage measured in days would hold a few hundred.
-type surfaceKey struct {
-	Day           time.Time
-	Surface       Surface
-	Authenticated bool
 }
 
 // Recorder accumulates presence in memory and flushes it in batches.
@@ -208,26 +183,39 @@ type surfaceKey struct {
 // handler goroutines.
 //
 // A nil *Recorder is a valid no-op receiver on every method.  That is not
-// defensive habit, it is what lets the middleware, the beacon handler and the
-// login path be wired unconditionally in main.go and still behave in tests and
-// tooling that never construct one.  The alternative -- a nil check at every
-// call site -- is four places to forget instead of one.
+// defensive habit, it is what lets the middleware and the login hook be wired
+// unconditionally in main.go and still behave in tests and tooling that never
+// construct one.  The alternative -- a nil check at every call site -- is
+// several places to forget instead of one.
 type Recorder struct {
 	pool  execer
 	log   *slog.Logger
 	every time.Duration
 
-	mu   sync.Mutex
-	buf  map[bufferKey]*bufferEntry
-	surf map[surfaceKey]int64
+	mu  sync.Mutex
+	buf map[bufferKey]*bufferEntry
+
+	// kick asks the flush loop to run early because the buffer hit its cap.
+	//
+	// Buffered with capacity 1 and sent to non-blockingly, which gives
+	// single-flight for free: while one early flush is pending, every further
+	// overflow send finds the channel full and drops.  The previous shape --
+	// `go r.Flush(...)` straight from the request path -- had no such guard,
+	// so during a database outage every request past the cap span
+	// a fresh goroutine, each holding a pool connection and competing to
+	// UPSERT overlapping row sets in map-iteration (i.e. arbitrary) order.
+	// That is a goroutine storm and a deadlock risk, arriving precisely when
+	// the database is already unwell.
+	kick chan struct{}
 
 	// stop closes on Close; done closes when the flush loop has drained and
 	// exited.  Two channels rather than a sync.WaitGroup because Close needs
 	// to WAIT for the final drain, and a caller that returns before the drain
 	// completes is a caller that loses the data Close exists to save.
-	stop     chan struct{}
-	done     chan struct{}
-	stopOnce sync.Once
+	stop      chan struct{}
+	done      chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 // NewRecorder builds a Recorder over pool.  A nil pool yields a nil Recorder,
@@ -254,19 +242,23 @@ func newRecorder(pool execer, log *slog.Logger, every time.Duration) *Recorder {
 		log:   log,
 		every: every,
 		buf:   make(map[bufferKey]*bufferEntry),
-		surf:  make(map[surfaceKey]int64),
+		kick:  make(chan struct{}, 1),
 		stop:  make(chan struct{}),
 		done:  make(chan struct{}),
 	}
 }
 
-// Start launches the flush loop.  Call once; calling twice starts two loops,
-// which is harmless but pointless.
+// Start launches the flush loop.
+//
+// Guarded by sync.Once because a second loop would close the same `done`
+// channel and panic -- and it would panic at shutdown, in production, far from
+// the line that called Start twice.  A misuse that only shows up under SIGTERM
+// is the worst kind to leave to a doc comment.
 func (r *Recorder) Start() {
 	if r == nil {
 		return
 	}
-	go r.loop()
+	r.startOnce.Do(func() { go r.loop() })
 }
 
 // Close stops the flush loop and drains whatever is still buffered.
@@ -274,10 +266,19 @@ func (r *Recorder) Start() {
 // Synchronous by design: it blocks until the final flush has been attempted,
 // so a shutdown path that calls it loses nothing.  Safe to call more than once
 // and safe on a nil receiver.
+//
+// Call it explicitly on every exit path rather than with defer -- an os.Exit
+// anywhere in the shutdown sequence skips deferred calls, and this one is the
+// difference between draining and discarding.  See main.go.
 func (r *Recorder) Close() {
 	if r == nil {
 		return
 	}
+	// A Recorder that was never started has no loop to close `done`, so
+	// waiting on it would block forever.  Starting it here is the cheapest
+	// correct answer: the loop runs once, sees `stop` already closed, drains,
+	// and exits.
+	r.Start()
 	r.stopOnce.Do(func() { close(r.stop) })
 	<-r.done
 }
@@ -285,16 +286,6 @@ func (r *Recorder) Close() {
 // Touch records one authenticated API request for userID at t.
 func (r *Recorder) Touch(userID uuid.UUID, t time.Time) {
 	r.add(userID, t, func(e *bufferEntry) { e.Requests++ })
-}
-
-// PageView records one client-reported page arrival.
-func (r *Recorder) PageView(userID uuid.UUID, t time.Time) {
-	r.add(userID, t, func(e *bufferEntry) { e.PageViews++ })
-}
-
-// Playback records one client-reported video start.
-func (r *Recorder) Playback(userID uuid.UUID, t time.Time) {
-	r.add(userID, t, func(e *bufferEntry) { e.Playbacks++ })
 }
 
 // Login records one successful password authentication.
@@ -306,24 +297,6 @@ func (r *Recorder) Playback(userID uuid.UUID, t time.Time) {
 // event this package could not see.
 func (r *Recorder) Login(userID uuid.UUID, t time.Time) {
 	r.add(userID, t, func(e *bufferEntry) { e.Logins++ })
-}
-
-// Surface records one visit to a coarse area of the site, anonymous callers
-// included.  surface must already have been through NormalizeSurface.
-//
-// This is the counter that would be a contention point if it were written
-// through: twenty rows carry the whole site's page-view volume, so every
-// logged-out anime page view targets one row.  Buffered, the row is touched
-// once per flush regardless of how much traffic arrives, and the endpoint that
-// feeds it does no database work in the request path at all.
-func (r *Recorder) Surface(surface Surface, authenticated bool, t time.Time) {
-	if r == nil {
-		return
-	}
-	key := surfaceKey{Day: Day(t), Surface: surface, Authenticated: authenticated}
-	r.mu.Lock()
-	r.surf[key]++
-	r.mu.Unlock()
 }
 
 // add is the single mutation path.  It holds the lock for the duration of a
@@ -348,6 +321,15 @@ func (r *Recorder) add(userID uuid.UUID, t time.Time, apply func(*bufferEntry)) 
 			// one produces thousands, and a per-event log turns a database
 			// outage into a disk-space incident.  The flush failure that
 			// caused it is logged, once per interval, with its error.
+			//
+			// Kick on the way out.  An earlier version signalled only from the
+			// add that CROSSED the cap, which meant that once the buffer was
+			// genuinely full -- the state where data is actively being thrown
+			// away -- nothing asked for an early flush again until the next
+			// tick.  If the loop was mid-flush when that one kick arrived, it
+			// was consumed for a flush that had already started, and the next
+			// sixty seconds of hits were dropped in silence.
+			r.requestFlush()
 			return
 		}
 		entry = &bufferEntry{FirstSeen: t, LastSeen: t}
@@ -364,10 +346,20 @@ func (r *Recorder) add(userID uuid.UUID, t time.Time, apply func(*bufferEntry)) 
 	r.mu.Unlock()
 
 	if overflow {
-		// Flush off the request goroutine.  Doing it inline would make one
-		// unlucky reader wait on a database round-trip for a counter they will
-		// never see.
-		go r.Flush(context.Background())
+		r.requestFlush()
+	}
+}
+
+// requestFlush asks the loop to flush early, at most once per pending flush.
+//
+// Non-blocking send into a capacity-1 channel: while one early flush is
+// pending, every further call finds the channel full and returns immediately.
+// Never spawn a goroutine from a request path to do this -- see the note on
+// the kick field for what that cost during an outage.
+func (r *Recorder) requestFlush() {
+	select {
+	case r.kick <- struct{}{}:
+	default:
 	}
 }
 
@@ -379,13 +371,16 @@ func (r *Recorder) loop() {
 	for {
 		select {
 		case <-ticker.C:
-			r.Flush(context.Background())
+			r.flush(context.Background(), flushTimeout)
+		case <-r.kick:
+			r.flush(context.Background(), flushTimeout)
 		case <-r.stop:
 			// The final drain gets its own context rather than inheriting a
 			// cancelled one: at this point the caller is shutting down, and a
 			// context that is already dead would turn "drain on exit" into
-			// "discard on exit" without saying so.
-			r.Flush(context.Background())
+			// "discard on exit" without saying so.  Its budget is shorter than
+			// the ticker path's -- see drainTimeout.
+			r.flush(context.Background(), drainTimeout)
 			return
 		}
 	}
@@ -393,6 +388,12 @@ func (r *Recorder) loop() {
 
 // Flush writes everything buffered and empties the buffer.  Exported so tests
 // can drive it deterministically instead of waiting on a ticker.
+func (r *Recorder) Flush(ctx context.Context) {
+	r.flush(ctx, flushTimeout)
+}
+
+// flush is Flush with an explicit budget, so the shutdown drain can be given a
+// tighter one than the ticker.
 //
 // The buffer is swapped out under the lock and written outside it, so requests
 // arriving mid-flush accumulate into the fresh map rather than blocking on a
@@ -404,39 +405,28 @@ func (r *Recorder) loop() {
 // caller which side of the commit it landed on) or grow without bound during a
 // sustained outage.  Losing a minute of activity counters is a smaller harm
 // than either, and the log line is the signal that it happened.
-func (r *Recorder) Flush(ctx context.Context) {
+//
+// Note this is now genuinely "a minute of counters" and not "everyone's
+// counters because of one bad row" -- see the WHERE EXISTS guard in the
+// statement above.
+func (r *Recorder) flush(ctx context.Context, budget time.Duration) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
-	batch, surfaces := r.buf, r.surf
-	if len(batch) > 0 {
-		r.buf = make(map[bufferKey]*bufferEntry)
-	}
-	if len(surfaces) > 0 {
-		r.surf = make(map[surfaceKey]int64)
-	}
-	r.mu.Unlock()
-
-	// Two independent statements rather than one transaction.  They write
-	// unrelated tables and neither is meaningful without the other being
-	// exactly right, so pairing them would only mean a failure in the
-	// low-trust aggregate could roll back the high-trust per-user counters.
-	r.flushUsers(ctx, batch)
-	r.flushSurfaces(ctx, surfaces)
-}
-
-func (r *Recorder) flushUsers(ctx context.Context, batch map[bufferKey]*bufferEntry) {
-	n := len(batch)
-	if n == 0 {
+	if len(r.buf) == 0 {
+		r.mu.Unlock()
 		return
 	}
+	batch := r.buf
+	r.buf = make(map[bufferKey]*bufferEntry)
+	r.mu.Unlock()
+
+	n := len(batch)
 	userIDs := make([]uuid.UUID, 0, n)
 	firstSeen := make([]time.Time, 0, n)
 	lastSeen := make([]time.Time, 0, n)
 	requests := make([]int64, 0, n)
-	pageViews := make([]int64, 0, n)
-	playbacks := make([]int64, 0, n)
 	logins := make([]int64, 0, n)
 
 	for key, entry := range batch {
@@ -444,56 +434,22 @@ func (r *Recorder) flushUsers(ctx context.Context, batch map[bufferKey]*bufferEn
 		firstSeen = append(firstSeen, entry.FirstSeen)
 		lastSeen = append(lastSeen, entry.LastSeen)
 		requests = append(requests, entry.Requests)
-		pageViews = append(pageViews, entry.PageViews)
-		playbacks = append(playbacks, entry.Playbacks)
 		logins = append(logins, entry.Logins)
 	}
 
-	execCtx, cancel := context.WithTimeout(ctx, flushTimeout)
+	execCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	if _, err := r.pool.Exec(execCtx, recordUserActivitySQL,
-		userIDs, firstSeen, lastSeen, requests, pageViews, playbacks, logins,
+		userIDs, firstSeen, lastSeen, requests, logins,
 	); err != nil {
 		if errors.Is(err, context.Canceled) {
 			// A cancelled parent means the process is going away mid-flush.
 			// Same data loss, but not a fault worth an ERROR line during a
 			// deliberate shutdown.
-			r.log.Warn("activity: user flush cancelled during shutdown", "rows", n)
+			r.log.Warn("activity: flush cancelled during shutdown", "rows", n)
 			return
 		}
-		r.log.Error("activity: user flush failed; this interval's counters are lost",
-			"err", err.Error(), "rows", n)
-	}
-}
-
-// flushSurfaces writes the aggregate half.  Same drop-on-failure policy as
-// flushUsers, and a weaker claim on the data: this table is fed by a public
-// endpoint and nothing on the dashboard that matters reads it.
-func (r *Recorder) flushSurfaces(ctx context.Context, batch map[surfaceKey]int64) {
-	n := len(batch)
-	if n == 0 {
-		return
-	}
-
-	bucketAts := make([]time.Time, 0, n)
-	surfaces := make([]string, 0, n)
-	authed := make([]bool, 0, n)
-	counts := make([]int64, 0, n)
-	for key, count := range batch {
-		bucketAts = append(bucketAts, key.Day)
-		surfaces = append(surfaces, key.Surface)
-		authed = append(authed, key.Authenticated)
-		counts = append(counts, count)
-	}
-
-	execCtx, cancel := context.WithTimeout(ctx, flushTimeout)
-	defer cancel()
-	if _, err := r.pool.Exec(execCtx, recordSurfaceSQL, bucketAts, surfaces, authed, counts); err != nil {
-		if errors.Is(err, context.Canceled) {
-			r.log.Warn("activity: surface flush cancelled during shutdown", "rows", n)
-			return
-		}
-		r.log.Error("activity: surface flush failed; this interval's counters are lost",
+		r.log.Error("activity: flush failed; this interval's counters are lost",
 			"err", err.Error(), "rows", n)
 	}
 }

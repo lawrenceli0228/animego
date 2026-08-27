@@ -1061,18 +1061,13 @@ const en = {
     // Answers the question the overview's own "802 users" invites and cannot
     // answer: how many of them are still here.
     //
-    // Four reliability tiers, and they must not blur together:
-    //   DAU/WAU/MAU, retention  server-side, from a signed token. Unforgeable
-    //                           — decide on these.
-    //   the daily bars          same source, but only a floor for days before
-    //                           instrumentation began.
-    //   page views / playbacks /
-    //   surfaces                reported by a public beacon anyone can call.
-    //                           Directional only.
-    //   anything before the seam
-    //                           reconstructed from traces other tables happen
-    //                           to hold: interaction days, a strict and small
-    //                           subset of real visits.
+    // Two reliability tiers, and they must not blur together:
+    //   after the seam   server-side, from a signed token on a real request.
+    //                    Unforgeable — decide on these.
+    //   before the seam  reconstructed from traces other tables happen to
+    //                    hold: interaction days, a strict and small subset of
+    //                    real visits.
+    // Neither covers logged-out readers, who are most of this site's traffic.
     activity: {
       title: 'User activity',
       loadError: 'Could not load activity data',
@@ -1097,8 +1092,7 @@ const en = {
       legendSignups: 'New signups',
       chartAlt: 'Daily active users over the last {{n}} days, peaking at {{max}}.',
       logins: 'Logins',
-      pageViews: 'Page views',
-      playbacks: 'Playbacks',
+      requests: 'API requests',
       reconstructedDay: 'Reconstructed day — counts only users who left an interaction behind',
       // Said out loud rather than left to a legend swatch. A reader who does
       // not know the seam exists will read the step at the boundary as growth,
@@ -1119,17 +1113,6 @@ const en = {
       retentionEver: 'Ever returned',
       retentionEverHint: 'Active on any day after signup. Largest sample — read this one first',
       noCohort: 'No cohort',
-      surfacesTitle: 'Traffic by surface',
-      // The only card on this panel fed by an endpoint a stranger can call.
-      // Saying so is what stops its numbers being quoted next to DAU as though
-      // they carried the same weight.
-      surfacesNote: 'Browser-reported, anonymous visitors included, and the endpoint is public — read the shape, not the digits. DAU and retention do not read this table.',
-      surfacesUnavailable: 'Could not load the surface breakdown',
-      surfacesEmpty: 'Nothing reported in this window yet.',
-      colSurface: 'Surface',
-      colAnonymous: 'Logged out',
-      colAuthenticated: 'Signed in',
-      colTotal: 'Total',
     },
     //
     // Not a "missing content" block: a "content is lying" block. The

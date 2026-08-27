@@ -1130,8 +1130,7 @@ const zhHant = {
       legendSignups: '新註冊',
       chartAlt: '最近 {{n}} 天的每日活躍使用者長條圖，峰值 {{max}} 人。',
       logins: '登入',
-      pageViews: '頁面造訪',
-      playbacks: '播放',
+      requests: 'API 請求',
       reconstructedDay: '這一天的數字是回推的，只含有互動痕跡的使用者',
       // 说出来，别只靠图例那个色块。不知道有这条缝的人，会把交界处那一跳
       // 读成增长 —— 这是整块面板最容易骗人的地方。
@@ -1149,15 +1148,6 @@ const zhHant = {
       retentionEver: '回訪率',
       retentionEverHint: '註冊日之後任意一天有過活躍。樣本量最大，先看這個',
       noCohort: '樣本為空',
-      surfacesTitle: '版塊造訪分佈',
-      // 整块面板上唯一一张由「谁都能调的接口」喂的表。
-      surfacesNote: '由瀏覽器上報，含未登入訪客，誰都能呼叫這個介面 —— 只看趨勢，別當精確數字引用。DAU、留存不讀這張表。',
-      surfacesUnavailable: '版塊分佈讀取失敗',
-      surfacesEmpty: '這個視窗內還沒有上報資料。',
-      colSurface: '版塊',
-      colAnonymous: '未登入',
-      colAuthenticated: '已登入',
-      colTotal: '合計',
     },
     // 繁体中文漂移 —— HantDriftSection。
     //

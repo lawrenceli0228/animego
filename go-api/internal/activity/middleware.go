@@ -105,24 +105,42 @@ func Middleware(signer *jwtx.Signer, rec *Recorder) func(http.Handler) http.Hand
 	}
 }
 
+// notRecordedPrefixes are /api paths that are not a person doing something.
+//
+// /api/avatars/ serves member-pass photo FILES off a volume.  Same-origin
+// <img> requests carry cookies, so an authenticated reader opening one
+// discussion page with twenty avatars on it would otherwise book twenty
+// "activity requests" -- and request_count's whole job is to be a request
+// VOLUME signal, which stops working the moment it is mixed with image
+// fetches.  Distinct people per day, the number every headline metric
+// reports, was never affected either way: a person counts once regardless.
+var notRecordedPrefixes = []string{"/api/avatars/"}
+
 // shouldRecordPath decides which paths count as presence.
 //
-// Only /api/*, and not the health probe.  The probe is the load balancer, not
-// a person -- it carries no token today, so it would be filtered by the claims
-// check anyway, but relying on that would make the exclusion an accident of
-// how the probe is configured rather than a decision.
+// Only /api/*, not the health probe, and not the static-file surfaces above.
+// The probe is the load balancer, not a person -- it carries no token today,
+// so it would be filtered by the claims check anyway, but relying on that
+// would make the exclusion an accident of how the probe is configured rather
+// than a decision.
 //
 // Everything else under /api/ is in, including refresh and SSR fan-out.  That
 // is on purpose: a server-rendered page fetching four endpoints is still one
 // human asking for one page, and the alternative -- guessing which calls are
 // "real" -- would put a policy about what counts as engagement inside a
 // middleware.  request_count is documented as a request count for exactly this
-// reason; the number of PEOPLE, which is what every headline metric on the
-// dashboard reports, is unaffected by fan-out because a person is counted once
-// per day no matter how many rows their requests touch.
+// reason.
 func shouldRecordPath(path string) bool {
 	if !strings.HasPrefix(path, "/api/") {
 		return false
 	}
-	return path != "/api/health"
+	if path == "/api/health" {
+		return false
+	}
+	for _, prefix := range notRecordedPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return false
+		}
+	}
+	return true
 }

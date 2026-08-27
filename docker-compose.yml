@@ -164,6 +164,15 @@ services:
     build:
       context: ./go-api
     restart: unless-stopped
+    # Docker's default stop grace is 10s, and main.go has always given
+    # srv.Shutdown a 15s budget — so the graceful path was never actually
+    # reachable: the kernel SIGKILLed the process five seconds into it.
+    # Migration 0025's activity recorder made that visible rather than
+    # merely wasteful, because it drains its in-memory buffer after
+    # Shutdown returns and a SIGKILL there throws away the last minute of
+    # counters. 30s covers 15s of shutdown plus the recorder's 3s drain
+    # with room to spare.
+    stop_grace_period: 30s
     env_file: .env.production
     environment:
       DATABASE_URL: postgres://animego:${POSTGRES_PASSWORD}@postgres:5432/animego?sslmode=disable

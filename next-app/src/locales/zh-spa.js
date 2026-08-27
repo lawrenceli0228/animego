@@ -1141,8 +1141,7 @@ const zh = {
       legendSignups: '新注册',
       chartAlt: '最近 {{n}} 天的每日活跃用户柱状图，峰值 {{max}} 人。',
       logins: '登录',
-      pageViews: '页面访问',
-      playbacks: '播放',
+      requests: 'API 请求',
       reconstructedDay: '这一天的数字是倒推的，只含有互动痕迹的用户',
       // 说出来，别只靠图例那个色块。不知道有这条缝的人，会把交界处那一跳
       // 读成增长 —— 这是整块面板最容易骗人的地方。
@@ -1161,16 +1160,6 @@ const zh = {
       retentionEver: '回访率',
       retentionEverHint: '注册日之后任意一天有过活跃。样本量最大，先看这个',
       noCohort: '样本为空',
-      surfacesTitle: '板块访问分布',
-      // 整块面板上唯一一张由「谁都能调的接口」喂的表。说清楚，免得它的数字
-      // 被摆在 DAU 旁边当成同等分量。
-      surfacesNote: '由浏览器上报，含未登录访客，谁都能调这个接口 —— 只看趋势，别当精确数字引用。DAU、留存不读这张表。',
-      surfacesUnavailable: '板块分布读取失败',
-      surfacesEmpty: '这个窗口内还没有上报数据。',
-      colSurface: '板块',
-      colAnonymous: '未登录',
-      colAuthenticated: '已登录',
-      colTotal: '合计',
     },
     // 这块看的不是「缺内容」，是「内容在骗人」：富化 worker 一直在写简体列，
     // title_hant / description_hant 只有回填跑的时候才动，掉队了也不会自愈。

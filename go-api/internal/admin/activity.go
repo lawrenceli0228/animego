@@ -13,26 +13,28 @@ package admin
 // entire credibility rests on being clear about which parts of it are
 // measured and which are inferred.
 //
-// FOUR RELIABILITY TIERS, AND THE PAYLOAD KEEPS THEM APART:
+// TWO RELIABILITY TIERS, AND THE PAYLOAD KEEPS THEM APART:
 //
-//	dau/wau/mau, retention  server-side, derived from a signed access token.
-//	                        Unforgeable.  These are the numbers to decide on.
-//	daily.activeUsers       same source.  Trustworthy at any point after
-//	                        instrumentedSince; a floor before it (see below).
-//	daily.pageViews,
-//	daily.playbacks,
-//	surfaces                client-reported through a public beacon.  Anyone
-//	                        can move them.  Directional only — never read as
-//	                        an audited figure.
+//	everything after
+//	instrumentedSince   server-side, derived from a signed access token on a
+//	                    real request.  Unforgeable, and nothing a client sends
+//	                    can move it — the browser beacon this feature briefly
+//	                    carried was removed before shipping.  Decide on these.
 //	everything before
-//	instrumentedSince       reconstructed by migration 0026 from whatever
-//	                        other tables happened to witness.  Interaction
-//	                        days, not visits: a strict and small subset.
+//	instrumentedSince   reconstructed by migration 0026 from whatever other
+//	                    tables happened to witness.  Interaction days, not
+//	                    visits: a strict and small subset.
 //
-// instrumentedSince is returned precisely so the last tier can be drawn as a
+// instrumentedSince is returned precisely so the second tier can be drawn as a
 // different thing rather than blended into the same line.  Plotted
 // continuously with no divider, the switch from "interactions" to "visits"
 // looks like the product suddenly took off, and it will be read that way.
+//
+// WHAT THIS ENDPOINT CANNOT TELL YOU: anything about logged-out visitors.
+// Every row it reads is keyed on a user id, so the majority of a search-led
+// catalogue's traffic is outside its remit entirely.  That is a known gap and
+// a deliberate one — see 0025's header for why closing it with a write
+// endpoint on the hot path was the wrong trade.
 
 import (
 	"context"
@@ -82,7 +84,6 @@ type activityQuerier interface {
 	ListActivityDailyTotals(ctx context.Context, dayCount int32) ([]dbgen.ListActivityDailyTotalsRow, error)
 	ListNewUserCountsByDay(ctx context.Context, dayCount int32) ([]dbgen.ListNewUserCountsByDayRow, error)
 	GetActivityRetention(ctx context.Context, windowDays int32) (dbgen.GetActivityRetentionRow, error)
-	ListActivitySurfaceTotals(ctx context.Context, dayCount int32) ([]dbgen.ListActivitySurfaceTotalsRow, error)
 }
 
 // ActivityHandlers carries the deps for the activity panel.  Its own bundle
@@ -126,9 +127,6 @@ type ActivityDayPoint struct {
 	// derivable, and because a sudden change in requests-per-active-user is a
 	// useful smell.
 	Requests int64 `json:"requests"`
-	// PageViews and Playbacks are client-reported.  See the header's tiers.
-	PageViews int64 `json:"pageViews"`
-	Playbacks int64 `json:"playbacks"`
 	// Instrumented is false for days that predate per-request recording, i.e.
 	// days whose numbers came out of migration 0026's reconstruction.  The
 	// flag travels with the point rather than being recomputed in the browser
@@ -172,24 +170,13 @@ type ActivityRetention struct {
 	Ever       ActivityRetentionBucket `json:"ever"`
 }
 
-// ActivitySurfaceRow is one bucket of the traffic breakdown.
-type ActivitySurfaceRow struct {
-	Surface string `json:"surface"`
-	// Authenticated and Anonymous are kept apart because the anonymous column
-	// is the majority of this site and is invisible to every other number on
-	// the panel, all of which are keyed on a user id.
-	Authenticated int64 `json:"authenticated"`
-	Anonymous     int64 `json:"anonymous"`
-	Total         int64 `json:"total"`
-}
-
 // ActivityResp is the GET /api/admin/activity body.
 //
-// Retention and Surfaces are POINTERS/NIL-ABLE and that is load-bearing: when
-// their query fails they are emitted as null, never as zeroes.  A zero in this
-// payload is a claim ("nobody returned", "nobody visited"), so a failed fetch
-// rendered as zeroes would be the panel asserting the exact thing it exists to
-// measure.  Null lets the UI say "unavailable", which is true.
+// Retention is a POINTER and that is load-bearing: when its query fails it is
+// emitted as null, never as zeroes.  A zero in this payload is a claim
+// ("nobody returned"), so a failed fetch rendered as one would be the panel
+// asserting the exact thing it exists to measure.  Null lets the UI say
+// "unavailable", which is true.
 //
 // The headline block (Dau/Wau/Mau/Daily) does NOT soft-fail: it is the panel.
 // Emitting zeroes there would read as "the site is dead", which is worse than
@@ -212,9 +199,8 @@ type ActivityResp struct {
 	// share used it today.  0 when MAU is 0.
 	Stickiness float64 `json:"stickiness"`
 
-	Daily     []ActivityDayPoint   `json:"daily"`
-	Retention *ActivityRetention   `json:"retention"`
-	Surfaces  []ActivitySurfaceRow `json:"surfaces"`
+	Daily     []ActivityDayPoint `json:"daily"`
+	Retention *ActivityRetention `json:"retention"`
 }
 
 // GetActivity implements GET /api/admin/activity?days=N.
@@ -273,27 +259,6 @@ func (h *ActivityHandlers) GetActivity(w http.ResponseWriter, r *http.Request) {
 			D7:         retentionBucket(row.D7Cohort, row.D7Returned),
 			Ever:       retentionBucket(row.EverCohort, row.EverReturned),
 		}
-	}
-
-	// Surfaces soft-fails to null for the same reason, plus one of its own:
-	// it is the only block fed by a public endpoint, so it is the block whose
-	// absence costs the least.
-	if rows, serr := h.Queries.ListActivitySurfaceTotals(ctx, int32(days)); serr != nil {
-		h.Log.WarnContext(ctx, "admin activity: surface query failed; omitting the block",
-			"err", serr.Error(), "days", days)
-	} else {
-		// Allocated even when empty so "[]" (nothing recorded) stays
-		// distinguishable from "null" (query failed) on the wire.
-		surfaces := make([]ActivitySurfaceRow, 0, len(rows))
-		for _, row := range rows {
-			surfaces = append(surfaces, ActivitySurfaceRow{
-				Surface:       row.Surface,
-				Authenticated: row.AuthedCount,
-				Anonymous:     row.AnonCount,
-				Total:         row.TotalCount,
-			})
-		}
-		resp.Surfaces = surfaces
 	}
 
 	httpx.Data(w, http.StatusOK, resp)
@@ -396,8 +361,6 @@ func buildDailySeries(
 			point.ActiveUsers = row.ActiveUsers
 			point.Logins = row.Logins
 			point.Requests = row.Requests
-			point.PageViews = row.PageViews
-			point.Playbacks = row.Playbacks
 		}
 		out = append(out, point)
 	}

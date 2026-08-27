@@ -313,43 +313,37 @@ type Querier interface {
 	// historical retention is a floor, not a measurement.  Cohorts after the seam
 	// are measured properly.
 	GetActivityRetention(ctx context.Context, windowDays int32) (GetActivityRetentionRow, error)
-	// Queries over the migration-0025 activity rollups: one writer, one beacon
-	// writer, and the five reads behind GET /api/admin/activity.
+	// Queries over the migration-0025 activity rollup: the five reads behind
+	// GET /api/admin/activity, plus the per-user batch the admin user table needs.
 	//
 	// THE DAY BOUNDARY IS DEFINED ONCE, HERE, AND IT IS +08.
 	// Every query in this file buckets on `AT TIME ZONE 'Asia/Shanghai'` and every
 	// one of them derives "today" the same way.  0025's header explains why the
 	// boundary is not UTC; what matters for this file is that the expression is
-	// identical in all six places.  A single query that reached for `current_date`
+	// identical in every place it appears.  A single query that reached for `current_date`
 	// instead would silently measure a different day than the rest of the page for
 	// the eight hours between the two midnights -- which is most of a Chinese
 	// evening, i.e. exactly when the numbers are worth looking at.
 	//
 	// Conventions follow admin.sql: counts cast to ::bigint so sqlc emits int64,
 	// and every read is a single round-trip.
-	// NEITHER WRITE IS IN THIS FILE -- ON PURPOSE, TWICE OVER.
+	// THE WRITE IS NOT IN THIS FILE -- ON PURPOSE.
 	//
-	// Both flush statements are multi-array unnests (`unnest(uuid[],
-	// timestamptz[], ...)`) feeding one INSERT ... ON CONFLICT, so a flush
-	// covering N buckets costs one round-trip instead of N.  sqlc cannot analyse
-	// that form: multi-argument unnest is a ROWS FROM construct rather than an
-	// ordinary function, and sqlc's catalogue has no signature for it (`function
-	// unnest(unknown, unknown, ...) does not exist` at generate time).  Rewriting
-	// each as seven single-array unnests joined WITH ORDINALITY would type-check
-	// and would be materially worse to read for no behavioural gain.
+	// The flush statement is a multi-array unnest (`unnest(uuid[], timestamptz[],
+	// ...)`) feeding one INSERT ... ON CONFLICT, so a flush covering N users costs
+	// one round-trip instead of N.  sqlc cannot analyse that form: multi-argument
+	// unnest is a ROWS FROM construct rather than an ordinary function, and sqlc's
+	// catalogue has no signature for it (`function unnest(unknown, unknown, ...)
+	// does not exist` at generate time).  Rewriting it as five single-array
+	// unnests joined WITH ORDINALITY would type-check and would be materially
+	// worse to read for no behavioural gain.
 	//
-	// So they run as raw pgxpool queries in internal/activity/recorder.go -- the
+	// So it runs as a raw pgxpool query in internal/activity/recorder.go -- the
 	// same escape hatch list_enrichment.go and list_users.go already use for SQL
-	// sqlc cannot express.  Neither takes user input: every value is a uuid, a
-	// timestamp, a counter this process accumulated, or a surface string that has
-	// already been through NormalizeSurface's ten-value allow-list.  Both
-	// statements are quoted in full there.
-	//
-	// The batching is not a micro-optimisation on the aggregate side.
-	// activity_surface_daily holds twenty rows for a whole day, so a per-request
-	// write would make every anonymous page view in the catalogue contend for the
-	// same row lock -- on a site whose logged-out traffic is the majority.
-	// Buffered, those twenty rows are touched once a minute at any traffic level.
+	// sqlc cannot express.  It takes no user input: every value is a uuid, a
+	// timestamp, or a counter this process accumulated.  The statement is quoted
+	// in full there, including the WHERE EXISTS guard that keeps one deleted
+	// account from discarding everybody else's counters.
 	// The four headline numbers, in one round-trip.
 	//
 	// DAU / WAU / MAU are ROLLING windows ending today, not calendar week and
@@ -919,21 +913,6 @@ type Querier interface {
 	// The DISTINCT in GetActivitySnapshot is doing real work (its windows span
 	// days); here it would only cost a sort.
 	ListActivityDailyTotals(ctx context.Context, dayCount int32) ([]ListActivityDailyTotalsRow, error)
-	// Where the traffic went, over the window, split by whether the visitor held a
-	// session.
-	//
-	// The split is the reason this table exists separately from the per-user one.
-	// This is an SEO-led catalogue: the logged-out column is the majority of the
-	// site and is invisible to every other number on the activity panel, all of
-	// which are keyed on a user id.  Reporting only the authenticated half would
-	// be a "page visits" figure that undercounts reality by an order of magnitude
-	// while looking precise.
-	//
-	// Both columns are client-reported and therefore the softest evidence on the
-	// page -- see the handler's note on what a public counter endpoint can and
-	// cannot be trusted to mean.  DAU/WAU/MAU and retention do not read this
-	// table.
-	ListActivitySurfaceTotals(ctx context.Context, dayCount int32) ([]ListActivitySurfaceTotalsRow, error)
 	// Whole-table read for cmd/hantbackfill.  Every row, every run.
 	//
 	// No WHERE clause and no candidate filter, which is a decision rather

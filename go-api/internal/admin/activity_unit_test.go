@@ -72,8 +72,8 @@ func TestRatio(t *testing.T) {
 func TestBuildDailySeries_FillsGapsWithZeroes(t *testing.T) {
 	today := activity.Day(time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC))
 	totals := []dbgen.ListActivityDailyTotalsRow{
-		{ActivityDate: day("2026-08-26"), ActiveUsers: 4, Requests: 40, Logins: 1, PageViews: 9, Playbacks: 2},
-		{ActivityDate: day("2026-08-28"), ActiveUsers: 7, Requests: 70, Logins: 3, PageViews: 15, Playbacks: 5},
+		{ActivityDate: day("2026-08-26"), ActiveUsers: 4, Requests: 40, Logins: 1},
+		{ActivityDate: day("2026-08-28"), ActiveUsers: 7, Requests: 70, Logins: 3},
 	}
 	signups := []dbgen.ListNewUserCountsByDayRow{
 		{SignupDate: day("2026-08-27"), NewUsers: 2},
@@ -97,8 +97,7 @@ func TestBuildDailySeries_FillsGapsWithZeroes(t *testing.T) {
 	assert.Equal(t, int64(2), got[2].NewUsers)
 	// 28th: everything.
 	assert.Equal(t, int64(7), got[3].ActiveUsers)
-	assert.Equal(t, int64(15), got[3].PageViews)
-	assert.Equal(t, int64(5), got[3].Playbacks)
+	assert.Equal(t, int64(70), got[3].Requests)
 	assert.Equal(t, int64(3), got[3].Logins)
 }
 

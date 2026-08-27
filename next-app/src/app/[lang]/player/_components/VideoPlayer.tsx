@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import Artplayer from "artplayer";
 import type { Danmu } from "artplayer-plugin-danmuku";
-import { trackPlaybackStart } from "@/lib/activityBeacon";
 import { applyHeatmapPath } from "@/lib/heatmapPath";
 import { convertAssToVtt, convertSrtToVtt } from "@/lib/subtitleConvert";
 import { mountJassub, destroyJassub } from "./jassubOverlay";
@@ -263,9 +262,6 @@ export function VideoPlayer({
   const onProgressTickRef = useRef(onProgressTick);
   const onWatchTickRef = useRef(onWatchTick);
   const onPlaybackErrorRef = useRef(onPlaybackError);
-  // The videoUrl whose first successful `playing` has already been reported to
-  // the activity beacon. Not reset on pause or seek — see the listener below.
-  const playbackReportedForRef = useRef<string | null>(null);
 
   // Keep refs in sync so async init / event handlers always see the latest values.
   useEffect(() => {
@@ -491,26 +487,6 @@ export function VideoPlayer({
         if (tracks?.addEventListener) {
           tracks.addEventListener("addtrack", disableNativeTextTracks);
         }
-      });
-
-      // ─── Activity beacon: one report the first time this file plays ───
-      //
-      // Fired from `video:playing` rather than from the click that chose the
-      // file, because the two are not the same claim: a file Chrome refuses to
-      // decode is picked and never plays, and counting the click would report
-      // a playback that did not happen.
-      //
-      // Once per source, not once per play event. Every seek and every
-      // pause/resume fires `playing` again, so an unguarded listener turns one
-      // viewing into dozens and makes "playbacks" a measure of how fidgety the
-      // viewer is. The ref is keyed on the URL so switching episodes — which
-      // reruns this whole effect — legitimately reports again.
-      art.on("video:playing", () => {
-        if (playbackReportedForRef.current === videoUrl) return;
-        playbackReportedForRef.current = videoUrl ?? null;
-        // Read the path at fire time rather than threading usePathname down
-        // three component layers; this handler only ever runs in the browser.
-        trackPlaybackStart(window.location.pathname);
       });
 
       // ─── Dexie watch-progress feed (library entry path) ───

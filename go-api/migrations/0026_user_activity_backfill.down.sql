@@ -15,6 +15,4 @@
 
 DELETE FROM user_activity_daily
 WHERE request_count = 0
-  AND page_view_count = 0
-  AND playback_count = 0
   AND login_count = 0;

@@ -145,6 +145,15 @@ func TestMiddleware_IgnoresAnonymousAndNonApiAndHealth(t *testing.T) {
 			req:  func() *http.Request { return bearerRequest(t, signer, "/api/health", user) },
 		},
 		{
+			// Static file serving is not a person doing something.  A
+			// discussion page with twenty avatars on it would otherwise book
+			// twenty "activity requests" for one page view, and request_count
+			// stops being a request-volume signal the moment it is mixed with
+			// image fetches.
+			name: "avatar file with a valid token",
+			req:  func() *http.Request { return bearerRequest(t, signer, "/api/avatars/abc.jpg", user) },
+		},
+		{
 			// A forged or expired token must be indistinguishable from no
 			// token: presence is only ever recorded off a signature we issued.
 			name: "invalid token",

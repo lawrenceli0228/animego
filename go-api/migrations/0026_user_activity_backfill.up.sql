@@ -63,8 +63,6 @@ INSERT INTO user_activity_daily (
     first_seen_at,
     last_seen_at,
     request_count,
-    page_view_count,
-    playback_count,
     login_count
 )
 SELECT
@@ -78,8 +76,6 @@ SELECT
     max(evidence.happened_at) AS last_seen_at,
     -- The seam marker.  See the header.
     0 AS request_count,
-    0 AS page_view_count,
-    0 AS playback_count,
     0 AS login_count
 FROM (
     -- The signup day.  Included first and unconditionally, because it is the

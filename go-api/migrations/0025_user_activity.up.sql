@@ -13,8 +13,8 @@
 --
 -- So DAU/WAU/MAU, "when was this account last here", "how many days has it
 -- shown up", and next-day / day-7 retention were not hard queries against the
--- existing schema.  They were unanswerable.  This migration adds the two
--- tables that make them answerable, and nothing else.
+-- existing schema.  They were unanswerable.  This migration adds the table
+-- that makes them answerable, and nothing else.
 --
 --
 -- THE DAY BOUNDARY IS +08:00, NOT UTC.  Every date column below is bucketed in
@@ -27,29 +27,33 @@
 -- carries no dependency on the container's tzdata.
 --
 -- The writer (internal/activity) computes the same boundary with a fixed
--- time.FixedZone(+8h).  The two MUST agree; see activityDay() there.
+-- time.FixedZone(+8h).  The two MUST agree; see Day() there.
 --
 --
--- TWO TABLES, AND WHY THEY ARE NOT ONE.
+-- ONE TABLE, PER USER PER DAY.  It has to be per-user rather than a pre-summed
+-- daily total, because every headline number here counts DISTINCT PEOPLE and
+-- you cannot recover a distinct-person count from a sum.
 --
---   user_activity_daily     per user, per day.  Answers DAU/WAU/MAU, visit
---                           days, last-seen, and retention cohorts, because
---                           each of those needs to count DISTINCT PEOPLE, and
---                           you cannot recover a distinct-person count from a
---                           pre-summed total.
---
---   activity_surface_daily  aggregate only, no user column, anonymous traffic
---                           included.  Answers "which parts of the site get
---                           visited".
---
--- Merging them is not an option in either direction.  Folding the surface
--- counts into the per-user table would silently drop every anonymous visit --
--- and this is an SEO-led catalogue whose logged-out readers are the majority,
--- so a "page visits" number sourced from logged-in sessions alone would
--- understate the site by an order of magnitude while looking authoritative.
--- Folding the per-user table into the aggregate would destroy the distinct
--- count, i.e. the whole point.  They measure different populations and are
--- kept apart so that neither can be read as the other.
+-- WHAT THIS TABLE DOES NOT COVER, SAID OUT LOUD: logged-out visitors.  Every
+-- row is keyed on a user id, so anonymous readers -- the majority of a
+-- search-led catalogue -- are invisible to all of it.  An earlier revision
+-- added a second, aggregate, no-user-column table fed by a public browser
+-- beacon to close that gap.  It was removed before shipping: every beacon was
+-- an origin request that Cloudflare's edge cache would otherwise have
+-- absorbed, and it spent from the same per-IP rate-limit budget as real API
+-- calls, so the cost landed on the reader.  If anonymous coverage is wanted
+-- later, take it from nginx / Cloudflare logs, not from a write endpoint on
+-- the hot path.
+
+
+-- The foreign key below takes a ShareRowExclusive lock on `users` for the
+-- duration of the DDL.  `users` is a four-figure table and this runs inside
+-- the deploy window, so the lock itself is instant -- but if any long
+-- transaction happens to be holding a conflicting lock, an unbounded DDL wait
+-- queues every subsequent login and profile write behind it.  Failing fast and
+-- letting the deploy retry is strictly better than a lock convoy on the one
+-- table every authenticated request touches.
+SET lock_timeout = '3s';
 
 CREATE TABLE user_activity_daily (
     user_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -80,14 +84,6 @@ CREATE TABLE user_activity_daily (
     -- land here.  It is a volume signal, not an engagement one.
     request_count bigint NOT NULL DEFAULT 0,
 
-    -- Client-reported beacons, split from request_count because they mean
-    -- something a request count cannot: an actual page arrival and an actual
-    -- video start.  Both are self-reported by the browser and therefore
-    -- softer evidence than request_count -- see activity_surface_daily's note
-    -- on trust.
-    page_view_count bigint NOT NULL DEFAULT 0,
-    playback_count  bigint NOT NULL DEFAULT 0,
-
     -- Successful password logins.  Deliberately NOT "sessions": the refresh
     -- token lives 7 days, so a daily reader logs in roughly never and a zero
     -- here is the normal, healthy state for an engaged account.  It is useful
@@ -97,17 +93,14 @@ CREATE TABLE user_activity_daily (
 
     -- (activity_date, user_id), in that order, and the order is the point.
     -- Every aggregate read here -- DAU, the daily trend, the retention
-    -- cohorts, the surface of the whole dashboard -- is a scan of a bounded
+    -- cohorts, the whole surface of the dashboard -- is a scan of a bounded
     -- date range, so the date must lead for the range to be a single index
     -- range scan rather than a filter over the whole table.  The per-user
     -- reads that want the other order get their own index below.
     PRIMARY KEY (activity_date, user_id),
 
     CONSTRAINT user_activity_daily_counts_chk CHECK (
-        request_count   >= 0
-        AND page_view_count >= 0
-        AND playback_count  >= 0
-        AND login_count     >= 0
+        request_count >= 0 AND login_count >= 0
     ),
     -- A row whose last_seen precedes its first_seen is not a small
     -- inaccuracy, it is a writer bug (a flush applying an older buffer over a
@@ -133,42 +126,6 @@ CREATE INDEX idx_user_activity_daily_user
 -- bucketed the same way, which is why the admin query casts it rather than
 -- comparing raw timestamps.
 
-CREATE TABLE activity_surface_daily (
-    activity_date date    NOT NULL,
-    surface       text    NOT NULL,
-    -- Whether the visitor held a valid session.  A boolean, never an id, and
-    -- never an IP or user agent -- the same line 0020 drew for
-    -- community_engagement_daily, drawn again here for the same reason: a
-    -- table that can tell you which pages one person read is a browsing
-    -- history, and this project does not keep one.  The per-user table above
-    -- deliberately counts visits without recording what was visited.
-    authenticated boolean NOT NULL,
-    event_count   bigint  NOT NULL DEFAULT 0,
-    updated_at    timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (activity_date, surface, authenticated),
-
-    -- The allow-list is duplicated in Go (internal/activity.ValidSurface) so
-    -- the API can answer 400 with a readable message instead of surfacing a
-    -- constraint violation as a 500.  This copy is the durable one: it binds
-    -- every writer, including a future one that forgets the handler.
-    --
-    -- 'other' is the catch-all and exists so that an unrecognised surface
-    -- degrades to a bucket instead of to a rejected request -- a new page
-    -- shipping before its enum entry should lose its label, not its count.
-    CONSTRAINT activity_surface_daily_surface_chk CHECK (
-        surface IN (
-            'home', 'anime', 'watch', 'seasonal', 'library',
-            'community', 'profile', 'search', 'auth', 'other'
-        )
-    ),
-    CONSTRAINT activity_surface_daily_count_chk CHECK (event_count >= 0)
-);
-
--- Mirrors idx_community_engagement_daily_date: the only read is "the last N
--- days, grouped by surface", newest first.
-CREATE INDEX idx_activity_surface_daily_date
-    ON activity_surface_daily (activity_date DESC, surface);
-
 -- Retention: 400 days on the per-user table.
 --
 -- 400 rather than 365 so a year-over-year comparison still has both endpoints
@@ -182,11 +139,6 @@ CREATE INDEX idx_activity_surface_daily_date
 -- retrofit one under time pressure once library sync started writing a row per
 -- finished episode.  A table that accumulates one row per person per day has
 -- exactly that shape, so the ceiling goes in with the table.
---
--- activity_surface_daily is deliberately NOT pruned: it is bounded by
--- (surfaces x 2) rows per day -- twenty -- so it accrues about 7 300 rows a
--- year and is the only long-horizon traffic record the project would have.
--- Expiring it would buy nothing and cost the one comparison it exists for.
 --
 -- 05:00 UTC keeps this clear of the danmaku TTL (04:00, 0006) and the
 -- activity_events prune (04:30, 0021) so the three never contend for the same

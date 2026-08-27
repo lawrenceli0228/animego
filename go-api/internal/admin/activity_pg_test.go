@@ -12,6 +12,9 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -247,29 +250,6 @@ func TestGetActivity_RetentionIsDayExact(t *testing.T) {
 	assert.Equal(t, int64(1), got.Retention.Ever.Returned, "but they do count as having come back at all")
 }
 
-// TestGetActivity_SurfacesSplitAnonymousFromAuthenticated.  The anonymous
-// column is the majority of this site and is invisible to every other number
-// on the panel, all of which are keyed on a user id.
-func TestGetActivity_SurfacesSplitAnonymousFromAuthenticated(t *testing.T) {
-	_, pool := makeHandlers(t)
-	ctx := context.Background()
-	date := reportingToday().Format(dateLayout)
-
-	_, err := pool.Exec(ctx, `
-		INSERT INTO activity_surface_daily (activity_date, surface, authenticated, event_count)
-		VALUES ($1, 'anime', false, 900), ($1, 'anime', true, 100), ($1, 'home', false, 50)`, date)
-	require.NoError(t, err)
-
-	got := getActivity(t, pool, "")
-	require.Len(t, got.Surfaces, 2)
-
-	assert.Equal(t, "anime", got.Surfaces[0].Surface, "ordered by total, descending")
-	assert.Equal(t, int64(900), got.Surfaces[0].Anonymous)
-	assert.Equal(t, int64(100), got.Surfaces[0].Authenticated)
-	assert.Equal(t, int64(1000), got.Surfaces[0].Total)
-	assert.Equal(t, "home", got.Surfaces[1].Surface)
-}
-
 // TestGetActivity_EmptyDatabaseIsAllZeroesNotAnError: a brand-new deployment
 // must render the panel rather than an error, and every list must be an empty
 // array rather than null — null is reserved for "the query failed".
@@ -284,8 +264,6 @@ func TestGetActivity_EmptyDatabaseIsAllZeroesNotAnError(t *testing.T) {
 	assert.Equal(t, 0.0, got.Stickiness)
 	assert.Len(t, got.Daily, defaultActivityDays, "the axis exists even with no data on it")
 	assert.NotNil(t, got.Retention)
-	assert.NotNil(t, got.Surfaces, "an empty array, not null: null means the query failed")
-	assert.Empty(t, got.Surfaces)
 }
 
 // TestUserActivityDaily_RejectsInvertedWindow proves migration 0025's CHECK is
@@ -302,19 +280,6 @@ func TestUserActivityDaily_RejectsInvertedWindow(t *testing.T) {
 		VALUES ($1, $2, $3, $4)`,
 		user, reportingToday().Format(dateLayout), at, at.Add(-time.Hour))
 	require.Error(t, err, "last_seen_at < first_seen_at must be rejected by the database")
-}
-
-// TestActivitySurfaceDaily_RejectsUnknownSurface proves the allow-list is
-// enforced at the edge and not only in Go.  NormalizeSurface is what keeps a
-// caller's text from ever reaching here; this is what binds a writer that
-// forgets it.
-func TestActivitySurfaceDaily_RejectsUnknownSurface(t *testing.T) {
-	_, pool := makeHandlers(t)
-
-	_, err := pool.Exec(context.Background(), `
-		INSERT INTO activity_surface_daily (activity_date, surface, authenticated, event_count)
-		VALUES (current_date, 'checkout', false, 1)`)
-	require.Error(t, err, "a surface outside the allow-list must be rejected by the database")
 }
 
 // TestBackfillMigration_ReconstructsInteractionDays runs migration 0026's SQL
@@ -452,4 +417,90 @@ func TestListUsers_CarriesActivityColumns(t *testing.T) {
 		"never recorded must serialise as null, not as an epoch that reads as a visit in year 1")
 	assert.Equal(t, int64(0), quiet.ActiveDays)
 	assert.Equal(t, int64(0), quiet.Logins)
+}
+
+// TestRecorderFlush_SkipsDeletedUsersWithoutDroppingTheBatch.
+//
+// THE FAILURE THIS EXISTS FOR, spelled out because the code that prevents it
+// is one inconspicuous WHERE clause.
+//
+// user_activity_daily.user_id carries a foreign key to users, and an access
+// token stays valid for fifteen minutes after an admin deletes the account it
+// belongs to.  Every request that token makes enqueues a uuid with no row
+// behind it.  The recorder flushes ALL users in one statement and drops the
+// whole batch on any error -- so without the guard, one deleted account
+// silently zeroes EVERYBODY's counters, once a minute, until the token
+// expires.  The only trace would be a foreign-key line in the log and a dent
+// in the DAU chart that nobody could explain.
+//
+// This runs the real statement against the real schema, because the guard is
+// SQL and a fake execer would prove nothing about it.
+func TestRecorderFlush_SkipsDeletedUsersWithoutDroppingTheBatch(t *testing.T) {
+	_, pool := makeHandlers(t)
+	ctx := context.Background()
+
+	alive := seedUser(t, pool, "still_here", "alive@example.com")
+	ghost := uuid.New() // never existed; stands in for "deleted a minute ago"
+	at := reportingToday().Add(12 * time.Hour)
+
+	rec := activity.NewRecorder(pool, nil, time.Hour)
+	rec.Touch(alive, at)
+	rec.Touch(alive, at)
+	rec.Touch(ghost, at)
+	rec.Flush(ctx)
+
+	var requests int64
+	err := pool.QueryRow(ctx,
+		`SELECT request_count FROM user_activity_daily WHERE user_id = $1`, alive).Scan(&requests)
+	require.NoError(t, err,
+		"the live user's row must exist: a deleted account in the same batch must not take it down")
+	assert.Equal(t, int64(2), requests)
+
+	var ghostRows int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM user_activity_daily WHERE user_id = $1`, ghost).Scan(&ghostRows))
+	assert.Equal(t, int64(0), ghostRows, "the orphan row must be skipped, not inserted")
+}
+
+// TestGetActivity_RetentionSoftFailsToNull.
+//
+// Retention is the most expensive read on this endpoint -- users joined
+// against the activity table with three correlated EXISTS probes per cohort
+// member -- so it is the one most likely to time out first.  Losing it must
+// not take the headline numbers with it, and it must come back as null rather
+// than as zeroes: a zero here is the claim "nobody returned", which is exactly
+// what a failed query has no right to assert.
+func TestGetActivity_RetentionSoftFailsToNull(t *testing.T) {
+	_, pool := makeHandlers(t)
+	user := seedUser(t, pool, "soft_fail", "soft@example.com")
+	seedActivity(t, pool, user, 0, 5)
+
+	h := NewActivityHandlers(retentionFailingQuerier{dbgen.New(pool)}, discardLogger())
+	rec := httptest.NewRecorder()
+	h.GetActivity(rec, httptest.NewRequest(http.MethodGet, "/api/admin/activity", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code,
+		"a failed retention query must not 500 the whole panel; body=%s", rec.Body.String())
+
+	var envelope struct {
+		Data ActivityResp `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	assert.Nil(t, envelope.Data.Retention, "must be null, never a zeroed object")
+	assert.Equal(t, int64(1), envelope.Data.Dau, "the headline numbers still ship")
+	assert.NotEmpty(t, envelope.Data.Daily)
+}
+
+// retentionFailingQuerier delegates everything to a real querier except the
+// retention read.  Embedding rather than reimplementing keeps the other
+// numbers genuine, which is the whole point of the assertion above -- the same
+// shape handlers_test.go uses for descCnFailingQuerier.
+type retentionFailingQuerier struct{ activityQuerier }
+
+func (retentionFailingQuerier) GetActivityRetention(_ context.Context, _ int32) (dbgen.GetActivityRetentionRow, error) {
+	return dbgen.GetActivityRetentionRow{}, errors.New("simulated retention query failure")
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
