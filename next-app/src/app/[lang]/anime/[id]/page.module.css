@@ -1,0 +1,355 @@
+/* The detail hero's styles, moved out of the `S` object in page.tsx.
+ *
+ * They were 19 inline `CSSProperties` literals. Inline styles cannot express
+ * a hover, a focus ring, or a media query, and they win against every
+ * stylesheet rule — so as long as the hero lived in that object, none of the
+ * responsive work below was possible and any CSS written against these
+ * elements would have been silently inert.
+ *
+ * Literals are replaced with tokens ONLY where the value already matched the
+ * token exactly. Several do not (0.75, 0.50, 0.42 text alphas; the 0.10 bgm
+ * fills) and those stay literal, with a note. Snapping an off-scale value to
+ * the nearest token would be a visual change wearing a refactor's clothes,
+ * and it would land in a commit nobody is reviewing for visual change.
+ */
+
+/* ── Hero geometry ───────────────────────────────────────────────────────
+ *
+ * Four numbers that only make sense together:
+ *
+ *   banner height   how tall the artwork strip is
+ *   pull            how far the content below is dragged up into it
+ *   cover width     the poster, which straddles the seam
+ *   meta top        how far the title is pushed down inside the content
+ *
+ * They were four separate ternaries on `detail.bannerImageUrl`, scattered
+ * across 70 lines of JSX. Changing one alone does not produce a smaller
+ * hero, it produces a broken one: shrink the banner without shrinking the
+ * pull and the poster hangs off the top of the artwork; shrink the pull
+ * without the meta offset and the title lands in the middle of the image.
+ *
+ * So they live here, as one custom-property set per state, and the JSX only
+ * says which state it is in. That is what makes the mobile clamp below a
+ * three-line change instead of a rewrite.
+ *
+ * Measured before: at a 390px viewport the banner (400px) plus the poster
+ * (300px) consumed the entire first screen, so the synopsis — the thing a
+ * visitor arriving from a search result came to read — started below the
+ * fold on every phone.
+ */
+.hero {
+  --hero-banner-h: clamp(150px, 34vw, 400px);
+  --hero-pull: calc(-1 * clamp(40px, 8vw, 80px));
+  --hero-cover-w: clamp(112px, 22vw, 210px);
+  --hero-meta-top: clamp(20px, 5vw, 60px);
+  --hero-gap: clamp(16px, 3vw, 32px);
+}
+
+/* No banner: there is no artwork to overlap, so the content sits below the
+ * short strip rather than being pulled into it, and the title needs no
+ * offset to clear anything. */
+.hero[data-banner="false"] {
+  --hero-banner-h: 120px;
+  --hero-pull: var(--sp-lg);
+  --hero-meta-top: 0px;
+}
+
+.banner {
+  position: relative;
+  height: var(--hero-banner-h);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.bannerImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+
+/* The gradient that lets white text sit on arbitrary artwork. Ends at 0.95
+ * rather than 1 so the bottom edge of the image is still faintly visible —
+ * a hard cut reads as a rendering bug. */
+.bannerOverlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent 40%,
+    rgba(0, 0, 0, 0.3) 65%,
+    rgba(0, 0, 0, 0.95) 100%
+  );
+}
+
+.content {
+  display: flex;
+  gap: var(--hero-gap);
+  margin-top: var(--hero-pull);
+  position: relative;
+  z-index: 1;
+  padding-bottom: 40px;
+  flex-wrap: wrap;
+}
+
+.coverSlot {
+  flex-shrink: 0;
+}
+
+/* Aspect ratio is 210:300 (7:10), not the 3:4 DESIGN.md's card rule names.
+ * That is deliberate: AniList's large covers are 460x650, so 7:10 crops
+ * almost nothing while 3:4 would visibly clip the artwork. The width/height
+ * attributes on the element supply the same ratio, which is what keeps the
+ * box reserved before the image decodes. */
+.cover {
+  width: var(--hero-cover-w);
+  height: auto;
+  aspect-ratio: 210 / 300;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  display: block;
+}
+
+/* The cover slot when there is no cover to show. */
+.coverPlaceholder {
+  composes: cover;
+  background: var(--bg-elevated);
+}
+
+.meta {
+  flex: 1;
+  min-width: 280px;
+  padding-top: var(--hero-meta-top);
+}
+
+/* Below the wrap point the poster and the title share a row instead of
+ * stacking. Stacking is what pushed the synopsis off the first screen: the
+ * poster gets a full row to itself and the text starts underneath it.
+ * `min-width: 0` is the whole mechanism — a flex item will not shrink past
+ * its min-width, and 280px plus the poster does not fit a 390px screen. */
+@media (max-width: 600px) {
+  .meta {
+    min-width: 0;
+  }
+}
+
+/* ── Type ─────────────────────────────────────────────────────────────── */
+
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 4vw, 36px);
+  color: var(--text);
+  margin-bottom: var(--sp-xs);
+  line-height: 1.2;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 15px;
+  margin-bottom: var(--sp-md);
+}
+
+.descText {
+  /* 0.75 — deliberately brighter than --text-secondary (0.60). This is body
+   * copy at 14px/1.8, and the secondary alpha is tuned for short labels. */
+  color: rgba(235, 235, 245, 0.75);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.sectionLabel {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: var(--sp-md);
+}
+
+/* ── Badges ───────────────────────────────────────────────────────────── */
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: var(--sp-md);
+}
+
+/* Shape only. Colour comes from one of the variants below, and never from
+ * a caller passing a pair of strings — that signature is what let the score
+ * badge pair a green foreground with an amber background in production. */
+.badge {
+  padding: var(--sp-xs) 12px;
+  border-radius: var(--radius-full);
+  font-size: 13px;
+}
+
+.badgeAccent {
+  composes: badge;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Read-only information, never a control — see DESIGN.md on teal. */
+.badgeInfo {
+  composes: badge;
+  background: var(--teal-dim);
+  color: var(--teal);
+}
+
+.badgeNeutral {
+  composes: badge;
+  background: var(--bg-fill);
+  color: var(--text-secondary);
+}
+
+/* One step quieter than neutral, for a value we are not certain of (the
+ * pending episode count). 0.42 sits between --text-secondary and
+ * --text-tertiary and matches no token; kept as measured rather than
+ * snapped, because "slightly less certain" is the thing it encodes. */
+.badgeMuted {
+  composes: badge;
+  background: var(--bg-fill);
+  color: rgba(235, 235, 245, 0.42);
+}
+
+/* Layout only — the colour pair is applied inline from scoreBadgeStyle(),
+ * which returns background and text together. See scoreStyle.ts. */
+.scoreBadge {
+  padding: var(--sp-xs) 12px;
+  border-radius: var(--radius-full);
+  font-weight: 700;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+/* Bangumi's score, kept visually distinct from ours so the two are not read
+ * as one number. 0.10 rather than the 0.12 the score bands use — a hair
+ * lighter, because this badge carries more glyphs. */
+.bgmScoreBadge {
+  padding: var(--sp-xs) 12px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 69, 58, 0.1);
+  color: var(--error);
+  font-weight: 700;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+}
+
+.bgmLabel {
+  font-size: 10px;
+  opacity: 0.7;
+  font-family: var(--font-sans);
+}
+
+.bgmVotes {
+  font-size: 11px;
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+.bgmLink {
+  padding: var(--sp-xs) 12px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 69, 58, 0.1);
+  color: var(--error);
+  font-size: 13px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-weight: 500;
+}
+
+/* An outbound link, so unlike the badges around it, it gets real states.
+ * This is the kind of rule the inline-style object could not hold at all. */
+.bgmLink:hover {
+  background: rgba(255, 69, 58, 0.18);
+}
+
+.bgmLink:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.bgmArrow {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+/* ── Meta row ─────────────────────────────────────────────────────────── */
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-xs) 12px;
+  margin-bottom: var(--sp-md);
+  align-items: center;
+}
+
+/* 0.75 / 0.50 — a three-step hierarchy inside one row (studio, separator,
+ * detail). The token scale has two steps in that range, so these stay
+ * literal rather than collapsing studio and detail into one weight. */
+.metaStudio {
+  color: rgba(235, 235, 245, 0.75);
+  font-size: 13px;
+}
+
+.metaDot {
+  color: var(--separator);
+  font-size: 13px;
+}
+
+.metaDetail {
+  color: rgba(235, 235, 245, 0.5);
+  font-size: 12px;
+}
+
+/* ── Genres ───────────────────────────────────────────────────────────── */
+
+.genreRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.genreTag {
+  padding: var(--sp-xs) 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-fill);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ── Hero relations strip ─────────────────────────────────────────────── */
+
+.relationRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-sm);
+  margin-top: 12px;
+}
+
+.relationLabel {
+  color: rgba(235, 235, 245, 0.35);
+  font-size: 11px;
+}
+
+.descBlock {
+  margin-bottom: 20px;
+}
+
+.descBlockLast {
+  margin-bottom: 0;
+}

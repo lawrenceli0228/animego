@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Button from "@/components/ui/Button";
 import Link from "@/components/ui/LocaleLink";
 import { useLang } from "@/lib/lang-client";
 import styles from "./PlayButton.module.css";
@@ -60,17 +61,16 @@ export default function PlayButton({
 
   return (
     <>
-      <button
+      <Button
         ref={triggerRef}
-        type="button"
+        variant="primary"
         onClick={() => setOpen(true)}
         aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className={styles.trigger}
       >
         {children}
-      </button>
+      </Button>
 
       {open ? (
         <div

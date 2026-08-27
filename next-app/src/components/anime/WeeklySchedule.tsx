@@ -16,10 +16,19 @@
 
 import Link from "@/components/ui/LocaleLink";
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { pickTitle } from "@/lib/formatters";
 import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
+import { nextTabIndex } from "./tabListNav";
+import styles from "./WeeklySchedule.module.css";
+
+// Static id prefix for the tab/panel wiring. The component renders once per
+// page, so a constant is enough and it keeps the ids stable between the
+// server and client renders - useId would be safer for a repeated component
+// but produces a value that has to match across hydration for these
+// relationships to resolve at all.
+const TABS_ID = "weekly-schedule";
 
 export interface ScheduleItem {
   scheduleId: number;
@@ -162,39 +171,13 @@ const titleStyle: CSSProperties = {
   color: "#ffffff",
 };
 
-const tabsStyle: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  overflowX: "auto",
-  paddingBottom: 8,
-  marginBottom: 24,
-  scrollbarWidth: "none",
-};
+// tabsStyle moved to the module alongside the tab rules it belongs with.
 
-function tabStyle(active: boolean, isToday: boolean): CSSProperties {
-  return {
-    padding: "6px 18px",
-    minHeight: 44,
-    borderRadius: 20,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "pointer",
-    border: "none",
-    whiteSpace: "nowrap",
-    transition: "all 0.2s",
-    background: active
-      ? "#0a84ff"
-      : isToday
-        ? "rgba(10,132,255,0.12)"
-        : "rgba(120,120,128,0.12)",
-    color: active
-      ? "#fff"
-      : isToday
-        ? "#0a84ff"
-        : "rgba(235,235,245,0.60)",
-    outline: "none",
-  };
-}
+// tabStyle(active, isToday) lived here and ended with `outline: "none"`.
+// Inline styles beat stylesheets, so that one line meant the tabs could
+// never grow a focus ring no matter what CSS anyone wrote for them. The
+// whole rule set is now in WeeklySchedule.module.css, keyed off the ARIA
+// attributes the tablist pattern requires anyway.
 
 const gridStyle: CSSProperties = {
   display: "grid",
@@ -303,11 +286,37 @@ export default function WeeklySchedule({
   const today = apiToday || localToday();
   const days = Object.keys(groups).sort();
   const [selected, setSelected] = useState<string | null>(null);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  // Hooks run before the early return below, which is why this sits here and
+  // not next to the JSX that uses it.
+  const active = selected ?? today;
+  const activeDay = days.includes(active) ? active : days[0];
+
+  /**
+   * Arrow-key movement across the tablist.
+   *
+   * Selection follows focus, which is the right choice here specifically
+   * because switching days is free — the data for all seven is already in
+   * memory, so there is no cost to arrowing through them and no reason to
+   * make someone press Enter as well. (For tabs whose panels load on
+   * demand, the pattern would be manual activation instead.)
+   *
+   * Wraps at both ends, and Home/End jump to the edges. Both are part of
+   * the pattern people already expect from every other tab control.
+   */
+  function onTabKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const next = nextTabIndex(e.key, days.indexOf(activeDay), days.length);
+    // null means the key is not ours. Returning before preventDefault is the
+    // point: a handler that swallows everything traps Tab inside the tablist.
+    if (next === null) return;
+    e.preventDefault();
+    setSelected(days[next]);
+    tabRefs.current[next]?.focus();
+  }
 
   if (days.length === 0) return null;
 
-  const active = selected ?? today;
-  const activeDay = days.includes(active) ? active : days[0];
   const items = groups[activeDay] ?? [];
 
   const dayMap = DAY_LABELS[lang];
@@ -334,25 +343,65 @@ export default function WeeklySchedule({
         <h2 style={titleStyle}>{dict.home.thisWeek}</h2>
       </div>
 
-      <div style={tabsStyle}>
-        {days.map((d) => (
-          <button
-            key={d}
-            style={tabStyle(d === activeDay, d === today)}
-            onClick={() => setSelected(d)}
-          >
-            {formatDayLabel(d)}
-            <span style={{ marginLeft: 4, opacity: 0.7, fontSize: 11 }}>
-              {groups[d]?.length ?? 0}
-            </span>
-          </button>
-        ))}
+      {/* A real tablist. Seven plain buttons were seven tab stops with no
+          relationship to each other or to the grid they control, so a
+          keyboard user tabbed through all of them to reach the content and
+          a screen reader announced seven unlabelled buttons.
+          Roving tabindex is what fixes the first half: exactly one tab is
+          reachable by Tab, and Arrow keys move between them — the pattern
+          every native tab control uses. */}
+      <div
+        className={styles.tabs}
+        role="tablist"
+        aria-label={dict.home.thisWeek}
+        onKeyDown={onTabKeyDown}
+      >
+        {days.map((d, i) => {
+          const isActive = d === activeDay;
+          return (
+            <button
+              key={d}
+              ref={(el) => {
+                tabRefs.current[i] = el;
+              }}
+              type="button"
+              role="tab"
+              id={`${TABS_ID}-tab-${d}`}
+              aria-selected={isActive}
+              aria-controls={`${TABS_ID}-panel`}
+              // The roving part. A non-selected tab stays focusable
+              // programmatically (that is what -1 means) so the arrow-key
+              // handler can move focus onto it.
+              tabIndex={isActive ? 0 : -1}
+              data-today={d === today ? "true" : "false"}
+              className={styles.tab}
+              onClick={() => setSelected(d)}
+            >
+              {formatDayLabel(d)}
+              <span className={styles.tabCount}>{groups[d]?.length ?? 0}</span>
+            </button>
+          );
+        })}
       </div>
 
+      {/* The panel the tabs control. Named and labelled by the active tab, so
+          the relationship the tablist claims actually resolves. */}
       {items.length === 0 ? (
-        <p style={emptyStyle}>{dict.home.noUpdates}</p>
+        <p
+          style={emptyStyle}
+          id={`${TABS_ID}-panel`}
+          role="tabpanel"
+          aria-labelledby={`${TABS_ID}-tab-${activeDay}`}
+        >
+          {dict.home.noUpdates}
+        </p>
       ) : (
-        <div style={gridStyle}>
+        <div
+          style={gridStyle}
+          id={`${TABS_ID}-panel`}
+          role="tabpanel"
+          aria-labelledby={`${TABS_ID}-tab-${activeDay}`}
+        >
           {items.map((item) => {
             const title = pickTitle(item, lang);
             const score = item.averageScore ?? 0;

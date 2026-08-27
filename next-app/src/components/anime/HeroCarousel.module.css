@@ -41,8 +41,14 @@
   background: #07090c;
 }
 
+/* Inset because the carousel is full-bleed and an outer ring would be
+ * clipped — that part is a legitimate variation. The COLOUR is not: it drew
+ * --hero-accent, which is sampled from whichever poster is on screen, so the
+ * focus ring changed colour as the carousel rotated and could land on a hue
+ * indistinguishable from the artwork behind it. DESIGN.md's poster-accent
+ * rule names focus rings specifically. */
 .root:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--hero-accent);
+  box-shadow: inset 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 .slide {

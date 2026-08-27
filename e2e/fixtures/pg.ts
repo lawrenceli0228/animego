@@ -285,6 +285,23 @@ export interface SeedAnimeDetail extends SeedAnimeCache {
   episodesBgm?: number | null;
   /** AniList status string, e.g. `"RELEASING"`. */
   status?: string | null;
+  /**
+   * The hero's four coupled geometry values switch on whether this is set.
+   * A spec about the detail hero that leaves it null is measuring the
+   * no-banner layout while believing it measured the other one.
+   */
+  bannerImageUrl?: string | null;
+  /** The poster. Absent renders the placeholder box, not an <img>. */
+  coverImageUrl?: string | null;
+  /**
+   * AniList's 0-100 score. Decides which of the three score-badge bands the
+   * page paints, so a spec pinning that pairing has to choose it — 87 and 30
+   * exercise different branches and the defect only existed in one of them.
+   */
+  averageScore?: number | null;
+  /** Synopsis. What a search visitor came for, and what the mobile hero has
+   * to get above the fold. */
+  description?: string | null;
 }
 
 /**
@@ -300,15 +317,16 @@ export interface SeedAnimeDetail extends SeedAnimeCache {
  * role are the cheapest way to make the row look complete and keep the read
  * entirely inside Postgres.
  *
- * The child rows are deleted first rather than upserted: they have surrogate
- * uuid keys, so a re-run would otherwise stack duplicates.
+ * Safe to call concurrently for the same id — see the note on the child-row
+ * inserts below, which is not the obvious way to write them.
  */
 export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
   const sql = getSql();
   await sql`
     INSERT INTO anime_cache (
       anilist_id, title_romaji, title_chinese, episodes, episodes_bgm,
-      status, cached_at
+      status, banner_image_url, cover_image_url, average_score, description,
+      cached_at
     )
     VALUES (
       ${anime.anilistId},
@@ -317,26 +335,53 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
       ${anime.episodes ?? null},
       ${anime.episodesBgm ?? null},
       ${anime.status ?? null},
+      ${anime.bannerImageUrl ?? null},
+      ${anime.coverImageUrl ?? null},
+      ${anime.averageScore ?? null},
+      ${anime.description ?? null},
       now()
     )
     ON CONFLICT (anilist_id) DO UPDATE SET
-      title_romaji  = EXCLUDED.title_romaji,
-      title_chinese = EXCLUDED.title_chinese,
-      episodes      = EXCLUDED.episodes,
-      episodes_bgm  = EXCLUDED.episodes_bgm,
-      status        = EXCLUDED.status,
-      cached_at     = now(),
-      updated_at    = now()
+      title_romaji     = EXCLUDED.title_romaji,
+      title_chinese    = EXCLUDED.title_chinese,
+      episodes         = EXCLUDED.episodes,
+      episodes_bgm     = EXCLUDED.episodes_bgm,
+      status           = EXCLUDED.status,
+      banner_image_url = EXCLUDED.banner_image_url,
+      cover_image_url  = EXCLUDED.cover_image_url,
+      average_score    = EXCLUDED.average_score,
+      description      = EXCLUDED.description,
+      cached_at        = now(),
+      updated_at       = now()
   `;
-  await sql`DELETE FROM anime_studios WHERE anime_id = ${anime.anilistId}`;
-  await sql`DELETE FROM anime_characters WHERE anime_id = ${anime.anilistId}`;
+  // Written idempotently rather than deleted-then-inserted.
+  //
+  // This used to clear both child tables first, which reads as the obvious
+  // way to keep a re-run from stacking duplicates and is safe only if one
+  // process is doing it. Playwright's fullyParallel puts the tests of one
+  // file on several workers, and beforeAll runs once PER WORKER, so several
+  // of them seed the same ids at the same time. One worker's DELETE lands
+  // between another's INSERT and its postcondition check, and the check
+  // throws `seeded row is still stale (studios=0, ...)` — a fixture error
+  // that reads exactly like a product bug in whichever spec drew the short
+  // straw, and only sometimes.
+  //
+  // anime_studios has PRIMARY KEY (anime_id, studio), so a conflicting
+  // insert is a no-op. anime_characters has only a surrogate uuid key, so
+  // (anime_id, display_order) stands in for the natural one. Neither
+  // statement can remove a row a peer just wrote.
   await sql`
     INSERT INTO anime_studios (anime_id, studio)
     VALUES (${anime.anilistId}, 'E2E Animation Works')
+    ON CONFLICT (anime_id, studio) DO NOTHING
   `;
   await sql`
     INSERT INTO anime_characters (anime_id, display_order, name_en, role)
-    VALUES (${anime.anilistId}, 0, 'E2E Protagonist', 'MAIN')
+    SELECT ${anime.anilistId}, 0, 'E2E Protagonist', 'MAIN'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM anime_characters
+      WHERE anime_id = ${anime.anilistId} AND display_order = 0
+    )
   `;
 
   // Verify the postcondition this function's whole name is a promise about.
