@@ -285,6 +285,23 @@ export interface SeedAnimeDetail extends SeedAnimeCache {
   episodesBgm?: number | null;
   /** AniList status string, e.g. `"RELEASING"`. */
   status?: string | null;
+  /**
+   * The hero's four coupled geometry values switch on whether this is set.
+   * A spec about the detail hero that leaves it null is measuring the
+   * no-banner layout while believing it measured the other one.
+   */
+  bannerImageUrl?: string | null;
+  /** The poster. Absent renders the placeholder box, not an <img>. */
+  coverImageUrl?: string | null;
+  /**
+   * AniList's 0-100 score. Decides which of the three score-badge bands the
+   * page paints, so a spec pinning that pairing has to choose it — 87 and 30
+   * exercise different branches and the defect only existed in one of them.
+   */
+  averageScore?: number | null;
+  /** Synopsis. What a search visitor came for, and what the mobile hero has
+   * to get above the fold. */
+  description?: string | null;
 }
 
 /**
@@ -308,7 +325,8 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
   await sql`
     INSERT INTO anime_cache (
       anilist_id, title_romaji, title_chinese, episodes, episodes_bgm,
-      status, cached_at
+      status, banner_image_url, cover_image_url, average_score, description,
+      cached_at
     )
     VALUES (
       ${anime.anilistId},
@@ -317,16 +335,24 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
       ${anime.episodes ?? null},
       ${anime.episodesBgm ?? null},
       ${anime.status ?? null},
+      ${anime.bannerImageUrl ?? null},
+      ${anime.coverImageUrl ?? null},
+      ${anime.averageScore ?? null},
+      ${anime.description ?? null},
       now()
     )
     ON CONFLICT (anilist_id) DO UPDATE SET
-      title_romaji  = EXCLUDED.title_romaji,
-      title_chinese = EXCLUDED.title_chinese,
-      episodes      = EXCLUDED.episodes,
-      episodes_bgm  = EXCLUDED.episodes_bgm,
-      status        = EXCLUDED.status,
-      cached_at     = now(),
-      updated_at    = now()
+      title_romaji     = EXCLUDED.title_romaji,
+      title_chinese    = EXCLUDED.title_chinese,
+      episodes         = EXCLUDED.episodes,
+      episodes_bgm     = EXCLUDED.episodes_bgm,
+      status           = EXCLUDED.status,
+      banner_image_url = EXCLUDED.banner_image_url,
+      cover_image_url  = EXCLUDED.cover_image_url,
+      average_score    = EXCLUDED.average_score,
+      description      = EXCLUDED.description,
+      cached_at        = now(),
+      updated_at       = now()
   `;
   await sql`DELETE FROM anime_studios WHERE anime_id = ${anime.anilistId}`;
   await sql`DELETE FROM anime_characters WHERE anime_id = ${anime.anilistId}`;
