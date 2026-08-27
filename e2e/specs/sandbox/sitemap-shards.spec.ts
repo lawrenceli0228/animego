@@ -20,6 +20,13 @@ import { closePg, ensureAnimeCached, removeAnimeFixture } from "../../fixtures/p
 // session changes what the proxy does with them.
 test.use({ storageState: { cookies: [], origins: [] } });
 
+// One worker for the whole file. The config sets fullyParallel, which
+// spreads a file's tests across workers — and beforeAll/afterAll run once
+// per worker, so with one shared database and one set of fixture ids the
+// first worker to finish deletes the rows the others are still reading.
+// The result is an intermittent 404 in whichever spec drew the short straw.
+test.describe.configure({ mode: "serial" });
+
 // Ids picked for their remainder, not their meaning. `anilist_id % 4` is the
 // shard, so this pair is the smallest thing that proves the Go query and the
 // Next route agree about which file an anime belongs in — seed both, and each
