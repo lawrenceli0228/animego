@@ -25,6 +25,7 @@ import EpisodesGrid from "@/components/anime/EpisodesGrid";
 import { resolveEpisodeSkeleton } from "@/components/anime/episodeGridSkeleton";
 import HeroAccent from "@/components/anime/HeroAccent";
 import { FormatBadge, GenreChips } from "@/components/anime/LocalizedChips";
+import { scoreBadgeStyle } from "@/components/anime/scoreStyle";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import { apiGet, ApiError } from "@/lib/api";
 import {
@@ -194,11 +195,11 @@ const SHOWS_ORIGINAL_SUBTITLE: Record<Lang, boolean> = {
   "zh-Hant": true,
 };
 
-function scoreColor(s: number): string {
-  if (s >= 75) return "#30d158";
-  if (s >= 50) return "#ff9f0a";
-  return "#ff453a";
-}
+// scoreColor lived here and shipped a bug: it returned one of three band
+// colours while S.scoreBadge hardcoded an amber background, so every anime
+// rated 75+ rendered green text on an amber pill. It now lives in
+// @/components/anime/scoreStyle, which returns the two together and can be
+// imported by a test — this file cannot. See that module's header.
 
 function statusLabel(dict: Dict, status: string | null): string {
   if (!status) return "";
@@ -324,15 +325,17 @@ const S = {
     color,
     fontSize: 13,
   }),
-  scoreBadge: (color: string): CSSProperties => ({
+  // Layout only. The two colour properties come from scoreBadgeStyle(score)
+  // and are spread in at the call site — deliberately not accepted as
+  // parameters here, because a `scoreBadge(color)` signature is exactly what
+  // let the foreground vary while this background stayed amber.
+  scoreBadge: {
     padding: "4px 12px",
     borderRadius: 9999,
-    background: "rgba(255,159,10,0.12)",
-    color,
-    fontWeight: 700,
+    fontWeight: 700 as const,
     fontSize: 13,
     fontFamily: "'JetBrains Mono', monospace",
-  }),
+  },
   bgmScoreBadge: {
     padding: "4px 12px",
     borderRadius: 9999,
@@ -633,7 +636,7 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
           {/* Badges */}
           <div style={S.badgeRow}>
             {score && score > 0 ? (
-              <span style={S.scoreBadge(scoreColor(score))}>
+              <span style={{ ...S.scoreBadge, ...scoreBadgeStyle(score) }}>
                 {"★"} {formatScore(score)}
               </span>
             ) : null}

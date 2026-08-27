@@ -9,6 +9,7 @@ import type { Lang } from "@/lib/i18n";
 import { useLang } from "@/lib/lang-client";
 import type { LandingPoster } from "@/lib/types";
 import FadeImage from "@/components/ui/FadeImage";
+import { scoreScrimStyle } from "./scoreStyle";
 import QuickSubscribeToggle from "./QuickSubscribeToggle";
 
 // AnimeCard accepts any record that carries the title fields, cover, and
@@ -67,11 +68,11 @@ const DISCUSSION_ARIA: Record<Lang, (count: number) => string> = {
   "zh-Hant": (count) => `${count} 條討論`,
 };
 
-function scoreColor(s: number): string {
-  if (s >= 75) return "#30d158";
-  if (s >= 50) return "#ff9f0a";
-  return "#ff453a";
-}
+// The band thresholds were a third verbatim copy of the same ladder. This
+// card's treatment was the correct one — an opaque scrim under band-coloured
+// text, because a 12% tint has no contrast guarantee over cover art — and it
+// is now the `scoreScrimStyle` half of @/components/anime/scoreStyle rather
+// than a local rule that happened to agree.
 
 // The card is a plain box that owns the frame (border/radius/clip) and the
 // hover transition; the <a> lives inside it and the quick-subscribe <button>
@@ -161,11 +162,12 @@ const formatBadgeStyle: CSSProperties = {
   letterSpacing: "0.5px",
 };
 
+// Layout and the blur only. `background` moved into scoreScrimStyle so the
+// scrim and the band foreground arrive together — see scoreStyle.ts.
 const scoreBadgeBase: CSSProperties = {
   position: "absolute",
   top: 8,
   right: 8,
-  background: "rgba(0,0,0,0.75)",
   backdropFilter: "blur(8px)",
   fontSize: 11,
   fontWeight: 700,
@@ -384,7 +386,7 @@ export default function AnimeCard({
 
         {anime.averageScore != null && anime.averageScore > 0 ? (
           <span
-            style={{ ...scoreBadgeBase, color: scoreColor(anime.averageScore) }}
+            style={{ ...scoreBadgeBase, ...scoreScrimStyle(anime.averageScore) }}
             aria-hidden
           >
             ★ {formatScore(anime.averageScore)}

@@ -6,14 +6,17 @@ import { useLang } from "@/lib/lang-client";
 import { formatScore } from "@/lib/formatters";
 import { durationLabel, sourceLabel } from "@/lib/contentLabels";
 import FadeImage from "@/components/ui/FadeImage";
+import { scoreBadgeStyle } from "@/components/anime/scoreStyle";
 import { CornerBrackets } from "@/components/landing/shared/hud";
 import { mono, PLAYER_HUE } from "@/components/landing/shared/hud-tokens";
 import { localizeHref, useLocale } from "@/components/ui/LocaleLink";
 
 const HUE = PLAYER_HUE.stream;
 
-const scoreColor = (v: number) =>
-  v >= 75 ? "#30d158" : v >= 50 ? "#ff9f0a" : "#ff453a";
+// The band thresholds used to be a third copy of the same ladder, paired
+// with a hardcoded amber background one screen down — the same defect the
+// detail page shipped, on the same shape of badge. Both now read
+// @/components/anime/scoreStyle, which hands back the two colours together.
 
 // OKLCH per-episode hue rotation: 210, 220, 230, ... cycles through the spectrum.
 const epHue = (ep: number | null | undefined) =>
@@ -80,15 +83,14 @@ const s = {
     gap: 8,
     marginBottom: 10,
   } as CSSProperties,
-  scoreBadge: (color: string): CSSProperties => ({
+  // Layout only — the colour pair is spread in from scoreBadgeStyle(score).
+  scoreBadge: {
     padding: "3px 10px",
     borderRadius: 9999,
-    background: "rgba(255,159,10,0.12)",
-    color,
     fontWeight: 700,
     fontSize: 12,
     fontFamily: "'JetBrains Mono',monospace",
-  }),
+  } as CSSProperties,
   bgmScoreBadge: {
     padding: "3px 10px",
     borderRadius: 9999,
@@ -479,7 +481,7 @@ function EpisodeFileList({
               {/* Score + info badges */}
               <div style={s.badgeRow}>
                 {Number.isFinite(avgScore) && avgScore > 0 && (
-                  <span style={s.scoreBadge(scoreColor(avgScore))}>
+                  <span style={{ ...s.scoreBadge, ...scoreBadgeStyle(avgScore) }}>
                     ★ {formatScore(avgScore)}
                   </span>
                 )}
