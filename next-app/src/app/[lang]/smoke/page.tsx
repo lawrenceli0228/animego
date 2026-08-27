@@ -1,7 +1,26 @@
+import type { Metadata } from "next";
 import { ApiError, apiGet } from "@/lib/api";
 import type { TrendingItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Off-index, and it has to say so itself.
+ *
+ * This is a debug page: it prints the internal Go API address it talked to
+ * and whatever that call returned or failed with. It carried
+ * `index, follow` inherited from the root layout, which is to say it was
+ * asking to be indexed — and robots.txt does not disallow it, so nothing
+ * else was stopping a crawler.
+ *
+ * Removing the layout's blanket directive is what surfaced this: with the
+ * inherited tag gone, "no robots tag" still means indexable, so the page
+ * needs its own. `follow: false` as well because there is nothing here worth
+ * following — the links are debug output.
+ */
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export default async function SmokePage() {
   let trending: TrendingItem[] = [];

@@ -65,7 +65,36 @@ export async function generateMetadata({ params }: LangParams): Promise<Metadata
     authors: [{ name: "AnimeGoClub" }],
     generator: "Next.js",
     keywords: dict.meta.keywords,
-    robots: { index: true, follow: true },
+    // No blanket `robots` directive.
+    //
+    // `index, follow` is what a crawler already assumes, so declaring it site-
+    // wide bought nothing — and it cost something specific: it inherits down
+    // into the not-found page, which emits its own `noindex`. Every 404 was
+    // therefore served with two contradictory robots tags:
+    //
+    //     <meta name="robots" content="index, follow">
+    //     <meta name="robots" content="noindex">
+    //
+    // Google resolves that conflict by taking the most restrictive value, so
+    // the pages were not being indexed — but the guarantee rested on a
+    // tie-break rule rather than on the page saying one thing. These routes
+    // stream (see the loading.tsx note below), which means notFound() cannot
+    // set a 404 status and `noindex` is the ONLY signal keeping a
+    // non-existent anime out of the index. It should not have to win an
+    // argument first.
+    //
+    // Removing it leaves normal pages with no robots tag, which is
+    // index,follow by default, and leaves 404s with an unambiguous noindex.
+    //
+    // A page that genuinely needs restricting declares it for itself, and
+    // most already did: /login, /register, /profile, /settings, /search
+    // without a query, and the alias form of /u/[username]. The legal pages
+    // set theirs through untranslatedRobots(locale).
+    //
+    // /smoke did not, and only looked covered because of the tag this
+    // removes — it now declares its own noindex. That is worth noting as the
+    // shape of the risk here: a blanket allow makes it impossible to tell a
+    // page that decided to be indexable from one that never thought about it.
     icons: {
       // favicon.ico is the app/ file convention; apple-touch-icon (180×180,
       // reused from the legacy site) has no file convention so declare it.
