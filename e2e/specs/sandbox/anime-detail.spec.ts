@@ -18,6 +18,21 @@ import { closePg, ensureAnimeDetail, removeAnimeFixture } from "../../fixtures/p
 // No authentication: this is the page as a search visitor meets it.
 test.use({ storageState: { cookies: [], origins: [] } });
 
+// One worker for the whole file.
+//
+// The config sets fullyParallel, which spreads a file's tests across
+// workers — and `beforeAll` runs once per worker, `afterAll` likewise. With
+// a shared database and one set of fixture ids that means several workers
+// seed the same rows at once, and the first to finish deletes them while
+// the others are still reading. The failure surfaces as a 404 in whichever
+// spec drew the short straw, intermittently, which is the most expensive
+// kind of red there is.
+//
+// Serial is the right trade here rather than per-worker fixture ids: six
+// short reads cost nothing to run in order, and ids that depend on
+// workerIndex make every failure message harder to trace back to a row.
+test.describe.configure({ mode: "serial" });
+
 // Local asset paths, not AniList URLs. next/image rejects a host outside
 // next.config's remotePatterns with a 400, and a real AniList fetch would put
 // an external dependency in the middle of a layout assertion.

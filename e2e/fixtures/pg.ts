@@ -317,8 +317,8 @@ export interface SeedAnimeDetail extends SeedAnimeCache {
  * role are the cheapest way to make the row look complete and keep the read
  * entirely inside Postgres.
  *
- * The child rows are deleted first rather than upserted: they have surrogate
- * uuid keys, so a re-run would otherwise stack duplicates.
+ * Safe to call concurrently for the same id — see the note on the child-row
+ * inserts below, which is not the obvious way to write them.
  */
 export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
   const sql = getSql();
@@ -354,15 +354,34 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
       cached_at        = now(),
       updated_at       = now()
   `;
-  await sql`DELETE FROM anime_studios WHERE anime_id = ${anime.anilistId}`;
-  await sql`DELETE FROM anime_characters WHERE anime_id = ${anime.anilistId}`;
+  // Written idempotently rather than deleted-then-inserted.
+  //
+  // This used to clear both child tables first, which reads as the obvious
+  // way to keep a re-run from stacking duplicates and is safe only if one
+  // process is doing it. Playwright's fullyParallel puts the tests of one
+  // file on several workers, and beforeAll runs once PER WORKER, so several
+  // of them seed the same ids at the same time. One worker's DELETE lands
+  // between another's INSERT and its postcondition check, and the check
+  // throws `seeded row is still stale (studios=0, ...)` — a fixture error
+  // that reads exactly like a product bug in whichever spec drew the short
+  // straw, and only sometimes.
+  //
+  // anime_studios has PRIMARY KEY (anime_id, studio), so a conflicting
+  // insert is a no-op. anime_characters has only a surrogate uuid key, so
+  // (anime_id, display_order) stands in for the natural one. Neither
+  // statement can remove a row a peer just wrote.
   await sql`
     INSERT INTO anime_studios (anime_id, studio)
     VALUES (${anime.anilistId}, 'E2E Animation Works')
+    ON CONFLICT (anime_id, studio) DO NOTHING
   `;
   await sql`
     INSERT INTO anime_characters (anime_id, display_order, name_en, role)
-    VALUES (${anime.anilistId}, 0, 'E2E Protagonist', 'MAIN')
+    SELECT ${anime.anilistId}, 0, 'E2E Protagonist', 'MAIN'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM anime_characters
+      WHERE anime_id = ${anime.anilistId} AND display_order = 0
+    )
   `;
 
   // Verify the postcondition this function's whole name is a promise about.
