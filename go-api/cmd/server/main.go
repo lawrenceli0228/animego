@@ -755,6 +755,9 @@ func main() {
 		// A fixed segment, so it must be registered outside the /{anilistId}
 		// group to avoid being read as an id.
 		r.Get("/episode-offsets", anime.EpisodeOffsets(q))
+		// Catalogue enumeration for next-app's sitemap. Another fixed
+		// segment sharing the subtree with /{anilistId}.
+		r.Get("/sitemap", anime.SitemapShard(q))
 		r.Get("/{anilistId}/watchers", anime.Watchers(q))
 		// How many episodes precede this season in its franchise's
 		// continuous numbering.  Registered before the bare /{anilistId} for

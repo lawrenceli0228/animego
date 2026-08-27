@@ -222,6 +222,34 @@ SELECT count(*)::bigint AS total
 FROM subscriptions
 WHERE anilist_id = $1 AND status = 'watching';
 
+-- name: ListSitemapShard :many
+-- One modulo slice of the whole catalogue, for /api/anime/sitemap.
+--
+-- Deliberately unfiltered.  Every row in anime_cache renders a 200 at
+-- /anime/{anilist_id} — the detail page reads GetAnimeMainByID and the
+-- row existing IS the page existing — so any WHERE clause here would be
+-- an editorial judgement about which real pages to hide from Google,
+-- not a correctness constraint.  The previous sitemap made that
+-- judgement by accident (it reused /yearly-top, which is one year's
+-- top-rated) and published 20 of 17,603.
+--
+-- Sharded by `anilist_id % $1` rather than LIMIT/OFFSET because a shard
+-- has to stay stable as the catalogue grows: with offsets, one new row
+-- shifts every anime after it into a different sitemap file, and a
+-- crawler re-reading them sees the whole tail as churn.  Modulo keeps
+-- each id in the same file for life, and the id space is dense enough
+-- that the shards stay balanced without tuning (measured on prod:
+-- 4129 / 4653 / 4061 / 4760 at $1 = 4).
+--
+-- updated_at, not now(): Google discards lastmod it can prove wrong,
+-- and "every URL changed this second, on every fetch" is provably wrong.
+SELECT
+    anilist_id,
+    updated_at
+FROM anime_cache
+WHERE anilist_id % sqlc.arg(shard_count)::int = sqlc.arg(shard_index)::int
+ORDER BY anilist_id;
+
 -- name: UpsertAnimeCache :exec
 -- Upsert anime_cache main row from AniList sync.  Bangumi columns
 -- (title_chinese, bgm_id, bangumi_score, bangumi_votes, bangumi_version)

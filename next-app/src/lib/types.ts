@@ -85,6 +85,18 @@ export interface TrendingItem {
 
 export type YearlyTopItem = Omit<TrendingItem, "rank" | "watcherCount">;
 
+// ─── SitemapShard (/api/anime/sitemap) ─────────────────────────────
+// Deliberately two fields. This endpoint feeds the XML sitemaps, which
+// carry a <loc> and a <lastmod> and nothing else — pulling titles or
+// covers along would be tens of megabytes crossing the wire on every
+// revalidate to be thrown away.
+
+export interface SitemapAnime {
+  anilistId: number;
+  /** RFC 3339. The row's `updated_at`, which becomes `<lastmod>`. */
+  updatedAt: string;
+}
+
 // Re-exported so consumers can `import type { FuzzyDate }` from the
 // same surface as AnimeDetail itself.
 export type { FuzzyDate };

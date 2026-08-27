@@ -984,6 +984,27 @@ type Querier interface {
 	ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]ListProfileWatchingRow, error)
 	// Passing NULL report_status returns the entire moderation queue.
 	ListReports(ctx context.Context, reportStatus *string, pageOffset int32, pageLimit int32) ([]ListReportsRow, error)
+	// One modulo slice of the whole catalogue, for /api/anime/sitemap.
+	//
+	// Deliberately unfiltered.  Every row in anime_cache renders a 200 at
+	// /anime/{anilist_id} — the detail page reads GetAnimeMainByID and the
+	// row existing IS the page existing — so any WHERE clause here would be
+	// an editorial judgement about which real pages to hide from Google,
+	// not a correctness constraint.  The previous sitemap made that
+	// judgement by accident (it reused /yearly-top, which is one year's
+	// top-rated) and published 20 of 17,603.
+	//
+	// Sharded by `anilist_id % $1` rather than LIMIT/OFFSET because a shard
+	// has to stay stable as the catalogue grows: with offsets, one new row
+	// shifts every anime after it into a different sitemap file, and a
+	// crawler re-reading them sees the whole tail as churn.  Modulo keeps
+	// each id in the same file for life, and the id space is dense enough
+	// that the shards stay balanced without tuning (measured on prod:
+	// 4129 / 4653 / 4061 / 4760 at $1 = 4).
+	//
+	// updated_at, not now(): Google discards lastmod it can prove wrong,
+	// and "every URL changed this second, on every fetch" is provably wrong.
+	ListSitemapShard(ctx context.Context, shardCount int32, shardIndex int32) ([]ListSitemapShardRow, error)
 	// Explainable discovery ranking for the homepage.  Participation matters more
 	// than raw volume, reactions add a smaller signal, and a smooth age divisor
 	// lets a fresh smaller conversation outrank an old thread without making the

@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { animeSitemapUrls } from "@/lib/seo/animeSitemap";
 import { SITE_ORIGIN as SITE } from "@/lib/seo/alternates";
 
 /**
@@ -22,6 +23,15 @@ import { SITE_ORIGIN as SITE } from "@/lib/seo/alternates";
  * storm (267 of ~1,000 5xx in 17h) and brings no search or referral value,
  * so it is barred site-wide. It documents robots.txt compliance, so this
  * is effective, unlike the residential-proxy scrapers we can't name.
+ *
+ * The sitemap list is plural. /sitemap.xml holds the static pages and keeps
+ * the URL Search Console has on file; the anime catalogue is too large for
+ * one document (17,603 anime × 3 locales overflows Google's 50,000-URL cap)
+ * and is sharded under /sitemaps/anime/. robots.txt accepts any number of
+ * Sitemap directives and Google reads all of them, so naming the files here
+ * is what makes the shards discoverable — there is no index document,
+ * because Next's sitemap convention emits <urlset> and cannot emit
+ * <sitemapindex>.
  */
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -36,7 +46,7 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/library", "/player", "/api/", "/admin"],
       },
     ],
-    sitemap: `${SITE}/sitemap.xml`,
+    sitemap: [`${SITE}/sitemap.xml`, ...animeSitemapUrls()],
     host: SITE,
   };
 }
