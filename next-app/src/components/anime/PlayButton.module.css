@@ -56,11 +56,21 @@
   place-items: center;
 }
 
-.close:hover,
+.close:hover {
+  border-color: rgba(10, 132, 255, 0.55);
+  color: #fff;
+}
+
+/* Was folded in with :hover and set `outline: none`, which left keyboard
+ * focus indicated by a border-colour change alone — on a 32px circle, on a
+ * dark backdrop. The dialog's only dismiss control needs the same ring as
+ * everything else. */
 .close:focus-visible {
   border-color: rgba(10, 132, 255, 0.55);
   color: #fff;
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 .headingRow {
@@ -181,7 +191,9 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  min-height: 42px;
+  /* 44px, DESIGN.md's touch floor. Was 42 — close enough to look considered
+   * and still two pixels under the number it was aiming at. */
+  min-height: 44px;
   padding: 0 17px;
   border-radius: 8px;
   cursor: pointer;
@@ -228,11 +240,17 @@
   color: #fff;
 }
 
+/* Blue, not the #64d2ff these drew. Teal is the read-only colour in this
+ * system — the file already says so, twenty lines up, about the secondary
+ * button's fill — and a focus ring is the most load-bearing "you can act on
+ * this" signal there is. Three different focus treatments lived in this one
+ * file; this is the last of them. */
 .primary:focus-visible,
 .secondary:focus-visible,
 .tertiary:focus-visible {
-  outline: 2px solid #64d2ff;
+  outline: 2px solid transparent;
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 @media (max-width: 540px) {
