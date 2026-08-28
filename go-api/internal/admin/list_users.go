@@ -10,8 +10,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -152,9 +154,52 @@ func runUsersList(ctx context.Context, pool *pgxpool.Pool, q adminQuerier, p use
 		byID[id] = countPair{Subscriptions: c.Subscriptions, Followers: c.Followers}
 	}
 
+	// Activity columns are SOFT-FAILED, unlike the sub/follow batch above.
+	//
+	// They read user_activity_daily (migration 0025), which is the newest
+	// dependency on this page and the only one a container can plausibly be
+	// running without — a rolled-forward image mid-deploy answers every other
+	// query here perfectly well.  Propagating the error would take down the
+	// screen an operator uses to edit and delete accounts in exchange for
+	// three informational columns, which is the wrong trade in both
+	// directions: the columns are not worth the page, and an operator who
+	// cannot reach the page cannot fix anything.
+	//
+	// The degraded rendering is honest by construction: LastSeenAt stays nil
+	// (rendered as "—", the same as a genuinely never-seen account) and the
+	// counts stay 0.  The warning below is the unambiguous signal.
+	type activityTriple struct {
+		LastSeenAt *time.Time
+		ActiveDays int64
+		Logins     int64
+	}
+	activityByID := make(map[uuid.UUID]activityTriple, len(rowsOut))
+	if activityRows, aerr := q.GetAdminUserActivityCounts(ctx, ids); aerr != nil {
+		slog.WarnContext(ctx, "admin users: activity counts query failed; emitting empty activity columns",
+			"err", aerr.Error(), "users", len(ids))
+	} else {
+		for _, a := range activityRows {
+			id, ok := asUUID(a.UserID)
+			if !ok {
+				continue
+			}
+			triple := activityTriple{ActiveDays: a.ActiveDays, Logins: a.Logins}
+			// max() over zero matching rows is NULL, which is the normal state
+			// for an account with nothing recorded.  Valid is the only thing
+			// separating it from the zero time — which would serialise as year
+			// 1 and read on screen as a visit in the distant past.
+			if a.LastSeenAt.Valid {
+				t := a.LastSeenAt.Time.UTC()
+				triple.LastSeenAt = &t
+			}
+			activityByID[id] = triple
+		}
+	}
+
 	out := make([]userItem, 0, len(rowsOut))
 	for _, r := range rowsOut {
 		cp := byID[r.ID]
+		act := activityByID[r.ID]
 		out = append(out, userItem{
 			ID:            r.ID,
 			Username:      r.Username,
@@ -163,6 +208,9 @@ func runUsersList(ctx context.Context, pool *pgxpool.Pool, q adminQuerier, p use
 			CreatedAt:     r.CreatedAt.Time,
 			Subscriptions: cp.Subscriptions,
 			Followers:     cp.Followers,
+			LastSeenAt:    act.LastSeenAt,
+			ActiveDays:    act.ActiveDays,
+			Logins:        act.Logins,
 		})
 	}
 

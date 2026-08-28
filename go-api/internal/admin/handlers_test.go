@@ -660,6 +660,10 @@ func (failingQuerier) GetAdminUserSubFollowCounts(_ context.Context, _ []uuid.UU
 	return nil, errors.New("simulated sub/follow query failure")
 }
 
+func (failingQuerier) GetAdminUserActivityCounts(_ context.Context, _ []uuid.UUID) ([]dbgen.GetAdminUserActivityCountsRow, error) {
+	return nil, errors.New("simulated activity counts query failure")
+}
+
 // --- ListEnrichment ---------------------------------------------------------
 
 func TestListEnrichment_EmptyResult(t *testing.T) {

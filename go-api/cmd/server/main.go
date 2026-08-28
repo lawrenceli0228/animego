@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/activity"
 	"github.com/lawrenceli0228/animego/go-api/internal/admin"
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/anime"
@@ -632,6 +633,22 @@ func main() {
 	adminUserHandlers := admin.NewUserHandlers(q, enqueuer)
 	adminEnrichmentHandlers := admin.NewEnrichmentHandlers(pool, q, enqueuer, riverClient)
 	adminHantHandlers := admin.NewHantHandlers(q, enqueuer)
+	adminActivityHandlers := admin.NewActivityHandlers(q, slog.Default())
+
+	// Presence recording (migration 0025).  The recorder buffers in memory and
+	// flushes on a ticker; nothing it does touches the database on a request
+	// path.
+	//
+	// Close is NOT deferred.  It is called explicitly on every shutdown path
+	// below, because the graceful-shutdown block ends in os.Exit on failure and
+	// a deferred call would be skipped exactly when the process is dying — i.e.
+	// exactly when draining is the only thing standing between the last minute
+	// of counters and the floor.
+	activityRecorder := activity.NewRecorder(pool, slog.Default(), activity.DefaultFlushInterval)
+	activityRecorder.Start()
+	// A login is the one presence event the recorder's middleware structurally
+	// cannot see: nobody holds a valid token at the moment they are logging in.
+	authHandlers.SetLoginObserver(activityRecorder)
 
 	// P2.4 — subscriptions + social.  Subscriptions handler depends on
 	// anime.EnsureCached for the FK pre-fill (POST /api/subscriptions
@@ -702,6 +719,19 @@ func main() {
 	r.Use(httpmw.MaxBodyBytes(httpmw.DefaultMaxBodyBytes))
 	// G4 wiring (see comment above).
 	r.Use(apiRateLimit.Middleware())
+	// P11 — presence recording.  Mounted ONCE at the top of the router
+	// rather than inside each authenticated route group, so it cannot be
+	// forgotten by a route added later and cannot be bypassed by one that
+	// skips auth middleware entirely.  That costs a second HMAC verification
+	// of the access token per authenticated request — see the note on
+	// activity.Middleware for why the context route is not available to a
+	// top-level middleware.  It never writes to the response, never blocks on
+	// the database, and never fails a request.
+	//
+	// Registered after the rate limiter on purpose: a throttled request never
+	// reached a handler, and counting it as presence would let a burst of
+	// rejected calls inflate the request counters.
+	r.Use(activity.Middleware(signer, activityRecorder))
 
 	// G3 — chi defaults emit plain-text "404 page not found" / "405
 	// Method Not Allowed" for unmatched routes.  Frontend retry logic
@@ -876,6 +906,11 @@ func main() {
 		r.Get("/reports", safetyHandlers.ListReports)
 		r.Patch("/reports/{id}", safetyHandlers.UpdateReport)
 		r.Get("/community-metrics", commentsHandlers.CommunityMetrics)
+		// The user-activity panel: DAU/WAU/MAU, the daily trend, retention
+		// cohorts and the surface breakdown.  Distinct from
+		// /community-metrics, which is one rail's impressions and is
+		// aggregate-only by construction.
+		r.Get("/activity", adminActivityHandlers.GetActivity)
 
 		// Enrichment writes — static paths first to keep chi happy.
 		r.Post("/enrichment/re-enrich", adminEnrichmentHandlers.ReEnrich)
@@ -925,8 +960,21 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("graceful shutdown failed", "err", err)
+	shutdownErr := srv.Shutdown(ctx)
+
+	// Drain the activity buffer AFTER Shutdown, so hits from the requests
+	// Shutdown was waiting on are included — and on BOTH paths, because the
+	// error branch exits the process and would skip anything deferred.
+	//
+	// The sum of these two has to fit inside the container's stop grace or the
+	// kernel SIGKILLs us mid-drain: 15s here plus the recorder's 3s drain
+	// budget is why docker-compose.yml gives go-api stop_grace_period: 30s.
+	// Docker's default is 10s, under which the pre-existing 15s shutdown was
+	// never reachable either.
+	activityRecorder.Close()
+
+	if shutdownErr != nil {
+		slog.Error("graceful shutdown failed", "err", shutdownErr)
 		os.Exit(1)
 	}
 	slog.Info("server stopped")

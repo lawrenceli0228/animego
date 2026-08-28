@@ -1098,6 +1098,57 @@ const zhHant = {
       rejected: '已拒(未過校驗)',
       queueLabel: '翻譯佇列',
     },
+    // 用户表新增的三列。lastSeenNever 是那个破折号的 title，写出来是因为
+    // 「从没记录过」和「从没来过」不是一回事 —— 对埋点上线之前注册的账号，
+    // 空值说的是我们的记录，不是那个人。
+    colLastSeen: '最近活躍',
+    colActiveDays: '活躍天數',
+    colLogins: '登入次數',
+    lastSeenNever: '沒有任何活躍記錄。注意這說的是我們的記錄，不是這個人沒來過。',
+    // 这块回答的是总览那句「注册用户 802」自己引出、又自己答不了的问题：
+    // 这 802 个人还有多少在。四个可信度层级必须分开读，别混。
+    activity: {
+      title: '使用者活躍度',
+      loadError: '活躍度資料讀取失敗',
+      // lede 不是装饰。没有它，「DAU 41」会被读成对整站的完整测量 ——
+      // 而所有按 user id 统计的数字，对没登录的那大半流量都是瞎的。
+      lede: '所有按使用者統計的數字都只涵蓋已登入造訪；本站大部分流量來自沒有登入的搜尋訪客，那部分只出現在下面的版塊分佈裡。',
+      windowLabel: '時間視窗',
+      windowDays: '{{n}} 天',
+      loading: '載入中',
+      dau: '日活 DAU',
+      dauHint: '今天來過的人數',
+      wau: '週活 WAU',
+      wauHint: '含今天在內的近 7 天',
+      mau: '月活 MAU',
+      mauHint: '含今天在內的近 30 天',
+      stickiness: '黏著度 DAU/MAU',
+      stickinessHint: '這個月用過的人裡，今天用了的占比',
+      trendTitle: '每日趨勢',
+      legendActive: '活躍使用者',
+      legendReconstructed: '回推（非埋點）',
+      legendSignups: '新註冊',
+      chartAlt: '最近 {{n}} 天的每日活躍使用者長條圖，峰值 {{max}} 人。',
+      logins: '登入',
+      requests: 'API 請求',
+      reconstructedDay: '這一天的數字是回推的，只含有互動痕跡的使用者',
+      // 说出来，别只靠图例那个色块。不知道有这条缝的人，会把交界处那一跳
+      // 读成增长 —— 这是整块面板最容易骗人的地方。
+      seamNote: '{{date}} 起才有逐請求埋點。左邊 {{n}} 天是從留言、追蹤、訂閱等痕跡回推的「有互動的天」，只是真實造訪的一個下界，兩段不可直接比。',
+      notInstrumented: '逐請求埋點還沒產生資料，圖上所有長條都是從歷史痕跡回推的，只能當下界看。',
+      retentionTitle: '新使用者留存',
+      retentionUnavailable: '留存資料讀取失敗',
+      retentionWindow: '近 {{n}} 天註冊的使用者',
+      // 写出来是因为三个分母确实不一样，而不一样看起来像 bug。
+      retentionNote: '三個分母不同是有意的：註冊不滿一天的人不計入次日留存，不滿七天的不計入 7 日留存 —— 否則每次拉新都會把留存率往下拽。',
+      retentionD1: '次日留存',
+      retentionD1Hint: '註冊後第 1 天當天有活躍（不是「7 天內」）',
+      retentionD7: '7 日留存',
+      retentionD7Hint: '註冊後第 7 天當天有活躍',
+      retentionEver: '回訪率',
+      retentionEverHint: '註冊日之後任意一天有過活躍。樣本量最大，先看這個',
+      noCohort: '樣本為空',
+    },
     // 繁体中文漂移 —— HantDriftSection。
     //
     // 这块看的不是「缺内容」，是「内容在骗人」：富化 worker 一直在写简体列，

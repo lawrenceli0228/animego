@@ -65,6 +65,9 @@ var allTables = []string{
 	"reports",
 	// Community discovery aggregate (migration 0020).
 	"community_engagement_daily",
+	// Activity rollup (migration 0025).  The CASCADE from users would reach
+	// it anyway; listing it keeps this the readable inventory it claims to be.
+	"user_activity_daily",
 	"danmakus",
 	"episode_windows",
 	// Enrichment match-accuracy tables (migration 0011).

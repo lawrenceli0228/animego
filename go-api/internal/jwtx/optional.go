@@ -28,16 +28,10 @@ import (
 func OptionalAuth(s *Signer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token, ok := extractToken(r)
+			claims, ok := ClaimsFromRequest(s, r)
 			if !ok {
-				// No token at all → anon.  Don't error.
-				next.ServeHTTP(w, r)
-				return
-			}
-			claims, err := s.VerifyAccess(token)
-			if err != nil {
-				// Token present but invalid (expired / tampered) → treat
-				// as anon rather than 401.  This matches Express's
+				// No token, or a token that is present but invalid (expired
+				// / tampered) → anon.  Don't error.  This matches Express's
 				// optionalAuth catch-all: `catch (_) { /* ignore */ }`.
 				next.ServeHTTP(w, r)
 				return
@@ -46,4 +40,47 @@ func OptionalAuth(s *Signer) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// ClaimsFromRequest verifies the access token carried by r and returns its
+// claims, or (nil, false) when there is no token or the token does not
+// verify.  It never writes to the response and never distinguishes the two
+// failures — callers that need to are looking at RequireAuth.
+//
+// This is a read of the request, not a mutation of it.  Attaching the claims
+// stays the private business of RequireAuth / OptionalAuth via withClaims, so
+// no caller of this function can fabricate an authenticated context.
+//
+// If you are reaching for this from an outer middleware in order to learn who
+// is calling, use WithClaimsSink instead: this function re-runs the HMAC
+// verification the auth middleware is about to run anyway, which measured at
+// ~8.5µs and 49 allocations per request on the site's hot path.
+func ClaimsFromRequest(s *Signer, r *http.Request) (*AccessClaims, bool) {
+	if s == nil || r == nil {
+		return nil, false
+	}
+	token, ok := extractToken(r)
+	if !ok {
+		return nil, false
+	}
+	claims, err := s.VerifyAccess(token)
+	if err != nil {
+		return nil, false
+	}
+	return claims, true
+}
+
+// HasToken reports whether r carries anything that looks like an access token,
+// without verifying it.
+//
+// Header and cookie reads only — no crypto, no allocation.  It exists so an
+// outer middleware can skip its own setup work for the requests that are
+// obviously anonymous, which on a search-traffic-led site is most of them.
+// A true result is not a claim that the token is valid.
+func HasToken(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	_, ok := extractToken(r)
+	return ok
 }

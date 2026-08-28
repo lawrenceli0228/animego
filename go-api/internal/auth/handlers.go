@@ -175,11 +175,39 @@ type Handlers struct {
 	// (set via SetAvatarDir at startup). Empty in tests that don't exercise
 	// avatar upload.
 	avatarDir string
+	// loginObserver counts successful logins for the activity dashboard.
+	// nil when nothing is watching — every call site guards.
+	loginObserver LoginObserver
 }
 
 // SetAvatarDir configures where UpdateMe writes uploaded avatar files.
 // Called once at startup after NewHandlers.
 func (h *Handlers) SetAvatarDir(dir string) { h.avatarDir = dir }
+
+// LoginObserver is told when a password authentication succeeds.
+//
+// Narrow on purpose — one method, no error return, no context — because the
+// only implementation (internal/activity.Recorder) writes to an in-memory
+// buffer and genuinely cannot fail or block.  A wider interface would invite a
+// future implementation that can do both, on the path where a user is waiting
+// to be let in.
+type LoginObserver interface {
+	Login(userID uuid.UUID, at time.Time)
+}
+
+// SetLoginObserver attaches the observer notified by Login.
+//
+// A post-construction setter rather than a constructor parameter, following
+// SetAvatarDir: NewHandlers already takes seven arguments and is called from
+// several tests that have no interest in this.  nil (the default) means
+// nobody is watching.
+//
+// Why logins are observed here rather than by the recorder's own middleware:
+// that middleware only sees requests that already carry a valid token, and by
+// definition nobody holds one when they are logging in.  Without this hook the
+// single event that most clearly means "a human deliberately came back" would
+// be the one event the activity record could not see.
+func (h *Handlers) SetLoginObserver(obs LoginObserver) { h.loginObserver = obs }
 
 // NewHandlers constructs a Handlers bundle.  refreshTTL must match the
 // Signer's refresh-token TTL so the cookie maxAge and the JWT exp align
@@ -352,6 +380,15 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
 	SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
 	SetAuthHintCookie(w, h.refreshTTL, h.isProd)
+
+	// Counted only after every failure path above has been passed, so the
+	// number means "somebody got in" rather than "somebody tried".  Placed
+	// after the cookies rather than before, so a panic in cookie-setting could
+	// never leave a login recorded that the user did not receive.
+	if h.loginObserver != nil {
+		h.loginObserver.Login(user.ID, time.Now())
+	}
+
 	httpx.Data(w, http.StatusOK, AuthData{AccessToken: accessToken, User: ToSafeUser(user)})
 }
 

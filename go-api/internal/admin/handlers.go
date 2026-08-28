@@ -80,11 +80,21 @@ type QueueStatusFn func(ctx context.Context) (QueueSnapshot, error)
 // Write endpoints in later phases will add to this surface (or the
 // caller will pass the full dbgen.Querier — the interface widens
 // without breaking existing callers).
+//
+// P11 added a fifth:
+//   - GetAdminUserActivityCounts, the last-seen / visit-days / logins batch
+//     for one page of the user table.  It reads user_activity_daily
+//     (migration 0025), the only table on this interface that a container can
+//     be running without — a rolled-forward image that has not applied 0025
+//     yet answers every other method fine.  runUsersList therefore soft-fails
+//     it rather than propagating: losing three informational columns must not
+//     take down the page an operator uses to edit and delete accounts.
 type adminQuerier interface {
 	GetAdminStats(ctx context.Context) (dbgen.GetAdminStatsRow, error)
 	GetDescriptionCnStats(ctx context.Context) (dbgen.GetDescriptionCnStatsRow, error)
 	GetDescriptionCnLlmStats(ctx context.Context) (dbgen.GetDescriptionCnLlmStatsRow, error)
 	GetAdminUserSubFollowCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]dbgen.GetAdminUserSubFollowCountsRow, error)
+	GetAdminUserActivityCounts(ctx context.Context, dollar_1 []uuid.UUID) ([]dbgen.GetAdminUserActivityCountsRow, error)
 }
 
 // Handlers carries the deps shared by every /api/admin/* read handler.

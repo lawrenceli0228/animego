@@ -288,6 +288,10 @@ type enrichmentListResponse struct {
 // Field order matches the Mongoose .lean() default for the projection
 // `username email role createdAt`:  _id, username, email, role,
 // createdAt, then the two injected counts.
+//
+// The three activity fields are appended after the historical prefix rather
+// than interleaved, so the Express-era field order stays intact for the
+// assertions that check it.
 type userItem struct {
 	ID            uuid.UUID `json:"_id"`
 	Username      string    `json:"username"`
@@ -296,6 +300,30 @@ type userItem struct {
 	CreatedAt     time.Time `json:"createdAt"`
 	Subscriptions int64     `json:"subscriptions"`
 	Followers     int64     `json:"followers"`
+
+	// LastSeenAt is the newest recorded presence, or null when nothing has
+	// ever been recorded for this account.
+	//
+	// A pointer without omitempty, so "never seen" serialises as an explicit
+	// null: dropping the key would make it indistinguishable from a build
+	// that predates the column, and substituting the signup date or an epoch
+	// would state as fact something we do not know.  For an account created
+	// before instrumentation began, null is a statement about our records,
+	// not about the person.
+	LastSeenAt *time.Time `json:"lastSeenAt"`
+
+	// ActiveDays is how many distinct days this account has been recorded on.
+	// Before the instrumentation date it counts interaction days (the ones
+	// migration 0026 could reconstruct) and after it, visit days — so it is a
+	// floor on old accounts and a measurement on new ones.
+	ActiveDays int64 `json:"activeDays"`
+
+	// Logins counts successful password authentications, which is NOT a
+	// session count and is expected to be near zero for an engaged user: the
+	// refresh token lives seven days, so a daily reader logs in about
+	// monthly.  A high value next to a low ActiveDays is the interesting
+	// shape — it usually means the session keeps failing to persist.
+	Logins int64 `json:"logins"`
 }
 
 // userListResponse is the full /api/admin/users envelope.  Same
