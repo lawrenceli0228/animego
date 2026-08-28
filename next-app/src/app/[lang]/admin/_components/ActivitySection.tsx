@@ -118,12 +118,18 @@ export function ActivitySection({ initial }: ActivitySectionProps) {
   // re-render when setState is handed the identical string; one word of drift in
   // the message and it would have been a retry loop against an endpoint that had
   // just told us it was in trouble.
+  //
+  // Every setState lives inside `run`, never synchronously in the effect body —
+  // same shape and same reason as Navbar's auth probe: a synchronous setState in
+  // an effect body triggers a cascading render, and react-hooks/set-state-in-effect
+  // is a hard error under the lint ratchet rather than a warning.
   useEffect(() => {
     if (loadedDays === days) return;
     const ac = new AbortController();
-    setLoading(true);
-    void fetchActivity(days, ac.signal)
-      .then((result) => {
+    const run = async () => {
+      setLoading(true);
+      try {
+        const result = await fetchActivity(days, ac.signal);
         if (ac.signal.aborted) return;
         if (result) {
           setData(result);
@@ -131,14 +137,14 @@ export function ActivitySection({ initial }: ActivitySectionProps) {
         } else {
           setError(t("admin.activity.loadError"));
         }
-      })
-      .catch(() => {
+      } catch {
         // An abort is a window change, not a failure; leave the message alone
         // so switching quickly does not flash an error.
-      })
-      .finally(() => {
+      } finally {
         if (!ac.signal.aborted) setLoading(false);
-      });
+      }
+    };
+    void run();
     return () => ac.abort();
   }, [days, loadedDays, t]);
 
