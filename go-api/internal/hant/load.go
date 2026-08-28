@@ -53,6 +53,22 @@ func DataDirFromEnv() string {
 	return DefaultDataDir
 }
 
+// NewConverterFromDir loads ONLY the OpenCC table, for callers that convert
+// text and never resolve a title.
+//
+// /api/anime/search is the one: it folds an incoming Simplified keyword to
+// Traditional so a reader can find the 1,262 rows that carry a title_hant and
+// no title_chinese. It has no use for the anilist and cgroup datasets, which
+// answer "what is the authoritative Traditional title for this anime" — a
+// different question, and 609KB of it.
+//
+// The filename stays inside this package for the reason stated at the top:
+// a call site that spelled it out could disagree with the CLI and the worker
+// about what a data directory contains.
+func NewConverterFromDir(dir string) (*Converter, error) {
+	return LoadConverter(filepath.Join(dir, openccFile))
+}
+
 // NewResolverFromDir loads the three vendored files and derives the gate.
 func NewResolverFromDir(dir string) (*Resolver, error) {
 	conv, err := LoadConverter(filepath.Join(dir, openccFile))

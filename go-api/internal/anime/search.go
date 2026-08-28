@@ -71,6 +71,20 @@ type SearchService struct {
 	cache    *cache.Cache[SearchPage]
 	db       dbgen.Querier
 	enqueuer queue.Enqueuer
+	folder   KeywordFolder
+}
+
+// KeywordFolder rewrites a search keyword into the other Chinese script.
+//
+// *hant.Converter satisfies it with the vendored OpenCC s2twp table. Narrowed
+// to the one method at the consumer rather than taking *hant.Converter
+// directly, so this package does not depend on the dataset loader and a test
+// can fold with three lines instead of a megabyte of vendored data.
+//
+// May be nil. A server that cannot load the table still searches — it just
+// searches the way it did before folding existed.
+type KeywordFolder interface {
+	Convert(string) string
 }
 
 // SearchPage is the cache-value shape: AniList page info + the post-
@@ -93,7 +107,19 @@ type SearchPage struct {
 // (the constructor swaps in a queue.NoopEnqueuer so the rest of the
 // pipeline stays nil-safe).  Tests that don't care about enqueue can
 // pass queue.NoopEnqueuer{} or nil interchangeably.
-func NewSearchService(client AniListSearcher, db dbgen.Querier, enq queue.Enqueuer) (*SearchService, error) {
+//
+// folder folds a Simplified keyword to Traditional; nil disables folding and
+// leaves search exactly as it behaved before. It is a constructor parameter
+// rather than a setter on purpose: a setter can be forgotten, and forgetting
+// it would silently return the catalogue to the state where a Simplified
+// reader cannot find 1,262 of its rows — a failure with no error and no log
+// line, which is the kind this codebase has been bitten by before.
+func NewSearchService(
+	client AniListSearcher,
+	db dbgen.Querier,
+	enq queue.Enqueuer,
+	folder KeywordFolder,
+) (*SearchService, error) {
 	if enq == nil {
 		enq = queue.NoopEnqueuer{}
 	}
@@ -101,7 +127,7 @@ func NewSearchService(client AniListSearcher, db dbgen.Querier, enq queue.Enqueu
 	if err != nil {
 		return nil, fmt.Errorf("anime/search: build cache: %w", err)
 	}
-	return &SearchService{anilist: client, cache: c, db: db, enqueuer: enq}, nil
+	return &SearchService{anilist: client, cache: c, db: db, enqueuer: enq, folder: folder}, nil
 }
 
 // Close releases the underlying ristretto cache.  Safe to call multiple
@@ -340,8 +366,17 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 // hand the reader AniList's page 9 of something else entirely.
 func (s *SearchService) runLocal(ctx context.Context, q string, page, perPage int) (*SearchPage, error) {
 	contains, prefix, exact := likePatterns(q)
+	// The same three, built from the keyword folded to Traditional. When there
+	// is nothing to fold these are byte-identical to the three above, and the
+	// query's extra predicate collapses into a duplicate rather than into a
+	// branch.
+	folded := q
+	if s.folder != nil {
+		folded = s.folder.Convert(q)
+	}
+	containsF, prefixF, exactF := likePatterns(folded)
 
-	total, err := s.db.CountAnimeCacheLocal(ctx, contains)
+	total, err := s.db.CountAnimeCacheLocal(ctx, contains, containsF)
 	if err != nil {
 		return nil, fmt.Errorf("count local: %w", err)
 	}
@@ -349,8 +384,16 @@ func (s *SearchService) runLocal(ctx context.Context, q string, page, perPage in
 		return nil, nil
 	}
 
-	ids, err := s.db.SearchAnimeCacheLocal(ctx, contains, exact, prefix,
-		int32((page-1)*perPage), int32(perPage))
+	ids, err := s.db.SearchAnimeCacheLocal(ctx, dbgen.SearchAnimeCacheLocalParams{
+		Contains:       contains,
+		ContainsFolded: containsF,
+		Exact:          exact,
+		ExactFolded:    exactF,
+		Prefix:         prefix,
+		PrefixFolded:   prefixF,
+		Off:            int32((page - 1) * perPage),
+		Lim:            int32(perPage),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("search local: %w", err)
 	}
@@ -428,19 +471,19 @@ func likePatterns(q string) (contains, prefix, exact string) {
 // writeError maps run() errors to the appropriate httpx envelope.
 //
 //   - context.DeadlineExceeded   → 504 GATEWAY_TIMEOUT mapped to
-//                                  SERVER_ERROR (httpx has no timeout
-//                                  code; preserve status for ops).
+//     SERVER_ERROR (httpx has no timeout
+//     code; preserve status for ops).
 //   - *anilist.ErrUpstream       → 502 BAD_GATEWAY mapped to
-//                                  SERVER_ERROR (Express returns 500;
-//                                  502 is more accurate and frontend
-//                                  treats both as "AniList unreachable").
+//     SERVER_ERROR (Express returns 500;
+//     502 is more accurate and frontend
+//     treats both as "AniList unreachable").
 //   - anilist.ErrRateLimited     → 503 SERVER_ERROR — AniList per-IP
-//                                  budget exhausted / breaker open.
-//                                  503 (not 502) because the condition
-//                                  is transient and clears after the
-//                                  breaker cooldown; the distinct
-//                                  status separates throttling storms
-//                                  from hard upstream failures in logs.
+//     budget exhausted / breaker open.
+//     503 (not 502) because the condition
+//     is transient and clears after the
+//     breaker cooldown; the distinct
+//     status separates throttling storms
+//     from hard upstream failures in logs.
 //   - any other error            → 500 SERVER_ERROR.
 func (s *SearchService) writeError(w http.ResponseWriter, err error) {
 	switch {

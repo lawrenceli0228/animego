@@ -91,7 +91,7 @@ type Querier interface {
 	// If these two predicates ever drift apart, the last page of a search silently
 	// comes back short. SearchLocalKeywordConsistency in search_test.go pins them
 	// to the same shape.
-	CountAnimeCacheLocal(ctx context.Context, contains string) (int64, error)
+	CountAnimeCacheLocal(ctx context.Context, contains string, containsFolded string) (int64, error)
 	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
 	CountBgmIdMap(ctx context.Context) (int64, error)
 	CountCommentReactions(ctx context.Context, commentID uuid.UUID) (int64, error)
@@ -1473,7 +1473,7 @@ type Querier interface {
 	// one worth reproducing. anilist_id last so the order is total: without it a
 	// LIMIT slices an arbitrary heap order out of a tie group and the page a
 	// reader sees drifts with vacuum.
-	SearchAnimeCacheLocal(ctx context.Context, contains string, exact string, prefix string, off int32, lim int32) ([]int32, error)
+	SearchAnimeCacheLocal(ctx context.Context, arg SearchAnimeCacheLocalParams) ([]int32, error)
 	// forgot-password sets the token + 1h expiry.  Caller generates the
 	// token via crypto/rand (32 random bytes hex-encoded — matches
 	// Express's crypto.randomBytes(32).toString('hex')).

@@ -109,6 +109,7 @@ WHERE title_romaji  ILIKE $1::text
    OR title_native  ILIKE $1::text
    OR title_chinese ILIKE $1::text
    OR title_hant    ILIKE $1::text
+   OR title_hant    ILIKE $2::text
 `
 
 // Total for the pagination envelope, matching SearchAnimeCacheLocal's WHERE
@@ -119,8 +120,8 @@ WHERE title_romaji  ILIKE $1::text
 // If these two predicates ever drift apart, the last page of a search silently
 // comes back short. SearchLocalKeywordConsistency in search_test.go pins them
 // to the same shape.
-func (q *Queries) CountAnimeCacheLocal(ctx context.Context, contains string) (int64, error) {
-	row := q.db.QueryRow(ctx, countAnimeCacheLocal, contains)
+func (q *Queries) CountAnimeCacheLocal(ctx context.Context, contains string, containsFolded string) (int64, error) {
+	row := q.db.QueryRow(ctx, countAnimeCacheLocal, contains, containsFolded)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -2544,24 +2545,70 @@ WHERE title_romaji  ILIKE $1::text
    OR title_native  ILIKE $1::text
    OR title_chinese ILIKE $1::text
    OR title_hant    ILIKE $1::text
+   -- The folded keyword, and only against the Traditional column.
+   --
+   -- The caller runs an incoming Simplified keyword through the vendored
+   -- OpenCC s2twp table, so this pattern is Traditional text. Traditional text
+   -- can only match a Traditional column, which is why this is one predicate
+   -- rather than a second copy of the five above -- those would be five index
+   -- scans that structurally cannot return a row.
+   --
+   -- It reaches the 1,262 rows that have a title_hant and no title_chinese: a
+   -- Simplified reader typing 进击的巨人 could not find 進擊的巨人 before, and
+   -- that is not a long tail (315 of them are TV, and they include some of the
+   -- best-known franchises in the catalogue). Their cause is upstream -- 9.4%
+   -- bgm_id coverage against 70.8% for the catalogue, so Bangumi enrichment
+   -- had no subject to read a Simplified title from.
+   --
+   -- How much it actually buys, measured rather than assumed. Over the 5,160
+   -- rows carrying BOTH a Simplified title and an AUTHORITATIVE Traditional one
+   -- (title_hant_source <> 'opencc'), folding the Simplified title yields a
+   -- substring of the stored Traditional title -- exactly the test this
+   -- predicate performs -- for 40.7% of them. Without folding it is 7.4%. So
+   -- roughly five and a half times the reach, not "solved".
+   --
+   -- The remaining 59% is NOT a conversion problem, and no table can fix it:
+   -- Taiwan and the mainland often publish an anime under different names.
+   -- 2,237 of the misses differ in LENGTH from the stored title, i.e. they are
+   -- a different translation outright -- 海賊王 against 航海王, 三眼小子
+   -- against 三眼神童, 鋼鐵奇兵 against 金屬對決. Reaching those needs an alias
+   -- table, which is a different project.
+   --
+   -- When the keyword has nothing to convert, the caller passes the SAME
+   -- pattern it passed above, so this collapses into a duplicate the planner
+   -- already dedupes rather than into a branch either side has to remember.
+   OR title_hant    ILIKE $2::text
 ORDER BY
     CASE
-        WHEN lower(title_romaji)  = $2::text
-          OR lower(title_english) = $2::text
-          OR lower(title_native)  = $2::text
-          OR lower(title_chinese) = $2::text
-          OR lower(title_hant)    = $2::text THEN 0
-        WHEN title_romaji  ILIKE $3::text
-          OR title_english ILIKE $3::text
-          OR title_native  ILIKE $3::text
-          OR title_chinese ILIKE $3::text
-          OR title_hant    ILIKE $3::text THEN 1
+        WHEN lower(title_romaji)  = $3::text
+          OR lower(title_english) = $3::text
+          OR lower(title_native)  = $3::text
+          OR lower(title_chinese) = $3::text
+          OR lower(title_hant)    = $3::text
+          OR lower(title_hant)    = $4::text THEN 0
+        WHEN title_romaji  ILIKE $5::text
+          OR title_english ILIKE $5::text
+          OR title_native  ILIKE $5::text
+          OR title_chinese ILIKE $5::text
+          OR title_hant    ILIKE $5::text
+          OR title_hant    ILIKE $6::text THEN 1
         ELSE 2
     END,
     average_score DESC NULLS LAST,
     anilist_id
-LIMIT $5::int OFFSET $4::int
+LIMIT $8::int OFFSET $7::int
 `
+
+type SearchAnimeCacheLocalParams struct {
+	Contains       string `json:"contains"`
+	ContainsFolded string `json:"containsFolded"`
+	Exact          string `json:"exact"`
+	ExactFolded    string `json:"exactFolded"`
+	Prefix         string `json:"prefix"`
+	PrefixFolded   string `json:"prefixFolded"`
+	Off            int32  `json:"off"`
+	Lim            int32  `json:"lim"`
+}
 
 // Keyword search over the local catalogue, ranked.
 //
@@ -2594,13 +2641,16 @@ LIMIT $5::int OFFSET $4::int
 // one worth reproducing. anilist_id last so the order is total: without it a
 // LIMIT slices an arbitrary heap order out of a tie group and the page a
 // reader sees drifts with vacuum.
-func (q *Queries) SearchAnimeCacheLocal(ctx context.Context, contains string, exact string, prefix string, off int32, lim int32) ([]int32, error) {
+func (q *Queries) SearchAnimeCacheLocal(ctx context.Context, arg SearchAnimeCacheLocalParams) ([]int32, error) {
 	rows, err := q.db.Query(ctx, searchAnimeCacheLocal,
-		contains,
-		exact,
-		prefix,
-		off,
-		lim,
+		arg.Contains,
+		arg.ContainsFolded,
+		arg.Exact,
+		arg.ExactFolded,
+		arg.Prefix,
+		arg.PrefixFolded,
+		arg.Off,
+		arg.Lim,
 	)
 	if err != nil {
 		return nil, err

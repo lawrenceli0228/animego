@@ -140,3 +140,67 @@ test.describe("the page itself", () => {
     await expect(page.locator(`a[href*="/anime/"]`)).toHaveCount(0);
   });
 });
+
+test.describe("a Simplified keyword reaches a Traditional-only title", () => {
+  // 1,262 catalogue rows carry a Traditional title and no Simplified one, so a
+  // reader typing 进击的巨人 could not find 進擊的巨人. go-api now folds the
+  // keyword through the vendored OpenCC table before matching.
+  //
+  // The probe is seeded so that ONLY folding can find it: its Simplified title
+  // deliberately shares nothing with the query, and its Traditional title is
+  // the folded form. A run where folding silently stopped working would fail
+  // here rather than quietly return one fewer result.
+  //
+  // Scope, so this is not read as more than it is: measured over the 5,160
+  // rows holding both a Simplified and an authoritative Traditional title,
+  // folding lifts the match rate from 7.4% to 40.7%. The rest is Taiwan and the
+  // mainland publishing an anime under different names (海賊王 / 航海王), which
+  // no character table bridges.
+  const FOLD_ID = 990_300_002;
+  // Chosen so the table converts it CHARACTER for character. s2twp is not a
+  // pure script conversion — the `wp` suffix is Taiwan phrase substitution,
+  // which rewrites vocabulary: 折叠 becomes 摺疊, not 折疊. A probe built on a
+  // word like that fails while the feature works, which cost two runs to
+  // notice. 测试探针进击的巨人 has no such word.
+  const FOLD_HANT = "測試探針進擊的巨人";
+  const FOLD_TYPED = "测试探针进击的巨人"; // what a Simplified reader types
+  // Shares no substring with FOLD_TYPED, so a hit cannot come from this field.
+  const FOLD_ZH_DECOY = "zzdecoyzz";
+
+  test.beforeAll(async () => {
+    await ensureAnimeCached({
+      anilistId: FOLD_ID,
+      titleRomaji: "E2E Fold Probe",
+      titleChinese: FOLD_ZH_DECOY,
+      titleHant: FOLD_HANT,
+      episodes: 1,
+    });
+  });
+
+  test.afterAll(async () => {
+    await removeAnimeFixture(FOLD_ID);
+  });
+
+  test("the Simplified form finds a row stored only in Traditional", async ({ page }) => {
+    await page.goto(`/search?q=${encodeURIComponent(FOLD_TYPED)}`);
+    await expect(
+      page.locator(`a[href*="/anime/${FOLD_ID}"]`).first(),
+      `searching "${FOLD_TYPED}" did not reach "${FOLD_HANT}" — keyword folding is off`,
+    ).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("the decoy really is a decoy", async ({ page }) => {
+    // Anti-vacuity for the test above: if the Simplified column could satisfy
+    // the query on its own, that test would pass with folding disabled. This
+    // pins that it cannot.
+    await page.goto(`/search?q=${encodeURIComponent(FOLD_ZH_DECOY)}`);
+    const viaDecoy = page.locator(`a[href*="/anime/${FOLD_ID}"]`).first();
+    await expect(viaDecoy, "the decoy should find the row by itself").toBeVisible({
+      timeout: 20_000,
+    });
+    // ...and the decoy shares nothing with the typed query, so the hit above
+    // could only have come through the Traditional column.
+    expect(FOLD_HANT.includes(FOLD_ZH_DECOY)).toBe(false);
+    expect(FOLD_TYPED.includes(FOLD_ZH_DECOY)).toBe(false);
+  });
+});
