@@ -82,6 +82,9 @@ const zh = {
   nav: {
     home: '首页', season: '季度', search: '搜索',
     login: '登录', register: '注册', logout: '登出',
+    // Shown when /api/auth/logout did not answer 200 — the cookies are still
+    // live, so the bar stays signed-in rather than lying about it.
+    logoutFailed: '登出未完成，请重试',
     myList: '我的追番', hi: 'Hi', library: '我的库', about: '关于',
   },
   // Season labels

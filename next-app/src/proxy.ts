@@ -198,9 +198,29 @@ export async function proxy(req: NextRequest) {
   // --- 1. Refresh step (all routes) ---
   if (needsRefresh(session) && refreshToken) {
     try {
+      // Forward the real client IP. go-api keys its per-IP rate limiter on
+      // X-Real-IP (auth.clientIP) and falls back to r.RemoteAddr, which for a
+      // server-side fetch is the next-app CONTAINER's address — so without
+      // these headers every SSR refresh on the site collapses into one shared
+      // 120-per-15-minutes bucket, about eight per minute for all users
+      // combined. When it drains, r.ok is false and the fall-through below
+      // renders every one of them as logged-out: a group-wide silent sign-out
+      // caused by traffic, not by anything wrong with their sessions.
+      //
+      // lib/api.ts:buildHeaders already does exactly this, and its comment
+      // describes this same failure mode. This call site was simply never
+      // updated to match.
+      const refreshHeaders: Record<string, string> = {
+        cookie: req.headers.get("cookie") ?? "",
+      };
+      const realIp = req.headers.get("x-real-ip");
+      if (realIp) refreshHeaders["X-Real-IP"] = realIp;
+      const forwardedFor = req.headers.get("x-forwarded-for");
+      if (forwardedFor) refreshHeaders["X-Forwarded-For"] = forwardedFor;
+
       const r = await fetch(`${GO_API_INTERNAL_URL}/api/auth/refresh`, {
         method: "POST",
-        headers: { cookie: req.headers.get("cookie") ?? "" },
+        headers: refreshHeaders,
       });
       if (r.ok) {
         const cookies = r.headers.getSetCookie();

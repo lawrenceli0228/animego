@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -432,13 +433,24 @@ type setPasswordReq struct {
 //
 // Admin-initiated password change for any account. Flow:
 //  1. Parse :userId (400 on bad UUID).
-//  2. Decode {password}; require >= 6 chars (matches the register rule).
+//  2. Decode {password}; require >= 6 RUNES (matching the register rule,
+//     which validates with go-playground's `min=6` — rune-counted for
+//     strings).
 //  3. GetUserByID — 404 if the account doesn't exist (the UPDATE is a
 //     silent no-op on a missing id, so check first to return a real 404).
 //  4. bcrypt-hash via jwtx.HashPassword (cost=10).
-//  5. AdminSetUserPassword — writes the hash + nulls refresh_token so the
-//     target's existing sessions are invalidated (forces re-login).
+//  5. AdminSetUserPassword — writes the hash and clears all three
+//     refresh-session columns, so the target's refresh cookie stops working.
 //  6. 200 { success: true }.
+//
+// What this does NOT do, spelled out because an admin reaching for this
+// endpoint is usually reacting to a suspected compromise: it does not end the
+// target's current session. Access tokens are stateless JWTs — one already
+// issued keeps authenticating for up to accessTTL (JWT_EXPIRES_IN, 15m by
+// default), and nothing here can recall it. The target loses access when that
+// token expires, not when this returns 200. Genuine immediate lockout would
+// need an access-token denylist or a token-version column; neither exists.
+// Do not let the response's `success: true` be read as "they are out now".
 func (h *UserHandlers) SetUserPassword(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), userQueryTimeout)
 	defer cancel()
@@ -453,7 +465,13 @@ func (h *UserHandlers) SetUserPassword(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, msgInvalidRequestBody))
 		return
 	}
-	if len(req.Password) < 6 {
+	// RuneCount, not len. The register form validates with go-playground's
+	// `min=6` (auth/types.go), which counts runes for strings; byte-counting
+	// here made this path LOOSER than the public form it claims to match —
+	// "密码密码", four characters, passed as twelve bytes while the same
+	// value was rejected at registration. An admin-only endpoint being the
+	// weakest place to set a password is the wrong way round.
+	if utf8.RuneCountInString(req.Password) < 6 {
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, msgPasswordTooShort))
 		return
 	}

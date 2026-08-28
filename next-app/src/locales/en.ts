@@ -24,6 +24,9 @@ const en = {
   nav: {
     home: 'Home', season: 'Season', search: 'Search',
     login: 'Login', register: 'Sign Up', logout: 'Logout',
+    // Shown when /api/auth/logout did not answer 200 — the cookies are still
+    // live, so the bar stays signed-in rather than lying about it.
+    logoutFailed: 'Sign-out did not complete — please try again.',
     myList: 'My List', hi: 'Hi', library: 'Library', about: 'About',
   },
   // Season labels

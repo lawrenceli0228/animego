@@ -64,7 +64,12 @@ type V1Reader interface {
 type V1Writer interface {
 	// UpdateBangumiV1 binds bgm_id (+ optional title_chinese) and records
 	// HOW it was bound via bgmMatchSource ('id_map' | 'fuzzy_high').
-	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error
+	//
+	// Returns rows affected.  The query carries an `AND bangumi_version = 0`
+	// predicate, so 0 means "this row moved on before the job ran" — a stale
+	// duplicate that was correctly refused, NOT an error.  Callers log it and
+	// return nil; retrying would refuse again.
+	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error)
 	// MarkBangumiV1NotFound parks a row Bangumi has no record for at all
 	// (no keyword / 404 / empty list): terminal version=2, no bgm_id.
 	MarkBangumiV1NotFound(ctx context.Context, anilistID int32) error
@@ -130,8 +135,17 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 	if bgmID, err := w.db.LookupBgmIdMap(ctx, anilistID); err == nil {
 		id := bgmID
 		src := matchSourceIDMap
-		if uErr := w.db.UpdateBangumiV1(ctx, anilistID, &id, nil, &src); uErr != nil {
+		n, uErr := w.db.UpdateBangumiV1(ctx, anilistID, &id, nil, &src)
+		if uErr != nil {
 			return fmt.Errorf("bangumi_v1 id_map update %d: %w", anilistID, uErr)
+		}
+		if n == 0 {
+			// Row left version 0 between enqueue and execution — a stale
+			// duplicate.  Do NOT chain V2: whoever advanced the row owns
+			// that side of the pipeline.  Not an error, so no retry.
+			slog.InfoContext(ctx, "bangumi_v1 stale_skip",
+				"anilistId", anilistID, "path", "id_map")
+			return nil
 		}
 		w.chainV2(ctx, anilistID, id)
 		slog.InfoContext(ctx, "bangumi_v1 id_map", "anilistId", anilistID, "bgmId", id)
@@ -220,9 +234,19 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 	}
 	bgmID := int32(best.ID)
 	src := matchSourceFuzzyHigh
-	if uErr := w.db.UpdateBangumiV1(ctx, anilistID, &bgmID, titleChinese, &src); uErr != nil {
+	n, uErr := w.db.UpdateBangumiV1(ctx, anilistID, &bgmID, titleChinese, &src)
+	if uErr != nil {
 		slog.WarnContext(ctx, "bangumi_v1 db update error", "anilistId", anilistID, "bgmId", bgmID, "err", uErr)
 		return fmt.Errorf("bangumi_v1 update %d: %w", anilistID, uErr)
+	}
+	if n == 0 {
+		// Row left version 0 between enqueue and execution — a stale
+		// duplicate.  Do NOT chain V2: whoever advanced the row owns that
+		// side of the pipeline.  Not an error, so no retry.  This path is
+		// the one that used to silently overwrite a hand-corrected binding.
+		slog.InfoContext(ctx, "bangumi_v1 stale_skip",
+			"anilistId", anilistID, "path", "fuzzy_high", "bgmId", bgmID)
+		return nil
 	}
 
 	// 8. Chain V2 — best-effort.

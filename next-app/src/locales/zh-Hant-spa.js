@@ -71,6 +71,7 @@ const zhHant = {
   nav: {
     home: '首頁', season: '季度', search: '搜尋',
     login: '登入', register: '註冊', logout: '登出',
+    logoutFailed: '登出未完成，請重試',
     myList: '我的追番', hi: 'Hi', library: '我的庫', about: '關於',
     // Language menu: the group heading + the account menu's own label.
     language: '語言', accountMenu: '賬戶選單', mainNavigation: '主導航',

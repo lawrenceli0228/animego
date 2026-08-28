@@ -14,6 +14,7 @@ const en = {
   nav: {
     home: 'Home', season: 'Season', search: 'Search',
     login: 'Login', register: 'Sign Up', logout: 'Logout',
+    logoutFailed: 'Sign-out did not complete — please try again.',
     myList: 'My List', hi: 'Hi', library: 'Library', about: 'About',
     // Language menu: the group heading + the account menu's own label.
     language: 'Language', accountMenu: 'Account menu', mainNavigation: 'Main navigation',

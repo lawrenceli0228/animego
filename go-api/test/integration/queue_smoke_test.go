@@ -109,8 +109,16 @@ func (noRowV12DB) LookupBgmIdMap(_ context.Context, _ int32) (int32, error) {
 // The bgmMatchSource parameter arrived with migration 0011's match-accuracy
 // work and this stub was never updated to match, so it had been failing to
 // satisfy V1Writer since then.
-func (noRowV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string, _ *string) error {
-	return nil
+//
+// The int64 return arrived later still, when UpdateBangumiV1 became :execrows
+// with a `bangumi_version = 0` guard so a stale duplicate job cannot overwrite
+// a v2/v3/hand-corrected row.  1 is the correct no-op answer here: it means
+// "the guard passed and one row was written", which is what the old bare
+// `nil` meant.  Returning 0 would claim the guard REJECTED the write and send
+// the worker down the stale-skip branch — a different code path, silently
+// selected by a stub.
+func (noRowV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string, _ *string) (int64, error) {
+	return 1, nil
 }
 
 // MarkBangumiV1NotFound and MarkBangumiNeedsReview satisfy queue.V1Writer.

@@ -63,7 +63,7 @@ func (f *fakeBangumi) Search(ctx context.Context, keyword string) (*bangumi.Sear
 type fakeV1DB struct {
 	getFn             func(ctx context.Context, id int32) (dbgen.GetAnimeForBangumiSearchRow, error)
 	lookupFn          func(ctx context.Context, anilistID int32) (int32, error)
-	updateFn          func(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error
+	updateFn          func(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error)
 	markNotFoundFn    func(ctx context.Context, anilistID int32) error
 	markNeedsReviewFn func(ctx context.Context, anilistID int32) error
 
@@ -149,14 +149,17 @@ func (f *fakeV1DB) LookupBgmIdMap(ctx context.Context, anilistID int32) (int32, 
 	return f.lookupFn(ctx, anilistID)
 }
 
-func (f *fakeV1DB) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error {
+// UpdateBangumiV1 records the call and returns rows-affected.  Default is 1
+// ("the row was still v0, we wrote it") so every pre-existing test keeps its
+// original meaning; the stale-job tests set updateFn to return 0 instead.
+func (f *fakeV1DB) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error) {
 	f.updateCalls++
 	f.lastUpdate.anilistID = anilistID
 	f.lastUpdate.bgmID = bgmID
 	f.lastUpdate.titleChinese = titleChinese
 	f.lastUpdate.matchSource = bgmMatchSource
 	if f.updateFn == nil {
-		return nil
+		return 1, nil
 	}
 	return f.updateFn(ctx, anilistID, bgmID, titleChinese, bgmMatchSource)
 }
@@ -303,6 +306,79 @@ func TestBangumiV1_IDMapHit(t *testing.T) {
 	require.Len(t, enq.v2Calls, 1, "id_map hit must chain V2")
 	require.Len(t, enq.v2Calls[0], 1)
 	assert.Equal(t, BangumiV2Args{AnilistID: 1234, BgmID: 7777}, enq.v2Calls[0][0])
+}
+
+// ---------------------------------------------------------------------------
+// REGRESSION — stale duplicate jobs.
+//
+// river has no arg-hash dedupe and ScanAndEnqueueOrphans runs at boot AND on a
+// periodic job, so the same anilist_id can sit in the queue twice.  A job
+// enqueued while the row was v0 can execute AFTER something else advanced that
+// row to v1/v2/v3.  UpdateBangumiV1 carries `AND bangumi_version = 0`, so the
+// write is refused and returns 0 rows.
+//
+// Before the predicate existed, that stale job silently overwrote bgm_id,
+// title_chinese and bgm_match_source and reset the version to 1 — including on
+// rows a human had corrected by hand.  orphan.go still claims the worker is
+// "effectively idempotent"; these two tests are what makes that true.
+//
+// Both assert the same three things:
+//   - the write is ATTEMPTED (the guard does the refusing, not a pre-check)
+//   - no error surfaces (a stale job is not a failure; retrying refuses again)
+//   - V2 is NOT chained (whoever advanced the row owns that side)
+// ---------------------------------------------------------------------------
+
+func TestBangumiV1_StaleJob_IDMapPath_SkipsChainV2(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeV1DB{
+		lookupFn: func(_ context.Context, _ int32) (int32, error) {
+			return int32(7777), nil
+		},
+		// 0 rows affected: the row left version 0 between enqueue and run.
+		updateFn: func(_ context.Context, _ int32, _ *int32, _ *string, _ *string) (int64, error) {
+			return 0, nil
+		},
+	}
+	enq := &fakeV1Enqueuer{}
+
+	err := runV1WithEnq(t, &fakeBangumi{}, db, enq, 1234)
+	require.NoError(t, err, "a refused stale job is not an error — retrying would refuse again")
+	assert.Equal(t, 1, db.updateCalls, "the write must be attempted; the DB predicate is what refuses it")
+	assert.Empty(t, enq.v2Calls, "stale id_map job must NOT chain V2 — the row is already owned by another run")
+}
+
+func TestBangumiV1_StaleJob_FuzzyPath_SkipsChainV2(t *testing.T) {
+	t.Parallel()
+
+	native := "ナルト"
+	b := &fakeBangumi{
+		searchFn: func(ctx context.Context, keyword string) (*bangumi.SearchResponse, error) {
+			return &bangumi.SearchResponse{
+				List: []bangumi.SearchResult{
+					{ID: 9999, Name: "ナルト", NameCN: "火影忍者"},
+				},
+			}, nil
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(ctx context.Context, id int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{
+				TitleNative: &native,
+				TitleRomaji: ptr("Naruto"),
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ int32, _ *int32, _ *string, _ *string) (int64, error) {
+			return 0, nil
+		},
+	}
+	enq := &fakeV1Enqueuer{}
+
+	err := runV1WithEnq(t, b, db, enq, 1234)
+	require.NoError(t, err, "a refused stale job is not an error — retrying would refuse again")
+	assert.Equal(t, 1, db.updateCalls, "the write must be attempted; the DB predicate is what refuses it")
+	assert.Empty(t, enq.v2Calls,
+		"stale fuzzy job must NOT chain V2 — this is the path that used to overwrite hand-corrected bindings")
 }
 
 // TestBangumiV1_IDMapLookupTransientError verifies that a non-ErrNoRows error
@@ -639,8 +715,8 @@ func TestBangumiV1_DBUpdateError_Propagates(t *testing.T) {
 		getFn: func(ctx context.Context, id int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
 			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: &native}, nil
 		},
-		updateFn: func(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error {
-			return dbErr
+		updateFn: func(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error) {
+			return 0, dbErr
 		},
 	}
 
