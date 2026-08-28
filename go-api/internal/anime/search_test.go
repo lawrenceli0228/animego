@@ -71,11 +71,20 @@ type searchFakeQuerier struct {
 	getAnimeByAnilistIDsFn func(ctx context.Context, ids []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error)
 	getTitleChineseFn      func(ctx context.Context, ids []int32) ([]dbgen.GetTitleChineseByAnilistIDsRow, error)
 
+	// The local-catalogue path. Both default to "the catalogue is empty", so
+	// every test written before local search existed still exercises the
+	// AniList path it was written for — an empty catalogue is exactly the
+	// condition under which run() falls through.
+	countLocalFn  func(ctx context.Context, contains string) (int64, error)
+	searchLocalFn func(ctx context.Context, contains, exact, prefix string, off, lim int32) ([]int32, error)
+
 	mu             sync.Mutex
 	upsertedIDs    []int32
 	upsertedParams []dbgen.UpsertAnimeCacheParams
 	gotReadIDs     []int32
 	enqueueLookups int
+	localArgs      []string
+	localCalls     int
 }
 
 func (f *searchFakeQuerier) UpsertAnimeCache(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error {
@@ -87,6 +96,27 @@ func (f *searchFakeQuerier) UpsertAnimeCache(ctx context.Context, arg dbgen.Upse
 		return nil
 	}
 	return f.upsertAnimeCacheFn(ctx, arg)
+}
+
+// CountAnimeCacheLocal is the gate run() consults before AniList. Returning 0
+// by default is what keeps the pre-existing tests meaningful: they assert
+// AniList behaviour, and a non-empty local catalogue would short-circuit them.
+func (f *searchFakeQuerier) CountAnimeCacheLocal(ctx context.Context, contains string) (int64, error) {
+	f.mu.Lock()
+	f.localCalls++
+	f.localArgs = append(f.localArgs, contains)
+	f.mu.Unlock()
+	if f.countLocalFn == nil {
+		return 0, nil
+	}
+	return f.countLocalFn(ctx, contains)
+}
+
+func (f *searchFakeQuerier) SearchAnimeCacheLocal(ctx context.Context, contains, exact, prefix string, off, lim int32) ([]int32, error) {
+	if f.searchLocalFn == nil {
+		return nil, nil
+	}
+	return f.searchLocalFn(ctx, contains, exact, prefix, off, lim)
 }
 
 func (f *searchFakeQuerier) GetAnimeByAnilistIDs(ctx context.Context, ids []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error) {
@@ -1081,4 +1111,239 @@ func TestSearch_EnqueueNotCalledOnCacheHit(t *testing.T) {
 	assert.Len(t, fe.snapshotCalls(), 1, "cache hit must NOT dispatch a second enqueue")
 	assert.Equal(t, 1, fq.snapshotEnqueueLookups(), "cache hit must NOT issue a second enqueue lookup")
 	assert.Equal(t, int32(1), fs.callCount(), "cache hit must NOT call AniList again")
+}
+
+// -----------------------------------------------------------------------------
+// Local-catalogue search.
+//
+// /api/anime/search used to be a pure AniList proxy, and AniList does not index
+// Chinese titles. Measured on production before this path existed: 進擊的巨人
+// and 鬼滅之刃 both returned zero results while anime_cache held those exact
+// strings in title_hant, and the Chinese queries that DID work only worked
+// where AniList happened to carry the string as a synonym — 葬送的芙莉蓮 found
+// the row and 葬送的芙莉莲 did not.
+//
+// These tests pin the routing decision (local first, AniList only when the
+// catalogue has nothing) and the argument construction, which is where a
+// silent wildcard injection would live.
+// -----------------------------------------------------------------------------
+
+// localHitQuerier is a fake catalogue holding exactly the ids given, in the
+// order given — the order SearchAnimeCacheLocal's ranking would have produced.
+func localHitQuerier(ids ...int32) *searchFakeQuerier {
+	return &searchFakeQuerier{
+		countLocalFn: func(_ context.Context, _ string) (int64, error) {
+			return int64(len(ids)), nil
+		},
+		searchLocalFn: func(_ context.Context, _, _, _ string, off, lim int32) ([]int32, error) {
+			if int(off) >= len(ids) {
+				return nil, nil
+			}
+			end := int(off) + int(lim)
+			if end > len(ids) {
+				end = len(ids)
+			}
+			return ids[off:end], nil
+		},
+		getAnimeByAnilistIDsFn: func(_ context.Context, got []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error) {
+			// Deliberately returned in REVERSE, standing in for
+			// GetAnimeByAnilistIDs's `ORDER BY average_score DESC`: the real
+			// query does not honour the id order it is given, so a test that
+			// echoed the input order back would pass even if reorderByIDs were
+			// deleted.
+			out := make([]dbgen.GetAnimeByAnilistIDsRow, 0, len(got))
+			for i := len(got) - 1; i >= 0; i-- {
+				out = append(out, dbgen.GetAnimeByAnilistIDsRow{AnilistID: got[i]})
+			}
+			return out, nil
+		},
+	}
+}
+
+func TestSearchLocal_ChineseHitDoesNotReachAniList(t *testing.T) {
+	t.Parallel()
+
+	fs := &fakeSearcher{
+		fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			t.Error("AniList was called even though the local catalogue answered")
+			return &anilist.SearchAnimeResponse{}, nil
+		},
+	}
+	fq := localHitQuerier(16498, 101922)
+	svc := newSearchService(t, fs, fq, nil)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/anime/search?q=%E9%80%B2%E6%93%8A%E7%9A%84%E5%B7%A8%E4%BA%BA", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Zero(t, fs.callCount(), "a local hit must not spend an AniList call")
+	assert.Contains(t, rec.Body.String(), `"total":2`)
+}
+
+func TestSearchLocal_RankingSurvivesTheReRead(t *testing.T) {
+	t.Parallel()
+
+	// The local query ranks exact-match first; GetAnimeByAnilistIDs then sorts
+	// by average_score and would discard that. reorderByIDs puts it back, and
+	// the fake returns rows reversed so this fails without it.
+	fq := localHitQuerier(1, 2, 3)
+	svc := newSearchService(t, &fakeSearcher{}, fq, nil)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	first, second, third :=
+		strings.Index(body, `"anilistId":1,`),
+		strings.Index(body, `"anilistId":2,`),
+		strings.Index(body, `"anilistId":3,`)
+	require.NotEqual(t, -1, first)
+	require.NotEqual(t, -1, third)
+	assert.Less(t, first, second, "rank order must survive the re-read")
+	assert.Less(t, second, third, "rank order must survive the re-read")
+}
+
+func TestSearchLocal_EmptyCatalogueFallsThroughToAniList(t *testing.T) {
+	t.Parallel()
+
+	// The self-healing case: a title we have not ingested. AniList answers,
+	// the upsert files the row, and the next search for it is local.
+	fs := &fakeSearcher{
+		fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			return &anilist.SearchAnimeResponse{
+				Page: anilist.MediaPage{
+					PageInfo: anilist.PageInfo{Total: 1, CurrentPage: 1, PerPage: 20},
+					Media:    []anilist.Media{mediaWith(999)},
+				},
+			}, nil
+		},
+	}
+	fq := &searchFakeQuerier{} // countLocalFn nil → catalogue reports empty
+	svc := newSearchService(t, fs, fq, nil)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=brandnew", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(1), fs.callCount(), "an empty catalogue must still reach AniList")
+	assert.Contains(t, fq.upsertedIDs, int32(999), "the fallback must file what it found")
+}
+
+func TestSearchLocal_DatabaseErrorFallsThroughRatherThanFailing(t *testing.T) {
+	t.Parallel()
+
+	// A local failure costs Chinese matching for one request, not the request.
+	fs := &fakeSearcher{
+		fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			return &anilist.SearchAnimeResponse{
+				Page: anilist.MediaPage{PageInfo: anilist.PageInfo{Total: 0, CurrentPage: 1, PerPage: 20}},
+			}, nil
+		},
+	}
+	fq := &searchFakeQuerier{
+		countLocalFn: func(_ context.Context, _ string) (int64, error) {
+			return 0, errors.New("connection reset")
+		},
+	}
+	svc := newSearchService(t, fs, fq, nil)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=naruto", nil))
+
+	assert.Equal(t, http.StatusOK, rec.Code, "a local DB error must not surface as a failed search")
+	assert.Equal(t, int32(1), fs.callCount())
+}
+
+func TestSearchLocal_GenreSearchStaysOnAniList(t *testing.T) {
+	t.Parallel()
+
+	// The local query has no genre predicate. Answering a genre filter from it
+	// would silently ignore the filter, which is worse than not using it.
+	for _, url := range []string{
+		"/api/anime/search?genre=Action",
+		"/api/anime/search?q=naruto&genre=Action",
+	} {
+		fs := &fakeSearcher{
+			fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+				return &anilist.SearchAnimeResponse{
+					Page: anilist.MediaPage{PageInfo: anilist.PageInfo{Total: 0, CurrentPage: 1, PerPage: 20}},
+				}, nil
+			},
+		}
+		fq := localHitQuerier(1, 2) // a catalogue that WOULD answer, if asked
+		svc := newSearchService(t, fs, fq, nil)
+
+		rec := httptest.NewRecorder()
+		svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+
+		require.Equal(t, http.StatusOK, rec.Code, url)
+		assert.Equal(t, int32(1), fs.callCount(), "genre search must reach AniList: "+url)
+		assert.Zero(t, fq.localCalls, "genre search must not consult the local catalogue: "+url)
+	}
+}
+
+func TestSearchLocal_PagePastTheEndStaysLocal(t *testing.T) {
+	t.Parallel()
+
+	// Once the total is non-zero the local catalogue owns the answer. Falling
+	// through here would hand the reader AniList's page 9 of something else.
+	fs := &fakeSearcher{
+		fn: func(_ context.Context, _ anilist.SearchVars) (*anilist.SearchAnimeResponse, error) {
+			t.Error("a page past the end fell through to AniList")
+			return &anilist.SearchAnimeResponse{}, nil
+		},
+	}
+	svc := newSearchService(t, fs, localHitQuerier(1, 2), nil)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=x&page=9", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `"data":[]`, "an empty page is still a page")
+	assert.Contains(t, body, `"total":2`, "the total describes the result set, not the page")
+}
+
+func TestLikePatterns_EscapesWildcards(t *testing.T) {
+	t.Parallel()
+
+	// Unescaped, a search for "100%" matches every row in the table and "_"
+	// matches every one-character title. The backslash must be escaped FIRST
+	// or it re-escapes the escapes.
+	tests := []struct {
+		name, in, wantContains, wantPrefix string
+	}{
+		{"plain", "naruto", "%naruto%", "naruto%"},
+		{"percent", "100%", `%100\%%`, `100\%%`},
+		{"underscore", "a_b", `%a\_b%`, `a\_b%`},
+		{"backslash", `a\b`, `%a\\b%`, `a\\b%`},
+		{"all three", `%_\`, `%\%\_\\%`, `\%\_\\%`},
+		{"cjk untouched", "進擊的巨人", "%進擊的巨人%", "進擊的巨人%"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contains, prefix, exact := likePatterns(tt.in)
+			assert.Equal(t, tt.wantContains, contains)
+			assert.Equal(t, tt.wantPrefix, prefix)
+			assert.Equal(t, strings.ToLower(tt.in), exact, "the exact form is compared with =, so it is not escaped")
+		})
+	}
+}
+
+func TestSearchLocal_PassesTheEscapedPatternToTheQuery(t *testing.T) {
+	t.Parallel()
+
+	// End-to-end on the argument, not just the helper: a refactor that built
+	// the pattern at the call site instead would pass this only if it escaped.
+	fq := localHitQuerier(1)
+	svc := newSearchService(t, &fakeSearcher{}, fq, nil)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=100%25", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotEmpty(t, fq.localArgs)
+	assert.Equal(t, `%100\%%`, fq.localArgs[0], "the user's %% must reach SQL escaped")
 }

@@ -101,6 +101,31 @@ func (q *Queries) ApplyHantTitleBatch(ctx context.Context, anilistIds []int32, t
 	return result.RowsAffected(), nil
 }
 
+const countAnimeCacheLocal = `-- name: CountAnimeCacheLocal :one
+SELECT count(*)
+FROM anime_cache
+WHERE title_romaji  ILIKE $1::text
+   OR title_english ILIKE $1::text
+   OR title_native  ILIKE $1::text
+   OR title_chinese ILIKE $1::text
+   OR title_hant    ILIKE $1::text
+`
+
+// Total for the pagination envelope, matching SearchAnimeCacheLocal's WHERE
+// clause exactly. Kept as its own query rather than a window function over the
+// page: count(*) OVER () would be computed per returned row and still only
+// describe rows that survived LIMIT, so it cannot answer "how many pages".
+//
+// If these two predicates ever drift apart, the last page of a search silently
+// comes back short. SearchLocalKeywordConsistency in search_test.go pins them
+// to the same shape.
+func (q *Queries) CountAnimeCacheLocal(ctx context.Context, contains string) (int64, error) {
+	row := q.db.QueryRow(ctx, countAnimeCacheLocal, contains)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSeasonal = `-- name: CountSeasonal :one
 SELECT count(*)::bigint AS total
 FROM anime_cache
@@ -2509,6 +2534,90 @@ func (q *Queries) MarkEpisodesBgmAttempted(ctx context.Context, outcome string, 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const searchAnimeCacheLocal = `-- name: SearchAnimeCacheLocal :many
+SELECT anilist_id
+FROM anime_cache
+WHERE title_romaji  ILIKE $1::text
+   OR title_english ILIKE $1::text
+   OR title_native  ILIKE $1::text
+   OR title_chinese ILIKE $1::text
+   OR title_hant    ILIKE $1::text
+ORDER BY
+    CASE
+        WHEN lower(title_romaji)  = $2::text
+          OR lower(title_english) = $2::text
+          OR lower(title_native)  = $2::text
+          OR lower(title_chinese) = $2::text
+          OR lower(title_hant)    = $2::text THEN 0
+        WHEN title_romaji  ILIKE $3::text
+          OR title_english ILIKE $3::text
+          OR title_native  ILIKE $3::text
+          OR title_chinese ILIKE $3::text
+          OR title_hant    ILIKE $3::text THEN 1
+        ELSE 2
+    END,
+    average_score DESC NULLS LAST,
+    anilist_id
+LIMIT $5::int OFFSET $4::int
+`
+
+// Keyword search over the local catalogue, ranked.
+//
+// This is what /api/anime/search consults BEFORE reaching for AniList. It
+// exists because that endpoint used to be a pure AniList proxy, and AniList
+// does not index Chinese titles: measured on production, 進擊的巨人 and
+// 鬼滅之刃 both returned zero results while anime_cache held those exact
+// strings in title_hant. Chinese queries that did work only worked when
+// AniList happened to carry the string as a synonym, which is why the failures
+// looked random -- 葬送的芙莉蓮 found the row and 葬送的芙莉莲 did not.
+//
+// Returns ids, not rows. The caller re-reads through GetAnimeByAnilistIDs so
+// there is exactly one definition of the response row shape, and then restores
+// this ordering (that query sorts by average_score, which would discard the
+// ranking below).
+//
+// Every predicate is `ILIKE '%needle%'` against a gin_trgm_ops index (0002 for
+// four columns, 0027 for title_hant). The caller escapes %, _ and \ before
+// building the patterns -- unescaped, a search for "50%" would match every row.
+//
+// Ranking is three tiers, then popularity, then id:
+//
+//	0  an entire title equals the query      進擊的巨人 -> 進擊的巨人
+//	1  a title starts with it                進擊的巨人 -> 進擊的巨人 3
+//	2  a title merely contains it            巨人       -> 進擊的巨人
+//
+// Without the tiers, average_score alone puts a high-scoring sequel above the
+// exact title the reader typed -- searching 进击的巨人 answers with 第三季
+// Part.2 first, which is the behaviour the AniList path already has and not
+// one worth reproducing. anilist_id last so the order is total: without it a
+// LIMIT slices an arbitrary heap order out of a tie group and the page a
+// reader sees drifts with vacuum.
+func (q *Queries) SearchAnimeCacheLocal(ctx context.Context, contains string, exact string, prefix string, off int32, lim int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, searchAnimeCacheLocal,
+		contains,
+		exact,
+		prefix,
+		off,
+		lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var anilist_id int32
+		if err := rows.Scan(&anilist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, anilist_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateAnimeCharacterCN = `-- name: UpdateAnimeCharacterCN :exec

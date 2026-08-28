@@ -211,6 +211,42 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 		return &hit, nil
 	}
 
+	// Local catalogue first.
+	//
+	// This endpoint was a pure AniList proxy, and AniList does not index
+	// Chinese titles. Measured on production before this changed: 進擊的巨人
+	// and 鬼滅之刃 both returned zero results, while anime_cache held those
+	// exact strings in title_hant. The Chinese queries that did work only
+	// worked when AniList happened to carry the string as a synonym, which is
+	// why the failures looked arbitrary — 葬送的芙莉蓮 found the row and
+	// 葬送的芙莉莲 did not, and 进击的巨人 found one row where the Japanese
+	// spelling found twenty. 11,149 rows carry a Simplified title and 12,354 a
+	// Traditional one; none of it was reachable.
+	//
+	// Going local-first also takes most search traffic off AniList, which is
+	// its own benefit: a burst of uncached queries could exhaust the per-IP
+	// budget and surface as "AniList rate limited" to the reader.
+	//
+	// Only for keyword search. A genre filter stays on AniList because the
+	// local query has no genre predicate — the genres live in a side table
+	// and joining them is a separate change, not a detail of this one.
+	if q != "" && genre == "" {
+		local, lErr := s.runLocal(ctx, q, page, perPage)
+		if lErr != nil {
+			// Never fatal. The AniList path below is a complete answer on its
+			// own, so a local failure costs Chinese matching for this one
+			// request rather than the request itself.
+			slog.WarnContext(ctx, "anime/search: local search failed, falling back to AniList",
+				"err", lErr, "q", q)
+		} else if local != nil {
+			s.cache.Set(key, *local)
+			return local, nil
+		}
+		// local == nil means the catalogue has nothing for this keyword — a
+		// title we have not ingested yet. Fall through: AniList answers, the
+		// upsert below files the row, and the next search for it is local.
+	}
+
 	// Build SearchVars with pointer fields so omitempty drops nil
 	// entries from the JSON body — AniList expects `undefined`, not
 	// the empty string.
@@ -289,6 +325,104 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 	}
 	s.cache.Set(key, sp)
 	return &sp, nil
+}
+
+// runLocal answers a keyword search from anime_cache alone.
+//
+// Returns (nil, nil) — not an error — when the catalogue holds nothing for the
+// keyword. That is the signal for run() to fall through to AniList, and it is
+// deliberately distinguished from a query failure: "we do not have this anime"
+// and "the database is unwell" want opposite responses.
+//
+// A page past the end of the results still returns a page rather than nil.
+// Once the total is non-zero the local catalogue owns the answer, and an empty
+// page 9 of a 3-page result is correct pagination; falling through there would
+// hand the reader AniList's page 9 of something else entirely.
+func (s *SearchService) runLocal(ctx context.Context, q string, page, perPage int) (*SearchPage, error) {
+	contains, prefix, exact := likePatterns(q)
+
+	total, err := s.db.CountAnimeCacheLocal(ctx, contains)
+	if err != nil {
+		return nil, fmt.Errorf("count local: %w", err)
+	}
+	if total == 0 {
+		return nil, nil
+	}
+
+	ids, err := s.db.SearchAnimeCacheLocal(ctx, contains, exact, prefix,
+		int32((page-1)*perPage), int32(perPage))
+	if err != nil {
+		return nil, fmt.Errorf("search local: %w", err)
+	}
+
+	// Re-read through the same query the AniList path uses, so both produce
+	// the identical row shape and the response envelope has one definition
+	// rather than two that can drift.
+	rows := []dbgen.GetAnimeByAnilistIDsRow{}
+	if len(ids) > 0 {
+		rows, err = s.db.GetAnimeByAnilistIDs(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("read local rows: %w", err)
+		}
+		// That query sorts by average_score, which would throw away the
+		// ranking. Put the rows back in the order the search decided.
+		rows = reorderByIDs(rows, ids)
+	}
+
+	lastPage := 0
+	if perPage > 0 {
+		lastPage = int((total + int64(perPage) - 1) / int64(perPage))
+	}
+	return &SearchPage{
+		PageInfo: anilist.PageInfo{
+			Total:       int(total),
+			CurrentPage: page,
+			PerPage:     perPage,
+			LastPage:    lastPage,
+			HasNextPage: page < lastPage,
+		},
+		Anime: rows,
+	}, nil
+}
+
+// reorderByIDs returns rows in the order given by ids.
+//
+// Rows whose id is not in the list are dropped, and ids with no row are
+// skipped — neither can happen when the caller passes ids it just read from
+// the same table, but neither may silently duplicate or lose a row if it ever
+// does.
+func reorderByIDs(rows []dbgen.GetAnimeByAnilistIDsRow, ids []int32) []dbgen.GetAnimeByAnilistIDsRow {
+	byID := make(map[int32]dbgen.GetAnimeByAnilistIDsRow, len(rows))
+	for _, r := range rows {
+		byID[r.AnilistID] = r
+	}
+	out := make([]dbgen.GetAnimeByAnilistIDsRow, 0, len(ids))
+	for _, id := range ids {
+		if r, ok := byID[id]; ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// likePatterns turns a raw user keyword into the three arguments
+// SearchAnimeCacheLocal takes: a contains pattern, a prefix pattern, and a
+// lowercased exact form.
+//
+// The escaping is the point. `%` and `_` are ILIKE wildcards and `\` is the
+// default escape character, so a reader searching for "100%" would otherwise
+// match every row in the table, and "_" would match every one-character title.
+// Escape the backslash FIRST — doing it after would go on to escape the
+// backslashes this function just added.
+//
+// The exact form is lowercased in Go and compared against SQL lower(). For the
+// scripts this serves — CJK has no case, and titles are otherwise ASCII — the
+// two agree. They can disagree on locale-sensitive pairs (Turkish dotless i);
+// the cost there is that an exact match ranks as a prefix match, which is a
+// mis-ordering rather than a miss.
+func likePatterns(q string) (contains, prefix, exact string) {
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
+	return "%" + escaped + "%", escaped + "%", strings.ToLower(q)
 }
 
 // writeError maps run() errors to the appropriate httpx envelope.
