@@ -121,6 +121,15 @@ type Querier interface {
 	// on another device, a password reset that landed first.  The cookies are
 	// cleared unconditionally before this runs either way.
 	ClearRefreshTokenIfMatches(ctx context.Context, iD uuid.UUID, presentedToken *string) (int64, error)
+	// Total for the pagination envelope, matching SearchAnimeCacheLocal's WHERE
+	// clause exactly. Kept as its own query rather than a window function over the
+	// page: count(*) OVER () would be computed per returned row and still only
+	// describe rows that survived LIMIT, so it cannot answer "how many pages".
+	//
+	// If these two predicates ever drift apart, the last page of a search silently
+	// comes back short. SearchLocalKeywordConsistency in search_test.go pins them
+	// to the same shape.
+	CountAnimeCacheLocal(ctx context.Context, contains string, containsFolded string) (int64, error)
 	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
 	CountBgmIdMap(ctx context.Context) (int64, error)
 	CountCommentReactions(ctx context.Context, commentID uuid.UUID) (int64, error)
@@ -1531,6 +1540,38 @@ type Querier interface {
 	// Relevance ranking happens in Go (rankCacheRows) because it needs the
 	// season/part gate, which SQL can't express cheaply.
 	SearchAnimeCacheForDandanplay(ctx context.Context, titleChinese *string) ([]SearchAnimeCacheForDandanplayRow, error)
+	// Keyword search over the local catalogue, ranked.
+	//
+	// This is what /api/anime/search consults BEFORE reaching for AniList. It
+	// exists because that endpoint used to be a pure AniList proxy, and AniList
+	// does not index Chinese titles: measured on production, 進擊的巨人 and
+	// 鬼滅之刃 both returned zero results while anime_cache held those exact
+	// strings in title_hant. Chinese queries that did work only worked when
+	// AniList happened to carry the string as a synonym, which is why the failures
+	// looked random -- 葬送的芙莉蓮 found the row and 葬送的芙莉莲 did not.
+	//
+	// Returns ids, not rows. The caller re-reads through GetAnimeByAnilistIDs so
+	// there is exactly one definition of the response row shape, and then restores
+	// this ordering (that query sorts by average_score, which would discard the
+	// ranking below).
+	//
+	// Every predicate is `ILIKE '%needle%'` against a gin_trgm_ops index (0002 for
+	// four columns, 0027 for title_hant). The caller escapes %, _ and \ before
+	// building the patterns -- unescaped, a search for "50%" would match every row.
+	//
+	// Ranking is three tiers, then popularity, then id:
+	//
+	//   0  an entire title equals the query      進擊的巨人 -> 進擊的巨人
+	//   1  a title starts with it                進擊的巨人 -> 進擊的巨人 3
+	//   2  a title merely contains it            巨人       -> 進擊的巨人
+	//
+	// Without the tiers, average_score alone puts a high-scoring sequel above the
+	// exact title the reader typed -- searching 进击的巨人 answers with 第三季
+	// Part.2 first, which is the behaviour the AniList path already has and not
+	// one worth reproducing. anilist_id last so the order is total: without it a
+	// LIMIT slices an arbitrary heap order out of a tie group and the page a
+	// reader sees drifts with vacuum.
+	SearchAnimeCacheLocal(ctx context.Context, arg SearchAnimeCacheLocalParams) ([]int32, error)
 	// forgot-password sets the token + 1h expiry.  Caller generates the
 	// token via crypto/rand (32 random bytes hex-encoded — matches
 	// Express's crypto.randomBytes(32).toString('hex')).

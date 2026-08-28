@@ -23,6 +23,17 @@ export interface AnimeCardData {
   titleRomaji?: string | null;
   titleEnglish?: string | null;
   titleNative?: string | null;
+  /**
+   * Traditional Chinese, and the first rung of the zh-Hant ladder in
+   * lib/formatters.ts. Missing it does not fail — pickTitle falls through to
+   * titleChinese and a Traditional reader gets a Simplified title, which is
+   * readable enough that nobody notices. That is exactly how /search shipped
+   * Simplified cards on /zh-Hant while every other surface was correct: those
+   * pass a row straight through, so the field arrived whether or not a type
+   * mentioned it, and /search hand-builds this object field by field.
+   * cardDataTitles.test.ts now fails when a construction site omits it.
+   */
+  titleHant?: string | null;
   coverImageUrl: string | null;
   posterAccent?: string | null;
   averageScore?: number | null;

@@ -77,11 +77,16 @@ export async function generateMetadata({ params }: LangParams): Promise<Metadata
     //
     // Google resolves that conflict by taking the most restrictive value, so
     // the pages were not being indexed — but the guarantee rested on a
-    // tie-break rule rather than on the page saying one thing. These routes
-    // stream (see the loading.tsx note below), which means notFound() cannot
-    // set a 404 status and `noindex` is the ONLY signal keeping a
-    // non-existent anime out of the index. It should not have to win an
-    // argument first.
+    // tie-break rule rather than on the page saying one thing.
+    //
+    // When this was written those routes streamed, so notFound() could not set
+    // a 404 and `noindex` was the ONLY signal keeping a non-existent anime out
+    // of the index — it should not have had to win an argument first. The
+    // streaming is gone now (the loading.tsx that caused it moved into
+    // ./(home)/, see ../routeBoundaries.test.ts) and a missing anime answers a
+    // real 404, so `noindex` is corroboration rather than the whole defence.
+    // Removing the blanket directive is still right for the reason above: a
+    // page should say one thing.
     //
     // Removing it leaves normal pages with no robots tag, which is
     // index,follow by default, and leaves 404s with an unambiguous noindex.

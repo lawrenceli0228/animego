@@ -101,6 +101,32 @@ func (q *Queries) ApplyHantTitleBatch(ctx context.Context, anilistIds []int32, t
 	return result.RowsAffected(), nil
 }
 
+const countAnimeCacheLocal = `-- name: CountAnimeCacheLocal :one
+SELECT count(*)
+FROM anime_cache
+WHERE title_romaji  ILIKE $1::text
+   OR title_english ILIKE $1::text
+   OR title_native  ILIKE $1::text
+   OR title_chinese ILIKE $1::text
+   OR title_hant    ILIKE $1::text
+   OR title_hant    ILIKE $2::text
+`
+
+// Total for the pagination envelope, matching SearchAnimeCacheLocal's WHERE
+// clause exactly. Kept as its own query rather than a window function over the
+// page: count(*) OVER () would be computed per returned row and still only
+// describe rows that survived LIMIT, so it cannot answer "how many pages".
+//
+// If these two predicates ever drift apart, the last page of a search silently
+// comes back short. SearchLocalKeywordConsistency in search_test.go pins them
+// to the same shape.
+func (q *Queries) CountAnimeCacheLocal(ctx context.Context, contains string, containsFolded string) (int64, error) {
+	row := q.db.QueryRow(ctx, countAnimeCacheLocal, contains, containsFolded)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSeasonal = `-- name: CountSeasonal :one
 SELECT count(*)::bigint AS total
 FROM anime_cache
@@ -2509,6 +2535,139 @@ func (q *Queries) MarkEpisodesBgmAttempted(ctx context.Context, outcome string, 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const searchAnimeCacheLocal = `-- name: SearchAnimeCacheLocal :many
+SELECT anilist_id
+FROM anime_cache
+WHERE title_romaji  ILIKE $1::text
+   OR title_english ILIKE $1::text
+   OR title_native  ILIKE $1::text
+   OR title_chinese ILIKE $1::text
+   OR title_hant    ILIKE $1::text
+   -- The folded keyword, and only against the Traditional column.
+   --
+   -- The caller runs an incoming Simplified keyword through the vendored
+   -- OpenCC s2twp table, so this pattern is Traditional text. Traditional text
+   -- can only match a Traditional column, which is why this is one predicate
+   -- rather than a second copy of the five above -- those would be five index
+   -- scans that structurally cannot return a row.
+   --
+   -- It reaches the 1,262 rows that have a title_hant and no title_chinese: a
+   -- Simplified reader typing 进击的巨人 could not find 進擊的巨人 before, and
+   -- that is not a long tail (315 of them are TV, and they include some of the
+   -- best-known franchises in the catalogue). Their cause is upstream -- 9.4%
+   -- bgm_id coverage against 70.8% for the catalogue, so Bangumi enrichment
+   -- had no subject to read a Simplified title from.
+   --
+   -- How much it actually buys, measured rather than assumed. Over the 5,160
+   -- rows carrying BOTH a Simplified title and an AUTHORITATIVE Traditional one
+   -- (title_hant_source <> 'opencc'), folding the Simplified title yields a
+   -- substring of the stored Traditional title -- exactly the test this
+   -- predicate performs -- for 40.7% of them. Without folding it is 7.4%. So
+   -- roughly five and a half times the reach, not "solved".
+   --
+   -- The remaining 59% is NOT a conversion problem, and no table can fix it:
+   -- Taiwan and the mainland often publish an anime under different names.
+   -- 2,237 of the misses differ in LENGTH from the stored title, i.e. they are
+   -- a different translation outright -- 海賊王 against 航海王, 三眼小子
+   -- against 三眼神童, 鋼鐵奇兵 against 金屬對決. Reaching those needs an alias
+   -- table, which is a different project.
+   --
+   -- When the keyword has nothing to convert, the caller passes the SAME
+   -- pattern it passed above, so this collapses into a duplicate the planner
+   -- already dedupes rather than into a branch either side has to remember.
+   OR title_hant    ILIKE $2::text
+ORDER BY
+    CASE
+        WHEN lower(title_romaji)  = $3::text
+          OR lower(title_english) = $3::text
+          OR lower(title_native)  = $3::text
+          OR lower(title_chinese) = $3::text
+          OR lower(title_hant)    = $3::text
+          OR lower(title_hant)    = $4::text THEN 0
+        WHEN title_romaji  ILIKE $5::text
+          OR title_english ILIKE $5::text
+          OR title_native  ILIKE $5::text
+          OR title_chinese ILIKE $5::text
+          OR title_hant    ILIKE $5::text
+          OR title_hant    ILIKE $6::text THEN 1
+        ELSE 2
+    END,
+    average_score DESC NULLS LAST,
+    anilist_id
+LIMIT $8::int OFFSET $7::int
+`
+
+type SearchAnimeCacheLocalParams struct {
+	Contains       string `json:"contains"`
+	ContainsFolded string `json:"containsFolded"`
+	Exact          string `json:"exact"`
+	ExactFolded    string `json:"exactFolded"`
+	Prefix         string `json:"prefix"`
+	PrefixFolded   string `json:"prefixFolded"`
+	Off            int32  `json:"off"`
+	Lim            int32  `json:"lim"`
+}
+
+// Keyword search over the local catalogue, ranked.
+//
+// This is what /api/anime/search consults BEFORE reaching for AniList. It
+// exists because that endpoint used to be a pure AniList proxy, and AniList
+// does not index Chinese titles: measured on production, 進擊的巨人 and
+// 鬼滅之刃 both returned zero results while anime_cache held those exact
+// strings in title_hant. Chinese queries that did work only worked when
+// AniList happened to carry the string as a synonym, which is why the failures
+// looked random -- 葬送的芙莉蓮 found the row and 葬送的芙莉莲 did not.
+//
+// Returns ids, not rows. The caller re-reads through GetAnimeByAnilistIDs so
+// there is exactly one definition of the response row shape, and then restores
+// this ordering (that query sorts by average_score, which would discard the
+// ranking below).
+//
+// Every predicate is `ILIKE '%needle%'` against a gin_trgm_ops index (0002 for
+// four columns, 0027 for title_hant). The caller escapes %, _ and \ before
+// building the patterns -- unescaped, a search for "50%" would match every row.
+//
+// Ranking is three tiers, then popularity, then id:
+//
+//	0  an entire title equals the query      進擊的巨人 -> 進擊的巨人
+//	1  a title starts with it                進擊的巨人 -> 進擊的巨人 3
+//	2  a title merely contains it            巨人       -> 進擊的巨人
+//
+// Without the tiers, average_score alone puts a high-scoring sequel above the
+// exact title the reader typed -- searching 进击的巨人 answers with 第三季
+// Part.2 first, which is the behaviour the AniList path already has and not
+// one worth reproducing. anilist_id last so the order is total: without it a
+// LIMIT slices an arbitrary heap order out of a tie group and the page a
+// reader sees drifts with vacuum.
+func (q *Queries) SearchAnimeCacheLocal(ctx context.Context, arg SearchAnimeCacheLocalParams) ([]int32, error) {
+	rows, err := q.db.Query(ctx, searchAnimeCacheLocal,
+		arg.Contains,
+		arg.ContainsFolded,
+		arg.Exact,
+		arg.ExactFolded,
+		arg.Prefix,
+		arg.PrefixFolded,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var anilist_id int32
+		if err := rows.Scan(&anilist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, anilist_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateAnimeCharacterCN = `-- name: UpdateAnimeCharacterCN :exec

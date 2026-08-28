@@ -71,6 +71,20 @@ type SearchService struct {
 	cache    *cache.Cache[SearchPage]
 	db       dbgen.Querier
 	enqueuer queue.Enqueuer
+	folder   KeywordFolder
+}
+
+// KeywordFolder rewrites a search keyword into the other Chinese script.
+//
+// *hant.Converter satisfies it with the vendored OpenCC s2twp table. Narrowed
+// to the one method at the consumer rather than taking *hant.Converter
+// directly, so this package does not depend on the dataset loader and a test
+// can fold with three lines instead of a megabyte of vendored data.
+//
+// May be nil. A server that cannot load the table still searches — it just
+// searches the way it did before folding existed.
+type KeywordFolder interface {
+	Convert(string) string
 }
 
 // SearchPage is the cache-value shape: AniList page info + the post-
@@ -93,7 +107,19 @@ type SearchPage struct {
 // (the constructor swaps in a queue.NoopEnqueuer so the rest of the
 // pipeline stays nil-safe).  Tests that don't care about enqueue can
 // pass queue.NoopEnqueuer{} or nil interchangeably.
-func NewSearchService(client AniListSearcher, db dbgen.Querier, enq queue.Enqueuer) (*SearchService, error) {
+//
+// folder folds a Simplified keyword to Traditional; nil disables folding and
+// leaves search exactly as it behaved before. It is a constructor parameter
+// rather than a setter on purpose: a setter can be forgotten, and forgetting
+// it would silently return the catalogue to the state where a Simplified
+// reader cannot find 1,262 of its rows — a failure with no error and no log
+// line, which is the kind this codebase has been bitten by before.
+func NewSearchService(
+	client AniListSearcher,
+	db dbgen.Querier,
+	enq queue.Enqueuer,
+	folder KeywordFolder,
+) (*SearchService, error) {
 	if enq == nil {
 		enq = queue.NoopEnqueuer{}
 	}
@@ -101,7 +127,7 @@ func NewSearchService(client AniListSearcher, db dbgen.Querier, enq queue.Enqueu
 	if err != nil {
 		return nil, fmt.Errorf("anime/search: build cache: %w", err)
 	}
-	return &SearchService{anilist: client, cache: c, db: db, enqueuer: enq}, nil
+	return &SearchService{anilist: client, cache: c, db: db, enqueuer: enq, folder: folder}, nil
 }
 
 // Close releases the underlying ristretto cache.  Safe to call multiple
@@ -211,6 +237,42 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 		return &hit, nil
 	}
 
+	// Local catalogue first.
+	//
+	// This endpoint was a pure AniList proxy, and AniList does not index
+	// Chinese titles. Measured on production before this changed: 進擊的巨人
+	// and 鬼滅之刃 both returned zero results, while anime_cache held those
+	// exact strings in title_hant. The Chinese queries that did work only
+	// worked when AniList happened to carry the string as a synonym, which is
+	// why the failures looked arbitrary — 葬送的芙莉蓮 found the row and
+	// 葬送的芙莉莲 did not, and 进击的巨人 found one row where the Japanese
+	// spelling found twenty. 11,149 rows carry a Simplified title and 12,354 a
+	// Traditional one; none of it was reachable.
+	//
+	// Going local-first also takes most search traffic off AniList, which is
+	// its own benefit: a burst of uncached queries could exhaust the per-IP
+	// budget and surface as "AniList rate limited" to the reader.
+	//
+	// Only for keyword search. A genre filter stays on AniList because the
+	// local query has no genre predicate — the genres live in a side table
+	// and joining them is a separate change, not a detail of this one.
+	if q != "" && genre == "" {
+		local, lErr := s.runLocal(ctx, q, page, perPage)
+		if lErr != nil {
+			// Never fatal. The AniList path below is a complete answer on its
+			// own, so a local failure costs Chinese matching for this one
+			// request rather than the request itself.
+			slog.WarnContext(ctx, "anime/search: local search failed, falling back to AniList",
+				"err", lErr, "q", q)
+		} else if local != nil {
+			s.cache.Set(key, *local)
+			return local, nil
+		}
+		// local == nil means the catalogue has nothing for this keyword — a
+		// title we have not ingested yet. Fall through: AniList answers, the
+		// upsert below files the row, and the next search for it is local.
+	}
+
 	// Build SearchVars with pointer fields so omitempty drops nil
 	// entries from the JSON body — AniList expects `undefined`, not
 	// the empty string.
@@ -291,22 +353,137 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 	return &sp, nil
 }
 
+// runLocal answers a keyword search from anime_cache alone.
+//
+// Returns (nil, nil) — not an error — when the catalogue holds nothing for the
+// keyword. That is the signal for run() to fall through to AniList, and it is
+// deliberately distinguished from a query failure: "we do not have this anime"
+// and "the database is unwell" want opposite responses.
+//
+// A page past the end of the results still returns a page rather than nil.
+// Once the total is non-zero the local catalogue owns the answer, and an empty
+// page 9 of a 3-page result is correct pagination; falling through there would
+// hand the reader AniList's page 9 of something else entirely.
+func (s *SearchService) runLocal(ctx context.Context, q string, page, perPage int) (*SearchPage, error) {
+	contains, prefix, exact := likePatterns(q)
+	// The same three, built from the keyword folded to Traditional. When there
+	// is nothing to fold these are byte-identical to the three above, and the
+	// query's extra predicate collapses into a duplicate rather than into a
+	// branch.
+	folded := q
+	if s.folder != nil {
+		folded = s.folder.Convert(q)
+	}
+	containsF, prefixF, exactF := likePatterns(folded)
+
+	total, err := s.db.CountAnimeCacheLocal(ctx, contains, containsF)
+	if err != nil {
+		return nil, fmt.Errorf("count local: %w", err)
+	}
+	if total == 0 {
+		return nil, nil
+	}
+
+	ids, err := s.db.SearchAnimeCacheLocal(ctx, dbgen.SearchAnimeCacheLocalParams{
+		Contains:       contains,
+		ContainsFolded: containsF,
+		Exact:          exact,
+		ExactFolded:    exactF,
+		Prefix:         prefix,
+		PrefixFolded:   prefixF,
+		Off:            int32((page - 1) * perPage),
+		Lim:            int32(perPage),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search local: %w", err)
+	}
+
+	// Re-read through the same query the AniList path uses, so both produce
+	// the identical row shape and the response envelope has one definition
+	// rather than two that can drift.
+	rows := []dbgen.GetAnimeByAnilistIDsRow{}
+	if len(ids) > 0 {
+		rows, err = s.db.GetAnimeByAnilistIDs(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("read local rows: %w", err)
+		}
+		// That query sorts by average_score, which would throw away the
+		// ranking. Put the rows back in the order the search decided.
+		rows = reorderByIDs(rows, ids)
+	}
+
+	lastPage := 0
+	if perPage > 0 {
+		lastPage = int((total + int64(perPage) - 1) / int64(perPage))
+	}
+	return &SearchPage{
+		PageInfo: anilist.PageInfo{
+			Total:       int(total),
+			CurrentPage: page,
+			PerPage:     perPage,
+			LastPage:    lastPage,
+			HasNextPage: page < lastPage,
+		},
+		Anime: rows,
+	}, nil
+}
+
+// reorderByIDs returns rows in the order given by ids.
+//
+// Rows whose id is not in the list are dropped, and ids with no row are
+// skipped — neither can happen when the caller passes ids it just read from
+// the same table, but neither may silently duplicate or lose a row if it ever
+// does.
+func reorderByIDs(rows []dbgen.GetAnimeByAnilistIDsRow, ids []int32) []dbgen.GetAnimeByAnilistIDsRow {
+	byID := make(map[int32]dbgen.GetAnimeByAnilistIDsRow, len(rows))
+	for _, r := range rows {
+		byID[r.AnilistID] = r
+	}
+	out := make([]dbgen.GetAnimeByAnilistIDsRow, 0, len(ids))
+	for _, id := range ids {
+		if r, ok := byID[id]; ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// likePatterns turns a raw user keyword into the three arguments
+// SearchAnimeCacheLocal takes: a contains pattern, a prefix pattern, and a
+// lowercased exact form.
+//
+// The escaping is the point. `%` and `_` are ILIKE wildcards and `\` is the
+// default escape character, so a reader searching for "100%" would otherwise
+// match every row in the table, and "_" would match every one-character title.
+// Escape the backslash FIRST — doing it after would go on to escape the
+// backslashes this function just added.
+//
+// The exact form is lowercased in Go and compared against SQL lower(). For the
+// scripts this serves — CJK has no case, and titles are otherwise ASCII — the
+// two agree. They can disagree on locale-sensitive pairs (Turkish dotless i);
+// the cost there is that an exact match ranks as a prefix match, which is a
+// mis-ordering rather than a miss.
+func likePatterns(q string) (contains, prefix, exact string) {
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
+	return "%" + escaped + "%", escaped + "%", strings.ToLower(q)
+}
+
 // writeError maps run() errors to the appropriate httpx envelope.
 //
 //   - context.DeadlineExceeded   → 504 GATEWAY_TIMEOUT mapped to
-//                                  SERVER_ERROR (httpx has no timeout
-//                                  code; preserve status for ops).
+//     SERVER_ERROR (httpx has no timeout
+//     code; preserve status for ops).
 //   - *anilist.ErrUpstream       → 502 BAD_GATEWAY mapped to
-//                                  SERVER_ERROR (Express returns 500;
-//                                  502 is more accurate and frontend
-//                                  treats both as "AniList unreachable").
+//     SERVER_ERROR (Express returns 500;
+//     502 is more accurate and frontend
+//     treats both as "AniList unreachable").
 //   - anilist.ErrRateLimited     → 503 SERVER_ERROR — AniList per-IP
-//                                  budget exhausted / breaker open.
-//                                  503 (not 502) because the condition
-//                                  is transient and clears after the
-//                                  breaker cooldown; the distinct
-//                                  status separates throttling storms
-//                                  from hard upstream failures in logs.
+//     budget exhausted / breaker open.
+//     503 (not 502) because the condition
+//     is transient and clears after the
+//     breaker cooldown; the distinct
+//     status separates throttling storms
+//     from hard upstream failures in logs.
 //   - any other error            → 500 SERVER_ERROR.
 func (s *SearchService) writeError(w http.ResponseWriter, err error) {
 	switch {

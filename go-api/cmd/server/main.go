@@ -49,6 +49,7 @@ import (
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/deepseek"
 	"github.com/lawrenceli0228/animego/go-api/internal/email"
+	"github.com/lawrenceli0228/animego/go-api/internal/hant"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
@@ -282,7 +283,39 @@ func main() {
 		slog.Info("warm_season boot enqueued", "current", curSeason, "next", nextSeason, "year", curYear)
 	}()
 
-	searchSvc, err := anime.NewSearchService(anilistClient, q, enqueuer)
+	// Simplified→Traditional folding for search keywords.
+	//
+	// 1,262 catalogue rows carry a Traditional title and no Simplified one —
+	// Bangumi enrichment is where a Simplified title comes from, and those rows
+	// have 9.4% bgm_id coverage against 70.8% for the catalogue, so there was
+	// no subject to read one from. A reader typing 进击的巨人 could not reach
+	// 進擊的巨人.
+	//
+	// Measured, not assumed: over the 5,160 rows holding both a Simplified
+	// title and an authoritative Traditional one, folding lifts the match rate
+	// from 7.4% to 40.7%. The rest is Taiwan and the mainland publishing an
+	// anime under genuinely different names (海賊王 / 航海王), which no
+	// character table can bridge.
+	//
+	// Folding closes what it can close without writing anything: the
+	// stored titles, and therefore every SEO surface, are untouched. Backfilling
+	// a converted title into title_chinese would NOT have that property —
+	// migration 0022 built title_hant_seo precisely to keep machine-converted
+	// text out of search results, and title_chinese has no such gate because it
+	// IS what page titles and JSON-LD read.
+	//
+	// A failure here is a warning, not a boot failure. Search without folding
+	// is what shipped yesterday; refusing to start over a missing dataset would
+	// trade a degraded feature for an outage.
+	var keywordFolder anime.KeywordFolder
+	if conv, cErr := hant.NewConverterFromDir(hant.DataDirFromEnv()); cErr != nil {
+		slog.Warn("search: OpenCC table unavailable, Simplified↔Traditional folding disabled",
+			"dir", hant.DataDirFromEnv(), "err", cErr)
+	} else {
+		keywordFolder = conv
+	}
+
+	searchSvc, err := anime.NewSearchService(anilistClient, q, enqueuer, keywordFolder)
 	if err != nil {
 		slog.Error("search service init failed", "err", err)
 		os.Exit(1)

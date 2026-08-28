@@ -1,0 +1,47 @@
+-- Bring title_hant into the set of columns keyword search can match.
+--
+-- 0002 built one GIN trigram index per title column -- romaji, english,
+-- native, chinese -- and 0022 later added title_hant without one, because at
+-- the time nothing searched it. 0022 said so in as many words, and named the
+-- exact symptom this migration exists to remove:
+--
+--   "Simplified/Traditional folding in search is still not done.  A reader who
+--    types 進擊的巨人 will not match the title_chinese trigram index [...]
+--    That is a search change, not a locale change, and it is out of scope
+--    here."
+--
+-- This is that search change. Measured on production before writing it:
+-- /api/anime/search returns 0 results for 進擊的巨人 and for 鬼滅之刃, while
+-- anime_cache holds both strings verbatim in title_hant (anilist_id 16498 and
+-- 101922). 12,354 of 17,689 rows have a title_hant.
+--
+-- Why a plain CREATE INDEX rather than CONCURRENTLY, which is the usual advice
+-- for a live table: this one was timed against the production table inside a
+-- rolled-back transaction, and the build takes 270ms for a 3.2MB index. That is
+-- how long writes to anime_cache wait. CONCURRENTLY cannot run inside a
+-- transaction block, and golang-migrate hands a multi-statement file to
+-- PostgreSQL as one implicit transaction -- so reaching for it here would trade
+-- 270ms of lock for a migration that can fail the deploy outright. The four
+-- sibling indexes in 0002 are plain for the same reason.
+--
+-- gin_trgm_ops, matching its four siblings, because the queries are
+-- `title_hant ILIKE '%needle%'` -- a substring match with a leading wildcard,
+-- which a B-tree cannot serve at all. Trigrams are per-character, so this works
+-- for CJK: a two-character query still yields padded trigrams. A one-character
+-- query may not, and falls back to a sequential scan over 17k rows, which is
+-- acceptable and is why no separate guard exists for it.
+--
+-- What this does NOT do: fold Simplified to Traditional. Searching both columns
+-- covers a row that stores both forms, which is nearly all of them -- only 57
+-- rows have title_chinese without title_hant, and 1,262 have title_hant without
+-- title_chinese. Those 1,319 rows still answer only to the script they are
+-- stored in. Closing that needs a character mapping (OpenCC-style) applied to
+-- the query, which is its own change; see TODOS.md.
+--
+-- search_vec (0001:57) is deliberately left alone. It is GENERATED over the
+-- four original title columns, widening it on PostgreSQL 16 means dropping and
+-- re-adding the column plus rebuilding its GIN index, and it still has no
+-- application consumer -- 0022 checked, and so did this change. A table rewrite
+-- to serve nothing is not worth it.
+CREATE INDEX anime_cache_title_hant_trgm_idx
+    ON anime_cache USING gin (title_hant gin_trgm_ops);
