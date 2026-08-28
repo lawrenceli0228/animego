@@ -1414,18 +1414,53 @@ WHERE title_romaji  ILIKE sqlc.arg(contains)::text
    OR title_native  ILIKE sqlc.arg(contains)::text
    OR title_chinese ILIKE sqlc.arg(contains)::text
    OR title_hant    ILIKE sqlc.arg(contains)::text
+   -- The folded keyword, and only against the Traditional column.
+   --
+   -- The caller runs an incoming Simplified keyword through the vendored
+   -- OpenCC s2twp table, so this pattern is Traditional text. Traditional text
+   -- can only match a Traditional column, which is why this is one predicate
+   -- rather than a second copy of the five above -- those would be five index
+   -- scans that structurally cannot return a row.
+   --
+   -- It reaches the 1,262 rows that have a title_hant and no title_chinese: a
+   -- Simplified reader typing 进击的巨人 could not find 進擊的巨人 before, and
+   -- that is not a long tail (315 of them are TV, and they include some of the
+   -- best-known franchises in the catalogue). Their cause is upstream -- 9.4%
+   -- bgm_id coverage against 70.8% for the catalogue, so Bangumi enrichment
+   -- had no subject to read a Simplified title from.
+   --
+   -- How much it actually buys, measured rather than assumed. Over the 5,160
+   -- rows carrying BOTH a Simplified title and an AUTHORITATIVE Traditional one
+   -- (title_hant_source <> 'opencc'), folding the Simplified title yields a
+   -- substring of the stored Traditional title -- exactly the test this
+   -- predicate performs -- for 40.7% of them. Without folding it is 7.4%. So
+   -- roughly five and a half times the reach, not "solved".
+   --
+   -- The remaining 59% is NOT a conversion problem, and no table can fix it:
+   -- Taiwan and the mainland often publish an anime under different names.
+   -- 2,237 of the misses differ in LENGTH from the stored title, i.e. they are
+   -- a different translation outright -- 海賊王 against 航海王, 三眼小子
+   -- against 三眼神童, 鋼鐵奇兵 against 金屬對決. Reaching those needs an alias
+   -- table, which is a different project.
+   --
+   -- When the keyword has nothing to convert, the caller passes the SAME
+   -- pattern it passed above, so this collapses into a duplicate the planner
+   -- already dedupes rather than into a branch either side has to remember.
+   OR title_hant    ILIKE sqlc.arg(contains_folded)::text
 ORDER BY
     CASE
         WHEN lower(title_romaji)  = sqlc.arg(exact)::text
           OR lower(title_english) = sqlc.arg(exact)::text
           OR lower(title_native)  = sqlc.arg(exact)::text
           OR lower(title_chinese) = sqlc.arg(exact)::text
-          OR lower(title_hant)    = sqlc.arg(exact)::text THEN 0
+          OR lower(title_hant)    = sqlc.arg(exact)::text
+          OR lower(title_hant)    = sqlc.arg(exact_folded)::text THEN 0
         WHEN title_romaji  ILIKE sqlc.arg(prefix)::text
           OR title_english ILIKE sqlc.arg(prefix)::text
           OR title_native  ILIKE sqlc.arg(prefix)::text
           OR title_chinese ILIKE sqlc.arg(prefix)::text
-          OR title_hant    ILIKE sqlc.arg(prefix)::text THEN 1
+          OR title_hant    ILIKE sqlc.arg(prefix)::text
+          OR title_hant    ILIKE sqlc.arg(prefix_folded)::text THEN 1
         ELSE 2
     END,
     average_score DESC NULLS LAST,
@@ -1447,4 +1482,5 @@ WHERE title_romaji  ILIKE sqlc.arg(contains)::text
    OR title_english ILIKE sqlc.arg(contains)::text
    OR title_native  ILIKE sqlc.arg(contains)::text
    OR title_chinese ILIKE sqlc.arg(contains)::text
-   OR title_hant    ILIKE sqlc.arg(contains)::text;
+   OR title_hant    ILIKE sqlc.arg(contains)::text
+   OR title_hant    ILIKE sqlc.arg(contains_folded)::text;

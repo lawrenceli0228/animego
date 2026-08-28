@@ -84,6 +84,8 @@ type searchFakeQuerier struct {
 	gotReadIDs     []int32
 	enqueueLookups int
 	localArgs      []string
+	foldedArgs     []string
+	searchParams   []dbgen.SearchAnimeCacheLocalParams
 	localCalls     int
 }
 
@@ -101,10 +103,11 @@ func (f *searchFakeQuerier) UpsertAnimeCache(ctx context.Context, arg dbgen.Upse
 // CountAnimeCacheLocal is the gate run() consults before AniList. Returning 0
 // by default is what keeps the pre-existing tests meaningful: they assert
 // AniList behaviour, and a non-empty local catalogue would short-circuit them.
-func (f *searchFakeQuerier) CountAnimeCacheLocal(ctx context.Context, contains string) (int64, error) {
+func (f *searchFakeQuerier) CountAnimeCacheLocal(ctx context.Context, contains, containsFolded string) (int64, error) {
 	f.mu.Lock()
 	f.localCalls++
 	f.localArgs = append(f.localArgs, contains)
+	f.foldedArgs = append(f.foldedArgs, containsFolded)
 	f.mu.Unlock()
 	if f.countLocalFn == nil {
 		return 0, nil
@@ -112,11 +115,14 @@ func (f *searchFakeQuerier) CountAnimeCacheLocal(ctx context.Context, contains s
 	return f.countLocalFn(ctx, contains)
 }
 
-func (f *searchFakeQuerier) SearchAnimeCacheLocal(ctx context.Context, contains, exact, prefix string, off, lim int32) ([]int32, error) {
+func (f *searchFakeQuerier) SearchAnimeCacheLocal(ctx context.Context, arg dbgen.SearchAnimeCacheLocalParams) ([]int32, error) {
+	f.mu.Lock()
+	f.searchParams = append(f.searchParams, arg)
+	f.mu.Unlock()
 	if f.searchLocalFn == nil {
 		return nil, nil
 	}
-	return f.searchLocalFn(ctx, contains, exact, prefix, off, lim)
+	return f.searchLocalFn(ctx, arg.Contains, arg.Exact, arg.Prefix, arg.Off, arg.Lim)
 }
 
 func (f *searchFakeQuerier) GetAnimeByAnilistIDs(ctx context.Context, ids []int32) ([]dbgen.GetAnimeByAnilistIDsRow, error) {
@@ -252,7 +258,10 @@ func (e *searchFakeEnqueuer) snapshotCalls() [][]int32 {
 // background goroutines don't leak between parallel tests.
 func newSearchService(t *testing.T, fs *fakeSearcher, fq *searchFakeQuerier, fe queue.Enqueuer) *SearchService {
 	t.Helper()
-	s, err := NewSearchService(fs, fq, fe)
+	// nil folder: every test written before folding existed asserts behaviour
+	// that must not change when the keyword is passed through unaltered.
+	// TestSearchLocal_FoldsSimplifiedToTraditional builds its own with one.
+	s, err := NewSearchService(fs, fq, fe, nil)
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	return s
@@ -1346,4 +1355,112 @@ func TestSearchLocal_PassesTheEscapedPatternToTheQuery(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotEmpty(t, fq.localArgs)
 	assert.Equal(t, `%100\%%`, fq.localArgs[0], "the user's %% must reach SQL escaped")
+}
+
+// -----------------------------------------------------------------------------
+// Simplified → Traditional keyword folding.
+//
+// 1,262 catalogue rows carry a title_hant and no title_chinese, so a reader
+// typing 进击的巨人 could not reach 進擊的巨人. Folding the KEYWORD closes that
+// without writing anything: stored titles, and therefore every SEO surface,
+// stay untouched. (Backfilling a converted title into title_chinese would not
+// have that property — migration 0022 built title_hant_seo specifically to keep
+// machine-converted text out of search results, and title_chinese has no such
+// gate because it IS what page titles and JSON-LD read.)
+// -----------------------------------------------------------------------------
+
+// fakeFolder is a three-line stand-in for the vendored OpenCC table. The real
+// table's output is pinned in internal/hant, against real catalogue titles;
+// here the question is only whether the folded string reaches the query.
+type fakeFolder struct{ from, to string }
+
+func (f fakeFolder) Convert(s string) string {
+	return strings.ReplaceAll(s, f.from, f.to)
+}
+
+func newFoldingSearchService(t *testing.T, fq *searchFakeQuerier, folder KeywordFolder) *SearchService {
+	t.Helper()
+	s, err := NewSearchService(&fakeSearcher{}, fq, nil, folder)
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+	return s
+}
+
+func TestSearchLocal_FoldsSimplifiedToTraditional(t *testing.T) {
+	t.Parallel()
+
+	fq := localHitQuerier(16498)
+	svc := newFoldingSearchService(t, fq, fakeFolder{from: "进击", to: "進擊"})
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/anime/search?q=%E8%BF%9B%E5%87%BB%E7%9A%84%E5%B7%A8%E4%BA%BA", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotEmpty(t, fq.searchParams)
+	p := fq.searchParams[0]
+
+	assert.Equal(t, "%进击的巨人%", p.Contains, "the keyword as typed still has to match")
+	assert.Equal(t, "%進擊的巨人%", p.ContainsFolded, "the folded keyword must reach the query")
+	assert.Equal(t, "進擊的巨人", p.ExactFolded, "ranking needs the folded exact form too")
+	assert.Equal(t, "進擊的巨人%", p.PrefixFolded)
+}
+
+func TestSearchLocal_FoldedPatternAlsoReachesTheCount(t *testing.T) {
+	t.Parallel()
+
+	// The count and the page must agree on what matches. If only the page
+	// folded, the last page of a Traditional-only result set would come back
+	// short — or a result set would report total=0 and fall through to AniList
+	// while the page query could have answered it.
+	fq := localHitQuerier(16498)
+	svc := newFoldingSearchService(t, fq, fakeFolder{from: "进击", to: "進擊"})
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/anime/search?q=%E8%BF%9B%E5%87%BB", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotEmpty(t, fq.foldedArgs)
+	assert.Equal(t, "%進擊%", fq.foldedArgs[0], "the count query must see the folded pattern too")
+}
+
+func TestSearchLocal_NilFolderPassesTheKeywordThrough(t *testing.T) {
+	t.Parallel()
+
+	// The degraded posture: a server that could not load the OpenCC table.
+	// Search must still work, and the folded arguments must be the unfolded
+	// ones so the extra SQL predicate collapses into a duplicate rather than
+	// matching nothing.
+	fq := localHitQuerier(16498)
+	svc := newFoldingSearchService(t, fq, nil)
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=naruto", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotEmpty(t, fq.searchParams)
+	p := fq.searchParams[0]
+	assert.Equal(t, p.Contains, p.ContainsFolded)
+	assert.Equal(t, p.Exact, p.ExactFolded)
+	assert.Equal(t, p.Prefix, p.PrefixFolded)
+}
+
+func TestSearchLocal_FoldedPatternIsEscapedToo(t *testing.T) {
+	t.Parallel()
+
+	// The folded string goes through likePatterns like any other, so a
+	// wildcard in the keyword cannot sneak in via the folded copy. A folder
+	// that passes % through unchanged is the realistic case — OpenCC does not
+	// touch ASCII.
+	fq := localHitQuerier(16498)
+	svc := newFoldingSearchService(t, fq, fakeFolder{from: "进", to: "進"})
+
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/anime/search?q=100%25", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotEmpty(t, fq.searchParams)
+	assert.Equal(t, `%100\%%`, fq.searchParams[0].ContainsFolded,
+		"an unescaped folded pattern would match every row just as an unescaped raw one would")
 }
