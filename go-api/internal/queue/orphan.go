@@ -39,11 +39,24 @@ type OrphanReader interface {
 // batches of 100, enqueues V1 jobs for each batch, and returns the
 // total count enqueued.
 //
-// Safe to call multiple times: river has no built-in arg-hash dedupe,
-// so a duplicate V1 job may run twice — but the V1 worker itself is
-// effectively idempotent (it only writes when there is a new exact
-// match), so cost of duplication is one extra Bangumi API call.  Worth
-// it for the simplicity of "scan on every boot".
+// Safe to call multiple times: river has no built-in arg-hash dedupe and
+// BangumiV1Args sets no UniqueOpts, so a duplicate V1 job may run twice.
+// What makes that safe is the `AND bangumi_version = 0` predicate on
+// UpdateBangumiV1 — a duplicate that arrives after the row moved on writes
+// 0 rows and the worker logs `stale_skip`.  Cost of duplication is one
+// extra Bangumi API call.
+//
+// It is NOT "the worker only writes when there is a new exact match": the
+// id-map branch (bangumi_v1.go) does no search at all and writes
+// unconditionally, and it passes nil for title_chinese.  Without the
+// version predicate a stale duplicate would null out a Chinese title.
+// The predicate is the guarantee; do not remove it on the strength of
+// this comment's older claim.
+//
+// Window size matters here: river's MaxAttempts defaults to 25 (not 3, as
+// the bangumi_v{1,2,3} headers claim) and this repo sets no override, so a
+// failing job can stay live for well over a week.  "Stale" is not a
+// millisecond race.
 //
 // Logs an INFO event with the total enqueued count when the scan
 // completes successfully so operators can correlate boot time with the

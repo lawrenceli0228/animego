@@ -75,6 +75,7 @@ const zh = {
   nav: {
     home: '首页', season: '季度', search: '搜索',
     login: '登录', register: '注册', logout: '登出',
+    logoutFailed: '登出未完成，请重试',
     myList: '我的追番', hi: 'Hi', library: '我的库', about: '关于',
     // Language menu: the group heading + the account menu's own label.
     language: '语言', accountMenu: '账户菜单', mainNavigation: '主导航',

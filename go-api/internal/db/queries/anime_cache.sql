@@ -490,7 +490,7 @@ UPDATE anime_cache
 SET title_chinese = NULL, bgm_id = NULL, bangumi_version = 2
 WHERE anilist_id = $1 AND bangumi_version = 0;
 
--- name: UpdateBangumiV1 :exec
+-- name: UpdateBangumiV1 :execrows
 -- Phase 1 result write — set bgm_id + title_chinese (the latter only
 -- when the Bangumi search produced an exact native match with a
 -- non-empty name_cn).  bangumi_version=1 marks ready for Phase 2.
@@ -499,13 +499,36 @@ WHERE anilist_id = $1 AND bangumi_version = 0;
 -- (keeps the column NULL).  bgm_id is also *int because Bangumi search
 -- may legitimately return no hits at all → caller sets bangumi_version
 -- via a separate path or leaves it 0.
+--
+-- ── WHY `AND bangumi_version = 0` (and why :execrows) ──
+-- river has no built-in arg-hash dedupe, and ScanAndEnqueueOrphans runs
+-- both at boot and on a periodic job, so the same anilist_id can sit in
+-- the queue twice.  A V1 job enqueued while the row was still v0 can
+-- therefore execute AFTER another worker (or an admin action) already
+-- advanced that row to v1/v2/v3.  Without the version predicate that
+-- stale job silently overwrites bgm_id, title_chinese and
+-- bgm_match_source, and resets bangumi_version to 1 — including on rows
+-- a human corrected by hand.  orphan.go's "the V1 worker itself is
+-- effectively idempotent" is not true without this predicate.
+--
+-- Safe for every caller: all six EnqueueV1Many call sites target rows at
+-- version 0.  The admin single-row path is not an exception — it runs
+-- ResetAnimeEnrichment (admin.sql), whose first SET is bangumi_version=0,
+-- BEFORE enqueuing.  So there is no legitimate "upgrade an already-bound
+-- row" path for this predicate to block; the way to re-bind is to reset
+-- first, which is exactly what the admin endpoint already does.
+--
+-- :execrows rather than :exec so the worker can tell "wrote it" from
+-- "a stale job was rejected" and log the latter.  A guard that fires
+-- silently would reproduce the very failure mode it exists to stop:
+-- nobody notices.
 UPDATE anime_cache
 SET bgm_id           = $2,
     title_chinese    = $3,
     bgm_match_source = $4,
     bangumi_version  = 1,
     updated_at       = now()
-WHERE anilist_id = $1;
+WHERE anilist_id = $1 AND bangumi_version = 0;
 
 -- name: LookupBgmIdMap :one
 -- Authoritative AniList->Bangumi binding from the vendored id map

@@ -442,6 +442,23 @@ func main() {
 	}
 	refreshRateLimit := auth.NewRateLimiter(refreshRateLimitMax, 15*time.Minute)
 	defer refreshRateLimit.Stop()
+	// Logout gets a bucket of its own rather than riding refreshRateLimit.
+	//
+	// The limiter middleware answers 429 BEFORE the handler runs, so a
+	// rate-limited logout writes no Clear-Cookie header at all — the request
+	// that is supposed to end a session instead leaves every cookie in place.
+	// Sharing a bucket with /refresh made that reachable in ordinary use: the
+	// key is the IP alone (auth.clientIP), so on a shared exit address every
+	// tab's refreshes drain the same 120, and the user who then clicks logout
+	// is the one who pays.  A logout must not fail because somebody else on
+	// the same CGNAT address was browsing.
+	//
+	// 60/15m is deliberately generous for what a real client does (one logout
+	// per session) while still bounding the one operation that costs anything:
+	// a logout carrying a validly-signed refresh cookie performs a DB write.
+	// Unsigned requests cost three SetCookie calls and are not worth metering.
+	logoutRateLimit := auth.NewRateLimiter(60, 15*time.Minute)
+	defer logoutRateLimit.Stop()
 
 	// Admin handler bundles — P2.3.
 	//   read:        /api/admin/{stats,enrichment,users}
@@ -785,15 +802,41 @@ func main() {
 	r.Get("/api/avatars/{name}", avatars.ServeAvatar(avatarDir))
 
 	// P2.2 auth: 7 endpoints.  Rate-limiter wraps the public flows
-	// (register/login/refresh + forgot/reset-password); logout + /me
-	// are gated by RequireAuth instead.
+	// (register/login/refresh/logout + forgot/reset-password); /me is
+	// gated by RequireAuth instead.
+	//
+	// logout is NOT behind RequireAuth: gating it on a valid access token
+	// (15m TTL) meant a tab idle past that window got a 401 from the
+	// middleware and the handler never ran — no Clear-Cookie, no DB write,
+	// while the browser kept its 7-day refresh cookie and proxy.ts signed
+	// the user straight back in on the next navigation.  See the Logout
+	// doc comment: it authenticates from the refresh cookie for the DB
+	// write and clears cookies unconditionally.
+	//
+	// It rides its OWN logoutRateLimit (60/15m), not authRateLimit and not
+	// refreshRateLimit.  authRateLimit (10/15m) is one shared bucket across
+	// register/login/forgot/reset, so ten fumbled password attempts would
+	// lock a user out of logging out.  refreshRateLimit (120/15m) is keyed on
+	// IP alone, so on a shared exit address other people's tab refreshes drain
+	// it — and a 429 here is not a delay, it is a logout that silently did not
+	// happen, because the limiter answers before the handler writes any
+	// Clear-Cookie header.
+	//
+	// Residual, stated rather than hidden: the global httpmw API limiter
+	// (1 req/s sustained, burst 60) still sits in front of every /api/ path,
+	// and isPublicReadExempt only exempts GET /api/anime/*, so logout can
+	// still 429 from that layer.  Exempting a POST there would widen a list
+	// that currently admits only cacheable catalog reads, which is not a
+	// trade to make silently.  The client-side fix is what makes this safe:
+	// Navbar checks res.ok and refuses to paint a logged-out bar over cookies
+	// the server did not confirm clearing.
 	r.Route("/api/auth", func(r chi.Router) {
 		r.With(authRateLimit.Middleware()).Post("/register", authHandlers.Register)
 		r.With(authRateLimit.Middleware()).Post("/login", authHandlers.Login)
 		r.With(refreshRateLimit.Middleware()).Post("/refresh", authHandlers.Refresh)
 		r.With(authRateLimit.Middleware()).Post("/forgot-password", authHandlers.ForgotPassword)
 		r.With(authRateLimit.Middleware()).Post("/reset-password/{token}", authHandlers.ResetPassword)
-		r.With(jwtx.RequireAuth(signer)).Post("/logout", authHandlers.Logout)
+		r.With(logoutRateLimit.Middleware()).Post("/logout", authHandlers.Logout)
 		r.With(jwtx.RequireAuth(signer)).Get("/me", authHandlers.Me)
 		r.With(jwtx.RequireAuth(signer)).Patch("/me", authHandlers.UpdateMe)
 	})

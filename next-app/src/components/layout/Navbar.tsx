@@ -9,6 +9,7 @@ import {
   authHrefWithFrom,
   type AuthSurface,
 } from "@/components/auth/authFromLink";
+import toast from "react-hot-toast";
 import { hasAuthHint } from "@/lib/clientAuth";
 import { authChrome } from "@/lib/authChrome";
 import { authFetch } from "@/lib/authFetch";
@@ -315,14 +316,58 @@ export default function Navbar({ season, year }: NavbarProps) {
 
   async function handleLogout() {
     setLoggingOut(true);
+
+    // `cleared` means go-api answered 200, which is the ONLY evidence that the
+    // three auth cookies are gone. They are httpOnly, so this component cannot
+    // clear them itself and cannot check them — a logged-out UI is a claim
+    // about server state, and it has to be earned.
+    //
+    // ── WHY res.ok AND NOT JUST try/catch ──
+    // fetch RESOLVES on 4xx/5xx; only a network-level failure rejects. So a
+    // bare `await fetch(...)` inside try/catch treats every error status as
+    // success. That is not hypothetical here: /api/auth/logout sits behind two
+    // independent per-IP rate limiters (auth.RateLimiter in main.go and the
+    // global httpmw.NewAPIRateLimiter — POST is not covered by the GET-only
+    // catalog exemption), and BOTH answer 429 from middleware, before the
+    // handler runs and therefore before any Clear-Cookie header is written.
+    // Shared-exit-IP networks make that reachable in normal use.
+    //
+    // The previous version of this comment claimed "the route no longer
+    // requires an access token and always clears cookies, so the only
+    // remaining gap is the request not arriving at all." That was wrong, and
+    // wrong in exactly the way the comment it replaced was wrong: it asserted
+    // a guarantee the routing layer does not provide. The handler always
+    // clears cookies; the handler does not always run.
+    //
+    // Getting this wrong reinstates the original bug. The UI would go
+    // logged-out while a 7-day refresh cookie stayed live, and proxy.ts would
+    // spend it on the next navigation — on a shared machine, signing the next
+    // person in as the previous user.
+    let cleared = false;
     try {
-      await fetch("/api/auth/logout", {
+      const res = await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "same-origin",
       });
+      cleared = res.ok;
     } catch {
-      /* swallow — the server still clears the cookies */
+      // Network-level failure: the request may or may not have reached go-api.
+      // Treated as "not cleared" because that is the safe direction — claiming
+      // failure on a logout that actually succeeded costs one confused user
+      // and a 401 on their next action; claiming success on one that did not
+      // costs the session.
+      cleared = false;
     }
+
+    if (!cleared) {
+      // Stay signed in, visibly. Retrying is pointless for a 429 (the window
+      // is 15 minutes) and the client has no way to force the cookies out, so
+      // the honest move is to leave the bar reading as signed-in and say so.
+      toast.error(t("nav.logoutFailed"));
+      setLoggingOut(false);
+      return;
+    }
+
     // go-api also clears the auth_hint cookie; reflect logged-out state now.
     setUser(null);
     // ...and tell every mounted SubscriptionSetProvider to drop the set it

@@ -60,10 +60,13 @@ export default function ResetPasswordForm({ token, dict }: ResetPasswordFormProp
     setLoading(true);
     const result = await submitResetPassword(token, form.password);
     if (result.ok) {
-      // Backend just invalidated user.refreshToken — every existing
-      // session is dead. router.replace + router.refresh sends the
-      // user to /login and re-runs the root layout's session probe
-      // so Navbar drops any stale logged-in state.
+      // Backend just cleared the refresh-token columns, so no session can
+      // renew itself. Other devices holding an unexpired access JWT stay
+      // live until it expires (15m default) — stateless tokens, nothing to
+      // revoke — so this is not the instant global logout it reads like.
+      // router.replace + router.refresh sends THIS browser to /login and
+      // re-runs the root layout's session probe so Navbar drops any stale
+      // logged-in state.
       //
       // Intentionally NOT resetting `loading` here. The form is about
       // to unmount when the transition commits navigation; clearing

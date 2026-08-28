@@ -100,6 +100,9 @@ const zhHant = {
   nav: {
     home: '首頁', season: '季度', search: '搜尋',
     login: '登入', register: '註冊', logout: '登出',
+    // Shown when /api/auth/logout did not answer 200 — the cookies are still
+    // live, so the bar stays signed-in rather than lying about it.
+    logoutFailed: '登出未完成，請重試',
     myList: '我的追番', hi: 'Hi', library: '我的庫', about: '關於',
   },
   // Season labels

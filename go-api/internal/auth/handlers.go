@@ -125,18 +125,42 @@ type AuthDB interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (dbgen.User, error)
 	UpdateUserRefreshToken(ctx context.Context, id uuid.UUID, refreshToken *string) error
 
-	// RotateRefreshToken atomically moves current→previous and writes the
-	// new token.  Called on every NORMAL refresh rotation so the grace
-	// window always holds the immediately-previous value.
-	RotateRefreshToken(ctx context.Context, id uuid.UUID, refreshToken *string) error
+	// ClearRefreshTokenIfMatches is logout's write.  It is a separate query
+	// from UpdateUserRefreshToken(nil) rather than a parameter on it, because
+	// the two have different authority: login OWNS the row and writes
+	// unconditionally, while logout is authenticated only by a signature that
+	// outlives the token it signs, so it may only clear the session it can
+	// still prove it holds.  Returns rows affected; 0 is a normal outcome.
+	ClearRefreshTokenIfMatches(ctx context.Context, id uuid.UUID, presentedToken *string) (int64, error)
+
+	// RotateRefreshToken moves current→previous and writes the new token,
+	// but only when the current token is still expectedToken — a
+	// compare-and-swap.  Returns the row's username and role so the caller
+	// can sign an access token without a separate read.
+	//
+	// pgx.ErrNoRows means the swap matched nothing: the cookie lost a
+	// rotation race, the user logged out, or a password change nulled the
+	// column.  That is NOT an error — the caller re-reads the row once and
+	// falls through to the grace window.  Anything else is a real failure.
+	//
+	// Argument order follows sqlc's generated positional signature
+	// (newToken, id, expectedToken).  The two *string parameters are the
+	// swap hazard: reversing them compiles and passes every stub test,
+	// but the CAS would then match nothing and every refresh would fall to
+	// grace.  Only asserting that the row actually changed catches it —
+	// test/integration/user_session_columns_test.go does, deliberately
+	// including a reversed call so the hazard is stated rather than implied.
+	RotateRefreshToken(ctx context.Context, newToken *string, id uuid.UUID, expectedToken *string) (dbgen.RotateRefreshTokenRow, error)
 
 	// Password-reset write/read trio.  SetResetPasswordToken is called
 	// by ForgotPassword to stage a token + 1h expiry.  GetUserByResetToken
 	// is the atomic "token-valid AND not-expired" lookup used by
-	// ResetPassword.  ResetUserPassword writes the new bcrypt hash and
-	// in one shot clears reset_token + reset_expires + refresh_token
-	// (the last bit kicks every existing session so a stolen refresh
-	// cookie is immediately invalidated).
+	// ResetPassword.  ResetUserPassword writes the new bcrypt hash and in
+	// one shot clears reset_token + reset_expires + all three refresh-session
+	// columns, so a stolen refresh cookie stops working — including the grace
+	// slot, which an earlier version left loaded and therefore honored for 30 s
+	// past the reset.  It does NOT reach access tokens: a JWT already issued
+	// stays valid until accessTTL expires (15m default).
 	SetResetPasswordToken(ctx context.Context, id uuid.UUID, resetPasswordToken *string, resetPasswordExpires pgtype.Timestamptz) error
 	GetUserByResetToken(ctx context.Context, resetPasswordToken *string) (dbgen.User, error)
 	ResetUserPassword(ctx context.Context, id uuid.UUID, password string) error
@@ -420,6 +444,48 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// NORMAL path: try to rotate straight away.  The CAS predicate inside
+	// RotateRefreshToken is what checks "the cookie is still the current
+	// token", so there is nothing to pre-read — RETURNING hands back the
+	// username and role SignAccess needs.  Happy path is one statement.
+	newRefresh, err := h.signer.SignRefresh(claims.UserID)
+	if err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "sign token failed"))
+		return
+	}
+
+	rotated, err := h.db.RotateRefreshToken(ctx, &newRefresh, claims.UserID, &cookieToken)
+	switch {
+	case err == nil:
+		accessToken, sErr := h.signer.SignAccess(claims.UserID, rotated.Username, rotated.Role)
+		if sErr != nil {
+			httpx.Fail(w, httpx.WrapError(sErr, http.StatusInternalServerError, codeServerError, "sign token failed"))
+			return
+		}
+		SetRefreshCookie(w, newRefresh, h.refreshTTL, h.isProd)
+		SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
+		SetAuthHintCookie(w, h.refreshTTL, h.isProd)
+		httpx.Data(w, http.StatusOK, RefreshData{AccessToken: accessToken})
+		return
+
+	case !errors.Is(err, pgx.ErrNoRows):
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "persist refresh token failed"))
+		return
+	}
+
+	// CAS matched nothing.  Three things look identical from here — the
+	// cookie lost a rotation race, the user logged out, or a password
+	// change nulled the column — and all three are answered by the same
+	// question: does the grace slot still recognise this cookie?
+	//
+	// The row MUST be re-read.  Whatever state we might have loaded before
+	// the CAS is by definition stale (something changed the row between the
+	// read and the write, which is why the CAS missed), and judging the
+	// grace window on stale token columns is the same class of bug the CAS
+	// exists to remove.  Re-read exactly once: /refresh shares one rate
+	// bucket for all SSR traffic, so a retry loop here is self-inflicted
+	// load, and a second miss means the row is moving faster than a 401
+	// costs to recover from.
 	user, err := h.db.GetUserByID(ctx, claims.UserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -429,25 +495,6 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "user lookup failed"))
 		return
 	}
-	// NORMAL path: cookie matches the current DB token.
-	if user.RefreshToken != nil && *user.RefreshToken == cookieToken {
-		accessToken, refreshToken, err := h.issueTokens(user)
-		if err != nil {
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "sign token failed"))
-			return
-		}
-
-		if err := h.db.RotateRefreshToken(ctx, user.ID, &refreshToken); err != nil {
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, codeServerError, "persist refresh token failed"))
-			return
-		}
-
-		SetRefreshCookie(w, refreshToken, h.refreshTTL, h.isProd)
-		SetSessionCookie(w, accessToken, h.accessTTL, h.isProd)
-		SetAuthHintCookie(w, h.refreshTTL, h.isProd)
-		httpx.Data(w, http.StatusOK, RefreshData{AccessToken: accessToken})
-		return
-	}
 
 	// GRACE path: cookie matches the previous token and is still within
 	// the 30 s grace window.  Issue a new access token; re-set the
@@ -455,7 +502,23 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Do NOT call RotateRefreshToken — re-rotating here would overwrite
 	// the previous slot with the token the client just sent, which is
 	// already stale on the other concurrent request.
-	if user.PreviousRefreshToken != nil &&
+	// user.RefreshToken != nil guards the dereference ~15 lines below, where
+	// the current token is written back into the cookie.  "previous matches,
+	// current is NULL" used to be a state the DB really produced:
+	// ResetUserPassword and AdminSetUserPassword nulled refresh_token while
+	// leaving previous_refresh_token and refresh_rotated_at loaded, and
+	// reaching the grace body in that state panicked into a 500 via the
+	// Recoverer for up to 30 s after any password change.
+	//
+	// Those statements now clear all three columns, so no write path produces
+	// the combination any more and this conjunct should be unreachable.  It
+	// stays deliberately.  "Unreachable" here is a property of four SQL
+	// statements agreeing with each other, not of anything the type system
+	// enforces, and the cost of being wrong is a panic on an unauthenticated
+	// route.  Deleting it would also silently re-arm the old bug the first
+	// time someone adds a fifth statement that forgets a column.
+	if user.RefreshToken != nil &&
+		user.PreviousRefreshToken != nil &&
 		*user.PreviousRefreshToken == cookieToken &&
 		user.RefreshRotatedAt.Valid &&
 		time.Since(user.RefreshRotatedAt.Time) < refreshGraceWindow {
@@ -478,40 +541,107 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	httpx.Fail(w, httpx.NewError(http.StatusUnauthorized, codeInvalidToken, msgInvalidToken))
 }
 
-// Logout implements POST /api/auth/logout.  Requires the route to be
-// wrapped in jwtx.RequireAuth so the access claims are present in ctx.
+// Logout implements POST /api/auth/logout.
 //
-// Side effects:
-//   - DB: UpdateUserRefreshToken(nil) nulls refresh_token, previous_refresh_token,
-//     and refresh_rotated_at in one shot, so any stolen refresh cookie
-//     (including one still inside the grace window) is fully invalidated.
-//   - Cookie: ClearRefreshCookie writes a Max-Age=-1 Set-Cookie so the
-//     browser drops the cookie immediately.
+// ── DELIBERATELY NOT BEHIND jwtx.RequireAuth ──
+// Logging out must always succeed.  The access cookie lives for accessTTL
+// (JWT_EXPIRES_IN, 15m by default), so gating this route on a valid access
+// token meant a tab left open past that window got a 401 from the
+// middleware and THIS FUNCTION NEVER RAN: no Clear-Cookie headers, no DB
+// write — while the browser kept a 7-day refresh cookie that proxy.ts
+// spends on the very next navigation (needsRefresh(session) is true
+// precisely because the access token expired).  The user saw a logged-out
+// UI and was silently signed back in.  That failure was deterministic, not
+// a race: idle past 15 minutes and it happened every time.
+//
+// The two side effects have different authentication requirements, so they
+// are deliberately separated:
+//
+//   - Clearing COOKIES needs no authentication.  It only touches the
+//     caller's own browser, so the worst a forged request achieves is
+//     logging out whoever sent it.  Runs unconditionally, first, before
+//     anything can fail.
+//
+//   - Clearing the DB ROW does need authentication — it ends a session
+//     server-side.  It runs only when the refresh cookie carries a
+//     signature we minted.  Identity comes from the REFRESH token, not the
+//     access token, because the refresh token is the credential that
+//     outlives the access window; that is the whole point of the change.
+//
+// Always answers 200.  Whether a cookie was present, parseable, or matched
+// a live user is not something an unauthenticated caller gets to learn.
+//
+// CSRF note: the cookies are SameSite=None in prod (cookies.go — required
+// for the SSR fetch), so a cross-site POST here does carry them and can
+// force a logout.  That was already true while this route sat behind
+// RequireAuth; what changes is the window, from "access token still valid"
+// (15m) to "refresh token still valid" (7d).  Forced logout is a nuisance,
+// not a compromise, and it matches the posture cookies.go already documents
+// for /auth/refresh ("CSRF on /auth/refresh only forces a harmless token
+// rotation").  Stated here so the widening is a choice, not an accident.
 func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
-	defer cancel()
-
-	claims, ok := jwtx.ClaimsFrom(r.Context())
-	if !ok {
-		// Routing bug — Logout should only be reachable via RequireAuth.
-		httpx.Fail(w, httpx.NewError(http.StatusInternalServerError, codeServerError, "missing auth claims"))
-		return
-	}
-
-	// Best-effort: clear the DB refresh token.  If the user row is
-	// gone (deleted between token issue and logout), the UPDATE is a
-	// no-op — that's fine, we still clear the cookie.
-	if err := h.db.UpdateUserRefreshToken(ctx, claims.UserID, nil); err != nil {
-		// Log + continue — logout should still succeed from the
-		// user's perspective even if the DB write fails.  The cookie
-		// is the dominant credential.
-		slog.Warn("auth: logout failed to clear refresh token", "userId", claims.UserID, "err", err)
-	}
-
+	// Cookies first and unconditionally — nothing below may prevent the
+	// browser from dropping its credentials.
 	ClearRefreshCookie(w, h.isProd)
 	ClearSessionCookie(w, h.isProd)
 	ClearAuthHintCookie(w, h.isProd)
+
+	if userID, token, ok := h.logoutSubject(r); ok {
+		ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+		defer cancel()
+
+		// Scoped to the session the caller actually holds — see the
+		// ClearRefreshTokenIfMatches doc comment.  A verified SIGNATURE is not
+		// evidence the token is still live, and an unconditional clear would
+		// let a long-dead refresh token be replayed as a forced-logout weapon
+		// against its former owner for the rest of its 7-day TTL.
+		n, err := h.db.ClearRefreshTokenIfMatches(ctx, userID, &token)
+		switch {
+		case err != nil:
+			// Log + continue — logout already succeeded from the user's
+			// perspective.  The cookie is the dominant credential.
+			slog.WarnContext(ctx, "auth: logout failed to clear refresh token", "userId", userID, "err", err)
+		case n == 0:
+			// Not an error and not worth a warning: the row moved on without
+			// us.  A double-clicked button, a logout racing a login on
+			// another device, a password reset that landed first, or a
+			// deleted account.  Info-level because a burst of these from one
+			// user is the signature of a replayed stale token.
+			slog.InfoContext(ctx, "auth: logout matched no live session", "userId", userID)
+		}
+	}
+
 	httpx.Data(w, http.StatusOK, MessageData{Message: msgLoggedOut})
+}
+
+// logoutSubject resolves whose session to end, and which token the caller
+// presented, from the refresh cookie.
+//
+// Returns false when there is no cookie, or the signature does not verify.
+// The caller treats that as "clear cookies only" — we will not touch a user
+// row on the strength of an unverified claim about who the caller is.
+//
+// The raw token is returned alongside the id because the signature alone is
+// not enough to authorise the write.  VerifyRefresh proves this server minted
+// the token; it says nothing about whether the token is still the live one,
+// and those come apart for a full 7 days after any rotation, logout or
+// password change.  The DB write is predicated on the raw value for exactly
+// that reason.
+//
+// Access claims are deliberately NOT consulted as a fallback: this route no
+// longer runs behind RequireAuth, so ctx never carries them, and refresh
+// TTL (7d) strictly outlives access TTL (15m) — a request holding a valid
+// access token but no valid refresh token is not a case that exists.
+func (h *Handlers) logoutSubject(r *http.Request) (uuid.UUID, string, bool) {
+	c, err := r.Cookie(RefreshCookieName)
+	if err != nil || c.Value == "" {
+		return uuid.Nil, "", false
+	}
+	claims, err := h.signer.VerifyRefresh(c.Value)
+	if err != nil {
+		return uuid.Nil, "", false
+	}
+	return claims.UserID, c.Value, true
 }
 
 // Me implements GET /api/auth/me.  Requires the route to be wrapped in
@@ -711,8 +841,13 @@ func (h *Handlers) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 // in one SQL via GetUserByResetToken.
 //
 // On success: ResetUserPassword writes a new bcrypt hash and in one
-// statement clears reset_token + reset_expires + refresh_token — the
-// last clear forces every active session to re-authenticate.
+// statement clears reset_token + reset_expires + all three refresh-session
+// columns.  That kills the refresh credential everywhere, grace slot
+// included.  It does not kill access tokens — a session holding an unexpired
+// JWT keeps working for up to accessTTL (15m default) before it has to come
+// back through /refresh and gets the 401.  The reset is effective within 15
+// minutes, not instantly, and the honest framing matters here because this is
+// the flow a user runs when they think someone else is in their account.
 //
 // Response messages:
 //

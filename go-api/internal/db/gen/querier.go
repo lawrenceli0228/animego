@@ -29,10 +29,17 @@ type Querier interface {
 	// if the update went through.  Returns ErrNoRows when no conflict.
 	AdminFindUserByUsernameOrEmailExcluding(ctx context.Context, username *string, email *string, excludeID uuid.UUID) (AdminFindUserByUsernameOrEmailExcludingRow, error)
 	// Admin-initiated password change (POST /api/admin/users/:id/password).
-	// Sets a new bcrypt hash and nulls refresh_token so the target user's
-	// existing sessions are invalidated (forces re-login with the new
-	// password). Unlike ResetUserPassword it leaves the reset-token columns
-	// alone — those belong to the self-serve forgot-password flow.
+	// Sets a new bcrypt hash and clears all three refresh-session columns, so
+	// the target user's refresh token stops working — see ResetUserPassword for
+	// why all three go together rather than refresh_token alone.  Unlike
+	// ResetUserPassword it leaves the reset-token columns alone; those belong to
+	// the self-serve forgot-password flow.
+	//
+	// Scope is the same and worth repeating here, because this is the statement
+	// an operator reaches for when they believe an account is compromised: it
+	// invalidates the REFRESH token, not access tokens.  A stateless JWT already
+	// in the attacker's hands stays valid until accessTTL runs out (15m default).
+	// Locking someone out immediately takes more than this statement.
 	AdminSetUserPassword(ctx context.Context, iD uuid.UUID, password string) error
 	// PATCH /api/admin/users/:userId — partial update of username/email.
 	// COALESCE() lets the caller pass nil to skip a field; passing a value
@@ -83,6 +90,37 @@ type Querier interface {
 	// social/notification edges between the two users. Repeating the request is
 	// idempotent and still cleans up any stale edges.
 	BlockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (BlockUserRow, error)
+	// Logout's DB write: ends the session the CALLER actually holds, and only
+	// that one.
+	//
+	// ── WHY A PREDICATE AND NOT A PLAIN `WHERE id = $1` ──
+	// Logout authenticates from the refresh cookie's SIGNATURE (logoutSubject).
+	// A signature stays valid for the full 7-day refresh TTL, and nothing about
+	// verifying it says the token is still the live one — a token this server
+	// revoked minutes ago verifies exactly as well as the current one.
+	//
+	// With an unconditional update that turns a DEAD credential back into a
+	// weapon: someone holding a refresh token that was already invalidated (an
+	// old browser profile on a shared machine, a stale backup, a captured
+	// request) can POST /logout with it every few minutes and keep the rightful
+	// owner from holding a session for a week.  They cannot read anything —
+	// Refresh checks the token against the row, so a stale token still fails
+	// there — but they can deny.  The predicate removes the primitive entirely:
+	// a token that no longer matches the row now clears nothing.
+	//
+	// previous_refresh_token is included in the match so the grace window keeps
+	// working: a tab that refreshed a moment ago holds the token that just moved
+	// into the grace slot, and it must still be able to log itself out.
+	//
+	// This does NOT reinstate the bug that took logout off RequireAuth.  That one
+	// was about a tab idle past the 15-minute ACCESS window; its refresh cookie is
+	// still the row's current value, so the predicate matches and the row clears.
+	//
+	// :execrows, and the caller does not treat 0 as an error.  Zero rows means
+	// "that session was already over" — a double-click, a logout racing a login
+	// on another device, a password reset that landed first.  The cookies are
+	// cleared unconditionally before this runs either way.
+	ClearRefreshTokenIfMatches(ctx context.Context, iD uuid.UUID, presentedToken *string) (int64, error)
 	// Total for the pagination envelope, matching SearchAnimeCacheLocal's WHERE
 	// clause exactly. Kept as its own query rather than a window function over the
 	// page: count(*) OVER () would be computed per returned row and still only
@@ -1409,15 +1447,75 @@ type Querier interface {
 	// is a frozen state.  Clearing them puts the row back at
 	// episodes_bgm_attempted_at IS NULL, i.e. at the front of the next sweep.
 	ResetAnimeEnrichment(ctx context.Context, anilistID int32) error
-	// reset-password write: sets new bcrypt hash, clears both reset-token
-	// columns, AND nulls refresh_token (invalidates all existing sessions).
-	// Matches Express's multi-field $set in resetPassword.
+	// reset-password write: sets the new bcrypt hash, clears both reset-token
+	// columns, and clears ALL THREE refresh-session columns.
+	//
+	// ── WHY previous_refresh_token AND refresh_rotated_at, NOT JUST refresh_token ──
+	// The three columns are one piece of state, not one column plus two
+	// bookkeeping fields.  The Refresh handler falls back to
+	// previous_refresh_token for refreshGraceWindow (30 s) after a rotation, so
+	// nulling only refresh_token left the row in a combination the read side did
+	// not expect: previous matches the cookie, current is NULL.
+	//
+	// What that produced is worth stating precisely, because the intuitive guess
+	// is wrong.  It did NOT hand out a token.  The grace branch signs the access
+	// token first, then dereferences *user.RefreshToken to re-set the cookie — so
+	// a NULL current token panicked before anything reached the response writer.
+	// The observable result was a 500 (caught by the Recoverer), for up to 30 s
+	// after a password reset.  An availability bug, not a credential leak; do not
+	// let a future reader "simplify" this on the theory that it was the latter.
+	//
+	// The read side now nil-guards that dereference, which makes this clause
+	// unreachable rather than unnecessary.  It stays for two reasons: the guard
+	// is one `&&` away from deletion by someone who reads it as merely defensive,
+	// and a write path whose safety depends on a nil check three files away is
+	// not one a reviewer can check locally.  The rule is small enough to just
+	// keep — ending a session clears all three columns.
+	//
+	// ── SCOPE, STATED HONESTLY ──
+	// This invalidates the REFRESH token.  It does NOT invalidate access tokens:
+	// those are stateless JWTs, so an already-issued one keeps working until it
+	// expires on its own (accessTTL, JWT_EXPIRES_IN, 15m by default).  There is
+	// no server-side access-token revocation in this codebase — no token version
+	// column, no denylist.  Any comment or UI copy promising that a password
+	// change "ends all sessions" is overpromising by up to 15 minutes.
 	ResetUserPassword(ctx context.Context, iD uuid.UUID, password string) error
-	// Atomically moves current refresh_token → previous_refresh_token and
-	// writes the new token.  refresh_rotated_at is set to now() so the
-	// Refresh handler can enforce the 30 s grace window.
-	// Called on every NORMAL (non-grace) refresh rotation.
-	RotateRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error
+	// Compare-and-swap rotation: moves current refresh_token →
+	// previous_refresh_token and writes the new token, but ONLY if the current
+	// token is still the one the caller verified.  refresh_rotated_at is set to
+	// now() so the Refresh handler can enforce the 30 s grace window.
+	//
+	// ── WHY `AND refresh_token = @expected_token` ──
+	// The handler reads the user, compares the cookie against refresh_token,
+	// then writes — three steps, no transaction, a JWT signing in between.
+	// Without the predicate that read-check-write loses two ways:
+	//
+	//   1. Two concurrent refreshes both holding T0 both pass the check.  The
+	//      first writes previous=T0, current=T1.  The second then reads
+	//      `previous_refresh_token = refresh_token` as T1 and produces
+	//      previous=T1, current=T2 — T0 is gone from BOTH slots and the next
+	//      request carrying it gets a 401.  The 30 s grace window exists for
+	//      exactly this case and was being erased by it.
+	//
+	//   2. A logout landing between the read and the write nulls all three
+	//      columns, and the in-flight rotation writes a live token straight
+	//      back — the user pressed logout and stayed signed in, with a 7-day
+	//      cookie.  The predicate turns that into zero rows.
+	//
+	// `:one` + RETURNING rather than `:execrows`: SignAccess needs username and
+	// role (jwtx.SignAccess), so returning them collapses the happy path from
+	// SELECT → sign → UPDATE into a single statement — no pre-read at all.
+	// Zero rows surfaces as pgx.ErrNoRows, which the handler treats as "lost the
+	// race / already logged out / password just changed" and routes into the
+	// existing grace branch after re-reading the row.
+	//
+	// Named parameters are deliberate: new_token and expected_token are both
+	// *string, and with sqlc's query_parameter_limit they stay positional in the
+	// generated signature.  Swapping them would compile, pass every stub test
+	// (the fakes do not model the WHERE clause), and make the CAS match nothing
+	// — every refresh would fall to grace and the whole site would 401 thirty
+	// seconds later.  RETURNING removes the temptation to hand-roll a row count.
+	RotateRefreshToken(ctx context.Context, newToken *string, iD uuid.UUID, expectedToken *string) (RotateRefreshTokenRow, error)
 	// Queries used by /api/dandanplay/* orchestration (P2.6).
 	//
 	// One query — SearchAnimeCacheForDandanplay — replaces Express's
@@ -1566,7 +1664,30 @@ type Querier interface {
 	// (keeps the column NULL).  bgm_id is also *int because Bangumi search
 	// may legitimately return no hits at all → caller sets bangumi_version
 	// via a separate path or leaves it 0.
-	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error
+	//
+	// ── WHY `AND bangumi_version = 0` (and why :execrows) ──
+	// river has no built-in arg-hash dedupe, and ScanAndEnqueueOrphans runs
+	// both at boot and on a periodic job, so the same anilist_id can sit in
+	// the queue twice.  A V1 job enqueued while the row was still v0 can
+	// therefore execute AFTER another worker (or an admin action) already
+	// advanced that row to v1/v2/v3.  Without the version predicate that
+	// stale job silently overwrites bgm_id, title_chinese and
+	// bgm_match_source, and resets bangumi_version to 1 — including on rows
+	// a human corrected by hand.  orphan.go's "the V1 worker itself is
+	// effectively idempotent" is not true without this predicate.
+	//
+	// Safe for every caller: all six EnqueueV1Many call sites target rows at
+	// version 0.  The admin single-row path is not an exception — it runs
+	// ResetAnimeEnrichment (admin.sql), whose first SET is bangumi_version=0,
+	// BEFORE enqueuing.  So there is no legitimate "upgrade an already-bound
+	// row" path for this predicate to block; the way to re-bind is to reset
+	// first, which is exactly what the admin endpoint already does.
+	//
+	// :execrows rather than :exec so the worker can tell "wrote it" from
+	// "a stale job was rejected" and log the latter.  A guard that fires
+	// silently would reproduce the very failure mode it exists to stop:
+	// nobody notices.
+	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error)
 	// Phase 2 result: write bangumi_score + bangumi_votes from Bangumi
 	// Subject API.  Also conditionally fills title_chinese if it's still
 	// NULL (V1 only writes it on exact native match; V2 has another shot
@@ -1737,10 +1858,27 @@ type Querier interface {
 	// Dormant: there is no self-serve change-password endpoint (password
 	// changes go through the email reset flow). Kept so the column write is
 	// available if a verified flow ever needs it.
+	//
+	// It clears the refresh-session columns anyway, even with no caller, because
+	// the shape a dormant query ships in is the shape whoever wires it up will
+	// trust.  Left as a bare password write, the first self-serve
+	// change-password endpoint would silently be the one password path that
+	// revokes nothing — the reader would reasonably assume a statement named
+	// UpdateUserPassword behaves like its two siblings above.  Being wrong in
+	// the same direction as the others is the cheaper failure.
+	//
+	// NOTE FOR WHOEVER WIRES THIS UP: clearing refresh_token logs out the acting
+	// session too, since that is the cookie the caller is holding.  A
+	// change-password handler must issue a fresh token pair and re-set the
+	// cookies before responding, or the user changes their password and is
+	// immediately bounced to the login screen.  Access tokens are unaffected
+	// either way (stateless JWT, valid until accessTTL expires).
 	UpdateUserPassword(ctx context.Context, iD uuid.UUID, password string) error
 	// Called after login (set new token) and logout (set NULL for all three
 	// token columns — clears both current and grace-window state so a stolen
-	// cookie is fully invalidated).
+	// REFRESH cookie is fully invalidated).  The noun matters: access tokens are
+	// stateless JWTs and no column write reaches them, so "fully invalidated"
+	// scopes to the refresh credential only.  See ResetUserPassword.
 	// updated_at bumps to now() so callers can audit last-session activity.
 	UpdateUserRefreshToken(ctx context.Context, iD uuid.UUID, refreshToken *string) error
 	// PATCH /api/auth/me — self-serve rename. Unique violation (23505) on the

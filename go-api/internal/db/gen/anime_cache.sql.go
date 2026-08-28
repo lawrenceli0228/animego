@@ -2701,14 +2701,14 @@ func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nam
 	return err
 }
 
-const updateBangumiV1 = `-- name: UpdateBangumiV1 :exec
+const updateBangumiV1 = `-- name: UpdateBangumiV1 :execrows
 UPDATE anime_cache
 SET bgm_id           = $2,
     title_chinese    = $3,
     bgm_match_source = $4,
     bangumi_version  = 1,
     updated_at       = now()
-WHERE anilist_id = $1
+WHERE anilist_id = $1 AND bangumi_version = 0
 `
 
 // Phase 1 result write — set bgm_id + title_chinese (the latter only
@@ -2719,14 +2719,40 @@ WHERE anilist_id = $1
 // (keeps the column NULL).  bgm_id is also *int because Bangumi search
 // may legitimately return no hits at all → caller sets bangumi_version
 // via a separate path or leaves it 0.
-func (q *Queries) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) error {
-	_, err := q.db.Exec(ctx, updateBangumiV1,
+//
+// ── WHY `AND bangumi_version = 0` (and why :execrows) ──
+// river has no built-in arg-hash dedupe, and ScanAndEnqueueOrphans runs
+// both at boot and on a periodic job, so the same anilist_id can sit in
+// the queue twice.  A V1 job enqueued while the row was still v0 can
+// therefore execute AFTER another worker (or an admin action) already
+// advanced that row to v1/v2/v3.  Without the version predicate that
+// stale job silently overwrites bgm_id, title_chinese and
+// bgm_match_source, and resets bangumi_version to 1 — including on rows
+// a human corrected by hand.  orphan.go's "the V1 worker itself is
+// effectively idempotent" is not true without this predicate.
+//
+// Safe for every caller: all six EnqueueV1Many call sites target rows at
+// version 0.  The admin single-row path is not an exception — it runs
+// ResetAnimeEnrichment (admin.sql), whose first SET is bangumi_version=0,
+// BEFORE enqueuing.  So there is no legitimate "upgrade an already-bound
+// row" path for this predicate to block; the way to re-bind is to reset
+// first, which is exactly what the admin endpoint already does.
+//
+// :execrows rather than :exec so the worker can tell "wrote it" from
+// "a stale job was rejected" and log the latter.  A guard that fires
+// silently would reproduce the very failure mode it exists to stop:
+// nobody notices.
+func (q *Queries) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error) {
+	result, err := q.db.Exec(ctx, updateBangumiV1,
 		anilistID,
 		bgmID,
 		titleChinese,
 		bgmMatchSource,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateBangumiV2 = `-- name: UpdateBangumiV2 :exec

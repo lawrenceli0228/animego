@@ -125,6 +125,82 @@
   也写了同一句结论,两处可以互相印证。
 - **Depends on / blocked by:** 无。与活跃度面板已有的部分完全独立,可以随时单独做。
 
+## bangumi 绑定决策无法从存储状态重建
+
+- **What:** 在 `anime_cache` 加一个 text 列(暂名 `bgm_match_name`),让
+  `UpdateBangumiV1` 在绑定成功时把当时选中的 Bangumi 侧原名 `best.Name` 一并写下来。
+  然后基于它做一次存量绑定审计。
+- **Why:** 现在绑定成功只写回 `bgm_id` / `title_chinese` / `bgm_match_source` 三个字段,
+  **Bangumi 侧的原名从来没被存下来**,全库也没有这个列。后果是一条已经存在的绑定,
+  事后没办法回答「当时是拿哪个标题匹配上的」—— 也就没办法判断它对不对。
+  `title_chinese` 只是部分代理:它在 `NameCN` 为空或等于 `Name` 时是 NULL,
+  而且后续 v2/v3 富化可能已经改写过它。这是「bgm 绑定 41% 无来源」那笔债的
+  结构性原因之一 —— 不是没记来源,是就算记了也无法复盘。
+- **Pros:** 一个列 + 一个 UPDATE 字段,约 10 行;从此每条新绑定都可复盘,
+  存量审计从「不可能」变成「一条 SQL」。
+- **Cons:** 需要一条 migration(本仓已到 0026);按项目惯例写 migration 前要先走
+  `database-migrations`;而且价值要到真的做存量 sweep 那一期才兑现,单独做收益为零。
+- **Context:** 2026-08-28 的 `/plan-eng-review` 里发现(季号信号方案的 D3)。当时刻意
+  没有并进那个 PR —— 那个改动是单文件纯逻辑、无 schema 变更、前向 only,加一条 migration
+  会改变它的风险类别,而本仓 `description_cn` 那一轮用了 0014→0015→0016 三次才定下来。
+  另一个必须一起想的点:`bangumi_v1` 只处理 `bangumi_version = 0` 的行,成功后置 1
+  永不回头,所以存量行不会自己重新评估,审计和纠正都得单独写 sweep。
+- **Depends on / blocked by:** 无技术前置。建议与存量绑定 sweep 同期做,否则加了列也没人读。
+
+## 分割放送会 50% 概率绑错,而且标成高置信
+
+- **What:** 给 `internal/bangumi` 的候选打分补上季号信号。**要先解一个包依赖环。**
+- **Why:** `NormalizeTitle` 的 `seasonSuffixReplacer` 把 `season2..9` / `第2期..第9期` /
+  `ii,iii,iv` / `part2..5` / `ova,movie` 全删掉,之后季号和格式**不再作为任何分量出现**
+  (`ScoreCandidate` 只有 titleSim / yearScore / epsScore 三项)。分割放送下 S1 和 S2 同年
+  同集数时两个候选得分**完全相同**,argmax 退化成「列表里谁在前面」,而档位规则 1
+  (`ts≥0.95 && ys≠0`)立即命中 → 权威绑定。同一个陷阱对「剧场版 vs TV 版」也成立。
+- **Pros:** 直接消掉一整类静默错绑;`titlematch` 已有 `ExtractMarker`/`MarkerFor`/`SameEntry`
+  且在 live data 上被打磨过(`season.go:70-79` 记录了 anilist 213097 ↔ bgm 659686 的假阴性修复)。
+- **Cons / 已知陷阱(2026-08-28 评审 + codex outside voice 找出来的,重写时别重踩):**
+  1. **`internal/titlematch/titlematch.go:35` 已经 import 了 `internal/bangumi`**,
+     所以 `bangumi/match.go` 不能反向 import —— 编译成环。
+     ✅ **2026-08-28 已实测出解法,比预想便宜得多(0.5 人天,不是「跨包重构」)**:
+     环的承重面只有 **一行** —— `titlematch.go:53` 的 `bangumi.TitleSimilarity`
+     (全包 5 处提到 bangumi,其中 4 处是注释;`SearchResult` 一次都没出现,
+     我最初的猜测是错的)。而 `season.go` 恰好**零仓库依赖**
+     (只 import `regexp`/`strconv`/`strings`/`x/text/unicode/norm`)。
+     → 把 `season.go` 原样搬成 `internal/titleseason`,在 `titlematch` 留一个
+     `type Marker = titleseason.Marker` 的别名 shim + 三个 wrapper 函数。
+     **实测:调用方 0 改动、测试 0 改动**,`titlematch` 的 30 个测试一字未改全绿,
+     `dandanplay/seasonmatch.go` 和 `queue/bangumi_episodes.go` 也不用动。
+     ⚠️ `Marker` 必须用**类型别名 `=`**,不能 `type Marker titleseason.Marker`
+     ——后者不继承方法集,`SameEntry`/`Merge`/`Normalized` 会全没。
+     ⚠️ shim 用 wrapper **函数**不要用 `var ExtractMarker = ...`(可变包级状态且不可内联)。
+  2. 不要用字典序排序(confirmed > neutral > implicit > conflict)——那等于给季号
+     **无限权重**,一个相似度很低的候选会无条件压过接近满分的候选。Seanime 的
+     `−8`/`−3` 是**有界惩罚**,其它证据能翻盘,这才是对的形状。
+  2b. ★**季号 gate 写在哪里决定测试是 0 改还是 1 挂**(两种写法都实跑过):
+     写在 `ScoreCandidate` 里(markers 不一致就 `return 0`)会挂
+     `match_test.go` 的 `TestPickBest_TierLow_YearContradicted`,而且**会把 TierLow
+     塌成 TierNone —— 等于吃掉 needs-review 通道**,把「存疑」变成「无匹配」。
+     写在 `PickBest` 里(marker 只作 argmax tiebreak + TierHigh 准入条件)现有测试全绿。
+     **选后者。**
+  3. 「一侧声明、另一侧沉默」不能只降排序不设闸门:候选表里没有正确的 S2、
+     只有裸标题 S1 时它正是这一档,仍会被权威绑定 —— 洞没堵上。
+  4. 不要把 Season 和 Part 判定「取更差者」:双方都声明 S2 但都没写 Part 时会退化成
+     中性,让「双方确认」几乎不可达。
+  5. 现有的 `TestPickBest_TierLow_YearContradicted` **分不出**这几种设计——它的年份差
+     4 年,`ys=0.0` 已经把它压到 TierLow 了。必须补一个「候选声明了不同季号 **且**
+     年份一致」的新用例才有判别力。
+- **Context:** 参照实现是 `5rahim/seanime` 的 `internal/library/scanner/matcher.go`
+  (1596 行,GPL-3.0):带负分的累加、门槛 6.0、季号一致 +5 / 明确不符 −8 / 隐含 −3、
+  格式相符 +5 / 不符 −5、年份差>1年 −10。它的 `getIgnoredSynonyms` 也值得看
+  ——被多个候选共享的别名只保留给主标题最短的那个,且只作用于非主标题。
+  ★ **注意别重复一个已经犯过的归因错误**:这条路径产出的是 `anime_cache.bgm_id`,
+  **不是** `bgm_id_map`(后者是从 `data/anilist_bgm_map.json` 灌进来的输入表,
+  `bangumi_v1.go:128` 命中即绑定并 return,根本不走 scorer)。所以这个改动改善的是
+  fuzzy 匹配质量,**不是**「无来源绑定」那笔债的修复,优先级要按前者判。
+- **Depends on / blocked by:** ~~被包依赖环阻塞~~ —— **已不再阻塞**,解法见 Cons 第 1 条
+  (0.5 人天,零调用方改动)。缺陷本身也已用可运行原型复现,不是推演:
+  基线下 `picked id=1 / tier=high`(绑错季且高置信),加上修复后 `picked id=2 / tier=high`;
+  候选表里只有错季条目时,基线 `tier=high` 无条件绑定,修复后 `tier=low` 转 needs-review。
+||||||| 6b31a3e
 ## 若任一路由的服务端渲染慢过约 300ms，把段内 `loading.tsx` 加回去
 
 - **What:** 2026-08-28 把 `app/[lang]/loading.tsx` 从根部挪进了 `(home)/`，代价是

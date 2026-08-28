@@ -143,9 +143,16 @@ export async function createAdminUser(data: {
 
 /**
  * POST /api/admin/users/:id/password — admin sets a new password for any
- * account. go-api bcrypt-hashes it (cost 10) and nulls the target's
- * refresh_token, invalidating their existing sessions so they must
- * re-login with the new password. Returns { success: true }.
+ * account. go-api bcrypt-hashes it (cost 10) and clears all three of the
+ * target's refresh-session columns, so their refresh cookie stops working.
+ * Returns { success: true }.
+ *
+ * It does NOT end the target's current session, and an admin using this to
+ * respond to a compromise needs to know that. Access tokens are stateless
+ * JWTs — one already issued keeps authenticating every API call for up to
+ * JWT_EXPIRES_IN (15m by default) and nothing server-side can recall it.
+ * There is no token-version column and no denylist. `success: true` means
+ * "the password changed", not "they are locked out now".
  *
  * No user-list revalidation — password is not a displayed field — but we
  * bust user:profile:{id} in case any per-user page keys on session state.

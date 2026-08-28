@@ -11,8 +11,11 @@ import ResetPasswordForm from "./_components/ResetPasswordForm";
 //     this surface, and a logged-in user holding a valid reset link
 //     SHOULD still be able to reset (e.g. recovering an account from
 //     another device while signed in elsewhere). The backend will also
-//     invalidate the user's refreshToken on success, killing every
-//     other session — so the eventual flow is "reset → re-login".
+//     clear the user's refresh-token columns on success, so every other
+//     session loses its refresh credential — though a session holding an
+//     unexpired access JWT keeps working until it expires (15m default;
+//     access tokens are stateless and cannot be revoked). The eventual
+//     flow is still "reset → re-login", just not instantly elsewhere.
 //   - No server-side pre-check of the token. Pre-validation would
 //     double the backend load and open a TOCTOU window between the
 //     check and the POST. The form submit hits the same endpoint that

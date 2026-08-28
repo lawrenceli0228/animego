@@ -310,8 +310,10 @@ func (noopV12DB) LookupBgmIdMap(_ context.Context, _ int32) (int32, error) {
 	return 0, pgx.ErrNoRows
 }
 
-func (noopV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string, _ *string) error {
-	return nil
+// Returns 1 row affected: this noop stands in for a healthy write on a row
+// that was still at bangumi_version=0.
+func (noopV12DB) UpdateBangumiV1(_ context.Context, _ int32, _ *int32, _ *string, _ *string) (int64, error) {
+	return 1, nil
 }
 
 func (noopV12DB) MarkBangumiV1NotFound(_ context.Context, _ int32) error {
