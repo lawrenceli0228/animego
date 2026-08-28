@@ -2,15 +2,26 @@
 
 // Client-side i18n provider, paired with the RSC i18n in @/lib/i18n.
 //
-// The server no longer has a say in what this resolves to. RootLayout seeds
-// the provider with the language of the URL's `[lang]` segment, which is what
-// the SSR pass renders; after hydration the effect below replaces it with the
-// `lang` COOKIE and keeps it there. So every client component on the site
-// follows the visitor's stated preference, while the server-rendered content
-// around them follows the address — and on a bare (Chinese) URL those two
-// disagree for an English reader. That gap is deliberate and unreconciled;
-// see the note beside SeasonalFilterChips in
-// app/[lang]/seasonal/[season]/[year]/page.tsx.
+// RootLayout seeds the provider with the language of the URL's `[lang]`
+// segment, which is what the SSR pass renders, and that value is used as
+// given. The URL is the only source; server and client cannot disagree.
+//
+// The paragraph that stood here said the opposite, in detail: that "after
+// hydration the effect below replaces it with the `lang` COOKIE", so client
+// leaves followed a stored preference while the server-rendered content around
+// them followed the address, and that the resulting gap was "deliberate and
+// unreconciled". There is no such effect. This file imports neither useEffect
+// nor useState, reads no cookie, and LanguageProvider has no reconciliation
+// step (see its own note below, which was right all along).
+//
+// It matters because it was load-bearing for other people's reasoning: the
+// same claim is repeated in about a dozen files — including the note beside
+// SeasonalFilterChips in app/[lang]/seasonal/[season]/[year]/page.tsx, which
+// cites it to justify a design decision — and it was cited as the reason the
+// 404 page could not be trusted to render in the URL's language. It does; that
+// is now asserted in a browser, in all three locales, by
+// e2e/specs/sandbox/not-found-status.spec.ts. Cleaning up the other copies is
+// its own pass; see TODOS.md.
 //
 // The provider is what keeps the ported Library + Player client components
 // (hundreds of `t('foo.bar')` call sites) in lockstep with each other.
@@ -86,10 +97,13 @@ function resolve(
 }
 
 /**
- * Controlled by `lang` (server-resolved from the cookie). The value is the
- * prop, not internal state, so a router.refresh() that re-renders the
- * server layout with a new cookie flows a new `lang` down and every
- * useLang() consumer re-renders in lockstep.
+ * Controlled by `lang`, which RootLayout resolves from the `[lang]` route
+ * segment. The value is the prop, not internal state, so a navigation that
+ * re-renders the server layout under a different locale flows a new `lang`
+ * down and every useLang() consumer re-renders in lockstep.
+ *
+ * ("server-resolved from the cookie" is what this said; there is no cookie in
+ * that path — see the correction at the top of this file.)
  */
 export function LanguageProvider({
   lang,

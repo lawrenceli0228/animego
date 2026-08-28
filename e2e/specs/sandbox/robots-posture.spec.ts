@@ -14,9 +14,13 @@ import { test, expect } from "@playwright/test";
 //
 // Google resolves that by taking the most restrictive, so nothing was
 // actually being indexed that should not have been. But the guarantee rested
-// on a tie-break rule rather than on the page saying one thing — and on
-// these routes `noindex` is the only signal there is, because they stream
-// (loading.tsx) and a streamed response cannot set a 404 status.
+// on a tie-break rule rather than on the page saying one thing.
+//
+// When this file was written `noindex` was the ONLY signal on these routes,
+// because a loading.tsx made them stream and a streamed response cannot set a
+// 404 status. That boundary is gone and they answer a real 404 now, so the tag
+// is corroboration — but a page saying two contradictory things is still the
+// defect this file exists to catch.
 //
 // Only the rendered HTML shows an inherited tag colliding with a declared
 // one, which is why this is an e2e and not a unit test.
@@ -34,10 +38,12 @@ const MISSING_ANIME = 999_999_999;
  *
  * `page.request.get` runs no JavaScript, so this is the document a crawler is
  * handed — the same reason episode-display.spec.ts reads it this way. Reading
- * the live DOM instead measures the wrong thing twice over: a crawler never
- * hydrates, and these routes stream, so during hydration the tag can briefly
- * appear twice. CI caught exactly that (`["noindex","noindex"]`, green on
- * retry) on the first version of this file.
+ * the live DOM instead measures the wrong thing: a crawler never hydrates. The
+ * first version of this file did read the DOM and CI caught it
+ * (`["noindex","noindex"]`, green on retry) — at the time these routes streamed
+ * and the tag could appear twice mid-hydration. They no longer stream, so that
+ * race is gone, but the reason for reading the SERVED document rather than the
+ * rendered one is unchanged.
  */
 async function robotsTags(page: import("@playwright/test").Page, path: string) {
   const res = await page.request.get(path);
@@ -122,19 +128,25 @@ test.describe("a missing anime", () => {
     // to out-rank.
     //
     // Asserted as "every directive is a noindex" rather than "the array is
-    // exactly ['noindex']": the count is a rendering detail of a streamed
-    // response, and pinning it made this test fail on a duplicate that
-    // changed nothing about what a crawler concludes.
-    const { tags } = await robotsTags(page, `/anime/${MISSING_ANIME}`);
+    // exactly ['noindex']". Pinning the count made this test fail on a
+    // duplicate that changed nothing about what a crawler concludes; the
+    // duplicate came from streaming, which this route no longer does, but the
+    // looser assertion is still the one that states the requirement.
+    const { status, tags } = await robotsTags(page, `/anime/${MISSING_ANIME}`);
     expect(tags.length).toBeGreaterThan(0);
     for (const tag of tags) expect(tag).toContain("noindex");
+
+    // And the status, which is strictly stronger than anything above: while
+    // this route streamed, `noindex` was the only signal available and the
+    // response was a 200. It is a real 404 now.
+    expect(status).toBe(404);
   });
 
   test("renders the not-found page, not a half-empty detail page", async ({ page }) => {
-    // Guards the other direction: a page that 200s with noindex is only
-    // acceptable because it genuinely is the not-found UI. If a data failure
-    // ever started rendering an empty hero here instead, the robots tag would
-    // still pass and the page would be junk.
+    // Guards the other direction: a 404 is only the right answer because the
+    // page genuinely is the not-found UI. If a data failure ever started
+    // rendering an empty hero here instead, the status and the robots tag
+    // would both still pass and the page would be junk.
     await page.goto(`/anime/${MISSING_ANIME}`);
     await expect(page.locator("h1, h2").first()).toBeVisible();
     await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);

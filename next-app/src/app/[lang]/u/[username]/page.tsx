@@ -110,15 +110,24 @@ export async function generateMetadata({
 
   // The visitor asked for this profile by a handle that is not the one it
   // should be addressed by — in practice, the stored contact-shaped username
-  // rather than the masked handle. The page component redirects, but that
-  // redirect cannot set a status code: the root loading.tsx puts every route
-  // behind a Suspense boundary, so the shell has already flushed by the time
-  // the component runs and Next falls back to a client-side navigation.
+  // rather than the masked handle. The page component redirects.
   //
-  // So the status stays 200 for a crawler, and without this the URL would be
-  // indexable — with clean content, but with the address in the URL itself.
-  // noindex keeps it out, and the canonical below still points at the handle
-  // form so any existing index entry consolidates there.
+  // That redirect used to be unable to set a status code: a loading.tsx above
+  // every route put this one behind a Suspense boundary, the shell had already
+  // flushed by the time the component ran, and Next fell back to a client-side
+  // navigation. The status stayed 200, so a crawler could index the alias URL —
+  // clean content, but with the address in the URL itself. The noindex below
+  // was the only thing keeping it out.
+  //
+  // The boundary is gone (see ../../routeBoundaries.test.ts) and this route has
+  // no loading.tsx of its own, so permanentRedirect() now reaches the response
+  // before the first byte and answers a real 308. A crawler follows it and
+  // never sees the alias as a page.
+  //
+  // The noindex stays for now, as corroboration rather than as the only
+  // signal. It can go once the 308 is confirmed against a production build —
+  // an unverified removal here re-exposes an address-shaped URL, which is not
+  // the thing to be optimistic about.
   const addressedByAlias = username !== requested;
 
   return {
