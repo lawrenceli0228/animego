@@ -51,6 +51,12 @@ interface SearchRow {
   titleEnglish: string | null;
   titleNative: string | null;
   titleChinese: string | null;
+  // go-api has returned this since migration 0022 — GetAnimeByAnilistIDs
+  // selects it, and both the AniList and the local-catalogue paths read
+  // through that one query. This interface simply never declared it, so the
+  // cards below were built without it and /zh-Hant/search rendered Simplified
+  // titles. Measured on production: 12 of 18 cards.
+  titleHant: string | null;
   coverImageUrl: string | null;
   coverImageColor: string | null;
   posterAccent: string | null;
@@ -354,6 +360,7 @@ export default async function SearchPage({ params, searchParams }: SearchPagePro
                 const cardData: AnimeCardData = {
                   anilistId: a.anilistId,
                   titleChinese: a.titleChinese,
+                  titleHant: a.titleHant,
                   titleRomaji: a.titleRomaji,
                   titleEnglish: a.titleEnglish,
                   titleNative: a.titleNative,

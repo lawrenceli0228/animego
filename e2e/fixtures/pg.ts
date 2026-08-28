@@ -189,6 +189,13 @@ export interface SeedAnimeCache {
   titleRomaji?: string;
   titleChinese?: string;
   /**
+   * Traditional Chinese (migration 0022), and the first rung of the zh-Hant
+   * title ladder. Left undefined by default because most production rows have
+   * it null, which is the state every other spec should be measuring — set it
+   * only when the spec is about Traditional readers seeing Traditional.
+   */
+  titleHant?: string | null;
+  /**
    * The authoritative total. Two things read it:
    *   - the server's `currentEpisode` upper bound (400 past it; NULL = airing,
    *     no bound at all — design doc decision 4);
@@ -208,11 +215,14 @@ export interface SeedAnimeCache {
 export async function ensureAnimeCached(anime: SeedAnimeCache): Promise<void> {
   const sql = getSql();
   await sql`
-    INSERT INTO anime_cache (anilist_id, title_romaji, title_chinese, episodes, format, cached_at)
+    INSERT INTO anime_cache (
+      anilist_id, title_romaji, title_chinese, title_hant, episodes, format, cached_at
+    )
     VALUES (
       ${anime.anilistId},
       ${anime.titleRomaji ?? `E2E Anime ${anime.anilistId}`},
       ${anime.titleChinese ?? `E2E 番剧 ${anime.anilistId}`},
+      ${anime.titleHant ?? null},
       ${anime.episodes ?? null},
       ${anime.format ?? "TV"},
       now()
@@ -220,6 +230,7 @@ export async function ensureAnimeCached(anime: SeedAnimeCache): Promise<void> {
     ON CONFLICT (anilist_id) DO UPDATE SET
       title_romaji  = EXCLUDED.title_romaji,
       title_chinese = EXCLUDED.title_chinese,
+      title_hant    = EXCLUDED.title_hant,
       episodes      = EXCLUDED.episodes,
       format        = EXCLUDED.format,
       updated_at    = now()
