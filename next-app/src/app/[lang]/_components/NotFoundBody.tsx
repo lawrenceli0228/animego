@@ -7,16 +7,29 @@
 // that cannot ask resolveLocale() what language it is rendering. See the
 // comment in ../not-found.tsx for why the alternatives are worse.
 //
-// `useLang()` closes that gap without any server-side language lookup: it
-// resolves the visitor's own `lang` cookie, so an English reader gets an
-// English 404 at every URL on the site rather than a Chinese one.
+// `useLang()` closes that gap without a server-side language lookup here: it
+// reads the LanguageProvider's value, and falls back to deriving the locale
+// from usePathname() when the provider is out of reach. Either way the answer
+// comes from the URL, so /en/nope renders English.
 //
-// It is the cookie and not the URL, in practice always. The root loading.tsx
-// means the shell has flushed before any page can call notFound(), so this
-// body is delivered as a streamed client render — past the point where the
-// LanguageProvider has swapped its route-locale seed for the cookie. Do not
-// "fix" that by passing a lang prop down from ../not-found.tsx: that file has
-// no params either, which is the whole reason this component exists.
+// It says the URL and not the cookie deliberately, because the previous version
+// of this comment said the opposite — "it is the cookie and not the URL, in
+// practice always" — and described a LanguageProvider effect that swaps the
+// route locale for the cookie after mount. There is no such effect;
+// @/lib/lang-client contains no useEffect, no useState and no cookie read at
+// all. The same wrong claim is repeated in about a dozen other files; see
+// TODOS.md.
+//
+// Do not "fix" the params gap by passing a lang prop down from
+// ../not-found.tsx: that file is handed no params either, which is the whole
+// reason this component exists. That part of the old note was right.
+//
+// This body now renders on the SERVER, with a real 404 status. It used to
+// arrive as a client render inside an already-committed 200, because a
+// loading.tsx sat above every route; that boundary is gone (see
+// ../../routeBoundaries.test.ts). "use client" stays because the params
+// problem above is unchanged — the component is still the only way this route
+// learns its locale.
 //
 // Everything that must not differ between the server render and the hydrated
 // one arrives as a prop: `seasonHref` is built from the server's clock, since
