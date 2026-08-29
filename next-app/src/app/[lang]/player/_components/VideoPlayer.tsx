@@ -49,6 +49,55 @@ const PLAYBACK_RATE_KEY = "animego:playbackRate";
 const DANMAKU_VISIBLE_DEFAULT = true;
 const DANMAKU_VISIBLE_KEY = "animego:danmakuVisible";
 
+// ─── Video transfer correction ────────────────────────────────────────────
+//
+// Chrome composites <video> — and only <video> — through a transfer-function
+// conversion that lifts the midtones. The picture arrives correct: reading the
+// decoded frame back through `canvas.drawImage(video)` matches ffmpeg. It is
+// the compositing step that shifts it, which is why this went unnoticed for so
+// long — every way of inspecting the pixels from JS says they are fine.
+//
+// Measured against ffmpeg's decode with a 16-step greyscale wedge, on a file
+// carrying no colour signalling at all (no `colr` atom, VUI unspecified —
+// the normal shape of a Baha / ANi WEB-DL):
+//
+//     source   ffmpeg   Chrome        source   ffmpeg   Chrome
+//        0        0        0            136      136      147
+//       17       17       16            170      170      179
+//       51       51       58            204      203      210
+//      102      102      114            255      255      255
+//
+// Black and white are pinned, everything between is pushed up by as much as
+// +12. That is exactly what "washed out / grey next to mpv" is: the ends are
+// nailed down and the middle is flattened. mpv, IINA and VLC do not apply the
+// conversion, so the same file looks more contrasty and more saturated there.
+//
+// TABLE, NOT GAMMA, AND MEASURED, NOT DERIVED. The analytic BT.709 → sRGB
+// model predicts a large lift in the shadows that Chrome does not actually
+// apply (it predicts 17 → 32; Chrome leaves it at 16). Fitting a single
+// `type="gamma"` exponent to the midtones therefore over-darkens the bottom
+// end — exponent 1.136 is the best power fit and it still crushed code 17
+// down to 10. The table below is the inverse of the *measured* curve; put
+// back through Chrome it returns the wedge to a mean absolute error of 0.31
+// levels (vs 7.0 uncorrected, 1.44 for the best gamma) with the shadow step
+// intact.
+//
+// `color-interpolation-filters="sRGB"` is load-bearing. The SVG default is
+// linearRGB, which would apply the table in the wrong space and produce a
+// different picture again.
+//
+// Scoped deliberately to the <video> element. The jassub subtitle canvas and
+// the danmaku layer are drawn by us in sRGB and never went through Chrome's
+// video path, so correcting them would introduce the very error this removes.
+//
+// Chrome-only by decision: Safari and Firefox handle the video transfer
+// differently and were not measured, so this is not feature-detected. If the
+// correction ever needs to be conditional, that is the assumption to revisit.
+const VIDEO_TRANSFER_FILTER_ID = "animego-video-transfer";
+const VIDEO_TRANSFER_TABLE =
+  "0.0000 0.0664 0.1119 0.1640 0.2190 0.2727 0.3319 0.3910 0.4529 " +
+  "0.5185 0.5819 0.6504 0.7177 0.7843 0.8540 0.9252 1.0000";
+
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
@@ -918,6 +967,31 @@ export function VideoPlayer({
 
   return (
     <div style={s.wrapper}>
+      {/* Transfer correction applied to art.video by the `.art-video-player
+          video` rule in globals.css. It lives here, in the only component that
+          constructs an Artplayer, so the definition and its one consumer mount
+          and unmount together — a `filter: url(#id)` whose target is missing
+          renders the element uncorrected rather than failing loudly, so the
+          two must not be able to drift apart. `videoTransferFilter.test.ts`
+          pins the id and the table against globals.css. */}
+      <svg
+        aria-hidden="true"
+        focusable="false"
+        width="0"
+        height="0"
+        style={{ position: "absolute" }}
+      >
+        <filter
+          id={VIDEO_TRANSFER_FILTER_ID}
+          colorInterpolationFilters="sRGB"
+        >
+          <feComponentTransfer>
+            <feFuncR type="table" tableValues={VIDEO_TRANSFER_TABLE} />
+            <feFuncG type="table" tableValues={VIDEO_TRANSFER_TABLE} />
+            <feFuncB type="table" tableValues={VIDEO_TRANSFER_TABLE} />
+          </feComponentTransfer>
+        </filter>
+      </svg>
       <div ref={containerRef} style={s.player} />
       <input
         ref={fileInputRef}

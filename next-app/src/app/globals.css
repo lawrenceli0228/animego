@@ -263,6 +263,23 @@ h4 {
   }
 }
 
+/* ── Player: undo Chrome's video transfer shift ────────────────────────
+   Chrome composites <video> — and only <video> — through a transfer conversion
+   that lifts the midtones while pinning black and white, which reads as a flat,
+   grey picture next to mpv / IINA. The decoded frame is correct; it is the
+   compositing step that shifts it. Measured against ffmpeg with a greyscale
+   wedge: mean absolute error 7 levels, peaking at +12 around code 102.
+
+   The table is the measured inverse of that curve, and it lives in
+   VideoPlayer.tsx next to the measurements that produced it — that component
+   also renders the <svg> this url() points at, so the definition and its one
+   consumer mount together. Keep the id in step with VIDEO_TRANSFER_FILTER_ID:
+   a stale reference does not throw, it just silently stops correcting, which
+   is why videoTransferFilter.test.ts asserts the two agree. */
+.art-video-player video {
+  filter: url(#animego-video-transfer);
+}
+
 /* ── Player: fullscreen subtitle-cue flicker ───────────────────────────
    Real root cause (confirmed by live testing): in NATIVE fullscreen Chrome
    promotes the <video> to a hardware OVERLAY plane (scanned out directly,
@@ -288,8 +305,14 @@ h4 {
 .art-video-player.art-fullscreen video,
 .art-video-player:fullscreen video,
 :fullscreen .art-video-player video {
-  /* opacity() filter disqualifies the <video> from hardware-overlay promotion */
-  filter: opacity(0.999);
+  /* Both filters, deliberately. `filter` is one property, so naming only
+     opacity() here would drop the transfer correction the moment the user
+     goes fullscreen — which is most of the time they are watching.
+     opacity() is kept even though url() already disqualifies the <video>
+     from hardware-overlay promotion: the promotion block is what fixes the
+     subtitle flicker (#24), and that fix has not been re-verified against a
+     url() filter alone. Chaining costs nothing and cannot regress it. */
+  filter: url(#animego-video-transfer) opacity(0.999);
 }
 .art-video-player .art-subtitle {
   transform: translateZ(0);
