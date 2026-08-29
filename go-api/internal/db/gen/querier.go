@@ -563,6 +563,14 @@ type Querier interface {
 	// reply abuse (someone passing a random comment id from a different
 	// episode).  ErrNoRows → handler 400 "Parent comment not found".
 	GetCommentParentForValidation(ctx context.Context, iD uuid.UUID, anilistID int32, episode int32) (uuid.UUID, error)
+	// Two independent pairs, not four interchangeable counters.  Read
+	// open_count against impression_count, and welcome_open_count against
+	// welcome_impression_count -- never across the pairs.  The two denominators
+	// do not count the same renders: hot_discussions_impression is suppressed
+	// when the rail has no discussions to show, while welcome_card_impression
+	// fires on every mount, because the card it counts renders either way.
+	// welcome_impression_count is therefore >= impression_count by construction,
+	// and their difference is how often the rail rendered empty.
 	GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (GetCommunityEngagementSummaryRow, error)
 	// Queries against anime_cache and its child tables.
 	//

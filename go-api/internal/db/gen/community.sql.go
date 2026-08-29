@@ -153,20 +153,41 @@ SELECT
     ), 0)::bigint AS impression_count,
     COALESCE(sum(event_count) FILTER (
         WHERE event_type = 'discussion_open'
-    ), 0)::bigint AS open_count
+    ), 0)::bigint AS open_count,
+    COALESCE(sum(event_count) FILTER (
+        WHERE event_type = 'welcome_card_impression'
+    ), 0)::bigint AS welcome_impression_count,
+    COALESCE(sum(event_count) FILTER (
+        WHERE event_type = 'welcome_card_open'
+    ), 0)::bigint AS welcome_open_count
 FROM community_engagement_daily
 WHERE event_date >= current_date - ($1::integer - 1)
 `
 
 type GetCommunityEngagementSummaryRow struct {
-	ImpressionCount int64 `json:"impressionCount"`
-	OpenCount       int64 `json:"openCount"`
+	ImpressionCount        int64 `json:"impressionCount"`
+	OpenCount              int64 `json:"openCount"`
+	WelcomeImpressionCount int64 `json:"welcomeImpressionCount"`
+	WelcomeOpenCount       int64 `json:"welcomeOpenCount"`
 }
 
+// Two independent pairs, not four interchangeable counters.  Read
+// open_count against impression_count, and welcome_open_count against
+// welcome_impression_count -- never across the pairs.  The two denominators
+// do not count the same renders: hot_discussions_impression is suppressed
+// when the rail has no discussions to show, while welcome_card_impression
+// fires on every mount, because the card it counts renders either way.
+// welcome_impression_count is therefore >= impression_count by construction,
+// and their difference is how often the rail rendered empty.
 func (q *Queries) GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (GetCommunityEngagementSummaryRow, error) {
 	row := q.db.QueryRow(ctx, getCommunityEngagementSummary, dayCount)
 	var i GetCommunityEngagementSummaryRow
-	err := row.Scan(&i.ImpressionCount, &i.OpenCount)
+	err := row.Scan(
+		&i.ImpressionCount,
+		&i.OpenCount,
+		&i.WelcomeImpressionCount,
+		&i.WelcomeOpenCount,
+	)
 	return i, err
 }
 

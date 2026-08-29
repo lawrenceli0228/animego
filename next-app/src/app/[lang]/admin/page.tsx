@@ -41,6 +41,13 @@ interface CommunityMetrics {
   impressions: number;
   opens: number;
   openRate: number;
+  // The pinned /welcome card in the same grid.  Its own pair, because it is
+  // shown on renders where `impressions` is not recorded at all — see the
+  // comment on GetCommunityEngagementSummary.  Never take a ratio across the
+  // two pairs.
+  welcomeImpressions: number;
+  welcomeOpens: number;
+  welcomeOpenRate: number;
 }
 
 async function safeGet<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -208,6 +215,20 @@ function Overview({
               hint={dict.admin.communityMetricsRatio
                 .replace("{{opens}}", String(communityMetrics.opens))
                 .replace("{{impressions}}", String(communityMetrics.impressions))}
+            />
+            {/* Its own denominator, deliberately.  welcomeImpressions counts
+                every render of the rail; impressions above counts only the
+                renders that had discussions in them.  The gap between the two
+                numbers is how often the rail came up empty. */}
+            <StatCard
+              label={dict.admin.statWelcomeCardOpenRate}
+              value={`${(communityMetrics.welcomeOpenRate * 100).toFixed(1)}%`}
+              hint={dict.admin.communityMetricsRatio
+                .replace("{{opens}}", String(communityMetrics.welcomeOpens))
+                .replace(
+                  "{{impressions}}",
+                  String(communityMetrics.welcomeImpressions),
+                )}
             />
           </>
         )}

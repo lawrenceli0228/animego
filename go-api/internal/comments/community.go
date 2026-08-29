@@ -216,6 +216,13 @@ type communityMetricsResponse struct {
 	Impressions int64   `json:"impressions"`
 	Opens       int64   `json:"opens"`
 	OpenRate    float64 `json:"openRate"`
+	// The pinned /welcome card in the same grid, counted separately because
+	// its exposure and the rail's are not the same event -- see the comment
+	// on GetCommunityEngagementSummary.  Its rate is deliberately computed
+	// against its own denominator and never against Impressions.
+	WelcomeImpressions int64   `json:"welcomeImpressions"`
+	WelcomeOpens       int64   `json:"welcomeOpens"`
+	WelcomeOpenRate    float64 `json:"welcomeOpenRate"`
 }
 
 // CommunityMetrics implements the admin-only GET
@@ -229,16 +236,27 @@ func (h *Handlers) CommunityMetrics(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "community metrics query failed"))
 		return
 	}
-	openRate := 0.0
-	if row.ImpressionCount > 0 {
-		openRate = float64(row.OpenCount) / float64(row.ImpressionCount)
-	}
 	httpx.Data(w, http.StatusOK, communityMetricsResponse{
-		Days:        days,
-		Impressions: row.ImpressionCount,
-		Opens:       row.OpenCount,
-		OpenRate:    openRate,
+		Days:               days,
+		Impressions:        row.ImpressionCount,
+		Opens:              row.OpenCount,
+		OpenRate:           engagementRate(row.OpenCount, row.ImpressionCount),
+		WelcomeImpressions: row.WelcomeImpressionCount,
+		WelcomeOpens:       row.WelcomeOpenCount,
+		WelcomeOpenRate:    engagementRate(row.WelcomeOpenCount, row.WelcomeImpressionCount),
 	})
+}
+
+// engagementRate divides a numerator by its own denominator, returning 0 when
+// there is nothing to divide by.  Extracted rather than repeated because the
+// two call sites must not be allowed to drift into sharing a denominator: the
+// rail's impressions and the welcome card's are different populations, and
+// crossing them silently reports a wrong rate rather than an error.
+func engagementRate(numerator, denominator int64) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
 }
 
 func clampIntQuery(r *http.Request, key string, fallback, minValue, maxValue int) int {
@@ -257,12 +275,19 @@ func clampIntQuery(r *http.Request, key string, fallback, minValue, maxValue int
 	return value
 }
 
+// validCommunityEngagement is the application half of a contract the database
+// enforces independently: community_engagement_event_type_chk declares the
+// vocabulary, community_engagement_target_chk declares which events may name
+// an anime.  The switch below must agree with both.  Disagreeing in the
+// permissive direction is the expensive mistake -- the insert then fails as a
+// constraint violation at write time rather than a 400 at parse time, which is
+// a 500 to the caller and a log line to us.
 func validCommunityEngagement(req communityEngagementRequest) bool {
 	if req.Source != "home" && req.Source != "seasonal" {
 		return false
 	}
 	switch req.EventType {
-	case "hot_discussions_impression":
+	case "hot_discussions_impression", "welcome_card_impression", "welcome_card_open":
 		return req.AnilistID == 0 && req.Episode == 0
 	case "discussion_open":
 		return req.AnilistID > 0 && req.Episode > 0

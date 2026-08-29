@@ -13,6 +13,8 @@ import {
   communityDiscussionTarget,
   trackHotDiscussionOpen,
   trackHotDiscussionsImpressionOnce,
+  trackWelcomeCardImpressionOnce,
+  trackWelcomeCardOpen,
 } from "@/lib/communityEngagement";
 import styles from "./HotDiscussions.module.css";
 
@@ -32,6 +34,15 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
   useEffect(() => {
     trackHotDiscussionsImpressionOnce(items.length);
   }, [items.length]);
+
+  // Separate effect, empty deps, on purpose.  The welcome card below renders
+  // outside the `items.length` conditional, so its exposure does not depend on
+  // there being any discussions — and the effect above deliberately records
+  // nothing when the list is empty.  Folding this into that one would make the
+  // card's denominator inherit a gate that does not apply to it.
+  useEffect(() => {
+    trackWelcomeCardImpressionOnce();
+  }, []);
 
   return (
     <section className={styles.section} aria-labelledby="hot-discussions-title">
@@ -128,6 +139,7 @@ export default function HotDiscussions({ items }: { items: HotDiscussion[] }) {
           href="/welcome"
           prefetch={false}
           className={`${styles.card} ${styles.welcomeCard}`}
+          onNavigate={() => trackWelcomeCardOpen()}
         >
           <span className={styles.poster} aria-hidden>
             <FadeImage

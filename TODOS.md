@@ -498,3 +498,24 @@
   服务端日志能分辨（`generate-params` 在不在 / 404 花了几毫秒）。
 - **Depends on / blocked by:** 无。与 Turbopack 那条彼此独立 —— 打包器换回去之后，
   这个盲区照样在。
+||||||| parent of b94900e (docs: record the dialog primitive migration as a TODO)
+## 把剩余 10 个手搓对话框迁到共享 Dialog primitive
+
+- **What:** 下一个新增的对话框会顺带抽出一个共享 Dialog primitive(backdrop、Escape、焦点进入、
+  焦点归还),并让它与 `components/anime/PlayButton.tsx` 同时使用。本条是把其余 10 个也迁过去:
+  `library/_components/` 的 MergeDialog / SplitDialog / RematchDialog / OpsLogDrawer / SeriesDetailSheet、
+  `components/anime/TorrentModal.tsx`、`components/profile/PhotoCropModal.tsx`、
+  `components/safety/ReportDialog.tsx`,以及 HudOverflowMenu 与 LanguageMenu 中的同形部分。
+- **Why:** 全仓 11 个组件各自手写 `e.key === "Escape"`,**没有任何共享实现**;其中只有 3 个
+  (HudOverflowMenu / LanguageMenu / PlayButton)做了关闭后的焦点归还。下一次无障碍修复
+  (焦点囚禁、`inert`、滚动锁定)要手改 11 处,而没有任何机制告诉你漏了哪几处。
+- **Pros:** 每迁一个,重复的图案数量减一;顺带把 8 个缺失的焦点归还一起补上;以后无障碍修复只改一处。
+- **Cons:** 跨 library / player / anime / profile / safety 五个区域,各自有转场动画、背景点击、
+  滚动锁定的差异,不是机械替换;纯重构 PR,无用户可见价值,需要逐个回归。
+- **Context:** 2026-08-29 清点全仓对话框实现时发现。刻意没有一次性全迁 —— 让 primitive 上线
+  当天就有两个真实使用者(新对话框 + PlayButton),同时把重复图案数保持在 11 而不是变成 12,
+  且不让一次全站重构阻塞新功能。primitive 从 `PlayButton.tsx:36,49` 已验证的 rAF 焦点模式
+  提炼(`triggerRef.current?.focus()` / `closeRef.current?.focus()`)。
+  **这条 TODO 最重要的作用不是催重构,而是让下一个要写弹窗的人知道 primitive 已经存在** ——
+  否则抽象会被手搓的第 12 份白白作废。建议按区域分批,一次一个 PR,每个配一条 e2e 键盘用例。
+- **Depends on / blocked by:** 阻塞于 primitive 先落地。
