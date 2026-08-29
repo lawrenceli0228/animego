@@ -141,6 +141,99 @@ func TestCommunityEngagement_RejectsInvalidTarget(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// The welcome card and the rail are counted against different denominators on
+// purpose: the card renders whether or not the rail has anything in it, so its
+// exposure is recorded on strictly more renders.  The two rates here are
+// deliberately different numbers, because a handler that crossed the pairs --
+// dividing welcome opens by rail impressions -- would produce 0.5 for both and
+// look perfectly plausible.
+func TestCommunityEngagement_WelcomeCardKeepsItsOwnDenominator(t *testing.T) {
+	h, pool := makeHandlers(t)
+	seedAnime(t, pool, 404)
+
+	post := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/community/engagement", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		h.TrackCommunityEngagement(rec, req)
+		// A 500 here is the specific failure this migration exists to avoid:
+		// widening community_engagement_event_type_chk without also widening
+		// community_engagement_target_chk lets the request past the Go
+		// allowlist and then fails the insert at the database edge.
+		require.Equal(t, http.StatusAccepted, rec.Code, "body=%s", rec.Body.String())
+	}
+
+	for range 4 {
+		post(`{"eventType":"welcome_card_impression","source":"home"}`)
+	}
+	post(`{"eventType":"welcome_card_open","source":"home"}`)
+
+	for range 2 {
+		post(`{"eventType":"hot_discussions_impression","source":"home"}`)
+	}
+	post(`{"eventType":"discussion_open","source":"home","anilistId":404,"episode":1}`)
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/admin/community-metrics?days=7", nil)
+	metricsRec := httptest.NewRecorder()
+	h.CommunityMetrics(metricsRec, metricsReq)
+	require.Equal(t, http.StatusOK, metricsRec.Code, "body=%s", metricsRec.Body.String())
+
+	var metrics struct {
+		Data struct {
+			Impressions        int64   `json:"impressions"`
+			Opens              int64   `json:"opens"`
+			OpenRate           float64 `json:"openRate"`
+			WelcomeImpressions int64   `json:"welcomeImpressions"`
+			WelcomeOpens       int64   `json:"welcomeOpens"`
+			WelcomeOpenRate    float64 `json:"welcomeOpenRate"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(metricsRec.Body.Bytes(), &metrics))
+
+	assert.Equal(t, int64(2), metrics.Data.Impressions)
+	assert.Equal(t, int64(1), metrics.Data.Opens)
+	assert.Equal(t, 0.5, metrics.Data.OpenRate)
+
+	assert.Equal(t, int64(4), metrics.Data.WelcomeImpressions)
+	assert.Equal(t, int64(1), metrics.Data.WelcomeOpens)
+	assert.Equal(t, 0.25, metrics.Data.WelcomeOpenRate,
+		"welcome opens must divide by welcome impressions, not by the rail's")
+}
+
+func TestCommunityEngagement_RejectsWelcomeEventCarryingATarget(t *testing.T) {
+	h, _ := makeHandlers(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/community/engagement", strings.NewReader(`{
+		"eventType":"welcome_card_open","source":"home","anilistId":101,"episode":3
+	}`))
+	rec := httptest.NewRecorder()
+	h.TrackCommunityEngagement(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"the welcome card names no anime, so a target must be refused at parse time")
+}
+
+// Proves 0028 widened community_engagement_target_chk rather than loosening it.
+// Going around the Go allowlist with a direct insert is the only way to reach
+// the constraint, and reaching it is the point: the handler and the schema are
+// two independent statements of the same rule, and this asserts the schema half
+// still says no.
+func TestCommunityEngagementSchema_WelcomeEventsStillCannotCarryATarget(t *testing.T) {
+	_, pool := makeHandlers(t)
+
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO community_engagement_daily
+			(event_type, source, anilist_id, episode, authenticated, event_count)
+		VALUES ('welcome_card_open', 'home', 101, 3, false, 1)`)
+	require.Error(t, err, "target_chk must still reject an untargeted event that names an anime")
+	assert.Contains(t, err.Error(), "community_engagement_target_chk")
+
+	_, err = pool.Exec(context.Background(), `
+		INSERT INTO community_engagement_daily
+			(event_type, source, anilist_id, episode, authenticated, event_count)
+		VALUES ('welcome_card_typo', 'home', 0, 0, false, 1)`)
+	require.Error(t, err, "the vocabulary stays closed — a typo is not a new event type")
+	assert.Contains(t, err.Error(), "community_engagement_event_type_chk")
+}
+
 func TestSeasonalRows_IncludeDiscussionCount(t *testing.T) {
 	_, pool := makeHandlers(t)
 	seedAnime(t, pool, 303)
