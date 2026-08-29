@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { waitForHydration } from "../../fixtures/hydration";
 
 // The regression guards for the locale URL migration.
 //
@@ -182,6 +183,15 @@ test.describe("hreflang is reciprocal on real HTML", () => {
   });
 
   test("only the bare copy of an untranslated page is indexable", async ({ page }) => {
+    // This test is nine cold navigations on a dev server that compiles each
+    // route on arrival, and it was overrunning the 30s per-test default with
+    // `page.goto: navigating to "/terms"`. That is a budget problem and not a
+    // race — no amount of waiting for hydration would have helped it, and
+    // reading it as flake is what kept it on the suspect list for two rounds.
+    // Deduplicating the double fetch below took it from twelve to nine;
+    // test.slow() covers the rest without changing the budget for anything
+    // else in the file.
+    test.slow();
     // Making no hreflang claim keeps these out of the reciprocal group but
     // not out of the index. They are prerendered and linked from every
     // footer, so without an explicit noindex each legal page has one
@@ -193,8 +203,12 @@ test.describe("hreflang is reciprocal on real HTML", () => {
       return page.locator('meta[name="robots"]').getAttribute("content");
     };
     for (const doc of ["/privacy", "/terms", "/copyright"]) {
-      expect(await robots(doc)).toContain("index");
-      expect(await robots(doc)).not.toContain("noindex");
+      // One fetch, two assertions. It used to navigate twice to assert on the
+      // same page — and the pair only means anything read together, since
+      // "noindex" contains "index" and the first line alone would pass for it.
+      const bare = await robots(doc);
+      expect(bare).toContain("index");
+      expect(bare).not.toContain("noindex");
       for (const prefix of ["/en", "/zh-Hant"]) {
         expect(await robots(`${prefix}${doc}`)).toContain("noindex");
       }
@@ -208,6 +222,12 @@ test.describe("the language menu", () => {
   // on a Traditional page was invited to "switch to Chinese".
   test("offers every locale, in its own script, with the current one marked", async ({ page }) => {
     await page.goto("/zh-Hant/faq");
+    // Both tests in this block click a trigger whose entire job is to run an
+    // onClick. Clicking it before React owns it is a no-op that leaves no
+    // trace: the menu simply never opens, and the failure reads "waiting for
+    // getByRole('menuitem')" — pointing at the menu, which was never the
+    // problem. See fixtures/hydration.ts.
+    await waitForHydration(page, ".agc-lang-trigger");
     await page.getByRole("button", { name: /language|語言|语言/i }).first().click();
 
     const options = page.getByRole("menuitem");
@@ -228,6 +248,7 @@ test.describe("the language menu", () => {
     // page, which is both a worse experience and a signal Google reads as the
     // alternate not really being an alternate.
     await page.goto("/zh-Hant/search?q=frieren");
+    await waitForHydration(page, ".agc-lang-trigger");
     await page.getByRole("button", { name: /language|語言|语言/i }).first().click();
     await page.getByRole("menuitem", { name: "English" }).click();
     await page.waitForURL(/\/en\/search/);

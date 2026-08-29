@@ -244,9 +244,21 @@ jobs:
           # runs before globalSetup seeds anything, so the miss would be a
           # genuine 404 — and `loadDetail` fetches with `revalidate: 60`, so
           # Next would serve that 404 back for a minute after the row existed.
+          #
+          # /seasonal/spring/2026 is the OTHER nested-dynamic segment the suite
+          # reaches, and unlike /anime/0 it is diagnostic: 200 is the answer
+          # only in the healthy state. It needs no seed and no clock. The page
+          # builds its heading from the route params alone and swallows its own
+          # API failure (`.catch(() => EMPTY_ITEMS)` in
+          # [lang]/seasonal/[season]/[year]/page.tsx), so it answers 200 with an
+          # empty grid against a database that has nothing in it — measured
+          # against a dev server with go-api not running at all. The year is a
+          # literal because parseSeasonYear bounds it to 1990..2100 and nothing
+          # else, so this probe cannot go stale.
           for probe in /:200 /login:200 /register:200 /forgot-password:200 \
                        /reset-password/warmup:200 /welcome:200 /library:307 \
-                       /player:200 /admin:307 /anime/0:404; do
+                       /player:200 /admin:307 /anime/0:404 \
+                       /seasonal/spring/2026:200; do
             # Split on the LAST colon, so a path that ever contains one still
             # pairs correctly with its status.
             route="${probe%:*}"
@@ -263,8 +275,14 @@ jobs:
               # The dev-server hint only when it applies. This loop also guards
               # auth redirects, and pointing an auth regression at a bundler bug
               # would replace one misleading failure with another.
+              #
+              # It names two causes rather than asserting one. The first draft
+              # asserted the dev-server defect, and a deliberate product break
+              # (a season removed from VALID_SEASONS) then got told to go read
+              # about bundlers. A guard that confidently misattributes is the
+              # thing this whole step exists to stop.
               if [ "$code" = "404" ]; then
-                echo "::error::A 404 here is the dev-server failure documented above this loop, not a product 404: every route with a dynamic segment under [lang] stops resolving for the whole run. Check the next dev log below for the 'generate-params' phase — healthy 200s have it, these 404s do not."
+                echo "::error::A 404 here is one of two things, and the dev log below tells them apart. (1) The dev-server defect documented above this loop: every route with a dynamic segment under [lang] stops resolving for the whole run. Its signature is a MISSING 'generate-params' phase and a near-zero compile time — the router 404s without ever building the segment. (2) A real product regression on this route, which compiles the segment first: you will see 'generate-params' and a compile time in the hundreds of ms, and the page itself decided to 404. Check which before you go looking."
               fi
               cat /tmp/next-dev.log
               exit 1

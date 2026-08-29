@@ -17,6 +17,7 @@ import {
 } from "../_helpers";
 import { makeUser } from "../../fixtures/users";
 import { closePg, getResetTokenFromPg, insertPgUser } from "../../fixtures/pg";
+import { waitForHydration } from "../../fixtures/hydration";
 
 // Start every test with a clean cookie jar so the already-authed
 // bypass on /login + /register doesn't redirect us off the form.
@@ -37,6 +38,15 @@ test.describe("auth journey", () => {
 
     // ── Register
     await page.goto("/register");
+    // Every form in this file is gated on hydration before the first fill.
+    // Without it a keystroke can land in the DOM and never reach React state:
+    // the field looks filled, `onChange` never ran, and the submit posts an
+    // empty value. That failure surfaces as the WRONG assertion failing —
+    // "invalid email format" where the test expected a rejected password —
+    // which is what made these three tests fail together whenever the dev
+    // server was slow enough. One wait per form: React commits the whole form
+    // in one pass, so claiming the first field means it claimed the rest.
+    await waitForHydration(page, "#register-username");
     await page.locator("#register-username").fill(user.username);
     await page.locator("#register-email").fill(user.email);
     await page.locator("#register-password").fill(user.password);
@@ -67,6 +77,7 @@ test.describe("auth journey", () => {
 
     // ── Login with the just-registered credentials
     await page.goto("/login");
+    await waitForHydration(page, "#login-email");
     await page.locator("#login-email").fill(user.email);
     await page.locator("#login-password").fill(user.password);
     await page.locator('button[type="submit"]').click();
@@ -95,6 +106,11 @@ test.describe("auth journey", () => {
     });
 
     await page.goto("/login");
+    // Load-bearing here specifically: this test asserts on WHICH error the form
+    // shows. An unhydrated fill submits an empty email, the client-side format
+    // check rejects it first, and the assertion below fails on a message that
+    // has nothing to do with passwords.
+    await waitForHydration(page, "#login-email");
     await page.locator("#login-email").fill(user.email);
     await page.locator("#login-password").fill("definitely-not-the-password");
     await page.locator('button[type="submit"]').click();
@@ -129,6 +145,7 @@ test.describe("auth journey", () => {
 
     // ── Forgot password — submit the email
     await page.goto("/forgot-password");
+    await waitForHydration(page, "#forgot-email");
     await page.locator("#forgot-email").fill(user.email);
     await page.locator('button[type="submit"]').click();
 
@@ -159,6 +176,7 @@ test.describe("auth journey", () => {
     // ── Visit /reset-password/<token>, set the new password
     const newPassword = "e2e-test-newpass-456";
     await page.goto(`/reset-password/${token}`);
+    await waitForHydration(page, "#reset-password");
     await page.locator("#reset-password").fill(newPassword);
     await page.locator("#reset-confirm").fill(newPassword);
     await page.locator('button[type="submit"]').click();
@@ -168,6 +186,14 @@ test.describe("auth journey", () => {
     await expect(page).toHaveURL(/\/login(\?|$)/);
 
     // ── Log in with the new password
+    //
+    // This form arrived by router.replace, not a navigation, so its nodes were
+    // client-rendered and carry React's keys from birth — the wait resolves at
+    // once. It stays because the wait is also what proves the form is on screen
+    // (toHaveURL above only proves the URL changed), and because whether this
+    // route is reached softly or hard is not something a reader of the next
+    // line should have to work out.
+    await waitForHydration(page, "#login-email");
     await page.locator("#login-email").fill(user.email);
     await page.locator("#login-password").fill(newPassword);
     await page.locator('button[type="submit"]').click();

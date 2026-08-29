@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { closePg, ensureAnimeCached, removeAnimeFixture } from "../../fixtures/pg";
+import { waitForHydration } from "../../fixtures/hydration";
 
 // What typing into /search costs.
 //
@@ -25,25 +26,15 @@ import { closePg, ensureAnimeCached, removeAnimeFixture } from "../../fixtures/p
 test.use({ storageState: { cookies: [], origins: [] } });
 
 /**
- * Resolve once React owns the input.
+ * Resolve once React owns the search box.
  *
- * Not paranoia and not a sleep in disguise: React attaches `__reactFiber$…`
- * keys to a node it has hydrated, and until they exist a keystroke lands in
- * the DOM and never reaches state. `next dev` compiles on demand, so that
- * window is seconds wide on a cold route — long enough that the probe written
- * alongside this spec typed into it three times out of six and reported the
- * feature broken.
+ * This started as a private function here, written for #129. It is general
+ * knowledge — every spec that types is exposed to the same race — so the
+ * implementation and the reasoning now live in fixtures/hydration.ts, where
+ * globalSetup can reach them too. What stays here is the selector.
  */
-async function hydrated(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      const input = document.querySelector('input[name="q"]');
-      return !!input && Object.keys(input).some((k) => k.startsWith("__react"));
-    },
-    undefined,
-    { timeout: 60_000 },
-  );
-}
+const hydrated = (page: Page): Promise<void> =>
+  waitForHydration(page, 'input[name="q"]');
 
 /** Every GET /api/anime/search the browser issues from now on. */
 function recordSearches(page: Page): string[] {
