@@ -1,7 +1,9 @@
 /**
  * Player preferences that live on the device, not on the server.
  *
- * Today that is one switch: `autoMarkDone`. When it is on, the player marks an
+ * Two of them so far: `autoMarkDone` and the danmaku speed ladder.
+ *
+ * `autoMarkDone` — when it is on, the player marks an
  * episode watched once playback crosses the completion threshold and pushes
  * the watch progress up (design doc §4 decision 6 / §5.1 — ported from
  * Animeko's `VideoScaffoldConfig.autoMarkDone: Boolean = true`, which is on by
@@ -134,4 +136,107 @@ export function subscribeAutoMarkDone(onChange: () => void): () => void {
     window.removeEventListener(CHANGE_EVENT, onChange);
     window.removeEventListener("storage", onChange);
   };
+}
+
+/* ── Danmaku speed ─────────────────────────────────────────────────────── */
+
+/** Same namespace as the rest (`animego:playbackRate`, `animego:danmakuVisible`). */
+export const DANMAKU_SPEED_KEY = "animego:danmakuSpeed";
+
+/**
+ * How long a comment takes to cross the screen, in seconds. Bigger is slower.
+ *
+ * THE CEILING IS 10 AND IT IS NOT OURS. artplayer-plugin-danmuku clamps inside
+ * `config()`:
+ *
+ *     this.option.speed = clamp(this.option.speed, 1, 10);
+ *
+ * so a step of 15 does not render slowly — it silently becomes 10. Measured,
+ * not assumed: `config({speed: 15})` and `config({speed: 12})` both read back
+ * as 10. That failure is invisible from the UI in the worst possible way,
+ * because the slider finds its position by matching `option.speed` against
+ * these values (`SPEED.steps.findIndex(item => item.value === option.speed)`)
+ * — an out-of-range step would collapse onto whichever step holds 10 and the
+ * handle would jump to the wrong label. `speedLadderIsRenderable()` pins it.
+ *
+ * The ladder deliberately sits at the slow end: the fastest tier here (6.5) is
+ * still slower than the 5 the player used to hard-code, because dense comment
+ * streams at 5s are the thing that made them unreadable.
+ */
+export const DANMAKU_SPEED_STEPS: ReadonlyArray<{ name: string; value: number }> = [
+  { name: "极慢", value: 10 },
+  { name: "缓慢", value: 8 },
+  { name: "适中", value: 6.5 },
+];
+
+/** The slowest tier. Deliberately the default — see DANMAKU_SPEED_STEPS. */
+export const DANMAKU_SPEED_DEFAULT = DANMAKU_SPEED_STEPS[0].value;
+
+/** The bounds the plugin enforces; exported so the guard test can name them. */
+export const DANMAKU_SPEED_MIN = 1;
+export const DANMAKU_SPEED_MAX = 10;
+
+/**
+ * Would every step survive the plugin's clamp and stay findable on the slider?
+ *
+ * Exists so the ladder cannot be edited into a shape that looks fine in the
+ * source and misbehaves only once a comment is on screen.
+ */
+export function speedLadderIsRenderable(
+  steps: ReadonlyArray<{ value: number }> = DANMAKU_SPEED_STEPS,
+): boolean {
+  const seen = new Set<number>();
+  for (const { value } of steps) {
+    if (!Number.isFinite(value)) return false;
+    if (value < DANMAKU_SPEED_MIN || value > DANMAKU_SPEED_MAX) return false;
+    if (seen.has(value)) return false;
+    seen.add(value);
+  }
+  return steps.length > 0;
+}
+
+/**
+ * The stored speed, snapped to a step we actually offer.
+ *
+ * Snapping rather than clamping is the point: the slider locates the handle by
+ * exact equality against the step values, so a stored 5 — which every user who
+ * played anything before this ladder existed has — is not "a bit fast", it is
+ * *no position at all* (`findIndex` returns -1). Falling back to the default
+ * puts the handle somewhere real.
+ */
+export function readDanmakuSpeed(store: PrefStore | null = prefStore()): number {
+  if (!store) return DANMAKU_SPEED_DEFAULT;
+  try {
+    const raw = Number(store.getItem(DANMAKU_SPEED_KEY));
+    if (!Number.isFinite(raw)) return DANMAKU_SPEED_DEFAULT;
+    return DANMAKU_SPEED_STEPS.some((s) => s.value === raw)
+      ? raw
+      : DANMAKU_SPEED_DEFAULT;
+  } catch {
+    return DANMAKU_SPEED_DEFAULT;
+  }
+}
+
+/**
+ * Persist the speed. Returns whether it landed, for the same reason
+ * `writeAutoMarkDone` does.
+ *
+ * A value outside the ladder is refused rather than written: the plugin's
+ * `artplayerPluginDanmuku:config` event fires for every config change it makes
+ * — opacity, margin, font size, the comment list we hand it on each episode —
+ * so this is called with whatever `option.speed` happens to be, and writing an
+ * unknown value would mean `readDanmakuSpeed` discards it next time anyway.
+ */
+export function writeDanmakuSpeed(
+  value: number,
+  store: PrefStore | null = prefStore(),
+): boolean {
+  if (!store) return false;
+  if (!DANMAKU_SPEED_STEPS.some((s) => s.value === value)) return false;
+  try {
+    store.setItem(DANMAKU_SPEED_KEY, String(value));
+  } catch {
+    return false;
+  }
+  return true;
 }

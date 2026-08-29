@@ -6,6 +6,11 @@ import type { Danmu } from "artplayer-plugin-danmuku";
 import { applyHeatmapPath } from "@/lib/heatmapPath";
 import { convertAssToVtt, convertSrtToVtt } from "@/lib/subtitleConvert";
 import { mountJassub, destroyJassub } from "./jassubOverlay";
+import {
+  DANMAKU_SPEED_STEPS,
+  readDanmakuSpeed,
+  writeDanmakuSpeed,
+} from "@/lib/playerSettings";
 import { useLang } from "@/lib/lang-client";
 import type {
   WatchTick,
@@ -306,6 +311,7 @@ export function VideoPlayer({
   const subtitleOffsetRef = useRef(readSubtitleOffset());
   const playbackRateRef = useRef(readPlaybackRate());
   const danmakuVisibleRef = useRef(readDanmakuVisible());
+  const danmakuSpeedRef = useRef(readDanmakuSpeed());
   // P2 in-memory resume — used only when progressKey is absent (unmatched files).
   const resumeAtRef = useRef(resumeAt);
   const onProgressTickRef = useRef(onProgressTick);
@@ -350,6 +356,7 @@ export function VideoPlayer({
     const initialOffset = subtitleOffsetRef.current;
     const initialRate = playbackRateRef.current;
     const initialDanmakuVisible = danmakuVisibleRef.current;
+    const initialDanmakuSpeed = danmakuSpeedRef.current;
     // Always wire VTT plaintext as the resilient base layer. When jassub
     // mounts successfully on top, we hide the VTT div so they don't double.
     // If jassub fails to load, VTT remains visible — user always sees
@@ -474,7 +481,20 @@ export function VideoPlayer({
         plugins: [
           artplayerPluginDanmuku({
             danmuku: danmakuList || [],
-            speed: 5,
+            // The plugin ships a five-stop ladder (10 / 7.5 / 5 / 2.5 / 1) with
+            // only three of them labelled and 5 as the middle. Replaced with
+            // three stops that all sit at the slow end, defaulting to the
+            // slowest the plugin will render — the ladder, the ceiling that
+            // caps it and the reasoning are in lib/playerSettings.ts.
+            speed: initialDanmakuSpeed,
+            SPEED: {
+              min: 0,
+              max: DANMAKU_SPEED_STEPS.length - 1,
+              // Spread so the plugin cannot see our frozen array. It writes
+              // `...this.option.SPEED` over its own defaults and reads `steps`
+              // back out on every slider move.
+              steps: DANMAKU_SPEED_STEPS.map((s) => ({ ...s })),
+            },
             opacity: 0.8,
             fontSize: 24,
             antiOverlap: true,
@@ -498,6 +518,24 @@ export function VideoPlayer({
       if (!initialDanmakuVisible) {
         art.plugins?.artplayerPluginDanmuku?.hide?.();
       }
+
+      // Remember where the user left the speed slider.
+      //
+      // The plugin owns that control — it is inside its own config panel, not
+      // in artplayer's settings menu where the other preferences live — so
+      // there is no onChange of ours to hang this on. `…:config` is the only
+      // signal, and it fires for every config change the plugin makes,
+      // including the comment list we hand it on each episode switch. Hence
+      // the ref: it keeps the whole thing to one storage write per actual
+      // change instead of one per episode, and `writeDanmakuSpeed` refuses
+      // anything outside the ladder anyway.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      art.on("artplayerPluginDanmuku:config", (opt: any) => {
+        const next = opt?.speed;
+        if (typeof next !== "number" || next === danmakuSpeedRef.current) return;
+        danmakuSpeedRef.current = next;
+        writeDanmakuSpeed(next);
+      });
 
       // Chrome auto-exposes embedded MKV subtitle tracks as video.textTracks
       // and renders cue.text as plaintext — for ASS payloads it prints raw
