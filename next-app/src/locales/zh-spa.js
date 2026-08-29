@@ -131,7 +131,7 @@ const zh = {
     watchedFailed: '第 {{ep}} 集没记上，请再试一次',
     watchedSignedOut: '登录状态已过期，重新登录后再记录',
     watchedProgress: '已看 {{done}} / {{total}} 集',
-    watchedHint: '点一下方格，记录你真正看过的那一集。',
+    watchedHint: '点一下某一集，记录你真正看过的那一集。',
     watchedCompletedHint: '这部已标记「看完」，所有集数都算已看。取消其中任意一集，会把状态改回「在看」，并改为按逐集记录显示。',
     furthestMarked: '标记到的最后一集',
     autoCompleted: '全部集数已记录，状态自动改为「看完」',

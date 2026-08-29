@@ -109,6 +109,19 @@ const en = {
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
+    info: 'Information',
+    synopsis: 'Synopsis',
+    charUnit: 'chars',
+    infoSeason: 'Season',
+    infoAired: 'Aired',
+    infoStatus: 'Status',
+    infoEpisodes: 'Episodes',
+    infoDuration: 'Duration',
+    infoFormat: 'Format',
+    infoSource: 'Source',
+    infoStudio: 'Studio',
+    scores: 'Scores',
+    votes: 'ratings',
     // Parity key. An English reader never sees the Chinese synopsis
     // (pickDescription pins `en` to AniList's description), so this only
     // surfaces if a future phase shows the Bangumi text to en as well.

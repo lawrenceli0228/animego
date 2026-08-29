@@ -85,15 +85,19 @@ test.afterAll(async () => {
 });
 
 /**
- * The site's own score badge, not Bangumi's.
+ * The site's own score, not Bangumi's.
  *
- * Both are spans beginning with a star, but the Bangumi one is prefixed with
- * a "BGM" label, so anchoring on the star being FIRST separates them without
- * depending on a CSS-module class name (those are hashed at build time) or
- * on a test id in production markup.
+ * Anchored on the source name, which is what the hero prints: "AniList 87"
+ * beside "Bangumi 7.9". It was `/^★/` back when both were stars and only the
+ * Bangumi one carried a "BGM" prefix — the star said nothing the word does
+ * not, and a 0-100 value shown as "8.7" had to be mentally converted before
+ * it could be compared against the site it came from.
+ *
+ * Still a text anchor rather than a CSS-module class (hashed at build time)
+ * or a test id (which would exist only for this file).
  */
 const scoreBadge = (page: import("@playwright/test").Page) =>
-  page.locator("main span").filter({ hasText: /^★/ }).first();
+  page.locator("main span").filter({ hasText: /^AniList\s/ }).first();
 
 test.describe("the score badge", () => {
   // The assertion is not "is it green". It was genuinely green — that was
@@ -113,9 +117,25 @@ test.describe("the score badge", () => {
       });
 
       expect(style.color).toBe(`rgb(${rgb})`);
-      // The pill is the same hue at 12%. Before the fix this was
-      // rgba(255, 159, 10, 0.12) — amber — for every score, including this one.
-      expect(style.background).toBe(`rgba(${rgb}, 0.12)`);
+
+      // The background is now conditional, and the reason is worth stating
+      // because relaxing an assertion is normally how a guard rots.
+      //
+      // The defect this pins was never "the pill is missing" — it was that
+      // the pill and the text named DIFFERENT bands: an 87 rendered
+      // rgb(48,209,88) green on an rgba(255,159,10,0.12) amber fill. The
+      // invariant is agreement between the two, and the count of colours
+      // that can disagree with the foreground is zero when there is no
+      // background at all.
+      //
+      // The hero sets its facts as one dot-separated sentence now, so the
+      // score has no pill to tint — scoreTextStyle() returns the band
+      // foreground alone. A transparent background is therefore correct
+      // here, and the line below still fails the original bug: put any
+      // colour back and it must be this band's.
+      if (style.background !== "rgba(0, 0, 0, 0)") {
+        expect(style.background).toBe(`rgba(${rgb}, 0.12)`);
+      }
     });
   }
 
@@ -135,10 +155,10 @@ test.describe("the hero on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("the synopsis starts on the first screen", async ({ page }) => {
-    // Measured on production before this change: the synopsis began at
-    // y=799 on an 844-tall screen, which is about 45px of visible text under
-    // a 400px banner and a 300px poster. This is the assertion that keeps
-    // the hero from growing back.
+    // Measured on production before this assertion existed: the synopsis
+    // began at y=799 on an 844-tall screen — about 45px of visible text, one
+    // line, under a 400px banner and a 300px poster. This is the assertion
+    // that keeps the hero from growing back.
     await page.goto(`/anime/${HIGH}`);
 
     const synopsis = page.locator("main p").filter({ hasText: "A test synopsis" }).first();
@@ -146,32 +166,57 @@ test.describe("the hero on a phone", () => {
 
     const box = await synopsis.boundingBox();
     expect(box).not.toBeNull();
-    // Half the fold, not all of it: "technically above 844" is what the old
-    // layout already satisfied.
-    expect(box!.y).toBeLessThan(422);
+
+    // The bound is stated as "how much text is readable", not as a y
+    // coordinate, because that is the property being defended and the y that
+    // satisfies it depends on the layout.
+    //
+    // It was `y < 422` — half the fold — while the synopsis lived inside the
+    // hero. It no longer does: the hero is artwork with the title and the
+    // controls on it, and the body copy is its own band underneath, which
+    // costs the synopsis roughly 90px. Worst case in the catalogue (a
+    // 20-character title beside seven genres) now starts at 490, and typical
+    // titles at 407.
+    //
+    // 300px is nine or ten lines of Chinese body copy. The old defect fails
+    // this by a wide margin — 844 − 799 = 45 — so the guard still catches
+    // the regression it was written for.
+    const VISIBLE_SYNOPSIS_MIN = 300;
+    expect(box!.y).toBeLessThan(844 - VISIBLE_SYNOPSIS_MIN);
   });
 
-  test("the banner, the poster and the overlap shrink together", async ({ page }) => {
-    // The four hero values are one design. This checks the two that are
-    // measurable from outside actually moved, so that a future change to one
-    // clamp without the others fails here rather than looking merely odd.
+  test("the artwork and the poster scale down together", async ({ page }) => {
+    // Both halves of the hero shrink on a phone, so a future change to one
+    // clamp without the other fails here rather than looking merely odd.
     await page.goto(`/anime/${HIGH}`);
 
     const banner = page.locator("main img[aria-hidden='true']").first();
     const bannerBox = await banner.boundingBox();
     expect(bannerBox).not.toBeNull();
-    expect(bannerBox!.height).toBeLessThan(200);
+    // The artwork is the hero's full background now, not a strip above it,
+    // so this is the hero's own height. It was `< 200` when the banner was a
+    // separate 150px band; the floor is 340 and it must stay well under half
+    // the 844px screen.
+    expect(bannerBox!.height).toBeLessThan(420);
 
     const cover = page.locator("img.hero-cover").first();
     const coverBox = await cover.boundingBox();
     expect(coverBox).not.toBeNull();
     expect(coverBox!.width).toBeLessThan(140);
 
-    // The poster still straddles the banner's lower edge — that overlap is
-    // the hero's whole visual idea, and a mis-scaled pull would either
-    // detach it or bury it.
-    expect(coverBox!.y).toBeLessThan(bannerBox!.y + bannerBox!.height);
-    expect(coverBox!.y + coverBox!.height).toBeGreaterThan(
+    // The poster sits ON the artwork, fully inside it.
+    //
+    // This assertion is inverted from what it was. It used to require the
+    // poster to STRADDLE the banner's lower edge, and the comment called
+    // that overlap "the hero's whole visual idea" — true of the design it
+    // was written for, where a fixed-height banner sat above content that a
+    // negative margin pulled up into it. The artwork is now the background
+    // of the whole hero and the content is laid on top of it, so there is no
+    // seam left to straddle; a poster crossing the lower edge would mean the
+    // content had overflowed the hero, which is the actual defect worth
+    // catching here.
+    expect(coverBox!.y).toBeGreaterThanOrEqual(bannerBox!.y);
+    expect(coverBox!.y + coverBox!.height).toBeLessThanOrEqual(
       bannerBox!.y + bannerBox!.height,
     );
   });
@@ -180,16 +225,23 @@ test.describe("the hero on a phone", () => {
 test.describe("the hero on a desktop", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test("keeps its full-size banner and poster", async ({ page }) => {
-    // The other half of the clamp. The mobile work was only safe because it
-    // left desktop untouched, and "untouched" is a claim worth holding.
+  test("keeps its full-size artwork and poster", async ({ page }) => {
+    // The other half of the clamp. Phone work must not reach desktop, and
+    // "untouched" is a claim worth holding.
     await page.goto(`/anime/${HIGH}`);
 
     const bannerBox = await page
       .locator("main img[aria-hidden='true']")
       .first()
       .boundingBox();
-    expect(bannerBox?.height).toBe(400);
+    // 556 at 1440px — the hero is `clamp(340px, 38.6vw, 560px)` and 38.6vw
+    // is 555.84 here. It was 400, back when this was a fixed-height banner
+    // strip rather than the full background of the hero.
+    //
+    // Rounded before comparing: 38.6vw lands on 555.828125 and a bounding
+    // box is a float, so an exact toBe() would pin the number to whatever
+    // sub-pixel the current viewport happens to produce.
+    expect(Math.round(bannerBox?.height ?? 0)).toBe(556);
 
     const coverBox = await page.locator("img.hero-cover").first().boundingBox();
     expect(coverBox?.width).toBe(210);

@@ -33,14 +33,7 @@
 // showing a progress number the detail page has already moved past.
 
 import Link from "@/components/ui/LocaleLink";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
@@ -88,9 +81,9 @@ import {
   visibleWatched,
   watchedInGrid,
   type AutoStatus,
-  type EpisodeCellState,
   type WatchedTracker,
 } from "./watchedEpisodeState";
+import styles from "./EpisodesGrid.module.css";
 
 interface EpisodesGridProps {
   anilistId: number;
@@ -148,223 +141,20 @@ function fill(template: string, values: Record<string, string | number>): string
   return out;
 }
 
-// Hover / focus lives in a stylesheet because neither can be expressed as an
-// inline style, and these cells are now interactive: a keyboard user has to be
-// able to SEE which cell they are on before they press it. Injected here rather
-// than added to globals.css for the same reason SubscriptionButton injects its
-// keyframe — globals.css is another surface's file.
-const GRID_CSS = `
-[data-episode-toggle]:not(:disabled):hover {
-  background: rgba(255,255,255,0.07);
-}
-[data-episode-toggle]:focus-visible,
-[data-episode-discussion]:focus-visible {
-  outline: 2px solid #0a84ff;
-  outline-offset: 2px;
-}
-[data-episode-discussion]:hover {
-  background: rgba(10,132,255,0.28);
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-episode-toggle] { transition: none; }
-}
-`;
-
-const headerRowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "baseline",
-  justifyContent: "space-between",
-  flexWrap: "wrap",
-  gap: 10,
-  marginBottom: 8,
-};
-
-const sectionLabelStyle: CSSProperties = {
-  color: "#0a84ff",
-  fontSize: 13,
-  fontWeight: 600,
-  letterSpacing: "2px",
-  textTransform: "uppercase",
-  margin: 0,
-};
-
-const progressStyle: CSSProperties = {
-  fontSize: 12,
-  color: "rgba(235,235,245,0.55)",
-  fontVariantNumeric: "tabular-nums",
-};
-
-const hintStyle: CSSProperties = {
-  margin: "0 0 14px",
-  fontSize: 12,
-  lineHeight: 1.5,
-  color: "rgba(235,235,245,0.42)",
-};
-
-// The "we don't know the count yet" panel. Dashed rather than solid on
-// purpose: it reads as a slot waiting to be filled, which is the whole claim
-// being made, where the solid border used elsewhere in this section reads as
-// finished content.
-const pendingPanelStyle: CSSProperties = {
-  border: "1px dashed #48484a",
-  borderRadius: 12,
-  padding: "18px 16px",
-  background: "rgba(255,255,255,0.02)",
-};
-
-const pendingTitleStyle: CSSProperties = {
-  margin: 0,
-  color: "rgba(235,235,245,0.72)",
-  fontSize: 14,
-  fontWeight: 600,
-};
-
-const pendingHintStyle: CSSProperties = {
-  margin: "6px 0 0",
-  color: "rgba(235,235,245,0.42)",
-  fontSize: 12,
-  lineHeight: 1.5,
-};
-
-const gridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(88px, 1fr))",
-  gap: 10,
-};
-
-/**
- * The cell's frame. Carries the whole visual state so the toggle inside can
- * stay a transparent, full-bleed hit area — a button nested inside a button is
- * invalid HTML, and the discussion chip has to be its own control.
- */
-function shellStyle(
-  state: EpisodeCellState,
-  isOpen: boolean,
-  isFurthest: boolean,
-): CSSProperties {
-  let background = "rgba(255,255,255,0.04)";
-  let borderColor = "#38383a";
-  if (state !== "unwatched") {
-    background = "rgba(48,209,88,0.12)";
-    // The furthest mark deepens the SAME green rather than introducing a
-    // second colour. It is an annotation on a watched cell, and the old blue
-    // box it replaces meant something else entirely — "current, not yet
-    // watched" — so reinstating that treatment would re-import the meaning.
-    borderColor = isFurthest ? "rgba(48,209,88,0.70)" : "rgba(48,209,88,0.30)";
-  }
-  // Open-panel highlight overrides the watched tint (legacy parity).
-  if (isOpen) {
-    background = "rgba(10,132,255,0.12)";
-    borderColor = "rgba(10,132,255,0.55)";
-  }
-  return {
-    position: "relative",
-    background,
-    border: `1px solid ${borderColor}`,
-    borderRadius: 10,
-    minWidth: 0,
-    overflow: "hidden",
-  };
-}
-
-/**
- * The anchor: a 2px rule along the bottom edge of the furthest marked cell.
- *
- * Deliberately quiet. A grid of two dozen cells with scattered marks gives a
- * reader nothing to orient by, and this is the one cell worth finding again —
- * but it must stay subordinate to the checkmark, because "watched" is the
- * claim and "furthest" is only a note about where the claims stop.
- */
-const furthestBarStyle: CSSProperties = {
-  position: "absolute",
-  left: 0,
-  right: 0,
-  bottom: 0,
-  height: 2,
-  background: "#30d158",
-  pointerEvents: "none",
-};
-
-const toggleStyle: CSSProperties = {
-  display: "block",
-  width: "100%",
-  background: "transparent",
-  border: 0,
-  borderRadius: 10,
-  padding: "10px 8px 8px",
-  textAlign: "center",
-  minWidth: 0,
-  color: "inherit",
-  fontFamily: "inherit",
-  transition: "background 200ms",
-};
-
-function discussionStyle(isOpen: boolean, hasComments: boolean): CSSProperties {
-  return {
-    position: "absolute",
-    top: 3,
-    right: 3,
-    zIndex: 1,
-    minWidth: 24,
-    height: 20,
-    padding: "0 5px",
-    borderRadius: 6,
-    border: 0,
-    background: isOpen ? "rgba(10,132,255,0.30)" : "rgba(120,120,128,0.18)",
-    color: hasComments
-      ? "rgba(235,235,245,0.80)"
-      : "rgba(235,235,245,0.38)",
-    fontSize: 9,
-    fontWeight: 700,
-    lineHeight: "20px",
-    fontFamily: "inherit",
-    cursor: "pointer",
-    transition: "background 150ms",
-  };
-}
-
-function numberStyle(state: EpisodeCellState, isOpen: boolean): CSSProperties {
-  let color = "rgba(235,235,245,0.60)";
-  if (state !== "unwatched") color = "#30d158";
-  if (isOpen) color = "#0a84ff";
-  return {
-    fontSize: 20,
-    fontWeight: 800,
-    color,
-    lineHeight: 1,
-    marginBottom: 5,
-    fontFamily: "'Sora', sans-serif",
-  };
-}
-
-const kickerStyle: CSSProperties = {
-  display: "block",
-  fontSize: 10,
-  color: "rgba(235,235,245,0.30)",
-  marginBottom: 3,
-  fontWeight: 600,
-  textTransform: "uppercase",
-  letterSpacing: "0.5px",
-};
-
-const checkStyle: CSSProperties = {
-  display: "block",
-  fontSize: 12,
-  color: "#30d158",
-  marginBottom: 2,
-  minHeight: 14,
-};
-
-const cellTitleStyle: CSSProperties = {
-  display: "block",
-  fontSize: 9,
-  color: "rgba(235,235,245,0.35)",
-  marginTop: 2,
-  lineHeight: 1.2,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
+// Every rule this section draws lives in EpisodesGrid.module.css, keyed off
+// the `data-` attributes below rather than off style objects built per cell.
+//
+// It used to be two halves that could not see each other: inline objects for
+// everything expressible inline, and an injected <style> string for the three
+// things that are not (:hover, :focus-visible, prefers-reduced-motion). The
+// injected half is what the app-wide focus-ring lint cannot read, and it had
+// drifted — the ring in there was an `outline`, which the cell's own
+// `overflow: hidden` was cropping. See the header of the stylesheet.
+//
+// The cost argument is the same one that governs everything else here: there
+// is no pagination, so `total` cells are drawn, and at a thousand episodes a
+// style object per cell per render is a thousand allocations that buy nothing
+// an attribute selector does not.
 
 export default function EpisodesGrid({
   anilistId,
@@ -794,11 +584,11 @@ export default function EpisodesGrid({
   // it reads as "none". Say what is actually true instead.
   if (skeleton.kind === "pending") {
     return (
-      <section style={{ marginTop: 40, marginBottom: 60 }}>
-        <h2 style={sectionLabelStyle}>{t("detail.episodes")}</h2>
-        <div style={{ ...pendingPanelStyle, marginTop: 16 }}>
-          <p style={pendingTitleStyle}>{t("detail.episodeCountPending")}</p>
-          <p style={pendingHintStyle}>{t("detail.episodeCountPendingHint")}</p>
+      <section className={styles.section}>
+        <h2 className={styles.sectionLabel}>{t("detail.episodes")}</h2>
+        <div className={styles.pendingPanel}>
+          <p className={styles.pendingTitle}>{t("detail.episodeCountPending")}</p>
+          <p className={styles.pendingHint}>{t("detail.episodeCountPendingHint")}</p>
         </div>
       </section>
     );
@@ -810,41 +600,68 @@ export default function EpisodesGrid({
   // walks the status back to `watching` (autoStatusForSet), so the reader gets
   // out of `completed` from right here rather than hunting for the dropdown.
   const canToggle = access === "ready";
+  // One number, read twice: as the caption the header already printed, and as
+  // the meter's scale factor. Derived once so the bar and the caption cannot
+  // disagree about the same fact.
+  const watchedCount = watchedInGrid(watched, isCompleted, total);
+  const progressRatio = total > 0 ? watchedCount / total : 0;
   const reading = latestWatched(watched, isCompleted, total);
   const previewEpisode = openEp ?? reading;
   const previewSummary = previewEpisode
     ? discussionByEpisode.get(previewEpisode)
     : undefined;
 
-  const cells: { n: number; title: string }[] = [];
+  // `original` alongside `title`: the picked title follows the reader's
+  // language, the original is always the Japanese one. Shown together, the
+  // way the design lays them out — a viewer matching an episode against a
+  // filename or a torrent needs the original, and a viewer reading the list
+  // needs their own language.
+  const cells: { n: number; title: string; original: string }[] = [];
   for (let n = 1; n <= total; n += 1) {
     // Shared with the server-rendered grid in app/[lang]/anime/[id]/page.tsx —
     // the two used to hold byte-identical copies of this ladder.
-    cells.push({ n, title: pickEpisodeTitle(titleByEpisode.get(n), lang) });
+    const rec = titleByEpisode.get(n);
+    const title = pickEpisodeTitle(rec, lang);
+    const original = rec?.name ?? "";
+    cells.push({
+      n,
+      title,
+      // Suppressed when it IS the title — under a Japanese-first ladder, or
+      // for a row that only ever had one name, the two are the same string
+      // and printing it twice reads as a rendering fault.
+      original: original && original !== title ? original : "",
+    });
   }
 
   return (
-    <section style={{ marginTop: 40, marginBottom: 60 }}>
-      <style>{GRID_CSS}</style>
-      <div style={headerRowStyle}>
-        <h2 style={sectionLabelStyle}>{t("detail.episodes")}</h2>
+    <section className={styles.section}>
+      <div className={styles.headerRow}>
+        <h2 className={styles.sectionLabel}>{t("detail.episodes")}</h2>
         {access === "ready" && (
-          <span style={progressStyle}>
-            {fill(t("detail.watchedProgress"), {
-              done: watchedInGrid(watched, isCompleted, total),
-              total,
-            })}
+          <span className={styles.progressText}>
+            {fill(t("detail.watchedProgress"), { done: watchedCount, total })}
           </span>
         )}
       </div>
       {access === "ready" && (
-        <p style={hintStyle}>
-          {isCompleted
-            ? t("detail.watchedCompletedHint")
-            : t("detail.watchedHint")}
-        </p>
+        <>
+          <p className={styles.hint}>
+            {isCompleted
+              ? t("detail.watchedCompletedHint")
+              : t("detail.watchedHint")}
+          </p>
+          {/* Decorative: the same count is already stated as text above, and
+              a second announcement of it is noise to a screen reader. Scaled
+              rather than sized so the only thing that moves is a transform. */}
+          <div className={styles.meter} aria-hidden="true">
+            <span
+              className={styles.meterFill}
+              style={{ transform: `scaleX(${progressRatio})` }}
+            />
+          </div>
+        </>
       )}
-      <div style={gridStyle}>
+      <div className={styles.grid}>
         {cells.map((cell) => {
           const state = episodeCellState(watched, isCompleted, cell.n);
           const isOpen = openEp === cell.n;
@@ -870,33 +687,59 @@ export default function EpisodesGrid({
 
           // The cell body: identical markup inside the toggle and inside the
           // inert probing placeholder, so nothing shifts when the probe lands.
+          // The check is out of the flow (see the stylesheet), which upgrades
+          // that from a promise the two branches keep to one the layout cannot
+          // break — an unwatched cell and a watched one are the same box.
+          // A row, not a tile. The grid of numbered squares could not show an
+          // episode title — at 88px a cell fits about four characters, so
+          // every title rendered as an ellipsis and the one piece of
+          // information that distinguishes episode 14 from episode 15 was
+          // never legible. A row has the width for it.
+          //
+          // The mark replaces the ✓ glyph: it is a fixed 16px box in both
+          // states, so a cell cannot change height when the probe lands or
+          // when it is toggled. That was previously a promise the two
+          // branches kept by rendering the same markup; now it is one the
+          // layout cannot break.
           const body = (
             <>
-              <span style={kickerStyle}>{t("detail.ep")}</span>
-              <span style={numberStyle(state, isOpen)}>{cell.n}</span>
-              <span style={checkStyle} aria-hidden="true">
-                {state === "unwatched" ? "" : "✓"}
+              <span className={styles.mark} aria-hidden="true" />
+              <span className={styles.number}>
+                {String(cell.n).padStart(2, "0")}
               </span>
-              {cell.title && (
-                <span style={cellTitleStyle} title={cell.title}>
-                  {cell.title}
-                </span>
-              )}
+              <span className={styles.titles}>
+                {cell.title ? (
+                  <span className={styles.title} title={cell.title}>
+                    {cell.title}
+                  </span>
+                ) : (
+                  <span className={styles.title} aria-hidden="true" />
+                )}
+                {cell.original ? (
+                  <span className={styles.original} title={cell.original}>
+                    {cell.original}
+                  </span>
+                ) : null}
+              </span>
             </>
           );
 
           return (
             <div
               key={cell.n}
-              style={shellStyle(state, isOpen, isFurthest)}
+              className={styles.cell}
+              // Read by the stylesheet, which is why `state` is restated here
+              // under a second name: `data-state` on the toggle is part of
+              // this component's contract and is not the shell's to move.
+              data-cell-state={state}
+              data-open={isOpen ? "true" : undefined}
               data-furthest-marked={isFurthest ? "true" : undefined}
             >
-              {isFurthest && <span style={furthestBarStyle} aria-hidden="true" />}
               {access === "probing" ? (
                 // Neutral placeholder, never a sign-in prompt: a signed-in
                 // reader must not see a "sign in" label flash over their own
                 // progress while the probe is in flight (lib/authChrome).
-                <div style={toggleStyle}>{body}</div>
+                <div className={styles.toggle}>{body}</div>
               ) : (
                 <button
                   type="button"
@@ -910,7 +753,7 @@ export default function EpisodesGrid({
                       ? goToLogin
                       : () => void toggleWatched(cell.n)
                   }
-                  style={{ ...toggleStyle, cursor: "pointer" }}
+                  className={styles.toggle}
                 >
                   {body}
                 </button>
@@ -918,13 +761,14 @@ export default function EpisodesGrid({
               <button
                 type="button"
                 data-episode-discussion="true"
+                data-has-comments={commentCount > 0 ? "true" : undefined}
                 aria-expanded={isOpen}
                 // Only while the panel exists: aria-controls pointing at an id
                 // that is not in the document is a dangling reference.
                 aria-controls={isOpen ? `episode-discussion-${cell.n}` : undefined}
                 aria-label={fill(t("detail.episodeDiscussion"), { ep: cell.n })}
                 onClick={() => openDiscussion(cell.n)}
-                style={discussionStyle(isOpen, commentCount > 0)}
+                className={styles.discussion}
               >
                 <span aria-hidden="true">
                   {commentCount > 0 ? `💬 ${commentCount}` : "💬"}
@@ -935,31 +779,23 @@ export default function EpisodesGrid({
         })}
       </div>
       {previewEpisode && previewSummary?.latest.length ? (
-        <div
-          style={{
-            marginTop: 14,
-            padding: "12px 14px",
-            borderRadius: 10,
-            border: "1px solid rgba(84,84,88,0.55)",
-            background: "rgba(255,255,255,0.025)",
-          }}
-        >
-          <div style={{ fontSize: 11, color: "rgba(235,235,245,0.42)", marginBottom: 8 }}>
+        <div className={styles.preview}>
+          <div className={styles.previewHead}>
             {t("comment.previewTitle")} · {t("detail.ep")} {previewEpisode}
           </div>
-          <div style={{ display: "grid", gap: 8 }}>
+          <div className={styles.previewList}>
             {previewSummary.latest.map((item) => (
-              <div key={item.id} style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+              <div key={item.id} className={styles.previewRow}>
                 <Link
                   href={`/u/${encodeURIComponent(item.username)}`}
                   prefetch={false}
-                  style={{ width: 24, height: 24, borderRadius: "50%", overflow: "hidden", flexShrink: 0 }}
+                  className={styles.previewAvatar}
                 >
                   <FallbackImg
                     src={item.avatarUrl ?? item.backdropCoverUrl ?? DEFAULT_AVATAR_IMAGE}
                     fallback={DEFAULT_AVATAR_IMAGE}
                     alt={item.username}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    className={styles.previewAvatarImg}
                   />
                 </Link>
                 <button
@@ -973,12 +809,10 @@ export default function EpisodesGrid({
                       `${window.location.pathname}${window.location.search}${discussionHash(previewEpisode, item.id)}`,
                     );
                   }}
-                  style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: "pointer", minWidth: 0 }}
+                  className={styles.previewBody}
                 >
-                  <b style={{ display: "block", color: "#0a84ff", fontSize: 11, marginBottom: 2 }}>
-                    {item.username}
-                  </b>
-                  <span style={{ color: "rgba(235,235,245,0.62)", fontSize: 12, lineHeight: 1.45 }}>
+                  <b className={styles.previewName}>{item.username}</b>
+                  <span className={styles.previewText}>
                     {item.isSpoiler ? t("comment.spoilerPreview") : item.content}
                   </span>
                 </button>
@@ -996,13 +830,7 @@ export default function EpisodesGrid({
           ref={panelRef}
           role="region"
           aria-label={`${t("comment.title")} · ${t("detail.ep")} ${openEp}`}
-          style={{
-            marginTop: 16,
-            borderRadius: 12,
-            overflow: "hidden",
-            border: "1px solid #38383a",
-            background: "rgba(255,255,255,0.02)",
-          }}
+          className={styles.panel}
         >
           <EpisodeComments
             key={openEp}

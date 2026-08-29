@@ -13,6 +13,7 @@
 //     within the request; no double load on the Go API.
 
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
@@ -23,13 +24,18 @@ import FadeImage from "@/components/ui/FadeImage";
 import EpisodesGrid from "@/components/anime/EpisodesGrid";
 import { resolveEpisodeSkeleton } from "@/components/anime/episodeGridSkeleton";
 import HeroAccent from "@/components/anime/HeroAccent";
-import { FormatBadge, GenreChips } from "@/components/anime/LocalizedChips";
-import { scoreBadgeStyle } from "@/components/anime/scoreStyle";
+import { GenreChips } from "@/components/anime/LocalizedChips";
+import { scoreScrimStyle, scoreTextStyle } from "@/components/anime/scoreStyle";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import s from "./page.module.css";
+// The four sections below the hero. A second module rather than more of
+// page.module.css because they are a separate surface — see that file's
+// header for the split, and this one's for what it is undoing.
+import x from "./sections.module.css";
 import { apiGet, ApiError } from "@/lib/api";
 import {
   durationLabel,
+  formatLabel,
   pickRelatedTitle,
   relationLabel,
   sourceLabel,
@@ -37,7 +43,6 @@ import {
 } from "@/lib/contentLabels";
 import {
   formatFuzzyDate,
-  formatScore,
   pickCharacterName,
   pickDescription,
   pickSeoTitle,
@@ -325,91 +330,24 @@ const HERO_SHOWN_RELATIONS = new Set([
 // into the hero.
 const DESC_TRUNCATE_WIDTH = 300;
 
-function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: Dict }) {
+function Hero({
+  detail,
+  lang,
+  dict,
+  actions,
+}: {
+  detail: AnimeDetail;
+  lang: Lang;
+  dict: Dict;
+  /* The action row, injected rather than rendered here. It is a client
+   * component and this file is not; passing it as a node keeps the hero a
+   * server component while letting the controls sit where the design puts
+   * them — directly under the facts, on the artwork. */
+  actions?: ReactNode;
+}) {
   const title = pickTitle(detail, lang);
-  // Full description for SEO; truncated mirror for the collapsed UI
-  // state. The client-side toggle in DescriptionExpand swaps between
-  // them so the rendered HTML always contains both (crawlers see the
-  // full text inside the rendered <p>).
-  //
-  // zh readers get description_cn — Bangumi's community-written Chinese
-  // synopsis — when the column is populated, falling back to AniList's
-  // English description otherwise. Until the enrichment backfill runs, the
-  // column is NULL for every row and this resolves to exactly what
-  // `detail.description` resolved to before.
-  //
-  // `lang` is the URL's locale, not the visitor's cookie preference. This body
-  // copy is baked server-side and the lang-client provider never swaps it, so
-  // an en-cookie visitor reading /anime/21 still gets the Chinese synopsis —
-  // they have to be at /en/anime/21 for pickDescription's `en` branch to fire.
-  // That is the same trade this page makes for titles and relation titles
-  // (pickTitle / pickRelatedTitle, see the route note up top): the page's
-  // language is the address, consistently, top to bottom.
-  //
-  // Before the locale migration this branch was unreachable at any URL, since
-  // getLang() returned "zh" for every server render. It is live now.
-  //
-  // ── SEO BOUNDARY — read before "fixing" the two other description reads ──
-  // This is the *body copy* only. generateMetadata's `description` (the
-  // meta/og/twitter tag, ~line 205) and buildJsonLd's `description` (~line
-  // 283) still read detail.description on purpose, so the indexed text does
-  // not change under Google while the visible page does. Swapping the
-  // indexed description is its own phase: bucketed rollout plus GSC
-  // observation, because a catalog-wide description rewrite is exactly the
-  // kind of change that moves rankings in either direction with no way to
-  // attribute it after the fact. Do not "make them consistent" here.
-  const desc = pickDescription(detail, lang);
-  const descFull = stripHtml(desc.text);
-  const descTruncated = truncateVisual(descFull, DESC_TRUNCATE_WIDTH);
-  const descNeedsToggle = visualWidth(descFull) > DESC_TRUNCATE_WIDTH;
-  // Attribution + snippet exclusion hang off the provenance of the text.
-  //
-  //   - 'bangumi': credit (linked when the binding survives) + nosnippet —
-  //     text we transcribed from bgm.tv.
-  //   - 'llm': an "AI-translated" note + nosnippet. The note is honesty
-  //     (readers judge machine translation differently) and nosnippet keeps
-  //     machine text out of Google's snippets entirely — the same SERP
-  //     boundary that keeps generateMetadata / JSON-LD on the English
-  //     original applies one layer down here.
-  //   - 'opencc': a Simplified-to-Traditional conversion of one of the above.
-  //     It arrived with zh-Hant and was briefly the one machine-made source
-  //     that carried neither a note nor nosnippet, because both flags named
-  //     their sources individually — so the identical prose was disclosed on
-  //     /anime/:id and undisclosed on /zh-Hant/anime/:id.
-  //   - 'manual' still does not exist; our own editorial text will have no
-  //     reason to be held out of snippets when it does.
-  //
-  // nosnippet is therefore computed from "is there any provenance at all"
-  // rather than from a list of sources. A tier added later is held out of
-  // snippets until someone decides otherwise, which is the direction this
-  // should fail in — the same reason title_hant_seo names the sources it
-  // admits instead of the one it excludes.
-  //
-  // Neither flag is gated on bgmId. bgmId only decides whether the bangumi
-  // credit is a link: a row that lost its binding after the summary was
-  // written would otherwise silently drop the credit while still
-  // republishing the text.
-  const isBangumiSummary = desc.source === "bangumi";
-  const isLlmSummary = desc.source === "llm";
-  const isConvertedSummary = desc.source === "opencc";
-  // A conversion inherits the honesty debt of what it converted. The
-  // Simplified text under a zh-Hant page is very often the LLM translation,
-  // and "converted to Traditional" alone would quietly drop the far more
-  // important half of that sentence.
-  const convertedFromLlm = isConvertedSummary && detail.descriptionCnSource === "llm";
-  const summaryIsDerived = desc.source !== null && desc.source !== undefined;
-  const bgmSummaryHref = detail.bgmId
-    ? `https://bgm.tv/subject/${detail.bgmId}`
-    : undefined;
-  const heroRelations = (detail.relations ?? []).filter((r) =>
-    HERO_SHOWN_RELATIONS.has(r.relationType),
-  );
-  const sourceText = sourceLabel(detail.source, lang);
   const durationText = durationLabel(detail.duration, lang);
-  const seasonLab = seasonLabel(dict, detail.season);
   const score = detail.averageScore;
-  const accent = detail.posterAccent || null;
-  const startDateLabel = formatFuzzyDate(detail.startDate, lang);
   // Shared with EpisodesGrid below the fold, so the badge and the grid can
   // never disagree about whether this show's episode count is known.
   //
@@ -497,7 +435,6 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
             are what reserves the box before decode); the module sizes it. */}
         <div className={s.coverSlot}>
           {detail.coverImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
             <FadeImage
               src={detail.coverImageUrl}
               alt={title}
@@ -518,157 +455,56 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
             <p className={s.subtitle}>{detail.titleNative || detail.titleRomaji}</p>
           )}
 
-          {/* Badges */}
-          <div className={s.badgeRow}>
+          {/* Facts — one dot-separated sentence, was three stacked strips.
+              Separators are drawn by CSS (.facts > * + *::before), so nothing
+              here has to know whether it is the first surviving item across
+              ten independently-optional fields. */}
+          {/* Six items, not eleven.
+              Format, season, studio, source and the Bangumi link all moved to
+              the InfoSection table below. This line is the glance — is it good,
+              is it finished, how long is it, what kind of thing is it — and
+              every field added to it costs the ones already here their weight.
+              The table is where the complete record belongs. */}
+          <div className={s.facts}>
             {score && score > 0 ? (
-              <span className={s.scoreBadge} style={scoreBadgeStyle(score)}>
-                {"★"} {formatScore(score)}
+              // "AniList 91", not "★ 9.1". The star said nothing the word
+              // does not, and the raw 0-100 needs no mental conversion to
+              // compare against the site it came from. Band colour stays:
+              // which band a score is in is information, not decoration.
+              <span className={s.factsScore} style={scoreTextStyle(score)}>
+                AniList {score}
               </span>
             ) : null}
             {detail.bangumiScore && detail.bangumiScore > 0 ? (
-              <span className={s.bgmScoreBadge}>
-                <span className={s.bgmLabel}>BGM</span>
-                {"★"} {detail.bangumiScore.toFixed(1)}
-                {detail.bangumiVotes && detail.bangumiVotes > 0 ? (
-                  <span className={s.bgmVotes}>({detail.bangumiVotes.toLocaleString()})</span>
-                ) : null}
+              // Vote count lives in the score panel beside the synopsis,
+              // where there is room to label it.
+              <span className={s.factsBgm}>
+                Bangumi {detail.bangumiScore.toFixed(1)}
               </span>
             ) : null}
-            {detail.format && (
-              // Client leaf so this follows the cookie language rather than
-              // the server-pinned zh — see the route note at the top of this
-              // file for why only this and the genre row get that treatment.
-              <FormatBadge format={detail.format} className={s.badgeAccent} />
-            )}
-            {detail.status && (
-              <span className={s.badgeInfo}>{statusLabel(dict, detail.status)}</span>
-            )}
+            {detail.status && <span>{statusLabel(dict, detail.status)}</span>}
             {episodeSkeleton.kind === "authoritative" ? (
-              <span className={s.badgeNeutral}>
+              <span>
                 {episodeSkeleton.total} {dict.detail.epUnit}
               </span>
             ) : (
-              // Muted rather than neutral: this is the "we do not have an
+              // Muted rather than plain: this is the "we do not have an
               // authoritative count" case, and it should not read with the
               // same confidence as a real number sitting next to it.
-              <span className={s.badgeMuted}>{dict.detail.episodeCountPending}</span>
+              <span className={s.factsBgmVotes}>{dict.detail.episodeCountPending}</span>
             )}
-            {seasonLab && detail.seasonYear ? (
-              <span className={s.badgeNeutral}>
-                {seasonLab} {detail.seasonYear}
-              </span>
-            ) : null}
-            {detail.bgmId ? (
-              <a
-                href={`https://bgm.tv/subject/${detail.bgmId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={s.bgmLink}
-              >
-                <span className={s.bgmArrow}>{"▶"}</span>
-                {dict.detail.viewOnBgm}
-              </a>
-            ) : null}
+            {durationText && <span>{durationText}</span>}
+            {/* Genres — client leaf so this follows the cookie language rather
+                than the server-pinned zh; see the route note at the top of this
+                file for why only this and the format badge get that treatment.
+                One instance for the whole row, not one per chip. Only the chip
+                text is localised: buildJsonLd still emits detail.genres raw, so
+                schema.org keeps the English AniList vocabulary. */}
+            <GenreChips genres={detail.genres} className={s.factsGenres} />
           </div>
 
-          {/* Meta row */}
-          {(detail.studios.length > 0 || sourceText || durationText || startDateLabel) && (
-            <div className={s.metaRow}>
-              {detail.studios.length > 0 && (
-                <span className={s.metaStudio}>{detail.studios.join(" · ")}</span>
-              )}
-              {detail.studios.length > 0 &&
-                (sourceText || durationText || startDateLabel) && (
-                  <span className={s.metaDot}>{"·"}</span>
-                )}
-              {sourceText && <span className={s.metaDetail}>{sourceText}</span>}
-              {durationText && <span className={s.metaDetail}>{durationText}</span>}
-              {startDateLabel && <span className={s.metaDetail}>{startDateLabel}</span>}
-            </div>
-          )}
+          {actions}
 
-          {/* Genres — client leaf for the same reason as FormatBadge above.
-              One instance for the whole row, not one per chip. Only the chip
-              text is localised: buildJsonLd still emits detail.genres raw, so
-              schema.org keeps the English AniList vocabulary. */}
-          <GenreChips
-            genres={detail.genres}
-            className={s.genreRow}
-            chipClassName={s.genreTag}
-          />
-
-          {/* Description with 展开更多 / 收起 toggle */}
-          {descFull && (
-            <div className={heroRelations.length > 0 ? s.descBlock : s.descBlockLast}>
-              <DescriptionExpand
-                truncated={descTruncated}
-                full={descFull}
-                needsToggle={descNeedsToggle}
-                expandLabel={dict.detail.readMore}
-                collapseLabel={dict.detail.collapse}
-                nosnippet={summaryIsDerived}
-                sourceLabel={
-                  isBangumiSummary
-                    ? dict.detail.summaryFromBangumi
-                    : isLlmSummary
-                      ? dict.detail.summaryFromLlm
-                      : convertedFromLlm
-                        ? dict.detail.summaryConvertedFromLlm
-                        : isConvertedSummary
-                          ? dict.detail.summaryConverted
-                          : undefined
-                }
-                sourceHref={isBangumiSummary ? bgmSummaryHref : undefined}
-              />
-            </div>
-          )}
-
-          {/* Inline relations (prequel / sequel / parent / side story /
-              spin-off) — matches legacy AnimeDetailHero.jsx behavior of
-              keeping the most important relations close to the title
-              instead of forcing the user to scroll to the relations
-              section. The full RelationsSection still renders below. */}
-          {heroRelations.length > 0 && (
-            <div className={s.relationRow}>
-              {heroRelations.map((r) => {
-                const relLabel =
-                  relationLabel(r.relationType, lang);
-                // Was `r.title || r.titleChinese` — legacy AnimeDetailHero.jsx
-                // pinned romaji, so a Chinese title sitting right there in the
-                // payload was never shown (prod: 48.7% of relation rows carry
-                // one). pickRelatedTitle prefers it under zh. `lang` is
-                // server-pinned zh here, so this reads Chinese-first for every
-                // visitor — same as pickTitle two screens up; see the route
-                // note at the top of this file. Wire field is `title` not
-                // `titleRomaji` — see DetailRelation type.
-                const relTitle =
-                  pickRelatedTitle(r, lang) || `Anime #${r.anilistId}`;
-                return (
-                  <Link
-                    key={`${r.relationType}-${r.anilistId}`}
-                    href={`/anime/${r.anilistId}`}
-                    className="hero-relation-chip"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      padding: "5px 12px",
-                      borderRadius: 8,
-                      background: "rgba(120,120,128,0.12)",
-                      border: "1px solid rgba(84,84,88,0.65)",
-                      color: "rgba(235,235,245,0.60)",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      textDecoration: "none",
-                    }}
-                  >
-                    <span className={s.relationLabel}>{relLabel}</span>
-                    {relTitle}
-                  </Link>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -676,6 +512,341 @@ function Hero({ detail, lang, dict }: { detail: AnimeDetail; lang: Lang; dict: D
 }
 
 // --- Relations section ---
+
+// --- Intrinsic sizes for the images in these four sections ---
+//
+// These are next/image's srcset basis, NOT the CSS box: the layout lives in
+// sections.module.css and the tiles are fluid. Next derives a 1x/2x pair from
+// `width`, so the number has to be at least the widest the tile ever renders
+// or every cover is upscaled on a retina screen — which is exactly what the
+// old width={110} did to a 110px tile the moment anything grew it.
+//
+// Poster: 7:10, matching the hero cover. AniList's large covers are 460x650,
+// so 7:10 crops almost nothing (page.module.css says the same thing about
+// `.cover`). 160 is the widest a `.posterGrid` track gets — 192px at a 400px
+// viewport, where the 2x candidate Next emits (384w) still covers it.
+const POSTER_SRC_W = 160;
+const POSTER_SRC_H = 229;
+// Character / voice-actor portraits. Enlarged from 58x76 — see the note on
+// `.people` in sections.module.css for why the grid track had to widen with
+// them rather than after them.
+const PORTRAIT_W = 64;
+const PORTRAIT_H = 86;
+// Staff avatar, up from 36. A 36px circle beside a name reads as a bullet.
+const STAFF_AVATAR = 44;
+
+
+/* The complete record, as a definition list.
+ *
+ * This is where format, season, studio, source and the air date went when
+ * the facts line in the hero was cut back to six items. They are not less
+ * important — they are less *glanceable*, and a dot-separated sentence is a
+ * bad container for eight label/value pairs: without labels the reader has
+ * to infer that "TV" is a format and "MADHOUSE" is a studio, and with them
+ * the sentence stops being a sentence.
+ *
+ * <dl> rather than a grid of divs because that is exactly what this is, and
+ * it is what lets a screen reader announce "季度: 2023 年秋季" as a pair.
+ * Rows with no value still render, with an em dash: an absent field is
+ * itself information here, and a table that changes shape per anime is
+ * harder to scan across pages than one with a hole in it.
+ */
+function InfoSection({
+  detail,
+  lang,
+  dict,
+}: {
+  detail: AnimeDetail;
+  lang: Lang;
+  dict: Dict;
+}) {
+  const seasonLab = seasonLabel(dict, detail.season);
+  const rows: Array<{ label: string; value: string | null }> = [
+    {
+      label: dict.detail.infoSeason,
+      value: seasonLab && detail.seasonYear ? `${seasonLab} ${detail.seasonYear}` : null,
+    },
+    { label: dict.detail.infoAired, value: formatFuzzyDate(detail.startDate, lang) || null },
+    { label: dict.detail.infoStatus, value: detail.status ? statusLabel(dict, detail.status) : null },
+    {
+      label: dict.detail.infoEpisodes,
+      value: detail.episodes ? `${detail.episodes} ${dict.detail.epUnit}` : null,
+    },
+    { label: dict.detail.infoDuration, value: durationLabel(detail.duration, lang) || null },
+    {
+      label: dict.detail.infoFormat,
+      // formatLabel, not the raw enum: the table would otherwise print
+      // "TV_SHORT" where every other row is prose.
+      value: detail.format ? formatLabel(detail.format, lang) : null,
+    },
+    { label: dict.detail.infoSource, value: sourceLabel(detail.source, lang) || null },
+    {
+      label: dict.detail.infoStudio,
+      value: detail.studios.length > 0 ? detail.studios.join(" / ") : null,
+    },
+  ];
+  // Every row empty means the row carries nothing but em dashes.
+  if (rows.every((r) => !r.value)) return null;
+
+  return (
+    <section className={x.section} aria-labelledby="info-heading">
+      <header className={x.head}>
+        <h2 className={x.headTitle} id="info-heading">
+          {dict.detail.info}
+        </h2>
+      </header>
+      <dl className={x.infoGrid}>
+        {rows.map((r) => (
+          <div key={r.label} className={x.infoCell}>
+            <dt className={x.infoLabel}>{r.label}</dt>
+            <dd className={x.infoValue}>{r.value ?? "—"}</dd>
+          </div>
+        ))}
+      </dl>
+      {detail.bgmId ? (
+        <a
+          href={`https://bgm.tv/subject/${detail.bgmId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={x.infoLink}
+        >
+          {dict.detail.viewOnBgm}
+        </a>
+      ) : null}
+    </section>
+  );
+}
+
+
+/* Synopsis — its own band under the hero, no longer inside it.
+ *
+ * The hero is now artwork with the title and the controls on it, and the
+ * body copy does not belong on top of a picture: it is the longest text on
+ * the page and the one thing a search visitor actually came to read. Giving
+ * it a plain background is what lets the artwork above be full-bleed.
+ *
+ * The scores ride alongside rather than in the facts sentence, because a
+ * number out of 100 next to a number out of 10 needs its denominator shown
+ * to be read at all, and denominators do not belong in a dot-separated
+ * list.
+ */
+function SynopsisSection({
+  detail,
+  lang,
+  dict,
+}: {
+  detail: AnimeDetail;
+  lang: Lang;
+  dict: Dict;
+}) {
+  // Full description for SEO; truncated mirror for the collapsed UI
+  // state. The client-side toggle in DescriptionExpand swaps between
+  // them so the rendered HTML always contains both (crawlers see the
+  // full text inside the rendered <p>).
+  //
+  // zh readers get description_cn — Bangumi's community-written Chinese
+  // synopsis — when the column is populated, falling back to AniList's
+  // English description otherwise. Until the enrichment backfill runs, the
+  // column is NULL for every row and this resolves to exactly what
+  // `detail.description` resolved to before.
+  //
+  // `lang` is the URL's locale, not the visitor's cookie preference. This body
+  // copy is baked server-side and the lang-client provider never swaps it, so
+  // an en-cookie visitor reading /anime/21 still gets the Chinese synopsis —
+  // they have to be at /en/anime/21 for pickDescription's `en` branch to fire.
+  // That is the same trade this page makes for titles and relation titles
+  // (pickTitle / pickRelatedTitle, see the route note up top): the page's
+  // language is the address, consistently, top to bottom.
+  //
+  // Before the locale migration this branch was unreachable at any URL, since
+  // getLang() returned "zh" for every server render. It is live now.
+  //
+  // ── SEO BOUNDARY — read before "fixing" the two other description reads ──
+  // This is the *body copy* only. generateMetadata's `description` (the
+  // meta/og/twitter tag, ~line 205) and buildJsonLd's `description` (~line
+  // 283) still read detail.description on purpose, so the indexed text does
+  // not change under Google while the visible page does. Swapping the
+  // indexed description is its own phase: bucketed rollout plus GSC
+  // observation, because a catalog-wide description rewrite is exactly the
+  // kind of change that moves rankings in either direction with no way to
+  // attribute it after the fact. Do not "make them consistent" here.
+  const desc = pickDescription(detail, lang);
+  const descFull = stripHtml(desc.text);
+  const descTruncated = truncateVisual(descFull, DESC_TRUNCATE_WIDTH);
+  const descNeedsToggle = visualWidth(descFull) > DESC_TRUNCATE_WIDTH;
+  // Attribution + snippet exclusion hang off the provenance of the text.
+  //
+  //   - 'bangumi': credit (linked when the binding survives) + nosnippet —
+  //     text we transcribed from bgm.tv.
+  //   - 'llm': an "AI-translated" note + nosnippet. The note is honesty
+  //     (readers judge machine translation differently) and nosnippet keeps
+  //     machine text out of Google's snippets entirely — the same SERP
+  //     boundary that keeps generateMetadata / JSON-LD on the English
+  //     original applies one layer down here.
+  //   - 'opencc': a Simplified-to-Traditional conversion of one of the above.
+  //     It arrived with zh-Hant and was briefly the one machine-made source
+  //     that carried neither a note nor nosnippet, because both flags named
+  //     their sources individually — so the identical prose was disclosed on
+  //     /anime/:id and undisclosed on /zh-Hant/anime/:id.
+  //   - 'manual' still does not exist; our own editorial text will have no
+  //     reason to be held out of snippets when it does.
+  //
+  // nosnippet is therefore computed from "is there any provenance at all"
+  // rather than from a list of sources. A tier added later is held out of
+  // snippets until someone decides otherwise, which is the direction this
+  // should fail in — the same reason title_hant_seo names the sources it
+  // admits instead of the one it excludes.
+  //
+  // Neither flag is gated on bgmId. bgmId only decides whether the bangumi
+  // credit is a link: a row that lost its binding after the summary was
+  // written would otherwise silently drop the credit while still
+  // republishing the text.
+  const isBangumiSummary = desc.source === "bangumi";
+  const isLlmSummary = desc.source === "llm";
+  const isConvertedSummary = desc.source === "opencc";
+  // A conversion inherits the honesty debt of what it converted. The
+  // Simplified text under a zh-Hant page is very often the LLM translation,
+  // and "converted to Traditional" alone would quietly drop the far more
+  // important half of that sentence.
+  const convertedFromLlm = isConvertedSummary && detail.descriptionCnSource === "llm";
+  const summaryIsDerived = desc.source !== null && desc.source !== undefined;
+  const bgmSummaryHref = detail.bgmId
+    ? `https://bgm.tv/subject/${detail.bgmId}`
+    : undefined;
+  const heroRelations = (detail.relations ?? []).filter((r) =>
+    HERO_SHOWN_RELATIONS.has(r.relationType),
+  );
+  const score = detail.averageScore;
+  const bgmScore = detail.bangumiScore;
+  if (!descFull && heroRelations.length === 0) return null;
+
+  return (
+    <section className={x.synopsis} aria-labelledby="synopsis-heading">
+      <div className={x.synopsisBody}>
+        <header className={x.head}>
+          <h2 className={x.headTitle} id="synopsis-heading">
+            {dict.detail.synopsis}
+          </h2>
+          {/* Length, not a count of anything the reader cares about on its
+              own — it sets the expectation before the read-more toggle, so
+              "展开更多" is a known quantity rather than a surprise. Measured
+              on the full text, not the collapsed mirror. */}
+          {descFull ? (
+            <span className={x.headCount}>
+              {descFull.length} {dict.detail.charUnit}
+            </span>
+          ) : null}
+        </header>
+        {/* Description with 展开更多 / 收起 toggle */}
+        {descFull && (
+          <div className={heroRelations.length > 0 ? s.descBlock : s.descBlockLast}>
+            <DescriptionExpand
+              truncated={descTruncated}
+              full={descFull}
+              needsToggle={descNeedsToggle}
+              expandLabel={dict.detail.readMore}
+              collapseLabel={dict.detail.collapse}
+              nosnippet={summaryIsDerived}
+              sourceLabel={
+                isBangumiSummary
+                  ? dict.detail.summaryFromBangumi
+                  : isLlmSummary
+                    ? dict.detail.summaryFromLlm
+                    : convertedFromLlm
+                      ? dict.detail.summaryConvertedFromLlm
+                      : isConvertedSummary
+                        ? dict.detail.summaryConverted
+                        : undefined
+              }
+              sourceHref={isBangumiSummary ? bgmSummaryHref : undefined}
+            />
+          </div>
+        )}
+        {/* Inline relations (prequel / sequel / parent / side story /
+            spin-off) — matches legacy AnimeDetailHero.jsx behavior of
+            keeping the most important relations close to the title
+            instead of forcing the user to scroll to the relations
+            section. The full RelationsSection still renders below. */}
+        {heroRelations.length > 0 && (
+          <div className={s.relationRow}>
+            {heroRelations.map((r) => {
+              const relLabel =
+                relationLabel(r.relationType, lang);
+              // Was `r.title || r.titleChinese` — legacy AnimeDetailHero.jsx
+              // pinned romaji, so a Chinese title sitting right there in the
+              // payload was never shown (prod: 48.7% of relation rows carry
+              // one). pickRelatedTitle prefers it under zh. `lang` is
+              // server-pinned zh here, so this reads Chinese-first for every
+              // visitor — same as pickTitle two screens up; see the route
+              // note at the top of this file. Wire field is `title` not
+              // `titleRomaji` — see DetailRelation type.
+              const relTitle =
+                pickRelatedTitle(r, lang) || `Anime #${r.anilistId}`;
+              return (
+                <Link
+                  key={`${r.relationType}-${r.anilistId}`}
+                  href={`/anime/${r.anilistId}`}
+                  className="hero-relation-chip"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "5px 12px",
+                    borderRadius: 8,
+                    background: "rgba(120,120,128,0.12)",
+                    border: "1px solid rgba(84,84,88,0.65)",
+                    color: "rgba(235,235,245,0.60)",
+                    fontSize: 12,
+                    fontWeight: 500,
+                    textDecoration: "none",
+                  }}
+                >
+                  <span className={s.relationLabel}>{relLabel}</span>
+                  {relTitle}
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {(score && score > 0) || (bgmScore && bgmScore > 0) ? (
+        <aside className={x.scorePanel} aria-label={dict.detail.scores}>
+          {score && score > 0 ? (
+            <div className={x.scoreItem}>
+              <div className={x.scoreLabel}>AniList</div>
+              <div className={x.scoreValue} style={scoreTextStyle(score)}>
+                {score}
+                <span className={x.scoreDenom}>/ 100</span>
+              </div>
+              {/* aria-hidden: the number above already says it, and a
+                  progress bar with no label is noise in a screen reader. */}
+              <div className={x.scoreBar} aria-hidden>
+                <span style={{ width: `${score}%` }} />
+              </div>
+            </div>
+          ) : null}
+          {bgmScore && bgmScore > 0 ? (
+            <div className={x.scoreItem}>
+              <div className={x.scoreLabel}>Bangumi</div>
+              <div className={x.scoreValue} style={scoreTextStyle(bgmScore * 10)}>
+                {bgmScore.toFixed(1)}
+                <span className={x.scoreDenom}>/ 10</span>
+              </div>
+              {detail.bangumiVotes && detail.bangumiVotes > 0 ? (
+                <div className={x.scoreVotes}>
+                  {detail.bangumiVotes.toLocaleString()} {dict.detail.votes}
+                </div>
+              ) : null}
+              <div className={x.scoreBar} aria-hidden>
+                <span style={{ width: `${bgmScore * 10}%` }} />
+              </div>
+            </div>
+          ) : null}
+        </aside>
+      ) : null}
+    </section>
+  );
+}
 
 function RelationsSection({
   relations,
@@ -694,28 +865,14 @@ function RelationsSection({
   });
 
   return (
-    <section style={{ margin: "32px 0" }}>
-      <h2
-        style={{
-          fontFamily: "'Sora',sans-serif",
-          fontSize: 16,
-          fontWeight: 700,
-          color: "#ffffff",
-          marginBottom: 16,
-        }}
-      >
-        {dict.detail.relations}
-      </h2>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-          gap: 12,
-        }}
-      >
+    <section className={x.section}>
+      <header className={x.head}>
+        <h2 className={x.headTitle}>{dict.detail.relations}</h2>
+        <span className={x.headCount}>{sorted.length}</span>
+      </header>
+      <div className={x.posterGrid}>
         {sorted.map((rel) => {
-          const label =
-            relationLabel(rel.relationType, lang);
+          const label = relationLabel(rel.relationType, lang);
           // Cards mirror the inline hero chips — same helper, same
           // server-pinned zh, so likewise Chinese-first for everyone. Both
           // sites previously hardcoded romaji-wins and suppressed titleChinese
@@ -726,82 +883,27 @@ function RelationsSection({
               key={`${rel.anilistId}-${rel.relationType}`}
               href={`/anime/${rel.anilistId}`}
               prefetch={false}
-              className="card-lift"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                background: "#1c1c1e",
-                border: "1px solid #38383a",
-                borderRadius: 10,
-                padding: 10,
-                textDecoration: "none",
-                color: "inherit",
-              }}
+              // .card-lift is the global reduced-motion-guarded hover lift
+              // (globals.css); the module adds the glow and the image scale,
+              // which it cannot express, and deliberately does not add a
+              // second transform on top of it.
+              className={`card-lift ${x.posterCard}`}
             >
-              {rel.coverImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <FadeImage
-                  src={rel.coverImageUrl}
-                  alt={relTitle}
-                  width={48}
-                  height={64}
-                  style={{
-                    width: 48,
-                    height: 64,
-                    objectFit: "cover",
-                    borderRadius: 6,
-                    flexShrink: 0,
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: 48,
-                    height: 64,
-                    borderRadius: 6,
-                    flexShrink: 0,
-                    background: "#2c2c2e",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 10,
-                    color: "rgba(235,235,245,0.30)",
-                  }}
-                >
-                  N/A
-                </div>
-              )}
-              <div style={{ minWidth: 0 }}>
-                <span
-                  style={{
-                    display: "inline-block",
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: "#0a84ff",
-                    textTransform: "uppercase",
-                    marginBottom: 4,
-                  }}
-                >
-                  {label}
-                </span>
-                <p
-                  style={{
-                    fontFamily: "'Sora',sans-serif",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#ffffff",
-                    margin: 0,
-                    lineHeight: 1.35,
-                    overflow: "hidden",
-                    display: "-webkit-box",
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical",
-                  }}
-                >
-                  {relTitle}
-                </p>
+              <div className={x.posterFrame}>
+                {rel.coverImageUrl ? (
+                  <FadeImage
+                    src={rel.coverImageUrl}
+                    alt={relTitle}
+                    width={POSTER_SRC_W}
+                    height={POSTER_SRC_H}
+                    className={x.posterImg}
+                  />
+                ) : (
+                  <span className={x.posterEmpty}>N/A</span>
+                )}
+                <span className={x.relBadge}>{label}</span>
               </div>
+              <p className={x.posterTitle}>{relTitle}</p>
             </Link>
           );
         })}
@@ -826,156 +928,55 @@ function CharactersSection({
   const jaLabel = dict.detail.voiceActorLang;
 
   return (
-    <section style={{ marginTop: 40 }}>
-      <h2 className={s.sectionLabel}>{label}</h2>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-          gap: 8,
-        }}
-      >
+    <section className={x.section}>
+      <header className={x.head}>
+        <h2 className={x.headTitle}>{label}</h2>
+        <span className={x.headCount}>{characters.length}</span>
+      </header>
+      <div className={x.people}>
         {characters.map((c, i) => {
           const roleKey = c.role?.toUpperCase() || "SUPPORTING";
-          const roleLabel =
-            CHARACTER_ROLE_LABEL[lang]?.[roleKey] ?? roleKey;
+          const roleLabel = CHARACTER_ROLE_LABEL[lang]?.[roleKey] ?? roleKey;
           // Field shape on the wire is {nameEn|nameJa|nameCn, voiceActor*}.
           // pickCharacterName picks lang-appropriate with fallback so a
           // missing nameCn surfaces nameJa instead of "—".
           const charName = pickCharacterName(c, lang) || "—";
           const va = pickVoiceActorName(c, lang) || null;
           return (
-            <div
-              key={`${charName}-${i}`}
-              style={{
-                display: "flex",
-                alignItems: "stretch",
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(84,84,88,0.30)",
-                borderRadius: 6,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "10px 12px",
-                  flex: 1,
-                  minWidth: 0,
-                }}
-              >
-                <div
-                  style={{
-                    width: 58,
-                    height: 76,
-                    flexShrink: 0,
-                    borderRadius: 4,
-                    overflow: "hidden",
-                    background: "#2c2c2e",
-                    border: "1px solid #38383a",
-                  }}
-                >
-                  {c.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <FadeImage
-                      src={c.imageUrl}
-                      alt={charName}
-                      width={58}
-                      height={76}
-                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    />
-                  ) : null}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "#ffffff",
-                      lineHeight: 1.35,
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {charName}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "rgba(235,235,245,0.40)",
-                      marginTop: 3,
-                    }}
-                  >
-                    {roleLabel}
-                  </div>
+            // The row is a row, not a card: no border, no fill. What tells
+            // one from the next is a hairline and the hover surface, both of
+            // which live in the module because neither can be an inline style.
+            <div key={`${charName}-${i}`} className={x.person}>
+              <div className={x.personSide}>
+                {/* No null guard: FadeImage renders the same box with the
+                    same class when src is null, so a character with no
+                    portrait keeps the row's shape instead of collapsing it. */}
+                <FadeImage
+                  src={c.imageUrl}
+                  alt={charName}
+                  width={PORTRAIT_W}
+                  height={PORTRAIT_H}
+                  className={x.portrait}
+                />
+                <div className={x.personText}>
+                  <div className={x.personRoleMain}>{roleLabel}</div>
+                  <div className={x.personName}>{charName}</div>
                 </div>
               </div>
               {va && (
-                <>
-                  <div
-                    style={{
-                      width: 1,
-                      background: "rgba(84,84,88,0.30)",
-                      flexShrink: 0,
-                    }}
+                <div className={x.personSideVa}>
+                  <FadeImage
+                    src={c.voiceActorImageUrl}
+                    alt={va}
+                    width={PORTRAIT_W}
+                    height={PORTRAIT_H}
+                    className={x.portrait}
                   />
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "10px 12px",
-                      flex: 1,
-                      minWidth: 0,
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 58,
-                        height: 76,
-                        flexShrink: 0,
-                        borderRadius: 4,
-                        overflow: "hidden",
-                        background: "#2c2c2e",
-                        border: "1px solid #38383a",
-                      }}
-                    >
-                      {c.voiceActorImageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <FadeImage
-                          src={c.voiceActorImageUrl}
-                          alt={va}
-                          width={58}
-                          height={76}
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                        />
-                      ) : null}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: "#ffffff",
-                          lineHeight: 1.35,
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {va}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "rgba(235,235,245,0.40)",
-                          marginTop: 3,
-                        }}
-                      >
-                        {jaLabel}
-                      </div>
-                    </div>
+                  <div className={x.personText}>
+                    <div className={x.personRole}>{jaLabel}</div>
+                    <div className={x.personName}>{va}</div>
                   </div>
-                </>
+                </div>
               )}
             </div>
           );
@@ -992,81 +993,46 @@ function StaffSectionView({ staff, lang, dict }: { staff: DetailStaff[]; lang: L
   const label = dict.detail.staff;
 
   return (
-    <section style={{ marginTop: 40 }}>
-      <h2 className={s.sectionLabel}>{label}</h2>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-          gap: "10px 16px",
-        }}
-      >
-        {staff.map((s, i) => {
+    <section className={x.section}>
+      <header className={x.head}>
+        <h2 className={x.headTitle}>{label}</h2>
+        <span className={x.headCount}>{staff.length}</span>
+      </header>
+      <div className={x.staffGrid}>
+        {/* `member`, not `s`. The callback parameter used to be named `s`,
+            which shadowed the page.module.css import of the same name for the
+            whole body — so no class from that module was reachable in here
+            and `s.role` read as a staff field one line after `s.sectionLabel`
+            read as a class. */}
+        {staff.map((member, i) => {
           // Wire shape is {nameEn, nameJa, role, imageUrl} — no top-level
           // `name`. pickStaffName: zh prefers Japanese (legacy convention),
           // en prefers English. Falls back across both before "—".
-          const staffName = pickStaffName(s, lang) || "—";
+          const staffName = pickStaffName(member, lang) || "—";
           return (
-          <div
-            key={`${staffName}-${i}`}
-            style={{ display: "flex", alignItems: "center", gap: 10 }}
-          >
-            <div
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: "50%",
-                flexShrink: 0,
-                overflow: "hidden",
-                background: "#2c2c2e",
-                border: "1px solid #38383a",
-              }}
-            >
-              {s.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <FadeImage
-                  src={s.imageUrl}
-                  alt={staffName}
-                  width={36}
-                  height={36}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : null}
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#ffffff",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {staffName}
+            <div key={`${staffName}-${i}`} className={x.staffRow}>
+              <FadeImage
+                src={member.imageUrl}
+                alt={staffName}
+                width={STAFF_AVATAR}
+                height={STAFF_AVATAR}
+                className={x.staffAvatar}
+              />
+              <div className={x.staffText}>
+                {member.role && (
+                  <div className={x.staffRole}>
+                    {/* Server-rendered, unlike the hero genre/format chips: this
+                        grid runs to dozens of rows, and the name beside each role
+                        is already Japanese for every visitor (pickStaffName under
+                        the pinned zh), so a client leaf per row would repaint one
+                        column of a block that stays non-English either way. See
+                        the route note at the top of this file. */}
+                    {staffRoleLabel(member.role, lang)}
+                  </div>
+                )}
+                <div className={x.staffName}>{staffName}</div>
               </div>
-              {s.role && (
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "rgba(235,235,245,0.40)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {/* Server-rendered, unlike the hero genre/format chips: this
-                      grid runs to dozens of rows, and the name beside each role
-                      is already Japanese for every visitor (pickStaffName under
-                      the pinned zh), so a client leaf per row would repaint one
-                      column of a block that stays non-English either way. See
-                      the route note at the top of this file. */}
-                  {staffRoleLabel(s.role, lang)}
-                </div>
-              )}
             </div>
-          </div>
           );
         })}
       </div>
@@ -1093,18 +1059,12 @@ function RecommendationsSection({
   const items = recommendations.slice(0, 10);
 
   return (
-    <section style={{ marginTop: 40, marginBottom: 60 }}>
-      <h2 className={s.sectionLabel}>{label}</h2>
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          overflowX: "auto",
-          paddingBottom: 8,
-          scrollbarWidth: "none",
-          msOverflowStyle: "none",
-        }}
-      >
+    <section className={x.sectionLast}>
+      <header className={x.head}>
+        <h2 className={x.headTitle}>{label}</h2>
+        <span className={x.headCount}>{items.length}</span>
+      </header>
+      <div className={x.recStrip}>
         {items.map((r) => {
           // Wire field is `title` (romaji), not `titleRomaji`. Legacy
           // RecommendationSection.jsx pinned r.title, throwing away the Chinese
@@ -1112,72 +1072,38 @@ function RecommendationsSection({
           // suppression on the page, which is why it is worth flipping even
           // though `lang` here is server-pinned zh for every visitor.
           const title = pickRelatedTitle(r, lang) || `Anime #${r.anilistId}`;
+          const score = r.averageScore && r.averageScore > 0 ? r.averageScore : null;
           return (
             <Link
               key={r.anilistId}
               href={`/anime/${r.anilistId}`}
               prefetch={false}
-              className="card-lift"
-              style={{
-                flexShrink: 0,
-                width: 110,
-                color: "inherit",
-                textDecoration: "none",
-              }}
+              className={`card-lift ${x.recCard}`}
             >
-              <div
-                style={{
-                  width: 110,
-                  height: 155,
-                  borderRadius: 8,
-                  overflow: "hidden",
-                  background: "#2c2c2e",
-                  marginBottom: 6,
-                  border: "1px solid #38383a",
-                }}
-              >
+              <div className={x.posterFrame}>
                 {r.coverImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <FadeImage
                     src={r.coverImageUrl}
                     alt={title}
-                    width={110}
-                    height={155}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      display: "block",
-                    }}
+                    width={POSTER_SRC_W}
+                    height={POSTER_SRC_H}
+                    className={x.posterImg}
                   />
                 ) : null}
+                {score !== null ? (
+                  // On the artwork now, and banded rather than always green.
+                  // It was a hardcoded #30d158 under the title, so a 55-rated
+                  // recommendation was painted the same "good" green as a 90 —
+                  // the exact split scoreStyle.ts exists to make impossible.
+                  // scoreScrimStyle returns background and foreground together.
+                  <span className={x.recScore} style={scoreScrimStyle(score)}>
+                    ★ {(score / 10).toFixed(1)}
+                  </span>
+                ) : null}
               </div>
-              <div
-                title={title}
-                style={{
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: "rgba(235,235,245,0.75)",
-                  lineHeight: 1.3,
-                  overflow: "hidden",
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                }}
-              >
+              <p className={x.posterTitle} title={title}>
                 {title}
-              </div>
-              {r.averageScore && r.averageScore > 0 ? (
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "#30d158",
-                    marginTop: 3,
-                  }}
-                >
-                  ★ {(r.averageScore / 10).toFixed(1)}
-                </div>
-              ) : null}
+              </p>
             </Link>
           );
         })}
@@ -1227,71 +1153,98 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
         }}
       />
       <main>
+        {/* Wraps the WHOLE page, not just the hero.
+         *
+         * HeroAccent carries `--poster-hue` and the `.poster-scope` class that
+         * builds `--poster-tone*` from it, and a custom property's var() is
+         * substituted on the element that DECLARES it — so those tokens only
+         * hold the anime's hue inside this element. Everything below the hero
+         * reads them (sections.module.css, EpisodesGrid), so closing the
+         * wrapper after <Hero> would leave all of it on the :root fallback:
+         * one violet for every anime, with nothing failing and the stylesheet
+         * still reading correctly. See globals.css `.poster-scope`.
+         *
+         * Adding this div does not touch the anonymous-server-render rule
+         * below — HeroAccent takes props only, reads no cookie or header. */}
         <HeroAccent
           anilistId={detail.anilistId}
           coverImageUrl={detail.coverImageUrl}
           posterAccent={detail.posterAccent ?? null}
           posterAccentRgb={detail.posterAccentRgb ?? null}
         >
-          <Hero detail={detail} lang={lang} dict={dict} />
-        </HeroAccent>
-        <div className="container">
-          <DetailActions
-            anilistId={detail.anilistId}
-            episodes={detail.episodes}
-            titleRomaji={detail.titleRomaji}
-            titleEnglish={detail.titleEnglish}
-            titleChinese={detail.titleChinese}
-            titleNative={detail.titleNative}
-            coverImageUrl={detail.coverImageUrl}
-            shareTitle={pickTitle(detail, lang)}
-            lang={lang}
-            labels={{
-              subAdd: dict.sub.addToList,
-              subRemove: dict.sub.remove,
-              subLogin: dict.sub.loginToWatch,
-              subLoginAria: dict.sub.loginToWatch,
-              subRate: dict.sub.rate,
-              subWatching: dict.sub.watching,
-              subCompleted: dict.sub.completed,
-              subPlanToWatch: dict.sub.planToWatch,
-              subDropped: dict.sub.dropped,
-              share: dict.social.share,
-              shareCopied: dict.detail.linkCopied,
-              shareCopyFailed: dict.detail.linkCopyFailed,
-              torrents: dict.torrent.download,
-              torrentsTitle: dict.torrent.title,
-              torrentsSearchBtn: dict.torrent.searchBtn,
-              torrentsPlaceholder: dict.torrent.placeholder,
-              torrentsGroupAll: dict.torrent.groupAll,
-              torrentsEpAll: dict.torrent.epAll,
-              torrentsLoading: dict.torrent.loading,
-              torrentsNoResults: dict.torrent.noResults,
-              torrentsClose: dict.torrent.close,
-              torrentsCopy: dict.torrent.copy,
-              torrentsCopied: dict.torrent.copied,
-              torrentsOpenMagnet: dict.torrent.openMagnet,
-              torrentsSeeders: dict.torrent.seeders,
-              play: dict.detail.openPlayer,
-              playAria: dict.detail.openPlayerAria,
-            }}
-          />
-          <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
-          <RelationsSection relations={detail.relations} lang={lang} dict={dict} />
-          <CharactersSection characters={detail.characters} lang={lang} dict={dict} />
-          <StaffSectionView staff={detail.staff} lang={lang} dict={dict} />
-          <EpisodesGrid
-            anilistId={detail.anilistId}
-            episodes={detail.episodes}
-            episodesBgm={detail.episodesBgm ?? null}
-            episodeTitles={detail.episodeTitles ?? []}
-          />
-          <RecommendationsSection
-            recommendations={detail.recommendations}
+          <Hero
+            detail={detail}
             lang={lang}
             dict={dict}
+            actions={
+                            <DetailActions
+                anilistId={detail.anilistId}
+                episodes={detail.episodes}
+                titleRomaji={detail.titleRomaji}
+                titleEnglish={detail.titleEnglish}
+                titleChinese={detail.titleChinese}
+                titleNative={detail.titleNative}
+                coverImageUrl={detail.coverImageUrl}
+                shareTitle={pickTitle(detail, lang)}
+                lang={lang}
+                labels={{
+                subAdd: dict.sub.addToList,
+                subRemove: dict.sub.remove,
+                subLogin: dict.sub.loginToWatch,
+                subLoginAria: dict.sub.loginToWatch,
+                subRate: dict.sub.rate,
+                subWatching: dict.sub.watching,
+                subCompleted: dict.sub.completed,
+                subPlanToWatch: dict.sub.planToWatch,
+                subDropped: dict.sub.dropped,
+                share: dict.social.share,
+                shareCopied: dict.detail.linkCopied,
+                shareCopyFailed: dict.detail.linkCopyFailed,
+                torrents: dict.torrent.download,
+                torrentsTitle: dict.torrent.title,
+                torrentsSearchBtn: dict.torrent.searchBtn,
+                torrentsPlaceholder: dict.torrent.placeholder,
+                torrentsGroupAll: dict.torrent.groupAll,
+                torrentsEpAll: dict.torrent.epAll,
+                torrentsLoading: dict.torrent.loading,
+                torrentsNoResults: dict.torrent.noResults,
+                torrentsClose: dict.torrent.close,
+                torrentsCopy: dict.torrent.copy,
+                torrentsCopied: dict.torrent.copied,
+                torrentsOpenMagnet: dict.torrent.openMagnet,
+                torrentsSeeders: dict.torrent.seeders,
+                play: dict.detail.openPlayer,
+                playAria: dict.detail.openPlayerAria,
+                }}
+              />
+            }
           />
-        </div>
+          <div className="container">
+            {/* Order follows the demo: read about it, look it up, then use
+                it. Episodes sit third rather than sixth because they are the
+                one thing a returning visitor came for, and relations move
+                near the bottom because they are navigation away from this
+                page — putting them second sent people off it before they had
+                seen anything. */}
+            <SynopsisSection detail={detail} lang={lang} dict={dict} />
+            <InfoSection detail={detail} lang={lang} dict={dict} />
+            <EpisodesGrid
+              anilistId={detail.anilistId}
+              episodes={detail.episodes}
+              episodesBgm={detail.episodesBgm ?? null}
+              episodeTitles={detail.episodeTitles ?? []}
+            />
+            <CharactersSection characters={detail.characters} lang={lang} dict={dict} />
+            <StaffSectionView staff={detail.staff} lang={lang} dict={dict} />
+            <RelationsSection relations={detail.relations} lang={lang} dict={dict} />
+            <RecommendationsSection
+              recommendations={detail.recommendations}
+              lang={lang}
+              dict={dict}
+            />
+            <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
+          </div>
+        </HeroAccent>
       </main>
     </>
   );

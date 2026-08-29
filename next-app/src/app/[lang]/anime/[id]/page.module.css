@@ -15,84 +15,109 @@
 
 /* ── Hero geometry ───────────────────────────────────────────────────────
  *
- * Four numbers that only make sense together:
+ * Two numbers, where there used to be four.
  *
- *   banner height   how tall the artwork strip is
- *   pull            how far the content below is dragged up into it
- *   cover width     the poster, which straddles the seam
- *   meta top        how far the title is pushed down inside the content
+ * The old hero was a banner strip of fixed height with the content below it
+ * dragged up by a negative margin, which took four values that only made
+ * sense together — banner height, pull, cover width, meta offset. Changing
+ * one alone did not produce a smaller hero, it produced a broken one: shrink
+ * the banner without the pull and the poster hung off the top of the
+ * artwork; shrink the pull without the meta offset and the title landed in
+ * the middle of the image.
  *
- * They were four separate ternaries on `detail.bannerImageUrl`, scattered
- * across 70 lines of JSX. Changing one alone does not produce a smaller
- * hero, it produces a broken one: shrink the banner without shrinking the
- * pull and the poster hangs off the top of the artwork; shrink the pull
- * without the meta offset and the title lands in the middle of the image.
+ * The artwork is now the hero's background and the content is laid on top of
+ * it, bottom-aligned. The overlap that the pull existed to manufacture is
+ * what `align-items: flex-end` gives for free, so two of the four numbers
+ * have no job left and the remaining two are independent of each other.
  *
- * So they live here, as one custom-property set per state, and the JSX only
- * says which state it is in. That is what makes the mobile clamp below a
- * three-line change instead of a rewrite.
- *
- * Measured before: at a 390px viewport the banner (400px) plus the poster
- * (300px) consumed the entire first screen, so the synopsis — the thing a
- * visitor arriving from a search result came to read — started below the
- * fold on every phone.
+ * What has not changed is why the phone floor is low: at 390px the banner
+ * (400px) plus the poster (300px) once consumed the entire first screen, so
+ * the synopsis — the thing a visitor arriving from a search result came to
+ * read — started below the fold on every phone. The artwork is a backdrop
+ * there, not the subject.
  */
 .hero {
-  --hero-banner-h: clamp(150px, 34vw, 400px);
-  --hero-pull: calc(-1 * clamp(40px, 8vw, 80px));
   --hero-cover-w: clamp(112px, 22vw, 210px);
-  --hero-meta-top: clamp(20px, 5vw, 60px);
   --hero-gap: clamp(16px, 3vw, 32px);
+
+  /* The artwork is the hero's background, not a strip above it, and the
+   * content sits ON the image rather than below it. This replaced a banner
+   * of fixed height with the content pulled up into it by a negative
+   * margin; four coupled numbers (height, pull, cover width, meta offset)
+   * became two, because the overlap is now what `align-items: flex-end`
+   * does for free.
+   *
+   * 38.6vw is the ratio the design was drawn at — 556px on a 1440 viewport.
+   * The floor is what a phone gets, and it is deliberately far below the
+   * ceiling: at 390px the artwork is a backdrop for the title, not the
+   * subject, and every pixel it takes is a pixel of synopsis pushed down. */
+  position: relative;
+  isolation: isolate;
+  /* The floor is not "as small as possible": with align-items:flex-end the
+   * content sits on the bottom edge, so a floor equal to the content height
+   * leaves no artwork visible and puts the title hard against the navbar.
+   * 340 is the measured content height on a phone (306px of meta plus its
+   * padding) plus enough for the banner to read as a backdrop. */
+  min-height: clamp(340px, 38.6vw, 560px);
+  display: flex;
+  align-items: flex-end;
 }
 
-/* No banner: there is no artwork to overlap, so the content sits below the
- * short strip rather than being pulled into it, and the title needs no
- * offset to clear anything. */
+/* No banner: nothing to sit on, so the hero collapses to just its content
+ * and the title has no artwork to clear. */
 .hero[data-banner="false"] {
-  --hero-banner-h: 120px;
-  --hero-pull: var(--sp-lg);
-  --hero-meta-top: 0px;
+  min-height: 0;
+  padding-top: var(--sp-xl);
 }
 
 .banner {
-  position: relative;
-  height: var(--hero-banner-h);
+  position: absolute;
+  inset: 0;
   background: var(--bg);
   overflow: hidden;
+  z-index: 0;
 }
 
+/* 38% rather than centre. AniList banners are 1900x400 and this box is far
+ * taller than that ratio, so most of the crop is vertical — and anime key
+ * art puts faces in the upper third, which centre-cropping is exactly wide
+ * enough to cut. */
 .bannerImage {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center;
+  object-position: center 38%;
   display: block;
 }
 
-/* The gradient that lets white text sit on arbitrary artwork. Ends at 0.95
- * rather than 1 so the bottom edge of the image is still faintly visible —
- * a hard cut reads as a rendering bug. */
+/* The gradient that lets white text sit on arbitrary artwork.
+ *
+ * Bottom-up, and it does not begin until two thirds of the way down: the
+ * text all sits in the lower third, so that is the only part that needs
+ * darkening. The previous version started fading at 40% and reached 0.95
+ * black by the bottom, which put the darkest band across the middle of the
+ * image — the faces — to protect text that was not there. */
 .bannerOverlay {
   position: absolute;
   inset: 0;
   background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    transparent 40%,
-    rgba(0, 0, 0, 0.3) 65%,
-    rgba(0, 0, 0, 0.95) 100%
+    to top,
+    var(--bg) 1%,
+    rgba(0, 0, 0, 0.55) 34%,
+    transparent 66%
   );
 }
 
 .content {
-  display: flex;
-  gap: var(--hero-gap);
-  margin-top: var(--hero-pull);
   position: relative;
   z-index: 1;
-  padding-bottom: 40px;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--hero-gap);
+  padding-bottom: clamp(20px, 2.6vw, 36px);
   flex-wrap: wrap;
 }
 
@@ -125,211 +150,134 @@
 .meta {
   flex: 1;
   min-width: 280px;
-  padding-top: var(--hero-meta-top);
 }
 
-/* Below the wrap point the poster and the title share a row instead of
- * stacking. Stacking is what pushed the synopsis off the first screen: the
- * poster gets a full row to itself and the text starts underneath it.
- * `min-width: 0` is the whole mechanism — a flex item will not shrink past
- * its min-width, and 280px plus the poster does not fit a 390px screen. */
-@media (max-width: 600px) {
-  .meta {
-    min-width: 0;
-  }
-}
 
 /* ── Type ─────────────────────────────────────────────────────────────── */
 
+/* The hero's one piece of scale contrast. Everything else in here is set
+ * within a few points of everything else, so the title carries the whole
+ * hierarchy by itself — which is only possible because the facts row below
+ * gave up its pills and stopped competing for attention. */
 .title {
   font-family: var(--font-display);
-  font-size: clamp(22px, 4vw, 36px);
+  font-size: clamp(28px, 4.6vw, 58px);
   color: var(--text);
   margin-bottom: var(--sp-xs);
-  line-height: 1.2;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
 }
 
+/* The original title, so it is set in a Japanese face. Han characters are
+ * drawn differently in Japanese and Simplified Chinese, and this is the one
+ * string on the page that is unambiguously Japanese — rendering 葬送のフリーレン
+ * in a Chinese face is legible but wrong in the way a reader notices without
+ * being able to name. */
 .subtitle {
   color: var(--text-secondary);
-  font-size: 15px;
-  margin-bottom: var(--sp-md);
+  font-family: var(--font-jp);
+  font-size: 16px;
+  margin-bottom: 14px;
 }
 
-.descText {
-  /* 0.75 — deliberately brighter than --text-secondary (0.60). This is body
-   * copy at 14px/1.8, and the secondary alpha is tuned for short labels. */
-  color: rgba(235, 235, 245, 0.75);
-  font-size: 14px;
-  line-height: 1.8;
-}
-
-.sectionLabel {
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  margin-bottom: var(--sp-md);
-}
-
-/* ── Badges ───────────────────────────────────────────────────────────── */
-
-.badgeRow {
+/* ── Facts ────────────────────────────────────────────────────────────────
+ *
+ * One sentence, dot-separated, in place of the three stacked strips this
+ * replaced: a row of seven pills, a meta row, and a row of genre pills.
+ *
+ * Pills were the wrong container for this content. Every one of these is a
+ * fact you read once — a score, a format, an episode count — and none is a
+ * control, but a filled rounded rectangle is the site's own vocabulary for
+ * something you can press. Fourteen of them stacked three deep also cost
+ * roughly 90px of vertical space above the synopsis, which on a phone is
+ * the difference between a search visitor landing on the text and landing
+ * on decoration.
+ *
+ * Wrapping is the layout: at 1440px this is one or two lines, on a phone
+ * three or four, and it needs no breakpoint to get there. */
+.facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: var(--sp-md);
+  align-items: baseline;
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: oklch(80% 0.012 var(--poster-hue));
+  margin-bottom: 18px;
 }
 
-/* Shape only. Colour comes from one of the variants below, and never from
- * a caller passing a pair of strings — that signature is what let the score
- * badge pair a green foreground with an amber background in production. */
-.badge {
-  padding: var(--sp-xs) 12px;
-  border-radius: var(--radius-full);
-  font-size: 13px;
+/* The separator is drawn, not typed. Writing "·" between items in the JSX
+ * would put it in the accessibility tree and in the text a crawler reads,
+ * turning the row into "9 · BGM 7.8 · TV" as a sentence; as generated
+ * content it stays decoration. It also means no item has to know whether
+ * it is first — an `x && y && <span>·</span>` chain across ten optional
+ * fields is where the missing-dot bugs live.
+ *
+ * ::after on the preceding item, NOT ::before on the following one. Both
+ * render identically on one line, and the row is one line on a desktop —
+ * but this row wraps to four on a phone, and a ::before is its own flex
+ * item, so it wraps with the item it belongs to and lands alone in the
+ * leading column. Every wrapped line began with a stray dot. Anchored as
+ * an ::after it is inside the previous item's box and cannot be separated
+ * from it. */
+.facts > *:not(:last-child)::after,
+.factsGenres > *:not(:last-child)::after {
+  content: "·";
+  margin: 0 8px;
+  color: oklch(52% 0.01 var(--poster-hue));
 }
 
-.badgeAccent {
-  composes: badge;
-  background: var(--accent-dim);
-  color: var(--accent);
+/* The genre group's own trailing separator, so the last genre is divided
+ * from whatever follows the group. `.facts > *:not(:last-child)::after`
+ * already targets the group element; because the group is itself a flex
+ * container that ::after becomes its final flex item, which is exactly
+ * where the separator belongs. */
+
+/* Genres sit one step back. They are the least specific thing in the row
+ * and there can be seven of them, so at the same weight as the rest they
+ * take the row over. */
+.factsGenres {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  color: oklch(74% 0.012 var(--poster-hue));
 }
 
-/* Read-only information, never a control — see DESIGN.md on teal. */
-.badgeInfo {
-  composes: badge;
-  background: var(--teal-dim);
-  color: var(--teal);
+.factsStudio {
+  color: oklch(88% 0.014 var(--poster-hue));
 }
 
-.badgeNeutral {
-  composes: badge;
-  background: var(--bg-fill);
-  color: var(--text-secondary);
-}
-
-/* One step quieter than neutral, for a value we are not certain of (the
- * pending episode count). 0.42 sits between --text-secondary and
- * --text-tertiary and matches no token; kept as measured rather than
- * snapped, because "slightly less certain" is the thing it encodes. */
-.badgeMuted {
-  composes: badge;
-  background: var(--bg-fill);
-  color: rgba(235, 235, 245, 0.42);
-}
-
-/* Layout only — the colour pair is applied inline from scoreBadgeStyle(),
- * which returns background and text together. See scoreStyle.ts. */
-.scoreBadge {
-  padding: var(--sp-xs) 12px;
-  border-radius: var(--radius-full);
-  font-weight: 700;
-  font-size: 13px;
+/* Score keeps its band colour. The pill went away; the information did not.
+ * See scoreTextStyle() — the band is applied inline because a test has to be
+ * able to import the mapping without importing this page. */
+.factsScore {
   font-family: var(--font-mono);
+  font-weight: 500;
 }
 
-/* Bangumi's score, kept visually distinct from ours so the two are not read
- * as one number. 0.10 rather than the 0.12 the score bands use — a hair
- * lighter, because this badge carries more glyphs. */
-.bgmScoreBadge {
-  padding: var(--sp-xs) 12px;
-  border-radius: var(--radius-full);
-  background: rgba(255, 69, 58, 0.1);
-  color: var(--error);
-  font-weight: 700;
-  font-size: 13px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+.factsBgm {
   font-family: var(--font-mono);
+  font-weight: 500;
+  color: oklch(88% 0.014 var(--poster-hue));
 }
 
-.bgmLabel {
-  font-size: 10px;
-  opacity: 0.7;
-  font-family: var(--font-sans);
+.factsBgmVotes {
+  color: oklch(62% 0.01 var(--poster-hue));
+  font-size: 12px;
 }
 
-.bgmVotes {
-  font-size: 11px;
-  opacity: 0.6;
-  font-weight: 400;
-}
-
-.bgmLink {
-  padding: var(--sp-xs) 12px;
-  border-radius: var(--radius-full);
-  background: rgba(255, 69, 58, 0.1);
-  color: var(--error);
-  font-size: 13px;
+.factsLink {
+  color: var(--poster-tone);
   text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-xs);
-  font-weight: 500;
+  border-radius: var(--radius-sm);
 }
 
-/* An outbound link, so unlike the badges around it, it gets real states.
- * This is the kind of rule the inline-style object could not hold at all. */
-.bgmLink:hover {
-  background: rgba(255, 69, 58, 0.18);
+.factsLink:hover {
+  text-decoration: underline;
 }
 
-.bgmLink:focus-visible {
-  outline: none;
+.factsLink:focus-visible {
+  outline: 2px solid transparent;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
-}
-
-.bgmArrow {
-  font-size: 10px;
-  opacity: 0.8;
-}
-
-/* ── Meta row ─────────────────────────────────────────────────────────── */
-
-.metaRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-xs) 12px;
-  margin-bottom: var(--sp-md);
-  align-items: center;
-}
-
-/* 0.75 / 0.50 — a three-step hierarchy inside one row (studio, separator,
- * detail). The token scale has two steps in that range, so these stay
- * literal rather than collapsing studio and detail into one weight. */
-.metaStudio {
-  color: rgba(235, 235, 245, 0.75);
-  font-size: 13px;
-}
-
-.metaDot {
-  color: var(--separator);
-  font-size: 13px;
-}
-
-.metaDetail {
-  color: rgba(235, 235, 245, 0.5);
-  font-size: 12px;
-}
-
-/* ── Genres ───────────────────────────────────────────────────────────── */
-
-.genreRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 20px;
-}
-
-.genreTag {
-  padding: var(--sp-xs) 10px;
-  border-radius: var(--radius-full);
-  background: var(--bg-fill);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
 }
 
 /* ── Hero relations strip ─────────────────────────────────────────────── */
@@ -352,4 +300,58 @@
 
 .descBlockLast {
   margin-bottom: 0;
+}
+
+/* ── Phone ────────────────────────────────────────────────────────────────
+ *
+ * This block sits at the END of the file on purpose. Every rule in it has
+ * the same specificity as the base rule it overrides, so the cascade decides
+ * by source order — placed above `.title` / `.facts` it lost to them and the
+ * whole media query was inert. It measured as no change at all: the phone
+ * numbers were byte-identical before and after adding it.
+ */
+/* Below the wrap point the poster and the title share a row instead of
+ * stacking. Stacking is what pushed the synopsis off the first screen: the
+ * poster gets a full row to itself and the text starts underneath it.
+ * `min-width: 0` is the whole mechanism — a flex item will not shrink past
+ * its min-width, and 280px plus the poster does not fit a 390px screen. */
+@media (max-width: 600px) {
+  .meta {
+    min-width: 0;
+  }
+
+  /* Everything above the synopsis gets tighter on a phone, because the
+   * synopsis is what the visitor came for and it is competing with a hero
+   * for the same 844px.
+   *
+   * The title's floor drops below its desktop clamp rather than scaling
+   * with it: beside a 112px poster the meta column is only ~230px wide, so
+   * a long title (Re:Zero S4 is 20 characters) wraps to three lines at
+   * 28px and stays three lines at 25px. The saving here is per-line, not
+   * in line count. */
+  .title {
+    font-size: 25px;
+    line-height: 1.18;
+  }
+
+  .subtitle {
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+
+  /* 1.5 rather than the desktop 1.85. Measured across a 16-title sample the
+   * facts row is 3 lines at the median and 6 on the worst title in the
+   * catalogue (Re:Zero S4 — a 20-character name beside seven genres), so
+   * every 0.1 of line-height here is worth ~7px on exactly the titles that
+   * need it and nothing on the ones that do not. */
+  .facts {
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 12px;
+  }
+
+  .facts > *:not(:last-child)::after,
+  .factsGenres > *:not(:last-child)::after {
+    margin: 0 6px;
+  }
 }

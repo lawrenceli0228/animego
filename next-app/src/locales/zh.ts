@@ -149,7 +149,7 @@ const zh = {
     watchedFailed: '第 {{ep}} 集没记上，请再试一次',
     watchedSignedOut: '登录状态已过期，重新登录后再记录',
     watchedProgress: '已看 {{done}} / {{total}} 集',
-    watchedHint: '点一下方格，记录你真正看过的那一集。',
+    watchedHint: '点一下某一集，记录你真正看过的那一集。',
     watchedCompletedHint: '这部已标记「看完」，所有集数都算已看。取消其中任意一集，会把状态改回「在看」，并改为按逐集记录显示。',
     // 「记录到的最远一集」——是关于集合本身的事实（max），不是对相邻几集
     // 的推断。措辞刻意不用「在看到这里」，那会暗示后面几集的状态。
@@ -161,6 +161,19 @@ const zh = {
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',
+    info: '作品信息',
+    synopsis: '简介',
+    charUnit: '字',
+    infoSeason: '季度',
+    infoAired: '开播',
+    infoStatus: '状态',
+    infoEpisodes: '集数',
+    infoDuration: '单集时长',
+    infoFormat: '类型',
+    infoSource: '原作',
+    infoStudio: '制作',
+    scores: '评分',
+    votes: '人评分',
     // Credit under the synopsis when the rendered text is Bangumi's
     // community-written summary rather than AniList's description.
     summaryFromBangumi: '简介来自 Bangumi',

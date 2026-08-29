@@ -119,3 +119,22 @@ export function scoreBadgeStyle(score: number): Pick<CSSProperties, "background"
 export function scoreScrimStyle(score: number): Pick<CSSProperties, "background" | "color"> {
   return { background: "var(--score-scrim-bg)", color: BAND_VARS[scoreBand(score)].fg };
 }
+
+/**
+ * The band colour alone, for a score set as running text rather than a pill.
+ *
+ * The detail hero sets its facts as one sentence — "★ 9 · BGM 7.8 · TV · 连载中"
+ * — so the score has no pill to tint. It still has to say which band it is
+ * in: that is the actual information, and it is what the production bug
+ * destroyed (a 87 rendered green-on-amber, so the background named one band
+ * and the text another).
+ *
+ * Returning a single property is safe here for the reason the pairs above
+ * are not: there is no second colour to disagree with. The moment a caller
+ * wants a background behind this, it must switch to `scoreBadgeStyle` or
+ * `scoreScrimStyle` rather than adding one alongside — assembling the pair
+ * at a call site is exactly the seam this module exists to close.
+ */
+export function scoreTextStyle(score: number): Pick<CSSProperties, "color"> {
+  return { color: BAND_VARS[scoreBand(score)].fg };
+}
