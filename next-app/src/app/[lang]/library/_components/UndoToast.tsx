@@ -71,7 +71,7 @@ const s = {
     letterSpacing: "0.18em",
   } as CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 13,
     lineHeight: 1.3,

@@ -104,9 +104,28 @@
    * page that mixes "MADHOUSE" and 葬送的芙莉莲 in the same sentence. */
   --font-cjk: "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC",
     "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-display: "Sora", var(--font-cjk);
-  --font-sans: "DM Sans", var(--font-cjk);
+
+  /* PingFang leads, and it leads for Latin too.
+   *
+   * The stack used to be "DM Sans, <cjk>", which meant a line like
+   * "MADHOUSE · 24分/集" was set in two different typefaces — DM Sans for
+   * the Latin run, PingFang for the Chinese — with different x-heights,
+   * different stroke contrast and different vertical metrics. On a site
+   * where nearly every line mixes the two, that is a seam in the middle of
+   * most sentences.
+   *
+   * PingFang carries a complete Latin set (it descends from the Helvetica
+   * Neue skeleton), so one family sets the whole line. The webfonts stay
+   * available for the places where a display face earns its keep — see
+   * --font-latin. */
+  --font-display: var(--font-cjk);
+  --font-sans: var(--font-cjk);
   --font-mono: "JetBrains Mono", ui-monospace, var(--font-cjk);
+
+  /* The Latin display face, now opt-in rather than the default. Used where
+   * the text is Latin by definition and a neutral system face would read as
+   * unstyled — the romanised title under the hero. */
+  --font-latin: "Sora", "DM Sans", system-ui, sans-serif;
 
   /* Japanese, for the original titles. Han characters are drawn differently
    * in Japanese and Simplified Chinese — 直 骨 令 among many — and a

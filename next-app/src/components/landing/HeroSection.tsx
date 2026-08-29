@@ -111,7 +111,7 @@ const s = {
     animation: "hudBlink 2.2s var(--ease-out-expo) infinite",
   } as CSSProperties,
   h1: (lang: Lang): CSSProperties => ({
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 800,
     fontSize:
       lang === "en"
@@ -135,7 +135,7 @@ const s = {
   sub: {
     marginTop: 24,
     maxWidth: 520,
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     fontSize: "clamp(15px, 1vw + 0.5rem, 18px)",
     lineHeight: 1.6,
     color: "rgba(235,235,245,0.60)",
@@ -171,7 +171,7 @@ const s = {
     display: "inline-flex",
     alignItems: "center",
     gap: 12,
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 16,
     fontWeight: 700,
     color: "#fff",
@@ -310,7 +310,7 @@ const s = {
     textTransform: "uppercase",
   } as CSSProperties,
   showcaseTitle: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 32,
     fontWeight: 800,
     color: "#fff",
@@ -339,7 +339,7 @@ const s = {
     top: `${y}%`,
     left: 0,
     padding: "4px 10px",
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     fontSize: 13,
     color: "#fff",
     textShadow: "0 1px 2px rgba(0,0,0,0.85)",

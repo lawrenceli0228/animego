@@ -14,10 +14,19 @@
 
 ## Typography
 
-- **Display/Hero:** Sora 700–800 — 日本设计师设计的几何无衬线，有隐性日系精密感，品类内少见
-- **Body:** DM Sans 400–500 — 干净易读，不抢 Sora 的戏
-- **UI/Labels:** DM Sans（同 Body）
-- **Data/Tables:** DM Sans，使用 `font-variant-numeric: tabular-nums`
+- **全局主字体:** `--font-sans` = `--font-cjk`，也就是 PingFang SC 打头。
+  **拉丁字符也走它**。原来是 `DM Sans, <cjk>`，于是「MADHOUSE · 24分/集」
+  这样一行是两套字体拼出来的 —— 拉丁用 DM Sans、中文用 PingFang，x 高度、
+  笔画对比、竖直度量都不一样。本站几乎每一行都中英混排，那就等于大多数句子
+  中间有一道缝。PingFang 自带完整拉丁字符集（骨架源自 Helvetica Neue），
+  一套字体能排完整行。
+- **标题:** 同上。Sora 没有中日韩字形，中文标题无论如何都回落到 PingFang，
+  所以标题不再单独指定显示字体 —— 层级靠字重和字号，不靠换字体。
+- **Latin 显示字体:** `--font-latin`（Sora / DM Sans）改为**按需使用**，
+  只用在「按定义就是拉丁文」且中性系统字体会显得没排过版的地方 —— 目前是
+  hero 下面那行罗马字标题。
+- **Data/Tables:** `--font-mono`（JetBrains Mono），用于字段标签和数字，
+  配 `font-variant-numeric: tabular-nums`
 - **Code:** JetBrains Mono 400 — 用于 API 输出、磁力链接、剧集编号
 - **中文:** `--font-cjk` — PingFang SC / Hiragino Sans GB / Source Han Sans SC /
   Noto Sans CJK SC / Microsoft YaHei。上面三个网页字体都只加载了 latin 子集，

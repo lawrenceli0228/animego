@@ -34,7 +34,7 @@ export const authFormStyles = {
   } as CSSProperties,
   header: { textAlign: "center", marginBottom: 32 } as CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 28,
     color: "#ffffff",
     marginBottom: 8,
@@ -139,7 +139,7 @@ export const authFormStyles = {
     fontSize: 15,
     fontWeight: 700,
     cursor: busy ? "not-allowed" : "pointer",
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     opacity: busy ? 0.7 : 1,
     transition: "opacity 0.15s",
   }),

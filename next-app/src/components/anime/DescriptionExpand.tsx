@@ -19,6 +19,12 @@ const textStyle: CSSProperties = {
 };
 
 const buttonStyle: CSSProperties = {
+  // A <button> does not inherit font-family from the document — the UA
+  // stylesheet sets its own. Without this the control rendered in the
+  // browser's default sans (Arial here) while every word around it was
+  // PingFang, which is the kind of mismatch that reads as "broken" without
+  // being nameable.
+  fontFamily: "inherit",
   // The derived tone, not the raw sample. `--poster-accent` is the colour
   // taken straight off the cover and nothing bounds its contrast: measured
   // across real accents it runs 3.58:1 to 8.84:1 against black, so on some

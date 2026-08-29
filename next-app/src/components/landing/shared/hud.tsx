@@ -52,7 +52,7 @@ const headerStyles = {
     marginBottom: 16,
   } as CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: "clamp(2rem, 1rem + 3vw, 3.5rem)",
     fontWeight: 800,
     color: "#fff",

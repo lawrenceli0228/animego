@@ -190,7 +190,7 @@ const s = {
     alignItems: "center",
     justifyContent: "center",
     background: `oklch(18% 0.06 ${HUE} / 0.80)`,
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 28,
     fontWeight: 700,
     color: `oklch(72% 0.15 ${HUE})`,
@@ -208,7 +208,7 @@ const s = {
     gap: 6,
   } as React.CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 13,
     color: "#fff",

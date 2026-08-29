@@ -29,7 +29,7 @@ const s = {
     gap: 32,
   } as CSSProperties,
   colTitle: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-latin)",
     fontSize: 14,
     fontWeight: 600,
     color: "#fff",
@@ -71,12 +71,12 @@ const s = {
   copyright: {
     fontSize: 12,
     color: "rgba(235,235,245,0.30)",
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
   } as CSSProperties,
   credits: {
     fontSize: 12,
     color: "rgba(235,235,245,0.30)",
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     display: "flex",
     alignItems: "center",
     gap: 6,

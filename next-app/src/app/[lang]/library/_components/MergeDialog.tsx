@@ -200,7 +200,7 @@ const s: Record<string, React.CSSProperties> = {
     letterSpacing: "0.18em",
   },
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 16,
     color: "#fff",

@@ -43,7 +43,7 @@ const s = {
     border: "none",
     outline: "none",
     color: "#fff",
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     fontSize: 13,
     padding: 0,
     caretColor: "#0a84ff",

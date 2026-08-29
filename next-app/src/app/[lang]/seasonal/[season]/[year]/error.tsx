@@ -66,7 +66,7 @@ export default function SeasonalError({ error, reset }: SeasonalErrorProps) {
       </div>
       <h1
         style={{
-          fontFamily: "'Sora', sans-serif",
+          fontFamily: "var(--font-display)",
           fontSize: 22,
           color: "#ffffff",
           marginBottom: 10,

@@ -61,7 +61,7 @@ const rowBaseStyle: CSSProperties = {
 };
 
 const rankBase: CSSProperties = {
-  fontFamily: "'Sora',sans-serif",
+  fontFamily: "var(--font-display)",
   fontWeight: 800,
   minWidth: 36,
   textAlign: "center",
@@ -90,7 +90,7 @@ const coverStyle: CSSProperties = {
 const infoStyle: CSSProperties = { flex: 1, minWidth: 0 };
 
 const nameStyle: CSSProperties = {
-  fontFamily: "'Sora',sans-serif",
+  fontFamily: "var(--font-display)",
   fontSize: 13,
   fontWeight: 600,
   color: "#ffffff",

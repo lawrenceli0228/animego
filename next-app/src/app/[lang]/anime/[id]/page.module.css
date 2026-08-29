@@ -180,6 +180,20 @@
   margin-bottom: 14px;
 }
 
+/* Set in the Latin display face and tracked out — it is a transliteration,
+ * so it wants to read as a different KIND of string from the title beside
+ * it, not merely a smaller one. Uppercase for the same reason. */
+.subtitleRoman {
+  margin-left: 12px;
+  font-family: var(--font-latin);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
 /* ── Facts ────────────────────────────────────────────────────────────────
  *
  * One sentence, dot-separated, in place of the three stacked strips this

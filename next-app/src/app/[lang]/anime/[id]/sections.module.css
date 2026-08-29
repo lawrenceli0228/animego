@@ -81,6 +81,11 @@
  * lower. Read them; do not restate them.
  */
 .section {
+  /* Sections sit further apart than they used to. Measured against the
+   * reference, heading to heading was 262px where the design has 292 — and
+   * that 30px is what stops two adjacent bands reading as one. */
+  margin-top: clamp(40px, 4.4vw, 64px);
+
   --sec-tone: var(--poster-tone, var(--accent));
   --sec-tone-mid: var(--poster-tone-mid, var(--separator));
   --sec-tone-low: var(--poster-tone-low, var(--bg-elevated));
@@ -125,11 +130,16 @@
   flex: none;
   margin: 0;
   font-family: var(--font-display);
-  /* The scale contrast the old 13px uppercase micro-label did not have: it
-   * was the same size as the body text it introduced. Sora is loaded at
-   * 300–800, so 600 is a real weight and not a synthesised one. */
-  font-size: clamp(16px, 1.3vw, 19px);
+  /* 15px, a hair above the 14.5px body it introduces, carrying its rank on
+   * weight and on the rule beside it rather than on size. The reference
+   * layout sets it here; at 19px the headings started to compete with the
+   * hero title for the page's one piece of scale contrast.
+   *
+   * Sora has no CJK glyphs, so a Chinese heading renders in --font-cjk
+   * either way — the display face only shows up on a Latin section name. */
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1.62;
   letter-spacing: 0.01em;
   color: var(--text);
 }
@@ -602,18 +612,29 @@
   gap: 4px;
 }
 
+/* Same rank as .infoLabel — these are the same kind of thing (a field name
+ * over a value) and were set two points apart for no reason. */
 .scoreLabel {
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
   color: var(--text-tertiary);
+  margin-bottom: 8px;
 }
 
 .scoreValue {
   font-family: var(--font-mono);
   font-size: 34px;
-  font-weight: 500;
+  /* 700 and a negative tracking. JetBrains Mono is loaded at 400/500 only,
+   * so 700 synthesises — accepted here because this is the one place on the
+   * page where the number is the headline, and the alternative is a 34px
+   * numeral at book weight, which reads as a placeholder. The tightening
+   * counters the mono advance, which at this size opens "8.5" into three
+   * separate marks. */
+  font-weight: 700;
+  letter-spacing: -0.025em;
   line-height: 1.05;
   color: oklch(96% 0.006 var(--poster-hue));
   display: flex;
@@ -672,29 +693,56 @@
  * pair, so there is no row-boundary logic that needs to know where a row
  * starts (unlike .people, which draws a hairline per row).
  */
+/* Eight columns, one per field, rather than auto-fill.
+ *
+ * There are exactly eight fields and they are the same eight on every anime,
+ * so a track count that changes with the viewport buys nothing and costs the
+ * table its most useful property: the same field is in the same place on
+ * every page. Below the breakpoint it drops to four and then two, which are
+ * factors of eight, so a field never lands alone on a row. */
 .infoGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-  gap: 18px 20px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 22px 30px;
   margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .infoGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .infoGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .infoCell {
   min-width: 0;
 }
 
+/* Mono, because these are labels rather than prose: a fixed advance width
+ * makes eight of them across a row read as one rank of type instead of eight
+ * words of varying colour. Same treatment as the score panel's labels. */
 .infoLabel {
+  font-family: var(--font-mono);
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-tertiary);
-  margin-bottom: 3px;
+  margin-bottom: 7px;
 }
 
+/* 500 rather than 400: the value has to hold its own against a label that is
+ * uppercase and letterspaced, which reads heavier than its size suggests. */
 .infoValue {
   margin: 0;
   font-size: 14.5px;
+  font-weight: 500;
+  line-height: 1.62;
   color: var(--text);
   overflow-wrap: anywhere;
 }

@@ -112,7 +112,7 @@ const s: Record<string, CSSProperties | ((hover: boolean) => CSSProperties)> = {
   },
   info: { flex: 1, minWidth: 0 },
   title: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 15,
     fontWeight: 600,
     color: "#ffffff",

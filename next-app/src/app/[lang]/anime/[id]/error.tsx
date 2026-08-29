@@ -64,7 +64,7 @@ export default function DetailError({ error, reset }: DetailErrorProps) {
       </div>
       <h1
         style={{
-          fontFamily: "'Sora', sans-serif",
+          fontFamily: "var(--font-display)",
           fontSize: 22,
           color: "#ffffff",
           marginBottom: 10,

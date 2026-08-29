@@ -13,7 +13,7 @@ const wrap: CSSProperties = {
   lineHeight: 1.8,
 };
 const titleStyle: CSSProperties = {
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
   fontSize: 28,
   fontWeight: 700,
   color: "#fff",
@@ -29,7 +29,7 @@ const updatedStyle: CSSProperties = {
 // Prose tokens reused by every legal page so headings/lists/links match.
 export const legalStyles = {
   h2: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 18,
     fontWeight: 600,
     color: "#fff",

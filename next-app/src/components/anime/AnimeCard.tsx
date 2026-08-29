@@ -151,7 +151,7 @@ const rankBadgeStyle: CSSProperties = {
   fontSize: 20,
   fontWeight: 900,
   lineHeight: 1,
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
   background: "rgba(0,0,0,0.65)",
   backdropFilter: "blur(8px)",
   WebkitBackdropFilter: "blur(8px)",
@@ -244,7 +244,7 @@ const genreChipStyle: CSSProperties = {
 };
 
 const titleStyle: CSSProperties = {
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
   fontSize: 13,
   fontWeight: 600,
   color: "#ffffff",

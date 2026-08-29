@@ -452,7 +452,17 @@ function Hero({
         <div className={s.meta}>
           <h1 className={s.title}>{title}</h1>
           {SHOWS_ORIGINAL_SUBTITLE[lang] && (detail.titleNative || detail.titleRomaji) && (
-            <p className={s.subtitle}>{detail.titleNative || detail.titleRomaji}</p>
+            <p className={s.subtitle}>
+              {detail.titleNative || detail.titleRomaji}
+              {/* The romanisation beside the native title, not instead of it.
+                  It is the string a reader types into a search box or matches
+                  against a filename, and it is Latin by definition — the one
+                  place on this page where a display face reads as typeset
+                  rather than as unstyled. */}
+              {detail.titleNative && detail.titleRomaji ? (
+                <span className={s.subtitleRoman}>{detail.titleRomaji}</span>
+              ) : null}
+            </p>
           )}
 
           {/* Facts — one dot-separated sentence, was three stacked strips.

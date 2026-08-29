@@ -220,7 +220,7 @@ const s = {
     marginBottom: 12,
   } as CSSProperties,
   hudTitle: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 700,
     fontSize: 32,
     letterSpacing: "-0.02em",

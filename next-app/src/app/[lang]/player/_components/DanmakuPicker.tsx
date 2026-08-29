@@ -68,7 +68,7 @@ const s: Record<string, CSSProperties | ((flag: boolean) => CSSProperties)> = {
     gap: 12,
   },
   headerTitle: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 700,
     fontSize: 18,
     color: "#ffffff",
@@ -179,7 +179,7 @@ const s: Record<string, CSSProperties | ((flag: boolean) => CSSProperties)> = {
   },
   animeInfo: { flex: 1, minWidth: 0 },
   animeTitle: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 14,
     fontWeight: 600,
     color: "#ffffff",

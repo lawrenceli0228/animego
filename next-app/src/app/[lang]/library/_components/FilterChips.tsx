@@ -41,7 +41,7 @@ const s = {
     borderRadius: 12,
   } as React.CSSProperties,
   segment: (active: boolean, dim: boolean): React.CSSProperties => ({
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     position: "relative",
     display: "inline-flex",
     alignItems: "center",

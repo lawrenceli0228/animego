@@ -210,7 +210,7 @@ const s = {
     marginBottom: 6,
   }),
   metaTitle: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 17,
     fontWeight: 700,
     color: "#fff",
@@ -238,7 +238,7 @@ const s = {
   caption: {
     marginTop: 40,
     textAlign: "center",
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     fontSize: 14,
     color: "rgba(235,235,245,0.60)",
     fontStyle: "italic",

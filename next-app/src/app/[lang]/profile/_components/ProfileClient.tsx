@@ -185,7 +185,7 @@ function AnimeCard({ item, lang }: AnimeCardProps) {
       >
         <p
           style={{
-            fontFamily: "'Sora', sans-serif",
+            fontFamily: "var(--font-display)",
             fontSize: 14,
             fontWeight: 600,
             color: "#fff",
@@ -463,7 +463,7 @@ export default function ProfileClient({
                 cursor: "pointer",
                 border: "none",
                 transition: "all 0.2s",
-                fontFamily: "'Sora', sans-serif",
+                fontFamily: "var(--font-display)",
                 background: isActive
                   ? `linear-gradient(135deg,${opt.color}33,${opt.color}22)`
                   : "transparent",
@@ -545,7 +545,7 @@ export default function ProfileClient({
             textAlign: "center",
             padding: "60px 0",
             color: "rgba(235,235,245,0.30)",
-            fontFamily: "'Sora', sans-serif",
+            fontFamily: "var(--font-display)",
             fontSize: 15,
           }}
         >

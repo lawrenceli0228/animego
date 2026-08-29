@@ -60,7 +60,7 @@ const s = {
     gap: 32,
   } as CSSProperties,
   logo: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 700,
     fontSize: 20,
     letterSpacing: "-0.03em",

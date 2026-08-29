@@ -51,7 +51,7 @@ const s = {
     maxWidth: 200,
   } as React.CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 12,
     color: "#fff",

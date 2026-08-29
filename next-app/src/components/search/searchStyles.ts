@@ -15,7 +15,7 @@ export const headingStyle: CSSProperties = {
   background: "linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))",
   WebkitBackgroundClip: "text",
   WebkitTextFillColor: "transparent",
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
   fontWeight: 700,
 };
 
@@ -64,13 +64,13 @@ export const submitStyle: CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
   cursor: "pointer",
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
 };
 
 export const statusStyle: CSSProperties = {
   color: "rgba(235,235,245,0.45)",
   fontSize: 12,
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
   minWidth: 56,
 };
 
@@ -91,14 +91,14 @@ export const chipStyle = (active: boolean): CSSProperties => ({
   background: active ? "rgba(10,132,255,0.12)" : "rgba(120,120,128,0.12)",
   border: `1px solid ${active ? "rgba(10,132,255,0.5)" : "transparent"}`,
   color: active ? "#0a84ff" : "rgba(235,235,245,0.60)",
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
 });
 
 export const promptStyle: CSSProperties = {
   textAlign: "center",
   padding: "60px 0",
   color: "rgba(235,235,245,0.30)",
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
   fontSize: 15,
 };
 
@@ -106,7 +106,7 @@ export const errorStyle: CSSProperties = {
   textAlign: "center",
   padding: "60px 0",
   color: "#ff453a",
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
   fontSize: 14,
 };
 
@@ -131,7 +131,7 @@ export const pageButtonStyle = (disabled: boolean): CSSProperties => ({
   color: disabled ? "rgba(235,235,245,0.18)" : "#ffffff",
   background: disabled ? "transparent" : "rgba(120,120,128,0.12)",
   cursor: disabled ? "not-allowed" : "pointer",
-  fontFamily: "'DM Sans', sans-serif",
+  fontFamily: "var(--font-sans)",
   fontSize: 14,
   fontWeight: 500,
   textDecoration: "none",
@@ -141,5 +141,5 @@ export const pageButtonStyle = (disabled: boolean): CSSProperties => ({
 export const pageInfoStyle: CSSProperties = {
   color: "rgba(235,235,245,0.60)",
   fontSize: 14,
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
 };
