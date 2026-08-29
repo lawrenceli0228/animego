@@ -131,8 +131,21 @@ const wrapStyle: CSSProperties = {
   padding: 0,
 };
 
+// Every control in this row is 44px tall.
+//
+// They were 32, 36, 40 and 44 depending on which object built them, because
+// each was written next to the thing it styles rather than against the row
+// it lands in — and the row also contains three <Button>s from components/ui,
+// whose base is 44. A row of controls at four different heights reads as
+// broken before it reads as anything else.
+//
+// 44 rather than the smallest of them: it is the touch-target floor in
+// DESIGN.md, and this row is the primary action strip on the page.
+const CONTROL_HEIGHT = 44;
+
 const selectStyle: CSSProperties = {
-  padding: "10px 16px",
+  minHeight: CONTROL_HEIGHT,
+  padding: "0 16px",
   borderRadius: 8,
   background: "#2c2c2e",
   border: "1px solid #38383a",
@@ -144,7 +157,10 @@ const selectStyle: CSSProperties = {
 };
 
 const removeBtnStyle: CSSProperties = {
-  padding: "10px 16px",
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: CONTROL_HEIGHT,
+  padding: "0 16px",
   borderRadius: 8,
   border: "1px solid rgba(255,69,58,0.4)",
   color: "#ff453a",
@@ -155,15 +171,16 @@ const removeBtnStyle: CSSProperties = {
 };
 
 const loginBtnStyle: CSSProperties = {
-  display: "inline-block",
-  padding: "10px 18px",
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "0 18px",
   borderRadius: 8,
   background: "#0a84ff",
   color: "#fff",
   fontWeight: 600,
   fontSize: 13,
   textDecoration: "none",
-  minHeight: 40,
+  minHeight: CONTROL_HEIGHT,
   lineHeight: "20px",
   border: "none",
   cursor: "pointer",
@@ -171,12 +188,14 @@ const loginBtnStyle: CSSProperties = {
 };
 
 const addBtnStyle: CSSProperties = {
-  padding: "10px 18px",
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "0 18px",
   borderRadius: 8,
   fontSize: 13,
   fontWeight: 600,
   cursor: "pointer",
-  minHeight: 40,
+  minHeight: CONTROL_HEIGHT,
   outline: "none",
   border: "1px solid rgba(84,84,88,0.65)",
   background: "transparent",
@@ -186,18 +205,21 @@ const addBtnStyle: CSSProperties = {
 };
 
 const placeholderStyle: CSSProperties = {
-  padding: "10px 18px",
+  padding: "0 18px",
   borderRadius: 8,
   border: "1px solid rgba(84,84,88,0.30)",
   background: "transparent",
   color: "transparent",
   pointerEvents: "none",
   minWidth: 110,
-  minHeight: 40,
+  minHeight: CONTROL_HEIGHT,
 };
 
 const scoreBtnBase: CSSProperties = {
-  padding: "8px 14px",
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: CONTROL_HEIGHT,
+  padding: "0 14px",
   borderRadius: 8,
   fontSize: 13,
   fontWeight: 600,
