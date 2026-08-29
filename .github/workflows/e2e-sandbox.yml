@@ -153,7 +153,7 @@ jobs:
           # process is on the host, so it takes the published port.
           GO_API_INTERNAL_URL: http://localhost:8080
         run: |
-          bun run dev > /tmp/next-dev.log 2>&1 &
+          bun run dev --webpack > /tmp/next-dev.log 2>&1 &
           echo $! > /tmp/next-dev.pid
 
       - name: Wait for next dev and warm the routes
@@ -197,6 +197,17 @@ jobs:
             fi
             sleep 1
           done
+          # CONTROL-BRANCH INSTRUMENTATION (not for merge).
+          #
+          # Record which bundler actually started. `bun run dev --webpack`
+          # passing the flag through is an assumption, and a green run on this
+          # branch proves nothing if the flag silently did not apply — the
+          # control group would be measuring Turbopack twice and calling it a
+          # fix. next-dev.log is only dumped on failure, so a passing run would
+          # otherwise carry no record of it at all.
+          echo "───── bundler banner ─────"
+          grep -m1 -E '▲ Next\.js' /tmp/next-dev.log || echo "(banner not found)"
+          echo "──────────────────────────"
           # /anime/0 is here to compile the `[lang]/anime/[id]` segment, which
           # nothing else in this list reaches. Turbopack compiles a segment on
           # its first request, so without this the first /anime/<id> in the
