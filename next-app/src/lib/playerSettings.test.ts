@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
   AUTO_MARK_DONE_KEY,
+  DANMAKU_SPEED_DEFAULT,
+  DANMAKU_SPEED_KEY,
+  DANMAKU_SPEED_MAX,
+  DANMAKU_SPEED_MIN,
+  DANMAKU_SPEED_STEPS,
+  readDanmakuSpeed,
+  speedLadderIsRenderable,
+  writeDanmakuSpeed,
   prefStore,
   readAutoMarkDone,
   subscribeAutoMarkDone,
@@ -262,5 +270,76 @@ describe("prefStore", () => {
     withWindow(hostileWindow, () => {
       expect(prefStore()).toBeNull();
     });
+  });
+});
+
+describe("danmaku speed ladder", () => {
+  test("every step survives the plugin's clamp", () => {
+    // artplayer-plugin-danmuku does `clamp(this.option.speed, 1, 10)` inside
+    // config(), and the slider then locates its handle with an exact
+    // `findIndex(item => item.value === option.speed)`. A step outside [1, 10]
+    // therefore does not render "a bit off" — it collapses onto whichever step
+    // holds the clamped value and the handle lands on the wrong label. This is
+    // measured behaviour: config({speed: 15}) reads back as 10.
+    expect(speedLadderIsRenderable()).toBe(true);
+    for (const { value } of DANMAKU_SPEED_STEPS) {
+      expect(value).toBeGreaterThanOrEqual(DANMAKU_SPEED_MIN);
+      expect(value).toBeLessThanOrEqual(DANMAKU_SPEED_MAX);
+    }
+  });
+
+  test("rejects a ladder that would misbehave", () => {
+    expect(speedLadderIsRenderable([{ value: 15 }])).toBe(false); // clamped
+    expect(speedLadderIsRenderable([{ value: 0.5 }])).toBe(false); // clamped
+    expect(speedLadderIsRenderable([{ value: 8 }, { value: 8 }])).toBe(false); // ambiguous
+    expect(speedLadderIsRenderable([])).toBe(false);
+  });
+
+  test("the ladder runs slowest-first and the default is the slowest", () => {
+    const values = DANMAKU_SPEED_STEPS.map((s) => s.value);
+    // The slider renders steps left to right, and slow belongs on the left.
+    for (let i = 1; i < values.length; i++) {
+      expect(values[i]).toBeLessThan(values[i - 1]);
+    }
+    expect(DANMAKU_SPEED_DEFAULT).toBe(values[0]);
+    // Every tier is slower than the 5 the player used to hard-code — the
+    // point of the change, and the thing a future edit is most likely to undo.
+    for (const v of values) expect(v).toBeGreaterThan(5);
+  });
+
+  test("reads back a stored step", () => {
+    const store = fakeStore({ [DANMAKU_SPEED_KEY]: "8" });
+    expect(readDanmakuSpeed(store)).toBe(8);
+  });
+
+  test("a value that is not on the ladder falls back to the default", () => {
+    // Everyone who played anything before this ladder existed has no stored
+    // value at all; anyone mid-migration could hold the old hard-coded 5.
+    // Neither has a slider position, so neither may be handed back.
+    for (const raw of ["5", "7.5", "abc", ""]) {
+      expect(readDanmakuSpeed(fakeStore({ [DANMAKU_SPEED_KEY]: raw }))).toBe(
+        DANMAKU_SPEED_DEFAULT,
+      );
+    }
+    expect(readDanmakuSpeed(fakeStore())).toBe(DANMAKU_SPEED_DEFAULT);
+    expect(readDanmakuSpeed(null)).toBe(DANMAKU_SPEED_DEFAULT);
+    expect(readDanmakuSpeed(throwingStore())).toBe(DANMAKU_SPEED_DEFAULT);
+  });
+
+  test("only writes values the slider can find again", () => {
+    const store = fakeStore();
+    expect(writeDanmakuSpeed(8, store)).toBe(true);
+    expect(store.raw.get(DANMAKU_SPEED_KEY)).toBe("8");
+
+    // The config event fires for opacity, margin, font size and the comment
+    // list too, so this is called with whatever speed happens to be current.
+    expect(writeDanmakuSpeed(15, store)).toBe(false);
+    expect(writeDanmakuSpeed(5, store)).toBe(false);
+    expect(store.raw.get(DANMAKU_SPEED_KEY)).toBe("8");
+  });
+
+  test("a failed write is reported, not swallowed", () => {
+    expect(writeDanmakuSpeed(8, throwingStore())).toBe(false);
+    expect(writeDanmakuSpeed(8, null)).toBe(false);
   });
 });
