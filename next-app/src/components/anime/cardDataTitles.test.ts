@@ -94,7 +94,10 @@ describe("every hand-built card object sets every rung", () => {
   // the four <AnimeCard> call sites forward a row and are fine by
   // construction, and only a hand-built one can drop a field.
   const HAND_BUILT: readonly (readonly [string, string])[] = [
-    ["app/[lang]/search/page.tsx", "cardData"],
+    // Moved out of app/[lang]/search/page.tsx when the grid stopped being
+    // re-rendered by the server on every keystroke. Same literal, built in the
+    // Client Component that now owns the results.
+    ["components/search/SearchExperience.tsx", "cardData"],
   ];
 
   test("the construction sites are still where this test thinks they are", () => {

@@ -1,8 +1,13 @@
 // /search route -- Server Component that reads `q` + `genre` + `page` from
-// searchParams, fetches Go /api/anime/search on the server, and renders
-// AnimeCard grid + Pagination links. The filter row (input + chips) is
-// a Client Component (SearchFilters) so user input can debounce and
-// router.push back here without a full server round-trip per keystroke.
+// searchParams, fetches Go /api/anime/search on the server, and hands the
+// first result set to SearchExperience.
+//
+// Everything interactive lives in that Client Component, including the
+// heading and the grid. This page renders the first answer and the metadata:
+// a shared link, a crawler and a reader with JS off see a complete page, and
+// from the first keystroke onward the browser talks to go-api itself rather
+// than pushing a new URL through here for every character. See
+// components/search/SearchExperience.tsx for what that fixed.
 //
 // Go endpoint shape note: /api/anime/search uses a CUSTOM envelope
 // distinct from apiGetPaged's {data,total,page,hasMore,nextPage}. It
@@ -11,15 +16,19 @@
 // See go-api/internal/anime/search.go searchResponse for the source.
 
 import type { Metadata } from "next";
-import Link from "@/components/ui/LocaleLink";
 import type { CSSProperties } from "react";
-import AnimeCard, { type AnimeCardData } from "@/components/anime/AnimeCard";
-import { SubscriptionSetProvider } from "@/components/anime/SubscriptionSetProvider";
-import SearchFilters from "@/components/search/SearchFilters";
+import SearchExperience from "@/components/search/SearchExperience";
+import { buildHeading, META_DESCRIPTION } from "@/components/search/searchHeading";
+import {
+  hasTerms,
+  parseSearchResponse,
+  queryFromParams,
+  searchApiPath,
+  type SearchQuery,
+  type SearchResultSet,
+} from "@/components/search/searchQuery";
 import { ApiError, getApiBase } from "@/lib/api";
 import { genreLabel } from "@/lib/contentLabels";
-import { type Dict } from "@/lib/i18n";
-import { type Lang } from "@/lib/i18n/lang";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
 
@@ -41,62 +50,12 @@ interface SearchPageProps {
   }>;
 }
 
-// Row shape returned by GET /api/anime/search. Matches the Go
-// GetAnimeByAnilistIDsRow struct in db/gen/anime_cache.sql.go:141.
-// Distinct from TrendingItem -- no rank/watcherCount/genres -- so we
-// declare it locally rather than reuse SeasonalAnime / TrendingItem.
-interface SearchRow {
-  anilistId: number;
-  titleRomaji: string | null;
-  titleEnglish: string | null;
-  titleNative: string | null;
-  titleChinese: string | null;
-  // go-api has returned this since migration 0022 — GetAnimeByAnilistIDs
-  // selects it, and both the AniList and the local-catalogue paths read
-  // through that one query. This interface simply never declared it, so the
-  // cards below were built without it and /zh-Hant/search rendered Simplified
-  // titles. Measured on production: 12 of 18 cards.
-  titleHant: string | null;
-  coverImageUrl: string | null;
-  coverImageColor: string | null;
-  posterAccent: string | null;
-  averageScore: number | null;
-  bangumiScore: number | null;
-  episodes: number | null;
-  season: string | null;
-  seasonYear: number | null;
-  status: string | null;
-  format: string | null;
-  description: string | null;
-}
-
-interface SearchPagination {
-  page: number;
-  perPage: number;
-  total: number;
-  totalPages: number;
-}
-
-interface SearchResponse {
-  data: SearchRow[];
-  pagination: SearchPagination;
-}
-
 // Custom envelope unwrap for /api/anime/search. Keeps the central
 // ApiError class so error logging upstream stays consistent, but does
 // not pretend the shape matches apiGet's {data:T} or apiGetPaged's
 // {data,total,page,hasMore,nextPage}.
-async function fetchSearch(
-  q: string,
-  genre: string,
-  page: number,
-): Promise<SearchResponse> {
-  const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  if (genre) params.set("genre", genre);
-  params.set("page", String(page));
-
-  const url = `${getApiBase()}/api/anime/search?${params.toString()}`;
+async function fetchSearch(query: SearchQuery): Promise<SearchResultSet> {
+  const url = `${getApiBase()}${searchApiPath(query)}`;
   let res: Response;
   try {
     res = await fetch(url, {
@@ -129,47 +88,11 @@ async function fetchSearch(
     );
   }
 
-  return body as SearchResponse;
-}
-
-// The three strings on this page that wrap a runtime value. Local Records of
-// functions rather than dictionary keys with a placeholder, because the value
-// sits in a different place in each language — Chinese puts the genre BEFORE
-// its noun and quotes the query with its own punctuation, English puts both
-// after a preposition. A single template with {{q}} in it cannot say that.
-const QUERY_HEADING: Record<Lang, (q: string) => string> = {
-  zh: (q) => `搜索"${q}"的动画结果`,
-  en: (q) => `Search results for "${q}"`,
-  "zh-Hant": (q) => `搜尋"${q}"的動畫結果`,
-};
-
-const GENRE_HEADING: Record<Lang, (label: string) => string> = {
-  zh: (label) => `${label}类型的动画`,
-  en: (label) => `${label} anime`,
-  "zh-Hant": (label) => `${label}類型的動畫`,
-};
-
-const META_DESCRIPTION: Record<Lang, (subject: string) => string> = {
-  zh: (subject) => `AnimeGoClub 搜索结果: ${subject}`,
-  en: (subject) => `AnimeGoClub search results for ${subject}`,
-  "zh-Hant": (subject) => `AnimeGoClub 搜尋結果: ${subject}`,
-};
-
-// Render headings that mirror legacy SearchPage.jsx:25-29 so SSR text
-// matches the SPA exactly. Crawler bots and accessibility tools key
-// off this <h1>, so keep it in sync with the active query.
-function buildHeading(q: string, genre: string, dict: Dict, lang: Lang): string {
-  if (q) {
-    return QUERY_HEADING[lang](q);
+  const parsed = parseSearchResponse(body);
+  if (!parsed) {
+    throw new ApiError("INVALID_JSON", "unexpected search envelope", res.status);
   }
-  if (genre) {
-    // zh used to render the raw enum ("Action 类型的动画"). genreLabel is the
-    // identity for en, so the English heading is unchanged; the zh heading
-    // drops the space because Chinese does not separate the two words.
-    const label = genreLabel(genre, lang);
-    return GENRE_HEADING[lang](label);
-  }
-  return dict.search.title;
+  return parsed;
 }
 
 // noindex when a query string is present -- there are effectively
@@ -213,92 +136,16 @@ const containerStyle: CSSProperties = {
   paddingBottom: 40,
 };
 
-const headingStyle: CSSProperties = {
-  fontSize: "clamp(22px,3vw,34px)",
-  marginBottom: 24,
-  background:
-    "linear-gradient(135deg,#ffffff,rgba(235,235,245,0.60))",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-  fontFamily: "'Sora', sans-serif",
-  fontWeight: 700,
-};
-
-const promptStyle: CSSProperties = {
-  textAlign: "center",
-  padding: "60px 0",
-  color: "rgba(235,235,245,0.30)",
-  fontFamily: "'Sora', sans-serif",
-  fontSize: 15,
-};
-
-const errorStyle: CSSProperties = {
-  textAlign: "center",
-  padding: "60px 0",
-  color: "#ff453a",
-  fontFamily: "'Sora', sans-serif",
-  fontSize: 14,
-};
-
-const gridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(5, 1fr)",
-  gap: 12,
-};
-
-const paginationWrapStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 16,
-  padding: "32px 0",
-};
-
-const pageButtonStyle = (disabled: boolean): CSSProperties => ({
-  padding: "8px 20px",
-  borderRadius: 8,
-  border: `1px solid ${disabled ? "rgba(84,84,88,0.30)" : "rgba(84,84,88,0.65)"}`,
-  color: disabled ? "rgba(235,235,245,0.18)" : "#ffffff",
-  background: disabled ? "transparent" : "rgba(120,120,128,0.12)",
-  cursor: disabled ? "not-allowed" : "pointer",
-  fontFamily: "'DM Sans', sans-serif",
-  fontSize: 14,
-  fontWeight: 500,
-  textDecoration: "none",
-  display: "inline-block",
-});
-
-const pageInfoStyle: CSSProperties = {
-  color: "rgba(235,235,245,0.60)",
-  fontSize: 14,
-  fontFamily: "'Sora', sans-serif",
-};
-
-// Build the /search URL preserving q + genre. Used by the server-side
-// pagination links so prev/next navigate without losing filter state.
-function buildHref(q: string, genre: string, page: number): string {
-  const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  if (genre) params.set("genre", genre);
-  if (page > 1) params.set("page", String(page));
-  const qs = params.toString();
-  return qs ? `/search?${qs}` : "/search";
-}
-
 export default async function SearchPage({ params, searchParams }: SearchPageProps) {
-  const { q: qRaw = "", genre = "", page: pageStr = "1" } = await searchParams;
-  const q = qRaw.trim();
-  const page = Math.max(1, Number(pageStr) || 1);
-
+  const { q, genre, page } = await searchParams;
+  const query = queryFromParams(q, genre, page);
   const { dict, lang } = await resolveLocale(params);
-  const heading = buildHeading(q, genre, dict, lang);
-  const hasQuery = Boolean(q || genre);
 
-  let results: SearchResponse | null = null;
+  let results: SearchResultSet | null = null;
   let fetchError: string | null = null;
-  if (hasQuery) {
+  if (hasTerms(query)) {
     try {
-      results = await fetchSearch(q, genre, page);
+      results = await fetchSearch(query);
     } catch (err) {
       // Render the rest of the page (heading + filters) even on
       // upstream failure so the user can still tweak inputs. Log
@@ -315,114 +162,15 @@ export default async function SearchPage({ params, searchParams }: SearchPagePro
     }
   }
 
-  const totalPages = results?.pagination.totalPages ?? 0;
-  const animeList: SearchRow[] = results?.data ?? [];
-
   return (
     <div className="container" style={containerStyle}>
-      <style>{`
-        .search-anime-grid {
-          grid-template-columns: repeat(5, 1fr);
-        }
-        @media (max-width: 900px) {
-          .search-anime-grid { grid-template-columns: repeat(3, 1fr) !important; }
-        }
-        @media (max-width: 600px) {
-          .search-anime-grid { grid-template-columns: repeat(2, 1fr) !important; }
-        }
-      `}</style>
-
-      <h1 style={headingStyle}>{heading}</h1>
-
-      <SearchFilters initialQ={q} initialGenre={genre} dict={dict} />
-
-      {!hasQuery ? (
-        <div style={promptStyle}>{dict.search.prompt}</div>
-      ) : fetchError ? (
-        <div style={errorStyle}>
-          {dict.anime.loadError}: {fetchError}
-        </div>
-      ) : animeList.length === 0 ? (
-        <div style={promptStyle}>{dict.anime.noAnime}</div>
-      ) : (
-        <>
-          {/* Client provider around server-rendered children — the cards stay
-              RSC output, passed through the boundary as an already-rendered
-              `children` node, so this page remains a Server Component. Only
-              the grid is wrapped: the pagination below needs nothing from the
-              subscription set, and one provider per grid means one
-              subscription-set fetch instead of one probe per card. */}
-          <SubscriptionSetProvider>
-            <div className="search-anime-grid" style={gridStyle}>
-              {animeList.map((a) => {
-                // SearchRow lacks `genres` -- AnimeCard treats it as
-                // optional and degrades gracefully (no chip overlay).
-                const cardData: AnimeCardData = {
-                  anilistId: a.anilistId,
-                  titleChinese: a.titleChinese,
-                  titleHant: a.titleHant,
-                  titleRomaji: a.titleRomaji,
-                  titleEnglish: a.titleEnglish,
-                  titleNative: a.titleNative,
-                  coverImageUrl: a.coverImageUrl,
-                  posterAccent: a.posterAccent,
-                  averageScore: a.averageScore,
-                  format: a.format,
-                };
-                return (
-                  <AnimeCard
-                    key={a.anilistId}
-                    anime={cardData}
-                    lang={lang}
-                    prefetch={false}
-                  />
-                );
-              })}
-            </div>
-          </SubscriptionSetProvider>
-
-          {totalPages > 1 ? (
-            <nav
-              style={paginationWrapStyle}
-              aria-label="search pagination"
-            >
-              {page > 1 ? (
-                <Link
-                  href={buildHref(q, genre, page - 1)}
-                  prefetch={false}
-                  style={pageButtonStyle(false)}
-                >
-                  {dict.search.prev}
-                </Link>
-              ) : (
-                <span style={pageButtonStyle(true)} aria-disabled>
-                  {dict.search.prev}
-                </span>
-              )}
-              <span style={pageInfoStyle}>
-                <span style={{ color: "#ffffff", fontWeight: 700 }}>
-                  {page}
-                </span>
-                {" / "}
-                {totalPages}
-              </span>
-              {page < totalPages ? (
-                <Link
-                  href={buildHref(q, genre, page + 1)}
-                  prefetch={false}
-                  style={pageButtonStyle(false)}
-                >
-                  {dict.search.next}
-                </Link>
-              ) : (
-                <span style={pageButtonStyle(true)} aria-disabled>
-                  {dict.search.next}
-                </span>
-              )}
-            </nav>
-          ) : null}
-        </>
-      )}
+      <SearchExperience
+        initialQuery={query}
+        initialResults={results}
+        initialError={fetchError}
+        dict={dict}
+        lang={lang}
+      />
     </div>
   );
 }

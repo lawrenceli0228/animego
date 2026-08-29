@@ -151,6 +151,7 @@ const en = {
     title: 'Search Anime',
     placeholder: 'Search anime title...',
     prompt: 'Enter a keyword or select a genre to search',
+    searching: 'Searching…',
     prev: 'Prev',
     next: 'Next',
   },

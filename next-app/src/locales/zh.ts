@@ -205,6 +205,7 @@ const zh = {
     title: '搜索番剧',
     placeholder: '搜索番剧名称...',
     prompt: '输入关键词或选择类型开始搜索',
+    searching: '搜索中…',
     prev: '上一页',
     next: '下一页',
   },

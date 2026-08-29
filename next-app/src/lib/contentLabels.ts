@@ -105,8 +105,9 @@ export const GENRE_LABEL: EnumLabels = {
  * Genres offered as filter chips on /search and /seasonal. Intentionally a
  * SUBSET of GENRE_LABEL.zh: Hentai is a real value in the catalogue (so it must
  * render when present on a detail page) but is not offered as a browse filter.
- * Previously hardcoded twice — SearchFilters.tsx and SeasonalFilterChips.tsx
- * each kept their own copy.
+ * Previously hardcoded twice — the /search filter row (SearchFilters.tsx, now
+ * folded into SearchExperience.tsx) and SeasonalFilterChips.tsx each kept
+ * their own copy.
  */
 export const FILTER_GENRES = [
   "Action",
