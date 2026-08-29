@@ -610,17 +610,25 @@
   color: var(--text-tertiary);
 }
 
-/* The band colour, same mapping as the hero's score. Bangumi is out of ten,
- * so it is scaled to the 0-100 the bands are defined on before being asked
- * which band it is in — otherwise every Bangumi score would read as "low". */
 .scoreValue {
   font-family: var(--font-mono);
   font-size: 34px;
   font-weight: 500;
   line-height: 1.05;
+  color: oklch(96% 0.006 var(--poster-hue));
   display: flex;
   align-items: baseline;
   gap: 6px;
+}
+
+/* Two treatments, deliberately. AniList carries the anime's colour because
+ * it is the site's own headline number; Bangumi sits in plain ink because
+ * two accented numerals stacked read as two competing headlines. Neither
+ * uses a score band: a band turns a number into a verdict, and this panel
+ * is a record, not a review. */
+.scoreValueAccent {
+  composes: scoreValue;
+  color: var(--sec-tone, var(--poster-tone));
 }
 
 .scoreDenom {
@@ -689,29 +697,5 @@
   font-size: 14.5px;
   color: var(--text);
   overflow-wrap: anywhere;
-}
-
-/* Shared by the info table's outbound link. Kept as its own class rather
- * than inlined so a second one can only be added by composing this. */
-.sectionLink {
-  display: inline-block;
-  font-size: 13px;
-  color: var(--sec-tone, var(--poster-tone));
-  text-decoration: none;
-  border-radius: var(--radius-sm);
-}
-
-.sectionLink:hover {
-  text-decoration: underline;
-}
-
-.sectionLink:focus-visible {
-  outline: 2px solid transparent;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
-}
-
-.infoLink {
-  composes: sectionLink;
-  margin-top: 18px;
 }
 

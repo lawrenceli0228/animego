@@ -19,7 +19,12 @@ const textStyle: CSSProperties = {
 };
 
 const buttonStyle: CSSProperties = {
-  color: "var(--poster-accent, #0a84ff)",
+  // The derived tone, not the raw sample. `--poster-accent` is the colour
+  // taken straight off the cover and nothing bounds its contrast: measured
+  // across real accents it runs 3.58:1 to 8.84:1 against black, so on some
+  // anime this control was legible and on others it was not. `--poster-tone`
+  // is the same hue re-derived at a fixed lightness — see globals.css.
+  color: "var(--poster-tone, #0a84ff)",
   fontSize: 13,
   fontWeight: 600,
   marginTop: 8,

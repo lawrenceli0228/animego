@@ -99,55 +99,83 @@ test.afterAll(async () => {
 const scoreBadge = (page: import("@playwright/test").Page) =>
   page.locator("main span").filter({ hasText: /^AniList\s/ }).first();
 
-test.describe("the score badge", () => {
-  // The assertion is not "is it green". It was genuinely green — that was
-  // never the problem. It is that the background named the same band.
-  for (const { id, label, rgb } of [
-    { id: HIGH, label: "87 is the high band", rgb: "48, 209, 88" },
-    { id: LOW, label: "30 is the low band", rgb: "255, 69, 58" },
-  ]) {
-    test(`${label}, in both halves`, async ({ page }) => {
-      await page.goto(`/anime/${id}`);
-      const badge = scoreBadge(page);
-      await expect(badge).toBeVisible();
+test.describe("the score", () => {
+  // What this file used to pin here was a colour BAND: an 87 had to render
+  // rgb(48,209,88) green and a 30 rgb(255,69,58) red, because production
+  // once shipped green text on an amber pill — the fill named one band and
+  // the text another.
+  //
+  // The hero no longer bands its scores. A band turns a number into a
+  // verdict, and the page carries three of them (AniList, Bangumi, and one
+  // per recommendation card) at a point where the reader has not decided to
+  // care yet. The hero's score now carries the anime's own colour, and the
+  // band mapping survives where a verdict IS the point — on the
+  // recommendation covers, via scoreScrimStyle.
+  //
+  // So the assertions invert. What has to hold now is that the score does
+  // NOT change colour with its value, and that the colour it does take is
+  // the one derived from the artwork.
 
-      const style = await badge.evaluate((el) => {
-        const cs = getComputedStyle(el);
-        return { color: cs.color, background: cs.backgroundColor };
-      });
+  test("carries the anime's colour, not a score band", async ({ page }) => {
+    await page.goto(`/anime/${HIGH}`);
+    const badge = scoreBadge(page);
+    await expect(badge).toBeVisible();
 
-      expect(style.color).toBe(`rgb(${rgb})`);
-
-      // The background is now conditional, and the reason is worth stating
-      // because relaxing an assertion is normally how a guard rots.
-      //
-      // The defect this pins was never "the pill is missing" — it was that
-      // the pill and the text named DIFFERENT bands: an 87 rendered
-      // rgb(48,209,88) green on an rgba(255,159,10,0.12) amber fill. The
-      // invariant is agreement between the two, and the count of colours
-      // that can disagree with the foreground is zero when there is no
-      // background at all.
-      //
-      // The hero sets its facts as one dot-separated sentence now, so the
-      // score has no pill to tint — scoreTextStyle() returns the band
-      // foreground alone. A transparent background is therefore correct
-      // here, and the line below still fails the original bug: put any
-      // colour back and it must be this band's.
-      if (style.background !== "rgba(0, 0, 0, 0)") {
-        expect(style.background).toBe(`rgba(${rgb}, 0.12)`);
-      }
+    const seen = await badge.evaluate((el) => {
+      const scope = el.closest(".poster-scope");
+      const tone = scope
+        ? getComputedStyle(scope).getPropertyValue("--poster-tone").trim()
+        : "";
+      // Both sides through the same canvas so an oklch() string and an rgb()
+      // string are compared as pixels rather than as text.
+      const paint = (colour: string) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 1;
+        const ctx = c.getContext("2d")!;
+        ctx.fillStyle = colour;
+        ctx.fillRect(0, 0, 1, 1);
+        return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3).join(",");
+      };
+      return { score: paint(getComputedStyle(el).color), tone: tone ? paint(tone) : "" };
     });
-  }
 
-  test("the two bands actually differ", async ({ page }) => {
-    // Guards the guard: if scoreBadgeStyle ever returned a constant, both
-    // assertions above would still need the constant to be right, but a
-    // future refactor collapsing the bands would be caught here first.
+    expect(seen.tone).not.toBe("");
+    expect(seen.score).toBe(seen.tone);
+  });
+
+  test("does not change colour with its value", async ({ page }) => {
+    // The inverse of the old "the two bands actually differ". A high score
+    // and a low one are the same colour now, and that is the property: if
+    // banding is reintroduced here these two diverge and this fails.
     await page.goto(`/anime/${HIGH}`);
     const high = await scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
     await page.goto(`/anime/${LOW}`);
     const low = await scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
-    expect(high).not.toBe(low);
+    expect(high).toBe(low);
+  });
+
+  test("the source name stays quiet next to the number", async ({ page }) => {
+    // "AniList 91" is a label plus a value, and at one weight the pair reads
+    // as a single unparsed token. The label must be dimmer than the number.
+    await page.goto(`/anime/${HIGH}`);
+    const pair = await scoreBadge(page).evaluate((el) => {
+      const label = el.querySelector("span");
+      const lum = (c: string) => {
+        const [r, g, b] = c.match(/[\d.]+/g)!.map(Number);
+        const f = (v: number) => {
+          const n = v / 255;
+          return n <= 0.04045 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      return {
+        hasLabel: !!label,
+        labelLum: label ? lum(getComputedStyle(label).color) : 0,
+        valueLum: lum(getComputedStyle(el).color),
+      };
+    });
+    expect(pair.hasLabel).toBe(true);
+    expect(pair.labelLum).toBeLessThan(pair.valueLum);
   });
 });
 

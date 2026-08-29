@@ -242,42 +242,63 @@
   color: oklch(74% 0.012 var(--poster-hue));
 }
 
-.factsStudio {
-  color: oklch(88% 0.014 var(--poster-hue));
-}
-
-/* Score keeps its band colour. The pill went away; the information did not.
- * See scoreTextStyle() — the band is applied inline because a test has to be
- * able to import the mapping without importing this page. */
+/* The value carries the anime's colour; the source name stays quiet.
+ * Splitting them is the point — "AniList" is a label you read once and
+ * "91" is the thing you came for, and at one weight the pair reads as a
+ * single unparsed token. */
 .factsScore {
   font-family: var(--font-mono);
   font-weight: 500;
+  color: var(--poster-tone);
 }
 
 .factsBgm {
   font-family: var(--font-mono);
   font-weight: 500;
-  color: oklch(88% 0.014 var(--poster-hue));
+  color: oklch(92% 0.008 var(--poster-hue));
+}
+
+/* The Bangumi score, linked to its source.
+ *
+ * It carries no accent colour at rest — the row already has one coloured
+ * number (AniList) and a second would read as two headlines. The anime's
+ * colour appears on hover instead.
+ *
+ * But "no styling at rest" would make it the only clickable item in a line
+ * of ten unclickable ones with nothing to say so, and hover does not exist
+ * on a phone. So it keeps a hairline underline: visible enough to read as a
+ * link, quiet enough not to compete. */
+.factsBgmLink {
+  composes: factsBgm;
+  text-decoration: underline;
+  text-decoration-color: oklch(92% 0.008 var(--poster-hue) / 0.28);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  border-radius: var(--radius-sm);
+  transition:
+    color 150ms var(--ease-out-expo),
+    text-decoration-color 150ms var(--ease-out-expo);
+}
+
+.factsBgmLink:hover {
+  color: var(--poster-tone);
+  text-decoration-color: var(--poster-tone);
+}
+
+.factsBgmLink:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.factsScoreLabel {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  color: oklch(78% 0.010 var(--poster-hue));
 }
 
 .factsBgmVotes {
   color: oklch(62% 0.01 var(--poster-hue));
   font-size: 12px;
-}
-
-.factsLink {
-  color: var(--poster-tone);
-  text-decoration: none;
-  border-radius: var(--radius-sm);
-}
-
-.factsLink:hover {
-  text-decoration: underline;
-}
-
-.factsLink:focus-visible {
-  outline: 2px solid transparent;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 /* ── Hero relations strip ─────────────────────────────────────────────── */

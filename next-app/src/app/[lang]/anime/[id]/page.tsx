@@ -25,7 +25,7 @@ import EpisodesGrid from "@/components/anime/EpisodesGrid";
 import { resolveEpisodeSkeleton } from "@/components/anime/episodeGridSkeleton";
 import HeroAccent from "@/components/anime/HeroAccent";
 import { GenreChips } from "@/components/anime/LocalizedChips";
-import { scoreScrimStyle, scoreTextStyle } from "@/components/anime/scoreStyle";
+import { scoreScrimStyle } from "@/components/anime/scoreStyle";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import s from "./page.module.css";
 // The four sections below the hero. A second module rather than more of
@@ -469,18 +469,44 @@ function Hero({
             {score && score > 0 ? (
               // "AniList 91", not "★ 9.1". The star said nothing the word
               // does not, and the raw 0-100 needs no mental conversion to
-              // compare against the site it came from. Band colour stays:
-              // which band a score is in is information, not decoration.
-              <span className={s.factsScore} style={scoreTextStyle(score)}>
-                AniList {score}
+              // compare against the site it came from.
+              //
+              // The number carries the anime's colour, not a score band.
+              // Band colours (green/amber/red) turn a score into a verdict,
+              // and three of them in a row — AniList, Bangumi, and every
+              // recommendation card — is three different judgements shouting
+              // at a reader who has not decided to care yet. The band
+              // mapping still exists and is still tested; it is used where a
+              // verdict IS the point, on the recommendation covers.
+              <span className={s.factsScore}>
+                <span className={s.factsScoreLabel}>AniList</span> {score}
               </span>
             ) : null}
             {detail.bangumiScore && detail.bangumiScore > 0 ? (
+              // The score IS the link. There used to be a separate "view on
+              // Bangumi" item further along the row, which is a second thing
+              // to read that says what this one already implies — and it sat
+              // nowhere near the number it belonged to.
+              //
               // Vote count lives in the score panel beside the synopsis,
               // where there is room to label it.
-              <span className={s.factsBgm}>
-                Bangumi {detail.bangumiScore.toFixed(1)}
-              </span>
+              detail.bgmId ? (
+                <a
+                  href={`https://bgm.tv/subject/${detail.bgmId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={s.factsBgmLink}
+                  title={dict.detail.viewOnBgm}
+                >
+                  <span className={s.factsScoreLabel}>Bangumi</span>{" "}
+                  {detail.bangumiScore.toFixed(1)}
+                </a>
+              ) : (
+                <span className={s.factsBgm}>
+                  <span className={s.factsScoreLabel}>Bangumi</span>{" "}
+                  {detail.bangumiScore.toFixed(1)}
+                </span>
+              )
             ) : null}
             {detail.status && <span>{statusLabel(dict, detail.status)}</span>}
             {episodeSkeleton.kind === "authoritative" ? (
@@ -603,16 +629,6 @@ function InfoSection({
           </div>
         ))}
       </dl>
-      {detail.bgmId ? (
-        <a
-          href={`https://bgm.tv/subject/${detail.bgmId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={x.infoLink}
-        >
-          {dict.detail.viewOnBgm}
-        </a>
-      ) : null}
     </section>
   );
 }
@@ -814,7 +830,7 @@ function SynopsisSection({
           {score && score > 0 ? (
             <div className={x.scoreItem}>
               <div className={x.scoreLabel}>AniList</div>
-              <div className={x.scoreValue} style={scoreTextStyle(score)}>
+              <div className={x.scoreValueAccent}>
                 {score}
                 <span className={x.scoreDenom}>/ 100</span>
               </div>
@@ -828,7 +844,7 @@ function SynopsisSection({
           {bgmScore && bgmScore > 0 ? (
             <div className={x.scoreItem}>
               <div className={x.scoreLabel}>Bangumi</div>
-              <div className={x.scoreValue} style={scoreTextStyle(bgmScore * 10)}>
+              <div className={x.scoreValue}>
                 {bgmScore.toFixed(1)}
                 <span className={x.scoreDenom}>/ 10</span>
               </div>
