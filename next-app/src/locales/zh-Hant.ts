@@ -214,6 +214,7 @@ const zhHant = {
     title: '搜尋番劇',
     placeholder: '搜尋番劇名稱...',
     prompt: '輸入關鍵詞或選擇類型開始搜尋',
+    searching: '搜尋中…',
     prev: '上一頁',
     next: '下一頁',
   },

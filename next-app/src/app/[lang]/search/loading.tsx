@@ -2,6 +2,10 @@
 // searchParams resolve + Go /api/anime/search returns. The shimmer
 // rhythm matches the Phase 4 LandingLoading skeleton so first-paint
 // feels consistent across surfaces.
+//
+// Cold navigation only, and that is the whole of its job now: typing no
+// longer navigates, so the reader who searches four times in a row sees this
+// once. The in-place pending state for those four lives in SearchExperience.
 
 import type { CSSProperties } from "react";
 import { estimateChipWidth } from "@/lib/chipWidth";
@@ -72,12 +76,12 @@ const cardSkeletonStyle: CSSProperties = {
   aspectRatio: "3/4",
 };
 
-// Chip widths are derived from the labels SearchFilters actually paints, so
-// the skeleton row wraps on the same line count as the real one. These were
+// Chip widths are derived from the labels SearchExperience actually paints,
+// so the skeleton row wraps on the same line count as the real one. These were
 // hardcoded to the English names until the genre chips were localised — the
 // Chinese row is ~33% narrower, which cost a whole wrapped line of layout
-// shift on swap. Mirrors SearchFilters' chipStyle: 12px text, 10px padding,
-// 1px border.
+// shift on swap. Mirrors SearchExperience's chipStyle: 12px text, 10px
+// padding, 1px border.
 const CHIP_WIDTHS = FILTER_GENRES.map((g) => estimateChipWidth(genreLabel(g, "zh")));
 
 export default function SearchLoading() {

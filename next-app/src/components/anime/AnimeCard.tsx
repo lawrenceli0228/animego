@@ -299,7 +299,7 @@ export default function AnimeCard({
   // traffic lands — those disagree. Following the cookie keeps these chips
   // English for an English reader instead of the "zh" the prop would give.
   // useLang() is SSR-seeded from the route locale and reconciled from
-  // the `lang` cookie after mount: the same source SearchFilters and
+  // the `lang` cookie after mount: the same source SearchExperience and
   // SeasonalFilterChips read, so a card badge can never disagree with the
   // filter chip sitting directly above it in the /search and /seasonal grids.
   const { lang: viewerLang } = useLang();
