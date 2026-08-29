@@ -143,17 +143,42 @@ const wrapStyle: CSSProperties = {
 // DESIGN.md, and this row is the primary action strip on the page.
 const CONTROL_HEIGHT = 44;
 
+// The chevron, drawn rather than left to the platform.
+//
+// A <select> renders the OS widget by default — a beveled arrow on macOS, a
+// different one on Windows, a full-width native picker on Android — so this
+// was the one control in the row that looked like it came from somewhere
+// else. `appearance: none` removes it and this draws the replacement.
+//
+// A background-image and not a pseudo-element: a <select> cannot host ::after
+// (it has no accessible box to render into), and the alternative — wrapping
+// it in a span that draws the arrow — needs a stylesheet this component does
+// not have, since every style here is an inline object.
+//
+// Stroke colour is baked in because a data URI cannot read currentColor.
+const CHEVRON = encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6">' +
+    '<path d="M1 1l4 4 4-4" fill="none" stroke="rgba(235,235,245,0.55)" ' +
+    'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+);
+
 const selectStyle: CSSProperties = {
   minHeight: CONTROL_HEIGHT,
-  padding: "0 16px",
+  // Right padding clears the chevron; without it a long status label runs
+  // underneath it.
+  padding: "0 34px 0 16px",
   borderRadius: 8,
-  background: "#2c2c2e",
+  background: `#2c2c2e url("data:image/svg+xml,${CHEVRON}") no-repeat right 14px center`,
   border: "1px solid #38383a",
   color: "#ffffff",
   fontSize: 14,
+  fontFamily: "inherit",
   cursor: "pointer",
   outline: "none",
   minWidth: 150,
+  appearance: "none",
+  WebkitAppearance: "none",
+  MozAppearance: "none",
 };
 
 const removeBtnStyle: CSSProperties = {
