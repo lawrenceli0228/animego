@@ -194,6 +194,24 @@
   white-space: nowrap;
 }
 
+/* ── A note on tinted neutrals ────────────────────────────────────────────
+ *
+ * Text on this page does NOT take the anime's hue, even at low chroma.
+ *
+ * The reference design sets its body copy at oklch(80% 0.012 h), and that
+ * looks right — on one anime. Across the catalogue it is not one colour, it
+ * is 360 of them: at hue 18 the "white" resolves to #c5bbbb and at hue 196
+ * to #b5c0c0, a 16/255 spread on a single channel. That is comfortably
+ * above the threshold where a reader sees it, and what they see is the body
+ * text changing colour when they open a different show — which reads as a
+ * rendering fault rather than as identity.
+ *
+ * Identity belongs to the elements that are ABOUT the anime: the score, the
+ * primary action, the section rules, the hover states. Those use
+ * --poster-tone and are meant to differ per title. Prose uses the site's
+ * neutral text ramp and stays put.
+ */
+
 /* ── Facts ────────────────────────────────────────────────────────────────
  *
  * One sentence, dot-separated, in place of the three stacked strips this
@@ -215,7 +233,7 @@
   align-items: baseline;
   font-size: 13.5px;
   line-height: 1.85;
-  color: oklch(80% 0.012 var(--poster-hue));
+  color: var(--text-secondary);
   margin-bottom: 18px;
 }
 
@@ -237,7 +255,7 @@
 .factsGenres > *:not(:last-child)::after {
   content: "·";
   margin: 0 8px;
-  color: oklch(52% 0.01 var(--poster-hue));
+  color: rgba(235, 235, 245, 0.28);
 }
 
 /* The genre group's own trailing separator, so the last genre is divided
@@ -253,7 +271,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  color: oklch(74% 0.012 var(--poster-hue));
+  color: rgba(235, 235, 245, 0.50);
 }
 
 /* The value carries the anime's colour; the source name stays quiet.
@@ -269,7 +287,7 @@
 .factsBgm {
   font-family: var(--font-mono);
   font-weight: 500;
-  color: oklch(92% 0.008 var(--poster-hue));
+  color: rgba(235, 235, 245, 0.88);
 }
 
 /* The Bangumi score, linked to its source.
@@ -285,7 +303,7 @@
 .factsBgmLink {
   composes: factsBgm;
   text-decoration: underline;
-  text-decoration-color: oklch(92% 0.008 var(--poster-hue) / 0.28);
+  text-decoration-color: rgba(235, 235, 245, 0.26);
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
   border-radius: var(--radius-sm);
@@ -307,11 +325,11 @@
 .factsScoreLabel {
   font-family: var(--font-sans);
   font-weight: 400;
-  color: oklch(78% 0.010 var(--poster-hue));
+  color: rgba(235, 235, 245, 0.52);
 }
 
 .factsBgmVotes {
-  color: oklch(62% 0.01 var(--poster-hue));
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 

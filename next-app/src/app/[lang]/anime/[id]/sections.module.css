@@ -81,11 +81,6 @@
  * lower. Read them; do not restate them.
  */
 .section {
-  /* Sections sit further apart than they used to. Measured against the
-   * reference, heading to heading was 262px where the design has 292 — and
-   * that 30px is what stops two adjacent bands reading as one. */
-  margin-top: clamp(40px, 4.4vw, 64px);
-
   --sec-tone: var(--poster-tone, var(--accent));
   --sec-tone-mid: var(--poster-tone-mid, var(--separator));
   --sec-tone-low: var(--poster-tone-low, var(--bg-elevated));
@@ -107,7 +102,10 @@
    * floor for readable copy, which a role label is. */
   --sec-meta: rgba(235, 235, 245, 0.45);
 
-  margin-top: clamp(36px, 5vw, 64px);
+  /* Measured against the reference: heading to heading was 262px where the
+   * design has 292, and that difference is what stops two adjacent bands
+   * reading as one. Was clamp(36px, 5vw, 64px). */
+  margin-top: clamp(44px, 5vw, 72px);
 }
 
 /* Recommendations is the last thing on the page. */
@@ -123,7 +121,11 @@
   display: flex;
   align-items: baseline;
   gap: 12px;
-  margin-bottom: var(--sp-md);
+  /* 22, not --sp-md's 16. Measured off the reference: the heading sits one
+   * line-height clear of the content it introduces, and 16 read as attached
+   * to it. Off the spacing scale on purpose — the scale has no 22, and
+   * snapping to 24 overshoots by enough to see. */
+  margin-bottom: 22px;
 }
 
 .headTitle {
@@ -636,7 +638,9 @@
   font-weight: 700;
   letter-spacing: -0.025em;
   line-height: 1.05;
-  color: oklch(96% 0.006 var(--poster-hue));
+  /* Neutral, not hue-tinted — see the note in page.module.css: a 0.006
+   * chroma "white" still shifts 9/255 across the catalogue's hues. */
+  color: rgba(235, 235, 245, 0.94);
   display: flex;
   align-items: baseline;
   gap: 6px;

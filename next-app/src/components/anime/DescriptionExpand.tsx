@@ -33,7 +33,10 @@ const buttonStyle: CSSProperties = {
   color: "var(--poster-tone, #0a84ff)",
   fontSize: 13,
   fontWeight: 600,
-  marginTop: 8,
+  // 20, matching the rhythm the rest of the block is set on. It was 8,
+  // which put the control closer to the paragraph than the paragraph's own
+  // line spacing, so it read as part of the text rather than as a control.
+  marginTop: 20,
   cursor: "pointer",
   background: "none",
   border: "none",
@@ -47,7 +50,7 @@ const sourceStyle: CSSProperties = {
   color: "rgba(235,235,245,0.35)",
   fontSize: 12,
   lineHeight: 1.6,
-  margin: "10px 0 0",
+  margin: "20px 0 0",
 };
 
 const sourceLinkStyle: CSSProperties = {

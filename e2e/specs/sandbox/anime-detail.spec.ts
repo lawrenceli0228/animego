@@ -154,28 +154,50 @@ test.describe("the score", () => {
     expect(high).toBe(low);
   });
 
-  test("the source name stays quiet next to the number", async ({ page }) => {
-    // "AniList 91" is a label plus a value, and at one weight the pair reads
-    // as a single unparsed token. The label must be dimmer than the number.
+  test("the source name is neutral, the value is not", async ({ page }) => {
+    // "AniList 91" is a label plus a value, and they have to read as two
+    // different kinds of thing — otherwise the pair is one unparsed token.
+    //
+    // The separation is chroma, not lightness. An earlier version of this
+    // asserted the label was DARKER, which is wrong in both directions: the
+    // reference design's label (#c5bbb9, luminance 0.499) is brighter than
+    // its value (#e29d93, 0.424), because a neutral is always brighter than
+    // a saturated colour at the same perceived lightness. Asserting on
+    // luminance would pin an accident of which hue the anime happens to be.
+    //
+    // What actually has to hold: the label carries no hue and the value
+    // carries the anime's.
     await page.goto(`/anime/${HIGH}`);
     const pair = await scoreBadge(page).evaluate((el) => {
-      const label = el.querySelector("span");
-      const lum = (c: string) => {
-        const [r, g, b] = c.match(/[\d.]+/g)!.map(Number);
-        const f = (v: number) => {
-          const n = v / 255;
-          return n <= 0.04045 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4);
-        };
-        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      // Through a canvas so a half-transparent label is measured as it is
+      // COMPOSITED, not as its unmultiplied channels — the earlier version
+      // read rgba(235,235,245,0.52) as near-white and compared that against
+      // a fully opaque value.
+      const paint = (colour: string) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 1;
+        const ctx = c.getContext("2d")!;
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, 1, 1);
+        ctx.fillStyle = colour;
+        ctx.fillRect(0, 0, 1, 1);
+        return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3);
       };
+      const spread = (rgb: number[]) => Math.max(...rgb) - Math.min(...rgb);
+      const label = el.querySelector("span");
       return {
         hasLabel: !!label,
-        labelLum: label ? lum(getComputedStyle(label).color) : 0,
-        valueLum: lum(getComputedStyle(el).color),
+        labelSpread: label ? spread(paint(getComputedStyle(label).color)) : -1,
+        valueSpread: spread(paint(getComputedStyle(el).color)),
       };
     });
+
     expect(pair.hasLabel).toBe(true);
-    expect(pair.labelLum).toBeLessThan(pair.valueLum);
+    // A neutral's channels sit within a few points of each other; the site's
+    // text ramp is rgba(235,235,245,...), a 10-point spread by design.
+    expect(pair.labelSpread).toBeLessThanOrEqual(12);
+    // The value is a real colour, so its channels are far apart.
+    expect(pair.valueSpread).toBeGreaterThan(20);
   });
 });
 
