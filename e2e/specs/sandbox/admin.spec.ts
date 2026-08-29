@@ -13,6 +13,7 @@ import { test, expect } from "@playwright/test";
 import { collectConsoleErrors, expectSignedIn } from "../_helpers";
 import { closePg, insertPgUser } from "../../fixtures/pg";
 import { makeUser } from "../../fixtures/users";
+import { waitForHydration } from "../../fixtures/hydration";
 
 // Cleanup is centralized in globalSetup so it runs once before any
 // worker starts. Doing it per-spec races with parallel test files.
@@ -60,6 +61,10 @@ test.describe("admin dashboard", () => {
     });
 
     await page.goto("/login");
+    // See fixtures/hydration.ts. An unhydrated fill posts an empty form, the
+    // login never happens, and this test then fails on the /admin assertion —
+    // reading exactly like an access-control regression.
+    await waitForHydration(page, "#login-email");
     await page.locator("#login-email").fill(user.email);
     await page.locator("#login-password").fill(user.password);
     await Promise.all([

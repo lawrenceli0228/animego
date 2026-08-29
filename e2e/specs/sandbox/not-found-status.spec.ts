@@ -84,6 +84,19 @@ const NO_SUCH_ANIME = 0;
 /** Valid-looking, uncatalogued — the path that consults AniList. */
 const UNCATALOGUED_ANIME = 999_999_999;
 
+/**
+ * The seasonal pair, differing in exactly one segment: a season
+ * `parseSeasonYear` accepts and one it rejects. Declared together so a change
+ * to either has to look at the other.
+ *
+ * The year is a literal because that function bounds it to 1990..2100 against
+ * nothing but itself — no clock — and the page swallows its own API failure
+ * (`.catch(() => EMPTY_ITEMS)`), building its heading from the route params
+ * alone. So both stay true on a database with nothing in it.
+ */
+const REAL_SEASON = "/seasonal/spring/2026";
+const NO_SUCH_SEASON = "/seasonal/notaseason/2026";
+
 test.afterAll(closePg);
 
 /**
@@ -158,12 +171,27 @@ async function statusOf(page: Page, path: string): Promise<number> {
   return res.status();
 }
 
+test.describe("a season that exists answers 200", () => {
+  // Asserted first, and first on purpose: this file is serial, so anything
+  // below a failure is skipped rather than run. The 404 below is only half a
+  // guard — the sole check that this route answers 200 lives in
+  // e2e/specs/seasonal.spec.ts under chromium-prod, which tests the site that
+  // is already deployed, so a PR that 404s every season merges green.
+  test(REAL_SEASON, async ({ page }) => {
+    expect(
+      await statusOf(page, REAL_SEASON),
+      `${REAL_SEASON} differs from ${NO_SUCH_SEASON} in one segment, and that ` +
+        `segment is the only thing allowed to decide the status`,
+    ).toBe(200);
+  });
+});
+
 test.describe("a resource that does not exist answers 404", () => {
   // Every page route that calls notFound(). The issue named two; the other
   // three turned up while checking, and they are the ones with guessable URLs.
   const MISSING = [
     `/anime/${NO_SUCH_ANIME}`,
-    "/seasonal/notaseason/2026",
+    NO_SUCH_SEASON,
     `/u/${MISSING_USER}`,
     `/u/${MISSING_USER}/followers`,
     `/u/${MISSING_USER}/following`,

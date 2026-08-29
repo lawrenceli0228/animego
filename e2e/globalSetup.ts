@@ -8,6 +8,7 @@ import {
   ensureAnimeDetail,
   ensureSeedUserInPostgres,
 } from "./fixtures/pg";
+import { waitForHydration } from "./fixtures/hydration";
 
 /**
  * The AniList id the routing specs use as "a detail page".
@@ -139,6 +140,31 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   const page = await context.newPage();
 
   await page.goto(`${BASE_URL}/login`);
+
+  // The most expensive place in the repo to lose the hydration race.
+  //
+  // A fill that lands before React claims the input goes into the DOM and never
+  // reaches state, so the submit posts an empty form, the login never happens,
+  // and `.auth/user.json` is never written — which fails EVERY sandbox spec on a
+  // missing storage state, loudly and repeatedly, describing a file. Nobody
+  // reading that goes looking for a keystroke. Same red herring the routing
+  // fixture guards against, reached by a different road.
+  //
+  // 30s rather than the helper's 15s default: there is no per-test budget out
+  // here (no `timeout`, no `globalTimeout` in playwright.config.ts) to make a
+  // longer wait unreportable, and this is the coldest the dev server ever is —
+  // /login may be the first React route it has been asked to compile.
+  try {
+    await waitForHydration(page, "#login-email", { timeout: 30_000 });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    // Close before rethrowing. This is the first throw between launch() and
+    // close(), and a leaked Chromium is one more confusing thing to find
+    // afterwards — locally it survives the run and keeps the port.
+    await browser.close().catch(() => {});
+    throw new Error(`${detail}\n\n${STORAGE_STATE_RED_HERRING}`);
+  }
+
   await page.locator("#login-email").fill(SEED_USER_EMAIL);
   await page.locator("#login-password").fill(SEED_USER_PASSWORD);
   await Promise.all([
