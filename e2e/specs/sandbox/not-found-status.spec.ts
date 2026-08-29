@@ -56,11 +56,26 @@ const MISSING_USER = "definitelynosuchuser99";
  * negative cache: a cache miss plus pgx.ErrNoRows goes straight to AniList
  * (detail.go:423), so EVERY request for an uncatalogued id opens a live
  * third-party call. When AniList rate-limits, the page answers 500 rather than
- * 404 — reproduced locally, and almost certainly the cause of the
- * `/en answers 404 (retry #1)` flake this suite showed in CI. That is a real
- * product defect and it is written up in TODOS.md; it is not something to
- * discover eight times per run through a status assertion that cannot tell a
- * regression from an upstream hiccup.
+ * 404 — reproduced locally. That is a real product defect and it is written up
+ * in TODOS.md; it is not something to discover eight times per run through a
+ * status assertion that cannot tell a regression from an upstream hiccup.
+ *
+ * This comment used to go on to call that defect "almost certainly the cause"
+ * of the `/en answers 404 (retry #1)` flake this suite showed in CI. It is
+ * not, and the correction matters because the guess pointed the next reader at
+ * the wrong system. Traced 2026-08-29 off two failing attempts: the symptom is
+ * 404, not 500, and it lands on routes that never call AniList at all —
+ * `/reset-password/[token]` among them. Every route with a dynamic segment
+ * nested inside `[lang]` stops resolving for the whole run, and the failing
+ * `/anime/*` request returned in 42ms with 5ms inside next.js, so nothing
+ * reached a third party. See TODOS.md.
+ *
+ * Worth knowing while reading the assertions below. In that state every
+ * negative assertion in this file passes, for the wrong reason: a run where
+ * the entire catalogue 404s satisfies "a missing id answers 404" perfectly.
+ * Ten of them went green that way. The one that went red was the paired
+ * POSITIVE case — a real anime still answering 200 — which is the shape a
+ * suite of negative assertions needs in order to stay honest.
  *
  * ONE test below still uses a large id, on purpose, to cover the path 0 does
  * not reach. It is the only one allowed to depend on AniList being up.

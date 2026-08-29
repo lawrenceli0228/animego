@@ -200,7 +200,6 @@
   (0.5 人天,零调用方改动)。缺陷本身也已用可运行原型复现,不是推演:
   基线下 `picked id=1 / tier=high`(绑错季且高置信),加上修复后 `picked id=2 / tier=high`;
   候选表里只有错季条目时,基线 `tier=high` 无条件绑定,修复后 `tier=low` 转 needs-review。
-||||||| 6b31a3e
 ## 若任一路由的服务端渲染慢过约 300ms，把段内 `loading.tsx` 加回去
 
 - **What:** 2026-08-28 把 `app/[lang]/loading.tsx` 从根部挪进了 `(home)/`，代价是
