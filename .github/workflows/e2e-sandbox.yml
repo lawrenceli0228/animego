@@ -170,19 +170,53 @@ jobs:
         # artifact. Paying that cost here, serially, keeps it out of the
         # specs.
         #
-        # The retry-on-5xx is not defensive padding, it is a measured
-        # behaviour: Turbopack prints "Ready" and answers /api/healthz
-        # before the module graph has settled, and a burst of page requests
-        # in that window comes back 500 with NOTHING logged. Seconds later
-        # the identical URLs return 200. Warming without the retry would
-        # therefore pass while leaving the app half-cold, and Playwright
-        # would inherit the tail of that window as a flake nobody could
-        # reproduce. A route that never stops 5xx is a real failure and
-        # fails the job here, where the log is still readable.
+        # The retry is not defensive padding, it is a measured behaviour:
+        # Turbopack prints "Ready" and answers /api/healthz before the module
+        # graph has settled, and a burst of page requests in that window comes
+        # back 500 with NOTHING logged. Seconds later the identical URLs return
+        # 200. Warming without the retry would therefore pass while leaving the
+        # app half-cold, and Playwright would inherit the tail of that window as
+        # a flake nobody could reproduce.
         #
-        # Non-5xx codes are accepted as "compiled": /library, /player and
-        # /admin answer 307 to an anonymous warm-up request, which is the
-        # correct behaviour and still proves the route built.
+        # ─── Why each route now declares the status it must answer ──────────
+        #
+        # This list used to be bare paths judged by one shared rule: anything
+        # that was not 5xx counted as "compiled". That rule waved through the
+        # exact signal it was standing next to.
+        #
+        # Measured 2026-08-29, on two PRs whose diffs do not overlap (#127,
+        # #128). Both failed their first attempt with the SAME nine specs at
+        # the SAME line numbers, and both went green on a re-run with no code
+        # change. In the failed runs, every route with a dynamic segment nested
+        # inside `[lang]` answered 404 for the whole run — `[lang]/anime/[id]`,
+        # `[lang]/reset-password/[token]`, `[lang]/u/[username]`,
+        # `[lang]/seasonal/[season]/[year]`. Three-segment paths went 0 for 19.
+        # Routes where `[lang]` is the only dynamic segment kept working.
+        #
+        # `/reset-password/warmup` is the canary. That page calls no API and has
+        # no notFound() path, so a 404 there is impossible in a healthy stack.
+        # Across 14 historical runs the line `warmed /reset-password/warmup ->
+        # 404` appeared three times, and all three attempts failed. It was
+        # printed, in the log, both times — and skipped, because 404 is not 5xx.
+        #
+        # So every route names its expected status. Two things follow that the
+        # old rule could not express:
+        #
+        #   - `/library` and `/admin` assert 307. Nothing checked those before;
+        #     if the auth redirect broke and they started answering 200, the
+        #     warm-up would have called it compiled and moved on.
+        #   - `/anime/0` asserts 404, and is NOT diagnostic on its own. It
+        #     answers 404 in the healthy state too (the page bails on
+        #     `anilistId <= 0`). The positive probe for that route class is in
+        #     e2e/globalSetup.ts, which asserts `/anime/21` AFTER seeding it.
+        #
+        # One concept, not two: keep asking until the route answers what it
+        # should, then assert. Retrying only on 5xx and asserting separately
+        # would fail the job on a transient 404 that a second request would
+        # have resolved. The cost of unifying them is bounded — a genuinely
+        # wrong status burns 10 attempts on the FIRST route that mismatches and
+        # then exits, so the job still fails around a minute in rather than
+        # letting the suite run for three and report nine confusing specs.
         run: |
           set -euo pipefail
           for i in $(seq 1 60); do
@@ -210,24 +244,31 @@ jobs:
           # runs before globalSetup seeds anything, so the miss would be a
           # genuine 404 — and `loadDetail` fetches with `revalidate: 60`, so
           # Next would serve that 404 back for a minute after the row existed.
-          for route in / /login /register /forgot-password /reset-password/warmup \
-                       /welcome /library /player /admin /anime/0; do
+          for probe in /:200 /login:200 /register:200 /forgot-password:200 \
+                       /reset-password/warmup:200 /welcome:200 /library:307 \
+                       /player:200 /admin:307 /anime/0:404; do
+            # Split on the LAST colon, so a path that ever contains one still
+            # pairs correctly with its status.
+            route="${probe%:*}"
+            want="${probe##*:}"
             code=000
             for attempt in $(seq 1 10); do
               code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 "http://localhost:3000${route}")
-              case "$code" in
-                5*|000) sleep 3 ;;
-                *) break ;;
-              esac
+              [ "$code" = "$want" ] && break
+              sleep 3
             done
-            echo "warmed ${route} -> ${code} (attempt ${attempt})"
-            case "$code" in
-              5*|000)
-                echo "::error::${route} never stopped returning ${code}"
-                cat /tmp/next-dev.log
-                exit 1
-                ;;
-            esac
+            echo "warmed ${route} -> ${code} (want ${want}, attempt ${attempt})"
+            if [ "$code" != "$want" ]; then
+              echo "::error::${route} answered ${code}, expected ${want}"
+              # The dev-server hint only when it applies. This loop also guards
+              # auth redirects, and pointing an auth regression at a bundler bug
+              # would replace one misleading failure with another.
+              if [ "$code" = "404" ]; then
+                echo "::error::A 404 here is the dev-server failure documented above this loop, not a product 404: every route with a dynamic segment under [lang] stops resolving for the whole run. Check the next dev log below for the 'generate-params' phase — healthy 200s have it, these 404s do not."
+              fi
+              cat /tmp/next-dev.log
+              exit 1
+            fi
           done
 
       - name: Install e2e deps

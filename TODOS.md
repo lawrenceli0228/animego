@@ -200,7 +200,6 @@
   (0.5 人天,零调用方改动)。缺陷本身也已用可运行原型复现,不是推演:
   基线下 `picked id=1 / tier=high`(绑错季且高置信),加上修复后 `picked id=2 / tier=high`;
   候选表里只有错季条目时,基线 `tier=high` 无条件绑定,修复后 `tier=low` 转 needs-review。
-||||||| 6b31a3e
 ## 若任一路由的服务端渲染慢过约 300ms，把段内 `loading.tsx` 加回去
 
 - **What:** 2026-08-28 把 `app/[lang]/loading.tsx` 从根部挪进了 `(home)/`，代价是
@@ -355,8 +354,18 @@
   一旦限流，go-api 返回 `AniList rate limited`，next-app 抛 `ApiError`，页面变成
   **500**。实测：沙箱套件用 `--repeat-each=3` 并发压一下就稳定复现，dev 日志逐字写着
   `Error [ApiError]: AniList rate limited` 后跟 `GET /anime/999999999 500`。
-- **Why:** 这大概率就是沙箱 CI 里 `not-found-status.spec.ts` 那条
-  `/en answers 404` 偶尔变红、重试即过的真正原因 —— 一直被当成不明 flake。
+- **Why:** 一个不存在的 id 本该答 404，在限流窗口里答的是 500。缺陷本身与 CI 无关、
+  独立可复现（见上面的 `--repeat-each=3`），代价写在下面的 Context 里。
+  > ★**归因更正（2026-08-29）**：本条原写「这大概率就是沙箱 CI 里
+  > `not-found-status.spec.ts` 那条 `/en answers 404` 偶尔变红、重试即过的真正原因」——
+  > **那句是错的，已删**。那个 flake 的真身是 Turbopack dev 下**整类嵌套动态路由变
+  > 404**（见下一条「Turbopack dev 下……」）。三条判据各自独立地否掉了本条：
+  > 症状是 **404 不是 500**；受害路由包括 `/reset-password/[token]`，它**一次 AniList
+  > 都不调**；而失败那次里 `/anime/*` 的 404 只花了 42ms（`next.js: 5ms`），
+  > 根本没进过第三方调用。两件事只是恰好都落在同一个套件上。
+  > ⚠️ **同一句错误归因也逐字写在 `e2e/specs/sandbox/not-found-status.spec.ts:59-60`
+  > 的注释里**（"almost certainly the cause of the `/en answers 404 (retry #1)`
+  > flake"），修这条缺陷时一并改掉，否则它会继续把下一个人引到 AniList 上。
 - **Pros:** 修法和 2026-08-28 的搜索改动是同一个思路：**目录里没有的 id，本地就能判定
   不存在，不必问第三方**。`anime_cache` 有 17,689 行，一个 id 不在里面且不是新番的
   概率极高。至少可以做到「AniList 不可达时退回本地判定」而不是直接 500。
@@ -367,3 +376,97 @@
   `not-found-status.spec.ts` 里那几条状态断言故意保持严格（只接受 404），**不要**为了
   让 CI 变绿而放宽成「404 或 500」—— 那会把这个缺陷永久藏起来。
 - **Depends on / blocked by:** 无。与本地搜索独立，但共用同一个判断。
+
+## Turbopack dev 下，嵌套在 `[lang]` 里的动态路由会整类 404
+
+- **What:** 沙箱 e2e 时红时绿、重跑即过，一直被当成不明 flake。真身不在测试里：
+  `next dev` 用的是 Turbopack（Next 16 起是默认），而某些进程实例里**凡是 `[lang]`
+  下面还有一层动态段的路由，一整轮全部 404** —— `[lang]/anime/[id]`、
+  `[lang]/reset-password/[token]`、`[lang]/u/[username]`、
+  `[lang]/seasonal/[season]/[year]` 无一幸免。止血办法是让沙箱的 dev server 也走
+  webpack（`next dev --webpack`，该 flag 确认存在），与 `next build --webpack` 对齐。
+- **Why:** 形状本身就排除了产品代码：两个 PR（#127 改 CSS/SVG filter、#128 改弹幕速度
+  设置）**diff 毫无交集**，却在 attempt 1 挂掉**同样 9 条用例、同样的行号**
+  （散落在 6 个 spec 文件里），且都在**零代码改动**的重跑里全绿。
+  再看范围：`[lang]` 是唯一动态段的路由（`[lang]/faq`、`[lang]/search`、
+  `[lang]/privacy`）自始至终正常，`[lang]` **之外**的动态路由
+  `/sitemaps/anime/sitemap/[id].xml` 同一轮里也正常 200 —— 坏的恰好是
+  「`[lang]` + 再嵌一层动态段」这一类，三段路径 **0 成功 / 19 次失败**。
+- **Pros:** 两条判据都能直接从 CI 日志读出来，不必复现：
+  1. **`generate-params` 阶段在不在。** next-dev.log 里每条 200 都带
+     `generate-params: …`，每条 404 **一个都没有**。这一段缺失＝该段从没被编译。
+  2. **404 花了多久。** 健康时 `/anime/0` 是 `404 in 942ms (next.js: 870ms)` ——
+     段编译过了、页面在 `anilistId <= 0` 上主动 `notFound()`，这是**产品的** 404。
+     故障时是 `404 in 42ms (next.js: 5ms)` —— 从没编译过，404 来自路由层。
+     ★**状态码一模一样，来源完全不同** —— 只看状态码永远分不出这两件事。
+- **Cons:** `--webpack` 是**止血不是修复**，而且 2026-08-29 的对照组实测证明**现在还不能上**。
+  同一个 commit 推 6 个分支各跑一次（不同 ref 才能绕开 `cancel-in-progress`，同 ref 连发只会
+  互相取消）：
+
+  | | Turbopack 基线 | webpack 6 次 |
+  |---|---|---|
+  | 嵌套动态段 404 指纹 | 14 次里出现 3 次 | **0/6，确实消失了** |
+  | job 时长 | ~4 分钟 | **8m08s–9m23s，约 2.2 倍** |
+  | 套件结果 | 间歇性红 | **6/6 全红** |
+
+  ★**它换来了一个更糟的缺陷**：7 条用例在 6 次里每次都挂（`auth` 3 条、`locale-routing`
+  2 条、`stale-tab` 2 条），确定性的，不是抖动。机理在第一条里写着 —— 期望
+  「邮箱或密码错误」，实际拿到「邮箱格式不正确」，即**打字进了 DOM 没进 React state**，
+  正是 #129 修 `/search` 时记下的水合竞态。#129 只修了那一个 spec，其余会打字的 spec
+  仍然不等 `__reactFiber$`，而 webpack 更慢的编译把那个窗口从偶发撑成了必现。
+  **结论：套件本来就依赖 dev server 足够快，Turbopack 的速度一直在掩盖这件事。**
+  换打包器之前必须先把这些 spec 的水合等待补上，否则是拿一个间歇性红换一个确定性红。
+
+  另外两块代价不变：沙箱从此不再覆盖生产之外的第二个打包器；**上游那半还没查** ——
+  这是不是已知的 Next issue、有没有在更晚的 16.x 里修掉，目前是空白
+  （查的时候 web search 额度已耗尽，不是查过没有）。在补上这一步之前，
+  只能说「webpack 下没复现 404」，**不能**说「根因是 Turbopack 的某某」。
+- **Context:** 全仓只有沙箱在跑 Turbopack —— `next-app/package.json` 的 build 是
+  `next build --webpack`，只有 `dev` 走默认。当前钉的是 `next@16.2.6`。
+  ★**最值钱的是早期指纹**：warm-up 那一行 `warmed /reset-password/warmup -> 404`。
+  那个页面不调任何 API、也没有任何 `notFound()` 分支，**健康栈里它不可能是 404**。
+  翻了 14 次历史运行它出现过 3 次，**3 次对应的 attempt 全部失败**。而 warm-up 的守卫
+  只对 `5xx|000` 判失败，所以它两次都把指纹打印出来又原样放行了。把这一行收紧成
+  「`/reset-password/warmup` 不是 200 就直接失败」成本一行，收益是把一次半小时的
+  e2e 排查压成一条报错。
+  ★**取证顺序**：重跑会**覆盖** job 日志，但
+  `gh api repos/OWNER/REPO/actions/runs/<id>/attempts/1/logs` 仍取得到失败那次；
+  而 `Dump service logs on failure` 是 `if: failure()`，所以 next-dev.log 和容器日志
+  **只有失败那次才存在**，重跑变绿之后就永远没有了。**先取证，再重跑。**
+- **Depends on / blocked by:** 无。
+  ★**退出条件 —— 什么情况下可以把 Turbopack 换回来**，三条都满足才动：
+  ① 找到对应的上游 issue，并确认它在某个具体的 16.x 里标为已修；
+  ② 升到那个版本；
+  ③ **用同一个指纹复验**：连跑若干次沙箱，`warmed /reset-password/warmup` 全是 200，
+  且 next-dev.log 里嵌套动态路由的 200 全都带 `generate-params`。
+  「跑了一次没红」**不算数** —— 这个缺陷本来就是间歇的，n=1 在本仓已经骗过人不止一次。
+
+## 断言「不存在」的用例，在整体故障下会以错误的理由变绿
+
+- **What:** 扫一遍沙箱套件，把「断言 404 / 不可见 / 空结果」却**没有同路由族正例配对**的
+  用例挑出来，逐条补上正例。**这条 TODO 的本体是那次扫描**，不是某一个文件 ——
+  下面的样本只是发现它的入口，不是全部。
+- **Why:** 2026-08-29 那次故障给了一个教科书级的样本：**全站每一条嵌套动态路由都在
+  404**，而 `not-found-status.spec.ts` 里断言 404 的 **10 条用例全绿** ——
+  `/anime/0`、`/anime/abc`、`/anime/-1`、`/anime/999999999`、
+  `/seasonal/notaseason/2026`、`/u/{不存在}` 及其 `followers`/`following`，
+  再加三个 locale 前缀各一条。它们要的答案是 404，而路由层正在无差别地发 404，
+  于是**每一条都以完全错误的理由通过了**。一条断言「这个不存在」的用例，
+  在「什么都不存在」的时候没有任何判别力。
+- **Pros:** 配对的效力不是推演，**同一个文件里就有现成的对照组**：
+  `not-found-status.spec.ts:207` 的 "a real anime still answers 200 in every locale
+  form"。那一轮 11 条状态断言里**唯一变红的就是它**，而它的注释当初就把理由写清楚了 ——
+  "a change that 404s the whole catalogue passes every assertion above"。
+  作者预见到了这个形状并挡住了；缺的只是把同一条规则推广到其余用例。
+- **Cons:** 配对不是免费的：正例需要一条真实存在的夹具数据，而夹具生命周期在
+  `fullyParallel` 下本身就是出过 bug 的地方（#123 修过一次共享夹具的并发缺陷，
+  #118 那轮的三条红也全是我自己 spec 的并发缺陷）。补正例时别顺手引入新的共享可变状态，
+  否则治好一个盲区、换来一个 flake。
+- **Context:** 沙箱 20 个 spec 里有 12 个含形如 `toBe(404)` / `not.toBeVisible` /
+  `toHaveCount(0)` / `toBeHidden` 的负向断言，共 **35 处** —— 这是扫描的**分母**，
+  **不是**「35 处都有问题」的结论，也**不是**「已经扫过了」。逐条只问一个问题：
+  **「如果被测的这个能力彻底坏掉，这条断言会不会照样绿？」** 会，就补正例。
+  ★配套的一条判据见上一条：状态码相同不代表路径相同，用例分辨不了的，
+  服务端日志能分辨（`generate-params` 在不在 / 404 花了几毫秒）。
+- **Depends on / blocked by:** 无。与 Turbopack 那条彼此独立 —— 打包器换回去之后，
+  这个盲区照样在。
