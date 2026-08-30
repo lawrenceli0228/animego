@@ -147,11 +147,48 @@ test.describe("the score", () => {
     // The inverse of the old "the two bands actually differ". A high score
     // and a low one are the same colour now, and that is the property: if
     // banding is reintroduced here these two diverge and this fails.
-    await page.goto(`/anime/${HIGH}`);
-    const high = await scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
-    await page.goto(`/anime/${LOW}`);
-    const low = await scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
+    //
+    // Both reads wait for [data-accent-ready="true"] first, and that wait is
+    // the whole reason this test is trustworthy. These two fixtures carry no
+    // poster_accent (fixtures/pg.ts seeds title/episodes/format and nothing
+    // else), so unlike a catalogue row — which ships --poster-hue inline in
+    // the SSR markup — HeroAccent has to sample the cover on a canvas after
+    // the image decodes. Until it does, --poster-tone resolves against the
+    // :root placeholder hue.
+    //
+    // Read without waiting, this compares "whichever of the two navigations
+    // happened to lose the race" against the other, and it fails in EITHER
+    // direction from run to run: observed as expected-292.7/received-260.6 on
+    // one attempt and the exact reverse on its retry. Both fixtures share one
+    // cover (COVER above), so once both have settled they are the same hue by
+    // construction and the assertion is about banding, which is what it is
+    // for.
+    const settledScoreColour = async (id: number) => {
+      await page.goto(`/anime/${id}`);
+      await page.locator('.poster-scope[data-accent-ready="true"]').waitFor();
+      return scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
+    };
+
+    const high = await settledScoreColour(HIGH);
+    const low = await settledScoreColour(LOW);
     expect(high).toBe(low);
+
+    // Guards the guard. If the wait above ever stops working, both sides
+    // would agree on the placeholder and this test would pass while measuring
+    // nothing at all. The placeholder is read off :root at runtime rather
+    // than typed here, so it cannot go stale when globals.css changes.
+    const placeholder = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement)
+        .getPropertyValue("--poster-tone")
+        .trim();
+      const probe = document.createElement("span");
+      probe.style.color = root;
+      document.body.appendChild(probe);
+      const resolved = getComputedStyle(probe).color;
+      probe.remove();
+      return resolved;
+    });
+    expect(high).not.toBe(placeholder);
   });
 
   test("the source name is neutral, the value is not", async ({ page }) => {
