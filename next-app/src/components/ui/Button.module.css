@@ -122,24 +122,38 @@
   transform: translateY(0);
 }
 
-/* ── Outline — secondary actions (share, downloads) ─────────────────────── */
+/* ── Outline — secondary actions (share, downloads) ─────────────────────────
+ *
+ * Glass, not a ghost. Both call sites (ShareButton, MagnetButton) sit in the
+ * detail hero, on a photograph, in a row with a filled primary — so this is
+ * the middle of a three-step ramp: filled / glass / plain text. Transparent
+ * with a grey hairline and 60% text was not the middle step, it was the
+ * bottom one, and the row read as one button plus two labels.
+ *
+ * A fill also gives the text something to sit on. Everything else in the hero
+ * carries a text-shadow for exactly this reason; a control gets a surface
+ * instead, which is what the surrounding blur is for.
+ *
+ * White at low alpha rather than a tinted tone: this is chrome, not identity.
+ * The anime's colour belongs to the primary next to it. */
 
 .outline {
   composes: base;
-  border: 1px solid var(--separator);
-  background: transparent;
-  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .outline:hover:not(:disabled) {
-  border-color: rgba(120, 120, 128, 0.9);
-  background: var(--bg-fill);
-  color: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
   transform: translateY(-1px);
 }
 
 .outline:active:not(:disabled) {
-  background: rgba(120, 120, 128, 0.2);
+  background: rgba(255, 255, 255, 0.2);
   transform: translateY(0);
 }
 

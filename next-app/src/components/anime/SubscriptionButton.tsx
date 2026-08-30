@@ -258,39 +258,48 @@ const removeBtnStyle: CSSProperties = {
   transition: "all 0.2s",
 };
 
-const loginBtnStyle: CSSProperties = {
+// ── The two "start tracking this" controls ─────────────────────────────────
+//
+// `login` (anonymous) and `add` (signed in, no subscription yet) are the same
+// control in two auth states, so they are the same object: glass, one step
+// heavier than the tools beside them, one step lighter than the filled play
+// button. That is the row's whole hierarchy — filled / glass / plain text.
+//
+// This used to be #0a84ff, a solid system-blue fill. Two problems, and the
+// second is the one that mattered. Solid blue made it a SECOND filled primary
+// in a row that already has one, so the play button and this one competed for
+// the same job; and blue is not in this page's palette at all — every other
+// coloured thing in the hero carries the anime's own hue, so the one control
+// painted in the system accent read as though it came from a different app.
+//
+// Glass is also what puts them on the artwork correctly: text in this hero
+// gets a shadow because the banner behind it is a photograph, and a control
+// gets a surface for the same reason.
+const trackingControlStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   padding: "0 18px",
   borderRadius: 8,
-  background: "#0a84ff",
+  fontSize: 13,
+  fontWeight: 660,
+  cursor: "pointer",
+  minHeight: CONTROL_HEIGHT,
+  outline: "none",
+  border: "1px solid rgba(255,255,255,0.2)",
+  background: "rgba(255,255,255,0.12)",
+  backdropFilter: "blur(12px)",
   color: "#fff",
-  fontWeight: 600,
-  fontSize: 13,
-  textDecoration: "none",
-  minHeight: CONTROL_HEIGHT,
-  lineHeight: "20px",
-  border: "none",
-  cursor: "pointer",
-  outline: "none",
-};
-
-const addBtnStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "0 18px",
-  borderRadius: 8,
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: "pointer",
-  minHeight: CONTROL_HEIGHT,
-  outline: "none",
-  border: "1px solid rgba(84,84,88,0.65)",
-  background: "transparent",
-  color: "rgba(235,235,245,0.60)",
   transition:
     "background 150ms, border-color 150ms, color 150ms, transform 120ms",
 };
+
+const loginBtnStyle: CSSProperties = {
+  ...trackingControlStyle,
+  textDecoration: "none",
+  lineHeight: "20px",
+};
+
+const addBtnStyle: CSSProperties = trackingControlStyle;
 
 const placeholderStyle: CSSProperties = {
   padding: "0 18px",

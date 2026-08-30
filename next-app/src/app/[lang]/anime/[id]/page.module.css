@@ -37,7 +37,11 @@
  * there, not the subject.
  */
 .hero {
-  --hero-cover-w: clamp(112px, 22vw, 210px);
+  /* v10 was checked against the real 1400px content width rather than the
+   * demo's former 1180px canvas. A gentler viewport slope keeps the cover
+   * from reaching its ceiling too early on laptops, while the wider ceiling
+   * lets it hold its weight on the full-width layout. */
+  --hero-cover-w: clamp(124px, 15.5vw, 216px);
   --hero-gap: clamp(16px, 3vw, 32px);
 
   /* The artwork is the hero's background, not a strip above it, and the
@@ -47,18 +51,12 @@
    * became two, because the overlap is now what `align-items: flex-end`
    * does for free.
    *
-   * 38.6vw is the ratio the design was drawn at — 556px on a 1440 viewport.
-   * The floor is what a phone gets, and it is deliberately far below the
-   * ceiling: at 390px the artwork is a backdrop for the title, not the
-   * subject, and every pixel it takes is a pixel of synopsis pushed down. */
+   * v10 uses a 400px floor, a 44vw slope and a 556px ceiling. Phones retain
+   * the denser 340px product override at the end of this file, where artwork
+   * is a backdrop rather than the subject. */
   position: relative;
   isolation: isolate;
-  /* The floor is not "as small as possible": with align-items:flex-end the
-   * content sits on the bottom edge, so a floor equal to the content height
-   * leaves no artwork visible and puts the title hard against the navbar.
-   * 340 is the measured content height on a phone (306px of meta plus its
-   * padding) plus enough for the banner to read as a backdrop. */
-  min-height: clamp(340px, 38.6vw, 560px);
+  min-height: clamp(400px, 44vw, 556px);
   display: flex;
   align-items: flex-end;
 }
@@ -102,12 +100,31 @@
 .bannerOverlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    to top,
-    var(--bg) 1%,
-    rgba(0, 0, 0, 0.55) 34%,
-    transparent 66%
-  );
+  background:
+    linear-gradient(
+      to top,
+      var(--bg) 1%,
+      color-mix(in oklab, var(--bg) 55%, transparent) 34%,
+      transparent 66%
+    ),
+    linear-gradient(
+      102deg,
+      color-mix(in oklab, var(--bg) 82%, transparent) 0%,
+      color-mix(in oklab, var(--bg) 34%, transparent) 34%,
+      transparent 58%
+    );
+}
+
+/* A barely-there wash joins each banner to its poster-derived colour without
+ * recolouring the artwork. This is the same soft-light layer used by v10. */
+.bannerOverlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--poster-tone);
+  mix-blend-mode: soft-light;
+  opacity: 0.055;
+  pointer-events: none;
 }
 
 .content {
@@ -117,7 +134,7 @@
   display: flex;
   align-items: flex-end;
   gap: var(--hero-gap);
-  padding-bottom: clamp(20px, 2.6vw, 36px);
+  padding-bottom: clamp(28px, 4.5vh, 48px);
   flex-wrap: wrap;
 }
 
@@ -130,26 +147,43 @@
  * almost nothing while 3:4 would visibly clip the artwork. The width/height
  * attributes on the element supply the same ratio, which is what keeps the
  * box reserved before the image decodes. */
+/* No box-shadow here on purpose. The element also carries the global
+ * `hero-cover` class, and `[data-accent-ready="true"] .hero-cover` in
+ * globals.css is two class selectors to this one's single one — anything
+ * written here loses and reads as if it were applied. The drop shadow and the
+ * tinted halo both live there, together, where the reveal transition is. */
 .cover {
   width: var(--hero-cover-w);
   height: auto;
   aspect-ratio: 210 / 300;
   object-fit: cover;
-  border-radius: var(--radius);
-  border: 1px solid var(--separator);
+  border-radius: 10px;
+  border: 0;
   background: var(--bg-card);
   display: block;
 }
 
-/* The cover slot when there is no cover to show. */
+/* The cover slot when there is no cover to show. It does NOT get the
+ * `hero-cover` class, so the drop shadow it would otherwise inherit from
+ * globals has to be stated here — otherwise the empty slot is the one thing
+ * in the hero sitting flat on the banner. */
 .coverPlaceholder {
   composes: cover;
   background: var(--bg-elevated);
+  box-shadow: 0 24px 56px -20px rgba(0, 0, 0, 0.92);
+}
+
+.metaColumn {
+  flex: 1;
+  min-width: 280px;
 }
 
 .meta {
-  flex: 1;
-  min-width: 280px;
+  min-width: 0;
+}
+
+.actionSlot {
+  min-width: 0;
 }
 
 
@@ -177,11 +211,14 @@
  * gave up its pills and stopped competing for attention. */
 .title {
   font-family: var(--font-display);
-  font-size: clamp(28px, 4.6vw, 58px);
+  font-size: clamp(28px, 4.4vw, 58px);
   color: var(--text);
-  margin-bottom: var(--sp-xs);
-  line-height: 1.12;
-  letter-spacing: -0.02em;
+  /* 10, not --sp-xs (4). At 58px the title's own descenders already close
+   * most of the gap to the subtitle; 4px put the two strings inside each
+   * other's line box and they read as one wrapped block. */
+  margin-bottom: 10px;
+  line-height: 1.08;
+  letter-spacing: -0.018em;
   text-shadow:
     0 1px 2px rgba(0, 0, 0, 0.5),
     0 3px 24px rgba(0, 0, 0, 0.72);
@@ -193,10 +230,10 @@
  * in a Chinese face is legible but wrong in the way a reader notices without
  * being able to name. */
 .subtitle {
-  color: var(--text-secondary);
+  color: rgba(235, 235, 245, 0.84);
   font-family: var(--font-jp);
-  font-size: 16px;
-  margin-bottom: 14px;
+  font-size: 14.5px;
+  margin-bottom: 20px;
   text-shadow: 0 1px 12px rgba(0, 0, 0, 0.75);
 }
 
@@ -204,13 +241,13 @@
  * so it wants to read as a different KIND of string from the title beside
  * it, not merely a smaller one. Uppercase for the same reason. */
 .subtitleRoman {
-  margin-left: 12px;
+  margin-left: 15px;
   font-family: var(--font-latin);
   font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-tertiary);
+  color: rgba(235, 235, 245, 0.68);
   white-space: nowrap;
 }
 
@@ -252,9 +289,9 @@
   flex-wrap: wrap;
   align-items: baseline;
   font-size: 13.5px;
-  line-height: 1.85;
-  color: var(--text-secondary);
-  margin-bottom: 18px;
+  line-height: 1.62;
+  color: rgba(235, 235, 245, 0.78);
+  margin-bottom: 24px;
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8);
 }
 
@@ -281,7 +318,15 @@
    * it off, so `text-decoration: none` here does nothing. An inline-block
    * establishes its own box and the line stops at its edge. */
   display: inline-block;
-  margin: 0 8px;
+  /* 9 each side = 18px between two facts, which is the reference's rhythm.
+   * It gets there differently — a real separator element inside a `gap: 0 9px`
+   * row — but the measurement that matters is the space a reader sees, and
+   * 8px here was 16px there. */
+  margin: 0 9px;
+  /* Pinned, because the separator after the AniList score is that element's
+   * ::after and would otherwise inherit its 16px. Every dot in the row is the
+   * same dot. */
+  font-size: 13.5px;
   color: rgba(235, 235, 245, 0.28);
 }
 
@@ -298,16 +343,22 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  color: rgba(235, 235, 245, 0.50);
+  color: rgba(235, 235, 245, 0.68);
 }
 
 /* The value carries the anime's colour; the source name stays quiet.
  * Splitting them is the point — "AniList" is a label you read once and
  * "91" is the thing you came for, and at one weight the pair reads as a
  * single unparsed token. */
+/* The one thing in this row that is set larger than the row. Everything here
+ * is a fact, but the score is the fact the reader is scanning for, and colour
+ * alone was not doing the job: at 13.5px/500 it sat at exactly the weight of
+ * "已完结 · 13 集 · 动作" beside it and had to be found rather than seen.
+ * 16px/640 is the reference's, and it is the row's only scale contrast. */
 .factsScore {
   font-family: var(--font-mono);
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 640;
   color: var(--poster-tone);
 }
 
@@ -349,10 +400,14 @@
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
+/* Explicit size, because .factsScore is now 16px and this lives inside it.
+ * "AniList" is the label on the number, not part of it — it stays at the row's
+ * size so the pair reads as one quiet word and one loud figure. */
 .factsScoreLabel {
   font-family: var(--font-sans);
+  font-size: 13.5px;
   font-weight: 400;
-  color: rgba(235, 235, 245, 0.52);
+  color: rgba(235, 235, 245, 0.72);
 }
 
 .factsBgmVotes {
@@ -378,8 +433,40 @@
  * `min-width: 0` is the whole mechanism — a flex item will not shrink past
  * its min-width, and 280px plus the poster does not fit a 390px screen. */
 @media (max-width: 600px) {
+  .hero {
+    /* Keep the product's denser phone composition while tablet and desktop
+     * follow v10's 400px floor. */
+    min-height: 340px;
+  }
+
+  .content {
+    display: grid;
+    grid-template-columns: var(--hero-cover-w) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: end;
+    column-gap: var(--hero-gap);
+    row-gap: 8px;
+    padding-bottom: 20px;
+  }
+
+  .coverSlot {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .metaColumn {
+    display: contents;
+  }
+
   .meta {
+    grid-column: 2;
+    grid-row: 1;
     min-width: 0;
+  }
+
+  .actionSlot {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   /* Everything above the synopsis gets tighter on a phone, because the
@@ -387,7 +474,7 @@
    * for the same 844px.
    *
    * The title's floor drops below its desktop clamp rather than scaling
-   * with it: beside a 112px poster the meta column is only ~230px wide, so
+   * with it: beside a 124px poster the meta column is only ~218px wide, so
    * a long title (Re:Zero S4 is 20 characters) wraps to three lines at
    * 28px and stays three lines at 25px. The saving here is per-line, not
    * in line count. */
@@ -401,7 +488,35 @@
     margin-bottom: 8px;
   }
 
-  /* 1.5 rather than the desktop 1.85. Measured across a 16-title sample the
+  /* The transliteration gets its own line here.
+   *
+   * Beside a full-width title `white-space: nowrap` is right: the string is
+   * one token and breaking "BLEACH: SENNEN / KESSEN-HEN" mid-title reads as a
+   * layout fault. But the two-column phone hero leaves the meta column 218px
+   * on a 390px screen and this string measures 224px at 12px/0.1em tracking,
+   * so nowrap did not keep it on one line — it pushed it past the viewport
+   * edge, where an ancestor clipped it. The reference has no equivalent
+   * problem because it stacks the whole hero below 860px and the text column
+   * is always full width.
+   *
+   * Wrapping is the fix rather than hiding it: this is the string a reader
+   * types into a search box, and 2 lines of it costs 17px. */
+  .subtitleRoman {
+    display: block;
+    margin-left: 0;
+    margin-top: 3px;
+    white-space: normal;
+    /* 0.04em, down from the desktop 0.1em. The tracking is there to say "this
+     * is a transliteration, not a title"; the uppercase and the Latin face
+     * already say most of it, and at 25 characters every 0.01em costs 3px of
+     * a 218px column. This is what keeps a typical romanisation on ONE line
+     * here — which matters beyond tidiness, because the hero is bottom-
+     * aligned inside a fixed 340px box, so a second line does not push the
+     * page down, it pushes the TITLE up, toward the navbar. */
+    letter-spacing: 0.04em;
+  }
+
+  /* 1.5 rather than the desktop 1.62. Measured across a 16-title sample the
    * facts row is 3 lines at the median and 6 on the worst title in the
    * catalogue (Re:Zero S4 — a 20-character name beside seven genres), so
    * every 0.1 of line-height here is worth ~7px on exactly the titles that

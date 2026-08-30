@@ -40,9 +40,18 @@
  *
  * Which token where, and this is not interchangeable:
  *
- *   --poster-tone      text, and only this one. Contrast-managed.
- *   --poster-tone-mid  borders, rules, scrollbars. 3:1, not text-safe.
- *   --poster-tone-low  fills and tints. Deliberately BELOW 3:1.
+ *   --poster-tone        text, at full volume. Contrast-managed.
+ *   --poster-tone-quiet  text, one step back. The DIMMEST text-safe step —
+ *                        62% lightness, against a 56.5% WCAG floor.
+ *   --poster-tone-mid    borders, rules, scrollbars. 3:1, not text-safe.
+ *   --poster-tone-low    fills and tints. Deliberately BELOW 3:1.
+ *
+ * The trap in that list is the gap between the second and third entries.
+ * "Quieter accent" reads as --poster-tone-mid, and it is one step down the
+ * ramp — but it measures 3.68:1, so using it on a label turns a styling
+ * choice into an accessibility regression that looks correct in review and in
+ * the stylesheet. If a piece of text needs to be dimmer than --poster-tone,
+ * --poster-tone-quiet is the end of the road; below it, stop using hue.
  *
  * The one same-hue pairing that is proven safe is `--poster-tone` ON a
  * `--poster-tone-low` fill; the relation badge below is exactly that, which
@@ -82,6 +91,7 @@
  */
 .section {
   --sec-tone: var(--poster-tone, var(--accent));
+  --sec-tone-quiet: var(--poster-tone-quiet, var(--text-secondary));
   --sec-tone-mid: var(--poster-tone-mid, var(--separator));
   --sec-tone-low: var(--poster-tone-low, var(--bg-elevated));
 
@@ -102,10 +112,9 @@
    * floor for readable copy, which a role label is. */
   --sec-meta: rgba(235, 235, 245, 0.45);
 
-  /* Measured against the reference: heading to heading was 262px where the
-   * design has 292, and that difference is what stops two adjacent bands
-   * reading as one. Was clamp(36px, 5vw, 64px). */
-  margin-top: clamp(44px, 5vw, 72px);
+  /* v10 keeps each content band visually independent without adding a full
+   * divider between them. */
+  margin-top: clamp(52px, 8vh, 88px);
 }
 
 /* Recommendations is the last thing on the page. */
@@ -140,7 +149,10 @@
    * Sora has no CJK glyphs, so a Chinese heading renders in --font-cjk
    * either way — the display face only shows up on a Latin section name. */
   font-size: 15px;
-  font-weight: 600;
+  /* 640, not 600. At 15px the heading is only half a point above the 14.5px
+   * body under it, so the whole of its rank is carried by weight and by the
+   * rule beside it — and 600 is what the body's own bold values use. */
+  font-weight: 640;
   line-height: 1.62;
   letter-spacing: 0.01em;
   color: var(--text);
@@ -244,11 +256,14 @@
   scroll-snap-align: start;
 }
 
+/* 6:8.6, the same ratio the hero poster is drawn at in the reference. These
+ * cards and the hero cover show the same artwork from the same source, so a
+ * second ratio here means the two crop the art differently on one page. */
 .posterFrame {
   position: relative;
-  aspect-ratio: 7 / 10;
-  margin-bottom: var(--sp-sm);
-  border-radius: var(--radius-sm);
+  aspect-ratio: 6 / 8.6;
+  margin-bottom: 9px;
+  border-radius: 9px;
   overflow: hidden;
   background: var(--bg-elevated);
   /* Inset rather than `border`, so the frame does not add to the box and
@@ -451,12 +466,15 @@
   text-align: right;
 }
 
+/* 56x76 — the reference's, and a 6:8.14 box that reads as the same KIND of
+ * object as the hero poster without competing with it. 64x86 made each row
+ * 110px tall, so eight characters cost a full screen. */
 .portrait {
-  width: 64px;
-  height: 86px;
+  width: 56px;
+  height: 76px;
   flex: none;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--bg-elevated);
 }
 
@@ -482,14 +500,26 @@
 /* The character's role is the one that varies per row and per anime, so it
  * is the one that carries the colour. The voice actor's label is the same
  * string on every row and stays neutral. */
+/* One step back down the ramp, not the full accent.
+ *
+ * "主角" / "配角" is a kicker: it tells you what the name under it is, and it
+ * is the same three words on every row. At --sec-tone it sat at the exact
+ * lightness of the score figure in the hero, so eight of them down the column
+ * read as eight highlights. --sec-tone-quiet keeps the hue — this is still
+ * the anime's colour — and gives the name below it the row.
+ *
+ * NOT --sec-tone-mid, which is the step that looks like it belongs here. This
+ * is 10px text; that token is 3.68:1. See the token table at the top. */
 .personRoleMain {
   composes: personRole;
-  color: var(--sec-tone);
+  color: var(--sec-tone-quiet);
 }
 
 .personName {
   font-size: 15px;
-  font-weight: 600;
+  /* 560: heavier than the body, lighter than a heading. The name is the row's
+   * subject but the row is a list item, not a headline. */
+  font-weight: 560;
   line-height: 1.35;
   color: var(--text);
   overflow: hidden;
@@ -542,9 +572,12 @@
   min-width: 0;
 }
 
+/* 40, matching the reference. Staff are the page's smallest people — a name
+ * and a job — and at 44 they read at the same weight as the characters above,
+ * which have twice the information. */
 .staffAvatar {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   flex: none;
   object-fit: cover;
   border-radius: var(--radius-full);
@@ -590,18 +623,19 @@
    * .headTitle::before paint with no background at all, so the rule beside
    * "简介" silently vanished while every other heading kept theirs. */
   --sec-tone: var(--poster-tone, var(--accent));
+  --sec-tone-quiet: var(--poster-tone-quiet, var(--text-secondary));
   --sec-tone-mid: var(--poster-tone-mid, var(--separator));
   --sec-tone-low: var(--poster-tone-low, var(--bg-elevated));
 
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: clamp(20px, 3vw, 44px);
-  margin: clamp(24px, 3.4vw, 44px) 0 0;
+  gap: clamp(24px, 4vw, 56px);
+  margin: clamp(46px, 7vh, 78px) 0 0;
 }
 
 @media (min-width: 900px) {
   .synopsis {
-    grid-template-columns: minmax(0, 1fr) 220px;
+    grid-template-columns: minmax(0, 1.7fr) minmax(210px, 0.8fr);
     align-items: start;
   }
 }
@@ -618,9 +652,29 @@
   gap: 22px;
 }
 
+/* Once the synopsis stacks, the two score records remain one compact row;
+ * stacking the scores too turned their 180px meters into two full-width
+ * bands and doubled the section height. */
+@media (max-width: 899px) {
+  .scorePanel {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 24px 40px;
+    align-items: flex-start;
+  }
+
+  .scoreItem {
+    width: min(180px, 100%);
+  }
+}
+
 .scoreItem {
   display: grid;
   gap: 4px;
+}
+
+.scoreItemBangumi {
+  composes: scoreItem;
 }
 
 /* Same rank as .infoLabel — these are the same kind of thing (a field name
@@ -680,8 +734,12 @@
  * is the child. One fewer node than a wrapper plus a bar, and the track
  * cannot get out of sync with the fill's width because they share a box. */
 .scoreBar {
-  margin-top: 6px;
-  height: 3px;
+  /* 10, so the bar reads as a separate mark under the figure rather than as
+   * its underline. At 6 it was inside the number's own line box. */
+  margin-top: 10px;
+  width: 100%;
+  max-width: 180px;
+  height: 2px;
   border-radius: var(--radius-full);
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
@@ -692,6 +750,10 @@
   height: 100%;
   border-radius: inherit;
   background: var(--sec-tone, var(--poster-tone));
+}
+
+.scoreItemBangumi .scoreBar > span {
+  background: rgba(235, 235, 245, 0.42);
 }
 
 /* ── Information table ────────────────────────────────────────────────────
@@ -759,4 +821,3 @@
   color: var(--text);
   overflow-wrap: anywhere;
 }
-

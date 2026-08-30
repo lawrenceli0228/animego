@@ -13,9 +13,21 @@ import type { CSSProperties } from "react";
 
 const textStyle: CSSProperties = {
   color: "rgba(235,235,245,0.60)",
-  fontSize: 14,
-  lineHeight: 1.8,
+  fontSize: 15,
+  lineHeight: 1.9,
   margin: 0,
+  // Measure, not column width. The synopsis column is 1.7fr of the section
+  // grid, which is ~880px on a laptop — at 15px that is a 95-character line,
+  // and a reader loses the start of the next one on the way back. 62ch caps
+  // it at ~558px regardless of how wide the grid gets, which is why this is
+  // a max-width on the paragraph rather than a narrower grid column: the
+  // score panel beside it still wants the room.
+  //
+  // Deliberately no margin-bottom, even though the reference sets 13px on
+  // its paragraphs: this component renders the whole synopsis as ONE <p>, so
+  // there is no second paragraph for the margin to separate — it would only
+  // stack under the 13px the toggle below already carries as marginTop.
+  maxWidth: "62ch",
 };
 
 const buttonStyle: CSSProperties = {
@@ -33,10 +45,8 @@ const buttonStyle: CSSProperties = {
   color: "var(--poster-tone, #0a84ff)",
   fontSize: 13,
   fontWeight: 600,
-  // 20, matching the rhythm the rest of the block is set on. It was 8,
-  // which put the control closer to the paragraph than the paragraph's own
-  // line spacing, so it read as part of the text rather than as a control.
-  marginTop: 20,
+  // One quiet text step below the paragraph, matching v10's synopsis rhythm.
+  marginTop: 13,
   cursor: "pointer",
   background: "none",
   border: "none",
@@ -48,9 +58,9 @@ const buttonStyle: CSSProperties = {
 // a link at this weight.
 const sourceStyle: CSSProperties = {
   color: "rgba(235,235,245,0.35)",
-  fontSize: 12,
+  fontSize: 11.5,
   lineHeight: 1.6,
-  margin: "20px 0 0",
+  margin: "14px 0 0",
 };
 
 const sourceLinkStyle: CSSProperties = {
