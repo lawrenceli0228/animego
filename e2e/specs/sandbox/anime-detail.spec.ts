@@ -147,11 +147,48 @@ test.describe("the score", () => {
     // The inverse of the old "the two bands actually differ". A high score
     // and a low one are the same colour now, and that is the property: if
     // banding is reintroduced here these two diverge and this fails.
-    await page.goto(`/anime/${HIGH}`);
-    const high = await scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
-    await page.goto(`/anime/${LOW}`);
-    const low = await scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
+    //
+    // Both reads wait for [data-accent-ready="true"] first, and that wait is
+    // the whole reason this test is trustworthy. These two fixtures carry no
+    // poster_accent (fixtures/pg.ts seeds title/episodes/format and nothing
+    // else), so unlike a catalogue row — which ships --poster-hue inline in
+    // the SSR markup — HeroAccent has to sample the cover on a canvas after
+    // the image decodes. Until it does, --poster-tone resolves against the
+    // :root placeholder hue.
+    //
+    // Read without waiting, this compares "whichever of the two navigations
+    // happened to lose the race" against the other, and it fails in EITHER
+    // direction from run to run: observed as expected-292.7/received-260.6 on
+    // one attempt and the exact reverse on its retry. Both fixtures share one
+    // cover (COVER above), so once both have settled they are the same hue by
+    // construction and the assertion is about banding, which is what it is
+    // for.
+    const settledScoreColour = async (id: number) => {
+      await page.goto(`/anime/${id}`);
+      await page.locator('.poster-scope[data-accent-ready="true"]').waitFor();
+      return scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
+    };
+
+    const high = await settledScoreColour(HIGH);
+    const low = await settledScoreColour(LOW);
     expect(high).toBe(low);
+
+    // Guards the guard. If the wait above ever stops working, both sides
+    // would agree on the placeholder and this test would pass while measuring
+    // nothing at all. The placeholder is read off :root at runtime rather
+    // than typed here, so it cannot go stale when globals.css changes.
+    const placeholder = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement)
+        .getPropertyValue("--poster-tone")
+        .trim();
+      const probe = document.createElement("span");
+      probe.style.color = root;
+      document.body.appendChild(probe);
+      const resolved = getComputedStyle(probe).color;
+      probe.remove();
+      return resolved;
+    });
+    expect(high).not.toBe(placeholder);
   });
 
   test("the source name is neutral, the value is not", async ({ page }) => {
@@ -284,17 +321,28 @@ test.describe("the hero on a desktop", () => {
       .locator("main img[aria-hidden='true']")
       .first()
       .boundingBox();
-    // 556 at 1440px — the hero is `clamp(340px, 38.6vw, 560px)` and 38.6vw
-    // is 555.84 here. It was 400, back when this was a fixed-height banner
-    // strip rather than the full background of the hero.
+    // 556 at 1440px. The hero is `clamp(400px, 44vw, 556px)` and 44vw is
+    // 633.6 here, so this is the ceiling. It reached the same number by a
+    // different route before — `clamp(340px, 38.6vw, 560px)`, where 38.6vw
+    // landed on 555.83 — which is why the assertion did not move when the
+    // formula did. Do not read that as the formula being unchanged.
     //
-    // Rounded before comparing: 38.6vw lands on 555.828125 and a bounding
-    // box is a float, so an exact toBe() would pin the number to whatever
-    // sub-pixel the current viewport happens to produce.
+    // Rounded before comparing: a bounding box is a float, so an exact toBe()
+    // would pin the number to whatever sub-pixel the viewport produces.
     expect(Math.round(bannerBox?.height ?? 0)).toBe(556);
 
+    // 216 at 1440px — the cover is `clamp(124px, 15.5vw, 216px)` and 15.5vw
+    // is 223.2 here, so this is the ceiling too. It was 210 under the earlier
+    // `clamp(112px, 22vw, 210px)`; both halves moved together when the hero
+    // was recalibrated against the real 1400px content width (DESIGN.md >
+    // Anime Detail Page > Hero).
+    //
+    // The height is derived rather than typed, because it is not an
+    // independent fact: `aspect-ratio: 210 / 300` owns it, and a hardcoded
+    // second number is just a chance for the two to disagree silently. What
+    // this asserts is that the ratio is intact at the ceiling.
     const coverBox = await page.locator("img.hero-cover").first().boundingBox();
-    expect(coverBox?.width).toBe(210);
-    expect(Math.round(coverBox?.height ?? 0)).toBe(300);
+    expect(coverBox?.width).toBe(216);
+    expect(Math.round(coverBox?.height ?? 0)).toBe(Math.round(216 * (300 / 210)));
   });
 });

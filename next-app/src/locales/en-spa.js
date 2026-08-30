@@ -56,8 +56,10 @@ const en = {
   detail: {
     releasing: 'Releasing', finished: 'Finished',
     notYetReleased: 'Not Yet Released', cancelled: 'Cancelled',
-    epUnit: 'Eps', readMore: 'Read more', collapse: 'Collapse',
+    epUnit: 'Eps', epUnitOne: 'Ep', readMore: 'Read more', collapse: 'Collapse',
     episodes: 'Episodes', noEpisodes: 'Episode info not available',
+    epTitleModeLabel: 'Episode title language',
+    epTitleLocalized: 'Translated', epTitleOriginal: 'Original', epTitleBoth: 'Both',
     // Degraded copy EpisodesGrid renders when the episode count is unknown;
     // same keys and same values as locales/en.ts. Says "not known yet",
     // never "none".

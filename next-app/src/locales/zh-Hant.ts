@@ -148,8 +148,10 @@ const zhHant = {
   detail: {
     releasing: '連載中', finished: '已完結',
     notYetReleased: '未開播', cancelled: '已取消',
-    epUnit: '集', readMore: '展開更多', collapse: '收起',
+    epUnit: '集', epUnitOne: '集', readMore: '展開更多', collapse: '收起',
     episodes: '集數列表', noEpisodes: '集數資訊待更新',
+    epTitleModeLabel: '集標題語言',
+    epTitleLocalized: '中文', epTitleOriginal: '原題', epTitleBoth: '並排',
     // 集數未知時的降級文案。手寫，沒有跑過轉換器：這兩句只有「數」一個字
     // 跟簡體本不同，交給 s2twp 只會多冒風險。說的是「還不知道」，不是
     // 「沒有」。

@@ -189,6 +189,7 @@
    * values actually come from. */
   --poster-hue: 292.7;
   --poster-tone: oklch(76% 0.085 var(--poster-hue));
+  --poster-tone-quiet: oklch(68% 0.07 var(--poster-hue));
   --poster-tone-mid: oklch(52% 0.07 var(--poster-hue));
   --poster-tone-low: oklch(24% 0.045 var(--poster-hue));
   --duration-halo-in: 260ms;
@@ -276,24 +277,62 @@ h4 {
  * value at a selector that sits above where --poster-hue is set. */
 .poster-scope {
   --poster-tone: oklch(76% 0.085 var(--poster-hue));
+  /* Quiet, but still TEXT. One step back from --poster-tone for a label that
+   * should not read at the same volume as a score, and the lowest step that
+   * may legally carry words.
+   *
+   * NOT --poster-tone-mid, one line below. That is the token that looks like
+   * it belongs here — it is literally "the dimmer accent" — and it measures
+   * 3.68:1 on black. Fine for what it paints (meter fills, scrollbar thumbs:
+   * non-text, where the 3:1 graphical threshold applies), not fine for a 10px
+   * kicker.
+   *
+   * 68%, and the exact number is reverse-solved rather than picked. At C 0.07
+   * the lightness that clears 4.5:1 across all 360 hues is 57 on --bg, 62.5
+   * on --bg-card and 67.5 on --bg-elevated; the token has to survive the
+   * strictest surface it could land on, not the one it happens to sit on
+   * today. The reference design uses 62 because it has exactly one background
+   * — here that would pass on the page and fail inside a card, which is the
+   * kind of defect that ships. lib/oklch.test.ts holds all three. */
+  --poster-tone-quiet: oklch(68% 0.07 var(--poster-hue));
   --poster-tone-mid: oklch(52% 0.07 var(--poster-hue));
   --poster-tone-low: oklch(24% 0.045 var(--poster-hue));
 }
 
 /* Hero cover halo — neutral by default. The poster's color signature is only
  * painted once the parent HeroAccent signals [data-accent-ready="true"], so the
- * user never sees a placeholder purple swap to the real color. */
+ * user never sees a placeholder purple swap to the real color.
+ *
+ * This rule, not the `.cover` rule in the detail page's CSS module, is what
+ * actually paints the cover's shadow: `[data-accent-ready] .hero-cover` is two
+ * class selectors and beats the module's single one. A shadow written over
+ * there is dead code, which is exactly what happened — the module carried the
+ * reference design's values while the page rendered these.
+ *
+ * The two shadows are not the same kind of thing and only one of them waits:
+ *
+ *  - The drop shadow is what lifts the poster off the artwork. It is neutral,
+ *    it is true before any colour is known, and it belongs on `.hero-cover`
+ *    unconditionally — gating it on the accent made the poster sit flat on the
+ *    banner for the first 400ms.
+ *  - The tinted halo is the anime's identity, so it is the one that waits.
+ *
+ * Colour: --poster-tone, not --poster-accent. The accent is the raw sampled
+ * pixel colour (#e45043 on BLEACH); the tone is that hue re-lit to a fixed
+ * lightness/chroma. Sampled straight, a saturated poster paints a hot ring
+ * around the cover and a muted one paints nothing, which is the same bug the
+ * text ramp already solved by refusing to tint prose. Spread -40px rather
+ * than -8/-4: this is a glow that has to be looked for, not a border. */
 .hero-cover {
-  border: 2px solid transparent;
-  transition:
-    box-shadow var(--duration-halo-in) var(--ease-out-expo) var(--delay-halo-appear),
-    border-color var(--duration-halo-in) var(--ease-out-expo) var(--delay-halo-appear);
+  border: 0;
+  box-shadow: 0 24px 56px -20px rgba(0, 0, 0, 0.92);
+  transition: box-shadow var(--duration-halo-in) var(--ease-out-expo)
+    var(--delay-halo-appear);
 }
 [data-accent-ready="true"] .hero-cover {
-  border-color: rgba(var(--poster-accent-rgb), 0.55);
   box-shadow:
-    0 0 64px -8px var(--poster-accent),
-    0 0 24px -4px var(--poster-accent);
+    0 24px 56px -20px rgba(0, 0, 0, 0.92),
+    0 0 58px -40px var(--poster-tone);
 }
 [data-accent-ready="true"][data-accent-fast="true"] .hero-cover {
   transition-delay: 0ms;

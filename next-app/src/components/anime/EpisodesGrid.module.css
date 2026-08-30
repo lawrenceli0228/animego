@@ -20,15 +20,11 @@
  *     cropped by the frame around it. Both fixed here, in a file the lint can
  *     see.
  *
- * Colour here is almost entirely semantic, and that is a decision rather
- * than an omission. Every cell reports a state — watched, furthest, open —
- * and it reports it in colour, so a per-anime hue that is free to land
- * anywhere on the wheel cannot also be a state in this grid: rendered
- * against real cover hues, an accent-tinted "open" cell reads as watched at
- * hue ~135 and as an error at hue ~25. So --poster-tone appears exactly
- * once, on the section label, which identifies rather than reports. (And
- * never --poster-accent, the raw sampled hex: its contrast against the page
- * swings across the catalogue, which is why the tone ladder exists at all.)
+ * Watched and furthest are semantic states, so they stay on the fixed system
+ * green. The anime's derived tone identifies the section and joins an open
+ * row to its discussion panel; it never replaces the watched colour. Raw
+ * --poster-accent is deliberately absent: its contrast against the page
+ * swings across the catalogue, which is why the tone ladder exists at all.
  */
 
 /* The same top margin the sections either side of this one use (see
@@ -37,8 +33,8 @@
  * its own off-scale 40px, which put it a step out of the page's cadence at
  * every viewport width. */
 .section {
-  margin-top: clamp(36px, 5vw, 64px);
-  margin-bottom: var(--sp-3xl);
+  margin-top: clamp(52px, 8vh, 88px);
+  margin-bottom: 0;
 }
 
 /* ── Section header ──────────────────────────────────────────────────────── */
@@ -49,23 +45,145 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: var(--sp-sm);
+  margin-bottom: 22px;
 }
 
 /* Matches the section headings below it (sections.module.css .headTitle) —
  * this one used to be 13px uppercase with 2px tracking while every other
  * heading on the page was 17px sentence case, so the episodes section read
  * as a different kind of thing than the ones either side of it. */
+/* The heading and its count, kept together on the left so `space-between` on
+ * .headerRow pushes the tools to the far edge rather than pushing these two
+ * apart from each other. */
+.headerMain {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+
+.headerTools {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
 .sectionLabel {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 700;
+  font-size: 15px;
+  /* 640, matching sections.module.css .headTitle — see the note there. */
+  font-weight: 640;
   color: var(--text);
   display: flex;
   align-items: center;
   gap: 10px;
 }
+
+/* The "已看 N / total" caption, and — via .headCount below — the episode count
+ * beside the heading. Same treatment as sections.module.css .headCount: this
+ * section owns its own header markup, so the two are kept in step by hand, and
+ * the reason they must be is that they sit five pixels apart on the page.
+ *
+ * Declared HERE, above its only consumer, and that is load-bearing rather than
+ * tidy: `composes` resolves at build time and css-loader requires the composed
+ * class to already exist in the file. With .progressText further down, Turbopack
+ * (next dev) rendered it fine and `next build --webpack` failed outright with
+ * "referenced class name in composes not found". Do not move it below. */
+.progressText {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.headCount {
+  composes: progressText;
+}
+
+/* ── Title-language switch ──────────────────────────────────────────────
+ *
+ * Text, not a segmented control. Three filled pills in the section header
+ * would out-weigh the heading beside them and read as the section's primary
+ * action, which they are not — this changes how a list is labelled, not what
+ * it contains. The selected one is marked with a rule under it in the anime's
+ * colour, the same mark the section heading uses. */
+.titleModes {
+  display: flex;
+  align-items: baseline;
+  /* Reads as the gap between the WORDS, which is what it looks like on screen:
+   * each button's 6px of padding is cancelled by an equal negative margin, so
+   * the two effects fall out of the arithmetic and text-to-text spacing is
+   * exactly this number. The hit areas end up 16px − 12px = 4px apart, which is
+   * separation enough that no thumb lands between two of them. */
+  gap: 16px;
+}
+
+.titleMode {
+  appearance: none;
+  border: 0;
+  background: none;
+  /* Hit area, not layout. 12.5px at line-height 1.4 is a 17px box — a third of
+   * the 44px floor DESIGN.md sets, and a control that is unmissable on a
+   * trackpad and genuinely hard to hit with a thumb. The padding buys the
+   * target; the equal negative margin hands the space straight back, so the
+   * section header does not grow a row and the baseline the header is aligned
+   * on does not move (padding shifts the box, not the baseline). */
+  padding: 14px 6px;
+  margin: -14px -6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  /* --text-secondary (6.36:1), NOT --text-tertiary (2.25:1).
+   *
+   * Tertiary is the right token for a caption you may ignore; these are the
+   * two options a reader is scanning in order to switch AWAY from the current
+   * one, so they are the most important thing in the control and they were the
+   * lowest-contrast text in the header. 2.25:1 is under the 4.5:1 text floor
+   * AND under the 3:1 non-text floor — measured, not estimated. The switch
+   * read as one label with two ghosts beside it. */
+  color: var(--text-secondary);
+  transition: color 150ms var(--ease-out-expo);
+}
+
+.titleMode:hover {
+  color: var(--text);
+}
+
+.titleMode[aria-pressed="true"] {
+  color: var(--text);
+  /* text-decoration, NOT the box-shadow rule this used to be. A box-shadow is
+   * offset from the border box, and the border box is now 14px taller than the
+   * word on each side — the underline would float below the label rather than
+   * sit under it. text-decoration hugs the text at any padding.
+   *
+   * It also removes a conflict: the focus ring is a box-shadow too, so the two
+   * marks used to fight over one property and tabbing onto the selected option
+   * erased the thing saying it was selected. Now they are different properties
+   * and both just show. */
+  text-decoration: underline;
+  text-decoration-color: var(--poster-tone, #0a84ff);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 5px;
+}
+
+/* The one ring DESIGN.md specifies, same as .toggle / .discussion below.
+ * NOT --poster-tone: a ring in the anime's own colour is the exact mistake
+ * ui/focusRing.test.ts exists to catch — it changes hue per title, and on the
+ * wrong artwork it is invisible. `outline: transparent` keeps a ring in forced
+ * -colours mode, where box-shadow is dropped. */
+.titleMode:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
 
 .sectionLabel::before {
   content: "";
@@ -73,12 +191,6 @@
   height: 2px;
   border-radius: 2px;
   background: var(--poster-tone, #0a84ff);
-}
-
-.progressText {
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
 }
 
 .hint {
@@ -146,24 +258,13 @@
  * the only thing distinguishing episode 14 from 15 was invisible. Titles are
  * the reason this section exists for a returning viewer.
  *
- * 300px is the narrowest track that fits a mark, a two-digit number and a
- * readable title; auto-fill then gives four columns at 1440px and one on a
- * phone, with no breakpoint. */
+ * v10's 258px floor is the narrowest track that still fits a mark, a
+ * two-digit number and a readable two-line title; auto-fill then gives four
+ * columns at 1440px and one on a phone, with no breakpoint. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 0 28px;
-}
-
-/* Phones carry the densest grids and the smallest viewport. A 72px track
- * fits four cells across a 360px screen where 88px fits three, which is a
- * row less scrolling per four episodes — and smaller cells are less paint,
- * which is the thing that actually scales badly here. */
-@media (max-width: 600px) {
-  .grid {
-    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-    gap: var(--sp-sm);
-  }
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: 1px 26px;
 }
 
 /* ── One cell ────────────────────────────────────────────────────────────── */
@@ -175,10 +276,16 @@
 .cell {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  /* A title may now take two lines. Anchor every control to its first line
+   * instead of vertically centring the mark and discussion count against a
+   * variable-height title block. */
+  align-items: flex-start;
+  gap: 10px;
   min-width: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  min-height: 44px;
+  padding: 5px 6px;
+  margin: 0 -6px;
+  border-radius: 8px;
 }
 
 /* Watched: the disc fills AND takes a tick.
@@ -231,10 +338,10 @@
   position: relative;
   flex: 1;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 10px;
   min-width: 0;
-  padding: 9px 4px;
+  padding: 5px 4px;
   border: 0;
   background: none;
   text-align: left;
@@ -249,14 +356,14 @@
   cursor: pointer;
 }
 
-/* The watched mark. A fixed 16px box in every state, so a row cannot change
+/* The watched mark. A fixed 18px box in every state, so a row cannot change
  * height when the auth probe lands or when it is toggled — the old ✓ glyph
  * was 1px taller than the box reserved for it, which shifted the whole grid
  * the moment a cell flipped to watched. */
 .mark {
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   border: 1.5px solid rgba(235, 235, 245, 0.28);
   background: transparent;
@@ -268,23 +375,39 @@
 .number {
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
+  /* Right, so 01…09 and 10…13 end on the same pixel and the titles beside
+   * them start on one. Left-aligned with tabular figures the numbers line up
+   * on their own but the gap to each title does not, which is visible the
+   * moment a series passes 99 episodes and the column widens by a digit. */
+  text-align: right;
 }
 
 
 .title {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: 14px;
+  font-weight: 490;
+  line-height: 1.45;
   color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* When the switch is on "original", the primary line is no longer in the
+ * reader's language — so it takes the Japanese face for the same reason
+ * `.original` does, and steps back one notch in colour because a list of
+ * originals is a reference view rather than the reading view. */
+.title[data-original="true"] {
+  font-family: var(--font-jp);
+  color: var(--text-secondary);
 }
 
 .cell[data-cell-state="watched"] .kicker,
@@ -298,7 +421,7 @@
 }
 
 .cell[data-open="true"] .number {
-  color: var(--accent);
+  color: var(--poster-tone, var(--accent));
 }
 
 /* ── The discussion control ──────────────────────────────────────────────── */
@@ -309,16 +432,24 @@
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   height: 26px;
-  padding: 0 8px;
+  padding: 0 6px;
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--text-tertiary);
-  font-size: 11px;
+  color: rgba(235, 235, 245, 0.42);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
   font-family: var(--font-mono);
   cursor: pointer;
+  margin-top: 5px;
+  opacity: 0.35;
+  transition:
+    opacity 150ms var(--ease-out-expo),
+    color 150ms var(--ease-out-expo),
+    background-color 150ms var(--ease-out-expo);
 }
 
 /* Episodes people are talking about should be findable by scanning, so a
@@ -326,22 +457,17 @@
  * rather than appearing on hover: most of this traffic is touch, where
  * reveal-on-hover means never revealed. */
 .discussion[data-has-comments="true"] {
-  background-color: rgba(120, 120, 128, 0.2);
-  color: rgba(235, 235, 245, 0.85);
-}
-
-/* The label carries an emoji, and an emoji glyph paints its own colours —
- * `color` moves the digits next to it and leaves the bubble at full
- * saturation. So the quiet state is opacity, which the glyph does obey.
- * Without this the empty footer and a busy one look the same from a metre
- * away, which is the distinction this footer exists to draw. */
-.discussion > span {
-  opacity: 0.45;
-  transition: opacity 150ms var(--ease-out-expo);
-}
-
-.discussion[data-has-comments="true"] > span {
+  color: rgba(235, 235, 245, 0.58);
   opacity: 1;
+}
+
+.discussion svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
 }
 
 /* Deliberately keeps the neutral fill. The cell behind it is already tinted
@@ -351,6 +477,7 @@
 .cell[data-open="true"] .discussion {
   background-color: transparent;
   color: var(--poster-tone, var(--accent));
+  opacity: 1;
 }
 
 /* ── Interaction ─────────────────────────────────────────────────────────── */
@@ -360,35 +487,21 @@
  * of the two halves is actually under the pointer lights up. */
 @media (hover: hover) {
   .cell:hover {
-    border-color: rgba(235, 235, 245, 0.28);
-    transform: translateY(-1px);
-  }
-
-  .cell[data-cell-state="watched"]:hover,
-  .cell[data-cell-state="completed"]:hover {
-    border-color: rgba(48, 209, 88, 0.6);
-  }
-
-  .cell[data-furthest-marked="true"]:hover {
-    border-color: rgba(48, 209, 88, 0.9);
-  }
-
-  /* Last, for the same reason the resting rules are ordered this way: these
-   * all match at one specificity and the open cell has to win. */
-  .cell[data-open="true"]:hover {
-    border-color: rgba(10, 132, 255, 0.75);
-  }
-
-  .toggle[data-episode-toggle]:hover {
-    background-color: rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.045);
   }
 
   .discussion:hover {
-    background-color: rgba(120, 120, 128, 0.34);
-    color: rgba(235, 235, 245, 0.95);
+    background-color: rgba(255, 255, 255, 0.06);
+    color: rgba(235, 235, 245, 0.72);
+    opacity: 1;
   }
 
-  .discussion:hover > span {
+  .discussion:not([data-has-comments="true"]) {
+    opacity: 0;
+  }
+
+  .cell:hover .discussion,
+  .cell[data-open="true"] .discussion {
     opacity: 1;
   }
 }
@@ -415,7 +528,6 @@
   .cell,
   .toggle,
   .discussion,
-  .discussion > span,
   .meterFill {
     transition: none;
   }
@@ -516,9 +628,12 @@
  * rules instead. */
 .panel {
   grid-column: 1 / -1;
-  margin: var(--sp-sm) 0 var(--sp-lg);
-  padding: var(--sp-md) 0 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 2px 0 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 2px 0 0 var(--poster-tone-low, rgba(255, 255, 255, 0.12));
 }
 
 /* Two lines per row: the reader's title, then the original underneath. */
@@ -526,7 +641,7 @@
   flex: 1;
   min-width: 0;
   display: grid;
-  gap: 1px;
+  gap: 0;
 }
 
 /* The original is Japanese, so it is set in a Japanese face — see
@@ -536,8 +651,8 @@
 .original {
   font-family: var(--font-jp);
   font-size: 11.5px;
-  line-height: 1.3;
-  color: var(--text-tertiary);
+  line-height: 1.5;
+  color: rgba(235, 235, 245, 0.42);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

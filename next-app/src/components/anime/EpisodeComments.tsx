@@ -85,26 +85,26 @@ const panelHeadStyle: CSSProperties = {
   display: "flex",
   alignItems: "baseline",
   justifyContent: "space-between",
-  gap: 16,
-  marginBottom: 18,
+  gap: 10,
+  marginBottom: 14,
 };
 
 const panelHeadActionsStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 18,
+  gap: 14,
   flexShrink: 0,
 };
 
 /* Text buttons, not filled ones. They are secondary to the conversation
  * they sit above, and two filled buttons in a header would outweigh it. */
 const panelHeadBtnStyle: CSSProperties = {
-  padding: 0,
+  padding: "6px 0",
   border: 0,
   background: "none",
-  color: "rgba(235,235,245,0.55)",
+  color: "rgba(235,235,245,0.48)",
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: 12,
   cursor: "pointer",
 };
 
@@ -301,7 +301,7 @@ function CommentItem({
       tabIndex={-1}
       style={{
         marginLeft: depth > 0 ? 24 : 0,
-        padding: highlighted ? "8px 10px" : 0,
+        padding: highlighted ? "9px 10px" : "9px 0",
         marginRight: highlighted ? -10 : 0,
         borderRadius: 10,
         background: highlighted ? "rgba(10,132,255,0.12)" : "transparent",
@@ -314,7 +314,6 @@ function CommentItem({
           display: "flex",
           gap: 10,
           alignItems: "flex-start",
-          paddingTop: depth > 0 ? 10 : 0,
         }}
       >
         <Link
@@ -322,16 +321,16 @@ function CommentItem({
           prefetch={false}
           aria-label={c.username}
           style={{
-            width: depth > 0 ? 26 : 32,
-            height: depth > 0 ? 26 : 32,
+            width: 28,
+            height: 28,
             borderRadius: "50%",
             background: "var(--poster-tone, #0a84ff)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
-            fontSize: depth > 0 ? 11 : 13,
-            fontWeight: 700,
+            fontSize: 11,
+            fontWeight: 600,
             color: "#fff",
             textTransform: "uppercase",
             overflow: "hidden",
@@ -349,7 +348,7 @@ function CommentItem({
           <div
             style={{
               display: "flex",
-              alignItems: "center",
+              alignItems: "baseline",
               gap: 8,
               marginBottom: 4,
               flexWrap: "wrap",
@@ -359,20 +358,26 @@ function CommentItem({
               href={`/u/${encodeURIComponent(c.username)}`}
               prefetch={false}
               style={{
-                fontSize: 13,
+                fontSize: 12.8,
                 fontWeight: 600,
-                color: "var(--poster-tone, #0a84ff)",
+                color: "rgba(235,235,245,0.72)",
                 textDecoration: "none",
               }}
             >
               {c.username}
             </Link>
             {c.replyToUsername && (
-              <span style={{ fontSize: 11, color: "rgba(235,235,245,0.30)" }}>
+              <span style={{ fontSize: 12, color: "rgba(235,235,245,0.42)" }}>
                 → {c.replyToUsername}
               </span>
             )}
-            <span style={{ fontSize: 11, color: "rgba(235,235,245,0.25)" }}>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "rgba(235,235,245,0.42)",
+              }}
+            >
               {new Date(c.createdAt).toLocaleDateString()}
             </span>
           </div>
@@ -397,9 +402,9 @@ function CommentItem({
           ) : (
             <p
               style={{
-                fontSize: 13,
-                color: "rgba(235,235,245,0.60)",
-                lineHeight: 1.6,
+                fontSize: 13.4,
+                color: "rgba(235,235,245,0.72)",
+                lineHeight: 1.72,
                 margin: 0,
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
@@ -408,7 +413,7 @@ function CommentItem({
               {c.content}
             </p>
           )}
-          <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+          <div style={{ display: "flex", gap: 16, marginTop: 7 }}>
             <button
               type="button"
               onClick={() => onReact(c)}
@@ -418,9 +423,9 @@ function CommentItem({
               style={{
                 background: "none",
                 border: "none",
-                color: c.viewerReacted ? "#ff375f" : "rgba(235,235,245,0.30)",
+                color: c.viewerReacted ? "#ff375f" : "rgba(235,235,245,0.42)",
                 cursor: reactionBusy ? "default" : "pointer",
-                fontSize: 11,
+                fontSize: 11.5,
                 padding: 0,
                 opacity: reactionBusy ? 0.5 : 1,
               }}
@@ -434,9 +439,9 @@ function CommentItem({
                 style={{
                   background: "none",
                   border: "none",
-                  color: "rgba(235,235,245,0.30)",
+                  color: "rgba(235,235,245,0.42)",
                   cursor: "pointer",
-                  fontSize: 11,
+                  fontSize: 11.5,
                   padding: 0,
                 }}
               >
@@ -508,7 +513,7 @@ function CommentItem({
       {c.children.length > 0 && (
         <div
           style={{
-            borderLeft: "2px solid #38383a",
+            borderLeft: "2px solid rgba(255,255,255,0.08)",
             marginLeft: 15,
             marginTop: 4,
           }}
@@ -536,12 +541,12 @@ function CommentItem({
 
 // ─── EpisodeComments ─────────────────────────────────────────────────
 const sectionLabel: CSSProperties = {
-  color: "var(--poster-tone, #0a84ff)",
-  fontSize: 12,
-  fontWeight: 700,
-  letterSpacing: "2px",
-  textTransform: "uppercase",
-  marginBottom: 16,
+  color: "rgba(235,235,245,0.94)",
+  fontSize: 13.5,
+  fontWeight: 640,
+  lineHeight: 1.4,
+  letterSpacing: 0,
+  margin: 0,
 };
 
 export default function EpisodeComments({
@@ -808,15 +813,18 @@ export default function EpisodeComments({
   const [composerOpen, setComposerOpen] = useState(false);
 
   return (
-    <div style={{ padding: "20px 24px 24px" }}>
+    <div style={{ padding: "16px 18px 14px" }}>
       <div style={panelHeadStyle}>
         <p style={sectionLabel}>
           {fill(t("comment.episodeTitle"), { ep: episode })}
           {comments.length > 0 && (
             <span
               style={{
-                color: "rgba(235,235,245,0.30)",
-                fontWeight: 400,
+                color: "rgba(235,235,245,0.42)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                fontWeight: 500,
+                lineHeight: 1,
                 marginLeft: 10,
               }}
             >
@@ -869,13 +877,10 @@ export default function EpisodeComments({
       ) : user ? null : (
         <div
           style={{
-            marginBottom: 20,
-            padding: "12px 16px",
-            borderRadius: 8,
-            background: "rgba(10,132,255,0.08)",
-            border: "1px solid rgba(10,132,255,0.15)",
-            color: "rgba(235,235,245,0.60)",
-            fontSize: 13,
+            marginBottom: 14,
+            color: "rgba(235,235,245,0.48)",
+            fontSize: 12.5,
+            lineHeight: 1.62,
           }}
         >
           {t("comment.loginPrompt")}
@@ -925,10 +930,10 @@ export default function EpisodeComments({
       {loading ? (
         <p
           style={{
-            color: "rgba(235,235,245,0.30)",
+            color: "rgba(235,235,245,0.48)",
             fontSize: 13,
             textAlign: "center",
-            padding: "16px 0",
+            padding: "14px 0",
           }}
         >
           ...
@@ -936,16 +941,16 @@ export default function EpisodeComments({
       ) : tree.length === 0 ? (
         <p
           style={{
-            color: "rgba(235,235,245,0.30)",
+            color: "rgba(235,235,245,0.48)",
             fontSize: 13,
             textAlign: "center",
-            padding: "16px 0",
+            padding: "14px 0",
           }}
         >
           {t("comment.noComments")}
         </p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
           {tree.map((c) => (
             <CommentItem
               key={c.id}

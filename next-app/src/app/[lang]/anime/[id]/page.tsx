@@ -436,9 +436,13 @@ function Hero({
           )}
         </div>
 
-        {/* Meta */}
-        <div className={s.meta}>
-          <h1 className={s.title}>{title}</h1>
+        {/* Meta + actions. Kept in one column on larger screens; the wrapper
+            becomes display:contents on phones so the action row can span
+            beneath both the cover and the text instead of being squeezed
+            into the narrow title column. */}
+        <div className={s.metaColumn}>
+          <div className={s.meta}>
+            <h1 className={s.title}>{title}</h1>
           {SHOWS_ORIGINAL_SUBTITLE[lang] && (detail.titleNative || detail.titleRomaji) && (
             <p className={s.subtitle}>
               {detail.titleNative || detail.titleRomaji}
@@ -527,8 +531,8 @@ function Hero({
             <GenreChips genres={detail.genres} className={s.factsGenres} />
           </div>
 
-          {actions}
-
+          </div>
+          {actions ? <div className={s.actionSlot}>{actions}</div> : null}
         </div>
       </div>
     </div>
@@ -791,7 +795,7 @@ function SynopsisSection({
             </div>
           ) : null}
           {bgmScore && bgmScore > 0 ? (
-            <div className={x.scoreItem}>
+            <div className={x.scoreItemBangumi}>
               <div className={x.scoreLabel}>Bangumi</div>
               <div className={x.scoreValue}>
                 {bgmScore.toFixed(1)}

@@ -117,8 +117,10 @@ const zh = {
   detail: {
     releasing: '连载中', finished: '已完结',
     notYetReleased: '未开播', cancelled: '已取消',
-    epUnit: '集', readMore: '展开更多', collapse: '收起',
+    epUnit: '集', epUnitOne: '集', readMore: '展开更多', collapse: '收起',
     episodes: '集数列表', noEpisodes: '集数信息待更新',
+    epTitleModeLabel: '集标题语言',
+    epTitleLocalized: '中文', epTitleOriginal: '原题', epTitleBoth: '并排',
     // EpisodesGrid 在集数未知时渲染的降级文案，与 locales/zh.ts 同名键同值。
     // 说的是「还不知道」，不是「没有」。
     episodeCountPending: '本季集数待定',

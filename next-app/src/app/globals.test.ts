@@ -74,9 +74,42 @@ const NOT_IN_SPEC = new Set([
   "--ease-out-expo",
 ]);
 
+/**
+ * Tokens DESIGN.md names that live in a CSS Module, not in `:root`.
+ *
+ * These are aliases a single surface declares for itself — `--sec-tone` is
+ * `var(--poster-tone, var(--accent))` written once at the top of the detail
+ * page's section stylesheet instead of at forty use sites. They are worth
+ * naming in the spec (the prose has to be able to say which one paints the
+ * section rule) but they are deliberately NOT global: nothing outside that
+ * file may reach for them, and hoisting them to `:root` would invite exactly
+ * that.
+ *
+ * The file is part of the entry, and the test below reads it. An exception
+ * that only said "trust me" would rot the first time the alias was renamed.
+ */
+const MODULE_LOCAL: Array<[string, string]> = [
+  ["--sec-tone", "app/[lang]/anime/[id]/sections.module.css"],
+  ["--sec-meta", "app/[lang]/anime/[id]/sections.module.css"],
+];
+
 describe("completeness", () => {
+  test("module-local tokens really are declared where the exception says", () => {
+    // Guards the exception list, so it cannot be used to wave through a token
+    // that is declared nowhere at all.
+    const wrong: string[] = [];
+    for (const [token, file] of MODULE_LOCAL) {
+      const css = readFileSync(join(import.meta.dir, "..", file), "utf8");
+      if (!new RegExp(`${token}\\s*:`).test(css)) wrong.push(`${token} not in ${file}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
   test("every token DESIGN.md names is declared in globals.css", () => {
-    const missing = [...specified].filter((t) => !declared.has(t)).sort();
+    const moduleLocal = new Set(MODULE_LOCAL.map(([t]) => t));
+    const missing = [...specified]
+      .filter((t) => !declared.has(t) && !moduleLocal.has(t))
+      .sort();
     expect(missing).toEqual([]);
   });
 

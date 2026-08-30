@@ -22,6 +22,7 @@ import ShareButton from "./ShareButton";
 import MagnetButton from "./MagnetButton";
 import PlayButton from "./PlayButton";
 import type { Lang } from "@/lib/i18n";
+import styles from "./DetailActions.module.css";
 
 const TorrentModal = dynamic(() => import("./TorrentModal"), {
   ssr: false,
@@ -72,14 +73,6 @@ interface DetailActionsProps {
   };
 }
 
-const rowStyle = {
-  display: "flex",
-  alignItems: "center",
-  flexWrap: "wrap" as const,
-  gap: 12,
-  marginTop: 16,
-} as const;
-
 export default function DetailActions({
   anilistId,
   episodes,
@@ -96,7 +89,7 @@ export default function DetailActions({
 
   return (
     <>
-      <div style={rowStyle}>
+      <div className={styles.row}>
         <SubscriptionButton
           anilistId={anilistId}
           episodes={episodes}

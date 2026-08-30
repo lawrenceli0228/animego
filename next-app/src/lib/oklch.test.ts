@@ -133,6 +133,7 @@ describe("hueFromHex", () => {
 
 /** Mirrors the `--poster-tone*` declarations. Keep in sync with page.module.css. */
 const TONE = { L: 76, C: 0.085 };
+const TONE_QUIET = { L: 68, C: 0.07 };
 const TONE_MID = { L: 52, C: 0.07 };
 const TONE_LOW = { L: 24, C: 0.045 };
 
@@ -164,6 +165,32 @@ describe("the derived palette is legible at every hue", () => {
       expect(worst.ratio).toBeGreaterThanOrEqual(4.5);
     });
   }
+
+  test("--poster-tone-quiet is text, so it clears 4.5:1 at every hue", () => {
+    // The dimmest step allowed to carry words (the character/staff role
+    // kickers). It exists because the only quieter accent in the ramp,
+    // --poster-tone-mid, is 3.68:1 — a plausible-looking choice for a small
+    // label and an accessibility regression.
+    //
+    // All three surfaces, not just --bg. 68 was reverse-solved against the
+    // strictest of them (--bg-elevated, floor 67.5); the reference design's
+    // 62 clears --bg comfortably at 5.53:1 and fails --bg-card at 4.48:1,
+    // so a token tested only on the page background would have shipped a
+    // label that goes illegal the moment it is used inside a card.
+    for (const [name, surface] of Object.entries(SURFACES)) {
+      const worst = worstContrast(TONE_QUIET, surface);
+      expect(worst.ratio, `${name} @ hue ${worst.hue}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test("--poster-tone-quiet is actually quieter than --poster-tone", () => {
+    // A "one step back" token that measured the same as the full one would be
+    // a token doing nothing, which is the other way this can rot.
+    const bg = SURFACES["--bg"];
+    expect(worstContrast(TONE_QUIET, bg).ratio).toBeLessThan(
+      worstContrast(TONE, bg).ratio,
+    );
+  });
 
   test("--poster-tone-mid clears the 3:1 non-text threshold on --bg", () => {
     // Borders and dividers only — never text. 3:1 is the WCAG 1.4.11 bar for
