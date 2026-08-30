@@ -118,7 +118,7 @@ const s = {
     textTransform: "uppercase",
   } as CSSProperties,
   demoHeadline: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: "clamp(1.25rem, 1rem + 0.6vw, 1.625rem)",
     fontWeight: 700,
     color: "#fff",
@@ -142,14 +142,14 @@ const s = {
     marginBottom: 10,
   } as CSSProperties,
   demoTitle: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 15,
     fontWeight: 600,
     color: "#fff",
     marginBottom: 4,
   } as CSSProperties,
   demoHint: {
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     fontSize: 13,
     color: "rgba(235,235,245,0.60)",
     marginBottom: 16,

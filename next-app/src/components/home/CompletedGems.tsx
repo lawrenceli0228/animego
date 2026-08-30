@@ -138,7 +138,7 @@ const gradientStyle: CSSProperties = {
 };
 
 const titleTextStyle: CSSProperties = {
-  fontFamily: "'Sora',sans-serif",
+  fontFamily: "var(--font-display)",
   fontSize: 13,
   fontWeight: 600,
   color: "#fff",

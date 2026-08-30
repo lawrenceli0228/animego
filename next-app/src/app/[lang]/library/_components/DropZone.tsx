@@ -124,7 +124,7 @@ const iconStyle = (state: DropZoneState): React.CSSProperties => ({
 });
 
 const titleStyle = (state: DropZoneState): React.CSSProperties => ({
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
   fontWeight: 600,
   fontSize: 18,
   letterSpacing: "-0.01em",
@@ -537,7 +537,7 @@ const s: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   parseTitle: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 16,
     fontWeight: 600,
     color: "#fff",
@@ -606,7 +606,7 @@ const s: Record<string, React.CSSProperties> = {
       "color 240ms ease, transform 240ms cubic-bezier(0.16,1,0.3,1)",
   },
   titleEmpty: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 22,
     letterSpacing: "-0.012em",
@@ -615,7 +615,7 @@ const s: Record<string, React.CSSProperties> = {
     lineHeight: 1.3,
   },
   subEmpty: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 400,
     fontSize: 14,
     lineHeight: 1.6,
@@ -624,7 +624,7 @@ const s: Record<string, React.CSSProperties> = {
     maxWidth: "36ch",
   },
   ctaEmpty: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 14,
     height: 44,

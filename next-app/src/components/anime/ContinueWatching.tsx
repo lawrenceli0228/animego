@@ -115,7 +115,7 @@ const overlayTextStyle = {
 } as const;
 
 const overlayTitleStyle = {
-  fontFamily: "'Sora',sans-serif",
+  fontFamily: "var(--font-display)",
   color: "#ffffff",
   fontSize: 17,
   fontWeight: 600,
@@ -198,7 +198,7 @@ const cardOverlayStyle = {
 } as const;
 
 const cardTitleStyle = {
-  fontFamily: "'Sora',sans-serif",
+  fontFamily: "var(--font-display)",
   fontSize: 12,
   fontWeight: 600,
   color: "#ffffff",

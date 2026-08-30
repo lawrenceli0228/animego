@@ -526,7 +526,7 @@ const s: Record<string, React.CSSProperties> = {
     animation: "animego-import-pulse 2s ease-in-out infinite",
   },
   titleRow: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 700,
     fontSize: 22,
     letterSpacing: "-0.02em",

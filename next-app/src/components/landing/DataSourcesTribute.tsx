@@ -101,7 +101,7 @@ const s = {
     borderRadius: 8,
     border: "1px solid rgba(84,84,88,0.45)",
     background: "rgba(255,255,255,0.02)",
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     fontSize: 13,
     fontWeight: 500,
     color: "rgba(235,235,245,0.72)",

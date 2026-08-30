@@ -120,7 +120,7 @@ const s = {
     alignItems: "center",
     justifyContent: "center",
     background: `oklch(18% 0.06 ${HUE} / 0.80)`,
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 48,
     fontWeight: 700,
     color: `oklch(72% 0.15 ${HUE})`,
@@ -164,7 +164,7 @@ const s = {
     textTransform: "uppercase",
   } as CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 700,
     fontSize: 28,
     lineHeight: 1.15,
@@ -172,7 +172,7 @@ const s = {
     letterSpacing: "-0.02em",
   } as CSSProperties,
   subtitle: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 500,
     fontSize: 14,
     color: "rgba(235,235,245,0.55)",

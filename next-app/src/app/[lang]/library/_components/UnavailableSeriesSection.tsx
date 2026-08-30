@@ -122,7 +122,7 @@ const s = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 16,
     fontWeight: 700,
     color: `oklch(72% 0.15 ${HUE})`,
@@ -133,7 +133,7 @@ const s = {
     minWidth: 0,
   } as CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 13,
     color: "#fff",

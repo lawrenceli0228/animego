@@ -68,7 +68,7 @@ const s = {
     gap: 16,
     cursor: "pointer",
     listStyle: "none",
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 18,
     fontWeight: 600,
     color: "#fff",

@@ -75,13 +75,29 @@
   cursor: not-allowed;
 }
 
-/* ── Primary — the blue CTA ─────────────────────────────────────────────── */
+/* ── Primary — the filled CTA ───────────────────────────────────────────
+ *
+ * Carries the anime's colour where one is in scope, iOS Blue everywhere
+ * else. There is exactly one of these in the app (PlayButton's trigger, on
+ * the detail hero); the other three <Button> call sites are outline or
+ * confirm, and sign-in / register are their own markup.
+ *
+ * This is the one documented exception to "poster accent never on a
+ * control" in DESIGN.md, and it is an exception on contrast grounds rather
+ * than taste: white on --accent measures 3.65:1, which is under the 4.5:1
+ * floor, and this is the most prominent button on the page. Dark text on
+ * --poster-tone measures 8.82:1 at its worst hue and 9.51:1 at its best,
+ * exhaustively across all 360 — see lib/oklch.test.ts for the method.
+ *
+ * The foreground is the same hue at 15% lightness rather than a flat black,
+ * so the button reads as one object rather than a black label sitting on a
+ * coloured rectangle. */
 
 .primary {
   composes: base;
   border: 0;
-  background: var(--accent);
-  color: var(--text);
+  background: var(--poster-tone, var(--accent));
+  color: oklch(15% 0.03 var(--poster-hue));
   /* 650 as extracted. DM Sans is loaded at 300..600, so this resolves to the
    * same rendered weight as the 600 on .base — kept rather than unified
    * because "renders the same" is an inference and this commit's job is the
@@ -91,9 +107,11 @@
   font-weight: 650;
 }
 
+/* Hover brightens rather than shifts hue: the button's colour is the
+ * anime's identity, and a hover that changes it says the identity changed. */
 .primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.35);
+  background: oklch(82% 0.09 var(--poster-hue));
+  box-shadow: 0 2px 12px oklch(76% 0.085 var(--poster-hue) / 0.35);
   transform: translateY(-1px);
 }
 

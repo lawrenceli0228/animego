@@ -45,7 +45,7 @@ const s = {
   } as CSSProperties,
   info: { flex: 1, minWidth: 0 } as CSSProperties,
   title: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 24,
     color: "#ffffff",
@@ -106,7 +106,7 @@ const s = {
   bgmLabel: {
     fontSize: 9,
     opacity: 0.7,
-    fontFamily: "'DM Sans',sans-serif",
+    fontFamily: "var(--font-sans)",
   } as CSSProperties,
   bgmVotes: { fontSize: 10, opacity: 0.6, fontWeight: 400 } as CSSProperties,
   infoBadge: (bg: string, color: string): CSSProperties => ({
@@ -213,7 +213,7 @@ const s = {
   }),
   fileInfo: { flex: 1, minWidth: 0 } as CSSProperties,
   fileName: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 15,
     color: "rgba(235,235,245,0.70)",
     overflow: "hidden",

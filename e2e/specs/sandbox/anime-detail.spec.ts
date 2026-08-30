@@ -85,49 +85,119 @@ test.afterAll(async () => {
 });
 
 /**
- * The site's own score badge, not Bangumi's.
+ * The site's own score, not Bangumi's.
  *
- * Both are spans beginning with a star, but the Bangumi one is prefixed with
- * a "BGM" label, so anchoring on the star being FIRST separates them without
- * depending on a CSS-module class name (those are hashed at build time) or
- * on a test id in production markup.
+ * Anchored on the source name, which is what the hero prints: "AniList 87"
+ * beside "Bangumi 7.9". It was `/^★/` back when both were stars and only the
+ * Bangumi one carried a "BGM" prefix — the star said nothing the word does
+ * not, and a 0-100 value shown as "8.7" had to be mentally converted before
+ * it could be compared against the site it came from.
+ *
+ * Still a text anchor rather than a CSS-module class (hashed at build time)
+ * or a test id (which would exist only for this file).
  */
 const scoreBadge = (page: import("@playwright/test").Page) =>
-  page.locator("main span").filter({ hasText: /^★/ }).first();
+  page.locator("main span").filter({ hasText: /^AniList\s/ }).first();
 
-test.describe("the score badge", () => {
-  // The assertion is not "is it green". It was genuinely green — that was
-  // never the problem. It is that the background named the same band.
-  for (const { id, label, rgb } of [
-    { id: HIGH, label: "87 is the high band", rgb: "48, 209, 88" },
-    { id: LOW, label: "30 is the low band", rgb: "255, 69, 58" },
-  ]) {
-    test(`${label}, in both halves`, async ({ page }) => {
-      await page.goto(`/anime/${id}`);
-      const badge = scoreBadge(page);
-      await expect(badge).toBeVisible();
+test.describe("the score", () => {
+  // What this file used to pin here was a colour BAND: an 87 had to render
+  // rgb(48,209,88) green and a 30 rgb(255,69,58) red, because production
+  // once shipped green text on an amber pill — the fill named one band and
+  // the text another.
+  //
+  // The hero no longer bands its scores. A band turns a number into a
+  // verdict, and the page carries three of them (AniList, Bangumi, and one
+  // per recommendation card) at a point where the reader has not decided to
+  // care yet. The hero's score now carries the anime's own colour, and the
+  // band mapping survives where a verdict IS the point — on the
+  // recommendation covers, via scoreScrimStyle.
+  //
+  // So the assertions invert. What has to hold now is that the score does
+  // NOT change colour with its value, and that the colour it does take is
+  // the one derived from the artwork.
 
-      const style = await badge.evaluate((el) => {
-        const cs = getComputedStyle(el);
-        return { color: cs.color, background: cs.backgroundColor };
-      });
+  test("carries the anime's colour, not a score band", async ({ page }) => {
+    await page.goto(`/anime/${HIGH}`);
+    const badge = scoreBadge(page);
+    await expect(badge).toBeVisible();
 
-      expect(style.color).toBe(`rgb(${rgb})`);
-      // The pill is the same hue at 12%. Before the fix this was
-      // rgba(255, 159, 10, 0.12) — amber — for every score, including this one.
-      expect(style.background).toBe(`rgba(${rgb}, 0.12)`);
+    const seen = await badge.evaluate((el) => {
+      const scope = el.closest(".poster-scope");
+      const tone = scope
+        ? getComputedStyle(scope).getPropertyValue("--poster-tone").trim()
+        : "";
+      // Both sides through the same canvas so an oklch() string and an rgb()
+      // string are compared as pixels rather than as text.
+      const paint = (colour: string) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 1;
+        const ctx = c.getContext("2d")!;
+        ctx.fillStyle = colour;
+        ctx.fillRect(0, 0, 1, 1);
+        return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3).join(",");
+      };
+      return { score: paint(getComputedStyle(el).color), tone: tone ? paint(tone) : "" };
     });
-  }
 
-  test("the two bands actually differ", async ({ page }) => {
-    // Guards the guard: if scoreBadgeStyle ever returned a constant, both
-    // assertions above would still need the constant to be right, but a
-    // future refactor collapsing the bands would be caught here first.
+    expect(seen.tone).not.toBe("");
+    expect(seen.score).toBe(seen.tone);
+  });
+
+  test("does not change colour with its value", async ({ page }) => {
+    // The inverse of the old "the two bands actually differ". A high score
+    // and a low one are the same colour now, and that is the property: if
+    // banding is reintroduced here these two diverge and this fails.
     await page.goto(`/anime/${HIGH}`);
     const high = await scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
     await page.goto(`/anime/${LOW}`);
     const low = await scoreBadge(page).evaluate((el) => getComputedStyle(el).color);
-    expect(high).not.toBe(low);
+    expect(high).toBe(low);
+  });
+
+  test("the source name is neutral, the value is not", async ({ page }) => {
+    // "AniList 91" is a label plus a value, and they have to read as two
+    // different kinds of thing — otherwise the pair is one unparsed token.
+    //
+    // The separation is chroma, not lightness. An earlier version of this
+    // asserted the label was DARKER, which is wrong in both directions: the
+    // reference design's label (#c5bbb9, luminance 0.499) is brighter than
+    // its value (#e29d93, 0.424), because a neutral is always brighter than
+    // a saturated colour at the same perceived lightness. Asserting on
+    // luminance would pin an accident of which hue the anime happens to be.
+    //
+    // What actually has to hold: the label carries no hue and the value
+    // carries the anime's.
+    await page.goto(`/anime/${HIGH}`);
+    const pair = await scoreBadge(page).evaluate((el) => {
+      // Through a canvas so a half-transparent label is measured as it is
+      // COMPOSITED, not as its unmultiplied channels — the earlier version
+      // read rgba(235,235,245,0.52) as near-white and compared that against
+      // a fully opaque value.
+      const paint = (colour: string) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 1;
+        const ctx = c.getContext("2d")!;
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, 1, 1);
+        ctx.fillStyle = colour;
+        ctx.fillRect(0, 0, 1, 1);
+        return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      };
+      const spread = (rgb: number[]) => Math.max(...rgb) - Math.min(...rgb);
+      const label = el.querySelector("span");
+      return {
+        hasLabel: !!label,
+        labelSpread: label ? spread(paint(getComputedStyle(label).color)) : -1,
+        valueSpread: spread(paint(getComputedStyle(el).color)),
+      };
+    });
+
+    expect(pair.hasLabel).toBe(true);
+    // A neutral's channels sit within a few points of each other; the site's
+    // text ramp is rgba(235,235,245,...), a 10-point spread by design.
+    expect(pair.labelSpread).toBeLessThanOrEqual(12);
+    // The value is a real colour, so its channels are far apart.
+    expect(pair.valueSpread).toBeGreaterThan(20);
   });
 });
 
@@ -135,10 +205,10 @@ test.describe("the hero on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("the synopsis starts on the first screen", async ({ page }) => {
-    // Measured on production before this change: the synopsis began at
-    // y=799 on an 844-tall screen, which is about 45px of visible text under
-    // a 400px banner and a 300px poster. This is the assertion that keeps
-    // the hero from growing back.
+    // Measured on production before this assertion existed: the synopsis
+    // began at y=799 on an 844-tall screen — about 45px of visible text, one
+    // line, under a 400px banner and a 300px poster. This is the assertion
+    // that keeps the hero from growing back.
     await page.goto(`/anime/${HIGH}`);
 
     const synopsis = page.locator("main p").filter({ hasText: "A test synopsis" }).first();
@@ -146,32 +216,57 @@ test.describe("the hero on a phone", () => {
 
     const box = await synopsis.boundingBox();
     expect(box).not.toBeNull();
-    // Half the fold, not all of it: "technically above 844" is what the old
-    // layout already satisfied.
-    expect(box!.y).toBeLessThan(422);
+
+    // The bound is stated as "how much text is readable", not as a y
+    // coordinate, because that is the property being defended and the y that
+    // satisfies it depends on the layout.
+    //
+    // It was `y < 422` — half the fold — while the synopsis lived inside the
+    // hero. It no longer does: the hero is artwork with the title and the
+    // controls on it, and the body copy is its own band underneath, which
+    // costs the synopsis roughly 90px. Worst case in the catalogue (a
+    // 20-character title beside seven genres) now starts at 490, and typical
+    // titles at 407.
+    //
+    // 300px is nine or ten lines of Chinese body copy. The old defect fails
+    // this by a wide margin — 844 − 799 = 45 — so the guard still catches
+    // the regression it was written for.
+    const VISIBLE_SYNOPSIS_MIN = 300;
+    expect(box!.y).toBeLessThan(844 - VISIBLE_SYNOPSIS_MIN);
   });
 
-  test("the banner, the poster and the overlap shrink together", async ({ page }) => {
-    // The four hero values are one design. This checks the two that are
-    // measurable from outside actually moved, so that a future change to one
-    // clamp without the others fails here rather than looking merely odd.
+  test("the artwork and the poster scale down together", async ({ page }) => {
+    // Both halves of the hero shrink on a phone, so a future change to one
+    // clamp without the other fails here rather than looking merely odd.
     await page.goto(`/anime/${HIGH}`);
 
     const banner = page.locator("main img[aria-hidden='true']").first();
     const bannerBox = await banner.boundingBox();
     expect(bannerBox).not.toBeNull();
-    expect(bannerBox!.height).toBeLessThan(200);
+    // The artwork is the hero's full background now, not a strip above it,
+    // so this is the hero's own height. It was `< 200` when the banner was a
+    // separate 150px band; the floor is 340 and it must stay well under half
+    // the 844px screen.
+    expect(bannerBox!.height).toBeLessThan(420);
 
     const cover = page.locator("img.hero-cover").first();
     const coverBox = await cover.boundingBox();
     expect(coverBox).not.toBeNull();
     expect(coverBox!.width).toBeLessThan(140);
 
-    // The poster still straddles the banner's lower edge — that overlap is
-    // the hero's whole visual idea, and a mis-scaled pull would either
-    // detach it or bury it.
-    expect(coverBox!.y).toBeLessThan(bannerBox!.y + bannerBox!.height);
-    expect(coverBox!.y + coverBox!.height).toBeGreaterThan(
+    // The poster sits ON the artwork, fully inside it.
+    //
+    // This assertion is inverted from what it was. It used to require the
+    // poster to STRADDLE the banner's lower edge, and the comment called
+    // that overlap "the hero's whole visual idea" — true of the design it
+    // was written for, where a fixed-height banner sat above content that a
+    // negative margin pulled up into it. The artwork is now the background
+    // of the whole hero and the content is laid on top of it, so there is no
+    // seam left to straddle; a poster crossing the lower edge would mean the
+    // content had overflowed the hero, which is the actual defect worth
+    // catching here.
+    expect(coverBox!.y).toBeGreaterThanOrEqual(bannerBox!.y);
+    expect(coverBox!.y + coverBox!.height).toBeLessThanOrEqual(
       bannerBox!.y + bannerBox!.height,
     );
   });
@@ -180,16 +275,23 @@ test.describe("the hero on a phone", () => {
 test.describe("the hero on a desktop", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test("keeps its full-size banner and poster", async ({ page }) => {
-    // The other half of the clamp. The mobile work was only safe because it
-    // left desktop untouched, and "untouched" is a claim worth holding.
+  test("keeps its full-size artwork and poster", async ({ page }) => {
+    // The other half of the clamp. Phone work must not reach desktop, and
+    // "untouched" is a claim worth holding.
     await page.goto(`/anime/${HIGH}`);
 
     const bannerBox = await page
       .locator("main img[aria-hidden='true']")
       .first()
       .boundingBox();
-    expect(bannerBox?.height).toBe(400);
+    // 556 at 1440px — the hero is `clamp(340px, 38.6vw, 560px)` and 38.6vw
+    // is 555.84 here. It was 400, back when this was a fixed-height banner
+    // strip rather than the full background of the hero.
+    //
+    // Rounded before comparing: 38.6vw lands on 555.828125 and a bounding
+    // box is a float, so an exact toBe() would pin the number to whatever
+    // sub-pixel the current viewport happens to produce.
+    expect(Math.round(bannerBox?.height ?? 0)).toBe(556);
 
     const coverBox = await page.locator("img.hero-cover").first().boundingBox();
     expect(coverBox?.width).toBe(210);

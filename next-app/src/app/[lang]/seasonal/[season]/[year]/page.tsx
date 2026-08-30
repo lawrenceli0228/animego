@@ -153,14 +153,14 @@ const headingStyle: CSSProperties = {
   fontSize: "clamp(22px,3vw,34px)",
   marginBottom: 24,
   color: "#ffffff",
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
 };
 
 const emptyStyle: CSSProperties = {
   textAlign: "center",
   padding: "60px 0",
   color: "rgba(235,235,245,0.30)",
-  fontFamily: "'Sora', sans-serif",
+  fontFamily: "var(--font-display)",
 };
 
 export default async function SeasonalPage({ params, searchParams }: SeasonalPageProps) {

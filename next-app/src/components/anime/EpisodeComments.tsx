@@ -32,6 +32,7 @@ import { hasAuthHint } from "@/lib/clientAuth";
 import { authChrome } from "@/lib/authChrome";
 import { DEFAULT_AVATAR_IMAGE } from "@/lib/cardDefaults";
 import FallbackImg from "@/components/ui/FallbackImg";
+import { fill } from "@/lib/i18n";
 import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n/lang";
 import { deletedCommentCount } from "./episodeDiscussionState";
@@ -72,11 +73,41 @@ interface EpisodeCommentsProps {
   episode: number;
   highlightCommentId?: string | null;
   onCommentDelta?: (episode: number, delta: number) => void;
+  /** Collapses the panel. Rendered as "收起" in the header. */
+  onClose?: () => void;
 }
 
 // Comment-count unit + the two reply affordances. Local Records rather than
 // t() keys: two of the three wrap a username, and Chinese glues the counter
 // word straight onto the number where English needs a space and a plural.
+/* Header: title and count on the left, the two controls on the right. */
+const panelHeadStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  justifyContent: "space-between",
+  gap: 16,
+  marginBottom: 18,
+};
+
+const panelHeadActionsStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 18,
+  flexShrink: 0,
+};
+
+/* Text buttons, not filled ones. They are secondary to the conversation
+ * they sit above, and two filled buttons in a header would outweigh it. */
+const panelHeadBtnStyle: CSSProperties = {
+  padding: 0,
+  border: 0,
+  background: "none",
+  color: "rgba(235,235,245,0.55)",
+  fontFamily: "inherit",
+  fontSize: 13,
+  cursor: "pointer",
+};
+
 const COMMENT_UNIT: Record<Lang, string> = {
   zh: "条",
   en: "comments",
@@ -216,7 +247,7 @@ function CommentInput({
               borderRadius: 6,
               border: "none",
               cursor: disabled ? "default" : "pointer",
-              background: "#0a84ff",
+              background: "var(--poster-tone, #0a84ff)",
               color: "#fff",
               fontWeight: 500,
               fontSize: 12,
@@ -294,7 +325,7 @@ function CommentItem({
             width: depth > 0 ? 26 : 32,
             height: depth > 0 ? 26 : 32,
             borderRadius: "50%",
-            background: "#0a84ff",
+            background: "var(--poster-tone, #0a84ff)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -330,7 +361,7 @@ function CommentItem({
               style={{
                 fontSize: 13,
                 fontWeight: 600,
-                color: "#0a84ff",
+                color: "var(--poster-tone, #0a84ff)",
                 textDecoration: "none",
               }}
             >
@@ -505,7 +536,7 @@ function CommentItem({
 
 // ─── EpisodeComments ─────────────────────────────────────────────────
 const sectionLabel: CSSProperties = {
-  color: "#0a84ff",
+  color: "var(--poster-tone, #0a84ff)",
   fontSize: 12,
   fontWeight: 700,
   letterSpacing: "2px",
@@ -518,6 +549,7 @@ export default function EpisodeComments({
   episode,
   highlightCommentId,
   onCommentDelta,
+  onClose,
 }: EpisodeCommentsProps) {
   const { lang, t } = useLang();
   // Detail page path for the login link's ?from=. usePathname is safe on
@@ -767,22 +799,48 @@ export default function EpisodeComments({
   // prompt mid-probe) · "anonymous" → login prompt. See lib/authChrome.
   const chrome = authChrome(Boolean(user), probing);
 
+  // The composer starts closed.
+  //
+  // A textarea is the largest thing in this panel and it opened above the
+  // discussion, so clicking a comment count showed a form first and the
+  // conversation second — the reader has to scroll past the thing they did
+  // not ask for to reach the thing they did. "写回复" opens it.
+  const [composerOpen, setComposerOpen] = useState(false);
+
   return (
     <div style={{ padding: "20px 24px 24px" }}>
-      <p style={sectionLabel}>
-        {t("comment.title")} · {t("detail.ep")} {episode}
-        {comments.length > 0 && (
-          <span
-            style={{
-              color: "rgba(235,235,245,0.30)",
-              fontWeight: 400,
-              marginLeft: 8,
-            }}
-          >
-            · {comments.length} {COMMENT_UNIT[lang]}
-          </span>
-        )}
-      </p>
+      <div style={panelHeadStyle}>
+        <p style={sectionLabel}>
+          {fill(t("comment.episodeTitle"), { ep: episode })}
+          {comments.length > 0 && (
+            <span
+              style={{
+                color: "rgba(235,235,245,0.30)",
+                fontWeight: 400,
+                marginLeft: 10,
+              }}
+            >
+              {comments.length} {COMMENT_UNIT[lang]}
+            </span>
+          )}
+        </p>
+        <div style={panelHeadActionsStyle}>
+          {chrome === "authed" && !composerOpen ? (
+            <button
+              type="button"
+              style={panelHeadBtnStyle}
+              onClick={() => setComposerOpen(true)}
+            >
+              {t("comment.write")}
+            </button>
+          ) : null}
+          {onClose ? (
+            <button type="button" style={panelHeadBtnStyle} onClick={onClose}>
+              {t("comment.collapse")}
+            </button>
+          ) : null}
+        </div>
+      </div>
 
       {chrome === "probing" ? (
         // auth_hint says logged in but /api/auth/me hasn't resolved — neutral
@@ -800,7 +858,7 @@ export default function EpisodeComments({
           }}
           aria-hidden
         />
-      ) : user ? (
+      ) : user && composerOpen ? (
         <div style={{ marginBottom: 20 }}>
           <CommentInput
             onSubmit={handlePost}
@@ -808,7 +866,7 @@ export default function EpisodeComments({
             placeholder={t("comment.placeholder")}
           />
         </div>
-      ) : (
+      ) : user ? null : (
         <div
           style={{
             marginBottom: 20,
@@ -827,7 +885,7 @@ export default function EpisodeComments({
           <Link
             href={authHrefWithFrom("/login", pathname)}
             prefetch={false}
-            style={{ color: "#0a84ff", fontWeight: 600, textDecoration: "none" }}
+            style={{ color: "var(--poster-tone, #0a84ff)", fontWeight: 600, textDecoration: "none" }}
           >
             {t("comment.loginLink")}
           </Link>

@@ -58,7 +58,7 @@ const s = {
     display: "block",
   } as CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: "clamp(3rem, 1rem + 5.5vw, 6rem)",
     fontWeight: 800,
     color: "#fff",
@@ -78,7 +78,7 @@ const s = {
     paddingBottom: 12,
   } as CSSProperties,
   sub: {
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     fontSize: 16,
     color: "rgba(235,235,245,0.60)",
     lineHeight: 1.65,
@@ -107,7 +107,7 @@ const s = {
     display: "inline-flex",
     alignItems: "center",
     gap: 16,
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: 18,
     fontWeight: 700,
     color: "#fff",

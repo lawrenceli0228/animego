@@ -62,6 +62,10 @@ import { useLocaleRouter } from "@/components/ui/LocaleLink";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
+import {
+  peekWatchedProgress,
+  subscribeWatchedProgress,
+} from "@/lib/watchedProgress";
 import { useLang } from "@/lib/lang-client";
 import { broadcastSubscription, subscribeToBus } from "@/lib/subscriptionBus";
 import { hintStore, takeListHint, LIST_HINT_TOAST_MS } from "./subscriptionToast";
@@ -82,6 +86,8 @@ interface Labels {
 
 interface SubscriptionButtonProps {
   anilistId: number;
+  /** Total episodes, for the "watched N / total" readout. Null when unknown. */
+  episodes: number | null;
   labels: Labels;
 }
 
@@ -131,20 +137,118 @@ const wrapStyle: CSSProperties = {
   padding: 0,
 };
 
-const selectStyle: CSSProperties = {
-  padding: "10px 16px",
+// Every control in this row is 44px tall.
+//
+// They were 32, 36, 40 and 44 depending on which object built them, because
+// each was written next to the thing it styles rather than against the row
+// it lands in — and the row also contains three <Button>s from components/ui,
+// whose base is 44. A row of controls at four different heights reads as
+// broken before it reads as anything else.
+//
+// 44 rather than the smallest of them: it is the touch-target floor in
+// DESIGN.md, and this row is the primary action strip on the page.
+const CONTROL_HEIGHT = 44;
+
+// The chevron, drawn rather than left to the platform.
+//
+// A <select> renders the OS widget by default — a beveled arrow on macOS, a
+// different one on Windows, a full-width native picker on Android — so this
+// was the one control in the row that looked like it came from somewhere
+// else. `appearance: none` removes it and this draws the replacement.
+//
+// A background-image and not a pseudo-element: a <select> cannot host ::after
+// (it has no accessible box to render into), and the alternative — wrapping
+// it in a span that draws the arrow — needs a stylesheet this component does
+// not have, since every style here is an inline object.
+//
+// Stroke colour is baked in because a data URI cannot read currentColor.
+const CHEVRON = encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6">' +
+    '<path d="M1 1l4 4 4-4" fill="none" stroke="rgba(235,235,245,0.55)" ' +
+    'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+);
+
+/* The status select and the progress readout share one frame.
+ *
+ * The border, radius and fill live on this wrapper rather than on the
+ * <select>, so the two read as one control the way the design draws them —
+ * status on the left, a hairline, then how far you are. The select keeps its
+ * own hit area and all of its native behaviour; it just stops painting a box
+ * of its own. */
+const statusGroupStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: CONTROL_HEIGHT,
   borderRadius: 8,
   background: "#2c2c2e",
   border: "1px solid #38383a",
+  overflow: "hidden",
+};
+
+const selectStyle: CSSProperties = {
+  alignSelf: "stretch",
+  // Right padding clears the chevron; without it a long status label runs
+  // underneath it.
+  padding: "0 30px 0 16px",
+  background: `transparent url("data:image/svg+xml,${CHEVRON}") no-repeat right 12px center`,
+  border: 0,
   color: "#ffffff",
   fontSize: 14,
+  fontFamily: "inherit",
   cursor: "pointer",
   outline: "none",
-  minWidth: 150,
+  appearance: "none",
+  WebkitAppearance: "none",
+  MozAppearance: "none",
+};
+
+/* 1px tall-ish rule between the two halves. Inset vertically so it reads as
+ * a divider inside the control rather than as the control being two. */
+const statusSepStyle: CSSProperties = {
+  width: 1,
+  height: 16,
+  flexShrink: 0,
+  background: "rgba(235,235,245,0.16)",
+};
+
+const progressStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "0 14px 0 12px",
+  fontSize: 13,
+  color: "rgba(235,235,245,0.60)",
+  whiteSpace: "nowrap",
+};
+
+/* The count itself, brighter and tabular so the control does not resize by a
+ * pixel as it ticks 9 → 10. */
+const progressCountStyle: CSSProperties = {
+  color: "#ffffff",
+  fontWeight: 600,
+  fontVariantNumeric: "tabular-nums",
+};
+
+const progressDenomStyle: CSSProperties = {
+  color: "rgba(235,235,245,0.38)",
+  fontVariantNumeric: "tabular-nums",
+};
+
+const progressBarStyle: CSSProperties = {
+  position: "relative",
+  width: 44,
+  height: 3,
+  marginLeft: 2,
+  borderRadius: 99,
+  background: "rgba(235,235,245,0.14)",
+  overflow: "hidden",
 };
 
 const removeBtnStyle: CSSProperties = {
-  padding: "10px 16px",
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: CONTROL_HEIGHT,
+  padding: "0 16px",
   borderRadius: 8,
   border: "1px solid rgba(255,69,58,0.4)",
   color: "#ff453a",
@@ -155,15 +259,16 @@ const removeBtnStyle: CSSProperties = {
 };
 
 const loginBtnStyle: CSSProperties = {
-  display: "inline-block",
-  padding: "10px 18px",
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "0 18px",
   borderRadius: 8,
   background: "#0a84ff",
   color: "#fff",
   fontWeight: 600,
   fontSize: 13,
   textDecoration: "none",
-  minHeight: 40,
+  minHeight: CONTROL_HEIGHT,
   lineHeight: "20px",
   border: "none",
   cursor: "pointer",
@@ -171,12 +276,14 @@ const loginBtnStyle: CSSProperties = {
 };
 
 const addBtnStyle: CSSProperties = {
-  padding: "10px 18px",
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "0 18px",
   borderRadius: 8,
   fontSize: 13,
   fontWeight: 600,
   cursor: "pointer",
-  minHeight: 40,
+  minHeight: CONTROL_HEIGHT,
   outline: "none",
   border: "1px solid rgba(84,84,88,0.65)",
   background: "transparent",
@@ -186,18 +293,21 @@ const addBtnStyle: CSSProperties = {
 };
 
 const placeholderStyle: CSSProperties = {
-  padding: "10px 18px",
+  padding: "0 18px",
   borderRadius: 8,
   border: "1px solid rgba(84,84,88,0.30)",
   background: "transparent",
   color: "transparent",
   pointerEvents: "none",
   minWidth: 110,
-  minHeight: 40,
+  minHeight: CONTROL_HEIGHT,
 };
 
 const scoreBtnBase: CSSProperties = {
-  padding: "8px 14px",
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: CONTROL_HEIGHT,
+  padding: "0 14px",
   borderRadius: 8,
   fontSize: 13,
   fontWeight: 600,
@@ -235,18 +345,32 @@ function scoreNumBtnStyle(
     fontSize: 12,
     fontWeight: 700,
     fontVariantNumeric: "tabular-nums",
-    background: isActive ? "#0a84ff" : "rgba(120,120,128,0.12)",
-    color: isActive
-      ? "#fff"
+    // The anime's colour, matching the rated pill this popup sets. It was
+    // iOS Blue, which made the picker the one surface in the hero still
+    // painted in the site's operation colour while everything it touches had
+    // moved to the show's.
+    background: isActive
+      ? "var(--poster-tone, #0a84ff)"
       : isBelow
-        ? "#0a84ff"
-        : "rgba(235,235,245,0.60)",
-    transition: "all 0.15s",
+        ? "var(--poster-tone-low, rgba(120,120,128,0.20))"
+        : "rgba(120,120,128,0.12)",
+    // Dark-on-tone for the selected number, same pairing as the primary CTA:
+    // white on --poster-tone is under the contrast floor at most hues.
+    color: isActive
+      ? "oklch(15% 0.03 var(--poster-hue))"
+      : isBelow
+        ? "var(--poster-tone, rgba(235,235,245,0.85))"
+        : "rgba(235,235,245,0.55)",
+    // Named properties, not `all`. DESIGN.md rules `transition: all` out, and
+    // here it would also animate the width/height/border-radius on every
+    // re-render of a ten-button row.
+    transition: "background 150ms var(--ease-out-expo), color 150ms var(--ease-out-expo)",
   };
 }
 
 export default function SubscriptionButton({
   anilistId,
+  episodes,
   labels,
 }: SubscriptionButtonProps) {
   const router = useLocaleRouter();
@@ -262,6 +386,29 @@ export default function SubscriptionButton({
   const [busy, setBusy] = useState(false);
   const [scoreOpen, setScoreOpen] = useState(false);
   const scoreRef = useRef<HTMLDivElement | null>(null);
+
+  // The watched count, owned by EpisodesGrid and mirrored here.
+  //
+  // Seeded from `sub.currentEpisode` (which the server derives from the same
+  // set) and then kept live by the grid's notifications, so ticking an
+  // episode updates both readouts at once instead of leaving this one on the
+  // value it fetched at mount.
+  // Seeded lazily rather than in the effect. A setState called synchronously
+  // in an effect body renders twice and trips react-hooks/set-state-in-effect;
+  // an initialiser runs once, before the first paint, with the same result.
+  const [watchedCount, setWatchedCount] = useState<number | null>(
+    () => peekWatchedProgress(anilistId)?.watched ?? null,
+  );
+  useEffect(
+    () =>
+      subscribeWatchedProgress((p) => {
+        // Guard the id: this component survives a client-side navigation
+        // between two anime, and the grid for the previous one can still be
+        // unmounting when the next one mounts.
+        if (p.anilistId === anilistId) setWatchedCount(p.watched);
+      }),
+    [anilistId],
+  );
 
   const statusLabels: Record<SubStatus, string> = {
     watching: labels.watching,
@@ -601,6 +748,10 @@ export default function SubscriptionButton({
 
   // state === "subscribed"
   const currentStatus = sub?.status ?? "watching";
+  // The grid's live count when we have it, otherwise the value the server
+  // derived from the same set at fetch time. Both describe one fact; the
+  // first is just fresher.
+  const shownWatched = watchedCount ?? sub?.currentEpisode ?? null;
   const currentScore = sub?.score ?? null;
 
   return (
@@ -609,21 +760,52 @@ export default function SubscriptionButton({
           flips busy briefly, which would re-paint the browser-default disabled
           styling and make the dropdown flicker. handleStatus has its own
           `if (busy) return` to drop conflicting status writes mid-mutation. */}
-      <select
-        style={selectStyle}
-        value={currentStatus}
-        onChange={(e) => handleStatus(e.target.value)}
-        aria-label={labels.watching}
-      >
-        <option value="" disabled>
-          {labels.add}
-        </option>
-        {STATUS_VALUES.map((v) => (
-          <option key={v} value={v}>
-            {statusLabels[v]}
+      <div style={statusGroupStyle}>
+        <select
+          style={selectStyle}
+          value={currentStatus}
+          onChange={(e) => handleStatus(e.target.value)}
+          aria-label={labels.watching}
+        >
+          <option value="" disabled>
+            {labels.add}
           </option>
-        ))}
-      </select>
+          {STATUS_VALUES.map((v) => (
+            <option key={v} value={v}>
+              {statusLabels[v]}
+            </option>
+          ))}
+        </select>
+
+        {/* Read-only. The count comes from EpisodesGrid, which owns the
+            watched set; there is no control here to change it, which is the
+            distinction that matters — see this file's header on why the old
+            stepper was removed. Hidden when the total is unknown, because
+            "7 / ?" says less than the episode list already does. */}
+        {shownWatched !== null && episodes && episodes > 0 ? (
+          <>
+            <span style={statusSepStyle} aria-hidden="true" />
+            <span style={progressStyle}>
+              {t("detail.watchedShort")}
+              <span style={progressCountStyle}>{shownWatched}</span>
+              <span style={progressDenomStyle}>/{episodes}</span>
+              {/* aria-hidden: the two numbers beside it already say this, and
+                  an unlabelled bar is noise in a screen reader. */}
+              <span style={progressBarStyle} aria-hidden="true">
+                <span
+                  style={{
+                    display: "block",
+                    height: "100%",
+                    width: `${Math.min(100, (shownWatched / episodes) * 100)}%`,
+                    borderRadius: 99,
+                    background: "var(--success)",
+                  }}
+                />
+              </span>
+            </span>
+          </>
+        ) : null}
+      </div>
 
       <div ref={scoreRef} style={{ position: "relative" }}>
         <button
@@ -632,14 +814,25 @@ export default function SubscriptionButton({
           onClick={() => setScoreOpen((open) => !open)}
           style={{
             ...scoreBtnBase,
+            // Rated: the anime's colour, matching the AniList figure in the
+            // facts line above it. It was iOS Blue, which made the one
+            // control showing YOUR opinion of the show the only thing on the
+            // hero not tinted by the show.
+            //
+            // Unrated stays neutral. The tint means "you have scored this";
+            // painting the empty state too would spend the signal on the
+            // state that has nothing to say.
+            //
+            // tone-on-tone-low is the same pairing as the format badge, and
+            // lib/oklch.test.ts proves it clears 4.5:1 at every hue.
             background: currentScore
-              ? "rgba(10,132,255,0.12)"
+              ? "var(--poster-tone-low, rgba(10,132,255,0.12))"
               : "#2c2c2e",
             border: currentScore
-              ? "1px solid rgba(10,132,255,0.4)"
+              ? "1px solid var(--poster-tone-mid, rgba(10,132,255,0.4))"
               : "1px solid #38383a",
             color: currentScore
-              ? "#0a84ff"
+              ? "var(--poster-tone, #0a84ff)"
               : "rgba(235,235,245,0.60)",
           }}
         >

@@ -19,10 +19,24 @@ const textStyle: CSSProperties = {
 };
 
 const buttonStyle: CSSProperties = {
-  color: "var(--poster-accent, #0a84ff)",
+  // A <button> does not inherit font-family from the document — the UA
+  // stylesheet sets its own. Without this the control rendered in the
+  // browser's default sans (Arial here) while every word around it was
+  // PingFang, which is the kind of mismatch that reads as "broken" without
+  // being nameable.
+  fontFamily: "inherit",
+  // The derived tone, not the raw sample. `--poster-accent` is the colour
+  // taken straight off the cover and nothing bounds its contrast: measured
+  // across real accents it runs 3.58:1 to 8.84:1 against black, so on some
+  // anime this control was legible and on others it was not. `--poster-tone`
+  // is the same hue re-derived at a fixed lightness — see globals.css.
+  color: "var(--poster-tone, #0a84ff)",
   fontSize: 13,
   fontWeight: 600,
-  marginTop: 8,
+  // 20, matching the rhythm the rest of the block is set on. It was 8,
+  // which put the control closer to the paragraph than the paragraph's own
+  // line spacing, so it read as part of the text rather than as a control.
+  marginTop: 20,
   cursor: "pointer",
   background: "none",
   border: "none",
@@ -36,7 +50,7 @@ const sourceStyle: CSSProperties = {
   color: "rgba(235,235,245,0.35)",
   fontSize: 12,
   lineHeight: 1.6,
-  margin: "10px 0 0",
+  margin: "20px 0 0",
 };
 
 const sourceLinkStyle: CSSProperties = {

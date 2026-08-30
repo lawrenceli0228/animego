@@ -67,7 +67,7 @@ const s = {
     marginBottom: 4,
   } as CSSProperties,
   primary: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 700,
     fontSize: 24,
     color: "#ffffff",
@@ -120,7 +120,7 @@ const s = {
     textTransform: "uppercase",
   } as CSSProperties,
   parseTitle: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 700,
     fontSize: 22,
     color: "#fff",

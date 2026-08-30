@@ -127,7 +127,7 @@ const zhHant = {
     watchedFailed: '第 {{ep}} 集沒記上，請再試一次',
     watchedSignedOut: '登入狀態已過期，重新登入後再記錄',
     watchedProgress: '已看 {{done}} / {{total}} 集',
-    watchedHint: '點一下方格，記錄你真正看過的那一集。',
+    watchedHint: '點一下某一集，記錄你真正看過的那一集。',
     watchedCompletedHint: '這部已標記「看完」，所有集數都算已看。取消其中任意一集，會把狀態改回「在看」，並改為按逐集記錄顯示。',
     furthestMarked: '標記到的最後一集',
     autoCompleted: '全部集數已記錄，狀態自動改為「看完」',
@@ -137,6 +137,7 @@ const zhHant = {
     ep: '第', epOf: '/',
     viewDetails: '檢視詳情',
     viewOnBgm: '在 Bangumi 檢視',
+    watchedShort: '已看',
     linkCopied: '連結已複製',
     linkCopyFailed: '複製失敗，請手動複製連結',
     openPlayer: '▶ 本地彈幕播放',
@@ -340,6 +341,9 @@ const zhHant = {
   },
   // Comments
   comment: {
+    episodeTitle: '第 {{ep}} 集的討論',
+    write: '寫回覆',
+    collapse: '收起',
     title: '集數評論', noComments: '暫無評論，來說點什麼吧',
     loginPrompt: '請', loginLink: '登入', loginSuffix: '後參與評論',
     placeholder: '寫下你的評論...', post: '發佈',

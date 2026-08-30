@@ -109,6 +109,20 @@ const en = {
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
+    watchedShort: 'Watched',
+    info: 'Information',
+    synopsis: 'Synopsis',
+    charUnit: 'chars',
+    infoSeason: 'Season',
+    infoAired: 'Aired',
+    infoStatus: 'Status',
+    infoEpisodes: 'Episodes',
+    infoDuration: 'Duration',
+    infoFormat: 'Format',
+    infoSource: 'Source',
+    infoStudio: 'Studio',
+    scores: 'Scores',
+    votes: 'ratings',
     // Parity key. An English reader never sees the Chinese synopsis
     // (pickDescription pins `en` to AniList's description), so this only
     // surfaces if a future phase shows the Bangumi text to en as well.
@@ -328,6 +342,9 @@ const en = {
   },
   // Comments
   comment: {
+    episodeTitle: 'Episode {{ep}} discussion',
+    write: 'Write a reply',
+    collapse: 'Collapse',
     title: 'Comments', noComments: 'No comments yet. Be the first!',
     loginPrompt: '', loginLink: 'Login', loginSuffix: ' to post a comment',
     placeholder: 'Write a comment...', post: 'Post',

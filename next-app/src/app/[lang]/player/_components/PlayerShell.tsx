@@ -174,7 +174,7 @@ const s = {
     padding: 24,
   } as CSSProperties,
   mobileTitle: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 20,
     color: "#ffffff",
@@ -246,7 +246,7 @@ const s = {
     marginBottom: 6,
   } as CSSProperties,
   epTitle: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 18,
     color: "#ffffff",
@@ -347,7 +347,7 @@ const s = {
     marginBottom: 12,
   } as CSSProperties,
   dropOverlayTitle: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 700,
     fontSize: 28,
     color: "#fff",

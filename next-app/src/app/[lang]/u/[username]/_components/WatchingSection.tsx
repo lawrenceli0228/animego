@@ -16,6 +16,12 @@ type StatusKey = (typeof STATUS_ORDER)[number];
 
 const PAGE_SIZE = 12;
 
+// Alpha channel for the poster-tile tint, as the `AA` pair of an `#RRGGBBAA`
+// hex. 0x26 = 38/255 ≈ 15%, matching the opacity the old (broken) rgba() asked
+// for. Kept as a named constant because "26" at a call site reads as a number,
+// not an opacity.
+const ACCENT_TINT_ALPHA = "26";
+
 // Minimal anime card for profile pages — simpler than the landing AnimeCard
 // (no hover details overlay), just cover + title on click.
 //
@@ -58,8 +64,20 @@ function ProfileAnimeCard({ anime, lang }: { anime: WatchingEntry; lang: Lang })
           height: 170,
           borderRadius: 8,
           overflow: "hidden",
-          background: anime.posterAccent
-            ? `rgba(${anime.posterAccent}, 0.15)`
+          // `posterAccent` is a hex string, not the `r, g, b` triplet rgba()
+        // wants. The old `rgba(${anime.posterAccent}, 0.15)` expanded to
+        // `rgba(#e45d35, 0.15)` — invalid, so the browser dropped the whole
+        // declaration and the tinted placeholder never painted. The sibling
+        // column `posterAccentRgb` does hold the triplet, but it is not in
+        // this page's `WatchingEntry` (types.ts:53 carries only the hex), so
+        // reaching for it here would mean widening the profile DTO.
+        //
+        // 8-digit hex instead: `#RRGGBBAA`, where 26 is 15% alpha. Safe
+        // because the column is strictly `#RRGGBB` — checked against
+        // production, 17,828 of 17,828 rows match /^#[0-9a-fA-F]{6}$/ with
+        // zero exceptions.
+        background: anime.posterAccent
+            ? `${anime.posterAccent}${ACCENT_TINT_ALPHA}`
             : "#2c2c2e",
           border: "1px solid #38383a",
           marginBottom: 6,

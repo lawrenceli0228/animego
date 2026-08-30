@@ -14,11 +14,30 @@
 
 ## Typography
 
-- **Display/Hero:** Sora 700–800 — 日本设计师设计的几何无衬线，有隐性日系精密感，品类内少见
-- **Body:** DM Sans 400–500 — 干净易读，不抢 Sora 的戏
-- **UI/Labels:** DM Sans（同 Body）
-- **Data/Tables:** DM Sans，使用 `font-variant-numeric: tabular-nums`
+- **全局主字体:** `--font-sans` = `--font-cjk`，也就是 PingFang SC 打头。
+  **拉丁字符也走它**。原来是 `DM Sans, <cjk>`，于是「MADHOUSE · 24分/集」
+  这样一行是两套字体拼出来的 —— 拉丁用 DM Sans、中文用 PingFang，x 高度、
+  笔画对比、竖直度量都不一样。本站几乎每一行都中英混排，那就等于大多数句子
+  中间有一道缝。PingFang 自带完整拉丁字符集（骨架源自 Helvetica Neue），
+  一套字体能排完整行。
+- **标题:** 同上。Sora 没有中日韩字形，中文标题无论如何都回落到 PingFang，
+  所以标题不再单独指定显示字体 —— 层级靠字重和字号，不靠换字体。
+- **Latin 显示字体:** `--font-latin`（Sora / DM Sans）改为**按需使用**，
+  只用在「按定义就是拉丁文」且中性系统字体会显得没排过版的地方 —— 目前是
+  hero 下面那行罗马字标题。
+- **Data/Tables:** `--font-mono`（JetBrains Mono），用于字段标签和数字，
+  配 `font-variant-numeric: tabular-nums`
 - **Code:** JetBrains Mono 400 — 用于 API 输出、磁力链接、剧集编号
+- **中文:** `--font-cjk` — PingFang SC / Hiragino Sans GB / Source Han Sans SC /
+  Noto Sans CJK SC / Microsoft YaHei。上面三个网页字体都只加载了 latin 子集，
+  **一个中日韩字形都没有**，所以站上每一个中文字都是由回落链渲染的。以前那一环
+  是 `system-ui`（macOS 上是 PingFang，Windows 上是 Segoe UI，中日韩覆盖看安装
+  情况，Linux 上什么都可能）。显式列出来是把它从「碰巧对」变成「有意如此」。
+  拉丁字体仍排在最前：它们没有中日韩字形可以抢，浏览器会逐字回落，所以同一条
+  声明能同时服务 “MADHOUSE” 和「葬送的芙莉莲」。
+- **日文:** `--font-jp` — Hiragino Sans / Yu Gothic / Noto Sans JP，尾部接
+  `--font-cjk`。汉字在日文和简体中文里字形不同（直 骨 令 等），日文原名用中文
+  字体排出来能读，但对认得出区别的人来说明显别扭。
 - **Loading:** Google Fonts CDN
   ```
   https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800
@@ -103,12 +122,71 @@
 由封面图取样得到），所以 "不要引入蓝色以外的 accent 色" 那条对它不适用 ——
 那条规则约束的是品牌色。
 
-作用范围严格限定在 hero 光晕和 hero 内的关系 chip。**不要**拿它做按钮、
-链接或焦点环 —— 可点击 = `--accent`，这条没有例外，否则"蓝色代表可操作"
-这个信号就废了。
+作用范围：hero 光晕用**原色** `--poster-accent`（纯装饰，不承载文字）；
+其余一律用派生的 `--poster-tone*`（见下节）。
+
+**焦点环永远是 `--accent` 蓝，没有例外。** 焦点环是「你在这里」的信号，
+不是身份色；`focusRing.test.ts` 的历史里最糟的一个坏环就是「随封面变色，
+某些封面上根本看不见」。
+
+按钮有**一个**记录在案的例外：详情页 hero 的主 CTA（`Button` 的
+`.primary`，全站仅此一处）。它用 `--poster-tone` 做底 + 同色相 15% 明度做
+字。这条例外是**对比度**给的，不是审美给的：白字在 `--accent` 上实测
+**3.65:1**，低于 4.5:1 下限，而那是整页最显眼的按钮；深色字在
+`--poster-tone` 上穷举 360 个色相是 **8.82–9.51:1**。
+
+除此之外，可点击 = `--accent`。
 
 globals.css 里那个紫色字面量只是取样值到达之前的占位；用它的光晕在
 `[data-accent-ready="true"]` 之前是透明的，所以它不会被画出来。
+
+#### 派生色阶 — 只借角度，不借颜色
+
+| Token               | Value                                | Usage                          |
+|---------------------|--------------------------------------|--------------------------------|
+| `--poster-hue`      | 运行时算出的 OKLCH 色相角（0–360 裸数）| 下面三个的唯一输入              |
+| `--poster-tone`     | `oklch(76% 0.085 var(--poster-hue))` | 详情页的强调文字、图标、hover   |
+| `--poster-tone-mid` | `oklch(52% 0.07 var(--poster-hue))`  | 边框、分隔线（非文字）          |
+| `--poster-tone-low` | `oklch(24% 0.045 var(--poster-hue))` | tint 底、chip 填充（纯装饰）    |
+
+`--poster-accent` 是取样到的**原色**，它的对比度不受任何约束。实测 6 个真实
+封面色对纯黑是 3.58:1 – 8.84:1，跨度 2.5 倍，其中 2 个（深蓝 `#2e6fbf`、
+玫红 `#c2185b`）**低于 WCAG 4.5:1**。原因是封面画面本身 51.8% 偏暖、80.8%
+高饱和 —— 这不是取样算法的缺陷，是"直接用画面颜色当 UI 颜色"这件事本身
+没有下界。
+
+所以派生色阶**只从封面拿色相角**，明度和彩度由设计系统固定。每部番仍然是
+自己的颜色，但落在一条保证可读的带子里。
+
+`76%` 不是拍脑袋：穷举全部 360 个色相，`oklch(76% 0.085 h)` 在最严的
+`--bg-elevated` 上最低 6.22:1，全部通过；能过 4.5:1 的最小明度是 68%，
+所以留了 8 个百分点余量。这条证明在 `lib/oklch.test.ts` 里是可执行的测试，
+改 L 或 C 会直接告诉你哪些色相破了。
+
+`--poster-tone-mid` 只到 3.65:1（够 WCAG 1.4.11 的非文字 3:1），
+`--poster-tone-low` 只有 1.25:1 —— **这两个永远不要拿来写字**。
+
+##### 陷阱：三个 tone 必须在设 `--poster-hue` 的那个元素上声明
+
+CSS 自定义属性的 `var()` 替换发生在**声明它的元素**上，不是使用它的元素上。
+所以下面这样写是**无效的**：
+
+```css
+:root { --poster-hue: 292.7; --poster-tone: oklch(76% .085 var(--poster-hue)); }
+.某部番 { --poster-hue: 135.8; }   /* 改不动 --poster-tone */
+```
+
+`--poster-tone` 在 `:root` 上就已经用 `:root` 的色相算完了，往下继承的是一个
+算死的紫色，子元素再改 `--poster-hue` 也没用。实测：6 个不同色相全部渲染成
+同一个紫，而样式表看起来完全正确 —— **这是个静默失效，代码审查和 markup
+里都看不出来**。
+
+正确做法是 `globals.css` 里的 `.poster-scope`：在写 `--poster-hue` 的**同一个
+元素**上重新声明这三个 token。`HeroAccent` 同时输出 class 和行内 hue，两者
+是一个机制，拆开任何一半都会退回上面那个失效状态。同样 6 个色相在修正后
+渲染出 6 种颜色，对比度 7.50–7.81:1。
+
+推论：**永远不要在比 `--poster-hue` 更靠上的选择器上组装 `--poster-tone*`。**
 
 ### Dark Mode
 单一暗色主题，不提供亮色模式。背景已基于 Apple True Black，在 OLED 屏幕上极省电。

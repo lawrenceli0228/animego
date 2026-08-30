@@ -146,7 +146,7 @@ export function PosterVisual({ hue, lang, posters, features }: PosterVisualProps
             </div>
             <div style={{
               position: "absolute", left: 6, right: 6, bottom: 6,
-              fontFamily: "'Sora', sans-serif", fontSize: 9, fontWeight: 700,
+              fontFamily: "var(--font-display)", fontSize: 9, fontWeight: 700,
               color: "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.85)", letterSpacing: "-0.01em",
             }}>{p.title[lang]}</div>
           </div>
@@ -291,7 +291,7 @@ export function DanmakuVisual({ hue, features }: DanmakuVisualProps) {
         {DANMAKU_BULLETS.map((b, i) => (
           <span key={i} style={{
             position: "absolute", left: `${b.x}%`, top: `${b.y}%`,
-            fontFamily: "'DM Sans', sans-serif", fontSize: b.size,
+            fontFamily: "var(--font-sans)", fontSize: b.size,
             fontWeight: b.pin ? 600 : 400,
             color: b.pin ? `oklch(85% 0.14 ${hue})` : "#fff",
             opacity: b.op, textShadow: "0 1px 2px rgba(0,0,0,0.92)",
@@ -570,7 +570,7 @@ function FlowCard({ hue, state, label: lbl, titleZh, sub }: FlowCardProps) {
       <div style={{ ...mono, fontSize: 9.5, color: tone.text, textTransform: "uppercase" }}>{lbl}</div>
       <div>
         <div style={{
-          fontFamily: "'Sora', sans-serif", fontSize: 12.5, fontWeight: 700, color: "#fff",
+          fontFamily: "var(--font-display)", fontSize: 12.5, fontWeight: 700, color: "#fff",
           letterSpacing: "-0.01em", marginBottom: 2,
         }}>{titleZh}</div>
         <div style={{ ...mono, fontSize: 9, color: "rgba(235,235,245,0.55)" }}>{sub}</div>
@@ -926,7 +926,7 @@ export function DropVisual({ hue, features }: DropVisualProps) {
             fontFamily="'JetBrains Mono', monospace" letterSpacing="0.08em">MKV</text>
         </svg>
         <div style={{
-          fontFamily: "'Sora', sans-serif", fontSize: 13, color: "#fff", marginBottom: 4,
+          fontFamily: "var(--font-display)", fontSize: 13, color: "#fff", marginBottom: 4,
           position: "relative", zIndex: 1,
         }}>{features.f7DropHint}</div>
       </div>
@@ -1042,7 +1042,7 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
                 </svg>
               </span>
             </div>
-            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "rgba(235,235,245,0.7)", lineHeight: 1.4 }}>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 13, color: "rgba(235,235,245,0.7)", lineHeight: 1.4 }}>
               {fStr(features, "f8PhotoHint")}
             </span>
           </div>
@@ -1084,7 +1084,7 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
                   <path d="M20 6L9 17l-5-5" />
                 </svg>
               </span>
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "rgba(235,235,245,0.78)" }}>
+              <span style={{ fontFamily: "var(--font-sans)", fontSize: 13, color: "rgba(235,235,245,0.78)" }}>
                 {fStr(features, k)}
               </span>
             </div>
@@ -1123,14 +1123,14 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
               ) : null}
             </div>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 7, paddingBottom: 8 }}>
-              <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 18, color: "#fff", letterSpacing: "-0.01em" }}>@you</span>
+              <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: "#fff", letterSpacing: "-0.01em" }}>@you</span>
               <span style={{ width: 7, height: 7, borderRadius: 9999, background: `oklch(74% 0.18 ${hue})`, boxShadow: `0 0 8px oklch(74% 0.18 ${hue})` }} aria-hidden />
             </span>
           </div>
           {/* stats row */}
           <div style={{ padding: "12px 18px 16px", display: "flex", alignItems: "baseline", gap: 12, ...mono, fontSize: 11, color: "rgba(235,235,245,0.5)" }}>
             <span>
-              <b style={{ fontFamily: "'Sora', sans-serif", fontSize: 15, color: "#fff", marginRight: 4 }}>42</b>
+              <b style={{ fontFamily: "var(--font-display)", fontSize: 15, color: "#fff", marginRight: 4 }}>42</b>
               {fStr(features, "f8PreviewWatched")}
             </span>
             <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>

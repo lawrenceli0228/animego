@@ -106,7 +106,7 @@ const s = {
     marginLeft: BAR_CONTENT_OFFSET,
   } as CSSProperties,
   value: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: "clamp(2.25rem, 1rem + 3.5vw, 4.25rem)",
     fontWeight: 800,
     letterSpacing: "-0.03em",
@@ -118,7 +118,7 @@ const s = {
     fontSize: "clamp(2.75rem, 1rem + 4.5vw, 5.5rem)",
   } as CSSProperties,
   label: {
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "var(--font-sans)",
     fontSize: 13,
     color: "rgba(235,235,245,0.60)",
     marginTop: 10,

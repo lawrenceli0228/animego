@@ -86,9 +86,54 @@
   --score-scrim-bg: rgba(0, 0, 0, 0.75);
 
   /* ── Typography ─────────────────────────────────────────────────────── */
-  --font-display: "Sora", system-ui, sans-serif;
-  --font-sans: "DM Sans", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* Sora, DM Sans and JetBrains Mono are all loaded `subsets: ["latin"]`
+   * (layout.tsx), so none of them contains a single CJK glyph. Every Chinese
+   * character on this site is therefore rendered by whatever the next entry
+   * in the stack resolves to — and until now that entry was `system-ui`,
+   * which is PingFang on macOS, Segoe UI on Windows (whose CJK coverage is
+   * a per-install question), and anything at all on Linux.
+   *
+   * Naming the CJK faces makes that deliberate instead of incidental. It is
+   * not a visual change on a Mac, where system-ui already resolved here; it
+   * is what stops the page falling back to a serif or a metrics-mismatched
+   * face on the platforms where system-ui does not.
+   *
+   * Latin faces stay FIRST: they have no CJK glyphs to win with, so a
+   * browser uses them for Latin runs and falls through per-character for the
+   * rest. That per-character fallthrough is why one declaration can serve a
+   * page that mixes "MADHOUSE" and 葬送的芙莉莲 in the same sentence. */
+  --font-cjk: "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC",
+    "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+
+  /* PingFang leads, and it leads for Latin too.
+   *
+   * The stack used to be "DM Sans, <cjk>", which meant a line like
+   * "MADHOUSE · 24分/集" was set in two different typefaces — DM Sans for
+   * the Latin run, PingFang for the Chinese — with different x-heights,
+   * different stroke contrast and different vertical metrics. On a site
+   * where nearly every line mixes the two, that is a seam in the middle of
+   * most sentences.
+   *
+   * PingFang carries a complete Latin set (it descends from the Helvetica
+   * Neue skeleton), so one family sets the whole line. The webfonts stay
+   * available for the places where a display face earns its keep — see
+   * --font-latin. */
+  --font-display: var(--font-cjk);
+  --font-sans: var(--font-cjk);
+  --font-mono: "JetBrains Mono", ui-monospace, var(--font-cjk);
+
+  /* The Latin display face, now opt-in rather than the default. Used where
+   * the text is Latin by definition and a neutral system face would read as
+   * unstyled — the romanised title under the hero. */
+  --font-latin: "Sora", "DM Sans", system-ui, sans-serif;
+
+  /* Japanese, for the original titles. Han characters are drawn differently
+   * in Japanese and Simplified Chinese — 直 骨 令 among many — and a
+   * Japanese title set in a Chinese face is legible but visibly foreign to
+   * a reader who knows the difference. The CJK stack is the tail, so a
+   * system with no Japanese face still gets a sane result rather than
+   * tofu. */
+  --font-jp: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", var(--font-cjk);
 
   /* ── Spacing — 8px base ─────────────────────────────────────────────
    * The whole scale was missing, so every component picked its own
@@ -121,6 +166,31 @@
    * transparent until [data-accent-ready="true"] — so it is never painted. */
   --poster-accent: #8b5cf6;
   --poster-accent-rgb: 139, 92, 246;
+
+  /* Derived per-anime ramp — takes only the HUE ANGLE from the artwork and
+   * fixes lightness/chroma here, so a colour sampled off a poster can never
+   * land below the contrast floor. `--poster-accent` above is the raw sample
+   * and is NOT contrast-managed: across real cover accents it ranges 3.58:1
+   * to 8.84:1 against black, so some anime fall under WCAG and some do not.
+   *
+   * 76% is proven, not chosen: exhaustively across all 360 hues this clears
+   * 4.5:1 on the strictest surface (--bg-elevated) with 8 points of headroom.
+   * lib/oklch.test.ts holds that proof — change these and it names the hues
+   * you broke. See DESIGN.md "派生色阶".
+   *
+   * The hue below is the brand violet's own angle, so the fallback is the
+   * placeholder colour's family rather than an arbitrary one. HeroAccent
+   * overrides it per anime, and omits it entirely for greyscale posters —
+   * whose hue angle would be rounding noise.
+   *
+   * These three are ONLY the fallback. They resolve here, against the hue
+   * declared here, and a descendant that sets its own --poster-hue does not
+   * change them — see .poster-scope below, which is where the per-anime
+   * values actually come from. */
+  --poster-hue: 292.7;
+  --poster-tone: oklch(76% 0.085 var(--poster-hue));
+  --poster-tone-mid: oklch(52% 0.07 var(--poster-hue));
+  --poster-tone-low: oklch(24% 0.045 var(--poster-hue));
   --duration-halo-in: 260ms;
   --duration-halo-in-fast: 200ms;
   --delay-halo-appear: 400ms;
@@ -186,6 +256,30 @@ h4 {
   }
 }
 
+/* Where the per-anime ramp is actually built. HeroAccent puts this class on
+ * the same element it writes `--poster-hue` to.
+ *
+ * It has to be re-declared rather than inherited, and that is not a style
+ * choice — a custom property's var() substitution happens on the element that
+ * DECLARES it. The `:root` copies above were already resolved against the
+ * fallback hue before any descendant could override it, so what inherits down
+ * is a finished violet, not a formula. Setting --poster-hue lower in the tree
+ * has no effect on them at all.
+ *
+ * Measured, because this is invisible in review and in the markup: with the
+ * ramp left on :root, six different anime hues rendered the identical violet
+ * — the feature was inert while looking entirely correct in the stylesheet.
+ * Re-declared here, the same six render six distinct colours holding
+ * 7.50–7.81:1 contrast.
+ *
+ * The corollary for anyone extending this: never assemble a --poster-tone*
+ * value at a selector that sits above where --poster-hue is set. */
+.poster-scope {
+  --poster-tone: oklch(76% 0.085 var(--poster-hue));
+  --poster-tone-mid: oklch(52% 0.07 var(--poster-hue));
+  --poster-tone-low: oklch(24% 0.045 var(--poster-hue));
+}
+
 /* Hero cover halo — neutral by default. The poster's color signature is only
  * painted once the parent HeroAccent signals [data-accent-ready="true"], so the
  * user never sees a placeholder purple swap to the real color. */
@@ -222,8 +316,14 @@ h4 {
 }
 .hero-relation-chip:hover,
 .hero-relation-chip:focus-visible {
-  border-color: var(--poster-accent) !important;
-  color: var(--poster-accent) !important;
+  /* The derived tone, not the raw sample. This used to hand `--poster-accent`
+   * straight to `color:`, which meant the chip's legibility on hover was
+   * whatever the cover art happened to be — measured across real accents,
+   * 3.58:1 to 8.84:1 against black, with a deep blue and a magenta landing
+   * under the 4.5:1 floor. `--poster-tone` keeps the anime's hue and holds
+   * the floor at every one of them. */
+  border-color: var(--poster-tone-mid) !important;
+  color: var(--poster-tone) !important;
 }
 
 /* Anime card grid — matches legacy AnimeGrid.jsx exactly: a fixed

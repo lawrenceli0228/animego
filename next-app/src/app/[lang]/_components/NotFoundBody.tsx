@@ -90,7 +90,7 @@ const s = {
     marginBottom: 16,
   } as CSSProperties,
   number: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: "clamp(5rem, 4rem + 8vw, 9rem)",
     fontWeight: 800,
     letterSpacing: "-0.04em",
@@ -104,7 +104,7 @@ const s = {
     marginBottom: 16,
   } as CSSProperties,
   title: {
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     fontSize: "clamp(1.5rem, 1rem + 1.8vw, 2rem)",
     fontWeight: 700,
     color: "#fff",

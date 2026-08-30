@@ -1,0 +1,762 @@
+/* The four sections BELOW the hero: relations, characters + voice actors,
+ * staff, recommendations.
+ *
+ * Second module rather than more of page.module.css because these are a
+ * different surface with a different problem. page.module.css is the hero:
+ * one composition, one set of geometry variables. This file is four lists of
+ * repeated rows, and what it is mostly doing is taking boxes away.
+ *
+ * ## What was here before
+ *
+ * Every one of these sections was an inline `style={{...}}` literal, which
+ * meant two things at once:
+ *
+ *   · no `:hover`, no `:focus-visible`, no media query — inline styles cannot
+ *     express any of them. Four sections of links and rows shipped with no
+ *     designed states at all, and any stylesheet rule written against them
+ *     would have lost to the inline declaration anyway.
+ *   · a 1px border plus a fill on every container. Relations were bordered
+ *     cards, characters were bordered cards containing two more bordered
+ *     boxes, thumbnails had their own borders inside those. The reviewed
+ *     verdict on the demo was "too many boxes, uncomfortable" — this file is
+ *     the answer to that.
+ *
+ * ## The rule this file follows
+ *
+ * A frame is allowed around ARTWORK, because the artwork has an edge whether
+ * we draw one or not. A frame is not allowed around TEXT. Rows are separated
+ * by a hairline and told apart by a hover surface; hierarchy comes from scale
+ * and colour, not from outlines.
+ *
+ * ## Per-anime colour
+ *
+ * The `--poster-tone*` family is derived from the cover art's OKLCH hue at a
+ * FIXED lightness and chroma (see lib/oklch.test.ts, which proves the
+ * derivation clears WCAG at all 360 hues). That is the whole point of it:
+ * `--poster-accent`, the raw sampled hex, ranges from 4.96:1 to 8.17:1
+ * against the page across the catalogue, so some anime rendered nearly
+ * unreadable. Nothing in this file may use the raw colour for text or a
+ * border.
+ *
+ * Which token where, and this is not interchangeable:
+ *
+ *   --poster-tone      text, and only this one. Contrast-managed.
+ *   --poster-tone-mid  borders, rules, scrollbars. 3:1, not text-safe.
+ *   --poster-tone-low  fills and tints. Deliberately BELOW 3:1.
+ *
+ * The one same-hue pairing that is proven safe is `--poster-tone` ON a
+ * `--poster-tone-low` fill; the relation badge below is exactly that, which
+ * is why it can sit on arbitrary cover artwork without a scrim.
+ */
+
+/* ── Shared ──────────────────────────────────────────────────────────────
+ *
+ * The aliases exist so the fallback chain is written once instead of at
+ * every use site. They also keep this file working before the
+ * `--poster-tone*` declarations land: an undefined custom property makes the
+ * whole declaration invalid at computed-value time, so `color: var(--x)`
+ * with no fallback does not degrade — it drops, and the element inherits
+ * something arbitrary. `--accent` (the site blue) and `--bg-elevated`
+ * (#2c2c2e, which is ~L24 in OKLCH — the same lightness --poster-tone-low
+ * targets) are the closest stand-ins.
+ *
+ * The blue one is transitional and should never actually paint: DESIGN.md
+ * reserves --accent for things you can operate, and a section rule is not
+ * one. It is here because it is what these sections looked like before —
+ * `.sectionLabel` in page.module.css was `color: var(--accent)` — so if the
+ * tone tokens are ever absent the page degrades to its previous appearance
+ * rather than to a dropped declaration.
+ *
+ * These three READ `--poster-tone*`; nothing in this file may DECLARE one.
+ * A custom property's `var()`s are substituted on the element that declares
+ * it, not on the element that uses it — so
+ *
+ *     :root      { --poster-hue: 292; --poster-tone: oklch(76% .085 var(--poster-hue)); }
+ *     .thisAnime { --poster-hue: 135; }
+ *
+ * paints violet, not green: `--poster-tone` was already resolved against
+ * :root's hue and only the finished value inherits down. That is why the
+ * tone tokens are declared on the same element that carries `--poster-hue`,
+ * and why re-declaring one here would rebuild the same dead feature a level
+ * lower. Read them; do not restate them.
+ */
+.section {
+  --sec-tone: var(--poster-tone, var(--accent));
+  --sec-tone-mid: var(--poster-tone-mid, var(--separator));
+  --sec-tone-low: var(--poster-tone-low, var(--bg-elevated));
+
+  /* Row separator. Not --separator (0.65 alpha): that is a divider you are
+   * meant to notice, and at one per row down a 34-row list it rebuilds the
+   * grid of boxes this file removed. This is a hairline. */
+  --sec-hairline: rgba(255, 255, 255, 0.07);
+
+  /* The one "lifted" surface, used only on hover. Neutral rather than
+   * hue-tinted on purpose — at 4.5% alpha a hue is imperceptible, and the
+   * per-anime colour is already carrying the section rule, the role kicker,
+   * the poster glow and the scrollbar. */
+  --sec-raise: rgba(255, 255, 255, 0.045);
+
+  /* Micro-label alpha. Off the token scale, like the 0.75 / 0.50 / 0.42
+   * literals page.module.css keeps next door: --text-secondary (0.60) is
+   * too loud for a 10px kicker and --text-tertiary (0.30) is the documented
+   * floor for readable copy, which a role label is. */
+  --sec-meta: rgba(235, 235, 245, 0.45);
+
+  /* Measured against the reference: heading to heading was 262px where the
+   * design has 292, and that difference is what stops two adjacent bands
+   * reading as one. Was clamp(36px, 5vw, 64px). */
+  margin-top: clamp(44px, 5vw, 72px);
+}
+
+/* Recommendations is the last thing on the page. */
+.sectionLast {
+  composes: section;
+  margin-bottom: var(--sp-3xl);
+}
+
+/* Section head: a short rule in the anime's own colour, the title, and the
+ * count. Not a full-width divider — a line across the page separates two
+ * things, and there is nothing above these sections to separate them from. */
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  /* 22, not --sp-md's 16. Measured off the reference: the heading sits one
+   * line-height clear of the content it introduces, and 16 read as attached
+   * to it. Off the spacing scale on purpose — the scale has no 22, and
+   * snapping to 24 overshoots by enough to see. */
+  margin-bottom: 22px;
+}
+
+.headTitle {
+  flex: none;
+  margin: 0;
+  font-family: var(--font-display);
+  /* 15px, a hair above the 14.5px body it introduces, carrying its rank on
+   * weight and on the rule beside it rather than on size. The reference
+   * layout sets it here; at 19px the headings started to compete with the
+   * hero title for the page's one piece of scale contrast.
+   *
+   * Sora has no CJK glyphs, so a Chinese heading renders in --font-cjk
+   * either way — the display face only shows up on a Latin section name. */
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.62;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.headTitle::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  margin-right: 11px;
+  /* Sits the rule on the x-height rather than the baseline. */
+  vertical-align: 0.34em;
+  border-radius: 1px;
+  background: var(--sec-tone);
+}
+
+/* Digits only — which is the one place a monospace face is unambiguously
+ * right, and the one place it is safe here. The repo ships no CJK webfont,
+ * so a Chinese label set in var(--font-mono) falls through JetBrains Mono
+ * and ui-monospace to whatever the OS last-resorts to; every other label in
+ * this file therefore stays in the sans stack and gets its "micro" reading
+ * from size, weight and tracking instead. */
+.headCount {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+
+/* ── Poster tiles — relations and recommendations ────────────────────────
+ *
+ * One tile, two containers. Relations get a grid because the set is bounded
+ * and browsing it is the point; recommendations keep the horizontal strip
+ * (see the note at its call site in page.tsx — the strip is a deliberate
+ * choice over a bento grid, not an accident).
+ *
+ * 7:10 rather than the 3:4 DESIGN.md's card rule names, for the reason
+ * page.module.css gives about the hero cover: AniList's large covers are
+ * 460x650, so 7:10 crops almost nothing and 3:4 visibly clips the artwork.
+ */
+.posterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-md);
+}
+
+.recStrip {
+  display: flex;
+  gap: var(--sp-md);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  /* `overflow-x: auto` computes the other axis to `auto` too, so the hover
+   * lift and the glow would be clipped at the top edge — and on a container
+   * that already scrolls, a clipped 4px lift reads as a rendering bug. The
+   * padding buys the room back and the negative margin gives it away again
+   * so the strip still aligns with the section head. */
+  padding: 10px 0 var(--sp-sm);
+  margin-top: -10px;
+  /* Thin and in the anime's colour rather than hidden outright, which is
+   * what it was. A scroll container with no scrollbar does not announce
+   * that it scrolls. --poster-tone-mid is a fill here, not text. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--sec-tone-mid) transparent;
+}
+
+.recStrip::-webkit-scrollbar {
+  height: 4px;
+}
+
+.recStrip::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.recStrip::-webkit-scrollbar-thumb {
+  background: var(--sec-tone-mid);
+  border-radius: var(--radius-full);
+}
+
+.posterCard {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+/* The one ring, app-wide — see components/ui/focusRing.test.ts, which fails
+ * the build on any other. The transparent outline is for forced-colors
+ * mode, where box-shadow is not painted. */
+.posterCard:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.recCard {
+  composes: posterCard;
+  flex: 0 0 140px;
+  scroll-snap-align: start;
+}
+
+.posterFrame {
+  position: relative;
+  aspect-ratio: 7 / 10;
+  margin-bottom: var(--sp-sm);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-elevated);
+  /* Inset rather than `border`, so the frame does not add to the box and
+   * cannot disagree with the aspect-ratio. This is the frame the de-boxing
+   * keeps: it is the artwork's own edge, and without it a cover that fades
+   * to black bleeds into the page. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.posterImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* No cover on the wire. Keeps the tile's shape so the grid does not reflow
+ * around a missing image. */
+.posterEmpty {
+  composes: posterImg;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+
+.posterTitle {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Relation type, over the artwork. An opaque tint in the anime's own hue
+ * carrying text in the matching tone — the one same-hue pairing lib/
+ * oklch.test.ts proves clears 4.5:1 at every hue. A translucent wash or a
+ * text-shadow would have no contrast guarantee at all here, because what is
+ * behind it is an arbitrary cover. */
+.relBadge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 5px 8px 5px 7px;
+  border-bottom-right-radius: var(--radius-sm);
+  background: var(--sec-tone-low);
+  color: var(--sec-tone);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* Score, over the artwork. Colour comes from scoreScrimStyle() applied
+ * inline — background and foreground together, never one without the other
+ * (components/anime/scoreStyle.ts documents the production bug that rule
+ * exists to prevent). This rule is shape only. */
+.recScore {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.posterCard:hover .posterFrame {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 18px 36px -18px rgba(0, 0, 0, 0.9),
+    0 0 30px -20px var(--sec-tone);
+}
+
+/* `:focus-within`, not `:focus-visible`. focusRing.test.ts requires every
+ * `:focus-visible` rule in the tree to draw the one specified ring, and this
+ * rule is not a ring — it is the same colour lift the hover gets, extended to
+ * keyboard focus so the card does not brighten for a mouse and stay flat for
+ * a Tab key. The ring itself is on `.posterCard:focus-visible` above. */
+.posterCard:hover .posterTitle,
+.posterCard:focus-within .posterTitle {
+  color: var(--text);
+}
+
+/* Transform and box-shadow only — both composited. The lift on the card
+ * itself comes from the global .card-lift, which is already reduced-motion
+ * guarded; this adds the parts of the hover it cannot express. */
+@media (prefers-reduced-motion: no-preference) {
+  .posterFrame {
+    transition: box-shadow 0.28s var(--ease-out-expo);
+  }
+
+  .posterImg {
+    transition: transform 0.5s var(--ease-out-expo);
+  }
+
+  .posterCard:hover .posterImg {
+    transform: scale(1.05);
+  }
+
+  .posterTitle {
+    transition: color 0.2s var(--ease-out-expo);
+  }
+}
+
+/* ── Characters + voice actors ───────────────────────────────────────────
+ *
+ * The portraits were 58x76 in a 340px track and read as footnotes in a
+ * section whose entire subject is people. They are 64x86 now, and the track
+ * had to widen with them: measured against live data, a 330px track
+ * truncated 2 of 34 real character names (scrollWidth > clientWidth) and a
+ * 400px track truncated none. Enlarging the portrait without widening the
+ * track would have bought the size with truncation.
+ *
+ * Explicit column counts rather than `auto-fill minmax(400px, 1fr)`, which
+ * is what the demo used, for one reason: the hairline below is drawn with
+ * `.person + .person`, and under auto-fill "the previous sibling" is not
+ * "the row above" — the second item of the first row would get a top
+ * hairline and the first would not. Knowing the column count is what lets
+ * the first ROW be excluded instead of the first ITEM. The breakpoints are
+ * the widths at which each track clears 400px inside `.container`
+ * (max-width 1400, 24px gutters).
+ */
+.people {
+  display: grid;
+  grid-template-columns: 1fr;
+  column-gap: clamp(24px, 3vw, 44px);
+}
+
+@media (min-width: 880px) {
+  .people {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 1340px) {
+  .people {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.person {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  /* Negative margin against the padding: the hover surface extends past the
+   * text into the gutter, so it reads as a row of the list rather than as a
+   * box that appeared around the text. */
+  padding: 12px 10px;
+  margin: 0 -10px;
+  border-radius: 10px;
+  box-shadow: 0 -1px 0 var(--sec-hairline);
+}
+
+/* Top of each column gets no rule — there is nothing above it to divide. */
+.person:first-child {
+  box-shadow: none;
+}
+
+@media (min-width: 880px) {
+  .person:nth-child(-n + 2) {
+    box-shadow: none;
+  }
+}
+
+@media (min-width: 1340px) {
+  .person:nth-child(-n + 3) {
+    box-shadow: none;
+  }
+}
+
+.person:hover {
+  background: var(--sec-raise);
+}
+
+.personSide {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+
+/* The voice actor mirrors the character: portraits at the outside edges,
+ * names meeting in the middle. Two identical left-aligned blocks side by
+ * side read as one four-column table; mirrored they read as a pairing. */
+.personSideVa {
+  composes: personSide;
+  flex-direction: row-reverse;
+  text-align: right;
+}
+
+.portrait {
+  width: 64px;
+  height: 86px;
+  flex: none;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+}
+
+.personText {
+  min-width: 0;
+}
+
+/* Kicker above the name, not a caption below it. Above, it labels what
+ * follows and the eye can skip it; below, it competes with the next row's
+ * name for the same piece of vertical space. */
+.personRole {
+  margin-bottom: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sec-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The character's role is the one that varies per row and per anime, so it
+ * is the one that carries the colour. The voice actor's label is the same
+ * string on every row and stays neutral. */
+.personRoleMain {
+  composes: personRole;
+  color: var(--sec-tone);
+}
+
+.personName {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .person {
+    transition: background 0.16s var(--ease-out-expo);
+  }
+}
+
+/* Below this width two portraits and two names cannot share a line at any
+ * legible size — 288px of content minus 128px of portrait leaves 80px per
+ * name. So the pair stacks and the voice actor takes a left rule instead of
+ * a column, which says "belongs to the row above" without a box. */
+@media (max-width: 560px) {
+  .person {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .personSideVa {
+    flex-direction: row;
+    text-align: left;
+    padding-left: 13px;
+    box-shadow: inset 2px 0 0 var(--sec-tone-low);
+  }
+}
+
+/* ── Staff ───────────────────────────────────────────────────────────────
+ *
+ * The images are the fix here. `staff[].imageUrl` is populated (10/10 on the
+ * sampled title) and the section was rendering a 36px circle for it, which
+ * is small enough to read as a bullet rather than a face. 44px is the same
+ * treatment at a size that is actually a portrait.
+ */
+.staffGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px 32px;
+}
+
+.staffRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.staffAvatar {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+}
+
+.staffText {
+  min-width: 0;
+}
+
+/* Same kicker-above-name order as the character rows, for the same reason,
+ * and so the two sections scan as one system. */
+.staffRole {
+  composes: personRole;
+}
+
+.staffName {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Synopsis band ────────────────────────────────────────────────────────
+ *
+ * The body copy used to live inside the hero, on top of the artwork. It is
+ * the longest text on the page and the thing a search visitor arrived to
+ * read, and it was competing with a picture for legibility — which is also
+ * what forced the hero's old gradient to be dark enough to bury the faces.
+ * Moving it out is what let the artwork above go full-bleed.
+ *
+ * Two columns on a desktop, stacked on a phone. The scores sit beside the
+ * text rather than inside the facts sentence because a value out of 100 and
+ * a value out of 10 are unreadable side by side without their denominators,
+ * and a denominator has no place in a dot-separated list.
+ */
+.synopsis {
+  /* The same three aliases .section declares. The synopsis is a section in
+   * every sense except that it does not use that class (it has its own grid),
+   * and without these `--sec-tone` is undefined here — which made
+   * .headTitle::before paint with no background at all, so the rule beside
+   * "简介" silently vanished while every other heading kept theirs. */
+  --sec-tone: var(--poster-tone, var(--accent));
+  --sec-tone-mid: var(--poster-tone-mid, var(--separator));
+  --sec-tone-low: var(--poster-tone-low, var(--bg-elevated));
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(20px, 3vw, 44px);
+  margin: clamp(24px, 3.4vw, 44px) 0 0;
+}
+
+@media (min-width: 900px) {
+  .synopsis {
+    grid-template-columns: minmax(0, 1fr) 220px;
+    align-items: start;
+  }
+}
+
+.synopsisBody {
+  min-width: 0;
+}
+
+/* ── Score panel ─────────────────────────────────────────────────────── */
+
+.scorePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.scoreItem {
+  display: grid;
+  gap: 4px;
+}
+
+/* Same rank as .infoLabel — these are the same kind of thing (a field name
+ * over a value) and were set two points apart for no reason. */
+.scoreLabel {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+
+.scoreValue {
+  font-family: var(--font-mono);
+  font-size: 34px;
+  /* 700 and a negative tracking. JetBrains Mono is loaded at 400/500 only,
+   * so 700 synthesises — accepted here because this is the one place on the
+   * page where the number is the headline, and the alternative is a 34px
+   * numeral at book weight, which reads as a placeholder. The tightening
+   * counters the mono advance, which at this size opens "8.5" into three
+   * separate marks. */
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  /* Neutral, not hue-tinted — see the note in page.module.css: a 0.006
+   * chroma "white" still shifts 9/255 across the catalogue's hues. */
+  color: rgba(235, 235, 245, 0.94);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* Two treatments, deliberately. AniList carries the anime's colour because
+ * it is the site's own headline number; Bangumi sits in plain ink because
+ * two accented numerals stacked read as two competing headlines. Neither
+ * uses a score band: a band turns a number into a verdict, and this panel
+ * is a record, not a review. */
+.scoreValueAccent {
+  composes: scoreValue;
+  color: var(--sec-tone, var(--poster-tone));
+}
+
+.scoreDenom {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.scoreVotes {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* Track and fill in one element — the track is the border-bottom, the fill
+ * is the child. One fewer node than a wrapper plus a bar, and the track
+ * cannot get out of sync with the fill's width because they share a box. */
+.scoreBar {
+  margin-top: 6px;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.scoreBar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--sec-tone, var(--poster-tone));
+}
+
+/* ── Information table ────────────────────────────────────────────────────
+ *
+ * Where format / season / studio / source / air date went when the hero's
+ * facts line was cut to six items. Labelled pairs, because without a label
+ * the reader has to infer that "TV" is a format and "MADHOUSE" is a studio —
+ * which a dot-separated sentence asks them to do and a table does not.
+ *
+ * auto-fill rather than a fixed column count: the number of fields is fixed
+ * at eight but the width available is not, and every cell holds one short
+ * pair, so there is no row-boundary logic that needs to know where a row
+ * starts (unlike .people, which draws a hairline per row).
+ */
+/* Eight columns, one per field, rather than auto-fill.
+ *
+ * There are exactly eight fields and they are the same eight on every anime,
+ * so a track count that changes with the viewport buys nothing and costs the
+ * table its most useful property: the same field is in the same place on
+ * every page. Below the breakpoint it drops to four and then two, which are
+ * factors of eight, so a field never lands alone on a row. */
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 22px 30px;
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .infoGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .infoGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.infoCell {
+  min-width: 0;
+}
+
+/* Mono, because these are labels rather than prose: a fixed advance width
+ * makes eight of them across a row read as one rank of type instead of eight
+ * words of varying colour. Same treatment as the score panel's labels. */
+.infoLabel {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 7px;
+}
+
+/* 500 rather than 400: the value has to hold its own against a label that is
+ * uppercase and letterspaced, which reads heavier than its size suggests. */
+.infoValue {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 500;
+  line-height: 1.62;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+

@@ -36,7 +36,7 @@ const s = {
     color: "oklch(72% 0.18 30 / 0.95)",
   } as CSSProperties,
   title: {
-    fontFamily: "'Sora',sans-serif",
+    fontFamily: "var(--font-display)",
     fontWeight: 600,
     fontSize: 22,
     color: "#fff",

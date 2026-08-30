@@ -1,0 +1,544 @@
+/* The episode grid on /anime/[id] — the section that both shows the watched
+ * set and writes it.
+ *
+ * Why a stylesheet, when this component used to be entirely inline styles:
+ *
+ *   · Cost. There is no pagination and no virtualisation here — the render
+ *     loop emits one cell per episode up to `total`, so a 1000-episode series
+ *     draws 1000 cells. Each of those cells used to allocate three fresh
+ *     style objects per render (shell, number, discussion chip) plus a
+ *     spread of the toggle's. State lives in `data-` attributes the
+ *     stylesheet reads now, and a cell allocates nothing.
+ *
+ *   · States that cannot be written inline at all: :hover, :focus-visible,
+ *     :active, prefers-reduced-motion. Those lived in a <style> string
+ *     injected by the component, which put them outside the reach of
+ *     ui/focusRing.test.ts — and the ring in there was `outline: 2px solid`
+ *     blue, not the one box-shadow ring DESIGN.md specifies. Worse, the cell
+ *     shell was `overflow: hidden`, and overflow clips a descendant's
+ *     outline: the only focus indicator these two buttons had was being
+ *     cropped by the frame around it. Both fixed here, in a file the lint can
+ *     see.
+ *
+ * Colour here is almost entirely semantic, and that is a decision rather
+ * than an omission. Every cell reports a state — watched, furthest, open —
+ * and it reports it in colour, so a per-anime hue that is free to land
+ * anywhere on the wheel cannot also be a state in this grid: rendered
+ * against real cover hues, an accent-tinted "open" cell reads as watched at
+ * hue ~135 and as an error at hue ~25. So --poster-tone appears exactly
+ * once, on the section label, which identifies rather than reports. (And
+ * never --poster-accent, the raw sampled hex: its contrast against the page
+ * swings across the catalogue, which is why the tone ladder exists at all.)
+ */
+
+/* The same top margin the sections either side of this one use (see
+ * app/[lang]/anime/[id]/sections.module.css). This section sits in that
+ * stack — staff above it, recommendations below — and it had been carrying
+ * its own off-scale 40px, which put it a step out of the page's cadence at
+ * every viewport width. */
+.section {
+  margin-top: clamp(36px, 5vw, 64px);
+  margin-bottom: var(--sp-3xl);
+}
+
+/* ── Section header ──────────────────────────────────────────────────────── */
+
+.headerRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: var(--sp-sm);
+}
+
+/* Matches the section headings below it (sections.module.css .headTitle) —
+ * this one used to be 13px uppercase with 2px tracking while every other
+ * heading on the page was 17px sentence case, so the episodes section read
+ * as a different kind of thing than the ones either side of it. */
+.sectionLabel {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sectionLabel::before {
+  content: "";
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--poster-tone, #0a84ff);
+}
+
+.progressText {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+/* The section-level answer to "how far am I", readable without counting
+ * cells. One element for the whole grid rather than a per-cell decoration,
+ * so it costs nothing at 1000 episodes. Decorative: the same fact is already
+ * stated as text in .progressText, which is why the meter is aria-hidden. */
+.meter {
+  position: relative;
+  height: 4px;
+  margin: 0 0 var(--sp-md);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  /* No --success-dim token exists; the ramp is the same green twice. */
+  background: linear-gradient(90deg, rgba(48, 209, 88, 0.45), var(--success));
+  transform-origin: left center;
+  transition: transform 320ms var(--ease-out-expo);
+}
+
+/* ── The "we do not know the count yet" panel ────────────────────────────── */
+
+/* Dashed rather than solid on purpose: it reads as a slot waiting to be
+ * filled, which is the claim being made. Solid borders elsewhere in this
+ * section read as finished content. */
+.pendingPanel {
+  margin-top: var(--sp-md);
+  padding: 18px var(--sp-md);
+  border: 1px dashed var(--separator-opaque);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.pendingTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.72);
+}
+
+.pendingHint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+/* Rows in columns, not a wall of numbered tiles.
+ *
+ * The tile grid was `minmax(88px, 1fr)`, and at 88px a cell fits roughly
+ * four CJK characters — so every episode title rendered as an ellipsis and
+ * the only thing distinguishing episode 14 from 15 was invisible. Titles are
+ * the reason this section exists for a returning viewer.
+ *
+ * 300px is the narrowest track that fits a mark, a two-digit number and a
+ * readable title; auto-fill then gives four columns at 1440px and one on a
+ * phone, with no breakpoint. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0 28px;
+}
+
+/* Phones carry the densest grids and the smallest viewport. A 72px track
+ * fits four cells across a 360px screen where 88px fits three, which is a
+ * row less scrolling per four episodes — and smaller cells are less paint,
+ * which is the thing that actually scales badly here. */
+@media (max-width: 600px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: var(--sp-sm);
+  }
+}
+
+/* ── One cell ────────────────────────────────────────────────────────────── */
+
+/* De-boxed. The tile had a border and a fill because it had to read as a
+ * discrete target at 88px square; a row is a row and does not. What is left
+ * is a hairline between rows and a hover wash — the watched state is carried
+ * by the mark and the number, not by a frame. */
+.cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+/* Watched: the disc fills AND takes a tick.
+ *
+ * Fill alone said "this one is different"; it did not say what. A tick is
+ * the one mark a reader does not have to learn, and it survives the case
+ * this list will hit — a colour-blind reader, for whom a green disc and a
+ * grey ring differ only in lightness.
+ *
+ * The glyph is a background image rather than a ::after with borders,
+ * because a rotated-box checkmark shifts by a subpixel at this size and the
+ * ring is only 16px across. */
+.cell[data-cell-state="watched"] .mark,
+.cell[data-cell-state="completed"] .mark {
+  border-color: var(--success);
+  background-color: var(--success);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='8' viewBox='0 0 10 8'%3E%3Cpath d='M1 4.2l2.6 2.6L9 1.2' fill='none' stroke='%23071a0c' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.cell[data-cell-state="watched"] .number,
+.cell[data-cell-state="completed"] .number {
+  color: var(--success);
+}
+
+.cell[data-cell-state="watched"] .title,
+.cell[data-cell-state="completed"] .title {
+  color: var(--text-secondary);
+}
+
+/* The furthest mark is a spine on the row's leading edge — it follows the
+ * row without needing a box to attach to. */
+.cell[data-furthest-marked="true"] {
+  box-shadow: inset 2px 0 0 0 var(--success);
+}
+
+/* Open: a hairline spine and a whisper of tint, not a filled blue row.
+ *
+ * --accent-dim is the site's "this is selected" fill, and at 12% blue across
+ * a full-width row it read louder than the watched state right next to it —
+ * the row you are READING outshouting the rows you have SEEN. The panel
+ * opening underneath is the real indicator; this only has to connect the two. */
+.cell[data-open="true"] {
+  background-color: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 2px 0 0 0 var(--poster-tone, var(--accent));
+}
+
+.toggle {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 4px;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  border-radius: var(--radius-sm);
+}
+
+/* The probing placeholder shares this class and is a <div>: same box, no
+ * pointer. Only the real control claims one. */
+.toggle[data-episode-toggle] {
+  cursor: pointer;
+}
+
+/* The watched mark. A fixed 16px box in every state, so a row cannot change
+ * height when the auth probe lands or when it is toggled — the old ✓ glyph
+ * was 1px taller than the box reserved for it, which shifted the whole grid
+ * the moment a cell flipped to watched. */
+.mark {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(235, 235, 245, 0.28);
+  background: transparent;
+  transition:
+    border-color 150ms var(--ease-out-expo),
+    background-color 150ms var(--ease-out-expo);
+}
+
+.number {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell[data-cell-state="watched"] .kicker,
+.cell[data-cell-state="completed"] .kicker {
+  color: rgba(48, 209, 88, 0.55);
+}
+
+.cell[data-cell-state="watched"] .number,
+.cell[data-cell-state="completed"] .number {
+  color: var(--success);
+}
+
+.cell[data-open="true"] .number {
+  color: var(--accent);
+}
+
+/* ── The discussion control ──────────────────────────────────────────────── */
+
+/* In the row, at its trailing edge — it was a 24x20 sticker pinned over the
+ * tile's corner, which read as a badge rather than a control. */
+.discussion {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+/* Episodes people are talking about should be findable by scanning, so a
+ * count is a brighter footer than an empty one. The empty one stays visible
+ * rather than appearing on hover: most of this traffic is touch, where
+ * reveal-on-hover means never revealed. */
+.discussion[data-has-comments="true"] {
+  background-color: rgba(120, 120, 128, 0.2);
+  color: rgba(235, 235, 245, 0.85);
+}
+
+/* The label carries an emoji, and an emoji glyph paints its own colours —
+ * `color` moves the digits next to it and leaves the bubble at full
+ * saturation. So the quiet state is opacity, which the glyph does obey.
+ * Without this the empty footer and a busy one look the same from a metre
+ * away, which is the distinction this footer exists to draw. */
+.discussion > span {
+  opacity: 0.45;
+  transition: opacity 150ms var(--ease-out-expo);
+}
+
+.discussion[data-has-comments="true"] > span {
+  opacity: 1;
+}
+
+/* Deliberately keeps the neutral fill. The cell behind it is already tinted
+ * with --accent-dim, so tinting the footer the same way would dissolve the
+ * boundary between the two controls. The divider and the text carry the
+ * open state instead. */
+.cell[data-open="true"] .discussion {
+  background-color: transparent;
+  color: var(--poster-tone, var(--accent));
+}
+
+/* ── Interaction ─────────────────────────────────────────────────────────── */
+
+/* Layered, so the cell answers as a unit and each control still answers for
+ * itself: the frame lifts wherever the pointer is inside it, and whichever
+ * of the two halves is actually under the pointer lights up. */
+@media (hover: hover) {
+  .cell:hover {
+    border-color: rgba(235, 235, 245, 0.28);
+    transform: translateY(-1px);
+  }
+
+  .cell[data-cell-state="watched"]:hover,
+  .cell[data-cell-state="completed"]:hover {
+    border-color: rgba(48, 209, 88, 0.6);
+  }
+
+  .cell[data-furthest-marked="true"]:hover {
+    border-color: rgba(48, 209, 88, 0.9);
+  }
+
+  /* Last, for the same reason the resting rules are ordered this way: these
+   * all match at one specificity and the open cell has to win. */
+  .cell[data-open="true"]:hover {
+    border-color: rgba(10, 132, 255, 0.75);
+  }
+
+  .toggle[data-episode-toggle]:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+  }
+
+  .discussion:hover {
+    background-color: rgba(120, 120, 128, 0.34);
+    color: rgba(235, 235, 245, 0.95);
+  }
+
+  .discussion:hover > span {
+    opacity: 1;
+  }
+}
+
+.toggle[data-episode-toggle]:active {
+  transform: scale(0.96);
+}
+
+/* The one ring DESIGN.md specifies, on both controls. Not the poster tone
+ * and not the watched green: a focus ring that changes colour with the
+ * artwork or with the cell's state stops meaning "you are here" — see
+ * ui/focusRing.test.ts, which is what this rule is written against.
+ * z-index so the ring paints over the neighbouring cells it overlaps. */
+.toggle:focus-visible,
+.discussion:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell,
+  .toggle,
+  .discussion,
+  .discussion > span,
+  .meterFill {
+    transition: none;
+  }
+
+  .cell:hover,
+  .toggle[data-episode-toggle]:active {
+    transform: none;
+  }
+}
+
+/* ── Latest-discussion preview, under the grid ───────────────────────────── */
+
+.preview {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.previewHead {
+  margin-bottom: var(--sp-sm);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.previewList {
+  display: grid;
+  gap: var(--sp-sm);
+}
+
+.previewRow {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+
+.previewAvatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.previewAvatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.previewBody {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.previewName {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.previewText {
+  color: rgba(235, 235, 245, 0.62);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (hover: hover) {
+  .previewBody:hover .previewText {
+    color: var(--text);
+  }
+}
+
+.previewAvatar:focus-visible,
+.previewBody:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── The expanded comment panel ──────────────────────────────────────────── */
+
+/* Spans every column so it lands on its own row directly beneath the cell
+ * that opened it, whatever the auto-fill track count came out as. */
+/* No box. The panel is a band the list opens into, not a card floating on
+ * top of it — a border here draws a rectangle around content that already
+ * has a full-width row to itself, and the reference layout separates it with
+ * rules instead. */
+.panel {
+  grid-column: 1 / -1;
+  margin: var(--sp-sm) 0 var(--sp-lg);
+  padding: var(--sp-md) 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Two lines per row: the reader's title, then the original underneath. */
+.titles {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+/* The original is Japanese, so it is set in a Japanese face — see
+ * globals.css --font-jp for why that is not the same as the CJK stack. It is
+ * also a step down in size and colour: it is a cross-reference, not the
+ * label, and at the same weight it doubles the visual density of the list. */
+.original {
+  font-family: var(--font-jp);
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

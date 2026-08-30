@@ -99,7 +99,7 @@ function pillStyle(
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontFamily: "'Sora', sans-serif",
+    fontFamily: "var(--font-display)",
     // ✓ needs less optical size than + to read at the same weight.
     fontSize: subscribed ? 16 : 22,
     fontWeight: 400,

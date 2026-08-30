@@ -119,3 +119,22 @@ export function tFromDict(
     return key;
   };
 }
+
+/**
+ * `第 {{ep}} 集` / `Episode {{ep}}` style interpolation, as used repo-wide.
+ *
+ * Lived as a private function inside EpisodesGrid until a second caller
+ * needed it. Double braces, not single: a single `{ep}` collides with the
+ * JSX the templates are written next to, and the repo's existing keys are
+ * already written this way.
+ */
+export function fill(
+  template: string,
+  values: Record<string, string | number>,
+): string {
+  let out = template;
+  for (const [key, value] of Object.entries(values)) {
+    out = out.split(`{{${key}}}`).join(String(value));
+  }
+  return out;
+}
