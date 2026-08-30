@@ -49,6 +49,7 @@ import { useLang } from "@/lib/lang-client";
 import EpisodeComments from "@/components/anime/EpisodeComments";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { DEFAULT_AVATAR_IMAGE } from "@/lib/cardDefaults";
+import { fill } from "@/lib/i18n";
 import { publishWatchedProgress } from "@/lib/watchedProgress";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import {
@@ -133,14 +134,6 @@ function parseSub(raw: unknown): SubscriptionDoc | null {
   };
 }
 
-/** `第 {{ep}} 集` / `Episode {{ep}}` style interpolation, as used repo-wide. */
-function fill(template: string, values: Record<string, string | number>): string {
-  let out = template;
-  for (const [key, value] of Object.entries(values)) {
-    out = out.split(`{{${key}}}`).join(String(value));
-  }
-  return out;
-}
 
 // Every rule this section draws lives in EpisodesGrid.module.css, keyed off
 // the `data-` attributes below rather than off style objects built per cell.
@@ -821,6 +814,7 @@ export default function EpisodesGrid({
                   episode={cell.n}
                   highlightCommentId={highlightCommentId}
                   onCommentDelta={handleCommentDelta}
+                  onClose={() => openDiscussion(cell.n)}
                 />
               </div>
             )}

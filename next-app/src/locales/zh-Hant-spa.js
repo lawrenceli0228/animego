@@ -341,6 +341,9 @@ const zhHant = {
   },
   // Comments
   comment: {
+    episodeTitle: '第 {{ep}} 集的討論',
+    write: '寫回覆',
+    collapse: '收起',
     title: '集數評論', noComments: '暫無評論，來說點什麼吧',
     loginPrompt: '請', loginLink: '登入', loginSuffix: '後參與評論',
     placeholder: '寫下你的評論...', post: '發佈',

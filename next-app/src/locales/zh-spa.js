@@ -345,6 +345,9 @@ const zh = {
   },
   // Comments
   comment: {
+    episodeTitle: '第 {{ep}} 集的讨论',
+    write: '写回复',
+    collapse: '收起',
     title: '集数评论', noComments: '暂无评论，来说点什么吧',
     loginPrompt: '请', loginLink: '登录', loginSuffix: '后参与评论',
     placeholder: '写下你的评论...', post: '发布',

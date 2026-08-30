@@ -286,6 +286,9 @@ const en = {
   },
   // Comments
   comment: {
+    episodeTitle: 'Episode {{ep}} discussion',
+    write: 'Write a reply',
+    collapse: 'Collapse',
     title: 'Comments', noComments: 'No comments yet. Be the first!',
     loginPrompt: '', loginLink: 'Login', loginSuffix: ' to post a comment',
     placeholder: 'Write a comment...', post: 'Post',

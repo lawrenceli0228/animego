@@ -216,8 +216,15 @@
   box-shadow: inset 2px 0 0 0 var(--success);
 }
 
+/* Open: a hairline spine and a whisper of tint, not a filled blue row.
+ *
+ * --accent-dim is the site's "this is selected" fill, and at 12% blue across
+ * a full-width row it read louder than the watched state right next to it —
+ * the row you are READING outshouting the rows you have SEEN. The panel
+ * opening underneath is the real indicator; this only has to connect the two. */
 .cell[data-open="true"] {
-  background-color: var(--accent-dim);
+  background-color: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 2px 0 0 0 var(--poster-tone, var(--accent));
 }
 
 .toggle {
@@ -342,9 +349,8 @@
  * boundary between the two controls. The divider and the text carry the
  * open state instead. */
 .cell[data-open="true"] .discussion {
-  background-color: rgba(120, 120, 128, 0.24);
-  border-top-color: rgba(10, 132, 255, 0.45);
-  color: var(--accent);
+  background-color: transparent;
+  color: var(--poster-tone, var(--accent));
 }
 
 /* ── Interaction ─────────────────────────────────────────────────────────── */
@@ -504,13 +510,15 @@
 
 /* Spans every column so it lands on its own row directly beneath the cell
  * that opened it, whatever the auto-fill track count came out as. */
+/* No box. The panel is a band the list opens into, not a card floating on
+ * top of it — a border here draws a rectangle around content that already
+ * has a full-width row to itself, and the reference layout separates it with
+ * rules instead. */
 .panel {
   grid-column: 1 / -1;
-  margin-top: var(--sp-md);
-  border: 1px solid var(--separator-opaque);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.02);
+  margin: var(--sp-sm) 0 var(--sp-lg);
+  padding: var(--sp-md) 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Two lines per row: the reader's title, then the original underneath. */
