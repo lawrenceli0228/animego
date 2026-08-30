@@ -106,6 +106,11 @@ backup-*.json
 /go-api/server
 /go-api/migrate-mongo
 /go-api/parity-check
+# air's live-reload build output. go-api/.air.toml sets tmp_dir = "tmp" and
+# builds to ./tmp/main, so anyone running `air` gets a ~30 MB binary sitting
+# in git status forever. The bare binaries above were ignored one at a time;
+# this is the directory the tool owns.
+/go-api/tmp/
 
 # 内部待办：含留存指标与未修补缺口，仓库是公开的
 TODO.md

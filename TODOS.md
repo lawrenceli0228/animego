@@ -519,3 +519,22 @@
   **这条 TODO 最重要的作用不是催重构,而是让下一个要写弹窗的人知道 primitive 已经存在** ——
   否则抽象会被手搓的第 12 份白白作废。建议按区域分批,一次一个 PR,每个配一条 e2e 键盘用例。
 - **Depends on / blocked by:** 阻塞于 primitive 先落地。
+
+## 网站 /library 的非 Chrome 兜底
+
+- **What:** 给 `next-app/src/app/[lang]/library/_components/DropZone.tsx` 补上 `webkitdirectory` / `webkitGetAsEntry` 兜底路径,让 Safari / Firefox 用户能建库。`/player` 那个同名文件已经有一份现成实现(`flattenDropFiles` + `<input webkitdirectory>`),直接搬。
+- **Why:** 实测 `library/_components/DropZone.tsx:262` 是 `if (onPick && isFsaSupported) onPick();` —— 非 Chromium 浏览器上点「添加文件夹」**什么都不会发生,没有任何兜底分支**。这些用户不是体验差,是整个本地库功能对他们不存在。
+- **Pros:** `/player` 代码现成可搬;非 Chrome 用户从「完全用不了」变成「能用」;纯前端,不阻塞任何其他工作。
+- **Cons:** 没有持久句柄 —— `File` 对象活不过刷新,每次开站要重选一次文件夹;也没有自动重扫(`FileSystemObserver` 同样 Chromium-only)。
+- **Context:** 2026-08-29 `/plan-eng-review`(agent 方案评审)中发现。⚠️ **降级模式必须在 UI 上明说**,否则「每次要重选文件夹」会被用户读成「功能坏了」—— 这个仓库在静默降级上栓过多次。注意两个 `DropZone.tsx` 是不同文件,别改错。
+  **为什么不等一个"装个东西就好了"的方案:** 任何要求用户先安装本地程序的路线都只救**装了的人**。不装的 Safari / Firefox 用户在那之后依然是今天这个处境,所以这一项不被它取代。
+- **Depends on / blocked by:** 无。纯前端,与其他方向零交集,任何时候都能做。
+
+## deploy.sh 的 smoke 检查从不因为 5xx 失败
+
+- **What:** 让 `scripts/deploy.sh` 末尾那三条 smoke curl 在非 2xx/3xx 时真的让部署红掉,而不是只打印一行状态码。
+- **Why:** 现在是 `curl -sk -o /dev/null -w "HTTP %{http_code} from /"` —— 把状态码**印出来但不判断**,三条都一样。脚本自己最后一行写着「If a smoke line shows 5xx, check `docker compose logs`」,也就是它明确依赖**有人去看那行输出**。一个全站 500 的部署,退出码是 0。这不是假想:2026-08-30 本地把 bgm 字段灌进 `anime_cache` 之后,`/anime/116674` 连续返 500,而整条流程照常走完。
+- **Pros:** 改动极小(三行加 `-f`,或显式比较状态码);把仓库自己那条「验部署要 curl 不能看退出码」的教训真正写进脚本;严重度高于大多数前端缺陷 —— 500 是硬故障,不会自愈。
+- **Cons:** smoke 跑在 `$COMPOSE up -d` **之后**,所以「失败」时新版已经在线且没有回滚。要么接受「大声报错但不回滚」(仍比静默好),要么顺带接上回滚 —— 后者就不是小改动了。`scripts/p9-rollback.sh` 已存在,可以先看它能不能直接接。
+- **Context:** 2026-08-30 的 `/plan-eng-review` 中发现:外部声音指出 smoke 在 `up -d` 之后且不 gate,由读脚本确认。⚠️ 注意别顺手把它改成 `set -e` 直接退出 —— 那会在「新版已上线」的状态下留下一个半完成的部署,比现在更难收拾;先决定失败语义再动手。
+- **Depends on / blocked by:** 无。纯 shell,与任何代码改动零交集。
