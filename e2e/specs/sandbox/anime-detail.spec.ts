@@ -284,17 +284,28 @@ test.describe("the hero on a desktop", () => {
       .locator("main img[aria-hidden='true']")
       .first()
       .boundingBox();
-    // 556 at 1440px — the hero is `clamp(340px, 38.6vw, 560px)` and 38.6vw
-    // is 555.84 here. It was 400, back when this was a fixed-height banner
-    // strip rather than the full background of the hero.
+    // 556 at 1440px. The hero is `clamp(400px, 44vw, 556px)` and 44vw is
+    // 633.6 here, so this is the ceiling. It reached the same number by a
+    // different route before — `clamp(340px, 38.6vw, 560px)`, where 38.6vw
+    // landed on 555.83 — which is why the assertion did not move when the
+    // formula did. Do not read that as the formula being unchanged.
     //
-    // Rounded before comparing: 38.6vw lands on 555.828125 and a bounding
-    // box is a float, so an exact toBe() would pin the number to whatever
-    // sub-pixel the current viewport happens to produce.
+    // Rounded before comparing: a bounding box is a float, so an exact toBe()
+    // would pin the number to whatever sub-pixel the viewport produces.
     expect(Math.round(bannerBox?.height ?? 0)).toBe(556);
 
+    // 216 at 1440px — the cover is `clamp(124px, 15.5vw, 216px)` and 15.5vw
+    // is 223.2 here, so this is the ceiling too. It was 210 under the earlier
+    // `clamp(112px, 22vw, 210px)`; both halves moved together when the hero
+    // was recalibrated against the real 1400px content width (DESIGN.md >
+    // Anime Detail Page > Hero).
+    //
+    // The height is derived rather than typed, because it is not an
+    // independent fact: `aspect-ratio: 210 / 300` owns it, and a hardcoded
+    // second number is just a chance for the two to disagree silently. What
+    // this asserts is that the ratio is intact at the ceiling.
     const coverBox = await page.locator("img.hero-cover").first().boundingBox();
-    expect(coverBox?.width).toBe(210);
-    expect(Math.round(coverBox?.height ?? 0)).toBe(300);
+    expect(coverBox?.width).toBe(216);
+    expect(Math.round(coverBox?.height ?? 0)).toBe(Math.round(216 * (300 / 210)));
   });
 });
