@@ -47,7 +47,14 @@ const SRC = join(import.meta.dir, "..", "..");
  * string literal, and none of the three files it reads contains one.
  */
 function codeOnly(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    // Trailing comments too, not just whole-line ones. The first version
+    // anchored at ^, so `something(); // reset()` kept the prose and any
+    // assertion built on this could be satisfied by a comment sitting to the
+    // right of real code. `(?<!:)` spares `https://` in a string literal,
+    // which is the only other `//` these three files can contain.
+    .replace(/(?<!:)\/\/.*$/gm, "");
 }
 
 function err(digest?: string): Error & { digest?: string } {
@@ -223,9 +230,9 @@ describe("the retry button reloads rather than resetting", () => {
     join(SRC, "components/error/RouteErrorBody.tsx"),
     "utf8",
   );
-  const BOUNDARIES = [
-    "app/[lang]/anime/[id]/error.tsx",
-    "app/[lang]/seasonal/[season]/[year]/error.tsx",
+  const BOUNDARIES: Array<{ file: string; scope: ErrorScope }> = [
+    { file: "app/[lang]/anime/[id]/error.tsx", scope: "detail" },
+    { file: "app/[lang]/seasonal/[season]/[year]/error.tsx", scope: "seasonal" },
   ];
 
   test("the source this suite reads is the real component", () => {
@@ -238,17 +245,47 @@ describe("the retry button reloads rather than resetting", () => {
     expect(codeOnly(BODY_SRC)).toContain("window.location.reload()");
   });
 
+  test("the boundary still reports to Sentry", () => {
+    // An error.tsx boundary swallows the error before the SDK's global
+    // handlers see it, so this call is the only reason either route is
+    // observable at all — the issue that motivated this whole change is known
+    // only because it was there.
+    //
+    // Deleting the effect passes everything else: 33 green, and `tsc --noEmit`
+    // stays clean too, because tsconfig.json does not set noUnusedLocals, so
+    // even the orphaned `import * as Sentry` raises nothing. Sentry would go
+    // quiet, which reads as "fixed".
+    expect(codeOnly(BODY_SRC)).toContain("Sentry.captureException(error)");
+  });
+
   test("no boundary takes reset out of its props", () => {
     // `reset()` re-renders the children without re-fetching them (Next's own
     // docs), so on the client-side module error it reproduces the same throw.
     // Taking the prop is the first step back to that, and it is a one-word
     // edit; this is the thing that notices.
-    for (const rel of BOUNDARIES) {
-      const code = codeOnly(readFileSync(join(SRC, rel), "utf8"));
+    for (const { file } of BOUNDARIES) {
+      const code = codeOnly(readFileSync(join(SRC, file), "utf8"));
       expect(code).toContain("RouteErrorBody");
-      expect(code).not.toMatch(/\breset\s*[,:}]/);
+      // `\??` because `reset?: () => void` is the shape a props interface
+      // would actually use, and without it the guard reads right past the
+      // one declaration most likely to be written.
+      expect(code).not.toMatch(/\breset\s*\??\s*[,:}]/);
       expect(code).not.toMatch(/\breset\s*\(\s*\)/);
     }
     expect(codeOnly(BODY_SRC)).not.toMatch(/\breset\s*\(\s*\)/);
+  });
+
+  test("each boundary passes its own scope", () => {
+    // Nothing else notices this. Both files render, both produce a coherent
+    // error page, and the seasonal route apologises for "this page" — the one
+    // sentence that distinguishes them, wrong, with every test green. Swapping
+    // the two literals is a plausible copy-paste and was undetectable until
+    // this assertion.
+    for (const { file, scope } of BOUNDARIES) {
+      const code = codeOnly(readFileSync(join(SRC, file), "utf8"));
+      expect(code).toContain(`scope="${scope}"`);
+      const other = scope === "detail" ? "seasonal" : "detail";
+      expect(code).not.toContain(`scope="${other}"`);
+    }
   });
 });
