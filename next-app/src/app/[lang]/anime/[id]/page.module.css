@@ -155,6 +155,22 @@
 
 /* ── Type ─────────────────────────────────────────────────────────────── */
 
+/* ── Text on artwork ──────────────────────────────────────────────────────
+ *
+ * Everything in the hero's content column sits on a photograph, and the
+ * gradient behind it only guarantees a dark FIELD — it cannot guarantee dark
+ * pixels under any particular glyph. A pale highlight in the key art lands
+ * behind a stroke and that stroke disappears.
+ *
+ * A wide, soft shadow rather than a hard one: it is not a drop shadow, it is
+ * a local darkening of whatever is behind the text, which is why the blur is
+ * an order of magnitude larger than the offset. Costs nothing on a solid
+ * background and rescues the case where the artwork is bright.
+ *
+ * Measured against the reference, which does the same on its title, its
+ * subtitle and its facts line.
+ */
+
 /* The hero's one piece of scale contrast. Everything else in here is set
  * within a few points of everything else, so the title carries the whole
  * hierarchy by itself — which is only possible because the facts row below
@@ -166,6 +182,9 @@
   margin-bottom: var(--sp-xs);
   line-height: 1.12;
   letter-spacing: -0.02em;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 3px 24px rgba(0, 0, 0, 0.72);
 }
 
 /* The original title, so it is set in a Japanese face. Han characters are
@@ -178,6 +197,7 @@
   font-family: var(--font-jp);
   font-size: 16px;
   margin-bottom: 14px;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.75);
 }
 
 /* Set in the Latin display face and tracked out — it is a transliteration,
@@ -235,6 +255,7 @@
   line-height: 1.85;
   color: var(--text-secondary);
   margin-bottom: 18px;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8);
 }
 
 /* The separator is drawn, not typed. Writing "·" between items in the JSX
@@ -254,6 +275,12 @@
 .facts > *:not(:last-child)::after,
 .factsGenres > *:not(:last-child)::after {
   content: "·";
+  /* inline-block, so the separator does not inherit its host's underline.
+   * The Bangumi score is a link, and its ::after lives INSIDE that link —
+   * text-decoration propagates to descendants and a descendant cannot switch
+   * it off, so `text-decoration: none` here does nothing. An inline-block
+   * establishes its own box and the line stops at its edge. */
+  display: inline-block;
   margin: 0 8px;
   color: rgba(235, 235, 245, 0.28);
 }
@@ -331,24 +358,6 @@
 .factsBgmVotes {
   color: var(--text-tertiary);
   font-size: 12px;
-}
-
-/* ── Hero relations strip ─────────────────────────────────────────────── */
-
-.relationRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-sm);
-  margin-top: 12px;
-}
-
-.relationLabel {
-  color: rgba(235, 235, 245, 0.35);
-  font-size: 11px;
-}
-
-.descBlock {
-  margin-bottom: 20px;
 }
 
 .descBlockLast {

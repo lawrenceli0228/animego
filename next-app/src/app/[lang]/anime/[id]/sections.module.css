@@ -584,6 +584,15 @@
  * and a denominator has no place in a dot-separated list.
  */
 .synopsis {
+  /* The same three aliases .section declares. The synopsis is a section in
+   * every sense except that it does not use that class (it has its own grid),
+   * and without these `--sec-tone` is undefined here — which made
+   * .headTitle::before paint with no background at all, so the rule beside
+   * "简介" silently vanished while every other heading kept theirs. */
+  --sec-tone: var(--poster-tone, var(--accent));
+  --sec-tone-mid: var(--poster-tone-mid, var(--separator));
+  --sec-tone-low: var(--poster-tone-low, var(--bg-elevated));
+
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: clamp(20px, 3vw, 44px);

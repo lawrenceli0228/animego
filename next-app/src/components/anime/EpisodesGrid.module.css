@@ -181,10 +181,23 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
 }
 
+/* Watched: the disc fills AND takes a tick.
+ *
+ * Fill alone said "this one is different"; it did not say what. A tick is
+ * the one mark a reader does not have to learn, and it survives the case
+ * this list will hit — a colour-blind reader, for whom a green disc and a
+ * grey ring differ only in lightness.
+ *
+ * The glyph is a background image rather than a ::after with borders,
+ * because a rotated-box checkmark shifts by a subpixel at this size and the
+ * ring is only 16px across. */
 .cell[data-cell-state="watched"] .mark,
 .cell[data-cell-state="completed"] .mark {
   border-color: var(--success);
-  background: var(--success);
+  background-color: var(--success);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='8' viewBox='0 0 10 8'%3E%3Cpath d='M1 4.2l2.6 2.6L9 1.2' fill='none' stroke='%23071a0c' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
 }
 
 .cell[data-cell-state="watched"] .number,
@@ -489,7 +502,10 @@
 
 /* ── The expanded comment panel ──────────────────────────────────────────── */
 
+/* Spans every column so it lands on its own row directly beneath the cell
+ * that opened it, whatever the auto-fill track count came out as. */
 .panel {
+  grid-column: 1 / -1;
   margin-top: var(--sp-md);
   border: 1px solid var(--separator-opaque);
   border-radius: var(--radius);

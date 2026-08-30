@@ -309,18 +309,6 @@ export async function generateMetadata({
 
 // --- Hero (banner + cover + meta block) ---
 
-// Relation types we surface inline in the hero (matches the legacy
-// SHOWN_RELATIONS set). RecommendationsSection further down still
-// renders the full relation set; this inline strip is a UX shortcut so
-// users see the prequel/sequel without scrolling.
-const HERO_SHOWN_RELATIONS = new Set([
-  "PREQUEL",
-  "SEQUEL",
-  "PARENT",
-  "SIDE_STORY",
-  "SPIN_OFF",
-]);
-
 // Collapsed-description budget, in "latin character" units — CJK counts two.
 // Measuring width rather than characters keeps the collapsed block the same
 // apparent size in both scripts. With a plain character count the Chinese
@@ -739,12 +727,9 @@ function SynopsisSection({
   const bgmSummaryHref = detail.bgmId
     ? `https://bgm.tv/subject/${detail.bgmId}`
     : undefined;
-  const heroRelations = (detail.relations ?? []).filter((r) =>
-    HERO_SHOWN_RELATIONS.has(r.relationType),
-  );
   const score = detail.averageScore;
   const bgmScore = detail.bangumiScore;
-  if (!descFull && heroRelations.length === 0) return null;
+  if (!descFull) return null;
 
   return (
     <section className={x.synopsis} aria-labelledby="synopsis-heading">
@@ -765,7 +750,7 @@ function SynopsisSection({
         </header>
         {/* Description with 展开更多 / 收起 toggle */}
         {descFull && (
-          <div className={heroRelations.length > 0 ? s.descBlock : s.descBlockLast}>
+          <div className={s.descBlockLast}>
             <DescriptionExpand
               truncated={descTruncated}
               full={descFull}
@@ -786,52 +771,6 @@ function SynopsisSection({
               }
               sourceHref={isBangumiSummary ? bgmSummaryHref : undefined}
             />
-          </div>
-        )}
-        {/* Inline relations (prequel / sequel / parent / side story /
-            spin-off) — matches legacy AnimeDetailHero.jsx behavior of
-            keeping the most important relations close to the title
-            instead of forcing the user to scroll to the relations
-            section. The full RelationsSection still renders below. */}
-        {heroRelations.length > 0 && (
-          <div className={s.relationRow}>
-            {heroRelations.map((r) => {
-              const relLabel =
-                relationLabel(r.relationType, lang);
-              // Was `r.title || r.titleChinese` — legacy AnimeDetailHero.jsx
-              // pinned romaji, so a Chinese title sitting right there in the
-              // payload was never shown (prod: 48.7% of relation rows carry
-              // one). pickRelatedTitle prefers it under zh. `lang` is
-              // server-pinned zh here, so this reads Chinese-first for every
-              // visitor — same as pickTitle two screens up; see the route
-              // note at the top of this file. Wire field is `title` not
-              // `titleRomaji` — see DetailRelation type.
-              const relTitle =
-                pickRelatedTitle(r, lang) || `Anime #${r.anilistId}`;
-              return (
-                <Link
-                  key={`${r.relationType}-${r.anilistId}`}
-                  href={`/anime/${r.anilistId}`}
-                  className="hero-relation-chip"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "5px 12px",
-                    borderRadius: 8,
-                    background: "rgba(120,120,128,0.12)",
-                    border: "1px solid rgba(84,84,88,0.65)",
-                    color: "rgba(235,235,245,0.60)",
-                    fontSize: 12,
-                    fontWeight: 500,
-                    textDecoration: "none",
-                  }}
-                >
-                  <span className={s.relationLabel}>{relLabel}</span>
-                  {relTitle}
-                </Link>
-              );
-            })}
           </div>
         )}
       </div>
@@ -868,8 +807,21 @@ function SynopsisSection({
               </div>
             </div>
           ) : null}
+          {/* Who else is watching, under the scores.
+              It used to sit alone at the bottom of the page, below the
+              recommendations, where it read as a footer rather than as part
+              of what this anime is. Here it closes the same column the
+              scores open — both are "what other people did with this show". */}
+          <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
         </aside>
-      ) : null}
+      ) : (
+        // No scores: the watcher strip still belongs in the column, and an
+        // empty second grid track would collapse the synopsis to full width
+        // on one anime and not the next.
+        <aside className={x.scorePanel}>
+          <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
+        </aside>
+      )}
     </section>
   );
 }
@@ -1268,7 +1220,6 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
               lang={lang}
               dict={dict}
             />
-            <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
           </div>
         </HeroAccent>
       </main>
