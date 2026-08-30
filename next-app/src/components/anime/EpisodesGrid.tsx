@@ -33,7 +33,23 @@
 // showing a progress number the detail page has already moved past.
 
 import Link from "@/components/ui/LocaleLink";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import {
+  EPISODE_TITLE_MODES,
+  readEpisodeTitleMode,
+  serverEpisodeTitleMode,
+  subscribeEpisodeTitleMode,
+  writeEpisodeTitleMode,
+  type EpisodeTitleMode,
+} from "@/lib/episodeTitleMode";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
@@ -150,6 +166,15 @@ function parseSub(raw: unknown): SubscriptionDoc | null {
 // style object per cell per render is a thousand allocations that buy nothing
 // an attribute selector does not.
 
+// Which name the list prints. The preference itself — storage key, default,
+// and the read/write/subscribe trio — lives in lib/episodeTitleMode.ts; this
+// file only needs the labels for the three buttons.
+const TITLE_MODE_LABEL: Record<EpisodeTitleMode, string> = {
+  localized: "detail.epTitleLocalized",
+  original: "detail.epTitleOriginal",
+  both: "detail.epTitleBoth",
+};
+
 export default function EpisodesGrid({
   anilistId,
   episodes,
@@ -170,6 +195,28 @@ export default function EpisodesGrid({
   const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
   const [discussion, setDiscussion] = useState<EpisodeDiscussionSummary[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Not useState + an effect. This value lives in localStorage, which the
+  // server cannot see, so the two obvious shapes are both wrong: a lazy
+  // initialiser reads storage during the hydrating render and disagrees with
+  // the server's markup, and an effect that calls setState is a cascading
+  // render (and the rule this repo's lint gate enforces). useSyncExternalStore
+  // is the one API that does neither — it renders the server's answer while
+  // hydrating, then switches. It also means another tab changing the
+  // preference moves this list, for free.
+  const titleMode = useSyncExternalStore(
+    subscribeEpisodeTitleMode,
+    readEpisodeTitleMode,
+    serverEpisodeTitleMode,
+  );
+
+  // No local state to keep in step: the switch renders whatever storage says,
+  // so a write that fails (private mode, quota) leaves the control showing the
+  // old value — which is the truth — rather than a selection that did not
+  // survive the next reload.
+  const chooseTitleMode = useCallback((mode: EpisodeTitleMode) => {
+    writeEpisodeTitleMode(mode);
+  }, []);
 
   // Mirrors of the two pieces of state that async write handlers have to read
   // AFTER an await. Reading them off the render closure would hand a handler
@@ -650,15 +697,57 @@ export default function EpisodesGrid({
     });
   }
 
+  // The switch only earns its place when the two names differ somewhere. On a
+  // series with no localised titles — or read in the language the originals
+  // are already in — all three modes render the same list, and a control that
+  // does nothing is worse than no control.
+  const hasOriginals = cells.some((cell) => cell.original !== "");
+
   return (
     <section className={styles.section}>
       <div className={styles.headerRow}>
-        <h2 className={styles.sectionLabel}>{t("detail.episodes")}</h2>
-        {access === "ready" && (
-          <span className={styles.progressText}>
-            {fill(t("detail.watchedProgress"), { done: watchedCount, total })}
+        {/* The count is a sibling of the heading, not part of it: read aloud,
+            "集数列表 13 集" is a heading that says its own body. Same shape as
+            every other section head on this page (sections.module.css). */}
+        <div className={styles.headerMain}>
+          <h2 className={styles.sectionLabel}>{t("detail.episodes")}</h2>
+          {/* Two units, because English has two and Chinese has one. `epUnit`
+              alone renders "1 Eps" on every movie, OVA and single-episode
+              special — a large slice of the catalogue, not an edge case. Both
+              keys are literals so the spaDictCoverage gate can see them. */}
+          <span className={styles.headCount}>
+            {total} {total === 1 ? t("detail.epUnitOne") : t("detail.epUnit")}
           </span>
-        )}
+        </div>
+        <div className={styles.headerTools}>
+          {hasOriginals && (
+            <div
+              role="group"
+              aria-label={t("detail.epTitleModeLabel")}
+              className={styles.titleModes}
+            >
+              {EPISODE_TITLE_MODES.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  // aria-pressed, not aria-selected: these are three toggles
+                  // of which one is on, not tabs — nothing below them is a
+                  // tabpanel, and the list they change is the same list.
+                  aria-pressed={titleMode === mode}
+                  onClick={() => chooseTitleMode(mode)}
+                  className={styles.titleMode}
+                >
+                  {t(TITLE_MODE_LABEL[mode])}
+                </button>
+              ))}
+            </div>
+          )}
+          {access === "ready" && (
+            <span className={styles.progressText}>
+              {fill(t("detail.watchedProgress"), { done: watchedCount, total })}
+            </span>
+          )}
+        </div>
       </div>
       {access === "ready" && (
         <>
@@ -713,11 +802,21 @@ export default function EpisodesGrid({
           // information that distinguishes episode 14 from episode 15 was
           // never legible. A row has the width for it.
           //
-          // The mark replaces the ✓ glyph: it is a fixed 16px box in both
+          // The mark replaces the ✓ glyph: it is a fixed 18px box in both
           // states, so a cell cannot change height when the probe lands or
           // when it is toggled. That was previously a promise the two
           // branches kept by rendering the same markup; now it is one the
           // layout cannot break.
+          // `original` falls back to the localised name rather than to an
+          // empty row: a series where only some episodes carry an original is
+          // common, and blanking those cells would make the switch look like
+          // it deleted them.
+          const primary =
+            titleMode === "original" ? cell.original || cell.title : cell.title;
+          const secondary = titleMode === "both" ? cell.original : "";
+          const primaryIsOriginal =
+            titleMode === "original" && cell.original !== "";
+
           const body = (
             <>
               <span className={styles.mark} aria-hidden="true" />
@@ -725,16 +824,20 @@ export default function EpisodesGrid({
                 {String(cell.n).padStart(2, "0")}
               </span>
               <span className={styles.titles}>
-                {cell.title ? (
-                  <span className={styles.title} title={cell.title}>
-                    {cell.title}
+                {primary ? (
+                  <span
+                    className={styles.title}
+                    data-original={primaryIsOriginal ? "true" : undefined}
+                    title={primary}
+                  >
+                    {primary}
                   </span>
                 ) : (
                   <span className={styles.title} aria-hidden="true" />
                 )}
-                {cell.original ? (
-                  <span className={styles.original} title={cell.original}>
-                    {cell.original}
+                {secondary ? (
+                  <span className={styles.original} title={secondary}>
+                    {secondary}
                   </span>
                 ) : null}
               </span>
@@ -787,9 +890,10 @@ export default function EpisodesGrid({
                 onClick={() => openDiscussion(cell.n)}
                 className={styles.discussion}
               >
-                <span aria-hidden="true">
-                  {commentCount > 0 ? `💬 ${commentCount}` : "💬"}
-                </span>
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M3 2.75h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3.5 2v-2H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z" />
+                </svg>
+                {commentCount > 0 ? <span aria-hidden="true">{commentCount}</span> : null}
               </button>
             </div>
 

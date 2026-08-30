@@ -113,8 +113,10 @@ const zhHant = {
   detail: {
     releasing: '連載中', finished: '已完結',
     notYetReleased: '未開播', cancelled: '已取消',
-    epUnit: '集', readMore: '展開更多', collapse: '收起',
+    epUnit: '集', epUnitOne: '集', readMore: '展開更多', collapse: '收起',
     episodes: '集數列表', noEpisodes: '集數資訊待更新',
+    epTitleModeLabel: '集標題語言',
+    epTitleLocalized: '中文', epTitleOriginal: '原題', epTitleBoth: '並排',
     // EpisodesGrid 在集數未知時渲染的降級文案，與 locales/zh-Hant.ts 同名鍵
     // 同值。手寫，沒有跑過轉換器。說的是「還不知道」，不是「沒有」。
     episodeCountPending: '本季集數待定',

@@ -87,6 +87,56 @@ describe("s2twp misfires stay corrected", () => {
   }
 });
 
+// ── The other direction: Simplified that never got converted at all ────────
+//
+// CORRECTIONS above catches s2twp converting something WRONGLY. This catches
+// it not running at all — a key hand-written straight into zh-Hant in
+// Simplified, or copy-pasted across from zh.ts. That is a different mistake
+// with the same symptom (Simplified text on a Traditional page) and the table
+// above cannot see it: every entry there is a Traditional string.
+//
+// Spot check, NOT a converter. The list is the handful of characters that
+// actually recur in this product's UI copy, each with its Traditional form —
+// enough to catch a whole string pasted over untranslated, which is the real
+// threat model. A single stray character in a long sentence can still slip
+// through, and that is an accepted limit rather than an oversight.
+const SIMPLIFIED_ONLY: Array<[string, string]> = [
+  ["标", "標"],
+  ["题", "題"],
+  ["语", "語"],
+  ["并", "並"],
+  ["间", "間"],
+  ["数", "數"],
+  ["单", "單"],
+  ["页", "頁"],
+  ["设", "設"],
+  ["评", "評"],
+  ["论", "論"],
+  ["讨", "討"],
+  ["选", "選"],
+  ["关", "關"],
+  ["电", "電"],
+  ["视", "視"],
+  ["剧", "劇"],
+  ["载", "載"],
+  ["间", "間"],
+  ["个", "個"],
+];
+
+describe("no Simplified characters survive in zh-Hant", () => {
+  for (const [simp, trad] of SIMPLIFIED_ONLY) {
+    test(`no ${simp} (want ${trad})`, () => {
+      const hits: string[] = [];
+      for (const [name, dict] of DICTS) {
+        for (const [path, value] of stringLeaves(dict)) {
+          if (value.includes(simp)) hits.push(`${name} ${path}: ${value}`);
+        }
+      }
+      expect(hits).toEqual([]);
+    });
+  }
+});
+
 describe("the corrected forms are actually present", () => {
   // A banned-substring check alone would also pass if the key were deleted.
   // These assert the positive side for the corrections that map to a specific

@@ -124,4 +124,57 @@ describe("*-spa dictionaries cover every client t() key", () => {
       expect(missing).toEqual([]);
     });
   }
+
+  // ── Keys the scanner structurally cannot find ────────────────────────────
+  //
+  // `clientTranslationCalls()` matches `t("literal")`. A call site that looks
+  // the key up first — `t(TABLE[mode])`, `t(cond ? a : b)` — is invisible to
+  // it, and the miss is silent in exactly the way this whole file exists to
+  // prevent: `t()` returns the key itself, so the dictionary key ships as
+  // visible UI text with green CI and no console warning.
+  //
+  // Proven, not assumed. Deleting all three episode-title-mode labels from
+  // every *-spa.js at once left the suite at 33 pass / 0 fail. They looked
+  // covered because zh and zh-Hant are held together by hantDictParity's
+  // key-set equality — but that only catches ASYMMETRIC drift between those
+  // two, and a reformat or a "these look unused" cleanup takes both.
+  //
+  // This list is the manual half of the gate. Add to it whenever you write a
+  // `t(variable)` in a client component. It is NOT complete for the repo as it
+  // stands: 13 other indirect call sites already ship unguarded
+  // (EnrichmentSection, EnrichmentBar, FollowButton, PrivateProfileState,
+  // ProfileSafetyActions, FilterChips, OpsLogDrawer). Adding them is welcome
+  // and is somebody's separate piece of work — each one needs its key set read
+  // off the source rather than guessed, which is why they are not here yet.
+  const INDIRECT_KEYS: ReadonlyArray<{ key: string; site: string }> = [
+    // components/anime/EpisodesGrid.tsx — TITLE_MODE_LABEL[mode]
+    { key: "detail.epTitleLocalized", site: "EpisodesGrid TITLE_MODE_LABEL" },
+    { key: "detail.epTitleOriginal", site: "EpisodesGrid TITLE_MODE_LABEL" },
+    { key: "detail.epTitleBoth", site: "EpisodesGrid TITLE_MODE_LABEL" },
+  ];
+
+  test("the indirect-key list still describes real call sites", () => {
+    // Guards the guard: a list that outlived its call site would go on
+    // demanding keys nobody reads, and the next person would delete the keys
+    // rather than the list. Every entry has to be traceable to a file that
+    // still mentions it.
+    const sources = walk(SRC)
+      .filter((f) => !/locales\//.test(f))
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n");
+    const orphaned = INDIRECT_KEYS.filter((k) => !sources.includes(k.key)).map(
+      (k) => `${k.key} (${k.site})`,
+    );
+    expect(orphaned).toEqual([]);
+  });
+
+  for (const lang of LANGS) {
+    test(`${lang}-spa.js resolves the indirect keys too`, () => {
+      const known = new Set(flatten(SPA_DICTS[lang]));
+      const missing = INDIRECT_KEYS.filter((k) => !known.has(k.key)).map(
+        (k) => `${k.key}  ← ${k.site}`,
+      );
+      expect(missing).toEqual([]);
+    });
+  }
 });

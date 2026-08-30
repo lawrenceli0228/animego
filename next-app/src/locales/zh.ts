@@ -130,8 +130,10 @@ const zh = {
   detail: {
     releasing: '连载中', finished: '已完结',
     notYetReleased: '未开播', cancelled: '已取消',
-    epUnit: '集', readMore: '展开更多', collapse: '收起',
+    epUnit: '集', epUnitOne: '集', readMore: '展开更多', collapse: '收起',
     episodes: '集数列表', noEpisodes: '集数信息待更新',
+    epTitleModeLabel: '集标题语言',
+    epTitleLocalized: '中文', epTitleOriginal: '原题', epTitleBoth: '并排',
     // 集数未知时的降级文案 —— 详情页徽章和 EpisodesGrid 共用第一条。
     // 说的是「还不知道」，不是「没有」：番剧在放送期间上游常常没有确认的
     // 总集数，而这一节从前是直接消失的，读者只会理解成这部番没有集数。
