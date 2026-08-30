@@ -99,6 +99,7 @@ export default function DetailActions({
       <div style={rowStyle}>
         <SubscriptionButton
           anilistId={anilistId}
+          episodes={episodes}
           labels={{
             add: labels.subAdd,
             remove: labels.subRemove,

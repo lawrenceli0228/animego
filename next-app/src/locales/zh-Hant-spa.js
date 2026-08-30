@@ -137,6 +137,7 @@ const zhHant = {
     ep: '第', epOf: '/',
     viewDetails: '檢視詳情',
     viewOnBgm: '在 Bangumi 檢視',
+    watchedShort: '已看',
     linkCopied: '連結已複製',
     linkCopyFailed: '複製失敗，請手動複製連結',
     openPlayer: '▶ 本地彈幕播放',

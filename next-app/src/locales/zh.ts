@@ -161,6 +161,7 @@ const zh = {
     ep: '第', epOf: '/',
     viewDetails: '查看详情',
     viewOnBgm: '在 Bangumi 查看',
+    watchedShort: '已看',
     info: '作品信息',
     synopsis: '简介',
     charUnit: '字',

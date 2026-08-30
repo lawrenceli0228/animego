@@ -33,7 +33,7 @@
 // showing a progress number the detail page has already moved past.
 
 import Link from "@/components/ui/LocaleLink";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import { hasAuthHint } from "@/lib/clientAuth";
@@ -49,6 +49,7 @@ import { useLang } from "@/lib/lang-client";
 import EpisodeComments from "@/components/anime/EpisodeComments";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { DEFAULT_AVATAR_IMAGE } from "@/lib/cardDefaults";
+import { publishWatchedProgress } from "@/lib/watchedProgress";
 import { authHrefWithFrom } from "@/components/auth/authFromLink";
 import {
   localizeHref,
@@ -579,6 +580,28 @@ export default function EpisodesGrid({
     );
   };
 
+  // Tell the status control what the count is now.
+  //
+  // SubscriptionButton shows this same number beside the status select, and
+  // it fetched its own copy on mount. Without this, ticking an episode here
+  // leaves that copy showing the value it loaded with — two numbers for one
+  // fact, on the same screen, disagreeing.
+  //
+  // A notification, not a store: the set has one owner and one writer, both
+  // in this component, and the server stays the source of truth. See
+  // lib/watchedProgress.
+  //
+  // Placed above the pending-state early return, not next to the derived
+  // count further down: a hook after a conditional return does not run in
+  // the same order on every render.
+  useEffect(() => {
+    if (access !== "ready") return;
+    publishWatchedProgress({
+      anilistId,
+      watched: watchedInGrid(watched, isCompleted, total),
+    });
+  }, [access, anilistId, watched, isCompleted, total]);
+
   // Was `return null`, which deleted the whole section whenever the catalogue
   // had no episode count — and an absent section does not read as "unknown",
   // it reads as "none". Say what is actually true instead.
@@ -605,6 +628,7 @@ export default function EpisodesGrid({
   // disagree about the same fact.
   const watchedCount = watchedInGrid(watched, isCompleted, total);
   const progressRatio = total > 0 ? watchedCount / total : 0;
+
   const reading = latestWatched(watched, isCompleted, total);
   const previewEpisode = openEp ?? reading;
   const previewSummary = previewEpisode
@@ -725,8 +749,8 @@ export default function EpisodesGrid({
           );
 
           return (
+            <Fragment key={cell.n}>
             <div
-              key={cell.n}
               className={styles.cell}
               // Read by the stylesheet, which is why `state` is restated here
               // under a second name: `data-state` on the toggle is part of
@@ -775,6 +799,32 @@ export default function EpisodesGrid({
                 </span>
               </button>
             </div>
+
+            {/* The panel opens under the row that was clicked, not under the
+                whole list.
+                It is a grid child spanning every column, so the browser
+                places it after this cell and pushes the rest of the list
+                down — no measuring of how many columns the viewport ended up
+                with, which is what an auto-fill track count would otherwise
+                require the JS to guess. */}
+            {isOpen && (
+              <div
+                id={`episode-discussion-${cell.n}`}
+                ref={panelRef}
+                role="region"
+                aria-label={`${t("comment.title")} · ${t("detail.ep")} ${cell.n}`}
+                className={styles.panel}
+              >
+                <EpisodeComments
+                  key={cell.n}
+                  anilistId={anilistId}
+                  episode={cell.n}
+                  highlightCommentId={highlightCommentId}
+                  onCommentDelta={handleCommentDelta}
+                />
+              </div>
+            )}
+            </Fragment>
           );
         })}
       </div>
@@ -821,26 +871,7 @@ export default function EpisodesGrid({
           </div>
         </div>
       ) : null}
-      {/* Legacy parity: click-to-expand panel under the grid, one episode
-          at a time. (DanmakuSection — the legacy panel's live-danmaku half
-          — is still deferred; it needs the ws-server socket hooks.) */}
-      {openEp !== null && (
-        <div
-          id={`episode-discussion-${openEp}`}
-          ref={panelRef}
-          role="region"
-          aria-label={`${t("comment.title")} · ${t("detail.ep")} ${openEp}`}
-          className={styles.panel}
-        >
-          <EpisodeComments
-            key={openEp}
-            anilistId={anilistId}
-            episode={openEp}
-            highlightCommentId={highlightCommentId}
-            onCommentDelta={handleCommentDelta}
-          />
-        </div>
-      )}
+
     </section>
   );
 }

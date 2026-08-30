@@ -82,6 +82,7 @@ const en = {
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
+    watchedShort: 'Watched',
     linkCopied: 'Link copied!',
     linkCopyFailed: 'Copy failed — please copy the link manually',
     openPlayer: '▶ Local Danmaku Player',

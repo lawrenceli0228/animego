@@ -109,6 +109,7 @@ const en = {
     ep: 'Ep', epOf: '/',
     viewDetails: 'View Details',
     viewOnBgm: 'View on Bangumi',
+    watchedShort: 'Watched',
     info: 'Information',
     synopsis: 'Synopsis',
     charUnit: 'chars',

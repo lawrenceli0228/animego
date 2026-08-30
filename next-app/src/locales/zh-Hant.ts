@@ -173,6 +173,7 @@ const zhHant = {
     ep: '第', epOf: '/',
     viewDetails: '檢視詳情',
     viewOnBgm: '在 Bangumi 檢視',
+    watchedShort: '已看',
     info: '作品資訊',
     synopsis: '簡介',
     charUnit: '字',
