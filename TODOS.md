@@ -519,3 +519,13 @@
   **这条 TODO 最重要的作用不是催重构,而是让下一个要写弹窗的人知道 primitive 已经存在** ——
   否则抽象会被手搓的第 12 份白白作废。建议按区域分批,一次一个 PR,每个配一条 e2e 键盘用例。
 - **Depends on / blocked by:** 阻塞于 primitive 先落地。
+
+## 网站 /library 的非 Chrome 兜底
+
+- **What:** 给 `next-app/src/app/[lang]/library/_components/DropZone.tsx` 补上 `webkitdirectory` / `webkitGetAsEntry` 兜底路径,让 Safari / Firefox 用户能建库。`/player` 那个同名文件已经有一份现成实现(`flattenDropFiles` + `<input webkitdirectory>`),直接搬。
+- **Why:** 实测 `library/_components/DropZone.tsx:262` 是 `if (onPick && isFsaSupported) onPick();` —— 非 Chromium 浏览器上点「添加文件夹」**什么都不会发生,没有任何兜底分支**。这些用户不是体验差,是整个本地库功能对他们不存在。
+- **Pros:** `/player` 代码现成可搬;非 Chrome 用户从「完全用不了」变成「能用」;纯前端,不阻塞任何其他工作。
+- **Cons:** 没有持久句柄 —— `File` 对象活不过刷新,每次开站要重选一次文件夹;也没有自动重扫(`FileSystemObserver` 同样 Chromium-only)。
+- **Context:** 2026-08-29 `/plan-eng-review`(agent 方案评审)中发现。⚠️ **降级模式必须在 UI 上明说**,否则「每次要重选文件夹」会被用户读成「功能坏了」—— 这个仓库在静默降级上栓过多次。注意两个 `DropZone.tsx` 是不同文件,别改错。
+  **为什么不等一个"装个东西就好了"的方案:** 任何要求用户先安装本地程序的路线都只救**装了的人**。不装的 Safari / Firefox 用户在那之后依然是今天这个处境,所以这一项不被它取代。
+- **Depends on / blocked by:** 无。纯前端,与其他方向零交集,任何时候都能做。
