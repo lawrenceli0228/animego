@@ -56,6 +56,28 @@
 // notes may be attacker-influenced, and they should not become fetches issued
 // by our own server.
 //
+// ...and relying on every call site to REMEMBER that is what `canOptimize`
+// below replaces. The rule above is right and it still shipped a bug, because
+// "can this src be any host" is a question about data, not about the call
+// site: /anime/{id} passes `characters[].voiceActorImageUrl`, which is an
+// AniList URL right up until the Bangumi V2 worker (go-api
+// internal/queue/bangumi_v2.go) fills it from bgm, and then it is
+// `https://lain.bgm.tv/...`. The call site did not change; the row did.
+//
+// On a client surface that mistake costs a 400 and a blank card. On this one
+// it cost the whole page: the detail route renders on the SERVER, where
+// next/image validates the URL against remotePatterns while rendering and
+// THROWS rather than returning a broken image. 73 of the 366 character rows
+// in one database carried a bgm portrait, and every anime holding one of them
+// answered 500.
+//
+// Detecting it here rather than widening remotePatterns is deliberate. Adding
+// lain.bgm.tv to the allowlist would mean allowing its query string too (bgm
+// cache-busts with `?r=`), and `search: ""` in next.config.ts exists so that a
+// crafted query cannot turn our optimizer into a proxy for arbitrary upstream
+// responses. Not optimizing a 400x portrait costs a few KB; the allowlist is
+// not the place to pay for it.
+//
 // ## What we do NOT use: next/image's `preload` prop
 //
 // `priority` is deprecated in Next 16 in favour of `preload`, but the docs
@@ -128,12 +150,37 @@ type FadeImageProps = Omit<
     src: string | null | undefined;
   };
 
+/** The single host `images.remotePatterns` in next.config.ts allows. */
+const OPTIMIZER_HOST = "s4.anilist.co";
+
+/**
+ * Whether the optimizer will accept this src, matching next.config.ts.
+ *
+ * Relative and same-origin paths are always fine — remotePatterns gates remote
+ * URLs only. An unparseable src is treated as not optimizable, because the
+ * alternative is letting next/image decide, and on a server-rendered route its
+ * way of deciding is to throw.
+ *
+ * Duplicating the hostname here is the cost of the check. It is one string,
+ * and the failure it prevents (a 500 on a public catalogue page) is not one
+ * that shows up in a build, a type check, or a lint.
+ */
+function canOptimize(src: string): boolean {
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(src)) return true;
+  try {
+    return new URL(src).host === OPTIMIZER_HOST;
+  } catch {
+    return false;
+  }
+}
+
 export default function FadeImage({
   priority = false,
   quality = 85,
   src,
   style,
   onLoad,
+  unoptimized,
   ...rest
 }: FadeImageProps) {
   const [loaded, setLoaded] = useState(false);
@@ -150,6 +197,11 @@ export default function FadeImage({
     <Image
       {...rest}
       src={src}
+      // An explicit `unoptimized` from the caller still wins: the surfaces
+      // that already pass it do so because their srcs come out of IndexedDB
+      // and should never become fetches our server issues, which is a
+      // stronger reason than "the host happens to be allowed today".
+      unoptimized={unoptimized ?? !canOptimize(src)}
       quality={quality}
       loading={priority ? "eager" : "lazy"}
       fetchPriority={priority ? "high" : undefined}
