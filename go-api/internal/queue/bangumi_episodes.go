@@ -487,7 +487,7 @@ func (w *EpisodesBgmWorker) Work(ctx context.Context, job *river.Job[EpisodesBgm
 	// Episode titles are best-effort, matching the stance V2 takes on the same
 	// write: the count has already committed, and failing the job here would
 	// re-spend two upstream requests to retry an optional column.
-	written, failures := w.writeTitles(ctx, anilistID, titles)
+	written, failures := writeEpisodeTitles(ctx, w.db, anilistID, titles)
 	if failures > 0 {
 		slog.WarnContext(ctx, "episodes_bgm title write failures",
 			"anilistId", anilistID, "bgmId", bgmID,
@@ -555,19 +555,6 @@ func (w *EpisodesBgmWorker) fetch(ctx context.Context, bgmID int) (*bangumi.Subj
 		episodes = &bangumi.EpisodesResponse{}
 	}
 	return subject, episodes, nil
-}
-
-// writeTitles upserts the normalised episode titles, returning how many landed
-// and how many failed.
-func (w *EpisodesBgmWorker) writeTitles(ctx context.Context, anilistID int32, titles []epTitle) (written, failures int) {
-	for _, t := range titles {
-		if err := w.db.UpsertEpisodeTitle(ctx, anilistID, t.episode, t.nameCN, t.name); err != nil {
-			failures++
-			continue
-		}
-		written++
-	}
-	return written, failures
 }
 
 // stamp records a decided non-'ok' outcome so the sweep can move past the row.

@@ -348,14 +348,8 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		}
 	} else if episodes != nil {
 		titles := normalizeEpisodeTitles(episodes.Eps)
-		epFailures := 0
-		for _, t := range titles {
-			if err := w.db.UpsertEpisodeTitle(ctx, anilistID, t.episode, t.nameCN, t.name); err != nil {
-				epFailures++
-				continue
-			}
-			epTitlesWritten++
-		}
+		var epFailures int
+		epTitlesWritten, epFailures = writeEpisodeTitles(ctx, w.db, anilistID, titles)
 		if epFailures > 0 {
 			slog.WarnContext(ctx, "bangumi_v2 episode title write failures",
 				"anilistId", anilistID, "bgmId", bgmID,
