@@ -155,6 +155,29 @@ func main() {
 	// an in-process token bucket, so the backfill only stays inside the
 	// bgm.tv budget while it draws from this same instance.  A standalone
 	// backfill CLI would open a second bucket and double the real rate.
+	// P2.6 — dandanplay 3-phase match.  Independent rate limiter
+	// (800ms, separate from Bangumi's 800ms) so admin enrichment
+	// queues don't starve user-triggered /match calls.  X-AppId /
+	// X-AppSecret read from env; absent values mean public-tier
+	// requests (stricter dandanplay limits, but the API still
+	// responds).
+	//
+	// Constructed HERE, several hundred lines before its HTTP handlers, and
+	// the position is load-bearing rather than tidy.  The episode-title sweep
+	// registered below is a river worker, so it must hold the client before
+	// queue.Boot runs -- and it must hold THIS client, not one of its own.
+	// A second instance would open a second 800ms bucket against the same
+	// AppId and double the real rate, which is the same argument the comment
+	// on WorkersWithBangumiAndNormalizer makes for sharing bangumiClient.
+	dandanClient, err := dandanplay.NewClient(
+		dandanplay.WithCredentials(os.Getenv("DANDANPLAY_APP_ID"), os.Getenv("DANDANPLAY_APP_SECRET")),
+	)
+	if err != nil {
+		slog.Error("dandanplay client init failed", "err", err)
+		os.Exit(1)
+	}
+	defer dandanClient.Close()
+
 	workers := queue.WorkersWithBangumiAndNormalizer(
 		bangumiClient,
 		anilistClient,
@@ -180,6 +203,13 @@ func main() {
 	// holds so its two-requests-per-row draw from the one token bucket
 	// rather than opening a second one beside it.
 	queue.AddEpisodesBgmWorkers(workers, bangumiClient, q, enqueuer)
+	// Airing-show episode-title top-up.  Takes the shared dandanplay client
+	// for the same reason the sweep above takes the shared bangumiClient, and
+	// the pool because its write is a four-statement transaction shared with
+	// cmd/bgmbackfill (internal/episodetitles).  Gated at work time by
+	// EPISODE_TITLES_SWEEP_ENABLED; registering it is not the same as running
+	// it.
+	queue.AddEpisodeTitlesWorker(workers, pool, q, dandanClient)
 
 	riverClient, err := queue.Boot(pool, queue.Config{
 		Workers: workers,
@@ -227,6 +257,14 @@ func main() {
 			// on-demand enrichment.  The separate queue is for isolation
 			// and pausability, not parallelism.
 			queue.EpisodesBgmQueueName: {MaxWorkers: 1},
+			// Airing episode titles: MaxWorkers MUST stay 1.  One pass is
+			// one job that walks its whole candidate list inline, and every
+			// row costs a token from the dandanplay bucket that user-facing
+			// /match draws on.  A second concurrent pass would not go faster
+			// -- the bucket is the constraint, not the worker count -- it
+			// would only take twice as many tokens away from the request
+			// path.
+			queue.EpisodeTitlesQueueName: {MaxWorkers: 1},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),
@@ -237,6 +275,7 @@ func main() {
 			// next run as now+period on every Start, so a deploy would
 			// otherwise push the sweep a full hour out every time.
 			queue.PeriodicEpisodesBgmScanJob(),
+			queue.PeriodicEpisodeTitlesJob(),
 			// 90 days, and deliberately NOT RunOnStart — see the note on
 			// PeriodicHantBackfillJob for why this one reads the opposite
 			// way round from the two sweeps above it, and for what that
@@ -717,20 +756,6 @@ func main() {
 	safetyHandlers := safety.NewHandlers(q)
 	danmakuHandlers := danmaku.NewHandlers(pool, q)
 
-	// P2.6 — dandanplay 3-phase match.  Independent rate limiter
-	// (800ms, separate from Bangumi's 800ms) so admin enrichment
-	// queues don't starve user-triggered /match calls.  X-AppId /
-	// X-AppSecret read from env; absent values mean public-tier
-	// requests (stricter dandanplay limits, but the API still
-	// responds).
-	dandanClient, err := dandanplay.NewClient(
-		dandanplay.WithCredentials(os.Getenv("DANDANPLAY_APP_ID"), os.Getenv("DANDANPLAY_APP_SECRET")),
-	)
-	if err != nil {
-		slog.Error("dandanplay client init failed", "err", err)
-		os.Exit(1)
-	}
-	defer dandanClient.Close()
 	dandanplayHandlers := dandanplay.NewHandlers(q, dandanClient, bangumiClient)
 
 	// G4 — global per-IP rate limiter for /api/*.  Express applied

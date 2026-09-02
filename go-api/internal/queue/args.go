@@ -340,3 +340,35 @@ func (DescriptionBackfillScanArgs) Kind() string { return "description_backfill_
 func (DescriptionBackfillScanArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: DescriptionBackfillQueueName}
 }
+
+// episodeTitlesUniqueStates collapses a second episode-title sweep into the one
+// already in flight.  Two concurrent passes would race on the same attempt
+// stamps and spend the shared dandanplay budget twice for one pass worth of
+// progress.
+var episodeTitlesUniqueStates = []rivertype.JobState{
+	rivertype.JobStateAvailable,
+	rivertype.JobStatePending,
+	rivertype.JobStateRetryable,
+	rivertype.JobStateRunning,
+	rivertype.JobStateScheduled,
+}
+
+// EpisodeTitlesArgs is the periodic top-up for shows still airing.  No fields:
+// the candidate query reads anime_cache directly, so the job is a pure trigger.
+// See episode_titles_releasing.go for why only airing shows.
+type EpisodeTitlesArgs struct{}
+
+// Kind returns the river job kind for the airing episode-title sweep.
+func (EpisodeTitlesArgs) Kind() string { return "episode_titles_releasing" }
+
+// InsertOpts pins the sweep to its own queue and collapses duplicates.  See
+// EpisodeTitlesQueueName for why the queue is separate.
+func (EpisodeTitlesArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: EpisodeTitlesQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: episodeTitlesUniqueStates,
+		},
+	}
+}
