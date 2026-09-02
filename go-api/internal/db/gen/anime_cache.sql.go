@@ -3190,23 +3190,45 @@ func (q *Queries) UpsertEpisodeTitle(ctx context.Context, animeID int32, episode
 }
 
 const upsertEpisodeTitleSourced = `-- name: UpsertEpisodeTitleSourced :execrows
+WITH incoming AS (
+    -- The trim set is explicit, and every character in it is here because
+    -- bare btrim(text) does NOT strip it.  btrim's default set is the ASCII
+    -- space and nothing else, so a value of a single tab, newline or -- the
+    -- one that makes this reachable rather than theoretical -- U+3000
+    -- IDEOGRAPHIC SPACE survives NULLIF and lands as a row.
+    --
+    -- U+3000 is the ordinary space in Japanese and Chinese text and both
+    -- upstreams feeding this table are CJK sources, so "whitespace only"
+    -- arrives in that form routinely.  A row that lands that way is worse
+    -- than a blank one: it renders as an empty title AND claims the column at
+    -- its source's precedence, so the next pass carrying the real name is
+    -- scored against a claimed column and a lower-ranked source loses to
+    -- nothing at all.
+    --
+    -- An explicit set rather than a regexp character class because
+    -- [[:space:]] resolves through the database's ctype, which makes the
+    -- behaviour of this guard depend on how the cluster was initialised.
+    -- U+00A0 and U+FEFF are included for the same reason as U+3000: they
+    -- survive a naive trim and arrive from scraped upstreams.
+    SELECT
+        NULLIF(btrim($5::text, E' \t\n\r\u3000\u00a0\ufeff'), '') AS name_cn,
+        NULLIF(btrim($6::text,    E' \t\n\r\u3000\u00a0\ufeff'), '') AS name
+)
 INSERT INTO anime_episode_titles (
     anime_id, episode, name_cn, name, name_cn_source, name_source
 )
 SELECT
     ac.anilist_id,
     $1::int,
-    NULLIF(btrim($2::text), ''),
-    NULLIF(btrim($3::text), ''),
-    CASE WHEN NULLIF(btrim($2::text), '') IS NULL
-         THEN NULL ELSE $4::text END,
-    CASE WHEN NULLIF(btrim($3::text), '') IS NULL
-         THEN NULL ELSE $4::text END
+    i.name_cn,
+    i.name,
+    CASE WHEN i.name_cn IS NULL THEN NULL ELSE $2::text END,
+    CASE WHEN i.name    IS NULL THEN NULL ELSE $2::text END
 FROM anime_cache ac
-WHERE ac.anilist_id = $5::int
-  AND ac.bgm_id     = $6::int
-  AND (NULLIF(btrim($2::text), '') IS NOT NULL
-       OR NULLIF(btrim($3::text), '') IS NOT NULL)
+CROSS JOIN incoming i
+WHERE ac.anilist_id = $3::int
+  AND ac.bgm_id     = $4::int
+  AND (i.name_cn IS NOT NULL OR i.name IS NOT NULL)
 ON CONFLICT (anime_id, episode) DO UPDATE SET
     name_cn = CASE
         WHEN excluded.name_cn IS NULL THEN anime_episode_titles.name_cn
@@ -3240,11 +3262,11 @@ ON CONFLICT (anime_id, episode) DO UPDATE SET
 
 type UpsertEpisodeTitleSourcedParams struct {
 	Episode int32  `json:"episode"`
-	NameCn  string `json:"nameCn"`
-	Name    string `json:"name"`
 	Source  string `json:"source"`
 	AnimeID int32  `json:"animeId"`
 	BgmID   int32  `json:"bgmId"`
+	NameCn  string `json:"nameCn"`
+	Name    string `json:"name"`
 }
 
 // Write one episode title, honouring both precedence and the binding it was
@@ -3290,11 +3312,11 @@ type UpsertEpisodeTitleSourcedParams struct {
 func (q *Queries) UpsertEpisodeTitleSourced(ctx context.Context, arg UpsertEpisodeTitleSourcedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, upsertEpisodeTitleSourced,
 		arg.Episode,
-		arg.NameCn,
-		arg.Name,
 		arg.Source,
 		arg.AnimeID,
 		arg.BgmID,
+		arg.NameCn,
+		arg.Name,
 	)
 	if err != nil {
 		return 0, err

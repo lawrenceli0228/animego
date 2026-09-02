@@ -1549,23 +1549,45 @@ WHERE title_romaji  ILIKE sqlc.arg(contains)::text
 -- wear a label that licenses the next writer to overwrite the wrong thing, and
 -- no constraint can catch it: a CHECK sees the row after the write, not the
 -- transition.
+WITH incoming AS (
+    -- The trim set is explicit, and every character in it is here because
+    -- bare btrim(text) does NOT strip it.  btrim's default set is the ASCII
+    -- space and nothing else, so a value of a single tab, newline or -- the
+    -- one that makes this reachable rather than theoretical -- U+3000
+    -- IDEOGRAPHIC SPACE survives NULLIF and lands as a row.
+    --
+    -- U+3000 is the ordinary space in Japanese and Chinese text and both
+    -- upstreams feeding this table are CJK sources, so "whitespace only"
+    -- arrives in that form routinely.  A row that lands that way is worse
+    -- than a blank one: it renders as an empty title AND claims the column at
+    -- its source's precedence, so the next pass carrying the real name is
+    -- scored against a claimed column and a lower-ranked source loses to
+    -- nothing at all.
+    --
+    -- An explicit set rather than a regexp character class because
+    -- [[:space:]] resolves through the database's ctype, which makes the
+    -- behaviour of this guard depend on how the cluster was initialised.
+    -- U+00A0 and U+FEFF are included for the same reason as U+3000: they
+    -- survive a naive trim and arrive from scraped upstreams.
+    SELECT
+        NULLIF(btrim(sqlc.arg(name_cn)::text, E' \t\n\r\u3000\u00a0\ufeff'), '') AS name_cn,
+        NULLIF(btrim(sqlc.arg(name)::text,    E' \t\n\r\u3000\u00a0\ufeff'), '') AS name
+)
 INSERT INTO anime_episode_titles (
     anime_id, episode, name_cn, name, name_cn_source, name_source
 )
 SELECT
     ac.anilist_id,
     sqlc.arg(episode)::int,
-    NULLIF(btrim(sqlc.arg(name_cn)::text), ''),
-    NULLIF(btrim(sqlc.arg(name)::text), ''),
-    CASE WHEN NULLIF(btrim(sqlc.arg(name_cn)::text), '') IS NULL
-         THEN NULL ELSE sqlc.arg(source)::text END,
-    CASE WHEN NULLIF(btrim(sqlc.arg(name)::text), '') IS NULL
-         THEN NULL ELSE sqlc.arg(source)::text END
+    i.name_cn,
+    i.name,
+    CASE WHEN i.name_cn IS NULL THEN NULL ELSE sqlc.arg(source)::text END,
+    CASE WHEN i.name    IS NULL THEN NULL ELSE sqlc.arg(source)::text END
 FROM anime_cache ac
+CROSS JOIN incoming i
 WHERE ac.anilist_id = sqlc.arg(anime_id)::int
   AND ac.bgm_id     = sqlc.arg(bgm_id)::int
-  AND (NULLIF(btrim(sqlc.arg(name_cn)::text), '') IS NOT NULL
-       OR NULLIF(btrim(sqlc.arg(name)::text), '') IS NOT NULL)
+  AND (i.name_cn IS NOT NULL OR i.name IS NOT NULL)
 ON CONFLICT (anime_id, episode) DO UPDATE SET
     name_cn = CASE
         WHEN excluded.name_cn IS NULL THEN anime_episode_titles.name_cn
