@@ -335,6 +335,16 @@ SET
                                      THEN NULL ELSE episodes_bgm_outcome END,
     episodes_bgm_reason       = CASE WHEN (SELECT yes FROM rebound)
                                      THEN NULL ELSE episodes_bgm_reason END,
+    -- Same move as episodes_bgm_attempted_at above, for the sweep added in
+    -- 0029.  cleared_titles has just deleted this row's episode titles, and
+    -- the stamp beside them records an attempt made against the binding that
+    -- was replaced -- so leaving it would tell the airing sweep this row was
+    -- recently handled and keep it out of the candidate set for another 26
+    -- hours, with the page showing no titles for the whole window.  Nulling it
+    -- puts the row at the front of ListReleasingEpisodeTitleCandidates, which
+    -- orders NULLS FIRST for exactly this case.
+    episode_titles_at         = CASE WHEN (SELECT yes FROM rebound)
+                                     THEN NULL ELSE episode_titles_at END,
     updated_at    = now()
 WHERE anilist_id = sqlc.arg('anilist_id')::integer
 RETURNING
