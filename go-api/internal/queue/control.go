@@ -100,6 +100,20 @@ const HantBackfillQueueName = "hant_backfill"
 // later" has to be one call and not a deploy.
 const EpisodesBgmQueueName = "episodes_bgm"
 
+// EpisodeTitlesQueueName isolates the airing-show episode-title top-up.
+//
+// Its own queue for two reasons.  One pass can run for minutes -- one upstream
+// request per candidate through a shared 800ms bucket -- and on the default
+// queue that would hold the single worker slot away from the V1/V2 enrichment
+// a page load is waiting on.
+//
+// The other is the kill switch.  EPISODE_TITLES_SWEEP_ENABLED gates the worker
+// but only takes effect on restart; a queue of its own means river's runtime
+// pause can stop this sweep, and only this sweep, without a deploy.  Same
+// argument EpisodesBgmQueueName makes above, and for the same kind of output:
+// rows that render on a public, indexed page.
+const EpisodeTitlesQueueName = "episode_titles"
+
 // Stats is the response shape for Status — the admin endpoint
 // marshals this to JSON.  Mirrors the relevant subset of Express
 // getQueueStatus() (which also reported in-memory queue depths from

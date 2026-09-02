@@ -538,3 +538,46 @@
 - **Cons:** smoke 跑在 `$COMPOSE up -d` **之后**,所以「失败」时新版已经在线且没有回滚。要么接受「大声报错但不回滚」(仍比静默好),要么顺带接上回滚 —— 后者就不是小改动了。`scripts/p9-rollback.sh` 已存在,可以先看它能不能直接接。
 - **Context:** 2026-08-30 的 `/plan-eng-review` 中发现:外部声音指出 smoke 在 `up -d` 之后且不 gate,由读脚本确认。⚠️ 注意别顺手把它改成 `set -e` 直接退出 —— 那会在「新版已上线」的状态下留下一个半完成的部署,比现在更难收拾;先决定失败语义再动手。
 - **Depends on / blocked by:** 无。纯 shell,与任何代码改动零交集。
+
+## `bangumi_version` 是单向棘轮，version≥2 的行没有任何重跑路径
+
+**What** — 给富化流水线加一条「让一行重新过一遍 V1→V2→V3」的入队路径，不依赖把 `bangumi_version` 手动改回 0。
+
+**Why** — 现在所有 V1 生产者（orphan scan、`/search` 与 `/schedule` 的 upsert 后置、warm_season、admin ReEnrich(0)）都过滤 `bangumi_version = 0`，而 `UpsertAnimeCache` 在冲突时**刻意不覆写**版本号（`go-api/internal/db/queries/anime_cache.sql:253-258`）。V2 一跑完把版本推到 2，这一行就永久掉出所有扫描；V2 本身又只由 V1 绑定成功后的 `chainV2`（`bangumi_v1.go:264`）链式触发，没有任何周期任务生产 V2 作业。结果是**那一次跑空了就永远是空的**——`bangumi_v2.go:344` 把 episodes fetch 错误记个 warn 就 `return nil`，作业标记完成，river 不重试，而版本已经推进。
+
+**Context** — 2026-09-02 分集标题方案评审中查出。当时的处理是**绕过**而不是修：存量用 `cmd/bgmbackfill` 的一次性 CLI 补，而不是让流水线自己重跑。但同一个棘轮对 V2/V3 写的**每一个**字段都成立——characters、bangumi_score、title_chinese、分集标题——所以下一个「某个富化字段大面积缺失」的问题会再撞一次，而且每次都得再写一个一次性 CLI。
+实测规模：1,784 行有 bgm_id 却零分集标题，其中 1,522 行任何自动任务都够不到（772 行卡在 v1、3 行 v2、747 行 v3）。
+⚠️ 动它之前先确认真实的 `MaxAttempts`：三个 worker 的头注释都写「river 默认 3 次」是**错的**，v0.37.1 的 `MaxAttemptsDefault` 是 **25**，配 attempt^4 退避约 20 天。
+
+**Depends on / blocked by** — 无。但与 `## 分割放送会 50% 概率绑错` 那条同属富化流水线，建议一起看。
+
+## id-map 一致并不排除「范围不符」，而它挡着分集网格取 max
+
+**What** — 在绑定校验里加第三个信号：上游正片集数与 `anime_cache.episodes` 的量级比对。现有两个信号（标题相似度、季号标记）和 id-map 都答不了这个问题。
+
+**Why** — id-map 回答的是「这个 anilist 条目对应哪个 bgm subject」，**不是**「这个 subject 的集列表就是这个条目的集列表」。一个 3 集的 ONA 可以合法地映射到整部正片的 subject 上，于是我们把正片几百集的标题写进了这个小条目。实测 `anime_episode_titles.episode > anime_cache.episodes` 的有 776 部：`+6..24` 那档 **335 部**抽样全是 ONA/SP 绑到正片 subject（`我的幸福婚姻` ONA 写着 3 集库里 12 行；`机动战士SD高达` SPECIAL 3 集 17 行）；溢出 >100 集的 18 部里有 **9 部是 id-map 确认的绑定**——也就是说权威映射表点头了，数据仍然是错的。
+
+**Context** — 2026-09-02 评审实测。⚠️ **这条阻塞分集标题方案里的 T9**（`next-app/src/components/anime/episodeGridSkeleton.ts:101` 的 authoritative 分支取 max）：不先解决范围不符，取 max 会把这批陈旧溢出重新渲染出来，`与莫芬一起` 那种 5 集 ONA 会被画出 3,528 个格子。所需信号很便宜——上游集数本来就在同一个响应里，不额外花请求。
+⚠️ 阈值要小心：实测溢出量是 +1 到 +820 的**连续谱**，`+1` 那档 164 部多是 AniList 少算一集的真实情况（`格斗美神·武龙` 25 集 / 上游 26 集，行是密的），不能一刀切。
+
+**Depends on / blocked by** — 无。做完它 T9 才能安全上线。
+
+## dandanplay client 把所有 4xx 压成「没有数据」
+
+**What** — 让 `go-api/internal/dandanplay/client.go:386` 区分 401/403（凭据或授权问题）、404（该资源确实不存在）、其他 4xx，而不是统一返回 `(nil, nil)`。
+
+**Why** — 现在调用方拿到的「没有数据」同时可能意味着「这个 subject 上游确实没有」「AppId/AppSecret 失效了」「请求被拒了」。前者是正常的数据稀疏，后两者是需要人介入的故障，而它们在日志和返回值上完全一样。
+
+**Context** — 2026-09-02 评审中由外部声音（Codex）指出，读代码确认。**严重度不高**：分集标题回填走的是人工跑的 CLI，凭据失效会让整份报告 100% EMPTY，跑的人一眼就能看出来；真正无人值守的只有 RELEASING 那个小 sweep（实测 TV 52 部），它静默空转的代价是「缺口不修但没人知道」。弹幕匹配路径（`match.go` / `handlers.go`）同样分不出这三种，改一次两边都受益。
+
+**Depends on / blocked by** — 无。但它动的是共享 client，回归面包含现有弹幕功能。
+
+## 绑定覆盖率：811 部死 bgm_id + 5,222 部压根没有 bgm_id
+
+**What** — 清理指向已不存在 subject 的绑定，并提高无绑定行的匹配覆盖率。
+
+**Why** — 这是分集标题缺口里最大的一块，但它是**绑定问题不是富化问题**。5,222 部没有 bgm_id，对应 32,471 个集位完全没有上游可取；另有 811 部卡在 `bangumi_version = 1`，抽样 12 个 bgm_id **12/12 上游返回 404**（`/v0/subjects/207567` 明说 resource has been removed），811 行里只有 1 行在 `bgm_id_map` 里有任何条目——是 `fuzzy_high` 绑到了不存在的 subject id。这批绑定不但补不回一条标题，还在每轮富化里静默消耗上游配额。
+
+**Context** — 2026-09-02 评审实测。这 811 部创建集中在 2026-05-31～06-08，格式以 OVA/ONA 为主。解决后分集标题、中文简介、评分三个缺口一起受益。注意 `bgm_id_map` 是从 `data/anilist_bgm_map.json` 灌进来的**输入**表不是匹配器产物，所以「改进匹配器」和「扩充 map」是两条不同的路。
+
+**Depends on / blocked by** — 无。与 `## 分割放送会 50% 概率绑错` 同属绑定质量，建议合并考虑。

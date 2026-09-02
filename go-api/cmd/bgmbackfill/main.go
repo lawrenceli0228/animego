@@ -98,15 +98,19 @@ func main() {
 	skipDDP := flag.Bool("skip-ddp", false, "id-map-only pass, skip dandanplay calls")
 	outFile := flag.String("out", "report.json", "path for the JSON report")
 	healMode := flag.Bool("heal", false, "WRITES: fill title_chinese from dandanplay for map-confirmed rows missing CN")
+	epTitlesMode := flag.Bool("heal-episode-titles", false, "fill anime_episode_titles from dandanplay; read-only unless combined with --apply")
 	flag.Parse()
 
 	// Default to report mode when no explicit mode is set.
-	if !*applyMode && !*reportMode && !*healMode {
+	if !*applyMode && !*reportMode && !*healMode && !*epTitlesMode {
 		*reportMode = true
 	}
 
-	if *applyMode {
+	if *applyMode && !*epTitlesMode {
 		fmt.Fprintln(os.Stderr, "WARNING: --apply will mutate production rows (BackfillResetRows). Proceeding...")
+	}
+	if *applyMode && *epTitlesMode {
+		fmt.Fprintln(os.Stderr, "WARNING: --heal-episode-titles --apply will WRITE and RETRACT anime_episode_titles rows. Proceeding...")
 	}
 	if *healMode {
 		fmt.Fprintln(os.Stderr, "WARNING: --heal will WRITE title_chinese to production rows. Proceeding...")
@@ -146,6 +150,24 @@ func main() {
 			os.Exit(1)
 		}
 		defer ddpClient.Close()
+	}
+
+	// ── episode-title heal: fill anime_episode_titles from dandanplay ─────
+	// Its own row set (every bgm-bound row) and its own write path, so like
+	// --heal it returns early rather than falling through to the classifier.
+	// Unlike --heal it is read-only by default: the decision it makes can
+	// retract titles from a public page, so writing takes an explicit --apply
+	// against a report someone has read.
+	if *epTitlesMode {
+		if *skipDDP || ddpClient == nil {
+			slog.Error("--heal-episode-titles needs dandanplay; do not combine with --skip-ddp")
+			os.Exit(1)
+		}
+		if err := runEpisodeTitleHeal(ctx, pool, q, ddpClient, *limitFlag, *applyMode, *outFile); err != nil {
+			slog.Error("episode-title heal failed", "err", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// ── heal mode: fill CN from dandanplay for map-confirmed rows ─────────
