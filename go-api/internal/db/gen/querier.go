@@ -90,6 +90,36 @@ type Querier interface {
 	// social/notification edges between the two users. Repeating the request is
 	// idempotent and still cleans up any stale edges.
 	BlockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (BlockUserRow, error)
+	// Half of the snapshot semantics an upsert cannot provide on its own.
+	//
+	// Upserting a fetch writes the episodes the upstream returned and says nothing
+	// about the ones it no longer returns.  So an entry bound to the wrong subject
+	// keeps every stale row the old binding left behind, and the new, correct rows
+	// simply overwrite the first few.  On a three-episode ONA bound to a full
+	// series that is three corrected rows in front of hundreds of wrong ones.
+	//
+	// The retraction is scoped to ONE SOURCE, and that scope is what makes it safe
+	// to run automatically.  A writer may withdraw what it previously said; it may
+	// not touch a column another source filled, and it may not delete a row
+	// outright, because the row may hold a manual correction or the other
+	// upstream's value in the other column.  Clearing per field and removing only
+	// what is left empty afterwards is the same conservatism the precedence rule
+	// above encodes, applied to removal.
+	//
+	// The cardinality guard is load-bearing, not defensive dressing.  With an
+	// empty kept-set every row is "outside" it, so a fetch that came back with no
+	// usable episodes -- a transient upstream blip, a subject mid-edit -- would
+	// retract this source's entire contribution for the anime.  Callers are
+	// specified to treat an empty result as 'empty' and never reach this query,
+	// but that is a convention, and a convention is the wrong place for the
+	// difference between "nothing changed" and "everything erased".
+	//
+	// Returns the episode numbers it touched so the caller can hand exactly those
+	// to DeleteEmptyEpisodeTitles.  The pairing is deliberately two statements: a
+	// data-modifying CTE cannot see its own effects, so a DELETE in the same
+	// statement would test the pre-UPDATE values and delete rows that still hold
+	// another source's title.
+	ClearEpisodeTitlesBySourceOutside(ctx context.Context, source string, animeID int32, kept []int32) ([]int32, error)
 	// Logout's DB write: ends the session the CALLER actually holds, and only
 	// that one.
 	//
@@ -208,6 +238,17 @@ type Querier interface {
 	DeleteComment(ctx context.Context, id uuid.UUID) error
 	DeleteCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (DeleteCommentReactionRow, error)
 	DeleteCommentReactionOnly(ctx context.Context, commentID uuid.UUID, userID uuid.UUID) (int64, error)
+	// Remove rows that ClearEpisodeTitlesBySourceOutside emptied.
+	//
+	// Scoped to the episode numbers that query returned rather than to "every
+	// empty row for this anime" on purpose.  The table already holds a large
+	// population of rows whose two payload columns were NULL from the day they
+	// were written; they are invisible to the reader, but they are the only record
+	// that an episode number exists at all for entries whose catalogue episode
+	// count is unknown, where the grid infers its size from the highest episode
+	// number it holds.  Sweeping them here would quietly shorten those grids as a
+	// side effect of an unrelated retraction.
+	DeleteEmptyEpisodeTitles(ctx context.Context, animeID int32, episodes []int32) (int64, error)
 	// DELETE /api/users/:username/follow.  Returns affected row count;
 	// the handler always returns 200 { following: false } regardless of
 	// whether a row was deleted (matches Express's findOneAndDelete which
@@ -1177,6 +1218,24 @@ type Querier interface {
 	// Express; the join is the same shape as the subscriptions list query
 	// but only returns the cardview projection.
 	ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]ListProfileWatchingRow, error)
+	// The airing shows whose episode titles are due another look.
+	//
+	// Anchored on status = 'RELEASING' because that is the population whose titles
+	// are still being written upstream: episode 9's name appears in the week
+	// episode 9 airs, so one enrichment pass can never finish the job for a show
+	// mid-broadcast.  Finished shows are settled and are served by the one-off
+	// backfill instead; keeping them out of this predicate is what lets the sweep
+	// run on a single timestamp with no outcome bookkeeping (0029, section C).
+	//
+	// The freshness interval is a parameter rather than a literal because it has
+	// to stay above the client's episode-response cache TTL.  Asking again sooner
+	// than that returns the cached body, writes nothing new, and stamps the row as
+	// attempted -- a pass that consumes a slot and cannot make progress.
+	//
+	// ORDER BY matches the partial index (0029) so the scan reads a prefix and
+	// stops: never-swept rows first, then oldest-swept, with the recently-swept
+	// rows the freshness arm rejects sorting last.
+	ListReleasingEpisodeTitleCandidates(ctx context.Context, staleAfter pgtype.Interval, rowLimit int32) ([]ListReleasingEpisodeTitleCandidatesRow, error)
 	// Passing NULL report_status returns the entire moderation queue.
 	ListReports(ctx context.Context, reportStatus *string, pageOffset int32, pageLimit int32) ([]ListReportsRow, error)
 	// One modulo slice of the whole catalogue, for /api/anime/sitemap.
@@ -1593,6 +1652,15 @@ type Querier interface {
 	// The profile header remains resolvable so existing profile links do not turn
 	// into misleading 404s; the social handler redacts the watching list instead.
 	SetUserPublic(ctx context.Context, iD uuid.UUID, isPublic bool) error
+	// Stamp the attempt, pinned to the binding the attempt was made against.
+	//
+	// Written on every pass regardless of what the pass produced -- that is what
+	// moves a row to the back of the queue and keeps a show whose upstream has
+	// nothing from starving the ones that do.  The bgm_id predicate means a row
+	// re-bound during the fetch is not stamped, so the next pass re-asks under the
+	// binding it now holds instead of resting on an attempt made against the old
+	// one.
+	TouchEpisodeTitlesAt(ctx context.Context, anilistID int32, bgmID int32) (int64, error)
 	// Aggregate-only counters keep product telemetry useful without retaining a
 	// per-user browsing history.  The handler owns the event/target allowlist;
 	// matching CHECK constraints make that contract durable at the database edge.
@@ -1920,6 +1988,47 @@ type Querier interface {
 	// we upsert per episode so a re-enrich refreshes names in place. ON CONFLICT
 	// overwrites so corrected Bangumi data wins on the next pass.
 	UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCn *string, name *string) error
+	// Write one episode title, honouring both precedence and the binding it was
+	// fetched under.  This is the query every episode-title writer is expected to
+	// use; UpsertEpisodeTitle above is the pre-0029 shape, kept only until its
+	// last caller moves over.
+	//
+	// Three guarantees live in this statement rather than in Go, because a rule
+	// enforced by the query is inherited by a new writer and a rule enforced by a
+	// helper function is only inherited by a writer who remembers to call it.
+	//
+	// 1. THE BINDING IS PINNED.  The INSERT sources its anime_id from anime_cache
+	//    with `bgm_id = @bgm_id`, so a re-binding that landed between the fetch and
+	//    this write produces zero rows instead of filing one upstream's episode
+	//    names under another's subject.  Same move UpdateEpisodesBgm and
+	//    UpdateDescriptionCn make, for the same reason -- the Go-side re-read
+	//    closes most of that window, this closes the rest, and the race becomes an
+	//    observable zero-row result rather than wrong data.
+	//
+	// 2. AN EMPTY VALUE NEVER LANDS.  btrim + NULLIF turn '' and whitespace into
+	//    NULL on the way in, the WHERE refuses a call where BOTH fields are empty,
+	//    and the DO UPDATE arms keep the existing value whenever the incoming one
+	//    is NULL.  Roughly a third of this table is rows whose two payload columns
+	//    are both NULL -- written, before 0029, by a transform with no name check
+	//    and an upsert with no COALESCE.  They render exactly like a missing row,
+	//    so they cost the reader nothing, but they made "does this anime have
+	//    titles" unanswerable by counting rows.  New writes cannot add to them.
+	//
+	// 3. PRECEDENCE IS PER FIELD.  manual outranks ddp outranks bangumi, scored by
+	//    position in the array literal; an absent source scores 0, so any real
+	//    source may fill a column nobody has claimed.  The comparison is >= rather
+	//    than >, deliberately: a source must be able to correct itself on a later
+	//    pass, which is the whole mechanism by which an airing show's titles fill
+	//    in.  Each field is compared against ITS OWN source column, because one
+	//    row routinely holds a name from one upstream beside a name_cn from
+	//    another -- see 0029's section A.
+	//
+	// Value and source are always assigned in the same arm of the same CASE.  A
+	// row whose name_cn was replaced while name_cn_source was left behind would
+	// wear a label that licenses the next writer to overwrite the wrong thing, and
+	// no constraint can catch it: a CHECK sees the row after the write, not the
+	// transition.
+	UpsertEpisodeTitleSourced(ctx context.Context, arg UpsertEpisodeTitleSourcedParams) (int64, error)
 	// ==================== Follow CRUD ====================
 	// POST /api/users/:username/follow.  ON CONFLICT DO NOTHING — re-follow
 	// is idempotent (Express used findOneAndUpdate with upsert; same effect).
