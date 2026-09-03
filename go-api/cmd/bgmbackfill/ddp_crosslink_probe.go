@@ -34,6 +34,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
@@ -86,24 +87,89 @@ type crosslinkRow struct {
 
 // crosslinkReport is the JSON artefact.
 type crosslinkReport struct {
-	Total       int            `json:"total"`
-	Probed      int            `json:"probed"`
+	Total  int `json:"total"`
+	Probed int `json:"probed"`
+	// Stride is the spacing of the systematic sample: 1 means the run walked
+	// the candidate set in order, N>1 means it took every Nth row.  Recorded
+	// because it decides whether the extrapolation below is a measurement or
+	// a guess about the head of the catalogue.
+	Stride      int            `json:"stride"`
 	Counts      map[string]int `json:"counts"`
 	APICalls    int            `json:"ddpApiCalls"`
 	PositionHit map[int]int    `json:"positionHit"`
 	Rows        []crosslinkRow `json:"rows"`
 }
 
+// crosslinkSample takes `want` rows spread evenly across the whole ordered
+// candidate set, and reports the stride it used.
+//
+// WHY THIS EXISTS.  The candidate query orders by anilist_id, deliberately, so
+// that a run which stops partway and a run which resumes walk the same
+// sequence.  That is right for a sweep and wrong for a measurement: capping a
+// measurement by request budget then means it only ever sees the head of the
+// catalogue, and the number it produces gets multiplied by 4,400.
+//
+// The bias is not hypothetical here.  On this exact table, in this exact
+// ordering, over this exact population -- unbound rows -- the id-map pass
+// measured 34.3% map-confirmed in the head against 69-78% in the middle
+// bands.  Roughly double.  A head sample would have understated that answer
+// by half.
+//
+// anilist_id is broadly chronological, and the thing being measured
+// (dandanplay's coverage and whether it publishes an AniList cross-link) has
+// every reason to vary with a title's age, so the head is exactly the wrong
+// slice to generalise from.
+//
+// A systematic every-Nth sample rather than a random one: the ordering has no
+// periodicity for a stride to alias against, it costs no extra query, and it
+// is reproducible -- the same `want` against the same catalogue probes the
+// same rows, so two runs can be compared instead of merely averaged.
+func crosslinkSample[T any](rows []T, want int) ([]T, int) {
+	if want <= 0 || want >= len(rows) {
+		return rows, 1
+	}
+	// Indices are computed proportionally (i*len/want) rather than by stepping
+	// a fixed stride, and the difference is not cosmetic.  Stepping by
+	// len/want truncates -- 4463/300 is 14, and 300 steps of 14 stop at 4186,
+	// leaving the last 277 rows of the catalogue unreachable no matter how
+	// large the sample.  That is the same tail-versus-head bias this function
+	// exists to remove, just at the other end, and it grows as `want` shrinks.
+	// Proportional indexing lands the final pick within one stride of the last
+	// row for any pair of sizes.
+	out := make([]T, 0, want)
+	for i := 0; i < want; i++ {
+		out = append(out, rows[i*len(rows)/want])
+	}
+	// Reported as the nominal spacing, which is what a reader of the summary
+	// wants ("every 14th row"); the actual gaps vary by one where the division
+	// is inexact.
+	stride := len(rows) / want
+	if stride < 1 {
+		stride = 1
+	}
+	return out, stride
+}
+
 // runCrosslinkProbe walks the candidate set and reports.  Writes nothing.
-func runCrosslinkProbe(ctx context.Context, q crosslinkProbeDB, ddp crosslinkProbeClient, limit int, outPath string) error {
-	rows, err := q.ListUnboundMapSilentForCrosslink(ctx)
+//
+// `sample` > 0 spreads the run across the whole population instead of walking
+// the head; see crosslinkSample.  `limit` stays a hard ceiling on upstream
+// calls either way, because the budget it protects is shared with live
+// danmaku.
+func runCrosslinkProbe(ctx context.Context, q crosslinkProbeDB, ddp crosslinkProbeClient, limit, sample int, outPath string) error {
+	all, err := q.ListUnboundMapSilentForCrosslink(ctx)
 	if err != nil {
 		return fmt.Errorf("list crosslink candidates: %w", err)
 	}
-	slog.Info("ddp crosslink probe: candidates", "count", len(rows), "limit", limit)
+	rows, stride := crosslinkSample(all, sample)
+	slog.Info("ddp crosslink probe: candidates",
+		"count", len(all), "sampled", len(rows), "stride", stride, "limit", limit)
 
 	rep := crosslinkReport{
-		Total:       len(rows),
+		// Total stays the whole population, not the sample: it is the
+		// multiplier the extrapolation uses.
+		Total:       len(all),
+		Stride:      stride,
 		Counts:      map[string]int{},
 		PositionHit: map[int]int{},
 		Rows:        make([]crosslinkRow, 0, len(rows)),
@@ -265,15 +331,27 @@ func printCrosslinkSummary(rep *crosslinkReport) {
 	}
 
 	// Extrapolation is the whole point of a probe, so it is printed rather
-	// than left for someone to do by hand -- and it is printed with the
-	// sample size beside it, because this is a head-of-catalogue sample and
-	// the id-map pass has already shown that the head is not representative.
+	// than left for someone to do by hand -- and it is printed with a note
+	// saying which of the two things it is, because a stride-1 run over a
+	// budget cap has only seen the head of the catalogue and the id-map pass
+	// has already shown the head of this population is not representative.
 	if rep.Probed > 0 && rep.Total > rep.Probed {
 		rate := float64(rep.Counts[xlinkBindable]) / float64(rep.Probed)
 		fmt.Printf("\n  at this rate a full pass over %d rows would bind ~%.0f\n",
 			rep.Total, rate*float64(rep.Total))
-		fmt.Printf("  and cost ~%.0f requests (n=%d, head of the anilist_id order --\n",
-			float64(rep.APICalls)/float64(rep.Probed)*float64(rep.Total), rep.Probed)
-		fmt.Println("  the id-map pass found its head unrepresentative, so treat this as a range)")
+		fmt.Printf("  and cost ~%.0f requests\n",
+			float64(rep.APICalls)/float64(rep.Probed)*float64(rep.Total))
+		if rep.Stride > 1 {
+			// Wald interval.  Printed because the decision this feeds is a
+			// threshold comparison, and a point estimate with no width invites
+			// reading 12% and 18% as different answers when the sample cannot
+			// tell them apart.
+			se := math.Sqrt(rate * (1 - rate) / float64(rep.Probed))
+			fmt.Printf("  n=%d, every %d-th row across the whole set; 95%% CI on the bind rate: %.1f%%-%.1f%%\n",
+				rep.Probed, rep.Stride, 100*(rate-1.96*se), 100*(rate+1.96*se))
+		} else {
+			fmt.Printf("  n=%d, head of the anilist_id order -- the id-map pass found its head\n", rep.Probed)
+			fmt.Println("  unrepresentative, so treat this as a range, or re-run with -probe-sample")
+		}
 	}
 }
