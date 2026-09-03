@@ -99,6 +99,8 @@ func main() {
 	outFile := flag.String("out", "report.json", "path for the JSON report")
 	healMode := flag.Bool("heal", false, "WRITES: fill title_chinese from dandanplay for map-confirmed rows missing CN")
 	epTitlesMode := flag.Bool("heal-episode-titles", false, "fill anime_episode_titles from dandanplay; read-only unless combined with --apply")
+	resumeFlag := flag.Bool("resume", false, "--heal-episode-titles: skip anime a previous pass already wrote (episode_titles_at set)")
+	maxEmptyStreak := flag.Int("max-empty-streak", 200, "--heal-episode-titles: abort after this many consecutive rows with no titles (0 disables)")
 	flag.Parse()
 
 	// Default to report mode when no explicit mode is set.
@@ -163,7 +165,7 @@ func main() {
 			slog.Error("--heal-episode-titles needs dandanplay; do not combine with --skip-ddp")
 			os.Exit(1)
 		}
-		if err := runEpisodeTitleHeal(ctx, pool, q, ddpClient, *limitFlag, *applyMode, *outFile); err != nil {
+		if err := runEpisodeTitleHeal(ctx, pool, q, ddpClient, *limitFlag, *applyMode, *resumeFlag, *maxEmptyStreak, *outFile); err != nil {
 			slog.Error("episode-title heal failed", "err", err)
 			os.Exit(1)
 		}
