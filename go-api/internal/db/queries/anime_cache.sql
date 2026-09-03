@@ -1826,7 +1826,11 @@ DELETE FROM anime_episode_titles
 -- rows the freshness arm rejects sorting last.
 SELECT
     ac.anilist_id,
-    ac.bgm_id
+    ac.bgm_id,
+    -- The scope guard's denominator.  Without it the sweep would write an
+    -- episode list whose width it cannot check, and the one-shot backfill and
+    -- the timer would then disagree about the same anime.
+    ac.episodes
 FROM anime_cache ac
 WHERE ac.status = 'RELEASING'
   AND ac.bgm_id IS NOT NULL

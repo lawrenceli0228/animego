@@ -201,6 +201,63 @@ func (q *Queries) ListBgmBoundNeedingEpisodeTitles(ctx context.Context) ([]ListB
 	return items, nil
 }
 
+const listRecentIdMapBindings = `-- name: ListRecentIdMapBindings :many
+SELECT
+    anilist_id,
+    bgm_id,
+    title_native,
+    title_romaji,
+    season_year,
+    episodes
+FROM anime_cache
+WHERE bgm_match_source = 'id_map'
+  AND updated_at > now() - make_interval(mins => $1::int)
+ORDER BY anilist_id
+`
+
+type ListRecentIdMapBindingsRow struct {
+	AnilistID   int32   `json:"anilistId"`
+	BgmID       *int32  `json:"bgmId"`
+	TitleNative *string `json:"titleNative"`
+	TitleRomaji *string `json:"titleRomaji"`
+	SeasonYear  *int32  `json:"seasonYear"`
+	Episodes    *int32  `json:"episodes"`
+}
+
+// Bindings the id-map sweep wrote recently, with the three fields an audit
+// compares against the Bangumi subject.
+//
+// Scoped by bgm_match_source rather than by a job id because the sweep is not
+// the only writer of that label -- the V1 worker's tier 0 reads the same table
+// -- and an audit that silently skipped V1's bindings would report a clean
+// batch while leaving half of it unread.
+func (q *Queries) ListRecentIdMapBindings(ctx context.Context, sinceMinutes int32) ([]ListRecentIdMapBindingsRow, error) {
+	rows, err := q.db.Query(ctx, listRecentIdMapBindings, sinceMinutes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentIdMapBindingsRow{}
+	for rows.Next() {
+		var i ListRecentIdMapBindingsRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.BgmID,
+			&i.TitleNative,
+			&i.TitleRomaji,
+			&i.SeasonYear,
+			&i.Episodes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnboundMapSilentForCrosslink = `-- name: ListUnboundMapSilentForCrosslink :many
 SELECT
     anilist_id,

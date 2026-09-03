@@ -162,7 +162,7 @@ func (w *EpisodeTitlesWorker) Work(ctx context.Context, _ *river.Job[EpisodeTitl
 		if row.BgmID == nil {
 			continue // the query's predicate guarantees this
 		}
-		res := w.sweepOne(ctx, row.AnilistID, *row.BgmID)
+		res := w.sweepOne(ctx, row.AnilistID, *row.BgmID, row.Episodes)
 		switch res.class {
 		case sweepWritten:
 			accepted++
@@ -210,7 +210,7 @@ type sweepResult struct {
 // step matters because they write the same rows through the same source label;
 // if they disagreed about which bindings are trustworthy, each pass would
 // partially undo the other's judgement.
-func (w *EpisodeTitlesWorker) sweepOne(ctx context.Context, anilistID, bgmID int32) sweepResult {
+func (w *EpisodeTitlesWorker) sweepOne(ctx context.Context, anilistID, bgmID int32, catalogueEpisodes *int32) sweepResult {
 	mapBgm, mapErr := w.db.LookupBgmIdMap(ctx, anilistID)
 	mapSpeaks := mapErr == nil
 	if mapErr != nil && mapErr != pgx.ErrNoRows {
@@ -244,6 +244,17 @@ func (w *EpisodeTitlesWorker) sweepOne(ctx context.Context, anilistID, bgmID int
 	titles := episodetitles.Usable(data.Episodes)
 	if len(titles) == 0 {
 		return sweepResult{class: sweepEmpty}
+	}
+	// The subject is the right one -- 41% of the rows this refuses have a
+	// binding an independent map confirms -- but its episode list is wider
+	// than the entry it would land on.  Refused whole rather than truncated:
+	// a list belonging to a series has the SERIES' episode 1 at its head, so
+	// the head is no more trustworthy than the tail.
+	if maxEp, over := episodetitles.ScopeExceeded(titles, catalogueEpisodes); over {
+		slog.InfoContext(ctx, "episode_titles refused: list wider than the entry",
+			"anilistId", anilistID, "bgmId", bgmID,
+			"maxEpisode", maxEp, "catalogueEpisodes", catalogueEpisodes)
+		return sweepResult{class: sweepRejected}
 	}
 
 	written, retracted, err := episodetitles.Apply(ctx, w.pool, w.q, anilistID, bgmID, titles)

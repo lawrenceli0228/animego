@@ -115,3 +115,23 @@ ORDER BY a.anilist_id;
 -- held subject would be accepted silently and make GetAnimeByBgmID -- a :one
 -- query -- return an arbitrary one of them.
 SELECT count(*)::bigint FROM anime_cache WHERE bgm_id = @bgm_id;
+
+-- name: ListRecentIdMapBindings :many
+-- Bindings the id-map sweep wrote recently, with the three fields an audit
+-- compares against the Bangumi subject.
+--
+-- Scoped by bgm_match_source rather than by a job id because the sweep is not
+-- the only writer of that label -- the V1 worker's tier 0 reads the same table
+-- -- and an audit that silently skipped V1's bindings would report a clean
+-- batch while leaving half of it unread.
+SELECT
+    anilist_id,
+    bgm_id,
+    title_native,
+    title_romaji,
+    season_year,
+    episodes
+FROM anime_cache
+WHERE bgm_match_source = 'id_map'
+  AND updated_at > now() - make_interval(mins => sqlc.arg(since_minutes)::int)
+ORDER BY anilist_id;

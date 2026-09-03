@@ -31,6 +31,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
@@ -104,10 +105,11 @@ func main() {
 	maxEmptyStreak := flag.Int("max-empty-streak", 200, "--heal-episode-titles: abort after this many consecutive rows with no titles (0 disables)")
 	idMapBinds := flag.Bool("report-id-map-binds", false, "read-only: what the id-map bind sweep would bind, and what it would refuse")
 	xlinkProbe := flag.Bool("probe-ddp-crosslink", false, "read-only: measure what dandanplay cross-links could bind for map-silent unbound rows")
+	auditBinds := flag.Int("audit-id-map-binds", 0, "read-only: check id_map bindings written in the last N minutes against their Bangumi subject")
 	flag.Parse()
 
 	// Default to report mode when no explicit mode is set.
-	if !*applyMode && !*reportMode && !*healMode && !*epTitlesMode && !*idMapBinds && !*xlinkProbe {
+	if !*applyMode && !*reportMode && !*healMode && !*epTitlesMode && !*idMapBinds && !*xlinkProbe && *auditBinds == 0 {
 		*reportMode = true
 	}
 
@@ -140,6 +142,20 @@ func main() {
 	defer pool.Close()
 
 	q := dbgen.New(pool)
+
+	// ── id-map binding audit ──────────────────────────────────────────────
+	// Reads Bangumi, not dandanplay, so it runs on a budget the episode-title
+	// work does not compete for.  Its own client, and therefore its own 800ms
+	// bucket: nothing else in this process talks to Bangumi, so there is no
+	// second consumer to share one with.
+	if *auditBinds > 0 {
+		bgmClient := bangumi.NewClient()
+		if err := runBindingAudit(ctx, q, bgmClient, *auditBinds, *outFile); err != nil {
+			slog.Error("id-map binding audit failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// ── id-map bind preview ───────────────────────────────────────────────
 	// Reads two tables and prints; needs neither dandanplay nor the

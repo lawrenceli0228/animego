@@ -1322,6 +1322,14 @@ type Querier interface {
 	// Express; the join is the same shape as the subscriptions list query
 	// but only returns the cardview projection.
 	ListProfileWatching(ctx context.Context, userID uuid.UUID) ([]ListProfileWatchingRow, error)
+	// Bindings the id-map sweep wrote recently, with the three fields an audit
+	// compares against the Bangumi subject.
+	//
+	// Scoped by bgm_match_source rather than by a job id because the sweep is not
+	// the only writer of that label -- the V1 worker's tier 0 reads the same table
+	// -- and an audit that silently skipped V1's bindings would report a clean
+	// batch while leaving half of it unread.
+	ListRecentIdMapBindings(ctx context.Context, sinceMinutes int32) ([]ListRecentIdMapBindingsRow, error)
 	// The airing shows whose episode titles are due another look.
 	//
 	// Anchored on status = 'RELEASING' because that is the population whose titles

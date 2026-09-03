@@ -96,6 +96,62 @@ func CountMain(eps []dandanplay.DandanEpisode) int {
 	return n
 }
 
+// scopeRatioCeiling is where an episode list stops describing the entry it
+// would be written onto and starts describing something larger.
+//
+// It is read off the live distribution rather than chosen.  Grouping every
+// anime whose written episode numbers already run past its catalogue count, by
+// the ratio of the two:
+//
+//	ratio      anime   overrun rows   binding confirmed by the id map
+//	<=1.10       122            183   89%
+//	1.10-1.50     95            423   75%
+//	1.50-2.00    198          1,829   63%
+//	>2.00        475         17,880   41%
+//
+// The shape of that table is the argument.  Below 1.10 the binding is
+// overwhelmingly confirmed by an independent map and the average entry is 29
+// episodes long, so an overrun of one or two is the catalogue undercounting a
+// season, not a wrong subject -- the titles there are right and refusing them
+// would lose real data.  Above 2.00 the average entry is 4.2 episodes long and
+// the worst case carries 3,528 of them: whatever that subject is, it is not
+// this four-episode ONA.  That band alone is 88% of the damage.
+//
+// Note what the last column rules out.  195 of those 475 bindings are
+// confirmed by the vendored id map, so this is NOT a binding error and
+// unbinding would be the wrong repair: Bangumi legitimately covers with one
+// subject what AniList splits into a series and its shorts.  The binding is
+// right and the episode list simply has a wider scope than the row it is
+// pointed at.
+const scopeRatioCeiling = 2.0
+
+// ScopeExceeded reports whether a title list describes more than the entry it
+// is about to be written onto, and returns the highest episode number in it.
+//
+// It measures the highest episode ABOUT TO BE WRITTEN rather than upstream's
+// own episode count, which CountMain already offers.  The two differ whenever
+// a subject carries entries this package refuses -- specials, fractional
+// numbering, empty titles -- and it is the written numbers that end up in the
+// table and in the grid, so they are what the ceiling has to be about.
+//
+// A row whose catalogue episode count is unknown returns false.  2.9% of
+// bgm-bound rows have no count, and with no signal to judge on, refusing them
+// would discard real titles on no evidence.  Absence of evidence is not
+// evidence of absence, so those rows are written and the question is left to
+// the reports.
+func ScopeExceeded(titles []Title, catalogueEpisodes *int32) (int32, bool) {
+	var maxEp int32
+	for _, t := range titles {
+		if t.Episode > maxEp {
+			maxEp = t.Episode
+		}
+	}
+	if catalogueEpisodes == nil || *catalogueEpisodes <= 0 {
+		return maxEp, false
+	}
+	return maxEp, float64(maxEp) > scopeRatioCeiling*float64(*catalogueEpisodes)
+}
+
 // Apply writes one anime's titles as a single transaction.
 //
 // The four statements are one unit and a partial application is worse than not
