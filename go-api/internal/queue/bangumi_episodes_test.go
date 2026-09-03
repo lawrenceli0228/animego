@@ -221,15 +221,16 @@ func (f *fakeEpisodesBgmDB) MarkEpisodesBgmAttempted(ctx context.Context, outcom
 	return fn(ctx, outcome, reason, anilistID, bgmID)
 }
 
-func (f *fakeEpisodesBgmDB) UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCN, name *string) error {
+func (f *fakeEpisodesBgmDB) UpsertEpisodeTitleSourced(ctx context.Context, arg dbgen.UpsertEpisodeTitleSourcedParams) (int64, error) {
+	nameCN, name := epStrPtr(arg.NameCn), epStrPtr(arg.Name)
 	f.mu.Lock()
-	f.titles = append(f.titles, episodeTitleWrite{animeID: animeID, episode: episode, nameCN: nameCN, name: name})
+	f.titles = append(f.titles, episodeTitleWrite{animeID: arg.AnimeID, episode: arg.Episode, nameCN: nameCN, name: name})
 	fn := f.titleFn
 	f.mu.Unlock()
 	if fn == nil {
-		return nil
+		return 1, nil
 	}
-	return fn(ctx, animeID, episode, nameCN, name)
+	return 1, fn(ctx, arg.AnimeID, arg.Episode, nameCN, name)
 }
 
 // --- the surface this worker must never touch ---
@@ -1125,8 +1126,8 @@ func (noopEpisodesBgmDB) MarkEpisodesBgmAttempted(_ context.Context, _ string, _
 	return 0, nil
 }
 
-func (noopEpisodesBgmDB) UpsertEpisodeTitle(_ context.Context, _ int32, _ int32, _ *string, _ *string) error {
-	return nil
+func (noopEpisodesBgmDB) UpsertEpisodeTitleSourced(_ context.Context, _ dbgen.UpsertEpisodeTitleSourcedParams) (int64, error) {
+	return 1, nil
 }
 
 // A double that is a valid Enqueuer but does NOT carry the episode-count

@@ -336,8 +336,8 @@ func (noopV12DB) UpdateAnimeCharacterCN(_ context.Context, _ int32, _ *string, _
 	return nil
 }
 
-func (noopV12DB) UpsertEpisodeTitle(_ context.Context, _ int32, _ int32, _ *string, _ *string) error {
-	return nil
+func (noopV12DB) UpsertEpisodeTitleSourced(_ context.Context, _ dbgen.UpsertEpisodeTitleSourcedParams) (int64, error) {
+	return 1, nil
 }
 
 // UpdateDescriptionCn satisfies V2Writer + V3Writer.  Registration tests

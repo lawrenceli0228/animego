@@ -259,7 +259,7 @@ func episodesBgmEnqueuerFrom(enq Enqueuer) EpisodesBgmEnqueuer {
 
 // EpisodesBgmWriter is everything the per-row worker touches.
 //
-// UpsertEpisodeTitle is shared with V2Writer on purpose: the episode titles
+// UpsertEpisodeTitleSourced is shared with V2Writer on purpose: the episode titles
 // arrive in the same response body as the count, and growing a second
 // normalise-then-write path for them would be two implementations of one
 // mapping.
@@ -267,7 +267,7 @@ type EpisodesBgmWriter interface {
 	GetEpisodesBgmGateInputs(ctx context.Context, anilistID int32) (dbgen.GetEpisodesBgmGateInputsRow, error)
 	UpdateEpisodesBgm(ctx context.Context, episodesBgm *int32, anilistID int32, bgmID *int32) (int64, error)
 	MarkEpisodesBgmAttempted(ctx context.Context, outcome string, reason *string, anilistID int32, bgmID *int32) (int64, error)
-	UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCN *string, name *string) error
+	UpsertEpisodeTitleSourced(ctx context.Context, arg dbgen.UpsertEpisodeTitleSourcedParams) (int64, error)
 }
 
 // EpisodesBgmSubjectClient is the upstream surface: the subject (for the
@@ -487,7 +487,7 @@ func (w *EpisodesBgmWorker) Work(ctx context.Context, job *river.Job[EpisodesBgm
 	// Episode titles are best-effort, matching the stance V2 takes on the same
 	// write: the count has already committed, and failing the job here would
 	// re-spend two upstream requests to retry an optional column.
-	written, failures := writeEpisodeTitles(ctx, w.db, anilistID, titles)
+	written, failures := writeEpisodeTitles(ctx, w.db, anilistID, int32(bgmID), titles)
 	if failures > 0 {
 		slog.WarnContext(ctx, "episodes_bgm title write failures",
 			"anilistId", anilistID, "bgmId", bgmID,

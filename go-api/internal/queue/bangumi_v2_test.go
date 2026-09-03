@@ -106,12 +106,19 @@ type v2CharCall struct {
 	voiceActorImageURL *string
 }
 
-// v2EpTitleCall snapshots one UpsertEpisodeTitle invocation.
+// v2EpTitleCall snapshots one UpsertEpisodeTitleSourced invocation.
+//
+// source and bgmID are recorded because they are the two halves of the fix in
+// 0030: the source is what makes the value's provenance survive the write, and
+// the bgm id is the binding the query pins to.  A worker that stopped supplying
+// either would keep passing every assertion about names.
 type v2EpTitleCall struct {
 	animeID int32
 	episode int32
 	nameCN  *string
 	name    *string
+	source  string
+	bgmID   int32
 }
 
 // v2DescCnCall snapshots one UpdateDescriptionCn invocation.
@@ -175,16 +182,28 @@ func (f *fakeV2DB) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, na
 	return fn(ctx, call)
 }
 
-func (f *fakeV2DB) UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCN *string, name *string) error {
-	call := v2EpTitleCall{animeID: animeID, episode: episode, nameCN: nameCN, name: name}
+func (f *fakeV2DB) UpsertEpisodeTitleSourced(ctx context.Context, arg dbgen.UpsertEpisodeTitleSourcedParams) (int64, error) {
+	call := v2EpTitleCall{animeID: arg.AnimeID, episode: arg.Episode, nameCN: epStrPtr(arg.NameCn), name: epStrPtr(arg.Name), source: arg.Source, bgmID: arg.BgmID}
 	f.mu.Lock()
 	f.upsertEpCalls = append(f.upsertEpCalls, call)
 	fn := f.upsertEpFn
 	f.mu.Unlock()
+	// 1 row affected is the success shape; the real query returns 0 when the
+	// binding moved, which the worker counts as a failure.
 	if fn == nil {
+		return 1, nil
+	}
+	return 1, fn(ctx, call)
+}
+
+// epStrPtr turns the plain strings UpsertEpisodeTitleSourcedParams carries back
+// into the nil-able form the recorded call shapes use, so assertions written
+// against the pre-0029 signature keep meaning the same thing.
+func epStrPtr(s string) *string {
+	if s == "" {
 		return nil
 	}
-	return fn(ctx, call)
+	return &s
 }
 
 // UpdateDescriptionCn records the Chinese-description write.  Note the
@@ -1144,4 +1163,53 @@ func TestBangumiV2_SubjectUpdateError_SkipsDescriptionCn(t *testing.T) {
 	require.Error(t, runV2(t, b, db, 1234, 9999))
 	assert.Empty(t, db.snapshotDescCnCalls(),
 		"primary write failed → don't attempt the optional one")
+}
+
+// TestBangumiV2_EpisodeTitlesCarryBangumiProvenance pins the half of the write
+// that has no visible effect until a second source exists.
+//
+// The regression it guards is not hypothetical.  For one release V2 wrote
+// through the pre-0029 statement, which set the two value columns and left the
+// source columns untouched; the hourly episodes_bgm sweep then passed over rows
+// cmd/bgmbackfill had labelled 'ddp' and replaced their values -- often with
+// NULL -- while the 'ddp' label stayed behind.  1,966 production rows ended up
+// claiming a source for a column that held nothing, and because the sourced
+// upsert scores precedence against that label, every automatic writer was then
+// refused on those episodes.
+//
+// TestBangumiV2_WritesEpisodeTitles above passes just as happily without a
+// source or a binding pin, which is exactly why the bug survived a release.
+// This one does not.
+func TestBangumiV2_EpisodeTitlesCarryBangumiProvenance(t *testing.T) {
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, id int) (*bangumi.Subject, error) {
+			return makeSubject(id, "中文名", 80, 100), nil
+		},
+		episodesFn: func(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
+			return &bangumi.EpisodesResponse{Eps: []bangumi.Episode{
+				{Sort: 1, Type: 0, Name: "E1", NameCN: "第一集"},
+				{Sort: 2, Type: 0, Name: "E2"},
+			}}, nil
+		},
+	}
+	d := &fakeV2DB{}
+	if err := runV2(t, b, d, 100, 555); err != nil {
+		t.Fatalf("Work: %v", err)
+	}
+	eps := d.snapshotEpTitleCalls()
+	if len(eps) != 2 {
+		t.Fatalf("want 2 episode-title writes, got %d", len(eps))
+	}
+	for _, e := range eps {
+		if e.source != "bangumi" {
+			t.Fatalf("episode %d written with source %q, want \"bangumi\": a value "+
+				"labelled by nobody is unclaimed, and one wearing another source's "+
+				"label blocks the writer that could fill it", e.episode, e.source)
+		}
+		if e.bgmID != 555 {
+			t.Fatalf("episode %d written with bgmID %d, want 555: the query cannot "+
+				"refuse a write whose subject moved if the caller does not say which "+
+				"subject it fetched", e.episode, e.bgmID)
+		}
+	}
 }
