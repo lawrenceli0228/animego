@@ -116,6 +116,20 @@ type epTitleRow struct {
 	Written           int    `json:"written,omitempty"`
 	Retracted         int    `json:"retracted,omitempty"`
 	Err               string `json:"err,omitempty"`
+
+	// AskedUpstream reports whether this row actually reached the network.
+	//
+	// It is false for a row decided before the fetch (a map conflict, a
+	// skipped row) and, less obviously, for a row whose subject a previous row
+	// in the same pass already fetched: the client caches an episode response
+	// for 24h in-process, so the second claimant of a shared subject is served
+	// from memory.  8.2% of one production candidate set were such rows,
+	// because 541 subjects are held by more than one anime (TODOS.md).
+	//
+	// The distinction matters to exactly one consumer, the empty-streak
+	// breaker, whose question is whether UPSTREAM is still answering.  A row
+	// that consulted no upstream is evidence about neither answer.
+	AskedUpstream bool `json:"asked_upstream,omitempty"`
 }
 
 // epTitleReport is the whole artifact.
@@ -161,6 +175,11 @@ func runEpisodeTitleHeal(
 		"maxEmptyStreak", maxEmptyStreak)
 
 	emptyStreak := 0
+	// Subjects this pass has already asked upstream about.  A repeat is served
+	// from the client's 24h in-process cache, which is shorter than no pass
+	// has ever been -- so within one run a repeated bgm_id is a cache hit by
+	// construction, and this set identifies them exactly.
+	fetched := make(map[int32]bool, len(rows))
 	rep := epTitleReport{
 		Mode:   map[bool]string{true: "apply", false: "report"}[apply],
 		Total:  len(rows),
@@ -177,7 +196,7 @@ func runEpisodeTitleHeal(
 		if row.BgmID == nil {
 			continue // the query's own predicate guarantees this; belt and braces
 		}
-		out := healOneRow(ctx, pool, q, ddp, row, limitDDP, apply, &rep)
+		out := healOneRow(ctx, pool, q, ddp, row, limitDDP, apply, &rep, fetched)
 		rep.Counts[out.Class]++
 		rep.Rows = append(rep.Rows, out)
 
@@ -190,11 +209,18 @@ func runEpisodeTitleHeal(
 		// NO_TITLES and 0-8 writes.  Stopping at the first few hundred turns
 		// 7,600 wasted requests into a few hundred, and leaves the unreached
 		// rows unstamped so --resume picks them up.
-		if out.Class == epClassNoTitles {
-			emptyStreak++
-		} else if out.Class != epClassSkipped {
-			emptyStreak = 0
-		}
+		//
+		// Only rows that reached the network move this counter, in EITHER
+		// direction.  The first version keyed on the class alone and could not
+		// fire: a second production run watched upstream go quiet at ~4,700
+		// requests and then walked 350 more rows without aborting, because
+		// 8.2% of its candidates shared a subject with an earlier row and came
+		// back from the client's in-process cache.  Those cached rows resolved
+		// to UNDECIDED or DDP_REBIND -- neither of which is NO_TITLES -- and
+		// reset the streak roughly every twelve rows, so it never reached the
+		// threshold.  A row that consulted no upstream cannot testify about
+		// upstream, which is why it is now neutral rather than exonerating.
+		emptyStreak = nextEmptyStreak(emptyStreak, out.AskedUpstream, out.Class)
 		if shouldAbortOnEmptyStreak(emptyStreak, maxEmptyStreak, rep.Counts[epClassWritten]) {
 			rep.Aborted = true
 			rep.AbortReason = fmt.Sprintf(
@@ -277,6 +303,7 @@ func healOneRow(
 	limitDDP int,
 	apply bool,
 	rep *epTitleReport,
+	fetched map[int32]bool,
 ) epTitleRow {
 	bgmID := *row.BgmID
 	out := epTitleRow{
@@ -309,8 +336,17 @@ func healOneRow(
 		out.Class = epClassSkipped
 		return out
 	}
+	// A subject this pass has already fetched comes back from the client's
+	// 24h in-process cache.  Counting it as an API call inflated the request
+	// total a run reports, and -- the reason this is tracked at all -- letting
+	// it reset the empty-streak breaker meant a cached answer could vouch for
+	// an upstream that had stopped answering.
+	out.AskedUpstream = !fetched[bgmID]
+	if out.AskedUpstream {
+		fetched[bgmID] = true
+		rep.DdpAPICalls++
+	}
 	data, err := ddp.FetchEpisodesByBgmID(ctx, bgmID)
-	rep.DdpAPICalls++
 	if err != nil {
 		out.Class = epClassFetchFail
 		out.Err = err.Error()
@@ -369,6 +405,33 @@ func healOneRow(
 	rep.TitlesWritten += written
 	rep.Retracted += retracted
 	return out
+}
+
+// nextEmptyStreak folds one row into the empty-streak counter.
+//
+// The rule is one sentence long and the first version got it wrong anyway:
+// only a row that reached the network may move this counter, in either
+// direction.
+//
+// What that version did instead was key on the class alone -- NO_TITLES
+// increments, anything but SKIPPED resets -- and the result could not fire at
+// all.  A production run watched upstream go quiet at ~4,700 requests and then
+// walked 350 further rows without aborting, because 8.2% of its candidates
+// shared a bgm subject with an earlier row and came back from the client's
+// 24h in-process cache.  Those rows resolved to UNDECIDED or DDP_REBIND, which
+// the old rule read as proof of life, and reset the streak about every twelfth
+// row.  Nothing in the cached response had touched upstream.
+//
+// So: a row that consulted no upstream is neutral.  It neither accuses nor
+// exonerates, which is the only honest thing a row with no evidence can do.
+func nextEmptyStreak(streak int, askedUpstream bool, class string) int {
+	if !askedUpstream {
+		return streak
+	}
+	if class == epClassNoTitles {
+		return streak + 1
+	}
+	return 0
 }
 
 // shouldAbortOnEmptyStreak decides whether a run of empty results means the

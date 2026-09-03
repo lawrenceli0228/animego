@@ -94,7 +94,8 @@ type classified struct {
 func main() {
 	applyMode := flag.Bool("apply", false, "mutate prod: reset REBIND+QUARANTINE rows")
 	reportMode := flag.Bool("report", false, "read-only report (default when neither flag is set)")
-	limitFlag := flag.Int("limit", 0, "cap dandanplay API calls this run (0=all)")
+	limitFlag := flag.Int("limit", defaultRequestBudget,
+		fmt.Sprintf("cap dandanplay API calls this run (0=uncapped, and see why the default is %d)", defaultRequestBudget))
 	skipDDP := flag.Bool("skip-ddp", false, "id-map-only pass, skip dandanplay calls")
 	outFile := flag.String("out", "report.json", "path for the JSON report")
 	healMode := flag.Bool("heal", false, "WRITES: fill title_chinese from dandanplay for map-confirmed rows missing CN")
@@ -609,3 +610,27 @@ func writeJSON(path string, v any) error {
 	}
 	return nil
 }
+
+// defaultRequestBudget caps how many dandanplay requests one run may spend.
+//
+// It is not a politeness setting.  dandanplay meters per function group per
+// day, and every episode lookup this tool makes -- /api/v2/bangumi/bgmtv/:id
+// and /api/v2/bangumi/:animeId alike -- draws on the 番剧详情 group, which is
+// also the group /match draws on for its episode list.  A run with no cap
+// therefore does not merely stop early when the group runs out: it takes the
+// live danmaku feature down with it for the rest of the day.
+//
+// That is observed, not hypothetical.  A pass left uncapped drained the group,
+// and afterwards the production endpoint returned "Anime not found on
+// dandanplay" for a subject that same pass had successfully read episode
+// titles from two hours earlier.
+//
+// The reserve is deliberately generous.  Live traffic through the two
+// user-facing groups is a couple of dozen requests on an ordinary day, so
+// holding back a tenth of the group costs a backfill one extra day and buys
+// the feature a margin it cannot be squeezed out of.  The monthly allowance is
+// twenty-four times the daily one and nowhere near spent, so days are the only
+// currency here worth economising.
+//
+// 0 still means uncapped, for a deliberate pass run when nobody is watching.
+const defaultRequestBudget = 4500

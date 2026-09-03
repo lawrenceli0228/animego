@@ -39,3 +39,152 @@ func TestShouldAbortOnEmptyStreak(t *testing.T) {
 		})
 	}
 }
+
+// TestNextEmptyStreak pins the counter the breaker reads.
+//
+// The breaker's own predicate (shouldAbortOnEmptyStreak) was unit-tested from
+// the day it shipped and was never wrong.  The counter feeding it lived inline
+// in the loop, was not tested, and was wrong in a way that made the whole
+// breaker inert against the exact failure it existed for.  That is the reason
+// this function was pulled out: a guard is only as good as the number it is
+// handed, and the number needs its own test.
+func TestNextEmptyStreak(t *testing.T) {
+	tests := []struct {
+		name          string
+		streak        int
+		askedUpstream bool
+		class         string
+		want          int
+	}{
+		{
+			name:          "an empty answer from upstream advances the streak",
+			streak:        5,
+			askedUpstream: true,
+			class:         epClassNoTitles,
+			want:          6,
+		},
+		{
+			name:          "a real answer from upstream clears it",
+			streak:        199,
+			askedUpstream: true,
+			class:         epClassWritten,
+			want:          0,
+		},
+		{
+			name:          "so does a real answer we then refuse to act on",
+			streak:        199,
+			askedUpstream: true,
+			class:         epClassUndecided,
+			want:          0,
+		},
+		{
+			// The production bug, as a single row.  This row's subject was
+			// fetched earlier in the same pass, so the response came from the
+			// client's in-process cache and upstream was never asked.  Reading
+			// it as proof of life is what kept the breaker from ever firing.
+			name:          "a cached answer neither advances nor clears it",
+			streak:        199,
+			askedUpstream: false,
+			class:         epClassUndecided,
+			want:          199,
+		},
+		{
+			name:          "a row decided before the fetch is equally neutral",
+			streak:        150,
+			askedUpstream: false,
+			class:         epClassMapConflict,
+			want:          150,
+		},
+		{
+			name:          "a skipped row leaves the count where it was",
+			streak:        150,
+			askedUpstream: false,
+			class:         epClassSkipped,
+			want:          150,
+		},
+		{
+			name:          "an upstream error is not an empty answer",
+			streak:        10,
+			askedUpstream: true,
+			class:         epClassFetchFail,
+			want:          0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nextEmptyStreak(tc.streak, tc.askedUpstream, tc.class); got != tc.want {
+				t.Fatalf("nextEmptyStreak(%d, %v, %q) = %d, want %d",
+					tc.streak, tc.askedUpstream, tc.class, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEmptyStreakReachesThresholdDespiteCacheHits replays the production
+// sequence that the old rule could not terminate.
+//
+// Upstream has gone quiet, so every row that reaches the network answers
+// NO_TITLES.  Scattered among them are rows whose subject an earlier row
+// already fetched -- 8.2% of one real candidate set, because 541 bgm subjects
+// are held by more than one anime -- and those come back from cache carrying
+// whatever the subject really said.  Under the old rule each of those reset
+// the counter, so 350 consecutive dead rows never reached a threshold of 200.
+//
+// The assertion is that the streak now crosses the threshold, and the control
+// case is that it does NOT cross when the same cached rows are counted as
+// evidence of life.  Without the control this test would pass against the bug.
+func TestEmptyStreakReachesThresholdDespiteCacheHits(t *testing.T) {
+	const (
+		rows         = 350
+		cacheEvery   = 12 // the observed spacing
+		threshold    = 200
+		writtenSoFar = 3890 // the pass had already written, so the breaker is armed
+	)
+
+	// The fixed rule.
+	streak := 0
+	fired := false
+	for i := 1; i <= rows; i++ {
+		asked := i%cacheEvery != 0
+		class := epClassNoTitles
+		if !asked {
+			class = epClassUndecided // what the cached response resolved to
+		}
+		streak = nextEmptyStreak(streak, asked, class)
+		if shouldAbortOnEmptyStreak(streak, threshold, writtenSoFar) {
+			fired = true
+			break
+		}
+	}
+	if !fired {
+		t.Fatalf("the breaker never fired over %d dead rows; streak reached %d, threshold %d",
+			rows, streak, threshold)
+	}
+
+	// Control: the old rule, restated here rather than referenced, so this
+	// stays a statement about the two rules and not about whichever one the
+	// production code currently holds.
+	oldStreak := 0
+	oldFired := false
+	for i := 1; i <= rows; i++ {
+		asked := i%cacheEvery != 0
+		class := epClassNoTitles
+		if !asked {
+			class = epClassUndecided
+		}
+		switch {
+		case class == epClassNoTitles:
+			oldStreak++
+		case class != epClassSkipped:
+			oldStreak = 0
+		}
+		if shouldAbortOnEmptyStreak(oldStreak, threshold, writtenSoFar) {
+			oldFired = true
+			break
+		}
+	}
+	if oldFired {
+		t.Fatal("the control did not reproduce the bug, so the case above proves nothing " +
+			"about the fix -- check the cache-hit spacing against the threshold")
+	}
+}
