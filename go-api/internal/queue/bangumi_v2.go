@@ -59,6 +59,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
+	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
 // v2WorkTimeout bounds the worker's total budget for Subject +
@@ -110,13 +111,14 @@ type BangumiV2Client interface {
 //     title_chinese) on anime_cache.
 //   - UpdateAnimeCharacterCN updates one row of anime_characters
 //     matched by (anime_id, name_en).
-//   - UpsertEpisodeTitle fills per-episode names.
+//   - UpsertEpisodeTitleSourced fills per-episode names, labelled
+//     'bangumi' and pinned to the binding they were fetched under.
 //   - UpdateDescriptionCn stores the Chinese synopsis carried by the
 //     same Subject payload (see persistDescriptionCn).
 type V2Writer interface {
 	UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error
 	UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCN *string, voiceActorCN *string, voiceActorImageURL *string) error
-	UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCN *string, name *string) error
+	UpsertEpisodeTitleSourced(ctx context.Context, arg dbgen.UpsertEpisodeTitleSourcedParams) (int64, error)
 	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
 }
 
@@ -349,7 +351,7 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 	} else if episodes != nil {
 		titles := normalizeEpisodeTitles(episodes.Eps)
 		var epFailures int
-		epTitlesWritten, epFailures = writeEpisodeTitles(ctx, w.db, anilistID, titles)
+		epTitlesWritten, epFailures = writeEpisodeTitles(ctx, w.db, anilistID, int32(bgmID), titles)
 		if epFailures > 0 {
 			slog.WarnContext(ctx, "bangumi_v2 episode title write failures",
 				"anilistId", anilistID, "bgmId", bgmID,
@@ -477,7 +479,7 @@ func persistDescriptionCn(ctx context.Context, db descriptionCnWriter, phase str
 	return true
 }
 
-// epTitle is a normalized episode-title row ready for UpsertEpisodeTitle.
+// epTitle is a normalized episode-title row ready for the sourced upsert.
 type epTitle struct {
 	episode int32
 	nameCN  *string

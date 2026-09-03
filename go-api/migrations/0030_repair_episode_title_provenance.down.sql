@@ -1,0 +1,23 @@
+-- Deliberately empty of DDL, and that is the honest answer rather than a
+-- missing one.
+--
+-- 0030 is a data repair, not a schema change: it adds nothing to drop and
+-- alters no column definition.  What it changed is the CONTENT of two source
+-- columns, and that change is not invertible.
+--
+-- Un-doing step A would mean putting a label back on a column that holds no
+-- value, and there is nothing recorded anywhere that says which label each row
+-- had -- 'ddp' for most of them, but the migration does not distinguish, and
+-- restoring the wrong one is worse than restoring none.  Un-doing step B would
+-- mean stripping 'bangumi' from values that demonstrably came from Bangumi.
+--
+-- Both directions would also be restoring a state the schema's own invariant
+-- calls invalid.  A down migration whose job is to reintroduce corruption is
+-- not a rollback, so this one does nothing and says why.
+--
+-- If a rollback is genuinely needed, the payload columns were never touched:
+-- `name` and `name_cn` are byte-identical before and after, so a restore of
+-- the provenance columns from a pre-0030 dump of anime_episode_titles is the
+-- only correct route.
+
+SELECT 1;

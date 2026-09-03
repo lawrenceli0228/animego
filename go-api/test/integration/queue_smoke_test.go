@@ -10,17 +10,17 @@
 // What this asserts (the contract the P2.1.2 enrichment package will
 // rely on):
 //
-//   1. queue.Boot accepts a real pool and returns a non-nil client
-//      that can Start without error against the river schema already
-//      applied by migrations 0007 + 0008.
-//   2. client.Insert publishes the job AND the worker fires AND the
-//      Subscribe(EventKindJobCompleted) channel reports completion
-//      with the right Kind.
-//   3. client.InsertTx inside a transaction defers the work until
-//      Commit and then dispatches to the worker.
-//   4. The stub workers actually return nil so jobs complete (not
-//      fail) — important because the integration suite is the first
-//      place we see a panic/error from the stubs.
+//  1. queue.Boot accepts a real pool and returns a non-nil client
+//     that can Start without error against the river schema already
+//     applied by migrations 0007 + 0008.
+//  2. client.Insert publishes the job AND the worker fires AND the
+//     Subscribe(EventKindJobCompleted) channel reports completion
+//     with the right Kind.
+//  3. client.InsertTx inside a transaction defers the work until
+//     Commit and then dispatches to the worker.
+//  4. The stub workers actually return nil so jobs complete (not
+//     fail) — important because the integration suite is the first
+//     place we see a panic/error from the stubs.
 //
 // Why subscribe rather than poll river_job table:  river's Subscribe
 // channel is buffered (1000 events default) and non-blocking — drop
@@ -132,10 +132,10 @@ func (noRowV12DB) MarkBangumiNeedsReview(_ context.Context, _ int32) error {
 	return nil
 }
 
-// UpsertEpisodeTitle satisfies queue.V2Writer.  Unreachable here because
+// UpsertEpisodeTitleSourced satisfies queue.V2Writer.  Unreachable here because
 // V2.Work() bails on the Subject ErrNotFound before it fetches episodes.
-func (noRowV12DB) UpsertEpisodeTitle(_ context.Context, _ int32, _ int32, _ *string, _ *string) error {
-	return nil
+func (noRowV12DB) UpsertEpisodeTitleSourced(_ context.Context, _ dbgen.UpsertEpisodeTitleSourcedParams) (int64, error) {
+	return 1, nil
 }
 
 func (noRowV12DB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int32, _ *string) error {

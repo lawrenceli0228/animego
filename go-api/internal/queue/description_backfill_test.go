@@ -287,11 +287,8 @@ func (f *fakeBackfillDB) UpdateAnimeCharacterCN(_ context.Context, _ int32, _ *s
 	return nil
 }
 
-func (f *fakeBackfillDB) UpsertEpisodeTitle(_ context.Context, _ int32, _ int32, _ *string, _ *string) error {
-	f.mu.Lock()
-	f.epCalls++
-	f.mu.Unlock()
-	return nil
+func (f *fakeBackfillDB) UpsertEpisodeTitleSourced(_ context.Context, _ dbgen.UpsertEpisodeTitleSourcedParams) (int64, error) {
+	return 1, nil
 }
 
 func (f *fakeBackfillDB) snapshotDescCalls() []backfillDescCall {

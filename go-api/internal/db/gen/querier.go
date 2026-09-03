@@ -1983,15 +1983,11 @@ type Querier interface {
 	// Persist a dandanplay lookup result (title, or NULL for a confirmed miss)
 	// keyed by bgm_id.
 	UpsertDdpTitle(ctx context.Context, bgmID int32, animeTitle *string) error
-	// Written by the Bangumi V2 worker (the Phase-4 enrichment analog) after
-	// fetching /subject/{bgmId}/ep.  Express set the whole episodeTitles array;
-	// we upsert per episode so a re-enrich refreshes names in place. ON CONFLICT
-	// overwrites so corrected Bangumi data wins on the next pass.
-	UpsertEpisodeTitle(ctx context.Context, animeID int32, episode int32, nameCn *string, name *string) error
 	// Write one episode title, honouring both precedence and the binding it was
 	// fetched under.  This is the query every episode-title writer is expected to
-	// use; UpsertEpisodeTitle above is the pre-0029 shape, kept only until its
-	// last caller moves over.
+	// use.  It replaced a pre-0029 statement that set the two value columns and
+	// left the source columns untouched, which let one source's value end up
+	// wearing another's label; migration 0030 repairs the rows that produced.
 	//
 	// Three guarantees live in this statement rather than in Go, because a rule
 	// enforced by the query is inherited by a new writer and a rule enforced by a
