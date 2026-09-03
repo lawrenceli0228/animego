@@ -41,6 +41,7 @@ function stats(queue: QueueOverride = {}): AdminStats {
       noCn: 0,
       hasCn: 0,
       healCnReal: 0,
+    subjectUnreadable: 0,
       cnStuck: 0,
       srcIdMap: 0,
       srcFuzzyHigh: 0,

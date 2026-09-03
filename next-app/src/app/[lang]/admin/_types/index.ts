@@ -140,6 +140,16 @@ export interface AdminStats {
     hasCn: number;
     healCnReal: number;
     cnStuck: number;
+    /**
+     * Bindings Bangumi will not serve us. V1 binds bgm_ids from the legacy
+     * search endpoint, which shows R18 subjects to an anonymous caller; V2
+     * reads /v0/subjects, which hides them. Those rows are terminal, not
+     * backlog — no button acts on this number, and none should, because the
+     * only thing that would change it is an authenticated client. It is
+     * rendered so the v3 bucket does not silently absorb them. See go-api
+     * migration 0031.
+     */
+    subjectUnreadable: number;
     srcIdMap: number;
     srcFuzzyHigh: number;
     srcFuzzyLow: number;

@@ -1,0 +1,114 @@
+-- 0031: record the one Bangumi answer that has nowhere to live -- "this
+-- subject exists, and we are not allowed to read it".
+--
+--
+-- ============================================================
+-- The defect this column exists to end
+-- ============================================================
+--
+-- V1 and V2 talk to two different Bangumi endpoints, and the two do not
+-- agree about who may see what:
+--
+--   V1 binds a bgm_id from the LEGACY search, /search/subject/{keyword}
+--   (internal/bangumi/client.go).  That endpoint serves R18 subjects to an
+--   anonymous caller.
+--
+--   V2 reads the subject itself from /v0/subjects/{bgm_id}.  That endpoint
+--   hides R18 subjects from an anonymous caller and answers 404.
+--
+-- We call both without an Authorization header -- the client sets none and
+-- no Bangumi token exists in the deployment -- so every R18 title binds
+-- successfully in V1 and then 404s in V2, forever.
+--
+-- Verified rather than inferred, from one host in one minute:  the legacy
+-- search returns subject 63029 for the keyword it was bound under, and
+-- /v0/subjects/63029 returns 404 in the same breath.  Of 59 randomly sampled
+-- stranded bgm_ids, 59 answered 404; of 3 sampled bindings that HAD
+-- completed V2, 3 answered 200.
+--
+-- The V2 worker treats that 404 as permanent and returns nil, which is the
+-- right call -- retrying cannot make an anonymous client into a logged-in
+-- one.  What was wrong is where it left the row.  bangumi_version stayed at
+-- 1, and 1 is a state no producer looks for:  the orphan scan takes
+-- version = 0, heal-CN takes version = 2, and the V1 producers take
+-- version = 0.  The row became unreachable by every sweep while still being
+-- counted as outstanding work by the admin surface, whose "Re-enrich v1"
+-- button re-enqueued exactly the V2 job that had already proven it cannot
+-- finish.  At the time of writing, 811 catalogue rows sat there, 753 of them
+-- OVA, the oldest since 2026-06-04, every one of them holding a bgm_id and a
+-- NULL bangumi_score -- and bangumi_score is written by V2 and nothing else,
+-- so that NULL is proof V2 never once completed for any of them.
+--
+-- The worker now writes a terminal state on that 404 (see
+-- MarkBangumiSubjectUnreadable).  This column is the part of that state
+-- which bangumi_version cannot carry.
+--
+--
+-- ============================================================
+-- Why a new column, and why a timestamp
+-- ============================================================
+--
+-- bangumi_version alone would put the row out of the pipeline, and it does:
+-- the worker raises it to 3, the value this schema already uses for "as far
+-- as this row can be taken" rather than "phase 3 ran" -- PromoteAnimeToV3
+-- writes exactly that to rows V3 can never touch.  But version 3 is also
+-- where 16k healthy rows live, so on its own it does not put the row out of
+-- the pipeline so much as out of sight, and "which bindings do we hold that
+-- we cannot read" stops being answerable the moment the rows arrive there.
+-- That question has a decision attached to it -- it is the entire case for
+-- acquiring a Bangumi token -- so it must survive.
+--
+-- The predicate that would answer it without a column,
+-- `bangumi_version >= 3 AND bgm_id IS NOT NULL AND bangumi_score IS NULL`,
+-- is specific today by luck (37 rows) and wrong by construction: a subject
+-- that exists, is readable, and simply has no Rating leaves the same NULL.
+-- It conflates "we could not read it" with "there was nothing to read".
+--
+-- admin_flag cannot carry it either, for the reason 0023 already wrote down
+-- when it faced the same choice: the CHECK at 0001_init.up.sql:68 admits
+-- exactly 'needs-review' and 'manually-corrected', a two-value human-workflow
+-- flag the admin surface already reads, and widening it would put two
+-- unrelated state machines in one column and break every existing reader's
+-- exhaustiveness assumption.
+--
+-- So: a column of its own.  A timestamp rather than 0023's enum, because
+-- there is only one outcome to record and an enum of one member is a
+-- vocabulary pretending to be a fact.  NULL means "never seen unreadable",
+-- which is the honest default for every row that has never been asked.  A
+-- value means "at that instant, /v0/subjects/{bgm_id} said not-found", which
+-- is the strongest claim the observation supports -- upstream's answer may
+-- change, and the timestamp says how stale our copy of it is.  It also gives
+-- a future re-probe its natural cursor without inventing a second column.
+--
+-- UpdateBangumiV2 clears it on every successful subject read, so a row that
+-- becomes readable does not keep wearing a claim that has stopped being
+-- true.  A marker with no path back to NULL is a marker that eventually
+-- lies.
+--
+--
+-- ============================================================
+-- What this migration deliberately does NOT do
+-- ============================================================
+--
+-- It does not backfill the 811.  It could -- they are trivially selectable --
+-- and it would be wrong, because the only honest way to learn that a subject
+-- is unreadable is to ask, and a migration cannot ask.  A sample of 59 says
+-- the write rate is somewhere under about 5%, which is small and is not
+-- zero: stamping all 811 from a sample would mark rows unreadable that a
+-- request would have enriched.  They are drained through the fixed worker
+-- instead -- one real request each -- which is what the "Re-enrich v1" button
+-- has always enqueued and, from this migration on, is finally the cure for
+-- rather than a re-run of the failure.
+--
+-- No index.  Nothing filters on this column in a hot path; the admin stats
+-- query counts it alongside sixteen other sequential counts over the same
+-- small table, and an ad-hoc operator query over 18k rows does not need one.
+-- Stated here so its absence reads as a decision rather than an oversight.
+
+ALTER TABLE anime_cache
+    ADD COLUMN IF NOT EXISTS bangumi_subject_unreadable_at timestamptz;
+
+COMMENT ON COLUMN anime_cache.bangumi_subject_unreadable_at IS
+    'When /v0/subjects/{bgm_id} last answered not-found for this row''s binding. '
+    'NULL means never observed unreadable. Cleared by any successful subject read. '
+    'See migration 0031.';

@@ -21,8 +21,15 @@
 //     to strand the description behind it.
 //
 // Retry policy:
-//   - Subject ErrNotFound (Bangumi has no record for this bgmId)
-//     → return nil, permanent skip.  Retrying wouldn't help.
+//   - Subject ErrNotFound (Bangumi will not serve us this subject)
+//     → mark the row terminal, then return nil.  Retrying wouldn't
+//     help: the usual cause is R18 gating, which V1's legacy search
+//     endpoint ignores and this v0 endpoint enforces, and no number
+//     of anonymous retries turns into a token.  The skip is right;
+//     what used to be wrong is that it wrote nothing, leaving the
+//     row at bangumi_version = 1 — a state no producer selects for
+//     and the admin surface still counts as outstanding.  See
+//     MarkBangumiSubjectUnreadable and migration 0031.
 //   - Either call has a network / 5xx error → return wrapped error so
 //     river retries per its policy (default 3 attempts, exp backoff).
 //   - Subject succeeds but Characters 404 → keep going with subject
@@ -106,9 +113,13 @@ type BangumiV2Client interface {
 	BangumiEpisodesFetcher
 }
 
-// V2Writer is the sqlc subset V2Worker writes.  Four methods:
+// V2Writer is the sqlc subset V2Worker writes.  Five methods:
 //   - UpdateBangumiV2 sets score/votes (and COALESCE-protected
 //     title_chinese) on anime_cache.
+//   - MarkBangumiSubjectUnreadable is the other terminal outcome:
+//     upstream answered, and the answer was that this binding is not
+//     ours to read.  Returns rows affected so a binding that moved
+//     mid-job is reported rather than mistaken for a write.
 //   - UpdateAnimeCharacterCN updates one row of anime_characters
 //     matched by (anime_id, name_en).
 //   - UpsertEpisodeTitleSourced fills per-episode names, labelled
@@ -117,6 +128,7 @@ type BangumiV2Client interface {
 //     same Subject payload (see persistDescriptionCn).
 type V2Writer interface {
 	UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error
+	MarkBangumiSubjectUnreadable(ctx context.Context, anilistID int32, bgmID int32) (int64, error)
 	UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCN *string, voiceActorCN *string, voiceActorImageURL *string) error
 	UpsertEpisodeTitleSourced(ctx context.Context, arg dbgen.UpsertEpisodeTitleSourcedParams) (int64, error)
 	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
@@ -215,14 +227,31 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 	// the result variables.
 	_ = g.Wait()
 
-	// Subject not found means Bangumi has no subject for this bgmId.
-	// Permanent — retrying won't help.  Express returned null and
-	// dropped the row; we do the same.
+	// Subject not found: upstream will not serve this bgmId to us.
+	// Permanent — retrying won't help — but permanent is a state the
+	// row has to be MOVED to, not just a branch the worker takes.
+	// Returning nil on its own is what stranded 811 rows at
+	// bangumi_version = 1, where the orphan scan (version = 0) and
+	// heal-CN (version = 2) both step over them and the admin bar
+	// counts them as work.  Mark first, then skip.
 	if errors.Is(subErr, bangumi.ErrNotFound) {
+		n, mErr := w.db.MarkBangumiSubjectUnreadable(ctx, anilistID, int32(bgmID))
+		if mErr != nil {
+			// Retryable, unlike the 404 that got us here.  A DB error
+			// must not be the thing that recreates the stranding this
+			// branch exists to prevent, so let river bring the job
+			// back rather than returning nil over a failed write.
+			return fmt.Errorf("bangumi_v2 mark unreadable %d (bgmId=%d): %w", anilistID, bgmID, mErr)
+		}
 		slog.InfoContext(ctx, "bangumi_v2 not_found",
 			"anilistId", anilistID,
 			"bgmId", bgmID,
-			"reason", "subject")
+			"reason", "subject",
+			// 0 means the row was rebound between the fetch and this
+			// write, so the verdict belongs to a subject id nobody has
+			// asked about yet and the statement correctly refused it.
+			// The rebinder owns enqueueing the new binding's V2.
+			"marked", n)
 		return nil
 	}
 	// Other subject error → transient, retryable.

@@ -587,15 +587,23 @@
 
 **Depends on / blocked by** — 无。但它动的是共享 client，回归面包含现有弹幕功能。
 
-## 绑定覆盖率：811 部死 bgm_id + 5,222 部压根没有 bgm_id
+## 绑定覆盖率：811 部 R18 绑定（已终态化）+ 5,222 部压根没有 bgm_id
 
-**What** — 清理指向已不存在 subject 的绑定，并提高无绑定行的匹配覆盖率。
+**What** — 提高无绑定行的匹配覆盖率。（原本还包含「清理指向已不存在 subject 的绑定」，这半条已被证伪并解决，见下方 09-03 更新二。）
 
 **Why** — 这是分集标题缺口里最大的一块，但它是**绑定问题不是富化问题**。5,222 部没有 bgm_id，对应 32,471 个集位完全没有上游可取；另有 811 部卡在 `bangumi_version = 1`，抽样 12 个 bgm_id **12/12 上游返回 404**（`/v0/subjects/207567` 明说 resource has been removed），811 行里只有 1 行在 `bgm_id_map` 里有任何条目——是 `fuzzy_high` 绑到了不存在的 subject id。这批绑定不但补不回一条标题，还在每轮富化里静默消耗上游配额。
 
 **Context** — 2026-09-02 评审实测。这 811 部创建集中在 2026-05-31～06-08，格式以 OVA/ONA 为主。解决后分集标题、中文简介、评分三个缺口一起受益。注意 `bgm_id_map` 是从 `data/anilist_bgm_map.json` 灌进来的**输入**表不是匹配器产物，所以「改进匹配器」和「扩充 map」是两条不同的路。
 
 **2026-09-03 更新** — 这批里有一个子集已经有自动路径了。未绑定行中 826 部在 `bgm_id_map` 里**本来就有答案**，只是够不着：V1 的 tier 0 早就查这张表，但 `UpdateBangumiV1` 带 `AND bangumi_version = 0`，而这些行停在 version 3（migration 0004 记录的 Express 时代批量态），所以答案有了也没人回头用。新的 `bgm_bind_idmap` sweep 补上这个入口，可绑 **791** 部（826 减去 33 部 subject 已被别的行占用、再减去 2 部两行争一个 subject）。剩下的约 4,400 部 map 里没有条目，仍然要靠改进匹配器或扩充 map，本条其余部分不变。
+
+**2026-09-03 更新二（推翻了上面 811 那半条的诊断）** — 那 811 部**不是死绑定，绑定全是对的**。真因是 V1 和 V2 用了两个可见范围不同的接口：V1 走老搜索 `/search/subject/{关键词}`，它对匿名调用者返回 R18 条目；V2 走 `/v0/subjects/{id}`，它把 R18 藏起来答 404。我们两边都不带 token，所以 R18 作品必然「绑得上、读不到」。
+
+上面写的「`/v0/subjects/207567` 明说 resource has been removed」是误读：那是 Bangumi 的固定 404 文案，原文 *can't be found in the database **or** has been removed*，并不声称条目被删。拿 207567 去老搜索接口查，`僧侶と交わる色欲の夜に…` 好好地在结果里；另抽的 63029、46533、109596 同样在。抽 59 个卡住的 bgm_id 全部 404，抽 3 个已完成 V2 的绑定全部 200 —— 差异在接口不在条目。判据还有一条：这 811 行 `bangumi_score` 全为 NULL，而只有 V2 写这个字段。
+
+**所以修法方向和原条目相反：必须保留绑定**（有 token 就立刻可用，清掉还会把 subject 当无主交回 id-map sweep）。migration 0031 加了 `bangumi_subject_unreadable_at`，V2 在 subject 404 时写终态（`GREATEST(bangumi_version,3)` + 打戳 + 钉住绑定），后台 v3 图例多一行「其中 N 上游不可读」。**排干动作**：部署后在后台点一次 `Re-enrich v1`，811 行各花一次真实请求离开 version 1；不在 migration 里回填，因为样本给的成功率上限约 5%、不是零，从样本推广会把本该能富化的行标错。约 2,433 次 bgm 请求（subject/characters/episodes 三路并发），按 800ms 桶约 30 分钟，期间分集标题和简介回填要排在后面。
+
+唯一还留在这一条里的，是那 5,222 部没有 bgm_id 的（其中约 4,400 部 map 里也没有条目）。
 
 **Depends on / blocked by** — 无。与 `## 分割放送会 50% 概率绑错` 同属绑定质量，建议合并考虑。
 

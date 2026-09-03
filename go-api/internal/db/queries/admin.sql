@@ -31,6 +31,12 @@ SELECT
     (SELECT count(*) FROM anime_cache WHERE title_chinese IS NOT NULL)::bigint                        AS has_cn,
     (SELECT count(*) FROM anime_cache WHERE bgm_id IS NOT NULL AND bangumi_version = 2 AND title_chinese IS NULL)::bigint AS heal_cn_real,
     (SELECT count(*) FROM anime_cache WHERE bangumi_version >= 3 AND bgm_id IS NOT NULL AND title_chinese IS NULL)::bigint AS cn_stuck,
+    -- Bindings upstream will not serve us (migration 0031).  These rows are
+    -- terminal by design, so no button acts on this number -- it is here
+    -- because without it they are indistinguishable from healthy v3 rows,
+    -- and "how many bindings can we not read" is the question a Bangumi
+    -- token would be bought to answer.
+    (SELECT count(*) FROM anime_cache WHERE bangumi_subject_unreadable_at IS NOT NULL)::bigint AS subject_unreadable,
     (SELECT count(*) FROM anime_cache WHERE bgm_match_source = 'id_map')::bigint                      AS src_id_map,
     (SELECT count(*) FROM anime_cache WHERE bgm_match_source = 'fuzzy_high')::bigint                  AS src_fuzzy_high,
     (SELECT count(*) FROM anime_cache WHERE bgm_match_source = 'fuzzy_low')::bigint                   AS src_fuzzy_low,

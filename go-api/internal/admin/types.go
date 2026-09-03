@@ -32,17 +32,23 @@ import (
 // numbers that the DB now computes — they were absent in the Mongo port
 // because Mongo's aggregation pipeline didn't track them.
 type statsEnrichment struct {
-	V0           int64 `json:"v0"`
-	V1           int64 `json:"v1"`
-	V2           int64 `json:"v2"`
-	V3           int64 `json:"v3"`
-	NoCn         int64 `json:"noCn"`
-	HasCn        int64 `json:"hasCn"`
-	HealCnReal   int64 `json:"healCnReal"`
-	CnStuck      int64 `json:"cnStuck"`
-	SrcIDMap     int64 `json:"srcIdMap"`
-	SrcFuzzyHigh int64 `json:"srcFuzzyHigh"`
-	SrcFuzzyLow  int64 `json:"srcFuzzyLow"`
+	V0         int64 `json:"v0"`
+	V1         int64 `json:"v1"`
+	V2         int64 `json:"v2"`
+	V3         int64 `json:"v3"`
+	NoCn       int64 `json:"noCn"`
+	HasCn      int64 `json:"hasCn"`
+	HealCnReal int64 `json:"healCnReal"`
+	CnStuck    int64 `json:"cnStuck"`
+	// SubjectUnreadable counts rows whose Bangumi subject upstream refuses
+	// to serve us (R18 gating on /v0/subjects, which V1's legacy search
+	// endpoint does not apply).  They are terminal, not backlog: no action
+	// exists for them short of an authenticated client.  Surfaced anyway so
+	// the v3 bucket does not silently absorb them.  See migration 0031.
+	SubjectUnreadable int64 `json:"subjectUnreadable"`
+	SrcIDMap          int64 `json:"srcIdMap"`
+	SrcFuzzyHigh      int64 `json:"srcFuzzyHigh"`
+	SrcFuzzyLow       int64 `json:"srcFuzzyLow"`
 }
 
 // DescriptionCnStats is the coverage side of the Chinese-description

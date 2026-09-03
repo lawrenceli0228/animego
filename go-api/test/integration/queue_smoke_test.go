@@ -87,7 +87,10 @@ func (noHitBangumi) Episodes(_ context.Context, _ int) (*bangumi.EpisodesRespons
 // noRowV12DB is a stub V12DB used alongside noHitBangumi.  ErrNoRows
 // on the V1 read short-circuits V1.Work() before Search is even
 // called.  UpdateBangumiV2 / UpdateAnimeCharacterCN are unreachable
-// because V2.Work() bails on Subject ErrNotFound first.  V3.Work()
+// because V2.Work() bails on Subject ErrNotFound first -- but the bail
+// is no longer silent: it writes the terminal state through
+// MarkBangumiSubjectUnreadable, which IS reached here and is stubbed
+// below.  V3.Work()
 // always calls UpdateBangumiV3 (terminal heal bumps version=3 even
 // on 404) so the V3 write is implemented as a no-op so the smoke
 // test path doesn't fail on row-not-found.
@@ -140,6 +143,14 @@ func (noRowV12DB) UpsertEpisodeTitleSourced(_ context.Context, _ dbgen.UpsertEpi
 
 func (noRowV12DB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int32, _ *string) error {
 	return nil
+}
+
+// MarkBangumiSubjectUnreadable is the one write V2.Work() DOES reach on this
+// stub's no-hit Subject.  One row affected is the success shape; returning an
+// error here would make the worker retry and the smoke test's completion path
+// non-deterministic, which is the property it exists to check.
+func (noRowV12DB) MarkBangumiSubjectUnreadable(_ context.Context, _ int32, _ int32) (int64, error) {
+	return 1, nil
 }
 
 func (noRowV12DB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) error {
