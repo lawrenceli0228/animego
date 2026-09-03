@@ -109,6 +109,11 @@ WITH unbound AS (
     FROM anime_cache a
     JOIN bgm_id_map m ON m.anilist_id = a.anilist_id
     WHERE a.bgm_id IS NULL
+      -- A human's decision outranks the map.  Without this there is no way to
+      -- say "not this one": unbinding a row hands it straight back to the next
+      -- pass, because the only thing that made it a candidate was the empty
+      -- bgm_id the correction just created.
+      AND (a.admin_flag IS DISTINCT FROM 'manually-corrected')
 ),
 eligible AS (
     SELECT anilist_id, bgm_id
@@ -127,8 +132,12 @@ SET bgm_id           = e.bgm_id,
     -- bgm_match_source 'fuzzy_low') is a candidate here the moment the map
     -- gains its entry, and the map answering IS the resolution of that
     -- review.  Leaving the flag would keep a settled row in the admin queue
-    -- for good.  'manually-corrected' is deliberately not touched: that one
-    -- records a human's decision, not a pending request for one.
+    -- for good.
+    --
+    -- The ELSE arm now only ever carries NULL forward: 'manually-corrected'
+    -- is excluded from the candidate set above, which is the stronger place
+    -- for that protection -- preserving the flag while re-binding the row
+    -- would have kept the audit trail of a correction it had just undone.
     admin_flag       = CASE WHEN a.admin_flag = 'needs-review' THEN NULL
                             ELSE a.admin_flag END,
     updated_at       = now()
@@ -2531,6 +2540,9 @@ WITH unbound AS (
     FROM anime_cache a
     JOIN bgm_id_map m ON m.anilist_id = a.anilist_id
     WHERE a.bgm_id IS NULL
+      -- Same exclusion the writer applies.  A preview that listed rows the
+      -- writer will not touch would report work that never happens.
+      AND (a.admin_flag IS DISTINCT FROM 'manually-corrected')
 )
 SELECT anilist_id,
        bgm_id,
