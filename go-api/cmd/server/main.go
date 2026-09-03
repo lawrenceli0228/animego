@@ -211,6 +211,15 @@ func main() {
 	// it.
 	queue.AddEpisodeTitlesWorker(workers, pool, q, dandanClient)
 
+	// The id-map bind sweep.  Takes the pool because its unit of work is a
+	// transaction spanning a binding write and that binding's V2 dispatch --
+	// a bound row with no enrichment queued behind it would drop out of the
+	// sweep's own candidate set and never be looked at again.  Takes the
+	// enqueuer for the same reason; `enqueuer` is late-bound above and is
+	// wired to river before any job can run.  Gated at work time by
+	// BGM_BIND_IDMAP_SWEEP_ENABLED.
+	queue.AddBindIdMapWorker(workers, pool, q, enqueuer)
+
 	riverClient, err := queue.Boot(pool, queue.Config{
 		Workers: workers,
 		// Queues: default for V1+V2+warm_season+orphan_scan, bangumi_v3
@@ -265,6 +274,14 @@ func main() {
 			// would only take twice as many tokens away from the request
 			// path.
 			queue.EpisodeTitlesQueueName: {MaxWorkers: 1},
+			// MaxWorkers 1 is load-bearing rather than polite here.
+			// BindBgmIdsFromIdMap refuses a subject some bound row already
+			// holds, but that check and its UPDATE are one statement: two
+			// concurrent passes could each pass it for the same subject and
+			// both bind, and anime_cache.bgm_id has no unique index to catch
+			// it.  A single slot is what makes the race unreachable, and it
+			// is why every writer of anime_cache.bgm_id shares this queue.
+			queue.BgmBindQueueName: {MaxWorkers: 1},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),
@@ -276,6 +293,7 @@ func main() {
 			// otherwise push the sweep a full hour out every time.
 			queue.PeriodicEpisodesBgmScanJob(),
 			queue.PeriodicEpisodeTitlesJob(),
+			queue.PeriodicBindIdMapJob(),
 			// 90 days, and deliberately NOT RunOnStart — see the note on
 			// PeriodicHantBackfillJob for why this one reads the opposite
 			// way round from the two sweeps above it, and for what that

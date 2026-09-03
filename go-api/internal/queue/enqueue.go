@@ -149,6 +149,34 @@ func (e *RealEnqueuer) EnqueueV2Many(ctx context.Context, jobs []BangumiV2Args) 
 	return nil
 }
 
+// EnqueueV2ManyTx is EnqueueV2Many inside a caller-supplied transaction.
+//
+// It exists for one caller: the id-map bind sweep, which writes a binding and
+// dispatches that binding's enrichment as a single unit.  Doing those in two
+// transactions has a failure mode with no recovery path -- the bind commits,
+// the insert fails, and the row now has a bgm_id, so the sweep's own candidate
+// query (bgm_id IS NULL) never returns it again.  The enrichment for that row
+// is then lost permanently and silently.  Sharing the transaction makes the
+// two outcomes the only two possible: bound and queued, or neither.
+//
+// Every other enqueue path is deliberately NOT transactional.  The V1→V2 and
+// V2→V3 chains enqueue AFTER their own write has committed, where a failed
+// insert costs a re-run rather than a lost row, so they take the simpler
+// non-transactional call and swallow the error.
+func (e *RealEnqueuer) EnqueueV2ManyTx(ctx context.Context, tx pgx.Tx, jobs []BangumiV2Args) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	params := make([]river.InsertManyParams, len(jobs))
+	for i, j := range jobs {
+		params[i] = river.InsertManyParams{Args: j}
+	}
+	if _, err := e.client.InsertManyTx(ctx, tx, params); err != nil {
+		return fmt.Errorf("queue.EnqueueV2ManyTx (n=%d): %w", len(jobs), err)
+	}
+	return nil
+}
+
 // EnqueueV3Many inserts V3 heal-CN jobs for each {anilistId, bgmId}
 // pair.  Empty slice → noop.  Uses river.Client.InsertMany so the
 // round-trip is one statement per batch.  Errors are wrapped with
@@ -390,6 +418,24 @@ func (l *LateBoundEnqueuer) EnqueueV1Many(ctx context.Context, anilistIDs []int3
 		return nil
 	}
 	return e.EnqueueV1Many(ctx, anilistIDs)
+}
+
+// EnqueueV2ManyTx delegates to the bound RealEnqueuer inside the caller's
+// transaction, or no-ops when unbound.
+//
+// Unbound is unreachable for its one caller.  The sweep that uses this runs as
+// a river job, and river only dispatches jobs after Start, which main.go calls
+// after Bind -- the same ordering the V1 worker's V2 chain already depends on.
+// The nil branch is here because the type promises it, not because a bind
+// sweep can observe it.
+func (l *LateBoundEnqueuer) EnqueueV2ManyTx(ctx context.Context, tx pgx.Tx, jobs []BangumiV2Args) error {
+	l.mu.RLock()
+	e := l.inner
+	l.mu.RUnlock()
+	if e == nil {
+		return nil
+	}
+	return e.EnqueueV2ManyTx(ctx, tx, jobs)
 }
 
 // EnqueueV2Many delegates to the bound RealEnqueuer, or no-ops when unbound.

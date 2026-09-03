@@ -580,4 +580,16 @@
 
 **Context** — 2026-09-02 评审实测。这 811 部创建集中在 2026-05-31～06-08，格式以 OVA/ONA 为主。解决后分集标题、中文简介、评分三个缺口一起受益。注意 `bgm_id_map` 是从 `data/anilist_bgm_map.json` 灌进来的**输入**表不是匹配器产物，所以「改进匹配器」和「扩充 map」是两条不同的路。
 
+**2026-09-03 更新** — 这批里有一个子集已经有自动路径了。未绑定行中 826 部在 `bgm_id_map` 里**本来就有答案**，只是够不着：V1 的 tier 0 早就查这张表，但 `UpdateBangumiV1` 带 `AND bangumi_version = 0`，而这些行停在 version 3（migration 0004 记录的 Express 时代批量态），所以答案有了也没人回头用。新的 `bgm_bind_idmap` sweep 补上这个入口，可绑 **791** 部（826 减去 33 部 subject 已被别的行占用、再减去 2 部两行争一个 subject）。剩下的约 4,400 部 map 里没有条目，仍然要靠改进匹配器或扩充 map，本条其余部分不变。
+
 **Depends on / blocked by** — 无。与 `## 分割放送会 50% 概率绑错` 同属绑定质量，建议合并考虑。
+
+## `anime_cache.bgm_id` 没有唯一索引，541 个 subject 已经被多行同时持有
+
+**What** — 给 `anime_cache.bgm_id` 加唯一约束；加之前必须先裁定那 1,161 行。
+
+**Why** — 「一个 bgm subject 对应一部番」这个假设全仓到处在用，但数据库不保证它，而且**已经被破坏了 541 次**（541 个 bgm_id 被 2 行以上持有，共 1,161 行）。直接后果：`GetAnimeByBgmID` 是 `:one` 查询，对这 1,161 行返回的是任意一行——`resolveSiteAnime` 第 2 腿和 `findSiteAnime` 第 3 腿都走它，所以 `/match` 的 siteAnime 结果对这批番是不确定的。任何「按 bgm_id 拉数据写回」的作业也会把同一份中文名和简介写到多部番上。顺带一提这一列**连普通索引都没有**，每次按 bgm_id 查都是全表扫（实测 18,009 行）。
+
+**Context** — 2026-09-03 写 `bgm_bind_idmap` sweep 时量到。⚠️ **不是所有重复都是错的**：Bangumi 有时用一个 subject 覆盖 AniList 拆成两季的内容，那种重复是数据模型差异不是绑定错误。所以不能一刀切去重，得先按「同一 subject 的两行是不是同一部作品的不同季」分类。新 sweep 自己不会让这个数字变大——它拒绝任何已被占用的 subject，也拒绝两行争同一个 subject 的情况——但它也修不了存量。
+
+**Depends on / blocked by** — 无。与 `## 绑定覆盖率` 和 `## 分割放送会 50% 概率绑错` 同属绑定质量。

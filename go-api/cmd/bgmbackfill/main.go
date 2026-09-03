@@ -101,10 +101,12 @@ func main() {
 	epTitlesMode := flag.Bool("heal-episode-titles", false, "fill anime_episode_titles from dandanplay; read-only unless combined with --apply")
 	resumeFlag := flag.Bool("resume", false, "--heal-episode-titles: skip anime a previous pass already wrote (episode_titles_at set)")
 	maxEmptyStreak := flag.Int("max-empty-streak", 200, "--heal-episode-titles: abort after this many consecutive rows with no titles (0 disables)")
+	idMapBinds := flag.Bool("report-id-map-binds", false, "read-only: what the id-map bind sweep would bind, and what it would refuse")
+	xlinkProbe := flag.Bool("probe-ddp-crosslink", false, "read-only: measure what dandanplay cross-links could bind for map-silent unbound rows")
 	flag.Parse()
 
 	// Default to report mode when no explicit mode is set.
-	if !*applyMode && !*reportMode && !*healMode && !*epTitlesMode {
+	if !*applyMode && !*reportMode && !*healMode && !*epTitlesMode && !*idMapBinds && !*xlinkProbe {
 		*reportMode = true
 	}
 
@@ -138,6 +140,17 @@ func main() {
 
 	q := dbgen.New(pool)
 
+	// ── id-map bind preview ───────────────────────────────────────────────
+	// Reads two tables and prints; needs neither dandanplay nor the
+	// classifier, so it returns before either is built.
+	if *idMapBinds {
+		if err := runIdMapBindReport(ctx, q); err != nil {
+			slog.Error("id-map bind report failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// ── dandanplay client ─────────────────────────────────────────────────
 	var ddpClient *dandanplay.Client
 	if !*skipDDP {
@@ -152,6 +165,21 @@ func main() {
 			os.Exit(1)
 		}
 		defer ddpClient.Close()
+	}
+
+	// ── dandanplay crosslink probe ────────────────────────────────────────
+	// Read-only, and placed before the write modes for that reason.  Needs
+	// the client above, so it cannot sit with the id-map preview.
+	if *xlinkProbe {
+		if *skipDDP || ddpClient == nil {
+			slog.Error("--probe-ddp-crosslink needs dandanplay; do not combine with --skip-ddp")
+			os.Exit(1)
+		}
+		if err := runCrosslinkProbe(ctx, q, ddpClient, *limitFlag, *outFile); err != nil {
+			slog.Error("ddp crosslink probe failed", "err", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// ── episode-title heal: fill anime_episode_titles from dandanplay ─────
