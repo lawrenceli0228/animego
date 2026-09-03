@@ -516,22 +516,30 @@ func TestIdMapBindConcurrentClaim(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		// A deadline rather than the parent context: if the CAS were removed
-		// AND the rival never committed, this would block forever and the test
-		// would time out with no explanation.
-		bindCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		tx, err := pool.Begin(bindCtx)
-		if err != nil {
-			done <- outcome{err: err}
-			return
-		}
-		defer func() { _ = tx.Rollback(context.Background()) }()
-		rows, err := dbgen.New(pool).WithTx(tx).BindBgmIdsFromIdMap(bindCtx, 200)
-		if err == nil {
-			err = tx.Commit(bindCtx)
-		}
-		done <- outcome{rows: rows, err: err}
+		var out outcome
+		func() {
+			// A deadline rather than the parent context: if the CAS were
+			// removed AND the rival never committed, this would block forever
+			// and the test would time out with no explanation.
+			bindCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			tx, err := pool.Begin(bindCtx)
+			if err != nil {
+				out.err = err
+				return
+			}
+			defer func() { _ = tx.Rollback(context.Background()) }()
+			out.rows, out.err = dbgen.New(pool).WithTx(tx).BindBgmIdsFromIdMap(bindCtx, 200)
+			if out.err == nil {
+				out.err = tx.Commit(bindCtx)
+			}
+		}()
+		// Signal only after that closure has returned, so the transaction is
+		// closed and its connection is back in the pool.  The test returns on
+		// this signal and the next test in the package opens with TRUNCATE,
+		// which takes ACCESS EXCLUSIVE and would queue behind a transaction
+		// this goroutine had not finished unwinding.
+		done <- out
 	}()
 
 	requireBlockedOnLock(t, ctx, pool)

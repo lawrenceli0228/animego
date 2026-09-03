@@ -64,16 +64,19 @@ import (
 )
 
 const (
-	// BindIdMapQueueName is the sweep's own river queue.  A dedicated queue
-	// is what lets river's runtime pause apply to this alone — the same
-	// mechanism the admin surface uses to freeze heal-CN — and a pause needs
-	// no deploy, unlike the env flag below.
+	// BgmBindQueueName is the river queue for every worker that writes
+	// anime_cache.bgm_id.  A dedicated queue lets river's runtime pause apply
+	// to binding alone — the same mechanism the admin surface uses to freeze
+	// heal-CN — and a pause needs no deploy, unlike the env flag below.
 	//
-	// It also carries a correctness role: BindBgmIdsFromIdMap's "no bound row
-	// holds this subject" check and its UPDATE are one statement, but two
-	// concurrent statements could still each pass it for the same subject.
-	// Registering this queue at MaxWorkers 1 makes that unreachable.
-	BindIdMapQueueName = "bgm_bind_idmap"
+	// It also carries a correctness role, which is why it is named for the
+	// operation rather than for this one sweep.  BindBgmIdsFromIdMap's "no
+	// bound row holds this subject" check and its UPDATE are one statement,
+	// but two concurrent statements could each pass it for the same subject,
+	// and anime_cache.bgm_id has no unique index to catch the result.  One
+	// queue at MaxWorkers 1 is what serialises every binding writer against
+	// every other, so any future one belongs on this queue too.
+	BgmBindQueueName = "bgm_bind"
 
 	// bindIdMapEnabledEnv gates the sweep at WORK time, not at registration.
 	// Gating registration would leave already-enqueued jobs to run anyway, so
@@ -104,7 +107,7 @@ func (BindIdMapArgs) Kind() string { return "bgm_bind_idmap" }
 
 // InsertOpts pins the job to the sweep's own queue.
 func (BindIdMapArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: BindIdMapQueueName}
+	return river.InsertOpts{Queue: BgmBindQueueName}
 }
 
 // bindIdMapV2Enqueuer is the single method the sweep needs from the enqueuer,

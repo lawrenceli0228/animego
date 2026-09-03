@@ -279,8 +279,9 @@ func main() {
 			// holds, but that check and its UPDATE are one statement: two
 			// concurrent passes could each pass it for the same subject and
 			// both bind, and anime_cache.bgm_id has no unique index to catch
-			// it.  A single slot is what makes the race unreachable.
-			queue.BindIdMapQueueName: {MaxWorkers: 1},
+			// it.  A single slot is what makes the race unreachable, and it
+			// is why every writer of anime_cache.bgm_id shares this queue.
+			queue.BgmBindQueueName: {MaxWorkers: 1},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),
