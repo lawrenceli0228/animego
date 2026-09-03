@@ -273,9 +273,8 @@ func TestIdMapBind(t *testing.T) {
 			{idmapFreeMid, idmapSubjectMid, "bindable"},
 			{idmapFreeHigh, idmapSubjectHigh, "bindable"},
 			{idmapReviewed, idmapSubjectReviewed, "bindable"},
-			{idmapCorrected, idmapSubjectCorrected, "bindable"},
 		}, flat,
-			"the bound holder and the unmapped row are not candidates at all; the other eight each carry the verdict the bind will act on")
+			"the bound holder, the unmapped row and the hand-corrected row are not candidates at all; the other seven each carry the verdict the bind will act on")
 
 		// The refusals are the rows a human has to adjudicate, and the only
 		// material they get for it is what this query returns.  A refusal
@@ -348,7 +347,6 @@ func TestIdMapBind(t *testing.T) {
 		assert.ElementsMatch(t, []dbgen.BindBgmIdsFromIdMapRow{
 			{AnilistID: idmapFreeHigh, BgmID: idmapSubjectHigh},
 			{AnilistID: idmapReviewed, BgmID: idmapSubjectReviewed},
-			{AnilistID: idmapCorrected, BgmID: idmapSubjectCorrected},
 		}, bound,
 			"the refusals are a property of the catalogue, not of how many rows were asked for")
 	})
@@ -364,14 +362,31 @@ func TestIdMapBind(t *testing.T) {
 			"the label must describe the binding the row now carries, not the fuzzy guess that was abandoned")
 	})
 
-	t.Run("a human's correction is not cleared", func(t *testing.T) {
+	// The audit of the first production batch found one wrong binding, and
+	// undoing it exposed this: clearing the bgm_id is the only thing that made
+	// the row a candidate, so the correction handed it straight back to the
+	// next pass.  There was no way to say "not this one".
+	//
+	// 'needs-review' and 'manually-corrected' therefore pull in opposite
+	// directions here, which is the whole point of them being two values: one
+	// is a question the map can answer, the other is an answer already given.
+	t.Run("a hand-corrected row is never offered again", func(t *testing.T) {
 		got := read(t, idmapCorrected)
-		require.NotNil(t, got.bgmID, "this row binds too; only the flag's treatment differs")
-		assert.Equal(t, idmapSubjectCorrected, *got.bgmID)
-		require.NotNil(t, got.adminFlag,
-			"the CASE has exactly one branch that clears, and this value is not it")
+		assert.Nil(t, got.bgmID,
+			"a human unbound this row on purpose; re-binding it from the map undoes the correction and there is no second chance to notice")
+		assert.Nil(t, got.matchSource)
+		require.NotNil(t, got.adminFlag)
 		assert.Equal(t, "manually-corrected", *got.adminFlag,
-			"that flag records a decision somebody already made rather than a pending request for one; clearing it would silently drop the audit trail for every hand-fixed row the map later touches")
+			"the flag is the record of that decision and nothing here may touch it")
+	})
+
+	t.Run("a corrected row is not even listed as a candidate", func(t *testing.T) {
+		rows, err := q.ListIdMapBindCandidates(ctx)
+		require.NoError(t, err)
+		for _, r := range rows {
+			assert.NotEqual(t, idmapCorrected, r.AnilistID,
+				"a preview that offered a row the writer will not touch would report work that never happens")
+		}
 	})
 
 	t.Run("neither claimant of a twice-claimed subject is bound", func(t *testing.T) {
