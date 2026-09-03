@@ -232,10 +232,11 @@ type fakeBackfillDB struct {
 	markAttemptErr error
 
 	// Forbidden surface — every one of these must stay at zero.
-	v2Calls   int
-	v3Calls   int
-	charCalls int
-	epCalls   int
+	v2Calls             int
+	v3Calls             int
+	charCalls           int
+	epCalls             int
+	markUnreadableCalls int
 }
 
 func (f *fakeBackfillDB) MarkDescriptionCnAttempted(_ context.Context, anilistID int32) error {
@@ -264,6 +265,17 @@ func (f *fakeBackfillDB) UpdateDescriptionCn(ctx context.Context, descriptionCn 
 		return nil
 	}
 	return fn(ctx, call)
+}
+
+// MarkBangumiSubjectUnreadable exists only to keep this fake satisfying
+// V2Writer; the description sweep never reaches it.  Counted anyway, so a
+// future change that DOES route through here fails an assertion instead of
+// passing unnoticed.
+func (f *fakeBackfillDB) MarkBangumiSubjectUnreadable(_ context.Context, _ int32, _ int32) (int64, error) {
+	f.mu.Lock()
+	f.markUnreadableCalls++
+	f.mu.Unlock()
+	return 1, nil
 }
 
 func (f *fakeBackfillDB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int32, _ *string) error {
@@ -312,6 +324,7 @@ func (f *fakeBackfillDB) assertEnrichmentStateUntouched(t *testing.T) {
 	assert.Zero(t, f.v3Calls, "backfill must never call UpdateBangumiV3 (would overwrite dandanplay title_chinese and bump bangumi_version)")
 	assert.Zero(t, f.charCalls, "backfill must never rewrite character rows")
 	assert.Zero(t, f.epCalls, "backfill must never rewrite episode titles")
+	assert.Zero(t, f.markUnreadableCalls, "backfill must never mark a subject unreadable (it never fetches one; a 404 here is the description sweep's own upstream, not a verdict on the binding)")
 }
 
 // ---------------------------------------------------------------------------

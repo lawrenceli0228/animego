@@ -40,7 +40,7 @@ function statsFor(over: Partial<AdminStats> = {}): AdminStats {
     anime: 285,
     enrichment: {
       v0: 0, v1: 0, v2: 0, v3: 0, noCn: 0, hasCn: 0,
-      healCnReal: 0, cnStuck: 0,
+      healCnReal: 0, cnStuck: 0, subjectUnreadable: 0,
       srcIdMap: 0, srcFuzzyHigh: 0, srcFuzzyLow: 0,
     },
     queue: {
@@ -186,6 +186,50 @@ describe("the existing enrichment bar is untouched", () => {
     const s = statsFor();
     s.queue.v3Progress = { processed: 40, total: 100 };
     expect(text(s)).toContain("V3 Heal: 40/100 (40%)");
+  });
+});
+
+// The bar's whole premise is that a number on it is a number an operator can
+// reproduce and act on. subjectUnreadable breaks the second half of that on
+// purpose: nothing can act on it short of an authenticated Bangumi client. It
+// is rendered anyway because the alternative is worse — those rows are
+// terminal at v3, so with no line of their own they are indistinguishable
+// from fully enriched ones, and "how many bindings can we not read" stops
+// being answerable from the surface that shows every other enrichment number.
+describe("bindings upstream will not serve us are shown, not folded into v3", () => {
+  test("the count appears on the v3 legend when there are any", () => {
+    const s = statsFor();
+    s.enrichment = { ...s.enrichment, v3: 900, subjectUnreadable: 811 };
+    expect(text(s)).toContain("其中 811 上游不可读");
+  });
+
+  test("it is a legend note, not a button — no action exists for these rows", () => {
+    const s = statsFor();
+    s.enrichment = { ...s.enrichment, v3: 900, subjectUnreadable: 811 };
+    const html = renderToStaticMarkup(<EnrichmentBar initial={s} />);
+    // The count must not appear inside any <button>. Offering one would
+    // re-create the exact defect this replaced: a control that enqueues jobs
+    // upstream has already refused.
+    const buttons: string[] = html.match(/<button[\s\S]*?<\/button>/g) ?? [];
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons.some((b) => b.includes("811"))).toBe(false);
+  });
+
+  test("zero renders nothing at all", () => {
+    const s = statsFor();
+    s.enrichment = { ...s.enrichment, v3: 900, subjectUnreadable: 0 };
+    expect(text(s)).not.toContain("上游不可读");
+  });
+
+  test("an older go-api that does not send the field renders without it", () => {
+    // Same defensive shape as the payload test above: the bar is deployed
+    // independently of go-api, so a stats response from before 0031 must not
+    // put NaN on the page.
+    const s = statsFor();
+    const { subjectUnreadable: _dropped, ...rest } = s.enrichment;
+    s.enrichment = rest as typeof s.enrichment;
+    expect(text(s)).not.toContain("上游不可读");
+    expect(text(s)).toContain("中文覆盖");
   });
 });
 

@@ -328,6 +328,10 @@ func (noopV12DB) UpdateBangumiV2(_ context.Context, _ int32, _ *float64, _ *int3
 	return nil
 }
 
+func (noopV12DB) MarkBangumiSubjectUnreadable(_ context.Context, _ int32, _ int32) (int64, error) {
+	return 1, nil
+}
+
 func (noopV12DB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) error {
 	return nil
 }

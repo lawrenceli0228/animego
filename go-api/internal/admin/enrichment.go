@@ -386,6 +386,15 @@ type reEnrichResponse struct {
 //
 //	0  → ListAnimeForReEnrichByVersion(0)  + EnqueueV1Many
 //	1  → ListAnimeForReEnrichByVersion(1)  + EnqueueV2Many (BangumiV2Args)
+//	     Version 1 is where a row lands when V1 bound a bgm_id and V2 has
+//	     not completed.  For most of this button's life the dominant
+//	     occupant of that state was a binding Bangumi refuses to serve an
+//	     anonymous client, and re-enqueueing V2 for it was a no-op that
+//	     left the row exactly where it was — so the count never fell and
+//	     the button never finished.  V2 now writes a terminal state on
+//	     that 404 (see queue.MarkBangumiSubjectUnreadable and migration
+//	     0031), which makes this button converge: every row it enqueues
+//	     either completes V2 or leaves version 1 for good.
 //	2  → ListEnrichedV2WithBgm  + EnqueueV3Many (BangumiV3Args)
 //	     ListEnrichedV2WithoutBgm + PromoteAnimeToV3   (can't V3 without bgmId)
 //

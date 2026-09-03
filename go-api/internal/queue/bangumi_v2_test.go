@@ -133,18 +133,51 @@ type v2DescCnCall struct {
 // fakeV2DB is a programmable V2DB.  Hooks let each test inject an
 // error for the retry/non-retry paths; call snapshots let assertions
 // inspect what got written without smuggling globals.
+// v2MarkUnreadableCall records one MarkBangumiSubjectUnreadable call.  The
+// bgmID is recorded and asserted on because the real statement is pinned to
+// it: a worker that passed the wrong id would file a not-found verdict
+// against a binding nobody probed.
+type v2MarkUnreadableCall struct {
+	anilistID int32
+	bgmID     int32
+}
+
 type fakeV2DB struct {
 	mu sync.Mutex
 
-	updateV2Fn     func(ctx context.Context, c v2UpdateCall) error
-	updateCharFn   func(ctx context.Context, c v2CharCall) error
-	upsertEpFn     func(ctx context.Context, c v2EpTitleCall) error
-	updateDescCnFn func(ctx context.Context, c v2DescCnCall) error
+	updateV2Fn       func(ctx context.Context, c v2UpdateCall) error
+	updateCharFn     func(ctx context.Context, c v2CharCall) error
+	upsertEpFn       func(ctx context.Context, c v2EpTitleCall) error
+	updateDescCnFn   func(ctx context.Context, c v2DescCnCall) error
+	markUnreadableFn func(ctx context.Context, c v2MarkUnreadableCall) (int64, error)
 
-	updateV2Calls     []v2UpdateCall
-	updateCharCalls   []v2CharCall
-	upsertEpCalls     []v2EpTitleCall
-	updateDescCnCalls []v2DescCnCall
+	updateV2Calls       []v2UpdateCall
+	updateCharCalls     []v2CharCall
+	upsertEpCalls       []v2EpTitleCall
+	updateDescCnCalls   []v2DescCnCall
+	markUnreadableCalls []v2MarkUnreadableCall
+}
+
+func (f *fakeV2DB) MarkBangumiSubjectUnreadable(ctx context.Context, anilistID int32, bgmID int32) (int64, error) {
+	call := v2MarkUnreadableCall{anilistID: anilistID, bgmID: bgmID}
+	f.mu.Lock()
+	f.markUnreadableCalls = append(f.markUnreadableCalls, call)
+	fn := f.markUnreadableFn
+	f.mu.Unlock()
+	// One row affected is the success shape; the real statement returns 0
+	// when the binding moved between the fetch and the write.
+	if fn == nil {
+		return 1, nil
+	}
+	return fn(ctx, call)
+}
+
+func (f *fakeV2DB) snapshotMarkUnreadableCalls() []v2MarkUnreadableCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]v2MarkUnreadableCall, len(f.markUnreadableCalls))
+	copy(dup, f.markUnreadableCalls)
+	return dup
 }
 
 func (f *fakeV2DB) UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error {
@@ -436,25 +469,100 @@ func TestBangumiV2_HappyPath_FullUpdate(t *testing.T) {
 	assert.Nil(t, charCalls[1].voiceActorImageURL, "no Images.Medium → nil")
 }
 
-// TestBangumiV2_SubjectNotFound_ReturnsNil — Subject 404 → return nil,
-// NO DB writes (Express dropped the row the same way).
-func TestBangumiV2_SubjectNotFound_ReturnsNil(t *testing.T) {
-	t.Parallel()
-
-	b := &fakeBangumiV2{
+// notFoundSubject builds the upstream shape an R18 binding actually produces:
+// the subject endpoint refuses, and so do its two siblings, because the gate
+// is on the subject and not on the sub-resources.  Using the real shape
+// matters — a fixture where only the subject 404s would let an implementation
+// that marks on ANY not-found pass.
+func notFoundSubject() *fakeBangumiV2 {
+	return &fakeBangumiV2{
 		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
 			return nil, bangumi.ErrNotFound
 		},
 		charactersFn: func(_ context.Context, _ int) ([]bangumi.Character, error) {
-			return nil, nil
+			return nil, bangumi.ErrNotFound
+		},
+		episodesFn: func(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
+			return nil, bangumi.ErrNotFound
 		},
 	}
+}
+
+// TestBangumiV2_SubjectNotFound_MarksRowTerminal — Subject 404 is permanent,
+// and permanent has to be WRITTEN somewhere.
+//
+// The old contract here was "return nil, no DB writes", and it read as
+// correct: retrying an anonymous request against a subject Bangumi hides
+// from anonymous requests cannot succeed, so skipping is right.  What it
+// missed is that skipping without a write leaves the row at
+// bangumi_version = 1, and 1 is selected for by no producer in the system —
+// the orphan scan takes 0, heal-CN takes 2.  The row becomes unreachable
+// and stays counted as outstanding, which is how 811 of them accumulated.
+//
+// So the assertion this test exists for is not "does it return nil" but
+// "does the row leave version 1", and the only evidence of that available at
+// this layer is the mark call, pinned to the binding it was fetched under.
+func TestBangumiV2_SubjectNotFound_MarksRowTerminal(t *testing.T) {
+	t.Parallel()
+
 	db := &fakeV2DB{}
 
-	err := runV2(t, b, db, 1, 100)
+	err := runV2(t, notFoundSubject(), db, 1, 100)
 	require.NoError(t, err, "ErrNotFound subject is permanent — must not retry")
+
+	marks := db.snapshotMarkUnreadableCalls()
+	require.Len(t, marks, 1, "subject 404 must move the row out of version 1, not just skip it")
+	assert.Equal(t, int32(1), marks[0].anilistID)
+	assert.Equal(t, int32(100), marks[0].bgmID,
+		"the verdict is about one subject id; passing another would file it against a binding nobody probed")
+
 	assert.Empty(t, db.snapshotV2Calls(), "subject 404 → no UpdateBangumiV2")
 	assert.Empty(t, db.snapshotCharCalls(), "subject 404 → no char UPDATEs")
+	assert.Empty(t, db.snapshotEpTitleCalls(), "subject 404 → no episode title writes")
+	assert.Empty(t, db.snapshotDescCnCalls(), "subject 404 → no synopsis write")
+}
+
+// TestBangumiV2_SubjectNotFound_MarkFailureRetries — a DB error on the mark
+// must surface so river brings the job back.
+//
+// Returning nil here would be the same defect the mark exists to fix, just
+// reached through a different door: the 404 is permanent, but a failed write
+// about it is not, and swallowing one strands the row exactly as before.
+func TestBangumiV2_SubjectNotFound_MarkFailureRetries(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeV2DB{
+		markUnreadableFn: func(_ context.Context, _ v2MarkUnreadableCall) (int64, error) {
+			return 0, errors.New("connection reset")
+		},
+	}
+
+	err := runV2(t, notFoundSubject(), db, 2, 200)
+	require.Error(t, err, "a failed terminal write must retry, or the row is stranded again")
+	assert.Contains(t, err.Error(), "mark unreadable")
+	assert.Contains(t, err.Error(), "connection reset", "the cause must survive the wrap")
+}
+
+// TestBangumiV2_SubjectNotFound_RebindAffectsNoRows — zero rows affected is
+// not an error.
+//
+// The statement is pinned to the binding, so zero means the row was rebound
+// between the fetch and the write and this verdict is about a subject the
+// row no longer holds.  Refusing it is the statement working; whoever moved
+// the binding owns enqueueing the new one's V2, so the job is done.
+func TestBangumiV2_SubjectNotFound_RebindAffectsNoRows(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeV2DB{
+		markUnreadableFn: func(_ context.Context, _ v2MarkUnreadableCall) (int64, error) {
+			return 0, nil
+		},
+	}
+
+	err := runV2(t, notFoundSubject(), db, 3, 300)
+	require.NoError(t, err, "a moved binding is a completed job, not a failed one")
+	assert.Len(t, db.snapshotMarkUnreadableCalls(), 1)
+	assert.Empty(t, db.snapshotV2Calls(), "still no V2 write — the subject was never read")
 }
 
 // TestBangumiV2_CharactersNotFound_ContinuesWithSubject — characters
@@ -481,6 +589,8 @@ func TestBangumiV2_CharactersNotFound_ContinuesWithSubject(t *testing.T) {
 	assert.InDelta(t, 7.5, *v2Calls[0].bangumiScore, 1e-9)
 
 	assert.Empty(t, db.snapshotCharCalls(), "characters 404 → no char UPDATEs")
+	assert.Empty(t, db.snapshotMarkUnreadableCalls(),
+		"the gate is on the subject: a readable subject with no character rows is a normal row, not an unreadable binding")
 }
 
 // TestBangumiV2_SubjectError_RetriesUp — non-NotFound subject errors
@@ -954,6 +1064,9 @@ func TestBangumiV2_EpisodesNotFound_DoesNotFail(t *testing.T) {
 	}
 	if n := len(d.snapshotEpTitleCalls()); n != 0 {
 		t.Fatalf("no episode writes expected on not-found, got %d", n)
+	}
+	if n := len(d.snapshotMarkUnreadableCalls()); n != 0 {
+		t.Fatalf("episodes 404 says nothing about whether the subject is readable — it was read; got %d marks", n)
 	}
 }
 

@@ -258,7 +258,8 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
     [],
   );
 
-  const { v0, v1, v2, v3, noCn, hasCn, healCnReal, cnStuck } = stats.enrichment;
+  const { v0, v1, v2, v3, noCn, hasCn, healCnReal, cnStuck, subjectUnreadable } =
+    stats.enrichment;
   const total = v0 + v1 + v2 + v3;
   const prog = stats.queue.v3Progress;
   const v3Active = !!(prog && prog.total > 0 && prog.processed < prog.total);
@@ -364,6 +365,13 @@ export function EnrichmentBar({ initial }: EnrichmentBarProps) {
               {label}
               {isV3 && cnStuck > 0
                 ? <span style={styles.legendSub}> 其中 {cnStuck} 无中文</span>
+                : null}
+              {/* Terminal, not actionable — see AdminStats.subjectUnreadable.
+                  Sits on the v3 dot because that is where these rows land, and
+                  it is the only thing on this bar that explains why v3 is
+                  bigger than the enrichment actually reached. */}
+              {isV3 && subjectUnreadable > 0
+                ? <span style={styles.legendSub}> 其中 {subjectUnreadable} 上游不可读</span>
                 : null}
             </span>
           );

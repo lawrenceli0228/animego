@@ -2802,6 +2802,54 @@ func (q *Queries) MarkBangumiNeedsReview(ctx context.Context, anilistID int32) e
 	return err
 }
 
+const markBangumiSubjectUnreadable = `-- name: MarkBangumiSubjectUnreadable :execrows
+UPDATE anime_cache
+SET bangumi_version               = GREATEST(bangumi_version, 3),
+    bangumi_subject_unreadable_at = now(),
+    updated_at                    = now()
+WHERE anilist_id = $1::int
+  AND bgm_id     = $2::int
+`
+
+// Terminal state for a binding Bangumi will not serve us.
+//
+// V1 binds bgm_ids from the legacy /search/subject endpoint, which shows R18
+// subjects to an anonymous caller; V2 reads /v0/subjects/{id}, which hides
+// them and answers 404.  We hold no Bangumi token, so those rows bind and
+// then never complete V2.  Before this statement existed they stopped at
+// bangumi_version = 1 -- a value no producer selects for, which made them
+// simultaneously unreachable and permanently outstanding.  Migration 0031
+// carries the full account and the evidence.
+//
+// GREATEST, not a bare 3.  The write has to be a ratchet because this
+// statement is reached from two directions: a V1-chained job on a version-1
+// row, where 3 is a promotion to terminal, and an id-map-sweep-chained job on
+// a legacy version-3 row, where the row is already terminal and must not be
+// moved.  A bare assignment would be correct for both today and silently
+// wrong the first time anything above 3 exists -- and the sibling statement
+// above, which does assign bare, is exactly how 750 rows were pulled back
+// from 3 to 2 in a single sweep pass.
+//
+// Pinned to the binding, same move as UpdateDescriptionCn and
+// UpsertEpisodeTitleSourced make, for the same reason: the 404 we are
+// recording was about ONE subject id, and a rebind landing between the fetch
+// and this write would file that verdict against a subject nobody has
+// asked about yet.  A moved binding makes this statement affect zero rows,
+// which the worker reports rather than swallows.
+//
+// bgm_id is deliberately left in place.  The binding is not wrong -- the
+// legacy search found a real subject and the id is correct -- it is merely
+// unreadable by an anonymous client.  Clearing it would throw away work that
+// becomes valuable the moment a token exists, and would hand the id back to
+// the id-map sweep as an unclaimed subject.
+func (q *Queries) MarkBangumiSubjectUnreadable(ctx context.Context, anilistID int32, bgmID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, markBangumiSubjectUnreadable, anilistID, bgmID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markBangumiV1NotFound = `-- name: MarkBangumiV1NotFound :exec
 UPDATE anime_cache
 SET title_chinese = NULL, bgm_id = NULL, bangumi_version = 2
@@ -3147,6 +3195,7 @@ SET bangumi_score  = $2,
     bangumi_votes  = $3,
     title_chinese  = COALESCE(title_chinese, $4),
     bangumi_version = 2,
+    bangumi_subject_unreadable_at = NULL,
     updated_at     = now()
 WHERE anilist_id = $1
 `
@@ -3159,6 +3208,13 @@ WHERE anilist_id = $1
 // title_chinese semantics: COALESCE keeps any existing CN string
 // (V1 may have set it from an exact-match search hit).  Pass nil for
 // title_chinese to leave existing value untouched.
+//
+// bangumi_subject_unreadable_at is cleared unconditionally.  Reaching this
+// statement means the Subject fetch succeeded, which is the only evidence
+// that could retire an earlier not-found observation; leaving the stamp
+// would let a row that has become readable keep claiming it is not.  The
+// write costs nothing on the overwhelming majority of rows, where the
+// column is already NULL.  See migration 0031.
 func (q *Queries) UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error {
 	_, err := q.db.Exec(ctx, updateBangumiV2,
 		anilistID,
