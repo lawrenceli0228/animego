@@ -101,10 +101,11 @@ func main() {
 	epTitlesMode := flag.Bool("heal-episode-titles", false, "fill anime_episode_titles from dandanplay; read-only unless combined with --apply")
 	resumeFlag := flag.Bool("resume", false, "--heal-episode-titles: skip anime a previous pass already wrote (episode_titles_at set)")
 	maxEmptyStreak := flag.Int("max-empty-streak", 200, "--heal-episode-titles: abort after this many consecutive rows with no titles (0 disables)")
+	idMapBinds := flag.Bool("report-id-map-binds", false, "read-only: what the id-map bind sweep would bind, and what it would refuse")
 	flag.Parse()
 
 	// Default to report mode when no explicit mode is set.
-	if !*applyMode && !*reportMode && !*healMode && !*epTitlesMode {
+	if !*applyMode && !*reportMode && !*healMode && !*epTitlesMode && !*idMapBinds {
 		*reportMode = true
 	}
 
@@ -137,6 +138,17 @@ func main() {
 	defer pool.Close()
 
 	q := dbgen.New(pool)
+
+	// ── id-map bind preview ───────────────────────────────────────────────
+	// Reads two tables and prints; needs neither dandanplay nor the
+	// classifier, so it returns before either is built.
+	if *idMapBinds {
+		if err := runIdMapBindReport(ctx, q); err != nil {
+			slog.Error("id-map bind report failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// ── dandanplay client ─────────────────────────────────────────────────
 	var ddpClient *dandanplay.Client

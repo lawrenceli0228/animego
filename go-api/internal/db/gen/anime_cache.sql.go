@@ -101,6 +101,117 @@ func (q *Queries) ApplyHantTitleBatch(ctx context.Context, anilistIds []int32, t
 	return result.RowsAffected(), nil
 }
 
+const bindBgmIdsFromIdMap = `-- name: BindBgmIdsFromIdMap :many
+WITH unbound AS (
+    SELECT a.anilist_id,
+           m.bgm_id,
+           count(*) OVER (PARTITION BY m.bgm_id) AS claims
+    FROM anime_cache a
+    JOIN bgm_id_map m ON m.anilist_id = a.anilist_id
+    WHERE a.bgm_id IS NULL
+),
+eligible AS (
+    SELECT anilist_id, bgm_id
+    FROM unbound
+    WHERE claims = 1
+      AND NOT EXISTS (
+          SELECT 1 FROM anime_cache b WHERE b.bgm_id = unbound.bgm_id
+      )
+    ORDER BY anilist_id
+    LIMIT $1::int
+)
+UPDATE anime_cache a
+SET bgm_id           = e.bgm_id,
+    bgm_match_source = 'id_map',
+    -- A row parked by V1's needs-review path (no bgm_id, admin_flag set,
+    -- bgm_match_source 'fuzzy_low') is a candidate here the moment the map
+    -- gains its entry, and the map answering IS the resolution of that
+    -- review.  Leaving the flag would keep a settled row in the admin queue
+    -- for good.  'manually-corrected' is deliberately not touched: that one
+    -- records a human's decision, not a pending request for one.
+    admin_flag       = CASE WHEN a.admin_flag = 'needs-review' THEN NULL
+                            ELSE a.admin_flag END,
+    updated_at       = now()
+FROM eligible e
+WHERE a.anilist_id = e.anilist_id
+  AND a.bgm_id IS NULL
+RETURNING a.anilist_id, e.bgm_id
+`
+
+type BindBgmIdsFromIdMapRow struct {
+	AnilistID int32 `json:"anilistId"`
+	BgmID     int32 `json:"bgmId"`
+}
+
+// Bind the vendored id map's answer onto rows that carry no bgm_id.
+//
+// # Why these rows need a second entry point at all
+//
+// The V1 worker already consults this same map first, and trusts it without
+// a search (bangumi_v1.go step 0).  But UpdateBangumiV1 is guarded on
+// `bangumi_version = 0`, and the rows this query is for sit at version 3 --
+// the bulk state migration 0004 records for everything enriched under the
+// pre-Go pipeline.  So V1's tier-0 answer is right and simply unreachable
+// for them: the map gained an entry after their one pass had already run,
+// and no producer looks at a version-3 row again.
+//
+// # What licenses trusting the map without a second signal
+//
+// Measured on production before this query was written: of the rows that
+// ARE bound and have a map entry, 3,769 were bound by the pre-Go pipeline
+// with no bgm_match_source recorded -- an entirely separate process from
+// this map -- and the map agrees with every single one of them.  Zero
+// disagreements out of 3,769 independent bindings is the evidence; V1
+// trusting the same map unconditionally is the precedent.
+//
+// # The two guards, and why both are load-bearing
+//
+// anime_cache.bgm_id has no unique index (541 subjects are already held by
+// more than one row, so one cannot be added without a cleanup first), which
+// means nothing below this query would catch a double binding.  Both guards
+// are therefore the only defence:
+//
+//	claims = 1   no OTHER unbound row maps to the same subject.  Needed
+//	             because a data-modifying statement cannot see its own
+//	             writes: without it, two rows mapping to one subject would
+//	             both pass the NOT EXISTS check in the same statement and
+//	             both be bound.
+//	NOT EXISTS   no BOUND row already holds the subject.
+//
+// `AND a.bgm_id IS NULL` on the UPDATE itself is the CAS: it re-checks, at
+// write time, the condition the CTE selected on.
+//
+// The write also retires a 'needs-review' flag, for the reason given inline
+// on that clause.
+//
+// Concurrency: two of these running at once could each pass NOT EXISTS for
+// the same subject.  The sweep that calls it runs on its own queue at
+// MaxWorkers 1, which is what makes that unreachable; a second caller would
+// need the same discipline.
+//
+// LIMIT keeps a batch bounded so the sweep's runtime is predictable.  The
+// ORDER BY makes successive batches walk the catalogue in a stable order
+// rather than re-drawing from the same end of it.
+func (q *Queries) BindBgmIdsFromIdMap(ctx context.Context, lim int32) ([]BindBgmIdsFromIdMapRow, error) {
+	rows, err := q.db.Query(ctx, bindBgmIdsFromIdMap, lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BindBgmIdsFromIdMapRow{}
+	for rows.Next() {
+		var i BindBgmIdsFromIdMapRow
+		if err := rows.Scan(&i.AnilistID, &i.BgmID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const clearEpisodeTitlesBySourceOutside = `-- name: ClearEpisodeTitlesBySourceOutside :many
 UPDATE anime_episode_titles t
    SET name_cn        = CASE WHEN t.name_cn_source = $1::text
@@ -2399,6 +2510,93 @@ func (q *Queries) ListEpisodesBgmCandidates(ctx context.Context, arg ListEpisode
 	for rows.Next() {
 		var i ListEpisodesBgmCandidatesRow
 		if err := rows.Scan(&i.AnilistID, &i.BgmID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIdMapBindCandidates = `-- name: ListIdMapBindCandidates :many
+WITH unbound AS (
+    SELECT a.anilist_id,
+           m.bgm_id,
+           a.title_romaji,
+           a.title_native,
+           a.season_year,
+           count(*) OVER (PARTITION BY m.bgm_id) AS claims
+    FROM anime_cache a
+    JOIN bgm_id_map m ON m.anilist_id = a.anilist_id
+    WHERE a.bgm_id IS NULL
+)
+SELECT anilist_id,
+       bgm_id,
+       title_romaji,
+       title_native,
+       season_year,
+       CASE
+           WHEN EXISTS (
+               SELECT 1 FROM anime_cache b WHERE b.bgm_id = unbound.bgm_id
+           ) THEN 'subject-already-bound'
+           WHEN claims > 1 THEN 'subject-claimed-twice'
+           ELSE 'bindable'
+       END::text AS verdict
+FROM unbound
+ORDER BY anilist_id
+`
+
+type ListIdMapBindCandidatesRow struct {
+	AnilistID   int32   `json:"anilistId"`
+	BgmID       int32   `json:"bgmId"`
+	TitleRomaji *string `json:"titleRomaji"`
+	TitleNative *string `json:"titleNative"`
+	SeasonYear  *int32  `json:"seasonYear"`
+	Verdict     string  `json:"verdict"`
+}
+
+// Read-only preview of what BindBgmIdsFromIdMap would do, and of what it
+// would refuse.  It exists so a human can read the refusals before any
+// binding is written: a wrong bgm_id does not fail loudly, it quietly puts
+// another show's Chinese title and synopsis on a public page.
+//
+// The three verdicts, and why the two refusals are refusals:
+//
+//	bindable               the map names a subject nothing else holds.
+//	subject-already-bound  another anime_cache row already carries this
+//	                       bgm_id.  Binding a second row to it would make
+//	                       GetAnimeByBgmID -- a :one query -- return an
+//	                       arbitrary one of them, so the subject is left
+//	                       to the row that already has it.
+//	subject-claimed-twice  two unbound AniList entries both map to this
+//	                       subject.  At least one of the two is wrong and
+//	                       nothing here can say which, so neither is bound.
+//	                       (Live example: Gekidol and its prequel special
+//	                       Alice in Deadly School both map to bgm 195723.)
+//
+// `claims` counts over the unbound set only, which is what makes the two
+// refusals distinct rather than one collapsed "taken" case: a subject held
+// by a bound row is somebody else's, while a subject two unbound rows both
+// want is nobody's yet.
+func (q *Queries) ListIdMapBindCandidates(ctx context.Context) ([]ListIdMapBindCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listIdMapBindCandidates)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIdMapBindCandidatesRow{}
+	for rows.Next() {
+		var i ListIdMapBindCandidatesRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.BgmID,
+			&i.TitleRomaji,
+			&i.TitleNative,
+			&i.SeasonYear,
+			&i.Verdict,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

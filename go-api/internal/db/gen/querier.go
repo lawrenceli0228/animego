@@ -85,6 +85,56 @@ type Querier interface {
 	// score/votes so the bad data disappears immediately; bangumi_version=0
 	// re-queues them via the orphan scan / a follow-up V1 enqueue.
 	BackfillResetRows(ctx context.Context, dollar_1 []int32) error
+	// Bind the vendored id map's answer onto rows that carry no bgm_id.
+	//
+	// # Why these rows need a second entry point at all
+	//
+	// The V1 worker already consults this same map first, and trusts it without
+	// a search (bangumi_v1.go step 0).  But UpdateBangumiV1 is guarded on
+	// `bangumi_version = 0`, and the rows this query is for sit at version 3 --
+	// the bulk state migration 0004 records for everything enriched under the
+	// pre-Go pipeline.  So V1's tier-0 answer is right and simply unreachable
+	// for them: the map gained an entry after their one pass had already run,
+	// and no producer looks at a version-3 row again.
+	//
+	// # What licenses trusting the map without a second signal
+	//
+	// Measured on production before this query was written: of the rows that
+	// ARE bound and have a map entry, 3,769 were bound by the pre-Go pipeline
+	// with no bgm_match_source recorded -- an entirely separate process from
+	// this map -- and the map agrees with every single one of them.  Zero
+	// disagreements out of 3,769 independent bindings is the evidence; V1
+	// trusting the same map unconditionally is the precedent.
+	//
+	// # The two guards, and why both are load-bearing
+	//
+	// anime_cache.bgm_id has no unique index (541 subjects are already held by
+	// more than one row, so one cannot be added without a cleanup first), which
+	// means nothing below this query would catch a double binding.  Both guards
+	// are therefore the only defence:
+	//
+	//	claims = 1   no OTHER unbound row maps to the same subject.  Needed
+	//	             because a data-modifying statement cannot see its own
+	//	             writes: without it, two rows mapping to one subject would
+	//	             both pass the NOT EXISTS check in the same statement and
+	//	             both be bound.
+	//	NOT EXISTS   no BOUND row already holds the subject.
+	//
+	// `AND a.bgm_id IS NULL` on the UPDATE itself is the CAS: it re-checks, at
+	// write time, the condition the CTE selected on.
+	//
+	// The write also retires a 'needs-review' flag, for the reason given inline
+	// on that clause.
+	//
+	// Concurrency: two of these running at once could each pass NOT EXISTS for
+	// the same subject.  The sweep that calls it runs on its own queue at
+	// MaxWorkers 1, which is what makes that unreachable; a second caller would
+	// need the same discipline.
+	//
+	// LIMIT keeps a batch bounded so the sweep's runtime is predictable.  The
+	// ORDER BY makes successive batches walk the catalogue in a stable order
+	// rather than re-drawing from the same end of it.
+	BindBgmIdsFromIdMap(ctx context.Context, lim int32) ([]BindBgmIdsFromIdMapRow, error)
 	// Community safety data access introduced by migration 0019.
 	// Blocking is one atomic boundary: create the directional block and sever all
 	// social/notification edges between the two users. Repeating the request is
@@ -1215,6 +1265,30 @@ type Querier interface {
 	// Returns the queue payload shape (anilistId / bgmId / titleChinese /
 	// bangumiVersion) so the handler can build V3 jobs directly.
 	ListHealCnCandidates(ctx context.Context) ([]ListHealCnCandidatesRow, error)
+	// Read-only preview of what BindBgmIdsFromIdMap would do, and of what it
+	// would refuse.  It exists so a human can read the refusals before any
+	// binding is written: a wrong bgm_id does not fail loudly, it quietly puts
+	// another show's Chinese title and synopsis on a public page.
+	//
+	// The three verdicts, and why the two refusals are refusals:
+	//
+	//	bindable               the map names a subject nothing else holds.
+	//	subject-already-bound  another anime_cache row already carries this
+	//	                       bgm_id.  Binding a second row to it would make
+	//	                       GetAnimeByBgmID -- a :one query -- return an
+	//	                       arbitrary one of them, so the subject is left
+	//	                       to the row that already has it.
+	//	subject-claimed-twice  two unbound AniList entries both map to this
+	//	                       subject.  At least one of the two is wrong and
+	//	                       nothing here can say which, so neither is bound.
+	//	                       (Live example: Gekidol and its prequel special
+	//	                       Alice in Deadly School both map to bgm 195723.)
+	//
+	// `claims` counts over the unbound set only, which is what makes the two
+	// refusals distinct rather than one collapsed "taken" case: a subject held
+	// by a bound row is somebody else's, while a subject two unbound rows both
+	// want is nobody's yet.
+	ListIdMapBindCandidates(ctx context.Context) ([]ListIdMapBindCandidatesRow, error)
 	// Heal targets for the dandanplay CN backfill: rows whose CURRENT bgm_id IS
 	// the authoritative id-map binding (so the subject is trusted) but that still
 	// have no Chinese title.  Healing these from dandanplay's animeTitle is safe
