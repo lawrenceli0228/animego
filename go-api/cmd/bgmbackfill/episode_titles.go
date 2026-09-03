@@ -127,7 +127,12 @@ type epTitleReport struct {
 	TitlesWritten int            `json:"titles_written"`
 	TitlesCN      int            `json:"titles_chinese"`
 	Retracted     int            `json:"retracted"`
-	Rows          []epTitleRow   `json:"rows"`
+	// Aborted is set when the empty-streak breaker stopped the pass.  A run
+	// that ended this way is INCOMPLETE, and the field exists so a reader of
+	// the artifact cannot mistake it for one that finished.
+	Aborted     bool         `json:"aborted,omitempty"`
+	AbortReason string       `json:"abort_reason,omitempty"`
+	Rows        []epTitleRow `json:"rows"`
 }
 
 // runEpisodeTitleHeal classifies every bgm-bound row and, in apply mode,
@@ -143,14 +148,19 @@ func runEpisodeTitleHeal(
 	ddp *dandanplay.Client,
 	limitDDP int,
 	apply bool,
+	resume bool,
+	maxEmptyStreak int,
 	outPath string,
 ) error {
-	rows, err := q.ListBgmBoundForBackfill(ctx)
+	rows, err := listEpisodeTitleCandidates(ctx, q, resume)
 	if err != nil {
-		return fmt.Errorf("ListBgmBoundForBackfill: %w", err)
+		return err
 	}
-	slog.Info("episode-title heal: candidates", "count", len(rows), "apply", apply)
+	slog.Info("episode-title heal: candidates",
+		"count", len(rows), "apply", apply, "resume", resume,
+		"maxEmptyStreak", maxEmptyStreak)
 
+	emptyStreak := 0
 	rep := epTitleReport{
 		Mode:   map[bool]string{true: "apply", false: "report"}[apply],
 		Total:  len(rows),
@@ -170,6 +180,32 @@ func runEpisodeTitleHeal(
 		out := healOneRow(ctx, pool, q, ddp, row, limitDDP, apply, &rep)
 		rep.Counts[out.Class]++
 		rep.Rows = append(rep.Rows, out)
+
+		// Empty-streak breaker.  The client reports a 4xx and a subject with no
+		// episodes identically, so an upstream that has stopped answering looks
+		// exactly like a long run of anime it has nothing for -- and a real
+		// catalogue does not produce hundreds of those back to back after a
+		// healthy start.  Measured on the run this exists for: the first ~40%
+		// wrote ~1,100 anime per tenth, then every remaining tenth was ~1,250
+		// NO_TITLES and 0-8 writes.  Stopping at the first few hundred turns
+		// 7,600 wasted requests into a few hundred, and leaves the unreached
+		// rows unstamped so --resume picks them up.
+		if out.Class == epClassNoTitles {
+			emptyStreak++
+		} else if out.Class != epClassSkipped {
+			emptyStreak = 0
+		}
+		if shouldAbortOnEmptyStreak(emptyStreak, maxEmptyStreak, rep.Counts[epClassWritten]) {
+			rep.Aborted = true
+			rep.AbortReason = fmt.Sprintf(
+				"%d consecutive rows returned no titles after %d successful writes; "+
+					"upstream has most likely stopped answering (the client cannot tell a 4xx "+
+					"from an empty subject). Re-run with --resume once it recovers.",
+				emptyStreak, rep.Counts[epClassWritten])
+			slog.Error("episode-title heal: aborted", "reason", rep.AbortReason,
+				"processed", i+1, "total", len(rows))
+			break
+		}
 	}
 
 	printEpisodeTitleSummary(&rep)
@@ -181,6 +217,55 @@ func runEpisodeTitleHeal(
 	return nil
 }
 
+// listEpisodeTitleCandidates picks the row set for this pass.
+//
+// resume=false is the full universe, which is what a first run wants.
+// resume=true drops rows a previous pass already wrote, using the stamp the
+// writer sets inside the same transaction as the titles -- see the query's own
+// comment for why an unstamped row is the safe direction to be wrong in.
+//
+// The two queries return different generated row types for the same columns,
+// so both are flattened here into the shape healOneRow actually reads.  A
+// conversion is cheaper than teaching the rest of the file about two types,
+// and it keeps the resume decision in one place instead of at every field.
+func listEpisodeTitleCandidates(ctx context.Context, q *dbgen.Queries, resume bool) ([]epTitleCandidate, error) {
+	if resume {
+		rows, err := q.ListBgmBoundNeedingEpisodeTitles(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("ListBgmBoundNeedingEpisodeTitles: %w", err)
+		}
+		out := make([]epTitleCandidate, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, epTitleCandidate{
+				AnilistID: r.AnilistID, BgmID: r.BgmID, Episodes: r.Episodes,
+				TitleChinese: r.TitleChinese, TitleRomaji: r.TitleRomaji,
+			})
+		}
+		return out, nil
+	}
+	rows, err := q.ListBgmBoundForBackfill(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ListBgmBoundForBackfill: %w", err)
+	}
+	out := make([]epTitleCandidate, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, epTitleCandidate{
+			AnilistID: r.AnilistID, BgmID: r.BgmID, Episodes: r.Episodes,
+			TitleChinese: r.TitleChinese, TitleRomaji: r.TitleRomaji,
+		})
+	}
+	return out, nil
+}
+
+// epTitleCandidate is the subset of a bgm-bound row this pass reads.
+type epTitleCandidate struct {
+	AnilistID    int32
+	BgmID        *int32
+	Episodes     *int32
+	TitleChinese *string
+	TitleRomaji  *string
+}
+
 // healOneRow runs the whole decision for a single anime.  It mutates only the
 // running totals on rep; the per-row result is returned.
 func healOneRow(
@@ -188,7 +273,7 @@ func healOneRow(
 	pool *pgxpool.Pool,
 	q *dbgen.Queries,
 	ddp *dandanplay.Client,
-	row dbgen.ListBgmBoundForBackfillRow,
+	row epTitleCandidate,
 	limitDDP int,
 	apply bool,
 	rep *epTitleReport,
@@ -286,6 +371,30 @@ func healOneRow(
 	return out
 }
 
+// shouldAbortOnEmptyStreak decides whether a run of empty results means the
+// upstream stopped answering rather than that the catalogue has a quiet patch.
+//
+// Two conditions, and the second is the one that keeps this from firing on a
+// legitimately barren stretch:
+//
+//   - the streak has reached the threshold, and
+//   - the pass has ALREADY written something.
+//
+// Without the second, a run that begins against a dead upstream would abort
+// before proving there was ever anything to get, and the operator would be
+// told "upstream stopped answering" about an upstream that never started.  A
+// run that has written nothing at all is a different diagnosis -- credentials,
+// network, the wrong database -- and deserves to be read as one.
+//
+// maxStreak == 0 disables the breaker, which is what a deliberate pass over a
+// known-barren slice wants.
+func shouldAbortOnEmptyStreak(streak, maxStreak, written int) bool {
+	if maxStreak <= 0 {
+		return false
+	}
+	return streak >= maxStreak && written > 0
+}
+
 // printEpisodeTitleSummary prints the table a human reads before --apply.
 //
 // The NO_TITLES share is called out separately because it is the one number
@@ -324,6 +433,9 @@ func printEpisodeTitleSummary(rep *epTitleReport) {
 			fmt.Printf("  ^ unusually high. The client reports a 4xx and an empty subject\n")
 			fmt.Printf("    identically, so check DANDANPLAY_APP_ID/SECRET before trusting this.\n")
 		}
+	}
+	if rep.Aborted {
+		fmt.Printf("\n  ABORTED — this report is INCOMPLETE\n  %s\n", rep.AbortReason)
 	}
 	fmt.Println()
 }
