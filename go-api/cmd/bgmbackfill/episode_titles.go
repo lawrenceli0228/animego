@@ -92,6 +92,13 @@ const (
 	epClassUndecided = "UNDECIDED"
 	// epClassFetchFail — the request itself failed.
 	epClassFetchFail = "FETCH_FAIL"
+	// epClassScopeMismatch — the binding is accepted, but the episode list
+	// reaches past twice this entry's own length, so the subject covers
+	// something larger than the row it would be written onto.  Refused rather
+	// than truncated: if the list belongs to a whole series, its episode 1 is
+	// the series' first episode, not this entry's, so the head is no more
+	// trustworthy than the tail.
+	epClassScopeMismatch = "SCOPE_MISMATCH"
 	// epClassSkipped — --limit was exhausted before this row was reached.
 	epClassSkipped = "SKIPPED"
 )
@@ -130,6 +137,11 @@ type epTitleRow struct {
 	// breaker, whose question is whether UPSTREAM is still answering.  A row
 	// that consulted no upstream is evidence about neither answer.
 	AskedUpstream bool `json:"asked_upstream,omitempty"`
+
+	// MaxEpisode is the highest episode number the refused list carried, set
+	// only on a scope mismatch.  Next to CatalogueEpisodes it is the whole
+	// case for the refusal in one line of the artifact.
+	MaxEpisode int32 `json:"max_episode,omitempty"`
 }
 
 // epTitleReport is the whole artifact.
@@ -387,6 +399,11 @@ func healOneRow(
 		out.Class = epClassNoTitles
 		return out
 	}
+	if maxEp, over := episodetitles.ScopeExceeded(titles, row.Episodes); over {
+		out.MaxEpisode = maxEp
+		out.Class = epClassScopeMismatch
+		return out
+	}
 
 	out.Class = epClassWritten
 	rep.TitlesCN += out.TitlesChinese
@@ -472,7 +489,7 @@ func printEpisodeTitleSummary(rep *epTitleReport) {
 	fmt.Printf("%-14s %8s %8s\n", "CLASS", "COUNT", "PCT")
 	fmt.Printf("%-14s %8s %8s\n", "──────────────", "────────", "────────")
 	for _, c := range []string{
-		epClassWritten, epClassNoTitles, epClassMapConflict,
+		epClassWritten, epClassNoTitles, epClassScopeMismatch, epClassMapConflict,
 		epClassRebind, epClassUndecided, epClassFetchFail, epClassSkipped,
 	} {
 		n := rep.Counts[c]

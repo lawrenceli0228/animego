@@ -2610,7 +2610,11 @@ func (q *Queries) ListIdMapBindCandidates(ctx context.Context) ([]ListIdMapBindC
 const listReleasingEpisodeTitleCandidates = `-- name: ListReleasingEpisodeTitleCandidates :many
 SELECT
     ac.anilist_id,
-    ac.bgm_id
+    ac.bgm_id,
+    -- The scope guard's denominator.  Without it the sweep would write an
+    -- episode list whose width it cannot check, and the one-shot backfill and
+    -- the timer would then disagree about the same anime.
+    ac.episodes
 FROM anime_cache ac
 WHERE ac.status = 'RELEASING'
   AND ac.bgm_id IS NOT NULL
@@ -2623,6 +2627,7 @@ LIMIT $2
 type ListReleasingEpisodeTitleCandidatesRow struct {
 	AnilistID int32  `json:"anilistId"`
 	BgmID     *int32 `json:"bgmId"`
+	Episodes  *int32 `json:"episodes"`
 }
 
 // The airing shows whose episode titles are due another look.
@@ -2651,7 +2656,7 @@ func (q *Queries) ListReleasingEpisodeTitleCandidates(ctx context.Context, stale
 	items := []ListReleasingEpisodeTitleCandidatesRow{}
 	for rows.Next() {
 		var i ListReleasingEpisodeTitleCandidatesRow
-		if err := rows.Scan(&i.AnilistID, &i.BgmID); err != nil {
+		if err := rows.Scan(&i.AnilistID, &i.BgmID, &i.Episodes); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
