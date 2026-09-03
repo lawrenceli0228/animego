@@ -278,9 +278,9 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
         style={{ paddingTop: 8, paddingBottom: 60 }}
       >
         <HotDiscussions items={hotDiscussions} />
+        <WeeklySchedule schedule={schedule} dict={dict} lang={lang} />
         <TrendingSection items={trending} dict={dict} lang={lang} />
         <ContinueWatching dict={dict} lang={lang} />
-        <WeeklySchedule schedule={schedule} dict={dict} lang={lang} />
         <CompletedGems
           initialItems={gems}
           dict={dict}
