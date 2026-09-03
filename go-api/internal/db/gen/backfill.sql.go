@@ -31,6 +31,25 @@ func (q *Queries) BackfillResetRows(ctx context.Context, dollar_1 []int32) error
 	return err
 }
 
+const countAnimeHoldingBgmID = `-- name: CountAnimeHoldingBgmID :one
+SELECT count(*)::bigint FROM anime_cache WHERE bgm_id = $1
+`
+
+// Whether any anime_cache row already holds this subject.
+//
+// The crosslink path has to ask this per row rather than as a set predicate,
+// because the subject it is testing does not exist until dandanplay answers.
+// Same refusal the id-map bind makes with its NOT EXISTS, asked one row at a
+// time: anime_cache.bgm_id has no unique index, so a second row claiming a
+// held subject would be accepted silently and make GetAnimeByBgmID -- a :one
+// query -- return an arbitrary one of them.
+func (q *Queries) CountAnimeHoldingBgmID(ctx context.Context, bgmID *int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countAnimeHoldingBgmID, bgmID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listBgmBoundForBackfill = `-- name: ListBgmBoundForBackfill :many
 
 SELECT
@@ -171,6 +190,79 @@ func (q *Queries) ListBgmBoundNeedingEpisodeTitles(ctx context.Context) ([]ListB
 			&i.Episodes,
 			&i.BangumiScore,
 			&i.BgmMatchSource,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnboundMapSilentForCrosslink = `-- name: ListUnboundMapSilentForCrosslink :many
+SELECT
+    anilist_id,
+    title_native,
+    title_romaji,
+    title_english,
+    title_chinese,
+    season_year,
+    episodes,
+    format,
+    status
+FROM anime_cache a
+WHERE a.bgm_id IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM bgm_id_map m WHERE m.anilist_id = a.anilist_id
+  )
+ORDER BY a.anilist_id
+`
+
+type ListUnboundMapSilentForCrosslinkRow struct {
+	AnilistID    int32   `json:"anilistId"`
+	TitleNative  *string `json:"titleNative"`
+	TitleRomaji  *string `json:"titleRomaji"`
+	TitleEnglish *string `json:"titleEnglish"`
+	TitleChinese *string `json:"titleChinese"`
+	SeasonYear   *int32  `json:"seasonYear"`
+	Episodes     *int32  `json:"episodes"`
+	Format       *string `json:"format"`
+	Status       *string `json:"status"`
+}
+
+// Rows with no bgm_id that the vendored id map has nothing to say about.
+//
+// This is the population left after the id-map bind sweep has run: the sweep
+// owns every unbound row the map DOES answer for, and deliberately writes
+// nothing where it is silent.  Excluding those rows here is what keeps the two
+// paths from ever disagreeing about the same row -- the map wins where it
+// speaks, without either side having to check what the other decided.
+//
+// The order is anilist_id, so a run that stops partway and a run that resumes
+// walk the same sequence and their reports can be read side by side.  Ordering
+// by popularity would read better in a report and be wrong here: it would make
+// successive probes re-draw the same head of the catalogue.
+func (q *Queries) ListUnboundMapSilentForCrosslink(ctx context.Context) ([]ListUnboundMapSilentForCrosslinkRow, error) {
+	rows, err := q.db.Query(ctx, listUnboundMapSilentForCrosslink)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUnboundMapSilentForCrosslinkRow{}
+	for rows.Next() {
+		var i ListUnboundMapSilentForCrosslinkRow
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.TitleNative,
+			&i.TitleRomaji,
+			&i.TitleEnglish,
+			&i.TitleChinese,
+			&i.SeasonYear,
+			&i.Episodes,
+			&i.Format,
+			&i.Status,
 		); err != nil {
 			return nil, err
 		}

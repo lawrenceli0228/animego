@@ -210,6 +210,15 @@ type Querier interface {
 	// comes back short. SearchLocalKeywordConsistency in search_test.go pins them
 	// to the same shape.
 	CountAnimeCacheLocal(ctx context.Context, contains string, containsFolded string) (int64, error)
+	// Whether any anime_cache row already holds this subject.
+	//
+	// The crosslink path has to ask this per row rather than as a set predicate,
+	// because the subject it is testing does not exist until dandanplay answers.
+	// Same refusal the id-map bind makes with its NOT EXISTS, asked one row at a
+	// time: anime_cache.bgm_id has no unique index, so a second row claiming a
+	// held subject would be accepted silently and make GetAnimeByBgmID -- a :one
+	// query -- return an arbitrary one of them.
+	CountAnimeHoldingBgmID(ctx context.Context, bgmID *int32) (int64, error)
 	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
 	CountBgmIdMap(ctx context.Context) (int64, error)
 	CountCommentReactions(ctx context.Context, commentID uuid.UUID) (int64, error)
@@ -1360,6 +1369,19 @@ type Querier interface {
 	// ordering jump at a hard date boundary.  Authenticated viewers do not see
 	// threads authored only by someone they blocked or were blocked by.
 	ListTrendingDiscussions(ctx context.Context, pageLimit int32, windowHours int32, viewerUserID *uuid.UUID) ([]ListTrendingDiscussionsRow, error)
+	// Rows with no bgm_id that the vendored id map has nothing to say about.
+	//
+	// This is the population left after the id-map bind sweep has run: the sweep
+	// owns every unbound row the map DOES answer for, and deliberately writes
+	// nothing where it is silent.  Excluding those rows here is what keeps the two
+	// paths from ever disagreeing about the same row -- the map wins where it
+	// speaks, without either side having to check what the other decided.
+	//
+	// The order is anilist_id, so a run that stops partway and a run that resumes
+	// walk the same sequence and their reports can be read side by side.  Ordering
+	// by popularity would read better in a report and be wrong here: it would make
+	// successive probes re-draw the same head of the catalogue.
+	ListUnboundMapSilentForCrosslink(ctx context.Context) ([]ListUnboundMapSilentForCrosslinkRow, error)
 	// Boot-time orphan scan: returns anilist_ids of rows where
 	// bangumi_version=0 (never enriched).  Paginated via limit/offset so
 	// the caller can batch-enqueue without loading the whole table into

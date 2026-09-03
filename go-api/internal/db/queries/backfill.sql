@@ -74,3 +74,44 @@ FROM anime_cache
 WHERE bgm_id IS NOT NULL
   AND episode_titles_at IS NULL
 ORDER BY anilist_id;
+
+-- name: ListUnboundMapSilentForCrosslink :many
+-- Rows with no bgm_id that the vendored id map has nothing to say about.
+--
+-- This is the population left after the id-map bind sweep has run: the sweep
+-- owns every unbound row the map DOES answer for, and deliberately writes
+-- nothing where it is silent.  Excluding those rows here is what keeps the two
+-- paths from ever disagreeing about the same row -- the map wins where it
+-- speaks, without either side having to check what the other decided.
+--
+-- The order is anilist_id, so a run that stops partway and a run that resumes
+-- walk the same sequence and their reports can be read side by side.  Ordering
+-- by popularity would read better in a report and be wrong here: it would make
+-- successive probes re-draw the same head of the catalogue.
+SELECT
+    anilist_id,
+    title_native,
+    title_romaji,
+    title_english,
+    title_chinese,
+    season_year,
+    episodes,
+    format,
+    status
+FROM anime_cache a
+WHERE a.bgm_id IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM bgm_id_map m WHERE m.anilist_id = a.anilist_id
+  )
+ORDER BY a.anilist_id;
+
+-- name: CountAnimeHoldingBgmID :one
+-- Whether any anime_cache row already holds this subject.
+--
+-- The crosslink path has to ask this per row rather than as a set predicate,
+-- because the subject it is testing does not exist until dandanplay answers.
+-- Same refusal the id-map bind makes with its NOT EXISTS, asked one row at a
+-- time: anime_cache.bgm_id has no unique index, so a second row claiming a
+-- held subject would be accepted silently and make GetAnimeByBgmID -- a :one
+-- query -- return an arbitrary one of them.
+SELECT count(*)::bigint FROM anime_cache WHERE bgm_id = @bgm_id;
