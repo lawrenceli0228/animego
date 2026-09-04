@@ -54,6 +54,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -72,12 +73,21 @@ const (
 	// In report mode this means "would have been written".
 	epClassWritten = "WRITTEN"
 	// epClassNoTitles — the binding was accepted and upstream had nothing
-	// usable.  Also where a 4xx lands: the client collapses every non-2xx
+	// usable.  Still where a 4xx lands: the client collapses every non-2xx
 	// below 500 into an empty result, so "this subject has no episodes" and
-	// "our credentials stopped working" are the same value here.  A run whose
-	// NO_TITLES share is far above the historical norm is the symptom of the
-	// latter; see the closing summary.
+	// "our credentials stopped working" remain the same value here.  A run
+	// whose NO_TITLES share is far above the historical norm is the symptom
+	// of the latter; see the closing summary.  The one refusal that no longer
+	// hides here is a spent quota -- see epClassQuotaSpent.
 	epClassNoTitles = "NO_TITLES"
+	// epClassQuotaSpent — dandanplay refused because the function group's
+	// daily quota is gone.  It used to arrive as NO_TITLES, because upstream
+	// reports it as HTTP 200 with success:false in the body and the client
+	// read the empty payload as an empty subject.  It is a class of its own
+	// rather than a flavour of FETCH_FAIL because it is the only outcome that
+	// says something about the RUN instead of about the row: every remaining
+	// row will get the same answer, so the run is over.
+	epClassQuotaSpent = "QUOTA_SPENT"
 	// epClassMapConflict — bgm_id_map names a DIFFERENT subject for this
 	// entry.  The authoritative map contradicts the stored binding, so
 	// nothing is written and no upstream request is spent.
@@ -232,13 +242,36 @@ func runEpisodeTitleHeal(
 		// reset the streak roughly every twelve rows, so it never reached the
 		// threshold.  A row that consulted no upstream cannot testify about
 		// upstream, which is why it is now neutral rather than exonerating.
+		// A spent quota is a fact about the run, so it does not go through the
+		// streak heuristic at all -- it stops the run on its first occurrence.
+		// The heuristic exists to INFER that upstream has stopped answering
+		// from a pattern of empty results; when upstream says so outright
+		// there is nothing left to infer, and inferring anyway would take
+		// another `maxEmptyStreak` rows to reach the same conclusion.  Note
+		// the streak could never reach it here in any case: a quota refusal is
+		// now an error, not an empty result, and nextEmptyStreak RESETS on
+		// anything that is not NO_TITLES.
+		if out.Class == epClassQuotaSpent {
+			rep.Aborted = true
+			rep.AbortReason = fmt.Sprintf(
+				"dandanplay refused at row %d of %d: the function group's quota is spent "+
+					"(%s). Every remaining row would get the same answer. The daily budget "+
+					"resets on dandanplay's own boundary; re-run with --resume then -- rows "+
+					"that were never read are not stamped, so none of them were lost.",
+				i+1, len(rows), out.Err)
+			slog.Error("episode-title heal: aborted", "reason", rep.AbortReason,
+				"processed", i+1, "total", len(rows), "written", rep.Counts[epClassWritten])
+			break
+		}
+
 		emptyStreak = nextEmptyStreak(emptyStreak, out.AskedUpstream, out.Class)
 		if shouldAbortOnEmptyStreak(emptyStreak, maxEmptyStreak, rep.Counts[epClassWritten]) {
 			rep.Aborted = true
 			rep.AbortReason = fmt.Sprintf(
 				"%d consecutive rows returned no titles after %d successful writes; "+
-					"upstream has most likely stopped answering (the client cannot tell a 4xx "+
-					"from an empty subject). Re-run with --resume once it recovers.",
+					"upstream has most likely stopped answering (the client still cannot tell "+
+					"a 4xx from an empty subject; a spent quota aborts separately). "+
+					"Re-run with --resume once it recovers.",
 				emptyStreak, rep.Counts[epClassWritten])
 			slog.Error("episode-title heal: aborted", "reason", rep.AbortReason,
 				"processed", i+1, "total", len(rows))
@@ -360,7 +393,11 @@ func healOneRow(
 	}
 	data, err := ddp.FetchEpisodesByBgmID(ctx, bgmID)
 	if err != nil {
-		out.Class = epClassFetchFail
+		// Checked before the generic failure because the caller has to abort
+		// on it, not count it.  A spent group refuses every subsequent row
+		// identically, so continuing spends ~800ms per row to learn the same
+		// thing thousands of times.
+		out.Class = classifyFetchError(err)
 		out.Err = err.Error()
 		return out
 	}
@@ -441,6 +478,25 @@ func healOneRow(
 //
 // So: a row that consulted no upstream is neutral.  It neither accuses nor
 // exonerates, which is the only honest thing a row with no evidence can do.
+// classifyFetchError decides which class a failed fetch belongs in.
+//
+// Extracted from healOneRow because it is the whole of the decision and
+// healOneRow is not reachable from a test (it takes a concrete
+// *dandanplay.Client).  The distinction it draws is the one thing that
+// stops the run: QUOTA_SPENT aborts, FETCH_FAIL is counted and walked past.
+//
+// errors.Is rather than a string match, and the test drives it through the
+// real client so the assertion covers the actual wrapping chain -- checkStatus
+// wraps the sentinel once and do() wraps that again, and a matcher that only
+// worked on the bare sentinel would compile, pass a hand-written test, and
+// never fire in production.
+func classifyFetchError(err error) string {
+	if errors.Is(err, dandanplay.ErrQuotaExceeded) {
+		return epClassQuotaSpent
+	}
+	return epClassFetchFail
+}
+
 func nextEmptyStreak(streak int, askedUpstream bool, class string) int {
 	if !askedUpstream {
 		return streak
@@ -489,7 +545,7 @@ func printEpisodeTitleSummary(rep *epTitleReport) {
 	fmt.Printf("%-14s %8s %8s\n", "CLASS", "COUNT", "PCT")
 	fmt.Printf("%-14s %8s %8s\n", "──────────────", "────────", "────────")
 	for _, c := range []string{
-		epClassWritten, epClassNoTitles, epClassScopeMismatch, epClassMapConflict,
+		epClassWritten, epClassNoTitles, epClassQuotaSpent, epClassScopeMismatch, epClassMapConflict,
 		epClassRebind, epClassUndecided, epClassFetchFail, epClassSkipped,
 	} {
 		n := rep.Counts[c]
