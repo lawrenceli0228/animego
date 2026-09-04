@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -706,22 +707,132 @@ func TestQuotaRefusalIsNeverCachedAsAMiss(t *testing.T) {
 	}
 }
 
+// TestNotFoundIsAnAnswerNotARefusal is the regression this file exists for as
+// much as the quota one.
+//
+// The body below is verbatim from production. errorCode 7 -- 无法找到指定的
+// 资源 -- is dandanplay saying it has no entry for that id, which for a
+// catalogue it has never heard of most of is the ordinary case. Treating it as
+// a refusal took the live danmaku route to HTTP 500 for every such anime, and
+// filled the RELEASING sweep's log with `episode_titles fetch failed` for rows
+// that were simply not there: 26 of them inside ten minutes.
+func TestNotFoundIsAnAnswerNotARefusal(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"bangumi":null,"errorCode":7,"success":false,"errorMessage":"无法找到指定的资源"}`))
+	})
+
+	data, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 24515)
+
+	if err != nil {
+		t.Fatalf("upstream having no entry is data, not failure: %v", err)
+	}
+	if data != nil {
+		t.Fatalf("want nil data, got %+v", data)
+	}
+}
+
+// captureWarnings swaps the default slog logger for one writing into a buffer,
+// and restores it. The buffer is what makes the difference between "code 7 is
+// catalogued" and "code 7 falls through the default" observable at all: both
+// return no data and no error, so behaviour alone cannot tell them apart, and
+// a test asserting only behaviour passes with the catalogue entry deleted.
+// (It did. That is why this exists.)
+func captureWarnings(t *testing.T) *strings.Builder {
+	t.Helper()
+	var buf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+// TestNotFoundDoesNotWarn — the catalogue entry for code 7 earns its keep in
+// the log, not in the return value.
+//
+// Production sees this code constantly: most of our catalogue is not in
+// dandanplay, and 26 arrived within ten minutes of one deploy. Routing it
+// through the uncatalogued branch would emit a WARN for each, which is how a
+// log stops being read.
+func TestNotFoundDoesNotWarn(t *testing.T) {
+	buf := captureWarnings(t)
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"bangumi":null,"errorCode":7,"success":false,"errorMessage":"无法找到指定的资源"}`))
+	})
+
+	if _, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 24515); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := buf.String(); strings.Contains(got, "uncatalogued") {
+		t.Fatalf("code 7 is a normal answer and must not warn; got: %s", got)
+	}
+}
+
+// TestUncataloguedCodeWarns is the other half: passing an unknown code through
+// silently would restore the exact blindness this whole change exists to end.
+// The log line IS the fix for anything not in the catalogue.
+func TestUncataloguedCodeWarns(t *testing.T) {
+	buf := captureWarnings(t)
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"bangumi":null,"errorCode":9001,"success":false,"errorMessage":"something new"}`))
+	})
+
+	if _, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 5415); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "uncatalogued") {
+		t.Fatalf("an unknown code must be named in the log, got: %q", got)
+	}
+	if !strings.Contains(got, "9001") || !strings.Contains(got, "something new") {
+		t.Fatalf("the log must carry the code AND upstream's message, got: %q", got)
+	}
+}
+
+// TestUncataloguedCodeFailsOpen — a code we have never seen is far more likely
+// to be another fact about the resource than a new way of being refused, and
+// the cost of guessing wrong in that direction is a log line rather than a 500
+// in front of a reader. The signal the original defect lacked was the log, not
+// the error.
+func TestUncataloguedCodeFailsOpen(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"bangumi":null,"errorCode":9001,"success":false,"errorMessage":"something new"}`))
+	})
+
+	data, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 5415)
+
+	if err != nil {
+		t.Fatalf("an unknown code must not break a live route: %v", err)
+	}
+	if data != nil {
+		t.Fatalf("want nil data, got %+v", data)
+	}
+}
+
 func TestNonQuotaRejectionIsDistinguishable(t *testing.T) {
+	// 401 is not in the catalogue, so under the fail-open rule it passes
+	// through as no data rather than as ErrUpstreamRejected. That is the
+	// deliberate trade: this path is in front of readers, and a credentials
+	// failure announces itself in the WARN log and in every call returning
+	// nothing, not in a 500. The sentinel stays exported for the codes we do
+	// catalogue as refusals.
 	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"errorCode":401,"success":false,"errorMessage":"bad credentials"}`))
 	})
 
-	_, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 5415)
+	data, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 5415)
 
-	if !errors.Is(err, ErrUpstreamRejected) {
-		t.Fatalf("want ErrUpstreamRejected, got %v", err)
+	if err != nil {
+		t.Fatalf("uncatalogued codes fail open: %v", err)
 	}
-	if errors.Is(err, ErrQuotaExceeded) {
-		t.Fatal("a credentials failure must not read as a quota failure -- the remedies are unrelated")
-	}
-	if !strings.Contains(err.Error(), "bad credentials") {
-		t.Fatalf("upstream's own message must survive for an operator to read, got %q", err)
+	if data != nil {
+		t.Fatalf("want nil data, got %+v", data)
 	}
 }
 
