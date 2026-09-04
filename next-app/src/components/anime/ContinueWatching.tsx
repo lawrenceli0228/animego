@@ -4,7 +4,11 @@ import { pickTitle } from "@/lib/formatters";
 import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { WatchingItem } from "@/lib/types";
-import { currentSeasonHref, resolveWatchingView } from "./continueWatchingState";
+import {
+  currentSeasonHref,
+  resolveWatchingTotal,
+  resolveWatchingView,
+} from "./continueWatchingState";
 import WatchingEmptySwap from "./WatchingEmptySwap";
 import SignedOutGate from "./SignedOutGate";
 
@@ -243,16 +247,6 @@ function progressFillStyle(currentEpisode: number, episodes: number | null) {
  * keeping the fallback here rather than merging the two fields upstream is
  * what keeps that decision reversible.
  */
-export function resolveWatchingTotal(item: WatchingItem): number | null {
-  if (typeof item.episodes === "number" && item.episodes > 0) {
-    return item.episodes;
-  }
-  if (typeof item.episodesBgm === "number" && item.episodesBgm > 0) {
-    return item.episodesBgm;
-  }
-  return null;
-}
-
 function badgeText(item: WatchingItem, dict: Dict, lang: Lang): string {
   const epUnit = dict.detail.epUnit;
   const total = resolveWatchingTotal(item);

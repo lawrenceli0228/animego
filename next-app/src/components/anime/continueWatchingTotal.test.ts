@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveWatchingTotal } from "./ContinueWatching";
+import { resolveWatchingTotal } from "./continueWatchingState";
 import type { WatchingItem } from "@/lib/types";
 
 const item = (over: Partial<WatchingItem>): WatchingItem =>
