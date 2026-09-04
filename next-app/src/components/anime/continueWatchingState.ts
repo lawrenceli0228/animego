@@ -3,6 +3,7 @@
 // same split as torrentModalLogic.ts next door).
 
 import type { SubscriptionChangeDetail } from "@/lib/subscriptionBus";
+import type { WatchingItem } from "@/lib/types";
 
 /** Which of the three ContinueWatching bodies the section renders. */
 export type WatchingView = "logged-out" | "empty" | "grid";
@@ -83,4 +84,35 @@ const SEASON_SLUGS = ["winter", "spring", "summer", "fall"] as const;
 export function currentSeasonHref(now: Date = new Date()): string {
   const slug = SEASON_SLUGS[Math.floor(now.getMonth() / 3)];
   return `/seasonal/${slug}/${now.getFullYear()}`;
+}
+
+/**
+ * The episode count a Continue Watching card should print as its total.
+ *
+ * Lives here rather than beside the component that renders it, and the reason
+ * is the test rather than the taste: importing a component to reach a pure
+ * function drags that component's whole module graph in with it. This one
+ * reaches `next/image`, whose `deployment-id` module runs
+ * `if (typeof window !== "undefined") document.documentElement.dataset...` at
+ * import time. bun:test shares one process and one module cache across every
+ * test file, several of which set `globalThis.window` while they run, so
+ * whether that import throws depends on which file happened to be running when
+ * some other file first pulled Next in -- an ordering nothing in the suite
+ * controls. The symptom was `ReferenceError: document is not defined` reported
+ * as an unhandled error between tests, on a run whose diff touched no
+ * front-end file at all.
+ *
+ * AniList's own count wins when it has one. `episodesBgm` is the inferred
+ * fallback, and zero or negative from either source means "unknown", not
+ * "zero episodes" -- a card that printed 0 would draw an empty progress bar
+ * where it should draw none.
+ */
+export function resolveWatchingTotal(item: WatchingItem): number | null {
+  if (typeof item.episodes === "number" && item.episodes > 0) {
+    return item.episodes;
+  }
+  if (typeof item.episodesBgm === "number" && item.episodesBgm > 0) {
+    return item.episodesBgm;
+  }
+  return null;
 }
