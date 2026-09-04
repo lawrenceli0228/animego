@@ -8,6 +8,7 @@ package dandanplay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -615,5 +616,168 @@ func TestFetchEpisodesToleratesMissingCrossLinks(t *testing.T) {
 	}
 	if got.AniListID != 0 || got.BgmID != 0 {
 		t.Errorf("AniListID=%d BgmID=%d, want 0/0", got.AniListID, got.BgmID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A 200 that says it failed
+//
+// dandanplay reports application errors inside a 200 body. Until checkStatus
+// existed, every one of them decoded to an empty payload and reached the
+// caller as (nil, nil) -- the same shape as "upstream genuinely has nothing
+// for this id". These tests are written against that confusion specifically,
+// because the cost of it is not an error anyone sees: it is a user being told
+// an anime has no danmaku, a backfill counting a row as untitled, and a probe
+// reporting a measurement it did not make.
+// ---------------------------------------------------------------------------
+
+// quotaBody is the exact envelope production returned on 2026-09-04 when the
+// 番剧详情 group was spent. Verbatim, including the Chinese message, so this
+// test fails if the shape we are defending against stops being the shape
+// upstream sends.
+const quotaBody = `{"errorCode":429,"success":false,"errorMessage":"已达到接口调用配额上限"}`
+
+func TestQuotaExhaustionIsNotMistakenForNoData(t *testing.T) {
+	c, calls := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK) // 200 -- this is the whole problem
+		_, _ = w.Write([]byte(quotaBody))
+	})
+
+	data, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 5415)
+
+	if err == nil {
+		t.Fatal("a spent quota must surface as an error; returning (nil, nil) is what told users an anime has no danmaku")
+	}
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("want ErrQuotaExceeded so callers can act on it by name, got %v", err)
+	}
+	if data != nil {
+		t.Fatalf("want no data alongside the error, got %+v", data)
+	}
+	// Retrying inside the process cannot refill a daily group, and this is a
+	// shared budget -- so the refusal must cost exactly one request.
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("want exactly 1 upstream call for a quota refusal, got %d", n)
+	}
+}
+
+func TestQuotaExhaustionSurfacesFromTheBgmIdPathToo(t *testing.T) {
+	// The two episode entry points share fetchEpisodes but not their cache
+	// keys, and live danmaku reaches upstream through this one.
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(quotaBody))
+	})
+
+	_, err := c.FetchEpisodesByBgmID(context.Background(), 253)
+
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("want ErrQuotaExceeded, got %v", err)
+	}
+}
+
+func TestQuotaRefusalIsNeverCachedAsAMiss(t *testing.T) {
+	// /match caches a miss for matchMissTTL. Caching a quota refusal there
+	// would outlive the refusal itself and keep answering "no danmaku" after
+	// the group refilled.
+	var body atomic.Value
+	body.Store(quotaBody)
+	c, calls := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(body.Load().(string)))
+	})
+
+	if _, err := c.MatchCombined(context.Background(), "ep01.mkv", "hash", 0); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("first call: want ErrQuotaExceeded, got %v", err)
+	}
+
+	// Quota comes back; the very next identical call must reach upstream.
+	body.Store(`{"success":true,"isMatched":true,"matches":[{"animeId":7,"animeTitle":"T","episodeId":70,"episodeTitle":"E"}]}`)
+	got, err := c.MatchCombined(context.Background(), "ep01.mkv", "hash", 0)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if got == nil || got.AnimeID != 7 {
+		t.Fatalf("want the fresh match, got %+v -- a cached refusal outlived the refusal", got)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("want 2 upstream calls (refusal not cached), got %d", n)
+	}
+}
+
+func TestNonQuotaRejectionIsDistinguishable(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errorCode":401,"success":false,"errorMessage":"bad credentials"}`))
+	})
+
+	_, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 5415)
+
+	if !errors.Is(err, ErrUpstreamRejected) {
+		t.Fatalf("want ErrUpstreamRejected, got %v", err)
+	}
+	if errors.Is(err, ErrQuotaExceeded) {
+		t.Fatal("a credentials failure must not read as a quota failure -- the remedies are unrelated")
+	}
+	if !strings.Contains(err.Error(), "bad credentials") {
+		t.Fatalf("upstream's own message must survive for an operator to read, got %q", err)
+	}
+}
+
+func TestAGenuinelyEmptyEntryStillReadsAsNoData(t *testing.T) {
+	// The other half of the contract. Before this change everything looked
+	// like this; after it, only this should. A body with no errorCode and a
+	// null payload is upstream saying "I have nothing for that id", which is
+	// a real answer and must stay a nil-nil.
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true,"bangumi":null}`))
+	})
+
+	data, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 999)
+
+	if err != nil {
+		t.Fatalf("an empty entry is not an error, got %v", err)
+	}
+	if data != nil {
+		t.Fatalf("want nil data, got %+v", data)
+	}
+}
+
+func TestHealthyBodyWithoutASuccessFieldIsAccepted(t *testing.T) {
+	// Why checkStatus tests errorCode rather than !Success: `success` is
+	// absent from some healthy bodies, and an absent bool is false in Go. A
+	// !Success check would reject every good response from those endpoints --
+	// turning a silent-failure fix into a total outage of the same calls.
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"bangumi":{"animeId":5415,"animeTitle":"T","episodes":[]}}`))
+	})
+
+	data, err := c.FetchEpisodesByDandanAnimeID(context.Background(), 5415)
+
+	if err != nil {
+		t.Fatalf("no errorCode means no refusal, got %v", err)
+	}
+	if data == nil || data.DandanAnimeID != 5415 {
+		t.Fatalf("want the decoded entry, got %+v", data)
+	}
+}
+
+func TestEveryEnvelopeCarriesAPIStatus(t *testing.T) {
+	// checkStatus is a type assertion, so an envelope that forgets to embed
+	// apiStatus skips the check in silence -- the same class of failure being
+	// fixed, reintroduced by omission. This list is the guard; a new endpoint
+	// must appear here.
+	for _, env := range []any{
+		&matchEnvelope{},
+		&bangumiEnvelope{},
+		&searchEnvelope{},
+		&commentsEnvelope{},
+	} {
+		if _, ok := env.(statusCarrier); !ok {
+			t.Errorf("%T does not embed apiStatus: its refusals will read as empty data", env)
+		}
 	}
 }
