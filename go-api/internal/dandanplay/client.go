@@ -40,6 +40,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -392,10 +393,21 @@ func (c *Client) doOnce(ctx context.Context, method, path string, bodyBytes []by
 		return false, false, 0, nil
 	}
 
-	// 2xx — decode body into dest.
+	// 2xx — decode body into dest, then ask the body whether it actually
+	// succeeded.  The status check has to happen HERE rather than in each
+	// caller: a caller that forgets it sees an empty payload and reports "no
+	// data", which is precisely the failure this exists to stop.
 	if dest != nil {
 		if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
 			return false, false, 0, fmt.Errorf("dandanplay: decode %s: %w", path, err)
+		}
+		if err := checkStatus(dest); err != nil {
+			// Not retryable within the process.  A spent group refills on
+			// dandanplay's daily boundary, so retrying inside one job's
+			// backoff window only spends attempts and adds load; river's own
+			// retry (or tomorrow's periodic pass) is the right timescale, and
+			// it gets a named error to act on instead of an empty result.
+			return false, false, 0, fmt.Errorf("dandanplay: %s %s: %w", method, path, err)
 		}
 	}
 	return true, false, 0, nil
@@ -464,7 +476,101 @@ type matchRequest struct {
 
 // matchEnvelope is the v2/match response shape.  Express only read
 // the first match — same here.
+// ---------------------------------------------------------------------------
+// The envelope every dandanplay response carries, and why it is checked
+// ---------------------------------------------------------------------------
+//
+// dandanplay reports application errors INSIDE a 200 response:
+//
+//	HTTP/1.1 200 OK
+//	{"success":false,"errorCode":429,"errorMessage":"已达到接口调用配额上限"}
+//
+// with the payload field simply absent.  Nothing above this line could see
+// that.  do() branched on resp.StatusCode alone, a 200 fell through to the
+// decode, `bangumi` unmarshalled to nil, and fetchEpisodes returned
+// (nil, nil) -- which every caller in this package reads as "upstream has no
+// data for this id".
+//
+// So a spent daily quota was indistinguishable from a genuinely empty entry,
+// and the three things that ask this API each drew a different wrong
+// conclusion from it:
+//
+//   - the player reported "no danmaku for this anime" to a user, for an anime
+//     with danmaku, and /match cached that verdict for matchMissTTL;
+//   - the episode-title backfill counted the row as having no titles, which
+//     is the signal its empty-streak breaker exists to accumulate -- a
+//     quota-exhausted run and a run over untitled anime produce identical
+//     evidence;
+//   - the crosslink probe recorded "dandanplay publishes no AniList link for
+//     this entry", the one outcome that makes a row unbindable, and reported
+//     it as a measurement.
+//
+// Confirmed on 2026-09-04: /api/v2/search/anime answered success:true while
+// /api/v2/bangumi/{id} and /api/v2/bangumi/bgmtv/{id} both answered 200 with
+// errorCode 429, because the quota is per function group and only the 番剧详情
+// group was spent.  Which is also why this cannot be inferred from the health
+// of some other call.
+type apiStatus struct {
+	// Success is dandanplay's own verdict on the request.  Absent in a
+	// well-formed success body from some endpoints, so it is read together
+	// with ErrorCode rather than alone -- see checkStatus.
+	Success      bool   `json:"success"`
+	ErrorCode    int    `json:"errorCode"`
+	ErrorMessage string `json:"errorMessage"`
+}
+
+// status lets do() read the envelope fields off any response struct that
+// embeds apiStatus, without knowing which struct it has.
+func (s apiStatus) status() apiStatus { return s }
+
+// statusCarrier is implemented by every envelope in this file, and
+// TestEveryEnvelopeCarriesAPIStatus asserts that -- a new endpoint whose
+// envelope forgets to embed apiStatus would otherwise skip the check in
+// silence, which is the exact failure being fixed.
+type statusCarrier interface{ status() apiStatus }
+
+// ErrQuotaExceeded is dandanplay refusing because a function group's quota is
+// spent.  Separate from a generic rejection because the remedy is different
+// and time-based: the group refills on dandanplay's own daily boundary, so a
+// caller should stop asking rather than retry harder, and an operator needs
+// to see it named rather than inferred from a drop in yield.
+var ErrQuotaExceeded = errors.New("dandanplay: API quota exceeded")
+
+// ErrUpstreamRejected is any other success:false body.  Deliberately not
+// folded into "no data": the whole point of this pair is that a refusal and
+// an empty answer stop looking alike.
+var ErrUpstreamRejected = errors.New("dandanplay: upstream rejected the request")
+
+// ddpQuotaErrorCode is the errorCode dandanplay returns for a spent group.
+// It mirrors HTTP 429 but arrives in a 200 body, which is the entire reason
+// this constant is needed.
+const ddpQuotaErrorCode = 429
+
+// checkStatus turns a non-success envelope into an error.
+//
+// The test is `ErrorCode != 0`, not `!Success`.  Several endpoints omit
+// `success` from a healthy body, so a bare !Success check would reject every
+// good response from those -- the field defaults to false when absent, and
+// "absent" and "false" are the same value in Go.  A non-zero errorCode is
+// only ever set on a refusal, so it is the signal that actually distinguishes
+// the two.
+func checkStatus(dest any) error {
+	sc, ok := dest.(statusCarrier)
+	if !ok {
+		return nil
+	}
+	st := sc.status()
+	if st.ErrorCode == 0 {
+		return nil
+	}
+	if st.ErrorCode == ddpQuotaErrorCode {
+		return fmt.Errorf("%w (code %d: %s)", ErrQuotaExceeded, st.ErrorCode, st.ErrorMessage)
+	}
+	return fmt.Errorf("%w (code %d: %s)", ErrUpstreamRejected, st.ErrorCode, st.ErrorMessage)
+}
+
 type matchEnvelope struct {
+	apiStatus
 	IsMatched bool `json:"isMatched"`
 	Matches   []struct {
 		AnimeID      int64  `json:"animeId"`
@@ -625,6 +731,7 @@ func (c *Client) MatchCombined(ctx context.Context, fileName, fileHash string, f
 // bangumiEnvelope is the shared shape of /api/v2/bangumi/bgmtv/:bgmId
 // and /api/v2/bangumi/:dandanAnimeId.
 type bangumiEnvelope struct {
+	apiStatus
 	Bangumi *struct {
 		AnimeID    int64  `json:"animeId"`
 		AnimeTitle string `json:"animeTitle"`
@@ -748,6 +855,7 @@ func (c *Client) fetchEpisodes(ctx context.Context, path string) (*EpisodeData, 
 // ─── /api/v2/search/anime ───────────────────────────────────────────────────
 
 type searchEnvelope struct {
+	apiStatus
 	Animes []struct {
 		AnimeID      int64  `json:"animeId"`
 		AnimeTitle   string `json:"animeTitle"`
@@ -790,6 +898,7 @@ func (c *Client) SearchAnime(ctx context.Context, keyword string) ([]DandanAnime
 // ─── /api/v2/comment/:episodeId ─────────────────────────────────────────────
 
 type commentsEnvelope struct {
+	apiStatus
 	Count    int             `json:"count"`
 	Comments json.RawMessage `json:"comments"`
 }

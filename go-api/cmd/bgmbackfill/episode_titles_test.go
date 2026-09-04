@@ -1,6 +1,14 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
+)
 
 // TestShouldAbortOnEmptyStreak pins the breaker that turns a silent upstream
 // into a stopped run instead of a full one that wrote almost nothing.
@@ -186,5 +194,52 @@ func TestEmptyStreakReachesThresholdDespiteCacheHits(t *testing.T) {
 	if oldFired {
 		t.Fatal("the control did not reproduce the bug, so the case above proves nothing " +
 			"about the fix -- check the cache-hit spacing against the threshold")
+	}
+}
+
+// TestClassifyFetchErrorSeesQuotaThroughTheRealClient drives the classifier
+// with an error produced by the actual dandanplay client against the actual
+// body upstream sends, rather than with a hand-made sentinel.
+//
+// That matters because the sentinel is wrapped twice on its way here — once by
+// checkStatus and once by do() — and because the body that produces it is a
+// 200. A classifier written against an assumption about either would compile,
+// pass a test built on the same assumption, and classify every real quota
+// refusal as FETCH_FAIL: counted, walked past, and repeated for every
+// remaining row in the catalogue.
+func TestClassifyFetchErrorSeesQuotaThroughTheRealClient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK) // upstream really does answer 200
+		_, _ = w.Write([]byte(`{"errorCode":429,"success":false,"errorMessage":"已达到接口调用配额上限"}`))
+	}))
+	defer srv.Close()
+
+	c, err := dandanplay.NewClient(
+		dandanplay.WithEndpoint(srv.URL),
+		dandanplay.WithCredentials("id", "secret"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	_, fetchErr := c.FetchEpisodesByBgmID(context.Background(), 253)
+	if fetchErr == nil {
+		t.Fatal("the client must surface a quota refusal as an error")
+	}
+
+	if got := classifyFetchError(fetchErr); got != epClassQuotaSpent {
+		t.Fatalf("want %s so the run aborts, got %s — every remaining row would be asked and refused",
+			epClassQuotaSpent, got)
+	}
+}
+
+func TestClassifyFetchErrorLeavesOrdinaryFailuresAlone(t *testing.T) {
+	// A transport failure says nothing about the budget, so it must stay
+	// FETCH_FAIL and let the run continue: aborting the whole pass on one
+	// flaky connection would be a worse bug than the one being fixed.
+	if got := classifyFetchError(errors.New("dial tcp: connection refused")); got != epClassFetchFail {
+		t.Fatalf("want %s, got %s", epClassFetchFail, got)
 	}
 }

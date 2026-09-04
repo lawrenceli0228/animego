@@ -324,3 +324,97 @@ func TestCrosslinkKeyword(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// crosslinkSample — the sampler the extrapolation rests on
+//
+// Every number this probe reports gets multiplied by ~4,400, so the one
+// property that matters is that the sample spans the whole ordered set rather
+// than its head.  These tests are written against that property, not against
+// the arithmetic: they check span and spread, so a future implementation that
+// changes how the stride is computed still has to keep the guarantee.
+// ---------------------------------------------------------------------------
+
+func seq(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
+	}
+	return out
+}
+
+func TestCrosslinkSampleSpansTheWholeSet(t *testing.T) {
+	rows := seq(4463)
+
+	got, stride := crosslinkSample(rows, 300)
+
+	if len(got) != 300 {
+		t.Fatalf("want 300 rows, got %d", len(got))
+	}
+	if stride != 14 {
+		t.Fatalf("want stride 14 for 4463/300, got %d", stride)
+	}
+	// The point of the whole function: the last row probed must live near the
+	// far end of the catalogue, not 300 rows into it.  Walking the head would
+	// end at index 299.
+	if last := got[len(got)-1]; last < len(rows)-2*stride {
+		t.Fatalf("sample ends at index %d of %d — that is a head sample, not a spread one", last, len(rows))
+	}
+	if got[0] != 0 {
+		t.Fatalf("sample should start at the first row, got %d", got[0])
+	}
+}
+
+func TestCrosslinkSampleCoversEveryQuarter(t *testing.T) {
+	rows := seq(4463)
+
+	got, _ := crosslinkSample(rows, 200)
+
+	// A spread sample must put roughly equal weight in each quarter of the
+	// ordered set. This is the assertion a head sample fails outright (all 200
+	// in the first quarter) and it is also what catches a stride that silently
+	// truncates halfway.
+	quarters := make([]int, 4)
+	for _, v := range got {
+		q := v * 4 / len(rows)
+		if q > 3 {
+			q = 3
+		}
+		quarters[q]++
+	}
+	for i, n := range quarters {
+		if n < len(got)/8 {
+			t.Fatalf("quarter %d holds only %d of %d sampled rows: %v", i, n, len(got), quarters)
+		}
+	}
+}
+
+func TestCrosslinkSamplePassesEverythingThroughWhenNotSampling(t *testing.T) {
+	rows := seq(50)
+
+	for _, want := range []int{0, -1, 50, 999} {
+		got, stride := crosslinkSample(rows, want)
+		if len(got) != 50 {
+			t.Fatalf("want=%d: expected the full set, got %d rows", want, len(got))
+		}
+		if stride != 1 {
+			// Stride 1 is what makes printCrosslinkSummary print the
+			// head-of-order caveat instead of a confidence interval. Getting
+			// this wrong would put a CI on a number that has not earned one.
+			t.Fatalf("want=%d: expected stride 1, got %d", want, stride)
+		}
+	}
+}
+
+func TestCrosslinkSampleHandlesTinySets(t *testing.T) {
+	// len(rows)/want rounds to 0 when the request is bigger than the set;
+	// without the floor that is an infinite loop, which is the kind of bug a
+	// probe run against a nearly-drained catalogue would find in production.
+	got, stride := crosslinkSample(seq(3), 2)
+	if stride < 1 {
+		t.Fatalf("stride must never be below 1, got %d", stride)
+	}
+	if len(got) == 0 || len(got) > 3 {
+		t.Fatalf("unexpected sample size %d", len(got))
+	}
+}

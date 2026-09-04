@@ -105,6 +105,7 @@ func main() {
 	maxEmptyStreak := flag.Int("max-empty-streak", 200, "--heal-episode-titles: abort after this many consecutive rows with no titles (0 disables)")
 	idMapBinds := flag.Bool("report-id-map-binds", false, "read-only: what the id-map bind sweep would bind, and what it would refuse")
 	xlinkProbe := flag.Bool("probe-ddp-crosslink", false, "read-only: measure what dandanplay cross-links could bind for map-silent unbound rows")
+	xlinkSample := flag.Int("probe-sample", 0, "--probe-ddp-crosslink: probe N rows spread evenly across the whole candidate set instead of walking the head (0 = walk in order)")
 	auditBinds := flag.Int("audit-id-map-binds", 0, "read-only: check id_map bindings written in the last N minutes against their Bangumi subject")
 	flag.Parse()
 
@@ -192,7 +193,7 @@ func main() {
 			slog.Error("--probe-ddp-crosslink needs dandanplay; do not combine with --skip-ddp")
 			os.Exit(1)
 		}
-		if err := runCrosslinkProbe(ctx, q, ddpClient, *limitFlag, *outFile); err != nil {
+		if err := runCrosslinkProbe(ctx, q, ddpClient, *limitFlag, *xlinkSample, *outFile); err != nil {
 			slog.Error("ddp crosslink probe failed", "err", err)
 			os.Exit(1)
 		}
