@@ -401,7 +401,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, bodyBytes []by
 		if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
 			return false, false, 0, fmt.Errorf("dandanplay: decode %s: %w", path, err)
 		}
-		if err := checkStatus(dest); err != nil {
+		if err := checkStatus(ctx, path, dest); err != nil {
 			// Not retryable within the process.  A spent group refills on
 			// dandanplay's daily boundary, so retrying inside one job's
 			// backoff window only spends attempts and adds load; river's own
@@ -541,32 +541,68 @@ var ErrQuotaExceeded = errors.New("dandanplay: API quota exceeded")
 // an empty answer stop looking alike.
 var ErrUpstreamRejected = errors.New("dandanplay: upstream rejected the request")
 
-// ddpQuotaErrorCode is the errorCode dandanplay returns for a spent group.
-// It mirrors HTTP 429 but arrives in a 200 body, which is the entire reason
-// this constant is needed.
-const ddpQuotaErrorCode = 429
-
-// checkStatus turns a non-success envelope into an error.
+// The errorCodes we have catalogued from production, and what each one is.
 //
-// The test is `ErrorCode != 0`, not `!Success`.  Several endpoints omit
-// `success` from a healthy body, so a bare !Success check would reject every
-// good response from those -- the field defaults to false when absent, and
-// "absent" and "false" are the same value in Go.  A non-zero errorCode is
-// only ever set on a refusal, so it is the signal that actually distinguishes
-// the two.
-func checkStatus(dest any) error {
+// The distinction that matters is NOT success versus failure.  It is whether
+// the code describes THE RESOURCE -- a real answer about data, which callers
+// must keep receiving as an empty result -- or OUR ABILITY TO ASK, which is a
+// refusal and has to stop being invisible.
+const (
+	// ddpQuotaErrorCode: the function group's daily quota is spent.  Mirrors
+	// HTTP 429 but arrives in a 200 body, which is the entire reason any of
+	// this exists.  A refusal: it says nothing about the id we asked for.
+	ddpQuotaErrorCode = 429
+	// ddpNotFoundErrorCode: 无法找到指定的资源.  An ANSWER, not a refusal --
+	// dandanplay's way of saying it has no entry for this id, which for a
+	// catalogue two-thirds of which it has never heard of is the ordinary
+	// case, not an incident.
+	//
+	// This one cost a production regression.  The first version of
+	// checkStatus treated every non-zero errorCode as a rejection, which
+	// turned "this anime is not in dandanplay" into an HTTP 500 on the live
+	// danmaku route and into `episode_titles fetch failed` on the RELEASING
+	// sweep -- 26 of them within ten minutes of the deploy, every single one
+	// of them a normal answer.
+	ddpNotFoundErrorCode = 7
+)
+
+// checkStatus decides whether a decoded envelope is a refusal.
+//
+// The test is on ErrorCode, not on `success`.  Several endpoints omit
+// `success` from a healthy body, and an absent bool is false in Go, so a bare
+// !Success check would reject every good response from those -- turning a
+// silent-failure fix into an outage of the same calls.
+//
+// FAIL OPEN ON CODES WE HAVE NOT CATALOGUED, and this is the deliberate half.
+// An earlier version returned an error for every non-zero code on the
+// reasoning that a refusal must never be silent again.  That reasoning is
+// right about refusals and wrong about this API, because dandanplay also
+// reports ordinary facts through the same field: code 7 is "no entry for that
+// id", which for our catalogue is the common case.  Failing closed on it took
+// the live danmaku route to HTTP 500 for every anime dandanplay does not have.
+//
+// So: codes known to be refusals are errors, code 7 is an answer, and
+// anything else is logged with its code and message and passed through as an
+// empty result.  A code we have never seen is far more likely to be another
+// fact about the resource than a new way of being refused, and the cost of
+// guessing wrong in that direction is a log line rather than a 500 in front
+// of a reader.  The log is what the original defect actually lacked -- it
+// returned nil with no signal at all.
+func checkStatus(ctx context.Context, path string, dest any) error {
 	sc, ok := dest.(statusCarrier)
 	if !ok {
 		return nil
 	}
 	st := sc.status()
-	if st.ErrorCode == 0 {
+	switch st.ErrorCode {
+	case 0, ddpNotFoundErrorCode:
 		return nil
-	}
-	if st.ErrorCode == ddpQuotaErrorCode {
+	case ddpQuotaErrorCode:
 		return fmt.Errorf("%w (code %d: %s)", ErrQuotaExceeded, st.ErrorCode, st.ErrorMessage)
 	}
-	return fmt.Errorf("%w (code %d: %s)", ErrUpstreamRejected, st.ErrorCode, st.ErrorMessage)
+	slog.WarnContext(ctx, "dandanplay: uncatalogued errorCode, treating as no data",
+		"path", path, "errorCode", st.ErrorCode, "errorMessage", st.ErrorMessage)
+	return nil
 }
 
 type matchEnvelope struct {
