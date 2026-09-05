@@ -460,7 +460,10 @@ func (w *EpisodesBgmWorker) Work(ctx context.Context, job *river.Job[EpisodesBgm
 		return nil
 	}
 
-	titles := normalizeEpisodeTitles(episodes.Eps)
+	// Unbounded on purpose.  ListEpisodesBgmCandidates selects
+	// `WHERE ac.episodes IS NULL`, so there is no AniList count to bound
+	// against here -- deriving one from this list is the job.
+	titles := normalizeEpisodeTitles(episodes.Eps, 0, nil)
 	count := episodesBgmCount(titles)
 	if count <= 0 {
 		w.stamp(ctx, anilistID, pinnedBgmID, episodesBgmEmpty, "no main episodes upstream")

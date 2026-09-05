@@ -302,6 +302,18 @@ func (noopBangumi) Episodes(_ context.Context, _ int) (*bangumi.EpisodesResponse
 // methods no-op; the registration tests never invoke these methods.
 type noopV12DB struct{}
 
+func (noopV12DB) CountAnimeBoundToBgmID(_ context.Context, _ int32, _ int32) (int64, error) {
+	return 0, nil
+}
+
+func (noopV12DB) GetAnimeEpisodeCount(_ context.Context, _ int32) (*int32, error) {
+	return nil, nil
+}
+
+func (noopV12DB) GetAbsoluteEpisodeOffset(_ context.Context, _ int32) (dbgen.GetAbsoluteEpisodeOffsetRow, error) {
+	return dbgen.GetAbsoluteEpisodeOffsetRow{}, nil
+}
+
 func (noopV12DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
 	return dbgen.GetAnimeForBangumiSearchRow{}, nil
 }

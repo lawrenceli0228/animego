@@ -66,7 +66,12 @@ type fakeV1DB struct {
 	updateFn          func(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error)
 	markNotFoundFn    func(ctx context.Context, anilistID int32) error
 	markNeedsReviewFn func(ctx context.Context, anilistID int32) error
+	// The collision pre-check.  A nil func answers "nobody holds it", which
+	// is what every test written before the guard assumes.
+	countBoundFn func(ctx context.Context, bgmID int32, excludeAnilistID int32) (int64, error)
 
+	countBoundCalls      int
+	lastCountBoundBgmID  int32
 	updateCalls          int
 	markNotFoundCalls    int
 	markNeedsReviewCalls int
@@ -78,6 +83,15 @@ type fakeV1DB struct {
 	}
 	lastMarkNotFoundID    int32
 	lastMarkNeedsReviewID int32
+}
+
+func (f *fakeV1DB) CountAnimeBoundToBgmID(ctx context.Context, bgmID int32, excludeAnilistID int32) (int64, error) {
+	f.countBoundCalls++
+	f.lastCountBoundBgmID = bgmID
+	if f.countBoundFn == nil {
+		return 0, nil
+	}
+	return f.countBoundFn(ctx, bgmID, excludeAnilistID)
 }
 
 // fakeV1Enqueuer records EnqueueV2Many calls so chain tests can
@@ -1076,3 +1090,85 @@ var _ BangumiSearcher = (*bangumi.Client)(nil)
 // Compile-time guard:  fakeV1Enqueuer must satisfy Enqueuer.  If a
 // new method is added to Enqueuer this fixture must be updated too.
 var _ Enqueuer = (*fakeV1Enqueuer)(nil)
+
+// ---------------------------------------------------------------------------
+// The already-taken subject
+//
+// One Bangumi subject describes one work.  BindBgmIdsFromIdMap has refused to
+// bind a subject another anime already holds since it was written; the fuzzy
+// path did not, and on 2026-09-05 production held 541 subjects claimed by two
+// or more anilist_ids — 1,161 rows, 22,019 episode titles — with not a single
+// one of them bound via id_map.  The second holder shows the first one's
+// Chinese title, synopsis and per-episode names, and nothing in the schema
+// distinguishes that from a correct binding.
+// ---------------------------------------------------------------------------
+
+func fuzzyHighFixture(t *testing.T) (*fakeBangumi, *fakeV1DB) {
+	t.Helper()
+	native := "ナルト"
+	b := &fakeBangumi{
+		searchFn: func(ctx context.Context, keyword string) (*bangumi.SearchResponse, error) {
+			return &bangumi.SearchResponse{
+				List: []bangumi.SearchResult{{ID: 9999, Name: "ナルト", NameCN: "火影忍者"}},
+			}, nil
+		},
+	}
+	db := &fakeV1DB{
+		getFn: func(ctx context.Context, id int32) (dbgen.GetAnimeForBangumiSearchRow, error) {
+			return dbgen.GetAnimeForBangumiSearchRow{TitleNative: &native, TitleRomaji: ptr("Naruto")}, nil
+		},
+	}
+	return b, db
+}
+
+func TestBangumiV1_TakenSubject_ParksInsteadOfBinding(t *testing.T) {
+	t.Parallel()
+
+	b, db := fuzzyHighFixture(t)
+	db.countBoundFn = func(_ context.Context, _ int32, _ int32) (int64, error) { return 1, nil }
+	enq := &fakeV1Enqueuer{}
+
+	err := runV1WithEnq(t, b, db, enq, 1234)
+	require.NoError(t, err, "a taken subject is a refusal, not a failure — retrying would refuse again")
+
+	assert.Equal(t, 0, db.updateCalls, "must not bind a subject another anime holds")
+	assert.Equal(t, 1, db.markNeedsReviewCalls,
+		"must PARK the row: left at version 0 it returns via the orphan scan and collides again every pass")
+	assert.Equal(t, int32(1234), db.lastMarkNeedsReviewID)
+	assert.Empty(t, enq.v2Calls, "no binding means nothing for V2 to enrich")
+}
+
+func TestBangumiV1_FreeSubject_BindsAndChecksTheRightID(t *testing.T) {
+	t.Parallel()
+
+	b, db := fuzzyHighFixture(t)
+	enq := &fakeV1Enqueuer{}
+
+	err := runV1WithEnq(t, b, db, enq, 1234)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, db.countBoundCalls, "the check must actually run on the bind path")
+	assert.Equal(t, int32(9999), db.lastCountBoundBgmID,
+		"the candidate subject is what gets checked, not the anime id")
+	assert.Equal(t, 1, db.updateCalls)
+	assert.Equal(t, 0, db.markNeedsReviewCalls)
+	require.Len(t, enq.v2Calls, 1)
+}
+
+func TestBangumiV1_CollisionCheckError_IsRetryableNotABind(t *testing.T) {
+	t.Parallel()
+
+	// A failed read must not become a licence to bind.  Returning nil here
+	// would turn every transient DB blip into a silent collision.
+	b, db := fuzzyHighFixture(t)
+	db.countBoundFn = func(_ context.Context, _ int32, _ int32) (int64, error) {
+		return 0, errors.New("connection reset")
+	}
+	enq := &fakeV1Enqueuer{}
+
+	err := runV1WithEnq(t, b, db, enq, 1234)
+	require.Error(t, err, "transient read failure must surface so river retries")
+	assert.Equal(t, 0, db.updateCalls, "must not bind when the check could not be made")
+	assert.Equal(t, 0, db.markNeedsReviewCalls, "and must not park either — nothing was decided")
+	assert.Empty(t, enq.v2Calls)
+}

@@ -288,6 +288,28 @@ func (q *Queries) ClearEpisodeTitlesBySourceOutside(ctx context.Context, source 
 	return items, nil
 }
 
+const countAnimeBoundToBgmID = `-- name: CountAnimeBoundToBgmID :one
+SELECT count(*) FROM anime_cache ac
+WHERE ac.bgm_id = $1::integer
+  AND ac.anilist_id <> $2::integer
+`
+
+// How many OTHER anime already hold this Bangumi subject.
+//
+// Read before binding so the worker can distinguish the two reasons a bind
+// writes no rows.  Folding both into UpdateBangumiV1's WHERE would make them
+// indistinguishable, and they need opposite handling: a stale duplicate is
+// finished (the row moved on), while a collision leaves the row at version 0
+// -- eligible for the orphan scan, re-scored on every pass, colliding again
+// every time.  That row has to be parked, and parking it is a decision the
+// caller makes, not a predicate.
+func (q *Queries) CountAnimeBoundToBgmID(ctx context.Context, bgmID int32, excludeAnilistID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countAnimeBoundToBgmID, bgmID, excludeAnilistID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAnimeCacheLocal = `-- name: CountAnimeCacheLocal :one
 SELECT count(*)
 FROM anime_cache
@@ -3136,13 +3158,17 @@ func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nam
 }
 
 const updateBangumiV1 = `-- name: UpdateBangumiV1 :execrows
-UPDATE anime_cache
+UPDATE anime_cache AS a
 SET bgm_id           = $2,
     title_chinese    = $3,
     bgm_match_source = $4,
     bangumi_version  = 1,
     updated_at       = now()
-WHERE anilist_id = $1 AND bangumi_version = 0
+WHERE a.anilist_id = $1 AND a.bangumi_version = 0
+  AND ($2::integer IS NULL
+       OR NOT EXISTS (SELECT 1 FROM anime_cache b
+                       WHERE b.bgm_id = $2::integer
+                         AND b.anilist_id <> $1))
 `
 
 // Phase 1 result write — set bgm_id + title_chinese (the latter only
@@ -3176,6 +3202,25 @@ WHERE anilist_id = $1 AND bangumi_version = 0
 // "a stale job was rejected" and log the latter.  A guard that fires
 // silently would reproduce the very failure mode it exists to stop:
 // nobody notices.
+//
+// ── WHY the `NOT EXISTS` on bgm_id ──
+// One Bangumi subject describes one work.  BindBgmIdsFromIdMap has refused to
+// bind an already-taken subject since it was written; this path -- the fuzzy
+// scorer's -- did not, and that asymmetry is where every collision came from.
+// Measured 2026-09-05: 541 subjects were held by two or more anilist_ids,
+// covering 1,161 rows and 22,019 episode-title rows, and NOT ONE of those
+// rows had bgm_match_source='id_map'.  The guarded path produced zero.
+//
+// The symptom is silent and it is public: the second row shows the first
+// row's Chinese title, synopsis and per-episode names, and nothing in the
+// schema can tell that apart from a correct binding.
+//
+// The predicate is a backstop, not the primary check.  The worker asks
+// CountAnimeBoundToBgmID first so it can PARK a colliding row (needs-review)
+// instead of leaving it at version 0 to be re-scored forever.  This clause
+// exists for the race the pre-check cannot close: two V1 jobs scoring
+// different anime onto the same subject at the same time.  A NULL bgm_id
+// (Bangumi returned no hit) skips it -- there is nothing to collide with.
 func (q *Queries) UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error) {
 	result, err := q.db.Exec(ctx, updateBangumiV1,
 		anilistID,

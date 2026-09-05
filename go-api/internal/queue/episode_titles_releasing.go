@@ -46,6 +46,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -57,6 +58,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
+	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/episodetitles"
@@ -101,6 +103,20 @@ type EpisodeTitlesClient interface {
 	FetchEpisodesByBgmID(ctx context.Context, bgmID int32) (*dandanplay.EpisodeData, error)
 }
 
+// EpisodeTitlesBangumiClient is the fallback upstream.
+//
+// dandanplay is asked first because its cross-link is an identity check this
+// sweep can perform on its own.  When that link is absent the sweep used to
+// write nothing at all -- and absent is the ordinary case, not the corner:
+// measured 2026-09-05 on the 132 rows then due, 68 (52%) had a dandanplay
+// entry carrying Bangumi.tv and AniDB links but no AniList one, and 35 more
+// had no dandanplay entry at all.  Bangumi holds episode names for about half
+// of those, so refusing to ask it left them permanently blank.
+type EpisodeTitlesBangumiClient interface {
+	Subject(ctx context.Context, bgmID int) (*bangumi.Subject, error)
+	Episodes(ctx context.Context, bgmID int) (*bangumi.EpisodesResponse, error)
+}
+
 // EpisodeTitlesWorker re-asks dandanplay about airing shows.
 //
 // It holds the pool and the concrete *dbgen.Queries because the write is a
@@ -115,11 +131,12 @@ type EpisodeTitlesWorker struct {
 	q      *dbgen.Queries
 	db     EpisodeTitlesReader
 	client EpisodeTitlesClient
+	bgm    EpisodeTitlesBangumiClient
 }
 
 // NewEpisodeTitlesWorker builds the worker.
-func NewEpisodeTitlesWorker(pool *pgxpool.Pool, q *dbgen.Queries, client EpisodeTitlesClient) *EpisodeTitlesWorker {
-	return &EpisodeTitlesWorker{pool: pool, q: q, db: q, client: client}
+func NewEpisodeTitlesWorker(pool *pgxpool.Pool, q *dbgen.Queries, client EpisodeTitlesClient, bgm EpisodeTitlesBangumiClient) *EpisodeTitlesWorker {
+	return &EpisodeTitlesWorker{pool: pool, q: q, db: q, client: client, bgm: bgm}
 }
 
 // Timeout bounds one pass.
@@ -170,8 +187,10 @@ func (w *EpisodeTitlesWorker) Work(ctx context.Context, _ *river.Job[EpisodeTitl
 			retracted += res.retracted
 		case sweepRejected:
 			rejected++
+			w.stampAttempt(ctx, row.AnilistID, *row.BgmID)
 		case sweepEmpty:
 			empty++
+			w.stampAttempt(ctx, row.AnilistID, *row.BgmID)
 		default:
 			failed++
 		}
@@ -231,30 +250,40 @@ func (w *EpisodeTitlesWorker) sweepOne(ctx context.Context, anilistID, bgmID int
 			"anilistId", anilistID, "bgmId", bgmID, "err", err)
 		return sweepResult{class: sweepFailed}
 	}
-	if data == nil {
-		return sweepResult{class: sweepEmpty}
-	}
-	if !mapSpeaks && data.AniListID != anilistID {
-		// Includes AniListID == 0, i.e. dandanplay published no cross-link:
-		// nothing vouches for this binding, so nothing is written.  Absence of
-		// evidence, kept distinct from evidence of absence.
-		return sweepResult{class: sweepRejected}
+	// dandanplay cannot vouch for this binding: either it has no entry for the
+	// subject, or the entry it has publishes no AniList cross-link.  Both used
+	// to end the row here, and both are ordinary rather than exceptional --
+	// together they were 103 of the 132 rows due on 2026-09-25.  Bangumi is
+	// asked instead, behind the identity gate the episodes_bgm worker already
+	// uses, so the fallback is a change of upstream and not of standard.
+	if data == nil || (!mapSpeaks && data.AniListID != anilistID) {
+		return w.sweepViaBangumi(ctx, anilistID, bgmID)
 	}
 
 	titles := episodetitles.Usable(data.Episodes)
 	if len(titles) == 0 {
-		return sweepResult{class: sweepEmpty}
+		return w.sweepViaBangumi(ctx, anilistID, bgmID)
 	}
-	// The subject is the right one -- 41% of the rows this refuses have a
-	// binding an independent map confirms -- but its episode list is wider
-	// than the entry it would land on.  Refused whole rather than truncated:
-	// a list belonging to a series has the SERIES' episode 1 at its head, so
-	// the head is no more trustworthy than the tail.
+	// The list is wider than the entry it would land on.  This used to refuse
+	// the whole row on the grounds that a series list has the SERIES' episode
+	// 1 at its head -- true, and the reason a prefix is not an answer, but the
+	// window is: with the absolute offset known this season occupies
+	// [offset+1, offset+total] of the franchise's continuous numbering. Same
+	// rule as normalizeEpisodeTitles, reached through the same two reads, so
+	// the two writers cannot disagree about where a season begins.
 	if maxEp, over := episodetitles.ScopeExceeded(titles, catalogueEpisodes); over {
-		slog.InfoContext(ctx, "episode_titles refused: list wider than the entry",
+		total, offset := episodeBound(ctx, w.q, anilistID)
+		windowed := windowTitles(titles, total, offset)
+		if len(windowed) == 0 {
+			slog.InfoContext(ctx, "episode_titles refused: list wider than the entry, no window",
+				"anilistId", anilistID, "bgmId", bgmID,
+				"maxEpisode", maxEp, "catalogueEpisodes", catalogueEpisodes)
+			return sweepResult{class: sweepRejected}
+		}
+		slog.InfoContext(ctx, "episode_titles windowed",
 			"anilistId", anilistID, "bgmId", bgmID,
-			"maxEpisode", maxEp, "catalogueEpisodes", catalogueEpisodes)
-		return sweepResult{class: sweepRejected}
+			"maxEpisode", maxEp, "catalogueEpisodes", catalogueEpisodes, "kept", len(windowed))
+		titles = windowed
 	}
 
 	written, retracted, err := episodetitles.Apply(ctx, w.pool, w.q, anilistID, bgmID, titles)
@@ -264,6 +293,119 @@ func (w *EpisodeTitlesWorker) sweepOne(ctx context.Context, anilistID, bgmID int
 		return sweepResult{class: sweepFailed}
 	}
 	return sweepResult{class: sweepWritten, written: written, retracted: retracted}
+}
+
+// stampAttempt records that this row was reached, for the outcomes that write
+// nothing.
+//
+// Without it the candidate set never converges.  A refusal and an empty
+// upstream both leave episode_titles_at NULL, the query orders NULLS FIRST,
+// and the same rows therefore sit at the head of every pass -- observed
+// directly in production, where three consecutive passes six hours apart
+// reported the identical `rejected 77, empty 46` and accepted nothing. Rows
+// that could have been served were behind them.  This is the same stall
+// migrations 0015 and 0023 each recorded on their own sweep, arriving here
+// through a third door: "we decided nothing" has to be distinguishable from
+// "we never looked", and the stamp is the only place that distinction lives.
+//
+// The stamp is not a claim that titles exist -- nothing reads this column as
+// though it were, and the admin re-bind path clears it precisely because it
+// means "attempted against THIS binding".  A stamped refusal returns after
+// episodeTitlesStaleAfter rather than in six hours, which is the intended
+// difference.
+func (w *EpisodeTitlesWorker) stampAttempt(ctx context.Context, anilistID, bgmID int32) {
+	if _, err := w.q.TouchEpisodeTitlesAt(ctx, anilistID, bgmID); err != nil {
+		slog.WarnContext(ctx, "episode_titles stamp failed",
+			"anilistId", anilistID, "bgmId", bgmID, "err", err)
+	}
+}
+
+// windowTitles keeps the episodes this season actually owns.
+//
+// The same window normalizeEpisodeTitles applies to the Bangumi list, applied
+// here to dandanplay's -- both writers reach it through episodeBound, so a
+// season cannot begin in one place and somewhere else in the other.  An
+// unknown total or offset returns nothing, which the caller reads as "refuse":
+// known:false is not offset:0.
+func windowTitles(titles []episodetitles.Title, total int32, offset *int32) []episodetitles.Title {
+	if total <= 0 || offset == nil {
+		return nil
+	}
+	lo, hi := *offset+1, *offset+total
+	out := make([]episodetitles.Title, 0, total)
+	for _, t := range titles {
+		if t.Episode >= lo && t.Episode <= hi {
+			t.Episode -= *offset
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// sweepViaBangumi is the fallback for a row dandanplay cannot vouch for.
+//
+// It deliberately reuses the episodes_bgm worker's identity gate rather than
+// inventing a second standard: that gate compares the subject's own name
+// against the AniList titles and answers ok / rejected / undecided, and an
+// `undecided` is NOT an acceptance -- a binding nothing vouches for still
+// writes nothing here, exactly as before.  What changes is only which upstream
+// is asked, not how much evidence a write requires.
+func (w *EpisodeTitlesWorker) sweepViaBangumi(ctx context.Context, anilistID, bgmID int32) sweepResult {
+	if w.bgm == nil {
+		return sweepResult{class: sweepEmpty}
+	}
+	gate, err := w.q.GetEpisodesBgmGateInputs(ctx, anilistID)
+	if err != nil {
+		slog.WarnContext(ctx, "episode_titles gate read failed",
+			"anilistId", anilistID, "bgmId", bgmID, "err", err)
+		return sweepResult{class: sweepFailed}
+	}
+	subject, err := w.bgm.Subject(ctx, int(bgmID))
+	if errors.Is(err, bangumi.ErrNotFound) {
+		return sweepResult{class: sweepEmpty}
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "episode_titles bangumi subject failed",
+			"anilistId", anilistID, "bgmId", bgmID, "err", err)
+		return sweepResult{class: sweepFailed}
+	}
+	if verdict := evaluateBinding(gate, subject.Name); verdict.outcome != episodesBgmOK {
+		slog.InfoContext(ctx, "episode_titles bangumi fallback not accepted",
+			"anilistId", anilistID, "bgmId", bgmID,
+			"outcome", string(verdict.outcome), "reason", verdict.reason)
+		return sweepResult{class: sweepRejected}
+	}
+
+	eps, err := w.bgm.Episodes(ctx, int(bgmID))
+	if errors.Is(err, bangumi.ErrNotFound) {
+		return sweepResult{class: sweepEmpty}
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "episode_titles bangumi episodes failed",
+			"anilistId", anilistID, "bgmId", bgmID, "err", err)
+		return sweepResult{class: sweepFailed}
+	}
+	if eps == nil {
+		return sweepResult{class: sweepEmpty}
+	}
+
+	total, offset := episodeBound(ctx, w.q, anilistID)
+	titles := normalizeEpisodeTitles(eps.Eps, total, offset)
+	if len(titles) == 0 {
+		return sweepResult{class: sweepEmpty}
+	}
+	written, failures := writeEpisodeTitles(ctx, w.q, anilistID, bgmID, titles)
+	if written == 0 {
+		return sweepResult{class: sweepEmpty}
+	}
+	if failures > 0 {
+		slog.WarnContext(ctx, "episode_titles bangumi fallback partial",
+			"anilistId", anilistID, "bgmId", bgmID, "written", written, "failures", failures)
+	}
+	slog.InfoContext(ctx, "episode_titles via bangumi",
+		"anilistId", anilistID, "bgmId", bgmID, "written", written)
+	w.stampAttempt(ctx, anilistID, bgmID)
+	return sweepResult{class: sweepWritten, written: written}
 }
 
 // episodeTitlesSweepEnabled reads the kill switch.
@@ -311,8 +453,8 @@ func PeriodicEpisodeTitlesJob() *river.PeriodicJob {
 // second client would open a second bucket and double the real rate against
 // one AppId — the same argument the comment above WorkersWithBangumiAndNormalizer
 // makes for sharing the Bangumi client.
-func AddEpisodeTitlesWorker(w *river.Workers, pool *pgxpool.Pool, q *dbgen.Queries, client EpisodeTitlesClient) {
-	river.AddWorker(w, NewEpisodeTitlesWorker(pool, q, client))
+func AddEpisodeTitlesWorker(w *river.Workers, pool *pgxpool.Pool, q *dbgen.Queries, client EpisodeTitlesClient, bgm EpisodeTitlesBangumiClient) {
+	river.AddWorker(w, NewEpisodeTitlesWorker(pool, q, client, bgm))
 }
 
 // Compile-time guard: the worker must satisfy river.Worker for its args.

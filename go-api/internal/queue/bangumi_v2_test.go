@@ -151,11 +151,30 @@ type fakeV2DB struct {
 	updateDescCnFn   func(ctx context.Context, c v2DescCnCall) error
 	markUnreadableFn func(ctx context.Context, c v2MarkUnreadableCall) (int64, error)
 
+	// The episode-title bound's two reads.  Nil funcs answer "unknown", which
+	// is what every test that predates the bound expects: an unbounded list.
+	episodeCountFn  func(ctx context.Context, anilistID int32) (*int32, error)
+	episodeOffsetFn func(ctx context.Context, anilistID int32) (dbgen.GetAbsoluteEpisodeOffsetRow, error)
+
 	updateV2Calls       []v2UpdateCall
 	updateCharCalls     []v2CharCall
 	upsertEpCalls       []v2EpTitleCall
 	updateDescCnCalls   []v2DescCnCall
 	markUnreadableCalls []v2MarkUnreadableCall
+}
+
+func (f *fakeV2DB) GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error) {
+	if f.episodeCountFn == nil {
+		return nil, nil
+	}
+	return f.episodeCountFn(ctx, anilistID)
+}
+
+func (f *fakeV2DB) GetAbsoluteEpisodeOffset(ctx context.Context, anilistID int32) (dbgen.GetAbsoluteEpisodeOffsetRow, error) {
+	if f.episodeOffsetFn == nil {
+		return dbgen.GetAbsoluteEpisodeOffsetRow{}, nil
+	}
+	return f.episodeOffsetFn(ctx, anilistID)
 }
 
 func (f *fakeV2DB) MarkBangumiSubjectUnreadable(ctx context.Context, anilistID int32, bgmID int32) (int64, error) {
@@ -994,7 +1013,7 @@ var _ BangumiV2Client = (*bangumi.Client)(nil)
 // ---------------------------------------------------------------------------
 
 func TestNormalizeEpisodeTitles_FiltersAndNulls(t *testing.T) {
-	got := normalizeEpisodeTitles([]bangumi.Episode{
+	got := normalizeEpisodeTitlesUnbounded([]bangumi.Episode{
 		{Sort: 1, Type: 0, Name: "Asteroid Blues", NameCN: "小行星浪人"},
 		{Sort: 2, Type: 0, Name: "Stray Dog Strut", NameCN: ""}, // empty CN → nil
 		{Sort: 0, Type: 0, Name: "drop: sort 0"},                // sort<=0 dropped
@@ -1014,7 +1033,7 @@ func TestNormalizeEpisodeTitles_FiltersAndNulls(t *testing.T) {
 
 func TestNormalizeEpisodeTitles_SequelOffset(t *testing.T) {
 	// A sequel whose eps start at sort 29 (S1 had 28) maps to 1..N.
-	got := normalizeEpisodeTitles([]bangumi.Episode{
+	got := normalizeEpisodeTitlesUnbounded([]bangumi.Episode{
 		{Sort: 30, Type: 0, Name: "S2E2"},
 		{Sort: 29, Type: 0, Name: "S2E1"}, // out of order on purpose
 	})
@@ -1324,5 +1343,189 @@ func TestBangumiV2_EpisodeTitlesCarryBangumiProvenance(t *testing.T) {
 				"refuse a write whose subject moved if the caller does not say which "+
 				"subject it fetched", e.episode, e.bgmID)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Episode titles: the season bound
+//
+// Measured on production 2026-09-05: 21,001 of 203,019 title rows (10.3%),
+// across 960 anime, sit at an episode number past their own season's episode
+// count.  They are invisible -- the grid renders 1..episodes -- but the rows
+// that ARE visible on those 960 came from the same list, so the question the
+// count raises is whether slots 1..N hold this season's titles or an earlier
+// season's.  Splitting the 960 by whether the anime has a PREQUEL edge:
+//
+//     594  no prequel   first season, so the prefix is this season; the
+//                       overflow is a trailing tail to drop
+//     267  has prequel  a later season, so a subject numbered from 1 puts the
+//                       WRONG season's titles in slots 1..N
+//      99  no relations unknown
+//
+// Refusing every overshoot would destroy 594 anime's correct titles to fix
+// 267.  So the bound is not a filter, it is a window: with the absolute
+// offset known, this season occupies sorts [offset+1, offset+total] of the
+// franchise's continuous numbering, and everything outside it belongs to a
+// different season.
+// ---------------------------------------------------------------------------
+
+func epSorts(t *testing.T, got []epTitle) []int32 {
+	t.Helper()
+	out := make([]int32, 0, len(got))
+	for _, e := range got {
+		out = append(out, e.episode)
+	}
+	return out
+}
+
+func ptrI32(v int32) *int32 { return &v }
+
+func TestNormalizeEpisodeTitles_FittingListIsUnchanged(t *testing.T) {
+	// The healthy majority: subject covers exactly this season.  The bound
+	// must not perturb it.
+	raw := []bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "E1"},
+		{Sort: 2, Type: 0, Name: "E2"},
+		{Sort: 3, Type: 0, Name: "E3"},
+	}
+	got := normalizeEpisodeTitles(raw, 3, ptrI32(0))
+	if want := []int32{1, 2, 3}; !equalI32(epSorts(t, got), want) {
+		t.Fatalf("fitting list perturbed: got %v want %v", epSorts(t, got), want)
+	}
+}
+
+func TestNormalizeEpisodeTitles_SequelSubjectNumberedLocallyStillFits(t *testing.T) {
+	// bgm subject for S2 numbered 29..40 while AniList says 12 episodes.
+	// The lowest-is-episode-1 shift already handles this and its output
+	// fits, so it stays -- the window is only consulted when it does not.
+	raw := []bangumi.Episode{
+		{Sort: 29, Type: 0, Name: "S2E1"},
+		{Sort: 40, Type: 0, Name: "S2E12"},
+	}
+	got := normalizeEpisodeTitles(raw, 12, ptrI32(28))
+	if want := []int32{1, 12}; !equalI32(epSorts(t, got), want) {
+		t.Fatalf("sequel local numbering: got %v want %v", epSorts(t, got), want)
+	}
+}
+
+func TestNormalizeEpisodeTitles_FirstSeasonOverflowDropsTail(t *testing.T) {
+	// The 594: subject runs past this entry, but the entry has no prequel,
+	// so sorts 1..total ARE this season and the rest is a tail.
+	raw := []bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "E1"},
+		{Sort: 2, Type: 0, Name: "E2"},
+		{Sort: 3, Type: 0, Name: "next season E1"},
+		{Sort: 4, Type: 0, Name: "next season E2"},
+	}
+	got := normalizeEpisodeTitles(raw, 2, ptrI32(0))
+	if want := []int32{1, 2}; !equalI32(epSorts(t, got), want) {
+		t.Fatalf("tail not dropped: got %v want %v", epSorts(t, got), want)
+	}
+	if got[0].name == nil || *got[0].name != "E1" {
+		t.Fatalf("kept the wrong end of the list: %+v", got[0])
+	}
+}
+
+func TestNormalizeEpisodeTitles_SequelOverflowSelectsItsOwnWindow(t *testing.T) {
+	// The 267, and the case that is actively wrong in production today: a
+	// subject numbered from 1 across both seasons, bound to the SECOND
+	// season.  The shift maps sort 1 -> episode 1, so slot 1 currently holds
+	// season one's title.  With the offset known the window is [3,4].
+	raw := []bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "S1E1"},
+		{Sort: 2, Type: 0, Name: "S1E2"},
+		{Sort: 3, Type: 0, Name: "S2E1"},
+		{Sort: 4, Type: 0, Name: "S2E2"},
+	}
+	got := normalizeEpisodeTitles(raw, 2, ptrI32(2))
+	if want := []int32{1, 2}; !equalI32(epSorts(t, got), want) {
+		t.Fatalf("window not applied: got %v want %v", epSorts(t, got), want)
+	}
+	if got[0].name == nil || *got[0].name != "S2E1" {
+		t.Fatalf("slot 1 must hold THIS season's first episode, got %+v", got[0])
+	}
+	if got[1].name == nil || *got[1].name != "S2E2" {
+		t.Fatalf("slot 2 wrong: %+v", got[1])
+	}
+}
+
+func TestNormalizeEpisodeTitles_UnknownOffsetRefusesOverflow(t *testing.T) {
+	// The 99.  Without an offset there is no way to tell which window is
+	// this season's, and writing the prefix would be a guess that renders
+	// as a confident answer.  All or nothing.
+	raw := []bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "E1"},
+		{Sort: 2, Type: 0, Name: "E2"},
+		{Sort: 3, Type: 0, Name: "E3"},
+	}
+	if got := normalizeEpisodeTitles(raw, 2, nil); got != nil {
+		t.Fatalf("unknown offset must refuse an overflowing list, got %+v", got)
+	}
+}
+
+func TestNormalizeEpisodeTitles_UnknownTotalKeepsTodaysBehaviour(t *testing.T) {
+	// episodes_bgm's worker only ever runs on rows where AniList's count is
+	// NULL (ListEpisodesBgmCandidates: WHERE ac.episodes IS NULL), so there
+	// is nothing to bound against and the count it derives depends on the
+	// full list.  total<=0 must therefore behave exactly as before.
+	raw := []bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "E1"},
+		{Sort: 2, Type: 0, Name: "E2"},
+		{Sort: 3, Type: 0, Name: "E3"},
+	}
+	got := normalizeEpisodeTitles(raw, 0, nil)
+	if want := []int32{1, 2, 3}; !equalI32(epSorts(t, got), want) {
+		t.Fatalf("unknown total must not bound: got %v want %v", epSorts(t, got), want)
+	}
+}
+
+func TestNormalizeEpisodeTitles_WindowWithNoMembersRefuses(t *testing.T) {
+	// An offset that points past everything the subject holds describes no
+	// episodes at all.  Zero rows is the answer, not the prefix.
+	raw := []bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "E1"},
+		{Sort: 2, Type: 0, Name: "E2"},
+		{Sort: 3, Type: 0, Name: "E3"},
+	}
+	if got := normalizeEpisodeTitles(raw, 2, ptrI32(50)); got != nil {
+		t.Fatalf("empty window must refuse, got %+v", got)
+	}
+}
+
+func equalI32(a, b []int32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeEpisodeTitlesUnbounded is the pre-bound call shape, kept for the
+// tests that are about filtering, ordering and nil-ing rather than about the
+// season bound.  Passing an unknown total is not a test convenience: it is the
+// episodes_bgm worker's real call, since its candidates are selected on
+// `episodes IS NULL`.
+func normalizeEpisodeTitlesUnbounded(raw []bangumi.Episode) []epTitle {
+	return normalizeEpisodeTitles(raw, 0, nil)
+}
+
+func TestNormalizeEpisodeTitles_ExactFitWithUnknownOffsetIsWritten(t *testing.T) {
+	// A list that exactly fills the season, with no offset available.  This
+	// is the boundary of the bound: `<= total` admits it on the fast path,
+	// `< total` would send it to a window that cannot be built, and the
+	// anime would silently lose every title it has.  Roughly a quarter of
+	// the catalogue has no relation rows, so "fits, offset unknown" is an
+	// ordinary state rather than a corner.
+	raw := []bangumi.Episode{
+		{Sort: 1, Type: 0, Name: "E1"},
+		{Sort: 2, Type: 0, Name: "E2"},
+	}
+	got := normalizeEpisodeTitles(raw, 2, nil)
+	if want := []int32{1, 2}; !equalI32(epSorts(t, got), want) {
+		t.Fatalf("exact fit must be written: got %v want %v", epSorts(t, got), want)
 	}
 }
