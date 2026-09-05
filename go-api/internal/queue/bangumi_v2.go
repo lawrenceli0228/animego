@@ -660,15 +660,28 @@ func renumberEpisodes(eps []bangumi.Episode, shift int) []epTitle {
 // returning 0 for a failed offset read, would assert that nothing precedes
 // this season and silently reinstate the bug this bound exists to fix.
 func (w *BangumiV2Worker) episodeBound(ctx context.Context, anilistID int32) (int32, *int32) {
+	return episodeBound(ctx, w.db, anilistID)
+}
+
+// episodeBoundReader is the two-read surface the bound needs.  Free-standing
+// because the RELEASING episode-title sweep applies the same window to the
+// same table and must reach the same answer -- two copies of this would drift
+// into two different definitions of "this season".
+type episodeBoundReader interface {
+	GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error)
+	GetAbsoluteEpisodeOffset(ctx context.Context, anilistID int32) (dbgen.GetAbsoluteEpisodeOffsetRow, error)
+}
+
+func episodeBound(ctx context.Context, db episodeBoundReader, anilistID int32) (int32, *int32) {
 	var total int32
-	if n, err := w.db.GetAnimeEpisodeCount(ctx, anilistID); err != nil {
+	if n, err := db.GetAnimeEpisodeCount(ctx, anilistID); err != nil {
 		slog.WarnContext(ctx, "bangumi_v2 episode count read failed",
 			"anilistId", anilistID, "err", err)
 	} else if n != nil && *n > 0 {
 		total = *n
 	}
 
-	row, err := w.db.GetAbsoluteEpisodeOffset(ctx, anilistID)
+	row, err := db.GetAbsoluteEpisodeOffset(ctx, anilistID)
 	if err != nil {
 		// pgx.ErrNoRows means the anchor is not cached, which the endpoint
 		// serving this same query already treats as an ordinary unknown.

@@ -209,7 +209,7 @@ func main() {
 	// cmd/bgmbackfill (internal/episodetitles).  Gated at work time by
 	// EPISODE_TITLES_SWEEP_ENABLED; registering it is not the same as running
 	// it.
-	queue.AddEpisodeTitlesWorker(workers, pool, q, dandanClient)
+	queue.AddEpisodeTitlesWorker(workers, pool, q, dandanClient, bangumiClient)
 
 	// The id-map bind sweep.  Takes the pool because its unit of work is a
 	// transaction spanning a binding write and that binding's V2 dispatch --
