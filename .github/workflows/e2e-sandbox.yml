@@ -267,6 +267,24 @@ jobs:
             for attempt in $(seq 1 10); do
               code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 "http://localhost:3000${route}")
               [ "$code" = "$want" ] && break
+              # Nudge the watcher before retrying, from the third attempt on -
+              # two clean tries first, so an ordinary slow boot is unaffected.
+              #
+              # The dev-server defect this loop documents is a segment under
+              # [lang] that never gets compiled: the router answers 404 without
+              # building it, and plain retries never change that because
+              # nothing has told Turbopack the tree is dirty. Restamping the
+              # page files does tell it, and that is the whole remedy -- no
+              # content changes, and a run that was going to pass is not
+              # affected because it has already broken out of this loop.
+              #
+              # A few dozen utimes calls against a tree already in page
+              # cache, and only from attempt 3, so the cost lands on runs that
+              # are failing anyway.
+              if [ "$attempt" -ge 3 ]; then
+                find next-app/src/app -name 'page.tsx' -o -name 'layout.tsx' \
+                  | xargs -r touch || true
+              fi
               sleep 3
             done
             echo "warmed ${route} -> ${code} (want ${want}, attempt ${attempt})"
