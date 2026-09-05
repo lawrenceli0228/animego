@@ -102,6 +102,11 @@ func main() {
 	healMode := flag.Bool("heal", false, "WRITES: fill title_chinese from dandanplay for map-confirmed rows missing CN")
 	epTitlesMode := flag.Bool("heal-episode-titles", false, "fill anime_episode_titles from dandanplay; read-only unless combined with --apply")
 	resumeFlag := flag.Bool("resume", false, "--heal-episode-titles: skip anime a previous pass already wrote (episode_titles_at set)")
+	startAfterID := flag.Int("start-after-id", 0,
+		"--heal-episode-titles: skip candidates with anilist_id <= N (0 = none). "+
+			"--resume only skips rows that were WRITTEN, so rows a previous round asked about "+
+			"and could not write stay at the head of the list and are asked again; pass the id "+
+			"the previous round stopped at to spend the shared daily quota on rows it never reached.")
 	maxEmptyStreak := flag.Int("max-empty-streak", 200, "--heal-episode-titles: abort after this many consecutive rows with no titles (0 disables)")
 	idMapBinds := flag.Bool("report-id-map-binds", false, "read-only: what the id-map bind sweep would bind, and what it would refuse")
 	xlinkProbe := flag.Bool("probe-ddp-crosslink", false, "read-only: measure what dandanplay cross-links could bind for map-silent unbound rows")
@@ -211,7 +216,7 @@ func main() {
 			slog.Error("--heal-episode-titles needs dandanplay; do not combine with --skip-ddp")
 			os.Exit(1)
 		}
-		if err := runEpisodeTitleHeal(ctx, pool, q, ddpClient, *limitFlag, *applyMode, *resumeFlag, *maxEmptyStreak, *outFile); err != nil {
+		if err := runEpisodeTitleHeal(ctx, pool, q, ddpClient, *limitFlag, *applyMode, *resumeFlag, *startAfterID, *maxEmptyStreak, *outFile); err != nil {
 			slog.Error("episode-title heal failed", "err", err)
 			os.Exit(1)
 		}

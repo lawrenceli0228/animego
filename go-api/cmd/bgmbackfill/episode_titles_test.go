@@ -243,3 +243,54 @@ func TestClassifyFetchErrorLeavesOrdinaryFailuresAlone(t *testing.T) {
 		t.Fatalf("want %s, got %s", epClassFetchFail, got)
 	}
 }
+
+// TestDropCandidatesUpTo pins the budget instrument that lets a resumed round
+// start where the previous one's budget ran out.
+//
+// The boundary is the whole point: --start-after-id names the last id the
+// previous round REACHED, so that row is done being asked and must be dropped,
+// while the next id up is the first one it never got to and must survive.  An
+// off-by-one in the other direction silently re-spends one request per run on
+// a row already answered -- which is the exact cost this flag exists to stop.
+func TestDropCandidatesUpTo(t *testing.T) {
+	rows := []epTitleCandidate{
+		{AnilistID: 43}, {AnilistID: 141932}, {AnilistID: 141933}, {AnilistID: 216167},
+	}
+
+	tests := []struct {
+		name  string
+		after int32
+		want  []int32
+	}{
+		{"zero keeps the whole set", 0, []int32{43, 141932, 141933, 216167}},
+		{"negative keeps the whole set", -1, []int32{43, 141932, 141933, 216167}},
+		{
+			// The id passed IS the last row the previous round reached.
+			name: "the boundary row itself is dropped", after: 141932,
+			want: []int32{141933, 216167},
+		},
+		{"an id below every row drops nothing", 1, []int32{43, 141932, 141933, 216167}},
+		{"an id above every row drops everything", 999999, []int32{}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := dropCandidatesUpTo(rows, tc.after)
+			if len(got) != len(tc.want) {
+				t.Fatalf("kept %d rows, want %d (%v)", len(got), len(tc.want), got)
+			}
+			for i, id := range tc.want {
+				if got[i].AnilistID != id {
+					t.Errorf("row %d = %d, want %d", i, got[i].AnilistID, id)
+				}
+			}
+		})
+	}
+
+	// The input must not be mutated: the caller logs len(all) next to
+	// len(rows), and a filter that reordered or truncated in place would make
+	// that pair report the same number twice.
+	if len(rows) != 4 || rows[0].AnilistID != 43 {
+		t.Fatalf("input slice was mutated: %v", rows)
+	}
+}
