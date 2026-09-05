@@ -102,6 +102,24 @@ func (noRowV12DB) GetAnimeForBangumiSearch(_ context.Context, _ int32) (dbgen.Ge
 	return dbgen.GetAnimeForBangumiSearchRow{}, pgx.ErrNoRows
 }
 
+// CountAnimeBoundToBgmID satisfies queue.V1Writer.  Zero is "nobody else holds
+// this subject", the answer that lets the bind proceed -- this double exists to
+// prove the workers are wired, not to exercise the collision refusal.
+func (noRowV12DB) CountAnimeBoundToBgmID(_ context.Context, _ int32, _ int32) (int64, error) {
+	return 0, nil
+}
+
+// The episode-title bound's two reads.  Both answer "unknown", which leaves
+// the list unbounded -- the pre-bound behaviour, and the right default for a
+// double whose rows do not exist.
+func (noRowV12DB) GetAnimeEpisodeCount(_ context.Context, _ int32) (*int32, error) {
+	return nil, nil
+}
+
+func (noRowV12DB) GetAbsoluteEpisodeOffset(_ context.Context, _ int32) (dbgen.GetAbsoluteEpisodeOffsetRow, error) {
+	return dbgen.GetAbsoluteEpisodeOffsetRow{}, nil
+}
+
 // LookupBgmIdMap satisfies queue.V1Reader.  pgx.ErrNoRows is the "this anime
 // has no curated bgm.tv binding" answer, which sends V1 down the search path
 // -- and the search stub returns ErrNotFound, so the worker still terminates.
