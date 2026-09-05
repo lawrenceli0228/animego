@@ -624,7 +624,13 @@ func TestEpisodesBgmWorker_AcceptedBindingWritesCountAndTitles(t *testing.T) {
 	assert.Equal(t, int32(400602), *counts[0].bgmID,
 		"the write must be pinned to the binding the job fetched")
 
-	assert.Len(t, titles, 3, "the SP must not become an episode title row")
+	// Two halves of the same list, deliberately different: the COUNT is 3
+	// because `{Sort: 3}` is an episode Bangumi lists but has not named, and
+	// an unnamed episode is still an episode. The WRITE is 2 because a row
+	// carrying no name in either language is two NULLs -- it renders exactly
+	// like no row at all, and it makes "how many titles do we hold" wrong.
+	assert.Len(t, titles, 2,
+		"the SP must not become a title row, and neither must the episode named in neither language")
 	assert.Empty(t, stamps, "a successful write stamps the attempt in the same statement, not separately")
 	assert.Zero(t, forbidden)
 }
