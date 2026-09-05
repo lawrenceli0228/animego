@@ -834,6 +834,142 @@ func TestPG_Create_IfAbsentOmitted_StillUpserts(t *testing.T) {
 		"the explicit Subscribe button still overwrites status — only ifAbsent changes that")
 }
 
+// TestPG_MarkEpisodesWatched_ConcurrentPushCannotRewindProgress is the
+// regression test for the second half of the sandbox failure on 2026-09-05:
+// with the create race fixed, `library-watch-sync.spec.ts:274` still ended
+// with `currentEpisode: 0` where it had written three episodes, and the
+// service log shows two overlapping PUT .../episodes for that title, both 200.
+//
+// The query is careful about its own snapshot -- `watched` UNIONs `inserted`
+// precisely because a plain SELECT cannot see what the same statement just
+// wrote -- but that only covers this statement's writes, not a concurrent
+// transaction's.  `target` takes FOR UPDATE, so the two pushes serialise on
+// the subscription row; the loser then resumes on the snapshot it took before
+// it began waiting, where the winner's episode_watches rows do not exist.  Its
+// own inserts all conflict, `inserted` is empty, `watched` is empty, and the
+// recompute writes MAX over nothing.
+//
+// So a reader with two tabs open loses their progress to whichever push
+// carries the smaller set -- against a query whose own comment says, in
+// capitals, that it unions and never replaces.  The set really does only grow;
+// it is the number DERIVED from the set that went backwards.
+func TestPG_MarkEpisodesWatched_ConcurrentPushCannotRewindProgress(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	seedSubscription(t, pool, user, 1, "watching")
+
+	// The winner: three episodes, committed only once the loser is waiting.
+	holder, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = holder.Rollback(ctx) }()
+	held, err := dbgen.New(holder).MarkEpisodesWatched(ctx, user, 1, []int32{1, 2, 3})
+	require.NoError(t, err)
+	require.Equal(t, int32(3), held.CurrentEpisode, "the winner writes 3 inside its transaction")
+
+	// The loser: a push carrying an episode the winner already covers.
+	type res struct {
+		row dbgen.MarkEpisodesWatchedRow
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		row, err := h.Queries.MarkEpisodesWatched(context.Background(), user, 1, []int32{1})
+		done <- res{row, err}
+	}()
+
+	requireBlockedOnMark(t, pool, "MarkEpisodesWatched")
+	require.NoError(t, holder.Commit(ctx))
+
+	select {
+	case got := <-done:
+		require.NoError(t, got.err)
+		assert.Equal(t, int32(3), got.row.CurrentEpisode,
+			"the losing push must not report progress the reader never lost")
+	case <-time.After(20 * time.Second):
+		t.Fatal("the second push never returned")
+	}
+
+	ep, _ := readProgress(t, pool, user, 1)
+	assert.Equal(t, int32(3), ep, "a push of episode 1 cannot rewind a reader who is on 3")
+
+	var marks int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM episode_watches WHERE user_id = $1 AND anilist_id = 1`, user).Scan(&marks))
+	assert.Equal(t, 3, marks, "the set itself was never in question")
+}
+
+// The single-episode door has the same exposure and the same fix: a checkbox
+// on one tab must not undo a sync on another.  It is a separate query, so it
+// needs a separate test — reverting either recompute on its own leaves the
+// other's test green.
+func TestPG_MarkEpisodeWatched_ConcurrentPushCannotRewindProgress(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+	seedSubscription(t, pool, user, 1, "watching")
+
+	holder, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = holder.Rollback(ctx) }()
+	held, err := dbgen.New(holder).MarkEpisodesWatched(ctx, user, 1, []int32{1, 2, 3})
+	require.NoError(t, err)
+	require.Equal(t, int32(3), held.CurrentEpisode)
+
+	type res struct {
+		row dbgen.MarkEpisodeWatchedRow
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		row, err := h.Queries.MarkEpisodeWatched(context.Background(), user, 1, 1)
+		done <- res{row, err}
+	}()
+
+	requireBlockedOnMark(t, pool, "MarkEpisodeWatched")
+	require.NoError(t, holder.Commit(ctx))
+
+	select {
+	case got := <-done:
+		require.NoError(t, got.err)
+		assert.Equal(t, int32(3), got.row.CurrentEpisode,
+			"ticking episode 1 must not report the reader back at 1")
+	case <-time.After(20 * time.Second):
+		t.Fatal("the single-episode mark never returned")
+	}
+
+	ep, _ := readProgress(t, pool, user, 1)
+	assert.Equal(t, int32(3), ep, "ticking an episode already in the set cannot rewind progress")
+}
+
+// requireBlockedOnMark blocks until a backend other than this one is waiting
+// on a lock inside the named query.  sqlc keeps the `-- name:` header in the
+// statement text it sends, so the query is identifiable by name.
+func requireBlockedOnMark(t *testing.T, pool *pgxpool.Pool, queryName string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var n int
+		require.NoError(t, pool.QueryRow(context.Background(), `
+			SELECT count(*)
+			FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock'
+			  AND query LIKE '%' || $1 || '%'`, queryName).Scan(&n))
+		if n > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("no backend ever blocked inside %s — the race this test needs did not happen", queryName)
+}
+
 func TestPG_Delete_RemovesRow(t *testing.T) {
 	h, pool := pgHandlers(t)
 	defer pool.Close()

@@ -2,6 +2,49 @@
 
 ---
 
+## [3.30.0] - 2026-09-06
+
+### ★★ 修完 500 之后，同一条 e2e 又红了——这次是「看到第 3 集」被并发写回 0
+
+#159 修掉 `POST /api/subscriptions` 的 500 之后，`library-watch-sync.spec.ts:274` 仍然失败，但形态变了：订阅建出来了、状态是 `watching`，**`currentEpisode` 是 0，不是 3**。那次运行的服务日志里**一个 500 都没有**（修生效了），有的是两次几乎同时的 `PUT /api/subscriptions/900201/episodes`，双双 200。
+
+### 快照问题的第二种形态：坏掉的不是行数，是那个数
+
+`MarkEpisodesWatched` 对自己的快照是很小心的——`watched` 特意 UNION 了 `inserted`，注释写明「plain SELECT 看不见本语句刚写的行」。但它只补得上**自己**那一半：
+
+```
+target      SELECT ... FOR UPDATE                    ← 两个 PUT 在这里串行
+inserted    INSERT ... ON CONFLICT DO NOTHING
+watched     SELECT FROM episode_watches ∪ inserted   ← 仍然走自己的快照
+recomputed  UPDATE ... SET current_episode = MAX(watched)
+```
+
+后到的那次在 `FOR UPDATE` 上等，等完之后**继续用开始等之前取的那个快照**——赢家写进 `episode_watches` 的三行在它眼里不存在。它自己要插的第 1 集撞键、`inserted` 为空、`watched` 为空，于是 `MAX(空集) = 0` 被写进 `current_episode`。
+
+★★ **集合确实只增不减，倒退的是从集合派生出来的那个数。** 这条查询的注释用大写字母写着 IT UNIONS. IT NEVER REPLACES —— 说的是集合，破的是数字。开两个标签页就够了。
+
+### 改法：拿一个不受快照约束的值兜底
+
+`s.current_episode` 是这条语句里唯一不受快照约束的值——READ COMMITTED 下 UPDATE 会**对并发写方提交后的最新行版本重新求值**。所以两个 mark 查询改成
+
+```sql
+SET current_episode = GREATEST(s.current_episode, (SELECT COALESCE(MAX(...)) FROM watched))
+```
+
+这正是它自己那条契约（只增不减）套用到派生值上。降低仍然只发生在 `UnmarkEpisodeWatched`，那条**故意不加**下界——加了就变成删不掉。
+
+先确认过没有语义冲突：migration 0024 把 `1..current_episode` 回填进了集合，`current_episode = MAX(集合)` 从那一刻起处处成立，`GREATEST` 只在读不全时才与原式不同——也就是只在竞态里。
+
+### 测试同样是把竞态摁住
+
+一个事务写 1/2/3 挂起不提交；另一个 goroutine 推第 1 集，撞在行锁上；主 goroutine 轮询 `pg_stat_activity` 确认真堵住了才提交。修前 **3 → 0**，与线上完全一致；修后 3。单集入口是另一条查询，单独一条测试——**只回滚其中一条，另一条的测试照样绿**，两个变异各自被自己那条杀掉。
+
+### ★ 未修，写进注释而不是糊过去
+
+`UnmarkEpisodeWatched` 有镜像的暴露面：取消标记若与「标记更高集」并发，会算出一个低于真实集合的值。**不加下界是故意的**（那会让取消标记无法生效），理由三条写在查询注释里：需要同一个人同时在两处一标一取消；集合本身没丢；下一次任何写入都会重算回来。
+
+---
+
 ## [3.29.0] - 2026-09-06
 
 ### ★★ 那个「大概是 flake」的 500，是一条真的并发缺陷
