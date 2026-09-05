@@ -77,6 +77,10 @@ type V1Writer interface {
 	// but none confident enough to bind: no bgm_id written, version=2,
 	// admin_flag='needs-review', bgm_match_source='fuzzy_low'.
 	MarkBangumiNeedsReview(ctx context.Context, anilistID int32) error
+	// CountAnimeBoundToBgmID reports how many OTHER anime already hold a
+	// subject.  One subject describes one work, so a non-zero answer means
+	// the scorer picked a subject that is already spoken for.
+	CountAnimeBoundToBgmID(ctx context.Context, bgmID int32, excludeAnilistID int32) (int64, error)
 }
 
 // V1DB combines the read + write surfaces this worker needs.
@@ -233,6 +237,33 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 		titleChinese = &cn
 	}
 	bgmID := int32(best.ID)
+	// A confident score is not the same as an unclaimed subject.  One
+	// Bangumi subject describes one work, so binding a second anime to it
+	// puts the first one's Chinese title, synopsis and episode names on the
+	// second one's public page -- indistinguishable, in the schema, from a
+	// correct binding.  BindBgmIdsFromIdMap has refused this since it was
+	// written; this path did not, and the whole measured collision set came
+	// through here (541 subjects / 1,161 rows on 2026-09-05, none of them
+	// bound via id_map).
+	//
+	// Parked rather than skipped: leaving the row at version 0 puts it back
+	// in the orphan scan, to be re-scored and to collide again on every
+	// pass.  'needs-review' is the same refusal TierLow already makes, and
+	// for the same reason -- we would rather show AniList romaji than
+	// another show's name.
+	if taken, cErr := w.db.CountAnimeBoundToBgmID(ctx, bgmID, anilistID); cErr != nil {
+		// A failed read must not become a licence to bind. Treat it as
+		// transient and let river retry the whole job.
+		return fmt.Errorf("bangumi_v1 collision check %d (bgmId=%d): %w", anilistID, bgmID, cErr)
+	} else if taken > 0 {
+		slog.InfoContext(ctx, "bangumi_v1 bgm_id_taken",
+			"anilistId", anilistID, "bgmId", bgmID, "heldBy", taken, "path", "fuzzy_high")
+		if mErr := w.db.MarkBangumiNeedsReview(ctx, anilistID); mErr != nil {
+			return fmt.Errorf("bangumi_v1 park taken %d: %w", anilistID, mErr)
+		}
+		return nil
+	}
+
 	src := matchSourceFuzzyHigh
 	n, uErr := w.db.UpdateBangumiV1(ctx, anilistID, &bgmID, titleChinese, &src)
 	if uErr != nil {
@@ -240,11 +271,13 @@ func (w *BangumiV1Worker) Work(ctx context.Context, job *river.Job[BangumiV1Args
 		return fmt.Errorf("bangumi_v1 update %d: %w", anilistID, uErr)
 	}
 	if n == 0 {
-		// Row left version 0 between enqueue and execution — a stale
-		// duplicate.  Do NOT chain V2: whoever advanced the row owns that
-		// side of the pipeline.  Not an error, so no retry.  This path is
-		// the one that used to silently overwrite a hand-corrected binding.
-		slog.InfoContext(ctx, "bangumi_v1 stale_skip",
+		// Two predicates can produce this, and the log has to admit both.
+		// Either the row left version 0 between enqueue and execution (a
+		// stale duplicate — whoever advanced it owns that side of the
+		// pipeline), or another anime took this subject between the check
+		// above and this statement.  Both are correct refusals and neither
+		// is retryable, so V2 is not chained either way.
+		slog.InfoContext(ctx, "bangumi_v1 stale_or_taken",
 			"anilistId", anilistID, "path", "fuzzy_high", "bgmId", bgmID)
 		return nil
 	}

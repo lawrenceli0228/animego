@@ -864,7 +864,7 @@ func TestEpisodesBgmCount_UsesHighestNumberNotEntryCount(t *testing.T) {
 		t.Parallel()
 		// Bangumi lists skip numbers.  Four entries, largest 7 — a grid sized
 		// by len() would stop at 4 and cut off the tail.
-		titles := normalizeEpisodeTitles([]bangumi.Episode{
+		titles := normalizeEpisodeTitlesUnbounded([]bangumi.Episode{
 			{Sort: 1, Type: 0}, {Sort: 2, Type: 0}, {Sort: 3, Type: 0}, {Sort: 7, Type: 0},
 		})
 		require.Len(t, titles, 4)
@@ -878,7 +878,7 @@ func TestEpisodesBgmCount_UsesHighestNumberNotEntryCount(t *testing.T) {
 		// both land on the same episode number.  Five entries, four distinct
 		// episodes; the (anime_id, episode) primary key dedupes the rows and
 		// len() would over-count.
-		titles := normalizeEpisodeTitles([]bangumi.Episode{
+		titles := normalizeEpisodeTitlesUnbounded([]bangumi.Episode{
 			{Sort: 29, Type: 0}, {Sort: 30, Type: 0}, {Sort: 31, Type: 0},
 			{Sort: 32.5, Type: 0}, {Sort: 33, Type: 0},
 		})
@@ -891,7 +891,7 @@ func TestEpisodesBgmCount_UsesHighestNumberNotEntryCount(t *testing.T) {
 		t.Parallel()
 		// A sequel whose episodes start at 29 maps to 1..N, matching AniList's
 		// per-season numbering.
-		titles := normalizeEpisodeTitles([]bangumi.Episode{
+		titles := normalizeEpisodeTitlesUnbounded([]bangumi.Episode{
 			{Sort: 29, Type: 0}, {Sort: 30, Type: 0}, {Sort: 31, Type: 0},
 		})
 		require.Len(t, titles, 3)

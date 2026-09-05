@@ -201,6 +201,16 @@ type Querier interface {
 	// on another device, a password reset that landed first.  The cookies are
 	// cleared unconditionally before this runs either way.
 	ClearRefreshTokenIfMatches(ctx context.Context, iD uuid.UUID, presentedToken *string) (int64, error)
+	// How many OTHER anime already hold this Bangumi subject.
+	//
+	// Read before binding so the worker can distinguish the two reasons a bind
+	// writes no rows.  Folding both into UpdateBangumiV1's WHERE would make them
+	// indistinguishable, and they need opposite handling: a stale duplicate is
+	// finished (the row moved on), while a collision leaves the row at version 0
+	// -- eligible for the orphan scan, re-scored on every pass, colliding again
+	// every time.  That row has to be parked, and parking it is a decision the
+	// caller makes, not a predicate.
+	CountAnimeBoundToBgmID(ctx context.Context, bgmID int32, excludeAnilistID int32) (int64, error)
 	// Total for the pagination envelope, matching SearchAnimeCacheLocal's WHERE
 	// clause exactly. Kept as its own query rather than a window function over the
 	// page: count(*) OVER () would be computed per returned row and still only
@@ -1920,6 +1930,25 @@ type Querier interface {
 	// "a stale job was rejected" and log the latter.  A guard that fires
 	// silently would reproduce the very failure mode it exists to stop:
 	// nobody notices.
+	//
+	// ── WHY the `NOT EXISTS` on bgm_id ──
+	// One Bangumi subject describes one work.  BindBgmIdsFromIdMap has refused to
+	// bind an already-taken subject since it was written; this path -- the fuzzy
+	// scorer's -- did not, and that asymmetry is where every collision came from.
+	// Measured 2026-09-05: 541 subjects were held by two or more anilist_ids,
+	// covering 1,161 rows and 22,019 episode-title rows, and NOT ONE of those
+	// rows had bgm_match_source='id_map'.  The guarded path produced zero.
+	//
+	// The symptom is silent and it is public: the second row shows the first
+	// row's Chinese title, synopsis and per-episode names, and nothing in the
+	// schema can tell that apart from a correct binding.
+	//
+	// The predicate is a backstop, not the primary check.  The worker asks
+	// CountAnimeBoundToBgmID first so it can PARK a colliding row (needs-review)
+	// instead of leaving it at version 0 to be re-scored forever.  This clause
+	// exists for the race the pre-check cannot close: two V1 jobs scoring
+	// different anime onto the same subject at the same time.  A NULL bgm_id
+	// (Bangumi returned no hit) skips it -- there is nothing to collide with.
 	UpdateBangumiV1(ctx context.Context, anilistID int32, bgmID *int32, titleChinese *string, bgmMatchSource *string) (int64, error)
 	// Phase 2 result: write bangumi_score + bangumi_votes from Bangumi
 	// Subject API.  Also conditionally fills title_chinese if it's still

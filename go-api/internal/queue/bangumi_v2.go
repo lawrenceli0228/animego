@@ -62,6 +62,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"golang.org/x/sync/errgroup"
 
@@ -134,12 +135,24 @@ type V2Writer interface {
 	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
 }
 
-// V2DB combines the read + write surfaces this worker needs.  V2 has
-// no DB reads (the Args carry both anilistId + bgmId already, so the
-// worker bypasses anime_cache for its inputs) so V2DB == V2Writer for
-// now.  Keep the interface separate from V2Writer so future workers
-// adding reads don't have to touch every call site.
+// V2Reader is the read surface the episode-title bound needs.
+//
+// V2 used to have no reads at all -- the Args carry both anilistId and bgmId,
+// so the worker bypassed anime_cache for its inputs.  Bounding the episode
+// titles to their own season needs two facts the Args cannot carry, because
+// both are properties of the AniList entry rather than of the job: how many
+// episodes the season has, and how many precede it in its franchise's
+// continuous numbering.  Both reads are cheap primary-key lookups and both are
+// best-effort -- a failure degrades to "unknown", which the bound already has
+// a defined answer for.
+type V2Reader interface {
+	GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error)
+	GetAbsoluteEpisodeOffset(ctx context.Context, anilistID int32) (dbgen.GetAbsoluteEpisodeOffsetRow, error)
+}
+
+// V2DB combines the read + write surfaces this worker needs.
 type V2DB interface {
+	V2Reader
 	V2Writer
 }
 
@@ -378,7 +391,8 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 				"anilistId", anilistID, "bgmId", bgmID, "err", epErr)
 		}
 	} else if episodes != nil {
-		titles := normalizeEpisodeTitles(episodes.Eps)
+		total, offset := w.episodeBound(ctx, anilistID)
+		titles := normalizeEpisodeTitles(episodes.Eps, total, offset)
 		var epFailures int
 		epTitlesWritten, epFailures = writeEpisodeTitles(ctx, w.db, anilistID, int32(bgmID), titles)
 		if epFailures > 0 {
@@ -515,7 +529,8 @@ type epTitle struct {
 	name    *string
 }
 
-// normalizeEpisodeTitles ports Express fetchBangumiEpisodes
+// normalizeEpisodeTitles turns a Bangumi episode list into rows for ONE
+// AniList entry's slots.  Ported from Express fetchBangumiEpisodes
 // (server/services/bangumi.service.js):
 //   - keep only main episodes (Type 0, Sort > 0) — drops SP/OP/ED/PV
 //   - sort by Sort ascending
@@ -523,7 +538,50 @@ type epTitle struct {
 //     (S1 had 28 eps), so map the first to 1 and the rest relative to it,
 //     aligning episode numbers with AniList's 1..N
 //   - empty Bangumi strings become nil so the column stays NULL, not ""
-func normalizeEpisodeTitles(raw []bangumi.Episode) []epTitle {
+//
+// ─── the bound, and why the shift alone is not one ──────────────────────
+//
+// The shift maps the lowest sort to 1, so it can never produce a number
+// BELOW the season.  It says nothing about the top, and a Bangumi subject
+// routinely covers more than one AniList entry: one subject for a whole
+// long-running series, or for two cours AniList splits in half.  Measured on
+// production 2026-09-05, 21,001 of 203,019 title rows (10.3%) across 960
+// anime sit past their own season's episode count.
+//
+// Those rows are invisible — the grid renders 1..episodes — so the cost is
+// not the overflow itself.  It is that the SAME list filled the slots that
+// ARE visible, and whether those hold this season's titles depends on where
+// the subject's numbering starts.  Splitting the 960 by PREQUEL edge:
+//
+//	594  no prequel     first season, so sorts 1..total are this season
+//	                    and the overflow is a tail to drop
+//	267  has prequel     a later season, so a subject numbered from 1 has
+//	                    been writing the WRONG season's titles into 1..N
+//	 99  no relations    unknown
+//
+// Refusing every overflow would destroy 594 correct sets to fix 267.  So the
+// bound is a WINDOW rather than a filter: with the absolute offset known,
+// this season occupies sorts [offset+1, offset+total] of the franchise's
+// continuous numbering and everything outside it is a different season's.
+//
+// Three inputs, three answers, and the order matters:
+//
+//   - the shifted list fits → keep it.  This is the healthy majority and
+//     the case the shift was written for (a sequel subject numbered 29..40);
+//     re-deriving it from the window would change nothing and risk a
+//     regression on subjects whose sorts restart at 1 per season.
+//   - it overflows and the offset is known → take the window.
+//   - it overflows and the offset is not → write nothing.  `known:false` is
+//     not `offset:0`; picking the prefix on an unknown origin is the guess
+//     that renders as a confident answer, which is the whole failure this
+//     function now exists to stop.
+//
+// total <= 0 means AniList has no count for this row and there is nothing to
+// check against, so the list passes through unbounded.  That is not a corner
+// case: ListEpisodesBgmCandidates selects `WHERE ac.episodes IS NULL`, so the
+// episodes_bgm worker — which derives a count FROM this list — only ever
+// calls with an unknown total, and its behaviour is unchanged.
+func normalizeEpisodeTitles(raw []bangumi.Episode, total int32, offset *int32) []epTitle {
 	mains := make([]bangumi.Episode, 0, len(raw))
 	for _, e := range raw {
 		if e.Type == 0 && e.Sort > 0 {
@@ -535,12 +593,46 @@ func normalizeEpisodeTitles(raw []bangumi.Episode) []epTitle {
 	}
 	sort.Slice(mains, func(i, j int) bool { return mains[i].Sort < mains[j].Sort })
 
-	offset := int(math.Floor(mains[0].Sort)) - 1
-	out := make([]epTitle, 0, len(mains))
+	shifted := renumberEpisodes(mains, int(math.Floor(mains[0].Sort))-1)
+	if total <= 0 {
+		return shifted
+	}
+	if len(shifted) > 0 && shifted[len(shifted)-1].episode <= total {
+		return shifted
+	}
+	if offset == nil {
+		return nil
+	}
+
+	// The window.  `mains` is sorted and math.Round is monotonic, so this
+	// selects a contiguous run; subtracting the same offset that defined the
+	// window is what lands it on 1..total.
+	lo, hi := int(*offset)+1, int(*offset)+int(total)
+	inSeason := make([]bangumi.Episode, 0, total)
 	for _, e := range mains {
-		ep := int32(int(math.Round(e.Sort)) - offset)
+		if n := int(math.Round(e.Sort)); n >= lo && n <= hi {
+			inSeason = append(inSeason, e)
+		}
+	}
+	windowed := renumberEpisodes(inSeason, int(*offset))
+	if len(windowed) == 0 {
+		return nil
+	}
+	return windowed
+}
+
+// renumberEpisodes maps each episode's sort to `sort - shift` and carries the
+// two title strings across, dropping anything that lands at or below zero.
+//
+// The drop is the episode > 0 CHECK constraint restated in Go: a fractional
+// sort below the shift (Bangumi numbers recaps 0.5, 12.5) would otherwise
+// reach the upsert as a constraint violation surfacing as a failed job.
+func renumberEpisodes(eps []bangumi.Episode, shift int) []epTitle {
+	out := make([]epTitle, 0, len(eps))
+	for _, e := range eps {
+		ep := int32(int(math.Round(e.Sort)) - shift)
 		if ep <= 0 {
-			continue // guard the episode > 0 CHECK constraint
+			continue
 		}
 		var nameCN *string
 		if e.NameCN != "" {
@@ -555,4 +647,40 @@ func normalizeEpisodeTitles(raw []bangumi.Episode) []epTitle {
 		out = append(out, epTitle{episode: ep, nameCN: nameCN, name: name})
 	}
 	return out
+}
+
+// episodeBound reads the two facts normalizeEpisodeTitles needs to keep a
+// Bangumi subject's episode list inside the season it is being filed against.
+//
+// Both halves fail soft, and to the SAME answer the bound already defines for
+// missing data: a total of 0 means "AniList has no count, do not bound", and a
+// nil offset means "we do not know what precedes this season", which makes an
+// overflowing list refuse rather than guess.  A read error therefore costs a
+// bound, never a wrong write -- worth stating because the tempting shortcut,
+// returning 0 for a failed offset read, would assert that nothing precedes
+// this season and silently reinstate the bug this bound exists to fix.
+func (w *BangumiV2Worker) episodeBound(ctx context.Context, anilistID int32) (int32, *int32) {
+	var total int32
+	if n, err := w.db.GetAnimeEpisodeCount(ctx, anilistID); err != nil {
+		slog.WarnContext(ctx, "bangumi_v2 episode count read failed",
+			"anilistId", anilistID, "err", err)
+	} else if n != nil && *n > 0 {
+		total = *n
+	}
+
+	row, err := w.db.GetAbsoluteEpisodeOffset(ctx, anilistID)
+	if err != nil {
+		// pgx.ErrNoRows means the anchor is not cached, which the endpoint
+		// serving this same query already treats as an ordinary unknown.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.WarnContext(ctx, "bangumi_v2 episode offset read failed",
+				"anilistId", anilistID, "err", err)
+		}
+		return total, nil
+	}
+	if row.Known == nil || !*row.Known {
+		return total, nil
+	}
+	offset := row.AbsoluteOffset
+	return total, &offset
 }
