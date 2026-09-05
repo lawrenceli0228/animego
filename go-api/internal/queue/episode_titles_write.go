@@ -88,6 +88,18 @@ func writeEpisodeTitles(
 	titles []epTitle,
 ) (written, failures int) {
 	for _, t := range titles {
+		// Bangumi lists episodes it has no name for in either language, and
+		// the numbering function keeps them on purpose -- episodes_bgm
+		// derives a COUNT from that list, and an episode without a name is
+		// still an episode. Writing one is a different matter: the row is two
+		// NULLs, which renders exactly like no row at all while making "how
+		// many titles do we hold" unanswerable by counting rows.
+		// internal/episodetitles.Usable has dropped these on the dandanplay
+		// side since it was written; this side had not, and the gap only
+		// became visible when the RELEASING sweep began routing rows here.
+		if t.nameCN == nil && t.name == nil {
+			continue
+		}
 		n, err := db.UpsertEpisodeTitleSourced(ctx, dbgen.UpsertEpisodeTitleSourcedParams{
 			Episode: t.episode,
 			NameCn:  derefOrEmpty(t.nameCN),
