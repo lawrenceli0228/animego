@@ -2315,6 +2315,54 @@ func (q *Queries) ListAnimeForHantBackfill(ctx context.Context) ([]ListAnimeForH
 	return items, nil
 }
 
+const listBgmBindingsForReEnrich = `-- name: ListBgmBindingsForReEnrich :many
+SELECT anilist_id, bgm_id
+FROM anime_cache
+WHERE anilist_id = ANY($1::int[])
+`
+
+type ListBgmBindingsForReEnrichRow struct {
+	AnilistID int32  `json:"anilistId"`
+	BgmID     *int32 `json:"bgmId"`
+}
+
+// The bindings behind an explicit list of anilist_ids, for the admin
+// re-enrich-by-id path.
+//
+// It exists because ListAnimeForReEnrichByVersion cannot serve that path: it
+// selects by `bangumi_version`, and a row that has already completed V2 sits
+// at version 2 or 3 -- outside every branch of the version-keyed endpoint.  So
+// a fix that changes what V2 WRITES has no way to reach the rows V2 already
+// wrote.  That gap is the reason this query is here, and re-stamping 600 rows'
+// version to squeeze them back into the version=1 branch is the alternative it
+// exists to avoid: `bangumi_version` is the whole pipeline's scheduling state,
+// and rewriting it to trigger a one-off is a lasting change made for a
+// temporary reason.
+//
+// bgm_id comes back NULLABLE on purpose.  "not in the catalogue" and "in the
+// catalogue with no binding" are different answers for the operator who typed
+// the list, and collapsing them into a single `skipped` count hides which of
+// the two happened.  The caller reports them separately.
+func (q *Queries) ListBgmBindingsForReEnrich(ctx context.Context, anilistIds []int32) ([]ListBgmBindingsForReEnrichRow, error) {
+	rows, err := q.db.Query(ctx, listBgmBindingsForReEnrich, anilistIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBgmBindingsForReEnrichRow{}
+	for rows.Next() {
+		var i ListBgmBindingsForReEnrichRow
+		if err := rows.Scan(&i.AnilistID, &i.BgmID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDescriptionCnCandidates = `-- name: ListDescriptionCnCandidates :many
 SELECT ac.anilist_id, ac.bgm_id
 FROM description_cn_eligible ac

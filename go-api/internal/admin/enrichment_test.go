@@ -43,6 +43,7 @@ type fakeEnrichmentDB struct {
 	listV2NoBgm     func(ctx context.Context) ([]int32, error)
 	promoteV3       func(ctx context.Context, ids []int32) error
 	listHealCn      func(ctx context.Context) ([]dbgen.ListHealCnCandidatesRow, error)
+	listBindings    func(ctx context.Context, ids []int32) ([]dbgen.ListBgmBindingsForReEnrichRow, error)
 
 	// recorded calls
 	promoteCalls [][]int32
@@ -86,6 +87,13 @@ func (f *fakeEnrichmentDB) PromoteAnimeToV3(ctx context.Context, ids []int32) er
 		return f.promoteV3(ctx, ids)
 	}
 	return nil
+}
+
+func (f *fakeEnrichmentDB) ListBgmBindingsForReEnrich(ctx context.Context, ids []int32) ([]dbgen.ListBgmBindingsForReEnrichRow, error) {
+	if f.listBindings == nil {
+		return nil, nil
+	}
+	return f.listBindings(ctx, ids)
 }
 
 func (f *fakeEnrichmentDB) ListHealCnCandidates(ctx context.Context) ([]dbgen.ListHealCnCandidatesRow, error) {
@@ -156,10 +164,10 @@ func (s *spyEnqueuer) EnqueueDescriptionLlmBackfillMany(_ context.Context, _ []q
 type fakeQueueController struct {
 	mu sync.Mutex
 
-	paused  bool
-	pauseErr error
+	paused    bool
+	pauseErr  error
 	resumeErr error
-	getErr error
+	getErr    error
 }
 
 func (f *fakeQueueController) QueuePause(ctx context.Context, name string, opts *river.QueuePauseOpts) error {
@@ -668,5 +676,123 @@ func TestDecodeJSONBody_RejectsUnknownFields(t *testing.T) {
 	}
 	if err := decodeJSONBody(req, &v); err == nil {
 		t.Error("expected error for unknown field")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/enrichment/re-enrich-ids
+//
+// This endpoint exists because the version-keyed one cannot reach the rows
+// this kind of fix needs. `re-enrich?version=1` selects bangumi_version = 1 —
+// bound by V1, not finished by V2 — so every row that HAS completed V2 sits at
+// 2 or 3, outside all three branches. A change to what V2 writes therefore has
+// no trigger that reaches what V2 already wrote. Measured 2026-09-05: of the
+// 663 anime still holding out-of-range title rows, 617 were at version 3 and
+// 46 at version 2. None at version 1.
+//
+// The alternative — re-stamping those rows' version to squeeze them into the
+// version=1 branch — was rejected: bangumi_version is the whole pipeline's
+// scheduling state, and rewriting it to trigger a one-off is a lasting change
+// made for a temporary reason.
+// ---------------------------------------------------------------------------
+
+func postReEnrichIDs(t *testing.T, h *EnrichmentHandlers, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/enrichment/re-enrich-ids",
+		strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ReEnrichIDs(rec, req)
+	return rec
+}
+
+func TestReEnrichIDs_EnqueuesV2ForBoundRows(t *testing.T) {
+	bgm := int32(555)
+	db := &fakeEnrichmentDB{
+		listBindings: func(_ context.Context, ids []int32) ([]dbgen.ListBgmBindingsForReEnrichRow, error) {
+			if len(ids) != 2 {
+				t.Errorf("ids=%v, want 2 after de-duplication", ids)
+			}
+			return []dbgen.ListBgmBindingsForReEnrichRow{
+				{AnilistID: 1, BgmID: &bgm},
+				{AnilistID: 2, BgmID: nil}, // in the catalogue, no binding
+			}, nil
+		},
+	}
+	enq := &spyEnqueuer{}
+	h := newEnrichmentHandlersWithFakes(db, enq, nil)
+
+	// 1 appears twice: river has no arg-hash dedupe, so a repeated id would
+	// spend a second upstream request writing what the first already wrote.
+	rec := postReEnrichIDs(t, h, `{"anilistIds":[1,2,1]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(enq.v2Calls) != 1 || len(enq.v2Calls[0]) != 1 {
+		t.Fatalf("want one V2 batch of one job, got %+v", enq.v2Calls)
+	}
+	if got := enq.v2Calls[0][0]; got.AnilistID != 1 || got.BgmID != 555 {
+		t.Fatalf("wrong job: %+v", got)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"requested":2`, `"enqueued":1`, `"noBinding":1`, `"notFound":0`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body %s missing %s", body, want)
+		}
+	}
+}
+
+func TestReEnrichIDs_CountsMissingAndUnboundApart(t *testing.T) {
+	// An operator who pasted a list needs to know whether they mistyped an id
+	// or whether the row is real but unbound. Those lead to different next
+	// actions, so one `skipped` number would answer neither.
+	db := &fakeEnrichmentDB{
+		listBindings: func(_ context.Context, _ []int32) ([]dbgen.ListBgmBindingsForReEnrichRow, error) {
+			return []dbgen.ListBgmBindingsForReEnrichRow{{AnilistID: 7, BgmID: nil}}, nil
+		},
+	}
+	h := newEnrichmentHandlersWithFakes(db, &spyEnqueuer{}, nil)
+	rec := postReEnrichIDs(t, h, `{"anilistIds":[7,8,9]}`)
+	body := rec.Body.String()
+	for _, want := range []string{`"requested":3`, `"enqueued":0`, `"notFound":2`, `"noBinding":1`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body %s missing %s", body, want)
+		}
+	}
+}
+
+func TestReEnrichIDs_RejectsBadInput(t *testing.T) {
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, nil)
+	big := make([]string, maxReEnrichIDs+1)
+	for i := range big {
+		big[i] = "1"
+	}
+	for name, body := range map[string]string{
+		"not json":     `{`,
+		"empty list":   `{"anilistIds":[]}`,
+		"zero id":      `{"anilistIds":[0]}`,
+		"negative id":  `{"anilistIds":[-3]}`,
+		"over the cap": `{"anilistIds":[` + strings.Join(big, ",") + `]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if rec := postReEnrichIDs(t, h, body); rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d, want 400 (body=%s)", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestReEnrichIDs_DoesNotEnqueueWhenTheReadFails(t *testing.T) {
+	db := &fakeEnrichmentDB{
+		listBindings: func(_ context.Context, _ []int32) ([]dbgen.ListBgmBindingsForReEnrichRow, error) {
+			return nil, errors.New("connection reset")
+		},
+	}
+	enq := &spyEnqueuer{}
+	h := newEnrichmentHandlersWithFakes(db, enq, nil)
+	if rec := postReEnrichIDs(t, h, `{"anilistIds":[1]}`); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500", rec.Code)
+	}
+	if len(enq.v2Calls) != 0 {
+		t.Fatalf("a failed read must not enqueue anything, got %+v", enq.v2Calls)
 	}
 }

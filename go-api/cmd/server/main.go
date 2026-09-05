@@ -1033,6 +1033,7 @@ func main() {
 
 		// Enrichment writes — static paths first to keep chi happy.
 		r.Post("/enrichment/re-enrich", adminEnrichmentHandlers.ReEnrich)
+		r.Post("/enrichment/re-enrich-ids", adminEnrichmentHandlers.ReEnrichIDs)
 		r.Post("/enrichment/heal-cn", adminEnrichmentHandlers.HealCn)
 		r.Post("/enrichment/heal-cn/pause", adminEnrichmentHandlers.PauseHeal)
 		r.Post("/enrichment/heal-cn/resume", adminEnrichmentHandlers.ResumeHeal)
