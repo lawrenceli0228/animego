@@ -185,15 +185,18 @@ func runEpisodeTitleHeal(
 	limitDDP int,
 	apply bool,
 	resume bool,
+	startAfterID int,
 	maxEmptyStreak int,
 	outPath string,
 ) error {
-	rows, err := listEpisodeTitleCandidates(ctx, q, resume)
+	all, err := listEpisodeTitleCandidates(ctx, q, resume)
 	if err != nil {
 		return err
 	}
+	rows := dropCandidatesUpTo(all, int32(startAfterID))
 	slog.Info("episode-title heal: candidates",
-		"count", len(rows), "apply", apply, "resume", resume,
+		"count", len(rows), "before_start_after", len(all),
+		"startAfterID", startAfterID, "apply", apply, "resume", resume,
 		"maxEmptyStreak", maxEmptyStreak)
 
 	emptyStreak := 0
@@ -326,6 +329,40 @@ func listEpisodeTitleCandidates(ctx context.Context, q *dbgen.Queries, resume bo
 		})
 	}
 	return out, nil
+}
+
+// dropCandidatesUpTo removes every candidate at or below startAfterID, so a
+// resumed round can begin where the previous one's budget actually ran out.
+//
+// It exists because --resume answers a narrower question than its name
+// suggests: `episode_titles_at` is stamped only inside the transaction that
+// WRITES titles, so a row upstream had nothing for, or that no source vouched
+// for, is never stamped and stays a candidate forever.  That is the right
+// default -- re-asking about an empty subject costs one request, while
+// skipping a row that was never written loses it silently -- but the cost is
+// not constant.  Measured on 2026-09-05: of 5,436 candidates, 2,730 sat ahead
+// of the point the previous round stopped at, and every one of them had
+// already been classified NO_TITLES / UNDECIDED / DDP_REBIND / SCOPE_MISMATCH
+// the day before.  None of those verdicts changes overnight -- the first 200
+// rows of the re-walk produced one write -- yet re-asking them would have
+// spent 68% of a 4,000-request budget that the online danmaku path shares.
+//
+// So this is a budget instrument, not a correctness one: the rows it skips are
+// still candidates, still unstamped, and a run without the flag still reaches
+// them.  Zero (the default) is the whole set, which is why the comparison is
+// <= and not <.
+func dropCandidatesUpTo(rows []epTitleCandidate, startAfterID int32) []epTitleCandidate {
+	if startAfterID <= 0 {
+		return rows
+	}
+	out := make([]epTitleCandidate, 0, len(rows))
+	for _, r := range rows {
+		if r.AnilistID <= startAfterID {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // epTitleCandidate is the subset of a bgm-bound row this pass reads.
