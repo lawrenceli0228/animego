@@ -74,7 +74,7 @@ type fakeSubsDB struct {
 	listFn     func(ctx context.Context, userID uuid.UUID, statusFilter *string) ([]dbgen.ListUserSubscriptionsRow, error)
 	getFn      func(ctx context.Context, userID uuid.UUID, anilistID int32) (dbgen.GetSubscriptionRow, error)
 	upsertFn   func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
-	ifAbsentFn func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error)
+	ifAbsentFn func(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
 	// episodeCountFn defaults to "no bound" (nil, nil) rather than
 	// panicking like its siblings: every PATCH carrying currentEpisode
 	// now calls it, and the ~20 pre-existing tests that exercise unrelated
@@ -147,7 +147,7 @@ func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, a
 	return f.upsertFn(ctx, userID, anilistID, status)
 }
 
-func (f *fakeSubsDB) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error) {
+func (f *fakeSubsDB) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error) {
 	atomic.AddInt32(&f.ifAbsentCalls, 1)
 	if f.ifAbsentFn == nil {
 		panic("fakeSubsDB.InsertSubscriptionIfAbsent not set")
@@ -748,11 +748,11 @@ func TestCreate_IfAbsentTrue_UsesIdempotentInsert(t *testing.T) {
 	t.Parallel()
 	userID := uuid.New()
 	// The pre-existing row the user had marked `dropped` by hand.
-	existing := dbgen.InsertSubscriptionIfAbsentRow{
+	existing := dbgen.Subscription{
 		UserID: userID, AnilistID: 42, Status: "dropped", CurrentEpisode: 7,
 	}
 	db := &fakeSubsDB{
-		ifAbsentFn: func(_ context.Context, _ uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error) {
+		ifAbsentFn: func(_ context.Context, _ uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error) {
 			assert.Equal(t, int32(42), anilistID)
 			assert.Equal(t, "watching", status, "the requested status is still sent — the SQL decides whether it lands")
 			return existing, nil
@@ -828,8 +828,8 @@ func TestCreate_IfAbsent_FKViolation_404(t *testing.T) {
 	// new branch too, not leak a 500.
 	userID := uuid.New()
 	db := &fakeSubsDB{
-		ifAbsentFn: func(_ context.Context, _ uuid.UUID, _ int32, _ string) (dbgen.InsertSubscriptionIfAbsentRow, error) {
-			return dbgen.InsertSubscriptionIfAbsentRow{}, &pgconn.PgError{Code: pgForeignKeyViolation}
+		ifAbsentFn: func(_ context.Context, _ uuid.UUID, _ int32, _ string) (dbgen.Subscription, error) {
+			return dbgen.Subscription{}, &pgconn.PgError{Code: pgForeignKeyViolation}
 		},
 	}
 	h := makeHandlersWithFakes(db, nil, nil)

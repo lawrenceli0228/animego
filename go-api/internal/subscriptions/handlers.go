@@ -108,7 +108,7 @@ type SubscriptionsDB interface {
 	// untouched instead of overwriting `status`.  Click-to-track fires on
 	// paths the user did not explicitly ask to re-subscribe on, so an
 	// upsert there would silently resurrect dropped/completed titles.
-	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error)
+	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error)
 	// GetAnimeEpisodeCount reads the authoritative total-episode count
 	// used as the upper bound on PATCH.  Nil result = still airing /
 	// unknown length = no bound to enforce.  Kept out of the PATCH CTE on
@@ -600,13 +600,7 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 	var sub dbgen.Subscription
 	var err error
 	if req.IfAbsent {
-		// InsertSubscriptionIfAbsentRow is field-for-field identical to
-		// dbgen.Subscription, so the conversion is free and keeps one
-		// response type across both branches.  If sqlc ever reshapes the
-		// row, this stops compiling rather than reshaping the JSON.
-		var row dbgen.InsertSubscriptionIfAbsentRow
-		row, err = h.Queries.InsertSubscriptionIfAbsent(ctx, claims.UserID, req.AnilistID, req.Status)
-		sub = dbgen.Subscription(row)
+		sub, err = h.Queries.InsertSubscriptionIfAbsent(ctx, claims.UserID, req.AnilistID, req.Status)
 	} else {
 		sub, err = h.Queries.UpsertSubscription(ctx, claims.UserID, req.AnilistID, req.Status)
 	}

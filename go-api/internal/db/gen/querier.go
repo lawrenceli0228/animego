@@ -1049,6 +1049,22 @@ type Querier interface {
 	InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error)
 	// A repeated delivery attempt returns the canonical existing row without
 	// resetting read state.  Natural keys are chosen by the caller per event.
+	//
+	// NOTHING CALLS THIS.  Every notification the site writes is emitted inline
+	// by the statement that caused it (CreateCommentWithActivity,
+	// UpsertCommentReactionWithNotification, UpsertFollowWithActivity), and the
+	// one test that mentions this query says why it writes its rows directly
+	// instead.
+	//
+	// Left in place, but whoever wires it up must not ship it as it stands: the
+	// DO NOTHING + read-back shape below cannot survive two overlapping
+	// deliveries of the same dedupe_key.  The conflicting insert waits on the
+	// other transaction, but the statement's snapshot predates that wait, so
+	// once the other side commits neither arm can see its row and a `:one`
+	// query returns pgx.ErrNoRows.  subscriptions.sql's
+	// InsertSubscriptionIfAbsent carries the long version of this note and the
+	// fix — `notifications` has a single unique constraint on
+	// (user_id, dedupe_key), so the same DO UPDATE conflict arm applies here.
 	InsertNotificationDedupe(ctx context.Context, arg InsertNotificationDedupeParams) (InsertNotificationDedupeRow, error)
 	// POST /api/subscriptions with `"ifAbsent": true` — the click-to-track path.
 	//
@@ -1057,13 +1073,27 @@ type Querier interface {
 	// marked dropped/completed back into `watching` the moment anything touches
 	// it.  §4 decision 3: creation is idempotent and `status` is human-only.
 	//
-	// ON CONFLICT DO NOTHING returns zero rows on conflict, so the UNION ALL arm
-	// reads the pre-existing row back and returns it untouched.  The NOT EXISTS
-	// guard keeps the two arms mutually exclusive (same idiom as
-	// InsertNotificationIfAbsent in community.sql and InsertReport in safety.sql).
+	// So the conflict arm assigns the stored status back over itself.  That is a
+	// no-op by construction — status, current_episode, score, last_watched_at,
+	// created_at and updated_at all keep exactly what they had — and it is
+	// written that way only because DO UPDATE is what gives RETURNING a row to
+	// hand back when the insert lost.
+	//
+	// It reads oddly, so here is why it is not DO NOTHING plus a read-back arm,
+	// which is what stood here until 2026-09-05.  A conflicting insert makes the
+	// statement WAIT on the other transaction's speculative token, but the
+	// statement's snapshot was taken before that wait began.  When the other side
+	// commits, DO NOTHING yields no row — and no arm of the same statement can
+	// see the row that was just committed either, because the snapshot predates
+	// it.  Zero rows, and a `:one` query turns zero rows into pgx.ErrNoRows,
+	// which the handler could only report as a 500.  Two overlapping
+	// click-to-track requests for one title did exactly that in CI.  DO UPDATE
+	// takes the row lock rather than reading through the snapshot, so it always
+	// has a row.  TestPG_Create_IfAbsent_SurvivesAConcurrentCreate holds the
+	// race open and asserts the 201.
 	//
 	// Caller MUST have ensured the anime_cache row exists (else the FK kicks).
-	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (InsertSubscriptionIfAbsentRow, error)
+	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (Subscription, error)
 	// One row per day that has any activity, within the window.
 	//
 	// Days with nothing in them are ABSENT here and are filled in by the caller

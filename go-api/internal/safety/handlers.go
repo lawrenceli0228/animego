@@ -252,6 +252,28 @@ func (h *Handlers) CreateReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row, err := h.db.CreatePendingReport(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Empty means one of two things, and only a second attempt tells
+		// them apart.
+		//
+		// Either the target really is gone — the report_target CTE matched
+		// nothing, and the 404 below is the answer — or this request
+		// overlapped another report of the same target by the same user.
+		// In that case ON CONFLICT DO NOTHING made the statement wait on
+		// the other transaction, but its snapshot was taken before the
+		// wait: once the other side commits, the insert arm yields nothing
+		// and the read-back arm cannot see the row that was just committed
+		// either.  Zero rows, and the user is told their target does not
+		// exist while their own report of it sits in the queue.
+		//
+		// Retrying runs on a fresh snapshot, so it reads that pending
+		// report back.  A genuinely missing target stays missing and still
+		// answers 404.  (InsertSubscriptionIfAbsent had the same race and
+		// could close it in SQL by making the conflict arm DO UPDATE.
+		// This one cannot: `reports` carries two partial unique indexes —
+		// one per target kind — and DO UPDATE can only infer one of them.)
+		row, err = h.db.CreatePendingReport(ctx, params)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, "Report target not found"))
