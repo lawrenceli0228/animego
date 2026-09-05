@@ -553,6 +553,28 @@ WHERE a.anilist_id = $1 AND a.bangumi_version = 0
                        WHERE b.bgm_id = $2::integer
                          AND b.anilist_id <> $1));
 
+-- name: ListBgmBindingsForReEnrich :many
+-- The bindings behind an explicit list of anilist_ids, for the admin
+-- re-enrich-by-id path.
+--
+-- It exists because ListAnimeForReEnrichByVersion cannot serve that path: it
+-- selects by `bangumi_version`, and a row that has already completed V2 sits
+-- at version 2 or 3 -- outside every branch of the version-keyed endpoint.  So
+-- a fix that changes what V2 WRITES has no way to reach the rows V2 already
+-- wrote.  That gap is the reason this query is here, and re-stamping 600 rows'
+-- version to squeeze them back into the version=1 branch is the alternative it
+-- exists to avoid: `bangumi_version` is the whole pipeline's scheduling state,
+-- and rewriting it to trigger a one-off is a lasting change made for a
+-- temporary reason.
+--
+-- bgm_id comes back NULLABLE on purpose.  "not in the catalogue" and "in the
+-- catalogue with no binding" are different answers for the operator who typed
+-- the list, and collapsing them into a single `skipped` count hides which of
+-- the two happened.  The caller reports them separately.
+SELECT anilist_id, bgm_id
+FROM anime_cache
+WHERE anilist_id = ANY(sqlc.arg(anilist_ids)::int[]);
+
 -- name: CountAnimeBoundToBgmID :one
 -- How many OTHER anime already hold this Bangumi subject.
 --

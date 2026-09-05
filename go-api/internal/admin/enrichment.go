@@ -3,6 +3,7 @@
 //
 //	PATCH /api/admin/enrichment/:anilistId          updateEnrichment
 //	POST  /api/admin/enrichment/re-enrich            reEnrich (?version=0|1|2)
+//	POST  /api/admin/enrichment/re-enrich-ids        reEnrichIDs (JSON body)
 //	POST  /api/admin/enrichment/heal-cn              healCnTitles
 //	POST  /api/admin/enrichment/heal-cn/pause        pauseHeal
 //	POST  /api/admin/enrichment/heal-cn/resume       resumeHeal
@@ -71,8 +72,8 @@ const (
 // Stored as a set keyed on the string form (treating "" as the null
 // case the JSON request body uses).
 var allowedFlagValues = map[string]struct{}{
-	"needs-review":        {},
-	"manually-corrected":  {},
+	"needs-review":       {},
+	"manually-corrected": {},
 }
 
 // EnrichmentDB is the sqlc subset the enrichment handlers consume.
@@ -93,6 +94,7 @@ type EnrichmentDB interface {
 	ListEnrichedV2WithoutBgm(ctx context.Context) ([]int32, error)
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error
 	ListHealCnCandidates(ctx context.Context) ([]dbgen.ListHealCnCandidatesRow, error)
+	ListBgmBindingsForReEnrich(ctx context.Context, anilistIds []int32) ([]dbgen.ListBgmBindingsForReEnrichRow, error)
 }
 
 // txQuerier is the subset of the sqlc-generated Querier that supports
@@ -111,13 +113,17 @@ type txQuerier interface {
 // router behind the RequireAuth + RequireAdmin chain.
 //
 // Pool — required by Reset (transaction over the three reset queries)
-//        and by transactional re-enrich (v=2 promote-to-v3 + enqueue
-//        atomicity is desirable but Express did not have it; we match
-//        Express here).
+//
+//	and by transactional re-enrich (v=2 promote-to-v3 + enqueue
+//	atomicity is desirable but Express did not have it; we match
+//	Express here).
+//
 // DB — the sqlc surface for the non-transactional reads + writes.
 // NewTxQuerier — pluggable factory that lets tests substitute a fake
-//        transactional querier without standing up Postgres.  Production
-//        wires this as `func(tx pgx.Tx) txQuerier { return dbgen.New(tx) }`.
+//
+//	transactional querier without standing up Postgres.  Production
+//	wires this as `func(tx pgx.Tx) txQuerier { return dbgen.New(tx) }`.
+//
 // Enq — queue dispatcher for V1 / V2 / V3 batches.
 // QueueCtrl — admin pause/resume surface from internal/queue.
 type EnrichmentHandlers struct {
@@ -368,6 +374,123 @@ func (h *EnrichmentHandlers) runResetTransaction(ctx context.Context, anilistID 
 		return fmt.Errorf("admin reset: commit: %w", err)
 	}
 	return nil
+}
+
+// ============================================================================
+// POST /api/admin/enrichment/re-enrich-ids — reEnrichIDs
+// ============================================================================
+
+// maxReEnrichIDs caps one request.
+//
+// The version-keyed endpoint is uncapped because its input is a query the
+// database answers; this one's input is typed by a person, and a paste
+// accident should not become a queue flood.  A thousand is well past any
+// list an operator assembles by hand and still one bounded enqueue.
+const maxReEnrichIDs = 1000
+
+// reEnrichIDsRequest is the body: an explicit list of anilist_ids.
+type reEnrichIDsRequest struct {
+	AnilistIDs []int32 `json:"anilistIds"`
+}
+
+// reEnrichIDsResponse separates the two reasons an id produced no job.
+//
+// One `skipped` number would answer neither question the operator has after
+// pasting a list: whether they mistyped an id, or whether the row is real but
+// unbound.  Those lead to different next actions, so they are counted apart.
+type reEnrichIDsResponse struct {
+	Requested int `json:"requested"`
+	Enqueued  int `json:"enqueued"`
+	NotFound  int `json:"notFound"`
+	NoBinding int `json:"noBinding"`
+}
+
+// ReEnrichIDs handles POST /api/admin/enrichment/re-enrich-ids.
+//
+// It re-runs PHASE 2 over an explicit list, which is the one thing the
+// version-keyed endpoint cannot do.  `re-enrich?version=1` selects rows at
+// bangumi_version = 1 -- rows V1 bound and V2 has not finished -- so a row
+// that already completed V2 sits at version 2 or 3 and is outside every
+// branch.  A change to what V2 writes therefore has no way to reach the rows
+// V2 has already written, which is exactly the shape of ceiling PR #105 and
+// #108 each hit from the other side.
+//
+// Rows without a bgm_id are counted, never enqueued: V2 fetches a Bangumi
+// subject and there is nothing to fetch.  The version is deliberately left
+// alone -- this endpoint re-runs a phase, it does not rewind one.
+func (h *EnrichmentHandlers) ReEnrichIDs(w http.ResponseWriter, r *http.Request) {
+	var req reEnrichIDsRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, "无效的请求体"))
+		return
+	}
+	if len(req.AnilistIDs) == 0 {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, "anilistIds 不能为空"))
+		return
+	}
+	if len(req.AnilistIDs) > maxReEnrichIDs {
+		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest,
+			fmt.Sprintf("一次最多 %d 个 id", maxReEnrichIDs)))
+		return
+	}
+
+	// De-duplicate before the query.  A repeated id would otherwise enqueue
+	// the same job twice, and river has no arg-hash dedupe -- the second one
+	// spends an upstream request to write what the first already wrote.
+	seen := make(map[int32]struct{}, len(req.AnilistIDs))
+	ids := make([]int32, 0, len(req.AnilistIDs))
+	for _, id := range req.AnilistIDs {
+		if id <= 0 {
+			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, "anilistIds 必须为正整数"))
+			return
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), enrichmentQueryTimeout)
+	defer cancel()
+
+	rows, err := h.DB.ListBgmBindingsForReEnrich(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "admin: ListBgmBindingsForReEnrich", "n", len(ids), "err", err)
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
+		return
+	}
+
+	jobs := make([]queue.BangumiV2Args, 0, len(rows))
+	noBinding := 0
+	for _, row := range rows {
+		if row.BgmID == nil {
+			noBinding++
+			continue
+		}
+		jobs = append(jobs, queue.BangumiV2Args{
+			AnilistID: int(row.AnilistID),
+			BgmID:     int(*row.BgmID),
+		})
+	}
+	if len(jobs) > 0 {
+		if err := h.Enq.EnqueueV2Many(ctx, jobs); err != nil {
+			slog.WarnContext(ctx, "admin: reEnrichIDs V2 enqueue", "n", len(jobs), "err", err)
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
+			return
+		}
+	}
+
+	resp := reEnrichIDsResponse{
+		Requested: len(ids),
+		Enqueued:  len(jobs),
+		NotFound:  len(ids) - len(rows),
+		NoBinding: noBinding,
+	}
+	slog.InfoContext(ctx, "admin: re-enrich by id",
+		"requested", resp.Requested, "enqueued", resp.Enqueued,
+		"notFound", resp.NotFound, "noBinding", resp.NoBinding)
+	httpx.Data(w, http.StatusOK, resp)
 }
 
 // ============================================================================
