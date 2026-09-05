@@ -717,6 +717,101 @@ func TestPG_Create_IfAbsentCreatesWhenMissing(t *testing.T) {
 	assert.Equal(t, 1, n, "replay must not duplicate")
 }
 
+// TestPG_Create_IfAbsent_SurvivesAConcurrentCreate is the regression test for
+// the 500 CI caught on 2026-09-05: two overlapping click-to-track requests for
+// the same title, one answering 201 and the other
+// `upsert subscription failed: no rows in result set`.
+//
+// Below is that race made deterministic.  A transaction inserts the row and
+// holds it uncommitted; the handler's own INSERT reaches the same key and
+// WAITS on the speculative token; the holder then commits.  The handler's
+// statement resumes on the snapshot it took *before* it began waiting, so
+// anything that tries to read the row back inside that same statement — which
+// is exactly what ON CONFLICT DO NOTHING leaves you having to do — sees
+// nothing at all.  Only a conflict arm that takes the row lock (DO UPDATE)
+// still has a row to RETURN.
+//
+// The assertion on `status` matters as much as the one on the code: the fix
+// must close the race without turning click-to-track into something that can
+// overwrite a status the user set by hand (§4 decision 3).
+func TestPG_Create_IfAbsent_SurvivesAConcurrentCreate(t *testing.T) {
+	h, pool := pgHandlers(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	user := seedUser(t, pool, "alice", "alice@example.com")
+	seedAnime(t, pool, 1, "A", "甲")
+
+	// The other request, frozen mid-flight.
+	holder, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = holder.Rollback(ctx) }()
+	_, err = holder.Exec(ctx,
+		`INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
+		 VALUES ($1, 1, 'dropped', now())`, user)
+	require.NoError(t, err)
+
+	// Built out here: newReq/withUserClaims call t.Fatal on failure, which is
+	// only legal on the test's own goroutine.
+	reqCtx := withUserClaims(t, context.Background(), user, "alice")
+	req := newReq(t, http.MethodPost, "/api/subscriptions",
+		`{"anilistId":1,"status":"watching","ifAbsent":true}`, "", reqCtx)
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		h.CreateSubscription(rec, req)
+		done <- rec
+	}()
+
+	// Committing before the handler is genuinely blocked would prove nothing —
+	// it would just be two sequential inserts — so wait until Postgres reports
+	// a backend parked on a lock inside this very query.
+	requireBlockedOnIfAbsentInsert(t, pool)
+	require.NoError(t, holder.Commit(ctx))
+
+	select {
+	case rec := <-done:
+		require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+		var got struct {
+			Data dbgen.Subscription `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		assert.Equal(t, "dropped", got.Data.Status,
+			"the row the other request committed must come back, status untouched")
+	case <-time.After(20 * time.Second):
+		t.Fatal("handler never returned")
+	}
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM subscriptions WHERE user_id = $1 AND anilist_id = 1`, user).Scan(&n))
+	assert.Equal(t, 1, n, "the loser of the race must not have written a second row")
+}
+
+// requireBlockedOnIfAbsentInsert blocks until a backend other than this one is
+// waiting on a lock inside InsertSubscriptionIfAbsent.  sqlc keeps the
+// `-- name:` header in the statement text it sends, so the query can be
+// identified by name whatever shape its body takes.
+func requireBlockedOnIfAbsentInsert(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var n int
+		require.NoError(t, pool.QueryRow(context.Background(), `
+			SELECT count(*)
+			FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock'
+			  AND query LIKE '%InsertSubscriptionIfAbsent%'`).Scan(&n))
+		if n > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the second create never reached the conflict — the race this test needs did not happen")
+}
+
 func TestPG_Create_IfAbsentOmitted_StillUpserts(t *testing.T) {
 	h, pool := pgHandlers(t)
 	defer pool.Close()

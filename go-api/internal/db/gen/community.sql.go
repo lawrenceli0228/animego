@@ -260,6 +260,22 @@ type InsertNotificationDedupeRow struct {
 
 // A repeated delivery attempt returns the canonical existing row without
 // resetting read state.  Natural keys are chosen by the caller per event.
+//
+// NOTHING CALLS THIS.  Every notification the site writes is emitted inline
+// by the statement that caused it (CreateCommentWithActivity,
+// UpsertCommentReactionWithNotification, UpsertFollowWithActivity), and the
+// one test that mentions this query says why it writes its rows directly
+// instead.
+//
+// Left in place, but whoever wires it up must not ship it as it stands: the
+// DO NOTHING + read-back shape below cannot survive two overlapping
+// deliveries of the same dedupe_key.  The conflicting insert waits on the
+// other transaction, but the statement's snapshot predates that wait, so
+// once the other side commits neither arm can see its row and a `:one`
+// query returns pgx.ErrNoRows.  subscriptions.sql's
+// InsertSubscriptionIfAbsent carries the long version of this note and the
+// fix — `notifications` has a single unique constraint on
+// (user_id, dedupe_key), so the same DO UPDATE conflict arm applies here.
 func (q *Queries) InsertNotificationDedupe(ctx context.Context, arg InsertNotificationDedupeParams) (InsertNotificationDedupeRow, error) {
 	row := q.db.QueryRow(ctx, insertNotificationDedupe,
 		arg.UserID,

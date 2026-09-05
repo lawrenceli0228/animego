@@ -158,32 +158,36 @@ RETURNING
 -- marked dropped/completed back into `watching` the moment anything touches
 -- it.  §4 decision 3: creation is idempotent and `status` is human-only.
 --
--- ON CONFLICT DO NOTHING returns zero rows on conflict, so the UNION ALL arm
--- reads the pre-existing row back and returns it untouched.  The NOT EXISTS
--- guard keeps the two arms mutually exclusive (same idiom as
--- InsertNotificationIfAbsent in community.sql and InsertReport in safety.sql).
+-- So the conflict arm assigns the stored status back over itself.  That is a
+-- no-op by construction — status, current_episode, score, last_watched_at,
+-- created_at and updated_at all keep exactly what they had — and it is
+-- written that way only because DO UPDATE is what gives RETURNING a row to
+-- hand back when the insert lost.
+--
+-- It reads oddly, so here is why it is not DO NOTHING plus a read-back arm,
+-- which is what stood here until 2026-09-05.  A conflicting insert makes the
+-- statement WAIT on the other transaction's speculative token, but the
+-- statement's snapshot was taken before that wait began.  When the other side
+-- commits, DO NOTHING yields no row — and no arm of the same statement can
+-- see the row that was just committed either, because the snapshot predates
+-- it.  Zero rows, and a `:one` query turns zero rows into pgx.ErrNoRows,
+-- which the handler could only report as a 500.  Two overlapping
+-- click-to-track requests for one title did exactly that in CI.  DO UPDATE
+-- takes the row lock rather than reading through the snapshot, so it always
+-- has a row.  TestPG_Create_IfAbsent_SurvivesAConcurrentCreate holds the
+-- race open and asserts the 201.
 --
 -- Caller MUST have ensured the anime_cache row exists (else the FK kicks).
-WITH inserted AS (
-    INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
-    VALUES (
-        sqlc.arg('user_id')::uuid,
-        sqlc.arg('anilist_id')::integer,
-        sqlc.arg('status')::text,
-        now()
-    )
-    ON CONFLICT (user_id, anilist_id) DO NOTHING
-    RETURNING
-        user_id,
-        anilist_id,
-        status,
-        current_episode,
-        score,
-        last_watched_at,
-        created_at,
-        updated_at
+INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
+VALUES (
+    sqlc.arg('user_id')::uuid,
+    sqlc.arg('anilist_id')::integer,
+    sqlc.arg('status')::text,
+    now()
 )
-SELECT
+ON CONFLICT (user_id, anilist_id) DO UPDATE
+SET status = subscriptions.status
+RETURNING
     user_id,
     anilist_id,
     status,
@@ -191,23 +195,7 @@ SELECT
     score,
     last_watched_at,
     created_at,
-    updated_at
-FROM inserted
-UNION ALL
-SELECT
-    existing.user_id,
-    existing.anilist_id,
-    existing.status,
-    existing.current_episode,
-    existing.score,
-    existing.last_watched_at,
-    existing.created_at,
-    existing.updated_at
-FROM subscriptions existing
-WHERE existing.user_id = sqlc.arg('user_id')::uuid
-  AND existing.anilist_id = sqlc.arg('anilist_id')::integer
-  AND NOT EXISTS (SELECT 1 FROM inserted)
-LIMIT 1;
+    updated_at;
 
 -- name: UpdateSubscriptionWithActivity :one
 -- Lock the previous value, apply the selective update, and append a watch event

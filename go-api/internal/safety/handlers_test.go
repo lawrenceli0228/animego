@@ -22,17 +22,22 @@ import (
 )
 
 type fakeDB struct {
-	user              dbgen.GetUserIDByUsernameRow
-	userErr           error
-	comment           dbgen.GetCommentByIDRow
-	commentErr        error
-	block             dbgen.BlockUserRow
-	blockArgs         [2]uuid.UUID
-	unblockArgs       [2]uuid.UUID
-	blocks            []dbgen.ListUserBlocksRow
-	report            dbgen.CreatePendingReportRow
-	reportParams      dbgen.CreatePendingReportParams
-	reportErr         error
+	user         dbgen.GetUserIDByUsernameRow
+	userErr      error
+	comment      dbgen.GetCommentByIDRow
+	commentErr   error
+	block        dbgen.BlockUserRow
+	blockArgs    [2]uuid.UUID
+	unblockArgs  [2]uuid.UUID
+	blocks       []dbgen.ListUserBlocksRow
+	report       dbgen.CreatePendingReportRow
+	reportParams dbgen.CreatePendingReportParams
+	reportErr    error
+	reportCalls  int
+	// reportSecond, when set, answers the second CreatePendingReport call and
+	// beyond.  It is how a test says "the retry finds what the first attempt
+	// could not see".
+	reportSecond      *dbgen.CreatePendingReportRow
 	reports           []dbgen.ListReportsRow
 	listReportStatus  *string
 	updatedReport     dbgen.Report
@@ -58,6 +63,10 @@ func (f *fakeDB) ListUserBlocks(context.Context, uuid.UUID, int32, int32) ([]dbg
 }
 func (f *fakeDB) CreatePendingReport(_ context.Context, arg dbgen.CreatePendingReportParams) (dbgen.CreatePendingReportRow, error) {
 	f.reportParams = arg
+	f.reportCalls++
+	if f.reportCalls > 1 && f.reportSecond != nil {
+		return *f.reportSecond, nil
+	}
 	return f.report, f.reportErr
 }
 func (f *fakeDB) ListReports(_ context.Context, status *string, _, _ int32) ([]dbgen.ListReportsRow, error) {
@@ -197,6 +206,51 @@ func TestReportTargetNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	NewHandlers(db).CreateReport(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// The two halves of the ON CONFLICT DO NOTHING retry in CreateReport.  The
+// PG test in pg_test.go proves the race is real; these two say what the
+// handler does with each of the two things an empty result can mean, and they
+// run without a container.
+func TestCreateReport_EmptyResultIsRetriedOnce(t *testing.T) {
+	viewer, author, commentID := uuid.New(), uuid.New(), uuid.New()
+	existing := dbgen.CreatePendingReportRow{ID: uuid.New(), Status: "pending"}
+	db := &fakeDB{
+		comment:      dbgen.GetCommentByIDRow{ID: commentID, UserID: author},
+		reportErr:    pgx.ErrNoRows,
+		reportSecond: &existing,
+	}
+	req := withClaims(t, httptest.NewRequest(http.MethodPost, "/api/reports", bytes.NewBufferString(
+		`{"targetType":"comment","targetId":"`+commentID.String()+`","reason":"spam"}`,
+	)), viewer, nil)
+	rec := httptest.NewRecorder()
+	NewHandlers(db).CreateReport(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, 2, db.reportCalls, "the empty first answer must be retried exactly once")
+	var got struct {
+		Data struct {
+			ID uuid.UUID `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, existing.ID, got.Data.ID, "the retry's row is the one that answers")
+}
+
+func TestCreateReport_StillEmptyAfterRetryIsA404(t *testing.T) {
+	viewer, author, commentID := uuid.New(), uuid.New(), uuid.New()
+	db := &fakeDB{
+		comment:   dbgen.GetCommentByIDRow{ID: commentID, UserID: author},
+		reportErr: pgx.ErrNoRows,
+	}
+	req := withClaims(t, httptest.NewRequest(http.MethodPost, "/api/reports", bytes.NewBufferString(
+		`{"targetType":"comment","targetId":"`+commentID.String()+`","reason":"spam"}`,
+	)), viewer, nil)
+	rec := httptest.NewRecorder()
+	NewHandlers(db).CreateReport(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code, "a target that is genuinely gone stays a 404")
+	assert.Equal(t, 2, db.reportCalls, "and the retry must not turn into a loop")
 }
 
 func TestAdminListAndUpdateReports(t *testing.T) {
