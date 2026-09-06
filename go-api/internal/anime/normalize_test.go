@@ -35,7 +35,7 @@ func TestNormalizeMainRow_AllFields(t *testing.T) {
 		Genres:       []string{"Action", "Adventure"},
 	}
 
-	row := NormalizeMainRow(m)
+	row := NormalizeMainRow(m, anilist.TrailerNotSelected)
 
 	assert.Equal(t, int32(12345), row.AnilistID)
 	assert.Equal(t, "Naruto", *row.TitleRomaji)
@@ -85,7 +85,7 @@ func TestNormalizeMainRow_CoverImageFallback(t *testing.T) {
 }
 
 func TestNormalizeMainRow_NilTitleAndCoverImage(t *testing.T) {
-	row := NormalizeMainRow(anilist.Media{ID: 42})
+	row := NormalizeMainRow(anilist.Media{ID: 42}, anilist.TrailerNotSelected)
 	assert.Equal(t, int32(42), row.AnilistID)
 	assert.Nil(t, row.TitleRomaji)
 	assert.Nil(t, row.TitleEnglish)
@@ -102,7 +102,7 @@ func TestNormalizeMainRow_BangumiColumnsNotSet(t *testing.T) {
 	// columns belong to the enrichment workers, not AniList sync.  The
 	// struct definition itself is the regression guard; if sqlc ever
 	// generates them by accident, this test catches it at compile time.
-	var p any = NormalizeMainRow(anilist.Media{ID: 1})
+	var p any = NormalizeMainRow(anilist.Media{ID: 1}, anilist.TrailerNotSelected)
 	_ = p
 }
 

@@ -129,6 +129,14 @@ func (f *fakeWarmDB) upsertCount() int {
 	return len(f.upsertCalls)
 }
 
+func (f *fakeWarmDB) snapshotUpserts() []dbgen.UpsertAnimeCacheParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dup := make([]dbgen.UpsertAnimeCacheParams, len(f.upsertCalls))
+	copy(dup, f.upsertCalls)
+	return dup
+}
+
 // fakeWarmEnqueuer records EnqueueV1Many and EnqueueEpisodesBgmMany calls so
 // tests can assert which IDs were chained.  The remaining Enqueuer methods are
 // no-ops since WarmSeasonWorker triggers only those two.
@@ -839,4 +847,36 @@ func TestWarmSeason_SeedFiresOncePerWarm(t *testing.T) {
 	batches := enq.snapshotEpBatches()
 	require.Len(t, batches, 1)
 	assert.Len(t, batches[0], 4, "all four upserted ids reach the one batch")
+}
+
+// TestWarmSeason_RecordsThatTrailerWasChecked — this worker runs
+// SeasonalAnimeQuery, which selects `trailer`, so the rows it writes must
+// carry a trailer_checked_at stamp even when the media has no trailer.
+//
+// It matters more here than anywhere else: warm_season sets cached_at to
+// now(), so a row it leaves marked unchecked stays inside the 24h
+// freshness window while isStale still reports it stale — and every
+// detail view for that day pays a blocking AniList re-fetch on the
+// crawler-heavy /anime/* path.  The default normalizer derives the flag
+// from the argument, so this asserts the call site passes TrailerSelected.
+func TestWarmSeason_RecordsThatTrailerWasChecked(t *testing.T) {
+	t.Parallel()
+
+	ali := &fakeAniListSeasonal{
+		seasonalFn: func(_ context.Context, _ anilist.SeasonalVars) (*anilist.SeasonalAnimeResponse, error) {
+			// No Trailer on any media: the "confirmed absence" case.
+			return makeMediaPage([]int{1, 2, 3}, false), nil
+		},
+	}
+	db := &fakeWarmDB{}
+	w := NewWarmSeasonWorker(ali, db, &fakeWarmEnqueuer{})
+
+	require.NoError(t, w.Work(context.Background(), makeWorkJob("WINTER", 2026)))
+
+	params := db.snapshotUpserts()
+	require.Len(t, params, 3)
+	for _, p := range params {
+		assert.True(t, p.TrailerChecked,
+			"anilist_id=%d: seasonal selects trailer, so its null is an answer", p.AnilistID)
+	}
 }

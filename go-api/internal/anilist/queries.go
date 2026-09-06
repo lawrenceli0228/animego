@@ -75,6 +75,7 @@ const SeasonalAnimeQuery = `
         id
         title { romaji english native }
         coverImage { extraLarge large color }
+        trailer { id site }
         bannerImage
         description(asHtml: false)
         episodes

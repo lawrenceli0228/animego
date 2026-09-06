@@ -50,19 +50,19 @@ type detailFakeDB struct {
 	getRelationEnrichmentByIDsFn  func(ctx context.Context, ids []int32) ([]dbgen.GetRelationEnrichmentByIDsRow, error)
 
 	// Writers (P2.1.6 re-fetch path).  Defaults return nil error.
-	upsertAnimeCacheFn            func(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
-	deleteAnimeGenresFn           func(ctx context.Context, id int32) error
-	insertAnimeGenreFn            func(ctx context.Context, id int32, g string) error
-	deleteAnimeStudiosFn          func(ctx context.Context, id int32) error
-	insertAnimeStudioFn           func(ctx context.Context, id int32, s string) error
-	deleteAnimeRelationsFn        func(ctx context.Context, id int32) error
-	insertAnimeRelationFn         func(ctx context.Context, arg dbgen.InsertAnimeRelationParams) error
-	deleteAnimeCharactersFn       func(ctx context.Context, id int32) error
-	insertAnimeCharacterFn        func(ctx context.Context, arg dbgen.InsertAnimeCharacterParams) error
-	deleteAnimeStaffFn            func(ctx context.Context, id int32) error
-	insertAnimeStaffMemberFn      func(ctx context.Context, arg dbgen.InsertAnimeStaffMemberParams) error
-	deleteAnimeRecommendationsFn  func(ctx context.Context, id int32) error
-	insertAnimeRecommendationFn   func(ctx context.Context, arg dbgen.InsertAnimeRecommendationParams) error
+	upsertAnimeCacheFn           func(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
+	deleteAnimeGenresFn          func(ctx context.Context, id int32) error
+	insertAnimeGenreFn           func(ctx context.Context, id int32, g string) error
+	deleteAnimeStudiosFn         func(ctx context.Context, id int32) error
+	insertAnimeStudioFn          func(ctx context.Context, id int32, s string) error
+	deleteAnimeRelationsFn       func(ctx context.Context, id int32) error
+	insertAnimeRelationFn        func(ctx context.Context, arg dbgen.InsertAnimeRelationParams) error
+	deleteAnimeCharactersFn      func(ctx context.Context, id int32) error
+	insertAnimeCharacterFn       func(ctx context.Context, arg dbgen.InsertAnimeCharacterParams) error
+	deleteAnimeStaffFn           func(ctx context.Context, id int32) error
+	insertAnimeStaffMemberFn     func(ctx context.Context, arg dbgen.InsertAnimeStaffMemberParams) error
+	deleteAnimeRecommendationsFn func(ctx context.Context, id int32) error
+	insertAnimeRecommendationFn  func(ctx context.Context, arg dbgen.InsertAnimeRecommendationParams) error
 
 	mainCalls       atomic.Int32
 	enrichmentCalls atomic.Int32
@@ -70,27 +70,27 @@ type detailFakeDB struct {
 
 	// Writer call counts — used by upsert-path tests to assert the
 	// expected number of Delete+Insert pairs ran.
-	upsertMainCalls           atomic.Int32
-	deleteGenresCalls         atomic.Int32
-	insertGenreCalls          atomic.Int32
-	deleteStudiosCalls        atomic.Int32
-	insertStudioCalls         atomic.Int32
-	deleteRelationsCalls      atomic.Int32
-	insertRelationCalls       atomic.Int32
-	deleteCharactersCalls     atomic.Int32
-	insertCharacterCalls      atomic.Int32
-	deleteStaffCalls          atomic.Int32
-	insertStaffCalls          atomic.Int32
+	upsertMainCalls            atomic.Int32
+	deleteGenresCalls          atomic.Int32
+	insertGenreCalls           atomic.Int32
+	deleteStudiosCalls         atomic.Int32
+	insertStudioCalls          atomic.Int32
+	deleteRelationsCalls       atomic.Int32
+	insertRelationCalls        atomic.Int32
+	deleteCharactersCalls      atomic.Int32
+	insertCharacterCalls       atomic.Int32
+	deleteStaffCalls           atomic.Int32
+	insertStaffCalls           atomic.Int32
 	deleteRecommendationsCalls atomic.Int32
 	insertRecommendationCalls  atomic.Int32
 
 	// Captured args for byte-shape assertions on the re-fetch path.
-	upsertParams          []dbgen.UpsertAnimeCacheParams
-	insertedGenres        []string
-	insertedStudios       []string
-	insertedRelations     []dbgen.InsertAnimeRelationParams
-	insertedCharacters    []dbgen.InsertAnimeCharacterParams
-	insertedStaff         []dbgen.InsertAnimeStaffMemberParams
+	upsertParams            []dbgen.UpsertAnimeCacheParams
+	insertedGenres          []string
+	insertedStudios         []string
+	insertedRelations       []dbgen.InsertAnimeRelationParams
+	insertedCharacters      []dbgen.InsertAnimeCharacterParams
+	insertedStaff           []dbgen.InsertAnimeStaffMemberParams
 	insertedRecommendations []dbgen.InsertAnimeRecommendationParams
 }
 
@@ -1098,7 +1098,7 @@ func staleTimestamp() pgtype.Timestamptz {
 func TestIsStale_FreshNotStale(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	studios := []string{"MAPPA"}
 	characters := []dbgen.GetAnimeCharactersByIDRow{
 		{NameEn: ptrString("Alice"), Role: ptrString("MAIN")},
@@ -1124,7 +1124,7 @@ func TestIsStale_CachedAtPastTTL(t *testing.T) {
 func TestIsStale_EmptyStudios(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
 	assert.True(t, isStale(main, []string{}, characters, nil), "empty studios must trip stale")
 }
@@ -1133,7 +1133,7 @@ func TestIsStale_EmptyStudios(t *testing.T) {
 func TestIsStale_EmptyCharacters(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	assert.True(t, isStale(main, []string{"MAPPA"}, []dbgen.GetAnimeCharactersByIDRow{}, nil),
 		"empty characters must trip stale")
 }
@@ -1143,7 +1143,7 @@ func TestIsStale_EmptyCharacters(t *testing.T) {
 func TestIsStale_FirstCharacterRoleNil(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{NameEn: ptrString("Bob"), Role: nil}}
 	assert.True(t, isStale(main, []string{"MAPPA"}, characters, nil),
 		"first character with nil role must trip stale")
@@ -1156,7 +1156,7 @@ func TestIsStale_FirstCharacterRoleNil(t *testing.T) {
 func TestIsStale_FirstRelationCoverNil(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
 	relations := []dbgen.GetAnimeRelationsByIDRow{{AnilistID: 100, CoverImageUrl: nil}}
 	assert.True(t, isStale(main, []string{"MAPPA"}, characters, relations),
@@ -1169,7 +1169,7 @@ func TestIsStale_FirstRelationCoverNil(t *testing.T) {
 func TestIsStale_NoRelations_NotTriggerByCover(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
 	assert.False(t, isStale(main, []string{"MAPPA"}, characters, []dbgen.GetAnimeRelationsByIDRow{}),
 		"empty relations slice must not by itself trip stale")
@@ -1282,11 +1282,11 @@ func makeDetailMedia(id int) anilist.Media {
 	avgScore := 88
 
 	return anilist.Media{
-		ID:           id,
-		Title:        &anilist.Title{Romaji: &romaji},
-		CoverImage:   &anilist.CoverImage{Large: &cover, Color: &color},
-		Genres:       []string{"Action"},
-		Studios:      &anilist.StudioConnection{Nodes: []anilist.Studio{{Name: studio}}},
+		ID:         id,
+		Title:      &anilist.Title{Romaji: &romaji},
+		CoverImage: &anilist.CoverImage{Large: &cover, Color: &color},
+		Genres:     []string{"Action"},
+		Studios:    &anilist.StudioConnection{Nodes: []anilist.Studio{{Name: studio}}},
 		Relations: &anilist.RelationConnection{Edges: []anilist.RelationEdge{
 			{
 				RelationType: &relType,
@@ -1339,9 +1339,10 @@ func TestDetail_NotInCache_AniListReFetchSucceeds(t *testing.T) {
 			}
 			// Post-refetch re-read.
 			return dbgen.GetAnimeMainByIDRow{
-				AnilistID:   42,
-				TitleRomaji: &romaji,
-				CachedAt:    freshTimestamp(),
+				AnilistID:      42,
+				TitleRomaji:    &romaji,
+				CachedAt:       freshTimestamp(),
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 		},
 	}
@@ -1394,16 +1395,18 @@ func TestDetail_StaleDetected_AniListReFetchSucceeds(t *testing.T) {
 			c := readCount.Add(1)
 			if c == 1 {
 				return dbgen.GetAnimeMainByIDRow{
-					AnilistID:   77,
-					TitleRomaji: &romaji,
-					CachedAt:    freshTimestamp(),
+					AnilistID:      77,
+					TitleRomaji:    &romaji,
+					CachedAt:       freshTimestamp(),
+					TrailerCheckedAt: freshTimestamp(),
 					// no characters → triggers stale check below
 				}, nil
 			}
 			return dbgen.GetAnimeMainByIDRow{
-				AnilistID:   77,
-				TitleRomaji: &romajiAfter,
-				CachedAt:    freshTimestamp(),
+				AnilistID:      77,
+				TitleRomaji:    &romajiAfter,
+				CachedAt:       freshTimestamp(),
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 		},
 		// characters/studios fns nil → empty slices → isStale=true.
@@ -1435,9 +1438,10 @@ func TestDetail_StaleDetected_AniListFails_FallbackToStale(t *testing.T) {
 	db := &detailFakeDB{
 		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
 			return dbgen.GetAnimeMainByIDRow{
-				AnilistID:   88,
-				TitleRomaji: &staleTitle,
-				CachedAt:    freshTimestamp(),
+				AnilistID:      88,
+				TitleRomaji:    &staleTitle,
+				CachedAt:       freshTimestamp(),
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 			// no characters → isStale=true
 		},
@@ -1467,9 +1471,10 @@ func TestDetail_FreshNotStale_SkipsReFetch(t *testing.T) {
 	db := &detailFakeDB{
 		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
 			return dbgen.GetAnimeMainByIDRow{
-				AnilistID:   99,
-				TitleRomaji: &romaji,
-				CachedAt:    freshTimestamp(),
+				AnilistID:      99,
+				TitleRomaji:    &romaji,
+				CachedAt:       freshTimestamp(),
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 		},
 		getAnimeStudiosByIDFn: func(_ context.Context, _ int32) ([]string, error) {
@@ -1514,9 +1519,10 @@ func TestDetail_StaleByCachedAt(t *testing.T) {
 				}, nil
 			}
 			return dbgen.GetAnimeMainByIDRow{
-				AnilistID:   55,
-				TitleRomaji: &romajiPost,
-				CachedAt:    freshTimestamp(),
+				AnilistID:      55,
+				TitleRomaji:    &romajiPost,
+				CachedAt:       freshTimestamp(),
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 		},
 		// Content checks all pass — only cached_at is stale.

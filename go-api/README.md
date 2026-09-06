@@ -328,3 +328,15 @@ same `episode` number (the Bangumi enrichment pipeline appended new
 versions instead of replacing).  The PG composite PK `(anime_id,
 episode)` rejects these.  The transform now dedups in-memory, **keeping
 the LAST occurrence** so the most recent enrichment wins.
+
+
+## 预告片元数据（迁移 0032）
+
+先执行数据库迁移 0032，再部署读取新字段的 Go API。季度、完结精选、年度榜单返回可空的 trailerId / trailerSite；详情返回 trailer `{id, site}`，无有效 YouTube 预告片时省略 trailer。只存 ID 与站点，不接收任意嵌入 URL。
+
+trailer_checked_at 是缓存内部状态，不出现在任何响应里。NULL 表示从没问过 AniList，访问详情时补齐；完整详情或季度查询明确返回 null 时记为「问过了，确实没有」并写入当时的时间。搜索等未选 trailer 的简化查询既不会清空已保存的值，也不会重新盖时间戳。用时间戳而不是布尔，是因为「哪些行该重新问一遍」（开播前没有 PV、或者当时的站点还不支持）只有时间戳能回答。
+
+部署完成后跑一次 `POST /api/admin/warm-all?startYear=1940` 回填存量：warm-all 按季度向 AniList 取数，缺省 startYear 是 2014，不带这个参数会漏掉 2014 年之前的行。没有季度的条目（剧场版/OVA/特典）warm-all 取不到，它们在详情页第一次被访问时补齐。
+
+验证：`CGO_ENABLED=0 go test ./internal/anime ./internal/anilist ./internal/db/...`。
+真实 SQL 往返：准备 Docker 和 `animego-postgres:dev` 后，执行 `CGO_ENABLED=0 go test -tags=integration ./internal/anime -run TestTrailerPostgresRoundTrip`；测试使用新建容器并自动销毁。本机 Docker 当前未启动，此项尚未执行。

@@ -62,6 +62,38 @@ type Trailer struct {
 	Site *string `json:"site"`
 }
 
+// TrailerSelection states whether the GraphQL document that produced a
+// Media asked for the `trailer` field at all.  It exists because a nil
+// Media.Trailer is ambiguous on its own: it means "AniList says this
+// media has no trailer" for a query that selected the field, and "we
+// never asked" for one that did not.  Only the first is an answer worth
+// persisting.
+//
+// The distinction is carried as a parameter rather than a convention at
+// each call site because five paths upsert anime_cache from AniList and
+// they do not share a query:
+//
+//	SeasonalAnimeQuery  selects trailer  → anime/seasonal, queue/warm_season
+//	AnimeDetailQuery    selects trailer  → anime/detail, anime/ensure_cached
+//	SearchAnimeQuery    does NOT         → anime/search
+//
+// Making it an argument means a sixth call site cannot compile without
+// answering the question.  The type lives here, next to the queries that
+// decide the answer, so both internal/anime and internal/queue can name
+// it without importing each other.
+type TrailerSelection bool
+
+const (
+	// TrailerNotSelected marks a Media from a query with no `trailer`
+	// field.  A nil Trailer carries no information; stored metadata must
+	// be preserved rather than cleared.
+	TrailerNotSelected TrailerSelection = false
+
+	// TrailerSelected marks a Media from a query that asked for
+	// `trailer`.  A nil Trailer is AniList's authoritative "none".
+	TrailerSelected TrailerSelection = true
+)
+
 // ---------------------------------------------------------------------------
 // Page wrapper + PageInfo (search / seasonal / weekly all return Page{...})
 // ---------------------------------------------------------------------------

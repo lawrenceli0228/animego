@@ -126,6 +126,7 @@ const refetchTimeout = 15 * time.Second
 // call site downstream looking identical, and the one that must not take the
 // inferred value would have no way left to refuse it.
 type AnimeDetail struct {
+	Trailer                     *anilist.Trailer       `json:"trailer,omitempty"`
 	AnilistID                   int32                  `json:"anilistId"`
 	TitleRomaji                 *string                `json:"titleRomaji"`
 	TitleEnglish                *string                `json:"titleEnglish"`
@@ -578,6 +579,12 @@ func isStale(
 	characters []dbgen.GetAnimeCharactersByIDRow,
 	relations []dbgen.GetAnimeRelationsByIDRow,
 ) bool {
+	// Never asked about this row's trailer.  Filling it is a read-through,
+	// not a repair: a row that HAS been asked stays fresh even when the
+	// answer was "none", so a confirmed absence cannot loop.
+	if !main.TrailerCheckedAt.Valid {
+		return true
+	}
 	if main.CachedAt.Valid && time.Since(main.CachedAt.Time) >= staleCacheTTL {
 		return true
 	}
@@ -690,7 +697,10 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 // also leave the document partially written on connection drops.
 func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m anilist.Media) error {
 	// 1) Main row — ON CONFLICT preserves Bangumi columns.
-	if err := s.db.UpsertAnimeCache(ctx, NormalizeMainRow(m)); err != nil {
+	// AnimeDetailQuery selects trailer, so a nil Trailer here is
+	// AniList's answer, not a gap.
+	params := NormalizeMainRow(m, anilist.TrailerSelected)
+	if err := s.db.UpsertAnimeCache(ctx, params); err != nil {
 		return fmt.Errorf("upsert main: %w", err)
 	}
 
@@ -980,6 +990,7 @@ func assembleDetail(
 	}
 
 	return &AnimeDetail{
+		Trailer:                     supportedTrailer(&anilist.Trailer{ID: main.TrailerID, Site: main.TrailerSite}),
 		AnilistID:                   main.AnilistID,
 		TitleRomaji:                 main.TitleRomaji,
 		TitleEnglish:                main.TitleEnglish,

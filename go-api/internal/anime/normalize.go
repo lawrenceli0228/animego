@@ -31,6 +31,16 @@ import (
 //	seasonYear           →  season_year         (*int → *int32)
 //	averageScore         →  average_score       (*int → *float64; AniList 0-100 scale)
 //	format               →  format
+//	trailer.id/.site     →  trailer_id / trailer_site  (YouTube only — see supportedTrailer)
+//	(the sel argument)   →  trailer_checked_at  (now() when selected)
+//
+// The trailer columns are the one place this function needs to know
+// something the Media alone cannot tell it: whether the query selected
+// `trailer`.  sel carries that (see anilist.TrailerSelection).  With
+// TrailerNotSelected the row is emitted with a nil trailer_checked_at and
+// nil metadata, which the upsert reads as "leave whatever is stored".
+// With TrailerSelected an absent or unsupported trailer is stamped as
+// checked-at-now, i.e. a confirmed absence rather than a gap.
 //
 // title_chinese, bgm_id, bangumi_score, bangumi_votes, bangumi_version
 // are NOT set here — Bangumi enrichment workers own those columns and
@@ -40,12 +50,19 @@ import (
 // function via colorx.NormalizePosterAccent.  Brand-fallback (#8B5CF6)
 // applies for null / invalid / grayscale color inputs, so the three
 // poster_accent_* columns ALWAYS land non-null.
-func NormalizeMainRow(m anilist.Media) dbgen.UpsertAnimeCacheParams {
+func NormalizeMainRow(m anilist.Media, sel anilist.TrailerSelection) dbgen.UpsertAnimeCacheParams {
 	var rawColor string
 	if m.CoverImage != nil && m.CoverImage.Color != nil {
 		rawColor = *m.CoverImage.Color
 	}
 	accent := colorx.NormalizePosterAccent(rawColor)
+
+	var trailerID, trailerSite *string
+	if sel == anilist.TrailerSelected {
+		if trailer := supportedTrailer(m.Trailer); trailer != nil {
+			trailerID, trailerSite = trailer.ID, trailer.Site
+		}
+	}
 
 	return dbgen.UpsertAnimeCacheParams{
 		AnilistID:                   int32(m.ID),
@@ -65,6 +82,9 @@ func NormalizeMainRow(m anilist.Media) dbgen.UpsertAnimeCacheParams {
 		SeasonYear:                  ptrInt32(m.SeasonYear),
 		AverageScore:                intPtrToFloat64Ptr(m.AverageScore),
 		Format:                      m.Format,
+		TrailerID:                   trailerID,
+		TrailerSite:                 trailerSite,
+		TrailerChecked:              sel == anilist.TrailerSelected,
 	}
 }
 
