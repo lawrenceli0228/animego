@@ -18,6 +18,9 @@
  * @property {number}  [parsedNumber]       - 从文件名解析出的集号(本季内)
  * @property {number}  [parsedSeason]       - 从文件名解析出的季号(4th / S2 / 第N季 / 罗马数字),null 表示未识别
  * @property {number}  [parsedEpisodeAlt]   - 繁中字幕组的"總第N"总集号,跨季全局递增;null 表示无此标记
+ * @property {'perSeason'|'absolute'|'unknown'} [parsedNumberSpace] - `episode` 属于哪套编号。
+ *   只在文件名自证时才不是 unknown(`S01E03`,或同时出现 `總第N`);缺失一律读作 unknown。
+ *   目前只携带不消费 —— 见 useVideoFiles.ts 上的说明。
  * @property {'main'|'sp'|'ova'|'movie'|'pv'|'commentary'|'ncop'|'nced'|'bonus'|'trailer'|'interview'|'wp'|'cm'|'menu'|'unknown'} parsedKind - 集类型
  * @property {string}  [parsedGroup]        - 字幕组(从括号标签提取)
  * @property {'480p'|'720p'|'1080p'|'2160p'} [parsedResolution]   - 分辨率标签
