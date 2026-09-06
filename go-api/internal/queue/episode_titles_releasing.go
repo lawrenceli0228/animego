@@ -174,7 +174,7 @@ func (w *EpisodeTitlesWorker) Work(ctx context.Context, _ *river.Job[EpisodeTitl
 		return nil
 	}
 
-	var accepted, written, retracted, rejected, empty, failed int
+	var accepted, written, retracted, shielded, rejected, empty, failed int
 	for _, row := range rows {
 		if row.BgmID == nil {
 			continue // the query's predicate guarantees this
@@ -185,6 +185,7 @@ func (w *EpisodeTitlesWorker) Work(ctx context.Context, _ *river.Job[EpisodeTitl
 			accepted++
 			written += res.written
 			retracted += res.retracted
+			shielded += res.shielded
 		case sweepRejected:
 			rejected++
 			w.stampAttempt(ctx, row.AnilistID, *row.BgmID)
@@ -201,6 +202,7 @@ func (w *EpisodeTitlesWorker) Work(ctx context.Context, _ *river.Job[EpisodeTitl
 		"accepted", accepted,
 		"titlesWritten", written,
 		"rowsRetracted", retracted,
+		"rowsShielded", shielded,
 		"rejected", rejected,
 		"empty", empty,
 		"failed", failed,
@@ -221,6 +223,12 @@ type sweepResult struct {
 	class     sweepClass
 	written   int
 	retracted int
+	// shielded counts rows the withdrawal declined to take because they sit
+	// inside the season's window -- the number that says how often a Bangumi
+	// fetch came back shorter than what we already hold.  It is reported and
+	// not acted on: a review queue for these is only worth building once the
+	// pass has shown the number is not zero.
+	shielded int
 }
 
 // sweepOne handles a single anime, applying the same identity rule the CLI
@@ -402,10 +410,30 @@ func (w *EpisodeTitlesWorker) sweepViaBangumi(ctx context.Context, anilistID, bg
 		slog.WarnContext(ctx, "episode_titles bangumi fallback partial",
 			"anilistId", anilistID, "bgmId", bgmID, "written", written, "failures", failures)
 	}
+
+	// The withdrawal the dandanplay branch has always done, on the branch that
+	// never did it.  Best-effort like the write it follows: it runs in its own
+	// transaction after the upserts have landed, so a failure here costs the
+	// withdrawal and not the titles, and the row is still stamped -- an
+	// un-stamped row would come back at the head of every batch and re-spend
+	// two Bangumi requests to retry an optional cleanup.
+	retracted, shielded, rerr := episodeTitleRetractor{pool: w.pool, q: w.q}.
+		retract(ctx, anilistID, keptEpisodes(titles), total)
+	if rerr != nil {
+		slog.WarnContext(ctx, "episode_titles bangumi retract failed",
+			"anilistId", anilistID, "bgmId", bgmID, "err", rerr)
+	}
+
 	slog.InfoContext(ctx, "episode_titles via bangumi",
-		"anilistId", anilistID, "bgmId", bgmID, "written", written)
+		"anilistId", anilistID, "bgmId", bgmID,
+		"written", written, "retracted", retracted, "shielded", shielded)
 	w.stampAttempt(ctx, anilistID, bgmID)
-	return sweepResult{class: sweepWritten, written: written}
+	return sweepResult{
+		class:     sweepWritten,
+		written:   written,
+		retracted: retracted,
+		shielded:  shielded,
+	}
 }
 
 // episodeTitlesSweepEnabled reads the kill switch.

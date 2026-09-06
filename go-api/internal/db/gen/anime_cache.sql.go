@@ -2479,6 +2479,57 @@ func (q *Queries) ListDescriptionCnLlmCandidates(ctx context.Context, retryAfter
 	return items, nil
 }
 
+const listEpisodeTitleEpisodesBySource = `-- name: ListEpisodeTitleEpisodesBySource :many
+SELECT episode
+  FROM anime_episode_titles
+ WHERE anime_id = $1::int
+   AND (name_cn_source = $2::text
+        OR name_source = $2::text)
+ ORDER BY episode
+`
+
+// The episode numbers one source currently holds a field on, for one anime.
+//
+// ClearEpisodeTitlesBySourceOutside decides what to withdraw from the kept-set
+// alone: everything this source owns and the caller did not re-state goes.
+// That is the right rule for a writer that fetches a whole subject every time
+// and can therefore treat its own silence as a retraction.  It is the wrong
+// rule for one whose list is routinely INCOMPLETE rather than shorter: on
+// 2026-09-06 production held 90,241 Bangumi-sourced rows across 6,041 anime,
+// of which 1,219 already hold fewer rows than their own season's episode
+// count and 282 have holes in the middle.  Sparse is the normal shape, so a
+// fetch that comes back with six of twelve episodes is not evidence that the
+// other six stopped existing.
+//
+// Reading the held set first is what lets the caller tell the two apart
+// without guessing: an episode outside the kept-set AND outside the season's
+// window cannot belong to this entry whatever upstream is doing today, while
+// one outside the kept-set but INSIDE the window is exactly the row a partial
+// fetch would erase.  The first is withdrawn; the second is added back to the
+// kept-set and survives.  See internal/queue/episode_titles_retract.go.
+//
+// Ordered so the caller's set arithmetic and the logs it emits are stable
+// between passes; the scan is anime_id-prefixed on the primary key.
+func (q *Queries) ListEpisodeTitleEpisodesBySource(ctx context.Context, animeID int32, source string) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listEpisodeTitleEpisodesBySource, animeID, source)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var episode int32
+		if err := rows.Scan(&episode); err != nil {
+			return nil, err
+		}
+		items = append(items, episode)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEpisodesBgmCandidates = `-- name: ListEpisodesBgmCandidates :many
 SELECT
     ac.anilist_id,

@@ -1924,6 +1924,36 @@ DELETE FROM anime_episode_titles
    AND name_cn IS NULL
    AND name IS NULL;
 
+-- name: ListEpisodeTitleEpisodesBySource :many
+-- The episode numbers one source currently holds a field on, for one anime.
+--
+-- ClearEpisodeTitlesBySourceOutside decides what to withdraw from the kept-set
+-- alone: everything this source owns and the caller did not re-state goes.
+-- That is the right rule for a writer that fetches a whole subject every time
+-- and can therefore treat its own silence as a retraction.  It is the wrong
+-- rule for one whose list is routinely INCOMPLETE rather than shorter: on
+-- 2026-09-06 production held 90,241 Bangumi-sourced rows across 6,041 anime,
+-- of which 1,219 already hold fewer rows than their own season's episode
+-- count and 282 have holes in the middle.  Sparse is the normal shape, so a
+-- fetch that comes back with six of twelve episodes is not evidence that the
+-- other six stopped existing.
+--
+-- Reading the held set first is what lets the caller tell the two apart
+-- without guessing: an episode outside the kept-set AND outside the season's
+-- window cannot belong to this entry whatever upstream is doing today, while
+-- one outside the kept-set but INSIDE the window is exactly the row a partial
+-- fetch would erase.  The first is withdrawn; the second is added back to the
+-- kept-set and survives.  See internal/queue/episode_titles_retract.go.
+--
+-- Ordered so the caller's set arithmetic and the logs it emits are stable
+-- between passes; the scan is anime_id-prefixed on the primary key.
+SELECT episode
+  FROM anime_episode_titles
+ WHERE anime_id = sqlc.arg(anime_id)::int
+   AND (name_cn_source = sqlc.arg(source)::text
+        OR name_source = sqlc.arg(source)::text)
+ ORDER BY episode;
+
 -- name: ListReleasingEpisodeTitleCandidates :many
 -- The airing shows whose episode titles are due another look.
 --

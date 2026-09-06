@@ -1266,6 +1266,29 @@ type Querier interface {
 	// LIMIT 500 caps abuse (Express has no limit; we add one because
 	// pulling 50k rows on a popular episode would blow the response).
 	ListEpisodeComments(ctx context.Context, anilistID int32, episode int32, viewerUserID *uuid.UUID) ([]ListEpisodeCommentsRow, error)
+	// The episode numbers one source currently holds a field on, for one anime.
+	//
+	// ClearEpisodeTitlesBySourceOutside decides what to withdraw from the kept-set
+	// alone: everything this source owns and the caller did not re-state goes.
+	// That is the right rule for a writer that fetches a whole subject every time
+	// and can therefore treat its own silence as a retraction.  It is the wrong
+	// rule for one whose list is routinely INCOMPLETE rather than shorter: on
+	// 2026-09-06 production held 90,241 Bangumi-sourced rows across 6,041 anime,
+	// of which 1,219 already hold fewer rows than their own season's episode
+	// count and 282 have holes in the middle.  Sparse is the normal shape, so a
+	// fetch that comes back with six of twelve episodes is not evidence that the
+	// other six stopped existing.
+	//
+	// Reading the held set first is what lets the caller tell the two apart
+	// without guessing: an episode outside the kept-set AND outside the season's
+	// window cannot belong to this entry whatever upstream is doing today, while
+	// one outside the kept-set but INSIDE the window is exactly the row a partial
+	// fetch would erase.  The first is withdrawn; the second is added back to the
+	// kept-set and survives.  See internal/queue/episode_titles_retract.go.
+	//
+	// Ordered so the caller's set arithmetic and the logs it emits are stable
+	// between passes; the scan is anime_id-prefixed on the primary key.
+	ListEpisodeTitleEpisodesBySource(ctx context.Context, animeID int32, source string) ([]int32, error)
 	// Rows whose episode count is unknown to AniList and whose Bangumi binding
 	// might be able to supply one.
 	//
