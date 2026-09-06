@@ -953,7 +953,6 @@ func (q *Queries) GetAnimeGenresByID(ctx context.Context, animeID int32) ([]stri
 
 const getAnimeMainByID = `-- name: GetAnimeMainByID :one
 SELECT
-    trailer_id, trailer_site, trailer_fetched,
     anilist_id,
     title_romaji,
     title_english,
@@ -987,15 +986,17 @@ SELECT
     bangumi_score,
     bangumi_votes,
     bangumi_version,
-    cached_at
+    cached_at,
+    trailer_id,
+    trailer_site,
+    -- The detail read is the one that has to tell "asked, none" apart
+    -- from "never asked": isStale turns the second into a re-fetch.
+    trailer_checked_at
 FROM anime_cache
 WHERE anilist_id = $1
 `
 
 type GetAnimeMainByIDRow struct {
-	TrailerID                   *string            `json:"trailerId"`
-	TrailerSite                 *string            `json:"trailerSite"`
-	TrailerFetched              bool               `json:"trailerFetched"`
 	AnilistID                   int32              `json:"anilistId"`
 	TitleRomaji                 *string            `json:"titleRomaji"`
 	TitleEnglish                *string            `json:"titleEnglish"`
@@ -1030,6 +1031,9 @@ type GetAnimeMainByIDRow struct {
 	BangumiVotes                *int32             `json:"bangumiVotes"`
 	BangumiVersion              int32              `json:"bangumiVersion"`
 	CachedAt                    pgtype.Timestamptz `json:"cachedAt"`
+	TrailerID                   *string            `json:"trailerId"`
+	TrailerSite                 *string            `json:"trailerSite"`
+	TrailerCheckedAt            pgtype.Timestamptz `json:"trailerCheckedAt"`
 }
 
 // Full main-row read for /:anilistId detail.  Returns every column
@@ -1056,9 +1060,6 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 	row := q.db.QueryRow(ctx, getAnimeMainByID, anilistID)
 	var i GetAnimeMainByIDRow
 	err := row.Scan(
-		&i.TrailerID,
-		&i.TrailerSite,
-		&i.TrailerFetched,
 		&i.AnilistID,
 		&i.TitleRomaji,
 		&i.TitleEnglish,
@@ -1093,6 +1094,9 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.BangumiVotes,
 		&i.BangumiVersion,
 		&i.CachedAt,
+		&i.TrailerID,
+		&i.TrailerSite,
+		&i.TrailerCheckedAt,
 	)
 	return i, err
 }
@@ -1274,7 +1278,6 @@ func (q *Queries) GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]str
 const getCompletedGems = `-- name: GetCompletedGems :many
 
 SELECT
-    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -1293,7 +1296,13 @@ SELECT
     season_year,
     status,
     format,
-    description
+    description,
+    -- Trailer metadata, for a consumer that renders a preview straight
+    -- from a list.  trailer_checked_at is deliberately NOT here: it is
+    -- cache bookkeeping, and a list reader's question is only "is there
+    -- a trailer to show".
+    trailer_id,
+    trailer_site
 FROM anime_cache
 WHERE
     status = 'FINISHED'
@@ -1304,8 +1313,6 @@ LIMIT $1
 `
 
 type GetCompletedGemsRow struct {
-	TrailerID       *string  `json:"trailerId"`
-	TrailerSite     *string  `json:"trailerSite"`
 	AnilistID       int32    `json:"anilistId"`
 	TitleRomaji     *string  `json:"titleRomaji"`
 	TitleEnglish    *string  `json:"titleEnglish"`
@@ -1325,6 +1332,8 @@ type GetCompletedGemsRow struct {
 	Status          *string  `json:"status"`
 	Format          *string  `json:"format"`
 	Description     *string  `json:"description"`
+	TrailerID       *string  `json:"trailerId"`
+	TrailerSite     *string  `json:"trailerSite"`
 }
 
 // Queries against anime_cache and its child tables.
@@ -1353,8 +1362,6 @@ func (q *Queries) GetCompletedGems(ctx context.Context, limit int32) ([]GetCompl
 	for rows.Next() {
 		var i GetCompletedGemsRow
 		if err := rows.Scan(
-			&i.TrailerID,
-			&i.TrailerSite,
 			&i.AnilistID,
 			&i.TitleRomaji,
 			&i.TitleEnglish,
@@ -1374,6 +1381,8 @@ func (q *Queries) GetCompletedGems(ctx context.Context, limit int32) ([]GetCompl
 			&i.Status,
 			&i.Format,
 			&i.Description,
+			&i.TrailerID,
+			&i.TrailerSite,
 		); err != nil {
 			return nil, err
 		}
@@ -1581,7 +1590,6 @@ func (q *Queries) GetRelationEnrichmentByIDs(ctx context.Context, dollar_1 []int
 
 const getSeasonalAnime = `-- name: GetSeasonalAnime :many
 SELECT
-    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -1625,7 +1633,11 @@ SELECT
     (SELECT count(*)::bigint
      FROM episode_comments discussion
      WHERE discussion.anilist_id = anime_cache.anilist_id
-    ) AS discussion_count
+    ) AS discussion_count,
+    -- See GetCompletedGems for why trailer_checked_at stays out of list
+    -- projections.
+    trailer_id,
+    trailer_site
 FROM anime_cache
 WHERE
     season = $1
@@ -1640,8 +1652,6 @@ LIMIT $3 OFFSET $4
 `
 
 type GetSeasonalAnimeRow struct {
-	TrailerID             *string  `json:"trailerId"`
-	TrailerSite           *string  `json:"trailerSite"`
 	AnilistID             int32    `json:"anilistId"`
 	TitleRomaji           *string  `json:"titleRomaji"`
 	TitleEnglish          *string  `json:"titleEnglish"`
@@ -1668,6 +1678,8 @@ type GetSeasonalAnimeRow struct {
 	DescriptionHantSource *string  `json:"descriptionHantSource"`
 	Genres                []string `json:"genres"`
 	DiscussionCount       int64    `json:"discussionCount"`
+	TrailerID             *string  `json:"trailerId"`
+	TrailerSite           *string  `json:"trailerSite"`
 }
 
 // Paginated season listing.  Backs /api/anime/seasonal (cache-first path)
@@ -1697,8 +1709,6 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 	for rows.Next() {
 		var i GetSeasonalAnimeRow
 		if err := rows.Scan(
-			&i.TrailerID,
-			&i.TrailerSite,
 			&i.AnilistID,
 			&i.TitleRomaji,
 			&i.TitleEnglish,
@@ -1725,6 +1735,8 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 			&i.DescriptionHantSource,
 			&i.Genres,
 			&i.DiscussionCount,
+			&i.TrailerID,
+			&i.TrailerSite,
 		); err != nil {
 			return nil, err
 		}
@@ -1984,7 +1996,6 @@ func (q *Queries) GetWatchers(ctx context.Context, anilistID int32, limit int32)
 
 const getYearlyTop = `-- name: GetYearlyTop :many
 SELECT
-    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -2003,7 +2014,13 @@ SELECT
     season_year,
     status,
     format,
-    description
+    description,
+    -- Trailer metadata, for a consumer that renders a preview straight
+    -- from a list.  trailer_checked_at is deliberately NOT here: it is
+    -- cache bookkeeping, and a list reader's question is only "is there
+    -- a trailer to show".
+    trailer_id,
+    trailer_site
 FROM anime_cache
 WHERE
     season_year = $1
@@ -2014,8 +2031,6 @@ LIMIT $2
 `
 
 type GetYearlyTopRow struct {
-	TrailerID       *string  `json:"trailerId"`
-	TrailerSite     *string  `json:"trailerSite"`
 	AnilistID       int32    `json:"anilistId"`
 	TitleRomaji     *string  `json:"titleRomaji"`
 	TitleEnglish    *string  `json:"titleEnglish"`
@@ -2035,6 +2050,8 @@ type GetYearlyTopRow struct {
 	Status          *string  `json:"status"`
 	Format          *string  `json:"format"`
 	Description     *string  `json:"description"`
+	TrailerID       *string  `json:"trailerId"`
+	TrailerSite     *string  `json:"trailerSite"`
 }
 
 // Top-rated TV/Movie/ONA anime for a single year.  Backs
@@ -2050,8 +2067,6 @@ func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int
 	for rows.Next() {
 		var i GetYearlyTopRow
 		if err := rows.Scan(
-			&i.TrailerID,
-			&i.TrailerSite,
 			&i.AnilistID,
 			&i.TitleRomaji,
 			&i.TitleEnglish,
@@ -2071,6 +2086,8 @@ func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int
 			&i.Status,
 			&i.Format,
 			&i.Description,
+			&i.TrailerID,
+			&i.TrailerSite,
 		); err != nil {
 			return nil, err
 		}
@@ -3514,7 +3531,7 @@ INSERT INTO anime_cache (
     description,
     episodes, status, season, season_year,
     average_score, format,
-    trailer_id, trailer_site, trailer_fetched,
+    trailer_id, trailer_site, trailer_checked_at,
     cached_at, updated_at
 ) VALUES (
     $1,
@@ -3525,7 +3542,7 @@ INSERT INTO anime_cache (
     $11,
     $12, $13, $14, $15,
     $16, $17,
-    $18, $19, $20::boolean,
+    $18, $19, CASE WHEN $20::boolean THEN now() ELSE NULL END,
     now(), now()
 )
 ON CONFLICT (anilist_id) DO UPDATE SET
@@ -3545,9 +3562,13 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     season_year = EXCLUDED.season_year,
     average_score = EXCLUDED.average_score,
     format = EXCLUDED.format,
-    trailer_id = CASE WHEN EXCLUDED.trailer_fetched THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
-    trailer_site = CASE WHEN EXCLUDED.trailer_fetched THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
-    trailer_fetched = anime_cache.trailer_fetched OR EXCLUDED.trailer_fetched,
+    -- EXCLUDED.trailer_checked_at is non-NULL exactly when this caller's
+    -- GraphQL document selected ` + "`" + `trailer` + "`" + `.  A caller whose query did not
+    -- (search) therefore leaves all three columns alone instead of
+    -- overwriting a stored trailer with the nothing it did not ask for.
+    trailer_id = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
+    trailer_site = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
+    trailer_checked_at = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_checked_at ELSE anime_cache.trailer_checked_at END,
     cached_at = now(),
     updated_at = now()
 `
@@ -3572,7 +3593,7 @@ type UpsertAnimeCacheParams struct {
 	Format                      *string  `json:"format"`
 	TrailerID                   *string  `json:"trailerId"`
 	TrailerSite                 *string  `json:"trailerSite"`
-	TrailerFetched              bool     `json:"trailerFetched"`
+	TrailerChecked              bool     `json:"trailerChecked"`
 }
 
 // Upsert anime_cache main row from AniList sync.  Bangumi columns
@@ -3610,7 +3631,7 @@ func (q *Queries) UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCachePara
 		arg.Format,
 		arg.TrailerID,
 		arg.TrailerSite,
-		arg.TrailerFetched,
+		arg.TrailerChecked,
 	)
 	return err
 }

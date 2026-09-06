@@ -1098,7 +1098,7 @@ func staleTimestamp() pgtype.Timestamptz {
 func TestIsStale_FreshNotStale(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerFetched: true}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	studios := []string{"MAPPA"}
 	characters := []dbgen.GetAnimeCharactersByIDRow{
 		{NameEn: ptrString("Alice"), Role: ptrString("MAIN")},
@@ -1124,7 +1124,7 @@ func TestIsStale_CachedAtPastTTL(t *testing.T) {
 func TestIsStale_EmptyStudios(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerFetched: true}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
 	assert.True(t, isStale(main, []string{}, characters, nil), "empty studios must trip stale")
 }
@@ -1133,7 +1133,7 @@ func TestIsStale_EmptyStudios(t *testing.T) {
 func TestIsStale_EmptyCharacters(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerFetched: true}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	assert.True(t, isStale(main, []string{"MAPPA"}, []dbgen.GetAnimeCharactersByIDRow{}, nil),
 		"empty characters must trip stale")
 }
@@ -1143,7 +1143,7 @@ func TestIsStale_EmptyCharacters(t *testing.T) {
 func TestIsStale_FirstCharacterRoleNil(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerFetched: true}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{NameEn: ptrString("Bob"), Role: nil}}
 	assert.True(t, isStale(main, []string{"MAPPA"}, characters, nil),
 		"first character with nil role must trip stale")
@@ -1156,7 +1156,7 @@ func TestIsStale_FirstCharacterRoleNil(t *testing.T) {
 func TestIsStale_FirstRelationCoverNil(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerFetched: true}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
 	relations := []dbgen.GetAnimeRelationsByIDRow{{AnilistID: 100, CoverImageUrl: nil}}
 	assert.True(t, isStale(main, []string{"MAPPA"}, characters, relations),
@@ -1169,7 +1169,7 @@ func TestIsStale_FirstRelationCoverNil(t *testing.T) {
 func TestIsStale_NoRelations_NotTriggerByCover(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerFetched: true}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
 	assert.False(t, isStale(main, []string{"MAPPA"}, characters, []dbgen.GetAnimeRelationsByIDRow{}),
 		"empty relations slice must not by itself trip stale")
@@ -1342,7 +1342,7 @@ func TestDetail_NotInCache_AniListReFetchSucceeds(t *testing.T) {
 				AnilistID:      42,
 				TitleRomaji:    &romaji,
 				CachedAt:       freshTimestamp(),
-				TrailerFetched: true,
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 		},
 	}
@@ -1398,7 +1398,7 @@ func TestDetail_StaleDetected_AniListReFetchSucceeds(t *testing.T) {
 					AnilistID:      77,
 					TitleRomaji:    &romaji,
 					CachedAt:       freshTimestamp(),
-					TrailerFetched: true,
+					TrailerCheckedAt: freshTimestamp(),
 					// no characters → triggers stale check below
 				}, nil
 			}
@@ -1406,7 +1406,7 @@ func TestDetail_StaleDetected_AniListReFetchSucceeds(t *testing.T) {
 				AnilistID:      77,
 				TitleRomaji:    &romajiAfter,
 				CachedAt:       freshTimestamp(),
-				TrailerFetched: true,
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 		},
 		// characters/studios fns nil → empty slices → isStale=true.
@@ -1441,7 +1441,7 @@ func TestDetail_StaleDetected_AniListFails_FallbackToStale(t *testing.T) {
 				AnilistID:      88,
 				TitleRomaji:    &staleTitle,
 				CachedAt:       freshTimestamp(),
-				TrailerFetched: true,
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 			// no characters → isStale=true
 		},
@@ -1474,7 +1474,7 @@ func TestDetail_FreshNotStale_SkipsReFetch(t *testing.T) {
 				AnilistID:      99,
 				TitleRomaji:    &romaji,
 				CachedAt:       freshTimestamp(),
-				TrailerFetched: true,
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 		},
 		getAnimeStudiosByIDFn: func(_ context.Context, _ int32) ([]string, error) {
@@ -1522,7 +1522,7 @@ func TestDetail_StaleByCachedAt(t *testing.T) {
 				AnilistID:      55,
 				TitleRomaji:    &romajiPost,
 				CachedAt:       freshTimestamp(),
-				TrailerFetched: true,
+				TrailerCheckedAt: freshTimestamp(),
 			}, nil
 		},
 		// Content checks all pass — only cached_at is stale.

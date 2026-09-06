@@ -579,7 +579,10 @@ func isStale(
 	characters []dbgen.GetAnimeCharactersByIDRow,
 	relations []dbgen.GetAnimeRelationsByIDRow,
 ) bool {
-	if !main.TrailerFetched {
+	// Never asked about this row's trailer.  Filling it is a read-through,
+	// not a repair: a row that HAS been asked stays fresh even when the
+	// answer was "none", so a confirmed absence cannot loop.
+	if !main.TrailerCheckedAt.Valid {
 		return true
 	}
 	if main.CachedAt.Valid && time.Since(main.CachedAt.Time) >= staleCacheTTL {
@@ -694,9 +697,9 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 // also leave the document partially written on connection drops.
 func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m anilist.Media) error {
 	// 1) Main row — ON CONFLICT preserves Bangumi columns.
-	params := NormalizeMainRow(m)
-	// The full detail query always selects trailer; null is an authoritative absence.
-	params.TrailerFetched = true
+	// AnimeDetailQuery selects trailer, so a nil Trailer here is
+	// AniList's answer, not a gap.
+	params := NormalizeMainRow(m, anilist.TrailerSelected)
 	if err := s.db.UpsertAnimeCache(ctx, params); err != nil {
 		return fmt.Errorf("upsert main: %w", err)
 	}

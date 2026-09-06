@@ -17,7 +17,6 @@
 -- min 19, max 91, avg 64.25).  The Express threshold of 75 corresponds
 -- to "highly rated by AniList community" and is preserved verbatim.
 SELECT
-    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -36,7 +35,13 @@ SELECT
     season_year,
     status,
     format,
-    description
+    description,
+    -- Trailer metadata, for a consumer that renders a preview straight
+    -- from a list.  trailer_checked_at is deliberately NOT here: it is
+    -- cache bookkeeping, and a list reader's question is only "is there
+    -- a trailer to show".
+    trailer_id,
+    trailer_site
 FROM anime_cache
 WHERE
     status = 'FINISHED'
@@ -50,7 +55,6 @@ LIMIT $1;
 -- /api/anime/yearly-top, replacing anime.controller.js:93-110.
 -- Express limit is 20 hard, slice down to query limit in handler.
 SELECT
-    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -69,7 +73,13 @@ SELECT
     season_year,
     status,
     format,
-    description
+    description,
+    -- Trailer metadata, for a consumer that renders a preview straight
+    -- from a list.  trailer_checked_at is deliberately NOT here: it is
+    -- cache bookkeeping, and a list reader's question is only "is there
+    -- a trailer to show".
+    trailer_id,
+    trailer_site
 FROM anime_cache
 WHERE
     season_year = $1
@@ -92,7 +102,6 @@ LIMIT $2;
 -- risk of the cutover).  The subquery costs nothing extra in practice: the
 -- Hentai exclusion below already forces the same anime_genres lookup.
 SELECT
-    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -136,7 +145,11 @@ SELECT
     (SELECT count(*)::bigint
      FROM episode_comments discussion
      WHERE discussion.anilist_id = anime_cache.anilist_id
-    ) AS discussion_count
+    ) AS discussion_count,
+    -- See GetCompletedGems for why trailer_checked_at stays out of list
+    -- projections.
+    trailer_id,
+    trailer_site
 FROM anime_cache
 WHERE
     season = $1
@@ -277,7 +290,7 @@ INSERT INTO anime_cache (
     description,
     episodes, status, season, season_year,
     average_score, format,
-    trailer_id, trailer_site, trailer_fetched,
+    trailer_id, trailer_site, trailer_checked_at,
     cached_at, updated_at
 ) VALUES (
     $1,
@@ -288,7 +301,7 @@ INSERT INTO anime_cache (
     $11,
     $12, $13, $14, $15,
     $16, $17,
-    $18, $19, sqlc.arg(trailer_fetched)::boolean,
+    $18, $19, CASE WHEN sqlc.arg(trailer_checked)::boolean THEN now() ELSE NULL END,
     now(), now()
 )
 ON CONFLICT (anilist_id) DO UPDATE SET
@@ -308,9 +321,13 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     season_year = EXCLUDED.season_year,
     average_score = EXCLUDED.average_score,
     format = EXCLUDED.format,
-    trailer_id = CASE WHEN EXCLUDED.trailer_fetched THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
-    trailer_site = CASE WHEN EXCLUDED.trailer_fetched THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
-    trailer_fetched = anime_cache.trailer_fetched OR EXCLUDED.trailer_fetched,
+    -- EXCLUDED.trailer_checked_at is non-NULL exactly when this caller's
+    -- GraphQL document selected `trailer`.  A caller whose query did not
+    -- (search) therefore leaves all three columns alone instead of
+    -- overwriting a stored trailer with the nothing it did not ask for.
+    trailer_id = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
+    trailer_site = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
+    trailer_checked_at = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_checked_at ELSE anime_cache.trailer_checked_at END,
     cached_at = now(),
     updated_at = now();
 
@@ -882,7 +899,6 @@ WHERE anime_id = $1
 -- factual claim to a search engine about the work.  The page picks; the
 -- database does not pick for it.
 SELECT
-    trailer_id, trailer_site, trailer_fetched,
     anilist_id,
     title_romaji,
     title_english,
@@ -916,7 +932,12 @@ SELECT
     bangumi_score,
     bangumi_votes,
     bangumi_version,
-    cached_at
+    cached_at,
+    trailer_id,
+    trailer_site,
+    -- The detail read is the one that has to tell "asked, none" apart
+    -- from "never asked": isStale turns the second into a re-fetch.
+    trailer_checked_at
 FROM anime_cache
 WHERE anilist_id = $1;
 

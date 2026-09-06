@@ -70,9 +70,16 @@ jobs:
       # vet is a separate step from test on purpose. It fails on a compile
       # break in about a second and names the file, whereas the test run only
       # reports it after paying ~40s of container startup.
+      #
+      # ./... and not ./test/integration/...: the gate used to be scoped to the
+      # one directory tagged files were expected to live in, which reproduced
+      # the same invisibility one directory over. A tagged file written next to
+      # the code it tests compiled in neither job -- not in the untagged
+      # `go test ./...` above, and not in the scoped gate here. Vetting the
+      # whole module costs a second and cannot miss the next one.
       - name: Vet integration tests (compile gate)
         working-directory: go-api
-        run: go vet -tags=integration ./test/integration/...
+        run: go vet -tags=integration ./...
 
       # Spins Postgres 16 (the custom pg_cron image built above) and Mongo 7
       # via testcontainers. TestMain starts each once and shares them across

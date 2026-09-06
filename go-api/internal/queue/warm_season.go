@@ -98,7 +98,12 @@ type WarmSeasonDB interface {
 // internal/queue for the Enqueuer surface — pulling anime back in here
 // would create a cycle.  Main.go passes anime.NormalizeMainRow as the
 // production normalizer; tests can inject a simpler closure if needed.
-type MainRowNormalizer func(m anilist.Media) dbgen.UpsertAnimeCacheParams
+// The anilist.TrailerSelection argument states whether the query behind
+// the Media selected `trailer`.  It is part of the signature (rather than
+// something each call site remembers to set on the returned params) so a
+// new upsert path cannot silently record "not checked" for a query that
+// did check.
+type MainRowNormalizer func(m anilist.Media, sel anilist.TrailerSelection) dbgen.UpsertAnimeCacheParams
 
 // defaultMainRowNormalizer is a tiny built-in normalizer used when the
 // constructor receives a nil normalizer.  It populates only AnilistID
@@ -106,8 +111,11 @@ type MainRowNormalizer func(m anilist.Media) dbgen.UpsertAnimeCacheParams
 // /anime.  Production callers MUST pass anime.NormalizeMainRow instead
 // (the default emits an under-populated row that won't render usefully
 // in the UI).
-func defaultMainRowNormalizer(m anilist.Media) dbgen.UpsertAnimeCacheParams {
-	return dbgen.UpsertAnimeCacheParams{AnilistID: int32(m.ID)}
+func defaultMainRowNormalizer(m anilist.Media, sel anilist.TrailerSelection) dbgen.UpsertAnimeCacheParams {
+	return dbgen.UpsertAnimeCacheParams{
+		AnilistID:      int32(m.ID),
+		TrailerChecked: sel == anilist.TrailerSelected,
+	}
 }
 
 // WarmSeasonWorker implements river.Worker[WarmSeasonArgs].  Embeds
@@ -224,7 +232,11 @@ func (w *WarmSeasonWorker) Work(ctx context.Context, job *river.Job[WarmSeasonAr
 		// keep going so a single bad row can't block the rest of the
 		// season; next periodic run picks up the misses.
 		for _, m := range resp.Page.Media {
-			params := w.normalize(m)
+			// This worker runs SeasonalAnimeQuery, which selects
+			// trailer: a nil Trailer is a confirmed absence, and
+			// recording that is what keeps a freshly warmed row from
+			// forcing a blocking detail re-fetch for the next 24h.
+			params := w.normalize(m, anilist.TrailerSelected)
 			if uErr := w.db.UpsertAnimeCache(ctx, params); uErr != nil {
 				upsertFail++
 				slog.WarnContext(ctx, "warm_season upsert row error",

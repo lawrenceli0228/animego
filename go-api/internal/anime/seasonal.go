@@ -328,9 +328,9 @@ func (s *SeasonalService) coldStart(
 	// request will retry the failed upsert via this same cold path
 	// because no enriched rows exist yet).
 	for _, m := range resp.Page.Media {
-		args := NormalizeMainRow(m)
-		// Seasonal query selects trailer too: null is a confirmed absence.
-		args.TrailerFetched = true
+		// SeasonalAnimeQuery selects trailer, so a nil Trailer here is
+		// a confirmed absence.
+		args := NormalizeMainRow(m, anilist.TrailerSelected)
 		if upErr := s.db.UpsertAnimeCache(ctx, args); upErr != nil {
 			slog.WarnContext(ctx, "anime/seasonal: upsert failed",
 				"anilist_id", args.AnilistID, "err", upErr)
