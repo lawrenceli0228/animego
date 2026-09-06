@@ -17,6 +17,7 @@
 -- min 19, max 91, avg 64.25).  The Express threshold of 75 corresponds
 -- to "highly rated by AniList community" and is preserved verbatim.
 SELECT
+    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -49,6 +50,7 @@ LIMIT $1;
 -- /api/anime/yearly-top, replacing anime.controller.js:93-110.
 -- Express limit is 20 hard, slice down to query limit in handler.
 SELECT
+    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -90,6 +92,7 @@ LIMIT $2;
 -- risk of the cutover).  The subquery costs nothing extra in practice: the
 -- Hentai exclusion below already forces the same anime_genres lookup.
 SELECT
+    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -274,6 +277,7 @@ INSERT INTO anime_cache (
     description,
     episodes, status, season, season_year,
     average_score, format,
+    trailer_id, trailer_site, trailer_fetched,
     cached_at, updated_at
 ) VALUES (
     $1,
@@ -284,6 +288,7 @@ INSERT INTO anime_cache (
     $11,
     $12, $13, $14, $15,
     $16, $17,
+    $18, $19, sqlc.arg(trailer_fetched)::boolean,
     now(), now()
 )
 ON CONFLICT (anilist_id) DO UPDATE SET
@@ -303,6 +308,9 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     season_year = EXCLUDED.season_year,
     average_score = EXCLUDED.average_score,
     format = EXCLUDED.format,
+    trailer_id = CASE WHEN EXCLUDED.trailer_fetched THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
+    trailer_site = CASE WHEN EXCLUDED.trailer_fetched THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
+    trailer_fetched = anime_cache.trailer_fetched OR EXCLUDED.trailer_fetched,
     cached_at = now(),
     updated_at = now();
 
@@ -874,6 +882,7 @@ WHERE anime_id = $1
 -- factual claim to a search engine about the work.  The page picks; the
 -- database does not pick for it.
 SELECT
+    trailer_id, trailer_site, trailer_fetched,
     anilist_id,
     title_romaji,
     title_english,

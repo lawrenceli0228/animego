@@ -47,7 +47,13 @@ func NormalizeMainRow(m anilist.Media) dbgen.UpsertAnimeCacheParams {
 	}
 	accent := colorx.NormalizePosterAccent(rawColor)
 
+	trailer := supportedTrailer(m.Trailer)
+	var trailerID, trailerSite *string
+	if trailer != nil {
+		trailerID, trailerSite = trailer.ID, trailer.Site
+	}
 	return dbgen.UpsertAnimeCacheParams{
+		TrailerID: trailerID, TrailerSite: trailerSite, TrailerFetched: m.Trailer != nil,
 		AnilistID:                   int32(m.ID),
 		TitleRomaji:                 deref(m.Title, func(t *anilist.Title) *string { return t.Romaji }),
 		TitleEnglish:                deref(m.Title, func(t *anilist.Title) *string { return t.English }),

@@ -328,3 +328,13 @@ same `episode` number (the Bangumi enrichment pipeline appended new
 versions instead of replacing).  The PG composite PK `(anime_id,
 episode)` rejects these.  The transform now dedups in-memory, **keeping
 the LAST occurrence** so the most recent enrichment wins.
+
+
+## 预告片元数据（迁移 0032）
+
+先执行数据库迁移 0032，再部署读取新字段的 Go API。季度、完结精选、年度榜单返回可空的 trailerId / trailerSite；详情返回 trailer `{id, site}`，无有效 YouTube 预告片时省略 trailer。只存 ID 与站点，不接收任意嵌入 URL。
+
+trailer_fetched 是缓存内部状态：迁移前的记录为 false，访问详情时补全；完整详情或季度查询明确返回 null 时记为已查询。搜索等未选 trailer 的简化查询不会清空已有值。季度旧缓存可以继续读取，使用方按需读详情补齐。
+
+验证：`CGO_ENABLED=0 go test ./internal/anime ./internal/anilist ./internal/db/...`。
+真实 SQL 往返：准备 Docker 和 `animego-postgres:dev` 后，执行 `CGO_ENABLED=0 go test -tags=integration ./internal/anime -run TestTrailerPostgresRoundTrip`；测试使用新建容器并自动销毁。本机 Docker 当前未启动，此项尚未执行。

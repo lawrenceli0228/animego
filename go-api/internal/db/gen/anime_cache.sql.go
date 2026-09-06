@@ -953,6 +953,7 @@ func (q *Queries) GetAnimeGenresByID(ctx context.Context, animeID int32) ([]stri
 
 const getAnimeMainByID = `-- name: GetAnimeMainByID :one
 SELECT
+    trailer_id, trailer_site, trailer_fetched,
     anilist_id,
     title_romaji,
     title_english,
@@ -992,6 +993,9 @@ WHERE anilist_id = $1
 `
 
 type GetAnimeMainByIDRow struct {
+	TrailerID                   *string            `json:"trailerId"`
+	TrailerSite                 *string            `json:"trailerSite"`
+	TrailerFetched              bool               `json:"trailerFetched"`
 	AnilistID                   int32              `json:"anilistId"`
 	TitleRomaji                 *string            `json:"titleRomaji"`
 	TitleEnglish                *string            `json:"titleEnglish"`
@@ -1052,6 +1056,9 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 	row := q.db.QueryRow(ctx, getAnimeMainByID, anilistID)
 	var i GetAnimeMainByIDRow
 	err := row.Scan(
+		&i.TrailerID,
+		&i.TrailerSite,
+		&i.TrailerFetched,
 		&i.AnilistID,
 		&i.TitleRomaji,
 		&i.TitleEnglish,
@@ -1267,6 +1274,7 @@ func (q *Queries) GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]str
 const getCompletedGems = `-- name: GetCompletedGems :many
 
 SELECT
+    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -1296,6 +1304,8 @@ LIMIT $1
 `
 
 type GetCompletedGemsRow struct {
+	TrailerID       *string  `json:"trailerId"`
+	TrailerSite     *string  `json:"trailerSite"`
 	AnilistID       int32    `json:"anilistId"`
 	TitleRomaji     *string  `json:"titleRomaji"`
 	TitleEnglish    *string  `json:"titleEnglish"`
@@ -1343,6 +1353,8 @@ func (q *Queries) GetCompletedGems(ctx context.Context, limit int32) ([]GetCompl
 	for rows.Next() {
 		var i GetCompletedGemsRow
 		if err := rows.Scan(
+			&i.TrailerID,
+			&i.TrailerSite,
 			&i.AnilistID,
 			&i.TitleRomaji,
 			&i.TitleEnglish,
@@ -1569,6 +1581,7 @@ func (q *Queries) GetRelationEnrichmentByIDs(ctx context.Context, dollar_1 []int
 
 const getSeasonalAnime = `-- name: GetSeasonalAnime :many
 SELECT
+    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -1627,6 +1640,8 @@ LIMIT $3 OFFSET $4
 `
 
 type GetSeasonalAnimeRow struct {
+	TrailerID             *string  `json:"trailerId"`
+	TrailerSite           *string  `json:"trailerSite"`
 	AnilistID             int32    `json:"anilistId"`
 	TitleRomaji           *string  `json:"titleRomaji"`
 	TitleEnglish          *string  `json:"titleEnglish"`
@@ -1682,6 +1697,8 @@ func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYe
 	for rows.Next() {
 		var i GetSeasonalAnimeRow
 		if err := rows.Scan(
+			&i.TrailerID,
+			&i.TrailerSite,
 			&i.AnilistID,
 			&i.TitleRomaji,
 			&i.TitleEnglish,
@@ -1967,6 +1984,7 @@ func (q *Queries) GetWatchers(ctx context.Context, anilistID int32, limit int32)
 
 const getYearlyTop = `-- name: GetYearlyTop :many
 SELECT
+    trailer_id, trailer_site,
     anilist_id,
     title_romaji,
     title_english,
@@ -1996,6 +2014,8 @@ LIMIT $2
 `
 
 type GetYearlyTopRow struct {
+	TrailerID       *string  `json:"trailerId"`
+	TrailerSite     *string  `json:"trailerSite"`
 	AnilistID       int32    `json:"anilistId"`
 	TitleRomaji     *string  `json:"titleRomaji"`
 	TitleEnglish    *string  `json:"titleEnglish"`
@@ -2030,6 +2050,8 @@ func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int
 	for rows.Next() {
 		var i GetYearlyTopRow
 		if err := rows.Scan(
+			&i.TrailerID,
+			&i.TrailerSite,
 			&i.AnilistID,
 			&i.TitleRomaji,
 			&i.TitleEnglish,
@@ -3492,6 +3514,7 @@ INSERT INTO anime_cache (
     description,
     episodes, status, season, season_year,
     average_score, format,
+    trailer_id, trailer_site, trailer_fetched,
     cached_at, updated_at
 ) VALUES (
     $1,
@@ -3502,6 +3525,7 @@ INSERT INTO anime_cache (
     $11,
     $12, $13, $14, $15,
     $16, $17,
+    $18, $19, $20::boolean,
     now(), now()
 )
 ON CONFLICT (anilist_id) DO UPDATE SET
@@ -3521,6 +3545,9 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     season_year = EXCLUDED.season_year,
     average_score = EXCLUDED.average_score,
     format = EXCLUDED.format,
+    trailer_id = CASE WHEN EXCLUDED.trailer_fetched THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
+    trailer_site = CASE WHEN EXCLUDED.trailer_fetched THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
+    trailer_fetched = anime_cache.trailer_fetched OR EXCLUDED.trailer_fetched,
     cached_at = now(),
     updated_at = now()
 `
@@ -3543,6 +3570,9 @@ type UpsertAnimeCacheParams struct {
 	SeasonYear                  *int32   `json:"seasonYear"`
 	AverageScore                *float64 `json:"averageScore"`
 	Format                      *string  `json:"format"`
+	TrailerID                   *string  `json:"trailerId"`
+	TrailerSite                 *string  `json:"trailerSite"`
+	TrailerFetched              bool     `json:"trailerFetched"`
 }
 
 // Upsert anime_cache main row from AniList sync.  Bangumi columns
@@ -3578,6 +3608,9 @@ func (q *Queries) UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCachePara
 		arg.SeasonYear,
 		arg.AverageScore,
 		arg.Format,
+		arg.TrailerID,
+		arg.TrailerSite,
+		arg.TrailerFetched,
 	)
 	return err
 }
