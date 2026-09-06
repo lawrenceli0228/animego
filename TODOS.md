@@ -683,3 +683,51 @@
 
 **Depends on / blocked by** — 番剧详情组的当日额度；与上一条抢同一份预算（搜索腿不抢）。
 
+
+---
+
+## 目录里够不着的那批条目的预告片
+
+**What** — 给 `anime_cache` 里 `season` 或 `season_year` 为 NULL 的行补一条按 id 批量拉取的回填路径：新增一个 `Page(media: id_in: [...])` 的 AniList 查询常量 + 客户端方法 + 一个 river job，每页 50 个 id，按 `trailer_checked_at IS NULL` 取批。
+
+**Why** — 迁移 0032 之后 trailer 只有两个写入口：`warm_season`（按 season+year 向 AniList 取整季）和详情页回源。前者按季度查，够不着没有季度的条目；后者要等有人打开那一页。2026-09-06 实测：全目录 18,048 行里 **4,500 行**没有季度（剧场版 / OVA / 特典），其中 **167 行**会出现在 `/api/anime/completed-gems` 的候选池里（该池共 1,610 行，占 10.4%）。也就是说 gems 列表大约每十张卡就有一张永远拿不到预告片，直到它自己的详情页被访问过一次。
+
+**Pros** — 覆盖补齐到 100%；这条「按 id 批量补一个 AniList 字段」的能力是通用的，下一个要给存量行补的字段可以直接复用，不用再想一遍。
+
+**Cons** — 新 job kind + 查询常量 + 取批 SQL + 配套测试约 250 行，而它在真实消费面（列表接口）上换来的增量只有 167 行。剩下的 4,333 行只能从详情页进，而详情页第一次访问就自己填了。
+
+**Context** — 这条是 2026-09-06 `/plan-eng-review` 评审 PR #167 时的 D3 决策的另一半：当时选了「跑现成的 warm-all」而不是新建回填 job，理由就是上面这个 167 : 250 行的比值。⚠️ **warm-all 必须带 `?startYear=1940`**（`internal/admin/warm_all.go:47` 的默认值是 2014，而目录里最早的 `season_year` 是 1940，`season_year < 2014` 的有 7,202 行，其中 511 行落在 gems 池里——不带这个参数会把 gems 池的覆盖率从 89.6% 打到 58%）。触发条件：Nagare 那边反馈 Discover 里空白卡片明显，或者要把预告片用在别的以 gems 为数据源的位置。
+
+**Depends on / blocked by** — 无。与 warm-all 互补而非互斥。
+
+---
+
+## sitemap 的 lastmod 说的不是「内容什么时候变的」
+
+**What** — 让 `anime_cache.updated_at` 只在内容真的发生变化时才推进（`ON CONFLICT` 的 `updated_at` 加一个 `IS DISTINCT FROM` 判断），或者给 `ListSitemapShard` 换一个内容级的 lastmod 来源。
+
+**Why** — `ListSitemapShard` 自己的注释写着「updated_at, not now(): Google discards lastmod it can prove wrong, and "every URL changed this second, on every fetch" is provably wrong」。但 `UpsertAnimeCache` 的 `ON CONFLICT` 无条件 `updated_at = now()`，而五个写入方里有三个是流量驱动的（详情回源、search 命中、seasonal 冷启动）。于是注释想避免的那件事，正在以周为单位发生。
+
+**Pros** — sitemap 的 lastmod 变成真信号，而 SEO 是这个项目的主线；顺带让「这行最后一次真的变了是什么时候」这个问题第一次有答案。
+
+**Cons** — 改的是五个写入方共用的那条 upsert，爆炸半径远大于任何单个特性；而且 SEO 侧的收益无法在上线前验证，只能上线后看 GSC。
+
+**Context** — 2026-09-06 实测 prod `anime_cache`：24 小时内 `updated_at` 被改过的有 **5,827 行（32%）**，7 天内 **17,692 行（98%）**，30 天内 **100%**。即全站 lastmod 每周整体翻新一遍，而内容并没有变。这条最初由 PR #167 评审的外部声音提出（担心 warm-all 会造成 lastmod 风暴），拿上面这组数字验证后结论反转：warm-all 的边际影响很小，因为基线本来就是全量翻新——问题不在 warm-all，在 upsert 语句本身。
+
+**Depends on / blocked by** — 无。但改动应当单独走一个 PR，并且和一次 GSC 观察窗口配对。
+
+---
+
+## 对外的 trailer 类型仍然是上游的解码结构体
+
+**What** — 在 `internal/anime` 定义 `DetailTrailer{ID, Site}`，`assembleDetail` 转换一次，不再把 `anilist.Trailer` 直接当成公开 API 类型。
+
+**Why** — `internal/anilist/types.go` 自己写着「field tags 跟 AniList GraphQL 字段名一致，不要改名，encoding/json 的 tag 就是契约」。同一个结构体现在同时背着两份契约：AniList 的解码格式，和我们对下游消费方的承诺。上游改名时，改 tag 会静默改变对外响应，不改 tag 会静默打断解码。
+
+**Pros** — 两份契约解耦，各自独立演进；四行代码。
+
+**Cons** — 与 `/search` 响应直接暴露 `anilist.PageInfo` 的现有做法不一致，要么两个一起改要么就是仓里有两套做法。
+
+**Context** — 2026-09-06 查过下游消费方的实际代码后，这条的优先级被判定为**低**：消费方用自己的匿名结构体解码，而它的前端把 trailer id 直接拼进 `youtube-nocookie.com/embed/${id}`、**根本不读 site 字段**。所以 `site` 改名的实际影响为零；只有 `id` 改名会出事，而那种情况下我们自己的解码同样会静默失效——拆不拆类型都挡不住。同一轮还确认了 `trailer,omitempty` 不需要改：消费方是 Go 的 `encoding/json` 解到指针，「缺键」和「null」结果完全一样。
+
+**Depends on / blocked by** — 无。真要做的话和 `anilist.PageInfo` 那处一起改，否则只是把不一致换个地方。
