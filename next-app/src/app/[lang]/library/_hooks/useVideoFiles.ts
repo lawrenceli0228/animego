@@ -39,6 +39,22 @@ export interface ParsedEpisodeItem {
   parsedResolution?: string;
   parsedSeason?: number;
   parsedEpisodeAlt?: number;
+  /**
+   * Which numbering `episode` is in — "perSeason" | "absolute" | "unknown",
+   * decided by episodeParser from the filename alone.
+   *
+   * Carried, not acted on. The consumers that would use it (the grid's
+   * offset inference, the danmaku match request, watchSync's translation)
+   * each infer a space today from `episodeOffset` + `totalEpisodes`, and
+   * changing what they infer from is a separate change with its own
+   * regressions. This lane exists so that when they do, the evidence is
+   * already alongside the number instead of having to be re-derived from a
+   * filename nobody kept.
+   *
+   * Absent means unknown — never assume perSeason for a field that was not
+   * written.
+   */
+  parsedNumberSpace?: "perSeason" | "absolute" | "unknown";
 }
 
 export interface ProcessFilesOptions {
@@ -148,6 +164,7 @@ export function useVideoFiles(): UseVideoFilesResult {
           parsedResolution: meta.resolution,
           parsedSeason: meta.season,
           parsedEpisodeAlt: meta.episodeAlt,
+          parsedNumberSpace: meta.numberSpace,
         };
       });
 

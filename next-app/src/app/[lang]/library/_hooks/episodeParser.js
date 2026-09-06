@@ -34,24 +34,44 @@ function stripTechTokens(s) {
     .replace(/\b\d{3,4}[Pp]\b/g, '');        // 1080P, 720p, 2160P, etc.
 }
 
-export function parseEpisodeNumber(filename) {
-  const patterns = [
-    /\bS\d+E(\d+)/i,                // S01E03
-    // `\b` is load-bearing — without it, `e 2` inside prose like
-    // "Class de 2-banme" matched and stole the episode number across all 7
-    // files in the cluster, collapsing them onto ep2 in the import flow.
-    /\bEP?\s*(\d+)/i,               // EP03, E03, EP 03
-    /第(\d+)[話话集]/,               // 第03話, 第3集
-    /\s-\s(\d+)\s/,                 // " - 03 "
-    /\[(\d+)(?:v\d+)?\]/,          // [03], [03v2]
-  ];
+/**
+ * 集号的六个来源。哪一条命中,决定了这个数字属于哪套编号 —— 见
+ * `resolveNumberSpace`。
+ *
+ * 这张表就是原来 `parseEpisodeNumber` 里的内联数组,顺序一字未动;
+ * 唯一的新增是 `origin`,因为「这个 3 是第几季的第 3 集,还是整个系列的
+ * 第 3 集」这个问题,答案只存在于**是哪条正则匹配到它的**,而原来的写法
+ * 在 `return num` 的那一刻就把它扔了。
+ *
+ * @type {ReadonlyArray<{ origin: string, re: RegExp }>}
+ */
+const EPISODE_NUMBER_PATTERNS = [
+  { origin: 'seasonEpisode', re: /\bS\d+E(\d+)/i },       // S01E03
+  // `\b` is load-bearing — without it, `e 2` inside prose like
+  // "Class de 2-banme" matched and stole the episode number across all 7
+  // files in the cluster, collapsing them onto ep2 in the import flow.
+  { origin: 'epLabel',       re: /\bEP?\s*(\d+)/i },      // EP03, E03, EP 03
+  { origin: 'cjkEpisode',    re: /第(\d+)[話话集]/ },        // 第03話, 第3集
+  { origin: 'dashed',        re: /\s-\s(\d+)\s/ },         // " - 03 "
+  { origin: 'bracketed',     re: /\[(\d+)(?:v\d+)?\]/ },  // [03], [03v2]
+];
 
-  for (const re of patterns) {
+/**
+ * `parseEpisodeNumber` 的内部形态:除了数字,还交代这个数字是谁匹配到的。
+ *
+ * 分成两个函数而不是改 `parseEpisodeNumber` 的返回值,是因为后者有调用方,
+ * 而这次要的是**多一个事实**,不是换一个契约。
+ *
+ * @param {string} filename
+ * @returns {{ number: number, origin: string } | null}
+ */
+function matchEpisodeNumber(filename) {
+  for (const { origin, re } of EPISODE_NUMBER_PATTERNS) {
     const m = filename.match(re);
     if (m) {
       const num = parseInt(m[1], 10);
       if (RESOLUTIONS.has(num)) continue;
-      return num;
+      return { number: num, origin };
     }
   }
 
@@ -62,10 +82,15 @@ export function parseEpisodeNumber(filename) {
   const fallback = stripTechTokens(filename).match(/(?:^|\D)(\d{2,3})(?:\D|$)/);
   if (fallback) {
     const num = parseInt(fallback[1], 10);
-    if (!RESOLUTIONS.has(num)) return num;
+    if (!RESOLUTIONS.has(num)) return { number: num, origin: 'digits' };
   }
 
   return null;
+}
+
+export function parseEpisodeNumber(filename) {
+  const m = matchEpisodeNumber(filename);
+  return m ? m.number : null;
 }
 
 const TAG_RE = /^(\d{2,4}[Pp]?\b|HEVC|AVC|x26[45]|H\.?26[45]|AAC|FLAC|WEB-?DL|WebRip|BDRip|Blu-?[Rr]ay|CHS|CHT|JPN?|ENG?|BIG5|GB|S\d+E?\d*|\d{1,3}(?:v\d+)?|SP\d*|OVA|OAD|NCOP|NCED|Commentary|Audio\s+Commentary|[A-Z0-9 ]+\d{3,4}[Pp])$/i;
@@ -327,6 +352,56 @@ export function parseAbsoluteEpisode(filename) {
   return m ? parseInt(m[1], 10) : null;
 }
 
+// ─── 编号空间 ─────────────────────────────────────────────────────────────
+
+/**
+ * 一个集号属于哪套编号。
+ *
+ * `perSeason` —— 本季自己的 1..N,和站点 `(anilist_id, episode)` 用的是同一套。
+ * `absolute`  —— 整个系列连续递增(《海贼王》第 1091 集那种)。
+ * `unknown`   —— **文件名没说**。不是「大概是本季的」,是没有证据。
+ *
+ * 为什么绝大多数文件只能是 `unknown`:字幕组写 `[03]`、`第03話`、` - 03 `
+ * 的时候,两套编号长得一模一样。第二季第 3 集和整部第 15 集,同样是一个
+ * `[03]` 或者一个 `[15]`,取决于这个组的习惯,而习惯不写在文件名里。
+ * 站点那边曾经为此付过账:21,001 行分集标题落在本季集数之外,靠的正是
+ * 「看起来像本季的数字」这个推断。
+ *
+ * 所以这里只认两种证据:
+ *
+ *  1. `S01E03` —— 这套写法**在构造上**就把季和集分开了,E 后面的数字按
+ *     定义是本季内的序号。这是唯一一条自证的格式。
+ *  2. `總第67` —— 文件名自己声明了一个系列级的数字。它和我们读到的数字
+ *     相等,说明我们读的就是那个系列级数字;不相等,说明这个文件同时给出
+ *     了两套数,而我们读到的是另一套 —— 也就是本季的。
+ *
+ * 其余一律 `unknown`,包括「文件名里有第 2 季字样」这种。`第二季 + 第87話`
+ * 完全可能是连续编号的第 87 集 —— 季度标记说明这一集属于哪一季,说明不了
+ * 那个数字是从哪儿开始数的。**没有证据必须读作 unknown,绝不能默认成
+ * perSeason**:这和 `episodeOffset` 那里「0 是答案、undefined 不是」是同一
+ * 条纪律,反过来那一半。
+ *
+ * 一处已知的钝角:第一季里 `第03話` 和 `總第03` 是同一个数,于是会判成
+ * `absolute`。这不产生错误答案 —— 两套编号在第一季本来就重合,任何消费方
+ * 用 offset 0 从 absolute 换算回来得到的还是 3。
+ *
+ * @typedef {'perSeason'|'absolute'|'unknown'} NumberSpace
+ */
+
+/**
+ * @param {{ number: number, origin: string } | null} match
+ * @param {number|null} episodeAlt
+ * @returns {NumberSpace}
+ */
+function resolveNumberSpace(match, episodeAlt) {
+  if (!match) return 'unknown';
+  if (match.origin === 'seasonEpisode') return 'perSeason';
+  if (episodeAlt !== null) {
+    return match.number === episodeAlt ? 'absolute' : 'perSeason';
+  }
+  return 'unknown';
+}
+
 const RESOLUTION_LABEL_MAP = {
   '4k': '2160p',
 };
@@ -337,21 +412,26 @@ const RESOLUTION_LABEL_MAP = {
  *
  * `season` 表示这一集**所在季**(从文件名 4th / S2 / 第N季 / 罗马数字推断,null 表示未识别)。
  * `episodeAlt` 是繁中字幕组的"总集号" (`總第N`) — 跨季全局递增。
- * `number` 是文件名表面的集号 (本季内的 01..N),与 `episodeAlt` 互不冲突,可同时存在。
+ * `number` 是文件名表面的集号,`numberSpace` 说的是**那个数字属于哪套编号**
+ * (`perSeason` / `absolute` / `unknown`,判据见 NumberSpace 的注释)。
+ * 注意 `number` 与 `episodeAlt` 互不冲突,可同时存在 —— 那正是能判出
+ * `perSeason` 的少数情形之一。
  *
  * @param {string} filename
- * @returns {{ title: string|null, number: number|null, kind: 'main'|'sp'|'ova'|'movie'|'pv'|'commentary'|'ncop'|'nced'|'bonus'|'trailer'|'interview'|'wp'|'cm'|'unknown', group: string|null, resolution: '480p'|'720p'|'1080p'|'2160p'|null, season: number|null, episodeAlt: number|null }}
+ * @returns {{ title: string|null, number: number|null, numberSpace: NumberSpace, kind: 'main'|'sp'|'ova'|'movie'|'pv'|'commentary'|'ncop'|'nced'|'bonus'|'trailer'|'interview'|'wp'|'cm'|'unknown', group: string|null, resolution: '480p'|'720p'|'1080p'|'2160p'|null, season: number|null, episodeAlt: number|null }}
  */
 export function parseEpisodeMeta(filename) {
   if (!filename) {
-    return { title: null, number: null, kind: 'unknown', group: null, resolution: null, season: null, episodeAlt: null };
+    return { title: null, number: null, numberSpace: 'unknown', kind: 'unknown', group: null, resolution: null, season: null, episodeAlt: null };
   }
 
   const title      = parseAnimeKeyword(filename);
-  const number     = parseEpisodeNumber(filename);
+  const match      = matchEpisodeNumber(filename);
+  const number     = match ? match.number : null;
   const kind       = parseEpisodeKind(filename);
   const season     = parseSeason(filename);
   const episodeAlt = parseAbsoluteEpisode(filename);
+  const numberSpace = resolveNumberSpace(match, episodeAlt);
 
   const groupMatch = filename.match(GROUP_RE);
   const group      = groupMatch ? groupMatch[1].trim() : null;
@@ -367,5 +447,5 @@ export function parseEpisodeMeta(filename) {
     if (!['480p', '720p', '1080p', '2160p'].includes(resolution)) resolution = null;
   }
 
-  return { title, number, kind, group, resolution, season, episodeAlt };
+  return { title, number, numberSpace, kind, group, resolution, season, episodeAlt };
 }
