@@ -253,7 +253,7 @@ func (w *EpisodeTitlesWorker) sweepOne(ctx context.Context, anilistID, bgmID int
 	// dandanplay cannot vouch for this binding: either it has no entry for the
 	// subject, or the entry it has publishes no AniList cross-link.  Both used
 	// to end the row here, and both are ordinary rather than exceptional --
-	// together they were 103 of the 132 rows due on 2026-09-25.  Bangumi is
+	// together they were 103 of the 132 rows due on 2026-09-05.  Bangumi is
 	// asked instead, behind the identity gate the episodes_bgm worker already
 	// uses, so the fallback is a change of upstream and not of standard.
 	if data == nil || (!mapSpeaks && data.AniListID != anilistID) {
