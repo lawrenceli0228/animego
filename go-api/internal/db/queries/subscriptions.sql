@@ -518,7 +518,27 @@ WITH target AS (
     SELECT i.episode FROM inserted i
 ), recomputed AS (
     UPDATE subscriptions s
-    SET current_episode = (SELECT COALESCE(MAX(w.episode), 0) FROM watched w),
+    -- GREATEST, not the bare recompute, and `target` is what makes it safe.
+    --
+    -- `watched` above closes this statement's OWN snapshot gap. It cannot
+    -- close a concurrent transaction's: two overlapping pushes serialise on
+    -- the FOR UPDATE in `target`, and the loser then resumes on the snapshot
+    -- it took BEFORE it began waiting, where the winner's episode_watches
+    -- rows do not exist. Its own inserts all conflict, `inserted` comes back
+    -- empty, and the bare recompute would write MAX over nothing -- sending a
+    -- reader on episode 3 back to 0. Measured 2026-09-06; two tabs is enough.
+    --
+    -- s.current_episode is read from the LATEST row version (READ COMMITTED
+    -- re-evaluates an UPDATE against the row the concurrent writer committed),
+    -- so it is the one value in this statement that is not snapshot-bound.
+    -- Taking the maximum of the two is exactly the contract stated above --
+    -- this statement unions, it never replaces -- applied to the number
+    -- DERIVED from the set as well as to the set itself. Lowering stays where
+    -- it belongs, in UnmarkEpisodeWatched, which recomputes without a floor.
+    SET current_episode = GREATEST(
+            s.current_episode,
+            (SELECT COALESCE(MAX(w.episode), 0) FROM watched w)
+        ),
         last_watched_at = CASE
                               WHEN EXISTS (SELECT 1 FROM inserted) THEN now()
                               ELSE s.last_watched_at
@@ -619,7 +639,27 @@ WITH target AS (
     SELECT i.episode FROM inserted i
 ), recomputed AS (
     UPDATE subscriptions s
-    SET current_episode = (SELECT COALESCE(MAX(w.episode), 0) FROM watched w),
+    -- GREATEST, not the bare recompute, and `target` is what makes it safe.
+    --
+    -- `watched` above closes this statement's OWN snapshot gap. It cannot
+    -- close a concurrent transaction's: two overlapping pushes serialise on
+    -- the FOR UPDATE in `target`, and the loser then resumes on the snapshot
+    -- it took BEFORE it began waiting, where the winner's episode_watches
+    -- rows do not exist. Its own inserts all conflict, `inserted` comes back
+    -- empty, and the bare recompute would write MAX over nothing -- sending a
+    -- reader on episode 3 back to 0. Measured 2026-09-06; two tabs is enough.
+    --
+    -- s.current_episode is read from the LATEST row version (READ COMMITTED
+    -- re-evaluates an UPDATE against the row the concurrent writer committed),
+    -- so it is the one value in this statement that is not snapshot-bound.
+    -- Taking the maximum of the two is exactly the contract stated above --
+    -- this statement unions, it never replaces -- applied to the number
+    -- DERIVED from the set as well as to the set itself. Lowering stays where
+    -- it belongs, in UnmarkEpisodeWatched, which recomputes without a floor.
+    SET current_episode = GREATEST(
+            s.current_episode,
+            (SELECT COALESCE(MAX(w.episode), 0) FROM watched w)
+        ),
         last_watched_at = CASE
                               WHEN EXISTS (SELECT 1 FROM inserted) THEN now()
                               ELSE s.last_watched_at
@@ -688,6 +728,18 @@ WITH target AS (
     EXCEPT
     SELECT d.episode FROM deleted d
 ), recomputed AS (
+    -- No GREATEST here, deliberately: lowering is this statement's entire
+    -- job, and a floor would make removal unable to remove.
+    --
+    -- The consequence is that the snapshot exposure the two mark queries were
+    -- given a floor against is still open in this one, mirrored: an unmark
+    -- overlapping a mark of a HIGHER episode computes its maximum without
+    -- seeing that mark, and lands a value below the real set.  It is left
+    -- open rather than papered over, on three grounds -- it needs one reader
+    -- ticking and unticking the same title from two places at the same
+    -- instant; nothing is lost, since episode_watches still holds the mark;
+    -- and the next write of any kind recomputes over both.  A floor here
+    -- would trade a rare wrong number for a permanently unremovable one.
     UPDATE subscriptions s
     SET current_episode = (SELECT COALESCE(MAX(w.episode), 0) FROM watched w),
         updated_at      = CASE
