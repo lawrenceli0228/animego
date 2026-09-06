@@ -207,3 +207,118 @@ func TestBuildEpisodeMap_MultipleRequestsMixedLevels(t *testing.T) {
 		t.Fatalf("mixed-levels request set:\n got:  %v\n want: %v", out, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Cardinality — the two shapes a map[int]EpisodeMapEntry cannot state
+// ---------------------------------------------------------------------------
+
+// ★ One-to-many: two upstream entries carry the same episode number.
+//
+// The old code took the first and `break`ed, so the second was unreachable and
+// nothing anywhere recorded that it had existed.  A broadcast cut and a
+// director's cut, or a subject whose numbering restarts, both land here — and
+// the consequence is not visible in the UI, because taking the first LOOKS
+// right for a title and a cover.
+func TestBuildEpisodeLinks_KeepsEveryCandidateAtTheWinningLevel(t *testing.T) {
+	dandan := []DandanEpisode{
+		ep(501, "Ep 5", "5", ip(5)),
+		ep(502, "Ep 5 (director's cut)", "5", ip(5)),
+		ep(503, "Ep 6", "6", ip(6)),
+	}
+
+	links := BuildEpisodeLinks(dandan, []int{5, 6})
+	if got := len(links[5]); got != 2 {
+		t.Fatalf("episode 5 has two upstream candidates → got %d: %v", got, links[5])
+	}
+	if links[5][0].DandanEpisodeID != 501 || links[5][1].DandanEpisodeID != 502 {
+		t.Fatalf("candidates must keep upstream order → got %v", links[5])
+	}
+	if got := len(links[6]); got != 1 {
+		t.Fatalf("episode 6 has one candidate → got %d", got)
+	}
+
+	// And the flattening is the old behaviour, unchanged.
+	out := BuildEpisodeMap(dandan, []int{5, 6})
+	if out[5].DandanEpisodeID != 501 {
+		t.Fatalf("the map still takes the first candidate → got %v", out[5])
+	}
+}
+
+// ★ Many-to-one: two requested episodes land on the same upstream entry.
+//
+// This one is usually TRUE rather than broken — a folder holding the same
+// episode twice under two numberings (1 from this season, 29 from the
+// franchise's running count) really does have two files for one upstream
+// episode.  Pinning it says the collapse is a decision rather than an
+// accident: de-duplicating here would take a file's chip away in the ad-hoc
+// player path, which builds its episode strip from this map.
+func TestBuildEpisodeMap_TwoRequestsMayShareOneUpstreamEpisode(t *testing.T) {
+	dandan := []DandanEpisode{
+		ep(291, "Ep 29", "29", ip(29)),
+		ep(292, "Ep 30", "30", ip(30)),
+	}
+
+	out := BuildEpisodeMap(dandan, []int{1, 29})
+
+	if out[29].DandanEpisodeID != 291 {
+		t.Fatalf("29 matches exactly at level 1 → got %v", out[29])
+	}
+	if out[1].DandanEpisodeID != 291 {
+		t.Fatalf("1 reaches the same entry through the index fallback → got %v", out[1])
+	}
+	if len(out) != 2 {
+		t.Fatalf("both requested episodes are mapped → got %d entries: %v", len(out), out)
+	}
+}
+
+// ★ The three levels are a priority order, not a merge.
+//
+// An episode that matched exactly must not also collect the index fallback's
+// guess: an exact numeric match and a position in a list are not two opinions
+// of equal standing, and merging them would put a wrong candidate one index
+// away from being chosen by anything that later looks past [0].
+func TestBuildEpisodeLinks_ALaterLevelDoesNotAddToAnEarlierMatch(t *testing.T) {
+	dandan := []DandanEpisode{
+		ep(201, "Ep 1", "1", ip(1)),
+		ep(202, "Ep 2", "2", ip(2)),
+	}
+
+	links := BuildEpisodeLinks(dandan, []int{1})
+	if got := len(links[1]); got != 1 {
+		t.Fatalf("level 1 matched, so level 3 must not append → got %d: %v", got, links[1])
+	}
+	if links[1][0].DandanEpisodeID != 201 {
+		t.Fatalf("the exact match must be the one kept → got %v", links[1][0])
+	}
+}
+
+// The flattened map must stay exactly what the links say, for every fixture
+// the rest of this file already pins.  Written as a property rather than a
+// case: the split into two functions is only safe if nothing can drift
+// between them, and the way that drift would arrive is a new pass appended to
+// one and not the other.
+func TestBuildEpisodeMap_IsTheLinksFlattened(t *testing.T) {
+	dandan := []DandanEpisode{
+		ep(101, "Ep 1", "1", ip(1)),
+		ep(102, "Ep 1 alt", "1", ip(1)),
+		ep(103, "OVA 2", "O2", nil),
+		ep(104, "Ep 3", "3", ip(3)),
+	}
+	requested := []int{1, 2, 3, 4, 99}
+
+	links := BuildEpisodeLinks(dandan, requested)
+	out := BuildEpisodeMap(dandan, requested)
+
+	if len(out) != len(links) {
+		t.Fatalf("every linked episode must appear in the map → links %d, map %d", len(links), len(out))
+	}
+	for epNum, candidates := range links {
+		got, ok := out[epNum]
+		if !ok {
+			t.Fatalf("episode %d is linked but missing from the map", epNum)
+		}
+		if !reflect.DeepEqual(got, candidates[0]) {
+			t.Fatalf("episode %d: map holds %v, links lead with %v", epNum, got, candidates[0])
+		}
+	}
+}
