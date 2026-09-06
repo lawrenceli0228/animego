@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -138,6 +139,14 @@ func TestTrailerSeasonalColdStartRecordsTheAnswer(t *testing.T) {
 	params := db.snapshotUpsertedParams()
 	require.Len(t, params, 1)
 	assert.True(t, params[0].TrailerChecked, "seasonal selects trailer, so its null is an answer")
+
+	// And the list projection is what the consumer reads: the key has to be
+	// on the wire even when the value is null, because a list card decides
+	// whether to fall back to a per-item detail fetch by looking at it.
+	assert.Contains(t, rec.Body.String(), `"trailerId"`)
+	assert.Contains(t, rec.Body.String(), `"trailerSite"`)
+	assert.NotContains(t, rec.Body.String(), `"trailerCheckedAt"`,
+		"checked-at is cache bookkeeping and must not leak into a list response")
 }
 
 // TestTrailerSearchDoesNotClaimToHaveChecked — /search runs
@@ -170,6 +179,46 @@ func TestTrailerSearchDoesNotClaimToHaveChecked(t *testing.T) {
 	_, params := fq.snapshotUpserts()
 	require.Len(t, params, 1)
 	assert.False(t, params[0].TrailerChecked, "search never asked, so it must not answer")
+}
+
+// TestTrailerEnsureCachedRecordsTheAnswer — EnsureCached fills a cache miss
+// through AnimeDetailQuery, which selects trailer.  A row it writes without
+// the stamp would be born stale and drag the next detail view into a
+// blocking AniList re-fetch it did not need.
+func TestTrailerEnsureCachedRecordsTheAnswer(t *testing.T) {
+	t.Parallel()
+
+	db := &ensureCachedFakeDB{}
+	ac := &ensureCachedFakeAniList{
+		media: anilist.Media{ID: 7, Trailer: &anilist.Trailer{ID: sptr("abcdefghijk"), Site: sptr("youtube")}},
+	}
+	require.NoError(t, EnsureCached(context.Background(), db, ac, 7))
+
+	require.Len(t, db.upserts, 1)
+	assert.True(t, db.upserts[0].TrailerChecked)
+	require.NotNil(t, db.upserts[0].TrailerID)
+	assert.Equal(t, "abcdefghijk", *db.upserts[0].TrailerID)
+}
+
+// ensureCachedFakeDB reports a cache miss on the probe and records what the
+// fill wrote.
+type ensureCachedFakeDB struct {
+	upserts []dbgen.UpsertAnimeCacheParams
+}
+
+func (f *ensureCachedFakeDB) GetAnimeMainByID(context.Context, int32) (dbgen.GetAnimeMainByIDRow, error) {
+	return dbgen.GetAnimeMainByIDRow{}, pgx.ErrNoRows
+}
+
+func (f *ensureCachedFakeDB) UpsertAnimeCache(_ context.Context, arg dbgen.UpsertAnimeCacheParams) error {
+	f.upserts = append(f.upserts, arg)
+	return nil
+}
+
+type ensureCachedFakeAniList struct{ media anilist.Media }
+
+func (f *ensureCachedFakeAniList) Detail(context.Context, anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+	return &anilist.AnimeDetailResponse{Media: f.media}, nil
 }
 
 // TestTrailerUnknownRefreshesButCheckedNullDoesNot — an unchecked row is
