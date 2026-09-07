@@ -167,6 +167,8 @@ export interface HotDiscussion {
 // Phase 5 consumer; included here so lib/types.ts is the single source.
 
 export interface AnimeDetail {
+  /** Present only when AniList supplied a supported, validated YouTube trailer. */
+  trailer?: DetailTrailer | null;
   anilistId: number;
   titleRomaji: string | null;
   titleEnglish: string | null;
@@ -245,6 +247,11 @@ export interface AnimeDetail {
   // upstream had no titles). Express schema:
   // `{ episode: number, nameCn: string|null, name: string|null }`.
   episodeTitles: DetailEpisodeTitle[];
+}
+
+export interface DetailTrailer {
+  id: string | null;
+  site: string | null;
 }
 
 export interface DetailEpisodeTitle {

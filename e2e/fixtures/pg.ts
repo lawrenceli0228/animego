@@ -313,6 +313,11 @@ export interface SeedAnimeDetail extends SeedAnimeCache {
   /** Synopsis. What a search visitor came for, and what the mobile hero has
    * to get above the fold. */
   description?: string | null;
+  /**
+   * YouTube video id for the official trailer. Undefined/null means AniList
+   * was checked and had no supported trailer, rather than "not checked yet".
+   */
+  trailerId?: string | null;
 }
 
 /**
@@ -333,11 +338,18 @@ export interface SeedAnimeDetail extends SeedAnimeCache {
  */
 export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
   const sql = getSql();
+  const trailerId = anime.trailerId ?? null;
+  if (trailerId !== null && !/^[A-Za-z0-9_-]{11}$/.test(trailerId)) {
+    throw new Error(
+      `ensureAnimeDetail(${anime.anilistId}): trailerId must be an 11-character YouTube id`,
+    );
+  }
+
   await sql`
     INSERT INTO anime_cache (
       anilist_id, title_romaji, title_chinese, episodes, episodes_bgm,
       status, banner_image_url, cover_image_url, average_score, description,
-      cached_at
+      trailer_id, trailer_site, trailer_checked_at, cached_at
     )
     VALUES (
       ${anime.anilistId},
@@ -350,6 +362,9 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
       ${anime.coverImageUrl ?? null},
       ${anime.averageScore ?? null},
       ${anime.description ?? null},
+      ${trailerId},
+      ${trailerId === null ? null : "youtube"},
+      now(),
       now()
     )
     ON CONFLICT (anilist_id) DO UPDATE SET
@@ -362,6 +377,9 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
       cover_image_url  = EXCLUDED.cover_image_url,
       average_score    = EXCLUDED.average_score,
       description      = EXCLUDED.description,
+      trailer_id       = EXCLUDED.trailer_id,
+      trailer_site     = EXCLUDED.trailer_site,
+      trailer_checked_at = EXCLUDED.trailer_checked_at,
       cached_at        = now(),
       updated_at       = now()
   `;
@@ -406,13 +424,21 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
   const [seeded] = await sql`
     SELECT (SELECT count(*) FROM anime_studios WHERE anime_id = ${anime.anilistId}) AS studios,
            (SELECT count(*) FROM anime_characters
-             WHERE anime_id = ${anime.anilistId} AND role IS NOT NULL) AS characters
+             WHERE anime_id = ${anime.anilistId} AND role IS NOT NULL) AS characters,
+           trailer_checked_at IS NOT NULL AS trailer_checked
+    FROM anime_cache
+    WHERE anilist_id = ${anime.anilistId}
   `;
-  if (Number(seeded?.studios ?? 0) === 0 || Number(seeded?.characters ?? 0) === 0) {
+  if (
+    Number(seeded?.studios ?? 0) === 0 ||
+    Number(seeded?.characters ?? 0) === 0 ||
+    seeded?.trailer_checked !== true
+  ) {
     throw new Error(
       `ensureAnimeDetail(${anime.anilistId}): seeded row is still stale ` +
-        `(studios=${seeded?.studios}, characters-with-role=${seeded?.characters}). ` +
-        `isStale trips on either being empty, so /anime/${anime.anilistId} would ` +
+        `(studios=${seeded?.studios}, characters-with-role=${seeded?.characters}, ` +
+        `trailer-checked=${seeded?.trailer_checked}). isStale trips on any missing ` +
+        `condition, so /anime/${anime.anilistId} would ` +
         `go to AniList and 404 whenever that call fails.`,
     );
   }

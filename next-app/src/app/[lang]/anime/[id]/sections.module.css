@@ -611,10 +611,10 @@
  * what forced the hero's old gradient to be dark enough to bury the faces.
  * Moving it out is what let the artwork above go full-bleed.
  *
- * Two columns on a desktop, stacked on a phone. The scores sit beside the
- * text rather than inside the facts sentence because a value out of 100 and
- * a value out of 10 are unreadable side by side without their denominators,
- * and a denominator has no place in a dot-separated list.
+ * Without media, desktop keeps scores beside the copy and phones stack them.
+ * When a trailer exists, the copy and scores form one reading column and the
+ * film card becomes the second. Scores stay labelled because a value out of
+ * 100 and one out of 10 are unreadable without their denominators.
  */
 .synopsis {
   /* The same three aliases .section declares. The synopsis is a section in
@@ -640,8 +640,106 @@
   }
 }
 
+/* A trailer is media, not hero furniture. On a wide screen the synopsis is
+ * one reading column — prose first, scores second — with the film card beside
+ * it. The earlier three-track version stranded ratings in a narrow third
+ * column and made the trailer feel wedged between two unrelated facts. */
+.synopsisSummary {
+  display: contents;
+}
+
+.synopsisTrailer {
+  display: none;
+  min-width: 0;
+}
+
+@media (min-width: 980px) {
+  .synopsis[data-has-trailer="true"] {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
+    gap: clamp(40px, 5vw, 72px);
+  }
+
+  .synopsis[data-has-trailer="true"] .synopsisSummary {
+    display: block;
+    min-width: 0;
+  }
+
+  .synopsisTrailer {
+    display: block;
+  }
+
+  .synopsis[data-has-trailer="true"] .scorePanel {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 24px 42px;
+    margin-top: 30px;
+    padding-top: 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .synopsis[data-has-trailer="true"] .scoreItem,
+  .synopsis[data-has-trailer="true"] .scoreItemBangumi {
+    width: min(180px, calc(50% - 21px));
+    grid-template-rows: auto auto minmax(14px, auto) auto;
+  }
+
+  .synopsis[data-has-trailer="true"] .scoreBar {
+    grid-row: 4;
+  }
+
+  .synopsis[data-has-trailer="true"] .synopsisWatchers {
+    flex-basis: 100%;
+  }
+}
+
+.synopsisTrailerHead {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.synopsisTrailerTitle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.synopsisTrailerMark {
+  width: 3px;
+  height: 15px;
+  flex: none;
+  border-radius: var(--radius-full);
+  background: var(--sec-tone, var(--poster-tone));
+}
+
+.synopsisTrailerSource {
+  flex: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
 .synopsisBody {
   min-width: 0;
+}
+
+.synopsisWatchers:empty {
+  display: none;
 }
 
 /* ── Score panel ─────────────────────────────────────────────────────── */
@@ -665,6 +763,16 @@
 
   .scoreItem {
     width: min(180px, 100%);
+  }
+
+  .scoreItem,
+  .scoreItemBangumi {
+    grid-template-rows: auto auto minmax(14px, auto) auto;
+  }
+
+  .scoreItem .scoreBar,
+  .scoreItemBangumi .scoreBar {
+    grid-row: 4;
   }
 }
 
