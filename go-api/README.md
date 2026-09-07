@@ -340,3 +340,20 @@ trailer_checked_at 是缓存内部状态，不出现在任何响应里。NULL �
 
 验证：`CGO_ENABLED=0 go test ./internal/anime ./internal/anilist ./internal/db/...`。
 真实 SQL 往返：准备 Docker 和 `animego-postgres:dev` 后，执行 `CGO_ENABLED=0 go test -tags=integration ./internal/anime -run TestTrailerPostgresRoundTrip`；测试使用新建容器并自动销毁。本机 Docker 当前未启动，此项尚未执行。
+
+
+## 评分人数与评分刷新（迁移 0033）
+
+先执行数据库迁移 0033，再部署 Go API。新增三列，都在 `anime_cache` 上：`anilist_score_votes`（AniList 的评分人数）、`anilist_rating_checked_at`、`bangumi_rating_checked_at`。
+
+AniList 的 GraphQL 里**没有**评分人数这个标量。它有的是 `stats.scoreDistribution`——按十分档的直方图——各档 `amount` 相加才是打过分的人数，也就是 Bangumi 主题页印的「N 人评分」那个数。`popularity` 不是它：那是把作品加进列表的人数，其中大部分人没有打分，写进这一列等于用同一个字段回答另一个问题。
+
+两个时间戳是两条独立的 sweep 各自的读取记录，不能合并成一个。AniList 那条一次请求 50 个 id（`MediaRatingsQuery` 用 `id_in`），全目录约 370 次请求；Bangumi 那条一行一次 subject 请求，走的是 `/match` 和弹幕查询共用的那个 800ms 令牌桶。两者速率预算、批量上限、失败方式都不同，任何一条都可能在另一条正常时坏掉——共用一个戳会让便宜的那条替贵的那条盖章。
+
+节奏由 `ratingsStaleAfter`（90 天）和候选查询的 WHERE 决定：**当年及以后**的行每季度重读一次，**其余的行读一次就不再读**。后半句是有意的，也正是时间戳买来的东西——以后想给存量行也排一个更慢的周期，改的是那条 WHERE，行里已经记着各自最后一次读的时间。
+
+两条 sweep 每小时各触发一次（`RunOnStart`）。间隔管的是**积压的排空速度**而不是刷新频率：一次 pass 只取到期的行，存量补完之后每小时那次会发现没有行可取。AniList 每次上限 2000 行（约 28 秒上游时间），Bangumi 每次上限 300 行（约 4 分钟令牌桶时间，约占该桶 7%）。共用 `ratings` 队列，`MaxWorkers` 是 2——这是队列表里唯一不是 1 的一个，理由是两个 kind 各自被自己的上游限速，谁也帮不了谁快，单槽只会让 4 分钟的 Bangumi pass 每小时挡在 30 秒的 AniList pass 前面。要临时停掉，暂停 `ratings` 队列即可，不需要发版。
+
+⚠️ **2026-09-07 起 AniList 的公开 API 整体返回 403**（`The AniList API has been temporarily disabled due to severe stability issues.`，本机与生产源站均复现）。迁移和部署不受影响：AniList 那条 sweep 每次 pass 会把整批标记为失败并**不盖戳**，行仍留在候选集里，等 API 恢复后自动补上；Bangumi 那条不受影响，照常排空。
+
+验证：`go test ./internal/anilist ./internal/queue`。真实 SQL 往返：`go test -tags=integration -timeout=300s ./test/integration/ -run 'Rating'`，覆盖候选 WHERE 的两种人群、`average_score` 的 COALESCE 保护、`updated_at` 的条件推进，以及 `anime_anilist_rating_pair` 约束的接受/拒绝表。

@@ -84,6 +84,22 @@ const breakerCooldown = 30 * time.Second
 // envelope.  This package stays I/O-agnostic.
 var ErrRateLimited = errors.New("anilist: rate limited after 3 retries")
 
+// MaxRatingIDs is the largest id batch MediaRatingsQuery may carry.  It
+// is AniList's documented per-page maximum, which the API enforces by
+// truncating rather than erroring — see Ratings for why that has to be
+// caught on this side.
+const MaxRatingIDs = 50
+
+// ErrNoRatingIDs is returned by Ratings for an empty batch.  Sending one
+// would post `id_in: []`, which AniList reads as no filter at all: the
+// response would be 50 arbitrary anime, attributed by the caller to
+// whichever rows it thought it was asking about.
+var ErrNoRatingIDs = errors.New("anilist: ratings called with no ids")
+
+// ErrRatingBatchTooLarge is returned by Ratings when the batch exceeds
+// MaxRatingIDs.
+var ErrRatingBatchTooLarge = errors.New("anilist: rating batch exceeds page cap")
+
 // ErrUpstream wraps a non-2xx response (or a GraphQL field-error
 // payload).  Callers in the handler layer map this to a 502 envelope
 // using the embedded Message.  Status preserves the original HTTP code
@@ -287,6 +303,19 @@ type ScheduleVars struct {
 	Page      int   `json:"page"`
 }
 
+// RatingsVars are the variables for MediaRatingsQuery.
+//
+// PerPage is carried alongside IDs rather than derived inside the client
+// because AniList caps a page at 50 and silently truncates past it: a
+// caller that handed over 80 ids would get 50 back and read the missing
+// 30 as "AniList no longer serves these", stamping them checked with no
+// rating.  Making both explicit means MaxRatingIDs can be asserted in
+// one place (Ratings) against the thing that is actually sent.
+type RatingsVars struct {
+	IDs     []int `json:"ids"`
+	PerPage int   `json:"perPage"`
+}
+
 // ---------------------------------------------------------------------------
 // Public query methods
 // ---------------------------------------------------------------------------
@@ -324,6 +353,32 @@ func (c *Client) Detail(ctx context.Context, v DetailVars) (*AnimeDetailResponse
 func (c *Client) Schedule(ctx context.Context, v ScheduleVars) (*WeeklyScheduleResponse, error) {
 	var dest WeeklyScheduleResponse
 	if err := c.do(ctx, WeeklyScheduleQuery, v, &dest); err != nil {
+		return nil, err
+	}
+	return &dest, nil
+}
+
+// Ratings runs MediaRatingsQuery for an explicit list of media ids.
+//
+// Refuses an over-long batch rather than letting AniList truncate it.
+// The cap is AniList's page maximum, and a truncated page is not
+// distinguishable at the wire from ids AniList declines to serve -- the
+// caller stamps those as checked, so a silent truncation would write
+// "asked, no rating" over rows that were never asked about.  See
+// MaxRatingIDs.
+//
+// An empty batch is a caller bug, not an empty result: it would post a
+// document whose id_in matches everything.  See ErrNoRatingIDs.
+func (c *Client) Ratings(ctx context.Context, v RatingsVars) (*MediaRatingsResponse, error) {
+	if len(v.IDs) == 0 {
+		return nil, ErrNoRatingIDs
+	}
+	if len(v.IDs) > MaxRatingIDs {
+		return nil, fmt.Errorf("%w: %d ids", ErrRatingBatchTooLarge, len(v.IDs))
+	}
+	v.PerPage = len(v.IDs)
+	var dest MediaRatingsResponse
+	if err := c.do(ctx, MediaRatingsQuery, v, &dest); err != nil {
 		return nil, err
 	}
 	return &dest, nil

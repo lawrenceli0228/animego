@@ -199,3 +199,23 @@ func Status(ctx context.Context, qc QueueController) (Stats, error) {
 	}
 	return Stats{V3Paused: q.PausedAt != nil}, nil
 }
+
+// RatingsQueueName isolates the two rating-refresh sweeps.
+//
+// Its own queue for the reason EpisodesBgmQueueName and
+// EpisodeTitlesQueueName each give: a Bangumi pass runs for minutes —
+// one request per candidate through the 800ms bucket — and on the
+// default queue that would hold the single worker slot away from the
+// V1/V2 enrichment a page load is waiting on.
+//
+// It is also the kill switch.  These sweeps write two numbers that
+// render on public, indexed pages, and they walk the whole catalogue to
+// do it; river's runtime pause can stop them, and only them, without a
+// deploy.
+//
+// Both kinds share one queue rather than taking one each.  They are the
+// same feature and are turned off for the same reasons, so a single
+// pause is the control an operator actually wants; the queue is
+// configured with two worker slots so that pausing is the only thing
+// that makes them wait for each other.
+const RatingsQueueName = "ratings"

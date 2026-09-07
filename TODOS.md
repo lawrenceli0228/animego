@@ -700,6 +700,10 @@
 
 **Depends on / blocked by** — 无。与 warm-all 互补而非互斥。
 
+> **前提已变（2026-09-08，迁移 0033）** — 这条的 Cons 算的是「新 job kind + 查询常量 + 取批 SQL + 配套测试约 250 行」。其中的**查询常量和客户端方法现在已经存在**：`anilist.MediaRatingsQuery` 就是 `Page(media: id_in: [...])`，`anilist.Client.Ratings` 是它的调用方，`anilist.MaxRatingIDs` 是那个 50 的上限（AniList 超了是**静默截断**不是报错，所以上限在 `Ratings` 里挡，不能只靠调用方自觉）。剩下要写的只有取批 SQL 和 job 本身，而 `queue/ratings_refresh.go` 里那条 AniList sweep 的分批 + 「没返回的 id 也要盖戳」逻辑可以照抄。167 : 250 的比值应当重算。
+>
+> ⚠️ 但**先确认 AniList 恢复了再动**：2026-09-07 起 `graphql.anilist.co` 对所有查询返回 403（`The AniList API has been temporarily disabled due to severe stability issues.`，本机与生产源站均复现）。
+
 ---
 
 ## sitemap 的 lastmod 说的不是「内容什么时候变的」
@@ -731,3 +735,36 @@
 **Context** — 2026-09-06 查过下游消费方的实际代码后，这条的优先级被判定为**低**：消费方用自己的匿名结构体解码，而它的前端把 trailer id 直接拼进 `youtube-nocookie.com/embed/${id}`、**根本不读 site 字段**。所以 `site` 改名的实际影响为零；只有 `id` 改名会出事，而那种情况下我们自己的解码同样会静默失效——拆不拆类型都挡不住。同一轮还确认了 `trailer,omitempty` 不需要改：消费方是 Go 的 `encoding/json` 解到指针，「缺键」和「null」结果完全一样。
 
 **Depends on / blocked by** — 无。真要做的话和 `anilist.PageInfo` 那处一起改，否则只是把不一致换个地方。
+
+
+---
+
+## AniList 的评分人数已经入库，但还没有人读得到
+
+**What** — 把 `anime_cache.anilist_score_votes` 接到详情响应上（`internal/anime/detail.go` 的 `BangumiVotes` 旁边加一个同形状的字段），然后在详情页 AniList 那一格里渲染，与 Bangumi 那格对称。
+
+**Why** — 迁移 0033 把这个数存进了库，但**没有任何 SELECT 读它**，所以目前它是纯粹的写入。而这个不对称在页面上是肉眼可见的：`next-app/src/app/[lang]/anime/[id]/page.tsx` 里 Bangumi 那一格已经渲染 `{detail.bangumiVotes.toLocaleString()} {dict.detail.votes}`（第 816 行附近），AniList 那一格只有一个 `84 / 100` 和一根进度条，没有任何东西说明这个 84 背后是四十个人还是四万个人。存这一列的全部理由就是让这两个数能放在一起看。
+
+**Pros** — 三处小改动（sqlc 的 SELECT 列、`detail.go` 的响应结构体、页面上一个已经存在的 `scoreVotes` 样式类），文案 `dict.detail.votes` 三个语言都已经有了。收益是详情页第一次能说清两个来源各自的样本量。
+
+**Cons** — 改的是公开响应的形状，而这个响应有跨仓下游（`/Users/lawrence_li/nagare`）。加字段本身对它无害（Go 的 `encoding/json` 解到自己的匿名结构体，多出来的键会被忽略），但按仓库既有规矩，改响应形状要去那边看一眼再动。另外**在 AniList 恢复之前这一列全是 NULL**，上线了页面上也什么都不会显示——所以这条的自然时机是那条 sweep 真的跑过一轮之后。
+
+**Context** — 2026-09-08 随迁移 0033 一起识别，当时刻意留在范围外：入库和呈现是两步，而第二步要碰公开契约。数据来源是 `stats.scoreDistribution` 各档 `amount` 之和（`anilist.Media.ScoreVotes`），不是 `popularity`——后者数的是把作品加进列表的人，大部分没打分。
+
+**Depends on / blocked by** — 被 AniList 的 403 挡着（见上一条）：呈现一个全是 NULL 的列没有意义。
+
+---
+
+## Bangumi 的票数列没有 CHECK
+
+**What** — 给 `anime_cache.bangumi_votes` 加一条 `NOT VALID` 的非负 CHECK，然后在确认存量行干净之后 `VALIDATE`。
+
+**Why** — 迁移 0033 给 `anilist_score_votes` 加了 `anime_anilist_rating_pair`，理由是 sweep 会吞掉单行写入失败，一个被约束挡下的值在生产上唯一的症状是那一行悄悄不再刷新——所以得由列来拒绝。`bangumi_votes` 承受同样的写入方（现在多了 `UpdateBangumiRating`）却没有任何约束，纯粹因为它比 0033 早了 32 个迁移。
+
+**Pros** — 两列的保护面拉齐；`NOT VALID` 加约束不锁表。
+
+**Cons** — 要先确认存量行没有违例，而这需要跑一次全表查询并对结果负责；这件事属于愿意做 `VALIDATE` 的那个人，不属于只是新增一列的那个迁移。
+
+**Context** — 2026-09-08 写迁移 0033 时明确留下的一条，迁移注释里也写了同样的话。
+
+**Depends on / blocked by** — 无。
