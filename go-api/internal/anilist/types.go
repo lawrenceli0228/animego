@@ -164,6 +164,64 @@ type Media struct {
 	Staff           *StaffConnection  `json:"staff,omitempty"`
 	Recommendations *RecommendationConnection `json:"recommendations,omitempty"`
 	Trailer         *Trailer         `json:"trailer,omitempty"`
+
+	// Ratings-only field (MediaRatingsQuery).  Nil for every other
+	// query, which is why nothing reads it directly — see ScoreVotes.
+	Stats *MediaStats `json:"stats,omitempty"`
+}
+
+// MediaStats is the stats{...} block.  Only scoreDistribution is
+// requested; AniList also exposes statusDistribution there, which
+// answers a different question (how many people are watching) and is
+// not selected.
+type MediaStats struct {
+	ScoreDistribution []ScoreDistributionBucket `json:"scoreDistribution"`
+}
+
+// ScoreDistributionBucket is one decile of the rating histogram: Score
+// is the bucket label on AniList's 0-100 scale (10, 20, ... 100) and
+// Amount is how many users gave a score in it.
+//
+// The bucket labels are not used.  This type exists so the amounts can
+// be summed; keeping Score means a future caller that wants the shape of
+// the distribution (a "mostly 10s vs evenly spread" signal) does not
+// have to change the query to get it.
+type ScoreDistributionBucket struct {
+	Score  int `json:"score"`
+	Amount int `json:"amount"`
+}
+
+// ScoreVotes is the number of users who scored this media -- the figure
+// Bangumi prints as "N 人评分" -- or nil when the query behind this
+// Media did not ask for it.
+//
+// AniList has no scalar for this.  It is the sum of the
+// scoreDistribution amounts, and the sum is the whole reason the
+// histogram is selected.
+//
+// The nil / zero distinction is the same one TrailerSelection exists
+// for, except here the response carries it: a Media from a document that
+// did not select `stats` has a nil Stats and no opinion, while a Media
+// from one that did has a non-nil Stats even when the distribution is
+// empty -- and an empty distribution means nobody has scored it, which
+// is an answer worth storing.  Callers therefore do not need to pass a
+// selection flag alongside the Media; a nil return says "did not ask"
+// and a *0 says "asked, nobody has".
+func (m Media) ScoreVotes() *int {
+	if m.Stats == nil {
+		return nil
+	}
+	total := 0
+	for _, b := range m.Stats.ScoreDistribution {
+		// Negative amounts are not a shape AniList produces; guarding
+		// is cheaper than explaining a negative count in the column
+		// later, and the CHECK on anilist_score_votes would refuse it
+		// anyway -- silently, from inside a swallowed per-row update.
+		if b.Amount > 0 {
+			total += b.Amount
+		}
+	}
+	return &total
 }
 
 // ---------------------------------------------------------------------------
@@ -344,4 +402,17 @@ type WeeklyScheduleResponse struct {
 // Media object under the "Media" key (no Page wrapper).
 type AnimeDetailResponse struct {
 	Media Media `json:"Media"`
+}
+
+// MediaRatingsResponse is the typed response for MediaRatings.  The
+// Page envelope carries no pageInfo: the caller supplies the id list and
+// perPage=len(ids), so there is never a second page to ask for.
+//
+// The returned slice is NOT guaranteed to hold one entry per requested
+// id.  AniList omits ids it no longer serves (deleted or merged media),
+// and the caller has to notice -- see queue/ratings_refresh.go, where the
+// ids that come back missing are stamped as checked so they stop leading
+// every subsequent batch.
+type MediaRatingsResponse struct {
+	Page MediaPage `json:"Page"`
 }

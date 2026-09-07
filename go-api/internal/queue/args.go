@@ -372,3 +372,79 @@ func (EpisodeTitlesArgs) InsertOpts() river.InsertOpts {
 		},
 	}
 }
+
+// ratingsUniqueStates is the set of states in which an existing ratings
+// sweep suppresses a new one: every non-terminal state, and nothing else.
+//
+// Spelled out rather than left to river's default for the reason
+// hantBackfillUniqueStates records — the default includes `completed`,
+// which river keeps for 24h, so an hourly periodic job carrying the
+// default would fire once a day and look like a scheduler bug.
+//
+// retryable is in the set on purpose: a pass in backoff after a failed
+// attempt is still this sweep in flight, and a second one beside it
+// would read the same head-of-queue candidates and spend the same
+// upstream budget twice.
+var ratingsUniqueStates = []rivertype.JobState{
+	rivertype.JobStateAvailable,
+	rivertype.JobStatePending,
+	rivertype.JobStateRetryable,
+	rivertype.JobStateRunning,
+	rivertype.JobStateScheduled,
+}
+
+// AnilistRatingsArgs re-reads AniList's score and rater count for the
+// rows that are due, in batches of 50 ids per request.
+//
+// No fields.  The work list is a query (ListAnilistRatingCandidates) and
+// a payload would only give the dedupe something to disagree about —
+// same shape as HantBackfillArgs and EpisodeTitlesArgs.  Notably it is
+// NOT one job per row, which is how the description backfill and
+// episodes-bgm sweeps are built: those spend one upstream request per
+// row and get pausability and per-row retries in exchange, while this
+// one spends a single request per 50 rows, so per-row jobs would cost
+// 50x the river bookkeeping for the same 370 requests.
+type AnilistRatingsArgs struct{}
+
+// Kind returns the river job kind for the AniList ratings sweep.
+func (AnilistRatingsArgs) Kind() string { return "anilist_ratings" }
+
+// InsertOpts pins the sweep to the ratings queue and collapses a second
+// enqueue into the one already in flight.
+func (AnilistRatingsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: RatingsQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: ratingsUniqueStates,
+		},
+	}
+}
+
+// BangumiRatingsArgs re-reads Bangumi's score and vote count for the
+// rows that are due, one subject request per row.
+//
+// A separate kind from AnilistRatingsArgs rather than one sweep over
+// both sources, because the two share nothing that matters: different
+// upstream, different rate budget (a shared 800ms bucket the request
+// path also draws on, against AniList's own 700ms limiter), and volumes
+// two orders of magnitude apart per pass.  Folded together, a wedged
+// Bangumi would hold the AniList refresh hostage, and the pass caps
+// could not be set independently — which is the whole difference between
+// a sweep that finishes in half a minute and one that runs for four.
+type BangumiRatingsArgs struct{}
+
+// Kind returns the river job kind for the Bangumi ratings sweep.
+func (BangumiRatingsArgs) Kind() string { return "bangumi_ratings" }
+
+// InsertOpts pins the sweep to the ratings queue and collapses a second
+// enqueue into the one already in flight.
+func (BangumiRatingsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: RatingsQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: ratingsUniqueStates,
+		},
+	}
+}

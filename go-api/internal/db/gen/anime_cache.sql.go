@@ -2282,6 +2282,67 @@ func (q *Queries) InsertAnimeStudio(ctx context.Context, animeID int32, studio s
 	return err
 }
 
+const listAnilistRatingCandidates = `-- name: ListAnilistRatingCandidates :many
+SELECT anilist_id
+FROM anime_cache
+WHERE (COALESCE(season_year, -1) >= $1::int
+       AND (anilist_rating_checked_at IS NULL
+            OR anilist_rating_checked_at < now() - $2::interval))
+   OR (COALESCE(season_year, -1) < $1::int
+       AND anilist_rating_checked_at IS NULL)
+ORDER BY (COALESCE(season_year, -1) >= $1::int) DESC,
+         anilist_rating_checked_at NULLS FIRST,
+         anilist_id
+LIMIT $3::int
+`
+
+// Rows due for an AniList rating read, most urgent first.
+//
+// Two populations, one query, because they are the same work with
+// different cadences:
+//
+//	season_year >= :current_year   refreshed on a cycle.  A rating that
+//	                               is still moving has to be re-read or
+//	                               the row keeps whatever number it
+//	                               happened to be born with.
+//	everything else                read once, then never again.
+//
+// The cutoff is >= rather than = the current year.  Next year's rows are
+// the least settled ratings in the table, not the most; excluding them
+// would freeze a 2027 show at its announcement-week figure for a year.
+// On 2026-09-07 that is 57 extra rows against 401, which is not a cost.
+//
+// The back catalogue's "never again" is deliberate and is what
+// anilist_rating_checked_at buys: turning it into a slower cycle later
+// is a change to this WHERE clause and nothing else, and the stamp
+// already records when each row was last read.
+//
+// COALESCE(season_year, -1) rather than a bare comparison: 4,500 of
+// 18,458 rows have no season_year, and `NULL >= 2026` is NULL, which
+// neither branch would claim.  They belong to the back catalogue.
+//
+// ORDER BY puts the cycling population ahead of the backlog so a
+// multi-day backfill drain cannot delay this season's refresh behind it.
+func (q *Queries) ListAnilistRatingCandidates(ctx context.Context, currentYear int32, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listAnilistRatingCandidates, currentYear, staleAfter, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var anilist_id int32
+		if err := rows.Scan(&anilist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, anilist_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAnimeForHantBackfill = `-- name: ListAnimeForHantBackfill :many
 SELECT
     anilist_id,
@@ -2344,6 +2405,55 @@ func (q *Queries) ListAnimeForHantBackfill(ctx context.Context) ([]ListAnimeForH
 			&i.DescriptionHantSource,
 			&i.DescriptionHantSourceHash,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBangumiRatingCandidates = `-- name: ListBangumiRatingCandidates :many
+SELECT anilist_id, bgm_id
+FROM anime_cache
+WHERE bgm_id IS NOT NULL
+  AND ((COALESCE(season_year, -1) >= $1::int
+        AND (bangumi_rating_checked_at IS NULL
+             OR bangumi_rating_checked_at < now() - $2::interval))
+    OR (COALESCE(season_year, -1) < $1::int
+        AND bangumi_rating_checked_at IS NULL))
+ORDER BY (COALESCE(season_year, -1) >= $1::int) DESC,
+         bangumi_rating_checked_at NULLS FIRST,
+         anilist_id
+LIMIT $3::int
+`
+
+type ListBangumiRatingCandidatesRow struct {
+	AnilistID int32  `json:"anilistId"`
+	BgmID     *int32 `json:"bgmId"`
+}
+
+// The Bangumi half of ListAnilistRatingCandidates.  Same two populations
+// and the same ordering; see that query for why they are shaped this way.
+//
+// Two queries rather than one parameterised by column name because sqlc
+// resolves columns at generate time.  Keep the WHERE clauses in step.
+//
+// bgm_id IS NOT NULL is the extra predicate: an unbound row has no
+// subject to ask about, and stamping it checked would be a lie the
+// binding sweep could never undo.  5,225 of 18,458 rows are unbound.
+func (q *Queries) ListBangumiRatingCandidates(ctx context.Context, currentYear int32, staleAfter pgtype.Interval, rowLimit int32) ([]ListBangumiRatingCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listBangumiRatingCandidates, currentYear, staleAfter, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBangumiRatingCandidatesRow{}
+	for rows.Next() {
+		var i ListBangumiRatingCandidatesRow
+		if err := rows.Scan(&i.AnilistID, &i.BgmID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2941,6 +3051,30 @@ func (q *Queries) LookupBgmIdMap(ctx context.Context, anilistID int32) (int32, e
 	return bgm_id, err
 }
 
+const markAnilistRatingChecked = `-- name: MarkAnilistRatingChecked :execrows
+UPDATE anime_cache
+   SET anilist_rating_checked_at = now()
+ WHERE anilist_id = $1::int
+`
+
+// Stamp a row AniList declined to return, without touching its figures.
+//
+// A batch asks for 50 ids and may get back fewer: AniList omits media it
+// no longer serves (deleted, merged into another entry).  Those rows
+// must still be stamped, or they sort to the head of every subsequent
+// batch on `checked_at NULLS FIRST` and quietly consume the same slots
+// forever while the rows behind them never get read.
+//
+// No updated_at bump: nothing about the row changed, and lastmod should
+// not claim otherwise.
+func (q *Queries) MarkAnilistRatingChecked(ctx context.Context, anilistID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, markAnilistRatingChecked, anilistID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markBangumiNeedsReview = `-- name: MarkBangumiNeedsReview :exec
 UPDATE anime_cache
 SET bgm_id           = NULL,
@@ -2960,6 +3094,32 @@ WHERE anilist_id = $1 AND bangumi_version = 0
 func (q *Queries) MarkBangumiNeedsReview(ctx context.Context, anilistID int32) error {
 	_, err := q.db.Exec(ctx, markBangumiNeedsReview, anilistID)
 	return err
+}
+
+const markBangumiRatingChecked = `-- name: MarkBangumiRatingChecked :execrows
+UPDATE anime_cache
+   SET bangumi_rating_checked_at = now()
+ WHERE anilist_id = $1::int
+   AND bgm_id     = $2::int
+`
+
+// Stamp a subject Bangumi would not serve, without touching its figures.
+//
+// The counterpart of MarkAnilistRatingChecked, and needed for the same
+// reason: an unstamped row leads every subsequent pass.  The usual cause
+// is the R18 gating migration 0031 records -- the v0 subject endpoint
+// 404s for an anonymous caller on a binding the legacy search endpoint
+// handed us -- and no number of retries turns into a token.
+//
+// This does NOT set bangumi_subject_unreadable_at.  That column is V2's
+// terminal state for a row that never completed enrichment; a row here
+// completed it long ago and is only failing to refresh a number.
+func (q *Queries) MarkBangumiRatingChecked(ctx context.Context, anilistID int32, bgmID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, markBangumiRatingChecked, anilistID, bgmID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markBangumiSubjectUnreadable = `-- name: MarkBangumiSubjectUnreadable :execrows
@@ -3264,6 +3424,47 @@ func (q *Queries) TouchEpisodeTitlesAt(ctx context.Context, anilistID int32, bgm
 	return result.RowsAffected(), nil
 }
 
+const updateAnilistRating = `-- name: UpdateAnilistRating :execrows
+UPDATE anime_cache
+   SET average_score             = COALESCE($1::numeric, average_score),
+       anilist_score_votes       = $2::int,
+       anilist_rating_checked_at = now(),
+       updated_at = CASE
+           WHEN average_score IS DISTINCT FROM COALESCE($1::numeric, average_score)
+             OR anilist_score_votes IS DISTINCT FROM $2::int
+           THEN now() ELSE updated_at END
+ WHERE anilist_id = $3::int
+`
+
+// Write one row's AniList rating figures and stamp the read.
+//
+// average_score is COALESCEd, so a null from this sweep leaves the
+// stored score alone.  The four paths that already write this column
+// (search, seasonal, detail, warm_season) overwrite it unconditionally
+// and should: each is answering for one row a request just named.  This
+// one walks all 18,458 in a couple of passes, so the same null on the
+// same field means something different here -- if it is wrong, it is
+// wrong across the whole catalogue at once, and there is no second
+// source to restore a score from.  A withdrawn score therefore survives
+// here until one of those paths clears it, and anilist_score_votes is
+// the column that says why the number is thin.
+//
+// score_votes is NOT coalesced.  It comes from ScoreVotes, which returns
+// nil only when the document did not select `stats` -- something this
+// statement's only caller cannot do -- so a null here is a bug, and
+// writing it is how the CHECK on the column gets to say so.
+//
+// updated_at moves only when a figure actually changed.  It is the
+// lastmod ListSitemapShard reports to Google, and a quarterly sweep that
+// touched every row would republish the whole sitemap for nothing.
+func (q *Queries) UpdateAnilistRating(ctx context.Context, averageScore *float64, scoreVotes *int32, anilistID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, updateAnilistRating, averageScore, scoreVotes, anilistID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateAnimeCharacterCN = `-- name: UpdateAnimeCharacterCN :exec
 UPDATE anime_characters
 SET name_cn               = $3,
@@ -3293,6 +3494,50 @@ func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nam
 		voiceActorImageUrl,
 	)
 	return err
+}
+
+const updateBangumiRating = `-- name: UpdateBangumiRating :execrows
+UPDATE anime_cache
+   SET bangumi_score             = COALESCE($1::numeric, bangumi_score),
+       bangumi_votes             = COALESCE($2::int, bangumi_votes),
+       bangumi_rating_checked_at = now(),
+       updated_at = CASE
+           WHEN bangumi_score IS DISTINCT FROM COALESCE($1::numeric, bangumi_score)
+             OR bangumi_votes IS DISTINCT FROM COALESCE($2::int, bangumi_votes)
+           THEN now() ELSE updated_at END
+ WHERE anilist_id = $3::int
+   AND bgm_id     = $4::int
+`
+
+// Write one row's Bangumi rating figures and stamp the read.
+//
+// The Bangumi counterpart of UpdateAnilistRating, and narrow on purpose.
+// UpdateBangumiV2 writes these same two columns, but it is the tail of a
+// job that also rewrites title_chinese, description_cn and every
+// character row, and can chain V3 -- re-running that on 13,233 bound
+// rows to refresh a score would put far more at risk than it collects.
+// Same argument DescriptionBackfillArgs makes for not reusing V3.
+//
+// Both figures are COALESCEd, so a subject whose response carried no
+// rating block leaves the stored pair alone rather than clearing it.
+// Note that a rating of zero is not null: Bangumi sends total=0 for a
+// subject nobody has rated, and that zero is written.
+//
+// bgm_id is in the WHERE, not just the payload.  A row re-bound between
+// the scan and this write would otherwise receive another subject's
+// score under its new binding.  The payload is never the authority --
+// same rule as TouchEpisodeTitlesAt and EpisodesBgmArgs.
+func (q *Queries) UpdateBangumiRating(ctx context.Context, bangumiScore *float64, bangumiVotes *int32, anilistID int32, bgmID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, updateBangumiRating,
+		bangumiScore,
+		bangumiVotes,
+		anilistID,
+		bgmID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateBangumiV1 = `-- name: UpdateBangumiV1 :execrows

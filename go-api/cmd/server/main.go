@@ -220,6 +220,14 @@ func main() {
 	// BGM_BIND_IDMAP_SWEEP_ENABLED.
 	queue.AddBindIdMapWorker(workers, pool, q, enqueuer)
 
+	// The two rating-refresh sweeps.  Register separately for the reason
+	// every sweep above does -- they need the AniList client, which the
+	// bundle builder holds but does not hand to any worker of its own --
+	// and the Bangumi half takes the SAME bangumiClient so its one
+	// request per row draws from the shared token bucket rather than
+	// opening a second one beside it.
+	queue.AddRatingsWorkers(workers, anilistClient, bangumiClient, q)
+
 	riverClient, err := queue.Boot(pool, queue.Config{
 		Workers: workers,
 		// Queues: default for V1+V2+warm_season+orphan_scan, bangumi_v3
@@ -282,6 +290,17 @@ func main() {
 			// it.  A single slot is what makes the race unreachable, and it
 			// is why every writer of anime_cache.bgm_id shares this queue.
 			queue.BgmBindQueueName: {MaxWorkers: 1},
+			// Rating refresh: 2, which is the one place in this map the
+			// number is not 1, and it is 2 for a specific reason rather
+			// than for throughput.  Two job kinds share this queue and
+			// neither can make the other go faster -- each is metered by
+			// its own upstream limiter, and the Bangumi one draws from
+			// the same 800ms bucket as the request path.  A single slot
+			// would only mean a four-minute Bangumi pass sitting in
+			// front of a thirty-second AniList one every hour.  They
+			// never contend for a row: the two write different columns,
+			// and Postgres serialises the overlap.
+			queue.RatingsQueueName: {MaxWorkers: 2},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),
@@ -299,6 +318,13 @@ func main() {
 			// way round from the two sweeps above it, and for what that
 			// costs on a service that deploys more often than quarterly.
 			queue.PeriodicHantBackfillJob(),
+			// Hourly, RunOnStart, for the reason the two sweeps above
+			// give: river's OSS scheduler recomputes nextRunAt at every
+			// Start, so without it a service that deploys more often
+			// than the interval never sweeps.  The read stamp is what
+			// makes firing on boot free.
+			queue.PeriodicAnilistRatingsJob(),
+			queue.PeriodicBangumiRatingsJob(),
 		},
 		Logger: slog.Default(),
 	})

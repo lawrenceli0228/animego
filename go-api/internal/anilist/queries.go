@@ -168,3 +168,44 @@ const WeeklyScheduleQuery = `
     }
   }
 `
+
+// MediaRatingsQuery — rating figures for an explicit list of media ids.
+//
+// The first query in this file that is NOT a port of an Express
+// document.  The four above are copied verbatim because production
+// observability and rate-limit budgets are tuned against them; this one
+// has no legacy counterpart to stay byte-identical with, because the
+// legacy backend never read a rating count.
+//
+// Variables:
+//
+//	$ids     [Int]  AniList media ids, at most 50 (AniList's page cap)
+//	$perPage Int    page size — the caller passes len(ids)
+//
+// `id_in` rather than a page of a season, because the rows that need
+// this are not a season: 4,500 of 18,458 catalogue rows have no
+// season_year at all (films, OVAs, specials), and a per-season document
+// can never reach them.  Batching by id also means one request refreshes
+// 50 rows instead of one, which is what makes a whole-catalogue sweep
+// cost ~370 requests instead of ~18,000.
+//
+// The selection is deliberately narrow.  This document is not a cache
+// warm and must not be mistaken for one: it selects the two rating
+// figures and the id needed to attribute them, and nothing a caller
+// could be tempted to write over an existing row with.
+//
+// stats.scoreDistribution is how AniList exposes a rater count -- there
+// is no scalar for it.  The buckets are per-decile and their amounts sum
+// to the number of users who scored the work, which is the figure
+// Bangumi prints as "N 人评分".  See Media.ScoreVotes.
+const MediaRatingsQuery = `
+  query MediaRatings($ids: [Int], $perPage: Int) {
+    Page(page: 1, perPage: $perPage) {
+      media(id_in: $ids, type: ANIME) {
+        id
+        averageScore
+        stats { scoreDistribution { score amount } }
+      }
+    }
+  }
+`
