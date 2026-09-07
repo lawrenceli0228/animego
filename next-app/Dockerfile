@@ -35,10 +35,21 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # falsy DSN). SENTRY_AUTH_TOKEN drives source-map upload via
 # next.config.ts's `sourcemaps.disable: !process.env.SENTRY_AUTH_TOKEN`
 # gate — without it, the upload step skips and the build still passes.
+#
+# SENTRY_ORG / SENTRY_PROJECT are the other half of that gate and were the
+# reason a token alone would not have worked: next.config.ts does not name
+# an org or project, so the plugin resolves both from the environment. With
+# the token set and these two absent, the upload has a credential and no
+# destination — it fails at build rather than skipping, which is the loud
+# half of a footgun whose quiet half (no token at all) had been hiding it.
 ARG NEXT_PUBLIC_SENTRY_DSN=
 ARG SENTRY_AUTH_TOKEN=
+ARG SENTRY_ORG=
+ARG SENTRY_PROJECT=
 ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 ENV SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN
+ENV SENTRY_ORG=$SENTRY_ORG
+ENV SENTRY_PROJECT=$SENTRY_PROJECT
 
 # The commit this image was built from. next.config.ts turns it into
 # NEXT_PUBLIC_BUILD_ID, which is how a tab opened before a deploy learns it
