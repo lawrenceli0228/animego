@@ -5,8 +5,10 @@
 // the exact rate-limit and retry semantics the legacy backend uses so
 // production AniList traffic stays inside the same per-IP budget:
 //
-//   - One in-flight request per 700ms (≈85 req/min) via a token-bucket
-//     rate limiter.  This replaces the JS lastRequestTime trick.
+//   - One in-flight request per minInterval via a token-bucket rate
+//     limiter.  This replaces the JS lastRequestTime trick.  The interval
+//     is derived from AniList's live budget (see rateLimitPerMinute), not
+//     from the figure the Express service used.
 //   - On HTTP 429, honour Retry-After (defaulting to 60s when the header
 //     is missing or unparsable), then retry — up to 3 retries (4 total
 //     attempts) before surfacing ErrRateLimited.
@@ -48,9 +50,39 @@ import (
 // with WithEndpoint(...) in tests or staging.
 const DefaultEndpoint = "https://graphql.anilist.co"
 
-// minInterval is the per-request gap the Express service enforces.
-// 700ms ≈ 85 req/min, well under AniList's documented 90 req/min cap.
-const minInterval = 700 * time.Millisecond
+// rateLimitPerMinute is the request budget AniList currently grants.
+//
+// 30, not the 90 this client was built against.  AniList degraded the
+// limit at some point and the number is not in the docs -- it is on every
+// response, as `X-RateLimit-Limit`.  Read from the production origin
+// 2026-09-08: `x-ratelimit-limit: 30`.
+//
+// It is a named constant so minInterval can be derived from it rather
+// than from a remembered figure, and so TestClient_ThrottleFitsTheBudget
+// has something to check the derivation against.
+const rateLimitPerMinute = 30
+
+// minInterval is the per-request gap the token bucket enforces.
+//
+// Derived from rateLimitPerMinute with a margin, not chosen.  It was
+// 700ms (≈85/min) for as long as this client has existed, which is 2.8x
+// the budget actually on offer -- an overdraft that stayed invisible
+// because ordinary traffic rarely sustains 85/min for long enough to
+// exhaust the window.
+//
+// The ratings sweep does sustain it.  Its first production pass, minutes
+// after the Referer fix landed, ran 16 batches and then took 429s for the
+// remaining 24: `rowsWritten:800 rowsFailed:1200`.  That matters beyond
+// the sweep, because exceeding the budget does not degrade gracefully --
+// a 429 that exhausts the retry budget trips the circuit breaker, and the
+// breaker is on the client every user-facing AniList call shares.  Going
+// over budget therefore converts a slow page into a failed one, for
+// everybody, for the length of the cooldown.
+//
+// Hence a margin rather than the exact 2000ms: the budget is a window,
+// not a rate, so pacing exactly at it leaves nothing for the jitter
+// between our clock and theirs.
+const minInterval = (60 * time.Second) / rateLimitPerMinute * 21 / 20
 
 // maxRetries is the number of 429 retries before giving up.  The first
 // HTTP attempt is not counted as a retry, so the total attempt budget is

@@ -4,6 +4,25 @@
 
 ## [未发布]
 
+### ★ 我们对 AniList 一直快 2.8 倍，是这次 sweep 把它顶出来的
+
+`minInterval` 从这个客户端存在起就是 700ms（≈85 req/min），注释写着「well under AniList's documented 90 req/min cap」。**那个 90 是旧的。** 从生产源站读它自己的响应头：
+
+    x-ratelimit-limit: 30
+
+一直超额 2.8 倍，而且一直没炸——因为普通流量很少把 85/min **持续**打到窗口耗尽。
+
+评分 sweep 会。Referer 修好之后的第一次生产 pass：`batches:16 rowsWritten:800 rowsFailed:1200`，16 批之后剩下 24 批全是 429。
+
+**这件事的严重性不在 sweep 身上。** 超额度不会让页面变慢，会让页面失败：一个耗尽重试预算的 429 会让熔断器跳闸，而那个熔断器挂在**每一次用户侧 AniList 调用共用的同一个客户端**上。也就是说 sweep 打爆额度，代价由 search、时间表、未缓存详情页一起付，持续一个冷却周期。
+
+现在 `minInterval` 是**从额度推导出来的**而不是记下来的：`rateLimitPerMinute = 30` 是一个具名常量，`minInterval = 60s/30 × 21/20 = 2.1s`。多出来的那 5% 余量是因为额度是个**窗口不是速率**，卡着 2000ms 走等于不给两边时钟的抖动留任何余地。
+
+守卫是 `TestClient_ThrottleFitsTheBudget`，它检的是算术不是计时：把 700ms 放回去，它会带着被违反的那个数字变红。原来那条 `TestClient_Throttle_700ms` 只断言「限速器确实等了」——那条性质在超额 2.8 倍时同样成立，所以它从来挡不住这件事。
+
+顺带记一条不明显但让人放心的推论：sweep 是**串行**发请求的，所以任一时刻限速队列里最多只有它的一个请求，用户请求最坏排队 2.1 秒而不是 84 秒。如果哪天有人把 sweep 改成并发，这个结论就没了。
+
+
 ### 评分是被读过一次的数，不是一个事实
 
 AniList 那半原本连人数都没有。目录里存着 AniList 的 `average_score` 和 Bangumi 的 `bangumi_score` / `bangumi_votes`，于是两个来源没法比：一个 84 分背后是四十个人还是四万个人，在表里长得一模一样，谁也说不出它和 Bangumi 的 18,023 该怎么放在一起看。

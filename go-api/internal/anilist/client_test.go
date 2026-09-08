@@ -61,8 +61,8 @@ func freshConnClient() *http.Client {
 
 // testClient builds a Client pointed at the given fake URL.  The
 // limiter is replaced with an unrestricted one so individual tests
-// don't pay the 700ms tax — TestClient_Throttle_700ms is the only
-// test that wants to exercise the real limiter.
+// don't pay the minInterval tax — TestClient_ThrottleFitsTheBudget is
+// the only test that wants to exercise the real limiter.
 func testClient(t *testing.T, url string, opts ...Option) *Client {
 	t.Helper()
 	noop, _ := newNoopSleep()
@@ -547,7 +547,29 @@ func TestClient_GraphQLError_WrappedAsUpstream(t *testing.T) {
 // Throttle + context behaviour
 // ---------------------------------------------------------------------------
 
-func TestClient_Throttle_700ms(t *testing.T) {
+// TestClient_ThrottleFitsTheBudget is the assertion that matters, and it
+// is about arithmetic rather than timing.
+//
+// minInterval was 700ms — ≈85 requests a minute — against a budget of 30.
+// Nothing failed for as long as ordinary traffic never sustained that
+// rate; the first ratings sweep did, took 429s on 24 of 40 batches, and
+// tripped the circuit breaker that every user-facing AniList call shares.
+// Going over budget does not make pages slow, it makes them fail.
+//
+// So the property to hold is not "the limiter waits" — the test below
+// shows that — but "the interval it waits for cannot be set faster than
+// the budget allows".  A future edit that puts 700ms back for latency
+// reasons fails here, with the number it would be violating.
+func TestClient_ThrottleFitsTheBudget(t *testing.T) {
+	t.Parallel()
+
+	budget := (60 * time.Second) / rateLimitPerMinute
+	assert.GreaterOrEqual(t, minInterval, budget,
+		"minInterval %v paces %0.1f req/min against a budget of %d; exceeding it trips the breaker for every caller, not just this one",
+		minInterval, float64(time.Minute)/float64(minInterval), rateLimitPerMinute)
+}
+
+func TestClient_Throttle(t *testing.T) {
 	t.Parallel()
 
 	const okBody = `{"data":{"Page":{"pageInfo":{"total":0,"currentPage":1,"lastPage":1,"hasNextPage":false,"perPage":20},"media":[]}}}`
@@ -567,9 +589,10 @@ func TestClient_Throttle_700ms(t *testing.T) {
 	elapsed := time.Since(start)
 
 	// burst=1 means the first call goes through immediately; the second
-	// must wait ~700ms for the bucket to refill.
-	assert.GreaterOrEqual(t, elapsed, 700*time.Millisecond,
-		"expected >=700ms total for 2 calls under the 700ms limiter, got %v", elapsed)
+	// must wait one minInterval for the bucket to refill.  Asserted
+	// against the constant, not a literal, so the two cannot drift.
+	assert.GreaterOrEqual(t, elapsed, minInterval,
+		"expected >=%v total for 2 calls under the real limiter, got %v", minInterval, elapsed)
 	// Don't assert an upper bound — CI scheduling jitter could push it
 	// over 1s without indicating a real bug.
 }
