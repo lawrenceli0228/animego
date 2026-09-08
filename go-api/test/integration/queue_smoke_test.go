@@ -77,9 +77,11 @@ func (noHitBangumi) Characters(_ context.Context, _ int) ([]bangumi.Character, e
 // Episodes joined BangumiV2Client via BangumiEpisodesFetcher after this stub
 // was written, and the stub was never updated -- which stopped the whole
 // `integration` package from compiling.  Nothing noticed because these tests
-// are behind a build tag and no CI job passes `-tags=integration`, so the
-// suite has been silently dead rather than failing.  Same no-hit shape as its
-// three siblings above.
+// are behind a build tag that, at the time, no CI job passed.
+//
+// That is no longer true: unit-tests.yml runs `go vet -tags=integration ./...`
+// and then the tagged suite itself, so this file compiles and runs on every
+// PR.  Same no-hit shape as its three siblings above.
 func (noHitBangumi) Episodes(_ context.Context, _ int) (*bangumi.EpisodesResponse, error) {
 	return nil, bangumi.ErrNotFound
 }
@@ -196,8 +198,8 @@ func (noRowV12DB) GetTitleChineseByAnilistIDs(_ context.Context, _ []int32) ([]d
 
 // The four below joined V12DB after this stub was written and were never
 // added, which is what stopped the `integration` package compiling.  See the
-// note on noHitBangumi.Episodes: the package is behind a build tag that no CI
-// job passes, so the suite went quiet rather than red.
+// note on noHitBangumi.Episodes: the build tag went ungated for two months, so
+// the suite went quiet rather than red.  unit-tests.yml gates it now.
 //
 // ListUnenrichedAnilistIDs satisfies queue.OrphanReader.  An empty slice ends
 // the orphan scan's paging loop on its first iteration, so the worker reaches
