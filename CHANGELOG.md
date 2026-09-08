@@ -4,6 +4,21 @@
 
 ## [未发布]
 
+### 预告片放不了：拦它的是我们自己的跨源隔离
+
+CSP 那行 `frame-src https://www.youtube-nocookie.com` 是对的，线上也确实生效了。真正拦住 iframe 的是另外两个头：`Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: credentialless`。
+
+**`credentialless` 对子资源放宽，对 iframe 不放宽。** 跨源 iframe 必须自己**强制**带 COEP，而 YouTube 的 embed 只带 `Cross-Origin-Embedder-Policy-Report-Only`（外加一个正确的 `Cross-Origin-Resource-Policy: cross-origin`）—— report-only 不算数。
+
+2026-09-08 用真浏览器对着生产量的：详情页 `crossOriginIsolated === true`，youtube-nocookie 的请求 `net::ERR_BLOCKED_BY_RESPONSE`。★ **顺带一个会骗人的信号：那个 iframe 的 `onload` 照样触发了** —— 在错误页上触发的。判据是失败的那个请求，不是 onload。
+
+这两个头不能删：播放器要靠跨源隔离拿 SharedArrayBuffer 跑 jassub（`.ass` 字幕），没有就退化成纯文本 VTT。所以**隔离改成按路由决定**：`map $uri` 让详情页（`/anime/`、`/en/anime/`、`/zh-Hant/anime/`，zh 是裸前缀）不发这两个头，其余路由一律照旧。详情页是唯一嵌预告片的路由，也是唯一从来不需要 SharedArrayBuffer 的路由。
+
+nginx 对空值的 `add_header` 会整条略过；就算哪天这个行为变了，空的 COOP/COEP 不是合法策略、浏览器会退回 unsafe-none —— 同样的结果，所以这条改动不会 fail closed。
+
+三份 nginx 配置都改了，并在 VPS 上用一次性容器 `nginx -t` 验过语法再部署（配置写坏会让整站起不来，不能等 `restart nginx` 才发现）。
+
+
 ### sweep 占住共享限速器的那 130 秒，让 /schedule 超时了
 
 限流修好之后的第一次干净 pass（`batches:40 rowsWritten:2000 rowsFailed:0`）跑了 **130 秒**，而生产在这 130 秒里记下一条 `/api/anime/schedule` 500、耗时 19.568s。
