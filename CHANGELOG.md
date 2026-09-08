@@ -4,6 +4,19 @@
 
 ## [未发布]
 
+### 详情页可以看预告片了，而且不是把 YouTube 播放器搬进关键路径
+
+迁移 0032（#167）把预告片元数据存进了目录，但**在此之前没有任何界面读它**——那次改动交付的是一列数据，不是一个功能。这次补上呈现层。
+
+页面默认只加载一张缩略图。真正的 iframe 是**点击之后**才在对话框里创建的，所以 YouTube 的播放器脚本、cookie 和体积不进详情页的首屏——详情页是这个站 SEO 的主力页面，它的关键路径不该为一个大多数人不会点的东西付费。
+
+所有 YouTube URL 的构造收在同一个校验边界后面（`asYouTubeTrailer`），11 位 id 的正则和 Go 侧、和迁移 0032 的 CHECK 是同一条规则。**客户端仍然校验一遍，尽管 Go 侧已经拦过**——理由不是不信任后端，是**混合版本部署窗口**：id 会被插进 iframe 的 URL，而这个窗口里前后端版本可以不一致，fail closed 比信任上游便宜。
+
+CSP 的 `frame-src` 从 `'none'` 放开到 **`https://www.youtube-nocookie.com` 一个域**，不是 `youtube.com`，更不是通配。
+
+三语文案齐全，`e2e/specs/sandbox/anime-detail.spec.ts` 补了 217 行覆盖。
+
+
 ### 预告片放不了：拦它的是我们自己的跨源隔离
 
 CSP 那行 `frame-src https://www.youtube-nocookie.com` 是对的，线上也确实生效了。真正拦住 iframe 的是另外两个头：`Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: credentialless`。
