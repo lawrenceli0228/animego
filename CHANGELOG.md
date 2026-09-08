@@ -4,6 +4,34 @@
 
 ## [未发布]
 
+### 详情页可以看预告片了，而且不是把 YouTube 播放器搬进关键路径
+
+迁移 0032（#167）把预告片元数据存进了目录，但**在此之前没有任何界面读它**——那次改动交付的是一列数据，不是一个功能。这次补上呈现层。
+
+页面默认只加载一张缩略图。真正的 iframe 是**点击之后**才在对话框里创建的，所以 YouTube 的播放器脚本、cookie 和体积不进详情页的首屏——详情页是这个站 SEO 的主力页面，它的关键路径不该为一个大多数人不会点的东西付费。
+
+所有 YouTube URL 的构造收在同一个校验边界后面（`asYouTubeTrailer`），11 位 id 的正则和 Go 侧、和迁移 0032 的 CHECK 是同一条规则。**客户端仍然校验一遍，尽管 Go 侧已经拦过**——理由不是不信任后端，是**混合版本部署窗口**：id 会被插进 iframe 的 URL，而这个窗口里前后端版本可以不一致，fail closed 比信任上游便宜。
+
+CSP 的 `frame-src` 从 `'none'` 放开到 **`https://www.youtube-nocookie.com` 一个域**，不是 `youtube.com`，更不是通配。
+
+三语文案齐全，`e2e/specs/sandbox/anime-detail.spec.ts` 补了 217 行覆盖。
+
+
+### 预告片放不了：拦它的是我们自己的跨源隔离
+
+CSP 那行 `frame-src https://www.youtube-nocookie.com` 是对的，线上也确实生效了。真正拦住 iframe 的是另外两个头：`Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: credentialless`。
+
+**`credentialless` 对子资源放宽，对 iframe 不放宽。** 跨源 iframe 必须自己**强制**带 COEP，而 YouTube 的 embed 只带 `Cross-Origin-Embedder-Policy-Report-Only`（外加一个正确的 `Cross-Origin-Resource-Policy: cross-origin`）—— report-only 不算数。
+
+2026-09-08 用真浏览器对着生产量的：详情页 `crossOriginIsolated === true`，youtube-nocookie 的请求 `net::ERR_BLOCKED_BY_RESPONSE`。★ **顺带一个会骗人的信号：那个 iframe 的 `onload` 照样触发了** —— 在错误页上触发的。判据是失败的那个请求，不是 onload。
+
+这两个头不能删：播放器要靠跨源隔离拿 SharedArrayBuffer 跑 jassub（`.ass` 字幕），没有就退化成纯文本 VTT。所以**隔离改成按路由决定**：`map $uri` 让详情页（`/anime/`、`/en/anime/`、`/zh-Hant/anime/`，zh 是裸前缀）不发这两个头，其余路由一律照旧。详情页是唯一嵌预告片的路由，也是唯一从来不需要 SharedArrayBuffer 的路由。
+
+nginx 对空值的 `add_header` 会整条略过；就算哪天这个行为变了，空的 COOP/COEP 不是合法策略、浏览器会退回 unsafe-none —— 同样的结果，所以这条改动不会 fail closed。
+
+三份 nginx 配置都改了，并在 VPS 上用一次性容器 `nginx -t` 验过语法再部署（配置写坏会让整站起不来，不能等 `restart nginx` 才发现）。
+
+
 ### sweep 占住共享限速器的那 130 秒，让 /schedule 超时了
 
 限流修好之后的第一次干净 pass（`batches:40 rowsWritten:2000 rowsFailed:0`）跑了 **130 秒**，而生产在这 130 秒里记下一条 `/api/anime/schedule` 500、耗时 19.568s。
