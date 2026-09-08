@@ -290,17 +290,24 @@ func main() {
 			// it.  A single slot is what makes the race unreachable, and it
 			// is why every writer of anime_cache.bgm_id shares this queue.
 			queue.BgmBindQueueName: {MaxWorkers: 1},
-			// Rating refresh: 2, which is the one place in this map the
-			// number is not 1, and it is 2 for a specific reason rather
-			// than for throughput.  Two job kinds share this queue and
-			// neither can make the other go faster -- each is metered by
-			// its own upstream limiter, and the Bangumi one draws from
-			// the same 800ms bucket as the request path.  A single slot
-			// would only mean a four-minute Bangumi pass sitting in
-			// front of a thirty-second AniList one every hour.  They
-			// never contend for a row: the two write different columns,
-			// and Postgres serialises the overlap.
-			queue.RatingsQueueName: {MaxWorkers: 2},
+			// Rating refresh: MaxWorkers MUST stay 1, and this replaces
+			// an earlier 2 that was chosen so a four-minute Bangumi pass
+			// would not sit in front of a thirty-second AniList one.
+			//
+			// That reasoning was right about the cost and wrong about
+			// what the slot count is for.  The single slot is now what
+			// makes two concurrent passes of the SAME kind unreachable,
+			// which is what lets ratingsUniqueStates leave `running`
+			// out -- and leaving it out is what stops a deploy that
+			// kills a pass mid-flight from suppressing the sweep for the
+			// hour it takes river's rescuer to reclaim the orphan.  See
+			// that comment for the incident.
+			//
+			// The cost it buys back is small at this cadence: with
+			// anilistRatingsBatch at 500 the AniList pass is ~21s and
+			// the Bangumi pass ~4 minutes, so serialising them spends
+			// about five minutes of one slot per hour.
+			queue.RatingsQueueName: {MaxWorkers: 1},
 		},
 		PeriodicJobs: []*river.PeriodicJob{
 			queue.PeriodicWarmSeasonJob(),

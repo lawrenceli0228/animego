@@ -374,7 +374,7 @@ func (EpisodeTitlesArgs) InsertOpts() river.InsertOpts {
 }
 
 // ratingsUniqueStates is the set of states in which an existing ratings
-// sweep suppresses a new one: every non-terminal state, and nothing else.
+// sweep suppresses a new one.
 //
 // Spelled out rather than left to river's default for the reason
 // hantBackfillUniqueStates records — the default includes `completed`,
@@ -385,11 +385,35 @@ func (EpisodeTitlesArgs) InsertOpts() river.InsertOpts {
 // attempt is still this sweep in flight, and a second one beside it
 // would read the same head-of-queue candidates and spend the same
 // upstream budget twice.
+//
+// ★ `running` is deliberately NOT in the set, and that is the one entry
+// worth explaining, because putting it there is the obvious choice.
+//
+// A `running` row does not mean a pass is running.  It means a pass was
+// running when its row was last written, and a deploy kills the process
+// mid-pass without changing it.  River only reclaims such a row through
+// its rescuer, whose default window is an hour.  For that hour the row
+// is indistinguishable from a live pass, so a `running` entry here makes
+// the boot-time RunOnStart insert suppress itself against the corpse of
+// the pass the deploy just killed.
+//
+// Measured on prod 2026-09-08: three deploys in one evening, and after
+// the last one `anilist_ratings` and `bangumi_ratings` each sat in
+// `running` for 59 minutes with zero sweep log lines, while the rescuer
+// counted down.  Nothing reported it — the sweeps simply produced
+// nothing, which is also what a caught-up sweep looks like.
+//
+// What actually prevents two concurrent passes is the queue: ratings
+// runs MaxWorkers=1 (see cmd/server/main.go), so only one ratings job
+// executes at a time regardless of how many are enqueued.  An orphaned
+// `running` row holds no worker slot, because slots are in-process.  And
+// a second pass that runs right after a first is not duplicated work:
+// candidacy is the read stamp, so the first pass's rows are no longer
+// candidates and the second one picks up where it left off.
 var ratingsUniqueStates = []rivertype.JobState{
 	rivertype.JobStateAvailable,
 	rivertype.JobStatePending,
 	rivertype.JobStateRetryable,
-	rivertype.JobStateRunning,
 	rivertype.JobStateScheduled,
 }
 

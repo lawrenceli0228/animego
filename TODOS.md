@@ -785,3 +785,36 @@
 **Context** — 2026-09-08 修 `minInterval`（700ms → 2.1s）时识别。触发条件：任何把 sweep 改成并发的改动，或者额度被进一步下调。
 
 **Depends on / blocked by** — 无。
+
+
+---
+
+## 未缓存的详情页在 AniList 够不到时返 502，而且没有可降级的数据
+
+**What** — 给「行不存在 + AniList 取不到」这条路径一个比 502 更好的答案：要么 404（我们确实没有这个条目），要么排队补齐后返回 202/占位，而不是把上游失败原样透出。
+
+**Why** — `detail.go` 已经有优雅降级，但它只在**行存在**时生效（「re-fetch 失败就返回已读到的陈旧行」）。行不存在时没有任何可返回的东西，直接 502。2026-09-08 实测两例（`88764`、`108289`，两者都不在 `anime_cache` 里），成因是 `anilist: rate limit wait: rate: Wait(n=1) would exceed context deadline` —— 限速器排队超过了 `refetchTimeout` 的 15 秒预算。
+
+**Pros** — `/anime/*` 是 SEO 主力面，502 是这个仓库已经为之修过一轮的东西（见「详情页 500 爬虫×限流」）。
+
+**Cons** — 「我们没有这个条目」和「我们暂时取不到」是两件事，用同一个状态码回答任何一件都会误导某一方；要分开就要引入一个新的响应形状。
+
+**Context** — 2026-09-08。`minInterval` 从 700ms 提到 2.1s（限流实际额度 30/min）之后这个窗口变宽了 3 倍：15 秒预算在 700ms 时容得下约 21 个排队请求，2.1s 时只有 7 个。**根因不是这个常量，是 30/min 对一个会在用户请求上做冷启动取数的站点本来就很紧** —— 真正的解法在「后台工作应有独立额度」那条，以及不要在请求路径上冷启动取数。实测频率很低（18 分钟 2 个）。
+
+**Depends on / blocked by** — 与「sweep 和用户请求共用同一个 AniList 额度」那条同源。
+
+---
+
+## hant_backfill 也会被部署杀出的孤儿作业压制
+
+**What** — 把 `hantBackfillUniqueStates` 里的 `running` 拿掉，理由和 `ratingsUniqueStates` 一样（见 `args.go` 里那段注释）。
+
+**Why** — 2026-09-08 当晚实测：一次部署之后 `hant_backfill` 和两条 ratings sweep 一起卡在 `running` 59 分钟。同一个机制 —— `running` 行是被杀进程留下的尸体，river 的 rescuer 一小时后才回收，而在那之前它会把新的入队压制掉。
+
+**Pros** — 三个 sweep 用同一条规则，不会有人照着 `hant_backfill` 抄一份新的坑。
+
+**Cons** — 它是**季度**作业，一小时的延迟对它毫无影响，所以这条纯粹是为了一致性。而且要顺带确认它的队列同样是 `MaxWorkers: 1`（是），否则拿掉 `running` 会打开并发的口子。
+
+**Context** — 2026-09-08 修 ratings 时顺带发现。
+
+**Depends on / blocked by** — 无。
