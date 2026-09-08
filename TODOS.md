@@ -805,16 +805,18 @@
 
 ---
 
-## hant_backfill 也会被部署杀出的孤儿作业压制
+## 部署杀出的孤儿作业会压制 sweep 一小时（三个 sweep 都有）
 
-**What** — 把 `hantBackfillUniqueStates` 里的 `running` 拿掉，理由和 `ratingsUniqueStates` 一样（见 `args.go` 里那段注释）。
+**What** — 让周期 sweep 不再依赖 `UniqueOpts` 去防重：去掉唯一性，改为靠队列的 `MaxWorkers: 1` 加候选查询的读取时间戳。或者调低 river 的 `RescueStuckJobsAfter`（默认 1 小时），但要先确认没有作业的正常时长会撞上这个窗口。
 
-**Why** — 2026-09-08 当晚实测：一次部署之后 `hant_backfill` 和两条 ratings sweep 一起卡在 `running` 59 分钟。同一个机制 —— `running` 行是被杀进程留下的尸体，river 的 rescuer 一小时后才回收，而在那之前它会把新的入队压制掉。
+**Why** — `running` 行不代表有 pass 在跑，部署杀进程不改它，rescuer 一小时后才回收。这一小时里 `RunOnStart` 的入队被自己的尸体压制，而且**没有症状**（不产出 = 追平了，两者同形）。2026-09-08 实测：一次部署后 `anilist_ratings` / `bangumi_ratings` / `hant_backfill` 同时卡 59 分钟。
 
-**Pros** — 三个 sweep 用同一条规则，不会有人照着 `hant_backfill` 抄一份新的坑。
+⚠️ **不要用「把 running 从 ByState 拿掉」来修**。已经在生产上试过并回滚：river 的 `UniqueOpts.validate` 强制要求 available/pending/running/scheduled 四个都在，少一个会让 `PeriodicJobEnqueuer` 对该 kind 整个失败——只留一行 ERROR 日志，服务照常跑，sweep 再也不入队，一小时的压制变成永久。守卫见 `TestRatingsUniqueStatesMatchRiver`。
 
-**Cons** — 它是**季度**作业，一小时的延迟对它毫无影响，所以这条纯粹是为了一致性。而且要顺带确认它的队列同样是 `MaxWorkers: 1`（是），否则拿掉 `running` 会打开并发的口子。
+**Pros** — 三个 sweep 一起受益；ratings 是每小时跑的，一小时的窗口对它最不能忍。而且去掉唯一性对 ratings 本来就安全：候选资格是读取时间戳，紧接着的第二次 pass 取的是下一批，不是重复劳动。
 
-**Context** — 2026-09-08 修 ratings 时顺带发现。
+**Cons** — 去掉唯一性后 river 行会累积（每小时一条，24 条/天，completed 会被 river 自己清理）；如果 worker 卡住，作业会堆积而不是被合并。`hant_backfill` 是**整表**pass，对它去掉唯一性要更谨慎——两次并发全表 pass 是真的重复劳动，它依赖的是 `MaxWorkers: 1`。
+
+**Context** — 2026-09-08。ratings 每小时跑所以最疼；`hant_backfill` 是季度作业，一小时对它无所谓。
 
 **Depends on / blocked by** — 无。

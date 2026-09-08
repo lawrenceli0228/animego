@@ -386,34 +386,39 @@ func (EpisodeTitlesArgs) InsertOpts() river.InsertOpts {
 // would read the same head-of-queue candidates and spend the same
 // upstream budget twice.
 //
-// ★ `running` is deliberately NOT in the set, and that is the one entry
-// worth explaining, because putting it there is the obvious choice.
+// ★ `running` is in the set because river REQUIRES it, and this is the
+// second thing to know about it rather than the first.
 //
-// A `running` row does not mean a pass is running.  It means a pass was
-// running when its row was last written, and a deploy kills the process
-// mid-pass without changing it.  River only reclaims such a row through
-// its rescuer, whose default window is an hour.  For that hour the row
-// is indistinguishable from a live pass, so a `running` entry here makes
-// the boot-time RunOnStart insert suppress itself against the corpse of
-// the pass the deploy just killed.
+// The first is that a `running` row does not mean a pass is running.  It
+// means one was running when the row was last written, and a deploy kills
+// the process without changing it; river reclaims such a row only through
+// its rescuer, an hour later by default.  For that hour the row is
+// indistinguishable from a live pass, so the boot-time RunOnStart insert
+// suppresses itself against the corpse of the pass the deploy just
+// killed.  Measured on prod 2026-09-08: after one deploy both sweeps sat
+// in `running` for 59 minutes producing nothing — which is also exactly
+// what a caught-up sweep looks like, so nothing reported it.
 //
-// Measured on prod 2026-09-08: three deploys in one evening, and after
-// the last one `anilist_ratings` and `bangumi_ratings` each sat in
-// `running` for 59 minutes with zero sweep log lines, while the rescuer
-// counted down.  Nothing reported it — the sweeps simply produced
-// nothing, which is also what a caught-up sweep looks like.
+// Removing `running` to fix that is the obvious move and it is WRONG.
+// UniqueOpts.validate requires available, pending, running and scheduled;
+// a set missing any of them makes PeriodicJobEnqueuer fail for this kind
+// entirely.  It fails at ERROR level in the log and nowhere else — the
+// service starts, serves traffic, and simply never enqueues the sweep
+// again.  That was tried on prod the same evening and turned a one-hour
+// suppression into a permanent one.  TestRatingsUniqueStatesMatchRiver
+// now holds the requirement so the next attempt fails in CI.
 //
-// What actually prevents two concurrent passes is the queue: ratings
-// runs MaxWorkers=1 (see cmd/server/main.go), so only one ratings job
-// executes at a time regardless of how many are enqueued.  An orphaned
-// `running` row holds no worker slot, because slots are in-process.  And
-// a second pass that runs right after a first is not duplicated work:
-// candidacy is the read stamp, so the first pass's rows are no longer
-// candidates and the second one picks up where it left off.
+// The one-hour window after a deploy therefore stands, and is accepted:
+// it self-heals through the rescuer, and the same shape has always been
+// true of hantBackfillUniqueStates.  TODOS.md carries what would remove
+// it — dropping uniqueness altogether and leaning on MaxWorkers=1 plus
+// the read stamp, which already makes a duplicate pass harmless because
+// candidacy is the stamp and a second pass picks up the next batch.
 var ratingsUniqueStates = []rivertype.JobState{
 	rivertype.JobStateAvailable,
 	rivertype.JobStatePending,
 	rivertype.JobStateRetryable,
+	rivertype.JobStateRunning,
 	rivertype.JobStateScheduled,
 }
 

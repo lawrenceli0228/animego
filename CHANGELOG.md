@@ -4,22 +4,23 @@
 
 ## [未发布]
 
-### ★ 一次部署，能让 sweep 静默停一小时——而且它看起来和「没活可干」一模一样
+### ★★ 一次部署能让 sweep 静默停一小时，而「拿掉 running」把一小时变成了永久
 
-三次部署之后回头看 river：`anilist_ratings` 和 `bangumi_ratings` 各有一条作业卡在 `running`，**59 分钟**，期间零条 sweep 日志。
+**上半段（成立）**：三次部署之后 river 里 `anilist_ratings`、`bangumi_ratings`、`hant_backfill` 各有一条作业卡在 `running`，**59 分钟**，期间零条 sweep 日志。原因是 `UniqueOpts.ByState` 里有 `running`，而 **`running` 不代表有 pass 在跑** —— 它代表「上次写这行时它在跑」，部署直接杀进程不改状态，river 只能靠 rescuer 回收（默认一小时）。这一小时里那行和真实 pass 无法区分，开机的 `RunOnStart` 入队被**部署刚杀掉的那次 pass 的尸体**压制。
 
-原因是我给它们设的 `UniqueOpts` 把 `running` 算成「已在飞行中」。**但 `running` 不代表有 pass 在跑** —— 它代表「上一次写这行时它在跑」，而部署直接把进程杀掉，不会改这个状态。river 只能靠 rescuer 回收，默认窗口是一小时。这一小时里那行和一次真实的 pass 完全无法区分，于是开机的 `RunOnStart` 自动入队**被部署刚杀掉的那次 pass 的尸体压制了**。
+★★ **它没有症状**：被压制的 sweep 什么都不产出，而这也正是「已经追平」的样子。
 
-★★ **最坏的部分是它没有症状**：sweep 什么都不产出，而这也正是「已经追平、没活可干」的样子。没有报错、没有告警，两者从外面看一模一样。
+**下半段（我修错了，并且上了生产）**：拿掉 `running` 看起来是显而易见的修法。**它是错的。** river 的 `UniqueOpts.validate` **强制要求** available / pending / running / scheduled 四个状态都在；少任何一个，`PeriodicJobEnqueuer` 对这个 kind **整个失败** —— 只在日志里留一行 ERROR，服务照常启动、照常服务流量、**再也不排队这个 sweep**。于是一小时的压制变成了永久停摆，直到下一次部署。
 
-`running` 从集合里拿掉。真正防止两次并发 pass 的不是它，是队列 —— `ratings` 的 `MaxWorkers` 从 2 改回 **1**，于是同一时刻只有一个 ratings 作业在执行；孤儿 `running` 行不占 worker 槽位（槽位在进程内）。而且**紧接着跑第二次 pass 并不是重复劳动**：候选资格就是那个读取时间戳，第一次盖过戳的行已经不是候选，第二次接着往下走。
+★★★ **这条约束就写在我读过并引用过的那段注释里**（`hantBackfillUniqueStates`：「available/pending/running/scheduled are required by river」）。读了、在 PR 里引了、然后照样删掉了其中一个。
 
-MaxWorkers 从 2 退回 1 推翻了我三小时前写的理由（「不让 4 分钟的 Bangumi pass 挡在 30 秒的 AniList pass 前面」）。那个理由对成本判断是对的，**对「槽位数是干什么用的」判断是错的**。批量降到 500 之后代价也小了：AniList pass ~21 秒、Bangumi ~4 分钟，串行起来每小时约占用一个槽位五分钟。
+★★ **测试也没抓住，而且是因为断言的东西不对**：那版测试断言集合「有 4 个元素」，而坏掉的集合**恰好也是 4 个** —— 它留下了可选的 `retryable`，删掉的是必需的 `running`。**数数不是那个性质，成员资格才是。** 新的 `TestRatingsUniqueStatesMatchRiver` 逐个断言 river 要求的四个状态在场，变异验证过。
 
-守卫是 `TestRatingsUniqueStatesExcludeRunning` —— 因为「少了一项」是读代码看不出来的，而把它加回去是个看起来像在收紧约束的单词级改动。变异验证过。
+★ 变异验证本身也犯过一次同样形状的错：第一次的变异脚本按状态序列做文本替换，而 `hantBackfillUniqueStates` 的顺序和 ratings **完全一样**，于是替换命中了文件里更靠前的那个块，ratings 根本没被改。测试报绿是对的，是探针错了。重做时把变异限定在 `ratingsUniqueStates` 的块内，并**分别打印「ratings 块已改」和「hant 块未动」**才继续。
 
-同一形状的问题 `hant_backfill` 也有（当晚同样卡了 59 分钟），但它是季度作业，一小时不算什么。已记进 TODOS。
+**那一小时的窗口保留，接受它**：它靠 rescuer 自愈，而且 `hantBackfillUniqueStates` 一直是同一个形状。TODOS 里记了真正能消除它的做法 —— 干脆不要唯一性，靠 `MaxWorkers=1` 加读取时间戳，因为候选资格就是那个戳，紧接着的第二次 pass 只会往下取下一批，本来就不是重复劳动。
 
+`ratings` 队列的 `MaxWorkers` 从 2 改回 **1** 保留：它是让并发 pass 不可达的那个东西，代价在批量降到 500 之后也小了（AniList ~21 秒、Bangumi ~4 分钟，串行每小时约占一个槽位五分钟）。
 
 ### 详情页可以看预告片了，而且不是把 YouTube 播放器搬进关键路径
 
