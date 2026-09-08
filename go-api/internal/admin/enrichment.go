@@ -714,20 +714,42 @@ type pauseResponse struct {
 	Paused bool `json:"paused"`
 }
 
-// PauseHeal handles POST /api/admin/enrichment/heal-cn/pause.  Thin
-// wrapper around queue.PauseV3.  If QueueCtrl is nil (test/boot before
-// river is ready) the call still returns 200 paused:true — matches
-// Express's in-memory bool flip semantics.
+// errQueueCtrlUnavailable is what a nil QueueCtrl now produces.
+//
+// It used to produce 200 {"paused":true} and no pause at all.  The comment
+// justifying that called it "matches Express's in-memory bool flip
+// semantics", which was true and beside the point: Express's flag WAS the
+// mechanism, so flipping it did pause the work.  Here the flag is river's,
+// and a nil controller means the request reached a process that cannot
+// touch it.
+//
+// The cost of the old behaviour is paid exactly when it hurts most.  These
+// endpoints are the three-in-the-morning lever — "stop that sweep now, look
+// at the data, decide later" — and an operator who pressed it got a
+// confident success and a queue that kept running.  Generalising pause to
+// eight queues would have multiplied that by eight.
+var errQueueCtrlUnavailable = httpx.NewError(
+	http.StatusServiceUnavailable, httpx.CodeServerError,
+	"queue controller unavailable: the queue was NOT paused")
+
+// PauseHeal handles POST /api/admin/enrichment/heal-cn/pause.
+//
+// Kept as its own route because the admin frontend already calls it.  It is
+// now a thin alias for PauseQueue against BangumiV3QueueName.
 func (h *EnrichmentHandlers) PauseHeal(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), enrichmentQueryTimeout)
 	defer cancel()
 
-	if h.QueueCtrl != nil {
-		if err := queue.PauseV3(ctx, h.QueueCtrl); err != nil {
-			slog.WarnContext(ctx, "admin: PauseV3", "err", err)
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
-			return
-		}
+	if h.QueueCtrl == nil {
+		slog.ErrorContext(ctx, "admin: pause requested with no queue controller",
+			"queue", queue.BangumiV3QueueName)
+		httpx.Fail(w, errQueueCtrlUnavailable)
+		return
+	}
+	if err := queue.PauseV3(ctx, h.QueueCtrl); err != nil {
+		slog.ErrorContext(ctx, "admin: PauseV3", "err", err)
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
+		return
 	}
 
 	httpx.Data(w, http.StatusOK, pauseResponse{Paused: true})
@@ -738,15 +760,118 @@ func (h *EnrichmentHandlers) ResumeHeal(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), enrichmentQueryTimeout)
 	defer cancel()
 
-	if h.QueueCtrl != nil {
-		if err := queue.ResumeV3(ctx, h.QueueCtrl); err != nil {
-			slog.WarnContext(ctx, "admin: ResumeV3", "err", err)
-			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
-			return
-		}
+	if h.QueueCtrl == nil {
+		slog.ErrorContext(ctx, "admin: resume requested with no queue controller",
+			"queue", queue.BangumiV3QueueName)
+		httpx.Fail(w, errQueueCtrlUnavailable)
+		return
+	}
+	if err := queue.ResumeV3(ctx, h.QueueCtrl); err != nil {
+		slog.ErrorContext(ctx, "admin: ResumeV3", "err", err)
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
+		return
 	}
 
 	httpx.Data(w, http.StatusOK, pauseResponse{Paused: false})
+}
+
+// ============================================================================
+// POST /api/admin/queues/{name}/pause | /resume, GET /api/admin/queues
+// ============================================================================
+
+// queueStatusResponse is the shape GET /api/admin/queues returns.
+type queueStatusResponse struct {
+	// Queues lists every queue this surface may act on, sorted.  Returned
+	// alongside the flags so an operator (or a UI) does not have to hardcode
+	// the list to know what it can ask for.
+	Queues []string `json:"queues"`
+
+	// Paused maps queue name to its pause flag.  A queue river has no row
+	// for is ABSENT rather than false — see queue.StatusAll.
+	Paused map[string]bool `json:"paused"`
+
+	// V3Paused is the legacy field the existing admin frontend reads.
+	V3Paused bool `json:"v3Paused"`
+}
+
+// PauseQueue handles POST /api/admin/queues/{name}/pause.
+//
+// The name is validated against the queue registry, which refuses
+// river.QueueDefault: that queue carries V1, V2, warm_season and orphan_scan
+// at once, so pausing it would freeze the enrichment a page load is waiting
+// on.  An unknown or refused name is a 400, not a 500 — the operator asked
+// for something that does not exist, which is a different thing from river
+// failing.
+func (h *EnrichmentHandlers) PauseQueue(w http.ResponseWriter, r *http.Request) {
+	h.setQueuePaused(w, r, true)
+}
+
+// ResumeQueue handles POST /api/admin/queues/{name}/resume.
+func (h *EnrichmentHandlers) ResumeQueue(w http.ResponseWriter, r *http.Request) {
+	h.setQueuePaused(w, r, false)
+}
+
+// setQueuePaused is the shared body of the two handlers above.
+func (h *EnrichmentHandlers) setQueuePaused(w http.ResponseWriter, r *http.Request, paused bool) {
+	ctx, cancel := context.WithTimeout(r.Context(), enrichmentQueryTimeout)
+	defer cancel()
+
+	name := chi.URLParam(r, "name")
+
+	if h.QueueCtrl == nil {
+		slog.ErrorContext(ctx, "admin: queue pause/resume with no queue controller",
+			"queue", name, "paused", paused)
+		httpx.Fail(w, errQueueCtrlUnavailable)
+		return
+	}
+
+	act := queue.ResumeQueue
+	if paused {
+		act = queue.PauseQueue
+	}
+
+	if err := act(ctx, h.QueueCtrl, name); err != nil {
+		if errors.Is(err, queue.ErrQueueNotPausable) {
+			slog.WarnContext(ctx, "admin: refused queue", "queue", name, "err", err)
+			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeBadRequest, err.Error()))
+			return
+		}
+		slog.ErrorContext(ctx, "admin: queue pause/resume failed",
+			"queue", name, "paused", paused, "err", err)
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
+		return
+	}
+
+	httpx.Data(w, http.StatusOK, pauseResponse{Paused: paused})
+}
+
+// QueuesStatus handles GET /api/admin/queues.
+//
+// Being able to stop a queue without being able to see whether it stopped is
+// half a switch, and the missing half is the one somebody needs while an
+// incident is running.
+func (h *EnrichmentHandlers) QueuesStatus(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), enrichmentQueryTimeout)
+	defer cancel()
+
+	if h.QueueCtrl == nil {
+		slog.ErrorContext(ctx, "admin: queue status with no queue controller")
+		httpx.Fail(w, errQueueCtrlUnavailable)
+		return
+	}
+
+	stats, err := queue.StatusAll(ctx, h.QueueCtrl)
+	if err != nil {
+		slog.ErrorContext(ctx, "admin: queue status failed", "err", err)
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
+		return
+	}
+
+	httpx.Data(w, http.StatusOK, queueStatusResponse{
+		Queues:   queue.PausableQueues(),
+		Paused:   stats.Paused,
+		V3Paused: stats.V3Paused,
+	})
 }
 
 // ============================================================================

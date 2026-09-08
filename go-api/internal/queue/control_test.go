@@ -86,6 +86,20 @@ func (f *fakeQueueController) snapshotResumeCalls() []string {
 	return out
 }
 
+// snapshotAllCalls reports every call that reached the controller, whichever
+// method it went through.  The validation tests below assert on this rather
+// than on one method's list: a refused name must not reach river AT ALL, and
+// checking only pauseCalls would miss a refusal that leaked into QueueGet.
+func (f *fakeQueueController) snapshotAllCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.pauseCalls)+len(f.resumeCalls)+len(f.getCalls))
+	out = append(out, f.pauseCalls...)
+	out = append(out, f.resumeCalls...)
+	out = append(out, f.getCalls...)
+	return out
+}
+
 func (f *fakeQueueController) snapshotGetCalls() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -135,7 +149,11 @@ func TestPauseV3_WrapsError(t *testing.T) {
 	err := PauseV3(context.Background(), f)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, sentinel), "underlying error must remain unwrappable")
-	assert.Contains(t, err.Error(), "queue.PauseV3", "wrap must include the helper name")
+	// The wrap names PauseQueue, not PauseV3: PauseV3 is now a thin alias
+	// for the general form, and the general form is where the wrapping
+	// lives.  What the message has to carry is the queue, which is the part
+	// an operator acts on.
+	assert.Contains(t, err.Error(), "queue.PauseQueue", "wrap must name the operation")
 	assert.Contains(t, err.Error(), BangumiV3QueueName, "wrap must include the queue name")
 }
 
@@ -165,7 +183,7 @@ func TestResumeV3_WrapsError(t *testing.T) {
 	err := ResumeV3(context.Background(), f)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, sentinel))
-	assert.Contains(t, err.Error(), "queue.ResumeV3")
+	assert.Contains(t, err.Error(), "queue.ResumeQueue", "wrap must name the operation")
 	assert.Contains(t, err.Error(), BangumiV3QueueName)
 }
 
@@ -225,7 +243,7 @@ func TestStatus_WrapsError(t *testing.T) {
 	got, err := Status(context.Background(), f)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, sentinel))
-	assert.Contains(t, err.Error(), "queue.Status")
+	assert.Contains(t, err.Error(), "queue.QueuePaused", "wrap must name the operation")
 	assert.Contains(t, err.Error(), BangumiV3QueueName)
 	assert.Equal(t, Stats{}, got, "error path must return zero Stats")
 }
@@ -282,3 +300,197 @@ func TestPauseResumeStatus_RoundTrip(t *testing.T) {
 // Compile-time assertion for the real *river.Client[pgx.Tx] living
 // in control.go covers the interface satisfaction.  No runtime test
 // here — the package-level guard catches drift at build time.
+
+// ---------------------------------------------------------------------------
+// The generalised pause surface
+// ---------------------------------------------------------------------------
+
+// TestPauseQueue_RefusesDefault is the constraint control.go's package doc has
+// carried since the surface was V3-only: the admin endpoint must not be able
+// to freeze the whole queue subsystem.
+//
+// default is not one workload, it is four — V1, V2, warm_season and
+// orphan_scan — so pausing it stops the enrichment a page load is waiting on.
+// Widening pause to the other eight queues is only safe while this holds.
+func TestPauseQueue_RefusesDefault(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeQueueController{}
+	err := PauseQueue(context.Background(), f, river.QueueDefault)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQueueNotPausable)
+	assert.Contains(t, err.Error(), "V1, V2, warm_season and orphan_scan",
+		"the refusal must say what pausing default would have stopped")
+	assert.Empty(t, f.snapshotAllCalls(), "a refused pause must not reach river")
+}
+
+// TestPauseQueue_RefusesWildcard covers river's all-queues form, which would
+// freeze everything default would and then some.
+func TestPauseQueue_RefusesWildcard(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeQueueController{}
+	err := PauseQueue(context.Background(), f, "*")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQueueNotPausable)
+	assert.Empty(t, f.snapshotAllCalls())
+}
+
+// TestPauseQueue_RefusesUnknownName covers the operator's typo.  Passing it
+// through would hand river a name it has never heard of, and river's
+// QueuePause is happy to record a pause for a queue that does not exist —
+// so the operator would get a success for a queue that keeps running.
+func TestPauseQueue_RefusesUnknownName(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"", "ratings ", "rating", "bangumi_v4"} {
+		f := &fakeQueueController{}
+		err := PauseQueue(context.Background(), f, name)
+
+		require.Error(t, err, "name %q", name)
+		assert.ErrorIs(t, err, ErrQueueNotPausable)
+		assert.Empty(t, f.snapshotAllCalls(), "name %q must not reach river", name)
+	}
+}
+
+// TestPauseQueue_AcceptsEveryDedicatedQueue asserts the whole point: the eight
+// queues that were given their own pool precisely so they could be stopped
+// independently are all reachable.
+func TestPauseQueue_AcceptsEveryDedicatedQueue(t *testing.T) {
+	t.Parallel()
+
+	names := PausableQueues()
+	require.Len(t, names, 8)
+
+	for _, name := range names {
+		f := &fakeQueueController{}
+		require.NoError(t, PauseQueue(context.Background(), f, name), "pause %q", name)
+		assert.Equal(t, []string{name}, f.snapshotAllCalls())
+
+		f2 := &fakeQueueController{}
+		require.NoError(t, ResumeQueue(context.Background(), f2, name), "resume %q", name)
+		assert.Equal(t, []string{name}, f2.snapshotAllCalls())
+	}
+}
+
+func TestResumeQueue_RefusesDefault(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeQueueController{}
+	err := ResumeQueue(context.Background(), f, river.QueueDefault)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQueueNotPausable)
+	assert.Empty(t, f.snapshotAllCalls())
+}
+
+func TestQueuePaused_RefusesDefault(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeQueueController{}
+	_, err := QueuePaused(context.Background(), f, river.QueueDefault)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQueueNotPausable)
+	assert.Empty(t, f.snapshotAllCalls())
+}
+
+// TestQueuePaused_ReadsPausedAt is the other half of the switch: being able to
+// stop a queue without being able to see whether it stopped is half a control.
+func TestQueuePaused_ReadsPausedAt(t *testing.T) {
+	t.Parallel()
+
+	at := time.Now()
+	for _, tc := range []struct {
+		name     string
+		pausedAt *time.Time
+		want     bool
+	}{
+		{"paused", &at, true},
+		{"running", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := &fakeQueueController{
+				getFn: func(_ context.Context, name string) (*rivertype.Queue, error) {
+					return &rivertype.Queue{Name: name, PausedAt: tc.pausedAt}, nil
+				},
+			}
+			got, err := QueuePaused(context.Background(), f, RatingsQueueName)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestStatusAll_ReportsEveryPausableQueue pins the generalised read.
+func TestStatusAll_ReportsEveryPausableQueue(t *testing.T) {
+	t.Parallel()
+
+	at := time.Now()
+	f := &fakeQueueController{
+		getFn: func(_ context.Context, name string) (*rivertype.Queue, error) {
+			q := &rivertype.Queue{Name: name}
+			if name == BangumiV3QueueName || name == RatingsQueueName {
+				q.PausedAt = &at
+			}
+			return q, nil
+		},
+	}
+
+	got, err := StatusAll(context.Background(), f)
+	require.NoError(t, err)
+
+	assert.Len(t, got.Paused, 8, "every pausable queue must be reported")
+	assert.True(t, got.Paused[BangumiV3QueueName])
+	assert.True(t, got.Paused[RatingsQueueName])
+	assert.False(t, got.Paused[HantBackfillQueueName])
+	assert.NotContains(t, got.Paused, river.QueueDefault,
+		"default is not pausable, so it has no flag to report")
+	assert.True(t, got.V3Paused,
+		"the legacy field must stay in step with the map the frontend has not moved to yet")
+}
+
+// TestStatusAll_OmitsQueuesRiverHasNoRowFor is the distinction that keeps the
+// status honest.  river creates a river_queue row when a producer starts, so a
+// missing one means "not started here" — reporting it as false would put a
+// confident "running" next to a queue nobody is draining.
+func TestStatusAll_OmitsQueuesRiverHasNoRowFor(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeQueueController{
+		getFn: func(_ context.Context, name string) (*rivertype.Queue, error) {
+			if name == HantBackfillQueueName {
+				return nil, river.ErrNotFound
+			}
+			return &rivertype.Queue{Name: name}, nil
+		},
+	}
+
+	got, err := StatusAll(context.Background(), f)
+	require.NoError(t, err, "a queue river has no row for is not an error")
+	assert.NotContains(t, got.Paused, HantBackfillQueueName,
+		"absent, not false — the two are different claims")
+	assert.Len(t, got.Paused, 7)
+}
+
+// TestStatusAll_PropagatesRealErrors — a status surface that hides failures is
+// the shape this whole change exists to remove.
+func TestStatusAll_PropagatesRealErrors(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("river: connection refused")
+	f := &fakeQueueController{
+		getFn: func(_ context.Context, _ string) (*rivertype.Queue, error) {
+			return nil, sentinel
+		},
+	}
+
+	got, err := StatusAll(context.Background(), f)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
+	assert.Equal(t, Stats{}, got, "error path must return zero Stats")
+}

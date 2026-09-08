@@ -8,28 +8,32 @@
 // PausedAt timestamp in river_queue so the state survives a process
 // restart, which the Express in-memory flag never did.
 //
-// QUEUE NAMING:  the BangumiV3QueueName constant declares the queue
-// that V3 enrichment jobs should ride on ("bangumi_v3").  At the time
-// of this writing all four worker kinds (V1, V2, V3, warm_season)
-// route to river.QueueDefault — see worker.go's default Queues map.
-// The next wiring phase (P2.3.2 admin handler) will add InsertOpts to
-// BangumiV3Args + register a "bangumi_v3" queue config so this pause
-// surface actually pauses V3 jobs in isolation.  Until then, calling
-// PauseV3 against the default boot config returns river's
-// "queue not found" error (river.ErrNotFound) — the right failure
-// mode (loud, observable) rather than silently pausing "default"
-// (which would freeze V1+V2+warm_season too).
+// QUEUE NAMING:  each *QueueName constant below declares the river queue
+// one workload rides.  That wiring is live — the Args types carry the
+// queue in their InsertOpts and registry_default.go configures a worker
+// pool for each — so pausing one of these pauses that workload and
+// nothing else.
 //
-// Callers that want to pause all queues at once (the "*" wildcard
-// supported by river.QueuePause) can do so via the underlying client
-// directly — this package intentionally keeps the surface targeted
-// to V3 so the admin endpoint can't accidentally freeze the whole
-// queue subsystem.
+// SCOPE: this surface used to be V3-only, with this note explaining why:
+//
+//	this package intentionally keeps the surface targeted to V3 so the
+//	admin endpoint can't accidentally freeze the whole queue subsystem
+//
+// The constraint stands; only its implementation has moved.  PauseQueue
+// takes any name, validates it against the registry, and refuses
+// river.QueueDefault — which is the queue that constraint was really
+// about, because default carries V1, V2, warm_season and orphan_scan at
+// once.  river's "*" wildcard is refused by the same check.
+//
+// Widening the surface is what makes the other eight queues reachable at
+// three in the morning without a deploy, which is the whole reason they
+// were given dedicated queues in the first place.
 
 package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -38,11 +42,10 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// BangumiV3QueueName is the river queue name V3 enrichment jobs route
-// to.  See the package doc for the wiring-phase TODO; today V3 still
-// rides on river.QueueDefault — this constant declares the target
-// queue so the admin pause/resume API has a stable contract that the
-// wiring phase can flip on without touching call sites.
+// BangumiV3QueueName is the river queue V3 enrichment jobs route to.
+// BangumiV3Args.InsertOpts pins them to it and the registry configures its
+// worker pool, so pausing it isolates heal-CN from V1/V2 and seasonal
+// warming.
 const BangumiV3QueueName = "bangumi_v3"
 
 // DescriptionBackfillQueueName isolates the Chinese-description sweep from
@@ -128,7 +131,20 @@ type Stats struct {
 	// V3Paused is true when the BangumiV3 queue (BangumiV3QueueName)
 	// has a non-nil PausedAt timestamp in river_queue.  Survives
 	// process restart because river persists pause state.
+	//
+	// Kept as its own field, spelled the way Express spelled it, because
+	// the admin frontend already reads it.  It is the same value as
+	// Paused[BangumiV3QueueName] when both are populated.
 	V3Paused bool `json:"v3Paused"`
+
+	// Paused reports the flag for every pausable queue, keyed by name.
+	//
+	// A queue river has no row for is ABSENT rather than false.  river
+	// creates river_queue rows when a producer starts, so a missing entry
+	// means "this process has not started that queue yet" — which is a
+	// different thing from "running", and collapsing the two would put a
+	// confident `false` next to a queue nobody is draining.
+	Paused map[string]bool `json:"paused,omitempty"`
 }
 
 // QueueController is the small subset of *river.Client[pgx.Tx]
@@ -152,6 +168,107 @@ type QueueController interface {
 // upgrade path (e.g. QueuePauseOpts → QueuePauseParams renames).
 var _ QueueController = (*river.Client[pgx.Tx])(nil)
 
+// ErrQueueNotPausable is returned for a queue name the admin surface must
+// not act on: one the registry does not declare, and river.QueueDefault.
+//
+// A sentinel rather than a formatted string because the HTTP layer has to
+// tell it apart from a river failure — this one is a 400 (the operator asked
+// for something that does not exist) and everything else is a 500.
+var ErrQueueNotPausable = errors.New("queue is not pausable")
+
+// checkPausable validates a queue name against the registry.
+//
+// Two things are refused and only one of them is a typo.  An unknown name is
+// the operator's mistake.  river.QueueDefault is OURS to refuse: it carries
+// V1, V2, warm_season and orphan_scan, so pausing it freezes the enrichment a
+// page load is waiting on, and river's "*" wildcard would freeze everything.
+// Neither is something an admin endpoint should be able to reach.
+func checkPausable(name string) error {
+	if Default().Pausable(name) {
+		return nil
+	}
+	if name == river.QueueDefault {
+		return fmt.Errorf("%w: %q carries V1, V2, warm_season and orphan_scan at once", ErrQueueNotPausable, name)
+	}
+	return fmt.Errorf("%w: %q is not a declared queue", ErrQueueNotPausable, name)
+}
+
+// PausableQueues returns the queue names PauseQueue will accept.
+func PausableQueues() []string { return Default().PausableNames() }
+
+// PauseQueue pauses one named queue.
+//
+// Idempotent: river treats a second pause as a refresh of PausedAt, and the
+// state is persisted in river_queue so it survives a restart — which the
+// Express in-memory flag never did.
+func PauseQueue(ctx context.Context, qc QueueController, name string) error {
+	if err := checkPausable(name); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "queue: pause", "queue", name)
+	if err := qc.QueuePause(ctx, name, nil); err != nil {
+		return fmt.Errorf("queue.PauseQueue (%s): %w", name, err)
+	}
+	return nil
+}
+
+// ResumeQueue resumes one named queue.  Idempotent: river clears PausedAt
+// unconditionally.
+func ResumeQueue(ctx context.Context, qc QueueController, name string) error {
+	if err := checkPausable(name); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "queue: resume", "queue", name)
+	if err := qc.QueueResume(ctx, name, nil); err != nil {
+		return fmt.Errorf("queue.ResumeQueue (%s): %w", name, err)
+	}
+	return nil
+}
+
+// QueuePaused reports whether one named queue is paused.
+//
+// Being able to stop a queue without being able to see whether it stopped is
+// half a switch, and the half that is missing is the one an operator needs at
+// three in the morning.
+func QueuePaused(ctx context.Context, qc QueueController, name string) (bool, error) {
+	if err := checkPausable(name); err != nil {
+		return false, err
+	}
+	q, err := qc.QueueGet(ctx, name)
+	if err != nil {
+		return false, fmt.Errorf("queue.QueuePaused (%s): %w", name, err)
+	}
+	return q.PausedAt != nil, nil
+}
+
+// StatusAll reports the pause flag for every pausable queue.
+//
+// A queue river has no row for is omitted rather than reported false: river
+// creates river_queue rows when a producer starts, so its absence means "not
+// started here", which is not the same claim as "running".  Any other error
+// is returned, because a status surface that hides failures is the shape this
+// whole change exists to remove.
+func StatusAll(ctx context.Context, qc QueueController) (Stats, error) {
+	names := PausableQueues()
+	out := Stats{Paused: make(map[string]bool, len(names))}
+
+	for _, name := range names {
+		q, err := qc.QueueGet(ctx, name)
+		if errors.Is(err, river.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return Stats{}, fmt.Errorf("queue.StatusAll (%s): %w", name, err)
+		}
+		paused := q.PausedAt != nil
+		out.Paused[name] = paused
+		if name == BangumiV3QueueName {
+			out.V3Paused = paused
+		}
+	}
+	return out, nil
+}
+
 // PauseV3 pauses the V3 enrichment queue via river.QueuePause.
 // No-op when the queue is already paused (river treats QueuePause as
 // idempotent — a second pause just refreshes PausedAt).
@@ -160,11 +277,7 @@ var _ QueueController = (*river.Client[pgx.Tx])(nil)
 // the queue does not exist (river.ErrNotFound) — see package doc for
 // the wiring-phase caveat.
 func PauseV3(ctx context.Context, qc QueueController) error {
-	slog.InfoContext(ctx, "queue: pauseV3", "queue", BangumiV3QueueName)
-	if err := qc.QueuePause(ctx, BangumiV3QueueName, nil); err != nil {
-		return fmt.Errorf("queue.PauseV3 (%s): %w", BangumiV3QueueName, err)
-	}
-	return nil
+	return PauseQueue(ctx, qc, BangumiV3QueueName)
 }
 
 // ResumeV3 resumes the V3 enrichment queue via river.QueueResume.
@@ -174,11 +287,7 @@ func PauseV3(ctx context.Context, qc QueueController) error {
 // Returns the underlying river error wrapped with the queue name
 // when the queue does not exist (river.ErrNotFound).
 func ResumeV3(ctx context.Context, qc QueueController) error {
-	slog.InfoContext(ctx, "queue: resumeV3", "queue", BangumiV3QueueName)
-	if err := qc.QueueResume(ctx, BangumiV3QueueName, nil); err != nil {
-		return fmt.Errorf("queue.ResumeV3 (%s): %w", BangumiV3QueueName, err)
-	}
-	return nil
+	return ResumeQueue(ctx, qc, BangumiV3QueueName)
 }
 
 // Status returns the current pause flag for the V3 queue.  Reads via
@@ -192,12 +301,11 @@ func ResumeV3(ctx context.Context, qc QueueController) error {
 // at all in the river config, so propagating that error is
 // intentional.
 func Status(ctx context.Context, qc QueueController) (Stats, error) {
-	slog.InfoContext(ctx, "queue: status", "queue", BangumiV3QueueName)
-	q, err := qc.QueueGet(ctx, BangumiV3QueueName)
+	paused, err := QueuePaused(ctx, qc, BangumiV3QueueName)
 	if err != nil {
-		return Stats{}, fmt.Errorf("queue.Status (%s): %w", BangumiV3QueueName, err)
+		return Stats{}, err
 	}
-	return Stats{V3Paused: q.PausedAt != nil}, nil
+	return Stats{V3Paused: paused}, nil
 }
 
 // RatingsQueueName isolates the two rating-refresh sweeps.

@@ -963,6 +963,19 @@ func main() {
 		r.Post("/enrichment/{anilistId}/reset", adminEnrichmentHandlers.ResetEnrichment)
 		r.Post("/enrichment/{anilistId}/flag", adminEnrichmentHandlers.FlagEnrichment)
 
+		// Queue control, generalised.  heal-cn/pause above is now one of
+		// these under an older name, kept because the admin frontend calls
+		// it; these reach the other seven dedicated queues, which were each
+		// given their own worker pool precisely so they could be stopped one
+		// at a time without a deploy.
+		//
+		// {name} is validated against the queue registry, which refuses
+		// river's default queue -- it carries V1, V2, warm_season and
+		// orphan_scan at once -- and river's "*" wildcard with it.
+		r.Get("/queues", adminEnrichmentHandlers.QueuesStatus)
+		r.Post("/queues/{name}/pause", adminEnrichmentHandlers.PauseQueue)
+		r.Post("/queues/{name}/resume", adminEnrichmentHandlers.ResumeQueue)
+
 		// zh-Hant drift monitor: the two counters that say how far the
 		// Traditional columns have fallen behind their sources, and the
 		// button that catches them up.
