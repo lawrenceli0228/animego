@@ -354,6 +354,6 @@ AniList 的 GraphQL 里**没有**评分人数这个标量。它有的是 `stats.
 
 两条 sweep 每小时各触发一次（`RunOnStart`）。间隔管的是**积压的排空速度**而不是刷新频率：一次 pass 只取到期的行，存量补完之后每小时那次会发现没有行可取。AniList 每次上限 2000 行（约 28 秒上游时间），Bangumi 每次上限 300 行（约 4 分钟令牌桶时间，约占该桶 7%）。共用 `ratings` 队列，`MaxWorkers` 是 2——这是队列表里唯一不是 1 的一个，理由是两个 kind 各自被自己的上游限速，谁也帮不了谁快，单槽只会让 4 分钟的 Bangumi pass 每小时挡在 30 秒的 AniList pass 前面。要临时停掉，暂停 `ratings` 队列即可，不需要发版。
 
-⚠️ **2026-09-07 起 AniList 的公开 API 整体返回 403**（`The AniList API has been temporarily disabled due to severe stability issues.`，本机与生产源站均复现）。迁移和部署不受影响：AniList 那条 sweep 每次 pass 会把整批标记为失败并**不盖戳**，行仍留在候选集里，等 API 恢复后自动补上；Bangumi 那条不受影响，照常排空。
+⚠️ **注意这一段最初写错了，留在这里当路标**：原文说「2026-09-07 起 AniList 的公开 API 整体返回 403，等它恢复」。AniList 没有停摆——它对**没有 `Referer` 头**的请求返回 403，并把原因说成「API has been temporarily disabled due to severe stability issues」。见 `internal/anilist/client.go` 的 `requestReferer`。两行请求头修好了它，代价是三天的生产降级。
 
 验证：`go test ./internal/anilist ./internal/queue`。真实 SQL 往返：`go test -tags=integration -timeout=300s ./test/integration/ -run 'Rating'`，覆盖候选 WHERE 的两种人群、`average_score` 的 COALESCE 保护、`updated_at` 的条件推进，以及 `anime_anilist_rating_pair` 约束的接受/拒绝表。

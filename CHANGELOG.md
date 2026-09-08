@@ -42,9 +42,23 @@ AniList 那条按 id 批量取，一次请求 50 行（`Page(media: id_in: [...]
 
 三条都做了变异验证：把条件 `updated_at` 改成无条件、去掉 COALESCE、把存量行也改成季度重读，对应的集成测试各自变红。另外两条行为上的——AniList 没返回的 id 不盖戳（会让它们排在此后每一次 pass 的最前面，永远占着同样的名额），以及批次失败时盖戳（一次 AniList 故障就会把整个目录静默标记成已读）——同样验证过。
 
-### ⚠️ AniList 的 API 现在是关的
+### ★★ AniList 从来没有停摆，是我们少发了一个请求头
 
-2026-09-07 起 `graphql.anilist.co` 对所有查询返回 403：`The AniList API has been temporarily disabled due to severe stability issues.`（本机与生产源站均复现）。迁移和部署不受影响——AniList 那条 sweep 每次 pass 把整批记为失败且**不盖戳**，行留在候选集里等 API 恢复后自动补齐；Bangumi 那条不受影响，照常排空。
+上面这段最初写的是「AniList 的 API 现在是关的」，并据此把部署推后。**那是错的。**
+
+`graphql.anilist.co` 对**没有 `Referer` 头**的请求返回 403，body 是一句 GraphQL 形状的
+`The AniList API has been temporarily disabled due to severe stability issues.`
+—— 一句描述上游故障、把读者支去找状态页、而且不成立的话。同一秒、同一个 IP、同一条查询，带上 Referer 就正常返回数据。
+
+这个门只测「有没有这个头」，不测内容：`https://anilist.co/`、`https://example.com/`、连字符串 `abc` 都能过；`Origin` 不接受；浏览器 UA 不带 Referer 照样 403。而 `internal/anilist/client.go` 的 `do()` 只设了 `Content-Type` 和 `Accept`。
+
+代价是三天：生产上 search、schedule、seasonal 冷启动、以及任何未缓存的详情页全程返 502/500（单个容器窗口内 1,948 条 `anilist upstream: 403`），而这三天里我们以为自己在等一个上游恢复。这句错话还进了 README、TODOS 和 PR #169 的正文——都已一并改正。
+
+修法是两行：`Referer` 填我们自己的域名（比浏览器给的信息更准确），外加一个能表明身份的 `User-Agent`（它单独不开门，但匿名的 `Go-http-client/1.1` 正是反滥用过滤要抓的东西，而这个仓库对 AniList 的负载历史值得被抓）。真正回应对方「stability」诉求的是限速，而 `minInterval` 本来就是 700ms/请求（约 85/min，在其文档的 90/min 之下）。
+
+**教训不是「加个头」，是「上游给的错误信息可以是错的」。** 判定「外部挂了」时，两个不同 IP 拿到同一句官方文案**不足以**支撑结论——那只说明两边触发了同一条规则，没说明那条规则是什么。真正花了两分钟就问出答案的动作是：换一组请求头再问一次。
+
+配套的测试是 `TestClient_SendsRefererAndUserAgent` 和 `TestClient_EveryQueryPathCarriesTheHeaders`。这个文件里其他所有测试驱动的假服务器都不看请求头，所以删掉那两行 `Header.Set` 整个套件照样全绿，而生产会整片 502——这两条测试是那条边上唯一的栏杆。
 
 部署顺序：先跑迁移 0033，再部署 API。不需要手动触发任何东西，两条 sweep 都是 `RunOnStart`。
 

@@ -62,6 +62,44 @@ const maxRetries = 3
 // uses the same 60s default.
 const defaultRetryAfter = 60 * time.Second
 
+// requestReferer is sent on every request because AniList refuses one
+// that arrives without a Referer header at all.
+//
+// The refusal does not look like a refusal.  It is HTTP 403 carrying a
+// GraphQL-shaped body whose message reads:
+//
+//	The AniList API has been temporarily disabled due to severe
+//	stability issues.
+//
+// That sentence is false for the caller reading it -- the API is up and
+// answering the same query on the same second from the same IP -- and it
+// cost this repository three days.  Measured 2026-09-08 from both a
+// laptop and the production origin: identical query, no Referer, 403 with
+// that message; Referer present, 200 with the data.  Nothing else moves
+// it.  A browser User-Agent alone still 403s; Origin is not accepted in
+// its place.
+//
+// The gate tests only for presence.  `https://anilist.co/`,
+// `https://example.com/`, and the bare string `abc` all pass it equally,
+// so this is a coarse bot filter and not an origin check -- which is why
+// sending our own domain is the honest answer rather than a workaround:
+// it identifies who is calling, which a browser's Referer would not, and
+// AniList's own documentation asks heavy callers to be identifiable.  The
+// rate budget that filter is presumably defending is respected
+// separately, by minInterval above.
+//
+// TestClient_SendsRefererAndUserAgent is what keeps this here.  Delete
+// this line and every AniList call in production starts answering 403
+// with a message that says the outage is upstream.
+const requestReferer = "https://animegoclub.com"
+
+// requestUserAgent identifies the caller.  It does NOT open the gate on
+// its own -- requestReferer is what does that -- but an anonymous
+// Go-http-client/1.1 is what an anti-abuse filter is built to catch, and
+// this repository has previously put enough load on AniList to be worth
+// catching.  Being nameable is cheaper than being blocked.
+const requestUserAgent = "animego/1.0 (+https://animegoclub.com)"
+
 // httpTimeout is the per-request HTTP client timeout.  Long enough to
 // survive AniList's worst observed latency without hanging callers
 // forever.  Override with WithHTTPClient(...) to tune.
@@ -443,6 +481,10 @@ func (c *Client) do(ctx context.Context, query string, vars any, dest any) error
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
+		// Referer is not optional and not decoration.  See requestReferer.
+		req.Header.Set("Referer", requestReferer)
+		req.Header.Set("User-Agent", requestUserAgent)
+		// Referer is not optional and not decoration.  See requestReferer.
 
 		res, err := c.http.Do(req)
 		if err != nil {
