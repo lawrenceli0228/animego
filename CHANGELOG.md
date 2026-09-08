@@ -4,6 +4,58 @@
 
 ## [未发布]
 
+### 一个 httptest 服务器关闭，会掐断另一个测试正在飞的请求
+
+CI 在 #177 上挂了，挂在 #177 根本没碰的包里：`internal/bangumi` 报 `net/http: HTTP/1.x transport connection broken: http: CloseIdleConnections called`。
+
+仓库里没有任何一处调 `CloseIdleConnections`。**标准库自己调**，在一个不容易想到的地方（`net/http/httptest/server.go` 的 `Server.Close()`，注释原文）：
+
+> Not part of httptest.Server's correctness, but assume most users of httptest.Server will be using the standard transport, so help them out and close any idle connections for them.
+
+五个 API client 都写的 `&http.Client{...}` 不带 `Transport`，而 **nil `Transport` 意味着 `http.DefaultTransport` —— 一个对象、一个连接池、整个进程共用**。于是任何一个 httptest 服务器关闭，都会清掉进程里所有 client 的空闲连接；在一个测试全是 `t.Parallel()` 各起各服务器的包里，A 的 `defer srv.Close()` 能在 B 复用池中连接的瞬间把它掐断。
+
+★ **四个包已经暴露，bangumi 只是先中奖的那个**：torrents 有 128 处 `t.Parallel()`、bangumi 44、anilist 30、deepseek 11。dandanplay 今天安全**只因为它的测试碰巧没写并行**——那是运气不是设计，离失效只有将来某人加的一行。所以五个一起改，留一个例外比统一处理更难记。
+
+★★ **测试断言的是结构不是行为，这是有意的**。它要防的竞态窗口极窄（连接得已从池里取出、请求还没结束），我**没能复现**：60 轮全量 `-parallel=16`，外加一个专门造的复现（慢 handler 配上并行狂搅 `srv.Close()` 的兄弟测试），约 200 次，一次没炸。所以没有诚实的行为测试可写，而「修完就不炸了」同样不算证据——不炸本来就是常态。能钉的是让竞态不可能发生的那个属性。六个变异六次红，其中最关键的一个：把 `httpx.NewTransport` 改成返回共享对象而不是克隆，**五个包的 client 测试跟着一起红**——这才证明它们依赖的是 helper 真的克隆了，而不只是 `Transport != nil`。
+
+`torrents` 那个故意不设的 client `Timeout` 保留（`aggregator.go:159` 写明 per-source 的 `ctx.WithTimeout` 才是权威 deadline）。
+
+
+### ★★ 那次静默停摆的真因不是「没有校验」，是「校验失败了但没人知道」
+
+接上一条 `running` 的事故。重复的四份 `*UniqueStates` 只是它的载体，不是它的原因。
+
+**所以第一件做的事不是注册表，是让 river 的失败能被看见。** river 汇报后台失败的方式就是写一行 ERROR 然后继续跑——周期作业构造失败、插入冲突、事务错误，一律如此（`periodic_job_enqueuer.go`）。而我们的 `slog` 默认 handler 是个裸的 `JSONHandler(os.Stdout)`，那行 ERROR 到容器日志为止。`internal/obs.SentryErrorHandler` 包住任意 handler：stdout 那半字节不变，ERROR 及以上额外送 Sentry。它一次覆盖**每一种** river 后台失败，而那些是任何静态闸门都看不见的。
+
+★ 转发限流 20/分钟，且**被抑制之后的第一条事件带上它替了多少条**——把风暴变成沉默的限流器，就是把同一个事故换一层重演。
+
+**闸门形式换掉了，而且是被实测推翻的。** 原方案是启动时校验四个必需状态。它错在两处，都对着 river v0.37.1 的源码核实过：
+
+- ★★ **会误杀**。`DescriptionBackfillArgs` 和 `DescriptionLlmBackfillArgs` 用的是 `UniqueOpts{ByArgs: true}`、`ByState` 为 nil，而 `validate()` 在 nil 时**提前返回**（`insert_opts.go:271`）。手写闸门会拒掉两个 river 完全接受的 kind。
+- ★★ **会烂成它要防的那个形状**。那四个状态是 river 的**私有**常量 `requiredV3states`（`insert_opts.go:244`），`rivertype` 什么都不导出。手抄一份，等 river 哪天加第五个，闸门报绿而 river 报错——和这次事故一模一样，只是上面多盖了一层让人放心的假保险。
+
+所以闸门改成**拿真 Postgres 启动生产配置、跑 river 自己的 `validate()`、断言行真的落了**。逐 kind 断言而不是看总数：`UniqueOpts` 一次只对一个 kind 失败，看总数那晚会过。
+
+它顺带钉住另外三种「kind 悄悄不跑」，每一种都是对着活库量出来的而不是推的：
+
+| 失败 | river 实际怎么做 |
+|---|---|
+| `ByState` 少 `running` | 零行 + 一条 ERROR。变异做成了**夹具**，配一个只差一个元素的健康对照，所以它不会像抄来的常量那样烂掉 |
+| 队列没声明 | 插入成功、行永远停在 `available`、river **一声不吭**。这是里面最安静的一种，唯一的防线就是注册表拒绝被那样构造出来 |
+| worker 没注册 | `Insert` 会以 `UnknownJobKindError` 拒绝——**但只在那条路上**，周期路径从不查 workers bundle |
+
+以及那个被接受的代价：部署留下的孤儿 `running` 行确实会压制下一次开机入队，直到 rescuer 回收。它和上面那条配成一对——**这个窗口是真的，而拿掉 `running` 不是关掉它的办法。**
+
+**注册表本身**：队列名、并发度、周期表收进一处，构造时校验六类错误。边界是它**读** `InsertOpts()` 来校验、绝不取代它——river 是在 Args 类型上调那个方法的，而其中一次调用发生在 `bgm_bind_idmap.go` 的绑定+入队事务里面，把静态方法换成 map 查询等于白给那条路加一个 panic 面。并发度是类型不是 int：四个 `1` 是因为第二个 worker 会弄坏什么（共享令牌桶、单槽位才不可达的 check-then-update 竞态），一个 `4` 是因为 DeepSeek 往返真的能并行，`FixedConcurrency` / `TunableConcurrency` 各自必须带理由。十个 `Periodic<Name>Job` 构造函数删光，编译器逼着改完每一个调用点。
+
+**pause 从只能停 V3 变成八条队列都能停能看**。白名单是注册表减去 `default`——那条队列同时装着 V1、V2、warm_season、orphan_scan，`control.go` 当年把接口收窄到 V3 就是为了防它，约束没变只是实现搬了家；river 的 `"*"` 通配同样被拒。顺带修掉一个：`QueueCtrl` 为 nil 时 `PauseHeal` 会返回 `200 {"paused":true}` 却什么也没暂停。当年的注释说这是「照 Express 的内存布尔翻转语义」——话没错但不相干，**Express 里那个标志本身就是机制**，翻了就真停了；这里机制是 river 的。而这几个接口正是凌晨止血的那根杆子，按下去得到一个自信的成功和一条还在跑的队列。现在返回 503。
+
+★★ **覆盖率查出来的缺口，恰好和这次事故同形**：所有新配置都测了，唯独没测 **`main()` 有没有真的用上它**。`main()` 里绝大部分错了都会大声失败（DSN 坏了直接退出、路由没挂就是 404、handler 漏了编译不过），只有两处会静默——摘掉 Sentry 转发器则日志一模一样而 Sentry 从此失聪；删掉 `Queues` 或 `PeriodicJobs` 则 `queue.Boot` 回落到 `{default: 1}`，八条队列没有 producer、一条 sweep 都不再排期。两处都抽出来测了，logger 那条**走真实 handler 链断言 ERROR 确实到达**而不是断言类型——中间插进一个新 handler 能通过类型检查却把 record 吞掉。
+
+★ 全程 48 个变异 48 次红，其中 **6 个一开始活了下来**，每一个都是测试写弱了而非代码本来就对：父 handler 的 attr slice 没有余量所以共享底层数组根本不会 alias；只覆盖了两条 resolve 循环里的一条；以为关掉了唯一性其实 `ByState` 单独仍在做 key；还有一个是编译失败而不是测试失败，那什么也证明不了，重做成了能编译的版本。
+
+★ **外部评审说对了一半**：它指出 `bgm_bind` 的 `MaxWorkers: 1` 陈述了一个进程外 CLI 写入方会打破的正确性不变量。属实，但更准的说法早就写在 TODOS 里——那条不变量不是「离假只有一个 `--apply` 标志」，它**已经假了 541 次**，其中一部分还是合法的（Bangumi 有时用一个 subject 覆盖 AniList 拆成两季的内容）。单槽位买到的是「这个 sweep 不会让这个数字变大」，理由字符串按这个改了。
+
 ### ★★ 一次部署能让 sweep 静默停一小时，而「拿掉 running」把一小时变成了永久
 
 **上半段（成立）**：三次部署之后 river 里 `anilist_ratings`、`bangumi_ratings`、`hant_backfill` 各有一条作业卡在 `running`，**59 分钟**，期间零条 sweep 日志。原因是 `UniqueOpts.ByState` 里有 `running`，而 **`running` 不代表有 pass 在跑** —— 它代表「上次写这行时它在跑」，部署直接杀进程不改状态，river 只能靠 rescuer 回收（默认一小时）。这一小时里那行和真实 pass 无法区分，开机的 `RunOnStart` 入队被**部署刚杀掉的那次 pass 的尸体**压制。
