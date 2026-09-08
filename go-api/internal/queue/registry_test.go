@@ -531,6 +531,36 @@ func TestDefaultRegistry_RunOnStartSplit(t *testing.T) {
 	}, runOnStart)
 }
 
+// TestDefaultRegistry_Intervals pins every scheduled cadence.
+//
+// These were previously implicit: each Periodic<Name>Job constructor read a
+// package const and only two of the ten had a test that looked at the value.
+// The cadence is half of what RunOnStart means — an hourly sweep that becomes
+// daily is the same silence by a slower route.
+func TestDefaultRegistry_Intervals(t *testing.T) {
+	t.Parallel()
+
+	intervals := map[string]time.Duration{}
+	for _, e := range Default().Entries() {
+		if e.Periodic != nil {
+			intervals[e.Kind()] = e.Periodic.Interval
+		}
+	}
+
+	assert.Equal(t, map[string]time.Duration{
+		"warm_season":                   24 * time.Hour,
+		"orphan_scan":                   time.Hour,
+		"description_backfill_scan":     time.Hour,
+		"description_llm_backfill_scan": time.Hour,
+		"episodes_bgm_scan":             time.Hour,
+		"episode_titles_releasing":      6 * time.Hour,
+		"bgm_bind_idmap":                6 * time.Hour,
+		"hant_backfill":                 90 * 24 * time.Hour,
+		"anilist_ratings":               time.Hour,
+		"bangumi_ratings":               time.Hour,
+	}, intervals)
+}
+
 // TestDefaultRegistry_PeriodicJobsMatchDeclarations asserts the built river
 // objects agree with the declarations, through river's own (unexported)
 // fields rather than through the struct we just read.

@@ -357,46 +357,6 @@ func (w *DescriptionBackfillWorker) Work(ctx context.Context, job *river.Job[Des
 	return nil
 }
 
-// PeriodicDescriptionBackfillScanJob returns the river PeriodicJob that fires
-// the sweep every hour.  Pass it to queue.Config.PeriodicJobs alongside
-// PeriodicOrphanScanJob and PeriodicWarmSeasonJob.
-//
-// InsertOpts is nil in the tuple: DescriptionBackfillScanArgs.InsertOpts()
-// already pins the job to DescriptionBackfillQueueName, and that is all this
-// job needs.  Note that river's periodic enqueuer does NOT check for an
-// existing pending or running instance before inserting — it inserts every
-// time the schedule elapses, full stop — so if the backfill queue ever wedges,
-// scan jobs will stack up behind it.  That is tolerated rather than fixed: a
-// stacked scan is one indexed SELECT whose rows are then deduplicated by
-// UniqueOpts{ByArgs} on the per-row jobs, and it matches what
-// PeriodicOrphanScanJob and PeriodicWarmSeasonJob already do.
-//
-// Do NOT "fix" it by adding UniqueOpts here without setting ByState
-// explicitly: river's default unique states include `completed`, and completed
-// jobs stay in river_job for 24h, so a naive UniqueOpts would block the hourly
-// cadence for a full day after every successful scan.
-//
-// RunOnStart is TRUE, which is where this departs from PeriodicOrphanScanJob.
-// That job can leave it false because main.go calls ScanAndEnqueueOrphans
-// directly at boot, so every restart still produces one immediate scan; this
-// job has no such companion call.  River schedules a periodic job's first run a
-// full interval after Start, so with RunOnStart=false every deploy would push
-// the next sweep an hour out — and on a day with several deploys the backfill
-// could make no progress at all, which is exactly the failure mode that left
-// ~1,052 orphan rows stranded before the orphan periodic job existed.  Firing
-// on start also means a release can be verified immediately instead of an hour
-// later.  The cost is one extra batch per boot, and UniqueOpts{ByArgs} on
-// DescriptionBackfillArgs collapses it against anything still queued.
-func PeriodicDescriptionBackfillScanJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(descriptionBackfillScanInterval),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return DescriptionBackfillScanArgs{}, nil
-		},
-		&river.PeriodicJobOpts{RunOnStart: true},
-	)
-}
-
 // Compile-time guards: both workers must satisfy river.Worker for their args.
 var (
 	_ river.Worker[DescriptionBackfillScanArgs] = (*DescriptionBackfillScanWorker)(nil)

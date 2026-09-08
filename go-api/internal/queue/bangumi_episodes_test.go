@@ -31,7 +31,6 @@ package queue
 import (
 	"context"
 	"errors"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -1062,37 +1061,6 @@ func TestEpisodesBgmScanIntervalIsHourly(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Periodic job
 // ---------------------------------------------------------------------------
-
-// Prevents: RunOnStart quietly reverting to river's default.
-//
-// River's OSS scheduler does not persist periodic schedules — it recomputes the
-// next run as now+period on every Start — so with RunOnStart=false every deploy
-// pushes the sweep a full hour out, and a day with several deploys can produce
-// no sweep at all.
-//
-// Read via reflection because river keeps PeriodicJob's fields unexported and
-// exposes no accessor.  That couples this test to river's internals on purpose:
-// river is version-pinned, so an upgrade that reshapes PeriodicJob should stop
-// and make somebody re-confirm this rather than silently carry an unverified
-// assumption forward.
-func TestPeriodicEpisodesBgmScanJobRunsOnStart(t *testing.T) {
-	t.Parallel()
-
-	job := PeriodicEpisodesBgmScanJob()
-	require.NotNil(t, job)
-
-	optsField := reflect.ValueOf(job).Elem().FieldByName("opts")
-	require.True(t, optsField.IsValid(),
-		"river.PeriodicJob no longer has an `opts` field — re-verify the sweep still runs at boot")
-	require.False(t, optsField.IsNil(),
-		"nil opts means RunOnStart=false, which lets a redeploying service never sweep")
-
-	runOnStart := optsField.Elem().FieldByName("RunOnStart")
-	require.True(t, runOnStart.IsValid(),
-		"river.PeriodicJobOpts no longer has RunOnStart — re-verify what the sweep does at boot")
-	assert.True(t, runOnStart.Bool(),
-		"river recomputes the next run on every Start, so RunOnStart=false can mean the sweep never fires")
-}
 
 // Both halves have to be registered together.  A scan with no per-row worker
 // enqueues jobs nothing can run; a per-row worker with no scan is never fed.

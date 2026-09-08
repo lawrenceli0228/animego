@@ -396,22 +396,6 @@ func (w *DescriptionLlmWorker) markAttempted(ctx context.Context, anilistID int3
 	}
 }
 
-// PeriodicDescriptionLlmBackfillScanJob returns the hourly trigger.
-// RunOnStart=true for the same reason as the Bangumi sweep: this scan has no
-// boot-time companion call, and river schedules a periodic job's first run a
-// full interval after Start — without it, frequent deploys could starve the
-// sweep entirely.  Registered unconditionally; the disabled posture lives in
-// the scan worker, keeping the wiring identical whether or not a key is set.
-func PeriodicDescriptionLlmBackfillScanJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(descriptionLlmScanInterval),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return DescriptionLlmBackfillScanArgs{}, nil
-		},
-		&river.PeriodicJobOpts{RunOnStart: true},
-	)
-}
-
 // AddDescriptionLlmWorkers registers both workers on an existing bundle.
 // Separate from WorkersWithBangumi so that function's signature (and its
 // existing call sites and test doubles) stay untouched; main.go calls this

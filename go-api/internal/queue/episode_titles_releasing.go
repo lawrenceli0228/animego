@@ -450,26 +450,6 @@ func episodeTitlesSweepEnabled() bool {
 	return err == nil && on
 }
 
-// PeriodicEpisodeTitlesJob returns the river PeriodicJob for the sweep.
-//
-// RunOnStart is true, and the attempt stamp is what makes that safe.  river's
-// open-source pilot does not persist periodic schedules — nextRunAt is
-// recomputed at every Start — so a service that deploys more often than the
-// interval would otherwise never sweep at all (the failure
-// PeriodicHantBackfillJob records for its quarterly timer).  Firing on boot
-// removes that dependency, and a redeploy ten minutes later costs nothing:
-// every row the previous pass touched carries a stamp inside the 26h window
-// and is no longer a candidate.
-func PeriodicEpisodeTitlesJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(episodeTitlesInterval),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return EpisodeTitlesArgs{}, nil
-		},
-		&river.PeriodicJobOpts{RunOnStart: true},
-	)
-}
-
 // AddEpisodeTitlesWorker registers the sweep on an existing bundle.
 //
 // Separate from the bundle builder for the same reason AddHantBackfillWorker

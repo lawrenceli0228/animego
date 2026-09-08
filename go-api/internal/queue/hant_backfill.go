@@ -201,48 +201,6 @@ func (w *HantBackfillWorker) Work(ctx context.Context, _ *river.Job[HantBackfill
 	return nil
 }
 
-// PeriodicHantBackfillJob returns the river PeriodicJob that fires the
-// sweep every 90 days.  Pass it to queue.Config.PeriodicJobs alongside
-// PeriodicDescriptionBackfillScanJob and friends.
-//
-// InsertOpts is nil in the tuple: HantBackfillArgs.InsertOpts() already
-// pins the queue and the uniqueness, and that is all this job needs.
-//
-// RunOnStart is FALSE, which is where this departs from
-// PeriodicDescriptionBackfillScanJob — and the departure is the point.
-// That job fires hourly, so RunOnStart=false meant a service deploying
-// several times a day never swept at all.  This one fires quarterly, so
-// the same flag reads the other way round: RunOnStart=true would not be
-// "quarterly, plus a nudge at boot", it would be "every deploy", and a
-// 90-day interval that in practice never elapses is not an interval.
-// The cost is not hypothetical either — a pass reads every row in
-// anime_cache including description_cn and runs s2twp over ~16k
-// synopses, in front of the request path on the coldest container.
-//
-// Nor is this job left without a trigger the way the description sweep
-// was.  POST /api/admin/hant/backfill enqueues it on demand, and
-// GET /api/admin/hant/stats reports titleBehind / descBehind so a human
-// can see when it is worth pressing.  That is the same argument
-// PeriodicOrphanScanJob makes for RunOnStart=false: it can afford a
-// delayed first fire because main.go calls ScanAndEnqueueOrphans at boot.
-//
-// KNOWN LIMIT, recorded so nobody reads the interval as a promise: river's
-// open-source pilot does not persist periodic schedules
-// (riverpilot.StandardPilot.PeriodicJobGetAll returns nil), so nextRunAt
-// is recomputed as now+90d at every Start.  On a service that deploys more
-// often than quarterly the timer never elapses, and the admin button is
-// the real trigger.  The periodic fire is the backstop for a process that
-// does stay up — not the day-to-day path.
-func PeriodicHantBackfillJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(hantBackfillInterval),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return HantBackfillArgs{}, nil
-		},
-		nil, // PeriodicJobOpts — defaults are fine; RunOnStart=false, see above
-	)
-}
-
 // AddHantBackfillWorker registers the sweep on an existing bundle.
 //
 // Separate from WorkersWithBangumi (the same shape as

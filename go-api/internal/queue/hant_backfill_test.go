@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"slices"
 	"testing"
@@ -206,48 +205,6 @@ func TestHantBackfillUniqueStatesMatchTheEndpointsRunningSet(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Periodic job
 // ---------------------------------------------------------------------------
-
-// A nil return would drop the schedule with no runtime error at all,
-// leaving the sweep dead while everything looks wired.
-func TestPeriodicHantBackfillJobNonNil(t *testing.T) {
-	t.Parallel()
-
-	require.NotNil(t, PeriodicHantBackfillJob())
-}
-
-// Prevents: RunOnStart being added "for symmetry" with the two
-// description sweeps.
-//
-// Those fire hourly, so RunOnStart=false meant a service deploying several
-// times a day never swept at all.  This one fires quarterly, so the same
-// flag reads the other way round: RunOnStart=true would not be "quarterly
-// plus a nudge at boot", it would be "every deploy" — a whole-table read
-// plus s2twp over ~16k synopses in front of the request path on the
-// coldest container, several times a week.
-//
-// Read via reflection because river keeps PeriodicJob's fields unexported
-// and exposes no accessor.  That couples this test to river's internals on
-// purpose: river is version-pinned, so an upgrade that reshapes
-// PeriodicJob should stop and make somebody re-confirm this rather than
-// silently carry an unverified assumption forward.
-func TestPeriodicHantBackfillJobDoesNotRunOnStart(t *testing.T) {
-	t.Parallel()
-
-	job := PeriodicHantBackfillJob()
-	require.NotNil(t, job)
-
-	optsField := reflect.ValueOf(job).Elem().FieldByName("opts")
-	require.True(t, optsField.IsValid(),
-		"river.PeriodicJob no longer has an `opts` field — re-verify RunOnStart is still unset on the sweep")
-	if optsField.IsNil() {
-		return // nil opts is RunOnStart=false, which is what this pins
-	}
-	runOnStart := optsField.Elem().FieldByName("RunOnStart")
-	require.True(t, runOnStart.IsValid(),
-		"river.PeriodicJobOpts no longer has RunOnStart — re-verify what the sweep does at boot")
-	assert.False(t, runOnStart.Bool(),
-		"RunOnStart=true turns a 90-day sweep into an every-deploy sweep; the admin button is the on-demand trigger")
-}
 
 // The interval is the one number that decides how much drift accumulates
 // before the sweep catches it on its own.  Pinned so a units mistake

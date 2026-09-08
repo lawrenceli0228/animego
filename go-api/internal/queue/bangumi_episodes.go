@@ -741,36 +741,6 @@ func episodesBgmCount(titles []epTitle) int32 {
 // Wiring
 // ---------------------------------------------------------------------------
 
-// PeriodicEpisodesBgmScanJob returns the river PeriodicJob that fires the sweep
-// every hour.  Pass it to queue.Config.PeriodicJobs.
-//
-// InsertOpts is nil in the tuple: EpisodesBgmScanArgs.InsertOpts() already pins
-// the job to EpisodesBgmQueueName, and that is all it needs.
-//
-// Do NOT add UniqueOpts here without setting ByState explicitly.  River's
-// default unique states include `completed`, and completed jobs stay in
-// river_job for 24h, so a naive UniqueOpts would block the hourly cadence for a
-// full day after every successful scan.  A stacked scan is tolerable by
-// comparison: it is one indexed SELECT whose rows are then deduplicated by
-// UniqueOpts{ByArgs} on the per-row jobs.
-//
-// RunOnStart is TRUE.  River's OSS scheduler does not persist periodic
-// schedules — it recomputes the next run as now+period on every Start — so with
-// RunOnStart=false a deploy would push the next sweep a full hour out, and a
-// day with several deploys could produce no sweep at all.  That is the failure
-// mode PeriodicDescriptionBackfillScanJob's comment records; the cost of
-// avoiding it is one extra batch per boot, which UniqueOpts{ByArgs} on
-// EpisodesBgmArgs collapses against anything still queued.
-func PeriodicEpisodesBgmScanJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(episodesBgmScanInterval),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return EpisodesBgmScanArgs{}, nil
-		},
-		&river.PeriodicJobOpts{RunOnStart: true},
-	)
-}
-
 // EpisodesBgmDB is the union of the two DB surfaces the pair of workers needs.
 // dbgen.Queries satisfies it.
 type EpisodesBgmDB interface {

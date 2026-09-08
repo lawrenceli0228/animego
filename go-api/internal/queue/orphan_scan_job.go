@@ -89,24 +89,3 @@ func (w *OrphanScanWorker) Work(ctx context.Context, _ *river.Job[OrphanScanArgs
 	slog.InfoContext(ctx, "orphan_scan done", "enqueued", total)
 	return nil
 }
-
-// PeriodicOrphanScanJob returns a river PeriodicJob that fires every
-// 1 hour to re-enqueue V1 jobs for any bangumi_version=0 rows.  Pass
-// the result to queue.Config.PeriodicJobs alongside PeriodicWarmSeasonJob.
-//
-// InsertOpts is nil (same as PeriodicWarmSeasonJob) — river's periodic
-// scheduler inserts only when no pending/running instance of the same
-// kind exists, which is sufficient deduplication for a 1-hour sweep.
-//
-// The boot-time ScanAndEnqueueOrphans call in main.go is NOT replaced
-// by this; the two are additive.
-func PeriodicOrphanScanJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(orphanScanPeriodicInterval),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return OrphanScanArgs{}, nil
-		},
-		nil, // PeriodicJobOpts — defaults are fine; RunOnStart=false
-		// because main.go handles the boot scan via ScanAndEnqueueOrphans.
-	)
-}
