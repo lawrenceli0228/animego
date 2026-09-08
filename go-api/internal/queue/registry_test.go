@@ -151,6 +151,56 @@ func TestNewRegistry_RejectsDuplicateKind(t *testing.T) {
 	assert.Contains(t, err.Error(), `kind "a" declared twice`)
 }
 
+func TestNewRegistry_RejectsEmptyQueueSet(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewRegistry(map[string]Concurrency{}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no queues declared")
+}
+
+func TestNewRegistry_RejectsEmptyQueueName(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewRegistry(
+		map[string]Concurrency{"": FixedConcurrency(1, "unnamed")},
+		[]Entry{{Args: fakeArgs{kind: "a", queue: ""}, Queue: ""}},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "queue name must not be empty")
+}
+
+// TestNewRegistry_RejectsEmptyKind covers an Args type whose Kind() returns
+// "".  river would accept it and the registry's duplicate check would then
+// collapse every such kind into one.
+func TestNewRegistry_RejectsEmptyKind(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewRegistry(okQueues(), []Entry{
+		{Args: fakeArgs{kind: "", queue: "alpha"}, Queue: "alpha"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty Kind()")
+}
+
+// TestMustRegistry_PanicsOnInvalidDeclarations pins the boot behaviour of the
+// package-level var: a registry that does not validate takes the process down
+// at start rather than letting river run some subset of the intended jobs
+// while reporting nothing.
+func TestMustRegistry_PanicsOnInvalidDeclarations(t *testing.T) {
+	t.Parallel()
+
+	assert.Panics(t, func() {
+		mustRegistry(NewRegistry(okQueues(), []Entry{
+			{Args: fakeArgs{kind: "b", queue: "beta"}, Queue: "beta"},
+		}))
+	})
+
+	assert.NotPanics(t, func() {
+		mustRegistry(NewRegistry(okQueues(), okEntries()))
+	})
+}
+
 func TestNewRegistry_RejectsZeroMaxWorkers(t *testing.T) {
 	t.Parallel()
 

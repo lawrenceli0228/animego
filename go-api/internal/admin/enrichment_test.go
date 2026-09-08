@@ -926,6 +926,48 @@ func TestResumeQueue_ResumesNamedQueue(t *testing.T) {
 // TestPauseQueue_NilCtrl_Fails is the generalised form of the bug this change
 // fixes: without it, widening pause to eight queues would have multiplied a
 // confident-but-false success by eight.
+// TestResumeQueue_RefusesDefault covers the resume half of the shared
+// validation.  Pause and resume go through one function, but a future split
+// would silently leave resume open, and resuming default is how a paused
+// subsystem gets un-paused by accident.
+func TestResumeQueue_RefusesDefault(t *testing.T) {
+	qc := &fakeQueueController{}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.ResumeQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/default/resume", "default"))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rec.Code)
+	}
+	if got := qc.snapshotNames(); len(got) != 0 {
+		t.Errorf("a refused name reached river: %v", got)
+	}
+}
+
+func TestResumeQueue_NilCtrl_Fails(t *testing.T) {
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, nil)
+
+	rec := httptest.NewRecorder()
+	h.ResumeQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/resume", queue.RatingsQueueName))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", rec.Code)
+	}
+}
+
+func TestResumeQueue_RiverErrorIs500(t *testing.T) {
+	qc := &fakeQueueController{resumeErr: errors.New("queue down")}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.ResumeQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/resume", queue.RatingsQueueName))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500", rec.Code)
+	}
+}
+
 func TestPauseQueue_NilCtrl_Fails(t *testing.T) {
 	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, nil)
 

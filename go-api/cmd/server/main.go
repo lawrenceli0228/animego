@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -63,26 +64,7 @@ import (
 )
 
 func main() {
-	// The default logger writes JSON to stdout AND forwards every ERROR to
-	// Sentry.  The forwarding half is not a nicety: river reports background
-	// failures by logging one ERROR line and carrying on — a periodic job
-	// whose UniqueOpts fail validation, an insert conflict, a transaction
-	// error — and until 2026-09-08 that line reached nothing but the
-	// container log.  A sweep stopped enqueueing for 23 minutes and the only
-	// evidence anywhere was one line nobody was reading.
-	//
-	// Wrapping here rather than after sentry.Init below is safe and
-	// deliberate: the handler resolves its hub per record, so lines logged
-	// before Init (and every line when SENTRY_DSN is empty) hit an
-	// uninitialised hub that drops them, while the stdout half is
-	// byte-identical either way.  See internal/obs.
-	logger := slog.New(obs.NewSentryErrorHandler(
-		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}),
-		obs.Options{},
-	))
-	slog.SetDefault(logger)
+	slog.SetDefault(newRootLogger(os.Stdout))
 
 	// Sentry init — P10 observability lane.  Empty SENTRY_DSN is the
 	// intended no-op for dev/staging (sentry-go drops events silently
@@ -217,13 +199,7 @@ func main() {
 	// See registry.go for why the registry reads InsertOpts() rather than
 	// replacing it, and test/integration/queue_registry_test.go for the
 	// gate that boots this exact configuration against a real Postgres.
-	registry := queue.Default()
-	riverClient, err := queue.Boot(pool, queue.Config{
-		Workers:      workers,
-		Queues:       registry.QueueConfigs(),
-		PeriodicJobs: registry.PeriodicJobs(),
-		Logger:       slog.Default(),
-	})
+	riverClient, err := queue.Boot(pool, queueBootConfig(workers))
 	if err != nil {
 		slog.Error("river queue boot failed", "err", err)
 		os.Exit(1)
@@ -1251,4 +1227,51 @@ func buildWorkers(d workerDeps) *river.Workers {
 	// opening a second one beside it.
 	queue.AddRatingsWorkers(workers, d.anilist, d.bangumi, d.db)
 	return workers
+}
+
+// newRootLogger builds the process logger: JSON to out, plus every ERROR
+// forwarded to Sentry.
+//
+// The forwarding half is not a nicety.  river reports background failures by
+// logging one ERROR line and carrying on — a periodic job whose UniqueOpts
+// fail validation, an insert conflict, a transaction error — and until
+// 2026-09-08 that line reached nothing but the container log.  A sweep
+// stopped enqueueing for 23 minutes and the only evidence anywhere was one
+// line nobody was reading.
+//
+// Wrapping here rather than after sentry.Init is safe and deliberate: the
+// handler resolves its hub per record, so lines logged before Init (and every
+// line when SENTRY_DSN is empty) hit an uninitialised hub that drops them,
+// while the stdout half is byte-identical either way.
+//
+// Extracted from main() so main_wiring_test.go can assert the forwarder is
+// actually in the chain.  Losing it would be silent in exactly the way this
+// whole change exists to prevent: logs would look identical and Sentry would
+// simply stop hearing about background failures.
+func newRootLogger(out io.Writer) *slog.Logger {
+	return slog.New(obs.NewSentryErrorHandler(
+		slog.NewJSONHandler(out, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}),
+		obs.Options{},
+	))
+}
+
+// queueBootConfig is the river configuration the server boots with: the
+// registry's queues and schedules, plus the worker bundle.
+//
+// Extracted for the same reason as newRootLogger.  Dropping
+// Queues or PeriodicJobs here fails silently and severely: queue.Boot falls
+// back to {default: 1}, so eight dedicated queues get no producer and their
+// jobs sit `available` forever, and no sweep is ever scheduled.  Neither
+// produces an error, a log line, or a failed request — the same shape as the
+// incident that prompted the registry.
+func queueBootConfig(workers *river.Workers) queue.Config {
+	registry := queue.Default()
+	return queue.Config{
+		Workers:      workers,
+		Queues:       registry.QueueConfigs(),
+		PeriodicJobs: registry.PeriodicJobs(),
+		Logger:       slog.Default(),
+	}
 }
