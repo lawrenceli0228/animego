@@ -702,7 +702,7 @@
 
 > **前提已变（2026-09-08，迁移 0033）** — 这条的 Cons 算的是「新 job kind + 查询常量 + 取批 SQL + 配套测试约 250 行」。其中的**查询常量和客户端方法现在已经存在**：`anilist.MediaRatingsQuery` 就是 `Page(media: id_in: [...])`，`anilist.Client.Ratings` 是它的调用方，`anilist.MaxRatingIDs` 是那个 50 的上限（AniList 超了是**静默截断**不是报错，所以上限在 `Ratings` 里挡，不能只靠调用方自觉）。剩下要写的只有取批 SQL 和 job 本身，而 `queue/ratings_refresh.go` 里那条 AniList sweep 的分批 + 「没返回的 id 也要盖戳」逻辑可以照抄。167 : 250 的比值应当重算。
 >
-> ⚠️ 但**先确认 AniList 恢复了再动**：2026-09-07 起 `graphql.anilist.co` 对所有查询返回 403（`The AniList API has been temporarily disabled due to severe stability issues.`，本机与生产源站均复现）。
+> ~~⚠️ 但**先确认 AniList 恢复了再动**：2026-09-07 起 `graphql.anilist.co` 对所有查询返回 403。~~ **2026-09-08 更正**：AniList 没有停摆，是我们的客户端没发 `Referer` 头，而它把这个拒绝说成了「API 已临时停用」。已修（`internal/anilist/client.go` 的 `requestReferer`）。这条不再有阻塞。
 
 ---
 
@@ -751,7 +751,7 @@
 
 **Context** — 2026-09-08 随迁移 0033 一起识别，当时刻意留在范围外：入库和呈现是两步，而第二步要碰公开契约。数据来源是 `stats.scoreDistribution` 各档 `amount` 之和（`anilist.Media.ScoreVotes`），不是 `popularity`——后者数的是把作品加进列表的人，大部分没打分。
 
-**Depends on / blocked by** — 被 AniList 的 403 挡着（见上一条）：呈现一个全是 NULL 的列没有意义。
+**Depends on / blocked by** — 无。（本条原写「被 AniList 的 403 挡着」，那个 403 是我们自己少发 `Referer` 造成的，2026-09-08 已修。）实际前提只剩一个：等那条 sweep 真的跑过一轮、列里有数了再接页面，否则呈现一个全是 NULL 的列没有意义。
 
 ---
 

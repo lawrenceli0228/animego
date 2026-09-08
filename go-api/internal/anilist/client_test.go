@@ -771,3 +771,79 @@ func TestClient_TransportError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "anilist: http do")
 }
+
+// TestClient_SendsRefererAndUserAgent pins the two headers that decide
+// whether AniList answers at all.
+//
+// It is here because the failure it guards against does not look like a
+// bug in this package.  AniList refuses a request with no Referer using
+// HTTP 403 and a GraphQL body reading "The AniList API has been
+// temporarily disabled due to severe stability issues" -- a sentence
+// that describes an upstream outage, sends the reader to look for a
+// status page, and is not true.  This repository believed it for three
+// days, wrote it into a CHANGELOG entry, a README section, a TODOS item
+// and a merged pull request, and postponed a deploy waiting for a
+// recovery that had nothing to recover.
+//
+// Every other test in this file drives an httptest server that answers
+// regardless of what headers arrive, so deleting the two Set calls in
+// do() would leave the whole suite green while production returned 502
+// on search, schedule, seasonal cold-start, and every uncached detail
+// page.  This test is the only thing standing between that edit and
+// that outage.
+func TestClient_SendsRefererAndUserAgent(t *testing.T) {
+	t.Parallel()
+
+	var seenReferer, seenUserAgent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenReferer = r.Header.Get("Referer")
+		seenUserAgent = r.Header.Get("User-Agent")
+		writeJSON(w, http.StatusOK, `{"data":{"Media":{"id":21}}}`)
+	}))
+	defer srv.Close()
+
+	_, err := testClient(t, srv.URL).Detail(context.Background(), DetailVars{ID: 21})
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, seenReferer,
+		"AniList answers 403 to a request with no Referer, and says the API is disabled rather than that the header is missing")
+	assert.Equal(t, requestReferer, seenReferer)
+
+	assert.NotEmpty(t, seenUserAgent,
+		"an anonymous Go-http-client is what an anti-abuse filter is built to catch")
+	assert.Equal(t, requestUserAgent, seenUserAgent)
+	assert.NotContains(t, seenUserAgent, "Go-http-client",
+		"the Go default identifies nothing; this caller should be nameable to the upstream it loads")
+}
+
+// TestClient_EveryQueryPathCarriesTheHeaders is the coverage the test
+// above cannot give on its own.
+//
+// do() is shared by all five query methods today, so one assertion would
+// be enough -- until someone adds a sixth that builds its own request.
+// Running the table means a new path that bypasses do() fails here
+// instead of in production, where the symptom is a 403 blaming AniList.
+func TestClient_EveryQueryPathCarriesTheHeaders(t *testing.T) {
+	t.Parallel()
+
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Referer"))
+		writeJSON(w, http.StatusOK, `{"data":{"Page":{"pageInfo":{},"media":[],"airingSchedules":[]},"Media":{"id":21}}}`)
+	}))
+	defer srv.Close()
+
+	c := testClient(t, srv.URL)
+	ctx := context.Background()
+	search := "x"
+	_, _ = c.Search(ctx, SearchVars{Page: 1, PerPage: 1, Search: &search})
+	_, _ = c.Seasonal(ctx, SeasonalVars{Page: 1, PerPage: 1, Season: "FALL", SeasonYear: 2026})
+	_, _ = c.Detail(ctx, DetailVars{ID: 21})
+	_, _ = c.Schedule(ctx, ScheduleVars{WeekStart: 1, WeekEnd: 2, Page: 1})
+	_, _ = c.Ratings(ctx, RatingsVars{IDs: []int{21}})
+
+	require.Len(t, seen, 5, "all five query methods must reach the server")
+	for i, ref := range seen {
+		assert.Equal(t, requestReferer, ref, "query path %d sent no Referer and would 403 in production", i)
+	}
+}
