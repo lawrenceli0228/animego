@@ -82,12 +82,32 @@ const ratingsStaleAfter = 90 * 24 * time.Hour
 
 // anilistRatingsBatch caps one AniList pass, in rows.
 //
-// 2,000 rows is 40 requests through the client's 700ms limiter, about
-// 28 seconds of upstream time.  At one pass an hour the whole 18,458-row
-// catalogue is collected inside a working day, and the cap is what keeps
-// a single pass from becoming a job that has to stay alive for hours to
-// be worth anything.
-const anilistRatingsBatch int32 = 2000
+// The number this cap is set against is NOT "how fast can the backfill
+// finish".  It is "how long may one pass hold the shared rate limiter",
+// because that window is when user-facing AniList calls get slower and
+// some of them stop fitting in their budget.
+//
+// 2,000 rows was the first value here, chosen when minInterval was 700ms
+// -- 40 requests, ~28s.  At the real interval (2.1s, see
+// anilist.rateLimitPerMinute) the same 2,000 rows held the limiter for
+// 130 seconds, and prod recorded what that costs: /api/anime/schedule
+// answered 500 after 19.568s, twenty seconds into a pass.  That endpoint
+// paginates, so it is not one request waiting one interval -- it is N
+// requests each queued behind one of this sweep's, which turns its 20s
+// budget into roughly N * 4.2s and puts five pages over the line.
+//
+// 500 rows is 10 requests, ~33 seconds -- under 1% of the hour rather
+// than 3.6%.  The cost is wall-clock on a ONE-TIME drain: the 18,458-row
+// catalogue takes ~37 hours instead of ~10.  Steady state is unaffected,
+// because once the back catalogue is collected a pass finds only the
+// current-year population, which is 458 rows.
+//
+// So: raising this to make the backfill finish sooner trades a user-
+// facing 500 for wall-clock on a job that runs once.  The contention is
+// the constraint; the drain time is not.  TODOS.md carries the fix that
+// would remove the trade -- giving background work its own share of the
+// budget instead of the same FIFO queue the request path uses.
+const anilistRatingsBatch int32 = 500
 
 // bangumiRatingsBatch caps one Bangumi pass, in rows.
 //
