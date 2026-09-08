@@ -107,15 +107,28 @@ var productionQueues = map[string]Concurrency{
 	// but that check and its UPDATE are one statement: two concurrent
 	// passes could each pass it for the same subject and both bind, and
 	// anime_cache.bgm_id has no unique index to catch it.  A single slot is
-	// what makes the race unreachable BETWEEN JOBS IN THIS PROCESS, and it
+	// what makes that race unreachable BETWEEN JOBS IN THIS PROCESS, and it
 	// is why every writer of anime_cache.bgm_id shares this queue.
 	//
-	// It is not a guarantee against a second process.  cmd/bgmbackfill's
-	// id_map_binds.go deliberately ships without an --apply flag, and that
-	// deliberate absence — not this slot count — is what keeps the
-	// invariant true today.
+	// Be precise about what it buys, because the obvious reading is wrong
+	// in two directions.
+	//
+	// It is not a guarantee against a second process: cmd/bgmbackfill and
+	// cmd/hantbackfill write some of the same tables without going through
+	// river at all.  id_map_binds.go deliberately ships without an --apply
+	// flag, and that absence — not this slot count — is what keeps the
+	// binding path single-writer today.
+	//
+	// And it is not the reason "one subject, one row" holds, because that
+	// does not hold: measured 2026-09-03, 541 subjects are already held by
+	// two or more rows (1,161 rows in total), some of them legitimately —
+	// Bangumi sometimes covers with one subject what AniList splits into
+	// two seasons.  What the slot buys is that this sweep cannot make that
+	// number larger.  TODOS.md carries what it would take to make the
+	// database enforce the invariant instead; the blocker there is
+	// adjudicating those 1,161 rows, not writing the migration.
 	BgmBindQueueName: FixedConcurrency(1,
-		"serialises in-process bgm_id writers; anime_cache.bgm_id has no unique index to catch a lost race"),
+		"keeps this sweep from adding to the 541 subjects already multi-held; in-process only"),
 
 	// Rating refresh, both kinds on one queue.  They are the same feature
 	// and are turned off for the same reasons, so a single pause is the
