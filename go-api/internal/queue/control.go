@@ -215,7 +215,12 @@ func Status(ctx context.Context, qc QueueController) (Stats, error) {
 //
 // Both kinds share one queue rather than taking one each.  They are the
 // same feature and are turned off for the same reasons, so a single
-// pause is the control an operator actually wants; the queue is
-// configured with two worker slots so that pausing is the only thing
-// that makes them wait for each other.
+// pause is the control an operator actually wants.
+//
+// The queue is configured with ONE worker slot, so the two sweeps do
+// wait for each other: about five minutes of every hour, which is the
+// price of making two passes of the same kind unable to overlap.  An
+// earlier version of this sentence said two slots and was wrong on
+// HEAD -- see the MaxWorkers block in cmd/server/main.go, which is the
+// authority.
 const RatingsQueueName = "ratings"

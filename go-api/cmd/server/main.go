@@ -307,22 +307,23 @@ func main() {
 			// it.  A single slot is what makes the race unreachable, and it
 			// is why every writer of anime_cache.bgm_id shares this queue.
 			queue.BgmBindQueueName: {MaxWorkers: 1},
-			// Rating refresh: MaxWorkers MUST stay 1, and this replaces
-			// an earlier 2 that was chosen so a four-minute Bangumi pass
-			// would not sit in front of a thirty-second AniList one.
+			// Rating refresh: MaxWorkers 1, replacing an earlier 2 that
+			// was chosen so a four-minute Bangumi pass would not sit in
+			// front of a thirty-second AniList one.
 			//
-			// That reasoning was right about the cost and wrong about
-			// what the slot count is for.  The single slot is now what
-			// makes two concurrent passes of the SAME kind unreachable,
-			// which is what lets ratingsUniqueStates leave `running`
-			// out -- and leaving it out is what stops a deploy that
-			// kills a pass mid-flight from suppressing the sweep for the
-			// hour it takes river's rescuer to reclaim the orphan.  See
-			// that comment for the incident.
+			// An intermediate version of this comment justified the 1 as
+			// what let ratingsUniqueStates leave `running` out of its
+			// state set.  That premise is dead: `running` is back in the
+			// set, because river's UniqueOpts.validate REQUIRES it and
+			// removing it stopped the sweep enqueueing at all.  The slot
+			// count neither grants nor needs that freedom.
 			//
-			// The cost it buys back is small at this cadence: with
-			// anilistRatingsBatch at 500 the AniList pass is ~21s and
-			// the Bangumi pass ~4 minutes, so serialising them spends
+			// What it does buy is that two passes of the same kind cannot
+			// overlap even if uniqueness is ever relaxed, which is the
+			// direction TODOS.md points at for closing the post-deploy
+			// suppression window.  The cost is small at this cadence:
+			// with anilistRatingsBatch at 500 the AniList pass is ~21s
+			// and the Bangumi pass ~4 minutes, so serialising them spends
 			// about five minutes of one slot per hour.
 			queue.RatingsQueueName: {MaxWorkers: 1},
 		},
