@@ -40,6 +40,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
 
 // ---------------------------------------------------------------------------
@@ -264,7 +266,7 @@ func WithSleep(f func(context.Context, time.Duration) error) Option {
 func NewClient(opts ...Option) *Client {
 	c := &Client{
 		endpoint:        DefaultEndpoint,
-		http:            &http.Client{Timeout: httpTimeout},
+		http:            &http.Client{Timeout: httpTimeout, Transport: httpx.NewTransport()},
 		limiter:         rate.NewLimiter(rate.Every(minInterval), 1),
 		sleep:           defaultSleep,
 		breakerCooldown: breakerCooldown,

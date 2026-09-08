@@ -27,6 +27,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
 
 // DefaultEndpoint is the production chat-completions URL.  Override with
@@ -209,7 +211,7 @@ func NewClient(apiKey string, opts ...Option) *Client {
 		endpoint: DefaultEndpoint,
 		model:    DefaultModel,
 		apiKey:   apiKey,
-		httpc:    &http.Client{Timeout: httpTimeout},
+		httpc:    &http.Client{Timeout: httpTimeout, Transport: httpx.NewTransport()},
 	}
 	for _, opt := range opts {
 		opt(c)

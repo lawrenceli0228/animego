@@ -54,6 +54,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
+	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
 
 // Defaults — exposed as package vars so tests can swap them.
@@ -148,7 +149,7 @@ func WithCredentials(appID, appSecret string) Option {
 func NewClient(opts ...Option) (*Client, error) {
 	c := &Client{
 		endpoint: DefaultEndpoint,
-		http:     &http.Client{Timeout: httpTimeout},
+		http:     &http.Client{Timeout: httpTimeout, Transport: httpx.NewTransport()},
 		limiter:  rate.NewLimiter(rate.Every(minInterval), 1),
 	}
 	for _, opt := range opts {

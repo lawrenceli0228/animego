@@ -45,6 +45,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
 
 // ---------------------------------------------------------------------------
@@ -152,7 +154,7 @@ func NewClient(opts ...Option) *Client {
 	c := &Client{
 		endpoint: DefaultEndpoint,
 		ua:       DefaultUA,
-		http:     &http.Client{Timeout: httpTimeout},
+		http:     &http.Client{Timeout: httpTimeout, Transport: httpx.NewTransport()},
 		limiter:  rate.NewLimiter(rate.Every(minInterval), 1),
 	}
 	for _, opt := range opts {
