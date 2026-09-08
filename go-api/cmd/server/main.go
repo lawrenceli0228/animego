@@ -54,6 +54,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 	"github.com/lawrenceli0228/animego/go-api/internal/notifications"
+	"github.com/lawrenceli0228/animego/go-api/internal/obs"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/safety"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
@@ -62,9 +63,25 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	// The default logger writes JSON to stdout AND forwards every ERROR to
+	// Sentry.  The forwarding half is not a nicety: river reports background
+	// failures by logging one ERROR line and carrying on — a periodic job
+	// whose UniqueOpts fail validation, an insert conflict, a transaction
+	// error — and until 2026-09-08 that line reached nothing but the
+	// container log.  A sweep stopped enqueueing for 23 minutes and the only
+	// evidence anywhere was one line nobody was reading.
+	//
+	// Wrapping here rather than after sentry.Init below is safe and
+	// deliberate: the handler resolves its hub per record, so lines logged
+	// before Init (and every line when SENTRY_DSN is empty) hit an
+	// uninitialised hub that drops them, while the stdout half is
+	// byte-identical either way.  See internal/obs.
+	logger := slog.New(obs.NewSentryErrorHandler(
+		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}),
+		obs.Options{},
+	))
 	slog.SetDefault(logger)
 
 	// Sentry init — P10 observability lane.  Empty SENTRY_DSN is the
