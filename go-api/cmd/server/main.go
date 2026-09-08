@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -54,6 +55,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 	"github.com/lawrenceli0228/animego/go-api/internal/notifications"
+	"github.com/lawrenceli0228/animego/go-api/internal/obs"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/safety"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
@@ -62,10 +64,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
+	slog.SetDefault(newRootLogger(os.Stdout))
 
 	// Sentry init — P10 observability lane.  Empty SENTRY_DSN is the
 	// intended no-op for dev/staging (sentry-go drops events silently
@@ -178,163 +177,29 @@ func main() {
 	}
 	defer dandanClient.Close()
 
-	workers := queue.WorkersWithBangumiAndNormalizer(
-		bangumiClient,
-		anilistClient,
-		q,
-		enqueuer,
-		anime.NormalizeMainRow,
-	)
-	// LLM translation sweep registers separately so the bundle builder's
-	// signature (and its test doubles) stay untouched.  With a nil
-	// translator this registers a disabled scan + a defensive no-op row
-	// worker — see AddDescriptionLlmWorkers.
-	queue.AddDescriptionLlmWorkers(workers, llmTranslator, q, enqueuer)
-	// zh-Hant sweep.  Registers separately for the same reason: it shares
-	// none of the bundle builder's dependencies and needs one nothing else
-	// does — the vendored dataset directory, which the image bakes at
-	// /usr/local/share/animego/hant and a checkout has at data/hant.
-	// Empty string here means "read HANT_DATA_DIR, default data/hant";
-	// docker-compose sets it for the container.
-	queue.AddHantBackfillWorker(workers, q, "")
-	// Inferred-episode-count sweep.  Registers separately for the same
-	// reason as the two above — it needs none of V12DB and V12DB needs
-	// none of it — and takes the SAME bangumiClient every other worker
-	// holds so its two-requests-per-row draw from the one token bucket
-	// rather than opening a second one beside it.
-	queue.AddEpisodesBgmWorkers(workers, bangumiClient, q, enqueuer)
-	// Airing-show episode-title top-up.  Takes the shared dandanplay client
-	// for the same reason the sweep above takes the shared bangumiClient, and
-	// the pool because its write is a four-statement transaction shared with
-	// cmd/bgmbackfill (internal/episodetitles).  Gated at work time by
-	// EPISODE_TITLES_SWEEP_ENABLED; registering it is not the same as running
-	// it.
-	queue.AddEpisodeTitlesWorker(workers, pool, q, dandanClient, bangumiClient)
-
-	// The id-map bind sweep.  Takes the pool because its unit of work is a
-	// transaction spanning a binding write and that binding's V2 dispatch --
-	// a bound row with no enrichment queued behind it would drop out of the
-	// sweep's own candidate set and never be looked at again.  Takes the
-	// enqueuer for the same reason; `enqueuer` is late-bound above and is
-	// wired to river before any job can run.  Gated at work time by
-	// BGM_BIND_IDMAP_SWEEP_ENABLED.
-	queue.AddBindIdMapWorker(workers, pool, q, enqueuer)
-
-	// The two rating-refresh sweeps.  Register separately for the reason
-	// every sweep above does -- they need the AniList client, which the
-	// bundle builder holds but does not hand to any worker of its own --
-	// and the Bangumi half takes the SAME bangumiClient so its one
-	// request per row draws from the shared token bucket rather than
-	// opening a second one beside it.
-	queue.AddRatingsWorkers(workers, anilistClient, bangumiClient, q)
-
-	riverClient, err := queue.Boot(pool, queue.Config{
-		Workers: workers,
-		// Queues: default for V1+V2+warm_season+orphan_scan, bangumi_v3
-		// for V3 only, description_backfill for the Chinese-description
-		// sweep.  The dedicated V3 queue is what makes the admin
-		// /heal-cn/pause endpoint isolate the heal-CN workload — pausing
-		// the default queue would also freeze enrichment and seasonal
-		// warming.  MaxWorkers=1 across the board matches the
-		// conservative serial throttle the workers use to respect
-		// Bangumi's 800ms-per-request budget (only one worker per queue).
-		Queues: map[string]river.QueueConfig{
-			river.QueueDefault:       {MaxWorkers: 1},
-			queue.BangumiV3QueueName: {MaxWorkers: 1},
-			// Chinese-description backfill: MaxWorkers MUST stay 1.
-			// This is a long-running sweep over ~17k existing rows, and
-			// its only cost is Bangumi API time — which is metered by a
-			// token bucket on the single shared *bangumi.Client above.
-			// Extra workers would therefore not drain the backlog any
-			// faster; they would just queue up on the same bucket while
-			// stealing dispatch slots from on-demand enrichment.  The
-			// separate queue is for isolation and pausability, not for
-			// parallelism.
-			queue.DescriptionBackfillQueueName: {MaxWorkers: 1},
-			// LLM translation sweep: 4 workers is the one queue here
-			// that genuinely parallelises — its budget is DeepSeek
-			// round-trips (seconds each, no shared token bucket), and
-			// 4-way keeps a 600-row batch under ~15 minutes without
-			// hammering the API.
-			queue.DescriptionLlmQueueName: {MaxWorkers: 4},
-			// zh-Hant sweep: MaxWorkers MUST stay 1.  One job is the
-			// whole table, so a second worker has nothing to do except
-			// run a duplicate pass — and HantBackfillArgs is unique
-			// across every non-terminal state precisely to stop that.
-			// The separate queue is so a pass that reads all ~17.5k rows
-			// and issues two dozen 500-row UPDATEs cannot sit in front
-			// of the V1/V2 enrichment a page load is waiting on.
-			queue.HantBackfillQueueName: {MaxWorkers: 1},
-			// Inferred episode counts: MaxWorkers MUST stay 1, for the
-			// same reason as the description backfill.  Its cost is two
-			// Bangumi requests per row, metered by the token bucket on
-			// the single shared *bangumi.Client above, so extra workers
-			// would not drain the backlog faster — they would queue on
-			// the same bucket while stealing dispatch slots from
-			// on-demand enrichment.  The separate queue is for isolation
-			// and pausability, not parallelism.
-			queue.EpisodesBgmQueueName: {MaxWorkers: 1},
-			// Airing episode titles: MaxWorkers MUST stay 1.  One pass is
-			// one job that walks its whole candidate list inline, and every
-			// row costs a token from the dandanplay bucket that user-facing
-			// /match draws on.  A second concurrent pass would not go faster
-			// -- the bucket is the constraint, not the worker count -- it
-			// would only take twice as many tokens away from the request
-			// path.
-			queue.EpisodeTitlesQueueName: {MaxWorkers: 1},
-			// MaxWorkers 1 is load-bearing rather than polite here.
-			// BindBgmIdsFromIdMap refuses a subject some bound row already
-			// holds, but that check and its UPDATE are one statement: two
-			// concurrent passes could each pass it for the same subject and
-			// both bind, and anime_cache.bgm_id has no unique index to catch
-			// it.  A single slot is what makes the race unreachable, and it
-			// is why every writer of anime_cache.bgm_id shares this queue.
-			queue.BgmBindQueueName: {MaxWorkers: 1},
-			// Rating refresh: MaxWorkers MUST stay 1, and this replaces
-			// an earlier 2 that was chosen so a four-minute Bangumi pass
-			// would not sit in front of a thirty-second AniList one.
-			//
-			// That reasoning was right about the cost and wrong about
-			// what the slot count is for.  The single slot is now what
-			// makes two concurrent passes of the SAME kind unreachable,
-			// which is what lets ratingsUniqueStates leave `running`
-			// out -- and leaving it out is what stops a deploy that
-			// kills a pass mid-flight from suppressing the sweep for the
-			// hour it takes river's rescuer to reclaim the orphan.  See
-			// that comment for the incident.
-			//
-			// The cost it buys back is small at this cadence: with
-			// anilistRatingsBatch at 500 the AniList pass is ~21s and
-			// the Bangumi pass ~4 minutes, so serialising them spends
-			// about five minutes of one slot per hour.
-			queue.RatingsQueueName: {MaxWorkers: 1},
-		},
-		PeriodicJobs: []*river.PeriodicJob{
-			queue.PeriodicWarmSeasonJob(),
-			queue.PeriodicOrphanScanJob(),
-			queue.PeriodicDescriptionBackfillScanJob(),
-			queue.PeriodicDescriptionLlmBackfillScanJob(),
-			// Hourly, RunOnStart — river's OSS scheduler recomputes the
-			// next run as now+period on every Start, so a deploy would
-			// otherwise push the sweep a full hour out every time.
-			queue.PeriodicEpisodesBgmScanJob(),
-			queue.PeriodicEpisodeTitlesJob(),
-			queue.PeriodicBindIdMapJob(),
-			// 90 days, and deliberately NOT RunOnStart — see the note on
-			// PeriodicHantBackfillJob for why this one reads the opposite
-			// way round from the two sweeps above it, and for what that
-			// costs on a service that deploys more often than quarterly.
-			queue.PeriodicHantBackfillJob(),
-			// Hourly, RunOnStart, for the reason the two sweeps above
-			// give: river's OSS scheduler recomputes nextRunAt at every
-			// Start, so without it a service that deploys more often
-			// than the interval never sweeps.  The read stamp is what
-			// makes firing on boot free.
-			queue.PeriodicAnilistRatingsJob(),
-			queue.PeriodicBangumiRatingsJob(),
-		},
-		Logger: slog.Default(),
+	workers := buildWorkers(workerDeps{
+		bangumi:   bangumiClient,
+		anilist:   anilistClient,
+		dandan:    dandanClient,
+		llm:       llmTranslator,
+		db:        q,
+		pool:      pool,
+		enqueuer:  enqueuer,
+		normalize: anime.NormalizeMainRow,
 	})
+
+	// Queues and schedules come from internal/queue's registry, which owns
+	// every one of them in a single declaration and validates the set at
+	// package init.  The 90-line map literal and the ten
+	// Periodic<Name>Job constructors that used to live here are gone; what
+	// justified each worker count moved with it, into
+	// registry_default.go, so the number and its reason cannot drift apart
+	// again.
+	//
+	// See registry.go for why the registry reads InsertOpts() rather than
+	// replacing it, and test/integration/queue_registry_test.go for the
+	// gate that boots this exact configuration against a real Postgres.
+	riverClient, err := queue.Boot(pool, queueBootConfig(workers))
 	if err != nil {
 		slog.Error("river queue boot failed", "err", err)
 		os.Exit(1)
@@ -1074,6 +939,19 @@ func main() {
 		r.Post("/enrichment/{anilistId}/reset", adminEnrichmentHandlers.ResetEnrichment)
 		r.Post("/enrichment/{anilistId}/flag", adminEnrichmentHandlers.FlagEnrichment)
 
+		// Queue control, generalised.  heal-cn/pause above is now one of
+		// these under an older name, kept because the admin frontend calls
+		// it; these reach the other seven dedicated queues, which were each
+		// given their own worker pool precisely so they could be stopped one
+		// at a time without a deploy.
+		//
+		// {name} is validated against the queue registry, which refuses
+		// river's default queue -- it carries V1, V2, warm_season and
+		// orphan_scan at once -- and river's "*" wildcard with it.
+		r.Get("/queues", adminEnrichmentHandlers.QueuesStatus)
+		r.Post("/queues/{name}/pause", adminEnrichmentHandlers.PauseQueue)
+		r.Post("/queues/{name}/resume", adminEnrichmentHandlers.ResumeQueue)
+
 		// zh-Hant drift monitor: the two counters that say how far the
 		// Traditional columns have fallen behind their sources, and the
 		// button that catches them up.
@@ -1266,5 +1144,134 @@ func healthHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		httpx.Data(w, http.StatusOK, healthOK{
 			OK: true, Service: "go-api", Stage: "P2.1", DB: "up",
 		})
+	}
+}
+
+// workerDeps is everything the river worker bundle is built from.
+//
+// A struct rather than eleven positional parameters because the members are
+// shared instances whose sharing is load-bearing: bangumiClient carries the
+// 800ms token bucket four sweeps draw from, dandanClient carries the one
+// user-facing /match also draws on, and a second instance of either would
+// silently double the real rate against the same upstream.  Naming them at
+// the call site is worth more here than brevity.
+type workerDeps struct {
+	bangumi queue.BangumiV12Client
+	anilist *anilist.Client
+	dandan  *dandanplay.Client
+	llm     queue.DescriptionTranslator
+	db      *dbgen.Queries
+	pool    *pgxpool.Pool
+	// The concrete late-bound enqueuer, not the narrow queue.Enqueuer: each
+	// Add*Workers call takes its own single-method interface, and only the
+	// concrete type satisfies all of them at once.
+	enqueuer  *queue.LateBoundEnqueuer
+	normalize queue.MainRowNormalizer
+}
+
+// buildWorkers assembles the production river worker bundle.
+//
+// Extracted from main() so cmd/server/workers_test.go can assert that every
+// kind in the queue registry has a worker here.  That check has to live
+// somewhere: the registry gives a kind a queue and a schedule, and river's
+// PERIODIC path never consults the workers bundle, so a scheduled kind with
+// no worker is inserted happily and only fails when a producer picks it up.
+func buildWorkers(d workerDeps) *river.Workers {
+	workers := queue.WorkersWithBangumiAndNormalizer(
+		d.bangumi,
+		d.anilist,
+		d.db,
+		d.enqueuer,
+		d.normalize,
+	)
+	// LLM translation sweep registers separately so the bundle builder's
+	// signature (and its test doubles) stay untouched.  With a nil
+	// translator this registers a disabled scan + a defensive no-op row
+	// worker — see AddDescriptionLlmWorkers.
+	queue.AddDescriptionLlmWorkers(workers, d.llm, d.db, d.enqueuer)
+	// zh-Hant sweep.  Registers separately for the same reason: it shares
+	// none of the bundle builder's dependencies and needs one nothing else
+	// does — the vendored dataset directory, which the image bakes at
+	// /usr/local/share/animego/hant and a checkout has at data/hant.
+	// Empty string here means "read HANT_DATA_DIR, default data/hant";
+	// docker-compose sets it for the container.
+	queue.AddHantBackfillWorker(workers, d.db, "")
+	// Inferred-episode-count sweep.  Registers separately for the same
+	// reason as the two above — it needs none of V12DB and V12DB needs
+	// none of it — and takes the SAME bangumiClient every other worker
+	// holds so its two-requests-per-row draw from the one token bucket
+	// rather than opening a second one beside it.
+	queue.AddEpisodesBgmWorkers(workers, d.bangumi, d.db, d.enqueuer)
+	// Airing-show episode-title top-up.  Takes the shared dandanplay client
+	// for the same reason the sweep above takes the shared bangumiClient, and
+	// the pool because its write is a four-statement transaction shared with
+	// cmd/bgmbackfill (internal/episodetitles).  Gated at work time by
+	// EPISODE_TITLES_SWEEP_ENABLED; registering it is not the same as running
+	// it.
+	queue.AddEpisodeTitlesWorker(workers, d.pool, d.db, d.dandan, d.bangumi)
+
+	// The id-map bind sweep.  Takes the pool because its unit of work is a
+	// transaction spanning a binding write and that binding's V2 dispatch --
+	// a bound row with no enrichment queued behind it would drop out of the
+	// sweep's own candidate set and never be looked at again.  Takes the
+	// enqueuer for the same reason; `enqueuer` is late-bound above and is
+	// wired to river before any job can run.  Gated at work time by
+	// BGM_BIND_IDMAP_SWEEP_ENABLED.
+	queue.AddBindIdMapWorker(workers, d.pool, d.db, d.enqueuer)
+
+	// The two rating-refresh sweeps.  Register separately for the reason
+	// every sweep above does -- they need the AniList client, which the
+	// bundle builder holds but does not hand to any worker of its own --
+	// and the Bangumi half takes the SAME bangumiClient so its one
+	// request per row draws from the shared token bucket rather than
+	// opening a second one beside it.
+	queue.AddRatingsWorkers(workers, d.anilist, d.bangumi, d.db)
+	return workers
+}
+
+// newRootLogger builds the process logger: JSON to out, plus every ERROR
+// forwarded to Sentry.
+//
+// The forwarding half is not a nicety.  river reports background failures by
+// logging one ERROR line and carrying on — a periodic job whose UniqueOpts
+// fail validation, an insert conflict, a transaction error — and until
+// 2026-09-08 that line reached nothing but the container log.  A sweep
+// stopped enqueueing for 23 minutes and the only evidence anywhere was one
+// line nobody was reading.
+//
+// Wrapping here rather than after sentry.Init is safe and deliberate: the
+// handler resolves its hub per record, so lines logged before Init (and every
+// line when SENTRY_DSN is empty) hit an uninitialised hub that drops them,
+// while the stdout half is byte-identical either way.
+//
+// Extracted from main() so main_wiring_test.go can assert the forwarder is
+// actually in the chain.  Losing it would be silent in exactly the way this
+// whole change exists to prevent: logs would look identical and Sentry would
+// simply stop hearing about background failures.
+func newRootLogger(out io.Writer) *slog.Logger {
+	return slog.New(obs.NewSentryErrorHandler(
+		slog.NewJSONHandler(out, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}),
+		obs.Options{},
+	))
+}
+
+// queueBootConfig is the river configuration the server boots with: the
+// registry's queues and schedules, plus the worker bundle.
+//
+// Extracted for the same reason as newRootLogger.  Dropping
+// Queues or PeriodicJobs here fails silently and severely: queue.Boot falls
+// back to {default: 1}, so eight dedicated queues get no producer and their
+// jobs sit `available` forever, and no sweep is ever scheduled.  Neither
+// produces an error, a log line, or a failed request — the same shape as the
+// incident that prompted the registry.
+func queueBootConfig(workers *river.Workers) queue.Config {
+	registry := queue.Default()
+	return queue.Config{
+		Workers:      workers,
+		Queues:       registry.QueueConfigs(),
+		PeriodicJobs: registry.PeriodicJobs(),
+		Logger:       slog.Default(),
 	}
 }

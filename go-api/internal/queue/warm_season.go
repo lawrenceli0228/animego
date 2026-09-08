@@ -407,26 +407,3 @@ func NextSeason(season string, year int) (string, int) {
 	}
 	return season, year
 }
-
-// PeriodicWarmSeasonJob returns a river PeriodicJob that fires every
-// 24h to re-enqueue WarmSeasonArgs for the current season.  Each fire
-// re-computes the pair at constructor time, so year rollovers
-// (FALL 2025 → WINTER 2026) handle themselves without restart.
-//
-// Pass the result to queue.Config.PeriodicJobs.  Boot-time initial
-// runs are NOT covered by this — call Enqueuer.EnqueueWarmSeasonNow
-// at boot for the initial current + next season pair.
-//
-// Schedule: 24h fixed interval (river.PeriodicInterval).  No cron
-// alignment needed — warm cache freshness has hours of slack.
-func PeriodicWarmSeasonJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(warmSeasonPeriodicInterval),
-		func() (river.JobArgs, *river.InsertOpts) {
-			cur, year := CurrentSeason(time.Now())
-			return WarmSeasonArgs{Season: cur, Year: year}, nil
-		},
-		nil, // PeriodicJobOpts — defaults are fine; RunOnStart=false
-		// because main.go handles the boot pair via EnqueueWarmSeasonNow.
-	)
-}

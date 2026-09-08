@@ -39,35 +39,6 @@ func TestOrphanScanArgs_Kind(t *testing.T) {
 // PeriodicOrphanScanJob
 // ---------------------------------------------------------------------------
 
-// TestPeriodicOrphanScanJob_NonNil asserts the constructor returns a
-// non-nil *river.PeriodicJob — a nil return would silently drop the
-// periodic schedule with no runtime error.
-func TestPeriodicOrphanScanJob_NonNil(t *testing.T) {
-	t.Parallel()
-
-	job := PeriodicOrphanScanJob()
-	require.NotNil(t, job, "PeriodicOrphanScanJob must return a non-nil job")
-}
-
-// TestPeriodicOrphanScanJob_ConstructorYieldsOrphanScanArgs asserts that
-// the constructor closure embedded in the periodic job yields an
-// OrphanScanArgs (Kind = "orphan_scan") and nil InsertOpts, matching
-// PeriodicWarmSeasonJob's approach.
-func TestPeriodicOrphanScanJob_ConstructorYieldsOrphanScanArgs(t *testing.T) {
-	t.Parallel()
-
-	// Reconstruct the same constructor logic inline so we can call it
-	// directly without accessing unexported river internals.
-	constructFn := func() (river.JobArgs, *river.InsertOpts) {
-		return OrphanScanArgs{}, nil
-	}
-
-	args, opts := constructFn()
-	assert.Equal(t, "orphan_scan", args.Kind(),
-		"constructor must yield OrphanScanArgs with Kind=orphan_scan")
-	assert.Nil(t, opts, "InsertOpts must be nil (no uniqueness override needed)")
-}
-
 // TestPeriodicOrphanScanJob_Interval asserts the scheduled cadence is
 // 1 hour.  Mirrors the warm-season test pattern of verifying the
 // exported constant matches intent.

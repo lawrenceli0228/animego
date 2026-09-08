@@ -209,24 +209,6 @@ func bindIdMapSweepEnabled() bool {
 	return err == nil && on
 }
 
-// PeriodicBindIdMapJob returns the river PeriodicJob for the sweep.
-//
-// RunOnStart is true because river's open-source pilot does not persist
-// periodic schedules — nextRunAt is recomputed at every Start — so a service
-// that deploys more often than the interval would otherwise never sweep.
-// Firing on boot is safe here for the same reason the sweep needs no attempt
-// bookkeeping: a pass that has nothing left to bind is one query returning
-// zero rows.
-func PeriodicBindIdMapJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(bindIdMapInterval),
-		func() (river.JobArgs, *river.InsertOpts) {
-			return BindIdMapArgs{}, nil
-		},
-		&river.PeriodicJobOpts{RunOnStart: true},
-	)
-}
-
 // AddBindIdMapWorker registers the sweep on an existing bundle.
 func AddBindIdMapWorker(w *river.Workers, pool *pgxpool.Pool, q *dbgen.Queries, enq bindIdMapV2Enqueuer) {
 	river.AddWorker(w, NewBindIdMapWorker(pool, q, enq))

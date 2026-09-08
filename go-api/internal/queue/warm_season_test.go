@@ -674,18 +674,6 @@ func TestNewWarmSeasonWorker_NilEnqueuer_DefaultsToNoop(t *testing.T) {
 	require.NoError(t, w.Work(context.Background(), makeWorkJob("FALL", 2026)))
 }
 
-// TestPeriodicWarmSeasonJob_NotNil is a smoke check that the factory
-// returns a usable *river.PeriodicJob.  The schedule/constructor
-// internals are river's responsibility (not the worker's contract);
-// we only own returning a non-nil value with a sensible Kind on its
-// emitted Args.
-func TestPeriodicWarmSeasonJob_NotNil(t *testing.T) {
-	t.Parallel()
-
-	pj := PeriodicWarmSeasonJob()
-	require.NotNil(t, pj, "factory must return a non-nil PeriodicJob")
-}
-
 // ---------------------------------------------------------------------------
 // The inferred-episode-count seed
 // ---------------------------------------------------------------------------

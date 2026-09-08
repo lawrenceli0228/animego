@@ -35,7 +35,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -1098,58 +1097,6 @@ func TestDescriptionBackfillQueueName_IsIsolated(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Periodic job
 // ---------------------------------------------------------------------------
-
-// TestPeriodicDescriptionBackfillScanJob_NonNil — a nil return would drop the
-// schedule with no runtime error at all, leaving the entire backfill dead
-// while everything looks wired.
-func TestPeriodicDescriptionBackfillScanJob_NonNil(t *testing.T) {
-	t.Parallel()
-
-	require.NotNil(t, PeriodicDescriptionBackfillScanJob(),
-		"PeriodicDescriptionBackfillScanJob must return a non-nil job")
-}
-
-// TestPeriodicDescriptionBackfillScanJob_RunsOnStart pins RunOnStart=true,
-// which is a deliberate divergence from PeriodicOrphanScanJob and the only
-// thing standing between this sweep and never running at all.
-//
-// River schedules a periodic job's first run one full interval AFTER Start.
-// The orphan job can afford RunOnStart=false because main.go also calls
-// ScanAndEnqueueOrphans directly at boot; this sweep has no such companion
-// call, so with RunOnStart=false every deploy would push the next pass an
-// hour out and a day with hourly deploys would produce zero passes — the
-// exact silent-stall shape that stranded ~1,052 orphan rows before the
-// orphan periodic job existed.
-//
-// The cost of RunOnStart=true is one extra pass per boot, and it is close to
-// free: the per-row jobs dedupe by args against anything still queued or
-// recently completed (see
-// TestDescriptionBackfillArgs_UniqueStateIncludesCompleted), so a burst of
-// deploys does not multiply upstream requests.
-//
-// Read via reflection because river keeps PeriodicJob's fields unexported and
-// exposes no accessor.  That couples this test to river's internals on
-// purpose: river is version-pinned, so an upgrade that reshapes PeriodicJob
-// should stop and make somebody re-confirm this flag rather than silently
-// carry an unverified assumption forward.
-func TestPeriodicDescriptionBackfillScanJob_RunsOnStart(t *testing.T) {
-	t.Parallel()
-
-	job := PeriodicDescriptionBackfillScanJob()
-	require.NotNil(t, job)
-
-	optsField := reflect.ValueOf(job).Elem().FieldByName("opts")
-	require.True(t, optsField.IsValid(),
-		"river.PeriodicJob no longer has an `opts` field — re-verify RunOnStart is still set on the sweep")
-	require.False(t, optsField.IsNil(),
-		"PeriodicDescriptionBackfillScanJob passed nil opts, so RunOnStart defaulted to false — the sweep would skip its first hour after every deploy")
-
-	runOnStart := optsField.Elem().FieldByName("RunOnStart")
-	require.True(t, runOnStart.IsValid(),
-		"river.PeriodicJobOpts no longer has RunOnStart — re-verify the sweep still fires at boot")
-	assert.True(t, runOnStart.Bool(),
-		"RunOnStart must stay true or a service that deploys more often than hourly never sweeps at all")
-}
 
 // ---------------------------------------------------------------------------
 // Compile-time guards

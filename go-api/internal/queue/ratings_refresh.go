@@ -479,34 +479,6 @@ func int32Ptr(v int) *int32 {
 // Registration
 // ---------------------------------------------------------------------------
 
-// PeriodicAnilistRatingsJob returns the river PeriodicJob for the AniList sweep.
-//
-// RunOnStart is true, and the read stamp is what makes that safe.
-// river's open-source pilot does not persist periodic schedules —
-// nextRunAt is recomputed at every Start — so a service that deploys
-// more often than the interval would never sweep at all, which is the
-// failure PeriodicHantBackfillJob records for its quarterly timer.
-// Firing on boot removes that dependency, and a redeploy ten minutes
-// later costs nothing: every row the previous pass read carries a stamp
-// and is no longer a candidate.
-func PeriodicAnilistRatingsJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(ratingsInterval),
-		func() (river.JobArgs, *river.InsertOpts) { return AnilistRatingsArgs{}, nil },
-		&river.PeriodicJobOpts{RunOnStart: true},
-	)
-}
-
-// PeriodicBangumiRatingsJob returns the river PeriodicJob for the Bangumi
-// sweep.  See PeriodicAnilistRatingsJob for why RunOnStart is safe.
-func PeriodicBangumiRatingsJob() *river.PeriodicJob {
-	return river.NewPeriodicJob(
-		river.PeriodicInterval(ratingsInterval),
-		func() (river.JobArgs, *river.InsertOpts) { return BangumiRatingsArgs{}, nil },
-		&river.PeriodicJobOpts{RunOnStart: true},
-	)
-}
-
 // AddRatingsWorkers registers both sweeps on an existing bundle.
 //
 // Separate from the bundle builder for the reason AddEpisodeTitlesWorker

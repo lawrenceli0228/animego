@@ -48,6 +48,18 @@
 
 **为什么这次没做** — 它属于运维能力，不属于「看见进度」这个需求。分开做两边都更干净。
 
+**2026-09-08 更新：后端已落地，只剩前端按钮。** river 注册表那轮把这条的后端做完了，而且比这里设想的更宽：不是「加一对同形函数」，是一组通用的
+`queue.PauseQueue / ResumeQueue / QueuePaused / StatusAll`，队列名按注册表白名单校验，八条专用队列全部可停可看。HTTP 面是
+`POST /api/admin/queues/{name}/pause`、`/resume` 和 `GET /api/admin/queues`。
+
+白名单显式排除 river 的 `default`——那条队列同时装着 V1、V2、warm_season、orphan_scan，停它就等于停掉页面在等的富化；river 的 `"*"` 通配同样被拒。
+未知名字返回 400 而不是 500（操作者要了个不存在的东西，和 river 挂了是两回事）。
+
+顺带修掉一个：`PauseHeal` / `ResumeHeal` 在 `QueueCtrl` 为 nil 时会返回 `200 {"paused":true}` 却什么也没暂停。现在返回 503。
+
+**还剩什么** — 只有前端：`EnrichmentBar` 的「中文简介」区块加按钮，照抄 `_actions/enrichment-queue.ts` 里的 `pauseHealCn` / `resumeHealCn`，
+把路径换成 `/api/admin/queues/description_backfill/pause`。`GET /api/admin/queues` 已经把可停队列名和各自的暂停态一起返回，前端不需要硬编码队列列表。
+
 ## anime-relations:字幕组连番号的精确重定向表
 
 - **What:** 接入 [`erengy/anime-relations`](https://github.com/erengy/anime-relations),把字幕组连续编号的
@@ -618,6 +630,12 @@
 **Why** — 「一个 bgm subject 对应一部番」这个假设全仓到处在用，但数据库不保证它，而且**已经被破坏了 541 次**（541 个 bgm_id 被 2 行以上持有，共 1,161 行）。直接后果：`GetAnimeByBgmID` 是 `:one` 查询，对这 1,161 行返回的是任意一行——`resolveSiteAnime` 第 2 腿和 `findSiteAnime` 第 3 腿都走它，所以 `/match` 的 siteAnime 结果对这批番是不确定的。任何「按 bgm_id 拉数据写回」的作业也会把同一份中文名和简介写到多部番上。顺带一提这一列**连普通索引都没有**，每次按 bgm_id 查都是全表扫（实测 18,009 行）。
 
 **Context** — 2026-09-03 写 `bgm_bind_idmap` sweep 时量到。⚠️ **不是所有重复都是错的**：Bangumi 有时用一个 subject 覆盖 AniList 拆成两季的内容，那种重复是数据模型差异不是绑定错误。所以不能一刀切去重，得先按「同一 subject 的两行是不是同一部作品的不同季」分类。新 sweep 自己不会让这个数字变大——它拒绝任何已被占用的 subject，也拒绝两行争同一个 subject 的情况——但它也修不了存量。
+
+**2026-09-08 补** — river 注册表那轮的跨模型评审从另一头撞上了同一件事，结论是这条 TODO 的措辞比那边的假设更准，记一下差在哪：
+
+评审提出的是「`bgm_bind` 队列的 `MaxWorkers: 1` 陈述了一个正确性不变量，而 `cmd/bgmbackfill` / `cmd/hantbackfill` 是进程外的第二个写入方，所以那个保证不成立」。核实为真，但只对了一半——**这条不变量不是「离假只有一个 `--apply` 标志的距离」，它已经假了 541 次**。单槽位买到的是「这个 sweep 不会让这个数字变大」，不是「这个数字是 0」。
+
+已经做了的是措辞那一半：`internal/queue/registry.go` 的 `FixedConcurrency` 文档现在明说 MaxWorkers 是**进程内**保证、理由必须按「这个槽位买到了什么」来写；`registry_default.go` 里 `bgm_bind` 那条按本 TODO 的实测重写了。机制那一半就是本条，前提仍然是先裁定那 1,161 行——唯一索引加不上去不是因为没想到，是因为数据现在过不了。
 
 **Depends on / blocked by** — 无。与 `## 绑定覆盖率` 和 `## 分割放送会 50% 概率绑错` 同属绑定质量。
 

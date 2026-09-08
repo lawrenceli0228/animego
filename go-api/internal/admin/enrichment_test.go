@@ -168,11 +168,23 @@ type fakeQueueController struct {
 	pauseErr  error
 	resumeErr error
 	getErr    error
+
+	// names records every queue name that reached the controller, in order.
+	// The generic pause handlers are validated BEFORE they call river, so
+	// "did this name get through?" is the assertion that matters for them.
+	names []string
+}
+
+func (f *fakeQueueController) snapshotNames() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append(([]string)(nil), f.names...)
 }
 
 func (f *fakeQueueController) QueuePause(ctx context.Context, name string, opts *river.QueuePauseOpts) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.names = append(f.names, name)
 	if f.pauseErr != nil {
 		return f.pauseErr
 	}
@@ -183,6 +195,7 @@ func (f *fakeQueueController) QueuePause(ctx context.Context, name string, opts 
 func (f *fakeQueueController) QueueResume(ctx context.Context, name string, opts *river.QueuePauseOpts) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.names = append(f.names, name)
 	if f.resumeErr != nil {
 		return f.resumeErr
 	}
@@ -590,13 +603,37 @@ func TestResumeHeal_CallsQueueCtrl(t *testing.T) {
 	}
 }
 
-func TestPauseHeal_NilCtrl_StillReturns200(t *testing.T) {
+// TestPauseHeal_NilCtrl_Fails replaces a test that asserted the opposite.
+//
+// The old behaviour returned 200 {"paused":true} with a nil controller and
+// paused nothing, justified as matching "Express's in-memory bool flip
+// semantics".  That was true and beside the point: in Express the flag WAS
+// the mechanism, so flipping it did stop the work.  Here the flag is
+// river's, and a nil controller means the request reached a process that
+// cannot touch it.
+//
+// These endpoints are the three-in-the-morning lever.  An operator who
+// pressed it got a confident success and a queue that kept running.
+func TestPauseHeal_NilCtrl_Fails(t *testing.T) {
 	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/enrichment/heal-cn/pause", nil)
 	rec := httptest.NewRecorder()
 	h.PauseHeal(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d, want 200", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "NOT paused") {
+		t.Errorf("body must say the queue was not paused, got %s", rec.Body.String())
+	}
+}
+
+func TestResumeHeal_NilCtrl_Fails(t *testing.T) {
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/enrichment/heal-cn/resume", nil)
+	rec := httptest.NewRecorder()
+	h.ResumeHeal(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", rec.Code)
 	}
 }
 
@@ -794,5 +831,225 @@ func TestReEnrichIDs_DoesNotEnqueueWhenTheReadFails(t *testing.T) {
 	}
 	if len(enq.v2Calls) != 0 {
 		t.Fatalf("a failed read must not enqueue anything, got %+v", enq.v2Calls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The generalised queue control endpoints
+// ---------------------------------------------------------------------------
+
+// newQueueRequest builds a request with chi's {name} route parameter set, the
+// way the router would.
+func newQueueRequest(method, target, name string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("name", name)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+// TestPauseQueue_RefusesDefault is the safety constraint at the HTTP edge.
+// The default queue carries V1, V2, warm_season and orphan_scan at once, so
+// pausing it freezes the enrichment a page load is waiting on.
+func TestPauseQueue_RefusesDefault(t *testing.T) {
+	qc := &fakeQueueController{}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.PauseQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/default/pause", "default"))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rec.Code)
+	}
+	if got := qc.snapshotNames(); len(got) != 0 {
+		t.Errorf("a refused name reached river: %v", got)
+	}
+}
+
+// TestPauseQueue_RefusesUnknownName is a 400 and not a 500 on purpose: the
+// operator asked for something that does not exist, which is a different
+// thing from river failing, and only one of the two is worth paging about.
+func TestPauseQueue_RefusesUnknownName(t *testing.T) {
+	for _, name := range []string{"", "*", "no_such_queue"} {
+		qc := &fakeQueueController{}
+		h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+		rec := httptest.NewRecorder()
+		h.PauseQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/pause", name))
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("name=%q status=%d, want 400", name, rec.Code)
+		}
+		if got := qc.snapshotNames(); len(got) != 0 {
+			t.Errorf("name=%q reached river: %v", name, got)
+		}
+	}
+}
+
+// TestPauseQueue_PausesEveryDedicatedQueue is the feature: the seven queues
+// beyond V3 that were each given their own worker pool so they could be
+// stopped one at a time are now reachable without a deploy.
+func TestPauseQueue_PausesEveryDedicatedQueue(t *testing.T) {
+	for _, name := range queue.PausableQueues() {
+		qc := &fakeQueueController{}
+		h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+		rec := httptest.NewRecorder()
+		h.PauseQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/pause", name))
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("name=%q status=%d, want 200", name, rec.Code)
+		}
+		if got := qc.snapshotNames(); len(got) != 1 || got[0] != name {
+			t.Errorf("name=%q reached river as %v", name, got)
+		}
+		if !qc.paused {
+			t.Errorf("name=%q returned 200 without pausing", name)
+		}
+	}
+}
+
+func TestResumeQueue_ResumesNamedQueue(t *testing.T) {
+	qc := &fakeQueueController{paused: true}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.ResumeQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/resume", queue.RatingsQueueName))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rec.Code)
+	}
+	if qc.paused {
+		t.Error("resume returned 200 but the queue is still paused")
+	}
+}
+
+// TestPauseQueue_NilCtrl_Fails is the generalised form of the bug this change
+// fixes: without it, widening pause to eight queues would have multiplied a
+// confident-but-false success by eight.
+// TestResumeQueue_RefusesDefault covers the resume half of the shared
+// validation.  Pause and resume go through one function, but a future split
+// would silently leave resume open, and resuming default is how a paused
+// subsystem gets un-paused by accident.
+func TestResumeQueue_RefusesDefault(t *testing.T) {
+	qc := &fakeQueueController{}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.ResumeQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/default/resume", "default"))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rec.Code)
+	}
+	if got := qc.snapshotNames(); len(got) != 0 {
+		t.Errorf("a refused name reached river: %v", got)
+	}
+}
+
+func TestResumeQueue_NilCtrl_Fails(t *testing.T) {
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, nil)
+
+	rec := httptest.NewRecorder()
+	h.ResumeQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/resume", queue.RatingsQueueName))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", rec.Code)
+	}
+}
+
+func TestResumeQueue_RiverErrorIs500(t *testing.T) {
+	qc := &fakeQueueController{resumeErr: errors.New("queue down")}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.ResumeQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/resume", queue.RatingsQueueName))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500", rec.Code)
+	}
+}
+
+func TestPauseQueue_NilCtrl_Fails(t *testing.T) {
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, nil)
+
+	rec := httptest.NewRecorder()
+	h.PauseQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/pause", queue.RatingsQueueName))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "NOT paused") {
+		t.Errorf("body must say the queue was not paused, got %s", rec.Body.String())
+	}
+}
+
+func TestPauseQueue_RiverErrorIs500(t *testing.T) {
+	qc := &fakeQueueController{pauseErr: errors.New("queue down")}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.PauseQueue(rec, newQueueRequest(http.MethodPost, "/api/admin/queues/x/pause", queue.RatingsQueueName))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500", rec.Code)
+	}
+}
+
+// TestQueuesStatus_ReportsEveryQueue covers the read half.  Being able to stop
+// a queue without being able to see whether it stopped is half a switch.
+func TestQueuesStatus_ReportsEveryQueue(t *testing.T) {
+	qc := &fakeQueueController{paused: true}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.QueuesStatus(rec, httptest.NewRequest(http.MethodGet, "/api/admin/queues", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rec.Code)
+	}
+
+	var body struct {
+		Data queueStatusResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, rec.Body.String())
+	}
+
+	want := queue.PausableQueues()
+	if len(body.Data.Queues) != len(want) {
+		t.Fatalf("queues=%v, want %v", body.Data.Queues, want)
+	}
+	for _, name := range want {
+		if paused, ok := body.Data.Paused[name]; !ok || !paused {
+			t.Errorf("queue %q: paused=%v ok=%v, want true", name, paused, ok)
+		}
+	}
+	if _, ok := body.Data.Paused["default"]; ok {
+		t.Error("default is not pausable and must not carry a flag")
+	}
+	if !body.Data.V3Paused {
+		t.Error("the legacy v3Paused field must stay in step with the map")
+	}
+}
+
+func TestQueuesStatus_NilCtrl_Fails(t *testing.T) {
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, nil)
+
+	rec := httptest.NewRecorder()
+	h.QueuesStatus(rec, httptest.NewRequest(http.MethodGet, "/api/admin/queues", nil))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", rec.Code)
+	}
+}
+
+func TestQueuesStatus_RiverErrorIs500(t *testing.T) {
+	qc := &fakeQueueController{getErr: errors.New("connection refused")}
+	h := newEnrichmentHandlersWithFakes(&fakeEnrichmentDB{}, &spyEnqueuer{}, qc)
+
+	rec := httptest.NewRecorder()
+	h.QueuesStatus(rec, httptest.NewRequest(http.MethodGet, "/api/admin/queues", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500", rec.Code)
 	}
 }
