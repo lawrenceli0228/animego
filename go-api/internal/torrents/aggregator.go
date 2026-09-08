@@ -38,6 +38,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
+	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
 
 // torrentCacheTTL is the per-query result TTL for a NON-EMPTY result.
@@ -268,7 +269,7 @@ func WithToshoFn(f fetchFn) Option {
 // here, but the error is surfaced for completeness).
 func New(opts ...Option) (*Aggregator, error) {
 	a := &Aggregator{
-		httpClient:    &http.Client{},
+		httpClient:    &http.Client{Transport: httpx.NewTransport()},
 		ownsCache:     true,
 		emptyCacheTTL: torrentEmptyCacheTTL,
 	}
