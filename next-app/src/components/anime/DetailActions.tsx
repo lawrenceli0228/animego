@@ -21,6 +21,7 @@ import SubscriptionButton from "./SubscriptionButton";
 import ShareButton from "./ShareButton";
 import MagnetButton from "./MagnetButton";
 import PlayButton from "./PlayButton";
+import TrailerPreview, { type TrailerPreviewLabels } from "./TrailerPreview";
 import type { Lang } from "@/lib/i18n";
 import styles from "./DetailActions.module.css";
 
@@ -38,6 +39,8 @@ interface DetailActionsProps {
   coverImageUrl: string | null;
   shareTitle: string;
   lang: Lang;
+  trailerId: string | null;
+  trailerLabels: TrailerPreviewLabels;
   labels: {
     // SubscriptionButton v2
     subAdd: string;
@@ -83,6 +86,8 @@ export default function DetailActions({
   coverImageUrl,
   shareTitle,
   lang,
+  trailerId,
+  trailerLabels,
   labels,
 }: DetailActionsProps) {
   const [torrentOpen, setTorrentOpen] = useState(false);
@@ -90,6 +95,19 @@ export default function DetailActions({
   return (
     <>
       <div className={styles.row}>
+        {/* Compact layouts do not render the cinematic card, so the trailer
+            becomes the first stable action. Keep it before the auth-dependent
+            subscription control in both DOM and visual order: a subscribed
+            reader gets status + progress + score + remove here, and that
+            expanding cluster must never push the trailer below itself. */}
+        {trailerId ? (
+          <TrailerPreview
+            trailerId={trailerId}
+            title={shareTitle}
+            labels={trailerLabels}
+            variant="button"
+          />
+        ) : null}
         <SubscriptionButton
           anilistId={anilistId}
           episodes={episodes}

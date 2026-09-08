@@ -1,5 +1,11 @@
-import { test, expect } from "@playwright/test";
-import { closePg, ensureAnimeDetail, removeAnimeFixture } from "../../fixtures/pg";
+import { test, expect, type Page } from "@playwright/test";
+import { SEED_USER_EMAIL } from "../../globalSetup";
+import {
+  closePg,
+  ensureAnimeDetail,
+  removeAnimeFixture,
+  seedSubscription,
+} from "../../fixtures/pg";
 
 // The two things the detail hero got wrong, pinned against a stack built
 // from this branch.
@@ -52,6 +58,37 @@ const SYNOPSIS =
 const HIGH = 990_100_001;
 /** Scored 30 — the band that happened to look right, which is why it hid. */
 const LOW = 990_100_002;
+/** Valid by shape; the test inspects the embed URL without depending on YouTube. */
+const TRAILER_ID = "abcdefghijk";
+
+// The UI should be deterministic even when YouTube is slow or unavailable in
+// CI. Keep the production URLs in the DOM (the assertions below inspect them),
+// but satisfy the thumbnail locally and abort the player navigation. This also
+// proves opening the dialog does not depend on the third-party frame loading.
+const TRANSPARENT_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+
+async function isolateTrailerNetwork(page: Page): Promise<void> {
+  await page.route("**/_next/image?*", async (route) => {
+    const source = new URL(route.request().url()).searchParams.get("url");
+    if (source?.startsWith("https://i.ytimg.com/")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: TRANSPARENT_PNG,
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("https://www.youtube-nocookie.com/**", (route) => route.abort());
+}
+
+test.beforeEach(async ({ page }) => {
+  await isolateTrailerNetwork(page);
+});
 
 test.beforeAll(async () => {
   await ensureAnimeDetail({
@@ -64,6 +101,7 @@ test.beforeAll(async () => {
     coverImageUrl: COVER,
     averageScore: 87,
     description: SYNOPSIS,
+    trailerId: TRAILER_ID,
   });
   await ensureAnimeDetail({
     anilistId: LOW,
@@ -76,6 +114,7 @@ test.beforeAll(async () => {
     averageScore: 30,
     description: SYNOPSIS,
   });
+  await seedSubscription(SEED_USER_EMAIL, HIGH, "watching", 4);
 });
 
 test.afterAll(async () => {
@@ -241,6 +280,36 @@ test.describe("the score", () => {
 test.describe("the hero on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
+  test("keeps the trailer compact and centers its theater", async ({ page }) => {
+    await page.goto(`/anime/${HIGH}`);
+
+    const trigger = page.getByRole("button", {
+      name: "播放《E2E 高分》的官方预告",
+    });
+    await expect(trigger).toBeVisible();
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+    expect(triggerBox!.width).toBeLessThan(250);
+
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "E2E 高分" });
+    await expect(dialog).toBeVisible();
+    const dialogBox = await dialog.boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(
+      Math.abs(dialogBox!.y + dialogBox!.height / 2 - 844 / 2),
+    ).toBeLessThan(4);
+    await expect(dialog.locator("iframe")).toHaveAttribute(
+      "src",
+      `https://www.youtube-nocookie.com/embed/${TRAILER_ID}?autoplay=1&rel=0&playsinline=1`,
+    );
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+
   test("the synopsis starts on the first screen", async ({ page }) => {
     // Measured on production before this assertion existed: the synopsis
     // began at y=799 on an 844-tall screen — about 45px of visible text, one
@@ -312,6 +381,54 @@ test.describe("the hero on a phone", () => {
 test.describe("the hero on a desktop", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
+  test(
+    "places the trailer beside the synopsis without covering the artwork",
+    async ({ page }) => {
+      await page.goto(`/anime/${HIGH}`);
+
+      const trigger = page.getByRole("button", {
+        name: "播放《E2E 高分》的官方预告",
+      });
+      await expect(trigger).toBeVisible();
+      const box = await trigger.boundingBox();
+      const heroBox = await page.locator("[data-banner]").boundingBox();
+      const synopsisBox = await page
+        .locator('section[aria-labelledby="synopsis-heading"]')
+        .boundingBox();
+      expect(box).not.toBeNull();
+      expect(heroBox).not.toBeNull();
+      expect(synopsisBox).not.toBeNull();
+      // The still remains recognisable and actionable, but is deliberately a
+      // content card rather than a second full-width hero.
+      expect(box!.width).toBeGreaterThanOrEqual(360);
+      expect(box!.width).toBeLessThanOrEqual(480);
+      expect(box!.width / box!.height).toBeCloseTo(16 / 9, 1);
+      // It starts below the artwork and lives inside the same reading band as
+      // the synopsis, so the page gains media without burying either image or
+      // pushing the description behind a standalone promotional slab.
+      expect(box!.y).toBeGreaterThanOrEqual(heroBox!.y + heroBox!.height);
+      expect(box!.y).toBeGreaterThanOrEqual(synopsisBox!.y);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(
+        synopsisBox!.y + synopsisBox!.height,
+      );
+
+      await trigger.click();
+      await expect(
+        page.getByRole("dialog", { name: "E2E 高分" }),
+      ).toBeVisible();
+    },
+  );
+
+  test(
+    "does not invent a trailer action when the database has none",
+    async ({ page }) => {
+      await page.goto(`/anime/${LOW}`);
+      await expect(
+        page.getByRole("button", { name: "播放《E2E 低分》的官方预告" }),
+      ).toHaveCount(0);
+    },
+  );
+
   test("keeps its full-size artwork and poster", async ({ page }) => {
     // The other half of the clamp. Phone work must not reach desktop, and
     // "untouched" is a claim worth holding.
@@ -344,5 +461,101 @@ test.describe("the hero on a desktop", () => {
     const coverBox = await page.locator("img.hero-cover").first().boundingBox();
     expect(coverBox?.width).toBe(216);
     expect(Math.round(coverBox?.height ?? 0)).toBe(Math.round(216 * (300 / 210)));
+  });
+});
+
+const TRAILER_LOCALES = [
+  {
+    language: "简体中文",
+    path: `/anime/${HIGH}`,
+    title: "E2E 高分",
+    official: "官方预告",
+    watch: "观看预告",
+    trigger: "播放《E2E 高分》的官方预告",
+    close: "关闭预告",
+    openYouTube: "在 YouTube 观看",
+  },
+  {
+    language: "繁體中文",
+    path: `/zh-Hant/anime/${HIGH}`,
+    title: "E2E 高分",
+    official: "官方預告",
+    watch: "觀看預告",
+    trigger: "播放《E2E 高分》的官方預告",
+    close: "關閉預告",
+    openYouTube: "在 YouTube 觀看",
+  },
+  {
+    language: "English",
+    path: `/en/anime/${HIGH}`,
+    title: "E2E High Score",
+    official: "Official trailer",
+    watch: "Watch trailer",
+    trigger: "Play the official trailer for E2E High Score",
+    close: "Close trailer",
+    openYouTube: "Watch on YouTube",
+  },
+] as const;
+
+test.describe("the trailer in every supported language", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  for (const locale of TRAILER_LOCALES) {
+    test(`${locale.language} labels the trigger and theater`, async ({ page }) => {
+      await page.goto(locale.path);
+
+      const trigger = page.getByRole("button", { name: locale.trigger });
+      await expect(trigger).toBeVisible();
+      await expect(
+        page.getByText(locale.official, { exact: true }).filter({ visible: true }),
+      ).toHaveCount(1);
+      await expect(
+        page.getByText(locale.watch, { exact: true }).filter({ visible: true }),
+      ).toHaveCount(1);
+
+      await trigger.click();
+      const dialog = page.getByRole("dialog", { name: locale.title });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByText(locale.official, { exact: true })).toBeVisible();
+      await expect(
+        dialog.getByRole("link", { name: locale.openYouTube }),
+      ).toHaveAttribute(
+        "href",
+        `https://www.youtube.com/watch?v=${TRAILER_ID}`,
+      );
+
+      await dialog.getByRole("button", { name: locale.close }).click();
+      await expect(dialog).toBeHidden();
+      await expect(trigger).toBeFocused();
+    });
+  }
+});
+
+test.describe("the trailer with an expanded signed-in action set", () => {
+  test.use({
+    storageState: "./.auth/user.json",
+    viewport: { width: 390, height: 844 },
+  });
+
+  test("stays ahead of subscription controls without being squeezed", async ({
+    page,
+  }) => {
+    await page.goto(`/anime/${HIGH}`);
+
+    const trailer = page.getByRole("button", {
+      name: "播放《E2E 高分》的官方预告",
+    });
+    const status = page.getByRole("combobox", { name: "在看" });
+    await expect(trailer).toBeVisible();
+    await expect(status).toBeVisible();
+
+    const [trailerBox, statusBox] = await Promise.all([
+      trailer.boundingBox(),
+      status.boundingBox(),
+    ]);
+    expect(trailerBox).not.toBeNull();
+    expect(statusBox).not.toBeNull();
+    expect(trailerBox!.height).toBeGreaterThanOrEqual(44);
+    expect(trailerBox!.y + trailerBox!.height).toBeLessThanOrEqual(statusBox!.y);
   });
 });

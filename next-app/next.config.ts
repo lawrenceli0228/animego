@@ -164,6 +164,14 @@ const nextConfig: NextConfig = {
         pathname: "/file/anilistcdn/**",
         search: "",
       },
+      {
+        // Detail-page trailer stills. The video itself is not requested until
+        // the visitor presses play; this image keeps the hero preview light.
+        protocol: "https",
+        hostname: "i.ytimg.com",
+        pathname: "/vi/**",
+        search: "",
+      },
     ],
 
     formats: ["image/avif", "image/webp"],

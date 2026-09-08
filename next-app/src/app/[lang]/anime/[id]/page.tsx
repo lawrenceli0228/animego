@@ -27,6 +27,7 @@ import HeroAccent from "@/components/anime/HeroAccent";
 import { GenreChips } from "@/components/anime/LocalizedChips";
 import { scoreScrimStyle } from "@/components/anime/scoreStyle";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
+import TrailerPreview from "@/components/anime/TrailerPreview";
 import s from "./page.module.css";
 // The four sections below the hero. A second module rather than more of
 // page.module.css because they are a separate surface — see that file's
@@ -58,6 +59,7 @@ import { resolveLocale } from "@/lib/i18n/route";
 import { LOCALES } from "@/lib/i18n/locale";
 import { buildAlternates } from "@/lib/seo/alternates";
 import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
+import { asYouTubeTrailer } from "@/lib/youtubeTrailer";
 import type { Dict } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n/lang";
 import type {
@@ -365,7 +367,10 @@ function Hero({
     // be a `detail.bannerImageUrl ? a : b` in the JSX below now hangs off this
     // one attribute in page.module.css, so the four of them cannot be changed
     // apart from each other.
-    <div className={s.hero} data-banner={detail.bannerImageUrl ? "true" : "false"}>
+    <div
+      className={s.hero}
+      data-banner={detail.bannerImageUrl ? "true" : "false"}
+    >
       {/* Banner — a real <img>, not a CSS background.
         *
         * This is the LCP element of the page Google indexes, and as
@@ -652,10 +657,12 @@ function SynopsisSection({
   detail,
   lang,
   dict,
+  trailer,
 }: {
   detail: AnimeDetail;
   lang: Lang;
   dict: Dict;
+  trailer?: ReactNode;
 }) {
   // Full description for SEO; truncated mirror for the collapsed UI
   // state. The client-side toggle in DescriptionExpand swaps between
@@ -736,96 +743,122 @@ function SynopsisSection({
   if (!descFull) return null;
 
   return (
-    <section className={x.synopsis} aria-labelledby="synopsis-heading">
-      <div className={x.synopsisBody}>
-        <header className={x.head}>
-          <h2 className={x.headTitle} id="synopsis-heading">
-            {dict.detail.synopsis}
-          </h2>
-          {/* Length, not a count of anything the reader cares about on its
-              own — it sets the expectation before the read-more toggle, so
-              "展开更多" is a known quantity rather than a surprise. Measured
-              on the full text, not the collapsed mirror. */}
-          {descFull ? (
-            <span className={x.headCount}>
-              {descFull.length} {dict.detail.charUnit}
-            </span>
-          ) : null}
-        </header>
-        {/* Description with 展开更多 / 收起 toggle */}
-        {descFull && (
-          <div className={s.descBlockLast}>
-            <DescriptionExpand
-              truncated={descTruncated}
-              full={descFull}
-              needsToggle={descNeedsToggle}
-              expandLabel={dict.detail.readMore}
-              collapseLabel={dict.detail.collapse}
-              nosnippet={summaryIsDerived}
-              sourceLabel={
-                isBangumiSummary
-                  ? dict.detail.summaryFromBangumi
-                  : isLlmSummary
-                    ? dict.detail.summaryFromLlm
-                    : convertedFromLlm
-                      ? dict.detail.summaryConvertedFromLlm
-                      : isConvertedSummary
-                        ? dict.detail.summaryConverted
-                        : undefined
-              }
-              sourceHref={isBangumiSummary ? bgmSummaryHref : undefined}
-            />
-          </div>
+    <section
+      className={x.synopsis}
+      aria-labelledby="synopsis-heading"
+      data-has-trailer={trailer ? "true" : "false"}
+    >
+      <div className={x.synopsisSummary}>
+        <div className={x.synopsisBody}>
+          <header className={x.head}>
+            <h2 className={x.headTitle} id="synopsis-heading">
+              {dict.detail.synopsis}
+            </h2>
+            {/* Length, not a count of anything the reader cares about on its
+                own — it sets the expectation before the read-more toggle, so
+                "展开更多" is a known quantity rather than a surprise. Measured
+                on the full text, not the collapsed mirror. */}
+            {descFull ? (
+              <span className={x.headCount}>
+                {descFull.length} {dict.detail.charUnit}
+              </span>
+            ) : null}
+          </header>
+          {/* Description with 展开更多 / 收起 toggle */}
+          {descFull && (
+            <div className={s.descBlockLast}>
+              <DescriptionExpand
+                truncated={descTruncated}
+                full={descFull}
+                needsToggle={descNeedsToggle}
+                expandLabel={dict.detail.readMore}
+                collapseLabel={dict.detail.collapse}
+                nosnippet={summaryIsDerived}
+                sourceLabel={
+                  isBangumiSummary
+                    ? dict.detail.summaryFromBangumi
+                    : isLlmSummary
+                      ? dict.detail.summaryFromLlm
+                      : convertedFromLlm
+                        ? dict.detail.summaryConvertedFromLlm
+                        : isConvertedSummary
+                          ? dict.detail.summaryConverted
+                          : undefined
+                }
+                sourceHref={isBangumiSummary ? bgmSummaryHref : undefined}
+              />
+            </div>
+          )}
+        </div>
+        {(score && score > 0) || (bgmScore && bgmScore > 0) ? (
+          <aside className={x.scorePanel} aria-label={dict.detail.scores}>
+            {score && score > 0 ? (
+              <div className={x.scoreItem}>
+                <div className={x.scoreLabel}>AniList</div>
+                <div className={x.scoreValueAccent}>
+                  {score}
+                  <span className={x.scoreDenom}>/ 100</span>
+                </div>
+                {/* aria-hidden: the number above already says it, and a
+                    progress bar with no label is noise in a screen reader. */}
+                <div className={x.scoreBar} aria-hidden>
+                  <span style={{ width: `${score}%` }} />
+                </div>
+              </div>
+            ) : null}
+            {bgmScore && bgmScore > 0 ? (
+              <div className={x.scoreItemBangumi}>
+                <div className={x.scoreLabel}>Bangumi</div>
+                <div className={x.scoreValue}>
+                  {bgmScore.toFixed(1)}
+                  <span className={x.scoreDenom}>/ 10</span>
+                </div>
+                {detail.bangumiVotes && detail.bangumiVotes > 0 ? (
+                  <div className={x.scoreVotes}>
+                    {detail.bangumiVotes.toLocaleString()} {dict.detail.votes}
+                  </div>
+                ) : null}
+                <div className={x.scoreBar} aria-hidden>
+                  <span style={{ width: `${bgmScore * 10}%` }} />
+                </div>
+              </div>
+            ) : null}
+            {/* Who else is watching, under the scores.
+                It used to sit alone at the bottom of the page, below the
+                recommendations, where it read as a footer rather than as part
+                of what this anime is. Here it closes the same group the
+                scores open — both are "what other people did with this show". */}
+            <div className={x.synopsisWatchers}>
+              <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
+            </div>
+          </aside>
+        ) : (
+          // No scores: the watcher strip still belongs in the summary group.
+          <aside className={x.scorePanel}>
+            <div className={x.synopsisWatchers}>
+              <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
+            </div>
+          </aside>
         )}
       </div>
-      {(score && score > 0) || (bgmScore && bgmScore > 0) ? (
-        <aside className={x.scorePanel} aria-label={dict.detail.scores}>
-          {score && score > 0 ? (
-            <div className={x.scoreItem}>
-              <div className={x.scoreLabel}>AniList</div>
-              <div className={x.scoreValueAccent}>
-                {score}
-                <span className={x.scoreDenom}>/ 100</span>
-              </div>
-              {/* aria-hidden: the number above already says it, and a
-                  progress bar with no label is noise in a screen reader. */}
-              <div className={x.scoreBar} aria-hidden>
-                <span style={{ width: `${score}%` }} />
-              </div>
-            </div>
-          ) : null}
-          {bgmScore && bgmScore > 0 ? (
-            <div className={x.scoreItemBangumi}>
-              <div className={x.scoreLabel}>Bangumi</div>
-              <div className={x.scoreValue}>
-                {bgmScore.toFixed(1)}
-                <span className={x.scoreDenom}>/ 10</span>
-              </div>
-              {detail.bangumiVotes && detail.bangumiVotes > 0 ? (
-                <div className={x.scoreVotes}>
-                  {detail.bangumiVotes.toLocaleString()} {dict.detail.votes}
-                </div>
-              ) : null}
-              <div className={x.scoreBar} aria-hidden>
-                <span style={{ width: `${bgmScore * 10}%` }} />
-              </div>
-            </div>
-          ) : null}
-          {/* Who else is watching, under the scores.
-              It used to sit alone at the bottom of the page, below the
-              recommendations, where it read as a footer rather than as part
-              of what this anime is. Here it closes the same column the
-              scores open — both are "what other people did with this show". */}
-          <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
+      {trailer ? (
+        <aside
+          className={x.synopsisTrailer}
+          aria-labelledby="synopsis-trailer-heading"
+        >
+          <header className={x.synopsisTrailerHead}>
+            <h2
+              className={x.synopsisTrailerTitle}
+              id="synopsis-trailer-heading"
+            >
+              <span className={x.synopsisTrailerMark} aria-hidden />
+              {dict.detail.officialTrailer}
+            </h2>
+            <span className={x.synopsisTrailerSource}>YouTube</span>
+          </header>
+          {trailer}
         </aside>
-      ) : (
-        // No scores: the watcher strip still belongs in the column, and an
-        // empty second grid track would collapse the synopsis to full width
-        // on one anime and not the next.
-        <aside className={x.scorePanel}>
-          <WatchersAvatarList anilistId={detail.anilistId} lang={lang} />
-        </aside>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -1121,6 +1154,15 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
   // their /api/subscriptions/:id probe when it's absent. That keeps this page
   // off cookies() so it can stay statically prerendered / ISR-cacheable.
   const jsonLd = buildJsonLd(detail, lang);
+  const displayTitle = pickTitle(detail, lang);
+  const trailer = asYouTubeTrailer(detail.trailer);
+  const trailerLabels = {
+    official: dict.detail.officialTrailer,
+    watch: dict.detail.watchTrailer,
+    watchAria: dict.detail.watchTrailerAria,
+    close: dict.detail.closeTrailer,
+    openYouTube: dict.detail.openTrailerOnYouTube,
+  };
 
   return (
     <>
@@ -1159,7 +1201,7 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
             lang={lang}
             dict={dict}
             actions={
-                            <DetailActions
+              <DetailActions
                 anilistId={detail.anilistId}
                 episodes={detail.episodes}
                 titleRomaji={detail.titleRomaji}
@@ -1167,36 +1209,38 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
                 titleChinese={detail.titleChinese}
                 titleNative={detail.titleNative}
                 coverImageUrl={detail.coverImageUrl}
-                shareTitle={pickTitle(detail, lang)}
+                shareTitle={displayTitle}
                 lang={lang}
+                trailerId={trailer?.id ?? null}
+                trailerLabels={trailerLabels}
                 labels={{
-                subAdd: dict.sub.addToList,
-                subRemove: dict.sub.remove,
-                subLogin: dict.sub.loginToWatch,
-                subLoginAria: dict.sub.loginToWatch,
-                subRate: dict.sub.rate,
-                subWatching: dict.sub.watching,
-                subCompleted: dict.sub.completed,
-                subPlanToWatch: dict.sub.planToWatch,
-                subDropped: dict.sub.dropped,
-                share: dict.social.share,
-                shareCopied: dict.detail.linkCopied,
-                shareCopyFailed: dict.detail.linkCopyFailed,
-                torrents: dict.torrent.download,
-                torrentsTitle: dict.torrent.title,
-                torrentsSearchBtn: dict.torrent.searchBtn,
-                torrentsPlaceholder: dict.torrent.placeholder,
-                torrentsGroupAll: dict.torrent.groupAll,
-                torrentsEpAll: dict.torrent.epAll,
-                torrentsLoading: dict.torrent.loading,
-                torrentsNoResults: dict.torrent.noResults,
-                torrentsClose: dict.torrent.close,
-                torrentsCopy: dict.torrent.copy,
-                torrentsCopied: dict.torrent.copied,
-                torrentsOpenMagnet: dict.torrent.openMagnet,
-                torrentsSeeders: dict.torrent.seeders,
-                play: dict.detail.openPlayer,
-                playAria: dict.detail.openPlayerAria,
+                  subAdd: dict.sub.addToList,
+                  subRemove: dict.sub.remove,
+                  subLogin: dict.sub.loginToWatch,
+                  subLoginAria: dict.sub.loginToWatch,
+                  subRate: dict.sub.rate,
+                  subWatching: dict.sub.watching,
+                  subCompleted: dict.sub.completed,
+                  subPlanToWatch: dict.sub.planToWatch,
+                  subDropped: dict.sub.dropped,
+                  share: dict.social.share,
+                  shareCopied: dict.detail.linkCopied,
+                  shareCopyFailed: dict.detail.linkCopyFailed,
+                  torrents: dict.torrent.download,
+                  torrentsTitle: dict.torrent.title,
+                  torrentsSearchBtn: dict.torrent.searchBtn,
+                  torrentsPlaceholder: dict.torrent.placeholder,
+                  torrentsGroupAll: dict.torrent.groupAll,
+                  torrentsEpAll: dict.torrent.epAll,
+                  torrentsLoading: dict.torrent.loading,
+                  torrentsNoResults: dict.torrent.noResults,
+                  torrentsClose: dict.torrent.close,
+                  torrentsCopy: dict.torrent.copy,
+                  torrentsCopied: dict.torrent.copied,
+                  torrentsOpenMagnet: dict.torrent.openMagnet,
+                  torrentsSeeders: dict.torrent.seeders,
+                  play: dict.detail.openPlayer,
+                  playAria: dict.detail.openPlayerAria,
                 }}
               />
             }
@@ -1208,7 +1252,21 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
                 near the bottom because they are navigation away from this
                 page — putting them second sent people off it before they had
                 seen anything. */}
-            <SynopsisSection detail={detail} lang={lang} dict={dict} />
+            <SynopsisSection
+              detail={detail}
+              lang={lang}
+              dict={dict}
+              trailer={
+                trailer ? (
+                  <TrailerPreview
+                    trailerId={trailer.id}
+                    title={displayTitle}
+                    labels={trailerLabels}
+                    variant="card"
+                  />
+                ) : undefined
+              }
+            />
             <InfoSection detail={detail} lang={lang} dict={dict} />
             <EpisodesGrid
               anilistId={detail.anilistId}
