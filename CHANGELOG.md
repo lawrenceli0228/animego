@@ -12,7 +12,7 @@
 
 ★★ **保留这两个头的理由也是假的。** `jassubOverlay.ts` 里那段「jassub 的 pthread worker 没有 SharedArrayBuffer 会静默挂死」是 4 月写播放器时的假设，从没测过。把线上那份 `public/jassub/` 的 wasm + worker.bundle.js 单独起个页面，带头/不带头各跑一次：`ready` 分别 233ms / **147ms**，ASS 都正常画出。jassub 2.5 的 emscripten loader 在非隔离页面把 pthread 池设成 0 走单线程，README 也明说会自动降级。**我们自己的闸门在 jassub 有机会降级之前就先退回 VTT 了**——所以 e2e 沙箱（`next dev`，从来没发过这两个头）里 ASS 字幕其实一直走的是 VTT 兜底，只是没人看。
 
-改法：三份 nginx 配置删掉 `map $uri` 和两条 `add_header`；`jassubOverlay.ts` 删掉 `crossOriginIsolated` 闸门。代价是 libass 在非隔离下单线程渲染，重特效 ASS 的 CPU 开销**没量**。
+改法：三份 nginx 配置删掉 `map $uri` 和两条 `add_header`；`jassubOverlay.ts` 删掉 `crossOriginIsolated` 闸门。代价是 libass 在非隔离下单线程渲染。部署后量了：线上 `/player` 放 1080p + 字幕组侧车 `.ass`（FLsnow 赛马娘 S2 的 ED 段，双语歌词 + 特效标牌），真 Chrome 有 GPU，60 秒解码 1439 帧**掉帧 0**，主线程 rAF p99 18.4ms、没有一帧超过 40ms。同一段视频拿线上 wasm 做隔离/不隔离 A/B：真实字幕两种模式都是 0 掉帧；一个故意造的 12 行同屏卡拉OK（每音节 `\kf`+`\t`+`\blur`+`\move`）两轮之间的抖动（隔离 50/14 帧、不隔离 72/5 帧）比两种模式的差异还大，最差一轮也只占 5%。单线程的代价在真实字幕上是零。
 
 守卫是一个 bun 测试，读 `nginx/*.conf` 断言没有 COOP/COEP 的 `add_header`，读 `jassubOverlay.ts` 断言没有 `crossOriginIsolated` 分支。放在 next-app 里而不是 e2e，因为头是 nginx 发的、`next.config.ts` 一个头都不设——对着 Next 应用本身写的任何测试在两种状态下都会绿。变异验证：把 COEP 那行加回 `default.conf`，1 fail。候选配置用线上 nginx 容器同一组挂载在 compose 网络上 `nginx -t` 过（线上那份作对照同样通过）。
 
