@@ -163,15 +163,13 @@ export async function mountJassub({ video, subContent, fonts }) {
   }
   if (!JASSUB || !video || !subContent) return null;
 
-  // jassub spawns emscripten pthread workers that need SharedArrayBuffer.
-  // SAB is only exposed when the page is cross-origin isolated (COOP +
-  // COEP set by the server). Without it the worker init hangs silently,
-  // so we'd rather fall back to VTT than freeze and confuse the user.
-  if (typeof crossOriginIsolated !== 'undefined' && !crossOriginIsolated) {
-    // eslint-disable-next-line no-console
-    console.warn('[jassub] page is not cross-origin isolated (no SharedArrayBuffer access). Falling back to VTT plaintext. Server must send Cross-Origin-Opener-Policy: same-origin + Cross-Origin-Embedder-Policy: credentialless (or require-corp).');
-    return null;
-  }
+  // No crossOriginIsolated gate here. There used to be one, on the theory
+  // that jassub's pthread workers hang without SharedArrayBuffer. They do
+  // not: the emscripten loader sizes the pthread pool to zero when the page
+  // is not isolated and renders single-threaded (measured: `ready` in 147ms,
+  // ASS painted). The gate was returning null before jassub ever got the
+  // chance to degrade, and the COOP/COEP headers it demanded were what
+  // blocked the YouTube trailer iframe on the detail page.
 
   // Wait for video metadata before reading videoWidth. If we hand jassub a
   // video with width=0, its _getElementBoundingBox returns NaN dimensions
