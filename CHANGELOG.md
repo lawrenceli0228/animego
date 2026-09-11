@@ -4,6 +4,21 @@
 
 ## [未发布]
 
+### 预告片还是放不了：按路由去掉 COOP/COEP 在 SPA 里根本不成立，两个头整站删掉
+
+#174 让 nginx 在 `/anime/` 路由上不发 `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy`，验收时直接打开详情页是能播的。合并四天后用户报「还是不行」，截图里 DevTools 的 Issues 面板写着 *Specify a Cross-Origin Embedder Policy to stop this frame from being blocked*——那份文档**带着** COEP。
+
+★★ **COOP/COEP 是文档级属性，只在整页加载那一刻由响应头决定。** Next App Router 的站内跳转不发新文档请求：从首页点进 `/anime/185874`，URL 变了，文档还是首页那份，`crossOriginIsolated` 照样是 `true`，iframe 照样 `ERR_BLOCKED_BY_RESPONSE`。真 Chrome 两条路径各走一遍：硬刷新详情页 → `crossOriginIsolated=false`、能播；首页点进去 → **0 次文档请求**、`crossOriginIsolated=true`、被拦。#174 只救了搜索引擎落地和硬刷新，**上一次的验收恰好只验了这一种进入方式**。
+
+★★ **保留这两个头的理由也是假的。** `jassubOverlay.ts` 里那段「jassub 的 pthread worker 没有 SharedArrayBuffer 会静默挂死」是 4 月写播放器时的假设，从没测过。把线上那份 `public/jassub/` 的 wasm + worker.bundle.js 单独起个页面，带头/不带头各跑一次：`ready` 分别 233ms / **147ms**，ASS 都正常画出。jassub 2.5 的 emscripten loader 在非隔离页面把 pthread 池设成 0 走单线程，README 也明说会自动降级。**我们自己的闸门在 jassub 有机会降级之前就先退回 VTT 了**——所以 e2e 沙箱（`next dev`，从来没发过这两个头）里 ASS 字幕其实一直走的是 VTT 兜底，只是没人看。
+
+改法：三份 nginx 配置删掉 `map $uri` 和两条 `add_header`；`jassubOverlay.ts` 删掉 `crossOriginIsolated` 闸门。代价是 libass 在非隔离下单线程渲染，重特效 ASS 的 CPU 开销**没量**。
+
+守卫是一个 bun 测试，读 `nginx/*.conf` 断言没有 COOP/COEP 的 `add_header`，读 `jassubOverlay.ts` 断言没有 `crossOriginIsolated` 分支。放在 next-app 里而不是 e2e，因为头是 nginx 发的、`next.config.ts` 一个头都不设——对着 Next 应用本身写的任何测试在两种状态下都会绿。变异验证：把 COEP 那行加回 `default.conf`，1 fail。候选配置用线上 nginx 容器同一组挂载在 compose 网络上 `nginx -t` 过（线上那份作对照同样通过）。
+
+★ 部署注意：线上 `nginx/default.conf` 是 `default.p9.conf` 的拷贝（`diff` 逐字节相同），所以合并后要 `cp nginx/default.p9.conf nginx/default.conf && docker compose restart nginx`——restart 不是 reload，bind mount 换了 inode。
+
+
 ### 一个 httptest 服务器关闭，会掐断另一个测试正在飞的请求
 
 CI 在 #177 上挂了，挂在 #177 根本没碰的包里：`internal/bangumi` 报 `net/http: HTTP/1.x transport connection broken: http: CloseIdleConnections called`。
