@@ -98,7 +98,7 @@ func TestTrailerColumns(t *testing.T) {
 	}
 
 	t.Run("a selecting query stores the pair and stamps when it asked", func(t *testing.T) {
-		require.NoError(t, q.UpsertAnimeCache(ctx, anime.NormalizeMainRow(withTrailer, anilist.TrailerSelected)))
+		require.NoError(t, q.UpsertAnimeCache(ctx, anime.NormalizeMainRow(withTrailer, anilist.SeasonalDocument)))
 
 		got := read(trailerRoundTrip)
 		require.NotNil(t, got.id)
@@ -116,7 +116,7 @@ func TestTrailerColumns(t *testing.T) {
 		require.NoError(t, err)
 
 		// Search's shape: no trailer in the payload, and none asked for.
-		omitted := anime.NormalizeMainRow(anilist.Media{ID: int(trailerRoundTrip)}, anilist.TrailerNotSelected)
+		omitted := anime.NormalizeMainRow(anilist.Media{ID: int(trailerRoundTrip)}, anilist.SearchDocument)
 		require.NoError(t, q.UpsertAnimeCache(ctx, omitted))
 
 		got := read(trailerRoundTrip)
@@ -128,7 +128,7 @@ func TestTrailerColumns(t *testing.T) {
 	})
 
 	t.Run("a selecting query with no trailer clears the pair and keeps the stamp", func(t *testing.T) {
-		checked := anime.NormalizeMainRow(anilist.Media{ID: int(trailerRoundTrip)}, anilist.TrailerSelected)
+		checked := anime.NormalizeMainRow(anilist.Media{ID: int(trailerRoundTrip)}, anilist.SeasonalDocument)
 		require.NoError(t, q.UpsertAnimeCache(ctx, checked))
 
 		got := read(trailerRoundTrip)
@@ -203,7 +203,7 @@ func TestTrailerColumns(t *testing.T) {
 
 				params := anime.NormalizeMainRow(
 					anilist.Media{ID: int(trailerAgreement), Trailer: tc.trailer},
-					anilist.TrailerSelected,
+					anilist.SeasonalDocument,
 				)
 				require.NoError(t, dbgen.New(sub).UpsertAnimeCache(ctx, params),
 					"normalizer output must always satisfy the constraint")

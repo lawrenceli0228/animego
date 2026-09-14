@@ -233,6 +233,13 @@ export interface AnimeDetail {
   // the raw shape, so consumers must format via lib/formatters before
   // rendering. Legacy ISO strings are tolerated by formatFuzzyDate.
   startDate: FuzzyDate | string | null;
+  /**
+   * go-api serialises a `date` column, so this is an ISO string or null —
+   * never a FuzzyDate: the writer only stores a date it knows in full (see
+   * dateFromFuzzy in normalize.go). Optional because it arrived with
+   * migration 0034; older API builds do not send it.
+   */
+  endDate?: string | null;
   genres: string[];
   studios: string[];
   relations: DetailRelation[];

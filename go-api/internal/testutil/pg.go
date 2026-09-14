@@ -16,6 +16,7 @@ package testutil
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -205,4 +206,53 @@ func migrationsDirAbs() (string, error) {
 		return "", fmt.Errorf("abs: %w", err)
 	}
 	return abs, nil
+}
+
+// MigrateTo moves the schema at pgURI to exactly `version` — down or up
+// as needed — so a test can plant rows under the schema a migration
+// expects to find and then apply it.  That is the only way to exercise
+// a migration's data step (a backfill UPDATE) rather than just its DDL:
+// SetupPG applies every migration to an empty database, where a backfill
+// has nothing to touch.
+//
+// Pair it with a final MigrateTo back to the latest version if the test
+// goes on to use sqlc queries, which are generated against the full
+// schema.
+func MigrateTo(t *testing.T, pgURI string, version uint) {
+	t.Helper()
+	migrationsDir, err := migrationsDirAbs()
+	require.NoError(t, err, "MigrateTo: migrations dir")
+	m, err := gomigrate.New("file://"+migrationsDir, pgURI)
+	require.NoError(t, err, "MigrateTo: migrate.New")
+	if err := m.Migrate(version); err != nil && err != gomigrate.ErrNoChange {
+		require.NoError(t, err, "MigrateTo: migrate to %d", version)
+	}
+	srcErr, dbErr := m.Close()
+	require.NoError(t, srcErr, "MigrateTo: close source")
+	require.NoError(t, dbErr, "MigrateTo: close db")
+}
+
+// LatestMigrationVersion returns the highest version present in the
+// migrations directory, so a test that stepped back with MigrateTo can
+// return without hard-coding a number that the next migration would make
+// stale.
+func LatestMigrationVersion(t *testing.T) uint {
+	t.Helper()
+	migrationsDir, err := migrationsDirAbs()
+	require.NoError(t, err, "LatestMigrationVersion: migrations dir")
+	entries, err := os.ReadDir(migrationsDir)
+	require.NoError(t, err, "LatestMigrationVersion: read dir")
+	var latest uint
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".up.sql") {
+			continue
+		}
+		var v uint
+		if _, err := fmt.Sscanf(name, "%d_", &v); err == nil && v > latest {
+			latest = v
+		}
+	}
+	require.NotZero(t, latest, "LatestMigrationVersion: no *.up.sql found")
+	return latest
 }

@@ -36,6 +36,7 @@ export interface JsonLdTVSeries {
   description?: string;
   numberOfEpisodes?: number;
   startDate?: string;
+  endDate?: string;
   genre?: string[];
   aggregateRating?: JsonLdAggregateRating;
   productionCompany?: { "@type": "Organization"; name: string }[];
@@ -76,6 +77,11 @@ export function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
   if (detail.episodes) ld.numberOfEpisodes = detail.episodes;
   const formattedStartDate = formatFuzzyDate(detail.startDate);
   if (formattedStartDate) ld.startDate = formattedStartDate;
+  // Same treatment as startDate. The writer only stores a whole date, so
+  // there is no partial-date case to refuse here; an absent value is a work
+  // still airing (or one AniList has no end date for) and says nothing.
+  const formattedEndDate = formatFuzzyDate(detail.endDate);
+  if (formattedEndDate) ld.endDate = formattedEndDate;
   if (detail.genres?.length) ld.genre = detail.genres;
   // Bangumi rating carries a real vote count (Subject.Rating.Count), which
   // Google requires for a valid AggregateRating. AniList's averageScore has
