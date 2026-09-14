@@ -62,37 +62,62 @@ type Trailer struct {
 	Site *string `json:"site"`
 }
 
-// TrailerSelection states whether the GraphQL document that produced a
-// Media asked for the `trailer` field at all.  It exists because a nil
-// Media.Trailer is ambiguous on its own: it means "AniList says this
-// media has no trailer" for a query that selected the field, and "we
-// never asked" for one that did not.  Only the first is an answer worth
-// persisting.
+// Document names which GraphQL document produced a Media.  It exists
+// because a Media on its own cannot say what was asked of AniList, and
+// two of the things the cache layer persists are answers whose absence
+// only means something if the question was posed:
+//
+//   - a nil Media.Trailer is "AniList says none" when the document
+//     selected `trailer`, and "we never asked" when it did not;
+//   - an empty studios / characters / staff / relations set is "AniList
+//     has none" when the document was AnimeDetailQuery, and "the listing
+//     query does not select children" for every other document.
+//
+// Only the first reading of each is worth writing down, and writing the
+// second one down is how a catalogue row ends up either overwritten with
+// nothing (trailer) or re-fetched on every cache miss forever (children;
+// see anime.isStale).
 //
 // The distinction is carried as a parameter rather than a convention at
 // each call site because five paths upsert anime_cache from AniList and
 // they do not share a query:
 //
-//	SeasonalAnimeQuery  selects trailer  → anime/seasonal, queue/warm_season
-//	AnimeDetailQuery    selects trailer  → anime/detail, anime/ensure_cached
-//	SearchAnimeQuery    does NOT         → anime/search
+//	SeasonalAnimeQuery  → anime/seasonal, queue/warm_season   (SeasonalDocument)
+//	AnimeDetailQuery    → anime/detail, anime/ensure_cached   (DetailDocument)
+//	SearchAnimeQuery    → anime/search                        (SearchDocument)
 //
 // Making it an argument means a sixth call site cannot compile without
 // answering the question.  The type lives here, next to the queries that
 // decide the answer, so both internal/anime and internal/queue can name
-// it without importing each other.
-type TrailerSelection bool
+// it without importing each other.  TestDocumentSelectionsMatchTheQueries
+// is what ties each constant to the document text it makes claims about.
+type Document uint8
 
 const (
-	// TrailerNotSelected marks a Media from a query with no `trailer`
-	// field.  A nil Trailer carries no information; stored metadata must
-	// be preserved rather than cleared.
-	TrailerNotSelected TrailerSelection = false
+	// SearchDocument marks a Media from SearchAnimeQuery: no `trailer`,
+	// no child connections.  Nothing absent on it is an answer.
+	SearchDocument Document = iota
 
-	// TrailerSelected marks a Media from a query that asked for
-	// `trailer`.  A nil Trailer is AniList's authoritative "none".
-	TrailerSelected TrailerSelection = true
+	// SeasonalDocument marks a Media from SeasonalAnimeQuery: selects
+	// `trailer` (a nil Trailer is authoritative) but no child
+	// connections.
+	SeasonalDocument
+
+	// DetailDocument marks a Media from AnimeDetailQuery: selects
+	// `trailer` and every child connection, so an empty child set is
+	// AniList's answer rather than a gap.
+	DetailDocument
 )
+
+// SelectsTrailer reports whether the document asked for `trailer`, i.e.
+// whether a nil Media.Trailer may be stored as a confirmed absence.
+func (d Document) SelectsTrailer() bool { return d != SearchDocument }
+
+// SelectsChildren reports whether the document asked for the child
+// connections (studios, relations, characters, staff, recommendations),
+// i.e. whether the row may be stamped as having been through the detail
+// fetch.
+func (d Document) SelectsChildren() bool { return d == DetailDocument }
 
 // ---------------------------------------------------------------------------
 // Page wrapper + PageInfo (search / seasonal / weekly all return Page{...})
@@ -199,7 +224,7 @@ type ScoreDistributionBucket struct {
 // scoreDistribution amounts, and the sum is the whole reason the
 // histogram is selected.
 //
-// The nil / zero distinction is the same one TrailerSelection exists
+// The nil / zero distinction is the same one Document exists
 // for, except here the response carries it: a Media from a document that
 // did not select `stats` has a nil Stats and no opinion, while a Media
 // from one that did has a non-nil Stats even when the distribution is

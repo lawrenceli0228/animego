@@ -330,7 +330,7 @@ func (s *SeasonalService) coldStart(
 	for _, m := range resp.Page.Media {
 		// SeasonalAnimeQuery selects trailer, so a nil Trailer here is
 		// a confirmed absence.
-		args := NormalizeMainRow(m, anilist.TrailerSelected)
+		args := NormalizeMainRow(m, anilist.SeasonalDocument)
 		if upErr := s.db.UpsertAnimeCache(ctx, args); upErr != nil {
 			slog.WarnContext(ctx, "anime/seasonal: upsert failed",
 				"anilist_id", args.AnilistID, "err", upErr)

@@ -156,6 +156,7 @@ type AnimeDetail struct {
 	Duration                    *int32                 `json:"duration"`
 	Source                      *string                `json:"source"`
 	StartDate                   pgtype.Date            `json:"startDate"`
+	EndDate                     pgtype.Date            `json:"endDate"`
 	Genres                      []string               `json:"genres"`
 	Studios                     []string               `json:"studios"`
 	Relations                   []DetailRelation       `json:"relations"`
@@ -559,20 +560,20 @@ func (s *DetailService) fetchChildren(ctx context.Context, anilistID int32) (
 }
 
 // isStale returns true when the cached main row + child arrays signal
-// the AniList row has gone stale.  Matches Express anilist.service.js
-// lines 365-370:
+// the AniList row should be re-fetched:
 //
-//   - cached_at older than staleCacheTTL  (24h in Express, 1h here — see
-//     const docstring above)
-//   - Studios array empty (Mongo "undefined" → Postgres "no rows")
-//   - Characters array empty
-//   - First character row has nil role
-//   - First relation row has nil cover_image_url
+//   - trailer never asked about (trailer_checked_at NULL)
+//   - cached_at older than staleCacheTTL
+//   - never been through AnimeDetailQuery (detail_fetched_at NULL)
+//   - First character row has nil role         (legacy row shape)
+//   - First relation row has nil cover_image_url (legacy row shape)
 //
-// All five conditions are independent — any one trips the re-fetch.
-// The order is cheapest-first: cached_at age is a single time.Since,
-// the slice-length checks are O(1), and the field-presence probes only
-// touch the first element each.
+// Any one trips the re-fetch.  The last two repair rows written before
+// those columns existed and terminate after one fetch.  The third is what
+// Express (anilist.service.js:365-370) approximated with "studios array
+// empty" and "characters array empty"; those two checks are gone because
+// they could not terminate for a row AniList genuinely has no main studio
+// or no character for -- see the comment at the check.
 func isStale(
 	main dbgen.GetAnimeMainByIDRow,
 	studios []string,
@@ -588,13 +589,22 @@ func isStale(
 	if main.CachedAt.Valid && time.Since(main.CachedAt.Time) >= staleCacheTTL {
 		return true
 	}
-	if len(studios) == 0 {
+	// Never been through AnimeDetailQuery: a listing upsert (seasonal,
+	// search, warm_season) wrote the main row and nothing else, so the
+	// child tables are empty because nobody asked, not because AniList
+	// has nothing.  One detail fetch fills them and stamps the row.
+	//
+	// This replaces the old inference from `len(studios) == 0` and
+	// `len(characters) == 0`, which could not tell that case apart from
+	// "fetched, and AniList lists no main studio / no character" -- and
+	// so re-fetched those rows on every in-process cache expiry, wrote the
+	// same empty set, and re-fetched again.  Roughly a third of the
+	// catalogue has no main studio on AniList; that was a third of the
+	// catalogue paying an upstream call per hour per visit.
+	if !main.DetailFetchedAt.Valid {
 		return true
 	}
-	if len(characters) == 0 {
-		return true
-	}
-	if characters[0].Role == nil {
+	if len(characters) > 0 && characters[0].Role == nil {
 		return true
 	}
 	if len(relations) > 0 && relations[0].CoverImageUrl == nil {
@@ -699,7 +709,7 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 	// 1) Main row — ON CONFLICT preserves Bangumi columns.
 	// AnimeDetailQuery selects trailer, so a nil Trailer here is
 	// AniList's answer, not a gap.
-	params := NormalizeMainRow(m, anilist.TrailerSelected)
+	params := NormalizeMainRow(m, anilist.DetailDocument)
 	if err := s.db.UpsertAnimeCache(ctx, params); err != nil {
 		return fmt.Errorf("upsert main: %w", err)
 	}
@@ -1020,6 +1030,7 @@ func assembleDetail(
 		Duration:                    main.Duration,
 		Source:                      main.Source,
 		StartDate:                   main.StartDate,
+		EndDate:                     main.EndDate,
 		Genres:                      genres,
 		Studios:                     studios,
 		Relations:                   relations,

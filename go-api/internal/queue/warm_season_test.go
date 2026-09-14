@@ -846,7 +846,7 @@ func TestWarmSeason_SeedFiresOncePerWarm(t *testing.T) {
 // freshness window while isStale still reports it stale — and every
 // detail view for that day pays a blocking AniList re-fetch on the
 // crawler-heavy /anime/* path.  The default normalizer derives the flag
-// from the argument, so this asserts the call site passes TrailerSelected.
+// from the argument, so this asserts the call site passes a Document that selects trailer.
 func TestWarmSeason_RecordsThatTrailerWasChecked(t *testing.T) {
 	t.Parallel()
 

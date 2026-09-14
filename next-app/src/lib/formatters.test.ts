@@ -599,6 +599,39 @@ describe("R3 — only the authoritative count reaches schema.org", () => {
   });
 });
 
+describe("startDate / endDate reach schema.org as machine-readable dates", () => {
+  test("both dates present are emitted in ISO form regardless of page language", () => {
+    // go-api serialises the two date columns as ISO strings; the builder
+    // must not localise them (the zh renderer would produce 2024年4月26日).
+    const ld = buildJsonLd(
+      detailRow({ startDate: "2024-04-26T00:00:00Z", endDate: "2024-07-12T00:00:00Z" }),
+      "zh",
+    );
+
+    expect(ld.startDate).toBe("2024-04-26");
+    expect(ld.endDate).toBe("2024-07-12");
+  });
+
+  test("an absent endDate omits the property rather than emitting an empty string", () => {
+    // Still airing, or AniList has no end date: an absent endDate says
+    // nothing; an empty one would be malformed structured data.
+    const ld = buildJsonLd(detailRow({ startDate: "2024-04-26", endDate: null }), "en");
+
+    expect(ld.startDate).toBe("2024-04-26");
+    expect(ld).not.toHaveProperty("endDate");
+  });
+
+  test("an API build that predates the field is tolerated", () => {
+    // endDate is optional on AnimeDetail because the column arrived with
+    // migration 0034; a response without the key must not throw.
+    const row = detailRow({ startDate: "2024-04-26" });
+    delete (row as Partial<AnimeDetail>).endDate;
+
+    expect(() => buildJsonLd(row, "zh")).not.toThrow();
+    expect(buildJsonLd(row, "zh")).not.toHaveProperty("endDate");
+  });
+});
+
 describe("formatFuzzyDate (zh locale)", () => {
   test("formats YYYY年MM月DD日 for zh with full date", () => {
     expect(formatFuzzyDate({ year: 2021, month: 12, day: 5 }, "zh")).toBe(

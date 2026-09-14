@@ -84,7 +84,7 @@ func EnsureCached(ctx context.Context, db EnsureCachedDB, ac AniListDetailFetche
 	}
 
 	// ac.Detail runs AnimeDetailQuery, which selects trailer.
-	params := NormalizeMainRow(resp.Media, anilist.TrailerSelected)
+	params := NormalizeMainRow(resp.Media, anilist.DetailDocument)
 	if err := db.UpsertAnimeCache(ctx, params); err != nil {
 		return fmt.Errorf("ensure_cached: upsert anime_cache (%d): %w", anilistID, err)
 	}

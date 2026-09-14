@@ -1,6 +1,9 @@
 package anime
 
 import (
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/colorx"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
@@ -32,15 +35,25 @@ import (
 //	averageScore         →  average_score       (*int → *float64; AniList 0-100 scale)
 //	format               →  format
 //	trailer.id/.site     →  trailer_id / trailer_site  (YouTube only — see supportedTrailer)
-//	(the sel argument)   →  trailer_checked_at  (now() when selected)
+//	startDate/endDate    →  start_date / end_date  (full dates only — see dateFromFuzzy)
+//	duration             →  duration            (*int → *int32)
+//	source               →  source
+//	(the doc argument)   →  trailer_checked_at  (now() when the document selects trailer)
+//	(the doc argument)   →  detail_fetched_at   (now() when the document selects children)
 //
-// The trailer columns are the one place this function needs to know
-// something the Media alone cannot tell it: whether the query selected
-// `trailer`.  sel carries that (see anilist.TrailerSelection).  With
-// TrailerNotSelected the row is emitted with a nil trailer_checked_at and
-// nil metadata, which the upsert reads as "leave whatever is stored".
-// With TrailerSelected an absent or unsupported trailer is stamped as
-// checked-at-now, i.e. a confirmed absence rather than a gap.
+// The two *_at columns are the places this function needs to know
+// something the Media alone cannot tell it: which GraphQL document
+// produced it.  doc carries that (see anilist.Document).  A document that
+// does not select `trailer` yields a nil trailer_checked_at and nil
+// metadata, which the upsert reads as "leave whatever is stored"; one that
+// does stamps an absent or unsupported trailer as checked-at-now, i.e. a
+// confirmed absence rather than a gap.  detail_fetched_at follows the same
+// rule for the child connections, and is what the detail read consults
+// instead of inferring "never fetched" from an empty studio list.
+//
+// The four facts (start/end date, duration, source) need no such flag:
+// only AnimeDetailQuery selects them, every other document yields nil,
+// and the upsert COALESCEs nil away rather than writing it.
 //
 // title_chinese, bgm_id, bangumi_score, bangumi_votes, bangumi_version
 // are NOT set here — Bangumi enrichment workers own those columns and
@@ -50,7 +63,7 @@ import (
 // function via colorx.NormalizePosterAccent.  Brand-fallback (#8B5CF6)
 // applies for null / invalid / grayscale color inputs, so the three
 // poster_accent_* columns ALWAYS land non-null.
-func NormalizeMainRow(m anilist.Media, sel anilist.TrailerSelection) dbgen.UpsertAnimeCacheParams {
+func NormalizeMainRow(m anilist.Media, doc anilist.Document) dbgen.UpsertAnimeCacheParams {
 	var rawColor string
 	if m.CoverImage != nil && m.CoverImage.Color != nil {
 		rawColor = *m.CoverImage.Color
@@ -58,7 +71,7 @@ func NormalizeMainRow(m anilist.Media, sel anilist.TrailerSelection) dbgen.Upser
 	accent := colorx.NormalizePosterAccent(rawColor)
 
 	var trailerID, trailerSite *string
-	if sel == anilist.TrailerSelected {
+	if doc.SelectsTrailer() {
 		if trailer := supportedTrailer(m.Trailer); trailer != nil {
 			trailerID, trailerSite = trailer.ID, trailer.Site
 		}
@@ -84,8 +97,39 @@ func NormalizeMainRow(m anilist.Media, sel anilist.TrailerSelection) dbgen.Upser
 		Format:                      m.Format,
 		TrailerID:                   trailerID,
 		TrailerSite:                 trailerSite,
-		TrailerChecked:              sel == anilist.TrailerSelected,
+		TrailerChecked:              doc.SelectsTrailer(),
+		StartDate:                   dateFromFuzzy(m.StartDate),
+		EndDate:                     dateFromFuzzy(m.EndDate),
+		Duration:                    ptrInt32(m.Duration),
+		Source:                      m.Source,
+		DetailFetched:               doc.SelectsChildren(),
 	}
+}
+
+// dateFromFuzzy turns an AniList FuzzyDate into a date column value.
+//
+// A column of type date cannot say "sometime in 2011", and pretending it
+// can — padding a missing month or day with 1 — would print "2011年1月1日"
+// on the page and emit it as schema.org startDate, both as fact.  So the
+// rule is the one the Express migration already applied to the rows it
+// carried over (transforms.MakeDate): all three parts or nothing.  A
+// year-only date is left NULL, which the upsert's COALESCE then reads as
+// "no new information" rather than as an erasure.
+func dateFromFuzzy(f *anilist.FuzzyDate) pgtype.Date {
+	if f == nil || f.Year == nil || f.Month == nil || f.Day == nil {
+		return pgtype.Date{}
+	}
+	y, mo, d := *f.Year, *f.Month, *f.Day
+	if y <= 0 || mo < 1 || mo > 12 || d < 1 || d > 31 {
+		return pgtype.Date{}
+	}
+	t := time.Date(y, time.Month(mo), d, 0, 0, 0, 0, time.UTC)
+	// time.Date normalises an impossible day (Feb 30) forward into the
+	// next month; that is not the date AniList stated, so refuse it.
+	if t.Day() != d || t.Month() != time.Month(mo) {
+		return pgtype.Date{}
+	}
+	return pgtype.Date{Time: t, Valid: true}
 }
 
 // Genres returns the media's genres slice — never nil; an empty Media

@@ -1098,7 +1098,7 @@ func staleTimestamp() pgtype.Timestamptz {
 func TestIsStale_FreshNotStale(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp(), DetailFetchedAt: freshTimestamp()}
 	studios := []string{"MAPPA"}
 	characters := []dbgen.GetAnimeCharactersByIDRow{
 		{NameEn: ptrString("Alice"), Role: ptrString("MAIN")},
@@ -1120,22 +1120,31 @@ func TestIsStale_CachedAtPastTTL(t *testing.T) {
 	assert.True(t, isStale(main, studios, characters, relations), "old cached_at must trip stale")
 }
 
-// TestIsStale_EmptyStudios: characters present but studios empty → true.
-func TestIsStale_EmptyStudios(t *testing.T) {
+// TestIsStale_NeverDetailFetched: a row a listing query wrote has no
+// detail_fetched_at, and that alone must trip the re-fetch -- even when
+// the child arrays happen to be populated, because the stamp, not the
+// children, is what says AnimeDetailQuery has run.
+func TestIsStale_NeverDetailFetched(t *testing.T) {
 	t.Parallel()
 
 	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
-	assert.True(t, isStale(main, []string{}, characters, nil), "empty studios must trip stale")
+	assert.True(t, isStale(main, []string{"MAPPA"}, characters, nil),
+		"no detail_fetched_at must trip stale")
 }
 
-// TestIsStale_EmptyCharacters: studios present but characters empty → true.
-func TestIsStale_EmptyCharacters(t *testing.T) {
+// TestIsStale_EmptyChildrenAfterDetailFetch is the regression test for the
+// re-fetch loop.  AniList lists no main studio for roughly a third of the
+// catalogue and no character for a quarter; the detail fetch writes the
+// empty sets and stamps the row, and from then on the empty sets are the
+// answer.  The old checks (`len(studios) == 0`, `len(characters) == 0`)
+// read them as "never fetched" and re-fetched on every cache expiry.
+func TestIsStale_EmptyChildrenAfterDetailFetch(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
-	assert.True(t, isStale(main, []string{"MAPPA"}, []dbgen.GetAnimeCharactersByIDRow{}, nil),
-		"empty characters must trip stale")
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp(), DetailFetchedAt: freshTimestamp()}
+	assert.False(t, isStale(main, []string{}, []dbgen.GetAnimeCharactersByIDRow{}, nil),
+		"a stamped row with no studios and no characters is AniList's answer, not a gap")
 }
 
 // TestIsStale_FirstCharacterRoleNil: characters[0].Role missing → true.
@@ -1143,7 +1152,7 @@ func TestIsStale_EmptyCharacters(t *testing.T) {
 func TestIsStale_FirstCharacterRoleNil(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp(), DetailFetchedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{NameEn: ptrString("Bob"), Role: nil}}
 	assert.True(t, isStale(main, []string{"MAPPA"}, characters, nil),
 		"first character with nil role must trip stale")
@@ -1156,7 +1165,7 @@ func TestIsStale_FirstCharacterRoleNil(t *testing.T) {
 func TestIsStale_FirstRelationCoverNil(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp(), DetailFetchedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
 	relations := []dbgen.GetAnimeRelationsByIDRow{{AnilistID: 100, CoverImageUrl: nil}}
 	assert.True(t, isStale(main, []string{"MAPPA"}, characters, relations),
@@ -1169,7 +1178,7 @@ func TestIsStale_FirstRelationCoverNil(t *testing.T) {
 func TestIsStale_NoRelations_NotTriggerByCover(t *testing.T) {
 	t.Parallel()
 
-	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp()}
+	main := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), TrailerCheckedAt: freshTimestamp(), DetailFetchedAt: freshTimestamp()}
 	characters := []dbgen.GetAnimeCharactersByIDRow{{Role: ptrString("MAIN")}}
 	assert.False(t, isStale(main, []string{"MAPPA"}, characters, []dbgen.GetAnimeRelationsByIDRow{}),
 		"empty relations slice must not by itself trip stale")
@@ -1471,10 +1480,11 @@ func TestDetail_FreshNotStale_SkipsReFetch(t *testing.T) {
 	db := &detailFakeDB{
 		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
 			return dbgen.GetAnimeMainByIDRow{
-				AnilistID:      99,
-				TitleRomaji:    &romaji,
-				CachedAt:       freshTimestamp(),
+				AnilistID:        99,
+				TitleRomaji:      &romaji,
+				CachedAt:         freshTimestamp(),
 				TrailerCheckedAt: freshTimestamp(),
+				DetailFetchedAt:  freshTimestamp(),
 			}, nil
 		},
 		getAnimeStudiosByIDFn: func(_ context.Context, _ int32) ([]string, error) {

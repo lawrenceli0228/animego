@@ -982,6 +982,7 @@ SELECT
     duration,
     source,
     start_date,
+    end_date,
     bgm_id,
     bangumi_score,
     bangumi_votes,
@@ -991,7 +992,8 @@ SELECT
     trailer_site,
     -- The detail read is the one that has to tell "asked, none" apart
     -- from "never asked": isStale turns the second into a re-fetch.
-    trailer_checked_at
+    trailer_checked_at,
+    detail_fetched_at
 FROM anime_cache
 WHERE anilist_id = $1
 `
@@ -1026,6 +1028,7 @@ type GetAnimeMainByIDRow struct {
 	Duration                    *int32             `json:"duration"`
 	Source                      *string            `json:"source"`
 	StartDate                   pgtype.Date        `json:"startDate"`
+	EndDate                     pgtype.Date        `json:"endDate"`
 	BgmID                       *int32             `json:"bgmId"`
 	BangumiScore                *float64           `json:"bangumiScore"`
 	BangumiVotes                *int32             `json:"bangumiVotes"`
@@ -1034,6 +1037,7 @@ type GetAnimeMainByIDRow struct {
 	TrailerID                   *string            `json:"trailerId"`
 	TrailerSite                 *string            `json:"trailerSite"`
 	TrailerCheckedAt            pgtype.Timestamptz `json:"trailerCheckedAt"`
+	DetailFetchedAt             pgtype.Timestamptz `json:"detailFetchedAt"`
 }
 
 // Full main-row read for /:anilistId detail.  Returns every column
@@ -1089,6 +1093,7 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.Duration,
 		&i.Source,
 		&i.StartDate,
+		&i.EndDate,
 		&i.BgmID,
 		&i.BangumiScore,
 		&i.BangumiVotes,
@@ -1097,6 +1102,7 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.TrailerID,
 		&i.TrailerSite,
 		&i.TrailerCheckedAt,
+		&i.DetailFetchedAt,
 	)
 	return i, err
 }
@@ -3777,6 +3783,8 @@ INSERT INTO anime_cache (
     episodes, status, season, season_year,
     average_score, format,
     trailer_id, trailer_site, trailer_checked_at,
+    start_date, end_date, duration, source,
+    detail_fetched_at,
     cached_at, updated_at
 ) VALUES (
     $1,
@@ -3788,6 +3796,8 @@ INSERT INTO anime_cache (
     $12, $13, $14, $15,
     $16, $17,
     $18, $19, CASE WHEN $20::boolean THEN now() ELSE NULL END,
+    $21, $22, $23, $24,
+    CASE WHEN $25::boolean THEN now() ELSE NULL END,
     now(), now()
 )
 ON CONFLICT (anilist_id) DO UPDATE SET
@@ -3814,31 +3824,50 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     trailer_id = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_id ELSE anime_cache.trailer_id END,
     trailer_site = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_site ELSE anime_cache.trailer_site END,
     trailer_checked_at = CASE WHEN EXCLUDED.trailer_checked_at IS NOT NULL THEN EXCLUDED.trailer_checked_at ELSE anime_cache.trailer_checked_at END,
+    -- The four facts only AnimeDetailQuery selects.  COALESCE rather than
+    -- the trailer's CASE because these have no "asked, none" state worth
+    -- keeping: a release date, once known, does not become unknown again.
+    -- So a caller whose document did not select them (search, seasonal)
+    -- passes NULL and leaves the stored value standing, and a caller whose
+    -- document did select them overwrites with whatever AniList says now.
+    start_date = COALESCE(EXCLUDED.start_date, anime_cache.start_date),
+    end_date   = COALESCE(EXCLUDED.end_date,   anime_cache.end_date),
+    duration   = COALESCE(EXCLUDED.duration,   anime_cache.duration),
+    source     = COALESCE(EXCLUDED.source,     anime_cache.source),
+    -- Same shape as trailer_checked_at: non-NULL exactly when this
+    -- caller's document selected the child connections, so a listing
+    -- upsert cannot un-stamp a row the detail path has been through.
+    detail_fetched_at = CASE WHEN EXCLUDED.detail_fetched_at IS NOT NULL THEN EXCLUDED.detail_fetched_at ELSE anime_cache.detail_fetched_at END,
     cached_at = now(),
     updated_at = now()
 `
 
 type UpsertAnimeCacheParams struct {
-	AnilistID                   int32    `json:"anilistId"`
-	TitleRomaji                 *string  `json:"titleRomaji"`
-	TitleEnglish                *string  `json:"titleEnglish"`
-	TitleNative                 *string  `json:"titleNative"`
-	CoverImageUrl               *string  `json:"coverImageUrl"`
-	CoverImageColor             *string  `json:"coverImageColor"`
-	PosterAccent                *string  `json:"posterAccent"`
-	PosterAccentRgb             *string  `json:"posterAccentRgb"`
-	PosterAccentContrastOnBlack *float64 `json:"posterAccentContrastOnBlack"`
-	BannerImageUrl              *string  `json:"bannerImageUrl"`
-	Description                 *string  `json:"description"`
-	Episodes                    *int32   `json:"episodes"`
-	Status                      *string  `json:"status"`
-	Season                      *string  `json:"season"`
-	SeasonYear                  *int32   `json:"seasonYear"`
-	AverageScore                *float64 `json:"averageScore"`
-	Format                      *string  `json:"format"`
-	TrailerID                   *string  `json:"trailerId"`
-	TrailerSite                 *string  `json:"trailerSite"`
-	TrailerChecked              bool     `json:"trailerChecked"`
+	AnilistID                   int32       `json:"anilistId"`
+	TitleRomaji                 *string     `json:"titleRomaji"`
+	TitleEnglish                *string     `json:"titleEnglish"`
+	TitleNative                 *string     `json:"titleNative"`
+	CoverImageUrl               *string     `json:"coverImageUrl"`
+	CoverImageColor             *string     `json:"coverImageColor"`
+	PosterAccent                *string     `json:"posterAccent"`
+	PosterAccentRgb             *string     `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64    `json:"posterAccentContrastOnBlack"`
+	BannerImageUrl              *string     `json:"bannerImageUrl"`
+	Description                 *string     `json:"description"`
+	Episodes                    *int32      `json:"episodes"`
+	Status                      *string     `json:"status"`
+	Season                      *string     `json:"season"`
+	SeasonYear                  *int32      `json:"seasonYear"`
+	AverageScore                *float64    `json:"averageScore"`
+	Format                      *string     `json:"format"`
+	TrailerID                   *string     `json:"trailerId"`
+	TrailerSite                 *string     `json:"trailerSite"`
+	TrailerChecked              bool        `json:"trailerChecked"`
+	StartDate                   pgtype.Date `json:"startDate"`
+	EndDate                     pgtype.Date `json:"endDate"`
+	Duration                    *int32      `json:"duration"`
+	Source                      *string     `json:"source"`
+	DetailFetched               bool        `json:"detailFetched"`
 }
 
 // Upsert anime_cache main row from AniList sync.  Bangumi columns
@@ -3877,6 +3906,11 @@ func (q *Queries) UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCachePara
 		arg.TrailerID,
 		arg.TrailerSite,
 		arg.TrailerChecked,
+		arg.StartDate,
+		arg.EndDate,
+		arg.Duration,
+		arg.Source,
+		arg.DetailFetched,
 	)
 	return err
 }

@@ -49,7 +49,7 @@ func TestTrailerNormalizeValidateAndSerialize(t *testing.T) {
 		{"no trailer object at all", nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			row := NormalizeMainRow(anilist.Media{ID: 1, Trailer: tc.trailer}, anilist.TrailerSelected)
+			row := NormalizeMainRow(anilist.Media{ID: 1, Trailer: tc.trailer}, anilist.DetailDocument)
 
 			require.True(t, row.TrailerChecked,
 				"a selecting query always records that it asked, whatever came back")
@@ -85,7 +85,7 @@ func TestTrailerOmittedListingDoesNotClearStoredValue(t *testing.T) {
 	row := NormalizeMainRow(anilist.Media{
 		ID:      1,
 		Trailer: &anilist.Trailer{ID: sptr("abcdefghijk"), Site: sptr("youtube")},
-	}, anilist.TrailerNotSelected)
+	}, anilist.SearchDocument)
 
 	assert.False(t, row.TrailerChecked)
 	assert.Nil(t, row.TrailerID)
@@ -225,7 +225,9 @@ func (f *ensureCachedFakeAniList) Detail(context.Context, anilist.DetailVars) (*
 // stale so it gets filled once; a checked one is not, so a confirmed
 // absence never turns into a permanent re-fetch loop.
 func TestTrailerUnknownRefreshesButCheckedNullDoesNot(t *testing.T) {
-	row := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp()}
+	// detail_fetched_at is set so the trailer stamp is the only thing
+	// under test; see TestIsStale_NeverDetailFetched for the other one.
+	row := dbgen.GetAnimeMainByIDRow{CachedAt: freshTimestamp(), DetailFetchedAt: freshTimestamp()}
 	studios := []string{"Studio"}
 	chars := []dbgen.GetAnimeCharactersByIDRow{{Role: sptr("MAIN")}}
 	require.True(t, isStale(row, studios, chars, nil))

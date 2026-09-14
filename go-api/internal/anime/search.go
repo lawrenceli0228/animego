@@ -292,7 +292,7 @@ func (s *SearchService) run(ctx context.Context, q, genre string, page, perPage 
 	for _, m := range resp.Page.Media {
 		// SearchAnimeQuery does not select trailer: a nil Trailer here
 		// says nothing, so stored metadata must survive this upsert.
-		args := NormalizeMainRow(m, anilist.TrailerNotSelected)
+		args := NormalizeMainRow(m, anilist.SearchDocument)
 		if upErr := s.db.UpsertAnimeCache(ctx, args); upErr != nil {
 			// Per-row failure is logged and skipped — the response
 			// composition can still proceed via the AniList payload +

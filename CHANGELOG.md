@@ -4,6 +4,23 @@
 
 ## [未发布]
 
+### 放送日期、时长、原作从来没写进库：查询要了、列也在、upsert 就是没列它们
+
+详情页信息栏的「放送 / 时长 / 原作」三行几乎总是空的，schema.org 的 `startDate` 同样缺席。查下去发现是一条从头就断的写入链：`AnimeDetailQuery` 从移植那天起就向 AniList 选了 `startDate / endDate / duration / source`，`anime_cache` 从 0001 起就有 `start_date / duration / source` 三列，而 `UpsertAnimeCache` 的 INSERT 列表里没有它们——每次 warm 拿到手，每次扔掉。库里仅有的几百个值全是 Express 时代那次一次性迁移带过来的存量，能活到今天只是因为 DO UPDATE 同样不碰这三列。
+
+★ **验错的方式也记一笔**：8 月那份审计已经指出这条链断了，而我这次拿一部番的 API 响应看到 `startDate` 有值，就写成「已修好」。那部恰好是存量。**详情页渲染了某字段 + 一条样本返回了它，不等于写入链通了**；要看的是最近一次 upsert 之后的行。
+
+修法：migration 0034 补上 `end_date`；upsert 写四列，DO UPDATE 用 `COALESCE(EXCLUDED.x, anime_cache.x)`——放送日一旦知道就不会变回不知道，所以列表页那种没选这几个字段的 upsert 传 NULL 进来也抹不掉已知值，不需要像 trailer 那样再带一个「选没选」标志。FuzzyDate 转 date 沿用 Express 迁移的规则：年月日三个都有才写，只有年份的留空——一个 `date` 列说不出「2011 年的某一天」，补成 1 月 1 日就是把没说过的话当事实印在页面和结构化数据里。pg 测试覆盖三步：详情 upsert 写入 → 列表 upsert 不擦除 → 第二次详情 upsert 覆盖成新值；把 COALESCE 换成裸 `EXCLUDED` 那一步 1 fail。
+
+### 「没有 studio 就当过期」让一类番在每次缓存过期时都重打一次 AniList，永远
+
+`isStale` 从 Express 原样搬来的两条判定：studios 为空 → 过期，characters 为空 → 过期。它们想表达的是「这行只被列表查询写过、还没走过详情查询」，但对 AniList 本来就没列主制作公司、或者没有角色的番，详情查询写下的就是空集——下一次读到空集又判过期，再拉，再写空，再判过期。进程内缓存一小时一过期，这类番每小时每次访问都多付一次上游请求，而且从不终止。
+
+改成和 `trailer_checked_at` 同一个形状：新列 `detail_fetched_at`，只有真正跑过 `AnimeDetailQuery` 的两条路径打戳，列表 upsert 保留原值；`isStale` 看戳不看子表长度。为此把 `anilist.TrailerSelection` 换成 `anilist.Document`——一个 Media 到底来自哪份 GraphQL 文档，同时决定「nil trailer 算不算答案」和「空子表算不算答案」，两个问题一个参数回答，第六个调用点不回答就编不过。`TestDocumentSelectionsMatchTheQueries` 把每个常量钉到它声称的文档文本上：从 `AnimeDetailQuery` 删掉任何一个子连接，测试红。
+
+migration 里用旧启发式**最后一次**给存量打戳（任一详情专属子表有行的，`detail_fetched_at = cached_at`；`anime_genres` 不算，列表路径也写它），之后只认戳。漏标的行多拉一次然后被打上戳，自愈；这正是这列存在的意义。`testutil.MigrateTo` 是为了测这条 UPDATE 加的：退到 0033、种行、升到 0034、看戳——`SetupPG` 对着空库跑全部 migration，回填语句在那里没有对象。
+
+
 ### 预告片还是放不了：按路由去掉 COOP/COEP 在 SPA 里根本不成立，两个头整站删掉
 
 #174 让 nginx 在 `/anime/` 路由上不发 `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy`，验收时直接打开详情页是能播的。合并四天后用户报「还是不行」，截图里 DevTools 的 Issues 面板写着 *Specify a Cross-Origin Embedder Policy to stop this frame from being blocked*——那份文档**带着** COEP。
