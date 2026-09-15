@@ -12,6 +12,8 @@
 
 schema.org 验证器两个类型零错误零警告；Google 富媒体测试「路径」和「评价摘要」各检出 1 项有效内容。
 
+部署后（`04fb265`）：`/anime/154587` 出两份 `<script type="application/ld+json">`，面包屑「首页 › 2023 秋季 › 葬送的芙莉莲」，`/en/` 版的父级指 `/en/seasonal/fall/2023`，Rich Results Test 抓线上 URL 同样两项有效零错误。数 `application/ld+json` 字符串会得到 4——RSC 的 flight payload 把 script 再序列化一遍，数标签才是 2。
+
 ★ **`VideoObject` 这次没做，且做不了。** 实测把预告片嵌成 `trailer: VideoObject`，Google 报严重问题「未填写字段 uploadDate」——那是必填项，而 AniList 只给 YouTube id，oEmbed 也不给日期。要做得先有 YouTube Data API 的 key（`videos.list?part=snippet` 拿 `publishedAt`，50 个 id 一次），多一列、多一趟 sweep。等拍板。
 
 
@@ -34,6 +36,8 @@ V2 拿到的 Subject 里一直带着 `tags`（标签名 + 投票数），`bangum
 
 ★ 这条只对**新走 V2 的行**生效。`bangumi_version` 是单向棘轮（TODOS 有那条），已经在 2 以上的一万三千行不会自己再来一遍；要给存量补中文标签，是后台 `re-enrich-ids` 或那条棘轮 TODO 的事，不是这里能顺手做的。
 
+部署 8 小时后：`source = 'bangumi'` 的标签 2 部 16 行——上面那句不是预言，是实测。
+
 
 ### 标签、外部链接、制作公司的 id 和角色，以及 JSON-LD 的 `sameAs`
 
@@ -44,6 +48,8 @@ V2 拿到的 Subject 里一直带着 `tags`（标签名 + 投票数），`bangum
 `sameAs` 进 JSON-LD：AniList 页永远有（id 就是行的键）、Bangumi 和 MAL 页在 id 已知时、然后是 AniList 列出的官网和社交账号。流媒体页不算身份——Crunchyroll 的条目说的是「在哪看」不是「这是什么」——不进去。这是对 AnimeGO.org 那次品牌混淆最直接的消歧信号：这一页说的是三个目录各有一页的那部作品，不是一个碰巧同名的站。详情页信息栏加了「外部链接」一行，**和 `sameAs` 用同一个集合**（官网、社交、三个目录），页面和结构化数据不可能对哪些 URL 属于这部番各说各话。
 
 `fetchChildren` 从 11 个位置返回值改成一个结构体：每加一张子表都要改三处调用点加一个测试，这次是第三回。facts sweep 的文档同步扩到 tags 和 externalLinks（它选的每一样仍然都是 AniList 独家的事实），migration 再次清零 `facts_checked_at`——理由同 0036，问题变宽了旧戳作废。Bangumi 的中文标签由 V2 写，那是下一条。
+
+部署 8 小时后：`anime_tags` 里 AniList 标签 4,868 部 / 44,805 行，`anime_external_links` 2,062 部 / 4,614 行，都跟着 facts sweep 每小时 500 行在涨。芙莉莲那行还没轮到，线上 `sameAs` 仍是两个 URL。
 
 
 ### V2 不再向 Bangumi 要角色列表：那一步写的两个字段上游根本没有，写了也活不过一天
@@ -64,6 +70,8 @@ V2 拿到的 Subject 里一直带着 `tags`（标签名 + 投票数），`bangum
 
 `perPage` 从 8 / 10 放到 25——AniList 嵌套连接的上限，实测 `pageInfo.perPage` 到此封顶。之前一半以上的番顶在那两个数上。详情页**画的数量没变**（还是 8 个角色、10 个 staff，用常量钉住）：人物网格在手机上是单列，25 行会把分集列表挤到两屏以外；「查看全部」归人物页那一步。
 
+部署 8 小时后：带 `character_id` 的番 795 → 1,305 部（15,114 行）；`staff_id` 已经有 3,205 个跨不止一部作品出现——「人物页值不值得开」的那个数，比计划里等一周提前有了答案。
+
 ★ 顺带做了一个判断并写在 TODOS 里：V2 里那段按名字匹配、写 `name_cn` 的循环是死代码（上游端点没这个字段），有了 id 之后也不值得改成「按 id upsert 保住富化列」——因为**现在没有任何富化列有东西可保**。删掉它是下一个 PR 的事，这条只加 id。
 
 
@@ -79,6 +87,8 @@ V2 拿到的 Subject 里一直带着 `tags`（标签名 + 投票数），`bangum
 
 facts sweep 的文档同步扩到这组标量（它选的每一样都是 AniList 独家来源的事实）。★但 sweep 的戳回答的是「问过没有」，而问题变宽了：在四字段文档下打过戳的行没被问过 popularity 和别名——所以 migration 把 `facts_checked_at` 全部清零，让 sweep 按自己的节奏再走一遍，而不是留两代戳并存。
 
+部署 8 小时后：`popularity` 非空 7,649 / 18,504；`anime_synonyms` 12,386 行覆盖 5,170 部；连载中的 253 部里 85 部已有 `next_airing_at`。其余跟 sweep 走。
+
 
 ### 四个字段的存量回填：不整仓 warm-all，走 50 个 id 一批的 facts sweep
 
@@ -91,6 +101,8 @@ facts sweep 的文档同步扩到这组标量（它选的每一样都是 AniList
 写入用 `COALESCE`，和 upsert 同一条规则：文档选了字段、AniList 回 null，意思是「它没说」（只知道年份的日期、未知的原作），不是「把存的清掉」。`updated_at` 只在某个事实真的变了才动——它是 sitemap 报给 Google 的 lastmod，重读一遍什么都没变的行不该让整张 sitemap 重新发布；但真变了就该动，因为详情页的信息栏和 JSON-LD 的 `startDate/endDate` 正是从这几列来的。AniList 不再提供的 id（合并或删除）会被单独打戳，否则它们会永远排在每一趟的最前面。
 
 `FuzzyDate.Whole()` 从 `internal/anime` 里那个未导出的转换函数提出来放到 `anilist` 包：sweep 在 `internal/queue`，而 `anime` 导入 `queue`，不能反过来。「年月日三段齐才算日期」这条规则现在只在一处，两个写入方各自包一层。
+
+第八小时：`facts_checked_at` 4,000 / 18,504（0036 和 0038 各清过一次零，所以从部署算起而不是从第一次上线算起），`start_date` 非空 341 → 10,019。按这个速率整库两天。
 
 
 ### 放送日期、时长、原作从来没写进库：查询要了、列也在、upsert 就是没列它们
