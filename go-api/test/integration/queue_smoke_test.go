@@ -216,6 +216,12 @@ func (noRowV12DB) ListDescriptionCnCandidates(_ context.Context, _ pgtype.Interv
 // queue.DescriptionBackfillWriter.  Unreachable while the candidate list is
 // empty; no-ops rather than panics so that if a future test does seed a
 // candidate, it fails on an assertion rather than on scaffolding.
+func (noRowV12DB) DeleteAnimeTagsBySource(_ context.Context, _ int32, _ string) error { return nil }
+
+func (noRowV12DB) InsertAnimeTag(_ context.Context, _ int32, _ string, _ string, _ *int32, _ bool) error {
+	return nil
+}
+
 func (noRowV12DB) UpdateDescriptionCn(_ context.Context, _ *string, _ int32, _ *int32) error {
 	return nil
 }

@@ -354,6 +354,12 @@ func (noopV12DB) UpsertEpisodeTitleSourced(_ context.Context, _ dbgen.UpsertEpis
 
 // UpdateDescriptionCn satisfies V2Writer + V3Writer.  Registration tests
 // never invoke this method.
+func (noopV12DB) DeleteAnimeTagsBySource(_ context.Context, _ int32, _ string) error { return nil }
+
+func (noopV12DB) InsertAnimeTag(_ context.Context, _ int32, _ string, _ string, _ *int32, _ bool) error {
+	return nil
+}
+
 func (noopV12DB) UpdateDescriptionCn(_ context.Context, _ *string, _ int32, _ *int32) error {
 	return nil
 }
