@@ -178,6 +178,14 @@ const en = {
     next: 'Next',
   },
   // Season page
+  hub: {
+    count: '{n} titles',
+    pageOf: 'Page {page} of {total}',
+    prev: '← Previous',
+    next: 'Next →',
+    noAnime: 'No anime yet',
+    metaSuffix: 'Sorted by popularity, with scores, episode counts and synopses in one place.',
+  },
   seasonPage: {
     title: 'Seasonal Anime',
     noAnime: 'No anime found',

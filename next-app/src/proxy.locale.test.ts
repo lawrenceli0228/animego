@@ -116,12 +116,35 @@ describe("unknown first segments fall through to a real 404", () => {
 describe("non-page requests are never localized", () => {
   // Rewriting /sitemap.xml to /zh-Hans/sitemap.xml 404s the one URL this
   // site most needs Google to keep fetching.
-  test.each([["/sitemap.xml"], ["/robots.txt"], ["/api/healthz"], ["/jassub/wasm/worker.bundle.js"]])(
-    "%s is passed straight through",
-    async (path) => {
-      expect(rewrittenTo(await proxy(request(path)))).toBeNull();
-    },
-  );
+  test.each([
+    ["/sitemap.xml"],
+    ["/sitemaps/anime/sitemap/0.xml"],
+    ["/sitemaps/hubs/sitemap.xml"],
+    ["/robots.txt"],
+    ["/version.json"],
+    ["/api/healthz"],
+    ["/jassub/wasm/worker.bundle.js"],
+    ["/jassub/wasm/jassub-worker.wasm"],
+    ["/fonts/x.woff2"],
+    ["/site.webmanifest"],
+  ])("%s is passed straight through", async (path) => {
+    expect(rewrittenTo(await proxy(request(path)))).toBeNull();
+  });
+});
+
+describe("a page whose last segment ends in a dot-suffix is still a page", () => {
+  // The old guard was `\.[a-z0-9]+$` -- anything with a dot -- which sent
+  // every studio named like J.C.STAFF and every email-shaped handle to the
+  // built-in 404, because the bare URL never got the rewrite it needs to
+  // reach /[lang]/. Only real file types are files.
+  test.each([
+    ["/studio/J.C.STAFF", "/zh-Hans/studio/J.C.STAFF"],
+    ["/studio/P.A.%20Works", "/zh-Hans/studio/P.A.%20Works"],
+    ["/u/someone@gmail.com", "/zh-Hans/u/someone@gmail.com"],
+    ["/genre/sci-fi", "/zh-Hans/genre/sci-fi"],
+  ])("%s is localized", async (path, expected) => {
+    expect(rewrittenTo(await proxy(request(path)))).toBe(expected);
+  });
 });
 
 describe("legacy ?lang= URLs move to the real tree", () => {

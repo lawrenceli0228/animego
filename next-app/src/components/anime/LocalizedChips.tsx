@@ -30,7 +30,9 @@
 // server-rendered and therefore zh — see the route note at the top of
 // app/anime/[id]/page.tsx for why the line is drawn here.
 
+import Link from "@/components/ui/LocaleLink";
 import { formatLabel, genreLabel } from "@/lib/contentLabels";
+import { genreFromSlug, genrePath, genreSlug } from "@/lib/hubs/paths";
 import { useLang } from "@/lib/lang-client";
 
 // These take class names, not style objects. The caller (the detail page)
@@ -51,17 +53,27 @@ interface GenreChipsProps {
  * Renders the whole genre row in a single client instance. The chip *text*
  * is localised; the underlying enum value is untouched, so nothing here
  * changes the values used in /search?genre= links elsewhere.
+ *
+ * Each chip is a link to the genre's hub page — the first link out of a
+ * detail page to anything but another title, and the one that turns 18k
+ * pages into a graph. A genre with no hub (the adult one) stays a span.
  */
 export function GenreChips({ genres, className, chipClassName }: GenreChipsProps) {
   const { lang } = useLang();
   if (!genres.length) return null;
   return (
     <div className={className}>
-      {genres.map((g) => (
-        <span key={g} className={chipClassName}>
-          {genreLabel(g, lang)}
-        </span>
-      ))}
+      {genres.map((g) =>
+        genreFromSlug(genreSlug(g)) ? (
+          <Link key={g} href={genrePath(g)} className={chipClassName} prefetch={false}>
+            {genreLabel(g, lang)}
+          </Link>
+        ) : (
+          <span key={g} className={chipClassName}>
+            {genreLabel(g, lang)}
+          </span>
+        ),
+      )}
     </div>
   );
 }

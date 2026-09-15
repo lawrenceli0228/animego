@@ -272,7 +272,9 @@
   矛盾了很久没人发现 —— 一个文件里两段注释互相打架，是这类腐烂的典型信号。
 - **Depends on / blocked by:** 无。
 
-## `proxy.ts` 把任何以点后缀结尾的路径当成静态资源，裸 URL 因此匹配不到路由
+## ✅ 已修：`proxy.ts` 把任何以点后缀结尾的路径当成静态资源，裸 URL 因此匹配不到路由
+
+> 2026-09-15 随 hub 页一起修：`NON_PAGE_PATH` 改成真实扩展名白名单。触发点是 `/studio/J.C.STAFF`——那家有几百部番。`proxy.locale.test.ts` 钉住白名单和四个带点的页面路径；e2e 的 KNOWN DEFECT 用例翻成正向断言。下面是原始记录。
 
 - **What:** `proxy.ts:94` 的 `NON_PAGE_PATH = /^\/api\/|^\/_next\/|\.[a-z0-9]+$/i`。
   第三个分支意思是「任何以 `.` + 字母数字结尾的路径」。这类路径会跳过 locale 改写，
