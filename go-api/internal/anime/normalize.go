@@ -255,12 +255,17 @@ type CharacterRow struct {
 	DisplayOrder       int32
 	NameEn             *string
 	NameJa             *string
-	NameCn             *string // always nil from AniList; V2 worker writes this
+	NameCn             *string // always nil: nothing writes it -- see TODOS.md, the Bangumi endpoint V2 reads has no name_cn
 	ImageUrl           *string
 	Role               *string
 	VoiceActorEn       *string
 	VoiceActorJa       *string
 	VoiceActorImageUrl *string
+	// AniList's ids for the character and the (first Japanese) voice
+	// actor.  Nil when AniList's node carried no positive id, which the
+	// column CHECK would refuse.  Since 0037.
+	CharacterID  *int32
+	VoiceActorID *int32
 }
 
 // StaffRow is one child-row payload for anime_staff.  DisplayOrder must be
@@ -271,6 +276,9 @@ type StaffRow struct {
 	NameJa       *string
 	ImageUrl     *string
 	Role         *string
+	// AniList's id for the person.  Nil when the node carried none.
+	// Since 0037.
+	StaffID *int32
 }
 
 // RecommendationRow is one child-row payload for anime_recommendations.
@@ -346,7 +354,8 @@ func RelationsFromMedia(m anilist.Media) []RelationRow {
 // edge ordering.  VoiceActor* fields come from edges.voiceActors[0] when
 // present — Express picks the first JAPANESE entry, the GraphQL query
 // already filters server-side so the first array entry is the correct one.
-// NameCn is always nil here; V2 enrichment writes it via Bangumi later.
+// NameCn is always nil here, and nothing downstream fills it either --
+// the Bangumi endpoint V2 reads returns no name_cn (TODOS.md).
 func CharactersFromMedia(m anilist.Media) []CharacterRow {
 	if m.Characters == nil || len(m.Characters.Edges) == 0 {
 		return []CharacterRow{}
@@ -363,6 +372,7 @@ func CharactersFromMedia(m anilist.Media) []CharacterRow {
 		}
 
 		var vaEn, vaJa, vaImg *string
+		var vaID *int32
 		if len(e.VoiceActors) > 0 {
 			va := e.VoiceActors[0]
 			if va.Name != nil {
@@ -372,6 +382,7 @@ func CharactersFromMedia(m anilist.Media) []CharacterRow {
 			if va.Image != nil {
 				vaImg = va.Image.Medium
 			}
+			vaID = positiveID(va.ID)
 		}
 
 		out = append(out, CharacterRow{
@@ -384,6 +395,8 @@ func CharactersFromMedia(m anilist.Media) []CharacterRow {
 			VoiceActorEn:       vaEn,
 			VoiceActorJa:       vaJa,
 			VoiceActorImageUrl: vaImg,
+			CharacterID:        positiveID(e.Node.ID),
+			VoiceActorID:       vaID,
 		})
 	}
 	return out
@@ -411,9 +424,21 @@ func StaffFromMedia(m anilist.Media) []StaffRow {
 			NameJa:       nameJa,
 			ImageUrl:     imageURL,
 			Role:         e.Role,
+			StaffID:      positiveID(e.Node.ID),
 		})
 	}
 	return out
+}
+
+// positiveID narrows an AniList node id for an id column, and turns the
+// decode default (0, for a node whose id was absent) into NULL rather
+// than a value the column's CHECK would refuse.
+func positiveID(id int) *int32 {
+	if id <= 0 {
+		return nil
+	}
+	n := int32(id)
+	return &n
 }
 
 // RecommendationsFromMedia maps Media.Recommendations to []RecommendationRow.

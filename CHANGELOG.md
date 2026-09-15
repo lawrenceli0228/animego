@@ -4,6 +4,17 @@
 
 ## [未发布]
 
+### 角色、声优、staff 存下 AniList 的 id；每部从 8 / 10 个放到整页 25 个
+
+`anime_characters` 和 `anime_staff` 从 0001 起只存名字和图，没存 id——`AnimeDetailQuery` 一直选着 `node { id }`，`normalize.go` 拿到手就丢。没有 id 就说不出「同一个人在另一部里」，人物页、「还配过」列表、任何往外的 join 都无从谈起。migration 0037 加 `character_id` / `voice_actor_id` / `staff_id` 三列（可空，正数 CHECK，带部分索引给反查用），normaliser 把 id 传下去，DTO 吐出来。
+
+存量不回填：详情路径每次重拉整表替换，一行的 id 会随它的番下一次被读到时一起到（24h TTL 或后台 re-enrich），不多花一次上游请求。
+
+`perPage` 从 8 / 10 放到 25——AniList 嵌套连接的上限，实测 `pageInfo.perPage` 到此封顶。之前一半以上的番顶在那两个数上。详情页**画的数量没变**（还是 8 个角色、10 个 staff，用常量钉住）：人物网格在手机上是单列，25 行会把分集列表挤到两屏以外；「查看全部」归人物页那一步。
+
+★ 顺带做了一个判断并写在 TODOS 里：V2 里那段按名字匹配、写 `name_cn` 的循环是死代码（上游端点没这个字段），有了 id 之后也不值得改成「按 id upsert 保住富化列」——因为**现在没有任何富化列有东西可保**。删掉它是下一个 PR 的事，这条只加 id。
+
+
 ### 向 AniList 多要七个标量和一张别名表，四份文档一起要，upsert 才没有「没选就写空」的歧义
 
 阶段 2 的第一步。`Media` 上一直有、目录里一直没有的：`synonyms`（别名）、`popularity` / `favourites`（榜单和「多少人在追」）、`idMal`（外链三件套的最后一个）、`isAdult`（成人标记，此前全站靠 `genre = 'Hentai'` 一根线）、`countryOfOrigin`、`nextAiringEpisode`（连载中的「第 N 集·几天后」）。migration 0036 加七列和 `anime_synonyms` 表。
