@@ -1,8 +1,6 @@
 package anime
 
 import (
-	"time"
-
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/colorx"
@@ -106,27 +104,13 @@ func NormalizeMainRow(m anilist.Media, doc anilist.Document) dbgen.UpsertAnimeCa
 	}
 }
 
-// dateFromFuzzy turns an AniList FuzzyDate into a date column value.
-//
-// A column of type date cannot say "sometime in 2011", and pretending it
-// can — padding a missing month or day with 1 — would print "2011年1月1日"
-// on the page and emit it as schema.org startDate, both as fact.  So the
-// rule is the one the Express migration already applied to the rows it
-// carried over (transforms.MakeDate): all three parts or nothing.  A
-// year-only date is left NULL, which the upsert's COALESCE then reads as
-// "no new information" rather than as an erasure.
+// dateFromFuzzy turns an AniList FuzzyDate into a date column value:
+// the whole date when AniList stated one, NULL otherwise.  The rule and
+// its reasons live on FuzzyDate.Whole, because the facts sweep in
+// internal/queue writes the same columns and cannot import this package.
 func dateFromFuzzy(f *anilist.FuzzyDate) pgtype.Date {
-	if f == nil || f.Year == nil || f.Month == nil || f.Day == nil {
-		return pgtype.Date{}
-	}
-	y, mo, d := *f.Year, *f.Month, *f.Day
-	if y <= 0 || mo < 1 || mo > 12 || d < 1 || d > 31 {
-		return pgtype.Date{}
-	}
-	t := time.Date(y, time.Month(mo), d, 0, 0, 0, 0, time.UTC)
-	// time.Date normalises an impossible day (Feb 30) forward into the
-	// next month; that is not the date AniList stated, so refuse it.
-	if t.Day() != d || t.Month() != time.Month(mo) {
+	t, ok := f.Whole()
+	if !ok {
 		return pgtype.Date{}
 	}
 	return pgtype.Date{Time: t, Valid: true}

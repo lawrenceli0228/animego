@@ -69,3 +69,18 @@ func TestDocumentSelectionsMatchTheQueries(t *testing.T) {
 	// change that starts persisting schedule rows has to pick a Document.
 	assert.False(t, strings.Contains(WeeklyScheduleQuery, trailerSelector))
 }
+
+// TestMediaFactsQuerySelectsExactlyTheFourFacts pins the sweep document
+// to the four columns 0034 taught the upsert to write, and to nothing
+// the sweep could overwrite across the catalogue by accident.  The
+// selection is the contract: queue/anime_facts.go reads these four and
+// only these four off the Media it gets back.
+func TestMediaFactsQuerySelectsExactlyTheFourFacts(t *testing.T) {
+	for _, sel := range []string{"id", "startDate { year month day }", "endDate   { year month day }", "duration", "source", "id_in: $ids"} {
+		assert.Contains(t, MediaFactsQuery, sel)
+	}
+	for _, forbidden := range []string{"title", "coverImage", "description", "averageScore", "episodes", "status", "genres", "trailer", "studios", "characters"} {
+		assert.NotContains(t, MediaFactsQuery, forbidden,
+			"MediaFactsQuery must not select %q: the sweep would write it over every row with no second source to restore from", forbidden)
+	}
+}

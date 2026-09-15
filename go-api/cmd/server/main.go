@@ -1226,6 +1226,11 @@ func buildWorkers(d workerDeps) *river.Workers {
 	// request per row draws from the shared token bucket rather than
 	// opening a second one beside it.
 	queue.AddRatingsWorkers(workers, d.anilist, d.bangumi, d.db)
+
+	// The facts backfill.  Same AniList client as the ratings sweep so its
+	// batches queue on the one limiter beside everything else, and the
+	// same queue so the two never run side by side.
+	queue.AddFactsWorker(workers, d.anilist, d.db)
 	return workers
 }
 

@@ -2349,6 +2349,52 @@ func (q *Queries) ListAnilistRatingCandidates(ctx context.Context, currentYear i
 	return items, nil
 }
 
+const listAnimeFactsCandidates = `-- name: ListAnimeFactsCandidates :many
+SELECT anilist_id
+FROM anime_cache
+WHERE facts_checked_at IS NULL
+   OR (COALESCE(status, '') <> 'FINISHED'
+       AND facts_checked_at < now() - $1::interval)
+ORDER BY facts_checked_at NULLS FIRST, anilist_id
+LIMIT $2::int
+`
+
+// Rows the facts sweep (queue/anime_facts.go) should ask AniList about.
+//
+// Two populations, one query, same split as ListAnilistRatingCandidates:
+//
+//	never asked          facts_checked_at IS NULL           -> once, any status
+//	still moving         status other than FINISHED          -> again when the stamp ages out
+//
+// A finished work's dates, length and source do not change, so one read
+// is the last read.  An airing or announced one has no end date yet by
+// definition and may not have a start date either, so its stamp is
+// allowed to age out and the row is offered again.  CANCELLED rides with
+// the moving population: it is rare and a cancellation can still acquire
+// an end date.
+//
+// Never-asked rows come first so a backfill drains oldest-first and the
+// re-check population cannot starve it.
+func (q *Queries) ListAnimeFactsCandidates(ctx context.Context, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listAnimeFactsCandidates, staleAfter, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var anilist_id int32
+		if err := rows.Scan(&anilist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, anilist_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAnimeForHantBackfill = `-- name: ListAnimeForHantBackfill :many
 SELECT
     anilist_id,
@@ -3081,6 +3127,24 @@ func (q *Queries) MarkAnilistRatingChecked(ctx context.Context, anilistID int32)
 	return result.RowsAffected(), nil
 }
 
+const markAnimeFactsChecked = `-- name: MarkAnimeFactsChecked :execrows
+UPDATE anime_cache
+   SET facts_checked_at = now()
+ WHERE anilist_id = $1::int
+`
+
+// Stamp a row AniList declined to return, without touching its facts.
+// Same role as MarkAnilistRatingChecked: an id absent from the batch
+// response is deleted or merged upstream, and left unstamped it would
+// head every subsequent batch forever.
+func (q *Queries) MarkAnimeFactsChecked(ctx context.Context, anilistID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, markAnimeFactsChecked, anilistID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markBangumiNeedsReview = `-- name: MarkBangumiNeedsReview :exec
 UPDATE anime_cache
 SET bgm_id           = NULL,
@@ -3500,6 +3564,49 @@ func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nam
 		voiceActorImageUrl,
 	)
 	return err
+}
+
+const updateAnimeFacts = `-- name: UpdateAnimeFacts :execrows
+UPDATE anime_cache
+   SET start_date       = COALESCE($1::date, start_date),
+       end_date         = COALESCE($2::date,   end_date),
+       duration         = COALESCE($3::int,    duration),
+       source           = COALESCE($4::text,     source),
+       facts_checked_at = now(),
+       updated_at = CASE
+           WHEN start_date IS DISTINCT FROM COALESCE($1::date, start_date)
+             OR end_date   IS DISTINCT FROM COALESCE($2::date,   end_date)
+             OR duration   IS DISTINCT FROM COALESCE($3::int,    duration)
+             OR source     IS DISTINCT FROM COALESCE($4::text,     source)
+           THEN now() ELSE updated_at END
+ WHERE anilist_id = $5::int
+`
+
+// Write one row's four facts and stamp the read.
+//
+// Every fact is COALESCEd, for the reason UpdateAnilistRating COALESCEs
+// average_score: this statement walks the whole catalogue, and a null
+// from a document that selected the field means "AniList does not state
+// this" (a year-only date, an unknown source), not "clear what is
+// stored".  The detail upsert applies the same rule (UpsertAnimeCache),
+// so the two writers cannot disagree about what a null means.
+//
+// updated_at moves only when a fact actually changed.  It is the lastmod
+// ListSitemapShard reports, and here a change IS content: the page's
+// info rows and its JSON-LD startDate/endDate come from these columns.
+// A re-check that finds nothing new must not republish the row.
+func (q *Queries) UpdateAnimeFacts(ctx context.Context, startDate pgtype.Date, endDate pgtype.Date, duration *int32, source *string, anilistID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, updateAnimeFacts,
+		startDate,
+		endDate,
+		duration,
+		source,
+		anilistID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateBangumiRating = `-- name: UpdateBangumiRating :execrows

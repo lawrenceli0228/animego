@@ -209,3 +209,35 @@ const MediaRatingsQuery = `
     }
   }
 `
+
+// MediaFactsQuery — the four scalar facts for an explicit list of media
+// ids, for the sweep that fills them in across the back catalogue.
+//
+// Same shape and same reasoning as MediaRatingsQuery above: id_in rather
+// than a season page because a quarter of the catalogue has no season to
+// page by, and a batch of 50 per request because that is what turns a
+// whole-catalogue pass into hundreds of requests rather than thousands.
+//
+// The selection is exactly the four columns 0034 taught the upsert to
+// write, plus the id to attribute them.  Nothing else: this document is
+// not a cache warm either, and a sweep that overwrote titles or scores
+// across every row at once would have no second source to restore them
+// from if it was wrong.  See queue/anime_facts.go.
+//
+// Variables:
+//
+//	$ids     [Int]  AniList media ids, at most 50 (AniList's page cap)
+//	$perPage Int    page size — the caller passes len(ids)
+const MediaFactsQuery = `
+  query MediaFacts($ids: [Int], $perPage: Int) {
+    Page(page: 1, perPage: $perPage) {
+      media(id_in: $ids, type: ANIME) {
+        id
+        startDate { year month day }
+        endDate   { year month day }
+        duration
+        source
+      }
+    }
+  }
+`

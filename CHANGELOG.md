@@ -4,6 +4,19 @@
 
 ## [未发布]
 
+### 四个字段的存量回填：不整仓 warm-all，走 50 个 id 一批的 facts sweep
+
+上一条把写入链修通之后，剩下的问题是存量：一行只有在被人打开、且 `cached_at` 过了 24 小时的时候才会重新走一遍详情查询，没人看的行永远轮不到。按上线后头几个小时的速度，整个目录要一周，而且只盖得到被访问过的那部分。
+
+★ **整仓 warm-all 是错的答案。** 它对每一行跑一次 `AnimeDetailQuery`——角色、staff、关联、推荐一整包——而要的只是四个标量。#169 的评分 sweep 已经给出了正确形状：`id_in` 一次 50 个 id 的窄文档，整个目录几百次请求而不是上万次。所以这条就是那个 worker 换一份文档：`MediaFactsQuery` 只选 `id / startDate / endDate / duration / source`，有测试钉住它**不能**多选任何一个字段——一份走遍全表的文档要是把标题或评分写错，没有第二个来源能救回来。
+
+★ **节奏也照抄评分 sweep，理由同样不是「多久跑完」。** 每小时一趟、每趟 500 行（10 次请求，约 20 秒），因为这个上限保护的是和用户请求共用的那把 AniList 限流器——线上记过一次 `/api/anime/schedule` 在一趟 2,000 行的 sweep 后面等到 500。目录两天内排干；排干之后一趟只剩连载中和未播出的行，它们的戳每 30 天过期一次（完结番的日期不会再变，读一次就是最后一次）。三条 sweep 共用 `ratings` 队列的那一个 worker 槽，所以永远不会并排去撞同一把限流器。
+
+写入用 `COALESCE`，和 upsert 同一条规则：文档选了字段、AniList 回 null，意思是「它没说」（只知道年份的日期、未知的原作），不是「把存的清掉」。`updated_at` 只在某个事实真的变了才动——它是 sitemap 报给 Google 的 lastmod，重读一遍什么都没变的行不该让整张 sitemap 重新发布；但真变了就该动，因为详情页的信息栏和 JSON-LD 的 `startDate/endDate` 正是从这几列来的。AniList 不再提供的 id（合并或删除）会被单独打戳，否则它们会永远排在每一趟的最前面。
+
+`FuzzyDate.Whole()` 从 `internal/anime` 里那个未导出的转换函数提出来放到 `anilist` 包：sweep 在 `internal/queue`，而 `anime` 导入 `queue`，不能反过来。「年月日三段齐才算日期」这条规则现在只在一处，两个写入方各自包一层。
+
+
 ### 放送日期、时长、原作从来没写进库：查询要了、列也在、upsert 就是没列它们
 
 详情页信息栏的「放送 / 时长 / 原作」三行几乎总是空的，schema.org 的 `startDate` 同样缺席。查下去发现是一条从头就断的写入链：`AnimeDetailQuery` 从移植那天起就向 AniList 选了 `startDate / endDate / duration / source`，`anime_cache` 从 0001 起就有 `start_date / duration / source` 三列，而 `UpsertAnimeCache` 的 INSERT 列表里没有它们——每次 warm 拿到手，每次扔掉。库里仅有的几百个值全是 Express 时代那次一次性迁移带过来的存量，能活到今天只是因为 DO UPDATE 同样不碰这三列。
