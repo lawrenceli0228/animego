@@ -254,6 +254,14 @@ func (f *fakeBackfillDB) snapshotAttemptStamps() []int32 {
 	return dup
 }
 
+func (f *fakeBackfillDB) DeleteAnimeTagsBySource(_ context.Context, _ int32, _ string) error {
+	return nil
+}
+
+func (f *fakeBackfillDB) InsertAnimeTag(_ context.Context, _ int32, _ string, _ string, _ *int32, _ bool) error {
+	return nil
+}
+
 func (f *fakeBackfillDB) UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error {
 	call := backfillDescCall{anilistID: anilistID, descriptionCn: descriptionCn, bgmID: bgmID}
 	f.mu.Lock()

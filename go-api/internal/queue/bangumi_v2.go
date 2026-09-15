@@ -74,6 +74,7 @@ import (
 	"log/slog"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -131,6 +132,11 @@ type V2Writer interface {
 	MarkBangumiSubjectUnreadable(ctx context.Context, anilistID int32, bgmID int32) (int64, error)
 	UpsertEpisodeTitleSourced(ctx context.Context, arg dbgen.UpsertEpisodeTitleSourcedParams) (int64, error)
 	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
+	// The Bangumi half of anime_tags.  Scoped to source 'bangumi' on
+	// both calls: the AniList half is the detail path's and the facts
+	// sweep's, and this worker must not be able to clear it.
+	DeleteAnimeTagsBySource(ctx context.Context, animeID int32, source string) error
+	InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error
 }
 
 // V2Reader is the read surface the episode-title bound needs.
@@ -292,6 +298,14 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 	//     Best-effort; see persistDescriptionCn for the full rationale.
 	descCnSent := persistDescriptionCn(ctx, w.db, "bangumi_v2", subject, anilistID, bgmID)
 
+	// 1c) Bangumi's tags, from the same Subject payload.  These are the
+	//     only Chinese-language tags any source offers, and they were
+	//     decoded by the client for months with nothing reading them.
+	//     Best-effort like the description: a failure is logged, the
+	//     subject write already committed, and the next V2 run (or a
+	//     re-enrich) replaces the set.
+	tagsWritten := persistBangumiTags(ctx, w.db, subject, anilistID, bgmID)
+
 	// 2) Episode titles — Express Phase-4 parity. Best-effort: an
 	//    episodes ErrNotFound / transport error (or a write failure) is
 	//    logged + skipped, never fails the job — the subject writes
@@ -350,8 +364,63 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		"hasScore", bangumiScore != nil,
 		"hasChinese", titleChinese != nil,
 		"descriptionCnSent", descCnSent,
+		"tags", tagsWritten,
 		"epTitles", epTitlesWritten)
 	return nil
+}
+
+// bangumiTagsWriter is the two-method surface persistBangumiTags needs.
+type bangumiTagsWriter interface {
+	DeleteAnimeTagsBySource(ctx context.Context, animeID int32, source string) error
+	InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error
+}
+
+// bangumiTagMinVotes is the vote count below which a Bangumi tag is not
+// stored.  Bangumi tags are free text from users; the tail of a
+// subject's list is one person's typo or in-joke.  A tag two people
+// agreed on is the lowest bar that still keeps the list a list.
+const bangumiTagMinVotes = 2
+
+// persistBangumiTags replaces the row's Bangumi tag set from the
+// Subject payload and returns how many were written.  Names are trimmed
+// and de-duplicated (Bangumi does serve the same tag twice with
+// different casing of whitespace); the vote count goes in `rank` so a
+// reader can order them the way Bangumi's own page does.
+func persistBangumiTags(ctx context.Context, db bangumiTagsWriter, subject *bangumi.Subject, anilistID int32, bgmID int) int {
+	if subject == nil {
+		return 0
+	}
+	type tag struct {
+		name  string
+		votes int32
+	}
+	seen := map[string]struct{}{}
+	tags := make([]tag, 0, len(subject.Tags))
+	for _, t := range subject.Tags {
+		name := strings.TrimSpace(t.Name)
+		if name == "" || t.Count < bangumiTagMinVotes {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		tags = append(tags, tag{name: name, votes: int32(t.Count)})
+	}
+	if err := db.DeleteAnimeTagsBySource(ctx, anilistID, "bangumi"); err != nil {
+		slog.WarnContext(ctx, "bangumi_v2 tags delete error", "anilistId", anilistID, "bgmId", bgmID, "err", err)
+		return 0
+	}
+	written := 0
+	for _, t := range tags {
+		votes := t.votes
+		if err := db.InsertAnimeTag(ctx, anilistID, "bangumi", t.name, &votes, false); err != nil {
+			slog.WarnContext(ctx, "bangumi_v2 tag insert error", "anilistId", anilistID, "bgmId", bgmID, "tag", t.name, "err", err)
+			continue
+		}
+		written++
+	}
+	return written
 }
 
 // descriptionCnWriter is the one-method surface persistDescriptionCn

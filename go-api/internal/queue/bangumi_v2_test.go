@@ -117,8 +117,21 @@ type v2MarkUnreadableCall struct {
 	bgmID     int32
 }
 
+// v2TagCall snapshots one InsertAnimeTag invocation.
+type v2TagCall struct {
+	animeID int32
+	source  string
+	name    string
+	rank    *int32
+	spoiler bool
+}
+
 type fakeV2DB struct {
 	mu sync.Mutex
+
+	tagDeletes   []string
+	tags         []v2TagCall
+	insertTagErr error
 
 	updateV2Fn       func(ctx context.Context, c v2UpdateCall) error
 	upsertEpFn       func(ctx context.Context, c v2EpTitleCall) error
@@ -215,6 +228,29 @@ func epStrPtr(s string) *string {
 
 // UpdateDescriptionCn records the Chinese-description write.  Note the
 // sqlc-generated argument order: (ctx, descriptionCn, anilistID).
+func (f *fakeV2DB) DeleteAnimeTagsBySource(_ context.Context, id int32, source string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tagDeletes = append(f.tagDeletes, source)
+	return nil
+}
+
+func (f *fakeV2DB) InsertAnimeTag(_ context.Context, id int32, source, name string, rank *int32, spoiler bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.insertTagErr != nil {
+		return f.insertTagErr
+	}
+	f.tags = append(f.tags, v2TagCall{animeID: id, source: source, name: name, rank: rank, spoiler: spoiler})
+	return nil
+}
+
+func (f *fakeV2DB) snapshotTags() []v2TagCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]v2TagCall(nil), f.tags...)
+}
+
 func (f *fakeV2DB) UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error {
 	call := v2DescCnCall{anilistID: anilistID, descriptionCn: descriptionCn, bgmID: bgmID}
 	f.mu.Lock()
@@ -1161,4 +1197,64 @@ func TestNormalizeEpisodeTitles_ExactFitWithUnknownOffsetIsWritten(t *testing.T)
 	if want := []int32{1, 2}; !equalI32(epSorts(t, got), want) {
 		t.Fatalf("exact fit must be written: got %v want %v", epSorts(t, got), want)
 	}
+}
+
+// TestBangumiV2_WritesBangumiTags — the Subject's tags land under source
+// 'bangumi' with the vote count as rank, the set is replaced (delete
+// scoped to that source), and the noise floor drops one-vote tags,
+// blanks and duplicates.
+func TestBangumiV2_WritesBangumiTags(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			s := makeSubject(400602, "葬送的芙莉莲", 8.5, 36161)
+			s.Tags = []struct {
+				Name  string `json:"name"`
+				Count int    `json:"count"`
+			}{
+				{Name: "奇幻", Count: 1200},
+				{Name: "治愈", Count: 900},
+				{Name: " 奇幻 ", Count: 3},
+				{Name: "", Count: 50},
+				{Name: "某人的错字", Count: 1},
+			}
+			return s, nil
+		},
+	}
+	db := &fakeV2DB{}
+
+	require.NoError(t, runV2(t, b, db, 154587, 400602))
+
+	assert.Equal(t, []string{"bangumi"}, db.tagDeletes, "only the bangumi source is cleared")
+	got := db.snapshotTags()
+	require.Len(t, got, 2)
+	assert.Equal(t, "奇幻", got[0].name)
+	assert.Equal(t, int32(1200), *got[0].rank)
+	assert.Equal(t, "bangumi", got[0].source)
+	assert.False(t, got[0].spoiler)
+	assert.Equal(t, "治愈", got[1].name)
+	assert.Equal(t, int32(154587), got[1].animeID)
+}
+
+// TestBangumiV2_TagWriteErrorDoesNotFailJob — a tag insert failing is
+// logged and skipped; the subject write already committed.
+func TestBangumiV2_TagWriteErrorDoesNotFailJob(t *testing.T) {
+	t.Parallel()
+
+	b := &fakeBangumiV2{
+		subjectFn: func(_ context.Context, _ int) (*bangumi.Subject, error) {
+			s := makeSubject(1, "X", 7, 10)
+			s.Tags = []struct {
+				Name  string `json:"name"`
+				Count int    `json:"count"`
+			}{{Name: "奇幻", Count: 10}}
+			return s, nil
+		},
+	}
+	db := &fakeV2DB{insertTagErr: errors.New("constraint")}
+
+	require.NoError(t, runV2(t, b, db, 1, 1))
+	require.Len(t, db.snapshotV2Calls(), 1, "the subject write still happened")
+	assert.Empty(t, db.snapshotTags())
 }

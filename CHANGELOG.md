@@ -4,6 +4,15 @@
 
 ## [未发布]
 
+### Bangumi 的中文标签进 `anime_tags`：客户端解码了几个月、从没人读的那份
+
+V2 拿到的 Subject 里一直带着 `tags`（标签名 + 投票数），`bangumi/client.go` 解码了它，全仓零引用。这是所有来源里唯一一份**中文**标签——对 79.6% @qq.com 的用户比 AniList 的英文 tag 更有用。现在 V2 在写完评分和简介之后顺手把它写进 `anime_tags`，`source = 'bangumi'`，投票数放 `rank`，删除按来源作用域所以碰不到 AniList 那半。
+
+噪音底线：两票以下不存。Bangumi 标签是用户随手打的，一部番的列表尾巴是某一个人的错字或内梗，两个人同意过的才算标签。空白和重复（同一个标签名前后空格不同）也过滤。写入是尽力而为——某个标签插不进去只记一行日志，评分那次写入已经落地。
+
+★ 这条只对**新走 V2 的行**生效。`bangumi_version` 是单向棘轮（TODOS 有那条），已经在 2 以上的一万三千行不会自己再来一遍；要给存量补中文标签，是后台 `re-enrich-ids` 或那条棘轮 TODO 的事，不是这里能顺手做的。
+
+
 ### 标签、外部链接、制作公司的 id 和角色，以及 JSON-LD 的 `sameAs`
 
 阶段 2 的最后一块 AniList 侧数据。migration 0038：`anime_tags`（按来源分 AniList / Bangumi，一张表，删除按来源作用域——两个来源的写入方各自替换自己的那半，谁也清不掉对方的行）、`anime_external_links`（按 URL 做主键，因为 AniList 的 `site` 是展示标签，一部番可以有两个 "Official Site"）、`anime_studios` 加 `studio_id` 和 `is_main`。
