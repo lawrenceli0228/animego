@@ -136,7 +136,7 @@ const AnimeDetailQuery = `
       endDate   { year month day }
       duration
       source
-      studios(isMain: true) { nodes { name } }
+      studios { edges { isMain node { id name } } }
       relations { edges { relationType node { id title { romaji native } coverImage { large color } format } } }
       characters(sort: ROLE, page: 1, perPage: 25) {
         edges { role node { id name { full native } image { medium } }
@@ -156,6 +156,8 @@ const AnimeDetailQuery = `
       isAdult
       countryOfOrigin
       nextAiringEpisode { airingAt episode }
+      tags { name rank isMediaSpoiler }
+      externalLinks { site url type }
     }
   }
 `
@@ -245,8 +247,8 @@ const MediaRatingsQuery = `
 //
 // The selection is the four columns 0034 taught the upsert to write, the
 // scalar block 0036 added (synonyms, popularity, favourites, idMal,
-// isAdult, countryOfOrigin, nextAiringEpisode), and the id to attribute
-// them.  Nothing else: this document is not a cache warm, and a sweep
+// isAdult, countryOfOrigin, nextAiringEpisode), the two lists 0038 added
+// (tags, externalLinks), and the id to attribute them.  Nothing else: this document is not a cache warm, and a sweep
 // that overwrote titles or scores across every row at once would have no
 // second source to restore them from if it was wrong.  Everything it
 // does select is a fact AniList alone is the source of.  See
@@ -272,6 +274,8 @@ const MediaFactsQuery = `
         isAdult
         countryOfOrigin
         nextAiringEpisode { airingAt episode }
+        tags { name rank isMediaSpoiler }
+        externalLinks { site url type }
       }
     }
   }

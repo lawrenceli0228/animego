@@ -256,3 +256,54 @@ func TestCharacterAndStaffIDs_PG(t *testing.T) {
 	err = q.InsertAnimeStaffMember(ctx, dbgen.InsertAnimeStaffMemberParams{AnimeID: 3, DisplayOrder: 1, StaffID: &zero})
 	require.Error(t, err)
 }
+
+// TestTagsLinksStudios_PG — the 0038 tables and columns through the
+// detail path's writers and readers: the studio list keeps the main
+// studios as the "Studio" row's answer while the detail list carries
+// every role; a tag delete is scoped to its source; links de-duplicate
+// by URL and the CHECK refuses a non-http one.
+func TestTagsLinksStudios_PG(t *testing.T) {
+	ctx := context.Background()
+	uri := testutil.SetupPG(t)
+	pool := testutil.NewWebPool(t, ctx, uri)
+	q := dbgen.New(pool)
+
+	require.NoError(t, q.UpsertAnimeCache(ctx, NormalizeMainRow(anilist.Media{ID: 5, Title: &anilist.Title{Romaji: sptr("Row")}}, anilist.DetailDocument)))
+
+	mappa, aniplex := int32(569), int32(17)
+	require.NoError(t, q.InsertAnimeStudio(ctx, 5, "MAPPA", &mappa, true))
+	require.NoError(t, q.InsertAnimeStudio(ctx, 5, "Aniplex", &aniplex, false))
+	mains, err := q.GetAnimeStudiosByID(ctx, 5)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"MAPPA"}, mains, "the Studio row shows main studios only")
+	all, err := q.GetAnimeStudioDetailsByID(ctx, 5)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+	assert.Equal(t, "MAPPA", all[0].Studio)
+	assert.True(t, all[0].IsMain)
+	assert.Equal(t, int32(17), *all[1].StudioID)
+	assert.False(t, all[1].IsMain)
+
+	rank := int32(87)
+	require.NoError(t, q.InsertAnimeTag(ctx, 5, "anilist", "Magic", &rank, false))
+	votes := int32(1200)
+	require.NoError(t, q.InsertAnimeTag(ctx, 5, "bangumi", "奇幻", &votes, false))
+	require.NoError(t, q.DeleteAnimeTagsBySource(ctx, 5, "anilist"))
+	tags, err := q.GetAnimeTagsByID(ctx, 5)
+	require.NoError(t, err)
+	require.Len(t, tags, 1, "clearing the AniList set must leave the Bangumi set")
+	assert.Equal(t, "bangumi", tags[0].Source)
+	assert.Equal(t, "奇幻", tags[0].Name)
+	err = q.InsertAnimeTag(ctx, 5, "mal", "x", nil, false)
+	require.Error(t, err, "an unknown source is refused at the column")
+
+	info := "INFO"
+	require.NoError(t, q.InsertAnimeExternalLink(ctx, 5, "Official Site", "https://example.jp/", &info))
+	require.NoError(t, q.InsertAnimeExternalLink(ctx, 5, "Official Site", "https://example.jp/", &info), "duplicate URL is a no-op")
+	err = q.InsertAnimeExternalLink(ctx, 5, "junk", "javascript:alert(1)", nil)
+	require.Error(t, err, "a non-http URL is refused at the column")
+	links, err := q.GetAnimeExternalLinksByID(ctx, 5)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	assert.Equal(t, "https://example.jp/", links[0].Url)
+}

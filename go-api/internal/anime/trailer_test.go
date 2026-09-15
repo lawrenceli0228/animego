@@ -56,7 +56,7 @@ func TestTrailerNormalizeValidateAndSerialize(t *testing.T) {
 
 			detail := assembleDetail(dbgen.GetAnimeMainByIDRow{
 				AnilistID: 1, TrailerID: row.TrailerID, TrailerSite: row.TrailerSite,
-			}, nil, nil, nil, nil, nil, nil, nil, nil)
+			}, detailChildren{}, nil)
 			payload, err := json.Marshal(detail)
 			require.NoError(t, err)
 

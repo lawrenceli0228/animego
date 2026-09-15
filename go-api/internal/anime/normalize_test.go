@@ -134,14 +134,30 @@ func TestStudiosFromMedia(t *testing.T) {
 		got := StudiosFromMedia(anilist.Media{Studios: &anilist.StudioConnection{}})
 		assert.Empty(t, got)
 	})
-	t.Run("two studios passthrough preserves order", func(t *testing.T) {
+	t.Run("two studios passthrough preserves order, ids and roles", func(t *testing.T) {
 		got := StudiosFromMedia(anilist.Media{
-			Studios: &anilist.StudioConnection{Nodes: []anilist.Studio{
-				{Name: "MAPPA"},
-				{Name: "WIT"},
+			Studios: &anilist.StudioConnection{Edges: []anilist.StudioEdge{
+				{IsMain: true, Node: anilist.Studio{ID: 569, Name: "MAPPA"}},
+				{IsMain: false, Node: anilist.Studio{ID: 858, Name: "WIT"}},
 			}},
 		})
-		assert.Equal(t, []string{"MAPPA", "WIT"}, got)
+		require.Len(t, got, 2)
+		assert.Equal(t, "MAPPA", got[0].Name)
+		assert.Equal(t, int32(569), *got[0].StudioID)
+		assert.True(t, got[0].IsMain)
+		assert.Equal(t, "WIT", got[1].Name)
+		assert.False(t, got[1].IsMain)
+	})
+	t.Run("a studio listed twice keeps one row and the main flag wins", func(t *testing.T) {
+		got := StudiosFromMedia(anilist.Media{
+			Studios: &anilist.StudioConnection{Edges: []anilist.StudioEdge{
+				{IsMain: false, Node: anilist.Studio{ID: 1, Name: "Toei"}},
+				{IsMain: true, Node: anilist.Studio{ID: 1, Name: "Toei"}},
+				{IsMain: false, Node: anilist.Studio{Name: "  "}},
+			}},
+		})
+		require.Len(t, got, 1)
+		assert.True(t, got[0].IsMain)
 	})
 }
 

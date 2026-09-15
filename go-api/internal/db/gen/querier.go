@@ -285,6 +285,7 @@ type Querier interface {
 	// that with a DELETE inside the reset transaction.
 	DeleteAnimeCharactersForReset(ctx context.Context, animeID int32) error
 	DeleteAnimeEpisodeTitlesForReset(ctx context.Context, animeID int32) error
+	DeleteAnimeExternalLinks(ctx context.Context, animeID int32) error
 	// -------------------------------------------------------------------------
 	// Child-table upsert pairs for /:anilistId AniList re-fetch (P2.1.6).
 	//
@@ -302,6 +303,9 @@ type Querier interface {
 	DeleteAnimeStaff(ctx context.Context, animeID int32) error
 	DeleteAnimeStudios(ctx context.Context, animeID int32) error
 	DeleteAnimeSynonyms(ctx context.Context, animeID int32) error
+	// Scoped to one source on purpose: the AniList set and the Bangumi set
+	// are replaced by different writers, and neither may clear the other's.
+	DeleteAnimeTagsBySource(ctx context.Context, animeID int32, source string) error
 	// DELETE /api/comments/:id.  ON DELETE CASCADE handles any reply
 	// children — Express deleteOne() left them dangling, which is a bug
 	// the Postgres FK definition fixes for free.
@@ -629,6 +633,7 @@ type Querier interface {
 	// episodeTitles array shape: {episode, name, nameCn}.  Ordered by
 	// episode ASC so the response is stable across re-fetches.
 	GetAnimeEpisodeTitlesByID(ctx context.Context, animeID int32) ([]GetAnimeEpisodeTitlesByIDRow, error)
+	GetAnimeExternalLinksByID(ctx context.Context, animeID int32) ([]GetAnimeExternalLinksByIDRow, error)
 	// Phase 1 worker uses titleNative (primary) → titleRomaji (fallback) as
 	// the keyword for Bangumi search.  Mirrors anilist.service.js V1
 	// enqueue (fetchBangumiData first arg).  title_english / season_year /
@@ -664,8 +669,17 @@ type Querier interface {
 	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]GetAnimeRecommendationsByIDRow, error)
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
 	GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error)
+	// Every studio on the title with its id and role, for the studio page
+	// links.  Main studios first, then by name.
+	GetAnimeStudioDetailsByID(ctx context.Context, animeID int32) ([]GetAnimeStudioDetailsByIDRow, error)
+	// The main studios only, by name: what the detail page's "Studio" row
+	// and the JSON-LD productionCompany have always shown.  The committee
+	// and the licensor are in the table since 0038 but not in this answer.
 	GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error)
 	GetAnimeSynonymsByID(ctx context.Context, animeID int32) ([]string, error)
+	// Both sources, AniList's first (they carry a rank to sort on), then
+	// Bangumi's by vote count.
+	GetAnimeTagsByID(ctx context.Context, animeID int32) ([]GetAnimeTagsByIDRow, error)
 	// DELETE pre-check: read the row so we can confirm ownership before
 	// deleting.  Returns the user_id the comment was authored by; handler
 	// compares against claims.UserID.
@@ -1035,6 +1049,7 @@ type Querier interface {
 	// preserves the AniList edge ordering Express got for free from
 	// Mongoose's array indexing.
 	InsertAnimeCharacter(ctx context.Context, arg InsertAnimeCharacterParams) error
+	InsertAnimeExternalLink(ctx context.Context, animeID int32, site string, url string, type_ *string) error
 	InsertAnimeGenre(ctx context.Context, animeID int32, genre string) error
 	InsertAnimeRecommendation(ctx context.Context, arg InsertAnimeRecommendationParams) error
 	// Relations have a uuid PK; the table's default gen_random_uuid()
@@ -1043,8 +1058,9 @@ type Querier interface {
 	// ON CONFLICT clause — the uuid PK keeps the rows separate.
 	InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelationParams) error
 	InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error
-	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
+	InsertAnimeStudio(ctx context.Context, animeID int32, studio string, studioID *int32, isMain bool) error
 	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
+	InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error
 	// Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
 	// updated_at takes its column DEFAULT now().  anidb_id is last to match the
 	// physical column order (added by migration 0013 via ALTER); pgx CopyFrom

@@ -218,6 +218,9 @@ type Media struct {
 	NextAiringEpisode *NextAiringEpisode `json:"nextAiringEpisode,omitempty"`
 	// Alternative titles; detail and facts documents only.
 	Synonyms []string `json:"synonyms,omitempty"`
+	// Tags and external links; detail and facts documents only (0038).
+	Tags          []MediaTag     `json:"tags,omitempty"`
+	ExternalLinks []ExternalLink `json:"externalLinks,omitempty"`
 
 	// Detail-only fields (AnimeDetailQuery)
 	StartDate       *FuzzyDate       `json:"startDate,omitempty"`
@@ -294,16 +297,42 @@ func (m Media) ScoreVotes() *int {
 // Studio / Relation / Character / Staff / Recommendation connections
 // ---------------------------------------------------------------------------
 
-// Studio is one studio node.  Only the name is requested.
+// Studio is one studio node: AniList's id and the name.
 type Studio struct {
+	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
 
-// StudioConnection is the studios{nodes{...}} wrapper.  Express picks
-// `isMain: true` server-side, so this connection only carries primary
-// production studios.
+// StudioEdge ties a Studio to whether AniList calls it a main studio
+// (animation production) rather than a committee member, licensor or
+// publisher.  The document asks for every studio since 0038; the edge
+// carries the distinction the old `isMain: true` filter used to make.
+type StudioEdge struct {
+	IsMain bool   `json:"isMain"`
+	Node   Studio `json:"node"`
+}
+
+// StudioConnection is the studios{edges{...}} wrapper.
 type StudioConnection struct {
-	Nodes []Studio `json:"nodes"`
+	Edges []StudioEdge `json:"edges"`
+}
+
+// MediaTag is one entry of Media.tags: AniList's classification layer
+// under genres, with the community's 0-100 rank for how strongly it
+// applies to this title and whether it gives away the plot.
+type MediaTag struct {
+	Name           string `json:"name"`
+	Rank           *int   `json:"rank"`
+	IsMediaSpoiler bool   `json:"isMediaSpoiler"`
+}
+
+// ExternalLink is one entry of Media.externalLinks: an official site,
+// a social account or a streaming page.  Type is INFO | STREAMING |
+// SOCIAL; Site is a display label ("Official Site", "Twitter").
+type ExternalLink struct {
+	Site string  `json:"site"`
+	URL  string  `json:"url"`
+	Type *string `json:"type"`
 }
 
 // RelationNode is the embedded Media reference on a RelationEdge.
@@ -445,6 +474,57 @@ func (m Media) SynonymSet() []string {
 		}
 		seen[syn] = struct{}{}
 		out = append(out, syn)
+	}
+	return out
+}
+
+// TagSet returns the tags worth storing: trimmed, non-empty,
+// de-duplicated by name, in AniList's order.  Same role as SynonymSet:
+// the table's PK and CHECK would refuse the bad rows one at a time
+// inside a loop that swallows per-row errors.
+func (m Media) TagSet() []MediaTag {
+	if len(m.Tags) == 0 {
+		return []MediaTag{}
+	}
+	out := make([]MediaTag, 0, len(m.Tags))
+	seen := make(map[string]struct{}, len(m.Tags))
+	for _, t := range m.Tags {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, MediaTag{Name: name, Rank: t.Rank, IsMediaSpoiler: t.IsMediaSpoiler})
+	}
+	return out
+}
+
+// LinkSet returns the external links worth storing: http(s) URLs only
+// (the column CHECKs that), de-duplicated by URL (the PK), with an
+// empty site label replaced by "Link" so the row can render.
+func (m Media) LinkSet() []ExternalLink {
+	if len(m.ExternalLinks) == 0 {
+		return []ExternalLink{}
+	}
+	out := make([]ExternalLink, 0, len(m.ExternalLinks))
+	seen := make(map[string]struct{}, len(m.ExternalLinks))
+	for _, l := range m.ExternalLinks {
+		url := strings.TrimSpace(l.URL)
+		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+			continue
+		}
+		if _, dup := seen[url]; dup {
+			continue
+		}
+		seen[url] = struct{}{}
+		site := strings.TrimSpace(l.Site)
+		if site == "" {
+			site = "Link"
+		}
+		out = append(out, ExternalLink{Site: site, URL: url, Type: l.Type})
 	}
 	return out
 }

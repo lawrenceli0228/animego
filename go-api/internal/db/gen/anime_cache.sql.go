@@ -384,6 +384,15 @@ func (q *Queries) DeleteAnimeCharacters(ctx context.Context, animeID int32) erro
 	return err
 }
 
+const deleteAnimeExternalLinks = `-- name: DeleteAnimeExternalLinks :exec
+DELETE FROM anime_external_links WHERE anime_id = $1
+`
+
+func (q *Queries) DeleteAnimeExternalLinks(ctx context.Context, animeID int32) error {
+	_, err := q.db.Exec(ctx, deleteAnimeExternalLinks, animeID)
+	return err
+}
+
 const deleteAnimeGenres = `-- name: DeleteAnimeGenres :exec
 
 DELETE FROM anime_genres WHERE anime_id = $1
@@ -447,6 +456,17 @@ DELETE FROM anime_synonyms WHERE anime_id = $1
 
 func (q *Queries) DeleteAnimeSynonyms(ctx context.Context, animeID int32) error {
 	_, err := q.db.Exec(ctx, deleteAnimeSynonyms, animeID)
+	return err
+}
+
+const deleteAnimeTagsBySource = `-- name: DeleteAnimeTagsBySource :exec
+DELETE FROM anime_tags WHERE anime_id = $1 AND source = $2
+`
+
+// Scoped to one source on purpose: the AniList set and the Bangumi set
+// are replaced by different writers, and neither may clear the other's.
+func (q *Queries) DeleteAnimeTagsBySource(ctx context.Context, animeID int32, source string) error {
+	_, err := q.db.Exec(ctx, deleteAnimeTagsBySource, animeID, source)
 	return err
 }
 
@@ -911,6 +931,36 @@ func (q *Queries) GetAnimeEpisodeTitlesByID(ctx context.Context, animeID int32) 
 	return items, nil
 }
 
+const getAnimeExternalLinksByID = `-- name: GetAnimeExternalLinksByID :many
+SELECT site, url, type FROM anime_external_links WHERE anime_id = $1 ORDER BY type NULLS LAST, site, url
+`
+
+type GetAnimeExternalLinksByIDRow struct {
+	Site string  `json:"site"`
+	Url  string  `json:"url"`
+	Type *string `json:"type"`
+}
+
+func (q *Queries) GetAnimeExternalLinksByID(ctx context.Context, animeID int32) ([]GetAnimeExternalLinksByIDRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeExternalLinksByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeExternalLinksByIDRow{}
+	for rows.Next() {
+		var i GetAnimeExternalLinksByIDRow
+		if err := rows.Scan(&i.Site, &i.Url, &i.Type); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAnimeForBangumiSearch = `-- name: GetAnimeForBangumiSearch :one
 SELECT title_native, title_romaji, title_english, season_year, episodes
 FROM anime_cache
@@ -1296,10 +1346,45 @@ func (q *Queries) GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAn
 	return items, nil
 }
 
-const getAnimeStudiosByID = `-- name: GetAnimeStudiosByID :many
-SELECT studio FROM anime_studios WHERE anime_id = $1 ORDER BY studio
+const getAnimeStudioDetailsByID = `-- name: GetAnimeStudioDetailsByID :many
+SELECT studio, studio_id, is_main FROM anime_studios WHERE anime_id = $1 ORDER BY is_main DESC, studio
 `
 
+type GetAnimeStudioDetailsByIDRow struct {
+	Studio   string `json:"studio"`
+	StudioID *int32 `json:"studioId"`
+	IsMain   bool   `json:"isMain"`
+}
+
+// Every studio on the title with its id and role, for the studio page
+// links.  Main studios first, then by name.
+func (q *Queries) GetAnimeStudioDetailsByID(ctx context.Context, animeID int32) ([]GetAnimeStudioDetailsByIDRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeStudioDetailsByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeStudioDetailsByIDRow{}
+	for rows.Next() {
+		var i GetAnimeStudioDetailsByIDRow
+		if err := rows.Scan(&i.Studio, &i.StudioID, &i.IsMain); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAnimeStudiosByID = `-- name: GetAnimeStudiosByID :many
+SELECT studio FROM anime_studios WHERE anime_id = $1 AND is_main ORDER BY studio
+`
+
+// The main studios only, by name: what the detail page's "Studio" row
+// and the JSON-LD productionCompany have always shown.  The committee
+// and the licensor are in the table since 0038 but not in this answer.
 func (q *Queries) GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error) {
 	rows, err := q.db.Query(ctx, getAnimeStudiosByID, animeID)
 	if err != nil {
@@ -1337,6 +1422,47 @@ func (q *Queries) GetAnimeSynonymsByID(ctx context.Context, animeID int32) ([]st
 			return nil, err
 		}
 		items = append(items, synonym)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAnimeTagsByID = `-- name: GetAnimeTagsByID :many
+SELECT source, name, rank, is_spoiler
+FROM anime_tags
+WHERE anime_id = $1
+ORDER BY (source = 'anilist') DESC, rank DESC NULLS LAST, name
+`
+
+type GetAnimeTagsByIDRow struct {
+	Source    string `json:"source"`
+	Name      string `json:"name"`
+	Rank      *int32 `json:"rank"`
+	IsSpoiler bool   `json:"isSpoiler"`
+}
+
+// Both sources, AniList's first (they carry a rank to sort on), then
+// Bangumi's by vote count.
+func (q *Queries) GetAnimeTagsByID(ctx context.Context, animeID int32) ([]GetAnimeTagsByIDRow, error) {
+	rows, err := q.db.Query(ctx, getAnimeTagsByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAnimeTagsByIDRow{}
+	for rows.Next() {
+		var i GetAnimeTagsByIDRow
+		if err := rows.Scan(
+			&i.Source,
+			&i.Name,
+			&i.Rank,
+			&i.IsSpoiler,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -2225,6 +2351,22 @@ func (q *Queries) InsertAnimeCharacter(ctx context.Context, arg InsertAnimeChara
 	return err
 }
 
+const insertAnimeExternalLink = `-- name: InsertAnimeExternalLink :exec
+INSERT INTO anime_external_links (anime_id, site, url, type)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) InsertAnimeExternalLink(ctx context.Context, animeID int32, site string, url string, type_ *string) error {
+	_, err := q.db.Exec(ctx, insertAnimeExternalLink,
+		animeID,
+		site,
+		url,
+		type_,
+	)
+	return err
+}
+
 const insertAnimeGenre = `-- name: InsertAnimeGenre :exec
 INSERT INTO anime_genres (anime_id, genre) VALUES ($1, $2) ON CONFLICT DO NOTHING
 `
@@ -2358,11 +2500,16 @@ func (q *Queries) InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeSta
 }
 
 const insertAnimeStudio = `-- name: InsertAnimeStudio :exec
-INSERT INTO anime_studios (anime_id, studio) VALUES ($1, $2) ON CONFLICT DO NOTHING
+INSERT INTO anime_studios (anime_id, studio, studio_id, is_main) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING
 `
 
-func (q *Queries) InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error {
-	_, err := q.db.Exec(ctx, insertAnimeStudio, animeID, studio)
+func (q *Queries) InsertAnimeStudio(ctx context.Context, animeID int32, studio string, studioID *int32, isMain bool) error {
+	_, err := q.db.Exec(ctx, insertAnimeStudio,
+		animeID,
+		studio,
+		studioID,
+		isMain,
+	)
 	return err
 }
 
@@ -2372,6 +2519,23 @@ INSERT INTO anime_synonyms (anime_id, synonym) VALUES ($1, $2) ON CONFLICT DO NO
 
 func (q *Queries) InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error {
 	_, err := q.db.Exec(ctx, insertAnimeSynonym, animeID, synonym)
+	return err
+}
+
+const insertAnimeTag = `-- name: InsertAnimeTag :exec
+INSERT INTO anime_tags (anime_id, source, name, rank, is_spoiler)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error {
+	_, err := q.db.Exec(ctx, insertAnimeTag,
+		animeID,
+		source,
+		name,
+		rank,
+		isSpoiler,
+	)
 	return err
 }
 

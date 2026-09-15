@@ -40,10 +40,13 @@ type fakeFactsDB struct {
 	stamped    []int32
 	synonyms   map[int32][]string
 	synDeletes int
+	tags       map[int32][]string
+	tagDeletes []string
+	links      map[int32][]string
 }
 
 func newFakeFactsDB(ids ...int32) *fakeFactsDB {
-	return &fakeFactsDB{candidates: ids, written: map[int32]factsWrite{}, synonyms: map[int32][]string{}}
+	return &fakeFactsDB{candidates: ids, written: map[int32]factsWrite{}, synonyms: map[int32][]string{}, tags: map[int32][]string{}, links: map[int32][]string{}}
 }
 
 func (f *fakeFactsDB) ListAnimeFactsCandidates(_ context.Context, stale pgtype.Interval, limit int32) ([]int32, error) {
@@ -71,6 +74,27 @@ func (f *fakeFactsDB) DeleteAnimeSynonyms(_ context.Context, id int32) error {
 
 func (f *fakeFactsDB) InsertAnimeSynonym(_ context.Context, id int32, syn string) error {
 	f.synonyms[id] = append(f.synonyms[id], syn)
+	return nil
+}
+
+func (f *fakeFactsDB) DeleteAnimeTagsBySource(_ context.Context, id int32, source string) error {
+	f.tagDeletes = append(f.tagDeletes, source)
+	delete(f.tags, id)
+	return nil
+}
+
+func (f *fakeFactsDB) InsertAnimeTag(_ context.Context, id int32, source, name string, _ *int32, _ bool) error {
+	f.tags[id] = append(f.tags[id], source+":"+name)
+	return nil
+}
+
+func (f *fakeFactsDB) DeleteAnimeExternalLinks(_ context.Context, id int32) error {
+	delete(f.links, id)
+	return nil
+}
+
+func (f *fakeFactsDB) InsertAnimeExternalLink(_ context.Context, id int32, _ string, url string, _ *string) error {
+	f.links[id] = append(f.links[id], url)
 	return nil
 }
 
@@ -282,4 +306,34 @@ func TestAnimeFacts_ScalarBlockAndSynonyms(t *testing.T) {
 	_, has := db.synonyms[2]
 	assert.False(t, has, "an empty set is a delete with no inserts")
 	assert.Equal(t, 2, db.synDeletes)
+}
+
+// TestAnimeFacts_TagsAndLinks — the AniList tag set is replaced under
+// its own source (a Bangumi row would survive the delete), external
+// links are replaced, and both are cleaned the way the detail path
+// cleans them.
+func TestAnimeFacts_TagsAndLinks(t *testing.T) {
+	t.Parallel()
+
+	db := newFakeFactsDB(1)
+	db.tags[1] = []string{"anilist:stale"}
+	rank := 87
+	social := "SOCIAL"
+	al := &fakeFactsFetcher{respond: func(ids []int) (*anilist.MediaFactsResponse, error) {
+		m := factsMedia(1, fullDate(2024, 4, 26), nil, nil, nil)
+		m.Tags = []anilist.MediaTag{{Name: "Magic", Rank: &rank}, {Name: " Magic "}, {Name: ""}, {Name: "Iyashikei", IsMediaSpoiler: false}}
+		m.ExternalLinks = []anilist.ExternalLink{
+			{Site: "Official Site", URL: "https://frieren-anime.jp/"},
+			{Site: "Twitter", URL: "https://x.com/Anime_Frieren", Type: &social},
+			{Site: "junk", URL: "javascript:alert(1)"},
+			{Site: "dup", URL: "https://frieren-anime.jp/"},
+		}
+		return &anilist.MediaFactsResponse{Page: anilist.MediaPage{Media: []anilist.Media{m}}}, nil
+	}}
+
+	require.NoError(t, NewAnimeFactsWorker(al, db).Work(context.Background(), factsJob()))
+
+	assert.Equal(t, []string{"anilist"}, db.tagDeletes, "only the anilist source is cleared")
+	assert.Equal(t, []string{"anilist:Magic", "anilist:Iyashikei"}, db.tags[1])
+	assert.Equal(t, []string{"https://frieren-anime.jp/", "https://x.com/Anime_Frieren"}, db.links[1])
 }

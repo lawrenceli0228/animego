@@ -192,7 +192,7 @@ func TestClient_Detail_OK(t *testing.T) {
 	      "averageScore": 75,
 	      "genres": ["Drama"],
 	      "format": "TV",
-	      "studios": { "nodes": [{ "name": "Studio A" }] },
+	      "studios": { "edges": [{ "isMain": true, "node": { "id": 7, "name": "Studio A" } }] },
 	      "characters": { "edges": [] },
 	      "staff": { "edges": [] },
 	      "recommendations": { "nodes": [] }
@@ -212,8 +212,10 @@ func TestClient_Detail_OK(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.Equal(t, 42, resp.Media.ID)
 	require.NotNil(t, resp.Media.Studios)
-	require.Len(t, resp.Media.Studios.Nodes, 1)
-	assert.Equal(t, "Studio A", resp.Media.Studios.Nodes[0].Name)
+	require.Len(t, resp.Media.Studios.Edges, 1)
+	assert.Equal(t, "Studio A", resp.Media.Studios.Edges[0].Node.Name)
+	assert.Equal(t, 7, resp.Media.Studios.Edges[0].Node.ID)
+	assert.True(t, resp.Media.Studios.Edges[0].IsMain)
 }
 
 func TestClient_Schedule_OK(t *testing.T) {

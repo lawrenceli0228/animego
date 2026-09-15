@@ -75,6 +75,8 @@ type detailFakeDB struct {
 	deleteGenresCalls          atomic.Int32
 	deleteSynonymsCalls        atomic.Int32
 	insertedSynonyms           []string
+	insertedTags               []string
+	insertedLinks              []string
 	insertGenreCalls           atomic.Int32
 	deleteStudiosCalls         atomic.Int32
 	insertStudioCalls          atomic.Int32
@@ -230,7 +232,37 @@ func (f *detailFakeDB) DeleteAnimeStudios(ctx context.Context, id int32) error {
 	return nil
 }
 
-func (f *detailFakeDB) InsertAnimeStudio(ctx context.Context, id int32, s string) error {
+func (f *detailFakeDB) GetAnimeStudioDetailsByID(context.Context, int32) ([]dbgen.GetAnimeStudioDetailsByIDRow, error) {
+	return []dbgen.GetAnimeStudioDetailsByIDRow{}, nil
+}
+
+func (f *detailFakeDB) GetAnimeTagsByID(context.Context, int32) ([]dbgen.GetAnimeTagsByIDRow, error) {
+	return []dbgen.GetAnimeTagsByIDRow{}, nil
+}
+
+func (f *detailFakeDB) GetAnimeExternalLinksByID(context.Context, int32) ([]dbgen.GetAnimeExternalLinksByIDRow, error) {
+	return []dbgen.GetAnimeExternalLinksByIDRow{}, nil
+}
+
+func (f *detailFakeDB) DeleteAnimeTagsBySource(context.Context, int32, string) error { return nil }
+
+func (f *detailFakeDB) InsertAnimeTag(_ context.Context, _ int32, source, name string, _ *int32, _ bool) error {
+	f.mu.Lock()
+	f.insertedTags = append(f.insertedTags, source+":"+name)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *detailFakeDB) DeleteAnimeExternalLinks(context.Context, int32) error { return nil }
+
+func (f *detailFakeDB) InsertAnimeExternalLink(_ context.Context, _ int32, _ string, url string, _ *string) error {
+	f.mu.Lock()
+	f.insertedLinks = append(f.insertedLinks, url)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *detailFakeDB) InsertAnimeStudio(ctx context.Context, id int32, s string, _ *int32, _ bool) error {
 	f.insertStudioCalls.Add(1)
 	f.mu.Lock()
 	f.insertedStudios = append(f.insertedStudios, s)
@@ -1317,7 +1349,7 @@ func makeDetailMedia(id int) anilist.Media {
 		Title:      &anilist.Title{Romaji: &romaji},
 		CoverImage: &anilist.CoverImage{Large: &cover, Color: &color},
 		Genres:     []string{"Action"},
-		Studios:    &anilist.StudioConnection{Nodes: []anilist.Studio{{Name: studio}}},
+		Studios:    &anilist.StudioConnection{Edges: []anilist.StudioEdge{{IsMain: true, Node: anilist.Studio{ID: 1, Name: studio}}}},
 		Relations: &anilist.RelationConnection{Edges: []anilist.RelationEdge{
 			{
 				RelationType: &relType,
