@@ -315,6 +315,10 @@ export interface DetailCharacter {
   voiceActorJa: string | null;
   voiceActorCn: string | null;
   voiceActorImageUrl: string | null;
+  /** AniList ids (migration 0037). Null on a row written before the column
+   *  existed, until its title is re-fetched; absent on an older API build. */
+  characterId?: number | null;
+  voiceActorId?: number | null;
 }
 
 export interface DetailStaff {
@@ -327,6 +331,8 @@ export interface DetailStaff {
   nameJa: string | null;
   role: string;
   imageUrl: string | null;
+  /** AniList id (migration 0037). See DetailCharacter.characterId. */
+  staffId?: number | null;
 }
 
 export interface DetailRecommendation {

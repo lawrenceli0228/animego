@@ -1031,13 +1031,15 @@ SELECT
     voice_actor_en,
     voice_actor_ja,
     voice_actor_cn,
-    voice_actor_image_url
+    voice_actor_image_url,
+    character_id,
+    voice_actor_id
 FROM anime_characters
 WHERE anime_id = $1
 ORDER BY display_order;
 
 -- name: GetAnimeStaffByID :many
-SELECT name_en, name_ja, image_url, role
+SELECT name_en, name_ja, image_url, role, staff_id
 FROM anime_staff
 WHERE anime_id = $1
 ORDER BY display_order;
@@ -1145,12 +1147,14 @@ INSERT INTO anime_characters (
     anime_id, display_order,
     name_en, name_ja, name_cn,
     image_url, role,
-    voice_actor_en, voice_actor_ja, voice_actor_image_url
+    voice_actor_en, voice_actor_ja, voice_actor_image_url,
+    character_id, voice_actor_id
 ) VALUES (
     $1, $2,
     $3, $4, $5,
     $6, $7,
-    $8, $9, $10
+    $8, $9, $10,
+    $11, $12
 );
 
 -- name: DeleteAnimeStaff :exec
@@ -1159,10 +1163,12 @@ DELETE FROM anime_staff WHERE anime_id = $1;
 -- name: InsertAnimeStaffMember :exec
 INSERT INTO anime_staff (
     anime_id, display_order,
-    name_en, name_ja, image_url, role
+    name_en, name_ja, image_url, role,
+    staff_id
 ) VALUES (
     $1, $2,
-    $3, $4, $5, $6
+    $3, $4, $5, $6,
+    $7
 );
 
 -- name: DeleteAnimeRecommendations :exec

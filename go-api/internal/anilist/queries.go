@@ -113,9 +113,10 @@ const SeasonalAnimeQuery = `
 //
 //	$id Int  AniList media id (the integer the rest of the system keys off)
 //
-// Includes relations, characters (8 max), staff (10 max), and 6 top
-// recommendations.  No filters applied (AniList returns whatever exists
-// for that id).
+// Includes relations, characters and staff (25 each -- AniList's cap on
+// a nested connection page; the port asked for 8 and 10, and more than
+// half the catalogue sat at those caps), and 6 top recommendations.  No
+// filters applied (AniList returns whatever exists for that id).
 const AnimeDetailQuery = `
   query AnimeDetail($id: Int) {
     Media(id: $id, type: ANIME) {
@@ -137,11 +138,11 @@ const AnimeDetailQuery = `
       source
       studios(isMain: true) { nodes { name } }
       relations { edges { relationType node { id title { romaji native } coverImage { large color } format } } }
-      characters(sort: ROLE, page: 1, perPage: 8) {
+      characters(sort: ROLE, page: 1, perPage: 25) {
         edges { role node { id name { full native } image { medium } }
           voiceActors(language: JAPANESE) { id name { full native } image { medium } } }
       }
-      staff(sort: RELEVANCE, page: 1, perPage: 10) {
+      staff(sort: RELEVANCE, page: 1, perPage: 25) {
         edges { role node { id name { full native } image { medium } } }
       }
       recommendations(sort: RATING_DESC, page: 1, perPage: 6) {

@@ -929,8 +929,17 @@ function RelationsSection({
 
 // --- Characters section ---
 
+// How many people each section lays out.  The API now returns a whole
+// AniList page (25 characters, 25 staff — up from 8 and 10) so the ids
+// behind them can be stored for the person pages; the page keeps drawing
+// what it drew before, because the people grid is one column on a phone
+// and 25 rows of it would push the episode list off the first two
+// screens.  A "view all" belongs to the person-page work, not here.
+const DETAIL_CHARACTERS_SHOWN = 8;
+const DETAIL_STAFF_SHOWN = 10;
+
 function CharactersSection({
-  characters,
+  characters: allCharacters,
   lang,
   dict,
 }: {
@@ -938,6 +947,7 @@ function CharactersSection({
   lang: Lang;
   dict: Dict;
 }) {
+  const characters = allCharacters.slice(0, DETAIL_CHARACTERS_SHOWN);
   if (!characters.length) return null;
   const label = dict.detail.characters;
   const jaLabel = dict.detail.voiceActorLang;
@@ -1003,7 +1013,16 @@ function CharactersSection({
 
 // --- Staff section ---
 
-function StaffSectionView({ staff, lang, dict }: { staff: DetailStaff[]; lang: Lang; dict: Dict }) {
+function StaffSectionView({
+  staff: allStaff,
+  lang,
+  dict,
+}: {
+  staff: DetailStaff[];
+  lang: Lang;
+  dict: Dict;
+}) {
+  const staff = allStaff.slice(0, DETAIL_STAFF_SHOWN);
   if (!staff.length) return null;
   const label = dict.detail.staff;
 

@@ -113,3 +113,16 @@ func TestEveryUpsertingDocumentSelectsTheScalarBlock(t *testing.T) {
 	assert.NotContains(t, SearchAnimeQuery, "synonyms")
 	assert.NotContains(t, SeasonalAnimeQuery, "synonyms")
 }
+
+// TestDetailDocumentAsksForTheWholeFirstPage — 25 is AniList's cap on a
+// nested connection page (pageInfo.perPage tops out there whatever is
+// asked).  The port asked for 8 characters and 10 staff, and more than
+// half the catalogue sat exactly at those caps; a person page needs
+// the whole first page.  Both selections also carry the node id, which
+// 0037 stores.
+func TestDetailDocumentAsksForTheWholeFirstPage(t *testing.T) {
+	assert.Contains(t, AnimeDetailQuery, "characters(sort: ROLE, page: 1, perPage: 25)")
+	assert.Contains(t, AnimeDetailQuery, "staff(sort: RELEVANCE, page: 1, perPage: 25)")
+	assert.Contains(t, AnimeDetailQuery, "voiceActors(language: JAPANESE) { id")
+	assert.Contains(t, AnimeDetailQuery, "edges { role node { id name { full native } image { medium } }")
+}

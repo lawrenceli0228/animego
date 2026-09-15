@@ -214,3 +214,45 @@ func TestListingsExcludeAdultRows(t *testing.T) {
 	require.Len(t, top, 1)
 	assert.Equal(t, int32(1), top[0].AnilistID)
 }
+
+// TestCharacterAndStaffIDs_PG — the 0037 columns round-trip through the
+// detail path's writer and reader, a NULL id is accepted (pre-0037 rows),
+// and a non-positive id is refused at the column.
+func TestCharacterAndStaffIDs_PG(t *testing.T) {
+	ctx := context.Background()
+	uri := testutil.SetupPG(t)
+	pool := testutil.NewWebPool(t, ctx, uri)
+	q := dbgen.New(pool)
+
+	require.NoError(t, q.UpsertAnimeCache(ctx, NormalizeMainRow(anilist.Media{ID: 3, Title: &anilist.Title{Romaji: sptr("Row")}}, anilist.DetailDocument)))
+
+	cid, vid, sid := int32(138100), int32(112215), int32(95000)
+	require.NoError(t, q.InsertAnimeCharacter(ctx, dbgen.InsertAnimeCharacterParams{
+		AnimeID: 3, DisplayOrder: 0, NameEn: sptr("Frieren"), CharacterID: &cid, VoiceActorID: &vid,
+	}))
+	require.NoError(t, q.InsertAnimeCharacter(ctx, dbgen.InsertAnimeCharacterParams{
+		AnimeID: 3, DisplayOrder: 1, NameEn: sptr("legacy row"), // no ids
+	}))
+	require.NoError(t, q.InsertAnimeStaffMember(ctx, dbgen.InsertAnimeStaffMemberParams{
+		AnimeID: 3, DisplayOrder: 0, NameEn: sptr("Director"), StaffID: &sid,
+	}))
+
+	chars, err := q.GetAnimeCharactersByID(ctx, 3)
+	require.NoError(t, err)
+	require.Len(t, chars, 2)
+	assert.Equal(t, int32(138100), *chars[0].CharacterID)
+	assert.Equal(t, int32(112215), *chars[0].VoiceActorID)
+	assert.Nil(t, chars[1].CharacterID)
+	assert.Nil(t, chars[1].VoiceActorID)
+
+	staff, err := q.GetAnimeStaffByID(ctx, 3)
+	require.NoError(t, err)
+	require.Len(t, staff, 1)
+	assert.Equal(t, int32(95000), *staff[0].StaffID)
+
+	zero := int32(0)
+	err = q.InsertAnimeCharacter(ctx, dbgen.InsertAnimeCharacterParams{AnimeID: 3, DisplayOrder: 2, CharacterID: &zero})
+	require.Error(t, err, "a zero id must be refused at the column, not stored")
+	err = q.InsertAnimeStaffMember(ctx, dbgen.InsertAnimeStaffMemberParams{AnimeID: 3, DisplayOrder: 1, StaffID: &zero})
+	require.Error(t, err)
+}

@@ -791,7 +791,9 @@ SELECT
     voice_actor_en,
     voice_actor_ja,
     voice_actor_cn,
-    voice_actor_image_url
+    voice_actor_image_url,
+    character_id,
+    voice_actor_id
 FROM anime_characters
 WHERE anime_id = $1
 ORDER BY display_order
@@ -807,6 +809,8 @@ type GetAnimeCharactersByIDRow struct {
 	VoiceActorJa       *string `json:"voiceActorJa"`
 	VoiceActorCn       *string `json:"voiceActorCn"`
 	VoiceActorImageUrl *string `json:"voiceActorImageUrl"`
+	CharacterID        *int32  `json:"characterId"`
+	VoiceActorID       *int32  `json:"voiceActorId"`
 }
 
 // Sorted by display_order so the response preserves the AniList role
@@ -832,6 +836,8 @@ func (q *Queries) GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]
 			&i.VoiceActorJa,
 			&i.VoiceActorCn,
 			&i.VoiceActorImageUrl,
+			&i.CharacterID,
+			&i.VoiceActorID,
 		); err != nil {
 			return nil, err
 		}
@@ -1250,7 +1256,7 @@ func (q *Queries) GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]G
 }
 
 const getAnimeStaffByID = `-- name: GetAnimeStaffByID :many
-SELECT name_en, name_ja, image_url, role
+SELECT name_en, name_ja, image_url, role, staff_id
 FROM anime_staff
 WHERE anime_id = $1
 ORDER BY display_order
@@ -1261,6 +1267,7 @@ type GetAnimeStaffByIDRow struct {
 	NameJa   *string `json:"nameJa"`
 	ImageUrl *string `json:"imageUrl"`
 	Role     *string `json:"role"`
+	StaffID  *int32  `json:"staffId"`
 }
 
 func (q *Queries) GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error) {
@@ -1277,6 +1284,7 @@ func (q *Queries) GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAn
 			&i.NameJa,
 			&i.ImageUrl,
 			&i.Role,
+			&i.StaffID,
 		); err != nil {
 			return nil, err
 		}
@@ -2170,12 +2178,14 @@ INSERT INTO anime_characters (
     anime_id, display_order,
     name_en, name_ja, name_cn,
     image_url, role,
-    voice_actor_en, voice_actor_ja, voice_actor_image_url
+    voice_actor_en, voice_actor_ja, voice_actor_image_url,
+    character_id, voice_actor_id
 ) VALUES (
     $1, $2,
     $3, $4, $5,
     $6, $7,
-    $8, $9, $10
+    $8, $9, $10,
+    $11, $12
 )
 `
 
@@ -2190,6 +2200,8 @@ type InsertAnimeCharacterParams struct {
 	VoiceActorEn       *string `json:"voiceActorEn"`
 	VoiceActorJa       *string `json:"voiceActorJa"`
 	VoiceActorImageUrl *string `json:"voiceActorImageUrl"`
+	CharacterID        *int32  `json:"characterId"`
+	VoiceActorID       *int32  `json:"voiceActorId"`
 }
 
 // display_order is the slice index (0-based) so the relational re-read
@@ -2207,6 +2219,8 @@ func (q *Queries) InsertAnimeCharacter(ctx context.Context, arg InsertAnimeChara
 		arg.VoiceActorEn,
 		arg.VoiceActorJa,
 		arg.VoiceActorImageUrl,
+		arg.CharacterID,
+		arg.VoiceActorID,
 	)
 	return err
 }
@@ -2311,10 +2325,12 @@ func (q *Queries) InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelati
 const insertAnimeStaffMember = `-- name: InsertAnimeStaffMember :exec
 INSERT INTO anime_staff (
     anime_id, display_order,
-    name_en, name_ja, image_url, role
+    name_en, name_ja, image_url, role,
+    staff_id
 ) VALUES (
     $1, $2,
-    $3, $4, $5, $6
+    $3, $4, $5, $6,
+    $7
 )
 `
 
@@ -2325,6 +2341,7 @@ type InsertAnimeStaffMemberParams struct {
 	NameJa       *string `json:"nameJa"`
 	ImageUrl     *string `json:"imageUrl"`
 	Role         *string `json:"role"`
+	StaffID      *int32  `json:"staffId"`
 }
 
 func (q *Queries) InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error {
@@ -2335,6 +2352,7 @@ func (q *Queries) InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeSta
 		arg.NameJa,
 		arg.ImageUrl,
 		arg.Role,
+		arg.StaffID,
 	)
 	return err
 }

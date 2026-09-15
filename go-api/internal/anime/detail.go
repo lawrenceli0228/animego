@@ -249,6 +249,10 @@ type DetailCharacter struct {
 	VoiceActorJa       *string `json:"voiceActorJa"`
 	VoiceActorCn       *string `json:"voiceActorCn"`
 	VoiceActorImageUrl *string `json:"voiceActorImageUrl"`
+	// AniList ids (0037).  Null on a row written before the column
+	// existed, until its title is re-fetched.
+	CharacterID  *int32 `json:"characterId"`
+	VoiceActorID *int32 `json:"voiceActorId"`
 }
 
 // DetailStaff mirrors the anime_staff table.  Order matches the
@@ -258,6 +262,8 @@ type DetailStaff struct {
 	NameJa   *string `json:"nameJa"`
 	ImageUrl *string `json:"imageUrl"`
 	Role     *string `json:"role"`
+	// AniList id (0037).  Null until the title is re-fetched.
+	StaffID *int32 `json:"staffId"`
 }
 
 // DetailRecommendation mirrors the anime_recommendations table.  Order
@@ -827,6 +833,8 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 			VoiceActorEn:       c.VoiceActorEn,
 			VoiceActorJa:       c.VoiceActorJa,
 			VoiceActorImageUrl: c.VoiceActorImageUrl,
+			CharacterID:        c.CharacterID,
+			VoiceActorID:       c.VoiceActorID,
 		}); err != nil {
 			return fmt.Errorf("insert character %d: %w", c.DisplayOrder, err)
 		}
@@ -844,6 +852,7 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 			NameJa:       st.NameJa,
 			ImageUrl:     st.ImageUrl,
 			Role:         st.Role,
+			StaffID:      st.StaffID,
 		}); err != nil {
 			return fmt.Errorf("insert staff %d: %w", st.DisplayOrder, err)
 		}
@@ -1020,6 +1029,8 @@ func assembleDetail(
 			VoiceActorJa:       c.VoiceActorJa,
 			VoiceActorCn:       c.VoiceActorCn,
 			VoiceActorImageUrl: c.VoiceActorImageUrl,
+			CharacterID:        c.CharacterID,
+			VoiceActorID:       c.VoiceActorID,
 		})
 	}
 
@@ -1030,6 +1041,7 @@ func assembleDetail(
 			NameJa:   st.NameJa,
 			ImageUrl: st.ImageUrl,
 			Role:     st.Role,
+			StaffID:  st.StaffID,
 		})
 	}
 
