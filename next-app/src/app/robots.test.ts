@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import robots from "./robots";
 import { ANIME_SITEMAP_SHARDS, animeSitemapPath } from "@/lib/seo/animeSitemap";
+import { hubsSitemapUrl } from "@/lib/seo/hubSitemap";
 import { SITE_ORIGIN } from "@/lib/seo/alternates";
 
 // robots.txt is the only thing that makes the sharded anime sitemaps
@@ -27,10 +28,14 @@ describe("sitemap discovery", () => {
     }
   });
 
-  test("lists nothing beyond the static sitemap and the shards", () => {
+  test("the hub sitemap is listed", () => {
+    expect(sitemaps).toContain(hubsSitemapUrl());
+  });
+
+  test("lists nothing beyond the static sitemap, the hub sitemap and the shards", () => {
     // Catches the reverse mistake: a stale entry left behind after the
     // shard count changes points a crawler at a file that no longer exists.
-    expect(sitemaps).toHaveLength(ANIME_SITEMAP_SHARDS + 1);
+    expect(sitemaps).toHaveLength(ANIME_SITEMAP_SHARDS + 2);
   });
 
   test("every sitemap url is absolute and on the canonical origin", () => {

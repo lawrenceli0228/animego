@@ -2352,3 +2352,146 @@ UPDATE anime_cache
    SET facts_checked_at = now()
  WHERE anilist_id = sqlc.arg(anilist_id)::int;
 
+-- name: BrowseAnime :many
+-- One hub page of titles: a genre, a main studio, or a release year,
+-- exactly one of which the caller passes (the others NULL).  Same
+-- projection as GetSeasonalAnime so the page renders the same card.
+--
+-- The year is COALESCE(season_year, year of start_date): see migration
+-- 0039 for why, and note the expression must stay byte-identical to the
+-- index there or the planner will not use it.
+--
+-- Adult titles are excluded twice, by the column and by the genre, for
+-- the reason GetSeasonalAnime gives: rows nothing has re-read since the
+-- Express migration carry is_adult = false by default.
+--
+-- Popularity first because it is what a visitor arriving at "Action
+-- anime" expects to see at the top; score second so the long tail of
+-- rows the facts sweep has not reached yet still orders sensibly.
+SELECT
+    anilist_id,
+    title_romaji,
+    title_english,
+    title_native,
+    title_chinese,
+    title_hant,
+    title_hant_source,
+    title_hant_seo,
+    cover_image_url,
+    banner_image_url,
+    cover_image_color,
+    poster_accent,
+    average_score,
+    bangumi_score,
+    episodes,
+    season,
+    season_year,
+    status,
+    format,
+    description,
+    -- The Chinese synopsis channels, carried for the same reason title_hant is
+    -- carried: this endpoint returns every variant and the Next layer picks one
+    -- with pickDescription(). Without them the homepage hero — which reads the
+    -- top 5 of this list — printed an English synopsis under a Chinese title,
+    -- on a site whose whole acquisition channel is Chinese search.
+    --
+    -- The two *_source columns come along even though nothing renders them yet.
+    -- pickDescription() answers a missing source field with null rather than an
+    -- error, so omitting them would leave a future source badge silently blank
+    -- instead of obviously broken — and they are ten bytes each.
+    description_cn,
+    description_cn_source,
+    description_hant,
+    description_hant_source,
+    ARRAY(
+        SELECT g.genre
+        FROM anime_genres g
+        WHERE g.anime_id = anime_cache.anilist_id
+        ORDER BY g.genre
+    )::text[] AS genres,
+    (SELECT count(*)::bigint
+     FROM episode_comments discussion
+     WHERE discussion.anilist_id = anime_cache.anilist_id
+    ) AS discussion_count,
+    -- See GetCompletedGems for why trailer_checked_at stays out of list
+    -- projections.
+    trailer_id,
+    trailer_site
+FROM anime_cache
+WHERE NOT is_adult
+  AND NOT EXISTS (
+        SELECT 1 FROM anime_genres
+        WHERE anime_genres.anime_id = anime_cache.anilist_id
+          AND anime_genres.genre = 'Hentai'
+      )
+  AND (sqlc.narg(genre)::text IS NULL OR EXISTS (
+        SELECT 1 FROM anime_genres g
+        WHERE g.anime_id = anime_cache.anilist_id AND g.genre = sqlc.narg(genre)::text))
+  AND (sqlc.narg(studio)::text IS NULL OR EXISTS (
+        SELECT 1 FROM anime_studios st
+        WHERE st.anime_id = anime_cache.anilist_id AND st.studio = sqlc.narg(studio)::text AND st.is_main))
+  AND (sqlc.narg(release_year)::int IS NULL
+       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = sqlc.narg(release_year)::int)
+ORDER BY popularity DESC NULLS LAST, average_score DESC NULLS LAST, anilist_id
+LIMIT sqlc.arg(row_limit)::int OFFSET sqlc.arg(row_offset)::int;
+
+-- name: CountBrowseAnime :one
+-- Total for BrowseAnime's pagination envelope; same WHERE.
+SELECT count(*)::bigint AS total
+FROM anime_cache
+WHERE NOT is_adult
+  AND NOT EXISTS (
+        SELECT 1 FROM anime_genres
+        WHERE anime_genres.anime_id = anime_cache.anilist_id
+          AND anime_genres.genre = 'Hentai'
+      )
+  AND (sqlc.narg(genre)::text IS NULL OR EXISTS (
+        SELECT 1 FROM anime_genres g
+        WHERE g.anime_id = anime_cache.anilist_id AND g.genre = sqlc.narg(genre)::text))
+  AND (sqlc.narg(studio)::text IS NULL OR EXISTS (
+        SELECT 1 FROM anime_studios st
+        WHERE st.anime_id = anime_cache.anilist_id AND st.studio = sqlc.narg(studio)::text AND st.is_main))
+  AND (sqlc.narg(release_year)::int IS NULL
+       OR COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) = sqlc.narg(release_year)::int);
+
+-- name: ListGenreCounts :many
+-- Every genre with how many non-adult titles carry it.  Hentai is not a
+-- hub and is left out by the same rule the listings apply.
+SELECT g.genre, count(*)::bigint AS n
+FROM anime_genres g
+JOIN anime_cache a ON a.anilist_id = g.anime_id
+WHERE NOT a.is_adult AND g.genre <> 'Hentai'
+GROUP BY g.genre
+ORDER BY n DESC, g.genre;
+
+-- name: ListStudioCounts :many
+-- Main studios with at least sqlc.arg(min_titles) non-adult titles.  The
+-- floor keeps one-title production companies -- thousands of them --
+-- off the sitemap; a hub page of one card is a thin page.
+SELECT st.studio, count(*)::bigint AS n
+FROM anime_studios st
+JOIN anime_cache a ON a.anilist_id = st.anime_id
+WHERE st.is_main AND NOT a.is_adult
+GROUP BY st.studio
+HAVING count(*) >= sqlc.arg(min_titles)::int
+ORDER BY n DESC, st.studio;
+
+-- name: ListYearCounts :many
+-- Every release year with a non-adult title, by the same expression
+-- BrowseAnime filters on.
+SELECT COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int)::int AS release_year, count(*)::bigint AS n
+FROM anime_cache
+WHERE NOT is_adult
+  AND COALESCE(season_year, EXTRACT(YEAR FROM start_date)::int) IS NOT NULL
+GROUP BY 1
+ORDER BY 1 DESC;
+
+-- name: ListSeasonCounts :many
+-- Every (season, year) pair with a non-adult title, for the sitemap: the
+-- seasonal route already renders all of them, it just never listed more
+-- than the current quarter.
+SELECT season, season_year, count(*)::bigint AS n
+FROM anime_cache
+WHERE NOT is_adult AND season IS NOT NULL AND season_year IS NOT NULL
+GROUP BY season, season_year
+ORDER BY season_year DESC, season;

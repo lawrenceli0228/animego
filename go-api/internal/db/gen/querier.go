@@ -140,6 +140,22 @@ type Querier interface {
 	// social/notification edges between the two users. Repeating the request is
 	// idempotent and still cleans up any stale edges.
 	BlockUser(ctx context.Context, blockerID uuid.UUID, blockedID uuid.UUID) (BlockUserRow, error)
+	// One hub page of titles: a genre, a main studio, or a release year,
+	// exactly one of which the caller passes (the others NULL).  Same
+	// projection as GetSeasonalAnime so the page renders the same card.
+	//
+	// The year is COALESCE(season_year, year of start_date): see migration
+	// 0039 for why, and note the expression must stay byte-identical to the
+	// index there or the planner will not use it.
+	//
+	// Adult titles are excluded twice, by the column and by the genre, for
+	// the reason GetSeasonalAnime gives: rows nothing has re-read since the
+	// Express migration carry is_adult = false by default.
+	//
+	// Popularity first because it is what a visitor arriving at "Action
+	// anime" expects to see at the top; score second so the long tail of
+	// rows the facts sweep has not reached yet still orders sensibly.
+	BrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32, rowOffset int32, rowLimit int32) ([]BrowseAnimeRow, error)
 	// Half of the snapshot semantics an upsert cannot provide on its own.
 	//
 	// Upserting a fetch writes the episodes the upstream returned and says nothing
@@ -231,6 +247,8 @@ type Querier interface {
 	CountAnimeHoldingBgmID(ctx context.Context, bgmID *int32) (int64, error)
 	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
 	CountBgmIdMap(ctx context.Context) (int64, error)
+	// Total for BrowseAnime's pagination envelope; same WHERE.
+	CountBrowseAnime(ctx context.Context, genre *string, studio *string, releaseYear *int32) (int64, error)
 	CountCommentReactions(ctx context.Context, commentID uuid.UUID) (int64, error)
 	// Total for pagination — same filter as ListFeedActivities sans paging.
 	CountFeedActivities(ctx context.Context, dollar_1 []uuid.UUID) (int64, error)
@@ -1421,6 +1439,9 @@ type Querier interface {
 	// GET /api/users/:username/following — paginated list of users this
 	// user is following.  Same shape as ListFollowers but reverse FK.
 	ListFollowing(ctx context.Context, followerID uuid.UUID, limit int32, offset int32) ([]ListFollowingRow, error)
+	// Every genre with how many non-adult titles carry it.  Hentai is not a
+	// hub and is left out by the same rule the listings apply.
+	ListGenreCounts(ctx context.Context) ([]ListGenreCountsRow, error)
 	// POST /api/admin/enrichment/heal-cn — Express filter:
 	//   bgmId: { $ne: null }
 	//   bangumiVersion: { $gte: 2, $lt: 3 }   // i.e. version = 2
@@ -1505,6 +1526,10 @@ type Querier interface {
 	ListReleasingEpisodeTitleCandidates(ctx context.Context, staleAfter pgtype.Interval, rowLimit int32) ([]ListReleasingEpisodeTitleCandidatesRow, error)
 	// Passing NULL report_status returns the entire moderation queue.
 	ListReports(ctx context.Context, reportStatus *string, pageOffset int32, pageLimit int32) ([]ListReportsRow, error)
+	// Every (season, year) pair with a non-adult title, for the sitemap: the
+	// seasonal route already renders all of them, it just never listed more
+	// than the current quarter.
+	ListSeasonCounts(ctx context.Context) ([]ListSeasonCountsRow, error)
 	// One modulo slice of the whole catalogue, for /api/anime/sitemap.
 	//
 	// Deliberately unfiltered.  Every row in anime_cache renders a 200 at
@@ -1526,6 +1551,10 @@ type Querier interface {
 	// updated_at, not now(): Google discards lastmod it can prove wrong,
 	// and "every URL changed this second, on every fetch" is provably wrong.
 	ListSitemapShard(ctx context.Context, shardCount int32, shardIndex int32) ([]ListSitemapShardRow, error)
+	// Main studios with at least sqlc.arg(min_titles) non-adult titles.  The
+	// floor keeps one-title production companies -- thousands of them --
+	// off the sitemap; a hub page of one card is a thin page.
+	ListStudioCounts(ctx context.Context, minTitles int32) ([]ListStudioCountsRow, error)
 	// Explainable discovery ranking for the homepage.  Participation matters more
 	// than raw volume, reactions add a smaller signal, and a smooth age divisor
 	// lets a fresh smaller conversation outrank an old thread without making the
@@ -1590,6 +1619,9 @@ type Querier interface {
 	// scan over the PK index that comes back already sorted — which is why
 	// migration 0024 adds no secondary index.
 	ListWatchedEpisodes(ctx context.Context, userID uuid.UUID, anilistID int32) ([]int32, error)
+	// Every release year with a non-adult title, by the same expression
+	// BrowseAnime filters on.
+	ListYearCounts(ctx context.Context) ([]ListYearCountsRow, error)
 	// Authoritative AniList->Bangumi binding from the vendored id map
 	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
 	// consults this BEFORE any Bangumi search; a hit binds the subject with

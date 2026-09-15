@@ -241,6 +241,14 @@ const zhHant = {
     next: '下一頁',
   },
   // Season page
+  hub: {
+    count: '共 {n} 部',
+    pageOf: '第 {page} / {total} 頁',
+    prev: '← 上一頁',
+    next: '下一頁 →',
+    noAnime: '暫無番劇',
+    metaSuffix: '按人氣排序，評分、集數、劇情簡介一站搞定。',
+  },
   seasonPage: {
     title: '季度番劇',
     noAnime: '暫無番劇',

@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { hubsSitemapUrl } from "@/lib/seo/hubSitemap";
 import { animeSitemapUrls } from "@/lib/seo/animeSitemap";
 import { SITE_ORIGIN as SITE } from "@/lib/seo/alternates";
 
@@ -46,7 +47,7 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/library", "/player", "/api/", "/admin"],
       },
     ],
-    sitemap: [`${SITE}/sitemap.xml`, ...animeSitemapUrls()],
+    sitemap: [`${SITE}/sitemap.xml`, hubsSitemapUrl(), ...animeSitemapUrls()],
     host: SITE,
   };
 }

@@ -58,6 +58,7 @@ import {
 import { resolveLocale } from "@/lib/i18n/route";
 import { LOCALES } from "@/lib/i18n/locale";
 import { buildAlternates } from "@/lib/seo/alternates";
+import { studioPath } from "@/lib/hubs/paths";
 import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { asYouTubeTrailer } from "@/lib/youtubeTrailer";
 import type { Dict } from "@/lib/i18n";
@@ -594,7 +595,7 @@ function InfoSection({
   dict: Dict;
 }) {
   const seasonLab = seasonLabel(dict, detail.season);
-  const rows: Array<{ label: string; value: string | null }> = [
+  const rows: Array<{ label: string; value: string | null; node?: ReactNode }> = [
     {
       label: dict.detail.infoSeason,
       value: seasonLab && detail.seasonYear ? `${seasonLab} ${detail.seasonYear}` : null,
@@ -616,6 +617,21 @@ function InfoSection({
     {
       label: dict.detail.infoStudio,
       value: detail.studios.length > 0 ? detail.studios.join(" / ") : null,
+      // The studio names link to their hub pages; the plain `value` stays
+      // for the "every row empty" check and as the text fallback.
+      node:
+        detail.studios.length > 0 ? (
+          <span className={x.infoLinks}>
+            {detail.studios.map((name, i) => (
+              <span key={name}>
+                {i > 0 ? " / " : ""}
+                <Link href={studioPath(name)} className={x.infoLink} prefetch={false}>
+                  {name}
+                </Link>
+              </span>
+            ))}
+          </span>
+        ) : null,
     },
   ];
   const links = identityLinks(detail);
@@ -633,7 +649,7 @@ function InfoSection({
         {rows.map((r) => (
           <div key={r.label} className={x.infoCell}>
             <dt className={x.infoLabel}>{r.label}</dt>
-            <dd className={x.infoValue}>{r.value ?? "—"}</dd>
+            <dd className={x.infoValue}>{r.node ?? r.value ?? "—"}</dd>
           </div>
         ))}
         {links.length > 0 && (

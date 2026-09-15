@@ -296,6 +296,11 @@ func main() {
 		slog.Error("trending cache init failed", "err", err)
 		os.Exit(1)
 	}
+	hubsCache, err := anime.NewHubsCache()
+	if err != nil {
+		slog.Error("hubs cache init failed", "err", err)
+		os.Exit(1)
+	}
 	yearlyTopCache, err := anime.NewYearlyTopCache()
 	if err != nil {
 		slog.Error("yearly-top cache init failed", "err", err)
@@ -793,6 +798,10 @@ func main() {
 		r.Get("/completed-gems", anime.CompletedGems(q))
 		r.Get("/seasonal", seasonalSvc.Handler())
 		r.Get("/yearly-top", anime.YearlyTop(q, yearlyTopCache))
+		// The hub pages: one listing per genre / main studio / release
+		// year, and the index of which of those exist (for the sitemap).
+		r.Get("/browse", anime.Browse(q))
+		r.Get("/hubs", anime.Hubs(q, hubsCache))
 		r.Get("/trending", anime.Trending(q, trendingCache))
 		r.Get("/torrents", anime.Torrents(torrentsAgg, q))
 		r.Get("/search", searchSvc.Handler())

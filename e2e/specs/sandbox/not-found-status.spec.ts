@@ -368,33 +368,20 @@ test.describe("REGRESSION — a redirect can set a status again", () => {
     });
   });
 
-  test("KNOWN DEFECT: a handle ending in a dot-suffix is unreachable bare", async ({
-    page,
-  }) => {
-    // proxy.ts:94 treats any path ending in `.<alnum>` as a non-page, so it
-    // skips the locale rewrite that a bare URL needs to match /[lang]/...; the
-    // request then matches no route and gets Next's built-in 404 instead of
-    // the alias redirect. The guard exists to keep /sitemap.xml and /robots.txt
-    // from being rewritten under a locale, which is load-bearing — narrowing it
-    // to a real extension list is its own change, so this records the cost.
-    //
-    // It bites any email-shaped alias, since every common mail domain ends in
-    // a dot-suffix — but only on the bare form, and only on the alias rather
-    // than the canonical /u/user-xxxx that everything actually links to.
-    //
-    // Status-wise this is harmless — 404 is a defensible answer for a URL that
-    // should not be public. It is the redirect that is lost.
+  test("a handle ending in a dot-suffix is reachable bare", async ({ page }) => {
+    // This was a KNOWN DEFECT: proxy.ts treated any path ending in `.<alnum>`
+    // as a non-page and skipped the locale rewrite a bare URL needs to reach
+    // /[lang]/..., so every email-shaped alias (and every studio named like
+    // J.C.STAFF) got the built-in 404. The guard is now a list of real file
+    // types; the bare alias redirects like the prefixed one.
     await withAliasUser("dotsuffix", async (email) => {
       await requireApiResolves(page, email);
-      expect(await statusOf(page, `/u/${encodeURIComponent(email)}`)).toBe(404);
-
-      // The canonical handle has no dot and IS reachable bare, which is what
-      // makes the line above a routing defect rather than a broken fixture.
-      const res = await page.request.get(`/en/u/${encodeURIComponent(email)}`, {
+      const bare = await page.request.get(`/u/${encodeURIComponent(email)}`, {
         maxRedirects: 0,
       });
-      const canonical = res.headers()["location"] ?? "";
-      expect(canonical, "the prefixed form must still redirect").toBeTruthy();
+      expect([301, 302, 307, 308], "the bare alias must redirect, not 404").toContain(bare.status());
+      const canonical = bare.headers()["location"] ?? "";
+      expect(canonical, "the redirect names the canonical handle").toBeTruthy();
       expect(await statusOf(page, canonical)).toBe(200);
     });
   });

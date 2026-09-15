@@ -91,7 +91,17 @@ function isGated(path: string, searchParams: URLSearchParams): boolean {
 // not a page must not be rewritten under a locale segment. Rewriting
 // /sitemap.xml to /zh-Hans/sitemap.xml 404s the sitemap, which is the single
 // URL this site most needs Google to keep fetching.
-const NON_PAGE_PATH = /^\/api\/|^\/_next\/|\.[a-z0-9]+$/i;
+//
+// The third branch is a list of file types, not "anything with a dot": a
+// studio called J.C.STAFF and an email-shaped handle are pages, and the
+// earlier `\.[a-z0-9]+$` sent both to the built-in 404 by skipping the
+// rewrite a bare URL needs to reach /[lang]/. The list is every type this
+// site serves as a file -- the sitemaps and robots.txt, the version stamp,
+// public/ and jassub's assets -- and a type missing from it would be
+// rewritten under a locale and 404, so the tests beside this enumerate
+// the load-bearing ones.
+const NON_PAGE_PATH =
+  /^\/api\/|^\/_next\/|\.(?:xml|txt|json|ico|png|jpe?g|gif|svg|webp|avif|css|js|mjs|map|wasm|data|woff2?|ttf|otf|webmanifest|vtt|ass|srt|mp4|webm|mp3|m4a)$/i;
 
 function shouldLocalize(pathname: string): boolean {
   return !NON_PAGE_PATH.test(pathname);

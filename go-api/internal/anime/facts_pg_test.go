@@ -307,3 +307,95 @@ func TestTagsLinksStudios_PG(t *testing.T) {
 	require.Len(t, links, 1)
 	assert.Equal(t, "https://example.jp/", links[0].Url)
 }
+
+// TestBrowseAndHubs_PG — the hub queries on a real Postgres: each key
+// filters, adult titles are excluded, a committee studio does not make a
+// studio page, a title with no season lands on its year by start date,
+// the studio floor holds, and every season pair is listed.
+func TestBrowseAndHubs_PG(t *testing.T) {
+	ctx := context.Background()
+	uri := testutil.SetupPG(t)
+	pool := testutil.NewWebPool(t, ctx, uri)
+	q := dbgen.New(pool)
+
+	seed := func(id int32, season *string, seasonYear *int32, start *time.Time, popularity int32, adult bool) {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO anime_cache (anilist_id, title_romaji, status, season, season_year, start_date, popularity, is_adult)
+			VALUES ($1, 'row', 'FINISHED', $2, $3, $4, $5, $6)`, id, season, seasonYear, start, popularity, adult)
+		require.NoError(t, err)
+	}
+	winter, y2024, y2023 := "WINTER", int32(2024), int32(2023)
+	film := time.Date(2024, 8, 9, 0, 0, 0, 0, time.UTC)
+	seed(1, &winter, &y2024, nil, 900, false) // Action, MAPPA main
+	seed(2, &winter, &y2024, nil, 500, false) // Action, Aniplex committee only
+	seed(3, nil, nil, &film, 700, false)      // film: no season, 2024 by start date; Action
+	seed(4, &winter, &y2023, nil, 100, false) // 2023, Action
+	seed(5, &winter, &y2024, nil, 999, true)  // adult, Action, MAPPA main: never listed
+	for _, r := range [][2]any{{1, "Action"}, {2, "Action"}, {3, "Action"}, {4, "Action"}, {5, "Action"}, {5, "Hentai"}, {1, "Drama"}} {
+		require.NoError(t, q.InsertAnimeGenre(ctx, int32(r[0].(int)), r[1].(string)))
+	}
+	require.NoError(t, q.InsertAnimeStudio(ctx, 1, "MAPPA", nil, true))
+	require.NoError(t, q.InsertAnimeStudio(ctx, 2, "Aniplex", nil, false))
+	require.NoError(t, q.InsertAnimeStudio(ctx, 2, "MAPPA", nil, true))
+	require.NoError(t, q.InsertAnimeStudio(ctx, 5, "MAPPA", nil, true))
+
+	ids := func(rows []dbgen.BrowseAnimeRow) []int32 {
+		out := make([]int32, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.AnilistID)
+		}
+		return out
+	}
+	genre, studio, committee := "Action", "MAPPA", "Aniplex"
+
+	rows, err := q.BrowseAnime(ctx, &genre, nil, nil, 0, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 3, 2, 4}, ids(rows), "genre page: by popularity, adult row absent")
+	n, err := q.CountBrowseAnime(ctx, &genre, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), n)
+
+	rows, err = q.BrowseAnime(ctx, nil, &studio, nil, 0, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 2}, ids(rows), "studio page: main studio, adult row absent")
+	rows, err = q.BrowseAnime(ctx, nil, &committee, nil, 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "a committee member is not a studio page")
+
+	rows, err = q.BrowseAnime(ctx, nil, nil, &y2024, 0, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 3, 2}, ids(rows), "year page: the film with no season lands by start date")
+
+	rows, err = q.BrowseAnime(ctx, &genre, nil, nil, 1, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{3, 2}, ids(rows), "offset and limit")
+
+	genres, err := q.ListGenreCounts(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "Action", genres[0].Genre)
+	assert.Equal(t, int64(4), genres[0].N, "the adult row's genre membership is not counted")
+	for _, g := range genres {
+		assert.NotEqual(t, "Hentai", g.Genre)
+	}
+
+	studios, err := q.ListStudioCounts(ctx, 2)
+	require.NoError(t, err)
+	require.Len(t, studios, 1)
+	assert.Equal(t, "MAPPA", studios[0].Studio)
+	assert.Equal(t, int64(2), studios[0].N)
+	studios, err = q.ListStudioCounts(ctx, 3)
+	require.NoError(t, err)
+	assert.Empty(t, studios, "the floor holds")
+
+	years, err := q.ListYearCounts(ctx)
+	require.NoError(t, err)
+	require.Len(t, years, 2)
+	assert.Equal(t, int32(2024), years[0].ReleaseYear)
+	assert.Equal(t, int64(3), years[0].N)
+
+	seasons, err := q.ListSeasonCounts(ctx)
+	require.NoError(t, err)
+	require.Len(t, seasons, 2)
+	assert.Equal(t, int32(2024), *seasons[0].SeasonYear)
+	assert.Equal(t, int64(2), seasons[0].N, "adult row excluded from the season count too")
+}

@@ -4,6 +4,17 @@
 
 ## [未发布]
 
+### 三种 hub 页——按类型、按制作公司、按年份——让一万八千个详情页第一次互相链接
+
+阶段 3 的第一步。此前详情页上的类型 chip 是 `<span>`，制作公司是一段纯文本，整个目录里没有任何一页链向不止一部番：爬虫落在一部番上，无处可去。现在 `/genre/[slug]`（18 个类型，成人那个不设页）、`/studio/[name]`（只算主制作，不算制作委员会）、`/year/[year]`（季度年份，没季度的剧场版/OVA 按放送日归年——四分之一的目录靠这条兜底）各是一页，按人气排序，真分页、真 URL、canonical 各自独立，prev/next 是爬虫走向长尾的路。详情页的 chip 和制作公司名变成链接。
+
+后端是一个 `GET /api/anime/browse?genre=|studio=|year=`（有且只有一个键，零个是整个目录、两个是搜索，都拒绝）和一个 `GET /api/anime/hubs`（每种 hub 有哪些、各多少部，缓存一小时）。migration 0039 加三个反向索引：`anime_genres(genre)`、`anime_studios(studio) WHERE is_main`、`COALESCE(season_year, EXTRACT(YEAR FROM start_date))` 的表达式索引——查询里的表达式必须和索引逐字相同。制作公司的门槛是 5 部：一部番的 hub 是薄页面，而一部番的制作公司有几千家。
+
+sitemap 多一份 `/sitemaps/hubs/sitemap.xml`：类型、年份、制作公司，以及 **291 个季度页**——`/seasonal/[season]/[year]` 一直渲染得出全部，此前只列了当季那一个。robots.txt 加这一行。
+
+★ **顺手修了 TODOS 里那条 `proxy.ts` 的 bug，因为它挡在路上。** `NON_PAGE_PATH` 原来是「任何以 `.字母数字` 结尾的路径都不是页面」——那是为了不把 `/sitemap.xml` 改写到 locale 段下面，但它同时把 `/studio/J.C.STAFF`（几百部番）和所有邮箱形状的用户别名送进了内置 404。改成真实扩展名白名单，测试列出承重的那几个（两份 sitemap、robots、version.json、jassub 的 wasm、字体）和四个带点的页面路径；e2e 里那条「KNOWN DEFECT」用例翻成正向断言。
+
+
 ### Bangumi 的中文标签进 `anime_tags`：客户端解码了几个月、从没人读的那份
 
 V2 拿到的 Subject 里一直带着 `tags`（标签名 + 投票数），`bangumi/client.go` 解码了它，全仓零引用。这是所有来源里唯一一份**中文**标签——对 79.6% @qq.com 的用户比 AniList 的英文 tag 更有用。现在 V2 在写完评分和简介之后顺手把它写进 `anime_tags`，`source = 'bangumi'`，投票数放 `rank`，删除按来源作用域所以碰不到 AniList 那半。
