@@ -17,7 +17,8 @@ import type { ReactNode } from "react";
 import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
-import { buildJsonLd } from "@/components/anime/animeJsonLd";
+import { buildBreadcrumbJsonLd, buildJsonLd } from "@/components/anime/animeJsonLd";
+import { DETAIL_CHARACTERS_SHOWN, DETAIL_STAFF_SHOWN } from "@/components/anime/detailPeople";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
 import FadeImage from "@/components/ui/FadeImage";
@@ -985,14 +986,8 @@ function RelationsSection({
 
 // --- Characters section ---
 
-// How many people each section lays out.  The API now returns a whole
-// AniList page (25 characters, 25 staff — up from 8 and 10) so the ids
-// behind them can be stored for the person pages; the page keeps drawing
-// what it drew before, because the people grid is one column on a phone
-// and 25 rows of it would push the episode list off the first two
-// screens.  A "view all" belongs to the person-page work, not here.
-const DETAIL_CHARACTERS_SHOWN = 8;
-const DETAIL_STAFF_SHOWN = 10;
+// How many people each section lays out lives in detailPeople.ts, shared
+// with the JSON-LD so the cast it names is the cast the reader can see.
 
 function CharactersSection({
   characters: allCharacters,
@@ -1229,6 +1224,7 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
   // their /api/subscriptions/:id probe when it's absent. That keeps this page
   // off cookies() so it can stay statically prerendered / ISR-cacheable.
   const jsonLd = buildJsonLd(detail, lang);
+  const breadcrumbLd = buildBreadcrumbJsonLd(detail, lang, dict.nav.home);
   const displayTitle = pickTitle(detail, lang);
   const trailer = asYouTubeTrailer(detail.trailer);
   const trailerLabels = {
@@ -1249,6 +1245,15 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
         type="application/ld+json"
         dangerouslySetInnerHTML={{
           __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+        }}
+      />
+      {/* BreadcrumbList: home › the hub this title hangs under › the title.
+          A second document rather than a @graph so the TVSeries keeps the
+          shape its tests pin. Same escaping, same provenance. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(breadcrumbLd).replace(/</g, "\\u003c"),
         }}
       />
       <main>

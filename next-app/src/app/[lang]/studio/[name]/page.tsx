@@ -8,8 +8,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { HubListing } from "@/components/hubs/HubListing";
 import { fetchHub, parseHubPage } from "@/lib/hubs/fetch";
+import { studioHeading } from "@/lib/hubs/headings";
 import { studioPath } from "@/lib/hubs/paths";
-import { OG_LOCALE, alternateOgLocales, type Lang } from "@/lib/i18n/lang";
+import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
 
@@ -20,12 +21,6 @@ import { buildAlternates } from "@/lib/seo/alternates";
 export const revalidate = 300;
 
 type Props = PageProps<"/[lang]/studio/[name]">;
-
-const HEADING: Record<Lang, (name: string) => string> = {
-  zh: (name) => `${name} 制作的番剧`,
-  en: (name) => `Anime by ${name}`,
-  "zh-Hant": (name) => `${name} 製作的番劇`,
-};
 
 const MAX_NAME_LENGTH = 120;
 
@@ -45,8 +40,9 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   if (!name) return { title: "Studio" };
   const { locale, lang, dict } = await resolveLocale(params);
   const page = parseHubPage((await searchParams).page);
-  const title = page > 1 ? `${HEADING[lang](name)} · ${page}` : HEADING[lang](name);
-  const description = `${HEADING[lang](name)} — ${dict.hub.metaSuffix}`;
+  const heading = studioHeading(name, lang);
+  const title = page > 1 ? `${heading} · ${page}` : heading;
+  const description = `${heading} — ${dict.hub.metaSuffix}`;
   const canonical = page > 1 ? `${studioPath(name)}?page=${page}` : studioPath(name);
   return {
     title: { absolute: title },
@@ -79,7 +75,7 @@ export default async function StudioPage({ params, searchParams }: Props) {
   if (pagination.total === 0) notFound();
   return (
     <HubListing
-      heading={HEADING[lang](name)}
+      heading={studioHeading(name, lang)}
       basePath={studioPath(name)}
       items={items}
       pagination={pagination}

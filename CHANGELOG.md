@@ -4,6 +4,17 @@
 
 ## [未发布]
 
+### 详情页的 JSON-LD 长出面包屑和人：`BreadcrumbList`、`actor`、`character`、`director`、`musicBy`
+
+阶段 3 的第二步。`/anime/[id]` 此前只有一份 `TVSeries`，说了这是什么、几集、评分几分，没说它挂在站点的哪里，也没说谁做的。现在多一份 `BreadcrumbList`：首页 › 它所在的 hub › 它自己。hub 优先季度页（站点导航就是「首页 › 季度」，那页从 hub 存在之前就一直列着它），没季度的按放送年份进 `/year/`，再没有就是第一个有页面的类型。URL 带 locale 前缀——`/en/anime/1` 的父页是 `/en/seasonal/...`，跨语言的面包屑会告诉 Google 一张英文页的上级是中文页。最后一级不带 `item`，它就是这一页。三份词典各自出「首页」和 hub 页自己的标题，这个标题从三个 hub 页里各自的 `HEADING` 表抽到 `lib/hubs/headings.ts`，页面和面包屑共用一份。
+
+`TVSeries` 多四个属性：`actor`（声优）、`character`（角色）、`director`（`Director` 和 `Chief Director`，不算美术监督、音响监督、演出那些带 Director 字样的）、`musicBy`（`Music`）。名字走页面同一套语言阶梯，中文站声优和监督是日文名，和页面上画的一致。**只写页面画出来的那几个**——8 个角色、10 个 staff，常量从 `page.tsx` 挪进 `detailPeople.ts` 让两边共用；Google 的规矩是别标注读者看不见的东西，DTO 里那 25 个的其余部分不进结构化数据。migration 0037 之后读到的行带 AniList id，Person 和 Organization 就各自带 `sameAs` 指到 AniList 的人物页 / 公司页；之前的行是光名字。
+
+schema.org 验证器两个类型零错误零警告；Google 富媒体测试「路径」和「评价摘要」各检出 1 项有效内容。
+
+★ **`VideoObject` 这次没做，且做不了。** 实测把预告片嵌成 `trailer: VideoObject`，Google 报严重问题「未填写字段 uploadDate」——那是必填项，而 AniList 只给 YouTube id，oEmbed 也不给日期。要做得先有 YouTube Data API 的 key（`videos.list?part=snippet` 拿 `publishedAt`，50 个 id 一次），多一列、多一趟 sweep。等拍板。
+
+
 ### 三种 hub 页——按类型、按制作公司、按年份——让一万八千个详情页第一次互相链接
 
 阶段 3 的第一步。此前详情页上的类型 chip 是 `<span>`，制作公司是一段纯文本，整个目录里没有任何一页链向不止一部番：爬虫落在一部番上，无处可去。现在 `/genre/[slug]`（18 个类型，成人那个不设页）、`/studio/[name]`（只算主制作，不算制作委员会）、`/year/[year]`（季度年份，没季度的剧场版/OVA 按放送日归年——四分之一的目录靠这条兜底）各是一页，按人气排序，真分页、真 URL、canonical 各自独立，prev/next 是爬虫走向长尾的路。详情页的 chip 和制作公司名变成链接。

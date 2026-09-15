@@ -6,10 +6,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { HubListing } from "@/components/hubs/HubListing";
-import { genreLabel } from "@/lib/contentLabels";
 import { fetchHub, parseHubPage } from "@/lib/hubs/fetch";
+import { genreHeading } from "@/lib/hubs/headings";
 import { genreFromSlug, genrePath } from "@/lib/hubs/paths";
-import { OG_LOCALE, alternateOgLocales, type Lang } from "@/lib/i18n/lang";
+import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
 
@@ -21,21 +21,15 @@ export const revalidate = 300;
 
 type Props = PageProps<"/[lang]/genre/[slug]">;
 
-const HEADING: Record<Lang, (label: string) => string> = {
-  zh: (label) => `${label}番剧`,
-  en: (label) => `${label} Anime`,
-  "zh-Hant": (label) => `${label}番劇`,
-};
-
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { slug } = await params;
   const genre = genreFromSlug(slug);
   if (!genre) return { title: "Genre" };
   const { locale, lang, dict } = await resolveLocale(params);
   const page = parseHubPage((await searchParams).page);
-  const label = genreLabel(genre, lang);
-  const title = page > 1 ? `${HEADING[lang](label)} · ${page}` : HEADING[lang](label);
-  const description = `${HEADING[lang](label)} — ${dict.hub.metaSuffix}`;
+  const heading = genreHeading(genre, lang);
+  const title = page > 1 ? `${heading} · ${page}` : heading;
+  const description = `${heading} — ${dict.hub.metaSuffix}`;
   // Page 1 is the bare path; deeper pages carry ?page= in their canonical
   // so each is its own indexable URL rather than a duplicate of page 1.
   const canonical = page > 1 ? `${genrePath(genre)}?page=${page}` : genrePath(genre);
@@ -67,7 +61,7 @@ export default async function GenrePage({ params, searchParams }: Props) {
   ]);
   return (
     <HubListing
-      heading={HEADING[lang](genreLabel(genre, lang))}
+      heading={genreHeading(genre, lang)}
       basePath={genrePath(genre)}
       items={items}
       pagination={pagination}
