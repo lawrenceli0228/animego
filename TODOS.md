@@ -838,3 +838,18 @@
 **Context** — 2026-09-08。ratings 每小时跑所以最疼；`hant_backfill` 是季度作业，一小时对它无所谓。
 
 **Depends on / blocked by** — 无。
+
+## 角色中文名全库 0 行：V2 写的字段上游没有，写了也会被详情重拉整表删掉
+
+**What** — 让 `anime_characters` 的富化列（`name_cn` / `voice_actor_cn`）真的能落地并且活过下一次详情重拉；或者承认 Bangumi 那条路给不了，删掉 V2 里这段死代码。
+
+**Why** — 两个各自独立就足够致命的原因叠在一起：
+
+1. **上游没有这个字段。** V2 走的是 `GET /v0/subjects/{id}/characters`，客户端解码 `Character.NameCN` / `Actor.NameCN`（`internal/bangumi/client.go:217-229`），但这个端点返回的字符对象只有 `id / name / type / images / relation / summary / actors`，演员对象只有 `id / name / type / images / career / locked / short_summary`——**两层都没有 `name_cn`**（2026-09-15 对 400602 实测）。所以 `bangumi_v2.go:336-345` 算出来的 `nameCN` 和 `voiceActorCN` 永远是 nil，`UpdateAnimeCharacterCN` 即使命中也是写两个 NULL。中文名在 Bangumi 上要 `GET /v0/characters/{id}` 逐个拉（在 `infobox` 里），一部番几十次请求。
+2. **写了也活不过一天。** 详情重拉（`detail.go:762-766`）对 `anime_characters` 是 `DeleteAnimeCharacters` + 逐行 `InsertAnimeCharacter`，插入时 `name_cn = NULL`（`normalize.go:203` 自己注释「V2 之后填」）。任何 V2 写进去的东西在下一次 24h TTL 到期时整表消失，而 V2 是单向棘轮不重跑。生产库 82,274 行 characters 里 `voice_actor_image_url` 带 `bgm.tv` 的是 **0**——这才是「UPDATE 从没留下过痕迹」的直接证据（V2 命中时会把它覆成 Bangumi 图）。
+
+顺带一个被这两条掩盖的 bug：`bangumi_v2.go:349-352` 把**角色**的 `c.Images.Medium` 写进 **`voice_actor_image_url`**，声优的图在 `c.Actors[0].Images`。现在没人看见，是因为它从来没成功写过。
+
+**Context** — 2026-09-15 元数据计划 1.4 的调查结论，封顶半天，实际 20 分钟。不在阶段 1 修，因为正确的修法依赖阶段 2.2：`anime_characters` 存 `character_id` 之后，详情重拉才能改成按 `(anime_id, character_id)` upsert 而不是删表重建，富化列才有地方活下来；而中文名本身要么接 `/v0/characters/{id}`（按角色数计费，只值得对主角做），要么放弃。在那之前 V2 的这一段是死代码，删掉比留着更诚实。
+
+**Depends on / blocked by** — 阶段 2.2（角色 id）。与 `## bangumi_version 是单向棘轮` 同属一根。
