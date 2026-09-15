@@ -1,6 +1,8 @@
 package anime
 
 import (
+	"strings"
+
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/colorx"
@@ -293,16 +295,72 @@ type RecommendationRow struct {
 	AverageScore                *float64
 }
 
-// StudiosFromMedia extracts studio names from a Media's StudioConnection.
-// Returns empty slice (never nil) so callers can range without a guard.
-// Mirrors Express `m.studios.nodes.map(n => n.name)`.
-func StudiosFromMedia(m anilist.Media) []string {
-	if m.Studios == nil || len(m.Studios.Nodes) == 0 {
-		return []string{}
+// StudioRow is one child-row payload for anime_studios.
+type StudioRow struct {
+	Name     string
+	StudioID *int32 // AniList's studio id; nil when the node carried none
+	IsMain   bool   // animation production, as opposed to committee / licensor
+}
+
+// StudiosFromMedia maps Media.Studios to []StudioRow, every studio on the
+// title with its role.  Names are de-duplicated (AniList can list a
+// studio twice with different roles; the table's PK is the name) with
+// the main-studio flag winning on a collision.
+func StudiosFromMedia(m anilist.Media) []StudioRow {
+	if m.Studios == nil || len(m.Studios.Edges) == 0 {
+		return []StudioRow{}
 	}
-	out := make([]string, 0, len(m.Studios.Nodes))
-	for _, n := range m.Studios.Nodes {
-		out = append(out, n.Name)
+	out := make([]StudioRow, 0, len(m.Studios.Edges))
+	index := map[string]int{}
+	for _, e := range m.Studios.Edges {
+		name := strings.TrimSpace(e.Node.Name)
+		if name == "" {
+			continue
+		}
+		if i, seen := index[name]; seen {
+			if e.IsMain {
+				out[i].IsMain = true
+			}
+			continue
+		}
+		index[name] = len(out)
+		out = append(out, StudioRow{Name: name, StudioID: positiveID(e.Node.ID), IsMain: e.IsMain})
+	}
+	return out
+}
+
+// TagRow is one child-row payload for anime_tags, AniList-sourced.
+type TagRow struct {
+	Name      string
+	Rank      *int32
+	IsSpoiler bool
+}
+
+// TagsFromMedia maps Media.TagSet to []TagRow.  The cleaning rules live
+// on the Media method because the facts sweep (internal/queue) applies
+// the same ones and cannot import this package.
+func TagsFromMedia(m anilist.Media) []TagRow {
+	tags := m.TagSet()
+	out := make([]TagRow, 0, len(tags))
+	for _, t := range tags {
+		out = append(out, TagRow{Name: t.Name, Rank: ptrInt32(t.Rank), IsSpoiler: t.IsMediaSpoiler})
+	}
+	return out
+}
+
+// LinkRow is one child-row payload for anime_external_links.
+type LinkRow struct {
+	Site string
+	URL  string
+	Type *string
+}
+
+// LinksFromMedia maps Media.LinkSet to []LinkRow.
+func LinksFromMedia(m anilist.Media) []LinkRow {
+	links := m.LinkSet()
+	out := make([]LinkRow, 0, len(links))
+	for _, l := range links {
+		out = append(out, LinkRow{Site: l.Site, URL: l.URL, Type: l.Type})
 	}
 	return out
 }

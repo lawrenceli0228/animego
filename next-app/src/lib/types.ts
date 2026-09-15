@@ -256,6 +256,16 @@ export interface AnimeDetail {
   isAdult?: boolean;
   countryOfOrigin?: string | null;
   nextAiring?: { airingAt: string; episode: number } | null;
+  /**
+   * Migration 0038. `studios` stays the main studios by name; `studioDetails`
+   * is every studio on the title with AniList's id and its role. `tags` are
+   * AniList's (rank 0–100, spoiler flag) and, once V2 writes them, Bangumi's
+   * (rank = vote count). `externalLinks` are AniList's, `type` INFO |
+   * STREAMING | SOCIAL or null.
+   */
+  studioDetails?: DetailStudio[];
+  tags?: DetailTag[];
+  externalLinks?: DetailExternalLink[];
   studios: string[];
   relations: DetailRelation[];
   characters: DetailCharacter[];
@@ -333,6 +343,25 @@ export interface DetailStaff {
   imageUrl: string | null;
   /** AniList id (migration 0037). See DetailCharacter.characterId. */
   staffId?: number | null;
+}
+
+export interface DetailStudio {
+  name: string;
+  studioId: number | null;
+  isMain: boolean;
+}
+
+export interface DetailTag {
+  source: "anilist" | "bangumi";
+  name: string;
+  rank: number | null;
+  isSpoiler: boolean;
+}
+
+export interface DetailExternalLink {
+  site: string;
+  url: string;
+  type: string | null;
 }
 
 export interface DetailRecommendation {

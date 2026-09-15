@@ -175,6 +175,7 @@ const zh = {
     infoFormat: '类型',
     infoSource: '原作',
     infoStudio: '制作',
+    infoLinks: '外部链接',
     scores: '评分',
     votes: '人评分',
     // Credit under the synopsis when the rendered text is Bangumi's

@@ -161,7 +161,17 @@ type AnimeDetail struct {
 	// Alternative titles from AniList (migration 0036).  Empty, never
 	// null, for the same reason genres is.
 	Synonyms []string `json:"synonyms"`
-	Studios  []string `json:"studios"`
+	// Studios is the main studios by name -- unchanged since the port,
+	// and what the "Studio" row and JSON-LD productionCompany show.
+	// StudioDetails (0038) is every studio on the title with AniList's id
+	// and its role, for studio pages and the committee line.
+	Studios       []string       `json:"studios"`
+	StudioDetails []DetailStudio `json:"studioDetails"`
+	// Tags (0038): AniList's, ranked 0-100, first; then Bangumi's by vote
+	// count once V2 writes them.  Empty, never null.
+	Tags []DetailTag `json:"tags"`
+	// External links (0038): official site, social, streaming.
+	ExternalLinks []DetailExternalLink `json:"externalLinks"`
 	// The 0036 scalar block.  All nullable except isAdult, which the
 	// column defaults to false; see the migration for why the genre
 	// exclusions still stand beside it.
@@ -185,6 +195,56 @@ type AnimeDetail struct {
 	BangumiVotes    *int32                 `json:"bangumiVotes"`
 	BangumiVersion  int32                  `json:"bangumiVersion"`
 	CachedAt        pgtype.Timestamptz     `json:"cachedAt"`
+}
+
+// DetailStudio is one entry of AnimeDetail.StudioDetails.
+type DetailStudio struct {
+	Name     string `json:"name"`
+	StudioID *int32 `json:"studioId"`
+	IsMain   bool   `json:"isMain"`
+}
+
+// DetailTag is one entry of AnimeDetail.Tags.  Source is "anilist" or
+// "bangumi"; Rank is AniList's 0-100 or Bangumi's vote count, read with
+// the source beside it; IsSpoiler is AniList's flag (always false for
+// Bangumi, which has no such notion).
+type DetailTag struct {
+	Source    string `json:"source"`
+	Name      string `json:"name"`
+	Rank      *int32 `json:"rank"`
+	IsSpoiler bool   `json:"isSpoiler"`
+}
+
+// DetailExternalLink is one entry of AnimeDetail.ExternalLinks.  Type
+// is AniList's INFO | STREAMING | SOCIAL, or null.
+type DetailExternalLink struct {
+	Site string  `json:"site"`
+	URL  string  `json:"url"`
+	Type *string `json:"type"`
+}
+
+func studioDetailsFromRows(rows []dbgen.GetAnimeStudioDetailsByIDRow) []DetailStudio {
+	out := make([]DetailStudio, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DetailStudio{Name: r.Studio, StudioID: r.StudioID, IsMain: r.IsMain})
+	}
+	return out
+}
+
+func tagsFromRows(rows []dbgen.GetAnimeTagsByIDRow) []DetailTag {
+	out := make([]DetailTag, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DetailTag{Source: r.Source, Name: r.Name, Rank: r.Rank, IsSpoiler: r.IsSpoiler})
+	}
+	return out
+}
+
+func linksFromRows(rows []dbgen.GetAnimeExternalLinksByIDRow) []DetailExternalLink {
+	out := make([]DetailExternalLink, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DetailExternalLink{Site: r.Site, URL: r.Url, Type: r.Type})
+	}
+	return out
 }
 
 // DetailNextAiring is AnimeDetail.NextAiring: when the next episode airs
@@ -293,6 +353,9 @@ type DetailReader interface {
 	GetAnimeMainByID(ctx context.Context, anilistID int32) (dbgen.GetAnimeMainByIDRow, error)
 	GetAnimeGenresByID(ctx context.Context, animeID int32) ([]string, error)
 	GetAnimeSynonymsByID(ctx context.Context, animeID int32) ([]string, error)
+	GetAnimeStudioDetailsByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeStudioDetailsByIDRow, error)
+	GetAnimeTagsByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeTagsByIDRow, error)
+	GetAnimeExternalLinksByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeExternalLinksByIDRow, error)
 	GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error)
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeRelationsByIDRow, error)
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeCharactersByIDRow, error)
@@ -316,7 +379,11 @@ type DetailWriter interface {
 	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
 
 	DeleteAnimeStudios(ctx context.Context, animeID int32) error
-	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
+	InsertAnimeStudio(ctx context.Context, animeID int32, studio string, studioID *int32, isMain bool) error
+	DeleteAnimeTagsBySource(ctx context.Context, animeID int32, source string) error
+	InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error
+	DeleteAnimeExternalLinks(ctx context.Context, animeID int32) error
+	InsertAnimeExternalLink(ctx context.Context, animeID int32, site string, url string, type_ *string) error
 
 	DeleteAnimeRelations(ctx context.Context, animeID int32) error
 	InsertAnimeRelation(ctx context.Context, arg dbgen.InsertAnimeRelationParams) error
@@ -482,7 +549,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 	}
 
 	// Six independent child reads run in parallel.
-	genres, synonyms, studios, relations, characters, staffRows, recommendations, episodeTitles, err := s.fetchChildren(ctx, anilistID)
+	ch, err := s.fetchChildren(ctx, anilistID)
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +558,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 	// AniList client is wired, re-fetch + upsert + re-read.  If the
 	// re-fetch fails (upstream 502, rate limit, network), fall through
 	// to return the stale rows so the client sees data over an error.
-	if s.anilist != nil && isStale(main, studios, characters, relations) {
+	if s.anilist != nil && isStale(main, ch.studios, ch.characters, ch.relations) {
 		slog.InfoContext(ctx, "anime/detail: stale, re-fetching from AniList", "anilistId", anilistID)
 		if det, refetchErr := s.refetchFromAniList(ctx, anilistID); refetchErr == nil {
 			return det, nil
@@ -509,11 +576,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 			// result so a herd of stale requests during an AniList outage
 			// doesn't each repeat the (blocking, ~5s) re-fetch attempt and
 			// pile up on the worker pool.
-			stale := assembleDetail(
-				main, genres, synonyms, studios,
-				convertRelationsToDetailRelations(relations),
-				characters, staffRows, recommendations, episodeTitles,
-			)
+			stale := assembleDetail(main, ch, convertRelationsToDetailRelations(ch.relations))
 			s.cache.Set(key, stale)
 			return stale, nil
 		}
@@ -524,12 +587,12 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 	// metadata a standalone /:relationId fetch would.  Skipped entirely
 	// when relations is empty (the IN(...) query is cheap but skipping
 	// keeps the cache-miss path mechanical).
-	enrichedRelations, err := s.enrichRelations(ctx, relations)
+	enrichedRelations, err := s.enrichRelations(ctx, ch.relations)
 	if err != nil {
 		return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 	}
 
-	detail := assembleDetail(main, genres, synonyms, studios, enrichedRelations, characters, staffRows, recommendations, episodeTitles)
+	detail := assembleDetail(main, ch, enrichedRelations)
 
 	// Populate cache.  Set is best-effort — ristretto may reject under
 	// contention but the next request will re-read from DB without
@@ -541,70 +604,49 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 	return detail, nil
 }
 
+// detailChildren is everything the child tables say about one title,
+// read in one parallel pass.  A struct rather than a positional return
+// because the list kept growing (eleven arrays now) and every addition
+// was a signature change at three call sites plus a test.
+type detailChildren struct {
+	genres          []string
+	synonyms        []string
+	studios         []string // main studios only, by name -- the "Studio" row
+	studioDetails   []dbgen.GetAnimeStudioDetailsByIDRow
+	tags            []dbgen.GetAnimeTagsByIDRow
+	links           []dbgen.GetAnimeExternalLinksByIDRow
+	relations       []dbgen.GetAnimeRelationsByIDRow
+	characters      []dbgen.GetAnimeCharactersByIDRow
+	staff           []dbgen.GetAnimeStaffByIDRow
+	recommendations []dbgen.GetAnimeRecommendationsByIDRow
+	episodeTitles   []dbgen.GetAnimeEpisodeTitlesByIDRow
+}
+
 // fetchChildren reads the child arrays in parallel via errgroup.
 // Extracted from fetchDetail so the re-fetch path can reuse the same
-// orchestration without duplicating the goroutine wiring.  Returned in
-// the same order as assembleDetail consumes them.
+// orchestration without duplicating the goroutine wiring.
 //
 // Errors flow back wrapped as a 500 APIError so callers can return them
 // straight to the writeError mapper.
-func (s *DetailService) fetchChildren(ctx context.Context, anilistID int32) (
-	genres []string,
-	synonyms []string,
-	studios []string,
-	relations []dbgen.GetAnimeRelationsByIDRow,
-	characters []dbgen.GetAnimeCharactersByIDRow,
-	staffRows []dbgen.GetAnimeStaffByIDRow,
-	recommendations []dbgen.GetAnimeRecommendationsByIDRow,
-	episodeTitles []dbgen.GetAnimeEpisodeTitlesByIDRow,
-	err error,
-) {
+func (s *DetailService) fetchChildren(ctx context.Context, anilistID int32) (detailChildren, error) {
+	var ch detailChildren
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		var e error
-		genres, e = s.db.GetAnimeGenresByID(gctx, anilistID)
-		return e
-	})
-	g.Go(func() error {
-		var e error
-		synonyms, e = s.db.GetAnimeSynonymsByID(gctx, anilistID)
-		return e
-	})
-	g.Go(func() error {
-		var e error
-		studios, e = s.db.GetAnimeStudiosByID(gctx, anilistID)
-		return e
-	})
-	g.Go(func() error {
-		var e error
-		relations, e = s.db.GetAnimeRelationsByID(gctx, anilistID)
-		return e
-	})
-	g.Go(func() error {
-		var e error
-		characters, e = s.db.GetAnimeCharactersByID(gctx, anilistID)
-		return e
-	})
-	g.Go(func() error {
-		var e error
-		staffRows, e = s.db.GetAnimeStaffByID(gctx, anilistID)
-		return e
-	})
-	g.Go(func() error {
-		var e error
-		recommendations, e = s.db.GetAnimeRecommendationsByID(gctx, anilistID)
-		return e
-	})
-	g.Go(func() error {
-		var e error
-		episodeTitles, e = s.db.GetAnimeEpisodeTitlesByID(gctx, anilistID)
-		return e
-	})
+	read := func(fn func() error) { g.Go(fn) }
+	read(func() (e error) { ch.genres, e = s.db.GetAnimeGenresByID(gctx, anilistID); return })
+	read(func() (e error) { ch.synonyms, e = s.db.GetAnimeSynonymsByID(gctx, anilistID); return })
+	read(func() (e error) { ch.studios, e = s.db.GetAnimeStudiosByID(gctx, anilistID); return })
+	read(func() (e error) { ch.studioDetails, e = s.db.GetAnimeStudioDetailsByID(gctx, anilistID); return })
+	read(func() (e error) { ch.tags, e = s.db.GetAnimeTagsByID(gctx, anilistID); return })
+	read(func() (e error) { ch.links, e = s.db.GetAnimeExternalLinksByID(gctx, anilistID); return })
+	read(func() (e error) { ch.relations, e = s.db.GetAnimeRelationsByID(gctx, anilistID); return })
+	read(func() (e error) { ch.characters, e = s.db.GetAnimeCharactersByID(gctx, anilistID); return })
+	read(func() (e error) { ch.staff, e = s.db.GetAnimeStaffByID(gctx, anilistID); return })
+	read(func() (e error) { ch.recommendations, e = s.db.GetAnimeRecommendationsByID(gctx, anilistID); return })
+	read(func() (e error) { ch.episodeTitles, e = s.db.GetAnimeEpisodeTitlesByID(gctx, anilistID); return })
 	if waitErr := g.Wait(); waitErr != nil {
-		err = httpx.WrapError(waitErr, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
-		return
+		return detailChildren{}, httpx.WrapError(waitErr, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 	}
-	return
+	return ch, nil
 }
 
 // isStale returns true when the cached main row + child arrays signal
@@ -725,19 +767,19 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 		// 500 so the failure is visible in logs.
 		return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "post-refetch read failed")
 	}
-	genres, synonyms, studios, relations, characters, staffRows, recommendations, episodeTitles, err := s.fetchChildren(ctx, anilistID)
+	ch, err := s.fetchChildren(ctx, anilistID)
 	if err != nil {
 		return nil, err
 	}
-	enrichedRelations, enrichErr := s.enrichRelations(ctx, relations)
+	enrichedRelations, enrichErr := s.enrichRelations(ctx, ch.relations)
 	if enrichErr != nil {
 		// Soft-fail: log but proceed with un-enriched relations so the
 		// re-fetched data still lands in front of the user.
 		slog.WarnContext(ctx, "anime/detail: post-refetch enrichment failed", "anilistId", anilistID, "err", enrichErr)
-		enrichedRelations = convertRelationsToDetailRelations(relations)
+		enrichedRelations = convertRelationsToDetailRelations(ch.relations)
 	}
 
-	detail := assembleDetail(main, genres, synonyms, studios, enrichedRelations, characters, staffRows, recommendations, episodeTitles)
+	detail := assembleDetail(main, ch, enrichedRelations)
 	if ok := s.cache.Set(strconv.FormatInt(int64(anilistID), 10), detail); !ok {
 		slog.Debug("anime/detail: cache set rejected post-refetch", "anilistId", anilistID)
 	}
@@ -789,8 +831,27 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 		return fmt.Errorf("delete studios: %w", err)
 	}
 	for _, st := range StudiosFromMedia(m) {
-		if err := s.db.InsertAnimeStudio(ctx, anilistID, st); err != nil {
-			return fmt.Errorf("insert studio %q: %w", st, err)
+		if err := s.db.InsertAnimeStudio(ctx, anilistID, st.Name, st.StudioID, st.IsMain); err != nil {
+			return fmt.Errorf("insert studio %q: %w", st.Name, err)
+		}
+	}
+
+	// 3b) Tags (AniList's set only -- Bangumi's is V2's) and external
+	//     links.  Whole-set replaces, like genres.
+	if err := s.db.DeleteAnimeTagsBySource(ctx, anilistID, "anilist"); err != nil {
+		return fmt.Errorf("delete tags: %w", err)
+	}
+	for _, tg := range TagsFromMedia(m) {
+		if err := s.db.InsertAnimeTag(ctx, anilistID, "anilist", tg.Name, tg.Rank, tg.IsSpoiler); err != nil {
+			return fmt.Errorf("insert tag %q: %w", tg.Name, err)
+		}
+	}
+	if err := s.db.DeleteAnimeExternalLinks(ctx, anilistID); err != nil {
+		return fmt.Errorf("delete external links: %w", err)
+	}
+	for _, l := range LinksFromMedia(m) {
+		if err := s.db.InsertAnimeExternalLink(ctx, anilistID, l.Site, l.URL, l.Type); err != nil {
+			return fmt.Errorf("insert external link %q: %w", l.URL, err)
 		}
 	}
 
@@ -995,15 +1056,11 @@ func (s *DetailService) enrichRelations(ctx context.Context, rels []dbgen.GetAni
 // shape-only assembly without spinning up a DetailService.
 func assembleDetail(
 	main dbgen.GetAnimeMainByIDRow,
-	genres []string,
-	synonyms []string,
-	studios []string,
+	ch detailChildren,
 	relations []DetailRelation,
-	characters []dbgen.GetAnimeCharactersByIDRow,
-	staffRows []dbgen.GetAnimeStaffByIDRow,
-	recommendations []dbgen.GetAnimeRecommendationsByIDRow,
-	episodeTitlesRows []dbgen.GetAnimeEpisodeTitlesByIDRow,
 ) *AnimeDetail {
+	genres, synonyms, studios := ch.genres, ch.synonyms, ch.studios
+	characters, staffRows, recommendations, episodeTitlesRows := ch.characters, ch.staff, ch.recommendations, ch.episodeTitles
 	if genres == nil {
 		genres = []string{}
 	}
@@ -1103,6 +1160,9 @@ func assembleDetail(
 		Genres:                      genres,
 		Synonyms:                    synonyms,
 		Studios:                     studios,
+		StudioDetails:               studioDetailsFromRows(ch.studioDetails),
+		Tags:                        tagsFromRows(ch.tags),
+		ExternalLinks:               linksFromRows(ch.links),
 		Popularity:                  main.Popularity,
 		Favourites:                  main.Favourites,
 		MalID:                       main.MalID,

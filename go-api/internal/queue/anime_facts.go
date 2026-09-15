@@ -73,6 +73,10 @@ type AnimeFactsDB interface {
 	MarkAnimeFactsChecked(ctx context.Context, anilistID int32) (int64, error)
 	DeleteAnimeSynonyms(ctx context.Context, animeID int32) error
 	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
+	DeleteAnimeTagsBySource(ctx context.Context, animeID int32, source string) error
+	InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error
+	DeleteAnimeExternalLinks(ctx context.Context, animeID int32) error
+	InsertAnimeExternalLink(ctx context.Context, animeID int32, site string, url string, type_ *string) error
 }
 
 // AnimeFactsWorker fills in the four facts in id batches.
@@ -156,6 +160,12 @@ func (w *AnimeFactsWorker) applyBatch(ctx context.Context, requested []int, medi
 		if err := w.replaceSynonyms(ctx, int32(m.ID), m.SynonymSet()); err != nil {
 			slog.WarnContext(ctx, "anime_facts synonyms failed", "anilistId", m.ID, "err", err)
 		}
+		if err := w.replaceTags(ctx, int32(m.ID), m.TagSet()); err != nil {
+			slog.WarnContext(ctx, "anime_facts tags failed", "anilistId", m.ID, "err", err)
+		}
+		if err := w.replaceLinks(ctx, int32(m.ID), m.LinkSet()); err != nil {
+			slog.WarnContext(ctx, "anime_facts links failed", "anilistId", m.ID, "err", err)
+		}
 		*written++
 	}
 	for _, id := range requested {
@@ -211,6 +221,33 @@ func (w *AnimeFactsWorker) replaceSynonyms(ctx context.Context, anilistID int32,
 	for _, syn := range synonyms {
 		if err := w.db.InsertAnimeSynonym(ctx, anilistID, syn); err != nil {
 			return fmt.Errorf("insert %q: %w", syn, err)
+		}
+	}
+	return nil
+}
+
+// replaceTags writes the AniList half of the row's tag set.  Scoped to
+// source 'anilist': the Bangumi half belongs to V2 and must survive.
+func (w *AnimeFactsWorker) replaceTags(ctx context.Context, anilistID int32, tags []anilist.MediaTag) error {
+	if err := w.db.DeleteAnimeTagsBySource(ctx, anilistID, "anilist"); err != nil {
+		return fmt.Errorf("delete: %w", err)
+	}
+	for _, t := range tags {
+		if err := w.db.InsertAnimeTag(ctx, anilistID, "anilist", t.Name, int32PtrFromInt(t.Rank), t.IsMediaSpoiler); err != nil {
+			return fmt.Errorf("insert %q: %w", t.Name, err)
+		}
+	}
+	return nil
+}
+
+// replaceLinks writes the row's external link set.
+func (w *AnimeFactsWorker) replaceLinks(ctx context.Context, anilistID int32, links []anilist.ExternalLink) error {
+	if err := w.db.DeleteAnimeExternalLinks(ctx, anilistID); err != nil {
+		return fmt.Errorf("delete: %w", err)
+	}
+	for _, l := range links {
+		if err := w.db.InsertAnimeExternalLink(ctx, anilistID, l.Site, l.URL, l.Type); err != nil {
+			return fmt.Errorf("insert %q: %w", l.URL, err)
 		}
 	}
 	return nil

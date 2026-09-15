@@ -599,6 +599,49 @@ describe("R3 — only the authoritative count reaches schema.org", () => {
   });
 });
 
+describe("sameAs names the work's pages elsewhere, and only those", () => {
+  test("the three catalogues, in a stable order, when their ids are known", () => {
+    const ld = buildJsonLd(detailRow({ anilistId: 154587, bgmId: 400602, malId: 52991 }), "zh");
+    expect(ld.sameAs).toEqual([
+      "https://anilist.co/anime/154587",
+      "https://bgm.tv/subject/400602",
+      "https://myanimelist.net/anime/52991",
+    ]);
+  });
+
+  test("AniList alone when no other id is known — never an empty list", () => {
+    const ld = buildJsonLd(detailRow({ anilistId: 7, bgmId: null }), "en");
+    expect(ld.sameAs).toEqual(["https://anilist.co/anime/7"]);
+  });
+
+  test("official site and social accounts are identity; streaming pages are not", () => {
+    const ld = buildJsonLd(
+      detailRow({
+        anilistId: 1,
+        externalLinks: [
+          { site: "Official Site", url: "https://frieren-anime.jp/", type: "INFO" },
+          { site: "Twitter", url: "https://x.com/Anime_Frieren", type: "SOCIAL" },
+          { site: "Crunchyroll", url: "https://www.crunchyroll.com/series/x", type: "STREAMING" },
+          { site: "Official Site", url: "https://frieren-anime.jp/", type: "INFO" },
+          { site: "junk", url: "javascript:alert(1)", type: "SOCIAL" },
+        ],
+      }),
+      "zh",
+    );
+    expect(ld.sameAs).toEqual([
+      "https://anilist.co/anime/1",
+      "https://frieren-anime.jp/",
+      "https://x.com/Anime_Frieren",
+    ]);
+  });
+
+  test("an API build that predates externalLinks is tolerated", () => {
+    const row = detailRow({ anilistId: 1 });
+    delete (row as Partial<AnimeDetail>).externalLinks;
+    expect(buildJsonLd(row, "zh").sameAs).toEqual(["https://anilist.co/anime/1"]);
+  });
+});
+
 describe("startDate / endDate reach schema.org as machine-readable dates", () => {
   test("both dates present are emitted in ISO form regardless of page language", () => {
     // go-api serialises the two date columns as ISO strings; the builder

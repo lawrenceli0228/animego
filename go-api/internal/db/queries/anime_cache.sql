@@ -982,7 +982,26 @@ SELECT genre FROM anime_genres WHERE anime_id = $1 ORDER BY genre;
 SELECT synonym FROM anime_synonyms WHERE anime_id = $1 ORDER BY synonym;
 
 -- name: GetAnimeStudiosByID :many
-SELECT studio FROM anime_studios WHERE anime_id = $1 ORDER BY studio;
+-- The main studios only, by name: what the detail page's "Studio" row
+-- and the JSON-LD productionCompany have always shown.  The committee
+-- and the licensor are in the table since 0038 but not in this answer.
+SELECT studio FROM anime_studios WHERE anime_id = $1 AND is_main ORDER BY studio;
+
+-- name: GetAnimeStudioDetailsByID :many
+-- Every studio on the title with its id and role, for the studio page
+-- links.  Main studios first, then by name.
+SELECT studio, studio_id, is_main FROM anime_studios WHERE anime_id = $1 ORDER BY is_main DESC, studio;
+
+-- name: GetAnimeTagsByID :many
+-- Both sources, AniList's first (they carry a rank to sort on), then
+-- Bangumi's by vote count.
+SELECT source, name, rank, is_spoiler
+FROM anime_tags
+WHERE anime_id = $1
+ORDER BY (source = 'anilist') DESC, rank DESC NULLS LAST, name;
+
+-- name: GetAnimeExternalLinksByID :many
+SELECT site, url, type FROM anime_external_links WHERE anime_id = $1 ORDER BY type NULLS LAST, site, url;
 
 -- name: GetAnimeRelationsByID :many
 SELECT
@@ -1095,7 +1114,25 @@ INSERT INTO anime_synonyms (anime_id, synonym) VALUES ($1, $2) ON CONFLICT DO NO
 DELETE FROM anime_studios WHERE anime_id = $1;
 
 -- name: InsertAnimeStudio :exec
-INSERT INTO anime_studios (anime_id, studio) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+INSERT INTO anime_studios (anime_id, studio, studio_id, is_main) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING;
+
+-- name: DeleteAnimeTagsBySource :exec
+-- Scoped to one source on purpose: the AniList set and the Bangumi set
+-- are replaced by different writers, and neither may clear the other's.
+DELETE FROM anime_tags WHERE anime_id = $1 AND source = $2;
+
+-- name: InsertAnimeTag :exec
+INSERT INTO anime_tags (anime_id, source, name, rank, is_spoiler)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING;
+
+-- name: DeleteAnimeExternalLinks :exec
+DELETE FROM anime_external_links WHERE anime_id = $1;
+
+-- name: InsertAnimeExternalLink :exec
+INSERT INTO anime_external_links (anime_id, site, url, type)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING;
 
 -- name: DeleteAnimeRelations :exec
 DELETE FROM anime_relations WHERE anime_id = $1;

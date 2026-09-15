@@ -28,7 +28,7 @@ func TestDocumentSelectionsMatchTheQueries(t *testing.T) {
 	const trailerSelector = "trailer { id site }"
 	// One selector per child connection the detail path persists.  All of
 	// them must be present for DetailDocument to be honest.
-	childSelectors := []string{"studios(", "relations {", "characters(", "staff(", "recommendations("}
+	childSelectors := []string{"studios {", "relations {", "characters(", "staff(", "recommendations("}
 
 	for _, tc := range []struct {
 		name  string
@@ -125,4 +125,20 @@ func TestDetailDocumentAsksForTheWholeFirstPage(t *testing.T) {
 	assert.Contains(t, AnimeDetailQuery, "staff(sort: RELEVANCE, page: 1, perPage: 25)")
 	assert.Contains(t, AnimeDetailQuery, "voiceActors(language: JAPANESE) { id")
 	assert.Contains(t, AnimeDetailQuery, "edges { role node { id name { full native } image { medium } }")
+}
+
+// TestTagsAndLinksAreSelectedWhereTheyAreWritten — the two lists 0038
+// added are written by the detail path and the facts sweep, so both of
+// their documents must select them; the listing documents write neither
+// table and must not carry the payload.
+func TestTagsAndLinksAreSelectedWhereTheyAreWritten(t *testing.T) {
+	for _, sel := range []string{"tags { name rank isMediaSpoiler }", "externalLinks { site url type }"} {
+		assert.Contains(t, AnimeDetailQuery, sel)
+		assert.Contains(t, MediaFactsQuery, sel)
+		assert.NotContains(t, SearchAnimeQuery, sel)
+		assert.NotContains(t, SeasonalAnimeQuery, sel)
+	}
+	// Every studio, with its id and role -- not only the main ones.
+	assert.Contains(t, AnimeDetailQuery, "studios { edges { isMain node { id name } } }")
+	assert.NotContains(t, AnimeDetailQuery, "isMain: true")
 }

@@ -929,3 +929,40 @@
   color: var(--text);
   overflow-wrap: anywhere;
 }
+
+/* The links row spans the grid: it is a list, not a single value, and a
+ * one-column cell would stack five links under a nine-pixel label. */
+.infoCellWide {
+  grid-column: 1 / -1;
+}
+
+.infoLinks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.infoLink {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: rgba(235, 235, 245, 0.26);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  border-radius: var(--radius-sm);
+  transition:
+    color 150ms var(--ease-out-expo),
+    text-decoration-color 150ms var(--ease-out-expo);
+}
+
+.infoLink:hover {
+  color: var(--poster-tone);
+  text-decoration-color: var(--poster-tone);
+}
+
+.infoLink:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}

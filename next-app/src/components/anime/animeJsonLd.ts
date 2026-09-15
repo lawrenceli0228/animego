@@ -40,6 +40,31 @@ export interface JsonLdTVSeries {
   genre?: string[];
   aggregateRating?: JsonLdAggregateRating;
   productionCompany?: { "@type": "Organization"; name: string }[];
+  sameAs?: string[];
+}
+
+/**
+ * The URLs that identify this work elsewhere, for schema.org `sameAs`.
+ *
+ * The AniList page always exists (the id is the row's key); the Bangumi
+ * and MyAnimeList pages when the ids are known; then the official site and
+ * the social accounts AniList lists. Streaming pages are not identity — a
+ * Crunchyroll listing says where to watch, not what the work is — so they
+ * stay out. Exported for the test; the order is stable so a diff on the
+ * emitted document is readable.
+ */
+export function sameAsUrls(detail: AnimeDetail): string[] {
+  const urls = [`https://anilist.co/anime/${detail.anilistId}`];
+  if (detail.bgmId) urls.push(`https://bgm.tv/subject/${detail.bgmId}`);
+  if (detail.malId) urls.push(`https://myanimelist.net/anime/${detail.malId}`);
+  for (const link of detail.externalLinks ?? []) {
+    const official = link.site === "Official Site";
+    const social = link.type === "SOCIAL";
+    if ((official || social) && /^https?:\/\//.test(link.url) && !urls.includes(link.url)) {
+      urls.push(link.url);
+    }
+  }
+  return urls;
 }
 
 export function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
@@ -106,5 +131,9 @@ export function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
       name,
     }));
   }
+  // sameAs is the disambiguation signal: this page is about the work that
+  // AniList, Bangumi and MyAnimeList each have a page for, not about a site
+  // that happens to share a name (see the AnimeGO.org confusion).
+  ld.sameAs = sameAsUrls(detail);
   return ld;
 }

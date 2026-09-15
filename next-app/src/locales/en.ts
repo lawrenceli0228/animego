@@ -123,6 +123,7 @@ const en = {
     infoFormat: 'Format',
     infoSource: 'Source',
     infoStudio: 'Studio',
+    infoLinks: 'Links',
     scores: 'Scores',
     votes: 'ratings',
     // Parity key. An English reader never sees the Chinese synopsis

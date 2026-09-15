@@ -4,6 +4,17 @@
 
 ## [未发布]
 
+### 标签、外部链接、制作公司的 id 和角色，以及 JSON-LD 的 `sameAs`
+
+阶段 2 的最后一块 AniList 侧数据。migration 0038：`anime_tags`（按来源分 AniList / Bangumi，一张表，删除按来源作用域——两个来源的写入方各自替换自己的那半，谁也清不掉对方的行）、`anime_external_links`（按 URL 做主键，因为 AniList 的 `site` 是展示标签，一部番可以有两个 "Official Site"）、`anime_studios` 加 `studio_id` 和 `is_main`。
+
+★ **制作公司这次要的是全部，不只主制作。** 移植过来的文档是 `studios(isMain: true)`，制作委员会和发行方从来没进过库。现在是 `studios { edges { isMain node { id name } } }`，`is_main` 记下角色。详情页「制作」那一行和 JSON-LD 的 `productionCompany` 读的仍然只是主制作（`GetAnimeStudiosByID` 加了 `AND is_main`），行为不变；`studioDetails` 是全量带 id 的新字段。
+
+`sameAs` 进 JSON-LD：AniList 页永远有（id 就是行的键）、Bangumi 和 MAL 页在 id 已知时、然后是 AniList 列出的官网和社交账号。流媒体页不算身份——Crunchyroll 的条目说的是「在哪看」不是「这是什么」——不进去。这是对 AnimeGO.org 那次品牌混淆最直接的消歧信号：这一页说的是三个目录各有一页的那部作品，不是一个碰巧同名的站。详情页信息栏加了「外部链接」一行，**和 `sameAs` 用同一个集合**（官网、社交、三个目录），页面和结构化数据不可能对哪些 URL 属于这部番各说各话。
+
+`fetchChildren` 从 11 个位置返回值改成一个结构体：每加一张子表都要改三处调用点加一个测试，这次是第三回。facts sweep 的文档同步扩到 tags 和 externalLinks（它选的每一样仍然都是 AniList 独家的事实），migration 再次清零 `facts_checked_at`——理由同 0036，问题变宽了旧戳作废。Bangumi 的中文标签由 V2 写，那是下一条。
+
+
 ### V2 不再向 Bangumi 要角色列表：那一步写的两个字段上游根本没有，写了也活不过一天
 
 移植过来的 V2 每行多打一次 `/v0/subjects/{id}/characters`，然后按名字匹配 `anime_characters`，写 `name_cn`、`voice_actor_cn`、`voice_actor_image_url`。这一步删掉了，两个理由各自就够：

@@ -618,8 +618,9 @@ function InfoSection({
       value: detail.studios.length > 0 ? detail.studios.join(" / ") : null,
     },
   ];
+  const links = identityLinks(detail);
   // Every row empty means the row carries nothing but em dashes.
-  if (rows.every((r) => !r.value)) return null;
+  if (rows.every((r) => !r.value) && links.length === 0) return null;
 
   return (
     <section className={x.section} aria-labelledby="info-heading">
@@ -635,9 +636,48 @@ function InfoSection({
             <dd className={x.infoValue}>{r.value ?? "—"}</dd>
           </div>
         ))}
+        {links.length > 0 && (
+          <div className={`${x.infoCell} ${x.infoCellWide}`}>
+            <dt className={x.infoLabel}>{dict.detail.infoLinks}</dt>
+            <dd className={x.infoValue}>
+              <ul className={x.infoLinks}>
+                {links.map((l) => (
+                  <li key={l.url}>
+                    <a href={l.url} target="_blank" rel="noopener noreferrer" className={x.infoLink}>
+                      {l.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
       </dl>
     </section>
   );
+}
+
+/* The links that say what this work is elsewhere: the official site and
+ * social accounts AniList lists, then the three catalogues that have a page
+ * for it. Streaming links are not identity and stay out — a "where to watch"
+ * row is a different feature with a different legal footprint. The same set
+ * feeds JSON-LD sameAs (animeJsonLd.ts), so the page and the structured data
+ * cannot disagree about which URLs this title claims. */
+function identityLinks(detail: AnimeDetail): Array<{ label: string; url: string }> {
+  const out: Array<{ label: string; url: string }> = [];
+  const seen = new Set<string>();
+  const push = (label: string, url: string) => {
+    if (!/^https?:\/\//.test(url) || seen.has(url)) return;
+    seen.add(url);
+    out.push({ label, url });
+  };
+  for (const l of detail.externalLinks ?? []) {
+    if (l.site === "Official Site" || l.type === "SOCIAL") push(l.site, l.url);
+  }
+  push("AniList", `https://anilist.co/anime/${detail.anilistId}`);
+  if (detail.bgmId) push("Bangumi", `https://bgm.tv/subject/${detail.bgmId}`);
+  if (detail.malId) push("MyAnimeList", `https://myanimelist.net/anime/${detail.malId}`);
+  return out;
 }
 
 
