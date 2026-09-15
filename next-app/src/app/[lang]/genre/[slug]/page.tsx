@@ -7,13 +7,17 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { HubListing } from "@/components/hubs/HubListing";
 import { genreLabel } from "@/lib/contentLabels";
-import { fetchHub, HUB_REVALIDATE, parseHubPage } from "@/lib/hubs/fetch";
+import { fetchHub, parseHubPage } from "@/lib/hubs/fetch";
 import { genreFromSlug, genrePath } from "@/lib/hubs/paths";
 import { OG_LOCALE, alternateOgLocales, type Lang } from "@/lib/i18n/lang";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
 
-export const revalidate = HUB_REVALIDATE;
+// A literal, not the imported HUB_REVALIDATE: Next reads segment config
+// statically and refuses an identifier here ("Unknown identifier ... at
+// revalidate" at build time -- next dev does not check). Keep in step with
+// lib/hubs/fetch.ts.
+export const revalidate = 300;
 
 type Props = PageProps<"/[lang]/genre/[slug]">;
 
