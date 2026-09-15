@@ -3,22 +3,41 @@
 // Replaces the stubBangumiV2Worker placeholder.  Mirrors
 // server/services/bangumi.service.js's processPhase4Queue branch:
 //
-//  1. Fetch /v0/subjects/{bgmId} and /v0/subjects/{bgmId}/characters
-//     in parallel for the bgmID handed to us by the job args.
+//  1. Fetch /v0/subjects/{bgmId} and /subject/{bgmId}/ep in parallel
+//     for the bgmID handed to us by the job args.
 //  2. UpdateBangumiV2 on anime_cache — writes bangumi_score,
 //     bangumi_votes (from Subject.Rating) and CONDITIONALLY fills
 //     title_chinese via SQL COALESCE (so a value V1 already wrote on
 //     exact native match is never clobbered).  bangumi_version → 2.
-//  3. For each Bangumi Character, UpdateAnimeCharacterCN matched by
-//     name_en → name_cn + voice_actor_cn + voice_actor_image_url.
-//     Rows that don't match a Bangumi character stay AniList-only.
-//  4. UpdateDescriptionCn with the Subject's own Summary, once it
+//  3. UpdateDescriptionCn with the Subject's own Summary, once it
 //     passes bangumi.CleanSummary.  Free — the summary arrived in the
-//     step-1 response body.  See persistDescriptionCn.  Listed last but
-//     RUNS right after step 2's write, before per-character enrichment:
-//     it depends on nothing the character loop produces, so a hard
-//     character failure (which retries the whole job) must not be able
-//     to strand the description behind it.
+//     step-1 response body.  See persistDescriptionCn.
+//  4. Episode titles from the /ep payload — see writeEpisodeTitles.
+//
+// # What V2 no longer does, and why
+//
+// The port also fetched /v0/subjects/{bgmId}/characters and, for each
+// character, matched anime_characters by name and wrote name_cn,
+// voice_actor_cn and voice_actor_image_url.  That step is gone, for
+// two reasons that were each sufficient on their own:
+//
+//   - The endpoint carries no name_cn, for characters or for actors.
+//     Its character object is {id, name, type, images, relation,
+//     summary, actors}; the actor object is {id, name, type, images,
+//     career, locked, short_summary}.  The two values the step existed
+//     to write were always nil, and the one it did write was the
+//     CHARACTER's image into the voice actor's column.
+//   - anime_characters is rebuilt wholesale (delete + insert) by the
+//     detail re-fetch, so anything written here was gone within a day
+//     and V2 does not re-run.  The catalogue had zero rows carrying a
+//     Bangumi image after months of the step running, which is how it
+//     was noticed.
+//
+// Dropping it saves one Bangumi request per enriched row from the
+// 800ms bucket the user-facing paths share.  Chinese character names,
+// if they are ever wanted, are per-character reads of /v0/characters/{id}
+// and belong to a job that can survive the detail re-fetch -- see
+// TODOS.md.
 //
 // Retry policy:
 //   - Subject ErrNotFound (Bangumi will not serve us this subject)
@@ -32,13 +51,8 @@
 //     MarkBangumiSubjectUnreadable and migration 0031.
 //   - Either call has a network / 5xx error → return wrapped error so
 //     river retries per its policy (default 3 attempts, exp backoff).
-//   - Subject succeeds but Characters 404 → keep going with subject
-//     data (and zero character writes).  Express ignored per-char
-//     failures the same way.
-//   - Per-character UPDATE errors are logged but NOT fatal — unless
-//     more than half error in which case we return so river retries.
-//     Protects against a wedged DB connection silently degrading
-//     enrichment quality while still tolerating per-row mismatches.
+//   - Episodes 404 or transport error → logged, subject data still
+//     written; the episode-titles sweep re-reads later.
 //
 // SCOPE: writes V2 fields AND chain-enqueues a V3 heal-CN job when
 // the Subject we just fetched didn't supply a Chinese title (i.e.
@@ -70,17 +84,11 @@ import (
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
-// v2WorkTimeout bounds the worker's total budget for Subject +
-// Characters + N character UPDATEs.  Generous to survive Bangumi's
-// worst observed latency but tight enough to free a worker slot when
-// upstream is wedged.
+// v2WorkTimeout bounds the worker's total budget for Subject + Episodes
+// and the writes that follow.  Generous to survive Bangumi's worst
+// observed latency but tight enough to free a worker slot when upstream
+// is wedged.
 const v2WorkTimeout = 30 * time.Second
-
-// v2CharErrorRetryThreshold — when more than this fraction of the
-// per-character UPDATEs fail, return error so river retries the whole
-// job.  0.5 means "if half or more error, retry"; below that we treat
-// it as best-effort partial success and return nil.
-const v2CharErrorRetryThreshold = 0.5
 
 // BangumiSubjector is the small use-site interface for Subject fetch.
 // *bangumi.Client satisfies it.  Defined here at the consumer (V2
@@ -88,12 +96,6 @@ const v2CharErrorRetryThreshold = 0.5
 // method without dragging the full HTTP client into scope.
 type BangumiSubjector interface {
 	Subject(ctx context.Context, bgmID int) (*bangumi.Subject, error)
-}
-
-// BangumiCharactersFetcher is the small use-site interface for the
-// characters list fetch.  *bangumi.Client satisfies it.
-type BangumiCharactersFetcher interface {
-	Characters(ctx context.Context, bgmID int) ([]bangumi.Character, error)
 }
 
 // BangumiEpisodesFetcher is the small use-site interface for the episode
@@ -107,22 +109,19 @@ type BangumiEpisodesFetcher interface {
 // BangumiV2Client is the merged interface BangumiV2Worker needs.  We
 // keep the halves separate above so future workers can compose just the
 // surface they need; this alias is for production wiring (one client,
-// one type) and test-time fakes that satisfy all three.
+// one type) and test-time fakes that satisfy both.
 type BangumiV2Client interface {
 	BangumiSubjector
-	BangumiCharactersFetcher
 	BangumiEpisodesFetcher
 }
 
-// V2Writer is the sqlc subset V2Worker writes.  Five methods:
+// V2Writer is the sqlc subset V2Worker writes.  Four methods:
 //   - UpdateBangumiV2 sets score/votes (and COALESCE-protected
 //     title_chinese) on anime_cache.
 //   - MarkBangumiSubjectUnreadable is the other terminal outcome:
 //     upstream answered, and the answer was that this binding is not
 //     ours to read.  Returns rows affected so a binding that moved
 //     mid-job is reported rather than mistaken for a write.
-//   - UpdateAnimeCharacterCN updates one row of anime_characters
-//     matched by (anime_id, name_en).
 //   - UpsertEpisodeTitleSourced fills per-episode names, labelled
 //     'bangumi' and pinned to the binding they were fetched under.
 //   - UpdateDescriptionCn stores the Chinese synopsis carried by the
@@ -130,7 +129,6 @@ type BangumiV2Client interface {
 type V2Writer interface {
 	UpdateBangumiV2(ctx context.Context, anilistID int32, bangumiScore *float64, bangumiVotes *int32, titleChinese *string) error
 	MarkBangumiSubjectUnreadable(ctx context.Context, anilistID int32, bgmID int32) (int64, error)
-	UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCN *string, voiceActorCN *string, voiceActorImageURL *string) error
 	UpsertEpisodeTitleSourced(ctx context.Context, arg dbgen.UpsertEpisodeTitleSourcedParams) (int64, error)
 	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
 }
@@ -195,22 +193,20 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 	bgmID := job.Args.BgmID
 
 	// Bound the worker's total time budget.  This caps Subject +
-	// Characters + per-character UPDATEs together; an individual call
-	// being slow shouldn't tie up a worker slot forever.
+	// Episodes and the writes together; an individual call being slow
+	// shouldn't tie up a worker slot forever.
 	ctx, cancel := context.WithTimeout(ctx, v2WorkTimeout)
 	defer cancel()
 
-	// Parallel fetch — Subject + Characters from Bangumi.
+	// Parallel fetch — Subject + Episodes from Bangumi.
 	// errgroup.WithContext cancels both calls if one fails, but we
 	// inspect the individual results below to distinguish ErrNotFound
 	// (permanent) from transport errors (retryable).
 	var (
-		subject    *bangumi.Subject
-		characters []bangumi.Character
-		episodes   *bangumi.EpisodesResponse
-		subErr     error
-		charErr    error
-		epErr      error
+		subject  *bangumi.Subject
+		episodes *bangumi.EpisodesResponse
+		subErr   error
+		epErr    error
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -220,13 +216,7 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		subErr = err
 		// Don't return err here — let the joint inspection below
 		// decide retry vs permanent.  Returning err would cancel the
-		// peer (Characters) goroutine on a benign ErrNotFound.
-		return nil
-	})
-	g.Go(func() error {
-		cs, err := w.bangumi.Characters(gctx, bgmID)
-		characters = cs
-		charErr = err
+		// peer (Episodes) goroutine on a benign ErrNotFound.
 		return nil
 	})
 	g.Go(func() error {
@@ -272,21 +262,6 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		return fmt.Errorf("bangumi_v2 subject %d (bgmId=%d): %w", anilistID, bgmID, subErr)
 	}
 
-	// Characters errors:
-	//   - ErrNotFound is tolerable — Bangumi sometimes has subjects
-	//     with no character rows; proceed with subject-only update.
-	//   - Other errors are transient; we retry the whole job so we
-	//     don't half-update the row.
-	if charErr != nil && !errors.Is(charErr, bangumi.ErrNotFound) {
-		return fmt.Errorf("bangumi_v2 characters %d (bgmId=%d): %w", anilistID, bgmID, charErr)
-	}
-	if errors.Is(charErr, bangumi.ErrNotFound) {
-		// Defensive: ensure characters is nil so the loop below is a
-		// no-op.  The HTTP client already returns nil on 404 but this
-		// keeps the contract local.
-		characters = nil
-	}
-
 	// Build the V2 update args.  All three are nullable; pass nil
 	// when the upstream field is missing so the SQL COALESCE/UPDATE
 	// leaves the column untouched (title_chinese) or NULL (score/votes).
@@ -317,73 +292,11 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 	//     Best-effort; see persistDescriptionCn for the full rationale.
 	descCnSent := persistDescriptionCn(ctx, w.db, "bangumi_v2", subject, anilistID, bgmID)
 
-	// 2) Per-character enrichment.  Track failure count so a wedged
-	//    DB connection doesn't silently degrade enrichment quality —
-	//    if more than half error, we ask river to retry the whole job
-	//    (UpdateBangumiV2 is idempotent — it just rewrites the same
-	//    values, no harm).
-	totalChars := len(characters)
-	charFailures := 0
-	for i := range characters {
-		c := &characters[i]
-
-		// nameEn: Bangumi's Character.Name is the canonical name we
-		// match against our anime_characters.name_en.  Pass a local
-		// pointer (NOT &c.Name) so any later loop iteration mutating
-		// c can't change the value we already handed to the DB.
-		nameEnStr := c.Name
-		nameEn := &nameEnStr
-
-		var nameCN *string
-		if c.NameCN != "" {
-			cn := c.NameCN
-			nameCN = &cn
-		}
-
-		var voiceActorCN *string
-		if len(c.Actors) > 0 && c.Actors[0].NameCN != "" {
-			va := c.Actors[0].NameCN
-			voiceActorCN = &va
-		}
-
-		var voiceActorImageURL *string
-		if c.Images != nil && c.Images.Medium != "" {
-			img := c.Images.Medium
-			voiceActorImageURL = &img
-		}
-
-		if err := w.db.UpdateAnimeCharacterCN(ctx, anilistID, nameEn, nameCN, voiceActorCN, voiceActorImageURL); err != nil {
-			charFailures++
-			slog.WarnContext(ctx, "bangumi_v2 char update error",
-				"anilistId", anilistID,
-				"bgmId", bgmID,
-				"nameEn", nameEnStr,
-				"err", err)
-			continue
-		}
-	}
-
-	// More than half the per-char UPDATEs errored — almost certainly
-	// a persistent DB problem.  Return error so river retries the
-	// whole job rather than silently degrading enrichment quality.
-	if totalChars > 0 && float64(charFailures)/float64(totalChars) >= v2CharErrorRetryThreshold {
-		return fmt.Errorf("bangumi_v2 too many char failures %d/%d for anilistId=%d (bgmId=%d)",
-			charFailures, totalChars, anilistID, bgmID)
-	}
-
-	if charFailures > 0 {
-		slog.WarnContext(ctx, "bangumi_v2 partial char failures",
-			"anilistId", anilistID,
-			"bgmId", bgmID,
-			"failures", charFailures,
-			"total", totalChars)
-	}
-
-	// 3) Episode titles — Express Phase-4 parity. Best-effort, like the
-	//    per-character writes: an episodes ErrNotFound / transport error
-	//    (or a write failure) is logged + skipped, never fails the job —
-	//    the subject + character writes already committed. Without this
-	//    block go-api had no path to fill per-episode names at all.
+	// 2) Episode titles — Express Phase-4 parity. Best-effort: an
+	//    episodes ErrNotFound / transport error (or a write failure) is
+	//    logged + skipped, never fails the job — the subject writes
+	//    already committed. Without this block go-api had no path to
+	//    fill per-episode names at all.
 	epTitlesWritten := 0
 	if epErr != nil {
 		if !errors.Is(epErr, bangumi.ErrNotFound) {
@@ -437,7 +350,6 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 		"hasScore", bangumiScore != nil,
 		"hasChinese", titleChinese != nil,
 		"descriptionCnSent", descCnSent,
-		"chars", totalChars-charFailures,
 		"epTitles", epTitlesWritten)
 	return nil
 }

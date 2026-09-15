@@ -88,7 +88,7 @@ func (noHitBangumi) Episodes(_ context.Context, _ int) (*bangumi.EpisodesRespons
 
 // noRowV12DB is a stub V12DB used alongside noHitBangumi.  ErrNoRows
 // on the V1 read short-circuits V1.Work() before Search is even
-// called.  UpdateBangumiV2 / UpdateAnimeCharacterCN are unreachable
+// called.  UpdateBangumiV2 is unreachable
 // because V2.Work() bails on Subject ErrNotFound first -- but the bail
 // is no longer silent: it writes the terminal state through
 // MarkBangumiSubjectUnreadable, which IS reached here and is stubbed
@@ -174,10 +174,6 @@ func (noRowV12DB) MarkBangumiSubjectUnreadable(_ context.Context, _ int32, _ int
 }
 
 func (noRowV12DB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) error {
-	return nil
-}
-
-func (noRowV12DB) UpdateAnimeCharacterCN(_ context.Context, _ int32, _ *string, _ *string, _ *string, _ *string) error {
 	return nil
 }
 

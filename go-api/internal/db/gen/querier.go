@@ -2039,18 +2039,6 @@ type Querier interface {
 	// lastmod ListSitemapShard reports to Google, and a quarterly sweep that
 	// touched every row would republish the whole sitemap for nothing.
 	UpdateAnilistRating(ctx context.Context, averageScore *float64, scoreVotes *int32, anilistID int32) (int64, error)
-	// Phase 2 character enrichment: match by anime_id + (name_en OR name_ja).
-	// Bangumi character.name is typically Japanese (e.g. "天使ヶ原恵") while
-	// AniList stores it under name_ja; some AniList entries have English/
-	// romaji names that match Bangumi's English alias instead.  Try both
-	// columns to maximise the per-character hit rate.
-	//
-	// P2.1.7 used name_en only — Bangumi vs AniList romanisation diffs
-	// yielded 0% match in live smoke (anilist_id=200 Tenshi: 9 chars / 0
-	// matched).  Switching to (name_en OR name_ja) recovers the typical
-	// case where Bangumi-name == AniList.name.native; fuzzy trigram match
-	// can land later if exact-Japanese still misses too many.
-	UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nameEn *string, nameCn *string, voiceActorCn *string, voiceActorImageUrl *string) error
 	// PATCH /api/admin/enrichment/:anilistId — partial update.  COALESCE
 	// pattern: pass NULL for fields the caller doesn't want to touch.  The
 	// *string / *float64 / *int parameters serialize correctly via pgx; the

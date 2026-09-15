@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+### V2 不再向 Bangumi 要角色列表：那一步写的两个字段上游根本没有，写了也活不过一天
+
+移植过来的 V2 每行多打一次 `/v0/subjects/{id}/characters`，然后按名字匹配 `anime_characters`，写 `name_cn`、`voice_actor_cn`、`voice_actor_image_url`。这一步删掉了，两个理由各自就够：
+
+- **端点没这两个字段。** 它的角色对象是 `{id, name, type, images, relation, summary, actors}`，演员对象是 `{id, name, type, images, career, locked, short_summary}`——两层都没有 `name_cn`。所以算出来的两个值永远是 nil；唯一真会写的第三个，写的是**角色**的图进**声优**图那一列。
+- **写了也留不住。** 详情重拉对 `anime_characters` 是整表删了重建，V2 写的任何东西在下一次 24h 到期时消失，而 V2 不重跑。全库 8 万多行角色，带 Bangumi 图的是零——这就是这一步从没留下过痕迹的直接证据，也是它被发现的方式。
+
+省下的是每个富化行一次 800ms 桶的请求，那个桶用户面的弹幕匹配也在用。V2 的重试策略随之收窄：只有 subject 的错误会让作业重试，episodes 照旧尽力而为。`UpdateAnimeCharacterCN` 这条 SQL 一起删了；`bangumi.Client.Characters` 留着，它是 API 面不是死代码。中文角色名要是哪天真要，是逐角色读 `/v0/characters/{id}`，而且得挂在一个能活过详情重拉的作业上——见 TODOS。
+
+
 ### 角色、声优、staff 存下 AniList 的 id；每部从 8 / 10 个放到整页 25 个
 
 `anime_characters` 和 `anime_staff` 从 0001 起只存名字和图，没存 id——`AnimeDetailQuery` 一直选着 `node { id }`，`normalize.go` 拿到手就丢。没有 id 就说不出「同一个人在另一部里」，人物页、「还配过」列表、任何往外的 join 都无从谈起。migration 0037 加 `character_id` / `voice_actor_id` / `staff_id` 三列（可空，正数 CHECK，带部分索引给反查用），normaliser 把 id 传下去，DTO 吐出来。

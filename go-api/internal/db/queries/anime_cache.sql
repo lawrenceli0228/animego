@@ -902,25 +902,6 @@ SET title_chinese  = $2,
     updated_at     = now()
 WHERE anilist_id = $1;
 
--- name: UpdateAnimeCharacterCN :exec
--- Phase 2 character enrichment: match by anime_id + (name_en OR name_ja).
--- Bangumi character.name is typically Japanese (e.g. "天使ヶ原恵") while
--- AniList stores it under name_ja; some AniList entries have English/
--- romaji names that match Bangumi's English alias instead.  Try both
--- columns to maximise the per-character hit rate.
---
--- P2.1.7 used name_en only — Bangumi vs AniList romanisation diffs
--- yielded 0% match in live smoke (anilist_id=200 Tenshi: 9 chars / 0
--- matched).  Switching to (name_en OR name_ja) recovers the typical
--- case where Bangumi-name == AniList.name.native; fuzzy trigram match
--- can land later if exact-Japanese still misses too many.
-UPDATE anime_characters
-SET name_cn               = $3,
-    voice_actor_cn        = $4,
-    voice_actor_image_url = $5
-WHERE anime_id = $1
-  AND (name_en = $2 OR name_ja = $2);
-
 -- name: GetAnimeMainByID :one
 -- Full main-row read for /:anilistId detail.  Returns every column
 -- the response payload needs (vs the trimmed listing shape
