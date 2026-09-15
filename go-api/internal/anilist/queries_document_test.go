@@ -84,3 +84,32 @@ func TestMediaFactsQuerySelectsExactlyTheFourFacts(t *testing.T) {
 			"MediaFactsQuery must not select %q: the sweep would write it over every row with no second source to restore from", forbidden)
 	}
 }
+
+// TestEveryUpsertingDocumentSelectsTheScalarBlock — the 0036 scalars are
+// written by UpsertAnimeCache without a "did the document select this"
+// flag, which is only honest if every document that reaches the upsert
+// selects them.  Drop isAdult from SeasonalAnimeQuery and every warm
+// cycle would write false over a row the detail path had marked adult;
+// this is the test that fails instead.
+func TestEveryUpsertingDocumentSelectsTheScalarBlock(t *testing.T) {
+	block := []string{"popularity", "favourites", "idMal", "isAdult", "countryOfOrigin", "nextAiringEpisode { airingAt episode }"}
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{"SearchAnimeQuery", SearchAnimeQuery},
+		{"SeasonalAnimeQuery", SeasonalAnimeQuery},
+		{"AnimeDetailQuery", AnimeDetailQuery},
+		{"MediaFactsQuery", MediaFactsQuery},
+	} {
+		for _, sel := range block {
+			assert.Contains(t, tc.query, sel, "%s must select %q", tc.name, sel)
+		}
+	}
+	// synonyms is a child table written only by the two documents that
+	// select it; the listing documents leave the table alone.
+	assert.Contains(t, AnimeDetailQuery, "synonyms")
+	assert.Contains(t, MediaFactsQuery, "synonyms")
+	assert.NotContains(t, SearchAnimeQuery, "synonyms")
+	assert.NotContains(t, SeasonalAnimeQuery, "synonyms")
+}

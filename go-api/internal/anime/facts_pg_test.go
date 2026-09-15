@@ -123,3 +123,94 @@ func TestMigration0034_StampsRowsWithChildRows(t *testing.T) {
 	// Leave the schema where every other test expects it.
 	testutil.MigrateTo(t, uri, testutil.LatestMigrationVersion(t))
 }
+
+// TestUpsertAnimeCache_ScalarBlock — the 0036 columns land, a Media that
+// did not decode isAdult leaves the stored flag alone, mal_id survives a
+// null, and the synonym set is a whole replace on the detail path.
+func TestUpsertAnimeCache_ScalarBlock(t *testing.T) {
+	ctx := context.Background()
+	uri := testutil.SetupPG(t)
+	pool := testutil.NewWebPool(t, ctx, uri)
+	q := dbgen.New(pool)
+
+	adult := true
+	m := anilist.Media{
+		ID:                7,
+		Title:             &anilist.Title{Romaji: sptr("Row")},
+		Popularity:        iptr(1000),
+		Favourites:        iptr(10),
+		IDMal:             iptr(555),
+		IsAdult:           &adult,
+		CountryOfOrigin:   sptr("JP"),
+		NextAiringEpisode: &anilist.NextAiringEpisode{AiringAt: 1_800_000_000, Episode: 4},
+	}
+	require.NoError(t, q.UpsertAnimeCache(ctx, NormalizeMainRow(m, anilist.DetailDocument)))
+	row, err := q.GetAnimeMainByID(ctx, 7)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1000), *row.Popularity)
+	assert.Equal(t, int32(10), *row.Favourites)
+	assert.Equal(t, int32(555), *row.MalID)
+	assert.True(t, row.IsAdult)
+	assert.Equal(t, "JP", *row.CountryOfOrigin)
+	require.True(t, row.NextAiringAt.Valid)
+	assert.Equal(t, time.Unix(1_800_000_000, 0).UTC(), row.NextAiringAt.Time.UTC())
+	assert.Equal(t, int32(4), *row.NextAiringEpisode)
+
+	// A Media with nothing decoded: isAdult nil keeps true, mal_id keeps
+	// 555, the plainly-written scalars go to what the document said (null).
+	require.NoError(t, q.UpsertAnimeCache(ctx, NormalizeMainRow(anilist.Media{ID: 7, Title: &anilist.Title{Romaji: sptr("Row")}}, anilist.SearchDocument)))
+	row, err = q.GetAnimeMainByID(ctx, 7)
+	require.NoError(t, err)
+	assert.True(t, row.IsAdult, "nil isAdult must not overwrite a stored true")
+	assert.Equal(t, int32(555), *row.MalID, "mal_id COALESCEs")
+	assert.Nil(t, row.Popularity, "popularity is written as stated, and this document stated nothing")
+	assert.False(t, row.NextAiringAt.Valid, "an aired episode is cleared by the next read that says none is scheduled")
+
+	// An explicit false does overwrite.
+	notAdult := false
+	require.NoError(t, q.UpsertAnimeCache(ctx, NormalizeMainRow(anilist.Media{ID: 7, Title: &anilist.Title{Romaji: sptr("Row")}, IsAdult: &notAdult}, anilist.SearchDocument)))
+	row, err = q.GetAnimeMainByID(ctx, 7)
+	require.NoError(t, err)
+	assert.False(t, row.IsAdult)
+}
+
+// TestListingsExcludeAdultRows — the four listings a visitor reaches
+// without asking for adult content exclude is_adult rows: seasonal and
+// its count (which also keep the genre exclusion), completed gems, and
+// the yearly top.
+func TestListingsExcludeAdultRows(t *testing.T) {
+	ctx := context.Background()
+	uri := testutil.SetupPG(t)
+	pool := testutil.NewWebPool(t, ctx, uri)
+	q := dbgen.New(pool)
+
+	for _, r := range []struct {
+		id    int32
+		adult bool
+	}{{1, false}, {2, true}} {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO anime_cache (anilist_id, title_romaji, status, season, season_year, average_score, format, cover_image_url, is_adult)
+			VALUES ($1, 'row', 'FINISHED', 'WINTER', 2026, 80, 'TV', 'https://cdn/x.jpg', $2)`, r.id, r.adult)
+		require.NoError(t, err)
+	}
+
+	yr := int32(2026)
+	seasonal, err := q.GetSeasonalAnime(ctx, sptr("WINTER"), &yr, 10, 0)
+	require.NoError(t, err)
+	require.Len(t, seasonal, 1)
+	assert.Equal(t, int32(1), seasonal[0].AnilistID)
+
+	n, err := q.CountSeasonal(ctx, sptr("WINTER"), &yr)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+
+	gems, err := q.GetCompletedGems(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, gems, 1)
+	assert.Equal(t, int32(1), gems[0].AnilistID)
+
+	top, err := q.GetYearlyTop(ctx, &yr, 10)
+	require.NoError(t, err)
+	require.Len(t, top, 1)
+	assert.Equal(t, int32(1), top[0].AnilistID)
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
+	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
 // ---------------------------------------------------------------------------
@@ -22,6 +23,11 @@ type factsWrite struct {
 	start, end pgtype.Date
 	duration   *int32
 	source     *string
+	popularity *int32
+	isAdult    bool
+	malID      *int32
+	nextAt     pgtype.Timestamptz
+	nextEp     *int32
 }
 
 type fakeFactsDB struct {
@@ -32,10 +38,12 @@ type fakeFactsDB struct {
 	gotLimit   int32
 	written    map[int32]factsWrite
 	stamped    []int32
+	synonyms   map[int32][]string
+	synDeletes int
 }
 
 func newFakeFactsDB(ids ...int32) *fakeFactsDB {
-	return &fakeFactsDB{candidates: ids, written: map[int32]factsWrite{}}
+	return &fakeFactsDB{candidates: ids, written: map[int32]factsWrite{}, synonyms: map[int32][]string{}}
 }
 
 func (f *fakeFactsDB) ListAnimeFactsCandidates(_ context.Context, stale pgtype.Interval, limit int32) ([]int32, error) {
@@ -43,12 +51,27 @@ func (f *fakeFactsDB) ListAnimeFactsCandidates(_ context.Context, stale pgtype.I
 	return f.candidates, f.listErr
 }
 
-func (f *fakeFactsDB) UpdateAnimeFacts(_ context.Context, start, end pgtype.Date, duration *int32, source *string, id int32) (int64, error) {
+func (f *fakeFactsDB) UpdateAnimeFacts(_ context.Context, p dbgen.UpdateAnimeFactsParams) (int64, error) {
 	if f.updErr != nil {
 		return 0, f.updErr
 	}
-	f.written[id] = factsWrite{start: start, end: end, duration: duration, source: source}
+	f.written[p.AnilistID] = factsWrite{
+		start: p.StartDate, end: p.EndDate, duration: p.Duration, source: p.Source,
+		popularity: p.Popularity, isAdult: p.IsAdult, malID: p.MalID,
+		nextAt: p.NextAiringAt, nextEp: p.NextAiringEpisode,
+	}
 	return 1, nil
+}
+
+func (f *fakeFactsDB) DeleteAnimeSynonyms(_ context.Context, id int32) error {
+	f.synDeletes++
+	delete(f.synonyms, id)
+	return nil
+}
+
+func (f *fakeFactsDB) InsertAnimeSynonym(_ context.Context, id int32, syn string) error {
+	f.synonyms[id] = append(f.synonyms[id], syn)
+	return nil
 }
 
 func (f *fakeFactsDB) MarkAnimeFactsChecked(_ context.Context, id int32) (int64, error) {
@@ -222,3 +245,41 @@ func TestAnimeFacts_UpdateFailureDoesNotStampOrAbort(t *testing.T) {
 }
 
 func intp(v int) *int { return &v }
+
+// TestAnimeFacts_ScalarBlockAndSynonyms — the 0036 scalars ride along
+// with the four facts, and the synonym set is replaced per returned row.
+func TestAnimeFacts_ScalarBlockAndSynonyms(t *testing.T) {
+	t.Parallel()
+
+	db := newFakeFactsDB(1, 2)
+	db.synonyms[1] = []string{"stale-old-synonym"}
+	adult := true
+	al := &fakeFactsFetcher{respond: func(ids []int) (*anilist.MediaFactsResponse, error) {
+		m1 := factsMedia(1, fullDate(2024, 4, 26), nil, nil, nil)
+		m1.Popularity = intp(4242)
+		m1.IDMal = intp(99)
+		m1.IsAdult = &adult
+		m1.NextAiringEpisode = &anilist.NextAiringEpisode{AiringAt: 1_700_000_000, Episode: 3}
+		m1.Synonyms = []string{"A", " A ", "", "B"}
+		m2 := factsMedia(2, nil, nil, nil, nil) // nothing stated, no synonyms
+		return &anilist.MediaFactsResponse{Page: anilist.MediaPage{Media: []anilist.Media{m1, m2}}}, nil
+	}}
+
+	require.NoError(t, NewAnimeFactsWorker(al, db).Work(context.Background(), factsJob()))
+
+	w1 := db.written[1]
+	assert.Equal(t, int32(4242), *w1.popularity)
+	assert.Equal(t, int32(99), *w1.malID)
+	assert.True(t, w1.isAdult)
+	require.True(t, w1.nextAt.Valid)
+	assert.Equal(t, int32(3), *w1.nextEp)
+	assert.Equal(t, []string{"A", "B"}, db.synonyms[1], "old set gone, new set trimmed and de-duplicated")
+
+	w2 := db.written[2]
+	assert.Nil(t, w2.popularity)
+	assert.False(t, w2.isAdult, "this document selects isAdult, so an absent value is false")
+	assert.False(t, w2.nextAt.Valid)
+	_, has := db.synonyms[2]
+	assert.False(t, has, "an empty set is a delete with no inserts")
+	assert.Equal(t, 2, db.synDeletes)
+}

@@ -41,6 +41,7 @@ type detailFakeDB struct {
 	// Readers
 	getAnimeMainByIDFn            func(ctx context.Context, id int32) (dbgen.GetAnimeMainByIDRow, error)
 	getAnimeGenresByIDFn          func(ctx context.Context, id int32) ([]string, error)
+	getAnimeSynonymsByIDFn        func(ctx context.Context, id int32) ([]string, error)
 	getAnimeStudiosByIDFn         func(ctx context.Context, id int32) ([]string, error)
 	getAnimeRelationsByIDFn       func(ctx context.Context, id int32) ([]dbgen.GetAnimeRelationsByIDRow, error)
 	getAnimeCharactersByIDFn      func(ctx context.Context, id int32) ([]dbgen.GetAnimeCharactersByIDRow, error)
@@ -72,6 +73,8 @@ type detailFakeDB struct {
 	// expected number of Delete+Insert pairs ran.
 	upsertMainCalls            atomic.Int32
 	deleteGenresCalls          atomic.Int32
+	deleteSynonymsCalls        atomic.Int32
+	insertedSynonyms           []string
 	insertGenreCalls           atomic.Int32
 	deleteStudiosCalls         atomic.Int32
 	insertStudioCalls          atomic.Int32
@@ -107,6 +110,13 @@ func (f *detailFakeDB) GetAnimeGenresByID(ctx context.Context, id int32) ([]stri
 		return []string{}, nil
 	}
 	return f.getAnimeGenresByIDFn(ctx, id)
+}
+
+func (f *detailFakeDB) GetAnimeSynonymsByID(ctx context.Context, id int32) ([]string, error) {
+	if f.getAnimeSynonymsByIDFn == nil {
+		return []string{}, nil
+	}
+	return f.getAnimeSynonymsByIDFn(ctx, id)
 }
 
 func (f *detailFakeDB) GetAnimeStudiosByID(ctx context.Context, id int32) ([]string, error) {
@@ -186,6 +196,18 @@ func (f *detailFakeDB) DeleteAnimeGenres(ctx context.Context, id int32) error {
 	if f.deleteAnimeGenresFn != nil {
 		return f.deleteAnimeGenresFn(ctx, id)
 	}
+	return nil
+}
+
+func (f *detailFakeDB) DeleteAnimeSynonyms(ctx context.Context, id int32) error {
+	f.deleteSynonymsCalls.Add(1)
+	return nil
+}
+
+func (f *detailFakeDB) InsertAnimeSynonym(ctx context.Context, id int32, syn string) error {
+	f.mu.Lock()
+	f.insertedSynonyms = append(f.insertedSynonyms, syn)
+	f.mu.Unlock()
 	return nil
 }
 

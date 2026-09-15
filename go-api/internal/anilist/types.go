@@ -11,7 +11,10 @@
 // rename — encoding/json's struct-tag lookup is the contract.
 package anilist
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ---------------------------------------------------------------------------
 // Shared scalars (used by multiple queries)
@@ -202,9 +205,19 @@ type Media struct {
 	Genres        []string   `json:"genres"`
 	Format        *string    `json:"format"`
 
-	// Weekly-schedule only — see Media{IsAdult} usage in
-	// anilist.service.js getWeeklySchedule for the adult-content skip.
+	// Selected by every document since 0036 (and by the weekly schedule
+	// long before, for its adult-content skip).  A pointer so a document
+	// that predates the field decodes as nil rather than false.
 	IsAdult *bool `json:"isAdult,omitempty"`
+
+	// The scalar block every upserting document selects (0036).
+	Popularity        *int               `json:"popularity,omitempty"`
+	Favourites        *int               `json:"favourites,omitempty"`
+	IDMal             *int               `json:"idMal,omitempty"`
+	CountryOfOrigin   *string            `json:"countryOfOrigin,omitempty"`
+	NextAiringEpisode *NextAiringEpisode `json:"nextAiringEpisode,omitempty"`
+	// Alternative titles; detail and facts documents only.
+	Synonyms []string `json:"synonyms,omitempty"`
 
 	// Detail-only fields (AnimeDetailQuery)
 	StartDate       *FuzzyDate       `json:"startDate,omitempty"`
@@ -391,6 +404,50 @@ type RecommendationConnection struct {
 // ---------------------------------------------------------------------------
 // Weekly-schedule specifics
 // ---------------------------------------------------------------------------
+
+// NextAiringEpisode is Media.nextAiringEpisode: the next scheduled
+// episode as AniList states it, or absent when nothing is scheduled.
+type NextAiringEpisode struct {
+	AiringAt int64 `json:"airingAt"` // Unix seconds
+	Episode  int   `json:"episode"`
+}
+
+// NextAiring returns the next scheduled episode as (airing time, episode
+// number, true), or false when AniList states none.  A pair with a
+// missing or non-positive half is treated as none: the column pair is
+// CHECKed to be both-or-neither, and half an answer is not one.
+func (m Media) NextAiring() (time.Time, int, bool) {
+	n := m.NextAiringEpisode
+	if n == nil || n.AiringAt <= 0 || n.Episode <= 0 {
+		return time.Time{}, 0, false
+	}
+	return time.Unix(n.AiringAt, 0).UTC(), n.Episode, true
+}
+
+// SynonymSet returns the synonyms worth storing: trimmed, non-empty,
+// de-duplicated, in first-seen order.  AniList's list is user-edited and
+// does carry blanks and repeats; the table's PK and CHECK would refuse
+// them one row at a time, and this is cheaper than a refused insert
+// inside a loop that swallows per-row errors.
+func (m Media) SynonymSet() []string {
+	if len(m.Synonyms) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(m.Synonyms))
+	out := make([]string, 0, len(m.Synonyms))
+	for _, raw := range m.Synonyms {
+		syn := strings.TrimSpace(raw)
+		if syn == "" {
+			continue
+		}
+		if _, dup := seen[syn]; dup {
+			continue
+		}
+		seen[syn] = struct{}{}
+		out = append(out, syn)
+	}
+	return out
+}
 
 // AiringSchedule is one row in airingSchedules{...}.  The embedded
 // Media object only carries the subset of fields the schedule view

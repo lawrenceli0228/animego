@@ -38,6 +38,12 @@ import (
 //	source               →  source
 //	(the doc argument)   →  trailer_checked_at  (now() when the document selects trailer)
 //	(the doc argument)   →  detail_fetched_at   (now() when the document selects children)
+//	popularity/favourites→  popularity / favourites
+//	idMal                →  mal_id
+//	isAdult              →  is_adult            (nullable on the way in; see the upsert)
+//	countryOfOrigin      →  country_of_origin
+//	nextAiringEpisode    →  next_airing_at / next_airing_episode  (both or neither — Media.NextAiring)
+//	synonyms             →  NOT here; a child table, written by the detail path like genres
 //
 // The two *_at columns are the places this function needs to know
 // something the Media alone cannot tell it: which GraphQL document
@@ -75,6 +81,14 @@ func NormalizeMainRow(m anilist.Media, doc anilist.Document) dbgen.UpsertAnimeCa
 		}
 	}
 
+	// Both halves or neither -- the column pair is CHECKed that way.
+	var nextAiringAt pgtype.Timestamptz
+	var nextAiringEpisode *int32
+	if at, ep, ok := m.NextAiring(); ok {
+		nextAiringAt = pgtype.Timestamptz{Time: at, Valid: true}
+		nextAiringEpisode = ptrInt32(&ep)
+	}
+
 	return dbgen.UpsertAnimeCacheParams{
 		AnilistID:                   int32(m.ID),
 		TitleRomaji:                 deref(m.Title, func(t *anilist.Title) *string { return t.Romaji }),
@@ -101,6 +115,13 @@ func NormalizeMainRow(m anilist.Media, doc anilist.Document) dbgen.UpsertAnimeCa
 		Duration:                    ptrInt32(m.Duration),
 		Source:                      m.Source,
 		DetailFetched:               doc.SelectsChildren(),
+		Popularity:                  ptrInt32(m.Popularity),
+		Favourites:                  ptrInt32(m.Favourites),
+		MalID:                       ptrInt32(m.IDMal),
+		IsAdult:                     m.IsAdult,
+		CountryOfOrigin:             m.CountryOfOrigin,
+		NextAiringAt:                nextAiringAt,
+		NextAiringEpisode:           nextAiringEpisode,
 	}
 }
 
