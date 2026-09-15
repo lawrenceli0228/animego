@@ -291,13 +291,6 @@ func (f *fakeBackfillDB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) 
 	return nil
 }
 
-func (f *fakeBackfillDB) UpdateAnimeCharacterCN(_ context.Context, _ int32, _ *string, _ *string, _ *string, _ *string) error {
-	f.mu.Lock()
-	f.charCalls++
-	f.mu.Unlock()
-	return nil
-}
-
 func (f *fakeBackfillDB) UpsertEpisodeTitleSourced(_ context.Context, _ dbgen.UpsertEpisodeTitleSourcedParams) (int64, error) {
 	return 1, nil
 }
