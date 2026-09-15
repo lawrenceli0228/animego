@@ -1,10 +1,15 @@
 // Package anilist — GraphQL query string constants.
 //
-// These four queries are copied VERBATIM from the Express
-// server/queries/*.graphql.js files so the AniList wire format stays
-// byte-identical with the legacy backend.  Do not optimise the GraphQL
-// shape locally; the legacy traffic is what production observability and
-// rate-limit budgets are tuned against.
+// The four listing/detail queries began as VERBATIM copies of the Express
+// server/queries/*.graphql.js documents, and their request COUNT is still
+// what production observability and rate-limit budgets are tuned against.
+// Their selection sets are no longer byte-identical: trailer (0032) and
+// then the scalar block -- popularity, favourites, idMal, isAdult,
+// countryOfOrigin, nextAiringEpisode (0036) -- were added to every
+// document that upserts anime_cache, so that no upsert path can carry a
+// row without them.  Adding a scalar to a document costs nothing in
+// requests; it is the request count, not the byte count, that the
+// budgets are about.
 //
 // Source files (Express):
 //   - server/queries/searchAnime.graphql.js
@@ -46,6 +51,12 @@ const SearchAnimeQuery = `
         averageScore
         genres
         format
+        popularity
+        favourites
+        idMal
+        isAdult
+        countryOfOrigin
+        nextAiringEpisode { airingAt episode }
       }
     }
   }
@@ -85,6 +96,12 @@ const SeasonalAnimeQuery = `
         averageScore
         genres
         format
+        popularity
+        favourites
+        idMal
+        isAdult
+        countryOfOrigin
+        nextAiringEpisode { airingAt episode }
       }
     }
   }
@@ -131,6 +148,13 @@ const AnimeDetailQuery = `
         nodes { mediaRecommendation { id title { romaji native } coverImage { large color } averageScore } }
       }
       trailer { id site }
+      synonyms
+      popularity
+      favourites
+      idMal
+      isAdult
+      countryOfOrigin
+      nextAiringEpisode { airingAt episode }
     }
   }
 `
@@ -218,11 +242,14 @@ const MediaRatingsQuery = `
 // page by, and a batch of 50 per request because that is what turns a
 // whole-catalogue pass into hundreds of requests rather than thousands.
 //
-// The selection is exactly the four columns 0034 taught the upsert to
-// write, plus the id to attribute them.  Nothing else: this document is
-// not a cache warm either, and a sweep that overwrote titles or scores
-// across every row at once would have no second source to restore them
-// from if it was wrong.  See queue/anime_facts.go.
+// The selection is the four columns 0034 taught the upsert to write, the
+// scalar block 0036 added (synonyms, popularity, favourites, idMal,
+// isAdult, countryOfOrigin, nextAiringEpisode), and the id to attribute
+// them.  Nothing else: this document is not a cache warm, and a sweep
+// that overwrote titles or scores across every row at once would have no
+// second source to restore them from if it was wrong.  Everything it
+// does select is a fact AniList alone is the source of.  See
+// queue/anime_facts.go.
 //
 // Variables:
 //
@@ -237,6 +264,13 @@ const MediaFactsQuery = `
         endDate   { year month day }
         duration
         source
+        synonyms
+        popularity
+        favourites
+        idMal
+        isAdult
+        countryOfOrigin
+        nextAiringEpisode { airingAt episode }
       }
     }
   }

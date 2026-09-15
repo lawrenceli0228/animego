@@ -4,6 +4,19 @@
 
 ## [未发布]
 
+### 向 AniList 多要七个标量和一张别名表，四份文档一起要，upsert 才没有「没选就写空」的歧义
+
+阶段 2 的第一步。`Media` 上一直有、目录里一直没有的：`synonyms`（别名）、`popularity` / `favourites`（榜单和「多少人在追」）、`idMal`（外链三件套的最后一个）、`isAdult`（成人标记，此前全站靠 `genre = 'Hentai'` 一根线）、`countryOfOrigin`、`nextAiringEpisode`（连载中的「第 N 集·几天后」）。migration 0036 加七列和 `anime_synonyms` 表。
+
+★ **标量加进了全部四份文档，不是只加详情。** trailer 当年只在两份文档里，所以 upsert 得带一个「这次选没选」的标志，否则搜索路径会拿 nil 把存好的预告片抹掉。这次的做法是让 search / seasonal / detail / facts 四份文档都选同一组标量——多选几个标量不多一次请求，而限流预算量的是请求数不是字节数——于是 upsert 可以按字面写：AniList 说 null 就是 null。两个例外各有理由：`mal_id` COALESCE（id 知道了不会变回不知道）；`is_adult` 进来时是可空的，`Media` 没解码到这个字段（这棵树里不存在，但类型允许）就保留库里的值，避免 false 盖掉 true。有测试钉住四份文档都选这组字段，少一个就红。
+
+`nextAiringEpisode` 存成一对列并加 CHECK：有时间没集号或反过来都不是答案。它的新鲜度就是行的新鲜度（详情路径 24h TTL），消费方要拿 `airingAt` 和自己的钟比，DTO 注释写明了。`synonyms` 是子表、整组替换，和 genres 一样，只由详情路径和 facts sweep 写；列表路径不碰。
+
+顺手把两处成人内容的口子合上：首页的「完结佳作」和「年度榜」此前从不排除成人条目（seasonal 一直排除，另外两个从来没有），现在四条查询都看 `is_adult`——seasonal 保留原来的 genre 判断在旁边，因为 Express 迁来的存量行在被任何 AniList 路径碰过之前 `is_adult` 是默认 false。本地搜索这次没动：它在 #123 改成本地之后确实丢掉了 AniList 路径的 `isAdult: false`，但搜索的成人策略属于阶段 3 的浏览页，一起定。
+
+facts sweep 的文档同步扩到这组标量（它选的每一样都是 AniList 独家来源的事实）。★但 sweep 的戳回答的是「问过没有」，而问题变宽了：在四字段文档下打过戳的行没被问过 popularity 和别名——所以 migration 把 `facts_checked_at` 全部清零，让 sweep 按自己的节奏再走一遍，而不是留两代戳并存。
+
+
 ### 四个字段的存量回填：不整仓 warm-all，走 50 个 id 一批的 facts sweep
 
 上一条把写入链修通之后，剩下的问题是存量：一行只有在被人打开、且 `cached_at` 过了 24 小时的时候才会重新走一遍详情查询，没人看的行永远轮不到。按上线后头几个小时的速度，整个目录要一周，而且只盖得到被访问过的那部分。

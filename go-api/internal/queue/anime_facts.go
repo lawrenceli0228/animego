@@ -69,8 +69,10 @@ type AniListFactsFetcher interface {
 // AnimeFactsDB is the sqlc subset the sweep uses.
 type AnimeFactsDB interface {
 	ListAnimeFactsCandidates(ctx context.Context, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error)
-	UpdateAnimeFacts(ctx context.Context, startDate pgtype.Date, endDate pgtype.Date, duration *int32, source *string, anilistID int32) (int64, error)
+	UpdateAnimeFacts(ctx context.Context, arg dbgen.UpdateAnimeFactsParams) (int64, error)
 	MarkAnimeFactsChecked(ctx context.Context, anilistID int32) (int64, error)
+	DeleteAnimeSynonyms(ctx context.Context, animeID int32) error
+	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
 }
 
 // AnimeFactsWorker fills in the four facts in id batches.
@@ -142,11 +144,17 @@ func (w *AnimeFactsWorker) applyBatch(ctx context.Context, requested []int, medi
 	seen := make(map[int]struct{}, len(media))
 	for _, m := range media {
 		seen[m.ID] = struct{}{}
-		if _, err := w.db.UpdateAnimeFacts(ctx,
-			dateColumn(m.StartDate), dateColumn(m.EndDate), int32PtrFromInt(m.Duration), m.Source,
-			int32(m.ID)); err != nil {
+		if _, err := w.db.UpdateAnimeFacts(ctx, factsParams(m)); err != nil {
 			slog.WarnContext(ctx, "anime_facts update failed", "anilistId", m.ID, "err", err)
 			continue
+		}
+		// Synonyms are a whole-set replace, like genres on the detail
+		// path.  A failure here is logged and the row still counts as
+		// written: the scalars committed, and the next re-read of a
+		// moving row -- or the next detail fetch of any row -- replaces
+		// the set again.
+		if err := w.replaceSynonyms(ctx, int32(m.ID), m.SynonymSet()); err != nil {
+			slog.WarnContext(ctx, "anime_facts synonyms failed", "anilistId", m.ID, "err", err)
 		}
 		*written++
 	}
@@ -168,6 +176,44 @@ func (w *AnimeFactsWorker) clock() time.Time {
 		return time.Now()
 	}
 	return w.now()
+}
+
+// factsParams projects one Media onto the UpdateAnimeFacts statement.
+// The rules are NormalizeMainRow's (internal/anime), restated here
+// because that package imports this one: whole dates or NULL, both
+// halves of next-airing or neither, is_adult false when AniList did not
+// say (this document always does).
+func factsParams(m anilist.Media) dbgen.UpdateAnimeFactsParams {
+	p := dbgen.UpdateAnimeFactsParams{
+		StartDate:       dateColumn(m.StartDate),
+		EndDate:         dateColumn(m.EndDate),
+		Duration:        int32PtrFromInt(m.Duration),
+		Source:          m.Source,
+		Popularity:      int32PtrFromInt(m.Popularity),
+		Favourites:      int32PtrFromInt(m.Favourites),
+		MalID:           int32PtrFromInt(m.IDMal),
+		IsAdult:         m.IsAdult != nil && *m.IsAdult,
+		CountryOfOrigin: m.CountryOfOrigin,
+		AnilistID:       int32(m.ID),
+	}
+	if at, ep, ok := m.NextAiring(); ok {
+		p.NextAiringAt = pgtype.Timestamptz{Time: at, Valid: true}
+		p.NextAiringEpisode = int32PtrFromInt(&ep)
+	}
+	return p
+}
+
+// replaceSynonyms writes the row's synonym set: delete, then insert each.
+func (w *AnimeFactsWorker) replaceSynonyms(ctx context.Context, anilistID int32, synonyms []string) error {
+	if err := w.db.DeleteAnimeSynonyms(ctx, anilistID); err != nil {
+		return fmt.Errorf("delete: %w", err)
+	}
+	for _, syn := range synonyms {
+		if err := w.db.InsertAnimeSynonym(ctx, anilistID, syn); err != nil {
+			return fmt.Errorf("insert %q: %w", syn, err)
+		}
+	}
+	return nil
 }
 
 // dateColumn renders a FuzzyDate for a date column: the whole date or

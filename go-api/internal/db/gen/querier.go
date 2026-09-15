@@ -301,6 +301,7 @@ type Querier interface {
 	DeleteAnimeRelations(ctx context.Context, animeID int32) error
 	DeleteAnimeStaff(ctx context.Context, animeID int32) error
 	DeleteAnimeStudios(ctx context.Context, animeID int32) error
+	DeleteAnimeSynonyms(ctx context.Context, animeID int32) error
 	// DELETE /api/comments/:id.  ON DELETE CASCADE handles any reply
 	// children — Express deleteOne() left them dangling, which is a bug
 	// the Postgres FK definition fixes for free.
@@ -664,6 +665,7 @@ type Querier interface {
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
 	GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error)
 	GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error)
+	GetAnimeSynonymsByID(ctx context.Context, animeID int32) ([]string, error)
 	// DELETE pre-check: read the row so we can confirm ownership before
 	// deleting.  Returns the user_id the comment was authored by; handler
 	// compares against claims.UserID.
@@ -1042,6 +1044,7 @@ type Querier interface {
 	InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelationParams) error
 	InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
+	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
 	// Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
 	// updated_at takes its column DEFAULT now().  anidb_id is last to match the
 	// physical column order (added by migration 0013 via ALTER); pgx CopyFrom
@@ -2088,7 +2091,12 @@ type Querier interface {
 	// ListSitemapShard reports, and here a change IS content: the page's
 	// info rows and its JSON-LD startDate/endDate come from these columns.
 	// A re-check that finds nothing new must not republish the row.
-	UpdateAnimeFacts(ctx context.Context, startDate pgtype.Date, endDate pgtype.Date, duration *int32, source *string, anilistID int32) (int64, error)
+	//
+	// The 0036 scalar block rides along with the same semantics it has in
+	// UpsertAnimeCache: plain writes for what the document states outright,
+	// COALESCE for mal_id.  is_adult is written plainly because this
+	// document selects it.
+	UpdateAnimeFacts(ctx context.Context, arg UpdateAnimeFactsParams) (int64, error)
 	// Write one row's Bangumi rating figures and stamp the read.
 	//
 	// The Bangumi counterpart of UpdateAnilistRating, and narrow on purpose.

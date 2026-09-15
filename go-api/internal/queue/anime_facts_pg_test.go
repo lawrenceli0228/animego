@@ -61,10 +61,11 @@ func TestAnimeFacts_PG(t *testing.T) {
 
 		dur := int32(24)
 		src := "MANGA"
-		n, err := q.UpdateAnimeFacts(ctx,
-			pgtype.Date{Time: time.Date(2024, 4, 26, 0, 0, 0, 0, time.UTC), Valid: true},
-			pgtype.Date{}, // still airing when read: no end date
-			&dur, &src, 10)
+		n, err := q.UpdateAnimeFacts(ctx, dbgen.UpdateAnimeFactsParams{
+			StartDate: pgtype.Date{Time: time.Date(2024, 4, 26, 0, 0, 0, 0, time.UTC), Valid: true},
+			EndDate:   pgtype.Date{}, // still airing when read: no end date
+			Duration:  &dur, Source: &src, AnilistID: 10,
+		})
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), n)
 
@@ -92,7 +93,7 @@ func TestAnimeFacts_PG(t *testing.T) {
 
 		// Sleep past the clock's resolution so a moved stamp is observable.
 		time.Sleep(20 * time.Millisecond)
-		_, err := q.UpdateAnimeFacts(ctx, pgtype.Date{}, pgtype.Date{}, nil, nil, 10)
+		_, err := q.UpdateAnimeFacts(ctx, dbgen.UpdateAnimeFactsParams{AnilistID: 10})
 		require.NoError(t, err)
 
 		row, err := q.GetAnimeMainByID(ctx, 10)
@@ -108,8 +109,10 @@ func TestAnimeFacts_PG(t *testing.T) {
 	})
 
 	t.Run("a newly known end date is written over NULL, and lastmod moves", func(t *testing.T) {
-		_, err := q.UpdateAnimeFacts(ctx, pgtype.Date{},
-			pgtype.Date{Time: time.Date(2024, 7, 12, 0, 0, 0, 0, time.UTC), Valid: true}, nil, nil, 10)
+		_, err := q.UpdateAnimeFacts(ctx, dbgen.UpdateAnimeFactsParams{
+			EndDate:   pgtype.Date{Time: time.Date(2024, 7, 12, 0, 0, 0, 0, time.UTC), Valid: true},
+			AnilistID: 10,
+		})
 		require.NoError(t, err)
 		row, err := q.GetAnimeMainByID(ctx, 10)
 		require.NoError(t, err)

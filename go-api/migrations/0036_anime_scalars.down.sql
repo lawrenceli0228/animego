@@ -1,0 +1,11 @@
+DROP TABLE anime_synonyms;
+ALTER TABLE anime_cache
+    DROP CONSTRAINT anime_counts_nonneg,
+    DROP CONSTRAINT anime_next_airing_pair,
+    DROP COLUMN popularity,
+    DROP COLUMN favourites,
+    DROP COLUMN mal_id,
+    DROP COLUMN is_adult,
+    DROP COLUMN country_of_origin,
+    DROP COLUMN next_airing_at,
+    DROP COLUMN next_airing_episode;

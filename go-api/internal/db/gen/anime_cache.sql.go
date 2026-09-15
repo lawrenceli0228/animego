@@ -342,6 +342,7 @@ FROM anime_cache
 WHERE
     season = $1
     AND season_year = $2
+    AND NOT is_adult
     AND NOT EXISTS (
         SELECT 1 FROM anime_genres
         WHERE anime_genres.anime_id = anime_cache.anilist_id
@@ -437,6 +438,15 @@ DELETE FROM anime_studios WHERE anime_id = $1
 
 func (q *Queries) DeleteAnimeStudios(ctx context.Context, animeID int32) error {
 	_, err := q.db.Exec(ctx, deleteAnimeStudios, animeID)
+	return err
+}
+
+const deleteAnimeSynonyms = `-- name: DeleteAnimeSynonyms :exec
+DELETE FROM anime_synonyms WHERE anime_id = $1
+`
+
+func (q *Queries) DeleteAnimeSynonyms(ctx context.Context, animeID int32) error {
+	_, err := q.db.Exec(ctx, deleteAnimeSynonyms, animeID)
 	return err
 }
 
@@ -993,7 +1003,14 @@ SELECT
     -- The detail read is the one that has to tell "asked, none" apart
     -- from "never asked": isStale turns the second into a re-fetch.
     trailer_checked_at,
-    detail_fetched_at
+    detail_fetched_at,
+    popularity,
+    favourites,
+    mal_id,
+    is_adult,
+    country_of_origin,
+    next_airing_at,
+    next_airing_episode
 FROM anime_cache
 WHERE anilist_id = $1
 `
@@ -1038,6 +1055,13 @@ type GetAnimeMainByIDRow struct {
 	TrailerSite                 *string            `json:"trailerSite"`
 	TrailerCheckedAt            pgtype.Timestamptz `json:"trailerCheckedAt"`
 	DetailFetchedAt             pgtype.Timestamptz `json:"detailFetchedAt"`
+	Popularity                  *int32             `json:"popularity"`
+	Favourites                  *int32             `json:"favourites"`
+	MalID                       *int32             `json:"malId"`
+	IsAdult                     bool               `json:"isAdult"`
+	CountryOfOrigin             *string            `json:"countryOfOrigin"`
+	NextAiringAt                pgtype.Timestamptz `json:"nextAiringAt"`
+	NextAiringEpisode           *int32             `json:"nextAiringEpisode"`
 }
 
 // Full main-row read for /:anilistId detail.  Returns every column
@@ -1103,6 +1127,13 @@ func (q *Queries) GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAni
 		&i.TrailerSite,
 		&i.TrailerCheckedAt,
 		&i.DetailFetchedAt,
+		&i.Popularity,
+		&i.Favourites,
+		&i.MalID,
+		&i.IsAdult,
+		&i.CountryOfOrigin,
+		&i.NextAiringAt,
+		&i.NextAiringEpisode,
 	)
 	return i, err
 }
@@ -1281,6 +1312,30 @@ func (q *Queries) GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]str
 	return items, nil
 }
 
+const getAnimeSynonymsByID = `-- name: GetAnimeSynonymsByID :many
+SELECT synonym FROM anime_synonyms WHERE anime_id = $1 ORDER BY synonym
+`
+
+func (q *Queries) GetAnimeSynonymsByID(ctx context.Context, animeID int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, getAnimeSynonymsByID, animeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var synonym string
+		if err := rows.Scan(&synonym); err != nil {
+			return nil, err
+		}
+		items = append(items, synonym)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCompletedGems = `-- name: GetCompletedGems :many
 
 SELECT
@@ -1314,6 +1369,9 @@ WHERE
     status = 'FINISHED'
     AND average_score >= 75
     AND cover_image_url IS NOT NULL
+    -- A home-page widget: the same exclusion the seasonal listing has
+    -- always applied, by the column rather than the genre.
+    AND NOT is_adult
 ORDER BY random()
 LIMIT $1
 `
@@ -1648,6 +1706,7 @@ FROM anime_cache
 WHERE
     season = $1
     AND season_year = $2
+    AND NOT is_adult
     AND NOT EXISTS (
         SELECT 1 FROM anime_genres
         WHERE anime_genres.anime_id = anime_cache.anilist_id
@@ -2032,6 +2091,7 @@ WHERE
     season_year = $1
     AND average_score > 0
     AND format IN ('TV', 'MOVIE', 'ONA')
+    AND NOT is_adult
 ORDER BY average_score DESC
 LIMIT $2
 `
@@ -2285,6 +2345,15 @@ INSERT INTO anime_studios (anime_id, studio) VALUES ($1, $2) ON CONFLICT DO NOTH
 
 func (q *Queries) InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error {
 	_, err := q.db.Exec(ctx, insertAnimeStudio, animeID, studio)
+	return err
+}
+
+const insertAnimeSynonym = `-- name: InsertAnimeSynonym :exec
+INSERT INTO anime_synonyms (anime_id, synonym) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error {
+	_, err := q.db.Exec(ctx, insertAnimeSynonym, animeID, synonym)
 	return err
 }
 
@@ -3568,19 +3637,45 @@ func (q *Queries) UpdateAnimeCharacterCN(ctx context.Context, animeID int32, nam
 
 const updateAnimeFacts = `-- name: UpdateAnimeFacts :execrows
 UPDATE anime_cache
-   SET start_date       = COALESCE($1::date, start_date),
-       end_date         = COALESCE($2::date,   end_date),
-       duration         = COALESCE($3::int,    duration),
-       source           = COALESCE($4::text,     source),
-       facts_checked_at = now(),
+   SET start_date          = COALESCE($1::date, start_date),
+       end_date            = COALESCE($2::date,   end_date),
+       duration            = COALESCE($3::int,    duration),
+       source              = COALESCE($4::text,     source),
+       popularity          = $5::int,
+       favourites          = $6::int,
+       mal_id              = COALESCE($7::int, mal_id),
+       is_adult            = $8::boolean,
+       country_of_origin   = $9::text,
+       next_airing_at      = $10::timestamptz,
+       next_airing_episode = $11::int,
+       facts_checked_at    = now(),
        updated_at = CASE
            WHEN start_date IS DISTINCT FROM COALESCE($1::date, start_date)
              OR end_date   IS DISTINCT FROM COALESCE($2::date,   end_date)
              OR duration   IS DISTINCT FROM COALESCE($3::int,    duration)
              OR source     IS DISTINCT FROM COALESCE($4::text,     source)
+             OR is_adult   IS DISTINCT FROM $8::boolean
+             OR country_of_origin IS DISTINCT FROM $9::text
+             OR mal_id     IS DISTINCT FROM COALESCE($7::int, mal_id)
+             OR next_airing_episode IS DISTINCT FROM $11::int
            THEN now() ELSE updated_at END
- WHERE anilist_id = $5::int
+ WHERE anilist_id = $12::int
 `
+
+type UpdateAnimeFactsParams struct {
+	StartDate         pgtype.Date        `json:"startDate"`
+	EndDate           pgtype.Date        `json:"endDate"`
+	Duration          *int32             `json:"duration"`
+	Source            *string            `json:"source"`
+	Popularity        *int32             `json:"popularity"`
+	Favourites        *int32             `json:"favourites"`
+	MalID             *int32             `json:"malId"`
+	IsAdult           bool               `json:"isAdult"`
+	CountryOfOrigin   *string            `json:"countryOfOrigin"`
+	NextAiringAt      pgtype.Timestamptz `json:"nextAiringAt"`
+	NextAiringEpisode *int32             `json:"nextAiringEpisode"`
+	AnilistID         int32              `json:"anilistId"`
+}
 
 // Write one row's four facts and stamp the read.
 //
@@ -3595,13 +3690,25 @@ UPDATE anime_cache
 // ListSitemapShard reports, and here a change IS content: the page's
 // info rows and its JSON-LD startDate/endDate come from these columns.
 // A re-check that finds nothing new must not republish the row.
-func (q *Queries) UpdateAnimeFacts(ctx context.Context, startDate pgtype.Date, endDate pgtype.Date, duration *int32, source *string, anilistID int32) (int64, error) {
+//
+// The 0036 scalar block rides along with the same semantics it has in
+// UpsertAnimeCache: plain writes for what the document states outright,
+// COALESCE for mal_id.  is_adult is written plainly because this
+// document selects it.
+func (q *Queries) UpdateAnimeFacts(ctx context.Context, arg UpdateAnimeFactsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateAnimeFacts,
-		startDate,
-		endDate,
-		duration,
-		source,
-		anilistID,
+		arg.StartDate,
+		arg.EndDate,
+		arg.Duration,
+		arg.Source,
+		arg.Popularity,
+		arg.Favourites,
+		arg.MalID,
+		arg.IsAdult,
+		arg.CountryOfOrigin,
+		arg.NextAiringAt,
+		arg.NextAiringEpisode,
+		arg.AnilistID,
 	)
 	if err != nil {
 		return 0, err
@@ -3892,6 +3999,8 @@ INSERT INTO anime_cache (
     trailer_id, trailer_site, trailer_checked_at,
     start_date, end_date, duration, source,
     detail_fetched_at,
+    popularity, favourites, mal_id, is_adult, country_of_origin,
+    next_airing_at, next_airing_episode,
     cached_at, updated_at
 ) VALUES (
     $1,
@@ -3905,6 +4014,9 @@ INSERT INTO anime_cache (
     $18, $19, CASE WHEN $20::boolean THEN now() ELSE NULL END,
     $21, $22, $23, $24,
     CASE WHEN $25::boolean THEN now() ELSE NULL END,
+    $26, $27, $28,
+    COALESCE($29::boolean, false), $30,
+    $31, $32,
     now(), now()
 )
 ON CONFLICT (anilist_id) DO UPDATE SET
@@ -3945,36 +4057,58 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     -- caller's document selected the child connections, so a listing
     -- upsert cannot un-stamp a row the detail path has been through.
     detail_fetched_at = CASE WHEN EXCLUDED.detail_fetched_at IS NOT NULL THEN EXCLUDED.detail_fetched_at ELSE anime_cache.detail_fetched_at END,
+    -- The 0036 scalar block.  Every document that reaches this statement
+    -- selects all of these, so a null here is AniList's answer for the
+    -- row and is written as such -- EXCEPT mal_id, which COALESCEs for
+    -- the reason the four facts above do: an id, once known, does not
+    -- become unknown.  is_adult arrives as a nullable so a Media decoded
+    -- from a document that predates the field (none in this tree, but
+    -- the type allows it) reads as "not stated" rather than as false
+    -- overwriting true; the CASE keeps the stored value in that case.
+    popularity          = EXCLUDED.popularity,
+    favourites          = EXCLUDED.favourites,
+    mal_id              = COALESCE(EXCLUDED.mal_id, anime_cache.mal_id),
+    is_adult            = CASE WHEN $29::boolean IS NULL THEN anime_cache.is_adult ELSE EXCLUDED.is_adult END,
+    country_of_origin   = EXCLUDED.country_of_origin,
+    next_airing_at      = EXCLUDED.next_airing_at,
+    next_airing_episode = EXCLUDED.next_airing_episode,
     cached_at = now(),
     updated_at = now()
 `
 
 type UpsertAnimeCacheParams struct {
-	AnilistID                   int32       `json:"anilistId"`
-	TitleRomaji                 *string     `json:"titleRomaji"`
-	TitleEnglish                *string     `json:"titleEnglish"`
-	TitleNative                 *string     `json:"titleNative"`
-	CoverImageUrl               *string     `json:"coverImageUrl"`
-	CoverImageColor             *string     `json:"coverImageColor"`
-	PosterAccent                *string     `json:"posterAccent"`
-	PosterAccentRgb             *string     `json:"posterAccentRgb"`
-	PosterAccentContrastOnBlack *float64    `json:"posterAccentContrastOnBlack"`
-	BannerImageUrl              *string     `json:"bannerImageUrl"`
-	Description                 *string     `json:"description"`
-	Episodes                    *int32      `json:"episodes"`
-	Status                      *string     `json:"status"`
-	Season                      *string     `json:"season"`
-	SeasonYear                  *int32      `json:"seasonYear"`
-	AverageScore                *float64    `json:"averageScore"`
-	Format                      *string     `json:"format"`
-	TrailerID                   *string     `json:"trailerId"`
-	TrailerSite                 *string     `json:"trailerSite"`
-	TrailerChecked              bool        `json:"trailerChecked"`
-	StartDate                   pgtype.Date `json:"startDate"`
-	EndDate                     pgtype.Date `json:"endDate"`
-	Duration                    *int32      `json:"duration"`
-	Source                      *string     `json:"source"`
-	DetailFetched               bool        `json:"detailFetched"`
+	AnilistID                   int32              `json:"anilistId"`
+	TitleRomaji                 *string            `json:"titleRomaji"`
+	TitleEnglish                *string            `json:"titleEnglish"`
+	TitleNative                 *string            `json:"titleNative"`
+	CoverImageUrl               *string            `json:"coverImageUrl"`
+	CoverImageColor             *string            `json:"coverImageColor"`
+	PosterAccent                *string            `json:"posterAccent"`
+	PosterAccentRgb             *string            `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64           `json:"posterAccentContrastOnBlack"`
+	BannerImageUrl              *string            `json:"bannerImageUrl"`
+	Description                 *string            `json:"description"`
+	Episodes                    *int32             `json:"episodes"`
+	Status                      *string            `json:"status"`
+	Season                      *string            `json:"season"`
+	SeasonYear                  *int32             `json:"seasonYear"`
+	AverageScore                *float64           `json:"averageScore"`
+	Format                      *string            `json:"format"`
+	TrailerID                   *string            `json:"trailerId"`
+	TrailerSite                 *string            `json:"trailerSite"`
+	TrailerChecked              bool               `json:"trailerChecked"`
+	StartDate                   pgtype.Date        `json:"startDate"`
+	EndDate                     pgtype.Date        `json:"endDate"`
+	Duration                    *int32             `json:"duration"`
+	Source                      *string            `json:"source"`
+	DetailFetched               bool               `json:"detailFetched"`
+	Popularity                  *int32             `json:"popularity"`
+	Favourites                  *int32             `json:"favourites"`
+	MalID                       *int32             `json:"malId"`
+	IsAdult                     *bool              `json:"isAdult"`
+	CountryOfOrigin             *string            `json:"countryOfOrigin"`
+	NextAiringAt                pgtype.Timestamptz `json:"nextAiringAt"`
+	NextAiringEpisode           *int32             `json:"nextAiringEpisode"`
 }
 
 // Upsert anime_cache main row from AniList sync.  Bangumi columns
@@ -4018,6 +4152,13 @@ func (q *Queries) UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCachePara
 		arg.Duration,
 		arg.Source,
 		arg.DetailFetched,
+		arg.Popularity,
+		arg.Favourites,
+		arg.MalID,
+		arg.IsAdult,
+		arg.CountryOfOrigin,
+		arg.NextAiringAt,
+		arg.NextAiringEpisode,
 	)
 	return err
 }

@@ -47,6 +47,9 @@ WHERE
     status = 'FINISHED'
     AND average_score >= 75
     AND cover_image_url IS NOT NULL
+    -- A home-page widget: the same exclusion the seasonal listing has
+    -- always applied, by the column rather than the genre.
+    AND NOT is_adult
 ORDER BY random()
 LIMIT $1;
 
@@ -85,6 +88,7 @@ WHERE
     season_year = $1
     AND average_score > 0
     AND format IN ('TV', 'MOVIE', 'ONA')
+    AND NOT is_adult
 ORDER BY average_score DESC
 LIMIT $2;
 
@@ -154,6 +158,7 @@ FROM anime_cache
 WHERE
     season = $1
     AND season_year = $2
+    AND NOT is_adult
     AND NOT EXISTS (
         SELECT 1 FROM anime_genres
         WHERE anime_genres.anime_id = anime_cache.anilist_id
@@ -171,6 +176,7 @@ FROM anime_cache
 WHERE
     season = $1
     AND season_year = $2
+    AND NOT is_adult
     AND NOT EXISTS (
         SELECT 1 FROM anime_genres
         WHERE anime_genres.anime_id = anime_cache.anilist_id
@@ -293,6 +299,8 @@ INSERT INTO anime_cache (
     trailer_id, trailer_site, trailer_checked_at,
     start_date, end_date, duration, source,
     detail_fetched_at,
+    popularity, favourites, mal_id, is_adult, country_of_origin,
+    next_airing_at, next_airing_episode,
     cached_at, updated_at
 ) VALUES (
     $1,
@@ -306,6 +314,9 @@ INSERT INTO anime_cache (
     $18, $19, CASE WHEN sqlc.arg(trailer_checked)::boolean THEN now() ELSE NULL END,
     sqlc.arg(start_date), sqlc.arg(end_date), sqlc.arg(duration), sqlc.arg(source),
     CASE WHEN sqlc.arg(detail_fetched)::boolean THEN now() ELSE NULL END,
+    sqlc.arg(popularity), sqlc.arg(favourites), sqlc.arg(mal_id),
+    COALESCE(sqlc.narg(is_adult)::boolean, false), sqlc.arg(country_of_origin),
+    sqlc.arg(next_airing_at), sqlc.arg(next_airing_episode),
     now(), now()
 )
 ON CONFLICT (anilist_id) DO UPDATE SET
@@ -346,6 +357,21 @@ ON CONFLICT (anilist_id) DO UPDATE SET
     -- caller's document selected the child connections, so a listing
     -- upsert cannot un-stamp a row the detail path has been through.
     detail_fetched_at = CASE WHEN EXCLUDED.detail_fetched_at IS NOT NULL THEN EXCLUDED.detail_fetched_at ELSE anime_cache.detail_fetched_at END,
+    -- The 0036 scalar block.  Every document that reaches this statement
+    -- selects all of these, so a null here is AniList's answer for the
+    -- row and is written as such -- EXCEPT mal_id, which COALESCEs for
+    -- the reason the four facts above do: an id, once known, does not
+    -- become unknown.  is_adult arrives as a nullable so a Media decoded
+    -- from a document that predates the field (none in this tree, but
+    -- the type allows it) reads as "not stated" rather than as false
+    -- overwriting true; the CASE keeps the stored value in that case.
+    popularity          = EXCLUDED.popularity,
+    favourites          = EXCLUDED.favourites,
+    mal_id              = COALESCE(EXCLUDED.mal_id, anime_cache.mal_id),
+    is_adult            = CASE WHEN sqlc.narg(is_adult)::boolean IS NULL THEN anime_cache.is_adult ELSE EXCLUDED.is_adult END,
+    country_of_origin   = EXCLUDED.country_of_origin,
+    next_airing_at      = EXCLUDED.next_airing_at,
+    next_airing_episode = EXCLUDED.next_airing_episode,
     cached_at = now(),
     updated_at = now();
 
@@ -957,12 +983,22 @@ SELECT
     -- The detail read is the one that has to tell "asked, none" apart
     -- from "never asked": isStale turns the second into a re-fetch.
     trailer_checked_at,
-    detail_fetched_at
+    detail_fetched_at,
+    popularity,
+    favourites,
+    mal_id,
+    is_adult,
+    country_of_origin,
+    next_airing_at,
+    next_airing_episode
 FROM anime_cache
 WHERE anilist_id = $1;
 
 -- name: GetAnimeGenresByID :many
 SELECT genre FROM anime_genres WHERE anime_id = $1 ORDER BY genre;
+
+-- name: GetAnimeSynonymsByID :many
+SELECT synonym FROM anime_synonyms WHERE anime_id = $1 ORDER BY synonym;
 
 -- name: GetAnimeStudiosByID :many
 SELECT studio FROM anime_studios WHERE anime_id = $1 ORDER BY studio;
@@ -1065,6 +1101,12 @@ DELETE FROM anime_genres WHERE anime_id = $1;
 
 -- name: InsertAnimeGenre :exec
 INSERT INTO anime_genres (anime_id, genre) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+
+-- name: DeleteAnimeSynonyms :exec
+DELETE FROM anime_synonyms WHERE anime_id = $1;
+
+-- name: InsertAnimeSynonym :exec
+INSERT INTO anime_synonyms (anime_id, synonym) VALUES ($1, $2) ON CONFLICT DO NOTHING;
 
 -- name: DeleteAnimeStudios :exec
 DELETE FROM anime_studios WHERE anime_id = $1;
@@ -2247,17 +2289,33 @@ LIMIT sqlc.arg(row_limit)::int;
 -- ListSitemapShard reports, and here a change IS content: the page's
 -- info rows and its JSON-LD startDate/endDate come from these columns.
 -- A re-check that finds nothing new must not republish the row.
+--
+-- The 0036 scalar block rides along with the same semantics it has in
+-- UpsertAnimeCache: plain writes for what the document states outright,
+-- COALESCE for mal_id.  is_adult is written plainly because this
+-- document selects it.
 UPDATE anime_cache
-   SET start_date       = COALESCE(sqlc.narg(start_date)::date, start_date),
-       end_date         = COALESCE(sqlc.narg(end_date)::date,   end_date),
-       duration         = COALESCE(sqlc.narg(duration)::int,    duration),
-       source           = COALESCE(sqlc.narg(source)::text,     source),
-       facts_checked_at = now(),
+   SET start_date          = COALESCE(sqlc.narg(start_date)::date, start_date),
+       end_date            = COALESCE(sqlc.narg(end_date)::date,   end_date),
+       duration            = COALESCE(sqlc.narg(duration)::int,    duration),
+       source              = COALESCE(sqlc.narg(source)::text,     source),
+       popularity          = sqlc.narg(popularity)::int,
+       favourites          = sqlc.narg(favourites)::int,
+       mal_id              = COALESCE(sqlc.narg(mal_id)::int, mal_id),
+       is_adult            = sqlc.arg(is_adult)::boolean,
+       country_of_origin   = sqlc.narg(country_of_origin)::text,
+       next_airing_at      = sqlc.narg(next_airing_at)::timestamptz,
+       next_airing_episode = sqlc.narg(next_airing_episode)::int,
+       facts_checked_at    = now(),
        updated_at = CASE
            WHEN start_date IS DISTINCT FROM COALESCE(sqlc.narg(start_date)::date, start_date)
              OR end_date   IS DISTINCT FROM COALESCE(sqlc.narg(end_date)::date,   end_date)
              OR duration   IS DISTINCT FROM COALESCE(sqlc.narg(duration)::int,    duration)
              OR source     IS DISTINCT FROM COALESCE(sqlc.narg(source)::text,     source)
+             OR is_adult   IS DISTINCT FROM sqlc.arg(is_adult)::boolean
+             OR country_of_origin IS DISTINCT FROM sqlc.narg(country_of_origin)::text
+             OR mal_id     IS DISTINCT FROM COALESCE(sqlc.narg(mal_id)::int, mal_id)
+             OR next_airing_episode IS DISTINCT FROM sqlc.narg(next_airing_episode)::int
            THEN now() ELSE updated_at END
  WHERE anilist_id = sqlc.arg(anilist_id)::int;
 

@@ -241,6 +241,21 @@ export interface AnimeDetail {
    */
   endDate?: string | null;
   genres: string[];
+  /**
+   * The 0036 scalar block, all optional because they arrived with that
+   * migration and an older API build does not send them. `synonyms` is
+   * AniList's alternative-title list (empty, never null, once present);
+   * `nextAiring` is the next scheduled episode as AniList last stated it —
+   * compare `airingAt` with the clock before rendering a countdown, since
+   * the value is as fresh as the row and an episode may have aired since.
+   */
+  synonyms?: string[];
+  popularity?: number | null;
+  favourites?: number | null;
+  malId?: number | null;
+  isAdult?: boolean;
+  countryOfOrigin?: string | null;
+  nextAiring?: { airingAt: string; episode: number } | null;
   studios: string[];
   relations: DetailRelation[];
   characters: DetailCharacter[];

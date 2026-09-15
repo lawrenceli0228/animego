@@ -126,49 +126,82 @@ const refetchTimeout = 15 * time.Second
 // call site downstream looking identical, and the one that must not take the
 // inferred value would have no way left to refuse it.
 type AnimeDetail struct {
-	Trailer                     *anilist.Trailer       `json:"trailer,omitempty"`
-	AnilistID                   int32                  `json:"anilistId"`
-	TitleRomaji                 *string                `json:"titleRomaji"`
-	TitleEnglish                *string                `json:"titleEnglish"`
-	TitleNative                 *string                `json:"titleNative"`
-	TitleChinese                *string                `json:"titleChinese"`
-	TitleHant                   *string                `json:"titleHant"`
-	TitleHantSource             *string                `json:"titleHantSource"`
-	TitleHantSeo                *string                `json:"titleHantSeo"`
-	CoverImageUrl               *string                `json:"coverImageUrl"`
-	CoverImageColor             *string                `json:"coverImageColor"`
-	PosterAccent                *string                `json:"posterAccent"`
-	PosterAccentRgb             *string                `json:"posterAccentRgb"`
-	PosterAccentContrastOnBlack *float64               `json:"posterAccentContrastOnBlack"`
-	BannerImageUrl              *string                `json:"bannerImageUrl"`
-	Description                 *string                `json:"description"`
-	DescriptionCn               *string                `json:"descriptionCn"`
-	DescriptionCnSource         *string                `json:"descriptionCnSource"`
-	DescriptionHant             *string                `json:"descriptionHant"`
-	DescriptionHantSource       *string                `json:"descriptionHantSource"`
-	Episodes                    *int32                 `json:"episodes"`
-	EpisodesBgm                 *int32                 `json:"episodesBgm"`
-	Status                      *string                `json:"status"`
-	Season                      *string                `json:"season"`
-	SeasonYear                  *int32                 `json:"seasonYear"`
-	AverageScore                *float64               `json:"averageScore"`
-	Format                      *string                `json:"format"`
-	Duration                    *int32                 `json:"duration"`
-	Source                      *string                `json:"source"`
-	StartDate                   pgtype.Date            `json:"startDate"`
-	EndDate                     pgtype.Date            `json:"endDate"`
-	Genres                      []string               `json:"genres"`
-	Studios                     []string               `json:"studios"`
-	Relations                   []DetailRelation       `json:"relations"`
-	Characters                  []DetailCharacter      `json:"characters"`
-	Staff                       []DetailStaff          `json:"staff"`
-	Recommendations             []DetailRecommendation `json:"recommendations"`
-	EpisodeTitles               []DetailEpisodeTitle   `json:"episodeTitles"`
-	BgmID                       *int32                 `json:"bgmId"`
-	BangumiScore                *float64               `json:"bangumiScore"`
-	BangumiVotes                *int32                 `json:"bangumiVotes"`
-	BangumiVersion              int32                  `json:"bangumiVersion"`
-	CachedAt                    pgtype.Timestamptz     `json:"cachedAt"`
+	Trailer                     *anilist.Trailer `json:"trailer,omitempty"`
+	AnilistID                   int32            `json:"anilistId"`
+	TitleRomaji                 *string          `json:"titleRomaji"`
+	TitleEnglish                *string          `json:"titleEnglish"`
+	TitleNative                 *string          `json:"titleNative"`
+	TitleChinese                *string          `json:"titleChinese"`
+	TitleHant                   *string          `json:"titleHant"`
+	TitleHantSource             *string          `json:"titleHantSource"`
+	TitleHantSeo                *string          `json:"titleHantSeo"`
+	CoverImageUrl               *string          `json:"coverImageUrl"`
+	CoverImageColor             *string          `json:"coverImageColor"`
+	PosterAccent                *string          `json:"posterAccent"`
+	PosterAccentRgb             *string          `json:"posterAccentRgb"`
+	PosterAccentContrastOnBlack *float64         `json:"posterAccentContrastOnBlack"`
+	BannerImageUrl              *string          `json:"bannerImageUrl"`
+	Description                 *string          `json:"description"`
+	DescriptionCn               *string          `json:"descriptionCn"`
+	DescriptionCnSource         *string          `json:"descriptionCnSource"`
+	DescriptionHant             *string          `json:"descriptionHant"`
+	DescriptionHantSource       *string          `json:"descriptionHantSource"`
+	Episodes                    *int32           `json:"episodes"`
+	EpisodesBgm                 *int32           `json:"episodesBgm"`
+	Status                      *string          `json:"status"`
+	Season                      *string          `json:"season"`
+	SeasonYear                  *int32           `json:"seasonYear"`
+	AverageScore                *float64         `json:"averageScore"`
+	Format                      *string          `json:"format"`
+	Duration                    *int32           `json:"duration"`
+	Source                      *string          `json:"source"`
+	StartDate                   pgtype.Date      `json:"startDate"`
+	EndDate                     pgtype.Date      `json:"endDate"`
+	Genres                      []string         `json:"genres"`
+	// Alternative titles from AniList (migration 0036).  Empty, never
+	// null, for the same reason genres is.
+	Synonyms []string `json:"synonyms"`
+	Studios  []string `json:"studios"`
+	// The 0036 scalar block.  All nullable except isAdult, which the
+	// column defaults to false; see the migration for why the genre
+	// exclusions still stand beside it.
+	Popularity      *int32  `json:"popularity"`
+	Favourites      *int32  `json:"favourites"`
+	MalID           *int32  `json:"malId"`
+	IsAdult         bool    `json:"isAdult"`
+	CountryOfOrigin *string `json:"countryOfOrigin"`
+	// The next scheduled episode as AniList last stated it, or null.  A
+	// consumer must compare airingAt with its own clock: the value is as
+	// fresh as the row (24h TTL on the detail path), so an episode that
+	// aired since the last fetch is still here until the row is read again.
+	NextAiring      *DetailNextAiring      `json:"nextAiring"`
+	Relations       []DetailRelation       `json:"relations"`
+	Characters      []DetailCharacter      `json:"characters"`
+	Staff           []DetailStaff          `json:"staff"`
+	Recommendations []DetailRecommendation `json:"recommendations"`
+	EpisodeTitles   []DetailEpisodeTitle   `json:"episodeTitles"`
+	BgmID           *int32                 `json:"bgmId"`
+	BangumiScore    *float64               `json:"bangumiScore"`
+	BangumiVotes    *int32                 `json:"bangumiVotes"`
+	BangumiVersion  int32                  `json:"bangumiVersion"`
+	CachedAt        pgtype.Timestamptz     `json:"cachedAt"`
+}
+
+// DetailNextAiring is AnimeDetail.NextAiring: when the next episode airs
+// and which one it is.  airingAt is RFC 3339 in UTC, matching every other
+// timestamp the API emits.
+type DetailNextAiring struct {
+	AiringAt time.Time `json:"airingAt"`
+	Episode  int32     `json:"episode"`
+}
+
+// nextAiringFromRow projects the column pair, which the CHECK keeps
+// both-or-neither, into the DTO's optional object.
+func nextAiringFromRow(main dbgen.GetAnimeMainByIDRow) *DetailNextAiring {
+	if !main.NextAiringAt.Valid || main.NextAiringEpisode == nil {
+		return nil
+	}
+	return &DetailNextAiring{AiringAt: main.NextAiringAt.Time.UTC(), Episode: *main.NextAiringEpisode}
 }
 
 // DetailRelation is one entry in AnimeDetail.Relations.  Enriched at
@@ -253,6 +286,7 @@ type DetailEpisodeTitle struct {
 type DetailReader interface {
 	GetAnimeMainByID(ctx context.Context, anilistID int32) (dbgen.GetAnimeMainByIDRow, error)
 	GetAnimeGenresByID(ctx context.Context, animeID int32) ([]string, error)
+	GetAnimeSynonymsByID(ctx context.Context, animeID int32) ([]string, error)
 	GetAnimeStudiosByID(ctx context.Context, animeID int32) ([]string, error)
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeRelationsByIDRow, error)
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]dbgen.GetAnimeCharactersByIDRow, error)
@@ -272,6 +306,8 @@ type DetailWriter interface {
 
 	DeleteAnimeGenres(ctx context.Context, animeID int32) error
 	InsertAnimeGenre(ctx context.Context, animeID int32, genre string) error
+	DeleteAnimeSynonyms(ctx context.Context, animeID int32) error
+	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
 
 	DeleteAnimeStudios(ctx context.Context, animeID int32) error
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string) error
@@ -440,7 +476,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 	}
 
 	// Six independent child reads run in parallel.
-	genres, studios, relations, characters, staffRows, recommendations, episodeTitles, err := s.fetchChildren(ctx, anilistID)
+	genres, synonyms, studios, relations, characters, staffRows, recommendations, episodeTitles, err := s.fetchChildren(ctx, anilistID)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +504,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 			// doesn't each repeat the (blocking, ~5s) re-fetch attempt and
 			// pile up on the worker pool.
 			stale := assembleDetail(
-				main, genres, studios,
+				main, genres, synonyms, studios,
 				convertRelationsToDetailRelations(relations),
 				characters, staffRows, recommendations, episodeTitles,
 			)
@@ -487,7 +523,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 		return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 	}
 
-	detail := assembleDetail(main, genres, studios, enrichedRelations, characters, staffRows, recommendations, episodeTitles)
+	detail := assembleDetail(main, genres, synonyms, studios, enrichedRelations, characters, staffRows, recommendations, episodeTitles)
 
 	// Populate cache.  Set is best-effort — ristretto may reject under
 	// contention but the next request will re-read from DB without
@@ -499,7 +535,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 	return detail, nil
 }
 
-// fetchChildren reads the six child arrays in parallel via errgroup.
+// fetchChildren reads the child arrays in parallel via errgroup.
 // Extracted from fetchDetail so the re-fetch path can reuse the same
 // orchestration without duplicating the goroutine wiring.  Returned in
 // the same order as assembleDetail consumes them.
@@ -508,6 +544,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 // straight to the writeError mapper.
 func (s *DetailService) fetchChildren(ctx context.Context, anilistID int32) (
 	genres []string,
+	synonyms []string,
 	studios []string,
 	relations []dbgen.GetAnimeRelationsByIDRow,
 	characters []dbgen.GetAnimeCharactersByIDRow,
@@ -520,6 +557,11 @@ func (s *DetailService) fetchChildren(ctx context.Context, anilistID int32) (
 	g.Go(func() error {
 		var e error
 		genres, e = s.db.GetAnimeGenresByID(gctx, anilistID)
+		return e
+	})
+	g.Go(func() error {
+		var e error
+		synonyms, e = s.db.GetAnimeSynonymsByID(gctx, anilistID)
 		return e
 	})
 	g.Go(func() error {
@@ -677,7 +719,7 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 		// 500 so the failure is visible in logs.
 		return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "post-refetch read failed")
 	}
-	genres, studios, relations, characters, staffRows, recommendations, episodeTitles, err := s.fetchChildren(ctx, anilistID)
+	genres, synonyms, studios, relations, characters, staffRows, recommendations, episodeTitles, err := s.fetchChildren(ctx, anilistID)
 	if err != nil {
 		return nil, err
 	}
@@ -689,7 +731,7 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 		enrichedRelations = convertRelationsToDetailRelations(relations)
 	}
 
-	detail := assembleDetail(main, genres, studios, enrichedRelations, characters, staffRows, recommendations, episodeTitles)
+	detail := assembleDetail(main, genres, synonyms, studios, enrichedRelations, characters, staffRows, recommendations, episodeTitles)
 	if ok := s.cache.Set(strconv.FormatInt(int64(anilistID), 10), detail); !ok {
 		slog.Debug("anime/detail: cache set rejected post-refetch", "anilistId", anilistID)
 	}
@@ -722,6 +764,17 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 	for _, g := range Genres(m) {
 		if err := s.db.InsertAnimeGenre(ctx, anilistID, g); err != nil {
 			return fmt.Errorf("insert genre %q: %w", g, err)
+		}
+	}
+
+	// 2b) Synonyms — same shape as genres: a whole-set replace from the
+	// one source that has them.
+	if err := s.db.DeleteAnimeSynonyms(ctx, anilistID); err != nil {
+		return fmt.Errorf("delete synonyms: %w", err)
+	}
+	for _, syn := range m.SynonymSet() {
+		if err := s.db.InsertAnimeSynonym(ctx, anilistID, syn); err != nil {
+			return fmt.Errorf("insert synonym %q: %w", syn, err)
 		}
 	}
 
@@ -934,6 +987,7 @@ func (s *DetailService) enrichRelations(ctx context.Context, rels []dbgen.GetAni
 func assembleDetail(
 	main dbgen.GetAnimeMainByIDRow,
 	genres []string,
+	synonyms []string,
 	studios []string,
 	relations []DetailRelation,
 	characters []dbgen.GetAnimeCharactersByIDRow,
@@ -943,6 +997,9 @@ func assembleDetail(
 ) *AnimeDetail {
 	if genres == nil {
 		genres = []string{}
+	}
+	if synonyms == nil {
+		synonyms = []string{}
 	}
 	if studios == nil {
 		studios = []string{}
@@ -1032,7 +1089,14 @@ func assembleDetail(
 		StartDate:                   main.StartDate,
 		EndDate:                     main.EndDate,
 		Genres:                      genres,
+		Synonyms:                    synonyms,
 		Studios:                     studios,
+		Popularity:                  main.Popularity,
+		Favourites:                  main.Favourites,
+		MalID:                       main.MalID,
+		IsAdult:                     main.IsAdult,
+		CountryOfOrigin:             main.CountryOfOrigin,
+		NextAiring:                  nextAiringFromRow(main),
 		Relations:                   relations,
 		Characters:                  chars,
 		Staff:                       staff,
