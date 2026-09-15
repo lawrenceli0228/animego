@@ -11,6 +11,8 @@
 // rename — encoding/json's struct-tag lookup is the contract.
 package anilist
 
+import "time"
+
 // ---------------------------------------------------------------------------
 // Shared scalars (used by multiple queries)
 // ---------------------------------------------------------------------------
@@ -39,6 +41,32 @@ type FuzzyDate struct {
 	Year  *int `json:"year"`
 	Month *int `json:"month"`
 	Day   *int `json:"day"`
+}
+
+// Whole returns the date as a calendar day, and false when AniList did
+// not state one in full.
+//
+// A FuzzyDate can be "sometime in 2011"; a date column, a page, and a
+// schema.org startDate cannot.  Padding a missing month or day with 1
+// would print a day nobody stated, so the rule every writer follows is
+// the one the Express migration already applied to the rows it carried
+// over (transforms.MakeDate): all three parts or nothing.  An impossible
+// day (Feb 30) is refused rather than normalised forward, for the same
+// reason -- time.Date would happily return March 2, and that is not the
+// date AniList gave.
+func (f *FuzzyDate) Whole() (time.Time, bool) {
+	if f == nil || f.Year == nil || f.Month == nil || f.Day == nil {
+		return time.Time{}, false
+	}
+	y, mo, d := *f.Year, *f.Month, *f.Day
+	if y <= 0 || mo < 1 || mo > 12 || d < 1 || d > 31 {
+		return time.Time{}, false
+	}
+	t := time.Date(y, time.Month(mo), d, 0, 0, 0, 0, time.UTC)
+	if t.Day() != d || t.Month() != time.Month(mo) {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // Image is the thumbnail object on characters/staff/voice-actors.
@@ -439,5 +467,13 @@ type AnimeDetailResponse struct {
 // ids that come back missing are stamped as checked so they stop leading
 // every subsequent batch.
 type MediaRatingsResponse struct {
+	Page MediaPage `json:"Page"`
+}
+
+// MediaFactsResponse is the typed response for MediaFacts.  Same
+// envelope and same caveat as MediaRatingsResponse: ids AniList no
+// longer serves are simply absent from the slice, and the caller has to
+// stamp them or they lead every subsequent batch.
+type MediaFactsResponse struct {
 	Page MediaPage `json:"Page"`
 }

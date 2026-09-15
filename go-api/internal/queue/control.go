@@ -308,7 +308,8 @@ func Status(ctx context.Context, qc QueueController) (Stats, error) {
 	return Stats{V3Paused: paused}, nil
 }
 
-// RatingsQueueName isolates the two rating-refresh sweeps.
+// RatingsQueueName isolates the catalogue-walking sweeps: the two
+// rating refreshes and the facts backfill.
 //
 // Its own queue for the reason EpisodesBgmQueueName and
 // EpisodeTitlesQueueName each give: a Bangumi pass runs for minutes —
@@ -321,14 +322,18 @@ func Status(ctx context.Context, qc QueueController) (Stats, error) {
 // do it; river's runtime pause can stop them, and only them, without a
 // deploy.
 //
-// Both kinds share one queue rather than taking one each.  They are the
-// same feature and are turned off for the same reasons, so a single
-// pause is the control an operator actually wants.
+// The kinds share one queue rather than taking one each.  They are the
+// same shape of work -- read a batch of rows, ask an upstream, write the
+// answer back across the catalogue -- and are turned off for the same
+// reasons, so a single pause is the control an operator actually wants.
+// The facts sweep (AnimeFactsArgs) joined the two rating sweeps here for
+// exactly that reason: it draws on the same AniList limiter as the
+// AniList ratings pass, and the one-slot queue is what keeps the two
+// from holding it at the same time.
 //
-// The queue is configured with ONE worker slot, so the two sweeps do
-// wait for each other: about five minutes of every hour, which is the
-// price of making two passes of the same kind unable to overlap.  An
-// earlier version of this sentence said two slots and was wrong on
-// HEAD -- see the MaxWorkers block in cmd/server/main.go, which is the
-// authority.
+// The queue is configured with ONE worker slot, so the sweeps do wait
+// for each other: about five minutes of every hour, which is the price
+// of making two passes of the same kind unable to overlap.  An earlier
+// version of this sentence said two slots and was wrong on HEAD -- see
+// the MaxWorkers block in cmd/server/main.go, which is the authority.
 const RatingsQueueName = "ratings"

@@ -450,6 +450,35 @@ func (AnilistRatingsArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// AnimeFactsArgs fills in start_date, end_date, duration and source
+// across the catalogue, in batches of 50 ids per request.
+//
+// Same shape as AnilistRatingsArgs and for the same reasons: no fields,
+// because the work list is a query (ListAnimeFactsCandidates); one job
+// per pass rather than per row, because a request covers 50 rows.  It
+// exists as a separate kind rather than four more fields on the ratings
+// document because the two sweeps answer different questions on
+// different cadences -- a rating moves for years, a finished work's
+// dates never move again -- and a shared stamp would let the one that
+// runs keep marking rows for the one that does not.
+type AnimeFactsArgs struct{}
+
+// Kind returns the river job kind for the facts sweep.
+func (AnimeFactsArgs) Kind() string { return "anime_facts" }
+
+// InsertOpts pins the sweep to the ratings queue -- the queue for
+// id-batched AniList sweeps that must not overlap -- and collapses a
+// second enqueue into the one already in flight.
+func (AnimeFactsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: RatingsQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: ratingsUniqueStates,
+		},
+	}
+}
+
 // BangumiRatingsArgs re-reads Bangumi's score and vote count for the
 // rows that are due, one subject request per row.
 //

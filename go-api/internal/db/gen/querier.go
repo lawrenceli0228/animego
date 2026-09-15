@@ -1136,6 +1136,23 @@ type Querier interface {
 	// ORDER BY puts the cycling population ahead of the backlog so a
 	// multi-day backfill drain cannot delay this season's refresh behind it.
 	ListAnilistRatingCandidates(ctx context.Context, currentYear int32, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error)
+	// Rows the facts sweep (queue/anime_facts.go) should ask AniList about.
+	//
+	// Two populations, one query, same split as ListAnilistRatingCandidates:
+	//
+	//   never asked          facts_checked_at IS NULL           -> once, any status
+	//   still moving         status other than FINISHED          -> again when the stamp ages out
+	//
+	// A finished work's dates, length and source do not change, so one read
+	// is the last read.  An airing or announced one has no end date yet by
+	// definition and may not have a start date either, so its stamp is
+	// allowed to age out and the row is offered again.  CANCELLED rides with
+	// the moving population: it is rare and a cancellation can still acquire
+	// an end date.
+	//
+	// Never-asked rows come first so a backfill drains oldest-first and the
+	// re-check population cannot starve it.
+	ListAnimeFactsCandidates(ctx context.Context, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error)
 	// Whole-table read for cmd/hantbackfill.  Every row, every run.
 	//
 	// No WHERE clause and no candidate filter, which is a decision rather
@@ -1572,6 +1589,11 @@ type Querier interface {
 	// No updated_at bump: nothing about the row changed, and lastmod should
 	// not claim otherwise.
 	MarkAnilistRatingChecked(ctx context.Context, anilistID int32) (int64, error)
+	// Stamp a row AniList declined to return, without touching its facts.
+	// Same role as MarkAnilistRatingChecked: an id absent from the batch
+	// response is deleted or merged upstream, and left unstamped it would
+	// head every subsequent batch forever.
+	MarkAnimeFactsChecked(ctx context.Context, anilistID int32) (int64, error)
 	// Phase-1 scorer found candidates but none confident enough to bind.  We
 	// REFUSE to guess: no bgm_id is written.  Park the row terminal
 	// (bangumi_version=2) so the auto-pipeline stops re-processing it, flag it
@@ -2053,6 +2075,20 @@ type Querier interface {
 	// fixes a binding sees the count and titles re-derived on the next sweep
 	// rather than in ninety days.
 	UpdateAnimeEnrichmentSelective(ctx context.Context, titleChinese *string, bgmID *int32, bangumiScore *float64, anilistID int32) (UpdateAnimeEnrichmentSelectiveRow, error)
+	// Write one row's four facts and stamp the read.
+	//
+	// Every fact is COALESCEd, for the reason UpdateAnilistRating COALESCEs
+	// average_score: this statement walks the whole catalogue, and a null
+	// from a document that selected the field means "AniList does not state
+	// this" (a year-only date, an unknown source), not "clear what is
+	// stored".  The detail upsert applies the same rule (UpsertAnimeCache),
+	// so the two writers cannot disagree about what a null means.
+	//
+	// updated_at moves only when a fact actually changed.  It is the lastmod
+	// ListSitemapShard reports, and here a change IS content: the page's
+	// info rows and its JSON-LD startDate/endDate come from these columns.
+	// A re-check that finds nothing new must not republish the row.
+	UpdateAnimeFacts(ctx context.Context, startDate pgtype.Date, endDate pgtype.Date, duration *int32, source *string, anilistID int32) (int64, error)
 	// Write one row's Bangumi rating figures and stamp the read.
 	//
 	// The Bangumi counterpart of UpdateAnilistRating, and narrow on purpose.

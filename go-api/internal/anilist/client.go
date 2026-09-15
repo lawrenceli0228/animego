@@ -388,6 +388,13 @@ type RatingsVars struct {
 	PerPage int   `json:"perPage"`
 }
 
+// FactsVars is the variable set for MediaFactsQuery.  Same two fields
+// and the same reason PerPage is explicit as RatingsVars.
+type FactsVars struct {
+	IDs     []int `json:"ids"`
+	PerPage int   `json:"perPage"`
+}
+
 // ---------------------------------------------------------------------------
 // Public query methods
 // ---------------------------------------------------------------------------
@@ -451,6 +458,27 @@ func (c *Client) Ratings(ctx context.Context, v RatingsVars) (*MediaRatingsRespo
 	v.PerPage = len(v.IDs)
 	var dest MediaRatingsResponse
 	if err := c.do(ctx, MediaRatingsQuery, v, &dest); err != nil {
+		return nil, err
+	}
+	return &dest, nil
+}
+
+// Facts runs MediaFactsQuery for an explicit list of media ids.
+//
+// The batch rules are Ratings' rules for Ratings' reasons: a page past
+// MaxRatingIDs is truncated silently upstream, and an empty id_in
+// matches everything, so both are refused here rather than read back as
+// "AniList no longer serves these".
+func (c *Client) Facts(ctx context.Context, v FactsVars) (*MediaFactsResponse, error) {
+	if len(v.IDs) == 0 {
+		return nil, ErrNoRatingIDs
+	}
+	if len(v.IDs) > MaxRatingIDs {
+		return nil, fmt.Errorf("%w: %d ids", ErrRatingBatchTooLarge, len(v.IDs))
+	}
+	v.PerPage = len(v.IDs)
+	var dest MediaFactsResponse
+	if err := c.do(ctx, MediaFactsQuery, v, &dest); err != nil {
 		return nil, err
 	}
 	return &dest, nil

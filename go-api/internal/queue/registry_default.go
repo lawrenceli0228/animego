@@ -252,4 +252,16 @@ var productionEntries = []Entry{
 		Queue:    RatingsQueueName,
 		Periodic: &PeriodicSpec{Interval: ratingsInterval, RunOnStart: true},
 	},
+
+	// --- facts backfill ---
+
+	// Same cadence and boot behaviour as the AniList ratings sweep, on the
+	// same queue: one id-batched AniList document per 50 rows, capped per
+	// pass so it never holds the shared limiter for long.  Once the back
+	// catalogue is stamped a pass finds only the still-airing population.
+	{
+		Args:     AnimeFactsArgs{},
+		Queue:    RatingsQueueName,
+		Periodic: &PeriodicSpec{Interval: ratingsInterval, RunOnStart: true},
+	},
 }

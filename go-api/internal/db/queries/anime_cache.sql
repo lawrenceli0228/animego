@@ -2207,3 +2207,66 @@ UPDATE anime_cache
    SET bangumi_rating_checked_at = now()
  WHERE anilist_id = sqlc.arg(anilist_id)::int
    AND bgm_id     = sqlc.arg(bgm_id)::int;
+
+-- name: ListAnimeFactsCandidates :many
+-- Rows the facts sweep (queue/anime_facts.go) should ask AniList about.
+--
+-- Two populations, one query, same split as ListAnilistRatingCandidates:
+--
+--   never asked          facts_checked_at IS NULL           -> once, any status
+--   still moving         status other than FINISHED          -> again when the stamp ages out
+--
+-- A finished work's dates, length and source do not change, so one read
+-- is the last read.  An airing or announced one has no end date yet by
+-- definition and may not have a start date either, so its stamp is
+-- allowed to age out and the row is offered again.  CANCELLED rides with
+-- the moving population: it is rare and a cancellation can still acquire
+-- an end date.
+--
+-- Never-asked rows come first so a backfill drains oldest-first and the
+-- re-check population cannot starve it.
+SELECT anilist_id
+FROM anime_cache
+WHERE facts_checked_at IS NULL
+   OR (COALESCE(status, '') <> 'FINISHED'
+       AND facts_checked_at < now() - sqlc.arg(stale_after)::interval)
+ORDER BY facts_checked_at NULLS FIRST, anilist_id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: UpdateAnimeFacts :execrows
+-- Write one row's four facts and stamp the read.
+--
+-- Every fact is COALESCEd, for the reason UpdateAnilistRating COALESCEs
+-- average_score: this statement walks the whole catalogue, and a null
+-- from a document that selected the field means "AniList does not state
+-- this" (a year-only date, an unknown source), not "clear what is
+-- stored".  The detail upsert applies the same rule (UpsertAnimeCache),
+-- so the two writers cannot disagree about what a null means.
+--
+-- updated_at moves only when a fact actually changed.  It is the lastmod
+-- ListSitemapShard reports, and here a change IS content: the page's
+-- info rows and its JSON-LD startDate/endDate come from these columns.
+-- A re-check that finds nothing new must not republish the row.
+UPDATE anime_cache
+   SET start_date       = COALESCE(sqlc.narg(start_date)::date, start_date),
+       end_date         = COALESCE(sqlc.narg(end_date)::date,   end_date),
+       duration         = COALESCE(sqlc.narg(duration)::int,    duration),
+       source           = COALESCE(sqlc.narg(source)::text,     source),
+       facts_checked_at = now(),
+       updated_at = CASE
+           WHEN start_date IS DISTINCT FROM COALESCE(sqlc.narg(start_date)::date, start_date)
+             OR end_date   IS DISTINCT FROM COALESCE(sqlc.narg(end_date)::date,   end_date)
+             OR duration   IS DISTINCT FROM COALESCE(sqlc.narg(duration)::int,    duration)
+             OR source     IS DISTINCT FROM COALESCE(sqlc.narg(source)::text,     source)
+           THEN now() ELSE updated_at END
+ WHERE anilist_id = sqlc.arg(anilist_id)::int;
+
+-- name: MarkAnimeFactsChecked :execrows
+-- Stamp a row AniList declined to return, without touching its facts.
+-- Same role as MarkAnilistRatingChecked: an id absent from the batch
+-- response is deleted or merged upstream, and left unstamped it would
+-- head every subsequent batch forever.
+UPDATE anime_cache
+   SET facts_checked_at = now()
+ WHERE anilist_id = sqlc.arg(anilist_id)::int;
+
