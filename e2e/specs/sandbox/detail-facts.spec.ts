@@ -86,7 +86,9 @@ test("the next episode is in the hero, reached by clicking through from a relate
   // The strip is the only <time> in <main> on this page.
   const time = page.locator("main time[datetime]");
   await expect(time).toHaveCount(1);
-  const strip = page.locator("main p").filter({ has: time });
+  // `has` is evaluated relative to the outer element, so the inner locator
+  // must not repeat the `main` prefix (it would look for a <main> inside <p>).
+  const strip = page.locator("main p").filter({ has: page.locator("time[datetime]") });
   await expect(strip).toContainText("第 7 集");
   // The relative part only exists once the client has a clock; it must
   // arrive, and it must say what the fixture said.
