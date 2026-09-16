@@ -279,9 +279,22 @@ export async function seedRelation(
   relationType: string,
 ): Promise<void> {
   const sql = getSql();
+  // Title and cover are written too, taken from the related row when it is
+  // cached. The cover is load-bearing: `isStale` treats a relation with no
+  // cover as an old-shape row and re-fetches the owner from AniList, and for
+  // a fixture id that fetch fails and the page falls back to the rows it
+  // already read WITHOUT the enrichment pass that fills relation titles --
+  // so the card renders with no name and nothing can click it. A placeholder
+  // cover keeps the row out of that path when the related title is not
+  // cached at all.
   await sql`
-    INSERT INTO anime_relations (anime_id, anilist_id, relation_type)
-    SELECT ${animeId}, ${relatedAnilistId}, ${relationType}
+    INSERT INTO anime_relations (anime_id, anilist_id, relation_type, title, cover_image_url)
+    SELECT ${animeId}, ${relatedAnilistId}, ${relationType},
+           (SELECT title_romaji FROM anime_cache WHERE anilist_id = ${relatedAnilistId}),
+           COALESCE(
+             (SELECT cover_image_url FROM anime_cache WHERE anilist_id = ${relatedAnilistId}),
+             '/mascot-wink.png'
+           )
     WHERE NOT EXISTS (
       SELECT 1 FROM anime_relations
       WHERE anime_id = ${animeId} AND anilist_id = ${relatedAnilistId} AND relation_type = ${relationType}
