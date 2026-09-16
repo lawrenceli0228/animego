@@ -238,22 +238,25 @@ export async function ensureAnimeCached(anime: SeedAnimeCache): Promise<void> {
 }
 
 /**
- * Point one anime at its prequel, the way the AniList detail sync does.
+ * Point one anime at its prequel, the way the AniList detail sync does, and
+ * at ONE prequel: any other PREQUEL edge on the anime is removed first, so a
+ * spec that derives an episode offset from "the prequel" never reads the
+ * ambiguity case from a leftover row.
  *
  * `anime_relations.anime_id` carries the FK onto anime_cache; the target
  * `anilist_id` does not, which is what lets a season name a prequel this cache
  * has never fetched. Both rows must exist before calling this for the owner
  * side of that FK to hold.
- *
- * Not idempotent by conflict — the table has a uuid PK and admits the same
- * pair twice on purpose (one anime can be a SEQUEL and an ALTERNATIVE of the
- * same parent), so the delete comes first. Seeding it twice would otherwise
- * read as the ambiguity case and report the offset as unknown.
  */
 export async function seedPrequelRelation(
   animeId: number,
   prequelAnilistId: number,
 ): Promise<void> {
+  const sql = getSql();
+  await sql`
+    DELETE FROM anime_relations
+    WHERE anime_id = ${animeId} AND relation_type = 'PREQUEL' AND anilist_id <> ${prequelAnilistId}
+  `;
   await seedRelation(animeId, prequelAnilistId, "PREQUEL");
 }
 
@@ -262,6 +265,13 @@ export async function seedPrequelRelation(
  * reverse edge is a separate call: AniList states both and so does the
  * detail sync, but this table has no such rule, and a spec that walks from
  * one page to the other and back needs both.
+ *
+ * Insert-if-absent, never delete-then-insert. The table has a uuid PK and
+ * admits the same pair twice, so idempotence has to be spelled out — and
+ * spelled out this way rather than as a DELETE first, because beforeAll runs
+ * once per worker and several workers seed the same edge at once. A peer's
+ * request landing between another's DELETE and INSERT reads a page with no
+ * relation card, and go-api caches that answer for minutes.
  */
 export async function seedRelation(
   animeId: number,
@@ -270,12 +280,12 @@ export async function seedRelation(
 ): Promise<void> {
   const sql = getSql();
   await sql`
-    DELETE FROM anime_relations
-    WHERE anime_id = ${animeId} AND relation_type = ${relationType}
-  `;
-  await sql`
     INSERT INTO anime_relations (anime_id, anilist_id, relation_type)
-    VALUES (${animeId}, ${relatedAnilistId}, ${relationType})
+    SELECT ${animeId}, ${relatedAnilistId}, ${relationType}
+    WHERE NOT EXISTS (
+      SELECT 1 FROM anime_relations
+      WHERE anime_id = ${animeId} AND anilist_id = ${relatedAnilistId} AND relation_type = ${relationType}
+    )
   `;
 }
 

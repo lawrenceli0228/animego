@@ -23,6 +23,12 @@ const AIRING = 990_100_020;
 const PREQUEL = 990_100_021;
 /** Three days ahead: enough for the strip to read "3 天后" for the whole run. */
 const NEXT_AT = new Date(Date.now() + 3 * 86_400_000 + 3_600_000).toISOString();
+/**
+ * The synopsis section — and the score panel inside it, where the popularity
+ * line lives — renders only when there is a description. A fixture without
+ * one has no panel to assert on.
+ */
+const SYNOPSIS = "E2E synopsis: a second season with a next episode on the calendar.";
 
 test.beforeAll(async () => {
   await ensureAnimeDetail({
@@ -31,6 +37,7 @@ test.beforeAll(async () => {
     titleChinese: "E2E 事实 第一季",
     status: "FINISHED",
     episodes: 12,
+    description: SYNOPSIS,
   });
   await ensureAnimeDetail({
     anilistId: AIRING,
@@ -39,6 +46,7 @@ test.beforeAll(async () => {
     status: "RELEASING",
     episodes: 12,
     averageScore: 80,
+    description: SYNOPSIS,
     popularity: 123_456,
     nextAiringAt: NEXT_AT,
     nextAiringEpisode: 7,
