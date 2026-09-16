@@ -18,7 +18,9 @@ import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
 import { buildBreadcrumbJsonLd, buildJsonLd } from "@/components/anime/animeJsonLd";
+import { producers, visibleSynonyms, visibleTags } from "@/components/anime/detailFacts";
 import { DETAIL_CHARACTERS_SHOWN, DETAIL_STAFF_SHOWN } from "@/components/anime/detailPeople";
+import NextAiringBadge from "@/components/anime/NextAiringBadge";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
 import DetailActions from "@/components/anime/DetailActions";
 import FadeImage from "@/components/ui/FadeImage";
@@ -60,9 +62,9 @@ import { resolveLocale } from "@/lib/i18n/route";
 import { LOCALES } from "@/lib/i18n/locale";
 import { buildAlternates } from "@/lib/seo/alternates";
 import { studioPath } from "@/lib/hubs/paths";
-import { OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
+import { BCP47_TAG, OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
 import { asYouTubeTrailer } from "@/lib/youtubeTrailer";
-import type { Dict } from "@/lib/i18n";
+import { fill, type Dict } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n/lang";
 import type {
   AnimeDetail,
@@ -322,6 +324,25 @@ export async function generateMetadata({
 // into the hero.
 const DESC_TRUNCATE_WIDTH = 300;
 
+/**
+ * The next episode if it is still ahead of the server clock, else null.
+ *
+ * `nextAiring` is as fresh as the row (a detail read or the hourly facts
+ * sweep), so on a page rendered a day after the episode aired it names an
+ * episode that is already out. Not rendering it at all is the honest
+ * answer; the badge does the same check again on the client, against the
+ * reader's clock, because the ISR copy this decision was made on can be
+ * hours old by the time it is read.
+ */
+function upcomingEpisode(
+  next: AnimeDetail["nextAiring"],
+): { airingAt: string; episode: number } | null {
+  if (!next?.airingAt || !next.episode) return null;
+  const at = Date.parse(next.airingAt);
+  if (!Number.isFinite(at) || at <= Date.now()) return null;
+  return { airingAt: next.airingAt, episode: next.episode };
+}
+
 function Hero({
   detail,
   lang,
@@ -363,6 +384,7 @@ function Hero({
     detail.episodesBgm ?? null,
     detail.episodeTitles ?? [],
   );
+  const nextAiring = upcomingEpisode(detail.nextAiring);
 
   return (
     // data-banner is the whole conditional. Every geometry value that used to
@@ -538,6 +560,27 @@ function Hero({
             <GenreChips genres={detail.genres} className={s.factsGenres} />
           </div>
 
+          {/* The next episode, for a title with one ahead of it. Decided here
+              on the server clock only as far as "not already aired at render
+              time"; the client leaf owns the countdown and hides itself once
+              the instant passes (see NextAiringBadge). Also covers a premiere:
+              AniList's nextAiringEpisode on a NOT_YET_RELEASED title is
+              episode 1. */}
+          {nextAiring ? (
+            <NextAiringBadge
+              airingAt={nextAiring.airingAt}
+              episode={nextAiring.episode}
+              bcp47={BCP47_TAG[lang]}
+              copy={{
+                nextEpisode: dict.detail.nextEpisode,
+                airsInDays: dict.detail.airsInDays,
+                airsInHours: dict.detail.airsInHours,
+                airsInMinutes: dict.detail.airsInMinutes,
+                airsSoon: dict.detail.airsSoon,
+              }}
+            />
+          ) : null}
+
           </div>
           {actions ? <div className={s.actionSlot}>{actions}</div> : null}
         </div>
@@ -636,8 +679,19 @@ function InfoSection({
     },
   ];
   const links = identityLinks(detail);
+  const synonyms = visibleSynonyms(detail, lang);
+  const committee = producers(detail);
+  const tags = visibleTags(detail, lang);
   // Every row empty means the row carries nothing but em dashes.
-  if (rows.every((r) => !r.value) && links.length === 0) return null;
+  if (
+    rows.every((r) => !r.value) &&
+    links.length === 0 &&
+    synonyms.length === 0 &&
+    committee.length === 0 &&
+    tags.length === 0
+  ) {
+    return null;
+  }
 
   return (
     <section className={x.section} aria-labelledby="info-heading">
@@ -653,6 +707,38 @@ function InfoSection({
             <dd className={x.infoValue}>{r.node ?? r.value ?? "—"}</dd>
           </div>
         ))}
+        {/* The wide rows: lists, not single values, and present only when
+            there is something to list — unlike the eight cells above, an
+            absent alias list is not information. Order: what else it is
+            called, who else made it, what it is about, where else it is. */}
+        {synonyms.length > 0 && (
+          <div className={`${x.infoCell} ${x.infoCellWide}`}>
+            <dt className={x.infoLabel}>{dict.detail.infoSynonyms}</dt>
+            <dd className={x.infoValue}>{synonyms.join(" / ")}</dd>
+          </div>
+        )}
+        {committee.length > 0 && (
+          <div className={`${x.infoCell} ${x.infoCellWide}`}>
+            <dt className={x.infoLabel}>{dict.detail.infoProducers}</dt>
+            <dd className={x.infoValue}>{committee.join(" / ")}</dd>
+          </div>
+        )}
+        {tags.length > 0 && (
+          <div className={`${x.infoCell} ${x.infoCellWide}`}>
+            <dt className={x.infoLabel}>{dict.detail.infoTags}</dt>
+            <dd className={x.infoValue}>
+              <ul className={x.tagChips}>
+                {tags.map((t) => (
+                  // Plain chips: there is no tag page yet, and a chip that
+                  // looks pressable but is not is the worse of the two.
+                  <li key={`${t.source}:${t.name}`} className={x.tagChip} data-source={t.source}>
+                    {t.name}
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
         {links.length > 0 && (
           <div className={`${x.infoCell} ${x.infoCellWide}`}>
             <dt className={x.infoLabel}>{dict.detail.infoLinks}</dt>
@@ -797,6 +883,7 @@ function SynopsisSection({
     : undefined;
   const score = detail.averageScore;
   const bgmScore = detail.bangumiScore;
+  const popularity = detail.popularity && detail.popularity > 0 ? detail.popularity : null;
   if (!descFull) return null;
 
   return (
@@ -847,20 +934,34 @@ function SynopsisSection({
             </div>
           )}
         </div>
-        {(score && score > 0) || (bgmScore && bgmScore > 0) ? (
+        {(score && score > 0) || (bgmScore && bgmScore > 0) || popularity ? (
           <aside className={x.scorePanel} aria-label={dict.detail.scores}>
-            {score && score > 0 ? (
+            {(score && score > 0) || popularity ? (
               <div className={x.scoreItem}>
                 <div className={x.scoreLabel}>AniList</div>
-                <div className={x.scoreValueAccent}>
-                  {score}
-                  <span className={x.scoreDenom}>/ 100</span>
-                </div>
+                {score && score > 0 ? (
+                  <div className={x.scoreValueAccent}>
+                    {score}
+                    <span className={x.scoreDenom}>/ 100</span>
+                  </div>
+                ) : null}
+                {/* How many AniList users have it on a list — the count the
+                    score above lacks (AniList publishes no vote count, which
+                    is why it cannot be an AggregateRating). A title that is
+                    not out yet has this and no score, and the panel still
+                    has something true to say about it. */}
+                {popularity ? (
+                  <div className={x.scoreVotes}>
+                    {fill(dict.detail.popularity, { n: popularity.toLocaleString(BCP47_TAG[lang]) })}
+                  </div>
+                ) : null}
                 {/* aria-hidden: the number above already says it, and a
                     progress bar with no label is noise in a screen reader. */}
-                <div className={x.scoreBar} aria-hidden>
-                  <span style={{ width: `${score}%` }} />
-                </div>
+                {score && score > 0 ? (
+                  <div className={x.scoreBar} aria-hidden>
+                    <span style={{ width: `${score}%` }} />
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {bgmScore && bgmScore > 0 ? (

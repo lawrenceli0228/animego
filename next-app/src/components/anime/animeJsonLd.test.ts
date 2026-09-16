@@ -192,6 +192,21 @@ describe("director and musicBy", () => {
   });
 });
 
+describe("alternateName", () => {
+  test("is the other three titles followed by the synonyms the info table shows", () => {
+    const ld = buildJsonLd(
+      detailRow({ synonyms: ["Frieren at the Funeral", "Sousou no Frieren", "葬送的芙莉莲"] }),
+      "zh",
+    );
+    expect(ld.alternateName).toEqual([
+      "Sousou no Frieren",
+      "Frieren: Beyond Journey's End",
+      "葬送のフリーレン",
+      "Frieren at the Funeral",
+    ]);
+  });
+});
+
 describe("productionCompany", () => {
   test("carries the studio's AniList page once studioDetails has its id", () => {
     const ld = buildJsonLd(

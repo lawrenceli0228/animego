@@ -1,0 +1,48 @@
+/* The next-episode strip under the hero's facts line.
+ *
+ * A pill rather than a seventh fact: the facts row is "what kind of thing is
+ * this", and this is "something is about to happen" — a different tense,
+ * and the one line in the hero that changes while the reader is looking.
+ * The anime's own tone colours the episode number, the way it colours the
+ * score, so the strip belongs to this title and not to the chrome. Sits on
+ * the artwork, so it carries the same shadow as the facts. */
+.badge {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 9px;
+  margin: -12px 0 24px;
+  padding: 5px 12px 5px 10px;
+  border-radius: 999px;
+  background: rgba(10, 10, 14, 0.42);
+  border: 1px solid rgba(235, 235, 245, 0.12);
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(235, 235, 245, 0.82);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+}
+
+.episode {
+  font-family: var(--font-mono);
+  font-weight: 640;
+  letter-spacing: 0.01em;
+  color: var(--poster-tone, #fff);
+}
+
+/* Drawn separators, same reasoning as .facts in page.module.css: decoration
+ * stays out of the accessibility tree and no item has to know its position. */
+.badge > *:not(:last-child)::after {
+  content: "·";
+  display: inline-block;
+  margin-left: 9px;
+  color: rgba(235, 235, 245, 0.28);
+}
+
+.when {
+  font-variant-numeric: tabular-nums;
+}
+
+.relative {
+  color: rgba(235, 235, 245, 0.62);
+}

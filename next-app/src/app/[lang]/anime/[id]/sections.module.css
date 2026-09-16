@@ -966,3 +966,36 @@
   outline: 2px solid transparent;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
+
+/* Tags, as chips in the info table's wide row.
+ *
+ * Quieter than the genre chips in the hero: a genre is one of eighteen
+ * categories and links to a page, a tag is one of hundreds of community
+ * labels and links nowhere. Same radius and mono label treatment as the
+ * rest of the table so the row reads as part of it. Bangumi's (Chinese)
+ * carry the anime's tone on the border so a reader can tell the two
+ * vocabularies apart without a legend. */
+.tagChips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 6px;
+}
+
+.tagChip {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(235, 235, 245, 0.14);
+  background: rgba(235, 235, 245, 0.04);
+  font-size: 12.5px;
+  line-height: 1.6;
+  font-weight: 500;
+  color: rgba(235, 235, 245, 0.78);
+}
+
+.tagChip[data-source="bangumi"] {
+  border-color: color-mix(in oklab, var(--poster-tone, #fff) 45%, transparent);
+}
