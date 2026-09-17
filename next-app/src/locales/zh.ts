@@ -175,10 +175,6 @@ const zh = {
     infoFormat: '类型',
     infoSource: '原作',
     infoStudio: '制作',
-    infoLinks: '外部链接',
-    infoSynonyms: '别名',
-    infoProducers: '制作委员会',
-    infoTags: '标签',
     // Under the AniList score: how many AniList users have it on a list.
     popularity: '{{n}} 人追番',
     // The hero's next-episode strip, for a title that is airing.
