@@ -18,7 +18,7 @@ import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
 import { buildBreadcrumbJsonLd, buildJsonLd } from "@/components/anime/animeJsonLd";
-import { producers, visibleSynonyms, visibleTags } from "@/components/anime/detailFacts";
+import { producers, visibleTags } from "@/components/anime/detailFacts";
 import { DETAIL_CHARACTERS_SHOWN, DETAIL_STAFF_SHOWN } from "@/components/anime/detailPeople";
 import NextAiringBadge from "@/components/anime/NextAiringBadge";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
@@ -679,17 +679,10 @@ function InfoSection({
     },
   ];
   const links = identityLinks(detail);
-  const synonyms = visibleSynonyms(detail, lang);
   const committee = producers(detail);
   const tags = visibleTags(detail, lang);
   // Every row empty means the row carries nothing but em dashes.
-  if (
-    rows.every((r) => !r.value) &&
-    links.length === 0 &&
-    synonyms.length === 0 &&
-    committee.length === 0 &&
-    tags.length === 0
-  ) {
+  if (rows.every((r) => !r.value) && links.length === 0 && committee.length === 0 && tags.length === 0) {
     return null;
   }
 
@@ -709,14 +702,15 @@ function InfoSection({
         ))}
         {/* The wide rows: lists, not single values, and present only when
             there is something to list — unlike the eight cells above, an
-            absent alias list is not information. Order: what else it is
-            called, who else made it, what it is about, where else it is. */}
-        {synonyms.length > 0 && (
-          <div className={`${x.infoCell} ${x.infoCellWide}`}>
-            <dt className={x.infoLabel}>{dict.detail.infoSynonyms}</dt>
-            <dd className={x.infoValue}>{synonyms.join(" / ")}</dd>
-          </div>
-        )}
+            absent committee is not information. Order: who else made it,
+            what it is about, where else it is.
+
+            No alias row, for now. AniList's synonyms are mostly other
+            markets' translated titles — a Chinese page showing a Thai and
+            a Russian name says nothing to its reader — and the Chinese and
+            Japanese names are usually the titles the hero already prints.
+            visibleSynonyms (detailFacts.ts) still knows how to pick them;
+            what is missing is a policy on which scripts a page should show. */}
         {committee.length > 0 && (
           <div className={`${x.infoCell} ${x.infoCellWide}`}>
             <dt className={x.infoLabel}>{dict.detail.infoProducers}</dt>

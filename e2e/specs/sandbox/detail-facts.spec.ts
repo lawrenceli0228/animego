@@ -7,7 +7,7 @@ import {
 } from "../../fixtures/pg";
 
 // The phase-2 data on the detail page: the next-episode strip in the hero,
-// and the alias / committee / tag rows in the info table.
+// and the committee / tag rows in the info table.
 //
 // Reached by navigating inside the site rather than by URL, on purpose. The
 // strip is a client leaf that knows the time only once it has a clock
@@ -104,17 +104,16 @@ test("a finished title has no strip", async ({ page }) => {
   await expect(page.locator("main time[datetime]")).toHaveCount(0);
 });
 
-test("the info table lists aliases, the committee and the tags, and the score panel the popularity", async ({
+test("the info table lists the committee and the tags, not the aliases, and the score panel the popularity", async ({
   page,
 }) => {
   await page.goto(`/anime/${AIRING}`);
   const info = page.locator("section[aria-labelledby='info-heading']");
   await expect(info).toBeVisible();
 
-  // Aliases: the two that are not already the title, Han first.
-  const aliases = info.locator("div").filter({ has: page.getByText("别名", { exact: true }) }).first();
-  await expect(aliases).toContainText("事实二 / E2E Facts 2");
-  await expect(aliases).not.toContainText("第二季 /");
+  // No alias row: the synonyms are seeded and must still not be shown.
+  await expect(info.getByText("别名", { exact: true })).toHaveCount(0);
+  await expect(info).not.toContainText("事实二");
 
   const committee = info.locator("div").filter({ has: page.getByText("制作委员会", { exact: true }) }).first();
   await expect(committee).toContainText("E2E Broadcasting / E2E Publishing");
