@@ -174,8 +174,8 @@ type MediaPage struct {
 // SchedulePage is the Page envelope used by WeeklySchedule.  Only
 // hasNextPage is meaningful in the PageInfo block.
 type SchedulePage struct {
-	PageInfo         PageInfo          `json:"pageInfo"`
-	AiringSchedules  []AiringSchedule  `json:"airingSchedules"`
+	PageInfo        PageInfo         `json:"pageInfo"`
+	AiringSchedules []AiringSchedule `json:"airingSchedules"`
 }
 
 // ---------------------------------------------------------------------------
@@ -192,18 +192,18 @@ type SchedulePage struct {
 // will marshal as `null` / empty slices for search & seasonal hits.
 type Media struct {
 	// Always populated (search, seasonal, detail)
-	ID            int        `json:"id"`
-	Title         *Title     `json:"title"`
-	CoverImage    *CoverImage `json:"coverImage"`
-	BannerImage   *string    `json:"bannerImage"`
-	Description   *string    `json:"description"`
-	Episodes      *int       `json:"episodes"`
-	Status        *string    `json:"status"`
-	Season        *string    `json:"season"`
-	SeasonYear    *int       `json:"seasonYear"`
-	AverageScore  *int       `json:"averageScore"`
-	Genres        []string   `json:"genres"`
-	Format        *string    `json:"format"`
+	ID           int         `json:"id"`
+	Title        *Title      `json:"title"`
+	CoverImage   *CoverImage `json:"coverImage"`
+	BannerImage  *string     `json:"bannerImage"`
+	Description  *string     `json:"description"`
+	Episodes     *int        `json:"episodes"`
+	Status       *string     `json:"status"`
+	Season       *string     `json:"season"`
+	SeasonYear   *int        `json:"seasonYear"`
+	AverageScore *int        `json:"averageScore"`
+	Genres       []string    `json:"genres"`
+	Format       *string     `json:"format"`
 
 	// Selected by every document since 0036 (and by the weekly schedule
 	// long before, for its adult-content skip).  A pointer so a document
@@ -223,16 +223,16 @@ type Media struct {
 	ExternalLinks []ExternalLink `json:"externalLinks,omitempty"`
 
 	// Detail-only fields (AnimeDetailQuery)
-	StartDate       *FuzzyDate       `json:"startDate,omitempty"`
-	EndDate         *FuzzyDate       `json:"endDate,omitempty"`
-	Duration        *int             `json:"duration,omitempty"`
-	Source          *string          `json:"source,omitempty"`
-	Studios         *StudioConnection `json:"studios,omitempty"`
-	Relations       *RelationConnection `json:"relations,omitempty"`
-	Characters      *CharacterConnection `json:"characters,omitempty"`
-	Staff           *StaffConnection  `json:"staff,omitempty"`
+	StartDate       *FuzzyDate                `json:"startDate,omitempty"`
+	EndDate         *FuzzyDate                `json:"endDate,omitempty"`
+	Duration        *int                      `json:"duration,omitempty"`
+	Source          *string                   `json:"source,omitempty"`
+	Studios         *StudioConnection         `json:"studios,omitempty"`
+	Relations       *RelationConnection       `json:"relations,omitempty"`
+	Characters      *CharacterConnection      `json:"characters,omitempty"`
+	Staff           *StaffConnection          `json:"staff,omitempty"`
 	Recommendations *RecommendationConnection `json:"recommendations,omitempty"`
-	Trailer         *Trailer         `json:"trailer,omitempty"`
+	Trailer         *Trailer                  `json:"trailer,omitempty"`
 
 	// Ratings-only field (MediaRatingsQuery).  Nil for every other
 	// query, which is why nothing reads it directly — see ScoreVotes.
@@ -454,10 +454,11 @@ func (m Media) NextAiring() (time.Time, int, bool) {
 }
 
 // SynonymSet returns the synonyms worth storing: trimmed, non-empty,
-// de-duplicated, in first-seen order.  AniList's list is user-edited and
-// does carry blanks and repeats; the table's PK and CHECK would refuse
-// them one row at a time, and this is cheaper than a refused insert
-// inside a loop that swallows per-row errors.
+// de-duplicated, in first-seen order, and in a script the site reads.
+// AniList's list is user-edited and does carry blanks and repeats; the
+// table's PK and CHECK would refuse them one row at a time, and this is
+// cheaper than a refused insert inside a loop that swallows per-row
+// errors.
 func (m Media) SynonymSet() []string {
 	if len(m.Synonyms) == 0 {
 		return []string{}
@@ -466,7 +467,7 @@ func (m Media) SynonymSet() []string {
 	out := make([]string, 0, len(m.Synonyms))
 	for _, raw := range m.Synonyms {
 		syn := strings.TrimSpace(raw)
-		if syn == "" {
+		if syn == "" || !KeepSynonym(syn) {
 			continue
 		}
 		if _, dup := seen[syn]; dup {
@@ -476,6 +477,52 @@ func (m Media) SynonymSet() []string {
 		out = append(out, syn)
 	}
 	return out
+}
+
+// synonymRanges is every code point a stored synonym may contain: Latin
+// through Extended-A (ASCII, accented Western European letters, and the
+// macron vowels of romaji), general punctuation and symbols, the CJK
+// blocks (Han, kana, CJK punctuation, fullwidth forms) and the CJK
+// supplementary plane, plus emoji.  Everything else -- Cyrillic, Greek,
+// Hebrew, Arabic, Thai, Hangul, Vietnamese tone marks (Latin Extended
+// Additional), Latin Extended-B -- is a script the site's readers do not
+// read a title in, and AniList's synonyms are mostly other markets'
+// translated titles in exactly those scripts.
+//
+// Migration 0040 deletes the stored rows by the same ranges, written as
+// a PostgreSQL ARE; synonym_scripts_pg_test.go drives both through the
+// same table so they cannot drift.  Change one, change both.
+var synonymRanges = [][2]rune{
+	{0x0000, 0x017F},   // Basic Latin, Latin-1, Latin Extended-A
+	{0x2000, 0x2BFF},   // General punctuation through Misc Symbols & Arrows
+	{0x2E80, 0x312F},   // CJK radicals, CJK punctuation, kana, Bopomofo
+	{0x3190, 0x9FFF},   // Kanbun, CJK Ext-A, CJK Unified (skips Hangul Compat Jamo)
+	{0xF900, 0xFAFF},   // CJK Compatibility Ideographs
+	{0xFF00, 0xFFEF},   // Halfwidth and Fullwidth Forms
+	{0x1F000, 0x1FAFF}, // Emoji
+	{0x20000, 0x2FFFF}, // CJK Ext-B and later
+}
+
+// KeepSynonym reports whether a synonym is in a script the site reads:
+// Chinese, Japanese, or Latin-alphabet.  Language cannot be told from
+// characters -- an Italian title in plain ASCII passes -- so this is a
+// script rule, not a language rule, and it removes the titles that were
+// visibly foreign on the page: Cyrillic, Thai, Hebrew, Arabic, Greek,
+// Korean, Vietnamese.
+func KeepSynonym(s string) bool {
+	for _, r := range s {
+		ok := false
+		for _, rg := range synonymRanges {
+			if r >= rg[0] && r <= rg[1] {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // TagSet returns the tags worth storing: trimmed, non-empty,
