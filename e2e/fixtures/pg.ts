@@ -238,17 +238,15 @@ export async function ensureAnimeCached(anime: SeedAnimeCache): Promise<void> {
 }
 
 /**
- * Point one anime at its prequel, the way the AniList detail sync does.
+ * Point one anime at its prequel, the way the AniList detail sync does, and
+ * at ONE prequel: any other PREQUEL edge on the anime is removed first, so a
+ * spec that derives an episode offset from "the prequel" never reads the
+ * ambiguity case from a leftover row.
  *
  * `anime_relations.anime_id` carries the FK onto anime_cache; the target
  * `anilist_id` does not, which is what lets a season name a prequel this cache
  * has never fetched. Both rows must exist before calling this for the owner
  * side of that FK to hold.
- *
- * Not idempotent by conflict — the table has a uuid PK and admits the same
- * pair twice on purpose (one anime can be a SEQUEL and an ALTERNATIVE of the
- * same parent), so the delete comes first. Seeding it twice would otherwise
- * read as the ambiguity case and report the offset as unknown.
  */
 export async function seedPrequelRelation(
   animeId: number,
@@ -257,11 +255,50 @@ export async function seedPrequelRelation(
   const sql = getSql();
   await sql`
     DELETE FROM anime_relations
-    WHERE anime_id = ${animeId} AND relation_type = 'PREQUEL'
+    WHERE anime_id = ${animeId} AND relation_type = 'PREQUEL' AND anilist_id <> ${prequelAnilistId}
   `;
+  await seedRelation(animeId, prequelAnilistId, "PREQUEL");
+}
+
+/**
+ * One edge of any AniList relation type, owner side on `animeId`. The
+ * reverse edge is a separate call: AniList states both and so does the
+ * detail sync, but this table has no such rule, and a spec that walks from
+ * one page to the other and back needs both.
+ *
+ * Insert-if-absent, never delete-then-insert. The table has a uuid PK and
+ * admits the same pair twice, so idempotence has to be spelled out — and
+ * spelled out this way rather than as a DELETE first, because beforeAll runs
+ * once per worker and several workers seed the same edge at once. A peer's
+ * request landing between another's DELETE and INSERT reads a page with no
+ * relation card, and go-api caches that answer for minutes.
+ */
+export async function seedRelation(
+  animeId: number,
+  relatedAnilistId: number,
+  relationType: string,
+): Promise<void> {
+  const sql = getSql();
+  // Title and cover are written too, taken from the related row when it is
+  // cached. The cover is load-bearing: `isStale` treats a relation with no
+  // cover as an old-shape row and re-fetches the owner from AniList, and for
+  // a fixture id that fetch fails and the page falls back to the rows it
+  // already read WITHOUT the enrichment pass that fills relation titles --
+  // so the card renders with no name and nothing can click it. A placeholder
+  // cover keeps the row out of that path when the related title is not
+  // cached at all.
   await sql`
-    INSERT INTO anime_relations (anime_id, anilist_id, relation_type)
-    VALUES (${animeId}, ${prequelAnilistId}, 'PREQUEL')
+    INSERT INTO anime_relations (anime_id, anilist_id, relation_type, title, cover_image_url)
+    SELECT ${animeId}, ${relatedAnilistId}, ${relationType},
+           (SELECT title_romaji FROM anime_cache WHERE anilist_id = ${relatedAnilistId}),
+           COALESCE(
+             (SELECT cover_image_url FROM anime_cache WHERE anilist_id = ${relatedAnilistId}),
+             '/mascot-wink.png'
+           )
+    WHERE NOT EXISTS (
+      SELECT 1 FROM anime_relations
+      WHERE anime_id = ${animeId} AND anilist_id = ${relatedAnilistId} AND relation_type = ${relationType}
+    )
   `;
 }
 
@@ -318,20 +355,35 @@ export interface SeedAnimeDetail extends SeedAnimeCache {
    * was checked and had no supported trailer, rather than "not checked yet".
    */
   trailerId?: string | null;
+  /**
+   * The next scheduled episode (migration 0036), as an ISO instant and an
+   * episode number — a pair, per the anime_next_airing_pair CHECK. Drives the
+   * hero's countdown strip; leave unset for a title with nothing scheduled.
+   */
+  nextAiringAt?: string | null;
+  nextAiringEpisode?: number | null;
+  /** AniList's list-membership count (migration 0036). */
+  popularity?: number | null;
+  /** AniList's alternative titles (migration 0036). */
+  synonyms?: readonly string[];
+  /** Tags from either source (migration 0038); rank is AniList's 0-100 or Bangumi's vote count. */
+  tags?: readonly { source: "anilist" | "bangumi"; name: string; rank: number | null; isSpoiler?: boolean }[];
+  /** Non-main studios — the production committee (migration 0038, is_main=false). */
+  producers?: readonly string[];
 }
 
 /**
  * Seed one anime the DETAIL page can render without going to AniList.
  *
  * `ensureAnimeCached` alone is not enough for `/anime/{id}`. `isStale`
- * (go-api/internal/anime/detail.go) trips on an empty studio list, an empty
- * character list, or a first character with no role — independently of
+ * (go-api/internal/anime/detail.go) trips on a row with no trailer check, no
+ * `detail_fetched_at`, or a first character with no role — independently of
  * `cached_at` — and a stale row makes the handler fetch AniList live. In CI
  * that is a real network call on every run; worse, a successful one OVERWRITES
  * the seeded row, so a spec asserting on `episodes IS NULL` would be asserting
- * against whatever AniList happens to say. One studio and one character with a
- * role are the cheapest way to make the row look complete and keep the read
- * entirely inside Postgres.
+ * against whatever AniList happens to say. Stamping the row and giving it one
+ * studio and one character with a role is the cheapest way to make it look
+ * complete and keep the read entirely inside Postgres.
  *
  * Safe to call concurrently for the same id — see the note on the child-row
  * inserts below, which is not the obvious way to write them.
@@ -345,11 +397,27 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
     );
   }
 
+  const nextAiringAt = anime.nextAiringAt ?? null;
+  const nextAiringEpisode = anime.nextAiringEpisode ?? null;
+  if ((nextAiringAt === null) !== (nextAiringEpisode === null)) {
+    throw new Error(
+      `ensureAnimeDetail(${anime.anilistId}): nextAiringAt and nextAiringEpisode come as a pair`,
+    );
+  }
+
+  // detail_fetched_at and facts_checked_at are stamped too: since migration
+  // 0034 `isStale` reads the first (a row nobody has fetched the detail of is
+  // stale whatever its child tables hold), and the hourly facts sweep reads
+  // the second. Without them the seeded row goes to AniList on every cache
+  // miss — for an id AniList has never heard of — and the spec passes only
+  // because the failed re-fetch falls back to the rows it already read.
   await sql`
     INSERT INTO anime_cache (
       anilist_id, title_romaji, title_chinese, episodes, episodes_bgm,
       status, banner_image_url, cover_image_url, average_score, description,
-      trailer_id, trailer_site, trailer_checked_at, cached_at
+      trailer_id, trailer_site, trailer_checked_at,
+      next_airing_at, next_airing_episode, popularity,
+      detail_fetched_at, facts_checked_at, cached_at
     )
     VALUES (
       ${anime.anilistId},
@@ -364,6 +432,11 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
       ${anime.description ?? null},
       ${trailerId},
       ${trailerId === null ? null : "youtube"},
+      now(),
+      ${nextAiringAt},
+      ${nextAiringEpisode},
+      ${anime.popularity ?? null},
+      now(),
       now(),
       now()
     )
@@ -380,6 +453,11 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
       trailer_id       = EXCLUDED.trailer_id,
       trailer_site     = EXCLUDED.trailer_site,
       trailer_checked_at = EXCLUDED.trailer_checked_at,
+      next_airing_at   = EXCLUDED.next_airing_at,
+      next_airing_episode = EXCLUDED.next_airing_episode,
+      popularity       = EXCLUDED.popularity,
+      detail_fetched_at = EXCLUDED.detail_fetched_at,
+      facts_checked_at = EXCLUDED.facts_checked_at,
       cached_at        = now(),
       updated_at       = now()
   `;
@@ -412,6 +490,29 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
       WHERE anime_id = ${anime.anilistId} AND display_order = 0
     )
   `;
+  // The phase-2 child rows, each behind a natural key so a concurrent peer
+  // cannot duplicate or remove them (same reasoning as the two above).
+  for (const producer of anime.producers ?? []) {
+    await sql`
+      INSERT INTO anime_studios (anime_id, studio, is_main)
+      VALUES (${anime.anilistId}, ${producer}, false)
+      ON CONFLICT (anime_id, studio) DO UPDATE SET is_main = false
+    `;
+  }
+  for (const synonym of anime.synonyms ?? []) {
+    await sql`
+      INSERT INTO anime_synonyms (anime_id, synonym)
+      VALUES (${anime.anilistId}, ${synonym})
+      ON CONFLICT (anime_id, synonym) DO NOTHING
+    `;
+  }
+  for (const tag of anime.tags ?? []) {
+    await sql`
+      INSERT INTO anime_tags (anime_id, source, name, rank, is_spoiler)
+      VALUES (${anime.anilistId}, ${tag.source}, ${tag.name}, ${tag.rank}, ${tag.isSpoiler ?? false})
+      ON CONFLICT (anime_id, source, name) DO UPDATE SET rank = EXCLUDED.rank, is_spoiler = EXCLUDED.is_spoiler
+    `;
+  }
 
   // Verify the postcondition this function's whole name is a promise about.
   //
@@ -425,20 +526,22 @@ export async function ensureAnimeDetail(anime: SeedAnimeDetail): Promise<void> {
     SELECT (SELECT count(*) FROM anime_studios WHERE anime_id = ${anime.anilistId}) AS studios,
            (SELECT count(*) FROM anime_characters
              WHERE anime_id = ${anime.anilistId} AND role IS NOT NULL) AS characters,
-           trailer_checked_at IS NOT NULL AS trailer_checked
+           trailer_checked_at IS NOT NULL AS trailer_checked,
+           detail_fetched_at IS NOT NULL AS detail_fetched
     FROM anime_cache
     WHERE anilist_id = ${anime.anilistId}
   `;
   if (
     Number(seeded?.studios ?? 0) === 0 ||
     Number(seeded?.characters ?? 0) === 0 ||
-    seeded?.trailer_checked !== true
+    seeded?.trailer_checked !== true ||
+    seeded?.detail_fetched !== true
   ) {
     throw new Error(
       `ensureAnimeDetail(${anime.anilistId}): seeded row is still stale ` +
         `(studios=${seeded?.studios}, characters-with-role=${seeded?.characters}, ` +
-        `trailer-checked=${seeded?.trailer_checked}). isStale trips on any missing ` +
-        `condition, so /anime/${anime.anilistId} would ` +
+        `trailer-checked=${seeded?.trailer_checked}, detail-fetched=${seeded?.detail_fetched}). ` +
+        `isStale trips on any missing condition, so /anime/${anime.anilistId} would ` +
         `go to AniList and 404 whenever that call fails.`,
     );
   }

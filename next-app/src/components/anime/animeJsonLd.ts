@@ -12,6 +12,7 @@
 // because the one rule it carries (see numberOfEpisodes below) is the kind
 // that only stays true if something executes it.
 
+import { visibleSynonyms } from "@/components/anime/detailFacts";
 import { DETAIL_CHARACTERS_SHOWN, DETAIL_STAFF_SHOWN } from "@/components/anime/detailPeople";
 import { genreFromSlug, genrePath, genreSlug, yearPath } from "@/lib/hubs/paths";
 import { genreHeading, yearHeading } from "@/lib/hubs/headings";
@@ -180,9 +181,16 @@ export function staffByRole(
 }
 
 export function buildJsonLd(detail: AnimeDetail, lang: Lang): JsonLdTVSeries {
-  const alts = [detail.titleRomaji, detail.titleEnglish, detail.titleNative].filter(
-    (s): s is string => Boolean(s),
-  );
+  // The three other titles the hero prints, then the synonyms the info
+  // table prints (visibleSynonyms already drops the four titles and
+  // duplicates). AniList's synonyms are where the Chinese and the fan
+  // spellings live, which is what a searcher types.
+  const alts = [
+    ...[detail.titleRomaji, detail.titleEnglish, detail.titleNative].filter(
+      (s): s is string => Boolean(s),
+    ),
+    ...visibleSynonyms(detail, lang),
+  ];
   const ld: JsonLdTVSeries = {
     "@context": "https://schema.org",
     "@type": "TVSeries",

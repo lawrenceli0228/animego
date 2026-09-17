@@ -295,6 +295,14 @@ test.describe("the hero on a phone", () => {
     await trigger.click();
     const dialog = page.getByRole("dialog", { name: "E2E 高分" });
     await expect(dialog).toBeVisible();
+    // The theater slides in (trailer-dialog-in: translateY(14px) over 320ms).
+    // toBeVisible resolves at the first painted frame, and a box measured
+    // mid-animation is off-centre by up to those 14px -- the two values this
+    // assertion has failed with on CI are 14.0 and 4.7. Let the animation
+    // finish before measuring where the dialog rests.
+    await dialog.evaluate((el) =>
+      Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+    );
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
     expect(

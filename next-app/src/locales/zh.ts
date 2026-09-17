@@ -176,6 +176,17 @@ const zh = {
     infoSource: '原作',
     infoStudio: '制作',
     infoLinks: '外部链接',
+    infoSynonyms: '别名',
+    infoProducers: '制作委员会',
+    infoTags: '标签',
+    // Under the AniList score: how many AniList users have it on a list.
+    popularity: '{{n}} 人追番',
+    // The hero's next-episode strip, for a title that is airing.
+    nextEpisode: '第 {{ep}} 集',
+    airsInDays: '{{n}} 天后',
+    airsInHours: '{{n}} 小时后',
+    airsInMinutes: '{{n}} 分钟后',
+    airsSoon: '即将播出',
     scores: '评分',
     votes: '人评分',
     // Credit under the synopsis when the rendered text is Bangumi's
