@@ -12,8 +12,12 @@ AniList 的 synonyms 大半是各个市场的译名。`anime_synonyms` 里 27,31
 
 SQL 那份正则和 Go 那张范围表是同一件事写两遍，`synonym_scripts_pg_test.go` 拿同一组用例把两边都跑一遍，改一边不改另一边会红。★ 顺带一个坑：正则里的 `\u0000` 必须以转义原样进文件——写文件的工具把它解成了真正的 NUL 字节，lib/pq 直接报 `invalid message format`。
 
+部署后：`anime_synonyms` 27,319 → 24,489，用外文字符反查还剩 17 行——都是部署那四分钟里写进来的。`deploy.sh` 的顺序是先跑 migration、再 build 镜像、最后换容器，旧的 go-api 在 build 窗口里照常跑，它那一轮 sweep 落在 migration 之后，5 部番的 17 个外文别名又写回去了。手工把 0040 的 DELETE 再跑一遍（幂等）→ **24,472 行，外文 0 行**。★ 凡是「删数据 + 改写入端」的 migration，以后部署完都要补跑一次 DELETE，或者等下一轮 sweep 把那几行覆盖掉。
+
 
 ### 详情页作品信息表退回八格：别名、制作委员会、标签、外部链接四行全撤
+
+部署后（`762ef4e`）：线上 `/anime/21` 作品信息表的 `<dt>` 是 季度 / 开播 / 状态 / 集数 / 单集时长 / 类型 / 原作 / 制作 八个，`alternateName` 三项，`sameAs` 五项未动。
 
 上一条刚上线，看了一眼 Re:ZERO 第三季的页：别名一行是一个泰文名和一个俄文名，制作委员会是五家电视台和出版社，标签全是英文，外部链接和 hero、评分面板说的是同一件事。四行都撤，表回到固定的八格；`alternateName` 也退回三个标题——页面不显示的东西结构化数据不该声称；`sameAs` 留着，它是身份消歧信号不是页面内容。数据一样不少：DTO、JSON-LD、`detailFacts.ts` 里挑子集的逻辑都在，缺的是「这些东西该在页面哪里、给谁看」，定了再画。
 
@@ -27,6 +31,8 @@ SQL 那份正则和 Go 那张范围表是同一件事写两遍，`synonym_script
 **作品信息表多两个宽行：制作委员会、标签。**（别名那行上线当天就撤了，见下一条。）制作委员会是 `is_main = false` 的公司，纯文字（hub 只列主制作）。标签中文页 Bangumi 先（按票数）、AniList 后（按认同率，30% 以下不要），英文页反过来；**剧透标签永不出现**——页面没有揭示控件可以把它藏在后面；两个来源同名只出一个 chip；Bangumi 的 chip 边框带作品色，不用图例就分得出两套词汇。评分面板 AniList 那格下面多一行「480,524 人追番」——AniList 没有投票数所以进不了 AggregateRating，这个数是它有的那一个；没评分只有人气的未播番，面板也有一句真话可说。
 
 e2e 里 `ensureAnimeDetail` 顺手补了 `detail_fetched_at` / `facts_checked_at` 两个戳：#184 之后 `isStale` 看的是前者，此前每个 fixture 行都是 stale 的，每次缓存 miss 都去 AniList 问一个不存在的 id，测试能过只因为失败回退到了已读的行。新 spec 从相关作品卡**点进去**验倒计时条——客户端路由切换是这个叶子没有服务端 HTML 可依赖的那条路。
+
+部署后（`8bd2d42`）：海贼王页源站 HTML 带「第 1179 集 · 9月20日周日 22:16」，浏览器里补出「3 天后」并换成本地时区；评分面板「750,992 人追番」；`/en/` 版「Episode 1179 · On 750,992 lists」；芙莉莲（完结）无条。CI 跑了四轮才全绿，四次都是 e2e 层的坑不是页面：fixture 先删再插在多 worker 下有窗口；**relation 行没封面会被 `isStale` 当成旧形状的行**，重拉不存在的 id 失败后回退路径不补标题，卡片无名点不到；预告片弹窗的居中断言量在 320ms 入场动画中间（失败值 14.0 / 4.7 就是 `translateY(14px)` 的起点和中途）；`filter({ has })` 的内层 locator 相对外层求值。另外 `ensureAnimeDetail` 从 #184 起就没打过 `detail_fetched_at`，所有 fixture 行其实一直是 stale 的，靠失败回退才过的测试。
 
 
 ### 详情页的 JSON-LD 长出面包屑和人：`BreadcrumbList`、`actor`、`character`、`director`、`musicBy`
