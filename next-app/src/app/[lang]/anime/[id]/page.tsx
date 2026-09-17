@@ -18,7 +18,6 @@ import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
 import { buildBreadcrumbJsonLd, buildJsonLd } from "@/components/anime/animeJsonLd";
-import { producers, visibleTags } from "@/components/anime/detailFacts";
 import { DETAIL_CHARACTERS_SHOWN, DETAIL_STAFF_SHOWN } from "@/components/anime/detailPeople";
 import NextAiringBadge from "@/components/anime/NextAiringBadge";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
@@ -628,6 +627,15 @@ const STAFF_AVATAR = 44;
  * Rows with no value still render, with an em dash: an absent field is
  * itself information here, and a table that changes shape per anime is
  * harder to scan across pages than one with a hole in it.
+ *
+ * Eight cells and nothing else, by decision. The 0036/0038 data (aliases,
+ * production committee, tags, external links) was drawn here as wide rows
+ * for a day and taken out: on a Chinese page the aliases were a Thai and a
+ * Russian title, the committee is a list of broadcasters, the tags are
+ * English, and the links duplicate what the hero and the score panel
+ * already say. The data stays in the DTO and in JSON-LD (sameAs is the
+ * disambiguation signal, not page content); detailFacts.ts still knows how
+ * to pick a readable subset when a surface for it is decided.
  */
 function InfoSection({
   detail,
@@ -678,13 +686,8 @@ function InfoSection({
         ) : null,
     },
   ];
-  const links = identityLinks(detail);
-  const committee = producers(detail);
-  const tags = visibleTags(detail, lang);
   // Every row empty means the row carries nothing but em dashes.
-  if (rows.every((r) => !r.value) && links.length === 0 && committee.length === 0 && tags.length === 0) {
-    return null;
-  }
+  if (rows.every((r) => !r.value)) return null;
 
   return (
     <section className={x.section} aria-labelledby="info-heading">
@@ -700,83 +703,10 @@ function InfoSection({
             <dd className={x.infoValue}>{r.node ?? r.value ?? "—"}</dd>
           </div>
         ))}
-        {/* The wide rows: lists, not single values, and present only when
-            there is something to list — unlike the eight cells above, an
-            absent committee is not information. Order: who else made it,
-            what it is about, where else it is.
-
-            No alias row, for now. AniList's synonyms are mostly other
-            markets' translated titles — a Chinese page showing a Thai and
-            a Russian name says nothing to its reader — and the Chinese and
-            Japanese names are usually the titles the hero already prints.
-            visibleSynonyms (detailFacts.ts) still knows how to pick them;
-            what is missing is a policy on which scripts a page should show. */}
-        {committee.length > 0 && (
-          <div className={`${x.infoCell} ${x.infoCellWide}`}>
-            <dt className={x.infoLabel}>{dict.detail.infoProducers}</dt>
-            <dd className={x.infoValue}>{committee.join(" / ")}</dd>
-          </div>
-        )}
-        {tags.length > 0 && (
-          <div className={`${x.infoCell} ${x.infoCellWide}`}>
-            <dt className={x.infoLabel}>{dict.detail.infoTags}</dt>
-            <dd className={x.infoValue}>
-              <ul className={x.tagChips}>
-                {tags.map((t) => (
-                  // Plain chips: there is no tag page yet, and a chip that
-                  // looks pressable but is not is the worse of the two.
-                  <li key={`${t.source}:${t.name}`} className={x.tagChip} data-source={t.source}>
-                    {t.name}
-                  </li>
-                ))}
-              </ul>
-            </dd>
-          </div>
-        )}
-        {links.length > 0 && (
-          <div className={`${x.infoCell} ${x.infoCellWide}`}>
-            <dt className={x.infoLabel}>{dict.detail.infoLinks}</dt>
-            <dd className={x.infoValue}>
-              <ul className={x.infoLinks}>
-                {links.map((l) => (
-                  <li key={l.url}>
-                    <a href={l.url} target="_blank" rel="noopener noreferrer" className={x.infoLink}>
-                      {l.label}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </dd>
-          </div>
-        )}
       </dl>
     </section>
   );
 }
-
-/* The links that say what this work is elsewhere: the official site and
- * social accounts AniList lists, then the three catalogues that have a page
- * for it. Streaming links are not identity and stay out — a "where to watch"
- * row is a different feature with a different legal footprint. The same set
- * feeds JSON-LD sameAs (animeJsonLd.ts), so the page and the structured data
- * cannot disagree about which URLs this title claims. */
-function identityLinks(detail: AnimeDetail): Array<{ label: string; url: string }> {
-  const out: Array<{ label: string; url: string }> = [];
-  const seen = new Set<string>();
-  const push = (label: string, url: string) => {
-    if (!/^https?:\/\//.test(url) || seen.has(url)) return;
-    seen.add(url);
-    out.push({ label, url });
-  };
-  for (const l of detail.externalLinks ?? []) {
-    if (l.site === "Official Site" || l.type === "SOCIAL") push(l.site, l.url);
-  }
-  push("AniList", `https://anilist.co/anime/${detail.anilistId}`);
-  if (detail.bgmId) push("Bangumi", `https://bgm.tv/subject/${detail.bgmId}`);
-  if (detail.malId) push("MyAnimeList", `https://myanimelist.net/anime/${detail.malId}`);
-  return out;
-}
-
 
 /* Synopsis — its own band under the hero, no longer inside it.
  *

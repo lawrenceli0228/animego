@@ -6,8 +6,9 @@ import {
   seedRelation,
 } from "../../fixtures/pg";
 
-// The phase-2 data on the detail page: the next-episode strip in the hero,
-// and the committee / tag rows in the info table.
+// The phase-2 data on the detail page: the next-episode strip in the hero
+// and the popularity line -- and the rows the info table deliberately does
+// not have.
 //
 // Reached by navigating inside the site rather than by URL, on purpose. The
 // strip is a client leaf that knows the time only once it has a clock
@@ -104,24 +105,21 @@ test("a finished title has no strip", async ({ page }) => {
   await expect(page.locator("main time[datetime]")).toHaveCount(0);
 });
 
-test("the info table lists the committee and the tags, not the aliases, and the score panel the popularity", async ({
+test("the info table shows none of the phase-2 rows; the score panel shows the popularity", async ({
   page,
 }) => {
   await page.goto(`/anime/${AIRING}`);
   const info = page.locator("section[aria-labelledby='info-heading']");
   await expect(info).toBeVisible();
 
-  // No alias row: the synonyms are seeded and must still not be shown.
-  await expect(info.getByText("别名", { exact: true })).toHaveCount(0);
+  // All four are seeded on this title and none of them is a row: the data
+  // stays in the DTO and in JSON-LD, the table is the eight cells only.
+  for (const label of ["别名", "制作委员会", "标签", "外部链接"]) {
+    await expect(info.getByText(label, { exact: true })).toHaveCount(0);
+  }
   await expect(info).not.toContainText("事实二");
-
-  const committee = info.locator("div").filter({ has: page.getByText("制作委员会", { exact: true }) }).first();
-  await expect(committee).toContainText("E2E Broadcasting / E2E Publishing");
-
-  // Tags: Bangumi's first, then AniList's over the rank floor; the spoiler and
-  // the 12% tag never appear.
-  const tags = info.locator("div").filter({ has: page.getByText("标签", { exact: true }) }).first();
-  await expect(tags.locator("li")).toHaveText(["治愈", "Ensemble Cast"]);
+  await expect(info).not.toContainText("E2E Broadcasting");
+  await expect(info).not.toContainText("Ensemble Cast");
 
   await expect(page.locator("aside").filter({ hasText: "AniList" }).first()).toContainText("123,456 人追番");
 });
