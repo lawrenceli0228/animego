@@ -22,7 +22,7 @@
 // v2 port of client/src/components/anime/TorrentModal.jsx, now driven by
 // anilistId. Layout: 3-column body (185px fansub list / center scrollable
 // rows / 128px cover thumbnail), title-variant pills, episode pills,
-// fansub filter, copy / open-magnet actions, ESC + backdrop close, body
+// fansub filter, copy / open-magnet actions, ESC + backdrop close, page
 // scroll-lock.
 //
 // Data source (primary): GET /api/anime/torrents?anilistId=<number>
@@ -48,7 +48,9 @@
 // staleness matters more than CDN economics for this surface.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { apiGet, ApiError } from "@/lib/api";
+import { useScrollLock } from "@/lib/scrollLock";
 import FadeImage from "@/components/ui/FadeImage";
 import Link from "@/components/ui/LocaleLink";
 import { useLang } from "@/lib/lang-client";
@@ -565,7 +567,7 @@ export default function TorrentModal({
     return () => controller.abort();
   }, [manualQ, anime.anilistId]);
 
-  // ─── Escape + body scroll lock ──────────────────────────────────
+  // ─── Escape + page scroll lock ──────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -574,13 +576,7 @@ export default function TorrentModal({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  useEffect(() => {
-    const original = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = original;
-    };
-  }, []);
+  useScrollLock(true);
 
   // ─── Copy magnet with 2s ✓ animation ────────────────────────────
   const copyMagnet = useCallback((magnet: string, idx: number) => {
@@ -681,7 +677,15 @@ export default function TorrentModal({
   const heroTitle = anime.titleRomaji || anime.titleEnglish || "";
 
   // ─── Render ─────────────────────────────────────────────────────
-  return (
+  //
+  // Portaled to <body>. DetailActions renders this from inside the hero,
+  // and the hero is `isolation: isolate` (page.module.css) — a stacking
+  // context that caps `zIndex: 1000` at the hero's own level. Anything
+  // positioned later in the document, such as the trailer card beside the
+  // synopsis, then paints over the open modal. Mounting under <body> puts
+  // the dialog in the root stacking context where its z-index means what it
+  // says. This component is `ssr: false`, so `document` exists at render.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -1125,6 +1129,7 @@ export default function TorrentModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

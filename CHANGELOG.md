@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+### 磁力搜索弹窗：预告片卡从弹窗里透出来、滚轮滚的是底下的详情页
+
+两个 bug 一张截图。预告片卡（Netflix 那张静帧）浮在打开的磁力列表上面；滚轮放在弹窗上，动的是后面的详情页。
+
+**透出来**是层叠上下文的事。`TorrentModal` 和 `PlayButton` 的引导弹窗都是 `DetailActions` 内联渲染的，而 `DetailActions` 在 hero 里，hero 是 `isolation: isolate`（`page.module.css`）——弹窗的 `z-index: 1000` 只在 hero 这个上下文里算数，对外整个 hero 是一层 `z-index: 0`。文档里排在 hero 后面、又是 positioned 的东西（预告片卡的 `.card` 是 `position: relative`，简介旁的追番头像也是）就按文档顺序画在它上面。修法和 `TrailerPreview` 的影院弹窗一样：`createPortal(…, document.body)`，让弹窗回到根层叠上下文。两个弹窗都不吃 `--poster-*` 变量，搬出 `.poster-scope` 没有代价。
+
+**滚轮**是全仓四个弹窗共用的一行：`document.body.style.overflow = "hidden"`。它从来没生效过——`globals.css` 给 `html` 写了 `overflow-x: hidden`，根元素的 overflow 一旦不是 `visible`，body 的 overflow 就不再传到视口，锁的是 body 自己（它的高度就是内容高度，什么都夹不住）。无头 Chromium 探针：同一条规则下 body 锁完滚轮照样滚 600px，锁在 `html` 上是 0。新的 `lib/scrollLock.ts` 锁 `documentElement`，带引用计数（引导弹窗点「去下载」切到磁力弹窗，两把锁在同一个 commit 里交接，页面只在最后一把松开时恢复），用经典滚动条时补一份 `padding-right` 顶住消失的滚动条。四个弹窗（磁力、引导、预告片、头像裁剪）全换过来。★ **「设了 overflow: hidden」和「页面锁住了」是两件事**，检查前者永远绿，只有量 `scrollY` 才知道。
+
+e2e 在 `anime-detail.spec.ts` 补了一条：开磁力弹窗，`elementFromPoint` 在预告片卡中心取到的必须在 `[role=dialog]` 里（可见性断言分不出画在上面还是下面），滚轮 800px 后 `scrollY` 不变，Esc 关掉后同一个滚轮页面得动。两条断言各自对着旧代码红过：不 portal 挂第一条，锁 body 挂第二条（滚了 800）。
+
 ### 别名只存中文、日文和拉丁字母：其它文字的从库里删掉
 
 AniList 的 synonyms 大半是各个市场的译名。`anime_synonyms` 里 27,319 行有 2,858 行是西里尔、泰文、希伯来、阿拉伯、希腊、谚文和越南文——站的读者不会用这些文字去找一部番。migration 0040 按码点白名单删掉它们，写入端（`Media.SynonymSet` → `anilist.KeepSynonym`）用同一张范围表拒收，以后详情读取和 facts sweep 也写不回来。

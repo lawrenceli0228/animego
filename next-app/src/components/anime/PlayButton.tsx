@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Button from "@/components/ui/Button";
 import Link from "@/components/ui/LocaleLink";
 import { useLang } from "@/lib/lang-client";
+import { useScrollLock } from "@/lib/scrollLock";
 import styles from "./PlayButton.module.css";
 
 interface PlayButtonProps {
@@ -36,22 +38,19 @@ export default function PlayButton({
     window.requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
+  useScrollLock(open);
+
   useEffect(() => {
     if (!open) return;
 
-    const originalOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
 
-    document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKeyDown);
     window.requestAnimationFrame(() => closeRef.current?.focus());
 
-    return () => {
-      document.body.style.overflow = originalOverflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [close, open]);
 
   const openDownloads = () => {
@@ -72,104 +71,111 @@ export default function PlayButton({
         {children}
       </Button>
 
-      {open ? (
-        <div
-          className={styles.backdrop}
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target) close();
-          }}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="player-guide-title"
-            className={styles.dialog}
-          >
-            <div className={styles.topline}>
-              <span className={styles.eyebrow}>
-                {t("playerGuide.eyebrow")}
-              </span>
-              <button
-                ref={closeRef}
-                type="button"
-                onClick={close}
-                className={styles.close}
-                aria-label={t("playerGuide.close")}
+      {/* Portaled to <body>: this button lives inside the hero, which is
+       * `isolation: isolate`, so an inline backdrop's z-index is capped
+       * there and later positioned content (the trailer card) paints over
+       * the guide. See TorrentModal for the same fix. */}
+      {open
+        ? createPortal(
+            <div
+              className={styles.backdrop}
+              onMouseDown={(event) => {
+                if (event.currentTarget === event.target) close();
+              }}
+            >
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="player-guide-title"
+                className={styles.dialog}
               >
-                ×
-              </button>
-            </div>
+                <div className={styles.topline}>
+                  <span className={styles.eyebrow}>
+                    {t("playerGuide.eyebrow")}
+                  </span>
+                  <button
+                    ref={closeRef}
+                    type="button"
+                    onClick={close}
+                    className={styles.close}
+                    aria-label={t("playerGuide.close")}
+                  >
+                    ×
+                  </button>
+                </div>
 
-            <div className={styles.headingRow}>
-              <div>
-                <h2 id="player-guide-title">{t("playerGuide.title")}</h2>
-                <p>{t("playerGuide.body")}</p>
-              </div>
-              <span className={styles.chromeBadge}>
-                <span aria-hidden>◉</span>
-                {t("playerGuide.chrome")}
-              </span>
-            </div>
+                <div className={styles.headingRow}>
+                  <div>
+                    <h2 id="player-guide-title">{t("playerGuide.title")}</h2>
+                    <p>{t("playerGuide.body")}</p>
+                  </div>
+                  <span className={styles.chromeBadge}>
+                    <span aria-hidden>◉</span>
+                    {t("playerGuide.chrome")}
+                  </span>
+                </div>
 
-            <ol className={styles.steps}>
-              <li>
-                <span className={styles.stepNumber}>01</span>
-                <span>
-                  <strong>{t("playerGuide.downloadTitle")}</strong>
-                  <small>{t("playerGuide.downloadBody")}</small>
-                </span>
-              </li>
-              <li>
-                <span className={styles.stepNumber}>02</span>
-                <span>
-                  <strong>{t("playerGuide.folderTitle")}</strong>
-                  <small>{t("playerGuide.folderBody")}</small>
-                </span>
-              </li>
-              <li>
-                <span className={styles.stepNumber}>03</span>
-                <span>
-                  <strong>{t("playerGuide.refreshTitle")}</strong>
-                  <small>{t("playerGuide.refreshBody")}</small>
-                </span>
-              </li>
-            </ol>
+                <ol className={styles.steps}>
+                  <li>
+                    <span className={styles.stepNumber}>01</span>
+                    <span>
+                      <strong>{t("playerGuide.downloadTitle")}</strong>
+                      <small>{t("playerGuide.downloadBody")}</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className={styles.stepNumber}>02</span>
+                    <span>
+                      <strong>{t("playerGuide.folderTitle")}</strong>
+                      <small>{t("playerGuide.folderBody")}</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className={styles.stepNumber}>03</span>
+                    <span>
+                      <strong>{t("playerGuide.refreshTitle")}</strong>
+                      <small>{t("playerGuide.refreshBody")}</small>
+                    </span>
+                  </li>
+                </ol>
 
-            <div className={styles.notice}>
-              <span aria-hidden>●</span>
-              <p>
-                <strong>{t("playerGuide.noticeTitle")}</strong>
-                {t("playerGuide.noticeBody")}
-              </p>
-            </div>
+                <div className={styles.notice}>
+                  <span aria-hidden>●</span>
+                  <p>
+                    <strong>{t("playerGuide.noticeTitle")}</strong>
+                    {t("playerGuide.noticeBody")}
+                  </p>
+                </div>
 
-            <div className={styles.actions}>
-              <button
-                type="button"
-                className={styles.primary}
-                onClick={openDownloads}
-              >
-                {t("playerGuide.downloadCta")}
-                <span aria-hidden>→</span>
-              </button>
-              <Link
-                href="/player"
-                prefetch={false}
-                className={styles.secondary}
-              >
-                {t("playerGuide.trialCta")}
-              </Link>
-              <Link
-                href="/library"
-                prefetch={false}
-                className={styles.tertiary}
-              >
-                {t("playerGuide.libraryCta")}
-              </Link>
-            </div>
-          </section>
-        </div>
-      ) : null}
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={styles.primary}
+                    onClick={openDownloads}
+                  >
+                    {t("playerGuide.downloadCta")}
+                    <span aria-hidden>→</span>
+                  </button>
+                  <Link
+                    href="/player"
+                    prefetch={false}
+                    className={styles.secondary}
+                  >
+                    {t("playerGuide.trialCta")}
+                  </Link>
+                  <Link
+                    href="/library"
+                    prefetch={false}
+                    className={styles.tertiary}
+                  >
+                    {t("playerGuide.libraryCta")}
+                  </Link>
+                </div>
+              </section>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }
