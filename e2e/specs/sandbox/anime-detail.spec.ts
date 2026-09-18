@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { SEED_USER_EMAIL } from "../../globalSetup";
+import { waitForHydration } from "../../fixtures/hydration";
 import {
   closePg,
   ensureAnimeDetail,
@@ -565,5 +566,73 @@ test.describe("the trailer with an expanded signed-in action set", () => {
     expect(statusBox).not.toBeNull();
     expect(trailerBox!.height).toBeGreaterThanOrEqual(44);
     expect(trailerBox!.y + trailerBox!.height).toBeLessThanOrEqual(statusBox!.y);
+  });
+});
+
+// The torrent modal is rendered from inside the hero, and the hero is a
+// stacking context (`isolation: isolate`). Before the modal was portaled to
+// <body>, its `z-index: 1000` was capped there and the trailer card — a
+// positioned element later in the document — painted straight through the
+// open dialog. And the dialog's scroll lock set `overflow: hidden` on <body>,
+// which globals.css' `html { overflow-x: hidden }` stops from reaching the
+// viewport: the wheel over the modal scrolled the detail page underneath.
+// Both were live on production (screenshot, 2026-09-18).
+test.describe("the torrent modal over the trailer", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test("paints above the trailer card and holds the page still", async ({
+    page,
+  }) => {
+    // The modal's own list is not what this is about; an empty answer keeps
+    // AnimeTosho out of the assertion.
+    await page.route("**/api/anime/torrents?*", (route) =>
+      route.fulfill({ json: { data: [] } }),
+    );
+    await page.goto(`/anime/${HIGH}`);
+
+    const trailer = page.getByRole("button", {
+      name: "播放《E2E 高分》的官方预告",
+    });
+    await expect(trailer).toBeVisible();
+    await waitForHydration(page, '[data-banner] button');
+
+    await page.getByRole("button", { name: "磁力资源" }).click();
+    const dialog = page.getByRole("dialog", { name: "磁力搜索" });
+    await expect(dialog).toBeVisible();
+
+    // Stacking: whatever is on top at the trailer card's centre must be part
+    // of the dialog. elementFromPoint is the only witness of paint order —
+    // toBeVisible would pass for both, and z-index reads the same either way.
+    const trailerBox = await trailer.boundingBox();
+    expect(trailerBox).not.toBeNull();
+    const cx = trailerBox!.x + trailerBox!.width / 2;
+    const cy = trailerBox!.y + trailerBox!.height / 2;
+    expect(cy).toBeLessThan(900); // in the viewport, or the probe is moot
+    const topmostIsDialog = await page.evaluate(
+      ({ x, y }) =>
+        document.elementFromPoint(x, y)?.closest('[role="dialog"]') instanceof
+        Element,
+      { x: cx, y: cy },
+    );
+    expect(topmostIsDialog).toBe(true);
+
+    // Scroll lock: a wheel over the dialog (not over its inner list) must
+    // leave the page where it was. The pre-fix code passed a body-overflow
+    // check and still scrolled, so the assertion is on scrollY itself.
+    const before = await page.evaluate(() => window.scrollY);
+    const dialogBox = await dialog.boundingBox();
+    await page.mouse.move(dialogBox!.x + 40, dialogBox!.y + 30);
+    await page.mouse.wheel(0, 800);
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+
+    // And the lock lets go when the dialog does: same wheel, page moves.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await page.mouse.move(720, 450);
+    await page.mouse.wheel(0, 800);
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBeGreaterThan(before);
   });
 });

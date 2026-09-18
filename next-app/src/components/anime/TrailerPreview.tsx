@@ -14,6 +14,7 @@ import {
   youtubeThumbnailUrl,
   youtubeWatchUrl,
 } from "@/lib/youtubeTrailer";
+import { useScrollLock } from "@/lib/scrollLock";
 import styles from "./TrailerPreview.module.css";
 
 export interface TrailerPreviewLabels {
@@ -64,10 +65,11 @@ export default function TrailerPreview({
     window.requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
+  useScrollLock(open);
+
   useEffect(() => {
     if (!open) return;
 
-    const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         close();
@@ -93,14 +95,10 @@ export default function TrailerPreview({
       }
     };
 
-    document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKeyDown);
     window.requestAnimationFrame(() => closeRef.current?.focus());
 
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [close, open]);
 
   const watchAria = labels.watchAria.replace("{{title}}", title);

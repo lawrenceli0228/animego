@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useScrollLock } from "@/lib/scrollLock";
 import "./photo-crop.css";
 
 // PhotoCropModal — the single adjustment step before a photo becomes the card
@@ -113,11 +114,11 @@ export default function PhotoCropModal({
     [clampPan, render],
   );
 
+  useScrollLock(open && !!src);
+
   // Initialise geometry whenever the modal opens with a source image.
   useEffect(() => {
     if (!open || !src) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
 
     const im = new Image();
     im.onload = () => {
@@ -137,10 +138,6 @@ export default function PhotoCropModal({
       });
     };
     im.src = src;
-
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
   }, [open, src, layout, clampPan, render]);
 
   // Pan (window-bound listeners; no setPointerCapture so card transforms can't
