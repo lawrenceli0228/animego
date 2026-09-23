@@ -2,6 +2,7 @@
 "use client";
 import { useSyncExternalStore, useCallback, useState, useRef } from 'react';
 import { liveQuery } from 'dexie';
+import { mergedAwayIds } from '../_services/resolveMergedIds';
 
 /** @typedef {import('@/lib/library/types').Series} Series */
 /** @typedef {import('@/lib/library/types').Season} Season */
@@ -71,12 +72,7 @@ function useLibrary({ db }) {
           db.userOverride ? db.userOverride.toArray() : Promise.resolve([]),
           db.seasons ? db.seasons.toArray() : Promise.resolve([]),
         ]);
-        const merged = new Set();
-        for (const o of overrides) {
-          if (Array.isArray(o?.mergedFrom)) {
-            for (const id of o.mergedFrom) merged.add(id);
-          }
-        }
+        const merged = mergedAwayIds(overrides);
         const series = merged.size === 0
           ? allSeries
           : allSeries.filter((s) => !merged.has(s.id));

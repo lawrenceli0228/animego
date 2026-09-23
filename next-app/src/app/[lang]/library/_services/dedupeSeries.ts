@@ -33,7 +33,7 @@
 // `dandan:806` cannot collide because they are not the same string.
 
 import type Dexie from "dexie";
-import { performMerge, type OpsLogRow } from "./mergeOps";
+import { performMerge, repairMergeCycles, type OpsLogRow } from "./mergeOps";
 
 interface SeasonRow {
   seriesId?: string;
@@ -65,6 +65,8 @@ export interface DedupeSummary {
   skipped: number;
   /** Pairs left alone because the reader had deliberately split them apart. */
   splitGuarded: number;
+  /** `mergedFrom` entries removed to break a cycle that hid cards. */
+  cyclesRepaired: number;
   pairs: DedupePair[];
   opIds: string[];
 }
@@ -146,6 +148,17 @@ export async function dedupeSeriesByIdentity({
 }): Promise<DedupeSummary> {
   if (!db) throw new Error("dedupeSeriesByIdentity: db is required");
 
+  // Before grouping: this pass is what used to CREATE merge cycles (it merges
+  // into the oldest row, which a reader may already have merged into a newer
+  // one), so it is also where libraries carrying one get repaired. See
+  // `mergeCycles.ts`. A failure here must not cost the rest of the pass.
+  let cyclesRepaired = 0;
+  try {
+    cyclesRepaired = (await repairMergeCycles({ db })).length;
+  } catch (err) {
+    console.warn("[dedupeSeries] merge cycle repair failed", err);
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tables = db as any;
   const [allSeasons, allSeries, allOverrides] = (await Promise.all([
@@ -191,6 +204,7 @@ export async function dedupeSeriesByIdentity({
     merged: 0,
     skipped: 0,
     splitGuarded: 0,
+    cyclesRepaired,
     pairs: [],
     opIds: [],
   };
