@@ -847,6 +847,25 @@
 
 ---
 
+## AniList 已删掉的条目我们还留着：补不全、每次缓存过期都再问一次，而且没人知道有多少
+
+**What** — 把「AniList 不再有这个 id」存成一个事实：`anime_cache` 加一列（例如 `anilist_gone_at`），由已经掌握这个信息的地方写入——facts sweep 与 ratings sweep 批量查询时没被返回的 id，以及详情页重拉拿到 AniList 404 的已有行。写了之后 `isStale` 对这种行不再触发重拉；再决定页面怎么对外：照常保留、从 sitemap 去掉、`noindex`，或者能找到合并目标时 301 过去。
+
+**Why** — 2026-09-23 对 #201 做线上测试时看到：库里一直补不全（`trailer_checked_at` 为空）的几行，全是 AniList 已经删掉的老番 Specials。每次进程内缓存过期后有人访问，它们就排队问一次 AniList，拿 404，记一条 Warn，返回旧行——这是一个永不收敛的重试。数据完整、只是后来被 AniList 删掉的行同样如此，只是走不排队的那条路。三个问题：
+- **没人知道有多少。** 两个 sweep 其实知道哪些 id 没被返回，但它们把这种行和「查过了」打成同一个戳（`MarkAnimeFactsChecked` / `MarkAnilistRatingChecked`，为的是别让它们永远排在批次最前），唯一留下的痕迹是每轮日志里的一个计数 `rowsAbsentUpstream`。
+- **页面对外的说法是错的。** 详情页 JSON-LD 的 `sameAs` 固定带 `https://anilist.co/anime/{id}`（`animeJsonLd.ts`），对这些行它指向一个 AniList 已经不认的条目；sitemap 按 `anime_cache` 出，它们也在里面。
+- **负缓存帮不上。** #201 的 `absent` 只在冷 id 分支写（DB 先行，行存在就读不到它），有意如此——所以对「我们有、AniList 没有」的行，每小时一次的重问不会停。
+
+**Pros** — 重问归零；第一次能回答「目录里有多少条目在上游已经不存在」；SEO 处置有了依据，不用猜。
+
+**Cons** — 多一列加一条 migration；两个 sweep 的「没返回」要和「这批请求失败」严格分开（后者现在整批不打戳，这个区分已经有了，但写新列时不能弄混）；AniList 偶尔会把条目合并到另一个 id，只知道「没了」不知道「去哪了」，301 需要另找来源（AniList 不给合并目标），做不到就只能 `noindex` 或保留。
+
+**Context** — 线上测试见 CHANGELOG「详情页的 AniList 额度」条目的「部署后」段。入口：`internal/queue/anime_facts.go` `applyBatch` 的第二个循环、`ratings_refresh.go` 同位置、`internal/anime/detail.go` stale 分支拿到 `NOT_FOUND` 的地方、`isStale`。与「bingbot / Semrush 在反复爬一批现在 404 的 `/anime/{id}`」是镜像问题：那条是「我们没有、爬虫以为有」，这条是「我们有、上游已经没有」。
+
+**Depends on / blocked by** — 无。
+
+---
+
 ## 未缓存的详情页在 AniList 够不到时返 502，而且没有可降级的数据
 
 **What** — 给「行不存在 + AniList 取不到」这条路径一个比 502 更好的答案：要么 404（我们确实没有这个条目），要么排队补齐后返回 202/占位，而不是把上游失败原样透出。
