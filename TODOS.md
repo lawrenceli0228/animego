@@ -390,6 +390,12 @@
   `not-found-status.spec.ts` 里那几条状态断言故意保持严格（只接受 404），**不要**为了
   让 CI 变绿而放宽成「404 或 500」—— 那会把这个缺陷永久藏起来。
 - **Depends on / blocked by:** 无。与本地搜索独立，但共用同一个判断。
+- **进展（2026-09-23，分支 `fix/anilist-budget-cold-id`）：** 「反复打 AniList」那一半已修 ——
+  AniList 答「不存在」的 id 在进程内记 24h（`detail.go` `absent`，只在冷 id 分支写，429/超时/
+  其它上游错误**不记**），同一冷 id 的并发请求经 singleflight 只打一次上游。**「限流窗口里冷 id
+  仍 5xx」这一半保留**：2026-09-20 eng-review（D3）否决了「AniList 不可用时本地判定 404」，
+  因为那会对刚上 AniList、我们还没收录的新番答 404，而且会被 CF 缓存（60s + SWR）；503 是
+  诚实的「暂时不知道」，爬虫和 CF 都不会把它缓存成结论。
 
 ## Turbopack dev 下，嵌套在 `[lang]` 里的动态路由会整类 404
 
@@ -809,17 +815,49 @@
 
 ---
 
+## 24h 读时刷新应该离开请求路径，改成 river sweep
+
+**What** — 新建一个每小时跑的 `detail_refresh` sweep（参照 `internal/queue/anime_facts.go` 的 500 行/小时节奏），按 `cached_at` 最旧优先重拉 AniList 详情；落地后把 `detail.go` `isStale` 里 `cached_at ≥ staleCacheTTL` 那一条去掉，只保留「从没拉过详情 / 角色 role 空 / 关联封面空」这类一次性修复条件。
+
+**Why** — 2026-09-20 实测：按 `anime/detail: stale, re-fetching from AniList` 与详情 200 的计数比，**一半的详情读会在请求路径上内联打一次 AniList**（+600ms）；目录里近一半的行 `cached_at` 超过 24h，爬虫全目录走一遍等于全目录刷新一遍。它是 30/min 额度的九成以上的消耗方（爬虫枚举不存在 id 的 404 不到一成）。「stale 重拉改非阻塞 + 404 负缓存」那个 PR 只是把它从队列里请出去，读路径仍然打 AniList，而且刷新变成尽力而为之后陈旧上界不再有保证。让刷新离开请求路径是 2026-08 eng-review（「SWR 不做，若做走 river job」）和下面「未缓存的详情页…」那条 Context 里「不要在请求路径上冷启动取数」两次指向的方向。
+
+**Pros** — 详情读彻底不碰 AniList；刷新节奏可控（每小时 500 行，与 facts sweep 同一节奏）；`anime_cache.updated_at` 不再被流量驱动翻新，sitemap lastmod 的基线随之变干净。
+
+**Cons** — 多一个 sweep 抢同一个 30/min（每小时 10 次，与 facts/ratings 同量）；当季新番的集数/状态变化到达会慢一点（`warm_season` 已覆盖当季，实际影响小）；要决定「从来没人访问的行要不要刷」——不刷则要给 sweep 一个「最近被读过」的信号，刷则每一轮大半在刷没人看的行。
+
+**Context** — 先看那个 PR 部署后 `stale, re-fetching` 与 `stale, budget busy, serving stale` 两个计数的比例，定 sweep 节奏。入口：`detail.go` `isStale` + `internal/queue` 新 worker + river 注册（`UniqueOpts.ByState` 必须含四态，见 `test/integration/queue_smoke_test.go`）。
+
+**Depends on / blocked by** — 「stale 重拉改非阻塞 + 404 负缓存」PR 先落地；与「sweep 和用户请求共用同一个 AniList 额度」同源。
+
+---
+
+## bingbot / Semrush 在反复爬一批现在 404 的 `/anime/{id}`，要查它们以前是不是真页
+
+**What** — nginx 日志里详情页的 404 有相当一部分来自 bingbot 和 Semrush，同一批 id 被反复打，另有少量带 `google.com` referer 的真人点击。查这批 id 是不是曾经在 `anime_cache` / sitemap 分片里、后来被删掉或合并掉的：对照 GSC「未找到 (404)」报告、历史 sitemap 分片、以及删行/合并类 migration（同名番剧合并、Hentai 过滤、synonyms 清理都要排一遍）。
+
+**Why** — 搜索引擎爬虫不会凭空猜 id，它们爬的是曾经见过的 URL。如果这批 id 曾经是我们的真页，现在 404 意味着**已索引页面在流失**；如果不是，那是外链污染，可以不管。两种结论的处置完全不同（301/410 vs 无视），所以值得一小时把真假判掉。
+
+**Pros** — 判为真则能定位到具体那次删行，并决定 301 到合并后的 id 还是 410；顺带校验 sitemap 是否还在列已删 id。
+
+**Cons** — 纯调查，要翻 GSC + 旧 sitemap + 数据库历史；可能结论是「外链垃圾」一场空。
+
+**Context** — 2026-09-20 查 Sentry 5xx 时的旁证：把详情页 404 按 UA / referer 分桶即可看到。同一天落地的「404 负缓存」只让这些 404 不再消耗 AniList，不回答它们从哪来。
+
+**Depends on / blocked by** — 无。
+
+---
+
 ## 未缓存的详情页在 AniList 够不到时返 502，而且没有可降级的数据
 
 **What** — 给「行不存在 + AniList 取不到」这条路径一个比 502 更好的答案：要么 404（我们确实没有这个条目），要么排队补齐后返回 202/占位，而不是把上游失败原样透出。
 
-**Why** — `detail.go` 已经有优雅降级，但它只在**行存在**时生效（「re-fetch 失败就返回已读到的陈旧行」）。行不存在时没有任何可返回的东西，直接 502。2026-09-08 实测两例（`88764`、`108289`，两者都不在 `anime_cache` 里），成因是 `anilist: rate limit wait: rate: Wait(n=1) would exceed context deadline` —— 限速器排队超过了 `refetchTimeout` 的 15 秒预算。
+**Why** — `detail.go` 已经有优雅降级，但它只在**行存在**时生效（「re-fetch 失败就返回已读到的陈旧行」）。行不存在时没有任何可返回的东西，直接 502。2026-09-08 实测两例（`88764`、`108289`，两者都不在 `anime_cache` 里），成因是 `anilist: rate limit wait: rate: Wait(n=1) would exceed context deadline` —— 限速器排队超过了请求的 5 秒预算（`queryTimeout`）。当时代码里写着 15 秒的 `refetchTimeout`，但它套在已带 5 秒 deadline 的 ctx 上，子 ctx 活不过父 ctx，从未生效（Sentry `duration_ms: 5001`）；2026-09-23 已删。
 
 **Pros** — `/anime/*` 是 SEO 主力面，502 是这个仓库已经为之修过一轮的东西（见「详情页 500 爬虫×限流」）。
 
 **Cons** — 「我们没有这个条目」和「我们暂时取不到」是两件事，用同一个状态码回答任何一件都会误导某一方；要分开就要引入一个新的响应形状。
 
-**Context** — 2026-09-08。`minInterval` 从 700ms 提到 2.1s（限流实际额度 30/min）之后这个窗口变宽了 3 倍：15 秒预算在 700ms 时容得下约 21 个排队请求，2.1s 时只有 7 个。**根因不是这个常量，是 30/min 对一个会在用户请求上做冷启动取数的站点本来就很紧** —— 真正的解法在「后台工作应有独立额度」那条，以及不要在请求路径上冷启动取数。实测频率很低（18 分钟 2 个）。
+**Context** — 2026-09-08。`minInterval` 从 700ms 提到 2.1s（限流实际额度 30/min）之后这个窗口变宽了 3 倍：5 秒预算在 700ms 时容得下约 7 个排队请求，2.1s 时只有 2 个。**2026-09-23 进展**：占队列的大头（stale 读时重拉，≈340/h）已改成不排队的 `DetailNoWait`，冷 id 队列里只剩冷 id 自己和 sweep 批次。**根因不是这个常量，是 30/min 对一个会在用户请求上做冷启动取数的站点本来就很紧** —— 真正的解法在「后台工作应有独立额度」那条，以及不要在请求路径上冷启动取数。实测频率很低（18 分钟 2 个）。
 
 **Depends on / blocked by** — 与「sweep 和用户请求共用同一个 AniList 额度」那条同源。
 

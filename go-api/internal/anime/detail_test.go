@@ -353,24 +353,47 @@ func (f *detailFakeDB) InsertAnimeRecommendation(ctx context.Context, arg dbgen.
 // fakeAniListDetailer — AniListDetailer test double.
 // -----------------------------------------------------------------------------
 
-// fakeAniListDetailer captures Detail() invocations and returns a canned
-// response or error.  Used by every stale / re-fetch test.
+// fakeAniListDetailer captures Detail() / DetailNoWait() invocations and
+// returns a canned response or error.  Used by every stale / re-fetch
+// test.  The two methods are counted separately because which one a path
+// uses is itself under test (cold ids queue, stale refreshes do not).
+// noWaitFn falls back to detailFn when unset, so a test that only cares
+// about the answer sets one function.
 type fakeAniListDetailer struct {
-	mu       sync.Mutex
-	detailFn func(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error)
-	calls    atomic.Int32
-	gotVars  []anilist.DetailVars
+	mu          sync.Mutex
+	detailFn    func(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error)
+	noWaitFn    func(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error)
+	detailCalls atomic.Int32
+	noWaitCalls atomic.Int32
+	gotVars     []anilist.DetailVars
 }
 
 func (f *fakeAniListDetailer) Detail(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
-	f.calls.Add(1)
+	f.detailCalls.Add(1)
+	return f.answer(ctx, v, f.detailFn)
+}
+
+func (f *fakeAniListDetailer) DetailNoWait(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error) {
+	f.noWaitCalls.Add(1)
+	fn := f.noWaitFn
+	if fn == nil {
+		fn = f.detailFn
+	}
+	return f.answer(ctx, v, fn)
+}
+
+func (f *fakeAniListDetailer) answer(
+	ctx context.Context,
+	v anilist.DetailVars,
+	fn func(context.Context, anilist.DetailVars) (*anilist.AnimeDetailResponse, error),
+) (*anilist.AnimeDetailResponse, error) {
 	f.mu.Lock()
 	f.gotVars = append(f.gotVars, v)
 	f.mu.Unlock()
-	if f.detailFn == nil {
+	if fn == nil {
 		return &anilist.AnimeDetailResponse{}, nil
 	}
-	return f.detailFn(ctx, v)
+	return fn(ctx, v)
 }
 
 // newDetailService builds a DetailService for tests with anilist=nil
@@ -1425,7 +1448,7 @@ func TestDetail_NotInCache_AniListReFetchSucceeds(t *testing.T) {
 	require.Contains(t, body, `"titleRomaji":"Re-fetched Title"`)
 
 	// Re-fetch was attempted.
-	assert.Equal(t, int32(1), al.calls.Load(), "AniList.Detail must be called exactly once")
+	assert.Equal(t, int32(1), al.detailCalls.Load(), "AniList.Detail must be called exactly once")
 	// Main row upsert + 6 Delete + N Inserts ran.  Counts: 1 genre / 1
 	// studio / 1 relation / 1 character / 1 staff / 1 recommendation.
 	assert.Equal(t, int32(1), db.upsertMainCalls.Load())
@@ -1487,7 +1510,7 @@ func TestDetail_StaleDetected_AniListReFetchSucceeds(t *testing.T) {
 
 	body := rec.Body.String()
 	require.Contains(t, body, `"titleRomaji":"Refetched"`, "must reflect post-refetch title")
-	assert.Equal(t, int32(1), al.calls.Load(), "AniList.Detail must fire once")
+	assert.Equal(t, int32(1), al.detailCalls.Load(), "an incomplete row queues for its repair fetch")
 	assert.Equal(t, int32(1), db.upsertMainCalls.Load())
 }
 
@@ -1520,7 +1543,7 @@ func TestDetail_StaleDetected_AniListFails_FallbackToStale(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, "must fall back to stale, not 500")
 	require.Contains(t, rec.Body.String(), `"titleRomaji":"Stale But Visible"`)
-	assert.Equal(t, int32(1), al.calls.Load(), "AniList.Detail was attempted")
+	assert.Equal(t, int32(1), al.detailCalls.Load(), "AniList.Detail was attempted")
 	assert.Equal(t, int32(0), db.upsertMainCalls.Load(), "upsert did not run after AniList failed")
 }
 
@@ -1560,7 +1583,8 @@ func TestDetail_FreshNotStale_SkipsReFetch(t *testing.T) {
 
 	rec := serveDetail(t, svc, "/api/anime/99")
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, int32(0), al.calls.Load(), "no AniList call for fresh row")
+	assert.Equal(t, int32(0), al.noWaitCalls.Load(), "no AniList call for fresh row")
+	assert.Equal(t, int32(0), al.detailCalls.Load(), "no AniList call for fresh row")
 	assert.Equal(t, int32(0), db.upsertMainCalls.Load(), "no upsert for fresh row")
 }
 
@@ -1577,9 +1601,11 @@ func TestDetail_StaleByCachedAt(t *testing.T) {
 		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
 			if readCount.Add(1) == 1 {
 				return dbgen.GetAnimeMainByIDRow{
-					AnilistID:   55,
-					TitleRomaji: &romajiPre,
-					CachedAt:    staleTimestamp(), // > 1h ago
+					AnilistID:        55,
+					TitleRomaji:      &romajiPre,
+					CachedAt:         staleTimestamp(), // > 24h ago
+					TrailerCheckedAt: freshTimestamp(),
+					DetailFetchedAt:  freshTimestamp(),
 				}, nil
 			}
 			return dbgen.GetAnimeMainByIDRow{
@@ -1613,7 +1639,7 @@ func TestDetail_StaleByCachedAt(t *testing.T) {
 
 	rec := serveDetail(t, svc, "/api/anime/55")
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, int32(1), al.calls.Load(), "stale cached_at must trigger re-fetch")
+	assert.Equal(t, int32(1), al.noWaitCalls.Load(), "stale cached_at must trigger re-fetch")
 	require.Contains(t, rec.Body.String(), `"titleRomaji":"Post-stale"`)
 }
 
@@ -1861,9 +1887,11 @@ func TestDetail_StaleRefetchFails_ServesStale(t *testing.T) {
 		getAnimeMainByIDFn: func(_ context.Context, _ int32) (dbgen.GetAnimeMainByIDRow, error) {
 			// stale cached_at is the only stale trigger here → re-fetch attempted
 			return dbgen.GetAnimeMainByIDRow{
-				AnilistID:   42,
-				TitleRomaji: &romaji,
-				CachedAt:    staleTimestamp(),
+				AnilistID:        42,
+				TitleRomaji:      &romaji,
+				CachedAt:         staleTimestamp(),
+				TrailerCheckedAt: freshTimestamp(),
+				DetailFetchedAt:  freshTimestamp(),
 			}, nil
 		},
 		getAnimeStudiosByIDFn: func(_ context.Context, _ int32) ([]string, error) {
@@ -1900,7 +1928,7 @@ func TestDetail_StaleRefetchFails_ServesStale(t *testing.T) {
 	require.Contains(t, body, `"titleRomaji":"Stale But Served"`)
 	require.Contains(t, body, `"anilistId":500`, "relation still served (un-enriched via no-DB converter)")
 
-	assert.Equal(t, int32(1), al.calls.Load(), "re-fetch must have been attempted once")
+	assert.Equal(t, int32(1), al.noWaitCalls.Load(), "re-fetch must have been attempted once")
 	assert.Equal(t, int32(0), db.enrichmentCalls.Load(),
 		"enrichment must NOT query the deadline-exhausted context on the stale-fallback path")
 
@@ -1909,6 +1937,6 @@ func TestDetail_StaleRefetchFails_ServesStale(t *testing.T) {
 	svc.cache.Wait()
 	rec2 := serveDetail(t, svc, "/api/anime/42")
 	require.Equal(t, http.StatusOK, rec2.Code)
-	assert.Equal(t, int32(1), al.calls.Load(), "stale result cached → second request must not re-fetch")
+	assert.Equal(t, int32(1), al.noWaitCalls.Load(), "stale result cached → second request must not re-fetch")
 	assert.Equal(t, int32(1), db.mainCalls.Load(), "second request served from cache, no DB read")
 }

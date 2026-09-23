@@ -4,6 +4,24 @@
 
 ## [未发布]
 
+### 详情页的 AniList 额度：旧行刷新不再排队，不存在的 id 记一天
+
+`/api/anime/:id` 的 502/503 全出在**冷 id**（库里没这一行）上——有行的 id 重拉失败会退回旧行，冷 id 没有可退的。而冷 id 里绝大多数是 AniList 本身就不存在的 id，答案本该是 404。它们 502 的主因不在 AniList：全站共用一个令牌桶（2.1s 一个、burst 1），`limiter.Wait` 在预计等待超过请求剩余的 5 秒时立刻报错，队列深到第三个就有人 0ms 拿 502。占着队列的是「`cached_at` 超过 24h 就在读路径上内联重拉」——目录里近一半的行过了这条线，爬虫走一遍目录，这一半就各排一次队。
+
+三处改动：
+
+- **只是旧的行不排队。** 新的 `anilist.Client.DetailNoWait` 用 `limiter.Allow()`，令牌不在就返回 `ErrBudgetBusy`，什么都不发、不碰熔断器；429 不重试直接跳熔断。详情页拿到 busy 就返回已读到的旧行（Debug 日志），真失败仍记 Warn。**不完整的行**（只经列表接口写入、没拉过详情，trailer 没问过，老形状的角色/关联）照旧走排队的 `Detail`：它们每行只需一次，而从忙的额度退回去的是一张没有角色、staff、关联的骨架页，还会被缓存一小时。
+- **AniList 说不存在的 id 记 24 小时。** 进程内 ristretto，只在冷 id 分支写，只认 `Media: null` 和上游 404；429、超时、其它上游错误不记，否则一次暂时的 503 会变成一天的假 404。读取顺序是缓存 → DB → 负缓存 → AniList，别的写入方把行写进库之后负缓存自动失效。
+- **同一冷 id 的并发请求只打一次上游**（singleflight）。这次调用用 `context.WithoutCancel` 派生、自带 5 秒上限，发起它的请求断开不会连累一起等的请求；每个请求仍在自己的截止时间放弃。
+
+冷 id 在 AniList 限流时仍是 503，这是有意保留的：「AniList 不可用时本地判 404」会对刚上 AniList、我们还没收录的新番答错，而 404 会被 CF 缓存；503 不会被当成结论。
+
+顺手删了 `detail.go` 的 `refetchTimeout`：15 秒套在已带 5 秒截止时间的 ctx 上，子 ctx 活不过父 ctx，从没生效过（Sentry 里是 `duration_ms: 5001`）。`client.go` 里三处「700ms」注释改成引用 `minInterval`，`detail.go` 包注释换成新的流程图。
+
+★ **singleflight 的 `DoChan` 在自己的 goroutine 里重新抛 panic**，`httpmw.Recoverer` 接不住——闭包里不 recover，一次 panic 就不是一个 500 而是整个 go-api 退出。现在闭包内 recover 成 500。★ 负缓存的 ristretto 显式定了尺寸（1e5 counters / MaxCost 1e4 / `IgnoreInternalCost`），实测空时 0.69MB、装满 1 万个 id 2.10MB；默认 `Config{}` 一个 Set 都没做就分配 50.6MB 堆。不开 `IgnoreInternalCost` 的话，同样的 MaxCost 只装得下约 175 条，其余被静默拒收，容量测试把这一点钉住了。
+
+测试：`client_test.go` 4 条、新文件 `detail_budget_test.go` 13 条（两条是表驱动，共 6 个子用例），原有 stale 测试按「排队 / 不排队」分开断言（其中两条名字写「只因 cached_at 过期」、数据却缺字段，原来是碰巧通过的，补齐了）。关键行各做了变异，15/15 全部被抓到；并发用例 `-cpu=1,4` 各跑 50 轮无失败。
+
 ### 磁力搜索弹窗：预告片卡从弹窗里透出来、滚轮滚的是底下的详情页
 
 两个 bug 一张截图。预告片卡（Netflix 那张静帧）浮在打开的磁力列表上面；滚轮放在弹窗上，动的是后面的详情页。

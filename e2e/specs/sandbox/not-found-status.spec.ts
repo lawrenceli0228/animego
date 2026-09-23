@@ -52,13 +52,16 @@ const MISSING_USER = "definitelynosuchuser99";
  * leaving the process.
  *
  * The obvious alternative, a large id like 999999999, does leave the process,
- * and that is what made the first version of this file flaky. go-api has no
- * negative cache: a cache miss plus pgx.ErrNoRows goes straight to AniList
- * (detail.go:423), so EVERY request for an uncatalogued id opens a live
- * third-party call. When AniList rate-limits, the page answers 500 rather than
- * 404 — reproduced locally. That is a real product defect and it is written up
- * in TODOS.md; it is not something to discover eight times per run through a
- * status assertion that cannot tell a regression from an upstream hiccup.
+ * and that is what made the first version of this file flaky. A cache miss
+ * plus pgx.ErrNoRows goes to AniList (detail.go, fetchCold). go-api now
+ * remembers AniList's "no such media" for a day and collapses concurrent
+ * requests for one id into one call, but the FIRST request for an
+ * uncatalogued id in each go-api process still opens a live third-party
+ * call, and a restart forgets. When AniList rate-limits that call, the page
+ * answers 500 rather than 404 — reproduced locally. That is a real product
+ * defect and it is written up in TODOS.md; it is not something to discover
+ * through a status assertion that cannot tell a regression from an upstream
+ * hiccup.
  *
  * This comment used to go on to call that defect "almost certainly the cause"
  * of the `/en answers 404 (retry #1)` flake this suite showed in CI. It is

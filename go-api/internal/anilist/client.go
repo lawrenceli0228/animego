@@ -144,7 +144,7 @@ const httpTimeout = 10 * time.Second
 // short-circuits to ErrRateLimited WITHOUT making the HTTP call — so a
 // caller (e.g. the detail handler under an SEO crawl) degrades to stale
 // data in microseconds instead of burning the full retry budget (up to
-// refetchTimeout, ~15s) on every request during an AniList rate-limit
+// the request's 5s budget) on every request during an AniList rate-limit
 // storm.  It also stops us hammering AniList while it's asking us to back
 // off.  After the cooldown the next call probes upstream again (a 429
 // re-trips it).  Set to 0 via WithBreakerCooldown to disable (tests).
@@ -155,6 +155,13 @@ const breakerCooldown = 30 * time.Second
 // handler layer in Go is responsible for mapping this sentinel to that
 // envelope.  This package stays I/O-agnostic.
 var ErrRateLimited = errors.New("anilist: rate limited after 3 retries")
+
+// ErrBudgetBusy is returned by the NoWait methods when the token bucket
+// has no token right now.  Nothing was sent upstream and the breaker was
+// not touched: it means "we are busy", not "AniList said no".  Kept
+// distinct from ErrRateLimited (neither errors.Is the other) so a caller
+// can tell its own queue apart from AniList's 429.
+var ErrBudgetBusy = errors.New("anilist: request budget busy, not queued")
 
 // MaxRatingIDs is the largest id batch MediaRatingsQuery may carry.  It
 // is AniList's documented per-page maximum, which the API enforces by
@@ -196,10 +203,9 @@ func (e *ErrUpstream) Error() string {
 // ---------------------------------------------------------------------------
 
 // Client is the AniList GraphQL caller.  It wraps a *http.Client with a
-// 700ms token-bucket throttle.  The limiter has burst=1 (a single token,
-// refilled every 700ms) which matches Express's "one request per 700ms,
-// no burst" semantics — multiple concurrent callers serialise through
-// the limiter exactly the way JS serialised through lastRequestTime.
+// token-bucket throttle of one token per minInterval, burst=1 — multiple
+// concurrent callers serialise through the limiter exactly the way JS
+// serialised through lastRequestTime.
 //
 // Clients are safe for concurrent use.  All four query methods reuse
 // the same limiter and *http.Client.
@@ -260,7 +266,7 @@ func WithSleep(f func(context.Context, time.Duration) error) Option {
 	}
 }
 
-// NewClient constructs a Client with the 700ms token-bucket limiter and
+// NewClient constructs a Client with the minInterval token-bucket limiter and
 // a 10-second HTTP timeout by default.  Pass WithEndpoint to override
 // the AniList URL (tests) and WithHTTPClient to swap timeout / transport.
 func NewClient(opts ...Option) *Client {
@@ -428,6 +434,23 @@ func (c *Client) Detail(ctx context.Context, v DetailVars) (*AnimeDetailResponse
 	return &dest, nil
 }
 
+// DetailNoWait is Detail for a caller that has something to fall back
+// on and would rather use it than queue.  If the token bucket is empty it
+// returns ErrBudgetBusy at once without sending anything; a 429 is not
+// retried but trips the breaker and returns ErrRateLimited.  It never
+// sleeps.
+//
+// The detail endpoint's stale-row refresh is the caller this exists for:
+// it has the stale row in hand, and queueing it on the shared limiter is
+// what used to push cold-id requests past their 5s deadline.
+func (c *Client) DetailNoWait(ctx context.Context, v DetailVars) (*AnimeDetailResponse, error) {
+	var dest AnimeDetailResponse
+	if err := c.doMode(ctx, AnimeDetailQuery, v, &dest, false); err != nil {
+		return nil, err
+	}
+	return &dest, nil
+}
+
 // Schedule runs WeeklyScheduleQuery for a [weekStart, weekEnd] window.
 func (c *Client) Schedule(ctx context.Context, v ScheduleVars) (*WeeklyScheduleResponse, error) {
 	var dest WeeklyScheduleResponse
@@ -497,6 +520,30 @@ func (c *Client) Facts(ctx context.Context, v FactsVars) (*MediaFactsResponse, e
 // the corresponding GraphQL response shape (see types.go for the four
 // concrete payload types).
 func (c *Client) do(ctx context.Context, query string, vars any, dest any) error {
+	return c.doMode(ctx, query, vars, dest, true)
+}
+
+// acquire takes one token from the shared limiter.  wait=true queues
+// (limiter.Wait, which fails immediately when the expected delay exceeds
+// ctx's deadline); wait=false takes a token only if one is free now and
+// otherwise returns ErrBudgetBusy.  Neither path touches the breaker.
+func (c *Client) acquire(ctx context.Context, wait bool) error {
+	if !wait {
+		if !c.limiter.Allow() {
+			return ErrBudgetBusy
+		}
+		return nil
+	}
+	if err := c.limiter.Wait(ctx); err != nil {
+		return fmt.Errorf("anilist: rate limit wait: %w", err)
+	}
+	return nil
+}
+
+// doMode is do with the queueing choice exposed.  wait=false is the
+// opportunistic mode: no queueing (see acquire) and no 429 retry, since
+// every retry is a wait.
+func (c *Client) doMode(ctx context.Context, query string, vars any, dest any, wait bool) error {
 	// Circuit breaker: while AniList is rate-limiting us, fail fast so the
 	// caller degrades immediately (e.g. detail → stale data) instead of
 	// every request blocking on the retry budget. See breakerCooldown.
@@ -518,12 +565,10 @@ func (c *Client) do(ctx context.Context, query string, vars any, dest any) error
 	}
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		// 1) Throttle.  limiter.Wait blocks until a token is available
-		//    or ctx is cancelled, returning ctx.Err() in the latter
-		//    case.  burst=1 + interval=700ms gives the Express
-		//    "one request per 700ms" rate exactly.
-		if err := c.limiter.Wait(ctx); err != nil {
-			return fmt.Errorf("anilist: rate limit wait: %w", err)
+		// 1) Throttle: one token per minInterval, burst=1.  See acquire
+		//    for the queueing vs. no-wait split.
+		if err := c.acquire(ctx, wait); err != nil {
+			return err
 		}
 
 		// Re-check the breaker after the wait: a concurrent request may
@@ -559,6 +604,13 @@ func (c *Client) do(ctx context.Context, query string, vars any, dest any) error
 			_, _ = io.Copy(io.Discard, res.Body)
 			_ = res.Body.Close()
 
+			// No-wait callers never sleep, so there is no retry to
+			// make: the 429 is final and opens the circuit.  Wrapped so
+			// logs do not read "after 3 retries" for a single attempt.
+			if !wait {
+				c.tripBreaker()
+				return fmt.Errorf("anilist: 429 in no-wait mode, not retried: %w", ErrRateLimited)
+			}
 			if attempt >= maxRetries {
 				c.tripBreaker()
 				return ErrRateLimited

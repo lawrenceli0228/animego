@@ -1,10 +1,35 @@
 // Package anime — /:anilistId detail endpoint.
 //
-// Composition: 7-query DB assembly (main row + 6 child arrays) + relations
-// enrichment lookup + 1-hour ristretto cache.  No AniList fetch in this
-// milestone — the cache row is returned as-is when present, 404 when not.
-// Stale detection + AniList re-fetch + Bangumi enrichment enqueue land in
-// P2.1.6 once the worker substitution shape is settled.
+// Composition: DB assembly (main row + child arrays) + relations
+// enrichment lookup + 1-hour ristretto cache, with AniList behind it for
+// rows we do not have and rows that have gone stale:
+//
+//	fetchDetail(id)
+//	 ├─ ristretto hit ─────────────────────────► 200
+//	 ├─ DB ErrNoRows (cold id)
+//	 │    ├─ absent hit ───────────────────────► 404  (no AniList call)
+//	 │    └─ singleflight(id) → Detail (queues on the shared limiter)
+//	 │         ├─ Media null / upstream 404 ───► absent.Set → 404
+//	 │         ├─ ErrRateLimited ──────────────► 503  (not remembered)
+//	 │         ├─ other upstream / timeout ────► 502  (not remembered)
+//	 │         └─ ok ──────────────────────────► upsert → 200
+//	 └─ DB row
+//	      ├─ !isStale ─────────────────────────► 200
+//	      ├─ needsRepair → Detail (queues: the row is a skeleton)
+//	      │    ├─ failure ─────────────────────► serveStale (Warn)
+//	      │    └─ ok ──────────────────────────► upsert → 200
+//	      └─ only aged → DetailNoWait (never queues)
+//	           ├─ ErrBudgetBusy ───────────────► serveStale (Debug)
+//	           ├─ other failure ───────────────► serveStale (Warn)
+//	           └─ ok ──────────────────────────► upsert → 200
+//
+// Only a cold id can 5xx: a row we hold always degrades to itself.  That
+// is why the age-based refresh must not queue — its place in the limiter
+// queue is what pushed cold ids past their 5s deadline.  A row that is
+// incomplete rather than old (a listing wrote it, nobody has fetched its
+// detail yet) still queues: serving it would mean serving a page with no
+// characters, staff or relations and caching that, and each such row
+// needs exactly one fetch.
 //
 // Express equivalent: server/controllers/detail.controller.js:5-30 +
 // server/services/anilist.service.js:361-398 (cache-hit branch only).
@@ -19,13 +44,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
@@ -56,11 +84,26 @@ const detailCacheTTL = 1 * time.Hour
 // refreshes current-season titles independently of this TTL.
 const staleCacheTTL = 24 * time.Hour
 
-// refetchTimeout bounds the AniList round-trip + upsert path.  Longer
-// than queryTimeout (5s) because the AniList call alone can take up to
-// 10s under load; 15s gives us comfortable headroom for the upstream
-// HTTP + the ten DB writes that follow.
-const refetchTimeout = 15 * time.Second
+// absentTTL is how long an id AniList answered "no such media" for is
+// remembered.  Equal to staleCacheTTL: a day is the freshness we already
+// accept for rows we do have.  Measured 2026-09-20 on crawler 404s, 45%
+// of repeat hits on a missing id land within 24h against 28% within 1h.
+//
+// Nothing has to invalidate an entry: fetchDetail reads the DB before
+// this cache, so once warm_season / search / seasonal writes the row the
+// entry is simply never consulted again.  A restart empties it.
+const absentTTL = staleCacheTTL
+
+// absentCacheConfig sizes the negative cache for ids, not for bytes: up
+// to 1e4 entries.  Measured 2026-09-23 with runtime.MemStats: 0.69MB of
+// heap empty, 2.10MB holding all 1e4 ids -- where the zero Config
+// allocates 50.6MB before a single Set.  IgnoreInternalCost is what
+// makes MaxCost an entry count -- without it ristretto charges 56 bytes
+// of overhead per entry and silently refuses admission past MaxCost/57
+// (see internal/cache).
+func absentCacheConfig(ttl time.Duration) cache.Config {
+	return cache.Config{NumCounters: 1e5, MaxCost: 1e4, IgnoreInternalCost: true, DefaultTTL: ttl}
+}
 
 // AnimeDetail is the full /:anilistId response payload.
 //
@@ -413,8 +456,13 @@ type DetailDB interface {
 // a canned response without spinning up an httptest server.  Pass nil
 // to NewDetailService to disable the re-fetch path entirely (cache-only
 // behaviour, matching the pre-P2.1.6 service shape).
+//
+// Detail queues on the client's limiter; DetailNoWait returns
+// anilist.ErrBudgetBusy instead of queueing.  See fetchDetail for which
+// path uses which.
 type AniListDetailer interface {
 	Detail(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error)
+	DetailNoWait(ctx context.Context, v anilist.DetailVars) (*anilist.AnimeDetailResponse, error)
 }
 
 // DetailService composes the DB + ristretto cache + (optional) AniList
@@ -430,6 +478,16 @@ type DetailService struct {
 	db      DetailDB
 	cache   *cache.Cache[*AnimeDetail]
 	anilist AniListDetailer
+
+	// absent remembers ids AniList said do not exist.  Written only on
+	// the cold-id path; see absentTTL.
+	absent *cache.Cache[struct{}]
+	// coldFetch collapses concurrent fetches of the same cold id into
+	// one AniList call.  It covers the gap absent cannot: ristretto
+	// writes are asynchronous, so a burst of identical requests would
+	// all miss absent before the first answer lands.
+	coldFetch singleflight.Group
+	closeOnce sync.Once
 }
 
 // NewDetailService builds a DetailService with a 1-hour ristretto cache.
@@ -447,15 +505,25 @@ func NewDetailService(db DetailDB, anilistClient AniListDetailer) (*DetailServic
 	if err != nil {
 		return nil, fmt.Errorf("anime/detail: build cache: %w", err)
 	}
-	return &DetailService{db: db, cache: c, anilist: anilistClient}, nil
+	absent, err := cache.New[struct{}](absentCacheConfig(absentTTL))
+	if err != nil {
+		c.Close()
+		return nil, fmt.Errorf("anime/detail: build absent cache: %w", err)
+	}
+	return &DetailService{db: db, cache: c, anilist: anilistClient, absent: absent}, nil
 }
 
-// Close releases the underlying ristretto cache.  Safe to call multiple
-// times — ristretto's Close is idempotent and the wrapper is too.
+// Close releases the underlying ristretto caches.  Safe to call multiple
+// times.
 func (s *DetailService) Close() {
-	if s.cache != nil {
-		s.cache.Close()
-	}
+	s.closeOnce.Do(func() {
+		if s.cache != nil {
+			s.cache.Close()
+		}
+		if s.absent != nil {
+			s.absent.Close()
+		}
+	})
 }
 
 // Handler returns the chi-compatible http.HandlerFunc for
@@ -473,8 +541,8 @@ func (s *DetailService) Close() {
 //
 // On cache miss the row is read from anime_cache + child tables; if the
 // main row is missing the handler returns 404 NOT_FOUND with the Chinese
-// message "番剧不存在".  Stale detection + AniList re-fetch are deferred
-// to P2.1.6 — see the TODO inside fetchDetail.
+// message "番剧不存在" unless AniList has it.  See the package comment for
+// the full flow.
 func (s *DetailService) Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
@@ -518,12 +586,14 @@ func (s *DetailService) Handler() http.HandlerFunc {
 // map to either 404 or a re-fetch before any child queries run — those
 // would return empty slices and mask the missing parent).
 //
-//   - pgx.ErrNoRows + anilist client wired  → re-fetch from AniList
+//   - pgx.ErrNoRows + anilist client wired  → fetchCold (negative cache,
+//     then one queued AniList call per id)
 //   - pgx.ErrNoRows + anilist nil           → 404 NOT_FOUND
-//   - main row present                       → read 6 child arrays in
-//     parallel, then check isStale; if stale and anilist wired, re-fetch
-//     and return the post-write read.  If re-fetch fails, the in-flight
-//     stale rows still get returned so the client sees data over no data.
+//   - main row present                       → read the child arrays in
+//     parallel, then check isStale; if stale and anilist wired, try a
+//     no-wait re-fetch and return the post-write read.  If it is busy or
+//     fails, the in-flight stale rows are served so the client sees data
+//     over no data.
 func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*AnimeDetail, error) {
 	key := strconv.FormatInt(int64(anilistID), 10)
 	if hit, ok := s.cache.Get(key); ok && hit != nil {
@@ -537,7 +607,7 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 			// Without the client, return the stable 404 signal so
 			// frontend clients can present a clean missing-page state.
 			if s.anilist != nil {
-				return s.refetchFromAniList(ctx, anilistID)
+				return s.fetchCold(ctx, anilistID)
 			}
 			return nil, httpx.NewError(
 				http.StatusNotFound,
@@ -554,32 +624,34 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 		return nil, err
 	}
 
-	// Stale check — runs only on cache miss.  When stale and the
-	// AniList client is wired, re-fetch + upsert + re-read.  If the
-	// re-fetch fails (upstream 502, rate limit, network), fall through
-	// to return the stale rows so the client sees data over an error.
+	// Stale check — runs only on cache miss.  An incomplete row queues
+	// for its one repair fetch; a row that is merely old tries a re-fetch
+	// that does not queue, because that refresh is best-effort and its
+	// waiting on the shared limiter is what used to starve cold ids
+	// (which have nothing to fall back on) into 502s.  Busy or failed,
+	// the stale rows are served.
 	if s.anilist != nil && isStale(main, ch.studios, ch.characters, ch.relations) {
+		fetch := s.anilist.DetailNoWait
+		if needsRepair(main, ch.characters, ch.relations) {
+			fetch = s.anilist.Detail
+		}
+		// Logged before the attempt, and worded as before, so the count
+		// stays comparable with the 2026-09-20 baseline: it counts stale
+		// reads, of which the busy Debug line below is the subset that
+		// never reached AniList.
 		slog.InfoContext(ctx, "anime/detail: stale, re-fetching from AniList", "anilistId", anilistID)
-		if det, refetchErr := s.refetchFromAniList(ctx, anilistID); refetchErr == nil {
+		det, refetchErr := s.refetchFromAniList(ctx, anilistID, fetch)
+		if refetchErr == nil {
 			return det, nil
+		}
+		// The busy sentinel survives refetchFromAniList's APIError wrap
+		// (APIError.Unwrap), which is what lets it be told apart here.
+		if errors.Is(refetchErr, anilist.ErrBudgetBusy) {
+			slog.DebugContext(ctx, "anime/detail: stale, budget busy, serving stale", "anilistId", anilistID)
 		} else {
 			slog.WarnContext(ctx, "anime/detail: AniList re-fetch failed, returning stale", "anilistId", anilistID, "err", refetchErr)
-			// Graceful degradation: serve the stale rows we ALREADY read.
-			// Do NOT touch the DB again on `ctx` here — a failed re-fetch can
-			// leave the request context deadline-exhausted, so enrichRelations
-			// (or any query) on it fails with "context deadline exceeded" and
-			// 500s the page. That dead-context query was the cause of the
-			// Internal Server Errors during AniList upstream slowness.
-			//
-			// Relation titleChinese/cover backfill is a best-effort nicety;
-			// skip it via the no-DB converter rather than 500. Cache the stale
-			// result so a herd of stale requests during an AniList outage
-			// doesn't each repeat the (blocking, ~5s) re-fetch attempt and
-			// pile up on the worker pool.
-			stale := assembleDetail(main, ch, convertRelationsToDetailRelations(ch.relations))
-			s.cache.Set(key, stale)
-			return stale, nil
 		}
+		return s.serveStale(key, main, ch), nil
 	}
 
 	// Relations enrichment — backfill titleChinese + coverImageUrl from
@@ -602,6 +674,81 @@ func (s *DetailService) fetchDetail(ctx context.Context, anilistID int32) (*Anim
 	}
 
 	return detail, nil
+}
+
+// serveStale answers with the rows already read when a stale refresh did
+// not happen.
+//
+// It does NOT touch the DB: a failed re-fetch can leave the request
+// context deadline-exhausted, and an enrichRelations query on it would
+// 500 the page (that dead-context query was the cause of the Internal
+// Server Errors during AniList upstream slowness).  Relation
+// titleChinese/cover backfill is a best-effort nicety, so the no-DB
+// converter is used instead.  The result is cached so a herd of requests
+// for the same stale row does not each retry the refresh.
+func (s *DetailService) serveStale(key string, main dbgen.GetAnimeMainByIDRow, ch detailChildren) *AnimeDetail {
+	stale := assembleDetail(main, ch, convertRelationsToDetailRelations(ch.relations))
+	s.cache.Set(key, stale)
+	return stale
+}
+
+// fetchCold answers an id with no DB row: 404 from the negative cache if
+// AniList already said it does not exist, otherwise one AniList call
+// shared by every concurrent request for the id.
+//
+// The shared call runs on a context detached from any one caller
+// (context.WithoutCancel keeps request values, drops cancellation) with
+// its own queryTimeout, so the request that happened to start it closing
+// its connection does not fail every other request waiting on it.  Each
+// caller still stops waiting at its own deadline.
+//
+// Only an authoritative "does not exist" is remembered.  A 429, timeout
+// or other upstream failure says nothing about the id, and remembering it
+// would turn a transient 503 into a day of false 404s.
+func (s *DetailService) fetchCold(ctx context.Context, anilistID int32) (*AnimeDetail, error) {
+	key := strconv.FormatInt(int64(anilistID), 10)
+	if _, ok := s.absent.Get(key); ok {
+		return nil, errAnimeNotFound()
+	}
+	// The DB read may have spent the whole budget.  Starting a detached
+	// fetch now would still take a limiter reservation for nobody.
+	if err := ctx.Err(); err != nil {
+		return nil, httpx.WrapError(err, http.StatusBadGateway, httpx.CodeServerError, "AniList upstream error")
+	}
+
+	ch := s.coldFetch.DoChan(key, func() (val any, err error) {
+		// DoChan runs this on its own goroutine and re-panics there,
+		// where httpmw.Recoverer cannot reach: an unrecovered panic here
+		// would take the whole process down, not answer one 500.
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.ErrorContext(ctx, "anime/detail: cold fetch panic",
+					"anilistId", anilistID, "panic", rec, "stack", string(debug.Stack()))
+				val, err = nil, httpx.NewError(http.StatusInternalServerError, httpx.CodeServerError, "Internal Server Error")
+			}
+		}()
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), queryTimeout)
+		defer cancel()
+		det, err := s.refetchFromAniList(fctx, anilistID, s.anilist.Detail)
+		if apiErr, ok := httpx.IsAPIError(err); ok && apiErr.Status == http.StatusNotFound {
+			s.absent.Set(key, struct{}{})
+		}
+		return det, err
+	})
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*AnimeDetail), nil
+	case <-ctx.Done():
+		return nil, httpx.WrapError(ctx.Err(), http.StatusBadGateway, httpx.CodeServerError, "AniList upstream error")
+	}
+}
+
+// errAnimeNotFound is the 404 every "no such anime" path returns.
+func errAnimeNotFound() *httpx.APIError {
+	return httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, "番剧不存在")
 }
 
 // detailChildren is everything the child tables say about one title,
@@ -670,13 +817,26 @@ func isStale(
 	characters []dbgen.GetAnimeCharactersByIDRow,
 	relations []dbgen.GetAnimeRelationsByIDRow,
 ) bool {
+	if needsRepair(main, characters, relations) {
+		return true
+	}
+	return main.CachedAt.Valid && time.Since(main.CachedAt.Time) >= staleCacheTTL
+}
+
+// needsRepair is the part of isStale that says the row is incomplete, as
+// opposed to old: each condition is cleared by one detail fetch and does
+// not come back.  fetchDetail queues for these (Detail) and not for age
+// alone (DetailNoWait), because an incomplete row served from a busy
+// budget is a page without characters, staff or relations.
+func needsRepair(
+	main dbgen.GetAnimeMainByIDRow,
+	characters []dbgen.GetAnimeCharactersByIDRow,
+	relations []dbgen.GetAnimeRelationsByIDRow,
+) bool {
 	// Never asked about this row's trailer.  Filling it is a read-through,
 	// not a repair: a row that HAS been asked stays fresh even when the
 	// answer was "none", so a confirmed absence cannot loop.
 	if !main.TrailerCheckedAt.Valid {
-		return true
-	}
-	if main.CachedAt.Valid && time.Since(main.CachedAt.Time) >= staleCacheTTL {
 		return true
 	}
 	// Never been through AnimeDetailQuery: a listing upsert (seasonal,
@@ -704,9 +864,11 @@ func isStale(
 }
 
 // refetchFromAniList runs the full AniList Detail → normalize → upsert
-// (main + 6 child tables) → re-read pipeline.  Used by two callers:
-// (a) pgx.ErrNoRows on initial DB read (truly missing record), and
-// (b) stale-flag fired after cache miss.
+// (main + child tables) → re-read pipeline.  Used by two callers, which
+// differ in how they are willing to reach AniList (fetch):
+// (a) fetchCold, for a truly missing record — s.anilist.Detail, which
+// queues, because there is nothing to fall back on; and
+// (b) the stale branch of fetchDetail — s.anilist.DetailNoWait.
 //
 // The upsert path is intentionally non-transactional for P2.1.6 — the
 // DetailDB surface is just sqlc's Querier so wrapping in pgx.Tx would
@@ -715,14 +877,15 @@ func isStale(
 // stale-detection sweep on the very next request re-runs this whole
 // pipeline, so consistency converges within one extra round-trip.
 //
-// Uses a per-call context with refetchTimeout (15s) so a slow upstream
-// doesn't hold the request-level context (5s queryTimeout) hostage — the
-// request would have failed long before the upsert completed otherwise.
-func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID int32) (*AnimeDetail, error) {
-	ctx, cancel := context.WithTimeout(parentCtx, refetchTimeout)
-	defer cancel()
-
-	resp, err := s.anilist.Detail(ctx, anilist.DetailVars{ID: int(anilistID)})
+// The whole pipeline runs inside the caller's 5s budget (queryTimeout).
+// There used to be a 15s refetchTimeout here; a child context cannot
+// outlive its parent, so it never applied (Sentry: duration_ms 5001).
+func (s *DetailService) refetchFromAniList(
+	ctx context.Context,
+	anilistID int32,
+	fetch func(context.Context, anilist.DetailVars) (*anilist.AnimeDetailResponse, error),
+) (*AnimeDetail, error) {
+	resp, err := fetch(ctx, anilist.DetailVars{ID: int(anilistID)})
 	if err != nil {
 		// Differentiate upstream errors from "AniList says this ID
 		// doesn't exist".  Express maps both to 404 with the same
@@ -731,7 +894,7 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 		// 502 BAD_GATEWAY so observability can distinguish.
 		var upErr *anilist.ErrUpstream
 		if errors.As(err, &upErr) && upErr.Status == http.StatusNotFound {
-			return nil, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, "番剧不存在")
+			return nil, errAnimeNotFound()
 		}
 		// Rate-limited is 503, not 502: the condition is transient and
 		// self-heals after the breaker cooldown, and the distinct status
@@ -747,7 +910,7 @@ func (s *DetailService) refetchFromAniList(parentCtx context.Context, anilistID 
 	// which the anilist client surfaces as a populated zero-value
 	// Media struct.  Treat as 404 to match Express's "番剧不存在".
 	if resp == nil || resp.Media.ID == 0 {
-		return nil, httpx.NewError(http.StatusNotFound, httpx.CodeNotFound, "番剧不存在")
+		return nil, errAnimeNotFound()
 	}
 
 	media := resp.Media

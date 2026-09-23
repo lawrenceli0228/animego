@@ -2,7 +2,7 @@
 //
 // Tests the AniList GraphQL client against an httptest fake that mimics
 // the production AniList wire format.  Covers all four query methods,
-// the 429 retry loop, upstream error wrapping, the 700ms throttle, and
+// the 429 retry loop, upstream error wrapping, the minInterval throttle, and
 // context cancellation behaviour.
 //
 // All retry-loop tests inject a no-op sleep via WithSleep so test
@@ -71,7 +71,7 @@ func testClient(t *testing.T, url string, opts ...Option) *Client {
 		WithSleep(noop),
 	}
 	c := NewClient(append(base, opts...)...)
-	// Replace the production 700ms limiter with one that allows
+	// Replace the production minInterval limiter with one that allows
 	// effectively unlimited bursts — individual functional tests don't
 	// care about throttle behaviour.
 	c.limiter = rate.NewLimiter(rate.Inf, 0)
@@ -350,6 +350,108 @@ func TestClient_429_GiveUpAfter3Retries(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Circuit breaker
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// DetailNoWait — the opportunistic mode (stale-row refresh)
+// ---------------------------------------------------------------------------
+
+// noWaitClient builds a Client with the production limiter (one token,
+// refilled every minInterval) so Allow() has something real to refuse.
+func noWaitClient(t *testing.T, url string, opts ...Option) (*Client, *[]time.Duration) {
+	t.Helper()
+	sleepHook, slept := newNoopSleep()
+	base := []Option{WithEndpoint(url), WithSleep(sleepHook), WithHTTPClient(freshConnClient())}
+	return NewClient(append(base, opts...)...), slept
+}
+
+// T-c1: a free token means DetailNoWait is just Detail.
+func TestClient_DetailNoWait_TokenFree_Fetches(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSON(w, http.StatusOK, `{"data":{"Media":{"id":42,"title":{"romaji":"Test"}}}}`)
+	}))
+	defer srv.Close()
+
+	c, _ := noWaitClient(t, srv.URL)
+	resp, err := c.DetailNoWait(context.Background(), DetailVars{ID: 42})
+
+	require.NoError(t, err)
+	assert.Equal(t, 42, resp.Media.ID)
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+// T-c2: no token → ErrBudgetBusy with zero HTTP calls, and the breaker
+// stays closed — being busy is not AniList saying no.
+func TestClient_DetailNoWait_NoToken_BudgetBusy(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSON(w, http.StatusOK, `{"data":{"Media":{"id":42}}}`)
+	}))
+	defer srv.Close()
+
+	c, _ := noWaitClient(t, srv.URL)
+	require.True(t, c.limiter.Allow(), "drain the single token")
+
+	_, err := c.DetailNoWait(context.Background(), DetailVars{ID: 42})
+
+	require.ErrorIs(t, err, ErrBudgetBusy)
+	assert.NotErrorIs(t, err, ErrRateLimited, "busy must stay distinguishable from a 429")
+	assert.NotErrorIs(t, ErrRateLimited, ErrBudgetBusy)
+	assert.Equal(t, int32(0), calls.Load(), "no token → nothing sent")
+	assert.False(t, c.breakerOpen(), "our own queue must not open the breaker")
+}
+
+// T-c3: an open breaker answers before the limiter, so it does not spend
+// the token another caller could use.
+func TestClient_DetailNoWait_BreakerOpen_KeepsToken(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+	}))
+	defer srv.Close()
+
+	now := time.Unix(1_700_000_000, 0)
+	c, _ := noWaitClient(t, srv.URL, WithNow(func() time.Time { return now }))
+	c.openUntil = now.Add(time.Minute)
+
+	_, err := c.DetailNoWait(context.Background(), DetailVars{ID: 42})
+
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.Equal(t, int32(0), calls.Load())
+	assert.True(t, c.limiter.Allow(), "the token must still be there")
+}
+
+// T-c4: a 429 in no-wait mode is final — no sleep, no retry, one HTTP
+// call, breaker open.
+func TestClient_DetailNoWait_429_NoRetry_TripsBreaker(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	c, slept := noWaitClient(t, srv.URL)
+
+	_, err := c.DetailNoWait(context.Background(), DetailVars{ID: 42})
+
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.Contains(t, err.Error(), "no-wait", "logs must not read as three retries")
+	assert.Equal(t, int32(1), calls.Load(), "no retry in no-wait mode")
+	assert.Empty(t, *slept, "no-wait mode never sleeps")
+	assert.True(t, c.breakerOpen())
+}
 
 func TestClient_Breaker_ShortCircuitsWhileOpen(t *testing.T) {
 	t.Parallel()
