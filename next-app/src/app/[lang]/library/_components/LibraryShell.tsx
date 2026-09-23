@@ -808,7 +808,7 @@ export function LibraryShell() {
     dedupeSweepRef.current = true;
     void dedupeSeriesByIdentity({ db })
       .then((result) => {
-        noteSweepSettled(result.merged > 0);
+        noteSweepSettled(result.merged > 0 || result.cyclesRepaired > 0);
         if (result.merged === 0 || result.opIds.length === 0) return;
         setUndoToast({
           opIds: result.opIds,

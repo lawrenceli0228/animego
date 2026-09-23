@@ -51,10 +51,12 @@ export function resolveMergedSeriesIds(
   // stable and readable in the ops log, unlike a recursive descent.
   //
   // `seen` is doing two jobs: de-duplication (the same source can be reached
-  // twice through a diamond) and cycle protection. A cycle should be
-  // impossible — performMerge refuses a self-merge and appends only — but an
-  // override table is user-writable state that survives across versions, and
-  // an infinite loop here would hang the detail sheet with no error to read.
+  // twice through a diamond) and cycle protection. Cycles are not
+  // hypothetical: before performMerge refused them, the duplicate sweep
+  // reversed a reader's older→newer merge into one on their next visit (see
+  // `mergeCycles.ts`), and libraries written then still carry them until
+  // `repairMergeCycles` runs. An infinite loop here would hang the detail
+  // sheet with no error to read.
   const seen = new Set<string>([rootId]);
   const out: string[] = [rootId];
   const queue: string[] = [rootId];
@@ -69,5 +71,25 @@ export function resolveMergedSeriesIds(
     }
   }
 
+  return out;
+}
+
+/**
+ * Every series id that has been merged INTO some other card, and so draws no
+ * card of its own. This is the grid's hiding rule (useLibrary).
+ *
+ * It is deliberately blind to roots: an id is hidden as soon as ANY override
+ * lists it. That is why a cycle is fatal rather than cosmetic — every member of
+ * the loop is listed by another member, so the whole loop disappears with no
+ * card left to hold it.
+ */
+export function mergedAwayIds(
+  overrides: readonly OverrideLike[] | null | undefined,
+): Set<string> {
+  const out = new Set<string>();
+  for (const o of overrides ?? []) {
+    if (!Array.isArray(o?.mergedFrom)) continue;
+    for (const id of o.mergedFrom) out.add(id);
+  }
   return out;
 }

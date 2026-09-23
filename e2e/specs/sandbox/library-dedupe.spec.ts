@@ -121,6 +121,66 @@ test.describe("/library — duplicate cards", () => {
       .toBe(true);
   });
 
+  // ─── merge cycles ──────────────────────────────────────────────────────────
+  //
+  // A reader merges the older copy into the newer one by hand; on the next
+  // visit this sweep, which always merges INTO the oldest row, merged it back.
+  // A listed B and B listed A, and useLibrary hides every id any override
+  // lists — so both cards vanished at once, every episode with them. From the
+  // reader's seat: "merging made everything disappear".
+  //
+  // The unit tests pin the repair's rules. This pins that it runs where the
+  // reader can benefit — on mount — and that the card actually comes back
+  // through liveQuery, which only a real page does.
+  test("★ two cards merged INTO EACH OTHER come back as one card", async ({ page }) => {
+    await page.goto("/welcome");
+    await clearLibrary(page);
+    await seedLibrary(page, {
+      series: [
+        {
+          id: CARD_A,
+          titleZh: "互相合并 A",
+          anilistId: ANILIST_ID,
+          mergedFrom: [CARD_B],
+          episodes: [{ number: 1 }],
+        },
+        {
+          id: CARD_B,
+          titleZh: "互相合并 B",
+          anilistId: ANILIST_ID,
+          mergedFrom: [CARD_A],
+          episodes: [{ number: 2 }],
+        },
+      ],
+    });
+
+    // Prove the premise: the loop is on disk, in both directions.
+    const [seededA, seededB] = await Promise.all([
+      readSeriesRow(page, CARD_A, "userOverride"),
+      readSeriesRow(page, CARD_B, "userOverride"),
+    ]);
+    expect([seededA?.mergedFrom, seededB?.mergedFrom]).toEqual([[CARD_B], [CARD_A]]);
+
+    await page.goto("/library");
+
+    // Exactly one card: zero is the bug, two would mean the repair threw the
+    // reader's merge away instead of just breaking the loop.
+    await expect(
+      page.getByTestId("series-card-root"),
+      "the cycle was not repaired on mount — both cards are still hidden",
+    ).toHaveCount(1, { timeout: 20_000 });
+
+    // And the storage agrees: still merged one way, no longer both ways.
+    const [rowA, rowB] = await Promise.all([
+      readSeriesRow(page, CARD_A, "userOverride"),
+      readSeriesRow(page, CARD_B, "userOverride"),
+    ]);
+    const inA = (rowA?.mergedFrom as string[] | undefined) ?? [];
+    const inB = (rowB?.mergedFrom as string[] | undefined) ?? [];
+    expect(inA.includes(CARD_B) && inB.includes(CARD_A), "the loop is still on disk").toBe(false);
+    expect(await mergedEitherWay(page, CARD_A, CARD_B), "the merge itself was lost").toBe(true);
+  });
+
   test("★ a pair the reader split apart is NOT re-merged", async ({ page }) => {
     await page.goto("/welcome");
     await clearLibrary(page);

@@ -5,6 +5,7 @@ import {
   identityKeyFor,
   wasDeliberatelySplit,
 } from "./dedupeSeries";
+import { mergedAwayIds, resolveMergedSeriesIds } from "./resolveMergedIds";
 
 // Grouping duplicate cards, after #105 took away the key this used to use.
 //
@@ -67,6 +68,19 @@ function fakeDb(seed: {
     _rows: { series, seasons, userOverride, opsLog },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
+}
+
+/**
+ * The cards the grid would draw, oldest-first by id — useLibrary's own rule
+ * (`mergedAwayIds`), not a re-statement of it.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function visibleIds(db: any): string[] {
+  const hidden = mergedAwayIds(db._rows.userOverride);
+  return (db._rows.series as FakeRow[])
+    .map((row) => row.id as string)
+    .filter((id) => !hidden.has(id))
+    .sort();
 }
 
 /** Typed, not FakeRow: `identityKeyFor` takes a real shape and the compiler
@@ -216,6 +230,63 @@ describe("dedupeSeriesByIdentity", () => {
     const second = await dedupeSeriesByIdentity({ db });
     expect(second.merged).toBe(0);
     expect(second.skipped).toBe(1);
+  });
+
+  // ─── merge cycles: the "merging made everything disappear" bug ─────────────
+  //
+  // The sweep targets the OLDEST row and reads every series, merged-in ones
+  // included. A reader who had merged the older card into the newer one by
+  // hand got that merge reversed on their next visit — B held A, then A held
+  // B — and useLibrary hides every id that appears in any `mergedFrom`, so
+  // both cards vanished with every episode under them.
+
+  test("★ a reader's older→newer merge is not reversed into a cycle", async () => {
+    const db = fakeDb({
+      series: [s("A", 100, 130003), s("B", 200, 130003)],
+      userOverride: [{ seriesId: "B", mergedFrom: ["A"], updatedAt: 300 }],
+    });
+    const summary = await dedupeSeriesByIdentity({ db });
+    expect(summary.merged).toBe(0);
+    expect(visibleIds(db)).toEqual(["B"]);
+    expect(resolveMergedSeriesIds(db._rows.userOverride, "B")).toEqual(["B", "A"]);
+  });
+
+  test("★ a cycle already on disk is repaired, and the reader's choice wins", async () => {
+    // What an affected library looks like today: B.mergedFrom=[A] written by
+    // the reader, A.mergedFrom=[B] written later by the sweep. Zero cards.
+    const db = fakeDb({
+      series: [s("A", 100, 130003), s("B", 200, 130003)],
+      userOverride: [
+        { seriesId: "B", mergedFrom: ["A"], updatedAt: 300 },
+        { seriesId: "A", mergedFrom: ["B"], updatedAt: 400 },
+      ],
+    });
+    expect(visibleIds(db)).toEqual([]);
+
+    const summary = await dedupeSeriesByIdentity({ db });
+    expect(summary.cyclesRepaired).toBe(1);
+    expect(visibleIds(db)).toEqual(["B"]);
+    expect(resolveMergedSeriesIds(db._rows.userOverride, "B")).toEqual(["B", "A"]);
+
+    // And the sweep does not immediately put it back.
+    const again = await dedupeSeriesByIdentity({ db });
+    expect(again.cyclesRepaired).toBe(0);
+    expect(visibleIds(db)).toEqual(["B"]);
+  });
+
+  test("★ three copies, one already merged by hand, end as ONE card holding all three", async () => {
+    const db = fakeDb({
+      series: [s("A", 100, 1), s("B", 200, 1), s("C", 300, 1)],
+      userOverride: [{ seriesId: "C", mergedFrom: ["A"], updatedAt: 400 }],
+    });
+    await dedupeSeriesByIdentity({ db });
+    const visible = visibleIds(db);
+    expect(visible).toHaveLength(1);
+    expect(resolveMergedSeriesIds(db._rows.userOverride, visible[0]).sort()).toEqual([
+      "A",
+      "B",
+      "C",
+    ]);
   });
 
   test("records an opsLog row per merge, so it can be undone", async () => {
