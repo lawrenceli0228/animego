@@ -63,9 +63,10 @@ const seasonalAniListMaxPerPage = 50
 
 // seasonalRefetchTimeout bounds the cold-start AniList call.  Longer
 // than queryTimeout (5s) because the AniList Seasonal call alone can
-// take up to 10s under load (700ms throttle + HTTP); 15s gives us
+// take up to 10s under load (minInterval throttle + HTTP); 15s gives us
 // comfortable headroom for the upstream HTTP + the N upserts that
-// follow.  Mirrors detail.go's refetchTimeout — same rationale.
+// follow.  Unlike the detail endpoint, the parent here is the bare
+// request context, so the 15s does apply.
 const seasonalRefetchTimeout = 15 * time.Second
 
 // AniListSeasonaler is the use-site interface SeasonalService consumes
