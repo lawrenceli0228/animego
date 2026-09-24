@@ -1,0 +1,38 @@
+/* The page ground and the shared homepage vocabulary.
+ *
+ * --home-ground / --home-tone / … arrive inline from HomeHueScope, already
+ * resolved to finished oklch() strings. They change when the hero changes, and
+ * every rule below that paints with them transitions the painted property —
+ * a custom property itself does not animate, the colour it lands in does. */
+
+.scope {
+  /* Content is ~1280px wide and centred; the gutter is at least 80px on a
+   * laptop and shrinks with the viewport below that. A percentage, not vw, so
+   * a Windows scrollbar does not push the content off-centre. */
+  --home-gutter: max(clamp(24px, 5.56vw, 80px), calc((100% - 1280px) / 2));
+  --home-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --home-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  /* How long the page takes to change colour with the hero. */
+  --home-tint: 0.9s;
+
+  position: relative;
+  display: flow-root;
+  padding-bottom: 96px;
+  background-color: var(--home-ground, #000);
+  color: #fff;
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+@media (max-width: 600px) {
+  .scope {
+    --home-gutter: 20px;
+    padding-bottom: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scope {
+    --home-tint: 0.01ms;
+    transition-duration: 0.01ms;
+  }
+}

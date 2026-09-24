@@ -1,0 +1,841 @@
+/* Homepage hero — "本季焦点".
+ *
+ * Geometry is the approved artboard's (1440 / 390 wide) minus the navbar,
+ * which in this phase still sits above the hero rather than over it: the
+ * artboard hero is 540px including a 64px header, so this one is 484px and its
+ * content starts 44px down — the same absolute positions on the page.
+ *
+ * Every @media block is at the END of the file: its rules have the same
+ * specificity as the ones they override and win on source order. */
+
+.hero {
+  position: relative;
+  height: 484px;
+  overflow: hidden;
+  color: #fff;
+}
+
+/* ── Ambient glow ──────────────────────────────────────────────────────────
+ * The focused cover, blurred into light. Confined to the hero and masked out
+ * well before its bottom edge, so the colour never bleeds into the section
+ * below — that section's ground is the page's, not this anime's glow. */
+.glow {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 50%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 50%, transparent 100%);
+}
+
+.glowInner {
+  position: absolute;
+  inset: -160px -140px;
+  filter: blur(90px) saturate(1.35);
+}
+
+.glowImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 1.4s var(--home-ease);
+}
+
+.glowImg[data-active="true"] {
+  opacity: 0.42;
+}
+
+.hero[data-entered="false"] .glow {
+  animation: fadeIn 1.8s var(--home-ease) backwards;
+}
+
+/* ── Banner ────────────────────────────────────────────────────────────────
+ * On the right, fading in from the left and out at the bottom. Two masks,
+ * intersected, so the left fade and the bottom fade multiply rather than one
+ * cutting a hard edge through the other. */
+.banner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 76.4%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(1.02);
+  transition:
+    opacity 0.9s var(--home-ease),
+    transform 0.9s var(--home-ease);
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent 0%, transparent 16%, #000 56%),
+    linear-gradient(180deg, #000 52%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(90deg, transparent 0%, transparent 16%, #000 56%),
+    linear-gradient(180deg, #000 52%, transparent 100%);
+  mask-composite: intersect;
+}
+
+.banner[data-active="true"] {
+  opacity: 1;
+  transform: scale(1);
+  transition:
+    opacity 1.1s var(--home-ease),
+    transform 1.6s var(--home-expo);
+}
+
+.bannerIn {
+  position: absolute;
+  inset: 0;
+}
+
+.hero[data-entered="false"] .banner[data-active="true"] .bannerIn {
+  animation: bannerIn 1.8s var(--home-expo) backwards;
+}
+
+/* Ken Burns — DESIGN.md's motion table allows it on the homepage banner.
+ * Paused, not removed, on the slides out of focus: removing it would snap an
+ * outgoing banner back to scale 1 in the middle of its fade. */
+.bannerImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+  animation: kenBurns 12s ease-in-out infinite alternate;
+}
+
+.banner:not([data-active="true"]) .bannerImg {
+  animation-play-state: paused;
+}
+
+/* A cover standing in for a missing banner is portrait art; show its upper
+ * part, where the faces are. */
+.bannerImg[data-cover="true"] {
+  object-position: center 22%;
+}
+
+.topShade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 120px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0) 100%);
+  pointer-events: none;
+}
+
+/* The left scrim that keeps the text legible over the glow and the banner's
+ * edge. It is the PAGE ground colour, painted as a solid and shaped by a mask,
+ * rather than a gradient of that colour: a gradient is an image and does not
+ * transition, a background-color does — so the scrim changes colour with the
+ * rest of the page instead of snapping. */
+.scrim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 66.7%;
+  background-color: var(--home-ground);
+  -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.5) 42%, transparent 100%);
+  mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.5) 42%, transparent 100%);
+  pointer-events: none;
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+/* ── Content ──────────────────────────────────────────────────────────────── */
+.content {
+  position: absolute;
+  top: 44px;
+  left: var(--home-gutter);
+  right: var(--home-gutter);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 28px;
+}
+
+.hero[data-entered="false"] .eyebrow {
+  animation: lineUp 0.95s var(--home-expo) 300ms backwards;
+}
+
+.eyebrowLabel {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: rgba(235, 235, 245, 0.66);
+}
+
+.bars {
+  display: flex;
+  align-items: center;
+}
+
+/* Each bar wears its own anime's colour: its line tone at rest, its text tone
+ * when in focus — so the row previews five palettes before any is picked. */
+.bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 26px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: width 0.45s var(--home-expo);
+}
+
+.bar[aria-pressed="true"] {
+  width: 38px;
+}
+
+.bar:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.barFill {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background-color: var(--bar-off);
+  transition: background-color 0.45s ease;
+}
+
+.bar[aria-pressed="true"] .barFill {
+  background-color: var(--bar-on);
+}
+
+.barTip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 3;
+  max-width: 260px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.3s var(--home-expo);
+}
+
+.bar:hover .barTip,
+.bar:focus-visible .barTip {
+  opacity: 1;
+  transform: none;
+}
+
+.stage {
+  position: relative;
+  height: 300px;
+}
+
+.covers {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  width: 196px;
+  height: 276px;
+}
+
+.hero[data-entered="false"] .covers {
+  animation: lineUp 0.95s var(--home-expo) 380ms backwards;
+}
+
+/* Cover pop: out-of-focus covers wait slightly shrunk and sheared, and the
+ * incoming one springs straight. The drop shadow is unconditional; the tinted
+ * glow is the anime's own tone, spread far negative so it reads as light
+ * rather than as a border (same rule as the detail page's .hero-cover). */
+.cover {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+  background-color: var(--tone-fill);
+  box-shadow:
+    0 18px 40px -14px rgba(0, 0, 0, 0.85),
+    0 0 48px -30px var(--tone);
+  opacity: 0;
+  transform: scale(0.9) skewY(2deg);
+  transition:
+    opacity 0.3s var(--home-ease),
+    transform 0.3s var(--home-ease);
+}
+
+.cover[data-active="true"] {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.7s var(--home-expo) 60ms,
+    transform 0.9s var(--home-expo) 60ms;
+}
+
+.slide {
+  position: absolute;
+  top: 0;
+  left: 226px;
+  width: min(560px, calc(100% - 226px));
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  visibility: hidden;
+  transition: visibility 0s linear 0.25s;
+}
+
+.slide[data-active="true"] {
+  visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+
+.head {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 34px;
+  line-height: 42px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.96);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* Per-token blur reveal. --td is the token's delay when its slide comes into
+ * focus, --ld its delay on the page's first paint. */
+.tok {
+  display: inline-block;
+  white-space: pre;
+  opacity: 0;
+  filter: blur(6px);
+  transition:
+    opacity 0.2s ease,
+    filter 0.2s ease;
+}
+
+.slide[data-active="true"] .tok {
+  opacity: 1;
+  filter: none;
+  transition:
+    opacity 0.5s ease var(--td),
+    filter 0.6s ease var(--td);
+}
+
+.hero[data-entered="false"] .slide[data-active="true"] .tok {
+  animation: tokenIn 0.7s ease var(--ld) backwards;
+}
+
+/* Lines slide in from the left, one after another. */
+.line {
+  opacity: 0;
+  transform: translateX(-16px);
+  transition:
+    opacity 0.22s var(--home-ease),
+    transform 0.22s var(--home-ease);
+}
+
+.slide[data-active="true"] .line {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.7s var(--home-expo) var(--line-delay),
+    transform 0.9s var(--home-expo) var(--line-delay);
+}
+
+.hero[data-entered="false"] .slide[data-active="true"] .line {
+  animation: lineUp 0.95s var(--home-expo) var(--line-entry) backwards;
+}
+
+.l1 {
+  --line-delay: 300ms;
+  --line-entry: 620ms;
+}
+
+.l2 {
+  --line-delay: 380ms;
+  --line-entry: 700ms;
+}
+
+.l3 {
+  --line-delay: 460ms;
+  --line-entry: 780ms;
+}
+
+.l4 {
+  --line-delay: 540ms;
+  --line-entry: 860ms;
+}
+
+.genres {
+  margin: 10px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 13.5px;
+  line-height: 20px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.8);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
+}
+
+.meta {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.score {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: 999px;
+  background-color: var(--tone-fill);
+  color: var(--tone);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13.5px;
+  color: rgba(235, 235, 245, 0.84);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
+}
+
+.statusLong,
+.statusShort {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.statusShort {
+  display: none;
+}
+
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  color: var(--tone);
+  background-color: currentColor;
+}
+
+.dot[data-live="true"] {
+  animation: ping 2.4s var(--home-ease) infinite;
+}
+
+.synopsis {
+  margin: 14px 0 0;
+  max-width: 520px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 23px;
+  color: rgba(235, 235, 245, 0.74);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
+}
+
+.actions {
+  margin-top: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The page's only solid button (DESIGN.md: one solid per page). The anime's
+ * tone as the fill, its hue at 15% lightness as the text: 8.8:1 or better at
+ * every hue (lib/home/tone.test.ts). */
+.solid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background-color: var(--tone);
+  color: var(--on-solid);
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+  transition:
+    filter 0.15s ease-out,
+    transform 0.15s ease-out;
+}
+
+.solid:hover {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+}
+
+.arrow {
+  transition: transform 0.25s var(--home-expo);
+}
+
+.solid:hover .arrow {
+  transform: translateX(3px);
+}
+
+.glass {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease-out,
+    border-color 0.15s ease-out,
+    transform 0.15s ease-out,
+    opacity 0.15s ease-out;
+}
+
+.glass:hover {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.glass[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.solid:focus-visible,
+.glass:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes bannerIn {
+  from {
+    scale: 1.06;
+    filter: opacity(0) brightness(0.4);
+  }
+}
+
+@keyframes kenBurns {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.07);
+  }
+}
+
+@keyframes tokenIn {
+  from {
+    filter: blur(8px) opacity(0);
+  }
+}
+
+@keyframes lineUp {
+  from {
+    translate: 0 18px;
+    filter: opacity(0);
+  }
+}
+
+@keyframes ping {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+/* ── Tablet ───────────────────────────────────────────────────────────────── */
+@media (min-width: 601px) and (max-width: 900px) {
+  .hero {
+    height: 440px;
+  }
+
+  .banner {
+    width: 100%;
+  }
+
+  .scrim {
+    width: 92%;
+  }
+
+  .covers {
+    top: 44px;
+    width: 150px;
+    height: 211px;
+  }
+
+  .slide {
+    left: 174px;
+    width: calc(100% - 174px);
+  }
+
+  .title {
+    font-size: 28px;
+    line-height: 36px;
+  }
+}
+
+/* ── Phone ────────────────────────────────────────────────────────────────
+ * Banner across the top, cover and title side by side under it, then the
+ * synopsis and the two buttons full width, and the bars last, centred and
+ * 44px tall so each is a real touch target. */
+@media (max-width: 600px) {
+  .hero {
+    height: 444px;
+  }
+
+  .glow {
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 55%, transparent 100%);
+    mask-image: linear-gradient(180deg, #000 0%, #000 55%, transparent 100%);
+  }
+
+  .glowInner {
+    inset: -110px -90px;
+    filter: blur(60px) saturate(1.35);
+  }
+
+  .glowImg[data-active="true"] {
+    opacity: 0.45;
+  }
+
+  .banner {
+    left: 0;
+    width: 100%;
+    height: 260px;
+    transform: scale(1.03);
+    -webkit-mask-image: linear-gradient(180deg, #000 40%, transparent 100%);
+    -webkit-mask-composite: source-over;
+    mask-image: linear-gradient(180deg, #000 40%, transparent 100%);
+    mask-composite: add;
+  }
+
+  .scrim {
+    display: none;
+  }
+
+  .topShade {
+    height: 110px;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0) 100%);
+  }
+
+  .content {
+    top: 80px;
+    gap: 12px;
+  }
+
+  .eyebrow {
+    order: 2;
+    justify-content: center;
+    height: auto;
+  }
+
+  .eyebrowLabel {
+    display: none;
+  }
+
+  .bar {
+    width: 36px;
+    height: 44px;
+    padding: 0 7px;
+    border-radius: 8px;
+  }
+
+  .bar[aria-pressed="true"] {
+    width: 50px;
+  }
+
+  .barTip {
+    display: none;
+  }
+
+  .stage {
+    height: 290px;
+  }
+
+  .covers {
+    top: 0;
+    width: 106px;
+    height: 150px;
+  }
+
+  .cover {
+    border-radius: 8px;
+    box-shadow:
+      0 16px 36px -14px rgba(0, 0, 0, 0.85),
+      0 0 40px -26px var(--tone);
+  }
+
+  /* Two columns: the cover's column is left empty in the first row (the cover
+   * stack sits there), the synopsis and the buttons span both. */
+  .slide {
+    left: 0;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 106px minmax(0, 1fr);
+    grid-template-rows: 150px auto auto;
+    column-gap: 14px;
+    align-content: start;
+  }
+
+  .head {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+  }
+
+  .title {
+    font-size: 20px;
+    line-height: 26px;
+  }
+
+  .genres {
+    margin-top: 6px;
+    gap: 2px 10px;
+    font-size: 12.5px;
+    line-height: 18px;
+  }
+
+  .meta {
+    margin-top: 8px;
+    gap: 10px;
+  }
+
+  .score {
+    height: 24px;
+    padding: 0 9px 0 7px;
+    gap: 4px;
+    font-size: 12.5px;
+  }
+
+  .status {
+    gap: 6px;
+    font-size: 12.5px;
+  }
+
+  .statusLong {
+    display: none;
+  }
+
+  .statusShort {
+    display: inline;
+  }
+
+  .synopsis {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin-top: 14px;
+    max-width: none;
+    height: 66px;
+    font-size: 13.5px;
+    line-height: 22px;
+    color: rgba(235, 235, 245, 0.76);
+  }
+
+  .actions {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    margin-top: 16px;
+  }
+
+  .solid,
+  .glass {
+    flex: 1;
+    height: 44px;
+    padding: 0 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero *,
+  .hero *::before,
+  .hero *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+}
