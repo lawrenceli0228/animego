@@ -1,0 +1,24 @@
+/* 完结佳作 beside 年度榜: one row on a wide screen (760px + the rest), stacked
+ * below 1100px. On a phone 完结佳作 is hidden (GemsPanel.module.css), so the
+ * row is just the ranking list. */
+.pair {
+  margin-top: 80px;
+  padding-inline: var(--home-gutter);
+  display: grid;
+  grid-template-columns: minmax(0, 760fr) minmax(0, 460fr);
+  gap: 60px;
+}
+
+@media (max-width: 1100px) {
+  .pair {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 64px;
+  }
+}
+
+@media (max-width: 600px) {
+  .pair {
+    margin-top: 44px;
+    gap: 0;
+  }
+}

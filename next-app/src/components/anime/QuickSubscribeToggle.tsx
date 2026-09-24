@@ -140,12 +140,7 @@ function pillStyle(
   };
 }
 
-import {
-  detailTarget,
-  loginTarget,
-  quickSubscribeMode,
-  type QuickSubscribeMode,
-} from "./quickSubscribeState";
+import { detailTarget } from "./quickSubscribeState";
 
 // Re-exported so this file stays the feature's public face.
 export {
