@@ -20,7 +20,7 @@ interface LibraryExplainerProps {
 export default function LibraryExplainer({ dict, variant, seasonHref }: LibraryExplainerProps) {
   const steps = [dict.home.libraryStep1, dict.home.libraryStep2, dict.home.libraryStep3];
   return (
-    <section className={`${section.section} ${styles.first}`} aria-labelledby="home-library">
+    <section className={`${section.section} ${section.first}`} aria-labelledby="home-library">
       <SectionHeader id="home-library" title={dict.nav.library} note={dict.home.librarySub} />
       <div className={styles.explainer}>
         <div className={styles.pitch}>

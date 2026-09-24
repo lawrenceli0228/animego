@@ -11,6 +11,15 @@
   padding-inline: var(--home-gutter);
 }
 
+/* The first section under the hero sits closer to it. Declared here, beside
+ * the rule it modifies, rather than in the section's own module: two
+ * single-class rules from different modules tie on specificity and the winner
+ * is whichever stylesheet happens to load last — which differs between dev
+ * and a production build. */
+.first {
+  margin-top: 36px;
+}
+
 /* A section whose content scrolls sideways to the viewport edge keeps its
  * header in the gutter but lets the rail run edge to edge. */
 .bleed {
@@ -112,7 +121,7 @@
 
 .empty {
   margin: 20px 0 0;
-  padding: 28px 0;
+  padding-block: 28px;
   font-size: 14px;
   color: rgba(235, 235, 245, 0.58);
 }
@@ -133,6 +142,10 @@
   .section,
   .bleed {
     margin-top: 44px;
+  }
+
+  .first {
+    margin-top: 36px;
   }
 
   .head {

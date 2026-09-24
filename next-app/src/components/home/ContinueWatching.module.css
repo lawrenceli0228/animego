@@ -1,10 +1,6 @@
 /* 继续看 (signed in) and 我的库 (visitor) — the section right under the hero.
  * Shared by components/anime/ContinueWatching.tsx and LibraryExplainer.tsx. */
 
-.first {
-  margin-top: 36px;
-}
-
 /* ── 继续看 ─────────────────────────────────────────────────────────────── */
 .row {
   margin-top: 20px;
@@ -432,10 +428,6 @@
 /* Phone: the large card shrinks to 150px, the compact cards become list rows,
  * the explainer's steps become a numbered list. */
 @media (max-width: 600px) {
-  .first {
-    margin-top: 36px;
-  }
-
   .row {
     margin-top: 12px;
     display: flex;

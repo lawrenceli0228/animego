@@ -167,7 +167,7 @@ export default function ContinueWatching({ items, loggedOut, dict, lang, nowMs, 
   const [first, ...rest] = items.slice(0, SHOWN);
   return (
     <SignedOutGate signedOut={visitor}>
-      <section className={`${section.section} ${styles.first}`} aria-labelledby="home-continue">
+      <section className={`${section.section} ${section.first}`} aria-labelledby="home-continue">
         <SectionHeader
           id="home-continue"
           title={dict.home.continueTitle}
