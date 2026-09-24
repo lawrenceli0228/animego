@@ -105,12 +105,6 @@
   color: rgba(235, 235, 245, 0.6);
 }
 
-@media (max-width: 900px) {
-  .page {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 /* The approved phone layout drops this section to keep the page short; 年度榜
  * carries the "good finished shows" role there. */
 @media (max-width: 600px) {

@@ -148,7 +148,7 @@ function Compact({ c, dict, lang, nowMs }: { c: ContinueCard; dict: Dict; lang: 
           <Bar c={c} />
         </span>
       </span>
-      <span className={cards.rule} aria-hidden />
+      <span className={`${cards.rule} ${styles.compactRule}`} aria-hidden />
     </Link>
   );
 }

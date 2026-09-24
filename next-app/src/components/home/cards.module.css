@@ -1,5 +1,10 @@
 /* The poster card vocabulary every homepage section shares.
  *
+ * The base rules are wrapped in :where(), which has zero specificity, so a
+ * section's own module can override any of them (a row instead of a column, a
+ * different radius) without depending on which CSS module happens to load
+ * first. Equal-specificity overrides silently flip with import order.
+ *
  * A card link sets `color: var(--tone)` — its own anime's tone, written inline
  * on the card element as a finished oklch() string (lib/home/tone.ts). Text
  * inside sets its own colour, so `currentColor` is free to mean "this anime":
@@ -9,7 +14,7 @@
  * inline `transition: opacity` on the image, which would override a transform
  * transition declared here and make the zoom jump instead of ease. */
 
-.card {
+:where(.card) {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -25,7 +30,7 @@
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
-.cover {
+:where(.cover) {
   position: relative;
   overflow: hidden;
   border-radius: 10px;
@@ -35,14 +40,14 @@
     box-shadow 0.35s var(--home-expo);
 }
 
-.zoom {
+:where(.zoom) {
   position: absolute;
   inset: 0;
   display: block;
   transition: transform 0.9s var(--home-expo);
 }
 
-.img {
+:where(.img) {
   position: absolute;
   inset: 0;
   display: block;
@@ -53,7 +58,7 @@
 
 /* The card's own tone as a thin rule along the cover's bottom edge. Line
  * tone, not text tone: it is a mark, not a word (3:1 non-text at every hue). */
-.rule {
+:where(.rule) {
   position: absolute;
   left: 0;
   right: 0;
@@ -62,30 +67,30 @@
   background-color: var(--tone-line);
 }
 
-.title {
+:where(.title) {
   color: rgba(255, 255, 255, 0.94);
   font-weight: 600;
   overflow-wrap: anywhere;
   transition: color 0.25s ease-out;
 }
 
-.clamp1,
-.clamp2 {
+:where(.clamp1),
+:where(.clamp2) {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
 }
 
-.clamp1 {
+:where(.clamp1) {
   -webkit-line-clamp: 1;
 }
 
-.clamp2 {
+:where(.clamp2) {
   -webkit-line-clamp: 2;
 }
 
-.meta {
+:where(.meta) {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -96,7 +101,7 @@
   color: rgba(235, 235, 245, 0.62);
 }
 
-.score {
+:where(.score) {
   flex: none;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -105,7 +110,7 @@
   color: var(--tone);
 }
 
-.mono {
+:where(.mono) {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }

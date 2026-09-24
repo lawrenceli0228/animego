@@ -498,6 +498,11 @@
     border-radius: 5px;
   }
 
+  /* A list row, not a card: no tone rule along its bottom edge. */
+  .compactRule {
+    display: none;
+  }
+
   .compactBody {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

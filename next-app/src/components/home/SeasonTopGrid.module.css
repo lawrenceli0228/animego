@@ -169,6 +169,11 @@
     gap: 24px 16px;
   }
 
+  /* Three full rows at three columns. */
+  .item:nth-child(n + 10) {
+    display: none;
+  }
+
   .item:nth-child(4n + 3) .pop,
   .item:nth-child(4n) .pop {
     left: calc(100% + 14px);
