@@ -10,7 +10,7 @@
 
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { HueFamilyKey } from "@/lib/home/hueFamilies";
 import { cardToneVars, toneLadder } from "@/lib/home/tone";
 import type { HueCard } from "@/lib/home/viewModels";
@@ -43,12 +43,25 @@ type Vars = CSSProperties & Record<`--${string}`, string>;
 
 export default function HueBrowser({ title, note, groupLabel, countTemplate, families, defaultKey }: HueBrowserProps) {
   const [selected, setSelected] = useState<HueFamilyKey>(defaultKey);
+  const pillsRef = useRef<HTMLDivElement | null>(null);
+
+  // On a phone the pills scroll sideways, and the default (largest) family
+  // can start off-screen. Bring its pill into the row's view on arrival — by
+  // scrolling the row itself, never scrollIntoView, which would move the page.
+  useEffect(() => {
+    const row = pillsRef.current;
+    const pill = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (!row || !pill || row.scrollWidth <= row.clientWidth) return;
+    if (pill.offsetLeft + pill.offsetWidth <= row.clientWidth) return;
+    row.scrollLeft = pill.offsetLeft - 20;
+  }, []);
+
   if (families.length === 0) return null;
 
   return (
     <section className={section.bleed} aria-labelledby="home-hue">
       <SectionHeader id="home-hue" title={title} note={note} />
-      <div className={styles.pills} role="group" aria-label={groupLabel}>
+      <div ref={pillsRef} className={styles.pills} role="group" aria-label={groupLabel}>
         {families.map((f) => {
           const tone = toneLadder(f.hue);
           const vars: Vars = { "--pill-tone": tone.text, "--pill-fill": tone.fill, "--pill-line": tone.line };
