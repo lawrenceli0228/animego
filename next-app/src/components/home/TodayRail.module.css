@@ -1,0 +1,238 @@
+/* 今日更新 rail. Runs from the content gutter to the viewport edge, so the
+ * rail visibly continues rather than stopping at a column line. */
+
+.rail {
+  margin-top: 16px;
+  display: flex;
+  gap: 16px;
+  padding: 8px var(--home-gutter) 4px;
+  scroll-padding-inline: var(--home-gutter);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.rail::-webkit-scrollbar {
+  display: none;
+}
+
+.empty {
+  padding-inline: var(--home-gutter);
+}
+
+.card {
+  flex: none;
+  width: 148px;
+  gap: 10px;
+}
+
+.cover {
+  width: 148px;
+  height: 197px;
+}
+
+.fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 88px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.84) 100%);
+}
+
+.badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Due within the hour: the badge takes the anime's tone and pings. */
+.soon {
+  gap: 6px;
+  padding: 0 8px;
+  background: rgba(0, 0, 0, 0.76);
+  color: var(--tone);
+}
+
+.ping {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: currentColor;
+  animation: ping 2.4s var(--home-ease) infinite;
+}
+
+.when {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #fff;
+}
+
+.title {
+  height: 38px;
+  font-size: 13.5px;
+  line-height: 19px;
+}
+
+/* ── The "now" marker ───────────────────────────────────────────────────── */
+.now {
+  flex: none;
+  width: 44px;
+  height: 197px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--home-tone);
+  transition: color var(--home-tint) var(--home-ease);
+}
+
+.nowLabel {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.nowTime {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.nowDot {
+  flex: none;
+  margin-top: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background-color: currentColor;
+  animation: ping 2.4s var(--home-ease) infinite;
+}
+
+.nowLine {
+  flex-grow: 1;
+  margin-top: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background-color: var(--home-tone-line);
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+/* ── Phone: the aired half folds into one tile ───────────────────────────── */
+.airedTile {
+  display: none;
+}
+
+.thumbs {
+  display: flex;
+  padding-left: 20px;
+}
+
+.thumb {
+  display: block;
+  width: 40px;
+  height: 56px;
+  margin-left: -20px;
+  border-radius: 5px;
+  object-fit: cover;
+  box-shadow: 0 0 0 2px var(--home-surface);
+}
+
+.airedCount {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.airedRange {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: rgba(235, 235, 245, 0.62);
+}
+
+.airedToggle {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--home-tone);
+}
+
+@keyframes ping {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+@media (max-width: 600px) {
+  .rail {
+    margin-top: 12px;
+    gap: 12px;
+    scroll-snap-type: x proximity;
+  }
+
+  .card,
+  .now,
+  .airedTile {
+    scroll-snap-align: start;
+  }
+
+  .airedTile {
+    flex: none;
+    width: 104px;
+    height: 197px;
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    background-color: var(--home-surface);
+    color: #fff;
+    font: inherit;
+    cursor: pointer;
+    transition: background-color var(--home-tint) var(--home-ease);
+  }
+
+  .airedTile:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+  }
+
+  .rail[data-aired="collapsed"] .card[data-state="aired"] {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ping,
+  .nowDot {
+    animation: none;
+  }
+}

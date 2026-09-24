@@ -1,0 +1,129 @@
+/* 完结佳作: two columns of horizontal cards, 3 rows. The section is the left
+ * half of a row it shares with 年度榜 (see page.module.css). */
+
+.section {
+  min-width: 0;
+}
+
+.refreshIcon {
+  display: inline-flex;
+  transition: transform 0.6s var(--home-expo);
+}
+
+/* Both pages share one grid cell, so the stage keeps its height while they
+ * crossfade. */
+.stage {
+  margin-top: 24px;
+  display: grid;
+}
+
+.page {
+  grid-area: 1 / 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 16px 20px;
+  visibility: hidden;
+  transition: visibility 0s linear 0.3s;
+}
+
+.page[data-active="true"] {
+  visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+
+.card {
+  flex-direction: row;
+  gap: 16px;
+  height: 136px;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 0.25s var(--home-ease),
+    transform 0.25s var(--home-ease);
+}
+
+.page[data-active="true"] .card {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.55s var(--home-ease) var(--stagger),
+    transform 0.8s var(--home-expo) var(--stagger);
+}
+
+.cover {
+  flex: none;
+  width: 96px;
+  height: 136px;
+  border-radius: 8px;
+}
+
+.body {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0 2px;
+}
+
+.title {
+  font-size: 15px;
+  line-height: 21px;
+}
+
+.native {
+  font-family: var(--font-jp);
+  font-size: 12px;
+  line-height: 17px;
+  color: rgba(235, 235, 245, 0.6);
+}
+
+.meta {
+  font-size: 12px;
+  line-height: 17px;
+  color: rgba(235, 235, 245, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.score {
+  margin-top: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.scoreValue {
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--tone);
+}
+
+.scoreSource {
+  font-size: 11.5px;
+  color: rgba(235, 235, 245, 0.6);
+}
+
+@media (max-width: 900px) {
+  .page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The approved phone layout drops this section to keep the page short; 年度榜
+ * carries the "good finished shows" role there. */
+@media (max-width: 600px) {
+  .section {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .page[data-active="true"] .card,
+  .refreshIcon {
+    transition-duration: 0.01ms;
+    transition-delay: 0s;
+  }
+}

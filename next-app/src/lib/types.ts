@@ -133,6 +133,15 @@ export interface SeasonalAnime {
   // (P8.5/P9) lands, either the seasonal handler grows a genre join or
   // this field stays optional and the filter quietly no-ops.
   genres?: string[] | null;
+  // Also on the wire (GetSeasonalAnimeRow) and read by the homepage hero:
+  // optional because older responses and the cold-start path may omit them.
+  bannerImageUrl?: string | null;
+  bangumiScore?: number | null;
+  description?: string | null;
+  descriptionCn?: string | null;
+  descriptionCnSource?: string | null;
+  descriptionHant?: string | null;
+  descriptionHantSource?: string | null;
 }
 
 // ─── Community discovery (/api/community/discussions/trending) ───
@@ -433,6 +442,14 @@ export interface WatchingItem {
   titleHantSeo?: string | null;
   coverImageUrl: string | null;
   lastWatchedAt: string | null;
+  // Sent by go-api's listItem all along (subscriptions/types.go); declared
+  // now because the homepage's 继续看 paints the banner and the anime's tone.
+  bannerImageUrl?: string | null;
+  posterAccent?: string | null;
+  season?: string | null;
+  seasonYear?: number | null;
+  format?: string | null;
+  animeStatus?: string | null;
 }
 
 // ─── Activity feed (/api/feed) — requires session ─────────────────
