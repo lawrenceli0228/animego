@@ -16,7 +16,7 @@ import { seasonYearLabel } from "@/lib/contentLabels";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
 import type { Dict } from "@/lib/i18n";
 import { upcomingAiring } from "@/lib/home/heroStatus";
-import { defaultFamily, groupByHueFamily, type HueFamilyKey } from "@/lib/home/hueFamilies";
+import { colouredFirst, defaultFamily, groupByHueFamily, type HueFamilyKey } from "@/lib/home/hueFamilies";
 import { dayHeader, fillTemplate } from "@/lib/home/time";
 import { todayScheduleItems } from "@/lib/home/todaySlots";
 import {
@@ -314,7 +314,12 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
   const airingsFor = (id: number) =>
     scheduleRows.filter((r) => r.anilistId === id).map((r) => ({ at: r.airingAt * 1000, ep: r.episode }));
 
-  const slides = seasonal.rows.slice(0, HERO_COUNT).map((row) => heroSlide(row, scheduleRows, lang));
+  // Still the season's top five, but the hero opens on a coloured one: its
+  // first slide paints the whole page, and a colourless cover would open the
+  // homepage grey.
+  const slides = colouredFirst(
+    seasonal.rows.slice(0, HERO_COUNT).map((row) => heroSlide(row, scheduleRows, lang)),
+  );
   const seasonTop = seasonal.rows
     .slice(0, SEASON_TOP_COUNT)
     .map((row) => seasonCard(row, upcomingAiring(airingsFor(row.anilistId), nowMs), lang, epCopy));

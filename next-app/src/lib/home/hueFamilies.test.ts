@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { HUE_FAMILIES, defaultFamily, groupByHueFamily, hueFamilyOf } from "./hueFamilies";
+import { HUE_FAMILIES, colouredFirst, defaultFamily, groupByHueFamily, hueFamilyOf } from "./hueFamilies";
 
 // "按色调逛" groups the season by the hue of each cover. The ranges are half-open
 // [lo, hi) and red wraps through 0°, which is exactly where an off-by-one would
@@ -93,5 +93,39 @@ describe("defaultFamily", () => {
 
   test("is null when nothing has a hue", () => {
     expect(defaultFamily([])).toBeNull();
+  });
+});
+
+// The hero opens on its first slide, and that slide's colour is the page's
+// colour. A colourless first slide makes the whole homepage open grey — the
+// one thing the hue design exists to avoid.
+describe("colouredFirst", () => {
+  const item = (id: number, hue: number | null) => ({ id, hue });
+
+  test("moves colourless items behind coloured ones, keeping each group's order", () => {
+    const ranked = [item(1, null), item(2, 200), item(3, null), item(4, 30), item(5, 120)];
+    expect(colouredFirst(ranked).map((x) => x.id)).toEqual([2, 4, 5, 1, 3]);
+  });
+
+  test("leaves an already coloured-first list untouched", () => {
+    const ranked = [item(1, 10), item(2, 20), item(3, null)];
+    expect(colouredFirst(ranked).map((x) => x.id)).toEqual([1, 2, 3]);
+  });
+
+  test("an all-colourless list keeps its order", () => {
+    const ranked = [item(1, null), item(2, null)];
+    expect(colouredFirst(ranked).map((x) => x.id)).toEqual([1, 2]);
+  });
+
+  test("hue 0 is a colour, not a missing one", () => {
+    const ranked = [item(1, null), item(2, 0)];
+    expect(colouredFirst(ranked).map((x) => x.id)).toEqual([2, 1]);
+  });
+
+  test("returns a new array and does not reorder the input", () => {
+    const ranked = [item(1, null), item(2, 200)];
+    const out = colouredFirst(ranked);
+    expect(out).not.toBe(ranked);
+    expect(ranked.map((x) => x.id)).toEqual([1, 2]);
   });
 });

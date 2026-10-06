@@ -78,3 +78,12 @@ export function defaultFamily(groups: ReadonlyArray<{ key: HueFamilyKey; items: 
   }
   return best?.key ?? null;
 }
+
+/**
+ * Coloured items first, colourless ones after, each group in its original
+ * order. The hero opens on its first slide and that slide paints the whole
+ * page, so a colourless first slide opens the homepage grey.
+ */
+export function colouredFirst<T extends { hue: number | null }>(items: readonly T[]): T[] {
+  return [...items.filter((x) => x.hue !== null), ...items.filter((x) => x.hue === null)];
+}

@@ -826,6 +826,8 @@ grid-template-columns: var(--hero-cover-w) minmax(0, 1fr);
 
 ### hero
 
+- 本季评分前五部，**有色相的排在前面**（`colouredFirst`）：第一张决定整页的颜色，
+  无色相的封面打头会让首页一打开就是灰的。
 - **没有自动轮播**（Don't 一节）。五条短条切换，每条是它那部番自己的颜色；
   支持方向键。五张全部常驻叠放，切换只有 CSS 过渡，不重新挂载；未聚焦过的
   banner 不下载。`prefers-reduced-motion` 关掉全部动画和过渡。
