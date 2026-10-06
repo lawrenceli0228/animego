@@ -18,7 +18,7 @@
 
 **数据。** `page.tsx` 把「正在追」列表和其它接口一起并发拉，不多一次往返；仍是 `force-dynamic` SSR，客户端只有界面状态。每个区块拿到的是服务端算好的精简卡片数据（`lib/home/viewModels.ts`），不是整行 API 数据。`lib/types.ts` 补上了 go-api 早就在发的字段（订阅上的横幅、强调色、番剧状态；季度行上的横幅、Bangumi 评分和简介通道）。新文案 54 个键进了全部六个词典。
 
-**撤下的东西。** 「正在热议」和动态流离开首页（组件还在）。通往 `/welcome` 的那张卡就在「正在热议」板块里，所以**首页上现在没有任何指向 `/welcome` 的链接**。★ 目前没有别的页面渲染 `HotDiscussions`，所以部署后 `hot_discussions_impression`、热议点击和 welcome 卡的两条社区埋点都不会再发出，后台对应的曲线会归零——这是撤掉板块的直接结果，不是埋点坏了。`HeroCarousel`、`TrendingSection`、`CompletedGems`、`SeasonRankings`、`RankingMeta`、`WatchingEmptySwap` 没有别的使用者，删除。
+**撤下的东西。** 「正在热议」和动态流离开首页（组件还在）。首页正文里通往 `/welcome` 的那张卡就在「正在热议」板块里，跟着一起撤下；`/welcome` 仍可从导航栏的「关于」和页脚进入。★ 目前没有别的页面渲染 `HotDiscussions`，所以部署后 `hot_discussions_impression`、热议点击和 welcome 卡的两条社区埋点都不会再发出，后台对应的曲线会归零——这是撤掉板块的直接结果，不是埋点坏了。`HeroCarousel`、`TrendingSection`、`CompletedGems`、`SeasonRankings`、`RankingMeta`、`WatchingEmptySwap` 没有别的使用者，删除。
 
 追番按钮和海报角上的 + 走同一条流程：写入、带撤销的提示、未登录跳 `/login` 再回来，都抽进了 `useQuickSubscribe`，`QuickSubscribeToggle` 外观不变。一处行为变化：订阅列表还没加载完时按下去，现在是忽略，不再当成未登录。
 
