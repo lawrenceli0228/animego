@@ -120,27 +120,28 @@ export function useHeroRotation({ rootRef, count, current, onPreload, onAdvance 
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
-  // The mouse over the hero: hold. Native pointerenter / pointerleave on the
-  // element, not React's onPointerEnter / onPointerLeave. React emulates those
-  // from pointerover / pointerout, and when the node under the cursor is
-  // replaced — the pause button swaps its icon on click, 追番 turns into 已追 —
-  // the next pointerout comes from a node React has already unmounted, so it
-  // dispatches no leave at all: the hero stayed held after the reader pressed
-  // play and moved away. The browser's own leave follows the hover chain.
-  // Touch is not hover.
+  // The mouse over the hero: hold. Judged by the element the mouse is over now
+  // (a pointerover anywhere on the document), not by waiting for the hero to
+  // be left. When the node under the cursor is replaced — the pause button
+  // swaps its icon on click, 追番 turns into 已追 — Chromium can skip the
+  // hero's pointerleave on the next move altogether (native or React's), and
+  // a hold waiting for it never lets go: the hero stayed still after the
+  // reader pressed play and moved away. The pointerover on the new target is
+  // always sent. The hero's own leave still covers the mouse leaving the
+  // window, where there is no new target. Touch is not hover.
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const enter = (e: PointerEvent) => {
-      if (e.pointerType !== "touch") setPointer(true);
+    const over = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") setPointer(e.target instanceof Node && el.contains(e.target));
     };
     const leave = (e: PointerEvent) => {
       if (e.pointerType !== "touch") setPointer(false);
     };
-    el.addEventListener("pointerenter", enter);
+    document.addEventListener("pointerover", over);
     el.addEventListener("pointerleave", leave);
     return () => {
-      el.removeEventListener("pointerenter", enter);
+      document.removeEventListener("pointerover", over);
       el.removeEventListener("pointerleave", leave);
     };
   }, [rootRef]);
