@@ -67,6 +67,22 @@ function focusRules(): Array<{ file: string; selector: string; body: string }> {
 
 const rules = focusRules();
 
+/**
+ * True when `:focus-visible` sits on the element the rule styles — the
+ * rightmost compound selector — rather than on an ancestor.
+ *
+ * `.bar:focus-visible .barTip { opacity: 1 }` reveals a tooltip while its bar
+ * has focus; it does not draw the bar's focus indicator, so demanding the ring
+ * inside it would paint a blue ring around the tooltip. The indicator for the
+ * bar is `.bar:focus-visible`, which this still checks.
+ */
+function focusIsSubject(selectorList: string): boolean {
+  return selectorList.split(",").some((selector) => {
+    const compounds = selector.trim().split(/\s*[>+~]\s*|\s+/);
+    return compounds[compounds.length - 1].includes(":focus-visible");
+  });
+}
+
 describe("the focus ring", () => {
   test("the scan finds rules at all (guards the parser, not the CSS)", () => {
     // Without this, a regex that quietly matched nothing would make every
@@ -76,6 +92,7 @@ describe("the focus ring", () => {
 
   test("every :focus-visible rule draws the one specified ring", () => {
     const wrong = rules
+      .filter((r) => focusIsSubject(r.selector))
       .filter((r) => !RING.test(r.body))
       .map((r) => `${r.file} — ${r.selector}`);
     expect(wrong).toEqual([]);
@@ -91,12 +108,26 @@ describe("the focus ring", () => {
   });
 
   test("no rule removes the indicator outright", () => {
-    // `outline: none` is fine in a rule that also draws the box-shadow ring;
-    // `box-shadow: none` inside a :focus-visible block is not.
+    // `box-shadow: none` inside a :focus-visible block takes the ring away.
+    // Clearing the outline is the subject of the forced-colors test below.
     const removed = rules
       .filter((r) => /box-shadow\s*:\s*none/.test(r.body))
       .map((r) => `${r.file} — ${r.selector}`);
     expect(removed).toEqual([]);
+  });
+
+  test("forced-colors mode still has an indicator", () => {
+    // Windows Contrast themes (forced-colors: active) force box-shadow to
+    // none, so a rule whose only indicator is the ring shows nothing there.
+    // `outline: none` / `outline: 0` throws away the one thing the browser
+    // could still paint. `outline: 2px solid transparent` keeps an outline
+    // that is invisible normally and drawn in the system colour in that mode
+    // (Button.module.css) — the ring above stays the visible indicator.
+    const bare = rules
+      .filter((r) => focusIsSubject(r.selector))
+      .filter((r) => /outline\s*:\s*(none|0)\s*(;|$)/.test(r.body))
+      .map((r) => `${r.file} — ${r.selector}`);
+    expect(bare).toEqual([]);
   });
 });
 

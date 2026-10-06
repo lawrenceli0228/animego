@@ -1,25 +1,45 @@
 import type { Metadata } from "next";
 import type { CSSProperties } from "react";
-import HeroCarousel from "@/components/anime/HeroCarousel";
-import TrendingSection from "@/components/home/TrendingSection";
 import ContinueWatching from "@/components/anime/ContinueWatching";
-import WeeklySchedule, {
-  type ScheduleResponse,
-} from "@/components/anime/WeeklySchedule";
-import CompletedGems from "@/components/home/CompletedGems";
-import ActivityFeed from "@/components/social/ActivityFeed";
-import HotDiscussions from "@/components/community/HotDiscussions";
-import SeasonRankings from "@/components/home/SeasonRankings";
+import { SubscriptionSetProvider } from "@/components/anime/SubscriptionSetProvider";
+import { currentSeasonHref } from "@/components/anime/continueWatchingState";
+import type { ScheduleItem, ScheduleResponse } from "@/components/anime/WeeklySchedule";
+import GemsPanel from "@/components/home/GemsPanel";
+import HomeHero from "@/components/home/HomeHero";
+import HomeHueScope from "@/components/home/HomeHueScope";
+import HueBrowser, { type HueFamilyView } from "@/components/home/HueBrowser";
+import SeasonTopGrid from "@/components/home/SeasonTopGrid";
+import TodayRail from "@/components/home/TodayRail";
+import TrendingRanks from "@/components/home/TrendingRanks";
+import YearTopList from "@/components/home/YearTopList";
+import { seasonYearLabel } from "@/lib/contentLabels";
 import { apiGet, apiGetPaged, ApiError } from "@/lib/api";
+import type { Dict } from "@/lib/i18n";
+import { upcomingAiring } from "@/lib/home/heroStatus";
+import { colouredFirst, defaultFamily, groupByHueFamily, type HueFamilyKey } from "@/lib/home/hueFamilies";
+import { dayHeader, fillTemplate } from "@/lib/home/time";
+import { todayScheduleItems } from "@/lib/home/todaySlots";
+import {
+  continueCard,
+  gemCard,
+  heroSlide,
+  hueCard,
+  seasonCard,
+  todayCard,
+  trendCard,
+  yearCard,
+  type ScheduleRow,
+} from "@/lib/home/viewModels";
+import { yearPath } from "@/lib/hubs/paths";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates, absoluteUrl, SITE_ORIGIN } from "@/lib/seo/alternates";
 import type {
   SeasonalAnime,
   TrendingItem,
+  WatchingItem,
   YearlyTopItem,
-  ApiPagedEnvelope,
-  HotDiscussion,
 } from "@/lib/types";
+import styles from "./page.module.css";
 
 // Phase 8.0: HomePage replaces the LandingPage at /. The marketing
 // page moved to /welcome.
@@ -29,9 +49,10 @@ import type {
 //   1. go-api is unreachable at `next build` (GO_API_INTERNAL_URL is a runtime
 //      env, not a build arg), so ISR would prerender an EMPTY homepage and keep
 //      serving it for the whole revalidate window after every deploy.
-//   2. ContinueWatching + ActivityFeed render the SIGNED-IN user's own data
-//      server-side (they read the session cookie via apiGet), so the page is
-//      genuinely per-user. Every load runs proxy.ts, which refreshes an
+//   2. 继续看 renders the SIGNED-IN user's own watching list server-side
+//      (the page reads the session cookie via apiGet), so the page is
+//      genuinely per-user. (ActivityFeed used to be the second such section;
+//      it left the homepage in the 2026-09 redesign.) Every load runs proxy.ts, which refreshes an
 //      expiring session server-side BEFORE this render — so the chrome shows
 //      logged-in without the client having to race a token refresh.
 //
@@ -56,38 +77,46 @@ function getCurrentSeason(): Season {
   return "FALL";
 }
 
-const EMPTY_PAGE: ApiPagedEnvelope<SeasonalAnime> = {
-  data: [],
-  total: 0,
-  page: 1,
-  hasMore: false,
-  nextPage: null,
-};
+// How much of the season one request brings back. The hero takes the top 5,
+// 本季高分 the top 12, and 按色调逛 groups all of them by colour — so this is
+// sized for the colour groups to have something in them, not for the grid.
+// The endpoint is score-ordered and already filters adult titles.
+const SEASON_ROWS = 48;
+const HERO_COUNT = 5;
+const SEASON_TOP_COUNT = 12;
+/** Per colour family: six show on a wide screen, the rest scroll on a phone. */
+const HUE_FAMILY_MAX = 10;
+const TRENDING_COUNT = 10;
+const COMPLETED_GEMS_LIMIT = 6;
+const YEAR_TOP_COUNT = 10;
 
 const EMPTY_SCHEDULE: ScheduleResponse = { today: "", groups: {} };
 
-async function safeSeasonal(
-  season: Season,
-  year: number,
-): Promise<ApiPagedEnvelope<SeasonalAnime>> {
+interface SeasonResult {
+  rows: SeasonalAnime[];
+  /** The whole season, for "本季全部 N 部" — not just the rows fetched. */
+  total: number;
+}
+
+async function safeSeasonal(season: Season, year: number): Promise<SeasonResult> {
   try {
-    return await apiGetPaged<SeasonalAnime>(
-      `/api/anime/seasonal?season=${season}&year=${year}&page=1`,
+    // /seasonal answers {data, pagination:{total}} — not the flat envelope
+    // ApiPagedEnvelope describes — so the total is read off `pagination`.
+    const body = (await apiGetPaged<SeasonalAnime>(
+      `/api/anime/seasonal?season=${season}&year=${year}&page=1&perPage=${SEASON_ROWS}`,
       { revalidate: 300 },
-    );
+    )) as unknown as { data?: SeasonalAnime[]; pagination?: { total?: number } };
+    const rows = Array.isArray(body.data) ? body.data : [];
+    return { rows, total: body.pagination?.total ?? rows.length };
   } catch (err) {
     console.warn("[HomePage] seasonal fetch failed:", err);
-    return EMPTY_PAGE;
+    return { rows: [], total: 0 };
   }
 }
 
 async function safeTrending(): Promise<TrendingItem[]> {
   try {
-    // 14, not 10. The grid is `repeat(auto-fill, minmax(160px, 1fr))`, so the
-    // extra four fill the row that ten already left ragged at most widths. The
-    // server needs nothing: Trending caches maxLimit (20) rows and slices to
-    // the per-request limit after the cache lookup, so this stays one fetch.
-    return await apiGet<TrendingItem[]>("/api/anime/trending?limit=14", {
+    return await apiGet<TrendingItem[]>(`/api/anime/trending?limit=${TRENDING_COUNT}`, {
       revalidate: 60,
     });
   } catch (err) {
@@ -96,24 +125,8 @@ async function safeTrending(): Promise<TrendingItem[]> {
   }
 }
 
-async function safeHotDiscussions(): Promise<HotDiscussion[]> {
-  try {
-    return await apiGet<HotDiscussion[]>(
-      "/api/community/discussions/trending?limit=6&windowHours=168",
-      { cache: "no-store" },
-    );
-  } catch (err) {
-    console.warn("[HomePage] hot discussions fetch failed:", err);
-    return [];
-  }
-}
-
-// Match legacy useCompletedGems(10) — 10 cards in a 5-col grid (3 mobile / 2
-// narrow). Endpoint returns a random sample per call; the component owns
-// "换一批" client-side refetch, so revalidate stays low to avoid serving
-// the same SSR cache for too long.
-const COMPLETED_GEMS_LIMIT = 10;
-
+// A random sample per call; the section's "换一批" fetches the next one from
+// the browser, so revalidate stays short.
 async function safeCompletedGems(): Promise<TrendingItem[]> {
   try {
     return await apiGet<TrendingItem[]>(
@@ -128,16 +141,8 @@ async function safeCompletedGems(): Promise<TrendingItem[]> {
   }
 }
 
-// /api/anime/schedule is a rolling 7-day window keyed off "today".
-// Mongo rotates the window every day, and within a day items get
-// re-scored / re-counted as enrichment lands. With revalidate=60 Next
-// 16 would serve a build-time static snapshot until the first stale
-// hit triggers a background regen — so per-day counts on the tab bar
-// (今天 18 / 周一 6 / ...) lag behind the legacy SPA by hours/days.
-// cache: "no-store" forces every RSC render to re-fetch and matches
-// the legacy useWeeklySchedule() React Query default (refetch on focus,
-// no long stale window). Cost is one upstream HTTP per page hit, which
-// the upstream nginx-cache layer can still absorb in prod.
+// /api/anime/schedule is a rolling 7-day window keyed off "today" and its
+// counts move within the day, so it is never served from a cache here.
 async function safeSchedule(): Promise<ScheduleResponse> {
   try {
     return await apiGet<ScheduleResponse>("/api/anime/schedule", {
@@ -152,7 +157,7 @@ async function safeSchedule(): Promise<ScheduleResponse> {
 async function safeYearlyTop(year: number): Promise<YearlyTopItem[]> {
   try {
     return await apiGet<YearlyTopItem[]>(
-      `/api/anime/yearly-top?year=${year}&limit=10`,
+      `/api/anime/yearly-top?year=${year}&limit=${YEAR_TOP_COUNT}`,
       { revalidate: 300 },
     );
   } catch (err) {
@@ -162,6 +167,50 @@ async function safeYearlyTop(year: number): Promise<YearlyTopItem[]> {
     return [];
   }
 }
+
+interface WatchingResult {
+  loggedOut: boolean;
+  items: WatchingItem[];
+}
+
+// The signed-in reader's own list, read with their session cookie on the
+// server (apiGet forwards it). Fetched here, alongside everything else, so it
+// does not become a second round trip after the page's own data. Any failure
+// reads as "not signed in", as it always has.
+async function safeWatching(): Promise<WatchingResult> {
+  try {
+    const items = await apiGet<WatchingItem[]>("/api/subscriptions?status=watching", {
+      cache: "no-store",
+    });
+    return { loggedOut: false, items: Array.isArray(items) ? items : [] };
+  } catch {
+    return { loggedOut: true, items: [] };
+  }
+}
+
+/**
+ * This request's render time.
+ *
+ * A helper rather than `Date.now()` in the component body, which
+ * react-hooks/purity rejects (same pattern as NotificationBell). A server
+ * component renders once per request here — the page is force-dynamic — so
+ * the value is simply "when this page was built". The clock-driven client
+ * parts (hero status, today rail) start from it, so their first paint and
+ * hydration agree, and switch to the browser's own clock after.
+ */
+function requestTime(): number {
+  return Date.now();
+}
+
+const HUE_LABEL_KEY: Record<HueFamilyKey, keyof Dict["home"]> = {
+  red: "hueRed",
+  orange: "hueOrange",
+  yellow: "hueYellow",
+  green: "hueGreen",
+  cyan: "hueCyan",
+  blue: "hueBlue",
+  purple: "huePurple",
+};
 
 // Visually-hidden style for the SEO <h1> — keeps the hero design intact
 // while giving the homepage a brand+category primary heading.
@@ -246,50 +295,111 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
   const season = getCurrentSeason();
   const year = new Date().getFullYear();
 
-  const [{ dict, lang }, seasonal, trending, hotDiscussions, gems, schedule, yearlyTop] =
+  const [{ dict, lang }, seasonal, trending, gems, schedule, yearlyTop, watching] =
     await Promise.all([
       resolveLocale(params),
       safeSeasonal(season, year),
       safeTrending(),
-      safeHotDiscussions(),
       safeCompletedGems(),
       safeSchedule(),
       safeYearlyTop(year),
+      safeWatching(),
     ]);
 
-  // Hero takes the top 5 of the current season. SeasonRankings is the
-  // 年度榜 (annual top 10) ranking list — not the same data set as the
-  // season grid, matches legacy client/src/components/home/SeasonRankings.jsx.
-  const heroList = seasonal.data.slice(0, 5);
+  const nowMs = requestTime();
+  const epCopy = { epUnit: dict.detail.epUnit, epUnitOne: dict.detail.epUnitOne };
+  const scheduleRows: ScheduleRow[] = Object.values(schedule.groups ?? {}).flatMap(
+    (items: ScheduleItem[] | undefined) => items ?? [],
+  );
+  const airingsFor = (id: number) =>
+    scheduleRows.filter((r) => r.anilistId === id).map((r) => ({ at: r.airingAt * 1000, ep: r.episode }));
+
+  // Still the season's top five, but the hero opens on a coloured one: its
+  // first slide paints the whole page, and a colourless cover would open the
+  // homepage grey.
+  const slides = colouredFirst(
+    seasonal.rows.slice(0, HERO_COUNT).map((row) => heroSlide(row, scheduleRows, lang)),
+  );
+  const seasonTop = seasonal.rows
+    .slice(0, SEASON_TOP_COUNT)
+    .map((row) => seasonCard(row, upcomingAiring(airingsFor(row.anilistId), nowMs), lang, epCopy));
+
+  const hueGroups = groupByHueFamily(seasonal.rows.map((row) => hueCard(row, lang)));
+  const families: HueFamilyView[] = hueGroups.map((g) => ({
+    key: g.key,
+    hue: g.hue,
+    label: dict.home[HUE_LABEL_KEY[g.key]] as string,
+    count: g.items.length,
+    items: g.items.slice(0, HUE_FAMILY_MAX),
+  }));
+  const hueCount = hueGroups.reduce((n, g) => n + g.items.length, 0);
+
+  const today = todayScheduleItems(schedule).map((row) => todayCard(row, lang));
+  const progress = Object.fromEntries(watching.items.map((w) => [w.anilistId, w.currentEpisode]));
+  const seasonName = seasonYearLabel(season, year, lang);
+  const seasonHref = currentSeasonHref();
 
   return (
-    <main>
+    <HomeHueScope hues={slides.map((s) => s.hue)}>
       {/* SEO: the homepage's primary heading is the brand + category, not
-          the rotating hero anime title (an <h2> inside HeroCarousel).
-          Visually hidden so the hero design is unchanged. */}
+          the focused anime's title (an <h2> inside the hero). Visually
+          hidden so the hero design is unchanged. */}
       <h1 style={SR_ONLY}>{dict.meta.homeH1}</h1>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(HOME_JSON_LD) }}
       />
-      <HeroCarousel animeList={heroList} dict={dict} lang={lang} />
-      <div
-        className="container"
-        style={{ paddingTop: 8, paddingBottom: 60 }}
-      >
-        <HotDiscussions items={hotDiscussions} />
-        <WeeklySchedule schedule={schedule} dict={dict} lang={lang} />
-        <TrendingSection items={trending} dict={dict} lang={lang} />
-        <ContinueWatching dict={dict} lang={lang} />
-        <CompletedGems
-          initialItems={gems}
-          dict={dict}
-          lang={lang}
-          limit={COMPLETED_GEMS_LIMIT}
+      {/* One subscription-set load backs the hero's 追番 button; anonymous
+          visitors cost zero requests (see SubscriptionSetProvider). */}
+      <SubscriptionSetProvider>
+        <HomeHero slides={slides} serverNowMs={nowMs} progress={progress} />
+      </SubscriptionSetProvider>
+      <ContinueWatching
+        items={watching.items.map((w) => continueCard(w, lang))}
+        loggedOut={watching.loggedOut}
+        dict={dict}
+        lang={lang}
+        nowMs={nowMs}
+        seasonHref={seasonHref}
+      />
+      {schedule.today ? (
+        <TodayRail
+          items={today}
+          dayKey={schedule.today}
+          dayLabel={dayHeader(schedule.today, lang)}
+          serverNowMs={nowMs}
         />
-        <ActivityFeed />
-        <SeasonRankings items={yearlyTop} dict={dict} lang={lang} />
+      ) : null}
+      <SeasonTopGrid
+        items={seasonTop}
+        dict={dict}
+        seasonLabel={seasonName}
+        seasonHref={seasonHref}
+        total={seasonal.total}
+      />
+      {families.length > 0 ? (
+        <HueBrowser
+          title={dict.home.hueTitle}
+          note={fillTemplate(dict.home.hueSub, { n: hueCount })}
+          groupLabel={dict.home.hueGroup}
+          countTemplate={dict.home.hueCount}
+          families={families}
+          defaultKey={defaultFamily(hueGroups) ?? families[0].key}
+        />
+      ) : null}
+      <TrendingRanks
+        items={trending.slice(0, TRENDING_COUNT).map((row) => trendCard(row, lang))}
+        dict={dict}
+      />
+      <div className={styles.pair}>
+        <GemsPanel initial={gems.map((row) => gemCard(row, lang, epCopy))} limit={COMPLETED_GEMS_LIMIT} />
+        <YearTopList
+          items={yearlyTop.slice(0, YEAR_TOP_COUNT).map((row, i) => yearCard(row, i + 1, lang))}
+          title={fillTemplate(dict.home.yearTopTitle, { year })}
+          note={dict.home.yearTopSub}
+          link={{ href: yearPath(year), label: dict.home.yearTopAll }}
+        />
       </div>
-    </main>
+    </HomeHueScope>
   );
 }

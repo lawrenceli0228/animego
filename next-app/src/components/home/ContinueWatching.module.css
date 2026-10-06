@@ -1,0 +1,630 @@
+/* 继续看 (signed in) and 我的库 (visitor) — the section right under the hero.
+ * Shared by components/anime/ContinueWatching.tsx and LibraryExplainer.tsx. */
+
+/* ── 继续看 ─────────────────────────────────────────────────────────────── */
+.row {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.feature {
+  position: relative;
+  display: block;
+  height: 212px;
+  overflow: hidden;
+  border-radius: 14px;
+  background-color: var(--tone-fill);
+}
+
+.featureArt {
+  position: absolute;
+  inset: 0;
+}
+
+.featureImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+  animation: kenBurns 12s ease-in-out infinite alternate;
+}
+
+.featureShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(8, 8, 10, 0.94) 0%, rgba(8, 8, 10, 0.8) 48%, rgba(8, 8, 10, 0.2) 100%);
+}
+
+.featureBody {
+  position: absolute;
+  top: 24px;
+  bottom: 24px;
+  left: 28px;
+  width: min(440px, calc(100% - 56px));
+  display: flex;
+  flex-direction: column;
+}
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgba(235, 235, 245, 0.84);
+}
+
+.featureTitle {
+  margin-top: 10px;
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.featureEp {
+  margin-top: 4px;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: rgba(235, 235, 245, 0.8);
+}
+
+.featureEpStrong {
+  flex: none;
+  font-weight: 600;
+  color: var(--tone);
+}
+
+.featureFoot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Looks like the glass button it stands for; it is the card link's label. */
+.featureCta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    background-color 0.15s ease-out,
+    border-color 0.15s ease-out;
+}
+
+.feature:hover .featureCta {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.featureProgress {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.track {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.fill {
+  display: block;
+  height: 3px;
+  background-color: var(--tone);
+  transform-origin: left center;
+  animation: grow 1.4s var(--home-expo) 0.4s backwards;
+}
+
+.progressText {
+  font-size: 11.5px;
+  color: rgba(235, 235, 245, 0.74);
+}
+
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  color: var(--tone);
+  background-color: currentColor;
+}
+
+.dot[data-live="true"] {
+  animation: ping 2.4s var(--home-ease) infinite;
+}
+
+.compact {
+  flex-direction: row;
+  gap: 14px;
+  height: 212px;
+  padding: 16px;
+  overflow: hidden;
+  border-radius: 14px;
+  background-color: var(--home-surface);
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+.compactCover {
+  flex: none;
+  width: 96px;
+  height: 136px;
+  border-radius: 8px;
+}
+
+.compactBody {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background-color: var(--tone-fill);
+  color: var(--tone);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.compactTitle {
+  margin-top: 10px;
+  font-size: 15px;
+  line-height: 21px;
+}
+
+.compactLine {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: rgba(235, 235, 245, 0.66);
+}
+
+.compactFoot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.compactFootRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  color: rgba(235, 235, 245, 0.62);
+}
+
+/* ── 我的库 explainer ────────────────────────────────────────────────────── */
+.explainer {
+  position: relative;
+  margin-top: 20px;
+  min-height: 212px;
+  padding: 28px 32px;
+  display: flex;
+  gap: 48px;
+  border-radius: 16px;
+  background-color: var(--home-surface);
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+.pitch {
+  flex: none;
+  width: min(452px, 45%);
+  display: flex;
+  flex-direction: column;
+}
+
+.pitchTitle {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.4;
+  font-weight: 700;
+  color: #fff;
+}
+
+.pitchBody {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(235, 235, 245, 0.66);
+}
+
+.ctas {
+  margin-top: auto;
+  padding-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.glassBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease-out,
+    border-color 0.15s ease-out,
+    transform 0.15s ease-out;
+}
+
+.glassBtn:hover {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.textLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 4px;
+  border-radius: 6px;
+  color: var(--home-tone);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    opacity 0.15s ease-out,
+    color var(--home-tint) var(--home-ease);
+}
+
+.textLink:hover {
+  opacity: 0.78;
+}
+
+.textLinkIcon {
+  transition: transform 0.25s var(--home-expo);
+}
+
+.textLink:hover .textLinkIcon {
+  transform: translateX(3px);
+}
+
+.glassBtn:focus-visible,
+.textLink:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.steps {
+  flex-grow: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
+}
+
+.step {
+  padding: 4px 24px 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stepNo {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--home-tone);
+  transition: color var(--home-tint) var(--home-ease);
+}
+
+.stepText {
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(235, 235, 245, 0.86);
+}
+
+.note {
+  position: absolute;
+  right: 32px;
+  bottom: 24px;
+  max-width: calc(55% - 80px);
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.58);
+  text-align: right;
+}
+
+@keyframes kenBurns {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.07);
+  }
+}
+
+@keyframes grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes ping {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+@media (max-width: 1100px) {
+  .row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .feature {
+    grid-column: 1 / -1;
+  }
+
+  .explainer {
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .pitch {
+    width: auto;
+  }
+
+  .step:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .note {
+    position: static;
+    max-width: none;
+    text-align: left;
+  }
+}
+
+/* Phone: the large card shrinks to 150px, the compact cards become list rows,
+ * the explainer's steps become a numbered list. */
+@media (max-width: 600px) {
+  .row {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .feature {
+    height: 150px;
+  }
+
+  .featureShade {
+    background: linear-gradient(90deg, rgba(8, 8, 10, 0.94) 0%, rgba(8, 8, 10, 0.78) 55%, rgba(8, 8, 10, 0.3) 100%);
+  }
+
+  .featureBody {
+    top: 14px;
+    bottom: 14px;
+    left: 16px;
+    width: calc(100% - 32px);
+  }
+
+  .kicker {
+    font-size: 11.5px;
+  }
+
+  .featureTitle {
+    margin-top: 8px;
+    font-size: 17px;
+    line-height: 24px;
+  }
+
+  .featureEp {
+    margin-top: 2px;
+    font-size: 13px;
+  }
+
+  .featureFoot {
+    gap: 12px;
+  }
+
+  .featureCta {
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .compact {
+    height: 56px;
+    padding: 0;
+    gap: 12px;
+    align-items: center;
+    border-radius: 0;
+    background-color: transparent;
+  }
+
+  .compactCover {
+    width: 36px;
+    height: 50px;
+    border-radius: 5px;
+  }
+
+  /* A list row, not a card: no tone rule along its bottom edge. */
+  .compactRule {
+    display: none;
+  }
+
+  .compactBody {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    column-gap: 10px;
+    align-items: center;
+  }
+
+  .chip {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    height: 24px;
+  }
+
+  .compactTitle {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 0;
+    font-size: 14px;
+    line-height: 20px;
+    -webkit-line-clamp: 1;
+  }
+
+  .compactLine {
+    display: none;
+  }
+
+  .compactFoot {
+    grid-column: 1;
+    grid-row: 2;
+    margin-top: 2px;
+    gap: 0;
+  }
+
+  .compactFoot .track {
+    display: none;
+  }
+
+  .compactFootRow {
+    justify-content: flex-start;
+    font-size: 12px;
+    color: rgba(235, 235, 245, 0.64);
+  }
+
+  .compact .compactCover + .compactBody {
+    min-height: 0;
+  }
+
+  .explainer {
+    margin-top: 12px;
+    padding: 18px;
+    gap: 14px;
+  }
+
+  .pitchTitle {
+    font-size: 17px;
+    line-height: 25px;
+  }
+
+  .pitchBody {
+    display: none;
+  }
+
+  .steps {
+    order: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .step,
+  .step:first-child {
+    flex-direction: row;
+    gap: 10px;
+    padding: 0;
+    border-left: 0;
+  }
+
+  .stepNo {
+    flex: none;
+    width: 18px;
+    letter-spacing: 0;
+  }
+
+  .stepText {
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .pitch {
+    display: contents;
+  }
+
+  .pitchTitle {
+    order: 0;
+  }
+
+  .ctas {
+    order: 2;
+    margin-top: 4px;
+    padding-top: 0;
+    gap: 10px;
+  }
+
+  .glassBtn {
+    flex: 1;
+  }
+
+  /* The player needs the File System Access API, which no phone browser has. */
+  .textLink {
+    display: none;
+  }
+
+  .textLinkAlways {
+    display: inline-flex;
+  }
+
+  .note {
+    order: 3;
+    font-size: 11.5px;
+    line-height: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .featureImg,
+  .fill,
+  .dot[data-live="true"] {
+    animation: none;
+  }
+}

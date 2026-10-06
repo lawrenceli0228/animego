@@ -38,13 +38,9 @@
 // and no <button> nested inside an <a>.
 
 import Link from "@/components/ui/LocaleLink";
-import { useLocaleRouter } from "@/components/ui/LocaleLink";
-import { useRef, useState, type CSSProperties } from "react";
-import toast, { type Toast } from "react-hot-toast";
+import { useState, type CSSProperties } from "react";
 import { useLang } from "@/lib/lang-client";
-import { stashPendingSubscribe } from "@/lib/pendingSubscribe";
-import { useSubscriptionSet } from "./SubscriptionSetProvider";
-import { LIST_HINT_TOAST_MS, hintStore, takeListHint } from "./subscriptionToast";
+import { useQuickSubscribe } from "./useQuickSubscribe";
 
 interface QuickSubscribeToggleProps {
   anilistId: number;
@@ -144,38 +140,7 @@ function pillStyle(
   };
 }
 
-const toastRowStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  flexWrap: "wrap",
-  gap: 10,
-};
-
-const toastLinkStyle: CSSProperties = {
-  color: "#0a84ff",
-  fontWeight: 600,
-  textDecoration: "none",
-  whiteSpace: "nowrap",
-};
-
-// Undo is an action, not a destination, so it is a <button> that merely looks
-// like the link next to it.
-const toastActionStyle: CSSProperties = {
-  ...toastLinkStyle,
-  padding: 0,
-  border: "none",
-  background: "transparent",
-  font: "inherit",
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-import {
-  detailTarget,
-  loginTarget,
-  quickSubscribeMode,
-  type QuickSubscribeMode,
-} from "./quickSubscribeState";
+import { detailTarget } from "./quickSubscribeState";
 
 // Re-exported so this file stays the feature's public face.
 export {
@@ -189,25 +154,18 @@ export default function QuickSubscribeToggle({
   anilistId,
   title,
 }: QuickSubscribeToggleProps): React.ReactElement | null {
-  const router = useLocaleRouter();
   const { t } = useLang();
-  const subs = useSubscriptionSet();
-  const [busy, setBusy] = useState(false);
-  // The state drives the paint (opacity + aria-disabled); the ref drives the
-  // guard. `setBusy` only queues a re-render, so two events delivered inside
-  // one task — a double-tap, or a held Enter repeating — both read the old
-  // `busy` from their own render closure and both fire a POST. The ref is
-  // written synchronously, so the second one sees it.
-  const busyRef = useRef(false);
+  // What a press means and what it does — the write, the toast with its Undo,
+  // the signed-out round trip — lives in useQuickSubscribe, shared with the
+  // homepage hero. This component is only the poster-corner look of it.
+  const { ready, mode, busy, press } = useQuickSubscribe(anilistId);
   const [hovered, setHovered] = useState(false);
 
   // Until the provider settles we render nothing rather than guess. The
   // button is absolutely positioned, so appearing later costs no layout
   // shift — whereas guessing "not subscribed" would flash a + at users who
   // already track the show.
-  if (!subs.ready) return null;
-
-  const mode = quickSubscribeMode(subs.known, subs.has(anilistId));
+  if (!ready) return null;
 
   // Hover is the one thing both branches share.
   const hoverProps = {
@@ -244,88 +202,6 @@ export default function QuickSubscribeToggle({
 
   const label = mode === "signedOut" ? t("card.quickAddLogin") : t("card.quickAdd");
 
-  /**
-   * The compensation for a mis-tap. Safe here and nowhere else: the row was
-   * created milliseconds ago, so DELETE can only take back what this click
-   * just made.
-   */
-  const undo = async () => {
-    if (await subs.remove(anilistId)) toast.success(t("sub.toastRemoved"));
-    else toast.error(t("card.quickAddFail"));
-  };
-
-  const notifyAdded = (withListHint: boolean) => {
-    toast.success(
-      (instance: Toast) => (
-        <span style={toastRowStyle}>
-          {t("sub.toastAdded")}
-          <button
-            type="button"
-            style={toastActionStyle}
-            onClick={() => {
-              // Dismiss first: the button vanishes with the toast, which is
-              // what stops a double-tap becoming two DELETEs.
-              toast.dismiss(instance.id);
-              void undo();
-            }}
-          >
-            {t("sub.toastUndo")}
-          </button>
-          {withListHint ? (
-            <Link
-              href="/profile"
-              prefetch={false}
-              style={toastLinkStyle}
-              onClick={() => toast.dismiss(instance.id)}
-            >
-              {t("sub.toastViewList")}
-            </Link>
-          ) : null}
-        </span>
-      ),
-      // The Toaster's 3500ms default is for "done" toasts nobody has to act
-      // on. This one carries up to two actions; 3500ms on a phone is gone
-      // before a thumb travelling from the bottom of a grid reaches the top
-      // of the screen.
-      { duration: LIST_HINT_TOAST_MS },
-    );
-  };
-
-  const handleClick = async () => {
-    if (busyRef.current) return;
-
-    // Signed out: keep the intent, send them to log in, and let the provider
-    // finish the job when they land back here. Reading location directly (not
-    // useSearchParams) keeps this component out of the Suspense/static-render
-    // constraints that hook drags onto every page hosting a card grid.
-    if (mode === "signedOut") {
-      stashPendingSubscribe(anilistId);
-      router.push(
-        loginTarget(window.location.pathname, window.location.search),
-      );
-      return;
-    }
-
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      if (!(await subs.add(anilistId))) {
-        toast.error(t("card.quickAddFail"));
-        return;
-      }
-      // The first successful add on this browser carries a signpost to the
-      // list it just filled — nobody discovers /profile on their own. Later
-      // adds stay a plain confirmation, or a grid session of five would show
-      // the same link five times. takeListHint is shared with
-      // SubscriptionButton so the detail page and the grid can't both spend
-      // the one-time hint.
-      notifyAdded(takeListHint(hintStore()));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
-
   return (
     <button
       type="button"
@@ -338,7 +214,7 @@ export default function QuickSubscribeToggle({
       // prevents the double submit that `disabled` was there for.
       aria-disabled={busy}
       aria-label={`${label}: ${title}`}
-      onClick={handleClick}
+      onClick={() => void press()}
       {...hoverProps}
     >
       <span style={pillStyle(false, hovered, busy)} aria-hidden>

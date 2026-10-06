@@ -1,0 +1,178 @@
+/* Shared homepage section chrome: the gutter, the vertical rhythm, and the
+ * header row — a short line in the focused anime's tone, the title, an
+ * optional count and note, and an optional link on the right.
+ *
+ * It is a short line and not a rule across the page, for the reason DESIGN.md
+ * gives on the detail page: it says "a new thing starts here", it does not
+ * separate an above from a below. */
+
+.section {
+  margin-top: 80px;
+  padding-inline: var(--home-gutter);
+}
+
+/* The first section under the hero sits closer to it. Declared here, beside
+ * the rule it modifies, rather than in the section's own module: two
+ * single-class rules from different modules tie on specificity and the winner
+ * is whichever stylesheet happens to load last — which differs between dev
+ * and a production build. */
+.first {
+  margin-top: 36px;
+}
+
+/* A section whose content scrolls sideways to the viewport edge keeps its
+ * header in the gutter but lets the rail run edge to edge. */
+.bleed {
+  margin-top: 80px;
+}
+
+.bleed > .head {
+  padding-inline: var(--home-gutter);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.rule {
+  flex: none;
+  width: 18px;
+  height: 2px;
+  border-radius: 1px;
+  background-color: var(--home-tone);
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: 0.01em;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: rgba(235, 235, 245, 0.58);
+}
+
+.note {
+  min-width: 0;
+  margin-left: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: rgba(235, 235, 245, 0.58);
+  font-variant-numeric: tabular-nums;
+}
+
+.spacer {
+  flex-grow: 1;
+}
+
+/* A text link in the page's tone. Tone text clears 4.5:1 on the ground at
+ * every hue (lib/home/tone.test.ts). */
+.link {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--home-tone);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease-out,
+    color var(--home-tint) var(--home-ease);
+}
+
+.link:hover {
+  opacity: 0.78;
+}
+
+.link:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.linkIcon {
+  transition: transform 0.25s var(--home-expo);
+}
+
+.link:hover .linkIcon {
+  transform: translateX(3px);
+}
+
+.empty {
+  margin: 20px 0 0;
+  padding-block: 28px;
+  font-size: 14px;
+  color: rgba(235, 235, 245, 0.58);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 600px) {
+  .section,
+  .bleed {
+    margin-top: 44px;
+  }
+
+  .first {
+    margin-top: 36px;
+  }
+
+  .head {
+    gap: 10px;
+  }
+
+  .title {
+    font-size: 16px;
+  }
+
+  .count {
+    letter-spacing: 0;
+  }
+
+  .note {
+    font-size: 12px;
+  }
+
+  .desktopOnly {
+    display: none;
+  }
+
+  /* 44px touch target without growing the header: negative margin gives the
+   * space back. */
+  .link {
+    height: 44px;
+    margin: -6px -4px;
+  }
+}

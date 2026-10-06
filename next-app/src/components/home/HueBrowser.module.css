@@ -1,0 +1,241 @@
+/* 按色调逛. Pills in their family's colour; one panel of up to six covers
+ * visible at a time on a wide screen, a sideways rail on a phone. */
+
+.pills {
+  margin-top: 24px;
+  padding-inline: var(--home-gutter);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px 0 13px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: rgba(235, 235, 245, 0.8);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.35s ease,
+    border-color 0.35s ease,
+    color 0.35s ease,
+    transform 0.2s var(--home-expo),
+    filter 0.2s ease;
+}
+
+.pill:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.18);
+}
+
+.pill[aria-pressed="true"] {
+  border-color: var(--pill-line);
+  background-color: var(--pill-fill);
+  color: var(--pill-tone);
+}
+
+.pill:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background-color: var(--pill-tone);
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+/* Panels are stacked in one grid cell, so the stage is as tall as the
+ * tallest panel and nothing below it jumps when the family changes. */
+.stage {
+  margin-top: 28px;
+  display: grid;
+}
+
+.panel {
+  grid-area: 1 / 1;
+  padding-inline: var(--home-gutter);
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 24px;
+  visibility: hidden;
+  transition: visibility 0s linear 0.3s;
+}
+
+.panel[data-active="true"] {
+  visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+
+.card:nth-child(n + 7) {
+  display: none;
+}
+
+.card {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 0.22s var(--home-ease),
+    transform 0.22s var(--home-ease);
+}
+
+.panel[data-active="true"] .card {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.55s var(--home-ease) var(--stagger),
+    transform 0.8s var(--home-expo) var(--stagger);
+}
+
+.cover {
+  aspect-ratio: 3 / 4;
+}
+
+/* Full tone, not line tone: in this section the colour IS the content. */
+.band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background-color: var(--tone);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.title {
+  height: 40px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+@media (max-width: 1180px) {
+  .panel {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .card:nth-child(n + 5) {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .panel {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .card:nth-child(n + 4) {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .pills {
+    margin-top: 14px;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .pills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pill {
+    flex: none;
+    height: 44px;
+    gap: 7px;
+    padding: 0 15px 0 12px;
+  }
+
+  .pill:hover {
+    transform: none;
+    filter: none;
+  }
+
+  .dot {
+    width: 9px;
+    height: 9px;
+  }
+
+  .count {
+    font-size: 11.5px;
+  }
+
+  .stage {
+    margin-top: 16px;
+  }
+
+  .panel {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: var(--home-gutter);
+    scrollbar-width: none;
+  }
+
+  .panel::-webkit-scrollbar {
+    display: none;
+  }
+
+  .card,
+  .card:nth-child(n + 4) {
+    display: flex;
+    flex: none;
+    width: 124px;
+    gap: 8px;
+    scroll-snap-align: start;
+  }
+
+  .cover {
+    width: 124px;
+    height: 165px;
+    aspect-ratio: auto;
+    border-radius: 8px;
+  }
+
+  .body {
+    gap: 4px;
+  }
+
+  .title {
+    height: 34px;
+    font-size: 12.5px;
+    line-height: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .panel[data-active="true"] .card,
+  .pill {
+    transition-duration: 0.01ms;
+    transition-delay: 0s;
+  }
+}

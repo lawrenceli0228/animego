@@ -1,0 +1,147 @@
+/* The poster card vocabulary every homepage section shares.
+ *
+ * The base rules are wrapped in :where(), which has zero specificity, so a
+ * section's own module can override any of them (a row instead of a column, a
+ * different radius) without depending on which CSS module happens to load
+ * first. Equal-specificity overrides silently flip with import order.
+ *
+ * A card link sets `color: var(--tone)` — its own anime's tone, written inline
+ * on the card element as a finished oklch() string (lib/home/tone.ts). Text
+ * inside sets its own colour, so `currentColor` is free to mean "this anime":
+ * the hover glow under the cover and the title's hover colour both read it.
+ *
+ * The zoom sits on a wrapper span, not on the <img>: FadeImage writes an
+ * inline `transition: opacity` on the image, which would override a transform
+ * transition declared here and make the zoom jump instead of ease. */
+
+:where(.card) {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  border-radius: 10px;
+  color: var(--tone);
+  text-decoration: none;
+}
+
+.card:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+:where(.cover) {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background-color: var(--tone-fill);
+  transition:
+    transform 0.35s var(--home-expo),
+    box-shadow 0.35s var(--home-expo);
+}
+
+:where(.zoom) {
+  position: absolute;
+  inset: 0;
+  display: block;
+  transition: transform 0.9s var(--home-expo);
+}
+
+:where(.img) {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The card's own tone as a thin rule along the cover's bottom edge. Line
+ * tone, not text tone: it is a mark, not a word (3:1 non-text at every hue). */
+:where(.rule) {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background-color: var(--tone-line);
+}
+
+:where(.title) {
+  color: rgba(255, 255, 255, 0.94);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  transition: color 0.25s ease-out;
+}
+
+:where(.clamp1),
+:where(.clamp2) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+:where(.clamp1) {
+  -webkit-line-clamp: 1;
+}
+
+:where(.clamp2) {
+  -webkit-line-clamp: 2;
+}
+
+:where(.meta) {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+  color: rgba(235, 235, 245, 0.62);
+}
+
+:where(.score) {
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tone);
+}
+
+:where(.mono) {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (hover: hover) {
+  .card:hover .cover {
+    transform: translateY(-4px);
+    box-shadow: 0 18px 44px -22px currentColor;
+  }
+
+  .card:hover .zoom {
+    transform: scale(1.06);
+  }
+
+  .card:hover .title {
+    color: var(--tone);
+  }
+}
+
+@media (hover: none) {
+  .card:active .cover {
+    transform: scale(0.97);
+    transition-duration: 0.12s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover,
+  .zoom,
+  .title {
+    transition-duration: 0.01ms;
+  }
+}

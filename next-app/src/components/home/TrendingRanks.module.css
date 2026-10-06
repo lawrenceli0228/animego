@@ -1,0 +1,166 @@
+.list {
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 32px 24px;
+}
+
+.item {
+  min-width: 0;
+}
+
+.art {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 188px;
+}
+
+/* The numeral is the section's typography: big, tight, in the show's tone
+ * (text tone — it is read, so it keeps the 4.5:1 guarantee). */
+.rank {
+  flex: none;
+  width: 80px;
+  text-align: right;
+  font-size: 64px;
+  line-height: 0.8;
+  font-weight: 600;
+  letter-spacing: -0.05em;
+  color: var(--tone);
+  transition: transform 0.45s var(--home-expo);
+}
+
+.cover {
+  flex: none;
+  width: 132px;
+  height: 188px;
+  border-radius: 8px;
+}
+
+.body {
+  padding-left: 86px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+.line {
+  font-size: 12px;
+  line-height: 18px;
+  color: rgba(235, 235, 245, 0.62);
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  display: none;
+}
+
+@media (hover: hover) {
+  .card:hover .rank {
+    transform: translateX(-4px);
+  }
+}
+
+@media (max-width: 1180px) {
+  .list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .item:nth-child(n + 9) {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .item:nth-child(n + 7) {
+    display: none;
+  }
+
+  .rank {
+    width: 56px;
+    font-size: 48px;
+  }
+
+  .body {
+    padding-left: 62px;
+  }
+}
+
+/* A phone gets a ranked list of five rows, not a grid of numerals. */
+@media (max-width: 600px) {
+  .list {
+    margin-top: 12px;
+    margin-inline: calc(-1 * var(--home-gutter));
+    display: block;
+  }
+
+  .item:nth-child(n + 6) {
+    display: none;
+  }
+
+  .item + .item {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .card {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    height: 67px;
+    padding: 0 var(--home-gutter);
+    border-radius: 0;
+    transition: background-color 0.15s ease-out;
+  }
+
+  .card:active {
+    background-color: rgba(255, 255, 255, 0.045);
+  }
+
+  .art {
+    height: auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .rank {
+    width: 30px;
+    text-align: center;
+    font-size: 26px;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+
+  .cover {
+    width: 40px;
+    height: 56px;
+    border-radius: 6px;
+  }
+
+  .body {
+    flex-grow: 1;
+    padding-left: 0;
+    gap: 3px;
+  }
+
+  .title {
+    font-size: 14.5px;
+  }
+
+  .chevron {
+    display: block;
+    flex: none;
+    color: rgba(235, 235, 245, 0.4);
+  }
+}
