@@ -133,9 +133,9 @@ const zhHant = {
     todayInMinutes: '{{n}} 分鐘後',
     todayNextDay: '次日',
     todayEp: '第 {{ep}} 集',
-    todayAiredCount: '已播 {{n}} 部',
-    todayShowAired: '展開已播',
-    todayHideAired: '收起已播',
+    // The rail's ← → buttons: a view of cards back / forward.
+    todayPrevPage: '上一組',
+    todayNextPage: '下一組',
     fullSchedule: '完整放送表',
     seasonTopTitle: '本季高分',
     seasonTopSub: '{{season}} · 按 AniList 評分',

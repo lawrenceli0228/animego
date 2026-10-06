@@ -90,9 +90,9 @@ const en = {
     todayInMinutes: 'In {{n}} min',
     todayNextDay: 'Tmrw',
     todayEp: 'Ep {{ep}}',
-    todayAiredCount: '{{n}} aired',
-    todayShowAired: 'Show aired',
-    todayHideAired: 'Hide aired',
+    // The rail's ← → buttons: a view of cards back / forward.
+    todayPrevPage: 'Previous shows',
+    todayNextPage: 'Next shows',
     fullSchedule: 'Full schedule',
     seasonTopTitle: 'Top rated this season',
     seasonTopSub: '{{season}} · by AniList score',
