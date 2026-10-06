@@ -342,7 +342,9 @@ test.describe("the desktop bar", () => {
 
     await page.goto("/calendar");
     await waitForHydration(page, "header nav");
-    const tab = page.locator('button[id^="weekly-schedule-tab-"]').first();
+    // The schedule page's first day tab: a focusable control well below the
+    // bar. Same selector the schedule's own spec uses.
+    const tab = page.locator('[role="tablist"] [role="tab"]').first();
     await expect(tab).toBeVisible();
     // Parked 20px from the top of the window: on screen, but where the bar is.
     await tab.evaluate((el) => window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 20));
