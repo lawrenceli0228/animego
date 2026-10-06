@@ -104,6 +104,11 @@ const zhHant = {
     // live, so the bar stays signed-in rather than lying about it.
     logoutFailed: '登出未完成，請重試',
     myList: '我的追番', hi: 'Hi', library: '我的庫', about: '關於',
+    // Site header. The bar is a client component and reads the -spa twin;
+    // these keep the server dictionary a complete record of the chrome.
+    schedule: '放送表', genres: '分類',
+    searchAnime: '搜尋番劇', searchPlaceholder: '中文 / 日文 / 羅馬字',
+    menu: '選單', openMenu: '打開選單', closeMenu: '關閉選單',
   },
   // Season labels
   season: {

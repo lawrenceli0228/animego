@@ -161,13 +161,13 @@ function isMobile(): boolean {
 }
 
 const s = {
-  page: { minHeight: "calc(100vh - 56px)", padding: "0 24px 48px" } as CSSProperties,
+  page: { minHeight: "calc(100vh - var(--nav-h))", padding: "0 24px 48px" } as CSSProperties,
   mobile: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: "calc(100vh - 56px)",
+    minHeight: "calc(100vh - var(--nav-h))",
     color: "rgba(235,235,245,0.60)",
     textAlign: "center",
     gap: 16,

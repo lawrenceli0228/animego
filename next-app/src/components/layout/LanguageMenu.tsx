@@ -43,8 +43,12 @@ function useCurrentLocale(): Locale {
 }
 
 interface OptionListProps {
-  /** Sets `role` on each option — "menuitem" inside a menu, "option" else. */
-  role: "menuitem" | "option";
+  /**
+   * Sets `role` on each option — "menuitem" inside a menu, "option" in a
+   * listbox. Omitted, the options are plain buttons in a labelled group: the
+   * phone drawer's list, which is neither a menu nor a listbox.
+   */
+  role?: "menuitem" | "option";
   current: Locale;
   onPick: (locale: Locale) => void;
   /** Registers each option for roving arrow-key focus. Optional. */
@@ -72,7 +76,7 @@ function LocaleOptionList({
   return (
     <div
       className="agc-lang-list"
-      role={role === "menuitem" ? "group" : "listbox"}
+      role={role === "option" ? "listbox" : "group"}
       aria-labelledby={labelledBy}
       onKeyDown={onKeyDown}
     >
@@ -186,13 +190,44 @@ export function LanguageMenuInline({ onPicked }: { onPicked?: () => void }) {
 }
 
 /**
+ * The options as plain buttons under a heading the caller provides — the phone
+ * drawer, which is a dialog, not a menu, so `menuitem` would be a lie there.
+ * Arrow keys still move between them.
+ */
+export function LanguageList({
+  labelledBy,
+  onPicked,
+}: {
+  labelledBy: string;
+  onPicked?: () => void;
+}) {
+  const { switchTo } = useLang();
+  const current = useCurrentLocale();
+  const { registerRef, onKeyDown } = useRovingFocus(LOCALES.length, true);
+
+  return (
+    <LocaleOptionList
+      current={current}
+      labelledBy={labelledBy}
+      registerRef={registerRef}
+      onKeyDown={onKeyDown}
+      onPick={(locale) => {
+        onPicked?.();
+        switchTo(locale);
+      }}
+    />
+  );
+}
+
+/**
  * A trigger plus its own popup, for the logged-out navbar where there is no
  * account menu to live inside, and for the footer.
  *
  * `variant` is the difference between the two placements:
  *
- *   compact — the navbar. A globe and the two-character short label, because
- *             the bar already overflows at 375px.
+ *   compact — the desktop navbar, signed out. A globe and the short label,
+ *             styled as one of the bar's quiet 40px controls. (On a phone the
+ *             bar has no room for it; the drawer carries LanguageList.)
  *   named   — the footer. The locale's full endonym, and the popup opens
  *             upward because there is nothing below it.
  *
@@ -213,7 +248,10 @@ export function LanguageMenu({ variant = "compact" }: { variant?: "compact" | "n
 
   const close = useCallback((restoreFocus: boolean) => {
     setOpen(false);
-    if (restoreFocus) triggerRef.current?.focus();
+    // Without scrolling: the trigger was just used, so it is on screen — and
+    // in the header it sits in the sticky bar, where letting the browser
+    // "reveal" it moved the page instead (Navbar.module.css).
+    if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
   }, []);
 
   // Same dismissal contract as AvatarMenu: pointer outside, or Escape.
@@ -251,7 +289,7 @@ export function LanguageMenu({ variant = "compact" }: { variant?: "compact" | "n
       <button
         type="button"
         ref={triggerRef}
-        className={`agc-lang-trigger${variant === "named" ? " agc-lang-trigger--named" : ""}`}
+        className={`agc-lang-trigger agc-lang-trigger--${variant}`}
         aria-haspopup="menu"
         aria-expanded={open}
         // The compact trigger reads as a bare glyph, so it needs the label

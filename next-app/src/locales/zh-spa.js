@@ -79,6 +79,10 @@ const zh = {
     myList: '我的追番', hi: 'Hi', library: '我的库', about: '关于',
     // Language menu: the group heading + the account menu's own label.
     language: '语言', accountMenu: '账户菜单', mainNavigation: '主导航',
+    // Site header (AniList-style bar + phone drawer).
+    schedule: '放送表', genres: '分类',
+    searchAnime: '搜索番剧', searchPlaceholder: '中文 / 日文 / 罗马字',
+    menu: '菜单', openMenu: '打开菜单', closeMenu: '关闭菜单',
   },
   // Season labels
   season: {

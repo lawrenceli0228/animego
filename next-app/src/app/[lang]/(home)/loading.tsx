@@ -1,7 +1,9 @@
 // HomePage skeleton: the hero block (LCP placeholder) and a few section bands,
 // laid out on the redesigned homepage's geometry — the same hero height, the
 // same gutters, the neutral version of the page ground — so the swap to the
-// real page does not jump. Pure CSS shimmer; prefers-reduced-motion freezes it.
+// real page does not jump. Like the real hero, it starts at the top of the page
+// under the transparent header (pulled up by --nav-h). Pure CSS shimmer;
+// prefers-reduced-motion freezes it.
 
 const shimmer = {
   background:
@@ -33,12 +35,13 @@ export default function HomeLoading() {
         }
         .home-skeleton {
           --gutter: max(clamp(24px, 5.56vw, 80px), calc((100% - 1280px) / 2));
+          margin-top: calc(-1 * var(--nav-h));
           background: oklch(13% 0 0);
           padding-bottom: 96px;
         }
         .home-skeleton-hero {
-          height: 484px;
-          padding: 44px var(--gutter) 0;
+          height: 540px;
+          padding: 100px var(--gutter) 0;
           display: flex;
           flex-direction: column;
           gap: 20px;
@@ -58,7 +61,7 @@ export default function HomeLoading() {
         }
         @media (max-width: 600px) {
           .home-skeleton { --gutter: 20px; padding-bottom: 44px; }
-          .home-skeleton-hero { height: 444px; padding-top: 80px; }
+          .home-skeleton-hero { height: 500px; padding-top: 136px; }
           .home-skeleton-stage { height: 150px; gap: 14px; }
           .home-skeleton-cover { width: 106px; height: 150px; }
           .home-skeleton-section { margin-top: 44px; }

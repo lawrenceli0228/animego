@@ -158,6 +158,13 @@
   /* ── Motion ─────────────────────────────────────────────────────────── */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
+  /* ── Site header ────────────────────────────────────────────────────────
+   * The header's height: 64px on a desktop, 56px below the header's 1023px
+   * breakpoint (the override is after this block). Read wherever something
+   * has to clear the bar — the homepage hero that runs up under it, the
+   * locale hint that floats below it, full-height pages that subtract it. */
+  --nav-h: 64px;
+
   /* Per-anime poster accent (overridden by HeroAccent wrapper on the detail
    * page). Exempt from the "no accent but blue" rule on purpose: this one is
    * sampled from the cover artwork at runtime, so it is not a brand colour
@@ -203,15 +210,44 @@
   margin: 0;
 }
 
+@media (max-width: 1023px) {
+  :root {
+    --nav-h: 56px;
+  }
+}
+
 html {
   height: 100%;
   color-scheme: dark;
+  /* The header is sticky: a link to an anchor, or Shift+Tab back to a control
+   * above the fold, must not land the target underneath it. The header's own
+   * controls live inside this band and carry a matching negative
+   * scroll-margin-top; without it, focusing one scrolls the page
+   * (Navbar.module.css). */
+  scroll-padding-top: var(--nav-h);
 }
 
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+}
+
+/* `clip`, not `hidden`, on <body> — and the difference is the whole header.
+ *
+ * `overflow-x: hidden` makes the other axis compute to `auto`, which turns
+ * <body> into a scroll container. A scroll container that never scrolls (the
+ * viewport does the scrolling; <body> just grows) is still the box
+ * `position: sticky` sticks inside, so every sticky element on the site —
+ * the header first of all — scrolled away with the page. Measured on the live
+ * site before this change: the "sticky" bar sat at y = −529 after a 529px
+ * scroll. `clip` clips the same overflow without making a scroll container.
+ *
+ * <html> keeps `hidden`: on the root it applies to the viewport, where it has
+ * always worked, and lib/scrollLock.ts depends on that. Browsers without
+ * `clip` (Safari before 16) keep the old behaviour from the rule above. */
+body {
+  overflow-x: clip;
 }
 
 body {
@@ -471,33 +507,6 @@ h4 {
   .card-lift:hover {
     transform: translateY(-4px);
   }
-}
-
-/* ── Navbar link: underline wipes in on hover ─────────────────────────────
-   Active state keeps its existing pill (set inline); this only adds the
-   hover affordance. transform-only (scaleX), reduced-motion safe. */
-.nav-link {
-  position: relative;
-}
-.nav-link::after {
-  content: "";
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 5px;
-  height: 2px;
-  border-radius: 2px;
-  background: #0a84ff;
-  transform: scaleX(0);
-  transform-origin: left center;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .nav-link::after {
-    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-}
-.nav-link:hover::after {
-  transform: scaleX(1);
 }
 
 /* ── Card quick-subscribe: AniList-style hover reveal ─────────────────────

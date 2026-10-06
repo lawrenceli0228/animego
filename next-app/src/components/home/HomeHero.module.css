@@ -1,18 +1,28 @@
 /* Homepage hero — "本季焦点".
  *
- * Geometry is the approved artboard's (1440 / 390 wide) minus the navbar,
- * which in this phase still sits above the hero rather than over it: the
- * artboard hero is 540px including a 64px header, so this one is 484px and its
- * content starts 44px down — the same absolute positions on the page.
+ * Geometry is the approved artboard's (1440 / 390 wide): the hero starts at
+ * the very top of the page and the transparent site header lies over it. The
+ * negative margin pulls it up by the header's height (--nav-h), so the hero is
+ * 540px tall from y=0 (500px on a phone) and its content starts 100px down
+ * (136px on a phone) — the artboard's absolute positions, and the same ones
+ * the page had while the header still sat above a 484px hero.
+ *
+ * The pull-up is on the hero, not on <main>: with no slides the hero renders
+ * nothing, and whatever came first would otherwise slide under the bar.
  *
  * Every @media block is at the END of the file: its rules have the same
  * specificity as the ones they override and win on source order. */
 
 .hero {
   position: relative;
-  height: 484px;
+  height: 540px;
+  margin-top: calc(-1 * var(--nav-h));
   overflow: hidden;
   color: #fff;
+  /* Its own ground: <main> paints the page colour from where <main> starts,
+   * and the hero reaches above that, under the header. */
+  background-color: var(--home-ground, #000);
+  transition: background-color var(--home-tint) var(--home-ease);
 }
 
 /* ── Ambient glow ──────────────────────────────────────────────────────────
@@ -119,13 +129,14 @@
   object-position: center 22%;
 }
 
+/* Darkens the strip the transparent header's words sit on. */
 .topShade {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 120px;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0) 100%);
+  height: 150px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0) 100%);
   pointer-events: none;
 }
 
@@ -150,7 +161,7 @@
 /* ── Content ──────────────────────────────────────────────────────────────── */
 .content {
   position: absolute;
-  top: 44px;
+  top: 100px;
   left: var(--home-gutter);
   right: var(--home-gutter);
   z-index: 1;
@@ -633,8 +644,9 @@
 
 /* ── Tablet ───────────────────────────────────────────────────────────────── */
 @media (min-width: 601px) and (max-width: 900px) {
+  /* 440px below a 56px header, as before — now the 56 is under it. */
   .hero {
-    height: 440px;
+    height: 496px;
   }
 
   .banner {
@@ -668,7 +680,7 @@
  * 44px tall so each is a real touch target. */
 @media (max-width: 600px) {
   .hero {
-    height: 444px;
+    height: 500px;
   }
 
   .glow {
@@ -706,7 +718,7 @@
   }
 
   .content {
-    top: 80px;
+    top: 136px;
     gap: 12px;
   }
 

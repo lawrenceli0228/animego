@@ -1,0 +1,37 @@
+/* The admin page's own bar (overview / activity / enrichment / users).
+ *
+ * Sticky right under the site header, at --nav-h: at 0 the site header would
+ * cover it whenever it is showing. The site header slides away while the
+ * reader scrolls down, and a bar left at --nav-h then had a band of page
+ * scrolling past above it. So while the site header is tucked away, this bar
+ * moves up into its place: the same distance, duration and easing as the
+ * site header's own slide (components/layout/Navbar.module.css), so the two
+ * travel together.
+ *
+ * :has() on <body> because the two headers are not related; the site header
+ * is the only element on the page carrying data-hidden. */
+.header {
+  position: sticky;
+  top: var(--nav-h);
+  z-index: 10;
+  border-bottom: 1px solid #1f1f2a;
+  background: #111118;
+  transition: transform 0.32s var(--ease-out-expo);
+}
+
+:global(body:has(header[data-hidden="true"])) .header {
+  transform: translateY(calc(-1 * var(--nav-h)));
+}
+
+/* While it stands in for the site header it sits in the band that html's
+ * scroll-padding-top keeps clear, so its links get the site header's
+ * exemption: focusing one must not scroll the page. */
+.header a {
+  scroll-margin-top: calc(-1 * var(--nav-h));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header {
+    transition: none;
+  }
+}

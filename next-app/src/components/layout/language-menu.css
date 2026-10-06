@@ -1,11 +1,12 @@
 /*
- * language-menu.css — the language control in both places it appears:
- * a trigger + popup in the logged-out navbar, and a flat option group inside
- * the account dropdown.
+ * language-menu.css — the language control in every place it appears: a
+ * trigger + popup in the signed-out desktop navbar (compact) and the footer
+ * (named), a flat option group inside the account dropdown, and a plain list
+ * in the phone drawer.
  *
- * Deliberately borrows avatar-menu.css's surface (same blur, same radius,
- * same hover wash) rather than inventing a second popup language — the two
- * sit two pixels apart in the same bar and any difference reads as a bug.
+ * The popup borrows the header dropdowns' surface (same blur, same radius,
+ * same hover wash) rather than inventing a second popup language — they sit
+ * side by side in the same bar and any difference reads as a bug.
  */
 
 .agc-lang-wrap {
@@ -13,20 +14,13 @@
   display: inline-flex;
 }
 
-/* Matches the 36px box the old lang button had, so the bar baseline holds. */
+/* What both triggers share. Their boxes differ: see the two variants. */
 .agc-lang-trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 36px;
-  min-width: 40px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(84, 84, 88, 0.65);
   background: none;
-  color: rgba(235, 235, 245, 0.6);
   font-family: var(--font-sans), sans-serif;
-  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition:
@@ -39,32 +33,60 @@
   height: 14px;
   opacity: 0.75;
 }
-.agc-lang-trigger:hover,
-.agc-lang-trigger[aria-expanded="true"] {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.28);
-  background: rgba(255, 255, 255, 0.06);
-}
 /* Focus is a ring, not a colour change: the hover state already uses colour,
-   and a keyboard user needs the two to be distinguishable. */
+   and a keyboard user needs the two to be distinguishable. The one ring
+   DESIGN.md specifies, like every other control in the bar, over a
+   transparent outline that forced-colors mode paints in a system colour once
+   it has dropped the ring (Navbar.module.css). This file is plain CSS, which
+   focusRing.test.ts does not scan — keep the two halves together by hand. */
 .agc-lang-trigger:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.65);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* The navbar's: one of the bar's quiet 40px controls, no outline of its own,
+   beside the search magnifier and 登录. */
+.agc-lang-trigger--compact {
+  height: 40px;
+  min-width: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  color: rgba(235, 235, 245, 0.86);
+  font-size: 12.5px;
+  /* In the bar, so exempt from html's scroll-padding-top — focus coming back
+     to it must not scroll the page (Navbar.module.css explains). The footer's
+     trigger is in the page and keeps the padding. */
+  scroll-margin-top: calc(-1 * var(--nav-h));
+}
+.agc-lang-trigger--compact:hover,
+.agc-lang-trigger--compact[aria-expanded="true"] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .agc-lang-pop {
   position: absolute;
   right: 0;
-  top: calc(100% + 10px);
+  top: calc(100% + 12px);
   z-index: 200;
   min-width: 168px;
   padding: 6px;
-  border-radius: 14px;
-  background: rgba(18, 18, 22, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(24, 24, 28, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   backdrop-filter: blur(20px) saturate(150%);
-  box-shadow: 0 24px 64px -20px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 18px 48px -10px rgba(0, 0, 0, 0.7);
+  animation: agc-lang-pop-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes agc-lang-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
 }
 
 .agc-lang-list {
@@ -72,12 +94,15 @@
   flex-direction: column;
 }
 
+/* 40px rows, like every other item in the header's popups (the account menu
+   these sit inside, the genre panel); padding alone left them about 35px. */
 .agc-lang-option {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 9px 10px;
+  min-height: 40px;
+  padding: 0 10px;
   border: none;
   border-radius: 9px;
   background: transparent;
@@ -96,9 +121,10 @@
   color: #fff;
 }
 .agc-lang-option:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   background: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.75);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 /* The current locale. Three signals, none of them colour alone: a check
    glyph, a heavier weight, and a tinted wash. Colour-only would be invisible
@@ -157,6 +183,9 @@
   .agc-lang-option {
     transition: none;
   }
+  .agc-lang-pop {
+    animation: none;
+  }
 }
 
 /* ─── the footer variant ──────────────────────────────────────────────────
@@ -166,8 +195,12 @@
    they are reading has no reason to go looking for a switcher. */
 
 .agc-lang-trigger--named {
+  min-height: 36px;
+  min-width: 40px;
   gap: 7px;
   padding: 6px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(84, 84, 88, 0.65);
   font-size: 13px;
   /* The navbar trigger is a glyph and can afford to be quiet. This one is a
      sentence about the page, so it sits at the same weight as the copyright
@@ -178,6 +211,8 @@
 .agc-lang-trigger--named:hover,
 .agc-lang-trigger--named[aria-expanded="true"] {
   color: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* Opens upward: it is the last row of the document, and a popup below it
@@ -187,6 +222,14 @@
   bottom: calc(100% + 10px);
   right: auto;
   left: 0;
+  animation-name: agc-lang-pop-up;
+}
+
+@keyframes agc-lang-pop-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 @media (max-width: 640px) {

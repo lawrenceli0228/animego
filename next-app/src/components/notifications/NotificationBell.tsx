@@ -95,6 +95,15 @@ function notificationCopy(
     : copy.replied(item.actor.username, title);
 }
 
+/**
+ * The bell's footprint with nothing in it, for the header's probing state —
+ * so the controls to its right do not jump when the session probe resolves
+ * and the real bell takes the slot. Same class as the bell, so same box.
+ */
+export function NotificationBellSkeleton() {
+  return <span className="agc-notification-bell agc-notification-bell--skeleton" aria-hidden="true" />;
+}
+
 export default function NotificationBell() {
   const pathname = usePathname();
   const { lang, t } = useLang();
@@ -202,6 +211,10 @@ export default function NotificationBell() {
   };
 
   const badge = notificationBadge(unreadCount);
+  const label =
+    unreadCount > 0
+      ? `${t("notification.title")} · ${unreadCount} ${t("notification.unread")}`
+      : t("notification.title");
   return (
     <div className="agc-notification-wrap" ref={wrapRef}>
       <button
@@ -209,21 +222,20 @@ export default function NotificationBell() {
         className="agc-notification-bell"
         aria-expanded={open}
         aria-controls={NOTIFICATION_PANEL_ID}
-        aria-label={
-          unreadCount > 0
-            ? `${t("notification.title")} · ${unreadCount} ${t("notification.unread")}`
-            : t("notification.title")
-        }
+        aria-label={label}
+        // The bar shows a dot, not a number; the count is in the accessible
+        // name and, for a pointer, in the tooltip.
+        title={badge ? `${t("notification.title")} · ${badge}` : undefined}
         onClick={() => {
           if (!open) void loadPage();
           setOpen((value) => !value);
         }}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-          <path d="M10 21h4" />
+          <path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5z" />
+          <path d="M10 20.5h4" />
         </svg>
-        {badge && <span className="agc-notification-badge">{badge}</span>}
+        {badge && <span className="agc-notification-dot" aria-hidden="true" />}
       </button>
 
       {open && (
