@@ -176,6 +176,8 @@ const zh = {
     watched: '已看',
     behind: '落后 {{n}} 集',
     upcoming: '待更新',
+    // Read before a row's score; the star beside it is aria-hidden.
+    scoreSr: '评分',
     mineTitle: '我追的 · 本周',
     mineEmpty: '你在追的番这周没有更新。',
     signInTitle: '标出你在追的番',

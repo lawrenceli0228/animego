@@ -344,6 +344,8 @@ const zhHant = {
     watched: '已看',
     behind: '落後 {{n}} 集',
     upcoming: '待更新',
+    // Read before a row's score; the star beside it is aria-hidden.
+    scoreSr: '評分',
     mineTitle: '我追的 · 本週',
     mineEmpty: '你在追的番這週沒有更新。',
     signInTitle: '標出你在追的番',

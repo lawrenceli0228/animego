@@ -281,6 +281,8 @@ const en = {
     watched: 'Watched',
     behind: '{{n}} behind',
     upcoming: 'Caught up',
+    // Read before a row's score; the star beside it is aria-hidden.
+    scoreSr: 'Score',
     mineTitle: 'Following · this week',
     mineEmpty: 'Nothing you follow airs this week.',
     signInTitle: 'Mark the shows you follow',

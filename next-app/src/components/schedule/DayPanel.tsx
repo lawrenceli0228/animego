@@ -16,6 +16,7 @@ import { Fragment, type CSSProperties } from "react";
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { StarIcon } from "@/components/home/icons";
+import section from "@/components/home/section.module.css";
 import type { HomeClock } from "@/components/home/useHomeClock";
 import { fillTemplate, hhmm } from "@/lib/home/time";
 import { isNextDay, type Slot } from "@/lib/home/todaySlots";
@@ -83,6 +84,8 @@ export default function DayPanel({ day, index, active, clock, progress }: DayPan
           {it.score ? (
             <span className={styles.score}>
               <StarIcon size={12} />
+              {/* The star is aria-hidden; without this the number is read bare. */}
+              <span className={section.srOnly}>{t("schedule.scoreSr")} </span>
               <span className={styles.scoreNum}>{it.score}</span>
             </span>
           ) : null}
