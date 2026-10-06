@@ -95,6 +95,36 @@ const en = {
     yearTopSub: 'by AniList score',
     yearTopAll: 'Full year list',
   },
+  // Schedule page (/calendar), hue redesign. The server components read the
+  // .ts dictionary, the client board the -spa twin; one key per visible string.
+  schedule: {
+    title: 'Schedule',
+    weekTotal: '{{n}} airings this week',
+    zoneSite: 'Times in Beijing time (UTC+8)',
+    zoneLocal: 'Times in your local time ({{offset}})',
+    dayTabs: 'Choose a day',
+    dayCount: '{{day}} · {{n}} airings',
+    todayShort: 'Today',
+    chartHint: 'Click a bar to switch',
+    upNext: 'Up next',
+    later: 'Upcoming',
+    emptyDay: 'Nothing airs this day.',
+    loadFailed: "The schedule didn't load. Try refreshing in a moment.",
+    following: 'Following',
+    unwatched: 'Unwatched',
+    watched: 'Watched',
+    behind: '{{n}} behind',
+    upcoming: 'Caught up',
+    // Read before a row's score; the star beside it is aria-hidden.
+    scoreSr: 'Score',
+    mineTitle: 'Following · this week',
+    mineEmpty: 'Nothing you follow airs this week.',
+    signInTitle: 'Mark the shows you follow',
+    signInBody: 'Sign in and the shows you follow are marked on this schedule as following or unwatched, and Continue watching on the homepage keeps your place.',
+    nextSeason: '{{season}} anime',
+    nextSeasonCount: '{{n}} announced',
+    nextSeasonStart: 'Starts in {{month}}',
+  },
   // Anime watchers
   anime: {
     watchers: 'watching', watchersMore: '+',

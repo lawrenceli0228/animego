@@ -101,6 +101,52 @@ export interface SitemapAnime {
 // same surface as AnimeDetail itself.
 export type { FuzzyDate };
 
+// ─── Schedule (/api/anime/schedule) ────────────────────────────────
+// go-api/internal/anime/schedule.go ScheduleItem / ScheduleResponse.
+// `groups` is keyed by the SERVER's local date (UTC in production) and
+// covers [today, today + 7 days); a day with nothing airing has no key.
+// Each group is sorted by airingAt.
+//
+// These lived inline in the old WeeklySchedule component while it was the
+// only consumer. The homepage's 今日更新 and the schedule page read them now.
+
+export interface ScheduleItem {
+  scheduleId: number;
+  /** Unix SECONDS. */
+  airingAt: number;
+  episode: number;
+  anilistId: number;
+  titleRomaji: string | null;
+  titleEnglish: string | null;
+  titleNative: string | null;
+  titleChinese: string | null;
+  titleHant?: string | null;
+  titleHantSource?: string | null;
+  /**
+   * SERP-safe projection — see the hant channel note above. Nothing built
+   * from a schedule row reaches a search engine as a title today (the rows
+   * render link text, not <title> or JSON-LD), so pickTitle() reads
+   * titleHant; any future metadata built from a ScheduleItem must read this.
+   */
+  titleHantSeo?: string | null;
+  coverImageUrl: string | null;
+  coverImageColor: string | null;
+  /** Never empty on the wire: the brand fallback #8B5CF6 stands in for "no colour". */
+  posterAccent: string | null;
+  posterAccentRgb: string | null;
+  posterAccentContrastOnBlack: number | null;
+  format: string | null;
+  averageScore: number | null;
+  genres: string[];
+}
+
+export interface ScheduleResponse {
+  /** The server's local date, `YYYY-MM-DD`. Empty when the fetch failed. */
+  today: string;
+  /** A day with nothing airing has no key — index with `?? []`. */
+  groups: Record<string, ScheduleItem[]>;
+}
+
 // ─── Seasonal (/api/anime/seasonal) ────────────────────────────────
 
 export interface SeasonalAnime {

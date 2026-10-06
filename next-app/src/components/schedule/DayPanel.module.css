@@ -1,0 +1,422 @@
+/* One day of the schedule: a row per airing time (time on the left, every
+ * show at that time on the right), and on today a "现在 HH:MM" rule between
+ * what has aired and what has not.
+ *
+ * Each show row carries its own anime's tone inline (--tone, --tone-fill …,
+ * finished oklch() strings from lib/home/tone.ts) and sets `color: var(--tone)`
+ * so currentColor means "this anime" for the hover glow under the cover. Text
+ * inside sets its own colour.
+ *
+ * The panel never sets `display`: inactive panels are `hidden`, and the UA's
+ * [hidden] { display: none } loses to any author `display`. */
+
+.panel {
+  min-width: 0;
+  border-radius: 12px;
+  animation: show 0.3s ease;
+}
+
+.panel:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.groups,
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.groups {
+  display: flex;
+  flex-direction: column;
+}
+
+.slot {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 16px;
+  padding-bottom: 16px;
+}
+
+.when {
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 19px;
+  line-height: 24px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+}
+
+/* 58%, not the board's 50%: on the lightest veil the page uses, 50% falls
+ * to 4.46:1 (lib/home/tone.test.ts). */
+.slot[data-aired="true"] .time {
+  color: rgba(235, 235, 245, 0.58);
+}
+
+.slot[data-next="true"] .time {
+  color: var(--home-tone);
+  transition: color var(--home-tint) var(--home-ease);
+}
+
+.nextDay {
+  margin-right: 5px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.note {
+  font-size: 11.5px;
+  line-height: 16px;
+  color: rgba(235, 235, 245, 0.58);
+}
+
+.rows {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── A show ─────────────────────────────────────────────────────────────── */
+/* Gaps are margins on the items rather than column-gap: the mine column is
+ * empty on most rows, and a column-gap would still be paid on both sides of
+ * it, out of the title's width. */
+.row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto 52px 106px;
+  grid-template-areas: "cover text mine score status";
+  align-items: center;
+  padding: 9px 16px 9px 9px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.03);
+  color: var(--tone);
+  text-decoration: none;
+  transition: background-color 0.2s ease;
+}
+
+.row:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.cover {
+  grid-area: cover;
+  position: relative;
+  width: 44px;
+  height: 62px;
+  overflow: hidden;
+  border-radius: 6px;
+  background-color: var(--tone-fill);
+  transition:
+    transform 0.35s var(--home-expo),
+    box-shadow 0.35s var(--home-expo);
+}
+
+/* The zoom is on a wrapper: FadeImage writes an inline opacity transition on
+ * the <img>, which would override a transform transition declared there. */
+.zoom {
+  position: absolute;
+  inset: 0;
+  display: block;
+  transition: transform 0.9s var(--home-expo);
+}
+
+.img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.text {
+  grid-area: text;
+  min-width: 0;
+  margin-inline: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.title,
+.meta {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.title {
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  transition: color 0.25s ease-out;
+}
+
+.meta {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: rgba(235, 235, 245, 0.64);
+}
+
+/* Wide: mine and status sit in their own grid columns. Phone: they share a
+ * line under the title (see the 600px block). */
+.state {
+  display: contents;
+}
+
+.mine {
+  grid-area: mine;
+  margin-right: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background-color: var(--tone-fill);
+  color: var(--tone);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.score {
+  grid-area: score;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tone);
+}
+
+.scoreNum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  grid-area: status;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.72);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.row[data-state="aired"] .status {
+  color: rgba(235, 235, 245, 0.58);
+}
+
+.row[data-state="soon"] .status {
+  color: var(--tone);
+}
+
+.dot,
+.mineDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: currentColor;
+}
+
+.row[data-state="soon"] .dot {
+  animation: ping 2.4s var(--home-ease) infinite;
+}
+
+/* ── Now ────────────────────────────────────────────────────────────────── */
+.now {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0 18px;
+  color: var(--home-tone);
+  transition: color var(--home-tint) var(--home-ease);
+}
+
+.nowDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background-color: currentColor;
+  animation: ping 2.4s var(--home-ease) infinite;
+}
+
+.nowLabel {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.nowLine {
+  flex-grow: 1;
+  height: 1px;
+  background-color: currentColor;
+  opacity: 0.45;
+}
+
+.empty {
+  margin: 0;
+  padding: 28px 0;
+  font-size: 14px;
+  color: rgba(235, 235, 245, 0.66);
+}
+
+@media (hover: hover) {
+  .row:hover {
+    background-color: rgba(255, 255, 255, 0.065);
+  }
+
+  .row:hover .cover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px -14px currentColor;
+  }
+
+  .row:hover .zoom {
+    transform: scale(1.08);
+  }
+
+  .row:hover .title {
+    color: var(--tone);
+  }
+}
+
+@keyframes ping {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+@keyframes show {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The time column keeps its 96px here: a next-day time ("Tmrw 01:00", 94px
+ * in English; "次日 01:00", 86px) does not fit in 80, and spilled into the
+ * row card beside it. Only the gap and the row's own columns narrow. */
+@media (max-width: 1100px) {
+  .slot {
+    gap: 12px;
+  }
+
+  .row {
+    grid-template-columns: 44px minmax(0, 1fr) auto 48px 96px;
+  }
+
+  .text {
+    margin-inline: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .slot {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding-bottom: 18px;
+  }
+
+  .when {
+    padding-top: 0;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .time {
+    font-size: 16px;
+    line-height: 22px;
+  }
+
+  .row {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "cover text score"
+      "cover state state";
+    row-gap: 6px;
+    padding: 9px 12px 9px 9px;
+  }
+
+  .text {
+    margin-inline: 12px 8px;
+    gap: 3px;
+  }
+
+  .state {
+    grid-area: state;
+    margin-left: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .status {
+    justify-content: flex-start;
+    padding-left: 0;
+    font-size: 12px;
+  }
+
+  .mine {
+    height: 22px;
+    margin-right: 0;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .score {
+    align-self: start;
+    padding-top: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .dot,
+  .nowDot,
+  .row[data-state="soon"] .dot {
+    animation: none;
+  }
+
+  .row,
+  .cover,
+  .zoom,
+  .title,
+  .now,
+  .slot[data-next="true"] .time {
+    transition-duration: 0.01ms;
+  }
+}

@@ -3,7 +3,6 @@ import type { CSSProperties } from "react";
 import ContinueWatching from "@/components/anime/ContinueWatching";
 import { SubscriptionSetProvider } from "@/components/anime/SubscriptionSetProvider";
 import { currentSeasonHref } from "@/components/anime/continueWatchingState";
-import type { ScheduleItem, ScheduleResponse } from "@/components/anime/WeeklySchedule";
 import GemsPanel from "@/components/home/GemsPanel";
 import HomeHero from "@/components/home/HomeHero";
 import HomeHueScope from "@/components/home/HomeHueScope";
@@ -19,6 +18,7 @@ import { upcomingAiring } from "@/lib/home/heroStatus";
 import { colouredFirst, defaultFamily, groupByHueFamily, type HueFamilyKey } from "@/lib/home/hueFamilies";
 import { dayHeader, fillTemplate } from "@/lib/home/time";
 import { todayScheduleItems } from "@/lib/home/todaySlots";
+import { fetchSchedule, fetchWatching } from "@/lib/schedule/fetch";
 import {
   continueCard,
   gemCard,
@@ -34,9 +34,9 @@ import { yearPath } from "@/lib/hubs/paths";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates, absoluteUrl, SITE_ORIGIN } from "@/lib/seo/alternates";
 import type {
+  ScheduleItem,
   SeasonalAnime,
   TrendingItem,
-  WatchingItem,
   YearlyTopItem,
 } from "@/lib/types";
 import styles from "./page.module.css";
@@ -90,8 +90,6 @@ const TRENDING_COUNT = 10;
 const COMPLETED_GEMS_LIMIT = 6;
 const YEAR_TOP_COUNT = 10;
 
-const EMPTY_SCHEDULE: ScheduleResponse = { today: "", groups: {} };
-
 interface SeasonResult {
   rows: SeasonalAnime[];
   /** The whole season, for "本季全部 N 部" — not just the rows fetched. */
@@ -141,19 +139,6 @@ async function safeCompletedGems(): Promise<TrendingItem[]> {
   }
 }
 
-// /api/anime/schedule is a rolling 7-day window keyed off "today" and its
-// counts move within the day, so it is never served from a cache here.
-async function safeSchedule(): Promise<ScheduleResponse> {
-  try {
-    return await apiGet<ScheduleResponse>("/api/anime/schedule", {
-      cache: "no-store",
-    });
-  } catch (err) {
-    console.warn("[HomePage] schedule fetch failed:", err);
-    return EMPTY_SCHEDULE;
-  }
-}
-
 async function safeYearlyTop(year: number): Promise<YearlyTopItem[]> {
   try {
     return await apiGet<YearlyTopItem[]>(
@@ -165,26 +150,6 @@ async function safeYearlyTop(year: number): Promise<YearlyTopItem[]> {
       console.warn("[HomePage] yearly-top fetch failed:", err);
     }
     return [];
-  }
-}
-
-interface WatchingResult {
-  loggedOut: boolean;
-  items: WatchingItem[];
-}
-
-// The signed-in reader's own list, read with their session cookie on the
-// server (apiGet forwards it). Fetched here, alongside everything else, so it
-// does not become a second round trip after the page's own data. Any failure
-// reads as "not signed in", as it always has.
-async function safeWatching(): Promise<WatchingResult> {
-  try {
-    const items = await apiGet<WatchingItem[]>("/api/subscriptions?status=watching", {
-      cache: "no-store",
-    });
-    return { loggedOut: false, items: Array.isArray(items) ? items : [] };
-  } catch {
-    return { loggedOut: true, items: [] };
   }
 }
 
@@ -301,9 +266,12 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
       safeSeasonal(season, year),
       safeTrending(),
       safeCompletedGems(),
-      safeSchedule(),
+      // Shared with the schedule page (lib/schedule/fetch.ts): the 7-day
+      // window, never cached, and the signed-in reader's watching list read
+      // server-side with their cookie — anonymous on any failure.
+      fetchSchedule("HomePage"),
       safeYearlyTop(year),
-      safeWatching(),
+      fetchWatching(),
     ]);
 
   const nowMs = requestTime();

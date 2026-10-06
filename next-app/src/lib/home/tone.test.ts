@@ -163,3 +163,43 @@ describe("every text/background pair the homepage paints clears 4.5:1 at every h
     expect(w.ratio).toBeGreaterThanOrEqual(AA);
   });
 });
+
+/** A white veil (`rgba(255,255,255,a)`) laid over an opaque background. */
+function veil(bg: Rgb, alpha: number): Rgb {
+  const mix = (b: number) => Math.round(255 * alpha + b * (1 - alpha));
+  return { r: mix(bg.r), g: mix(bg.g), b: mix(bg.b) };
+}
+
+describe("the schedule page's veiled surfaces keep the same guarantee", () => {
+  // The schedule page reuses the ladder and the three ground layers, and adds
+  // translucent white veils on top of them: every row sits on 3% white over
+  // the ground (6.5% when hovered), the selected day tab on 8%, a hovered row
+  // inside an aside box on 5% over the surface. A veil lightens the
+  // background, which only ever LOWERS contrast with light text, so each one
+  // is proven here rather than assumed from the layer under it.
+  //
+  // 58% white is the quietest neutral copy the page uses (notes, aired times,
+  // unselected counts). 0.5 — the design board's value for an aired time —
+  // falls to 4.46:1 on the lightest veil, which is why the page does not use it.
+  const veils = [
+    ["a row (3% over the ground)", 13, 0.012, 0.03],
+    ["a hovered row (6.5% over the ground)", 13, 0.012, 0.065],
+    ["the selected day tab (8% over the ground)", 13, 0.012, 0.08],
+    ["a hovered aside row (5% over the surface)", 18, 0.014, 0.05],
+  ] as const;
+
+  for (const [name, L, C, alpha] of veils) {
+    test(`tone text on ${name}`, () => {
+      const w = worst((h) => contrastRatio(rgbOf(76, 0.085, h), veil(rgbOf(L, C, h), alpha)));
+      expect(w.ratio).toBeGreaterThanOrEqual(AA);
+    });
+
+    test(`58% white on ${name}`, () => {
+      const w = worst((h) => {
+        const bg = veil(rgbOf(L, C, h), alpha);
+        return contrastRatio(over(bg, 0.58), bg);
+      });
+      expect(w.ratio).toBeGreaterThanOrEqual(AA);
+    });
+  }
+});

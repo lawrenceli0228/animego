@@ -152,6 +152,36 @@ const zhHant = {
     yearTopSub: '按 AniList 評分',
     yearTopAll: '完整年榜',
   },
+  // Schedule page (/calendar), hue redesign. The server components read the
+  // .ts dictionary, the client board the -spa twin; one key per visible string.
+  schedule: {
+    title: '放送表',
+    weekTotal: '本週 {{n}} 部更新',
+    zoneSite: '時間為北京時間（UTC+8）',
+    zoneLocal: '時間為你的本地時間（{{offset}}）',
+    dayTabs: '選擇星期',
+    dayCount: '{{day}} · {{n}} 部更新',
+    todayShort: '今',
+    chartHint: '點柱子切換',
+    upNext: '即將播出',
+    later: '待播出',
+    emptyDay: '這一天沒有新劇集',
+    loadFailed: '放送表暫時沒有載入，稍後重新整理試試。',
+    following: '在追',
+    unwatched: '未看',
+    watched: '已看',
+    behind: '落後 {{n}} 集',
+    upcoming: '待更新',
+    // Read before a row's score; the star beside it is aria-hidden.
+    scoreSr: '評分',
+    mineTitle: '我追的 · 本週',
+    mineEmpty: '你在追的番這週沒有更新。',
+    signInTitle: '標出你在追的番',
+    signInBody: '登入後，你追的番會在這張表上標出「在追 / 未看」，首頁的「繼續看」也會接上你的進度。',
+    nextSeason: '{{season}}新番',
+    nextSeasonCount: '已公佈 {{n}} 部',
+    nextSeasonStart: '{{month}}開播',
+  },
   // Anime watchers
   anime: {
     watchers: '人在追', watchersMore: '還有',
