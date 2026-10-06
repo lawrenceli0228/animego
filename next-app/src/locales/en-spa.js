@@ -49,6 +49,9 @@ const en = {
     heroEpUpdate: '· Ep {{ep}}',
     heroTotalEps: '{{n}} eps',
     heroWatching: 'Watching · Ep {{ep}}',
+    // The hero's pause control; its name says what pressing it will do.
+    heroPause: 'Pause auto-rotation',
+    heroPlay: 'Resume auto-rotation',
     continueTitle: 'Continue watching',
     continueAll: 'All watching',
     continueNext: 'Continue with ep {{ep}}',

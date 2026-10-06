@@ -106,6 +106,9 @@ const zhHant = {
     heroEpUpdate: '更新第 {{ep}} 集',
     heroTotalEps: '共 {{n}} 集',
     heroWatching: '已追 · 看到第 {{ep}} 集',
+    // The hero's pause control; its name says what pressing it will do.
+    heroPause: '暫停自動切換',
+    heroPlay: '繼續自動切換',
     continueTitle: '繼續看',
     continueAll: '全部在追',
     continueNext: '繼續看第 {{ep}} 集',
