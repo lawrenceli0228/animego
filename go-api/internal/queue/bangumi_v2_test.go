@@ -129,6 +129,10 @@ type v2TagCall struct {
 type fakeV2DB struct {
 	mu sync.Mutex
 
+	// The legacy-binding identity read and its withdrawal; see
+	// legacy_binding_test.go.  Unregistered ids answer pgx.ErrNoRows.
+	fakeLegacyBindingDB
+
 	tagDeletes   []string
 	tags         []v2TagCall
 	insertTagErr error

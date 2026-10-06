@@ -79,6 +79,10 @@ type v3DescCnCall struct {
 type fakeV3DB struct {
 	mu sync.Mutex
 
+	// The legacy-binding identity read and its withdrawal; see
+	// legacy_binding_test.go.  Unregistered ids answer pgx.ErrNoRows.
+	fakeLegacyBindingDB
+
 	updateFn       func(ctx context.Context, c v3UpdateCall) error
 	updateDescCnFn func(ctx context.Context, c v3DescCnCall) error
 

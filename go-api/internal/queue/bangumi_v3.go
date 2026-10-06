@@ -69,12 +69,13 @@ type V3Writer interface {
 	UpdateDescriptionCn(ctx context.Context, descriptionCn *string, anilistID int32, bgmID *int32) error
 }
 
-// V3DB combines the read + write surfaces this worker needs.  V3 has
-// no DB reads (the Args carry both anilistId + bgmId already), so
-// V3DB == V3Writer for now.  Kept as a separate interface so future
-// workers adding reads don't have to touch every call site.
+// V3DB combines the read + write surfaces this worker needs.  The Args
+// carry both anilistId + bgmId, so V3's only read is the identity check
+// every subject-copying worker runs before it writes (LegacyBindingDB, see
+// legacy_binding.go).
 type V3DB interface {
 	V3Writer
+	LegacyBindingDB
 }
 
 // BangumiV3Worker is the real Phase 3 heal-CN worker.  Embeds
@@ -120,6 +121,22 @@ func (w *BangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3Args
 		// Transient (network / 5xx / decode failure).  Surface so
 		// river retries the whole job per its policy.
 		return fmt.Errorf("bangumi_v3 subject %d (bgmId=%d): %w", anilistID, bgmID, err)
+	}
+
+	// 1b. V3 overwrites title_chinese unconditionally, and the admin
+	//     re-enrich?version=2 path runs it over every version-2 row that
+	//     holds a bgm_id -- so a binding from before migration 0011 that
+	//     names another show would have that show's name written back here
+	//     even after someone cleared it.  Withdraw such a binding instead of
+	//     healing from it; see legacy_binding.go.  A withdrawn row counts as
+	//     processed for the batch, but not as healed.
+	if subj != nil {
+		if withdrawn, err := withdrawIfAnotherWork(ctx, w.db, "bangumi_v3", anilistID, int32(bgmID), subj); err != nil {
+			return err
+		} else if withdrawn {
+			V3BatchRecordProcessed(false)
+			return nil
+		}
 	}
 
 	// 2. Decide titleChinese.  Subject.NameCN may be empty even on a

@@ -155,10 +155,16 @@ type BangumiRatingsFetcher interface {
 }
 
 // BangumiRatingsDB is the sqlc subset the Bangumi sweep uses.
+//
+// LegacyBindingDB is the identity check every subject-copying worker runs
+// before it writes; see legacy_binding.go.  This sweep is the one such
+// writer that reaches old rows on its own, so it is also where a
+// pre-0011 binding to another show is most likely to be caught.
 type BangumiRatingsDB interface {
 	ListBangumiRatingCandidates(ctx context.Context, currentYear int32, staleAfter pgtype.Interval, rowLimit int32) ([]dbgen.ListBangumiRatingCandidatesRow, error)
 	UpdateBangumiRating(ctx context.Context, bangumiScore *float64, bangumiVotes *int32, anilistID int32, bgmID int32) (int64, error)
 	MarkBangumiRatingChecked(ctx context.Context, anilistID int32, bgmID int32) (int64, error)
+	LegacyBindingDB
 }
 
 // ratingsStaleInterval renders ratingsStaleAfter as the pgtype.Interval
@@ -332,7 +338,7 @@ func (w *BangumiRatingsWorker) Work(ctx context.Context, _ *river.Job[BangumiRat
 		return nil
 	}
 
-	var written, unreadable, failed int
+	var written, unreadable, withdrawn, failed int
 	for _, row := range rows {
 		if row.BgmID == nil {
 			continue // the query's predicate guarantees this
@@ -342,6 +348,8 @@ func (w *BangumiRatingsWorker) Work(ctx context.Context, _ *river.Job[BangumiRat
 			written++
 		case ratingUnreadable:
 			unreadable++
+		case ratingWithdrawn:
+			withdrawn++
 		default:
 			failed++
 		}
@@ -354,6 +362,7 @@ func (w *BangumiRatingsWorker) Work(ctx context.Context, _ *river.Job[BangumiRat
 		"candidates", len(rows),
 		"rowsWritten", written,
 		"rowsUnreadable", unreadable,
+		"rowsWithdrawn", withdrawn,
 		"rowsFailed", failed,
 		"duration", w.clock().Sub(start))
 	return nil
@@ -373,6 +382,11 @@ const (
 	// ratingFailed — transport or database.  Nothing is stamped, so the
 	// row is a candidate again on the next pass.
 	ratingFailed
+	// ratingWithdrawn — the row's binding predates migration 0011 and the
+	// subject names another show, so the binding was withdrawn instead of
+	// its rating being copied.  The row has left this sweep's candidate set
+	// (bgm_id is NULL) and is V1's work again.
+	ratingWithdrawn
 )
 
 // refreshOne reads one subject and writes its rating figures.
@@ -388,6 +402,16 @@ func (w *BangumiRatingsWorker) refreshOne(ctx context.Context, anilistID, bgmID 
 	case err != nil:
 		slog.WarnContext(ctx, "bangumi_ratings subject failed", "anilistId", anilistID, "bgmId", bgmID, "err", err)
 		return ratingFailed
+	}
+
+	// Before copying the rating: is this subject this show at all?  See
+	// legacy_binding.go.  A failure leaves the row unstamped, so the next
+	// pass asks again -- the same treatment as any other failed read.
+	if withdrawn, err := withdrawIfAnotherWork(ctx, w.db, "bangumi_ratings", anilistID, bgmID, subject); err != nil {
+		slog.WarnContext(ctx, "bangumi_ratings binding check failed", "anilistId", anilistID, "bgmId", bgmID, "err", err)
+		return ratingFailed
+	} else if withdrawn {
+		return ratingWithdrawn
 	}
 
 	// A subject with no rating block leaves both figures alone — the

@@ -348,6 +348,17 @@ func (noopV12DB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) error {
 	return nil
 }
 
+// GetBangumiBindingIdentity + RepudiateLegacyBangumiBinding satisfy
+// LegacyBindingDB.  Registration tests never invoke them; ErrNoRows is the
+// "no verdict" answer.
+func (noopV12DB) GetBangumiBindingIdentity(_ context.Context, _ int32) (dbgen.GetBangumiBindingIdentityRow, error) {
+	return dbgen.GetBangumiBindingIdentityRow{}, pgx.ErrNoRows
+}
+
+func (noopV12DB) RepudiateLegacyBangumiBinding(_ context.Context, _ int32, _ int32) (int64, error) {
+	return 0, nil
+}
+
 func (noopV12DB) UpsertEpisodeTitleSourced(_ context.Context, _ dbgen.UpsertEpisodeTitleSourcedParams) (int64, error) {
 	return 1, nil
 }

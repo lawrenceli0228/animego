@@ -177,6 +177,17 @@ func (noRowV12DB) UpdateBangumiV3(_ context.Context, _ int32, _ *string) error {
 	return nil
 }
 
+// GetBangumiBindingIdentity + RepudiateLegacyBangumiBinding satisfy
+// queue.LegacyBindingDB.  V2 and V3 bail on the stub's no-hit Subject before
+// reaching the check, and ErrNoRows is its "no verdict" answer regardless.
+func (noRowV12DB) GetBangumiBindingIdentity(_ context.Context, _ int32) (dbgen.GetBangumiBindingIdentityRow, error) {
+	return dbgen.GetBangumiBindingIdentityRow{}, pgx.ErrNoRows
+}
+
+func (noRowV12DB) RepudiateLegacyBangumiBinding(_ context.Context, _ int32, _ int32) (int64, error) {
+	return 0, nil
+}
+
 // UpsertAnimeCache satisfies queue.WarmSeasonDB.  The warm-season smoke
 // test uses a stub AniList that returns an empty page, so this method
 // is never actually called — but it must exist for the V12DB embedding

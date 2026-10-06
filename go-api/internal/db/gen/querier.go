@@ -698,6 +698,31 @@ type Querier interface {
 	// Both sources, AniList's first (they carry a rank to sort on), then
 	// Bangumi's by vote count.
 	GetAnimeTagsByID(ctx context.Context, animeID int32) ([]GetAnimeTagsByIDRow, error)
+	// What a worker holding a freshly fetched Bangumi subject needs to decide
+	// whether that subject still describes this row, before copying anything
+	// out of it.  Read by V2, V3 and the Bangumi rating sweep; the decision
+	// itself is queue.legacyBindingNamesAnotherWork.
+	//
+	// bgm_match_source and admin_flag are here because the check applies only
+	// to bindings nothing has ever vouched for.  A NULL source means the row was
+	// bound before migration 0011, by the matcher that took list[0] of a
+	// Bangumi search whenever no result's name equalled the AniList native
+	// title exactly.  Every binding made since records its source, and each of
+	// those sources is a check in its own right: the id map, the V1 scorer, a
+	// human.
+	//
+	// The comparison titles are the three AniList ones.  title_chinese is
+	// deliberately absent, for the reason GetEpisodesBgmGateInputs gives: on a
+	// mis-bound row it already holds the wrong subject's name_cn, so comparing
+	// it against that subject validates the error with the error.
+	//
+	// season_year and start_date both come back because either can be missing,
+	// and the year is one of the check's two signals.  Same precedence as the
+	// /year hub: season_year first, then the year of start_date.
+	//
+	// id_map_agrees asks whether the vendored map names THIS pair -- the same
+	// test as description_cn_eligible (migration 0016).
+	GetBangumiBindingIdentity(ctx context.Context, anilistID int32) (GetBangumiBindingIdentityRow, error)
 	// DELETE pre-check: read the row so we can confirm ownership before
 	// deleting.  Returns the user_id the comment was authored by; handler
 	// compares against claims.UserID.
@@ -1865,6 +1890,62 @@ type Querier interface {
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error
+	// Withdraw a pre-0011 binding that names another work, and everything that
+	// was copied out of it, then hand the row back to V1.
+	//
+	// # Why such bindings exist
+	//
+	// Until migration 0011 the V1 matcher searched Bangumi by the native title
+	// and, when no result's name matched exactly, bound list[0].  Bangumi's
+	// legacy search matches any token, so for a sequel announced before its own
+	// subject existed the query "アオアシ 第2期" returned unrelated shows sharing
+	// only "第2期", and the first of them was bound.  Every later step trusted the
+	// binding: V2 copied the subject's name_cn into title_chinese and its rating
+	// into bangumi_score, the episode list into anime_episode_titles, and the
+	// zh-Hant sweep converted the wrong title_chinese with OpenCC.  The result is
+	// another show's name, score and episode names on a public, indexed page.
+	//
+	// # What is cleared, and why each one
+	//
+	//   bgm_id, title_chinese, bangumi_score/votes   the binding and its copies
+	//   title_hant* when source = 'opencc'           a conversion of the title
+	//                                                being cleared; the hant
+	//                                                sweep re-derives it from the
+	//                                                next title_chinese
+	//   episodes_bgm*                                inferred from the subject's
+	//                                                episode list (same set
+	//                                                ResetAnimeEnrichment clears)
+	//   episode_titles_at, bangumi_rating_checked_at stamps that mean "attempted
+	//   bangumi_subject_unreadable_at                against THIS binding"
+	//   bangumi_version = 0                          the hourly orphan scan
+	//                                                re-runs V1, which binds
+	//                                                through the id map or the
+	//                                                scorer -- both record a
+	//                                                source, so this statement
+	//                                                can never fire on the result
+	//
+	// Episode names are withdrawn by source, the same conservatism
+	// ClearEpisodeTitlesBySourceOutside applies: a row holding only Bangumi
+	// names (or nothing) is deleted, a row that also holds a 'manual' or 'ddp'
+	// name keeps that half and loses only the Bangumi half.  'ddp' names are
+	// written only after dandanplay's own AniList cross-link vouches for the
+	// pair, so they are not this binding's output.  The two data-modifying CTEs
+	// touch disjoint rows, which is what lets them share one statement.
+	//
+	// Bangumi tags go with the subject they were read from.  description_cn is
+	// not touched: the Bangumi synopsis channel only writes rows that
+	// description_cn_eligible vouches for, and the id-map half of that test is
+	// excluded below, so no row this statement reaches can hold one; the LLM
+	// tier translates the English description and never reads the binding.
+	//
+	// # Guards
+	//
+	// Pinned to the subject the caller fetched (bgm_id = $2), so a binding that
+	// moved between the fetch and this write is left alone.  Scoped to rows
+	// whose binding nothing vouches for: no recorded source, no admin
+	// correction, no id-map entry naming this pair.  The worker checks the same
+	// three before calling, but the statement must be safe for any caller.
+	RepudiateLegacyBangumiBinding(ctx context.Context, anilistID int32, bgmID int32) (int64, error)
 	// POST /api/admin/enrichment/:anilistId/reset — Express:
 	//   doc.bangumiVersion = 0
 	//   doc.titleChinese   = null
