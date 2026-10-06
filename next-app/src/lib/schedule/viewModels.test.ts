@@ -38,6 +38,9 @@ describe("scheduleItemView", () => {
       score: "8.5",
     });
     expect(typeof v.hue).toBe("number");
+    // The exact key set: every field here ships in the RSC payload for every
+    // airing of the week, so nothing from the API row may ride along.
+    expect(Object.keys(v).sort()).toEqual(["at", "cover", "ep", "href", "hue", "id", "key", "meta", "score", "title"]);
   });
 
   test("the meta line is episode · format · two localised genres", () => {

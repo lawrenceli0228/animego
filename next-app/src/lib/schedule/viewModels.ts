@@ -61,7 +61,10 @@ export function scheduleItemView(row: ScheduleItem, lang: Lang, epTemplate: stri
   ]
     .filter((part): part is string => !!part)
     .join(" · ");
-  return { ...todayCard(row, lang), meta, score: scoreText(row.averageScore) };
+  // Named key by key rather than spread: whatever todayCard grows for the
+  // homepage would otherwise ride into this payload unseen.
+  const { id, href, title, cover, hue, key, at, ep } = todayCard(row, lang);
+  return { id, href, title, cover, hue, key, at, ep, meta, score: scoreText(row.averageScore) };
 }
 
 /**
