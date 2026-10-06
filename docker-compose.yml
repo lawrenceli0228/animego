@@ -57,7 +57,14 @@ services:
       timeout: 3s
       retries: 3
       start_period: 30s
-    mem_limit: 512m
+    # Headroom for the image optimizer and SSR while caches are still cold
+    # after a deploy.
+    mem_limit: 1g
+    volumes:
+      # Optimized images survive container recreation (every deploy recreates
+      # next-app). Only images/: the rest of .next/cache is the fetch data
+      # cache, which must not outlive the build that wrote it.
+      - next-image-cache:/app/.next/cache/images
     logging:
       driver: json-file
       options:
@@ -122,7 +129,8 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
-    mem_limit: 400m
+    # Headroom above shared_buffers for per-connection work under load.
+    mem_limit: 1g
     logging:
       driver: json-file
       options:
@@ -204,7 +212,8 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
-    mem_limit: 200m
+    # Headroom for the in-process caches while they refill after a restart.
+    mem_limit: 512m
     logging:
       driver: json-file
       options:
@@ -311,7 +320,8 @@ services:
       - next-app
     networks:
       - animego
-    mem_limit: 64m
+    # Headroom for open connections and the image cache's working set.
+    mem_limit: 256m
     logging:
       driver: json-file
       options:
@@ -321,6 +331,7 @@ services:
 volumes:
   postgres-data:
   avatars:
+  next-image-cache:
 
 networks:
   animego:

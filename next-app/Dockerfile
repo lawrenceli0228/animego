@@ -83,6 +83,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
+# .next/cache/images is a named volume (docker-compose.yml). A new named volume
+# takes its owner from the image's directory at the mount point, so the
+# directory has to exist here, owned by the runtime user; otherwise the volume
+# is created root-owned and the image optimizer cannot write its cache.
+RUN mkdir -p .next/cache/images && chown -R nextjs:nodejs .next/cache
+
 USER nextjs
 EXPOSE 3000
 
