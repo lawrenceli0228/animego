@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import WeeklySchedule, {
-  type ScheduleResponse,
-} from "@/components/anime/WeeklySchedule";
+import WeeklySchedule from "@/components/anime/WeeklySchedule";
 import { apiGet } from "@/lib/api";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
+import type { ScheduleResponse } from "@/lib/types";
 import type { CSSProperties } from "react";
 
 // Rolling 7-day schedule changes continuously as episodes air and

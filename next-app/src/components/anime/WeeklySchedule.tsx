@@ -6,11 +6,8 @@
 // representation in the legacy version. Schedule data still comes from
 // the server via props; only the active-day pick lives on the client.
 //
-// ScheduleDay / ScheduleResponse are declared inline (NOT added to
-// lib/types.ts) because lib/types.ts is the lockstep mirror of the Go
-// API surface and this component is the only consumer in next-app so
-// far. If a second consumer appears, lift these into lib/types.ts in
-// the same commit as the Go-side mirror change.
+// ScheduleItem / ScheduleResponse now live in lib/types.ts, the mirror of
+// the Go API surface, since the homepage reads them too.
 //
 // ASCII comments only - Unicode in source can panic Turbopack.
 
@@ -20,6 +17,7 @@ import { useRef, useState } from "react";
 import { pickTitle } from "@/lib/formatters";
 import FadeImage from "@/components/ui/FadeImage";
 import type { Dict, Lang } from "@/lib/i18n";
+import type { ScheduleItem, ScheduleResponse } from "@/lib/types";
 import { nextTabIndex } from "./tabListNav";
 import styles from "./WeeklySchedule.module.css";
 
@@ -29,44 +27,6 @@ import styles from "./WeeklySchedule.module.css";
 // but produces a value that has to match across hydration for these
 // relationships to resolve at all.
 const TABS_ID = "weekly-schedule";
-
-export interface ScheduleItem {
-  scheduleId: number;
-  airingAt: number;
-  episode: number;
-  anilistId: number;
-  titleRomaji: string | null;
-  titleEnglish: string | null;
-  titleNative: string | null;
-  titleChinese: string | null;
-  // Traditional Chinese title channel (migration 0022). Optional rather than
-  // `| null` for the same reason as everywhere in lib/types.ts: a go-api older
-  // than that commit omits them entirely, and pickTitle's ladder already falls
-  // through. See the hant-channel note at the top of lib/types.ts.
-  titleHant?: string | null;
-  titleHantSource?: string | null;
-  /**
-   * SERP-safe projection: null whenever titleHant is a machine conversion.
-   * Nothing on this component reaches a search engine — the schedule renders
-   * card link text, not a <title> or JSON-LD name — so pickTitle() reads
-   * titleHant here. Any future metadata built from a ScheduleItem must read
-   * this field instead.
-   */
-  titleHantSeo?: string | null;
-  coverImageUrl: string | null;
-  coverImageColor: string | null;
-  posterAccent: string | null;
-  posterAccentRgb: string | null;
-  posterAccentContrastOnBlack: number | null;
-  format: string | null;
-  averageScore: number | null;
-  genres: string[];
-}
-
-export interface ScheduleResponse {
-  today: string;
-  groups: Record<string, ScheduleItem[]>;
-}
 
 // Public alias matching the subagent task spec.
 export type ScheduleDay = {
