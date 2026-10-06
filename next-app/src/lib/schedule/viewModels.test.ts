@@ -91,6 +91,21 @@ describe("buildWeek", () => {
     expect(day.items.map((i) => i.id)).toEqual([2, 1]);
   });
 
+  test("a colourless best-rated show does not paint the page; the best-rated coloured one does", () => {
+    // Same call as the homepage hero (hueFamilies.colouredFirst): the lead
+    // paints the whole page, and the brand-fallback accent would paint it grey.
+    const grey = row({ anilistId: 1, averageScore: 95, posterAccent: "#8B5CF6", airingAt: 10 });
+    const lesser = row({ anilistId: 2, averageScore: 70, posterAccent: "#e47843", airingAt: 20 });
+    const better = row({ anilistId: 3, averageScore: 80, posterAccent: "#17afd6", airingAt: 30 });
+    const [day] = buildWeek(schedule({ [today]: [grey, lesser, better] }), "zh", copy);
+    expect(day.hue).toBe(scheduleItemView(better, "zh", copy.ep).hue);
+  });
+
+  test("a day with no coloured show at all is neutral", () => {
+    const grey = row({ averageScore: 90, posterAccent: "#8B5CF6" });
+    expect(buildWeek(schedule({ [today]: [grey] }), "zh", copy)[0].hue).toBeNull();
+  });
+
   test("an empty day has no hue", () => {
     expect(buildWeek(schedule({}), "zh", copy)[0].hue).toBeNull();
   });

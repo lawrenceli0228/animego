@@ -8,7 +8,7 @@ import { collectConsoleErrors } from "../_helpers";
  * What is pinned:
  *   - choosing a day — by its tab, or by its bar in 本周更新 on a wide
  *     screen — shows that day's list and nothing else, and the page takes the
- *     colour of one of that day's shows (its best-rated one);
+ *     colour of one of that day's shows (its best-rated coloured one);
  *   - the 现在 HH:MM rule exists on today and on no other day;
  *   - on a phone the tabs are a sideways pill row, and choosing a pill that
  *     is off-screen scrolls the ROW to show it — the page itself stays put.

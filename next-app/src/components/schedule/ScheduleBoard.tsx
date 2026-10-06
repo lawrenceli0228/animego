@@ -9,8 +9,8 @@
 // sign-in prompt and the next-season link are server-rendered nodes passed in.
 // Nothing here fetches.
 //
-// The page wears the selected day's colour: its best-rated show's hue, turned
-// into finished oklch() strings (lib/home/tone.ts) and written onto <main>,
+// The page wears the selected day's colour: its best-rated coloured show's hue,
+// turned into finished oklch() strings (lib/home/tone.ts) and written onto <main>,
 // the element whose descendants read them. Switching day re-colours the
 // ground, the tabs, the bars and the 现在 rule together over 0.9s.
 

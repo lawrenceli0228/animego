@@ -58,8 +58,10 @@ export function weekdayShort(weekday: number, lang: Lang): string {
 }
 
 /**
- * The show whose colour a day wears: the best-rated one, the earlier airing on
- * a tie, the first airing when nobody is rated. Null for an empty day.
+ * The lead of a list of shows: the best-rated one, the earlier airing on a
+ * tie, the first airing when nobody is rated. Null for an empty list.
+ * buildWeek hands it only a day's coloured shows — the lead's colour is the
+ * page's.
  *
  * Expects airing order, which is how the API groups arrive.
  */

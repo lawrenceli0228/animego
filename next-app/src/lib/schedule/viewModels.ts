@@ -37,7 +37,7 @@ export interface ScheduleDayView {
   short: string;
   /** "9/24" */
   md: string;
-  /** The day's best-rated show's hue: the page's colour while it is selected. */
+  /** The day's best-rated coloured show's hue: the page's colour while it is selected. */
   hue: number | null;
   /** In airing order. */
   items: ScheduleItemView[];
@@ -69,11 +69,16 @@ export function scheduleItemView(row: ScheduleItem, lang: Lang, epTemplate: stri
  *
  * A day the API has no group for still gets its entry (and its tab), with no
  * items and no hue.
+ *
+ * A day's colour is its best-rated show that HAS a colour. The lead paints the
+ * whole page, and a show on the brand-fallback accent would paint it grey —
+ * the homepage hero makes the same call (hueFamilies.colouredFirst). Only a
+ * day with no coloured show at all is neutral.
  */
 export function buildWeek(schedule: ScheduleResponse, lang: Lang, copy: WeekCopy): ScheduleDayView[] {
   return weekKeys(schedule.today).map((key, i) => {
     const rows = [...(schedule.groups?.[key] ?? [])].sort((a, b) => a.airingAt - b.airingAt);
-    const lead = leadOf(rows);
+    const lead = leadOf(rows.filter((r) => animeHue(r.posterAccent) !== null));
     const weekday = parseDayKey(key)?.weekday ?? 0;
     return {
       key,
