@@ -51,12 +51,14 @@ describe("followingThisWeek", () => {
   });
 
   test("sorted by when they air, not by id or by day order of the input", () => {
+    // Air order (7 at +3h, then 6 at +5h) disagrees with id order and with
+    // input order, so a sort on either would fail here.
     const out = followingThisWeek(
-      [{ items: [item(7, 5, 2), item(6, 3, 2)] }],
+      [{ items: [item(6, 5, 2), item(7, 3, 2)] }],
       { 6: 0, 7: 0 },
       NOW,
     );
-    expect(out.map((e) => e.item.id)).toEqual([6, 7]);
+    expect(out.map((e) => e.item.id)).toEqual([7, 6]);
   });
 
   test("nobody followed, nothing listed", () => {
