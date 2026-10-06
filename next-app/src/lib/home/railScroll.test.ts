@@ -7,6 +7,7 @@ import {
   nowScrollLeft,
   pageScrollLeft,
   railEdges,
+  releasedElsewhere,
   startsDrag,
   suppressesClick,
 } from "./railScroll";
@@ -25,6 +26,20 @@ describe("startsDrag", () => {
   test("touch and pen scroll the row natively, not through the drag", () => {
     expect(startsDrag("touch", 0)).toBe(false);
     expect(startsDrag("pen", 0)).toBe(false);
+  });
+});
+
+describe("releasedElsewhere", () => {
+  test("a move with the primary button up belongs to no press", () => {
+    expect(releasedElsewhere(0)).toBe(true);
+    // Only the secondary or the middle button held: still not our press.
+    expect(releasedElsewhere(2)).toBe(true);
+    expect(releasedElsewhere(4)).toBe(true);
+  });
+
+  test("the primary button still down, alone or with others: the press goes on", () => {
+    expect(releasedElsewhere(1)).toBe(false);
+    expect(releasedElsewhere(3)).toBe(false);
   });
 });
 

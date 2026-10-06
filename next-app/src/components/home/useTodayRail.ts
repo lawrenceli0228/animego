@@ -18,6 +18,7 @@ import {
   beginPress,
   movePress,
   railEdges,
+  releasedElsewhere,
   startsDrag,
   suppressesClick,
   type RailEdges,
@@ -77,6 +78,7 @@ export interface RailDrag {
     onPointerMove: (e: PointerEvent<HTMLElement>) => void;
     onPointerUp: (e: PointerEvent<HTMLElement>) => void;
     onPointerCancel: (e: PointerEvent<HTMLElement>) => void;
+    onLostPointerCapture: (e: PointerEvent<HTMLElement>) => void;
     onClickCapture: (e: MouseEvent<HTMLElement>) => void;
     onDragStart: (e: DragEvent<HTMLElement>) => void;
   };
@@ -97,11 +99,13 @@ export function useRailDrag(): RailDrag {
   const swallowClick = useRef(false);
 
   const end = (e: PointerEvent<HTMLElement>) => {
+    // Whatever ends, nothing is being dragged any more — including a drag
+    // whose release the rail never saw.
+    setDragging(false);
     const p = press.current;
     if (!p || p.pointerId !== e.pointerId) return;
     press.current = null;
     if (!p.dragging) return;
-    setDragging(false);
     // A cancelled pointer gets no click. A released one gets it in this same
     // task; the timeout makes sure a click that never comes cannot swallow
     // the next real one.
@@ -116,12 +120,21 @@ export function useRailDrag(): RailDrag {
     handlers: {
       onPointerDown: (e) => {
         swallowClick.current = false;
-        if (!startsDrag(e.pointerType, e.button)) return;
-        press.current = beginPress(e.pointerId, e.clientX, e.currentTarget.scrollLeft);
+        setDragging(false);
+        press.current = startsDrag(e.pointerType, e.button)
+          ? beginPress(e.pointerId, e.clientX, e.currentTarget.scrollLeft)
+          : null;
       },
       onPointerMove: (e) => {
         const p = press.current;
         if (!p || p.pointerId !== e.pointerId) return;
+        // Released somewhere else before the drag began (and the capture with
+        // it): this is a hover now, not a press.
+        if (releasedElsewhere(e.buttons)) {
+          press.current = null;
+          setDragging(false);
+          return;
+        }
         const move = movePress(p, e.clientX);
         press.current = move.press;
         if (move.started) {
@@ -134,6 +147,9 @@ export function useRailDrag(): RailDrag {
       },
       onPointerUp: end,
       onPointerCancel: end,
+      // Capture taken away (the row unmounted, the browser stepped in): the
+      // press is over too. After a normal release this finds no press left.
+      onLostPointerCapture: end,
       onClickCapture: (e) => {
         if (!swallowClick.current) return;
         swallowClick.current = false;

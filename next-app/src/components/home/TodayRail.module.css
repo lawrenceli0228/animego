@@ -204,14 +204,23 @@
   border-color: rgba(255, 255, 255, 0.26);
 }
 
+/* At an end: the glyph and the glass fade, the element does not. Opacity on
+ * the button would fade its focus ring with it — and focus stays on the
+ * button at the end of the row. The ring rule below comes after this one and
+ * ties on specificity, so a focused end button still draws it. */
 .arrow[aria-disabled="true"] {
-  opacity: 0.32;
   cursor: default;
+  border-color: rgba(255, 255, 255, 0.07);
+  background-color: color-mix(in oklch, var(--home-pop) 45%, transparent);
+  color: rgba(255, 255, 255, 0.3);
+  box-shadow: none;
 }
 
+/* No hover response at an end (and no box-shadow here: this selector
+ * outranks the ring's, and a hovered, focused end button keeps its ring). */
 .arrow[aria-disabled="true"]:hover {
-  background-color: color-mix(in oklch, var(--home-pop) 84%, transparent);
-  border-color: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.07);
+  background-color: color-mix(in oklch, var(--home-pop) 45%, transparent);
 }
 
 .arrow:focus-visible {

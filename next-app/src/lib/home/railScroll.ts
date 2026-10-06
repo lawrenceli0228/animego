@@ -20,6 +20,17 @@ export function startsDrag(pointerType: string, button: number): boolean {
   return pointerType === "mouse" && button === 0;
 }
 
+/**
+ * Whether a move arrives with the primary button already up — a press whose
+ * release the rail never saw. Before the drag threshold the pointer is not
+ * captured, so a press that wandered off the rail (to cancel a click, onto an
+ * arrow, into a context menu) is released elsewhere; the next hover must not
+ * be mistaken for a drag. `buttons` is PointerEvent.buttons, a bitmask.
+ */
+export function releasedElsewhere(buttons: number): boolean {
+  return (buttons & 1) === 0;
+}
+
 /** One press of the mouse on the rail. */
 export interface RailPress {
   readonly pointerId: number;
