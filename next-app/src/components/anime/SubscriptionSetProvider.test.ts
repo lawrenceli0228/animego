@@ -7,6 +7,7 @@ import {
   broadcastSignedOut,
   classifyCreateStatus,
   classifyDeleteStatus,
+  hasSignedOutHere,
   nextSubscriptionSet,
   subscribeToSignedOut,
   subscribedIdsFromList,
@@ -301,11 +302,30 @@ describe("sign-out signal", () => {
     expect(() => broadcastSignedOut()).not.toThrow();
   });
 
+  test("the sign-out is remembered for the document, for blocks mounted after it", () => {
+    // Browser back / forward remounts a cached page without a request; a
+    // SignedOutGate mounted then never hears the event and must still know.
+    installWindow();
+    expect(hasSignedOutHere()).toBe(false);
+    broadcastSignedOut();
+    expect(hasSignedOutHere()).toBe(true);
+    expect(hasSignedOutHere()).toBe(true);
+  });
+
+  test("a new document starts signed in again", () => {
+    // Signing in is a full navigation — a new window object here.
+    installWindow();
+    broadcastSignedOut();
+    installWindow();
+    expect(hasSignedOutHere()).toBe(false);
+  });
+
   test("both halves are inert during SSR instead of throwing", () => {
     // The module is imported by server-rendered trees; touching `window` at
     // module scope or on call would break the build, not just the feature.
     delete (globalThis as { window?: unknown }).window;
     expect(() => broadcastSignedOut()).not.toThrow();
+    expect(hasSignedOutHere()).toBe(false);
     const off = subscribeToSignedOut(() => {
       throw new Error("must never run");
     });

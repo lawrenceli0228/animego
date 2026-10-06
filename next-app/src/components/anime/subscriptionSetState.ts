@@ -104,6 +104,22 @@ export const QUICK_ADD_STATUS = "watching" as const;
 export const SIGNED_OUT_EVENT = "animego:auth:signed-out";
 
 /**
+ * The windows (documents) that have seen a sign-out.
+ *
+ * The event alone only reaches what is mounted when it fires. Next reuses
+ * cached pages on browser back / forward, and a tree remounted from that cache
+ * after a sign-out — the 全部在追 list, the homepage's 继续看 — would otherwise
+ * show the previous reader's data again under a signed-out header, without a
+ * request reaching the server. So the fact is kept for the rest of the
+ * document. It never needs clearing: signing in again is a full navigation
+ * (lib/authRedirect.ts), which is a new document.
+ *
+ * Keyed by window rather than a module boolean, so a test that installs its
+ * own window starts clean.
+ */
+const signedOutWindows = new WeakSet<object>();
+
+/**
  * Tell every account-scoped view on the page that the session is gone.
  *
  * Call it from the logout handler *after* the request settles, success or
@@ -112,7 +128,16 @@ export const SIGNED_OUT_EVENT = "animego:auth:signed-out";
  */
 export function broadcastSignedOut(): void {
   if (typeof window === "undefined") return;
+  signedOutWindows.add(window);
   window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+}
+
+/**
+ * Whether this document has seen a sign-out — the snapshot for
+ * useSyncExternalStore(subscribeToSignedOut, hasSignedOutHere, () => false).
+ */
+export function hasSignedOutHere(): boolean {
+  return typeof window !== "undefined" && signedOutWindows.has(window);
 }
 
 /** Subscribe to {@link SIGNED_OUT_EVENT}. Returns the unsubscribe function. */
