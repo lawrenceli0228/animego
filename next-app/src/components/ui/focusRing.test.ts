@@ -83,6 +83,29 @@ function focusIsSubject(selectorList: string): boolean {
   });
 }
 
+/** Everything inside `:has(…)`, one level of nested parentheses deep. */
+const HAS_ARGUMENT = /:has\((?:[^()]|\([^()]*\))*\)/g;
+
+/**
+ * True when the rule is a focus indicator, i.e. what this suite holds to the
+ * ring and to the forced-colors outline.
+ *
+ * `X:has(:focus-visible)` styles X because something INSIDE it has focus, so
+ * by itself it says nothing about drawing an indicator. It is one when it
+ * draws one: the search pill's ring around its field
+ * (`.pill:has(.input:focus-visible)`) is the field's indicator and is held to
+ * the ring like any other. The site header showing itself when keyboard focus
+ * lands in it while tucked away (`.bar[data-hidden="true"]:has(:focus-visible)`,
+ * a transform) is not, and demanding the ring there would paint one around
+ * the whole bar — the tooltip case above, written with :has().
+ */
+function isIndicator(rule: { selector: string; body: string }): boolean {
+  if (!focusIsSubject(rule.selector)) return false;
+  const outsideHas = rule.selector.replace(HAS_ARGUMENT, "");
+  if (outsideHas.includes(":focus-visible")) return true;
+  return /(^|[;\s])(box-shadow|outline)\s*:/.test(rule.body);
+}
+
 describe("the focus ring", () => {
   test("the scan finds rules at all (guards the parser, not the CSS)", () => {
     // Without this, a regex that quietly matched nothing would make every
@@ -90,9 +113,23 @@ describe("the focus ring", () => {
     expect(rules.length).toBeGreaterThanOrEqual(5);
   });
 
+  test("a :has() rule counts as an indicator only when it draws one", () => {
+    // Pins isIndicator itself, so loosening it cannot quietly let real
+    // indicators through.
+    const ring = "box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);";
+    expect(isIndicator({ selector: ".pill:has(.input:focus-visible)", body: ring })).toBe(true);
+    expect(isIndicator({ selector: ".pill:has(.input:focus-visible)", body: "outline: none;" })).toBe(true);
+    expect(
+      isIndicator({ selector: '.bar[data-hidden="true"]:has(:focus-visible)', body: "transform: none;" }),
+    ).toBe(false);
+    expect(isIndicator({ selector: ".x:focus-visible", body: "color: red;" })).toBe(true);
+    expect(isIndicator({ selector: ".x:has(.y):focus-visible", body: "color: red;" })).toBe(true);
+    expect(isIndicator({ selector: ".bar:focus-visible .barTip", body: ring })).toBe(false);
+  });
+
   test("every :focus-visible rule draws the one specified ring", () => {
     const wrong = rules
-      .filter((r) => focusIsSubject(r.selector))
+      .filter(isIndicator)
       .filter((r) => !RING.test(r.body))
       .map((r) => `${r.file} — ${r.selector}`);
     expect(wrong).toEqual([]);
@@ -124,7 +161,7 @@ describe("the focus ring", () => {
     // that is invisible normally and drawn in the system colour in that mode
     // (Button.module.css) — the ring above stays the visible indicator.
     const bare = rules
-      .filter((r) => focusIsSubject(r.selector))
+      .filter(isIndicator)
       .filter((r) => /outline\s*:\s*(none|0)\s*(;|$)/.test(r.body))
       .map((r) => `${r.file} — ${r.selector}`);
     expect(bare).toEqual([]);
