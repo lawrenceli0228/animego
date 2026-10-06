@@ -325,9 +325,11 @@
   }
 }
 
+/* The time column keeps its 96px here: a next-day time ("Tmrw 01:00", 94px
+ * in English; "次日 01:00", 86px) does not fit in 80, and spilled into the
+ * row card beside it. Only the gap and the row's own columns narrow. */
 @media (max-width: 1100px) {
   .slot {
-    grid-template-columns: 80px minmax(0, 1fr);
     gap: 12px;
   }
 
