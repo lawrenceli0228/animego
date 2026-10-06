@@ -51,7 +51,8 @@
 }
 
 .tab:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
@@ -127,7 +128,8 @@
 @media (max-width: 900px) {
   .tabs {
     margin-top: 20px;
-    /* Room for the 3px focus ring: a scroll container clips on both axes. */
+    /* Room for the 3px focus ring, and for the forced-colors outline (2px at
+     * a 2px offset): a scroll container clips on both axes. */
     padding-block: 4px;
     display: flex;
     gap: 8px;
