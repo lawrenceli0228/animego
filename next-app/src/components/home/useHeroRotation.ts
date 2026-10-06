@@ -18,7 +18,6 @@ import {
   useState,
   useSyncExternalStore,
   type FocusEvent,
-  type PointerEvent,
   type RefObject,
 } from "react";
 import {
@@ -80,10 +79,8 @@ export interface HeroRotation {
   togglePause: () => void;
   /** Changes when the current slide's 8 seconds start over without a switch. */
   restarts: number;
-  /** For the hero's root element: the hover and focus holds. */
+  /** For the hero's root element: the keyboard-focus hold. */
   rootHandlers: {
-    onPointerEnter: (e: PointerEvent<HTMLElement>) => void;
-    onPointerLeave: (e: PointerEvent<HTMLElement>) => void;
     onFocus: (e: FocusEvent<HTMLElement>) => void;
     onBlur: (e: FocusEvent<HTMLElement>) => void;
   };
@@ -122,6 +119,31 @@ export function useHeroRotation({ rootRef, count, current, onPreload, onAdvance 
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
+
+  // The mouse over the hero: hold. Native pointerenter / pointerleave on the
+  // element, not React's onPointerEnter / onPointerLeave. React emulates those
+  // from pointerover / pointerout, and when the node under the cursor is
+  // replaced — the pause button swaps its icon on click, 追番 turns into 已追 —
+  // the next pointerout comes from a node React has already unmounted, so it
+  // dispatches no leave at all: the hero stayed held after the reader pressed
+  // play and moved away. The browser's own leave follows the hover chain.
+  // Touch is not hover.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const enter = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") setPointer(true);
+    };
+    const leave = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") setPointer(false);
+    };
+    el.addEventListener("pointerenter", enter);
+    el.addEventListener("pointerleave", leave);
+    return () => {
+      el.removeEventListener("pointerenter", enter);
+      el.removeEventListener("pointerleave", leave);
+    };
+  }, [rootRef]);
 
   // Scrolled out of view: hold. The first report arrives asynchronously, with
   // the hero's position at the time — a reload that restores a scrolled page
@@ -173,12 +195,6 @@ export function useHeroRotation({ rootRef, count, current, onPreload, onAdvance 
     togglePause: () => setPaused((p) => !p),
     restarts,
     rootHandlers: {
-      onPointerEnter: (e) => {
-        if (e.pointerType !== "touch") setPointer(true);
-      },
-      onPointerLeave: (e) => {
-        if (e.pointerType !== "touch") setPointer(false);
-      },
       onFocus: (e) => setFocus(isKeyboardFocus(e.target)),
       onBlur: (e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocus(false);
