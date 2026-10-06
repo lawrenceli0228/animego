@@ -249,6 +249,8 @@ test.describe("the phone bar and its drawer", () => {
       .toBeGreaterThanOrEqual(0);
     const scrolledTo = await page.evaluate(() => window.scrollY);
     expect(scrolledTo).toBe(300);
+    // Closed, there is no drawer for aria-controls to point at.
+    expect(await menuButton.getAttribute("aria-controls")).toBeNull();
 
     await tap(page, MENU_BUTTON);
     const drawer = page.getByRole("dialog", { name: "菜单" });
@@ -286,6 +288,7 @@ test.describe("the phone bar and its drawer", () => {
     await expect(drawer).toHaveCount(0);
     await expect(menuButton).toHaveAttribute("aria-expanded", "false");
     await expect(menuButton).toBeFocused();
+    expect(await menuButton.getAttribute("aria-controls")).toBeNull();
 
     // And the page scrolls again.
     await page.mouse.wheel(0, 400);

@@ -112,7 +112,9 @@ export default function NavDrawer({ entries, labels, chrome }: NavDrawerProps) {
         className={styles.menuButton}
         aria-label={t("nav.openMenu")}
         aria-expanded={isOpen}
-        aria-controls={drawerId}
+        // Only while the drawer exists: an id reference to nothing is a
+        // broken relationship, not an empty one.
+        aria-controls={phase !== "closed" ? drawerId : undefined}
         aria-haspopup="dialog"
         onClick={() => (isOpen ? close(true) : setPhase("open"))}
       >
