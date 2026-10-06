@@ -104,6 +104,17 @@ const en = {
   },
   // Schedule page (/calendar), hue redesign. The server components read the
   // .ts dictionary, the client board the -spa twin; one key per visible string.
+  // 全部在追 (/watching): every show the reader is watching, as 继续看 cards.
+  // Server-rendered from the .ts copy; the -spa twin keeps the sets equal.
+  watchingPage: {
+    title: 'Watching',
+    count: '{{n}} watching',
+    order: 'Most recently updated first',
+    manage: 'Manage list',
+    loadFailed: "Your watching list didn't load. Refresh the page to try again.",
+    signedOut: "You've signed out, so your watching list is hidden.",
+    signIn: 'Sign in again',
+  },
   schedule: {
     title: 'Schedule',
     weekTotal: '{{n}} airings this week',

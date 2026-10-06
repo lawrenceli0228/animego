@@ -161,6 +161,17 @@ const zhHant = {
   },
   // Schedule page (/calendar), hue redesign. The server components read the
   // .ts dictionary, the client board the -spa twin; one key per visible string.
+  // 全部在追 (/watching): every show the reader is watching, as 继续看 cards.
+  // Server-rendered from the .ts copy; the -spa twin keeps the sets equal.
+  watchingPage: {
+    title: '全部在追',
+    count: '{{n}} 部在追',
+    order: '最近更新的在前',
+    manage: '管理追番',
+    loadFailed: '在追清單沒有載入，重新整理頁面再試一次。',
+    signedOut: '你已登出，在追清單不再顯示。',
+    signIn: '重新登入',
+  },
   schedule: {
     title: '放送表',
     weekTotal: '本週 {{n}} 部更新',

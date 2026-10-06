@@ -32,6 +32,13 @@ export async function fetchSchedule(caller: string): Promise<ScheduleResponse> {
 export interface WatchingResult {
   loggedOut: boolean;
   items: WatchingItem[];
+  /**
+   * The list could not be read for a reason other than the session — the
+   * API down, a 5xx. `loggedOut` is true then as well, which is how the
+   * homepage and the schedule page have always rendered it (as a visitor);
+   * the 全部在追 page, which is behind the sign-in gate, tells the two apart.
+   */
+  unavailable: boolean;
 }
 
 /**
@@ -46,9 +53,11 @@ export interface WatchingResult {
 export async function fetchWatching(): Promise<WatchingResult> {
   try {
     const items = await apiGet<WatchingItem[]>("/api/subscriptions?status=watching", { cache: "no-store" });
-    return { loggedOut: false, items: Array.isArray(items) ? items : [] };
-  } catch {
-    return { loggedOut: true, items: [] };
+    return { loggedOut: false, items: Array.isArray(items) ? items : [], unavailable: false };
+  } catch (err) {
+    const signedOut = err instanceof ApiError && (err.status === 401 || err.status === 403);
+    if (!signedOut) console.warn("[fetchWatching] watching list unavailable:", err);
+    return { loggedOut: true, items: [], unavailable: !signedOut };
   }
 }
 

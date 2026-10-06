@@ -179,6 +179,36 @@ describe("proxy /library gate + public /player trial", () => {
   });
 });
 
+describe("proxy /watching gate (全部在追)", () => {
+  test("no session → /login with from preserved, like /profile", async () => {
+    const res = await proxy(buildRequest("/watching"));
+    expect(res.status).toBe(307);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/login");
+    expect(loc.searchParams.get("from")).toBe("/watching");
+  });
+
+  test("a signed-in reader passes through", async () => {
+    const token = jwt.sign({ userId: "u1", username: "alice", role: "user" }, SECRET);
+    const res = await proxy(buildRequest("/watching", { session: token }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  test("an expired session is bounced and cleared", async () => {
+    const token = jwt.sign({ userId: "u1" }, SECRET, { expiresIn: "-1h" });
+    const res = await proxy(buildRequest("/watching", { session: token }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("set-cookie")).toContain("session=");
+  });
+
+  test("only the /watching segment is gated, not every path that starts with the word", async () => {
+    // Not a route today; the point is that the gate matches a segment, not a prefix.
+    const res = await proxy(buildRequest("/watchinglist"));
+    expect(res.headers.get("location")).toBeNull();
+  });
+});
+
 describe("proxy session-refresh step (needsRefresh + refreshToken present)", () => {
   // Build a fresh session the go-api "refresh" endpoint would return.
   function freshSession(role = "user") {

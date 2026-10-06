@@ -241,4 +241,19 @@ describe("the auth gate is locale-aware", () => {
     const res = await proxy(request("/en/library", { session: session() }));
     expect(res.status).toBe(200);
   });
+
+  test("全部在追 is gated in every locale, and the bounce keeps the locale", async () => {
+    for (const [path, login] of [
+      ["/en/watching", "/en/login"],
+      ["/zh-Hant/watching", "/zh-Hant/login"],
+    ] as const) {
+      const res = await proxy(request(path));
+      expect(res.status).toBe(307);
+      const location = new URL(res.headers.get("location")!);
+      expect(location.pathname).toBe(login);
+      expect(location.searchParams.get("from")).toBe(path);
+    }
+    const signedIn = await proxy(request("/en/watching", { session: session() }));
+    expect(signedIn.status).toBe(200);
+  });
 });

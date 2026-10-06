@@ -13,7 +13,8 @@
 //
 // The first row is the large card (its banner, progress, "继续看第 N 集"); the
 // next two are compact. The cards themselves are components/home/ContinueCards
-// — the 全部在追 page draws the same ones.
+// — the 全部在追 page (/watching), which the header's link opens, draws the
+// same ones for every show in the list.
 
 import LibraryExplainer from "@/components/home/LibraryExplainer";
 import SectionHeader from "@/components/home/SectionHeader";
@@ -54,7 +55,7 @@ export default function ContinueWatching({ items, loggedOut, dict, lang, nowMs, 
           id="home-continue"
           title={dict.home.continueTitle}
           count={items.length}
-          link={{ href: "/profile", label: dict.home.continueAll }}
+          link={{ href: "/watching", label: dict.home.continueAll }}
         />
         <div className={styles.row} data-count={1 + rest.length}>
           <ContinueFeatureCard c={first} dict={dict} lang={lang} nowMs={nowMs} />

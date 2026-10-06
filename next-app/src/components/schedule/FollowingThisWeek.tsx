@@ -84,7 +84,8 @@ export default function FollowingThisWeek({ days, progress, clock }: FollowingTh
         </ol>
       )}
       {entries.length > MAX_ROWS ? (
-        <Link href="/profile" prefetch={false} className={styles.all}>
+        // 全部在追: every watched show as a 继续看 card (/watching).
+        <Link href="/watching" prefetch={false} className={styles.all}>
           {t("home.continueAll")}
           <ChevronIcon />
         </Link>
