@@ -77,11 +77,13 @@
   min-width: 0;
 }
 
+/* No horizontal padding: the wordmark's first letter sits exactly on the
+ * content edge, in line with the homepage hero's text below it. */
 .logo {
   display: inline-flex;
   align-items: center;
   height: 40px;
-  padding: 0 2px;
+  padding: 0;
   border-radius: 6px;
   /* The wordmark is Latin by definition — the one place --font-latin is for. */
   font-family: var(--font-latin);
