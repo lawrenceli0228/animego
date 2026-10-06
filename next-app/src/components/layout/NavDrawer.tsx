@@ -3,11 +3,12 @@
 // The phone header's ☰ and the drawer it opens.
 //
 // The drawer is a real modal, because it covers the page: focus moves into it
-// and is trapped there (lib/nav/focusTrap), Escape, the dimmed backdrop and
-// any navigation close it, and focus goes back to ☰ afterwards. It is portalled
-// to <body>: the header is a sticky element that moves with a transform, and
-// anything `position: fixed` inside a transformed ancestor is positioned
-// against that ancestor rather than the viewport.
+// and is trapped there (lib/nav/focusTrap); Escape, ✕, the dimmed backdrop and
+// any navigation close it, and focus goes back to ☰ afterwards — except after
+// a change of path (below). It is portalled to <body>: the header is a sticky
+// element that moves with a transform, and anything `position: fixed` inside a
+// transformed ancestor is positioned against that ancestor rather than the
+// viewport.
 //
 // The page underneath is locked with lib/scrollLock, which locks <html>.
 // `document.body.style.overflow` would be a no-op here — globals.css gives the
@@ -16,10 +17,13 @@
 //
 // "Any navigation" is two mechanisms. A click on any link inside the drawer
 // closes it (one delegated handler covers the nav links, the genres, the
-// wordmark and the sign-in links). And a change of path — back/forward, or a
-// navigation from somewhere else — closes it during render, the same
-// "adjust state when a prop changes" step SearchExperience uses, rather than
-// in an effect one frame late.
+// wordmark and the sign-in links) and gives focus back to ☰, like Escape. And a
+// change of path — back/forward, or a navigation from somewhere else — closes
+// it during render, the same "adjust state when a prop changes" step
+// SearchExperience uses, rather than in an effect one frame late. That one
+// deliberately does NOT pull focus back to ☰: the reader has left the page the
+// drawer was opened on, and dragging the keyboard into the next page's header
+// would be a jump they did not ask for (DESIGN.md, Navigation).
 
 import Link from "@/components/ui/LocaleLink";
 import { usePathname } from "next/navigation";
