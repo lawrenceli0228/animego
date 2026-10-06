@@ -2325,7 +2325,7 @@ WHERE
         WHERE anime_genres.anime_id = anime_cache.anilist_id
           AND anime_genres.genre = 'Hentai'
     )
-ORDER BY average_score DESC NULLS LAST
+ORDER BY average_score DESC NULLS LAST, anilist_id
 LIMIT $3 OFFSET $4
 `
 
@@ -2393,6 +2393,9 @@ type GetSeasonalAnimeRow struct {
 // listing upserts have written answers NULL for the studio ("not known
 // yet", not "AniList has none") and relations_known false, which the
 // handler turns into a null isSequel.  See internal/anime/seasonal.go.
+// anilist_id makes this a total order. Pages are LIMIT/OFFSET slices of it,
+// and with average_score alone equal scores came back in a different order
+// for each LIMIT, so a show could appear on two pages and another on none.
 func (q *Queries) GetSeasonalAnime(ctx context.Context, season *string, seasonYear *int32, limit int32, offset int32) ([]GetSeasonalAnimeRow, error) {
 	rows, err := q.db.Query(ctx, getSeasonalAnime,
 		season,

@@ -215,7 +215,10 @@ WHERE
         WHERE anime_genres.anime_id = anime_cache.anilist_id
           AND anime_genres.genre = 'Hentai'
     )
-ORDER BY average_score DESC NULLS LAST
+-- anilist_id makes this a total order. Pages are LIMIT/OFFSET slices of it,
+-- and with average_score alone equal scores came back in a different order
+-- for each LIMIT, so a show could appear on two pages and another on none.
+ORDER BY average_score DESC NULLS LAST, anilist_id
 LIMIT $3 OFFSET $4;
 
 -- name: CountSeasonal :one
