@@ -32,7 +32,7 @@ const pageTone = (page: Page) =>
 const rowTones = (page: Page, index: number) =>
   page.evaluate(
     (i) =>
-      [...document.querySelectorAll<HTMLElement>(`#schedule-panel-${i} a[href*="/anime/"]`)].map((a) =>
+      Array.from(document.querySelectorAll<HTMLElement>(`#schedule-panel-${i} a[href*="/anime/"]`)).map((a) =>
         a.style.getPropertyValue("--tone").trim(),
       ),
     index,
