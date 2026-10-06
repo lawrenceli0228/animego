@@ -18,6 +18,7 @@ import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import scope from "@/components/home/HomeHueScope.module.css";
 import { useHomeClock } from "@/components/home/useHomeClock";
 import { pageToneVars } from "@/lib/home/tone";
+import { asideBox } from "@/lib/schedule/aside";
 import { revealScrollLeft } from "@/lib/schedule/reveal";
 import type { ScheduleDayView } from "@/lib/schedule/viewModels";
 import { useLang } from "@/lib/lang-client";
@@ -80,11 +81,15 @@ export default function ScheduleBoard({ days, serverNowMs, progress, header, sig
   const hue = days[selected]?.hue ?? null;
   const loaded = days.length > 0;
 
-  // A signed-in reader sees 我追的 · 本周 — but only when there is a week to
-  // read it from. With the schedule missing, an empty box would say "nothing
-  // you follow airs this week" right beside "the schedule did not load", the
-  // same false claim seven tabs of 0 would make; it is left out instead.
-  const mine = progress ? (loaded ? <FollowingThisWeek days={days} progress={progress} clock={clock} /> : null) : signIn;
+  // 我追的 · 本周 for a signed-in reader, the sign-in prompt for a visitor —
+  // and neither for a signed-in reader whose schedule failed (lib/schedule/aside.ts).
+  const box = asideBox(progress, loaded);
+  const boxNode =
+    box === "mine" && progress ? (
+      <FollowingThisWeek days={days} progress={progress} clock={clock} />
+    ) : box === "signIn" ? (
+      signIn
+    ) : null;
 
   return (
     <main className={`${scope.scope} ${styles.page}`} style={pageToneVars(hue) as unknown as CSSProperties}>
@@ -99,7 +104,7 @@ export default function ScheduleBoard({ days, serverNowMs, progress, header, sig
         </div>
         <aside className={styles.aside}>
           {loaded ? <WeekChart days={days} selected={selected} onSelect={(i) => select(i)} /> : null}
-          {mine}
+          {boxNode}
           {nextSeason}
         </aside>
       </div>
