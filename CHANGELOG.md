@@ -17,7 +17,7 @@
 
 选中的短条变成同色的暗轨道，8 秒里被自己的颜色填满，暂停时停在原处——这是一段跟着暂停一起停住的 CSS 动画，倒计时看得见、组件不用每帧渲染。自动切换不进读屏的 live region（否则每 8 秒播报一次），手动切换照常播报。其余不变：五张一直挂着、切换只有 CSS 过渡、没走到的横幅不下载——只是现在自动切换前 2.5 秒先加载下一张，免得它在自己的淡入之后才蹦出来。
 
-规则在 `lib/home/heroRotation.ts`（暂停原因、暂停时把已走的时间存起来、什么情况从头算、两个定时器），接线在 `useHeroRotation`：暂停状态来自事件回调和两个 `useSyncExternalStore`（标签页可见性；减弱动态效果，服务端按「是」算，所以服务端 HTML 是静止的），倒计时放在 ref 里，定时器在 layout effect 里挂上；effect 体里不同步 setState。悬停用元素上浏览器原生的 `pointerenter` / `pointerleave`：React 的 `onPointerLeave` 是用 pointerover / pointerout 模拟的，按下暂停 / 继续时光标下的图标被换掉，之后那次 pointerout 来自一个已卸载的节点，React 就不发 leave——按了继续、鼠标移开，hero 仍停着。
+规则在 `lib/home/heroRotation.ts`（暂停原因、暂停时把已走的时间存起来、什么情况从头算、两个定时器），接线在 `useHeroRotation`：暂停状态来自事件回调和两个 `useSyncExternalStore`（标签页可见性；减弱动态效果，服务端按「是」算，所以服务端 HTML 是静止的），倒计时放在 ref 里，定时器在 layout effect 里挂上；effect 体里不同步 setState。悬停按鼠标此刻所在的元素判断（文档上的 `pointerover`），而不是等 hero 被离开：按下暂停 / 继续时光标下的图标节点被换掉，Chromium 在下一次移动时可能根本不给 hero 发 `pointerleave`（原生的和 React 模拟的都一样），只等 leave 的话，按了继续、鼠标移开，hero 仍停着；新目标上的 `pointerover` 总会发。鼠标移出窗口时没有新目标，仍由 hero 自己的 `pointerleave` 处理。
 
 测试：`heroRotation.test.ts` 25 条；sandbox e2e `home-redesign.spec.ts` 原来那条「超过 5 秒也不自己换」改成 7 条轮播用例，跑在 Playwright 的假时钟上（页面加载时时钟照常走，之后暂停、手动拨），所以「8 秒边界」是精确的：自己会换、手动切换后重新给满 8 秒、悬停 / 键盘焦点 / 暂停按钮 / 后台标签页 / 滚出视野时都不换、减弱动态效果时不换也没有暂停按钮。把「切换不重新计时」「回到标签页不重新计时」「忽略悬停、焦点、视野」分别改坏，对应用例都会变红。
 
