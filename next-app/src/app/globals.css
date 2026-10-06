@@ -158,6 +158,13 @@
   /* ── Motion ─────────────────────────────────────────────────────────── */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
+  /* ── Site header ────────────────────────────────────────────────────────
+   * The header's height: 64px on a desktop, 56px below the header's 1023px
+   * breakpoint (the override is after this block). Read wherever something
+   * has to clear the bar — the homepage hero that runs up under it, the
+   * locale hint that floats below it, full-height pages that subtract it. */
+  --nav-h: 64px;
+
   /* Per-anime poster accent (overridden by HeroAccent wrapper on the detail
    * page). Exempt from the "no accent but blue" rule on purpose: this one is
    * sampled from the cover artwork at runtime, so it is not a brand colour
@@ -203,9 +210,18 @@
   margin: 0;
 }
 
+@media (max-width: 1023px) {
+  :root {
+    --nav-h: 56px;
+  }
+}
+
 html {
   height: 100%;
   color-scheme: dark;
+  /* The header is sticky: a link to an anchor, or Shift+Tab back to a control
+   * above the fold, must not land the target underneath it. */
+  scroll-padding-top: var(--nav-h);
 }
 
 html,
@@ -471,33 +487,6 @@ h4 {
   .card-lift:hover {
     transform: translateY(-4px);
   }
-}
-
-/* ── Navbar link: underline wipes in on hover ─────────────────────────────
-   Active state keeps its existing pill (set inline); this only adds the
-   hover affordance. transform-only (scaleX), reduced-motion safe. */
-.nav-link {
-  position: relative;
-}
-.nav-link::after {
-  content: "";
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 5px;
-  height: 2px;
-  border-radius: 2px;
-  background: #0a84ff;
-  transform: scaleX(0);
-  transform-origin: left center;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .nav-link::after {
-    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-}
-.nav-link:hover::after {
-  transform: scaleX(1);
 }
 
 /* ── Card quick-subscribe: AniList-style hover reveal ─────────────────────

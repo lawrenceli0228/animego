@@ -384,21 +384,60 @@ CSS 自定义属性的 `var()` 替换发生在**声明它的元素**上，不是
 
 ### Navigation
 
-**Top Bar**
-- Background: `rgba(0,0,0,0.80)` + `backdrop-filter: saturate(180%) blur(20px)`
-- Height: 56px
-- Position: sticky top
-- Logo: Sora 20px weight 700，`--text`
-- Nav links: DM Sans 14px weight 500，`--text-secondary`
-- Active link: `--text` + 底部 2px `--accent` 下划线
-- Hover: `--text`
+全站顶栏，**仿 AniList 的结构**（不照搬它的 logo 和配色）。实现在
+`components/layout/Navbar.tsx` + `Navbar.module.css`，子件 `GenreMenu`（分类下拉）、
+`NavSearch`（搜索）、`NavDrawer`（手机抽屉）、`AvatarMenu`（账户菜单）；链接清单与
+「当前页」规则在 `lib/nav/navLinks.ts`，滚动收起的判断在 `lib/nav/navScroll.ts`
+（纯函数，有单测）。
 
-**Mobile Bottom Bar**
-- Background: `#1c1c1e` + `backdrop-filter: blur(20px)`
-- Height: 56px + safe-area-inset-bottom
-- Border-top: `1px solid rgba(84,84,88,0.65)` (`--separator`)
-- Icons: 24px，inactive `--text-tertiary`，active `--accent`
-- Labels: 11px weight 500，同图标颜色
+**结构（≥1024px）**
+- 高 **64px**（`--nav-h`；<1024px 是 56px）。三栏 `grid: minmax(0,1fr) auto minmax(0,1fr)`，
+  链接相对**页面**居中；<1200px 两侧栏放不下最宽的语言时改成 `auto 1fr auto`，链接在
+  logo 与右侧控件之间居中。左右边距与首页内容一致（`max(clamp(24px,5.56vw,80px), (100%-1280px)/2)`）。
+- 左：AnimeGoClub 字标，`--font-latin`（Sora）20px / 700 / -0.01em。
+- 中：首页 · 放送表 · 季度 · 分类▾ · 关于；登录后在「关于」前多一个「我的追番」。
+  链接 40px 高、`0 16px` 内边距、圆角 8px、14.5px / 600；安静态 `rgba(235,235,245,0.66)`，
+  悬停 `rgba(255,255,255,0.07)` 底 + 白字，当前页白字 + `aria-current="page"`
+  （比对去掉语言前缀后的路径；季度在任何 `/seasonal/*` 都算当前，分类在任何 `/genre/*`）。
+  **`/library` 不进顶栏**（在头像菜单里）。「我的追番」随登录三态：匿名不出现；
+  probing 是同宽的隐形占位（`visibility: hidden`，不是链接）；authed 才是真链接。
+- 右：搜索放大镜（40px 圆）→ 访客：语言（地球 + 简称）· 登录（文字）· 注册（玻璃）；
+  登录后：通知铃（未读是一个点，数字在无障碍名里）· 头像按钮（32px 圆头像 + 下箭头，
+  40px 胶囊）。probing 时是铃和头像**同尺寸**的占位，探测结束不跳。
+
+**状态**
+- **页面顶部透明**，滚动超过 8px 变**毛玻璃**：`rgba(9,9,11,0.78)` + `saturate(160%) blur(16px)`
+  + 底部 1px `rgba(255,255,255,0.07)`。玻璃是 `::before` 上的一层（能淡入淡出，且顶栏本身
+  不是 backdrop root，下拉菜单才能模糊页面）。**不按首页焦点番取色**：半透明深色玻璃
+  压在有色相的页面上，本身就带着颜色。透明态下字带 `text-shadow`（字在照片上）。
+- **往下滚收起、往上滚滑出**（AniList）：向下连续滚 12px 收起、向上连续 8px 滑出，
+  滚动位置在顶栏自身高度以内永不收起；橡皮筋回弹不算滚动。**有下拉/抽屉打开或键盘焦点
+  在顶栏里时不收起**；Tab 进一个已收起的顶栏会立刻滑出。`prefers-reduced-motion` 时无滑动动画。
+- **分类▾**：AniList 式下拉，鼠标停 120ms 打开、离开 200ms 后关闭；点击 / Enter / Space
+  打开并保持，Esc（焦点回到触发器）、点别处、焦点离开都关闭；淡入 + 下移 6px。内容是
+  全部类型 hub（`FILTER_GENRES` → `/genre/<slug>`，按读者语言显示），三列——**没有类型索引页，
+  这个下拉就是索引**。是 disclosure（按钮 + 普通链接），不是 `role=menu`；方向键可选用。
+- **搜索**：放大镜向左展开成 300px 输入框（淡入），展开时中间的链接让位淡出；Enter 去
+  `/search?q=…`（空框去 `/search`），Esc 收起并把焦点还给放大镜；**输入法确认候选的那次
+  Enter 不提交**（`isComposing`，以及 Safari 先发 compositionend 时的 keyCode 229）。
+  输入框只在展开时渲染（`/search` 页自己的 `form[role=search]` / `input[name=q]` 必须唯一）。
+- **头像菜单 / 分类 / 语言 / 通知**的弹层统一：`rgba(24,24,28,0.96)` + blur、1px
+  `rgba(255,255,255,0.08)` 描边、圆角 12、`0 18px 48px -10px rgba(0,0,0,0.7)` 投影，
+  条目 40px 高；打开淡入 + 下移，关闭反向。
+
+**手机与平板（<1024px）**
+- 56px：☰ · 字标 · 搜索（44px 图标，直接链到 `/search`）· 登录（访客）/ 通知铃 + 头像（登录）。
+  断点取的是桌面栏放不下的宽度：英文、未登录（最宽的形态）大约需要 1000px。
+- ☰ 打开**左侧抽屉**（最宽 320px），页面压暗。抽屉是真正的模态：焦点移进去、Tab 困在里面、
+  Esc / 点暗处 / 任何跳转都关闭并把焦点还给 ☰，按钮带 `aria-expanded` / `aria-controls`，
+  用 `lib/scrollLock.ts` 锁页面滚动（锁 `<html>`；`body` 的 overflow 在本仓库是无效的）。
+  内容：同一份链接（分类是可展开的类型列表）、语言、访客的登录 / 注册。portal 到 `<body>`。
+
+**几何联动**
+- `--nav-h`（globals.css）是唯一的顶栏高度：首页 hero 用它上拉到顶栏下面，语言提示浮在
+  它下面 12px（右对齐，`z-index` 低于顶栏的下拉），满屏页面用 `calc(100vh - var(--nav-h))`，
+  `html` 的 `scroll-padding-top` 也是它。
+- 焦点环照旧是那一个蓝色 box-shadow；手机上所有控件 ≥44px。
 
 ### Tags & Badges
 
@@ -832,8 +871,11 @@ grid-template-columns: var(--hero-cover-w) minmax(0, 1fr);
   支持方向键。五张全部常驻叠放，切换只有 CSS 过渡，不重新挂载；未聚焦过的
   banner 不下载。`prefers-reduced-motion` 关掉全部动画和过渡。
 - 背景光晕是封面模糊（blur 90px），**遮罩在 hero 底边之前淡出**，不渗进下一节。
-- 本期导航栏仍在 hero 上方（Phase 2 再做透明导航），所以 hero 高 484px
-  （手机 444px），内容位置与设计稿的绝对位置一致。
+- hero 从页面最顶端开始，透明的站点顶栏叠在它上面（hero 用
+  `margin-top: calc(-1 * var(--nav-h))` 上拉，自己画一层页面底色）：高 540px
+  （平板 496px、手机 500px），内容从 100px（手机 136px）开始——与设计稿的绝对位置一致，
+  也和顶栏还在 hero 上方时的位置一致。上拉放在 hero 上而不是 `<main>` 上：没有焦点番时
+  hero 不渲染，排在第一的区块不该滑到顶栏下面。顶栏的规格见 Component Stylings → Navigation。
 
 ### 时间
 
@@ -892,7 +934,7 @@ effect + setState）。`/api/anime/schedule` 按**服务器所在日**分组，�
 | Surface (Level 1) | `#1c1c1e` — 无 shadow 或极淡 `0 1px 2px rgba(0,0,0,0.20)` | 卡片、面板、侧栏 |
 | Elevated (Level 2) | `#2c2c2e` + `0 8px 32px rgba(0,0,0,0.50)` | 下拉菜单、Tooltip、浮层面板 |
 | Modal (Level 3) | `#2c2c2e` + `0 16px 48px rgba(0,0,0,0.60)` + 背景 `rgba(0,0,0,0.60)` overlay | 模态框、确认弹窗 |
-| Navigation Glass | `rgba(0,0,0,0.80)` + `backdrop-filter: saturate(180%) blur(20px)` | 顶栏、移动端底栏 |
+| Navigation Glass | `rgba(9,9,11,0.78)` + `backdrop-filter: saturate(160%) blur(16px)`，页面顶部透明、滚动后才出现 | 站点顶栏（见 Component Stylings → Navigation） |
 | Focus Ring | `0 0 0 3px rgba(10,132,255,0.40)` | 键盘焦点态，所有可交互元素 |
 
 **Shadow 哲学：** 暗色主题 shadow 必须足够重（0.40–0.60 opacity）才能在黑色背景上可见。但 Level 0→1 的提升主要靠背景色差而非 shadow — 与 Apple 一致，shadow 留给真正"浮起来"的元素。
@@ -933,14 +975,14 @@ effect + setState）。`/api/anime/schedule` 按**服务器所在日**分组，�
 ### Breakpoints
 | Name | Width | Key Changes |
 |------|-------|-------------|
-| Mobile | < 600px | 2 列网格，底部导航栏，搜索收起为图标 |
-| Tablet | 600–900px | 3 列网格，顶栏导航，侧边栏隐藏 |
+| Mobile | < 600px | 2 列网格，顶栏 ☰ + 左侧抽屉，搜索收起为图标 |
+| Tablet | 600–900px | 3 列网格，顶栏 ☰ + 左侧抽屉（顶栏 <1024px 都是手机形态），侧边栏隐藏 |
 | Desktop | 900–1400px | 6 列网格，完整顶栏 + 侧边信息面板 |
 | Large Desktop | > 1400px | 内容居中，`max-width: 1400px`，两侧留白 |
 
 ### Touch Targets
 - 所有按钮最小高度: 44px（Apple HIG 标准）
-- 底部导航图标触控区: 48×48px
+- 顶栏手机形态的每个控件（☰ / 搜索 / 登录 / 头像 / 铃）: 44×44px；抽屉里的链接行 48px 高
 - 卡片整体可点击，无需精确点击小文字
 - Genre Tag 间距 ≥ 8px，防止误触
 
@@ -949,8 +991,8 @@ effect + setState）。`/api/anime/schedule` 按**服务器所在日**分组，�
 - **详情页:** 不是"双栏塌成单栏"。hero 手机端保持**海报和文字并排**、动作行横跨两列；
   简介/评分那一栏在 ≤900px 塌成单栏且评分改横排；作品信息 8 列 → 4 列（≤1100px）。
   完整取值见 [Anime Detail Page](#anime-detail-page详情页页面规范)，那一节是权威
-- **顶栏:** 桌面完整导航 → 移动端仅 Logo + 搜索图标 + 用户头像
-- **导航:** 桌面顶栏 → 移动端底部 Tab Bar（首页/搜索/追番/我的）
+- **顶栏:** 桌面（≥1024px）三栏完整导航 → <1024px 仅 ☰ + Logo + 搜索图标 + 登录 / 头像
+- **导航:** 桌面顶栏 → <1024px 时 ☰ 打开左侧抽屉（不是底部 Tab Bar，也不是悬浮按钮——2026-10-06 定）
 - **弹幕面板:** 桌面侧边常驻 → 移动端底部 Sheet（上滑展开）
 - **封面图:** 网格卡片保持 `3:4`，宽度随网格自适应。**详情页是例外**：hero 海报
   `210 / 300`（7:10），相关/推荐格 `6 / 8.6`。AniList 的大图是 460×650，7:10 几乎
@@ -993,7 +1035,7 @@ effect + setState）。`/api/anime/schedule` 按**服务器所在日**分组，�
 ### Example Component Prompts
 - "创建一个 Anime Card：`#1c1c1e` 背景，`12px` 圆角，`1px solid #38383a` 边框。封面图 `aspect-ratio: 3/4`，`object-fit: cover`。标题 Sora 14px weight 600 白色，最多 2 行 `line-clamp`。副标题 DM Sans 13px `rgba(235,235,245,0.60)`。Hover 时 `translateY(-4px)` + `box-shadow: 0 8px 24px rgba(0,0,0,0.40)`，`transition 250ms ease-out`。"
 - "创建主操作按钮：`#0a84ff` 背景，白色文字，`10px 20px` padding，`8px` 圆角。DM Sans 14px weight 500。Hover `#409cff`，Focus `0 0 0 3px rgba(10,132,255,0.40)`。Disabled opacity 0.35。"
-- "创建顶部导航栏：sticky，56px 高，`rgba(0,0,0,0.80)` 背景 + `backdrop-filter: saturate(180%) blur(20px)`。Logo 用 Sora 20px weight 700。导航链接 DM Sans 14px weight 500，inactive `rgba(235,235,245,0.60)`，active 白色 + 底部 2px `#0a84ff` 下划线。"
+- "站点顶栏已经存在（`components/layout/Navbar.tsx`），不要再造一个。改它之前读 Component Stylings → Navigation：64px（手机 56px，`--nav-h`），顶部透明、滚动后 `rgba(9,9,11,0.78)` 毛玻璃，链接 40px 高 14.5px / 600、安静态 `rgba(235,235,245,0.66)`、当前页白字 + `aria-current`。"
 - "创建模态弹窗：`#2c2c2e` 背景，`20px` 圆角，`24px` 内边距，`box-shadow: 0 16px 48px rgba(0,0,0,0.60)`。背景 overlay `rgba(0,0,0,0.60)`。标题 Sora 20px weight 600。关闭按钮右上角圆形 icon button。"
 - "创建剧集列表项：`#1c1c1e` 背景，`12px` 圆角，`16px` padding。左侧集数 JetBrains Mono 13px `--warning`。标题 DM Sans 16px weight 500 白色。右侧播出日期 13px `--text-tertiary`。Hover 背景 `#2c2c2e`。"
 
@@ -1032,3 +1074,4 @@ effect + setState）。`/api/anime/schedule` 按**服务器所在日**分组，�
 | 2026-08-30 | 集数区加集标题语言开关，默认**读者自己的语言** | 原来硬编码并排，每行两条、13 集变 26 行，列表从"扫"变成"读"。开关只在有东西可切时出现；偏好走 `useSyncExternalStore` + localStorage，不用 `useState`+effect（水合不一致 / 级联渲染，后者是 lint 闸门拦的那条） |
 | 2026-08-30 | `components/ui/Button` 的适用范围写进文档：只服务详情页 hero 三个调用点 | 它的 `.primary` 是 `--poster-tone` 不是 `#0a84ff`，`.outline` 是玻璃不是灰描边 —— 和 Buttons 一节描述的全站约定是两套东西。此前文档只写了约定，读者会以为共享组件实现了它 |
 | 2026-09-25 | 首页改为「逐番色」页面级规范（Homepage 一节） | 首页穿上焦点番的颜色：tinted ground、tone 链接、唯一实心按钮用番剧色；颜色串在 TS 里拼好写在使用处，回落紫按无色相处理；360 色相对比度由 `lib/home/tone.test.ts` 证明。无自动轮播 |
+| 2026-10-06 | 站点顶栏改为仿 AniList 的三栏结构（Navigation 一节） | 顶部透明、滚动后毛玻璃、往下滚收起往上滚滑出；搜索收成图标、分类是下拉（没有类型索引页，下拉就是索引）；<1024px 是 ☰ + 左侧抽屉而不是底部 Tab Bar。断点按「英文、未登录的桌面栏放不下」实测取的。顶栏不按首页焦点番取色：深色半透明玻璃压在有色页面上已经带色 |

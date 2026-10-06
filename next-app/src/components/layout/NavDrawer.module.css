@@ -1,0 +1,316 @@
+/* The phone header's ☰ and its drawer. The drawer is portalled to <body>, so
+ * nothing here depends on the header's own layout. The ☰ shows at the bar's
+ * phone breakpoint (1023px, as in Navbar.module.css) and nowhere else. */
+
+.menuButton {
+  display: none;
+}
+
+.icon {
+  display: block;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── The drawer ─────────────────────────────────────────────────────────── */
+
+.root {
+  position: fixed;
+  inset: 0;
+  /* Above the header (100), the locale hint and the stale-tab notice; the
+   * toasts stay above everything. */
+  z-index: 300;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  animation: backdropIn 0.3s ease both;
+}
+
+.root[data-state="closing"] .backdrop {
+  animation: backdropOut 0.2s ease both;
+}
+
+.panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(320px, 86vw);
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px calc(24px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #101014;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 24px 0 64px -24px rgba(0, 0, 0, 0.8);
+  color: #fff;
+  animation: panelIn 0.32s var(--ease-out-expo) both;
+}
+
+.root[data-state="closing"] .panel {
+  animation: panelOut 0.2s ease-in both;
+}
+
+.head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding-left: 4px;
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-family: var(--font-latin);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #fff;
+  text-decoration: none;
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(235, 235, 245, 0.86);
+  cursor: pointer;
+}
+
+.close:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.78);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.link:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.link[aria-current="page"],
+.link[data-current="true"] {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.chevron {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.28s var(--ease-out-expo);
+}
+
+.link[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+.genres {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding: 0 0 0 8px;
+  list-style: none;
+}
+
+.genre {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 14.5px;
+  color: rgba(235, 235, 245, 0.78);
+  text-decoration: none;
+}
+
+.genre:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.genre[aria-current="page"] {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  font-weight: 600;
+}
+
+.section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sectionTitle {
+  margin: 0 0 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(235, 235, 245, 0.6);
+}
+
+/* The language options are LanguageMenu's own rows, sized up to a touch
+ * target here. Two classes against their one, so this wins whatever order the
+ * stylesheets load in. */
+.langs :global(.agc-lang-option) {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+.auth {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.authLogin,
+.authRegister {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  text-decoration: none;
+}
+
+.authLogin {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.authRegister {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.menuButton:focus-visible,
+.logo:focus-visible,
+.close:focus-visible,
+.link:focus-visible,
+.genre:focus-visible,
+.authLogin:focus-visible,
+.authRegister:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@keyframes backdropIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes backdropOut {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes panelIn {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes panelOut {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@media (max-width: 1023px) {
+  .menuButton {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .menuButton:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .panel,
+  .root[data-state="closing"] .backdrop,
+  .root[data-state="closing"] .panel {
+    animation: none;
+  }
+
+  .link,
+  .chevron {
+    transition: none;
+  }
+}

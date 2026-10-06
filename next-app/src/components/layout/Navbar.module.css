@@ -1,0 +1,310 @@
+/* The site header — AniList's structure in this site's materials.
+ *
+ * Three columns on a desktop: the wordmark, the links centred on the page, and
+ * search + account on the right. Transparent at the top of a page (the
+ * homepage hero runs up underneath it), a blurred glass once there is content
+ * below it, and out of the way while the reader scrolls down.
+ *
+ * One breakpoint, 1023px. Below it the bar is the phone bar: ☰, wordmark,
+ * search and the account control, with the links in a drawer. The number is
+ * where the desktop bar stops fitting — measured in English while signed
+ * out, its widest form (five links plus 登录 / 注册 and the language menu need
+ * about 1,000px with the page gutters). NavSearch, AvatarMenu, the bell and
+ * globals.css (--nav-h) use the same number; change them together.
+ *
+ * Every @media block is at the END of the file, so a rule there wins over the
+ * one it overrides on source order rather than on load order. Styles that
+ * belong to another component's element (the genre trigger, the language
+ * trigger) are passed in as this module's class or live in that component's
+ * own file — never one module overriding another's class, which resolves
+ * differently in `next dev` and in a production build. */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--nav-h);
+  color: #fff;
+  transition: transform 0.32s var(--ease-out-expo);
+}
+
+/* Off the top edge while the reader scrolls down. A transform, not `top`, so
+ * the move is composited and nothing below the bar re-lays-out. It stays in
+ * the tab order: focus entering it brings it straight back (useNavScroll). */
+.bar[data-hidden="true"] {
+  transform: translateY(-100%);
+}
+
+/* The glass is a layer of its own rather than the bar's background, for two
+ * reasons. It can fade (opacity animates; backdrop-filter does not, reliably).
+ * And the bar itself carries no backdrop-filter, so it is not a "backdrop
+ * root": the dropdowns inside it can blur the PAGE behind them, not just the
+ * bar's own pixels. */
+.bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(9, 9, 11, 0.78);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  backdrop-filter: saturate(160%) blur(16px);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.bar[data-glass="true"]::before {
+  opacity: 1;
+}
+
+.inner {
+  position: relative;
+  height: 100%;
+  /* The homepage's content gutter: 80px on a laptop, content centred at
+   * 1280px beyond that — so the wordmark lines up with the hero's text. */
+  padding: 0 max(clamp(24px, 5.56vw, 80px), calc((100% - 1280px) / 2));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+}
+
+.start {
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 2px;
+  border-radius: 6px;
+  /* The wordmark is Latin by definition — the one place --font-latin is for. */
+  font-family: var(--font-latin);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #fff;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+/* ── The links ──────────────────────────────────────────────────────────── */
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition:
+    opacity 0.2s ease,
+    visibility 0s linear 0s;
+}
+
+/* The search box opens leftwards over the link strip; the strip steps aside
+ * rather than sit half-covered under a translucent field. */
+.bar[data-search="true"] .links {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.2s ease,
+    visibility 0s linear 0.2s;
+}
+
+/* Shared by the plain links, the 分类 trigger (passed into GenreMenu) and the
+ * 我的追番 placeholder, so the three are the same box. */
+.link {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: rgba(235, 235, 245, 0.66);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.link:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.link[aria-current="page"],
+.link[data-current="true"] {
+  color: #fff;
+}
+
+/* Reserves the width of 我的追番 while the session probe is in flight.
+ * `visibility: hidden` keeps the box and removes the subtree from the
+ * accessibility tree, the tab order, find-in-page and selection. */
+.placeholder {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ── The right-hand group ───────────────────────────────────────────────── */
+
+.end {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.desktopOnly {
+  display: contents;
+}
+
+.login {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.86);
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.login:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.register {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.12);
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease-out,
+    border-color 0.15s ease-out,
+    transform 0.15s ease-out;
+}
+
+.register:hover {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+/* Over the homepage hero the bar has no surface of its own, so its words sit
+ * on a photograph. DESIGN.md: text on artwork carries a soft shadow or sits on
+ * a surface; once the glass is on, the surface does the job. */
+.bar:not([data-glass="true"]) .logo,
+.bar:not([data-glass="true"]) .link,
+.bar:not([data-glass="true"]) .login {
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* The one focus ring, on the focused element itself. */
+.logo:focus-visible,
+.link:focus-visible,
+.login:focus-visible,
+.register:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── Between the phone bar and a wide desktop ───────────────────────────────
+ * The links are centred on the PAGE while the side columns have room; below
+ * 1200px the widest locale's side column no longer fits in an equal third, so
+ * the links centre in the space left between the wordmark and the account
+ * controls instead. */
+@media (max-width: 1199px) {
+  .inner {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .links {
+    justify-self: center;
+  }
+}
+
+/* ── Phone and tablet ───────────────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  .inner {
+    /* The ☰ glyph sits 14px inside its 44px target; this lines it up with
+     * the page gutter rather than the target's edge. */
+    padding: 0 max(6px, calc(5.56vw - 14px));
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px;
+  }
+
+  .start {
+    gap: 2px;
+  }
+
+  .logo {
+    height: 44px;
+    font-size: 18px;
+  }
+
+  .links,
+  .desktopOnly,
+  .register {
+    display: none;
+  }
+
+  .end {
+    gap: 2px;
+  }
+
+  .login {
+    height: 44px;
+    padding: 0 12px;
+    font-size: 14.5px;
+    color: #fff;
+  }
+}
+
+@media (max-width: 359px) {
+  .logo {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar,
+  .bar::before,
+  .links,
+  .link,
+  .login,
+  .register {
+    transition: none;
+  }
+
+  .register:hover {
+    transform: none;
+  }
+}
