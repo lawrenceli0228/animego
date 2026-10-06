@@ -266,12 +266,17 @@
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 
-/* The one focus ring, on the focused element itself. */
+/* The one focus ring, on the focused element itself. The outline is
+ * transparent, so invisible — until forced-colors mode (Windows Contrast
+ * themes) drops every box-shadow and paints outlines in a system colour; it
+ * is then the only indicator left (Button.module.css). Every focus rule in
+ * the header does the same. */
 .logo:focus-visible,
 .link:focus-visible,
 .login:focus-visible,
 .register:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 

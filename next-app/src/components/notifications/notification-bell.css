@@ -16,7 +16,9 @@
 }
 .agc-notification-bell:hover,
 .agc-notification-bell[aria-expanded="true"] { color: #fff; background: rgba(255,255,255,.07); }
-.agc-notification-bell:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(10,132,255,.4); }
+/* Transparent outline: forced-colors mode's indicator once it has dropped the
+   ring (Navbar.module.css). Plain CSS, so focusRing.test.ts does not see it. */
+.agc-notification-bell:focus-visible { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 3px rgba(10,132,255,.4); }
 .agc-notification-bell svg { width: 19px; height: 19px; }
 .agc-notification-bell--skeleton { cursor: default; pointer-events: none; }
 .agc-notification-dot {

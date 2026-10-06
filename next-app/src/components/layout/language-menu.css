@@ -35,9 +35,13 @@
 }
 /* Focus is a ring, not a colour change: the hover state already uses colour,
    and a keyboard user needs the two to be distinguishable. The one ring
-   DESIGN.md specifies, like every other control in the bar. */
+   DESIGN.md specifies, like every other control in the bar, over a
+   transparent outline that forced-colors mode paints in a system colour once
+   it has dropped the ring (Navbar.module.css). This file is plain CSS, which
+   focusRing.test.ts does not scan — keep the two halves together by hand. */
 .agc-lang-trigger:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
@@ -114,7 +118,8 @@
   color: #fff;
 }
 .agc-lang-option:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   background: rgba(255, 255, 255, 0.08);
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }

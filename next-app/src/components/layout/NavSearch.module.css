@@ -106,13 +106,30 @@
   scroll-margin-top: calc(-1 * var(--nav-h));
 }
 
-/* The ring goes on the pill — the field's visible shape — not on the bare
- * input inside it. The magnifier carries its own when it has focus. */
+/* The magnifier (and the phone's search link) carry the ring themselves. The
+ * transparent outline is forced-colors mode's indicator (Navbar.module.css). */
 .toggle:focus-visible,
-.pill:has(.input:focus-visible),
 .phone:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* The field's ring goes on the pill — its visible shape — not on the bare
+ * input inside it. A rule of its own: a browser that cannot parse :has()
+ * drops the whole rule, and must not take the magnifier's ring with it. */
+.pill:has(.input:focus-visible) {
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* Forced-colors mode removes the pill's ring, and the field has no outline of
+ * its own (`outline: none` above, so it never doubles the ring). Hand the
+ * outline back to the browser there: its own focus ring, drawn in a system
+ * colour, on the field itself — which does not depend on :has() either. */
+@media (forced-colors: active) {
+  .input {
+    outline: revert;
+  }
 }
 
 .phone {

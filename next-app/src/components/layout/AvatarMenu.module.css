@@ -257,9 +257,11 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Transparent outline: forced-colors mode's indicator (Navbar.module.css). */
 .trigger:focus-visible,
 .item:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
