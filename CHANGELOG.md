@@ -4,6 +4,15 @@
 
 ## [未发布]
 
+### 部署后不再从冷缓存起步；nginx 跟得上重启后换了地址的容器
+
+- **图片优化结果跨部署保留。** next-app 的 `.next/cache/images` 挂成命名卷 `next-image-cache`：每次部署都会重建容器，之前处理过的图片会一起丢掉，部署后每张图都要重新优化一遍。只持久化 `images/`——`.next/cache` 里的数据缓存（fetch-cache）刻意不留，它不应该活过写下它的那次构建。镜像里预先建好这个目录并交给运行用户：新命名卷的属主取自镜像里挂载点那个目录，目录不存在时卷是 root 的，优化器写不进去。
+- **nginx 缓存 `/_next/image`。** CDN 不缓存这类按 `Accept` 变化的响应，所以之前每次图片请求都会打到 next-app。缓存键是「地址 + 协商出的图片格式（avif / webp / 原格式）」，而不是原始 `Accept` 头；`proxy_cache_lock` 让同一张图的并发请求只回源一次；上游出错或忙时先给旧条目。上游的 `Vary` / `Cache-Control` / `Expires` 被忽略，`Set-Cookie` 不忽略：带 cookie 的响应一律不进缓存。响应头 `X-Image-Cache` 标明命中情况。
+- **nginx 在运行时重新解析上游地址。** 三个上游（next-app / go-api / ws-server）改为 `zone` + `server … resolve`，配 Docker 内置 DNS `resolver 127.0.0.11 valid=10s`。之前地址只在 nginx 启动时解析一次，任何一个容器重启换了 IP，nginx 会一直往旧地址发，直到 nginx 自己重启。
+- **容器内存上限上调**，给缓存冷启动和重新填充时留余量：next-app 512m → 1g，go-api 200m → 512m，postgres 400m → 1g，nginx 64m → 256m。
+
+验证：仓库里的 nginx 配置用与生产同系列的 nginx（1.31）跑 `nginx -t` 通过；`docker compose config` 通过；命名卷的属主用与运行阶段相同的最小镜像对照实测——预建目录时以运行用户写入成功，不预建时 `Permission denied`。
+
 ### 番剧中文名：旧绑定指向别的番时不再照抄，而是撤销重绑
 
 2026 秋季榜前六里有三部续作挂着别家续作的中文名：《ブラッククローバー 第2期》显示「Love Live! 第二季」，《アオのハコ Season２》显示「卡片战斗先导者 will+Dress 第二季」，《アオアシ 第2期》显示「爱丽丝侦探局 第2期」。错的不只是标题——评分、分集名、繁体标题（OpenCC 从这个错标题转出来）都是那部番的，而且出现在可被索引的详情页上。
