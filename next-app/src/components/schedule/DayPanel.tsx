@@ -101,11 +101,15 @@ export default function DayPanel({ day, index, active, clock, progress }: DayPan
     </li>
   );
 
+  // tabIndex 0: the tabs pattern puts a panel in the tab order when its first
+  // content is not focusable — here a time label, or the empty-day line — so
+  // Tab from the tablist always lands on the day it just chose.
   return (
     <div
       role="tabpanel"
       id={panelId(index)}
       aria-labelledby={tabId(index)}
+      tabIndex={0}
       hidden={!active}
       className={styles.panel}
     >

@@ -78,23 +78,28 @@ export default function ScheduleBoard({ days, serverNowMs, progress, header, sig
   }
 
   const hue = days[selected]?.hue ?? null;
+  const loaded = days.length > 0;
+
+  // A signed-in reader sees 我追的 · 本周 — but only when there is a week to
+  // read it from. With the schedule missing, an empty box would say "nothing
+  // you follow airs this week" right beside "the schedule did not load", the
+  // same false claim seven tabs of 0 would make; it is left out instead.
+  const mine = progress ? (loaded ? <FollowingThisWeek days={days} progress={progress} clock={clock} /> : null) : signIn;
 
   return (
     <main className={`${scope.scope} ${styles.page}`} style={pageToneVars(hue) as unknown as CSSProperties}>
       {header}
-      {days.length > 0 ? (
-        <DayTabs days={days} selected={selected} onSelect={select} rowRef={rowRef} tabRefs={tabRefs} />
-      ) : null}
+      {loaded ? <DayTabs days={days} selected={selected} onSelect={select} rowRef={rowRef} tabRefs={tabRefs} /> : null}
       <div className={styles.content}>
         <div className={styles.panels}>
-          {days.length === 0 ? <p className={styles.failed}>{t("schedule.loadFailed")}</p> : null}
+          {loaded ? null : <p className={styles.failed}>{t("schedule.loadFailed")}</p>}
           {days.map((d, i) => (
             <DayPanel key={d.key} day={d} index={i} active={i === selected} clock={clock} progress={progress} />
           ))}
         </div>
         <aside className={styles.aside}>
-          {days.length > 0 ? <WeekChart days={days} selected={selected} onSelect={(i) => select(i)} /> : null}
-          {progress ? <FollowingThisWeek days={days} progress={progress} clock={clock} /> : signIn}
+          {loaded ? <WeekChart days={days} selected={selected} onSelect={(i) => select(i)} /> : null}
+          {mine}
           {nextSeason}
         </aside>
       </div>

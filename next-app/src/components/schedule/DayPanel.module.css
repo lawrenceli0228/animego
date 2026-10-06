@@ -12,7 +12,13 @@
 
 .panel {
   min-width: 0;
+  border-radius: 12px;
   animation: show 0.3s ease;
+}
+
+.panel:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 .groups,
