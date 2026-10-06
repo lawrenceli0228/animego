@@ -108,12 +108,26 @@ describe("the focus ring", () => {
   });
 
   test("no rule removes the indicator outright", () => {
-    // `outline: none` is fine in a rule that also draws the box-shadow ring;
-    // `box-shadow: none` inside a :focus-visible block is not.
+    // `box-shadow: none` inside a :focus-visible block takes the ring away.
+    // Clearing the outline is the subject of the forced-colors test below.
     const removed = rules
       .filter((r) => /box-shadow\s*:\s*none/.test(r.body))
       .map((r) => `${r.file} — ${r.selector}`);
     expect(removed).toEqual([]);
+  });
+
+  test("forced-colors mode still has an indicator", () => {
+    // Windows Contrast themes (forced-colors: active) force box-shadow to
+    // none, so a rule whose only indicator is the ring shows nothing there.
+    // `outline: none` / `outline: 0` throws away the one thing the browser
+    // could still paint. `outline: 2px solid transparent` keeps an outline
+    // that is invisible normally and drawn in the system colour in that mode
+    // (Button.module.css) — the ring above stays the visible indicator.
+    const bare = rules
+      .filter((r) => focusIsSubject(r.selector))
+      .filter((r) => /outline\s*:\s*(none|0)\s*(;|$)/.test(r.body))
+      .map((r) => `${r.file} — ${r.selector}`);
+    expect(bare).toEqual([]);
   });
 });
 
