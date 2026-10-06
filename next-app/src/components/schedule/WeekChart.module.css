@@ -1,0 +1,104 @@
+/* 本周更新: one bar per day, height against the busiest day, the selected day
+ * in the page's tone. Each bar is a button that selects its day. Wide screens
+ * only — on the pill row (≤900px) every pill already carries its count. */
+
+.chart {
+  padding: 20px 20px 18px;
+}
+
+.hint {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.58);
+  white-space: nowrap;
+}
+
+.bars {
+  margin-top: 16px;
+  height: 150px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.bar {
+  flex: 1;
+  min-width: 0;
+  height: 150px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.bar:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.58);
+  transition: color 0.4s ease;
+}
+
+.bar[aria-pressed="true"] .count {
+  color: var(--home-tone);
+}
+
+/* --bar-h is the day's height in px, written inline from its count. */
+.fill {
+  display: block;
+  flex: none;
+  width: 100%;
+  height: var(--bar-h);
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.12);
+  transition: background-color 0.5s ease;
+}
+
+.bar[aria-pressed="true"] .fill {
+  background-color: var(--home-tone);
+}
+
+.day {
+  font-size: 12px;
+  line-height: 16px;
+  color: rgba(235, 235, 245, 0.62);
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .bar:not([aria-pressed="true"]):hover .fill {
+    background-color: rgba(255, 255, 255, 0.22);
+  }
+
+  .bar:not([aria-pressed="true"]):hover .count {
+    color: #fff;
+  }
+}
+
+@media (max-width: 900px) {
+  .chart {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .count,
+  .fill {
+    transition-duration: 0.01ms;
+  }
+}

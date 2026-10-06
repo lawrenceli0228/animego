@@ -1,0 +1,85 @@
+/* The schedule page's frame. It sits on the homepage's hue scope — `.scope`
+ * from components/home/HomeHueScope.module.css supplies the gutter, the
+ * tinted ground, the shared easing and the 0.9s tint — and adds only what the
+ * scope does not set. Nothing here redeclares a property `.scope` declares:
+ * two single-class rules from different modules tie on specificity, and which
+ * one wins changes between next dev and a production build. */
+
+.page {
+  padding-top: 40px;
+}
+
+.content {
+  margin-top: 32px;
+  padding-inline: var(--home-gutter);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 360px);
+  gap: 40px;
+  align-items: start;
+}
+
+.panels {
+  min-width: 0;
+}
+
+.aside {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: rise 0.75s var(--home-expo) 0.22s backwards;
+}
+
+.failed {
+  margin: 0;
+  padding: 28px 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: rgba(235, 235, 245, 0.66);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+/* The list takes the full width; the aside's boxes go under it, side by
+ * side, and the week chart drops out (WeekChart.module.css). */
+@media (max-width: 900px) {
+  .content {
+    margin-top: 24px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+
+  .aside {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .page {
+    padding-top: 28px;
+  }
+
+  .content {
+    margin-top: 20px;
+    gap: 28px;
+  }
+
+  .aside {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aside {
+    animation: none;
+  }
+}

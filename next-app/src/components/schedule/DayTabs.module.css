@@ -1,0 +1,201 @@
+/* The week's seven day tabs.
+ *
+ * Wide: seven equal cards, weekday and date on the left, the day's count large
+ * on the right. ≤900px: one row of 44px pills (weekday + count) that scrolls
+ * sideways; ScheduleBoard scrolls the ROW to reveal the selected pill, never
+ * the page.
+ *
+ * The selected tab takes the page's tone (--home-tone*, written on <main> for
+ * the selected day), so tab, bars and page ground change colour together.
+ * State is read off aria-selected: a tab cannot look selected while telling a
+ * screen reader it is not. */
+
+.tabs {
+  /* The offsetParent of the pills, so offsetLeft is in the row's own scroll
+   * coordinates (lib/schedule/reveal.ts). */
+  position: relative;
+  margin-top: 28px;
+  padding-inline: var(--home-gutter);
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  animation: rise 0.75s var(--home-expo) 0.12s backwards;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  height: 76px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.03);
+  color: rgba(235, 235, 245, 0.72);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.3s ease,
+    border-color var(--home-tint) var(--home-ease),
+    color 0.3s ease,
+    transform 0.2s var(--home-expo);
+}
+
+.tab[aria-selected="true"] {
+  border-color: var(--home-tone-line);
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.date {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 16px;
+  color: rgba(235, 235, 245, 0.62);
+}
+
+.count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 600;
+  color: rgba(235, 235, 245, 0.58);
+  transition: color 0.4s ease;
+}
+
+.tab[aria-selected="true"] .count {
+  color: var(--home-tone);
+}
+
+/* Today, on the pill row: a dot in the page's tone before "今天", so the day
+ * stays findable when another day is selected. The wide cards say 今天 at
+ * 15px and need no more. */
+.todayDot {
+  display: none;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: var(--home-tone);
+}
+
+@media (hover: hover) {
+  .tab:hover {
+    transform: translateY(-2px);
+  }
+
+  .tab:not([aria-selected="true"]):hover {
+    background-color: rgba(255, 255, 255, 0.055);
+    color: #fff;
+  }
+}
+
+@media (max-width: 1100px) {
+  .tab {
+    padding: 0 12px;
+  }
+}
+
+@media (max-width: 900px) {
+  .tabs {
+    margin-top: 20px;
+    /* Room for the 3px focus ring: a scroll container clips on both axes. */
+    padding-block: 4px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    scroll-padding-inline: var(--home-gutter);
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    flex: none;
+    justify-content: center;
+    height: 44px;
+    padding: 0 14px;
+    border-radius: 999px;
+  }
+
+  .tab:hover {
+    transform: none;
+  }
+
+  .text {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .label {
+    font-size: 14px;
+  }
+
+  .date {
+    display: none;
+  }
+
+  .count {
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .todayDot {
+    display: block;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabs {
+    animation: none;
+    scroll-behavior: auto;
+  }
+
+  .tab,
+  .count {
+    transition-duration: 0.01ms;
+  }
+
+  .tab:hover {
+    transform: none;
+  }
+}

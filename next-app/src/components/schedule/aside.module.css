@@ -1,0 +1,150 @@
+/* The schedule page's right column: boxes on the page's surface layer, and
+ * the two that are plain server markup — the sign-in prompt and the
+ * next-season link. The week chart and 我追的 · 本周 keep their own modules
+ * and add their class beside `box`.
+ *
+ * `box` and `title` are :where() rules, zero specificity, so a sibling
+ * module's class on the same element always overrides them whichever
+ * stylesheet loads first. Two single-class rules from different modules tie,
+ * and the winner differs between next dev and a production build — the
+ * trap the homepage hit twice (cards.module.css, section.module.css). */
+
+:where(.box) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 20px;
+  border-radius: 16px;
+  background-color: var(--home-surface);
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+:where(.title) {
+  margin: 0;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 650;
+  color: #fff;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ── Sign-in prompt (visitors) ─────────────────────────────────────────── */
+.prompt {
+  gap: 14px;
+}
+
+.body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 22px;
+  color: rgba(235, 235, 245, 0.7);
+}
+
+.cta {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease-out,
+    border-color 0.15s ease-out,
+    transform 0.15s ease-out;
+}
+
+.cta:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── Next season ───────────────────────────────────────────────────────── */
+.next {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  color: #fff;
+  text-decoration: none;
+}
+
+.next:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.nextText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.nextTitle {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 650;
+}
+
+.nextSub {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: rgba(235, 235, 245, 0.64);
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  flex: none;
+  color: rgba(235, 235, 245, 0.6);
+  transition: transform 0.25s var(--home-expo);
+}
+
+@media (hover: hover) {
+  .cta:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    background-color: rgba(255, 255, 255, 0.18);
+    transform: translateY(-1px);
+  }
+
+  /* A white veil over the surface, not a new background colour: the surface
+   * is the anime's tinted layer and has to stay under it. 5% is proven in
+   * lib/home/tone.test.ts ("a hovered aside row"). */
+  .next:hover {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05));
+  }
+
+  .next:hover .chevron {
+    transform: translateX(3px);
+  }
+}
+
+@media (max-width: 600px) {
+  .cta {
+    height: 44px;
+  }
+
+  .next {
+    min-height: 64px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .box,
+  .cta,
+  .chevron {
+    transition-duration: 0.01ms;
+  }
+}

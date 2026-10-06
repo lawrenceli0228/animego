@@ -1,0 +1,146 @@
+/* 我追的 · 本周: the reader's followed shows that air this week, each in its
+ * own anime's tone (--tone / --tone-fill written inline on the row). */
+
+.mine {
+  padding: 20px 12px 12px;
+}
+
+.heading {
+  padding: 0 8px;
+}
+
+.list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 10px;
+  color: var(--tone);
+  text-decoration: none;
+  transition: background-color 0.15s ease-out;
+}
+
+.row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.cover {
+  flex: none;
+  position: relative;
+  width: 34px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 5px;
+  background-color: var(--tone-fill);
+}
+
+.img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.text {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title,
+.when {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.title {
+  font-size: 13.5px;
+  line-height: 20px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.when {
+  font-size: 12px;
+  line-height: 18px;
+  color: rgba(235, 235, 245, 0.62);
+  font-variant-numeric: tabular-nums;
+}
+
+.state {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tone);
+  white-space: nowrap;
+}
+
+.empty {
+  margin: 8px 8px 4px;
+  font-size: 13.5px;
+  line-height: 22px;
+  color: rgba(235, 235, 245, 0.66);
+}
+
+/* A text link in the page's tone, like the homepage's section links. */
+.all {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  margin: 4px 4px 0;
+  padding: 0 4px;
+  border-radius: 6px;
+  color: var(--home-tone);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    opacity 0.15s ease-out,
+    color var(--home-tint) var(--home-ease);
+}
+
+.all:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (hover: hover) {
+  .row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  .all:hover {
+    opacity: 0.78;
+  }
+}
+
+@media (max-width: 600px) {
+  .all {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .all {
+    transition-duration: 0.01ms;
+  }
+}

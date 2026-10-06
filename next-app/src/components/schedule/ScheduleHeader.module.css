@@ -1,0 +1,73 @@
+/* The schedule page's title block: the season in the page's tone, the title,
+ * and one line saying how much airs this week and on which clock. */
+
+.header {
+  padding-inline: var(--home-gutter);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: rise 0.75s var(--home-expo) backwards;
+}
+
+.eyebrow {
+  font-size: 12.5px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--home-tone);
+  transition: color var(--home-tint) var(--home-ease);
+}
+
+.title {
+  margin: 0;
+  font-size: 34px;
+  line-height: 42px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+.sub {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: rgba(235, 235, 245, 0.66);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+@media (max-width: 600px) {
+  .header {
+    gap: 6px;
+  }
+
+  .eyebrow {
+    font-size: 12px;
+  }
+
+  .title {
+    font-size: 28px;
+    line-height: 36px;
+  }
+
+  .sub {
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header {
+    animation: none;
+  }
+
+  .eyebrow {
+    transition-duration: 0.01ms;
+  }
+}

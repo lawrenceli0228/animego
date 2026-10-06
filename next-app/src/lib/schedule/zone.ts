@@ -22,6 +22,14 @@ export function utcOffsetLabel(minutesEast: number): string {
   return `UTC${sign}${hours}${minutes ? `:${String(minutes).padStart(2, "0")}` : ""}`;
 }
 
+/**
+ * The runtime zone's offset at `ms`, minutes east of UTC. On the client that
+ * is the reader's zone; only call it once the page is on the browser's clock.
+ */
+export function runtimeOffsetMinutes(ms: number): number {
+  return -new Date(ms).getTimezoneOffset();
+}
+
 export type ZoneNote = { kind: "site" } | { kind: "local"; offset: string };
 
 /**
