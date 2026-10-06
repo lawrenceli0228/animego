@@ -89,7 +89,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #1f1f2a",
     background: "#111118",
     position: "sticky",
-    top: 0,
+    // Below the site header (--nav-h), not under it. Sticky never took effect
+    // before globals.css moved <body> to `overflow-x: clip`; at `top: 0` this
+    // bar would now stick behind the site header whenever that is showing.
+    top: "var(--nav-h)",
     zIndex: 10,
   },
   headerInner: {

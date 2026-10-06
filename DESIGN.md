@@ -438,6 +438,11 @@ CSS 自定义属性的 `var()` 替换发生在**声明它的元素**上，不是
   它下面 12px（右对齐，`z-index` 低于顶栏的下拉），满屏页面用 `calc(100vh - var(--nav-h))`，
   `html` 的 `scroll-padding-top` 也是它。
 - 焦点环照旧是那一个蓝色 box-shadow；手机上所有控件 ≥44px。
+- ⚠️ **`<body>` 必须是 `overflow-x: clip`，不能是 `hidden`。** `hidden` 会把另一轴算成
+  `auto`，让 `<body>` 变成一个永远不滚动的滚动容器，`position: sticky` 就粘在它里面——
+  全站所有 sticky（顶栏首当其冲）都跟着页面滚走了。改之前线上实测：滚 529px 后「吸顶」
+  的顶栏在 y = −529。`clip` 裁掉同样的溢出但不建滚动容器。`<html>` 保持 `hidden`
+  （作用于视口，`lib/scrollLock.ts` 依赖它）。
 
 ### Tags & Badges
 

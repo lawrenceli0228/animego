@@ -230,6 +230,23 @@ body {
   overflow-x: hidden;
 }
 
+/* `clip`, not `hidden`, on <body> — and the difference is the whole header.
+ *
+ * `overflow-x: hidden` makes the other axis compute to `auto`, which turns
+ * <body> into a scroll container. A scroll container that never scrolls (the
+ * viewport does the scrolling; <body> just grows) is still the box
+ * `position: sticky` sticks inside, so every sticky element on the site —
+ * the header first of all — scrolled away with the page. Measured on the live
+ * site before this change: the "sticky" bar sat at y = −529 after a 529px
+ * scroll. `clip` clips the same overflow without making a scroll container.
+ *
+ * <html> keeps `hidden`: on the root it applies to the viewport, where it has
+ * always worked, and lib/scrollLock.ts depends on that. Browsers without
+ * `clip` (Safari before 16) keep the old behaviour from the rule above. */
+body {
+  overflow-x: clip;
+}
+
 body {
   min-height: 100%;
   background: var(--bg);
