@@ -34,10 +34,11 @@ const scrollY = (page: Page) => page.evaluate(() => window.scrollY);
  * Each step waits until the header has SEEN it: scroll decisions run once per
  * animation frame, and two scrolls inside one frame are a single net move
  * (y → y + 20 → y would read as "down", and the bar would stay hidden). The
- * first step also waits until the page is long enough to stand at y + 20: on
- * a page still filling in, the browser clamps the scroll, and the way back up
- * to y then reads as a scroll DOWN. The last step waits out the slide back
- * in, so nothing is measured mid-move.
+ * first step also waits until the page is long enough to stand at y + 20: the
+ * body streams in after the header, and until React reveals it the page is
+ * only its loading fallback, so the browser clamps the scroll and the way
+ * back up to y then reads as a scroll DOWN. The last step waits out the slide
+ * back in, so nothing is measured mid-move.
  *
  * Why so much of this file is about the page NOT moving: html carries
  * `scroll-padding-top: var(--nav-h)`, and before the bar's own controls were
@@ -329,6 +330,10 @@ test.describe("the desktop bar", () => {
     // for everything that is not in the bar.
     await page.goto("/welcome");
     await waitForHydration(page, "header nav");
+    // The page body streams in after the header: until React reveals it, the
+    // heading sits in a hidden placeholder (its box reads 0) on a page a
+    // quarter of its real height. Measure only what has been laid out.
+    await expect(page.locator("#hero-heading")).toBeVisible();
     const anchorTop = await page.evaluate(() => {
       location.hash = "#hero-heading";
       return document.getElementById("hero-heading")?.getBoundingClientRect().top ?? -1;
@@ -338,6 +343,7 @@ test.describe("the desktop bar", () => {
     await page.goto("/calendar");
     await waitForHydration(page, "header nav");
     const tab = page.locator('button[id^="weekly-schedule-tab-"]').first();
+    await expect(tab).toBeVisible();
     // Parked 20px from the top of the window: on screen, but where the bar is.
     await tab.evaluate((el) => window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 20));
     expect(Math.round(await tab.evaluate((el) => el.getBoundingClientRect().top))).toBe(20);
