@@ -1,0 +1,285 @@
+/* The signed-in account control and its dropdown.
+ *
+ * On a desktop the trigger is a 40px pill — the member's photo (or the
+ * chosen anime's cover) in a 32px circle, and a chevron. On a phone it is a
+ * 44px touch target around the same circle, no chevron. The probing skeleton
+ * (AvatarSkeleton) uses the SAME classes, so the two cannot drift apart: the
+ * probe resolving swaps one box for another of identical size.
+ *
+ * Breakpoint 1023px, as in Navbar.module.css. */
+
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(235, 235, 245, 0.86);
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.face {
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.face img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.28s var(--ease-out-expo);
+}
+
+.trigger[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+/* The neutral stand-in shown while the session probe is in flight. */
+.skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+
+.skeleton .face {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.skeletonChevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+/* ── The dropdown ───────────────────────────────────────────────────────────
+ * Mounted on first open and kept, so it fades and moves both ways; the very
+ * first open gets its entrance from @starting-style. Closed, `visibility`
+ * takes it out of the accessibility tree once the fade has finished. */
+.menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  z-index: 10;
+  width: 244px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(24, 24, 28, 0.96);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 18px 48px -10px rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0s linear 0.15s;
+}
+
+.menu[data-open="true"] {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.28s var(--ease-out-expo),
+    visibility 0s linear 0s;
+}
+
+@starting-style {
+  .menu[data-open="true"] {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* The mini profile card: the chosen anime's banner behind the photo + name. */
+.head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 64px;
+  margin-bottom: 6px;
+  padding: 12px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.headBanner {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.headBanner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(16, 16, 20, 0.92), rgba(16, 16, 20, 0.5));
+}
+
+.headFace {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.headFace img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.name {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.name b {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+.name span {
+  font-size: 11px;
+  color: rgba(235, 235, 245, 0.6);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: rgba(235, 235, 245, 0.88);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.item:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.item svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  opacity: 0.8;
+}
+
+.item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.danger {
+  color: #ff7b72;
+}
+
+.danger:hover {
+  background-color: rgba(255, 69, 58, 0.14);
+  color: #ff8b82;
+}
+
+.separator {
+  height: 1px;
+  margin: 6px 4px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.trigger:focus-visible,
+.item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (max-width: 1023px) {
+  .trigger {
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+
+  .chevron,
+  .skeletonChevron {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger,
+  .chevron,
+  .menu,
+  .menu[data-open="true"],
+  .item {
+    transition: none;
+  }
+}

@@ -8,11 +8,12 @@ import { cssUrl } from "@/lib/cssUrl";
 import FallbackImg from "@/components/ui/FallbackImg";
 import type { NavUser } from "./Navbar";
 import { LanguageMenuInline } from "./LanguageMenu";
-import "./avatar-menu.css";
+import styles from "./AvatarMenu.module.css";
 
-// AvatarMenu — the logged-in navbar chrome collapsed into a circular avatar.
-// The avatar shows the member-pass photo when set (else the username initial),
-// and the dropdown integrates the user's functions; 设置 links to /settings.
+// AvatarMenu — the signed-in navbar chrome collapsed into the member's face.
+// The face is the member-pass photo when set, else the chosen anime's cover,
+// else the default card; the dropdown integrates the account's functions and
+// 设置 links to /settings.
 
 interface AvatarMenuProps {
   user: NavUser;
@@ -20,10 +21,40 @@ interface AvatarMenuProps {
   loggingOut: boolean;
 }
 
+function Chevron() {
+  return (
+    <svg className={styles.chevron} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 10l5 5 5-5" />
+    </svg>
+  );
+}
+
+/**
+ * The neutral stand-in Navbar shows while the session probe is in flight.
+ *
+ * Built from the trigger's own classes, so its footprint IS the trigger's —
+ * the probe resolving swaps a box for one of identical size and nothing in
+ * the bar moves. (It used to be a hand-copied width/height/radius that had to
+ * be kept in step with the stylesheet by eye.)
+ */
+export function AvatarSkeleton() {
+  return (
+    <span className={`${styles.trigger} ${styles.skeleton}`} aria-hidden="true">
+      <span className={styles.face} />
+      <span className={styles.skeletonChevron} />
+    </span>
+  );
+}
+
 export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuProps) {
   const { t } = useLang();
   const [open, setOpen] = useState(false);
+  // The dropdown is mounted on the first open and kept, so it can fade out as
+  // well as in — and so a signed-in page view that never opens it never
+  // fetches the banner it carries.
+  const [mounted, setMounted] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -33,7 +64,10 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      const hadFocus = wrapRef.current?.contains(document.activeElement) ?? false;
+      setOpen(false);
+      if (hadFocus) triggerRef.current?.focus();
     };
     document.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
@@ -48,7 +82,7 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
   // Banner falls back to cover then the default, so the mini-card is never an
   // empty dark strip.
   const banner = user.backdropBannerUrl ?? user.backdropCoverUrl ?? DEFAULT_BACKDROP_IMAGE;
-  // Square tile: the photo, else the chosen anime's cover, else the default
+  // The face: the photo, else the chosen anime's cover, else the default
   // card. The cover is an AniList URL that can rotate/404, so FallbackImg
   // swaps to the default on error.
   const avatarSrc = photo ?? cover ?? DEFAULT_AVATAR_IMAGE;
@@ -57,31 +91,38 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
     <FallbackImg src={avatarSrc} fallback={DEFAULT_AVATAR_IMAGE} alt={user.username} />
   );
 
+  const close = () => setOpen(false);
+
   return (
-    <div className="agc-avatar-wrap" ref={wrapRef}>
+    <div className={styles.wrap} ref={wrapRef}>
       <button
+        ref={triggerRef}
         type="button"
-        className="agc-avatar"
+        className={styles.trigger}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("nav.accountMenu")}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setMounted(true);
+          setOpen((v) => !v);
+        }}
       >
-        {avatar()}
+        <span className={styles.face}>{avatar()}</span>
+        <Chevron />
       </button>
 
-      {open && (
-        <div className="agc-avatar-menu" role="menu">
-          <div className="agc-avatar-head">
+      {mounted && (
+        <div className={styles.menu} role="menu" data-open={open}>
+          <div className={styles.head}>
             {banner && (
               <span
-                className="agc-avatar-head-banner"
+                className={styles.headBanner}
                 style={{ backgroundImage: cssUrl(banner, DEFAULT_BACKDROP_IMAGE) }}
                 aria-hidden="true"
               />
             )}
-            <span className="agc-avatar">{avatar()}</span>
-            <span className="nm">
+            <span className={styles.headFace}>{avatar()}</span>
+            <span className={styles.name}>
               <b>{user.username}</b>
               <span>{t("nav.hi")}</span>
             </span>
@@ -90,9 +131,9 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
           <Link
             href="/profile"
             prefetch={false}
-            className="agc-menu-item"
+            className={styles.item}
             role="menuitem"
-            onClick={() => setOpen(false)}
+            onClick={close}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="8" y1="6" x2="21" y2="6" />
@@ -105,19 +146,17 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
             {t("nav.myList")}
           </Link>
 
-          {/* 我的库 demoted here from the top-level nav. It is the local-file
-              player: needs File System Access plus a folder the user has
-              granted, and is auth-gated by proxy.ts either way — so it was
-              spending a scarce nav slot on something a first-time visitor
-              cannot use, while 我的追番 (above) had no visible entry at all.
-              Swapping the two keeps the nav at five links; the 375px bar has
-              no room for a sixth. */}
+          {/* 我的库 lives here, not in the bar. It is the local-file player:
+              needs File System Access plus a folder the user has granted, and
+              is auth-gated by proxy.ts either way — so as a top-level entry it
+              spends a slot on something a first-time visitor cannot use.
+              (lib/nav/navLinks holds the bar's side of this decision.) */}
           <Link
             href="/library"
             prefetch={false}
-            className="agc-menu-item"
+            className={styles.item}
             role="menuitem"
-            onClick={() => setOpen(false)}
+            onClick={close}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -128,9 +167,9 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
           <Link
             href="/settings"
             prefetch={false}
-            className="agc-menu-item"
+            className={styles.item}
             role="menuitem"
-            onClick={() => setOpen(false)}
+            onClick={close}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
@@ -143,9 +182,9 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
             <Link
               href="/admin"
               prefetch={false}
-              className="agc-menu-item"
+              className={styles.item}
               role="menuitem"
-              onClick={() => setOpen(false)}
+              onClick={close}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2l8 4v6c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6z" />
@@ -158,13 +197,13 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
               readout over an N-way cycle, which stopped describing what the
               button did the moment a third locale existed. Now a group of
               options derived from LOCALES, each named in its own language. */}
-          <LanguageMenuInline onPicked={() => setOpen(false)} />
+          <LanguageMenuInline onPicked={close} />
 
-          <div className="agc-menu-sep" />
+          <div className={styles.separator} />
 
           <button
             type="button"
-            className="agc-menu-item danger"
+            className={`${styles.item} ${styles.danger}`}
             role="menuitem"
             disabled={loggingOut}
             onClick={() => {

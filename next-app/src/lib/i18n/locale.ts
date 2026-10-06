@@ -84,8 +84,8 @@ export const LOCALE_LANG: Record<Locale, Lang> = {
  * keyed by the reader's language — every entry is the same in every locale,
  * which is why it lives here rather than in the dictionaries.
  *
- * `short` is the compact form for the navbar trigger, which sits in a 56px
- * bar that already overflows at 375px; `endonym` is the menu row.
+ * `short` is the compact form for the signed-out desktop header's trigger,
+ * one of the bar's small round controls; `endonym` is the menu row.
  *
  * Exhaustive over Locale, so adding a locale to LOCALES is a compile error
  * here until it has named itself — which is the point. Nothing else about the
