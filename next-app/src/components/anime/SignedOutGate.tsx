@@ -15,12 +15,17 @@
 // than polling the cookie, because the cookie clears before the request that
 // cleared it settles and nothing would re-render on that alone.
 //
+// The sign-out is remembered for the rest of the document, not just announced
+// (hasSignedOutHere): browser back / forward remounts cached pages without a
+// request, and a block mounted after the event would otherwise start out
+// showing the previous reader's data again.
+//
 // Both bodies are rendered on the server and handed in as props — the client
 // only picks between them, so nothing account-specific is fetched here and no
 // server component has to become a client component to use this.
 
-import { useEffect, useState, type ReactNode } from "react";
-import { subscribeToSignedOut } from "./subscriptionSetState";
+import { useSyncExternalStore, type ReactNode } from "react";
+import { hasSignedOutHere, subscribeToSignedOut } from "./subscriptionSetState";
 
 interface SignedOutGateProps {
   /** The authenticated body. Shown until a sign-out lands. */
@@ -29,16 +34,14 @@ interface SignedOutGateProps {
   signedOut: ReactNode;
 }
 
+// The server rendered for whoever was signed in when the page was built, and
+// hydration agrees with it; the client only ever learns of a sign-out after.
+const notSignedOutOnServer = () => false;
+
 export default function SignedOutGate({
   children,
   signedOut,
 }: SignedOutGateProps): React.ReactElement {
-  // Starts false on both sides of hydration: the server render is the
-  // authority on who was logged in when the page was built, and the client
-  // only ever learns about a sign-out that happens after it.
-  const [gone, setGone] = useState(false);
-
-  useEffect(() => subscribeToSignedOut(() => setGone(true)), []);
-
+  const gone = useSyncExternalStore(subscribeToSignedOut, hasSignedOutHere, notSignedOutOnServer);
   return <>{gone ? signedOut : children}</>;
 }

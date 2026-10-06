@@ -1,15 +1,34 @@
 /* 今日更新 rail. Runs from the content gutter to the viewport edge, so the
- * rail visibly continues rather than stopping at a column line. */
+ * rail visibly continues rather than stopping at a column line.
+ *
+ * Every show of the day is its own card at every width. Phones used to fold
+ * the aired half behind one tile, and a card that aired while the page was
+ * open dropped into that fold — the show vanished from the row. Nothing in
+ * this file may hide a card; TodayRail.css.test.ts holds it to that. */
+
+.frame {
+  position: relative;
+  margin-top: 16px;
+}
 
 .rail {
-  margin-top: 16px;
+  /* The offsetParent of the cards, so their offsetLeft is a position in the
+   * row: the paging and the opening scroll read it. */
+  position: relative;
   display: flex;
   gap: 16px;
   padding: 8px var(--home-gutter) 4px;
   scroll-padding-inline: var(--home-gutter);
   overflow-x: auto;
   overflow-y: hidden;
+  /* Reaching either end does not hand the swipe on to the browser's
+   * back / forward gesture. */
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
+  /* No scroll-behavior: smooth. A drag writes scrollLeft on every pointer
+   * move, and smoothing would leave the row trailing behind the mouse; the
+   * ← → buttons ask for smooth scrolling themselves, except under reduced
+   * motion. */
 }
 
 .rail::-webkit-scrollbar {
@@ -140,42 +159,74 @@
   transition: background-color var(--home-tint) var(--home-ease);
 }
 
-/* ── Phone: the aired half folds into one tile ───────────────────────────── */
-.airedTile {
+/* ── ← → : one view of cards back or forward ─────────────────────────────
+ * Over the rail's two ends, centred on the covers; in the gutter on a wide
+ * screen. Shown only with a mouse (below) and only when the row overflows.
+ * At an end the button stays focusable and says so (aria-disabled), dimmed. */
+.arrow {
   display: none;
-}
-
-.thumbs {
-  display: flex;
-  padding-left: 20px;
-}
-
-.thumb {
-  display: block;
+  position: absolute;
+  top: calc(8px + 197px / 2 - 20px);
+  z-index: 2;
+  align-items: center;
+  justify-content: center;
   width: 40px;
-  height: 56px;
-  margin-left: -20px;
-  border-radius: 5px;
-  object-fit: cover;
-  box-shadow: 0 0 0 2px var(--home-surface);
+  height: 40px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background-color: color-mix(in oklch, var(--home-pop) 84%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 28px -12px rgba(0, 0, 0, 0.8);
+  cursor: pointer;
+  transition:
+    opacity 0.2s ease-out,
+    background-color 0.15s ease-out,
+    border-color 0.15s ease-out;
 }
 
-.airedCount {
-  font-size: 13.5px;
-  font-weight: 600;
+.prev {
+  left: max(8px, calc(var(--home-gutter) - 56px));
 }
 
-.airedRange {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  color: rgba(235, 235, 245, 0.62);
+.next {
+  right: max(8px, calc(var(--home-gutter) - 56px));
 }
 
-.airedToggle {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--home-tone);
+.back {
+  transform: rotate(180deg);
+}
+
+.arrow:hover {
+  background-color: color-mix(in oklch, var(--home-pop) 90%, white 10%);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+/* At an end: the glyph and the glass fade, the element does not. Opacity on
+ * the button would fade its focus ring with it — and focus stays on the
+ * button at the end of the row. The ring rule below comes after this one and
+ * ties on specificity, so a focused end button still draws it. */
+.arrow[aria-disabled="true"] {
+  cursor: default;
+  border-color: rgba(255, 255, 255, 0.07);
+  background-color: color-mix(in oklch, var(--home-pop) 45%, transparent);
+  color: rgba(255, 255, 255, 0.3);
+  box-shadow: none;
+}
+
+/* No hover response at an end (and no box-shadow here: this selector
+ * outranks the ring's, and a hovered, focused end button keeps its ring). */
+.arrow[aria-disabled="true"]:hover {
+  border-color: rgba(255, 255, 255, 0.07);
+  background-color: color-mix(in oklch, var(--home-pop) 45%, transparent);
+}
+
+.arrow:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 @keyframes ping {
@@ -188,46 +239,45 @@
   }
 }
 
-@media (max-width: 600px) {
+/* A mouse: the row is grabbed and dragged, and the buttons appear. */
+@media (hover: hover) and (pointer: fine) {
   .rail {
+    cursor: grab;
+  }
+
+  /* While dragging: the grabbing hand over everything, the card links
+   * included; no text or image selection; no snapping pulling against the
+   * pointer. */
+  .rail[data-dragging="true"],
+  .rail[data-dragging="true"] * {
+    cursor: grabbing;
+  }
+
+  .rail[data-dragging="true"] {
+    -webkit-user-select: none;
+    user-select: none;
+    scroll-snap-type: none;
+  }
+
+  .frame[data-overflow="true"] .arrow {
+    display: inline-flex;
+  }
+}
+
+/* Phone: the row swipes and settles card by card. */
+@media (max-width: 600px) {
+  .frame {
     margin-top: 12px;
+  }
+
+  .rail {
     gap: 12px;
     scroll-snap-type: x proximity;
   }
 
   .card,
-  .now,
-  .airedTile {
+  .now {
     scroll-snap-align: start;
-  }
-
-  .airedTile {
-    flex: none;
-    width: 104px;
-    height: 197px;
-    padding: 14px 10px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    background-color: var(--home-surface);
-    color: #fff;
-    font: inherit;
-    cursor: pointer;
-    transition: background-color var(--home-tint) var(--home-ease);
-  }
-
-  .airedTile:focus-visible {
-    outline: 2px solid transparent;
-    outline-offset: 2px;
-    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
-  }
-
-  .rail[data-aired="collapsed"] .card[data-state="aired"] {
-    display: none;
   }
 }
 
@@ -235,5 +285,9 @@
   .ping,
   .nowDot {
     animation: none;
+  }
+
+  .arrow {
+    transition-duration: 0.01ms;
   }
 }

@@ -25,12 +25,14 @@ import {
 //      browser (Set-Cookie). Without this, a logged-in user looks logged
 //      out after 15 min on any navigation / language toggle.
 //
-//   2. AUTH GATE (/admin, /library, library-mode /player, /profile) — verify the (now
+//   2. AUTH GATE (/admin, /library, library-mode /player, /profile, /settings,
+//      /watching) — verify the (now
 //      possibly refreshed) session against JWT_SECRET and redirect to
 //      /login?from=<path> if absent/expired/tampered. /admin additionally
 //      requires role "admin". Bare /player is a public local-file trial;
 //      /player?seriesId=... stays gated because it opens a user's persisted
-//      library. /profile (P11) is the user's own subscription list — auth-only.
+//      library. /profile (P11) is the user's own subscription list — auth-only,
+//      and so is /watching (全部在追), its watching shows as 继续看 cards.
 //
 // Runtime: Next 16 renamed the deprecated `middleware` convention to this
 // `proxy.ts`. Proxy runs on the Node.js runtime (the `runtime` config is
@@ -73,7 +75,12 @@ function isGated(path: string, searchParams: URLSearchParams): boolean {
     path.startsWith("/library") ||
     (path.startsWith("/player") && searchParams.has("seriesId")) ||
     path.startsWith("/profile") ||
-    path.startsWith("/settings")
+    path.startsWith("/settings") ||
+    // 全部在追: the reader's own watching list, auth-only like /profile.
+    // Matched at the segment boundary, so a future /watching-something
+    // is not swept in by accident.
+    path === "/watching" ||
+    path.startsWith("/watching/")
   );
 }
 

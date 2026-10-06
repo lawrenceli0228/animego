@@ -20,7 +20,7 @@ import { dayHeader, fillTemplate } from "@/lib/home/time";
 import { todayScheduleItems } from "@/lib/home/todaySlots";
 import { fetchSchedule, fetchWatching } from "@/lib/schedule/fetch";
 import {
-  continueCard,
+  continueCards,
   gemCard,
   heroSlide,
   hueCard,
@@ -323,7 +323,7 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
         <HomeHero slides={slides} serverNowMs={nowMs} progress={progress} />
       </SubscriptionSetProvider>
       <ContinueWatching
-        items={watching.items.map((w) => continueCard(w, lang))}
+        items={continueCards(watching.items, lang)}
         loggedOut={watching.loggedOut}
         dict={dict}
         lang={lang}

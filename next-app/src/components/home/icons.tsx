@@ -64,6 +64,15 @@ export function PlayIcon({ size = 15, className }: IconProps) {
   );
 }
 
+export function PauseIcon({ size = 15, className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className} fill="currentColor">
+      <rect x="6.5" y="5" width="3.6" height="14" rx="1.2" />
+      <rect x="13.9" y="5" width="3.6" height="14" rx="1.2" />
+    </svg>
+  );
+}
+
 export function RefreshIcon({ size = 15, className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className} {...stroke}>

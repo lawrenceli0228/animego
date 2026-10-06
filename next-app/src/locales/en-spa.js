@@ -49,6 +49,9 @@ const en = {
     heroEpUpdate: '· Ep {{ep}}',
     heroTotalEps: '{{n}} eps',
     heroWatching: 'Watching · Ep {{ep}}',
+    // The hero's pause control; its name says what pressing it will do.
+    heroPause: 'Pause auto-rotation',
+    heroPlay: 'Resume auto-rotation',
     continueTitle: 'Continue watching',
     continueAll: 'All watching',
     continueNext: 'Continue with ep {{ep}}',
@@ -73,9 +76,9 @@ const en = {
     todayInMinutes: 'In {{n}} min',
     todayNextDay: 'Tmrw',
     todayEp: 'Ep {{ep}}',
-    todayAiredCount: '{{n}} aired',
-    todayShowAired: 'Show aired',
-    todayHideAired: 'Hide aired',
+    // The rail's ← → buttons: a view of cards back / forward.
+    todayPrevPage: 'Previous shows',
+    todayNextPage: 'Next shows',
     fullSchedule: 'Full schedule',
     seasonTopTitle: 'Top rated this season',
     seasonTopSub: '{{season}} · by AniList score',
@@ -101,6 +104,17 @@ const en = {
   },
   // Schedule page (/calendar), hue redesign. The server components read the
   // .ts dictionary, the client board the -spa twin; one key per visible string.
+  // 全部在追 (/watching): every show the reader is watching, as 继续看 cards.
+  // Server-rendered from the .ts copy; the -spa twin keeps the sets equal.
+  watchingPage: {
+    title: 'Watching',
+    count: '{{n}} watching',
+    order: 'Most recently updated first',
+    manage: 'Manage list',
+    loadFailed: "Your watching list didn't load. Refresh the page to try again.",
+    signedOut: "You've signed out, so your watching list is hidden.",
+    signIn: 'Sign in again',
+  },
   schedule: {
     title: 'Schedule',
     weekTotal: '{{n}} airings this week',

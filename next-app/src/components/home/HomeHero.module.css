@@ -220,9 +220,11 @@
 }
 
 .barFill {
+  position: relative;
   display: block;
   width: 100%;
   height: 6px;
+  overflow: hidden;
   border-radius: 3px;
   background-color: var(--bar-off);
   transition: background-color 0.45s ease;
@@ -230,6 +232,86 @@
 
 .bar[aria-pressed="true"] .barFill {
   background-color: var(--bar-on);
+}
+
+/* While the hero rotates, the selected bar is a dim track of its own colour
+ * that fills over the slide's 8 seconds — the countdown, kept quiet. The fill
+ * stops where it is while anything holds the hero, and does not exist where
+ * the hero does not rotate (reduced motion, before hydration), so there the
+ * selected bar is solid as before. Declared beside the rule it overrides. */
+.hero[data-rotates="true"] .bar[aria-pressed="true"] .barFill {
+  background-color: color-mix(in oklch, var(--bar-on) 38%, transparent);
+}
+
+.barProgress {
+  position: absolute;
+  inset: 0;
+  background-color: var(--bar-on);
+  transform-origin: left center;
+  animation: barProgress var(--hero-interval) linear both;
+}
+
+.hero[data-held="true"] .barProgress {
+  animation-play-state: paused;
+}
+
+/* The rotation's pause / play control (WCAG 2.2.2): a small glass circle at
+ * the end of the bars, the same height as they are. The circle is drawn by
+ * ::before so the button can be a bigger touch target than it looks (44px on
+ * a phone around a 32px circle), the way the bars are. */
+.pause {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(235, 235, 245, 0.82);
+  cursor: pointer;
+  transition: color 0.15s ease-out;
+}
+
+.pause::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.06);
+  transition:
+    background-color 0.15s ease-out,
+    border-color 0.15s ease-out;
+}
+
+/* Above the circle: positioned content paints after it. */
+.pause svg {
+  position: relative;
+}
+
+.pause:hover {
+  color: #fff;
+}
+
+.pause:hover::before {
+  background-color: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.pause:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
 }
 
 .barTip {
@@ -257,9 +339,18 @@
 }
 
 .bar:hover .barTip,
-.bar:focus-visible .barTip {
+.bar:focus-visible .barTip,
+.pause:hover .barTip,
+.pause:focus-visible .barTip {
   opacity: 1;
   transform: none;
+}
+
+/* The pause button is the last thing in the row: its label opens leftwards
+ * so it never runs off the hero's right edge. */
+.pause .barTip {
+  left: auto;
+  right: 0;
 }
 
 .stage {
@@ -632,6 +723,12 @@
   }
 }
 
+@keyframes barProgress {
+  from {
+    transform: scaleX(0);
+  }
+}
+
 @keyframes ping {
   0% {
     box-shadow: 0 0 0 0 currentColor;
@@ -723,9 +820,27 @@
   }
 
   .eyebrow {
+    position: relative;
     order: 2;
     justify-content: center;
     height: auto;
+  }
+
+  /* Out of the flow at the row's right end: the bars stay centred whether
+   * the button is there or not (it appears only after hydration). */
+  .pause {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 44px;
+    height: 44px;
+    margin-left: 0;
+  }
+
+  .pause::before {
+    width: 32px;
+    height: 32px;
+    margin: -16px 0 0 -16px;
   }
 
   .eyebrowLabel {

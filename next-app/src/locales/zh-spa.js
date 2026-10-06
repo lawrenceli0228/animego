@@ -110,6 +110,9 @@ const zh = {
     heroEpUpdate: '更新第 {{ep}} 集',
     heroTotalEps: '共 {{n}} 集',
     heroWatching: '已追 · 看到第 {{ep}} 集',
+    // The hero's pause control; its name says what pressing it will do.
+    heroPause: '暂停自动切换',
+    heroPlay: '继续自动切换',
     continueTitle: '继续看',
     continueAll: '全部在追',
     continueNext: '继续看第 {{ep}} 集',
@@ -134,9 +137,9 @@ const zh = {
     todayInMinutes: '{{n}} 分钟后',
     todayNextDay: '次日',
     todayEp: '第 {{ep}} 集',
-    todayAiredCount: '已播 {{n}} 部',
-    todayShowAired: '展开已播',
-    todayHideAired: '收起已播',
+    // The rail's ← → buttons: a view of cards back / forward.
+    todayPrevPage: '上一组',
+    todayNextPage: '下一组',
     fullSchedule: '完整放送表',
     seasonTopTitle: '本季高分',
     seasonTopSub: '{{season}} · 按 AniList 评分',
@@ -162,6 +165,17 @@ const zh = {
   },
   // Schedule page (/calendar), hue redesign. The server components read the
   // .ts dictionary, the client board the -spa twin; one key per visible string.
+  // 全部在追 (/watching): every show the reader is watching, as 继续看 cards.
+  // Server-rendered from the .ts copy; the -spa twin keeps the sets equal.
+  watchingPage: {
+    title: '全部在追',
+    count: '{{n}} 部在追',
+    order: '最近更新的在前',
+    manage: '管理追番',
+    loadFailed: '在追列表没加载出来，刷新页面再试一次。',
+    signedOut: '你已退出登录，在追列表不再显示。',
+    signIn: '重新登录',
+  },
   schedule: {
     title: '放送表',
     weekTotal: '本周 {{n}} 部更新',

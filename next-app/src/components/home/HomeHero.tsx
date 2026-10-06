@@ -6,9 +6,13 @@
 // behind everything, its banner fading in from the right, a small cover and a
 // few lines of text on the left.
 //
-// No autoplay. DESIGN.md forbids auto-rotating carousels, and the old one's
-// rotation was also what yanked readers back up the page. Switching is five
-// short bars, each in its own anime's colour.
+// It moves on to the next slide every 8 seconds, and holds while a mouse is
+// over it, while keyboard focus is inside it, while the pause button is
+// pressed, while the tab is in the background or the hero is scrolled out of
+// view; under reduced motion it never moves on its own (WCAG 2.2.2 — the rules
+// are in lib/home/heroRotation.ts, the wiring in useHeroRotation). The five
+// short bars, each in its own anime's colour, switch by hand; the selected one
+// fills over the 8 seconds and stops filling while the hero is held.
 //
 // All five slides stay mounted and stacked, and a switch is CSS transitions
 // only — banner crossfade, the cover popping in, the title's tokens un-blurring
@@ -16,12 +20,14 @@
 // and nothing flashes. The page colour follows along through HomeHueScope.
 //
 // Banners are the heaviest images on the page, so a slide's banner is only
-// rendered once it is in focus or has been hovered/focused toward — the first
-// paint fetches one banner, not five.
+// rendered once it is in focus, has been hovered/focused toward, or is next in
+// line shortly before the rotation reaches it — the first paint fetches one
+// banner, not five.
 
 import { getImageProps } from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { HERO_INTERVAL_MS } from "@/lib/home/heroRotation";
 import { heroStatusParts, statusText } from "@/lib/home/heroStatus";
 import { fillTemplate, weekdayTime } from "@/lib/home/time";
 import { tokenDelays } from "@/lib/home/titleTokens";
@@ -30,7 +36,8 @@ import type { HeroSlide } from "@/lib/home/viewModels";
 import { useLang } from "@/lib/lang-client";
 import HeroFollowButton from "./HeroFollowButton";
 import { useHeroFocus } from "./HomeHueScope";
-import { ArrowIcon, StarIcon } from "./icons";
+import { ArrowIcon, PauseIcon, PlayIcon, StarIcon } from "./icons";
+import { useHeroRotation } from "./useHeroRotation";
 import { useHomeClock } from "./useHomeClock";
 import styles from "./HomeHero.module.css";
 
@@ -62,27 +69,36 @@ export default function HomeHero({ slides, serverNowMs, progress }: HomeHeroProp
   const { lang, t } = useLang();
   const { active, setActive } = useHeroFocus();
   const { nowMs, timeZone } = useHomeClock(serverNowMs);
-  // Flips on the first switch: the entrance animations belong to the first
-  // paint only, and the live region should stay silent until someone acts.
+  // Flips on the first switch, by hand or by the timer: the entrance
+  // animations belong to the first paint only, and the live region has
+  // nothing to say before then.
   const [switched, setSwitched] = useState(false);
   const [warm, setWarm] = useState<ReadonlySet<number>>(() => new Set([0]));
   const barRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const heroRef = useRef<HTMLElement | null>(null);
 
   const count = slides.length;
-  if (count === 0) return null;
-  const current = Math.min(active, count - 1);
+  const current = count === 0 ? 0 : Math.min(active, count - 1);
 
   const warmUp = (index: number) => {
-    if (warm.has(index)) return;
-    setWarm((prev) => new Set(prev).add(index));
+    setWarm((prev) => (prev.has(index) ? prev : new Set(prev).add(index)));
   };
 
-  const pick = (index: number) => {
+  const switchTo = (index: number) => {
     warmUp(index);
     if (index === current) return;
     setActive(index);
     setSwitched(true);
   };
+
+  // Called before the early return below: a hook may not follow it.
+  const rotation = useHeroRotation({ rootRef: heroRef, count, current, onPreload: warmUp, onAdvance: switchTo });
+
+  if (count === 0) return null;
+
+  // A switch by hand. It also starts the new slide's 8 seconds over — the
+  // countdown is keyed on the slide (useHeroRotation).
+  const pick = switchTo;
 
   // Arrow keys move between the bars, as they would in any segmented control.
   // Only these keys are handled — swallowing everything would trap Tab.
@@ -107,7 +123,16 @@ export default function HomeHero({ slides, serverNowMs, progress }: HomeHeroProp
   const when = (ms: number) => weekdayTime(ms, timeZone, lang);
 
   return (
-    <section className={styles.hero} aria-label={t("home.heroLabel")} data-entered={switched ? "true" : "false"}>
+    <section
+      ref={heroRef}
+      className={styles.hero}
+      aria-label={t("home.heroLabel")}
+      data-entered={switched ? "true" : "false"}
+      data-rotates={rotation.rotates ? "true" : "false"}
+      data-held={rotation.held ? "true" : "false"}
+      style={{ "--hero-interval": `${HERO_INTERVAL_MS}ms` } as Vars}
+      {...rotation.rootHandlers}
+    >
       <div className={styles.glow} aria-hidden>
         <div className={styles.glowInner}>
           {slides.map((s, i) =>
@@ -173,7 +198,14 @@ export default function HomeHero({ slides, serverNowMs, progress }: HomeHeroProp
                   onPointerEnter={() => warmUp(i)}
                   onFocus={() => warmUp(i)}
                 >
-                  <span className={styles.barFill} />
+                  <span className={styles.barFill}>
+                    {/* The countdown, on the selected bar only. Re-keyed when
+                        the slide's 8 seconds start over without a switch (the
+                        tab came back), so the fill starts over with them. */}
+                    {rotation.rotates && i === current ? (
+                      <span key={rotation.restarts} className={styles.barProgress} />
+                    ) : null}
+                  </span>
                   <span className={styles.barTip} aria-hidden>
                     {s.title}
                   </span>
@@ -181,6 +213,19 @@ export default function HomeHero({ slides, serverNowMs, progress }: HomeHeroProp
               );
             })}
           </div>
+          {/* WCAG 2.2.2's pause control. Only where the hero rotates: under
+              reduced motion, or before hydration, there is nothing to pause.
+              It sits after the bars, so appearing moves nothing. Its name
+              says what pressing it will do. */}
+          {rotation.rotates ? (
+            <button type="button" className={styles.pause} onClick={rotation.togglePause}>
+              {rotation.paused ? <PlayIcon size={12} /> : <PauseIcon size={12} />}
+              <span className={styles.srOnly}>{rotation.paused ? t("home.heroPlay") : t("home.heroPause")}</span>
+              <span className={styles.barTip} aria-hidden>
+                {rotation.paused ? t("home.heroPlay") : t("home.heroPause")}
+              </span>
+            </button>
+          ) : null}
         </div>
 
         <div className={styles.stage}>
@@ -290,7 +335,10 @@ export default function HomeHero({ slides, serverNowMs, progress }: HomeHeroProp
         </div>
       </div>
 
-      <p className={styles.srOnly} aria-live="polite">
+      {/* Silent while the hero rotates on its own — a screen reader would
+          otherwise announce a new slide every 8 seconds. A switch made by hand
+          happens with the hero held (pointer or focus on it), and is said. */}
+      <p className={styles.srOnly} aria-live={rotation.held ? "polite" : "off"}>
         {switched ? `${current + 1} / ${count}: ${slides[current].title}` : ""}
       </p>
     </section>
