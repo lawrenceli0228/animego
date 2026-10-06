@@ -32,6 +32,20 @@ describe("slotToday", () => {
     expect(slots.map((s) => s.minutesUntil)).toEqual([null, null]);
   });
 
+  test("every item keeps its slot as the clock passes an airing — it changes state, it never leaves", () => {
+    // The rail re-slots on every minute tick. A show airing at +2 minutes is
+    // "soon" before and "aired" after; the list must still hold all of them,
+    // in the same order, or a card would vanish from the rail mid-visit.
+    const items = [at(-60), at(2), at(45), at(180)];
+    const before = slotToday(items, NOW);
+    const after = slotToday(items, NOW + 3 * MIN);
+    expect(after.slots).toHaveLength(items.length);
+    expect(after.slots.map((s) => s.item.id)).toEqual(before.slots.map((s) => s.item.id));
+    expect(before.slots[1].state).toBe("soon");
+    expect(after.slots[1].state).toBe("aired");
+    expect(after.nowIndex).toBe(before.nowIndex + 1);
+  });
+
   test("the marker sits at the start when nothing has aired, at the end when everything has", () => {
     expect(slotToday([at(10), at(20)], NOW).nowIndex).toBe(0);
     expect(slotToday([at(-20), at(-10)], NOW).nowIndex).toBe(2);
