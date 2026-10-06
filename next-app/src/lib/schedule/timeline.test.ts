@@ -11,8 +11,12 @@ const at = (offsetMin: number, id = offsetMin, extraMs = 0) => ({ id, at: NOW + 
 
 describe("dayTimeline", () => {
   test("shows airing in the same minute share a time group", () => {
-    const { groups } = dayTimeline([at(-60, 1), at(-60, 2), at(30, 3)], NOW);
+    const { groups, nowIndex } = dayTimeline([at(-60, 1), at(-60, 2), at(30, 3)], NOW);
     expect(groups.map((g) => g.slots.map((s) => s.item.id))).toEqual([[1, 2], [3]]);
+    // Counted in groups, not shows: two aired shows are one group, so now
+    // sits before group 1. A count of aired shows (2) would put it after the
+    // 30-minutes-away group, as if that had aired too.
+    expect(nowIndex).toBe(1);
   });
 
   test("seconds inside the same minute do not split a group", () => {
@@ -40,6 +44,20 @@ describe("dayTimeline", () => {
     const { groups, nowIndex } = dayTimeline([at(-120), at(-10), at(15), at(200)], NOW);
     expect(groups.map((g) => g.aired)).toEqual([true, true, false, false]);
     expect(nowIndex).toBe(2);
+  });
+
+  test("a group with one show out and one still to come is not aired, and now sits before it", () => {
+    // 20:39 has two aired shows; at 20:40 one went out on the minute and one
+    // goes out 30s later; the clock reads 20:40:15.
+    const items = [at(-1, 1), at(-1, 2), at(0, 3), at(0, 4, 30_000), at(120, 5)];
+    const { groups, nowIndex } = dayTimeline(items, NOW + 15_000);
+    expect(groups.map((g) => g.slots.map((s) => s.state))).toEqual([
+      ["aired", "aired"],
+      ["aired", "soon"],
+      ["later"],
+    ]);
+    expect(groups.map((g) => g.aired)).toEqual([true, false, false]);
+    expect(nowIndex).toBe(1);
   });
 
   test("now sits at the start when nothing has aired, at the end when everything has", () => {
