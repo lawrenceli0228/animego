@@ -40,6 +40,13 @@ const COMPLETED = { anilistId: 990_104, titleChinese: "E2E 已看完", episodes:
 const cardHrefs = (page: Page) =>
   page.locator("main ul a[href*='/anime/']").evaluateAll((els) => els.map((el) => el.getAttribute("href")));
 
+/** A reader of this test's own, with nothing followed yet. */
+async function newReader(): Promise<TestUser> {
+  const user = makeUser();
+  await insertPgUser({ username: user.username, email: user.email, passwordHash: user.passwordHash });
+  return user;
+}
+
 async function signIn(page: Page, user: TestUser) {
   await page.goto("/login");
   await waitForHydration(page, "#login-email");
@@ -57,11 +64,10 @@ test.describe("全部在追, signed in", () => {
     await closePg();
   });
 
-  test("lists every show being watched as a 继续看 card, and both 全部在追 links lead here", async ({ page }) => {
+  test("lists every show being watched as a 继续看 card, and the homepage's 全部在追 leads here", async ({ page }) => {
     test.setTimeout(90_000);
     const errors = collectConsoleErrors(page);
-    const user = makeUser();
-    await insertPgUser({ username: user.username, email: user.email, passwordHash: user.passwordHash });
+    const user = await newReader();
     for (const show of [...FIXTURE, COMPLETED]) {
       await ensureAnimeCached({ anilistId: show.anilistId, titleChinese: show.titleChinese, episodes: show.episodes });
     }
@@ -107,9 +113,14 @@ test.describe("全部在追, signed in", () => {
     await continueSection.getByRole("link", { name: "全部在追" }).click();
     await expect(page).toHaveURL(/\/watching$/);
     await expect(page.getByRole("heading", { level: 1, name: "全部在追" })).toBeVisible();
+  });
 
-    // The schedule page links out once the reader follows more than eight of
-    // the week's shows. Follow nine of the week this stack is serving.
+  test("the schedule page's 我追的 · 本周 leads here once it has more than it lists", async ({ page }) => {
+    test.setTimeout(90_000);
+    // It links out past eight followed shows that air this week: follow nine
+    // of the week this stack is serving.
+    const user = await newReader();
+    await signIn(page, user);
     await page.goto("/calendar");
     const weekIds = await page.evaluate(() => {
       const ids = new Set<number>();
@@ -130,8 +141,8 @@ test.describe("全部在追, signed in", () => {
     await waitForHydration(page, 'section[aria-labelledby="schedule-mine"] a');
     await mine.getByRole("link", { name: "全部在追" }).click();
     await expect(page).toHaveURL(/\/watching$/);
-    // Now twelve: the three fixtures and the nine from the week.
-    await expect(page.locator("main ul a[href*='/anime/']")).toHaveCount(12);
+    // All nine, each as a card.
+    await expect(page.locator("main ul a[href*='/anime/']")).toHaveCount(9);
   });
 });
 

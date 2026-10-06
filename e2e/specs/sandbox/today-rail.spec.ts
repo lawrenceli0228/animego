@@ -82,6 +82,9 @@ test.describe("今日更新 on a desktop", () => {
 
     // A short drag that starts and ends on the same card — the case where a
     // click would land on that card's link — moves the row and opens nothing.
+    // From the start of the row, so there is room to move toward the end
+    // (the drag above may have left it there).
+    await rail!.evaluate((el) => el.scrollTo({ left: 0, behavior: "instant" }));
     const card0 = rail!.locator('a[href*="/anime/"]').nth(1);
     await card0.scrollIntoViewIfNeeded();
     const c = (await card0.boundingBox())!;
@@ -125,9 +128,10 @@ test.describe("今日更新 on a desktop", () => {
     let position = 0;
     for (let i = 0; i < 30 && (await next.getAttribute("aria-disabled")) !== "true"; i++) {
       await next.click();
-      const now = await settled(rail!);
-      expect(now).toBeGreaterThan(position);
-      position = now;
+      // Moving first (a smooth scroll can start a frame or two late under
+      // load), then come to rest.
+      await expect.poll(() => scrollLeftOf(rail!)).toBeGreaterThan(position);
+      position = await settled(rail!);
     }
     expect(position).toBeGreaterThanOrEqual(max - 1);
     await expect(next).toHaveAttribute("aria-disabled", "true");
@@ -138,9 +142,8 @@ test.describe("今日更新 on a desktop", () => {
     await prev.focus();
     for (let i = 0; i < 30 && (await prev.getAttribute("aria-disabled")) !== "true"; i++) {
       await page.keyboard.press("Enter");
-      const now = await settled(rail!);
-      expect(now).toBeLessThan(position);
-      position = now;
+      await expect.poll(() => scrollLeftOf(rail!)).toBeLessThan(position);
+      position = await settled(rail!);
     }
     expect(position).toBeLessThanOrEqual(1);
     await expect(prev).toHaveAttribute("aria-disabled", "true");

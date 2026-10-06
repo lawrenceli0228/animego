@@ -81,6 +81,15 @@ async function openHero(page: Page, { rotates = true } = {}): Promise<OpenedHero
   // and pausing at a moment it has already passed is an error.
   const now = await page.evaluate(() => Date.now());
   await page.clock.pauseAt(now + 1_000);
+  // The first slide has been counting since hydration, for however long this
+  // machine took to get here. Send the tab away and back — by the hero's own
+  // rule that gives the slide a fresh 8 seconds — so every case starts from
+  // exactly zero at the paused instant, however slow the runner.
+  if (rotates) {
+    await setTabVisibility(page, "hidden");
+    await setTabVisibility(page, "visible");
+    await expect(hero).toHaveAttribute("data-held", "false");
+  }
   return { hero, bars, count };
 }
 
@@ -164,10 +173,11 @@ test.describe("the hero's rotation", () => {
     const errors = collectConsoleErrors(page);
     const { hero, bars, count } = await openHero(page);
 
-    // Nothing is touching it: it runs, and moves on by itself.
+    // Nothing is touching it: it runs, and moves on by itself at 8 seconds.
     await expect(hero).toHaveAttribute("data-held", "false");
+    await page.clock.runFor(INTERVAL_MS - 200);
     await expect(bars.nth(0)).toHaveAttribute("aria-pressed", "true");
-    await page.clock.runFor(INTERVAL_MS + 500);
+    await page.clock.runFor(400);
     await expect(bars.nth(1)).toHaveAttribute("aria-pressed", "true");
 
     // Five seconds into the second slide, pick the third by hand, then let
