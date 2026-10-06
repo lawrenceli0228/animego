@@ -46,8 +46,14 @@
 }
 
 /* The list takes the full width; the aside's boxes go under it, side by
- * side, and the week chart drops out (WeekChart.module.css). */
-@media (max-width: 900px) {
+ * side, and the week chart drops out (WeekChart.module.css).
+ *
+ * 1100px, not where the tabs turn into pills (900px): beside a 300px aside
+ * and a 40px gap, a row from 901 to 1100px has a few dozen pixels left for
+ * the title once a followed show's 在追 / 未看 chip takes its column — 27px at
+ * 901 in English, against 367px one pixel narrower. Above 1100px the
+ * narrowest followed title is ~170px, and it only grows from there. */
+@media (max-width: 1100px) {
   .content {
     margin-top: 24px;
     grid-template-columns: minmax(0, 1fr);

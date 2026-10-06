@@ -1,6 +1,8 @@
 /* 本周更新: one bar per day, height against the busiest day, the selected day
- * in the page's tone. Each bar is a button that selects its day. Wide screens
- * only — on the pill row (≤900px) every pill already carries its count. */
+ * in the page's tone. Each bar is a button that selects its day. Two-column
+ * layout only: at ≤1100px the aside goes under the list (ScheduleBoard.module.css),
+ * where a day picker would sit below the day it picks, and every tab above
+ * already carries its count. */
 
 .chart {
   padding: 20px 20px 18px;
@@ -91,7 +93,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .chart {
     display: none;
   }
