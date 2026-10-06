@@ -195,7 +195,7 @@ test.describe("今日更新 on a phone", () => {
       .locator("time[datetime]")
       .evaluateAll((els) => els.map((el) => el.getAttribute("datetime") as string));
     test.skip(times.length === 0, "no airing times on the cards");
-    const target = times[Math.floor(times.length / 2)];
+    const target = times[Math.floor(times.length / 2)] ?? "";
     const airsAt = Date.parse(target);
 
     // …and come back two minutes before it.

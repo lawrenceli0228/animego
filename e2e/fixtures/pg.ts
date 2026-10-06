@@ -238,6 +238,24 @@ export async function ensureAnimeCached(anime: SeedAnimeCache): Promise<void> {
 }
 
 /**
+ * Make sure an `anime_cache` row exists for a REAL id, without touching one
+ * that is already there.
+ *
+ * For subscribing a test user to shows the stack is actually serving (the
+ * week's schedule, say): the subscription's foreign key needs the row, and
+ * `ensureAnimeCached` would overwrite a real row's titles with fixture ones
+ * for every other spec reading that show.
+ */
+export async function ensureAnimeRowExists(anilistId: number): Promise<void> {
+  const sql = getSql();
+  await sql`
+    INSERT INTO anime_cache (anilist_id, title_romaji, cached_at)
+    VALUES (${anilistId}, ${`E2E Anime ${anilistId}`}, now())
+    ON CONFLICT (anilist_id) DO NOTHING
+  `;
+}
+
+/**
  * Point one anime at its prequel, the way the AniList detail sync does, and
  * at ONE prequel: any other PREQUEL edge on the anime is removed first, so a
  * spec that derives an episode offset from "the prequel" never reads the
