@@ -327,3 +327,14 @@ export function continueCard(row: ContinueRow, lang: Lang): ContinueCard {
     lastWatchedAt: row.lastWatchedAt ?? null,
   };
 }
+
+/**
+ * The reader's watching list as 继续看 cards, in the order 继续看 shows them:
+ * the API's own, most recently updated first (`ORDER BY s.updated_at DESC` in
+ * go-api's ListUserSubscriptions — a progress mark bumps a show to the
+ * front). The homepage section and the 全部在追 page both go through here,
+ * so the page's first three are the section's three.
+ */
+export function continueCards(rows: readonly ContinueRow[], lang: Lang): ContinueCard[] {
+  return rows.map((row) => continueCard(row, lang));
+}

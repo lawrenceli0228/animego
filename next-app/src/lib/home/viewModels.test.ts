@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   bangumiScoreText,
   continueCard,
+  continueCards,
   episodesText,
   gemCard,
   heroSlide,
@@ -198,5 +199,19 @@ describe("continueCard", () => {
     expect(continueCard({ ...row(), currentEpisode: 12 }, "zh").nextEpisode).toBe(12);
     expect(continueCard({ ...row(), currentEpisode: 3 }, "zh").nextEpisode).toBe(4);
     expect(continueCard({ ...row({ episodes: null }), currentEpisode: 0 }, "zh").nextEpisode).toBe(1);
+  });
+});
+
+describe("continueCards", () => {
+  test("keeps the API's order — most recently updated first — and every row", () => {
+    // The 全部在追 page's first three must be the homepage section's three.
+    const rows = [7, 3, 11, 5].map((id, i) => ({ ...row({ anilistId: id }), currentEpisode: i }));
+    const out = continueCards(rows, "zh");
+    expect(out.map((c) => c.id)).toEqual([7, 3, 11, 5]);
+    expect(out[2]).toEqual(continueCard(rows[2], "zh"));
+  });
+
+  test("an empty list is an empty list", () => {
+    expect(continueCards([], "zh")).toEqual([]);
   });
 });
