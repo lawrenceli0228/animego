@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import jwt from "jsonwebtoken";
 import { localizePath, type Locale } from "@/lib/i18n/locale";
 import { resolveLocale } from "@/lib/i18n/route";
+import layoutStyles from "./layout.module.css";
 
 // Belt-and-suspenders role re-check. `proxy.ts` already guards
 // /admin/:path*, but proxy matcher misconfigurations are an easy way to
@@ -45,7 +46,7 @@ export default async function AdminLayout({ children, params }: LayoutProps<"/[l
 
   return (
     <div style={styles.shell}>
-      <header style={styles.header}>
+      <header className={layoutStyles.header}>
         <div style={styles.headerInner}>
           <h1 style={styles.title}>{dict.admin.title}</h1>
           {/* Monolithic single-page admin — anchor scrolls instead of
@@ -85,16 +86,9 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily:
       "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
   },
-  header: {
-    borderBottom: "1px solid #1f1f2a",
-    background: "#111118",
-    position: "sticky",
-    // Below the site header (--nav-h), not under it. Sticky never took effect
-    // before globals.css moved <body> to `overflow-x: clip`; at `top: 0` this
-    // bar would now stick behind the site header whenever that is showing.
-    top: "var(--nav-h)",
-    zIndex: 10,
-  },
+  // The bar itself (sticky, and moving with the site header) is in
+  // layout.module.css: following the site header takes a :has() selector,
+  // which an inline style cannot carry.
   headerInner: {
     maxWidth: 1200,
     margin: "0 auto",

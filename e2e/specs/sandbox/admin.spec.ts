@@ -79,6 +79,21 @@ test.describe("admin dashboard", () => {
     ).toBeVisible();
     await expect(page.locator("#users")).toBeVisible();
 
+    // The admin bar sticks under the site header and, while the site header
+    // is tucked away, moves up into its place — no strip of page scrolling
+    // past above it. Measured as boxes, not read off a style.
+    const siteHeader = page.locator("body > header");
+    const adminBar = page.locator('header:has(nav[aria-label="Admin navigation"])');
+    const barTop = async () => Math.round((await adminBar.boundingBox())?.y ?? -1);
+    await waitForHydration(page, "body > header nav");
+    await page.mouse.move(700, 600);
+    await page.mouse.wheel(0, 600);
+    await expect(siteHeader).toHaveAttribute("data-hidden", "true");
+    await expect.poll(barTop).toBe(0);
+    await page.mouse.wheel(0, -200);
+    await expect(siteHeader).toHaveAttribute("data-hidden", "false");
+    await expect.poll(barTop).toBe(64);
+
     expect(errors, `Unexpected console errors: ${errors.join("\n")}`).toEqual([]);
   });
 });
