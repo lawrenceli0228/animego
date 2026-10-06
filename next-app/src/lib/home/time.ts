@@ -1,12 +1,12 @@
-// Clock and calendar strings for the homepage.
+// Clock and calendar strings for the homepage and the schedule page.
 //
 // These run inside client components during hydration, so the server (Node's
 // ICU) and the browser (its own ICU) must produce byte-identical output. They
 // do not agree on localised date strings — Node formats zh-CN weekday+time as
 // "周日19:00", Bun and Chrome as "周日 19:00" — so Intl is only asked for
-// numeric parts, in en-US, and the words come from the tables below. Same
-// approach as WeeklySchedule's DAY_LABELS, and keyed by Lang for the same
-// reason: a new language is a compile error here, not a silent fallthrough.
+// numeric parts, in en-US, and the words come from the tables below — keyed
+// by Lang, so a new language is a compile error here, not a silent
+// fallthrough.
 //
 // Pure: no DOM, no React.
 
@@ -76,7 +76,7 @@ const WEEKDAY_LABELS: Record<Lang, readonly string[]> = {
   zh: ["周日", "周一", "周二", "周三", "周四", "周五", "周六"],
   en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
   // 週, not 周: both exist in Traditional, and 週 is what Taiwan and Hong Kong
-  // write for a day of the week (same choice as WeeklySchedule).
+  // write for a day of the week.
   "zh-Hant": ["週日", "週一", "週二", "週三", "週四", "週五", "週六"],
 };
 

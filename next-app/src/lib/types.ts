@@ -107,9 +107,8 @@ export type { FuzzyDate };
 // covers [today, today + 7 days); a day with nothing airing has no key.
 // Each group is sorted by airingAt.
 //
-// These lived inline in components/anime/WeeklySchedule.tsx while it was the
-// only consumer, with a note to move them here once a second one appeared.
-// The homepage's 今日更新 and the schedule page both read them now.
+// These lived inline in the old WeeklySchedule component while it was the
+// only consumer. The homepage's 今日更新 and the schedule page read them now.
 
 export interface ScheduleItem {
   scheduleId: number;
