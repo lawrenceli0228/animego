@@ -1667,6 +1667,78 @@ func (q *Queries) GetAnimeTagsByID(ctx context.Context, animeID int32) ([]GetAni
 	return items, nil
 }
 
+const getBangumiBindingIdentity = `-- name: GetBangumiBindingIdentity :one
+SELECT
+    ac.bgm_id,
+    ac.bgm_match_source,
+    ac.admin_flag,
+    ac.title_native,
+    ac.title_romaji,
+    ac.title_english,
+    ac.season_year,
+    ac.start_date,
+    EXISTS (
+        SELECT 1 FROM bgm_id_map m
+        WHERE m.anilist_id = ac.anilist_id
+          AND m.bgm_id = ac.bgm_id
+    ) AS id_map_agrees
+FROM anime_cache ac
+WHERE ac.anilist_id = $1
+`
+
+type GetBangumiBindingIdentityRow struct {
+	BgmID          *int32      `json:"bgmId"`
+	BgmMatchSource *string     `json:"bgmMatchSource"`
+	AdminFlag      *string     `json:"adminFlag"`
+	TitleNative    *string     `json:"titleNative"`
+	TitleRomaji    *string     `json:"titleRomaji"`
+	TitleEnglish   *string     `json:"titleEnglish"`
+	SeasonYear     *int32      `json:"seasonYear"`
+	StartDate      pgtype.Date `json:"startDate"`
+	IDMapAgrees    bool        `json:"idMapAgrees"`
+}
+
+// What a worker holding a freshly fetched Bangumi subject needs to decide
+// whether that subject still describes this row, before copying anything
+// out of it.  Read by V2, V3 and the Bangumi rating sweep; the decision
+// itself is queue.legacyBindingNamesAnotherWork.
+//
+// bgm_match_source and admin_flag are here because the check applies only
+// to bindings nothing has ever vouched for.  A NULL source means the row was
+// bound before migration 0011, by the matcher that took list[0] of a
+// Bangumi search whenever no result's name equalled the AniList native
+// title exactly.  Every binding made since records its source, and each of
+// those sources is a check in its own right: the id map, the V1 scorer, a
+// human.
+//
+// The comparison titles are the three AniList ones.  title_chinese is
+// deliberately absent, for the reason GetEpisodesBgmGateInputs gives: on a
+// mis-bound row it already holds the wrong subject's name_cn, so comparing
+// it against that subject validates the error with the error.
+//
+// season_year and start_date both come back because either can be missing,
+// and the year is one of the check's two signals.  Same precedence as the
+// /year hub: season_year first, then the year of start_date.
+//
+// id_map_agrees asks whether the vendored map names THIS pair -- the same
+// test as description_cn_eligible (migration 0016).
+func (q *Queries) GetBangumiBindingIdentity(ctx context.Context, anilistID int32) (GetBangumiBindingIdentityRow, error) {
+	row := q.db.QueryRow(ctx, getBangumiBindingIdentity, anilistID)
+	var i GetBangumiBindingIdentityRow
+	err := row.Scan(
+		&i.BgmID,
+		&i.BgmMatchSource,
+		&i.AdminFlag,
+		&i.TitleNative,
+		&i.TitleRomaji,
+		&i.TitleEnglish,
+		&i.SeasonYear,
+		&i.StartDate,
+		&i.IDMapAgrees,
+	)
+	return i, err
+}
+
 const getCompletedGems = `-- name: GetCompletedGems :many
 
 SELECT
@@ -3927,6 +3999,130 @@ func (q *Queries) MarkEpisodesBgmAttempted(ctx context.Context, outcome string, 
 		anilistID,
 		bgmID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const repudiateLegacyBangumiBinding = `-- name: RepudiateLegacyBangumiBinding :execrows
+WITH target AS (
+    SELECT ac.anilist_id
+    FROM anime_cache ac
+    WHERE ac.anilist_id = $1::int
+      AND ac.bgm_id = $2::int
+      AND ac.bgm_match_source IS NULL
+      AND ac.admin_flag IS DISTINCT FROM 'manually-corrected'
+      AND NOT EXISTS (
+          SELECT 1 FROM bgm_id_map m
+          WHERE m.anilist_id = ac.anilist_id
+            AND m.bgm_id = ac.bgm_id
+      )
+),
+dropped_titles AS (
+    DELETE FROM anime_episode_titles t
+    USING target
+    WHERE t.anime_id = target.anilist_id
+      AND (t.name IS NULL OR t.name_source = 'bangumi')
+      AND (t.name_cn IS NULL OR t.name_cn_source = 'bangumi')
+),
+cleared_titles AS (
+    UPDATE anime_episode_titles t
+       SET name_cn        = CASE WHEN t.name_cn_source = 'bangumi' THEN NULL ELSE t.name_cn END,
+           name_cn_source = CASE WHEN t.name_cn_source = 'bangumi' THEN NULL ELSE t.name_cn_source END,
+           name           = CASE WHEN t.name_source = 'bangumi' THEN NULL ELSE t.name END,
+           name_source    = CASE WHEN t.name_source = 'bangumi' THEN NULL ELSE t.name_source END
+      FROM target
+     WHERE t.anime_id = target.anilist_id
+       AND (t.name_source = 'bangumi' OR t.name_cn_source = 'bangumi')
+       AND NOT ((t.name IS NULL OR t.name_source = 'bangumi')
+                AND (t.name_cn IS NULL OR t.name_cn_source = 'bangumi'))
+),
+dropped_tags AS (
+    DELETE FROM anime_tags g
+    USING target
+    WHERE g.anime_id = target.anilist_id
+      AND g.source = 'bangumi'
+)
+UPDATE anime_cache a
+SET bgm_id                        = NULL,
+    title_chinese                 = NULL,
+    bangumi_score                 = NULL,
+    bangumi_votes                 = NULL,
+    title_hant                    = CASE WHEN a.title_hant_source = 'opencc' THEN NULL ELSE a.title_hant END,
+    title_hant_source_hash        = CASE WHEN a.title_hant_source = 'opencc' THEN NULL ELSE a.title_hant_source_hash END,
+    title_hant_source             = CASE WHEN a.title_hant_source = 'opencc' THEN NULL ELSE a.title_hant_source END,
+    episodes_bgm                  = NULL,
+    episodes_bgm_at               = NULL,
+    episodes_bgm_attempted_at     = NULL,
+    episodes_bgm_outcome          = NULL,
+    episodes_bgm_reason           = NULL,
+    episode_titles_at             = NULL,
+    bangumi_rating_checked_at     = NULL,
+    bangumi_subject_unreadable_at = NULL,
+    bangumi_version               = 0,
+    updated_at                    = now()
+FROM target
+WHERE a.anilist_id = target.anilist_id
+`
+
+// Withdraw a pre-0011 binding that names another work, and everything that
+// was copied out of it, then hand the row back to V1.
+//
+// # Why such bindings exist
+//
+// Until migration 0011 the V1 matcher searched Bangumi by the native title
+// and, when no result's name matched exactly, bound list[0].  Bangumi's
+// legacy search matches any token, so for a sequel announced before its own
+// subject existed the query "アオアシ 第2期" returned unrelated shows sharing
+// only "第2期", and the first of them was bound.  Every later step trusted the
+// binding: V2 copied the subject's name_cn into title_chinese and its rating
+// into bangumi_score, the episode list into anime_episode_titles, and the
+// zh-Hant sweep converted the wrong title_chinese with OpenCC.  The result is
+// another show's name, score and episode names on a public, indexed page.
+//
+// # What is cleared, and why each one
+//
+//	bgm_id, title_chinese, bangumi_score/votes   the binding and its copies
+//	title_hant* when source = 'opencc'           a conversion of the title
+//	                                             being cleared; the hant
+//	                                             sweep re-derives it from the
+//	                                             next title_chinese
+//	episodes_bgm*                                inferred from the subject's
+//	                                             episode list (same set
+//	                                             ResetAnimeEnrichment clears)
+//	episode_titles_at, bangumi_rating_checked_at stamps that mean "attempted
+//	bangumi_subject_unreadable_at                against THIS binding"
+//	bangumi_version = 0                          the hourly orphan scan
+//	                                             re-runs V1, which binds
+//	                                             through the id map or the
+//	                                             scorer -- both record a
+//	                                             source, so this statement
+//	                                             can never fire on the result
+//
+// Episode names are withdrawn by source, the same conservatism
+// ClearEpisodeTitlesBySourceOutside applies: a row holding only Bangumi
+// names (or nothing) is deleted, a row that also holds a 'manual' or 'ddp'
+// name keeps that half and loses only the Bangumi half.  'ddp' names are
+// written only after dandanplay's own AniList cross-link vouches for the
+// pair, so they are not this binding's output.  The two data-modifying CTEs
+// touch disjoint rows, which is what lets them share one statement.
+//
+// Bangumi tags go with the subject they were read from.  description_cn is
+// not touched: the Bangumi synopsis channel only writes rows that
+// description_cn_eligible vouches for, and the id-map half of that test is
+// excluded below, so no row this statement reaches can hold one; the LLM
+// tier translates the English description and never reads the binding.
+//
+// # Guards
+//
+// Pinned to the subject the caller fetched (bgm_id = $2), so a binding that
+// moved between the fetch and this write is left alone.  Scoped to rows
+// whose binding nothing vouches for: no recorded source, no admin
+// correction, no id-map entry naming this pair.  The worker checks the same
+// three before calling, but the statement must be safe for any caller.
+func (q *Queries) RepudiateLegacyBangumiBinding(ctx context.Context, anilistID int32, bgmID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, repudiateLegacyBangumiBinding, anilistID, bgmID)
 	if err != nil {
 		return 0, err
 	}
