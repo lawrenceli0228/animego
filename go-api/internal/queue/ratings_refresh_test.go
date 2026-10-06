@@ -251,6 +251,10 @@ func TestAnilistRatings_ReturnsWhenItCannotSeeItsWorkList(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type fakeBangumiRatingsDB struct {
+	// The legacy-binding identity read and its withdrawal; see
+	// legacy_binding_test.go.  Unregistered ids answer pgx.ErrNoRows.
+	fakeLegacyBindingDB
+
 	candidates []dbgen.ListBangumiRatingCandidatesRow
 
 	gotYear  int32
