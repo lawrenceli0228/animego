@@ -67,7 +67,8 @@ export default function AvatarMenu({ user, onLogout, loggingOut }: AvatarMenuPro
       if (e.key !== "Escape") return;
       const hadFocus = wrapRef.current?.contains(document.activeElement) ?? false;
       setOpen(false);
-      if (hadFocus) triggerRef.current?.focus();
+      // Without scrolling: the trigger is in the sticky bar, already on screen.
+      if (hadFocus) triggerRef.current?.focus({ preventScroll: true });
     };
     document.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);

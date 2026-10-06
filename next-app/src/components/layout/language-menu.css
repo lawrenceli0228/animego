@@ -51,6 +51,10 @@
   border-radius: 999px;
   color: rgba(235, 235, 245, 0.86);
   font-size: 12.5px;
+  /* In the bar, so exempt from html's scroll-padding-top — focus coming back
+     to it must not scroll the page (Navbar.module.css explains). The footer's
+     trigger is in the page and keeps the padding. */
+  scroll-margin-top: calc(-1 * var(--nav-h));
 }
 .agc-lang-trigger--compact:hover,
 .agc-lang-trigger--compact[aria-expanded="true"] {

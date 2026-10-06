@@ -98,6 +98,14 @@
   -webkit-appearance: none;
 }
 
+/* In the bar, so exempt from html's scroll-padding-top — focusing them must
+ * not scroll the page (Navbar.module.css explains). */
+.toggle,
+.input,
+.phone {
+  scroll-margin-top: calc(-1 * var(--nav-h));
+}
+
 /* The ring goes on the pill — the field's visible shape — not on the bare
  * input inside it. The magnifier carries its own when it has focus. */
 .toggle:focus-visible,

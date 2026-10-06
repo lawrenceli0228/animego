@@ -68,7 +68,10 @@ export function useNavScroll(headerRef: RefObject<HTMLElement | null>): NavScrol
 
     window.addEventListener("scroll", schedule, { passive: true });
     window.addEventListener("resize", schedule, { passive: true });
-    // Tabbing into a hidden bar brings it back at once, not on the next scroll.
+    // Tabbing into a hidden bar unhides it here, not on the next scroll. (On
+    // screen it is back already: Navbar.module.css shows a hidden bar the
+    // moment it holds keyboard focus, before the browser can scroll the page
+    // towards it. This brings the state into line a frame later.)
     header.addEventListener("focusin", schedule);
     // The page may already be scrolled when this mounts (a reload restores the
     // position), so the first decision does not wait for a scroll event.

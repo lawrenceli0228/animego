@@ -35,6 +35,43 @@
   transform: translateY(-100%);
 }
 
+/* Keyboard focus landing in a hidden bar shows it at once, without the slide.
+ *
+ * The browser scrolls the page to reveal a focused control before
+ * useNavScroll gets its next frame, and it measures the control where the
+ * transform has put it: above the viewport. Scrolling cannot bring a sticky
+ * bar down, so the page jumped by hundreds of pixels and the bar slid in a
+ * frame later anyway. This rule applies before that measurement, so the
+ * control is already on screen and the page does not move. No slide, because
+ * a transition would start from the hidden position the browser measures. */
+.bar[data-hidden="true"]:has(:focus-visible) {
+  transform: none;
+  transition: none;
+}
+
+/* The bar's own controls are exempt from html's scroll-padding-top.
+ *
+ * globals.css marks the top --nav-h of the viewport as covered, so an anchor
+ * or a control focused further down the page is scrolled clear of the bar.
+ * The bar's controls sit inside that band — they are what covers it — so
+ * focusing one (Escape handing focus back to its trigger, the search field
+ * opening, Tab or Shift+Tab into the bar) made the browser scroll the page to
+ * "reveal" a control that was already in view, and since a sticky bar does
+ * not move when the page scrolls, only the page moved. A negative margin of
+ * the same height cancels the padding for these elements alone.
+ *
+ * Every control that sits in the bar carries this line (NavSearch, the ☰ in
+ * NavDrawer, AvatarMenu, the bell, the language trigger). The popups that
+ * open below the bar must not: they are clear of the band already, and the
+ * notification list scrolls, where a negative margin would park an item
+ * half out of view. Scripted focus moves also pass `preventScroll`. */
+.logo,
+.link,
+.login,
+.register {
+  scroll-margin-top: calc(-1 * var(--nav-h));
+}
+
 /* The glass is a layer of its own rather than the bar's background, for two
  * reasons. It can fade (opacity animates; backdrop-filter does not, reliably).
  * And the bar itself carries no backdrop-filter, so it is not a "backdrop

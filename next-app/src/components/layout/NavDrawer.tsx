@@ -79,8 +79,12 @@ export default function NavDrawer({ entries, labels, chrome }: NavDrawerProps) {
     // No slide to wait for under reduced motion: gone at once.
     setPhase(prefersReducedMotion() ? "closed" : "closing");
     // After the frame that hides the dialog, so focus does not land on a
-    // control that is about to become inert.
-    if (restoreFocus) window.requestAnimationFrame(() => buttonRef.current?.focus());
+    // control that is about to become inert. Without scrolling: ☰ is in the
+    // sticky bar, already on screen, and letting the browser "reveal" it
+    // threw the page back to the top (Navbar.module.css).
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => buttonRef.current?.focus({ preventScroll: true }));
+    }
   }, []);
 
   // The closing slide runs, then the drawer leaves the DOM. Reopening during
@@ -160,9 +164,10 @@ function DrawerPanel({ id, phase, entries, labels, chrome, onClose }: DrawerPane
   const [genresOpen, setGenresOpen] = useState(() => isUnder(pathname, "/genre"));
   const genres = genreNavItems(lang);
 
-  // Focus into the dialog as it opens.
+  // Focus into the dialog as it opens. ✕ is at the top of a panel that has
+  // just mounted, so it is in view; nothing needs scrolling to show it.
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
+    const frame = window.requestAnimationFrame(() => closeRef.current?.focus({ preventScroll: true }));
     return () => window.cancelAnimationFrame(frame);
   }, []);
 

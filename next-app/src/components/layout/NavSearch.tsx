@@ -53,17 +53,20 @@ export default function NavSearch({ open, onOpenChange }: NavSearchProps) {
   const composingRef = useRef(false);
   const imeKeyRef = useRef(false);
 
+  // Both focus moves below pass preventScroll: the bar is sticky, so the
+  // control is already on screen, and letting the browser "reveal" it moved
+  // the page instead (Navbar.module.css has the whole story).
   const close = (restoreFocus: boolean) => {
     onOpenChange(false);
     setValue("");
     composingRef.current = false;
     imeKeyRef.current = false;
-    if (restoreFocus) toggleRef.current?.focus();
+    if (restoreFocus) toggleRef.current?.focus({ preventScroll: true });
   };
 
   // The field appears on open; give it the caret once it exists.
   useEffect(() => {
-    if (open) inputRef.current?.focus();
+    if (open) inputRef.current?.focus({ preventScroll: true });
   }, [open]);
 
   // A pointer-down anywhere else folds it away.

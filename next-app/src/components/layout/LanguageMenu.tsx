@@ -248,7 +248,10 @@ export function LanguageMenu({ variant = "compact" }: { variant?: "compact" | "n
 
   const close = useCallback((restoreFocus: boolean) => {
     setOpen(false);
-    if (restoreFocus) triggerRef.current?.focus();
+    // Without scrolling: the trigger was just used, so it is on screen — and
+    // in the header it sits in the sticky bar, where letting the browser
+    // "reveal" it moved the page instead (Navbar.module.css).
+    if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
   }, []);
 
   // Same dismissal contract as AvatarMenu: pointer outside, or Escape.

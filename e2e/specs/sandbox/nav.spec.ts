@@ -19,22 +19,49 @@ test.use({ storageState: { cookies: [], origins: [] } });
 
 const SEARCH_TOGGLE = 'header button[aria-label="搜索番剧"]';
 const GENRE_TRIGGER = "header nav ul button[aria-expanded]";
+const LANGUAGE_TRIGGER = 'header button[aria-label="语言"]';
+const AVATAR_TRIGGER = 'header button[aria-label="账户菜单"]';
 const MENU_BUTTON = 'header button[aria-haspopup="dialog"]';
 
+const scrollY = (page: Page) => page.evaluate(() => window.scrollY);
+
 /**
- * A real pointer click at the control's centre.
+ * Park the page part-way down with the bar showing, the way a reader gets
+ * there: a scroll down (which tucks the bar away) and a short one back up
+ * (which brings it back). Returns the position every "the page did not move"
+ * assertion compares against.
  *
- * `locator.click()` first scrolls its target into view, and for a control in
- * a sticky header Chromium computes that from the header's place at the top
- * of the document: the page jumps back to y = 0 before the click lands —
- * measured, 300 → 0, while a pointer click at the same spot leaves it at 300.
- * A reader's tap does no such thing, and the scroll-lock assertion below
- * needs the page to stay where it was.
+ * Each step waits until the header has SEEN it: scroll decisions run once per
+ * animation frame, and two scrolls inside one frame are a single net move
+ * (y → y + 20 → y would read as "down", and the bar would stay hidden). The
+ * first step also waits until the page is long enough to stand at y + 20: on
+ * a page still filling in, the browser clamps the scroll, and the way back up
+ * to y then reads as a scroll DOWN. The last step waits out the slide back
+ * in, so nothing is measured mid-move.
+ *
+ * Why so much of this file is about the page NOT moving: html carries
+ * `scroll-padding-top: var(--nav-h)`, and before the bar's own controls were
+ * exempted from it, every focus that landed on one — Escape handing focus back
+ * to a trigger, the search field opening, ☰ getting focus back from the
+ * drawer, a Tab into the bar — made the browser scroll the page to "reveal" a
+ * control that was already on screen. Playwright's `locator.click()` scrolls
+ * its target into view first and was thrown back the same way; that was the
+ * page, not Playwright — a page without the padding stays put for the same
+ * click. These tests click with `locator.click()` on purpose: it is one more
+ * way into exactly that path.
  */
-async function tap(page: Page, selector: string) {
-  const box = await page.locator(selector).boundingBox();
-  if (!box) throw new Error(`tap: ${selector} has no box`);
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+async function parkMidPage(page: Page, y: number): Promise<number> {
+  const header = page.locator("header").first();
+  await expect
+    .poll(() => page.evaluate((to) => (window.scrollTo(0, to), window.scrollY), y + 20))
+    .toBe(y + 20);
+  await expect(header).toHaveAttribute("data-hidden", "true");
+  await page.evaluate((to) => window.scrollTo(0, to), y);
+  await expect(header).toHaveAttribute("data-hidden", "false");
+  await expect.poll(async () => Math.round((await header.boundingBox())?.y ?? -1)).toBe(0);
+  const at = await scrollY(page);
+  expect(at).toBe(y);
+  return at;
 }
 
 /** The centre link strip, in order: [label, href, aria-current]. */
@@ -228,6 +255,95 @@ test.describe("the desktop bar", () => {
     await expect(header).toHaveAttribute("data-glass", "true");
     await expect(header).toHaveAttribute("data-hidden", "false");
   });
+
+  test("search, 分类 and the language menu take and give back focus without moving the page", async ({ page }) => {
+    await page.goto("/welcome");
+    await waitForHydration(page, SEARCH_TOGGLE);
+    const at = await parkMidPage(page, 2400);
+
+    // Search: the field takes the caret as it opens; Escape gives it back to
+    // the magnifier. Was 2400 → 1500 on opening.
+    const toggle = page.locator(SEARCH_TOGGLE);
+    await toggle.click();
+    const field = navbar(page).getByRole("searchbox", { name: "搜索番剧" });
+    await expect(field).toBeFocused();
+    expect(await scrollY(page)).toBe(at);
+    await page.keyboard.press("Escape");
+    await expect(field).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    expect(await scrollY(page)).toBe(at);
+
+    // 分类 from the keyboard: focus, Enter, Tab into the panel, Escape.
+    const trigger = page.locator(GENRE_TRIGGER);
+    await trigger.focus();
+    expect(await scrollY(page)).toBe(at);
+    await page.keyboard.press("Enter");
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Tab");
+    await expect(navbar(page).getByRole("link", { name: "动作" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(trigger).toBeFocused();
+    expect(await scrollY(page)).toBe(at);
+
+    // The language menu moves focus onto the current option as it opens and
+    // back to its trigger on Escape.
+    const language = page.locator(LANGUAGE_TRIGGER);
+    await language.click();
+    await expect(page.getByRole("menuitem", { name: "简体中文" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(language).toHaveAttribute("aria-expanded", "false");
+    await expect(language).toBeFocused();
+    expect(await scrollY(page)).toBe(at);
+  });
+
+  test("Tab into the bar does not move the page, shown or tucked away", async ({ page }) => {
+    await page.goto("/welcome");
+    await waitForHydration(page, "header nav");
+    const header = page.locator("header").first();
+    const at = await parkMidPage(page, 2400);
+
+    // Shown: the first Tab on the page lands on the wordmark.
+    await page.keyboard.press("Tab");
+    await expect(navbar(page).getByRole("link", { name: "AnimeGoClub" })).toBeFocused();
+    expect(await scrollY(page)).toBe(at);
+
+    // Tucked away: the bar comes back at once and the page stays where it is.
+    // (The browser scrolls toward a focused control before the header's own
+    // scroll logic runs; measured on a hidden bar, that was hundreds of
+    // pixels even with no scroll-padding at all.)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.evaluate(() => window.scrollTo(0, window.scrollY + 600));
+    await expect(header).toHaveAttribute("data-hidden", "true");
+    await expect.poll(async () => Math.round((await header.boundingBox())?.y ?? 0)).toBe(-64);
+    const hiddenAt = await scrollY(page);
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("header"))).toBe(true);
+    expect(await scrollY(page)).toBe(hiddenAt);
+    expect(Math.round((await header.boundingBox())?.y ?? -1)).toBe(0);
+    await expect(header).toHaveAttribute("data-hidden", "false");
+  });
+
+  test("an anchor, and a control focused under the bar, still land clear of it", async ({ page }) => {
+    // The other half of the bargain: html's scroll-padding-top is still there
+    // for everything that is not in the bar.
+    await page.goto("/welcome");
+    await waitForHydration(page, "header nav");
+    const anchorTop = await page.evaluate(() => {
+      location.hash = "#hero-heading";
+      return document.getElementById("hero-heading")?.getBoundingClientRect().top ?? -1;
+    });
+    expect(Math.round(anchorTop)).toBe(64);
+
+    await page.goto("/calendar");
+    await waitForHydration(page, "header nav");
+    const tab = page.locator('button[id^="weekly-schedule-tab-"]').first();
+    // Parked 20px from the top of the window: on screen, but where the bar is.
+    await tab.evaluate((el) => window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 20));
+    expect(Math.round(await tab.evaluate((el) => el.getBoundingClientRect().top))).toBe(20);
+    await tab.focus();
+    expect(await tab.evaluate((el) => el.getBoundingClientRect().top)).toBeGreaterThanOrEqual(64);
+  });
 });
 
 test.describe("the phone bar and its drawer", () => {
@@ -240,27 +356,12 @@ test.describe("the phone bar and its drawer", () => {
     // The phone bar has no centre strip: the links are in the drawer.
     await expect(navbar(page).locator("ul").first()).toBeHidden();
 
-    // Start part-way down, so "did not move" is a real claim. The jump down
-    // hides the bar; a short scroll back up brings it back to tap. Each step
-    // waits until the header has SEEN it: scroll decisions run once per
-    // animation frame, and two scrolls inside one frame are a single net
-    // move (0 → 300, i.e. "down" — the bar would stay hidden).
-    const header = page.locator("header").first();
-    await page.evaluate(() => window.scrollTo(0, 320));
-    await expect(header).toHaveAttribute("data-hidden", "true");
-    await page.evaluate(() => window.scrollTo(0, 300));
-    await expect(header).toHaveAttribute("data-hidden", "false");
-    // Wait out the header's slide back in before aiming at it: a box measured
-    // mid-slide sends the tap past the button.
-    await expect
-      .poll(async () => Math.round((await page.locator(MENU_BUTTON).boundingBox())?.y ?? -1))
-      .toBeGreaterThanOrEqual(0);
-    const scrolledTo = await page.evaluate(() => window.scrollY);
-    expect(scrolledTo).toBe(300);
+    // Start part-way down, so "did not move" is a real claim.
+    const scrolledTo = await parkMidPage(page, 300);
     // Closed, there is no drawer for aria-controls to point at.
     expect(await menuButton.getAttribute("aria-controls")).toBeNull();
 
-    await tap(page, MENU_BUTTON);
+    await menuButton.click();
     const drawer = page.getByRole("dialog", { name: "菜单" });
     await expect(drawer).toBeVisible();
     await expect(menuButton).toHaveAttribute("aria-expanded", "true");
@@ -291,16 +392,43 @@ test.describe("the phone bar and its drawer", () => {
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => window.scrollY)).toBe(before);
 
-    // Escape closes it and focus goes back to ☰.
+    // Escape closes it and focus goes back to ☰ — with the page where it was.
+    // (It used to land at 0: focus coming back to ☰ scrolled the page to
+    // "reveal" it, and the next check still passed because the wheel below
+    // scrolls down from wherever the page had jumped to.)
     await page.keyboard.press("Escape");
     await expect(drawer).toHaveCount(0);
     await expect(menuButton).toHaveAttribute("aria-expanded", "false");
     await expect(menuButton).toBeFocused();
+    expect(await scrollY(page)).toBe(before);
     expect(await menuButton.getAttribute("aria-controls")).toBeNull();
 
     // And the page scrolls again.
     await page.mouse.wheel(0, 400);
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
+  });
+
+  test("however it is closed — ✕, the dimmed page, Escape — the page stays where it was", async ({ page }) => {
+    await page.goto("/welcome");
+    await waitForHydration(page, MENU_BUTTON);
+    const menuButton = page.locator(MENU_BUTTON);
+    const drawer = page.getByRole("dialog", { name: "菜单" });
+    const at = await parkMidPage(page, 1200);
+
+    const ways: Array<[string, () => Promise<void>]> = [
+      ["✕", () => drawer.getByRole("button", { name: "关闭菜单" }).click()],
+      ["the dimmed page", () => page.mouse.click(370, 700)],
+      ["Escape", () => page.keyboard.press("Escape")],
+    ];
+    for (const [way, close] of ways) {
+      await menuButton.click();
+      await expect(drawer, `open before closing by ${way}`).toBeVisible();
+      expect(await scrollY(page), `opening, before closing by ${way}`).toBe(at);
+      await close();
+      await expect(drawer, `closed by ${way}`).toHaveCount(0);
+      await expect(menuButton, `focus back on ☰ after ${way}`).toBeFocused();
+      expect(await scrollY(page), `the page after closing by ${way}`).toBe(at);
+    }
   });
 
   test("the dimmed page closes it, and so does following a link", async ({ page }) => {
@@ -348,5 +476,24 @@ test.describe("signed in", () => {
     expect(links[4]?.[1]).toBe("/profile");
     // No visitor chrome once the probe has answered.
     await expect(navbar(page).locator('a[href^="/login"]')).toHaveCount(0);
+  });
+
+  test("the account menu gives focus back on Escape without moving the page", async ({ page }) => {
+    await page.goto("/welcome");
+    await expectSignedIn(page, "e2e-sandbox");
+    await waitForHydration(page, AVATAR_TRIGGER);
+    const at = await parkMidPage(page, 2400);
+
+    const trigger = page.locator(AVATAR_TRIGGER);
+    await trigger.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(await scrollY(page)).toBe(at);
+    // Into the menu from the keyboard, then out again.
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("menuitem", { name: "我的追番" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(trigger).toBeFocused();
+    expect(await scrollY(page)).toBe(at);
   });
 });

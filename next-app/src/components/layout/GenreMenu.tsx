@@ -80,8 +80,9 @@ export default function GenreMenu({ triggerClassName, label }: GenreMenuProps) {
       const hadFocus = wrapRef.current?.contains(document.activeElement) ?? false;
       dispatch("dismiss");
       // Only take focus back if it was in here; an Escape meant for something
-      // else on the page must not yank the caret into the header.
-      if (hadFocus) triggerRef.current?.focus();
+      // else on the page must not yank the caret into the header. Without
+      // scrolling: the trigger is in the sticky bar, already on screen.
+      if (hadFocus) triggerRef.current?.focus({ preventScroll: true });
     };
     document.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);

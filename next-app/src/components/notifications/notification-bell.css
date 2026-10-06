@@ -10,6 +10,9 @@
   width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px;
   background: transparent; color: rgba(235,235,245,.86); cursor: pointer;
   transition: background-color .2s ease, color .2s ease;
+  /* In the bar, so exempt from html's scroll-padding-top — focusing it must
+     not scroll the page (Navbar.module.css explains). */
+  scroll-margin-top: calc(-1 * var(--nav-h));
 }
 .agc-notification-bell:hover,
 .agc-notification-bell[aria-expanded="true"] { color: #fff; background: rgba(255,255,255,.07); }

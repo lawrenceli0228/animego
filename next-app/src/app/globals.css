@@ -220,7 +220,10 @@ html {
   height: 100%;
   color-scheme: dark;
   /* The header is sticky: a link to an anchor, or Shift+Tab back to a control
-   * above the fold, must not land the target underneath it. */
+   * above the fold, must not land the target underneath it. The header's own
+   * controls live inside this band and carry a matching negative
+   * scroll-margin-top; without it, focusing one scrolls the page
+   * (Navbar.module.css). */
   scroll-padding-top: var(--nav-h);
 }
 
