@@ -5,6 +5,9 @@
 //
 //  1. Fetch /v0/subjects/{bgmId} and /subject/{bgmId}/ep in parallel
 //     for the bgmID handed to us by the job args.
+//     1a. If the row's binding predates migration 0011 and the subject
+//     names another work, withdraw the binding and stop; nothing below
+//     runs.  See legacy_binding.go.
 //  2. UpdateBangumiV2 on anime_cache — writes bangumi_score,
 //     bangumi_votes (from Subject.Rating) and CONDITIONALLY fills
 //     title_chinese via SQL COALESCE (so a value V1 already wrote on
@@ -155,9 +158,13 @@ type V2Reader interface {
 }
 
 // V2DB combines the read + write surfaces this worker needs.
+//
+// LegacyBindingDB is the identity check every subject-copying worker runs
+// before it writes; see legacy_binding.go.
 type V2DB interface {
 	V2Reader
 	V2Writer
+	LegacyBindingDB
 }
 
 // BangumiV2Worker is the real Phase 2 worker.  Embeds
@@ -266,6 +273,18 @@ func (w *BangumiV2Worker) Work(ctx context.Context, job *river.Job[BangumiV2Args
 	// Other subject error → transient, retryable.
 	if subErr != nil {
 		return fmt.Errorf("bangumi_v2 subject %d (bgmId=%d): %w", anilistID, bgmID, subErr)
+	}
+
+	// Before anything is copied out of the subject: a binding made before
+	// migration 0011 may name another show entirely (the list[0] matcher),
+	// and every write below would publish that show's name, score, synopsis,
+	// tags and episode names on this one's page.  A withdrawn binding hands
+	// the row back to V1, so there is nothing further to do here -- and in
+	// particular no V3 chain, which would re-read the same wrong subject.
+	if withdrawn, err := withdrawIfAnotherWork(ctx, w.db, "bangumi_v2", anilistID, int32(bgmID), subject); err != nil {
+		return err
+	} else if withdrawn {
+		return nil
 	}
 
 	// Build the V2 update args.  All three are nullable; pass nil
