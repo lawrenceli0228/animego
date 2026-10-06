@@ -5,6 +5,15 @@ import {
   type SubscriptionChangeDetail,
 } from "./subscriptionBus";
 
+// bun runs every test file in ONE process, so a `window` left behind here is
+// seen by every file that runs later. It used to be left behind: any later
+// test importing next/image then died at import time, because next's
+// deployment-id module reads `document` as soon as `window` exists. Put the
+// global back exactly as it was found, the way pendingSubscribe.test.ts and
+// communityEngagement.test.ts do.
+const hadWindow = "window" in globalThis;
+const originalWindow = (globalThis as { window?: unknown }).window;
+
 describe("subscriptionBus", () => {
   beforeEach(() => {
     // bun:test runs in node — provide a window stub for the bus to attach to
@@ -14,7 +23,10 @@ describe("subscriptionBus", () => {
   });
 
   afterEach(() => {
-    // Nothing else to clean: subscribeToBus returns an unsubscribe each call
+    // Listeners need no cleanup (subscribeToBus returns an unsubscribe each
+    // call); the window stub does.
+    if (hadWindow) (globalThis as { window?: unknown }).window = originalWindow;
+    else delete (globalThis as { window?: unknown }).window;
   });
 
   test("broadcasts reach a single subscriber with full detail", () => {
