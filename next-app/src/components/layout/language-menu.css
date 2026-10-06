@@ -94,12 +94,15 @@
   flex-direction: column;
 }
 
+/* 40px rows, like every other item in the header's popups (the account menu
+   these sit inside, the genre panel); padding alone left them about 35px. */
 .agc-lang-option {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 9px 10px;
+  min-height: 40px;
+  padding: 0 10px;
   border: none;
   border-radius: 9px;
   background: transparent;
