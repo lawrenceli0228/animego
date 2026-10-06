@@ -61,3 +61,12 @@
   .agc-notification-bell { transition: none; }
   .agc-notification-popover { animation: none; }
 }
+/* Forced-colors mode repaints backgrounds in the page colour, and these dots
+   are nothing but a background: the bell's unread dot (the bar's only visible
+   sign of unread notifications — the count is in the accessible name) and
+   each unread row's dot in the panel vanished. Opt them out of the override
+   and paint them in a system colour. */
+@media (forced-colors: active) {
+  .agc-notification-dot,
+  .agc-notification-item > i { forced-color-adjust: none; background: Highlight; }
+}
