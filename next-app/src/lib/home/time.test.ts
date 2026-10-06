@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { SITE_TZ, clockParts, dayHeader, fillTemplate, hhmm, weekdayTime } from "./time";
+import {
+  SITE_TZ,
+  clockParts,
+  dayHeader,
+  fillTemplate,
+  hhmm,
+  parseDayKey,
+  weekdayLabel,
+  weekdayTime,
+} from "./time";
 
 // Every string here is rendered during hydration by a client component, so it
 // has to come out identical from Node's ICU on the server and the browser's
@@ -54,6 +63,33 @@ describe("dayHeader", () => {
   test("an unparseable key yields an empty string rather than 'NaN'", () => {
     expect(dayHeader("", "zh")).toBe("");
     expect(dayHeader("2026-13-99x", "en")).toBe("");
+  });
+});
+
+describe("parseDayKey", () => {
+  test("reads the date and its weekday without any time zone", () => {
+    // 2026-09-24 is a Thursday wherever the code runs.
+    expect(parseDayKey("2026-09-24")).toEqual({ year: 2026, month: 9, day: 24, weekday: 4 });
+  });
+
+  test("rejects anything that is not a real calendar date", () => {
+    expect(parseDayKey("")).toBeNull();
+    expect(parseDayKey("2026-9-24")).toBeNull();
+    expect(parseDayKey("2026-02-30")).toBeNull();
+    expect(parseDayKey("2026-13-01")).toBeNull();
+  });
+});
+
+describe("weekdayLabel", () => {
+  test("names the day from the language's table, Sunday first", () => {
+    expect(weekdayLabel(0, "zh")).toBe("周日");
+    expect(weekdayLabel(4, "zh-Hant")).toBe("週四");
+    expect(weekdayLabel(6, "en")).toBe("Sat");
+  });
+
+  test("an index outside the week is an empty string, not 'undefined'", () => {
+    expect(weekdayLabel(7, "zh")).toBe("");
+    expect(weekdayLabel(-1, "en")).toBe("");
   });
 });
 

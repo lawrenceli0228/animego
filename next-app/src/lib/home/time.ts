@@ -80,10 +80,15 @@ const WEEKDAY_LABELS: Record<Lang, readonly string[]> = {
   "zh-Hant": ["週日", "週一", "週二", "週三", "週四", "週五", "週六"],
 };
 
+/** "周四" for weekday 4 (0 = Sunday); empty for an index outside the week. */
+export function weekdayLabel(weekday: number, lang: Lang): string {
+  return WEEKDAY_LABELS[lang][weekday] ?? "";
+}
+
 /** "周日 19:00" — when the next episode of a show goes out. */
 export function weekdayTime(ms: number, timeZone: string | undefined, lang: Lang): string {
   const { weekday, hh, mm } = clockParts(ms, timeZone);
-  return `${WEEKDAY_LABELS[lang][weekday]} ${hh}:${mm}`;
+  return `${weekdayLabel(weekday, lang)} ${hh}:${mm}`;
 }
 
 const EN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -94,19 +99,38 @@ const DAY_HEADER: Record<Lang, (weekday: string, month: number, day: number) => 
   "zh-Hant": (w, m, d) => `${w} ${m}月${d}日`,
 };
 
+export interface DayKeyParts {
+  year: number;
+  /** 1–12. */
+  month: number;
+  day: number;
+  /** 0 = Sunday. */
+  weekday: number;
+}
+
 /**
- * "周四 9月24日" for a `YYYY-MM-DD` day key.
+ * A `YYYY-MM-DD` day key as numbers, or null when it is not a real date.
  *
  * The key is already a calendar date, so no zone is involved: the weekday is
- * computed from the date itself. Empty for anything that is not a real date.
+ * computed from the date itself, and comes out the same on every runtime.
  */
-export function dayHeader(dayKey: string, lang: Lang): string {
+export function parseDayKey(dayKey: string): DayKeyParts | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
-  if (!m) return "";
+  if (!m) return null;
   const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
-  return DAY_HEADER[lang](WEEKDAY_LABELS[lang][date.getUTCDay()], month, day);
+  if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return { year, month, day, weekday: date.getUTCDay() };
+}
+
+/**
+ * "周四 9月24日" for a `YYYY-MM-DD` day key. Empty for anything that is not a
+ * real date.
+ */
+export function dayHeader(dayKey: string, lang: Lang): string {
+  const parts = parseDayKey(dayKey);
+  if (!parts) return "";
+  return DAY_HEADER[lang](weekdayLabel(parts.weekday, lang), parts.month, parts.day);
 }
 
 /** `{{name}}` substitution — the same contract as lib/i18n's `fill`, without its dictionary imports. */
