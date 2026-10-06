@@ -346,6 +346,16 @@ test.describe("the desktop bar", () => {
     // bar. Same selector the schedule's own spec uses.
     const tab = page.locator('[role="tablist"] [role="tab"]').first();
     await expect(tab).toBeVisible();
+    // The day tabs rise into place on arrival (DayTabs.module.css, 0.75s
+    // after a 0.12s delay). Measured inside that window the tab is still
+    // moving up: against a production server, fast enough to get here first,
+    // it was parked at 19, read 63 after focus and 60 a second later. Let the
+    // finite animations finish (the 现在 dot pings forever; that one stays).
+    await page.waitForFunction(() =>
+      document
+        .getAnimations()
+        .every((a) => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity),
+    );
     // Parked 20px from the top of the window: on screen, but where the bar is.
     await tab.evaluate((el) => window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 20));
     expect(Math.round(await tab.evaluate((el) => el.getBoundingClientRect().top))).toBe(20);
