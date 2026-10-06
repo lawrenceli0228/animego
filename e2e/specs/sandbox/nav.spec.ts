@@ -221,8 +221,12 @@ test.describe("the desktop bar", () => {
     await page.keyboard.press("Enter");
     await page.mouse.move(700, 600);
     await page.mouse.wheel(0, 900);
-    await page.waitForTimeout(600);
-    await expect(page.locator("header").first()).toHaveAttribute("data-hidden", "false");
+    // Glass is decided in the same step as hidden, so once it is on, the
+    // scroll has been seen — "still visible" below is a decision, not a
+    // header that simply has not looked yet.
+    const header = page.locator("header").first();
+    await expect(header).toHaveAttribute("data-glass", "true");
+    await expect(header).toHaveAttribute("data-hidden", "false");
   });
 });
 
@@ -237,11 +241,15 @@ test.describe("the phone bar and its drawer", () => {
     await expect(navbar(page).locator("ul").first()).toBeHidden();
 
     // Start part-way down, so "did not move" is a real claim. The jump down
-    // hides the bar; a short scroll back up brings it back to tap.
+    // hides the bar; a short scroll back up brings it back to tap. Each step
+    // waits until the header has SEEN it: scroll decisions run once per
+    // animation frame, and two scrolls inside one frame are a single net
+    // move (0 → 300, i.e. "down" — the bar would stay hidden).
+    const header = page.locator("header").first();
     await page.evaluate(() => window.scrollTo(0, 320));
-    await page.waitForTimeout(300);
+    await expect(header).toHaveAttribute("data-hidden", "true");
     await page.evaluate(() => window.scrollTo(0, 300));
-    await expect(page.locator("header").first()).toHaveAttribute("data-hidden", "false");
+    await expect(header).toHaveAttribute("data-hidden", "false");
     // Wait out the header's slide back in before aiming at it: a box measured
     // mid-slide sends the tap past the button.
     await expect
