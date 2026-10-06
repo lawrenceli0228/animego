@@ -120,7 +120,7 @@
 }
 .set-preview {
   position: sticky;
-  top: 80px;
+  top: calc(var(--nav-h) + 24px);
   display: flex;
   flex-direction: column;
   align-items: center;

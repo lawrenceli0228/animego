@@ -10,14 +10,15 @@
 // "sent" view glyph + message).
 //
 // CSSProperties typing matches the project-wide convention for inline
-// styles (see Navbar.tsx). Two of the entries are callbacks because
-// they depend on per-render state (focused field, busy state).
+// styles. Two of the entries are callbacks because they depend on
+// per-render state (focused field, busy state). The shell subtracts the
+// site header's height (--nav-h, globals.css) to fill the window under it.
 
 import type { CSSProperties } from "react";
 
 export const authFormStyles = {
   shell: {
-    minHeight: "calc(100vh - 56px)",
+    minHeight: "calc(100vh - var(--nav-h))",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",

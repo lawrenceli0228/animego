@@ -50,7 +50,7 @@ const s = {
   } as CSSProperties,
   stickyLeft: {
     position: "sticky",
-    top: 96,
+    top: "calc(var(--nav-h) + 40px)",
     paddingLeft: 20,
   } as CSSProperties,
   headerOverride: {

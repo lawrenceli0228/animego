@@ -10,16 +10,20 @@
 
 .agc-locale-hint {
   position: fixed;
-  /* Below the sticky navbar rather than over it. Covering the navigation to
+  /* Below the sticky header rather than over it. Covering the navigation to
      offer a translation would take away the control the reader is most
      likely to want if they disagree with the offer. */
-  top: 68px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 180;
+  top: calc(var(--nav-h) + 12px);
+  /* Right-aligned to the header's content edge, not centred: on the homepage
+     the hero runs up under the header, and its text column is on the left —
+     a centred hint sat on the hero's first line. The right is the banner. */
+  right: max(clamp(24px, 5.56vw, 80px), calc((100% - 1280px) / 2));
+  /* Under the header's own layer (100), so a dropdown opened from the bar
+     covers the hint instead of the hint covering the dropdown. */
+  z-index: 90;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
   gap: 6px;
   max-width: calc(100vw - 24px);
   /* Nothing here should ever swallow a click meant for the page underneath. */
@@ -115,20 +119,22 @@
 @keyframes agc-locale-hint-in {
   from {
     opacity: 0;
-    /* translateX is repeated because transform replaces, not composes — the
-       centring above would be dropped mid-animation without it. */
-    transform: translateX(-50%) translateY(-8px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
 }
 
 @media (max-width: 560px) {
+  /* Full width under the phone bar. On the homepage that is the banner strip
+     above the hero's cover and title, which start 136px down. */
   .agc-locale-hint {
-    top: 60px;
-    width: calc(100vw - 24px);
+    top: calc(var(--nav-h) + 8px);
+    right: 12px;
+    left: 12px;
+    align-items: center;
   }
 
   .agc-locale-hint-card {
