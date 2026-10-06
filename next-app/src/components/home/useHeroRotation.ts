@@ -129,7 +129,12 @@ export function useHeroRotation({ rootRef, count, current, onPreload, onAdvance 
   useEffect(() => {
     const el = rootRef.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(([entry]) => setOffscreen(!entry.isIntersecting));
+    // The last entry: two crossings can queue before the callback runs (away
+    // and back on a busy main thread), and the first would be stale.
+    const observer = new IntersectionObserver((entries) => {
+      const latest = entries[entries.length - 1];
+      if (latest) setOffscreen(!latest.isIntersecting);
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, [rootRef]);
