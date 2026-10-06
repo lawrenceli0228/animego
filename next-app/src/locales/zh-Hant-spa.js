@@ -75,6 +75,10 @@ const zhHant = {
     myList: '我的追番', hi: 'Hi', library: '我的庫', about: '關於',
     // Language menu: the group heading + the account menu's own label.
     language: '語言', accountMenu: '賬戶選單', mainNavigation: '主導航',
+    // Site header (AniList-style bar + phone drawer).
+    schedule: '放送表', genres: '分類',
+    searchAnime: '搜尋番劇', searchPlaceholder: '中文 / 日文 / 羅馬字',
+    menu: '選單', openMenu: '打開選單', closeMenu: '關閉選單',
   },
   // Season labels
   season: {

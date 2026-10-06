@@ -18,6 +18,10 @@ const en = {
     myList: 'My List', hi: 'Hi', library: 'Library', about: 'About',
     // Language menu: the group heading + the account menu's own label.
     language: 'Language', accountMenu: 'Account menu', mainNavigation: 'Main navigation',
+    // Site header (AniList-style bar + phone drawer).
+    schedule: 'Schedule', genres: 'Genres',
+    searchAnime: 'Search anime', searchPlaceholder: 'Chinese, Japanese or romaji',
+    menu: 'Menu', openMenu: 'Open menu', closeMenu: 'Close menu',
   },
   // Season labels
   season: {

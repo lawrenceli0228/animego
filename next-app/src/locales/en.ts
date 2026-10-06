@@ -28,6 +28,11 @@ const en = {
     // live, so the bar stays signed-in rather than lying about it.
     logoutFailed: 'Sign-out did not complete — please try again.',
     myList: 'My List', hi: 'Hi', library: 'Library', about: 'About',
+    // Site header. The bar is a client component and reads the -spa twin;
+    // these keep the server dictionary a complete record of the chrome.
+    schedule: 'Schedule', genres: 'Genres',
+    searchAnime: 'Search anime', searchPlaceholder: 'Chinese, Japanese or romaji',
+    menu: 'Menu', openMenu: 'Open menu', closeMenu: 'Close menu',
   },
   // Season labels
   season: {
