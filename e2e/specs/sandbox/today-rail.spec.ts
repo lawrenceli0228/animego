@@ -11,8 +11,13 @@ import { collectConsoleErrors } from "../_helpers";
  *     a quick drag flings on after the button is up and comes to rest with a
  *     card flush with the gutter;
  *   - the slider under the row moves it: the thumb dragged, the bare track
- *     clicked, and from the keyboard on its range input (a card at a time,
- *     the ends), saying which shows are in view;
+ *     clicked, and from the keyboard on its range input (a card at a time —
+ *     two quick presses two cards — and the ends), counting stops and saying
+ *     which shows are in view; it stays drawn and focusable in forced colours;
+ *   - a click that stops a fling opens nothing; a vertical wheel lets it finish;
+ *   - the row rises in the first time it scrolls into view, then lets go;
+ *   - on a phone a swipe up that starts on the slider scrolls the page, while
+ *     a tap on its bare track glides the row;
  *   - the row ends by saying the day is over, with a link to the schedule;
  *   - on a phone every show of the day is its own card (the aired half used
  *     to fold into one tile), the row swipes, and the slider is finger-sized;
@@ -62,11 +67,23 @@ async function expectAtAStop(rail: Locator, at: number) {
   expect(stops.some((stop) => Math.abs(stop - at) <= 1), `rest at ${at}, stops ${stops.join(", ")}`).toBe(true);
 }
 
+/**
+ * Hydrated is not the same as settled in: the rail's effects — where it opens,
+ * the slider's first measurement, whether it will rise in — run after React has
+ * attached to the DOM, and on a dev server noticeably after. Acting before them
+ * means the opening scroll lands in the middle of the test. The slider's spoken
+ * value is written by that first measurement.
+ */
+async function railSettledIn(page: Page) {
+  await waitForHydration(page, `${RAIL} a`);
+  await expect(page.getByRole("slider", { name: "横向滚动今日更新" })).toHaveAttribute("aria-valuetext", /\S/);
+}
+
 async function openRail(page: Page): Promise<Locator | null> {
   await page.goto("/");
   const rail = page.locator(RAIL);
   if ((await rail.count()) === 0) return null;
-  await waitForHydration(page, `${RAIL} a`);
+  await railSettledIn(page);
   return rail;
 }
 
@@ -76,7 +93,8 @@ test.describe("今日更新 on a desktop", () => {
     const rail = await openRail(page);
     test.skip(rail === null, "nothing airs today in this stack");
     const max = await maxScrollOf(rail!);
-    test.skip(max < 120, "today's row fits on one screen here");
+    // The 260px drag below needs the farther end to be more than 200px away.
+    test.skip(max < 450, "today's row is too short to drag along here");
 
     await rail!.scrollIntoViewIfNeeded();
     const before = await scrollLeftOf(rail!);
@@ -170,7 +188,8 @@ test.describe("今日更新 on a desktop", () => {
     const rail = await openRail(page);
     test.skip(rail === null, "nothing airs today in this stack");
     const max = await maxScrollOf(rail!);
-    test.skip(max < 120, "today's row fits on one screen here");
+    // A short day's thumb fills most of the track: too little bare track to click.
+    test.skip(max < 450, "today's row is too short for the slider steps here");
 
     const slider = sliderOf(page);
     await expect(slider).toHaveAttribute("data-overflow", "true");
@@ -191,30 +210,135 @@ test.describe("今日更新 on a desktop", () => {
     const rested = await settled(rail!);
     await expectAtAStop(rail!, rested);
 
-    // The bare track near its far end, clicked: the row glides there and rests at a stop.
+    // The bare track beside the thumb, clicked near that end: the row glides
+    // that way and rests at a stop.
     const s = (await slider.boundingBox())!;
-    await page.mouse.click(s.x + s.width - 4, s.y + s.height / 2);
-    await expect.poll(() => scrollLeftOf(rail!)).toBeGreaterThan(rested);
+    const th = (await thumb.boundingBox())!;
+    const roomAfter = s.x + s.width - (th.x + th.width);
+    const forward = roomAfter > th.x - s.x;
+    await page.mouse.click(forward ? s.x + s.width - 4 : s.x + 4, s.y + s.height / 2);
+    if (forward) await expect.poll(() => scrollLeftOf(rail!)).toBeGreaterThan(rested);
+    else await expect.poll(() => scrollLeftOf(rail!)).toBeLessThan(rested);
     const glided = await settled(rail!);
-    expect(glided).toBeGreaterThan(max * 0.75);
+    if (forward) expect(glided).toBeGreaterThan(max * 0.75);
+    else expect(glided).toBeLessThan(max * 0.25);
     await expectAtAStop(rail!, glided);
 
-    // The keyboard, on the range input in front of the slider.
+    // The keyboard, on the range input in front of the slider. It counts
+    // stops, not pixels, so a screen reader's increment moves a card.
     const input = page.getByRole("slider", { name: "横向滚动今日更新" });
+    const stops = [...new Set(await stopsOf(rail!))].sort((a, b) => a - b);
     await input.focus();
     await expect(slider).toHaveAttribute("data-active", "true");
     await page.keyboard.press("Home");
     await expect.poll(() => scrollLeftOf(rail!)).toBeLessThanOrEqual(1);
+    await settled(rail!);
+    await expect(input).toHaveValue("0");
+    await expect(input).toHaveAttribute("max", String(stops.length - 1));
+    // Two quick presses go two cards on: the second steps from where the
+    // first is already gliding to, not from halfway there.
     await page.keyboard.press("ArrowRight");
-    const oneOn = await settled(rail!);
-    expect(oneOn).toBeGreaterThan(1);
-    expect(oneOn).toBeLessThan(400); // a card, not a page
-    await expectAtAStop(rail!, oneOn);
+    await page.keyboard.press("ArrowRight");
+    const twoOn = await settled(rail!);
+    expect(Math.abs(twoOn - stops[2])).toBeLessThanOrEqual(1);
+    await expect(input).toHaveValue("2");
     await page.keyboard.press("End");
     await expect.poll(() => scrollLeftOf(rail!)).toBeGreaterThanOrEqual(max - 1);
+    await expect(input).toHaveValue(String(stops.length - 1));
     // It says which shows are in view, out of how many.
     const total = await headerCount(page).textContent();
     await expect(input).toHaveAttribute("aria-valuetext", new RegExp(`共 ${total} 部$`));
+  });
+
+  test("a click that stops a flinging row opens nothing; a vertical wheel lets a fling finish", async ({ page }) => {
+    const rail = await openRail(page);
+    test.skip(rail === null, "nothing airs today in this stack");
+    const max = await maxScrollOf(rail!);
+    test.skip(max < 600, "today's row is too short to fling along here");
+
+    await rail!.scrollIntoViewIfNeeded();
+    const url = page.url();
+    const box = (await rail!.boundingBox())!;
+    const y = box.y + 100;
+    const x0 = box.x + box.width * 0.7;
+    /**
+     * Flick from the start; true when a fling is under way just after. Moving
+     * is not enough to tell: a flick read as no fling settles back onto a card,
+     * which moves the row too. Only a fling (or a hand on the row) sets
+     * data-moving once the button is up.
+     */
+    const flick = async () => {
+      await rail!.evaluate((el) => el.scrollTo({ left: 0, behavior: "instant" }));
+      await settled(rail!);
+      await page.mouse.move(x0, y);
+      await page.mouse.down();
+      await page.mouse.move(x0 - 240, y, { steps: 6 });
+      await page.mouse.up();
+      return (await rail!.getAttribute("data-moving")) === "true";
+    };
+    const flickTillItFlings = async () => {
+      for (let i = 0; i < 3; i++) if (await flick()) return true;
+      return false;
+    };
+
+    // A vertical wheel over the row scrolls the page; the fling carries on and rests on a stop.
+    test.skip(!(await flickTillItFlings()), "no flick carried on (loaded machine)");
+    await page.mouse.wheel(0, 120);
+    const afterWheel = await scrollLeftOf(rail!);
+    await expect.poll(() => scrollLeftOf(rail!)).not.toBe(afterWheel);
+    await expectAtAStop(rail!, await settled(rail!));
+    await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(200);
+
+    // A click while it flings stops it — like native momentum, that click is
+    // "stop", not "open the card going past" — and the row rests on a stop.
+    test.skip(!(await flickTillItFlings()), "no flick carried on (loaded machine)");
+    await page.mouse.click(box.x + box.width * 0.5, y);
+    const rest = await settled(rail!);
+    await page.waitForTimeout(300);
+    expect(page.url()).toBe(url);
+    await expectAtAStop(rail!, rest);
+  });
+
+  test("in forced colours the slider is still drawn and still shows focus", async ({ page }) => {
+    await page.emulateMedia({ forcedColors: "active" });
+    const rail = await openRail(page);
+    test.skip(rail === null, "nothing airs today in this stack");
+    const max = await maxScrollOf(rail!);
+    test.skip(max < 120, "today's row fits on one screen here");
+
+    const slider = sliderOf(page);
+    const [track, thumb] = [slider.locator(":scope > span").first(), slider.locator(":scope > span").last()];
+    // The track keeps a border; the thumb keeps a system colour of its own.
+    expect(await track.evaluate((el) => getComputedStyle(el).borderTopStyle)).toBe("solid");
+    const thumbColour = await thumb.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const ground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    expect(thumbColour).not.toBe(ground);
+    expect(thumbColour).not.toBe("rgba(0, 0, 0, 0)");
+    // Keyboard focus on the range input shows as an outline on the slider.
+    // (Script focus alone is not keyboard focus for a range input: a key
+    // press makes it so, as Tab would.)
+    await page.getByRole("slider", { name: "横向滚动今日更新" }).focus();
+    await page.keyboard.press("Shift");
+    expect(await slider.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("solid");
+  });
+
+  test("the row rises in the first time it comes into view, then lets go of the animation", async ({ page }) => {
+    await page.goto("/");
+    const rail = page.locator(RAIL);
+    test.skip((await rail.count()) === 0, "nothing airs today in this stack");
+    await railSettledIn(page);
+    const onScreen = await rail.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return r.bottom > 0 && r.top < window.innerHeight;
+    });
+    test.skip(onScreen, "the row is on screen at load here, so it does not rise");
+    await expect(rail).not.toHaveAttribute("data-enter", "run");
+    await rail.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await expect(rail).toHaveAttribute("data-enter", "run");
+    // Dropped once the last item is in, so nothing re-created later rises again.
+    await expect(rail).not.toHaveAttribute("data-enter", "run", { timeout: 4000 });
+    for (const item of await rail.locator(":scope > *").all()) await expect(item).toHaveCSS("opacity", "1");
   });
 
   test("the row ends by saying the day is over, with the way to the full schedule", async ({ page }) => {
@@ -267,6 +391,43 @@ test.describe("今日更新 on a phone", () => {
     });
     const after = await settled(rail!);
     expect(Math.abs(after - before)).toBeGreaterThan(60);
+  });
+
+  test("on the slider a vertical swipe scrolls the page, and a tap on the bare track glides the row", async ({ page }) => {
+    const rail = await openRail(page);
+    test.skip(rail === null, "nothing airs today in this stack");
+    const max = await maxScrollOf(rail!);
+    test.skip(max < 450, "today's row is too short for the slider steps here");
+
+    const slider = sliderOf(page);
+    await rail!.evaluate((el) => el.scrollTo({ left: 0, behavior: "instant" }));
+    await slider.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    expect(await settled(rail!)).toBeLessThanOrEqual(1);
+    // The thumb is at the start, so the far end of the track is bare.
+    const s = (await slider.boundingBox())!;
+    const x = Math.round(s.x + s.width - 6);
+    const y = Math.round(s.y + s.height / 2);
+
+    // A swipe up that starts on the slider: the page scrolls and the row stays put.
+    const pageBefore = await page.evaluate(() => window.scrollY);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Input.synthesizeScrollGesture", {
+      x,
+      y,
+      xDistance: 0,
+      yDistance: -200,
+      gestureSourceType: "touch",
+      speed: 800,
+    });
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(pageBefore + 40);
+    expect(await settled(rail!)).toBeLessThanOrEqual(1);
+
+    // A tap on the bare track: the row glides that way and rests on a stop.
+    await slider.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    const t = (await slider.boundingBox())!;
+    await page.touchscreen.tap(t.x + t.width - 6, t.y + t.height / 2);
+    await expect.poll(() => scrollLeftOf(rail!)).toBeGreaterThan(1);
+    await expectAtAStop(rail!, await settled(rail!));
   });
 
   test("a show that airs while the page is open stays in the row, marked aired", async ({ page }) => {
