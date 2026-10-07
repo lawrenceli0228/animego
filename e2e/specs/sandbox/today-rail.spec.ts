@@ -240,7 +240,7 @@ test.describe("今日更新 on a desktop", () => {
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("ArrowRight");
     const twoOn = await settled(rail!);
-    expect(Math.abs(twoOn - stops[2])).toBeLessThanOrEqual(1);
+    expect(Math.abs(twoOn - (stops[2] ?? Number.NaN))).toBeLessThanOrEqual(1);
     await expect(input).toHaveValue("2");
     await page.keyboard.press("End");
     await expect.poll(() => scrollLeftOf(rail!)).toBeGreaterThanOrEqual(max - 1);
@@ -390,7 +390,7 @@ test.describe("今日更新 on a phone", () => {
       speed: 1200,
     });
     const after = await settled(rail!);
-    expect(Math.abs(after - before)).toBeGreaterThan(60);
+    expect(Math.abs(after - before), `row at ${before} before the swipe, ${after} after`).toBeGreaterThan(60);
   });
 
   test("on the slider a vertical swipe scrolls the page, and a tap on the bare track glides the row", async ({ page }) => {
@@ -409,6 +409,14 @@ test.describe("今日更新 on a phone", () => {
     const y = Math.round(s.y + s.height / 2);
 
     // A swipe up that starts on the slider: the page scrolls and the row stays put.
+    // What the slider receives is kept, so a failure says what the browser did.
+    await slider.evaluate((el) => {
+      const log: string[] = [];
+      (window as unknown as { __sliderLog: string[] }).__sliderLog = log;
+      for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) {
+        el.addEventListener(type, (e) => log.push(`${type}:${(e as PointerEvent).pointerType}`), true);
+      }
+    });
     const pageBefore = await page.evaluate(() => window.scrollY);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Input.synthesizeScrollGesture", {
@@ -419,7 +427,12 @@ test.describe("今日更新 on a phone", () => {
       gestureSourceType: "touch",
       speed: 800,
     });
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(pageBefore + 40);
+    try {
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(pageBefore + 40);
+    } catch (err) {
+      const seen = await page.evaluate(() => (window as unknown as { __sliderLog: string[] }).__sliderLog.join(" "));
+      throw new Error(`the page did not scroll (scrollY ${pageBefore}); the slider saw: ${seen || "nothing"}\n${String(err)}`);
+    }
     expect(await settled(rail!)).toBeLessThanOrEqual(1);
 
     // A tap on the bare track: the row glides that way and rests on a stop.
