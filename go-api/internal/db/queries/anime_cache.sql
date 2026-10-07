@@ -899,8 +899,14 @@ WHERE anilist_id = sqlc.arg(anilist_id)::int
 -- Phase 3 heal-CN: re-fetches Subject's name_cn for v2-completed
 -- entries whose title_chinese is still NULL.  Tiny operation —
 -- bumps bangumi_version=3 either way (success or null).
+--
+-- COALESCE, not a plain assignment: a NULL from V3 means "Bangumi still has
+-- no Chinese name", never "erase the one we hold".  V2 chains V3 whenever the
+-- subject lacks name_cn, including on a re-enrich of a row whose title came
+-- from somewhere else (an admin, the dandanplay heal, a donghua's Chinese
+-- native name), and a plain assignment wiped those titles.
 UPDATE anime_cache
-SET title_chinese  = $2,
+SET title_chinese  = COALESCE($2, title_chinese),
     bangumi_version = 3,
     updated_at     = now()
 WHERE anilist_id = $1;

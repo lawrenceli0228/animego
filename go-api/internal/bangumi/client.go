@@ -275,6 +275,7 @@ func (c *Client) Search(ctx context.Context, keyword string) (*SearchResponse, e
 	if err := c.get(ctx, path+query, &dest); err != nil {
 		return nil, err
 	}
+	dest.unescape()
 	return &dest, nil
 }
 
@@ -286,6 +287,7 @@ func (c *Client) Subject(ctx context.Context, bgmID int) (*Subject, error) {
 	if err := c.get(ctx, path, &dest); err != nil {
 		return nil, err
 	}
+	dest.unescape()
 	return &dest, nil
 }
 
@@ -298,6 +300,7 @@ func (c *Client) Characters(ctx context.Context, bgmID int) ([]Character, error)
 	if err := c.get(ctx, path, &dest); err != nil {
 		return nil, err
 	}
+	unescapeCharacters(dest)
 	return dest, nil
 }
 
@@ -311,6 +314,7 @@ func (c *Client) Episodes(ctx context.Context, bgmID int) (*EpisodesResponse, er
 	if err := c.get(ctx, path, &dest); err != nil {
 		return nil, err
 	}
+	dest.unescape()
 	return &dest, nil
 }
 
