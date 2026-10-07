@@ -533,10 +533,13 @@ export function useRailSlider(
           : nearestStop(scrollForPointer(g, thumbFor(g), track.width, x, grab), stopsOf(rail, g));
         const mouse = e.pointerType === "mouse";
         hold.current = { pointerId: e.pointerId, grab, startX: e.clientX, moved: false, tapGlide: mouse ? null : glide };
+        // A finger is left alone until it moves sideways: a swipe up the page
+        // that starts here is the browser's (touch-action: pan-y), and taking
+        // hold of it at once would only get in the way.
+        if (!mouse) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         // No text selection, and focus stays where it was.
         e.preventDefault();
-        if (!mouse) return;
         setDragging(true);
         if (glide !== null) motion.scrollTo(glide, true);
       },
@@ -544,8 +547,12 @@ export function useRailSlider(
         const h = hold.current;
         if (!h || h.pointerId !== e.pointerId) return;
         if (!h.moved && Math.abs(e.clientX - h.startX) < CLICK_SLOP_PX) return;
-        // A finger shows the slider held once it is actually sliding it.
-        if (!h.moved) setDragging(true);
+        // A finger is taken hold of, and shows the slider held, once it is
+        // actually sliding it.
+        if (!h.moved && e.pointerType !== "mouse") {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setDragging(true);
+        }
         hold.current = { ...h, moved: true };
         const left = pointerScroll(e, h.grab);
         if (left !== null && railRef.current) railRef.current.scrollLeft = left;

@@ -89,10 +89,14 @@ export default function TodayRail({ items, dayKey, dayLabel, tomorrow, serverNow
   // fifteen finished episodes to find the next one. Scrolls the rail itself —
   // never scrollIntoView, which would move the page too (the old carousel's
   // rail did exactly that). Instant: this is where the row starts, not a move.
+  // Once per mount: an effect run again (a dev server's hot update re-runs
+  // them) must not pull the row back from wherever the reader has taken it.
+  const opened = useRef(false);
   useEffect(() => {
     const rail = railRef.current;
     const marker = rail?.querySelector<HTMLElement>("[data-now]");
-    if (!rail || !marker) return;
+    if (opened.current || !rail || !marker) return;
+    opened.current = true;
     const prev = marker.previousElementSibling as HTMLElement | null;
     const next = marker.nextElementSibling as HTMLElement | null;
     const left = nowScrollLeft(
