@@ -9,6 +9,40 @@ import (
 	"context"
 )
 
+// iteratorForInsertAnidbIdMapCopy implements pgx.CopyFromSource.
+type iteratorForInsertAnidbIdMapCopy struct {
+	rows                 []InsertAnidbIdMapCopyParams
+	skippedFirstNextCall bool
+}
+
+func (r *iteratorForInsertAnidbIdMapCopy) Next() bool {
+	if len(r.rows) == 0 {
+		return false
+	}
+	if !r.skippedFirstNextCall {
+		r.skippedFirstNextCall = true
+		return true
+	}
+	r.rows = r.rows[1:]
+	return len(r.rows) > 0
+}
+
+func (r iteratorForInsertAnidbIdMapCopy) Values() ([]interface{}, error) {
+	return []interface{}{
+		r.rows[0].AnilistID,
+		r.rows[0].AnidbID,
+	}, nil
+}
+
+func (r iteratorForInsertAnidbIdMapCopy) Err() error {
+	return nil
+}
+
+// Bulk-load via pgx CopyFrom; updated_at takes its column DEFAULT now().
+func (q *Queries) InsertAnidbIdMapCopy(ctx context.Context, arg []InsertAnidbIdMapCopyParams) (int64, error) {
+	return q.db.CopyFrom(ctx, []string{"anidb_id_map"}, []string{"anilist_id", "anidb_id"}, &iteratorForInsertAnidbIdMapCopy{rows: arg})
+}
+
 // iteratorForInsertBgmIdMapCopy implements pgx.CopyFromSource.
 type iteratorForInsertBgmIdMapCopy struct {
 	rows                 []InsertBgmIdMapCopyParams

@@ -321,6 +321,13 @@ func main() {
 		} else {
 			slog.Info("bgm_id_map seeded", "entries", n)
 		}
+		// AniList->AniDB pairs for the magnet handler's AnimeTosho feed.
+		// Failure degrades magnet search to keyword-only, nothing more.
+		if n, err := bgmidmap.SeedAnidb(seedCtx, pool); err != nil {
+			slog.Warn("anidb_id_map seed failed", "err", err)
+		} else {
+			slog.Info("anidb_id_map seeded", "entries", n)
+		}
 		seedCancel()
 
 		// Orphan scan: catches anime_cache rows with bangumi_version=0 that

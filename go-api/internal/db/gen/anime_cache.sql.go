@@ -2280,9 +2280,9 @@ SELECT
     a.title_native,
     a.title_english,
     a.title_chinese,
-    m.anidb_id
+    d.anidb_id
 FROM anime_cache a
-LEFT JOIN bgm_id_map m ON m.anilist_id = a.anilist_id
+LEFT JOIN anidb_id_map d ON d.anilist_id = a.anilist_id
 WHERE a.anilist_id = $1
 `
 
@@ -2299,10 +2299,13 @@ type GetTorrentQueryInputsByAnilistIDRow struct {
 // the handler turns the four titles into deduped search variants and uses
 // anidb_id (when present) to pull AnimeTosho's complete aid feed.
 //
-// LEFT JOIN bgm_id_map so a row missing from the id map (or with a NULL
-// anidb_id) still returns its titles — anidb_id comes back NULL and the
-// handler degrades to keyword-only (no aid feed).  pgx.ErrNoRows means "no
-// such anime cached" → handler 404s.
+// anidb_id comes from anidb_id_map (Fribb's AniList->AniDB pairs), not from
+// bgm_id_map: whether Bangumi agrees about a show says nothing about its
+// AniDB id, and bgm_id_map leaves out every show whose Bangumi link the two
+// upstream datasets dispute (migration 0041).  LEFT JOIN so a row with no
+// pair still returns its titles — anidb_id comes back NULL and the handler
+// degrades to keyword-only (no aid feed).  pgx.ErrNoRows means "no such
+// anime cached" → handler 404s.
 func (q *Queries) GetTorrentQueryInputsByAnilistID(ctx context.Context, anilistID int32) (GetTorrentQueryInputsByAnilistIDRow, error) {
 	row := q.db.QueryRow(ctx, getTorrentQueryInputsByAnilistID, anilistID)
 	var i GetTorrentQueryInputsByAnilistIDRow
