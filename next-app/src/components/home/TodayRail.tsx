@@ -2,7 +2,8 @@
 
 // 今日更新 — today's episodes as one sideways rail, split by a "now" marker:
 // aired on the left with a 已播 badge, upcoming on the right, the ones due in
-// the next hour counting down with a ping.
+// the next hour counting down with a ping. The row ends by saying the day is
+// over, what tomorrow holds and where the full schedule is.
 //
 // A client component for the clock and for moving along the row. Membership
 // (which episodes are "today") is decided on the server from the schedule's
@@ -17,13 +18,17 @@
 //
 // Moving along: touch scrolls the row natively (snapping card by card on a
 // phone). A desktop mouse wheel cannot — it scrolls the page — so there the
-// row is dragged by hand (a drag never opens the card it started on) and
-// paged by ← → buttons at its ends. The arithmetic is lib/home/railScroll.ts.
+// row is dragged by hand (a drag never opens the card it started on; a quick
+// one flings on and comes to rest on a card). Under the row, at every width,
+// a thin slider: its thumb is as wide as the share of the row in view, and is
+// dragged, or the track clicked, or the keyboard used on the range input
+// behind it. The arithmetic is lib/home/railScroll.ts; the wiring is
+// useTodayRail.ts.
 
 import Link from "@/components/ui/LocaleLink";
 import FadeImage from "@/components/ui/FadeImage";
 import { Fragment, useEffect, useRef, type CSSProperties } from "react";
-import { nowScrollLeft, pageScrollLeft } from "@/lib/home/railScroll";
+import { nowScrollLeft } from "@/lib/home/railScroll";
 import { fillTemplate, hhmm } from "@/lib/home/time";
 import { isNextDay, slotToday, type Slot } from "@/lib/home/todaySlots";
 import { cardToneVars } from "@/lib/home/tone";
@@ -32,12 +37,27 @@ import { useLang } from "@/lib/lang-client";
 import SectionHeader from "./SectionHeader";
 import { CheckIcon, ChevronIcon } from "./icons";
 import { useHomeClock } from "./useHomeClock";
-import { railGeometry, useRailDrag, useRailEdges } from "./useTodayRail";
+import {
+  gutterOf,
+  railGeometry,
+  useRailDrag,
+  useRailEntrance,
+  useRailMotion,
+  useRailSlider,
+} from "./useTodayRail";
 import cards from "./cards.module.css";
 import section from "./section.module.css";
 import styles from "./TodayRail.module.css";
 
 const RAIL_ID = "home-today-rail";
+
+/** The day after today, for the end of the row: already formatted on the server. */
+export interface TodayRailTomorrow {
+  /** "周日 10月11日". */
+  label: string;
+  /** Episodes on it; 0 says only which day it is. */
+  count: number;
+}
 
 interface TodayRailProps {
   items: TodayCard[];
@@ -45,24 +65,22 @@ interface TodayRailProps {
   dayKey: string;
   /** That day, already formatted on the server ("周四 9月24日"). */
   dayLabel: string;
+  tomorrow: TodayRailTomorrow | null;
   serverNowMs: number;
 }
 
-/** The rail's inline padding: the page gutter, where a card lines up. */
-function gutterOf(rail: HTMLElement): number {
-  return parseFloat(getComputedStyle(rail).paddingLeft) || 0;
-}
-
-function prefersReducedMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-export default function TodayRail({ items, dayKey, dayLabel, serverNowMs }: TodayRailProps) {
+export default function TodayRail({ items, dayKey, dayLabel, tomorrow, serverNowMs }: TodayRailProps) {
   const { t } = useLang();
   const { nowMs, timeZone } = useHomeClock(serverNowMs);
   const railRef = useRef<HTMLDivElement | null>(null);
-  const edges = useRailEdges(railRef);
-  const drag = useRailDrag();
+  const thumbRef = useRef<HTMLSpanElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const motion = useRailMotion(railRef);
+  const drag = useRailDrag({ onPress: motion.stop, onRelease: motion.fling });
+  const slider = useRailSlider(railRef, { thumbRef, inputRef }, motion, (first, last, total) =>
+    fillTemplate(t("home.todayScrollValue"), { from: first, to: last, n: total }),
+  );
+  const entering = useRailEntrance(railRef);
 
   const { slots, nowIndex } = slotToday(items, nowMs);
   const now = hhmm(nowMs, timeZone);
@@ -71,10 +89,14 @@ export default function TodayRail({ items, dayKey, dayLabel, serverNowMs }: Toda
   // fifteen finished episodes to find the next one. Scrolls the rail itself —
   // never scrollIntoView, which would move the page too (the old carousel's
   // rail did exactly that). Instant: this is where the row starts, not a move.
+  // Once per mount: an effect run again (a dev server's hot update re-runs
+  // them) must not pull the row back from wherever the reader has taken it.
+  const opened = useRef(false);
   useEffect(() => {
     const rail = railRef.current;
     const marker = rail?.querySelector<HTMLElement>("[data-now]");
-    if (!rail || !marker) return;
+    if (opened.current || !rail || !marker) return;
+    opened.current = true;
     const prev = marker.previousElementSibling as HTMLElement | null;
     const next = marker.nextElementSibling as HTMLElement | null;
     const left = nowScrollLeft(
@@ -90,15 +112,6 @@ export default function TodayRail({ items, dayKey, dayLabel, serverNowMs }: Toda
     // Only on arrival; after that the reader owns the scroll position.
   }, []);
 
-  /** About one view of cards back or forward, landing on a card. */
-  const page = (direction: 1 | -1) => {
-    const rail = railRef.current;
-    if (!rail) return;
-    const starts = Array.from(rail.children, (el) => (el as HTMLElement).offsetLeft);
-    const left = pageScrollLeft(railGeometry(rail), starts, gutterOf(rail), direction);
-    rail.scrollTo({ left, behavior: prefersReducedMotion() ? "instant" : "smooth" });
-  };
-
   const card = (slot: Slot<TodayCard>) => {
     const it = slot.item;
     const tone = cardToneVars(it.hue) as unknown as CSSProperties;
@@ -112,7 +125,7 @@ export default function TodayRail({ items, dayKey, dayLabel, serverNowMs }: Toda
         data-state={slot.state}
       >
         <div className={`${cards.cover} ${styles.cover}`}>
-          <span className={cards.zoom}>
+          <span className={`${cards.zoom} ${styles.zoom}`}>
             <FadeImage src={it.cover} alt="" width={148} height={197} className={cards.img} />
           </span>
           <span className={styles.fade} aria-hidden />
@@ -148,6 +161,16 @@ export default function TodayRail({ items, dayKey, dayLabel, serverNowMs }: Toda
     </div>
   );
 
+  const tomorrowLine = !tomorrow
+    ? null
+    : tomorrow.count > 0
+      ? fillTemplate(t("home.todayEndTomorrow"), { day: tomorrow.label, n: tomorrow.count })
+      : fillTemplate(t("home.todayEndTomorrowNone"), { day: tomorrow.label });
+
+  // The row is being moved by hand or by a fling: no snapping against it, no
+  // hover lift on the cards passing under the pointer.
+  const moving = drag.dragging || slider.dragging || motion.flinging;
+
   return (
     <section className={section.bleed} aria-labelledby="home-today">
       <SectionHeader
@@ -161,26 +184,14 @@ export default function TodayRail({ items, dayKey, dayLabel, serverNowMs }: Toda
       {items.length === 0 ? (
         <p className={`${section.empty} ${styles.empty}`}>{t("home.noUpdates")}</p>
       ) : (
-        <div className={styles.frame} data-overflow={edges.overflow ? "true" : "false"}>
-          {/* aria-disabled, not disabled: a focused button that became
-              disabled at the end of the row would drop keyboard focus. */}
-          <button
-            type="button"
-            className={`${styles.arrow} ${styles.prev}`}
-            aria-label={t("home.todayPrevPage")}
-            aria-controls={RAIL_ID}
-            aria-disabled={edges.atStart}
-            onClick={() => {
-              if (!edges.atStart) page(-1);
-            }}
-          >
-            <ChevronIcon size={18} className={styles.back} />
-          </button>
+        <div className={styles.frame}>
           <div
             ref={railRef}
             id={RAIL_ID}
             className={styles.rail}
             data-dragging={drag.dragging ? "true" : undefined}
+            data-moving={moving ? "true" : undefined}
+            data-enter={entering ? "run" : undefined}
             {...drag.handlers}
           >
             {slots.map((slot, i) => (
@@ -190,19 +201,41 @@ export default function TodayRail({ items, dayKey, dayLabel, serverNowMs }: Toda
               </Fragment>
             ))}
             {nowIndex === slots.length ? marker : null}
+            <div className={styles.end}>
+              <span className={styles.endTitle}>{t("home.todayEndTitle")}</span>
+              {tomorrowLine ? <span className={styles.endNext}>{tomorrowLine}</span> : null}
+              <Link href="/calendar" prefetch={false} className={styles.endLink}>
+                {t("home.todayEndLink")}
+                <ChevronIcon size={14} />
+              </Link>
+            </div>
           </div>
-          <button
-            type="button"
-            className={`${styles.arrow} ${styles.next}`}
-            aria-label={t("home.todayNextPage")}
+          {/* The keyboard's and assistive technology's way along the row; the
+              slider after it is its picture and the pointer's. Value, max and
+              spoken value are kept in step with the rail by useRailSlider. */}
+          <input
+            ref={inputRef}
+            type="range"
+            className={styles.scrub}
+            aria-label={t("home.todayScroll")}
             aria-controls={RAIL_ID}
-            aria-disabled={edges.atEnd}
-            onClick={() => {
-              if (!edges.atEnd) page(1);
-            }}
+            min={0}
+            step={1}
+            defaultValue={0}
+            disabled={!slider.overflow}
+            {...slider.inputHandlers}
+          />
+          <div
+            className={styles.slider}
+            data-overflow={slider.overflow ? "true" : "false"}
+            data-active={slider.active ? "true" : undefined}
+            data-dragging={slider.dragging ? "true" : undefined}
+            aria-hidden
+            {...slider.sliderHandlers}
           >
-            <ChevronIcon size={18} />
-          </button>
+            <span className={styles.track} />
+            <span ref={thumbRef} className={styles.thumb} />
+          </div>
         </div>
       )}
     </section>

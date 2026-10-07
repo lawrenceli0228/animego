@@ -123,6 +123,13 @@ export function parseDayKey(dayKey: string): DayKeyParts | null {
   return { year, month, day, weekday: date.getUTCDay() };
 }
 
+/** The `YYYY-MM-DD` key of the day after `dayKey`, or null when it is not a real date. */
+export function nextDayKey(dayKey: string): string | null {
+  const parts = parseDayKey(dayKey);
+  if (!parts) return null;
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1)).toISOString().slice(0, 10);
+}
+
 /**
  * "周四 9月24日" for a `YYYY-MM-DD` day key. Empty for anything that is not a
  * real date.

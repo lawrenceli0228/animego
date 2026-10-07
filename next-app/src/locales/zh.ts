@@ -148,9 +148,13 @@ const zh = {
     todayInMinutes: '{{n}} 分钟后',
     todayNextDay: '次日',
     todayEp: '第 {{ep}} 集',
-    // The rail's ← → buttons: a view of cards back / forward.
-    todayPrevPage: '上一组',
-    todayNextPage: '下一组',
+    // The slider under the rail (its range input's name and spoken value), and the panel that ends the row.
+    todayScroll: '横向滚动今日更新',
+    todayScrollValue: '第 {{from}}–{{to}} 部，共 {{n}} 部',
+    todayEndTitle: '今天的番就这些',
+    todayEndTomorrow: '明天 · {{day}} · {{n}} 部',
+    todayEndTomorrowNone: '明天 · {{day}}',
+    todayEndLink: '看完整放送表',
     fullSchedule: '完整放送表',
     seasonTopTitle: '本季高分',
     seasonTopSub: '{{season}} · 按 AniList 评分',

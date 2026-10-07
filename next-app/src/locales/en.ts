@@ -90,9 +90,13 @@ const en = {
     todayInMinutes: 'In {{n}} min',
     todayNextDay: 'Tmrw',
     todayEp: 'Ep {{ep}}',
-    // The rail's ← → buttons: a view of cards back / forward.
-    todayPrevPage: 'Previous shows',
-    todayNextPage: 'Next shows',
+    // The slider under the rail (its range input's name and spoken value), and the panel that ends the row.
+    todayScroll: 'Scroll through today\'s episodes',
+    todayScrollValue: '{{from}}–{{to}} of {{n}}',
+    todayEndTitle: 'That\'s all for today',
+    todayEndTomorrow: 'Tomorrow · {{day}} · {{n}} on the schedule',
+    todayEndTomorrowNone: 'Tomorrow · {{day}}',
+    todayEndLink: 'See the full schedule',
     fullSchedule: 'Full schedule',
     seasonTopTitle: 'Top rated this season',
     seasonTopSub: '{{season}} · by AniList score',

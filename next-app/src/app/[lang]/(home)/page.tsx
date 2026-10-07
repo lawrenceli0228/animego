@@ -17,7 +17,7 @@ import type { Dict } from "@/lib/i18n";
 import { upcomingAiring } from "@/lib/home/heroStatus";
 import { colouredFirst, defaultFamily, groupByHueFamily, type HueFamilyKey } from "@/lib/home/hueFamilies";
 import { dayHeader, fillTemplate } from "@/lib/home/time";
-import { todayScheduleItems } from "@/lib/home/todaySlots";
+import { todayScheduleItems, tomorrowOf } from "@/lib/home/todaySlots";
 import { fetchSchedule, fetchWatching } from "@/lib/schedule/fetch";
 import {
   continueCards,
@@ -303,6 +303,8 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
   const hueCount = hueGroups.reduce((n, g) => n + g.items.length, 0);
 
   const today = todayScheduleItems(schedule).map((row) => todayCard(row, lang));
+  const nextDay = tomorrowOf(schedule);
+  const tomorrow = nextDay ? { label: dayHeader(nextDay.dayKey, lang), count: nextDay.count } : null;
   const progress = Object.fromEntries(watching.items.map((w) => [w.anilistId, w.currentEpisode]));
   const seasonName = seasonYearLabel(season, year, lang);
   const seasonHref = currentSeasonHref();
@@ -335,6 +337,7 @@ export default async function HomePage({ params }: PageProps<"/[lang]">) {
           items={today}
           dayKey={schedule.today}
           dayLabel={dayHeader(schedule.today, lang)}
+          tomorrow={tomorrow}
           serverNowMs={nowMs}
         />
       ) : null}
