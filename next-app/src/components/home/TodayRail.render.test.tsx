@@ -13,6 +13,8 @@ import TodayRail from "./TodayRail";
 // What is pinned: every show of the day is a card in the row whatever the
 // time, and a show changes state as it airs rather than leaving. (The CSS half
 // of that bug — a rule hiding aired cards on phones — is TodayRail.css.test.ts.)
+// Also: the row is moved by a labelled slider, not by buttons, and it ends by
+// saying the day is over, what tomorrow holds and where the full schedule is.
 
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 9, 7, 12, 0); // 20:00 in Shanghai
@@ -32,12 +34,20 @@ const item = (key: number, offsetMin: number): TodayCard => ({
 // Aired two hours ago and half an hour ago; airing in 2 minutes; in 45; in 3 hours.
 const ITEMS = [item(1, -120), item(2, -30), item(3, 2), item(4, 45), item(5, 180)];
 
-function render(nowMs: number, items = ITEMS): string {
+const TOMORROW = { label: "周四 10月8日", count: 27 };
+
+function render(nowMs: number, items = ITEMS, tomorrow: { label: string; count: number } | null = TOMORROW): string {
   return renderToStaticMarkup(
     <LanguageProvider lang="zh">
-      <TodayRail items={items} dayKey={DAY} dayLabel="周三 10月7日" serverNowMs={nowMs} />
+      <TodayRail items={items} dayKey={DAY} dayLabel="周三 10月7日" tomorrow={tomorrow} serverNowMs={nowMs} />
     </LanguageProvider>,
   );
+}
+
+/** The end-of-day panel: from its title to the end of the row. */
+function endOf(html: string): string {
+  const at = html.indexOf(zh.home.todayEndTitle);
+  return at < 0 ? "" : html.slice(at);
 }
 
 /** Each card's data-state, in row order (attribute order is React's business). */
@@ -78,17 +88,49 @@ describe("TodayRail", () => {
     expect(html).toContain(`<time dateTime="${new Date(NOW + 2 * MIN).toISOString()}">20:02</time>`);
   });
 
-  test("the ← → buttons name what they do and control the row", () => {
+  test("no ← → buttons: the row is moved by a slider that names what it does and controls the row", () => {
     const html = render(NOW);
-    expect(html).toContain(`aria-label="${zh.home.todayPrevPage}"`);
-    expect(html).toContain(`aria-label="${zh.home.todayNextPage}"`);
-    expect(html.match(/aria-controls="home-today-rail"/g)).toHaveLength(2);
+    expect(html).not.toContain("<button");
+    const input = /<input\b[^>]*type="range"[^>]*>/.exec(html)?.[0] ?? "";
+    expect(input).toContain(`aria-label="${zh.home.todayScroll}"`);
+    expect(input).toContain('aria-controls="home-today-rail"');
     expect(html).toContain('id="home-today-rail"');
   });
 
-  test("an empty day says so, with no row and no buttons", () => {
+  test("until it is measured the slider keeps its room but draws nothing, and is not a stop for Tab", () => {
+    const html = render(NOW);
+    expect(html).toContain('data-overflow="false"');
+    expect(/<input\b[^>]*type="range"[^>]*>/.exec(html)?.[0]).toContain("disabled");
+  });
+
+  test("the row ends by saying the day is over, what tomorrow holds, and where the full schedule is", () => {
+    const end = endOf(render(NOW));
+    expect(end).toContain("明天 · 周四 10月8日 · 27 部");
+    expect(end).toContain('href="/calendar"');
+    expect(end).toContain(zh.home.todayEndLink);
+    // After every card: the panel is not a show and is not counted as one.
+    expect(end).not.toContain('href="/anime/');
+    expect(end).not.toContain("data-state");
+  });
+
+  test("a tomorrow with nothing on it says only which day it is; no tomorrow, no line", () => {
+    expect(endOf(render(NOW, ITEMS, { label: "周四 10月8日", count: 0 }))).toContain("明天 · 周四 10月8日<");
+    const none = endOf(render(NOW, ITEMS, null));
+    expect(none).toContain(zh.home.todayEndLink);
+    expect(none).not.toContain("明天");
+  });
+
+  test("the end panel comes after the 现在 marker when everything has aired", () => {
+    const html = render(NOW + 4 * 60 * MIN);
+    expect(states(html)).toEqual(["aired", "aired", "aired", "aired", "aired"]);
+    expect(html.indexOf("data-now")).toBeGreaterThan(html.indexOf('href="/anime/9005"'));
+    expect(html.indexOf(zh.home.todayEndTitle)).toBeGreaterThan(html.indexOf("data-now"));
+  });
+
+  test("an empty day says so, with no row and no slider", () => {
     const html = render(NOW, []);
     expect(html).toContain(zh.home.noUpdates);
     expect(html).not.toContain("home-today-rail");
+    expect(html).not.toContain('type="range"');
   });
 });

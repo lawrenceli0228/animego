@@ -27,8 +27,8 @@
   scrollbar-width: none;
   /* No scroll-behavior: smooth. A drag writes scrollLeft on every pointer
    * move, and smoothing would leave the row trailing behind the mouse; the
-   * ← → buttons ask for smooth scrolling themselves, except under reduced
-   * motion. */
+   * slider and the settle after a fling ask for smooth scrolling themselves,
+   * except under reduced motion. */
 }
 
 .rail::-webkit-scrollbar {
@@ -159,74 +159,174 @@
   transition: background-color var(--home-tint) var(--home-ease);
 }
 
-/* ── ← → : one view of cards back or forward ─────────────────────────────
- * Over the rail's two ends, centred on the covers; in the gutter on a wide
- * screen. Shown only with a mouse (below) and only when the row overflows.
- * At an end the button stays focusable and says so (aria-disabled), dimmed. */
-.arrow {
-  display: none;
-  position: absolute;
-  top: calc(8px + 197px / 2 - 20px);
-  z-index: 2;
-  align-items: center;
+/* ── The end of the day ────────────────────────────────────────────────────
+ * After the last card: the day is over, what tomorrow holds, and the way to
+ * the full schedule. A plain panel at cover height, not a card: it is not a
+ * show, carries no data-state and is not counted. */
+.end {
+  box-sizing: border-box;
+  flex: none;
+  width: 300px;
+  height: 197px;
+  display: flex;
+  flex-direction: column;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
-  background-color: color-mix(in oklch, var(--home-pop) 84%, transparent);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 28px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background-color: var(--home-surface);
+  transition: background-color var(--home-tint) var(--home-ease);
+}
+
+.endTitle {
+  font-size: 15px;
+  font-weight: 600;
   color: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 10px 28px -12px rgba(0, 0, 0, 0.8);
-  cursor: pointer;
+}
+
+.endNext {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(235, 235, 245, 0.58);
+}
+
+.endLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  margin-top: 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--home-tone);
+  text-decoration: none;
   transition:
-    opacity 0.2s ease-out,
-    background-color 0.15s ease-out,
-    border-color 0.15s ease-out;
+    opacity 0.15s ease-out,
+    color var(--home-tint) var(--home-ease);
 }
 
-.prev {
-  left: max(8px, calc(var(--home-gutter) - 56px));
+.endLink:hover {
+  opacity: 0.78;
 }
 
-.next {
-  right: max(8px, calc(var(--home-gutter) - 56px));
-}
-
-.back {
-  transform: rotate(180deg);
-}
-
-.arrow:hover {
-  background-color: color-mix(in oklch, var(--home-pop) 90%, white 10%);
-  border-color: rgba(255, 255, 255, 0.26);
-}
-
-/* At an end: the glyph and the glass fade, the element does not. Opacity on
- * the button would fade its focus ring with it — and focus stays on the
- * button at the end of the row. The ring rule below comes after this one and
- * ties on specificity, so a focused end button still draws it. */
-.arrow[aria-disabled="true"] {
-  cursor: default;
-  border-color: rgba(255, 255, 255, 0.07);
-  background-color: color-mix(in oklch, var(--home-pop) 45%, transparent);
-  color: rgba(255, 255, 255, 0.3);
-  box-shadow: none;
-}
-
-/* No hover response at an end (and no box-shadow here: this selector
- * outranks the ring's, and a hovered, focused end button keeps its ring). */
-.arrow[aria-disabled="true"]:hover {
-  border-color: rgba(255, 255, 255, 0.07);
-  background-color: color-mix(in oklch, var(--home-pop) 45%, transparent);
-}
-
-.arrow:focus-visible {
+.endLink:focus-visible {
   outline: 2px solid transparent;
   outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── The slider ────────────────────────────────────────────────────────────
+ * A thin line under the row, aligned with the page's content; its thumb is as
+ * wide as the share of the row in view and as far along as the row is. Quiet
+ * until the pointer is on it, it is held, or the keyboard is on the range
+ * input in front of it; then the line thickens and the thumb takes the page's
+ * tone. Size and place are written onto the thumb by useRailSlider.
+ *
+ * A row that fits keeps the slider's room — nothing below moves when the row
+ * is measured — but draws nothing. */
+.slider {
+  position: relative;
+  height: 24px;
+  margin: 14px var(--home-gutter) 0;
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.slider[data-overflow="false"] {
+  visibility: hidden;
+}
+
+.track,
+.thumb {
+  position: absolute;
+  top: 11px;
+  height: 2px;
+  transition:
+    top 0.15s ease-out,
+    height 0.15s ease-out,
+    background-color 0.15s ease-out;
+}
+
+.track {
+  left: 0;
+  right: 0;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.thumb {
+  border-radius: 4px;
+  background-color: var(--home-tone-line);
+  cursor: grab;
+}
+
+.slider[data-active="true"] .track {
+  top: 9px;
+  height: 6px;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.slider[data-active="true"] .thumb {
+  top: 8px;
+  height: 8px;
+  background-color: var(--home-tone);
+}
+
+.slider[data-dragging="true"],
+.slider[data-dragging="true"] .thumb {
+  cursor: grabbing;
+}
+
+/* The range input: off screen but focusable; its focus shows on the slider. */
+.scrub {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.scrub:focus-visible + .slider {
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* While the row is moved by hand or flung: nothing snaps against it, and the
+ * cards passing under the pointer do not lift. Specific enough to beat the
+ * hover rules in cards.module.css whichever stylesheet loads first. */
+.rail[data-moving="true"] {
+  scroll-snap-type: none;
+}
+
+.rail[data-moving="true"] .card .cover,
+.rail[data-moving="true"] .card .zoom {
+  transform: none;
+  box-shadow: none;
+}
+
+/* ── The entrance ──────────────────────────────────────────────────────────
+ * The first time the row comes into view (useRailEntrance), its items rise
+ * into place left to right. The animation runs to its end by itself; nothing
+ * is left hidden. */
+.rail[data-enter="run"] > * {
+  animation: rise 0.6s var(--home-expo) both;
+  animation-delay: calc(var(--enter-order, 0) * 45ms);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
 }
 
 @keyframes ping {
@@ -239,7 +339,7 @@
   }
 }
 
-/* A mouse: the row is grabbed and dragged, and the buttons appear. */
+/* A mouse: the row is grabbed and dragged. */
 @media (hover: hover) and (pointer: fine) {
   .rail {
     cursor: grab;
@@ -258,10 +358,6 @@
     user-select: none;
     scroll-snap-type: none;
   }
-
-  .frame[data-overflow="true"] .arrow {
-    display: inline-flex;
-  }
 }
 
 /* Phone: the row swipes and settles card by card. */
@@ -276,18 +372,50 @@
   }
 
   .card,
-  .now {
+  .now,
+  .end {
     scroll-snap-align: start;
+  }
+
+  .end {
+    width: 200px;
+    padding: 0 16px;
+  }
+
+  .slider {
+    margin-top: 12px;
+  }
+}
+
+/* A finger needs a taller target than a mouse. */
+@media (pointer: coarse) {
+  .slider {
+    height: 44px;
+  }
+
+  .track,
+  .thumb {
+    top: 21px;
+  }
+
+  .slider[data-active="true"] .track {
+    top: 19px;
+  }
+
+  .slider[data-active="true"] .thumb {
+    top: 18px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ping,
-  .nowDot {
+  .nowDot,
+  .rail[data-enter="run"] > * {
     animation: none;
   }
 
-  .arrow {
+  .track,
+  .thumb {
     transition-duration: 0.01ms;
   }
 }
