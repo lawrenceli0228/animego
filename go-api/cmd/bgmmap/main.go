@@ -106,7 +106,7 @@ func run(o options) error {
 		report := RenderReport(ReportInput{
 			Prev: in.prev, Next: entries, Skips: res.Skips, Overrides: outcomes,
 			Subjects: SubjectIndex(in.bel), Stats: res.Stats,
-			AnidbBefore: len(in.prevAnidb), AnidbAfter: len(anidb),
+			Anidb: DiffAnidb(in.prevAnidb, anidb),
 		})
 		if err := os.WriteFile(o.report, []byte(report), 0o644); err != nil {
 			return fmt.Errorf("writing report: %w", err)

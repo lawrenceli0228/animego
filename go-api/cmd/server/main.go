@@ -321,14 +321,17 @@ func main() {
 		} else {
 			slog.Info("bgm_id_map seeded", "entries", n)
 		}
-		// AniList->AniDB pairs for the magnet handler's AnimeTosho feed.
-		// Failure degrades magnet search to keyword-only, nothing more.
-		if n, err := bgmidmap.SeedAnidb(seedCtx, pool); err != nil {
+		seedCancel()
+		// AniList->AniDB pairs for the magnet handler's AnimeTosho feed, on
+		// a deadline of their own so a stalled bgm_id_map seed cannot spend
+		// it.  Failure degrades magnet search to keyword-only, nothing more.
+		anidbCtx, anidbCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		if n, err := bgmidmap.SeedAnidb(anidbCtx, pool); err != nil {
 			slog.Warn("anidb_id_map seed failed", "err", err)
 		} else {
 			slog.Info("anidb_id_map seeded", "entries", n)
 		}
-		seedCancel()
+		anidbCancel()
 
 		// Orphan scan: catches anime_cache rows with bangumi_version=0 that
 		// were upserted during a previous worker outage.  river's queue can

@@ -78,14 +78,41 @@ func DiffMaps(prev, next []MapEntry) MapDiff {
 
 // ReportInput is everything the weekly PR body is built from.
 type ReportInput struct {
-	Prev        []MapEntry // the vendored map before this run
-	Next        []MapEntry // the map this run writes, overrides applied
-	Skips       []Skip
-	Overrides   []OverrideOutcome
-	Subjects    map[int]Subject
-	Stats       Stats
-	AnidbBefore int
-	AnidbAfter  int
+	Prev      []MapEntry // the vendored map before this run
+	Next      []MapEntry // the map this run writes, overrides applied
+	Skips     []Skip
+	Overrides []OverrideOutcome
+	Subjects  map[int]Subject
+	Stats     Stats
+	Anidb     AnidbDiff
+}
+
+// AnidbDiff is what a refresh does to the AniList->AniDB pairs.  Counts only:
+// a pair is one id, and the totals alone would hide a pair that changed.
+type AnidbDiff struct {
+	Before, After           int
+	Added, Removed, Changed int
+}
+
+// DiffAnidb compares two AniList->AniDB pair lists by AniList id.
+func DiffAnidb(prev, next []AnidbEntry) AnidbDiff {
+	before := make(map[int]int, len(prev))
+	for _, e := range prev {
+		before[e.AnilistID] = e.AnidbID
+	}
+	d := AnidbDiff{Before: len(prev), After: len(next)}
+	for _, e := range next {
+		old, ok := before[e.AnilistID]
+		switch {
+		case !ok:
+			d.Added++
+		case old != e.AnidbID:
+			d.Changed++
+		}
+		delete(before, e.AnilistID)
+	}
+	d.Removed = len(before)
+	return d
 }
 
 // RenderReport writes the refresh PR's body: what changed, why ids were
@@ -100,6 +127,11 @@ func RenderReport(in ReportInput) string {
 
 	r.intro()
 	r.summary(in, d)
+	// Overrides first: they are few, and a cut report must not lose them.
+	r.table(fmt.Sprintf("### Overrides (%d)", len(in.Overrides)), "| AniList | Pinned to | Join says | Note |", len(in.Overrides), func(i int) string {
+		o := in.Overrides[i]
+		return row(anilistLink(o.AnilistID), r.subject(o.BgmID), r.joinSays(o), cell(o.Note))
+	})
 	r.table(fmt.Sprintf("### Changed (%d)", len(d.Changed)), "| AniList | Before | After | Via |", len(d.Changed), func(i int) string {
 		c := d.Changed[i]
 		return row(anilistLink(c.From.AnilistID), r.subject(c.From.BgmID), r.subject(c.To.BgmID), c.To.Source)
@@ -113,13 +145,9 @@ func RenderReport(in ReportInput) string {
 		return row(anilistLink(e.AnilistID), r.subject(e.BgmID), e.Source)
 	})
 	other := otherRefusals(in.Skips, d.Removed)
-	r.details(fmt.Sprintf("Other refused ids (%d)", len(other)), "| AniList | Why | Via MAL | Via AniDB |", len(other), func(i int) string {
+	r.details(fmt.Sprintf("Other refused ids (%d)", len(other)), "| AniList | Why | Candidates |", len(other), func(i int) string {
 		s := other[i]
-		return row(anilistLink(s.AnilistID), reasonText(s.Reason), r.subjectList(s.ViaMal), r.subjectList(s.ViaAnidb))
-	})
-	r.table(fmt.Sprintf("### Overrides (%d)", len(in.Overrides)), "| AniList | Pinned to | Join says | Note |", len(in.Overrides), func(i int) string {
-		o := in.Overrides[i]
-		return row(anilistLink(o.AnilistID), r.subject(o.BgmID), r.joinSays(o), cell(o.Note))
+		return row(anilistLink(s.AnilistID), reasonText(s.Reason), r.candidates(s))
 	})
 	return capReport(r.b.String())
 }
@@ -135,8 +163,9 @@ func (r *reportWriter) intro() {
 		"and of the AniList→AniDB map.\n\n" +
 		"Every row below changes which Bangumi subject the site trusts for a show — its Chinese title, " +
 		"synopsis and episode names are copied from that subject. Check the Changed and Removed rows " +
-		"against the shows themselves. Pin anything the join gets wrong in " +
-		"`go-api/cmd/bgmmap/overrides.json` (with a note) and re-run the workflow. " +
+		"against the shows themselves. To correct one, add it to " +
+		"`go-api/cmd/bgmmap/overrides.json` (with a note) on main and re-run the workflow — " +
+		"the job regenerates from main and force-pushes this branch, so a pin committed here is lost. " +
 		"Then merge and redeploy go-api: both maps are embedded via go:embed and seeded at boot.\n\n")
 }
 
@@ -154,9 +183,14 @@ func (r *reportWriter) summary(in ReportInput, d MapDiff) {
 	fmt.Fprintf(&r.b, "| | |\n|---|---|\n")
 	fmt.Fprintf(&r.b, "| Entries | %d (was %d) |\n", len(in.Next), len(in.Prev))
 	fmt.Fprintf(&r.b, "| Added / removed / changed | %d / %d / %d |\n", len(d.Added), len(d.Removed), len(d.Changed))
-	fmt.Fprintf(&r.b, "| Refused by the join | %d — %s |\n", len(in.Skips), strings.Join(reasons, ", "))
+	refused := fmt.Sprint(len(in.Skips))
+	if len(reasons) > 0 {
+		refused += " — " + strings.Join(reasons, ", ")
+	}
+	fmt.Fprintf(&r.b, "| Refused by the join | %s |\n", refused)
 	fmt.Fprintf(&r.b, "| Overrides | %d |\n", len(in.Overrides))
-	fmt.Fprintf(&r.b, "| AniList → AniDB pairs | %d → %d |\n", in.AnidbBefore, in.AnidbAfter)
+	a := in.Anidb
+	fmt.Fprintf(&r.b, "| AniList → AniDB pairs | %d → %d (+%d / −%d / changed %d) |\n", a.Before, a.After, a.Added, a.Removed, a.Changed)
 	fmt.Fprintf(&r.b, "| Upstream rows | Fribb %d, BangumiExtLinker %d |\n\n", in.Stats.FribbCount, in.Stats.BelCount)
 }
 
@@ -243,6 +277,27 @@ func (r *reportWriter) removalWhy(skips map[int]Skip, e MapEntry) string {
 	return reasonText(s.Reason) + "; also: " + r.subjectList(others.sorted())
 }
 
+// candidates names the subjects behind a refusal.  When both paths reach the
+// same set, which is the usual ambiguous case, it is named once.
+func (r *reportWriter) candidates(s Skip) string {
+	if equalInts(s.ViaMal, s.ViaAnidb) {
+		return r.subjectList(s.ViaMal)
+	}
+	return "MAL: " + r.subjectList(s.ViaMal) + "<br>AniDB: " + r.subjectList(s.ViaAnidb)
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // otherRefusals is the refused ids the Removed table does not already show:
 // ids that were not in the previous map, or that an override now holds.
 func otherRefusals(skips []Skip, removed []MapEntry) []Skip {
@@ -294,22 +349,36 @@ func row(cells ...string) string {
 	return "| " + strings.Join(cells, " | ") + " |"
 }
 
+// wordJoiner is U+2060: invisible, but it breaks "#12" and "@name" apart so
+// GitHub neither links an unrelated issue (adding a back-reference to its
+// timeline) nor pings a user.  Upstream names carry both — "PERSONA3 THE
+// MOVIE #1", "THE IDOLM@STER".
+const wordJoiner = "\u2060"
+
 // cell makes upstream text safe inside a markdown table cell.
 func cell(s string) string {
 	s = strings.ReplaceAll(s, "|", `\|`)
+	s = strings.ReplaceAll(s, "#", "#"+wordJoiner)
+	s = strings.ReplaceAll(s, "@", "@"+wordJoiner)
 	return strings.Join(strings.Fields(s), " ")
 }
 
 // capReport cuts at the last line break under the limit, so a cut never
-// splits a multi-byte character, and says that it did.
+// splits a multi-byte character, closes a <details> the cut left open (or
+// the note would be folded away inside it), and says that it cut.
 func capReport(s string) string {
+	const closeDetails = "\n\n</details>"
 	const note = "\n\n_Report cut here: it would exceed the PR body limit._\n"
 	if len(s) <= maxReportBytes {
 		return s
 	}
-	cut := strings.LastIndexByte(s[:maxReportBytes-len(note)], '\n')
+	cut := strings.LastIndexByte(s[:maxReportBytes-len(closeDetails)-len(note)], '\n')
 	if cut < 0 {
 		cut = 0
 	}
-	return s[:cut] + note
+	out := s[:cut]
+	if strings.Count(out, "<details>") > strings.Count(out, "</details>") {
+		out += closeDetails
+	}
+	return out + note
 }

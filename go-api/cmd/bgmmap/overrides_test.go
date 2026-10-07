@@ -43,6 +43,8 @@ func TestParseOverrides_Rejects(t *testing.T) {
 		"blank note":        `[{"anilist_id": 1, "bgm_id": 2, "note": "  "}]`,
 		"duplicate anilist": `[{"anilist_id": 1, "bgm_id": 2, "note": "a"}, {"anilist_id": 1, "bgm_id": 3, "note": "b"}]`,
 		"unknown field":     `[{"anilist_id": 1, "bgm_id": 2, "note": "a", "bgm": 3}]`,
+		"two arrays":        `[{"anilist_id": 1, "bgm_id": 2, "note": "a"}] [{"anilist_id": 3, "bgm_id": 4, "note": "b"}]`,
+		"trailing brace":    `[{"anilist_id": 1, "bgm_id": 2, "note": "a"}]}`,
 	}
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -39,6 +41,11 @@ func ParseOverrides(raw []byte) ([]Override, error) {
 	if err := dec.Decode(&ovs); err != nil {
 		return nil, fmt.Errorf("overrides: decode: %w", err)
 	}
+	// A bad merge can leave two arrays back to back; Decode reads the first
+	// and would drop the second without a word.
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("overrides: unexpected data after the list")
+	}
 	seen := map[int]bool{}
 	for i, o := range ovs {
 		switch {
@@ -58,8 +65,8 @@ func ParseOverrides(raw []byte) ([]Override, error) {
 
 // ApplyOverrides returns a new entry list with every override in place —
 // replacing the join's entry or filling an id the join refused or never
-// reached — sorted by AniList id, plus one outcome per override in the same
-// order.  res is not modified.
+// reached — plus one outcome per override, both sorted by AniList id.  res is
+// not modified.
 //
 // An override carries no MAL or AniDB id: it is a claim about the Bangumi
 // subject only, and the AniDB id has its own map (BuildAnidbMap).

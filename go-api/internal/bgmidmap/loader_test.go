@@ -83,3 +83,22 @@ func TestLoadAnidb_CoversShowsTheBangumiMapLeavesOut(t *testing.T) {
 	}
 	t.Fatal("every AniDB pair is also in the Bangumi map; the split has no effect")
 }
+
+// Every Bangumi map entry, not a sample: a duplicate AniList id would only
+// surface as a primary-key failure in Seed at boot, and the weekly refresh
+// does not run the Postgres tests.
+func TestLoad_EveryEntryValidAndSortedOnce(t *testing.T) {
+	entries, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for i, e := range entries {
+		if e.AnilistID <= 0 || e.BgmID <= 0 || e.Source == "" {
+			t.Fatalf("entry %d is incomplete: %+v", i, e)
+		}
+		if i > 0 && entries[i-1].AnilistID >= e.AnilistID {
+			t.Fatalf("entries not strictly sorted by anilist_id at %d (%d then %d)",
+				i, entries[i-1].AnilistID, e.AnilistID)
+		}
+	}
+}

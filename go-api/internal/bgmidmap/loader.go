@@ -30,7 +30,7 @@ var rawAnidbMap []byte
 type Entry struct {
 	AnilistID int32  `json:"anilist_id"`
 	BgmID     int32  `json:"bgm_id"`
-	MalID     int32  `json:"mal_id"`   // 0 when the join used the anidb fallback
+	MalID     int32  `json:"mal_id"`   // 0 when the join went through AniDB, or for an override
 	AnidbID   int32  `json:"anidb_id"` // 0 when Fribb listed no anidb_id; feeds AnimeTosho aid lookup
 	Source    string `json:"source"`
 }

@@ -295,6 +295,26 @@ func TestBuildMap_OneAmbiguousFribbRow_RefusesTheId(t *testing.T) {
 	}
 }
 
+// An id refused by several Fribb rows for different reasons reports the same
+// reason whichever order Fribb lists the rows in.
+func TestBuildMap_RefusalReasonIndependentOfFribbOrder(t *testing.T) {
+	rows := []FribbEntry{
+		{AnilistID: 43, AnidbID: 432},             // ambiguous via AniDB
+		{AnilistID: 43, MalID: 431, AnidbID: 433}, // MAL and AniDB disagree
+	}
+	bel := []BelEntry{
+		{BgmID: "60", AnidbID: "432"},
+		{BgmID: "61", AnidbID: "432"},
+		{BgmID: "62", MalID: "431"},
+		{BgmID: "63", AnidbID: "433"},
+	}
+	for _, fribb := range [][]FribbEntry{rows, {rows[1], rows[0]}} {
+		if s := onlySkip(t, BuildMap(fribb, bel)); s.Reason != SkipMalAnidbDisagree {
+			t.Errorf("rows %+v: want %s, got %s", fribb, SkipMalAnidbDisagree, s.Reason)
+		}
+	}
+}
+
 // The old join was last-writer-wins over the BEL file, so the answer
 // depended on upstream row order.  The output must not.
 func TestBuildMap_IndependentOfUpstreamOrder(t *testing.T) {
