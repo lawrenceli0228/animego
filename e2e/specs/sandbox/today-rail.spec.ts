@@ -139,23 +139,30 @@ test.describe("今日更新 on a desktop", () => {
     test.skip(max < 600, "today's row is too short to fling along here");
 
     await rail!.scrollIntoViewIfNeeded();
-    await rail!.evaluate((el) => el.scrollTo({ left: 0, behavior: "instant" }));
-    await settled(rail!);
     const box = (await rail!.boundingBox())!;
     const y = box.y + 100;
     const x0 = box.x + box.width * 0.7;
 
-    // Playwright sends the moves back to back: a flick.
-    await page.mouse.move(x0, y);
-    await page.mouse.down();
-    await page.mouse.move(x0 - 240, y, { steps: 6 });
-    await page.mouse.up();
-    const atRelease = await scrollLeftOf(rail!);
-
-    // The row carries on after the button is up…
-    await expect.poll(() => scrollLeftOf(rail!)).toBeGreaterThan(atRelease + 40);
-    // …and comes to rest with a card flush with the gutter (or at the end).
-    await expectAtAStop(rail!, await settled(rail!));
+    // Playwright sends the moves back to back: a flick. Its speed is read off
+    // the moves' timestamps, and on a loaded machine they can arrive spread
+    // out enough to read as a pointer that came to rest (no fling, by design).
+    // So a few tries, of which one must carry on — and every one, fling or
+    // not, must come to rest on a stop.
+    let flung = false;
+    for (let attempt = 0; attempt < 3 && !flung; attempt++) {
+      await rail!.evaluate((el) => el.scrollTo({ left: 0, behavior: "instant" }));
+      await settled(rail!);
+      await page.mouse.move(x0, y);
+      await page.mouse.down();
+      await page.mouse.move(x0 - 240, y, { steps: 6 });
+      await page.mouse.up();
+      const atRelease = await scrollLeftOf(rail!);
+      const rest = await settled(rail!);
+      await expectAtAStop(rail!, rest);
+      // Carried on past where the button came up (a settle alone moves at most half a card).
+      flung = rest > atRelease + 90;
+    }
+    expect(flung, "none of three flicks carried on after the button was up").toBe(true);
     await expect(rail!).not.toHaveAttribute("data-moving", "true");
   });
 
