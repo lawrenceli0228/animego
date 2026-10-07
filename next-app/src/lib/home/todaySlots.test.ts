@@ -1,6 +1,30 @@
 import { describe, expect, test } from "bun:test";
 import { SITE_TZ } from "./time";
-import { SOON_WINDOW_MS, isNextDay, slotToday, todayScheduleItems } from "./todaySlots";
+import { SOON_WINDOW_MS, isNextDay, slotToday, todayScheduleItems, tomorrowOf } from "./todaySlots";
+
+describe("tomorrowOf — what the end of the row says comes next", () => {
+  const row = (airingAt: number) => ({ airingAt });
+
+  test("the day after the schedule's today, with how many episodes it has", () => {
+    const schedule = {
+      today: "2026-10-10",
+      groups: { "2026-10-10": [row(1), row(2)], "2026-10-11": [row(3), row(4), row(5)] },
+    };
+    expect(tomorrowOf(schedule)).toEqual({ dayKey: "2026-10-11", count: 3 });
+  });
+
+  test("a tomorrow with nothing on it counts none", () => {
+    expect(tomorrowOf({ today: "2026-10-10", groups: { "2026-10-10": [row(1)] } })).toEqual({
+      dayKey: "2026-10-11",
+      count: 0,
+    });
+  });
+
+  test("no today, no tomorrow", () => {
+    expect(tomorrowOf({ today: "", groups: {} })).toBeNull();
+    expect(tomorrowOf({ today: "not-a-day", groups: {} })).toBeNull();
+  });
+});
 
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 8, 24, 12, 40); // 20:40 in Shanghai

@@ -8,7 +8,7 @@
 //
 // Pure: no DOM, no React.
 
-import { clockParts } from "./time";
+import { clockParts, nextDayKey } from "./time";
 
 /** "N 分钟后" and the ping dot apply within this window. */
 export const SOON_WINDOW_MS = 60 * 60_000;
@@ -65,4 +65,16 @@ interface ScheduleLike<T extends { airingAt: number }> {
 export function todayScheduleItems<T extends { airingAt: number }>(schedule: ScheduleLike<T>): T[] {
   const group = schedule.today ? schedule.groups[schedule.today] : undefined;
   return [...(group ?? [])].sort((a, b) => a.airingAt - b.airingAt);
+}
+
+/**
+ * The day after the API's "today", and how many episodes it has — what the
+ * end of 今日更新's row says comes next. Null when there is no today.
+ */
+export function tomorrowOf<T extends { airingAt: number }>(
+  schedule: ScheduleLike<T>,
+): { dayKey: string; count: number } | null {
+  const dayKey = schedule.today ? nextDayKey(schedule.today) : null;
+  if (!dayKey) return null;
+  return { dayKey, count: schedule.groups[dayKey]?.length ?? 0 };
 }

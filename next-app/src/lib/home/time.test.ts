@@ -5,10 +5,26 @@ import {
   dayHeader,
   fillTemplate,
   hhmm,
+  nextDayKey,
   parseDayKey,
   weekdayLabel,
   weekdayTime,
 } from "./time";
+
+describe("nextDayKey", () => {
+  test("the day after, across a month and a year", () => {
+    expect(nextDayKey("2026-10-10")).toBe("2026-10-11");
+    expect(nextDayKey("2026-10-31")).toBe("2026-11-01");
+    expect(nextDayKey("2026-12-31")).toBe("2027-01-01");
+    expect(nextDayKey("2028-02-28")).toBe("2028-02-29");
+  });
+
+  test("nothing for a key that is not a real day", () => {
+    expect(nextDayKey("")).toBeNull();
+    expect(nextDayKey("2026-02-30")).toBeNull();
+    expect(nextDayKey("tomorrow")).toBeNull();
+  });
+});
 
 // Every string here is rendered during hydration by a client component, so it
 // has to come out identical from Node's ICU on the server and the browser's
