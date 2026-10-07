@@ -2,9 +2,18 @@ name: Refresh AniList→Bangumi map
 
 # Regenerates the vendored AniList→Bangumi id map
 # (go-api/internal/bgmidmap/anilist_bgm_map.json) by re-joining the two
-# upstream community datasets on MAL id:
+# upstream community datasets on MAL and AniDB ids:
 #   - Fribb/anime-lists        (anilist_id ↔ mal_id ↔ anidb_id)
-#   - Rhilip/BangumiExtLinker  (bgm_id ↔ mal_id)
+#   - Rhilip/BangumiExtLinker  (bgm_id ↔ mal_id ↔ anidb_id)
+# and the AniList→AniDB pairs (anilist_anidb_map.json, Fribb alone) that the
+# magnet handler's AnimeTosho feed reads.
+#
+# The join refuses an AniList id when the two paths name different Bangumi
+# subjects, or when several subjects share the id it went through — the old
+# last-writer-wins join bound TV series to their own films that way.  The PR
+# body is cmd/bgmmap's report: every changed, removed and refused id with the
+# subjects' names, so a refresh can be reviewed instead of rubber-stamped.
+# Corrections go in go-api/cmd/bgmmap/overrides.json.
 #
 # Why a vendored file + weekly PR instead of fetching at runtime?
 #   - The go-api binary embeds the map (go:embed) so prod has no runtime
@@ -54,22 +63,28 @@ jobs:
         with:
           go-version-file: go-api/go.mod
 
-      - name: Regenerate map
+      - name: Regenerate maps
         working-directory: go-api
-        run: go run ./cmd/bgmmap
+        run: go run ./cmd/bgmmap -report "$RUNNER_TEMP/bgmmap-report.md"
+
+      # A PR opened with GITHUB_TOKEN triggers no workflows, so the unit-test
+      # gate never sees these files.  Check here that both still parse and
+      # that the generator's own tests (overrides.json included) pass.
+      - name: Check the regenerated maps
+        working-directory: go-api
+        run: |
+          go test -count=1 ./cmd/bgmmap/
+          go test -count=1 -run '^TestLoad' ./internal/bgmidmap/
 
       - name: Open PR if the map changed
         uses: peter-evans/create-pull-request@v8
         with:
           # Only fires when the regenerated JSON differs from what's vendored.
-          add-paths: go-api/internal/bgmidmap/anilist_bgm_map.json
+          add-paths: |
+            go-api/internal/bgmidmap/anilist_bgm_map.json
+            go-api/internal/bgmidmap/anilist_anidb_map.json
           branch: chore/refresh-bgm-map
           commit-message: "chore(enrichment): refresh AniList→Bangumi id map"
           title: "chore(enrichment): refresh AniList→Bangumi id map"
-          body: |
-            Automated weekly regeneration of the vendored AniList→Bangumi id map
-            (Fribb/anime-lists × Rhilip/BangumiExtLinker, joined on MAL id).
-
-            Review the diff, then merge + redeploy go-api to ship the updated map
-            (it is embedded via go:embed and seeded into bgm_id_map at boot).
+          body-path: ${{ runner.temp }}/bgmmap-report.md
           delete-branch: true
