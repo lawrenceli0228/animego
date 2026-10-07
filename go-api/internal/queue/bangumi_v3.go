@@ -11,13 +11,12 @@
 //     V1/V2 fetch time but populated later (a Bangumi editor filled
 //     it in between requests).  V3 takes one more shot.
 //  3. titleChinese = Subject.NameCN (when non-empty) else nil.  The
-//     UpdateBangumiV3 SQL writes the column unconditionally (NOT
-//     COALESCE) — V3 is the terminal phase so a heal attempt's NULL
-//     stays NULL until the next manual sweep.  Note: V2 already
-//     populated title_chinese via COALESCE when its Subject had
-//     name_cn — V3 only chains when V2 itself supplied nil
-//     titleChinese (see bangumi_v2.go chain logic), so this overwrite
-//     is safe (the column was NULL when we got here).
+//     UpdateBangumiV3 SQL COALESCEs, so nil leaves the column as it is.
+//     It used to assign unconditionally, on the reasoning that V3 only
+//     chains when V2's subject had no name_cn and so the column must be
+//     NULL here.  That holds on a first pass only: on a re-enrich the
+//     row can already carry a title from an admin, the dandanplay heal
+//     or a donghua's Chinese native name, and the assignment erased it.
 //  4. bangumi_version=3 set unconditionally — V3 is the terminal
 //     phase.  Even a 404 from Bangumi (ErrNotFound) bumps the version
 //     so the row isn't picked up by another sweep.
@@ -123,9 +122,10 @@ func (w *BangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3Args
 		return fmt.Errorf("bangumi_v3 subject %d (bgmId=%d): %w", anilistID, bgmID, err)
 	}
 
-	// 1b. V3 overwrites title_chinese unconditionally, and the admin
-	//     re-enrich?version=2 path runs it over every version-2 row that
-	//     holds a bgm_id -- so a binding from before migration 0011 that
+	// 1b. V3 overwrites title_chinese whenever the subject has a name_cn,
+	//     and the admin re-enrich?version=2 path runs it over every
+	//     version-2 row that holds a bgm_id -- so a binding from before
+	//     migration 0011 that
 	//     names another show would have that show's name written back here
 	//     even after someone cleared it.  Withdraw such a binding instead of
 	//     healing from it; see legacy_binding.go.  A withdrawn row counts as
@@ -141,19 +141,18 @@ func (w *BangumiV3Worker) Work(ctx context.Context, job *river.Job[BangumiV3Args
 
 	// 2. Decide titleChinese.  Subject.NameCN may be empty even on a
 	//    successful fetch (Bangumi has no Chinese name for this
-	//    subject), in which case we pass nil so UpdateBangumiV3
-	//    writes NULL.  When subj itself is nil (ErrNotFound), we also
-	//    pass nil.
+	//    subject), in which case we pass nil and UpdateBangumiV3 leaves
+	//    the column alone.  When subj itself is nil (ErrNotFound), we
+	//    also pass nil.
 	var titleChinese *string
 	if subj != nil && subj.NameCN != "" {
 		cn := subj.NameCN
 		titleChinese = &cn
 	}
 
-	// 3. Persist.  UpdateBangumiV3 always bumps bangumi_version=3 —
-	//    the column write itself is unconditional (V3 SQL doesn't use
-	//    COALESCE), so a nil titleChinese here means the column ends
-	//    up NULL.  Any DB error is transient; river retries.
+	// 3. Persist.  UpdateBangumiV3 always bumps bangumi_version=3; the
+	//    title is COALESCEd, so nil keeps whatever the row holds.  Any DB
+	//    error is transient; river retries.
 	if err := w.db.UpdateBangumiV3(ctx, anilistID, titleChinese); err != nil {
 		return fmt.Errorf("bangumi_v3 update %d (bgmId=%d): %w", anilistID, bgmID, err)
 	}
