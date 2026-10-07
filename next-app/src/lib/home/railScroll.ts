@@ -77,9 +77,12 @@ export function movePress(press: RailPress, x: number): PressMove {
  * Whether the click that follows the release must not open the card under
  * the pointer. Any press that became a drag counts — even one that came back
  * to where it started: the reader was moving the row, not choosing a card.
+ * So does a press that stopped a fling: like native momentum scrolling, that
+ * tap means "stop", not "open the card going past". (A short settle onto a
+ * card is not a fling: a click then lands where the reader aimed.)
  */
-export function suppressesClick(press: RailPress): boolean {
-  return press.dragging;
+export function suppressesClick(press: RailPress, stoppedMotion = false): boolean {
+  return press.dragging || stoppedMotion;
 }
 
 /** The rail's scroll geometry, read off the element. */
@@ -244,6 +247,18 @@ export function nearestStop(target: number, stops: readonly number[]): number {
   return best;
 }
 
+/**
+ * The index of the stop nearest `target` — the slider's range input counts
+ * stops, not pixels, so a screen reader's increment moves a card.
+ */
+export function nearestStopIndex(target: number, stops: readonly number[]): number {
+  let best = 0;
+  stops.forEach((stop, i) => {
+    if (Math.abs(stop - target) < Math.abs(stops[best] - target)) best = i;
+  });
+  return best;
+}
+
 /** The next stop past where the rail is, in `direction` — the slider's arrow keys. An end stays put. */
 export function stepStop(g: RailGeometry, stops: readonly number[], direction: 1 | -1): number {
   if (direction > 0) return stops.find((s) => s > g.viewLeft + 1) ?? maxScrollLeft(g);
@@ -280,6 +295,15 @@ export function releaseVelocity(samples: readonly PointerSample[], releasedAt: n
   if (!last || samples.length < 2 || releasedAt - last.t > FLING_REST_MS) return 0;
   const first = samples.find((s) => s.t < last.t && last.t - s.t <= FLING_WINDOW_MS);
   return first ? (last.x - first.x) / (last.t - first.t) : 0;
+}
+
+/**
+ * Whether a wheel over a flinging rail takes the row over: a sideways scroll
+ * (a trackpad) does; a vertical wheel scrolls the page and leaves the fling
+ * to finish and settle on a card.
+ */
+export function takesOverFling(deltaX: number, deltaY: number): boolean {
+  return Math.abs(deltaX) > Math.abs(deltaY);
 }
 
 /** One frame of a fling: how far the rail moves in `dt` ms, and the speed left after it. */

@@ -14,6 +14,7 @@ import {
   maxScrollLeft,
   movePress,
   nearestStop,
+  nearestStopIndex,
   nowScrollLeft,
   pageScrollLeft,
   railEdges,
@@ -23,6 +24,7 @@ import {
   scrollForPointer,
   startsDrag,
   stepStop,
+  takesOverFling,
   suppressesClick,
   thumbFor,
 } from "./railScroll";
@@ -93,6 +95,12 @@ describe("a press on the rail", () => {
     expect(suppressesClick(back)).toBe(true);
     // And the rail follows it back.
     expect(movePress(out, 500).scrollLeft).toBe(120);
+  });
+
+  test("a press that stopped the moving row opens nothing, even one that never left the threshold", () => {
+    const still = movePress(press, 500 + 2).press;
+    expect(suppressesClick(still, true)).toBe(true);
+    expect(suppressesClick(still, false)).toBe(false);
   });
 
   test("a press that never left the threshold lets the click through", () => {
@@ -411,5 +419,31 @@ describe("enterOrder — the order the cards rise in", () => {
   test("never past the cap, however many are on screen", () => {
     const wide = { viewLeft: 0, viewWidth: 5000, contentWidth: 5000 };
     expect(Math.max(...enterOrder(wide, boxes(30)))).toBe(ENTER_ORDER_CAP);
+  });
+});
+
+describe("the slider's range input counts stops, not pixels", () => {
+  test("its value is the index of the stop nearest where the rail is", () => {
+    const stops = railStops(desk(0, 20), cards(20), PAD);
+    expect(nearestStopIndex(0, stops)).toBe(0);
+    expect(nearestStopIndex(3 * STEP + 40, stops)).toBe(3);
+    expect(nearestStopIndex(3 * STEP + 120, stops)).toBe(4);
+    expect(nearestStopIndex(1e6, stops)).toBe(stops.length - 1);
+  });
+
+  test("no stops, index 0", () => {
+    expect(nearestStopIndex(50, [])).toBe(0);
+  });
+});
+
+describe("takesOverFling — a wheel over a flinging rail", () => {
+  test("a sideways scroll (trackpad) takes over the row", () => {
+    expect(takesOverFling(30, 4)).toBe(true);
+    expect(takesOverFling(-30, 0)).toBe(true);
+  });
+
+  test("a vertical wheel scrolls the page and leaves the fling to finish", () => {
+    expect(takesOverFling(0, 100)).toBe(false);
+    expect(takesOverFling(5, -40)).toBe(false);
   });
 });

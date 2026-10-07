@@ -90,7 +90,7 @@ const en = {
     todayInMinutes: 'In {{n}} min',
     todayNextDay: 'Tmrw',
     todayEp: 'Ep {{ep}}',
-    // The rail's ← → buttons: a view of cards back / forward.
+    // The slider under the rail (its range input's name and spoken value), and the panel that ends the row.
     todayScroll: 'Scroll through today\'s episodes',
     todayScrollValue: '{{from}}–{{to}} of {{n}}',
     todayEndTitle: 'That\'s all for today',

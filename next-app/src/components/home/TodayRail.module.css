@@ -297,7 +297,23 @@
 }
 
 .scrub:focus-visible + .slider {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* Forced colours (Windows high contrast) drop backgrounds and shadows: the
+ * track keeps a border and the thumb a system colour; the transparent outline
+ * above becomes the focus ring. */
+@media (forced-colors: active) {
+  .track {
+    border: 1px solid CanvasText;
+  }
+
+  .thumb {
+    forced-color-adjust: none;
+    background-color: Highlight;
+  }
 }
 
 /* While the row is moved by hand or flung: nothing snaps against it, and the
@@ -316,7 +332,8 @@
 /* ── The entrance ──────────────────────────────────────────────────────────
  * The first time the row comes into view (useRailEntrance), its items rise
  * into place left to right. The animation runs to its end by itself; nothing
- * is left hidden. */
+ * is left hidden. The 45ms step and the 0.6s rise are mirrored in the hook,
+ * which drops data-enter once the last item is in. */
 .rail[data-enter="run"] > * {
   animation: rise 0.6s var(--home-expo) both;
   animation-delay: calc(var(--enter-order, 0) * 45ms);

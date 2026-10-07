@@ -133,7 +133,7 @@ const zhHant = {
     todayInMinutes: '{{n}} 分鐘後',
     todayNextDay: '次日',
     todayEp: '第 {{ep}} 集',
-    // The rail's ← → buttons: a view of cards back / forward.
+    // The slider under the rail (its range input's name and spoken value), and the panel that ends the row.
     todayScroll: '橫向捲動今日更新',
     todayScrollValue: '第 {{from}}–{{to}} 部，共 {{n}} 部',
     todayEndTitle: '今天的番就這些',
