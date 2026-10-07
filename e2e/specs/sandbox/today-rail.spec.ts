@@ -50,6 +50,29 @@ async function settled(rail: Locator): Promise<number> {
   return last;
 }
 
+/**
+ * A finger put down at `from`, dragged by `by` over a dozen frames, and lifted —
+ * sent as raw touch events, the way a touchscreen delivers them, so the
+ * browser recognises the pan itself. `Input.synthesizeScrollGesture` with a
+ * touch source scrolls nothing in Chromium on Linux (it does on macOS): a swipe
+ * built on it fails in CI and nowhere else.
+ */
+async function swipe(page: Page, from: { x: number; y: number }, by: { x: number; y: number }) {
+  const steps = 12;
+  const cdp = await page.context().newCDPSession(page);
+  const point = (i: number) => ({
+    x: Math.round(from.x + (by.x * i) / steps),
+    y: Math.round(from.y + (by.y * i) / steps),
+  });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point(0)] });
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [point(i)] });
+    await page.waitForTimeout(16);
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
+
 /** The slider under the row (aria-hidden: its range input is what assistive technology uses). */
 const sliderOf = (page: Page) => page.locator('section[aria-labelledby="home-today"] [data-overflow]');
 
@@ -124,7 +147,10 @@ test.describe("今日更新 on a desktop", () => {
     // A short drag that starts and ends on the same card — the case where a
     // click would land on that card's link — moves the row and opens nothing.
     // From the start of the row, so there is room to move toward the end
-    // (the drag above may have left it there).
+    // (the drag above may have left it there). The row is measured while the
+    // button is still down: let go without a fling, a 40px drag settles back
+    // onto the card it started from, and a loaded machine spaces the moves
+    // out enough to read as a rest.
     await rail!.evaluate((el) => el.scrollTo({ left: 0, behavior: "instant" }));
     const card0 = rail!.locator('a[href*="/anime/"]').nth(1);
     await card0.scrollIntoViewIfNeeded();
@@ -133,8 +159,8 @@ test.describe("今日更新 on a desktop", () => {
     await page.mouse.move(c.x + c.width / 2 + 20, c.y + 80);
     await page.mouse.down();
     await page.mouse.move(c.x + c.width / 2 - 20, c.y + 80, { steps: 6 });
-    await page.mouse.up();
     expect(Math.abs((await scrollLeftOf(rail!)) - start)).toBeGreaterThan(20);
+    await page.mouse.up();
     await page.waitForTimeout(600);
     expect(page.url()).toBe(url);
     await settled(rail!);
@@ -378,17 +404,14 @@ test.describe("今日更新 on a phone", () => {
     await rail!.scrollIntoViewIfNeeded();
     const before = await settled(rail!);
     const box = (await rail!.boundingBox())!;
+    // The row goes toward whichever end has room, so the finger goes the other way.
     const direction = before < max / 2 ? -1 : 1;
-    // A real touch swipe, not a scrollTo: Chromium synthesises the gesture.
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Input.synthesizeScrollGesture", {
-      x: Math.round(box.x + box.width / 2),
-      y: Math.round(box.y + 100),
-      xDistance: direction * 240,
-      yDistance: 0,
-      gestureSourceType: "touch",
-      speed: 1200,
-    });
+    // A real touch swipe, not a scrollTo, starting near the edge it moves away from.
+    await swipe(
+      page,
+      { x: direction < 0 ? box.x + box.width - 40 : box.x + 40, y: box.y + 100 },
+      { x: direction * 240, y: 0 },
+    );
     const after = await settled(rail!);
     expect(Math.abs(after - before), `row at ${before} before the swipe, ${after} after`).toBeGreaterThan(60);
   });
@@ -418,15 +441,7 @@ test.describe("今日更新 on a phone", () => {
       }
     });
     const pageBefore = await page.evaluate(() => window.scrollY);
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Input.synthesizeScrollGesture", {
-      x,
-      y,
-      xDistance: 0,
-      yDistance: -200,
-      gestureSourceType: "touch",
-      speed: 800,
-    });
+    await swipe(page, { x, y }, { x: 0, y: -200 });
     try {
       await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(pageBefore + 40);
     } catch (err) {
