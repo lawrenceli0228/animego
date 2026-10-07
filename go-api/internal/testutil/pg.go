@@ -74,6 +74,8 @@ var allTables = []string{
 	// Enrichment match-accuracy tables (migration 0011).
 	"bgm_id_map",
 	"ddp_bgm_title",
+	// AniList->AniDB pairs, split out of bgm_id_map (migration 0041).
+	"anidb_id_map",
 	// river queue tables (migrations 0007/0008).
 	"river_client",
 	"river_client_queue",
