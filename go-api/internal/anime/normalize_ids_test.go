@@ -14,14 +14,15 @@ import (
 // with no id decodes to, becomes NULL rather than a value the column
 // CHECK refuses.
 func TestCharactersFromMedia_CarriesIDs(t *testing.T) {
+	ja := sptr("Japanese")
 	got := CharactersFromMedia(anilist.Media{
 		Characters: &anilist.CharacterConnection{Edges: []anilist.CharacterEdge{
 			{
 				Role: sptr("MAIN"),
 				Node: anilist.CharacterNode{ID: 138100, Name: &anilist.PersonName{Full: sptr("Frieren")}},
-				VoiceActors: []anilist.VoiceActor{
-					{ID: 112215, Name: &anilist.PersonName{Full: sptr("Atsumi Tanezaki")}},
-					{ID: 999, Name: &anilist.PersonName{Full: sptr("someone else")}},
+				VoiceActorRoles: []anilist.VoiceActorRole{
+					{VoiceActor: &anilist.VoiceActor{ID: 112215, Name: &anilist.PersonName{Full: sptr("Atsumi Tanezaki")}, LanguageV2: ja}},
+					{VoiceActor: &anilist.VoiceActor{ID: 999, Name: &anilist.PersonName{Full: sptr("someone else")}, LanguageV2: ja}},
 				},
 			},
 			{
@@ -35,10 +36,36 @@ func TestCharactersFromMedia_CarriesIDs(t *testing.T) {
 	require.NotNil(t, got[0].CharacterID)
 	assert.Equal(t, int32(138100), *got[0].CharacterID)
 	require.NotNil(t, got[0].VoiceActorID)
-	assert.Equal(t, int32(112215), *got[0].VoiceActorID, "the first voice actor, matching the name and image columns")
+	assert.Equal(t, int32(112215), *got[0].VoiceActorID, "the primary voice actor, matching the name and image columns")
 
 	assert.Nil(t, got[1].CharacterID, "a zero id is NULL, not 0")
 	assert.Nil(t, got[1].VoiceActorID, "no voice actors, no id")
+}
+
+// TestCastFromMedia_UsesTheTitlesCountry — the detail path hands the
+// title's countryOfOrigin to the voice choice: a donghua's character row
+// carries its Chinese voice even when AniList lists the Japanese dub
+// first, and every voice reaches the voice rows.
+func TestCastFromMedia_UsesTheTitlesCountry(t *testing.T) {
+	cast := CastFromMedia(anilist.Media{
+		CountryOfOrigin: sptr("CN"),
+		Characters: &anilist.CharacterConnection{Edges: []anilist.CharacterEdge{{
+			Role: sptr("MAIN"),
+			Node: anilist.CharacterNode{ID: 1, Name: &anilist.PersonName{Full: sptr("Wei Wuxian")}},
+			VoiceActorRoles: []anilist.VoiceActorRole{
+				{VoiceActor: &anilist.VoiceActor{ID: 10, Name: &anilist.PersonName{Native: sptr("木村良平")}, LanguageV2: sptr("Japanese")}},
+				{VoiceActor: &anilist.VoiceActor{ID: 11, Name: &anilist.PersonName{Native: sptr("阿杰")}, LanguageV2: sptr("Chinese")}},
+			},
+		}}},
+	})
+	require.Len(t, cast.Characters, 1)
+	assert.Equal(t, int32(11), *cast.Characters[0].VoiceActorID)
+	assert.Equal(t, "阿杰", *cast.Characters[0].VoiceActorJa)
+	require.Len(t, cast.Voices, 2)
+	assert.Equal(t, int32(11), cast.Voices[0].StaffID)
+	assert.Equal(t, int32(10), cast.Voices[1].StaffID)
+
+	assert.Empty(t, CastFromMedia(anilist.Media{}).Characters, "no connection, no rows")
 }
 
 func TestStaffFromMedia_CarriesIDs(t *testing.T) {

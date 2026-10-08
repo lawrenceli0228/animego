@@ -275,11 +275,13 @@ func TestCharactersFromMedia(t *testing.T) {
 						Name:  &anilist.PersonName{Full: sptr("Alice"), Native: sptr("アリス")},
 						Image: &anilist.Image{Medium: sptr("https://cdn/alice.jpg")},
 					},
-					VoiceActors: []anilist.VoiceActor{
-						{
-							Name:  &anilist.PersonName{Full: sptr("Yui"), Native: sptr("ゆい")},
-							Image: &anilist.Image{Medium: sptr("https://cdn/yui.jpg")},
-						},
+					VoiceActorRoles: []anilist.VoiceActorRole{
+						{VoiceActor: &anilist.VoiceActor{
+							ID:         5,
+							Name:       &anilist.PersonName{Full: sptr("Yui"), Native: sptr("ゆい")},
+							Image:      &anilist.Image{Medium: sptr("https://cdn/yui.jpg")},
+							LanguageV2: sptr("Japanese"),
+						}},
 					},
 				},
 				{
@@ -315,8 +317,8 @@ func TestCharactersFromMedia(t *testing.T) {
 					Node: anilist.CharacterNode{
 						Name: &anilist.PersonName{Full: sptr("X")},
 					},
-					VoiceActors: []anilist.VoiceActor{
-						{Name: &anilist.PersonName{Full: sptr("VA")}, Image: nil},
+					VoiceActorRoles: []anilist.VoiceActorRole{
+						{VoiceActor: &anilist.VoiceActor{ID: 6, Name: &anilist.PersonName{Full: sptr("VA")}, Image: nil}},
 					},
 				},
 			}},

@@ -1387,8 +1387,8 @@ func makeDetailMedia(id int) anilist.Media {
 			{
 				Role: &chRole,
 				Node: anilist.CharacterNode{Name: &anilist.PersonName{Full: &chFull}},
-				VoiceActors: []anilist.VoiceActor{
-					{Name: &anilist.PersonName{Full: &vaFull}},
+				VoiceActorRoles: []anilist.VoiceActorRole{
+					{VoiceActor: &anilist.VoiceActor{ID: 700, Name: &anilist.PersonName{Full: &vaFull}, LanguageV2: ptrString("Japanese")}},
 				},
 			},
 		}},
