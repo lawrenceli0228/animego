@@ -231,10 +231,27 @@ func (w *AnimeCreditsWorker) Work(ctx context.Context, _ *river.Job[AnimeCredits
 	return nil
 }
 
+// errShortCreditPages is a credit response that does not carry one page
+// per page asked for.  The client refuses to produce one (an omitted
+// page is an upstream error there); this is the sweep's own guard, so a
+// list it cannot vouch for is never written as the whole list.
+var errShortCreditPages = errors.New("anime_credits: response does not carry every requested page")
+
+// checkPages verifies a response carried a full request's pages.
+func checkPages(n int) error {
+	if n != anilist.MaxCreditPagesPerRequest {
+		return fmt.Errorf("%w: got %d of %d", errShortCreditPages, n, anilist.MaxCreditPagesPerRequest)
+	}
+	return nil
+}
+
 // sweepCast fetches one title's characters in full and replaces what is
 // stored.
 func (p *creditsPass) sweepCast(ctx context.Context, id int32) {
 	first, err := fetchPages(ctx, p, id, 1, p.w.anilist.CharacterPagesNoWait)
+	if err == nil {
+		err = checkPages(len(first.Pages))
+	}
 	if err != nil {
 		p.titleFailed(ctx, "cast", id, err, p.w.store.StampAnimeCastChecked)
 		return
@@ -242,6 +259,9 @@ func (p *creditsPass) sweepCast(ctx context.Context, id int32) {
 	pages := first.Pages
 	if more, _ := lastPage(pages).NextPage(); more {
 		second, err := fetchPages(ctx, p, id, len(pages)+1, p.w.anilist.CharacterPagesNoWait)
+		if err == nil {
+			err = checkPages(len(second.Pages))
+		}
 		if err != nil {
 			// Half a list is not written: the rows the first request
 			// would replace are no worse than they were.
@@ -270,6 +290,9 @@ func (p *creditsPass) sweepCast(ctx context.Context, id int32) {
 // sweepStaff is sweepCast for staff.
 func (p *creditsPass) sweepStaff(ctx context.Context, id int32) {
 	first, err := fetchPages(ctx, p, id, 1, p.w.anilist.StaffPagesNoWait)
+	if err == nil {
+		err = checkPages(len(first.Pages))
+	}
 	if err != nil {
 		p.titleFailed(ctx, "staff", id, err, p.w.store.StampAnimeStaffChecked)
 		return
@@ -277,6 +300,9 @@ func (p *creditsPass) sweepStaff(ctx context.Context, id int32) {
 	pages := first.Pages
 	if more, _ := lastPage(pages).NextPage(); more {
 		second, err := fetchPages(ctx, p, id, len(pages)+1, p.w.anilist.StaffPagesNoWait)
+		if err == nil {
+			err = checkPages(len(second.Pages))
+		}
 		if err != nil {
 			p.titleFailed(ctx, "staff", id, err, p.w.store.StampAnimeStaffChecked)
 			return
@@ -399,7 +425,7 @@ func stitchPages[E any](n int, page func(int) ([]E, bool)) (edges []E, capped bo
 			return edges, false
 		}
 	}
-	return edges, true
+	return edges, n > 0
 }
 
 // lastPage returns the last page of a non-empty slice, or nil.  NextPage

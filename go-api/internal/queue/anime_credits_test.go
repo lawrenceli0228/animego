@@ -476,6 +476,53 @@ func TestAnimeCredits_HalfAListIsNotWritten(t *testing.T) {
 	assert.Empty(t, store.castStamps)
 }
 
+// shortPagesFetcher drops pages from responses: all of them for the first
+// request, or the tail of the second.
+type shortPagesFetcher struct {
+	*fakeCreditsAniList
+	keep func(v anilist.CreditPagesVars) int
+}
+
+func (f *shortPagesFetcher) CharacterPagesNoWait(ctx context.Context, v anilist.CreditPagesVars) (*anilist.CharacterPages, error) {
+	res, err := f.fakeCreditsAniList.CharacterPagesNoWait(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+	res.Pages = res.Pages[:f.keep(v)]
+	return res, nil
+}
+
+// TestAnimeCredits_ShortResponseIsAFailure — a response without one page
+// per page asked for is never stitched into "the whole list": with no
+// pages it would have nothing to read page 1's flag from, and with a
+// truncated second request it would store 200 of a longer list and delete
+// the rest.  It is a failure like any other: no write, back-dated stamp,
+// pass over.
+func TestAnimeCredits_ShortResponseIsAFailure(t *testing.T) {
+	for name, keep := range map[string]func(anilist.CreditPagesVars) int{
+		"no pages at all": func(anilist.CreditPagesVars) int { return 0 },
+		"second request short": func(v anilist.CreditPagesVars) int {
+			if v.FirstPage > 1 {
+				return 3
+			}
+			return anilist.MaxCreditPagesPerRequest
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := newFakeCreditsStore()
+			store.castIDs = []int32{1, 2}
+			al := &shortPagesFetcher{fakeCreditsAniList: &fakeCreditsAniList{castLen: map[int]int{1: 300, 2: 30}}, keep: keep}
+			w, _ := newCreditsWorker(al, store)
+
+			require.NotPanics(t, func() { require.NoError(t, w.Work(context.Background(), creditsJob())) })
+
+			assert.Empty(t, store.castWrites)
+			require.Len(t, store.castStamps, 1)
+			assert.Equal(t, creditsNow.Add(creditsRetryAfterFailure-creditsStaleAfter), store.castStamps[0].at)
+		})
+	}
+}
+
 // TestAnimeCredits_NothingDue is a pass with empty candidate lists.
 func TestAnimeCredits_NothingDue(t *testing.T) {
 	store := newFakeCreditsStore()

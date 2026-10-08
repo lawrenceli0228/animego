@@ -49,9 +49,11 @@ type StaffWriter interface {
 // The statement order is the design:
 //
 //  1. Upsert every row, keyed (anime_id, character_id), collecting the
-//     row ids.  First, so a reader of a title being rewritten sees the old
-//     list or the new one, never an empty one -- which is what the old
-//     delete-then-insert showed for the length of the write.
+//     row ids.  First, so a reader of a title being rewritten never sees
+//     an empty list -- which is what the old delete-then-insert showed for
+//     the length of the write.  Outside a transaction (the detail
+//     refresh) a reader can catch a mix of old and new rows until step 3;
+//     inside one (the sweep) it sees the old list or the new one.
 //  2. Prune what the mode says may go: in WholeList every row not written,
 //     in FirstPage only rows that have no character id (rows from before
 //     0037, or an earlier copy of an id-less node; nothing can address
