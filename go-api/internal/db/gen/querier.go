@@ -658,6 +658,24 @@ type Querier interface {
 	// that page at display_order 0..24 (credits.WriteCast), so these are the
 	// 25 AniList lists first.
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error)
+	// credit_lists.sql — the detail page's 角色 and 制作 tabs: every character,
+	// voice and staff credit a title stores, for /api/anime/:id/characters,
+	// /api/anime/:id/staff and /api/anime/:id/credit-counts
+	// (internal/anime/credit_lists.go).
+	//
+	// Read-only, and only from our own tables: these endpoints never go to
+	// AniList, so a title we do not hold is a 404 rather than a fetch.
+	//
+	// Each query reads a whole title.  The credits sweep keeps at most 400
+	// characters and 400 staff credits a title (internal/queue), and the
+	// handler filters, counts and pages that list in Go, so a reader typing
+	// into the search box re-reads a cached copy rather than the tables.  The
+	// LIMITs are a ceiling on a table no writer is meant to fill past that,
+	// not a page size.
+	// The title's existence and the one fact the cast needs from it: the
+	// country of origin picks the default dub language, the same way
+	// credits.PrimaryLanguage picks the voice the character rows carry.
+	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (*string, error)
 	// Authoritative total-episode count for one title, used by
 	// PATCH /api/subscriptions/:anilistId as the upper bound on currentEpisode.
 	//
@@ -1238,6 +1256,19 @@ type Querier interface {
 	// the missing characters are missed in.  Adult titles are not excluded:
 	// they are stored like every other row and filtered where they are read.
 	ListAnimeCastCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error)
+	// Every character on the title in AniList's order ([ROLE, RELEVANCE, ID]
+	// -- display_order), with the Chinese names GetAnimeCharactersByID uses:
+	// Bangumi's match first (0045), then whatever the row itself holds.
+	//
+	// The voice_actor_* columns ride along for the rows anime_character_voices
+	// has nothing for: a row written before 0042, or one with no character id,
+	// carries its only voice here.
+	ListAnimeCastCharacters(ctx context.Context, animeID int32) ([]ListAnimeCastCharactersRow, error)
+	// Every voice the title stores (0042), each character's in its stored
+	// order: display_order 0 is the voice its character row carries, the
+	// title's own language comes next, then Japanese, Chinese and Korean.
+	// name_cn is Bangumi's, by the person's AniList id.
+	ListAnimeCastVoices(ctx context.Context, animeID int32) ([]ListAnimeCastVoicesRow, error)
 	// Rows the facts sweep (queue/anime_facts.go) should ask AniList about.
 	//
 	// Two populations, one query, same split as ListAnilistRatingCandidates:
@@ -1278,6 +1309,11 @@ type Querier interface {
 	ListAnimeForReEnrichByVersion(ctx context.Context, bangumiVersion int32) ([]ListAnimeForReEnrichByVersionRow, error)
 	// ListAnimeCastCandidates for staff.
 	ListAnimeStaffCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error)
+	// Every staff credit on the title, one row per person per role, in
+	// AniList's order ([RELEVANCE, ID] -- display_order).  name_cn is
+	// Bangumi's (0045); the detail endpoint has no field for it, this one
+	// does.
+	ListAnimeStaffCredits(ctx context.Context, animeID int32) ([]ListAnimeStaffCreditsRow, error)
 	// The Bangumi half of ListAnilistRatingCandidates.  Same two populations
 	// and the same ordering; see that query for why they are shaped this way.
 	//

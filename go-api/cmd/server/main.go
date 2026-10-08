@@ -286,6 +286,13 @@ func main() {
 		os.Exit(1)
 	}
 	seasonalSvc := anime.NewSeasonalService(q, anilistClient)
+	// The detail page's 角色 / 制作 tabs: every character and staff credit
+	// a title stores, read from the tables and never from AniList.
+	creditListsSvc, err := anime.NewCreditListsService(q)
+	if err != nil {
+		slog.Error("credit lists service init failed", "err", err)
+		os.Exit(1)
+	}
 
 	// 1h in-memory caches for /trending + /yearly-top (Express had these
 	// as Map-based caches; we use ristretto for accurate eviction).
@@ -831,6 +838,11 @@ func main() {
 		// pattern first, and a two-segment route added after the catch-all
 		// would never be reached.
 		r.Get("/{anilistId}/episode-offset", anime.EpisodeOffset(q))
+		// The detail tabs' full lists, past the 25 /{anilistId} carries.
+		// Two segments, like /watchers above.
+		r.Get("/{anilistId}/characters", creditListsSvc.Characters())
+		r.Get("/{anilistId}/staff", creditListsSvc.Staff())
+		r.Get("/{anilistId}/credit-counts", creditListsSvc.Counts())
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
 
