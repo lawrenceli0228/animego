@@ -51,6 +51,11 @@ var allTables = []string{
 	// anime_cache would reach it anyway; listed to keep the inventory true.
 	"anime_character_voices",
 	"anime_staff",
+	// AniList profiles of the people and characters the credits name
+	// (migration 0044).  No foreign key reaches them, so only listing them
+	// here empties them.
+	"people",
+	"characters",
 	"anime_recommendations",
 	"anime_episode_titles",
 	"subscriptions",

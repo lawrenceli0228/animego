@@ -1321,6 +1321,11 @@ type Querier interface {
 	// The order is unchanged (anilist_id) so a resumed run walks the same sequence
 	// as the run it continues, and the report of the two can be read side by side.
 	ListBgmBoundNeedingEpisodeTitles(ctx context.Context) ([]ListBgmBoundNeedingEpisodeTitlesRow, error)
+	// ListPeopleCandidates for characters: every character a title lists
+	// (anime_characters.character_id), in the same two tiers and the same
+	// order.  anime_character_voices names no character that anime_characters
+	// does not (the credit writers keep the two in step), so it adds nothing.
+	ListCharacterCandidates(ctx context.Context, rowLimit int32, staleAfter pgtype.Interval) ([]int32, error)
 	// Queries against danmakus + episode_windows (P2.5).
 	//
 	// HTTP surface is read-only for danmaku — writes go through socket.io
@@ -1547,6 +1552,28 @@ type Querier interface {
 	// large enough for it not to.
 	ListNewUserCountsByDay(ctx context.Context, dayCount int32) ([]ListNewUserCountsByDayRow, error)
 	ListNotifications(ctx context.Context, userID uuid.UUID, pageLimit int32) ([]ListNotificationsRow, error)
+	// Profiles: AniList's people and characters (migration 0044), written by
+	// the profiles sweep (queue/profiles.go), one transaction per batch of up
+	// to fifty ids: an upsert per profile AniList returned, then one stamp for
+	// the ids it did not.
+	// The AniList Staff ids the profiles sweep should ask about next: every
+	// person a credit row names -- a staff credit (anime_staff.staff_id), a
+	// character's primary voice (anime_characters.voice_actor_id) or any of
+	// its voices (anime_character_voices.staff_id) -- in two tiers.
+	//
+	//   1. Never asked (no people row), the most visible first: by the highest
+	//      popularity among the titles that credit them, then by how many
+	//      credit rows name them, then by id.  queue/profiles.go says why
+	//      popularity and not the credit count leads.
+	//   2. Asked before, last asked longer ago than stale_after, and still
+	//      credited somewhere, oldest stamp first.  A person no credit names
+	//      any more is not asked about again; their row stays as it is.
+	//
+	// Each tier is capped at row_limit before the two are put together, so
+	// the second is an index scan that stops early whatever the first holds.
+	// Adult titles are not excluded: their credits are stored like every
+	// other row and filtered where they are read, and so are these.
+	ListPeopleCandidates(ctx context.Context, rowLimit int32, staleAfter pgtype.Interval) ([]int32, error)
 	// The "watching" list shown on the public profile.  200-row cap matches
 	// Express; the join is the same shape as the subscriptions list query
 	// but only returns the cardview projection.
@@ -2182,6 +2209,17 @@ type Querier interface {
 	StampAnimeCastChecked(ctx context.Context, checkedAt pgtype.Timestamptz, hasMore *bool, anilistID int32) error
 	// StampAnimeCastChecked for staff.
 	StampAnimeStaffChecked(ctx context.Context, checkedAt pgtype.Timestamptz, hasMore *bool, anilistID int32) error
+	// StampPeopleChecked for characters.
+	StampCharactersChecked(ctx context.Context, checkedAt pgtype.Timestamptz, absent bool, ids []int32) error
+	// Stamps ids the sweep asked about and has no profile to write for.
+	//
+	// absent: the ask succeeded and these ids were not in the answer -- AniList
+	// deleted them, or merged them into another id.  absent_since is set the
+	// first time and kept after, so it says since when.  Not absent: the ask
+	// failed, checked_at arrives back-dated (see queue/profiles.go), and
+	// nothing else moves.  Either way a stored profile and its fetched_at are
+	// left alone, and an id with no row gets a stamp-only one.
+	StampPeopleChecked(ctx context.Context, checkedAt pgtype.Timestamptz, absent bool, ids []int32) error
 	// Stamp the attempt, pinned to the binding the attempt was made against.
 	//
 	// Written on every pass regardless of what the pass produced -- that is what
@@ -2637,6 +2675,8 @@ type Querier interface {
 	// role is a key like any other.  Same id-less and RETURNING rules as
 	// characters.
 	UpsertAnimeStaff(ctx context.Context, animeID int32, batch []byte) ([]uuid.UUID, error)
+	// UpsertPerson for characters.
+	UpsertCharacter(ctx context.Context, arg UpsertCharacterParams) error
 	UpsertCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID, reaction string) (CommentReaction, error)
 	// The notification is intentionally insert-only on conflict: retrying a like
 	// must not turn an already-read notification back into an unread one.
@@ -2695,6 +2735,17 @@ type Querier interface {
 	// Re-follow after an unfollow refreshes the existing dedupe-key notification;
 	// an idempotent retry never reaches either downstream CTE.
 	UpsertFollowWithActivity(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (bool, error)
+	// One person as AniList returned them: every profile column replaced, both
+	// stamps set to the fetch, the absence (if any) cleared.
+	//
+	// Replaced, not COALESCEd.  The facts sweep keeps a stored value when
+	// AniList sends null, because anime_cache has other writers and a null
+	// across the whole catalogue at once would have no second source to be
+	// restored from.  A profile has one writer and one source: the row is
+	// AniList's as of fetched_at, so a description AniList removed is removed
+	// here too.  The lists are COALESCEd only because a nil Go slice arrives
+	// as NULL, and NULL is not an empty list.
+	UpsertPerson(ctx context.Context, arg UpsertPersonParams) error
 	// POST /api/subscriptions — create-or-update on (user_id, anilist_id).
 	// Caller MUST have ensured anime_cache row exists (else the FK kicks).
 	// ON CONFLICT only writes status — Express also only patches `status`
