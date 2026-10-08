@@ -549,7 +549,8 @@ func (h *Handlers) UnmarkEpisodeWatched(w http.ResponseWriter, r *http.Request) 
 //  2. Decode + validate body (anilistId >= 1, status ∈ enum).  Field
 //     errors → 400 VALIDATION_ERROR with the mapped message.
 //  3. anime.EnsureCached on the anilistId — fills the cache from
-//     AniList if it's missing so the subscriptions FK passes.
+//     AniList if it's missing so the subscriptions FK passes, with the
+//     detail page's child tables from the same document.
 //     ErrAnilistNotFound → 404 "Anime not found".
 //  4. Write.  `"ifAbsent": true` routes to InsertSubscriptionIfAbsent
 //     (existing row returned untouched — status is human-only, §4

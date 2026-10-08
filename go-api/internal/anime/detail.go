@@ -972,64 +972,73 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 		return fmt.Errorf("upsert main: %w", err)
 	}
 
+	return writeDetailChildren(ctx, s.db, anilistID, m)
+}
+
+// writeDetailChildren writes everything of one AnimeDetailQuery Media
+// below the main row: steps 2-7 of upsertFromMedia, which calls it after
+// the main row.  EnsureCached calls it too, for a title a subscription
+// reaches before the detail page does: the row it writes is stamped as
+// detail-fetched, so these tables are filled then or not for a day.
+func writeDetailChildren(ctx context.Context, w DetailWriter, anilistID int32, m anilist.Media) error {
 	// 2) Genres — Delete + Insert.  Plain string column, no accent
 	// fields, no display order.
-	if err := s.db.DeleteAnimeGenres(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeGenres(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete genres: %w", err)
 	}
 	for _, g := range Genres(m) {
-		if err := s.db.InsertAnimeGenre(ctx, anilistID, g); err != nil {
+		if err := w.InsertAnimeGenre(ctx, anilistID, g); err != nil {
 			return fmt.Errorf("insert genre %q: %w", g, err)
 		}
 	}
 
 	// 2b) Synonyms — same shape as genres: a whole-set replace from the
 	// one source that has them.
-	if err := s.db.DeleteAnimeSynonyms(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeSynonyms(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete synonyms: %w", err)
 	}
 	for _, syn := range m.SynonymSet() {
-		if err := s.db.InsertAnimeSynonym(ctx, anilistID, syn); err != nil {
+		if err := w.InsertAnimeSynonym(ctx, anilistID, syn); err != nil {
 			return fmt.Errorf("insert synonym %q: %w", syn, err)
 		}
 	}
 
 	// 3) Studios — Delete + Insert.
-	if err := s.db.DeleteAnimeStudios(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeStudios(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete studios: %w", err)
 	}
 	for _, st := range StudiosFromMedia(m) {
-		if err := s.db.InsertAnimeStudio(ctx, anilistID, st.Name, st.StudioID, st.IsMain); err != nil {
+		if err := w.InsertAnimeStudio(ctx, anilistID, st.Name, st.StudioID, st.IsMain); err != nil {
 			return fmt.Errorf("insert studio %q: %w", st.Name, err)
 		}
 	}
 
 	// 3b) Tags (AniList's set only -- Bangumi's is V2's) and external
 	//     links.  Whole-set replaces, like genres.
-	if err := s.db.DeleteAnimeTagsBySource(ctx, anilistID, "anilist"); err != nil {
+	if err := w.DeleteAnimeTagsBySource(ctx, anilistID, "anilist"); err != nil {
 		return fmt.Errorf("delete tags: %w", err)
 	}
 	for _, tg := range TagsFromMedia(m) {
-		if err := s.db.InsertAnimeTag(ctx, anilistID, "anilist", tg.Name, tg.Rank, tg.IsSpoiler); err != nil {
+		if err := w.InsertAnimeTag(ctx, anilistID, "anilist", tg.Name, tg.Rank, tg.IsSpoiler); err != nil {
 			return fmt.Errorf("insert tag %q: %w", tg.Name, err)
 		}
 	}
-	if err := s.db.DeleteAnimeExternalLinks(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeExternalLinks(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete external links: %w", err)
 	}
 	for _, l := range LinksFromMedia(m) {
-		if err := s.db.InsertAnimeExternalLink(ctx, anilistID, l.Site, l.URL, l.Type); err != nil {
+		if err := w.InsertAnimeExternalLink(ctx, anilistID, l.Site, l.URL, l.Type); err != nil {
 			return fmt.Errorf("insert external link %q: %w", l.URL, err)
 		}
 	}
 
 	// 4) Relations — Delete + Insert.  Each row carries accent fields
 	// computed from the relation's cover colour.
-	if err := s.db.DeleteAnimeRelations(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeRelations(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete relations: %w", err)
 	}
 	for _, r := range RelationsFromMedia(m) {
-		if err := s.db.InsertAnimeRelation(ctx, dbgen.InsertAnimeRelationParams{
+		if err := w.InsertAnimeRelation(ctx, dbgen.InsertAnimeRelationParams{
 			AnimeID:                     anilistID,
 			AnilistID:                   r.AnilistID,
 			RelationType:                r.RelationType,
@@ -1055,13 +1064,13 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 	// stored for the title is stale.  See credits.WriteCast.
 	if m.Characters != nil {
 		mode := credits.ModeFor(m.Characters.NextPage())
-		if err := credits.WriteCast(ctx, s.db, anilistID, CastFromMedia(m), mode); err != nil {
+		if err := credits.WriteCast(ctx, w, anilistID, CastFromMedia(m), mode); err != nil {
 			return fmt.Errorf("characters: %w", err)
 		}
 	}
 	if m.Staff != nil {
 		mode := credits.ModeFor(m.Staff.NextPage())
-		if err := credits.WriteStaff(ctx, s.db, anilistID, StaffFromMedia(m), mode); err != nil {
+		if err := credits.WriteStaff(ctx, w, anilistID, StaffFromMedia(m), mode); err != nil {
 			return fmt.Errorf("staff: %w", err)
 		}
 	}
@@ -1070,7 +1079,7 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 	// in, or keeps it out of, the credits sweep's candidate list.
 	castHasMore, staffHasMore := hasMore(m.Characters.NextPage()), hasMore(m.Staff.NextPage())
 	if castHasMore != nil || staffHasMore != nil {
-		if err := s.db.SetAnimeCreditsHasMore(ctx, castHasMore, staffHasMore, anilistID); err != nil {
+		if err := w.SetAnimeCreditsHasMore(ctx, castHasMore, staffHasMore, anilistID); err != nil {
 			return fmt.Errorf("credits has-more: %w", err)
 		}
 	}
@@ -1078,11 +1087,11 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 	// 7) Recommendations — Delete + Insert.  Express filtered nil
 	// mediaRecommendation entries at normalize time, so the slice here
 	// is already clean.
-	if err := s.db.DeleteAnimeRecommendations(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeRecommendations(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete recommendations: %w", err)
 	}
 	for _, r := range RecommendationsFromMedia(m) {
-		if err := s.db.InsertAnimeRecommendation(ctx, dbgen.InsertAnimeRecommendationParams{
+		if err := w.InsertAnimeRecommendation(ctx, dbgen.InsertAnimeRecommendationParams{
 			AnimeID:                     anilistID,
 			AnilistID:                   r.AnilistID,
 			Title:                       r.Title,
