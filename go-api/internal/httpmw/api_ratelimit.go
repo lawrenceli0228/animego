@@ -190,9 +190,18 @@ func shouldLimitPath(p string) bool {
 // initiated (X-Real-IP forwarded, so limited per real user):
 //   - /api/anime/search   → AniList GraphQL
 //   - /api/anime/torrents  → BT scraper fan-out
+//
+// The person and character pages (/person/[id], /character/[id]) are the
+// same kind of read: ISR pages fetching /api/people/{id} and
+// /api/characters/{id} with auth:false, database only.  Just the numeric
+// page reads -- the sitemap listings beside them are fetched by next-app
+// once an hour, not per crawled page.
 func isPublicReadExempt(method, path string) bool {
 	if method != http.MethodGet {
 		return false
+	}
+	if isNumericPageRead(path, "/api/people/") || isNumericPageRead(path, "/api/characters/") {
+		return true
 	}
 	if !strings.HasPrefix(path, "/api/anime/") {
 		return false
@@ -200,6 +209,21 @@ func isPublicReadExempt(method, path string) bool {
 	if strings.HasPrefix(path, "/api/anime/search") ||
 		strings.HasPrefix(path, "/api/anime/torrents") {
 		return false
+	}
+	return true
+}
+
+// isNumericPageRead reports whether path is prefix followed by a run of
+// digits and nothing else: "/api/people/133507", not "/api/people/sitemap".
+func isNumericPageRead(path, prefix string) bool {
+	id, ok := strings.CutPrefix(path, prefix)
+	if !ok || id == "" {
+		return false
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return false
+		}
 	}
 	return true
 }

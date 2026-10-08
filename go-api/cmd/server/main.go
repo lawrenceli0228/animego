@@ -56,6 +56,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 	"github.com/lawrenceli0228/animego/go-api/internal/notifications"
 	"github.com/lawrenceli0228/animego/go-api/internal/obs"
+	"github.com/lawrenceli0228/animego/go-api/internal/people"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/safety"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
@@ -833,6 +834,15 @@ func main() {
 		r.Get("/{anilistId}/episode-offset", anime.EpisodeOffset(q))
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
+
+	// The person and character pages: one AniList Staff id or Character id
+	// each, read from the database and nothing else (an unknown id is a
+	// database miss and a 404, never an AniList request), plus the listings
+	// of the indexed ones for next-app's sitemap.  One cache for both
+	// listings; its keys carry the kind.
+	peopleSitemapCache := people.NewSitemapCache(people.SitemapTTL)
+	r.Route("/api/people", func(r chi.Router) { people.MountPeople(r, q, peopleSitemapCache) })
+	r.Route("/api/characters", func(r chi.Router) { people.MountCharacters(r, q, peopleSitemapCache) })
 
 	// P2.4 — subscriptions: 8 endpoints, every route RequireAuth.
 	//
