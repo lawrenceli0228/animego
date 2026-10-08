@@ -39,7 +39,8 @@ function buildDatabaseUrl(): string {
 
 let _sql: ReturnType<typeof postgres> | null = null;
 
-function getSql(): ReturnType<typeof postgres> {
+/** The shared connection; exported for fixture modules beside this one. */
+export function getSql(): ReturnType<typeof postgres> {
   if (!_sql) {
     // Lazy: resolve the connection string (and throw on a missing password)
     // only when a DB helper is actually called. Importing this module must
