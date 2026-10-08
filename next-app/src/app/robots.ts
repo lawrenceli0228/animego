@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { hubsSitemapUrl } from "@/lib/seo/hubSitemap";
 import { animeSitemapUrls } from "@/lib/seo/animeSitemap";
+import { peopleSitemapUrls } from "@/lib/seo/peopleSitemap";
 import { SITE_ORIGIN as SITE } from "@/lib/seo/alternates";
 
 /**
@@ -28,7 +29,9 @@ import { SITE_ORIGIN as SITE } from "@/lib/seo/alternates";
  * The sitemap list is plural. /sitemap.xml holds the static pages and keeps
  * the URL Search Console has on file; the anime catalogue is too large for
  * one document (17,603 anime × 3 locales overflows Google's 50,000-URL cap)
- * and is sharded under /sitemaps/anime/. robots.txt accepts any number of
+ * and is sharded under /sitemaps/anime/; the indexed person and character
+ * pages are sharded under /sitemaps/people/ and /sitemaps/characters/.
+ * robots.txt accepts any number of
  * Sitemap directives and Google reads all of them, so naming the files here
  * is what makes the shards discoverable — there is no index document,
  * because Next's sitemap convention emits <urlset> and cannot emit
@@ -47,7 +50,7 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/library", "/player", "/api/", "/admin"],
       },
     ],
-    sitemap: [`${SITE}/sitemap.xml`, hubsSitemapUrl(), ...animeSitemapUrls()],
+    sitemap: [`${SITE}/sitemap.xml`, hubsSitemapUrl(), ...animeSitemapUrls(), ...peopleSitemapUrls()],
     host: SITE,
   };
 }

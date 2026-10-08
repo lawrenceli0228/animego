@@ -156,6 +156,13 @@ jobs:
       - name: Assert /anime/[id] is still prerendered
         run: node scripts/ci/assert-isr.mjs
 
+      # The person and character pages are ISR on the same terms (they read
+      # only the database, so nothing about them needs to be dynamic).
+      - name: Assert /person/[id] and /character/[id] are prerendered
+        run: |
+          node scripts/ci/assert-isr.mjs --route-suffix "/person/[id]"
+          node scripts/ci/assert-isr.mjs --route-suffix "/character/[id]"
+
   ws-server:
     name: ws-server (jest)
     runs-on: ubuntu-latest
