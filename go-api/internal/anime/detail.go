@@ -340,9 +340,11 @@ type DetailRelation struct {
 	Format                      *string  `json:"format"`
 }
 
-// DetailCharacter mirrors the anime_characters table; nameCn /
-// voiceActorImageUrl / voiceActorCn remain nil until Phase 4 enrichment
-// runs.  Order matches the sqlc-generated GetAnimeCharactersByIDRow.
+// DetailCharacter mirrors the anime_characters table.  nameCn and
+// voiceActorCn are Bangumi's simplified Chinese names for the character
+// and its voice, from the matches cmd/bgmnames stores (0045), and nil
+// where there is none.  Order matches the sqlc-generated
+// GetAnimeCharactersByIDRow.
 type DetailCharacter struct {
 	NameEn             *string `json:"nameEn"`
 	NameJa             *string `json:"nameJa"`

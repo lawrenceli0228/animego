@@ -642,8 +642,14 @@ type Querier interface {
 	// (handler maps → 404).
 	GetAnimeCacheRowForReset(ctx context.Context, anilistID int32) (GetAnimeCacheRowForResetRow, error)
 	// Sorted by display_order so the response preserves AniList's order
-	// ([ROLE, RELEVANCE, ID]: MAIN → SUPPORTING → BACKGROUND).  name_cn and
-	// voice_actor_cn are NULL: nothing has a source for them yet.
+	// ([ROLE, RELEVANCE, ID]: MAIN → SUPPORTING → BACKGROUND).
+	//
+	// name_cn and voice_actor_cn come from Bangumi through the maps
+	// cmd/bgmnames fills (0045): the character's own Chinese name, and that of
+	// whoever voice_actor_id names.  A match wins over a name stored on the
+	// row (nothing writes those today; a row from the old import may carry
+	// one), which still shows where there is no match.  Both joins are by
+	// primary key; the response keeps its shape.
 	//
 	// LIMIT 25 is the /api/anime/:id contract, not an accident of storage.
 	// The table holds up to 400 characters a title since the credits sweep

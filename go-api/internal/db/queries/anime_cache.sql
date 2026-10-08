@@ -1185,8 +1185,14 @@ WHERE anime_id = $1;
 
 -- name: GetAnimeCharactersByID :many
 -- Sorted by display_order so the response preserves AniList's order
--- ([ROLE, RELEVANCE, ID]: MAIN → SUPPORTING → BACKGROUND).  name_cn and
--- voice_actor_cn are NULL: nothing has a source for them yet.
+-- ([ROLE, RELEVANCE, ID]: MAIN → SUPPORTING → BACKGROUND).
+--
+-- name_cn and voice_actor_cn come from Bangumi through the maps
+-- cmd/bgmnames fills (0045): the character's own Chinese name, and that of
+-- whoever voice_actor_id names.  A match wins over a name stored on the
+-- row (nothing writes those today; a row from the old import may carry
+-- one), which still shows where there is no match.  Both joins are by
+-- primary key; the response keeps its shape.
 --
 -- LIMIT 25 is the /api/anime/:id contract, not an accident of storage.
 -- The table holds up to 400 characters a title since the credits sweep
@@ -1195,20 +1201,22 @@ WHERE anime_id = $1;
 -- that page at display_order 0..24 (credits.WriteCast), so these are the
 -- 25 AniList lists first.
 SELECT
-    name_en,
-    name_ja,
-    name_cn,
-    image_url,
-    role,
-    voice_actor_en,
-    voice_actor_ja,
-    voice_actor_cn,
-    voice_actor_image_url,
-    character_id,
-    voice_actor_id
-FROM anime_characters
-WHERE anime_id = $1
-ORDER BY display_order, id
+    c.name_en,
+    c.name_ja,
+    COALESCE(cm.name_cn, c.name_cn) AS name_cn,
+    c.image_url,
+    c.role,
+    c.voice_actor_en,
+    c.voice_actor_ja,
+    COALESCE(pm.name_cn, c.voice_actor_cn) AS voice_actor_cn,
+    c.voice_actor_image_url,
+    c.character_id,
+    c.voice_actor_id
+FROM anime_characters c
+LEFT JOIN bgm_character_map cm ON cm.anilist_id = c.character_id
+LEFT JOIN bgm_person_map pm ON pm.anilist_id = c.voice_actor_id
+WHERE c.anime_id = $1
+ORDER BY c.display_order, c.id
 LIMIT 25;
 
 -- name: GetAnimeStaffByID :many
