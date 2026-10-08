@@ -1,0 +1,533 @@
+/* The cards on the person and character pages: representative roles, a
+ * character's voices, title posters and the voice timeline's role cards.
+ *
+ * A second module beside people.module.css, which holds the page around
+ * them (the header, the section heads, the controls). The colour tokens
+ * these rules read (--pp-*, --poster-tone*) are declared there, on the
+ * page's root element, and inherit down to every card.
+ *
+ * Phone (≤600px): the representative roles become a strip of portraits to
+ * swipe, the voices a list with a chevron, a character's titles a strip, and
+ * the timeline three cards a row — the canvas's phone boards.
+ */
+
+/* ── Representative roles ───────────────────────────────────────────────── */
+
+.repGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.repCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-surface);
+  color: inherit;
+}
+
+.repCard:hover {
+  background: var(--pp-surface-2);
+}
+
+.repImageLink {
+  flex: none;
+  display: block;
+  border-radius: 8px;
+}
+
+.repImage {
+  flex: none;
+  display: block;
+  width: 64px;
+  height: 96px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--pp-surface-3);
+}
+
+.repText {
+  min-width: 0;
+}
+
+.repName {
+  display: block;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 4px;
+}
+
+.repCard:hover .repName {
+  color: var(--pp-tone-hi);
+}
+
+.repTitle {
+  color: inherit;
+  border-radius: 4px;
+}
+
+.repTitle:hover {
+  color: var(--pp-tone-hi);
+}
+
+.repName:focus-visible,
+.repTitle:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.repSub {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--pp-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ── Voices of a character ──────────────────────────────────────────────── */
+
+.voiceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.voiceCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-surface);
+  color: inherit;
+}
+
+.voiceCard:hover {
+  background: var(--pp-surface-2);
+}
+
+.voiceCard:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.avatar {
+  flex: none;
+  display: block;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--pp-surface-3);
+}
+
+.voiceText {
+  flex: 1;
+  min-width: 0;
+}
+
+.voiceName {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voiceCard:hover .voiceName {
+  color: var(--pp-tone-hi);
+}
+
+.voiceSub {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--pp-muted);
+}
+
+.chevron {
+  display: none;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--pp-label);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── Poster cards: a character's titles, a person's staff credits ───────── */
+
+.posterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 20px;
+}
+
+.posterCard {
+  display: block;
+  min-width: 0;
+  color: inherit;
+  border-radius: 10px;
+}
+
+.posterCard:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.posterFrame {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--pp-surface-2);
+}
+
+.posterImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.posterTag {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.78);
+  font-size: 11.5px;
+  color: var(--text);
+  pointer-events: none;
+}
+
+.posterTitle {
+  margin-top: 9px;
+  font-size: 13.5px;
+  color: var(--text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.posterCard:hover .posterTitle {
+  color: var(--pp-tone-hi);
+}
+
+.posterMeta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--pp-label);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ── The voice timeline ─────────────────────────────────────────────────── */
+
+.yearHead {
+  margin: 22px 0 12px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--pp-muted);
+}
+
+.yearHead:first-of-type {
+  margin-top: 0;
+}
+
+.roleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.roleCard {
+  min-width: 0;
+}
+
+.roleFrame {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--pp-surface-2);
+}
+
+.roleImageLink {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.roleImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The title's cover, small, in the corner the character's portrait can
+ * spare: AniList's arrangement, which the canvas follows. */
+.roleCoverLink {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: block;
+  width: 40%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-top-left-radius: 8px;
+  border-top: 2px solid var(--bg);
+  border-left: 2px solid var(--bg);
+  background: var(--pp-surface-3);
+}
+
+.roleCover {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.roleName {
+  display: block;
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 4px;
+}
+
+.roleCard:hover .roleName {
+  color: var(--pp-tone-hi);
+}
+
+.roleName:focus-visible,
+.roleTitle:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.roleTitle {
+  color: inherit;
+  border-radius: 4px;
+}
+
+.roleTitle:hover {
+  color: var(--pp-tone-hi);
+}
+
+.roleSub {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--pp-label);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* 主角, one step into the title's colour: the kicker that varies, as the
+ * detail page's cast list has it (sections.module.css, .personRoleMain). */
+.roleMain {
+  color: var(--poster-tone-quiet);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .repCard,
+  .voiceCard,
+  .posterTitle,
+  .roleName {
+    transition:
+      background-color 0.18s var(--ease-out-expo),
+      color 0.18s var(--ease-out-expo),
+      border-color 0.18s var(--ease-out-expo);
+  }
+}
+
+/* ── Tablet: two cards a row where three would cut the names ─────────────── */
+
+@media (max-width: 900px) and (min-width: 601px) {
+  .repGrid,
+  .voiceGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── Phone ──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  /* Representative roles: a strip of portraits to swipe. */
+  .repGrid {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .repCard {
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    width: 120px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .repCard:hover {
+    background: transparent;
+  }
+
+  .repImage {
+    width: 120px;
+    height: 180px;
+    border-radius: 10px;
+  }
+
+  .repName {
+    margin-top: 6px;
+    font-size: 14px;
+  }
+
+  .repSub {
+    margin-top: 0;
+    font-size: 12px;
+    color: var(--pp-label);
+    -webkit-line-clamp: 1;
+  }
+
+  .repRole {
+    display: none;
+  }
+
+  /* A character's voices: a list with a chevron, not cards. */
+  .voiceGrid {
+    display: block;
+  }
+
+  .voiceCard {
+    min-height: 52px;
+    gap: 12px;
+    padding: 6px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .voiceCard:hover {
+    background: transparent;
+  }
+
+  .avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .voiceName {
+    font-size: 14px;
+    font-weight: 400;
+  }
+
+  .voiceSub {
+    margin-top: 0;
+    font-size: 12px;
+    color: var(--pp-label);
+  }
+
+  .chevron {
+    display: block;
+  }
+
+  /* A character's titles: a strip to swipe. */
+  .posterStrip {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .posterStrip .posterCard {
+    flex: none;
+    width: 112px;
+  }
+
+  .posterStrip .posterTitle {
+    font-size: 12.5px;
+  }
+
+  .posterStrip .posterMeta {
+    display: none;
+  }
+
+  .posterGrid:not(.posterStrip) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .posterGrid:not(.posterStrip) .posterTitle {
+    margin-top: 6px;
+    font-size: 12.5px;
+  }
+
+  .yearHead,
+  .yearHead:first-of-type {
+    margin: 18px 0 10px;
+    font-size: 16px;
+  }
+
+  .roleGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .roleFrame {
+    border-radius: 9px;
+  }
+
+  .roleCoverLink {
+    width: 42%;
+    border-top-left-radius: 7px;
+  }
+
+  .roleName {
+    margin-top: 6px;
+    font-size: 13px;
+  }
+
+  .roleSub {
+    margin-top: 1px;
+    font-size: 11.5px;
+    -webkit-line-clamp: 1;
+  }
+}

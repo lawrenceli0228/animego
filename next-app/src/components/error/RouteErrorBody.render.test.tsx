@@ -233,6 +233,8 @@ describe("the retry button reloads rather than resetting", () => {
   const BOUNDARIES: Array<{ file: string; scope: ErrorScope }> = [
     { file: "app/[lang]/anime/[id]/error.tsx", scope: "detail" },
     { file: "app/[lang]/seasonal/[season]/[year]/error.tsx", scope: "seasonal" },
+    { file: "app/[lang]/person/[id]/error.tsx", scope: "detail" },
+    { file: "app/[lang]/character/[id]/error.tsx", scope: "detail" },
   ];
 
   test("the source this suite reads is the real component", () => {
