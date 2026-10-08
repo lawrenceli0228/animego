@@ -74,6 +74,7 @@ func TestAnimeCredits_PG(t *testing.T) {
 		require.NoError(t, credits.WriteCast(ctx, q, 154587, credits.CastFromEdges(first.Pages[0].Edges, nil), credits.FirstPage))
 
 		w := NewAnimeCreditsWorker(al, pgCreditsStore{Queries: q, pool: pool})
+		w.enabled = func() bool { return true }
 		w.sleep = func(context.Context, time.Duration) error { return nil }
 		require.NoError(t, w.Work(ctx, creditsJob()))
 

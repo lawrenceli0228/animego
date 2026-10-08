@@ -61,6 +61,14 @@
 // failure (creditsRetryAfterFailure) or after its second request found no
 // budget (creditsDeferAfterBusy), or left alone for the next pass.  Only a
 // failure to read a candidate list is returned.
+//
+// # The switch
+//
+// ANIME_CREDITS_SWEEP_ENABLED gates every pass, read at work time and
+// failing closed, like EPISODE_TITLES_SWEEP_ENABLED: a release can ship
+// with it off, and turning it off again needs a restart, not a deploy.
+// Pausing the queue is no substitute -- this sweep shares the ratings
+// queue with the facts and ratings sweeps.
 package queue
 
 import (
@@ -69,6 +77,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -135,6 +145,9 @@ const (
 	creditsDeferAfterBusy = time.Hour
 )
 
+// creditsEnabledEnv names the switch; see the file comment.
+const creditsEnabledEnv = "ANIME_CREDITS_SWEEP_ENABLED"
+
 // AniListCreditsFetcher is the upstream surface the sweep needs; both
 // methods are no-wait.  *anilist.Client satisfies it.
 type AniListCreditsFetcher interface {
@@ -162,11 +175,22 @@ type AnimeCreditsWorker struct {
 	now     func() time.Time
 	// sleep is the pause between requests; tests replace it.
 	sleep func(context.Context, time.Duration) error
+	// enabled reports whether a pass may run (creditsSweepEnabled); tests
+	// replace it.
+	enabled func() bool
 }
 
 // NewAnimeCreditsWorker builds the worker.
 func NewAnimeCreditsWorker(client AniListCreditsFetcher, store AnimeCreditsStore) *AnimeCreditsWorker {
-	return &AnimeCreditsWorker{anilist: client, store: store, now: time.Now, sleep: sleepCtx}
+	return &AnimeCreditsWorker{anilist: client, store: store, now: time.Now, sleep: sleepCtx, enabled: creditsSweepEnabled}
+}
+
+// creditsSweepEnabled reads the switch.  Only a value strconv.ParseBool
+// reads as true turns the sweep on; anything else, a typo included, is
+// off.
+func creditsSweepEnabled() bool {
+	on, err := strconv.ParseBool(os.Getenv(creditsEnabledEnv))
+	return err == nil && on
 }
 
 // Timeout bounds one pass.
@@ -190,6 +214,12 @@ type creditsPass struct {
 
 // Work runs one pass.
 func (w *AnimeCreditsWorker) Work(ctx context.Context, _ *river.Job[AnimeCreditsArgs]) error {
+	if !w.enabled() {
+		// Debug, not Info: this fires every five minutes.  AddCreditsWorker
+		// says it once, at startup.
+		slog.DebugContext(ctx, "anime_credits sweep disabled", "env", creditsEnabledEnv)
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, creditsTimeout)
 	defer cancel()
 	start := w.clock()
@@ -561,6 +591,9 @@ func (s pgCreditsStore) inTx(ctx context.Context, fn func(*dbgen.Queries) error)
 // its per-title transactions.
 func AddCreditsWorker(w *river.Workers, anilistClient AniListCreditsFetcher, pool *pgxpool.Pool, q *dbgen.Queries) {
 	river.AddWorker(w, NewAnimeCreditsWorker(anilistClient, pgCreditsStore{Queries: q, pool: pool}))
+	if !creditsSweepEnabled() {
+		slog.Info("anime_credits sweep registered but disabled", "env", creditsEnabledEnv)
+	}
 }
 
 // Compile-time guards.

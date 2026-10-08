@@ -167,11 +167,13 @@ func (f *fakeCreditsAniList) StaffPagesNoWait(_ context.Context, v anilist.Credi
 
 var creditsNow = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 
-// newCreditsWorker wires the fakes with a frozen clock and a sleep that
-// records instead of waiting.
+// newCreditsWorker wires the fakes with a frozen clock, a sleep that
+// records instead of waiting, and the switch on (see
+// TestAnimeCredits_OffUnlessEnabled for the switch itself).
 func newCreditsWorker(al AniListCreditsFetcher, store *fakeCreditsStore) (*AnimeCreditsWorker, *[]time.Duration) {
 	var slept []time.Duration
 	w := NewAnimeCreditsWorker(al, store)
+	w.enabled = func() bool { return true }
 	w.now = func() time.Time { return creditsNow }
 	w.sleep = func(_ context.Context, d time.Duration) error {
 		slept = append(slept, d)
@@ -193,6 +195,38 @@ func characterIDs(cast credits.Cast) []int32 {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+// TestAnimeCredits_OffUnlessEnabled — the sweep runs only when
+// ANIME_CREDITS_SWEEP_ENABLED parses as true.  Absent, false or a typo is
+// a pass that reads no candidate and asks AniList nothing: a variable
+// gating writes to production fails closed, like the other sweeps' flags.
+func TestAnimeCredits_OffUnlessEnabled(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		on    bool
+	}{
+		{"", false}, {"false", false}, {"0", false}, {"yes", false}, {"ture", false},
+		{"true", true}, {"1", true}, {"TRUE", true},
+	} {
+		t.Run(fmt.Sprintf("%q", tc.value), func(t *testing.T) {
+			t.Setenv(creditsEnabledEnv, tc.value)
+			store := newFakeCreditsStore()
+			store.castIDs = []int32{154587}
+			al := &fakeCreditsAniList{castLen: map[int]int{154587: 100}}
+			w := NewAnimeCreditsWorker(al, store)
+			w.sleep = func(context.Context, time.Duration) error { return nil }
+
+			require.NoError(t, w.Work(context.Background(), creditsJob()))
+			if tc.on {
+				assert.Equal(t, int32(creditsCastPerPass), store.castLimit)
+				assert.NotEmpty(t, al.calls)
+			} else {
+				assert.Zero(t, store.castLimit, "no candidate read")
+				assert.Empty(t, al.calls, "no AniList request")
+			}
+		})
+	}
+}
 
 // TestAnimeCredits_OneRequestCoversEightPages — a 100-character title is
 // four pages; one request for pages 1-8 covers it, the empty pages past
