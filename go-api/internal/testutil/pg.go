@@ -56,6 +56,10 @@ var allTables = []string{
 	// here empties them.
 	"people",
 	"characters",
+	// Bangumi matches and Chinese names for them (migration 0045), the
+	// same: nothing cascades into them.
+	"bgm_person_map",
+	"bgm_character_map",
 	"anime_recommendations",
 	"anime_episode_titles",
 	"subscriptions",

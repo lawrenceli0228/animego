@@ -43,6 +43,42 @@ func (q *Queries) InsertAnidbIdMapCopy(ctx context.Context, arg []InsertAnidbIdM
 	return q.db.CopyFrom(ctx, []string{"anidb_id_map"}, []string{"anilist_id", "anidb_id"}, &iteratorForInsertAnidbIdMapCopy{rows: arg})
 }
 
+// iteratorForInsertBgmCharacterMap implements pgx.CopyFromSource.
+type iteratorForInsertBgmCharacterMap struct {
+	rows                 []InsertBgmCharacterMapParams
+	skippedFirstNextCall bool
+}
+
+func (r *iteratorForInsertBgmCharacterMap) Next() bool {
+	if len(r.rows) == 0 {
+		return false
+	}
+	if !r.skippedFirstNextCall {
+		r.skippedFirstNextCall = true
+		return true
+	}
+	r.rows = r.rows[1:]
+	return len(r.rows) > 0
+}
+
+func (r iteratorForInsertBgmCharacterMap) Values() ([]interface{}, error) {
+	return []interface{}{
+		r.rows[0].AnilistID,
+		r.rows[0].BgmID,
+		r.rows[0].NameCn,
+		r.rows[0].Source,
+		r.rows[0].MatchedAt,
+	}, nil
+}
+
+func (r iteratorForInsertBgmCharacterMap) Err() error {
+	return nil
+}
+
+func (q *Queries) InsertBgmCharacterMap(ctx context.Context, arg []InsertBgmCharacterMapParams) (int64, error) {
+	return q.db.CopyFrom(ctx, []string{"bgm_character_map"}, []string{"anilist_id", "bgm_id", "name_cn", "source", "matched_at"}, &iteratorForInsertBgmCharacterMap{rows: arg})
+}
+
 // iteratorForInsertBgmIdMapCopy implements pgx.CopyFromSource.
 type iteratorForInsertBgmIdMapCopy struct {
 	rows                 []InsertBgmIdMapCopyParams
@@ -81,4 +117,41 @@ func (r iteratorForInsertBgmIdMapCopy) Err() error {
 // binds positionally, so the generated column list must mirror that order.
 func (q *Queries) InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error) {
 	return q.db.CopyFrom(ctx, []string{"bgm_id_map"}, []string{"anilist_id", "bgm_id", "mal_id", "source", "anidb_id"}, &iteratorForInsertBgmIdMapCopy{rows: arg})
+}
+
+// iteratorForInsertBgmPersonMap implements pgx.CopyFromSource.
+type iteratorForInsertBgmPersonMap struct {
+	rows                 []InsertBgmPersonMapParams
+	skippedFirstNextCall bool
+}
+
+func (r *iteratorForInsertBgmPersonMap) Next() bool {
+	if len(r.rows) == 0 {
+		return false
+	}
+	if !r.skippedFirstNextCall {
+		r.skippedFirstNextCall = true
+		return true
+	}
+	r.rows = r.rows[1:]
+	return len(r.rows) > 0
+}
+
+func (r iteratorForInsertBgmPersonMap) Values() ([]interface{}, error) {
+	return []interface{}{
+		r.rows[0].AnilistID,
+		r.rows[0].BgmID,
+		r.rows[0].NameCn,
+		r.rows[0].Source,
+		r.rows[0].MatchedAt,
+	}, nil
+}
+
+func (r iteratorForInsertBgmPersonMap) Err() error {
+	return nil
+}
+
+// The rows an import adds or replaces, in one COPY.
+func (q *Queries) InsertBgmPersonMap(ctx context.Context, arg []InsertBgmPersonMapParams) (int64, error) {
+	return q.db.CopyFrom(ctx, []string{"bgm_person_map"}, []string{"anilist_id", "bgm_id", "name_cn", "source", "matched_at"}, &iteratorForInsertBgmPersonMap{rows: arg})
 }

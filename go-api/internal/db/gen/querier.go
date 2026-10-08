@@ -332,6 +332,11 @@ type Querier interface {
 	// Scoped to one source on purpose: the AniList set and the Bangumi set
 	// are replaced by different writers, and neither may clear the other's.
 	DeleteAnimeTagsBySource(ctx context.Context, animeID int32, source string) error
+	DeleteBgmCharacterMap(ctx context.Context, ids []int32) error
+	// The rows an import replaces or no longer finds.  Deleted before the
+	// inserts, so a Bangumi id moving between two AniList ids in one run never
+	// meets the unique index twice.
+	DeleteBgmPersonMap(ctx context.Context, ids []int32) error
 	// DELETE /api/comments/:id.  ON DELETE CASCADE handles any reply
 	// children — Express deleteOne() left them dangling, which is a bug
 	// the Postgres FK definition fixes for free.
@@ -1119,11 +1124,14 @@ type Querier interface {
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string, studioID *int32, isMain bool) error
 	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
 	InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error
+	InsertBgmCharacterMap(ctx context.Context, arg []InsertBgmCharacterMapParams) (int64, error)
 	// Bulk-load via pgx CopyFrom (one COPY for the whole map ~11k rows).
 	// updated_at takes its column DEFAULT now().  anidb_id is last to match the
 	// physical column order (added by migration 0013 via ALTER); pgx CopyFrom
 	// binds positionally, so the generated column list must mirror that order.
 	InsertBgmIdMapCopy(ctx context.Context, arg []InsertBgmIdMapCopyParams) (int64, error)
+	// The rows an import adds or replaces, in one COPY.
+	InsertBgmPersonMap(ctx context.Context, arg []InsertBgmPersonMapParams) (int64, error)
 	// A repeated delivery attempt returns the canonical existing row without
 	// resetting read state.  Natural keys are chosen by the caller per event.
 	//
@@ -1321,6 +1329,24 @@ type Querier interface {
 	// The order is unchanged (anilist_id) so a resumed run walks the same sequence
 	// as the run it continues, and the report of the two can be read side by side.
 	ListBgmBoundNeedingEpisodeTitles(ctx context.Context) ([]ListBgmBoundNeedingEpisodeTitlesRow, error)
+	// bgm_name_maps.sql — cmd/bgmnames: which Bangumi person or character each
+	// AniList id is, and its simplified Chinese name (migration 0045).  The
+	// matching rules are internal/bgmnames'.
+	// Every title bound to a Bangumi subject.  The binding is not trusted:
+	// the import matches names inside the title, and a wrong binding matches
+	// nothing.
+	ListBgmBoundTitles(ctx context.Context) ([]ListBgmBoundTitlesRow, error)
+	// Every voice on every bound title, with the native names AniList stores
+	// for the character and for the person.  Two sources, because a row
+	// written before 0042 has its primary voice on anime_characters and none
+	// in anime_character_voices; UNION removes the primary voice where both
+	// hold it.
+	ListBgmCastVoices(ctx context.Context) ([]ListBgmCastVoicesRow, error)
+	ListBgmCharacterMap(ctx context.Context) ([]ListBgmCharacterMapRow, error)
+	// Every staff credit on every bound title, once per person and title
+	// however many roles they hold there.
+	ListBgmCreditedStaff(ctx context.Context) ([]ListBgmCreditedStaffRow, error)
+	ListBgmPersonMap(ctx context.Context) ([]ListBgmPersonMapRow, error)
 	// ListPeopleCandidates for characters: every character a title lists
 	// (anime_characters.character_id), in the same two tiers and the same
 	// order.  anime_character_voices names no character that anime_characters
@@ -1702,6 +1728,10 @@ type Querier interface {
 	// Every release year with a non-adult title, by the same expression
 	// BrowseAnime filters on.
 	ListYearCounts(ctx context.Context) ([]ListYearCountsRow, error)
+	// Serialises imports: a second run started while one is writing waits for
+	// it (the lock ends with the transaction) instead of interleaving its
+	// deletes and inserts with the first one's.  Readers are not affected.
+	LockBgmNameMaps(ctx context.Context) error
 	// Authoritative AniList->Bangumi binding from the vendored id map
 	// (bgm_id_map, seeded from data/anilist_bgm_map.json).  The V1 worker
 	// consults this BEFORE any Bangumi search; a hit binds the subject with
