@@ -227,15 +227,18 @@ func TestCharacterAndStaffIDs_PG(t *testing.T) {
 	require.NoError(t, q.UpsertAnimeCache(ctx, NormalizeMainRow(anilist.Media{ID: 3, Title: &anilist.Title{Romaji: sptr("Row")}}, anilist.DetailDocument)))
 
 	cid, vid, sid := int32(138100), int32(112215), int32(95000)
-	require.NoError(t, q.InsertAnimeCharacter(ctx, dbgen.InsertAnimeCharacterParams{
+	_, err := q.UpsertAnimeCharacter(ctx, dbgen.UpsertAnimeCharacterParams{
 		AnimeID: 3, DisplayOrder: 0, NameEn: sptr("Frieren"), CharacterID: &cid, VoiceActorID: &vid,
-	}))
-	require.NoError(t, q.InsertAnimeCharacter(ctx, dbgen.InsertAnimeCharacterParams{
+	})
+	require.NoError(t, err)
+	_, err = q.UpsertAnimeCharacter(ctx, dbgen.UpsertAnimeCharacterParams{
 		AnimeID: 3, DisplayOrder: 1, NameEn: sptr("legacy row"), // no ids
-	}))
-	require.NoError(t, q.InsertAnimeStaffMember(ctx, dbgen.InsertAnimeStaffMemberParams{
+	})
+	require.NoError(t, err)
+	_, err = q.UpsertAnimeStaff(ctx, dbgen.UpsertAnimeStaffParams{
 		AnimeID: 3, DisplayOrder: 0, NameEn: sptr("Director"), StaffID: &sid,
-	}))
+	})
+	require.NoError(t, err)
 
 	chars, err := q.GetAnimeCharactersByID(ctx, 3)
 	require.NoError(t, err)
@@ -251,9 +254,9 @@ func TestCharacterAndStaffIDs_PG(t *testing.T) {
 	assert.Equal(t, int32(95000), *staff[0].StaffID)
 
 	zero := int32(0)
-	err = q.InsertAnimeCharacter(ctx, dbgen.InsertAnimeCharacterParams{AnimeID: 3, DisplayOrder: 2, CharacterID: &zero})
+	_, err = q.UpsertAnimeCharacter(ctx, dbgen.UpsertAnimeCharacterParams{AnimeID: 3, DisplayOrder: 2, CharacterID: &zero})
 	require.Error(t, err, "a zero id must be refused at the column, not stored")
-	err = q.InsertAnimeStaffMember(ctx, dbgen.InsertAnimeStaffMemberParams{AnimeID: 3, DisplayOrder: 1, StaffID: &zero})
+	_, err = q.UpsertAnimeStaff(ctx, dbgen.UpsertAnimeStaffParams{AnimeID: 3, DisplayOrder: 1, StaffID: &zero})
 	require.Error(t, err)
 }
 

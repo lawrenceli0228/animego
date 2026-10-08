@@ -299,10 +299,15 @@ type Querier interface {
 	// Unique constraint violations (username/email already taken) surface
 	// as pgx.PgError code 23505 — handler catches + maps to 400 DUPLICATE.
 	CreateUser(ctx context.Context, username string, email string, password string) (User, error)
-	DeleteAnimeCharacters(ctx context.Context, animeID int32) error
 	// Wipe child tables when Reset clears a row.  Express puts characters /
 	// episode_titles back to `undefined` in the document — Postgres mirrors
 	// that with a DELETE inside the reset transaction.
+	//
+	// The voices go with their characters (0042): anime_character_voices is
+	// keyed to the title, not to a character row, so nothing else would
+	// remove them.  ResetAnimeEnrichment clears the credits sweep's stamp in
+	// the same transaction, so the sweep puts the characters beyond the first
+	// page back instead of waiting out its 30 days.
 	DeleteAnimeCharactersForReset(ctx context.Context, animeID int32) error
 	DeleteAnimeEpisodeTitlesForReset(ctx context.Context, animeID int32) error
 	DeleteAnimeExternalLinks(ctx context.Context, animeID int32) error
@@ -318,9 +323,10 @@ type Querier interface {
 	// re-fetches.
 	// -------------------------------------------------------------------------
 	DeleteAnimeGenres(ctx context.Context, animeID int32) error
+	// Recommendations are still a whole-set delete + insert: only the detail
+	// document fetches them, so there is no second writer whose rows to keep.
 	DeleteAnimeRecommendations(ctx context.Context, animeID int32) error
 	DeleteAnimeRelations(ctx context.Context, animeID int32) error
-	DeleteAnimeStaff(ctx context.Context, animeID int32) error
 	DeleteAnimeStudios(ctx context.Context, animeID int32) error
 	DeleteAnimeSynonyms(ctx context.Context, animeID int32) error
 	// Scoped to one source on purpose: the AniList set and the Bangumi set
@@ -630,10 +636,16 @@ type Querier interface {
 	// Errors out cleanly with pgx.ErrNoRows when the anime doesn't exist
 	// (handler maps → 404).
 	GetAnimeCacheRowForReset(ctx context.Context, anilistID int32) (GetAnimeCacheRowForResetRow, error)
-	// Sorted by display_order so the response preserves the AniList role
-	// ordering (MAIN → SUPPORTING → BACKGROUND).  Phase 4 worker writes
-	// name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
-	// until enrichment runs.
+	// Sorted by display_order so the response preserves AniList's order
+	// ([ROLE, RELEVANCE, ID]: MAIN → SUPPORTING → BACKGROUND).  name_cn and
+	// voice_actor_cn are NULL: nothing has a source for them yet.
+	//
+	// LIMIT 25 is the /api/anime/:id contract, not an accident of storage.
+	// The table holds up to 400 characters a title since the credits sweep
+	// (0042), while the detail response -- and every consumer that decodes it
+	// -- was built on at most AniList's first page.  The detail refresh keeps
+	// that page at display_order 0..24 (credits.WriteCast), so these are the
+	// 25 AniList lists first.
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error)
 	// Authoritative total-episode count for one title, used by
 	// PATCH /api/subscriptions/:anilistId as the upper bound on currentEpisode.
@@ -688,6 +700,7 @@ type Querier interface {
 	GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error)
 	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]GetAnimeRecommendationsByIDRow, error)
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
+	// LIMIT 25 for the reason GetAnimeCharactersByID gives.
 	GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error)
 	// Every studio on the title with its id and role, for the studio page
 	// links.  Main studios first, then by name.
@@ -1095,10 +1108,6 @@ type Querier interface {
 	HealCnTitle(ctx context.Context, anilistID int32, titleChinese *string) error
 	// Bulk-load via pgx CopyFrom; updated_at takes its column DEFAULT now().
 	InsertAnidbIdMapCopy(ctx context.Context, arg []InsertAnidbIdMapCopyParams) (int64, error)
-	// display_order is the slice index (0-based) so the relational re-read
-	// preserves the AniList edge ordering Express got for free from
-	// Mongoose's array indexing.
-	InsertAnimeCharacter(ctx context.Context, arg InsertAnimeCharacterParams) error
 	InsertAnimeExternalLink(ctx context.Context, animeID int32, site string, url string, type_ *string) error
 	InsertAnimeGenre(ctx context.Context, animeID int32, genre string) error
 	InsertAnimeRecommendation(ctx context.Context, arg InsertAnimeRecommendationParams) error
@@ -1107,7 +1116,6 @@ type Querier interface {
 	// parent with two relationship facets (e.g. SEQUEL + ALTERNATIVE) so no
 	// ON CONFLICT clause — the uuid PK keeps the rows separate.
 	InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelationParams) error
-	InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error
 	InsertAnimeStudio(ctx context.Context, animeID int32, studio string, studioID *int32, isMain bool) error
 	InsertAnimeSynonym(ctx context.Context, animeID int32, synonym string) error
 	InsertAnimeTag(ctx context.Context, animeID int32, source string, name string, rank *int32, isSpoiler bool) error
@@ -1205,6 +1213,16 @@ type Querier interface {
 	// ORDER BY puts the cycling population ahead of the backlog so a
 	// multi-day backfill drain cannot delay this season's refresh behind it.
 	ListAnilistRatingCandidates(ctx context.Context, currentYear int32, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error)
+	// Titles whose characters the credits sweep should fetch in full: AniList
+	// said there is a second page, or -- for a title not read since 0042 --
+	// it holds a full first page, which is what a capped title looks like
+	// from here.  Due when never swept or swept longer ago than stale_after.
+	//
+	// Never-swept titles first, so the backfill cannot be starved by
+	// re-checks; most popular first within each, because that is the order
+	// the missing characters are missed in.  Adult titles are not excluded:
+	// they are stored like every other row and filtered where they are read.
+	ListAnimeCastCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error)
 	// Rows the facts sweep (queue/anime_facts.go) should ask AniList about.
 	//
 	// Two populations, one query, same split as ListAnilistRatingCandidates:
@@ -1243,6 +1261,8 @@ type Querier interface {
 	// In PG the column is `NOT NULL DEFAULT 0` (see 0001_init.up.sql:53) so
 	// "missing" is impossible — a single = 0 covers it.
 	ListAnimeForReEnrichByVersion(ctx context.Context, bangumiVersion int32) ([]ListAnimeForReEnrichByVersionRow, error)
+	// ListAnimeCastCandidates for staff.
+	ListAnimeStaffCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error)
 	// The Bangumi half of ListAnilistRatingCandidates.  Same two populations
 	// and the same ordering; see that query for why they are shaped this way.
 	//
@@ -1897,6 +1917,29 @@ type Querier interface {
 	// Used by re-enrich v=2 path to mark no-bgm rows as fully enriched.
 	// ANY($1::int[]) takes a Postgres int array — sqlc generates []int32.
 	PromoteAnimeToV3(ctx context.Context, dollar_1 []int32) error
+	// Clears the voices a write is about to replace (those of the characters
+	// it wrote) and any voice whose character row no longer exists for the
+	// title -- left by a whole-list write, an admin reset, or a first page
+	// that dropped a character.  Voices of characters the write did not
+	// touch stay with them.
+	PruneAnimeCharacterVoices(ctx context.Context, animeID int32, characterIds []int32) error
+	// After a write has upserted its rows (keep): in whole-list mode every
+	// other row of the title goes -- the write was the whole list.  In
+	// first-page mode only the other rows with no character id go: those are
+	// pre-0037 rows or an earlier copy of an id-less node, and no later write
+	// could ever address them.  The rows beyond the first page stay.
+	PruneAnimeCharacters(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error
+	// PruneAnimeCharacters for staff.
+	PruneAnimeStaff(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error
+	// First-page mode only: move every row the write did not touch to
+	// display_order first_order, first_order+1, ..., keeping their existing
+	// relative order.  After it, the first page is display_order 0..n-1 and
+	// nothing else sorts among it -- which is what GetAnimeCharactersByID's
+	// LIMIT relies on -- even when a character slipped off the first page
+	// and kept the place it used to have.
+	RenumberAnimeCharacters(ctx context.Context, firstOrder int32, animeID int32, keep []uuid.UUID) error
+	// RenumberAnimeCharacters for staff.
+	RenumberAnimeStaff(ctx context.Context, firstOrder int32, animeID int32, keep []uuid.UUID) error
 	// Withdraw a pre-0011 binding that names another work, and everything that
 	// was copied out of it, then hand the row back to V1.
 	//
@@ -1973,6 +2016,12 @@ type Querier interface {
 	// away — and leave the sweep unable to notice, since 'ok' on a finished show
 	// is a frozen state.  Clearing them puts the row back at
 	// episodes_bgm_attempted_at IS NULL, i.e. at the front of the next sweep.
+	//
+	// cast_checked_at goes because the reset deletes every character row
+	// (DeleteAnimeCharactersForReset), including the ones only the credits
+	// sweep fetches.  cast_has_more is kept: it is AniList's answer about page
+	// 2, still true, and with the stamp cleared it is what puts the title back
+	// in the sweep's candidate list.
 	ResetAnimeEnrichment(ctx context.Context, anilistID int32) error
 	// reset-password write: sets the new bcrypt hash, clears both reset-token
 	// columns, and clears ALL THREE refresh-session columns.
@@ -2099,6 +2148,11 @@ type Querier interface {
 	// LIMIT slices an arbitrary heap order out of a tie group and the page a
 	// reader sees drifts with vacuum.
 	SearchAnimeCacheLocal(ctx context.Context, arg SearchAnimeCacheLocalParams) ([]int32, error)
+	// What the detail refresh learned about page 2: pageInfo.hasNextPage on
+	// the characters and staff connections.  NULL leaves a flag alone (a
+	// document that did not say).  updated_at does not move -- the sitemap
+	// lastmod is about what the page shows, and this is bookkeeping.
+	SetAnimeCreditsHasMore(ctx context.Context, castHasMore *bool, staffHasMore *bool, anilistID int32) error
 	// forgot-password sets the token + 1h expiry.  Caller generates the
 	// token via crypto/rand (32 random bytes hex-encoded — matches
 	// Express's crypto.randomBytes(32).toString('hex')).
@@ -2112,6 +2166,13 @@ type Querier interface {
 	// The profile header remains resolvable so existing profile links do not turn
 	// into misleading 404s; the social handler redacts the watching list instead.
 	SetUserPublic(ctx context.Context, iD uuid.UUID, isPublic bool) error
+	// The credits sweep's read stamp for characters, with what page 1 said
+	// about page 2 (NULL: unchanged -- a failed or absent read learned
+	// nothing).  checked_at comes from the caller because a failed read is
+	// stamped back-dated; see queue/anime_credits.go.
+	StampAnimeCastChecked(ctx context.Context, checkedAt pgtype.Timestamptz, hasMore *bool, anilistID int32) error
+	// StampAnimeCastChecked for staff.
+	StampAnimeStaffChecked(ctx context.Context, checkedAt pgtype.Timestamptz, hasMore *bool, anilistID int32) error
 	// Stamp the attempt, pinned to the binding the attempt was made against.
 	//
 	// Written on every pass regardless of what the pass produced -- that is what
@@ -2523,6 +2584,34 @@ type Querier interface {
 	// them in a separate transaction if needed.  /search + /schedule never
 	// mutate child tables; only /:anilistId detail-fetch does.
 	UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCacheParams) error
+	// -------------------------------------------------------------------------
+	// Characters, voices and staff: addressed rows, not delete + insert.
+	//
+	// These three tables left the delete-then-insert pattern above in 0042.
+	// Two writers fill them -- the detail refresh (AniList's first page) and
+	// the credits sweep (everything up to 400) -- and a refresh that replaced
+	// the table would erase the sweep's rows every 24 hours.  So a write
+	// upserts the rows it has, by AniList's key, and then removes only what
+	// its mode says it may: see credits.WriteCast for the statement order and
+	// the two modes.  Every insert is an upsert because the two writers can
+	// meet on the same title; whichever lands second updates the row the
+	// first wrote instead of failing on the key.
+	// -------------------------------------------------------------------------
+	// One character row, keyed (anime_id, character_id).  A row with no
+	// character id (a node AniList sent without one) never conflicts and is
+	// always inserted; the write that follows removes the previous copy.
+	//
+	// name_cn is not written and survives an update: no source fills it yet,
+	// and the day one does it should not be erased by a refresh.
+	// voice_actor_cn is the Chinese name of whoever voice_actor_id names, so
+	// it survives only while that person stays the same.  RETURNING id is
+	// how the write knows which rows it touched.
+	UpsertAnimeCharacter(ctx context.Context, arg UpsertAnimeCharacterParams) (uuid.UUID, error)
+	UpsertAnimeCharacterVoice(ctx context.Context, arg UpsertAnimeCharacterVoiceParams) error
+	// One staff row, keyed (anime_id, staff_id, role): a person appears once
+	// per role.  The index is NULLS NOT DISTINCT, so an empty role is a key
+	// like any other.  Same id-less and RETURNING rules as characters.
+	UpsertAnimeStaff(ctx context.Context, arg UpsertAnimeStaffParams) (uuid.UUID, error)
 	UpsertCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID, reaction string) (CommentReaction, error)
 	// The notification is intentionally insert-only on conflict: retrying a like
 	// must not turn an already-read notification back into an unread one.

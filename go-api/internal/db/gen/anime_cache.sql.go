@@ -8,6 +8,7 @@ package dbgen
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -572,15 +573,6 @@ func (q *Queries) CountWatchers(ctx context.Context, anilistID int32) (int64, er
 	return total, err
 }
 
-const deleteAnimeCharacters = `-- name: DeleteAnimeCharacters :exec
-DELETE FROM anime_characters WHERE anime_id = $1
-`
-
-func (q *Queries) DeleteAnimeCharacters(ctx context.Context, animeID int32) error {
-	_, err := q.db.Exec(ctx, deleteAnimeCharacters, animeID)
-	return err
-}
-
 const deleteAnimeExternalLinks = `-- name: DeleteAnimeExternalLinks :exec
 DELETE FROM anime_external_links WHERE anime_id = $1
 `
@@ -612,9 +604,12 @@ func (q *Queries) DeleteAnimeGenres(ctx context.Context, animeID int32) error {
 }
 
 const deleteAnimeRecommendations = `-- name: DeleteAnimeRecommendations :exec
+
 DELETE FROM anime_recommendations WHERE anime_id = $1
 `
 
+// Recommendations are still a whole-set delete + insert: only the detail
+// document fetches them, so there is no second writer whose rows to keep.
 func (q *Queries) DeleteAnimeRecommendations(ctx context.Context, animeID int32) error {
 	_, err := q.db.Exec(ctx, deleteAnimeRecommendations, animeID)
 	return err
@@ -626,15 +621,6 @@ DELETE FROM anime_relations WHERE anime_id = $1
 
 func (q *Queries) DeleteAnimeRelations(ctx context.Context, animeID int32) error {
 	_, err := q.db.Exec(ctx, deleteAnimeRelations, animeID)
-	return err
-}
-
-const deleteAnimeStaff = `-- name: DeleteAnimeStaff :exec
-DELETE FROM anime_staff WHERE anime_id = $1
-`
-
-func (q *Queries) DeleteAnimeStaff(ctx context.Context, animeID int32) error {
-	_, err := q.db.Exec(ctx, deleteAnimeStaff, animeID)
 	return err
 }
 
@@ -1013,7 +999,8 @@ SELECT
     voice_actor_id
 FROM anime_characters
 WHERE anime_id = $1
-ORDER BY display_order
+ORDER BY display_order, id
+LIMIT 25
 `
 
 type GetAnimeCharactersByIDRow struct {
@@ -1030,10 +1017,16 @@ type GetAnimeCharactersByIDRow struct {
 	VoiceActorID       *int32  `json:"voiceActorId"`
 }
 
-// Sorted by display_order so the response preserves the AniList role
-// ordering (MAIN → SUPPORTING → BACKGROUND).  Phase 4 worker writes
-// name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
-// until enrichment runs.
+// Sorted by display_order so the response preserves AniList's order
+// ([ROLE, RELEVANCE, ID]: MAIN → SUPPORTING → BACKGROUND).  name_cn and
+// voice_actor_cn are NULL: nothing has a source for them yet.
+//
+// LIMIT 25 is the /api/anime/:id contract, not an accident of storage.
+// The table holds up to 400 characters a title since the credits sweep
+// (0042), while the detail response -- and every consumer that decodes it
+// -- was built on at most AniList's first page.  The detail refresh keeps
+// that page at display_order 0..24 (credits.WriteCast), so these are the
+// 25 AniList lists first.
 func (q *Queries) GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error) {
 	rows, err := q.db.Query(ctx, getAnimeCharactersByID, animeID)
 	if err != nil {
@@ -1506,7 +1499,8 @@ const getAnimeStaffByID = `-- name: GetAnimeStaffByID :many
 SELECT name_en, name_ja, image_url, role, staff_id
 FROM anime_staff
 WHERE anime_id = $1
-ORDER BY display_order
+ORDER BY display_order, id
+LIMIT 25
 `
 
 type GetAnimeStaffByIDRow struct {
@@ -1517,6 +1511,7 @@ type GetAnimeStaffByIDRow struct {
 	StaffID  *int32  `json:"staffId"`
 }
 
+// LIMIT 25 for the reason GetAnimeCharactersByID gives.
 func (q *Queries) GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error) {
 	rows, err := q.db.Query(ctx, getAnimeStaffByID, animeID)
 	if err != nil {
@@ -2571,58 +2566,6 @@ func (q *Queries) GetYearlyTop(ctx context.Context, seasonYear *int32, limit int
 	return items, nil
 }
 
-const insertAnimeCharacter = `-- name: InsertAnimeCharacter :exec
-INSERT INTO anime_characters (
-    anime_id, display_order,
-    name_en, name_ja, name_cn,
-    image_url, role,
-    voice_actor_en, voice_actor_ja, voice_actor_image_url,
-    character_id, voice_actor_id
-) VALUES (
-    $1, $2,
-    $3, $4, $5,
-    $6, $7,
-    $8, $9, $10,
-    $11, $12
-)
-`
-
-type InsertAnimeCharacterParams struct {
-	AnimeID            int32   `json:"animeId"`
-	DisplayOrder       int32   `json:"displayOrder"`
-	NameEn             *string `json:"nameEn"`
-	NameJa             *string `json:"nameJa"`
-	NameCn             *string `json:"nameCn"`
-	ImageUrl           *string `json:"imageUrl"`
-	Role               *string `json:"role"`
-	VoiceActorEn       *string `json:"voiceActorEn"`
-	VoiceActorJa       *string `json:"voiceActorJa"`
-	VoiceActorImageUrl *string `json:"voiceActorImageUrl"`
-	CharacterID        *int32  `json:"characterId"`
-	VoiceActorID       *int32  `json:"voiceActorId"`
-}
-
-// display_order is the slice index (0-based) so the relational re-read
-// preserves the AniList edge ordering Express got for free from
-// Mongoose's array indexing.
-func (q *Queries) InsertAnimeCharacter(ctx context.Context, arg InsertAnimeCharacterParams) error {
-	_, err := q.db.Exec(ctx, insertAnimeCharacter,
-		arg.AnimeID,
-		arg.DisplayOrder,
-		arg.NameEn,
-		arg.NameJa,
-		arg.NameCn,
-		arg.ImageUrl,
-		arg.Role,
-		arg.VoiceActorEn,
-		arg.VoiceActorJa,
-		arg.VoiceActorImageUrl,
-		arg.CharacterID,
-		arg.VoiceActorID,
-	)
-	return err
-}
-
 const insertAnimeExternalLink = `-- name: InsertAnimeExternalLink :exec
 INSERT INTO anime_external_links (anime_id, site, url, type)
 VALUES ($1, $2, $3, $4)
@@ -2736,41 +2679,6 @@ func (q *Queries) InsertAnimeRelation(ctx context.Context, arg InsertAnimeRelati
 	return err
 }
 
-const insertAnimeStaffMember = `-- name: InsertAnimeStaffMember :exec
-INSERT INTO anime_staff (
-    anime_id, display_order,
-    name_en, name_ja, image_url, role,
-    staff_id
-) VALUES (
-    $1, $2,
-    $3, $4, $5, $6,
-    $7
-)
-`
-
-type InsertAnimeStaffMemberParams struct {
-	AnimeID      int32   `json:"animeId"`
-	DisplayOrder int32   `json:"displayOrder"`
-	NameEn       *string `json:"nameEn"`
-	NameJa       *string `json:"nameJa"`
-	ImageUrl     *string `json:"imageUrl"`
-	Role         *string `json:"role"`
-	StaffID      *int32  `json:"staffId"`
-}
-
-func (q *Queries) InsertAnimeStaffMember(ctx context.Context, arg InsertAnimeStaffMemberParams) error {
-	_, err := q.db.Exec(ctx, insertAnimeStaffMember,
-		arg.AnimeID,
-		arg.DisplayOrder,
-		arg.NameEn,
-		arg.NameJa,
-		arg.ImageUrl,
-		arg.Role,
-		arg.StaffID,
-	)
-	return err
-}
-
 const insertAnimeStudio = `-- name: InsertAnimeStudio :exec
 INSERT INTO anime_studios (anime_id, studio, studio_id, is_main) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING
 `
@@ -2854,6 +2762,46 @@ LIMIT $3::int
 // multi-day backfill drain cannot delay this season's refresh behind it.
 func (q *Queries) ListAnilistRatingCandidates(ctx context.Context, currentYear int32, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error) {
 	rows, err := q.db.Query(ctx, listAnilistRatingCandidates, currentYear, staleAfter, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var anilist_id int32
+		if err := rows.Scan(&anilist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, anilist_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAnimeCastCandidates = `-- name: ListAnimeCastCandidates :many
+SELECT a.anilist_id
+FROM anime_cache a
+WHERE (a.cast_checked_at IS NULL OR a.cast_checked_at < now() - $1::interval)
+  AND (a.cast_has_more
+       OR (a.cast_has_more IS NULL
+           AND (SELECT count(*) FROM anime_characters c WHERE c.anime_id = a.anilist_id) >= $2::int))
+ORDER BY (a.cast_checked_at IS NULL) DESC, a.popularity DESC NULLS LAST, a.anilist_id
+LIMIT $3::int
+`
+
+// Titles whose characters the credits sweep should fetch in full: AniList
+// said there is a second page, or -- for a title not read since 0042 --
+// it holds a full first page, which is what a capped title looks like
+// from here.  Due when never swept or swept longer ago than stale_after.
+//
+// Never-swept titles first, so the backfill cannot be starved by
+// re-checks; most popular first within each, because that is the order
+// the missing characters are missed in.  Adult titles are not excluded:
+// they are stored like every other row and filtered where they are read.
+func (q *Queries) ListAnimeCastCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listAnimeCastCandidates, staleAfter, fullPage, rowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -2983,6 +2931,38 @@ func (q *Queries) ListAnimeForHantBackfill(ctx context.Context) ([]ListAnimeForH
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAnimeStaffCandidates = `-- name: ListAnimeStaffCandidates :many
+SELECT a.anilist_id
+FROM anime_cache a
+WHERE (a.staff_checked_at IS NULL OR a.staff_checked_at < now() - $1::interval)
+  AND (a.staff_has_more
+       OR (a.staff_has_more IS NULL
+           AND (SELECT count(*) FROM anime_staff s WHERE s.anime_id = a.anilist_id) >= $2::int))
+ORDER BY (a.staff_checked_at IS NULL) DESC, a.popularity DESC NULLS LAST, a.anilist_id
+LIMIT $3::int
+`
+
+// ListAnimeCastCandidates for staff.
+func (q *Queries) ListAnimeStaffCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listAnimeStaffCandidates, staleAfter, fullPage, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var anilist_id int32
+		if err := rows.Scan(&anilist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, anilist_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -4008,6 +3988,101 @@ func (q *Queries) MarkEpisodesBgmAttempted(ctx context.Context, outcome string, 
 	return result.RowsAffected(), nil
 }
 
+const pruneAnimeCharacterVoices = `-- name: PruneAnimeCharacterVoices :exec
+DELETE FROM anime_character_voices v
+WHERE v.anime_id = $1
+  AND (v.character_id = ANY($2::int[])
+       OR NOT EXISTS (
+           SELECT 1 FROM anime_characters c
+           WHERE c.anime_id = v.anime_id AND c.character_id = v.character_id
+       ))
+`
+
+// Clears the voices a write is about to replace (those of the characters
+// it wrote) and any voice whose character row no longer exists for the
+// title -- left by a whole-list write, an admin reset, or a first page
+// that dropped a character.  Voices of characters the write did not
+// touch stay with them.
+func (q *Queries) PruneAnimeCharacterVoices(ctx context.Context, animeID int32, characterIds []int32) error {
+	_, err := q.db.Exec(ctx, pruneAnimeCharacterVoices, animeID, characterIds)
+	return err
+}
+
+const pruneAnimeCharacters = `-- name: PruneAnimeCharacters :exec
+DELETE FROM anime_characters
+WHERE anime_id = $1
+  AND NOT (id = ANY($2::uuid[]))
+  AND ($3::boolean OR character_id IS NULL)
+`
+
+// After a write has upserted its rows (keep): in whole-list mode every
+// other row of the title goes -- the write was the whole list.  In
+// first-page mode only the other rows with no character id go: those are
+// pre-0037 rows or an earlier copy of an id-less node, and no later write
+// could ever address them.  The rows beyond the first page stay.
+func (q *Queries) PruneAnimeCharacters(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error {
+	_, err := q.db.Exec(ctx, pruneAnimeCharacters, animeID, keep, wholeList)
+	return err
+}
+
+const pruneAnimeStaff = `-- name: PruneAnimeStaff :exec
+DELETE FROM anime_staff
+WHERE anime_id = $1
+  AND NOT (id = ANY($2::uuid[]))
+  AND ($3::boolean OR staff_id IS NULL)
+`
+
+// PruneAnimeCharacters for staff.
+func (q *Queries) PruneAnimeStaff(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error {
+	_, err := q.db.Exec(ctx, pruneAnimeStaff, animeID, keep, wholeList)
+	return err
+}
+
+const renumberAnimeCharacters = `-- name: RenumberAnimeCharacters :exec
+WITH rest AS (
+    SELECT r.id, row_number() OVER (ORDER BY r.display_order, r.id) AS rn
+    FROM anime_characters r
+    WHERE r.anime_id = $2
+      AND NOT (r.id = ANY($3::uuid[]))
+)
+UPDATE anime_characters c
+SET display_order = $1::int + rest.rn::int - 1
+FROM rest
+WHERE c.id = rest.id
+  AND c.display_order <> $1::int + rest.rn::int - 1
+`
+
+// First-page mode only: move every row the write did not touch to
+// display_order first_order, first_order+1, ..., keeping their existing
+// relative order.  After it, the first page is display_order 0..n-1 and
+// nothing else sorts among it -- which is what GetAnimeCharactersByID's
+// LIMIT relies on -- even when a character slipped off the first page
+// and kept the place it used to have.
+func (q *Queries) RenumberAnimeCharacters(ctx context.Context, firstOrder int32, animeID int32, keep []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, renumberAnimeCharacters, firstOrder, animeID, keep)
+	return err
+}
+
+const renumberAnimeStaff = `-- name: RenumberAnimeStaff :exec
+WITH rest AS (
+    SELECT r.id, row_number() OVER (ORDER BY r.display_order, r.id) AS rn
+    FROM anime_staff r
+    WHERE r.anime_id = $2
+      AND NOT (r.id = ANY($3::uuid[]))
+)
+UPDATE anime_staff s
+SET display_order = $1::int + rest.rn::int - 1
+FROM rest
+WHERE s.id = rest.id
+  AND s.display_order <> $1::int + rest.rn::int - 1
+`
+
+// RenumberAnimeCharacters for staff.
+func (q *Queries) RenumberAnimeStaff(ctx context.Context, firstOrder int32, animeID int32, keep []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, renumberAnimeStaff, firstOrder, animeID, keep)
+	return err
+}
+
 const repudiateLegacyBangumiBinding = `-- name: RepudiateLegacyBangumiBinding :execrows
 WITH target AS (
     SELECT ac.anilist_id
@@ -4263,6 +4338,51 @@ func (q *Queries) SearchAnimeCacheLocal(ctx context.Context, arg SearchAnimeCach
 		return nil, err
 	}
 	return items, nil
+}
+
+const setAnimeCreditsHasMore = `-- name: SetAnimeCreditsHasMore :exec
+UPDATE anime_cache
+SET cast_has_more  = COALESCE($1::boolean, cast_has_more),
+    staff_has_more = COALESCE($2::boolean, staff_has_more)
+WHERE anilist_id = $3
+`
+
+// What the detail refresh learned about page 2: pageInfo.hasNextPage on
+// the characters and staff connections.  NULL leaves a flag alone (a
+// document that did not say).  updated_at does not move -- the sitemap
+// lastmod is about what the page shows, and this is bookkeeping.
+func (q *Queries) SetAnimeCreditsHasMore(ctx context.Context, castHasMore *bool, staffHasMore *bool, anilistID int32) error {
+	_, err := q.db.Exec(ctx, setAnimeCreditsHasMore, castHasMore, staffHasMore, anilistID)
+	return err
+}
+
+const stampAnimeCastChecked = `-- name: StampAnimeCastChecked :exec
+UPDATE anime_cache
+SET cast_checked_at = $1,
+    cast_has_more   = COALESCE($2::boolean, cast_has_more)
+WHERE anilist_id = $3
+`
+
+// The credits sweep's read stamp for characters, with what page 1 said
+// about page 2 (NULL: unchanged -- a failed or absent read learned
+// nothing).  checked_at comes from the caller because a failed read is
+// stamped back-dated; see queue/anime_credits.go.
+func (q *Queries) StampAnimeCastChecked(ctx context.Context, checkedAt pgtype.Timestamptz, hasMore *bool, anilistID int32) error {
+	_, err := q.db.Exec(ctx, stampAnimeCastChecked, checkedAt, hasMore, anilistID)
+	return err
+}
+
+const stampAnimeStaffChecked = `-- name: StampAnimeStaffChecked :exec
+UPDATE anime_cache
+SET staff_checked_at = $1,
+    staff_has_more   = COALESCE($2::boolean, staff_has_more)
+WHERE anilist_id = $3
+`
+
+// StampAnimeCastChecked for staff.
+func (q *Queries) StampAnimeStaffChecked(ctx context.Context, checkedAt pgtype.Timestamptz, hasMore *bool, anilistID int32) error {
+	_, err := q.db.Exec(ctx, stampAnimeStaffChecked, checkedAt, hasMore, anilistID)
+	return err
 }
 
 const touchEpisodeTitlesAt = `-- name: TouchEpisodeTitlesAt :execrows
@@ -4861,6 +4981,186 @@ func (q *Queries) UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCachePara
 		arg.NextAiringEpisode,
 	)
 	return err
+}
+
+const upsertAnimeCharacter = `-- name: UpsertAnimeCharacter :one
+
+INSERT INTO anime_characters (
+    anime_id, display_order,
+    name_en, name_ja, image_url, role,
+    voice_actor_en, voice_actor_ja, voice_actor_image_url,
+    character_id, voice_actor_id
+) VALUES (
+    $1, $2,
+    $3, $4, $5, $6,
+    $7, $8, $9,
+    $10, $11
+)
+ON CONFLICT (anime_id, character_id) WHERE character_id IS NOT NULL DO UPDATE SET
+    display_order         = EXCLUDED.display_order,
+    name_en               = EXCLUDED.name_en,
+    name_ja               = EXCLUDED.name_ja,
+    image_url             = EXCLUDED.image_url,
+    role                  = EXCLUDED.role,
+    voice_actor_en        = EXCLUDED.voice_actor_en,
+    voice_actor_ja        = EXCLUDED.voice_actor_ja,
+    voice_actor_image_url = EXCLUDED.voice_actor_image_url,
+    voice_actor_cn        = CASE
+        WHEN anime_characters.voice_actor_id IS NOT DISTINCT FROM EXCLUDED.voice_actor_id
+        THEN anime_characters.voice_actor_cn
+    END,
+    voice_actor_id        = EXCLUDED.voice_actor_id
+RETURNING id
+`
+
+type UpsertAnimeCharacterParams struct {
+	AnimeID            int32   `json:"animeId"`
+	DisplayOrder       int32   `json:"displayOrder"`
+	NameEn             *string `json:"nameEn"`
+	NameJa             *string `json:"nameJa"`
+	ImageUrl           *string `json:"imageUrl"`
+	Role               *string `json:"role"`
+	VoiceActorEn       *string `json:"voiceActorEn"`
+	VoiceActorJa       *string `json:"voiceActorJa"`
+	VoiceActorImageUrl *string `json:"voiceActorImageUrl"`
+	CharacterID        *int32  `json:"characterId"`
+	VoiceActorID       *int32  `json:"voiceActorId"`
+}
+
+// -------------------------------------------------------------------------
+// Characters, voices and staff: addressed rows, not delete + insert.
+//
+// These three tables left the delete-then-insert pattern above in 0042.
+// Two writers fill them -- the detail refresh (AniList's first page) and
+// the credits sweep (everything up to 400) -- and a refresh that replaced
+// the table would erase the sweep's rows every 24 hours.  So a write
+// upserts the rows it has, by AniList's key, and then removes only what
+// its mode says it may: see credits.WriteCast for the statement order and
+// the two modes.  Every insert is an upsert because the two writers can
+// meet on the same title; whichever lands second updates the row the
+// first wrote instead of failing on the key.
+// -------------------------------------------------------------------------
+// One character row, keyed (anime_id, character_id).  A row with no
+// character id (a node AniList sent without one) never conflicts and is
+// always inserted; the write that follows removes the previous copy.
+//
+// name_cn is not written and survives an update: no source fills it yet,
+// and the day one does it should not be erased by a refresh.
+// voice_actor_cn is the Chinese name of whoever voice_actor_id names, so
+// it survives only while that person stays the same.  RETURNING id is
+// how the write knows which rows it touched.
+func (q *Queries) UpsertAnimeCharacter(ctx context.Context, arg UpsertAnimeCharacterParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertAnimeCharacter,
+		arg.AnimeID,
+		arg.DisplayOrder,
+		arg.NameEn,
+		arg.NameJa,
+		arg.ImageUrl,
+		arg.Role,
+		arg.VoiceActorEn,
+		arg.VoiceActorJa,
+		arg.VoiceActorImageUrl,
+		arg.CharacterID,
+		arg.VoiceActorID,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const upsertAnimeCharacterVoice = `-- name: UpsertAnimeCharacterVoice :exec
+INSERT INTO anime_character_voices (
+    anime_id, character_id, staff_id, display_order,
+    language, role_notes, dub_group,
+    name_full, name_native, image_url
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, $9, $10
+)
+ON CONFLICT (anime_id, character_id, staff_id) DO UPDATE SET
+    display_order = EXCLUDED.display_order,
+    language      = EXCLUDED.language,
+    role_notes    = EXCLUDED.role_notes,
+    dub_group     = EXCLUDED.dub_group,
+    name_full     = EXCLUDED.name_full,
+    name_native   = EXCLUDED.name_native,
+    image_url     = EXCLUDED.image_url
+`
+
+type UpsertAnimeCharacterVoiceParams struct {
+	AnimeID      int32   `json:"animeId"`
+	CharacterID  int32   `json:"characterId"`
+	StaffID      int32   `json:"staffId"`
+	DisplayOrder int32   `json:"displayOrder"`
+	Language     *string `json:"language"`
+	RoleNotes    *string `json:"roleNotes"`
+	DubGroup     *string `json:"dubGroup"`
+	NameFull     *string `json:"nameFull"`
+	NameNative   *string `json:"nameNative"`
+	ImageUrl     *string `json:"imageUrl"`
+}
+
+func (q *Queries) UpsertAnimeCharacterVoice(ctx context.Context, arg UpsertAnimeCharacterVoiceParams) error {
+	_, err := q.db.Exec(ctx, upsertAnimeCharacterVoice,
+		arg.AnimeID,
+		arg.CharacterID,
+		arg.StaffID,
+		arg.DisplayOrder,
+		arg.Language,
+		arg.RoleNotes,
+		arg.DubGroup,
+		arg.NameFull,
+		arg.NameNative,
+		arg.ImageUrl,
+	)
+	return err
+}
+
+const upsertAnimeStaff = `-- name: UpsertAnimeStaff :one
+INSERT INTO anime_staff (
+    anime_id, display_order,
+    name_en, name_ja, image_url, role,
+    staff_id
+) VALUES (
+    $1, $2,
+    $3, $4, $5, $6,
+    $7
+)
+ON CONFLICT (anime_id, staff_id, role) WHERE staff_id IS NOT NULL DO UPDATE SET
+    display_order = EXCLUDED.display_order,
+    name_en       = EXCLUDED.name_en,
+    name_ja       = EXCLUDED.name_ja,
+    image_url     = EXCLUDED.image_url
+RETURNING id
+`
+
+type UpsertAnimeStaffParams struct {
+	AnimeID      int32   `json:"animeId"`
+	DisplayOrder int32   `json:"displayOrder"`
+	NameEn       *string `json:"nameEn"`
+	NameJa       *string `json:"nameJa"`
+	ImageUrl     *string `json:"imageUrl"`
+	Role         *string `json:"role"`
+	StaffID      *int32  `json:"staffId"`
+}
+
+// One staff row, keyed (anime_id, staff_id, role): a person appears once
+// per role.  The index is NULLS NOT DISTINCT, so an empty role is a key
+// like any other.  Same id-less and RETURNING rules as characters.
+func (q *Queries) UpsertAnimeStaff(ctx context.Context, arg UpsertAnimeStaffParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertAnimeStaff,
+		arg.AnimeID,
+		arg.DisplayOrder,
+		arg.NameEn,
+		arg.NameJa,
+		arg.ImageUrl,
+		arg.Role,
+		arg.StaffID,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const upsertEpisodeTitleSourced = `-- name: UpsertEpisodeTitleSourced :execrows

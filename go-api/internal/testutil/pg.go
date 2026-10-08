@@ -47,6 +47,9 @@ var allTables = []string{
 	"anime_studios",
 	"anime_relations",
 	"anime_characters",
+	// Every voice of a character (migration 0042).  CASCADE from
+	// anime_cache would reach it anyway; listed to keep the inventory true.
+	"anime_character_voices",
 	"anime_staff",
 	"anime_recommendations",
 	"anime_episode_titles",

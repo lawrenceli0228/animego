@@ -130,12 +130,21 @@ func (q *Queries) AdminUpdateUser(ctx context.Context, username *string, email *
 }
 
 const deleteAnimeCharactersForReset = `-- name: DeleteAnimeCharactersForReset :exec
-DELETE FROM anime_characters WHERE anime_id = $1
+WITH voices AS (
+    DELETE FROM anime_character_voices v WHERE v.anime_id = $1
+)
+DELETE FROM anime_characters c WHERE c.anime_id = $1
 `
 
 // Wipe child tables when Reset clears a row.  Express puts characters /
 // episode_titles back to `undefined` in the document — Postgres mirrors
 // that with a DELETE inside the reset transaction.
+//
+// The voices go with their characters (0042): anime_character_voices is
+// keyed to the title, not to a character row, so nothing else would
+// remove them.  ResetAnimeEnrichment clears the credits sweep's stamp in
+// the same transaction, so the sweep puts the characters beyond the first
+// page back instead of waiting out its 30 days.
 func (q *Queries) DeleteAnimeCharactersForReset(ctx context.Context, animeID int32) error {
 	_, err := q.db.Exec(ctx, deleteAnimeCharactersForReset, animeID)
 	return err
@@ -900,6 +909,7 @@ SET
     episodes_bgm_attempted_at = NULL,
     episodes_bgm_outcome      = NULL,
     episodes_bgm_reason       = NULL,
+    cast_checked_at = NULL,
     updated_at      = now()
 WHERE anilist_id = $1
 `
@@ -925,6 +935,12 @@ WHERE anilist_id = $1
 // away — and leave the sweep unable to notice, since 'ok' on a finished show
 // is a frozen state.  Clearing them puts the row back at
 // episodes_bgm_attempted_at IS NULL, i.e. at the front of the next sweep.
+//
+// cast_checked_at goes because the reset deletes every character row
+// (DeleteAnimeCharactersForReset), including the ones only the credits
+// sweep fetches.  cast_has_more is kept: it is AniList's answer about page
+// 2, still true, and with the stamp cleared it is what puts the title back
+// in the sweep's candidate list.
 func (q *Queries) ResetAnimeEnrichment(ctx context.Context, anilistID int32) error {
 	_, err := q.db.Exec(ctx, resetAnimeEnrichment, anilistID)
 	return err
