@@ -749,6 +749,10 @@ type Querier interface {
 	// id_map_agrees asks whether the vendored map names THIS pair -- the same
 	// test as description_cn_eligible (migration 0016).
 	GetBangumiBindingIdentity(ctx context.Context, anilistID int32) (GetBangumiBindingIdentityRow, error)
+	// GetPersonIdentity for a character.  The spoiler aliases are not read:
+	// the page does not show them, and an answer that carries them puts them
+	// in the page source.
+	GetCharacterIdentity(ctx context.Context, id int32) (GetCharacterIdentityRow, error)
 	// DELETE pre-check: read the row so we can confirm ownership before
 	// deleting.  Returns the user_id the comment was authored by; handler
 	// compares against claims.UserID.
@@ -969,6 +973,20 @@ type Querier interface {
 	// 0022 called out as expected: there is no predicate to accelerate and an
 	// index on this table would cost more than the scan it saves.
 	GetHantStats(ctx context.Context) (GetHantStatsRow, error)
+	// people_pages.sql — the person and character pages (internal/people).
+	// Database only; adult titles are filtered here, where credits are read,
+	// and a profile row counts only once AniList returned it (fetched_at).
+	// A person's AniList profile, if the sweep has fetched one, and Bangumi's
+	// match, if the import made one.  Always one row -- the id is selected from
+	// a one-row VALUES list and both sources are LEFT JOINed onto it -- so "no
+	// profile" and "no match" are NULL columns rather than two error paths.
+	// has_profile tells a fetched profile from an absent one, since every
+	// profile column can be NULL on a real profile too.
+	//
+	// The alternative names are not read.  For a voice actor AniList's list
+	// carries the pseudonyms they work under elsewhere, adult games included,
+	// and a person page is not the place to join those to their name.
+	GetPersonIdentity(ctx context.Context, id int32) (GetPersonIdentityRow, error)
 	// ==================== Public profile ====================
 	// Aggregate counts for the profile header.  Two correlated subqueries
 	// so it's one round-trip.  followers = "how many follow this user",
@@ -1353,11 +1371,32 @@ type Querier interface {
 	// however many roles they hold there.
 	ListBgmCreditedStaff(ctx context.Context) ([]ListBgmCreditedStaffRow, error)
 	ListBgmPersonMap(ctx context.Context) ([]ListBgmPersonMapRow, error)
+	// Every non-adult title a character is listed on, with the character's
+	// role there and the name and image that title's credit stored.
+	ListCharacterAppearances(ctx context.Context, characterID int32) ([]ListCharacterAppearancesRow, error)
 	// ListPeopleCandidates for characters: every character a title lists
 	// (anime_characters.character_id), in the same two tiers and the same
 	// order.  anime_character_voices names no character that anime_characters
 	// does not (the credit writers keep the two in step), so it adds nothing.
 	ListCharacterCandidates(ctx context.Context, rowLimit int32, staleAfter pgtype.Interval) ([]int32, error)
+	// Every voice of a character on its non-adult titles, one row per (title,
+	// voice): the two sources ListPersonVoiceRoles reads, from the character's
+	// side.  A title's anime_characters voice is taken only when the title has
+	// no anime_character_voices row for the character at all.  The voice's
+	// Chinese name and profile photo come from the Bangumi match and the
+	// profile, where they exist.
+	//
+	// Reached through the character's anime_characters rows (indexed on
+	// character_id) and then the voices' primary key (anime_id, character_id,
+	// ...): anime_character_voices has no index of its own on character_id, and
+	// filtering it by that column directly is a scan of the whole table.  The
+	// credit writers keep the two tables in step, so the voices this reaches
+	// are all of them.
+	ListCharacterVoices(ctx context.Context, characterID int32) ([]ListCharacterVoicesRow, error)
+	// The characters whose page is indexed, in one modulo shard: a lead
+	// (MAIN) on at least one non-adult title, with a Chinese name from
+	// Bangumi.  updated_at as ListPeopleSitemapShard has it.
+	ListCharactersSitemapShard(ctx context.Context, shardCount int32, shardIndex int32) ([]ListCharactersSitemapShardRow, error)
 	// Queries against danmakus + episode_windows (P2.5).
 	//
 	// HTTP surface is read-only for danmaku — writes go through socket.io
@@ -1606,6 +1645,40 @@ type Querier interface {
 	// Adult titles are not excluded: their credits are stored like every
 	// other row and filtered where they are read, and so are these.
 	ListPeopleCandidates(ctx context.Context, rowLimit int32, staleAfter pgtype.Interval) ([]int32, error)
+	// The people whose page is indexed, in one modulo shard: credited on at
+	// least min_voice_works non-adult titles as a voice, or min_staff_works as
+	// staff.  The counts are of distinct titles, read from the same sources
+	// with the same joins as ListPersonVoiceRoles and ListPersonStaffCredits,
+	// so this list and the page's own `indexable` cannot disagree.  The
+	// thresholds are internal/people's constants, passed in.
+	//
+	// updated_at is the latest of the profile fetch and the last write of any
+	// title the person is credited on: the page is built from those rows and
+	// from nothing else.
+	ListPeopleSitemapShard(ctx context.Context, minVoiceWorks int32, minStaffWorks int32, shardCount int32, shardIndex int32) ([]ListPeopleSitemapShardRow, error)
+	// Every production credit a person holds on a non-adult title, one row
+	// per (title, role) in the order AniList lists the title's staff.  The
+	// person's name and image as the credit stored them ride along, for the
+	// reason ListPersonVoiceRoles gives.
+	ListPersonStaffCredits(ctx context.Context, staffID int32) ([]ListPersonStaffCreditsRow, error)
+	// Every role a person voiced on a non-adult title, one row per (title,
+	// character, language, notes).  A page exists for an id the credits name:
+	// they are its content, and the profile (0044) and the Bangumi match
+	// (0045) only add to it.  Adult titles are stored like every other row and
+	// left out where they are read: not listed, not counted, and an id
+	// credited only on adult titles has no page.
+	//
+	// Two sources.  anime_character_voices (0042) holds every voice of a
+	// character; a title last written before 0042 has none there and carries
+	// its one voice on anime_characters.voice_actor_id instead.  That voice is
+	// taken only where the title has no anime_character_voices row for the
+	// pair, and it is labelled Japanese because it is one: the query that
+	// wrote it asked AniList for voiceActors(language: JAPANESE).
+	//
+	// The person's own name and image come with each row as that credit
+	// stored them: they are the page's name and photo when the profile sweep
+	// has not reached this id.
+	ListPersonVoiceRoles(ctx context.Context, staffID int32) ([]ListPersonVoiceRolesRow, error)
 	// The "watching" list shown on the public profile.  200-row cap matches
 	// Express; the join is the same shape as the subscriptions list query
 	// but only returns the cardview projection.
