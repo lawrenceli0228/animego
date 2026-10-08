@@ -810,6 +810,8 @@
 
 **Context** — 2026-09-08 修 `minInterval`（700ms → 2.1s）时识别。触发条件：任何把 sweep 改成并发的改动，或者额度被进一步下调。
 
+2026-10-08：`anime_credits` sweep（`internal/queue/anime_credits.go`）是第一条会让路的 sweep——全部请求走 no-wait（令牌空闲才取，有人排队时 `Allow()` 直接拒绝），每次请求前隔 6 秒，忙就重试三次后结束本轮。facts / ratings 两条仍是排队模式；要统一的话照它改，不需要动 limiter。
+
 **Depends on / blocked by** — 无。
 
 
@@ -910,5 +912,7 @@
 顺带一个被这两条掩盖的 bug：`bangumi_v2.go:349-352` 把**角色**的 `c.Images.Medium` 写进 **`voice_actor_image_url`**，声优的图在 `c.Actors[0].Images`。现在没人看见，是因为它从来没成功写过。
 
 **Context** — 2026-09-15 元数据计划 1.4 的调查结论，封顶半天，实际 20 分钟。不在阶段 1 修，因为正确的修法依赖阶段 2.2：`anime_characters` 存 `character_id` 之后，详情重拉才能改成按 `(anime_id, character_id)` upsert 而不是删表重建，富化列才有地方活下来；而中文名本身要么接 `/v0/characters/{id}`（按角色数计费，只值得对主角做），要么放弃。在那之前 V2 的这一段是死代码，删掉比留着更诚实。
+
+**2026-10-08 更新** — 第 2 条已解除（migration 0042）：详情重拉和 `anime_credits` sweep 都按 `(anime_id, character_id)` upsert，`UpsertAnimeCharacter` 不写 `name_cn`，别处写进去的值能活过重拉；`voice_actor_cn` 只在 `voice_actor_id` 不变时保留。没有 character id 的旧行仍会在下一次重拉时删除。第 1 条（上游没有这个字段）仍在。
 
 **Depends on / blocked by** — 阶段 2.2（角色 id）。与 `## bangumi_version 是单向棘轮` 同属一根。
