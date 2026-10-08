@@ -1,4 +1,5 @@
--- Roll the code back to a build that predates 0042 before running this.
+-- Roll the code back to a build that predates 0042 before running this
+-- (and 0043's down, which runs first).
 --
 -- That build reads every anime_characters / anime_staff row of a title
 -- (its GetAnimeCharactersByID has no LIMIT) and was written when a title
@@ -9,13 +10,7 @@
 DELETE FROM anime_characters WHERE display_order >= 25;
 DELETE FROM anime_staff WHERE display_order >= 25;
 
-ALTER TABLE anime_cache
-    DROP COLUMN IF EXISTS staff_checked_at,
-    DROP COLUMN IF EXISTS staff_has_more,
-    DROP COLUMN IF EXISTS cast_checked_at,
-    DROP COLUMN IF EXISTS cast_has_more;
-
-DROP TABLE IF EXISTS anime_character_voices;
-
 DROP INDEX IF EXISTS anime_staff_anime_staff_role_uidx;
 DROP INDEX IF EXISTS anime_characters_anime_character_uidx;
+
+DROP TABLE IF EXISTS anime_character_voices;

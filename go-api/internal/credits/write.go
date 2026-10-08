@@ -2,11 +2,10 @@ package credits
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
-
-	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
 // Mode says what a write's rows are, and therefore what it may remove.
@@ -29,22 +28,26 @@ const (
 // CastWriter is the statement set WriteCast runs.  *dbgen.Queries
 // satisfies it, bound to a transaction (the sweep) or not (the detail
 // refresh, whose writes have always been statement-at-a-time).
+//
+// The two upserts take the rows as a jsonb array (the json tags on
+// Character and Voice), so a list is one statement however long it is.
 type CastWriter interface {
-	UpsertAnimeCharacter(ctx context.Context, arg dbgen.UpsertAnimeCharacterParams) (uuid.UUID, error)
+	UpsertAnimeCharacters(ctx context.Context, animeID int32, rows []byte) ([]uuid.UUID, error)
 	PruneAnimeCharacters(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error
 	RenumberAnimeCharacters(ctx context.Context, firstOrder int32, animeID int32, keep []uuid.UUID) error
 	PruneAnimeCharacterVoices(ctx context.Context, animeID int32, characterIds []int32) error
-	UpsertAnimeCharacterVoice(ctx context.Context, arg dbgen.UpsertAnimeCharacterVoiceParams) error
+	UpsertAnimeCharacterVoices(ctx context.Context, animeID int32, rows []byte) error
 }
 
 // StaffWriter is the statement set WriteStaff runs.
 type StaffWriter interface {
-	UpsertAnimeStaff(ctx context.Context, arg dbgen.UpsertAnimeStaffParams) (uuid.UUID, error)
+	UpsertAnimeStaff(ctx context.Context, animeID int32, rows []byte) ([]uuid.UUID, error)
 	PruneAnimeStaff(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error
 	RenumberAnimeStaff(ctx context.Context, firstOrder int32, animeID int32, keep []uuid.UUID) error
 }
 
-// WriteCast stores a title's characters and their voices.
+// WriteCast stores a title's characters and their voices, in at most five
+// statements whatever the list's length.
 //
 // The statement order is the design:
 //
@@ -73,28 +76,20 @@ type StaffWriter interface {
 // once on one title -- whichever lands second updates what the first
 // wrote instead of failing on the key.
 func WriteCast(ctx context.Context, w CastWriter, animeID int32, cast Cast, mode Mode) error {
-	keep := make([]uuid.UUID, 0, len(cast.Characters))
+	keep := []uuid.UUID{}
 	written := make([]int32, 0, len(cast.Characters))
-	for _, c := range cast.Characters {
-		id, err := w.UpsertAnimeCharacter(ctx, dbgen.UpsertAnimeCharacterParams{
-			AnimeID:            animeID,
-			DisplayOrder:       c.DisplayOrder,
-			NameEn:             c.NameEn,
-			NameJa:             c.NameJa,
-			ImageUrl:           c.ImageUrl,
-			Role:               c.Role,
-			VoiceActorEn:       c.VoiceActorEn,
-			VoiceActorJa:       c.VoiceActorJa,
-			VoiceActorImageUrl: c.VoiceActorImageUrl,
-			CharacterID:        c.CharacterID,
-			VoiceActorID:       c.VoiceActorID,
-		})
+	if len(cast.Characters) > 0 {
+		rows, err := json.Marshal(cast.Characters)
 		if err != nil {
-			return fmt.Errorf("upsert character %d: %w", c.DisplayOrder, err)
+			return fmt.Errorf("encode characters: %w", err)
 		}
-		keep = append(keep, id)
-		if c.CharacterID != nil {
-			written = append(written, *c.CharacterID)
+		if keep, err = w.UpsertAnimeCharacters(ctx, animeID, rows); err != nil {
+			return fmt.Errorf("upsert characters: %w", err)
+		}
+		for _, c := range cast.Characters {
+			if c.CharacterID != nil {
+				written = append(written, *c.CharacterID)
+			}
 		}
 	}
 
@@ -110,20 +105,13 @@ func WriteCast(ctx context.Context, w CastWriter, animeID int32, cast Cast, mode
 	if err := w.PruneAnimeCharacterVoices(ctx, animeID, written); err != nil {
 		return fmt.Errorf("prune voices: %w", err)
 	}
-	for _, v := range cast.Voices {
-		if err := w.UpsertAnimeCharacterVoice(ctx, dbgen.UpsertAnimeCharacterVoiceParams{
-			AnimeID:      animeID,
-			CharacterID:  v.CharacterID,
-			StaffID:      v.StaffID,
-			DisplayOrder: v.DisplayOrder,
-			Language:     v.Language,
-			RoleNotes:    v.RoleNotes,
-			DubGroup:     v.DubGroup,
-			NameFull:     v.NameFull,
-			NameNative:   v.NameNative,
-			ImageUrl:     v.ImageUrl,
-		}); err != nil {
-			return fmt.Errorf("upsert voice %d/%d: %w", v.CharacterID, v.StaffID, err)
+	if len(cast.Voices) > 0 {
+		rows, err := json.Marshal(cast.Voices)
+		if err != nil {
+			return fmt.Errorf("encode voices: %w", err)
+		}
+		if err := w.UpsertAnimeCharacterVoices(ctx, animeID, rows); err != nil {
+			return fmt.Errorf("upsert voices: %w", err)
 		}
 	}
 	return nil
@@ -132,21 +120,15 @@ func WriteCast(ctx context.Context, w CastWriter, animeID int32, cast Cast, mode
 // WriteStaff stores a title's staff: WriteCast's steps 1-3, keyed
 // (anime_id, staff_id, role).
 func WriteStaff(ctx context.Context, w StaffWriter, animeID int32, staff []Staff, mode Mode) error {
-	keep := make([]uuid.UUID, 0, len(staff))
-	for _, s := range staff {
-		id, err := w.UpsertAnimeStaff(ctx, dbgen.UpsertAnimeStaffParams{
-			AnimeID:      animeID,
-			DisplayOrder: s.DisplayOrder,
-			NameEn:       s.NameEn,
-			NameJa:       s.NameJa,
-			ImageUrl:     s.ImageUrl,
-			Role:         s.Role,
-			StaffID:      s.StaffID,
-		})
+	keep := []uuid.UUID{}
+	if len(staff) > 0 {
+		rows, err := json.Marshal(staff)
 		if err != nil {
-			return fmt.Errorf("upsert staff %d: %w", s.DisplayOrder, err)
+			return fmt.Errorf("encode staff: %w", err)
 		}
-		keep = append(keep, id)
+		if keep, err = w.UpsertAnimeStaff(ctx, animeID, rows); err != nil {
+			return fmt.Errorf("upsert staff: %w", err)
+		}
 	}
 
 	if err := w.PruneAnimeStaff(ctx, animeID, keep, mode == WholeList); err != nil {

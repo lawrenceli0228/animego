@@ -58,8 +58,9 @@
 // backoff measured in minutes to days, and for a sweep that re-fires every
 // five minutes the next pass is the retry.  A title is either written and
 // stamped (one transaction), stamped as absent, stamped back-dated after a
-// failure (see creditsRetryAfterFailure), or left alone for the next pass.
-// Only a failure to read a candidate list is returned.
+// failure (creditsRetryAfterFailure) or after its second request found no
+// budget (creditsDeferAfterBusy), or left alone for the next pass.  Only a
+// failure to read a candidate list is returned.
 package queue
 
 import (
@@ -124,6 +125,14 @@ const (
 	// creditsMaxPages is the hard cap: two requests of eight pages, 400
 	// rows of each list.
 	creditsMaxPages = 2 * anilist.MaxCreditPagesPerRequest
+
+	// creditsDeferAfterBusy is how long a title steps back when its first
+	// request went through and its second could not get a token.  A busy
+	// budget says nothing about a title, so it is normally not stamped at
+	// all -- but this title has already cost a request, would cost it again
+	// at the head of every pass for as long as the budget stays that
+	// contended, and would hold up every title behind it while it did.
+	creditsDeferAfterBusy = time.Hour
 )
 
 // AniListCreditsFetcher is the upstream surface the sweep needs; both
@@ -265,7 +274,7 @@ func (p *creditsPass) sweepCast(ctx context.Context, id int32) {
 		if err != nil {
 			// Half a list is not written: the rows the first request
 			// would replace are no worse than they were.
-			p.titleFailed(ctx, "cast", id, err, p.w.store.StampAnimeCastChecked)
+			p.secondRequestFailed(ctx, "cast", id, err, p.w.store.StampAnimeCastChecked)
 			return
 		}
 		pages = append(pages, second.Pages...)
@@ -304,7 +313,7 @@ func (p *creditsPass) sweepStaff(ctx context.Context, id int32) {
 			err = checkPages(len(second.Pages))
 		}
 		if err != nil {
-			p.titleFailed(ctx, "staff", id, err, p.w.store.StampAnimeStaffChecked)
+			p.secondRequestFailed(ctx, "staff", id, err, p.w.store.StampAnimeStaffChecked)
 			return
 		}
 		pages = append(pages, second.Pages...)
@@ -343,6 +352,9 @@ func fetchPages[R any](
 		res, err = fetch(ctx, vars)
 		return err
 	})
+	if err == nil && res == nil {
+		err = errShortCreditPages
+	}
 	return res, err
 }
 
@@ -413,6 +425,30 @@ func (p *creditsPass) titleFailed(
 	}
 }
 
+// secondRequestFailed handles a failure of a title's second request
+// (pages 9-16).  A busy budget or a 429 there ends the pass as it would
+// anywhere, but also steps the title back creditsDeferAfterBusy, because
+// unlike a first request this one comes after a request the title has
+// already spent.  Every other failure is titleFailed's.
+func (p *creditsPass) secondRequestFailed(
+	ctx context.Context,
+	list string,
+	id int32,
+	err error,
+	stamp func(context.Context, pgtype.Timestamptz, *bool, int32) error,
+) {
+	if !errors.Is(err, anilist.ErrBudgetBusy) && !errors.Is(err, anilist.ErrRateLimited) {
+		p.titleFailed(ctx, list, id, err, stamp)
+		return
+	}
+	p.stop, p.stopReason = true, "budget"
+	slog.DebugContext(ctx, "anime_credits second request found no budget, deferring title", "list", list, "anilistId", id, "err", err)
+	at := p.w.clock().Add(creditsDeferAfterBusy - creditsStaleAfter)
+	if err := stamp(ctx, pgtype.Timestamptz{Time: at, Valid: true}, nil, id); err != nil {
+		slog.WarnContext(ctx, "anime_credits stamp failed", "list", list, "anilistId", id, "err", err)
+	}
+}
+
 // stitchPages concatenates the edges of pages 0..n-1 in order, stopping
 // after the first page that says it is the last.  capped reports that the
 // last page fetched still had a next one: the list is longer than
@@ -475,22 +511,30 @@ type pgCreditsStore struct {
 // ReplaceCast writes a title's whole character list and its voices, and
 // stamps the sweep's read, in one transaction: a title is either fully
 // rewritten and stamped or untouched and still a candidate.
+//
+// The stamp is written FIRST, though it describes the write that follows.
+// Inside one transaction the order changes nothing about what commits,
+// and it decides the order locks are taken in: the anime_cache row before
+// the credit rows, as the admin enrichment reset takes them
+// (ResetAnimeEnrichment, then DeleteAnimeCharactersForReset).  The other
+// way round, a reset and a sweep pass meeting on one title could each hold
+// what the other waits for.
 func (s pgCreditsStore) ReplaceCast(ctx context.Context, animeID int32, cast credits.Cast, hasMore bool, checkedAt time.Time) error {
 	return s.inTx(ctx, func(q *dbgen.Queries) error {
-		if err := credits.WriteCast(ctx, q, animeID, cast, credits.WholeList); err != nil {
-			return err
+		if err := q.StampAnimeCastChecked(ctx, pgtype.Timestamptz{Time: checkedAt, Valid: true}, &hasMore, animeID); err != nil {
+			return fmt.Errorf("stamp: %w", err)
 		}
-		return q.StampAnimeCastChecked(ctx, pgtype.Timestamptz{Time: checkedAt, Valid: true}, &hasMore, animeID)
+		return credits.WriteCast(ctx, q, animeID, cast, credits.WholeList)
 	})
 }
 
-// ReplaceStaff is ReplaceCast for staff.
+// ReplaceStaff is ReplaceCast for staff, stamp first for the same reason.
 func (s pgCreditsStore) ReplaceStaff(ctx context.Context, animeID int32, staff []credits.Staff, hasMore bool, checkedAt time.Time) error {
 	return s.inTx(ctx, func(q *dbgen.Queries) error {
-		if err := credits.WriteStaff(ctx, q, animeID, staff, credits.WholeList); err != nil {
-			return err
+		if err := q.StampAnimeStaffChecked(ctx, pgtype.Timestamptz{Time: checkedAt, Valid: true}, &hasMore, animeID); err != nil {
+			return fmt.Errorf("stamp: %w", err)
 		}
-		return q.StampAnimeStaffChecked(ctx, pgtype.Timestamptz{Time: checkedAt, Valid: true}, &hasMore, animeID)
+		return credits.WriteStaff(ctx, q, animeID, staff, credits.WholeList)
 	})
 }
 

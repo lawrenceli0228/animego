@@ -80,36 +80,41 @@ func PrimaryLanguage(countryOfOrigin *string) string {
 // Japanese actor, Chinese for a Chinese one -- the column was named when
 // only Japanese voices were stored.  NameCn is always nil: no source
 // fills it yet.
+//
+// The json tags are the column definition list of UpsertAnimeCharacters,
+// which takes a whole list as one jsonb array (see WriteCast); a field
+// the statement must not write is tagged "-".
 type Character struct {
-	DisplayOrder       int32
-	NameEn             *string
-	NameJa             *string
-	NameCn             *string
-	ImageUrl           *string
-	Role               *string
-	VoiceActorEn       *string
-	VoiceActorJa       *string
-	VoiceActorImageUrl *string
+	DisplayOrder       int32   `json:"display_order"`
+	NameEn             *string `json:"name_en"`
+	NameJa             *string `json:"name_ja"`
+	NameCn             *string `json:"-"`
+	ImageUrl           *string `json:"image_url"`
+	Role               *string `json:"role"`
+	VoiceActorEn       *string `json:"voice_actor_en"`
+	VoiceActorJa       *string `json:"voice_actor_ja"`
+	VoiceActorImageUrl *string `json:"voice_actor_image_url"`
 	// AniList's ids for the character and the primary voice actor.  Nil
 	// when AniList's node carried no positive id, which the column CHECK
 	// would refuse.
-	CharacterID  *int32
-	VoiceActorID *int32
+	CharacterID  *int32 `json:"character_id"`
+	VoiceActorID *int32 `json:"voice_actor_id"`
 }
 
 // Voice is one anime_character_voices row: one person voicing one
 // character, in DisplayOrder within that character (0 is the primary
-// voice, the same person as the character row's voice_actor_id).
+// voice, the same person as the character row's voice_actor_id).  The
+// json tags are UpsertAnimeCharacterVoices' column definition list.
 type Voice struct {
-	CharacterID  int32
-	StaffID      int32
-	DisplayOrder int32
-	Language     *string // languageV2: "Japanese", "Chinese", ...
-	RoleNotes    *string // "Childhood", "Young", ...; nil for a main voice
-	DubGroup     *string
-	NameFull     *string
-	NameNative   *string
-	ImageUrl     *string
+	CharacterID  int32   `json:"character_id"`
+	StaffID      int32   `json:"staff_id"`
+	DisplayOrder int32   `json:"display_order"`
+	Language     *string `json:"language"`   // languageV2: "Japanese", "Chinese", ...
+	RoleNotes    *string `json:"role_notes"` // "Childhood", "Young", ...; nil for a main voice
+	DubGroup     *string `json:"dub_group"`
+	NameFull     *string `json:"name_full"`
+	NameNative   *string `json:"name_native"`
+	ImageUrl     *string `json:"image_url"`
 }
 
 // Cast is a list of characters with their voices.
@@ -118,14 +123,15 @@ type Cast struct {
 	Voices     []Voice
 }
 
-// Staff is one anime_staff row.
+// Staff is one anime_staff row.  The json tags are UpsertAnimeStaff's
+// column definition list.
 type Staff struct {
-	DisplayOrder int32
-	NameEn       *string
-	NameJa       *string
-	ImageUrl     *string
-	Role         *string
-	StaffID      *int32 // nil when the node carried no positive id
+	DisplayOrder int32   `json:"display_order"`
+	NameEn       *string `json:"name_en"`
+	NameJa       *string `json:"name_ja"`
+	ImageUrl     *string `json:"image_url"`
+	Role         *string `json:"role"`
+	StaffID      *int32  `json:"staff_id"` // nil when the node carried no positive id
 }
 
 // CastFromEdges builds the character and voice rows for a list of

@@ -2,6 +2,7 @@ package anime
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
+	"github.com/lawrenceli0228/animego/go-api/internal/credits"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/testutil"
 )
@@ -227,17 +229,19 @@ func TestCharacterAndStaffIDs_PG(t *testing.T) {
 	require.NoError(t, q.UpsertAnimeCache(ctx, NormalizeMainRow(anilist.Media{ID: 3, Title: &anilist.Title{Romaji: sptr("Row")}}, anilist.DetailDocument)))
 
 	cid, vid, sid := int32(138100), int32(112215), int32(95000)
-	_, err := q.UpsertAnimeCharacter(ctx, dbgen.UpsertAnimeCharacterParams{
-		AnimeID: 3, DisplayOrder: 0, NameEn: sptr("Frieren"), CharacterID: &cid, VoiceActorID: &vid,
-	})
+	rows := func(v any) []byte {
+		b, err := json.Marshal(v)
+		require.NoError(t, err)
+		return b
+	}
+	_, err := q.UpsertAnimeCharacters(ctx, 3, rows([]credits.Character{
+		{DisplayOrder: 0, NameEn: sptr("Frieren"), CharacterID: &cid, VoiceActorID: &vid},
+		{DisplayOrder: 1, NameEn: sptr("legacy row")}, // no ids
+	}))
 	require.NoError(t, err)
-	_, err = q.UpsertAnimeCharacter(ctx, dbgen.UpsertAnimeCharacterParams{
-		AnimeID: 3, DisplayOrder: 1, NameEn: sptr("legacy row"), // no ids
-	})
-	require.NoError(t, err)
-	_, err = q.UpsertAnimeStaff(ctx, dbgen.UpsertAnimeStaffParams{
-		AnimeID: 3, DisplayOrder: 0, NameEn: sptr("Director"), StaffID: &sid,
-	})
+	_, err = q.UpsertAnimeStaff(ctx, 3, rows([]credits.Staff{
+		{DisplayOrder: 0, NameEn: sptr("Director"), StaffID: &sid},
+	}))
 	require.NoError(t, err)
 
 	chars, err := q.GetAnimeCharactersByID(ctx, 3)
@@ -254,9 +258,9 @@ func TestCharacterAndStaffIDs_PG(t *testing.T) {
 	assert.Equal(t, int32(95000), *staff[0].StaffID)
 
 	zero := int32(0)
-	_, err = q.UpsertAnimeCharacter(ctx, dbgen.UpsertAnimeCharacterParams{AnimeID: 3, DisplayOrder: 2, CharacterID: &zero})
+	_, err = q.UpsertAnimeCharacters(ctx, 3, rows([]credits.Character{{DisplayOrder: 2, CharacterID: &zero}}))
 	require.Error(t, err, "a zero id must be refused at the column, not stored")
-	_, err = q.UpsertAnimeStaff(ctx, dbgen.UpsertAnimeStaffParams{AnimeID: 3, DisplayOrder: 1, StaffID: &zero})
+	_, err = q.UpsertAnimeStaff(ctx, 3, rows([]credits.Staff{{DisplayOrder: 1, StaffID: &zero}}))
 	require.Error(t, err)
 }
 

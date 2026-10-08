@@ -1214,9 +1214,10 @@ type Querier interface {
 	// multi-day backfill drain cannot delay this season's refresh behind it.
 	ListAnilistRatingCandidates(ctx context.Context, currentYear int32, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error)
 	// Titles whose characters the credits sweep should fetch in full: AniList
-	// said there is a second page, or -- for a title not read since 0042 --
-	// it holds a full first page, which is what a capped title looks like
-	// from here.  Due when never swept or swept longer ago than stale_after.
+	// said there is a second page, or -- for a title whose flag is still NULL
+	// (not read since 0043 added it) -- it holds a full first page, which is
+	// what a capped title looks like from here.  Due when never swept or
+	// swept longer ago than stale_after.
 	//
 	// Never-swept titles first, so the backfill cannot be starved by
 	// re-checks; most popular first within each, because that is the order
@@ -2152,6 +2153,14 @@ type Querier interface {
 	// the characters and staff connections.  NULL leaves a flag alone (a
 	// document that did not say).  updated_at does not move -- the sitemap
 	// lastmod is about what the page shows, and this is bookkeeping.
+	//
+	// A flag turning true clears that list's sweep stamp.  The stamp records
+	// a sweep that found no second page (or never got an answer); an airing
+	// show that has since grown past one page would otherwise wait out the
+	// rest of the 30 days before its new characters were fetched.  A flag
+	// that was already true leaves the stamp alone -- the sweep's 30-day
+	// re-read covers a list that keeps growing.  (In SET, the bare column
+	// names are the row's values before this UPDATE.)
 	SetAnimeCreditsHasMore(ctx context.Context, castHasMore *bool, staffHasMore *bool, anilistID int32) error
 	// forgot-password sets the token + 1h expiry.  Caller generates the
 	// token via crypto/rand (32 random bytes hex-encoded — matches
@@ -2584,6 +2593,9 @@ type Querier interface {
 	// them in a separate transaction if needed.  /search + /schedule never
 	// mutate child tables; only /:anilistId detail-fetch does.
 	UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCacheParams) error
+	// A title's voice rows for the characters a write covers, keyed
+	// (anime_id, character_id, staff_id).
+	UpsertAnimeCharacterVoices(ctx context.Context, animeID int32, batch []byte) error
 	// -------------------------------------------------------------------------
 	// Characters, voices and staff: addressed rows, not delete + insert.
 	//
@@ -2596,22 +2608,35 @@ type Querier interface {
 	// the two modes.  Every insert is an upsert because the two writers can
 	// meet on the same title; whichever lands second updates the row the
 	// first wrote instead of failing on the key.
+	//
+	// Each upsert is ONE statement for the whole list, the rows passed as a
+	// jsonb array and unpacked by jsonb_to_recordset.  Row by row, a first
+	// page with every voice was some 250 statements, each its own commit and
+	// its own WAL flush, inside the 5 seconds a cold detail request has.
+	// jsonb rather than parallel arrays because most of these columns are
+	// nullable, and a text[] cannot carry a NULL element through sqlc (see
+	// ApplyHantDescriptionBatch).  The JSON keys are the column definition
+	// list's names; credits.WriteCast builds them.
+	//
+	// A batch must not name the same key twice -- ON CONFLICT DO UPDATE
+	// refuses to touch one row twice in a statement -- and the normaliser
+	// (credits.CastFromEdges / StaffFromEdges) is what guarantees it.
 	// -------------------------------------------------------------------------
-	// One character row, keyed (anime_id, character_id).  A row with no
-	// character id (a node AniList sent without one) never conflicts and is
-	// always inserted; the write that follows removes the previous copy.
+	// A title's character rows, keyed (anime_id, character_id).  A row with
+	// no character id (a node AniList sent without one) never conflicts and
+	// is always inserted; the prune that follows removes the previous copy.
 	//
 	// name_cn is not written and survives an update: no source fills it yet,
 	// and the day one does it should not be erased by a refresh.
 	// voice_actor_cn is the Chinese name of whoever voice_actor_id names, so
 	// it survives only while that person stays the same.  RETURNING id is
 	// how the write knows which rows it touched.
-	UpsertAnimeCharacter(ctx context.Context, arg UpsertAnimeCharacterParams) (uuid.UUID, error)
-	UpsertAnimeCharacterVoice(ctx context.Context, arg UpsertAnimeCharacterVoiceParams) error
-	// One staff row, keyed (anime_id, staff_id, role): a person appears once
-	// per role.  The index is NULLS NOT DISTINCT, so an empty role is a key
-	// like any other.  Same id-less and RETURNING rules as characters.
-	UpsertAnimeStaff(ctx context.Context, arg UpsertAnimeStaffParams) (uuid.UUID, error)
+	UpsertAnimeCharacters(ctx context.Context, animeID int32, batch []byte) ([]uuid.UUID, error)
+	// A title's staff rows, keyed (anime_id, staff_id, role): a person
+	// appears once per role.  The index is NULLS NOT DISTINCT, so an empty
+	// role is a key like any other.  Same id-less and RETURNING rules as
+	// characters.
+	UpsertAnimeStaff(ctx context.Context, animeID int32, batch []byte) ([]uuid.UUID, error)
 	UpsertCommentReaction(ctx context.Context, commentID uuid.UUID, userID uuid.UUID, reaction string) (CommentReaction, error)
 	// The notification is intentionally insert-only on conflict: retrying a like
 	// must not turn an already-read notification back into an unread one.

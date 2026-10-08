@@ -2792,9 +2792,10 @@ LIMIT $3::int
 `
 
 // Titles whose characters the credits sweep should fetch in full: AniList
-// said there is a second page, or -- for a title not read since 0042 --
-// it holds a full first page, which is what a capped title looks like
-// from here.  Due when never swept or swept longer ago than stale_after.
+// said there is a second page, or -- for a title whose flag is still NULL
+// (not read since 0043 added it) -- it holds a full first page, which is
+// what a capped title looks like from here.  Due when never swept or
+// swept longer ago than stale_after.
 //
 // Never-swept titles first, so the backfill cannot be starved by
 // re-checks; most popular first within each, because that is the order
@@ -4342,8 +4343,16 @@ func (q *Queries) SearchAnimeCacheLocal(ctx context.Context, arg SearchAnimeCach
 
 const setAnimeCreditsHasMore = `-- name: SetAnimeCreditsHasMore :exec
 UPDATE anime_cache
-SET cast_has_more  = COALESCE($1::boolean, cast_has_more),
-    staff_has_more = COALESCE($2::boolean, staff_has_more)
+SET cast_checked_at  = CASE
+        WHEN $1::boolean AND cast_has_more IS DISTINCT FROM true THEN NULL
+        ELSE cast_checked_at
+    END,
+    cast_has_more    = COALESCE($1::boolean, cast_has_more),
+    staff_checked_at = CASE
+        WHEN $2::boolean AND staff_has_more IS DISTINCT FROM true THEN NULL
+        ELSE staff_checked_at
+    END,
+    staff_has_more   = COALESCE($2::boolean, staff_has_more)
 WHERE anilist_id = $3
 `
 
@@ -4351,6 +4360,14 @@ WHERE anilist_id = $3
 // the characters and staff connections.  NULL leaves a flag alone (a
 // document that did not say).  updated_at does not move -- the sitemap
 // lastmod is about what the page shows, and this is bookkeeping.
+//
+// A flag turning true clears that list's sweep stamp.  The stamp records
+// a sweep that found no second page (or never got an answer); an airing
+// show that has since grown past one page would otherwise wait out the
+// rest of the 30 days before its new characters were fetched.  A flag
+// that was already true leaves the stamp alone -- the sweep's 30-day
+// re-read covers a list that keeps growing.  (In SET, the bare column
+// names are the row's values before this UPDATE.)
 func (q *Queries) SetAnimeCreditsHasMore(ctx context.Context, castHasMore *bool, staffHasMore *bool, anilistID int32) error {
 	_, err := q.db.Exec(ctx, setAnimeCreditsHasMore, castHasMore, staffHasMore, anilistID)
 	return err
@@ -4983,18 +5000,56 @@ func (q *Queries) UpsertAnimeCache(ctx context.Context, arg UpsertAnimeCachePara
 	return err
 }
 
-const upsertAnimeCharacter = `-- name: UpsertAnimeCharacter :one
+const upsertAnimeCharacterVoices = `-- name: UpsertAnimeCharacterVoices :exec
+INSERT INTO anime_character_voices (
+    anime_id, character_id, staff_id, display_order,
+    language, role_notes, dub_group,
+    name_full, name_native, image_url
+)
+SELECT
+    $1::int, r.character_id, r.staff_id, r.display_order,
+    r.language, r.role_notes, r.dub_group,
+    r.name_full, r.name_native, r.image_url
+FROM jsonb_to_recordset($2::jsonb) AS r(
+    character_id int, staff_id int, display_order int,
+    language text, role_notes text, dub_group text,
+    name_full text, name_native text, image_url text
+)
+ON CONFLICT (anime_id, character_id, staff_id) DO UPDATE SET
+    display_order = EXCLUDED.display_order,
+    language      = EXCLUDED.language,
+    role_notes    = EXCLUDED.role_notes,
+    dub_group     = EXCLUDED.dub_group,
+    name_full     = EXCLUDED.name_full,
+    name_native   = EXCLUDED.name_native,
+    image_url     = EXCLUDED.image_url
+`
+
+// A title's voice rows for the characters a write covers, keyed
+// (anime_id, character_id, staff_id).
+func (q *Queries) UpsertAnimeCharacterVoices(ctx context.Context, animeID int32, batch []byte) error {
+	_, err := q.db.Exec(ctx, upsertAnimeCharacterVoices, animeID, batch)
+	return err
+}
+
+const upsertAnimeCharacters = `-- name: UpsertAnimeCharacters :many
 
 INSERT INTO anime_characters (
     anime_id, display_order,
     name_en, name_ja, image_url, role,
     voice_actor_en, voice_actor_ja, voice_actor_image_url,
     character_id, voice_actor_id
-) VALUES (
-    $1, $2,
-    $3, $4, $5, $6,
-    $7, $8, $9,
-    $10, $11
+)
+SELECT
+    $1::int, r.display_order,
+    r.name_en, r.name_ja, r.image_url, r.role,
+    r.voice_actor_en, r.voice_actor_ja, r.voice_actor_image_url,
+    r.character_id, r.voice_actor_id
+FROM jsonb_to_recordset($2::jsonb) AS r(
+    display_order int,
+    name_en text, name_ja text, image_url text, role text,
+    voice_actor_en text, voice_actor_ja text, voice_actor_image_url text,
+    character_id int, voice_actor_id int
 )
 ON CONFLICT (anime_id, character_id) WHERE character_id IS NOT NULL DO UPDATE SET
     display_order         = EXCLUDED.display_order,
@@ -5013,20 +5068,6 @@ ON CONFLICT (anime_id, character_id) WHERE character_id IS NOT NULL DO UPDATE SE
 RETURNING id
 `
 
-type UpsertAnimeCharacterParams struct {
-	AnimeID            int32   `json:"animeId"`
-	DisplayOrder       int32   `json:"displayOrder"`
-	NameEn             *string `json:"nameEn"`
-	NameJa             *string `json:"nameJa"`
-	ImageUrl           *string `json:"imageUrl"`
-	Role               *string `json:"role"`
-	VoiceActorEn       *string `json:"voiceActorEn"`
-	VoiceActorJa       *string `json:"voiceActorJa"`
-	VoiceActorImageUrl *string `json:"voiceActorImageUrl"`
-	CharacterID        *int32  `json:"characterId"`
-	VoiceActorID       *int32  `json:"voiceActorId"`
-}
-
 // -------------------------------------------------------------------------
 // Characters, voices and staff: addressed rows, not delete + insert.
 //
@@ -5039,93 +5080,63 @@ type UpsertAnimeCharacterParams struct {
 // the two modes.  Every insert is an upsert because the two writers can
 // meet on the same title; whichever lands second updates the row the
 // first wrote instead of failing on the key.
+//
+// Each upsert is ONE statement for the whole list, the rows passed as a
+// jsonb array and unpacked by jsonb_to_recordset.  Row by row, a first
+// page with every voice was some 250 statements, each its own commit and
+// its own WAL flush, inside the 5 seconds a cold detail request has.
+// jsonb rather than parallel arrays because most of these columns are
+// nullable, and a text[] cannot carry a NULL element through sqlc (see
+// ApplyHantDescriptionBatch).  The JSON keys are the column definition
+// list's names; credits.WriteCast builds them.
+//
+// A batch must not name the same key twice -- ON CONFLICT DO UPDATE
+// refuses to touch one row twice in a statement -- and the normaliser
+// (credits.CastFromEdges / StaffFromEdges) is what guarantees it.
 // -------------------------------------------------------------------------
-// One character row, keyed (anime_id, character_id).  A row with no
-// character id (a node AniList sent without one) never conflicts and is
-// always inserted; the write that follows removes the previous copy.
+// A title's character rows, keyed (anime_id, character_id).  A row with
+// no character id (a node AniList sent without one) never conflicts and
+// is always inserted; the prune that follows removes the previous copy.
 //
 // name_cn is not written and survives an update: no source fills it yet,
 // and the day one does it should not be erased by a refresh.
 // voice_actor_cn is the Chinese name of whoever voice_actor_id names, so
 // it survives only while that person stays the same.  RETURNING id is
 // how the write knows which rows it touched.
-func (q *Queries) UpsertAnimeCharacter(ctx context.Context, arg UpsertAnimeCharacterParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, upsertAnimeCharacter,
-		arg.AnimeID,
-		arg.DisplayOrder,
-		arg.NameEn,
-		arg.NameJa,
-		arg.ImageUrl,
-		arg.Role,
-		arg.VoiceActorEn,
-		arg.VoiceActorJa,
-		arg.VoiceActorImageUrl,
-		arg.CharacterID,
-		arg.VoiceActorID,
-	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+func (q *Queries) UpsertAnimeCharacters(ctx context.Context, animeID int32, batch []byte) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, upsertAnimeCharacters, animeID, batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const upsertAnimeCharacterVoice = `-- name: UpsertAnimeCharacterVoice :exec
-INSERT INTO anime_character_voices (
-    anime_id, character_id, staff_id, display_order,
-    language, role_notes, dub_group,
-    name_full, name_native, image_url
-) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7,
-    $8, $9, $10
-)
-ON CONFLICT (anime_id, character_id, staff_id) DO UPDATE SET
-    display_order = EXCLUDED.display_order,
-    language      = EXCLUDED.language,
-    role_notes    = EXCLUDED.role_notes,
-    dub_group     = EXCLUDED.dub_group,
-    name_full     = EXCLUDED.name_full,
-    name_native   = EXCLUDED.name_native,
-    image_url     = EXCLUDED.image_url
-`
-
-type UpsertAnimeCharacterVoiceParams struct {
-	AnimeID      int32   `json:"animeId"`
-	CharacterID  int32   `json:"characterId"`
-	StaffID      int32   `json:"staffId"`
-	DisplayOrder int32   `json:"displayOrder"`
-	Language     *string `json:"language"`
-	RoleNotes    *string `json:"roleNotes"`
-	DubGroup     *string `json:"dubGroup"`
-	NameFull     *string `json:"nameFull"`
-	NameNative   *string `json:"nameNative"`
-	ImageUrl     *string `json:"imageUrl"`
-}
-
-func (q *Queries) UpsertAnimeCharacterVoice(ctx context.Context, arg UpsertAnimeCharacterVoiceParams) error {
-	_, err := q.db.Exec(ctx, upsertAnimeCharacterVoice,
-		arg.AnimeID,
-		arg.CharacterID,
-		arg.StaffID,
-		arg.DisplayOrder,
-		arg.Language,
-		arg.RoleNotes,
-		arg.DubGroup,
-		arg.NameFull,
-		arg.NameNative,
-		arg.ImageUrl,
-	)
-	return err
-}
-
-const upsertAnimeStaff = `-- name: UpsertAnimeStaff :one
+const upsertAnimeStaff = `-- name: UpsertAnimeStaff :many
 INSERT INTO anime_staff (
     anime_id, display_order,
     name_en, name_ja, image_url, role,
     staff_id
-) VALUES (
-    $1, $2,
-    $3, $4, $5, $6,
-    $7
+)
+SELECT
+    $1::int, r.display_order,
+    r.name_en, r.name_ja, r.image_url, r.role,
+    r.staff_id
+FROM jsonb_to_recordset($2::jsonb) AS r(
+    display_order int,
+    name_en text, name_ja text, image_url text, role text,
+    staff_id int
 )
 ON CONFLICT (anime_id, staff_id, role) WHERE staff_id IS NOT NULL DO UPDATE SET
     display_order = EXCLUDED.display_order,
@@ -5135,32 +5146,28 @@ ON CONFLICT (anime_id, staff_id, role) WHERE staff_id IS NOT NULL DO UPDATE SET
 RETURNING id
 `
 
-type UpsertAnimeStaffParams struct {
-	AnimeID      int32   `json:"animeId"`
-	DisplayOrder int32   `json:"displayOrder"`
-	NameEn       *string `json:"nameEn"`
-	NameJa       *string `json:"nameJa"`
-	ImageUrl     *string `json:"imageUrl"`
-	Role         *string `json:"role"`
-	StaffID      *int32  `json:"staffId"`
-}
-
-// One staff row, keyed (anime_id, staff_id, role): a person appears once
-// per role.  The index is NULLS NOT DISTINCT, so an empty role is a key
-// like any other.  Same id-less and RETURNING rules as characters.
-func (q *Queries) UpsertAnimeStaff(ctx context.Context, arg UpsertAnimeStaffParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, upsertAnimeStaff,
-		arg.AnimeID,
-		arg.DisplayOrder,
-		arg.NameEn,
-		arg.NameJa,
-		arg.ImageUrl,
-		arg.Role,
-		arg.StaffID,
-	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+// A title's staff rows, keyed (anime_id, staff_id, role): a person
+// appears once per role.  The index is NULLS NOT DISTINCT, so an empty
+// role is a key like any other.  Same id-less and RETURNING rules as
+// characters.
+func (q *Queries) UpsertAnimeStaff(ctx context.Context, animeID int32, batch []byte) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, upsertAnimeStaff, animeID, batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertEpisodeTitleSourced = `-- name: UpsertEpisodeTitleSourced :execrows

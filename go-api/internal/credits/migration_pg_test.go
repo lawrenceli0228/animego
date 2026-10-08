@@ -11,11 +11,13 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/testutil"
 )
 
-// TestMigration0042_PG exercises 0042 against rows planted under 0041:
-// the dedupe that lets the unique indexes exist, the write path of the
-// binary that predates 0042 (which runs against this schema for the
-// length of a deploy), and the down migration.
-func TestMigration0042_PG(t *testing.T) {
+// TestMigrations0042And0043_PG exercises 0042 and 0043 against rows
+// planted under 0041: the dedupe that lets the unique indexes exist, each
+// file on its own (a deploy applies them in turn, and either can be the
+// last one applied when something stops it), the write path of the
+// binary that predates them (which runs against this schema for the
+// length of a deploy), and the down migrations.
+func TestMigrations0042And0043_PG(t *testing.T) {
 	ctx := context.Background()
 	uri := testutil.SetupPG(t)
 	testutil.MigrateTo(t, uri, 41)
@@ -62,21 +64,38 @@ func TestMigration0042_PG(t *testing.T) {
 		assert.Equal(t, 1, count(`SELECT count(*) FROM anime_staff WHERE anime_id = 1 AND staff_id IS NULL`))
 	})
 
-	t.Run("the new columns and table are there and empty", func(t *testing.T) {
-		assert.Equal(t, 2, count(`SELECT count(*) FROM anime_cache
-			WHERE cast_has_more IS NULL AND cast_checked_at IS NULL AND staff_has_more IS NULL AND staff_checked_at IS NULL`))
+	stampColumns := `SELECT count(*) FROM information_schema.columns
+		WHERE table_name = 'anime_cache' AND column_name IN ('cast_has_more', 'cast_checked_at', 'staff_has_more', 'staff_checked_at')`
+
+	t.Run("0042 adds the voices table; the sweep's columns wait for 0043", func(t *testing.T) {
 		exec(`INSERT INTO anime_character_voices (anime_id, character_id, staff_id, display_order, language)
 			VALUES (2, 10, 900, 0, 'Japanese')`)
 		_, err := pool.Exec(ctx, `INSERT INTO anime_character_voices (anime_id, character_id, staff_id, display_order) VALUES (2, 0, 900, 0)`)
 		assert.Error(t, err, "ids are positive")
 		exec(`DELETE FROM anime_cache WHERE anilist_id = 2`)
 		assert.Equal(t, 0, count(`SELECT count(*) FROM anime_character_voices`), "voices go with their title")
+		assert.Equal(t, 0, count(stampColumns))
+	})
+
+	// The binary that predates 0042 must also survive a deploy that stops
+	// between the two files.
+	t.Run("the pre-0042 delete-and-insert write works after 0042 alone", func(t *testing.T) {
+		oldWrite(t, ctx, pool, 1)
+		assert.Equal(t, 3, count(`SELECT count(*) FROM anime_characters WHERE anime_id = 1`))
+	})
+
+	testutil.MigrateTo(t, uri, 43)
+
+	t.Run("0043 adds the sweep's columns, empty", func(t *testing.T) {
+		assert.Equal(t, 4, count(stampColumns))
+		assert.Equal(t, 1, count(`SELECT count(*) FROM anime_cache
+			WHERE cast_has_more IS NULL AND cast_checked_at IS NULL AND staff_has_more IS NULL AND staff_checked_at IS NULL`))
 	})
 
 	// The binary that predates 0042 keeps serving while the new one
 	// builds.  Its whole credit write is: delete every row of the title,
 	// insert page 1.  Those exact statement shapes must still succeed.
-	t.Run("the pre-0042 delete-and-insert write still works", func(t *testing.T) {
+	t.Run("the pre-0042 delete-and-insert write still works after 0043", func(t *testing.T) {
 		oldWrite(t, ctx, pool, 1)
 		assert.Equal(t, 3, count(`SELECT count(*) FROM anime_characters WHERE anime_id = 1`))
 		assert.Equal(t, 3, count(`SELECT count(*) FROM anime_staff WHERE anime_id = 1`))
@@ -90,11 +109,15 @@ func TestMigration0042_PG(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("down trims rows beyond the first page and drops what 0042 added", func(t *testing.T) {
+	t.Run("down trims rows beyond the first page and drops what 0042 and 0043 added", func(t *testing.T) {
 		exec(`INSERT INTO anime_characters (anime_id, display_order, character_id)
 			SELECT 1, 100 + g, 1000 + g FROM generate_series(0, 39) g`)
 		exec(`INSERT INTO anime_staff (anime_id, display_order, staff_id, role)
 			SELECT 1, 100 + g, 1000 + g, 'Key Animation' FROM generate_series(0, 39) g`)
+
+		testutil.MigrateTo(t, uri, 42)
+		assert.Equal(t, 0, count(stampColumns), "0043's down drops the sweep's columns")
+		assert.Equal(t, 43, count(`SELECT count(*) FROM anime_characters WHERE anime_id = 1`), "and touches nothing else")
 
 		testutil.MigrateTo(t, uri, 41)
 
@@ -102,8 +125,6 @@ func TestMigration0042_PG(t *testing.T) {
 			"the build that predates 0042 reads every row; only the first page may remain")
 		assert.Equal(t, 3, count(`SELECT count(*) FROM anime_staff WHERE anime_id = 1`))
 		assert.Equal(t, 0, count(`SELECT count(*) FROM information_schema.tables WHERE table_name = 'anime_character_voices'`))
-		assert.Equal(t, 0, count(`SELECT count(*) FROM information_schema.columns
-			WHERE table_name = 'anime_cache' AND column_name IN ('cast_has_more', 'cast_checked_at', 'staff_has_more', 'staff_checked_at')`))
 		assert.Equal(t, 0, count(`SELECT count(*) FROM pg_indexes
 			WHERE indexname IN ('anime_characters_anime_character_uidx', 'anime_staff_anime_staff_role_uidx')`))
 

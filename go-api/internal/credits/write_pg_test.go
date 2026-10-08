@@ -202,6 +202,73 @@ func TestWriteCast_PG(t *testing.T) {
 	})
 }
 
+// TestWrite_EveryColumnRoundTrips_PG pins the json tags on Character,
+// Voice and Staff to the column definition lists of the batch upserts.
+// jsonb_to_recordset answers a key it does not know with NULL and no
+// error, so a tag that drifts from its column would silently empty that
+// column on every write -- this test is where that shows.
+func TestWrite_EveryColumnRoundTrips_PG(t *testing.T) {
+	ctx := context.Background()
+	uri := testutil.SetupPG(t)
+	pool := testutil.NewWebPool(t, ctx, uri)
+	q := dbgen.New(pool)
+	seedTitle(t, ctx, pool, 1)
+
+	s := func(v string) *string { return &v }
+	i32 := func(v int32) *int32 { return &v }
+	cast := Cast{
+		Characters: []Character{{
+			DisplayOrder: 0, NameEn: s("Stark"), NameJa: s("シュタルク"), ImageUrl: s("https://img/c"),
+			Role: s("MAIN"), VoiceActorEn: s("Chiaki Kobayashi"), VoiceActorJa: s("小林千晃"),
+			VoiceActorImageUrl: s("https://img/va"), CharacterID: i32(10), VoiceActorID: i32(20),
+		}},
+		Voices: []Voice{{
+			CharacterID: 10, StaffID: 21, DisplayOrder: 1, Language: s("Japanese"), RoleNotes: s("Childhood"),
+			DubGroup: s("Dub Co"), NameFull: s("Arisa Kiyoto"), NameNative: s("清都ありさ"), ImageUrl: s("https://img/v2"),
+		}},
+	}
+	require.NoError(t, WriteCast(ctx, q, 1, cast, WholeList))
+	require.NoError(t, WriteStaff(ctx, q, 1, []Staff{{
+		DisplayOrder: 0, NameEn: s("Keiichiro Saito"), NameJa: s("斎藤圭一郎"), ImageUrl: s("https://img/s"),
+		Role: s("Director"), StaffID: i32(30),
+	}}, WholeList))
+
+	// Every column is read as text so a NULL shows up as a mismatch in the
+	// diff rather than as a nil dereference.
+	readRow := func(sql string) []string {
+		t.Helper()
+		rows, err := pool.Query(ctx, sql)
+		require.NoError(t, err)
+		defer rows.Close()
+		require.True(t, rows.Next(), "no row for %s", sql)
+		vals, err := rows.Values()
+		require.NoError(t, err)
+		out := make([]string, len(vals))
+		for i, v := range vals {
+			if v == nil {
+				out[i] = "<NULL>"
+				continue
+			}
+			out[i] = fmt.Sprint(v)
+		}
+		return out
+	}
+
+	assert.Equal(t,
+		[]string{"0", "Stark", "シュタルク", "https://img/c", "MAIN", "Chiaki Kobayashi", "小林千晃", "https://img/va", "10", "20"},
+		readRow(`SELECT display_order, name_en, name_ja, image_url, role, voice_actor_en, voice_actor_ja,
+		               voice_actor_image_url, character_id, voice_actor_id
+		        FROM anime_characters WHERE anime_id = 1`))
+	assert.Equal(t,
+		[]string{"10", "21", "1", "Japanese", "Childhood", "Dub Co", "Arisa Kiyoto", "清都ありさ", "https://img/v2"},
+		readRow(`SELECT character_id, staff_id, display_order, language, role_notes, dub_group,
+		               name_full, name_native, image_url
+		        FROM anime_character_voices WHERE anime_id = 1`))
+	assert.Equal(t,
+		[]string{"0", "Keiichiro Saito", "斎藤圭一郎", "https://img/s", "Director", "30"},
+		readRow(`SELECT display_order, name_en, name_ja, image_url, role, staff_id FROM anime_staff WHERE anime_id = 1`))
+}
+
 // TestWriteStaff_PG — the staff key includes the role, an empty role is
 // a key of its own (NULLS NOT DISTINCT), and the two modes prune and
 // renumber as they do for characters.

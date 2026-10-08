@@ -455,13 +455,16 @@ func TestAnimeCredits_FailureIsRetriedTomorrowAndEndsThePass(t *testing.T) {
 }
 
 // TestAnimeCredits_HalfAListIsNotWritten — when the second request of a
-// long list fails, nothing is written: the stored rows are no worse than
-// they were, and a truncated list must not replace them.
+// long list cannot get a token, nothing is written (the stored rows are
+// no worse than they were, and a truncated list must not replace them),
+// the pass ends, and the title steps back an hour: it has already cost a
+// request, and at the head of every pass it would cost one each time and
+// hold up the titles behind it.
 func TestAnimeCredits_HalfAListIsNotWritten(t *testing.T) {
 	store := newFakeCreditsStore()
-	store.castIDs = []int32{1}
+	store.castIDs = []int32{1, 2}
 	al := &fakeCreditsAniList{
-		castLen: map[int]int{1: 300},
+		castLen: map[int]int{1: 300, 2: 30},
 		err: func(_ string, v anilist.CreditPagesVars, _ int) error {
 			if v.FirstPage > 1 {
 				return anilist.ErrBudgetBusy
@@ -473,7 +476,33 @@ func TestAnimeCredits_HalfAListIsNotWritten(t *testing.T) {
 
 	require.NoError(t, w.Work(context.Background(), creditsJob()))
 	assert.Empty(t, store.castWrites)
-	assert.Empty(t, store.castStamps)
+	require.Len(t, store.castStamps, 1)
+	assert.Equal(t, creditsStamp{id: 1, at: creditsNow.Add(creditsDeferAfterBusy - creditsStaleAfter)}, store.castStamps[0],
+		"due again in an hour, has_more untouched")
+	assert.NotContains(t, al.calls, "cast 2 p1-8", "the pass ended at the busy budget")
+	assert.False(t, store.staffListed)
+}
+
+// TestAnimeCredits_SecondRequestFailureIsAFailure — any failure of the
+// second request other than the budget is an ordinary failed title.
+func TestAnimeCredits_SecondRequestFailureIsAFailure(t *testing.T) {
+	store := newFakeCreditsStore()
+	store.castIDs = []int32{1}
+	al := &fakeCreditsAniList{
+		castLen: map[int]int{1: 300},
+		err: func(_ string, v anilist.CreditPagesVars, _ int) error {
+			if v.FirstPage > 1 {
+				return &anilist.ErrUpstream{Status: http.StatusBadGateway, Message: "boom"}
+			}
+			return nil
+		},
+	}
+	w, _ := newCreditsWorker(al, store)
+
+	require.NoError(t, w.Work(context.Background(), creditsJob()))
+	assert.Empty(t, store.castWrites)
+	require.Len(t, store.castStamps, 1)
+	assert.Equal(t, creditsNow.Add(creditsRetryAfterFailure-creditsStaleAfter), store.castStamps[0].at)
 }
 
 // shortPagesFetcher drops pages from responses: all of them for the first

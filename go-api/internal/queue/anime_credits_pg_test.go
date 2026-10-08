@@ -123,4 +123,32 @@ func TestAnimeCredits_PG(t *testing.T) {
 		assert.Equal(t, 100, rows, "the prune that ran before the failure was rolled back")
 		assert.False(t, stamped, "no stamp for a write that did not happen")
 	})
+
+	t.Run("a has_more flag turning true puts a swept title back in the list", func(t *testing.T) {
+		exec(`TRUNCATE anime_cache CASCADE`)
+		exec(`INSERT INTO anime_cache (anilist_id, title_romaji, cast_has_more, cast_checked_at, staff_has_more, staff_checked_at) VALUES
+			(900, 'swept short, now growing', false, now(), false, now()),
+			(901, 'swept long, still long',   true,  now(), NULL,  NULL),
+			(902, 'nothing said',             false, now(), false, now())`)
+		yes := true
+
+		require.NoError(t, q.SetAnimeCreditsHasMore(ctx, &yes, nil, 900))
+		require.NoError(t, q.SetAnimeCreditsHasMore(ctx, &yes, nil, 901))
+		require.NoError(t, q.SetAnimeCreditsHasMore(ctx, nil, nil, 902))
+
+		ids, err := q.ListAnimeCastCandidates(ctx, stale, anilist.CreditsPerPage, 10)
+		require.NoError(t, err)
+		assert.Equal(t, []int32{900}, ids,
+			"900's stamp was for a one-page list and is void; 901's flag was already true, so its 30-day stamp stands")
+
+		var staffStamped bool
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT staff_checked_at IS NOT NULL FROM anime_cache WHERE anilist_id = 900`).Scan(&staffStamped))
+		assert.True(t, staffStamped, "the staff stamp is the staff flag's business")
+
+		require.NoError(t, q.SetAnimeCreditsHasMore(ctx, nil, &yes, 900))
+		ids, err = q.ListAnimeStaffCandidates(ctx, stale, anilist.CreditsPerPage, 10)
+		require.NoError(t, err)
+		assert.Equal(t, []int32{900}, ids)
+	})
 }

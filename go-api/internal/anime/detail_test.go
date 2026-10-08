@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
+	"github.com/lawrenceli0228/animego/go-api/internal/credits"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
@@ -89,9 +90,9 @@ type detailFakeDB struct {
 	insertedGenres          []string
 	insertedStudios         []string
 	insertedRelations       []dbgen.InsertAnimeRelationParams
-	insertedCharacters      []dbgen.UpsertAnimeCharacterParams
-	insertedVoices          []dbgen.UpsertAnimeCharacterVoiceParams
-	insertedStaff           []dbgen.UpsertAnimeStaffParams
+	insertedCharacters      []upsertedCharacter
+	insertedVoices          []credits.Voice
+	insertedStaff           []upsertedStaff
 	insertedRecommendations []dbgen.InsertAnimeRecommendationParams
 
 	// The credits statements, in call order ("prune characters whole",
@@ -295,6 +296,20 @@ func (f *detailFakeDB) InsertAnimeRelation(ctx context.Context, arg dbgen.Insert
 	return nil
 }
 
+// upsertedCharacter / upsertedStaff are one row of a batch upsert, with
+// the title it was written for.  The batch arrives as the jsonb array the
+// real statement unpacks; decoding it back through the row types' json
+// tags is also what checks those tags carry every field.
+type upsertedCharacter struct {
+	AnimeID int32
+	credits.Character
+}
+
+type upsertedStaff struct {
+	AnimeID int32
+	credits.Staff
+}
+
 // recordCredit appends one credits statement to the call log.
 func (f *detailFakeDB) recordCredit(call string) {
 	f.mu.Lock()
@@ -302,12 +317,27 @@ func (f *detailFakeDB) recordCredit(call string) {
 	f.mu.Unlock()
 }
 
-func (f *detailFakeDB) UpsertAnimeCharacter(_ context.Context, arg dbgen.UpsertAnimeCharacterParams) (uuid.UUID, error) {
+// newIDs returns one fresh row id per row, as RETURNING id would.
+func newIDs(n int) []uuid.UUID {
+	ids := make([]uuid.UUID, n)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+	return ids
+}
+
+func (f *detailFakeDB) UpsertAnimeCharacters(_ context.Context, animeID int32, rows []byte) ([]uuid.UUID, error) {
 	f.upsertCharacterCalls.Add(1)
+	var decoded []credits.Character
+	if err := json.Unmarshal(rows, &decoded); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
-	f.insertedCharacters = append(f.insertedCharacters, arg)
+	for _, c := range decoded {
+		f.insertedCharacters = append(f.insertedCharacters, upsertedCharacter{AnimeID: animeID, Character: c})
+	}
 	f.mu.Unlock()
-	return uuid.New(), nil
+	return newIDs(len(decoded)), nil
 }
 
 func (f *detailFakeDB) PruneAnimeCharacters(_ context.Context, _ int32, keep []uuid.UUID, wholeList bool) error {
@@ -325,19 +355,29 @@ func (f *detailFakeDB) PruneAnimeCharacterVoices(_ context.Context, _ int32, cha
 	return nil
 }
 
-func (f *detailFakeDB) UpsertAnimeCharacterVoice(_ context.Context, arg dbgen.UpsertAnimeCharacterVoiceParams) error {
+func (f *detailFakeDB) UpsertAnimeCharacterVoices(_ context.Context, _ int32, rows []byte) error {
+	var decoded []credits.Voice
+	if err := json.Unmarshal(rows, &decoded); err != nil {
+		return err
+	}
 	f.mu.Lock()
-	f.insertedVoices = append(f.insertedVoices, arg)
+	f.insertedVoices = append(f.insertedVoices, decoded...)
 	f.mu.Unlock()
 	return nil
 }
 
-func (f *detailFakeDB) UpsertAnimeStaff(_ context.Context, arg dbgen.UpsertAnimeStaffParams) (uuid.UUID, error) {
+func (f *detailFakeDB) UpsertAnimeStaff(_ context.Context, animeID int32, rows []byte) ([]uuid.UUID, error) {
 	f.upsertStaffCalls.Add(1)
+	var decoded []credits.Staff
+	if err := json.Unmarshal(rows, &decoded); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
-	f.insertedStaff = append(f.insertedStaff, arg)
+	for _, s := range decoded {
+		f.insertedStaff = append(f.insertedStaff, upsertedStaff{AnimeID: animeID, Staff: s})
+	}
 	f.mu.Unlock()
-	return uuid.New(), nil
+	return newIDs(len(decoded)), nil
 }
 
 func (f *detailFakeDB) PruneAnimeStaff(_ context.Context, _ int32, keep []uuid.UUID, wholeList bool) error {
