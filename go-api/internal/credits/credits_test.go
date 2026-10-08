@@ -1,6 +1,7 @@
 package credits
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -113,9 +114,10 @@ func TestCastFromEdges_PrimaryVoice(t *testing.T) {
 }
 
 // TestCastFromEdges_VoiceOrderAndCap — the shape measured on AniList for
-// Stark (Frieren): thirteen roles in ten languages.  The title's language
-// comes first (main voice, then the childhood voice), then the rest in
-// AniList's order, cut at eight.
+// Stark (Frieren): thirteen roles in ten languages, plus a Chinese dub
+// listed after all of them.  The title's language comes first (main
+// voice, then the childhood voice), then Chinese, then Korean; the other
+// dubs are dropped, and what is left is cut at eight.
 func TestCastFromEdges_VoiceOrderAndCap(t *testing.T) {
 	stark := character(100, "Stark",
 		voice(1, "Kobayashi", "Japanese", ""),
@@ -131,11 +133,14 @@ func TestCastFromEdges_VoiceOrderAndCap(t *testing.T) {
 		voice(11, "Bayhaqi", "Indonesian", ""),
 		voice(12, "Lee", "Korean", "Young"),
 		voice(13, "Kim", "Korean", ""),
+		voice(14, "Zhang", "Chinese", ""),
 	)
 	cast := CastFromEdges([]anilist.CharacterEdge{stark}, sptr("JP"))
 
-	assert.Equal(t, []int32{1, 8, 2, 3, 4, 5, 6, 7}, voiceIDs(cast, 100))
-	require.Len(t, cast.Voices, MaxVoicesPerCharacter)
+	// Japanese first, then the Chinese dub AniList listed last, then
+	// Korean; the European and South-East Asian dubs are not kept at all,
+	// so they can no longer push the Chinese voice past the cap.
+	assert.Equal(t, []int32{1, 8, 14, 12, 13}, voiceIDs(cast, 100))
 	for i, v := range cast.Voices {
 		assert.Equal(t, int32(i), v.DisplayOrder)
 	}
@@ -148,7 +153,8 @@ func TestCastFromEdges_VoiceOrderAndCap(t *testing.T) {
 	assert.Equal(t, "Kobayashi (native)", *cast.Voices[0].NameNative)
 	assert.Equal(t, "https://img/Kobayashi", *cast.Voices[0].ImageUrl)
 
-	// A donghua: Chinese voices first, Japanese next, the rest after.
+	// A donghua: Chinese voices first, Japanese next, Korean after; the
+	// English dub is dropped.
 	wei := character(200, "Wei Wuxian",
 		voice(21, "Kimura", "Japanese", ""),
 		voice(22, "Ajie", "Chinese", ""),
@@ -157,10 +163,24 @@ func TestCastFromEdges_VoiceOrderAndCap(t *testing.T) {
 		voice(25, "Sim", "Korean", ""),
 	)
 	cast = CastFromEdges([]anilist.CharacterEdge{wei}, sptr("CN"))
-	assert.Equal(t, []int32{22, 24, 21, 23, 25}, voiceIDs(cast, 200))
+	assert.Equal(t, []int32{22, 24, 21, 25}, voiceIDs(cast, 200))
 	c := cast.Characters[0]
 	assert.Equal(t, "Ajie", *c.VoiceActorEn)
 	assert.Equal(t, "Ajie (native)", *c.VoiceActorJa, "the native-script name, whatever the language")
+
+	// The cap still applies once only kept languages remain.
+	many := make([]anilist.VoiceActorRole, 0, 10)
+	for i := 1; i <= 10; i++ {
+		many = append(many, voice(300+i, fmt.Sprintf("Cast %d", i), "Japanese", "Young"))
+	}
+	cast = CastFromEdges([]anilist.CharacterEdge{character(300, "Crowd", many...)}, sptr("JP"))
+	require.Len(t, cast.Voices, MaxVoicesPerCharacter)
+
+	// A character whose only voice is in another language keeps it as the
+	// primary, as before; it is the extra dubs that are dropped.
+	solo := character(400, "Solo", voice(41, "Only", "English", ""))
+	cast = CastFromEdges([]anilist.CharacterEdge{solo}, sptr("JP"))
+	assert.Equal(t, []int32{41}, voiceIDs(cast, 400))
 }
 
 // TestCastFromEdges_Dedupes — a character listed twice is kept at its

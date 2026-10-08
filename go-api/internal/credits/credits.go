@@ -38,11 +38,9 @@ import (
 
 // MaxVoicesPerCharacter caps the voice rows kept per character.
 //
-// A popular character has a voice in every market AniList tracks --
-// thirteen roles in ten languages is not unusual -- and nobody reading a
-// cast list needs the Thai and Indonesian dubs of every side character.
-// Eight keeps the title's own language, the Japanese cast and the larger
-// dubs (voices are ordered before the cap, see orderVoices), and bounds a
+// Only Japanese, Chinese and Korean voices are kept at all (see
+// keptLanguage), so the cap is reached by alternate casts -- childhood and
+// young versions, replacements -- rather than by dubs.  It bounds a
 // 400-character title at 3,200 rows.
 const MaxVoicesPerCharacter = 8
 
@@ -53,6 +51,16 @@ const (
 	LanguageChinese  = "Chinese"
 	LanguageKorean   = "Korean"
 )
+
+// keptLanguage reports whether a voice in this language is stored at all:
+// Japanese, Chinese or Korean, the three a primary voice is chosen from.
+// The English, European and South-East Asian dubs AniList lists for a
+// popular title are not shown anywhere on the site.
+func keptLanguage(lang string) bool {
+	return strings.EqualFold(lang, LanguageJapanese) ||
+		strings.EqualFold(lang, LanguageChinese) ||
+		strings.EqualFold(lang, LanguageKorean)
+}
 
 // PrimaryLanguage is the language whose voice a title's character rows
 // carry: Chinese for a Chinese or Taiwanese production, Korean for a
@@ -217,12 +225,14 @@ func CastFromEdges(edges []anilist.CharacterEdge, countryOfOrigin *string) Cast 
 
 // orderVoices returns the character's usable voice roles in stored
 // order: the primary voice first (see CastFromEdges), then the rest of
-// the title's language, then Japanese, then every other language, each
-// group in AniList's order; one entry per person; at most
-// MaxVoicesPerCharacter.
+// the title's language, then Japanese, Chinese and Korean, each group in
+// AniList's order; one entry per person; at most MaxVoicesPerCharacter.
+// Voices in any other language are dropped, except that the primary
+// itself may be one when a character has nothing else.
 //
-// Grouping before the cap is what keeps a Chinese title's second Chinese
-// voice ahead of a character's eighth dub.
+// Dropping before the cap is what keeps a Japanese title's Chinese dub:
+// AniList lists it after the Portuguese, Italian and German casts, and
+// with every language kept those filled the eight places first.
 func orderVoices(roles []anilist.VoiceActorRole, want string) []anilist.VoiceActorRole {
 	usable := make([]anilist.VoiceActorRole, 0, len(roles))
 	for _, r := range roles {
@@ -237,7 +247,7 @@ func orderVoices(roles []anilist.VoiceActorRole, want string) []anilist.VoiceAct
 	primary := pickPrimary(usable, want)
 	rest := make([]anilist.VoiceActorRole, 0, len(usable)-1)
 	for i, r := range usable {
-		if i != primary {
+		if i != primary && keptLanguage(language(r)) {
 			rest = append(rest, r)
 		}
 	}
@@ -247,8 +257,10 @@ func orderVoices(roles []anilist.VoiceActorRole, want string) []anilist.VoiceAct
 			return 0
 		case strings.EqualFold(lang, LanguageJapanese):
 			return 1
-		default:
+		case strings.EqualFold(lang, LanguageChinese):
 			return 2
+		default: // Korean, the only other language keptLanguage lets through
+			return 3
 		}
 	}
 	sort.SliceStable(rest, func(i, j int) bool { return group(rest[i]) < group(rest[j]) })
