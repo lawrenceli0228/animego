@@ -509,6 +509,37 @@ func (AnimeCreditsArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// ProfilesArgs collects AniList's profiles of the people and characters
+// the credit tables name, fifty ids to a request.  See profiles.go.
+//
+// Same shape as AnimeCreditsArgs: no fields, because the work list is two
+// queries (ListPeopleCandidates / ListCharacterCandidates), and one job
+// per pass rather than per batch, because a pass is a few requests paced
+// seconds apart.
+//
+// On the ratings queue, deliberately.  That queue runs one job at a time
+// (FixedConcurrency(1) in registry_default.go), so this sweep never runs
+// beside the credits, facts or ratings sweeps: their AniList requests come
+// one pass after another, never from two passes interleaved, and the most
+// they take together is what each pass is allowed in its turn.  A queue of
+// its own would buy a separate pause lever and lose that bound.
+type ProfilesArgs struct{}
+
+// Kind returns the river job kind for the profiles sweep.
+func (ProfilesArgs) Kind() string { return "profiles" }
+
+// InsertOpts pins the sweep to the ratings queue and collapses a second
+// enqueue into the one already in flight, as AnimeCreditsArgs does.
+func (ProfilesArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: RatingsQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: ratingsUniqueStates,
+		},
+	}
+}
+
 // BangumiRatingsArgs re-reads Bangumi's score and vote count for the
 // rows that are due, one subject request per row.
 //

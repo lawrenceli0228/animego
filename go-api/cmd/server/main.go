@@ -1257,6 +1257,13 @@ func buildWorkers(d workerDeps) *river.Workers {
 	// -- and a client of its own would be a second bucket against the same
 	// budget.  The pool is for its one-transaction-per-title writes.
 	queue.AddCreditsWorker(workers, d.anilist, d.pool, d.db)
+
+	// The profiles sweep: AniList's profiles of the people and characters
+	// those credits name.  The same AniList client for the credits sweep's
+	// reason -- its no-wait requests only take tokens nobody is waiting for
+	// on that client's limiter -- and the pool for its one-transaction-
+	// per-batch writes.  Gated at work time by PROFILES_SWEEP_ENABLED.
+	queue.AddProfilesWorker(workers, d.anilist, d.pool, d.db)
 	return workers
 }
 
