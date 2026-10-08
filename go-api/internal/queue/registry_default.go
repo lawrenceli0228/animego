@@ -138,7 +138,10 @@ var productionQueues = map[string]Concurrency{
 	// pass would not sit in front of a thirty-second AniList one.  The cost
 	// is small at this cadence: with anilistRatingsBatch at 500 the AniList
 	// pass is ~21s and the Bangumi pass ~4 minutes, so serialising them
-	// spends about five minutes of one slot per hour.
+	// spends about five minutes of one slot per hour.  The facts sweep and
+	// the credits sweep share the slot for the same reason; the credits
+	// sweep adds a pass of under a minute every five minutes, so an hourly
+	// pass may wait that long behind it.
 	RatingsQueueName: FixedConcurrency(1,
 		"two passes of the same kind cannot overlap, which is what keeps a relaxed-uniqueness future safe"),
 }
@@ -263,5 +266,18 @@ var productionEntries = []Entry{
 		Args:     AnimeFactsArgs{},
 		Queue:    RatingsQueueName,
 		Periodic: &PeriodicSpec{Interval: ratingsInterval, RunOnStart: true},
+	},
+
+	// --- credits beyond the first page ---
+
+	// Every five minutes rather than hourly: a pass is a few titles paced
+	// seconds apart on no-wait requests (anime_credits.go), so the backlog
+	// drains by frequency and no pass holds the slot for long.  RunOnStart
+	// for the reason every sweep here has it; the read stamp makes a boot
+	// pass free when nothing is due.
+	{
+		Args:     AnimeCreditsArgs{},
+		Queue:    RatingsQueueName,
+		Periodic: &PeriodicSpec{Interval: creditsInterval, RunOnStart: true},
 	},
 }

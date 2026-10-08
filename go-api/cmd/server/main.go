@@ -1250,6 +1250,13 @@ func buildWorkers(d workerDeps) *river.Workers {
 	// batches queue on the one limiter beside everything else, and the
 	// same queue so the two never run side by side.
 	queue.AddFactsWorker(workers, d.anilist, d.db)
+
+	// The credits sweep: characters and staff beyond AniList's first page.
+	// The SAME AniList client, because its pacing is defined against that
+	// client's limiter -- it only ever takes a token nobody is waiting for
+	// -- and a client of its own would be a second bucket against the same
+	// budget.  The pool is for its one-transaction-per-title writes.
+	queue.AddCreditsWorker(workers, d.anilist, d.pool, d.db)
 	return workers
 }
 

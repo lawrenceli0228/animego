@@ -479,6 +479,36 @@ func (AnimeFactsArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// AnimeCreditsArgs completes titles' characters and staff beyond
+// AniList's first page: up to 400 of each, every voice of every
+// character.  See anime_credits.go.
+//
+// Same shape as AnimeFactsArgs: no fields, because the work list is a
+// query (ListAnimeCastCandidates / ListAnimeStaffCandidates), and one job
+// per pass rather than per title, because a pass is a handful of titles
+// paced seconds apart and per-title jobs would only add bookkeeping.  On
+// the ratings queue with the other catalogue-walking AniList sweeps, for
+// the reason RatingsQueueName gives: one slot, so no two of them hold the
+// shared limiter at once, and one pause that stops them all.
+type AnimeCreditsArgs struct{}
+
+// Kind returns the river job kind for the credits sweep.
+func (AnimeCreditsArgs) Kind() string { return "anime_credits" }
+
+// InsertOpts pins the sweep to the ratings queue and collapses a second
+// enqueue into the one already in flight.  At a five-minute cadence that
+// collapse is what stops passes piling up behind a long Bangumi ratings
+// pass on the same slot.
+func (AnimeCreditsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: RatingsQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: ratingsUniqueStates,
+		},
+	}
+}
+
 // BangumiRatingsArgs re-reads Bangumi's score and vote count for the
 // rows that are due, one subject request per row.
 //
