@@ -209,7 +209,11 @@ for (const { name, viewport, base } of VIEWPORTS) {
       await expect(helpful).toHaveAttribute("aria-pressed", "true");
       await expect(helpful).toContainText("1");
 
+      // Waited for as on the first visit: the render may again be the cached
+      // one from before the review, and the card then comes with the
+      // reader's re-read once the page has hydrated.
       await page.reload();
+      await waitForHydration(page, `#review-${reviewId} button[aria-pressed]`);
       await expect(page.locator(`#review-${reviewId}`).getByRole("button", { name: /有用/ })).toHaveAttribute(
         "aria-pressed",
         "true",
