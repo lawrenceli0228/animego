@@ -16,6 +16,7 @@ import { resolveEpisodeSkeleton } from "@/components/anime/episodeGridSkeleton";
 import { GenreChips } from "@/components/anime/LocalizedChips";
 import { durationLabel } from "@/lib/contentLabels";
 import { pickTitle } from "@/lib/formatters";
+import { toMirrorUrl } from "@/lib/images/mirror";
 import { BCP47_TAG, type Lang } from "@/lib/i18n/lang";
 import type { Dict } from "@/lib/i18n";
 import type { AnimeDetail } from "@/lib/types";
@@ -146,11 +147,15 @@ export default function DetailHero({
         * No width/height attributes on purpose: the element is absolutely
         * positioned into a fixed-height box, so there is no layout to reserve
         * and the intrinsic ratio would only be a lie if AniList ever changes
-        * banner dimensions. */}
+        * banner dimensions.
+        *
+        * next/image directly rather than FadeImage, so the mirror rewrite
+        * FadeImage does for the cover below has to be done here by hand
+        * (lib/images/mirror.ts). */}
       <div className={s.banner}>
         {detail.bannerImageUrl ? (
           <Image
-            src={detail.bannerImageUrl}
+            src={toMirrorUrl(detail.bannerImageUrl)}
             alt=""
             aria-hidden
             // AniList banners are 1900x400. `sizes="100vw"` is honest -- the

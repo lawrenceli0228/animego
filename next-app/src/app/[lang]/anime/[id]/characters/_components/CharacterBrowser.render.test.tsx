@@ -3,6 +3,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { Lang } from "@/lib/i18n/lang";
 import { LanguageProvider } from "@/lib/lang-client";
+import {
+  PRODUCTION_MIRROR_BASE,
+  imgSrcs,
+  mirrorOf,
+  optimizedFrom,
+  renderAsNextDev,
+  withMirror,
+} from "@/lib/test-utils/nextImage";
 import type { CastCharacter, CharactersResponse } from "@/lib/types";
 import CharacterBrowser from "./CharacterBrowser";
 
@@ -175,5 +183,62 @@ describe("CharacterBrowser — the edges", () => {
     expect(buttons(html).slice(0, 4)).toEqual(["All 100", "Main 3", "Supporting 40", "Background 57"]);
     expect(buttons(html)).toContain("Japanese 98");
     expect(buttons(html)).toContain("Show 48 more");
+  });
+});
+
+// The portraits, rendered as `next dev` renders them: next/image checks every
+// src against the app's remotePatterns and throws on one it does not admit.
+// That throw is a 500 for the whole 角色 tab, so "renders at all" is half of
+// what these pin; the other half is where each portrait is fetched from.
+describe("CharacterBrowser — portraits and the AniList mirror", () => {
+  const CHARACTER = "https://s4.anilist.co/file/anilistcdn/character/large/b176754-5x6wfCKhRrxR.png";
+  const VOICE = "https://s4.anilist.co/file/anilistcdn/staff/medium/n95991-0B7dPZHaFl9X.png";
+  // What the Bangumi V2 worker writes over an AniList portrait.
+  const BANGUMI = "https://lain.bgm.tv/pic/crt/l/1a/2b/95991_prsn_aBcDe.jpg?r=1700000000";
+
+  const page = (characterImage: string, voiceImage: string): CharactersResponse => ({
+    ...FIRST_PAGE,
+    data: [
+      character(1, "MAIN", [voice(11, "種﨑敦美", { imageUrl: voiceImage })], {
+        nameCn: "芙莉莲",
+        imageUrl: characterImage,
+      }),
+    ],
+  });
+
+  const renderDev = (initial: CharactersResponse) =>
+    renderAsNextDev(
+      <LanguageProvider lang="zh">
+        <CharacterBrowser anilistId={154587} initial={initial} />
+      </LanguageProvider>,
+    );
+
+  test("switched on: both portraits are optimized from our mirror", () => {
+    const srcs = withMirror(PRODUCTION_MIRROR_BASE, () => imgSrcs(renderDev(page(CHARACTER, VOICE))));
+    expect(srcs).toHaveLength(2);
+    expect(srcs[0].startsWith(optimizedFrom(mirrorOf(CHARACTER)))).toBe(true);
+    expect(srcs[1].startsWith(optimizedFrom(mirrorOf(VOICE)))).toBe(true);
+  });
+
+  test("switched off: the same portraits are optimized from AniList", () => {
+    const srcs = withMirror(undefined, () => imgSrcs(renderDev(page(CHARACTER, VOICE))));
+    expect(srcs).toHaveLength(2);
+    expect(srcs[0].startsWith(optimizedFrom(CHARACTER))).toBe(true);
+    expect(srcs[1].startsWith(optimizedFrom(VOICE))).toBe(true);
+  });
+
+  test("a row already holding the mirror's URL renders, switch on or off", () => {
+    for (const base of [PRODUCTION_MIRROR_BASE, undefined]) {
+      const srcs = withMirror(base, () => imgSrcs(renderDev(page(mirrorOf(CHARACTER), mirrorOf(VOICE)))));
+      expect(srcs[0].startsWith(optimizedFrom(mirrorOf(CHARACTER)))).toBe(true);
+      expect(srcs[1].startsWith(optimizedFrom(mirrorOf(VOICE)))).toBe(true);
+    }
+  });
+
+  test("a Bangumi portrait stays a plain <img> on Bangumi, switch on or off", () => {
+    for (const base of [PRODUCTION_MIRROR_BASE, undefined]) {
+      const srcs = withMirror(base, () => imgSrcs(renderDev(page(CHARACTER, BANGUMI))));
+      expect(srcs[1]).toBe(BANGUMI);
+    }
   });
 });

@@ -27,6 +27,7 @@
 import { getImageProps } from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { toMirrorUrl } from "@/lib/images/mirror";
 import { HERO_INTERVAL_MS } from "@/lib/home/heroRotation";
 import { heroStatusParts, statusText } from "@/lib/home/heroStatus";
 import { fillTemplate, weekdayTime } from "@/lib/home/time";
@@ -49,18 +50,20 @@ interface HomeHeroProps {
   progress: Record<number, number>;
 }
 
-// Same image conventions as the rest of the site (see FadeImage): through the
+// Same image conventions as the rest of the site (see FadeImage): AniList
+// URLs pointed at our mirror when the build has one (toMirrorUrl), through the
 // optimizer, quality 85 (AVIF q65). Covers at their rendered size; banners at
 // their native 1900px, because object-fit: cover scales a 4.75:1 banner to
 // ~2300px wide in a 484px-tall hero — anything smaller is upscaled.
 function coverProps(src: string) {
-  return getImageProps({ src, alt: "", width: 196, height: 276, quality: 85 }).props;
+  return getImageProps({ src: toMirrorUrl(src), alt: "", width: 196, height: 276, quality: 85 }).props;
 }
 
 function bannerProps(src: string, isBanner: boolean) {
+  const mirrored = toMirrorUrl(src);
   return isBanner
-    ? getImageProps({ src, alt: "", width: 1900, height: 400, quality: 85 }).props
-    : getImageProps({ src, alt: "", width: 460, height: 650, quality: 85 }).props;
+    ? getImageProps({ src: mirrored, alt: "", width: 1900, height: 400, quality: 85 }).props
+    : getImageProps({ src: mirrored, alt: "", width: 460, height: 650, quality: 85 }).props;
 }
 
 type Vars = CSSProperties & Record<`--${string}`, string>;

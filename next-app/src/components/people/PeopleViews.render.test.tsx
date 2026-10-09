@@ -5,6 +5,8 @@ import { getDictByLang } from "@/lib/i18n";
 import { LANGS, type Lang } from "@/lib/i18n/lang";
 import { LanguageProvider } from "@/lib/lang-client";
 import type { Character, PeopleWork, Person, VoiceRole, VoiceYear } from "@/lib/people/types";
+import { PRODUCTION_MIRROR_BASE, imgSrcs, mirrorOf, renderAsNextDev, withMirror } from "@/lib/test-utils/nextImage";
+import zh from "@/locales/zh";
 import CharacterView from "./CharacterView";
 import PersonView from "./PersonView";
 
@@ -347,5 +349,61 @@ describe("the person page", () => {
     expect(html).toMatch(/<a[^>]*href="\/person\/133507\/edit"[^>]*>[\s\S]*?编辑<\/a>/);
     expect(renderPerson(person(), "en")).toMatch(/<a[^>]*href="\/person\/133507\/edit"[^>]*>[\s\S]*?Edit<\/a>/);
     expect(html).not.toContain("资料来自");
+  });
+});
+
+// Every image on both pages, rendered as `next dev` renders them: next/image
+// checks each src against the app's remotePatterns and throws on one it does
+// not admit, which is a 500 for the page. With the mirror switched on every
+// AniList image must be optimized from the mirror; with it off, from AniList.
+//
+// The dictionary is imported directly rather than through getDictByLang, as
+// in DetailTabs.render.test.tsx: admin/_actions/users.test.ts replaces
+// @/lib/i18n with a stub for the rest of the run, so these hold whichever
+// file runs first.
+describe("the images and the AniList mirror", () => {
+  const STAFF_PORTRAIT = "https://s4.anilist.co/file/anilistcdn/staff/large/n133507-hW5bK3fZv3Nn.png";
+
+  const characterPage = () =>
+    renderAsNextDev(
+      <LanguageProvider lang="zh">
+        <CharacterView character={STARK} lang="zh" dict={zh} />
+      </LanguageProvider>,
+    );
+  const personPage = () =>
+    renderAsNextDev(
+      <LanguageProvider lang="zh">
+        <PersonView person={person({ image: STAFF_PORTRAIT })} lang="zh" dict={zh} />
+      </LanguageProvider>,
+    );
+
+  /** The source each <img> is optimized from; fails on an <img> that is not optimized at all. */
+  const optimizedSources = (html: string) =>
+    imgSrcs(html).map((src) => {
+      expect(src.startsWith("/_next/image?url=")).toBe(true);
+      return new URL(src, "https://animegoclub.com").searchParams.get("url") ?? "";
+    });
+
+  const CHARACTER_IMAGES = [STARK.image!, FRIEREN.coverImageUrl!, work(182255, 2026).coverImageUrl!];
+  const PERSON_IMAGES = [STAFF_PORTRAIT, voiceRole(154587, 2023, 184313, "MAIN").character.image!, FRIEREN.coverImageUrl!];
+
+  test.each([
+    ["the character page", characterPage, CHARACTER_IMAGES],
+    ["the person page", personPage, PERSON_IMAGES],
+  ] as const)("%s, switched on: every image comes from our mirror", (_, render, anilist) => {
+    const sources = withMirror(PRODUCTION_MIRROR_BASE, () => optimizedSources(render()));
+    expect(sources.length).toBeGreaterThan(0);
+    for (const source of sources) expect(source.startsWith(PRODUCTION_MIRROR_BASE)).toBe(true);
+    for (const url of anilist) expect(sources).toContain(mirrorOf(url));
+  });
+
+  test.each([
+    ["the character page", characterPage, CHARACTER_IMAGES],
+    ["the person page", personPage, PERSON_IMAGES],
+  ] as const)("%s, switched off: every image comes from AniList", (_, render, anilist) => {
+    const sources = withMirror(undefined, () => optimizedSources(render()));
+    expect(sources.length).toBeGreaterThan(0);
+    for (const source of sources) expect(source.startsWith("https://s4.anilist.co/file/anilistcdn/")).toBe(true);
+    for (const url of anilist) expect(sources).toContain(url);
   });
 });

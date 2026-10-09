@@ -51,6 +51,15 @@ ENV SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN
 ENV SENTRY_ORG=$SENTRY_ORG
 ENV SENTRY_PROJECT=$SENTRY_PROJECT
 
+# The AniList image mirror switch (src/lib/images/mirror.ts): the URL prefix
+# AniList image URLs are rewritten to, https://animegoclub.com/img/anilist/ in
+# production. NEXT_PUBLIC_* for the same reason as the DSN above -- Next
+# inlines it into both bundles at build time, so only a build arg reaches it.
+# Empty (the default) keeps every image on AniList's own URLs, which is what a
+# build without the nginx mirror in front of it needs.
+ARG NEXT_PUBLIC_IMAGE_MIRROR_BASE=
+ENV NEXT_PUBLIC_IMAGE_MIRROR_BASE=$NEXT_PUBLIC_IMAGE_MIRROR_BASE
+
 # The commit this image was built from. next.config.ts turns it into
 # NEXT_PUBLIC_BUILD_ID, which is how a tab opened before a deploy learns it
 # is stale. Empty is fine and falls back to a timestamp -- the only thing
