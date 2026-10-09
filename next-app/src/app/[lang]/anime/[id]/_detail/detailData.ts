@@ -105,6 +105,32 @@ export async function loadStaff(id: number, cachedAt: string | null | undefined)
   }
 }
 
+/**
+ * The number beside 社区: the tab's reviews, threads and status events as an
+ * anonymous reader sees them. Null on any failure — the tab bar then shows
+ * 社区 without a number rather than failing the page.
+ */
+export async function loadCommunityCount(id: number): Promise<number | null> {
+  try {
+    const { total } = await apiGet<{ total: number }>(`/api/anime/${id}/community/count`, READ);
+    return typeof total === "number" ? total : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The detail document of a title the catalogue already holds, or null.
+ *
+ * The tabs other than the overview ask the read-only counts first: an id
+ * nobody has heard of then costs a primary-key read and a 404, never a call
+ * to AniList (which /api/anime/:id makes for a title it does not hold).
+ */
+export async function loadKnownDetail(id: number): Promise<AnimeDetail | null> {
+  if (!(await loadCreditCounts(id))) return null;
+  return loadDetail(id);
+}
+
 /** AniList ids are positive int32s; go-api answers 400 for anything else. */
 const MAX_ANIME_ID = 2_147_483_647;
 

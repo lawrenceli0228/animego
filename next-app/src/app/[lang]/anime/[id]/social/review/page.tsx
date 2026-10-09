@@ -11,7 +11,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import HeroAccent from "@/components/anime/HeroAccent";
 import WriteReviewForm from "@/components/community/WriteReviewForm";
-import { loadAnime } from "@/lib/community/server";
+import { loadKnownDetail, parseAnimeId } from "../../_detail/detailData";
 import { pickTitle } from "@/lib/formatters";
 import { resolveLocale } from "@/lib/i18n/route";
 
@@ -24,17 +24,12 @@ export async function generateStaticParams(): Promise<Array<{ lang: string; id: 
 
 type WriteReviewPageProps = PageProps<"/[lang]/anime/[id]/social/review">;
 
-function parseId(raw: string): number | null {
-  const id = Number(raw);
-  return Number.isInteger(id) && id > 0 ? id : null;
-}
-
 export async function generateMetadata({ params }: WriteReviewPageProps): Promise<Metadata> {
   const { id } = await params;
-  const anilistId = parseId(id);
+  const anilistId = parseAnimeId(id);
   const [{ lang, dict }, detail] = await Promise.all([
     resolveLocale(params),
-    anilistId ? loadAnime(anilistId) : Promise.resolve(null),
+    anilistId === null ? Promise.resolve(null) : loadKnownDetail(anilistId),
   ]);
   const title = detail ? `${dict.community.writeTitle} · ${pickTitle(detail, lang)}` : dict.community.writeTitle;
   return {
@@ -45,9 +40,9 @@ export async function generateMetadata({ params }: WriteReviewPageProps): Promis
 
 export default async function WriteReviewPage({ params }: WriteReviewPageProps) {
   const { id } = await params;
-  const anilistId = parseId(id);
-  if (!anilistId) notFound();
-  const [{ lang }, detail] = await Promise.all([resolveLocale(params), loadAnime(anilistId)]);
+  const anilistId = parseAnimeId(id);
+  if (anilistId === null) notFound();
+  const [{ lang }, detail] = await Promise.all([resolveLocale(params), loadKnownDetail(anilistId)]);
   if (!detail) notFound();
 
   return (

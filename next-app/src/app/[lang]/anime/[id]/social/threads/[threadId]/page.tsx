@@ -13,11 +13,12 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import HeroAccent from "@/components/anime/HeroAccent";
 import ThreadView from "@/components/community/ThreadView";
-import { isThreadId, loadAnime, loadThread } from "@/lib/community/server";
+import { isThreadId, loadThread } from "@/lib/community/server";
 import { plainText, parseReview } from "@/lib/community/reviewMarkup";
 import { pickSeoTitle, pickTitle, truncate } from "@/lib/formatters";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
+import { loadDetail, parseAnimeId } from "../../../_detail/detailData";
 
 export const revalidate = 60;
 export const dynamicParams = true;
@@ -28,20 +29,12 @@ export async function generateStaticParams(): Promise<Array<{ lang: string; id: 
 
 type ThreadPageProps = PageProps<"/[lang]/anime/[id]/social/threads/[threadId]">;
 
-function parseId(raw: string): number | null {
-  const id = Number(raw);
-  return Number.isInteger(id) && id > 0 ? id : null;
-}
-
 export async function generateMetadata({ params }: ThreadPageProps): Promise<Metadata> {
   const { id, threadId } = await params;
-  const anilistId = parseId(id);
-  if (!anilistId || !isThreadId(threadId)) return { title: { absolute: "AnimeGoClub" } };
-  const [{ locale, lang }, detail, view] = await Promise.all([
-    resolveLocale(params),
-    loadAnime(anilistId),
-    loadThread(anilistId, threadId),
-  ]);
+  const anilistId = parseAnimeId(id);
+  if (anilistId === null || !isThreadId(threadId)) return { title: { absolute: "AnimeGoClub" } };
+  const [{ locale, lang }, view] = await Promise.all([resolveLocale(params), loadThread(anilistId, threadId)]);
+  const detail = view ? await loadDetail(anilistId) : null;
   if (!detail || !view) return { title: { absolute: "AnimeGoClub" } };
   const title = `${view.thread.title} · ${pickSeoTitle(detail, lang)}`;
   const description = view.thread.isSpoiler ? undefined : truncate(plainText(parseReview(view.thread.body)), 160);
@@ -56,14 +49,15 @@ export async function generateMetadata({ params }: ThreadPageProps): Promise<Met
 
 export default async function ThreadPage({ params }: ThreadPageProps) {
   const { id, threadId } = await params;
-  const anilistId = parseId(id);
-  if (!anilistId || !isThreadId(threadId)) notFound();
-  const [{ lang }, detail, view] = await Promise.all([
-    resolveLocale(params),
-    loadAnime(anilistId),
-    loadThread(anilistId, threadId),
-  ]);
-  if (!detail || !view) notFound();
+  const anilistId = parseAnimeId(id);
+  if (anilistId === null || !isThreadId(threadId)) notFound();
+  // The thread first: it exists only under a title the catalogue holds, so a
+  // made-up id is a 404 from the community API alone and never reaches the
+  // detail read, which can go to AniList.
+  const [{ lang }, view] = await Promise.all([resolveLocale(params), loadThread(anilistId, threadId)]);
+  if (!view) notFound();
+  const detail = await loadDetail(anilistId);
+  if (!detail) notFound();
 
   return (
     <HeroAccent

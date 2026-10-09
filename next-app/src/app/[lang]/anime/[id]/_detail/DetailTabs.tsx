@@ -1,4 +1,4 @@
-// The tab bar under the hero: 概览 / 角色 N / 制作 N.
+// The tab bar under the hero: 概览 / 角色 N / 制作 N / 社区 N.
 //
 // Links, not buttons: every tab is a route of its own (lib/detail/tabs.ts),
 // so a tab can be opened in a new window, shared, and crawled, and the
@@ -28,6 +28,7 @@ const TAB_LABEL: Record<DetailTabKey, (dict: Dict) => string> = {
   overview: (dict) => dict.detail.tabOverview,
   characters: (dict) => dict.detail.tabCharacters,
   staff: (dict) => dict.detail.tabStaff,
+  social: (dict) => dict.detail.tabSocial,
 };
 
 export default function DetailTabs({

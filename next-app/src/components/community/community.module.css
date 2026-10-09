@@ -43,10 +43,10 @@
 
 /* ── the tab: a main column and the 谁在追 aside ─────────────────────── */
 
-/* Vertical padding only: the element also carries the global .container,
- * whose horizontal padding is the page gutter (24px, 16px on phones). */
+/* The bottom of the page only: the tab sits in the detail page's shared
+ * column (DetailShell), which already carries the page gutter and the gap
+ * under the tab bar. */
 .tab {
-  padding-top: 40px;
   padding-bottom: 64px;
 }
 
@@ -757,7 +757,6 @@ a.name:hover {
  * The canvas's 390 boards: one column, 44px touch targets. */
 @media (max-width: 600px) {
   .tab {
-    padding-top: 28px;
     padding-bottom: 48px;
   }
 

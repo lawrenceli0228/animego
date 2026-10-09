@@ -7,7 +7,7 @@ import en from "@/locales/en";
 import zhHant from "@/locales/zh-Hant";
 import DetailTabs from "./DetailTabs";
 
-// The tab bar every /anime/[id] tab renders: three links, the active one
+// The tab bar every /anime/[id] tab renders: four links, the active one
 // marked for assistive tech and for the stylesheet, and the counts the API
 // gave — or no count at all when it gave none, never a "0" made up for it.
 //
@@ -25,14 +25,20 @@ function links(html: string): Array<[string, string, string | null]> {
 }
 
 describe("DetailTabs", () => {
-  test("three tabs, each a route, the active one marked", () => {
+  test("four tabs, each a route, the active one marked", () => {
     const html = renderToStaticMarkup(
-      <DetailTabs anilistId={154587} active="characters" counts={{ characters: 100, staff: 343 }} dict={zh} />,
+      <DetailTabs
+        anilistId={154587}
+        active="characters"
+        counts={{ characters: 100, staff: 343, social: 3 }}
+        dict={zh}
+      />,
     );
     expect(links(html)).toEqual([
       ["/anime/154587", "概览", null],
       ["/anime/154587/characters", "角色 100", "page"],
       ["/anime/154587/staff", "制作 343", null],
+      ["/anime/154587/social", "社区 3", null],
     ]);
     expect(html).toContain('aria-label="作品页标签"');
     expect(html.match(/data-active="true"/g)).toHaveLength(1);
@@ -40,25 +46,40 @@ describe("DetailTabs", () => {
 
   test("no count is printed when the counts did not arrive", () => {
     const html = renderToStaticMarkup(<DetailTabs anilistId={1} active="overview" counts={{}} dict={zh} />);
-    expect(links(html).map(([, text]) => text)).toEqual(["概览", "角色", "制作"]);
+    expect(links(html).map(([, text]) => text)).toEqual(["概览", "角色", "制作", "社区"]);
     expect(links(html)[0][2]).toBe("page");
+    // A count the community read could not get is null, not 0.
+    const failed = renderToStaticMarkup(
+      <DetailTabs anilistId={1} active="social" counts={{ characters: 1, staff: 2, social: null }} dict={zh} />,
+    );
+    expect(links(failed).map(([, text, current]) => [text, current])).toEqual([
+      ["概览", null],
+      ["角色 1", null],
+      ["制作 2", null],
+      ["社区", "page"],
+    ]);
   });
 
   test("a zero is a count", () => {
     const html = renderToStaticMarkup(
-      <DetailTabs anilistId={1} active="staff" counts={{ characters: 0, staff: 0 }} dict={zh} />,
+      <DetailTabs anilistId={1} active="staff" counts={{ characters: 0, staff: 0, social: 0 }} dict={zh} />,
     );
-    expect(links(html).map(([, text]) => text)).toEqual(["概览", "角色 0", "制作 0"]);
+    expect(links(html).map(([, text]) => text)).toEqual(["概览", "角色 0", "制作 0", "社区 0"]);
   });
 
   test("names follow the page's language", () => {
     const html = renderToStaticMarkup(
-      <DetailTabs anilistId={1} active="overview" counts={{ characters: 3, staff: 4 }} dict={en as unknown as Dict} />,
+      <DetailTabs
+        anilistId={1}
+        active="overview"
+        counts={{ characters: 3, staff: 4, social: 5 }}
+        dict={en as unknown as Dict}
+      />,
     );
-    expect(links(html).map(([, text]) => text)).toEqual(["Overview", "Characters 3", "Staff 4"]);
+    expect(links(html).map(([, text]) => text)).toEqual(["Overview", "Characters 3", "Staff 4", "Community 5"]);
     const hant = renderToStaticMarkup(
       <DetailTabs anilistId={1} active="overview" counts={{}} dict={zhHant} />,
     );
-    expect(links(hant).map(([, text]) => text)).toEqual(["概覽", "角色", "製作"]);
+    expect(links(hant).map(([, text]) => text)).toEqual(["概覽", "角色", "製作", "社群"]);
   });
 });

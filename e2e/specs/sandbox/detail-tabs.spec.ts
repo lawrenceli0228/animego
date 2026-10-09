@@ -190,7 +190,7 @@ async function holdCastRequests(page: Page, pattern: RegExp) {
 
 test.describe("desktop", () => {
   test("every tab carries the tab bar, with the counts, and marks itself", async ({ page }) => {
-    // Three routes, each compiled on arrival by `next dev` when it has gone
+    // Four routes, each compiled on arrival by `next dev` when it has gone
     // cold: a budget problem, not a race (see locale-routing.spec.ts).
     test.slow();
     await page.goto(`/anime/${TITLE}`);
@@ -199,6 +199,7 @@ test.describe("desktop", () => {
     await expect(bar.getByRole("link", { name: "概览" })).toHaveAttribute("href", `/anime/${TITLE}`);
     await expect(bar.getByRole("link", { name: "角色 31" })).toHaveAttribute("href", `/anime/${TITLE}/characters`);
     await expect(bar.getByRole("link", { name: "制作 49" })).toHaveAttribute("href", `/anime/${TITLE}/staff`);
+    await expect(bar.getByRole("link", { name: "社区 0" })).toHaveAttribute("href", `/anime/${TITLE}/social`);
     await expectActiveTab(page, /^概览$/);
 
     await page.goto(`/anime/${TITLE}/characters`);
@@ -208,6 +209,11 @@ test.describe("desktop", () => {
     await page.goto(`/anime/${TITLE}/staff`);
     await expect(page.locator("h1")).toHaveText("E2E 标签页");
     await expectActiveTab(page, /^制作 49$/);
+
+    await page.goto(`/anime/${TITLE}/social`);
+    await expect(page.locator("h1")).toHaveText("E2E 标签页");
+    await expectActiveTab(page, /^社区 0$/);
+    await expect(tabs(page).getByRole("link", { name: "角色 31" })).toBeVisible();
   });
 
   test("the overview's 「全部」 links and the tab bar lead to the tabs", async ({ page }) => {
@@ -423,7 +429,15 @@ test.describe("desktop", () => {
 
   test("a title the catalogue does not hold is a 404 on every tab", async ({ page }) => {
     // Read as a crawler reads it: the status of the response, no JavaScript.
-    for (const path of [`/anime/${MISSING}/characters`, `/anime/${MISSING}/staff`, "/anime/0/characters", "/anime/0/staff"]) {
+    for (const path of [
+      `/anime/${MISSING}/characters`,
+      `/anime/${MISSING}/staff`,
+      `/anime/${MISSING}/social`,
+      "/anime/0/characters",
+      "/anime/0/staff",
+      "/anime/0/social",
+      "/anime/0154587/social",
+    ]) {
       const res = await page.request.get(path);
       expect(res.status(), path).toBe(404);
     }

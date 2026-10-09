@@ -319,7 +319,7 @@ export default function SocialTab({ anilistId, animeTitle, coverUrl, initial, re
   if (status !== "ready") {
     return (
       <div className={s.root}>
-        <div className={`container ${s.tab}`}>
+        <div className={s.tab}>
           <div className={s.empty}>
             {status === "loading" ? (
               <div className={s.emptyTitle}>{t("community.loading")}</div>
@@ -339,7 +339,7 @@ export default function SocialTab({ anilistId, animeTitle, coverUrl, initial, re
 
   return (
     <div className={s.root}>
-      <div className={`container ${s.tab}`}>
+      <div className={s.tab}>
         <div className={s.cols}>
           <div className={s.main}>
             <ReviewsSection

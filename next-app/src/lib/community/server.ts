@@ -1,4 +1,4 @@
-// Server-side reads for the community pages. All three are anonymous
+// Server-side reads for the community pages. Both are anonymous
 // (`auth: false`) and ISR-cached (`revalidate: 60`, the detail page's window):
 // the pages they feed are statically rendered and edge-cached for everyone,
 // so they must not read a cookie or a header, and must not carry anything
@@ -6,20 +6,9 @@
 // see components/community/SocialTab.tsx.
 
 import { apiGet, ApiError } from "@/lib/api";
-import type { AnimeDetail } from "@/lib/types";
 import { parseSummary, parseThreadView, type CommunitySummary, type CommunityThreadView } from "./types";
 
 const REVALIDATE_SECONDS = 60;
-
-/** The anime the page is about; null when there is no such anime (404). */
-export async function loadAnime(anilistId: number): Promise<AnimeDetail | null> {
-  try {
-    return await apiGet<AnimeDetail>(`/api/anime/${anilistId}`, { revalidate: REVALIDATE_SECONDS, auth: false });
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
-    throw err;
-  }
-}
 
 /**
  * The tab's first page of everything, or null when it could not be read. A

@@ -324,6 +324,11 @@ type summaryDTO struct {
 	Viewer   *viewerDTO                `json:"viewer"`
 }
 
+// countDTO is the number beside 社区 in the detail page's tab bar.
+type countDTO struct {
+	Total int64 `json:"total"`
+}
+
 // voteDTO / likeDTO answer the toggles with the state they left behind.
 type voteDTO struct {
 	Voted        bool  `json:"voted"`

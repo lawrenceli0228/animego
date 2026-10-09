@@ -19,7 +19,7 @@ func TestUnknownAnimeIs404AndBadIDIs400_EverywhereOnTheTab(t *testing.T) {
 	someID := uuid.New().String()
 	for _, path := range []string{
 		"", "/reviews", "/reviews/" + someID, "/threads", "/threads/" + someID,
-		"/activity", "/activity/" + someID, "/watchers",
+		"/activity", "/activity/" + someID, "/watchers", "/count",
 	} {
 		t.Run("GET"+path, func(t *testing.T) {
 			failure(t, e.call(anonymous, http.MethodGet, "/api/anime/999999/community"+path, nil),

@@ -75,6 +75,40 @@ func (h *Handlers) Summary(w http.ResponseWriter, r *http.Request) {
 	httpx.Data(w, http.StatusOK, out)
 }
 
+// Count implements GET /api/anime/{anilistId}/community/count: how many
+// reviews, threads and status events the tab lists, as an anonymous reader
+// sees them — the number beside 社区 in the detail page's tab bar.
+//
+// Always anonymous, session or not.  The tab bar is part of the cached
+// render every reader of an /anime/[id] tab shares, so its number cannot
+// depend on who asked; and the three counts are the very ones the lists'
+// totals come from, with no viewer, so the bar and the anonymous render of
+// the tab cannot disagree.
+func (h *Handlers) Count(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+	anilistID, ok := h.animeFromPath(ctx, w, r)
+	if !ok {
+		return
+	}
+	reviews, err := h.db.CountAnimeReviews(ctx, anilistID, nil)
+	if err != nil {
+		failServer(w, err, "count reviews failed")
+		return
+	}
+	threads, err := h.db.CountAnimeThreads(ctx, anilistID, nil)
+	if err != nil {
+		failServer(w, err, "count threads failed")
+		return
+	}
+	activity, err := h.db.CountAnimeActivity(ctx, anilistID, nil)
+	if err != nil {
+		failServer(w, err, "count activity failed")
+		return
+	}
+	httpx.Data(w, http.StatusOK, countDTO{Total: reviews + threads + activity})
+}
+
 // viewerState is the signed-in reader's own status for the anime and their
 // live review, if any.
 func (h *Handlers) viewerState(ctx context.Context, anilistID int32, userID uuid.UUID) (*viewerDTO, error) {

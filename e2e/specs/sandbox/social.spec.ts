@@ -138,9 +138,11 @@ for (const { name, viewport, base } of VIEWPORTS) {
       for (const empty of ["还没有人写评价", "还没有讨论帖", "还没有动态", "还没有人追这部番"]) {
         await expect(page.getByText(empty, { exact: true })).toBeVisible();
       }
-      const main = await page.locator("main").innerText();
-      expect(main).not.toMatch(/评分|★/);
-      expect(main).not.toContain("评价是完整的观后感");
+      // The tab's own column, under the shared tab bar: the hero above it
+      // keeps the AniList / Bangumi scores the overview always had.
+      const tab = await page.locator("#detail-tabs ~ div").innerText();
+      expect(tab).not.toMatch(/评分|★/);
+      expect(tab).not.toContain("评价是完整的观后感");
 
       await waitForHydration(page, `a[href$="/anime/${id}/social/review"]`);
       await page.getByRole("link", { name: "写评价" }).click();

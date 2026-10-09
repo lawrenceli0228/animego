@@ -203,6 +203,7 @@ const en = {
     tabOverview: 'Overview',
     tabCharacters: 'Characters',
     tabStaff: 'Staff',
+    tabSocial: 'Community',
     allCharacters: 'All characters ({{n}})',
     allCharactersPlain: 'All characters',
     allStaff: 'All staff ({{n}})',
@@ -517,9 +518,6 @@ const en = {
   // The anime page's community tab, write-review page and thread page
   // (components/community/); same keys in every dictionary.
   community: {
-    tabOverview: 'Overview',
-    tabSocial: 'Community',
-    tabsLabel: 'Anime page sections',
     crumbsLabel: 'Breadcrumb',
     metaTitle: '{{title}} · Community',
     metaDescription: 'Reviews, discussion threads and recent activity for {{title}}.',

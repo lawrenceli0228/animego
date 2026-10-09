@@ -5,6 +5,7 @@
 // Every route lives under /api/anime/{anilistId}/community:
 //
 //	GET    /                                summary: first page of each list   (optional auth)
+//	GET    /count                           the tab bar's number, anonymous    (none)
 //	GET    /reviews                         reviews, most helpful first        (optional auth)
 //	GET    /reviews/mine                    the viewer's own review            (auth)
 //	GET    /reviews/{reviewId}              one review, body included          (optional auth)
@@ -132,6 +133,8 @@ func (h *Handlers) Mount(r chi.Router, signer *jwtx.Signer) {
 	required := func(next http.Handler) http.Handler { return requireAuth(privateForViewer(next)) }
 	r.Route("/{anilistId}/community", func(r chi.Router) {
 		r.With(optional).Get("/", h.Summary)
+		// No session middleware: the count is the same for every reader.
+		r.Get("/count", h.Count)
 
 		r.With(optional).Get("/reviews", h.ListReviews)
 		// "mine" is a literal segment; chi tries it before {reviewId}.

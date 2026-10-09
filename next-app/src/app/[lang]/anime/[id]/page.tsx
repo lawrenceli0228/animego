@@ -31,6 +31,7 @@ import x from "./sections.module.css";
 import DetailShell, { detailTrailerLabels } from "./_detail/DetailShell";
 import {
   detailStaticParams,
+  loadCommunityCount,
   loadCreditCountsSoft,
   loadDetail,
   parseAnimeId,
@@ -964,8 +965,13 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
   // the detail fetch is what fills the credit tables, and counts read in
   // parallel would be the zeros from before (see detailData.ts `snapshot`).
   // For the tab bar and the 「全部」 links only — a page that could not get
-  // them still renders, with neither number.
-  const counts = await loadCreditCountsSoft(anilistId, detail.cachedAt);
+  // them still renders, with neither number. The community count waits for
+  // the detail too: for a title the catalogue did not hold, the detail fetch
+  // is what adds it, and before that the count is a 404.
+  const [counts, communityCount] = await Promise.all([
+    loadCreditCountsSoft(anilistId, detail.cachedAt),
+    loadCommunityCount(anilistId),
+  ]);
 
   // ISSUE-001 now lives client-side: SubscriptionButton / EpisodesGrid read
   // the non-httpOnly `auth_hint` cookie on mount (see lib/clientAuth) and skip
@@ -1002,7 +1008,7 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
         lang={lang}
         dict={dict}
         active="overview"
-        counts={{ characters: counts?.characters, staff: counts?.staff }}
+        counts={{ characters: counts?.characters, staff: counts?.staff, social: communityCount }}
       >
         {/* Order follows the demo: read about it, look it up, then use
             it. Episodes sit third rather than sixth because they are the

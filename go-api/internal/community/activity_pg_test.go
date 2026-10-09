@@ -248,6 +248,45 @@ func TestSummary_AnonymousAndSignedIn(t *testing.T) {
 	assert.Nil(t, bobs.Viewer.ReviewID)
 }
 
+// The tab bar's number is what an anonymous reader is shown, whoever asks:
+// a private review, a removed thread and a private profile's status are not
+// in it, and neither the author of the private review nor someone with a
+// block sees a different number.
+func TestCount_IsTheAnonymousTotalForEveryReader(t *testing.T) {
+	e := newEnv(t, generous())
+	e.anime(154587)
+	alice, bob, quiet := e.user("alice"), e.user("bob"), e.privateUser("quiet")
+
+	data[wireReview](t, e.call(bob, http.MethodPost, base+"/reviews",
+		reviewBody(strings.Repeat("一", 10), 300, false, false)), http.StatusCreated)
+	data[wireReview](t, e.call(alice, http.MethodPost, base+"/reviews",
+		reviewBody(strings.Repeat("二", 10), 300, false, true)), http.StatusCreated)
+	e.thread(bob, "第五集的回忆杀", "说说看", false)
+	removed := e.thread(alice, "删掉的帖子", "说说看", false)
+	require.Equal(t, http.StatusOK,
+		e.call(alice, http.MethodDelete, base+"/threads/"+removed.Thread.ID.String(), nil).Code)
+	e.statusEvent(alice, 154587, "watching", time.Now())
+	e.statusEvent(quiet, 154587, "watching", time.Now())
+	e.block(alice, bob)
+
+	type wireCount struct {
+		Total int64 `json:"total"`
+	}
+	for _, reader := range []user{anonymous, alice, bob, quiet} {
+		rec := e.call(reader, http.MethodGet, base+"/count", nil)
+		assert.Equal(t, int64(3), data[wireCount](t, rec, http.StatusOK).Total, "reader %q", reader.Name)
+	}
+
+	type wireTotals struct {
+		Reviews  struct{ Total int64 } `json:"reviews"`
+		Threads  struct{ Total int64 } `json:"threads"`
+		Activity struct{ Total int64 } `json:"activity"`
+	}
+	anon := data[wireTotals](t, e.call(anonymous, http.MethodGet, base, nil), http.StatusOK)
+	assert.Equal(t, int64(3), anon.Reviews.Total+anon.Threads.Total+anon.Activity.Total,
+		"the bar and the anonymous render of the tab agree")
+}
+
 func TestRateLimits_PerUserPerAction(t *testing.T) {
 	limits := generous()
 	limits.Reviews = Limit{Max: 1, Window: time.Hour}

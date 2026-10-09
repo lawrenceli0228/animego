@@ -22,8 +22,9 @@ import { buildAlternates } from "@/lib/seo/alternates";
 import DetailShell from "../_detail/DetailShell";
 import {
   detailStaticParams,
+  loadCommunityCount,
   loadCreditCounts,
-  loadDetail,
+  loadKnownDetail,
   loadStaff,
   parseAnimeId,
 } from "../_detail/detailData";
@@ -45,15 +46,15 @@ type StaffPageProps = PageProps<"/[lang]/anime/[id]/staff">;
 
 /** Everything the page needs, or null for a title the catalogue does not hold. */
 async function loadPage(id: number) {
-  if (!(await loadCreditCounts(id))) return null;
-  const detail = await loadDetail(id);
+  const detail = await loadKnownDetail(id);
   if (!detail) return null;
-  const [counts, staff] = await Promise.all([
+  const [counts, staff, communityCount] = await Promise.all([
     loadCreditCounts(id, detail.cachedAt),
     loadStaff(id, detail.cachedAt),
+    loadCommunityCount(id),
   ]);
   if (!counts || !staff) return null;
-  return { counts, staff, detail };
+  return { counts, staff, communityCount, detail };
 }
 
 export async function generateMetadata({ params }: StaffPageProps): Promise<Metadata> {
@@ -108,7 +109,7 @@ export default async function AnimeStaffPage({ params }: StaffPageProps) {
       lang={lang}
       dict={dict}
       active="staff"
-      counts={{ characters: page.counts.characters, staff: page.counts.staff }}
+      counts={{ characters: page.counts.characters, staff: page.counts.staff, social: page.communityCount }}
     >
       {/* Keyed by title: a client-side move to another title's staff tab
           reuses this component, and its filters belong to the old one. */}

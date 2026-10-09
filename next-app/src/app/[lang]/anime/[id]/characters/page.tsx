@@ -31,8 +31,9 @@ import DetailShell from "../_detail/DetailShell";
 import {
   detailStaticParams,
   loadCharacters,
+  loadCommunityCount,
   loadCreditCounts,
-  loadDetail,
+  loadKnownDetail,
   parseAnimeId,
 } from "../_detail/detailData";
 import CharacterBrowser from "./_components/CharacterBrowser";
@@ -56,15 +57,15 @@ const FIRST_PAGE = charactersQuery({ role: "all", dub: null, q: "", offset: 0, l
 
 /** Everything the page needs, or null for a title the catalogue does not hold. */
 async function loadPage(id: number) {
-  if (!(await loadCreditCounts(id))) return null;
-  const detail = await loadDetail(id);
+  const detail = await loadKnownDetail(id);
   if (!detail) return null;
-  const [counts, cast] = await Promise.all([
+  const [counts, cast, communityCount] = await Promise.all([
     loadCreditCounts(id, detail.cachedAt),
     loadCharacters(id, FIRST_PAGE, detail.cachedAt),
+    loadCommunityCount(id),
   ]);
   if (!counts || !cast) return null;
-  return { counts, cast, detail };
+  return { counts, cast, communityCount, detail };
 }
 
 export async function generateMetadata({ params }: CharactersPageProps): Promise<Metadata> {
@@ -123,7 +124,7 @@ export default async function AnimeCharactersPage({ params }: CharactersPageProp
       lang={lang}
       dict={dict}
       active="characters"
-      counts={{ characters: page.counts.characters, staff: page.counts.staff }}
+      counts={{ characters: page.counts.characters, staff: page.counts.staff, social: page.communityCount }}
     >
       {/* Keyed by title: a client-side move to another title's 角色 tab
           reuses this component, and its state belongs to the old one. */}

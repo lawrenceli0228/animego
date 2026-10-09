@@ -20,17 +20,20 @@
 //
 // An unknown id answers HTTP 404, not a 200 not-found page. That holds only
 // because no loading.tsx sits above this route (app/routeBoundaries.test.ts
-// guards it): notFound() below runs before anything has streamed.
+// guards it): notFound() below runs before anything has streamed. As on the
+// 角色 and 制作 tabs, the read that decides it never goes to AniList
+// (loadKnownDetail).
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import SocialShell from "@/components/community/SocialShell";
 import SocialTab from "@/components/community/SocialTab";
-import { loadAnime, loadCommunity } from "@/lib/community/server";
+import { loadCommunity } from "@/lib/community/server";
 import { fillTemplate } from "@/lib/community/format";
 import { pickSeoTitle, pickTitle } from "@/lib/formatters";
 import { resolveLocale } from "@/lib/i18n/route";
 import { buildAlternates } from "@/lib/seo/alternates";
+import DetailShell from "../_detail/DetailShell";
+import { loadCreditCountsSoft, loadKnownDetail, parseAnimeId } from "../_detail/detailData";
 
 // Literal on purpose: Next reads segment config statically, and an imported
 // constant fails `next build` while passing dev and tsc (see the note in
@@ -48,16 +51,11 @@ export async function generateStaticParams(): Promise<Array<{ lang: string; id: 
 
 type SocialPageProps = PageProps<"/[lang]/anime/[id]/social">;
 
-function parseId(raw: string): number | null {
-  const id = Number(raw);
-  return Number.isInteger(id) && id > 0 ? id : null;
-}
-
 export async function generateMetadata({ params }: SocialPageProps): Promise<Metadata> {
   const { id } = await params;
-  const anilistId = parseId(id);
-  if (!anilistId) return { title: { absolute: "AnimeGoClub" } };
-  const [{ locale, lang, dict }, detail] = await Promise.all([resolveLocale(params), loadAnime(anilistId)]);
+  const anilistId = parseAnimeId(id);
+  if (anilistId === null) return { title: { absolute: "AnimeGoClub" } };
+  const [{ locale, lang, dict }, detail] = await Promise.all([resolveLocale(params), loadKnownDetail(anilistId)]);
   if (!detail) return { title: { absolute: "AnimeGoClub" } };
 
   const title = fillTemplate(dict.community.metaTitle, { title: pickSeoTitle(detail, lang) });
@@ -73,22 +71,30 @@ export async function generateMetadata({ params }: SocialPageProps): Promise<Met
 
 export default async function SocialPage({ params }: SocialPageProps) {
   const { id } = await params;
-  const anilistId = parseId(id);
-  if (!anilistId) notFound();
+  const anilistId = parseAnimeId(id);
+  if (anilistId === null) notFound();
 
-  const [{ dict, lang }, detail, community] = await Promise.all([
-    resolveLocale(params),
-    loadAnime(anilistId),
+  const [{ dict, lang }, detail] = await Promise.all([resolveLocale(params), loadKnownDetail(anilistId)]);
+  if (!detail) notFound();
+  // The counts after the detail, keyed to it, as on the other tabs (see
+  // _detail/detailData.ts `snapshot`); the tab's own number is the anonymous
+  // render's totals, which is what /community/count adds up on the others.
+  const [counts, community] = await Promise.all([
+    loadCreditCountsSoft(anilistId, detail.cachedAt),
     loadCommunity(anilistId),
   ]);
-  if (!detail) notFound();
-
   const count = community
     ? community.reviews.total + community.threads.total + community.activity.total
     : null;
 
   return (
-    <SocialShell detail={detail} lang={lang} dict={dict} communityCount={count}>
+    <DetailShell
+      detail={detail}
+      lang={lang}
+      dict={dict}
+      active="social"
+      counts={{ characters: counts?.characters, staff: counts?.staff, social: count }}
+    >
       <SocialTab
         anilistId={anilistId}
         animeTitle={pickTitle(detail, lang)}
@@ -97,6 +103,6 @@ export default async function SocialPage({ params }: SocialPageProps) {
         renderedAt={new Date().toISOString()}
         lang={lang}
       />
-    </SocialShell>
+    </DetailShell>
   );
 }

@@ -133,7 +133,7 @@ export default function WriteReviewForm({ anilistId, animeTitle, coverUrl }: Wri
         </Link>
         <span aria-hidden="true">›</span>
         <Link href={socialHref} prefetch={false}>
-          {t("community.tabSocial")}
+          {t("detail.tabSocial")}
         </Link>
         <span aria-hidden="true">›</span>
         <span aria-current="page">{reviewId ? t("community.editTitle") : t("community.writeTitle")}</span>

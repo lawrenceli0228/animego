@@ -262,6 +262,7 @@ const zh = {
     tabOverview: '概览',
     tabCharacters: '角色',
     tabStaff: '制作',
+    tabSocial: '社区',
     allCharacters: '全部 {{n}} 位角色',
     allCharactersPlain: '全部角色',
     allStaff: '全部 {{n}} 位',
@@ -573,9 +574,6 @@ const zh = {
   // 作品页的社区标签、写评价页和讨论帖页（components/community/）；
   // 六份词典同名键。
   community: {
-    tabOverview: '概览',
-    tabSocial: '社区',
-    tabsLabel: '作品页标签',
     crumbsLabel: '位置',
     metaTitle: '{{title}} · 社区',
     metaDescription: '《{{title}}》的评价、讨论帖和最近动态。',

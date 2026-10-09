@@ -124,7 +124,7 @@ export default function ThreadView({ anilistId, animeTitle, initial, renderedAt,
         </Link>
         <span aria-hidden="true">›</span>
         <Link href={`${socialHref}#threads`} prefetch={false}>
-          {t("community.tabSocial")}
+          {t("detail.tabSocial")}
         </Link>
         <span aria-hidden="true">›</span>
         <span>{t("community.threads")}</span>

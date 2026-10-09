@@ -2,10 +2,10 @@
 // that can be shared, indexed and opened directly — and the tab bar is drawn
 // from this list.
 //
-// Adding a tab (社区 is next) is one entry here, its label in the
-// dictionaries (detail.tab*) and in DetailTabs' TAB_LABEL, and its page.
+// Adding a tab is one entry here, its label in the dictionaries
+// (detail.tab*) and in DetailTabs' TAB_LABEL, and its page.
 
-export type DetailTabKey = "overview" | "characters" | "staff";
+export type DetailTabKey = "overview" | "characters" | "staff" | "social";
 
 export interface DetailTabDef {
   key: DetailTabKey;
@@ -17,6 +17,7 @@ export const DETAIL_TABS: readonly DetailTabDef[] = [
   { key: "overview", segment: "" },
   { key: "characters", segment: "characters" },
   { key: "staff", segment: "staff" },
+  { key: "social", segment: "social" },
 ];
 
 /** The count beside a tab's name, where it has one. */

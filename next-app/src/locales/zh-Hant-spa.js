@@ -258,6 +258,7 @@ const zhHant = {
     tabOverview: '概覽',
     tabCharacters: '角色',
     tabStaff: '製作',
+    tabSocial: '社群',
     allCharacters: '全部 {{n}} 位角色',
     allCharactersPlain: '全部角色',
     allStaff: '全部 {{n}} 位',
@@ -571,9 +572,6 @@ const zhHant = {
   // 作品頁的社群標籤、寫評價頁和討論帖頁（components/community/）；
   // 六份詞典同名鍵。
   community: {
-    tabOverview: '概覽',
-    tabSocial: '社群',
-    tabsLabel: '作品頁標籤',
     crumbsLabel: '位置',
     metaTitle: '{{title}} · 社群',
     metaDescription: '《{{title}}》的評價、討論帖和最近動態。',
