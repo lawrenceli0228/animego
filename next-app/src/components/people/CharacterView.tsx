@@ -6,7 +6,7 @@
 import type { Dict } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n/lang";
 import { pickTitle } from "@/lib/formatters";
-import { parseAnilistMarkdown } from "@/lib/people/anilistMarkdown";
+import { characterDescription } from "@/lib/people/description";
 import { characterRoleLabel } from "@/lib/people/labels";
 import { secondaryNames } from "@/lib/people/names";
 import { animeListPath, animePath, characterEditPath } from "@/lib/people/paths";
@@ -50,11 +50,10 @@ export default function CharacterView({ character, lang, dict }: CharacterViewPr
   const names = secondaryNames(character.name, heading);
   const primary = primaryAppearance(character);
   const role = characterRoleLabel(primary?.role, lang);
-  // Parsed here only to know whether there is anything to show: a
-  // description that is nothing but an image or a link target leaves no
-  // text, and the 简介 heading should not stand over an empty block.
-  const description = character.profile?.description?.trim() ?? "";
-  const hasDescription = parseAnilistMarkdown(description).length > 0;
+  // Bangumi's summary for a Chinese reader, AniList's for an English one,
+  // each standing in for the other; null when neither has any text, so the
+  // 简介 heading never stands over an empty block.
+  const description = characterDescription(character, lang);
   return (
     <main className={`container poster-scope ${s.page}`} style={hueStyle(primary?.anime.posterAccent)}>
       <Breadcrumbs items={characterCrumbs(character, lang, dict)} label={dict.people.breadcrumb} />
@@ -72,8 +71,27 @@ export default function CharacterView({ character, lang, dict }: CharacterViewPr
         tags={role ? [role] : []}
         facts={characterFacts(character.profile, lang, dict)}
         about={
-          hasDescription
-            ? { title: dict.people.description, body: <SpoilerDescription markdown={description} /> }
+          description
+            ? {
+                title: dict.people.description,
+                body: (
+                  <>
+                    <SpoilerDescription markdown={description.text} lang={description.lang} />
+                    {/* Credited as the title's synopsis is when it is Bangumi's. */}
+                    {description.source === "bangumi" ? (
+                      <p className={s.descriptionSource}>
+                        {character.bangumiId ? (
+                          <a href={`https://bgm.tv/character/${character.bangumiId}`} target="_blank" rel="noopener noreferrer">
+                            {dict.detail.summaryFromBangumi}
+                          </a>
+                        ) : (
+                          dict.detail.summaryFromBangumi
+                        )}
+                      </p>
+                    ) : null}
+                  </>
+                ),
+              }
             : null
         }
         actions={<EditLink href={characterEditPath(character.anilistId)} label={dict.people.edit} />}

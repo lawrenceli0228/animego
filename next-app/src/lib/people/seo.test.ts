@@ -74,6 +74,7 @@ const HANAZAWA: Person = {
   staffRoles: [],
   voiceWorkCount: 524,
   staffWorkCount: 3,
+
   indexable: true,
 };
 
@@ -92,6 +93,8 @@ const STARK: Character = {
     { anime: work(154587), role: "MAIN" },
     { anime: work(182255, { titleChinese: "葬送的芙莉莲 第二季", popularity: 100 }), role: "MAIN" },
   ],
+  bangumiDescription: null,
+
   indexable: true,
 };
 

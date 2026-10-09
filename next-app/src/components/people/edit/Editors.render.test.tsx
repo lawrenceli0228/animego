@@ -63,6 +63,8 @@ const STARK: Character = {
     },
   ],
   appearances: [{ anime: FRIEREN, role: "MAIN" }],
+  bangumiDescription: null,
+
   indexable: true,
 };
 
@@ -88,6 +90,7 @@ const KOBAYASHI: Person = {
   staffRoles: [],
   voiceWorkCount: 1,
   staffWorkCount: 0,
+
   indexable: false,
 };
 

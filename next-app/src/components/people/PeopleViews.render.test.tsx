@@ -84,6 +84,8 @@ const STARK: Character = {
     { anime: FRIEREN, role: "MAIN" },
     { anime: work(182255, 2026, { titleChinese: "葬送的芙莉莲 第二季" }), role: "MAIN" },
   ],
+  bangumiDescription: null,
+
   indexable: true,
 };
 
@@ -133,6 +135,7 @@ function person(overrides: Partial<Person> = {}): Person {
     staffRoles: [],
     voiceWorkCount: 2,
     staffWorkCount: 0,
+
     indexable: false,
     ...overrides,
   };
@@ -228,6 +231,29 @@ describe("the character page", () => {
   test("a description with no text in it gets no 简介 section", () => {
     const html = renderCharacter({ ...STARK, profile: { ...STARK.profile!, description: "img220(https://x/y.png)" } });
     expect(html).not.toContain("profile-about");
+  });
+
+  test("a Chinese page shows Bangumi's summary, in its own language and credited; an English page AniList's", () => {
+    const withBangumi: Character = { ...STARK, bangumiDescription: "フリーレンと共に旅をする戦士。~!のちに英雄となる。!~" };
+    const about = (h: string) => /aria-labelledby="profile-about"[\s\S]*?<\/section>/.exec(h)?.[0] ?? "";
+
+    const zh = about(renderCharacter(withBangumi, "zh"));
+    expect(zh).toMatch(/<div class="[^"]*" lang="ja">/);
+    expect(zh).toContain("フリーレンと共に旅をする戦士。");
+    expect(zh).not.toContain("のちに英雄となる");
+    expect(zh).not.toContain("Stark fights alongside");
+    expect(zh).toMatch(/<a href="https:\/\/bgm\.tv\/character\/89182"[^>]*>简介来自 Bangumi<\/a>/);
+
+    const en = about(renderCharacter(withBangumi, "en"));
+    expect(en).toContain('lang="en"');
+    expect(en).toContain("Stark fights alongside");
+    expect(en).not.toContain("bgm.tv/character");
+  });
+
+  test("with no AniList profile, a Chinese page still has Bangumi's summary", () => {
+    const html = renderCharacter({ ...STARK, profile: null, bangumiDescription: "芙莉莲的弟子，后来成为一级魔法使。" });
+    expect(html).toContain("芙莉莲的弟子，后来成为一级魔法使。");
+    expect(html).toContain('lang="zh"');
   });
 
   test("every language renders its own labels", () => {

@@ -43,6 +43,8 @@ const STARK: Character = {
     { anime: { anilistId: 154587 } as Character["appearances"][number]["anime"], role: "MAIN" },
     { anime: { anilistId: 182255 } as Character["appearances"][number]["anime"], role: "MAIN" },
   ],
+  bangumiDescription: null,
+
   indexable: true,
 };
 
@@ -68,6 +70,7 @@ const KOBAYASHI: Person = {
   staffRoles: [],
   voiceWorkCount: 0,
   staffWorkCount: 0,
+
   indexable: false,
 };
 
@@ -84,6 +87,17 @@ describe("drafts open as the page shows itself", () => {
     expect(d.voices.map((v) => v.autoLine)).toEqual([true, true]);
     expect(d.roles).toEqual({ 154587: "MAIN", 182255: "MAIN" });
     expect(diffDraft(d, d)).toEqual({ changes: {}, count: 0, invalid: false });
+  });
+
+  test("the description is the one the page shows the reader: Bangumi's in Chinese, AniList's in English", () => {
+    const withBangumi = { ...STARK, bangumiDescription: "フリーレンと共に旅をする戦士。" };
+    const zh = characterDraft(withBangumi, "zh");
+    expect(zh.description).toBe("フリーレンと共に旅をする戦士。");
+    expect(diffDraft(zh, zh).count).toBe(0);
+    expect(characterDraft(withBangumi, "en").description).toBe(STARK.profile!.description);
+    // Changed from what the reader saw, it is a change to send.
+    const now = { ...zh, description: "フリーレンと共に旅をする戦士。のちに英雄。" };
+    expect(diffDraft(zh, now).changes).toEqual({ description: "フリーレンと共に旅をする戦士。のちに英雄。" });
   });
 
   test("an edited voice line is shown as written", () => {

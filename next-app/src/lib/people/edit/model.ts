@@ -12,6 +12,7 @@
 // submission arrives, and that answer is the one that counts.
 
 import type { Lang } from "@/lib/i18n/lang";
+import { characterDescription } from "@/lib/people/description";
 import { bloodTypeLabel, genderLabel, homeTownLabel, occupationLabels, voiceLine } from "@/lib/people/labels";
 import type { Character, FuzzyDate, Person, PersonRef } from "@/lib/people/types";
 
@@ -114,7 +115,9 @@ export function characterDraft(c: Character, lang: Lang): CharacterDraft {
     age: profile?.age ?? "",
     ...birthParts(profile?.birth),
     bloodType: profile?.bloodType ?? "",
-    description: profile?.description ?? "",
+    // The description the page shows this reader (Bangumi's or AniList's),
+    // so an untouched one is no change.
+    description: characterDescription(c, lang)?.text ?? "",
     photo: null,
     voices: c.voices.map((v) => {
       const written = v.line?.trim();

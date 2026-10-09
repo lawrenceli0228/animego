@@ -5,19 +5,23 @@
 // button until the reader asks for it. A spoiler spanning paragraphs is one
 // spoiler: one button, where it starts, opens every piece.
 //
-// The description is AniList's, and AniList writes it in English; the
-// paragraph says so to assistive tech and to search engines with `lang`.
+// The text is AniList's or Bangumi's (lib/people/description.ts), in the same
+// markup; the caller says which language it is in, and the block says so to
+// assistive tech and to search engines with `lang` -- and, for Japanese, sets
+// it in the Japanese face.
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useLang } from "@/lib/lang-client";
 import { parseAnilistMarkdown, type InlineNode } from "@/lib/people/anilistMarkdown";
+import type { DescriptionLanguage } from "@/lib/people/description";
 import s from "./people.module.css";
 
 interface SpoilerDescriptionProps {
   markdown: string;
+  lang: DescriptionLanguage;
 }
 
-export default function SpoilerDescription({ markdown }: SpoilerDescriptionProps) {
+export default function SpoilerDescription({ markdown, lang }: SpoilerDescriptionProps) {
   const { t } = useLang();
   const paragraphs = useMemo(() => parseAnilistMarkdown(markdown), [markdown]);
   const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set());
@@ -66,7 +70,7 @@ export default function SpoilerDescription({ markdown }: SpoilerDescriptionProps
 
   if (visible.length === 0) return null;
   return (
-    <div className={s.description} lang="en">
+    <div className={lang === "ja" ? `${s.description} ${s.jp}` : s.description} lang={lang}>
       {visible.map((p) => (
         <p key={p.key}>{p.nodes}</p>
       ))}

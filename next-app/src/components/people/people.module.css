@@ -342,6 +342,20 @@
   margin-top: 10px;
 }
 
+/* 简介来自 Bangumi, as under the title's synopsis (DescriptionExpand). */
+.descriptionSource {
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--pp-label);
+}
+
+.descriptionSource a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .spoilerButton {
   display: inline-flex;
   align-items: center;

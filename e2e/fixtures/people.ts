@@ -8,7 +8,10 @@
 //                                 popular first; 990_500_099 is adult
 //   characters  990_510_001..030  one per title, a lead on every third;
 //                                 001 also supports on title 002 and has a
-//                                 profile with a spoiler in its description
+//                                 profile with a spoiler in its description;
+//                                 004 has no profile, only a Chinese name and
+//                                 a Bangumi summary (0048), as cmd/bgmnames
+//                                 writes it
 //   people      990_520_001       voices every character above (31 roles,
 //                                 30 titles), profile + Chinese name
 //               990_520_002       001's childhood voice
@@ -26,6 +29,12 @@ export const VOICE = 990_520_001;
 export const CHILD_VOICE = 990_520_002;
 export const STAFF = 990_520_003;
 export const ADULT_ONLY = 990_520_004;
+
+/** Character 004: a Bangumi summary and no AniList profile. */
+export const SUMMARY_CHARACTER = 990_510_004;
+export const SUMMARY_SPOILER = "のちに一級魔法使いになる。";
+/** As the import stores it: Bangumi's [mask] already ~!...!~. */
+export const SUMMARY_TEXT = `E2E 第四はフリーレンと旅をする魔法使い。~!${SUMMARY_SPOILER}!~`;
 
 /** The lead's description: a link, then a spoiler with text after it. */
 export const LEAD_SPOILER = "E2E spoiler: the lead becomes the villain.";
@@ -130,6 +139,11 @@ export async function seedPeopleFixtures(): Promise<void> {
   await sql`
     INSERT INTO bgm_character_map (anilist_id, bgm_id, name_cn, source, matched_at)
     VALUES (${LEAD}, ${LEAD}, 'E2E 主角', 'e2e', now())
+    ON CONFLICT (anilist_id) DO NOTHING
+  `;
+  await sql`
+    INSERT INTO bgm_character_map (anilist_id, bgm_id, name_cn, summary, source, matched_at)
+    VALUES (${SUMMARY_CHARACTER}, ${SUMMARY_CHARACTER}, 'E2E 第四', ${SUMMARY_TEXT}, 'e2e', now())
     ON CONFLICT (anilist_id) DO NOTHING
   `;
 }

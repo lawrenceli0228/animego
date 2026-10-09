@@ -14,6 +14,8 @@ import {
   VOICE,
   removePeopleFixtures,
   seedPeopleFixtures,
+  SUMMARY_CHARACTER,
+  SUMMARY_SPOILER,
 } from "../../fixtures/people";
 
 // The person and character pages, /person/[id] and /character/[id], against
@@ -170,6 +172,34 @@ test.describe("desktop", () => {
       .evaluateAll((ss) => ss.map((s) => JSON.parse(s.textContent ?? "{}") as { "@type": string; name?: string }));
     expect(docs.map((d) => d["@type"]).sort()).toEqual(["BreadcrumbList", "Person"]);
     expect(docs.find((d) => d["@type"] === "Person")?.name).toBe("E2E 声优");
+  });
+
+  test("a character with only Bangumi's summary: shown, in Japanese, spoiler shut, credited", async ({ page }) => {
+    const res = await page.goto(`/character/${SUMMARY_CHARACTER}`);
+    expect(res?.status()).toBe(200);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("E2E 第四");
+    const about = page.locator('section[aria-labelledby="profile-about"]');
+    await expect(about.locator('div[lang="ja"]')).toContainText("E2E 第四はフリーレンと旅をする魔法使い。");
+    await expect(page.getByText(SUMMARY_SPOILER)).toHaveCount(0);
+    await waitForHydration(page, "main button[aria-expanded]");
+    await about.getByRole("button", { name: "显示剧透" }).click();
+    await expect(about.getByText(SUMMARY_SPOILER)).toBeVisible();
+    await expect(about.getByRole("link", { name: "简介来自 Bangumi" })).toHaveAttribute(
+      "href",
+      `https://bgm.tv/character/${SUMMARY_CHARACTER}`,
+    );
+
+    // No AniList description to prefer: an English page falls back to it too.
+    await page.goto(`/en/character/${SUMMARY_CHARACTER}`);
+    await expect(page.locator('section[aria-labelledby="profile-about"] div[lang="ja"]')).toBeVisible();
+    await expect(page.getByRole("link", { name: "Summary from Bangumi" })).toBeVisible();
+  });
+
+  test("the lead: AniList's description, with nothing credited to Bangumi", async ({ page }) => {
+    await page.goto(`/character/${LEAD}`);
+    const about = page.locator('section[aria-labelledby="profile-about"]');
+    await expect(about.locator('div[lang="en"]')).toContainText("E2E lead fights alongside E2E Friend.");
+    await expect(about).not.toContainText("简介来自 Bangumi");
   });
 
   test("English and Traditional pages render in their language", async ({ page }) => {

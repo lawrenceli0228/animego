@@ -143,6 +143,12 @@ export interface Character {
   alternativeNames: string[];
   image: string | null;
   profile: CharacterProfile | null;
+  /**
+   * Bangumi's summary (go-api 0048), in the description markup the profile's
+   * uses; null when Bangumi has none, or when an accepted edit set the
+   * description. lib/people/description.ts picks between the two.
+   */
+  bangumiDescription: string | null;
   voices: CharacterVoice[];
   /** Earliest first. */
   appearances: Appearance[];
