@@ -235,8 +235,9 @@ services:
     # Migration 0025's activity recorder made that visible rather than
     # merely wasteful, because it drains its in-memory buffer after
     # Shutdown returns and a SIGKILL there throws away the last minute of
-    # counters. 30s covers 15s of shutdown plus the recorder's 3s drain
-    # with room to spare.
+    # counters. 30s covers 15s of shutdown, the recorder's 3s drain and the
+    # job queue's 10s stop (queue.Shutdown: five to finish, five to cancel
+    # what is still running), 28s in all.
     stop_grace_period: 30s
     env_file: .env.production
     environment:

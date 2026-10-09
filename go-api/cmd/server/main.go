@@ -215,10 +215,13 @@ func main() {
 		slog.Error("river queue start failed", "err", err)
 		os.Exit(1)
 	}
+	// Five seconds for jobs to finish, then five more for the ones still
+	// running to be cancelled and return (queue.Shutdown says why the second
+	// step matters).  With srv.Shutdown's 15s and the activity drain's 3s
+	// below, that is 28s of the 30s stop grace docker-compose.yml gives
+	// go-api.
 	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := riverClient.Stop(stopCtx); err != nil {
+		if err := queue.Shutdown(riverClient, 5*time.Second, 5*time.Second); err != nil {
 			slog.Warn("river queue stop", "err", err)
 		}
 	}()

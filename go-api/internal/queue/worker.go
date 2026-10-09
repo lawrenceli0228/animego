@@ -21,7 +21,9 @@ package queue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -242,4 +244,40 @@ func Boot(pool *pgxpool.Pool, c Config) (*river.Client[pgx.Tx], error) {
 		return nil, err
 	}
 	return client, nil
+}
+
+// Shutdown stops a started client in two steps, and returns once every job
+// it was working has returned and been recorded.
+//
+// First a soft stop: no new jobs are fetched, and the ones in flight may
+// finish within soft, which is all most jobs here need.  Any job still
+// running then has its context cancelled (StopAndCancel) and hard to return.
+//
+// The second step is what keeps a long job from being stranded.  A job that
+// outlives a soft stop alone dies with the process and stays 'running' in
+// river_job until the rescuer takes it, an hour later; and since every
+// unique job here counts 'running' as a duplicate, the next run of that
+// kind -- RunOnStart included -- is skipped until then.  The image warm
+// pass runs for most of an hour, so without the cancel every deploy that
+// landed in a pass cost the warm job an hour.  Cancelled, the pass stops
+// after the request in flight and returns, and river records it.
+//
+// soft + hard must fit inside the container's stop grace, together with
+// whatever shutdown does before it (cmd/server/main.go).
+func Shutdown(c *river.Client[pgx.Tx], soft, hard time.Duration) error {
+	softCtx, cancelSoft := context.WithTimeout(context.Background(), soft)
+	defer cancelSoft()
+	err := c.Stop(softCtx)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("river stop: %w", err)
+	}
+	hardCtx, cancelHard := context.WithTimeout(context.Background(), hard)
+	defer cancelHard()
+	if err := c.StopAndCancel(hardCtx); err != nil {
+		return fmt.Errorf("river stop and cancel: %w", err)
+	}
+	return nil
 }
