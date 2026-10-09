@@ -60,6 +60,7 @@ type Notification struct {
 	ReadAt           pgtype.Timestamptz `json:"readAt"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
 	ReplyID          *uuid.UUID         `json:"replyId"`
+	EditSubmissionID *uuid.UUID         `json:"editSubmissionId"`
 }
 
 type Report struct {

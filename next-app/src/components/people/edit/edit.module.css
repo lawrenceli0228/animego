@@ -1,0 +1,1079 @@
+/* The edit state of the person and character pages (…/edit).
+ *
+ * Values are the approved canvas's (EditCast, EditPerson, Mobile-Edit,
+ * Mobile-EditPerson and their detail.css), on the people page's tokens: the
+ * editor root also carries people.module.css's `.page` (which declares the
+ * --pp-* colours on this element) and the global `.poster-scope`, so the tone
+ * ramp follows the title the page hangs under, exactly as on the page itself.
+ *
+ * The layout is the page's: the same header grid, the same sections, every
+ * displayed value an input in its place. Editable surfaces are drawn with a
+ * dashed line (the canvas's .ed-*), a changed one picks up the tone line and
+ * the inset bar (.fi.ch). One DOM for desktop and phone; the phone layout
+ * (≤600px, the page's breakpoint) is a media query, and it is the only place
+ * the two submit controls trade places: the bar beside the name on a desktop,
+ * the sticky top bar on a phone -- so a phone shows exactly one.
+ */
+
+.editor {
+  --pp-tone: oklch(76% 0.085 var(--poster-hue));
+  --pp-tone-ink: oklch(22% 0.03 var(--poster-hue));
+  --pp-input: #000;
+}
+
+/* ── Buttons: the canvas's .btn, .btn.solid, .btn.sm.ghost, .xbtn ─────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 15px;
+  border-radius: 9px;
+  border: 1px solid var(--pp-line-2);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.btnSolid {
+  border-color: transparent;
+  background: var(--pp-tone);
+  color: var(--pp-tone-ink);
+  font-weight: 600;
+}
+
+.btnSolid:hover {
+  background: var(--pp-tone);
+  filter: brightness(1.06);
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+  filter: none;
+}
+
+.btnSmall {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.ghost {
+  background: transparent;
+}
+
+.iconButton {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--pp-line);
+  background: transparent;
+  color: var(--pp-label);
+  cursor: pointer;
+}
+
+.iconButton:hover {
+  color: var(--text);
+  border-color: var(--pp-line-2);
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.btn:focus-visible,
+.iconButton:focus-visible,
+.chipX:focus-visible,
+.addChip:focus-visible,
+.addTile:focus-visible,
+.photoButton:focus-visible,
+.segmentButton:focus-visible,
+.fileButton:focus-within {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* 已改 N 处: the canvas's .chtag. */
+.changedTag {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--pp-tone-line);
+  background: var(--pp-tone-dim);
+  color: var(--pp-tone-hi);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* ── The two bars ────────────────────────────────────────────────────── */
+
+/* Beside the name, on a desktop: 已改 N 处 · 取消 · 提交审核. */
+.bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* At the top, on a phone: 取消 · name · 已改 N 处 · 提交. Sticky under the
+ * site header, and moving up into its place while it is tucked away, as the
+ * admin bar does (app/[lang]/admin/layout.module.css). */
+.mobileBar {
+  display: none;
+}
+
+/* ── Inputs: the canvas's .fi, .in, .ta and the dashed .ed-* ───────────── */
+
+.field {
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+select.field {
+  padding-right: 6px;
+}
+
+.field::placeholder,
+.textArea::placeholder,
+.boxInput::placeholder {
+  color: var(--pp-label);
+}
+
+.field:focus,
+.textArea:focus,
+.boxInput:focus,
+.nameInput:focus,
+.subInput:focus,
+.chipInput:focus {
+  outline: none;
+  border-color: rgba(10, 132, 255, 0.75);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
+}
+
+.field[data-changed="true"],
+.textArea[data-changed="true"],
+.nameInput[data-changed="true"],
+.subInput[data-changed="true"] {
+  border-color: var(--pp-tone-line);
+  border-style: solid;
+  box-shadow: inset 3px 0 0 var(--pp-tone);
+}
+
+.nameInput {
+  display: block;
+  width: 100%;
+  height: 56px;
+  margin-left: -12px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--pp-line-2);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.subNames {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.subInput {
+  width: 200px;
+  max-width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--pp-line-2);
+  background: transparent;
+  color: var(--pp-muted);
+  font: inherit;
+  font-size: 14px;
+}
+
+.jp {
+  font-family: var(--font-jp);
+}
+
+.latin {
+  font-family: var(--font-latin);
+}
+
+.dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.textArea {
+  display: block;
+  width: 100%;
+  max-width: 760px;
+  min-height: 120px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+/* .in: an input in a box, for the links. */
+.box {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-surface);
+}
+
+.box[data-invalid="true"] {
+  border-color: rgba(255, 120, 120, 0.7);
+}
+
+.boxInput {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.boxInput:focus {
+  box-shadow: none;
+}
+
+.box:focus-within {
+  border-color: rgba(10, 132, 255, 0.75);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
+}
+
+/* ── The header ─────────────────────────────────────────────────────────── *
+ *
+ * The page's header grid (people.module.css .header), restated here because
+ * the edit state needs one more area: the photo picker, under the portrait
+ * on a desktop and across the page on a phone. */
+
+.header {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-areas:
+    "portrait main"
+    "portrait facts"
+    "portrait about";
+  grid-template-rows: auto auto 1fr;
+  column-gap: 40px;
+  margin-top: 22px;
+}
+
+.header[data-kind="person"] {
+  grid-template-columns: 200px minmax(0, 1fr);
+}
+
+.photoSlot {
+  grid-area: portrait;
+  align-self: start;
+  min-width: 0;
+}
+
+.photoFrame {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--pp-surface-2);
+  box-shadow: 0 0 0 2px var(--pp-tone);
+}
+
+.photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 更换图片, across the bottom of the portrait (.ph .ov). */
+.photoButton {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 44px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.8);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* The picker: .imgpick. */
+.picker {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--pp-tone-line);
+  background: var(--pp-tone-dim);
+}
+
+.segment {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-surface);
+}
+
+.segmentButton {
+  height: 32px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--pp-muted);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmentButton[aria-pressed="true"] {
+  background: var(--pp-surface-3);
+  color: var(--text);
+}
+
+.pickerRow {
+  margin-top: 10px;
+}
+
+.fileButton {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 38px;
+  border-radius: 9px;
+  border: 1px dashed var(--pp-line-2);
+  color: var(--pp-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.fileButton:hover {
+  color: var(--text);
+}
+
+/* The input covers its label, invisible, so the label is the target. */
+.fileInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.headMain {
+  grid-area: main;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.titleBlock {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Aliases and occupations: chips with a remove control, and + 添加. */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.chipLabel {
+  font-size: 13px;
+  color: var(--pp-label);
+}
+
+.alias {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px 0 10px;
+  border-radius: 8px;
+  background: var(--pp-surface-3);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--pp-tone-line);
+  background: var(--pp-tone-dim);
+  color: var(--pp-tone-hi);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chipX {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--pp-label);
+  cursor: pointer;
+}
+
+.chipX:hover {
+  color: var(--text);
+}
+
+.chipX .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.addChip {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--pp-line-2);
+  background: transparent;
+  color: var(--pp-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.addChip:hover {
+  color: var(--text);
+}
+
+.chipInput {
+  width: 140px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--pp-line-2);
+  background: var(--pp-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.mobileOnly {
+  display: none;
+}
+
+/* The facts, as inputs in the page's four-column grid. */
+.facts {
+  grid-area: facts;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 64px minmax(0, 1fr);
+  gap: 12px 14px;
+  align-items: center;
+  max-width: 560px;
+  margin-top: 22px;
+  font-size: 14px;
+}
+
+.factLabel {
+  font-size: 13px;
+  color: var(--pp-label);
+}
+
+.dateParts {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.yearInput {
+  width: 76px;
+}
+
+.dayInput {
+  width: 52px;
+}
+
+.about {
+  grid-area: about;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--pp-line);
+}
+
+/* The 简介 heading exists on a phone (the canvas's), and for assistive tech
+ * everywhere. */
+.aboutTitle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Voices ─────────────────────────────────────────────────────────────── */
+
+.voiceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.voiceRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-surface);
+}
+
+.voiceRow[data-changed="true"] {
+  border-color: var(--pp-tone-line);
+  box-shadow: inset 3px 0 0 var(--pp-tone);
+}
+
+.voiceRow[data-removed="true"] .voiceName,
+.voiceRow[data-removed="true"] .avatar {
+  opacity: 0.45;
+}
+
+.voiceRow[data-removed="true"] .voiceName {
+  text-decoration: line-through;
+}
+
+.avatar {
+  flex: none;
+  display: block;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--pp-surface-3);
+}
+
+.voiceMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.voiceName {
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineInput {
+  width: 150px;
+  max-width: 100%;
+  height: 30px;
+  margin-top: 4px;
+}
+
+.lookup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lookup .field {
+  flex: 1;
+  min-width: 120px;
+  height: 32px;
+}
+
+.lookupError {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  color: rgba(255, 150, 150, 0.95);
+}
+
+/* + 添加声优: the canvas's .ed-tile. */
+.addTile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 72px;
+  border-radius: 10px;
+  border: 1px dashed var(--pp-line-2);
+  background: transparent;
+  color: var(--pp-muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.addTile:hover {
+  color: var(--text);
+}
+
+/* ── Titles: the role on each, a select on the poster (.ed-tag) ─────────── */
+
+.posterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 20px;
+}
+
+.posterCard {
+  min-width: 0;
+}
+
+.posterFrame {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--pp-surface-2);
+}
+
+.posterImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.roleSelect {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--pp-tone-line);
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--pp-tone-hi);
+  font: inherit;
+  font-size: 12px;
+}
+
+.roleSelect[data-changed="true"] {
+  border-color: var(--pp-tone);
+  box-shadow: 0 0 0 2px var(--pp-tone-dim);
+}
+
+.posterTitle {
+  margin-top: 9px;
+  font-size: 13.5px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.posterMeta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--pp-label);
+}
+
+/* ── Source ─────────────────────────────────────────────────────────────── */
+
+.required {
+  color: var(--pp-tone-hi);
+}
+
+.sourceGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  max-width: 980px;
+}
+
+.fieldError,
+.formError {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: rgba(255, 150, 150, 0.95);
+}
+
+.formError:empty {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn,
+  .iconButton,
+  .addChip,
+  .addTile,
+  .segmentButton {
+    transition:
+      background-color 0.18s var(--ease-out-expo),
+      color 0.18s var(--ease-out-expo),
+      border-color 0.18s var(--ease-out-expo);
+  }
+}
+
+@media (max-width: 900px) and (min-width: 601px) {
+  .header {
+    column-gap: 28px;
+  }
+
+  .voiceGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .headMain {
+    flex-wrap: wrap;
+  }
+}
+
+/* ── Phone ──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .crumbs {
+    display: none;
+  }
+
+  .bar {
+    display: none;
+  }
+
+  .mobileBar {
+    position: sticky;
+    top: var(--nav-h);
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: -16px -16px 0;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--pp-line);
+    background: rgba(0, 0, 0, 0.92);
+    transition: transform 0.32s var(--ease-out-expo);
+  }
+
+  .mobileBarTitle {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mobileBarName {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .mobileBar .btn {
+    height: 44px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .header,
+  .header[data-kind="person"] {
+    grid-template-columns: 130px minmax(0, 1fr);
+    grid-template-areas:
+      "portrait main"
+      "picker picker"
+      "facts facts"
+      "about about";
+    grid-template-rows: auto;
+    column-gap: 16px;
+    margin-top: 20px;
+  }
+
+  .header[data-kind="person"] {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+
+  /* The picker leaves the portrait's column for a row of its own. */
+  .photoSlot {
+    display: contents;
+  }
+
+  .photoFrame {
+    grid-area: portrait;
+    align-self: start;
+    border-radius: 12px;
+  }
+
+  .photoButton {
+    height: 40px;
+    font-size: 12.5px;
+  }
+
+  .picker {
+    grid-area: picker;
+  }
+
+  .segment {
+    display: flex;
+  }
+
+  .segmentButton {
+    flex: 1;
+    height: 40px;
+  }
+
+  .pickerRow .box,
+  .fileButton {
+    height: 44px;
+  }
+
+  .headMain {
+    padding-top: 4px;
+  }
+
+  .nameInput {
+    height: 44px;
+    margin-left: -10px;
+    padding: 0 10px;
+    border-radius: 9px;
+    font-size: 24px;
+  }
+
+  .subNames {
+    display: block;
+    margin-top: 0;
+  }
+
+  .subNames .dot {
+    display: none;
+  }
+
+  .subInput {
+    display: block;
+    width: 100%;
+    height: 44px;
+    margin: 6px 0 0 -10px;
+  }
+
+  .chipRow {
+    margin-top: 10px;
+  }
+
+  .chipLabel,
+  .desktopOnly {
+    display: none;
+  }
+
+  .mobileOnly {
+    display: inline;
+  }
+
+  .chipX {
+    width: 22px;
+    height: 22px;
+  }
+
+  .facts {
+    grid-template-columns: 52px minmax(0, 1fr) 52px minmax(0, 1fr);
+    max-width: none;
+    margin-top: 20px;
+  }
+
+  .header[data-kind="person"] .facts {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .facts .field {
+    height: 44px;
+  }
+
+  .dateParts {
+    gap: 6px;
+  }
+
+  .yearInput {
+    width: 72px;
+  }
+
+  .dayInput {
+    width: 48px;
+  }
+
+  .about {
+    margin-top: 22px;
+  }
+
+  .aboutTitle {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    white-space: normal;
+    margin: 0 0 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--pp-label);
+  }
+
+  .voiceGrid {
+    display: block;
+  }
+
+  .voiceRow {
+    min-height: 52px;
+    gap: 12px;
+    padding: 6px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .voiceRow[data-changed="true"] {
+    box-shadow: inset 3px 0 0 var(--pp-tone);
+    padding-left: 10px;
+  }
+
+  .avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .voiceName {
+    font-size: 14px;
+    font-weight: 400;
+  }
+
+  .lineInput {
+    width: 130px;
+    height: 32px;
+  }
+
+  .voiceRow .btnSmall {
+    height: 44px;
+  }
+
+  .voiceRow .iconButton {
+    width: 44px;
+    height: 44px;
+  }
+
+  .addTile {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 8px;
+  }
+
+  .posterGrid {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .posterCard {
+    flex: none;
+    width: 112px;
+  }
+
+  .roleSelect {
+    left: 6px;
+    top: 6px;
+    padding: 0 4px;
+  }
+
+  .posterTitle {
+    font-size: 12.5px;
+  }
+
+  .posterMeta {
+    display: none;
+  }
+
+  .sourceGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .sourceGrid .box {
+    height: 44px;
+  }
+}
+
+/* The phone bar follows the site header up when it slides away. */
+@media (max-width: 600px) {
+  :global(body:has(header[data-hidden="true"])) .mobileBar {
+    transform: translateY(calc(-1 * var(--nav-h)));
+  }
+}
+
+@media (max-width: 600px) and (prefers-reduced-motion: reduce) {
+  .mobileBar {
+    transition: none;
+  }
+}

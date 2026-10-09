@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -50,6 +51,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/deepseek"
+	"github.com/lawrenceli0228/animego/go-api/internal/edits"
 	"github.com/lawrenceli0228/animego/go-api/internal/email"
 	"github.com/lawrenceli0228/animego/go-api/internal/hant"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
@@ -57,6 +59,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 	"github.com/lawrenceli0228/animego/go-api/internal/notifications"
 	"github.com/lawrenceli0228/animego/go-api/internal/obs"
+	"github.com/lawrenceli0228/animego/go-api/internal/people"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/safety"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
@@ -857,6 +860,31 @@ func main() {
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
 
+	// The person and character pages: one AniList Staff id or Character id
+	// each, read from the database and nothing else (an unknown id is a
+	// database miss and a 404, never an AniList request), plus the listings
+	// of the indexed ones for next-app's sitemap.  One cache for both
+	// listings; its keys carry the kind.
+	peopleSitemapCache := people.NewSitemapCache(people.SitemapTTL)
+	r.Route("/api/people", func(r chi.Router) { people.MountPeople(r, q, peopleSitemapCache) })
+	r.Route("/api/characters", func(r chi.Router) { people.MountCharacters(r, q, peopleSitemapCache) })
+
+	// Readers' edits to those pages: POST /api/edits (signed in) and the
+	// accepted photos at /api/edit-images/*; the review routes are in the
+	// /api/admin group below.  Photos live on the avatar volume, under
+	// edits/pending until accepted and edits/public after -- the public
+	// route serves only the latter -- so no volume or compose change is
+	// needed.  Accepted ones are addressed at CLIENT_ORIGIN, the site's own
+	// origin, which nginx routes /api/* from.  A review drops every title
+	// crediting the page from the detail cache (detailSvc.Forget).
+	editImageDir := os.Getenv("EDIT_IMAGE_DIR")
+	if editImageDir == "" {
+		editImageDir = filepath.Join(avatarDir, "edits")
+	}
+	editsHandlers := edits.NewHandlers(pool,
+		edits.NewImageStore(editImageDir, cfg.ClientOrigin, edits.NewFetcher()), detailSvc.Forget)
+	editsHandlers.Mount(r, jwtx.RequireAuth(signer))
+
 	// P2.4 — subscriptions: 8 endpoints, every route RequireAuth.
 	//
 	// The last three are the per-episode watch marks (migration 0024).  They
@@ -1002,6 +1030,11 @@ func main() {
 		// button that catches them up.
 		r.Get("/hant/stats", adminHantHandlers.GetHantStats)
 		r.Post("/hant/backfill", adminHantHandlers.BackfillHant)
+
+		// The review queue for readers' edits to person and character
+		// pages (internal/edits): list, one submission, the decision, and
+		// the photos waiting for one.
+		editsHandlers.MountAdmin(r)
 
 		// Warm-all (fire-and-forget) + user CRUD.
 		r.Post("/warm-all", adminUserHandlers.WarmAll)

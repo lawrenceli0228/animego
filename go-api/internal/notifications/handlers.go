@@ -3,6 +3,7 @@ package notifications
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -31,6 +32,9 @@ type DB interface {
 	ListNotifications(ctx context.Context, userID uuid.UUID, pageLimit int32) ([]dbgen.ListNotificationsRow, error)
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (dbgen.Notification, error)
 	MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) (int64, error)
+	// The outcome of reviewed edits (migration 0047), for the inbox rows
+	// that report one.
+	ListEditReviewNotifications(ctx context.Context, notificationIds []uuid.UUID, userID uuid.UUID) ([]dbgen.ListEditReviewNotificationsRow, error)
 }
 
 type Handlers struct{ db DB }
@@ -103,6 +107,21 @@ type itemResponse struct {
 	IsSpoiler   bool               `json:"isSpoiler"`
 	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
 	ReadAt      pgtype.Timestamptz `json:"readAt"`
+	// Edit is set on an edit_review row only, and absent on every other
+	// type, whose shape stays as it was.
+	Edit *editResponse `json:"edit,omitempty"`
+}
+
+// editResponse is what an edit_review notification reports: the page the
+// edit was on, as its submitter saw it, how many of its items were
+// accepted and rejected, and the reviewer's notes on the rejected ones.
+type editResponse struct {
+	Kind        string          `json:"kind"`
+	EntityID    int32           `json:"entityId"`
+	Snapshot    json.RawMessage `json:"snapshot"`
+	Accepted    int16           `json:"accepted"`
+	Rejected    int16           `json:"rejected"`
+	RejectNotes []string        `json:"rejectNotes"`
 }
 
 type listResponse struct {
@@ -151,6 +170,10 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	items := make([]itemResponse, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toItem(row))
+	}
+	if err := h.attachEdits(ctx, claims.UserID, items); err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "notification list failed"))
+		return
 	}
 	httpx.Data(w, http.StatusOK, listResponse{Items: items, UnreadCount: unread})
 }
@@ -204,6 +227,45 @@ func toItem(row dbgen.ListNotificationsRow) itemResponse {
 	return item
 }
 
+// attachEdits fills Edit on the edit_review rows of items, in place: one
+// query for all of them, none when there are none.  A row whose
+// submission is gone keeps Edit nil and the page shows it without detail.
+func (h *Handlers) attachEdits(ctx context.Context, userID uuid.UUID, items []itemResponse) error {
+	var ids []uuid.UUID
+	for _, it := range items {
+		if it.Type == typeEditReview {
+			ids = append(ids, it.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := h.db.ListEditReviewNotifications(ctx, ids, userID)
+	if err != nil {
+		return err
+	}
+	byID := make(map[uuid.UUID]*editResponse, len(rows))
+	for _, r := range rows {
+		notes := r.RejectNotes
+		if notes == nil {
+			notes = []string{}
+		}
+		byID[r.NotificationID] = &editResponse{
+			Kind: r.Kind, EntityID: r.EntityID, Snapshot: r.Snapshot,
+			Accepted: r.AcceptedCount, Rejected: r.RejectedCount, RejectNotes: notes,
+		}
+	}
+	for i := range items {
+		if items[i].Type == typeEditReview {
+			items[i].Edit = byID[items[i].ID]
+		}
+	}
+	return nil
+}
+
+// typeEditReview is the type the inbox gives a reviewed edit.
+const typeEditReview = "edit_review"
+
 func notificationType(dbType string) string {
 	switch dbType {
 	case "reply":
@@ -214,6 +276,8 @@ func notificationType(dbType string) string {
 		// Same word on the wire as in the table: the client routes each to
 		// its own place (a thread page, the tab's activity list).
 		return dbType
+	case "edit_review":
+		return typeEditReview
 	default:
 		return "follow"
 	}

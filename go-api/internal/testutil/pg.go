@@ -60,6 +60,12 @@ var allTables = []string{
 	// same: nothing cascades into them.
 	"bgm_person_map",
 	"bgm_character_map",
+	// Reader edits and the accepted overlay (migration 0047).  The first two
+	// cascade from users; entity_overlays is keyed by AniList id and only
+	// listing it here empties it.
+	"edit_submissions",
+	"edit_items",
+	"entity_overlays",
 	"anime_recommendations",
 	"anime_episode_titles",
 	"subscriptions",

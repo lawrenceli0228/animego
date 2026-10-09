@@ -25,6 +25,7 @@ type fakeDB struct {
 	listFn    func(context.Context, uuid.UUID, int32) ([]dbgen.ListNotificationsRow, error)
 	markFn    func(context.Context, uuid.UUID, uuid.UUID) (dbgen.Notification, error)
 	markAllFn func(context.Context, uuid.UUID) (int64, error)
+	editsFn   func(context.Context, []uuid.UUID, uuid.UUID) ([]dbgen.ListEditReviewNotificationsRow, error)
 }
 
 func (f *fakeDB) CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error) {
@@ -53,6 +54,13 @@ func (f *fakeDB) MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID)
 		panic("unexpected MarkAllNotificationsRead call")
 	}
 	return f.markAllFn(ctx, userID)
+}
+
+func (f *fakeDB) ListEditReviewNotifications(ctx context.Context, ids []uuid.UUID, userID uuid.UUID) ([]dbgen.ListEditReviewNotificationsRow, error) {
+	if f.editsFn == nil {
+		panic("unexpected ListEditReviewNotifications call")
+	}
+	return f.editsFn(ctx, ids, userID)
 }
 
 func authenticatedRequest(t *testing.T, method, target string, userID uuid.UUID) *http.Request {
@@ -347,7 +355,59 @@ func TestNotificationTypeMapping(t *testing.T) {
 	for db, wire := range map[string]string{
 		"reply": "comment_reply", "reaction": "comment_reaction", "follow": "follow",
 		"thread_reply": "thread_reply", "activity_reply": "activity_reply",
+		"edit_review": "edit_review",
 	} {
 		assert.Equal(t, wire, notificationType(db), db)
 	}
+}
+
+// TestListAttachesTheOutcomeOfAReviewedEdit: an edit_review row carries the
+// page and the outcome, read in one query for every such row; the other
+// types keep their shape, with no edit key at all.
+func TestListAttachesTheOutcomeOfAReviewedEdit(t *testing.T) {
+	viewerID := uuid.New()
+	editID, followID := uuid.New(), uuid.New()
+	createdAt := pgtype.Timestamptz{Time: time.Date(2026, 10, 9, 1, 2, 3, 0, time.UTC), Valid: true}
+	var asked []uuid.UUID
+	db := &fakeDB{
+		countFn: func(context.Context, uuid.UUID) (int64, error) { return 2, nil },
+		listFn: func(context.Context, uuid.UUID, int32) ([]dbgen.ListNotificationsRow, error) {
+			return []dbgen.ListNotificationsRow{
+				{ID: editID, NotificationType: "edit_review", CreatedAt: createdAt, ActorID: uuid.New(), ActorUsername: "admin"},
+				{ID: followID, NotificationType: "follow", CreatedAt: createdAt, ActorID: uuid.New(), ActorUsername: "bob"},
+			}, nil
+		},
+		editsFn: func(_ context.Context, ids []uuid.UUID, userID uuid.UUID) ([]dbgen.ListEditReviewNotificationsRow, error) {
+			assert.Equal(t, viewerID, userID)
+			asked = ids
+			return []dbgen.ListEditReviewNotificationsRow{{
+				NotificationID: editID, Kind: "character", EntityID: 184313,
+				Snapshot:      []byte(`{"name":{"full":"Stark","native":"シュタルク","cn":"修塔尔克"},"image":null,"work":null}`),
+				AcceptedCount: 1, RejectedCount: 1, RejectNotes: []string{"第二季的造型"},
+			}}, nil
+		},
+	}
+	rec := httptest.NewRecorder()
+	NewHandlers(db).List(rec, authenticatedRequest(t, http.MethodGet, "/api/notifications", viewerID))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []uuid.UUID{editID}, asked)
+
+	var body struct {
+		Data struct {
+			Items []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Data.Items, 2)
+	edit := body.Data.Items[0]
+	assert.Equal(t, "edit_review", edit["type"])
+	detail := edit["edit"].(map[string]any)
+	assert.Equal(t, "character", detail["kind"])
+	assert.Equal(t, float64(184313), detail["entityId"])
+	assert.Equal(t, float64(1), detail["accepted"])
+	assert.Equal(t, float64(1), detail["rejected"])
+	assert.Equal(t, []any{"第二季的造型"}, detail["rejectNotes"])
+	assert.Equal(t, "修塔尔克", detail["snapshot"].(map[string]any)["name"].(map[string]any)["cn"])
+	_, has := body.Data.Items[1]["edit"]
+	assert.False(t, has, "a follow keeps its shape")
 }
