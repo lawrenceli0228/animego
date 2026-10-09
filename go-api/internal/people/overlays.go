@@ -49,10 +49,10 @@ func decodeOverlays(rows []dbgen.ListEntityOverlaysRow) (people, characters map[
 	return people, characters
 }
 
-// personRefFromRow is a ListPersonRefs row as a credit line shows it: the
+// PersonRefFromRow is a ListPersonRefs row as a credit line shows it: the
 // person page's ladder (profile, then credit; Bangumi alone for the Chinese
 // name; the large portrait).
-func personRefFromRow(r dbgen.ListPersonRefsRow) PersonRef {
+func PersonRefFromRow(r dbgen.ListPersonRefsRow) PersonRef {
 	return PersonRef{
 		AnilistID: r.AnilistID,
 		Name: Name{

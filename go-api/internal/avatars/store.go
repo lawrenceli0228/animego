@@ -82,20 +82,44 @@ func IsTooLarge(err error) bool { return errors.Is(err, errTooLarge) }
 // it atomically to {dir}/{userID}.jpg. Returns the public URL (with a
 // cache-busting ?v= so a changed photo is fetched fresh through CF).
 func Save(dir, userID, dataURL string) (string, error) {
+	raw, err := DecodeDataURL(dataURL)
+	if err != nil {
+		return "", err
+	}
+	img, err := DecodeImage(raw)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	if err := WriteJPEG(filepath.Join(dir, userID+".jpg"), img); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("/api/avatars/%s.jpg?v=%d", userID, time.Now().Unix()), nil
+}
+
+// DecodeDataURL checks a "data:image/...;base64," URL the way an avatar
+// upload is checked -- a JPEG or PNG declared, valid base64 (wrapped lines
+// allowed), at most maxDecodedBytes -- and returns the decoded bytes.  What
+// the bytes really are is DecodeImage's question.
+//
+// Shared with internal/edits, whose photo uploads follow this pipeline.
+func DecodeDataURL(dataURL string) ([]byte, error) {
 	comma := strings.IndexByte(dataURL, ',')
 	if comma < 0 {
-		return "", errNotImage
+		return nil, errNotImage
 	}
 	meta := dataURL[:comma]
 	if !strings.HasPrefix(meta, "data:image/") || !strings.Contains(meta, "base64") {
-		return "", errNotImage
+		return nil, errNotImage
 	}
 	// Allowlist only the formats we have decoders for. The MIME prefix alone
 	// could claim gif/webp, which image.Decode can't read — that would fail
 	// later with a misleading "decode" error. The server re-encodes to JPEG
 	// regardless, so JPEG + PNG input is all we need.
 	if !strings.HasPrefix(meta, "data:image/jpeg") && !strings.HasPrefix(meta, "data:image/png") {
-		return "", errUnsupported
+		return nil, errUnsupported
 	}
 	// Some canvas/base64 producers wrap the payload at 76 cols; StdEncoding
 	// rejects embedded newlines, so strip ASCII whitespace before decoding.
@@ -107,54 +131,73 @@ func Save(dir, userID, dataURL string) (string, error) {
 	}, dataURL[comma+1:])
 	raw, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
-		return "", errDecode
+		return nil, errDecode
 	}
 	if len(raw) > maxDecodedBytes {
-		return "", errTooLarge
+		return nil, errTooLarge
 	}
+	return raw, nil
+}
 
+// DecodeImage reads image bytes: at most maxDecodedBytes, JPEG or PNG by
+// what the bytes are (not by what the caller or a Content-Type claimed),
+// at most maxDimension on a side -- read from the header before a pixel is
+// allocated -- then the bitmap.
+//
+// Shared with internal/edits, which feeds it uploads and fetched links.
+func DecodeImage(raw []byte) (image.Image, error) {
+	if len(raw) > maxDecodedBytes {
+		return nil, errTooLarge
+	}
 	// Read just the header to get dimensions BEFORE decoding the full bitmap.
 	// image.Decode allocates width*height*4 bytes of RGBA up front, so a
 	// small but highly compressed file (a "decompression bomb") could balloon
 	// to tens of MB and OOM the container. DecodeConfig is cheap and lets us
 	// reject oversized images without ever allocating the pixel buffer.
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
-		return "", errDecode
+		return nil, errDecode
+	}
+	// Any decoder another package registers would answer here too; only the
+	// two this pipeline promises are let through.
+	if format != "jpeg" && format != "png" {
+		return nil, errUnsupported
 	}
 	if cfg.Width > maxDimension || cfg.Height > maxDimension {
-		return "", errTooLarge
+		return nil, errTooLarge
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return "", errDecode
+		return nil, errDecode
 	}
+	return img, nil
+}
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	final := filepath.Join(dir, userID+".jpg")
-	tmp := final + ".tmp"
+// WriteJPEG re-encodes img as a JPEG -- which keeps the pixels and drops
+// everything else a file can carry (EXIF, location, ICC, trailing bytes) --
+// and writes it to path atomically: a temporary file beside it, renamed
+// over it.  The directory must exist.
+func WriteJPEG(path string, img image.Image) error {
+	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return "", err
+		return err
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
-		return "", err
+		return err
 	}
-	if err := os.Rename(tmp, final); err != nil { // atomic replace
+	if err := os.Rename(tmp, path); err != nil { // atomic replace
 		os.Remove(tmp)
-		return "", err
+		return err
 	}
-
-	return fmt.Sprintf("/api/avatars/%s.jpg?v=%d", userID, time.Now().Unix()), nil
+	return nil
 }
 
 // Delete removes a user's avatar file (best-effort; missing file is fine).

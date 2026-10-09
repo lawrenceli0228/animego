@@ -198,7 +198,7 @@ func TestBuildPerson_OverlayAndCharacterOverlays(t *testing.T) {
 
 func TestPersonRefFromRow(t *testing.T) {
 	t.Parallel()
-	ref := personRefFromRow(dbgen.ListPersonRefsRow{
+	ref := PersonRefFromRow(dbgen.ListPersonRefsRow{
 		AnilistID:    95185,
 		CreditFull:   sp("Credit Name"),
 		CreditNative: sp("クレジット"),

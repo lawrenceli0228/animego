@@ -152,7 +152,7 @@ func LoadCharacter(ctx context.Context, db CharacterDB, id int32) (*Character, b
 	}
 	ov.people, _ = decodeOverlays(peopleRows)
 	for _, r := range refRows {
-		ov.refs[r.AnilistID] = personRefFromRow(r)
+		ov.refs[r.AnilistID] = PersonRefFromRow(r)
 	}
 	character, found := buildCharacter(id, ident, appearances, voices, ov)
 	return character, found, nil

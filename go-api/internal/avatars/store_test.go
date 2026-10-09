@@ -136,6 +136,41 @@ func TestSave_UnsupportedFormat_GIF(t *testing.T) {
 	}
 }
 
+// A GIF that calls itself a PNG is refused for what it is: the format is
+// read from the bytes, and this test binary has the GIF decoder registered.
+func TestSave_GIFDeclaredAsPNG_RefusedByContent(t *testing.T) {
+	dir := t.TempDir()
+	id := uuid.NewString()
+	img := image.NewPaletted(image.Rect(0, 0, 16, 16), []color.Color{color.Black, color.White})
+	var buf bytes.Buffer
+	if err := gif.Encode(&buf, img, nil); err != nil {
+		t.Fatalf("encode gif: %v", err)
+	}
+	_, err := Save(dir, id, dataURL(t, "png", buf.Bytes()))
+	if !IsUnsupportedFormat(err) {
+		t.Fatalf("err = %v, want IsUnsupportedFormat", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, id+".jpg")); !os.IsNotExist(statErr) {
+		t.Fatalf("a refused image left a file behind: %v", statErr)
+	}
+}
+
+func TestDecodeImage_SizeAndContent(t *testing.T) {
+	if _, err := DecodeImage(make([]byte, maxDecodedBytes+1)); !IsTooLarge(err) {
+		t.Fatalf("err = %v, want IsTooLarge", err)
+	}
+	if _, err := DecodeImage([]byte("plain text")); !IsBadImage(err) {
+		t.Fatalf("err = %v, want IsBadImage", err)
+	}
+	img, err := DecodeImage(jpegBytes(t, 40, 60))
+	if err != nil {
+		t.Fatalf("DecodeImage: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != 40 || b.Dy() != 60 {
+		t.Fatalf("bounds %v", b)
+	}
+}
+
 func TestSave_NotADataURL(t *testing.T) {
 	dir := t.TempDir()
 	id := uuid.NewString()
