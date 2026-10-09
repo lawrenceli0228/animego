@@ -104,7 +104,8 @@ services:
     cpus: 1.5
     # Every request in flight holds its source image, and the ones sharp is
     # working on hold decoded frames too. nginx caps how many are in flight
-    # (max_conns in default.conf, sized for a whole page of cold images).
+    # (max_conns in default.conf, set so that bursts queue here rather than
+    # fail).
     mem_limit: 1g
     volumes:
       # Optimized images survive container recreation (every deploy recreates
@@ -366,6 +367,10 @@ services:
       # recreated nginx starts with every image it has already encoded
       # instead of sending them all to next-image again.
       - nginx-cache:/var/cache/nginx
+      # Rules that must not be public, kept only on the server (git ignores
+      # the directory). default.conf includes what is there; an empty or
+      # missing directory adds nothing.
+      - ./nginx/private:/etc/nginx/private:ro
     depends_on:
       - next-app
     networks:
