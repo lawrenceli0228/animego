@@ -11,15 +11,15 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/testutil"
 )
 
-// TestMigration0047_PG applies 0047 over a schema at 0045 while another
-// transaction holds ACCESS EXCLUSIVE on every table AniList or the sweeps
-// write (a file that touched one would wait, and time out here), checks
-// the new tables' constraints and the widened notification types, then
-// runs it down and up again.
+// TestMigration0047_PG applies 0047 over a schema at 0046 -- the file it
+// follows when it ships -- while another transaction holds ACCESS EXCLUSIVE
+// on every table AniList or the sweeps write (a file that touched one would
+// wait, and time out here), checks the new tables' constraints and the
+// widened notification types, then runs it down and up again.
 func TestMigration0047_PG(t *testing.T) {
 	ctx := context.Background()
 	uri := testutil.SetupPG(t)
-	testutil.MigrateTo(t, uri, 45)
+	testutil.MigrateTo(t, uri, 46)
 	pool := testutil.NewWebPool(t, ctx, uri)
 
 	exec := func(sql string) {
@@ -67,8 +67,23 @@ func TestMigration0047_PG(t *testing.T) {
 		assert.Less(t, time.Since(start), bound, "0047 waited for a lock on a table it should not touch")
 	})
 
+	// notifications_type_chk as the database holds it, value by value.
+	typeConstraint := func() string {
+		t.Helper()
+		var def string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint
+			WHERE conname = 'notifications_type_chk'`).Scan(&def))
+		return def
+	}
+
 	t.Run("the three tables and their constraints", func(t *testing.T) {
 		assert.Equal(t, 3, count(tables))
+		// Widened twice -- 0046 for the community tab's replies, then here --
+		// so this file names every value 0046 added, or the replies' own
+		// notifications would stop passing it.
+		for _, kind := range []string{"reply", "reaction", "follow", "thread_reply", "activity_reply", "edit_review"} {
+			assert.Contains(t, typeConstraint(), "'"+kind+"'", kind)
+		}
 		assert.Equal(t, 1, count(`SELECT count(*) FROM notifications WHERE dedupe_key = 'follow:old'`),
 			"existing notifications pass the widened constraint")
 
@@ -137,8 +152,10 @@ func TestMigration0047_PG(t *testing.T) {
 			('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000002', 'edit_review',
 			 '10000000-0000-0000-0000-000000000002', 'edit_review:10000000-0000-0000-0000-000000000002')`)
 
-		testutil.MigrateTo(t, uri, 45)
+		testutil.MigrateTo(t, uri, 46)
 		assert.Zero(t, count(tables))
+		assert.Contains(t, typeConstraint(), "'thread_reply'", "down restores 0046's list, not 0045's")
+		assert.NotContains(t, typeConstraint(), "'edit_review'")
 		assert.Zero(t, count(`SELECT count(*) FROM information_schema.columns
 			WHERE table_name = 'notifications' AND column_name = 'edit_submission_id'`))
 		_, err := pool.Exec(ctx, `INSERT INTO notifications (user_id, actor_id, notification_type, dedupe_key) VALUES
