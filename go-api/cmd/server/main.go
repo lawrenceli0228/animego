@@ -43,6 +43,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/bgmidmap"
 	"github.com/lawrenceli0228/animego/go-api/internal/comments"
+	"github.com/lawrenceli0228/animego/go-api/internal/community"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
 	"github.com/lawrenceli0228/animego/go-api/internal/danmaku"
@@ -683,6 +684,11 @@ func main() {
 	// is the only auth-gated write; danmaku writes go through socket.io
 	// (P2.8), so only the read endpoint lives here.
 	commentsHandlers := comments.NewHandlers(pool, q)
+	// The community tab of an anime page (migration 0046): reviews, threads,
+	// replies, activity likes.  Mounted under /api/anime/{anilistId}/community
+	// below; the per-user write budgets are community.DefaultLimits.
+	communityHandlers := community.NewHandlers(q, community.DefaultLimits())
+	defer communityHandlers.Stop()
 	notificationHandlers := notifications.NewHandlers(q)
 	safetyHandlers := safety.NewHandlers(q)
 	danmakuHandlers := danmaku.NewHandlers(pool, q)
@@ -831,6 +837,11 @@ func main() {
 		// pattern first, and a two-segment route added after the catch-all
 		// would never be reached.
 		r.Get("/{anilistId}/episode-offset", anime.EpisodeOffset(q))
+		// The community tab: /{anilistId}/community and everything under it.
+		// Its GETs are public catalogue reads like /watchers above, which is
+		// what lets the ISR page render them without forwarding a visitor's
+		// address (see isPublicReadExempt); its writes are per-user limited.
+		communityHandlers.Mount(r, signer)
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
 
@@ -941,6 +952,9 @@ func main() {
 		r.Get("/users", adminReadHandlers.ListUsers)
 		r.Get("/reports", safetyHandlers.ListReports)
 		r.Patch("/reports/{id}", safetyHandlers.UpdateReport)
+		// Removing a reported review, thread or reply (soft; deleted_by is
+		// the admin).
+		communityHandlers.MountAdmin(r)
 		r.Get("/community-metrics", commentsHandlers.CommunityMetrics)
 		// The user-activity panel: DAU/WAU/MAU, the daily trend, retention
 		// cohorts and the surface breakdown.  Distinct from
