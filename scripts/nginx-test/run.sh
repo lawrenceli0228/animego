@@ -422,11 +422,14 @@ ok "$(warm "$X")" 404 "404 is passed on"
 warm "$X" >/dev/null
 ok "$(ani_hits "$X")" 2 "and not stored, though AniList said to cache it"
 ok "$(img "$X")" 404 "/img/anilist/ passes the 404 on too"
+ok "$(head_of cache-control)|$(head_of x-accel-expires)" "|" "without AniList's invitation to cache it"
 X=media/anime/cover/large/bx9602-throttled.png
 ani "set?path=$X&status=429&retry_after=120" >/dev/null
 ok "$(warm "$X")|$(head_of retry-after)" "429|120" "429 is passed on with its Retry-After"
 warm "$X" >/dev/null
 ok "$(ani_hits "$X")" 2 "and not stored"
+ok "$(img "$X")|$(head_of retry-after)|$(head_of cache-control)" "429|120|" \
+  "/img/anilist/ passes the 429 on with its Retry-After, and nothing that lets the CDN keep it"
 X=media/anime/cover/large/bx9603-broken.png
 ani "set?path=$X&status=503" >/dev/null
 ok "$(warm "$X")" 503 "503 is passed on"
@@ -448,6 +451,8 @@ CLEAN='^/file/anilistcdn/([A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9
 ok "$(ani targets | grep -v '^$' | grep -c -v -E "$CLEAN")" 0 "in this whole run AniList was only asked for plain /file/anilistcdn/ paths"
 echo "== what comes back from AniList"
 img "$S" >/dev/null
+ok "$(head_of cache-control)" "max-age=2592000" "a stored original may be kept 30 days, whatever AniList's Cache-Control said"
+ok "$(head_of expires | grep -c 1970)" 0 "and AniList's Expires is not passed on"
 ok "$(head_of set-cookie)" "" "AniList's Set-Cookie never reaches the visitor"
 ok "$(head_of strict-transport-security)" "max-age=31536000; includeSubDomains; preload" "only the site's own HSTS policy, not AniList's"
 ok "$(head_of report-to)$(head_of nel)" "" "nor AniList's error-report endpoints"
