@@ -20,7 +20,9 @@ import {
 import { characterHeading } from "@/lib/people/seo";
 import type { Character } from "@/lib/people/types";
 import type { Lang } from "@/lib/i18n/lang";
+import { nativeLanguage } from "@/lib/people/view";
 import ChipEditor from "./ChipEditor";
+import NameFields from "./NameFields";
 import EditorFrame, { DesktopBar } from "./EditorFrame";
 import PhotoField from "./PhotoField";
 import RolesEditor from "./RolesEditor";
@@ -70,35 +72,13 @@ export default function CharacterEditor({ character, lang, crumbs, pageHref, hue
         />
         <div className={e.headMain}>
           <div className={e.titleBlock}>
-            <input
-              id="edit-name"
-              className={e.nameInput}
-              aria-label={t("peopleEdit.nameCn")}
-              value={draft.nameCn}
-              maxLength={LIMITS.name}
-              data-changed={changedAttr(draft.nameCn, initial.nameCn)}
-              onChange={(event) => set("nameCn", event.target.value)}
+            <NameFields
+              lang={lang}
+              values={draft}
+              initial={initial}
+              nativeLang={nativeLanguage(character.name.native)}
+              onChange={(key, value) => set(key, value)}
             />
-            <div className={e.subNames}>
-              <input
-                className={`${e.subInput} ${e.jp}`}
-                lang="ja"
-                aria-label={t("peopleEdit.nameNative")}
-                value={draft.nameNative}
-                maxLength={LIMITS.name}
-                data-changed={changedAttr(draft.nameNative, initial.nameNative)}
-                onChange={(event) => set("nameNative", event.target.value)}
-              />
-              <span className={e.dot} aria-hidden="true" />
-              <input
-                className={`${e.subInput} ${e.latin}`}
-                aria-label={t("peopleEdit.nameFull")}
-                value={draft.nameFull}
-                maxLength={LIMITS.name}
-                data-changed={changedAttr(draft.nameFull, initial.nameFull)}
-                onChange={(event) => set("nameFull", event.target.value)}
-              />
-            </div>
             <ChipEditor
               variant="alias"
               chips={draft.aliases.map((a) => ({ value: a, label: a }))}

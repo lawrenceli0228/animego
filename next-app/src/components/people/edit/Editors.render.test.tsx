@@ -157,6 +157,9 @@ describe("the character's edit state", () => {
     expect(submits(en)).toEqual(["Submit", "Submit for review"]);
     expect(en).toContain('aria-label="Chinese name"');
     expect(en).toContain('value="Japanese"');
+    // The big field is the name the English page leads with.
+    expect(en).toMatch(/<input id="edit-name"[^>]*aria-label="Romanised name"[^>]*value="Stark"/);
+    expect(html).toMatch(/<input id="edit-name"[^>]*aria-label="中文名"[^>]*value="修塔尔克"/);
   });
 });
 
