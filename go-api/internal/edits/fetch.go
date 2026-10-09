@@ -100,8 +100,11 @@ func checkImageURL(raw string) (*url.URL, error) {
 }
 
 // blockedPrefixes are the ranges netip's predicates do not already cover
-// that must never be fetched from: shared, reserved, documentation and
-// benchmark space, and the v6 prefixes that embed a v4 address.
+// that must never be fetched from.  v4: shared, reserved, documentation and
+// benchmark space.  v6 is allowed only from global unicast (globalUnicast6),
+// and these are the special-purpose blocks inside it: the IETF protocol
+// assignments (Teredo, benchmarking, ORCHID and the rest), documentation,
+// and 6to4, which embeds a v4 address.
 var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("100.64.0.0/10"),
@@ -111,13 +114,17 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("198.51.100.0/24"),
 	netip.MustParsePrefix("203.0.113.0/24"),
 	netip.MustParsePrefix("240.0.0.0/4"),
-	netip.MustParsePrefix("64:ff9b::/96"),
-	netip.MustParsePrefix("64:ff9b:1::/48"),
-	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/23"),
 	netip.MustParsePrefix("2001:db8::/32"),
 	netip.MustParsePrefix("2002::/16"),
-	netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("3fff::/20"),
 }
+
+// globalUnicast6 is the only v6 space fetched from.  Everything outside it
+// -- the v4-compatible, translated and NAT64 forms that embed a v4 address,
+// discard-only, unique-local, link- and site-local, multicast -- is refused
+// without a list to keep up to date.
+var globalUnicast6 = netip.MustParsePrefix("2000::/3")
 
 // publicAddr reports whether a is an address the fetcher may connect to.
 func publicAddr(a netip.Addr) bool {
@@ -125,6 +132,9 @@ func publicAddr(a netip.Addr) bool {
 	if !a.IsValid() || a.IsLoopback() || a.IsPrivate() || a.IsUnspecified() ||
 		a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsInterfaceLocalMulticast() ||
 		a.IsMulticast() || a == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
+		return false
+	}
+	if a.Is6() && !globalUnicast6.Contains(a) {
 		return false
 	}
 	for _, p := range blockedPrefixes {

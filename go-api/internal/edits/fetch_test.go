@@ -57,7 +57,7 @@ func TestCheckImageURL(t *testing.T) {
 
 func TestPublicAddr(t *testing.T) {
 	t.Parallel()
-	for _, s := range []string{"8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "203.0.114.1"} {
+	for _, s := range []string{"8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "203.0.114.1", "2001:4860:4860::8888", "2a00:1450:4001:80b::200e"} {
 		assert.True(t, publicAddr(netip.MustParseAddr(s)), s)
 	}
 	for _, s := range []string{
@@ -66,6 +66,17 @@ func TestPublicAddr(t *testing.T) {
 		"192.0.2.1", "198.51.100.7", "203.0.113.9", "240.0.0.1", "192.0.0.8",
 		"::1", "::", "fe80::1", "fc00::1", "fd12::1", "ff02::1", "2001:db8::1",
 		"::ffff:127.0.0.1", "::ffff:10.0.0.1", "64:ff9b::a00:1", "2002:a00:1::1", "fec0::1",
+		// v6 is allowed only from global unicast (2000::/3), less the
+		// special-purpose blocks inside it.
+		"::7f00:1",                             // IPv4-compatible (deprecated)
+		"::ffff:0:7f00:1",                      // SIIT
+		"100::1",                               // discard-only
+		"2001::1",                              // Teredo
+		"2001:0:4136:e378:8000:63bf:3fff:fdd2", // Teredo
+		"2001:2::1",                            // benchmarking
+		"2001:10::1",                           // ORCHID
+		"3fff::1",                              // documentation
+		"5f00::1",                              // SRv6 SIDs
 	} {
 		assert.False(t, publicAddr(netip.MustParseAddr(s)), s)
 	}
