@@ -11,6 +11,11 @@
 // credits alone, and an id no non-adult credit names is a 404 whatever else
 // the database holds about it.
 //
+// Accepted reader edits (entity_overlays, 0047; see internal/overlay) come
+// last and win: overlay, then Bangumi's Chinese name, then AniList.  They
+// change what a page says, never whether it exists, and never which titles
+// a person is counted on.
+//
 // Nothing here calls AniList.  A crawler walking ids gets a database read and
 // a 404, never an upstream request; the profiles sweep is what fills the
 // profile tables, in its own time.
@@ -173,9 +178,17 @@ type CharacterProfile struct {
 
 // CharacterVoice is one person who voices a character.
 type CharacterVoice struct {
+	// Key names the row for an edit: overlay.VoiceKey of the credit it came
+	// from (person, language, notes), or overlay.AddedVoiceKey for a row an
+	// accepted edit added.  It stays the credit's key after an edit gives
+	// the row to someone else, so a later edit still finds it.
+	Key       string    `json:"key"`
 	Person    PersonRef `json:"person"`
 	Language  *string   `json:"language"`
 	RoleNotes *string   `json:"roleNotes"`
+	// Line is the line under the name as an accepted edit wrote it; the
+	// page shows it in place of the language and notes.  Null otherwise.
+	Line *string `json:"line"`
 }
 
 // Appearance is one title a character is on, and their role there.

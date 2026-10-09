@@ -359,17 +359,18 @@ func (q *Queries) ListCharacterVoices(ctx context.Context, characterID int32) ([
 const listCharactersSitemapShard = `-- name: ListCharactersSitemapShard :many
 SELECT
     c.character_id::int AS anilist_id,
-    GREATEST(max(a.updated_at), max(ch.fetched_at))::timestamptz AS updated_at
+    GREATEST(max(a.updated_at), max(ch.fetched_at), max(o.updated_at))::timestamptz AS updated_at
 FROM anime_characters c
 JOIN anime_cache a ON a.anilist_id = c.anime_id
-JOIN bgm_character_map m ON m.anilist_id = c.character_id
+LEFT JOIN bgm_character_map m ON m.anilist_id = c.character_id
 LEFT JOIN characters ch ON ch.anilist_id = c.character_id AND ch.fetched_at IS NOT NULL
+LEFT JOIN entity_overlays o ON o.kind = 'character' AND o.entity_id = c.character_id
 WHERE c.character_id IS NOT NULL
   AND NOT a.is_adult
-  AND m.name_cn IS NOT NULL
+  AND COALESCE(o.data->>'nameCn', m.name_cn) IS NOT NULL
   AND c.character_id % $1::int = $2::int
 GROUP BY c.character_id
-HAVING bool_or(c.role = 'MAIN')
+HAVING bool_or(COALESCE(o.data->'roles'->>(c.anime_id::text), c.role) = 'MAIN')
 ORDER BY c.character_id
 `
 
@@ -379,8 +380,12 @@ type ListCharactersSitemapShardRow struct {
 }
 
 // The characters whose page is indexed, in one modulo shard: a lead
-// (MAIN) on at least one non-adult title, with a Chinese name from
-// Bangumi.  updated_at as ListPeopleSitemapShard has it.
+// (MAIN) on at least one non-adult title, with a Chinese name.  Both are
+// read the way the page reads them: the accepted edits first
+// (entity_overlays, 0047 -- a role per title, a Chinese name), then
+// Bangumi's name and the credit's role, so an edit that gives a lead its
+// Chinese name lists the page and the page says index, together.
+// updated_at as ListPeopleSitemapShard has it.
 func (q *Queries) ListCharactersSitemapShard(ctx context.Context, shardCount int32, shardIndex int32) ([]ListCharactersSitemapShardRow, error) {
 	rows, err := q.db.Query(ctx, listCharactersSitemapShard, shardCount, shardIndex)
 	if err != nil {
@@ -428,9 +433,10 @@ counted AS (
 )
 SELECT
     c.id::int AS anilist_id,
-    GREATEST(c.updated_at, p.fetched_at)::timestamptz AS updated_at
+    GREATEST(c.updated_at, p.fetched_at, o.updated_at)::timestamptz AS updated_at
 FROM counted c
 LEFT JOIN people p ON p.anilist_id = c.id AND p.fetched_at IS NOT NULL
+LEFT JOIN entity_overlays o ON o.kind = 'person' AND o.entity_id = c.id
 WHERE c.voice_works >= $1::int
    OR c.staff_works >= $2::int
 ORDER BY c.id
@@ -448,9 +454,11 @@ type ListPeopleSitemapShardRow struct {
 // so this list and the page's own `indexable` cannot disagree.  The
 // thresholds are internal/people's constants, passed in.
 //
-// updated_at is the latest of the profile fetch and the last write of any
-// title the person is credited on: the page is built from those rows and
-// from nothing else.
+// updated_at is the latest of the profile fetch, the last accepted edit
+// (entity_overlays) and the last write of any title the person is
+// credited on: the page is built from those rows and from nothing else.
+// An edit changes no count, so it cannot move a person across the
+// threshold.
 func (q *Queries) ListPeopleSitemapShard(ctx context.Context, minVoiceWorks int32, minStaffWorks int32, shardCount int32, shardIndex int32) ([]ListPeopleSitemapShardRow, error) {
 	rows, err := q.db.Query(ctx, listPeopleSitemapShard,
 		minVoiceWorks,

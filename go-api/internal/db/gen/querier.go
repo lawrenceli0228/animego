@@ -663,6 +663,13 @@ type Querier interface {
 	// -- was built on at most AniList's first page.  The detail refresh keeps
 	// that page at display_order 0..24 (credits.WriteCast), so these are the
 	// 25 AniList lists first.
+	//
+	// Accepted reader edits (entity_overlays, 0047) come first for the names
+	// and the images, the character's and its voice's: overlay, then Bangumi,
+	// then the row.  Names and images only -- a role or a change of voice an
+	// edit made is the character page's, and this response keeps both as
+	// AniList has them.  Both joins are by primary key; the shape is
+	// unchanged.
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error)
 	// Authoritative total-episode count for one title, used by
 	// PATCH /api/subscriptions/:anilistId as the upper bound on currentEpisode.
@@ -717,7 +724,8 @@ type Querier interface {
 	GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error)
 	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]GetAnimeRecommendationsByIDRow, error)
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
-	// LIMIT 25 for the reason GetAnimeCharactersByID gives.
+	// LIMIT 25 for the reason GetAnimeCharactersByID gives, and the accepted
+	// edits' names and images first, as there.
 	GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error)
 	// Every studio on the title with its id and role, for the studio page
 	// links.  Main studios first, then by name.
@@ -1412,8 +1420,12 @@ type Querier interface {
 	// are all of them.
 	ListCharacterVoices(ctx context.Context, characterID int32) ([]ListCharacterVoicesRow, error)
 	// The characters whose page is indexed, in one modulo shard: a lead
-	// (MAIN) on at least one non-adult title, with a Chinese name from
-	// Bangumi.  updated_at as ListPeopleSitemapShard has it.
+	// (MAIN) on at least one non-adult title, with a Chinese name.  Both are
+	// read the way the page reads them: the accepted edits first
+	// (entity_overlays, 0047 -- a role per title, a Chinese name), then
+	// Bangumi's name and the credit's role, so an edit that gives a lead its
+	// Chinese name lists the page and the page says index, together.
+	// updated_at as ListPeopleSitemapShard has it.
 	ListCharactersSitemapShard(ctx context.Context, shardCount int32, shardIndex int32) ([]ListCharactersSitemapShardRow, error)
 	// Queries against danmakus + episode_windows (P2.5).
 	//
@@ -1684,9 +1696,11 @@ type Querier interface {
 	// so this list and the page's own `indexable` cannot disagree.  The
 	// thresholds are internal/people's constants, passed in.
 	//
-	// updated_at is the latest of the profile fetch and the last write of any
-	// title the person is credited on: the page is built from those rows and
-	// from nothing else.
+	// updated_at is the latest of the profile fetch, the last accepted edit
+	// (entity_overlays) and the last write of any title the person is
+	// credited on: the page is built from those rows and from nothing else.
+	// An edit changes no count, so it cannot move a person across the
+	// threshold.
 	ListPeopleSitemapShard(ctx context.Context, minVoiceWorks int32, minStaffWorks int32, shardCount int32, shardIndex int32) ([]ListPeopleSitemapShardRow, error)
 	// What a credit line needs to show a person -- names and a portrait -- for
 	// ids an edit names that the page's own credits do not carry: the person a

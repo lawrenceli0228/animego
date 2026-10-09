@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/overlay"
 )
 
 // characterIndexable is the character page's indexing rule: a lead (MAIN)
@@ -32,8 +33,11 @@ func characterIndexable(name Name, appearances []Appearance) bool {
 // buildCharacter assembles GET /api/characters/:id.  ok is false when no
 // non-adult title lists the character.  The name ladder is buildPerson's:
 // the profile, else the most popular title's credit, and Bangumi alone for
-// the Chinese name.
-func buildCharacter(id int32, ident dbgen.GetCharacterIdentityRow, appearances []dbgen.ListCharacterAppearancesRow, voices []dbgen.ListCharacterVoicesRow) (*Character, bool) {
+// the Chinese name -- under the accepted edits in ov, which win over all of
+// them (names, aliases, portrait, facts, a role per title, the voices).
+// Indexing is decided on the edited page, as the sitemap listing decides
+// it (ListCharactersSitemapShard).
+func buildCharacter(id int32, ident dbgen.GetCharacterIdentityRow, appearances []dbgen.ListCharacterAppearancesRow, voices []dbgen.ListCharacterVoicesRow, ov pageOverlays) (*Character, bool) {
 	if len(appearances) == 0 {
 		return nil, false
 	}
@@ -56,7 +60,7 @@ func buildCharacter(id int32, ident dbgen.GetCharacterIdentityRow, appearances [
 				popularity:    a.Popularity,
 				posterAccent:  a.PosterAccent,
 			}),
-			Role: text(a.Role),
+			Role: roleWith(text(a.Role), ov.self, a.AnimeID),
 		})
 	}
 
@@ -77,23 +81,18 @@ func buildCharacter(id int32, ident dbgen.GetCharacterIdentityRow, appearances [
 
 	slices.SortStableFunc(apps, func(a, b Appearance) int { return compareWorksEarliestFirst(a.Anime, b.Anime) })
 
-	name := Name{
+	name := nameWith(Name{
 		Full:   firstText(ident.NameFull, creditFull),
 		Native: firstText(ident.NameNative, creditNative),
 		Cn:     text(ident.NameCn),
+	}, ov.self)
+	aliases := ident.NameAlternative
+	if ov.self.Aliases.Set {
+		aliases = cleanList(ov.self.Aliases.Value)
 	}
-	c := &Character{
-		AnilistID:        id,
-		BangumiID:        ident.BgmID,
-		Name:             name,
-		AlternativeNames: alternativeNames(ident.NameAlternative, name),
-		Image:            firstText(ident.ImageLarge, largeImage(creditImage)),
-		Voices:           characterVoices(voices),
-		Appearances:      apps,
-		Indexable:        characterIndexable(name, apps),
-	}
+	var profile *CharacterProfile
 	if ident.HasProfile {
-		c.Profile = &CharacterProfile{
+		profile = &CharacterProfile{
 			Description: text(ident.Description),
 			Gender:      text(ident.Gender),
 			Age:         text(ident.Age),
@@ -102,7 +101,38 @@ func buildCharacter(id int32, ident dbgen.GetCharacterIdentityRow, appearances [
 			SiteURL:     text(ident.SiteUrl),
 		}
 	}
-	return c, true
+	return &Character{
+		AnilistID:        id,
+		BangumiID:        ident.BgmID,
+		Name:             name,
+		AlternativeNames: alternativeNames(aliases, name),
+		Image:            imageWith(firstText(ident.ImageLarge, largeImage(creditImage)), ov.self),
+		Profile:          characterProfileWith(profile, ov.self),
+		Voices:           editedVoices(characterVoices(voices), ov),
+		Appearances:      apps,
+		Indexable:        characterIndexable(name, apps),
+	}, true
+}
+
+// editedVoices is a character's voices with its voice edits applied and
+// each person's own edits (names, portrait) on top.  The people the edits
+// name are looked up among the credited voices first, then in ov.refs.
+func editedVoices(base []CharacterVoice, ov pageOverlays) []CharacterVoice {
+	refs := make(map[int32]PersonRef, len(base)+len(ov.refs))
+	for id, ref := range ov.refs {
+		refs[id] = ref
+	}
+	for _, v := range base {
+		refs[v.Person.AnilistID] = v.Person
+	}
+	edited := voicesWith(base, ov.self, refs)
+	out := make([]CharacterVoice, 0, len(edited))
+	for _, v := range edited {
+		next := v
+		next.Person = personRefWith(v.Person, ov.people[v.Person.AnilistID])
+		out = append(out, next)
+	}
+	return out
 }
 
 // characterVoices lists every person who voices the character, once per
@@ -161,6 +191,7 @@ func characterVoices(rows []dbgen.ListCharacterVoicesRow) []CharacterVoice {
 		seen[k] = true
 		entries = append(entries, entry{
 			voice: CharacterVoice{
+				Key: overlay.VoiceKey(r.StaffID, r.Language, r.RoleNotes),
 				Person: PersonRef{
 					AnilistID: r.StaffID,
 					Name: Name{

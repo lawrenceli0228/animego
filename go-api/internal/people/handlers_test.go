@@ -26,6 +26,8 @@ type fakeDB struct {
 	characterIdent  dbgen.GetCharacterIdentityRow
 	appearances     []dbgen.ListCharacterAppearancesRow
 	characterVoices []dbgen.ListCharacterVoicesRow
+	overlays        []dbgen.ListEntityOverlaysRow
+	personRefs      []dbgen.ListPersonRefsRow
 	err             error
 
 	peopleSitemapCalls     int
@@ -51,6 +53,12 @@ func (f *fakeDB) ListCharacterAppearances(context.Context, int32) ([]dbgen.ListC
 }
 func (f *fakeDB) ListCharacterVoices(context.Context, int32) ([]dbgen.ListCharacterVoicesRow, error) {
 	return f.characterVoices, f.err
+}
+func (f *fakeDB) ListEntityOverlays(context.Context, []int32, []int32) ([]dbgen.ListEntityOverlaysRow, error) {
+	return f.overlays, f.err
+}
+func (f *fakeDB) ListPersonRefs(context.Context, []int32) ([]dbgen.ListPersonRefsRow, error) {
+	return f.personRefs, f.err
 }
 func (f *fakeDB) ListPeopleSitemapShard(_ context.Context, minVoice, minStaff, shards, shard int32) ([]dbgen.ListPeopleSitemapShardRow, error) {
 	f.peopleSitemapCalls++
@@ -179,8 +187,30 @@ func TestCharacterHandler_StatusesAndShape(t *testing.T) {
 	assert.Equal(t, []string{"age", "birth", "bloodType", "description", "gender", "siteUrl"}, keys(data["profile"].(map[string]any)))
 	assert.Equal(t, []string{"anime", "role"}, keys(data["appearances"].([]any)[0].(map[string]any)))
 	voice := data["voices"].([]any)[0].(map[string]any)
-	assert.Equal(t, []string{"language", "person", "roleNotes"}, keys(voice))
+	// key names the row for an edit; line is the line an accepted edit wrote.
+	assert.Equal(t, []string{"key", "language", "line", "person", "roleNotes"}, keys(voice))
+	assert.Equal(t, "133507|Japanese|", voice["key"])
+	assert.Nil(t, voice["line"])
 	assert.Equal(t, []string{"anilistId", "image", "name"}, keys(voice["person"].(map[string]any)))
+}
+
+// TestCharacterHandler_AppliesItsOverlay: the handler reads the character's
+// accepted edits and answers with them on top.
+func TestCharacterHandler_AppliesItsOverlay(t *testing.T) {
+	t.Parallel()
+	db := &fakeDB{
+		characterIdent: dbgen.GetCharacterIdentityRow{NameCn: sp("修塔尔克")},
+		appearances:    []dbgen.ListCharacterAppearancesRow{appearanceRow(frieren, "MAIN")},
+		overlays: []dbgen.ListEntityOverlaysRow{
+			{Kind: "character", EntityID: 184313, Data: []byte(`{"nameCn":"史塔克","roles":{"154587":"SUPPORTING"}}`)},
+		},
+	}
+	rec, body := get(t, router(db), "/api/characters/184313")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	data := body["data"].(map[string]any)
+	assert.Equal(t, "史塔克", data["name"].(map[string]any)["cn"])
+	assert.Equal(t, "SUPPORTING", data["appearances"].([]any)[0].(map[string]any)["role"])
+	assert.Equal(t, false, data["indexable"], "no longer a lead anywhere")
 }
 
 // TestRoutes_SitemapIsNotAnID: the literal segment shares the subtree with

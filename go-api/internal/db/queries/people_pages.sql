@@ -251,9 +251,11 @@ ORDER BY v.anime_id, v.display_order, v.staff_id;
 -- so this list and the page's own `indexable` cannot disagree.  The
 -- thresholds are internal/people's constants, passed in.
 --
--- updated_at is the latest of the profile fetch and the last write of any
--- title the person is credited on: the page is built from those rows and
--- from nothing else.
+-- updated_at is the latest of the profile fetch, the last accepted edit
+-- (entity_overlays) and the last write of any title the person is
+-- credited on: the page is built from those rows and from nothing else.
+-- An edit changes no count, so it cannot move a person across the
+-- threshold.
 WITH credits AS (
     SELECT v.staff_id AS id, v.anime_id, true AS voiced
     FROM anime_character_voices v
@@ -280,28 +282,34 @@ counted AS (
 )
 SELECT
     c.id::int AS anilist_id,
-    GREATEST(c.updated_at, p.fetched_at)::timestamptz AS updated_at
+    GREATEST(c.updated_at, p.fetched_at, o.updated_at)::timestamptz AS updated_at
 FROM counted c
 LEFT JOIN people p ON p.anilist_id = c.id AND p.fetched_at IS NOT NULL
+LEFT JOIN entity_overlays o ON o.kind = 'person' AND o.entity_id = c.id
 WHERE c.voice_works >= sqlc.arg(min_voice_works)::int
    OR c.staff_works >= sqlc.arg(min_staff_works)::int
 ORDER BY c.id;
 
 -- name: ListCharactersSitemapShard :many
 -- The characters whose page is indexed, in one modulo shard: a lead
--- (MAIN) on at least one non-adult title, with a Chinese name from
--- Bangumi.  updated_at as ListPeopleSitemapShard has it.
+-- (MAIN) on at least one non-adult title, with a Chinese name.  Both are
+-- read the way the page reads them: the accepted edits first
+-- (entity_overlays, 0047 -- a role per title, a Chinese name), then
+-- Bangumi's name and the credit's role, so an edit that gives a lead its
+-- Chinese name lists the page and the page says index, together.
+-- updated_at as ListPeopleSitemapShard has it.
 SELECT
     c.character_id::int AS anilist_id,
-    GREATEST(max(a.updated_at), max(ch.fetched_at))::timestamptz AS updated_at
+    GREATEST(max(a.updated_at), max(ch.fetched_at), max(o.updated_at))::timestamptz AS updated_at
 FROM anime_characters c
 JOIN anime_cache a ON a.anilist_id = c.anime_id
-JOIN bgm_character_map m ON m.anilist_id = c.character_id
+LEFT JOIN bgm_character_map m ON m.anilist_id = c.character_id
 LEFT JOIN characters ch ON ch.anilist_id = c.character_id AND ch.fetched_at IS NOT NULL
+LEFT JOIN entity_overlays o ON o.kind = 'character' AND o.entity_id = c.character_id
 WHERE c.character_id IS NOT NULL
   AND NOT a.is_adult
-  AND m.name_cn IS NOT NULL
+  AND COALESCE(o.data->>'nameCn', m.name_cn) IS NOT NULL
   AND c.character_id % sqlc.arg(shard_count)::int = sqlc.arg(shard_index)::int
 GROUP BY c.character_id
-HAVING bool_or(c.role = 'MAIN')
+HAVING bool_or(COALESCE(o.data->'roles'->>(c.anime_id::text), c.role) = 'MAIN')
 ORDER BY c.character_id;

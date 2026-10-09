@@ -518,6 +518,17 @@ func NewDetailService(db DetailDB, anilistClient AniListDetailer) (*DetailServic
 	return &DetailService{db: db, cache: c, anilist: anilistClient, absent: absent}, nil
 }
 
+// Forget drops titles from the detail cache, so the next read of each
+// rebuilds it from the database.  A review that accepts edits to a person
+// or character calls it with every title crediting them: the cast and
+// staff lists carry their names and images (GetAnimeCharactersByID), and a
+// cached response would keep the old ones for up to detailCacheTTL.
+func (s *DetailService) Forget(ids ...int32) {
+	for _, id := range ids {
+		s.cache.Delete(strconv.FormatInt(int64(id), 10))
+	}
+}
+
 // Close releases the underlying ristretto caches.  Safe to call multiple
 // times.
 func (s *DetailService) Close() {

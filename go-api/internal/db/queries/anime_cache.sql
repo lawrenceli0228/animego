@@ -1200,31 +1200,47 @@ WHERE anime_id = $1;
 -- -- was built on at most AniList's first page.  The detail refresh keeps
 -- that page at display_order 0..24 (credits.WriteCast), so these are the
 -- 25 AniList lists first.
+--
+-- Accepted reader edits (entity_overlays, 0047) come first for the names
+-- and the images, the character's and its voice's: overlay, then Bangumi,
+-- then the row.  Names and images only -- a role or a change of voice an
+-- edit made is the character page's, and this response keeps both as
+-- AniList has them.  Both joins are by primary key; the shape is
+-- unchanged.
 SELECT
-    c.name_en,
-    c.name_ja,
-    COALESCE(cm.name_cn, c.name_cn) AS name_cn,
-    c.image_url,
+    COALESCE(co.data->>'nameFull', c.name_en) AS name_en,
+    COALESCE(co.data->>'nameNative', c.name_ja) AS name_ja,
+    COALESCE(co.data->>'nameCn', cm.name_cn, c.name_cn) AS name_cn,
+    COALESCE(co.data->>'image', c.image_url) AS image_url,
     c.role,
-    c.voice_actor_en,
-    c.voice_actor_ja,
-    COALESCE(pm.name_cn, c.voice_actor_cn) AS voice_actor_cn,
-    c.voice_actor_image_url,
+    COALESCE(po.data->>'nameFull', c.voice_actor_en) AS voice_actor_en,
+    COALESCE(po.data->>'nameNative', c.voice_actor_ja) AS voice_actor_ja,
+    COALESCE(po.data->>'nameCn', pm.name_cn, c.voice_actor_cn) AS voice_actor_cn,
+    COALESCE(po.data->>'image', c.voice_actor_image_url) AS voice_actor_image_url,
     c.character_id,
     c.voice_actor_id
 FROM anime_characters c
 LEFT JOIN bgm_character_map cm ON cm.anilist_id = c.character_id
 LEFT JOIN bgm_person_map pm ON pm.anilist_id = c.voice_actor_id
+LEFT JOIN entity_overlays co ON co.kind = 'character' AND co.entity_id = c.character_id
+LEFT JOIN entity_overlays po ON po.kind = 'person' AND po.entity_id = c.voice_actor_id
 WHERE c.anime_id = $1
 ORDER BY c.display_order, c.id
 LIMIT 25;
 
 -- name: GetAnimeStaffByID :many
--- LIMIT 25 for the reason GetAnimeCharactersByID gives.
-SELECT name_en, name_ja, image_url, role, staff_id
-FROM anime_staff
-WHERE anime_id = $1
-ORDER BY display_order, id
+-- LIMIT 25 for the reason GetAnimeCharactersByID gives, and the accepted
+-- edits' names and images first, as there.
+SELECT
+    COALESCE(o.data->>'nameFull', s.name_en) AS name_en,
+    COALESCE(o.data->>'nameNative', s.name_ja) AS name_ja,
+    COALESCE(o.data->>'image', s.image_url) AS image_url,
+    s.role,
+    s.staff_id
+FROM anime_staff s
+LEFT JOIN entity_overlays o ON o.kind = 'person' AND o.entity_id = s.staff_id
+WHERE s.anime_id = $1
+ORDER BY s.display_order, s.id
 LIMIT 25;
 
 -- name: GetAnimeRecommendationsByID :many

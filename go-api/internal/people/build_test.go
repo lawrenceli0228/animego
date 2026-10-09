@@ -106,7 +106,7 @@ func TestBuildPerson_ProfileAndBangumiNameWin(t *testing.T) {
 	}
 	voices := []dbgen.ListPersonVoiceRolesRow{voiceRow(frieren, 184313, 2, "MAIN", "Stark")}
 
-	p, ok := buildPerson(133507, ident, voices, nil)
+	p, ok := buildPerson(133507, ident, voices, nil, pageOverlays{})
 	require.True(t, ok)
 
 	assert.Equal(t, int32(133507), p.AnilistID)
@@ -145,7 +145,7 @@ func TestBuildPerson_RowlessFallsBackToTheCredits(t *testing.T) {
 	minor.PersonImage = sp("https://s4.anilist.co/file/anilistcdn/staff/medium/old.jpg")
 	voices := []dbgen.ListPersonVoiceRolesRow{minor, voiceRow(frieren, 184313, 2, "MAIN", "Stark")}
 
-	p, ok := buildPerson(133507, ident, voices, nil)
+	p, ok := buildPerson(133507, ident, voices, nil, pageOverlays{})
 	require.True(t, ok, "a rowless person credited somewhere still has a page")
 
 	assert.Nil(t, p.Profile)
@@ -166,7 +166,7 @@ func TestBuildPerson_NameLadderTakesEachFieldWhereItExists(t *testing.T) {
 	ident := dbgen.GetPersonIdentityRow{HasProfile: true, NameFull: sp("Profile Name")}
 	staff := []dbgen.ListPersonStaffCreditsRow{staffRow(frieren, "Director")}
 
-	p, ok := buildPerson(134254, ident, nil, staff)
+	p, ok := buildPerson(134254, ident, nil, staff, pageOverlays{})
 	require.True(t, ok)
 	assert.Equal(t, "Profile Name", *p.Name.Full)
 	assert.Equal(t, "斎藤圭一郎", *p.Name.Native)
@@ -177,7 +177,7 @@ func TestBuildPerson_NotCreditedAnywhereIsNotAPage(t *testing.T) {
 	t.Parallel()
 
 	ident := dbgen.GetPersonIdentityRow{HasProfile: true, NameFull: sp("Has A Profile"), NameCn: sp("有档案")}
-	_, ok := buildPerson(1, ident, nil, nil)
+	_, ok := buildPerson(1, ident, nil, nil, pageOverlays{})
 	assert.False(t, ok, "a profile alone is not a page")
 }
 
@@ -326,7 +326,7 @@ func TestBuildPerson_CountsDistinctTitles(t *testing.T) {
 		voiceRow(mashle, 9, 1, "SUPPORTING", "Other"),
 		voiceRow(frieren, 184313, 2, "MAIN", "Stark"),
 	}
-	p, ok := buildPerson(133507, dbgen.GetPersonIdentityRow{}, voices, nil)
+	p, ok := buildPerson(133507, dbgen.GetPersonIdentityRow{}, voices, nil, pageOverlays{})
 	require.True(t, ok)
 	assert.Equal(t, 2, p.VoiceWorkCount, "two characters on one title count it once")
 	assert.Equal(t, 0, p.StaffWorkCount)
@@ -386,7 +386,7 @@ func TestBuildCharacter_VoicesAcrossLanguagesWithNotes(t *testing.T) {
 	voices[0].NameCn = sp("小林千晃")
 	voices[0].ImageLarge = sp("https://s4.anilist.co/file/anilistcdn/staff/large/n133507-profile.jpg")
 
-	c, ok := buildCharacter(184313, ident, appearances, voices)
+	c, ok := buildCharacter(184313, ident, appearances, voices, pageOverlays{})
 	require.True(t, ok)
 
 	var got []string
@@ -422,7 +422,7 @@ func TestBuildCharacter_RowlessAndIndexing(t *testing.T) {
 	t.Parallel()
 
 	appearances := []dbgen.ListCharacterAppearancesRow{appearanceRow(frieren, "SUPPORTING")}
-	c, ok := buildCharacter(184313, dbgen.GetCharacterIdentityRow{}, appearances, nil)
+	c, ok := buildCharacter(184313, dbgen.GetCharacterIdentityRow{}, appearances, nil, pageOverlays{})
 	require.True(t, ok, "credited somewhere, so a page, profile or not")
 	assert.Nil(t, c.Profile)
 	assert.Equal(t, "Stark", *c.Name.Full)
@@ -432,7 +432,7 @@ func TestBuildCharacter_RowlessAndIndexing(t *testing.T) {
 	assert.NotNil(t, c.Voices)
 	assert.False(t, c.Indexable, "no Chinese name and no lead role")
 
-	_, ok = buildCharacter(1, dbgen.GetCharacterIdentityRow{HasProfile: true}, nil, nil)
+	_, ok = buildCharacter(1, dbgen.GetCharacterIdentityRow{HasProfile: true}, nil, nil, pageOverlays{})
 	assert.False(t, ok, "listed on no title: no page")
 }
 
@@ -461,7 +461,7 @@ func TestBuildCharacter_ProfileFields(t *testing.T) {
 		BirthMonth:      ip(3),
 		BirthDay:        ip(14),
 	}
-	c, ok := buildCharacter(219110, ident, []dbgen.ListCharacterAppearancesRow{appearanceRow(frieren, "SUPPORTING")}, nil)
+	c, ok := buildCharacter(219110, ident, []dbgen.ListCharacterAppearancesRow{appearanceRow(frieren, "SUPPORTING")}, nil, pageOverlays{})
 	require.True(t, ok)
 	require.NotNil(t, c.Profile)
 	assert.Equal(t, "Aura is ~!killed later!~.", *c.Profile.Description, "markup is the page's to render")

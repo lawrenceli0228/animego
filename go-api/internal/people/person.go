@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
+	"github.com/lawrenceli0228/animego/go-api/internal/overlay"
 )
 
 // The indexing threshold: a person page asks to be indexed once the person
@@ -53,39 +54,33 @@ func personIndexable(voiceWorks, staffWorks int) bool {
 //     a Chinese name, and a guess at one is worse than the native name;
 //   - image: the profile's large portrait, else the credit's at the large
 //     size (largeImage).
-func buildPerson(id int32, ident dbgen.GetPersonIdentityRow, voices []dbgen.ListPersonVoiceRolesRow, staff []dbgen.ListPersonStaffCreditsRow) (*Person, bool) {
+//
+// The accepted edits in ov sit on top of every rung: the person's own
+// (names, portrait, occupations and facts) and, on each voice role, the
+// character's (its names, portrait and its role on that title).  They never
+// change which titles are listed or counted, so the indexing threshold
+// reads the credits alone, as the sitemap listing does.
+func buildPerson(id int32, ident dbgen.GetPersonIdentityRow, voices []dbgen.ListPersonVoiceRolesRow, staff []dbgen.ListPersonStaffCreditsRow, ov pageOverlays) (*Person, bool) {
 	if len(voices) == 0 && len(staff) == 0 {
 		return nil, false
 	}
 
 	roles := make([]VoiceRole, 0, len(voices))
 	for _, r := range voices {
-		roles = append(roles, voiceRoleFromRow(r))
+		roles = append(roles, voiceRoleWith(voiceRoleFromRow(r), ov.characters[r.CharacterID]))
 	}
 	staffYears, staffWorks := groupStaffCredits(staff)
 
 	creditFull, creditNative, creditImage := personCreditIdentity(voices, staff)
-	name := Name{
+	name := nameWith(Name{
 		Full:   firstText(ident.NameFull, creditFull),
 		Native: firstText(ident.NameNative, creditNative),
 		Cn:     text(ident.NameCn),
-	}
+	}, ov.self)
 
-	voiceWorks := distinctWorks(roles)
-	p := &Person{
-		AnilistID:           id,
-		BangumiID:           ident.BgmID,
-		Name:                name,
-		Image:               firstText(ident.ImageLarge, largeImage(creditImage)),
-		RepresentativeRoles: representativeRoles(roles, RepresentativeRoleCount),
-		VoiceRoles:          groupVoiceRoles(roles),
-		StaffRoles:          staffYears,
-		VoiceWorkCount:      voiceWorks,
-		StaffWorkCount:      staffWorks,
-		Indexable:           personIndexable(voiceWorks, staffWorks),
-	}
+	var profile *PersonProfile
 	if ident.HasProfile {
-		p.Profile = &PersonProfile{
+		profile = &PersonProfile{
 			Occupations: nonNil(ident.PrimaryOccupations),
 			Gender:      text(ident.Gender),
 			Birth:       fuzzyDate(ident.BirthYear, ident.BirthMonth, ident.BirthDay),
@@ -98,7 +93,29 @@ func buildPerson(id int32, ident dbgen.GetPersonIdentityRow, voices []dbgen.List
 			SiteURL:     text(ident.SiteUrl),
 		}
 	}
-	return p, true
+	voiceWorks := distinctWorks(roles)
+	return &Person{
+		AnilistID:           id,
+		BangumiID:           ident.BgmID,
+		Name:                name,
+		Image:               imageWith(firstText(ident.ImageLarge, largeImage(creditImage)), ov.self),
+		Profile:             personProfileWith(profile, ov.self),
+		RepresentativeRoles: representativeRoles(roles, RepresentativeRoleCount),
+		VoiceRoles:          groupVoiceRoles(roles),
+		StaffRoles:          staffYears,
+		VoiceWorkCount:      voiceWorks,
+		StaffWorkCount:      staffWorks,
+		Indexable:           personIndexable(voiceWorks, staffWorks),
+	}, true
+}
+
+// voiceRoleWith is a voice role with the character's accepted edits on it:
+// its names and portrait, and its role on the role's title.
+func voiceRoleWith(r VoiceRole, o overlay.Doc) VoiceRole {
+	next := r
+	next.Character = characterRefWith(r.Character, o)
+	next.Role = roleWith(r.Role, o, r.Anime.AnilistID)
+	return next
 }
 
 // personCreditIdentity is the person's name and image as their credits
