@@ -185,6 +185,23 @@ WITH previous AS (
     WHERE u.created_at = now()
        OR u.status IS DISTINCT FROM (SELECT p.status FROM previous p)
     RETURNING id
+), replaced_status_events AS (
+    -- One card per person per title in 最近动态: a new status event takes
+    -- the place of this person's earlier ones for the title that nobody has
+    -- liked or answered, so switching a status back and forth cannot fill
+    -- the tab.  A card someone liked or replied to stays — it is a
+    -- conversation now.  The new event is not among those deleted: every
+    -- part of a statement reads the snapshot from before the statement.
+    DELETE FROM activity_events e
+    WHERE EXISTS (SELECT 1 FROM status_event)
+      AND e.user_id = sqlc.arg('user_id')::uuid
+      AND e.anilist_id = sqlc.arg('anilist_id')::integer
+      AND e.event_type = 'status'
+      AND NOT EXISTS (SELECT 1 FROM activity_likes l WHERE l.activity_event_id = e.id)
+      AND NOT EXISTS (
+          SELECT 1 FROM community_replies r
+          WHERE r.activity_event_id = e.id AND r.deleted_at IS NULL
+      )
 )
 SELECT
     u.user_id,
@@ -257,6 +274,18 @@ WITH upserted AS (
     FROM upserted u
     WHERE u.created_at = now()
     RETURNING id
+), replaced_status_events AS (
+    -- One card per person per title: see UpsertSubscription.
+    DELETE FROM activity_events e
+    WHERE EXISTS (SELECT 1 FROM status_event)
+      AND e.user_id = sqlc.arg('user_id')::uuid
+      AND e.anilist_id = sqlc.arg('anilist_id')::integer
+      AND e.event_type = 'status'
+      AND NOT EXISTS (SELECT 1 FROM activity_likes l WHERE l.activity_event_id = e.id)
+      AND NOT EXISTS (
+          SELECT 1 FROM community_replies r
+          WHERE r.activity_event_id = e.id AND r.deleted_at IS NULL
+      )
 )
 SELECT
     u.user_id,
@@ -458,6 +487,18 @@ WITH previous AS (
     FROM updated
     WHERE status IS DISTINCT FROM previous_status
     RETURNING id
+), replaced_status_events AS (
+    -- One card per person per title: see UpsertSubscription.
+    DELETE FROM activity_events e
+    WHERE EXISTS (SELECT 1 FROM inserted_status_activity)
+      AND e.user_id = sqlc.arg('user_id')::uuid
+      AND e.anilist_id = sqlc.arg('anilist_id')::integer
+      AND e.event_type = 'status'
+      AND NOT EXISTS (SELECT 1 FROM activity_likes l WHERE l.activity_event_id = e.id)
+      AND NOT EXISTS (
+          SELECT 1 FROM community_replies r
+          WHERE r.activity_event_id = e.id AND r.deleted_at IS NULL
+      )
 )
 SELECT
     user_id,
@@ -506,10 +547,20 @@ RETURNING
 -- name: DeleteSubscription :execrows
 -- DELETE /api/subscriptions/:anilistId.  Returns the affected row count
 -- so the handler can 404 when no row matched (matches Express's
--- findOneAndDelete returning null → 404 "Subscription not found").
-DELETE FROM subscriptions
-WHERE user_id = $1
-  AND anilist_id = $2;
+-- findOneAndDelete returning null → 404 "Subscription not found"); the
+-- count is the subscriptions DELETE's, not the CTE's.
+--
+-- The title's status events go with it (migration 0046): off the list is
+-- off the anime's community tab, with the replies and likes on those cards.
+WITH removed_status_events AS (
+    DELETE FROM activity_events e
+    WHERE e.user_id = $1
+      AND e.anilist_id = $2
+      AND e.event_type = 'status'
+)
+DELETE FROM subscriptions s
+WHERE s.user_id = $1
+  AND s.anilist_id = $2;
 
 -- -----------------------------------------------------------------------------
 -- Per-episode watch marks (migration 0024)

@@ -414,7 +414,11 @@ type Querier interface {
 	DeleteFollow(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (int64, error)
 	// DELETE /api/subscriptions/:anilistId.  Returns the affected row count
 	// so the handler can 404 when no row matched (matches Express's
-	// findOneAndDelete returning null → 404 "Subscription not found").
+	// findOneAndDelete returning null → 404 "Subscription not found"); the
+	// count is the subscriptions DELETE's, not the CTE's.
+	//
+	// The title's status events go with it (migration 0046): off the list is
+	// off the anime's community tab, with the replies and likes on those cards.
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 	// POST /api/admin/enrichment/:anilistId/flag — set admin_flag to one of
 	// 'needs-review' / 'manually-corrected' / NULL.  CHECK constraint on the

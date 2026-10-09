@@ -38,6 +38,18 @@ WHERE notification.user_id = $1
          OR (block.blocker_id = notification.actor_id
              AND block.blocked_id = notification.user_id)
   )
+  -- The same rule ListNotifications applies to community replies.
+  AND (
+      notification.reply_id IS NULL
+      OR EXISTS (
+          SELECT 1
+          FROM community_replies reply
+          LEFT JOIN anime_threads thread ON thread.id = reply.thread_id
+          WHERE reply.id = notification.reply_id
+            AND reply.deleted_at IS NULL
+            AND (reply.thread_id IS NULL OR thread.deleted_at IS NULL)
+      )
+  )
 `
 
 func (q *Queries) CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error) {
@@ -349,6 +361,15 @@ WHERE n.user_id = $1::uuid
       FROM user_blocks block
       WHERE (block.blocker_id = n.user_id AND block.blocked_id = n.actor_id)
          OR (block.blocker_id = n.actor_id AND block.blocked_id = n.user_id)
+  )
+  -- A community reply notification only while its reply is there and, under
+  -- a thread, the thread too (migration 0046).  Deleting either deletes its
+  -- notifications in the same statement, but a reply posted while its
+  -- thread was being deleted is one that statement never saw; this keeps
+  -- the removed title out of the inbox.  CountUnreadNotifications agrees.
+  AND (
+      n.reply_id IS NULL
+      OR (reply.id IS NOT NULL AND (reply.thread_id IS NULL OR thread.deleted_at IS NULL))
   )
 ORDER BY n.created_at DESC, n.id DESC
 LIMIT $2::integer

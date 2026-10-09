@@ -283,13 +283,32 @@ func TestListNotificationsReadsCommunityReplyContext(t *testing.T) {
 	assert.True(t, item.IsSpoiler)
 	assert.Nil(t, item.Excerpt, "the handler never quotes a spoiler")
 
-	// Soft-deleting the reply is a different write's job (it deletes the
-	// notification too); if one were ever left behind, the list would not
-	// quote the removed text.
+	unread, err := queries.CountUnreadNotifications(ctx, owner)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), unread)
+
+	// Deleting a thread or a reply deletes its notifications in the same
+	// statement, but a reply posted while its thread was being deleted is
+	// one that statement's snapshot never saw, and its notification stays
+	// behind.  Such a leftover is neither listed (no removed title or text
+	// in the inbox) nor counted.
+	_, err = pool.Exec(ctx, `UPDATE anime_threads SET deleted_at = now() WHERE id = $1`, threadID)
+	require.NoError(t, err)
+	rows, err = queries.ListNotifications(ctx, owner, 10)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "nothing from a removed thread")
+	unread, err = queries.CountUnreadNotifications(ctx, owner)
+	require.NoError(t, err)
+	assert.Zero(t, unread)
+
+	_, err = pool.Exec(ctx, `UPDATE anime_threads SET deleted_at = NULL WHERE id = $1`, threadID)
+	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `UPDATE community_replies SET deleted_at = now() WHERE id = $1`, replyID)
 	require.NoError(t, err)
 	rows, err = queries.ListNotifications(ctx, owner, 10)
 	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	assert.Nil(t, rows[0].ReplyBody)
+	assert.Empty(t, rows, "nor a removed reply")
+	unread, err = queries.CountUnreadNotifications(ctx, owner)
+	require.NoError(t, err)
+	assert.Zero(t, unread)
 }
