@@ -93,8 +93,8 @@ test.describe("desktop", () => {
     await expect(titles.nth(0)).toContainText("主角");
     await expect(titles.nth(1)).toContainText("配角");
 
-    // No edit control yet, and nothing about where the data came from.
-    await expect(main).not.toContainText("编辑");
+    // 「编辑」 leads to the edit state; nothing says where the data came from.
+    await expect(main.getByRole("link", { name: "编辑" })).toHaveAttribute("href", `/character/${LEAD}/edit`);
     await expect(main).not.toContainText("资料来自");
   });
 
