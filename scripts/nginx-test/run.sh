@@ -302,6 +302,14 @@ n=$(next_hits)
 code "/_next/image?url=https%3A%2F%2Fanimegoclub.com.example%2Fimg%2Fanilist%2F$P1&w=640&q=85" >/dev/null
 code "/_next/image?url=https%3A%2F%2FanimegoclubXcom%2Fimg%2Fanilist%2F$P1&w=640&q=85" >/dev/null
 ok "$(( $(next_hits) - n ))" 2 "look-alike hosts are not taken for the mirror"
+# An escape other than an encoded slash (%2E is a dot) is never rewritten:
+# only allowlist-shaped paths share the AniList address's entry.
+ESC=${MIRROR}media%2Fanime%2Fcover%2Flarge%2Fbx9001-share%2Epng
+n=$(next_hits)
+code "/_next/image?url=$ESC&w=640&q=85" >/dev/null
+ok "$(( $(next_hits) - n ))" 1 "a mirror address with any other escape in its path is not served from a shared entry"
+keys=$(docker exec "$NGX" find /var/cache/nginx/next_image -type f -exec cat {} + | grep -a '^KEY: ')
+ok "$(printf '%s\n' "$keys" | grep -c -x -F "KEY: url=$ESC&w=640&q=85|avif")" 1 "it keeps the key of its own query string"
 
 # ═══ /img/anilist/ and :8090 /warm/: the allowlist ═════════════════════
 echo "== /img/anilist/ serves each kind of image the site shows"
@@ -458,6 +466,8 @@ ok "$(head_of expires | grep -c 1970)" 0 "and AniList's Expires is not passed on
 ok "$(head_of set-cookie)" "" "AniList's Set-Cookie never reaches the visitor"
 ok "$(head_of strict-transport-security)" "max-age=31536000; includeSubDomains; preload" "only the site's own HSTS policy, not AniList's"
 ok "$(head_of report-to)$(head_of nel)" "" "nor AniList's error-report endpoints"
+ok "$(head_of age)|$(head_of cf-ray)|$(head_of cf-cache-status)|$(grep -c -i '^x-bz-' "$T/head")" "|||0" \
+  "nor its CDN's notes about itself: Age, CF-Ray, CF-Cache-Status, x-bz-*"
 ok "$(head_of x-frame-options)|$(head_of x-content-type-options)" "DENY|nosniff" "the site's security headers are still added"
 
 echo "== AniList's certificate is checked"

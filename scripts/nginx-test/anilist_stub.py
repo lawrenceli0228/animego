@@ -12,7 +12,10 @@ after it gets a 304.  Both carry every header that would stop a naive cache
 from storing them (Cache-Control: no-store, an Expires in the past, Vary: *,
 Set-Cookie, X-Accel-Expires: 0, X-Accel-Redirect) and headers that must never
 reach our visitors (Set-Cookie, Strict-Transport-Security, Report-To, NEL).
-Error answers carry headers that invite a cache to keep them.
+A 200 also carries the CDN's notes about itself, as the real one does: how
+old its own copy is (Age), its request and cache ids, and its storage
+backend's file metadata.  Error answers carry headers that invite a cache to
+keep them.
 
 :9000 is plain HTTP, for the harness.  <path> is the part after
 /file/anilistcdn/.
@@ -50,6 +53,16 @@ STORE_REPELLENT = (
     ("Strict-Transport-Security", "max-age=1"),
     ("Report-To", '{"group":"cf-nel","max_age":1,"endpoints":[{"url":"https://reports.invalid/"}]}'),
     ("NEL", '{"report_to":"cf-nel","max_age":1}'),
+)
+CDN_BOOKKEEPING = (
+    ("Age", "1171085"),
+    ("CF-Ray", "0123456789abcdef-SYD"),
+    ("CF-Cache-Status", "HIT"),
+    ("X-Bz-Upload-Timestamp", "1743617779515"),
+    ("x-bz-content-sha1", "1e43bfb5e49b2c7a40fc0270be87e7a10b853164"),
+    ("x-bz-file-id", "4_ztest_ftest"),
+    ("x-bz-file-name", "media/anime/cover/large/test.png"),
+    ("x-bz-info-src_last_modified_millis", "1743617779240"),
 )
 ERROR_CACHEABLE = (
     ("Cache-Control", "public, max-age=3600"),
@@ -142,7 +155,7 @@ class CDN(BaseHTTPRequestHandler):
             return
         body = f"original {name} v{version}\n".encode()
         headers = (("Content-Type", "image/png"), ("Last-Modified", modified))
-        self.answer(200, body, headers + STORE_REPELLENT)
+        self.answer(200, body, headers + STORE_REPELLENT + CDN_BOOKKEEPING)
 
     def answer_error(self, status: int, retry_after: int) -> None:
         headers: Headers = (("Content-Type", "text/plain"),) + ERROR_CACHEABLE
