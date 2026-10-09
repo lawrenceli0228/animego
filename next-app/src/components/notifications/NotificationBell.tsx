@@ -54,6 +54,10 @@ const COPY: Record<
     followed: (actor: string) => string;
     liked: (actor: string, title: string) => string;
     replied: (actor: string, title: string) => string;
+    // The anime community tab: a reply in a discussion thread (theirs, or
+    // under a reply of theirs) and a reply under their activity.
+    threadReplied: (actor: string, title: string) => string;
+    activityReplied: (actor: string, title: string) => string;
   }
 > = {
   zh: {
@@ -61,6 +65,8 @@ const COPY: Record<
     followed: (actor) => `${actor} 关注了你`,
     liked: (actor, title) => `${actor} 赞了你在《${title}》的评论`,
     replied: (actor, title) => `${actor} 回复了你在《${title}》的评论`,
+    threadReplied: (actor, title) => `${actor} 在《${title}》的讨论帖里回复了你`,
+    activityReplied: (actor, title) => `${actor} 回复了你在《${title}》的动态`,
   },
   en: {
     unknownAnime: "an anime",
@@ -70,12 +76,16 @@ const COPY: Record<
     // the caller fills in.
     liked: (actor, title) => `${actor} liked your comment on ${title}`,
     replied: (actor, title) => `${actor} replied to your comment on ${title}`,
+    threadReplied: (actor, title) => `${actor} replied to you in a ${title} thread`,
+    activityReplied: (actor, title) => `${actor} replied to your activity on ${title}`,
   },
   "zh-Hant": {
     unknownAnime: "番劇",
     followed: (actor) => `${actor} 關注了你`,
     liked: (actor, title) => `${actor} 讚了你在《${title}》的評論`,
     replied: (actor, title) => `${actor} 回覆了你在《${title}》的評論`,
+    threadReplied: (actor, title) => `${actor} 在《${title}》的討論帖裡回覆了你`,
+    activityReplied: (actor, title) => `${actor} 回覆了你在《${title}》的動態`,
   },
 };
 
@@ -90,9 +100,16 @@ function notificationCopy(
   // language prefers. Resolves identically to the old chain for zh and en.
   const title =
     (item.anime ? pickRelatedTitle(item.anime, lang) : "") || copy.unknownAnime;
-  return item.type === "comment_reaction"
-    ? copy.liked(item.actor.username, title)
-    : copy.replied(item.actor.username, title);
+  switch (item.type) {
+    case "comment_reaction":
+      return copy.liked(item.actor.username, title);
+    case "thread_reply":
+      return copy.threadReplied(item.actor.username, title);
+    case "activity_reply":
+      return copy.activityReplied(item.actor.username, title);
+    default:
+      return copy.replied(item.actor.username, title);
+  }
 }
 
 /**
