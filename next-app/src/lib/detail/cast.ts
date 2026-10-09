@@ -4,6 +4,7 @@
 
 import { pickCharacterName, pickVoiceActorName } from "@/lib/formatters";
 import type { Lang } from "@/lib/i18n/lang";
+import { characterPath, personPath } from "@/lib/people/paths";
 import type { CastCharacter, CastRoleCounts, CastVoice, DubLanguage } from "@/lib/types";
 
 /** AniList's character roles, as each language names them. */
@@ -55,8 +56,10 @@ export interface CastCardView {
   roleLabel: string;
   isMain: boolean;
   imageUrl: string | null;
+  /** The character's page; null for a row with no AniList id. */
+  href: string | null;
   /** The main voice in the dub shown; null when the character has none in it. */
-  voice: { name: string; altName: string | null; imageUrl: string | null } | null;
+  voice: { name: string; altName: string | null; imageUrl: string | null; href: string | null } | null;
   /** Under the voice: the dub (日配), or the second voice (童年 · 某某). */
   note: string;
 }
@@ -107,11 +110,13 @@ export function castCardView(c: CastCharacter, dub: DubLanguage, lang: Lang, ind
     roleLabel: characterRoleLabel(c.role, lang),
     isMain: c.role?.trim().toUpperCase() === "MAIN",
     imageUrl: c.imageUrl,
+    href: c.characterId != null ? characterPath(c.characterId) : null,
     voice: main
       ? {
           name: mainName,
           altName: firstOther(mainName, [main.nameNative, main.nameFull, main.nameCn]),
           imageUrl: main.imageUrl,
+          href: main.staffId != null ? personPath(main.staffId) : null,
         }
       : null,
     note,

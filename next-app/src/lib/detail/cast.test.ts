@@ -50,9 +50,11 @@ describe("castCardView", () => {
       name: "种崎敦美",
       altName: "種﨑敦美",
       imageUrl: "https://s4.anilist.co/file/anilistcdn/staff/medium/a.jpg",
+      href: "/person/112215",
     });
     expect(card.note).toBe("日配");
     expect(card.key).toBe("c176754");
+    expect(card.href).toBe("/character/176754");
   });
 
   test("zh without a Chinese name: Japanese first, romaji under it", () => {
@@ -106,6 +108,14 @@ describe("castCardView", () => {
     expect(card.key).toBe("i7");
     expect(card.roleLabel).toBe("客串");
     expect(card.isMain).toBe(false);
+  });
+
+  test("no id, no link: a row written before ids were stored links nowhere", () => {
+    const card = castCardView(frieren({ characterId: null, voices: [voice({ staffId: null })] }), "ja", "zh", 7);
+    expect(card.href).toBeNull();
+    expect(card.voice?.href).toBeNull();
+    // Each half on its own: a voice with an id still links when the character has none.
+    expect(castCardView(frieren({ characterId: null }), "ja", "zh", 7).voice?.href).toBe("/person/112215");
   });
 
   test("the alternate name is never the same string as the name", () => {

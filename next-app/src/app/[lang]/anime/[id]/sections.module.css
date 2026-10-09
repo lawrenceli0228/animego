@@ -653,6 +653,25 @@
 /* 40, matching the reference. Staff are the page's smallest people — a name
  * and a job — and at 44 they read at the same weight as the characters above,
  * which have twice the information. */
+/* The rows' links: each side of a character row, and a staff row, opens
+ * its page. The row's own hover surface says "this is clickable"; the ring
+ * is the one app-wide (components/ui/focusRing.test.ts). */
+a.personSide:focus-visible,
+a.personSideVa:focus-visible,
+a.staffRow:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+  border-radius: 8px;
+}
+
+@media (hover: hover) {
+  a.personSide:hover .personName,
+  a.personSideVa:hover .personName,
+  a.staffRow:hover .staffName {
+    color: var(--sec-tone);
+  }
+}
+
 .staffAvatar {
   width: 40px;
   height: 40px;

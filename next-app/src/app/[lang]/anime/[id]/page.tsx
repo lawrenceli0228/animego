@@ -39,6 +39,7 @@ import {
 import { seasonLabel, statusLabel } from "./_detail/detailLabels";
 import { characterRoleLabel } from "@/lib/detail/cast";
 import { detailTabHref } from "@/lib/detail/tabs";
+import { characterPath, personPath } from "@/lib/people/paths";
 import {
   durationLabel,
   formatLabel,
@@ -752,7 +753,13 @@ function CharactersSection({
             // one from the next is a hairline and the hover surface, both of
             // which live in the module because neither can be an inline style.
             <div key={`${charName}-${i}`} className={x.person}>
-              <div className={x.personSide}>
+              {/* Each side opens its own page — the character's, the voice
+                  actor's — as the design's two links per row. A row written
+                  before AniList ids were stored has no id and stays text. */}
+              <PersonSide
+                href={c.characterId != null ? characterPath(c.characterId) : null}
+                className={x.personSide}
+              >
                 {/* No null guard: FadeImage renders the same box with the
                     same class when src is null, so a character with no
                     portrait keeps the row's shape instead of collapsing it. */}
@@ -767,9 +774,12 @@ function CharactersSection({
                   <div className={x.personRoleMain}>{roleLabel}</div>
                   <div className={x.personName}>{charName}</div>
                 </div>
-              </div>
+              </PersonSide>
               {va && (
-                <div className={x.personSideVa}>
+                <PersonSide
+                  href={c.voiceActorId != null ? personPath(c.voiceActorId) : null}
+                  className={x.personSideVa}
+                >
                   <FadeImage
                     src={c.voiceActorImageUrl}
                     alt={va}
@@ -781,7 +791,7 @@ function CharactersSection({
                     <div className={x.personRole}>{jaLabel}</div>
                     <div className={x.personName}>{va}</div>
                   </div>
-                </div>
+                </PersonSide>
               )}
             </div>
           );
@@ -794,6 +804,17 @@ function CharactersSection({
         {allLabel}
       </Link>
     </section>
+  );
+}
+
+/** A link to a person's or character's page, or a plain box when there is none. */
+function PersonSide({ href, className, children }: { href: string | null; className: string; children: ReactNode }) {
+  return href ? (
+    <Link href={href} className={className} prefetch={false}>
+      {children}
+    </Link>
+  ) : (
+    <div className={className}>{children}</div>
   );
 }
 
@@ -838,7 +859,11 @@ function StaffSectionView({
           // en prefers English. Falls back across both before "—".
           const staffName = pickStaffName(member, lang) || "—";
           return (
-            <div key={`${staffName}-${i}`} className={x.staffRow}>
+            <PersonSide
+              key={`${staffName}-${i}`}
+              href={member.staffId != null ? personPath(member.staffId) : null}
+              className={x.staffRow}
+            >
               <FadeImage
                 src={member.imageUrl}
                 alt={staffName}
@@ -860,7 +885,7 @@ function StaffSectionView({
                 )}
                 <div className={x.staffName}>{staffName}</div>
               </div>
-            </div>
+            </PersonSide>
           );
         })}
       </div>

@@ -5,9 +5,9 @@
  * A card is two halves facing each other — the character's portrait at the
  * left edge, the voice actor's at the right, the names meeting in the middle
  * — the same pairing the overview's rows make, given a card because here the
- * list is the whole page. Cards are not links (the character and person
- * pages do not exist yet), so they have no hover state either: a surface
- * that lights up under the pointer is a promise of a click.
+ * list is the whole page. Each half is a link — the character's page on the
+ * left, the voice actor's on the right, as the design's `.cc` — and the card
+ * lights up under the pointer, the design's `.cc:hover`.
  */
 
 .root {
@@ -169,6 +169,7 @@
 }
 
 .card {
+  position: relative;
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr) 64px;
   height: 96px;
@@ -238,6 +239,71 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── The two links ─────────────────────────────────────────────────────
+ *
+ * Each name is a link whose ::after covers its half of the card, so the
+ * whole half is the target while the link's text stays the name a screen
+ * reader reads (an empty overlay link would need a label, and the name
+ * would be read twice). The ring is drawn on the half, not on the text:
+ * the text's own outline is made transparent, which still shows in
+ * forced-colors mode. A card with no voice gives the character all of it.
+ */
+.charLink,
+.vaLink {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.charLink:focus,
+.vaLink:focus {
+  outline: 2px solid transparent;
+}
+
+.charLink::after,
+.vaLink::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.charLink::after {
+  left: 0;
+  right: 50%;
+  border-radius: 10px 0 0 10px;
+}
+
+.card:not(:has(.vaLink)) .charLink::after {
+  right: 0;
+  border-radius: 10px;
+}
+
+.vaLink::after {
+  left: 50%;
+  right: 0;
+  z-index: 1;
+  border-radius: 0 10px 10px 0;
+}
+
+.charLink:focus-visible::after,
+.vaLink:focus-visible::after {
+  outline: 2px solid transparent;
+  box-shadow: inset 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (hover: hover) {
+  .card:has(.charLink, .vaLink):hover {
+    background: var(--detail-surface-raised);
+    border-color: var(--detail-line-strong);
+  }
+
+  .charLink:hover,
+  .vaLink:hover {
+    color: var(--poster-tone, var(--accent));
+  }
 }
 
 /* The other name: Japanese under a Chinese one, romaji under a Japanese one. */
@@ -404,9 +470,24 @@
   }
 
   .sideVa {
+    position: relative;
     max-width: 128px;
     padding: 6px 0;
     justify-content: center;
+  }
+
+  /* A row rather than a card: the character's link takes the whole row and
+   * the voice actor's only the name on the right, above it — the phone
+   * board's row, which opens the character, with the voice name opening
+   * the person. */
+  .charLink::after {
+    right: 0;
+    border-radius: 8px;
+  }
+
+  .vaLink::after {
+    left: 0;
+    border-radius: 8px;
   }
 
   /* The character's name takes the first line; the role and the other name

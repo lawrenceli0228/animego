@@ -9,11 +9,13 @@
 // the search filter that in place, with no request.
 //
 // In the 全部 view each department shows its first few and 「展开全部 N 位」;
-// choosing a department, or searching, shows everyone who matches. No row
-// links anywhere: the person pages do not exist yet.
+// choosing a department, or searching, shows everyone who matches. Every row
+// and every name opens the person's page, as the design's rows do; a credit
+// written before AniList ids were stored has no page to open and stays text.
 
 import { useDeferredValue, useMemo, useRef, useState } from "react";
 import FadeImage from "@/components/ui/FadeImage";
+import Link from "@/components/ui/LocaleLink";
 import { staffRoleLabel } from "@/lib/contentLabels";
 import {
   DEPARTMENT_LABEL,
@@ -31,6 +33,7 @@ import { pickStaffName } from "@/lib/formatters";
 import { fillTemplate } from "@/lib/home/time";
 import type { Lang } from "@/lib/i18n/lang";
 import { useLang } from "@/lib/lang-client";
+import { personPath } from "@/lib/people/paths";
 import type { StaffCredit } from "@/lib/types";
 // The section head the overview's sections use (rule, title, count, and
 // the 「全部」 link style), so a department reads as one of them.
@@ -51,8 +54,8 @@ function staffNames(p: StaffPerson, lang: Lang): { name: string; alt: string | n
 function PersonRow({ person, lang }: { person: StaffPerson; lang: Lang }) {
   const { name, alt } = staffNames(person, lang);
   const roles = person.roles.map((r) => staffRoleLabel(r, lang)).join(" · ");
-  return (
-    <li className={s.person}>
+  const body = (
+    <>
       {/* alt="": the name is right beside it, and would be read twice. */}
       {person.imageUrl ? (
         <FadeImage src={person.imageUrl} alt="" width={AVATAR} height={AVATAR} className={s.avatar} />
@@ -68,6 +71,17 @@ function PersonRow({ person, lang }: { person: StaffPerson; lang: Lang }) {
         </div>
         {roles ? <div className={s.personRoles}>{roles}</div> : null}
       </div>
+    </>
+  );
+  return (
+    <li className={s.personItem}>
+      {person.staffId != null ? (
+        <Link href={personPath(person.staffId)} className={s.person} prefetch={false}>
+          {body}
+        </Link>
+      ) : (
+        <div className={s.person}>{body}</div>
+      )}
     </li>
   );
 }
@@ -217,10 +231,28 @@ export default function StaffBrowser({ credits }: { credits: StaffCredit[] }) {
                         // The roles are a tooltip for a mouse and text for a
                         // screen reader; a touch screen has neither, and the
                         // department heading says most of it.
-                        return (
-                          <li key={p.key} className={s.nameChip} title={roles || undefined}>
+                        const text = (
+                          <>
                             {staffNames(p, lang).name}
                             {roles ? <span className={s.srOnly}> {roles}</span> : null}
+                          </>
+                        );
+                        return (
+                          <li key={p.key}>
+                            {p.staffId != null ? (
+                              <Link
+                                href={personPath(p.staffId)}
+                                className={s.nameChip}
+                                title={roles || undefined}
+                                prefetch={false}
+                              >
+                                {text}
+                              </Link>
+                            ) : (
+                              <span className={s.nameChip} title={roles || undefined}>
+                                {text}
+                              </span>
+                            )}
                           </li>
                         );
                       })}

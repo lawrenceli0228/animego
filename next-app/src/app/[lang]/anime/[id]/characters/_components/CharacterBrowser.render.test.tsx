@@ -103,9 +103,27 @@ describe("CharacterBrowser — the first page", () => {
     expect(buttons(html)).toContain("再显示 48 位");
   });
 
-  test("no card links anywhere: the character and person pages do not exist yet", () => {
+  test("a card is two links, named by the names on it: the character's page and the voice's", () => {
     const grid = html.slice(html.indexOf("<ul"), html.indexOf("</ul>"));
+    const links = [...grid.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/g)].map((m) => [m[1], m[2]]);
+    expect(links).toEqual([
+      ["/character/1", "芙莉莲"],
+      ["/person/11", "种崎敦美"],
+      ["/character/2", "キャラ2"],
+      ["/person/21", "小林千晃"],
+      // No voice in this dub: the character's link alone.
+      ["/character/3", "キャラ3"],
+    ]);
+  });
+
+  test("a row with no AniList id links nowhere", () => {
+    const noIds = render({
+      ...FIRST_PAGE,
+      data: [character(9, "MAIN", [voice(91, "某声优", { staffId: null })], { characterId: null })],
+    });
+    const grid = noIds.slice(noIds.indexOf("<ul"), noIds.indexOf("</ul>"));
     expect(grid).not.toContain("<a ");
+    expect(cards(noIds)[0]).toContain("キャラ9");
   });
 
   test("a screen reader hears the count, and a portrait is not read as the name beside it", () => {

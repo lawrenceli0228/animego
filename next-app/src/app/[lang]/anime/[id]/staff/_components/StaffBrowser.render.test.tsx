@@ -101,12 +101,30 @@ describe("StaffBrowser — the first paint", () => {
     expect(html).not.toMatch(/<img[^>]*alt="[^"]+"/);
   });
 
-  test("no row links anywhere: the person pages do not exist yet", () => {
-    expect(html).not.toContain("<a ");
+  test("every row and every name opens the person's page", () => {
+    const hrefs = (section: string) => [...section.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map((m) => m[1]);
+    // One link per person per department, whatever their roles there.
+    expect(hrefs(department(html, "监督与演出")).slice(0, 2)).toEqual(["/person/1", "/person/100"]);
+    expect(hrefs(department(html, "原作"))).toEqual(["/person/2"]);
+    // Names only: each name is the link, with its role still read out.
+    const keyAnimation = department(html, "原画与动画");
+    expect(hrefs(keyAnimation)).toHaveLength(36);
+    expect(hrefs(keyAnimation)[0]).toBe("/person/200");
+    expect(keyAnimation).toMatch(/<a\b[^>]*title="原画"[^>]*>原画1/);
   });
 });
 
 describe("StaffBrowser — the edges", () => {
+  test("a credit with no AniList id is text, in a row or as a name", () => {
+    const html = render([
+      credit(null, "Director", "某监督", "Some Director"),
+      ...Array.from({ length: 40 }, (_, i) => credit(null, "Key Animation", `原画${i + 1}`, `Animator ${i + 1}`)),
+    ]);
+    expect(html).not.toContain("<a ");
+    expect(items(department(html, "监督与演出"))[0]).toContain("某监督");
+    expect(items(department(html, "原画与动画"))[0]).toBe("原画1 原画");
+  });
+
   test("no staff at all says so, with no chips and no search", () => {
     const html = render([]);
     expect(html).toContain("这部作品还没有制作人员资料");

@@ -4,8 +4,8 @@
  * the anime's tone. Each department's head is the overview's section head
  * (sections.module.css), so the tab reads as more of the same page.
  *
- * Rows are not links — the person pages do not exist yet — and so have no
- * hover state.
+ * Every row and every name is a link to the person's page, with the
+ * design's `.prow:hover`; a credit with no AniList id is text, with none.
  */
 
 .root {
@@ -163,7 +163,13 @@
   gap: 12px;
 }
 
+.personItem {
+  display: flex;
+  min-width: 0;
+}
+
 .person {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -172,6 +178,23 @@
   border-radius: 10px;
   border: 1px solid var(--detail-line);
   background: var(--detail-surface);
+  color: inherit;
+  text-decoration: none;
+}
+
+a.person:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (hover: hover) {
+  a.person:hover {
+    background: var(--detail-surface-raised);
+  }
+
+  a.person:hover .personName {
+    color: var(--poster-tone, var(--accent));
+  }
 }
 
 .avatar {
@@ -255,6 +278,7 @@
 }
 
 .nameChip {
+  display: block;
   padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid var(--detail-line);
@@ -262,6 +286,19 @@
   font-family: var(--font-jp);
   font-size: 13px;
   color: var(--detail-text-2);
+  text-decoration: none;
+}
+
+a.nameChip:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (hover: hover) {
+  a.nameChip:hover {
+    color: var(--text);
+    background: var(--detail-surface-raised);
+  }
 }
 
 .empty {

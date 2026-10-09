@@ -10,11 +10,14 @@
 // the filters and the search are server-side, so a 400-character title
 // never ships its whole cast to the page.
 //
-// No card links anywhere: the character and person pages do not exist yet,
-// and a link that 404s is worse than none.
+// A card is two links, as the design draws it: the left half opens the
+// character's page and the right half the voice actor's. Each name is the
+// link, stretched over its half (CharacterBrowser.module.css), so what a
+// screen reader announces is the name on the card.
 
 import { useCallback, useEffect, useRef, useState, type CompositionEvent } from "react";
 import FadeImage from "@/components/ui/FadeImage";
+import Link from "@/components/ui/LocaleLink";
 import { apiGetEnvelope } from "@/lib/api";
 import {
   CAST_FIRST_PAGE,
@@ -303,7 +306,13 @@ export default function CharacterBrowser({
                 />
                 <div className={s.side}>
                   <div className={s.names}>
-                    <div className={s.name}>{card.name}</div>
+                    {card.href ? (
+                      <Link href={card.href} className={`${s.name} ${s.charLink}`} prefetch={false}>
+                        {card.name}
+                      </Link>
+                    ) : (
+                      <div className={s.name}>{card.name}</div>
+                    )}
                     {card.altName ? <div className={s.alt}>{card.altName}</div> : null}
                   </div>
                   <div className={s.role} data-main={card.isMain ? "true" : undefined}>
@@ -314,7 +323,13 @@ export default function CharacterBrowser({
                   <>
                     <div className={s.sideVa}>
                       <div className={s.names}>
-                        <div className={s.name}>{card.voice.name}</div>
+                        {card.voice.href ? (
+                          <Link href={card.voice.href} className={`${s.name} ${s.vaLink}`} prefetch={false}>
+                            {card.voice.name}
+                          </Link>
+                        ) : (
+                          <div className={s.name}>{card.voice.name}</div>
+                        )}
                         {card.voice.altName ? <div className={s.alt}>{card.voice.altName}</div> : null}
                       </div>
                       <div className={s.note}>{card.note}</div>
