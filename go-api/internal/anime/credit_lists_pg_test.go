@@ -127,10 +127,43 @@ func TestCreditLists_ReadEverythingTheTablesHold_PG(t *testing.T) {
 		assert.Equal(t, "Storyboard (eps 1, 2)", *body.Data[2].Role)
 	})
 
-	t.Run("credit counts", func(t *testing.T) {
+	t.Run("credit counts agree with the lists", func(t *testing.T) {
+		// Counted in SQL, listed in Go: the two must name the same numbers,
+		// legacy row and twice-credited director included.
 		rec := getCredits(t, h, "/api/anime/154587/credit-counts")
 		require.Equal(t, http.StatusOK, rec.Code)
 		assert.Equal(t, `{"data":{"characters":31,"staff":2}}`, rec.Body.String())
+
+		// A pre-0037 staff row has no id: it is one person per name, as the
+		// staff list counts it.
+		exec(`INSERT INTO anime_staff (anime_id, display_order, name_en, name_ja, role) VALUES
+			(154587, 10, 'No Id', '無番号', 'Key Animation'),
+			(154587, 11, 'No Id', '無番号', 'In-Between Animation')`)
+		svc2, err := NewCreditListsService(q)
+		require.NoError(t, err)
+		t.Cleanup(svc2.Close)
+		h2 := creditListsRouter(t, svc2)
+		assert.Equal(t, `{"data":{"characters":31,"staff":3}}`, getCredits(t, h2, "/api/anime/154587/credit-counts").Body.String())
+		var staff staffResponse
+		require.NoError(t, json.Unmarshal(getCredits(t, h2, "/api/anime/154587/staff").Body.Bytes(), &staff))
+		assert.Equal(t, 3, staff.People)
+		assert.Equal(t, 5, staff.Total)
+	})
+
+	t.Run("a title only a listing wrote is answered, never kept", func(t *testing.T) {
+		// seasonal / search / warm_season write the main row and nothing
+		// else; detail_fetched_at stays NULL until /api/anime/:id fills the
+		// credit tables.  Its empty lists are "not yet".
+		exec(`INSERT INTO anime_cache (anilist_id, title_romaji) VALUES (154588, 'Listing Only')`)
+		for _, path := range []string{"characters", "staff", "credit-counts"} {
+			rec := getCredits(t, h, "/api/anime/154588/"+path)
+			require.Equal(t, http.StatusOK, rec.Code, path)
+			assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"), path)
+		}
+		assert.Equal(t, `{"data":{"characters":0,"staff":0}}`, getCredits(t, h, "/api/anime/154588/credit-counts").Body.String())
+
+		// The fetched title still carries the public policy.
+		assert.Equal(t, creditListsCacheControl, getCredits(t, h, "/api/anime/154587/characters").Header().Get("Cache-Control"))
 	})
 
 	t.Run("an id the catalogue does not hold is a 404", func(t *testing.T) {

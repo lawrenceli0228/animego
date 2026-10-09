@@ -22,6 +22,14 @@
 // the understanding that a cache stands behind them -- here a reader
 // typing into the search box, or anyone else varying the query string,
 // re-reads the copy rather than the tables.
+//
+// Two kinds of answer are not kept, or not for long.  A title a listing
+// wrote and no detail fetch has filled (detail_fetched_at NULL) has empty
+// credit tables because nobody has asked yet, and the next /api/anime/:id
+// fills them: its lists are never cached, and the response says no-store.
+// An empty list of a fetched title is kept for emptyCreditListTTL only --
+// AniList may list nobody, but the detail refresh also stamps the row
+// before it writes the credits, and an answer read in between is empty.
 package anime
 
 import (
@@ -57,6 +65,10 @@ const (
 	// tables is far shorter; a longer query is a mistake or a probe.
 	castMaxQueryRunes = 64
 
+	// emptyCreditListTTL is how long an empty list of a fetched title is
+	// served from memory (see the package comment).
+	emptyCreditListTTL = 30 * time.Second
+
 	// creditListsTTL is how long a title's lists are served from memory.
 	// The tables change when the detail refresh (at most daily) or the
 	// credits sweep (at most monthly) writes them, and the pages that read
@@ -74,12 +86,21 @@ const (
 // creditListsCacheControl is the public cache policy of the three
 // endpoints: the one /api/anime/episodes uses for the same kind of
 // answer, a catalogue fact that moves at the pace of a background sweep.
-// Set on 200s only.
+// Set on 200s only, and only for a title whose detail has been fetched;
+// the others answer no-store (see the package comment).
 const creditListsCacheControl = episodeCountsCacheControl
+
+func creditListsCachePolicy(settled bool) string {
+	if settled {
+		return creditListsCacheControl
+	}
+	return "no-store"
+}
 
 // CreditListsDB is the sqlc subset the three endpoints read.
 type CreditListsDB interface {
-	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (*string, error)
+	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (dbgen.GetAnimeCreditsHeadRow, error)
+	GetAnimeCreditCounts(ctx context.Context, anilistID int32) (dbgen.GetAnimeCreditCountsRow, error)
 	ListAnimeCastCharacters(ctx context.Context, animeID int32) ([]dbgen.ListAnimeCastCharactersRow, error)
 	ListAnimeCastVoices(ctx context.Context, animeID int32) ([]dbgen.ListAnimeCastVoicesRow, error)
 	ListAnimeStaffCredits(ctx context.Context, animeID int32) ([]dbgen.ListAnimeStaffCreditsRow, error)
@@ -92,6 +113,8 @@ type CreditListsService struct {
 	db    CreditListsDB
 	cast  *cache.Cache[*castList]
 	staff *cache.Cache[*staffList]
+	// emptyTTL is emptyCreditListTTL; a field so a test can shorten it.
+	emptyTTL time.Duration
 	// loads collapses concurrent cold reads of one title's list into one,
 	// the way DetailService.coldFetch does for AniList.
 	loads     singleflight.Group
@@ -119,7 +142,7 @@ func NewCreditListsService(db CreditListsDB) (*CreditListsService, error) {
 		castCache.Close()
 		return nil, fmt.Errorf("anime/credit-lists: build staff cache: %w", err)
 	}
-	return &CreditListsService{db: db, cast: castCache, staff: staffCache}, nil
+	return &CreditListsService{db: db, cast: castCache, staff: staffCache, emptyTTL: emptyCreditListTTL}, nil
 }
 
 // Close releases the caches.  Safe to call more than once.
@@ -195,13 +218,13 @@ func (s *CreditListsService) Characters() http.HandlerFunc {
 			return
 		}
 
-		list, err := s.loadCast(ctx, id)
+		list, settled, err := s.loadCast(ctx, id)
 		if err != nil {
 			writeCreditListsError(w, err)
 			return
 		}
 		page := list.page(q)
-		w.Header().Set("Cache-Control", creditListsCacheControl)
+		w.Header().Set("Cache-Control", creditListsCachePolicy(settled))
 		writeMultiKeyEnvelope(w, http.StatusOK, charactersResponse{
 			Data:     page.Data,
 			Total:    page.Total,
@@ -226,12 +249,12 @@ func (s *CreditListsService) Staff() http.HandlerFunc {
 		if !ok {
 			return
 		}
-		list, err := s.loadStaff(ctx, id)
+		list, settled, err := s.loadStaff(ctx, id)
 		if err != nil {
 			writeCreditListsError(w, err)
 			return
 		}
-		w.Header().Set("Cache-Control", creditListsCacheControl)
+		w.Header().Set("Cache-Control", creditListsCachePolicy(settled))
 		writeMultiKeyEnvelope(w, http.StatusOK, staffResponse{
 			Data:   list.credits,
 			Total:  len(list.credits),
@@ -245,10 +268,12 @@ func (s *CreditListsService) Staff() http.HandlerFunc {
 //	{"data":{"characters":100,"staff":343}}
 //
 // Every detail tab shows both numbers in its tab bar, and the overview
-// shows them in its 「全部 N 位」 links, so each page asks once rather than
-// loading two lists for their lengths.  The numbers are read off the same
-// cached lists the tabs page through, so a tab never disagrees with the
-// count that led to it.
+// shows them in its 「全部 N 位」 links.  One aggregate query
+// (GetAnimeCreditCounts), not the lists: the overview is the page crawlers
+// walk, and taking the numbers off the cached lists would read every
+// title's whole cast and staff for two integers and churn the list caches
+// the tabs rely on.  The query counts by the identities the lists use, so
+// a tab and the number that led to it agree (the _PG test pins it).
 func (s *CreditListsService) Counts() http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), queryTimeout)
@@ -258,18 +283,17 @@ func (s *CreditListsService) Counts() http.HandlerFunc {
 		if !ok {
 			return
 		}
-		cast, err := s.loadCast(ctx, id)
-		if err != nil {
-			writeCreditListsError(w, err)
+		row, err := s.db.GetAnimeCreditCounts(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Fail(w, errAnimeNotFound())
 			return
 		}
-		staff, err := s.loadStaff(ctx, id)
 		if err != nil {
-			writeCreditListsError(w, err)
+			httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
 			return
 		}
-		w.Header().Set("Cache-Control", creditListsCacheControl)
-		httpx.Data(w, http.StatusOK, creditCounts{Characters: len(cast.entries), Staff: staff.people})
+		w.Header().Set("Cache-Control", creditListsCachePolicy(row.DetailFetched))
+		httpx.Data(w, http.StatusOK, creditCounts{Characters: int(row.Characters), Staff: int(row.Staff)})
 	}
 }
 
@@ -324,14 +348,23 @@ func parseCastQuery(qs map[string][]string) (castQuery, error) {
 	return q, nil
 }
 
-// loadCast returns the title's cast from memory, or reads it.
-func (s *CreditListsService) loadCast(ctx context.Context, id int32) (*castList, error) {
+// loaded is what a load hands back through singleflight: the list, and
+// whether the title's detail had been fetched when it was read -- whether
+// the list is the title's or merely "not yet" (see the package comment).
+type loaded[V any] struct {
+	list    V
+	settled bool
+}
+
+// loadCast returns the title's cast from memory, or reads it.  settled is
+// false for a title whose detail has never been fetched.
+func (s *CreditListsService) loadCast(ctx context.Context, id int32) (*castList, bool, error) {
 	key := strconv.FormatInt(int64(id), 10)
 	if hit, ok := s.cast.Get(key); ok && hit != nil {
-		return hit, nil
+		return hit, true, nil
 	}
 	v, err := s.shared(ctx, "cast:"+key, func(lctx context.Context) (any, error) {
-		country, err := s.head(lctx, id)
+		head, err := s.head(lctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -343,26 +376,29 @@ func (s *CreditListsService) loadCast(ctx context.Context, id int32) (*castList,
 		if err != nil {
 			return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 		}
-		list := buildCastList(country, chars, voices)
-		if !s.cast.Set(key, list) {
-			slog.Debug("anime/credit-lists: cast cache set rejected", "anilistId", id)
+		list := buildCastList(head.CountryOfOrigin, chars, voices)
+		if head.DetailFetched {
+			remember(s.cast, key, list, len(list.entries) == 0, s.emptyTTL)
 		}
-		return list, nil
+		return loaded[*castList]{list: list, settled: head.DetailFetched}, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return v.(*castList), nil
+	got := v.(loaded[*castList])
+	return got.list, got.settled, nil
 }
 
-// loadStaff returns the title's staff from memory, or reads it.
-func (s *CreditListsService) loadStaff(ctx context.Context, id int32) (*staffList, error) {
+// loadStaff returns the title's staff from memory, or reads it; settled
+// as for loadCast.
+func (s *CreditListsService) loadStaff(ctx context.Context, id int32) (*staffList, bool, error) {
 	key := strconv.FormatInt(int64(id), 10)
 	if hit, ok := s.staff.Get(key); ok && hit != nil {
-		return hit, nil
+		return hit, true, nil
 	}
 	v, err := s.shared(ctx, "staff:"+key, func(lctx context.Context) (any, error) {
-		if _, err := s.head(lctx, id); err != nil {
+		head, err := s.head(lctx, id)
+		if err != nil {
 			return nil, err
 		}
 		rows, err := s.db.ListAnimeStaffCredits(lctx, id)
@@ -370,30 +406,45 @@ func (s *CreditListsService) loadStaff(ctx context.Context, id int32) (*staffLis
 			return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 		}
 		list := buildStaffList(rows)
-		if !s.staff.Set(key, list) {
-			slog.Debug("anime/credit-lists: staff cache set rejected", "anilistId", id)
+		if head.DetailFetched {
+			remember(s.staff, key, list, len(list.credits) == 0, s.emptyTTL)
 		}
-		return list, nil
+		return loaded[*staffList]{list: list, settled: head.DetailFetched}, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return v.(*staffList), nil
+	got := v.(loaded[*staffList])
+	return got.list, got.settled, nil
+}
+
+// remember caches a fetched title's list: an empty one for emptyTTL, any
+// other for the cache's default.
+func remember[V any](c *cache.Cache[V], key string, list V, empty bool, emptyTTL time.Duration) {
+	ok := false
+	if empty {
+		ok = c.SetWithTTL(key, list, emptyTTL)
+	} else {
+		ok = c.Set(key, list)
+	}
+	if !ok {
+		slog.Debug("anime/credit-lists: cache set rejected", "key", key)
+	}
 }
 
 // head is the existence check every load starts with: the title's row,
 // or the 404 /api/anime/:id gives for an id we do not hold.  Only a hit
 // is ever cached (inside the list it was read for), so a title that
 // appears later is listed as soon as it does.
-func (s *CreditListsService) head(ctx context.Context, id int32) (*string, error) {
-	country, err := s.db.GetAnimeCreditsHead(ctx, id)
+func (s *CreditListsService) head(ctx context.Context, id int32) (dbgen.GetAnimeCreditsHeadRow, error) {
+	head, err := s.db.GetAnimeCreditsHead(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, errAnimeNotFound()
+		return head, errAnimeNotFound()
 	}
 	if err != nil {
-		return nil, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
+		return head, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed")
 	}
-	return country, nil
+	return head, nil
 }
 
 // shared runs load once for every concurrent caller of the same key.
@@ -420,14 +471,21 @@ func (s *CreditListsService) shared(ctx context.Context, key string, load func(c
 	case res := <-ch:
 		return res.Val, res.Err
 	case <-ctx.Done():
-		return nil, httpx.WrapError(ctx.Err(), http.StatusInternalServerError, httpx.CodeServerError, "query failed")
+		return nil, ctx.Err()
 	}
 }
 
+// writeCreditListsError answers a failed load.  A caller that went away
+// -- a reader typing on past the request, a tab closed -- is answered
+// with nothing: nobody is there to read it, and a 500 for it would be a
+// server error that never happened.
 func writeCreditListsError(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	if apiErr, ok := httpx.IsAPIError(err); ok {
 		httpx.Fail(w, apiErr)
 		return
 	}
-	httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "internal error"))
+	httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "query failed"))
 }

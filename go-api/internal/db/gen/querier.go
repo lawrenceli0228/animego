@@ -658,6 +658,16 @@ type Querier interface {
 	// that page at display_order 0..24 (credits.WriteCast), so these are the
 	// 25 AniList lists first.
 	GetAnimeCharactersByID(ctx context.Context, animeID int32) ([]GetAnimeCharactersByIDRow, error)
+	// The two numbers the tab bar shows, without reading the lists: every
+	// overview render asks for them.  ErrNoRows for a title we do not hold;
+	// detail_fetched as in GetAnimeCreditsHead.
+	//
+	// Characters are rows, a row with no AniList id included.  Staff are
+	// people, not credits: a person is their AniList id, or for a row written
+	// before 0037 their names -- the identity buildStaffList counts by
+	// (chr(31) is its separator too), so the staff tab and the number that
+	// led to it agree.
+	GetAnimeCreditCounts(ctx context.Context, anilistID int32) (GetAnimeCreditCountsRow, error)
 	// credit_lists.sql — the detail page's 角色 and 制作 tabs: every character,
 	// voice and staff credit a title stores, for /api/anime/:id/characters,
 	// /api/anime/:id/staff and /api/anime/:id/credit-counts
@@ -672,10 +682,14 @@ type Querier interface {
 	// into the search box re-reads a cached copy rather than the tables.  The
 	// LIMITs are a ceiling on a table no writer is meant to fill past that,
 	// not a page size.
-	// The title's existence and the one fact the cast needs from it: the
-	// country of origin picks the default dub language, the same way
-	// credits.PrimaryLanguage picks the voice the character rows carry.
-	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (*string, error)
+	// The title's existence and two facts about it.  The country of origin
+	// picks the default dub language, the same way credits.PrimaryLanguage
+	// picks the voice the character rows carry.  detail_fetched says whether
+	// the credit tables have been filled at all: a row a listing wrote
+	// (seasonal, search, warm_season) has none of them until the next
+	// /api/anime/:id fetches its detail, so its empty lists are "not yet",
+	// not "nobody" -- the same distinction isStale draws (detail.go).
+	GetAnimeCreditsHead(ctx context.Context, anilistID int32) (GetAnimeCreditsHeadRow, error)
 	// Authoritative total-episode count for one title, used by
 	// PATCH /api/subscriptions/:anilistId as the upper bound on currentEpisode.
 	//
@@ -1267,7 +1281,9 @@ type Querier interface {
 	// Every voice the title stores (0042), each character's in its stored
 	// order: display_order 0 is the voice its character row carries, the
 	// title's own language comes next, then Japanese, Chinese and Korean.
-	// name_cn is Bangumi's, by the person's AniList id.
+	// name_cn is Bangumi's, by the person's AniList id.  staff_id breaks a
+	// tie, which the detail refresh and the credits sweep upserting one title
+	// at once can leave, so the first voice is always the same one.
 	ListAnimeCastVoices(ctx context.Context, animeID int32) ([]ListAnimeCastVoicesRow, error)
 	// Rows the facts sweep (queue/anime_facts.go) should ask AniList about.
 	//

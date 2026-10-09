@@ -5,6 +5,7 @@
 package anime
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -162,7 +163,9 @@ func (e *castEntry) matches(lang castLang, needle string) bool {
 
 // castList is a whole title's cast, built once per load and shared by
 // every request that reads it until it is evicted.  Nothing mutates it
-// after buildCastList returns.
+// after buildCastList returns, and its slices are clipped to their length,
+// so a caller that appends to one copies it rather than writing into the
+// cached array.
 type castList struct {
 	entries     []castEntry
 	langCounts  []castLangCount
@@ -194,15 +197,25 @@ type castPage struct {
 // buildCastList puts a title's character and voice rows together.
 //
 // A character's voices come from anime_character_voices.  When that table
-// names none for the character -- every row written before 0042, and a
-// row with no AniList id, which the table cannot key -- the voice the
-// character row itself carries stands in, filed as Japanese: until 0042
-// the row stored voiceActors(language: JAPANESE)[0], and since 0042 a row
-// with an id always has its voices in the table.
+// names none for the character, the voice the character row itself
+// carries stands in, and which language it is depends on who wrote the
+// row:
+//
+//   - a title with nothing in the voice table was written before 0042,
+//     whose code stored voiceActors(language: JAPANESE)[0]: Japanese;
+//   - a title with voices in the table was written since 0042, whose rows
+//     carry the voice credits.PrimaryLanguage chose.  A character of it
+//     with none in the table is a row with no AniList id (the table cannot
+//     key it) or a refresh caught between pruning a character's voices and
+//     writing them again: the title's own language.
 func buildCastList(country *string, chars []dbgen.ListAnimeCastCharactersRow, voices []dbgen.ListAnimeCastVoicesRow) *castList {
 	byCharacter := make(map[int32][]dbgen.ListAnimeCastVoicesRow, len(chars))
 	for _, v := range voices {
 		byCharacter[v.CharacterID] = append(byCharacter[v.CharacterID], v)
+	}
+	standIn := castLangJa
+	if len(voices) > 0 {
+		standIn = primaryCastLang(country)
 	}
 
 	entries := make([]castEntry, 0, len(chars))
@@ -211,7 +224,7 @@ func buildCastList(country *string, chars []dbgen.ListAnimeCastCharactersRow, vo
 		if c.CharacterID != nil {
 			rows = byCharacter[*c.CharacterID]
 		}
-		byLang := voicesByLanguage(c, rows)
+		byLang := voicesByLanguage(c, rows, standIn)
 		voiceNames := make(map[castLang]string, len(byLang))
 		for lang, vs := range byLang {
 			parts := make([]*string, 0, 3*len(vs))
@@ -250,7 +263,7 @@ func buildCastList(country *string, chars []dbgen.ListAnimeCastCharactersRow, vo
 	}
 	return &castList{
 		entries:     entries,
-		langCounts:  langCounts,
+		langCounts:  slices.Clip(langCounts),
 		defaultLang: defaultCastLang(primaryCastLang(country), langCounts),
 	}
 }
@@ -258,14 +271,16 @@ func buildCastList(country *string, chars []dbgen.ListAnimeCastCharactersRow, vo
 // voicesByLanguage files one character's voices under the three languages,
 // keeping the stored order within each.  Voices in any other language
 // (the store keeps one only as a character's primary of last resort) are
-// left out: the switch has no button for them.
-func voicesByLanguage(c dbgen.ListAnimeCastCharactersRow, rows []dbgen.ListAnimeCastVoicesRow) map[castLang][]castVoice {
+// left out: the switch has no button for them.  standIn is the language
+// the row's own voice is filed under when the table has none for it (see
+// buildCastList).
+func voicesByLanguage(c dbgen.ListAnimeCastCharactersRow, rows []dbgen.ListAnimeCastVoicesRow, standIn castLang) map[castLang][]castVoice {
 	out := make(map[castLang][]castVoice, len(castLangs))
 	if len(rows) == 0 {
 		if c.VoiceActorEn == nil && c.VoiceActorJa == nil {
 			return out
 		}
-		out[castLangJa] = []castVoice{{
+		out[standIn] = []castVoice{{
 			StaffID:    c.VoiceActorID,
 			NameFull:   c.VoiceActorEn,
 			NameNative: c.VoiceActorJa,
@@ -295,6 +310,9 @@ func voicesByLanguage(c dbgen.ListAnimeCastCharactersRow, rows []dbgen.ListAnime
 			RoleNotes:  v.RoleNotes,
 			DubGroup:   v.DubGroup,
 		})
+	}
+	for lang, vs := range out {
+		out[lang] = slices.Clip(vs)
 	}
 	return out
 }
@@ -429,12 +447,14 @@ func buildStaffList(rows []dbgen.ListAnimeStaffCreditsRow) *staffList {
 		})
 		people[staffIdentity(r)] = struct{}{}
 	}
-	return &staffList{credits: out, people: len(people)}
+	return &staffList{credits: slices.Clip(out), people: len(people)}
 }
 
+// staffIdentity is who a credit names, as GetAnimeCreditCounts counts
+// people: the AniList id, else the two names joined by chr(31).
 func staffIdentity(r dbgen.ListAnimeStaffCreditsRow) string {
 	if r.StaffID != nil {
 		return "id:" + strconv.FormatInt(int64(*r.StaffID), 10)
 	}
-	return "name:" + derefStr(r.NameJa) + "\x00" + derefStr(r.NameEn)
+	return "name:" + derefStr(r.NameJa) + "\x1f" + derefStr(r.NameEn)
 }

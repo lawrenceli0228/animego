@@ -382,3 +382,43 @@ func TestBuildStaffList_KeepsTheOrderAndCountsPeople(t *testing.T) {
 	assert.Equal(t, 0, buildStaffList(nil).people)
 	assert.NotNil(t, buildStaffList(nil).credits)
 }
+
+func TestBuildCastList_TheStandInVoiceTakesTheTitlesLanguageOnceTheTitleHasVoiceRows(t *testing.T) {
+	t.Parallel()
+
+	// A donghua written since 0042: its character rows carry the Chinese
+	// voice (credits.PrimaryLanguage), and a character the voice table has
+	// nothing for -- one with no AniList id, or a refresh caught between
+	// pruning and rewriting its voices -- is standing in a Chinese voice.
+	noID := castChar(0, "SUPPORTING", "No Id", "无号")
+	noID.VoiceActorEn = sptr("Zh Voice")
+	noID.VoiceActorJa = sptr("中文声优")
+	chars := []dbgen.ListAnimeCastCharactersRow{castChar(1, "MAIN", "Wei Ying", "魏婴"), noID}
+	voices := []dbgen.ListAnimeCastVoicesRow{castVoiceRow(1, 11, "Chinese", "", "Ajie", "阿杰")}
+
+	cn := buildCastList(sptr("CN"), chars, voices)
+	assert.Equal(t, "中文声优", *cn.entries[1].voices[castLangZh][0].NameNative)
+	assert.Empty(t, cn.entries[1].voices[castLangJa])
+
+	// The same donghua before 0042, with nothing in the voice table: the
+	// deployed code stored voiceActors(language: JAPANESE)[0] on the row.
+	old := buildCastList(sptr("CN"), chars, nil)
+	assert.Equal(t, "中文声优", *old.entries[1].voices[castLangJa][0].NameNative)
+	assert.Empty(t, old.entries[1].voices[castLangZh])
+}
+
+func TestBuildCastList_SharedSlicesHaveNoSpareCapacity(t *testing.T) {
+	t.Parallel()
+
+	// The list is cached and every request hands its slices to the encoder;
+	// an append on one of them must copy rather than write into the cache.
+	list := fixtureCast(nil)
+	for _, e := range list.entries {
+		for _, vs := range e.voices {
+			assert.Equal(t, len(vs), cap(vs))
+		}
+	}
+	assert.Equal(t, len(list.langCounts), cap(list.langCounts))
+	staff := buildStaffList([]dbgen.ListAnimeStaffCreditsRow{{StaffID: i32(1), Role: sptr("Director")}})
+	assert.Equal(t, len(staff.credits), cap(staff.credits))
+}

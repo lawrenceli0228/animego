@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -24,13 +25,19 @@ import (
 type fakeCreditListsDB struct {
 	mu sync.Mutex
 
-	missing bool    // GetAnimeCreditsHead answers pgx.ErrNoRows
+	missing bool    // GetAnimeCreditsHead and GetAnimeCreditCounts answer pgx.ErrNoRows
 	country *string // the title's country_of_origin
-	chars   []dbgen.ListAnimeCastCharactersRow
-	voices  []dbgen.ListAnimeCastVoicesRow
-	staff   []dbgen.ListAnimeStaffCreditsRow
+	// unfetched is a title a listing wrote and no detail fetch has filled:
+	// detail_fetched_at NULL, its credit tables empty because nobody asked.
+	unfetched bool
+	// gate, when set, holds ListAnimeCastCharacters until it is closed.
+	gate   chan struct{}
+	chars  []dbgen.ListAnimeCastCharactersRow
+	voices []dbgen.ListAnimeCastVoicesRow
+	staff  []dbgen.ListAnimeStaffCreditsRow
+	counts dbgen.GetAnimeCreditCountsRow
 
-	headErr, charsErr, voicesErr, staffErr error
+	headErr, charsErr, voicesErr, staffErr, countsErr error
 
 	calls map[string]int
 }
@@ -50,19 +57,35 @@ func (f *fakeCreditListsDB) called(name string) int {
 	return f.calls[name]
 }
 
-func (f *fakeCreditListsDB) GetAnimeCreditsHead(_ context.Context, _ int32) (*string, error) {
+func (f *fakeCreditListsDB) GetAnimeCreditsHead(_ context.Context, _ int32) (dbgen.GetAnimeCreditsHeadRow, error) {
 	f.count("head")
 	if f.headErr != nil {
-		return nil, f.headErr
+		return dbgen.GetAnimeCreditsHeadRow{}, f.headErr
 	}
 	if f.missing {
-		return nil, pgx.ErrNoRows
+		return dbgen.GetAnimeCreditsHeadRow{}, pgx.ErrNoRows
 	}
-	return f.country, nil
+	return dbgen.GetAnimeCreditsHeadRow{CountryOfOrigin: f.country, DetailFetched: !f.unfetched}, nil
+}
+
+func (f *fakeCreditListsDB) GetAnimeCreditCounts(_ context.Context, _ int32) (dbgen.GetAnimeCreditCountsRow, error) {
+	f.count("counts")
+	if f.countsErr != nil {
+		return dbgen.GetAnimeCreditCountsRow{}, f.countsErr
+	}
+	if f.missing {
+		return dbgen.GetAnimeCreditCountsRow{}, pgx.ErrNoRows
+	}
+	row := f.counts
+	row.DetailFetched = !f.unfetched
+	return row, nil
 }
 
 func (f *fakeCreditListsDB) ListAnimeCastCharacters(_ context.Context, _ int32) ([]dbgen.ListAnimeCastCharactersRow, error) {
 	f.count("chars")
+	if f.gate != nil {
+		<-f.gate
+	}
 	return f.chars, f.charsErr
 }
 
@@ -89,6 +112,7 @@ func fixtureCreditsDB() *fakeCreditListsDB {
 	list[0].ImageUrl = sptr("https://s4.anilist.co/file/anilistcdn/character/large/1.png")
 	return &fakeCreditListsDB{
 		country: sptr("JP"),
+		counts:  dbgen.GetAnimeCreditCountsRow{Characters: 4, Staff: 2},
 		chars:   list,
 		voices: []dbgen.ListAnimeCastVoicesRow{
 			castVoiceRow(1, 11, "Japanese", "", "Atsumi Tanezaki", "種崎敦美"),
@@ -314,6 +338,7 @@ func TestCreditLists_UnknownTitleIs404AndNothingElseIsRead(t *testing.T) {
 	assert.Zero(t, db.called("chars"))
 	assert.Zero(t, db.called("voices"))
 	assert.Zero(t, db.called("staff"))
+	assert.Equal(t, 1, db.called("counts"), "the counts are their own one query")
 }
 
 func TestCreditLists_DatabaseErrorsAre500(t *testing.T) {
@@ -328,7 +353,7 @@ func TestCreditLists_DatabaseErrorsAre500(t *testing.T) {
 		"chars":  {func(f *fakeCreditListsDB) { f.charsErr = boom }, "characters"},
 		"voices": {func(f *fakeCreditListsDB) { f.voicesErr = boom }, "characters"},
 		"staff":  {func(f *fakeCreditListsDB) { f.staffErr = boom }, "staff"},
-		"counts": {func(f *fakeCreditListsDB) { f.staffErr = boom }, "credit-counts"},
+		"counts": {func(f *fakeCreditListsDB) { f.countsErr = boom }, "credit-counts"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -420,23 +445,22 @@ func TestStaff_ATitleWithNoStaffIsAnEmptyList(t *testing.T) {
 	assert.JSONEq(t, `{"data":[],"total":0,"people":0}`, rec.Body.String())
 }
 
-func TestCreditCounts_CharactersAndPeople(t *testing.T) {
+func TestCreditCounts_TwoNumbersFromOneQuery(t *testing.T) {
 	t.Parallel()
 
+	// Every overview render asks for these, so they must not load the lists:
+	// a crawl through the catalogue would otherwise read every title's whole
+	// cast and staff and churn the list caches for numbers.
 	db := fixtureCreditsDB()
-	svc := newCreditListsService(t, db)
-	h := creditListsRouter(t, svc)
+	h := creditListsRouter(t, newCreditListsService(t, db))
 	rec := getCredits(t, h, "/api/anime/154587/credit-counts")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, `{"data":{"characters":4,"staff":2}}`, rec.Body.String())
-
-	// The tabs read the same cached lists the counts were taken from.
-	svc.cast.Wait()
-	svc.staff.Wait()
-	require.Equal(t, http.StatusOK, getCredits(t, h, "/api/anime/154587/characters").Code)
-	require.Equal(t, http.StatusOK, getCredits(t, h, "/api/anime/154587/staff").Code)
-	assert.Equal(t, 1, db.called("chars"))
-	assert.Equal(t, 1, db.called("staff"))
+	assert.Equal(t, 1, db.called("counts"))
+	assert.Zero(t, db.called("head"))
+	assert.Zero(t, db.called("chars"))
+	assert.Zero(t, db.called("voices"))
+	assert.Zero(t, db.called("staff"))
 }
 
 func TestCreditCounts_ATitleWithNoCreditsCountsZero(t *testing.T) {
@@ -458,4 +482,80 @@ func TestCreditLists_RoutesDoNotCollideWithDetail(t *testing.T) {
 	for _, path := range []string{"characters", "staff", "credit-counts"} {
 		assert.Equal(t, http.StatusOK, getCredits(t, h, "/api/anime/154587/"+path).Code, path)
 	}
+}
+
+func TestCreditLists_AListingOnlyTitleIsNeitherCachedNorCacheable(t *testing.T) {
+	t.Parallel()
+
+	// A title seasonal / search / warm_season wrote and nobody has opened:
+	// its credit tables are empty because no detail fetch has filled them
+	// yet, and the next /api/anime/:id will.  Remembering that emptiness for
+	// ten minutes would show an empty tab long after the fetch landed.
+	db := fixtureCreditsDB()
+	db.unfetched = true
+	svc := newCreditListsService(t, db)
+	h := creditListsRouter(t, svc)
+
+	for _, path := range []string{"characters", "staff", "credit-counts"} {
+		rec := getCredits(t, h, "/api/anime/154587/"+path)
+		require.Equal(t, http.StatusOK, rec.Code, path)
+		assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"), path)
+	}
+	svc.cast.Wait()
+	svc.staff.Wait()
+	require.Equal(t, http.StatusOK, getCredits(t, h, "/api/anime/154587/characters").Code)
+	require.Equal(t, http.StatusOK, getCredits(t, h, "/api/anime/154587/staff").Code)
+	assert.Equal(t, 2, db.called("chars"), "read again: nothing was kept")
+	assert.Equal(t, 2, db.called("staff"))
+}
+
+func TestCreditLists_AnEmptyListIsKeptOnlyBriefly(t *testing.T) {
+	t.Parallel()
+
+	// Fetched, and empty: AniList lists nobody, or the refresh that stamped
+	// the row has not written its credits yet -- the main row goes first.
+	// Either way the answer is worth a short look, not ten minutes.
+	db := fixtureCreditsDB()
+	db.chars, db.voices, db.staff = nil, nil, nil
+	svc := newCreditListsService(t, db)
+	svc.emptyTTL = 50 * time.Millisecond
+	h := creditListsRouter(t, svc)
+
+	rec := getCredits(t, h, "/api/anime/154587/characters")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, creditListsCacheControl, rec.Header().Get("Cache-Control"))
+	svc.cast.Wait()
+	require.Equal(t, http.StatusOK, getCredits(t, h, "/api/anime/154587/characters").Code)
+	assert.Equal(t, 1, db.called("chars"), "kept for its short while")
+
+	time.Sleep(120 * time.Millisecond)
+	require.Equal(t, http.StatusOK, getCredits(t, h, "/api/anime/154587/characters").Code)
+	assert.Equal(t, 2, db.called("chars"), "and read again after it")
+}
+
+func TestCharacters_ConcurrentColdRequestsShareOneRead(t *testing.T) {
+	t.Parallel()
+
+	db := fixtureCreditsDB()
+	db.gate = make(chan struct{})
+	h := creditListsRouter(t, newCreditListsService(t, db))
+
+	const callers = 8
+	codes := make(chan int, callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			codes <- getCredits(t, h, "/api/anime/154587/characters").Code
+		}()
+	}
+	// Let every caller reach the shared load before the first read returns.
+	require.Eventually(t, func() bool { return db.called("chars") == 1 }, time.Second, 5*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	close(db.gate)
+
+	for i := 0; i < callers; i++ {
+		assert.Equal(t, http.StatusOK, <-codes)
+	}
+	assert.Equal(t, 1, db.called("head"))
+	assert.Equal(t, 1, db.called("chars"))
+	assert.Equal(t, 1, db.called("voices"))
 }
