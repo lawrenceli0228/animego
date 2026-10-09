@@ -129,9 +129,9 @@ func (r *Report) Write(w io.Writer, samples int) {
 	fmt.Fprintf(w, "people:     %d considered, %d matched (%s), %d with a Chinese name; by voice %d, by staff %d; %d in conflicts, %d unmatched\n",
 		s.PeopleConsidered, s.PeopleMatched, percent(s.PeopleMatched, s.PeopleConsidered), s.PeopleNamed,
 		s.ByVoice, s.ByStaff, s.PeopleConflicted, s.PeopleConsidered-s.PeopleMatched-s.PeopleConflicted)
-	fmt.Fprintf(w, "characters: %d considered, %d matched (%s), %d with a Chinese name; %d in conflicts, %d unmatched\n",
+	fmt.Fprintf(w, "characters: %d considered, %d matched (%s), %d with a Chinese name, %d with a summary; %d in conflicts, %d unmatched\n",
 		s.CharactersConsidered, s.CharactersMatched, percent(s.CharactersMatched, s.CharactersConsidered), s.CharactersNamed,
-		s.CharactersConflicted, s.CharactersConsidered-s.CharactersMatched-s.CharactersConflicted)
+		withSummary(r.Characters), s.CharactersConflicted, s.CharactersConsidered-s.CharactersMatched-s.CharactersConflicted)
 
 	fmt.Fprintf(w, "\nconflicts: %d (written neither way)\n", len(r.Conflicts))
 	for i, c := range r.Conflicts {
@@ -156,6 +156,17 @@ func (r *Report) Write(w io.Writer, samples int) {
 		fmt.Fprintf(w, "%-18s %s insert %d, update %d, delete %d; %d unchanged\n",
 			t.table+":", verb, t.c.Inserted, t.c.Updated, t.c.Deleted, t.c.Unchanged)
 	}
+}
+
+// withSummary counts the pairs that carry a summary.
+func withSummary(pairs []Pair) int {
+	n := 0
+	for _, p := range pairs {
+		if p.Summary != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // writeSamples lists the first n pairs of a kind.

@@ -47,6 +47,9 @@ type Pair struct {
 	// NameCn is Bangumi's simplified Chinese name, "" when it states none:
 	// the match is kept either way.
 	NameCn string
+	// Summary is a character's Bangumi summary (Entity.Summary); "" for a
+	// person and for a character without one.
+	Summary string
 	// Titles are our titles the match was found in, ascending.
 	Titles []int32
 }
@@ -288,7 +291,8 @@ func (c candidates) resolve(kind string, entities map[int32]Entity) ([]Pair, []C
 				continue
 			}
 			pairs = append(pairs, Pair{AnilistID: anilist, BgmID: bgm, AniListName: cand.anilistName,
-				BgmName: cand.bgmName, NameCn: entities[bgm].NameCn, Titles: sortedKeys(cand.titles)})
+				BgmName: cand.bgmName, NameCn: entities[bgm].NameCn, Summary: entities[bgm].Summary,
+				Titles: sortedKeys(cand.titles)})
 		}
 	}
 	for bgm, anilists := range byBgm {

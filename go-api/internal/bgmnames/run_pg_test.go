@@ -75,6 +75,7 @@ func TestRun_PG(t *testing.T) {
 			assert.Contains(t, out.String(), want)
 		}
 		assert.NotContains(t, out.String(), "（声优）")
+		assert.Contains(t, out.String(), "3 with a Chinese name, 1 with a summary")
 	})
 
 	t.Run("a write stores the matches; the same write again changes nothing", func(t *testing.T) {
@@ -93,6 +94,8 @@ func TestRun_PG(t *testing.T) {
 		chars := readMap(t, ctx, pool, "bgm_character_map")
 		assert.Equal(t, "芙莉莲", *chars[176754].NameCn)
 		assert.Equal(t, "菲伦", *chars[183965].NameCn)
+		assert.Equal(t, 1, count(`SELECT count(*) FROM bgm_character_map
+			WHERE anilist_id = 183965 AND summary = E'芙莉莲的弟子。\n~!后来成为一级魔法使。!~'`), "the summary, cleaned, with the match")
 		assert.Equal(t, "伏拉梅", *chars[219733].NameCn, "found through the primary voice alone")
 		assert.NotContains(t, chars, int32(1), "the unbound title is not read")
 

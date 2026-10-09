@@ -160,6 +160,16 @@ func characterProfileWith(p *CharacterProfile, o overlay.Doc) *CharacterProfile 
 	return &next
 }
 
+// bangumiDescriptionWith is Bangumi's summary unless an overlay set the
+// description: then the edited text (or its absence) is the description
+// everywhere, and Bangumi's would only contradict it.
+func bangumiDescriptionWith(summary *string, o overlay.Doc) *string {
+	if o.Description.Set {
+		return nil
+	}
+	return summary
+}
+
 // personProfileWith is characterProfileWith for a person.
 func personProfileWith(p *PersonProfile, o overlay.Doc) *PersonProfile {
 	if !o.Occupations.Set && !o.Gender.Set && !o.Birth.Set && !o.HomeTown.Set && !o.BloodType.Set {

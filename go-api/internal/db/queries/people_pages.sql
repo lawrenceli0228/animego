@@ -157,7 +157,8 @@ SELECT
     ch.site_url,
     (ch.anilist_id IS NOT NULL)::boolean AS has_profile,
     m.bgm_id,
-    m.name_cn
+    m.name_cn,
+    m.summary AS bgm_summary
 FROM (VALUES (sqlc.arg(id)::int)) AS k (id)
 LEFT JOIN characters ch ON ch.anilist_id = k.id AND ch.fetched_at IS NOT NULL
 LEFT JOIN bgm_character_map m ON m.anilist_id = k.id;

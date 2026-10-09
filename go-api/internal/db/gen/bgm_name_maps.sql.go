@@ -36,6 +36,7 @@ type InsertBgmCharacterMapParams struct {
 	AnilistID int32              `json:"anilistId"`
 	BgmID     int32              `json:"bgmId"`
 	NameCn    *string            `json:"nameCn"`
+	Summary   *string            `json:"summary"`
 	Source    string             `json:"source"`
 	MatchedAt pgtype.Timestamptz `json:"matchedAt"`
 }
@@ -144,15 +145,18 @@ func (q *Queries) ListBgmCastVoices(ctx context.Context) ([]ListBgmCastVoicesRow
 }
 
 const listBgmCharacterMap = `-- name: ListBgmCharacterMap :many
-SELECT anilist_id, bgm_id, name_cn FROM bgm_character_map
+SELECT anilist_id, bgm_id, name_cn, summary FROM bgm_character_map
 `
 
 type ListBgmCharacterMapRow struct {
 	AnilistID int32   `json:"anilistId"`
 	BgmID     int32   `json:"bgmId"`
 	NameCn    *string `json:"nameCn"`
+	Summary   *string `json:"summary"`
 }
 
+// With the summary (0048): an import that finds a changed one replaces the
+// row, as it does a changed name.
 func (q *Queries) ListBgmCharacterMap(ctx context.Context) ([]ListBgmCharacterMapRow, error) {
 	rows, err := q.db.Query(ctx, listBgmCharacterMap)
 	if err != nil {
@@ -162,7 +166,12 @@ func (q *Queries) ListBgmCharacterMap(ctx context.Context) ([]ListBgmCharacterMa
 	items := []ListBgmCharacterMapRow{}
 	for rows.Next() {
 		var i ListBgmCharacterMapRow
-		if err := rows.Scan(&i.AnilistID, &i.BgmID, &i.NameCn); err != nil {
+		if err := rows.Scan(
+			&i.AnilistID,
+			&i.BgmID,
+			&i.NameCn,
+			&i.Summary,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

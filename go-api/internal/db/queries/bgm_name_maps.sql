@@ -51,7 +51,9 @@ SELECT pg_advisory_xact_lock(hashtext('bgm_name_maps'));
 SELECT anilist_id, bgm_id, name_cn FROM bgm_person_map;
 
 -- name: ListBgmCharacterMap :many
-SELECT anilist_id, bgm_id, name_cn FROM bgm_character_map;
+-- With the summary (0048): an import that finds a changed one replaces the
+-- row, as it does a changed name.
+SELECT anilist_id, bgm_id, name_cn, summary FROM bgm_character_map;
 
 -- name: DeleteBgmPersonMap :exec
 -- The rows an import replaces or no longer finds.  Deleted before the
@@ -68,5 +70,5 @@ INSERT INTO bgm_person_map (anilist_id, bgm_id, name_cn, source, matched_at)
 VALUES ($1, $2, $3, $4, $5);
 
 -- name: InsertBgmCharacterMap :copyfrom
-INSERT INTO bgm_character_map (anilist_id, bgm_id, name_cn, source, matched_at)
-VALUES ($1, $2, $3, $4, $5);
+INSERT INTO bgm_character_map (anilist_id, bgm_id, name_cn, summary, source, matched_at)
+VALUES ($1, $2, $3, $4, $5, $6);

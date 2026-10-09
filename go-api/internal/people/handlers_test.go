@@ -172,7 +172,8 @@ func TestCharacterHandler_StatusesAndShape(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code, "a profile alone is not a page")
 
 	db := &fakeDB{
-		characterIdent: dbgen.GetCharacterIdentityRow{HasProfile: true, Description: sp("Stark ~!x!~"), NameAlternative: []string{"Alias"}},
+		characterIdent: dbgen.GetCharacterIdentityRow{HasProfile: true, Description: sp("Stark ~!x!~"), NameAlternative: []string{"Alias"},
+			BgmSummary: sp("アイゼンの弟子。")},
 		appearances:    []dbgen.ListCharacterAppearancesRow{appearanceRow(frieren, "MAIN")},
 		characterVoices: []dbgen.ListCharacterVoicesRow{
 			characterVoiceRow(frieren, 133507, 0, "Japanese", nil, "Chiaki Kobayashi"),
@@ -182,8 +183,10 @@ func TestCharacterHandler_StatusesAndShape(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	data := body["data"].(map[string]any)
 	assert.Equal(t, []string{
-		"alternativeNames", "anilistId", "appearances", "bangumiId", "image", "indexable", "name", "profile", "voices",
+		"alternativeNames", "anilistId", "appearances", "bangumiDescription", "bangumiId", "image", "indexable", "name",
+		"profile", "voices",
 	}, keys(data))
+	assert.Equal(t, "アイゼンの弟子。", data["bangumiDescription"])
 	assert.Equal(t, []string{"age", "birth", "bloodType", "description", "gender", "siteUrl"}, keys(data["profile"].(map[string]any)))
 	assert.Equal(t, []string{"anime", "role"}, keys(data["appearances"].([]any)[0].(map[string]any)))
 	voice := data["voices"].([]any)[0].(map[string]any)
@@ -192,6 +195,47 @@ func TestCharacterHandler_StatusesAndShape(t *testing.T) {
 	assert.Equal(t, "133507|Japanese|", voice["key"])
 	assert.Nil(t, voice["line"])
 	assert.Equal(t, []string{"anilistId", "image", "name"}, keys(voice["person"].(map[string]any)))
+}
+
+// TestCharacterHandler_BangumiDescription: Bangumi's summary rides beside
+// AniList's description, with or without an AniList profile, and an accepted
+// edit to the description -- a new text or a cleared one -- supersedes both,
+// so every language shows the edited one.
+func TestCharacterHandler_BangumiDescription(t *testing.T) {
+	t.Parallel()
+	page := func(ident dbgen.GetCharacterIdentityRow, overlay string) map[string]any {
+		t.Helper()
+		db := &fakeDB{
+			characterIdent: ident,
+			appearances:    []dbgen.ListCharacterAppearancesRow{appearanceRow(frieren, "MAIN")},
+		}
+		if overlay != "" {
+			db.overlays = []dbgen.ListEntityOverlaysRow{{Kind: "character", EntityID: 184313, Data: []byte(overlay)}}
+		}
+		rec, body := get(t, router(db), "/api/characters/184313")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return body["data"].(map[string]any)
+	}
+	withProfile := dbgen.GetCharacterIdentityRow{HasProfile: true, Description: sp("AniList's text"), BgmSummary: sp("Bangumi 的简介")}
+
+	data := page(withProfile, "")
+	assert.Equal(t, "Bangumi 的简介", data["bangumiDescription"])
+	assert.Equal(t, "AniList's text", data["profile"].(map[string]any)["description"])
+
+	data = page(dbgen.GetCharacterIdentityRow{BgmSummary: sp("Bangumi 的简介")}, "")
+	assert.Equal(t, "Bangumi 的简介", data["bangumiDescription"], "no AniList profile yet: Bangumi's still shows")
+	assert.Nil(t, data["profile"])
+
+	data = page(withProfile, `{"description":"读者改过的简介"}`)
+	assert.Nil(t, data["bangumiDescription"])
+	assert.Equal(t, "读者改过的简介", data["profile"].(map[string]any)["description"])
+
+	data = page(withProfile, `{"description":null}`)
+	assert.Nil(t, data["bangumiDescription"], "a cleared description is cleared everywhere")
+	assert.Nil(t, data["profile"].(map[string]any)["description"])
+
+	data = page(dbgen.GetCharacterIdentityRow{HasProfile: true, BgmSummary: sp("  ")}, "")
+	assert.Nil(t, data["bangumiDescription"], "blank is none")
 }
 
 // TestCharacterHandler_AppliesItsOverlay: the handler reads the character's

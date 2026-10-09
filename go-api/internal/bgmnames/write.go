@@ -31,10 +31,12 @@ type Reader interface {
 // deleteBatch bounds the ids one DELETE carries.
 const deleteBatch = 5000
 
-// stored is a map row as the import compares it.
+// stored is a map row as the import compares it.  summary is a
+// character's (0048); a person's is always "".
 type stored struct {
-	bgmID  int32
-	nameCn string
+	bgmID   int32
+	nameCn  string
+	summary string
 }
 
 // Preview returns what Apply would change, reading the tables and writing
@@ -93,7 +95,8 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, res Result, source string, a
 	}
 	cc, err := replace(ctx, characters, res.Characters, q.DeleteBgmCharacterMap, q.InsertBgmCharacterMap,
 		func(p Pair) dbgen.InsertBgmCharacterMapParams {
-			return dbgen.InsertBgmCharacterMapParams{AnilistID: p.AnilistID, BgmID: p.BgmID, NameCn: nullable(p.NameCn), Source: source, MatchedAt: stamp}
+			return dbgen.InsertBgmCharacterMapParams{AnilistID: p.AnilistID, BgmID: p.BgmID, NameCn: nullable(p.NameCn),
+				Summary: nullable(p.Summary), Source: source, MatchedAt: stamp}
 		})
 	if err != nil {
 		return Changes{}, fmt.Errorf("characters: %w", err)
@@ -136,8 +139,9 @@ func replace[R any](
 
 // plan compares a run's pairs with what is stored.  It returns the
 // AniList ids to delete (changed and vanished rows, ascending), the pairs
-// to insert (changed and new), and the counts.  An empty Chinese name and
-// a NULL one are the same.
+// to insert (changed and new), and the counts.  A row is changed when its
+// Bangumi id, its Chinese name or its summary is.  An empty Chinese name or
+// summary and a NULL one are the same.
 func plan(existing map[int32]stored, next []Pair) (deletes []int32, inserts []Pair, c Change) {
 	seen := make(map[int32]bool, len(next))
 	for _, p := range next {
@@ -147,7 +151,7 @@ func plan(existing map[int32]stored, next []Pair) (deletes []int32, inserts []Pa
 		case !ok:
 			c.Inserted++
 			inserts = append(inserts, p)
-		case old.bgmID == p.BgmID && old.nameCn == p.NameCn:
+		case old.bgmID == p.BgmID && old.nameCn == p.NameCn && old.summary == p.Summary:
 			c.Unchanged++
 		default:
 			c.Updated++
@@ -181,7 +185,7 @@ func readStored(ctx context.Context, r Reader) (people, characters map[int32]sto
 	}
 	characters = make(map[int32]stored, len(characterRows))
 	for _, row := range characterRows {
-		characters[row.AnilistID] = stored{bgmID: row.BgmID, nameCn: deref(row.NameCn)}
+		characters[row.AnilistID] = stored{bgmID: row.BgmID, nameCn: deref(row.NameCn), summary: deref(row.Summary)}
 	}
 	return people, characters, nil
 }

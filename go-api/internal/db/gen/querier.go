@@ -1551,6 +1551,8 @@ type Querier interface {
 	// in anime_character_voices; UNION removes the primary voice where both
 	// hold it.
 	ListBgmCastVoices(ctx context.Context) ([]ListBgmCastVoicesRow, error)
+	// With the summary (0048): an import that finds a changed one replaces the
+	// row, as it does a changed name.
 	ListBgmCharacterMap(ctx context.Context) ([]ListBgmCharacterMapRow, error)
 	// Every staff credit on every bound title, once per person and title
 	// however many roles they hold there.

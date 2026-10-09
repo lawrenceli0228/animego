@@ -27,7 +27,8 @@ SELECT
     ch.site_url,
     (ch.anilist_id IS NOT NULL)::boolean AS has_profile,
     m.bgm_id,
-    m.name_cn
+    m.name_cn,
+    m.summary AS bgm_summary
 FROM (VALUES ($1::int)) AS k (id)
 LEFT JOIN characters ch ON ch.anilist_id = k.id AND ch.fetched_at IS NOT NULL
 LEFT JOIN bgm_character_map m ON m.anilist_id = k.id
@@ -49,6 +50,7 @@ type GetCharacterIdentityRow struct {
 	HasProfile      bool     `json:"hasProfile"`
 	BgmID           *int32   `json:"bgmId"`
 	NameCn          *string  `json:"nameCn"`
+	BgmSummary      *string  `json:"bgmSummary"`
 }
 
 // GetPersonIdentity for a character.  The spoiler aliases are not read:
@@ -73,6 +75,7 @@ func (q *Queries) GetCharacterIdentity(ctx context.Context, id int32) (GetCharac
 		&i.HasProfile,
 		&i.BgmID,
 		&i.NameCn,
+		&i.BgmSummary,
 	)
 	return i, err
 }

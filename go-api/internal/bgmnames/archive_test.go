@@ -34,7 +34,7 @@ func frierenDump(t *testing.T) string {
 	t.Helper()
 	return writeDump(t, map[string][]string{
 		"person.jsonlines": {
-			`{"id":7575,"name":"種﨑敦美","type":1,"career":["seiyu"],"infobox":"{{Infobox Person\r\n|简体中文名= 种崎敦美\r\n|性别= 女\r\n}}","summary":"","comments":0,"collects":0}`,
+			`{"id":7575,"name":"種﨑敦美","type":1,"career":["seiyu"],"infobox":"{{Infobox Person\r\n|简体中文名= 种崎敦美\r\n|性别= 女\r\n}}","summary":"日本の声優。","comments":0,"collects":0}`,
 			`{"id":31136,"name":"市ノ瀬加那","type":1,"career":["seiyu"],"infobox":"{{Infobox Person\r\n|简体中文名= 市之濑加那\r\n}}","summary":"","comments":0,"collects":0}`,
 			`{"id":3873,"name":"田中敦子","type":1,"career":["seiyu"],"infobox":"{{Infobox Person\r\n|简体中文名= 田中敦子（声优）\r\n}}","summary":"","comments":0,"collects":0}`,
 			`{"id":11679,"name":"田中敦子","type":1,"career":["producer"],"infobox":"{{Infobox Person\r\n|简体中文名= 田中敦子（动画人）\r\n}}","summary":"","comments":0,"collects":0}`,
@@ -43,7 +43,7 @@ func frierenDump(t *testing.T) string {
 		},
 		"character.jsonlines": {
 			`{"id":86246,"role":1,"name":"フリーレン","infobox":"{{Infobox Crt\r\n|简体中文名= 芙莉莲\r\n}}","summary":"","comments":0,"collects":0}`,
-			`{"id":86247,"role":1,"name":"フェルン","infobox":"{{Infobox Crt\r\n|简体中文名= 菲伦\r\n}}","summary":"","comments":0,"collects":0}`,
+			`{"id":86247,"role":1,"name":"フェルン","infobox":"{{Infobox Crt\r\n|简体中文名= 菲伦\r\n}}","summary":"芙莉莲的弟子。\r\n[mask]后来成为一级魔法使。[/mask]","comments":0,"collects":0}`,
 			`{"id":89180,"role":1,"name":"フランメ","infobox":"{{Infobox Crt\r\n|简体中文名= 伏拉梅\r\n}}","summary":"","comments":0,"collects":0}`,
 			`{"id":12345,"role":1,"name":"誰か","infobox":"","summary":"","comments":0,"collects":0}`,
 		},
@@ -83,7 +83,11 @@ func TestLoadArchive_KeepsWhatTheSubjectsNeed(t *testing.T) {
 	assert.NotContains(t, a.Persons, int32(99999))
 	assert.Len(t, a.Persons, 4)
 
-	assert.Equal(t, Entity{Name: "フェルン", NameCn: "菲伦"}, a.Characters[86247])
+	// A character's summary comes in cleaned (CleanSummary); a person's is
+	// not read at all -- no page shows it, and the import holds every
+	// matched person in memory.
+	assert.Equal(t, Entity{Name: "フェルン", NameCn: "菲伦", Summary: "芙莉莲的弟子。\n~!后来成为一级魔法使。!~"}, a.Characters[86247])
+	assert.Equal(t, Entity{Name: "フリーレン", NameCn: "芙莉莲"}, a.Characters[86246], "no summary is no summary")
 	assert.NotContains(t, a.Characters, int32(12345))
 	assert.Len(t, a.Characters, 3)
 }

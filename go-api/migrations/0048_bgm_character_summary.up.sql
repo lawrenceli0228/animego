@@ -1,0 +1,15 @@
+-- 0048: the character summary Bangumi gives a matched character.
+--
+-- cmd/bgmnames writes it with the match it already writes (0045), from the
+-- same dump record: Bangumi's summary, rewritten into the markup the
+-- character page already renders for AniList's descriptions -- a [mask]
+-- spoiler becomes ~!...!~, a link keeps its text, the other BBCode tags
+-- are dropped, line breaks are \n -- or NULL when Bangumi has none.  Most
+-- are Chinese or Japanese; the page shows it to Chinese readers ahead of
+-- AniList's English, and an accepted reader edit to the description
+-- (0047) ahead of both.
+--
+-- Locks.  One nullable column without a default: a catalogue change on
+-- bgm_character_map and nothing else, no rewrite.  /api/anime/:id joins
+-- the table by primary key and waits only for that instant.
+ALTER TABLE bgm_character_map ADD COLUMN summary text;

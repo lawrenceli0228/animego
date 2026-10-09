@@ -33,6 +33,10 @@ const maxLine = 64 << 20
 type Entity struct {
 	Name   string
 	NameCn string
+	// Summary is a character's Bangumi summary in the character page's
+	// markup (CleanSummary), "" when it has none.  A person's is not read:
+	// no page shows it, and every matched person is held in memory.
+	Summary string
 }
 
 // Cast is one person-characters link inside a subject: PersonID voices
@@ -119,10 +123,10 @@ func LoadArchive(dir string, subjects map[int32]bool) (*Archive, error) {
 		a.Staff[subject] = firstOfEach(persons)
 	}
 
-	if err := loadEntities(dir, personFile, wantPersons, a.Persons); err != nil {
+	if err := loadEntities(dir, personFile, wantPersons, a.Persons, false); err != nil {
 		return nil, err
 	}
-	if err := loadEntities(dir, characterFile, wantCharacters, a.Characters); err != nil {
+	if err := loadEntities(dir, characterFile, wantCharacters, a.Characters, true); err != nil {
 		return nil, err
 	}
 	return a, nil
@@ -149,7 +153,7 @@ var errMissingIDs = fmt.Errorf("a key id is missing or not positive")
 // loadEntities reads person.jsonlines or character.jsonlines into dest,
 // keeping the ids in want.  Every line is checked for an id, kept or not:
 // a renamed field shows on the first line, not only on the ones asked for.
-func loadEntities(dir, file string, want map[int32]bool, dest map[int32]Entity) error {
+func loadEntities(dir, file string, want map[int32]bool, dest map[int32]Entity, withSummary bool) error {
 	return eachLine(dir, file, func(line []byte) error {
 		var r struct {
 			ID      int32  `json:"id"`
@@ -158,7 +162,8 @@ func loadEntities(dir, file string, want map[int32]bool, dest map[int32]Entity) 
 			// Not in the dump's person or character records today (only
 			// subjects and episodes carry one); read in case a later dump
 			// adds it, as ChineseName's fallback.
-			NameCn string `json:"name_cn"`
+			NameCn  string `json:"name_cn"`
+			Summary string `json:"summary"`
 		}
 		if err := json.Unmarshal(line, &r); err != nil {
 			return err
@@ -167,7 +172,11 @@ func loadEntities(dir, file string, want map[int32]bool, dest map[int32]Entity) 
 			return errMissingIDs
 		}
 		if want[r.ID] {
-			dest[r.ID] = Entity{Name: r.Name, NameCn: ChineseName(r.Infobox, r.NameCn)}
+			e := Entity{Name: r.Name, NameCn: ChineseName(r.Infobox, r.NameCn)}
+			if withSummary {
+				e.Summary = CleanSummary(r.Summary)
+			}
+			dest[r.ID] = e
 		}
 		return nil
 	})

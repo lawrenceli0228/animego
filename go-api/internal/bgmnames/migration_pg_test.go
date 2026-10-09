@@ -96,3 +96,75 @@ func TestMigration0045_PG(t *testing.T) {
 		testutil.MigrateTo(t, uri, testutil.LatestMigrationVersion(t))
 	})
 }
+
+// TestMigration0048_PG adds the character summary column over a schema at
+// 0047 while every credit and profile table is locked (the file touches
+// only bgm_character_map), keeps the rows already there with a NULL
+// summary, and runs down and up again.
+func TestMigration0048_PG(t *testing.T) {
+	ctx := context.Background()
+	uri := testutil.SetupPG(t)
+	testutil.MigrateTo(t, uri, 47)
+	pool := testutil.NewWebPool(t, ctx, uri)
+
+	exec := func(sql string) {
+		t.Helper()
+		_, err := pool.Exec(ctx, sql)
+		require.NoError(t, err, sql)
+	}
+	hasColumn := func() bool {
+		t.Helper()
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'bgm_character_map' AND column_name = 'summary'`).Scan(&n))
+		return n == 1
+	}
+	exec(`INSERT INTO bgm_character_map (anilist_id, bgm_id, name_cn, source, matched_at)
+		VALUES (183965, 86247, '菲伦', 'dump-a', now())`)
+	require.False(t, hasColumn())
+
+	t.Run("0048 applies while the tables beside it are locked", func(t *testing.T) {
+		const bound = 10 * time.Second
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		_, err = tx.Exec(ctx, `LOCK TABLE anime_cache, anime_characters, anime_character_voices, anime_staff,
+			people, characters, bgm_person_map, entity_overlays IN ACCESS EXCLUSIVE MODE`)
+		require.NoError(t, err)
+
+		applied, released := make(chan struct{}), make(chan struct{})
+		go func() {
+			defer close(released)
+			select {
+			case <-applied:
+			case <-time.After(bound):
+			}
+			_ = tx.Rollback(ctx)
+		}()
+		start := time.Now()
+		testutil.MigrateTo(t, uri, 48)
+		close(applied)
+		<-released
+		assert.Less(t, time.Since(start), bound, "0048 waited for a lock on a table it should not touch")
+	})
+
+	t.Run("the rows already there keep their match, with no summary yet", func(t *testing.T) {
+		require.True(t, hasColumn())
+		var name string
+		var summary *string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT name_cn, summary FROM bgm_character_map WHERE anilist_id = 183965`).Scan(&name, &summary))
+		assert.Equal(t, "菲伦", name)
+		assert.Nil(t, summary)
+		exec(`UPDATE bgm_character_map SET summary = '芙莉莲的弟子。' WHERE anilist_id = 183965`)
+	})
+
+	t.Run("down drops the column and keeps the match; up again", func(t *testing.T) {
+		testutil.MigrateTo(t, uri, 47)
+		assert.False(t, hasColumn())
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM bgm_character_map`).Scan(&n))
+		assert.Equal(t, 1, n)
+		testutil.MigrateTo(t, uri, 48)
+		assert.True(t, hasColumn())
+		testutil.MigrateTo(t, uri, testutil.LatestMigrationVersion(t))
+	})
+}

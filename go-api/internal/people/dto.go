@@ -205,6 +205,13 @@ type Character struct {
 	AlternativeNames []string          `json:"alternativeNames"`
 	Image            *string           `json:"image"`
 	Profile          *CharacterProfile `json:"profile"`
+	// BangumiDescription is Bangumi's summary of the character (0048), in
+	// the markup Profile.Description uses; null when Bangumi has none, and
+	// when an accepted edit set the description, which every language then
+	// shows.  Beside the profile, not in it: it is there whether or not the
+	// profiles sweep has reached the character.  The page picks between the
+	// two per language.
+	BangumiDescription *string `json:"bangumiDescription"`
 	// Voices is every voice of the character across its titles and
 	// languages, one entry per person and note.
 	Voices []CharacterVoice `json:"voices"`

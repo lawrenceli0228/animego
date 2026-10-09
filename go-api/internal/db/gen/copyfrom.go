@@ -66,6 +66,7 @@ func (r iteratorForInsertBgmCharacterMap) Values() ([]interface{}, error) {
 		r.rows[0].AnilistID,
 		r.rows[0].BgmID,
 		r.rows[0].NameCn,
+		r.rows[0].Summary,
 		r.rows[0].Source,
 		r.rows[0].MatchedAt,
 	}, nil
@@ -76,7 +77,7 @@ func (r iteratorForInsertBgmCharacterMap) Err() error {
 }
 
 func (q *Queries) InsertBgmCharacterMap(ctx context.Context, arg []InsertBgmCharacterMapParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"bgm_character_map"}, []string{"anilist_id", "bgm_id", "name_cn", "source", "matched_at"}, &iteratorForInsertBgmCharacterMap{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"bgm_character_map"}, []string{"anilist_id", "bgm_id", "name_cn", "summary", "source", "matched_at"}, &iteratorForInsertBgmCharacterMap{rows: arg})
 }
 
 // iteratorForInsertBgmIdMapCopy implements pgx.CopyFromSource.

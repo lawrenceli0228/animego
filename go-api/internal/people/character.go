@@ -108,9 +108,12 @@ func buildCharacter(id int32, ident dbgen.GetCharacterIdentityRow, appearances [
 		AlternativeNames: alternativeNames(aliases, name),
 		Image:            imageWith(firstText(ident.ImageLarge, largeImage(creditImage)), ov.self),
 		Profile:          characterProfileWith(profile, ov.self),
-		Voices:           editedVoices(characterVoices(voices), ov),
-		Appearances:      apps,
-		Indexable:        characterIndexable(name, apps),
+		// An accepted edit to the description, new text or cleared, is the
+		// description in every language: Bangumi's gives way to it.
+		BangumiDescription: bangumiDescriptionWith(text(ident.BgmSummary), ov.self),
+		Voices:             editedVoices(characterVoices(voices), ov),
+		Appearances:        apps,
+		Indexable:          characterIndexable(name, apps),
 	}, true
 }
 

@@ -117,6 +117,32 @@ func TestApply_PG(t *testing.T) {
 		assert.NotContains(t, readMap(t, ctx, pool, "bgm_character_map"), int32(183965), "not found this run, so not kept")
 	})
 
+	t.Run("a character's summary is written with it, and a changed one replaces the row", func(t *testing.T) {
+		summary := func() *string {
+			t.Helper()
+			var s *string
+			require.NoError(t, pool.QueryRow(ctx, `SELECT summary FROM bgm_character_map WHERE anilist_id = 176754`).Scan(&s))
+			return s
+		}
+		with := Result{People: second.People, Characters: []Pair{
+			{AnilistID: 176754, BgmID: 86246, NameCn: "芙莉莲", Summary: "活了一千多年的精灵魔法使。"},
+		}}
+		changes, err := Apply(ctx, pool, with, "dump-d", t1)
+		require.NoError(t, err)
+		assert.Equal(t, Change{Updated: 1}, changes.Characters, "a summary where there was none is a change")
+		require.NotNil(t, summary())
+		assert.Equal(t, "活了一千多年的精灵魔法使。", *summary())
+
+		changes, err = Apply(ctx, pool, with, "dump-e", t1)
+		require.NoError(t, err)
+		assert.Equal(t, Change{Unchanged: 1}, changes.Characters)
+
+		changes, err = Apply(ctx, pool, second, "dump-f", t1)
+		require.NoError(t, err)
+		assert.Equal(t, Change{Updated: 1}, changes.Characters, "and so is none where there was one")
+		assert.Nil(t, summary())
+	})
+
 	t.Run("a failed run leaves both tables as they were", func(t *testing.T) {
 		before := [2]map[int32]storedRow{readMap(t, ctx, pool, "bgm_person_map"), readMap(t, ctx, pool, "bgm_character_map")}
 		bad := Result{
