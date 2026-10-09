@@ -35,6 +35,12 @@ test.afterAll(async () => {
   await closePg();
 });
 
+// A move to another route waits for it as long as detail-tabs.spec.ts does:
+// `next dev` compiles a route on its first request, and evicts one nobody
+// has asked for in a while, so the first click into the write-review page or
+// a thread can take far longer than an assertion's default 5s.
+const NAVIGATION = { timeout: 30_000 };
+
 async function seedAnime(id: number, title: string): Promise<void> {
   await ensureAnimeDetail({ anilistId: id, titleRomaji: `E2E Social ${id}`, titleChinese: title, episodes: 12 });
 }
@@ -146,7 +152,7 @@ for (const { name, viewport, base } of VIEWPORTS) {
 
       await waitForHydration(page, `a[href$="/anime/${id}/social/review"]`);
       await page.getByRole("link", { name: "写评价" }).click();
-      await expect(page).toHaveURL(new RegExp(`/anime/${id}/social/review$`));
+      await expect(page).toHaveURL(new RegExp(`/anime/${id}/social/review$`), NAVIGATION);
       await expect(page.getByText("登录后写评价")).toBeVisible();
       expect(errors, errors.join("\n")).toEqual([]);
     });
@@ -168,13 +174,16 @@ for (const { name, viewport, base } of VIEWPORTS) {
       await expect(page.locator("#review-body")).toHaveAttribute("aria-invalid", "true");
       await expect(page).toHaveURL(/\/social\/review$/);
 
-      await page.locator("#review-summary").fill("一部关于时间与告别的温柔之作");
+      // Unique per attempt: a retry runs against the same anime, whose
+      // earlier attempt's review is still there.
+      const summary = `一部关于时间与告别的温柔之作 ${randomUUID().slice(0, 4)}`;
+      await page.locator("#review-summary").fill(summary);
       await page.locator("#review-body").fill(REVIEW_BODY);
       await expect(page.getByText(`${Array.from(REVIEW_BODY).length} 字，至少 300 字`)).toBeVisible();
       await page.getByRole("button", { name: "发布评价" }).click();
 
-      await expect(page).toHaveURL(new RegExp(`/anime/${id}/social#review-`));
-      await expect(page.getByRole("heading", { level: 3, name: "一部关于时间与告别的温柔之作" })).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/anime/${id}/social#review-`), NAVIGATION);
+      await expect(page.getByRole("heading", { level: 3, name: summary })).toBeVisible();
       await expect(page.getByRole("link", { name: "修改我的评价" })).toBeVisible();
     });
 
@@ -216,18 +225,20 @@ for (const { name, viewport, base } of VIEWPORTS) {
       await gotoSocial(page, id);
       await waitForHydration(page, "#threads button[aria-expanded]");
       await page.locator("#threads").getByRole("button", { name: "发帖" }).click();
-      await page.locator("#community-thread-title").fill("第五集的回忆杀大家怎么看");
+      // Unique per attempt, as the review's summary above.
+      const title = `第五集的回忆杀大家怎么看 ${randomUUID().slice(0, 4)}`;
+      await page.locator("#community-thread-title").fill(title);
       await page.locator("#community-thread-body").fill("辛美尔那段真的好戳我。");
       await page.getByRole("button", { name: "发布", exact: true }).click();
 
-      const row = page.getByRole("link", { name: /第五集的回忆杀大家怎么看/ });
+      const row = page.getByRole("link", { name: new RegExp(title) });
       await expect(row).toBeVisible();
       // The thread page re-reads the thread for its signed-in reader; that
       // answer arrives only after the reply below is posted.
       const reread = await holdReread(page, new RegExp(`^/api/anime/${id}/community/threads/[0-9a-f-]{36}$`));
       await row.click();
-      await expect(page).toHaveURL(new RegExp(`/anime/${id}/social/threads/[0-9a-f-]{36}$`));
-      await expect(page.getByRole("heading", { level: 1, name: "第五集的回忆杀大家怎么看" })).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/anime/${id}/social/threads/[0-9a-f-]{36}$`), NAVIGATION);
+      await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
 
       const box = page.getByPlaceholder("写回复，最多 500 字");
       await waitForHydration(page, 'input[placeholder="写回复，最多 500 字"]');
