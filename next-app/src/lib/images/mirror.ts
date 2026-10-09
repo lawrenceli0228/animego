@@ -26,11 +26,12 @@
 // uploads live under the same prefix), a query string, YouTube stills, our own
 // images, Bangumi portraits, null, "", strings that are not URLs.
 //
-// Called where images are rendered (FadeImage, and the few files that use
-// next/image directly), and nowhere else. Structured data (JSON-LD) and
-// share-card image URLs keep pointing at AniList on purpose.
-// lib/images/nextImageCallSites.test.ts fails when a new next/image call site
-// skips it.
+// Called where images are rendered through the optimizer (FadeImage, and the
+// few files that use next/image directly), and nowhere else. A FadeImage
+// caller that passes `unoptimized` itself keeps its src as given, see
+// FadeImage. Structured data (JSON-LD) and share-card image URLs keep
+// pointing at AniList on purpose. lib/images/nextImageCallSites.test.ts fails
+// when a new next/image call site skips it.
 
 const ANILIST_CDN_PREFIX = "https://s4.anilist.co/file/anilistcdn/";
 

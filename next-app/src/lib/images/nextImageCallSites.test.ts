@@ -148,7 +148,7 @@ describe("every next/image call site goes through the mirror rewrite", () => {
     for (const known of [
       "components/ui/FadeImage.tsx",
       "app/[lang]/anime/[id]/_detail/DetailHero.tsx",
-      "components/home/HomeHero.tsx",
+      "components/home/heroImages.ts",
       "components/anime/TrailerPreview.tsx",
     ]) {
       expect(NEXT_IMAGE_FILES).toContain(known);
@@ -171,7 +171,7 @@ describe("every next/image call site goes through the mirror rewrite", () => {
       offenders.length
         ? "These files use next/image without pointing AniList URLs at the mirror.\n" +
             "Render through FadeImage, or pass the src through toMirrorUrl\n" +
-            "(lib/images/mirror.ts) as DetailHero and HomeHero do. A src that can be\n" +
+            "(lib/images/mirror.ts) as DetailHero and home/heroImages.ts do. A src that can be\n" +
             "any host should be `unoptimized`. A file that never shows an AniList\n" +
             "image goes in ALLOWED in this test, with the reason.\n\n  " +
             offenders.join("\n  ")

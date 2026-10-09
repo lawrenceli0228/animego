@@ -42,9 +42,10 @@
 //
 // ## AniList URLs are pointed at our mirror first
 //
-// Every src goes through toMirrorUrl (lib/images/mirror.ts) before anything
-// else here looks at it. In a build with the mirror switched on, an AniList
-// cover or portrait becomes the same file on our own domain:
+// A src goes through toMirrorUrl (lib/images/mirror.ts) before anything else
+// here looks at it, with one exception below. In a build with the mirror
+// switched on, an AniList cover or portrait becomes the same file on our own
+// domain:
 //
 //   https://animegoclub.com/img/anilist/<the path after /file/anilistcdn/>
 //
@@ -53,6 +54,11 @@
 // covers every call site of this component at once, and doing it BEFORE
 // canOptimize means the allowlist decision below is made about the URL the
 // page will actually request.
+//
+// The one exception is a caller that passes `unoptimized` itself: its src is
+// rendered exactly as given. Those are the surfaces described next, whose
+// srcs are not ours to vouch for and are kept away from our own servers; the
+// mirror is for images the optimizer fetches, and these it never does.
 //
 // ## `unoptimized` is REQUIRED when the host is not ours to enumerate
 //
@@ -184,8 +190,9 @@ export default function FadeImage({
   const [loaded, setLoaded] = useState(false);
   const visible = priority || loaded;
   // The mirror rewrite comes first, so canOptimize below judges the URL the
-  // page will actually request. See the header.
-  const src = toMirrorUrl(sourceSrc);
+  // page will actually request; a caller's own `unoptimized` skips it. See
+  // the header.
+  const src = unoptimized ? sourceSrc : toMirrorUrl(sourceSrc);
 
   // No source: render the same box the caller styled, so the grid keeps its
   // shape. Callers that want a themed placeholder already pass a background in
