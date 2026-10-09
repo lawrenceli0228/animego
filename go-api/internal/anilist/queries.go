@@ -18,6 +18,13 @@
 //   - server/queries/weeklySchedule.graphql.js
 package anilist
 
+import (
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
 // SearchAnimeQuery — full-text + genre search across all anime.
 //
 // Variables:
@@ -107,16 +114,67 @@ const SeasonalAnimeQuery = `
   }
 `
 
+// CreditsPerPage is how many characters or staff one page of a nested
+// connection holds: AniList's ceiling (pageInfo.perPage tops out there
+// whatever is asked).  The documents below spell it as the literal 25,
+// because a const string cannot be built from an int; the query tests
+// hold the two together.
+const CreditsPerPage = 25
+
+// MaxCreditPagesPerRequest is how many pages one aliased credit request
+// carries (p1 ... p8 on a single Media).  Measured against AniList: eight
+// pages of characters with every voice role answer in one request with
+// no complexity error.  See CharacterPagesQuery.
+const MaxCreditPagesPerRequest = 8
+
+// The two sort orders, and why they end in ID.
+//
+// [ROLE, RELEVANCE, ID] is the order AniList's own site lists characters
+// in; the port asked for ROLE alone, so the first page was a different
+// 25 from the one AniList shows and the eight the detail page draws were
+// not AniList's eight.  Staff were RELEVANCE alone.  The trailing ID is
+// what makes either order total: page 9 of an order with ties is not
+// guaranteed to continue page 8, and the credits sweep stitches up to
+// sixteen pages from two requests.
+const (
+	characterCreditsSort = `[ROLE, RELEVANCE, ID]`
+	staffCreditsSort     = `[RELEVANCE, ID]`
+)
+
+// characterCreditsSelection is everything inside one characters(...)
+// page, shared by AnimeDetailQuery and CharacterPagesQuery so the detail
+// path and the sweep cannot drift apart on what a row is made of.
+//
+// `node { id ... }` is load-bearing beyond the id it stores: AniList
+// answers voiceActorRoles with an empty list, and no error, on an edge
+// whose node id was not selected.  voiceActorRoles takes no language
+// argument, so every language comes back with its languageV2 label --
+// the StaffLanguage enum the old `voiceActors(language:)` filter took has
+// no Chinese value at all.
+const characterCreditsSelection = `pageInfo { hasNextPage }
+        edges { role node { id name { full native } image { large medium } }
+          voiceActorRoles(sort: [RELEVANCE, ID]) { roleNotes dubGroup voiceActor { id name { full native } image { large medium } languageV2 } } }`
+
+// staffCreditsSelection is characterCreditsSelection for staff.
+const staffCreditsSelection = `pageInfo { hasNextPage }
+        edges { role node { id name { full native } image { medium } } }`
+
 // AnimeDetailQuery — detail view for a single anime by AniList id.
 //
 // Variables:
 //
 //	$id Int  AniList media id (the integer the rest of the system keys off)
 //
-// Includes relations, characters and staff (25 each -- AniList's cap on
-// a nested connection page; the port asked for 8 and 10, and more than
-// half the catalogue sat at those caps), and 6 top recommendations.  No
-// filters applied (AniList returns whatever exists for that id).
+// Includes relations, the first page of characters and of staff (25
+// each -- AniList's cap on a nested connection page), and 6 top
+// recommendations.  No filters applied (AniList returns whatever exists
+// for that id).
+//
+// The first page is all the detail path ever writes.  Whether there is a
+// second is what pageInfo { hasNextPage } is selected for: it is stored
+// (cast_has_more / staff_has_more) and is how the credits sweep finds the
+// titles it has to complete -- see credits.WriteCast for why the detail
+// path keeps the sweep's rows instead of replacing them.
 const AnimeDetailQuery = `
   query AnimeDetail($id: Int) {
     Media(id: $id, type: ANIME) {
@@ -138,12 +196,11 @@ const AnimeDetailQuery = `
       source
       studios { edges { isMain node { id name } } }
       relations { edges { relationType node { id title { romaji native } coverImage { large color } format } } }
-      characters(sort: ROLE, page: 1, perPage: 25) {
-        edges { role node { id name { full native } image { medium } }
-          voiceActors(language: JAPANESE) { id name { full native } image { medium } } }
+      characters(sort: ` + characterCreditsSort + `, page: 1, perPage: 25) {
+        ` + characterCreditsSelection + `
       }
-      staff(sort: RELEVANCE, page: 1, perPage: 25) {
-        edges { role node { id name { full native } image { medium } } }
+      staff(sort: ` + staffCreditsSort + `, page: 1, perPage: 25) {
+        ` + staffCreditsSelection + `
       }
       recommendations(sort: RATING_DESC, page: 1, perPage: 6) {
         nodes { mediaRecommendation { id title { romaji native } coverImage { large color } averageScore } }
@@ -280,3 +337,58 @@ const MediaFactsQuery = `
     }
   }
 `
+
+// ErrCreditPageRange is returned for a page range no credit document can
+// carry: pages are 1-based, the range must not be empty, and one request
+// holds at most MaxCreditPagesPerRequest of them.
+var ErrCreditPageRange = errors.New("anilist: credit page range invalid")
+
+// CreditPageAlias is the GraphQL alias page n is requested under: "p1"
+// for page 1, "p9" for page 9.  Aliases are numbered by page rather than
+// by position in the request so the sweep's second request (pages 9-16)
+// reads p9 ... p16, and a decoder counting from 1 cannot attribute a
+// page to the wrong offset.
+func CreditPageAlias(page int) string { return "p" + strconv.Itoa(page) }
+
+// CharacterPagesQuery returns the document that fetches pages
+// first..last of one title's characters in a single request: each page
+// is the same characters(...) connection under its own alias on one
+// Media.  It also selects countryOfOrigin, which decides whose voice is
+// the primary one (see credits.PrimaryLanguage).
+//
+// A document per range rather than one with page variables, because
+// GraphQL has no way to repeat a field a variable number of times; the
+// variables carry only $id.
+//
+// The selection inside each page is the constant AnimeDetailQuery uses,
+// so a row the sweep writes and a row the detail path writes are made of
+// the same fields.
+func CharacterPagesQuery(first, last int) (string, error) {
+	return creditPagesQuery("MediaCharacterPages", "characters", characterCreditsSort,
+		characterCreditsSelection, "countryOfOrigin", first, last)
+}
+
+// StaffPagesQuery is CharacterPagesQuery for the staff connection.
+func StaffPagesQuery(first, last int) (string, error) {
+	return creditPagesQuery("MediaStaffPages", "staff", staffCreditsSort,
+		staffCreditsSelection, "", first, last)
+}
+
+// creditPagesQuery assembles one aliased credit document.  extra is an
+// optional Media scalar selected beside the pages.
+func creditPagesQuery(name, connection, sort, selection, extra string, first, last int) (string, error) {
+	if first < 1 || last < first || last-first+1 > MaxCreditPagesPerRequest {
+		return "", fmt.Errorf("%w: pages %d..%d", ErrCreditPageRange, first, last)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n  query %s($id: Int) {\n    Media(id: $id, type: ANIME) {\n      id\n", name)
+	if extra != "" {
+		fmt.Fprintf(&b, "      %s\n", extra)
+	}
+	for page := first; page <= last; page++ {
+		fmt.Fprintf(&b, "      %s: %s(sort: %s, page: %d, perPage: %d) {\n        %s\n      }\n",
+			CreditPageAlias(page), connection, sort, page, CreditsPerPage, selection)
+	}
+	b.WriteString("    }\n  }\n")
+	return b.String(), nil
+}

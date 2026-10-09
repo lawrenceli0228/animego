@@ -25,6 +25,7 @@ type fakeDB struct {
 	listFn    func(context.Context, uuid.UUID, int32) ([]dbgen.ListNotificationsRow, error)
 	markFn    func(context.Context, uuid.UUID, uuid.UUID) (dbgen.Notification, error)
 	markAllFn func(context.Context, uuid.UUID) (int64, error)
+	editsFn   func(context.Context, []uuid.UUID, uuid.UUID) ([]dbgen.ListEditReviewNotificationsRow, error)
 }
 
 func (f *fakeDB) CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error) {
@@ -53,6 +54,13 @@ func (f *fakeDB) MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID)
 		panic("unexpected MarkAllNotificationsRead call")
 	}
 	return f.markAllFn(ctx, userID)
+}
+
+func (f *fakeDB) ListEditReviewNotifications(ctx context.Context, ids []uuid.UUID, userID uuid.UUID) ([]dbgen.ListEditReviewNotificationsRow, error) {
+	if f.editsFn == nil {
+		panic("unexpected ListEditReviewNotifications call")
+	}
+	return f.editsFn(ctx, ids, userID)
 }
 
 func authenticatedRequest(t *testing.T, method, target string, userID uuid.UUID) *http.Request {
@@ -260,4 +268,151 @@ func TestHandlersRejectMissingClaimsBeforeDatabaseAccess(t *testing.T) {
 			assert.False(t, called, "case %s accessed the DB", strconv.Itoa(i))
 		})
 	}
+}
+
+// The community tab's two reply notifications (migration 0046) carry the
+// reply, the thread or activity event it sits under, and the anime — and a
+// spoiler reply is flagged, never quoted.
+func TestListMapsCommunityReplyNotifications(t *testing.T) {
+	viewerID := uuid.New()
+	anilistID := int32(154587)
+	title := "Sousou no Frieren"
+	threadID, threadReplyID := uuid.New(), uuid.New()
+	eventID, activityReplyID := uuid.New(), uuid.New()
+	threadTitle := "第五集的回忆杀"
+	plain, secret := "哭死我了", "结局是……"
+	yes, no := true, false
+	createdAt := pgtype.Timestamptz{Time: time.Date(2026, 10, 9, 1, 2, 3, 0, time.UTC), Valid: true}
+
+	db := &fakeDB{
+		countFn: func(context.Context, uuid.UUID) (int64, error) { return 3, nil },
+		listFn: func(context.Context, uuid.UUID, int32) ([]dbgen.ListNotificationsRow, error) {
+			return []dbgen.ListNotificationsRow{
+				{
+					ID: uuid.New(), NotificationType: "thread_reply", ReplyID: &threadReplyID,
+					ActorUsername: "bob", CreatedAt: createdAt,
+					ReplyAnilistID: &anilistID, ReplyThreadID: &threadID, ThreadTitle: &threadTitle,
+					ReplyBody: &plain, ReplyIsSpoiler: &no, TitleRomaji: &title,
+				},
+				{
+					ID: uuid.New(), NotificationType: "thread_reply", ReplyID: &threadReplyID,
+					ActorUsername: "carol", CreatedAt: createdAt,
+					ReplyAnilistID: &anilistID, ReplyThreadID: &threadID, ThreadTitle: &threadTitle,
+					ReplyBody: &secret, ReplyIsSpoiler: &yes, TitleRomaji: &title,
+				},
+				{
+					ID: uuid.New(), NotificationType: "activity_reply", ReplyID: &activityReplyID,
+					ActivityEventID: &eventID, ActorUsername: "dave", CreatedAt: createdAt,
+					ReplyAnilistID: &anilistID, ReplyActivityEventID: &eventID,
+					ReplyBody: &plain, ReplyIsSpoiler: &no, TitleRomaji: &title,
+				},
+			}, nil
+		},
+	}
+	rec := httptest.NewRecorder()
+	NewHandlers(db).List(rec, authenticatedRequest(t, http.MethodGet, "/api/notifications", viewerID))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var body struct {
+		Data struct {
+			Items []struct {
+				Type        string  `json:"type"`
+				ReplyID     *string `json:"replyId"`
+				ThreadID    *string `json:"threadId"`
+				ThreadTitle *string `json:"threadTitle"`
+				ActivityID  *string `json:"activityId"`
+				Excerpt     *string `json:"excerpt"`
+				IsSpoiler   bool    `json:"isSpoiler"`
+				Anime       *struct {
+					AnilistID int32 `json:"anilistId"`
+				} `json:"anime"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	items := body.Data.Items
+	require.Len(t, items, 3)
+
+	assert.Equal(t, "thread_reply", items[0].Type)
+	assert.Equal(t, threadReplyID.String(), *items[0].ReplyID)
+	assert.Equal(t, threadID.String(), *items[0].ThreadID)
+	assert.Equal(t, threadTitle, *items[0].ThreadTitle)
+	assert.Nil(t, items[0].ActivityID)
+	assert.Equal(t, plain, *items[0].Excerpt)
+	require.NotNil(t, items[0].Anime)
+	assert.Equal(t, anilistID, items[0].Anime.AnilistID)
+
+	assert.True(t, items[1].IsSpoiler)
+	assert.Nil(t, items[1].Excerpt, "a spoiler reply is flagged, never quoted")
+
+	assert.Equal(t, "activity_reply", items[2].Type)
+	assert.Equal(t, eventID.String(), *items[2].ActivityID)
+	assert.Nil(t, items[2].ThreadID)
+	assert.Equal(t, plain, *items[2].Excerpt)
+}
+
+func TestNotificationTypeMapping(t *testing.T) {
+	for db, wire := range map[string]string{
+		"reply": "comment_reply", "reaction": "comment_reaction", "follow": "follow",
+		"thread_reply": "thread_reply", "activity_reply": "activity_reply",
+		"edit_review": "edit_review",
+	} {
+		assert.Equal(t, wire, notificationType(db), db)
+	}
+}
+
+// TestListAttachesTheOutcomeOfAReviewedEdit: an edit_review row carries the
+// page and the outcome, read in one query for every such row; the other
+// types keep their shape, with no edit key at all.
+func TestListAttachesTheOutcomeOfAReviewedEdit(t *testing.T) {
+	viewerID := uuid.New()
+	editID, followID := uuid.New(), uuid.New()
+	createdAt := pgtype.Timestamptz{Time: time.Date(2026, 10, 9, 1, 2, 3, 0, time.UTC), Valid: true}
+	var asked []uuid.UUID
+	db := &fakeDB{
+		countFn: func(context.Context, uuid.UUID) (int64, error) { return 2, nil },
+		listFn: func(context.Context, uuid.UUID, int32) ([]dbgen.ListNotificationsRow, error) {
+			return []dbgen.ListNotificationsRow{
+				{ID: editID, NotificationType: "edit_review", CreatedAt: createdAt, ActorID: uuid.New(), ActorUsername: "admin"},
+				{ID: followID, NotificationType: "follow", CreatedAt: createdAt, ActorID: uuid.New(), ActorUsername: "bob"},
+			}, nil
+		},
+		editsFn: func(_ context.Context, ids []uuid.UUID, userID uuid.UUID) ([]dbgen.ListEditReviewNotificationsRow, error) {
+			assert.Equal(t, viewerID, userID)
+			asked = ids
+			return []dbgen.ListEditReviewNotificationsRow{{
+				NotificationID: editID, Kind: "character", EntityID: 184313,
+				Snapshot:      []byte(`{"name":{"full":"Stark","native":"シュタルク","cn":"修塔尔克"},"image":null,"work":null}`),
+				AcceptedCount: 1, RejectedCount: 1, RejectNotes: []string{"第二季的造型"},
+			}}, nil
+		},
+	}
+	rec := httptest.NewRecorder()
+	NewHandlers(db).List(rec, authenticatedRequest(t, http.MethodGet, "/api/notifications", viewerID))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []uuid.UUID{editID}, asked)
+
+	var body struct {
+		Data struct {
+			Items []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Data.Items, 2)
+	edit := body.Data.Items[0]
+	assert.Equal(t, "edit_review", edit["type"])
+	detail := edit["edit"].(map[string]any)
+	assert.Equal(t, "character", detail["kind"])
+	assert.Equal(t, float64(184313), detail["entityId"])
+	assert.Equal(t, float64(1), detail["accepted"])
+	assert.Equal(t, float64(1), detail["rejected"])
+	assert.Equal(t, []any{"第二季的造型"}, detail["rejectNotes"])
+	assert.Equal(t, "修塔尔克", detail["snapshot"].(map[string]any)["name"].(map[string]any)["cn"])
+	_, has := body.Data.Items[1]["edit"]
+	assert.False(t, has, "a follow keeps its shape")
+
+	// Who reviewed it is not the submitter's to know: the actor is there,
+	// as on every row, but empty.
+	assert.Equal(t, map[string]any{"username": "", "avatarUrl": nil}, edit["actor"])
+	assert.Equal(t, "bob", body.Data.Items[1]["actor"].(map[string]any)["username"])
 }

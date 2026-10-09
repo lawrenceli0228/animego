@@ -1184,31 +1184,64 @@ FROM anime_relations
 WHERE anime_id = $1;
 
 -- name: GetAnimeCharactersByID :many
--- Sorted by display_order so the response preserves the AniList role
--- ordering (MAIN → SUPPORTING → BACKGROUND).  Phase 4 worker writes
--- name_cn + voice_actor_image_url + voice_actor_cn; they'll be NULL
--- until enrichment runs.
+-- Sorted by display_order so the response preserves AniList's order
+-- ([ROLE, RELEVANCE, ID]: MAIN → SUPPORTING → BACKGROUND).
+--
+-- name_cn and voice_actor_cn come from Bangumi through the maps
+-- cmd/bgmnames fills (0045): the character's own Chinese name, and that of
+-- whoever voice_actor_id names.  A match wins over a name stored on the
+-- row (nothing writes those today; a row from the old import may carry
+-- one), which still shows where there is no match.  Both joins are by
+-- primary key; the response keeps its shape.
+--
+-- LIMIT 25 is the /api/anime/:id contract, not an accident of storage.
+-- The table holds up to 400 characters a title since the credits sweep
+-- (0042), while the detail response -- and every consumer that decodes it
+-- -- was built on at most AniList's first page.  The detail refresh keeps
+-- that page at display_order 0..24 (credits.WriteCast), so these are the
+-- 25 AniList lists first.
+--
+-- Accepted reader edits (entity_overlays, 0047) come first for the names
+-- and the images, the character's and its voice's: overlay, then Bangumi,
+-- then the row.  Names and images only -- a role or a change of voice an
+-- edit made is the character page's, and this response keeps both as
+-- AniList has them.  Both joins are by primary key; the shape is
+-- unchanged.
 SELECT
-    name_en,
-    name_ja,
-    name_cn,
-    image_url,
-    role,
-    voice_actor_en,
-    voice_actor_ja,
-    voice_actor_cn,
-    voice_actor_image_url,
-    character_id,
-    voice_actor_id
-FROM anime_characters
-WHERE anime_id = $1
-ORDER BY display_order;
+    COALESCE(co.data->>'nameFull', c.name_en) AS name_en,
+    COALESCE(co.data->>'nameNative', c.name_ja) AS name_ja,
+    COALESCE(co.data->>'nameCn', cm.name_cn, c.name_cn) AS name_cn,
+    COALESCE(co.data->>'image', c.image_url) AS image_url,
+    c.role,
+    COALESCE(po.data->>'nameFull', c.voice_actor_en) AS voice_actor_en,
+    COALESCE(po.data->>'nameNative', c.voice_actor_ja) AS voice_actor_ja,
+    COALESCE(po.data->>'nameCn', pm.name_cn, c.voice_actor_cn) AS voice_actor_cn,
+    COALESCE(po.data->>'image', c.voice_actor_image_url) AS voice_actor_image_url,
+    c.character_id,
+    c.voice_actor_id
+FROM anime_characters c
+LEFT JOIN bgm_character_map cm ON cm.anilist_id = c.character_id
+LEFT JOIN bgm_person_map pm ON pm.anilist_id = c.voice_actor_id
+LEFT JOIN entity_overlays co ON co.kind = 'character' AND co.entity_id = c.character_id
+LEFT JOIN entity_overlays po ON po.kind = 'person' AND po.entity_id = c.voice_actor_id
+WHERE c.anime_id = $1
+ORDER BY c.display_order, c.id
+LIMIT 25;
 
 -- name: GetAnimeStaffByID :many
-SELECT name_en, name_ja, image_url, role, staff_id
-FROM anime_staff
-WHERE anime_id = $1
-ORDER BY display_order;
+-- LIMIT 25 for the reason GetAnimeCharactersByID gives, and the accepted
+-- edits' names and images first, as there.
+SELECT
+    COALESCE(o.data->>'nameFull', s.name_en) AS name_en,
+    COALESCE(o.data->>'nameNative', s.name_ja) AS name_ja,
+    COALESCE(o.data->>'image', s.image_url) AS image_url,
+    s.role,
+    s.staff_id
+FROM anime_staff s
+LEFT JOIN entity_overlays o ON o.kind = 'person' AND o.entity_id = s.staff_id
+WHERE s.anime_id = $1
+ORDER BY s.display_order, s.id
+LIMIT 25;
 
 -- name: GetAnimeRecommendationsByID :many
 SELECT
@@ -1320,40 +1353,269 @@ INSERT INTO anime_relations (
     $10
 );
 
--- name: DeleteAnimeCharacters :exec
-DELETE FROM anime_characters WHERE anime_id = $1;
+-- -------------------------------------------------------------------------
+-- Characters, voices and staff: addressed rows, not delete + insert.
+--
+-- These three tables left the delete-then-insert pattern above in 0042.
+-- Two writers fill them -- the detail refresh (AniList's first page) and
+-- the credits sweep (everything up to 400) -- and a refresh that replaced
+-- the table would erase the sweep's rows every 24 hours.  So a write
+-- upserts the rows it has, by AniList's key, and then removes only what
+-- its mode says it may: see credits.WriteCast for the statement order and
+-- the two modes.  Every insert is an upsert because the two writers can
+-- meet on the same title; whichever lands second updates the row the
+-- first wrote instead of failing on the key.
+--
+-- Each upsert is ONE statement for the whole list, the rows passed as a
+-- jsonb array and unpacked by jsonb_to_recordset.  Row by row, a first
+-- page with every voice was some 250 statements, each its own commit and
+-- its own WAL flush, inside the 5 seconds a cold detail request has.
+-- jsonb rather than parallel arrays because most of these columns are
+-- nullable, and a text[] cannot carry a NULL element through sqlc (see
+-- ApplyHantDescriptionBatch).  The JSON keys are the column definition
+-- list's names; credits.WriteCast builds them.
+--
+-- A batch must not name the same key twice -- ON CONFLICT DO UPDATE
+-- refuses to touch one row twice in a statement -- and the normaliser
+-- (credits.CastFromEdges / StaffFromEdges) is what guarantees it.
+-- -------------------------------------------------------------------------
 
--- name: InsertAnimeCharacter :exec
--- display_order is the slice index (0-based) so the relational re-read
--- preserves the AniList edge ordering Express got for free from
--- Mongoose's array indexing.
+-- name: UpsertAnimeCharacters :many
+-- A title's character rows, keyed (anime_id, character_id).  A row with
+-- no character id (a node AniList sent without one) never conflicts and
+-- is always inserted; the prune that follows removes the previous copy.
+--
+-- name_cn is not written and survives an update: no source fills it yet,
+-- and the day one does it should not be erased by a refresh.
+-- voice_actor_cn is the Chinese name of whoever voice_actor_id names, so
+-- it survives only while that person stays the same.  RETURNING id is
+-- how the write knows which rows it touched.
 INSERT INTO anime_characters (
     anime_id, display_order,
-    name_en, name_ja, name_cn,
-    image_url, role,
+    name_en, name_ja, image_url, role,
     voice_actor_en, voice_actor_ja, voice_actor_image_url,
     character_id, voice_actor_id
-) VALUES (
-    $1, $2,
-    $3, $4, $5,
-    $6, $7,
-    $8, $9, $10,
-    $11, $12
-);
+)
+SELECT
+    sqlc.arg(anime_id)::int, r.display_order,
+    r.name_en, r.name_ja, r.image_url, r.role,
+    r.voice_actor_en, r.voice_actor_ja, r.voice_actor_image_url,
+    r.character_id, r.voice_actor_id
+FROM jsonb_to_recordset(sqlc.arg(batch)::jsonb) AS r(
+    display_order int,
+    name_en text, name_ja text, image_url text, role text,
+    voice_actor_en text, voice_actor_ja text, voice_actor_image_url text,
+    character_id int, voice_actor_id int
+)
+ON CONFLICT (anime_id, character_id) WHERE character_id IS NOT NULL DO UPDATE SET
+    display_order         = EXCLUDED.display_order,
+    name_en               = EXCLUDED.name_en,
+    name_ja               = EXCLUDED.name_ja,
+    image_url             = EXCLUDED.image_url,
+    role                  = EXCLUDED.role,
+    voice_actor_en        = EXCLUDED.voice_actor_en,
+    voice_actor_ja        = EXCLUDED.voice_actor_ja,
+    voice_actor_image_url = EXCLUDED.voice_actor_image_url,
+    voice_actor_cn        = CASE
+        WHEN anime_characters.voice_actor_id IS NOT DISTINCT FROM EXCLUDED.voice_actor_id
+        THEN anime_characters.voice_actor_cn
+    END,
+    voice_actor_id        = EXCLUDED.voice_actor_id
+RETURNING id;
 
--- name: DeleteAnimeStaff :exec
-DELETE FROM anime_staff WHERE anime_id = $1;
+-- name: PruneAnimeCharacters :exec
+-- After a write has upserted its rows (keep): in whole-list mode every
+-- other row of the title goes -- the write was the whole list.  In
+-- first-page mode only the other rows with no character id go: those are
+-- pre-0037 rows or an earlier copy of an id-less node, and no later write
+-- could ever address them.  The rows beyond the first page stay.
+DELETE FROM anime_characters
+WHERE anime_id = sqlc.arg(anime_id)
+  AND NOT (id = ANY(sqlc.arg(keep)::uuid[]))
+  AND (sqlc.arg(whole_list)::boolean OR character_id IS NULL);
 
--- name: InsertAnimeStaffMember :exec
+-- name: RenumberAnimeCharacters :exec
+-- First-page mode only: move every row the write did not touch to
+-- display_order first_order, first_order+1, ..., keeping their existing
+-- relative order.  After it, the first page is display_order 0..n-1 and
+-- nothing else sorts among it -- which is what GetAnimeCharactersByID's
+-- LIMIT relies on -- even when a character slipped off the first page
+-- and kept the place it used to have.
+WITH rest AS (
+    SELECT r.id, row_number() OVER (ORDER BY r.display_order, r.id) AS rn
+    FROM anime_characters r
+    WHERE r.anime_id = sqlc.arg(anime_id)
+      AND NOT (r.id = ANY(sqlc.arg(keep)::uuid[]))
+)
+UPDATE anime_characters c
+SET display_order = sqlc.arg(first_order)::int + rest.rn::int - 1
+FROM rest
+WHERE c.id = rest.id
+  AND c.display_order <> sqlc.arg(first_order)::int + rest.rn::int - 1;
+
+-- name: PruneAnimeCharacterVoices :exec
+-- Clears the voices a write is about to replace (those of the characters
+-- it wrote) and any voice whose character row no longer exists for the
+-- title -- left by a whole-list write, an admin reset, or a first page
+-- that dropped a character.  Voices of characters the write did not
+-- touch stay with them.
+DELETE FROM anime_character_voices v
+WHERE v.anime_id = sqlc.arg(anime_id)
+  AND (v.character_id = ANY(sqlc.arg(character_ids)::int[])
+       OR NOT EXISTS (
+           SELECT 1 FROM anime_characters c
+           WHERE c.anime_id = v.anime_id AND c.character_id = v.character_id
+       ));
+
+-- name: UpsertAnimeCharacterVoices :exec
+-- A title's voice rows for the characters a write covers, keyed
+-- (anime_id, character_id, staff_id).
+INSERT INTO anime_character_voices (
+    anime_id, character_id, staff_id, display_order,
+    language, role_notes, dub_group,
+    name_full, name_native, image_url
+)
+SELECT
+    sqlc.arg(anime_id)::int, r.character_id, r.staff_id, r.display_order,
+    r.language, r.role_notes, r.dub_group,
+    r.name_full, r.name_native, r.image_url
+FROM jsonb_to_recordset(sqlc.arg(batch)::jsonb) AS r(
+    character_id int, staff_id int, display_order int,
+    language text, role_notes text, dub_group text,
+    name_full text, name_native text, image_url text
+)
+ON CONFLICT (anime_id, character_id, staff_id) DO UPDATE SET
+    display_order = EXCLUDED.display_order,
+    language      = EXCLUDED.language,
+    role_notes    = EXCLUDED.role_notes,
+    dub_group     = EXCLUDED.dub_group,
+    name_full     = EXCLUDED.name_full,
+    name_native   = EXCLUDED.name_native,
+    image_url     = EXCLUDED.image_url;
+
+-- name: UpsertAnimeStaff :many
+-- A title's staff rows, keyed (anime_id, staff_id, role): a person
+-- appears once per role.  The index is NULLS NOT DISTINCT, so an empty
+-- role is a key like any other.  Same id-less and RETURNING rules as
+-- characters.
 INSERT INTO anime_staff (
     anime_id, display_order,
     name_en, name_ja, image_url, role,
     staff_id
-) VALUES (
-    $1, $2,
-    $3, $4, $5, $6,
-    $7
-);
+)
+SELECT
+    sqlc.arg(anime_id)::int, r.display_order,
+    r.name_en, r.name_ja, r.image_url, r.role,
+    r.staff_id
+FROM jsonb_to_recordset(sqlc.arg(batch)::jsonb) AS r(
+    display_order int,
+    name_en text, name_ja text, image_url text, role text,
+    staff_id int
+)
+ON CONFLICT (anime_id, staff_id, role) WHERE staff_id IS NOT NULL DO UPDATE SET
+    display_order = EXCLUDED.display_order,
+    name_en       = EXCLUDED.name_en,
+    name_ja       = EXCLUDED.name_ja,
+    image_url     = EXCLUDED.image_url
+RETURNING id;
+
+-- name: PruneAnimeStaff :exec
+-- PruneAnimeCharacters for staff.
+DELETE FROM anime_staff
+WHERE anime_id = sqlc.arg(anime_id)
+  AND NOT (id = ANY(sqlc.arg(keep)::uuid[]))
+  AND (sqlc.arg(whole_list)::boolean OR staff_id IS NULL);
+
+-- name: RenumberAnimeStaff :exec
+-- RenumberAnimeCharacters for staff.
+WITH rest AS (
+    SELECT r.id, row_number() OVER (ORDER BY r.display_order, r.id) AS rn
+    FROM anime_staff r
+    WHERE r.anime_id = sqlc.arg(anime_id)
+      AND NOT (r.id = ANY(sqlc.arg(keep)::uuid[]))
+)
+UPDATE anime_staff s
+SET display_order = sqlc.arg(first_order)::int + rest.rn::int - 1
+FROM rest
+WHERE s.id = rest.id
+  AND s.display_order <> sqlc.arg(first_order)::int + rest.rn::int - 1;
+
+-- name: SetAnimeCreditsHasMore :exec
+-- What the detail refresh learned about page 2: pageInfo.hasNextPage on
+-- the characters and staff connections.  NULL leaves a flag alone (a
+-- document that did not say).  updated_at does not move -- the sitemap
+-- lastmod is about what the page shows, and this is bookkeeping.
+--
+-- A flag turning true clears that list's sweep stamp.  The stamp records
+-- a sweep that found no second page (or never got an answer); an airing
+-- show that has since grown past one page would otherwise wait out the
+-- rest of the 30 days before its new characters were fetched.  A flag
+-- that was already true leaves the stamp alone -- the sweep's 30-day
+-- re-read covers a list that keeps growing.  (In SET, the bare column
+-- names are the row's values before this UPDATE.)
+UPDATE anime_cache
+SET cast_checked_at  = CASE
+        WHEN sqlc.narg(cast_has_more)::boolean AND cast_has_more IS DISTINCT FROM true THEN NULL
+        ELSE cast_checked_at
+    END,
+    cast_has_more    = COALESCE(sqlc.narg(cast_has_more)::boolean, cast_has_more),
+    staff_checked_at = CASE
+        WHEN sqlc.narg(staff_has_more)::boolean AND staff_has_more IS DISTINCT FROM true THEN NULL
+        ELSE staff_checked_at
+    END,
+    staff_has_more   = COALESCE(sqlc.narg(staff_has_more)::boolean, staff_has_more)
+WHERE anilist_id = sqlc.arg(anilist_id);
+
+-- name: StampAnimeCastChecked :exec
+-- The credits sweep's read stamp for characters, with what page 1 said
+-- about page 2 (NULL: unchanged -- a failed or absent read learned
+-- nothing).  checked_at comes from the caller because a failed read is
+-- stamped back-dated; see queue/anime_credits.go.
+UPDATE anime_cache
+SET cast_checked_at = sqlc.arg(checked_at),
+    cast_has_more   = COALESCE(sqlc.narg(has_more)::boolean, cast_has_more)
+WHERE anilist_id = sqlc.arg(anilist_id);
+
+-- name: StampAnimeStaffChecked :exec
+-- StampAnimeCastChecked for staff.
+UPDATE anime_cache
+SET staff_checked_at = sqlc.arg(checked_at),
+    staff_has_more   = COALESCE(sqlc.narg(has_more)::boolean, staff_has_more)
+WHERE anilist_id = sqlc.arg(anilist_id);
+
+-- name: ListAnimeCastCandidates :many
+-- Titles whose characters the credits sweep should fetch in full: AniList
+-- said there is a second page, or -- for a title whose flag is still NULL
+-- (not read since 0043 added it) -- it holds a full first page, which is
+-- what a capped title looks like from here.  Due when never swept or
+-- swept longer ago than stale_after.
+--
+-- Never-swept titles first, so the backfill cannot be starved by
+-- re-checks; most popular first within each, because that is the order
+-- the missing characters are missed in.  Adult titles are not excluded:
+-- they are stored like every other row and filtered where they are read.
+SELECT a.anilist_id
+FROM anime_cache a
+WHERE (a.cast_checked_at IS NULL OR a.cast_checked_at < now() - sqlc.arg(stale_after)::interval)
+  AND (a.cast_has_more
+       OR (a.cast_has_more IS NULL
+           AND (SELECT count(*) FROM anime_characters c WHERE c.anime_id = a.anilist_id) >= sqlc.arg(full_page)::int))
+ORDER BY (a.cast_checked_at IS NULL) DESC, a.popularity DESC NULLS LAST, a.anilist_id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListAnimeStaffCandidates :many
+-- ListAnimeCastCandidates for staff.
+SELECT a.anilist_id
+FROM anime_cache a
+WHERE (a.staff_checked_at IS NULL OR a.staff_checked_at < now() - sqlc.arg(stale_after)::interval)
+  AND (a.staff_has_more
+       OR (a.staff_has_more IS NULL
+           AND (SELECT count(*) FROM anime_staff s WHERE s.anime_id = a.anilist_id) >= sqlc.arg(full_page)::int))
+ORDER BY (a.staff_checked_at IS NULL) DESC, a.popularity DESC NULLS LAST, a.anilist_id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- Recommendations are still a whole-set delete + insert: only the detail
+-- document fetches them, so there is no second writer whose rows to keep.
 
 -- name: DeleteAnimeRecommendations :exec
 DELETE FROM anime_recommendations WHERE anime_id = $1;

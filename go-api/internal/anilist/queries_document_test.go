@@ -119,12 +119,16 @@ func TestEveryUpsertingDocumentSelectsTheScalarBlock(t *testing.T) {
 // asked).  The port asked for 8 characters and 10 staff, and more than
 // half the catalogue sat exactly at those caps; a person page needs
 // the whole first page.  Both selections also carry the node id, which
-// 0037 stores.
+// 0037 stores, and whether a second page exists, which 0042 stores.
+// The sort orders and the voice selection are pinned in
+// queries_credits_test.go.
 func TestDetailDocumentAsksForTheWholeFirstPage(t *testing.T) {
-	assert.Contains(t, AnimeDetailQuery, "characters(sort: ROLE, page: 1, perPage: 25)")
-	assert.Contains(t, AnimeDetailQuery, "staff(sort: RELEVANCE, page: 1, perPage: 25)")
-	assert.Contains(t, AnimeDetailQuery, "voiceActors(language: JAPANESE) { id")
-	assert.Contains(t, AnimeDetailQuery, "edges { role node { id name { full native } image { medium } }")
+	assert.Contains(t, AnimeDetailQuery, "characters(sort: [ROLE, RELEVANCE, ID], page: 1, perPage: 25)")
+	assert.Contains(t, AnimeDetailQuery, "staff(sort: [RELEVANCE, ID], page: 1, perPage: 25)")
+	assert.Contains(t, AnimeDetailQuery, "edges { role node { id name { full native } image { large medium } }")
+	assert.Contains(t, AnimeDetailQuery, "edges { role node { id name { full native } image { medium } } }")
+	assert.Equal(t, 2, strings.Count(AnimeDetailQuery, "pageInfo { hasNextPage }"),
+		"both credit connections must say whether a second page exists")
 }
 
 // TestTagsAndLinksAreSelectedWhereTheyAreWritten — the two lists 0038

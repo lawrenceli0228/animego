@@ -1,0 +1,364 @@
+/* The 制作 tab. Values are the approved design's (the Staff board and its
+ * shared stylesheet: `.chips` / `.chip`, `.in`, `.dept`, `.dgrid`, `.prow`,
+ * `.namecloud`), in the detail page's tokens (DetailShell.module.css) and
+ * the anime's tone. Each department's head is the overview's section head
+ * (sections.module.css), so the tab reads as more of the same page.
+ *
+ * Every row and every name is a link to the person's page, with the
+ * design's `.prow:hover`; a credit with no AniList id is text, with none.
+ */
+
+.root {
+  /* The section head's rule and its 「全部」 hover read --sec-tone, which
+   * the overview's sections declare for themselves. */
+  --sec-tone: var(--poster-tone, var(--accent));
+  margin-bottom: var(--sp-3xl);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Toolbar: department chips and search ──────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px 20px;
+  margin-bottom: 20px;
+}
+
+.chips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--detail-line-strong);
+  background: transparent;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--detail-text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 150ms var(--ease-out-expo),
+    border-color 150ms var(--ease-out-expo),
+    color 150ms var(--ease-out-expo);
+}
+
+.chip:hover {
+  color: var(--text);
+}
+
+/* The anime's tone on its own low fill — the one same-hue pairing
+ * lib/oklch.test.ts proves clears 4.5:1 at every hue. */
+.chip[aria-pressed="true"] {
+  border-color: var(--poster-tone-mid, var(--separator));
+  background: var(--poster-tone-low, var(--bg-elevated));
+  color: var(--poster-tone, var(--accent));
+}
+
+/* The one ring, app-wide — components/ui/focusRing.test.ts. */
+.chip:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.chipCount {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.searchBox {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 220px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--detail-line);
+  background: var(--detail-surface);
+  color: var(--detail-label);
+}
+
+.searchBox:has(.searchInput:focus-visible) {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.searchIcon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.searchInput::placeholder {
+  color: var(--detail-label);
+}
+
+.searchInput::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/* ── Departments ───────────────────────────────────────────────────────── */
+
+.dept {
+  margin-top: 40px;
+}
+
+/* 「展开全部 N 位」 is a button styled as the overview's 「全部」 link
+ * (.headMore); this only clears what a <button> brings with it. */
+.expand {
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.personItem {
+  display: flex;
+  min-width: 0;
+}
+
+.person {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--detail-line);
+  background: var(--detail-surface);
+  color: inherit;
+  text-decoration: none;
+}
+
+a.person:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (hover: hover) {
+  a.person:hover {
+    background: var(--detail-surface-raised);
+  }
+
+  a.person:hover .personName {
+    color: var(--poster-tone, var(--accent));
+  }
+}
+
+.avatar {
+  display: block;
+  flex: none;
+  width: 46px;
+  height: 46px;
+  object-fit: cover;
+  border-radius: var(--radius-full);
+  background: var(--detail-surface-high);
+}
+
+/* No portrait: the name's first character, as the design draws it. */
+.avatarEmpty {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-full);
+  background: var(--detail-surface-high);
+  font-family: var(--font-jp);
+  font-size: 13px;
+  color: var(--detail-text-2);
+}
+
+.personText {
+  min-width: 0;
+}
+
+.personNames {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.personName {
+  flex: none;
+  max-width: 100%;
+  font-family: var(--font-jp);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personAlt {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--detail-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Every role the person has in this department, as staffRoleLabel names
+ * them. Two lines at most: an episode director of a long series is credited
+ * for dozens of episodes. */
+.personRoles {
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--detail-text-2);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* A department too large for rows: names only. */
+.names {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nameChip {
+  display: block;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--detail-line);
+  background: var(--detail-surface);
+  font-family: var(--font-jp);
+  font-size: 13px;
+  color: var(--detail-text-2);
+  text-decoration: none;
+}
+
+a.nameChip:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (hover: hover) {
+  a.nameChip:hover {
+    color: var(--text);
+    background: var(--detail-surface-raised);
+  }
+}
+
+.empty {
+  padding: 30px;
+  border-radius: 14px;
+  border: 1px dashed var(--detail-line-strong);
+  text-align: center;
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 15px;
+  color: var(--detail-text-2);
+}
+
+/* ── Narrower screens ──────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .people {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* A phone: one column of rows; the chips scroll sideways in one line, as
+ * the design's phone boards draw them, and the search goes under them at
+ * full width. */
+@media (max-width: 700px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* The padding keeps a focused chip's ring inside the scroller, which
+   * would otherwise clip it; the margin gives the space back. */
+  .chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 4px;
+    margin: -4px;
+  }
+
+  .chips::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chip {
+    flex: none;
+  }
+
+  .searchBox {
+    width: 100%;
+    height: 44px;
+  }
+
+  .people {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dept {
+    margin-top: 32px;
+  }
+}

@@ -1,0 +1,43 @@
+/* The frame every /anime/[id] tab shares, and the detail page's own tokens.
+ *
+ * Declared here, on the element that wraps the whole page, and read by the
+ * sections below through var() — the hero, the overview's sections,
+ * EpisodesGrid, the tab bar and the two list tabs. Declared on this page
+ * only: globals.css keeps --text-tertiary at 0.30 for the rest of the site.
+ */
+
+.page {
+  /* Small label text on this page — field labels, section counts, episode
+   * numbers, role lines, score labels, the tab counts — at 55% white rather
+   * than --text-tertiary's 30%, which readers found too faint to use. About
+   * 5.7:1 on the page's black. */
+  --detail-label: rgba(235, 235, 245, 0.55);
+
+  /* The list tabs' surfaces and lines, from the approved design: a step
+   * darker than --bg-card, so a grid of forty cards reads as a quiet field
+   * rather than forty boxes. */
+  --detail-text-2: rgba(235, 235, 245, 0.72);
+  --detail-surface: #101013;
+  --detail-surface-raised: #16161a;
+  --detail-surface-high: #1d1d22;
+  --detail-line: rgba(255, 255, 255, 0.08);
+  --detail-line-strong: rgba(255, 255, 255, 0.14);
+}
+
+/* The column under the tab bar. 40px from the bar to the first thing in it
+ * (24px on a phone), whatever that thing's own margin says — the overview's
+ * first section used to sit straight under the hero and carries the larger
+ * gap that position wanted. */
+.body {
+  padding-top: 40px;
+}
+
+.body > :first-child {
+  margin-top: 0;
+}
+
+@media (max-width: 600px) {
+  .body {
+    padding-top: 24px;
+  }
+}

@@ -1,0 +1,108 @@
+/* The tab bar under the detail hero.
+ *
+ * Values are the approved design's (the `.tabs` / `.tab` rules of its shared
+ * stylesheet): a 56px bar with a hairline under it, 15px names in a quiet
+ * grey, the count beside each in the mono face, and the active tab in full
+ * white with a 2px rule in the anime's colour on the hairline.
+ *
+ * Nothing in the bar is positioned, on purpose. The hero above it is a
+ * stacking context of its own (isolation: isolate), and what opens out of
+ * its bottom edge — the signed-in rating popover under the action row —
+ * reaches into the first pixels of this bar. A positioned bar, or a
+ * positioned tab, paints over the popover and takes its clicks: a reader
+ * scoring a show 10 landed on 角色 instead. As plain flow content the bar
+ * paints below the hero's layer, so the active tab's rule is a background
+ * rather than an absolutely placed ::after.
+ *
+ * The tabs wrap rather than scroll. A scroller clips the focus ring at its
+ * top and bottom edges, and four tabs fit a phone in Chinese; a long English
+ * set takes a second line instead of hiding a tab off-screen.
+ *
+ * Colours read the detail page's tokens (DetailShell.module.css) and the
+ * per-anime tone, which HeroAccent provides on the element wrapping the page.
+ */
+
+.bar {
+  border-bottom: 1px solid var(--detail-line, rgba(255, 255, 255, 0.08));
+  background: var(--bg);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 56px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  white-space: nowrap;
+  color: var(--detail-text-2, rgba(235, 235, 245, 0.72));
+  text-decoration: none;
+  transition: color 150ms var(--ease-out-expo);
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+/* The one ring, app-wide — components/ui/focusRing.test.ts. */
+.tab:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--detail-label, var(--text-tertiary));
+}
+
+/* The rule: 2px, 12px in from each side, on the tab's bottom edge — which
+ * is the top of the bar's hairline. */
+.tab[data-active="true"] {
+  color: var(--text);
+  font-weight: 600;
+  background-image: linear-gradient(var(--poster-tone, var(--accent)), var(--poster-tone, var(--accent)));
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: calc(100% - 24px) 2px;
+}
+
+.tab[data-active="true"] .count {
+  color: var(--poster-tone, var(--accent));
+}
+
+/* A phone: the design's `.mtabs` — 48px, a little tighter. The gap above
+ * separates the overview's action row from the bar; every other tab has the
+ * compact hero (DetailShell: compact={active !== "overview"}), which ends in
+ * its own hairline, so the bar follows it directly. */
+@media (max-width: 600px) {
+  .bar {
+    margin-top: 16px;
+  }
+
+  [data-tab]:not([data-tab="overview"]) .bar {
+    margin-top: 0;
+  }
+
+  .row {
+    column-gap: 0;
+  }
+
+  .tab {
+    height: 48px;
+    padding: 0 14px;
+  }
+
+  .tab[data-active="true"] {
+    background-size: calc(100% - 20px) 2px;
+  }
+}

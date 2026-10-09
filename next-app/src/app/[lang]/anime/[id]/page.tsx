@@ -14,28 +14,32 @@
 
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import Image from "next/image";
 import Link from "@/components/ui/LocaleLink";
 import { notFound } from "next/navigation";
 import { buildBreadcrumbJsonLd, buildJsonLd } from "@/components/anime/animeJsonLd";
 import { DETAIL_CHARACTERS_SHOWN, DETAIL_STAFF_SHOWN } from "@/components/anime/detailPeople";
-import NextAiringBadge from "@/components/anime/NextAiringBadge";
 import DescriptionExpand from "@/components/anime/DescriptionExpand";
-import DetailActions from "@/components/anime/DetailActions";
 import FadeImage from "@/components/ui/FadeImage";
 import EpisodesGrid from "@/components/anime/EpisodesGrid";
-import { resolveEpisodeSkeleton } from "@/components/anime/episodeGridSkeleton";
-import HeroAccent from "@/components/anime/HeroAccent";
-import { GenreChips } from "@/components/anime/LocalizedChips";
 import { scoreScrimStyle } from "@/components/anime/scoreStyle";
 import WatchersAvatarList from "@/components/anime/WatchersAvatarList";
 import TrailerPreview from "@/components/anime/TrailerPreview";
-import s from "./page.module.css";
-// The four sections below the hero. A second module rather than more of
-// page.module.css because they are a separate surface — see that file's
-// header for the split, and this one's for what it is undoing.
+// The sections below the hero. The hero itself, the tab bar and the frame
+// around them are shared with the 角色 and 制作 tabs and live in _detail/ —
+// see DetailShell.tsx.
 import x from "./sections.module.css";
-import { apiGet, ApiError } from "@/lib/api";
+import DetailShell, { detailTrailerLabels } from "./_detail/DetailShell";
+import {
+  detailStaticParams,
+  loadCommunityCount,
+  loadCreditCountsSoft,
+  loadDetail,
+  parseAnimeId,
+} from "./_detail/detailData";
+import { seasonLabel, statusLabel } from "./_detail/detailLabels";
+import { characterRoleLabel } from "@/lib/detail/cast";
+import { detailTabHref } from "@/lib/detail/tabs";
+import { characterPath, personPath } from "@/lib/people/paths";
 import {
   durationLabel,
   formatLabel,
@@ -58,7 +62,6 @@ import {
   visualWidth,
 } from "@/lib/formatters";
 import { resolveLocale } from "@/lib/i18n/route";
-import { LOCALES } from "@/lib/i18n/locale";
 import { buildAlternates } from "@/lib/seo/alternates";
 import { studioPath } from "@/lib/hubs/paths";
 import { BCP47_TAG, OG_LOCALE, alternateOgLocales } from "@/lib/i18n/lang";
@@ -67,6 +70,7 @@ import { fill, type Dict } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n/lang";
 import type {
   AnimeDetail,
+  CreditCounts,
   DetailCharacter,
   DetailRecommendation,
   DetailRelation,
@@ -123,8 +127,10 @@ export const dynamicParams = true;
 // [] so 0 pages prerender and all ids fall through to ISR-on-demand. CI has no
 // backend and still has to exit 0 — do not add a throw path here.
 //
-// The result is the full LOCALES × ids product, and it has to be built here
-// rather than left to the root layout's localeParams(). A route with its own
+// The result is the full LOCALES × ids product, and it has to be built by the
+// route rather than left to the root layout's localeParams(); the 角色 and 制作
+// tabs prerender the same set, so detailStaticParams builds it for all three
+// (_detail/detailData.ts). A route with its own
 // generateStaticParams supplies EVERY param in its path, `lang` included; a
 // list of bare `{ id }` would not name the locale segment at all. Returning
 // half the product does not fail the build or the ISR gate — it silently
@@ -133,38 +139,22 @@ export const dynamicParams = true;
 export async function generateStaticParams(): Promise<
   Array<{ lang: string; id: string }>
 > {
-  let ids: string[];
-  try {
-    const trending = await apiGet<Array<{ anilistId: number }>>(
-      "/api/anime/trending?limit=20",
-      { revalidate: 3600, auth: false },
-    );
-    ids = trending.map((a) => String(a.anilistId));
-  } catch {
-    return [];
-  }
-  return LOCALES.flatMap((lang) => ids.map((id) => ({ lang, id })));
+  return detailStaticParams();
 }
 
 type AnimeDetailPageProps = PageProps<"/[lang]/anime/[id]">;
 
-// --- Detail fetch helper (shared by generateMetadata + default export) ---
+// --- Detail fetch helper ---
+//
+// loadDetail lives in _detail/detailData.ts with the other reads the tabs
+// share; generateMetadata and the page both call it and Next memoizes the
+// fetch within the request.
 
-async function loadDetail(id: number): Promise<AnimeDetail | null> {
-  try {
-    // auth:false — detail data is public / not user-scoped, so skip the
-    // cookies()/headers() read that would force this page dynamic (ISR-safe).
-    return await apiGet<AnimeDetail>(`/api/anime/${id}`, {
-      revalidate: 60,
-      auth: false,
-    });
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
-    throw err;
-  }
-}
-
-// --- Status / source / season labels ---
+// --- Labels ---
+//
+// The status and season labels the hero shares with the information table
+// are in _detail/detailLabels.ts; the character roles, which the 角色 tab
+// prints too, in lib/detail/cast.ts.
 
 const RELATION_ORDER = [
   "PREQUEL",
@@ -179,54 +169,11 @@ const RELATION_ORDER = [
   "OTHER",
 ];
 
-const CHARACTER_ROLE_LABEL: Record<Lang, Record<string, string>> = {
-  zh: { MAIN: "主角", SUPPORTING: "配角", BACKGROUND: "客串" },
-  en: { MAIN: "Main", SUPPORTING: "Supporting", BACKGROUND: "Background" },
-  // All three are script-identical — no conversion needed, only a row.
-  "zh-Hant": { MAIN: "主角", SUPPORTING: "配角", BACKGROUND: "客串" },
-};
-
-/**
- * Whether the H1 gets the Japanese (or romaji) original beneath it.
- *
- * Not a script question — a redundancy one. A Chinese H1 is a translation, so
- * the original is extra information worth showing; the English H1 already IS
- * titleEnglish or titleRomaji, so a romaji subtitle under it would repeat the
- * line above. zh-Hant is in the first group.
- *
- * Written as `lang === "zh" && …` before, which silently put every language
- * that was not Simplified into the second group — so a Traditional reader
- * lost the Japanese subtitle entirely, on every detail page, with nothing to
- * see in review because the H1 above it was correct.
- */
-const SHOWS_ORIGINAL_SUBTITLE: Record<Lang, boolean> = {
-  zh: true,
-  en: false,
-  "zh-Hant": true,
-};
-
 // scoreColor lived here and shipped a bug: it returned one of three band
 // colours while S.scoreBadge hardcoded an amber background, so every anime
 // rated 75+ rendered green text on an amber pill. It now lives in
 // @/components/anime/scoreStyle, which returns the two together and can be
 // imported by a test — this file cannot. See that module's header.
-
-function statusLabel(dict: Dict, status: string | null): string {
-  if (!status) return "";
-  const map: Record<string, string> = {
-    RELEASING: dict.detail.releasing,
-    FINISHED: dict.detail.finished,
-    NOT_YET_RELEASED: dict.detail.notYetReleased,
-    CANCELLED: dict.detail.cancelled,
-  };
-  return map[status] ?? status;
-}
-
-function seasonLabel(dict: Dict, season: string | null): string | null {
-  if (!season) return null;
-  const seasons = dict.season as unknown as Record<string, string>;
-  return seasons[season] ?? season;
-}
 
 // --- generateMetadata: title / description / OG / Twitter / canonical ---
 
@@ -234,8 +181,8 @@ export async function generateMetadata({
   params,
 }: AnimeDetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  const anilistId = Number(id);
-  if (!Number.isFinite(anilistId) || anilistId <= 0) {
+  const anilistId = parseAnimeId(id);
+  if (anilistId === null) {
     return { title: { absolute: "AnimeGoClub" } };
   }
 
@@ -299,9 +246,10 @@ export async function generateMetadata({
 
 // --- Styles ---
 //
-// In page.module.css, not in an object here. The hero was 19 inline
-// CSSProperties literals, and inline styles have two properties that made
-// that a dead end: they cannot express a hover, a focus ring or a media
+// The hero's are in _detail/DetailHero.module.css (page.module.css until
+// the tabs needed the same hero), not in an object here. The hero was 19
+// inline CSSProperties literals, and inline styles have two properties that
+// made that a dead end: they cannot express a hover, a focus ring or a media
 // query, and they beat every stylesheet rule, so CSS written against these
 // elements would have been silently inert.
 //
@@ -310,9 +258,9 @@ export async function generateMetadata({
 // top offset — are one design, and they were four separate ternaries on
 // `detail.bannerImageUrl` spread over 70 lines of JSX. They are now one
 // custom-property set per state and this file only declares which state it
-// is in, via data-banner. See the header of page.module.css.
+// is in, via data-banner. See the header of _detail/DetailHero.module.css.
 
-// --- Hero (banner + cover + meta block) ---
+// --- Synopsis ---
 
 // Collapsed-description budget, in "latin character" units — CJK counts two.
 // Measuring width rather than characters keeps the collapsed block the same
@@ -322,271 +270,6 @@ export async function generateMetadata({
 // only for English readers and Chinese readers got the whole synopsis dumped
 // into the hero.
 const DESC_TRUNCATE_WIDTH = 300;
-
-/**
- * The next episode if it is still ahead of the server clock, else null.
- *
- * `nextAiring` is as fresh as the row (a detail read or the hourly facts
- * sweep), so on a page rendered a day after the episode aired it names an
- * episode that is already out. Not rendering it at all is the honest
- * answer; the badge does the same check again on the client, against the
- * reader's clock, because the ISR copy this decision was made on can be
- * hours old by the time it is read.
- */
-function upcomingEpisode(
-  next: AnimeDetail["nextAiring"],
-): { airingAt: string; episode: number } | null {
-  if (!next?.airingAt || !next.episode) return null;
-  const at = Date.parse(next.airingAt);
-  if (!Number.isFinite(at) || at <= Date.now()) return null;
-  return { airingAt: next.airingAt, episode: next.episode };
-}
-
-function Hero({
-  detail,
-  lang,
-  dict,
-  actions,
-}: {
-  detail: AnimeDetail;
-  lang: Lang;
-  dict: Dict;
-  /* The action row, injected rather than rendered here. It is a client
-   * component and this file is not; passing it as a node keeps the hero a
-   * server component while letting the controls sit where the design puts
-   * them — directly under the facts, on the artwork. */
-  actions?: ReactNode;
-}) {
-  const title = pickTitle(detail, lang);
-  const durationText = durationLabel(detail.duration, lang);
-  const score = detail.averageScore;
-  // Shared with EpisodesGrid below the fold, so the badge and the grid can
-  // never disagree about whether this show's episode count is known.
-  //
-  // Both counts go in, and they go in through separate parameters. `episodes`
-  // is AniList's authoritative total; `episodesBgm` is the sweep's inference
-  // for the rows AniList leaves NULL. Passing the second one in as the first
-  // would size the grid correctly and then label the result `authoritative`,
-  // which is the same merge the schema refuses to do in SQL, just relocated
-  // into a discriminant.
-  //
-  // Only the `authoritative` case prints a number in the badge. `inferred` is
-  // a lower bound — a possibly-stale external total, or however many episode
-  // titles we happen to hold — and printing one next to the studio and the
-  // season would present it as the total, on a page Google indexes, in the
-  // same badge row that carries the score. buildJsonLd draws the harder line
-  // one layer up: numberOfEpisodes reads detail.episodes and nothing else, so
-  // an inferred count can size this grid but can never become a claim about
-  // the work. See animeJsonLd.ts.
-  const episodeSkeleton = resolveEpisodeSkeleton(
-    detail.episodes,
-    detail.episodesBgm ?? null,
-    detail.episodeTitles ?? [],
-  );
-  const nextAiring = upcomingEpisode(detail.nextAiring);
-
-  return (
-    // data-banner is the whole conditional. Every geometry value that used to
-    // be a `detail.bannerImageUrl ? a : b` in the JSX below now hangs off this
-    // one attribute in page.module.css, so the four of them cannot be changed
-    // apart from each other.
-    <div
-      className={s.hero}
-      data-banner={detail.bannerImageUrl ? "true" : "false"}
-    >
-      {/* Banner — a real <img>, not a CSS background.
-        *
-        * This is the LCP element of the page Google indexes, and as
-        * `background: url(...)` the preload scanner could not see it: that
-        * scanner only reads tag attributes off the raw HTML byte stream, so a
-        * URL that only exists inside a style declaration is not discoverable
-        * until the CSSOM is built and the box is laid out. Measured in prod at
-        * 198 KB with no preload of any kind, while the one image preload the
-        * page did emit pointed at the 210x300 cover below it.
-        *
-        * Switching to <img loading="eager" fetchPriority="high"> fixes both
-        * halves at once: the scanner finds it in the first pass, and React 19
-        * hoists a matching <link rel="preload" as="image"> for it (that is
-        * where the cover's existing preload comes from — there is no explicit
-        * preload call anywhere in this repo).
-        *
-        * Pixel-identical to the old rule: `center/cover` is exactly
-        * `object-fit: cover` + `object-position: center`, and inset-0 on a
-        * `position: relative` parent reproduces the painting box a background
-        * had. The overlay stays after it in DOM order so it still stacks on
-        * top. Decorative, so alt="" and hidden from the a11y tree — the title
-        * is rendered as text a few lines below.
-        *
-        * No width/height attributes on purpose: the element is absolutely
-        * positioned into a fixed-height box, so there is no layout to reserve
-        * and the intrinsic ratio would only be a lie if AniList ever changes
-        * banner dimensions. */}
-      <div className={s.banner}>
-        {detail.bannerImageUrl ? (
-          <Image
-            src={detail.bannerImageUrl}
-            alt=""
-            aria-hidden
-            // AniList banners are 1900x400. `sizes="100vw"` is honest -- the
-            // box is full-bleed at every width -- and it is affordable here
-            // because the page renders exactly one of these.
-            width={1900}
-            height={400}
-            quality={85}
-            sizes="100vw"
-            loading="eager"
-            fetchPriority="high"
-            decoding="sync"
-            className={s.bannerImage}
-          />
-        ) : null}
-        <div className={s.bannerOverlay} />
-      </div>
-
-      {/* Content */}
-      <div className={`container ${s.content}`}>
-        {/* Cover — `hero-cover` class lets HeroAccent's halo CSS attach.
-            Halo color comes from --poster-accent on the HeroAccent wrapper.
-            The width/height attributes still carry the intrinsic ratio (they
-            are what reserves the box before decode); the module sizes it. */}
-        <div className={s.coverSlot}>
-          {detail.coverImageUrl ? (
-            <FadeImage
-              src={detail.coverImageUrl}
-              alt={title}
-              width={210}
-              height={300}
-              priority
-              className={`hero-cover ${s.cover}`}
-            />
-          ) : (
-            <div className={s.coverPlaceholder} aria-hidden />
-          )}
-        </div>
-
-        {/* Meta + actions. Kept in one column on larger screens; the wrapper
-            becomes display:contents on phones so the action row can span
-            beneath both the cover and the text instead of being squeezed
-            into the narrow title column. */}
-        <div className={s.metaColumn}>
-          <div className={s.meta}>
-            <h1 className={s.title}>{title}</h1>
-          {SHOWS_ORIGINAL_SUBTITLE[lang] && (detail.titleNative || detail.titleRomaji) && (
-            <p className={s.subtitle}>
-              {detail.titleNative || detail.titleRomaji}
-              {/* The romanisation beside the native title, not instead of it.
-                  It is the string a reader types into a search box or matches
-                  against a filename, and it is Latin by definition — the one
-                  place on this page where a display face reads as typeset
-                  rather than as unstyled. */}
-              {detail.titleNative && detail.titleRomaji ? (
-                <span className={s.subtitleRoman}>{detail.titleRomaji}</span>
-              ) : null}
-            </p>
-          )}
-
-          {/* Facts — one dot-separated sentence, was three stacked strips.
-              Separators are drawn by CSS (.facts > * + *::before), so nothing
-              here has to know whether it is the first surviving item across
-              ten independently-optional fields. */}
-          {/* Six items, not eleven.
-              Format, season, studio, source and the Bangumi link all moved to
-              the InfoSection table below. This line is the glance — is it good,
-              is it finished, how long is it, what kind of thing is it — and
-              every field added to it costs the ones already here their weight.
-              The table is where the complete record belongs. */}
-          <div className={s.facts}>
-            {score && score > 0 ? (
-              // "AniList 91", not "★ 9.1". The star said nothing the word
-              // does not, and the raw 0-100 needs no mental conversion to
-              // compare against the site it came from.
-              //
-              // The number carries the anime's colour, not a score band.
-              // Band colours (green/amber/red) turn a score into a verdict,
-              // and three of them in a row — AniList, Bangumi, and every
-              // recommendation card — is three different judgements shouting
-              // at a reader who has not decided to care yet. The band
-              // mapping still exists and is still tested; it is used where a
-              // verdict IS the point, on the recommendation covers.
-              <span className={s.factsScore}>
-                <span className={s.factsScoreLabel}>AniList</span> {score}
-              </span>
-            ) : null}
-            {detail.bangumiScore && detail.bangumiScore > 0 ? (
-              // The score IS the link. There used to be a separate "view on
-              // Bangumi" item further along the row, which is a second thing
-              // to read that says what this one already implies — and it sat
-              // nowhere near the number it belonged to.
-              //
-              // Vote count lives in the score panel beside the synopsis,
-              // where there is room to label it.
-              detail.bgmId ? (
-                <a
-                  href={`https://bgm.tv/subject/${detail.bgmId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={s.factsBgmLink}
-                  title={dict.detail.viewOnBgm}
-                >
-                  <span className={s.factsScoreLabel}>Bangumi</span>{" "}
-                  {detail.bangumiScore.toFixed(1)}
-                </a>
-              ) : (
-                <span className={s.factsBgm}>
-                  <span className={s.factsScoreLabel}>Bangumi</span>{" "}
-                  {detail.bangumiScore.toFixed(1)}
-                </span>
-              )
-            ) : null}
-            {detail.status && <span>{statusLabel(dict, detail.status)}</span>}
-            {episodeSkeleton.kind === "authoritative" ? (
-              <span>
-                {episodeSkeleton.total} {dict.detail.epUnit}
-              </span>
-            ) : (
-              // Muted rather than plain: this is the "we do not have an
-              // authoritative count" case, and it should not read with the
-              // same confidence as a real number sitting next to it.
-              <span className={s.factsBgmVotes}>{dict.detail.episodeCountPending}</span>
-            )}
-            {durationText && <span>{durationText}</span>}
-            {/* Genres — client leaf so this follows the cookie language rather
-                than the server-pinned zh; see the route note at the top of this
-                file for why only this and the format badge get that treatment.
-                One instance for the whole row, not one per chip. Only the chip
-                text is localised: buildJsonLd still emits detail.genres raw, so
-                schema.org keeps the English AniList vocabulary. */}
-            <GenreChips genres={detail.genres} className={s.factsGenres} />
-          </div>
-
-          {/* The next episode, for a title with one ahead of it. Decided here
-              on the server clock only as far as "not already aired at render
-              time"; the client leaf owns the countdown and hides itself once
-              the instant passes (see NextAiringBadge). Also covers a premiere:
-              AniList's nextAiringEpisode on a NOT_YET_RELEASED title is
-              episode 1. */}
-          {nextAiring ? (
-            <NextAiringBadge
-              airingAt={nextAiring.airingAt}
-              episode={nextAiring.episode}
-              bcp47={BCP47_TAG[lang]}
-              copy={{
-                nextEpisode: dict.detail.nextEpisode,
-                airsInDays: dict.detail.airsInDays,
-                airsInHours: dict.detail.airsInHours,
-                airsInMinutes: dict.detail.airsInMinutes,
-                airsSoon: dict.detail.airsSoon,
-              }}
-            />
-          ) : null}
-
-          </div>
-          {actions ? <div className={s.actionSlot}>{actions}</div> : null}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // --- Relations section ---
 
@@ -834,7 +517,7 @@ function SynopsisSection({
           </header>
           {/* Description with 展开更多 / 收起 toggle */}
           {descFull && (
-            <div className={s.descBlockLast}>
+            <div className={x.descBlock}>
               <DescriptionExpand
                 truncated={descTruncated}
                 full={descFull}
@@ -1014,12 +697,25 @@ function RelationsSection({
 // How many people each section lays out lives in detailPeople.ts, shared
 // with the JSON-LD so the cast it names is the cast the reader can see.
 
+/** The chevron after a 「全部」 link — the design's, drawn in currentColor. */
+function MoreChevron() {
+  return (
+    <svg className={x.headMoreIcon} viewBox="0 0 24 24" aria-hidden>
+      <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
+}
+
 function CharactersSection({
+  anilistId,
   characters: allCharacters,
+  counts,
   lang,
   dict,
 }: {
+  anilistId: number;
   characters: DetailCharacter[];
+  counts: CreditCounts | null;
   lang: Lang;
   dict: Dict;
 }) {
@@ -1027,17 +723,26 @@ function CharactersSection({
   if (!characters.length) return null;
   const label = dict.detail.characters;
   const jaLabel = dict.detail.voiceActorLang;
+  // To the 角色 tab, which lists them all with every voice. Named with the
+  // number when the count arrived; the tab is there either way.
+  const allHref = detailTabHref(anilistId, "characters");
+  const allLabel = counts
+    ? fill(dict.detail.allCharacters, { n: counts.characters })
+    : dict.detail.allCharactersPlain;
 
   return (
     <section className={x.section}>
       <header className={x.head}>
         <h2 className={x.headTitle}>{label}</h2>
         <span className={x.headCount}>{characters.length}</span>
+        <Link href={allHref} className={x.headMoreWide} prefetch={false}>
+          {allLabel}
+          <MoreChevron />
+        </Link>
       </header>
       <div className={x.people}>
         {characters.map((c, i) => {
-          const roleKey = c.role?.toUpperCase() || "SUPPORTING";
-          const roleLabel = CHARACTER_ROLE_LABEL[lang]?.[roleKey] ?? roleKey;
+          const roleLabel = characterRoleLabel(c.role, lang);
           // Field shape on the wire is {nameEn|nameJa|nameCn, voiceActor*}.
           // pickCharacterName picks lang-appropriate with fallback so a
           // missing nameCn surfaces nameJa instead of "—".
@@ -1048,7 +753,13 @@ function CharactersSection({
             // one from the next is a hairline and the hover surface, both of
             // which live in the module because neither can be an inline style.
             <div key={`${charName}-${i}`} className={x.person}>
-              <div className={x.personSide}>
+              {/* Each side opens its own page — the character's, the voice
+                  actor's — as the design's two links per row. A row written
+                  before AniList ids were stored has no id and stays text. */}
+              <PersonSide
+                href={c.characterId != null ? characterPath(c.characterId) : null}
+                className={x.personSide}
+              >
                 {/* No null guard: FadeImage renders the same box with the
                     same class when src is null, so a character with no
                     portrait keeps the row's shape instead of collapsing it. */}
@@ -1063,9 +774,12 @@ function CharactersSection({
                   <div className={x.personRoleMain}>{roleLabel}</div>
                   <div className={x.personName}>{charName}</div>
                 </div>
-              </div>
+              </PersonSide>
               {va && (
-                <div className={x.personSideVa}>
+                <PersonSide
+                  href={c.voiceActorId != null ? personPath(c.voiceActorId) : null}
+                  className={x.personSideVa}
+                >
                   <FadeImage
                     src={c.voiceActorImageUrl}
                     alt={va}
@@ -1077,24 +791,45 @@ function CharactersSection({
                     <div className={x.personRole}>{jaLabel}</div>
                     <div className={x.personName}>{va}</div>
                   </div>
-                </div>
+                </PersonSide>
               )}
             </div>
           );
         })}
       </div>
+      {/* On a phone the link moves under the list, full width, where the
+          thumb is after eight rows — the design's phone board. One of the
+          two is display:none at any width. */}
+      <Link href={allHref} className={x.moreBlock} prefetch={false}>
+        {allLabel}
+      </Link>
     </section>
+  );
+}
+
+/** A link to a person's or character's page, or a plain box when there is none. */
+function PersonSide({ href, className, children }: { href: string | null; className: string; children: ReactNode }) {
+  return href ? (
+    <Link href={href} className={className} prefetch={false}>
+      {children}
+    </Link>
+  ) : (
+    <div className={className}>{children}</div>
   );
 }
 
 // --- Staff section ---
 
 function StaffSectionView({
+  anilistId,
   staff: allStaff,
+  counts,
   lang,
   dict,
 }: {
+  anilistId: number;
   staff: DetailStaff[];
+  counts: CreditCounts | null;
   lang: Lang;
   dict: Dict;
 }) {
@@ -1107,6 +842,10 @@ function StaffSectionView({
       <header className={x.head}>
         <h2 className={x.headTitle}>{label}</h2>
         <span className={x.headCount}>{staff.length}</span>
+        <Link href={detailTabHref(anilistId, "staff")} className={x.headMore} prefetch={false}>
+          {counts ? fill(dict.detail.allStaff, { n: counts.staff }) : dict.detail.allStaffPlain}
+          <MoreChevron />
+        </Link>
       </header>
       <div className={x.staffGrid}>
         {/* `member`, not `s`. The callback parameter used to be named `s`,
@@ -1120,7 +859,11 @@ function StaffSectionView({
           // en prefers English. Falls back across both before "—".
           const staffName = pickStaffName(member, lang) || "—";
           return (
-            <div key={`${staffName}-${i}`} className={x.staffRow}>
+            <PersonSide
+              key={`${staffName}-${i}`}
+              href={member.staffId != null ? personPath(member.staffId) : null}
+              className={x.staffRow}
+            >
               <FadeImage
                 src={member.imageUrl}
                 alt={staffName}
@@ -1142,7 +885,7 @@ function StaffSectionView({
                 )}
                 <div className={x.staffName}>{staffName}</div>
               </div>
-            </div>
+            </PersonSide>
           );
         })}
       </div>
@@ -1235,14 +978,25 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
   // route ever must become per-user, update/remove the CF cache rule in the
   // same change.
   const { id } = await params;
-  const anilistId = Number(id);
-  if (!Number.isFinite(anilistId) || anilistId <= 0) notFound();
+  const anilistId = parseAnimeId(id);
+  if (anilistId === null) notFound();
 
   const [{ dict, lang }, detail] = await Promise.all([
     resolveLocale(params),
     loadDetail(anilistId),
   ]);
   if (!detail) notFound();
+  // After the detail, not beside it: for a title only a listing has written,
+  // the detail fetch is what fills the credit tables, and counts read in
+  // parallel would be the zeros from before (see detailData.ts `snapshot`).
+  // For the tab bar and the 「全部」 links only — a page that could not get
+  // them still renders, with neither number. The community count waits for
+  // the detail too: for a title the catalogue did not hold, the detail fetch
+  // is what adds it, and before that the count is a 404.
+  const [counts, communityCount] = await Promise.all([
+    loadCreditCountsSoft(anilistId, detail.cachedAt),
+    loadCommunityCount(anilistId),
+  ]);
 
   // ISSUE-001 now lives client-side: SubscriptionButton / EpisodesGrid read
   // the non-httpOnly `auth_hint` cookie on mount (see lib/clientAuth) and skip
@@ -1252,13 +1006,6 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
   const breadcrumbLd = buildBreadcrumbJsonLd(detail, lang, dict.nav.home);
   const displayTitle = pickTitle(detail, lang);
   const trailer = asYouTubeTrailer(detail.trailer);
-  const trailerLabels = {
-    official: dict.detail.officialTrailer,
-    watch: dict.detail.watchTrailer,
-    watchAria: dict.detail.watchTrailerAria,
-    close: dict.detail.closeTrailer,
-    openYouTube: dict.detail.openTrailerOnYouTube,
-  };
 
   return (
     <>
@@ -1281,115 +1028,62 @@ export default async function AnimeDetailPage({ params }: AnimeDetailPageProps) 
           __html: JSON.stringify(breadcrumbLd).replace(/</g, "\\u003c"),
         }}
       />
-      <main>
-        {/* Wraps the WHOLE page, not just the hero.
-         *
-         * HeroAccent carries `--poster-hue` and the `.poster-scope` class that
-         * builds `--poster-tone*` from it, and a custom property's var() is
-         * substituted on the element that DECLARES it — so those tokens only
-         * hold the anime's hue inside this element. Everything below the hero
-         * reads them (sections.module.css, EpisodesGrid), so closing the
-         * wrapper after <Hero> would leave all of it on the :root fallback:
-         * one violet for every anime, with nothing failing and the stylesheet
-         * still reading correctly. See globals.css `.poster-scope`.
-         *
-         * Adding this div does not touch the anonymous-server-render rule
-         * below — HeroAccent takes props only, reads no cookie or header. */}
-        <HeroAccent
-          anilistId={detail.anilistId}
-          coverImageUrl={detail.coverImageUrl}
-          posterAccent={detail.posterAccent ?? null}
-          posterAccentRgb={detail.posterAccentRgb ?? null}
-        >
-          <Hero
-            detail={detail}
-            lang={lang}
-            dict={dict}
-            actions={
-              <DetailActions
-                anilistId={detail.anilistId}
-                episodes={detail.episodes}
-                titleRomaji={detail.titleRomaji}
-                titleEnglish={detail.titleEnglish}
-                titleChinese={detail.titleChinese}
-                titleNative={detail.titleNative}
-                coverImageUrl={detail.coverImageUrl}
-                shareTitle={displayTitle}
-                lang={lang}
-                trailerId={trailer?.id ?? null}
-                trailerLabels={trailerLabels}
-                labels={{
-                  subAdd: dict.sub.addToList,
-                  subRemove: dict.sub.remove,
-                  subLogin: dict.sub.loginToWatch,
-                  subLoginAria: dict.sub.loginToWatch,
-                  subRate: dict.sub.rate,
-                  subWatching: dict.sub.watching,
-                  subCompleted: dict.sub.completed,
-                  subPlanToWatch: dict.sub.planToWatch,
-                  subDropped: dict.sub.dropped,
-                  share: dict.social.share,
-                  shareCopied: dict.detail.linkCopied,
-                  shareCopyFailed: dict.detail.linkCopyFailed,
-                  torrents: dict.torrent.download,
-                  torrentsTitle: dict.torrent.title,
-                  torrentsSearchBtn: dict.torrent.searchBtn,
-                  torrentsPlaceholder: dict.torrent.placeholder,
-                  torrentsGroupAll: dict.torrent.groupAll,
-                  torrentsEpAll: dict.torrent.epAll,
-                  torrentsLoading: dict.torrent.loading,
-                  torrentsNoResults: dict.torrent.noResults,
-                  torrentsClose: dict.torrent.close,
-                  torrentsCopy: dict.torrent.copy,
-                  torrentsCopied: dict.torrent.copied,
-                  torrentsOpenMagnet: dict.torrent.openMagnet,
-                  torrentsSeeders: dict.torrent.seeders,
-                  play: dict.detail.openPlayer,
-                  playAria: dict.detail.openPlayerAria,
-                }}
+      <DetailShell
+        detail={detail}
+        lang={lang}
+        dict={dict}
+        active="overview"
+        counts={{ characters: counts?.characters, staff: counts?.staff, social: communityCount }}
+      >
+        {/* Order follows the demo: read about it, look it up, then use
+            it. Episodes sit third rather than sixth because they are the
+            one thing a returning visitor came for, and relations move
+            near the bottom because they are navigation away from this
+            page — putting them second sent people off it before they had
+            seen anything. */}
+        <SynopsisSection
+          detail={detail}
+          lang={lang}
+          dict={dict}
+          trailer={
+            trailer ? (
+              <TrailerPreview
+                trailerId={trailer.id}
+                title={displayTitle}
+                labels={detailTrailerLabels(dict)}
+                variant="card"
               />
-            }
-          />
-          <div className="container">
-            {/* Order follows the demo: read about it, look it up, then use
-                it. Episodes sit third rather than sixth because they are the
-                one thing a returning visitor came for, and relations move
-                near the bottom because they are navigation away from this
-                page — putting them second sent people off it before they had
-                seen anything. */}
-            <SynopsisSection
-              detail={detail}
-              lang={lang}
-              dict={dict}
-              trailer={
-                trailer ? (
-                  <TrailerPreview
-                    trailerId={trailer.id}
-                    title={displayTitle}
-                    labels={trailerLabels}
-                    variant="card"
-                  />
-                ) : undefined
-              }
-            />
-            <InfoSection detail={detail} lang={lang} dict={dict} />
-            <EpisodesGrid
-              anilistId={detail.anilistId}
-              episodes={detail.episodes}
-              episodesBgm={detail.episodesBgm ?? null}
-              episodeTitles={detail.episodeTitles ?? []}
-            />
-            <CharactersSection characters={detail.characters} lang={lang} dict={dict} />
-            <StaffSectionView staff={detail.staff} lang={lang} dict={dict} />
-            <RelationsSection relations={detail.relations} lang={lang} dict={dict} />
-            <RecommendationsSection
-              recommendations={detail.recommendations}
-              lang={lang}
-              dict={dict}
-            />
-          </div>
-        </HeroAccent>
-      </main>
+            ) : undefined
+          }
+        />
+        <InfoSection detail={detail} lang={lang} dict={dict} />
+        <EpisodesGrid
+          anilistId={detail.anilistId}
+          episodes={detail.episodes}
+          episodesBgm={detail.episodesBgm ?? null}
+          episodeTitles={detail.episodeTitles ?? []}
+        />
+        <CharactersSection
+          anilistId={detail.anilistId}
+          characters={detail.characters}
+          counts={counts}
+          lang={lang}
+          dict={dict}
+        />
+        <StaffSectionView
+          anilistId={detail.anilistId}
+          staff={detail.staff}
+          counts={counts}
+          lang={lang}
+          dict={dict}
+        />
+        <RelationsSection relations={detail.relations} lang={lang} dict={dict} />
+        <RecommendationsSection
+          recommendations={detail.recommendations}
+          lang={lang}
+          dict={dict}
+        />
+      </DetailShell>
     </>
   );
 }

@@ -57,6 +57,7 @@ import (
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/cache"
+	"github.com/lawrenceli0228/animego/go-api/internal/credits"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpx"
 )
@@ -339,9 +340,11 @@ type DetailRelation struct {
 	Format                      *string  `json:"format"`
 }
 
-// DetailCharacter mirrors the anime_characters table; nameCn /
-// voiceActorImageUrl / voiceActorCn remain nil until Phase 4 enrichment
-// runs.  Order matches the sqlc-generated GetAnimeCharactersByIDRow.
+// DetailCharacter mirrors the anime_characters table.  nameCn and
+// voiceActorCn are Bangumi's simplified Chinese names for the character
+// and its voice, from the matches cmd/bgmnames stores (0045), and nil
+// where there is none.  Order matches the sqlc-generated
+// GetAnimeCharactersByIDRow.
 type DetailCharacter struct {
 	NameEn             *string `json:"nameEn"`
 	NameJa             *string `json:"nameJa"`
@@ -409,10 +412,14 @@ type DetailReader interface {
 }
 
 // DetailWriter is the upsert slice of DetailDB.  Used only by the
-// AniList re-fetch path: main row upsert + six child-table Delete+Insert
-// pairs.  Defined as a separate interface so consumers that only need to
-// READ (e.g. a hypothetical /api/anime/:anilistId/preview endpoint that
-// never re-fetches) can depend on the narrower DetailReader alone.
+// AniList re-fetch path: main row upsert, whole-set Delete+Insert pairs
+// for the child tables only the detail document fills, and the credits
+// statements (credits.CastWriter / StaffWriter) for characters and staff,
+// which the credits sweep fills too and which are therefore upserted
+// rather than replaced.  Defined as a separate interface so consumers
+// that only need to READ (e.g. a hypothetical
+// /api/anime/:anilistId/preview endpoint that never re-fetches) can
+// depend on the narrower DetailReader alone.
 type DetailWriter interface {
 	UpsertAnimeCache(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
 
@@ -431,11 +438,9 @@ type DetailWriter interface {
 	DeleteAnimeRelations(ctx context.Context, animeID int32) error
 	InsertAnimeRelation(ctx context.Context, arg dbgen.InsertAnimeRelationParams) error
 
-	DeleteAnimeCharacters(ctx context.Context, animeID int32) error
-	InsertAnimeCharacter(ctx context.Context, arg dbgen.InsertAnimeCharacterParams) error
-
-	DeleteAnimeStaff(ctx context.Context, animeID int32) error
-	InsertAnimeStaffMember(ctx context.Context, arg dbgen.InsertAnimeStaffMemberParams) error
+	credits.CastWriter
+	credits.StaffWriter
+	SetAnimeCreditsHasMore(ctx context.Context, castHasMore *bool, staffHasMore *bool, anilistID int32) error
 
 	DeleteAnimeRecommendations(ctx context.Context, animeID int32) error
 	InsertAnimeRecommendation(ctx context.Context, arg dbgen.InsertAnimeRecommendationParams) error
@@ -511,6 +516,17 @@ func NewDetailService(db DetailDB, anilistClient AniListDetailer) (*DetailServic
 		return nil, fmt.Errorf("anime/detail: build absent cache: %w", err)
 	}
 	return &DetailService{db: db, cache: c, anilist: anilistClient, absent: absent}, nil
+}
+
+// Forget drops titles from the detail cache, so the next read of each
+// rebuilds it from the database.  A review that accepts edits to a person
+// or character calls it with every title crediting them: the cast and
+// staff lists carry their names and images (GetAnimeCharactersByID), and a
+// cached response would keep the old ones for up to detailCacheTTL.
+func (s *DetailService) Forget(ids ...int32) {
+	for _, id := range ids {
+		s.cache.Delete(strconv.FormatInt(int64(id), 10))
+	}
 }
 
 // Close releases the underlying ristretto caches.  Safe to call multiple
@@ -949,10 +965,12 @@ func (s *DetailService) refetchFromAniList(
 	return detail, nil
 }
 
-// upsertFromMedia writes one Media into anime_cache + the six child
-// tables.  Sequential, non-transactional — the trade-off documented in
-// refetchFromAniList's docstring.  Each child table follows the
-// Delete+Insert pattern (anime_cache main row uses ON CONFLICT instead).
+// upsertFromMedia writes one Media into anime_cache + the child tables.
+// Sequential, non-transactional — the trade-off documented in
+// refetchFromAniList's docstring.  The child tables only this document
+// fills follow the Delete+Insert pattern; characters, voices and staff,
+// which the credits sweep fills beyond the first page, are upserted (see
+// step 5).  The anime_cache main row uses ON CONFLICT.
 //
 // Errors from any step short-circuit the rest; subsequent calls will
 // observe the partial state via isStale and re-fetch.  This is the same
@@ -967,64 +985,73 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 		return fmt.Errorf("upsert main: %w", err)
 	}
 
+	return writeDetailChildren(ctx, s.db, anilistID, m)
+}
+
+// writeDetailChildren writes everything of one AnimeDetailQuery Media
+// below the main row: steps 2-7 of upsertFromMedia, which calls it after
+// the main row.  EnsureCached calls it too, for a title a subscription
+// reaches before the detail page does: the row it writes is stamped as
+// detail-fetched, so these tables are filled then or not for a day.
+func writeDetailChildren(ctx context.Context, w DetailWriter, anilistID int32, m anilist.Media) error {
 	// 2) Genres — Delete + Insert.  Plain string column, no accent
 	// fields, no display order.
-	if err := s.db.DeleteAnimeGenres(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeGenres(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete genres: %w", err)
 	}
 	for _, g := range Genres(m) {
-		if err := s.db.InsertAnimeGenre(ctx, anilistID, g); err != nil {
+		if err := w.InsertAnimeGenre(ctx, anilistID, g); err != nil {
 			return fmt.Errorf("insert genre %q: %w", g, err)
 		}
 	}
 
 	// 2b) Synonyms — same shape as genres: a whole-set replace from the
 	// one source that has them.
-	if err := s.db.DeleteAnimeSynonyms(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeSynonyms(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete synonyms: %w", err)
 	}
 	for _, syn := range m.SynonymSet() {
-		if err := s.db.InsertAnimeSynonym(ctx, anilistID, syn); err != nil {
+		if err := w.InsertAnimeSynonym(ctx, anilistID, syn); err != nil {
 			return fmt.Errorf("insert synonym %q: %w", syn, err)
 		}
 	}
 
 	// 3) Studios — Delete + Insert.
-	if err := s.db.DeleteAnimeStudios(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeStudios(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete studios: %w", err)
 	}
 	for _, st := range StudiosFromMedia(m) {
-		if err := s.db.InsertAnimeStudio(ctx, anilistID, st.Name, st.StudioID, st.IsMain); err != nil {
+		if err := w.InsertAnimeStudio(ctx, anilistID, st.Name, st.StudioID, st.IsMain); err != nil {
 			return fmt.Errorf("insert studio %q: %w", st.Name, err)
 		}
 	}
 
 	// 3b) Tags (AniList's set only -- Bangumi's is V2's) and external
 	//     links.  Whole-set replaces, like genres.
-	if err := s.db.DeleteAnimeTagsBySource(ctx, anilistID, "anilist"); err != nil {
+	if err := w.DeleteAnimeTagsBySource(ctx, anilistID, "anilist"); err != nil {
 		return fmt.Errorf("delete tags: %w", err)
 	}
 	for _, tg := range TagsFromMedia(m) {
-		if err := s.db.InsertAnimeTag(ctx, anilistID, "anilist", tg.Name, tg.Rank, tg.IsSpoiler); err != nil {
+		if err := w.InsertAnimeTag(ctx, anilistID, "anilist", tg.Name, tg.Rank, tg.IsSpoiler); err != nil {
 			return fmt.Errorf("insert tag %q: %w", tg.Name, err)
 		}
 	}
-	if err := s.db.DeleteAnimeExternalLinks(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeExternalLinks(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete external links: %w", err)
 	}
 	for _, l := range LinksFromMedia(m) {
-		if err := s.db.InsertAnimeExternalLink(ctx, anilistID, l.Site, l.URL, l.Type); err != nil {
+		if err := w.InsertAnimeExternalLink(ctx, anilistID, l.Site, l.URL, l.Type); err != nil {
 			return fmt.Errorf("insert external link %q: %w", l.URL, err)
 		}
 	}
 
 	// 4) Relations — Delete + Insert.  Each row carries accent fields
 	// computed from the relation's cover colour.
-	if err := s.db.DeleteAnimeRelations(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeRelations(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete relations: %w", err)
 	}
 	for _, r := range RelationsFromMedia(m) {
-		if err := s.db.InsertAnimeRelation(ctx, dbgen.InsertAnimeRelationParams{
+		if err := w.InsertAnimeRelation(ctx, dbgen.InsertAnimeRelationParams{
 			AnimeID:                     anilistID,
 			AnilistID:                   r.AnilistID,
 			RelationType:                r.RelationType,
@@ -1040,56 +1067,44 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 		}
 	}
 
-	// 5) Characters — Delete + Insert.  display_order is the slice
-	// index (set inside CharactersFromMedia).
-	if err := s.db.DeleteAnimeCharacters(ctx, anilistID); err != nil {
-		return fmt.Errorf("delete characters: %w", err)
+	// 5) Characters, their voices, and staff.  Not Delete + Insert: this
+	// document holds AniList's FIRST page of each list, and the credits
+	// sweep (queue/anime_credits.go) stores the rest.  Replacing the table
+	// here, as this step did until 0042, erased the sweep's rows on every
+	// 24h refresh.  credits.WriteCast upserts the page by AniList's ids
+	// and keeps every row beyond it -- unless AniList says the page is
+	// also the last, in which case it is the whole list and anything else
+	// stored for the title is stale.  See credits.WriteCast.
+	if m.Characters != nil {
+		mode := credits.ModeFor(m.Characters.NextPage())
+		if err := credits.WriteCast(ctx, w, anilistID, CastFromMedia(m), mode); err != nil {
+			return fmt.Errorf("characters: %w", err)
+		}
 	}
-	for _, c := range CharactersFromMedia(m) {
-		if err := s.db.InsertAnimeCharacter(ctx, dbgen.InsertAnimeCharacterParams{
-			AnimeID:            anilistID,
-			DisplayOrder:       c.DisplayOrder,
-			NameEn:             c.NameEn,
-			NameJa:             c.NameJa,
-			NameCn:             c.NameCn,
-			ImageUrl:           c.ImageUrl,
-			Role:               c.Role,
-			VoiceActorEn:       c.VoiceActorEn,
-			VoiceActorJa:       c.VoiceActorJa,
-			VoiceActorImageUrl: c.VoiceActorImageUrl,
-			CharacterID:        c.CharacterID,
-			VoiceActorID:       c.VoiceActorID,
-		}); err != nil {
-			return fmt.Errorf("insert character %d: %w", c.DisplayOrder, err)
+	if m.Staff != nil {
+		mode := credits.ModeFor(m.Staff.NextPage())
+		if err := credits.WriteStaff(ctx, w, anilistID, StaffFromMedia(m), mode); err != nil {
+			return fmt.Errorf("staff: %w", err)
 		}
 	}
 
-	// 6) Staff — Delete + Insert.
-	if err := s.db.DeleteAnimeStaff(ctx, anilistID); err != nil {
-		return fmt.Errorf("delete staff: %w", err)
-	}
-	for _, st := range StaffFromMedia(m) {
-		if err := s.db.InsertAnimeStaffMember(ctx, dbgen.InsertAnimeStaffMemberParams{
-			AnimeID:      anilistID,
-			DisplayOrder: st.DisplayOrder,
-			NameEn:       st.NameEn,
-			NameJa:       st.NameJa,
-			ImageUrl:     st.ImageUrl,
-			Role:         st.Role,
-			StaffID:      st.StaffID,
-		}); err != nil {
-			return fmt.Errorf("insert staff %d: %w", st.DisplayOrder, err)
+	// 6) Whether there is more than the first page: what puts the title
+	// in, or keeps it out of, the credits sweep's candidate list.
+	castHasMore, staffHasMore := hasMore(m.Characters.NextPage()), hasMore(m.Staff.NextPage())
+	if castHasMore != nil || staffHasMore != nil {
+		if err := w.SetAnimeCreditsHasMore(ctx, castHasMore, staffHasMore, anilistID); err != nil {
+			return fmt.Errorf("credits has-more: %w", err)
 		}
 	}
 
 	// 7) Recommendations — Delete + Insert.  Express filtered nil
 	// mediaRecommendation entries at normalize time, so the slice here
 	// is already clean.
-	if err := s.db.DeleteAnimeRecommendations(ctx, anilistID); err != nil {
+	if err := w.DeleteAnimeRecommendations(ctx, anilistID); err != nil {
 		return fmt.Errorf("delete recommendations: %w", err)
 	}
 	for _, r := range RecommendationsFromMedia(m) {
-		if err := s.db.InsertAnimeRecommendation(ctx, dbgen.InsertAnimeRecommendationParams{
+		if err := w.InsertAnimeRecommendation(ctx, dbgen.InsertAnimeRecommendationParams{
 			AnimeID:                     anilistID,
 			AnilistID:                   r.AnilistID,
 			Title:                       r.Title,
@@ -1105,6 +1120,15 @@ func (s *DetailService) upsertFromMedia(ctx context.Context, anilistID int32, m 
 	}
 
 	return nil
+}
+
+// hasMore turns a connection's NextPage answer into the nullable flag
+// SetAnimeCreditsHasMore takes: nil when the document did not say.
+func hasMore(hasNext, known bool) *bool {
+	if !known {
+		return nil
+	}
+	return &hasNext
 }
 
 // convertRelationsToDetailRelations is the fallback path when the

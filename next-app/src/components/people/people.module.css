@@ -1,0 +1,664 @@
+/* The person and character pages — /person/[id] and /character/[id].
+ *
+ * Values are the approved canvas's (docs: detail-tabs-canvas, Character /
+ * Person / Mobile-Character / Mobile-Person, and its detail.css), set on the
+ * site's own tokens where one exists: the page width is `.container`'s, the
+ * section heads are the detail page's (sections.module.css: 15px / 640, the
+ * short rule in the title's colour), the focus ring is the one ring.
+ *
+ * One DOM per page, desktop and phone alike; the phone layout (≤600px, the
+ * detail page's phone breakpoint) is a media query, not a second component.
+ * This file is the page around the content — the header, the section heads,
+ * the controls; the cards are cards.module.css, where the canvas's other
+ * desktop/phone differences (row cards that become a strip, cards that
+ * become a list) live.
+ *
+ * Colour. `.page` sits on the same element as the global `.poster-scope` and
+ * the inline `--poster-hue` of the title the page hangs under, so the tone
+ * tokens below are built from that hue on that element (a var() resolves where
+ * the property is declared — see globals.css `.poster-scope`). Nothing below
+ * may declare a `--pp-tone-*` anywhere else, or it would resolve against the
+ * :root hue.
+ *
+ * Small text — counts, the fact labels, the line under a name — is 55% white,
+ * the value the redesign settled on for the detail page's micro-labels.
+ */
+
+.page {
+  --pp-surface: #101013;
+  --pp-surface-2: #16161a;
+  --pp-surface-3: #1d1d22;
+  --pp-line: rgba(255, 255, 255, 0.08);
+  --pp-line-2: rgba(255, 255, 255, 0.14);
+  --pp-muted: rgba(235, 235, 245, 0.68);
+  --pp-label: rgba(235, 235, 245, 0.55);
+  --pp-tone-hi: oklch(84% 0.07 var(--poster-hue));
+  --pp-tone-dim: oklch(76% 0.085 var(--poster-hue) / 0.14);
+  --pp-tone-line: oklch(76% 0.085 var(--poster-hue) / 0.4);
+
+  padding-top: 32px;
+  padding-bottom: 64px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Breadcrumb ─────────────────────────────────────────────────────────── */
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--pp-label);
+}
+
+.crumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.crumbLink {
+  color: var(--pp-muted);
+  border-radius: 4px;
+}
+
+.crumbLink:hover {
+  color: var(--pp-tone-hi);
+}
+
+.crumbLink:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.crumbSep {
+  color: var(--pp-label);
+}
+
+/* ── Header: portrait, names, tags, facts ───────────────────────────────── *
+ *
+ * A grid with named areas, because the facts move: beside the portrait on a
+ * desktop, under it at full width on a phone. One DOM order for both, which is
+ * also the reading order a screen reader gets. */
+
+.header {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-areas:
+    "portrait main"
+    "portrait facts"
+    "portrait about";
+  grid-template-rows: auto auto 1fr;
+  column-gap: 40px;
+  margin-top: 22px;
+}
+
+.header[data-kind="person"] {
+  grid-template-columns: 200px minmax(0, 1fr);
+}
+
+.portraitSlot {
+  grid-area: portrait;
+  align-self: start;
+}
+
+.portrait {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 14px;
+  background: var(--pp-surface-2);
+}
+
+.header[data-kind="character"] .portrait {
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
+}
+
+.headMain {
+  grid-area: main;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.titleBlock {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.subNames {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.nativeName {
+  color: var(--pp-muted);
+}
+
+/* Japanese text in a Japanese face: Han characters are drawn differently in
+ * Japanese and Simplified Chinese (globals.css, --font-jp). Only on text
+ * known to be Japanese — a Chinese voice actor's native name is Chinese. */
+.jp {
+  font-family: var(--font-jp);
+}
+
+.romajiName {
+  font-family: var(--font-latin);
+  color: var(--pp-label);
+}
+
+.dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.aliasRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.aliasLabel {
+  font-size: 13px;
+  color: var(--pp-label);
+}
+
+.alias {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--pp-surface-3);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tag {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--pp-tone-line);
+  background: var(--pp-tone-dim);
+  color: var(--pp-tone-hi);
+  white-space: nowrap;
+}
+
+/* A character's role in the title the page hangs under. The phone canvas
+ * shows it under the name; the desktop one leaves it to the role tags on the
+ * title covers below. */
+.header[data-kind="character"] .tags {
+  display: none;
+}
+
+/* The header's controls: 「编辑」. Rendered only when there are any, so a
+ * header without one has no empty box. */
+.actions {
+  flex: none;
+  display: flex;
+  gap: 8px;
+}
+
+/* 「编辑」, the canvas's .btn: a quiet outlined control beside the name. */
+.editLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 15px;
+  border-radius: 9px;
+  border: 1px solid var(--pp-line-2);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.editLink:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.editLink:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.editIcon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.facts {
+  grid-area: facts;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 64px minmax(0, 1fr);
+  gap: 12px 14px;
+  align-items: center;
+  max-width: 520px;
+  margin: 22px 0 0;
+  font-size: 14px;
+}
+
+/* <dt>/<dd> pairs in wrappers a screen reader keeps together; the wrapper
+ * steps out of the grid so the pairs lay out as four columns. */
+.factPair {
+  display: contents;
+}
+
+.factLabel {
+  font-size: 13px;
+  color: var(--pp-label);
+}
+
+.factValue {
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.factEmpty {
+  color: var(--pp-label);
+}
+
+.about {
+  grid-area: about;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--pp-line);
+  max-width: 760px;
+}
+
+/* The description has a heading on a phone (the canvas's 简介) and none on a
+ * desktop, where the rule above it is the whole separation. Kept in the
+ * document either way so the section is named for assistive tech. */
+.aboutTitle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.description {
+  font-size: 14px;
+  line-height: 1.85;
+  color: rgba(243, 243, 245, 0.82);
+  overflow-wrap: anywhere;
+}
+
+.description p {
+  margin: 0;
+}
+
+.description p + p {
+  margin-top: 10px;
+}
+
+/* 简介来自 Bangumi, as under the title's synopsis (DescriptionExpand). */
+.descriptionSource {
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--pp-label);
+}
+
+.descriptionSource a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.spoilerButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  margin: 0 2px;
+  border-radius: 6px;
+  border: 1px solid var(--pp-line-2);
+  background: var(--pp-surface-3);
+  color: var(--pp-muted);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1;
+  vertical-align: 1px;
+  cursor: pointer;
+}
+
+.spoilerButton:hover {
+  color: var(--pp-tone-hi);
+  border-color: var(--pp-tone-line);
+}
+
+.spoilerButton:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.spoilerText {
+  border-bottom: 1px dashed var(--pp-line-2);
+}
+
+/* ── Sections ───────────────────────────────────────────────────────────── */
+
+.section {
+  margin-top: 48px;
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.sectionTitle {
+  flex: none;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 640;
+  line-height: 1.62;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.sectionTitle::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  margin-right: 11px;
+  vertical-align: 0.34em;
+  border-radius: 1px;
+  background: var(--poster-tone);
+}
+
+/* Sans for the words, mono for the digits only: the repo ships no CJK
+ * monospace face, so a Chinese label set in --font-mono falls through to
+ * whatever the OS has (sections.module.css, .headCount). */
+.sectionCount {
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--pp-label);
+}
+
+.sectionTools {
+  margin-left: auto;
+  align-self: center;
+}
+
+/* ── Controls: 新到旧 / 只看主角, and 查看全部 ─────────────────────────────── */
+
+.segment {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--pp-line);
+  background: var(--pp-surface);
+}
+
+.segmentButton {
+  height: 32px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--pp-muted);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmentButton:hover {
+  color: var(--text);
+}
+
+.segmentButton[aria-pressed="true"] {
+  background: var(--pp-surface-3);
+  color: var(--text);
+}
+
+.segmentButton:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.loadMore {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-top: 18px;
+  border-radius: 10px;
+  border: 1px dashed var(--pp-line-2);
+  background: var(--pp-surface);
+  color: var(--pp-muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.loadMore:hover {
+  color: var(--text);
+  border-color: var(--pp-tone-line);
+}
+
+.loadMore:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .segmentButton,
+  .loadMore {
+    transition:
+      background-color 0.18s var(--ease-out-expo),
+      color 0.18s var(--ease-out-expo),
+      border-color 0.18s var(--ease-out-expo);
+  }
+}
+
+@media (max-width: 900px) and (min-width: 601px) {
+  .header {
+    column-gap: 28px;
+  }
+}
+
+/* ── Phone ──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .page {
+    padding-top: 16px;
+    padding-bottom: 40px;
+  }
+
+  .header,
+  .header[data-kind="person"] {
+    grid-template-columns: 130px minmax(0, 1fr);
+    grid-template-areas:
+      "portrait main"
+      "facts facts"
+      "about about";
+    grid-template-rows: auto;
+    column-gap: 16px;
+    margin-top: 16px;
+  }
+
+  .header[data-kind="person"] {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+
+  .portrait {
+    border-radius: 12px;
+  }
+
+  /* The name column is narrow beside the portrait: 「编辑」 goes under the
+   * names rather than squeezing them. */
+  .headMain {
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 4px;
+  }
+
+  .editLink {
+    height: 40px;
+    padding: 0 14px;
+    font-size: 13.5px;
+  }
+
+  .name {
+    font-size: 26px;
+  }
+
+  .subNames {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    margin-top: 6px;
+  }
+
+  .romajiName {
+    font-size: 13px;
+  }
+
+  .dot {
+    display: none;
+  }
+
+  .aliasLabel {
+    display: none;
+  }
+
+  .header[data-kind="character"] .tags {
+    display: flex;
+  }
+
+  .facts {
+    grid-template-columns: 52px minmax(0, 1fr) 52px minmax(0, 1fr);
+    max-width: none;
+    margin-top: 20px;
+  }
+
+  .about,
+  .section {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--pp-line);
+  }
+
+  .aboutTitle {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    white-space: normal;
+  }
+
+  /* The canvas's phone section label: small, grey, no rule. */
+  .aboutTitle,
+  .sectionTitle {
+    margin: 0 0 10px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: 0;
+    color: var(--pp-label);
+  }
+
+  .sectionTitle::before {
+    display: none;
+  }
+
+  /* No row gap: the title's own 10px is the space above the chips. */
+  .sectionHead {
+    gap: 0 8px;
+    margin-bottom: 0;
+  }
+
+  .sectionTools {
+    flex-basis: 100%;
+    margin: 0;
+  }
+
+  /* The filter as chips, the phone canvas's control. */
+  .segment {
+    display: flex;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .segmentButton {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--pp-line-2);
+  }
+
+  .segmentButton[aria-pressed="true"] {
+    background: var(--pp-tone-dim);
+    border-color: var(--pp-tone-line);
+    color: var(--pp-tone-hi);
+  }
+}

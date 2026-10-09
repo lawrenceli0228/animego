@@ -201,8 +201,10 @@ func TestTrailerEnsureCachedRecordsTheAnswer(t *testing.T) {
 }
 
 // ensureCachedFakeDB reports a cache miss on the probe and records what the
-// fill wrote.
+// fill wrote to the main row; the child tables go to the embedded
+// detailFakeDB.
 type ensureCachedFakeDB struct {
+	detailFakeDB
 	upserts []dbgen.UpsertAnimeCacheParams
 }
 

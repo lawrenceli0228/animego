@@ -3,6 +3,7 @@ package notifications
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -31,6 +32,9 @@ type DB interface {
 	ListNotifications(ctx context.Context, userID uuid.UUID, pageLimit int32) ([]dbgen.ListNotificationsRow, error)
 	MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (dbgen.Notification, error)
 	MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) (int64, error)
+	// The outcome of reviewed edits (migration 0047), for the inbox rows
+	// that report one.
+	ListEditReviewNotifications(ctx context.Context, notificationIds []uuid.UUID, userID uuid.UUID) ([]dbgen.ListEditReviewNotificationsRow, error)
 }
 
 type Handlers struct{ db DB }
@@ -86,16 +90,38 @@ type animeResponse struct {
 }
 
 type itemResponse struct {
-	ID        uuid.UUID          `json:"id"`
-	Type      string             `json:"type"`
-	Actor     actorResponse      `json:"actor"`
-	Anime     *animeResponse     `json:"anime"`
-	Episode   *int32             `json:"episode"`
-	CommentID *uuid.UUID         `json:"commentId"`
-	Excerpt   *string            `json:"excerpt"`
-	IsSpoiler bool               `json:"isSpoiler"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
-	ReadAt    pgtype.Timestamptz `json:"readAt"`
+	ID        uuid.UUID      `json:"id"`
+	Type      string         `json:"type"`
+	Actor     actorResponse  `json:"actor"`
+	Anime     *animeResponse `json:"anime"`
+	Episode   *int32         `json:"episode"`
+	CommentID *uuid.UUID     `json:"commentId"`
+	// The community tab's replies (migration 0046): the reply itself and
+	// the thread or activity event it answers, so the client can link to
+	// the exact place.  All null on the episode-comment and follow kinds.
+	ReplyID     *uuid.UUID         `json:"replyId"`
+	ThreadID    *uuid.UUID         `json:"threadId"`
+	ThreadTitle *string            `json:"threadTitle"`
+	ActivityID  *uuid.UUID         `json:"activityId"`
+	Excerpt     *string            `json:"excerpt"`
+	IsSpoiler   bool               `json:"isSpoiler"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	ReadAt      pgtype.Timestamptz `json:"readAt"`
+	// Edit is set on an edit_review row only, and absent on every other
+	// type, whose shape stays as it was.
+	Edit *editResponse `json:"edit,omitempty"`
+}
+
+// editResponse is what an edit_review notification reports: the page the
+// edit was on, as its submitter saw it, how many of its items were
+// accepted and rejected, and the reviewer's notes on the rejected ones.
+type editResponse struct {
+	Kind        string          `json:"kind"`
+	EntityID    int32           `json:"entityId"`
+	Snapshot    json.RawMessage `json:"snapshot"`
+	Accepted    int16           `json:"accepted"`
+	Rejected    int16           `json:"rejected"`
+	RejectNotes []string        `json:"rejectNotes"`
 }
 
 type listResponse struct {
@@ -143,36 +169,106 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]itemResponse, 0, len(rows))
 	for _, row := range rows {
-		item := itemResponse{
-			ID:        row.ID,
-			Type:      notificationType(row.NotificationType),
-			Actor:     actorResponse{Username: pii.PublicUsername(row.ActorUsername), AvatarURL: row.ActorAvatarUrl},
-			Episode:   row.Episode,
-			CommentID: row.CommentID,
-			Excerpt:   row.CommentContent,
-			IsSpoiler: row.CommentIsSpoiler,
-			CreatedAt: row.CreatedAt,
-			ReadAt:    row.ReadAt,
-		}
-		if row.AnilistID != nil {
-			title := "Anime #" + strconv.FormatInt(int64(*row.AnilistID), 10)
-			if row.TitleRomaji != nil && *row.TitleRomaji != "" {
-				title = *row.TitleRomaji
-			}
-			item.Anime = &animeResponse{
-				AnilistID:       *row.AnilistID,
-				Title:           title,
-				TitleChinese:    row.TitleChinese,
-				TitleHant:       row.TitleHant,
-				TitleHantSource: row.TitleHantSource,
-				TitleHantSeo:    row.TitleHantSeo,
-				CoverImageURL:   row.CoverImageUrl,
-			}
-		}
-		items = append(items, item)
+		items = append(items, toItem(row))
+	}
+	if err := h.attachEdits(ctx, claims.UserID, items); err != nil {
+		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "notification list failed"))
+		return
 	}
 	httpx.Data(w, http.StatusOK, listResponse{Items: items, UnreadCount: unread})
 }
+
+// toItem maps one inbox row.  An episode-comment notification takes its
+// anime, excerpt and spoiler flag from the comment; a community reply
+// notification (thread_reply / activity_reply) from the reply.  A spoiler is
+// never quoted: the comment side is filtered in SQL, the reply side here.
+func toItem(row dbgen.ListNotificationsRow) itemResponse {
+	item := itemResponse{
+		ID:        row.ID,
+		Type:      notificationType(row.NotificationType),
+		Actor:     actorResponse{Username: pii.PublicUsername(row.ActorUsername), AvatarURL: row.ActorAvatarUrl},
+		Episode:   row.Episode,
+		CommentID: row.CommentID,
+		Excerpt:   row.CommentContent,
+		IsSpoiler: row.CommentIsSpoiler,
+		CreatedAt: row.CreatedAt,
+		ReadAt:    row.ReadAt,
+	}
+	anilistID := row.AnilistID
+	if row.ReplyID != nil {
+		item.ReplyID = row.ReplyID
+		item.ThreadID = row.ReplyThreadID
+		item.ThreadTitle = row.ThreadTitle
+		item.ActivityID = row.ReplyActivityEventID
+		if anilistID == nil {
+			anilistID = row.ReplyAnilistID
+		}
+		replySpoiler := row.ReplyIsSpoiler != nil && *row.ReplyIsSpoiler
+		item.IsSpoiler = item.IsSpoiler || replySpoiler
+		if item.Excerpt == nil && !replySpoiler {
+			item.Excerpt = row.ReplyBody
+		}
+	}
+	if anilistID != nil {
+		title := "Anime #" + strconv.FormatInt(int64(*anilistID), 10)
+		if row.TitleRomaji != nil && *row.TitleRomaji != "" {
+			title = *row.TitleRomaji
+		}
+		item.Anime = &animeResponse{
+			AnilistID:       *anilistID,
+			Title:           title,
+			TitleChinese:    row.TitleChinese,
+			TitleHant:       row.TitleHant,
+			TitleHantSource: row.TitleHantSource,
+			TitleHantSeo:    row.TitleHantSeo,
+			CoverImageURL:   row.CoverImageUrl,
+		}
+	}
+	return item
+}
+
+// attachEdits fills Edit on the edit_review rows of items, in place: one
+// query for all of them, none when there are none.  A row whose
+// submission is gone keeps Edit nil and the page shows it without detail.
+func (h *Handlers) attachEdits(ctx context.Context, userID uuid.UUID, items []itemResponse) error {
+	var ids []uuid.UUID
+	for _, it := range items {
+		if it.Type == typeEditReview {
+			ids = append(ids, it.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := h.db.ListEditReviewNotifications(ctx, ids, userID)
+	if err != nil {
+		return err
+	}
+	byID := make(map[uuid.UUID]*editResponse, len(rows))
+	for _, r := range rows {
+		notes := r.RejectNotes
+		if notes == nil {
+			notes = []string{}
+		}
+		byID[r.NotificationID] = &editResponse{
+			Kind: r.Kind, EntityID: r.EntityID, Snapshot: r.Snapshot,
+			Accepted: r.AcceptedCount, Rejected: r.RejectedCount, RejectNotes: notes,
+		}
+	}
+	for i := range items {
+		if items[i].Type == typeEditReview {
+			items[i].Edit = byID[items[i].ID]
+			// The row's actor is the admin who reviewed the edit; who that
+			// was is not the submitter's to know.  The field stays, empty,
+			// so every row keeps the one shape.
+			items[i].Actor = actorResponse{}
+		}
+	}
+	return nil
+}
+
+// typeEditReview is the type the inbox gives a reviewed edit.
+const typeEditReview = "edit_review"
 
 func notificationType(dbType string) string {
 	switch dbType {
@@ -180,6 +276,12 @@ func notificationType(dbType string) string {
 		return "comment_reply"
 	case "reaction":
 		return "comment_reaction"
+	case "thread_reply", "activity_reply":
+		// Same word on the wire as in the table: the client routes each to
+		// its own place (a thread page, the tab's activity list).
+		return dbType
+	case "edit_review":
+		return typeEditReview
 	default:
 		return "follow"
 	}

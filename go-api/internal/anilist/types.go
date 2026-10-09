@@ -73,9 +73,11 @@ func (f *FuzzyDate) Whole() (time.Time, bool) {
 }
 
 // Image is the thumbnail object on characters/staff/voice-actors.
-// AniList exposes large/medium variants; only medium is requested by
-// the detail query.
+// AniList exposes large/medium variants.  The credit documents ask for
+// both on characters and voice actors and only medium on staff; what is
+// stored is medium, with large as the fallback (see credits.imageURL).
 type Image struct {
+	Large  *string `json:"large,omitempty"`
 	Medium *string `json:"medium"`
 }
 
@@ -365,27 +367,71 @@ type CharacterNode struct {
 	Image *Image      `json:"image"`
 }
 
-// VoiceActor is one voice-actor entry.  AniList returns an array per
-// character; Express picks the first JAPANESE entry only, so callers
-// should look at edges.voiceActors[0].
+// VoiceActor is the person behind one voice role.  LanguageV2 is
+// AniList's free-text language label ("Japanese", "Chinese", "Korean",
+// "English", ...) -- free text rather than the StaffLanguage enum,
+// because the enum has no Chinese and the label is the only place a
+// Chinese dub is named at all.
 type VoiceActor struct {
-	ID    int         `json:"id"`
-	Name  *PersonName `json:"name"`
-	Image *Image      `json:"image"`
+	ID         int         `json:"id"`
+	Name       *PersonName `json:"name"`
+	Image      *Image      `json:"image"`
+	LanguageV2 *string     `json:"languageV2,omitempty"`
+}
+
+// VoiceActorRole is one entry of CharacterEdge.voiceActorRoles: a voice
+// actor together with what the role was.  RoleNotes is how AniList
+// marks the second voice of one character ("Childhood", "Young"); a
+// character's main voice in a language carries none.  DubGroup names
+// the studio of a dub, when AniList records one.
+type VoiceActorRole struct {
+	RoleNotes  *string     `json:"roleNotes"`
+	DubGroup   *string     `json:"dubGroup"`
+	VoiceActor *VoiceActor `json:"voiceActor"`
 }
 
 // CharacterEdge carries the role string (MAIN, SUPPORTING, BACKGROUND)
-// plus the embedded character node and its voice-actor list.
+// plus the embedded character node and every voice role, in every
+// language.
+//
+// voiceActorRoles replaced `voiceActors(language: JAPANESE)` for two
+// reasons that are both about what the old field could not say: the
+// language argument has no Chinese value, so a donghua's Chinese cast
+// was unaskable, and a plain voice actor list cannot tell a character's
+// main voice from their childhood voice.  See credits.CastFromEdges for
+// how one of these is chosen for the voice_actor_* columns.
+//
+// ★ AniList returns voiceActorRoles (and voiceActors) as an empty list,
+// without an error, when the document does not also select `node { id }`
+// on the same edge.  Every credit document selects it; the query tests
+// pin that, because an omission is invisible everywhere else.
 type CharacterEdge struct {
-	Role        *string       `json:"role"`
-	Node        CharacterNode `json:"node"`
-	VoiceActors []VoiceActor  `json:"voiceActors"`
+	Role            *string          `json:"role"`
+	Node            CharacterNode    `json:"node"`
+	VoiceActorRoles []VoiceActorRole `json:"voiceActorRoles"`
 }
 
-// CharacterConnection is the characters{edges{...}} wrapper.  Express
-// requests page=1 perPage=8 so the slice has at most 8 entries.
+// CharacterConnection is the characters{pageInfo, edges{...}} wrapper:
+// one page of 25 (AniList's ceiling on a nested connection page).
+//
+// PageInfo is a pointer so "the document did not ask" (nil) stays apart
+// from "AniList says this is the last page" (HasNextPage false).  Only
+// hasNextPage is selected: pageInfo.total on a nested connection is not
+// a count of the title's characters (it has been seen answering 500 for
+// titles with far fewer), so nothing may read it.
 type CharacterConnection struct {
-	Edges []CharacterEdge `json:"edges"`
+	PageInfo *PageInfo       `json:"pageInfo,omitempty"`
+	Edges    []CharacterEdge `json:"edges"`
+}
+
+// NextPage reports whether AniList has characters after this page, and
+// whether the answer is known at all (false when the document selected
+// no pageInfo or the connection is nil).
+func (c *CharacterConnection) NextPage() (hasNext, known bool) {
+	if c == nil || c.PageInfo == nil {
+		return false, false
+	}
+	return c.PageInfo.HasNextPage, true
 }
 
 // StaffNode is one staff person's identity.
@@ -402,10 +448,19 @@ type StaffEdge struct {
 	Node StaffNode `json:"node"`
 }
 
-// StaffConnection is the staff{edges{...}} wrapper.  Express requests
-// page=1 perPage=10.
+// StaffConnection is the staff{pageInfo, edges{...}} wrapper: one page
+// of 25.  PageInfo has CharacterConnection's meaning.
 type StaffConnection struct {
-	Edges []StaffEdge `json:"edges"`
+	PageInfo *PageInfo   `json:"pageInfo,omitempty"`
+	Edges    []StaffEdge `json:"edges"`
+}
+
+// NextPage is CharacterConnection.NextPage for staff.
+func (c *StaffConnection) NextPage() (hasNext, known bool) {
+	if c == nil || c.PageInfo == nil {
+		return false, false
+	}
+	return c.PageInfo.HasNextPage, true
 }
 
 // MediaRecommendation is the embedded Media reference on a
@@ -660,4 +715,25 @@ type MediaRatingsResponse struct {
 // stamp them or they lead every subsequent batch.
 type MediaFactsResponse struct {
 	Page MediaPage `json:"Page"`
+}
+
+// CharacterPages is one aliased character-pages request decoded: the
+// pages FirstPage..LastPage of CreditPagesVars, in page order, plus the
+// title's country of origin (which decides whose voice goes in the
+// voice_actor_* columns -- see credits.PrimaryLanguage).
+//
+// Pages has exactly one entry per requested page.  A page past the end
+// of the list comes back as an empty connection with HasNextPage false,
+// so the caller reads pages until the first one that says there is no
+// next, and ignores the rest.
+type CharacterPages struct {
+	MediaID         int
+	CountryOfOrigin *string
+	Pages           []CharacterConnection
+}
+
+// StaffPages is CharacterPages for the staff connection.
+type StaffPages struct {
+	MediaID int
+	Pages   []StaffConnection
 }

@@ -139,20 +139,25 @@ func (f *fakeSubsDB) MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, 
 	return f.markManyFn(ctx, userID, anilistID, episodes)
 }
 
-func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error) {
+// The two create queries return their own row types since migration 0046
+// put each in a CTE; the fields are dbgen.Subscription's, so the fakes keep
+// taking a Subscription and convert on the way out.
+func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.UpsertSubscriptionRow, error) {
 	atomic.AddInt32(&f.upsertCalls, 1)
 	if f.upsertFn == nil {
 		panic("fakeSubsDB.UpsertSubscription not set")
 	}
-	return f.upsertFn(ctx, userID, anilistID, status)
+	sub, err := f.upsertFn(ctx, userID, anilistID, status)
+	return dbgen.UpsertSubscriptionRow(sub), err
 }
 
-func (f *fakeSubsDB) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error) {
+func (f *fakeSubsDB) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error) {
 	atomic.AddInt32(&f.ifAbsentCalls, 1)
 	if f.ifAbsentFn == nil {
 		panic("fakeSubsDB.InsertSubscriptionIfAbsent not set")
 	}
-	return f.ifAbsentFn(ctx, userID, anilistID, status)
+	sub, err := f.ifAbsentFn(ctx, userID, anilistID, status)
+	return dbgen.InsertSubscriptionIfAbsentRow(sub), err
 }
 
 func (f *fakeSubsDB) GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error) {
@@ -181,10 +186,62 @@ func (f *fakeSubsDB) DeleteSubscription(ctx context.Context, userID uuid.UUID, a
 
 // fakeEnsureCachedDB satisfies anime.EnsureCachedDB with function
 // pointers.  Used to drive the CreateSubscription anime-cache probe +
-// upsert path in fake-DB tests.
+// upsert path in fake-DB tests.  The child tables a fill also writes go
+// to noopDetailWriter: these tests are about the subscription.
 type fakeEnsureCachedDB struct {
+	noopDetailWriter
 	getFn    func(ctx context.Context, anilistID int32) (dbgen.GetAnimeMainByIDRow, error)
 	upsertFn func(ctx context.Context, arg dbgen.UpsertAnimeCacheParams) error
+}
+
+// noopDetailWriter is anime.DetailWriter minus UpsertAnimeCache, every
+// statement succeeding and storing nothing.
+type noopDetailWriter struct{}
+
+func (noopDetailWriter) DeleteAnimeGenres(context.Context, int32) error               { return nil }
+func (noopDetailWriter) InsertAnimeGenre(context.Context, int32, string) error        { return nil }
+func (noopDetailWriter) DeleteAnimeSynonyms(context.Context, int32) error             { return nil }
+func (noopDetailWriter) InsertAnimeSynonym(context.Context, int32, string) error      { return nil }
+func (noopDetailWriter) DeleteAnimeStudios(context.Context, int32) error              { return nil }
+func (noopDetailWriter) DeleteAnimeTagsBySource(context.Context, int32, string) error { return nil }
+func (noopDetailWriter) DeleteAnimeExternalLinks(context.Context, int32) error        { return nil }
+func (noopDetailWriter) DeleteAnimeRelations(context.Context, int32) error            { return nil }
+func (noopDetailWriter) DeleteAnimeRecommendations(context.Context, int32) error      { return nil }
+func (noopDetailWriter) InsertAnimeStudio(context.Context, int32, string, *int32, bool) error {
+	return nil
+}
+func (noopDetailWriter) InsertAnimeTag(context.Context, int32, string, string, *int32, bool) error {
+	return nil
+}
+func (noopDetailWriter) InsertAnimeExternalLink(context.Context, int32, string, string, *string) error {
+	return nil
+}
+func (noopDetailWriter) InsertAnimeRelation(context.Context, dbgen.InsertAnimeRelationParams) error {
+	return nil
+}
+func (noopDetailWriter) InsertAnimeRecommendation(context.Context, dbgen.InsertAnimeRecommendationParams) error {
+	return nil
+}
+func (noopDetailWriter) UpsertAnimeCharacters(context.Context, int32, []byte) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (noopDetailWriter) PruneAnimeCharacters(context.Context, int32, []uuid.UUID, bool) error {
+	return nil
+}
+func (noopDetailWriter) RenumberAnimeCharacters(context.Context, int32, int32, []uuid.UUID) error {
+	return nil
+}
+func (noopDetailWriter) PruneAnimeCharacterVoices(context.Context, int32, []int32) error { return nil }
+func (noopDetailWriter) UpsertAnimeCharacterVoices(context.Context, int32, []byte) error { return nil }
+func (noopDetailWriter) UpsertAnimeStaff(context.Context, int32, []byte) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (noopDetailWriter) PruneAnimeStaff(context.Context, int32, []uuid.UUID, bool) error { return nil }
+func (noopDetailWriter) RenumberAnimeStaff(context.Context, int32, int32, []uuid.UUID) error {
+	return nil
+}
+func (noopDetailWriter) SetAnimeCreditsHasMore(context.Context, *bool, *bool, int32) error {
+	return nil
 }
 
 func (f *fakeEnsureCachedDB) GetAnimeMainByID(ctx context.Context, anilistID int32) (dbgen.GetAnimeMainByIDRow, error) {

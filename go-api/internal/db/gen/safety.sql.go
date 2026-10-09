@@ -48,12 +48,40 @@ WITH inserted_block AS (
            AND comment.user_id = $1::uuid)
       )
     RETURNING reaction.comment_id
+), removed_activity_likes AS (
+    -- The community tab's two acknowledgement primitives (migration 0046)
+    -- are severed the same way comment likes are.
+    DELETE FROM activity_likes activity_like
+    USING activity_events event
+    WHERE activity_like.activity_event_id = event.id
+      AND (
+          (activity_like.user_id = $1::uuid
+           AND event.user_id = $2::uuid)
+          OR
+          (activity_like.user_id = $2::uuid
+           AND event.user_id = $1::uuid)
+      )
+    RETURNING activity_like.activity_event_id
+), removed_review_votes AS (
+    DELETE FROM anime_review_votes vote
+    USING anime_reviews review
+    WHERE vote.review_id = review.id
+      AND (
+          (vote.user_id = $1::uuid
+           AND review.user_id = $2::uuid)
+          OR
+          (vote.user_id = $2::uuid
+           AND review.user_id = $1::uuid)
+      )
+    RETURNING vote.review_id
 )
 SELECT
     EXISTS (SELECT 1 FROM inserted_block)::boolean AS inserted,
     (SELECT count(*) FROM removed_follows)::bigint AS removed_follows,
     (SELECT count(*) FROM removed_notifications)::bigint AS removed_notifications,
-    (SELECT count(*) FROM removed_reactions)::bigint AS removed_reactions
+    ((SELECT count(*) FROM removed_reactions)
+     + (SELECT count(*) FROM removed_activity_likes)
+     + (SELECT count(*) FROM removed_review_votes))::bigint AS removed_reactions
 `
 
 type BlockUserRow struct {
@@ -84,6 +112,9 @@ WITH report_target AS (
     SELECT
         comment.id AS target_comment_id,
         NULL::uuid AS target_user_id,
+        NULL::uuid AS target_review_id,
+        NULL::uuid AS target_thread_id,
+        NULL::uuid AS target_reply_id,
         jsonb_build_object(
             'username', author.username,
             'content', comment.content,
@@ -101,37 +132,112 @@ WITH report_target AS (
     SELECT
         NULL::uuid AS target_comment_id,
         target_user.id AS target_user_id,
+        NULL::uuid AS target_review_id,
+        NULL::uuid AS target_thread_id,
+        NULL::uuid AS target_reply_id,
         jsonb_build_object('username', target_user.username) AS target_snapshot
     FROM users target_user
     WHERE $1::text = 'user'
       AND target_user.id = $3::uuid
+
+    UNION ALL
+
+    SELECT
+        NULL::uuid AS target_comment_id,
+        NULL::uuid AS target_user_id,
+        review.id AS target_review_id,
+        NULL::uuid AS target_thread_id,
+        NULL::uuid AS target_reply_id,
+        jsonb_build_object(
+            'username', author.username,
+            'summary', review.summary,
+            'content', review.body,
+            'isSpoiler', review.is_spoiler,
+            'anilistId', review.anilist_id
+        ) AS target_snapshot
+    FROM anime_reviews review
+    JOIN users author ON author.id = review.user_id
+    WHERE $1::text = 'review'
+      AND review.id = $4::uuid
+      AND review.deleted_at IS NULL
+      AND NOT review.is_private
+
+    UNION ALL
+
+    SELECT
+        NULL::uuid AS target_comment_id,
+        NULL::uuid AS target_user_id,
+        NULL::uuid AS target_review_id,
+        thread.id AS target_thread_id,
+        NULL::uuid AS target_reply_id,
+        jsonb_build_object(
+            'username', author.username,
+            'title', thread.title,
+            'content', thread.body,
+            'isSpoiler', thread.is_spoiler,
+            'anilistId', thread.anilist_id,
+            'threadId', thread.id
+        ) AS target_snapshot
+    FROM anime_threads thread
+    JOIN users author ON author.id = thread.user_id
+    WHERE $1::text = 'thread'
+      AND thread.id = $5::uuid
+      AND thread.deleted_at IS NULL
+
+    UNION ALL
+
+    SELECT
+        NULL::uuid AS target_comment_id,
+        NULL::uuid AS target_user_id,
+        NULL::uuid AS target_review_id,
+        NULL::uuid AS target_thread_id,
+        reply.id AS target_reply_id,
+        jsonb_build_object(
+            'username', author.username,
+            'content', reply.body,
+            'isSpoiler', reply.is_spoiler,
+            'anilistId', reply.anilist_id,
+            'threadId', reply.thread_id,
+            'activityId', reply.activity_event_id
+        ) AS target_snapshot
+    FROM community_replies reply
+    JOIN users author ON author.id = reply.user_id
+    WHERE $1::text = 'reply'
+      AND reply.id = $6::uuid
+      AND reply.deleted_at IS NULL
 ), inserted_report AS (
     INSERT INTO reports (
         reporter_id,
         target_type,
         target_comment_id,
         target_user_id,
+        target_review_id,
+        target_thread_id,
+        target_reply_id,
         target_snapshot,
         reason,
         details
     )
     SELECT
-        $4::uuid,
+        $7::uuid,
         $1::text,
         target.target_comment_id,
         target.target_user_id,
+        target.target_review_id,
+        target.target_thread_id,
+        target.target_reply_id,
         target.target_snapshot,
-        $5::text,
-        $6::text
+        $8::text,
+        $9::text
     FROM report_target target
     ON CONFLICT DO NOTHING
-    RETURNING id, reporter_id, target_type, target_comment_id, target_user_id, target_snapshot, reason, details, status, resolution_note, reviewed_by, reviewed_at, created_at, updated_at
+    RETURNING id, reporter_id, target_type, target_comment_id, target_user_id, target_snapshot, reason, details, status, resolution_note, reviewed_by, reviewed_at, created_at, updated_at, target_review_id, target_thread_id, target_reply_id
 )
-SELECT id, reporter_id, target_type, target_comment_id, target_user_id, target_snapshot, reason, details, status, resolution_note, reviewed_by, reviewed_at, created_at, updated_at FROM inserted_report
+SELECT id, reporter_id, target_type, target_comment_id, target_user_id, target_snapshot, reason, details, status, resolution_note, reviewed_by, reviewed_at, created_at, updated_at, target_review_id, target_thread_id, target_reply_id FROM inserted_report
 UNION ALL
-SELECT report.id, report.reporter_id, report.target_type, report.target_comment_id, report.target_user_id, report.target_snapshot, report.reason, report.details, report.status, report.resolution_note, report.reviewed_by, report.reviewed_at, report.created_at, report.updated_at
+SELECT report.id, report.reporter_id, report.target_type, report.target_comment_id, report.target_user_id, report.target_snapshot, report.reason, report.details, report.status, report.resolution_note, report.reviewed_by, report.reviewed_at, report.created_at, report.updated_at, report.target_review_id, report.target_thread_id, report.target_reply_id
 FROM reports report
-WHERE report.reporter_id = $4::uuid
+WHERE report.reporter_id = $7::uuid
   AND report.target_type = $1::text
   AND report.status = 'pending'
   AND (
@@ -140,6 +246,15 @@ WHERE report.reporter_id = $4::uuid
       OR
       (report.target_type = 'user'
        AND report.target_user_id = $3::uuid)
+      OR
+      (report.target_type = 'review'
+       AND report.target_review_id = $4::uuid)
+      OR
+      (report.target_type = 'thread'
+       AND report.target_thread_id = $5::uuid)
+      OR
+      (report.target_type = 'reply'
+       AND report.target_reply_id = $6::uuid)
   )
   AND NOT EXISTS (SELECT 1 FROM inserted_report)
 LIMIT 1
@@ -149,6 +264,9 @@ type CreatePendingReportParams struct {
 	TargetType      string     `json:"targetType"`
 	TargetCommentID *uuid.UUID `json:"targetCommentId"`
 	TargetUserID    *uuid.UUID `json:"targetUserId"`
+	TargetReviewID  *uuid.UUID `json:"targetReviewId"`
+	TargetThreadID  *uuid.UUID `json:"targetThreadId"`
+	TargetReplyID   *uuid.UUID `json:"targetReplyId"`
 	ReporterID      uuid.UUID  `json:"reporterId"`
 	Reason          string     `json:"reason"`
 	Details         *string    `json:"details"`
@@ -169,15 +287,26 @@ type CreatePendingReportRow struct {
 	ReviewedAt      pgtype.Timestamptz `json:"reviewedAt"`
 	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+	TargetReviewID  *uuid.UUID         `json:"targetReviewId"`
+	TargetThreadID  *uuid.UUID         `json:"targetThreadId"`
+	TargetReplyID   *uuid.UUID         `json:"targetReplyId"`
 }
 
 // A repeated report while the first is pending returns that canonical report.
 // Once moderation moves it out of pending the reporter may file a new report.
+//
+// Reviews, threads and replies (migration 0046) are reportable while they are
+// up; a private review is not (nobody but its author can see it).  Their
+// snapshot carries the text as it stood, like a comment's, and the anime and
+// thread / activity it lives under so a moderator can find it.
 func (q *Queries) CreatePendingReport(ctx context.Context, arg CreatePendingReportParams) (CreatePendingReportRow, error) {
 	row := q.db.QueryRow(ctx, createPendingReport,
 		arg.TargetType,
 		arg.TargetCommentID,
 		arg.TargetUserID,
+		arg.TargetReviewID,
+		arg.TargetThreadID,
+		arg.TargetReplyID,
 		arg.ReporterID,
 		arg.Reason,
 		arg.Details,
@@ -198,6 +327,9 @@ func (q *Queries) CreatePendingReport(ctx context.Context, arg CreatePendingRepo
 		&i.ReviewedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TargetReviewID,
+		&i.TargetThreadID,
+		&i.TargetReplyID,
 	)
 	return i, err
 }
@@ -210,6 +342,9 @@ SELECT
     report.target_type,
     report.target_comment_id,
     report.target_user_id,
+    report.target_review_id,
+    report.target_thread_id,
+    report.target_reply_id,
     report.target_snapshot,
     target_user.username AS target_username,
     target_comment.content AS target_comment_content,
@@ -245,6 +380,9 @@ type ListReportsRow struct {
 	TargetType             string             `json:"targetType"`
 	TargetCommentID        *uuid.UUID         `json:"targetCommentId"`
 	TargetUserID           *uuid.UUID         `json:"targetUserId"`
+	TargetReviewID         *uuid.UUID         `json:"targetReviewId"`
+	TargetThreadID         *uuid.UUID         `json:"targetThreadId"`
+	TargetReplyID          *uuid.UUID         `json:"targetReplyId"`
 	TargetSnapshot         []byte             `json:"targetSnapshot"`
 	TargetUsername         *string            `json:"targetUsername"`
 	TargetCommentContent   *string            `json:"targetCommentContent"`
@@ -279,6 +417,9 @@ func (q *Queries) ListReports(ctx context.Context, reportStatus *string, pageOff
 			&i.TargetType,
 			&i.TargetCommentID,
 			&i.TargetUserID,
+			&i.TargetReviewID,
+			&i.TargetThreadID,
+			&i.TargetReplyID,
 			&i.TargetSnapshot,
 			&i.TargetUsername,
 			&i.TargetCommentContent,
@@ -377,7 +518,7 @@ SET status = $1::text,
     reviewed_at = now(),
     updated_at = now()
 WHERE id = $4::uuid
-RETURNING id, reporter_id, target_type, target_comment_id, target_user_id, target_snapshot, reason, details, status, resolution_note, reviewed_by, reviewed_at, created_at, updated_at
+RETURNING id, reporter_id, target_type, target_comment_id, target_user_id, target_snapshot, reason, details, status, resolution_note, reviewed_by, reviewed_at, created_at, updated_at, target_review_id, target_thread_id, target_reply_id
 `
 
 func (q *Queries) UpdateReport(ctx context.Context, reportStatus string, resolutionNote *string, reviewedBy uuid.UUID, reportID uuid.UUID) (Report, error) {
@@ -403,6 +544,9 @@ func (q *Queries) UpdateReport(ctx context.Context, reportStatus string, resolut
 		&i.ReviewedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TargetReviewID,
+		&i.TargetThreadID,
+		&i.TargetReplyID,
 	)
 	return i, err
 }

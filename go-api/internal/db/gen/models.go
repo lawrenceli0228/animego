@@ -18,6 +18,7 @@ type ActivityEvent struct {
 	CommentID    *uuid.UUID         `json:"commentId"`
 	TargetUserID *uuid.UUID         `json:"targetUserId"`
 	CreatedAt    pgtype.Timestamptz `json:"createdAt"`
+	Status       *string            `json:"status"`
 }
 
 type CommentReaction struct {
@@ -58,6 +59,8 @@ type Notification struct {
 	DedupeKey        string             `json:"dedupeKey"`
 	ReadAt           pgtype.Timestamptz `json:"readAt"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	ReplyID          *uuid.UUID         `json:"replyId"`
+	EditSubmissionID *uuid.UUID         `json:"editSubmissionId"`
 }
 
 type Report struct {
@@ -75,6 +78,9 @@ type Report struct {
 	ReviewedAt      pgtype.Timestamptz `json:"reviewedAt"`
 	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+	TargetReviewID  *uuid.UUID         `json:"targetReviewId"`
+	TargetThreadID  *uuid.UUID         `json:"targetThreadId"`
+	TargetReplyID   *uuid.UUID         `json:"targetReplyId"`
 }
 
 type Subscription struct {

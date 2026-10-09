@@ -533,12 +533,15 @@ func TestDefaultRegistry_EveryKindIsDeclared(t *testing.T) {
 		HantBackfillArgs{},
 		AnilistRatingsArgs{},
 		BangumiRatingsArgs{},
+		AnimeFactsArgs{},
+		AnimeCreditsArgs{},
+		ProfilesArgs{},
 	} {
 		assert.True(t, declared[args.Kind()],
 			"kind %q implements river.JobArgs but is not in the registry: it would get "+
 				"no queue configuration and no schedule", args.Kind())
 	}
-	assert.Len(t, Default().Kinds(), 17,
+	assert.Len(t, Default().Kinds(), 19,
 		"a kind was added to or removed from the registry without updating this list")
 }
 
@@ -571,6 +574,8 @@ func TestDefaultRegistry_RunOnStartSplit(t *testing.T) {
 		"anilist_ratings":               true,
 		"bangumi_ratings":               true,
 		"anime_facts":                   true,
+		"anime_credits":                 true,
+		"profiles":                      true,
 
 		// Not boot-fired: main.go enqueues these two by hand at boot with
 		// payloads the single-payload schedule cannot express...
@@ -610,6 +615,8 @@ func TestDefaultRegistry_Intervals(t *testing.T) {
 		"anilist_ratings":               time.Hour,
 		"bangumi_ratings":               time.Hour,
 		"anime_facts":                   time.Hour,
+		"anime_credits":                 5 * time.Minute,
+		"profiles":                      5 * time.Minute,
 	}, intervals)
 }
 
@@ -620,7 +627,7 @@ func TestDefaultRegistry_PeriodicJobsMatchDeclarations(t *testing.T) {
 	t.Parallel()
 
 	jobs := Default().PeriodicJobs()
-	require.Len(t, jobs, 11, "eleven scheduled kinds")
+	require.Len(t, jobs, 13, "thirteen scheduled kinds")
 
 	var want []Entry
 	for _, e := range Default().Entries() {

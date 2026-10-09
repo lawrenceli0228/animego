@@ -96,7 +96,9 @@
   font-size: 11.5px;
   font-weight: 500;
   letter-spacing: 0.05em;
-  color: var(--text-tertiary);
+  /* The detail page's label colour, 55% white (DetailShell.module.css); the
+   * fallback is the 30% this had before the page declared one. */
+  color: var(--detail-label, var(--text-tertiary));
   font-variant-numeric: tabular-nums;
 }
 
@@ -378,7 +380,8 @@
   font-size: 11px;
   font-weight: 600;
   line-height: 1.6;
-  color: var(--text-tertiary);
+  /* Episode numbers are labels too: 55% on the detail page, as .progressText. */
+  color: var(--detail-label, var(--text-tertiary));
   font-variant-numeric: tabular-nums;
   /* Right, so 01…09 and 10…13 end on the same pixel and the titles beside
    * them start on one. Left-aligned with tabular figures the numbers line up

@@ -39,7 +39,8 @@ function buildDatabaseUrl(): string {
 
 let _sql: ReturnType<typeof postgres> | null = null;
 
-function getSql(): ReturnType<typeof postgres> {
+/** The shared connection; exported for fixture modules beside this one. */
+export function getSql(): ReturnType<typeof postgres> {
   if (!_sql) {
     // Lazy: resolve the connection string (and throw on a missing password)
     // only when a DB helper is actually called. Importing this module must
@@ -654,5 +655,149 @@ export async function seedSubscription(
       FROM generate_series(1, ${currentEpisode}) AS g(episode)
       ON CONFLICT (user_id, anilist_id, episode) DO NOTHING
     `;
+  }
+}
+
+// ─── detail tabs: the whole cast and staff ──────────────────────────────────
+//
+// The 角色 and 制作 tabs read every row the credit tables hold for a title
+// (go-api internal/anime/credit_lists.go), past the 25 /api/anime/:id carries,
+// so a spec about them needs more rows than ensureAnimeDetail's one
+// protagonist: characters in all three roles with voices in two languages, a
+// childhood voice, staff across departments and one department large enough
+// to list names only. Bangumi's Chinese names go through the 0045 maps, which
+// key by AniList id and have no foreign key — removeDetailCredits clears them;
+// removeAnimeFixture's cascade clears everything else.
+
+export interface SeedCastVoice {
+  staffId: number;
+  language: "Japanese" | "Chinese" | "Korean";
+  nameFull: string;
+  nameNative: string;
+  roleNotes?: string;
+  /** Bangumi's simplified Chinese name for the person (bgm_person_map). */
+  nameCn?: string;
+}
+
+export interface SeedCastCharacter {
+  characterId: number;
+  role: "MAIN" | "SUPPORTING" | "BACKGROUND";
+  nameEn: string;
+  nameJa: string;
+  /** Bangumi's simplified Chinese name (bgm_character_map). */
+  nameCn?: string;
+  /** In display order; the first is the voice the character row carries. */
+  voices?: readonly SeedCastVoice[];
+}
+
+export interface SeedStaffCredit {
+  staffId: number;
+  role: string;
+  nameEn: string;
+  nameJa: string;
+}
+
+/**
+ * Write a title's characters, voices and staff the way the credit writers
+ * store them. The characters take display_order 1.. after ensureAnimeDetail's
+ * protagonist at 0, which stays as the kind of row written before 0037 (no
+ * AniList id, no voice). Idempotent: every insert skips a row that is already
+ * there, so parallel workers seeding the same ids cannot collide.
+ */
+export async function seedDetailCredits(
+  anilistId: number,
+  cast: readonly SeedCastCharacter[],
+  staff: readonly SeedStaffCredit[],
+): Promise<void> {
+  const sql = getSql();
+  const characterRows = cast.map((c, i) => {
+    const primary = c.voices?.[0];
+    return {
+      anime_id: anilistId,
+      display_order: i + 1,
+      character_id: c.characterId,
+      role: c.role,
+      name_en: c.nameEn,
+      name_ja: c.nameJa,
+      voice_actor_id: primary?.staffId ?? null,
+      voice_actor_en: primary?.nameFull ?? null,
+      voice_actor_ja: primary?.nameNative ?? null,
+    };
+  });
+  if (characterRows.length > 0) {
+    await sql`INSERT INTO anime_characters ${sql(characterRows)} ON CONFLICT DO NOTHING`;
+  }
+
+  const voiceRows = cast.flatMap((c) =>
+    (c.voices ?? []).map((v, i) => ({
+      anime_id: anilistId,
+      character_id: c.characterId,
+      staff_id: v.staffId,
+      display_order: i,
+      language: v.language,
+      role_notes: v.roleNotes ?? null,
+      name_full: v.nameFull,
+      name_native: v.nameNative,
+    })),
+  );
+  if (voiceRows.length > 0) {
+    await sql`INSERT INTO anime_character_voices ${sql(voiceRows)} ON CONFLICT DO NOTHING`;
+  }
+
+  const staffRows = staff.map((s, i) => ({
+    anime_id: anilistId,
+    display_order: i,
+    staff_id: s.staffId,
+    role: s.role,
+    name_en: s.nameEn,
+    name_ja: s.nameJa,
+  }));
+  if (staffRows.length > 0) {
+    await sql`INSERT INTO anime_staff ${sql(staffRows)} ON CONFLICT DO NOTHING`;
+  }
+
+  // The Bangumi id is the fixture's own id: bgm_id is unique, and these ids
+  // are far above any real Bangumi id.
+  const characterNames = cast
+    .filter((c) => c.nameCn)
+    .map((c) => ({
+      anilist_id: c.characterId,
+      bgm_id: c.characterId,
+      name_cn: c.nameCn!,
+      source: "e2e",
+      matched_at: new Date(),
+    }));
+  if (characterNames.length > 0) {
+    await sql`
+      INSERT INTO bgm_character_map ${sql(characterNames)}
+      ON CONFLICT DO NOTHING
+    `;
+  }
+  const personNames = cast
+    .flatMap((c) => c.voices ?? [])
+    .filter((v) => v.nameCn)
+    .map((v) => ({
+      anilist_id: v.staffId,
+      bgm_id: v.staffId,
+      name_cn: v.nameCn!,
+      source: "e2e",
+      matched_at: new Date(),
+    }));
+  if (personNames.length > 0) {
+    await sql`
+      INSERT INTO bgm_person_map ${sql(personNames)}
+      ON CONFLICT DO NOTHING
+    `;
+  }
+}
+
+/** Remove the Bangumi names seedDetailCredits wrote; the rest cascades with the title. */
+export async function removeDetailCredits(characterIds: readonly number[], personIds: readonly number[]): Promise<void> {
+  const sql = getSql();
+  if (characterIds.length > 0) {
+    await sql`DELETE FROM bgm_character_map WHERE anilist_id IN ${sql([...characterIds])}`;
+  }
+  if (personIds.length > 0) {
+    await sql`DELETE FROM bgm_person_map WHERE anilist_id IN ${sql([...personIds])}`;
   }
 }

@@ -401,6 +401,15 @@ type FactsVars struct {
 	PerPage int   `json:"perPage"`
 }
 
+// CreditPagesVars names one aliased credit request: a title and the
+// range of pages to fetch.  The range is baked into the document (see
+// CharacterPagesQuery); only ID travels as a GraphQL variable.
+type CreditPagesVars struct {
+	ID        int
+	FirstPage int
+	LastPage  int
+}
+
 // ---------------------------------------------------------------------------
 // Public query methods
 // ---------------------------------------------------------------------------
@@ -505,6 +514,121 @@ func (c *Client) Facts(ctx context.Context, v FactsVars) (*MediaFactsResponse, e
 		return nil, err
 	}
 	return &dest, nil
+}
+
+// CharacterPagesNoWait fetches pages FirstPage..LastPage of a title's
+// characters in one request (CharacterPagesQuery), in the no-wait mode
+// DetailNoWait uses: ErrBudgetBusy at once if the shared token bucket is
+// empty, no 429 retry, never a sleep.
+//
+// No-wait is the only mode offered because the one caller is the credits
+// sweep, which is background work by definition.  Its requests are the
+// heaviest documents this client sends, and queueing them on the shared
+// limiter is exactly how a background pass would push a cold detail
+// request (a user or a crawler with nothing cached to fall back on) past
+// its deadline.  Taking only a token that is idle right now cannot do
+// that.  The caller is expected to space its attempts out; see
+// queue/anime_credits.go.
+//
+// A title AniList does not serve comes back as *ErrUpstream with Status
+// 404, whether AniList said so with the status or with `Media: null`.
+func (c *Client) CharacterPagesNoWait(ctx context.Context, v CreditPagesVars) (*CharacterPages, error) {
+	query, err := CharacterPagesQuery(v.FirstPage, v.LastPage)
+	if err != nil {
+		return nil, err
+	}
+	media, err := c.creditMediaNoWait(ctx, query, v.ID)
+	if err != nil {
+		return nil, err
+	}
+	pages, err := decodeCreditPages[CharacterConnection](media, v.FirstPage, v.LastPage)
+	if err != nil {
+		return nil, err
+	}
+	out := &CharacterPages{Pages: pages}
+	if err := decodeCreditScalar(media, "id", &out.MediaID); err != nil {
+		return nil, err
+	}
+	if err := decodeCreditScalar(media, "countryOfOrigin", &out.CountryOfOrigin); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// StaffPagesNoWait is CharacterPagesNoWait for the staff connection.
+func (c *Client) StaffPagesNoWait(ctx context.Context, v CreditPagesVars) (*StaffPages, error) {
+	query, err := StaffPagesQuery(v.FirstPage, v.LastPage)
+	if err != nil {
+		return nil, err
+	}
+	media, err := c.creditMediaNoWait(ctx, query, v.ID)
+	if err != nil {
+		return nil, err
+	}
+	pages, err := decodeCreditPages[StaffConnection](media, v.FirstPage, v.LastPage)
+	if err != nil {
+		return nil, err
+	}
+	out := &StaffPages{Pages: pages}
+	if err := decodeCreditScalar(media, "id", &out.MediaID); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// creditMediaNoWait posts one credit document and returns its Media
+// object as raw fields, keyed by name and alias.  The aliases are why
+// this is not a struct: p1 ... p16 are names the document chose, not
+// fields AniList has.
+func (c *Client) creditMediaNoWait(ctx context.Context, query string, id int) (map[string]json.RawMessage, error) {
+	var dest struct {
+		Media map[string]json.RawMessage `json:"Media"`
+	}
+	vars := struct {
+		ID int `json:"id"`
+	}{ID: id}
+	if err := c.doMode(ctx, query, vars, &dest, false); err != nil {
+		return nil, err
+	}
+	if dest.Media == nil {
+		return nil, &ErrUpstream{Status: http.StatusNotFound, Message: "AniList returned no media"}
+	}
+	return dest.Media, nil
+}
+
+// decodeCreditPages reads the aliased pages first..last out of a credit
+// Media, in page order.  A page the document asked for and the response
+// does not carry is an upstream error rather than an empty page: an
+// empty page means "the list ended", and reading an omission that way
+// would let the sweep store a truncated list as the whole one.
+func decodeCreditPages[T any](media map[string]json.RawMessage, first, last int) ([]T, error) {
+	pages := make([]T, 0, last-first+1)
+	for page := first; page <= last; page++ {
+		raw, ok := media[CreditPageAlias(page)]
+		if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return nil, &ErrUpstream{Status: http.StatusBadGateway,
+				Message: fmt.Sprintf("AniList omitted credit page %d", page)}
+		}
+		var conn T
+		if err := json.Unmarshal(raw, &conn); err != nil {
+			return nil, fmt.Errorf("anilist: decode credit page %d: %w", page, err)
+		}
+		pages = append(pages, conn)
+	}
+	return pages, nil
+}
+
+// decodeCreditScalar reads one plain Media field selected beside the
+// pages.  An absent field leaves dest at its zero value.
+func decodeCreditScalar(media map[string]json.RawMessage, field string, dest any) error {
+	raw, ok := media[field]
+	if !ok {
+		return nil
+	}
+	if err := json.Unmarshal(raw, dest); err != nil {
+		return fmt.Errorf("anilist: decode credit media %s: %w", field, err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import robots from "./robots";
 import { ANIME_SITEMAP_SHARDS, animeSitemapPath } from "@/lib/seo/animeSitemap";
+import {
+  CHARACTER_SITEMAP_SHARDS,
+  PEOPLE_SITEMAP_SHARDS,
+  characterSitemapPath,
+  peopleSitemapPath,
+} from "@/lib/seo/peopleSitemap";
 import { hubsSitemapUrl } from "@/lib/seo/hubSitemap";
 import { SITE_ORIGIN } from "@/lib/seo/alternates";
 
@@ -28,6 +34,15 @@ describe("sitemap discovery", () => {
     }
   });
 
+  test("every person and character shard is listed", () => {
+    for (let id = 0; id < PEOPLE_SITEMAP_SHARDS; id++) {
+      expect(sitemaps).toContain(`${SITE_ORIGIN}${peopleSitemapPath(id)}`);
+    }
+    for (let id = 0; id < CHARACTER_SITEMAP_SHARDS; id++) {
+      expect(sitemaps).toContain(`${SITE_ORIGIN}${characterSitemapPath(id)}`);
+    }
+  });
+
   test("the hub sitemap is listed", () => {
     expect(sitemaps).toContain(hubsSitemapUrl());
   });
@@ -35,7 +50,7 @@ describe("sitemap discovery", () => {
   test("lists nothing beyond the static sitemap, the hub sitemap and the shards", () => {
     // Catches the reverse mistake: a stale entry left behind after the
     // shard count changes points a crawler at a file that no longer exists.
-    expect(sitemaps).toHaveLength(ANIME_SITEMAP_SHARDS + 2);
+    expect(sitemaps).toHaveLength(ANIME_SITEMAP_SHARDS + PEOPLE_SITEMAP_SHARDS + CHARACTER_SITEMAP_SHARDS + 2);
   });
 
   test("every sitemap url is absolute and on the canonical origin", () => {
@@ -60,6 +75,9 @@ describe("crawl policy", () => {
     for (const path of blocked) {
       expect("/anime/1".startsWith(path)).toBe(false);
       expect("/sitemaps/anime/sitemap/0.xml".startsWith(path)).toBe(false);
+      for (const page of ["/person/1", "/character/1", peopleSitemapPath(0), characterSitemapPath(0)]) {
+        expect(page.startsWith(path)).toBe(false);
+      }
     }
   });
 });

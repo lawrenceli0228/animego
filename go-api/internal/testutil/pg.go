@@ -47,7 +47,25 @@ var allTables = []string{
 	"anime_studios",
 	"anime_relations",
 	"anime_characters",
+	// Every voice of a character (migration 0042).  CASCADE from
+	// anime_cache would reach it anyway; listed to keep the inventory true.
+	"anime_character_voices",
 	"anime_staff",
+	// AniList profiles of the people and characters the credits name
+	// (migration 0044).  No foreign key reaches them, so only listing them
+	// here empties them.
+	"people",
+	"characters",
+	// Bangumi matches and Chinese names for them (migration 0045), the
+	// same: nothing cascades into them.
+	"bgm_person_map",
+	"bgm_character_map",
+	// Reader edits and the accepted overlay (migration 0047).  The first two
+	// cascade from users; entity_overlays is keyed by AniList id and only
+	// listing it here empties it.
+	"edit_submissions",
+	"edit_items",
+	"entity_overlays",
 	"anime_recommendations",
 	"anime_episode_titles",
 	"subscriptions",
@@ -64,6 +82,13 @@ var allTables = []string{
 	// Community safety tables (migration 0019).
 	"user_blocks",
 	"reports",
+	// The anime community tab (migration 0046).  Every one cascades from
+	// users or anime_cache; listed to keep the inventory true.
+	"anime_reviews",
+	"anime_review_votes",
+	"anime_threads",
+	"community_replies",
+	"activity_likes",
 	// Community discovery aggregate (migration 0020).
 	"community_engagement_daily",
 	// Activity rollup (migration 0025).  The CASCADE from users would reach

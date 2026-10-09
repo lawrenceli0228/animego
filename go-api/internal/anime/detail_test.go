@@ -14,12 +14,14 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
+	"github.com/lawrenceli0228/animego/go-api/internal/credits"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
@@ -58,10 +60,6 @@ type detailFakeDB struct {
 	insertAnimeStudioFn          func(ctx context.Context, id int32, s string) error
 	deleteAnimeRelationsFn       func(ctx context.Context, id int32) error
 	insertAnimeRelationFn        func(ctx context.Context, arg dbgen.InsertAnimeRelationParams) error
-	deleteAnimeCharactersFn      func(ctx context.Context, id int32) error
-	insertAnimeCharacterFn       func(ctx context.Context, arg dbgen.InsertAnimeCharacterParams) error
-	deleteAnimeStaffFn           func(ctx context.Context, id int32) error
-	insertAnimeStaffMemberFn     func(ctx context.Context, arg dbgen.InsertAnimeStaffMemberParams) error
 	deleteAnimeRecommendationsFn func(ctx context.Context, id int32) error
 	insertAnimeRecommendationFn  func(ctx context.Context, arg dbgen.InsertAnimeRecommendationParams) error
 
@@ -82,10 +80,8 @@ type detailFakeDB struct {
 	insertStudioCalls          atomic.Int32
 	deleteRelationsCalls       atomic.Int32
 	insertRelationCalls        atomic.Int32
-	deleteCharactersCalls      atomic.Int32
-	insertCharacterCalls       atomic.Int32
-	deleteStaffCalls           atomic.Int32
-	insertStaffCalls           atomic.Int32
+	upsertCharacterCalls       atomic.Int32
+	upsertStaffCalls           atomic.Int32
 	deleteRecommendationsCalls atomic.Int32
 	insertRecommendationCalls  atomic.Int32
 
@@ -94,9 +90,17 @@ type detailFakeDB struct {
 	insertedGenres          []string
 	insertedStudios         []string
 	insertedRelations       []dbgen.InsertAnimeRelationParams
-	insertedCharacters      []dbgen.InsertAnimeCharacterParams
-	insertedStaff           []dbgen.InsertAnimeStaffMemberParams
+	insertedCharacters      []upsertedCharacter
+	insertedVoices          []credits.Voice
+	insertedStaff           []upsertedStaff
 	insertedRecommendations []dbgen.InsertAnimeRecommendationParams
+
+	// The credits statements, in call order ("prune characters whole",
+	// "renumber staff from 3", ...), and the has-more flags written.  How
+	// a refresh writes credits is the mode it chose, and these are where
+	// the mode is visible.
+	creditCalls []string
+	hasMoreSets [][2]*bool
 }
 
 func (f *detailFakeDB) GetAnimeMainByID(ctx context.Context, id int32) (dbgen.GetAnimeMainByIDRow, error) {
@@ -292,41 +296,104 @@ func (f *detailFakeDB) InsertAnimeRelation(ctx context.Context, arg dbgen.Insert
 	return nil
 }
 
-func (f *detailFakeDB) DeleteAnimeCharacters(ctx context.Context, id int32) error {
-	f.deleteCharactersCalls.Add(1)
-	if f.deleteAnimeCharactersFn != nil {
-		return f.deleteAnimeCharactersFn(ctx, id)
-	}
-	return nil
+// upsertedCharacter / upsertedStaff are one row of a batch upsert, with
+// the title it was written for.  The batch arrives as the jsonb array the
+// real statement unpacks; decoding it back through the row types' json
+// tags is also what checks those tags carry every field.
+type upsertedCharacter struct {
+	AnimeID int32
+	credits.Character
 }
 
-func (f *detailFakeDB) InsertAnimeCharacter(ctx context.Context, arg dbgen.InsertAnimeCharacterParams) error {
-	f.insertCharacterCalls.Add(1)
+type upsertedStaff struct {
+	AnimeID int32
+	credits.Staff
+}
+
+// recordCredit appends one credits statement to the call log.
+func (f *detailFakeDB) recordCredit(call string) {
 	f.mu.Lock()
-	f.insertedCharacters = append(f.insertedCharacters, arg)
+	f.creditCalls = append(f.creditCalls, call)
 	f.mu.Unlock()
-	if f.insertAnimeCharacterFn != nil {
-		return f.insertAnimeCharacterFn(ctx, arg)
-	}
-	return nil
 }
 
-func (f *detailFakeDB) DeleteAnimeStaff(ctx context.Context, id int32) error {
-	f.deleteStaffCalls.Add(1)
-	if f.deleteAnimeStaffFn != nil {
-		return f.deleteAnimeStaffFn(ctx, id)
+// newIDs returns one fresh row id per row, as RETURNING id would.
+func newIDs(n int) []uuid.UUID {
+	ids := make([]uuid.UUID, n)
+	for i := range ids {
+		ids[i] = uuid.New()
 	}
-	return nil
+	return ids
 }
 
-func (f *detailFakeDB) InsertAnimeStaffMember(ctx context.Context, arg dbgen.InsertAnimeStaffMemberParams) error {
-	f.insertStaffCalls.Add(1)
+func (f *detailFakeDB) UpsertAnimeCharacters(_ context.Context, animeID int32, rows []byte) ([]uuid.UUID, error) {
+	f.upsertCharacterCalls.Add(1)
+	var decoded []credits.Character
+	if err := json.Unmarshal(rows, &decoded); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
-	f.insertedStaff = append(f.insertedStaff, arg)
-	f.mu.Unlock()
-	if f.insertAnimeStaffMemberFn != nil {
-		return f.insertAnimeStaffMemberFn(ctx, arg)
+	for _, c := range decoded {
+		f.insertedCharacters = append(f.insertedCharacters, upsertedCharacter{AnimeID: animeID, Character: c})
 	}
+	f.mu.Unlock()
+	return newIDs(len(decoded)), nil
+}
+
+func (f *detailFakeDB) PruneAnimeCharacters(_ context.Context, _ int32, keep []uuid.UUID, wholeList bool) error {
+	f.recordCredit(fmt.Sprintf("prune characters keep=%d whole=%t", len(keep), wholeList))
+	return nil
+}
+
+func (f *detailFakeDB) RenumberAnimeCharacters(_ context.Context, firstOrder int32, _ int32, _ []uuid.UUID) error {
+	f.recordCredit(fmt.Sprintf("renumber characters from %d", firstOrder))
+	return nil
+}
+
+func (f *detailFakeDB) PruneAnimeCharacterVoices(_ context.Context, _ int32, characterIDs []int32) error {
+	f.recordCredit(fmt.Sprintf("prune voices of %d", len(characterIDs)))
+	return nil
+}
+
+func (f *detailFakeDB) UpsertAnimeCharacterVoices(_ context.Context, _ int32, rows []byte) error {
+	var decoded []credits.Voice
+	if err := json.Unmarshal(rows, &decoded); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	f.insertedVoices = append(f.insertedVoices, decoded...)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *detailFakeDB) UpsertAnimeStaff(_ context.Context, animeID int32, rows []byte) ([]uuid.UUID, error) {
+	f.upsertStaffCalls.Add(1)
+	var decoded []credits.Staff
+	if err := json.Unmarshal(rows, &decoded); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	for _, s := range decoded {
+		f.insertedStaff = append(f.insertedStaff, upsertedStaff{AnimeID: animeID, Staff: s})
+	}
+	f.mu.Unlock()
+	return newIDs(len(decoded)), nil
+}
+
+func (f *detailFakeDB) PruneAnimeStaff(_ context.Context, _ int32, keep []uuid.UUID, wholeList bool) error {
+	f.recordCredit(fmt.Sprintf("prune staff keep=%d whole=%t", len(keep), wholeList))
+	return nil
+}
+
+func (f *detailFakeDB) RenumberAnimeStaff(_ context.Context, firstOrder int32, _ int32, _ []uuid.UUID) error {
+	f.recordCredit(fmt.Sprintf("renumber staff from %d", firstOrder))
+	return nil
+}
+
+func (f *detailFakeDB) SetAnimeCreditsHasMore(_ context.Context, castHasMore *bool, staffHasMore *bool, _ int32) error {
+	f.mu.Lock()
+	f.hasMoreSets = append(f.hasMoreSets, [2]*bool{castHasMore, staffHasMore})
+	f.mu.Unlock()
 	return nil
 }
 
@@ -1288,7 +1355,8 @@ func TestDetail_NilAniList_StaleNeverFires(t *testing.T) {
 
 	// No writer methods were called — proves the re-fetch path stayed off.
 	assert.Equal(t, int32(0), db.upsertMainCalls.Load())
-	assert.Equal(t, int32(0), db.deleteCharactersCalls.Load())
+	assert.Equal(t, int32(0), db.upsertCharacterCalls.Load())
+	assert.Empty(t, db.creditCalls)
 	assert.Equal(t, int32(0), db.deleteStudiosCalls.Load())
 }
 
@@ -1387,8 +1455,8 @@ func makeDetailMedia(id int) anilist.Media {
 			{
 				Role: &chRole,
 				Node: anilist.CharacterNode{Name: &anilist.PersonName{Full: &chFull}},
-				VoiceActors: []anilist.VoiceActor{
-					{Name: &anilist.PersonName{Full: &vaFull}},
+				VoiceActorRoles: []anilist.VoiceActorRole{
+					{VoiceActor: &anilist.VoiceActor{ID: 700, Name: &anilist.PersonName{Full: &vaFull}, LanguageV2: ptrString("Japanese")}},
 				},
 			},
 		}},
@@ -1458,10 +1526,9 @@ func TestDetail_NotInCache_AniListReFetchSucceeds(t *testing.T) {
 	assert.Equal(t, int32(1), db.insertStudioCalls.Load())
 	assert.Equal(t, int32(1), db.deleteRelationsCalls.Load())
 	assert.Equal(t, int32(1), db.insertRelationCalls.Load())
-	assert.Equal(t, int32(1), db.deleteCharactersCalls.Load())
-	assert.Equal(t, int32(1), db.insertCharacterCalls.Load())
-	assert.Equal(t, int32(1), db.deleteStaffCalls.Load())
-	assert.Equal(t, int32(1), db.insertStaffCalls.Load())
+	assert.Equal(t, int32(1), db.upsertCharacterCalls.Load())
+	assert.Equal(t, int32(1), db.upsertStaffCalls.Load())
+	assert.Len(t, db.creditCalls, 3+2, "characters prune / renumber / voice prune, staff prune / renumber")
 	assert.Equal(t, int32(1), db.deleteRecommendationsCalls.Load())
 	assert.Equal(t, int32(1), db.insertRecommendationCalls.Load())
 }
@@ -1692,7 +1759,10 @@ func TestDetail_UpsertFromMedia_ChildrenShapesAreCorrect(t *testing.T) {
 	assert.Equal(t, "Hero", *ch.NameEn)
 	require.NotNil(t, ch.VoiceActorEn)
 	assert.Equal(t, "VA", *ch.VoiceActorEn)
-	assert.Nil(t, ch.NameCn, "AniList never sets name_cn")
+	require.NotNil(t, ch.VoiceActorID)
+	assert.Equal(t, int32(700), *ch.VoiceActorID)
+	// name_cn is not a parameter of the upsert at all: the statement never
+	// writes it, so a value from elsewhere survives a refresh.
 
 	require.Len(t, db.insertedStaff, 1)
 	st := db.insertedStaff[0]

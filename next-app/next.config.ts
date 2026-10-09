@@ -41,17 +41,23 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
 
-  // Dev-only rewrite to the local go-api on :8080. In docker-compose
+  // Dev-only rewrite to the local go-api. In docker-compose
   // (local and prod) RSC reads GO_API_INTERNAL_URL directly via the
   // Docker network, and browser requests for /api/* hit nginx, which
   // routes to legacy Express:5001. Phase 8.5 will switch nginx /api/
   // upstream from `app` to `go_api`.
+  //
+  // The destination is GO_API_INTERNAL_URL when set — the variable
+  // lib/api.ts already reads for server-side fetches — so the browser's
+  // /api calls and the server's reach the same go-api. Unset, it is
+  // :8080 as before, which is what CI's sandbox job publishes.
   async rewrites() {
     if (process.env.NODE_ENV === "production") return [];
+    const goApi = (process.env.GO_API_INTERNAL_URL || "http://localhost:8080").replace(/\/+$/, "");
     return [
       {
         source: "/api/:path*",
-        destination: "http://localhost:8080/api/:path*",
+        destination: `${goApi}/api/:path*`,
       },
     ];
   },

@@ -43,28 +43,33 @@ export async function generateMetadata({ params }: LayoutProps<"/[lang]/admin">)
 export default async function AdminLayout({ children, params }: LayoutProps<"/[lang]/admin">) {
   const { locale, dict } = await resolveLocale(params);
   const { username } = await requireAdmin(locale);
+  const adminHref = localizePath("/admin", locale);
 
   return (
     <div style={styles.shell}>
       <header className={layoutStyles.header}>
         <div style={styles.headerInner}>
           <h1 style={styles.title}>{dict.admin.title}</h1>
-          {/* Monolithic single-page admin — anchor scrolls instead of
-              Link navigations. Four sections live on /admin: #overview
-              (stats grid + EnrichmentBar), #activity (DAU/WAU/MAU, trend,
-              retention), #enrichment (data review table), #users (CRUD). */}
+          {/* Four sections live on /admin -- #overview (stats grid +
+              EnrichmentBar), #activity (DAU/WAU/MAU, trend, retention),
+              #enrichment (data review table), #users (CRUD) -- reached by
+              anchor; the anchors carry the /admin path so they also work
+              from /admin/edits, the review queue for readers' edits. */}
           <nav style={styles.nav} aria-label="Admin navigation">
-            <a href="#overview" style={styles.navLink}>
+            <a href={`${adminHref}#overview`} style={styles.navLink}>
               {dict.admin.navOverview}
             </a>
-            <a href="#activity" style={styles.navLink}>
+            <a href={`${adminHref}#activity`} style={styles.navLink}>
               {dict.admin.navActivity}
             </a>
-            <a href="#enrichment" style={styles.navLink}>
+            <a href={`${adminHref}#enrichment`} style={styles.navLink}>
               {dict.admin.navEnrichment}
             </a>
-            <a href="#users" style={styles.navLink}>
+            <a href={`${adminHref}#users`} style={styles.navLink}>
               {dict.admin.navUsers}
+            </a>
+            <a href={localizePath("/admin/edits", locale)} style={styles.navLink}>
+              {dict.editReview.title}
             </a>
           </nav>
           <div style={styles.userBadge}>
@@ -102,16 +107,22 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     margin: 0,
   },
+  // On a phone the five links do not fit beside the title: they scroll
+  // sideways in one line rather than each breaking into a column of
+  // single characters.
   nav: {
     display: "flex",
     gap: 18,
     flex: 1,
+    minWidth: 0,
+    overflowX: "auto",
   },
   navLink: {
     color: "#a8a8b8",
     textDecoration: "none",
     fontSize: 14,
     padding: "6px 0",
+    whiteSpace: "nowrap",
   },
   userBadge: {
     fontSize: 13,

@@ -329,11 +329,16 @@ func Status(ctx context.Context, qc QueueController) (Stats, error) {
 // The facts sweep (AnimeFactsArgs) joined the two rating sweeps here for
 // exactly that reason: it draws on the same AniList limiter as the
 // AniList ratings pass, and the one-slot queue is what keeps the two
-// from holding it at the same time.
+// from holding it at the same time.  The credits sweep (AnimeCreditsArgs)
+// is the third AniList sweep on it and the profiles sweep (ProfilesArgs)
+// the fourth, and pausing this queue is how their pacing is overridden
+// without a deploy.
 //
 // The queue is configured with ONE worker slot, so the sweeps do wait
-// for each other: about five minutes of every hour, which is the price
-// of making two passes of the same kind unable to overlap.  An earlier
+// for each other: about five minutes of every hour for the hourly
+// passes, plus under a minute in every five for each of the credits and
+// profiles sweeps while they have work, which is the price of making two
+// passes unable to overlap.  An earlier
 // version of this sentence said two slots and was wrong on HEAD -- see
 // the MaxWorkers block in cmd/server/main.go, which is the authority.
 const RatingsQueueName = "ratings"

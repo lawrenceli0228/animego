@@ -63,6 +63,18 @@ func TestIsPublicReadExempt(t *testing.T) {
 		// Non-GET on an anime path (no such route today, but the method gate
 		// must hold regardless).
 		{"detail POST", http.MethodPost, "/api/anime/1", false},
+		// The person and character pages are SSR catalogue reads too.  Only
+		// the page itself: the sitemap listings are not on the crawl path
+		// (next-app reads them hourly) and keep the limit, as does anything
+		// that is not a numeric id.
+		{"person GET", http.MethodGet, "/api/people/133507", true},
+		{"character GET", http.MethodGet, "/api/characters/184313", true},
+		{"person sitemap GET", http.MethodGet, "/api/people/sitemap", false},
+		{"character sitemap GET", http.MethodGet, "/api/characters/sitemap", false},
+		{"person non-numeric GET", http.MethodGet, "/api/people/abc", false},
+		{"person nested GET", http.MethodGet, "/api/people/1/x", false},
+		{"people root GET", http.MethodGet, "/api/people/", false},
+		{"person POST", http.MethodPost, "/api/people/1", false},
 		// Other API surfaces are never exempt.
 		{"subscriptions GET", http.MethodGet, "/api/subscriptions", false},
 		{"dandanplay GET", http.MethodGet, "/api/dandanplay/match", false},

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -222,4 +223,128 @@ func requireBlockedOnPendingReportInsert(t *testing.T, pool *pgxpool.Pool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("the second report never reached the conflict — the race this test needs did not happen")
+}
+
+// TestReportCommunityContent_SnapshotsDedupeAndVisibility covers the three
+// community targets (migration 0046) against the real statements: the
+// snapshot keeps the text, a second pending report returns the first, a
+// private or deleted review resolves as nothing, and the database refuses a
+// report that names the wrong kind of target.
+func TestReportCommunityContent_SnapshotsDedupeAndVisibility(t *testing.T) {
+	ctx := context.Background()
+	pool := testutil.NewWebPool(t, ctx, pgURI)
+	testutil.TruncateAll(t, ctx, pool)
+	queries := dbgen.New(pool)
+	reporter := seedSafetyUser(t, "reporter", pool)
+	author := seedSafetyUser(t, "author", pool)
+	_, err := pool.Exec(ctx, `INSERT INTO anime_cache (anilist_id, cached_at) VALUES (154587, now())`)
+	require.NoError(t, err)
+
+	body := strings.Repeat("评", 300)
+	var reviewID, privateID, threadID, replyID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO anime_reviews (anilist_id, user_id, summary, body) VALUES (154587, $1, '一句话总结一下这部番', $2)
+		RETURNING id`, author, body).Scan(&reviewID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO anime_reviews (anilist_id, user_id, summary, body, is_private) VALUES (154587, $1, '只给自己看的私密评价', $2, true)
+		RETURNING id`, reporter, body).Scan(&privateID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO anime_threads (anilist_id, user_id, title, body) VALUES (154587, $1, '第五集的回忆杀', '说说看')
+		RETURNING id`, author).Scan(&threadID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO community_replies (anilist_id, thread_id, user_id, body) VALUES (154587, $1, $2, '哭死我了')
+		RETURNING id`, threadID, author).Scan(&replyID))
+
+	review, err := queries.CreatePendingReport(ctx, dbgen.CreatePendingReportParams{
+		ReporterID: reporter, TargetType: "review", TargetReviewID: &reviewID, Reason: "spam",
+	})
+	require.NoError(t, err)
+	again, err := queries.CreatePendingReport(ctx, dbgen.CreatePendingReportParams{
+		ReporterID: reporter, TargetType: "review", TargetReviewID: &reviewID, Reason: "spam",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, review.ID, again.ID, "one pending report per reporter per review")
+	var snapshot map[string]any
+	require.NoError(t, json.Unmarshal(review.TargetSnapshot, &snapshot))
+	assert.Equal(t, "author", snapshot["username"])
+	assert.Equal(t, "一句话总结一下这部番", snapshot["summary"])
+	assert.Equal(t, body, snapshot["content"])
+
+	thread, err := queries.CreatePendingReport(ctx, dbgen.CreatePendingReportParams{
+		ReporterID: reporter, TargetType: "thread", TargetThreadID: &threadID, Reason: "spam",
+	})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(thread.TargetSnapshot, &snapshot))
+	assert.Equal(t, "第五集的回忆杀", snapshot["title"])
+	assert.Equal(t, threadID.String(), snapshot["threadId"])
+
+	reply, err := queries.CreatePendingReport(ctx, dbgen.CreatePendingReportParams{
+		ReporterID: reporter, TargetType: "reply", TargetReplyID: &replyID, Reason: "spam",
+	})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(reply.TargetSnapshot, &snapshot))
+	assert.Equal(t, "哭死我了", snapshot["content"])
+	assert.Equal(t, threadID.String(), snapshot["threadId"])
+
+	// What a reporter cannot see cannot be reported.
+	_, err = queries.GetCommunityReportTarget(ctx, "review", privateID)
+	assert.ErrorIs(t, err, pgx.ErrNoRows, "a private review")
+	_, err = queries.CreatePendingReport(ctx, dbgen.CreatePendingReportParams{
+		ReporterID: author, TargetType: "review", TargetReviewID: &privateID, Reason: "spam",
+	})
+	assert.ErrorIs(t, err, pgx.ErrNoRows)
+	_, err = pool.Exec(ctx, `UPDATE anime_threads SET deleted_at = now() WHERE id = $1`, threadID)
+	require.NoError(t, err)
+	_, err = queries.GetCommunityReportTarget(ctx, "thread", threadID)
+	assert.ErrorIs(t, err, pgx.ErrNoRows, "a deleted thread")
+	owner, err := queries.GetCommunityReportTarget(ctx, "reply", replyID)
+	require.NoError(t, err)
+	assert.Equal(t, author, owner.UserID)
+
+	// The shape check: a review report may not carry a thread id.
+	_, err = pool.Exec(ctx, `
+		INSERT INTO reports (reporter_id, target_type, target_review_id, target_thread_id, reason)
+		VALUES ($1, 'review', $2, $3, 'spam')`, reporter, reviewID, threadID)
+	assert.Error(t, err)
+
+	// The list carries the new ids.
+	items, err := queries.ListReports(ctx, nil, 0, 10)
+	require.NoError(t, err)
+	assert.Len(t, items, 3)
+}
+
+// TestBlockUserAlsoRemovesLikesAndHelpfulVotes extends the block's clean-up
+// to the community tab's two acknowledgement primitives.
+func TestBlockUserAlsoRemovesLikesAndHelpfulVotes(t *testing.T) {
+	ctx := context.Background()
+	pool := testutil.NewWebPool(t, ctx, pgURI)
+	testutil.TruncateAll(t, ctx, pool)
+	queries := dbgen.New(pool)
+	alice := seedSafetyUser(t, "alice", pool)
+	bob := seedSafetyUser(t, "bob", pool)
+	carol := seedSafetyUser(t, "carol", pool)
+	_, err := pool.Exec(ctx, `INSERT INTO anime_cache (anilist_id, cached_at) VALUES (154587, now())`)
+	require.NoError(t, err)
+
+	var aliceEvent, aliceReview uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO activity_events (user_id, event_type, anilist_id, status) VALUES ($1, 'status', 154587, 'completed')
+		RETURNING id`, alice).Scan(&aliceEvent))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO anime_reviews (anilist_id, user_id, summary, body) VALUES (154587, $1, '一句话总结一下这部番', $2)
+		RETURNING id`, alice, strings.Repeat("评", 300)).Scan(&aliceReview))
+	_, err = pool.Exec(ctx, `INSERT INTO activity_likes (activity_event_id, user_id) VALUES ($1, $2), ($1, $3)`, aliceEvent, bob, carol)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO anime_review_votes (review_id, user_id) VALUES ($1, $2), ($1, $3)`, aliceReview, bob, carol)
+	require.NoError(t, err)
+
+	row, err := queries.BlockUser(ctx, alice, bob)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), row.RemovedReactions, "bob's like and bob's vote")
+
+	var likes, votes int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM activity_likes`).Scan(&likes))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM anime_review_votes`).Scan(&votes))
+	assert.Equal(t, 1, likes, "carol's like stays")
+	assert.Equal(t, 1, votes, "carol's vote stays")
 }

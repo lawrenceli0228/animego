@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lawrenceli0228/animego/go-api/internal/anilist"
 	"github.com/lawrenceli0228/animego/go-api/internal/colorx"
+	"github.com/lawrenceli0228/animego/go-api/internal/credits"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 )
 
@@ -250,38 +251,19 @@ type RelationRow struct {
 	Format                      *string
 }
 
-// CharacterRow is one child-row payload for anime_characters.  DisplayOrder
-// must be assigned by the caller (typically the slice index).  NameCn is
-// always nil here — V2 enrichment fills it via Bangumi later.
-type CharacterRow struct {
-	DisplayOrder       int32
-	NameEn             *string
-	NameJa             *string
-	NameCn             *string // always nil: nothing writes it -- see TODOS.md, the Bangumi endpoint V2 reads has no name_cn
-	ImageUrl           *string
-	Role               *string
-	VoiceActorEn       *string
-	VoiceActorJa       *string
-	VoiceActorImageUrl *string
-	// AniList's ids for the character and the (first Japanese) voice
-	// actor.  Nil when AniList's node carried no positive id, which the
-	// column CHECK would refuse.  Since 0037.
-	CharacterID  *int32
-	VoiceActorID *int32
-}
+// CharacterRow is one child-row payload for anime_characters: the same
+// columns as ever (they feed /api/anime/:id and its consumers), built by
+// internal/credits.  The rules live there rather than here because the
+// credits sweep (internal/queue) writes the same rows and cannot import
+// this package -- the reason TagsFromMedia defers to anilist's TagSet.
+//
+// The voice_actor_* fields carry the title's primary voice, chosen by
+// country of origin (credits.PrimaryLanguage); every voice of the
+// character goes to anime_character_voices (credits.Cast.Voices).
+type CharacterRow = credits.Character
 
-// StaffRow is one child-row payload for anime_staff.  DisplayOrder must be
-// assigned by the caller (slice index).
-type StaffRow struct {
-	DisplayOrder int32
-	NameEn       *string
-	NameJa       *string
-	ImageUrl     *string
-	Role         *string
-	// AniList's id for the person.  Nil when the node carried none.
-	// Since 0037.
-	StaffID *int32
-}
+// StaffRow is one child-row payload for anime_staff.  See CharacterRow.
+type StaffRow = credits.Staff
 
 // RecommendationRow is one child-row payload for anime_recommendations.
 type RecommendationRow struct {
@@ -407,85 +389,32 @@ func RelationsFromMedia(m anilist.Media) []RelationRow {
 	return out
 }
 
-// CharactersFromMedia maps Media.Characters to []CharacterRow.  DisplayOrder
-// is the slice index (0-based) so the relational re-read preserves AniList
-// edge ordering.  VoiceActor* fields come from edges.voiceActors[0] when
-// present — Express picks the first JAPANESE entry, the GraphQL query
-// already filters server-side so the first array entry is the correct one.
-// NameCn is always nil here, and nothing downstream fills it either --
-// the Bangumi endpoint V2 reads returns no name_cn (TODOS.md).
-func CharactersFromMedia(m anilist.Media) []CharacterRow {
-	if m.Characters == nil || len(m.Characters.Edges) == 0 {
-		return []CharacterRow{}
+// CastFromMedia maps Media.Characters to the character rows and voice
+// rows the detail refresh writes: credits.CastFromEdges over the page,
+// with the title's country of origin deciding the primary voice.
+// DisplayOrder is the position on the page, so the relational re-read
+// preserves AniList's order.
+func CastFromMedia(m anilist.Media) credits.Cast {
+	if m.Characters == nil {
+		return credits.CastFromEdges(nil, m.CountryOfOrigin)
 	}
-	out := make([]CharacterRow, 0, len(m.Characters.Edges))
-	for i, e := range m.Characters.Edges {
-		var nameEn, nameJa, imageURL *string
-		if e.Node.Name != nil {
-			nameEn = e.Node.Name.Full
-			nameJa = e.Node.Name.Native
-		}
-		if e.Node.Image != nil {
-			imageURL = e.Node.Image.Medium
-		}
-
-		var vaEn, vaJa, vaImg *string
-		var vaID *int32
-		if len(e.VoiceActors) > 0 {
-			va := e.VoiceActors[0]
-			if va.Name != nil {
-				vaEn = va.Name.Full
-				vaJa = va.Name.Native
-			}
-			if va.Image != nil {
-				vaImg = va.Image.Medium
-			}
-			vaID = positiveID(va.ID)
-		}
-
-		out = append(out, CharacterRow{
-			DisplayOrder:       int32(i),
-			NameEn:             nameEn,
-			NameJa:             nameJa,
-			NameCn:             nil,
-			ImageUrl:           imageURL,
-			Role:               e.Role,
-			VoiceActorEn:       vaEn,
-			VoiceActorJa:       vaJa,
-			VoiceActorImageUrl: vaImg,
-			CharacterID:        positiveID(e.Node.ID),
-			VoiceActorID:       vaID,
-		})
-	}
-	return out
+	return credits.CastFromEdges(m.Characters.Edges, m.CountryOfOrigin)
 }
 
-// StaffFromMedia maps Media.Staff to []StaffRow.  DisplayOrder = slice
-// index.  Mirrors Express `m.staff.edges.map(e => ({...}))`.
+// CharactersFromMedia maps Media.Characters to []CharacterRow -- the
+// character half of CastFromMedia.  NameCn is always nil: no source
+// fills it yet (TODOS.md).
+func CharactersFromMedia(m anilist.Media) []CharacterRow {
+	return CastFromMedia(m).Characters
+}
+
+// StaffFromMedia maps Media.Staff to []StaffRow.  DisplayOrder is the
+// position on the page.
 func StaffFromMedia(m anilist.Media) []StaffRow {
-	if m.Staff == nil || len(m.Staff.Edges) == 0 {
-		return []StaffRow{}
+	if m.Staff == nil {
+		return credits.StaffFromEdges(nil)
 	}
-	out := make([]StaffRow, 0, len(m.Staff.Edges))
-	for i, e := range m.Staff.Edges {
-		var nameEn, nameJa, imageURL *string
-		if e.Node.Name != nil {
-			nameEn = e.Node.Name.Full
-			nameJa = e.Node.Name.Native
-		}
-		if e.Node.Image != nil {
-			imageURL = e.Node.Image.Medium
-		}
-		out = append(out, StaffRow{
-			DisplayOrder: int32(i),
-			NameEn:       nameEn,
-			NameJa:       nameJa,
-			ImageUrl:     imageURL,
-			Role:         e.Role,
-			StaffID:      positiveID(e.Node.ID),
-		})
-	}
-	return out
+	return credits.StaffFromEdges(m.Staff.Edges)
 }
 
 // positiveID narrows an AniList node id for an id column, and turns the

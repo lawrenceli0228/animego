@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -43,12 +44,14 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/bangumi"
 	"github.com/lawrenceli0228/animego/go-api/internal/bgmidmap"
 	"github.com/lawrenceli0228/animego/go-api/internal/comments"
+	"github.com/lawrenceli0228/animego/go-api/internal/community"
 	"github.com/lawrenceli0228/animego/go-api/internal/config"
 	"github.com/lawrenceli0228/animego/go-api/internal/dandanplay"
 	"github.com/lawrenceli0228/animego/go-api/internal/danmaku"
 	"github.com/lawrenceli0228/animego/go-api/internal/db"
 	dbgen "github.com/lawrenceli0228/animego/go-api/internal/db/gen"
 	"github.com/lawrenceli0228/animego/go-api/internal/deepseek"
+	"github.com/lawrenceli0228/animego/go-api/internal/edits"
 	"github.com/lawrenceli0228/animego/go-api/internal/email"
 	"github.com/lawrenceli0228/animego/go-api/internal/hant"
 	"github.com/lawrenceli0228/animego/go-api/internal/httpmw"
@@ -56,6 +59,7 @@ import (
 	"github.com/lawrenceli0228/animego/go-api/internal/jwtx"
 	"github.com/lawrenceli0228/animego/go-api/internal/notifications"
 	"github.com/lawrenceli0228/animego/go-api/internal/obs"
+	"github.com/lawrenceli0228/animego/go-api/internal/people"
 	"github.com/lawrenceli0228/animego/go-api/internal/queue"
 	"github.com/lawrenceli0228/animego/go-api/internal/safety"
 	"github.com/lawrenceli0228/animego/go-api/internal/social"
@@ -286,6 +290,13 @@ func main() {
 		os.Exit(1)
 	}
 	seasonalSvc := anime.NewSeasonalService(q, anilistClient)
+	// The detail page's 角色 / 制作 tabs: every character and staff credit
+	// a title stores, read from the tables and never from AniList.
+	creditListsSvc, err := anime.NewCreditListsService(q)
+	if err != nil {
+		slog.Error("credit lists service init failed", "err", err)
+		os.Exit(1)
+	}
 
 	// 1h in-memory caches for /trending + /yearly-top (Express had these
 	// as Map-based caches; we use ristretto for accurate eviction).
@@ -683,6 +694,11 @@ func main() {
 	// is the only auth-gated write; danmaku writes go through socket.io
 	// (P2.8), so only the read endpoint lives here.
 	commentsHandlers := comments.NewHandlers(pool, q)
+	// The community tab of an anime page (migration 0046): reviews, threads,
+	// replies, activity likes.  Mounted under /api/anime/{anilistId}/community
+	// below; the per-user write budgets are community.DefaultLimits.
+	communityHandlers := community.NewHandlers(q, community.DefaultLimits())
+	defer communityHandlers.Stop()
 	notificationHandlers := notifications.NewHandlers(q)
 	safetyHandlers := safety.NewHandlers(q)
 	danmakuHandlers := danmaku.NewHandlers(pool, q)
@@ -831,8 +847,49 @@ func main() {
 		// pattern first, and a two-segment route added after the catch-all
 		// would never be reached.
 		r.Get("/{anilistId}/episode-offset", anime.EpisodeOffset(q))
+		// The detail tabs' full lists, past the 25 /{anilistId} carries.
+		// Two segments, like /watchers above.
+		r.Get("/{anilistId}/characters", creditListsSvc.Characters())
+		r.Get("/{anilistId}/staff", creditListsSvc.Staff())
+		r.Get("/{anilistId}/credit-counts", creditListsSvc.Counts())
+		// The community tab: /{anilistId}/community and everything under it.
+		// Its GETs are public catalogue reads like /watchers above, which is
+		// what lets the ISR page render them without forwarding a visitor's
+		// address (see isPublicReadExempt); its writes are per-user limited.
+		communityHandlers.Mount(r, signer)
 		r.Get("/{anilistId}", detailSvc.Handler())
 	})
+
+	// The person and character pages: one AniList Staff id or Character id
+	// each, read from the database and nothing else (an unknown id is a
+	// database miss and a 404, never an AniList request), plus the listings
+	// of the indexed ones for next-app's sitemap.  One cache for both
+	// listings; its keys carry the kind.
+	peopleSitemapCache := people.NewSitemapCache(people.SitemapTTL)
+	r.Route("/api/people", func(r chi.Router) { people.MountPeople(r, q, peopleSitemapCache) })
+	r.Route("/api/characters", func(r chi.Router) { people.MountCharacters(r, q, peopleSitemapCache) })
+
+	// Readers' edits to those pages: POST /api/edits (signed in) and the
+	// accepted photos at /api/edit-images/*; the review routes are in the
+	// /api/admin group below.  Photos live on the avatar volume, under
+	// edits/pending until accepted and edits/public after -- the public
+	// route serves only the latter -- so no volume or compose change is
+	// needed.  Accepted ones are addressed at CLIENT_ORIGIN, the site's own
+	// origin, which nginx routes /api/* from.  A review drops every title
+	// crediting the page from the detail cache (detailSvc.Forget).
+	editImageDir := os.Getenv("EDIT_IMAGE_DIR")
+	if editImageDir == "" {
+		editImageDir = filepath.Join(avatarDir, "edits")
+	}
+	// An accepted edit changes what every title crediting the page shows:
+	// its detail and its 角色 / 制作 lists are both dropped from memory.
+	forgetTitles := func(ids ...int32) {
+		detailSvc.Forget(ids...)
+		creditListsSvc.Forget(ids...)
+	}
+	editsHandlers := edits.NewHandlers(pool,
+		edits.NewImageStore(editImageDir, cfg.ClientOrigin, edits.NewFetcher()), forgetTitles)
+	editsHandlers.Mount(r, jwtx.RequireAuth(signer))
 
 	// P2.4 — subscriptions: 8 endpoints, every route RequireAuth.
 	//
@@ -941,6 +998,9 @@ func main() {
 		r.Get("/users", adminReadHandlers.ListUsers)
 		r.Get("/reports", safetyHandlers.ListReports)
 		r.Patch("/reports/{id}", safetyHandlers.UpdateReport)
+		// Removing a reported review, thread or reply (soft; deleted_by is
+		// the admin).
+		communityHandlers.MountAdmin(r)
 		r.Get("/community-metrics", commentsHandlers.CommunityMetrics)
 		// The user-activity panel: DAU/WAU/MAU, the daily trend, retention
 		// cohorts and the surface breakdown.  Distinct from
@@ -976,6 +1036,11 @@ func main() {
 		// button that catches them up.
 		r.Get("/hant/stats", adminHantHandlers.GetHantStats)
 		r.Post("/hant/backfill", adminHantHandlers.BackfillHant)
+
+		// The review queue for readers' edits to person and character
+		// pages (internal/edits): list, one submission, the decision, and
+		// the photos waiting for one.
+		editsHandlers.MountAdmin(r)
 
 		// Warm-all (fire-and-forget) + user CRUD.
 		r.Post("/warm-all", adminUserHandlers.WarmAll)
@@ -1250,6 +1315,20 @@ func buildWorkers(d workerDeps) *river.Workers {
 	// batches queue on the one limiter beside everything else, and the
 	// same queue so the two never run side by side.
 	queue.AddFactsWorker(workers, d.anilist, d.db)
+
+	// The credits sweep: characters and staff beyond AniList's first page.
+	// The SAME AniList client, because its pacing is defined against that
+	// client's limiter -- it only ever takes a token nobody is waiting for
+	// -- and a client of its own would be a second bucket against the same
+	// budget.  The pool is for its one-transaction-per-title writes.
+	queue.AddCreditsWorker(workers, d.anilist, d.pool, d.db)
+
+	// The profiles sweep: AniList's profiles of the people and characters
+	// those credits name.  The same AniList client for the credits sweep's
+	// reason -- its no-wait requests only take tokens nobody is waiting for
+	// on that client's limiter -- and the pool for its one-transaction-
+	// per-batch writes.  Gated at work time by PROFILES_SWEEP_ENABLED.
+	queue.AddProfilesWorker(workers, d.anilist, d.pool, d.db)
 	return workers
 }
 

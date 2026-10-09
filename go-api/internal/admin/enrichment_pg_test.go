@@ -68,6 +68,18 @@ func TestResetEnrichment_HappyPath_PG(t *testing.T) {
 		VALUES ($1, 1, $2)`, id, "Ep 1 — Pilot"); err != nil {
 		t.Fatalf("seed episode title: %v", err)
 	}
+	// A voice row and the credits sweep's stamp (0042): the reset deletes
+	// every character, so it must take their voices and clear the stamp
+	// that would otherwise keep the sweep from putting them back.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO anime_character_voices (anime_id, character_id, staff_id, display_order)
+		VALUES ($1, 11, 22, 0)`, id); err != nil {
+		t.Fatalf("seed voice: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE anime_cache SET cast_has_more = true, cast_checked_at = now() WHERE anilist_id = $1`, id); err != nil {
+		t.Fatalf("seed sweep stamp: %v", err)
+	}
 
 	// Reset.
 	req := newReqWithChiParam(http.MethodPost, "/api/admin/enrichment/"+strconv.Itoa(int(id))+"/reset", "anilistId", strconv.Itoa(int(id)), "")
@@ -119,6 +131,25 @@ func TestResetEnrichment_HappyPath_PG(t *testing.T) {
 	}
 	if charCount != 0 || epCount != 0 {
 		t.Errorf("post-reset child counts: characters=%d episode_titles=%d, want both 0", charCount, epCount)
+	}
+	var voiceCount int
+	var castChecked, castHasMore *bool
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM anime_character_voices WHERE anime_id = $1`, id).Scan(&voiceCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT cast_checked_at IS NOT NULL, cast_has_more FROM anime_cache WHERE anilist_id = $1`, id).
+		Scan(&castChecked, &castHasMore); err != nil {
+		t.Fatal(err)
+	}
+	if voiceCount != 0 {
+		t.Errorf("post-reset voices=%d, want 0: no voice outlives its character", voiceCount)
+	}
+	if castChecked == nil || *castChecked {
+		t.Errorf("cast_checked_at survived the reset; the sweep would not restore the characters for 30 days")
+	}
+	if castHasMore == nil || !*castHasMore {
+		t.Errorf("cast_has_more=%v, want true kept: it is what puts the title back in the sweep", castHasMore)
 	}
 
 	// Verify V1 dispatched.
