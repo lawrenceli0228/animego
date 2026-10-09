@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"image"
 	"image/color"
 	"image/gif"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -55,7 +57,7 @@ func TestImageStore_UploadLifecycle(t *testing.T) {
 	root := t.TempDir()
 	s := NewImageStore(root, "https://example.org/", nil)
 
-	img, err := s.SaveUpload(jpegDataURL(t, 230, 345))
+	img, err := s.SaveUpload(context.Background(), jpegDataURL(t, 230, 345))
 	require.NoError(t, err)
 	assert.Regexp(t, imageNameRe, img.File)
 	assert.Equal(t, 230, img.Width)
@@ -104,7 +106,7 @@ func TestImageStore_UploadLifecycle(t *testing.T) {
 func TestImageStore_LargeImagesAreScaledDown(t *testing.T) {
 	t.Parallel()
 	s := NewImageStore(t.TempDir(), "https://example.org", nil)
-	img, err := s.SaveUpload(jpegDataURL(t, 2400, 3600))
+	img, err := s.SaveUpload(context.Background(), jpegDataURL(t, 2400, 3600))
 	require.NoError(t, err)
 	assert.Equal(t, 800, img.Width)
 	assert.Equal(t, 1200, img.Height)
@@ -122,7 +124,7 @@ func TestImageStore_RefusesWhatIsNotJPEGOrPNG(t *testing.T) {
 	_, err := s.SaveLink(context.Background(), "https://example.org/a.png")
 	assert.True(t, avatars.IsUnsupportedFormat(err), "a GIF served as a PNG: %v", err)
 
-	_, err = s.SaveUpload("data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()))
+	_, err = s.SaveUpload(context.Background(), "data:image/png;base64,"+base64.StdEncoding.EncodeToString(buf.Bytes()))
 	assert.True(t, avatars.IsUnsupportedFormat(err), "%v", err)
 
 	entries, _ := os.ReadDir(filepath.Join(root, "pending"))
@@ -144,6 +146,64 @@ func TestImageStore_SaveLinkKeepsTheSource(t *testing.T) {
 	f.err = errImageTooLarge
 	_, err = s.SaveLink(context.Background(), "https://example.org/b.jpg")
 	assert.ErrorIs(t, err, errImageTooLarge)
+}
+
+// One photo is decoded at a time: a large one takes a few hundred megabytes
+// while it decodes, and requests that each started one at once could take
+// the process down.  A request waiting for its turn gives up with its
+// context.
+func TestImageStore_DecodesOneAtATime(t *testing.T) {
+	t.Parallel()
+	s := NewImageStore(t.TempDir(), "https://example.org", nil)
+	s.decodeSlots <- struct{}{} // another photo is being decoded
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := s.SaveUpload(ctx, jpegDataURL(t, 40, 60))
+	assert.ErrorIs(t, err, errImageBusy)
+
+	<-s.decodeSlots
+	_, err = s.SaveUpload(context.Background(), jpegDataURL(t, 40, 60))
+	assert.NoError(t, err, "its turn")
+
+	rec := httptest.NewRecorder()
+	(&Handlers{}).failImage(rec, err2(errImageBusy))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+func err2(err error) error { return fmt.Errorf("%w: %v", err, context.DeadlineExceeded) }
+
+// The decoders' own pixel types are read directly rather than through
+// image.Image's At, which boxes every pixel's colour; the result is the same.
+func TestFitWithin_ReadsDecodedTypesDirectly(t *testing.T) {
+	t.Parallel()
+	type opaque struct{ image.Image } // hides the concrete type: the At path
+
+	ycc := image.NewYCbCr(image.Rect(0, 0, 2400, 1601), image.YCbCrSubsampleRatio420)
+	for i := range ycc.Y {
+		ycc.Y[i] = uint8(i * 7)
+	}
+	for i := range ycc.Cb {
+		ycc.Cb[i], ycc.Cr[i] = uint8(i*3), uint8(255-i)
+	}
+	nrgba := image.NewNRGBA(image.Rect(0, 0, 1300, 1700))
+	for i := range nrgba.Pix {
+		nrgba.Pix[i] = uint8(i * 11)
+	}
+	rgba := image.NewRGBA(image.Rect(5, 5, 1305, 1405))
+	for i := range rgba.Pix {
+		rgba.Pix[i] = uint8(i * 13)
+	}
+	gray := image.NewGray(image.Rect(0, 0, 1500, 900))
+	for i := range gray.Pix {
+		gray.Pix[i] = uint8(i * 5)
+	}
+	for name, img := range map[string]image.Image{"YCbCr": ycc, "NRGBA": nrgba, "RGBA": rgba, "Gray": gray} {
+		fast, ok := fitWithin(img, 1200).(*image.RGBA)
+		require.True(t, ok, name)
+		slow := fitWithin(opaque{img}, 1200).(*image.RGBA)
+		assert.Equal(t, slow.Rect, fast.Rect, name)
+		assert.True(t, bytes.Equal(slow.Pix, fast.Pix), name)
+	}
 }
 
 func TestFitWithin(t *testing.T) {

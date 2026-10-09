@@ -410,4 +410,9 @@ func TestListAttachesTheOutcomeOfAReviewedEdit(t *testing.T) {
 	assert.Equal(t, "修塔尔克", detail["snapshot"].(map[string]any)["name"].(map[string]any)["cn"])
 	_, has := body.Data.Items[1]["edit"]
 	assert.False(t, has, "a follow keeps its shape")
+
+	// Who reviewed it is not the submitter's to know: the actor is there,
+	// as on every row, but empty.
+	assert.Equal(t, map[string]any{"username": "", "avatarUrl": nil}, edit["actor"])
+	assert.Equal(t, "bob", body.Data.Items[1]["actor"].(map[string]any)["username"])
 }

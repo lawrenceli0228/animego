@@ -70,7 +70,15 @@ export interface EditItem {
   rejectNote: string | null;
   /** The proposed photo: admin-only while pending, public once accepted. */
   previewUrl: string | null;
+  /**
+   * Pending, and the page no longer shows the value it was made against:
+   * another edit was accepted meanwhile. It can only be rejected.
+   */
+  stale: boolean;
 }
+
+/** go-api's answer when an accepted item turned out stale (internal/edits/review.go). */
+export const STALE_MESSAGE = "Some changes no longer match the page";
 
 export interface EditSubmission extends Omit<EditListItem, "hasImage"> {
   sourceUrl: string;
@@ -113,9 +121,29 @@ export interface Decision {
   note: string;
 }
 
-/** Every pending item accepted, with no note: where the panel starts. */
-export function initialDecisions(items: EditItem[]): Record<string, Decision> {
-  return Object.fromEntries(items.map((it) => [it.id, { accept: true, note: "" }]));
+/**
+ * Where the panel starts: every item accepted with no note, but a stale one
+ * rejected with the given note.
+ */
+export function initialDecisions(items: EditItem[], staleNote = ""): Record<string, Decision> {
+  return Object.fromEntries(
+    items.map((it) => [it.id, it.stale ? { accept: false, note: staleNote } : { accept: true, note: "" }]),
+  );
+}
+
+/** 全部采纳: every item that can be accepted; a stale one keeps its rejection and note. */
+export function acceptAllDecisions(items: EditItem[], current: Record<string, Decision>): Record<string, Decision> {
+  return Object.fromEntries(
+    items.map((it) => [it.id, it.stale ? { accept: false, note: current[it.id]?.note ?? "" } : { accept: true, note: "" }]),
+  );
+}
+
+/**
+ * The panel's React key. The decisions are the panel's own state, so a
+ * reload that finds an item newly stale has to start the panel again.
+ */
+export function panelKey(s: Pick<EditSubmission, "id" | "status" | "items">): string {
+  return `${s.id}:${s.status}:${s.items.filter((it) => it.stale).map((it) => it.id).join(",")}`;
 }
 
 /** Whether every rejected item has a note, so the review can be sent. */

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"mime"
 	"net/http"
 	"slices"
 	"sync"
@@ -43,6 +44,8 @@ const (
 	msgImageUnreadable = "The image could not be read"
 	msgPendingExists   = "This page already has a submission of yours waiting for review"
 	msgTooMany         = "Too many submissions, try again later"
+	msgBusy            = "The server is busy, try again later"
+	msgNotJSON         = "The body must be JSON"
 )
 
 var (
@@ -62,6 +65,15 @@ const (
 	dayWindow         = 24 * time.Hour
 	dayMax            = 20
 	maxPendingPerUser = 10
+)
+
+// Every attempt counts toward attemptMax in attemptWindow, refused or not:
+// the limits above count stored submissions, and a refused one can still
+// cost the page reads, a fetched photo and its decoding.  Generous for a
+// reader whose link or date was turned down a few times; it stops a loop.
+const (
+	attemptWindow = 10 * time.Minute
+	attemptMax    = 20
 )
 
 // submitTimeout covers the page reads, a fetched photo (fetchTimeout) and
@@ -86,6 +98,7 @@ type Handlers struct {
 	// cheap checks and each fetch a linked photo before the transaction
 	// let only one of them through.
 	inflight sync.Map
+	attempts *attemptCounter
 }
 
 // NewHandlers wires the handlers.  forget may be nil.
@@ -93,7 +106,19 @@ func NewHandlers(pool *pgxpool.Pool, images *ImageStore, forget ForgetFunc) *Han
 	if pool == nil || images == nil {
 		panic("edits.NewHandlers: nil dependency")
 	}
-	return &Handlers{pool: pool, q: dbgen.New(pool), images: images, forget: forget, now: time.Now}
+	return &Handlers{
+		pool: pool, q: dbgen.New(pool), images: images, forget: forget, now: time.Now,
+		attempts: newAttemptCounter(attemptWindow, attemptMax),
+	}
+}
+
+// isJSON reports whether a request says its body is JSON.  Only such a
+// body is read: a form or a no-cors fetch from another site can carry a
+// reader's cookie but not this Content-Type, which takes a CORS preflight
+// that only the site's own origin passes.
+func isJSON(r *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mediaType == "application/json"
 }
 
 // submitRequest is the body of POST /api/edits.
@@ -122,15 +147,24 @@ func fail(w http.ResponseWriter, status int, code, message string) {
 //	{"kind":"character","entityId":184313,"sourceUrl":"https://…","note":"…",
 //	 "changes":{"nameCn":"…","image":{"url":"https://…"},"roles":[{"animeId":154587,"role":"MAIN"}]}}
 //
-// 201 {"data":{"id","status":"pending","itemCount","createdAt"}}.  400 for a
-// body, field, link or photo it refuses -- including a submission that
-// changes nothing on the page as it is shown now; 404 for a page that does
-// not exist; 409 when the submitter already has one waiting on this page;
-// 429 past the limits above.
+// 201 {"data":{"id","status":"pending","itemCount","createdAt"}}.  415 for a
+// body that is not application/json; 400 for a body, field, link or photo
+// it refuses -- including a submission that changes nothing on the page as
+// it is shown now; 404 for a page that does not exist; 409 when the
+// submitter already has one waiting on this page; 429 past the limits
+// above.
 func (h *Handlers) Submit(w http.ResponseWriter, r *http.Request) {
 	claims, ok := jwtx.ClaimsFrom(r.Context())
 	if !ok || claims == nil {
 		fail(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "Authentication required")
+		return
+	}
+	if !isJSON(r) {
+		fail(w, http.StatusUnsupportedMediaType, httpx.CodeBadRequest, msgNotJSON)
+		return
+	}
+	if !h.attempts.allow(claims.UserID, h.now()) {
+		fail(w, http.StatusTooManyRequests, httpx.CodeTooManyRequests, msgTooMany)
 		return
 	}
 	if _, busy := h.inflight.LoadOrStore(claims.UserID, struct{}{}); busy {
@@ -149,6 +183,10 @@ func (h *Handlers) Submit(w http.ResponseWriter, r *http.Request) {
 	kind := overlay.Kind(req.Kind)
 	if kind != overlay.Character && kind != overlay.Person {
 		fail(w, http.StatusBadRequest, httpx.CodeValidationError, msgBadKind)
+		return
+	}
+	if err := checkShape(req.Changes); err != nil {
+		fail(w, http.StatusBadRequest, httpx.CodeValidationError, err.Error())
 		return
 	}
 	if req.EntityID <= 0 || req.EntityID > math.MaxInt32 {
@@ -219,7 +257,7 @@ func (h *Handlers) Submit(w http.ResponseWriter, r *http.Request) {
 		if img.URL != "" {
 			si, err = h.images.SaveLink(ctx, img.URL)
 		} else {
-			si, err = h.images.SaveUpload(img.DataURL)
+			si, err = h.images.SaveUpload(ctx, img.DataURL)
 		}
 		if err != nil {
 			h.failImage(w, err)
@@ -277,6 +315,8 @@ func (h *Handlers) failImage(w http.ResponseWriter, err error) {
 		fail(w, http.StatusBadRequest, httpx.CodeValidationError, msgImageTooLarge)
 	case avatars.IsBadImage(err):
 		fail(w, http.StatusBadRequest, httpx.CodeValidationError, msgImageUnreadable)
+	case errors.Is(err, errImageBusy):
+		fail(w, http.StatusServiceUnavailable, httpx.CodeServerError, msgBusy)
 	default:
 		httpx.Fail(w, httpx.WrapError(err, http.StatusInternalServerError, httpx.CodeServerError, "image store failed"))
 	}

@@ -3,6 +3,7 @@ package edits
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"net/http"
@@ -40,10 +41,21 @@ import (
 // largest portrait the pages draw (345px), rounded.
 const maxStoredSide = 1200
 
+// maxConcurrentDecodes is how many photos the process decodes at once.  The
+// dimension cap bounds one decode, not several: a 4000px-square progressive
+// JPEG takes a few hundred megabytes of buffers while it decodes, failed or
+// not, and requests that each started one at the same moment could take the
+// server down.  Edits are few; one at a time costs a short wait at most.
+const maxConcurrentDecodes = 1
+
 var imageNameRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$`)
 
-// errImageFile: the image could not be written or moved (a server fault).
-var errImageFile = errors.New("edits: image file")
+var (
+	// errImageFile: the image could not be written or moved (a server fault).
+	errImageFile = errors.New("edits: image file")
+	// errImageBusy: the request gave up waiting for its turn to decode.
+	errImageBusy = errors.New("edits: image decoding busy")
+)
 
 // StoredImage is a photo an edit proposes, as its item stores it.
 type StoredImage struct {
@@ -64,12 +76,18 @@ type ImageStore struct {
 	root    string
 	origin  string
 	fetcher imageFetcher
+	// decodeSlots holds a token for each photo being decoded.
+	decodeSlots chan struct{}
 }
 
 // NewImageStore stores under root and publishes at origin (the site's own
 // address: an accepted photo's URL is origin + /api/edit-images/<file>).
+// The server makes one; its decodes are the process's.
 func NewImageStore(root, origin string, fetcher imageFetcher) *ImageStore {
-	return &ImageStore{root: root, origin: strings.TrimRight(origin, "/"), fetcher: fetcher}
+	return &ImageStore{
+		root: root, origin: strings.TrimRight(origin, "/"), fetcher: fetcher,
+		decodeSlots: make(chan struct{}, maxConcurrentDecodes),
+	}
 }
 
 func (s *ImageStore) pendingPath(name string) string { return filepath.Join(s.root, "pending", name) }
@@ -79,12 +97,12 @@ func (s *ImageStore) publicPath(name string) string  { return filepath.Join(s.ro
 func (s *ImageStore) PublicURL(name string) string { return s.origin + "/api/edit-images/" + name }
 
 // SaveUpload stores an uploaded photo (a JPEG or PNG data URL) as pending.
-func (s *ImageStore) SaveUpload(dataURL string) (StoredImage, error) {
+func (s *ImageStore) SaveUpload(ctx context.Context, dataURL string) (StoredImage, error) {
 	raw, err := avatars.DecodeDataURL(dataURL)
 	if err != nil {
 		return StoredImage{}, err
 	}
-	return s.save(raw, nil)
+	return s.save(ctx, raw, nil)
 }
 
 // SaveLink fetches a linked photo (see fetch.go) and stores it as pending.
@@ -99,10 +117,17 @@ func (s *ImageStore) SaveLink(ctx context.Context, link string) (StoredImage, er
 		return StoredImage{}, err
 	}
 	source := strings.TrimSpace(link)
-	return s.save(raw, &source)
+	return s.save(ctx, raw, &source)
 }
 
-func (s *ImageStore) save(raw []byte, source *string) (StoredImage, error) {
+// save decodes, scales and stores a photo, waiting for its turn to decode.
+func (s *ImageStore) save(ctx context.Context, raw []byte, source *string) (StoredImage, error) {
+	select {
+	case s.decodeSlots <- struct{}{}:
+		defer func() { <-s.decodeSlots }()
+	case <-ctx.Done():
+		return StoredImage{}, fmt.Errorf("%w: %v", errImageBusy, ctx.Err())
+	}
 	img, err := avatars.DecodeImage(raw)
 	if err != nil {
 		return StoredImage{}, err
@@ -205,6 +230,7 @@ func fitWithin(img image.Image, maxSide int) image.Image {
 	} else {
 		dw = max(1, sw*maxSide/sh)
 	}
+	at := rgbaAt(img)
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
 	for y := 0; y < dh; y++ {
 		y0 := b.Min.Y + y*sh/dh
@@ -215,7 +241,7 @@ func fitWithin(img image.Image, maxSide int) image.Image {
 			var r, g, bl, a, n uint64
 			for sy := y0; sy < y1; sy++ {
 				for sx := x0; sx < x1; sx++ {
-					cr, cg, cb, ca := img.At(sx, sy).RGBA()
+					cr, cg, cb, ca := at(sx, sy)
 					r += uint64(cr)
 					g += uint64(cg)
 					bl += uint64(cb)
@@ -229,4 +255,22 @@ func fitWithin(img image.Image, maxSide int) image.Image {
 		}
 	}
 	return dst
+}
+
+// rgbaAt reads a pixel's premultiplied colour.  The decoders' own image
+// types are read directly: image.Image's At returns each pixel's colour as an
+// interface, an allocation per pixel -- millions of them for a large photo.
+// Anything else goes through At.
+func rgbaAt(img image.Image) func(x, y int) (r, g, b, a uint32) {
+	switch src := img.(type) {
+	case *image.YCbCr:
+		return func(x, y int) (uint32, uint32, uint32, uint32) { return src.YCbCrAt(x, y).RGBA() }
+	case *image.RGBA:
+		return func(x, y int) (uint32, uint32, uint32, uint32) { return src.RGBAAt(x, y).RGBA() }
+	case *image.NRGBA:
+		return func(x, y int) (uint32, uint32, uint32, uint32) { return src.NRGBAAt(x, y).RGBA() }
+	case *image.Gray:
+		return func(x, y int) (uint32, uint32, uint32, uint32) { return src.GrayAt(x, y).RGBA() }
+	}
+	return func(x, y int) (uint32, uint32, uint32, uint32) { return img.At(x, y).RGBA() }
 }

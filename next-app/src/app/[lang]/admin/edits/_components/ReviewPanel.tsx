@@ -7,6 +7,10 @@
 // checked, 「全部采纳」 accepts everything, 「不采纳」 unchecks everything so each
 // change can be given its reason.
 //
+// A change made against a value the page no longer shows (another edit was
+// accepted meanwhile) is marked 页面已变 and can only be rejected; it starts
+// unchecked with a note the admin can rewrite.
+//
 // A reviewed submission is shown the same way, read-only, with each change's
 // outcome and note.
 
@@ -19,10 +23,12 @@ import { useLang } from "@/lib/lang-client";
 import { characterDisplayName, personDisplayName } from "@/lib/people/names";
 import { characterPath, personPath } from "@/lib/people/paths";
 import {
+  acceptAllDecisions,
   decisionsComplete,
   fieldLabelKey,
   initialDecisions,
   reviewBody,
+  STALE_MESSAGE,
   type Decision,
   type EditItem,
   type EditSubmission,
@@ -49,7 +55,9 @@ function FieldName({ item }: { item: EditItem }) {
 export default function ReviewPanel({ submission }: { submission: EditSubmission }) {
   const { lang, t } = useLang();
   const router = useRouter();
-  const [decisions, setDecisions] = useState<Record<string, Decision>>(() => initialDecisions(submission.items));
+  const [decisions, setDecisions] = useState<Record<string, Decision>>(() =>
+    initialDecisions(submission.items, t("editReview.staleNote")),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,11 +99,18 @@ export default function ReviewPanel({ submission }: { submission: EditSubmission
     // The repo compiles without strict null checks, which leaves this union
     // un-narrowed; the failure arm is the only one with a status.
     const status = "status" in result ? result.status : 0;
+    if (status === 409 && "message" in result && result.message === STALE_MESSAGE) {
+      // Another edit was accepted while this one was open: reload to see
+      // which changes no longer apply (the panel starts again).
+      toast.error(t("editReview.staleConflict"));
+      router.refresh();
+      return;
+    }
     setError(status === 409 ? t("editReview.conflict") : t("editReview.failed"));
   };
 
   const acceptAll = () => {
-    const all = Object.fromEntries(submission.items.map((it) => [it.id, { accept: true, note: "" }]));
+    const all = acceptAllDecisions(submission.items, decisions);
     setDecisions(all);
     void send(all);
   };
@@ -159,11 +174,13 @@ export default function ReviewPanel({ submission }: { submission: EditSubmission
                   <label className={q.check}>
                     <input
                       type="checkbox"
-                      checked={d.accept}
+                      checked={d.accept && !item.stale}
+                      disabled={item.stale}
                       onChange={(event) => setDecision(item.id, { accept: event.target.checked })}
                     />
                     <span>
                       <FieldName item={item} />
+                      {item.stale ? <span className={q.fieldSub}>{t("editReview.stale")}</span> : null}
                     </span>
                   </label>
                 ) : (

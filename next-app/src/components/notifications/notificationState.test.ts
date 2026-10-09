@@ -112,7 +112,8 @@ test("an edit_review row: the page, the outcome, the notes, and a link to the pa
         {
           id: "n2",
           type: "edit_review",
-          actor: { username: "admin", avatarUrl: null },
+          // go-api leaves who reviewed it out: the actor is there, empty.
+          actor: { username: "", avatarUrl: null },
           anime: null,
           episode: null,
           commentId: null,
@@ -130,7 +131,9 @@ test("an edit_review row: the page, the outcome, the notes, and a link to the pa
           },
         },
         // An edit_review without its outcome is dropped, not shown blank.
-        { id: "n3", type: "edit_review", actor: { username: "admin" }, createdAt: "2026-10-09T00:00:00Z" },
+        { id: "n3", type: "edit_review", actor: { username: "" }, createdAt: "2026-10-09T00:00:00Z" },
+        // Any other type still needs who did it.
+        { id: "n4", type: "follow", actor: { username: "" }, createdAt: "2026-10-09T00:00:00Z" },
       ],
     },
   };

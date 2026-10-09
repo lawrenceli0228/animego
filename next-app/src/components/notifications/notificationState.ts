@@ -124,7 +124,8 @@ function notification(value: unknown): CommunityNotification | null {
   const createdAt = string(row?.createdAt);
   if (
     !id ||
-    !username ||
+    // A reviewed edit names no one: go-api leaves the reviewer out.
+    (!username && type !== "edit_review") ||
     !createdAt ||
     !NOTIFICATION_TYPES.includes(type as NotificationType)
   ) {
@@ -136,7 +137,7 @@ function notification(value: unknown): CommunityNotification | null {
   return {
     id,
     type: type as NotificationType,
-    actor: { username, avatarUrl: string(actor?.avatarUrl) },
+    actor: { username: username ?? "", avatarUrl: string(actor?.avatarUrl) },
     anime:
       typeof anilistId === "number" && Number.isSafeInteger(anilistId) && anilistId > 0
         ? {

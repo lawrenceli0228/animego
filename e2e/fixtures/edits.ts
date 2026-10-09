@@ -8,26 +8,52 @@
 // users, whose submissions and notifications go with them (ON DELETE
 // CASCADE).
 
+import type { JSONValue } from "postgres";
 import { getSql } from "./pg";
 import { makeUser, type TestUser } from "./users";
 
 export const STARK = 184313;
 
-/** Stark's overlay as it was before the spec, to restore afterwards. */
-export async function takeOverlay(kind: "character" | "person", id: number): Promise<string | null> {
-  const sql = getSql();
-  const rows = await sql<{ data: string }[]>`
-    SELECT data::text AS data FROM entity_overlays WHERE kind = ${kind} AND entity_id = ${id}
-  `;
-  await sql`DELETE FROM entity_overlays WHERE kind = ${kind} AND entity_id = ${id}`;
-  return rows[0]?.data ?? null;
+/** An overlay row as it was, to put back exactly. */
+export interface SavedOverlay {
+  /** The document, as postgres.js parses jsonb: an object. */
+  data: JSONValue;
+  updatedAt: Date;
+  updatedBy: string | null;
 }
 
-export async function restoreOverlay(kind: "character" | "person", id: number, data: string | null): Promise<void> {
+/**
+ * Sets a page's overlay aside -- it is gone until restoreOverlay -- and
+ * returns it, or null when the page had none.
+ */
+export async function takeOverlay(kind: "character" | "person", id: number): Promise<SavedOverlay | null> {
+  const sql = getSql();
+  const rows = await sql<{ data: JSONValue; updated_at: Date; updated_by: string | null }[]>`
+    DELETE FROM entity_overlays WHERE kind = ${kind} AND entity_id = ${id}
+    RETURNING data, updated_at, updated_by
+  `;
+  const row = rows[0];
+  return row ? { data: row.data, updatedAt: row.updated_at, updatedBy: row.updated_by } : null;
+}
+
+/**
+ * Puts back what takeOverlay set aside, over whatever overlay the spec left;
+ * with null, leaves the page with none. The document goes back through
+ * sql.json: a JSON *string* bound to a jsonb parameter is stored as a jsonb
+ * string, which the table's check refuses.
+ */
+export async function restoreOverlay(
+  kind: "character" | "person",
+  id: number,
+  saved: SavedOverlay | null,
+): Promise<void> {
   const sql = getSql();
   await sql`DELETE FROM entity_overlays WHERE kind = ${kind} AND entity_id = ${id}`;
-  if (data !== null) {
-    await sql`INSERT INTO entity_overlays (kind, entity_id, data) VALUES (${kind}, ${id}, ${data}::jsonb)`;
+  if (saved !== null) {
+    await sql`
+      INSERT INTO entity_overlays (kind, entity_id, data, updated_at, updated_by)
+      VALUES (${kind}, ${id}, ${sql.json(saved.data)}, ${saved.updatedAt}, ${saved.updatedBy})
+    `;
   }
 }
 

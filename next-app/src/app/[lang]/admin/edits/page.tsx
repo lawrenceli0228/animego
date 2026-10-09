@@ -13,7 +13,7 @@ import { fill } from "@/lib/i18n";
 import { resolveLocale } from "@/lib/i18n/route";
 import { pickTitle } from "@/lib/formatters";
 import { characterDisplayName, personDisplayName } from "@/lib/people/names";
-import { UUID, type EditList, type EditListItem, type EditSubmission } from "@/lib/people/edit/review";
+import { panelKey, UUID, type EditList, type EditListItem, type EditSubmission } from "@/lib/people/edit/review";
 import ReviewPanel from "./_components/ReviewPanel";
 import q from "./edits.module.css";
 
@@ -169,7 +169,7 @@ export default async function AdminEditsPage({ params, searchParams }: PageProps
             </div>
           ) : null}
         </section>
-        <section>{selected ? <ReviewPanel key={`${selected.id}:${selected.status}`} submission={selected} /> : null}</section>
+        <section>{selected ? <ReviewPanel key={panelKey(selected)} submission={selected} /> : null}</section>
       </div>
     </div>
   );

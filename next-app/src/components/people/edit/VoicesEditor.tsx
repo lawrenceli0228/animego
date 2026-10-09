@@ -10,7 +10,7 @@ import { useState, type KeyboardEvent } from "react";
 import FadeImage from "@/components/ui/FadeImage";
 import { useLang } from "@/lib/lang-client";
 import type { VoiceDraft } from "@/lib/people/edit/model";
-import { LIMITS, personIdFromInput } from "@/lib/people/edit/model";
+import { LIMITS, personIdFromInput, voiceLineChange } from "@/lib/people/edit/model";
 import { personDisplayName } from "@/lib/people/names";
 import type { PersonRef } from "@/lib/people/types";
 import SectionHead from "../SectionHead";
@@ -129,7 +129,10 @@ export default function VoicesEditor({ voices, onChange }: VoicesEditorProps) {
   const add = (ref: PersonRef) => {
     setAdding(false);
     if (voices.some((v) => v.key === null && v.person.anilistId === ref.anilistId)) return;
-    onChange([...voices, { key: null, person: ref, initialPersonId: null, line: "", initialLine: "", removed: false }]);
+    onChange([
+      ...voices,
+      { key: null, person: ref, initialPersonId: null, line: "", initialLine: "", autoLine: false, removed: false },
+    ]);
   };
 
   return (
@@ -139,7 +142,7 @@ export default function VoicesEditor({ voices, onChange }: VoicesEditorProps) {
         {voices.map((v) => {
           const id = rowId(v);
           const changed =
-            v.key === null || v.removed || v.person.anilistId !== v.initialPersonId || v.line.trim() !== v.initialLine.trim();
+            v.key === null || v.removed || v.person.anilistId !== v.initialPersonId || voiceLineChange(v) !== undefined;
           const name = personDisplayName(v.person.name, lang) || `#${v.person.anilistId}`;
           return (
             <div key={id} className={e.voiceRow} data-changed={changed} data-removed={v.removed}>

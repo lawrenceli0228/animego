@@ -59,6 +59,7 @@ INSERT INTO bgm_person_map (anilist_id, bgm_id, name_cn, source, matched_at) VAL
 type flow struct {
 	t       *testing.T
 	pool    *pgxpool.Pool
+	h       *Handlers
 	router  http.Handler
 	signer  *jwtx.Signer
 	images  *ImageStore
@@ -85,14 +86,14 @@ func newFlow(t *testing.T) *flow {
 	require.NoError(t, err)
 	f := &flow{t: t, pool: pool, signer: signer, root: t.TempDir(), fetcher: &stubFetcher{}}
 	f.images = NewImageStore(f.root, "https://example.org", f.fetcher)
-	f.router = f.process()
+	f.h, f.router = f.process()
 	return f
 }
 
 // process is the API as one server process would run it: its own handlers
 // (and so its own record of who has a submission in flight) over the shared
 // database and image directory.
-func (f *flow) process() http.Handler {
+func (f *flow) process() (*Handlers, http.Handler) {
 	h := NewHandlers(f.pool, f.images, func(ids ...int32) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -110,7 +111,7 @@ func (f *flow) process() http.Handler {
 	cache := people.NewSitemapCache(people.SitemapTTL)
 	r.Route("/api/characters", func(r chi.Router) { people.MountCharacters(r, q, cache) })
 	r.Route("/api/people", func(r chi.Router) { people.MountPeople(r, q, cache) })
-	return r
+	return h, r
 }
 
 func (f *flow) user(name string, admin bool) account {
@@ -136,17 +137,25 @@ func (f *flow) do(method, path string, who *account, body any) (int, map[string]
 
 func (f *flow) doOn(router http.Handler, method, path string, who *account, body any) (int, map[string]any) {
 	f.t.Helper()
-	var reader *bytes.Reader
-	if s, ok := body.(string); ok {
-		reader = bytes.NewReader([]byte(s))
-	} else if body != nil {
-		raw, err := json.Marshal(body)
-		require.NoError(f.t, err)
-		reader = bytes.NewReader(raw)
-	} else {
-		reader = bytes.NewReader(nil)
+	if body == nil {
+		return f.send(router, method, path, who, "", nil)
 	}
-	req := httptest.NewRequest(method, path, reader)
+	raw, ok := body.(string)
+	if !ok {
+		b, err := json.Marshal(body)
+		require.NoError(f.t, err)
+		raw = string(b)
+	}
+	return f.send(router, method, path, who, "application/json", []byte(raw))
+}
+
+// send is a request with the body and Content-Type given as they are.
+func (f *flow) send(router http.Handler, method, path string, who *account, contentType string, body []byte) (int, map[string]any) {
+	f.t.Helper()
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 	if who != nil {
 		req.Header.Set("Authorization", "Bearer "+who.token)
 	}
@@ -209,6 +218,7 @@ func TestSubmit_Refusals_PG(t *testing.T) {
 		"both image kinds":    {submission(map[string]any{"image": map[string]any{"url": "https://e.org/a.png", "dataUrl": "data:image/png;base64,AA"}}), http.StatusBadRequest, "invalid change: image: a link or an upload, one of them"},
 		"a GIF upload":        {submission(map[string]any{"image": map[string]any{"dataUrl": "data:image/gif;base64,R0lGODlhAQABAAAAACw="}}), http.StatusBadRequest, msgImageType},
 		"an unreadable image": {submission(map[string]any{"image": map[string]any{"dataUrl": "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("nope"))}}), http.StatusBadRequest, msgImageUnreadable},
+		"too many voice rows": {submission(map[string]any{"voices": manyVoices(maxVoiceChanges + 1)}), http.StatusBadRequest, "invalid change: voice: too many"},
 	} {
 		code, body := f.do(http.MethodPost, "/api/edits", &reader, tc.body)
 		assert.Equal(t, tc.code, code, name)
@@ -263,7 +273,7 @@ func TestSubmit_ConcurrentSubmissionsCannotBothPass_PG(t *testing.T) {
 	var wg sync.WaitGroup
 	codes := make([]int, 4)
 	for i := range codes {
-		router := f.process()
+		_, router := f.process()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -309,6 +319,178 @@ func TestSubmit_OneInFlightPerPerson_PG(t *testing.T) {
 	close(f.fetcher.release)
 	assert.Equal(t, http.StatusCreated, <-first)
 	f.fetcher.entered = nil
+}
+
+func manyVoices(n int) []map[string]any {
+	out := make([]map[string]any, n)
+	for i := range out {
+		out[i] = map[string]any{"personId": 95185}
+	}
+	return out
+}
+
+// Only a JSON body is read, on both write endpoints.  A form, or a fetch
+// another site makes in no-cors mode, can carry a signed-in reader's or an
+// admin's cookie (SameSite=None in production) but not this Content-Type:
+// asking for it takes a CORS preflight, which only the site's own origin
+// passes.  Each refusal comes before anything is read or written.
+func TestEdits_OnlyJSONBodies_PG(t *testing.T) {
+	f := newFlow(t)
+	reader := f.user("reader-plain", false)
+	admin := f.user("admin-plain", true)
+	f.fetcher.body = pngBytes(t, 20, 30)
+	notJSON := []string{
+		"text/plain", "text/plain;charset=UTF-8", "application/x-www-form-urlencoded",
+		"multipart/form-data; boundary=x", "",
+	}
+
+	body, err := json.Marshal(submission(map[string]any{
+		"nameCn": "史塔克",
+		"image":  map[string]any{"url": "https://images.example.org/stark.png"},
+	}))
+	require.NoError(t, err)
+	for _, ct := range notJSON {
+		code, got := f.send(f.router, http.MethodPost, "/api/edits", &reader, ct, body)
+		assert.Equal(t, http.StatusUnsupportedMediaType, code, ct)
+		assert.Equal(t, msgNotJSON, errMessage(got), ct)
+	}
+	assert.Zero(t, f.count(`SELECT count(*) FROM edit_submissions`), "no submission")
+	assert.Empty(t, f.fetcher.got, "no photo fetched")
+	stored, _ := os.ReadDir(filepath.Join(f.root, "pending"))
+	assert.Empty(t, stored, "none stored")
+
+	// As JSON -- a charset is fine -- the same body is a submission.
+	code, got := f.send(f.router, http.MethodPost, "/api/edits", &reader, "application/json; charset=utf-8", body)
+	require.Equal(t, http.StatusCreated, code, "%v", got)
+	id := got["data"].(map[string]any)["id"].(string)
+
+	_, sub := f.do(http.MethodGet, "/api/admin/edits/"+id, &admin, nil)
+	var decisions []map[string]any
+	for _, it := range sub["data"].(map[string]any)["items"].([]any) {
+		decisions = append(decisions, map[string]any{"itemId": it.(map[string]any)["id"], "accept": true})
+	}
+	review, err := json.Marshal(map[string]any{"decisions": decisions})
+	require.NoError(t, err)
+	for _, ct := range notJSON {
+		code, got := f.send(f.router, http.MethodPost, "/api/admin/edits/"+id+"/review", &admin, ct, review)
+		assert.Equal(t, http.StatusUnsupportedMediaType, code, ct)
+		assert.Equal(t, msgNotJSON, errMessage(got), ct)
+	}
+	assert.Equal(t, 1, f.count(`SELECT count(*) FROM edit_submissions WHERE status = 'pending'`), "not reviewed")
+	assert.Zero(t, f.count(`SELECT count(*) FROM edit_items WHERE status <> 'pending'`))
+	assert.Zero(t, f.count(`SELECT count(*) FROM entity_overlays`))
+	assert.Zero(t, f.count(`SELECT count(*) FROM notifications`))
+	stored, _ = os.ReadDir(filepath.Join(f.root, "pending"))
+	assert.Len(t, stored, 1, "the photo still waits")
+
+	code, got = f.send(f.router, http.MethodPost, "/api/admin/edits/"+id+"/review", &admin, "application/json; charset=utf-8", review)
+	require.Equal(t, http.StatusOK, code, "%v", got)
+	assert.Equal(t, "reviewed", got["data"].(map[string]any)["status"])
+}
+
+// Every attempt counts toward a person's attempts, refused or not: a refusal
+// can still cost the page reads and a fetched photo, and it stores nothing
+// the submission limits would count.
+func TestSubmit_RefusedAttemptsCount_PG(t *testing.T) {
+	f := newFlow(t)
+	f.h.attempts = newAttemptCounter(attemptWindow, 3)
+	reader := f.user("reader-tries", false)
+	for i := 0; i < 3; i++ {
+		code, body := f.do(http.MethodPost, "/api/edits", &reader, submission(map[string]any{"nameCn": "修塔尔克"}))
+		assert.Equal(t, http.StatusBadRequest, code)
+		assert.Equal(t, msgNothingChanged, errMessage(body))
+	}
+	code, body := f.do(http.MethodPost, "/api/edits", &reader, submission(map[string]any{"nameCn": "史塔克"}))
+	assert.Equal(t, http.StatusTooManyRequests, code, "the fourth, however good")
+	assert.Equal(t, msgTooMany, errMessage(body))
+
+	other := f.user("reader-fresh", false)
+	code, _ = f.do(http.MethodPost, "/api/edits", &other, submission(map[string]any{"nameCn": "史塔克"}))
+	assert.Equal(t, http.StatusCreated, code, "someone else's attempts are their own")
+}
+
+// Two readers edit the same voice row and the aliases; the first is
+// accepted.  The second's row and aliases were made against a page that is
+// gone: accepting them would put back the first reader's row and drop their
+// alias, so they are marked and refused, and what else the second changed
+// can still be accepted.
+func TestReview_StaleItemsAreNotAccepted_PG(t *testing.T) {
+	f := newFlow(t)
+	a := f.user("reader-a", false)
+	b := f.user("reader-b", false)
+	admin := f.user("admin-stale", true)
+
+	submit := func(who account, changes map[string]any) string {
+		code, body := f.do(http.MethodPost, "/api/edits", &who, submission(changes))
+		require.Equal(t, http.StatusCreated, code, "%v", body)
+		return body["data"].(map[string]any)["id"].(string)
+	}
+	itemsOf := func(id string) []map[string]any {
+		code, got := f.do(http.MethodGet, "/api/admin/edits/"+id, &admin, nil)
+		require.Equal(t, http.StatusOK, code)
+		var out []map[string]any
+		for _, it := range got["data"].(map[string]any)["items"].([]any) {
+			out = append(out, it.(map[string]any))
+		}
+		return out
+	}
+	staleOf := func(items []map[string]any) map[string]any {
+		out := map[string]any{}
+		for _, it := range items {
+			out[it["field"].(string)] = it["stale"]
+		}
+		return out
+	}
+	review := func(id string, items []map[string]any, reject ...string) (int, map[string]any) {
+		var decisions []map[string]any
+		for _, it := range items {
+			d := map[string]any{"itemId": it["id"], "accept": true}
+			for _, field := range reject {
+				if it["field"] == field {
+					d = map[string]any{"itemId": it["id"], "accept": false, "note": "页面已经改过，请按现在的页面重新提交"}
+				}
+			}
+			decisions = append(decisions, d)
+		}
+		return f.do(http.MethodPost, "/api/admin/edits/"+id+"/review", &admin, map[string]any{"decisions": decisions})
+	}
+
+	aid := submit(a, map[string]any{
+		"voices":  []map[string]any{{"key": "133507|Japanese|", "personId": 95185}},
+		"aliases": []string{"斯塔克"},
+	})
+	bid := submit(b, map[string]any{
+		"voices":  []map[string]any{{"key": "133507|Japanese|", "line": "日配 · 主役"}},
+		"aliases": []string{"史塔克"},
+		"age":     "18",
+	})
+	assert.Equal(t, map[string]any{"voice": false, "aliases": false, "age": false}, staleOf(itemsOf(bid)),
+		"nothing is stale while the page is as both saw it")
+
+	code, body := review(aid, itemsOf(aid))
+	require.Equal(t, http.StatusOK, code, "%v", body)
+
+	items := itemsOf(bid)
+	assert.Equal(t, map[string]any{"voice": true, "aliases": true, "age": false}, staleOf(items))
+
+	code, body = review(bid, items)
+	assert.Equal(t, http.StatusConflict, code)
+	assert.Equal(t, msgStale, errMessage(body))
+	assert.Equal(t, 1, f.count(`SELECT count(*) FROM edit_submissions WHERE status = 'pending'`), "nothing was decided")
+
+	code, body = review(bid, items, "voice", "aliases")
+	require.Equal(t, http.StatusOK, code, "%v", body)
+	_, page := f.do(http.MethodGet, "/api/characters/184313", nil, nil)
+	c := page["data"].(map[string]any)
+	assert.Equal(t, []any{"斯塔克"}, c["alternativeNames"], "the first reader's alias stays")
+	row := c["voices"].([]any)[0].(map[string]any)
+	assert.Equal(t, "133507|Japanese|", row["key"])
+	assert.Equal(t, float64(95185), row["person"].(map[string]any)["anilistId"], "and their row")
+	assert.Nil(t, row["line"])
+	assert.Equal(t, "18", c["profile"].(map[string]any)["age"], "the second reader's age is accepted")
+	for _, it := range itemsOf(bid) {
+		assert.Equal(t, false, it["stale"], "a reviewed submission is past being stale")
+	}
 }
 
 func TestEditFlow_PG(t *testing.T) {
@@ -508,6 +690,7 @@ func TestEditFlow_PG(t *testing.T) {
 		assert.Equal(t, float64(1), edit["rejected"])
 		assert.Equal(t, []any{"这张图是第二季的造型，会剧透，先不换"}, edit["rejectNotes"])
 		assert.Equal(t, float64(1), inbox["data"].(map[string]any)["unreadCount"])
+		assert.Equal(t, map[string]any{"username": "", "avatarUrl": nil}, n["actor"], "not who reviewed it")
 	})
 
 	t.Run("an accepted photo is published and shown", func(t *testing.T) {
