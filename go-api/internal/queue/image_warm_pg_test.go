@@ -292,6 +292,41 @@ func TestImageWarm_PG(t *testing.T) {
 		assert.Equal(t, "unreachable", summary["stopped"])
 	})
 
+	t.Run("the third pass in a row that cannot connect is an ERROR, and any answer starts the count again", func(t *testing.T) {
+		h.reset(t)
+		h.seed(t, cover(1), cover(2))
+		closed := httptest.NewServer(http.NotFoundHandler())
+		closedBase := closed.URL + "/warm/"
+		closed.Close()
+		w := h.worker()
+
+		// Literal counts, not the constant: the third pass is the contract.
+		t.Setenv(imageWarmBaseURLEnv, closedBase)
+		for pass := 1; pass <= 2; pass++ {
+			logs := captureImageWarmLogs(t)
+			h.pass(t, w)
+			assert.Contains(t, logs.messages(slog.LevelWarn), "image warm: warm endpoint not reachable, pass stopped", "pass %d", pass)
+			assert.Empty(t, logs.messages(slog.LevelError), "pass %d could still be a deploy", pass)
+		}
+		logs := captureImageWarmLogs(t)
+		h.pass(t, w)
+		assert.Contains(t, logs.messages(slog.LevelError), "image warm: warm endpoint not reachable pass after pass",
+			"three hours of no connection is not a deploy")
+
+		// The endpoint answers: both images are stored and the count is reset.
+		newWarmStub(t, func(int, string) warmStubAnswer { return warmStubAnswer{status: http.StatusOK} })
+		h.pass(t, w)
+		assert.Equal(t, 2, h.count(t, `SELECT count(*) FROM image_manager WHERE status = 'warmed'`))
+
+		// A new image, and the endpoint gone again: one pass is a WARN once more.
+		h.exec(t, `INSERT INTO anime_cache (anilist_id, title_romaji, cover_image_url) VALUES (3, 'title', $1)`, cover(3))
+		t.Setenv(imageWarmBaseURLEnv, closedBase)
+		logs = captureImageWarmLogs(t)
+		h.pass(t, w)
+		assert.Contains(t, logs.messages(slog.LevelWarn), "image warm: warm endpoint not reachable, pass stopped")
+		assert.Empty(t, logs.messages(slog.LevelError), "the count started again at the answers")
+	})
+
 	t.Run("the disk guard skips the pass without a request", func(t *testing.T) {
 		h.reset(t)
 		logs := captureImageWarmLogs(t)

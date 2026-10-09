@@ -337,18 +337,18 @@ media/anime/cover/large/%2E%2E/%2E%2E/%2E%2E/%2E%2E/user/avatar/b%ID%.png|encode
 media/anime/cover/large/../../../../user/avatar/b%ID%.png|plain .. segments
 media/anime/cover/large/%252E%252E%252Fb%ID%.png|double-encoded ../
 media/anime/cover/large/b%ID%%5C..%5C..%5Cx.png|backslashes'
-refused() { # get function, id base
+refused() { # get function, id base, the status every one of them gets
   local id=$2 p label
   while IFS='|' read -r p label; do
     id=$((id + 1))
-    ok "$($1 "$(printf '%s' "$p" | sed "s/%ID%/$id/")")" 404 "$label"
+    ok "$($1 "$(printf '%s' "$p" | sed "s/%ID%/$id/")")" "$3" "$label"
   done <<EOF
 $REFUSED
 EOF
 }
 echo "== /img/anilist/ answers 404 for anything else, without asking AniList"
 h=$(ani_hits)
-refused img 9200
+refused img 9200 404
 ok "$(c -o /dev/null -w '%{http_code}' -X POST --data x "$B/img/anilist/media/anime/cover/large/bx9299.png")" 403 "a POST to an allowed path is refused"
 ok "$(( $(ani_hits) - h ))" 0 "none of them reached AniList"
 
@@ -363,12 +363,14 @@ character/large/b9304-kind.png|a character portrait
 staff/medium/n9305-kind.jpg|a staff portrait
 EOF
 h=$(ani_hits)
-refused warm 9310
+# 403, not 404: the warm job reads a 404 as AniList having no such file and
+# waits a month before asking again; a 403 stops its pass (image_warm.go).
+refused warm 9310 403
 ok "$(curl -s -o /dev/null -w '%{http_code}' -X POST --data x "$W/warm/media/anime/cover/large/bx9399.png")" 403 "a POST to an allowed path is refused"
 ALLOWED=media/anime/cover/large/bx9301-kind.png
 for p in / /warm/ /warm "/img/anilist/$ALLOWED" "/file/anilistcdn/$ALLOWED" "/WARM/$ALLOWED" "/warmx/$ALLOWED" \
          "/_next/image?url=%2Fa.png&w=640&q=85"; do
-  ok "$(curl -s -o /dev/null -w '%{http_code}' "$W$p")" 404 ":8090 has nothing at $p"
+  ok "$(curl -s -o /dev/null -w '%{http_code}' "$W$p")" 403 ":8090 refuses $p"
 done
 ok "$(( $(ani_hits) - h ))" 0 "none of them reached AniList"
 ok "$(hdr "$A" "/warm/$ALLOWED" x-stub)|$(( $(ani_hits) - h ))" "next-app|0" "the public server has no /warm/: that path is a page request for next-app"

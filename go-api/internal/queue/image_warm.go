@@ -14,7 +14,8 @@
 //	GET {IMAGE_WARM_BASE_URL}{path}   path: the URL after https://s4.anilist.co/file/anilistcdn/
 //
 //	200  nginx holds the original (stored now, or already)
-//	404  AniList has no such file, or the path is outside nginx's allowlist
+//	404  AniList has no such file
+//	403  AniList refusing us, or a path nginx's warm server will not fetch
 //	429  AniList is throttling us; its Retry-After is passed through
 //	5xx  AniList failed, or nginx could not reach it (502, 504)
 //
@@ -31,9 +32,11 @@
 //	        404, 410, other 4xx ───► missing, asked again in 30 days
 //	        429 ───────────────────► throttled until Retry-After (1h if absent,
 //	                                 24h at most); ERROR; STOP, no further request
-//	        5xx, timeout, 401, 403 ► row untouched; failures in a row + 1;
+//	        5xx, timeout, 401, 403,
+//	        a 200 cut short ───────► row untouched; failures in a row + 1;
 //	                                 the 3rd in a row ─► ERROR; STOP
-//	        cannot connect ────────► row untouched; WARN; STOP (nginx not up yet)
+//	        cannot connect ────────► row untouched; WARN; STOP (nginx not up yet);
+//	                                 the 3rd pass in a row to stop here ─► ERROR
 //	      a 200 or a missing answer sets failures in a row back to 0
 //	 INFO: one summary line, the count of each outcome and why the pass stopped
 //
@@ -47,12 +50,20 @@
 // it, is in trouble, and more requests will not help.  A 401 or 403 counts
 // with them rather than as a missing file: AniList answers a file it does not
 // have with 404, so a refusal means we are being refused, and recording it as
-// missing would hide a month of images while the pass kept asking.  Both
-// stops are ERRORs, which internal/obs forwards to Sentry.
+// missing would hide a month of images while the pass kept asking.  403 is
+// also how nginx's warm server answers a path it will not fetch.  The job
+// sends only paths its own copy of the allowlist accepts, so that answer
+// means IMAGE_WARM_BASE_URL or one of the two allowlists is wrong, and
+// stopping is right there too; read as missing, it would put every URL of
+// the pass off for a month.  Both stops are ERRORs, which internal/obs
+// forwards to Sentry.
 //
 // A connection that cannot be made at all is different.  That is nginx not
 // accepting yet, which is what every deploy looks like for a moment, so it
-// ends the pass with a WARN and pages nobody.
+// ends the pass with a WARN and pages nobody.  The third pass in a row to
+// stop that way is no deploy -- a wrong host or port in IMAGE_WARM_BASE_URL,
+// or an nginx without the warm server -- and is an ERROR, or the store could
+// stop filling for good with nothing anyone reads saying so.
 //
 // # Why it has a queue of its own
 //
@@ -91,6 +102,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -133,6 +145,12 @@ const (
 	// imageWarmFailuresToStop is how many 5xx answers or timeouts in a row
 	// end a pass.
 	imageWarmFailuresToStop = 3
+
+	// imageWarmUnreachablePassesToAlert is the pass, counting those that
+	// stopped in a row because the warm endpoint took no connection, at
+	// which that is reported as an ERROR rather than a WARN: one is a
+	// deploy, three hours of it is not.
+	imageWarmUnreachablePassesToAlert = 3
 
 	// imageWarmRecheckAfter is how long a stored original goes before it is
 	// asked for again.  nginx answers that with a conditional request, so an
@@ -188,6 +206,11 @@ type ImageWarmWorker struct {
 	// freeBytes reports the free space on the file system holding a path
 	// (hostFreeBytes); tests replace it.
 	freeBytes func(path string) (uint64, error)
+	// unreachablePasses counts the passes in a row that stopped because the
+	// warm endpoint took no connection; any answer from it resets the count.
+	// Held for the life of the process, so a restart (a deploy) starts it
+	// again from zero.
+	unreachablePasses atomic.Int32
 }
 
 // NewImageWarmWorker builds the worker.
@@ -377,6 +400,9 @@ func (p *imageWarmPass) refuse(ctx context.Context, imageURL string) {
 
 // record acts on one answer.
 func (p *imageWarmPass) record(ctx context.Context, imageURL string, a warmAnswer) {
+	if a.kind != answerUnreachable && a.kind != answerCancelled {
+		p.w.unreachablePasses.Store(0)
+	}
 	switch a.kind {
 	case answerStored:
 		p.warmed++
@@ -393,11 +419,24 @@ func (p *imageWarmPass) record(ctx context.Context, imageURL string, a warmAnswe
 		p.onFailure(ctx, imageURL, a)
 	case answerUnreachable:
 		p.stop("unreachable")
-		slog.WarnContext(ctx, "image warm: warm endpoint not reachable, pass stopped",
-			"endpoint", p.base, "err", a.err)
+		p.onUnreachable(ctx, a)
 	default:
 		p.stop("cancelled")
 	}
+}
+
+// onUnreachable reports a pass stopped because the warm endpoint took no
+// connection: a WARN while that could be a deploy, an ERROR from the
+// imageWarmUnreachablePassesToAlert-th pass in a row (see the file comment).
+func (p *imageWarmPass) onUnreachable(ctx context.Context, a warmAnswer) {
+	n := p.w.unreachablePasses.Add(1)
+	if n < imageWarmUnreachablePassesToAlert {
+		slog.WarnContext(ctx, "image warm: warm endpoint not reachable, pass stopped",
+			"endpoint", p.base, "passesInARow", n, "err", a.err)
+		return
+	}
+	slog.ErrorContext(ctx, "image warm: warm endpoint not reachable pass after pass",
+		"endpoint", p.base, "passesInARow", n, "env", imageWarmBaseURLEnv, "err", a.err)
 }
 
 // onThrottled stops the pass before anything else happens, then records the
@@ -419,8 +458,13 @@ func (p *imageWarmPass) onFailure(ctx context.Context, imageURL string, a warmAn
 		return
 	}
 	p.stop("failures")
-	slog.ErrorContext(ctx, "image warm: upstream failing or refusing, pass stopped",
-		"failuresInARow", p.failuresInARow, "url", imageURL, "status", a.status, "err", a.err)
+	attrs := []any{"failuresInARow", p.failuresInARow, "url", imageURL, "status", a.status, "err", a.err}
+	if a.status == http.StatusForbidden {
+		attrs = append(attrs, "hint",
+			"AniList refusing us, or nginx's warm server refusing the path: check "+imageWarmBaseURLEnv+
+				" and that the allowlists in image_warm.go and nginx/default.p9.conf agree")
+	}
+	slog.ErrorContext(ctx, "image warm: upstream failing or refusing, pass stopped", attrs...)
 }
 
 // write checks the write that recorded an answer.  A failed one stops the
@@ -490,7 +534,14 @@ func statusAnswer(ctx context.Context, resp *http.Response, readErr error) warmA
 	code := resp.StatusCode
 	switch {
 	case code == http.StatusOK && readErr != nil:
-		return transportAnswer(ctx, code, readErr)
+		// nginx answered, so it was reachable; a body that breaks off is the
+		// fetch behind it failing, and counts like a 5xx.  Read as
+		// unreachable, it would end the pass with a WARN and an AniList in
+		// trouble would page nobody.
+		if ctx.Err() != nil {
+			return warmAnswer{kind: answerCancelled, status: code, err: readErr}
+		}
+		return warmAnswer{kind: answerFailed, status: code, err: readErr}
 	case code == http.StatusOK:
 		return warmAnswer{kind: answerStored, status: code}
 	case code == http.StatusTooManyRequests:
@@ -510,9 +561,10 @@ func statusAnswer(ctx context.Context, resp *http.Response, readErr error) warmA
 	}
 }
 
-// transportAnswer reads a request that got no complete answer.  A timeout is
+// transportAnswer reads a request that got no answer.  A timeout is
 // AniList's (nginx waits on it while we wait on nginx); a connection that
-// cannot be made, or that breaks, is nginx's.
+// cannot be made, or that breaks before nginx answers, is nginx's.  (A 200
+// whose body breaks off is statusAnswer's.)
 func transportAnswer(ctx context.Context, status int, err error) warmAnswer {
 	kind := answerUnreachable
 	switch {

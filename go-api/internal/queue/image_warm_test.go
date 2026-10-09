@@ -253,6 +253,36 @@ func TestWarm_ReadsTheBodyToTheEnd(t *testing.T) {
 	}
 }
 
+// TestWarm_ABodyCutShortIsAFailure: once nginx has answered, the connection
+// to it was made, so a 200 whose body breaks off is the fetch behind it
+// failing.  It must count towards the three-in-a-row stop, an ERROR, and not
+// end the pass as unreachable with a WARN that pages nobody.
+func TestWarm_ABodyCutShortIsAFailure(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Read(make([]byte, 4096))
+		// A megabyte promised, a kilobyte sent, and the connection closed.
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 1048576\r\n\r\n"))
+		_, _ = conn.Write(make([]byte, 1024))
+	}()
+
+	a := NewImageWarmWorker(nil).warm(context.Background(), "http://"+ln.Addr().String()+"/warm/x.png")
+	assert.Equal(t, answerFailed, a.kind, "%v", a.err)
+	assert.Equal(t, http.StatusOK, a.status)
+	assert.Error(t, a.err)
+}
+
 // TestImageWarmTiming pins how the pass's bounds relate, so changing one
 // cannot quietly break another.
 func TestImageWarmTiming(t *testing.T) {
