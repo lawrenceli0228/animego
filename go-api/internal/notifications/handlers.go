@@ -86,16 +86,23 @@ type animeResponse struct {
 }
 
 type itemResponse struct {
-	ID        uuid.UUID          `json:"id"`
-	Type      string             `json:"type"`
-	Actor     actorResponse      `json:"actor"`
-	Anime     *animeResponse     `json:"anime"`
-	Episode   *int32             `json:"episode"`
-	CommentID *uuid.UUID         `json:"commentId"`
-	Excerpt   *string            `json:"excerpt"`
-	IsSpoiler bool               `json:"isSpoiler"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
-	ReadAt    pgtype.Timestamptz `json:"readAt"`
+	ID        uuid.UUID      `json:"id"`
+	Type      string         `json:"type"`
+	Actor     actorResponse  `json:"actor"`
+	Anime     *animeResponse `json:"anime"`
+	Episode   *int32         `json:"episode"`
+	CommentID *uuid.UUID     `json:"commentId"`
+	// The community tab's replies (migration 0046): the reply itself and
+	// the thread or activity event it answers, so the client can link to
+	// the exact place.  All null on the episode-comment and follow kinds.
+	ReplyID     *uuid.UUID         `json:"replyId"`
+	ThreadID    *uuid.UUID         `json:"threadId"`
+	ThreadTitle *string            `json:"threadTitle"`
+	ActivityID  *uuid.UUID         `json:"activityId"`
+	Excerpt     *string            `json:"excerpt"`
+	IsSpoiler   bool               `json:"isSpoiler"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	ReadAt      pgtype.Timestamptz `json:"readAt"`
 }
 
 type listResponse struct {
@@ -143,35 +150,58 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]itemResponse, 0, len(rows))
 	for _, row := range rows {
-		item := itemResponse{
-			ID:        row.ID,
-			Type:      notificationType(row.NotificationType),
-			Actor:     actorResponse{Username: pii.PublicUsername(row.ActorUsername), AvatarURL: row.ActorAvatarUrl},
-			Episode:   row.Episode,
-			CommentID: row.CommentID,
-			Excerpt:   row.CommentContent,
-			IsSpoiler: row.CommentIsSpoiler,
-			CreatedAt: row.CreatedAt,
-			ReadAt:    row.ReadAt,
-		}
-		if row.AnilistID != nil {
-			title := "Anime #" + strconv.FormatInt(int64(*row.AnilistID), 10)
-			if row.TitleRomaji != nil && *row.TitleRomaji != "" {
-				title = *row.TitleRomaji
-			}
-			item.Anime = &animeResponse{
-				AnilistID:       *row.AnilistID,
-				Title:           title,
-				TitleChinese:    row.TitleChinese,
-				TitleHant:       row.TitleHant,
-				TitleHantSource: row.TitleHantSource,
-				TitleHantSeo:    row.TitleHantSeo,
-				CoverImageURL:   row.CoverImageUrl,
-			}
-		}
-		items = append(items, item)
+		items = append(items, toItem(row))
 	}
 	httpx.Data(w, http.StatusOK, listResponse{Items: items, UnreadCount: unread})
+}
+
+// toItem maps one inbox row.  An episode-comment notification takes its
+// anime, excerpt and spoiler flag from the comment; a community reply
+// notification (thread_reply / activity_reply) from the reply.  A spoiler is
+// never quoted: the comment side is filtered in SQL, the reply side here.
+func toItem(row dbgen.ListNotificationsRow) itemResponse {
+	item := itemResponse{
+		ID:        row.ID,
+		Type:      notificationType(row.NotificationType),
+		Actor:     actorResponse{Username: pii.PublicUsername(row.ActorUsername), AvatarURL: row.ActorAvatarUrl},
+		Episode:   row.Episode,
+		CommentID: row.CommentID,
+		Excerpt:   row.CommentContent,
+		IsSpoiler: row.CommentIsSpoiler,
+		CreatedAt: row.CreatedAt,
+		ReadAt:    row.ReadAt,
+	}
+	anilistID := row.AnilistID
+	if row.ReplyID != nil {
+		item.ReplyID = row.ReplyID
+		item.ThreadID = row.ReplyThreadID
+		item.ThreadTitle = row.ThreadTitle
+		item.ActivityID = row.ReplyActivityEventID
+		if anilistID == nil {
+			anilistID = row.ReplyAnilistID
+		}
+		replySpoiler := row.ReplyIsSpoiler != nil && *row.ReplyIsSpoiler
+		item.IsSpoiler = item.IsSpoiler || replySpoiler
+		if item.Excerpt == nil && !replySpoiler {
+			item.Excerpt = row.ReplyBody
+		}
+	}
+	if anilistID != nil {
+		title := "Anime #" + strconv.FormatInt(int64(*anilistID), 10)
+		if row.TitleRomaji != nil && *row.TitleRomaji != "" {
+			title = *row.TitleRomaji
+		}
+		item.Anime = &animeResponse{
+			AnilistID:       *anilistID,
+			Title:           title,
+			TitleChinese:    row.TitleChinese,
+			TitleHant:       row.TitleHant,
+			TitleHantSource: row.TitleHantSource,
+			TitleHantSeo:    row.TitleHantSeo,
+			CoverImageURL:   row.CoverImageUrl,
+		}
+	}
+	return item
 }
 
 func notificationType(dbType string) string {
@@ -180,6 +210,10 @@ func notificationType(dbType string) string {
 		return "comment_reply"
 	case "reaction":
 		return "comment_reaction"
+	case "thread_reply", "activity_reply":
+		// Same word on the wire as in the table: the client routes each to
+		// its own place (a thread page, the tab's activity list).
+		return dbType
 	default:
 		return "follow"
 	}

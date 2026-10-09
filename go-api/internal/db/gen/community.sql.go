@@ -38,6 +38,18 @@ WHERE notification.user_id = $1
          OR (block.blocker_id = notification.actor_id
              AND block.blocked_id = notification.user_id)
   )
+  -- The same rule ListNotifications applies to community replies.
+  AND (
+      notification.reply_id IS NULL
+      OR EXISTS (
+          SELECT 1
+          FROM community_replies reply
+          LEFT JOIN anime_threads thread ON thread.id = reply.thread_id
+          WHERE reply.id = notification.reply_id
+            AND reply.deleted_at IS NULL
+            AND (reply.thread_id IS NULL OR thread.deleted_at IS NULL)
+      )
+  )
 `
 
 func (q *Queries) CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error) {
@@ -64,7 +76,7 @@ INSERT INTO activity_events (
     $5::uuid,
     $6::uuid
 )
-RETURNING id, user_id, event_type, anilist_id, episode, comment_id, target_user_id, created_at
+RETURNING id, user_id, event_type, anilist_id, episode, comment_id, target_user_id, created_at, status
 `
 
 type CreateActivityEventParams struct {
@@ -98,6 +110,7 @@ func (q *Queries) CreateActivityEvent(ctx context.Context, arg CreateActivityEve
 		&i.CommentID,
 		&i.TargetUserID,
 		&i.CreatedAt,
+		&i.Status,
 	)
 	return i, err
 }
@@ -225,11 +238,11 @@ WITH inserted AS (
         $6::text
     )
     ON CONFLICT (user_id, dedupe_key) DO NOTHING
-    RETURNING id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at
+    RETURNING id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at, reply_id
 )
-SELECT id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at FROM inserted
+SELECT id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at, reply_id FROM inserted
 UNION ALL
-SELECT n.id, n.user_id, n.actor_id, n.notification_type, n.comment_id, n.activity_event_id, n.dedupe_key, n.read_at, n.created_at
+SELECT n.id, n.user_id, n.actor_id, n.notification_type, n.comment_id, n.activity_event_id, n.dedupe_key, n.read_at, n.created_at, n.reply_id
 FROM notifications n
 WHERE n.user_id = $1::uuid
   AND n.dedupe_key = $6::text
@@ -256,6 +269,7 @@ type InsertNotificationDedupeRow struct {
 	DedupeKey        string             `json:"dedupeKey"`
 	ReadAt           pgtype.Timestamptz `json:"readAt"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	ReplyID          *uuid.UUID         `json:"replyId"`
 }
 
 // A repeated delivery attempt returns the canonical existing row without
@@ -296,6 +310,7 @@ func (q *Queries) InsertNotificationDedupe(ctx context.Context, arg InsertNotifi
 		&i.DedupeKey,
 		&i.ReadAt,
 		&i.CreatedAt,
+		&i.ReplyID,
 	)
 	return i, err
 }
@@ -306,6 +321,7 @@ SELECT
     n.notification_type,
     n.comment_id,
     n.activity_event_id,
+    n.reply_id,
     n.read_at,
     n.created_at,
     actor.id AS actor_id,
@@ -315,6 +331,12 @@ SELECT
     c.episode,
     visible_comment.content AS comment_content,
     COALESCE(c.is_spoiler, false)::boolean AS comment_is_spoiler,
+    reply.anilist_id AS reply_anilist_id,
+    reply.thread_id AS reply_thread_id,
+    reply.activity_event_id AS reply_activity_event_id,
+    reply.body AS reply_body,
+    reply.is_spoiler AS reply_is_spoiler,
+    thread.title AS thread_title,
     a.title_romaji,
     a.title_chinese,
     a.title_hant,
@@ -327,7 +349,12 @@ LEFT JOIN episode_comments c ON c.id = n.comment_id
 LEFT JOIN episode_comments visible_comment
     ON visible_comment.id = n.comment_id
    AND visible_comment.is_spoiler = false
-LEFT JOIN anime_cache a ON a.anilist_id = c.anilist_id
+LEFT JOIN community_replies reply
+    ON reply.id = n.reply_id
+   AND reply.deleted_at IS NULL
+LEFT JOIN anime_threads thread
+    ON thread.id = reply.thread_id
+LEFT JOIN anime_cache a ON a.anilist_id = COALESCE(c.anilist_id, reply.anilist_id)
 WHERE n.user_id = $1::uuid
   AND NOT EXISTS (
       SELECT 1
@@ -335,32 +362,52 @@ WHERE n.user_id = $1::uuid
       WHERE (block.blocker_id = n.user_id AND block.blocked_id = n.actor_id)
          OR (block.blocker_id = n.actor_id AND block.blocked_id = n.user_id)
   )
+  -- A community reply notification only while its reply is there and, under
+  -- a thread, the thread too (migration 0046).  Deleting either deletes its
+  -- notifications in the same statement, but a reply posted while its
+  -- thread was being deleted is one that statement never saw; this keeps
+  -- the removed title out of the inbox.  CountUnreadNotifications agrees.
+  AND (
+      n.reply_id IS NULL
+      OR (reply.id IS NOT NULL AND (reply.thread_id IS NULL OR thread.deleted_at IS NULL))
+  )
 ORDER BY n.created_at DESC, n.id DESC
 LIMIT $2::integer
 `
 
 type ListNotificationsRow struct {
-	ID               uuid.UUID          `json:"id"`
-	NotificationType string             `json:"notificationType"`
-	CommentID        *uuid.UUID         `json:"commentId"`
-	ActivityEventID  *uuid.UUID         `json:"activityEventId"`
-	ReadAt           pgtype.Timestamptz `json:"readAt"`
-	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
-	ActorID          uuid.UUID          `json:"actorId"`
-	ActorUsername    string             `json:"actorUsername"`
-	ActorAvatarUrl   *string            `json:"actorAvatarUrl"`
-	AnilistID        *int32             `json:"anilistId"`
-	Episode          *int32             `json:"episode"`
-	CommentContent   *string            `json:"commentContent"`
-	CommentIsSpoiler bool               `json:"commentIsSpoiler"`
-	TitleRomaji      *string            `json:"titleRomaji"`
-	TitleChinese     *string            `json:"titleChinese"`
-	TitleHant        *string            `json:"titleHant"`
-	TitleHantSource  *string            `json:"titleHantSource"`
-	TitleHantSeo     *string            `json:"titleHantSeo"`
-	CoverImageUrl    *string            `json:"coverImageUrl"`
+	ID                   uuid.UUID          `json:"id"`
+	NotificationType     string             `json:"notificationType"`
+	CommentID            *uuid.UUID         `json:"commentId"`
+	ActivityEventID      *uuid.UUID         `json:"activityEventId"`
+	ReplyID              *uuid.UUID         `json:"replyId"`
+	ReadAt               pgtype.Timestamptz `json:"readAt"`
+	CreatedAt            pgtype.Timestamptz `json:"createdAt"`
+	ActorID              uuid.UUID          `json:"actorId"`
+	ActorUsername        string             `json:"actorUsername"`
+	ActorAvatarUrl       *string            `json:"actorAvatarUrl"`
+	AnilistID            *int32             `json:"anilistId"`
+	Episode              *int32             `json:"episode"`
+	CommentContent       *string            `json:"commentContent"`
+	CommentIsSpoiler     bool               `json:"commentIsSpoiler"`
+	ReplyAnilistID       *int32             `json:"replyAnilistId"`
+	ReplyThreadID        *uuid.UUID         `json:"replyThreadId"`
+	ReplyActivityEventID *uuid.UUID         `json:"replyActivityEventId"`
+	ReplyBody            *string            `json:"replyBody"`
+	ReplyIsSpoiler       *bool              `json:"replyIsSpoiler"`
+	ThreadTitle          *string            `json:"threadTitle"`
+	TitleRomaji          *string            `json:"titleRomaji"`
+	TitleChinese         *string            `json:"titleChinese"`
+	TitleHant            *string            `json:"titleHant"`
+	TitleHantSource      *string            `json:"titleHantSource"`
+	TitleHantSeo         *string            `json:"titleHantSeo"`
+	CoverImageUrl        *string            `json:"coverImageUrl"`
 }
 
+// Episode-comment notifications read their anime and excerpt through
+// comment_id; the community tab's reply notifications (migration 0046)
+// through reply_id, which also names the thread or activity event the reply
+// sits under.  A spoiler is never quoted, in either kind.
 func (q *Queries) ListNotifications(ctx context.Context, userID uuid.UUID, pageLimit int32) ([]ListNotificationsRow, error) {
 	rows, err := q.db.Query(ctx, listNotifications, userID, pageLimit)
 	if err != nil {
@@ -375,6 +422,7 @@ func (q *Queries) ListNotifications(ctx context.Context, userID uuid.UUID, pageL
 			&i.NotificationType,
 			&i.CommentID,
 			&i.ActivityEventID,
+			&i.ReplyID,
 			&i.ReadAt,
 			&i.CreatedAt,
 			&i.ActorID,
@@ -384,6 +432,12 @@ func (q *Queries) ListNotifications(ctx context.Context, userID uuid.UUID, pageL
 			&i.Episode,
 			&i.CommentContent,
 			&i.CommentIsSpoiler,
+			&i.ReplyAnilistID,
+			&i.ReplyThreadID,
+			&i.ReplyActivityEventID,
+			&i.ReplyBody,
+			&i.ReplyIsSpoiler,
+			&i.ThreadTitle,
 			&i.TitleRomaji,
 			&i.TitleChinese,
 			&i.TitleHant,
@@ -421,7 +475,7 @@ UPDATE notifications
 SET read_at = COALESCE(read_at, now())
 WHERE id = $1::uuid
   AND user_id = $2::uuid
-RETURNING id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at
+RETURNING id, user_id, actor_id, notification_type, comment_id, activity_event_id, dedupe_key, read_at, created_at, reply_id
 `
 
 func (q *Queries) MarkNotificationRead(ctx context.Context, notificationID uuid.UUID, userID uuid.UUID) (Notification, error) {
@@ -437,6 +491,7 @@ func (q *Queries) MarkNotificationRead(ctx context.Context, notificationID uuid.
 		&i.DedupeKey,
 		&i.ReadAt,
 		&i.CreatedAt,
+		&i.ReplyID,
 	)
 	return i, err
 }

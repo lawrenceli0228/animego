@@ -12,6 +12,12 @@ import (
 )
 
 type Querier interface {
+	// Idempotent; same snapshot arithmetic as AddReviewHelpfulVote.
+	AddActivityLike(ctx context.Context, eventID uuid.UUID, userID uuid.UUID) (int64, error)
+	// Idempotent.  The count is read from the statement's snapshot, which
+	// cannot see the row this statement inserts, hence the + inserted (the same
+	// arithmetic UpsertCommentReactionWithNotification does).
+	AddReviewHelpfulVote(ctx context.Context, reviewID uuid.UUID, userID uuid.UUID) (int64, error)
 	// POST /api/admin/users — create-by-admin path.  Caller bcrypts password
 	// before passing it in.  RETURNING only the projection Express's
 	// response uses ({ _id, username, email }) — handler maps to {id, ...}.
@@ -217,8 +223,29 @@ type Querier interface {
 	// on another device, a password reset that landed first.  The cookies are
 	// cleared unconditionally before this runs either way.
 	ClearRefreshTokenIfMatches(ctx context.Context, iD uuid.UUID, presentedToken *string) (int64, error)
+	// The community tab of an anime page (migration 0046): reviews, review
+	// helpful votes, discussion threads, replies under a thread or an activity
+	// event, activity likes, and who is following the anime.
+	//
+	// Read rules every list here follows:
+	//   * soft-deleted rows (deleted_at IS NOT NULL) are never returned;
+	//   * a private review is returned only to its author — the predicate
+	//     `NOT r.is_private OR r.user_id = viewer_id` is NULL, hence false, for
+	//     an anonymous viewer;
+	//   * for a signed-in viewer, nothing written by someone on either side of a
+	//     block with them (user_blocks is read symmetrically, as everywhere else);
+	//   * activity and the follower list show only users whose profile is
+	//     public (users.is_public), except to the user themselves — the same
+	//     line the public profile and /api/feed draw.
+	//
+	// Writes that notify do it in the same statement, as CreateCommentWithActivity
+	// does, so a reply can never commit without its notification or vice versa.
+	// Every community endpoint answers 404 for an anime the catalogue does not
+	// hold.  Read-only on purpose: these endpoints never fetch from AniList.
+	CommunityAnimeExists(ctx context.Context, anilistID int32) (bool, error)
 	// Boot log: how many AniList->AniDB pairs are loaded.
 	CountAnidbIdMap(ctx context.Context) (int64, error)
+	CountAnimeActivity(ctx context.Context, anilistID int32, viewerID *uuid.UUID) (int64, error)
 	// How many OTHER anime already hold this Bangumi subject.
 	//
 	// Read before binding so the worker can distinguish the two reasons a bind
@@ -238,6 +265,7 @@ type Querier interface {
 	// comes back short. SearchLocalKeywordConsistency in search_test.go pins them
 	// to the same shape.
 	CountAnimeCacheLocal(ctx context.Context, contains string, containsFolded string) (int64, error)
+	CountAnimeFollowers(ctx context.Context, anilistID int32, viewerID *uuid.UUID) (CountAnimeFollowersRow, error)
 	// Whether any anime_cache row already holds this subject.
 	//
 	// The crosslink path has to ask this per row rather than as a set predicate,
@@ -247,6 +275,9 @@ type Querier interface {
 	// held subject would be accepted silently and make GetAnimeByBgmID -- a :one
 	// query -- return an arbitrary one of them.
 	CountAnimeHoldingBgmID(ctx context.Context, bgmID *int32) (int64, error)
+	// The total behind QueryAnimeReviews' list form, same visibility rules.
+	CountAnimeReviews(ctx context.Context, anilistID int32, viewerID *uuid.UUID) (int64, error)
+	CountAnimeThreads(ctx context.Context, anilistID int32, viewerID *uuid.UUID) (int64, error)
 	// Boot log + admin dashboard: how many AniList->Bangumi rows are loaded.
 	CountBgmIdMap(ctx context.Context) (int64, error)
 	// Total for BrowseAnime's pagination envelope; same WHERE.
@@ -269,6 +300,17 @@ type Querier interface {
 	// migration 0018.  Multi-write user actions live in writable CTEs so callers
 	// cannot accidentally commit the primary write without its event/notification.
 	CreateActivityEvent(ctx context.Context, arg CreateActivityEventParams) (ActivityEvent, error)
+	// CreateThreadReply's shape under an activity event: notify the event's
+	// owner (and the author of the reply this answers), never oneself, never
+	// across a block.  Only status events — the ones the tab lists — take
+	// replies, and only while their owner's profile is public (or the replier
+	// is the owner).
+	CreateActivityReply(ctx context.Context, eventID uuid.UUID, userID uuid.UUID, parentID *uuid.UUID, body string) (CreateActivityReplyRow, error)
+	// One live review per user per anime: a second insert trips the partial
+	// unique index anime_reviews_one_live_per_user (23505), which the handler
+	// answers with 409.
+	CreateAnimeReview(ctx context.Context, arg CreateAnimeReviewParams) (uuid.UUID, error)
+	CreateAnimeThread(ctx context.Context, anilistID int32, userID uuid.UUID, title string, body string, isSpoiler bool) (uuid.UUID, error)
 	// POST /api/comments/:anilistId/:episode.  Caller has already
 	// validated content length + parent existence.  parent_id may be NULL
 	// (top-level comment) or a uuid pointer.  reply_to_username is a
@@ -281,7 +323,18 @@ type Querier interface {
 	CreateCommentWithActivity(ctx context.Context, arg CreateCommentWithActivityParams) (CreateCommentWithActivityRow, error)
 	// A repeated report while the first is pending returns that canonical report.
 	// Once moderation moves it out of pending the reporter may file a new report.
+	//
+	// Reviews, threads and replies (migration 0046) are reportable while they are
+	// up; a private review is not (nobody but its author can see it).  Their
+	// snapshot carries the text as it stood, like a comment's, and the anime and
+	// thread / activity it lives under so a moderator can find it.
 	CreatePendingReport(ctx context.Context, arg CreatePendingReportParams) (CreatePendingReportRow, error)
+	// Insert the reply, move the thread up the list, and notify the thread's
+	// author and — when this answers another reply — that reply's author.  The
+	// UNION collapses the two when they are the same person; nobody is notified
+	// of their own reply, and nobody across a block.  A thread deleted between
+	// the handler's check and this statement yields no row (handler: 404).
+	CreateThreadReply(ctx context.Context, threadID uuid.UUID, parentID *uuid.UUID, userID uuid.UUID, body string, isSpoiler bool) (CreateThreadReplyRow, error)
 	// Queries against the users table.  Auth flow (register / login / refresh
 	// / logout / me) drives the read+write contract.  Password reset adds
 	// token-keyed reads + multi-column update.
@@ -361,7 +414,11 @@ type Querier interface {
 	DeleteFollow(ctx context.Context, followerID uuid.UUID, followeeID uuid.UUID) (int64, error)
 	// DELETE /api/subscriptions/:anilistId.  Returns the affected row count
 	// so the handler can 404 when no row matched (matches Express's
-	// findOneAndDelete returning null → 404 "Subscription not found").
+	// findOneAndDelete returning null → 404 "Subscription not found"); the
+	// count is the subscriptions DELETE's, not the CTE's.
+	//
+	// The title's status events go with it (migration 0046): off the list is
+	// off the anime's community tab, with the replies and likes on those cards.
 	DeleteSubscription(ctx context.Context, userID uuid.UUID, anilistID int32) (int64, error)
 	// POST /api/admin/enrichment/:anilistId/flag — set admin_flag to one of
 	// 'needs-review' / 'manually-corrected' / NULL.  CHECK constraint on the
@@ -469,6 +526,9 @@ type Querier interface {
 	// DISTINCT ON keeps the first row per root, and the ORDER BY makes that the
 	// deepest one — the end of that chain, which is where completeness is decided.
 	GetAbsoluteEpisodeOffsets(ctx context.Context, ids []int32) ([]GetAbsoluteEpisodeOffsetsRow, error)
+	// What the reply and like paths need to know about an event: its anime, its
+	// owner, whether it is a kind the tab lists, and whether its owner is public.
+	GetActivityEventMeta(ctx context.Context, id uuid.UUID) (GetActivityEventMetaRow, error)
 	// Next-day, day-7, and ever-returned retention for the signup cohorts inside
 	// the window.
 	//
@@ -743,6 +803,10 @@ type Querier interface {
 	GetAnimeMainByID(ctx context.Context, anilistID int32) (GetAnimeMainByIDRow, error)
 	GetAnimeRecommendationsByID(ctx context.Context, animeID int32) ([]GetAnimeRecommendationsByIDRow, error)
 	GetAnimeRelationsByID(ctx context.Context, animeID int32) ([]GetAnimeRelationsByIDRow, error)
+	// Ownership and state of one review, for the write paths to tell "not
+	// found" from "not yours".  Deleted rows are returned (deleted = true) so the
+	// caller decides; nothing here filters on the viewer.
+	GetAnimeReviewMeta(ctx context.Context, id uuid.UUID) (GetAnimeReviewMetaRow, error)
 	// LIMIT 25 for the reason GetAnimeCharactersByID gives.
 	GetAnimeStaffByID(ctx context.Context, animeID int32) ([]GetAnimeStaffByIDRow, error)
 	// Every studio on the title with its id and role, for the studio page
@@ -756,6 +820,10 @@ type Querier interface {
 	// Both sources, AniList's first (they carry a rank to sort on), then
 	// Bangumi's by vote count.
 	GetAnimeTagsByID(ctx context.Context, animeID int32) ([]GetAnimeTagsByIDRow, error)
+	// The thread view.  A viewer on either side of a block with the author gets
+	// nothing, the same as the list.
+	GetAnimeThread(ctx context.Context, threadID uuid.UUID, anilistID int32, viewerID *uuid.UUID) (GetAnimeThreadRow, error)
+	GetAnimeThreadMeta(ctx context.Context, id uuid.UUID) (GetAnimeThreadMetaRow, error)
 	// What a worker holding a freshly fetched Bangumi subject needs to decide
 	// whether that subject still describes this row, before copying anything
 	// out of it.  Read by V2, V3 and the Bangumi rating sweep; the decision
@@ -799,6 +867,14 @@ type Querier interface {
 	// welcome_impression_count is therefore >= impression_count by construction,
 	// and their difference is how often the rail rendered empty.
 	GetCommunityEngagementSummary(ctx context.Context, dayCount int32) (GetCommunityEngagementSummaryRow, error)
+	// One live reply in the list shape, for a write to answer with what it wrote.
+	GetCommunityReply(ctx context.Context, id uuid.UUID) (GetCommunityReplyRow, error)
+	GetCommunityReplyMeta(ctx context.Context, id uuid.UUID) (GetCommunityReplyMetaRow, error)
+	// ==================== Reports ====================
+	// The author of a reportable piece of community content, if it is still up
+	// and visible to someone other than its author.  A private review is not:
+	// only its author can read it, and nobody reports their own words.
+	GetCommunityReportTarget(ctx context.Context, targetType string, targetID uuid.UUID) (GetCommunityReportTargetRow, error)
 	// Queries against anime_cache and its child tables.
 	//
 	// Each :one / :many / :exec annotation tells sqlc which result shape to
@@ -1136,6 +1212,9 @@ type Querier interface {
 	// takes a username path param.  Returns id + canonical username
 	// (handler echoes it back).  ErrNoRows → 404 "User not found".
 	GetUserIDByUsername(ctx context.Context, username string) (GetUserIDByUsernameRow, error)
+	// The signed-in viewer's own status for the anime; ErrNoRows when they do
+	// not follow it.
+	GetViewerSubscriptionStatus(ctx context.Context, userID uuid.UUID, anilistID int32) (string, error)
 	// Public watcher list for one anime.  Backs /api/anime/:anilistId/watchers.
 	// Replaces anime.controller.js:53-75 — single SQL with JOIN drops the
 	// Express two-step (find + populate) pattern.
@@ -1216,7 +1295,14 @@ type Querier interface {
 	// race open and asserts the 201.
 	//
 	// Caller MUST have ensured the anime_cache row exists (else the FK kicks).
-	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (Subscription, error)
+	//
+	// Only a row this statement created appends a 'status' activity event
+	// (migration 0046) — the conflict arm changes nothing, so it has nothing to
+	// announce.  created_at = now() is the "created here" test: now() is this
+	// transaction's start time, and a row that won the race in another
+	// transaction carries that transaction's.  The final SELECT still reads the
+	// upsert's RETURNING, so the DO UPDATE guarantee above is untouched.
+	InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (InsertSubscriptionIfAbsentRow, error)
 	// One row per day that has any activity, within the window.
 	//
 	// Days with nothing in them are ABSENT here and are filled in by the caller
@@ -1231,6 +1317,10 @@ type Querier interface {
 	// The DISTINCT in GetActivitySnapshot is doing real work (its windows span
 	// days); here it would only cost a sort.
 	ListActivityDailyTotals(ctx context.Context, dayCount int32) ([]ListActivityDailyTotalsRow, error)
+	// The replies under a page of activity events, oldest first, at most
+	// per_event_limit for each.  One query for the whole page rather than one
+	// per event.
+	ListActivityReplies(ctx context.Context, eventIds []uuid.UUID, viewerID *uuid.UUID, perEventLimit int32) ([]ListActivityRepliesRow, error)
 	// Rows due for an AniList rating read, most urgent first.
 	//
 	// Two populations, one query, because they are the same work with
@@ -1302,6 +1392,12 @@ type Querier interface {
 	// Never-asked rows come first so a backfill drains oldest-first and the
 	// re-check population cannot starve it.
 	ListAnimeFactsCandidates(ctx context.Context, staleAfter pgtype.Interval, rowLimit int32) ([]int32, error)
+	// ==================== 谁在追 ====================
+	// Everyone with the anime on their list, whatever the status, most recent
+	// change first.  `since` is when the current status was set: the newest
+	// status event that set it, or — for a subscription older than those events
+	// (migration 0046) — the row's last update.
+	ListAnimeFollowers(ctx context.Context, anilistID int32, viewerID *uuid.UUID, pageLimit int32) ([]ListAnimeFollowersRow, error)
 	// Whole-table read for cmd/hantbackfill.  Every row, every run.
 	//
 	// No WHERE clause and no candidate filter, which is a decision rather
@@ -1330,6 +1426,11 @@ type Querier interface {
 	// Bangumi's (0045); the detail endpoint has no field for it, this one
 	// does.
 	ListAnimeStaffCredits(ctx context.Context, animeID int32) ([]ListAnimeStaffCreditsRow, error)
+	// ==================== Threads ====================
+	// Busiest conversation first: a reply moves last_activity_at.  The list
+	// carries the first 200 characters of the body, enough for an excerpt; the
+	// thread view reads the whole of it through GetAnimeThread.
+	ListAnimeThreads(ctx context.Context, viewerID *uuid.UUID, anilistID int32, pageOffset int32, pageLimit int32) ([]ListAnimeThreadsRow, error)
 	// The Bangumi half of ListAnilistRatingCandidates.  Same two populations
 	// and the same ordering; see that query for why they are shaped this way.
 	//
@@ -1635,6 +1736,10 @@ type Querier interface {
 	// written down slightly differently.  Legibility wins until the table is
 	// large enough for it not to.
 	ListNewUserCountsByDay(ctx context.Context, dayCount int32) ([]ListNewUserCountsByDayRow, error)
+	// Episode-comment notifications read their anime and excerpt through
+	// comment_id; the community tab's reply notifications (migration 0046)
+	// through reply_id, which also names the thread or activity event the reply
+	// sits under.  A spoiler is never quoted, in either kind.
 	ListNotifications(ctx context.Context, userID uuid.UUID, pageLimit int32) ([]ListNotificationsRow, error)
 	// Profiles: AniList's people and characters (migration 0044), written by
 	// the profiles sweep (queue/profiles.go), one transaction per batch of up
@@ -1719,6 +1824,12 @@ type Querier interface {
 	// floor keeps one-title production companies -- thousands of them --
 	// off the sitemap; a hub page of one card is a thin page.
 	ListStudioCounts(ctx context.Context, minTitles int32) ([]ListStudioCountsRow, error)
+	// ==================== Replies ====================
+	// Oldest first, like episode comments.  Capped at 500 — far past any thread
+	// this site has, and a bound on what one request can ask Postgres for.
+	// reply_to_username names who a reply answers, read through its parent even
+	// when that parent was since deleted.
+	ListThreadReplies(ctx context.Context, threadID uuid.UUID, viewerID *uuid.UUID) ([]ListThreadRepliesRow, error)
 	// Explainable discovery ranking for the homepage.  Participation matters more
 	// than raw volume, reactions add a smaller signal, and a smooth age divisor
 	// lets a fresh smaller conversation outrank an old thread without making the
@@ -2047,6 +2158,20 @@ type Querier interface {
 	PruneAnimeCharacters(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error
 	// PruneAnimeCharacters for staff.
 	PruneAnimeStaff(ctx context.Context, animeID int32, keep []uuid.UUID, wholeList bool) error
+	// ==================== Activity ====================
+	// The tab's 最近动态: one anime's status events, newest first, with their
+	// like and reply counts.  event_id narrows it to one event (a notification
+	// links to an event that may be past the first page).
+	QueryAnimeActivity(ctx context.Context, viewerID *uuid.UUID, anilistID int32, eventID *uuid.UUID, pageOffset int32, pageLimit int32) ([]QueryAnimeActivityRow, error)
+	// ==================== Reviews ====================
+	// One review shape for three callers: the list (review_id and author_id
+	// NULL), a single review (review_id), and the viewer's own (author_id).
+	// Sorted by how many found it helpful, then newest.  helpful_count is
+	// computed, not stored: one row per vote is the only record, so the number
+	// cannot drift from it.
+	QueryAnimeReviews(ctx context.Context, arg QueryAnimeReviewsParams) ([]QueryAnimeReviewsRow, error)
+	RemoveActivityLike(ctx context.Context, eventID uuid.UUID, userID uuid.UUID) (int64, error)
+	RemoveReviewHelpfulVote(ctx context.Context, reviewID uuid.UUID, userID uuid.UUID) (int64, error)
 	// First-page mode only: move every row the write did not touch to
 	// display_order first_order, first_order+1, ..., keeping their existing
 	// relative order.  After it, the first page is display_order 0..n-1 and
@@ -2290,6 +2415,16 @@ type Querier interface {
 	// The profile header remains resolvable so existing profile links do not turn
 	// into misleading 404s; the social handler redacts the watching list instead.
 	SetUserPublic(ctx context.Context, iD uuid.UUID, isPublic bool) error
+	// The author's delete and an admin's removal are the same write; deleted_by
+	// records which.  Already-deleted rows are left alone (0 rows).
+	SoftDeleteAnimeReview(ctx context.Context, actorID uuid.UUID, reviewID uuid.UUID) (int64, error)
+	// Removing a thread also removes the notifications its replies sent: an
+	// inbox must not link into a thread that answers 404.  The replies
+	// themselves stay as they are, unreachable behind the deleted thread.
+	SoftDeleteAnimeThread(ctx context.Context, actorID uuid.UUID, threadID uuid.UUID) (int64, error)
+	// The reply's notifications go in the same statement, so an inbox never
+	// quotes a reply its author took back.
+	SoftDeleteCommunityReply(ctx context.Context, actorID uuid.UUID, replyID uuid.UUID) (int64, error)
 	// The credits sweep's read stamp for characters, with what page 1 said
 	// about page 2 (NULL: unchanged -- a failed or absent read learned
 	// nothing).  checked_at comes from the caller because a failed read is
@@ -2424,6 +2559,9 @@ type Querier interface {
 	// COALESCE for mal_id.  is_adult is written plainly because this
 	// document selects it.
 	UpdateAnimeFacts(ctx context.Context, arg UpdateAnimeFactsParams) (int64, error)
+	// Author-only, enforced here as well as by the handler: a request for
+	// someone else's review matches no row.
+	UpdateAnimeReview(ctx context.Context, arg UpdateAnimeReviewParams) (uuid.UUID, error)
 	// Write one row's Bangumi rating figures and stamp the read.
 	//
 	// The Bangumi counterpart of UpdateAnilistRating, and narrow on purpose.
@@ -2839,7 +2977,24 @@ type Querier interface {
 	// ON CONFLICT only writes status — Express also only patches `status`
 	// in the upsert payload, leaving current_episode/score untouched on
 	// re-add.  RETURNING gives the canonical post-write state.
-	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (Subscription, error)
+	//
+	// A 'status' activity event (migration 0046) is appended in the same
+	// statement when the row is new or its status actually moved, so the
+	// anime's community tab can say "看完了".  `previous` locks the existing
+	// row first: two overlapping upserts to the same status then serialise, and
+	// the second reads the first one's value rather than its own stale snapshot
+	// and appends nothing.  A brand-new row is recognised by created_at = now():
+	// now() is this transaction's start, which no row written by another
+	// transaction carries.
+	//
+	// ★ The insert reads `previous` (the count below) on purpose.  A CTE runs
+	// when something first reads it, and the only other reader is status_event,
+	// which runs after the upsert.  By then the row has been rewritten by this
+	// same statement, and FOR UPDATE on a row the current command already
+	// modified finds nothing — `previous` would come back empty, every repeat
+	// would look like a change, and the feed would fill with duplicates.
+	// Reading it here takes the lock and the old status before the write.
+	UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (UpsertSubscriptionRow, error)
 	// Product policy is symmetric: either user's block closes interaction in both
 	// directions even though only the initiator owns the row.
 	UserBlockExists(ctx context.Context, userID uuid.UUID, otherUserID uuid.UUID) (bool, error)

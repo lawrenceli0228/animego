@@ -68,11 +68,16 @@ WHERE n.user_id = sqlc.arg('user_id')::uuid
 LIMIT 1;
 
 -- name: ListNotifications :many
+-- Episode-comment notifications read their anime and excerpt through
+-- comment_id; the community tab's reply notifications (migration 0046)
+-- through reply_id, which also names the thread or activity event the reply
+-- sits under.  A spoiler is never quoted, in either kind.
 SELECT
     n.id,
     n.notification_type,
     n.comment_id,
     n.activity_event_id,
+    n.reply_id,
     n.read_at,
     n.created_at,
     actor.id AS actor_id,
@@ -82,6 +87,12 @@ SELECT
     c.episode,
     visible_comment.content AS comment_content,
     COALESCE(c.is_spoiler, false)::boolean AS comment_is_spoiler,
+    reply.anilist_id AS reply_anilist_id,
+    reply.thread_id AS reply_thread_id,
+    reply.activity_event_id AS reply_activity_event_id,
+    reply.body AS reply_body,
+    reply.is_spoiler AS reply_is_spoiler,
+    thread.title AS thread_title,
     a.title_romaji,
     a.title_chinese,
     a.title_hant,
@@ -94,13 +105,27 @@ LEFT JOIN episode_comments c ON c.id = n.comment_id
 LEFT JOIN episode_comments visible_comment
     ON visible_comment.id = n.comment_id
    AND visible_comment.is_spoiler = false
-LEFT JOIN anime_cache a ON a.anilist_id = c.anilist_id
+LEFT JOIN community_replies reply
+    ON reply.id = n.reply_id
+   AND reply.deleted_at IS NULL
+LEFT JOIN anime_threads thread
+    ON thread.id = reply.thread_id
+LEFT JOIN anime_cache a ON a.anilist_id = COALESCE(c.anilist_id, reply.anilist_id)
 WHERE n.user_id = sqlc.arg('user_id')::uuid
   AND NOT EXISTS (
       SELECT 1
       FROM user_blocks block
       WHERE (block.blocker_id = n.user_id AND block.blocked_id = n.actor_id)
          OR (block.blocker_id = n.actor_id AND block.blocked_id = n.user_id)
+  )
+  -- A community reply notification only while its reply is there and, under
+  -- a thread, the thread too (migration 0046).  Deleting either deletes its
+  -- notifications in the same statement, but a reply posted while its
+  -- thread was being deleted is one that statement never saw; this keeps
+  -- the removed title out of the inbox.  CountUnreadNotifications agrees.
+  AND (
+      n.reply_id IS NULL
+      OR (reply.id IS NOT NULL AND (reply.thread_id IS NULL OR thread.deleted_at IS NULL))
   )
 ORDER BY n.created_at DESC, n.id DESC
 LIMIT sqlc.arg('page_limit')::integer;
@@ -117,6 +142,18 @@ WHERE notification.user_id = $1
              AND block.blocked_id = notification.actor_id)
          OR (block.blocker_id = notification.actor_id
              AND block.blocked_id = notification.user_id)
+  )
+  -- The same rule ListNotifications applies to community replies.
+  AND (
+      notification.reply_id IS NULL
+      OR EXISTS (
+          SELECT 1
+          FROM community_replies reply
+          LEFT JOIN anime_threads thread ON thread.id = reply.thread_id
+          WHERE reply.id = notification.reply_id
+            AND reply.deleted_at IS NULL
+            AND (reply.thread_id IS NULL OR thread.deleted_at IS NULL)
+      )
   );
 
 -- name: MarkNotificationRead :one

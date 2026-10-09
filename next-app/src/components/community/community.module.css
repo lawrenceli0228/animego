@@ -1,0 +1,788 @@
+/* The community tab (社区) and its two sub-pages — the approved design's
+ * Social and WriteReview boards, rebuilt on the site's tokens.
+ *
+ * ## Colour
+ *
+ * The canvas names its accents --tone, --tone-hi, --tone-dim, --tone-line and
+ * --tone-ink, all one OKLCH hue. Here they are derived from --poster-hue,
+ * which HeroAccent declares on its wrapper — the same hue the overview page's
+ * --poster-tone family is built from (globals.css .poster-scope). They are
+ * DECLARED on .root rather than on :root on purpose: a custom property's
+ * var() is substituted on the element that declares it, so declaring these
+ * above the HeroAccent wrapper would bake in the default hue for every anime
+ * (see the note at the top of sections.module.css). The fallback hue is the
+ * site default, so the page still reads correctly outside a wrapper.
+ *
+ * Small labels — dates, counters, the 「谁在追」 sub-line — are 55% white,
+ * the owner's call on the canvas (the site's --text-tertiary is 30%). */
+.root {
+  --c-hue: var(--poster-hue, 292.7);
+  --c-tone: oklch(76% 0.085 var(--c-hue));
+  --c-tone-hi: oklch(84% 0.07 var(--c-hue));
+  --c-tone-dim: oklch(76% 0.085 var(--c-hue) / 0.14);
+  --c-tone-line: oklch(76% 0.085 var(--c-hue) / 0.4);
+  --c-tone-ink: oklch(22% 0.03 var(--c-hue));
+  --c-s1: #101013;
+  --c-s2: #16161a;
+  --c-s3: #1d1d22;
+  --c-line: rgba(255, 255, 255, 0.08);
+  --c-line2: rgba(255, 255, 255, 0.14);
+  --c-tx: #f3f3f5;
+  --c-tx2: #a6a6ad;
+  --c-meta: rgba(235, 235, 245, 0.55);
+  --c-danger: #ff453a;
+  color: var(--c-tx);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.root :focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── the tab: a main column and the 谁在追 aside ─────────────────────── */
+
+/* Vertical padding only: the element also carries the global .container,
+ * whose horizontal padding is the page gutter (24px, 16px on phones). */
+.tab {
+  padding-top: 40px;
+  padding-bottom: 64px;
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px;
+}
+
+@media (min-width: 980px) {
+  .cols {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+.main {
+  min-width: 0;
+}
+
+.aside {
+  min-width: 0;
+}
+
+.section + .section {
+  margin-top: 48px;
+}
+
+/* Anchor targets (#activity-…) land below the sticky site header. */
+.section,
+.anchor {
+  scroll-margin-top: calc(var(--nav-h, 64px) + 16px);
+}
+
+/* Section head: the canvas .sh — a short rule in the anime's colour, the
+ * title at 15px/640, the count in mono at 55%, and the action at the end. */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+  min-height: 32px;
+}
+
+.headTitle {
+  flex: none;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 640;
+  line-height: 1.62;
+  letter-spacing: 0.01em;
+  color: #fff;
+}
+
+.headTitle::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  margin-right: 11px;
+  vertical-align: 0.34em;
+  border-radius: 1px;
+  background: var(--c-tone);
+}
+
+.headCount {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  color: var(--c-meta);
+}
+
+.headAction {
+  margin-left: auto;
+}
+
+/* ── buttons: the canvas .btn family ───────────────────────────────── */
+
+.btn {
+  height: 38px;
+  padding: 0 15px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--c-line2);
+  color: var(--c-tx);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 150ms, border-color 150ms, color 150ms, filter 150ms;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btnSm {
+  composes: btn;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.btnSolid {
+  composes: btn;
+  background: var(--c-tone);
+  border-color: transparent;
+  color: var(--c-tone-ink);
+  font-weight: 600;
+}
+
+.btnSolid:hover {
+  background: var(--c-tone);
+  filter: brightness(1.06);
+}
+
+.btnSmSolid {
+  composes: btnSm;
+  background: var(--c-tone);
+  border-color: transparent;
+  color: var(--c-tone-ink);
+  font-weight: 600;
+}
+
+.btnSmSolid:hover {
+  background: var(--c-tone);
+  filter: brightness(1.06);
+}
+
+.btnGhost {
+  composes: btnSm;
+  background: transparent;
+}
+
+/* A ghost button that is "on": the canvas's highlighted 回复 / a cast vote. */
+.btnGhost[aria-pressed="true"],
+.btnGhost[aria-expanded="true"] {
+  color: var(--c-tone-hi);
+  border-color: var(--c-tone-line);
+}
+
+.btnBlock {
+  composes: btn;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.textBtn {
+  border: 0;
+  padding: 4px 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--c-meta);
+  cursor: pointer;
+}
+
+.textBtn:hover {
+  color: var(--c-tx);
+}
+
+.textBtnDanger {
+  composes: textBtn;
+  color: var(--c-danger);
+  font-weight: 600;
+}
+
+.textBtnDanger:hover {
+  color: var(--c-danger);
+}
+
+.icon {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+  display: block;
+}
+
+/* ── cards, empty states, chips ────────────────────────────────────── */
+
+.card {
+  background: var(--c-s1);
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  padding: 22px;
+}
+
+.cardTight {
+  composes: card;
+  padding: 16px 18px;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cardSub {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--c-meta);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.empty {
+  border: 1px dashed var(--c-line2);
+  border-radius: 14px;
+  padding: 30px;
+  text-align: center;
+  color: var(--c-tx2);
+}
+
+.emptyTitle {
+  font-size: 15px;
+  color: var(--c-tx);
+}
+
+.retry {
+  margin-top: 16px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--c-line2);
+  color: var(--c-tx2);
+  white-space: nowrap;
+}
+
+.chipTone {
+  composes: chip;
+  border-color: var(--c-tone-line);
+  color: var(--c-tone-hi);
+  background: var(--c-tone-dim);
+}
+
+/* Dates and small counts. The sans stack, not mono: these mix CJK into the
+ * digits ("10 月 4 日"), the repo ships no CJK webfont, and a CJK glyph in a
+ * mono stack falls through to whatever the OS last resorts to — the same
+ * reason sections.module.css keeps mono for pure digits only. */
+.meta {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-meta);
+}
+
+.loadMore {
+  margin-top: 18px;
+  width: 100%;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--c-s1);
+  border: 1px dashed var(--c-line2);
+  color: var(--c-tx2);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.loadMore:hover {
+  color: var(--c-tx);
+}
+
+.loadMore:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* ── people: the canvas .ini initial circle, or the user's own picture ── */
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: var(--c-s3);
+  color: var(--c-tx2);
+  text-decoration: none;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatarSm {
+  composes: avatar;
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+}
+
+.name {
+  font-weight: 600;
+  color: var(--c-tx);
+  text-decoration: none;
+}
+
+a.name:hover {
+  color: var(--c-tone-hi);
+}
+
+/* ── reviews ───────────────────────────────────────────────────────── */
+
+.byline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.bylineText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+}
+
+.reviewSummary {
+  margin: 14px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.reviewBody {
+  margin-top: 10px;
+  font-size: 14.5px;
+  line-height: 1.85;
+  color: rgba(243, 243, 245, 0.86);
+  overflow-wrap: anywhere;
+}
+
+/* The collapsed list form: six lines, the rest one click away. The whole text
+ * is in the document either way, so a crawler reads all of it. */
+.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.fold {
+  margin-top: 12px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--c-tone-line);
+  background: var(--c-tone-dim);
+  color: var(--c-tone-hi);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 14px;
+}
+
+.actionsEnd {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* 确认删除 / 取消, side by side where 删除 was. */
+.confirmPair {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ── markup inside a review or a thread ────────────────────────────── */
+
+.prose p {
+  margin: 0;
+}
+
+.prose p + p,
+.prose p + blockquote,
+.prose blockquote + p,
+.prose blockquote + blockquote {
+  margin-top: 0.9em;
+}
+
+.prose blockquote {
+  margin: 0;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--c-tone-line);
+  color: var(--c-tx2);
+}
+
+.prose strong {
+  font-weight: 650;
+  color: #fff;
+}
+
+.prose a {
+  color: var(--c-tone-hi);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--c-tone-line);
+  overflow-wrap: anywhere;
+}
+
+.spoiler {
+  border: 0;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  font: inherit;
+  color: transparent;
+  background: rgba(235, 235, 245, 0.22);
+  cursor: pointer;
+  user-select: none;
+}
+
+.spoiler:hover {
+  background: rgba(235, 235, 245, 0.3);
+}
+
+.spoilerOpen {
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: rgba(235, 235, 245, 0.08);
+}
+
+/* ── threads ───────────────────────────────────────────────────────── */
+
+.threadList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--c-s1);
+}
+
+.threadRow + .threadRow {
+  border-top: 1px solid var(--c-line);
+}
+
+.threadLink {
+  display: block;
+  padding: 14px 18px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.threadLink:hover {
+  background: var(--c-s2);
+}
+
+.threadTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.threadExcerpt {
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--c-tx2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.threadMeta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--c-meta);
+}
+
+/* The canvas .compose card: what 发帖 opens. */
+.compose {
+  background: var(--c-s1);
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+.field + .field {
+  margin-top: 12px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: var(--c-tx2);
+}
+
+.input {
+  width: 100%;
+  height: 40px;
+  border-radius: 9px;
+  background: #000;
+  border: 1px solid var(--c-line);
+  padding: 0 12px;
+  color: var(--c-tx);
+  font: inherit;
+  font-size: 14px;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  background: #000;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  padding: 12px;
+  color: var(--c-tx);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: rgba(235, 235, 245, 0.4);
+}
+
+/* Sans, like .meta: the counters are Chinese sentences around a number. */
+.counter {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-meta);
+}
+
+.counterOver {
+  composes: counter;
+  color: var(--c-danger);
+}
+
+.composeFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--c-tx2);
+  cursor: pointer;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--c-tone);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ── activity: the canvas's 最近动态 cards ──────────────────────────── */
+
+.activityHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.activityText {
+  flex: 1;
+  min-width: 0;
+}
+
+.activitySentence {
+  overflow-wrap: anywhere;
+}
+
+.cover {
+  width: 36px;
+  height: 50px;
+  border-radius: 5px;
+  object-fit: cover;
+  flex: none;
+  background: var(--c-s3);
+}
+
+.activityButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.highlight {
+  box-shadow: 0 0 0 1px var(--c-tone-line), 0 0 0 4px var(--c-tone-dim);
+  transition: box-shadow 300ms;
+}
+
+/* The 登录 后… line where a signed-out reader would reply or post. */
+.loginLine {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--c-tx2);
+}
+
+.loginLine a {
+  color: var(--c-tone-hi);
+}
+
+/* ── 谁在追 ────────────────────────────────────────────────────────── */
+
+.whoList {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.who:last-child {
+  border-bottom: 0;
+}
+
+.whoText {
+  flex: 1;
+  min-width: 0;
+}
+
+.whoName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── phones ─────────────────────────────────────────────────────────
+ * The canvas's 390 boards: one column, 44px touch targets. */
+@media (max-width: 600px) {
+  .tab {
+    padding-top: 28px;
+    padding-bottom: 48px;
+  }
+
+  .section + .section {
+    margin-top: 40px;
+  }
+
+  .card {
+    padding: 18px 16px;
+  }
+
+  .cardTight {
+    padding: 14px 14px;
+  }
+
+  .btn,
+  .btnSm {
+    height: 44px;
+  }
+
+  .textBtn {
+    padding: 10px 0;
+  }
+
+  .threadLink {
+    padding: 14px 16px;
+  }
+}

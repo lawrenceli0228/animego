@@ -1,7 +1,19 @@
 export type NotificationType =
   | "comment_reply"
   | "comment_reaction"
-  | "follow";
+  | "follow"
+  // The anime community tab (go-api migration 0046): a reply in a thread
+  // the reader started or a reply of theirs, and a reply under their activity.
+  | "thread_reply"
+  | "activity_reply";
+
+const NOTIFICATION_TYPES: readonly NotificationType[] = [
+  "comment_reply",
+  "comment_reaction",
+  "follow",
+  "thread_reply",
+  "activity_reply",
+];
 
 export interface CommunityNotification {
   id: string;
@@ -25,6 +37,11 @@ export interface CommunityNotification {
   } | null;
   episode: number | null;
   commentId: string | null;
+  /** The community reply this is about, and where it sits (thread or activity event). */
+  replyId: string | null;
+  threadId: string | null;
+  threadTitle: string | null;
+  activityId: string | null;
   excerpt: string | null;
   isSpoiler: boolean;
   createdAt: string;
@@ -64,7 +81,7 @@ function notification(value: unknown): CommunityNotification | null {
     !id ||
     !username ||
     !createdAt ||
-    !["comment_reply", "comment_reaction", "follow"].includes(type ?? "")
+    !NOTIFICATION_TYPES.includes(type as NotificationType)
   ) {
     return null;
   }
@@ -90,6 +107,10 @@ function notification(value: unknown): CommunityNotification | null {
         ? row.episode
         : null,
     commentId: string(row?.commentId),
+    replyId: string(row?.replyId),
+    threadId: string(row?.threadId),
+    threadTitle: string(row?.threadTitle),
+    activityId: string(row?.activityId),
     excerpt: string(row?.excerpt),
     isSpoiler: row?.isSpoiler === true,
     createdAt,
@@ -123,6 +144,14 @@ export function notificationTarget(item: CommunityNotification): string {
     return `/u/${encodeURIComponent(item.actor.username)}`;
   }
   const base = `/anime/${item.anime.anilistId}`;
+  if (item.type === "thread_reply") {
+    if (!item.threadId) return `${base}/social`;
+    const reply = item.replyId ? `#reply-${item.replyId}` : "";
+    return `${base}/social/threads/${item.threadId}${reply}`;
+  }
+  if (item.type === "activity_reply") {
+    return item.activityId ? `${base}/social#activity-${item.activityId}` : `${base}/social`;
+  }
   if (!item.episode) return base;
   const comment = item.commentId ? `-comment-${item.commentId}` : "";
   return `${base}#episode-${item.episode}${comment}`;

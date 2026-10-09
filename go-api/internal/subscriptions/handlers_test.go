@@ -139,20 +139,25 @@ func (f *fakeSubsDB) MarkEpisodesWatched(ctx context.Context, userID uuid.UUID, 
 	return f.markManyFn(ctx, userID, anilistID, episodes)
 }
 
-func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error) {
+// The two create queries return their own row types since migration 0046
+// put each in a CTE; the fields are dbgen.Subscription's, so the fakes keep
+// taking a Subscription and convert on the way out.
+func (f *fakeSubsDB) UpsertSubscription(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.UpsertSubscriptionRow, error) {
 	atomic.AddInt32(&f.upsertCalls, 1)
 	if f.upsertFn == nil {
 		panic("fakeSubsDB.UpsertSubscription not set")
 	}
-	return f.upsertFn(ctx, userID, anilistID, status)
+	sub, err := f.upsertFn(ctx, userID, anilistID, status)
+	return dbgen.UpsertSubscriptionRow(sub), err
 }
 
-func (f *fakeSubsDB) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.Subscription, error) {
+func (f *fakeSubsDB) InsertSubscriptionIfAbsent(ctx context.Context, userID uuid.UUID, anilistID int32, status string) (dbgen.InsertSubscriptionIfAbsentRow, error) {
 	atomic.AddInt32(&f.ifAbsentCalls, 1)
 	if f.ifAbsentFn == nil {
 		panic("fakeSubsDB.InsertSubscriptionIfAbsent not set")
 	}
-	return f.ifAbsentFn(ctx, userID, anilistID, status)
+	sub, err := f.ifAbsentFn(ctx, userID, anilistID, status)
+	return dbgen.InsertSubscriptionIfAbsentRow(sub), err
 }
 
 func (f *fakeSubsDB) GetAnimeEpisodeCount(ctx context.Context, anilistID int32) (*int32, error) {

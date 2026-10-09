@@ -135,20 +135,84 @@ ORDER BY episode;
 -- ON CONFLICT only writes status — Express also only patches `status`
 -- in the upsert payload, leaving current_episode/score untouched on
 -- re-add.  RETURNING gives the canonical post-write state.
-INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
-VALUES ($1, $2, $3, now())
-ON CONFLICT (user_id, anilist_id) DO UPDATE
-SET status     = EXCLUDED.status,
-    updated_at = now()
-RETURNING
-    user_id,
-    anilist_id,
-    status,
-    current_episode,
-    score,
-    last_watched_at,
-    created_at,
-    updated_at;
+--
+-- A 'status' activity event (migration 0046) is appended in the same
+-- statement when the row is new or its status actually moved, so the
+-- anime's community tab can say "看完了".  `previous` locks the existing
+-- row first: two overlapping upserts to the same status then serialise, and
+-- the second reads the first one's value rather than its own stale snapshot
+-- and appends nothing.  A brand-new row is recognised by created_at = now():
+-- now() is this transaction's start, which no row written by another
+-- transaction carries.
+--
+-- ★ The insert reads `previous` (the count below) on purpose.  A CTE runs
+-- when something first reads it, and the only other reader is status_event,
+-- which runs after the upsert.  By then the row has been rewritten by this
+-- same statement, and FOR UPDATE on a row the current command already
+-- modified finds nothing — `previous` would come back empty, every repeat
+-- would look like a change, and the feed would fill with duplicates.
+-- Reading it here takes the lock and the old status before the write.
+WITH previous AS (
+    SELECT s.status
+    FROM subscriptions s
+    WHERE s.user_id = sqlc.arg('user_id')::uuid
+      AND s.anilist_id = sqlc.arg('anilist_id')::integer
+    FOR UPDATE
+), upserted AS (
+    INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
+    SELECT
+        sqlc.arg('user_id')::uuid,
+        sqlc.arg('anilist_id')::integer,
+        sqlc.arg('status')::text,
+        now()
+    FROM (SELECT count(*) FROM previous) AS read_previous_first
+    ON CONFLICT (user_id, anilist_id) DO UPDATE
+    SET status     = EXCLUDED.status,
+        updated_at = now()
+    RETURNING
+        user_id,
+        anilist_id,
+        status,
+        current_episode,
+        score,
+        last_watched_at,
+        created_at,
+        updated_at
+), status_event AS (
+    INSERT INTO activity_events (user_id, event_type, anilist_id, status)
+    SELECT u.user_id, 'status', u.anilist_id, u.status
+    FROM upserted u
+    WHERE u.created_at = now()
+       OR u.status IS DISTINCT FROM (SELECT p.status FROM previous p)
+    RETURNING id
+), replaced_status_events AS (
+    -- One card per person per title in 最近动态: a new status event takes
+    -- the place of this person's earlier ones for the title that nobody has
+    -- liked or answered, so switching a status back and forth cannot fill
+    -- the tab.  A card someone liked or replied to stays — it is a
+    -- conversation now.  The new event is not among those deleted: every
+    -- part of a statement reads the snapshot from before the statement.
+    DELETE FROM activity_events e
+    WHERE EXISTS (SELECT 1 FROM status_event)
+      AND e.user_id = sqlc.arg('user_id')::uuid
+      AND e.anilist_id = sqlc.arg('anilist_id')::integer
+      AND e.event_type = 'status'
+      AND NOT EXISTS (SELECT 1 FROM activity_likes l WHERE l.activity_event_id = e.id)
+      AND NOT EXISTS (
+          SELECT 1 FROM community_replies r
+          WHERE r.activity_event_id = e.id AND r.deleted_at IS NULL
+      )
+)
+SELECT
+    u.user_id,
+    u.anilist_id,
+    u.status,
+    u.current_episode,
+    u.score,
+    u.last_watched_at,
+    u.created_at,
+    u.updated_at
+FROM upserted u;
 
 -- name: InsertSubscriptionIfAbsent :one
 -- POST /api/subscriptions with `"ifAbsent": true` — the click-to-track path.
@@ -178,24 +242,61 @@ RETURNING
 -- race open and asserts the 201.
 --
 -- Caller MUST have ensured the anime_cache row exists (else the FK kicks).
-INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
-VALUES (
-    sqlc.arg('user_id')::uuid,
-    sqlc.arg('anilist_id')::integer,
-    sqlc.arg('status')::text,
-    now()
+--
+-- Only a row this statement created appends a 'status' activity event
+-- (migration 0046) — the conflict arm changes nothing, so it has nothing to
+-- announce.  created_at = now() is the "created here" test: now() is this
+-- transaction's start time, and a row that won the race in another
+-- transaction carries that transaction's.  The final SELECT still reads the
+-- upsert's RETURNING, so the DO UPDATE guarantee above is untouched.
+WITH upserted AS (
+    INSERT INTO subscriptions (user_id, anilist_id, status, updated_at)
+    VALUES (
+        sqlc.arg('user_id')::uuid,
+        sqlc.arg('anilist_id')::integer,
+        sqlc.arg('status')::text,
+        now()
+    )
+    ON CONFLICT (user_id, anilist_id) DO UPDATE
+    SET status = subscriptions.status
+    RETURNING
+        user_id,
+        anilist_id,
+        status,
+        current_episode,
+        score,
+        last_watched_at,
+        created_at,
+        updated_at
+), status_event AS (
+    INSERT INTO activity_events (user_id, event_type, anilist_id, status)
+    SELECT u.user_id, 'status', u.anilist_id, u.status
+    FROM upserted u
+    WHERE u.created_at = now()
+    RETURNING id
+), replaced_status_events AS (
+    -- One card per person per title: see UpsertSubscription.
+    DELETE FROM activity_events e
+    WHERE EXISTS (SELECT 1 FROM status_event)
+      AND e.user_id = sqlc.arg('user_id')::uuid
+      AND e.anilist_id = sqlc.arg('anilist_id')::integer
+      AND e.event_type = 'status'
+      AND NOT EXISTS (SELECT 1 FROM activity_likes l WHERE l.activity_event_id = e.id)
+      AND NOT EXISTS (
+          SELECT 1 FROM community_replies r
+          WHERE r.activity_event_id = e.id AND r.deleted_at IS NULL
+      )
 )
-ON CONFLICT (user_id, anilist_id) DO UPDATE
-SET status = subscriptions.status
-RETURNING
-    user_id,
-    anilist_id,
-    status,
-    current_episode,
-    score,
-    last_watched_at,
-    created_at,
-    updated_at;
+SELECT
+    u.user_id,
+    u.anilist_id,
+    u.status,
+    u.current_episode,
+    u.score,
+    u.last_watched_at,
+    u.created_at,
+    u.updated_at
+FROM upserted u;
 
 -- name: UpdateSubscriptionWithActivity :one
 -- Lock the previous value, apply the selective update, and append a watch event
@@ -300,7 +401,7 @@ RETURNING
 -- something, and it must not reorder the list.
 --
 WITH previous AS (
-    SELECT s.user_id, s.anilist_id, s.current_episode
+    SELECT s.user_id, s.anilist_id, s.current_episode, s.status
     FROM subscriptions s
     WHERE s.user_id = sqlc.arg('user_id')::uuid
       AND s.anilist_id = sqlc.arg('anilist_id')::integer
@@ -358,7 +459,9 @@ WITH previous AS (
     FROM previous
     WHERE subscription.user_id = sqlc.arg('user_id')::uuid
       AND subscription.anilist_id = sqlc.arg('anilist_id')::integer
-    RETURNING subscription.*, previous.current_episode AS previous_episode
+    RETURNING subscription.*,
+              previous.current_episode AS previous_episode,
+              previous.status AS previous_status
 ), inserted_activity AS (
     INSERT INTO activity_events (user_id, event_type, anilist_id, episode)
     SELECT
@@ -370,6 +473,32 @@ WITH previous AS (
     WHERE sqlc.narg('current_episode')::integer IS NOT NULL
       AND current_episode IS DISTINCT FROM previous_episode
     RETURNING id
+), inserted_status_activity AS (
+    -- A status the caller actually moved (migration 0046): the community
+    -- tab's 最近动态 reads these.  `previous` holds the row lock, so a
+    -- repeated PATCH to the same status reads the value the first one wrote
+    -- and appends nothing.
+    INSERT INTO activity_events (user_id, event_type, anilist_id, status)
+    SELECT
+        user_id,
+        'status',
+        anilist_id,
+        status
+    FROM updated
+    WHERE status IS DISTINCT FROM previous_status
+    RETURNING id
+), replaced_status_events AS (
+    -- One card per person per title: see UpsertSubscription.
+    DELETE FROM activity_events e
+    WHERE EXISTS (SELECT 1 FROM inserted_status_activity)
+      AND e.user_id = sqlc.arg('user_id')::uuid
+      AND e.anilist_id = sqlc.arg('anilist_id')::integer
+      AND e.event_type = 'status'
+      AND NOT EXISTS (SELECT 1 FROM activity_likes l WHERE l.activity_event_id = e.id)
+      AND NOT EXISTS (
+          SELECT 1 FROM community_replies r
+          WHERE r.activity_event_id = e.id AND r.deleted_at IS NULL
+      )
 )
 SELECT
     user_id,
@@ -418,10 +547,20 @@ RETURNING
 -- name: DeleteSubscription :execrows
 -- DELETE /api/subscriptions/:anilistId.  Returns the affected row count
 -- so the handler can 404 when no row matched (matches Express's
--- findOneAndDelete returning null → 404 "Subscription not found").
-DELETE FROM subscriptions
-WHERE user_id = $1
-  AND anilist_id = $2;
+-- findOneAndDelete returning null → 404 "Subscription not found"); the
+-- count is the subscriptions DELETE's, not the CTE's.
+--
+-- The title's status events go with it (migration 0046): off the list is
+-- off the anime's community tab, with the replies and likes on those cards.
+WITH removed_status_events AS (
+    DELETE FROM activity_events e
+    WHERE e.user_id = $1
+      AND e.anilist_id = $2
+      AND e.event_type = 'status'
+)
+DELETE FROM subscriptions s
+WHERE s.user_id = $1
+  AND s.anilist_id = $2;
 
 -- -----------------------------------------------------------------------------
 -- Per-episode watch marks (migration 0024)
