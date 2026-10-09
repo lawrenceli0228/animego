@@ -540,6 +540,34 @@ func (ProfilesArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// ImageWarmArgs has nginx store the original of every AniList image the
+// database references.  See image_warm.go.
+//
+// No fields, like the sweeps above: the work list is a query
+// (ListImageWarmBatch over the image_refs view), and one job is one pass
+// rather than one image, because a pass is thousands of requests paced a
+// tenth of a second apart and per-image jobs would only add bookkeeping.
+type ImageWarmArgs struct{}
+
+// Kind returns the river job kind for the image warm job.
+func (ImageWarmArgs) Kind() string { return "image_warm" }
+
+// InsertOpts pins the job to its own queue (see ImageWarmQueueName) and
+// collapses a second enqueue into the pass already in flight.  The state set
+// is ratingsUniqueStates: the same contract -- every state river requires,
+// retryable, and not completed, or an hourly job would fire once a day --
+// and one slice that TestRatingsUniqueStatesMatchRiver already holds to it,
+// rather than another copy of it.
+func (ImageWarmArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue: ImageWarmQueueName,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByState: ratingsUniqueStates,
+		},
+	}
+}
+
 // BangumiRatingsArgs re-reads Bangumi's score and vote count for the
 // rows that are due, one subject request per row.
 //

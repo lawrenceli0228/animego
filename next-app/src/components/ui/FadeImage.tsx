@@ -40,14 +40,35 @@
 // LCP. `loading="lazy"` (next/image's default) already keeps off-screen covers
 // out of the way, which is the part we actually wanted.
 //
+// ## AniList URLs are pointed at our mirror first
+//
+// A src goes through toMirrorUrl (lib/images/mirror.ts) before anything else
+// here looks at it, with one exception below. In a build with the mirror
+// switched on, an AniList cover or portrait becomes the same file on our own
+// domain:
+//
+//   https://animegoclub.com/img/anilist/<the path after /file/anilistcdn/>
+//
+// so the optimizer fetches the original from us instead of from AniList. In
+// any other build, and for any other src, it is the identity. Doing it here
+// covers every call site of this component at once, and doing it BEFORE
+// canOptimize means the allowlist decision below is made about the URL the
+// page will actually request.
+//
+// The one exception is a caller that passes `unoptimized` itself: its src is
+// rendered exactly as given. Those are the surfaces described next, whose
+// srcs are not ours to vouch for and are kept away from our own servers; the
+// mirror is for images the optimizer fetches, and these it never does.
+//
 // ## `unoptimized` is REQUIRED when the host is not ours to enumerate
 //
-// next.config.ts allows exactly one remote host, s4.anilist.co. Anything else
-// -- a dandanplay match's imageUrl, a bgm mirror, whatever a future enrichment
-// path writes into IndexedDB -- answers 400 from the optimizer, and this
-// component has no onError, so the image simply does not appear. It shipped
-// that way once: /library rendered 26 empty cards and 115 console 400s, and
-// nothing in the build, the type check or the lint said a word.
+// next.config.ts allows a short list of remote sources: AniList's CDN, our
+// mirror of it and YouTube stills (lib/images/remotePatterns.ts). Anything
+// else -- a dandanplay match's imageUrl, a bgm mirror, whatever a future
+// enrichment path writes into IndexedDB -- answers 400 from the optimizer,
+// and this component has no onError, so the image simply does not appear. It
+// shipped that way once: /library rendered 26 empty cards and 115 console
+// 400s, and nothing in the build, the type check or the lint said a word.
 //
 // So: if the src can be any host, pass `unoptimized`. That is the library and
 // player surfaces (SeriesCard, SeriesDetailSheet, UnavailableSeriesSection,
@@ -57,7 +78,8 @@
 // by our own server.
 //
 // ...and relying on every call site to REMEMBER that is what `canOptimize`
-// below replaces. The rule above is right and it still shipped a bug, because
+// (lib/images/remotePatterns.ts, the same list next.config.ts hands to Next)
+// replaces. The rule above is right and it still shipped a bug, because
 // "can this src be any host" is a question about data, not about the call
 // site: /anime/{id} passes `characters[].voiceActorImageUrl`, which is an
 // AniList URL right up until the Bangumi V2 worker (go-api
@@ -66,10 +88,13 @@
 //
 // On a client surface that mistake costs a 400 and a blank card. On this one
 // it cost the whole page: the detail route renders on the SERVER, where
-// next/image validates the URL against remotePatterns while rendering and
-// THROWS rather than returning a broken image. 73 of the 366 character rows
-// in one database carried a bgm portrait, and every anime holding one of them
-// answered 500.
+// next/image under `next dev` (which is also what the e2e sandbox runs)
+// validates the URL against remotePatterns while rendering and THROWS rather
+// than returning a broken image. 73 of the 366 character rows in a local
+// database carried a bgm portrait, and every anime holding one of them
+// answered 500. A production build skips that check, so there the same src
+// renders and the optimizer answers 400: the blank-card failure again, on
+// every page that shows the image.
 //
 // Detecting it here rather than widening remotePatterns is deliberate. Adding
 // lain.bgm.tv to the allowlist would mean allowing its query string too (bgm
@@ -91,6 +116,8 @@ import { useState } from "react";
 import Image from "next/image";
 import type { ImageProps } from "next/image";
 import type { CSSProperties, SyntheticEvent } from "react";
+import { toMirrorUrl } from "@/lib/images/mirror";
+import { canOptimize } from "@/lib/images/remotePatterns";
 
 // next/image's own ImageProps leaves `width`/`height` optional, because `fill`
 // is the alternative. That makes a call site that forgets both compile clean
@@ -151,34 +178,10 @@ type FadeImageProps = Omit<
     src: string | null | undefined;
   };
 
-/** The single host `images.remotePatterns` in next.config.ts allows. */
-const OPTIMIZER_HOST = "s4.anilist.co";
-
-/**
- * Whether the optimizer will accept this src, matching next.config.ts.
- *
- * Relative and same-origin paths are always fine — remotePatterns gates remote
- * URLs only. An unparseable src is treated as not optimizable, because the
- * alternative is letting next/image decide, and on a server-rendered route its
- * way of deciding is to throw.
- *
- * Duplicating the hostname here is the cost of the check. It is one string,
- * and the failure it prevents (a 500 on a public catalogue page) is not one
- * that shows up in a build, a type check, or a lint.
- */
-function canOptimize(src: string): boolean {
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(src)) return true;
-  try {
-    return new URL(src).host === OPTIMIZER_HOST;
-  } catch {
-    return false;
-  }
-}
-
 export default function FadeImage({
   priority = false,
   quality = 85,
-  src,
+  src: sourceSrc,
   style,
   onLoad,
   unoptimized,
@@ -186,6 +189,10 @@ export default function FadeImage({
 }: FadeImageProps) {
   const [loaded, setLoaded] = useState(false);
   const visible = priority || loaded;
+  // The mirror rewrite comes first, so canOptimize below judges the URL the
+  // page will actually request; a caller's own `unoptimized` skips it. See
+  // the header.
+  const src = unoptimized ? sourceSrc : toMirrorUrl(sourceSrc);
 
   // No source: render the same box the caller styled, so the grid keeps its
   // shape. Callers that want a themed placeholder already pass a background in

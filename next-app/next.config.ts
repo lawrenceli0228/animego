@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import bundleAnalyzer from "@next/bundle-analyzer";
 import path from "node:path";
+import { IMAGE_REMOTE_PATTERNS } from "./src/lib/images/remotePatterns";
 
 const withBundleAnalyzer = bundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -154,11 +155,22 @@ const nextConfig: NextConfig = {
   // over image/avif + image/webp. Without that rule every variant of every
   // image is an origin request.
   images: {
-    // AniList's media CDN, and nothing else. Covers, banners, character and
-    // voice-actor portraits all live under /file/anilistcdn/. `search: ""`
-    // forbids a query string -- omitting it implies `**`, which would let a
-    // crafted query turn the optimizer into a proxy for arbitrary AniList
-    // responses.
+    // Where the optimizer may fetch from: AniList's media CDN, our own mirror
+    // of the AniList originals (https://animegoclub.com/img/anilist/), and
+    // YouTube trailer stills. Every entry has `search: ""`, which forbids a
+    // query string -- omitting it implies `**`, which would let a crafted
+    // query turn the optimizer into a proxy for arbitrary upstream responses.
+    //
+    // The list lives in src/lib/images/remotePatterns.ts rather than here,
+    // because FadeImage reads it too: before handing a src to next/image it
+    // asks whether this list covers it, and renders a plain <img> when not.
+    // The two must agree exactly (that file says what disagreeing costs), and
+    // one array read by both is how they do. remotePatterns.test.ts fails if
+    // this key stops being exactly that array.
+    //
+    // `dangerouslyAllowLocalIP` stays at its default, false: the mirror is
+    // reached through the public domain precisely so that the optimizer's
+    // refusal to fetch from private addresses never has to be switched off.
     //
     // Deliberately NOT listed: user avatars. They are served from go-api's
     // volume at /api/avatars/*, and Next resolves a same-origin path through
@@ -167,22 +179,7 @@ const nextConfig: NextConfig = {
     // there; nginx is what routes /api to go-api). Optimizing an avatar would
     // 404 into FallbackImg's onError and silently show the default card. They
     // stay on plain <img>.
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "s4.anilist.co",
-        pathname: "/file/anilistcdn/**",
-        search: "",
-      },
-      {
-        // Detail-page trailer stills. The video itself is not requested until
-        // the visitor presses play; this image keeps the hero preview light.
-        protocol: "https",
-        hostname: "i.ytimg.com",
-        pathname: "/vi/**",
-        search: "",
-      },
-    ],
+    remotePatterns: [...IMAGE_REMOTE_PATTERNS],
 
     formats: ["image/avif", "image/webp"],
 

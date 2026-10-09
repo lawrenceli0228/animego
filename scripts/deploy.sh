@@ -89,12 +89,51 @@ $COMPOSE restart nginx
 echo "==> Status:"
 $COMPOSE ps
 
+# The AniList originals cache may grow to 30 GB on this disk, next to the
+# database and docker's build cache, which grows back on its own. The warm job
+# stops storing and reports to Sentry below 10 GB free; this line shows the
+# margin at every deploy.
+echo "==> Disk:"
+df -h /
+
 echo "==> Smoke (via nginx, -k for self-signed cert)..."
 curl -sk -o /dev/null -w "HTTP %{http_code} from /api/health\n" https://localhost/api/health
 curl -sk -o /dev/null -w "HTTP %{http_code} from /\n" https://localhost/
 curl -sk -o /dev/null -w "HTTP %{http_code} from /anime/154587\n" https://localhost/anime/154587
 # /_next/image is served by the next-image container, not next-app.
 curl -sk -o /dev/null -w "HTTP %{http_code} from /_next/image (next-image)\n" "https://localhost/_next/image?url=%2Fcommunity-guide.jpg&w=640&q=85"
+# The AniList mirror; each line should say 200 image/* (or OK). First, nginx
+# serving an original: from its store once the warm job has run, from
+# AniList until then. Second, a /_next/image request shaped like a page's,
+# whose source is the mirror.
+MIRROR_PATH="media/anime/cover/medium/bx154587-qQTzQnEJJ3oB.jpg"
+curl -sk -o /dev/null -w "HTTP %{http_code} %{content_type} from /img/anilist/ (mirror original)\n" "https://localhost/img/anilist/$MIRROR_PATH"
+curl -sk -o /dev/null -w "HTTP %{http_code} %{content_type} from /_next/image (mirror source)\n" "https://localhost/_next/image?url=https%3A%2F%2Fanimegoclub.com%2Fimg%2Fanilist%2F${MIRROR_PATH//\//%2F}&w=640&q=85"
+# The /_next/image line above is answered from nginx's variant cache once it
+# has passed, so it stops proving the optimizer can still reach the mirror.
+# This one cannot be cached in front: from inside next-image, the request Next
+# makes for an image it has not encoded yet (same runtime, DNS and route
+# through the CDN). Anything but 200 image/* means new images cannot load.
+$COMPOSE exec -T next-image node -e '
+  const url = process.argv[1];
+  fetch(url, { signal: AbortSignal.timeout(7000), redirect: "manual" })
+    .then(async (r) => {
+      console.log(`HTTP ${r.status} ${r.headers.get("content-type")} from next-image -> ${url}`);
+      await r.body?.cancel();
+    })
+    .catch((e) => console.log(`FAILED from next-image -> ${url}: ${e.name}: ${e.message}`));
+' "https://animegoclub.com/img/anilist/$MIRROR_PATH" || true
+# The warm job's own way in: from the go-api container, through the
+# IMAGE_WARM_BASE_URL it reads. OK means it can store originals; a 403 is a
+# wrong path or allowlists that disagree; no answer is a wrong host or port.
+$COMPOSE exec -T go-api sh -c '
+  if [ -z "$IMAGE_WARM_BASE_URL" ]; then
+    echo "warm job off (IMAGE_WARM_BASE_URL is empty)"
+  elif out=$(wget -nv -O /dev/null "${IMAGE_WARM_BASE_URL%/}/$1" 2>&1); then
+    echo "OK from the warm endpoint (go-api -> $IMAGE_WARM_BASE_URL)"
+  else
+    echo "FAILED from the warm endpoint (go-api -> $IMAGE_WARM_BASE_URL): $out"
+  fi' sh "$MIRROR_PATH" || true
 
 echo ""
 echo "==> Done. If a smoke line shows 5xx, check 'docker compose logs --tail=50 <service>'."

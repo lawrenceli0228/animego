@@ -25,7 +25,7 @@
 // about, because default carries V1, V2, warm_season and orphan_scan at
 // once.  river's "*" wildcard is refused by the same check.
 //
-// Widening the surface is what makes the other eight queues reachable at
+// Widening the surface is what makes every other queue reachable at
 // three in the morning without a deploy, which is the whole reason they
 // were given dedicated queues in the first place.
 
@@ -342,3 +342,23 @@ func Status(ctx context.Context, qc QueueController) (Stats, error) {
 // version of this sentence said two slots and was wrong on HEAD -- see
 // the MaxWorkers block in cmd/server/main.go, which is the authority.
 const RatingsQueueName = "ratings"
+
+// ImageWarmQueueName isolates the image warm job (image_warm.go), which has
+// nginx store the original of every AniList image the database references.
+//
+// Its own queue rather than the ratings queue, though it is an AniList
+// sweep too, because of how long it runs.  A pass asks for its images one
+// at a time, a tenth of a second apart, for up to most of an hour, and
+// filling an empty store takes several such passes.  On the ratings queue's
+// one slot every pass would hold the ratings, facts, credits and profiles
+// sweeps until it ended.  It does not share their AniList limiter either:
+// it never calls the API, only nginx, which fetches from AniList's CDN.
+//
+// One slot, because one pass at a time is what keeps the request rate the
+// pass's own pacing.  A second slot could only run a second pass beside the
+// first, at twice the rate against AniList, which is the thing this job must
+// never do.
+//
+// And it is a kill switch like the others: pausing this queue stops the
+// warm job and nothing else, without a deploy.
+const ImageWarmQueueName = "image_warm"

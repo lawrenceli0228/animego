@@ -10,6 +10,8 @@ name: Unit Tests
 #   - ws-server : `jest` — socket auth, danmaku handler, connection lifecycle.
 #   - next-app-build : `next build` + `tsc --noEmit` + lint ratchet + an
 #                 assertion that /anime/[id] is still statically prerendered.
+#   - nginx     : scripts/nginx-test/run.sh — the live nginx config, run in
+#                 the real nginx image beside stand-in upstreams.
 #
 # This is the safety net that keeps the suites GREEN. E2E (live prod) lives
 # in a sibling workflow; this one is the fast unit gate.
@@ -194,3 +196,23 @@ jobs:
       - name: Test
         working-directory: ws-server
         run: npm test
+
+  # nginx/default.p9.conf is the config production runs, and nothing tested it
+  # until now: a cache-poisoning hole in front of the image optimizer and a
+  # connection cap that turned bursts into failed images were both found by
+  # hand, with a harness that lived outside the repo.  That harness is now
+  # scripts/nginx-test/run.sh.  It starts the nginx image docker-compose.yml
+  # runs, with this config, beside stand-ins for next-image, next-app and
+  # AniList's image CDN, and checks routing, the image caches and their keys,
+  # and the AniList original-image mirror.  It needs docker, curl and openssl,
+  # which ubuntu-latest ships.
+  nginx:
+    name: nginx (config behaviour)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run the nginx behaviour harness
+        run: bash scripts/nginx-test/run.sh

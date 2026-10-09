@@ -144,6 +144,14 @@ var productionQueues = map[string]Concurrency{
 	// pass may wait that long behind them.
 	RatingsQueueName: FixedConcurrency(1,
 		"two passes of the same kind cannot overlap, which is what keeps a relaxed-uniqueness future safe"),
+
+	// Image warm.  Its own queue because a pass runs for most of an hour
+	// and the first fill takes several; on the ratings slot it would hold
+	// every sweep above it for that long (see ImageWarmQueueName).  One
+	// slot because a pass paces its own requests: a second worker could
+	// only run a second pass beside it at twice the rate against AniList.
+	ImageWarmQueueName: FixedConcurrency(1,
+		"a pass paces its own requests; a second slot could only add a second pass at twice the rate against AniList"),
 }
 
 // productionEntries declares every job kind.
@@ -292,5 +300,17 @@ var productionEntries = []Entry{
 		Args:     ProfilesArgs{},
 		Queue:    RatingsQueueName,
 		Periodic: &PeriodicSpec{Interval: profilesInterval, RunOnStart: true},
+	},
+
+	// --- originals of the images the database references ---
+
+	// Hourly and RunOnStart for the reason every sweep here has it.  What
+	// is due lives in image_manager, not in river's schedule, so the
+	// monthly re-check survives the restarts that reset the schedule, and
+	// a boot pass with nothing due costs its batch query and no request.
+	{
+		Args:     ImageWarmArgs{},
+		Queue:    ImageWarmQueueName,
+		Periodic: &PeriodicSpec{Interval: imageWarmInterval, RunOnStart: true},
 	},
 }
