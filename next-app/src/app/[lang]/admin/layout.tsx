@@ -107,16 +107,22 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     margin: 0,
   },
+  // On a phone the five links do not fit beside the title: they scroll
+  // sideways in one line rather than each breaking into a column of
+  // single characters.
   nav: {
     display: "flex",
     gap: 18,
     flex: 1,
+    minWidth: 0,
+    overflowX: "auto",
   },
   navLink: {
     color: "#a8a8b8",
     textDecoration: "none",
     fontSize: 14,
     padding: "6px 0",
+    whiteSpace: "nowrap",
   },
   userBadge: {
     fontSize: 13,
