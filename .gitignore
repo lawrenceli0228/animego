@@ -92,6 +92,10 @@ docs/migration/data/
 nginx/selfsigned.crt
 nginx/selfsigned.key
 
+# nginx rules that must not be public (nginx/default.p9.conf includes them).
+# They live only on the server.
+nginx/private/
+
 # Enrichment backfill ops tool: outputs + stray local-build binaries.
 # report.json / backup-*.json land in backfill-out/ (bind-mounted by the
 # `backfill` compose service). The cmd binaries are built into the Docker
