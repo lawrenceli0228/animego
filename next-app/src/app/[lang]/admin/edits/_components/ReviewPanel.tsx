@@ -37,6 +37,7 @@ import { fillTemplate } from "@/lib/people/template";
 import { reviewEditSubmission } from "../../_actions/edits";
 import EditValue from "./EditValue";
 import q from "../edits.module.css";
+import { anilistImgProps } from "@/lib/images/anilistImg";
 
 /** "role" rows say which title; the rest are named by their field. */
 function FieldName({ item }: { item: EditItem }) {
@@ -125,7 +126,7 @@ export default function ReviewPanel({ submission }: { submission: EditSubmission
       <div className={q.cardHead}>
         {submission.snapshot.image ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={submission.snapshot.image} alt="" className={q.thumb} />
+          <img {...anilistImgProps(submission.snapshot.image, 48, 72)} alt="" className={q.thumb} />
         ) : null}
         <div className={q.spacer}>
           <h2 className={q.cardTitle}>{title}</h2>

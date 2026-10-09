@@ -14,6 +14,7 @@ import Avatar from "./Avatar";
 import { HeartIcon, ReplyIcon } from "./Icons";
 import { ReplyComposer, ReplyList } from "./Replies";
 import s from "./community.module.css";
+import { anilistImgProps } from "@/lib/images/anilistImg";
 
 export interface Me {
   username: string;
@@ -88,7 +89,7 @@ export function ActivityCard({
         {coverUrl ? (
           // The anime's own cover at 36px, already in the page above.
           // eslint-disable-next-line @next/next/no-img-element
-          <img className={s.cover} src={coverUrl} alt="" loading="lazy" />
+          <img className={s.cover} {...anilistImgProps(coverUrl, 36, 50)} alt="" loading="lazy" />
         ) : null}
       </div>
 

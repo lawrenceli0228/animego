@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import s from "./community.module.css";
+import { anilistImgProps } from "@/lib/images/anilistImg";
 
 interface AvatarProps {
   name: string;
@@ -28,7 +29,7 @@ export default function Avatar({ name, avatarUrl, backdropCoverUrl, small = fals
         // A user-supplied URL from any host: next/image would need every one
         // of them allow-listed, and these are 36px.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} />
+        <img {...anilistImgProps(src, 36, 36)} alt="" loading="lazy" onError={() => setFailed(true)} />
       ) : (
         initialOf(name)
       )}

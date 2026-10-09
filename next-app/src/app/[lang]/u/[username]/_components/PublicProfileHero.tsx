@@ -15,6 +15,7 @@ import { cssUrl } from "@/lib/cssUrl";
 import "@/components/profile/cinematic.css";
 import type { WatchingEntry } from "./types";
 import { seasonYearLabel } from "@/lib/contentLabels";
+import { anilistImageSrc, FULL_WIDTH } from "@/lib/images/anilistImg";
 
 // PublicProfileHero — cinematic member-pass head for the public /u/[username]
 // page. Reads the owner's DB-persisted photo + backdrop so visitors see the
@@ -137,7 +138,7 @@ export default function PublicProfileHero({
   return (
     <div className="agc-cine-root">
       <div className="agc-cine-bg" aria-hidden="true">
-        {backdrop && <div className="agc-cine-bg-img is-shown" style={{ backgroundImage: cssUrl(backdrop, DEFAULT_BACKDROP_IMAGE) }} />}
+        {backdrop && <div className="agc-cine-bg-img is-shown" style={{ backgroundImage: cssUrl(anilistImageSrc(backdrop, FULL_WIDTH), DEFAULT_BACKDROP_IMAGE) }} />}
       </div>
       <div className="agc-cine-grain" aria-hidden="true" />
 

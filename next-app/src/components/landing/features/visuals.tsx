@@ -13,6 +13,7 @@ import FadeImage from "@/components/ui/FadeImage";
 import MemberPass from "@/components/profile/MemberPass";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { LandingPoster } from "@/lib/types";
+import { anilistImgProps } from "@/lib/images/anilistImg";
 
 export { CornerBrackets };
 
@@ -1105,7 +1106,7 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
           <div style={{ position: "relative", height: 108 }}>
             {backdrop ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={backdrop} alt="" loading="lazy" decoding="async" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 35%" }} />
+              <img {...anilistImgProps(backdrop, 512, 108)} alt="" loading="lazy" decoding="async" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 35%" }} />
             ) : (
               <div style={{ position: "absolute", inset: 0, background: `linear-gradient(135deg, oklch(40% 0.13 ${hue}) 0%, oklch(20% 0.07 ${hue}) 100%)` }} />
             )}
@@ -1119,7 +1120,7 @@ export function MemberPassVisual({ hue, features, lang, art, banner }: MemberPas
             }}>
               {art ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={art} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img {...anilistImgProps(art, 62, 62)} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               ) : null}
             </div>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 7, paddingBottom: 8 }}>

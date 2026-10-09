@@ -7,6 +7,10 @@ import { DEFAULT_CARD_IMAGE } from "@/lib/cardDefaults";
 import type { Lang } from "@/lib/i18n/lang";
 import { TOP_SEASON_LABEL, WATCHED_LABEL } from "./passLabels";
 import "./member-pass.css";
+import { anilistImageSrc } from "@/lib/images/anilistImg";
+
+/** The widest the card is drawn (member-pass.css: --w tops out at 320px). */
+const CARD_ART_WIDTH = 320;
 
 // MemberPass — AnimeGoClub 会员通行证. Presentational holo card: given the
 // member's identity + a cover/photo, it renders the full-bleed pass with the
@@ -95,11 +99,15 @@ export default function MemberPass({
   // SVG gradient is the last-ditch onError target; the default card image is
   // the face for users who haven't set a photo or backdrop cover.
   const fallback = artFallback(username || memberNo);
-  const [src, setSrc] = useState<string>(photoUrl || artUrl || DEFAULT_CARD_IMAGE);
+  // A backdrop cover is an AniList image: through the optimizer, from our
+  // mirror (lib/images/anilistImg.ts). A photo is the member's own and is used
+  // as given.
+  const art = anilistImageSrc(artUrl, CARD_ART_WIDTH);
+  const [src, setSrc] = useState<string>(photoUrl || art || DEFAULT_CARD_IMAGE);
   const hasPhoto = Boolean(photoUrl);
 
   // Keep src in sync when the parent swaps photo/cover (cheap, no effect needed).
-  const desired = photoUrl || artUrl || DEFAULT_CARD_IMAGE;
+  const desired = photoUrl || art || DEFAULT_CARD_IMAGE;
   const [lastDesired, setLastDesired] = useState(desired);
   if (desired !== lastDesired) {
     setLastDesired(desired);

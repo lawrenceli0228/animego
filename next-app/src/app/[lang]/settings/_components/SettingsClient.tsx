@@ -18,6 +18,12 @@ import BlockedUsersList from "./BlockedUsersList";
 import PlaybackSettings from "./PlaybackSettings";
 import "./settings.css";
 import type { Lang } from "@/lib/i18n/lang";
+import { anilistImageSrc } from "@/lib/images/anilistImg";
+
+/** The nav mini-card preview's width (settings.css .set-minicard). */
+const MINICARD_WIDTH = 290;
+/** About the widest a backdrop-picker cell gets (settings.css .set-grid-thumbs). */
+const THUMB_WIDTH = 96;
 
 interface SettingsClientProps {
   username: string;
@@ -227,7 +233,7 @@ export default function SettingsClient({
           {chosenBanner && (
             <div
               className="set-minicard-bg"
-              style={{ backgroundImage: cssUrl(chosenBanner, DEFAULT_BACKDROP_IMAGE) }}
+              style={{ backgroundImage: cssUrl(anilistImageSrc(chosenBanner, MINICARD_WIDTH), DEFAULT_BACKDROP_IMAGE) }}
               aria-hidden="true"
             />
           )}
@@ -325,6 +331,7 @@ export default function SettingsClient({
                         fallback={DEFAULT_CARD_IMAGE}
                         alt={o.title}
                         loading="lazy"
+                        width={THUMB_WIDTH}
                       />
                     </button>
                   ))}

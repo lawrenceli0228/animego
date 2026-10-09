@@ -13,6 +13,7 @@ import {
 } from "@/components/profile/memberIdentity";
 import type { BackdropOption } from "@/components/profile/backdropTypes";
 import { seasonYearLabel } from "@/lib/contentLabels";
+import { anilistImgProps } from "@/lib/images/anilistImg";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ function AnimeCard({ item, lang }: AnimeCardProps) {
       {/* Cover */}
       {item.coverImageUrl ? (
         <img
-          src={item.coverImageUrl}
+          {...anilistImgProps(item.coverImageUrl, 56, 80)}
           alt={title}
           style={{
             width: 56,
