@@ -1,7 +1,22 @@
 export type NotificationType =
   | "comment_reply"
   | "comment_reaction"
-  | "follow";
+  | "follow"
+  | "edit_review";
+
+/**
+ * What an edit_review notification reports: the page the reader edited, as
+ * they saw it, and how the review went (go-api internal/edits).
+ */
+export interface EditNotice {
+  kind: "character" | "person";
+  entityId: number;
+  name: { full: string | null; native: string | null; cn: string | null };
+  image: string | null;
+  accepted: number;
+  rejected: number;
+  rejectNotes: string[];
+}
 
 export interface CommunityNotification {
   id: string;
@@ -29,6 +44,8 @@ export interface CommunityNotification {
   isSpoiler: boolean;
   createdAt: string;
   readAt: string | null;
+  /** Set on edit_review rows only. */
+  edit: EditNotice | null;
 }
 
 export interface NotificationPage {
@@ -52,6 +69,32 @@ function nonNegativeInt(value: unknown): number {
     : 0;
 }
 
+function editNotice(value: unknown): EditNotice | null {
+  const edit = record(value);
+  const snapshot = record(edit?.snapshot);
+  const name = record(snapshot?.name);
+  const kind = edit?.kind;
+  const entityId = edit?.entityId;
+  if (
+    (kind !== "character" && kind !== "person") ||
+    typeof entityId !== "number" ||
+    !Number.isSafeInteger(entityId) ||
+    entityId <= 0
+  ) {
+    return null;
+  }
+  const notes = Array.isArray(edit?.rejectNotes) ? edit.rejectNotes : [];
+  return {
+    kind,
+    entityId,
+    name: { full: string(name?.full), native: string(name?.native), cn: string(name?.cn) },
+    image: string(snapshot?.image),
+    accepted: nonNegativeInt(edit?.accepted),
+    rejected: nonNegativeInt(edit?.rejected),
+    rejectNotes: notes.map(string).filter((n): n is string => n !== null),
+  };
+}
+
 function notification(value: unknown): CommunityNotification | null {
   const row = record(value);
   const actor = record(row?.actor);
@@ -64,10 +107,12 @@ function notification(value: unknown): CommunityNotification | null {
     !id ||
     !username ||
     !createdAt ||
-    !["comment_reply", "comment_reaction", "follow"].includes(type ?? "")
+    !["comment_reply", "comment_reaction", "follow", "edit_review"].includes(type ?? "")
   ) {
     return null;
   }
+  const edit = type === "edit_review" ? editNotice(row?.edit) : null;
+  if (type === "edit_review" && !edit) return null;
   const anilistId = anime?.anilistId;
   return {
     id,
@@ -94,6 +139,7 @@ function notification(value: unknown): CommunityNotification | null {
     isSpoiler: row?.isSpoiler === true,
     createdAt,
     readAt: string(row?.readAt),
+    edit,
   };
 }
 
@@ -119,6 +165,9 @@ export function notificationBadge(count: number): string {
 }
 
 export function notificationTarget(item: CommunityNotification): string {
+  if (item.type === "edit_review" && item.edit) {
+    return `/${item.edit.kind}/${item.edit.entityId}`;
+  }
   if (item.type === "follow" || !item.anime) {
     return `/u/${encodeURIComponent(item.actor.username)}`;
   }

@@ -33,6 +33,7 @@ const reply: CommunityNotification = {
   isSpoiler: false,
   createdAt: "2026-08-15T00:00:00Z",
   readAt: null,
+  edit: null,
 };
 
 test("parses standard notification envelopes", () => {
@@ -53,4 +54,50 @@ test("formats and reduces unread state", () => {
   expect(one.unreadCount).toBe(0);
   expect(one.items[0].readAt).toBe("now");
   expect(markAllNotificationsRead(page, "all").unreadCount).toBe(0);
+});
+
+test("an edit_review row: the page, the outcome, the notes, and a link to the page", () => {
+  const raw = {
+    data: {
+      unreadCount: 1,
+      items: [
+        {
+          id: "n2",
+          type: "edit_review",
+          actor: { username: "admin", avatarUrl: null },
+          anime: null,
+          episode: null,
+          commentId: null,
+          excerpt: null,
+          isSpoiler: false,
+          createdAt: "2026-10-09T00:00:00Z",
+          readAt: null,
+          edit: {
+            kind: "character",
+            entityId: 184313,
+            snapshot: { name: { full: "Stark", native: "シュタルク", cn: "修塔尔克" }, image: "https://x.org/s.jpg", work: null },
+            accepted: 1,
+            rejected: 1,
+            rejectNotes: ["第二季的造型", 5],
+          },
+        },
+        // An edit_review without its outcome is dropped, not shown blank.
+        { id: "n3", type: "edit_review", actor: { username: "admin" }, createdAt: "2026-10-09T00:00:00Z" },
+      ],
+    },
+  };
+  const page = parseNotificationPage(raw);
+  expect(page.items).toHaveLength(1);
+  const [item] = page.items;
+  expect(item.edit).toEqual({
+    kind: "character",
+    entityId: 184313,
+    name: { full: "Stark", native: "シュタルク", cn: "修塔尔克" },
+    image: "https://x.org/s.jpg",
+    accepted: 1,
+    rejected: 1,
+    rejectNotes: ["第二季的造型"],
+  });
+  expect(notificationTarget(item)).toBe("/character/184313");
+  expect(notificationTarget({ ...item, edit: { ...item.edit!, kind: "person", entityId: 133507 } })).toBe("/person/133507");
 });

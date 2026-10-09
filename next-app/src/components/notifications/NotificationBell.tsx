@@ -7,6 +7,7 @@ import { authFetch } from "@/lib/authFetch";
 import { useLang } from "@/lib/lang-client";
 import type { Lang } from "@/lib/i18n/lang";
 import { pickRelatedTitle } from "@/lib/contentLabels";
+import { characterDisplayName, personDisplayName } from "@/lib/people/names";
 import { formatRelativeTime } from "@/lib/formatters";
 import FallbackImg from "@/components/ui/FallbackImg";
 import { DEFAULT_AVATAR_IMAGE } from "@/lib/cardDefaults";
@@ -54,6 +55,9 @@ const COPY: Record<
     followed: (actor: string) => string;
     liked: (actor: string, title: string) => string;
     replied: (actor: string, title: string) => string;
+    /** The outcome of a reviewed edit to a person or character page. */
+    edited: (name: string, accepted: number, rejected: number) => string;
+    noteSeparator: string;
   }
 > = {
   zh: {
@@ -61,6 +65,13 @@ const COPY: Record<
     followed: (actor) => `${actor} 关注了你`,
     liked: (actor, title) => `${actor} 赞了你在《${title}》的评论`,
     replied: (actor, title) => `${actor} 回复了你在《${title}》的评论`,
+    edited: (name, accepted, rejected) =>
+      rejected === 0
+        ? `你对「${name}」的修改已采纳`
+        : accepted === 0
+          ? `你对「${name}」的修改未被采纳`
+          : `你对「${name}」的修改：采纳 ${accepted} 处，未采纳 ${rejected} 处`,
+    noteSeparator: "；",
   },
   en: {
     unknownAnime: "an anime",
@@ -70,12 +81,26 @@ const COPY: Record<
     // the caller fills in.
     liked: (actor, title) => `${actor} liked your comment on ${title}`,
     replied: (actor, title) => `${actor} replied to your comment on ${title}`,
+    edited: (name, accepted, rejected) =>
+      rejected === 0
+        ? `Your edit to ${name} was accepted`
+        : accepted === 0
+          ? `Your edit to ${name} was not accepted`
+          : `Your edit to ${name}: ${accepted} accepted, ${rejected} not accepted`,
+    noteSeparator: "; ",
   },
   "zh-Hant": {
     unknownAnime: "番劇",
     followed: (actor) => `${actor} 關注了你`,
     liked: (actor, title) => `${actor} 讚了你在《${title}》的評論`,
     replied: (actor, title) => `${actor} 回覆了你在《${title}》的評論`,
+    edited: (name, accepted, rejected) =>
+      rejected === 0
+        ? `你對「${name}」的修改已採納`
+        : accepted === 0
+          ? `你對「${name}」的修改未被採納`
+          : `你對「${name}」的修改：採納 ${accepted} 處，未採納 ${rejected} 處`,
+    noteSeparator: "；",
   },
 };
 
@@ -84,6 +109,13 @@ function notificationCopy(
   lang: Lang,
 ): string {
   const copy = COPY[lang];
+  if (item.type === "edit_review" && item.edit) {
+    const name =
+      (item.edit.kind === "person"
+        ? personDisplayName(item.edit.name, lang)
+        : characterDisplayName(item.edit.name, lang)) || `#${item.edit.entityId}`;
+    return copy.edited(name, item.edit.accepted, item.edit.rejected);
+  }
   if (item.type === "follow") return copy.followed(item.actor.username);
   // pickRelatedTitle rather than a local ladder: same helper the relation
   // rows and the activity feed use, so all three agree on which title a
@@ -279,15 +311,18 @@ export default function NotificationBell() {
                   }}
                 >
                   <span className="agc-notification-avatar">
+                    {/* A reviewed edit shows the page it was on, not who reviewed it. */}
                     <FallbackImg
-                      src={item.actor.avatarUrl ?? DEFAULT_AVATAR_IMAGE}
+                      src={(item.edit ? item.edit.image : item.actor.avatarUrl) ?? DEFAULT_AVATAR_IMAGE}
                       fallback={DEFAULT_AVATAR_IMAGE}
                       alt=""
                     />
                   </span>
                   <span className="agc-notification-copy">
                     <span>{notificationCopy(item, lang)}</span>
-                    {item.isSpoiler ? (
+                    {item.edit && item.edit.rejectNotes.length > 0 ? (
+                      <small>{item.edit.rejectNotes.join(COPY[lang].noteSeparator)}</small>
+                    ) : item.isSpoiler ? (
                       <small>{t("comment.spoilerPreview")}</small>
                     ) : item.excerpt ? (
                       <small>“{item.excerpt}”</small>
