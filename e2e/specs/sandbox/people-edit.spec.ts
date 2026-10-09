@@ -1,7 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
 import { closePg } from "../../fixtures/pg";
 import { waitForHydration } from "../../fixtures/hydration";
-import { STARK, createEditUsers, deleteEditUsers, restoreOverlay, takeOverlay } from "../../fixtures/edits";
+import {
+  STARK,
+  createEditUsers,
+  deleteEditUsers,
+  restoreOverlay,
+  takeOverlay,
+  type SavedOverlay,
+} from "../../fixtures/edits";
 import type { TestUser } from "../../fixtures/users";
 
 // Editing a character page and reviewing the edit, against the local stack:
@@ -31,7 +38,7 @@ const REJECT_NOTE = "这张图不是角色本人";
 
 let reader: TestUser;
 let admin: TestUser;
-let savedOverlay: string | null = null;
+let savedOverlay: SavedOverlay | null = null;
 
 test.beforeAll(async () => {
   savedOverlay = await takeOverlay("character", STARK);
