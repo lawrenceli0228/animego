@@ -494,15 +494,12 @@ test.describe("phone", () => {
 test.describe("signed in", () => {
   test.use({ storageState: "./.auth/user.json" });
 
-  // Reset first: a subscription outlives the title's fixture, and one a
-  // previous run scored would show 「★ 10/10」 where this needs 「★ 评分」.
+  // Reset first. The title's teardown cascades to the subscription, but a
+  // run that died before its afterAll leaves both in place, and a score it
+  // gave would show 「★ 10/10」 where this needs 「★ 评分」.
   test.beforeAll(async () => {
     await resetSubscriptions(SEED_USER_EMAIL, [TITLE]);
     await seedSubscription(SEED_USER_EMAIL, TITLE, "watching");
-  });
-
-  test.afterAll(async () => {
-    await resetSubscriptions(SEED_USER_EMAIL, [TITLE]);
   });
 
   // The rating picker opens below the hero's action row and reaches into the
