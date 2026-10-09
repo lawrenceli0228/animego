@@ -25,13 +25,21 @@ function setWindow(value: WindowLike): void {
 afterEach(() => setWindow(originalWindow));
 
 describe("the 存草稿 draft", () => {
-  test("round-trips per anime", () => {
+  test("round-trips per reader and anime", () => {
     setWindow({ localStorage: memoryStorage() });
-    expect(saveDraft(1, { summary: "总结", body: "正文", isSpoiler: true, isPrivate: false })).toBe(true);
-    expect(loadDraft(1)).toMatchObject({ summary: "总结", body: "正文", isSpoiler: true, isPrivate: false });
-    expect(loadDraft(2)).toBeNull();
-    clearDraft(1);
-    expect(loadDraft(1)).toBeNull();
+    expect(saveDraft("alice", 1, { summary: "总结", body: "正文", isSpoiler: true, isPrivate: false })).toBe(true);
+    expect(loadDraft("alice", 1)).toMatchObject({ summary: "总结", body: "正文", isSpoiler: true, isPrivate: false });
+    expect(loadDraft("alice", 2)).toBeNull();
+    clearDraft("alice", 1);
+    expect(loadDraft("alice", 1)).toBeNull();
+  });
+
+  test("another account on the same browser never gets the draft", () => {
+    setWindow({ localStorage: memoryStorage() });
+    saveDraft("alice", 1, { summary: "只写给自己", body: "私密的观后感", isSpoiler: false, isPrivate: true });
+    expect(loadDraft("bob", 1)).toBeNull();
+    clearDraft("bob", 1);
+    expect(loadDraft("alice", 1)).toMatchObject({ summary: "只写给自己" });
   });
 
   test("storage that throws or is missing degrades to no draft", () => {
@@ -43,17 +51,17 @@ describe("the 存草稿 draft", () => {
       throw new Error("SecurityError");
     };
     setWindow({ localStorage: throwing });
-    expect(saveDraft(1, { summary: "", body: "", isSpoiler: false, isPrivate: false })).toBe(false);
-    expect(loadDraft(1)).toBeNull();
+    expect(saveDraft("alice", 1, { summary: "", body: "", isSpoiler: false, isPrivate: false })).toBe(false);
+    expect(loadDraft("alice", 1)).toBeNull();
     setWindow(undefined);
-    expect(loadDraft(1)).toBeNull();
-    expect(() => clearDraft(1)).not.toThrow();
+    expect(loadDraft("alice", 1)).toBeNull();
+    expect(() => clearDraft("alice", 1)).not.toThrow();
   });
 
   test("a corrupt value is no draft", () => {
     const storage = memoryStorage();
-    storage.setItem("agc:review-draft:1", "{not json");
+    storage.setItem("agc:review-draft:alice:1", "{not json");
     setWindow({ localStorage: storage });
-    expect(loadDraft(1)).toBeNull();
+    expect(loadDraft("alice", 1)).toBeNull();
   });
 });

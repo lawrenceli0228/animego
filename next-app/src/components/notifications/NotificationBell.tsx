@@ -54,8 +54,9 @@ const COPY: Record<
     followed: (actor: string) => string;
     liked: (actor: string, title: string) => string;
     replied: (actor: string, title: string) => string;
-    // The anime community tab: a reply in a discussion thread (theirs, or
-    // under a reply of theirs) and a reply under their activity.
+    // The anime community tab: a reply in a discussion thread, and a reply
+    // under an activity — each to the owner of the thread or activity, or to
+    // the person whose reply it answers, so the copy fits both.
     threadReplied: (actor: string, title: string) => string;
     activityReplied: (actor: string, title: string) => string;
   }
@@ -66,7 +67,7 @@ const COPY: Record<
     liked: (actor, title) => `${actor} 赞了你在《${title}》的评论`,
     replied: (actor, title) => `${actor} 回复了你在《${title}》的评论`,
     threadReplied: (actor, title) => `${actor} 在《${title}》的讨论帖里回复了你`,
-    activityReplied: (actor, title) => `${actor} 回复了你在《${title}》的动态`,
+    activityReplied: (actor, title) => `${actor} 在《${title}》的动态里回复了你`,
   },
   en: {
     unknownAnime: "an anime",
@@ -77,7 +78,7 @@ const COPY: Record<
     liked: (actor, title) => `${actor} liked your comment on ${title}`,
     replied: (actor, title) => `${actor} replied to your comment on ${title}`,
     threadReplied: (actor, title) => `${actor} replied to you in a ${title} thread`,
-    activityReplied: (actor, title) => `${actor} replied to your activity on ${title}`,
+    activityReplied: (actor, title) => `${actor} replied to you in an activity on ${title}`,
   },
   "zh-Hant": {
     unknownAnime: "番劇",
@@ -85,7 +86,7 @@ const COPY: Record<
     liked: (actor, title) => `${actor} 讚了你在《${title}》的評論`,
     replied: (actor, title) => `${actor} 回覆了你在《${title}》的評論`,
     threadReplied: (actor, title) => `${actor} 在《${title}》的討論帖裡回覆了你`,
-    activityReplied: (actor, title) => `${actor} 回覆了你在《${title}》的動態`,
+    activityReplied: (actor, title) => `${actor} 在《${title}》的動態裡回覆了你`,
   },
 };
 

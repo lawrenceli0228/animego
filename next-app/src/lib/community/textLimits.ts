@@ -20,7 +20,13 @@ export const THREAD_TITLE_MAX = 80;
 export const THREAD_BODY_MAX = 5000;
 export const REPLY_MAX = 500;
 
-const FORMAT_CHARS = /\p{Cf}/gu;
+// Characters that draw nothing a reader would count: format characters
+// (zero-width spaces and joiners, the BOM), marks (combining accents and
+// variation selectors, which belong to the character before them), and the
+// fillers fonts draw as blank — the Hangul fillers and the Braille blank.
+// go-api's validate.go (invisible) skips the same set.
+const BLANK_FILLERS = String.fromCodePoint(0x115f, 0x1160, 0x3164, 0xffa0, 0x2800);
+const INVISIBLE = new RegExp(`[\\p{Cf}\\p{Mn}\\p{Me}${BLANK_FILLERS}]`, "gu");
 const WHITESPACE_RUN = /\s+/gu;
 // Control characters other than \n and \t, which the server drops.
 const DROPPED_CONTROLS = /[\p{Cc}]/gu;
@@ -44,7 +50,7 @@ export function normalizeLine(s: string): string {
 
 /** Characters a reader can see — what the minimums are measured in. */
 export function visibleLength(s: string): number {
-  return codePoints(s.replace(FORMAT_CHARS, "").trim().replace(WHITESPACE_RUN, " "));
+  return codePoints(s.replace(INVISIBLE, "").trim().replace(WHITESPACE_RUN, " "));
 }
 
 /** Characters the server will store — what the maximums are measured in. */

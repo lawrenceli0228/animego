@@ -39,6 +39,33 @@ describe("visibleLength", () => {
   });
 });
 
+// The same blank-drawing characters go-api's visibleLength skips (validate.go):
+// the Hangul fillers, the Braille blank, and marks with nothing to sit on.
+describe("characters that draw as blank", () => {
+  const ch = (...codePoints: number[]) => String.fromCodePoint(...codePoints);
+
+  test.each([
+    ["four Hangul fillers", ch(0x3164, 0x3164, 0x3164, 0x3164)],
+    ["halfwidth Hangul filler", ch(0xffa0)],
+    ["choseong and jungseong fillers", ch(0x115f, 0x1160)],
+    ["Braille blanks", `${ch(0x2800)} ${ch(0x2800)}`],
+    ["a combining accent alone", ch(0x0301)],
+    ["variation selectors", ch(0xfe0f, 0xfe0e)],
+  ])("%s count as nothing", (_name, input) => {
+    expect(visibleLength(input as string)).toBe(0);
+  });
+
+  test("a mark after a letter belongs to the letter", () => {
+    expect(visibleLength(`e${ch(0x0301)}`)).toBe(1);
+    expect(visibleLength(`${ch(0x3164)}好${ch(0x2800)}好`)).toBe(2);
+  });
+
+  test("they cannot make a title or a reply", () => {
+    expect(threadProblems(ch(0x3164, 0x3164, 0x3164, 0x3164), "正文")).toContain("titleLength");
+    expect(replyProblem(ch(0x3164))).toBe("empty");
+  });
+});
+
 describe("normalisation matches the server's", () => {
   test("bodies: line endings, controls, trim", () => {
     expect(normalizeBody("a\r\nb\rc")).toBe("a\nb\nc");

@@ -71,7 +71,7 @@ export default function WriteReviewForm({ anilistId, animeTitle, coverUrl }: Wri
         setIsSpoiler(mine.data.isSpoiler);
         setIsPrivate(mine.data.isPrivate);
       } else {
-        const draft = loadDraft(anilistId);
+        const draft = loadDraft(viewer.id, anilistId);
         if (draft) {
           setSummary(draft.summary);
           setBody(draft.body);
@@ -99,7 +99,7 @@ export default function WriteReviewForm({ anilistId, animeTitle, coverUrl }: Wri
       notify("error", t(errorKey(result)));
       return;
     }
-    clearDraft(anilistId);
+    if (viewer) clearDraft(viewer.id, anilistId);
     notify("success", t(reviewId ? "community.reviewUpdated" : "community.reviewPublished"));
     router.push(`${socialHref}#review-${result.data.id}`);
   };
@@ -118,8 +118,11 @@ export default function WriteReviewForm({ anilistId, animeTitle, coverUrl }: Wri
   };
 
   const keepDraft = () => {
-    if (saveDraft(anilistId, { summary, body, isSpoiler, isPrivate })) notify("success", t("community.draftSaved"));
-    else notify("error", t("community.errorFailed"));
+    if (viewer && saveDraft(viewer.id, anilistId, { summary, body, isSpoiler, isPrivate })) {
+      notify("success", t("community.draftSaved"));
+    } else {
+      notify("error", t("community.errorFailed"));
+    }
   };
 
   return (
