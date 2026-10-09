@@ -87,18 +87,20 @@ const listAnimeCastCharacters = `-- name: ListAnimeCastCharacters :many
 SELECT
     c.character_id,
     c.role,
-    c.name_en,
-    c.name_ja,
-    COALESCE(cm.name_cn, c.name_cn) AS name_cn,
-    c.image_url,
+    COALESCE(co.data->>'nameFull', c.name_en) AS name_en,
+    COALESCE(co.data->>'nameNative', c.name_ja) AS name_ja,
+    COALESCE(co.data->>'nameCn', cm.name_cn, c.name_cn) AS name_cn,
+    COALESCE(co.data->>'image', c.image_url) AS image_url,
     c.voice_actor_id,
-    c.voice_actor_en,
-    c.voice_actor_ja,
-    COALESCE(pm.name_cn, c.voice_actor_cn) AS voice_actor_cn,
-    c.voice_actor_image_url
+    COALESCE(po.data->>'nameFull', c.voice_actor_en) AS voice_actor_en,
+    COALESCE(po.data->>'nameNative', c.voice_actor_ja) AS voice_actor_ja,
+    COALESCE(po.data->>'nameCn', pm.name_cn, c.voice_actor_cn) AS voice_actor_cn,
+    COALESCE(po.data->>'image', c.voice_actor_image_url) AS voice_actor_image_url
 FROM anime_characters c
 LEFT JOIN bgm_character_map cm ON cm.anilist_id = c.character_id
 LEFT JOIN bgm_person_map pm ON pm.anilist_id = c.voice_actor_id
+LEFT JOIN entity_overlays co ON co.kind = 'character' AND co.entity_id = c.character_id
+LEFT JOIN entity_overlays po ON po.kind = 'person' AND po.entity_id = c.voice_actor_id
 WHERE c.anime_id = $1
 ORDER BY c.display_order, c.id
 LIMIT 1000
@@ -119,8 +121,11 @@ type ListAnimeCastCharactersRow struct {
 }
 
 // Every character on the title in AniList's order ([ROLE, RELEVANCE, ID]
-// -- display_order), with the Chinese names GetAnimeCharactersByID uses:
-// Bangumi's match first (0045), then whatever the row itself holds.
+// -- display_order), named as GetAnimeCharactersByID names them: an
+// accepted reader edit first (entity_overlays, 0047), then Bangumi's match
+// (0045), then whatever the row itself holds.  Names and images only, as
+// on /api/anime/:id -- an edited role is the character page's, so the
+// overview and this tab never disagree on one.
 //
 // The voice_actor_* columns ride along for the rows anime_character_voices
 // has nothing for: a row written before 0042, or one with no character id,
@@ -164,12 +169,13 @@ SELECT
     v.language,
     v.role_notes,
     v.dub_group,
-    v.name_full,
-    v.name_native,
-    pm.name_cn,
-    v.image_url
+    COALESCE(po.data->>'nameFull', v.name_full) AS name_full,
+    COALESCE(po.data->>'nameNative', v.name_native) AS name_native,
+    COALESCE(po.data->>'nameCn', pm.name_cn) AS name_cn,
+    COALESCE(po.data->>'image', v.image_url) AS image_url
 FROM anime_character_voices v
 LEFT JOIN bgm_person_map pm ON pm.anilist_id = v.staff_id
+LEFT JOIN entity_overlays po ON po.kind = 'person' AND po.entity_id = v.staff_id
 WHERE v.anime_id = $1
 ORDER BY v.character_id, v.display_order, v.staff_id
 LIMIT 8000
@@ -190,9 +196,11 @@ type ListAnimeCastVoicesRow struct {
 // Every voice the title stores (0042), each character's in its stored
 // order: display_order 0 is the voice its character row carries, the
 // title's own language comes next, then Japanese, Chinese and Korean.
-// name_cn is Bangumi's, by the person's AniList id.  staff_id breaks a
-// tie, which the detail refresh and the credits sweep upserting one title
-// at once can leave, so the first voice is always the same one.
+// The person's names and image are an accepted edit's (0047) where there
+// is one; name_cn otherwise Bangumi's, by the person's AniList id.
+// staff_id breaks a tie, which the detail refresh and the credits sweep
+// upserting one title at once can leave, so the first voice is always the
+// same one.
 func (q *Queries) ListAnimeCastVoices(ctx context.Context, animeID int32) ([]ListAnimeCastVoicesRow, error) {
 	rows, err := q.db.Query(ctx, listAnimeCastVoices, animeID)
 	if err != nil {
@@ -227,12 +235,13 @@ const listAnimeStaffCredits = `-- name: ListAnimeStaffCredits :many
 SELECT
     s.staff_id,
     s.role,
-    s.name_en,
-    s.name_ja,
-    pm.name_cn,
-    s.image_url
+    COALESCE(po.data->>'nameFull', s.name_en) AS name_en,
+    COALESCE(po.data->>'nameNative', s.name_ja) AS name_ja,
+    COALESCE(po.data->>'nameCn', pm.name_cn) AS name_cn,
+    COALESCE(po.data->>'image', s.image_url) AS image_url
 FROM anime_staff s
 LEFT JOIN bgm_person_map pm ON pm.anilist_id = s.staff_id
+LEFT JOIN entity_overlays po ON po.kind = 'person' AND po.entity_id = s.staff_id
 WHERE s.anime_id = $1
 ORDER BY s.display_order, s.id
 LIMIT 1000
@@ -248,9 +257,10 @@ type ListAnimeStaffCreditsRow struct {
 }
 
 // Every staff credit on the title, one row per person per role, in
-// AniList's order ([RELEVANCE, ID] -- display_order).  name_cn is
-// Bangumi's (0045); the detail endpoint has no field for it, this one
-// does.
+// AniList's order ([RELEVANCE, ID] -- display_order).  The person's names
+// and image are an accepted edit's (0047) where there is one; name_cn
+// otherwise Bangumi's (0045) -- the detail endpoint has no field for it,
+// this one does.
 func (q *Queries) ListAnimeStaffCredits(ctx context.Context, animeID int32) ([]ListAnimeStaffCreditsRow, error) {
 	rows, err := q.db.Query(ctx, listAnimeStaffCredits, animeID)
 	if err != nil {

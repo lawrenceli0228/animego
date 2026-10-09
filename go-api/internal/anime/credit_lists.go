@@ -145,6 +145,17 @@ func NewCreditListsService(db CreditListsDB) (*CreditListsService, error) {
 	return &CreditListsService{db: db, cast: castCache, staff: staffCache, emptyTTL: emptyCreditListTTL}, nil
 }
 
+// Forget drops titles' cached lists, so the next read goes to the tables:
+// what a review calls once it has accepted an edit to someone the titles
+// credit, beside DetailService.Forget.
+func (s *CreditListsService) Forget(ids ...int32) {
+	for _, id := range ids {
+		key := strconv.FormatInt(int64(id), 10)
+		s.cast.Delete(key)
+		s.staff.Delete(key)
+	}
+}
+
 // Close releases the caches.  Safe to call more than once.
 func (s *CreditListsService) Close() {
 	s.closeOnce.Do(func() {

@@ -1401,8 +1401,11 @@ type Querier interface {
 	// they are stored like every other row and filtered where they are read.
 	ListAnimeCastCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error)
 	// Every character on the title in AniList's order ([ROLE, RELEVANCE, ID]
-	// -- display_order), with the Chinese names GetAnimeCharactersByID uses:
-	// Bangumi's match first (0045), then whatever the row itself holds.
+	// -- display_order), named as GetAnimeCharactersByID names them: an
+	// accepted reader edit first (entity_overlays, 0047), then Bangumi's match
+	// (0045), then whatever the row itself holds.  Names and images only, as
+	// on /api/anime/:id -- an edited role is the character page's, so the
+	// overview and this tab never disagree on one.
 	//
 	// The voice_actor_* columns ride along for the rows anime_character_voices
 	// has nothing for: a row written before 0042, or one with no character id,
@@ -1411,9 +1414,11 @@ type Querier interface {
 	// Every voice the title stores (0042), each character's in its stored
 	// order: display_order 0 is the voice its character row carries, the
 	// title's own language comes next, then Japanese, Chinese and Korean.
-	// name_cn is Bangumi's, by the person's AniList id.  staff_id breaks a
-	// tie, which the detail refresh and the credits sweep upserting one title
-	// at once can leave, so the first voice is always the same one.
+	// The person's names and image are an accepted edit's (0047) where there
+	// is one; name_cn otherwise Bangumi's, by the person's AniList id.
+	// staff_id breaks a tie, which the detail refresh and the credits sweep
+	// upserting one title at once can leave, so the first voice is always the
+	// same one.
 	ListAnimeCastVoices(ctx context.Context, animeID int32) ([]ListAnimeCastVoicesRow, error)
 	// Rows the facts sweep (queue/anime_facts.go) should ask AniList about.
 	//
@@ -1466,9 +1471,10 @@ type Querier interface {
 	// ListAnimeCastCandidates for staff.
 	ListAnimeStaffCandidates(ctx context.Context, staleAfter pgtype.Interval, fullPage int32, rowLimit int32) ([]int32, error)
 	// Every staff credit on the title, one row per person per role, in
-	// AniList's order ([RELEVANCE, ID] -- display_order).  name_cn is
-	// Bangumi's (0045); the detail endpoint has no field for it, this one
-	// does.
+	// AniList's order ([RELEVANCE, ID] -- display_order).  The person's names
+	// and image are an accepted edit's (0047) where there is one; name_cn
+	// otherwise Bangumi's (0045) -- the detail endpoint has no field for it,
+	// this one does.
 	ListAnimeStaffCredits(ctx context.Context, animeID int32) ([]ListAnimeStaffCreditsRow, error)
 	// ==================== Threads ====================
 	// Busiest conversation first: a reply moves last_activity_at.  The list

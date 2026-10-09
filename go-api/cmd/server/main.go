@@ -881,8 +881,14 @@ func main() {
 	if editImageDir == "" {
 		editImageDir = filepath.Join(avatarDir, "edits")
 	}
+	// An accepted edit changes what every title crediting the page shows:
+	// its detail and its 角色 / 制作 lists are both dropped from memory.
+	forgetTitles := func(ids ...int32) {
+		detailSvc.Forget(ids...)
+		creditListsSvc.Forget(ids...)
+	}
 	editsHandlers := edits.NewHandlers(pool,
-		edits.NewImageStore(editImageDir, cfg.ClientOrigin, edits.NewFetcher()), detailSvc.Forget)
+		edits.NewImageStore(editImageDir, cfg.ClientOrigin, edits.NewFetcher()), forgetTitles)
 	editsHandlers.Mount(r, jwtx.RequireAuth(signer))
 
 	// P2.4 — subscriptions: 8 endpoints, every route RequireAuth.

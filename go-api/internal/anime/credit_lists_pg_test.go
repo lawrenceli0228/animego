@@ -179,3 +179,92 @@ func TestCreditLists_ReadEverythingTheTablesHold_PG(t *testing.T) {
 		assert.Equal(t, "芙莉莲", *got.Characters[0].NameCn)
 	})
 }
+
+// TestCreditLists_AcceptedEditsApply_PG — a reader's accepted edit
+// (entity_overlays, 0047) shows on the 角色 and 制作 tabs as it does on
+// /api/anime/:id: the names and the image of a character, of the people
+// voicing it and of a staff member, ahead of Bangumi's names and the rows'.
+// Roles and voice changes stay the character page's, as on /api/anime/:id.
+// The lists are cached, so a review that accepts an edit has the titles
+// forgotten (Forget), as it has the detail forgotten.
+func TestCreditLists_AcceptedEditsApply_PG(t *testing.T) {
+	ctx := context.Background()
+	pool := testutil.NewWebPool(t, ctx, testutil.SetupPG(t))
+	q := dbgen.New(pool)
+	detail, err := NewDetailService(q, nil)
+	require.NoError(t, err)
+	t.Cleanup(detail.Close)
+
+	const id = 154587
+	m := creditsMedia(id, idRange(1, 3), []int{101, 102}, 1000, false)
+	m.Characters.Edges[0].Role = sptr("MAIN")
+	require.NoError(t, detail.upsertFromMedia(ctx, id, m))
+	exec := func(sql string) {
+		t.Helper()
+		_, err := pool.Exec(ctx, sql)
+		require.NoError(t, err, sql)
+	}
+	exec(`INSERT INTO bgm_character_map (anilist_id, bgm_id, name_cn, source, matched_at) VALUES (1, 86246, '芙莉莲', 'dump', now())`)
+	exec(`INSERT INTO bgm_person_map (anilist_id, bgm_id, name_cn, source, matched_at) VALUES
+		(1001, 7575, '种崎敦美', 'dump', now()),
+		(101, 9001, '斋藤圭一郎', 'dump', now())`)
+
+	svc, err := NewCreditListsService(q)
+	require.NoError(t, err)
+	t.Cleanup(svc.Close)
+	h := creditListsRouter(t, svc)
+	characters := func() charactersResponse {
+		t.Helper()
+		return decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?limit=100"))
+	}
+	staff := func() staffResponse {
+		t.Helper()
+		rec := getCredits(t, h, "/api/anime/154587/staff")
+		require.Equal(t, http.StatusOK, rec.Code)
+		var body staffResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		return body
+	}
+
+	// Read before any edit: from here both lists are in memory.
+	require.Equal(t, "芙莉莲", *characters().Data[0].NameCn)
+	require.Equal(t, "斋藤圭一郎", *staff().Data[0].NameCn)
+
+	exec(`INSERT INTO entity_overlays (kind, entity_id, data) VALUES
+		('character', 1, '{"nameCn":"芙莉莲（修）","nameNative":"フリーレン","nameFull":"Frieren","image":"https://example.org/frieren.jpg","role":{"154587":"SUPPORTING"}}'),
+		('person', 1001, '{"nameCn":"种崎敦美（修）","image":"https://example.org/tanezaki.jpg"}'),
+		('person', 101, '{"nameCn":"斋藤圭一郎（修）","nameNative":"斎藤圭一郎","image":"https://example.org/saito.jpg"}')`)
+
+	t.Run("served from memory until the title is forgotten", func(t *testing.T) {
+		assert.Equal(t, "芙莉莲", *characters().Data[0].NameCn)
+		assert.Equal(t, "斋藤圭一郎", *staff().Data[0].NameCn)
+		svc.Forget(id)
+	})
+
+	t.Run("characters: the character's edit and its voice's", func(t *testing.T) {
+		body := characters()
+		c := body.Data[0]
+		assert.Equal(t, "芙莉莲（修）", *c.NameCn)
+		assert.Equal(t, "フリーレン", *c.NameJa)
+		assert.Equal(t, "Frieren", *c.NameEn)
+		assert.Equal(t, "https://example.org/frieren.jpg", *c.ImageUrl)
+		assert.Equal(t, "MAIN", *c.Role, "a role edit is the character page's, as on /api/anime/:id")
+		require.NotEmpty(t, c.Voices)
+		assert.Equal(t, int32(1001), *c.Voices[0].StaffID)
+		assert.Equal(t, "种崎敦美（修）", *c.Voices[0].NameCn)
+		assert.Equal(t, "https://example.org/tanezaki.jpg", *c.Voices[0].ImageUrl)
+		assert.Equal(t, "C2", *body.Data[1].NameEn, "a character with no edit keeps its own")
+
+		found := decodeCharacters(t, getCredits(t, h, "/api/anime/154587/characters?q=%E4%BF%AE")) // 修
+		require.Equal(t, 1, found.Total, "the edited names are the ones searched")
+		assert.Equal(t, int32(1), *found.Data[0].CharacterID)
+	})
+
+	t.Run("staff: the person's edit", func(t *testing.T) {
+		s := staff().Data[0]
+		assert.Equal(t, int32(101), *s.StaffID)
+		assert.Equal(t, "斋藤圭一郎（修）", *s.NameCn)
+		assert.Equal(t, "斎藤圭一郎", *s.NameJa)
+		assert.Equal(t, "https://example.org/saito.jpg", *s.ImageUrl)
+	})
+}
