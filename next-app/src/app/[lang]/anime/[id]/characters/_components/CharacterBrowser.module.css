@@ -1,0 +1,448 @@
+/* The 角色 tab. Values are the approved design's (the Characters board and
+ * its shared stylesheet: `.bar`, `.seg`, `.in`, `.cgrid`, `.cc`, `.loadmore`),
+ * in the detail page's tokens (DetailShell.module.css) and the anime's tone.
+ *
+ * A card is two halves facing each other — the character's portrait at the
+ * left edge, the voice actor's at the right, the names meeting in the middle
+ * — the same pairing the overview's rows make, given a card because here the
+ * list is the whole page. Cards are not links (the character and person
+ * pages do not exist yet), so they have no hover state either: a surface
+ * that lights up under the pointer is a promise of a click.
+ */
+
+.root {
+  margin-bottom: var(--sp-3xl);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Toolbar: role filter, dub switch, search ───────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.seg {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--detail-line);
+  background: var(--detail-surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seg::-webkit-scrollbar {
+  display: none;
+}
+
+.segButton {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--detail-text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 150ms var(--ease-out-expo),
+    color 150ms var(--ease-out-expo);
+}
+
+.segButton:hover {
+  color: var(--text);
+}
+
+.segButton[aria-pressed="true"] {
+  background: var(--detail-surface-high);
+  color: var(--text);
+}
+
+/* The one ring, app-wide — components/ui/focusRing.test.ts. */
+.segButton:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.segCount {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--detail-label);
+}
+
+.segButton[aria-pressed="true"] .segCount {
+  color: var(--poster-tone, var(--accent));
+}
+
+/* Pushed to the right edge of the toolbar, 260px — the design's. */
+.searchBox {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 260px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--detail-line);
+  background: var(--detail-surface);
+  color: var(--detail-label);
+}
+
+/* The field's indicator is the ring around the whole pill. */
+.searchBox:has(.searchInput:focus-visible) {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.searchIcon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.searchInput::placeholder {
+  color: var(--detail-label);
+}
+
+/* The browser's own clear button would sit in a 38px pill drawn in another
+ * colour scheme; the field clears with the keyboard like any other. */
+.searchInput::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/* ── The grid ──────────────────────────────────────────────────────────── */
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* A filter's request in flight: the old cards stay, quieter, rather than
+ * the grid collapsing to a spinner and back. */
+.grid[data-busy="true"] {
+  opacity: 0.55;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr) 64px;
+  height: 96px;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid var(--detail-line);
+  background: var(--detail-surface);
+}
+
+/* Focus lands on a card only after 「再显示」 from the keyboard (the cards
+ * are not in the tab order). */
+.card:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.charImg,
+.vaImg {
+  display: block;
+  width: 64px;
+  height: 96px;
+  object-fit: cover;
+  background: var(--detail-surface-high);
+}
+
+.charImg {
+  grid-column: 1;
+}
+
+.vaImgSlot {
+  grid-column: 4;
+}
+
+.side {
+  grid-column: 2;
+  min-width: 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* The voice actor's half, mirrored. Its own rule rather than a composes of
+ * .side: the phone layout below rearranges the character's half only, and a
+ * shared class would drag this one along. */
+.sideVa {
+  grid-column: 3;
+  min-width: 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.names {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.name {
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The other name: Japanese under a Chinese one, romaji under a Japanese one. */
+.alt {
+  margin-top: 2px;
+  font-family: var(--font-jp);
+  font-size: 12px;
+  color: var(--detail-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role {
+  font-size: 12px;
+  color: var(--detail-label);
+}
+
+/* 主角 in the anime's colour, the design's `.rl.main`. --poster-tone is
+ * contrast-managed for text at every hue (lib/oklch.test.ts). */
+.role[data-main="true"] {
+  color: var(--poster-tone, var(--accent));
+}
+
+/* 日配, or the second voice: 童年 · 某某. */
+.note {
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--detail-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Load more, empty, error ──────────────────────────────────────────── */
+
+.loadMore {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-top: 18px;
+  border-radius: 10px;
+  border: 1px dashed var(--detail-line-strong);
+  background: var(--detail-surface);
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--detail-text-2);
+  cursor: pointer;
+  transition: color 150ms var(--ease-out-expo);
+}
+
+.loadMore:hover {
+  color: var(--text);
+}
+
+.loadMore[aria-disabled="true"] {
+  cursor: default;
+}
+
+.loadMore:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.empty {
+  padding: 30px;
+  border-radius: 14px;
+  border: 1px dashed var(--detail-line-strong);
+  text-align: center;
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 15px;
+  color: var(--detail-text-2);
+}
+
+.retry {
+  min-height: 44px;
+  margin-top: 16px;
+  padding: 0 18px;
+  border-radius: 9px;
+  border: 1px solid var(--detail-line-strong);
+  background: rgba(255, 255, 255, 0.06);
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.retry:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+/* ── Narrower screens ──────────────────────────────────────────────────
+ *
+ * One column of cards once two no longer leave a name room; on a phone the
+ * cards become the design's list rows (its Mobile-Characters board): no
+ * fill, a hairline between rows, the portrait at 48x64, the role and the
+ * other name on one line under the name, and the voice actor as text on the
+ * right with no portrait. The toolbar stacks, the search full width.
+ */
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .seg {
+    align-self: flex-start;
+  }
+
+  .segButton {
+    height: 38px;
+  }
+
+  .searchBox {
+    margin-left: 0;
+    width: 100%;
+    height: 44px;
+  }
+
+  .grid {
+    gap: 0;
+  }
+
+  .card {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    height: auto;
+    padding: 10px 0;
+    overflow: visible;
+    border: 0;
+    border-bottom: 1px solid var(--detail-line);
+    border-radius: 0;
+    background: none;
+  }
+
+  .charImg {
+    width: 48px;
+    height: 64px;
+    border-radius: 7px;
+  }
+
+  .vaImgSlot {
+    display: none;
+  }
+
+  .side {
+    padding: 0;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-start;
+  }
+
+  .sideVa {
+    max-width: 128px;
+    padding: 6px 0;
+    justify-content: center;
+  }
+
+  /* The character's name takes the first line; the role and the other name
+   * share the second, as the design's 「主角 · フリーレン」. */
+  .side > .names {
+    display: contents;
+  }
+
+  .side .name {
+    flex-basis: 100%;
+    font-size: 15px;
+  }
+
+  .side .role {
+    order: 2;
+  }
+
+  .side .alt {
+    order: 3;
+    margin-top: 0;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .side .alt::before {
+    content: "·";
+    margin: 0 4px;
+    color: var(--detail-label);
+  }
+
+  .sideVa .name {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .sideVa .alt {
+    display: none;
+  }
+}

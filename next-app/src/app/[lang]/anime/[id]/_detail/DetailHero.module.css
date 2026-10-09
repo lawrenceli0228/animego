@@ -1,4 +1,8 @@
-/* The detail hero's styles, moved out of the `S` object in page.tsx.
+/* The detail hero's styles, moved out of the `S` object in page.tsx — and
+ * since the page grew tabs, out of page.module.css into this file beside
+ * DetailHero.tsx, which every /anime/[id] tab renders. Nothing below changed
+ * in that move except the last block, the compact form the 角色 and 制作 tabs
+ * take on a phone.
  *
  * They were 19 inline `CSSProperties` literals. Inline styles cannot express
  * a hover, a focus ring, or a media query, and they win against every
@@ -415,10 +419,6 @@
   font-size: 12px;
 }
 
-.descBlockLast {
-  margin-bottom: 0;
-}
-
 /* ── Phone ────────────────────────────────────────────────────────────────
  *
  * This block sits at the END of the file on purpose. Every rule in it has
@@ -530,5 +530,58 @@
   .facts > *:not(:last-child)::after,
   .factsGenres > *:not(:last-child)::after {
     margin: 0 6px;
+  }
+}
+
+/* ── The 角色 and 制作 tabs on a phone ─────────────────────────────────────
+ *
+ * The hero folds to a single row: the poster as a thumbnail and the title,
+ * nothing else. On these two tabs the reader came for a list, and the full
+ * phone hero (340px of artwork, facts and five actions) would push the first
+ * card below the fold on every visit. The approved design draws exactly this
+ * header on its phone boards; the overview keeps the full hero, as do the
+ * wider screens, where the hero and the list fit together.
+ *
+ * Same markup, same h1 — only hidden or resized here — so the page has one
+ * heading and one hero component whatever the width. After the phone block
+ * above, and at the same specificity plus the attribute, so it wins without
+ * relying on load order across files.
+ */
+@media (max-width: 600px) {
+  .hero[data-compact="true"] {
+    --hero-cover-w: 30px;
+    --hero-gap: 12px;
+    min-height: 0;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .hero[data-compact="true"] .banner,
+  .hero[data-compact="true"] .actionSlot,
+  .hero[data-compact="true"] .meta > :not(.title) {
+    display: none;
+  }
+
+  .hero[data-compact="true"] .content {
+    grid-template-rows: auto;
+    align-items: center;
+    padding-bottom: 0;
+  }
+
+  .hero[data-compact="true"] .cover,
+  .hero[data-compact="true"] .coverPlaceholder {
+    border-radius: 4px;
+  }
+
+  .hero[data-compact="true"] .title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: 0;
+    text-shadow: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }

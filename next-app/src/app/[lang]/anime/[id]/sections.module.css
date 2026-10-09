@@ -106,11 +106,12 @@
    * the poster glow and the scrollbar. */
   --sec-raise: rgba(255, 255, 255, 0.045);
 
-  /* Micro-label alpha. Off the token scale, like the 0.75 / 0.50 / 0.42
-   * literals page.module.css keeps next door: --text-secondary (0.60) is
-   * too loud for a 10px kicker and --text-tertiary (0.30) is the documented
-   * floor for readable copy, which a role label is. */
-  --sec-meta: rgba(235, 235, 245, 0.45);
+  /* Micro-label colour for the role kickers. The detail page's label token
+   * (DetailShell.module.css, 55% white) since the page grew tabs — readers
+   * found the old 0.45 too faint, and every small label on the page now
+   * shares one value. The literal is the old one, for a render outside the
+   * shell. */
+  --sec-meta: var(--detail-label, rgba(235, 235, 245, 0.45));
 
   /* v10 keeps each content band visually independent without adding a full
    * divider between them. */
@@ -182,7 +183,84 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.05em;
-  color: var(--text-tertiary);
+  /* 55% on this page, not --text-tertiary's 30%: see DetailShell.module.css.
+   * Every small label below reads the same token. */
+  color: var(--detail-label, var(--text-tertiary));
+}
+
+/* 「全部 N 位角色」 / 「全部 N 位」: from a section's first few to the tab that
+ * lists them all. At the far end of the head, quiet until hovered, in the
+ * design's 13px. The padding and the matching negative margin widen what a
+ * finger can hit without moving anything in the row. */
+.headMore {
+  margin: -10px 0 -10px auto;
+  padding: 10px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--detail-text-2, var(--text-secondary));
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  transition: color 150ms var(--ease-out-expo);
+}
+
+.headMore:hover {
+  color: var(--sec-tone);
+}
+
+/* The one ring, app-wide — components/ui/focusRing.test.ts. */
+.headMore:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.headMoreIcon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The characters link that gives way on a phone to .moreBlock under the
+ * list. Declared after .headMore so the phone rule below overrides it. */
+.headMoreWide {
+  composes: headMore;
+}
+
+/* The full-width button under the characters on a phone. */
+.moreBlock {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .headMoreWide {
+    display: none;
+  }
+
+  .moreBlock {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    margin-top: 14px;
+    border-radius: 9px;
+    border: 1px solid var(--detail-line-strong, rgba(255, 255, 255, 0.14));
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    font-size: 14px;
+    text-decoration: none;
+  }
+
+  .moreBlock:focus-visible {
+    outline: 2px solid transparent;
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+  }
 }
 
 /* ── Poster tiles — relations and recommendations ────────────────────────
@@ -726,7 +804,7 @@
 
 .synopsisTrailerSource {
   flex: none;
-  color: var(--text-tertiary);
+  color: var(--detail-label, var(--text-tertiary));
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 600;
@@ -736,6 +814,12 @@
 
 .synopsisBody {
   min-width: 0;
+}
+
+/* The synopsis paragraph's wrapper. Moved here from the hero's stylesheet,
+ * where it sat while the synopsis was part of the hero. */
+.descBlock {
+  margin-bottom: 0;
 }
 
 .synopsisWatchers:empty {
@@ -793,7 +877,7 @@
   font-weight: 600;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: var(--text-tertiary);
+  color: var(--detail-label, var(--text-tertiary));
   margin-bottom: 8px;
 }
 
@@ -830,12 +914,12 @@
 .scoreDenom {
   font-size: 13px;
   font-weight: 400;
-  color: var(--text-tertiary);
+  color: var(--detail-label, var(--text-tertiary));
 }
 
 .scoreVotes {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--detail-label, var(--text-tertiary));
 }
 
 /* Track and fill in one element — the track is the border-bottom, the fill
@@ -915,7 +999,7 @@
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text-tertiary);
+  color: var(--detail-label, var(--text-tertiary));
   margin-bottom: 7px;
 }
 

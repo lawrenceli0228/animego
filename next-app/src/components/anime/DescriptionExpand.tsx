@@ -57,7 +57,9 @@ const buttonStyle: CSSProperties = {
 // a credit, not content. Underlined because colour alone would not read as
 // a link at this weight.
 const sourceStyle: CSSProperties = {
-  color: "rgba(235,235,245,0.35)",
+  // The detail page's label colour (55% white, DetailShell.module.css) — the
+  // credit is one of the small labels readers found too faint at 35%.
+  color: "var(--detail-label, rgba(235,235,245,0.35))",
   fontSize: 11.5,
   lineHeight: 1.6,
   margin: "14px 0 0",

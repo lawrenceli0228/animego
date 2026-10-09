@@ -334,6 +334,12 @@ export interface AnimeDetail {
   // upstream had no titles). Express schema:
   // `{ episode: number, nameCn: string|null, name: string|null }`.
   episodeTitles: DetailEpisodeTitle[];
+  /**
+   * When the row was last written (anime_cache.cached_at), as go-api
+   * serialises a timestamptz. The detail tabs key their credits reads to it
+   * (app/[lang]/anime/[id]/_detail/detailData.ts `snapshot`).
+   */
+  cachedAt?: string | null;
 }
 
 export interface DetailTrailer {
@@ -447,6 +453,97 @@ export interface WatcherItem {
 export interface WatchersResponse {
   data: WatcherItem[];
   total: number;
+}
+
+// ─── Detail tabs: the whole cast and staff ─────────────────────────
+//
+// /api/anime/:id carries the first 25 characters and staff and keeps that
+// shape for its other consumers; the 角色 and 制作 tabs read these three
+// endpoints instead (go-api internal/anime/credit_lists.go). All three read
+// our own tables only: an id the catalogue does not hold answers 404.
+
+/** A dub language the characters tab can switch to. */
+export type DubLanguage = "ja" | "zh" | "ko";
+
+/**
+ * One person voicing one character, in the response's dub language.
+ * `nameNative` is the person's own-script name — Japanese for a Japanese
+ * actor, Chinese for a Chinese one — which is why it is not called nameJa.
+ */
+export interface CastVoice {
+  staffId: number | null;
+  nameFull: string | null;
+  nameNative: string | null;
+  /** Bangumi's simplified Chinese name, when matched. */
+  nameCn: string | null;
+  imageUrl: string | null;
+  /** "Childhood", "Young", …; null for the character's main voice. */
+  roleNotes: string | null;
+  dubGroup: string | null;
+}
+
+/** One character of /api/anime/:id/characters; fields as DetailCharacter names them. */
+export interface CastCharacter {
+  characterId: number | null;
+  /** MAIN | SUPPORTING | BACKGROUND as AniList spells it; null when unknown. */
+  role: string | null;
+  nameEn: string | null;
+  nameJa: string | null;
+  nameCn: string | null;
+  imageUrl: string | null;
+  /** Voices in the response's `language`, main voice first; [] when none. */
+  voices: CastVoice[];
+}
+
+export interface CastRoleCounts {
+  all: number;
+  main: number;
+  supporting: number;
+  background: number;
+}
+
+/**
+ * GET /api/anime/:id/characters?role=&lang=&q=&offset=&limit=
+ *
+ * `total` counts the characters matching role + q; `counts.roles` counts each
+ * role over the characters matching q; `counts.languages` lists only the dubs
+ * the title has, over the whole title, in the order ja, zh, ko.
+ */
+export interface CharactersResponse {
+  data: CastCharacter[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  language: DubLanguage;
+  counts: {
+    roles: CastRoleCounts;
+    languages: Array<{ language: DubLanguage; count: number }>;
+  };
+}
+
+/** One credit of /api/anime/:id/staff: one person in one role, role text as AniList has it. */
+export interface StaffCredit {
+  staffId: number | null;
+  role: string | null;
+  nameEn: string | null;
+  nameJa: string | null;
+  /** Bangumi's simplified Chinese name, when matched. */
+  nameCn: string | null;
+  imageUrl: string | null;
+}
+
+/** GET /api/anime/:id/staff — every credit in AniList's order, and how many people. */
+export interface StaffResponse {
+  data: StaffCredit[];
+  total: number;
+  people: number;
+}
+
+/** GET /api/anime/:id/credit-counts — what the tab bar shows. Staff counts people. */
+export interface CreditCounts {
+  characters: number;
+  staff: number;
 }
 
 // ─── Subscriptions detail row (/api/subscriptions/:anilistId) ──────
