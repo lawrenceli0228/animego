@@ -150,6 +150,25 @@ func TestDiffCharacter_Birthdays(t *testing.T) {
 	assert.Empty(t, items, "an empty date is no date, which is what the page has")
 }
 
+// A character is born whenever its story says, the far future included; a
+// person not after next year.  Neither in year 0.
+func TestBirthYears_ByKindOfPage(t *testing.T) {
+	t.Parallel()
+	items, err := diffCharacter(stark(), decodeChanges(t, `{"birth":{"year":2199,"month":4,"day":1}}`), nil)
+	require.NoError(t, err, "a character in 2199")
+	assert.Len(t, items, 1)
+	_, err = diffCharacter(stark(), decodeChanges(t, `{"birth":{"year":0,"month":4,"day":1}}`), nil)
+	var ce *changeError
+	assert.ErrorAs(t, err, &ce, "year 0")
+
+	p := &people.Person{AnilistID: 1, Name: people.Name{Full: sp("X")}}
+	_, err = diffPerson(p, decodeChanges(t, `{"birth":{"year":2199,"month":4,"day":1}}`))
+	assert.ErrorAs(t, err, &ce, "a person in 2199")
+	items, err = diffPerson(p, decodeChanges(t, `{"birth":{"year":1994,"month":6,"day":4}}`))
+	require.NoError(t, err)
+	assert.Len(t, items, 1)
+}
+
 // The lists a submission carries are refused by their length as sent, before
 // the page is read or a person looked up: a body full of aliases or voice
 // rows costs nothing but its decoding.

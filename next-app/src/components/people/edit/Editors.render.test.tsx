@@ -136,6 +136,18 @@ describe("the character's edit state", () => {
     expect(html).toContain("+ 添加声优");
   });
 
+  test("the birthday as the page shows it: month and day, and the year when it has one", () => {
+    expect(html).toContain('aria-label="出生月"');
+    expect(html).not.toContain('aria-label="出生年"');
+    const withYear = { ...STARK, profile: { ...STARK.profile!, birth: { year: 2199, month: 4, day: 1 } } };
+    const dated = renderToStaticMarkup(
+      <LanguageProvider lang="zh">
+        <CharacterEditor character={withYear} lang="zh" crumbs={<nav>crumbs</nav>} pageHref="/character/184313" />
+      </LanguageProvider>,
+    );
+    expect(dated).toContain('aria-label="出生年" maxLength="4" data-changed="false" value="2199"');
+  });
+
   test("the role on each title is a select", () => {
     expect(html).toMatch(/<select[^>]*aria-label="在《葬送的芙莉莲》中的定位"[\s\S]*?<option value="MAIN" selected="">主角<\/option>/);
   });

@@ -11,6 +11,7 @@ import {
   personIdFromInput,
   submissionBody,
   validSource,
+  voiceLineChange,
   type CharacterDraft,
   type PersonDraft,
 } from "./model";
@@ -80,6 +81,7 @@ describe("drafts open as the page shows itself", () => {
     expect(d.nameCn).toBe("修塔尔克");
     expect(d.aliases).toEqual(["休塔尔克"]);
     expect(d.voices.map((v) => v.line)).toEqual(["日配", "日配 · 童年"]);
+    expect(d.voices.map((v) => v.autoLine)).toEqual([true, true]);
     expect(d.roles).toEqual({ 154587: "MAIN", 182255: "MAIN" });
     expect(diffDraft(d, d)).toEqual({ changes: {}, count: 0, invalid: false });
   });
@@ -87,6 +89,7 @@ describe("drafts open as the page shows itself", () => {
   test("an edited voice line is shown as written", () => {
     const withLine = { ...STARK, voices: [{ ...STARK.voices[0], line: "日配 · 主役" }] };
     expect(characterDraft(withLine, "zh").voices[0].line).toBe("日配 · 主役");
+    expect(characterDraft(withLine, "zh").voices[0].autoLine).toBe(false);
   });
 
   test("a person, the home town and occupations translated", () => {
@@ -122,6 +125,23 @@ describe("the diff", () => {
     expect(count).toBe(5);
   });
 
+  test("a birthday the page has is checked only once it is changed", () => {
+    // The data can hold dates the editor would refuse (30 February); a draft
+    // that leaves the birthday alone is still sent.
+    const odd = characterDraft({ ...STARK, profile: { ...STARK.profile!, birth: { year: null, month: 2, day: 30 } } }, "zh");
+    expect(diffDraft(odd, edit(odd, { nameCn: "史塔克" }))).toEqual({ changes: { nameCn: "史塔克" }, count: 1, invalid: false });
+    expect(diffDraft(odd, edit(odd, { birthDay: "31" })).invalid).toBe(true);
+    expect(diffDraft(odd, edit(odd, { birthDay: "28" })).changes.birth).toEqual({ year: null, month: 2, day: 28 });
+  });
+
+  test("a character is born in any year its story sets; a person not after next year", () => {
+    const future = characterDraft({ ...STARK, profile: { ...STARK.profile!, birth: { year: 2199, month: 4, day: 1 } } }, "zh");
+    expect(future.birthYear).toBe("2199");
+    expect(diffDraft(future, edit(future, { birthDay: "2" })).changes.birth).toEqual({ year: 2199, month: 4, day: 2 });
+    const person = personDraft(KOBAYASHI, "zh");
+    expect(diffDraft(person, edit(person, { birthYear: "2199" })).invalid).toBe(true);
+  });
+
   test("emptying a name, or a date that cannot be, blocks the submission", () => {
     const start = characterDraft(STARK, "zh");
     expect(diffDraft(start, edit(start, { nameNative: "  " })).invalid).toBe(true);
@@ -146,8 +166,8 @@ describe("the diff", () => {
       voices: [
         { ...start.voices[0], line: "日配 · 主役" },
         { ...start.voices[1], person: someone },
-        { key: null, person: { ...someone, anilistId: 777 }, initialPersonId: null, line: "中配", initialLine: "", removed: false },
-        { key: null, person: { ...someone, anilistId: 888 }, initialPersonId: null, line: "", initialLine: "", removed: true },
+        { key: null, person: { ...someone, anilistId: 777 }, initialPersonId: null, line: "中配", initialLine: "", autoLine: false, removed: false },
+        { key: null, person: { ...someone, anilistId: 888 }, initialPersonId: null, line: "", initialLine: "", autoLine: false, removed: true },
       ],
     };
     const { changes, count } = diffDraft(start, now);
@@ -161,8 +181,16 @@ describe("the diff", () => {
     const removed = { ...start, voices: [{ ...start.voices[0], removed: true }, start.voices[1]] };
     expect(diffDraft(start, removed).changes.voices).toEqual([{ key: "133507|Japanese|", remove: true }]);
 
+    // The line the page makes from the credit (日配), emptied, is still that
+    // line: the page shows it whenever none is written. Nothing to send.
     const cleared = { ...start, voices: [{ ...start.voices[0], line: "  " }, start.voices[1]] };
-    expect(diffDraft(start, cleared).changes.voices).toEqual([{ key: "133507|Japanese|", line: null }]);
+    expect(diffDraft(start, cleared)).toEqual({ changes: {}, count: 0, invalid: false });
+    expect(voiceLineChange(cleared.voices[0])).toBeUndefined();
+    // A written line emptied goes back to the credit's.
+    const written = characterDraft({ ...STARK, voices: [{ ...STARK.voices[0], line: "日配 · 主役" }] }, "zh");
+    const unwritten = { ...written, voices: [{ ...written.voices[0], line: "" }] };
+    expect(diffDraft(written, unwritten).changes.voices).toEqual([{ key: "133507|Japanese|", line: null }]);
+    expect(voiceLineChange(unwritten.voices[0])).toBeNull();
   });
 
   test("roles per title", () => {
@@ -203,6 +231,8 @@ describe("helpers", () => {
     expect(birthValue({ birthYear: "2023", birthMonth: "2", birthDay: "29" })).toBe("bad");
     expect(birthValue({ birthYear: "1994", birthMonth: "13", birthDay: "" })).toBe("bad");
     expect(birthValue({ birthYear: "999", birthMonth: "", birthDay: "" })).toBe("bad");
+    expect(birthValue({ birthYear: "2199", birthMonth: "", birthDay: "" }, "character")).toEqual({ year: 2199, month: null, day: null });
+    expect(birthValue({ birthYear: "0", birthMonth: "", birthDay: "" }, "character")).toBe("bad");
   });
 
   test("validSource", () => {

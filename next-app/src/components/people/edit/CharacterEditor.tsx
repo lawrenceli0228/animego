@@ -126,6 +126,19 @@ export default function CharacterEditor({ character, lang, crumbs, pageHref, hue
           />
           <span className={e.factLabel}>{t("people.birthday")}</span>
           <span className={e.dateParts}>
+            {/* A character's birthday is a month and a day; the page shows a
+                year only when the data has one, and then it is a field too. */}
+            {initial.birthYear ? (
+              <input
+                className={`${e.field} ${e.yearInput}`}
+                inputMode="numeric"
+                aria-label={t("peopleEdit.birthYear")}
+                value={draft.birthYear}
+                maxLength={4}
+                data-changed={changedAttr(draft.birthYear, initial.birthYear)}
+                onChange={(event) => set("birthYear", event.target.value)}
+              />
+            ) : null}
             <input
               className={`${e.field} ${e.dayInput}`}
               inputMode="numeric"

@@ -52,6 +52,12 @@ export interface VoiceDraft {
   initialPersonId: number | null;
   line: string;
   initialLine: string;
+  /**
+   * Whether the line is the one the page makes from the credit (日配 · 童年):
+   * no line was written for the row. Emptying it changes nothing, since the
+   * page shows that line whenever none is written.
+   */
+  autoLine: boolean;
   removed: boolean;
 }
 
@@ -111,8 +117,17 @@ export function characterDraft(c: Character, lang: Lang): CharacterDraft {
     description: profile?.description ?? "",
     photo: null,
     voices: c.voices.map((v) => {
-      const line = v.line?.trim() || voiceLine(v.language, v.roleNotes, lang);
-      return { key: v.key, person: v.person, initialPersonId: v.person.anilistId, line, initialLine: line, removed: false };
+      const written = v.line?.trim();
+      const line = written || voiceLine(v.language, v.roleNotes, lang);
+      return {
+        key: v.key,
+        person: v.person,
+        initialPersonId: v.person.anilistId,
+        line,
+        initialLine: line,
+        autoLine: !written,
+        removed: false,
+      };
     }),
     roles: Object.fromEntries(c.appearances.map((a) => [a.anime.anilistId, a.role ?? ""])),
     sourceUrl: "",
@@ -179,15 +194,22 @@ export interface BirthValue {
   day: number | null;
 }
 
-/** The draft's birthday, or "bad" when a part is not a number or the date cannot exist. */
-export function birthValue(d: Pick<CommonDraft, "birthYear" | "birthMonth" | "birthDay">): BirthValue | null | "bad" {
+type BirthParts = Pick<CommonDraft, "birthYear" | "birthMonth" | "birthDay">;
+
+/**
+ * The draft's birthday, or "bad" when a part is not a number or the date
+ * cannot exist. A person was born by next year at the latest; a character in
+ * any year its story sets (go-api's cleanBirth).
+ */
+export function birthValue(d: BirthParts, kind: Draft["kind"] = "person"): BirthValue | null | "bad" {
   const year = part(d.birthYear);
   const month = part(d.birthMonth);
   const day = part(d.birthDay);
   if (year === "bad" || month === "bad" || day === "bad") return "bad";
   if (year === null && month === null && day === null) return null;
   if (month !== null && (month < 1 || month > 12)) return "bad";
-  if (year !== null && (year < 1000 || year > new Date().getFullYear() + 1)) return "bad";
+  const [minYear, maxYear] = kind === "person" ? [1000, new Date().getFullYear() + 1] : [1, 9999];
+  if (year !== null && (year < minYear || year > maxYear)) return "bad";
   if (day !== null) {
     if (month === null) return "bad";
     const last = new Date(Date.UTC(year ?? 2000, month, 0)).getUTCDate();
@@ -224,6 +246,23 @@ function textChange(changes: Record<string, unknown>, key: string, initial: stri
   return 1;
 }
 
+const sameBirth = (a: BirthParts, b: BirthParts) =>
+  a.birthYear.trim() === b.birthYear.trim() &&
+  a.birthMonth.trim() === b.birthMonth.trim() &&
+  a.birthDay.trim() === b.birthDay.trim();
+
+/**
+ * A credited voice row's line as it is to be sent: undefined when unchanged
+ * (an emptied line the page makes from the credit included), null to go
+ * back to that line, or the line written.
+ */
+export function voiceLineChange(v: VoiceDraft): string | null | undefined {
+  const next = v.line.trim();
+  if (next === v.initialLine.trim()) return undefined;
+  if (next === "") return v.autoLine ? undefined : null;
+  return next;
+}
+
 /**
  * What differs between the draft as it opened and as it is now.
  *
@@ -246,13 +285,16 @@ export function diffDraft(initial: Draft, current: Draft): Changes {
   count += textChange(changes, "gender", initial.gender, current.gender, true);
   count += textChange(changes, "bloodType", initial.bloodType, current.bloodType, true);
 
-  const before = birthValue(initial);
-  const after = birthValue(current);
-  if (after === "bad") {
-    invalid = true;
-  } else if (JSON.stringify(before) !== JSON.stringify(after)) {
-    changes.birth = after;
-    count++;
+  // Checked only once changed: the data can hold a date the editor would
+  // refuse, and leaving it alone must not block the rest of the edit.
+  if (!sameBirth(initial, current)) {
+    const after = birthValue(current, current.kind);
+    if (after === "bad") {
+      invalid = true;
+    } else if (JSON.stringify(birthValue(initial, initial.kind)) !== JSON.stringify(after)) {
+      changes.birth = after;
+      count++;
+    }
   }
 
   if (initial.kind === "character" && current.kind === "character") {
@@ -277,7 +319,8 @@ export function diffDraft(initial: Draft, current: Draft): Changes {
       }
       const change: Record<string, unknown> = { key: v.key };
       if (v.person.anilistId !== v.initialPersonId) change.personId = v.person.anilistId;
-      if (v.line.trim() !== v.initialLine.trim()) change.line = v.line.trim() || null;
+      const line = voiceLineChange(v);
+      if (line !== undefined) change.line = line;
       if (Object.keys(change).length > 1) voices.push(change);
     }
     if (voices.length > 0) {

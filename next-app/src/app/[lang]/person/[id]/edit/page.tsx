@@ -1,5 +1,6 @@
 // /person/[id]/edit — the person page in its edit state. A route of its own,
-// dynamic and noindex, for the reasons /character/[id]/edit gives.
+// dynamic and noindex, its reads ordered as /character/[id]/edit's are, for
+// the reasons given there.
 
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
@@ -11,13 +12,11 @@ import PersonEditor from "@/components/people/edit/PersonEditor";
 import { readSession } from "@/lib/auth/serverSession";
 import { localizePath } from "@/lib/i18n/locale";
 import { resolveLocale } from "@/lib/i18n/route";
-import { loadPersonFresh } from "@/lib/people/fetch";
+import { loadPerson, loadPersonFresh } from "@/lib/people/fetch";
 import { parseEntityId, personEditPath, personPath } from "@/lib/people/paths";
 import { personAnchor } from "@/lib/people/primary";
 import { personHeading } from "@/lib/people/seo";
 import { hueStyle } from "@/lib/people/view";
-
-export const dynamic = "force-dynamic";
 
 type PersonEditProps = PageProps<"/[lang]/person/[id]/edit">;
 
@@ -25,7 +24,7 @@ export async function generateMetadata({ params }: PersonEditProps): Promise<Met
   const robots = { index: false, follow: false };
   const id = parseEntityId((await params).id);
   if (id === null) return { title: { absolute: "AnimeGoClub" }, robots };
-  const [{ lang, dict }, person] = await Promise.all([resolveLocale(params), loadPersonFresh(id)]);
+  const [{ lang, dict }, person] = await Promise.all([resolveLocale(params), loadPerson(id)]);
   if (!person) return { title: { absolute: "AnimeGoClub" }, robots };
   const name = personHeading(person, lang);
   return { title: { absolute: `${dict.peopleEdit.pageTitle.replace("{{name}}", name)} · AnimeGoClub` }, robots };
@@ -34,9 +33,11 @@ export async function generateMetadata({ params }: PersonEditProps): Promise<Met
 export default async function PersonEditPage({ params }: PersonEditProps) {
   const id = parseEntityId((await params).id);
   if (id === null) notFound();
-  const [{ locale, lang, dict }, person] = await Promise.all([resolveLocale(params), loadPersonFresh(id)]);
-  if (!person) notFound();
+  const [{ locale, lang, dict }, exists] = await Promise.all([resolveLocale(params), loadPerson(id)]);
+  if (!exists) notFound();
   if (!(await readSession())) redirect(authHrefWithFrom("/login", localizePath(personEditPath(id), locale)));
+  const person = await loadPersonFresh(id);
+  if (!person) notFound();
 
   const crumbs = personCrumbs(person, lang, dict).map((c, i, all) =>
     i === all.length - 1 ? { ...c, href: personPath(id) } : c,

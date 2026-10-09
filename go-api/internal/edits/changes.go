@@ -255,8 +255,10 @@ func optLen(o overlay.Opt[[]string]) int {
 
 // cleanBirth is a birthday: any part may be unknown, but a day needs its
 // month and must exist in it (29 February only in a leap year, or with no
-// year).  All parts unknown, or null, clears it.
-func cleanBirth(o overlay.Opt[overlay.Date]) (*overlay.Date, error) {
+// year).  All parts unknown, or null, clears it.  A person was born by next
+// year at the latest; a character in whatever year its story is set, the
+// far future included.
+func cleanBirth(kind overlay.Kind, o overlay.Opt[overlay.Date]) (*overlay.Date, error) {
 	if o.Value == nil {
 		return nil, nil
 	}
@@ -264,7 +266,11 @@ func cleanBirth(o overlay.Opt[overlay.Date]) (*overlay.Date, error) {
 	if d.Year == nil && d.Month == nil && d.Day == nil {
 		return nil, nil
 	}
-	if d.Year != nil && (*d.Year < 1000 || *d.Year > int32(time.Now().Year()+1)) {
+	minYear, maxYear := int32(1), int32(9999)
+	if kind == overlay.Person {
+		minYear, maxYear = 1000, int32(time.Now().Year()+1)
+	}
+	if d.Year != nil && (*d.Year < minYear || *d.Year > maxYear) {
 		return nil, invalid(overlay.FieldBirth, "year out of range")
 	}
 	if d.Month != nil && (*d.Month < 1 || *d.Month > 12) {
@@ -585,7 +591,7 @@ func diffCharacter(c *people.Character, ch changeSet, refs map[int32]people.Pers
 		items = textItem(items, overlay.FieldAge, profile.Age, next)
 	}
 	if ch.Birth.Set {
-		next, err := cleanBirth(ch.Birth)
+		next, err := cleanBirth(overlay.Character, ch.Birth)
 		if err != nil {
 			return nil, err
 		}
@@ -654,7 +660,7 @@ func diffPerson(p *people.Person, ch changeSet) ([]item, error) {
 		items = textItem(items, overlay.FieldGender, profile.Gender, next)
 	}
 	if ch.Birth.Set {
-		next, err := cleanBirth(ch.Birth)
+		next, err := cleanBirth(overlay.Person, ch.Birth)
 		if err != nil {
 			return nil, err
 		}
