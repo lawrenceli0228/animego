@@ -109,6 +109,17 @@ curl -sk -o /dev/null -w "HTTP %{http_code} from /_next/image (next-image)\n" "h
 MIRROR_PATH="media/anime/cover/medium/bx154587-qQTzQnEJJ3oB.jpg"
 curl -sk -o /dev/null -w "HTTP %{http_code} %{content_type} from /img/anilist/ (mirror original)\n" "https://localhost/img/anilist/$MIRROR_PATH"
 curl -sk -o /dev/null -w "HTTP %{http_code} %{content_type} from /_next/image (mirror source)\n" "https://localhost/_next/image?url=https%3A%2F%2Fanimegoclub.com%2Fimg%2Fanilist%2F${MIRROR_PATH//\//%2F}&w=640&q=85"
+# The warm job's own way in: from the go-api container, through the
+# IMAGE_WARM_BASE_URL it reads. OK means it can store originals; a 403 is a
+# wrong path or allowlists that disagree; no answer is a wrong host or port.
+$COMPOSE exec -T go-api sh -c '
+  if [ -z "$IMAGE_WARM_BASE_URL" ]; then
+    echo "warm job off (IMAGE_WARM_BASE_URL is empty)"
+  elif out=$(wget -nv -O /dev/null "${IMAGE_WARM_BASE_URL%/}/$1" 2>&1); then
+    echo "OK from the warm endpoint (go-api -> $IMAGE_WARM_BASE_URL)"
+  else
+    echo "FAILED from the warm endpoint (go-api -> $IMAGE_WARM_BASE_URL): $out"
+  fi' sh "$MIRROR_PATH" || true
 
 echo ""
 echo "==> Done. If a smoke line shows 5xx, check 'docker compose logs --tail=50 <service>'."
