@@ -74,7 +74,8 @@ services:
   # encode, and anyone can ask for any image the site shows; when a scraper
   # did exactly that, the encodes shared next-app's CPU and page renders timed
   # out behind them. Here they get a ceiling of their own: a flood of new
-  # images makes images slow, and pages keep the rest of the machine.
+  # images makes images slow (past nginx's max_conns, some come back 503 and
+  # are tried again on the next view), and pages keep the rest of the machine.
   #
   # No env_file: this container fetches and decodes images from outside and
   # needs none of the application's secrets to do it.
@@ -101,9 +102,10 @@ services:
       retries: 3
       start_period: 30s
     cpus: 1.5
-    # sharp holds the source and the decoded frame for every image in
-    # flight; nginx caps how many are in flight (max_conns in default.conf).
-    mem_limit: 768m
+    # Every request in flight holds its source image, and the ones sharp is
+    # working on hold decoded frames too. nginx caps how many are in flight
+    # (max_conns in default.conf, sized for a whole page of cold images).
+    mem_limit: 1g
     volumes:
       # Optimized images survive container recreation (every deploy recreates
       # this container). Only images/: the rest of .next/cache is the fetch
