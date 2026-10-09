@@ -261,3 +261,93 @@ func TestHandlersRejectMissingClaimsBeforeDatabaseAccess(t *testing.T) {
 		})
 	}
 }
+
+// The community tab's two reply notifications (migration 0046) carry the
+// reply, the thread or activity event it sits under, and the anime — and a
+// spoiler reply is flagged, never quoted.
+func TestListMapsCommunityReplyNotifications(t *testing.T) {
+	viewerID := uuid.New()
+	anilistID := int32(154587)
+	title := "Sousou no Frieren"
+	threadID, threadReplyID := uuid.New(), uuid.New()
+	eventID, activityReplyID := uuid.New(), uuid.New()
+	threadTitle := "第五集的回忆杀"
+	plain, secret := "哭死我了", "结局是……"
+	yes, no := true, false
+	createdAt := pgtype.Timestamptz{Time: time.Date(2026, 10, 9, 1, 2, 3, 0, time.UTC), Valid: true}
+
+	db := &fakeDB{
+		countFn: func(context.Context, uuid.UUID) (int64, error) { return 3, nil },
+		listFn: func(context.Context, uuid.UUID, int32) ([]dbgen.ListNotificationsRow, error) {
+			return []dbgen.ListNotificationsRow{
+				{
+					ID: uuid.New(), NotificationType: "thread_reply", ReplyID: &threadReplyID,
+					ActorUsername: "bob", CreatedAt: createdAt,
+					ReplyAnilistID: &anilistID, ReplyThreadID: &threadID, ThreadTitle: &threadTitle,
+					ReplyBody: &plain, ReplyIsSpoiler: &no, TitleRomaji: &title,
+				},
+				{
+					ID: uuid.New(), NotificationType: "thread_reply", ReplyID: &threadReplyID,
+					ActorUsername: "carol", CreatedAt: createdAt,
+					ReplyAnilistID: &anilistID, ReplyThreadID: &threadID, ThreadTitle: &threadTitle,
+					ReplyBody: &secret, ReplyIsSpoiler: &yes, TitleRomaji: &title,
+				},
+				{
+					ID: uuid.New(), NotificationType: "activity_reply", ReplyID: &activityReplyID,
+					ActivityEventID: &eventID, ActorUsername: "dave", CreatedAt: createdAt,
+					ReplyAnilistID: &anilistID, ReplyActivityEventID: &eventID,
+					ReplyBody: &plain, ReplyIsSpoiler: &no, TitleRomaji: &title,
+				},
+			}, nil
+		},
+	}
+	rec := httptest.NewRecorder()
+	NewHandlers(db).List(rec, authenticatedRequest(t, http.MethodGet, "/api/notifications", viewerID))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var body struct {
+		Data struct {
+			Items []struct {
+				Type        string  `json:"type"`
+				ReplyID     *string `json:"replyId"`
+				ThreadID    *string `json:"threadId"`
+				ThreadTitle *string `json:"threadTitle"`
+				ActivityID  *string `json:"activityId"`
+				Excerpt     *string `json:"excerpt"`
+				IsSpoiler   bool    `json:"isSpoiler"`
+				Anime       *struct {
+					AnilistID int32 `json:"anilistId"`
+				} `json:"anime"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	items := body.Data.Items
+	require.Len(t, items, 3)
+
+	assert.Equal(t, "thread_reply", items[0].Type)
+	assert.Equal(t, threadReplyID.String(), *items[0].ReplyID)
+	assert.Equal(t, threadID.String(), *items[0].ThreadID)
+	assert.Equal(t, threadTitle, *items[0].ThreadTitle)
+	assert.Nil(t, items[0].ActivityID)
+	assert.Equal(t, plain, *items[0].Excerpt)
+	require.NotNil(t, items[0].Anime)
+	assert.Equal(t, anilistID, items[0].Anime.AnilistID)
+
+	assert.True(t, items[1].IsSpoiler)
+	assert.Nil(t, items[1].Excerpt, "a spoiler reply is flagged, never quoted")
+
+	assert.Equal(t, "activity_reply", items[2].Type)
+	assert.Equal(t, eventID.String(), *items[2].ActivityID)
+	assert.Nil(t, items[2].ThreadID)
+	assert.Equal(t, plain, *items[2].Excerpt)
+}
+
+func TestNotificationTypeMapping(t *testing.T) {
+	for db, wire := range map[string]string{
+		"reply": "comment_reply", "reaction": "comment_reaction", "follow": "follow",
+		"thread_reply": "thread_reply", "activity_reply": "activity_reply",
+	} {
+		assert.Equal(t, wire, notificationType(db), db)
+	}
+}

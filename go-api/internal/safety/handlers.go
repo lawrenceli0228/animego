@@ -40,6 +40,12 @@ var validReasons = map[string]struct{}{
 	"violence": {}, "spoiler": {}, "misinformation": {}, "other": {},
 }
 
+// validTargetTypes is the report target vocabulary; reports_target_type_chk
+// says the same thing at the database edge.
+var validTargetTypes = map[string]struct{}{
+	"comment": {}, "user": {}, "review": {}, "thread": {}, "reply": {},
+}
+
 var validReportStatuses = map[string]struct{}{
 	"pending": {}, "reviewing": {}, "resolved": {}, "dismissed": {},
 }
@@ -50,6 +56,10 @@ type DB interface {
 	BlockUser(ctx context.Context, blockerID, blockedID uuid.UUID) (dbgen.BlockUserRow, error)
 	UnblockUser(ctx context.Context, blockerID, blockedID uuid.UUID) (int64, error)
 	ListUserBlocks(ctx context.Context, blockerID uuid.UUID, limit, offset int32) ([]dbgen.ListUserBlocksRow, error)
+	// GetCommunityReportTarget resolves a review, thread or reply (migration
+	// 0046) to its author, and answers ErrNoRows for one that is deleted,
+	// private, or never existed.
+	GetCommunityReportTarget(ctx context.Context, targetType string, targetID uuid.UUID) (dbgen.GetCommunityReportTargetRow, error)
 	CreatePendingReport(ctx context.Context, arg dbgen.CreatePendingReportParams) (dbgen.CreatePendingReportRow, error)
 	ListReports(ctx context.Context, reportStatus *string, pageOffset, pageLimit int32) ([]dbgen.ListReportsRow, error)
 	UpdateReport(ctx context.Context, reportStatus string, resolutionNote *string, reviewedBy, reportID uuid.UUID) (dbgen.Report, error)
@@ -200,7 +210,7 @@ func (h *Handlers) CreateReport(w http.ResponseWriter, r *http.Request) {
 	req.TargetType = strings.TrimSpace(req.TargetType)
 	req.TargetID = strings.TrimSpace(req.TargetID)
 	req.Reason = strings.TrimSpace(req.Reason)
-	if req.TargetType != "comment" && req.TargetType != "user" {
+	if _, ok := validTargetTypes[req.TargetType]; !ok {
 		httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, "Invalid report target"))
 		return
 	}
@@ -222,7 +232,8 @@ func (h *Handlers) CreateReport(w http.ResponseWriter, r *http.Request) {
 		Reason:     req.Reason,
 		Details:    details,
 	}
-	if req.TargetType == "comment" {
+	switch req.TargetType {
+	case "comment":
 		id, err := uuid.Parse(req.TargetID)
 		if err != nil {
 			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, "Invalid comment ID"))
@@ -238,7 +249,32 @@ func (h *Handlers) CreateReport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.TargetCommentID = &id
-	} else {
+	case "review", "thread", "reply":
+		// The community tab's content (migration 0046).  A private review
+		// resolves as not found: only its author can see it.
+		id, err := uuid.Parse(req.TargetID)
+		if err != nil {
+			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeValidationError, "Invalid "+req.TargetType+" ID"))
+			return
+		}
+		target, err := h.db.GetCommunityReportTarget(ctx, req.TargetType, id)
+		if err != nil {
+			handleTargetLookupError(w, err, req.TargetType)
+			return
+		}
+		if target.UserID == claims.UserID {
+			httpx.Fail(w, httpx.NewError(http.StatusBadRequest, httpx.CodeInvalidAction, "Cannot report your own content"))
+			return
+		}
+		switch req.TargetType {
+		case "review":
+			params.TargetReviewID = &id
+		case "thread":
+			params.TargetThreadID = &id
+		default:
+			params.TargetReplyID = &id
+		}
+	default:
 		target, err := h.db.GetUserIDByUsername(ctx, req.TargetID)
 		if err != nil {
 			handleTargetLookupError(w, err, "user")
@@ -294,6 +330,9 @@ type reportItem struct {
 	TargetType             string             `json:"targetType"`
 	TargetCommentID        *uuid.UUID         `json:"targetCommentId"`
 	TargetUserID           *uuid.UUID         `json:"targetUserId"`
+	TargetReviewID         *uuid.UUID         `json:"targetReviewId"`
+	TargetThreadID         *uuid.UUID         `json:"targetThreadId"`
+	TargetReplyID          *uuid.UUID         `json:"targetReplyId"`
 	TargetSnapshot         json.RawMessage    `json:"targetSnapshot"`
 	TargetUsername         *string            `json:"targetUsername"`
 	TargetCommentContent   *string            `json:"targetCommentContent"`
@@ -342,6 +381,8 @@ func (h *Handlers) ListReports(w http.ResponseWriter, r *http.Request) {
 		items[i] = reportItem{
 			ID: row.ID, ReporterUsername: row.ReporterUsername, TargetType: row.TargetType,
 			TargetCommentID: row.TargetCommentID, TargetUserID: row.TargetUserID,
+			TargetReviewID: row.TargetReviewID, TargetThreadID: row.TargetThreadID,
+			TargetReplyID:  row.TargetReplyID,
 			TargetSnapshot: json.RawMessage(row.TargetSnapshot), TargetUsername: row.TargetUsername,
 			TargetCommentContent: row.TargetCommentContent, TargetCommentIsSpoiler: row.TargetCommentIsSpoiler,
 			TargetCommentAnilistID: row.TargetCommentAnilistID, TargetCommentEpisode: row.TargetCommentEpisode,

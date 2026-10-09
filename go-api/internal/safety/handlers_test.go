@@ -42,6 +42,11 @@ type fakeDB struct {
 	listReportStatus  *string
 	updatedReport     dbgen.Report
 	updateReportError error
+	// The community tab's report targets (migration 0046).
+	communityTarget     dbgen.GetCommunityReportTargetRow
+	communityTargetErr  error
+	communityTargetType string
+	communityTargetID   uuid.UUID
 }
 
 func (f *fakeDB) GetUserIDByUsername(context.Context, string) (dbgen.GetUserIDByUsernameRow, error) {
@@ -60,6 +65,11 @@ func (f *fakeDB) UnblockUser(_ context.Context, blockerID, blockedID uuid.UUID) 
 }
 func (f *fakeDB) ListUserBlocks(context.Context, uuid.UUID, int32, int32) ([]dbgen.ListUserBlocksRow, error) {
 	return f.blocks, nil
+}
+func (f *fakeDB) GetCommunityReportTarget(_ context.Context, targetType string, targetID uuid.UUID) (dbgen.GetCommunityReportTargetRow, error) {
+	f.communityTargetType = targetType
+	f.communityTargetID = targetID
+	return f.communityTarget, f.communityTargetErr
 }
 func (f *fakeDB) CreatePendingReport(_ context.Context, arg dbgen.CreatePendingReportParams) (dbgen.CreatePendingReportRow, error) {
 	f.reportParams = arg
@@ -322,4 +332,71 @@ func TestHandlersRequireClaims(t *testing.T) {
 			assert.Equal(t, http.StatusUnauthorized, rec.Code)
 		})
 	}
+}
+
+// Reviews, threads and replies (migration 0046) are reportable through the
+// same endpoint, each into its own target column.
+func TestCreateCommunityContentReport(t *testing.T) {
+	for _, kind := range []string{"review", "thread", "reply"} {
+		t.Run(kind, func(t *testing.T) {
+			viewer, author, targetID, reportID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+			db := &fakeDB{
+				communityTarget: dbgen.GetCommunityReportTargetRow{UserID: author, AnilistID: 154587},
+				report:          dbgen.CreatePendingReportRow{ID: reportID, Status: "pending"},
+			}
+			body := bytes.NewBufferString(`{"targetType":"` + kind + `","targetId":"` + targetID.String() + `","reason":"spoiler"}`)
+			req := withClaims(t, httptest.NewRequest(http.MethodPost, "/api/reports", body), viewer, nil)
+			rec := httptest.NewRecorder()
+			NewHandlers(db).CreateReport(rec, req)
+			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+			assert.Equal(t, kind, db.communityTargetType)
+			assert.Equal(t, targetID, db.communityTargetID)
+			assert.Equal(t, kind, db.reportParams.TargetType)
+
+			got := map[string]*uuid.UUID{
+				"review": db.reportParams.TargetReviewID,
+				"thread": db.reportParams.TargetThreadID,
+				"reply":  db.reportParams.TargetReplyID,
+			}
+			for k, id := range got {
+				if k == kind {
+					require.NotNil(t, id, k)
+					assert.Equal(t, targetID, *id)
+				} else {
+					assert.Nil(t, id, k)
+				}
+			}
+			assert.Nil(t, db.reportParams.TargetCommentID)
+			assert.Nil(t, db.reportParams.TargetUserID)
+		})
+	}
+}
+
+func TestCreateCommunityContentReport_OwnMissingAndMalformed(t *testing.T) {
+	viewer, targetID := uuid.New(), uuid.New()
+
+	own := &fakeDB{communityTarget: dbgen.GetCommunityReportTargetRow{UserID: viewer}}
+	rec := httptest.NewRecorder()
+	NewHandlers(own).CreateReport(rec, withClaims(t, httptest.NewRequest(http.MethodPost, "/api/reports", bytes.NewBufferString(
+		`{"targetType":"review","targetId":"`+targetID.String()+`","reason":"spam"}`)), viewer, nil))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Cannot report your own content")
+
+	missing := &fakeDB{communityTargetErr: pgx.ErrNoRows}
+	rec = httptest.NewRecorder()
+	NewHandlers(missing).CreateReport(rec, withClaims(t, httptest.NewRequest(http.MethodPost, "/api/reports", bytes.NewBufferString(
+		`{"targetType":"thread","targetId":"`+targetID.String()+`","reason":"spam"}`)), viewer, nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Thread not found")
+
+	rec = httptest.NewRecorder()
+	NewHandlers(&fakeDB{}).CreateReport(rec, withClaims(t, httptest.NewRequest(http.MethodPost, "/api/reports", bytes.NewBufferString(
+		`{"targetType":"reply","targetId":"nope","reason":"spam"}`)), viewer, nil))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Invalid reply ID")
+
+	rec = httptest.NewRecorder()
+	NewHandlers(&fakeDB{}).CreateReport(rec, withClaims(t, httptest.NewRequest(http.MethodPost, "/api/reports", bytes.NewBufferString(
+		`{"targetType":"activity","targetId":"`+targetID.String()+`","reason":"spam"}`)), viewer, nil))
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "only the five kinds")
 }

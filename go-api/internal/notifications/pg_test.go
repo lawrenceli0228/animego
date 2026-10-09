@@ -233,3 +233,63 @@ func TestListEndpointHidesBlockedActorFromItemsAndBadge(t *testing.T) {
 	assert.Equal(t, "friend", body.Data.Items[0].Actor.Username)
 	assert.Equal(t, int64(1), body.Data.UnreadCount)
 }
+
+// TestListNotificationsReadsCommunityReplyContext proves the SQL half of the
+// community tab's reply notifications (migration 0046): the anime comes
+// through the reply when there is no comment, the thread title through the
+// reply's thread, and an episode-comment notification beside it is
+// unchanged.
+func TestListNotificationsReadsCommunityReplyContext(t *testing.T) {
+	ctx := context.Background()
+	pool := testutil.NewWebPool(t, ctx, pgURI)
+	testutil.TruncateAll(t, ctx, pool)
+	queries := dbgen.New(pool)
+
+	owner := seedNotificationUser(t, pool, "owner")
+	replier := seedNotificationUser(t, pool, "replier")
+	_, err := pool.Exec(ctx, `INSERT INTO anime_cache (anilist_id, title_romaji, title_chinese) VALUES (154587, 'Sousou no Frieren', '葬送的芙莉莲')`)
+	require.NoError(t, err)
+
+	var threadID, replyID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO anime_threads (anilist_id, user_id, title, body) VALUES (154587, $1, '第五集的回忆杀', '说说看')
+		RETURNING id`, owner).Scan(&threadID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO community_replies (anilist_id, thread_id, user_id, body, is_spoiler) VALUES (154587, $1, $2, '结局是……', true)
+		RETURNING id`, threadID, replier).Scan(&replyID))
+	_, err = pool.Exec(ctx, `
+		INSERT INTO notifications (user_id, actor_id, notification_type, reply_id, dedupe_key)
+		VALUES ($1, $2, 'thread_reply', $3, $4)`, owner, replier, replyID, "thread_reply:"+replyID.String())
+	require.NoError(t, err)
+
+	rows, err := queries.ListNotifications(ctx, owner, 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	row := rows[0]
+	assert.Equal(t, "thread_reply", row.NotificationType)
+	assert.Nil(t, row.AnilistID, "no comment behind it")
+	require.NotNil(t, row.ReplyAnilistID)
+	assert.Equal(t, int32(154587), *row.ReplyAnilistID)
+	require.NotNil(t, row.TitleChinese, "the anime is joined through the reply")
+	assert.Equal(t, "葬送的芙莉莲", *row.TitleChinese)
+	require.NotNil(t, row.ReplyThreadID)
+	assert.Equal(t, threadID, *row.ReplyThreadID)
+	require.NotNil(t, row.ThreadTitle)
+	assert.Equal(t, "第五集的回忆杀", *row.ThreadTitle)
+	require.NotNil(t, row.ReplyIsSpoiler)
+	assert.True(t, *row.ReplyIsSpoiler)
+
+	item := toItem(row)
+	assert.True(t, item.IsSpoiler)
+	assert.Nil(t, item.Excerpt, "the handler never quotes a spoiler")
+
+	// Soft-deleting the reply is a different write's job (it deletes the
+	// notification too); if one were ever left behind, the list would not
+	// quote the removed text.
+	_, err = pool.Exec(ctx, `UPDATE community_replies SET deleted_at = now() WHERE id = $1`, replyID)
+	require.NoError(t, err)
+	rows, err = queries.ListNotifications(ctx, owner, 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Nil(t, rows[0].ReplyBody)
+}
