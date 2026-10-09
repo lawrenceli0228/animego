@@ -59,6 +59,7 @@ INSERT INTO bgm_person_map (anilist_id, bgm_id, name_cn, source, matched_at) VAL
 type flow struct {
 	t       *testing.T
 	pool    *pgxpool.Pool
+	h       *Handlers
 	router  http.Handler
 	signer  *jwtx.Signer
 	images  *ImageStore
@@ -85,14 +86,14 @@ func newFlow(t *testing.T) *flow {
 	require.NoError(t, err)
 	f := &flow{t: t, pool: pool, signer: signer, root: t.TempDir(), fetcher: &stubFetcher{}}
 	f.images = NewImageStore(f.root, "https://example.org", f.fetcher)
-	f.router = f.process()
+	f.h, f.router = f.process()
 	return f
 }
 
 // process is the API as one server process would run it: its own handlers
 // (and so its own record of who has a submission in flight) over the shared
 // database and image directory.
-func (f *flow) process() http.Handler {
+func (f *flow) process() (*Handlers, http.Handler) {
 	h := NewHandlers(f.pool, f.images, func(ids ...int32) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -110,7 +111,7 @@ func (f *flow) process() http.Handler {
 	cache := people.NewSitemapCache(people.SitemapTTL)
 	r.Route("/api/characters", func(r chi.Router) { people.MountCharacters(r, q, cache) })
 	r.Route("/api/people", func(r chi.Router) { people.MountPeople(r, q, cache) })
-	return r
+	return h, r
 }
 
 func (f *flow) user(name string, admin bool) account {
@@ -217,6 +218,7 @@ func TestSubmit_Refusals_PG(t *testing.T) {
 		"both image kinds":    {submission(map[string]any{"image": map[string]any{"url": "https://e.org/a.png", "dataUrl": "data:image/png;base64,AA"}}), http.StatusBadRequest, "invalid change: image: a link or an upload, one of them"},
 		"a GIF upload":        {submission(map[string]any{"image": map[string]any{"dataUrl": "data:image/gif;base64,R0lGODlhAQABAAAAACw="}}), http.StatusBadRequest, msgImageType},
 		"an unreadable image": {submission(map[string]any{"image": map[string]any{"dataUrl": "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("nope"))}}), http.StatusBadRequest, msgImageUnreadable},
+		"too many voice rows": {submission(map[string]any{"voices": manyVoices(maxVoiceChanges + 1)}), http.StatusBadRequest, "invalid change: voice: too many"},
 	} {
 		code, body := f.do(http.MethodPost, "/api/edits", &reader, tc.body)
 		assert.Equal(t, tc.code, code, name)
@@ -271,7 +273,7 @@ func TestSubmit_ConcurrentSubmissionsCannotBothPass_PG(t *testing.T) {
 	var wg sync.WaitGroup
 	codes := make([]int, 4)
 	for i := range codes {
-		router := f.process()
+		_, router := f.process()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -317,6 +319,14 @@ func TestSubmit_OneInFlightPerPerson_PG(t *testing.T) {
 	close(f.fetcher.release)
 	assert.Equal(t, http.StatusCreated, <-first)
 	f.fetcher.entered = nil
+}
+
+func manyVoices(n int) []map[string]any {
+	out := make([]map[string]any, n)
+	for i := range out {
+		out[i] = map[string]any{"personId": 95185}
+	}
+	return out
 }
 
 // Only a JSON body is read, on both write endpoints.  A form, or a fetch
@@ -376,6 +386,27 @@ func TestEdits_OnlyJSONBodies_PG(t *testing.T) {
 	code, got = f.send(f.router, http.MethodPost, "/api/admin/edits/"+id+"/review", &admin, "application/json; charset=utf-8", review)
 	require.Equal(t, http.StatusOK, code, "%v", got)
 	assert.Equal(t, "reviewed", got["data"].(map[string]any)["status"])
+}
+
+// Every attempt counts toward a person's attempts, refused or not: a refusal
+// can still cost the page reads and a fetched photo, and it stores nothing
+// the submission limits would count.
+func TestSubmit_RefusedAttemptsCount_PG(t *testing.T) {
+	f := newFlow(t)
+	f.h.attempts = newAttemptCounter(attemptWindow, 3)
+	reader := f.user("reader-tries", false)
+	for i := 0; i < 3; i++ {
+		code, body := f.do(http.MethodPost, "/api/edits", &reader, submission(map[string]any{"nameCn": "修塔尔克"}))
+		assert.Equal(t, http.StatusBadRequest, code)
+		assert.Equal(t, msgNothingChanged, errMessage(body))
+	}
+	code, body := f.do(http.MethodPost, "/api/edits", &reader, submission(map[string]any{"nameCn": "史塔克"}))
+	assert.Equal(t, http.StatusTooManyRequests, code, "the fourth, however good")
+	assert.Equal(t, msgTooMany, errMessage(body))
+
+	other := f.user("reader-fresh", false)
+	code, _ = f.do(http.MethodPost, "/api/edits", &other, submission(map[string]any{"nameCn": "史塔克"}))
+	assert.Equal(t, http.StatusCreated, code, "someone else's attempts are their own")
 }
 
 func TestEditFlow_PG(t *testing.T) {

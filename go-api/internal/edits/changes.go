@@ -199,27 +199,58 @@ func cleanFact(field string, o overlay.Opt[string], max int) (*string, error) {
 	return &s, nil
 }
 
-// cleanList is a list of short labels: each trimmed, blanks and repeats
-// dropped, at most maxEach characters each and maxCount in all.  Null is
-// the empty list.
+// cleanList is a list of short labels: at most maxCount as sent, each
+// trimmed, blanks and repeats dropped, at most maxEach characters each.
+// Null is the empty list.
 func cleanList(field string, o overlay.Opt[[]string], maxEach, maxCount int) ([]string, error) {
 	out := []string{}
 	if o.Value == nil {
 		return out, nil
 	}
+	if len(*o.Value) > maxCount {
+		return nil, invalid(field, "too many")
+	}
+	seen := make(map[string]bool, len(*o.Value))
 	for _, s := range *o.Value {
 		s, err := cleanLine(field, s, maxEach)
 		if err != nil {
 			return nil, err
 		}
-		if s != "" && !slices.Contains(out, s) {
+		if s != "" && !seen[s] {
+			seen[s] = true
 			out = append(out, s)
 		}
 	}
-	if len(out) > maxCount {
-		return nil, invalid(field, "too many")
-	}
 	return out, nil
+}
+
+// checkShape refuses a change set whose lists are longer, as sent, than
+// any page could need -- before the page is read or anyone looked up, so
+// that a body packed with list entries costs no more than its decoding.
+// The same limits hold again where each list is cleaned.
+func checkShape(ch changeSet) error {
+	for _, l := range []struct {
+		field string
+		n     int
+		max   int
+	}{
+		{overlay.FieldAliases, optLen(ch.Aliases), maxAliases},
+		{overlay.FieldOccupations, optLen(ch.Occupations), maxOccupations},
+		{overlay.FieldVoice, len(ch.Voices), maxVoiceChanges},
+		{overlay.FieldRole, len(ch.Roles), maxRoleChanges},
+	} {
+		if l.n > l.max {
+			return invalid(l.field, "too many")
+		}
+	}
+	return nil
+}
+
+func optLen(o overlay.Opt[[]string]) int {
+	if o.Value == nil {
+		return 0
+	}
+	return len(*o.Value)
 }
 
 // cleanBirth is a birthday: any part may be unknown, but a day needs its
@@ -356,10 +387,12 @@ func voiceValueOf(v people.CharacterVoice) voiceValue {
 // voicePeopleIn is the people a set of voice changes names.
 func voicePeopleIn(changes []voiceChange) []int32 {
 	var out []int32
+	seen := map[int32]bool{}
 	for _, v := range changes {
 		if v.PersonID != nil && *v.PersonID > 0 && *v.PersonID <= int64(^uint32(0)>>1) {
 			id := int32(*v.PersonID)
-			if !slices.Contains(out, id) {
+			if !seen[id] {
+				seen[id] = true
 				out = append(out, id)
 			}
 		}
