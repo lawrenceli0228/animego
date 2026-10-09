@@ -2,9 +2,8 @@
 // reader's language with the other two under it, aliases, tags, the profile
 // facts, and (characters) the description.
 //
-// `actions` is the slot the canvas's 「编辑」 goes in once editing exists. It
-// renders nothing until something is passed — there is no dead button here
-// waiting for a feature.
+// `actions` is the slot the canvas's 「编辑」 goes in (EditLink, passed by the
+// two views). It renders nothing when nothing is passed.
 
 import type { ReactNode } from "react";
 import FadeImage from "@/components/ui/FadeImage";

@@ -140,10 +140,12 @@ export function voiceLine(language: string | null, notes: string | null, lang: L
 
 // ── Profile facts ─────────────────────────────────────────────────────────
 
+// "Other" is the edit form's third choice (the canvas's 其他); AniList's own
+// values are free text, and the ones it uses are the first three.
 const GENDER_LABEL: Labels = {
-  zh: { Male: "男", Female: "女", "Non-binary": "非二元" },
+  zh: { Male: "男", Female: "女", "Non-binary": "非二元", Other: "其他" },
   en: null,
-  "zh-Hant": { Male: "男", Female: "女", "Non-binary": "非二元" },
+  "zh-Hant": { Male: "男", Female: "女", "Non-binary": "非二元", Other: "其他" },
 };
 
 export function genderLabel(gender: string | null | undefined, lang: Lang): string | null {

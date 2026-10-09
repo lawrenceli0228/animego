@@ -118,9 +118,17 @@ export interface CharacterProfile {
 }
 
 export interface CharacterVoice {
+  /**
+   * The row's name for an edit: "<personId>|<language>|<notes>" for a row the
+   * credits list, "add:<personId>" for one an accepted edit added. It stays
+   * the credit's key after an edit gives the row to someone else.
+   */
+  key: string;
   person: PersonRef;
   language: string | null;
   roleNotes: string | null;
+  /** The line under the name as an accepted edit wrote it; shown instead of language · notes. */
+  line: string | null;
 }
 
 export interface Appearance {

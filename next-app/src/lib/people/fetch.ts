@@ -31,3 +31,25 @@ export function loadPerson(id: number): Promise<Person | null> {
 export function loadCharacter(id: number): Promise<Character | null> {
   return loadOrNull<Character>(`/api/characters/${id}`);
 }
+
+/**
+ * The page as it is right now, for its edit state: never cached, since the
+ * draft is diffed against it and an accepted edit must show at once. Still
+ * anonymous -- the answer is the same for everyone.
+ */
+async function loadFreshOrNull<T>(path: string): Promise<T | null> {
+  try {
+    return await apiGet<T>(path, { cache: "no-store", auth: false });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export function loadPersonFresh(id: number): Promise<Person | null> {
+  return loadFreshOrNull<Person>(`/api/people/${id}`);
+}
+
+export function loadCharacterFresh(id: number): Promise<Character | null> {
+  return loadFreshOrNull<Character>(`/api/characters/${id}`);
+}

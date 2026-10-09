@@ -6,17 +6,17 @@
 // controls. Takes the API's answer and the route's language, reads nothing
 // else, so the page it is part of stays ISR-cacheable.
 
-import type { ReactNode } from "react";
 import type { Dict } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n/lang";
 import { pickTitle } from "@/lib/formatters";
 import { secondaryNames } from "@/lib/people/names";
-import { animeListPath, animePath } from "@/lib/people/paths";
+import { animeListPath, animePath, personEditPath } from "@/lib/people/paths";
 import { personAnchor } from "@/lib/people/primary";
 import { personHeading } from "@/lib/people/seo";
 import type { Person } from "@/lib/people/types";
 import { hueStyle, nativeLanguage, personFacts, personTags } from "@/lib/people/view";
 import Breadcrumbs, { type Crumb } from "./Breadcrumbs";
+import EditLink from "./EditLink";
 import ProfileHeader from "./ProfileHeader";
 import RepresentativeRoles from "./RepresentativeRoles";
 import StaffTimeline from "./StaffTimeline";
@@ -27,8 +27,6 @@ interface PersonViewProps {
   person: Person;
   lang: Lang;
   dict: Dict;
-  /** The header's action slot (the edit control, once there is one). */
-  actions?: ReactNode;
 }
 
 /** The breadcrumb: the title the page hangs under, its list, the person. */
@@ -49,7 +47,7 @@ export function personCrumbs(person: Person, lang: Lang, dict: Dict): Crumb[] {
   return crumbs;
 }
 
-export default function PersonView({ person, lang, dict, actions }: PersonViewProps) {
+export default function PersonView({ person, lang, dict }: PersonViewProps) {
   const heading = personHeading(person, lang);
   const names = secondaryNames(person.name, heading);
   const anchor = personAnchor(person);
@@ -65,7 +63,7 @@ export default function PersonView({ person, lang, dict, actions }: PersonViewPr
         romaji={names.full}
         tags={personTags(person, lang)}
         facts={personFacts(person.profile, lang, dict)}
-        actions={actions}
+        actions={<EditLink href={personEditPath(person.anilistId)} label={dict.people.edit} />}
       />
       <RepresentativeRoles roles={person.representativeRoles} lang={lang} dict={dict} />
       {person.voiceWorkCount > 0 ? (

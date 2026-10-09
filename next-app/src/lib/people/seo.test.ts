@@ -85,8 +85,8 @@ const STARK: Character = {
   image: null,
   profile: null,
   voices: [
-    { person: { anilistId: 133507, name: { full: "Chiaki Kobayashi", native: "小林千晃", cn: "小林千晃" }, image: null }, language: "Japanese", roleNotes: null },
-    { person: { anilistId: 133507, name: { full: "Chiaki Kobayashi", native: "小林千晃", cn: "小林千晃" }, image: null }, language: "Japanese", roleNotes: "Young" },
+    { key: "133507|Japanese|", person: { anilistId: 133507, name: { full: "Chiaki Kobayashi", native: "小林千晃", cn: "小林千晃" }, image: null }, language: "Japanese", roleNotes: null, line: null },
+    { key: "133507|Japanese|Young", person: { anilistId: 133507, name: { full: "Chiaki Kobayashi", native: "小林千晃", cn: "小林千晃" }, image: null }, language: "Japanese", roleNotes: "Young", line: null },
   ],
   appearances: [
     { anime: work(154587), role: "MAIN" },

@@ -3,20 +3,20 @@
 // description with its spoilers collapsed, every voice across languages, and
 // the titles the character is on.
 
-import type { ReactNode } from "react";
 import type { Dict } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n/lang";
 import { pickTitle } from "@/lib/formatters";
 import { parseAnilistMarkdown } from "@/lib/people/anilistMarkdown";
 import { characterRoleLabel } from "@/lib/people/labels";
 import { secondaryNames } from "@/lib/people/names";
-import { animeListPath, animePath } from "@/lib/people/paths";
+import { animeListPath, animePath, characterEditPath } from "@/lib/people/paths";
 import { primaryAppearance } from "@/lib/people/primary";
 import { characterHeading } from "@/lib/people/seo";
 import type { Character } from "@/lib/people/types";
 import { characterFacts, hueStyle, nativeLanguage } from "@/lib/people/view";
 import Appearances from "./Appearances";
 import Breadcrumbs, { type Crumb } from "./Breadcrumbs";
+import EditLink from "./EditLink";
 import CharacterVoices from "./CharacterVoices";
 import ProfileHeader from "./ProfileHeader";
 import SpoilerDescription from "./SpoilerDescription";
@@ -26,7 +26,6 @@ interface CharacterViewProps {
   character: Character;
   lang: Lang;
   dict: Dict;
-  actions?: ReactNode;
 }
 
 export function characterCrumbs(character: Character, lang: Lang, dict: Dict): Crumb[] {
@@ -46,7 +45,7 @@ export function characterCrumbs(character: Character, lang: Lang, dict: Dict): C
   return crumbs;
 }
 
-export default function CharacterView({ character, lang, dict, actions }: CharacterViewProps) {
+export default function CharacterView({ character, lang, dict }: CharacterViewProps) {
   const heading = characterHeading(character, lang);
   const names = secondaryNames(character.name, heading);
   const primary = primaryAppearance(character);
@@ -77,7 +76,7 @@ export default function CharacterView({ character, lang, dict, actions }: Charac
             ? { title: dict.people.description, body: <SpoilerDescription markdown={description} /> }
             : null
         }
-        actions={actions}
+        actions={<EditLink href={characterEditPath(character.anilistId)} label={dict.people.edit} />}
       />
       <CharacterVoices voices={character.voices} lang={lang} dict={dict} />
       <Appearances appearances={character.appearances} lang={lang} dict={dict} />

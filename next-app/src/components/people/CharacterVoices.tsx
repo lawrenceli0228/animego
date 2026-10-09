@@ -28,10 +28,11 @@ export default function CharacterVoices({ voices, lang, dict }: CharacterVoicesP
       <div className={c.voiceGrid}>
         {voices.map((v) => {
           const name = personDisplayName(v.person.name, lang) || "—";
-          const line = voiceLine(v.language, v.roleNotes, lang);
+          // An accepted edit's line is shown as its editor wrote it.
+          const line = v.line?.trim() || voiceLine(v.language, v.roleNotes, lang);
           return (
             <Link
-              key={`${v.person.anilistId}-${v.language ?? ""}-${v.roleNotes ?? ""}`}
+              key={v.key}
               href={personPath(v.person.anilistId)}
               prefetch={false}
               className={c.voiceCard}

@@ -66,14 +66,18 @@ const STARK: Character = {
   },
   voices: [
     {
+      key: "133507|Japanese|",
       person: { anilistId: 133507, name: { full: "Chiaki Kobayashi", native: "小林千晃", cn: "小林千晃" }, image: null },
       language: "Japanese",
       roleNotes: null,
+      line: null,
     },
     {
+      key: "115100|Japanese|Childhood",
       person: { anilistId: 115100, name: { full: "Arisa Kiyoto", native: "清都ありさ", cn: "清都亚里沙" }, image: null },
       language: "Japanese",
       roleNotes: "Childhood",
+      line: null,
     },
   ],
   appearances: [
@@ -195,10 +199,19 @@ describe("the character page", () => {
     expect(nav).toContain('aria-current="page">修塔尔克<');
   });
 
-  test("no edit button yet, and no notes on where the data came from", () => {
-    expect(html).not.toContain("编辑");
+  test("「编辑」 links to the edit state, and nothing says where the data came from", () => {
+    const edit = /<a[^>]*href="\/character\/184313\/edit"[^>]*>[\s\S]*?<\/a>/.exec(html)?.[0] ?? "";
+    expect(edit).toContain("编辑");
+    expect(edit).toContain('rel="nofollow"');
     expect(html).not.toContain("资料来自");
     expect(html).not.toContain("数据来自");
+  });
+
+  test("a voice line an accepted edit wrote is shown as written", () => {
+    const edited: Character = { ...STARK, voices: [{ ...STARK.voices[1], line: "日配 · 少年时期" }] };
+    const voices = /aria-labelledby="voices-heading"[\s\S]*?<\/section>/.exec(renderCharacter(edited))?.[0] ?? "";
+    expect(voices).toContain("日配 · 少年时期");
+    expect(voices).not.toContain("日配 · 童年");
   });
 
   test("the page takes its colour from the title it hangs under", () => {
@@ -303,9 +316,10 @@ describe("the person page", () => {
     expect(renderPerson(person({ profile: null }))).toContain(">声优</span>");
   });
 
-  test("no edit button, no source notes", () => {
+  test("「编辑」 links to the edit state; no source notes", () => {
     const html = renderPerson(person());
-    expect(html).not.toContain("编辑");
+    expect(html).toMatch(/<a[^>]*href="\/person\/133507\/edit"[^>]*>[\s\S]*?编辑<\/a>/);
+    expect(renderPerson(person(), "en")).toMatch(/<a[^>]*href="\/person\/133507\/edit"[^>]*>[\s\S]*?Edit<\/a>/);
     expect(html).not.toContain("资料来自");
   });
 });

@@ -33,3 +33,16 @@ export function parseEntityId(raw: string): number | null {
   const id = Number(raw);
   return id <= 2_147_483_647 ? id : null;
 }
+
+/**
+ * A page's edit state. Its own route, apart from the page: the page stays a
+ * static ISR render that never reads a cookie, and the edit state -- which
+ * needs to know who is signed in -- is a dynamic, noindex page beside it.
+ */
+export function characterEditPath(id: number): string {
+  return `/character/${id}/edit`;
+}
+
+export function personEditPath(id: number): string {
+  return `/person/${id}/edit`;
+}
